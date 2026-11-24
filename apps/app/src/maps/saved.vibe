@@ -1,10 +1,12 @@
-// spec/maps/savedPlaces.md, "A place is saved with a name and a valid identity; saving it again updates the same row"; spec/maps/savedPlaces.md, "A saved place can be renamed to a non-empty name and removed"
-import { type SavedItem, Machine as SavedMachine, stored } from "../../gen/maps__savedPlaces.effect.vibe"
+// spec/maps/savedPlaces.md, "A place is saved with a name and a valid identity; saving it again updates the same row"; spec/maps/savedPlaces.md, "A saved place can be renamed to a non-empty name and removed"; spec/maps/savedPlaces.md, "A phone updated from the previous Alpha keeps its saved places"
+import { type SavedItem, type SaveRequest, Machine as SavedMachine, canAdoptPrevious, stored } from "../../gen/maps__savedPlaces.effect.vibe"
 import { labelFits, mayKeep } from "../../gen/maps__vocabulary.effect.vibe"
 import { ownerKey } from "../platform/storage.vibe"
+import { providerKind } from "./cloud.vibe"
 import type { Shown } from "./content.vibe"
 import { failure, type MapsFailure } from "./failure.vibe"
 import { micro } from "./geometry.vibe"
+import { previousSavedPlaces } from "./previous.ts"
 
 /** Where saved places are kept: the owner's private WebView storage, never synced. */
 export const SAVED_PLACES_KEY = ownerKey("phone", "maps/saved-places")
@@ -19,9 +21,25 @@ export service SavedPlacesStore {
   readonly changes: Stream.Stream<ReadonlyArray<SavedItem>>
 }
 
-/** Saved places over the stored machine. */
+/** The places the previous Alpha saved, as save requests in its order; none when it kept none or its list cannot be read. */
+function previousRequests(): Array<SaveRequest> {
+  return (previousSavedPlaces() ?? []).map((p) => {
+    const point = micro({ latitude: p.latitude, longitude: p.longitude })
+    return {
+      label: p.label.slice(0, 300), lat: point.lat, lng: point.lng, provider: p.providerId, providerPlaceId: p.providerPlaceId,
+      kind: p.providerId === "" ? "NoProvider" : providerKind(p.providerId),
+    }
+  })
+}
+
+/** Saved places over the stored machine; a list that has never been used first takes the previous Alpha's places, once. */
 export const savedLayer = Layer.effect(SavedPlacesStore, effect {
   const machine = try SavedMachine
+  const current = try machine.get()
+  if (current.nextId === 0 && current.items.length === 0) {
+    const places = previousRequests()
+    if (canAdoptPrevious(current, places)) machine.send({ type: "adoptPrevious", places }) catch () => undefined
+  }
   return {
     effect list() { return (try machine.get()).items },
     effect save(shown: Shown, label: string) {

@@ -1,0 +1,58 @@
+// spec/maps/savedPlaces.md, "Story: Keep the places I care about on this phone"
+// @vitest-environment happy-dom
+import { assert, it } from "@effect/vitest"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { SavedPlacesStore, savedLayer, savedMachine } from "../../src/maps/saved.vibe"
+
+const PREVIOUS = "alpha.maps.saved-places.v1"
+
+/** A page storage that outlives one start of the layer, as the WebView's does across restarts. */
+function pageStorage(): Storage {
+  const values = new Map<string, string>()
+  return {
+    get length() { return values.size },
+    clear: () => { values.clear() },
+    getItem: (key: string) => values.get(key) ?? null,
+    key: (index: number) => [...values.keys()][index] ?? null,
+    removeItem: (key: string) => { values.delete(key) },
+    setItem: (key: string, value: string) => { values.set(key, value) },
+  }
+}
+
+it.effect("a phone updated from the previous Alpha keeps its saved places (spec/maps/savedPlaces.md, \"A phone updated from the previous Alpha keeps its saved places\")", () => effect {
+  const previous = JSON.stringify({ version: 1, items: [
+    { id: "a1", label: "Home", coordinate: { latitude: 37.8087, longitude: -122.4098 }, savedAt: 1 },
+    { id: "a2", label: "Gallery", coordinate: { latitude: 37.7955, longitude: -122.3937 }, providerId: "eliza-cloud-google", providerPlaceId: "g1", savedAt: 2 },
+    { id: "a3", label: "Cafe", coordinate: { latitude: 37.7955, longitude: -122.3937 }, providerId: "alpha-osm", providerPlaceId: "n1", savedAt: 3 },
+    { id: "a4", label: "Home again", coordinate: { latitude: 37.8087, longitude: -122.4098 }, savedAt: 4 },
+  ] })
+  try sync(() => { globalThis.localStorage.setItem(PREVIOUS, previous) })
+  const page = pageStorage()
+  const start = Layer.provideMerge(savedLayer, Layer.provideMerge(savedMachine, KeyValueStore.layerStorage(() => page)))
+  const first = try Effect.provide(effect { return try (try SavedPlacesStore).list() }, start)
+  const second = try Effect.provide(effect { return try (try SavedPlacesStore).list() }, start)
+  const removed = try Effect.provide(effect {
+    const saved = try SavedPlacesStore
+    for (const item of try saved.list()) try saved.remove(item.id)
+    return try saved.list()
+  }, start)
+  const third = try Effect.provide(effect { return try (try SavedPlacesStore).list() }, start)
+  const kept = try sync(() => globalThis.localStorage.getItem(PREVIOUS))
+  try sync(() => { globalThis.localStorage.setItem(PREVIOUS, "{not json") })
+  const unreadable = try Effect.provide(effect { return try (try SavedPlacesStore).list() }, Layer.provideMerge(savedLayer, Layer.provideMerge(savedMachine, KeyValueStore.layerMemory)))
+  try sync(() => { globalThis.localStorage.removeItem(PREVIOUS) })
+  try Effect.try(() => assert.deepStrictEqual(
+    { first, second, removed: removed.length, third: third.length, kept: kept === previous, unreadable: unreadable.length },
+    {
+      first: [
+        { id: 1, label: "Home", lat: 37808700, lng: -122409800, provider: "", providerPlaceId: "" },
+        { id: 2, label: "Cafe", lat: 37795500, lng: -122393700, provider: "alpha-osm", providerPlaceId: "n1" },
+      ],
+      second: [
+        { id: 1, label: "Home", lat: 37808700, lng: -122409800, provider: "", providerPlaceId: "" },
+        { id: 2, label: "Cafe", lat: 37795500, lng: -122393700, provider: "alpha-osm", providerPlaceId: "n1" },
+      ],
+      removed: 0, third: 0, kept: true, unreadable: 0,
+    },
+  ))
+})

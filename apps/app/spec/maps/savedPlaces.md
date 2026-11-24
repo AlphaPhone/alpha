@@ -79,6 +79,38 @@ pure def sometimesRenamed(s: SavedPlaces): bool = s.items.some(i => i.label == "
 pure def sometimesRemovedThenSaved(s: SavedPlaces): bool = s.nextId > s.items.length() and s.items.length() >= 1
 ```
 
+### A phone updated from the previous Alpha keeps its saved places
+
+The previous Alpha kept the saved places in its own list on this phone. When this version has never
+saved a place (its list is empty and has issued no id), it takes that list once, in its order, as if
+each place were saved again: a Google place, a place without a name or valid coordinates, the same
+place twice and anything past 200 are skipped, and each kept place gets a new id. Once this version
+has saved, renamed or removed a place, or taken the previous list, it never takes it again. A
+previous list that cannot be read leaves this version's list empty and untouched. The previous list
+is never written or removed.
+
+```quint
+pure def keptOf(place: SaveRequest, s: SavedPlaces): SavedPlaces =
+  if (canSavePlace(s, place) and not(s.items.some(i => samePlace(i, place)))) savePlace(s, place) else s
+pure def canAdoptPrevious(s: SavedPlaces, places: List[SaveRequest]): bool = s.nextId == 0 and s.items.length() == 0 and places.length() > 0
+pure def adoptPrevious(s: SavedPlaces, places: List[SaveRequest]): SavedPlaces = places.foldl(s, (acc, place) => keptOf(place, acc))
+pure def stepThePreviousListIsTakenOnlyByAnUnusedList(before: SavedPlaces, via: str, after: SavedPlaces): bool =
+  via == "adoptPrevious" implies (before.nextId == 0 and before.items.length() == 0)
+pure def stepAdoptedPlacesAreNumberedAfresh(before: SavedPlaces, via: str, after: SavedPlaces): bool =
+  via == "adoptPrevious" implies after.nextId == after.items.length()
+pure def lawAPreviousGooglePlaceIsSkipped(place: SaveRequest): bool =
+  place.kind == GoogleProvider implies adoptPrevious(initial, List(place)) == initial
+pure def lawTheFirstPreviousPlaceIsKept(place: SaveRequest): bool =
+  canSavePlace(initial, place) implies adoptPrevious(initial, List(place)).items.length() == 1
+pure val placesValues = Set(
+  List({ label: "Home", lat: 43730000, lng: 7420000, provider: "", providerPlaceId: "", kind: NoProvider },
+    { label: "Gallery", lat: 37795000, lng: -122394000, provider: "google", providerPlaceId: "g1", kind: GoogleProvider },
+    { label: "Cafe", lat: 43731000, lng: 7421000, provider: "osm", providerPlaceId: "n1", kind: OpenProvider },
+    { label: "Home again", lat: 43730000, lng: 7420000, provider: "", providerPlaceId: "", kind: NoProvider }),
+  List({ label: "", lat: 1, lng: 1, provider: "", providerPlaceId: "", kind: NoProvider }))
+pure def sometimesAdopted(s: SavedPlaces): bool = s.items.length() >= 2 and s.nextId == s.items.length()
+```
+
 ### A saved provider place is used only with the open-data provider that served it
 
 A saved place of another provider, or of a Google provider, is shown under its
