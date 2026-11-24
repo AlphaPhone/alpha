@@ -1,6 +1,6 @@
 import { elizaCalendar } from "./calendar.ts";
 import { alphaMapsTransport, elizaLocation } from "./maps.ts";
-import { type Faked, elizaAgent, elizaCloud, elizaSecureStore, present } from "./phone.ts";
+import { type Faked, elizaAgent, elizaCloud, elizaSecureStore } from "./phone.ts";
 import type { Answering } from "./routes.ts";
 import { elizaFiles, selectedDocuments } from "./files.ts";
 import type { Scene } from "./scene.ts";
@@ -19,7 +19,6 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     ElizaFiles: elizaFiles(world.files),
     SelectedDocuments: selectedDocuments(world.files),
     ElizaLocation: elizaLocation(world.maps, () => world.now),
-    ...(world.image ? { ElizaTelephony: present, ElizaContacts: present } : {}),
     ElizaSystem: elizaSystem(world.launcher, world.settings),
     ElizaReset: elizaReset(world.settings),
     ElizaWiFi: elizaWiFi(world.settings),
