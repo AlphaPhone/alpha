@@ -1,6 +1,6 @@
 // spec/browser/agent.md, "Story: Open the site I asked for"; spec/browser/session.md, "Story: Let the agent open and drive my tabs"; spec/browser/session.md, "Story: Close every tab from one listed review"; spec/browser/session.md, "Closing every tab is negotiated only beside Browser tabs, and it never runs without the owner's review"; spec/assistant/review.md, "A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it"; spec/browser/agent.md, "The native call names the admitted revision, is sent at most once per claim, and its result is a dispatch, never a finished page"; spec/browser/agent.md, "The open creates its tab without selecting it, the journal's receipt names that tab, and the tab is shown only after the receipt was attempted and only while the same foreground is current"; spec/browser/pageContext.md, "An exact link of the page the latest message carried keeps its open card, and opens only after the owner approves it"; spec/browser/agent.md, "A deferred switch, close of the showing tab, page-history move or tab list that does not run after its receipt says a correction"; spec/browser/session.md, "The agent shows Browser's own list of open tabs only after its receipt, only while the tab the request came from is still selected, and changes no tab"
 import type { ExecutorCall } from "@elizaos/agent/client"
-import { BROWSER_FIND_CAPABILITY, BROWSER_HISTORY_CAPABILITY, BROWSER_OPEN_NEW_TAB_CAPABILITY, BROWSER_SEARCH_CAPABILITY, BROWSER_TABS_CAPABILITY, type BrowserControlOperation, browserControlRunsUnreviewed, describeBrowserControl, parseBrowserControl, parseBrowserNavigate } from "@elizaos/plugin-browser/contract"
+import { BROWSER_FIND_CAPABILITY, BROWSER_HISTORY_CAPABILITY, BROWSER_OPEN_NEW_TAB_CAPABILITY, BROWSER_SEARCH_CAPABILITY, BROWSER_TABS_CAPABILITY, BROWSER_TABS_SHOW_CAPABILITY, type BrowserControlOperation, browserControlRunsUnreviewed, describeBrowserControl, parseBrowserControl, parseBrowserNavigate } from "@elizaos/plugin-browser/contract"
 import { browserDestinationMatches, groundBrowserDestination, groundBrowserSearchQuery } from "@elizaos/plugin-browser/grounding"
 import { closeAllNegotiated, closeAllRunsUnreviewed, tabListRunsUnreviewed } from "../../gen/browser__session.effect.vibe"
 import { groundOf, offersCard, runs } from "../../gen/browser__pageContext.effect.vibe"
@@ -18,15 +18,6 @@ const ASSISTANT_NAME = "Alpha"
 /** The capability a phone advertises to close every open tab from one reviewed card that lists them: `browser_tab_close {all: true}`. */
 export const BROWSER_TABS_CLOSE_ALL_CAPABILITY = "browser.tabs.close-all.v1"
 
-/**
- * The capability a phone advertises to show Browser's own list of open tabs: `browser_tabs_show`, whose receipt carries no tab.
- * Local copy until the eliza pin includes elizaOS/eliza#40331, which adds this constant and `{type: "browser_tabs_show"}` to
- * `@elizaos/plugin-browser/contract`. When the pin advances, import it from there, delete BrowserTabsShow, parseBrowserTabsShow,
- * the `tabsShow` kind and its local card, and route the operation through parseBrowserControl, describeBrowserControl,
- * controlSummary (TABS_SHOWN_SUMMARY) and BrowserAgent.control() (delegating to showTabs()), whose switches must then name it.
- */
-export const BROWSER_TABS_SHOW_CAPABILITY = "browser.tabs.show.v1"
-
 /** The notice shown instead of a close-every-tab card when Browser could not list its tabs, or they changed after they were listed. */
 export const TABS_UNLISTED_NOTICE = "Browser couldn’t list its open tabs for this request, or they changed after they were listed. Nothing was closed. Ask again."
 /** The notice shown instead of a close-every-tab card when no tab would close. */
@@ -38,16 +29,10 @@ export interface BrowserCloseAll {
   readonly all: true
 }
 
-/** The show-the-tab-list operation: exactly `{type: "browser_tabs_show"}`, with no field. Local until the pin includes eliza#40331 (see BROWSER_TABS_SHOW_CAPABILITY). */
-export interface BrowserTabsShow {
-  readonly type: "browser_tabs_show"
-}
-
 type BrowserOperation =
   | { readonly kind: "navigate"; readonly url: string; readonly newTab: boolean }
   | { readonly kind: "control"; readonly operation: BrowserControlOperation }
   | { readonly kind: "closeAll" }
-  | { readonly kind: "tabsShow" }
 
 function field(value: object, key: string): unknown {
   return Object.getOwnPropertyDescriptor(value, key)?.value
@@ -60,15 +45,8 @@ export function parseBrowserCloseAll(value: unknown): BrowserCloseAll | undefine
   return { type: "browser_tab_close", all: true }
 }
 
-/** Reads an untrusted value as the show-the-tab-list operation; any field is refused. Replaced by parseBrowserControl once the pin includes eliza#40331. */
-export function parseBrowserTabsShow(value: unknown): BrowserTabsShow | undefined {
-  if (typeof value !== "object" || value === null || field(value, "type") !== "browser_tabs_show") return undefined
-  return Object.keys(value).every((key) => key === "type") ? { type: "browser_tabs_show" } : undefined
-}
-
 function decoded(operation: unknown): BrowserOperation | undefined {
   if (parseBrowserCloseAll(operation) !== undefined) return { kind: "closeAll" }
-  if (parseBrowserTabsShow(operation) !== undefined) return { kind: "tabsShow" }
   const navigate = parseBrowserNavigate(operation)
   if (navigate.ok) return { kind: "navigate", url: navigate.operation.url, newTab: navigate.operation.newTab === true }
   const control = parseBrowserControl(operation)
@@ -102,8 +80,8 @@ export function groundedIn(raw: unknown, text: string): boolean {
   const op = decoded(raw)
   if (op === undefined) return false
   if (op.kind === "closeAll") return closeAllRunsUnreviewed(true, true)
-  if (op.kind === "tabsShow") return tabListRunsUnreviewed(true, false)
   if (op.kind === "navigate") return browserDestinationMatches(raw, groundBrowserDestination(text, op.url, ASSISTANT_NAME))
+  if (op.operation.type === "browser_tabs_show") return tabListRunsUnreviewed(true, false)
   return browserControlRunsUnreviewed(op.operation, { boundToMessage: true, wordsTyped: wordsTyped(op.operation, text) })
 }
 
@@ -114,6 +92,7 @@ export function controlSummary(operation: BrowserControlOperation): string {
     case "browser_tab_new": return operation.private === true ? "Opened a private tab." : "Opened a new tab."
     case "browser_tab_switch": return "Switched tabs in Browser."
     case "browser_tab_close": return "Closed the tab."
+    case "browser_tabs_show": return TABS_SHOWN_SUMMARY
     case "browser_find": return `Finding “${operation.text}” in the page.`
     case "browser_history": return { back: "Went back a page.", forward: "Went forward a page.", reload: "Reloading the page.", stop: "Stopped loading the page." }[operation.action]
   }
@@ -127,12 +106,12 @@ const HISTORY_VERBS = { back: "go back", forward: "go forward", reload: "reload"
 /** The owner's correction when a Browser change its receipt reported did not run once presented, because Browser changed or was not on screen. */
 export function browserNotDone(operation: unknown): string {
   const op = decoded(operation)
-  if (op?.kind === "tabsShow") return "Browser changed or was not on screen, so the tab list did not open. Ask again."
   if (op?.kind === "closeAll") return "Browser changed or was not on screen, so the tab that was showing stayed open. Ask again from Browser."
   if (op?.kind !== "control") return "Browser changed or was not on screen, so this was not done. Ask again."
   switch (op.operation.type) {
     case "browser_tab_switch": return "Browser changed or was not on screen, so the tab did not switch. Ask again."
     case "browser_tab_close": return "Browser changed or was not on screen, so the tab that was showing stayed open. Ask again from Browser."
+    case "browser_tabs_show": return "Browser changed or was not on screen, so the tab list did not open. Ask again."
     case "browser_history": return `The page changed or Browser was not on screen, so it did not ${HISTORY_VERBS[op.operation.action]}. Ask again.`
     default: return "Browser changed or was not on screen, so this was not done. Ask again."
   }
@@ -215,7 +194,6 @@ export const operationPorts = effect {
       while (closed.size > HELD_PRESENTATIONS) closed.delete(closed.keys().next().value ?? "")
       return done.present
     }
-    if (op.kind === "tabsShow") return try browser.showTabs()
     if (op.kind === "navigate") return map((try browser.openApproved(op.url, op.newTab)).present, () => true)
     const observed = op.operation.type === "browser_history" ? try browser.selection() : undefined
     return try browser.control(op.operation, observed, () => succeed(null))
@@ -265,8 +243,6 @@ export const operationPorts = effect {
       const op = decoded(operation)
       if (op === undefined) return { title: "Action", detail: "" }
       if (op.kind === "closeAll") return describeCloseAll(undefined)
-      // Upstream's describeBrowserControl card for browser_tabs_show (eliza#40331), copied until the pin includes it.
-      if (op.kind === "tabsShow") return { title: "Show open tabs", detail: "Shows the list of your open tabs in Browser. The agent does not see your tabs." }
       if (op.kind === "navigate") return { title: op.newTab ? "Open in a new tab" : "Open in Browser", detail: op.url }
       const described = describeBrowserControl(op.operation)
       return { title: described.title, detail: described.description }
@@ -281,7 +257,6 @@ export const operationPorts = effect {
       const op = decoded(operation)
       if (op === undefined || result !== "Applied") return copy.unconfirmed
       if (op.kind === "closeAll") return closedSummary(proposalId === undefined ? undefined : closed.get(proposalId))
-      if (op.kind === "tabsShow") return TABS_SHOWN_SUMMARY
       return op.kind === "navigate" ? browserNavigationSummary(op.url) : controlSummary(op.operation)
     },
     itemized: (operation) => decoded(operation)?.kind === "closeAll",

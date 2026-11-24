@@ -3,7 +3,7 @@ import {
   type Admission, type AdmissionEffect, type EndsAt, type SignedPlan, type SnapshotPlan,
   Machine as PlanMachine, admittedKind, admits, enabled, stored as storedPlan
 } from "../../gen/account__plan.effect.vibe"
-import { checkEntitlement, nextRefreshDelay, parseEntitlementKeys, snapshotFromResponse, subscriptionView, type SubscriptionView } from "@elizaos/cloud/client"
+import { checkEntitlement, nextRefreshDelay, parseEntitlementKeys, snapshotFromResponse, subscriptionView, type EntitlementExpectation, type SubscriptionView } from "@elizaos/cloud/client"
 import { Build } from "../platform/build.vibe"
 import { AppLifecycle } from "../platform/lifecycle.vibe"
 import { buildCloudEnvironment } from "../platform/build-live.vibe"
@@ -120,13 +120,16 @@ export const entitlementService = Layer.effect(Entitlement, effect {
     }
   }
 
-  effect function signedPlan(now: number) {
+  effect function signedPlan(now: number, account: Pick<EntitlementExpectation, "userId" | "organizationId">) {
     const keysBody = try read(cloud, "/api/v1/subscription/entitlement-keys")
     const keys = parseEntitlementKeys(keysBody)
     if (keys === undefined) return { signed: "SignedInvalid" as SignedPlan, planEndsAt: null, expires: 0 }
     const body = try read(cloud, "/api/v1/subscription/entitlement")
     const token = typeof body === "object" && body !== null && typeof (body as { entitlement?: unknown }).entitlement === "string" ? (body as { entitlement: string }).entitlement : ""
-    const checked = tryPromise(() => checkEntitlement(token, { keys, issuer: authority.api, audience: authority.entitlementAudience, now })) catch () => undefined
+    const checked = tryPromise(() => checkEntitlement(token, {
+      keys, issuer: authority.api, audience: authority.entitlementAudience, now,
+      userId: account.userId, organizationId: account.organizationId,
+    })) catch () => undefined
     if (checked === undefined) return { signed: "SignedInvalid" as SignedPlan, planEndsAt: null, expires: 0 }
     return { signed: signedOf(checked.plan.status), planEndsAt: checked.planEndsAt, expires: checked.expiresAt }
   }
@@ -138,12 +141,13 @@ export const entitlementService = Layer.effect(Entitlement, effect {
   }
 
   effect function admit(credential: number) {
-    if (credential === 0 || credential !== (try session.owner())) {
+    const current = try session.current()
+    if (credential === 0 || credential !== ownerOf(current)) {
       try send({ type: "checkFailed", credential })
       return
     }
     const now = try Clock.currentTimeMillis
-    const signed = signedPlan(now) catch (error) => error
+    const signed = signedPlan(now, current.account) catch (error) => error
     if (signed instanceof PlanUnread && signed.signedOut) {
       if ((try send({ type: "signInRejected", credential })) && credential === (try session.owner())) try session.rejected()
       return
