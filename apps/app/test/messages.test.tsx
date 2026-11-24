@@ -36,7 +36,7 @@ const bubble = (text: string) => act(async () => {
 });
 
 describe("Messages on an Alpha image", () => {
-  it("Read a conversation, and send a message once (spec/app/messages/index.md, \"Story: Read a conversation\"; spec/app/messages/composer.md, \"Story: Send a message\"; spec/app/messages/sending.md, \"Story: Send a message once\")", async () => {
+  it("See my conversations, read one, and send a message once (spec/app/messages/index.md, \"Story: See my conversations\"; spec/app/messages/index.md, \"Story: Read a conversation\"; spec/app/messages/composer.md, \"Story: Send a message\"; spec/app/messages/sending.md, \"Story: Send a message once\"; spec/app/messages/sending.md, \"Story: Know whether it arrived\")", async () => {
     const world = image();
     world.telephony.live = [];
     const { alpha } = await open(world);
@@ -61,6 +61,10 @@ describe("Messages on an Alpha image", () => {
     await press("Send");
     await until(alpha, alpha.runtime, Composer, (s) => s.outgoing.op.outcome === "Confirmed" && s.slot.author === "Nobody");
     expect(world.telephony.sent.map(({ recipients, body }) => ({ recipients, body }))).toEqual([{ recipients: ["+14155550100"], body: "On my way" }]);
+
+    // spec/app/messages/sending.md, "A delivery report counts only for a part reported sent"; spec/app/messages/sending.md, "A finished record is retired by a tombstone"
+    world.telephony.deliver(world.telephony.sent[0]!.operationId);
+    await until(alpha, alpha.runtime, Composer, (s) => s.outgoing.reported === 1 && s.outgoing.retired === s.outgoing.op.id);
 
     // spec/app/messages/index.md, "Confirming removes the message under a new number, never during a call that may be an emergency call"
     await bubble("See you at five");

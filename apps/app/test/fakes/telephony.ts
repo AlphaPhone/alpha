@@ -47,6 +47,8 @@ export interface TelephonyScene {
   report: () => void;
   /** The providers' change notice, as the SMS provider's observer sends it. */
   changed: () => void;
+  /** Every part of the send under `operationId` delivered, as the radio's delivery reports say, and the observer told. */
+  deliver: (operationId: string) => void;
   /** While set, the radio has not answered a send yet. */
   hold: Promise<void> | undefined;
 }
@@ -81,6 +83,7 @@ export function telephonyScene(): TelephonyScene {
     ended: [],
     report: () => {},
     changed: () => {},
+    deliver: () => {},
     hold: undefined,
   };
 }
@@ -89,6 +92,12 @@ export function telephonyScene(): TelephonyScene {
 function telephony(world: TelephonyScene): Faked {
   return plugin<PhoneNativePlugin & MessagesNativePlugin, Record<string, unknown>>((emit) => {
     world.changed = () => emit("messagesChanged", {});
+    world.deliver = (operationId) => {
+      const record = world.journal.get(operationId);
+      if (record === undefined) return;
+      world.journal.set(operationId, { ...record, status: "delivered", parts: (record.parts as Record<string, unknown>[]).map((part) => ({ ...part, delivery: "success" })) });
+      emit("smsSendUpdated", { operationId });
+    };
     const status = () => ({
       version: 2, voiceCapable: true, smsCapable: true,
       permissions: { contacts: "granted", phoneState: "granted", sms: world.sms, sendSms: "granted", callLog: world.callLog },

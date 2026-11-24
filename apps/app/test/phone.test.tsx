@@ -81,7 +81,7 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Phone, (s) => !s.front && s.rows === 0);
   });
 
-  it("Listen to a voicemail, and delete it (spec/app/phone/voicemail.md, \"Story: Listen to a voicemail\"; spec/app/phone/voicemail.md, \"Story: Delete a voicemail\")", async () => {
+  it("See my voicemail, listen to one, and delete it (spec/app/phone/voicemail.md, \"Story: See my voicemail\"; spec/app/phone/voicemail.md, \"Story: Listen to a voicemail\"; spec/app/phone/voicemail.md, \"Story: Delete a voicemail\")", async () => {
     const world = image();
     const { alpha } = await open(world);
     await until(alpha, alpha.runtime, Shell, (s) => s.image);

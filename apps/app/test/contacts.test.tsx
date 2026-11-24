@@ -31,7 +31,7 @@ const write = (name: string, text: string) => act(async () => {
 });
 
 describe("Contacts on an Alpha image", () => {
-  it("Look at one contact, change it and delete it (spec/app/contacts/index.md, \"Story: Look at one contact\"; spec/app/contacts/index.md, \"Story: Add or change a contact\"; spec/app/contacts/index.md, \"Story: Delete a contact\")", async () => {
+  it("Browse my contacts, look at one, change it and delete it (spec/app/contacts/index.md, \"Story: Browse my contacts\"; spec/app/contacts/index.md, \"Story: Know what happened to my change\"; spec/app/contacts/index.md, \"Story: Look at one contact\"; spec/app/contacts/index.md, \"Story: Add or change a contact\"; spec/app/contacts/index.md, \"Story: Delete a contact\")", async () => {
     const world = image();
     const { alpha } = await open(world);
     await until(alpha, alpha.runtime, Shell, (s) => s.contacts);
