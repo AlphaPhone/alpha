@@ -156,7 +156,8 @@ pure def giveUpOnEid(s: Carrier, now: int): Carrier = { ...s, eidRead: T::answer
 
 ### Copy puts one identifier Android returned on the clipboard, one copy at a time, and the page says whether it was copied
 
-Only an IMEI, an ICCID or the EID the page shows can be copied.
+Only an IMEI, an ICCID or the EID the page shows can be copied. Whether it
+was copied is announced, as well as shown.
 
 ```quint
 pure val valueValues = Set("", "356938035643809")
