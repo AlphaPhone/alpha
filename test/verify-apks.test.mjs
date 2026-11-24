@@ -202,16 +202,16 @@ test('archive retains actual flag-off APK web bytes and refuses a mock payload',
 for (const mode of ['native', 'inherited', 'wrong-profile', 'wrong-channel']) fixtureTest(`build archive keeps the one runtime profile and its update channel: ${mode}`, t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-build-archive-'));
   t.after(() => fs.rmSync(dir, {recursive:true, force:true}));
-  for (const name of ['scripts', 'bin']) fs.mkdirSync(path.join(dir, name));
+  fs.mkdirSync(path.join(dir, 'scripts'));
+  fs.symlinkSync(path.join(root, 'node_modules'), path.join(dir, 'node_modules'));
   fs.writeFileSync(path.join(dir,'app.config.json'),JSON.stringify({updateManifestUrl:'https://example.test/public-update.json'}));
   fs.symlinkSync(path.join(root, 'scripts/audit-production-bundle.ts'), path.join(dir, 'scripts/audit-production-bundle.ts'));
   fs.writeFileSync(path.join(dir, 'scripts/stage-local-agent-sources.ts'), '');
   // The generated Gradle host is written before the source snapshot; the stub stands in for it.
   fs.writeFileSync(path.join(dir, 'scripts/android-host.ts'), '');
   fs.writeFileSync(path.join(dir, 'scripts/source-snapshot.ts'), 'console.log(JSON.stringify({digest:"synthetic-stable-source"}));');
-  // The archive runs its package scripts as `bun run`; this stand-in is first on PATH, so it names the real Bun absolutely.
-  fs.writeFileSync(path.join(dir, 'bin/bun'), `#!${process.execPath}
-import fs from 'node:fs';
+  const fixture = path.join(dir, 'fixture-build.mjs');
+  fs.writeFileSync(fixture, `import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
@@ -238,14 +238,28 @@ if(args[1]==='android:build'){
  if(process.env.FIXTURE_WRONG_CHANNEL)updateChannel.manifestUrlSha256='e'.repeat(64);
  fs.writeFileSync(path.join(output,'apk-manifest.json'),JSON.stringify({testMocks:mocks,runtimeProfile:process.env.FIXTURE_WRONG_PROFILE?'cloud':'native',updateChannel,results}));
 }
-`, {mode:0o755});
+`);
+  const preload = path.join(dir, "fixture-package-runner.mjs");
+  fs.writeFileSync(preload, `
+    import child from "node:child_process";
+    import {syncBuiltinESMExports} from "node:module";
+    const exec = child.execFileSync;
+    child.execFileSync = (file, args, options) => {
+      if (file === process.execPath && args?.[0] === "run") {
+        if (!["android:sync", "verify", "android:build"].includes(args[1])) throw Error("Unexpected package script " + args[1]);
+        return exec(file, [${JSON.stringify(fixture)}, ...args], options);
+      }
+      return exec(file, args, options);
+    };
+    syncBuiltinESMExports();
+  `);
   const inherited = mode !== 'native';
-  const env = {...process.env, PATH:path.join(dir, 'bin')+path.delimiter+process.env.PATH};
+  const env = {...process.env};
   for (const name of ['ELIZA_DEV_ALLOW_TEST_MOCKS', 'FIXTURE_WRONG_PROFILE','FIXTURE_WRONG_CHANNEL']) delete env[name];
   if (inherited) Object.assign(env, {ELIZA_DEV_ALLOW_TEST_MOCKS:'1'});
   if (mode === 'wrong-profile') env.FIXTURE_WRONG_PROFILE='1';
   if(mode==='wrong-channel')env.FIXTURE_WRONG_CHANNEL='1';
-  const run = spawnSync(process.execPath, [path.join(root, 'scripts/build-archive.ts'), 'test-results/archive'], {cwd:dir, env, encoding:'utf8'});
+  const run = spawnSync(process.execPath, ["--conditions=eliza-source", "--import", import.meta.resolve("vibelang/register"), "--import", preload, path.join(root, 'scripts/build-archive.ts'), 'test-results/archive'], {cwd:dir, env, encoding:'utf8'});
   const archive = path.join(dir, 'test-results/archive');
   if (mode === 'wrong-profile'||mode==='wrong-channel') {
     assert.notEqual(run.status, 0);
@@ -274,7 +288,7 @@ if(args[1]==='android:build'){
 test('archive rejects unsupported options before creating output', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-build-archive-invalid-'));
   t.after(() => fs.rmSync(dir, {recursive:true, force:true}));
-  const run = spawnSync(process.execPath, [path.join(root, 'scripts/build-archive.ts'), '--unknown', 'test-results/archive'], {cwd:dir, encoding:'utf8'});
+  const run = spawnSync(process.execPath, ["--conditions=eliza-source", "--import", import.meta.resolve("vibelang/register"), path.join(root, 'scripts/build-archive.ts'), '--unknown', 'test-results/archive'], {cwd:dir, encoding:'utf8'});
   assert.notEqual(run.status, 0);
   assert.ok(!fs.existsSync(path.join(dir, 'test-results')));
 });

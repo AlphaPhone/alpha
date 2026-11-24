@@ -32,10 +32,11 @@ const snapshot=()=>JSON.parse(execFileSync(process.execPath,['scripts/source-sna
 // Generated native Java is a build input: finish its normal source admission
 // before freezing the baseline. Gradle repeats this stage; final equality below
 // still rejects any non-deterministic regeneration or later source drift.
+const generateHost=['--conditions=eliza-source','--import','vibelang/register','scripts/android-host.ts'];
 const nativeStageLog=fs.openSync(path.join(destination,'native-source-prestage.log'),'wx');
 try{
  // The generated Gradle host is a build input too; android:build regenerates identical bytes.
- execFileSync(process.execPath,['--conditions=eliza-source','--import','vibelang/register','scripts/android-host.ts'],{stdio:['ignore',nativeStageLog,nativeStageLog],timeout:180000,env:buildEnv});
+ execFileSync(process.execPath,generateHost,{stdio:['ignore',nativeStageLog,nativeStageLog],timeout:180000,env:buildEnv});
 }
 finally{fs.closeSync(nativeStageLog);}
 // Capacitor generates res/xml/config.xml, an authenticated native build input.
@@ -44,7 +45,7 @@ finally{fs.closeSync(nativeStageLog);}
 const capacitorStageLog=fs.openSync(path.join(destination,'capacitor-prestage.log'),'wx');
 try{
  execFileSync(process.execPath,['run','android:sync'],{stdio:['ignore',capacitorStageLog,capacitorStageLog],timeout:600000,env:buildEnv});
- execFileSync(process.execPath,['scripts/android-host.ts'],{stdio:['ignore',capacitorStageLog,capacitorStageLog],timeout:180000,env:buildEnv});
+ execFileSync(process.execPath,generateHost,{stdio:['ignore',capacitorStageLog,capacitorStageLog],timeout:180000,env:buildEnv});
 }
 finally{fs.closeSync(capacitorStageLog);}
 const before=snapshot();
