@@ -1,7 +1,8 @@
-// spec/kit/read.md, "Only the newest ticket's answer is taken, once"; spec/kit/undo.md, "A held change takes effect only once its time has come"; spec/kit/attempt.md, "Only a recorded attempt is sent"
+// spec/kit/read.md, "Only the newest ticket's answer is taken, once"; spec/kit/undo.md, "A held change takes effect only once its time has come"; spec/kit/attempt.md, "Only a recorded attempt is sent"; spec/app/platform/index.md, "A kept value that is no longer a state is set aside where nothing is held, and its machine starts afresh"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { Attempts, Install, attemptsOf, fresh } from "./attempts.vibe"
 import { Time } from "./time.vibe"
+import { setAside } from "../../gen/app__platform.effect.vibe"
 
 module pure {
   /** `value` as text, to tell whether two facts are the same. @throws {never} */
@@ -160,17 +161,31 @@ function storeKey(machine: string, version: number): string {
   return `alpha/${machine.replace(/^.*\/spec\//, "").replace(/\.md#Machine$/, "")}@${version}`
 }
 
+/** The places a value kept under `key` that is no longer a state may be copied to, in order. */
+const asides = (key: string): ReadonlyArray<string> => [`${key}.unreadable`, ...Array.from({ length: 8 }, (_, index) => `${key}.unreadable.${index + 2}`)]
+
 /**
  * The machine kept under `key`. What is stored there and is not a state, after a change of its shape or of an
- * `always` rule, is set aside under `<key>.unreadable` and the machine starts afresh: one area's state never keeps
- * Alpha from opening. A store that cannot be read at all leaves the machine in memory.
+ * `always` rule, is copied to the first of its `asides` that holds nothing and the machine starts afresh: one area's
+ * state never keeps Alpha from opening, and no copy is written over. Where every place is taken, or the store cannot
+ * be read at all, the value stays and the machine runs in memory.
  */
 function kept<I, S, SE, SR>(key: string, stored: (key: string, start?: S) => Layer.Layer<I, SE, SR>, memory: Layer.Layer<I>) {
   const aside = Layer.unwrap(effect {
     const store = try KeyValueStore.KeyValueStore
     const found = store.get(key) catch () => undefined
-    try logError(`what is kept under ${key} is not a state: set aside under ${key}.unreadable`)
-    if (found !== undefined) try ignore(store.set(`${key}.unreadable`, found))
+    if (found !== undefined) {
+      let place: string | undefined
+      for (const one of asides(key)) {
+        const held = (store.get(one) catch () => "") !== undefined
+        if (place === undefined && setAside("KeptUnreadable", held)) place = one
+      }
+      if (place === undefined) return memory
+      const at = place
+      try logError(`what is kept under ${key} is not a state: set aside under ${at}`)
+      const copied = effect { try store.set(at, found); return true } catch () => false
+      if (!copied) return memory
+    }
     try ignore(store.remove(key))
     try ignore(store.remove(`${key}.epoch`))
     return Layer.catch(Layer.fresh(stored(key)), () => memory)
