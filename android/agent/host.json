@@ -387,6 +387,10 @@
      ]
     },
     {
+     "method": "POST",
+     "path": "/api/lifeops/calendar/events/{id}/response"
+    },
+    {
      "method": "GET",
      "path": "/api/lifeops/calendar/feed",
      "query": [
@@ -1414,6 +1418,10 @@
        }
       }
      ]
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/calendar/events/{id}/response"
     },
     {
      "method": "GET",

@@ -1,4 +1,4 @@
-// spec/calendar/agent.md, "Story: See my agent's Calendar for the account I am signed in to"; spec/calendar/agent.md, "Story: Change my agent's Calendar only as I reviewed, and be told what happened"; spec/calendar/deletions.md, "Story: Undo a deletion before it is sent"; spec/calendar/drafts.md, "Story: Keep what I typed when Calendar is interrupted"; spec/calendar/approvals.md, "Story: Approve or decline a Calendar change the agent asked for"; spec/calendar/device.md, "Story: Create an event on my phone without making it twice"; spec/calendar/home.md, "Story: See what is next on Home, and trust \"nothing planned\""
+// spec/calendar/agent.md, "Story: See my agent's Calendar for the account I am signed in to"; spec/calendar/agent.md, "Story: Change my agent's Calendar only as I reviewed, and be told what happened"; spec/calendar/deletions.md, "Story: Undo a deletion before it is sent"; spec/calendar/drafts.md, "Story: Keep what I typed when Calendar is interrupted"; spec/calendar/approvals.md, "Story: Approve or decline a Calendar change the agent asked for"; spec/calendar/device.md, "Story: Create an event on my phone without making it twice"; spec/calendar/home.md, "Story: See what is next on Home, and trust \"nothing planned\""; spec/calendar/agent.md, "An invitation answer is sent only by the invitee, at the version shown, and is saved only when a read shows the answer"
 import { assert, describe, it } from "@effect/vitest"
 import { Build } from "../../src/platform/build.vibe"
 import { Native, NativeFailed } from "../../src/platform/native.vibe"
@@ -12,7 +12,10 @@ import { HeldDeletions } from "../../src/calendar/deletions.vibe"
 import { DeviceCalendar } from "../../src/calendar/device.vibe"
 import { CalendarDrafts } from "../../src/calendar/drafts.vibe"
 import { HomeAgenda } from "../../src/calendar/home.vibe"
-import { agentEventKey } from "../../src/calendar/model.vibe"
+import type { EventRecord } from "../../src/calendar/feed.schema.vibe"
+import { type CalendarRow, agentEventKey } from "../../src/calendar/model.vibe"
+import { answerRow } from "../../src/calendar/screen.vibe"
+import { Notices } from "../../src/shell/notices.vibe"
 import { CalendarAgentFake, DeviceCalendarFake } from "./resident-fake.ts"
 
 effect function check(run: () => void) {
@@ -44,6 +47,20 @@ function fakes(agent: CalendarAgentFake, device: DeviceCalendarFake) {
 }
 
 const calendarOver = (agent: CalendarAgentFake, device: DeviceCalendarFake) => Layer.provide(services, fakes(agent, device))
+
+/** The shell's notices, recording each sentence shown. */
+function noticesInto(shown: string[]) {
+  return Layer.succeed(Notices, {
+    show: (message: string) => sync(() => { shown.push(message) }), persist: () => Effect.void, dismiss: () => Effect.void, hold: () => Effect.void,
+    release: () => Effect.void, takeAction: () => Effect.void, dismissShown: () => Effect.void, send: () => succeed(true),
+  })
+}
+
+/** The Calendar row an agent event is shown as. */
+function rowOf(event: EventRecord): CalendarRow {
+  return { id: `agent:${agentEventKey(event)}`, source: "agent", sourceKey: "", title: event.title, notes: "", where: "", begin: Date.parse(event.startAt), end: Date.parse(event.endAt),
+    allDay: false, offset: 0, endOffset: 1, revision: String(event.metadata.etag), calendarName: "Agent Calendar", account: "", writable: true, recurring: false, timeZone: "UTC" }
+}
 const binding = { owner: JSON.stringify(["https://agent.test", "owner-1", "agent-1"]), session: 1, agentId: "agent-1", usable: true }
 
 describe("Calendar journeys (spec/calendar/agent.md, \"Story: See my agent's Calendar for the account I am signed in to\")", () => {
@@ -92,6 +109,60 @@ describe("Calendar journeys (spec/calendar/agent.md, \"Story: See my agent's Cal
       try bindCalendar({ ...binding, owner: JSON.stringify(["https://agent.test", "owner-2", "agent-1"]), session: 2 })
       const other = try agent.view()
       try check(() => assert.deepStrictEqual([other.state.owner, other.feed], ["", undefined]))
+    }
+  })
+
+  it.live("answers an invitation Going, then Maybe, only as its invitee at the version shown (spec/calendar/agent.md, \"Story: Change my agent's Calendar only as I reviewed, and be told what happened\")", () => effect {
+    // spec/calendar/agent.md, "An invitation answer is sent only by the invitee, at the version shown, and is saved only when a read shows the answer"
+    const fakeAgent = new CalendarAgentFake()
+    fakeAgent.invite("invite-a", "Design review", 0, 23, "needsAction")
+    fakeAgent.add("own-a", "Focus", 0, 22)
+    const shown: string[] = []
+    provide calendarOver(fakeAgent, new DeviceCalendarFake()), noticesInto(shown) {
+      try bindCalendar(binding)
+      try readCalendar(false, false)
+      const agent = try AgentCalendar
+      const invitation = (try agent.view()).feed!.events.find((event) => event.id === "invite-a")!
+      const ownEvent = (try agent.view()).feed!.events.find((event) => event.id === "own-a")!
+      const going = try answerRow(rowOf(invitation), "accepted")
+      const answered = (try agent.view()).feed!.events.find((event) => event.id === "invite-a")!
+      const stale = try answerRow(rowOf(invitation), "tentative")
+      const own = try answerRow(rowOf(ownEvent), "accepted")
+      const maybe = try answerRow(rowOf(answered), "tentative")
+      const last = (try agent.view()).feed!.events.find((event) => event.id === "invite-a")!
+      const sent = fakeAgent.writes.map((write) => [write.method, write.path, (write.body as { responseStatus: string; idempotencyKey: string }).responseStatus,
+        (write.body as { idempotencyKey: string }).idempotencyKey])
+      try check(() => assert.deepStrictEqual({
+        outcomes: [going, stale, own, maybe], reply: answered.attendees.find((guest) => guest.self)?.responseStatus,
+        sent, notices: shown, last: last.attendees.find((guest) => guest.self)?.responseStatus,
+      }, {
+        outcomes: ["Saved", "WriteNotAdmitted", "WriteNotAdmitted", "Saved"], reply: "accepted",
+        sent: [["POST", "/api/lifeops/calendar/events/invite-a/response", "accepted", "answer-accepted-etag-1"],
+          ["POST", "/api/lifeops/calendar/events/invite-a/response", "tentative", "answer-tentative-etag-1"]],
+        notices: ["Refresh this invitation before answering it. No answer was sent.", "Refresh this invitation before answering it. No answer was sent."],
+        last: "tentative",
+      }))
+    }
+  })
+
+  it.live("an answer the agent files for approval says only that it waits, changes nothing and reads nothing again (spec/calendar/agent.md, \"Story: Change my agent's Calendar only as I reviewed, and be told what happened\")", () => effect {
+    // spec/calendar/agent.md, "An invitation answer is sent only by the invitee, at the version shown, and is saved only when a read shows the answer"
+    const fakeAgent = new CalendarAgentFake()
+    fakeAgent.invite("invite-q", "Vendor sync", 0, 23, "needsAction")
+    fakeAgent.queueAnswers = true
+    const shown: string[] = []
+    provide calendarOver(fakeAgent, new DeviceCalendarFake()), noticesInto(shown) {
+      try bindCalendar(binding)
+      try readCalendar(false, false)
+      const agent = try AgentCalendar
+      const invitation = (try agent.view()).feed!.events.find((event) => event.id === "invite-q")!
+      const readsBefore = fakeAgent.feedReads
+      const outcome = try answerRow(rowOf(invitation), "accepted")
+      const after = (try agent.view()).feed!.events.find((event) => event.id === "invite-q")!
+      try check(() => assert.deepStrictEqual({
+        outcome, notices: shown, sent: fakeAgent.writes.length, reads: fakeAgent.feedReads - readsBefore,
+        reply: after.attendees.find((guest) => guest.self)?.responseStatus,
+      }, { outcome: "WriteQueuedForApproval", notices: ["Waiting for your approval"], sent: 1, reads: 0, reply: "needsAction" }))
     }
   })
 
