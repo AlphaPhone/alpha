@@ -173,23 +173,39 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
       "Battery is at 80 percent.",
     ]);
     expect(world.ask.kept.get("c1")?.messages.at(-1)?.text).toBe("Sun, Nov 22:\nDentist Mon, Nov 23 at 3:30 pm, about 5–10 minutes. Then 9:05 to 10:00, and lunch at 12 pm. Battery is at 80%.");
+
+    const withAbbreviations = ["Dentist Mon.", " Se", "pt. 0", "7 from 2 p.", " m. to", " 3 p.m. Bring 5–10."];
+    const spokenAbbreviations = ["Dentist Monday, September seventh from two P M to three P M.", "Bring 5 to 10."];
+    for (const [index, provisional] of [false, true].entries()) {
+      const from = world.voice.spoken.length;
+      world.ask.nextReplyChunks = withAbbreviations;
+      world.ask.nextReplyProvisional = provisional;
+      await speakUtterance(runtime, world, "Read me another day");
+      await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.sent === 3 + index && s.turn === 4 + index);
+      expect(world.voice.spoken.slice(from).map((one) => one.text)).toEqual(spokenAbbreviations);
+      expect(world.ask.kept.get("c1")?.messages.at(-1)?.text).toBe(withAbbreviations.join(""));
+    }
   });
 
   // spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"
-  it("keeps listening after another refusal, and ends quietly with nothing spoken when Cloud refuses a spoken turn for spent funds", async () => {
+  it("keeps listening after other refusals and ends quietly when Cloud refuses a spoken turn for spent funds", async () => {
     const world = { ...scene(), phone: true };
     const runtime = await startListening(world);
 
-    world.ask.refusal = "provider_issue";
+    world.ask.refusal = { failureKind: "provider_issue" };
     await speakUtterance(runtime, world, "What's the weather");
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 1 && s.turn === 2);
 
-    world.ask.refusal = "allowance_exhausted";
+    world.ask.refusal = { failureKind: "insufficient_credits", planAction: "funding" };
     await speakUtterance(runtime, world, "And tomorrow");
+    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 2 && s.turn === 3);
+
+    world.ask.refusal = { failureKind: "insufficient_credits", cloudCode: "allowance_exhausted", planAction: "funding" };
+    await speakUtterance(runtime, world, "And Friday");
     await until(runtime, Voice.Machine, (s) => s.phase === "Idle");
     const ended = await getVoice(runtime);
     expect([ended.phase, ended.mic, ended.failure, ended.engineHeld, ended.sent, world.voice.engineHeld, world.voice.activeMicSession, world.voice.startLiveCaptureCalls, world.voice.spoken]).toEqual([
-      "Idle", "Off", "NoFailure", false, 2, false, undefined, 2, [],
+      "Idle", "Off", "NoFailure", false, 3, false, undefined, 3, [],
     ]);
   });
 

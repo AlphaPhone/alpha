@@ -73,8 +73,10 @@ const failures: Readonly<Record<string, Reply.Failure>> = {
   no_provider: "NoProvider", billing_refused: "PlanLimit", subscription_required: "PlanLimit", allowance_exhausted: "PlanLimit",
 }
 
-/** Cloud's own codes for an account with no plan allowance and no credits left, as a failed turn names them. */
-export const outOfFunds: ReadonlySet<string> = new Set(["insufficient_credits", "allowance_exhausted"])
+/** Whether the resident's failed turn carries Cloud's own code for spent allowance and credits. */
+export function isCloudFundsRefusal(result: TurnResult | undefined): boolean {
+  return result?.kind === "AgentFailed" && result.reply?.cloudCode !== undefined
+}
 
 // spec/app/assistant/reply.md, "The settled reply is the whole final answer, shown and spoken, never the acknowledgment"; spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"
 function replied(turn: number, result: TurnResult | undefined): Reply.Event {
@@ -82,7 +84,7 @@ function replied(turn: number, result: TurnResult | undefined): Reply.Event {
   if (result === undefined) return { type: "failed", turn, kind: "OtherFailure" }
   return match (result) {
     when { kind: "Replied", let reply }: reply.failureKind === undefined ? (reply.text === "" ? { type: "decline", turn } : { type: "done", turn, units: reply.text.length }) : failed(reply, reply.failureKind);
-    when { kind: "AgentFailed", let code }: outOfFunds.has(code) ? { type: "failed", turn, kind: "OutOfFunds" } : failed(result.reply, code);
+    when { kind: "AgentFailed", let code }: isCloudFundsRefusal(result) ? { type: "failed", turn, kind: "OutOfFunds" } : failed(result.reply, code);
     when { kind: "StoppedByOwner" }: { type: "stop", turn };
     default: { type: "failed", turn, kind: "OtherFailure" };
   }

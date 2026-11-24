@@ -5,7 +5,7 @@ import * as Voice from "../../gen/app__voice.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { ask } from "../platform/remote.vibe"
-import { outOfFunds } from "../assistant/assistant.vibe"
+import { isCloudFundsRefusal } from "../assistant/assistant.vibe"
 import { type VoiceEvent, VoiceBridge } from "../platform/voice.vibe"
 import { fresh } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, due, hearing, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
@@ -85,23 +85,8 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
 module pure {
   import { clockWords, meridiemOf, twelveHour } from "../../gen/app__voice.ts"
 
-  const sentenceBoundary = /^(.*?[.!?])(?:\s+|$)([\s\S]*)$/
   const reviewTag = /\[(APPROVAL|PROPOSAL|REVIEW|DRAFT|CALENDAR_APPROVAL|EMAIL_DRAFT)\b/i
   const navigateTag = /\[NAVIGATE:([a-zA-Z]+)\]/i
-
-  /** @throws {never} */
-  export function takeCompleteSentences(buffer: string): { readonly ready: readonly string[]; readonly rest: string } {
-    const ready: string[] = []
-    let rest = buffer
-    for (let i = 0; i < 32; i += 1) {
-      const matched = sentenceBoundary.exec(rest)
-      if (matched === null) break
-      const head = (matched[1] ?? "").trim()
-      if (head !== "") ready.push(head)
-      rest = (matched[2] ?? "").trimStart()
-    }
-    return { ready, rest }
-  }
 
   /** @throws {never} */
   export function replyNeedsReview(text: string): boolean {
@@ -121,7 +106,7 @@ module pure {
       .replace(/\[(APPROVAL|PROPOSAL|REVIEW|DRAFT|CALENDAR_APPROVAL|EMAIL_DRAFT)[^\]]*\]/gi, "")
       .replace(/:[ \t]*(?=\r?\n)/g, ".")
       .replace(/\s+/g, " ")
-      .trim()
+      .trimStart()
   }
 
   const weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
@@ -145,8 +130,10 @@ module pure {
     return names.flatMap((name) => (name.length > 3 ? [name, name.slice(0, 3)] : [name])).flatMap((name) => [name, name.toUpperCase()]).join("|")
   }
 
+  const weekdayNames = namesPattern(weekdays)
+  const monthNames = `${namesPattern(months)}|Sept|SEPT`
   const namedDate = new RegExp(
-    String.raw`\b(?:(${namesPattern(weekdays)})\.?,?[ \t]+)?(${namesPattern(months)}|Sept|SEPT)\.?[ \t]+(0?[1-9]|[12]\d|3[01])(?:st|nd|rd|th)?(?![\p{L}\d/-]|[.:]\d)`,
+    String.raw`\b(?:(${weekdayNames})\.?,?[ \t]+)?(${monthNames})\.?[ \t]+(0?[1-9]|[12]\d|3[01])(?:st|nd|rd|th)?(?![\p{L}\d/-]|[.:]\d)`,
     "gu",
   )
   const clock = String.raw`(?:0?[1-9]|1[0-2])(?::[0-5]\d)?`
@@ -154,10 +141,42 @@ module pure {
   const meridiem = String.raw`[ \t]*[ap]\.?[ \t]*m(?:\.(?=[ \t]*[,;–—−-]|[ \t]+to[ \t]))?`
   const rangeSeparator = String.raw`(?:[ \t]*[-–—−][ \t]*|[ \t]+to[ \t]+)`
   const clockEnd = String.raw`(?![\p{L}\d:/-]|\.\d)`
-  const clockStart = String.raw`(?<![\p{L}\d:+./-])`
+  const clockStart = String.raw`(?<![\p{L}\d:+./−-])`
   const clockRange = new RegExp(String.raw`${clockStart}(?:(${clock}(?:${meridiem})?)${rangeSeparator}(${clock}${meridiem})|(${bareClock})${rangeSeparator}(${bareClock}))${clockEnd}`, "giu")
   const clockWithMeridiem = new RegExp(String.raw`${clockStart}(${clock}${meridiem})${clockEnd}`, "giu")
   const bareClockTime = new RegExp(String.raw`${clockStart}${bareClock}${clockEnd}`, "gu")
+  const unfinishedWeekday = new RegExp(String.raw`\b(?:${weekdayNames})\.,?(?:[ \t]+([A-Z][A-Za-z]*)\.?(?:[ \t]+0)?)?[ \t]*$`, "u")
+  const unfinishedMonth = new RegExp(String.raw`\b(?:${monthNames})\.(?:[ \t]+0)?[ \t]*$`, "u")
+  const unfinishedClock = new RegExp(String.raw`${clockStart}${clock}[ \t]*[ap](?:\.|\.?[ \t]*m\.(?:[ \t]+t(?:o)?)?)[ \t]*$`, "iu")
+
+  function hidePeriods(text: string): string {
+    return text.replaceAll(".", "·")
+  }
+
+  /** Returns complete written sentences and how much of the unchanged input they consumed. @throws {never} */
+  export function takeCompleteSentences(buffer: string, final: boolean): { readonly ready: readonly string[]; readonly consumed: number } {
+    const scan = (final ? buffer : buffer
+      .replace(unfinishedWeekday, (tail, month?: string) =>
+        month === undefined || months.some((name) => name.startsWith(month) || name.toUpperCase().startsWith(month)) ? hidePeriods(tail) : tail)
+      .replace(unfinishedMonth, hidePeriods)
+      .replace(unfinishedClock, hidePeriods))
+      .replace(namedDate, hidePeriods)
+      .replace(clockRange, hidePeriods)
+      .replace(clockWithMeridiem, hidePeriods)
+    const ready: string[] = []
+    let consumed = 0
+    for (const boundary of scan.matchAll(/[.!?](?=\s|$)\s*/g)) {
+      if (!final && boundary[0] === "." && boundary.index + 1 === scan.length && /\d/.test(scan.charAt(boundary.index - 1))) break
+      ready.push(buffer.slice(consumed, boundary.index + 1).trim())
+      consumed = boundary.index + boundary[0].length
+    }
+    if (final) {
+      const tail = buffer.slice(consumed).trim()
+      if (tail !== "") ready.push(tail)
+      consumed = buffer.length
+    }
+    return { ready, consumed }
+  }
 
   function clockSaid(value: string): string {
     const found = /^(\d{1,2})(?::(\d{2}))?[ \t]*([ap])?/i.exec(value)
@@ -187,7 +206,7 @@ module pure {
       .replace(clockRange, (_, from?: string, to?: string, fromBare?: string, toBare?: string) => `${clockSaid(from ?? fromBare ?? "")} to ${clockSaid(to ?? toBare ?? "")}`)
       .replace(clockWithMeridiem, clockSaid)
       .replace(bareClockTime, clockSaid)
-      .replace(/(?<![\d:./-])(\d{1,2})[ \t]*[-–][ \t]*(\d{1,2})(?![\d:./-])/g, "$1 to $2")
+      .replace(/(?<![\p{L}\d:./-])(\d{1,2})[ \t]*[-–][ \t]*(\d{1,2})(?![\p{L}\d:/-]|\.\d)/gu, "$1 to $2")
       .replace(/(?<=\d)[ \t]?%(?![\p{L}\d])/gu, " percent")
       .replace(/(?<=\p{L}):(?=[ \t]+\S)/gu, ",")
   }
@@ -244,6 +263,11 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       memory.enqueueSentence(turn, spokenForm(sentence))
       Queue.offerUnsafe(queue, { type: "sentence", session, turn })
     }
+    const sayFrom = (written: string, final: boolean) => {
+      const split = takeCompleteSentences(written.slice(said), final)
+      said += split.consumed
+      for (const sentence of split.ready) say(sentence)
+    }
     const feed = (written: string, provisional: boolean) => {
       if (provisional) return
       emitNavigation(written)
@@ -251,13 +275,10 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       const clean = speakableText(written)
       if (clean.length <= shown.length) return
       shown = clean
-      const unsaid = clean.slice(said)
-      const split = takeCompleteSentences(unsaid)
-      said += unsaid.length - split.rest.length
-      for (const sentence of split.ready) say(sentence)
+      sayFrom(clean, false)
     }
     const result = tryPromise(() => controller.send({ text: spoken }, { stream: { onPreview: feed } })) catch () => undefined
-    if (result?.kind === "AgentFailed" && outOfFunds.has(result.code)) {
+    if (isCloudFundsRefusal(result)) {
       memory.lastReply = ""
       Queue.offerUnsafe(queue, { type: "refusedForFunds", session, turn })
       Queue.endUnsafe(queue)
@@ -274,8 +295,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       return
     }
     const full = speakableText(finalText)
-    const remaining = (full.length > shown.length ? full : shown).slice(said).trim()
-    if (remaining !== "") say(remaining)
+    sayFrom(full.length >= shown.length ? full : shown, true)
     Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false })
     Queue.endUnsafe(queue)
   })

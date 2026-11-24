@@ -1,5 +1,5 @@
 // spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "Starting asks for the microphone the first time, opens it once it is allowed, and holds the speech engine while talking"
-import { type CloudStreamingSpeech, cloudSpeechPlugin, createCloudStreamingSpeech, type CredentialId, type EnvironmentName } from "@elizaos/os/bridges/voice"
+import { type CloudStreamingSpeech, createCloudStreamingSpeech, type CredentialId, type EnvironmentName } from "@elizaos/os/bridges/voice"
 import { fresh } from "../runtime/attempts.vibe"
 import { Agent } from "./agent.vibe"
 import { registered } from "./device.vibe"
@@ -26,6 +26,7 @@ export interface RecordedClip {
 
 module capacitor {
   import { registerPlugin } from "@capacitor/core"
+  import type { ElizaCloudSpeechPlugin, EnvironmentName } from "@elizaos/os/bridges/voice"
 
   export interface ListenerHandle { remove(): Promise<void> }
 
@@ -55,15 +56,14 @@ module capacitor {
     return (made ??= registerPlugin<LocalVoicePlugin>("AlphaVoiceCloud"))
   }
 
-  /** The Cloud speech relay's warm-up, which opens its connection to Cloud speech while no conversation runs. */
-  export interface RelayWarmup {
-    prewarmCloudSpeech(options: { environment: string }): Promise<unknown>
+  type RelayPlugin = ElizaCloudSpeechPlugin & {
+    prewarmCloudSpeech(options: { environment: EnvironmentName }): Promise<unknown>
   }
 
-  let relay: RelayWarmup | undefined
+  let relay: RelayPlugin | undefined
   /** @throws {never} */
-  export function relayPlugin(name: string): RelayWarmup {
-    return (relay ??= registerPlugin<RelayWarmup>(name))
+  export function relayPlugin(name: string): RelayPlugin {
+    return (relay ??= registerPlugin<RelayPlugin>(name))
   }
 
   /** @throws {never} */
@@ -247,7 +247,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
         credentialId: DEFAULT_CREDENTIAL,
         assertCurrent: makeSessionGuard(() => activeSession, currentSession),
         onInterim: (text) => publish({ kind: "transcript", session: currentSession, text, final: false }),
-      }, cloudSpeechPlugin(CLOUD_STREAM_PLUGIN))
+      }, relayPlugin(CLOUD_STREAM_PLUGIN))
       cloudStream = stream
       const abort = makeAbort()
       const capture = try tryPromise({

@@ -1,4 +1,5 @@
 // spec/app/ask/index.md, "Story: Talk to my agent"
+import type { TurnReply } from "@elizaos/agent/client";
 import type { Route } from "./routes.ts";
 
 export interface AskScene {
@@ -11,9 +12,10 @@ export interface AskScene {
   searchDown: boolean;
   acknowledgment?: string;
   metadata?: unknown[];
-  /** The code of the error frame the agent writes instead of a reply, as eliza's agent does when Cloud refuses the turn. */
-  refusal?: string;
+  /** The failure fields of the resident's terminal reply. */
+  refusal?: Pick<TurnReply, "cloudCode" | "planAction"> & { readonly failureKind: NonNullable<TurnReply["failureKind"]> };
   nextReplyChunks?: readonly string[];
+  nextReplyProvisional?: boolean;
   cloudWarmCalls: number;
 }
 
@@ -34,12 +36,17 @@ const named = (turn: number) => ({ messageId: `m${turn}a`, userMessageId: `m${tu
 
 function reply(scene: AskScene, room: string, text: string, keep: (said: string) => void): Response {
   const custom = scene.nextReplyChunks;
+  const provisional = scene.nextReplyProvisional;
   scene.nextReplyChunks = undefined;
+  scene.nextReplyProvisional = undefined;
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
       controller.enqueue(frame({ type: "status", activity: "thinking" }));
-      if (scene.refusal !== undefined) controller.enqueue(frame({ type: "error", code: scene.refusal, message: "Cloud refused the turn" }));
-      if (scene.refusal !== undefined) return controller.close();
+      if (scene.refusal !== undefined) {
+        controller.enqueue(frame({ type: "done", fullText: "", ...named(scene.said.length), ...scene.refusal }));
+        controller.close();
+        return;
+      }
       if (scene.acknowledgment !== undefined) controller.enqueue(frame({ type: "acknowledgment", text: scene.acknowledgment }));
       if (scene.acknowledgment !== undefined) controller.enqueue(frame({ type: "tool", name: "CALENDAR", label: "Using Calendar" }));
       if (scene.stalled) {
@@ -48,7 +55,7 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
         return;
       }
       if (custom !== undefined && custom.length > 0) {
-        for (const piece of custom) controller.enqueue(frame({ type: "token", text: piece }));
+        for (const piece of custom) controller.enqueue(frame({ type: "token", text: piece, ...(provisional ? { provisional } : {}) }));
         const full = custom.join("");
         keep(full);
         controller.enqueue(frame({ type: "done", fullText: full, ...named(scene.said.length) }));
