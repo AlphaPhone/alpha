@@ -174,12 +174,14 @@ pure def stepOneExportAtATime(before: Developer, after: Developer, out: List[Eff
 
 Versions, the eliza pin, asset hashes, the build's variant, Android's
 release and security patch, the permissions granted, Alpha's own roles,
-the agent's connection, the plan, and each problem as the log shows it.
-Another app's name, the apps holding a role, an account or session, a web
-address or any free text is left out, never scrubbed.
+the agent's connection, the plan, each problem as the log shows it, and
+for each recent Talk over Cloud speech the milliseconds from its start to
+the relay's connection and to the first audio sent, and whether consent
+was asked again. Another app's name, the apps holding a role, an account
+or session, a web address or any free text is left out, never scrubbed.
 
 ```quint
-type Field = AppVersion | VersionCode | Variant | BuildType | TestMocks | AndroidRelease | SecurityPatch | SdkLevel | UpstreamPin | AssetHash | PermissionGrant | AlphaRole | ConnectionKind | PlanView | ProblemEntry | RoleHolder | AccountId | SessionId | FreeText | Url | PackageName
+type Field = AppVersion | VersionCode | Variant | BuildType | TestMocks | AndroidRelease | SecurityPatch | SdkLevel | UpstreamPin | AssetHash | PermissionGrant | AlphaRole | ConnectionKind | PlanView | ProblemEntry | TalkTiming | RoleHolder | AccountId | SessionId | FreeText | Url | PackageName
 
 pure def reported(fieldId: Field): bool =
   not(fieldId == RoleHolder or fieldId == AccountId or fieldId == SessionId or fieldId == FreeText or fieldId == Url or fieldId == PackageName)
