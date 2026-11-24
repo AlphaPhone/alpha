@@ -116,8 +116,8 @@ export function Assistant({ runtime }: AssistantProps) {
   const reply = useReply(runtime);
   const shell = useShell(runtime);
   const dock = useDock(runtime);
-  const [board] = useState(() => runtime.runSync(Talk.use((talk) => Effect.succeed(talk.board))));
-  const seen = useSyncExternalStore(board.subscribe, board.snapshot);
+  const [board] = useState(() => runtime.runSync(Effect.flatMap(Talk, (talk) => Effect.succeed(talk.board))));
+  const seen = useSyncExternalStore((listener) => board.subscribe(listener), () => board.snapshot());
   const [listing, setListing] = useState(false);
   const [words, setWords] = useState("");
   if (conversation.cause || chats.cause || composer.cause || reply.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Ask Alpha</Alert>;
@@ -141,16 +141,15 @@ export function Assistant({ runtime }: AssistantProps) {
   };
   const send = () => {
     if (newChat) {
-      board.sendWhenMade = true;
+      board.queueSend();
       void chats.send(start);
       return;
     }
-    board.outgoing = seen.typed;
+    board.hold(seen.typed);
     board.type("");
     void composer.send(hold);
   };
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"
-  /** The card of a reply that did not finish: live, with the fix the agent named and its wait, or read again from history, with neither. */
   const failureCard = ({ kind, fix, waitMs }: { kind: Failure; fix: Fix; waitMs: number }, live: boolean) => {
     const act = actionOf(kind, fix);
     const detail = showsWait(kind, waitMs) ? `Try again in about ${about(waitMs)}` : !live && kind === "LimitReached" ? "Wait a moment, then try again" : undefined;

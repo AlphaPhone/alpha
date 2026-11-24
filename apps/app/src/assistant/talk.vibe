@@ -1,5 +1,5 @@
 // spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Keep what I am writing"
-import { ConversationRecord } from "@elizaos/agent/client"
+import type { ConversationRecord } from "@elizaos/agent/client"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import type { Failure, Fix } from "../../gen/app__assistant__reply.ts"
 import type { Sighting } from "../platform/location.vibe"
@@ -53,10 +53,14 @@ export interface Seen {
  * with `useSyncExternalStore`, and the shell writes. It holds no rule; each machine decides what counts.
  */
 export interface Board {
-  snapshot(): Seen
-  subscribe(listener: () => void): () => void
+  snapshot(this: void): Seen
+  subscribe(this: void, listener: () => void): () => void
   /** The owner typed `text` in the composer's box. */
   type(text: string): void
+  /** Hold `text` as the outgoing message for the send in hand. */
+  hold(text: string): void
+  /** Mark a send waiting for the new conversation to be made. */
+  queueSend(): void
   /** The text a send in hand carries, the last text sent, and a send that waits for its conversation to be made. */
   outgoing: string
   lastSent: string
@@ -128,6 +132,8 @@ export const talk = Layer.effect(Talk, effect {
       return () => { listeners.delete(listener) }
     },
     type: (text) => board.change({ typed: text }),
+    hold: (text) => { board.outgoing = text },
+    queueSend: () => { board.sendWhenMade = true },
     outgoing: "",
     lastSent: "",
     lastSentId: "",

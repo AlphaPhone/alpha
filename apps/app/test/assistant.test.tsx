@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { Effect } from "effect";
+import { act } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Chats } from "../gen/app__assistant__chats.effect.vibe";
@@ -26,9 +27,8 @@ const lines = () => [...document.querySelectorAll("section[aria-label='Ask Alpha
 const rows = (list: string) => document.querySelector(`section[aria-label='${list}'] > div`)?.children.length ?? 0;
 
 /** Write `text` in the composer, as the owner types it. */
-async function write(text: string) {
-  const { act } = await import("react");
-  await act(() => {
+function write(text: string) {
+  act(() => {
     const box = document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']");
     if (!box) throw new Error("no composer");
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(box, text);
@@ -37,14 +37,13 @@ async function write(text: string) {
 }
 
 /** Open the menu of the message that says `text` and choose `item`, as the owner does with the keyboard. */
-async function onMessage(text: string, item: string) {
-  const { act } = await import("react");
-  await act(() => {
+function onMessage(text: string, item: string) {
+  act(() => {
     const found = [...document.querySelectorAll("[role=log] article button")].find((one) => one.textContent === text);
     if (!(found instanceof HTMLButtonElement)) throw new Error(`no message ${text}`);
     found.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   });
-  await act(() => {
+  act(() => {
     const chosen = [...document.querySelectorAll("[role=menuitem]")].find((one) => one.textContent === item);
     if (!(chosen instanceof HTMLElement)) throw new Error(`no ${item} for ${text}`);
     chosen.click();
@@ -52,9 +51,8 @@ async function onMessage(text: string, item: string) {
 }
 
 /** Open the list of conversations, from the conversation's name. */
-async function chatsList() {
-  const { act } = await import("react");
-  await act(() => {
+function chatsList() {
+  act(() => {
     const found = [...document.querySelectorAll("button")].find((one) => one.getAttribute("aria-label")?.startsWith("Chats, "));
     if (!(found instanceof HTMLButtonElement)) throw new Error("no chats control");
     found.click();
@@ -62,9 +60,8 @@ async function chatsList() {
 }
 
 /** Click the row of the list named `list` whose text starts with `text`. */
-async function row(list: string, text: string) {
-  const { act } = await import("react");
-  await act(() => {
+function row(list: string, text: string) {
+  act(() => {
     const found = [...document.querySelectorAll(`section[aria-label='${list}'] button`)].find((one) => one.textContent?.startsWith(text));
     if (!(found instanceof HTMLButtonElement)) throw new Error(`no row ${text} in ${list}`);
     found.click();
@@ -95,7 +92,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/assistant/composer.md, "A message written before its conversation existed moves into the new one, then its old slot is cleared on the exact revision read"
     world.ask.metadata = [];
-    await write("Hello");
+    write("Hello");
     await press("Send");
     // spec/app/assistant/index.md, "A reply completes, streamed or all at once, even after the owner asked to stop it"
     await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Complete");
@@ -112,16 +109,16 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect(JSON.parse(localStorage.getItem("alpha/assistant/slot/0/1@1") ?? "{}")).toMatchObject({ text: "", sending: false });
 
     // spec/app/assistant/composer.md, "Story: Keep what I am writing": a draft is kept in its conversation's slot.
-    await write("Not yet");
+    write("Not yet");
     await until(alpha, runtime, Composer, (s) => s.draft.sync === "Kept" && s.editor.text);
     expect(JSON.parse(localStorage.getItem("alpha/assistant/slot/0/1@1") ?? "{}")).toMatchObject({ text: "Not yet", sending: false });
     // spec/app/assistant/composer.md, "A message longer than a message may hold is kept as a draft and never sent"
-    await write("x".repeat(64_001));
+    write("x".repeat(64_001));
     await until(alpha, runtime, Composer, (s) => s.long);
     expect(button("Send")?.disabled).toBe(true);
     // spec/app/assistant/reply.md, "One brief acknowledgment at most, only from the agent's acknowledgment frame, before any tool runs"
     world.ask.acknowledgment = "Let me look";
-    await write("Again");
+    write("Again");
     await press("Send");
     await until(alpha, runtime, Conversation, (s) => s.turn.send.id === 2 && s.turn.reply === "Complete");
     await until(alpha, runtime, Reply, (s) => s.turn === 2 && s.status === "Settled");
@@ -130,7 +127,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect(lines()).toEqual(["Hello", "You said: Hello", "Again", "You said: Again"]);
 
     // spec/app/assistant/chats.md, "A fork is asked for from a message of the conversation showing"
-    await onMessage("Hello", "New chat from here");
+    onMessage("Hello", "New chat from here");
     await until(alpha, runtime, Chats, (s) => s.origin === 1 && s.page.status === "Loaded");
     expect(lines()).toEqual(["Hello"]);
     // spec/app/assistant/chats.md, "Back to the original leaves the fork for the conversation it came from"
@@ -139,7 +136,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect(lines()).toEqual(["Hello", "You said: Hello", "Again", "You said: Again"]);
 
     // spec/app/assistant/chats.md, "The newest list says which conversations there are, and a conversation no longer listed stops showing"
-    await chatsList();
+    chatsList();
     await until(alpha, runtime, Chats, (s) => s.list.status === "Loaded");
     expect(rows("Chats")).toBe(2);
 
@@ -148,7 +145,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "openSection", page: "Apps" })));
     await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "open", page: "PasswordsPage" })));
     await until(alpha, runtime, Conversation, (s) => s.context.sensitive && s.context.showing.tag === "App");
-    await write("my password is hunter2");
+    write("my password is hunter2");
     expect([button("Send")?.disabled, world.ask.said.length]).toEqual([true, 2]);
     // spec/app/assistant/index.md, "A sensitive screen says only that it is sensitive: no selection and no day"
     await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "goBack" })));
@@ -159,7 +156,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
     world.ask.refusal = "allowance_exhausted";
-    await write("Hi");
+    write("Hi");
     await press("Send");
     await until(alpha, runtime, Reply, (s) => s.turn === 3 && s.status === "Interrupted");
     expect([(document.querySelector("section[aria-label='Ask Alpha'] [role=log]")?.textContent ?? "").includes("You’re out of plan allowance and credits, so I couldn’t reply."), Boolean(button("Manage plan"))]).toEqual([true, true]);
@@ -171,9 +168,9 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect(lines().slice(0, 2)).toEqual(["Hello", "You said: Hello"]);
 
     // spec/app/assistant/composer.md, "A quoted message goes with the next send, until the owner removes the quote"
-    await onMessage("You said: Hello", "Reply");
+    onMessage("You said: Hello", "Reply");
     await until(alpha, runtime, Composer, (s) => s.editor.quote === 2);
-    await write("Why?");
+    write("Why?");
     await press("Send");
     await until(alpha, runtime, Conversation, (s) => s.turn.send.id === 4 && s.turn.reply === "Complete");
     expect([world.ask.metadata?.at(-1), world.ask.said.at(-1)]).toEqual([expect.objectContaining({ replyToMessageId: "m1a" }), "Why?"]);
@@ -187,7 +184,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       await alpha.runtime.runPromise(Effect.flatMap(Prefs.Machine, (prefs) => prefs.send({ type: "setShare", share: "AgentLocation", on: false, at: untimed }, "Owner")));
       await until(alpha, alpha.runtime, Prefs.Machine, (s) => !Prefs.allows(s, "AgentLocation"));
       await until(alpha, runtime, Locator, (s) => !s.enabled && s.gpsAt === -1);
-      await write("Where am I?");
+      write("Where am I?");
       await press("Send");
       await until(alpha, runtime, Conversation, (s) => s.turn.send.id === 5 && s.turn.reply === "Complete");
       expect(locationIn(world.ask.metadata?.at(-1))).toBe(undefined);
@@ -196,13 +193,13 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       await alpha.runtime.runPromise(Effect.flatMap(Prefs.Machine, (prefs) => prefs.send({ type: "setShare", share: "AgentLocation", on: true, at: untimed }, "Owner")));
       await until(alpha, alpha.runtime, Prefs.Machine, (s) => Prefs.allows(s, "AgentLocation"));
       await until(alpha, runtime, Locator, (s) => s.enabled);
-      await write("Refresh");
+      write("Refresh");
       await press("Send");
       await until(alpha, runtime, Conversation, (s) => s.turn.send.id === 6 && s.turn.reply === "Complete");
       await until(alpha, runtime, Locator, (s) => s.gpsAt >= 0);
       world.maps.here = undefined;
       await later(alpha, 1_800_001);
-      await write("Too old");
+      write("Too old");
       await press("Send");
       await until(alpha, runtime, Conversation, (s) => s.turn.send.id === 7 && s.turn.reply === "Complete");
       expect(locationIn(world.ask.metadata?.at(-1))).toBe(undefined);
@@ -221,7 +218,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Search, (s) => s.hits.status === "Loaded" && s.words === "friday");
     expect(rows("Results")).toBe(2);
     // spec/app/assistant/search.md, "Opening a hit closes search and opens its conversation around its message, and another conversation only while the turn and the composer are free"
-    await row("Results", "Friday at noon");
+    row("Results", "Friday at noon");
     await until(alpha, runtime, Chats, (s) => s.chosen > 0 && s.around > 0 && s.page.status === "Loaded");
     expect([lines().slice(0, 2), document.querySelector("section[aria-label='Results']")]).toEqual([["Lunch on Friday?", "Friday at noon works."], null]);
     // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again": a reply read again from history says why it did not finish, and to wait a moment.
@@ -244,14 +241,14 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     world.ask.kept.set("c1", { roomId: "r1", title: "Ask Alpha", messages: [] });
     world.ask.opened = 1;
     const { alpha, runtime } = await openAssistant(world);
-    await chatsList();
+    chatsList();
     await until(alpha, runtime, Chats, (s) => s.list.status === "Loaded");
-    await row("Chats", "Ask Alpha");
+    row("Chats", "Ask Alpha");
     await until(alpha, runtime, Composer, (s) => s.binding.conversation === 1 && s.slot === "Open");
 
     // spec/app/assistant/index.md, "Stop reply ends a streaming reply, and takes back a message nothing was heard of"
     world.ask.stalled = true;
-    await write("Take your time");
+    write("Take your time");
     await press("Send");
     await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Streaming");
     expect(button("Send")).toBe(undefined);
