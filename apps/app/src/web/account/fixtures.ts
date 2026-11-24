@@ -12,6 +12,7 @@ import { initial as sheetInitial, type Sheet } from "../../../gen/account__sheet
 import { initial as signInInitial, type SignIn } from "../../../gen/account__signIn.ts";
 import type { BillingDetails } from "../../account/billing.vibe";
 import type { DelegationDetails } from "../../account/delegation.vibe";
+import type { PlanSummary } from "../../account/entitlement.vibe";
 import type { GoogleAccount } from "../../account/google.vibe";
 
 const ready = { known: true, google: true, email: true, phone: true };
@@ -116,3 +117,23 @@ export const bridgeAccountChanged: Bridge = { ...bridgeAllowed, phase: "BridgeFa
 export const dedicatedReview: Dedicated = { ...dedicatedInitial, allowed: true, view: { tag: "Review", adoption: false, available: true } };
 /** A dedicated setup whose acceptance was not confirmed. */
 export const dedicatedBlocked: Dedicated = { ...dedicatedReview, blocked: true, accepted: 1 };
+
+/** Plus with the plan manager closed, as the account section shows it. */
+export const onPlus: Billing = { ...managerOnPlus, manager: "ManagerClosed" };
+/** The plan summary before Cloud's subscription view arrives. */
+export const summaryUnread: PlanSummary = { owner: 1, view: undefined, planEndsAt: null };
+/** Billing details before Cloud answers. */
+export const detailsUnread: BillingDetails = { offers: [], referral: undefined, email: undefined, quote: undefined, renewsAt: undefined };
+/** A key that ends soon, with its notice on the open sheet. */
+export const expiringSheet: Sheet = { ...openSheet, keyExpiring: true, expiryShown: true };
+/** Billing details naming a long address. */
+export const longDetails: BillingDetails = { ...details, email: "owner.with.a.rather.long.address.for.this.phone@workspace.example.com" };
+/** Several connected Google accounts, some with long addresses. */
+export const manyGoogleRows: ReadonlyArray<GoogleAccount> = [
+  ...googleRows,
+  { connectionId: "conn-2", email: "owner.with.a.rather.long.address.for.this.phone@workspace.example.com", grantedCapabilities: ["google.basic_identity", "google.calendar.read"] },
+  { connectionId: "conn-3", email: "family@example.org", grantedCapabilities: ["google.basic_identity", "google.gmail.triage"] },
+  { connectionId: "conn-4", email: "volunteering.coordinator@example.net", grantedCapabilities: ["google.basic_identity"] },
+];
+/** A connected delegation whose earlier grants still wait for Cloud to disconnect them. */
+export const manyPendingRevocations: DelegationDetails = { ...delegationDetails, pendingRevocations: ["grant-0a", "grant-0b", "grant-0c"] };

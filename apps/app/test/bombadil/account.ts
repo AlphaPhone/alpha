@@ -1,4 +1,4 @@
-// spec/account/signIn.md, "A wrong code keeps the step, a spent code leaves only Resend, and any other failure returns to the choice"; spec/account/signIn.md, "Nothing starts while the phone is offline"; spec/account/billing.md, "Add funds is offered only on Eliza Cloud, never opens the plan manager, and takes $5 to $1,000"; spec/account/billing.md, "A plan change or cancellation needs the account's own fresh session"; spec/account/sheet.md, "Sign-out is confirmed only for the account that was reviewed, and closing keeps everything"; spec/account/sheet.md, "The plan notice shows on Home only, until dismissed, and never under a covering screen"; spec/account/google.md, "A disconnect is confirmed only by reading the accounts back"; spec/account/provider.md, "A key is removed only after its own review, and shown only in the host's secure dialog"
+// spec/account/signIn.md, "A wrong code keeps the step, a spent code leaves only Resend, and any other failure returns to the choice"; spec/account/signIn.md, "Nothing starts while the phone is offline"; spec/account/billing.md, "Add funds is offered only on Eliza Cloud, never opens the plan manager, and takes $5 to $1,000"; spec/account/billing.md, "A plan change or cancellation needs the account's own fresh session"; spec/account/sheet.md, "Sign-out is confirmed only for the account that was reviewed, and closing keeps everything"; spec/account/sheet.md, "The plan notice shows on Home only, until dismissed, and never under a covering screen"; spec/account/google.md, "A disconnect is confirmed only by reading the accounts back"; spec/account/provider.md, "A key is removed only after its own review, and shown only in the host's secure dialog"; spec/account/devBridge.md, "The bridge exists only in a test-mocks build"; spec/account/dedicated.md, "The review exists only with test mocks, and an unconfirmed acceptance blocks another"
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
 
@@ -102,3 +102,10 @@ export const accountKeyRemovalNeedsItsReview = always(() => keyRemovalNeedsRevie
 
 /** Own-key fields never show what is typed and are never offered to autofill. */
 export const accountProviderKeysAreMasked = always(() => providerKeysMasked.current);
+
+const developerPanel = extract(({ document }) =>
+  document.documentElement.dataset.testMocks === "false" && (document.querySelector('[aria-label="Developer"]:not(button)') !== null
+    || Array.from(document.querySelectorAll("button")).some((button) => button.textContent?.trim() === "Bridge sign-in")));
+
+/** The development bridge and the dedicated agent review never show in a build without test mocks. */
+export const accountDeveloperPanelOnlyWithTestMocks = always(() => !developerPanel.current);
