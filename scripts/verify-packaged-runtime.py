@@ -74,19 +74,24 @@ def verify(apk, release=False):
         rows = inventory.get('files') if isinstance(inventory, dict) and inventory.get('schema') == 1 else None
         if not isinstance(rows, list) or not rows:
             raise ValueError('Invalid runtime inventory')
+        packaged_abis = {name.split('/')[1] for name in names if name.startswith('lib/') and name.count('/') >= 2}
         checks, listed = 0, set()
         for row in rows:
             path, expected, size = row.get('path'), row.get('sha256'), row.get('size')
             if not isinstance(path, str) or path in listed or '..' in path.split('/') or type(size) is not int:
                 raise ValueError('Invalid runtime inventory row')
             listed.add(path)
+            # The payload lists native files for every staged ABI; an APK built for fewer ABIs (the
+            # arm64-v8a release) carries only its own, and the device checks only its own ABI's rows.
+            parts = path.split('/')
+            if parts[0] == 'lib' and len(parts) == 3 and parts[1] in ABIS and parts[1] not in packaged_abis:
+                continue
             entry = path if path in names else 'assets/' + path
             if entry not in names or archive.getinfo(entry).file_size != size or packaged(entry) != expected:
                 raise ValueError('Packaged runtime file differs from its inventory: ' + path)
             checks += 1
         lock = json.loads(NODE_LOCK.read_text())
         pins = {row['abi']: row['sha256'] for row in lock.get('entries', [])}
-        packaged_abis = {name.split('/')[1] for name in names if name.startswith('lib/') and name.count('/') >= 2}
         unexpected = packaged_abis - set(ABIS)
         if unexpected:
             raise ValueError(f'Unexpected packaged ABI: {sorted(unexpected)}')
