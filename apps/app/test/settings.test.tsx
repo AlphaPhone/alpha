@@ -213,6 +213,17 @@ describe("Settings", () => {
     await press("Developer");
     await press("Problem log");
     await until(alpha, machines, Developer.Machine, (s) => s.log.read.status === "Loaded" && s.problems === 2);
+    // spec/app/settings/developer.md, "Export diagnostics shares the log and Alpha's diagnostics, one export at a time, with ten seconds to start"; spec/app/settings/developer.md, "The report copies only the fields Alpha allows, so no text, address, key or identifier can reach it"
+    const sharedFiles: File[] = [];
+    Object.defineProperty(navigator, "canShare", { configurable: true, value: () => true });
+    Object.defineProperty(navigator, "share", { configurable: true, value: (data: ShareData) => { sharedFiles.push(...(data.files ?? [])); return Promise.resolve(); } });
+    await press("Export diagnostics");
+    await until(alpha, machines, Developer.Machine, (s) => s.exporting.read.status === "Loaded");
+    const text = await sharedFiles[0]?.text();
+    const report = JSON.parse(text ?? "{}");
+    expect([report.format, report.roles, report.problems.count, report.permissions, text?.includes("launcher3"), text?.includes("ai.alphacompute")]).toEqual([
+      "alpha-diagnostics/v1", [{ role: "home", held: false, available: true }, { role: "assistant", held: false, available: true }], 2, { LocationAccess: true }, false, false,
+    ]);
     // spec/app/settings/developer.md, "Clear is offered only for a log with problems, one at a time; once the startup area answers, the log is read again": Clear asks first, and backing out clears nothing.
     await press("Clear");
     await press("Cancel");
