@@ -464,7 +464,8 @@ pure def stepAskingStopsOnlyOnTheOwnersWord(before: Preferences, via: str, after
 
 ### When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again
 
-A recovery not answered in ten seconds is given up and the document is read
+The owner confirms first: a recovery puts back what a new phone has. A
+recovery not answered in ten seconds is given up and the document is read
 again; Alpha says when it did not recover.
 
 ```quint

@@ -2,6 +2,7 @@
 import {
   Banner,
   Button,
+  ConfirmDialog,
   type SettingsAccess,
   type SettingsAccessWord,
   SettingsAboutPage,
@@ -32,7 +33,7 @@ import {
   SettingsPage,
 } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import type * as AndroidGen from "../../gen/app__settings__android.ts";
 import { useMachine as useAndroid } from "../../gen/app__settings__android.react.ts";
 import type { Machine as AndroidMachine } from "../../gen/app__settings__android.effect.vibe";
@@ -161,6 +162,7 @@ function deviceRead(prefs: PrefsGen.Preferences): SettingsDeviceRead {
 /** The device preferences as the Privacy and Inbox pages show and change them, each change offered exactly when the rules allow it. */
 function useDevice(runtime: SettingsRuntime) {
   const { state, can, send } = useTimed(runtime, usePrefs);
+  const [asking, setAsking] = useState(false);
   if (!state) return undefined;
   const read = deviceRead(state);
   const offer = <E extends PrefsGen.Event>(event: (value: boolean) => E) => (value: boolean) => {
@@ -177,7 +179,21 @@ function useDevice(runtime: SettingsRuntime) {
     onAskFirstChange: offer((askFirst) => ({ type: "setAskFirst", askFirst, at: untimed })),
     onImagesChange: offer((images) => ({ type: "setImages", images, at: untimed })),
     onShareChange: (share: SettingsShare, on: boolean) => offer((value) => ({ type: "setShare", share: sharesNamed[share], on: value, at: untimed }))(on),
-    onRecover: can(recover, "Owner") ? () => void send(recover, "Owner") : undefined,
+    onRecover: can(recover, "Owner") ? () => setAsking(true) : undefined,
+    recovery: (
+      <ConfirmDialog
+        open={asking && can(recover, "Owner")}
+        title="Recover device settings?"
+        confirmLabel="Recover"
+        onConfirm={() => {
+          setAsking(false);
+          if (can(recover, "Owner")) void send(recover, "Owner");
+        }}
+        onCancel={() => setAsking(false)}
+      >
+        Ask before Alpha acts, Inbox images and what Alpha may share go back to how a new phone has them.
+      </ConfirmDialog>
+    ),
   };
 }
 
@@ -240,16 +256,20 @@ function Display({ runtime, common }: PageProps) {
   );
 }
 
-// spec/app/settings/preferences.md, "Story: Decide whether Alpha asks before it acts"; spec/app/settings/index.md, "Set up Alpha access on Privacy, and each access on Permissions, open the walkthrough to review that one access"
+// spec/app/settings/preferences.md, "Story: Decide whether Alpha asks before it acts"; spec/app/settings/preferences.md, "When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again"; spec/app/settings/index.md, "Set up Alpha access on Privacy, and each access on Permissions, open the walkthrough to review that one access"
 function Privacy({ runtime, alpha, common }: PageProps) {
   const device = useDevice(runtime);
   const { can, send } = usePages(runtime);
   if (!device) return null;
+  const { recovery, ...shown } = device;
   const review = { type: "reviewAccess", access: "NotificationsAccess" } as const;
   return (
-    <SettingsPrivacyPage {...common} {...device} onSetUpAccess={can(review) ? () => void send(review) : undefined}>
-      {alpha.slot("settings/listening")}
-    </SettingsPrivacyPage>
+    <>
+      {recovery}
+      <SettingsPrivacyPage {...common} {...shown} onSetUpAccess={can(review) ? () => void send(review) : undefined}>
+        {alpha.slot("settings/listening")}
+      </SettingsPrivacyPage>
+    </>
   );
 }
 
@@ -302,6 +322,8 @@ function App({ runtime, common, app }: PageProps & { app: "inbox" | "workflows" 
   const facts = useFacts(runtime).state;
   const device = useDevice(runtime);
   return (
+    <>
+    {device?.recovery}
     <SettingsAppPage
       {...common}
       app={app}
@@ -313,6 +335,7 @@ function App({ runtime, common, app }: PageProps & { app: "inbox" | "workflows" 
       onImagesChange={device?.onImagesChange}
       onRecover={device?.onRecover}
     />
+    </>
   );
 }
 
