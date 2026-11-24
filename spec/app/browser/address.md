@@ -202,6 +202,18 @@ pure def canFollowed(p: Page): bool = p.phase == Shown
 pure def followed(p: Page): Page = { ...started(p), behind: p.behind + 1, ahead: 0 }
 ```
 
+### A page that replaces its own address on its site, without loading another document, is still the same load
+
+A page may do it before it first paints, as Facebook does, or while it is
+shown. The load keeps its number, so it still commits or fails, and the tab
+keeps the page it shows under the new address.
+
+```quint
+pure def canReaddressed(p: Page, load: int): bool = load == p.load and (p.phase == Loading or p.phase == Shown)
+
+pure def readdressed(p: Page, load: int): Page = p
+```
+
 ### Back and forward move through the tab's own pages
 
 ```quint

@@ -3,9 +3,9 @@
 How the shown page leaves the Browser at the owner's own request: the share
 panel (Android's share sheet, copying the link or an email draft), and
 opening the page in another browser where it needs what Alpha's tabs cannot
-do, such as a passkey. Whether the page has committed, is secure and is
-private comes from its [page](./address.md); every load of it changes what
-is under review here.
+do, such as a passkey, or where a tab could not load it at all. Whether the
+page has committed, is secure and is private comes from its
+[page](./address.md); every load of it changes what is under review here.
 
 ## Story: Share the page
 
@@ -14,23 +14,28 @@ is under review here.
 
 ### Sharing holds the share panel's review and number, the last panel that sent, the review for opening the page elsewhere, and what it last told the owner
 
+Whether the page needs another browser is part of opening it elsewhere: it
+asked for a passkey, or its load failed where another browser may still
+reach it.
+
 ```quint
 import review as V from "../../kit/review"
 
 type Kind = Normal | Private
 type Dest = System | Copy | Email
 type Notice = Quiet | NoPage | Changed | Copied | ClipboardRefused | Passkeys | NoBrowser | NotOpened
+type Failure = Unreachable | Untrusted
 type Effect = Sheet({ panel: int }) | CopyLink({ panel: int }) | Draft({ panel: int }) | Elsewhere({ confirmed: bool })
 type Share = {
   panel: int, sent: int, review: V::Review,
-  passkey: bool, handoff: V::Review, privately: bool, launching: bool, confirmed: bool,
+  passkey: bool, stranded: bool, handoff: V::Review, privately: bool, launching: bool, confirmed: bool,
   notice: Notice,
 }
 type Step = { state: Share, out: List[Effect] }
 
 pure val initial: Share = {
   panel: 0, sent: 0, review: V::unreviewed,
-  passkey: false, handoff: V::unreviewed, privately: false, launching: false, confirmed: false,
+  passkey: false, stranded: false, handoff: V::unreviewed, privately: false, launching: false, confirmed: false,
   notice: Quiet,
 }
 
@@ -40,7 +45,7 @@ pure def busy(s: Share): bool = s.review.showing or s.handoff.showing or s.launc
 ### Every load of the page changes what is under review, and the page no longer needs another browser
 
 ```quint
-pure def pageChanged(s: Share): Share = { ...s, review: V::revise(s.review), handoff: V::revise(s.handoff), passkey: false }
+pure def pageChanged(s: Share): Share = { ...s, review: V::revise(s.review), handoff: V::revise(s.handoff), passkey: false, stranded: false }
 ```
 
 ### The share panel opens over a committed page, one at a time; otherwise the owner is told to load the page first
@@ -110,10 +115,27 @@ pure def sometimesCopied(s: Share): bool = s.notice == Copied and s.sent > 1
 pure def passkeyAsked(s: Share): Share = { ...s, passkey: true, notice: Passkeys }
 ```
 
-### "Open externally" is offered where the page needs another browser, for an HTTPS page; a private tab's page asks the owner first
+### A page that could not load or timed out may open in another browser; one whose certificate was refused may not
+
+Both are failures of the network or the web view, which another browser may
+get past. A refused certificate stays refused, and the failed page's own
+message says why. A stopped load is not a failure, and a refused address
+never loaded.
 
 ```quint
-pure def canOpenExternally(s: Share, kind: Kind, secure: bool): bool = s.passkey and not(busy(s))
+pure def pageFailed(s: Share, failure: Failure): Share = { ...s, stranded: failure == Unreachable }
+```
+
+### "Open externally" is offered where the page needs another browser, for an HTTPS page; a private tab's page asks the owner first
+
+A page that asked for a passkey offers it from the menu. A normal tab's page
+that failed at an HTTPS address offers it beside its failure message, so a
+site the tab cannot load is not a dead end; for that page, secure means its
+address is an HTTPS one.
+
+```quint
+pure def canOpenExternally(s: Share, kind: Kind, secure: bool): bool =
+  (s.passkey or (s.stranded and kind == Normal and secure)) and not(busy(s))
 
 pure def openExternally(s: Share, kind: Kind, secure: bool): Step =
   if (not(secure)) { state: { ...s, notice: NoPage }, out: List() }
@@ -159,10 +181,24 @@ pure def lawOnlySecurePagesLeave(kind: Kind): bool =
   openExternally({ ...initial, passkey: true }, kind, false).out.length() == 0
 ```
 
+### A failed page leaves only from a normal tab, at an HTTPS address, and never after its certificate was refused
+
+```quint
+pure def lawAFailedPageLeavesOnlyWhenAnotherBrowserMayReachIt(kind: Kind, secure: bool): bool =
+  not(canOpenExternally(pageFailed(initial, Untrusted), kind, secure)) and
+    (canOpenExternally(pageFailed(initial, Unreachable), kind, secure) iff (kind == Normal and secure))
+```
+
 ### A confirmed private page can open elsewhere, and there can be no other browser
 
 ```quint
 pure def sometimesPrivatePageOpenedElsewhere(s: Share): bool = s.launching and s.privately
 
 pure def sometimesNoOtherBrowser(s: Share): bool = s.notice == NoBrowser
+```
+
+### A page that failed to load can open in another browser
+
+```quint
+pure def sometimesAFailedPageOpensElsewhere(s: Share): bool = s.launching and s.stranded
 ```
