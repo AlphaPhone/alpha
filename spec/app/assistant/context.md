@@ -22,7 +22,7 @@ permission itself.
 ### The locator holds whether the owner allows it, the time last told, the last GPS fix and the last network answer, each read once under its ticket, and when each may be read again
 
 A turn never waits for the phone's position: it sends what the locator
-holds. Times are in seconds; a fix or an answer that is none is at -1.
+holds. Times are Alpha's, in milliseconds; a fix or an answer that is none is at -1.
 Location for Alpha is on until the owner turns it off.
 
 ```quint
@@ -39,18 +39,18 @@ pure val initial: Locator = {
   gps: R::unread, gpsAt: -1, gpsNext: 0, network: R::unread, networkAt: -1, networkNext: 0,
 }
 
-pure val reuseS = 300
-pure val retryS = 120
-pure val sendableS = 1800
-pure val networkReuseS = 900
-pure val networkUnchangedS = 3600
-pure val networkRetryS = 120
+pure val reuseMs = 300000
+pure val retryMs = 120000
+pure val sendableMs = 1800000
+pure val networkReuseMs = 900000
+pure val networkUnchangedMs = 3600000
+pure val networkRetryMs = 120000
 
 pure def allowed(l: Locator): bool = l.enabled and l.granted
 
-pure def gpsCurrent(l: Locator, now: int): bool = l.gpsAt >= 0 and now - l.gpsAt <= sendableS
+pure def gpsCurrent(l: Locator, now: int): bool = l.gpsAt >= 0 and now - l.gpsAt <= sendableMs
 
-pure def networkCurrent(l: Locator, now: int): bool = l.networkAt >= 0 and now - l.networkAt <= networkUnchangedS
+pure def networkCurrent(l: Locator, now: int): bool = l.networkAt >= 0 and now - l.networkAt <= networkUnchangedMs
 
 pure def located(l: Locator, now: int): bool = gpsCurrent(l, now) or networkCurrent(l, now)
 ```
@@ -69,13 +69,13 @@ type Moved = { state: Locator, out: List[Effect] }
 ### What the simulator tries
 
 ```quint
-pure val nowValues = Set(0, 100, 400, 2000, 4000)
-pure val atValues = Set(0, 100, 350)
+pure val nowValues = Set(0, 100000, 400000, 2000000, 4000000)
+pure val takenValues = Set(0, 100000, 350000)
 pure val ticketValues = Set(1, 2, 3)
 pure val lValues = Set(initial)
-  .union(Set({ ...initial, granted: true, clock: 2000, gpsAt: 0 }))
-  .union(Set({ ...initial, granted: true, clock: 100, gpsAt: 100, gpsNext: 400 }))
-  .union(Set({ ...initial, granted: true, clock: 4000, networkAt: 350 }))
+  .union(Set({ ...initial, granted: true, clock: 2000000, gpsAt: 0 }))
+  .union(Set({ ...initial, granted: true, clock: 100000, gpsAt: 100000, gpsNext: 400000 }))
+  .union(Set({ ...initial, granted: true, clock: 4000000, networkAt: 350000 }))
 ```
 
 ### Turning Location for Alpha off, or Android taking the permission away, forgets every fix and answer, and leaves what was being read behind
@@ -101,13 +101,13 @@ pure def canRead(l: Locator, now: int): bool =
 
 pure def read(l: Locator, now: int): Moved =
   val gps = R::ask(l.gps)
-  { state: { ...l, clock: now, gps: gps, gpsNext: now + retryS }, out: List(ReadFix({ ticket: gps.ticket })) }
+  { state: { ...l, clock: now, gps: gps, gpsNext: now + retryMs }, out: List(ReadFix({ ticket: gps.ticket })) }
 
-pure def canFixed(l: Locator, ticket: int, ok: bool, at: int, now: int): bool =
-  R::canAnswer(l.gps, ticket) and now >= l.clock and at <= now and now - at <= reuseS
+pure def canFixed(l: Locator, ticket: int, ok: bool, taken: int, now: int): bool =
+  R::canAnswer(l.gps, ticket) and now >= l.clock and taken <= now and now - taken <= reuseMs
 
-pure def fixed(l: Locator, ticket: int, ok: bool, at: int, now: int): Locator =
-  if (ok) { ...l, clock: now, gps: R::answer(l.gps, true), gpsAt: at, gpsNext: now + reuseS }
+pure def fixed(l: Locator, ticket: int, ok: bool, taken: int, now: int): Locator =
+  if (ok) { ...l, clock: now, gps: R::answer(l.gps, true), gpsAt: taken, gpsNext: now + reuseMs }
   else { ...l, clock: now, gps: R::answer(l.gps, false) }
 ```
 
@@ -129,19 +129,19 @@ pure def canLookUp(l: Locator, now: int, warm: bool): bool =
 
 pure def lookUp(l: Locator, now: int, warm: bool): Moved =
   val network = R::ask(l.network)
-  { state: { ...l, clock: now, network: network, networkNext: now + networkRetryS }, out: List(LookUp({ ticket: network.ticket })) }
+  { state: { ...l, clock: now, network: network, networkNext: now + networkRetryMs }, out: List(LookUp({ ticket: network.ticket })) }
 
-pure def canLooked(l: Locator, ticket: int, ok: bool, at: int, now: int): bool =
-  R::canAnswer(l.network, ticket) and now >= l.clock and at <= now and now - at <= networkUnchangedS
+pure def canLooked(l: Locator, ticket: int, ok: bool, taken: int, now: int): bool =
+  R::canAnswer(l.network, ticket) and now >= l.clock and taken <= now and now - taken <= networkUnchangedMs
 
-pure def looked(l: Locator, ticket: int, ok: bool, at: int, now: int): Locator =
-  if (ok) { ...l, clock: now, network: R::answer(l.network, true), networkAt: at, networkNext: now + networkReuseS }
+pure def looked(l: Locator, ticket: int, ok: bool, taken: int, now: int): Locator =
+  if (ok) { ...l, clock: now, network: R::answer(l.network, true), networkAt: taken, networkNext: now + networkReuseMs }
   else { ...l, clock: now, network: R::answer(l.network, false) }
 
 pure def canConfirm(l: Locator, now: int): bool =
   allowed(l) and now >= l.clock and networkCurrent(l, now) and l.network.status != R::Loading
 
-pure def confirm(l: Locator, now: int): Locator = { ...l, clock: now, networkNext: now + networkReuseS }
+pure def confirm(l: Locator, now: int): Locator = { ...l, clock: now, networkNext: now + networkReuseMs }
 ```
 
 ### A turn carries the location only while the owner allows it, from a screen that is not sensitive, to a peer that declares it, and only a GPS fix at most thirty minutes old or a network answer that still stands
@@ -169,7 +169,7 @@ pure def alwaysNothingIsKeptWithoutLeave(l: Locator): bool =
 
 ```quint
 pure def alwaysReadsBackOff(l: Locator): bool =
-  l.gpsNext <= l.clock + reuseS and l.networkNext <= l.clock + networkReuseS
+  l.gpsNext <= l.clock + reuseMs and l.networkNext <= l.clock + networkReuseMs
     and l.gpsAt <= l.clock and l.networkAt <= l.clock and l.gpsAt >= -1 and l.networkAt >= -1
 ```
 
