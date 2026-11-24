@@ -220,15 +220,16 @@ test('actual pinned client features retain shared voice source unchanged and exc
  const scan='plugins/plugin-native-camera/src/scan-document.ts';
  assert.equal(stamp.sourceFiles[scan],stamp.files[scan],'Scan state is copied from the pinned shared owner without a product patch');
  assert.deepEqual(fs.readFileSync(path.join(source,scan)),fs.readFileSync(path.join('vendor/eliza',scan)));
-assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','utf8')).commit);assert.equal(stamp.projectionVersion,17);
+assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','utf8')).commit);assert.equal(stamp.projectionVersion,18);
  // Alpha inherits the history validator verbatim. Server policy and its
  // dependencies stay exclusively in the SDK.
  const browserCommand='plugins/plugin-browser/src/native-client-command.ts';
  const browserOriginal=fs.readFileSync(path.join('vendor/eliza',browserCommand),'utf8');
  const browserProjected=fs.readFileSync(path.join(source,browserCommand),'utf8');
- const historyMarker='/**\n * The browser tab and document';
- const sharedHistory=browserOriginal.slice(browserOriginal.indexOf(historyMarker),browserOriginal.indexOf('\nconst OPEN_SUBACTIONS = '));
- assert.equal(browserProjected.slice(browserProjected.indexOf(historyMarker)).trimEnd(),sharedHistory.trimEnd());
+ assert.equal(browserProjected,browserOriginal.replace(
+  'from "@elizaos/contracts/client-turn-observation";',
+  'from "../../../packages/contracts/src/client-turn-observation.ts";',
+ ));
  assert.doesNotMatch(browserProjected, /@elizaos\/core|withheldPageReloadRefusal/);
  assert.notEqual(stamp.sourceFiles[browserCommand],stamp.files[browserCommand]);
  // Run plain Node without tsx, aliases or a custom loader and exercise the imported
