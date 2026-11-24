@@ -2,8 +2,10 @@
 
 Settings → Phone on an Alpha image: the SIM, carrier, own number, network,
 roaming and signal of each line, which apps hold the phone and SMS roles,
-and whether the carrier's voicemail is set up. Settings shows the row and
-opens the page; this spec owns the page. Everything comes from one bounded
+and whether the carrier's voicemail is set up. [Settings](../settings/)
+shows the row and opens the page; this spec owns what the page shows. The
+carrier's identifiers for activating a SIM are Settings' own Carrier & SIM
+setup page. Everything comes from one bounded
 read of the image's telephony status and lines, made only while the page is
 in front, kept in memory while it stays there, and never stored, logged or
 given to the agent. The launcher cannot read the IMEI or the SIM serial: those

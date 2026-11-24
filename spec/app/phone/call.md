@@ -1,15 +1,14 @@
-# Ongoing-call bar
+# Call strip
 
-On an Alpha image Android's in-call service holds Telecom's calls and its
-call screen is a separate activity: every Alpha view is "not the call
-screen". The phone reports each call's ID, state and connect time, offers
-Return (bring the call screen to the front) and End, and reports whether a
-call is live and whether it may be an emergency call. The bar sits at the
-top of every view while a call is live, says what the call screen says, and
-goes when the call ends. A ringing call is Android's to present: a heads-up
-or full-screen alert with Answer and Decline, or the call screen as the
-incoming screen, so the bar draws nothing while a call rings. Off the image
-there is no call here, and the bar is never drawn.
+The strip over every view while a call is live, which [Phone](./)'s fact
+that a call is live turns on. Android's in-call service holds the calls and
+its call screen is a separate activity: every Alpha view is "not the call
+screen". The phone reports each call's ID, state and connect time, and
+offers Return, which brings the call screen to the front, and End. The strip
+says what the call screen says and goes when the call ends. A ringing call
+is Android's to present, a heads-up or full-screen alert with Answer and
+Decline, so the strip draws nothing while a call rings. Off an Alpha image
+there is no call here, and the strip is never drawn.
 
 ## Story: See my live call over every view
 
@@ -17,7 +16,7 @@ there is no call here, and the bar is never drawn.
 > what the call screen says, returns me to the call and ends it, so that
 > leaving the call screen never hides a call.
 
-### The bar holds the calls Telecom last reported, the reading's ticket, the call-state reading, and the time it last ticked to
+### The bar holds the calls Telecom last reported, the reading's ticket, and the time it last ticked to
 
 `connectedAt` is the connect time Android reports in milliseconds, 0 until
 the call is active. `shown` is whether the bar shows a live call;
@@ -25,20 +24,18 @@ the call is active. `shown` is whether the bar shows a live call;
 the time the bar last ticked to.
 
 ```quint
-import common.* from "./common"
-
 type CallPhase = Dialing | Ringing | Active | Held
 type LiveCall = { id: str, phase: CallPhase, connectedAt: int }
 type Effect = ReadCalls({ ticket: int }) | ShowCall({ callId: str }) | EndCall({ callId: str })
 type CallBar = {
   calls: List[LiveCall], trusted: bool, generation: int, eligible: bool, ending: str,
-  shown: bool, endedUntil: int, now: int, reading: CallReading
+  shown: bool, endedUntil: int, now: int
 }
 type Moved = { state: CallBar, out: List[Effect] }
 
 pure val initial: CallBar = {
   calls: List(), trusted: true, generation: 0, eligible: false, ending: "",
-  shown: false, endedUntil: 0, now: 0, reading: noReading
+  shown: false, endedUntil: 0, now: 0
 }
 pure val endedHold = 1500
 pure val noCall: LiveCall = { id: "", phase: Dialing, connectedAt: 0 }
@@ -208,19 +205,4 @@ pure def stepEndIsAskedOnce(before: CallBar, via: str, after: CallBar, out: List
   out.some(e => match e { | EndCall(x) => true | _ => false }) implies (via == "endAsked" and before.ending != after.ending)
 
 pure def sometimesAnEndIsWaiting(b: CallBar): bool = b.ending != "" and barPhase(b) == LiveBar
-```
-
-## Story: Know when a call may be an emergency call
-
-> As the owner, I want the phone's own call-state reading to reach Alpha, so
-> that nothing acts over an emergency call (AC-19).
-
-### The bar keeps Telecom's latest call-state reading for the emergency gate
-
-```quint
-pure def callStateReported(b: CallBar, reading: CallReading): CallBar = { ...b, reading: reading }
-
-pure def callHolds(b: CallBar): bool = b.calls.length() > 0 or b.reading.inCall == KnownYes
-
-pure def sometimesAnEmergencyCallIsLive(b: CallBar): bool = emergencyLive(b.reading) and barPhase(b) == LiveBar
 ```

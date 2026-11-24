@@ -1,12 +1,14 @@
 # Agent requests
 
-What the agent may ask of the phone: a call, or a contact added, changed or
-deleted. The agent names a number or a contact by search text; the search
+What the agent may ask of the phone: a call, a text, or a contact added,
+changed or deleted. The agent names a number or a contact by search text; the search
 runs on the phone and the agent never receives the address book. The owner
 sees the exact number, or the contact before and after, on the phone and
 approves each request; nothing happens without that. A call the owner
-approves is handed to the phone's dialer, as in [Phone](../phone/); a contact
-change is written as in [Contacts](./). The agent is told only how its
+approves is handed to the phone's dialer, as in [Phone](../phone/); a text is
+sent once, as in [Sending](../messages/sending.md); a contact change is
+written as in [Contacts](./). A text the agent only drafts is
+[Alpha's suggestion](../messages/composer.md), which never sends. The agent is told only how its
 request ended.
 
 ## Domain
@@ -30,9 +32,9 @@ import read as R from "../../kit/read"
 import review as V from "../../kit/review"
 import attempt as A from "../../kit/attempt"
 
-type Ask = Dial | AddContact | ChangeContact | DeleteContact
+type Ask = Dial | Text | AddContact | ChangeContact | DeleteContact
 type Stage = Quiet | Looking | Choosing | Shown | Acting | Ended
-type Ending = Done | Declined | Withdrawn | NotFound | Unavailable | EmergencyRefused | NotDone | Unsure
+type Ending = Done | Declined | Withdrawn | NotFound | Unavailable | EmergencyRefused | NotWritten | NotDone | Unsure
 type Request = {
   stage: Stage, ask: Ask, matches: int, emergency: bool,
   lookup: R::Read, review: V::Review, attempt: A::Attempt, ending: Ending,
@@ -77,7 +79,7 @@ pure val weight_approve = 3
 
 ## Story: Let the agent ask for a call or a contact change
 
-> As the owner, I want the agent to ask for a call or a change to my
+> As the owner, I want the agent to ask for a call, a text or a change to my
 > contacts by name, have the contact found on my phone, and see exactly
 > what it would do.
 
@@ -95,14 +97,40 @@ pure def finish(ending: Ending, r: Request): Moved =
 
 pure def anew(v: V::Review): V::Review = V::present(V::revise(v))
 
-pure def canAsked(r: Request, ask: Ask, byName: bool, emergency: bool, by: Actor): bool = by == Agent and not(open(r))
+pure def canAsked(r: Request, ask: Ask, byName: bool, emergency: bool, written: bool, pictures: bool, by: Actor): bool = by == Agent and not(open(r))
 
-pure def asked(r: Request, ask: Ask, byName: bool, emergency: bool, by: Actor): Moved =
+pure def reachesANumber(ask: Ask): bool = ask == Dial or ask == Text
+
+pure def asked(r: Request, ask: Ask, byName: bool, emergency: bool, written: bool, pictures: bool, by: Actor): Moved =
   val fresh = { ...r, ask: ask, matches: 0, emergency: ask == Dial and emergency and not(byName) }
   val lookup = R::ask(r.lookup)
   if (fresh.emergency) finish(EmergencyRefused, fresh)
-  else if (ask == AddContact or (ask == Dial and not(byName))) { state: { ...fresh, stage: Shown, matches: 1, review: anew(r.review) }, out: List() }
+  else if (reachesANumber(ask) and not(byName) and not(written)) finish(NotWritten, fresh)
+  else if (ask == Text and pictures) finish(Unavailable, fresh)
+  else if (ask == AddContact or (reachesANumber(ask) and not(byName))) { state: { ...fresh, stage: Shown, matches: 1, review: anew(r.review) }, out: List() }
   else { state: { ...fresh, stage: Looking, lookup: lookup }, out: List(Search({ ticket: lookup.ticket })) }
+```
+
+### A call or a text to a number reaches only a number the owner wrote
+
+The agent may name a number only when the owner wrote that number in the
+request; any other number, such as one taken from a message's body or
+written in place of a contact, ends the request at once, saying the number
+is not one the owner wrote. A number is never searched for.
+
+```quint
+pure def alwaysOnlyANumberIsRefusedAsNotWritten(r: Request): bool =
+  (r.stage == Ended and r.ending == NotWritten) implies reachesANumber(r.ask)
+
+pure def sometimesNotWritten(r: Request): bool = r.stage == Ended and r.ending == NotWritten and r.ask == Text
+```
+
+### A text with pictures the agent asks for answers that it is unavailable
+
+Only the owner sends pictures, from the composer.
+
+```quint
+pure def sometimesPicturesUnavailable(r: Request): bool = r.stage == Ended and r.ending == Unavailable and r.ask == Text and r.lookup.ticket == 0
 ```
 
 ### Only the phone answers the newest search, and the request goes on by how many contacts it found
@@ -132,6 +160,28 @@ pure def canChoose(r: Request, emergency: bool, by: Actor): bool = by == Owner a
 pure def choose(r: Request, emergency: bool, by: Actor): Moved =
   val chosen = { ...r, emergency: r.ask == Dial and emergency }
   if (chosen.emergency) finish(EmergencyRefused, chosen) else { state: { ...chosen, stage: Shown, matches: 1, review: anew(r.review) }, out: List() }
+```
+
+### A change is shown line by line, and a removed value never reads as kept
+
+Each number and address of the contact is a line of its own, never cut
+short, that says in words what the change does to it: Remove, with the value
+struck through; Add, with the value in bold; or Keep. A new name also shows
+"Rename from" with the old name. A change that would leave the contact as it
+is is never offered, and a new contact whose name or number is already in
+Contacts shows that contact first. A name is looked up in at most ten
+contacts, and the review says when more matched.
+
+```quint
+type LineChange = RemoveLine | AddLine | KeepLine
+
+pure val maxMatches = 10
+
+pure def lineChange(before: bool, after: bool): LineChange =
+  if (before and not(after)) RemoveLine else if (after and not(before)) AddLine else KeepLine
+
+pure def lawARemovedValueNeverReadsAsKept(before: bool, after: bool): bool =
+  (before and not(after)) iff lineChange(before, after) == RemoveLine
 ```
 
 ### A request is shown only for exactly one number or contact, and several are only offered
@@ -172,13 +222,16 @@ pure def showAgain(r: Request, by: Actor): Request = { ...r, review: V::present(
 ### Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call
 
 `clear` is Phone's fact that no call which may be an emergency call is
-live. Approving acts once, under the next number.
+live. Approving acts once, under the next number. A text whose whole review
+is showing can also be approved by the owner saying "Send this text" as the
+next thing said in Talk; nothing else is approved by voice, and the phrase
+is never spoken back.
 
 ```quint
-pure def canApprove(r: Request, clear: bool, by: Actor): bool =
-  by == Owner and r.stage == Shown and V::canConfirm(r.review) and clear
+pure def canApprove(r: Request, clear: bool, spoken: bool, by: Actor): bool =
+  by == Owner and r.stage == Shown and V::canConfirm(r.review) and clear and (spoken implies r.ask == Text)
 
-pure def approve(r: Request, clear: bool, by: Actor): Moved =
+pure def approve(r: Request, clear: bool, spoken: bool, by: Actor): Moved =
   val attempt = A::dispatch(A::record(A::plan(r.attempt.id + 1)))
   { state: { ...r, stage: Acting, review: V::confirm(r.review), attempt: attempt }, out: acting(attempt.id, r.ask) }
 ```
@@ -270,5 +323,6 @@ pure val fair_answerLost = "weak"
 
 ```quint
 pure def sometimesDone(r: Request): bool = r.ending == Done and r.ask == Dial
+pure def sometimesTextSent(r: Request): bool = r.ending == Done and r.ask == Text and r.lookup.status == R::Loaded
 pure def sometimesUnknown(r: Request): bool = r.ending == Unsure and r.ask == ChangeContact
 ```

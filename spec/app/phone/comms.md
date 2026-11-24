@@ -1,6 +1,7 @@
-# Agentic comms
+# Talking with Alpha in Phone, Messages and Contacts
 
-The AP-16 design ("split stage") for Phone, Contacts and Messages: one
+The split stage of [Phone](./), [Messages](../messages/) and
+[Contacts](../contacts/): one
 bottom bar that addresses the person on screen or Alpha, a stage that lays
 the app's view out above the conversation sheet instead of covering it,
 sheet heights closed, open and full, End never covered, and at most one
@@ -25,7 +26,7 @@ survive a restart and a lost permission without executing anything (AC-30).
 is a new ring.
 
 ```quint
-import common.* from "./common"
+type Actor = Owner | Agent | Device
 
 type CommsApp = PhoneApp | MessagesApp | ContactsApp
 type Subject = ListSubject | ThreadSubject | RecentsSubject | KeypadSubject | CallSubject | ContactSubject
@@ -36,16 +37,19 @@ type ProposalKind = CallProposal | ScreenProposal | OtherProposal
 type Proposal = NoProposal | Proposed({ proposalId: str, kind: ProposalKind, acts: bool, ring: str, live: bool })
 type Fate = Replaced | Done | Declined | Retired
 type PastProposal = { pastId: str, fate: Fate }
+type Request = { about: str, request: str }
 type Comms = {
   app: CommsApp, subject: Subject, key: str, target: Target, height: Height, voice: bool,
   stage: List[StageEntry], callLive: bool, emergency: bool, ring: str,
-  proposal: Proposal, past: List[PastProposal], briefed: str, approved: int
+  proposal: Proposal, past: List[PastProposal], briefed: str, approved: int,
+  requests: List[Request]
 }
 
 pure val initial: Comms = {
   app: MessagesApp, subject: ListSubject, key: "messages:list:", target: PersonTarget, height: SheetClosed, voice: false,
   stage: List(), callLive: false, emergency: false, ring: "",
-  proposal: NoProposal, past: List(), briefed: "", approved: 0
+  proposal: NoProposal, past: List(), briefed: "", approved: 0,
+  requests: List()
 }
 pure def openId(p: Proposal): str = match p { | Proposed(x) => x.proposalId | NoProposal => "" }
 pure def openActs(p: Proposal): bool = match p { | Proposed(x) => x.acts | NoProposal => false }
@@ -89,11 +93,11 @@ pure def barField(c: Comms): Field =
   else if (c.subject == RecentsSubject or c.subject == KeypadSubject) CallOrAsk
   else SearchOrAsk
 
-pure def canAlphaOpened(c: Comms, by: Actor): bool = ownerOnly(by) and c.height == SheetClosed
+pure def canAlphaOpened(c: Comms, by: Actor): bool = by == Owner and c.height == SheetClosed
 
 pure def alphaOpened(c: Comms, by: Actor): Comms = { ...c, height: SheetOpen, target: AlphaTarget }
 
-pure def canChatClosed(c: Comms, by: Actor): bool = by != Alpha and c.height != SheetClosed
+pure def canChatClosed(c: Comms, by: Actor): bool = by != Agent and c.height != SheetClosed
 
 pure def chatClosed(c: Comms, by: Actor): Comms = { ...c, height: SheetClosed, target: PersonTarget, stage: List(), voice: false }
 
@@ -132,7 +136,7 @@ pure def subjectShown(c: Comms, app: CommsApp, subject: Subject, key: str, by: A
     stage: if (shifted) c.stage.append({ app: c.app, subject: c.subject, key: c.key }) else c.stage,
     height: if (c.emergency and c.height == SheetFull) SheetOpen else c.height }
 
-pure def canStageReturned(c: Comms, by: Actor): bool = by != Alpha and c.stage.length() > 0
+pure def canStageReturned(c: Comms, by: Actor): bool = by != Agent and c.stage.length() > 0
 
 pure def stageReturned(c: Comms, by: Actor): Comms =
   val entry = c.stage.nthOr(c.stage.length() - 1, { app: c.app, subject: c.subject, key: c.key })
@@ -153,7 +157,7 @@ Full shows the live strip: avatar, name and app, Mute and End during a call,
 Send when a draft is waiting; tapping it or dragging down returns to open.
 
 ```quint
-pure def canHeightChanged(c: Comms, height: Height, by: Actor): bool = by != Alpha and height != SheetClosed and c.height != SheetClosed
+pure def canHeightChanged(c: Comms, height: Height, by: Actor): bool = by != Agent and height != SheetClosed and c.height != SheetClosed
 
 pure def heightChanged(c: Comms, height: Height, by: Actor): Comms = { ...c, height: if (c.emergency and height == SheetFull) SheetOpen else height }
 
@@ -244,7 +248,7 @@ the number (AC-20).
 
 ```quint
 pure def canProposed(c: Comms, proposalId: str, kind: ProposalKind, acts: bool, ring: str, by: Actor): bool =
-  by == Alpha and proposalId != "" and (proposalId != openId(c.proposal) or not(openLive(c.proposal))) and not(wasProposed(c.past, proposalId))
+  by == Agent and proposalId != "" and (proposalId != openId(c.proposal) or not(openLive(c.proposal))) and not(wasProposed(c.past, proposalId))
     and (kind == ScreenProposal implies (ring != "" and ring == c.ring)) and (kind != ScreenProposal implies ring == "")
 
 pure def proposed(c: Comms, proposalId: str, kind: ProposalKind, acts: bool, ring: str, by: Actor): Comms =
@@ -268,13 +272,13 @@ again.
 
 ```quint
 pure def canProposalApproved(c: Comms, proposalId: str, by: Actor): bool =
-  ownerOnly(by) and proposalId != "" and proposalId == openId(c.proposal) and openLive(c.proposal) and not(c.emergency and openActs(c.proposal))
+  by == Owner and proposalId != "" and proposalId == openId(c.proposal) and openLive(c.proposal) and not(c.emergency and openActs(c.proposal))
     and (openKind(c.proposal) == ScreenProposal implies c.ring != "")
 
 pure def proposalApproved(c: Comms, proposalId: str, by: Actor): Comms =
   { ...c, proposal: NoProposal, past: retire(c.proposal, Done, c.past), approved: c.approved + 1 }
 
-pure def canProposalDeclined(c: Comms, proposalId: str, by: Actor): bool = ownerOnly(by) and proposalId != "" and proposalId == openId(c.proposal)
+pure def canProposalDeclined(c: Comms, proposalId: str, by: Actor): bool = by == Owner and proposalId != "" and proposalId == openId(c.proposal)
 
 pure def proposalDeclined(c: Comms, proposalId: str, by: Actor): Comms = { ...c, proposal: NoProposal, past: retire(c.proposal, Declined, c.past) }
 
@@ -330,4 +334,55 @@ pure def briefingShown(c: Comms, key: str, by: Actor): Comms = { ...c, briefed: 
 pure def stepABriefingIsNeverRepeated(before: Comms, via: str, after: Comms): bool = via == "briefingShown" implies before.briefed != after.briefed
 
 pure def sometimesBriefed(c: Comms): bool = c.briefed != "" and c.briefed == c.key and c.height != SheetClosed
+```
+
+## Story: Keep what I was asking Alpha
+
+> As the owner, I want my unsent request to Alpha about a conversation or
+> contact kept apart from my text to the person, so that swapping the bar's
+> target never clears or merges them (AC-10).
+
+### Each subject keeps one request to Alpha, separate from its draft
+
+`about` is the key of the screen, such as a conversation or a contact.
+The text to the person is the [composer](../messages/composer.md)'s draft;
+the request is kept here, across a restart. Sending the request to Alpha
+clears it, and nothing in it ever reaches the SMS provider.
+
+```quint
+pure val aboutValues = Set("messages:thread:1", "contacts:contact:7")
+pure val requestValues = Set("", "who is this")
+
+pure def canRequestTyped(c: Comms, about: str, request: str, by: Actor): bool = by == Owner and about != ""
+
+pure def requestTyped(c: Comms, about: str, request: str, by: Actor): Comms =
+  { ...c, requests: c.requests.select(r => r.about != about).concat(if (request == "") List() else List({ about: about, request: request })) }
+
+pure def canRequestSent(c: Comms, about: str, by: Actor): bool = by == Owner and c.requests.some(r => r.about == about)
+
+pure def requestSent(c: Comms, about: str, by: Actor): Comms = { ...c, requests: c.requests.select(r => r.about != about) }
+
+pure def alwaysOneRequestPerSubject(c: Comms): bool =
+  c.requests.foldl(true, (ok, r) => ok and r.request != "" and c.requests.select(x => x.about == r.about).length() == 1)
+
+pure def sometimesARequestKeptBesideTheStage(c: Comms): bool = c.requests.length() > 0 and c.height == SheetClosed
+```
+
+### What was written signed out becomes the account's that signs in, only where that account kept nothing
+
+The stage and the requests are kept under the account signed in. What was
+kept while signed out moves to the first account that signs in when that
+account has nothing kept, and is then removed from the phone's own place,
+so a later account never receives it. An account's own kept state is never
+replaced; a damaged record is never moved. Nothing is sent or proposed by
+the move.
+
+```quint
+type Kept = NothingKept | KeptState | KeptDamaged
+
+pure def adoptsDeviceSlot(device: Kept, account: Kept): bool = device == KeptState and account == NothingKept
+
+pure def lawAnAccountsOwnStateIsNeverReplaced(device: Kept, account: Kept): bool = account != NothingKept implies not(adoptsDeviceSlot(device, account))
+
+pure def lawADamagedRecordIsNeverMoved(account: Kept): bool = not(adoptsDeviceSlot(KeptDamaged, account))
 ```

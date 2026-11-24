@@ -9,6 +9,9 @@ pause voice during a call or to refuse a write during a call that may be an
 emergency call.
 
 - [Voicemail](./voicemail.md): the voicemail list, one open voicemail, its audio and its on-phone transcript
+- [Call strip](./call.md): the strip over every view while a call is live, Return and End
+- [Talking with Alpha](./comms.md): the one bar of Phone, Messages and Contacts, the stage above the conversation, End and Alpha's proposals
+- [Phone details](./details.md): Settings → Phone: each line's SIM, carrier, number and network, and the role holders
 - [Agent requests](../contacts/agent.md): calls and contact changes the agent proposes, which the owner approves on the phone
 
 ## Domain
@@ -30,7 +33,7 @@ type Typed = Blank | Partial | Dialable | Emergency
 type Telecom = NoCall | OrdinaryCall | MaybeEmergencyCall | CallUnknown
 type Phone = {
   front: bool, tab: Tab,
-  log: P::Permission, recents: R::Read, rows: int, chip: Filter,
+  log: P::Permission, recents: R::Read, rows: int, chip: Filter, sought: bool,
   digits: int, typed: Typed, lookup: R::Read, matched: bool,
   dial: R::Read, dialled: bool, failedDial: bool,
   telecom: Telecom, carrier: bool, missed: int,
@@ -38,7 +41,7 @@ type Phone = {
 
 pure val initial: Phone = {
   front: false, tab: Recents,
-  log: P::unasked, recents: R::unread, rows: 0, chip: AllCalls,
+  log: P::unasked, recents: R::unread, rows: 0, chip: AllCalls, sought: false,
   digits: 0, typed: Blank, lookup: R::unread, matched: false,
   dial: R::unread, dialled: false, failedDial: false,
   telecom: CallUnknown, carrier: false, missed: 0,
@@ -152,6 +155,21 @@ pure def historyFailed(s: Phone): bool = onRecents(s) and s.recents.status == R:
 pure def logNeeded(s: Phone): bool = onRecents(s) and not(P::allows(s.log))
 ```
 
+### Typing in the bar, or the agent's filter, searches the log afresh
+
+Digits match numbers and letters match names, on the phone. Clearing the
+search, or the agent's filter chip, lists the log again.
+
+```quint
+pure def canSearch(s: Phone, typed: bool): bool = onRecents(s) and P::allows(s.log) and (typed or s.sought)
+
+pure def search(s: Phone, typed: bool): Moved = readLog(s.chip, { ...s, sought: typed, rows: 0 })
+
+pure def noMatchingCalls(s: Phone): bool = noCalls(s) and s.sought
+
+pure def sometimesNoMatchingCalls(s: Phone): bool = noMatchingCalls(s) and s.chip == AllCalls
+```
+
 ### Recent calls are held only while Recents is showing, from a read that was answered, with access
 
 ```quint
@@ -231,6 +249,23 @@ pure def canTakeBack(s: Phone, typed: Typed): bool =
   s.front and s.tab == Keypad and s.digits > 0 and ((s.digits == 1) == (typed == Blank))
 
 pure def takeBack(s: Phone, typed: Typed): Moved = judged(s.digits - 1, typed, s)
+```
+
+### A number handed to Phone opens the keypad with it filled in, and never dials
+
+Contacts' Call, a voicemail's Call back, Messages' Call and Home hand Phone
+a number, also before Phone shows. The phone judges it and looks it up as
+if it had been typed.
+
+```quint
+pure def canPrefill(s: Phone, digits: int, typed: Typed): bool = 0 < digits and digits <= maxDigits and typed != Blank
+
+pure def prefill(s: Phone, digits: int, typed: Typed): Moved = judged(digits, typed, { ...s, tab: Keypad, rows: 0 })
+
+pure def stepAHandedNumberNeverDials(before: Phone, via: str, after: Phone, out: List[Effect]): bool =
+  via == "prefill" implies (not(handoffIn(out)) and after.dialled == before.dialled)
+
+pure def sometimesAHandedNumberWaits(s: Phone): bool = s.tab == Keypad and s.digits > 0 and not(s.front) and s.lookup.status == R::Loading
 ```
 
 ### Only the newest lookup names a contact
