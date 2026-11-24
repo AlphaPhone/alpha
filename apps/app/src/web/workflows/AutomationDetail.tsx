@@ -1,7 +1,7 @@
 // spec/workflows/agentSchedules.md, "Story: Answer a scheduled item from Workflows"; spec/workflows/agentSchedules.md, "Story: Save and run a prompt my agent sends on a schedule"; spec/workflows/automations.md, "A change is held before it is sent, one per owner, and needs the row it names"
 import { useState } from "react";
 import type { Row } from "../../../gen/workflows__automations.ts";
-import { historyNeedsReason, historyWord, verbOffered, type TaskStatus, type Verb } from "../../../gen/workflows__agentSchedules.ts";
+import { historyNeedsReason, historyWord, reminderVerbOffered, verbOffered, type TaskStatus, type Verb } from "../../../gen/workflows__agentSchedules.ts";
 import type { PromptRunLine, Report } from "../../workflows/automations.vibe";
 import { Button, Input, Label, Switch, Textarea } from "../components/ui/index.ts";
 import { ReviewDialog } from "./ReviewDialog.tsx";
@@ -49,8 +49,10 @@ export function AutomationDetail({ row, canChange, history, report, onSwitch, on
   const [time, setTime] = useState("");
   const status = taskStatus[row.status] ?? "TaskOther";
   const schedule = row.kind === "ScheduleRow";
-  const switchable = row.kind === "PromptRow" || row.kind === "ReminderRow" || row.kind === "RoutineRow";
-  const verbs = schedule ? (["Fire", "Edit", "Snooze", "Complete", "Dismiss", "Reopen"] as const).filter((v) => verbOffered(status, v)) : [];
+  const switchable = row.kind === "PromptRow" || row.kind === "RoutineRow";
+  // spec/workflows/agentSchedules.md: a reminder is a scheduled item that offers Snooze, Complete and Dismiss, then Reopen.
+  const verbs = schedule ? (["Fire", "Edit", "Snooze", "Complete", "Dismiss", "Reopen"] as const).filter((v) => verbOffered(status, v))
+    : row.kind === "ReminderRow" ? (["Snooze", "Complete", "Dismiss", "Reopen"] as const).filter((v) => reminderVerbOffered(status, v)) : [];
   const confirm = () => {
     const chosen = pending;
     setPending(undefined);
@@ -89,9 +91,8 @@ export function AutomationDetail({ row, canChange, history, report, onSwitch, on
           <Button key={verb} size="lg" variant={verb === "Fire" || verb === "Reopen" ? "primary" : "outline"} disabled={!canChange}
             onClick={() => setPending(verb === "Edit" ? { kind: "edit" } : { kind: "verb", verb })}>{verbWords[verb]}</Button>
         ))}
-        {row.kind === "ReminderRow" && row.target !== "" && <Button size="lg" variant="outline" disabled={!canChange} onClick={() => setPending({ kind: "snooze" })}>Snooze 10 minutes</Button>}
-        {(row.kind === "PromptRow" || row.kind === "RoutineRow" || row.kind === "ReminderRow") && (
-          <Button size="lg" variant="ghost" disabled={!canChange} onClick={() => setPending({ kind: "delete" })}>{row.kind === "ReminderRow" ? "Cancel reminder" : "Delete"}</Button>
+        {(row.kind === "PromptRow" || row.kind === "RoutineRow") && (
+          <Button size="lg" variant="ghost" disabled={!canChange} onClick={() => setPending({ kind: "delete" })}>Delete</Button>
         )}
       </div>
       {history !== undefined && history.length > 0 && (
@@ -104,7 +105,7 @@ export function AutomationDetail({ row, canChange, history, report, onSwitch, on
           ))}
         </ol>
       )}
-      <ReviewDialog open={pending !== undefined} confirm={pending?.kind === "delete" ? (row.kind === "ReminderRow" ? "Cancel reminder" : "Delete") : pending?.kind === "edit" ? "Save" : "Confirm"}
+      <ReviewDialog open={pending !== undefined} confirm={pending?.kind === "delete" ? "Delete" : pending?.kind === "edit" ? "Save" : "Confirm"}
         destructive={pending?.kind === "delete"} disabled={pending?.kind === "edit" && instructions.trim() === ""}
         title={pending?.kind === "switch" ? (pending.on ? `Turn on ${name}?` : `Turn off ${name}?`) : pending?.kind === "run" ? `Run ${name} now?`
           : pending?.kind === "delete" ? `Delete ${name}?` : pending?.kind === "edit" ? "Edit schedule" : pending?.kind === "snooze" ? `Snooze until ${when(Date.now() + 600000)}` : name}

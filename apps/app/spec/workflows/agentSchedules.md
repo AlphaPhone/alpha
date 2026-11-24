@@ -1,7 +1,7 @@
 # Prompts and scheduled items
 
 The agent's saved prompts (`/api/triggers`, `@elizaos/agent` triggers) and its owner-visible
-scheduled tasks (`/api/scheduled-tasks`), as the Workflows list offers and confirms them. The agent
+scheduled tasks (`/api/scheduled-tasks`), reminders among them, as the Workflows list offers and confirms them. The agent
 owns the trigger and the task; Alpha decides what it offers, what it sends and when the agent's
 answer confirms it (PRD AP-07).
 
@@ -124,6 +124,22 @@ pure def lawAnEndedItemOffersOnlyReopen(s: TaskStatus, v: Verb): bool = (taskEnd
 pure def lawAcknowledgeIsNeverOffered(s: TaskStatus): bool = not(verbOffered(s, Acknowledge))
 ```
 
+### An agent reminder is a scheduled item of the reminder kind, listed once as a reminder that offers Snooze, Complete and Dismiss
+
+The agent keeps the reminders the owner asked for as owner-visible scheduled tasks of kind
+`personal-assistant.reminder` (no reminders route of its own), so they are read with the scheduled
+items, listed as reminders and answered through the same task verbs: Snooze 10 minutes, Complete and
+Dismiss while one has not ended, Reopen once it has. A reminder offers no Run now and no schedule edit.
+
+```quint
+pure val reminderKind = "personal-assistant.reminder"
+pure def reminderTask(kind: str): bool = kind == reminderKind
+pure def reminderVerbOffered(s: TaskStatus, v: Verb): bool = verbOffered(s, v) and Set(Snooze, Complete, Dismiss, Reopen).contains(v)
+pure val taskKindValues = Set("personal-assistant.reminder", "personal-assistant.checkin", "")
+pure def lawOnlyTheReminderKindIsAReminder(taskKind: str): bool = reminderTask(taskKind) iff taskKind == "personal-assistant.reminder"
+pure def lawAReminderIsNeverRunOrEdited(s: TaskStatus): bool = not(reminderVerbOffered(s, Fire)) and not(reminderVerbOffered(s, Edit))
+```
+
 ### A manual item that has not ended reads paused, and only a recorded deferral reads snoozed
 
 An item is snoozed only when it is scheduled and its decision log says it was snoozed until its
@@ -188,8 +204,6 @@ pure def lawAnEditWithoutInstructionsIsNeverConfirmed(savedInstructions: str, se
 ```
 
 ### A routine or goal is listed under its surface, and an archived one is not
-
-Reminder-surface definitions come from the reminders list; their shared key drops the overlap.
 
 ```quint
 type DefinitionRow = GoalRow | RoutineDefinition | NotListed

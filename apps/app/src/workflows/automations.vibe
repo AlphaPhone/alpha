@@ -1,14 +1,14 @@
 // spec/workflows/automations.md, "Story: See all my automations even when one source fails"; spec/workflows/automations.md, "Story: Change an automation once, even when the answer is lost"; spec/workflows/agentSchedules.md, "Story: Save and run a prompt my agent sends on a schedule"; spec/workflows/agentSchedules.md, "Story: Answer a scheduled item from Workflows"
 import { type Answer, type ChangeKind, type Row, type RowKind, type Source, Machine, answerOfStatus, readOf, stored } from "../../gen/workflows__automations.effect.vibe"
 import {
-  type Draft, type TaskStatus, type Verb, definitionRow, draftProblem, editConfirmed, enableOutcome, fireOutcome, promptEditable, runNowOutcome,
-  saveConfirmed, snoozeConfirmed, snoozeUntil, taskEnded, taskOn, taskSnoozed,
+  type Draft, type TaskStatus, type Verb, definitionRow, draftProblem, editConfirmed, enableOutcome, fireOutcome, promptEditable, reminderTask,
+  reminderVerbOffered, runNowOutcome, saveConfirmed, snoozeConfirmed, snoozeUntil, taskEnded, taskOn, taskSnoozed,
 } from "../../gen/workflows__agentSchedules.effect.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 import { AgentRefused, AgentUnavailable, NotSent, Unrecognized, WorkflowApi, decoded } from "./api.vibe"
 import { deviceZone, instant, sameLocalDay } from "./ids.ts"
 import {
-  DefinitionList, DefinitionReply, Deleted, ExecuteReply, FireReply, ReminderList, ScheduledTaskList, TriggerList,
+  DefinitionList, DefinitionReply, Deleted, ExecuteReply, FireReply, ScheduledTaskList, TriggerList,
   type ScheduledTaskRecord, type TaskTrigger, TaskReply, TriggerReply, TriggerRuns,
 } from "./wire.schema.vibe"
 
@@ -45,13 +45,13 @@ export interface PromptRunLine { readonly at: number; readonly status: string; r
 export service Automations {
   /** Read every source on its own, for the agent's current owner. */
   refresh(): void!!
-  /** Turn a prompt, reminder or routine on or off. */
+  /** Turn a prompt or routine on or off. */
   setEnabled(key: string, on: boolean): Report!!
-  /** Delete a prompt, reminder or routine, or cancel a reminder. */
+  /** Delete a prompt or routine. */
   remove(key: string): Report!!
   /** Run a prompt or fire a scheduled item now. */
   run(key: string): Report!!
-  /** Answer a scheduled item with one of its offered verbs. */
+  /** Answer a scheduled item or reminder with one of its offered verbs. */
   verb(key: string, verb: Verb): Report!!
   /** Snooze a scheduled item or a reminder by ten minutes. */
   snooze(key: string): Report!!
@@ -69,7 +69,7 @@ export service Automations {
   allowAnother(id: number): void!!
 }
 
-const sources: ReadonlyArray<Source> = ["AutomationSource", "ScheduleSource", "ReminderSource", "DefinitionSource"]
+const sources: ReadonlyArray<Source> = ["AutomationSource", "ScheduleSource", "DefinitionSource"]
 
 function statusOf(status: string): TaskStatus {
   switch (status) {
@@ -83,6 +83,11 @@ function statusOf(status: string): TaskStatus {
     case "failed": return "TaskFailed"
     default: return "TaskOther"
   }
+}
+
+/** A listed item's status as the task verbs read it: a snoozed or paused item is still scheduled. */
+function taskStatusOf(status: string): TaskStatus {
+  return status === "snoozed" || status === "paused" ? "TaskScheduled" : statusOf(status)
 }
 
 /** The schedule code a row carries; the screen words it. */
@@ -104,10 +109,12 @@ function scheduledRow(task: ScheduledTaskRecord): Row | undefined {
   const status = statusOf(task.state.status)
   const snoozed = taskSnoozed(status, instant(task.state.firedAt) > 0, task.state.lastDecisionLog === `snoozed until ${task.state.firedAt} (ladder reset)`)
   const manual = task.trigger.kind === "manual"
+  // spec/workflows/agentSchedules.md: the agent's reminders are scheduled items of the reminder kind, listed as reminders.
+  const reminder = reminderTask(task.kind ?? "")
   return {
-    key: `scheduled:${task.taskId}`, id: task.taskId, target: task.taskId, kind: "ScheduleRow",
+    key: `scheduled:${task.taskId}`, id: task.taskId, target: task.taskId, kind: reminder ? "ReminderRow" : "ScheduleRow",
     enabled: taskOn(manual, status), status: snoozed ? "snoozed" : manual && !taskEnded(status) ? "paused" : task.state.status,
-    title: task.metadata?.recordKey ?? task.kind ?? "", description: task.promptInstructions ?? "",
+    title: reminder ? task.promptInstructions ?? "" : task.metadata?.recordKey ?? task.kind ?? "", description: reminder ? "" : task.promptInstructions ?? "",
     schedule: snoozed ? `${scheduleCode(task.trigger)}|snoozed:${task.state.firedAt ?? ""}` : scheduleCode(task.trigger), system: false,
   }
 }
@@ -162,15 +169,6 @@ export const automations = Layer.provideMerge(Layer.effect(Automations, effect {
       case "ScheduleSource": {
         const list = try decoded(ScheduledTaskList, "/api/scheduled-tasks", try agent.request("GET", "/api/scheduled-tasks?ownerVisibleOnly=1"))
         return { rows: list.tasks.flatMap((t) => { const row = scheduledRow(t); return row === undefined ? [] : [row] }), partial: false }
-      }
-      case "ReminderSource": {
-        const list = try decoded(ReminderList, "/api/lifeops/reminders", try agent.request("GET", "/api/lifeops/reminders"))
-        const rows: Row[] = list.reminders.map(({ definition, occurrence }) => ({
-          key: `reminder:${definition.id}`, id: definition.id, target: occurrence?.id ?? "", kind: "ReminderRow", enabled: definition.status === "active",
-          status: occurrence?.status ?? definition.status ?? "", title: definition.title ?? "", description: definition.description ?? "",
-          schedule: definition.cadence?.kind === "once" ? `once:${occurrence?.dueAt ?? definition.cadence.dueAt ?? ""}` : `routine:${definition.cadence?.kind ?? ""}`, system: false,
-        }))
-        return { rows, partial: false }
       }
       case "DefinitionSource": {
         const list = try decoded(DefinitionList, "/api/lifeops/definitions", try agent.request("GET", "/api/lifeops/definitions"))
@@ -270,6 +268,7 @@ export const automations = Layer.provideMerge(Layer.effect(Automations, effect {
     effect setEnabled(key: string, on: boolean) {
       const row = try rowOf(key)
       if (row === undefined) return { answer: "refused" } satisfies Report
+      if (row.kind !== "PromptRow" && row.kind !== "RoutineRow") return { answer: "refused" } satisfies Report
       return try settle("EnableChange", key, on, effect {
         if (row.kind === "PromptRow") return try enablePrompt(row.target, on)
         const status = on ? "active" : "paused"
@@ -278,13 +277,12 @@ export const automations = Layer.provideMerge(Layer.effect(Automations, effect {
     },
     effect remove(key: string) {
       const row = try rowOf(key)
-      if (row === undefined) return { answer: "refused" } satisfies Report
+      if (row === undefined || (row.kind !== "PromptRow" && row.kind !== "RoutineRow")) return { answer: "refused" } satisfies Report
       return try settle("DeleteChange", key, false, effect {
         if (row.kind === "PromptRow") {
           const path = `/api/triggers/${row.target}`
           return (try decoded(Deleted, path, try agent.request("DELETE", path))).ok === true ? reportOf("AnswerApplied") : reportOf("AnswerUnknown", "not-confirmed")
         }
-        if (row.kind === "ReminderRow" && row.schedule.startsWith("once:")) return try setDefinition(row.id, { status: "archived" }, (saved) => saved === "archived")
         const path = `/api/lifeops/definitions/${row.id}`
         return (try decoded(Deleted, path, try agent.request("DELETE", path))).deleted === true ? reportOf("AnswerApplied") : reportOf("AnswerUnknown", "not-confirmed")
       })
@@ -302,19 +300,15 @@ export const automations = Layer.provideMerge(Layer.effect(Automations, effect {
     },
     effect verb(key: string, verb: Verb) {
       const row = try rowOf(key)
-      if (row === undefined || row.kind !== "ScheduleRow") return { answer: "refused" } satisfies Report
+      if (row === undefined || (row.kind !== "ScheduleRow" && row.kind !== "ReminderRow")) return { answer: "refused" } satisfies Report
+      if (row.kind === "ReminderRow" && !reminderVerbOffered(taskStatusOf(row.status), verb)) return { answer: "refused" } satisfies Report
       return try settle("VerbChange", key, false, taskVerb(row.id, verb, {}))
     },
     effect snooze(key: string) {
       const row = try rowOf(key)
-      if (row === undefined) return { answer: "refused" } satisfies Report
+      if (row === undefined || (row.kind !== "ScheduleRow" && row.kind !== "ReminderRow")) return { answer: "refused" } satisfies Report
       const now = try Clock.currentTimeMillis
       return try settle("SnoozeChange", key, false, effect {
-        if (row.kind === "ReminderRow") {
-          const path = `/api/lifeops/occurrences/${row.target}/snooze`
-          try agent.request("POST", path, { minutes: 10 })
-          return reportOf("AnswerApplied")
-        }
         const [, snoozedPart] = row.schedule.split("|snoozed:")
         const snoozedUntil = instant(snoozedPart)
         const until = snoozeUntil(row.status === "snoozed" || row.status === "scheduled", nextCronAt(row.schedule, now), now, snoozedUntil, sameLocalDay(snoozedUntil, nextCronAt(row.schedule, now), deviceZone()))

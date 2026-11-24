@@ -30,14 +30,19 @@ const scheduled: Row = {
   description: "", schedule: "cron:30 8 * * *|UTC|snoozed:2026-11-22T08:40:00.000Z", system: false,
 };
 
-/** Every source listed, a prompt on and a snoozed scheduled item. */
+const reminder: Row = {
+  key: "scheduled:r1", id: "r1", target: "r1", kind: "ReminderRow", enabled: true, status: "scheduled", title: "Call the dentist",
+  description: "", schedule: "once:2026-11-22T15:00:00.000Z", system: false,
+};
+
+/** Every source listed, a prompt on, a snoozed scheduled item and a reminder the agent keeps. */
 export const listed: Automations = {
-  ...automationsInitial, owner: "owner", automations: "Listed", schedules: "Listed", reminders: "Listed", definitions: "Listed", rows: [prompt, scheduled],
+  ...automationsInitial, owner: "owner", automations: "Listed", schedules: "Listed", definitions: "Listed", rows: [prompt, scheduled, reminder],
 };
 
 /** One source failed, and a change whose answer was lost is held. */
 export const heldUnknown: Automations = {
-  ...listed, reminders: "RefreshFailed", answer: "AnswerUnknown", minted: 1,
+  ...listed, definitions: "RefreshFailed", answer: "AnswerUnknown", minted: 1,
   held: [{ owner: "owner", id: 1, kind: "RunChange", key: "a1", target: false }],
 };
 

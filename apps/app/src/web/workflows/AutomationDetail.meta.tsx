@@ -14,5 +14,6 @@ export const meta: ComponentMeta<AutomationDetailProps> = {
     Held: { canChange: false },
     ScheduledItem: { row: listed.rows[1] },
     EndedItem: { row: endedItem },
+    Reminder: { row: listed.rows[2] },
   },
 };

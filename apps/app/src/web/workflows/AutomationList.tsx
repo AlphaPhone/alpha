@@ -19,7 +19,7 @@ export interface AutomationListProps {
 
 const icons: Record<RowKind, typeof Workflow> = { WorkflowRow: Workflow, PromptRow: MessageSquareText, ScheduleRow: CalendarClock, ReminderRow: Bell, RoutineRow: Repeat };
 
-const sourceNames = { automations: "Automations", schedules: "Scheduled items", reminders: "Agent reminders", definitions: "Routines and goals" } as const;
+const sourceNames = { automations: "Automations", schedules: "Scheduled items and reminders", definitions: "Routines and goals" } as const;
 
 function note(name: string, read: Read): string | undefined {
   switch (read) {
@@ -43,7 +43,7 @@ function title(row: Row): string {
 export function AutomationList({ list, waiting = [], canAllowAnother, onOpen, onAllowAnother }: AutomationListProps) {
   const notes = [
     note(sourceNames.automations, list.automations), note(sourceNames.schedules, list.schedules),
-    note(sourceNames.reminders, list.reminders), note(sourceNames.definitions, list.definitions),
+    note(sourceNames.definitions, list.definitions),
     list.partial ? "Some workflow data or run history couldn’t refresh. Open the workflow to check it before running." : undefined,
   ].filter((text): text is string => text !== undefined);
   const held = list.held.find((h) => h.owner === list.owner);

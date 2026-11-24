@@ -46,9 +46,6 @@ export schema LifeDefinition {
   cadence?: { kind?: string; dueAt?: string }
 }
 
-/** `GET /api/lifeops/reminders`. */
-export schema ReminderList { reminders: ReadonlyArray<{ definition: LifeDefinition; occurrence?: { id: string; dueAt?: string; status?: string } }> }
-
 /** `GET /api/lifeops/definitions`. */
 export schema DefinitionList { definitions: ReadonlyArray<{ definition: LifeDefinition }> }
 

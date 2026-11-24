@@ -147,7 +147,6 @@
           "paths": [
             "/api/triggers",
             "/api/lifeops/definitions",
-            "/api/lifeops/reminders",
             "/api/lifeops/scheduled-tasks?ownerVisibleOnly=1",
             "/api/lifeops/scheduled-tasks/{id}",
             "/api/triggers/{id}",
@@ -161,7 +160,6 @@
           "paths": [
             "/api/lifeops/definitions",
             "/api/triggers",
-            "/api/lifeops/occurrences/{id}/snooze",
             "/api/triggers/{id}/execute",
             "/api/lifeops/scheduled-tasks/{id}/snooze",
             "/api/lifeops/scheduled-tasks/{id}/skip",
