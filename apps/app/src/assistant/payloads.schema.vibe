@@ -147,7 +147,7 @@ export schema ViewHandoff {
   readonly viewPath?: string
   readonly viewType?: string
   readonly label?: string
-  readonly subview?: Schema.Union([Schema.Boolean, Schema.String])
+  readonly subview?: boolean | string
   readonly completedActionDelivered?: boolean
   readonly completedActionHandoffId?: string
   readonly navigationPrepared: true
