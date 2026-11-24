@@ -10,6 +10,7 @@ import * as Reply from "../../gen/app__assistant__reply.effect.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
 import * as Search from "../../gen/app__assistant__search.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
 import { stepping } from "../shell/shell.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { ask, outcomeOf } from "../platform/remote.vibe"
@@ -472,7 +473,7 @@ const bound = started(effect {
   })
 }, "binding the composer")
 
-// spec/app/assistant/dock.md, "A drag released asks the shell once for where it landed, and keeps a sheet's height"; spec/app/assistant/dock.md, "A gesture asks the shell to raise Ask Alpha, to go back a step or two, or nothing; a press that did not move is a tap on its control"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"
+// spec/app/assistant/dock.md, "A drag released asks the shell once for where it landed, and keeps a sheet's height"; spec/app/assistant/dock.md, "A gesture asks the shell to raise Ask Alpha, to go back a step or two, or nothing; a press that did not move is a tap on its control"; spec/app/assistant/dock.md, "Alpha's mark, a send from the bar, or a tap on the handle opens Ask Alpha as a sheet"
 function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell, []> {
   return match (fx) {
     when { tag: "Raise", let detent }: run("raise", effect { try contained((try Shell).send({ type: "raise", detent }), "raising Ask Alpha") });
@@ -483,12 +484,22 @@ function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell, []> {
     when { tag: "Tap" }: run("tap", effect {
       const shell = try Shell
       const current = try shell.get()
-      for (const ask of Dock.focused(current.assistant)) {
+      for (const ask of Dock.opened(current.assistant)) {
         if (ask.tag === "Raise") try contained(shell.send({ type: "raise", detent: ask.detent }), "raising Ask Alpha")
       }
     });
   }
 }
+
+// spec/app/assistant/dock.md, "A keyboard closed while typing puts Ask Alpha back on the bar"
+const keyboardGone = started(effect {
+  const canvas = try Canvas
+  const shell = try Shell
+  try Stream.runForEach(Stream.changes(Stream.map(canvas.changes, (shown) => shown.released)), effect (_released) => {
+    const current = try shell.get()
+    for (const _lower of Dock.keyboardClosed(current.assistant)) try contained(shell.send({ type: "goBack" }), "putting the bar away")
+  })
+}, "putting the bar away")
 
 // spec/app/assistant/dock.md, "Ask Alpha put away forgets the height its sheet was left at"
 const resting = following(Shell, (shell) => shell.assistant === "Bar", Dock.Machine, (bar): Dock.Event | undefined => (bar ? { type: "putAway", now: untimed } : undefined))
@@ -511,7 +522,7 @@ export const assisting = Layer.provideMerge(
     reacting(Reply, {}),
     reacting(Dock, { carry: carryDock }),
     stepping("assistant", Search.Machine, (search) => search.open),
-    reached, looked, left, opening, saving, bound, resting,
+    reached, looked, left, opening, saving, bound, resting, keyboardGone,
   ),
   Layer.merge(Layer.fresh(turns), talk),
 )

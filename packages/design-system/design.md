@@ -20,10 +20,11 @@ do next.
 - **Type.** `font-sans` is Public Sans, for everything read or pressed. `font-display` is Denton, with
   Fraunces behind it, at weight `light`: a screen's one title, the date on Home, a large figure. The sizes
   are in rem, so Android's text size scales them: `base` is body text, `3xl` a screen title, `4xl` the
-  Home date. `tracking-caps` with `text-xs` is a small uppercase label.
+  Home date. `chat` is Alpha's messages and `field` the Ask Alpha field, both 16px. `tracking-caps` with `text-xs` is a small uppercase label.
 - **Shape.** `radius` is a card or a row group; `rounded-home-card` is a Home overview card;
   `rounded-drawer-icon` rounds an installed app icon. `rounded-tile` is an app tile, a menu and a dialog;
-  `rounded-sheet` the top of a bottom sheet; `rounded-full` a button, a chip and the Ask Alpha bar.
+  `rounded-sheet` the top of a bottom sheet; `rounded-full` a button, a chip and the Ask Alpha bar. `rounded-bubble-tail` is the
+  tail corner of the owner's message bubble.
   Everything pressed is at least 44px in both directions.
 - **Elevation.** `shadow-sm` lifts a control, `shadow-md` a menu or dialog, `shadow-lg` the Ask Alpha
   bar, `shadow-sheet` a bottom sheet.
@@ -91,6 +92,7 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `rounded.sheet` | 1.75rem |
 | `rounded.home-card` | 1.875rem |
 | `rounded.drawer-icon` | 1.125rem |
+| `rounded.bubble-tail` | 0.375rem |
 | `font.sans` | "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif |
 | `font.display` | Denton, Fraunces, Georgia, serif |
 | `font.mono` | ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace |
@@ -114,6 +116,10 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.4xl.tracking` | -0.01em |
 | `text.home-display.size` | 1.625rem |
 | `text.home-display.leading` | 1.1 |
+| `text.chat.size` | 1rem |
+| `text.chat.leading` | 1.5 |
+| `text.field.size` | 1rem |
+| `text.field.leading` | 1.375 |
 | `weight.light` | 300 |
 | `weight.normal` | 400 |
 | `weight.medium` | 500 |

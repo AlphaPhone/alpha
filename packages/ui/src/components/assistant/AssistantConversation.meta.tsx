@@ -4,7 +4,7 @@ import { AssistantCard } from "./AssistantCard.tsx";
 import { AssistantGrabber } from "./AssistantGrabber.tsx";
 import type { AssistantConversationProps } from "./AssistantConversation.tsx";
 
-const header = { title: "Friday plans", context: { view: "Calendar", day: "Thu 10 Jul" }, grabber: <AssistantGrabber />, onHistory: fn(), onSearch: fn(), onNew: fn(), onClose: fn() };
+const header = { title: "Friday plans", context: { view: "Calendar", day: "Thu 10 Jul" }, grabber: <AssistantGrabber />, onHome: fn(), onResize: fn(), onMinimize: fn() };
 const transcript = {
   messages: [
     { id: "1", author: "owner" as const, text: "What is on my calendar on Friday?" },
@@ -31,5 +31,7 @@ export const meta: ComponentMeta<AssistantConversationProps> = {
     Empty: { header: { ...header, title: "New chat" }, transcript: { messages: [] }, composer },
     "Loading": { header, transcript: { messages: [], status: "loading" }, composer },
     "Offline": { header, transcript, composer: { ...composer, value: "Hello", unavailable: "away" } },
+    "Chat history": { header, transcript, composer, history: { chats: [{ id: "4", title: "Friday plans", current: true }, { id: "3", title: "Dentist and invoices" }], onChoose: fn(), onBack: fn() } },
+    "Pill in an app": { header, transcript, composer, detent: "pill", pill: { onOpen: fn(), onType: fn(), onTalk: fn() } },
   },
 };

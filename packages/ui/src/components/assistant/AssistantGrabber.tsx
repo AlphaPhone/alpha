@@ -56,7 +56,7 @@ export function AssistantGrabber({ onPress, onDrag, onRelease, onLift, onCancel,
     <button
       type="button"
       aria-label="Resize chat"
-      className={cn(focusRing, "flex min-h-11 w-full touch-none items-center justify-center", className)}
+      className={cn(focusRing, "flex size-11 cursor-grab touch-none items-start justify-center rounded-md pt-1.5", className)}
       onPointerDown={(event) => {
         capture(event.currentTarget, event.pointerId);
         const sample = { y: event.clientY, at: event.timeStamp };
@@ -84,7 +84,7 @@ export function AssistantGrabber({ onPress, onDrag, onRelease, onLift, onCancel,
       onClick={(event) => onTap?.({ now: event.timeStamp })}
       {...props}
     >
-      <span aria-hidden className="h-1 w-10 rounded-full bg-border" />
+      <span aria-hidden className="h-1 w-10 rounded-full bg-muted-foreground/45" />
     </button>
   );
 }

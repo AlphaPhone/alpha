@@ -1,6 +1,6 @@
-// spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
+// spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing the composer on the bar raises it to typing: the bar grows above the keyboard and the page stays in view"; spec/app/assistant/dock.md, "Alpha's mark, a send from the bar, or a tap on the handle opens Ask Alpha as a sheet"; spec/app/assistant/dock.md, "Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
 import {
-  Alert, AssistantCard, AssistantChatHistorySheet, AssistantConversation, AssistantGrabber, AssistantSearchSheet,
+  Alert, AssistantCard, AssistantConversation, AssistantGrabber, AssistantSearchSheet,
   type AssistantAttachment, type AssistantDraftNoticeProps, type AssistantMessageProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
@@ -9,13 +9,13 @@ import type { Conversation as Talking, Machine as ConversationMachine } from "..
 import { askable, inFlight, pending } from "../../gen/app__assistant.ts";
 import { useMachine as useConversation } from "../../gen/app__assistant.react.ts";
 import type { Machine as ChatsMachine } from "../../gen/app__assistant__chats.effect.vibe";
-import { making, unsure } from "../../gen/app__assistant__chats.ts";
+import { unsure } from "../../gen/app__assistant__chats.ts";
 import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import type { Composer as Writing, Machine as ComposerMachine } from "../../gen/app__assistant__composer.effect.vibe";
 import { textLimit } from "../../gen/app__assistant__composer.ts";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
 import type { Machine as DockMachine } from "../../gen/app__assistant__dock.effect.vibe";
-import { focused as dockFocused, isOpen as dockOpen } from "../../gen/app__assistant__dock.ts";
+import { type Effect as Ask, asked, focused as dockFocused, isOpen as dockOpen, opened as dockOpened, pill as dockPill } from "../../gen/app__assistant__dock.ts";
 import { useMachine as useDock } from "../../gen/app__assistant__dock.react.ts";
 import type { Failure, Fix, Machine as ReplyMachine } from "../../gen/app__assistant__reply.effect.vibe";
 import { fixShown, managesPlan, showsWait, waitSeconds } from "../../gen/app__assistant__reply.ts";
@@ -24,12 +24,14 @@ import type { Machine as SearchMachine } from "../../gen/app__assistant__search.
 import { useMachine as useSearch } from "../../gen/app__assistant__search.react.ts";
 import { type Machine as ShellMachine, showing } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
+import type { Machine as LayersMachine } from "../../gen/app__shell__layers.effect.vibe";
+import { home } from "../shell/shell.vibe";
 import { untimed } from "../runtime/reactor.vibe";
 import { freedom } from "./assistant.vibe";
 import { Talk } from "./talk.vibe";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | Talk, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | LayersMachine | Talk, unknown>;
 }
 
 function turnOf(talking: Talking, label: string): AssistantTurnNoteProps["status"] | undefined {
@@ -113,6 +115,13 @@ export function Assistant({ runtime }: AssistantProps) {
   const [talking, shown, writing, finding] = [conversation.state, chats.state, composer.state, search.state];
   if (!talking || !shown || !writing || !finding) return null;
   const free = freedom(talking, writing, shown.chosen);
+  const assistantDetent = shell.state?.assistant ?? "Bar";
+  const carry = (asks: readonly Ask[]) => {
+    for (const ask of asks) {
+      if (ask.tag === "Raise" && shell.can({ type: "raise", detent: ask.detent })) void shell.send({ type: "raise", detent: ask.detent });
+      if (ask.tag === "Lower") for (const _ of Array.from({ length: ask.steps })) void shell.send({ type: "goBack" });
+    }
+  };
   const lines = shown.page.status === "Idle" && shown.chosen === 0 ? [] : board.page(shown.page.ticket);
   const hold = { type: "hold", askable: askable(talking) } as const;
   const start = { type: "start", ...free } as const;
@@ -129,6 +138,7 @@ export function Assistant({ runtime }: AssistantProps) {
     void composer.send({ type: "edit", blank: text.trim() === "", long: text.length > textLimit });
   };
   const send = () => {
+    carry(dockOpened(assistantDetent));
     const talk = runtime.runSync(Effect.map(Talk, (t) => t.board));
     if (newChat) {
       talk.sendWhenMade = true;
@@ -185,33 +195,45 @@ export function Assistant({ runtime }: AssistantProps) {
   const failed = seen.failure === undefined ? [] : [{ id: "failure", author: "alpha", text: "", children: failureCard(seen.failure, true) } as const];
   const quoted = writing.editor.quote > 0 ? lines[writing.editor.quote - 1]?.text : undefined;
   const view = talking.context.showing.tag === "App" ? talking.context.showing.view : "Home";
-  const assistantDetent = shell.state?.assistant ?? "Bar";
   const open = dockOpen(assistantDetent);
+  const inPill = shell.state !== undefined && dockPill(shell.state);
   const keptHeight = assistantDetent === "Sheet" && dock.state && dock.state.kept > 0 ? dock.state.kept : undefined;
-  const openWithFocus = (focusField: boolean) => {
-    for (const ask of dockFocused(assistantDetent)) {
-      if (ask.tag === "Raise" && shell.can({ type: "raise", detent: ask.detent })) void shell.send({ type: "raise", detent: ask.detent });
-    }
-    if (focusField) composerRef.current?.focus();
+  const openWithFocus = () => {
+    carry(dockOpened(assistantDetent));
+    composerRef.current?.focus();
   };
+  const typeWithFocus = () => {
+    carry(dockFocused(assistantDetent));
+    composerRef.current?.focus();
+  };
+  const history = listing ? {
+    chats: shown.ids.map((id) => ({ id: String(id), title: seen.titles.get(id) ?? "Ask Alpha", current: id === shown.chosen })),
+    status: shown.list.status === "Loading" ? "loading" as const : shown.list.status === "Failed" ? "failed" as const : "loaded" as const,
+    blocked: free.replying || free.holding,
+    unsure: unsure(shown),
+    onChoose: (id: string) => {
+      const choose = { type: "choose", conversation: Number(id), ...free } as const;
+      if (!chats.can(choose)) return;
+      void chats.send(choose);
+      setListing(false);
+    },
+    onBack: () => setListing(false),
+    onRetry: () => void chats.send({ type: "browse" }),
+  } : undefined;
 
   return (
     <>
       <AssistantConversation
-        detent={assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
+        detent={assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : inPill ? "pill" : "bar"}
         className={open ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
         style={keptHeight ? { height: keptHeight } : undefined}
         header={{
           title: seen.titles.get(shown.chosen) ?? "Ask Alpha",
           context: { view, selected: talking.context.selected, sensitive: talking.context.sensitive },
-          onHistory: () => {
-            void chats.send({ type: "browse" });
-            setListing(true);
-          },
-          onSearch: search.can({ type: "openSearch" }) ? () => { void chats.send({ type: "browse" }); void search.send({ type: "openSearch" }); } : undefined,
-          onNew: chats.can(start) ? () => void chats.send(start) : undefined,
-          onClose: open && shell.can({ type: "goBack" }) ? () => void shell.send({ type: "goBack" }) : undefined,
-          making: making(shown),
+          onHome: () => void runtime.runPromise(home()),
+          full: assistantDetent === "Full",
+          onResize: assistantDetent === "Full" ? () => carry(asked("Full", "Sheet")) : shell.can({ type: "raise", detent: "Full" }) ? () => carry(asked(assistantDetent, "Full")) : undefined,
+          onMinimize: open ? () => carry(asked(assistantDetent, "Bar")) : undefined,
           grabber: shell.state ? (
             <AssistantGrabber
               onPress={() => {
@@ -221,17 +243,17 @@ export function Assistant({ runtime }: AssistantProps) {
               onRelease={({ direction, flick, y }) => {
                 void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height: Math.max(0, Math.round(window.innerHeight - y)), floor: barHeight, full: window.innerHeight, now: untimed });
               }}
-              onLift={() => {
-                void dock.send({ type: "lift", now: untimed });
-                if (!open) composerRef.current?.focus();
-              }}
+              onLift={() => { void dock.send({ type: "lift", now: untimed }); }}
               onCancel={() => { void dock.send({ type: "shift", now: untimed }); }}
-              onTap={() => {
-                void dock.send({ type: "click", now: untimed });
-                if (!open) composerRef.current?.focus();
-              }}
+              onTap={() => { void dock.send({ type: "click", now: untimed }); }}
             />
           ) : undefined,
+        }}
+        history={history}
+        pill={{
+          onOpen: openWithFocus,
+          onType: typeWithFocus,
+          onStop: conversation.can({ type: "stop" }) ? () => void conversation.send({ type: "stop" }) : undefined,
         }}
         transcript={{
           messages: [...messages, ...writingReply, ...failed],
@@ -264,14 +286,14 @@ export function Assistant({ runtime }: AssistantProps) {
           attachments: waiting(writing),
           quote: quoted,
           editing: writing.editor.editing > 0,
-          onOpen: !open ? () => openWithFocus(true) : undefined,
+          onOpen: !open ? openWithFocus : undefined,
           onSend: sendable && !inFlight(talking.turn) ? send : undefined,
           onStop: conversation.can({ type: "stop" }) ? () => void conversation.send({ type: "stop" }) : undefined,
           stopping: talking.turn.stopping,
-          onFocusField: () => openWithFocus(false),
+          onFocusField: () => carry(dockFocused(assistantDetent)),
           onClick: !open ? (event) => {
             if (event.target instanceof Element && event.target.closest("button, textarea")) return;
-            openWithFocus(true);
+            typeWithFocus();
           } : undefined,
           onRemoveAttachment: (id) => {
             if (id === "question") void composer.send({ type: "removeQuestion" });
@@ -279,25 +301,6 @@ export function Assistant({ runtime }: AssistantProps) {
             else if (id === "mail" || id === "transcript" || id === "shown") void composer.send({ type: "detach", kind: detached[id] });
           },
           onUnquote: composer.can({ type: "unquote" }) ? () => void composer.send({ type: "unquote" }) : undefined,
-        }}
-      />
-      <AssistantChatHistorySheet
-        open={listing}
-        onOpenChange={setListing}
-        history={{
-          chats: shown.ids.map((id) => ({ id: String(id), title: seen.titles.get(id) ?? "Ask Alpha", current: id === shown.chosen })),
-          status: shown.list.status === "Loading" ? "loading" : shown.list.status === "Failed" ? "failed" : "loaded",
-          blocked: free.replying || free.holding,
-          making: making(shown),
-          unsure: unsure(shown),
-          onChoose: (id) => {
-            const choose = { type: "choose", conversation: Number(id), ...free } as const;
-            if (!chats.can(choose)) return;
-            void chats.send(choose);
-            setListing(false);
-          },
-          onStart: chats.can(start) ? () => { void chats.send(start); setListing(false); } : undefined,
-          onRetry: () => void chats.send({ type: "browse" }),
         }}
       />
       <AssistantSearchSheet

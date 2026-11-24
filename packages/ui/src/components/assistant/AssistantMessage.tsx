@@ -1,7 +1,7 @@
 import type { ComponentProps, ReactNode } from "react";
 import { CornerUpLeft, GitBranch, Pencil, Volume2 } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
-import { Mark } from "../Mark.tsx";
+import { AssistantMark } from "./AssistantMark.tsx";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
 import { AssistantAttachmentChip, type AssistantAttachment } from "./AssistantAttachmentChip.tsx";
 
@@ -29,29 +29,29 @@ export type AssistantMessageProps = Omit<ComponentProps<"article">, "children"> 
 };
 
 /**
- * One message of the conversation: the owner's in a quiet bubble at the end, Alpha's as plain text under its mark
+ * One message of the conversation: the owner's in a blue bubble at the end, Alpha's as plain text beside its mark
  * with the cards of its reply. Pressing the text opens what can be done with it, each action only where it is offered.
  * @model spec/app/assistant/chats.md
  */
 export function AssistantMessage({ author, text, quote, attachments = [], children, onPreview, onQuote, onEditAgain, onFork, onReadAloud, className, ...props }: AssistantMessageProps) {
   const owner = author === "owner";
-  const body = <span className="break-words whitespace-pre-line">{text}</span>;
-  const bubble = cn("max-w-full text-left text-base", owner && "rounded-tile bg-secondary px-4 py-2.5 text-secondary-foreground");
+  const body = <span className="wrap-anywhere whitespace-pre-line">{text}</span>;
+  const bubble = cn("min-w-0 text-left", owner ? "max-w-[80%] rounded-tile rounded-br-bubble-tail bg-alpha px-4 py-2.75 text-base text-alpha-foreground" : "flex-1 text-chat");
   const actions = onQuote || onEditAgain || onFork || onReadAloud;
   return (
-    <article aria-label={owner ? "You" : "Alpha"} className={cn("flex flex-col gap-2", owner ? "items-end pl-10" : "items-start", className)} {...props}>
+    <article aria-label={owner ? "You" : "Alpha"} className={cn("flex flex-col gap-3", owner ? "items-end" : "items-start", className)} {...props}>
       {attachments.length ? (
         <div className={cn("flex flex-wrap gap-2", owner && "justify-end")}>
           {attachments.map((attachment) => <AssistantAttachmentChip key={attachment.id} attachment={attachment} onPreview={onPreview && (() => onPreview(attachment.id))} />)}
         </div>
       ) : null}
       {quote ? <p className="line-clamp-2 border-l-2 border-border pl-3 text-sm break-words text-muted-foreground">{quote}</p> : null}
-      <div className="flex max-w-full items-start gap-2">
-        {owner ? null : <Mark aria-hidden className="mt-1 size-4.5 shrink-0 text-alpha" />}
+      <div className={cn("flex w-full items-start", owner ? "justify-end" : "gap-2.5")}>
+        {owner ? null : <AssistantMark className="mt-0.75 size-4.5" />}
         {actions ? (
           <Menu>
             <MenuTrigger asChild>
-              <button type="button" className={cn(focusRing, bubble, "min-h-11 py-2.5")}>{body}</button>
+              <button type="button" className={cn(focusRing, bubble, owner || "min-h-11")}>{body}</button>
             </MenuTrigger>
             <MenuContent align={owner ? "end" : "start"}>
               {onQuote ? <MenuItem onSelect={onQuote}><CornerUpLeft aria-hidden />Reply</MenuItem> : null}

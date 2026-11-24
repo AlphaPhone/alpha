@@ -267,18 +267,32 @@ pure def lawTheKeyboardLiftsNothingElse(keyboard: int, navigation: int): bool =
   composerLift(false, keyboard, navigation) == navigation
 ```
 
-### Focusing or tapping the composer on the bar opens Ask Alpha as a sheet
+### Focusing the composer on the bar raises it to typing: the bar grows above the keyboard and the page stays in view
 
-Tapping or focusing the input bar from rest opens the half-screen conversation
-sheet immediately without requiring an upward drag, while leaving an already
-open sheet or full screen where it is.
+The field on the bar is typed in where it is, as in Alpha before
+VibeStack: focusing it never opens the conversation over the page. An open
+sheet or the full screen stays where it is.
 
 ```quint
-pure def focused(detent: S::Detent): List[Effect] = if (not(isOpen(detent))) List(Raise({ detent: S::Sheet })) else List()
+pure def focused(detent: S::Detent): List[Effect] = if (detent == S::Bar) List(Raise({ detent: S::Typing })) else List()
 
-pure def lawFocusingTheBarOpensSheet(phone: S::Shell): bool =
+pure def lawFocusingTheBarRaisesTyping(phone: S::Shell): bool =
   not(phone.drawer) implies
-    applied(focused(phone.assistant), phone).assistant == (if (not(isOpen(phone.assistant))) S::Sheet else phone.assistant)
+    applied(focused(phone.assistant), phone).assistant == (if (phone.assistant == S::Bar) S::Typing else phone.assistant)
+```
+
+### Alpha's mark, a send from the bar, or a tap on the handle opens Ask Alpha as a sheet
+
+From the bar or from typing the conversation opens at once as the
+half-screen sheet, without an upward drag; an open sheet or the full screen
+stays where it is.
+
+```quint
+pure def opened(detent: S::Detent): List[Effect] = if (not(isOpen(detent))) List(Raise({ detent: S::Sheet })) else List()
+
+pure def lawOpeningFromTheBarOpensSheet(phone: S::Shell): bool =
+  not(phone.drawer) implies
+    applied(opened(phone.assistant), phone).assistant == (if (not(isOpen(phone.assistant))) S::Sheet else phone.assistant)
 ```
 
 ### A keyboard closed while typing puts Ask Alpha back on the bar
@@ -288,4 +302,27 @@ pure def keyboardClosed(detent: S::Detent): List[Effect] = if (detent == S::Typi
 
 pure def lawAClosedKeyboardLeavesTypingForTheBar(phone: S::Shell): bool =
   not(phone.drawer) implies applied(keyboardClosed(phone.assistant), phone).assistant == (if (phone.assistant == S::Typing) S::Bar else phone.assistant)
+```
+
+## Story: Keep the app's screen while Ask Alpha rests
+
+> As the owner, I want Ask Alpha at rest inside an app to take as little of
+> the screen as it did before VibeStack: a small pill centred above the
+> bottom edge with Alpha's mark, Type and Talk, while Home and the Browser
+> keep the whole bar to type in.
+
+### Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows
+
+The pill is how the bar is drawn in an app, not another height: Back,
+gestures and every guard treat it as the bar. Alpha's mark opens the sheet,
+Type focuses the composer, and Talk starts a spoken turn.
+
+```quint
+pure def pill(s: S::Shell): bool = s.assistant == S::Bar and s.trail.length() > 0 and not(S::showing(s, S::Browser))
+
+pure def lawThePillIsOnlyTheBarInAnApp(s: S::Shell): bool =
+  pill(s) implies (s.assistant == S::Bar and s.trail.length() > 0)
+
+pure def lawTypeLeavesThePill(phone: S::Shell): bool =
+  (pill(phone) and not(phone.drawer)) implies not(pill(applied(focused(phone.assistant), phone)))
 ```
