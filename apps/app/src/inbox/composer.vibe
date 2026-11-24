@@ -12,6 +12,7 @@ import { Cloud } from "../platform/cloud.vibe"
 import { Device } from "../platform/device.vibe"
 import { type Job, answer, contained, due, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import { Mail, asked } from "./gmail.vibe"
+import { ownerChanges } from "./mailbox.vibe"
 import { provider } from "./provider.vibe"
 
 module pure {
@@ -321,10 +322,9 @@ const leaving = started(effect {
 
 // spec/app/inbox/drafts.md, "A new cloud session shows none of the drafts of the one before"
 const sessions = started(effect {
-  const list = try Inbox.Machine
   const composer = try Drafts.Machine
   const words = try Letters
-  try Stream.runForEach(Stream.drop(Stream.changes(Stream.map(list.changes, (mailbox) => mailbox.signedIn)), 1), effect () => {
+  try Stream.runForEach(ownerChanges, effect () => {
     try words.clear()
     try contained(composer.send({ type: "sessionChanged" }, "World"), "a new cloud session")
   })

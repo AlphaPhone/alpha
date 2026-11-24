@@ -319,7 +319,6 @@ export const mail = Layer.effect(Mail, effect {
       tokens.clear()
       bodies.clear()
       ledger = blank()
-      nextId = ledger.next
       try keep()
     },
   }

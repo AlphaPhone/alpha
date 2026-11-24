@@ -13,9 +13,10 @@ import { Agent } from "../platform/agent.vibe"
 import { MailQuestions, sourceOf, type MailQuestion } from "./mail-context.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
-import { type Job, answer, contained, following, reacting, run, started, stream, together } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, following, hearing, reacting, run, started, stream, together } from "../runtime/reactor.vibe"
 import { Mail, asked, body, faultOf, relabel, revisionOf } from "./gmail.vibe"
 import { backFromDraft } from "./composer.vibe"
+import { ownerChanges } from "./mailbox.vibe"
 import { prepareMessage } from "./mail-html.ts"
 import { ThreadPages, threadFault, threadMessage, threadPages } from "./thread.vibe"
 import { type AttachmentPreviews, attachmentPreviews, forgetPreview, handleAttachment } from "./attachment.vibe"
@@ -150,15 +151,6 @@ function carryMark(fx: MarkOut): Job<MarkEvent, Cloud | Mail | Inbox.Machine, [b
   }
 }
 
-/** Each fact `fact` reads from the list after the first, as an event of `target`: what changed while the area was open. */
-function afterLaunch<I, A, Ev, By extends ReadonlyArray<unknown>>(fact: (list: Inbox.Mailbox) => A, target: Context.Key<I, { send(event: Ev, ...by: By): unknown!unknown }>, told: (fact: A) => Ev, ...by: By) {
-  return started(effect {
-    const list = try Inbox.Machine
-    const to = try target
-    try Stream.runForEach(Stream.drop(Stream.changes(Stream.map(list.changes, fact)), 1), (value) => contained(to.send(told(value), ...by), "following the list"))
-  }, "following the list")
-}
-
 // spec/app/inbox/message.md, "Closing the message, losing read access to its account, a new cloud session, or a restart leaves nothing open and no read that could still answer"
 const access = started(effect {
   const list = try Inbox.Machine
@@ -176,8 +168,8 @@ const access = started(effect {
 }, "the grant of the message open")
 
 const sessions = together(
-  afterLaunch((list) => list.signedIn, Message.Machine, (): Event => ({ type: "sessionChanged" })),
-  afterLaunch((list) => list.signedIn, Marking.Machine, (): MarkEvent => ({ type: "sessionChanged" }), "World"),
+  hearing(ownerChanges, Message.Machine, (): Event => ({ type: "sessionChanged" })),
+  hearing(ownerChanges, Marking.Machine, (): MarkEvent => ({ type: "sessionChanged" }), "World"),
 )
 
 // spec/app/inbox/marking.md, "A list read afresh lets unconfirmed marks be tried again, and the owner can put the message away"

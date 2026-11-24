@@ -13,6 +13,14 @@ import { Mail, asked, connections, failureOf, mail, page } from "./gmail.vibe"
 
 const owner = "alpha/inbox/owner"
 
+/** Each new owner session, including a different owner who is already signed in. */
+export const ownerChanges = Stream.unwrap(effect {
+  const list = try Inbox.Machine
+  const ledger = try Mail
+  const owners = Stream.map(list.changes, (state) => `${ledger.generation()}/${state.signedIn}`)
+  return Stream.drop(Stream.changes(owners), 1)
+})
+
 // spec/app/inbox/index.md, "The answer names the connected accounts, their credentials and grants; the account chosen stays selected while it is connected, else the one account that may be read, else none and the owner chooses"
 effect function checked(ticket: number): Event!!(Cloud | Mail | Inbox.Machine | KeyValueStore.KeyValueStore) {
   const list = try Inbox.Machine
