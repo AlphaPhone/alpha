@@ -1,4 +1,4 @@
-// spec/workflows/simulator.md, "Story: Walk a workflow end to end in the browser without touching anything real"; spec/workflows/deviceSteps.md, "A named calendar range reads today, tomorrow, the next three days or this week from local midnight, and an all-day event counts by its civil dates"; spec/workflows/simulatedTriggers.md, "Story: Try a place or message workflow in the browser without a phone"
+// spec/workflows/simulator.md, "Story: Walk a workflow end to end in the browser without touching anything real"; spec/workflows/deviceSteps.md, "A named calendar range reads today, tomorrow, the next three days or this week from local midnight, and an all-day event counts by its civil dates"; spec/workflows/simulatedTriggers.md, "Story: Try a place or message workflow in the browser without a phone"; spec/platform/index.md, "A simulated action only ever changes simulated state"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import {
   type Destination, type Where, cacheFresh, focusFits, historyRemovable, noticeFits, receiptMatches, removableRun, resultAccepted,
@@ -6,6 +6,7 @@ import {
 } from "../../gen/workflows__simulator.effect.vibe"
 import { type Side, type Triggers, Machine as TriggersMachine, machine as triggersMachine } from "../../gen/workflows__simulatedTriggers.effect.vibe"
 import { Build } from "../platform/build.vibe"
+import { actionEffectOf } from "../platform/build-live.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 import type { DeviceEventRecord } from "../calendar/device.schema.vibe"
 import { WorkflowCalendar } from "./calendarRanges.vibe"
@@ -48,7 +49,7 @@ export const simulatedWorkflows = Layer.effect(SimulatedWorkflows, effect {
   const build = try Build
   const store = try KeyValueStore.KeyValueStore
   const calendar = try WorkflowCalendar
-  const loaded = simulatorLoads(build.info.testMocks, build.info.variant === "browser")
+  const loaded = simulatorLoads(actionEffectOf(build.info) === "Simulated", build.info.variant === "browser")
   const calendarReads = try Ref.make<ReadonlyMap<string, { readonly readAt: number; readonly events: ReadonlyArray<DeviceEventRecord> }>>(new Map())
 
   effect function guard() {
@@ -162,7 +163,7 @@ export service SimulatedTriggers {
 export const simulatedTriggers = Layer.provideMerge(Layer.effect(SimulatedTriggers, effect {
   const held = try TriggersMachine
   const build = try Build
-  const loaded = simulatorLoads(build.info.testMocks, build.info.variant === "browser")
+  const loaded = simulatorLoads(actionEffectOf(build.info) === "Simulated", build.info.variant === "browser")
 
   effect function guard() {
     if (!loaded) throw new SimulatedRefusal({ reason: "not-loaded" })

@@ -1,4 +1,4 @@
-// spec/files/index.md; spec/platform/index.md, "Mocks, fixtures and developer surfaces exist only when the build allows test mocks"
+// spec/files/index.md; spec/platform/index.md, "Mocks, fixtures and developer surfaces exist only when the build allows test mocks"; spec/platform/index.md, "A simulated action only ever changes simulated state"
 import { machine as browserMachine } from "../../gen/files__browser.effect.vibe"
 import { machine as trashMachine } from "../../gen/files__trash.effect.vibe"
 import { machine as filterMachine } from "../../gen/files__filter.effect.vibe"
@@ -12,6 +12,7 @@ import { machine as emailMachine } from "../../gen/files__emailDraft.effect.vibe
 import { machine as exportMachine } from "../../gen/files__downloads.effect.vibe"
 import { machine as pickerMachine } from "../../gen/files__picker.effect.vibe"
 import { Build } from "../platform/build.vibe"
+import { actionEffectOf } from "../platform/build-live.vibe"
 import { Native } from "../platform/native.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 import { FILES_PLUGIN, nativeDocuments, nativeStorage } from "./storage.vibe"
@@ -34,7 +35,7 @@ export const devices = Layer.unwrap(effect {
   const present = try native.available(FILES_PLUGIN)
   if (present) return Layer.merge(nativeStorage, nativeDocuments)
   if (build.info.variant === "browser") return browserLibrary
-  return build.info.testMocks ? fixtureLayer : Layer.merge(nativeStorage, nativeDocuments)
+  return actionEffectOf(build.info) === "Simulated" ? fixtureLayer : Layer.merge(nativeStorage, nativeDocuments)
 })
 
 /** The Files area's machines; Recent is kept on this phone across restarts. */
