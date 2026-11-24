@@ -46,7 +46,7 @@ type Mode = Browse | Search | Place | Directions | Navigating
 type Sheet = Peek | Half | Full
 type Question = NoQuestion | ReadPlace | StartTrip
 type HandOff = SharePlace | EmailPlace | CopyLink | EtaShare | Website | MapsApp | Call | CopyNumber
-type Change = Added | Renamed | Removed
+type Change = Added | Renamed | Removed | Adopted
 type SavedNotice = NoNotice | PlaceSaved | PlaceRenamed | PlaceRemoved | NotKept
 type GuideNotice = Quiet | StoppedFromNotification | PausedAway | AccountChanged | RerouteKept
 type CopyNotice = Uncopied | NumberCopied | CopyFailed
@@ -129,6 +129,7 @@ pure val weight_pressMap = 5
 pure val weight_liftPress = 5
 pure val weight_pressHeld = 10
 pure val weight_pinAt = 5
+pure val weight_menuPin = 5
 pure val weight_clearRecent = 5
 pure val weight_savedKept = 10
 pure val weight_savedUnreadable = 2
@@ -495,6 +496,22 @@ pure def stepAPressPinsOnce(before: Maps, via: str, after: Maps, out: List[Effec
 pure def sometimesPinnedByHand(m: Maps): bool = m.pinning and m.presses > 0
 ```
 
+### A secondary click, or a menu opened with no finger down, drops a pin there at once
+
+On a desktop there is no finger to hold: its secondary click asks for the
+same pin at once, under the same limits as a held finger.
+
+```quint
+pure def canMenuPin(m: Maps, lat: int, lng: int): bool =
+  canPressMap(m, lat, lng, 0) and not(m.pressing)
+
+pure def menuPin(m: Maps, lat: int, lng: int): Stepped =
+  { state: { ...m, pinning: true }, out: List(MakePin({ lat: lat, lng: lng })) }
+
+pure def stepAMenuPinsOnlyWithNoFingerDown(before: Maps, via: str, after: Maps, out: List[Effect]): bool =
+  via == "menuPin" implies (not(before.pressing) and before.trip.guidance == N::Stopped and not(before.directions))
+```
+
 ### A query another app hands to Maps opens as a search, never over navigation
 
 A query handed over while no provider works waits for one, as a search
@@ -625,6 +642,25 @@ pure def stepSavedPlacesAreKeptOnThePhone(before: Maps, via: str, after: Maps, o
   after.saved != before.saved implies (via == "restoreSaved" or kept(out, after.saved))
 ```
 
+### A list this version never wrote takes the previous Alpha's places once, and keeps them
+
+When the shell finds no list of this version's own, it gives back the
+previous Alpha's places as [saved places](./places.md) adopt them, and
+the list they make is written at once, so the previous list is never taken
+again. A previous list that cannot be read gives back nothing.
+
+```quint
+pure def canAdoptPrevious(m: Maps, saved: List[S::Saved]): bool =
+  m.saved == List() and m.keepable and S::adopted(saved).length() > 0
+
+pure def adoptPrevious(m: Maps, saved: List[S::Saved]): Stepped =
+  val taken = S::adopted(saved)
+  { state: { ...m, saved: taken, notice: NoNotice }, out: List(KeepSaved({ saved: taken, change: Adopted })) }
+
+pure def stepThePreviousListIsTakenOnlyByAnUnusedList(before: Maps, via: str, after: Maps): bool =
+  via == "adoptPrevious" implies (before.saved == List() and before.keepable and S::distinctAndNamed(after.saved))
+```
+
 ### A saved list that cannot be read is never written over, and a change is told only once it reads back
 
 The owner reads "Saved places could not be read. Existing data has not been
@@ -641,7 +677,7 @@ pure def savedUnreadable(m: Maps): Maps = { ...m, keepable: false }
 
 pure def noticeOf(change: Change, ok: bool): SavedNotice =
   if (not(ok)) NotKept
-  else match change { | Added => PlaceSaved | Renamed => PlaceRenamed | Removed => PlaceRemoved }
+  else match change { | Added => PlaceSaved | Renamed => PlaceRenamed | Removed => PlaceRemoved | Adopted => NoNotice }
 
 pure def canSavedKept(m: Maps, change: Change, ok: bool): bool = m.keepable
 

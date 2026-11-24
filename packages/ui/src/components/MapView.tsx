@@ -80,6 +80,8 @@ export interface MapViewProps {
   onPressMove: (pixels: number) => void;
   /** The press ended: lifted, a second finger, or the menu that follows a held finger. */
   onPressEnd: () => void;
+  /** A secondary click, or a menu opened with no finger down, at a point of the map. */
+  onMenu?: (at: MapPoint) => void;
   /** The camera came to rest on this view. */
   onSettled: (view: MapBounds) => void;
   /** The owner began to drag the map. */
@@ -248,7 +250,10 @@ export function MapView(props: MapViewProps) {
     instance.on("mousedown", (event) => { if (event.originalEvent.button === 0) press(event.lngLat, event.point); });
     instance.on("mousemove", (event) => moved(event.point));
     instance.on("mouseup", end);
-    instance.on("contextmenu", end);
+    instance.on("contextmenu", (event) => {
+      if (down === undefined) latest.current.onMenu?.({ lat: event.lngLat.lat, lng: event.lngLat.lng });
+      end();
+    });
     instance.on("dragstart", () => latest.current.onDragged?.());
     instance.on("moveend", () => {
       const bounds = instance.getBounds();

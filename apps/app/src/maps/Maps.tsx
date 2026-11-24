@@ -225,6 +225,10 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
         }}
         onPressMove={(pixels) => { if (pixels > panPixels) lift(); }}
         onPressEnd={lift}
+        onMenu={(at) => {
+          const event = { type: "menuPin", lat: Math.round(at.lat * 1e6), lng: Math.round(at.lng * 1e6) } as const;
+          if (can(event)) void send(event);
+        }}
         onSettled={(view) => void runtime.runPromise(settled(view))}
         onDragged={() => { if (can({ type: "panMap" })) void send({ type: "panMap" }); }}
       >
