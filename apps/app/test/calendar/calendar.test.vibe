@@ -129,17 +129,51 @@ describe("Calendar journeys (spec/calendar/agent.md, \"Story: See my agent's Cal
   })
 
   it.effect("an approval is read again at the tap and decided once (spec/calendar/approvals.md, \"Story: Approve or decline a Calendar change the agent asked for\")", () => effect {
+    // spec/calendar/approvals.md, "A Calendar request is listed under the agent's id with the change it would run": the agent files
+    // the change under calendar-<40 hex> with its digest and lists its owner once; the decision carries the revision it lists.
     const fakeAgent = new CalendarAgentFake()
-    const id = "0f0f0f0f-1111-4222-8333-444455556666"
-    fakeAgent.approvals.push({ id, state: "pending", subjectUserId: "u", ownerId: "u", action: "schedule_event", reason: "Add lunch", expiresAt: null,
-      payload: { action: "schedule_event", side: "owner", calendarId: "primary", title: "Lunch", startsAtMs: 1_800_000_000_000, endsAtMs: 1_800_003_600_000,
-        attendees: [], location: "", description: "", notifyAttendees: false } })
+    const id = `calendar-${"ab".repeat(20)}`
+    const source = { provider: "eliza", side: "owner", grantId: "eliza-calendar", connectorAccountId: "", calendarId: "primary" }
+    const fields = { title: "Lunch", description: "", location: "", startAt: "2027-01-15T12:00:00.000Z", endAt: "2027-01-15T13:00:00.000Z", isAllDay: false, timeZone: "UTC" }
+    fakeAgent.approvals.push({ id, state: "pending", subjectUserId: "u", requestedBy: "agent-1", action: "schedule_event", reason: "Calendar schedule event reviewed in chat", expiresAt: null,
+      revision: "rev-1", payload: { change: { action: "schedule_event", account: "acct-1", source, fields, recurrence: null }, digest: "d".repeat(64) } })
+    // A row whose change is filed under another action, or carries no digest, is no request the review can show.
+    fakeAgent.approvals.push({ id: `calendar-${"cd".repeat(20)}`, state: "pending", subjectUserId: "u", action: "cancel_event", reason: "x", expiresAt: null,
+      payload: { change: { action: "schedule_event", account: "acct-1", source, fields, recurrence: null }, digest: "d".repeat(64) } })
     provide calendarOver(fakeAgent, new DeviceCalendarFake()) {
       const reviews = try ApprovalReviews
+      try reviews.open(`calendar-${"cd".repeat(20)}`)
+      const misfiled = Option.getOrThrow(try Stream.runHead(reviews.changes))
+      try reviews.close()
       try reviews.open(id)
+      const shown = Option.getOrThrow(try Stream.runHead(reviews.changes))
       try reviews.choose("ApproveChange")
       try reviews.choose("ApproveChange")
-      try check(() => assert.deepStrictEqual(fakeAgent.resolved.map((entry) => (entry.body as { decision: string }).decision), ["approve"]))
+      try check(() => assert.deepStrictEqual([
+        misfiled.state.found, shown.state.found, shown.state.verified, shown.presentation?.complete, shown.presentation?.fields.find((f) => f.label === "Title")?.value,
+        fakeAgent.resolved.map((entry) => [entry.id, entry.body]),
+      ], [false, true, true, true, "Lunch", [[id, { decision: "approve", revision: "rev-1" }]]]))
+    }
+  })
+
+  it.effect("a Calendar request of another owner is shown but cannot be approved (spec/calendar/approvals.md, \"Story: Approve or decline a Calendar change the agent asked for\")", () => effect {
+    // spec/calendar/approvals.md, "A Calendar request is listed under the agent's id with the change it would run"
+    const fakeAgent = new CalendarAgentFake()
+    fakeAgent.add("event-a", "Dentist", 1, 10)
+    const id = `calendar-${"ef".repeat(20)}`
+    const source = { provider: "eliza", side: "owner", grantId: "eliza-calendar", connectorAccountId: "", calendarId: "primary" }
+    const event = fakeAgent.events[0]!
+    fakeAgent.approvals.push({ id, state: "pending", subjectUserId: "someone-else", action: "cancel_event", reason: "x", expiresAt: null, revision: "rev-1",
+      payload: { change: { action: "cancel_event", account: "acct-1", target: { source, eventId: "event-a", expectedVersion: "etag-1" }, scope: "instance" },
+        digest: "d".repeat(64), targetStartAt: event.startAt } })
+    provide calendarOver(fakeAgent, new DeviceCalendarFake()) {
+      try bindCalendar(binding)
+      try readCalendar(false, false)
+      const reviews = try ApprovalReviews
+      try reviews.open(id)
+      const shown = Option.getOrThrow(try Stream.runHead(reviews.changes))
+      try reviews.choose("ApproveChange")
+      try check(() => assert.deepStrictEqual([shown.state.found, shown.state.verified, shown.presentation?.heading, fakeAgent.resolved.length], [true, false, "Cancel event", 0]))
     }
   })
 

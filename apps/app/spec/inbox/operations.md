@@ -146,7 +146,7 @@ pure def alwaysARecordHasItsIdentity(s: Journal): bool =
 pure val capabilitiesValues = capsValues
 pure val requestIdValues = Set("r1", "r2")
 pure val kindValues = Set(SendKind, ArchiveKind, DraftDeleteKind)
-pure val composerValues = Set(noComposer).union(Set({ draftId: "d1", content: "c1" })).union(Set({ draftId: "d1", content: "c2" }))
+pure val composerValues = Set(noComposer).union(Set({ draftId: "d1", content: "c1" })).union(Set({ draftId: "d1", content: "c2" })).union(Set({ draftId: "d1", content: "" }))
 pure val sourceValues = Set(noSource).union(Set({ localDraft: "d1", revision: 1, gmailDraft: "", gmailDigest: "" }))
 pure val bytesValues = Set(0, 7864321)
 ```
@@ -189,7 +189,8 @@ the composer still showing exactly the reviewed draft, read again once Gmail's r
 email edited while Gmail reviewed it has that review discarded and is not sent. The operation is
 stored as dispatching before the request leaves, so a lost answer can never lead to a second
 dispatch; a journal running only in memory, because the kept one could not be read or set apart,
-confirms nothing.
+confirms nothing. The only other dispatching operation is one the previous version dispatched,
+taken as it was.
 
 ```quint
 pure def canConfirm(s: Journal, requestId: str, shown: ComposerRef): bool = {
@@ -201,7 +202,7 @@ pure def confirm(s: Journal, requestId: str, shown: ComposerRef): Journal = with
 pure def findRecord(owner: str, requestId: str, s: Journal): OperationRecord = s.records.foldl(noRecord, (found, r) => if (r.owner == owner and r.requestId == requestId) r else found)
 pure def stepADispatchFollowsAConfirmedReview(before: Journal, via: str, after: Journal): bool =
   after.records.every(r => (r.phase == Dispatching and findRecord(r.owner, r.requestId, before).phase != Dispatching) implies
-    (via == "confirm" and findRecord(r.owner, r.requestId, before).phase == Reviewing))
+    ((via == "confirm" and findRecord(r.owner, r.requestId, before).phase == Reviewing) or (via == "adoptPrevious" and not(hasRecord(r.owner, before)))))
 pure val shownValues = composerValues
 pure def sometimesDispatching(s: Journal): bool = s.records.some(r => r.phase == Dispatching)
 ```
@@ -326,6 +327,38 @@ pure def abandon(s: Journal, requestId: str): Journal = withoutRecord(s.owner, s
 pure def stepAnUnresolvedOutcomeIsNeverCleared(before: Journal, after: Journal): bool =
   before.records.every(r => after.records.some(o => o.owner == r.owner and o.requestId == r.requestId) or clearable(r) or notStarted(r))
 pure def sometimesClosedAfterSuccess(s: Journal): bool = s.records == List() and s.announced != List()
+```
+
+### An operation the previous version left unresolved stays its account's operation until its receipt settles
+
+The previous version kept one operation per account and Gmail grant in the phone's secure slots
+(in the browser build, its private storage). One that was dispatching, or whose outcome it had not
+learned, when the phone updated is taken once as its account's operation, under its own request id,
+kind, proposal and receipt, so every send of that account waits until a receipt read settles it,
+and it is never dispatched again. It names no composer content and no local draft to clean up; the
+draft it was sent from comes into Drafts as an earlier version of a sent email (spec/inbox/drafts.md).
+An account that already holds an operation keeps it, and the previous one stays in its slot. One
+the previous version never dispatched, or whose outcome it recorded, is not taken. The previous
+slot is cleared once its operation is in a journal the phone keeps, or needs none, and never while
+the journal runs only in memory.
+
+```quint
+pure def previousUnresolved(phase: OpPhase, receipt: Receipt): bool =
+  (phase == Dispatching and receipt.receiptState != SucceededReceipt and receipt.receiptState != RejectedReceipt)
+  or (phase == Observed and (receipt.receiptState == DispatchedReceipt or receipt.receiptState == UnknownReceipt))
+pure def canAdoptPrevious(s: Journal, owner: str, requestId: str, kind: OpKind, proposal: Proposal, phase: OpPhase, receipt: Receipt, composer: ComposerRef): bool =
+  owner != "" and requestId != "" and not(hasRecord(owner, s)) and previousUnresolved(phase, receipt) and proposalFits(kind, proposal)
+  and (isComposerKind(kind) iff composer.draftId != "") and composer.content == ""
+  and (receipt.receiptState == NoReceipt or (receipt.requestId == requestId and receipt.receiptKind == kind))
+pure def adoptPrevious(s: Journal, owner: str, requestId: str, kind: OpKind, proposal: Proposal, phase: OpPhase, receipt: Receipt, composer: ComposerRef): Journal =
+  withRecord({ ...noRecord, owner: owner, requestId: requestId, kind: kind, proposal: proposal, phase: phase, receipt: receipt, composer: composer }, s)
+pure def lawAnAdoptedOperationBlocksEverySend(kind: OpKind, phase: OpPhase, previousReceipt: Receipt, shown: ComposerRef): bool = {
+  val r = { ...noRecord, owner: "o1", requestId: "r1", kind: kind, phase: phase, receipt: previousReceipt, composer: { draftId: "d1", content: "" } }
+  (previousUnresolved(phase, previousReceipt) and shown.content != "") implies sendStep(true, r, shown) == ReadReceipt
+}
+pure val phaseValues = Set(Reviewing, Dispatching, Observed)
+pure val previousReceiptValues = Set(noReceipt, prepared1, { ...prepared1, receiptState: UnknownReceipt }, { ...prepared1, receiptState: SucceededReceipt })
+pure def sometimesPreviousOperationAdopted(s: Journal): bool = s.records.some(r => r.composer.content == "" and r.composer.draftId != "" and r.phase == Dispatching)
 ```
 
 ### A review the composer no longer shows is discarded, and an absent composer only blocks confirmation

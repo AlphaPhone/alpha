@@ -1,4 +1,4 @@
-// spec/inbox/drafts.md, "A draft the previous version kept comes into its account's Drafts once, and the previous slots clear only after every draft is kept"
+// spec/inbox/drafts.md, "A draft the previous version kept comes into its account's Drafts once, and the previous slots clear only after every draft is kept"; spec/inbox/operations.md, "An operation the previous version left unresolved stays its account's operation until its receipt settles"
 
 /** One slot answer of `ElizaSecureStore.get`. */
 export schema PreviousSlot {
@@ -88,6 +88,65 @@ export schema PreviousRecovery {
   toQ: string
 }
 
+/** The originals a previous forward proposal attached, by part. */
+export schema PreviousForwardSource {
+  messageId: string
+  historyId: string
+  partIds: string[]
+}
+
+/** What the previous version proposed to managed Gmail, as it sent it. */
+export schema PreviousProposal {
+  kind: "send" | "draft-create" | "draft-replace" | "draft-delete" | "archive" | "unarchive" | "trash" | "untrash" | "mark-read" | "mark-unread" | "star" | "unstar"
+  mode?: "compose" | "reply" | "reply-all" | "forward"
+  to?: string[]
+  cc?: string[]
+  bcc?: string[]
+  subject?: string
+  bodyText?: string
+  attachments?: PreviousAttachment[]
+  forwardAttachments?: PreviousForwardSource
+  replyMessageId?: string
+  draftId?: string
+  expectedDigest?: string
+  messageId?: string
+  expectedHistoryId?: string
+}
+
+/** A receipt the previous version kept, as managed Gmail answered it. */
+export schema PreviousReceipt {
+  requestId: string
+  kind: "send" | "draft-create" | "draft-replace" | "draft-delete" | "archive" | "unarchive" | "trash" | "untrash" | "mark-read" | "mark-unread" | "star" | "unstar"
+  reviewDigest: string
+  state: "prepared" | "dispatched" | "succeeded" | "rejected" | "outcome-unknown"
+  providerResult: Record<string, unknown> | null
+  rejectionCode: string | null
+}
+
+/** The local draft a previous send was started from. */
+export schema PreviousOperationSource {
+  draftId: string
+}
+
+/** The composer draft a previous send or Gmail draft save was reviewed from. */
+export schema PreviousOperationComposer {
+  draftId: string
+}
+
+/** One account's operation as the previous version journaled it (`inbox-operation:v1:<sha256([owner, grant])>`). */
+export schema PreviousOperation {
+  version: number
+  owner: string
+  grantId: string
+  requestId: string
+  proposal: PreviousProposal
+  phase: "preparing" | "review" | "dispatching" | "observed"
+  review: Record<string, unknown> | null
+  receipt: PreviousReceipt | null
+  source?: PreviousOperationSource
+  composer?: PreviousOperationComposer
+}
+
 /** Decodes an `ElizaSecureStore.get` answer. */
 export const decodePreviousSlot = Schema.decodeUnknownEffect(PreviousSlot)
 /** Decodes a previous saved draft from its stored JSON. */
@@ -98,3 +157,5 @@ export const decodePreviousShelf = Schema.decodeUnknownEffect(Schema.fromJsonStr
 export const decodePreviousRecoveryEnvelope = Schema.decodeUnknownEffect(Schema.fromJsonString(PreviousRecoveryEnvelope))
 /** Decodes a previous recovery copy from its envelope's text. */
 export const decodePreviousRecovery = Schema.decodeUnknownEffect(Schema.fromJsonString(PreviousRecovery))
+/** Decodes a previous operation record from its stored JSON. */
+export const decodePreviousOperation = Schema.decodeUnknownEffect(Schema.fromJsonString(PreviousOperation))

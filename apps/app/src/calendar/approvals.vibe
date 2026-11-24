@@ -1,8 +1,8 @@
-// spec/calendar/approvals.md, "Story: Approve or decline a Calendar change the agent asked for"; spec/calendar/approvals.md, "The request is read again at the tap; a different revision is shown as updated and nothing is sent"; spec/calendar/approvals.md, "Only a change the provider accepted refreshes Calendar and Home"
-import { type ApprovalReview, type ApprovalState, type Decision, type Resolution, type Event as ReviewEvent, Machine as ReviewMachine, refreshesCalendar } from "../../gen/calendar__approvals.effect.vibe"
+// spec/calendar/approvals.md, "Story: Approve or decline a Calendar change the agent asked for"; spec/calendar/approvals.md, "The request is read again at the tap; a different revision is shown as updated and nothing is sent"; spec/calendar/approvals.md, "Only a change the provider accepted refreshes Calendar and Home"; spec/calendar/approvals.md, "A Calendar request is listed under the agent's id with the change it would run"
+import { type ApprovalReview, type ApprovalState, type Decision, type Resolution, type Event as ReviewEvent, Machine as ReviewMachine, ownerVerified, refreshesCalendar } from "../../gen/calendar__approvals.effect.vibe"
 import { Resident } from "../platform/resident.vibe"
 import { AgentCalendar } from "./agent.vibe"
-import { type ApprovalPresentation, type ApprovalTarget, approvalPresentation, approvalTarget } from "./approvalFields.vibe"
+import { type ApprovalPresentation, type ApprovalTarget, type QueuedChange, approvalPresentation, approvalTarget, changeSourceKey, queuedChange } from "./approvalFields.vibe"
 import { type ApprovalRecord, type ResolutionRecord, decodeApproval, decodeApprovals, decodeResolution } from "./feed.schema.vibe"
 import { deviceZone } from "./time.ts"
 
@@ -27,7 +27,8 @@ export service ApprovalReviews {
 }
 
 const READ_PATH = "/api/approvals?state=all&limit=500"
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+/** A request id: a UUID, or the `calendar-<40 hex>` id the agent files a Calendar change under. */
+const REQUEST_ID = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|calendar-[0-9a-f]{40})$/i
 
 function approvalState(state: ApprovalRecord["state"]): ApprovalState {
   switch (state) {
@@ -42,17 +43,21 @@ function approvalState(state: ApprovalRecord["state"]): ApprovalState {
   }
 }
 
+/** The revision the agent resolves against: the one it lists, else the same array computed from the listed row. */
 function revisionOf(row: ApprovalRecord): string {
-  return JSON.stringify([row.id, row.subjectUserId ?? "", row.state, row.action, row.payload, row.reason, row.expiresAt, row.updatedAt ?? ""])
+  return row.revision ?? JSON.stringify([row.id, row.subjectUserId ?? "", row.state, row.action, row.payload, row.reason, row.expiresAt, row.updatedAt ?? ""])
 }
+
+/** One listed Calendar request, its change, and the owner the agent decides for. */
+interface ListedRequest { readonly row: ApprovalRecord; readonly queued: QueuedChange; readonly owner: string | undefined }
 
 /** The approval request ids of `[CHOICE:approval-<id>]` blocks with exactly approve and reject lines, and the text without them. */
 export function calendarReviewText(text: string): { readonly text: string; readonly ids: readonly string[] } {
   const ids: string[] = []
-  const stripped = text.replace(/\[CHOICE:approval-([0-9a-f-]{36}) id=\1\]\n([^\[]*?)\n?\[\/CHOICE\]/gi, (block, id: string, body: string) => {
+  const stripped = text.replace(/\[CHOICE:approval-([0-9a-z-]{36,49}) id=\1\]\n([^\[]*?)\n?\[\/CHOICE\]/gi, (block, id: string, body: string) => {
     const lines = body.split("\n").map((line) => line.trim()).filter((line) => line !== "")
     const exact = lines.length === 2 && lines.some((line) => line.startsWith(`approve ${id}=`)) && lines.some((line) => line.startsWith(`reject ${id}=`))
-    if (!exact || !UUID.test(id)) return block
+    if (!exact || !REQUEST_ID.test(id)) return block
     ids.push(id.toLowerCase())
     return ""
   })
@@ -74,45 +79,47 @@ export const approvalsLayer = Layer.effect(ApprovalReviews, effect {
     return after
   }
 
-  effect function readRow(requestId: string): (ApprovalRecord | undefined)!! {
+  effect function readRow(requestId: string): (ListedRequest | undefined)!! {
     return effect {
       const answer = try resident.json("GET", READ_PATH)
-      const list = (try decodeApprovals(answer.data)).approvals
-      const matching: ApprovalRecord[] = []
-      for (const raw of list) {
+      const listing = try decodeApprovals(answer.data)
+      const matching: ListedRequest[] = []
+      for (const raw of listing.approvals) {
         const row = decodeApproval(raw) catch () => undefined
-        if (row !== undefined && row.id.toLowerCase() === requestId && row.payload.action === row.action && row.payload.side === "owner"
-          && typeof row.payload.calendarId === "string" && row.payload.calendarId !== "") matching.push(row)
+        const queued = row === undefined || row.id.toLowerCase() !== requestId ? undefined : queuedChange(row)
+        if (row !== undefined && queued !== undefined) matching.push({ row, queued, owner: listing.ownerEntityId ?? undefined })
       }
       return matching.length === 1 ? matching[0] : undefined
     } catch () => undefined
   }
 
-  effect function targetOf(row: ApprovalRecord): ApprovalTarget!! {
-    if (row.action === "schedule_event") return { verified: true }
+  effect function targetOf(listed: ListedRequest): ApprovalTarget!! {
+    const change = listed.queued.change
     const view = try agent.view()
-    const loaded = view.savedAt === undefined && view.feed !== undefined ? approvalTarget(row.payload, view.calendars, view.feed.events) : { verified: false }
-    if (loaded.verified || typeof row.payload.expectedEventStartAtMs !== "number") return loaded
-    const sourceKey = JSON.stringify(["google", "owner", String(row.payload.grantId ?? ""), "", String(row.payload.calendarId)])
-    const read = try agent.readSourceAt(sourceKey, row.payload.expectedEventStartAtMs)
-    return read === undefined ? loaded : approvalTarget(row.payload, read.calendars, read.events)
+    const loaded = view.savedAt === undefined && view.feed !== undefined ? approvalTarget(change, view.calendars, view.feed.events, listed.queued.targetStartAt)
+      : change.action === "schedule_event" ? approvalTarget(change, view.calendars, []) : { verified: false }
+    if (change.action === "schedule_event" || loaded.verified || listed.queued.targetStartAt === undefined) return loaded
+    const read = try agent.readSourceAt(changeSourceKey(change), listed.queued.targetStartAt)
+    return read === undefined ? loaded : approvalTarget(change, read.calendars, read.events, listed.queued.targetStartAt)
   }
 
-  effect function present(row: ApprovalRecord | undefined) {
-    if (row === undefined) return undefined
-    const target = try targetOf(row)
-    return approvalPresentation(row, target, deviceZone())
+  effect function present(listed: ListedRequest | undefined) {
+    if (listed === undefined) return undefined
+    const target = try targetOf(listed)
+    return approvalPresentation(listed.row, listed.queued, target, deviceZone())
   }
 
-  effect function owned(row: ApprovalRecord) {
-    return (row.ownerEntityId ?? row.ownerId) === row.subjectUserId
+  /** The request was asked for by the owner the agent decides for: the listing's owner, or the one a row names itself. */
+  effect function owned(listed: ListedRequest) {
+    return ownerVerified(listed.owner ?? listed.row.ownerEntityId ?? listed.row.ownerId ?? "", listed.row.subjectUserId ?? "")
   }
 
-  effect function reply(kind: "readReply" | "recheckReply", row: ApprovalRecord | undefined) {
-    const presentation = try present(row)
+  effect function reply(kind: "readReply" | "recheckReply", listed: ListedRequest | undefined) {
+    const row = listed?.row
+    const presentation = try present(listed)
     try SubscriptionRef.update(sheet, (shown) => ({ ...shown, row, presentation }))
     const expired = row !== undefined && row.expiresAt !== null && Date.parse(row.expiresAt) <= (try Clock.currentTimeMillis)
-    return try send({ type: kind, found: row !== undefined, verified: row !== undefined && (try owned(row)),
+    return try send({ type: kind, found: row !== undefined, verified: listed !== undefined && (try owned(listed)),
       approval: row === undefined ? "ApprovalPending" : expired ? "ApprovalExpired" : approvalState(row.state),
       revision: row === undefined ? "" : revisionOf(row), complete: presentation?.complete ?? false })
   }
@@ -120,7 +127,7 @@ export const approvalsLayer = Layer.effect(ApprovalReviews, effect {
   return {
     changes: SubscriptionRef.changes(sheet),
     effect open(requestId: string) {
-      if (!UUID.test(requestId)) return
+      if (!REQUEST_ID.test(requestId)) return
       const opened = try send({ type: "open", requestId: requestId.toLowerCase() })
       if (opened === undefined) return
       try SubscriptionRef.update(sheet, (shown) => ({ ...shown, answer: undefined }))

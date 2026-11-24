@@ -11,6 +11,8 @@ export class CalendarAgentFake {
   events: FakeEvent[] = [];
   agentId = "agent-1";
   approvals: Record<string, unknown>[] = [];
+  /** The owner the agent's approval listing names once, as upstream's approval routes answer. */
+  ownerEntityId = "u";
   resolved: { id: string; body: unknown }[] = [];
   writes: { method: string; path: string; body: unknown }[] = [];
   refuseReads = false;
@@ -86,7 +88,7 @@ export class CalendarAgentFake {
       return { status: 200, data: { revision: this.control.revision, choice: "SelectPrimary", destination: this.control.destination, candidates: this.candidates } };
     }
     if (url.pathname === "/api/lifeops/calendar/links") return { status: 200, data: { links: this.links } };
-    if (url.pathname === "/api/approvals") return { status: 200, data: { approvals: this.approvals } };
+    if (url.pathname === "/api/approvals") return { status: 200, data: { ownerEntityId: this.ownerEntityId, approvals: this.approvals } };
     const resolve = /^\/api\/approvals\/(.+)\/resolve$/.exec(url.pathname);
     if (resolve) {
       this.resolved.push({ id: resolve[1]!, body });

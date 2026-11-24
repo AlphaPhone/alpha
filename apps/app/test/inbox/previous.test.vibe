@@ -1,8 +1,8 @@
-// spec/inbox/drafts.md, "Story: Keep the drafts I wrote before this version"; spec/inbox/operations.md, "The phone advertises the agent's local email draft only when the agent offers it"
+// spec/inbox/drafts.md, "Story: Keep the drafts I wrote before this version"; spec/inbox/operations.md, "The phone advertises the agent's local email draft only when the agent offers it"; spec/inbox/operations.md, "An operation the previous version left unresolved stays its account's operation until its receipt settles"
 import { assert, it } from "@effect/vitest"
 import { fakeNative, fakeResident, buildInfo } from "../../src/platform/layers.vibe"
 import { memoryStore } from "../../src/platform/storage.vibe"
-import { layer as inbox, InboxAccounts, Mailbox, MailComposer, inboxCapabilities, keepPreviousDrafts } from "../../src/inbox/layer.vibe"
+import { layer as inbox, InboxAccounts, Mailbox, MailComposer, MailOperations, inboxCapabilities, keepPreviousDrafts } from "../../src/inbox/layer.vibe"
 import { previousOwners } from "../../src/inbox/previous.vibe"
 import { sha256Hex } from "../../src/inbox/text.ts"
 import { calls, grantA, mailCloud, neighbors, settle } from "./support.vibe"
@@ -32,8 +32,8 @@ function secureStore(slots: Map<string, string>) {
 }
 
 /** The Inbox with its platform kept visible, so a pass can be run again by hand. */
-function inboxOver(log: ReturnType<typeof calls>, slots: Map<string, string>) {
-  return Layer.provideMerge(inbox, Layer.mergeAll(mailCloud(log), secureStore(slots), fakeResident({}), buildInfo(), memoryStore, neighbors(log)))
+function inboxOver(log: ReturnType<typeof calls>, slots: Map<string, string>, cloud = mailCloud(log)) {
+  return Layer.provideMerge(inbox, Layer.mergeAll(cloud, secureStore(slots), fakeResident({}), buildInfo(), memoryStore, neighbors(log)))
 }
 
 /** A draft as the previous version kept it for this account. */
@@ -109,6 +109,82 @@ it.live("A previous draft of another account is never brought in, and its slot i
     const kept = try keepPreviousDrafts(try accounts.selectedKey())
     const shelf = (try composer.mine()).shelf
     try Effect.try(() => assert.deepStrictEqual({ kept, shelf: shelf.length, left: previousSlotsLeft(slots) }, { kept: 0, shelf: 0, left: [savedSlot] }))
+  }
+})
+
+/** The slot and owner the previous version journaled this account's operation under. */
+effect function previousOperationSlot() {
+  const owner = JSON.stringify(["production", "u1", "org1"])
+  const hash = try tryPromise({ try: () => sha256Hex(JSON.stringify([owner, grantA])), catch: (cause) => cause })
+  return { slot: `inbox-operation:v1:${hash}`, owner }
+}
+
+// spec/inbox/operations.md, "An operation the previous version left unresolved stays its account's operation until its receipt settles"; spec/inbox/drafts.md, "A draft the previous version kept comes into its account's Drafts once, and the previous slots clear only after every draft is kept"
+it.live("A send the previous version left in flight blocks every send until its receipt settles it, and is never sent again", () => effect {
+  const log = calls()
+  const ownerHash = try tryPromise({ try: () => sha256Hex(previous), catch: (cause) => cause })
+  const operation = try previousOperationSlot()
+  let state = "outcome-unknown"
+  const receipt = (now: string) => ({ requestId: "legacy-1", kind: "send", reviewDigest: "e".repeat(64), state: now, providerResult: now === "succeeded" ? { messageId: "sent-1" } : null, rejectionCode: null })
+  const proposal = { kind: "send", mode: "compose", to: ["bo@example.com"], cc: [], bcc: [], subject: "Lunch", bodyText: "Saved body", attachments: [] }
+  const slots = new Map<string, string>([
+    [operation.slot, JSON.stringify({ version: 1, owner: operation.owner, grantId: grantA, requestId: "legacy-1", proposal, phase: "dispatching", review: null,
+      receipt: receipt("prepared"), source: { draftId: "p-sent" }, composer: { draftId: "p-sent" } })],
+    [`inbox-drafts:v1:shelf:${ownerHash}`, JSON.stringify({ version: 1, owner: previous, items: [{ draft: previousDraft("p-sent"), toQ: "" }, { draft: previousDraft("p-other", { subject: "Other" }), toQ: "" }] })],
+  ])
+  const cloud = mailCloud(log, {
+    "GET /api/v1/eliza/google/gmail/inbox-v1/operations/legacy-1": () => {
+      log.cloud.push("receipt legacy-1")
+      return { version: 1, providerExactlyOnce: false, receipt: receipt(state) }
+    },
+  })
+  provide inboxOver(log, slots, cloud) {
+    const mailbox = try Mailbox
+    const composer = try MailComposer
+    const operations = try MailOperations
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try settle(composer.changes, (s) => s.accounts.some((a) => a.shelf.length === 2))
+    try settle(operations.changes, (j) => j.records.some((r) => r.requestId === "legacy-1" && r.phase === "Observed"))
+    const adopted = try operations.current()
+    const shelf = (try composer.mine()).shelf
+    const other = shelf.find((d) => d.id === "p-other")!
+    const blocked = try operations.sendDraft(other)
+    state = "succeeded"
+    const settled = try operations.refresh()
+    const next = try operations.current()
+    try Effect.try(() => assert.deepStrictEqual({
+      adopted: { kind: adopted?.kind, phase: adopted?.phase, receipt: adopted?.receipt.receiptState, composer: adopted?.composer, source: adopted?.source.localDraft },
+      earlier: shelf.map((d) => [d.id, d.earlier]),
+      blocked, settled, next: next?.receipt.receiptState,
+      prepared: log.cloud.filter((call) => call.startsWith("prepare")),
+      left: [...slots.keys()].filter((key) => key.startsWith("inbox-")),
+    }, {
+      adopted: { kind: "SendKind", phase: "Observed", receipt: "UnknownReceipt", composer: { draftId: "p-sent", content: "" }, source: "" },
+      earlier: [["p-sent", true], ["p-other", false]],
+      blocked: "Uncertain", settled: "Sent", next: "SucceededReceipt",
+      prepared: [],
+      left: [],
+    }))
+  }
+})
+
+// spec/inbox/operations.md, "An operation the previous version left unresolved stays its account's operation until its receipt settles"
+it.live("A previous operation that was never dispatched, or that settled, is not taken, and its slot clears", () => effect {
+  const log = calls()
+  const operation = try previousOperationSlot()
+  const slots = new Map<string, string>([[operation.slot, JSON.stringify({ version: 1, owner: operation.owner, grantId: grantA, requestId: "legacy-2",
+    proposal: { kind: "archive", messageId: "m1", expectedHistoryId: "41" }, phase: "review", review: null,
+    receipt: { requestId: "legacy-2", kind: "archive", reviewDigest: "e".repeat(64), state: "prepared", providerResult: null, rejectionCode: null } })]])
+  provide inboxOver(log, slots) {
+    const mailbox = try Mailbox
+    const composer = try MailComposer
+    const operations = try MailOperations
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try settle(composer.changes, (s) => s.owner !== "")
+    const accounts = try InboxAccounts
+    const again = try keepPreviousDrafts(try accounts.selectedKey())
+    const journal = try operations.get()
+    try Effect.try(() => assert.deepStrictEqual({ again, records: journal.records.length, left: [...slots.keys()] }, { again: 0, records: 0, left: [] }))
   }
 })
 

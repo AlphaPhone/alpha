@@ -1,17 +1,18 @@
-// spec/calendar/agent.md, "Story: Return to the event I left Calendar from"; spec/calendar/approvals.md, "Story: Read where a Calendar request stands"
+// spec/calendar/agent.md, "Story: Return to the event I left Calendar from"; spec/calendar/approvals.md, "Story: Read where a Calendar request stands"; spec/calendar/approvals.md, "A Calendar request is listed under the agent's id with the change it would run"
 import { describe, it } from "@effect/vitest"
 import { AgentCalendar, eventSourceRevision } from "../../src/calendar/agent.vibe"
-import { approvalPresentation } from "../../src/calendar/approvalFields.vibe"
+import { approvalPresentation, queuedChange } from "../../src/calendar/approvalFields.vibe"
 import { bindCalendar, readCalendar } from "../../src/calendar/binding.vibe"
 import type { ApprovalRecord } from "../../src/calendar/feed.schema.vibe"
 import { agentEventKey } from "../../src/calendar/model.vibe"
 import { binding, calendarOver, otherBinding, same } from "./harness.vibe"
 import { CalendarAgentFake, DeviceCalendarFake } from "./resident-fake.ts"
 
+const source = { provider: "eliza" as const, side: "owner" as const, grantId: "eliza-calendar", connectorAccountId: "", calendarId: "primary" }
+const fields = { title: "Lunch", description: "", location: "", startAt: "2027-01-15T12:00:00.000Z", endAt: "2027-01-15T13:00:00.000Z", isAllDay: false, timeZone: "UTC" }
 const schedule: ApprovalRecord = {
-  id: "0f0f0f0f-1111-4222-8333-444455556666", state: "pending", action: "schedule_event", reason: "Add lunch", expiresAt: null,
-  payload: { action: "schedule_event", side: "owner", calendarId: "primary", title: "Lunch", startsAtMs: 1_800_000_000_000, endsAtMs: 1_800_003_600_000,
-    attendees: [], location: "", description: "", notifyAttendees: false },
+  id: `calendar-${"0f".repeat(20)}`, state: "pending", action: "schedule_event", reason: "Add lunch", expiresAt: null,
+  payload: { change: { action: "schedule_event", account: "acct-1", source, fields, recurrence: null }, digest: "d".repeat(64) },
 }
 
 describe("The agent's Calendar (spec/calendar/agent.md, spec/calendar/approvals.md)", () => {
@@ -38,11 +39,25 @@ describe("The agent's Calendar (spec/calendar/agent.md, spec/calendar/approvals.
 
   it.effect("a change whose target is not verified is shown but never complete (spec/calendar/approvals.md, \"Story: Read where a Calendar request stands\")", () => effect {
     // spec/calendar/approvals.md, "A request is complete only with its known fields, a verified current target and a valid time"
-    const created = approvalPresentation(schedule, { verified: false }, "UTC")
-    const modify: ApprovalRecord = { ...schedule, action: "modify_event", payload: { action: "modify_event", side: "owner", calendarId: "primary", eventId: "event-a",
-      expectedProviderVersion: "etag-1", patch: { title: "Lunch later" }, notifyAttendees: false } }
-    const unverified = approvalPresentation(modify, { verified: false }, "UTC")
-    const unknownField = approvalPresentation({ ...schedule, payload: { ...schedule.payload, secret: "x" } }, { verified: true }, "UTC")
+    const queued = queuedChange(schedule)!
+    const created = approvalPresentation(schedule, queued, { verified: false }, "UTC")
+    const modify: ApprovalRecord = { ...schedule, action: "modify_event", payload: { change: { action: "modify_event", account: "acct-1",
+      target: { source, eventId: "event-a", expectedVersion: "etag-1" }, scope: "instance", fields: { ...fields, title: "Lunch later" } }, digest: "d".repeat(64) } }
+    const unverified = approvalPresentation(modify, queuedChange(modify)!, { verified: false }, "UTC")
+    const extra = { ...schedule, payload: { ...schedule.payload, change: { ...(schedule.payload.change as object), secret: "x" } } }
+    const unknownField = approvalPresentation(extra, queuedChange(extra)!, { verified: true }, "UTC")
     try same([created.complete, created.fields.length > 0, unverified.complete, unknownField.complete], [true, true, false, false])
+  })
+
+  it.effect("a Calendar request is read only under the agent's id, filed under its own action with a digest (spec/calendar/approvals.md, \"Story: Read where a Calendar request stands\")", () => effect {
+    // spec/calendar/approvals.md, "A Calendar request is listed under the agent's id with the change it would run"
+    const decline: ApprovalRecord = { ...schedule, action: "cancel_event", payload: { change: { action: "respond_invitation", account: "acct-1",
+      target: { source, eventId: "event-a", expectedVersion: "etag-1" }, scope: "instance", response: "declined" }, digest: "d".repeat(64), targetStartAt: "2027-01-15T12:00:00.000Z" } }
+    const flat: ApprovalRecord = { ...schedule, payload: { action: "schedule_event", side: "owner", calendarId: "primary", title: "Lunch" } }
+    try same([
+      queuedChange(schedule) !== undefined, queuedChange(decline)?.targetStartAt, approvalPresentation(decline, queuedChange(decline)!, { verified: true, event: "Dentist", startsAt: 0, endsAt: 1 }, "UTC").heading,
+      queuedChange({ ...decline, action: "modify_event" }), queuedChange({ ...schedule, payload: { ...schedule.payload, digest: "" } }), queuedChange(flat),
+      queuedChange({ ...schedule, id: "calendar-1234" }), queuedChange({ ...schedule, id: "0f0f0f0f-1111-4222-8333-444455556666" }) !== undefined,
+    ], [true, Date.parse("2027-01-15T12:00:00.000Z"), "Decline invitation", undefined, undefined, undefined, undefined, true])
   })
 })

@@ -394,7 +394,9 @@ storage), under the same account key of environment, user, organization and Gmai
 composer binds to an account, each of those drafts that holds anything the owner wrote is put on
 that account's shelf under its own id, with its recipients, half-typed address, subject, body,
 attachments checked again as files, forwarded originals, reply, Gmail draft reference and its mark
-as an earlier version of a sent email. The recovery copy replaces the saved draft with the same id
+as an earlier version of a sent email. A draft the previous version's operation was sending, or had
+sent, when the phone updated (spec/inbox/operations.md) comes in marked as an earlier version of a
+sent email whatever its own mark said, so one tap cannot send it again. The recovery copy replaces the saved draft with the same id
 only when its edits were typed over that saved revision; a saved draft saved again after the copy's
 base is newer, keeps its place, and the stale copy is dropped. A draft already open or shelved is kept, so a second pass adds nothing. Only
 the account bound now receives drafts, a full shelf takes none, and the previous slots are cleared
@@ -414,6 +416,8 @@ pure def keepPrevious(s: Drafts, owner: str, draft: Draft, shelfBytes: int): Dra
   withAccount({ ...a, shelf: a.shelf.append(draft) }, s)
 }
 pure def previousKept(a: AccountDrafts, id: str): bool = a.open.id == id or onShelf(a.shelf, id)
+pure def previousEarlier(markedEarlier: bool, beingSent: bool): bool = markedEarlier or beingSent
+pure def lawADraftBeingSentComesInAsEarlier(markedEarlier: bool): bool = previousEarlier(markedEarlier, true)
 pure def previousSlotsClear(kept: int, total: int): bool = total >= 0 and kept == total
 pure def stepKeepingAPreviousDraftOnlyAddsToTheShelf(before: Drafts, via: str, after: Drafts): bool =
   via == "keepPrevious" implies (accountOf(before.owner, after).open == accountOf(before.owner, before).open

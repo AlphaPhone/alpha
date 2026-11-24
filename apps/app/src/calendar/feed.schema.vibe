@@ -102,9 +102,9 @@ export const WriteReceipt = Schema.Struct({
 
 const ApprovalStateText = Schema.Literals(["pending", "approved", "executing", "retryable", "reconciliation_required", "done", "rejected", "expired"])
 
-/** One approval request in the agent's queue. */
+/** One approval request in the agent's queue: the agent files a Calendar change under `calendar-<40 hex>`; a UUID is any other producer's. */
 export const ApprovalRow = Schema.Struct({
-  id: Schema.String.check(Schema.isPattern(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/)),
+  id: Schema.String.check(Schema.isPattern(/^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|calendar-[0-9a-f]{40})$/)),
   state: ApprovalStateText,
   subjectUserId: Schema.optionalKey(Schema.String),
   ownerEntityId: Schema.optionalKey(Schema.NullOr(Schema.String)),
@@ -113,11 +113,39 @@ export const ApprovalRow = Schema.Struct({
   reason: Text(8192),
   expiresAt: Schema.NullOr(Schema.String),
   updatedAt: Schema.optionalKey(Schema.String),
+  revision: Schema.optionalKey(Schema.String),
   payload: Schema.Record(Schema.String, Schema.Unknown),
 })
 
-/** The approvals listing. */
-export const Approvals = Schema.Struct({ approvals: Schema.Array(Schema.Unknown).check(Schema.isMaxLength(500)) })
+/** The approvals listing, with the owner the agent decides for. */
+export const Approvals = Schema.Struct({
+  ownerEntityId: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  approvals: Schema.Array(Schema.Unknown).check(Schema.isMaxLength(500)),
+})
+
+const ChangeSource = Schema.Struct(SourceKey)
+const ChangeTarget = Schema.Struct({ source: ChangeSource, eventId: Text(4096), expectedVersion: Text(4096) })
+const ChangeFields = Schema.Struct({
+  title: Text(4000), description: Text(32768), location: Text(4000), startAt: Text(64), endAt: Text(64), isAllDay: Schema.Boolean, timeZone: Text(128),
+  attendees: Schema.optionalKey(Schema.Array(Text(320)).check(Schema.isMaxLength(100))),
+})
+const ChangeRecurrence = Schema.Struct({
+  rule: Schema.Literals(["daily", "weekdays", "weekly"]), until: Schema.optionalKey(Text(64)), excluded: Schema.optionalKey(Schema.Array(Text(64)).check(Schema.isMaxLength(500))),
+})
+const WriteScope = Schema.Literals(["instance", "this_and_following", "series"])
+const Notify = { notifyAttendees: Schema.optionalKey(Schema.Literal(true)) }
+
+/** The change a queued Calendar request carries: plugin-calendar's CalendarMutationPayload, one of four operations. */
+export const CalendarChange = Schema.Union([
+  Schema.Struct({ action: Schema.Literal("schedule_event"), account: Text(1024), source: ChangeSource, fields: ChangeFields, recurrence: Schema.NullOr(ChangeRecurrence) }),
+  Schema.Struct({ action: Schema.Literal("modify_event"), account: Text(1024), target: ChangeTarget, scope: WriteScope, fields: ChangeFields, ...Notify }),
+  Schema.Struct({ action: Schema.Literal("cancel_event"), account: Text(1024), target: ChangeTarget, scope: WriteScope, ...Notify }),
+  Schema.Struct({ action: Schema.Literal("respond_invitation"), account: Text(1024), target: ChangeTarget, scope: Schema.Literals(["instance", "series"]),
+    response: Schema.Literals(["accepted", "tentative", "declined"]), ...Notify }),
+])
+
+/** A queued Calendar request's payload: the change, the digest the agent runs it under and the start of the event it changes. */
+export const ChangePayload = Schema.Struct({ change: Schema.Unknown, digest: Text(256), targetStartAt: Schema.optionalKey(Text(64)) })
 
 /** The agent's answer to one decision. */
 export const Resolution = Schema.Struct({
@@ -135,6 +163,7 @@ export type NextRecord = typeof NextContext.Type
 export type WriteRecord = typeof WriteReceipt.Type
 export type ApprovalRecord = typeof ApprovalRow.Type
 export type ResolutionRecord = typeof Resolution.Type
+export type CalendarChangeRecord = typeof CalendarChange.Type
 
 /** Decoders, failing with Schema's own issue on anything else. */
 export const decodeFeed = Schema.decodeUnknownEffect(Feed)
@@ -144,3 +173,8 @@ export const decodeWrite = Schema.decodeUnknownEffect(WriteReceipt)
 export const decodeApprovals = Schema.decodeUnknownEffect(Approvals)
 export const decodeApproval = Schema.decodeUnknownEffect(ApprovalRow)
 export const decodeResolution = Schema.decodeUnknownEffect(Resolution, { onExcessProperty: "error" })
+
+/** A queued change, read loosely (`changeOf`) to find the request, and exactly (`exactChangeOf`): a field the review cannot show leaves Approve off. */
+export const changePayloadOf = Schema.decodeUnknownOption(ChangePayload)
+export const changeOf = Schema.decodeUnknownOption(CalendarChange)
+export const exactChangeOf = Schema.decodeUnknownOption(CalendarChange, { onExcessProperty: "error" })

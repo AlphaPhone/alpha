@@ -151,6 +151,36 @@ pure def lawUnverifiedChangeIsIncomplete(onlyKnownFields: bool, detailsValid: bo
   not(approvalComplete(ModifyEvent, onlyKnownFields, false, detailsValid))
 ```
 
+### A Calendar request is listed under the agent's id with the change it would run
+
+The agent files a Calendar change under `calendar-` and 40 lowercase hex digits; a request any
+other producer files has a UUID. The row carries the change the agent would run (add, change,
+cancel or answer an invitation, with the calendar's source key, the target event and the version
+it was read at, and the event's fields), the digest the agent runs it under and, for a change to
+an existing event, that event's start as it was read, which is the start the target must still
+have. The row is filed under the change's own approval action: an invitation answer is a change,
+or a cancellation when it declines. A row whose change does not read, whose digest is empty or
+whose action is not the change's is not a request the review can show, so it reads as not found;
+a field the review cannot show leaves Approve off. The listing names once the owner the agent
+decides for, and a request is the owner's only when it was asked for by that owner. The revision
+a decision is tied to is the one the agent lists for the row.
+
+```quint
+type RequestId = AgentCalendarId | ProducerUuid | MalformedId
+type ChangeRead = ChangeDecoded({ filedAs: ApprovalAction, runsAs: ApprovalAction, digested: bool }) | ChangeUnreadable
+pure def requestListed(id: RequestId, change: ChangeRead): bool =
+  id != MalformedId and match change { | ChangeDecoded(c) => c.digested and c.filedAs == c.runsAs | ChangeUnreadable => false }
+pure def ownerVerified(listOwner: str, subject: str): bool = listOwner != "" and listOwner == subject
+pure def lawUnreadableOrMisfiledChangeIsNotFound(id: RequestId, filedAs: ApprovalAction, runsAs: ApprovalAction): bool =
+  not(requestListed(id, ChangeUnreadable)) and (filedAs != runsAs implies not(requestListed(id, ChangeDecoded({ filedAs: filedAs, runsAs: runsAs, digested: true }))))
+pure def lawRequestOfAnotherOwnerIsUnverified(listOwner: str, subject: str): bool = listOwner != subject implies not(ownerVerified(listOwner, subject))
+pure val idValues = Set(AgentCalendarId, ProducerUuid, MalformedId)
+pure val listOwnerValues = Set("", "owner-1", "owner-2")
+pure val subjectValues = Set("", "owner-1", "owner-2")
+pure val filedAsValues = Set(ScheduleEvent, ModifyEvent, CancelEvent)
+pure val runsAsValues = Set(ScheduleEvent, ModifyEvent, CancelEvent)
+```
+
 ### Only a change the provider accepted refreshes Calendar and Home
 
 Queued or declined reviews, replays, failures and previews refresh nothing.

@@ -1,7 +1,9 @@
-// spec/calendar/approvals.md, "A request is complete only with its known fields, a verified current target and a valid time"; spec/calendar/approvals.md, "Approve needs every field the change would apply to be shown; Decline is always possible for a pending request"
-import { approvalComplete, targetVerified } from "../../gen/calendar__approvals.effect.vibe"
-import type { ApprovalRecord, CalendarRecord as CalendarSummary, EventRecord } from "./feed.schema.vibe"
-import { formatDateTime, validZone } from "./time.ts"
+// spec/calendar/approvals.md, "A request is complete only with its known fields, a verified current target and a valid time"; spec/calendar/approvals.md, "Approve needs every field the change would apply to be shown; Decline is always possible for a pending request"; spec/calendar/approvals.md, "A Calendar request is listed under the agent's id with the change it would run"
+import { sourceKeyId } from "@elizaos/plugin-calendar"
+import { type ApprovalAction, type ChangeRead, type RequestId, approvalComplete, requestListed, targetVerified } from "../../gen/calendar__approvals.effect.vibe"
+import type { ApprovalRecord, CalendarChangeRecord, CalendarRecord as CalendarSummary, EventRecord } from "./feed.schema.vibe"
+import { changeOf, changePayloadOf, exactChangeOf } from "./feed.schema.vibe"
+import { formatDateTime, formatLongDate, validZone } from "./time.ts"
 
 /** The current event a change or cancellation targets, as one read of its calendar found it. */
 export interface ApprovalTarget {
@@ -20,54 +22,89 @@ export interface ApprovalField { readonly label: string; readonly value: string 
 /** What a review shows: its heading, its lines, and whether Approve may be offered. */
 export interface ApprovalPresentation { readonly heading: string; readonly fields: readonly ApprovalField[]; readonly complete: boolean }
 
-const COMMON = ["action", "side", "grantId", "calendarId", "notifyAttendees", "editorRequestSha256"]
-const SCHEDULE = [...COMMON, "title", "startsAtMs", "endsAtMs", "attendees", "location", "description", "timeZone", "allDay", "durationMinutes", "windowPreset", "recurrence", "sourceNote", "travelBuffer"]
-const MODIFY = [...COMMON, "eventId", "expectedProvider", "expectedProviderVersion", "expectedEventUpdatedAt", "expectedEventStartAtMs", "seriesMaster", "recurrenceScope", "patch"]
-const CANCEL = [...COMMON, "eventId", "expectedProvider", "expectedProviderVersion", "expectedEventUpdatedAt", "expectedEventStartAtMs", "seriesMaster", "recurrenceScope", "cancellationMode"]
-const PATCH = ["title", "startsAtMs", "endsAtMs", "attendees", "location", "description", "timeZone", "recurrence", "allDay"]
+/** A queued Calendar request read from its row: the change, whether it holds only fields the review shows, and the target's start as filed. */
+export interface QueuedChange {
+  readonly change: CalendarChangeRecord
+  readonly known: boolean
+  readonly targetStartAt?: number
+}
+
 const SCOPES: Readonly<Record<string, string>> = { instance: "This occurrence", this_and_following: "This and following", series: "Entire series" }
+const ANSWERS: Readonly<Record<string, string>> = { accepted: "Accept invitation", tentative: "Answer maybe", declined: "Decline invitation" }
+const RULES: Readonly<Record<string, string>> = { daily: "Every day", weekdays: "Every weekday", weekly: "Every week" }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
+/** The approval action the agent files a change under: an invitation answer is a modify, or a cancel when it declines. */
+export function approvalActionOf(change: CalendarChangeRecord): ApprovalRecord["action"] {
+  if (change.action !== "respond_invitation") return change.action
+  return change.response === "declined" ? "cancel_event" : "modify_event"
 }
 
-function instant(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 8.64e15
+const AGENT_REQUEST = /^calendar-[0-9a-f]{40}$/
+const PRODUCER_REQUEST = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const ACTIONS: Readonly<Record<ApprovalRecord["action"], ApprovalAction>> = { schedule_event: "ScheduleEvent", modify_event: "ModifyEvent", cancel_event: "CancelEvent" }
+
+/** What kind of request id a row is filed under: the agent's own Calendar id, another producer's UUID, or neither. */
+export function requestIdOf(id: string): RequestId {
+  return AGENT_REQUEST.test(id) ? "AgentCalendarId" : PRODUCER_REQUEST.test(id) ? "ProducerUuid" : "MalformedId"
 }
 
-/** The calendar and current event a request names, verified only when exactly one of each matches its version and start. */
-export function approvalTarget(payload: Readonly<Record<string, unknown>>, calendars: readonly CalendarSummary[], events: readonly EventRecord[]): ApprovalTarget {
-  const matches = (value: { calendarId: string; side: string; grantId?: string; provider?: string }) =>
-    value.calendarId === payload.calendarId && value.side === "owner" && String(value.grantId ?? "") === String(payload.grantId ?? "")
-    && (!payload.expectedProvider || value.provider === payload.expectedProvider)
-  const sources = calendars.filter(matches)
-  const found = events.filter((event) => matches(event) && (event.externalId === payload.eventId || event.id === payload.eventId)
-    && (payload.expectedEventStartAtMs == null || Date.parse(event.startAt) === payload.expectedEventStartAtMs))
+/** The change a row carries, when it is a Calendar change filed under its own approval action with a digest; otherwise undefined. */
+export function queuedChange(row: ApprovalRecord): QueuedChange | undefined {
+  const payload = changePayloadOf(row.payload)
+  const change = Option.isNone(payload) ? Option.none() : changeOf(payload.value.change)
+  const read: ChangeRead = Option.isNone(payload) || Option.isNone(change) ? { tag: "ChangeUnreadable" }
+    : { tag: "ChangeDecoded", filedAs: ACTIONS[row.action], runsAs: ACTIONS[approvalActionOf(change.value)], digested: payload.value.digest !== "" }
+  if (!requestListed(requestIdOf(row.id), read) || Option.isNone(payload) || Option.isNone(change)) return undefined
+  const start = payload.value.targetStartAt === undefined ? NaN : Date.parse(payload.value.targetStartAt)
+  return {
+    change: change.value, known: Option.isSome(exactChangeOf(payload.value.change)) && Option.isSome(changePayloadOf(row.payload, { onExcessProperty: "error" })),
+    ...(Number.isFinite(start) ? { targetStartAt: start } : {}),
+  }
+}
+
+/** The source key of the calendar a change writes to. */
+export function changeSourceKey(change: CalendarChangeRecord): string {
+  return sourceKeyId(change.action === "schedule_event" ? change.source : change.target.source)
+}
+
+/** The event version the agent compares a change with: the provider's etag, else the event's update time. */
+function eventVersion(event: EventRecord): string {
+  return typeof event.metadata.etag === "string" && event.metadata.etag !== "" ? event.metadata.etag : event.updatedAt
+}
+
+/**
+ * The calendar and current event a request names, verified only when exactly one of each matches, the event still starts when the
+ * request was filed (when it says) and still has the version the change was made against.
+ */
+export function approvalTarget(change: CalendarChangeRecord, calendars: readonly CalendarSummary[], events: readonly EventRecord[], targetStartAt?: number): ApprovalTarget {
+  const key = changeSourceKey(change)
+  const sources = calendars.filter((calendar) => sourceKeyId(calendar) === key)
+  if (change.action === "schedule_event") return { calendar: sources[0]?.summary, account: sources[0]?.accountEmail ?? undefined, verified: sources.length === 1 }
+  const target = change.target
+  const found = events.filter((event) => sourceKeyId({ provider: event.provider, side: event.side, grantId: event.grantId ?? "", connectorAccountId: event.connectorAccountId ?? "",
+    calendarId: event.calendarId }) === key && (event.id === target.eventId || event.externalId === target.eventId))
   const event = found.length === 1 ? found[0] : undefined
   const startsAt = Date.parse(event?.startAt ?? "")
   const endsAt = Date.parse(event?.endAt ?? "")
-  const etag = typeof event?.metadata.etag === "string" ? event.metadata.etag.trim() : undefined
-  const versionMatches = payload.expectedProviderVersion == null || etag === payload.expectedProviderVersion
   return {
     calendar: sources[0]?.summary, account: sources[0]?.accountEmail ?? undefined, event: event?.title, startsAt, endsAt, allDay: event?.isAllDay === true,
-    verified: targetVerified(sources.length, found.length, payload.expectedEventStartAtMs == null || startsAt === payload.expectedEventStartAtMs, versionMatches)
+    verified: targetVerified(sources.length, found.length, targetStartAt === undefined || startsAt === targetStartAt, event !== undefined && eventVersion(event) === target.expectedVersion)
       && Number.isFinite(startsAt) && Number.isFinite(endsAt) && endsAt > startsAt,
   }
 }
 
-/** The lines a review shows: only effect fields; versions and request ids stay authority, never prose. */
-export function approvalPresentation(row: ApprovalRecord, target: ApprovalTarget, zone: string): ApprovalPresentation {
-  const p = row.payload
+/** The lines a review shows: only effect fields; versions, digests and request ids stay authority, never prose. */
+export function approvalPresentation(row: ApprovalRecord, queued: QueuedChange, target: ApprovalTarget, zone: string): ApprovalPresentation {
+  const change = queued.change
   const fields: ApprovalField[] = []
   const add = (label: string, value: string) => fields.push({ label, value })
-  const heading = row.action === "schedule_event" ? "Add event" : row.action === "modify_event" ? "Change event"
-    : p.cancellationMode === "decline_invitation" ? "Decline invitation" : p.cancellationMode === "remove_private_copy" ? "Remove event from your calendar" : "Cancel event"
-  const allowed = row.action === "schedule_event" ? SCHEDULE : row.action === "modify_event" ? MODIFY : CANCEL
-  let known = Object.keys(p).every((key) => allowed.includes(key))
-  let valid = true
-  add("Calendar", target.calendar ?? (p.calendarId === "primary" ? "Primary calendar" : String(p.calendarId ?? "")))
+  const heading = change.action === "schedule_event" ? "Add event" : change.action === "modify_event" ? "Change event"
+    : change.action === "cancel_event" ? "Cancel event" : ANSWERS[change.response]!
+  let valid = approvalActionOf(change) === row.action
+  const calendarId = change.action === "schedule_event" ? change.source.calendarId : change.target.source.calendarId
+  add("Calendar", target.calendar ?? (calendarId === "primary" ? "Primary calendar" : calendarId))
   if (target.account) add("Account", target.account)
-  if (row.action !== "schedule_event") {
+  if (change.action !== "schedule_event") {
     if (!target.verified || !target.event?.trim()) valid = false
     else {
       add("Event", target.event)
@@ -78,42 +115,37 @@ export function approvalPresentation(row: ApprovalRecord, target: ApprovalTarget
       }
     }
   }
-  const value = row.action === "modify_event" ? p.patch : p
-  if (!isObject(value)) valid = false
-  else if (row.action !== "cancel_event") {
-    if (row.action === "modify_event" && Object.keys(value).some((key) => !PATCH.includes(key))) known = false
-    if (row.action === "schedule_event" && (typeof value.title !== "string" || value.title.trim() === "")) valid = false
-    if (typeof value.title === "string") add("Title", value.title || "No title")
-    if (isObject(value.allDay)) {
-      if (typeof value.allDay.startDate !== "string" || typeof value.allDay.endDateExclusive !== "string") valid = false
-      else add("Date", `${value.allDay.startDate} – ${value.allDay.endDateExclusive}`)
+  if (change.action === "schedule_event" || change.action === "modify_event") {
+    const f = change.fields
+    const startsAt = Date.parse(f.startAt)
+    const endsAt = Date.parse(f.endAt)
+    if (f.title.trim() === "" || !Number.isFinite(startsAt) || !Number.isFinite(endsAt) || endsAt < startsAt || (!f.isAllDay && endsAt === startsAt)) valid = false
+    if (f.timeZone !== "" && !validZone(f.timeZone)) valid = false
+    add("Title", f.title || "No title")
+    if (f.isAllDay) {
+      const day = validZone(f.timeZone) ? f.timeZone : "UTC"
+      if (Number.isFinite(startsAt)) add("Starts", formatLongDate(startsAt, day))
+      if (Number.isFinite(endsAt) && endsAt > startsAt) add("Ends", formatLongDate(endsAt - 1, day))
       add("Time", "All day")
     } else {
-      if (row.action === "schedule_event" && (!instant(value.startsAtMs) || !instant(value.endsAtMs) || value.endsAtMs <= value.startsAtMs)) valid = false
-      if (value.startsAtMs != null) { if (!instant(value.startsAtMs)) valid = false; else add("Starts", formatDateTime(value.startsAtMs, zone, true)) }
-      if (value.endsAtMs != null) { if (!instant(value.endsAtMs)) valid = false; else add("Ends", formatDateTime(value.endsAtMs, zone, true)) }
-      if (instant(value.startsAtMs) && instant(value.endsAtMs) && value.endsAtMs <= value.startsAtMs) valid = false
+      if (Number.isFinite(startsAt)) add("Starts", formatDateTime(startsAt, zone, true))
+      if (Number.isFinite(endsAt)) add("Ends", formatDateTime(endsAt, zone, true))
     }
-    if (value.timeZone != null) { if (typeof value.timeZone !== "string" || !validZone(value.timeZone)) valid = false; else add("Event time zone", value.timeZone) }
-    if (value.location != null) add("Location", typeof value.location === "string" && value.location !== "" ? value.location : "No location")
-    if (value.description != null) add("Notes", typeof value.description === "string" && value.description !== "" ? value.description : "No notes")
-    if (value.attendees != null) {
-      if (!Array.isArray(value.attendees)) valid = false
-      else add("Guests", value.attendees.length === 0 ? "No guests" : value.attendees.map((person) =>
-        typeof person === "string" ? person : isObject(person) && typeof person.email === "string" ? `${typeof person.displayName === "string" && person.displayName ? `${person.displayName} · ` : ""}${person.email}${person.optional === true ? " (optional)" : ""}` : "").join("\n"))
-    }
-    if (value.recurrence != null) {
-      if (!Array.isArray(value.recurrence) || value.recurrence.some((rule) => typeof rule !== "string")) valid = false
-      else add("Repeat", value.recurrence.length === 0 ? "Does not repeat" : (value.recurrence as string[]).map((rule) => rule.replace(/^RRULE:/, "")).join("\n"))
-    }
-  } else if (p.cancellationMode != null && !["organizer_cancel", "decline_invitation", "remove_private_copy"].includes(String(p.cancellationMode))) valid = false
-  if (p.recurrenceScope != null) {
-    if (typeof p.recurrenceScope !== "string" || SCOPES[p.recurrenceScope] === undefined) valid = false
-    else add("Applies to", SCOPES[p.recurrenceScope]!)
+    if (f.timeZone !== "") add("Event time zone", f.timeZone)
+    add("Location", f.location !== "" ? f.location : "No location")
+    add("Notes", f.description !== "" ? f.description : "No notes")
+    if (f.attendees !== undefined) add("Guests", f.attendees.length === 0 ? "No guests" : f.attendees.join("\n"))
   }
-  if (p.notifyAttendees !== undefined && typeof p.notifyAttendees !== "boolean") valid = false
-  if (row.action === "cancel_event" && typeof p.notifyAttendees !== "boolean") valid = false
-  add("Notify guests", p.notifyAttendees === true ? "Yes" : "No")
+  if (change.action === "schedule_event") {
+    const r = change.recurrence
+    if (r === null) add("Repeat", "Does not repeat")
+    else {
+      const until = r.until === undefined ? NaN : Date.parse(r.until)
+      if (r.until !== undefined && !Number.isFinite(until)) valid = false
+      add("Repeat", `${RULES[r.rule]}${Number.isFinite(until) ? ` until ${formatLongDate(until, zone)}` : ""}${(r.excluded?.length ?? 0) > 0 ? `, except ${r.excluded!.length} ${r.excluded!.length === 1 ? "occurrence" : "occurrences"}` : ""}`)
+    }
+  } else add("Applies to", SCOPES[change.scope]!)
+  add("Notify guests", change.action !== "schedule_event" && change.notifyAttendees === true ? "Yes" : "No")
   const action = row.action === "schedule_event" ? "ScheduleEvent" : row.action === "modify_event" ? "ModifyEvent" : "CancelEvent"
-  return { heading, fields, complete: approvalComplete(action, known, target.verified, valid) }
+  return { heading, fields, complete: approvalComplete(action, queued.known, target.verified, valid) }
 }
