@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import { act } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Screen } from "../gen/app__maps.effect.vibe";
+import { Machine as Credits } from "../gen/app__maps__credits.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import maps from "../src/maps/index.tsx";
 import type { Alpha } from "../src/runtime/area.tsx";
@@ -150,10 +151,13 @@ describe("Maps in a browser", () => {
     expect(world.maps.asked).toEqual([]);
 
     // spec/app/maps/index.md, "The place on the card is saved under a name, renamed under another, or forgotten"; spec/app/maps/index.md, "A saved list that cannot be read is never written over, and a change is told only once it reads back"
-    await fill("Name", "Quay");
+    await fill("Name", "Pier");
     await press("Save");
-    await until(first.alpha, runtime, Screen, (s) => s.saved.length === 2 && s.saved[1]?.name === "Quay" && s.notice === "PlaceSaved");
+    await until(first.alpha, runtime, Screen, (s) => s.saved.length === 2 && s.saved[1]?.name === "Pier" && s.notice === "PlaceSaved");
     expect(document.body.textContent).toContain("Place saved on this device.");
+    await fill("Name", "Quay");
+    await press("Rename");
+    await until(first.alpha, runtime, Screen, (s) => s.saved.length === 2 && s.saved[1]?.name === "Quay" && s.notice === "PlaceRenamed");
     await first.close();
 
     // spec/app/maps/index.md, "Saved places are kept on the phone, and are what survives a restart"
@@ -172,6 +176,13 @@ describe("Maps in a browser", () => {
     await press("Harbour Gallery");
     await until(second.alpha, again, Screen, (s) => s.place !== 0);
     expect([Boolean(button("Directions")), Boolean(button("Save")), Boolean(button("Share"))]).toEqual([true, false, false]);
+
+    // spec/app/maps/credits.md, "The credits panel opens from the badge or the information button of a drawn surface": Back closes it first
+    await press("Google Maps");
+    await until(second.alpha, again, Credits, (s) => s.infoOpen);
+    await hardware("back");
+    await until(second.alpha, again, Credits, (s) => !s.infoOpen);
+    await until(second.alpha, again, Screen, (s) => s.place !== 0);
 
     // spec/app/maps/index.md, "A route is asked from coordinates or another place, which ends a pending \"Use my location\"": Google's map offers no coordinate prompt
     await press("Directions");

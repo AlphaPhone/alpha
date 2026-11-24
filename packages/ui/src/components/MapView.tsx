@@ -1,6 +1,5 @@
 import * as maplibregl from "maplibre-gl";
 import type { GeoJSONSource, Map as MapLibre, StyleSpecification } from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
 import { Compass, Minus, Plus } from "lucide-react";
 import { type ReactNode, useCallback, useRef, useState } from "react";
 import { cn } from "../lib/cn.ts";

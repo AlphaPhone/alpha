@@ -130,7 +130,7 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
 
       {now === "Navigating" && (
         <Banner variant={state.trip.rerouting ? "warn" : "info"} action={can({ type: "endGuidance" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "endGuidance" })}>End</Button>}>
-          {state.trip.guidance === "Arrived" ? "You have arrived." : state.trip.rerouting ? "Finding a new route" : turn === undefined ? "" : `${turn.instruction}${after === undefined ? "" : `, then ${after.instruction}`}`}
+          {state.trip.guidance === "Arrived" ? `Arrived at ${kept?.name ?? spot?.name ?? "your destination"}.` : seen.here === undefined ? "Waiting for your location." : state.trip.rerouting ? "Finding a new route" : turn === undefined ? "" : `${turn.instruction}${after === undefined ? "" : `, then ${after.instruction}`}`}
         </Banner>
       )}
 
