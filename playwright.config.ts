@@ -14,8 +14,9 @@ const runSuffix=port===5317?'':`-${port}`;
 const webServerTimeout=scaledTimeout(180_000);
 // The production lane runs production-surface.spec.ts and every <name>.production.spec.ts.
 const productionSpec=/(production-surface|\.production)\.spec\.ts$/;
-// Live specs need a running local agent and real providers; only the live project runs them
-// (pnpm test:browser:live).
+// Live specs need a running local agent and real providers; only the live project runs them, and it
+// exists only when selected (`playwright test --project=live`). They still drive the legacy local-agent
+// bridge, and no package script runs them until local development starts a resident beside the renderer.
 const liveSpec=/\.local\.spec\.ts$/;
 
 // The top-level webServer list is not per-project. Start only the servers that the
