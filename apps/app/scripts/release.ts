@@ -16,6 +16,7 @@ import * as Channel from "../gen/release.ts";
 import {
   type Apk, type Blockers, admitted, channelManifest, channelRepository, channelRepositoryId, channelTag, clear, distributable, earlierRepositories, maxApkBytes, retiredTag,
 } from "../gen/release.ts";
+import { pilotPassed } from "../gen/app__image.ts";
 import * as Pilot from "../gen/release__pilot.ts";
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -412,7 +413,7 @@ const commands = {
     if (problems.length > 0) return yield* new ReleaseRefused({ message: `the pilot update is refused: ${problems.join(", ")}` });
     const update = yield* attempt(() => pilotUpdate({ adb, serial, apk: { file, sha256: read.sha256, versionCode: read.apk.version }, stockHome: found.values["stock-home"] }));
     yield* attempt(() => writeFileSync(out, `${JSON.stringify(update, null, 2)}\n`, { flag: "wx" }));
-    if (!update.state.passed) return yield* new ReleaseRefused({ message: `the pilot update did not pass; its record is ${out}` });
+    if (!pilotPassed(update.state)) return yield* new ReleaseRefused({ message: `the pilot update did not pass; its record is ${out}` });
     return update;
   }),
 } as const;
