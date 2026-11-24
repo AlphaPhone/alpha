@@ -12,6 +12,7 @@ export const meta: ComponentMeta<AssistantTurnNoteProps> = {
     "Look later": { status: "lookLater", onCheck },
     "Not sent": { status: "neverArrived" },
     "Cut off": { status: "cutOff" },
+    Acknowledged: { status: "replying", label: "Checking your calendar" },
   },
   play: {
     Unknown: presses("Check for reply", onCheck),

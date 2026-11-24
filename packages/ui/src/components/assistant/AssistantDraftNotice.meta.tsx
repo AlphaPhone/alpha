@@ -15,6 +15,7 @@ export const meta: ComponentMeta<AssistantDraftNoticeProps> = {
     Opening: { status: "opening", onRetry: undefined },
     Damaged: { status: "damaged", onRetry: undefined, onRecover },
     Unreadable: { status: "unreadable", onRetry: undefined, onReopen: fn() },
+    Long: { status: "long", onRetry: undefined },
     Conflict: { status: "conflict", onRetry: undefined, saved: "Ask Ana whether Friday lunch still stands, and book Cais if so.", onRestoreSaved, onKeepCurrent },
     Review: { status: "review", onRetry: undefined, saved: "What is on my calendar tomorrow?", onCheck, onRestoreSaved, onKeepCurrent },
   },

@@ -113,9 +113,9 @@ pure def lawAKeptHeightLiesBetweenTheZones(start: S::Detent, direction: Directio
 
 ```quint
 type Gesture = Idle | Pressed | Dragging
-type Dock = { gesture: Gesture, start: S::Detent, quiet: int, at: int, kept: int }
+type Dock = { gesture: Gesture, start: S::Detent, quiet: int, at: int, kept: int, voice: bool }
 
-pure val initial: Dock = { gesture: Idle, start: S::Bar, quiet: 0, at: 0, kept: 0 }
+pure val initial: Dock = { gesture: Idle, start: S::Bar, quiet: 0, at: 0, kept: 0, voice: false }
 
 pure val clickWindow = 400
 
@@ -138,7 +138,7 @@ pure def canPress(d: Dock, detent: S::Detent, now: int): bool = d.gesture == Idl
 
 pure def press(d: Dock, detent: S::Detent, now: int): Dock = { ...d, gesture: Pressed, start: detent, at: now }
 
-pure def canDrag(d: Dock): bool = d.gesture == Pressed
+pure def canDrag(d: Dock): bool = d.gesture == Pressed and not(d.voice and isOpen(d.start))
 
 pure def drag(d: Dock): Dock = { ...d, gesture: Dragging }
 ```
@@ -184,6 +184,23 @@ pure def canShift(d: Dock, now: int): bool = now >= d.at
 
 pure def shift(d: Dock, now: int): Moved =
   { state: { ...d, gesture: Idle, at: now, quiet: if (d.gesture == Idle) d.quiet else now + clickWindow }, out: List() }
+```
+
+### While voice owns Ask Alpha its open sheet is not dragged, a drag under way is let go, and the sheet is dragged again once voice ends
+
+The Talk and dictation controls stay where they are while voice runs; a
+press on them still taps.
+
+```quint
+pure def canVoicing(d: Dock, on: bool, now: int): bool = on != d.voice and now >= d.at
+
+pure def voicing(d: Dock, on: bool, now: int): Moved =
+  { state: { ...d, voice: on, at: now, gesture: if (on and d.gesture == Dragging) Idle else d.gesture,
+      quiet: if (on and d.gesture == Dragging) now + clickWindow else d.quiet }, out: List() }
+
+pure def alwaysVoiceDragsNoOpenSheet(d: Dock): bool = (d.voice and isOpen(d.start)) implies d.gesture != Dragging
+
+pure def sometimesVoiceHoldsTheSheet(d: Dock): bool = d.voice and isOpen(d.start) and d.gesture == Pressed
 ```
 
 ### Ask Alpha put away forgets the height its sheet was left at

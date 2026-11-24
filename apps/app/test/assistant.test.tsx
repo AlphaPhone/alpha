@@ -4,10 +4,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Chats } from "../gen/app__assistant__chats.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
+import { Machine as Reply } from "../gen/app__assistant__reply.effect.vibe";
 import { Machine as Search } from "../gen/app__assistant__search.effect.vibe";
 import type { Mount } from "../src/areas.ts";
 import assistant from "../src/assistant/index.tsx";
-import { button, closeAll, fill, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, fill, hardware, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -16,26 +17,42 @@ afterEach(closeAll);
 /** Ask Alpha in full, alone at its place: the journeys draw no other screen. */
 const mounts: Mount[] = [{ at: "assistant", load: () => import("../src/assistant/index.tsx") }];
 
-const lines = () => [...document.querySelectorAll("section[aria-label='Assistant'] ol[aria-label='Conversation'] li > span")].map((line) => line.textContent);
-const alerts = () => [...document.querySelectorAll("section[aria-label='Assistant'] [role=alert]")].map((alert) => alert.textContent);
+const lines = () => [...document.querySelectorAll("section[aria-label='Ask Alpha'] [role=log] article")].map((line) => line.querySelector("span")?.textContent);
+const rows = (list: string) => document.querySelector(`section[aria-label='${list}'] > div`)?.children.length ?? 0;
 
 /** Write `text` in the composer, as the owner types it. */
 async function write(text: string) {
   const { act } = await import("react");
   await act(async () => {
-    const box = document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message']");
+    const box = document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']");
     if (!box) throw new Error("no composer");
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(box, text);
     box.dispatchEvent(new Event("input", { bubbles: true }));
   });
 }
 
-/** Submit the form that holds the field or button named `name`. */
-async function submit(name: string) {
+/** Open the menu of the message that says `text` and choose `item`, as the owner does with the keyboard. */
+async function onMessage(text: string, item: string) {
   const { act } = await import("react");
   await act(async () => {
-    const field = document.querySelector(`[aria-label='${name}']`);
-    field?.closest("form")?.requestSubmit();
+    const found = [...document.querySelectorAll("[role=log] article button")].find((one) => one.textContent === text);
+    if (!(found instanceof HTMLButtonElement)) throw new Error(`no message ${text}`);
+    found.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  });
+  await act(async () => {
+    const chosen = [...document.querySelectorAll("[role=menuitem]")].find((one) => one.textContent === item);
+    if (!(chosen instanceof HTMLElement)) throw new Error(`no ${item} for ${text}`);
+    chosen.click();
+  });
+}
+
+/** Open the list of conversations, from the conversation's name. */
+async function chatsList() {
+  const { act } = await import("react");
+  await act(async () => {
+    const found = [...document.querySelectorAll("button")].find((one) => one.getAttribute("aria-label")?.startsWith("Chats, "));
+    if (!(found instanceof HTMLButtonElement)) throw new Error("no chats control");
+    found.click();
   });
 }
 
@@ -43,7 +60,7 @@ async function submit(name: string) {
 async function row(list: string, text: string) {
   const { act } = await import("react");
   await act(async () => {
-    const found = [...document.querySelectorAll(`[aria-label='${list}'] button`)].find((one) => one.textContent?.startsWith(text));
+    const found = [...document.querySelectorAll(`section[aria-label='${list}'] button`)].find((one) => one.textContent?.startsWith(text));
     if (!(found instanceof HTMLButtonElement)) throw new Error(`no row ${text} in ${list}`);
     found.click();
   });
@@ -60,10 +77,15 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Conversation, (s) => s.ready);
 
     // spec/app/assistant/composer.md, "A message written before its conversation existed moves into the new one, then its old slot is cleared on the exact revision read"
+    world.ask.metadata = [];
     await write("Hello");
     await press("Send");
     // spec/app/assistant/index.md, "A reply completes, streamed or all at once, even after the owner asked to stop it"
     await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Complete");
+    // spec/app/assistant/reply.md, "The settled reply is the whole final answer, shown and spoken, never the acknowledgment"
+    await until(alpha, runtime, Reply, (s) => s.status === "Settled" && s.final === "You said: Hello".length);
+    // spec/app/assistant/index.md, "The agent is told the view, the time zone, the day only from Calendar, and whether something is selected"
+    expect(world.ask.metadata).toMatchObject([{ observation: { view: "home", sensitive: false } }]);
     await until(alpha, runtime, Composer, (s) => s.away === "Free" && s.clear.outcome === "Confirmed" && s.draft.sync === "Kept");
     expect([lines(), world.ask.said, world.ask.opened]).toEqual([["Hello", "You said: Hello"], ["Hello"], 1]);
     expect(localStorage.getItem("alpha/assistant/slot/0/0@1")).toBe(null);
@@ -77,24 +99,29 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await write("x".repeat(64_001));
     await until(alpha, runtime, Composer, (s) => s.long);
     expect(button("Send")).toBe(undefined);
+    // spec/app/assistant/reply.md, "One brief acknowledgment at most, only from the agent's acknowledgment frame, before any tool runs"
+    world.ask.acknowledgment = "Let me look";
     await write("Again");
     await press("Send");
     await until(alpha, runtime, Conversation, (s) => s.turn.send.id === 2 && s.turn.reply === "Complete");
+    await until(alpha, runtime, Reply, (s) => s.turn === 2 && s.status === "Settled");
+    const said = await runtime.runPromise(Effect.flatMap(Reply, (machine) => machine.get()));
+    expect([said.acks, said.ackUnits, said.final]).toEqual([1, "Let me look".length, "You said: Again".length]);
     expect(lines()).toEqual(["Hello", "You said: Hello", "Again", "You said: Again"]);
 
     // spec/app/assistant/chats.md, "A fork is asked for from a message of the conversation showing"
-    await press("Fork from “Hello”");
+    await onMessage("Hello", "New chat from here");
     await until(alpha, runtime, Chats, (s) => s.origin === 1 && s.page.status === "Loaded");
     expect(lines()).toEqual(["Hello"]);
     // spec/app/assistant/chats.md, "Back to the original leaves the fork for the conversation it came from"
-    await press("Back to the original");
+    await press("Original chat");
     await until(alpha, runtime, Chats, (s) => s.chosen === 1 && s.page.status === "Loaded");
     expect(lines()).toEqual(["Hello", "You said: Hello", "Again", "You said: Again"]);
 
     // spec/app/assistant/chats.md, "The newest list says which conversations there are, and a conversation no longer listed stops showing"
-    await press("Chats");
+    await chatsList();
     await until(alpha, runtime, Chats, (s) => s.list.status === "Loaded");
-    expect([...document.querySelectorAll("nav[aria-label='Chats'] button")].length).toBe(2);
+    expect(rows("Chats")).toBe(2);
   });
 
   // spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/chats.md, "Story: Open a message that search found"
@@ -108,21 +135,22 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     // spec/app/assistant/search.md, "Words are searched from the first hit, and empty words are not searched"
     await press("Search chats");
     await fill("Search chats", "friday");
-    await submit("Search chats");
-    await until(alpha, runtime, Search, (s) => s.hits.status === "Loaded");
-    expect([...document.querySelectorAll("ul[aria-label='Hits'] li")].length).toBe(2);
+    await until(alpha, runtime, Search, (s) => s.hits.status === "Loaded" && s.words === "friday");
+    expect(rows("Results")).toBe(2);
     // spec/app/assistant/search.md, "Opening a hit closes search and opens its conversation around its message, and another conversation only while the turn and the composer are free"
-    await row("Hits", "Friday at noon");
+    await row("Results", "Friday at noon");
     await until(alpha, runtime, Chats, (s) => s.chosen > 0 && s.around > 0 && s.page.status === "Loaded");
-    expect([lines(), document.querySelector("ul[aria-label='Hits']")]).toEqual([["Lunch on Friday?", "Friday at noon works."], null]);
+    expect([lines(), document.querySelector("section[aria-label='Results']")]).toEqual([["Lunch on Friday?", "Friday at noon works."], null]);
 
     // spec/app/assistant/search.md, "Only the newest asking's hits are shown, a page at a time, after those already shown": a search that fails says so.
     world.ask.searchDown = true;
     await press("Search chats");
     await fill("Search chats", "noon");
-    await submit("Search chats");
     await until(alpha, runtime, Search, (s) => s.hits.status === "Failed");
-    expect(alerts()).toContain("Search did not answer");
+    expect(document.body.textContent).toContain("Search did not finish");
+    // spec/app/assistant/index.md, "Back closes a review, then search, then a quote or an edit, one at a time; with none of them open Back is the shell's"
+    await hardware("back");
+    await until(alpha, runtime, Search, (s) => !s.open);
   });
 
   // spec/app/assistant/index.md, "Story: Stop a reply"
@@ -134,7 +162,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const runtime = assistant.runtime(alpha);
     await until(alpha, runtime, Composer, (s) => s.slot === "Open");
     await until(alpha, runtime, Conversation, (s) => s.ready);
-    await press("Chats");
+    await chatsList();
     await until(alpha, runtime, Chats, (s) => s.list.status === "Loaded");
     await row("Chats", "Ask Alpha");
     await until(alpha, runtime, Composer, (s) => s.binding.conversation === 1 && s.slot === "Open");

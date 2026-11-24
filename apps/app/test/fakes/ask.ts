@@ -16,6 +16,10 @@ export interface AskScene {
   readonly kept: Map<string, Kept>;
   /** Searching answers 500. */
   searchDown: boolean;
+  /** The acknowledgment the agent writes with its first tool call, before its reply. */
+  acknowledgment?: string;
+  /** What each turn told the agent beside its text, as it arrived. */
+  metadata?: unknown[];
 }
 
 /** One conversation as the agent keeps it: its room, title and messages. */
@@ -39,6 +43,8 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
       controller.enqueue(frame({ type: "status", activity: "thinking" }));
+      if (scene.acknowledgment !== undefined) controller.enqueue(frame({ type: "acknowledgment", text: scene.acknowledgment }));
+      if (scene.acknowledgment !== undefined) controller.enqueue(frame({ type: "tool", name: "CALENDAR", label: "Using Calendar" }));
       if (scene.stalled) {
         controller.enqueue(frame({ type: "token", text: "Thinking" }));
         scene.turns.set(room, () => controller.close());
@@ -102,7 +108,8 @@ export function askRoutes(scene: AskScene): Route[] {
       if (request.method !== "POST" || !found) return;
       const messages = scene.kept.get(`c${found[1]}`)?.messages ?? [];
       const keep = (role: "user" | "assistant", text: string) => void messages.push({ id: `m${scene.said.length}${role === "user" ? "u" : "a"}`, role, text });
-      return request.json().then((body: { text: string }) => {
+      return request.json().then((body: { text: string; metadata?: unknown }) => {
+        scene.metadata?.push(body.metadata);
         if (found[2] === undefined) return Response.json({ text: `You said: ${body.text}`, ...named(scene.said.length) });
         scene.said.push(body.text);
         keep("user", body.text);
@@ -119,5 +126,6 @@ export function askRoutes(scene: AskScene): Route[] {
         return Response.json({ aborted: stop !== undefined, roomId: room, reason, outcome: stop === undefined ? "nothingRunning" : "stopped" });
       });
     },
+    (request, url) => (request.method === "GET" && url.pathname === "/api/status" ? Response.json({ serverInstanceId: "alpha-fake" }) : undefined),
   ];
 }
