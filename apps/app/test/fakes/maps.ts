@@ -43,6 +43,8 @@ export interface MapsScene {
   readonly listeners: Set<(result: LocationResult) => void>;
   /** The native watches the page started and has not cleared. */
   readonly watches: Set<string>;
+  /** Alpha's screen-off guidance service: the session running with its notification, the arrival notices shown, and whether the owner opened Alpha from the notification. */
+  readonly guidance: { session: string | undefined; title: string; text: string; arrivals: string[]; opened: boolean; stop?: (reason: string) => void };
 }
 
 export const harbour = cloudPlace("test:harbour", "Harbour Cafe", 43.7312, 7.4211, "+377 93 15 00 00");
@@ -67,6 +69,7 @@ export function mapsScene(): MapsScene {
     here: { latitude: 43.7300, longitude: 7.4200, accuracy: 8 },
     listeners: new Set(),
     watches: new Set(),
+    guidance: { session: undefined, title: "", text: "", arrivals: [], opened: false },
   };
 }
 
@@ -144,4 +147,42 @@ export function elizaLocation(scene: MapsScene, now: () => number, permission: (
       removeAllListeners: () => Promise.resolve(),
     };
   });
+}
+
+/** `AlphaMapsTransport` of Alpha's host: the foreground service that guides with the screen off, and its notification's Stop. */
+export function alphaMapsTransport(scene: MapsScene): Faked {
+  return (emit) => {
+    const guidance = scene.guidance;
+    guidance.stop = (reason) => {
+      const session = guidance.session;
+      guidance.session = undefined;
+      if (session !== undefined) emit("navigationStopped", { sessionId: session, reason });
+    };
+    return {
+      navigationAvailability: () => Promise.resolve({ background: true }),
+      startNavigation: ({ sessionId, title, text }: { sessionId: string; title: string; text: string }) => {
+        Object.assign(guidance, { session: sessionId, title, text });
+        return Promise.resolve();
+      },
+      updateNavigation: ({ sessionId, title, text }: { sessionId: string; title: string; text: string }) => {
+        const active = guidance.session === sessionId;
+        if (active) Object.assign(guidance, { title, text });
+        return Promise.resolve({ active });
+      },
+      navigationArrived: ({ text }: { text: string }) => {
+        guidance.arrivals.push(text);
+        return Promise.resolve({ shown: true });
+      },
+      stopNavigation: ({ sessionId }: { sessionId: string }) => {
+        const stopped = guidance.session === sessionId;
+        if (stopped) guidance.session = undefined;
+        return Promise.resolve({ stopped });
+      },
+      consumeNavigationOpen: () => {
+        const open = guidance.opened;
+        guidance.opened = false;
+        return Promise.resolve({ open });
+      },
+    };
+  };
 }

@@ -82,6 +82,8 @@ export interface MapViewProps {
   onPressEnd: () => void;
   /** The camera came to rest on this view. */
   onSettled: (view: MapBounds) => void;
+  /** The owner began to drag the map. */
+  onDragged?: () => void;
   /** What sits over the map: its credits and its controls. */
   children?: ReactNode;
   className?: string;
@@ -240,6 +242,7 @@ export function MapView(props: MapViewProps) {
     instance.on("mousemove", (event) => moved(event.point));
     instance.on("mouseup", end);
     instance.on("contextmenu", end);
+    instance.on("dragstart", () => latest.current.onDragged?.());
     instance.on("moveend", () => {
       const bounds = instance.getBounds();
       latest.current.onSettled({ north: bounds.getNorth(), south: bounds.getSouth(), east: bounds.getEast(), west: bounds.getWest(), zoom: Math.round(instance.getZoom()) });

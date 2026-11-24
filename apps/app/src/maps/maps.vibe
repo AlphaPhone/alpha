@@ -2,19 +2,21 @@
 import { CloudError } from "@elizaos/cloud/client"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Screen from "../../gen/app__maps.effect.vibe"
-import { mode, pressMs, readable, shown } from "../../gen/app__maps.effect.vibe"
+import { mode, pressMs, readable, shown, typingMs } from "../../gen/app__maps.effect.vibe"
 import type { Change, Effect as Out, Event as Ev, HandOff, Maps as State } from "../../gen/app__maps.effect.vibe"
 import * as Credits from "../../gen/app__maps__credits.effect.vibe"
 import type { Effect as CreditsOut, Event as CreditsEv } from "../../gen/app__maps__credits.effect.vibe"
-import { findTimeoutMs, holding } from "../../gen/app__maps__connection.effect.vibe"
+import { findTimeoutMs, holding, networkGraceMs } from "../../gen/app__maps__connection.effect.vibe"
 import type { Wait } from "../../gen/app__maps__connection.effect.vibe"
-import { judged } from "../../gen/app__maps__navigation.effect.vibe"
+import { judged, maxFixAgeMs, maxFixAheadMs } from "../../gen/app__maps__navigation.effect.vibe"
 import type { Offer, Origin, Travel } from "../../gen/app__maps__navigation.effect.vibe"
 import type { Saved } from "../../gen/app__maps__places.effect.vibe"
 import type { Grant as Allowed } from "../../gen/kit__permission.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { type CloudClient, Cloud } from "../platform/cloud.vibe"
-import { type Grant, Location } from "../platform/location.vibe"
+import { Device } from "../platform/device.vibe"
+import { type Grant, Location, type Sighting } from "../platform/location.vibe"
+import { Navigation } from "../platform/navigation.vibe"
 import { type Job, answer, due, following, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { type Coverage, type Spot, type View, type Way, atlas } from "./atlas.vibe"
@@ -27,16 +29,30 @@ module web {
   export function opened(url: string): void {
     globalThis.open?.(url, "_blank", "noopener")
   }
-  /** The phone's share sheet with `text`, where it has one. */
-  export async function shared(title: string, text: string): Promise<void> {
-    await globalThis.navigator?.share?.({ title, text })
+  /** The phone's share sheet with `text`, or, where the phone has none, `text` copied: whether either took it. */
+  export async function shared(title: string, text: string): Promise<boolean> {
+    const phone = globalThis.navigator
+    if (phone?.share !== undefined) {
+      await phone.share({ title, text })
+      return true
+    }
+    return copied(text)
+  }
+  /** `text` on the clipboard: whether it was put there. */
+  export async function copied(text: string): Promise<boolean> {
+    try {
+      await globalThis.navigator.clipboard.writeText(text)
+      return true
+    } catch {
+      return false
+    }
   }
   /** `text` read as JSON, or `undefined` where it is not JSON. @throws {never} */
   export function parsed(text: string): unknown {
     try { return JSON.parse(text) } catch { return undefined }
   }
 }
-import { opened, parsed, shared } from web
+import { copied, opened, parsed, shared } from web
 
 /** A Maps request the phone did not get an answer to: held back by a wait Cloud named, refused or failed. */
 error Unanswered { cause: unknown }
@@ -125,6 +141,18 @@ effect function searched(ticket: number, query: string): Ev!!(Cloud | Time | Scr
   } catch () => ({ type: "answerSearch", ticket, ok: false, found: 0 })
 }
 
+// spec/app/maps/index.md, "A starting point can be a place found by its name, around the phone or the last start"
+effect function foundOrigins(ticket: number, query: string): Ev!!(Cloud | Time | Screen.Machine) {
+  const { startLat, startLng } = try (try Screen.Machine).get()
+  const around = atlas.snapshot().here?.at ?? (startLat === 0 && startLng === 0 ? undefined : { lat: startLat, lng: startLng })
+  return effect {
+    const found = try asked((client, signal) => client.mapsPlacesSearch({ query, limit: 5, ...(around === undefined ? {} : { near: coordinateOf(around) }) }, { signal }))
+    const places = found.places.map((raw) => atlas.numberOf(spotOf(raw)))
+    atlas.originsFound(places)
+    return { type: "answerOrigins", ticket, ok: true, found: places.length }
+  } catch () => ({ type: "answerOrigins", ticket, ok: false, found: 0 })
+}
+
 // spec/app/maps/index.md, "The agent's search shows its cards in the conversation and leaves the screen alone"
 effect function foundForAgent(query: string): void!!(Cloud | Time | Screen.Machine) {
   try ignore(asked((client, signal) => client.mapsPlacesSearch({ query, limit: 5, ...near() }, { signal }))
@@ -169,36 +197,74 @@ function allowedOf(grant: Grant): Allowed {
   return grant === "precise" ? "Granted" : grant === "approximate" ? "Limited" : grant === "denied" ? "Denied" : "Unasked"
 }
 
-// spec/app/maps/index.md, "A fix goes to whoever holds the location"; spec/app/maps/navigation.md, "A fix moves guidance only when it is precise, fresh and close: arrival within 25 meters, a turn passed within 40 meters or beyond 60, the route left beyond 75"
+// spec/app/maps/index.md, "A fix goes to whoever holds the location"; spec/app/maps/navigation.md, "A fix moves guidance only when it is precise, fresh and close: arrival within 25 meters, a turn passed within 40 meters or beyond 60, the route left beyond 75"; spec/app/maps/connection.md, "\"Use my location\" gives up after 15 seconds without a fix"
 function located(session: number, once: boolean): Stream.Stream<Ev, never, Location | Time | Screen.Machine> {
   return Stream.unwrap(effect {
     const location = try Location
     const time = try Time
     const screen = try Screen.Machine
     const began = try time.now()
+    const exact = (try location.permission()) === "precise"
+    let gps = false
     const fixes = location.watch()
-      |> Stream.filter(%, (heard) => heard.kind === "fix")
-      |> Stream.mapEffect(%, (heard) => effect {
-        if (heard.kind !== "fix") return { type: "locationLost", session } satisfies Ev
-        const at: Point = { lat: heard.lat, lng: heard.lng }
-        atlas.located({ at, accuracy: heard.accuracy, approximate: !heard.precise })
+      |> Stream.map(%, (heard): Sighting | undefined => {
+        if (heard.kind !== "fix") return undefined
+        gps = true
+        return { ...heard, precise: heard.precise && exact }
+      })
+    const standIn = Stream.fromEffect(time.until(began + networkGraceMs) |> Effect.andThen(%, location.rough()))
+      |> Stream.map(%, (rough): Sighting | undefined => (gps || Option.isNone(rough) ? undefined : rough.value))
+    const heard = Stream.merge(fixes, standIn)
+      |> Stream.mapEffect(%, (fix) => effect {
+        if (fix === undefined) return undefined
+        const ageMs = (try time.now()) - fix.taken
+        if (once && fix.precise && (ageMs > maxFixAgeMs || ageMs < -maxFixAheadMs)) return undefined
+        return { fix, ageMs }
+      })
+      |> Stream.filterMap(%, (seen) => (seen === undefined ? Option.none() : Option.some(seen)))
+      |> Stream.mapEffect(%, ({ fix, ageMs }) => effect {
+        const at: Point = { lat: fix.lat, lng: fix.lng }
+        atlas.located({ at, accuracy: fix.accuracy, approximate: !fix.precise })
         if (once) return { type: "locationFix", session, fix: "Along" } satisfies Ev
         const { trip, chosen } = try screen.get()
         const way = atlas.way(trip.route, chosen)
-        const ageMs = (try time.now()) - heard.taken
         if (way === undefined) return { type: "locationFix", session, fix: "Along" } satisfies Ev
         const along = measured(at, { line: way.line, turns: way.turns.map((turn) => turn.at) }, trip.turn - 1)
-        return { type: "locationFix", session, fix: judged(heard.precise, ageMs, heard.accuracy, along.toEnd, along.toRoute, along.toStep, along.beyond) } satisfies Ev
+        return { type: "locationFix", session, fix: judged(fix.precise, ageMs, fix.accuracy, along.toEnd, along.toRoute, along.toStep, along.beyond) } satisfies Ev
       })
       |> Stream.catch(%, () => Stream.succeed<Ev>({ type: "locationLost", session }))
-    if (!once) return fixes
+    if (!once) return heard
     const givenUp = Stream.fromEffect(time.until(began + findTimeoutMs) |> Effect.as(%, { type: "findTimedOut", session } satisfies Ev))
-    return Stream.merge(Stream.take(fixes, 1), givenUp) |> Stream.take(%, 1)
+    return Stream.merge(Stream.take(heard, 1), givenUp) |> Stream.take(%, 1)
   })
 }
 
 effect function stopped(): void!!Location {
   try ignore((try Location).clear())
+}
+
+/** The words of the notification of guidance: where it goes and the next turn. */
+effect function notified(): { readonly title: string; readonly text: string }!!Screen.Machine {
+  const { trip, chosen, place } = try (try Screen.Machine).get()
+  const turn = atlas.way(trip.route, chosen)?.turns[trip.turn]
+  return { title: `Navigating to ${atlas.spot(place)?.name ?? "your destination"}`, text: turn?.instruction ?? "Follow the route" }
+}
+
+// spec/app/maps/index.md, "Android confirms or loses the service of this journey"; spec/app/maps/index.md, "The phone guides with the screen off only for the journey that just started"
+effect function guided(journey: number): Ev!!(Navigation | Screen.Machine) {
+  const { title, text } = try notified()
+  return { type: "serviceReport", journey, running: try (try Navigation).start(journey, title, text) }
+}
+
+// spec/app/maps/index.md, "End stops guidance and its location and goes back to the directions"
+effect function unguided(): void!!(Location | Navigation | Screen.Machine) {
+  try ignore((try Location).clear())
+  try (try Navigation).stop((try (try Screen.Machine).get()).trip.journey)
+}
+
+// spec/app/maps/index.md, "Arriving with Maps away is told once on the phone"
+effect function arrivedAway(place: number): void!!Navigation {
+  try (try Navigation).arrived("Arrived", `Arrived at ${atlas.spot(place)?.name ?? "your destination"}.`)
 }
 
 // spec/app/maps/index.md, "Continuing past the disclosure asks Android, once"
@@ -298,6 +364,12 @@ effect function restored(): readonly [Ev]!!KeyValueStore.KeyValueStore {
 effect function handed(place: number, kind: HandOff): void!!(Screen.Machine | Time) {
   const spot = atlas.spot(place)
   if (spot === undefined) return
+  if (kind === "CopyNumber") {
+    const number = spot.phone ?? ""
+    const ok = number === "" ? false : try (tryPromise(() => copied(number)) |> Effect.orElseSucceed(%, () => false))
+    try ignore((try Screen.Machine).send({ type: "numberCopied", ok }))
+    return
+  }
   const where = `${spot.at.lat / 1e6},${spot.at.lng / 1e6}`
   const { trip, chosen } = try (try Screen.Machine).get()
   const way = atlas.way(trip.route, chosen)
@@ -308,15 +380,17 @@ effect function handed(place: number, kind: HandOff): void!!(Screen.Machine | Ti
     when "Website": sync(() => { if (spot.website !== undefined) opened(spot.website) });
     when "MapsApp": sync(() => opened(`geo:${where}?q=${encodeURIComponent(`${where}(${spot.name})`)}`));
     when "Call": sync(() => { if (spot.phone !== undefined) opened(`tel:${spot.phone.replace(/[^+0-9]/g, "")}`) });
+    when "CopyNumber": Effect.void;
   })
 }
 
-function carry(fx: Out): Job<Ev, Cloud | Time | Location | Screen.Machine | KeyValueStore.KeyValueStore | Shell, []> {
+function carry(fx: Out): Job<Ev, Cloud | Time | Location | Navigation | Screen.Machine | KeyValueStore.KeyValueStore | Shell, []> {
   return match (fx) {
     when { tag: "ReadCoverage", let ticket }: answer("coverage", covered(ticket), { type: "answerCoverage", ticket, ok: false, covered: false, google: false, offer: noOffer });
     when { tag: "DrawMap" }: run("draw", Effect.void);
     when { tag: "FindPlaces", let ticket, let query }: answer("search", searched(ticket, query), { type: "answerSearch", ticket, ok: false, found: 0 });
     when { tag: "FindForAgent", let query }: run("agentSearch", foundForAgent(query));
+    when { tag: "FindOrigins", let ticket, let query }: answer("origins", foundOrigins(ticket, query), { type: "answerOrigins", ticket, ok: false, found: 0 });
     when { tag: "ReadDetails", let ticket, let place }: answer("details", detailed(ticket, place), { type: "answerDetails", ticket, ok: false });
     when { tag: "MakePin", let lat, let lng }: answer("pin", pinned({ lat, lng }), { type: "dropPin", place: 0 });
     when { tag: "PlanRoute", let ticket, let origin, let travel, let place, let lat, let lng }: answer("route", planned(ticket, origin, travel, place, { lat, lng }), { type: "answerRoute", ticket, ok: false, turns: 0, routes: 0 });
@@ -325,8 +399,9 @@ function carry(fx: Out): Job<Ev, Cloud | Time | Location | Screen.Machine | KeyV
     when { tag: "AskLocation" }: answer("permission", permitted(), { type: "observeLocation", grant: "Denied" });
     when { tag: "OpenLocationSettings" }: run("settings", settingsOpened());
     when { tag: "ShowMyLocation" }: run("show", sync(() => atlas.showMe()));
-    when { tag: "GuideWithScreenOff", let journey }: answer("service", succeed<Ev>({ type: "serviceReport", journey, running: false }), { type: "serviceReport", journey, running: false });
-    when { tag: "StopGuidance" }: run("location", stopped());
+    when { tag: "GuideWithScreenOff", let journey }: answer("service", guided(journey), { type: "serviceReport", journey, running: false });
+    when { tag: "StopGuidance" }: run("location", unguided());
+    when { tag: "TellArrival", let place }: run("arrival", arrivedAway(place));
     when { tag: "KeepSaved", let saved, let change }: answer("saved", keep(saved, change), { type: "savedKept", change, ok: false });
     when { tag: "HandedOn", let place, let kind }: run("handOn", handed(place, kind));
     when { tag: "OpenEvent" }: run("event", Effect.flatMap(Shell, (shell) => ignore(shell.send({ type: "openView", view: "Calendar" }))));
@@ -342,6 +417,7 @@ const screen = reacting(Screen, {
   timers: (state) => [
     ...(holding(state.link) ? [due("hold", state.link.holdEnds, { type: "waitEnded", hold: state.link.holds } satisfies Ev)] : []),
     ...(state.pressing ? [due("press", state.pressedAt + pressMs, { type: "pressHeld", press: state.presses } satisfies Ev)] : []),
+    ...(state.pausing ? [due("typing", state.typedAt + typingMs, { type: "typingSettled", typed: state.types } satisfies Ev)] : []),
   ],
 })
 
@@ -439,6 +515,54 @@ const opening = started(effect {
   })
 }, "opening Maps")
 
+// spec/app/maps/index.md, "Leaving Maps keeps guidance with its service and ends it without; a pending \"Use my location\" and the Calendar return end"; spec/app/maps/index.md, "The notification of this journey opens Maps on its guidance, or stops it"
+const presence = started(effect {
+  const shell = try Shell
+  const device = try Device
+  const screen = try Screen.Machine
+  const page = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
+  const inFront = Stream.zipLatest(shell.changes |> Stream.map(%, (s) => showing(s, "Maps")), page) |> Stream.map(%, ([maps, shown]) => maps && shown)
+  try Stream.runForEach(Stream.changes(inFront), effect (shown) => {
+    if (shown) {
+      try ignore(screen.send({ type: "comeBack" }))
+      return
+    }
+    try ignore(screen.send({ type: "leaveMaps" }))
+  })
+}, "following whether Maps shows")
+
+// spec/app/maps/index.md, "The notification of this journey opens Maps on its guidance, or stops it"
+const notification = started(effect {
+  const device = try Device
+  const screen = try Screen.Machine
+  const navigation = try Navigation
+  try Stream.runForEach(device.visible |> Stream.filter(%, (shown) => shown), effect () => {
+    if (!(try navigation.opened())) return
+    const { trip } = try screen.get()
+    try ignore(screen.send({ type: "openNotification", journey: trip.journey }))
+  })
+}, "opening Maps from its notification")
+
+// spec/app/maps/index.md, "Android confirms or loses the service of this journey"
+const serviceEnds = started(effect {
+  const screen = try Screen.Machine
+  try Stream.runForEach((try Navigation).ended, effect (ended) => {
+    const event: Ev = ended.by === "notification" ? { type: "stopFromNotification", journey: ended.journey } : { type: "serviceReport", journey: ended.journey, running: false }
+    try ignore(screen.send(event))
+  })
+}, "hearing guidance's service")
+
+// spec/app/maps/navigation.md, "The ongoing notification belongs to the journey whose service runs, and opening it shows Maps"
+const notificationWords = started(effect {
+  const screen = try Screen.Machine
+  const navigation = try Navigation
+  const facts = screen.changes |> Stream.filter(%, (s) => s.trip.guidance === "Going" && s.trip.service === "Running") |> Stream.map(%, (s) => [s.trip.journey, s.trip.turn, s.trip.route, s.chosen] as const)
+  try Stream.runForEach(Stream.changesWith(facts, (a, b) => a.every((x, i) => x === b[i])), effect ([journey]) => {
+    const { title, text } = try notified()
+    try ignore(navigation.update(journey, title, text))
+  })
+}, "writing guidance's notification")
+
 /**
  * Maps: its screen and the map's credits, which live from Maps' first opening until Alpha closes; the saved places,
  * kept on the phone; and what each follows: the shell's showing Maps, the account, Android's permission and the surface.
@@ -448,7 +572,10 @@ export const maps = together(
   credits,
   retried,
   opening,
-  following(Shell, (shell) => showing(shell, "Maps"), Screen.Machine, (shown): Ev => (shown ? { type: "comeBack" } : { type: "leaveMaps" })),
+  presence,
+  notification,
+  serviceEnds,
+  notificationWords,
   following(Screen.Machine, (state) => [state.place, state.details.status] as const, Screen.Machine, ([place, status]): Ev | undefined => (status !== "Idle" || (atlas.spot(place)?.id ?? "") === "" ? undefined : { type: "readDetails", place })),
   following(Screen.Machine, (state) => [state.link.plane, state.link.basemap === "Cloud"] as const, Credits.Machine, ([plane, raster]): CreditsEv => ({ type: "drawnOn", plane, raster })),
 )

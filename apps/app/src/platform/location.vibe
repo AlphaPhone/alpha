@@ -43,6 +43,8 @@ export service Location {
   request(): Grant!!
   /** A new native watch: that it started, then each position, high accuracy and at most one a second, until it fails; the watch outlives the stream until `clear`. */
   watch(): Stream.Stream<Heard, Unavailable>
+  /** One position from the network, approximate, where the phone has one: what stands in while GPS is silent. */
+  rough(): Option.Option<Sighting>!!
   /** Remove every native watch this page started: whether Android confirmed it. */
   clear(): boolean!!
   /** Android's location settings, where the owner can allow what they refused: whether they opened. */
@@ -83,6 +85,11 @@ export const phoneLocation = Layer.sync(Location, () => {
       }
       return confirmed
     },
+    rough: () => tryPromise(() => native.getCurrentPosition({ accuracy: "low", timeout: 10_000, maxAge: 30_000 }))
+      |> Effect.map(%, (read) => (read.kind === "fix"
+        ? Option.some<Sighting>({ lat: Math.round(read.coords.latitude * 1e6), lng: Math.round(read.coords.longitude * 1e6), accuracy: Math.round(read.coords.accuracy), precise: false, taken: read.coords.timestamp })
+        : Option.none<Sighting>()))
+      |> Effect.orElseSucceed(%, () => Option.none<Sighting>()),
     openSettings: () => tryPromise(() => settings().openSettingsPage({ page: "location" })) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false),
   }
 })
@@ -92,6 +99,7 @@ export const browserLocation = Layer.succeed(Location, {
   permission: () => succeed<Grant>("denied"),
   request: () => succeed<Grant>("denied"),
   watch: () => Stream.fail(new Unavailable({ cause: "a browser gives Maps no location" })),
+  rough: () => succeed(Option.none<Sighting>()),
   clear: () => succeed(true),
   openSettings: () => succeed(false),
 })

@@ -1,5 +1,5 @@
 import { elizaCalendar } from "./calendar.ts";
-import { elizaLocation } from "./maps.ts";
+import { alphaMapsTransport, elizaLocation } from "./maps.ts";
 import { type Faked, elizaAgent, elizaCloud, elizaSecureStore, present } from "./phone.ts";
 import type { Answering } from "./routes.ts";
 import { elizaSystem } from "./launcher.ts";
@@ -27,6 +27,7 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     ElizaWiFi: elizaWiFi(world.settings),
     ElizaPasswords: elizaPasswords(world.settings),
     AlphaCarrierSetup: alphaCarrierSetup(world.settings),
+    AlphaMapsTransport: alphaMapsTransport(world.maps),
     ...(world.image ? telephonyPlugins(world.telephony) : {}),
   };
 }

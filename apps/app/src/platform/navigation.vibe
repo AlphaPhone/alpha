@@ -1,0 +1,84 @@
+// spec/app/maps/index.md, "Story: Keep guiding away from Maps"; spec/app/maps/navigation.md, "Story: Keep guiding with the screen off"
+
+module held {
+  import { type PluginListenerHandle, registerPlugin } from "@capacitor/core"
+
+  /** Why Android ended a journey's service: Stop on its notification, the service lost, or arrival shown. */
+  export interface Stopped { sessionId: string; reason: string }
+  /** `AlphaMapsTransport`: Alpha's own plugin for the foreground service that guides with the screen off. */
+  export interface Transport {
+    navigationAvailability(): Promise<{ background: boolean }>
+    startNavigation(input: { sessionId: string; title: string; text: string }): Promise<void>
+    updateNavigation(input: { sessionId: string; title: string; text: string }): Promise<{ active: boolean }>
+    navigationArrived(input: { title: string; text: string }): Promise<{ shown: boolean }>
+    stopNavigation(input: { sessionId: string }): Promise<{ stopped: boolean }>
+    consumeNavigationOpen(): Promise<{ open: boolean }>
+    addListener(event: "navigationStopped", listener: (stopped: Stopped) => void): Promise<PluginListenerHandle>
+  }
+
+  let made: Transport | undefined
+  /** The plugin, registered once for the life of the page. @throws {never} */
+  export function plugin(): Transport {
+    return (made ??= registerPlugin<Transport>("AlphaMapsTransport"))
+  }
+}
+import { type Stopped, plugin } from held
+
+/** How the notification of a journey ended it: Stop pressed on it, or Android lost the service. */
+export type Ended = { readonly journey: number; readonly by: "notification" | "lost" }
+
+/** The phone's service that keeps guiding with the screen off, with its ongoing notification. */
+export service Navigation {
+  /** Start the service for `journey`, with its notification's words: whether Android runs it. */
+  start(journey: number, title: string, text: string): boolean!!
+  /** The notification's words for `journey`: whether its service still runs. */
+  update(journey: number, title: string, text: string): boolean!!
+  /** One "Arrived at" notice while Maps is off screen. */
+  arrived(title: string, text: string): void!!
+  stop(journey: number): void!!
+  /** Whether the owner opened Alpha from the notification since it was last asked. */
+  opened(): boolean!!
+  /** Each journey whose service Android ended. */
+  readonly ended: Stream.Stream<Ended>
+}
+
+const sessionOf = (journey: number) => `alpha-maps-${journey}`
+const journeyOf = (session: string): number | undefined => {
+  const found = /^alpha-maps-(\d+)$/.exec(session)
+  return found === null ? undefined : Number(found[1])
+}
+
+/** On the phone: Alpha's `AlphaMapsTransport` plugin. */
+export const phoneNavigation = Layer.sync(Navigation, () => {
+  const native = plugin()
+  return {
+    start: (journey: number, title: string, text: string) =>
+      tryPromise(() => native.startNavigation({ sessionId: sessionOf(journey), title, text })) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false),
+    update: (journey: number, title: string, text: string) =>
+      tryPromise(() => native.updateNavigation({ sessionId: sessionOf(journey), title, text })) |> Effect.map(%, (r) => r.active === true) |> Effect.orElseSucceed(%, () => false),
+    arrived: (title: string, text: string) => tryPromise(() => native.navigationArrived({ title, text })) |> Effect.ignore(%),
+    stop: (journey: number) => tryPromise(() => native.stopNavigation({ sessionId: sessionOf(journey) })) |> Effect.ignore(%),
+    opened: () => tryPromise(() => native.consumeNavigationOpen()) |> Effect.map(%, (r) => r.open === true) |> Effect.orElseSucceed(%, () => false),
+    ended: Stream.callback<Ended>((queue) => effect {
+      try acquireRelease(
+        promise(() => native.addListener("navigationStopped", (stopped: Stopped) => {
+          const journey = journeyOf(stopped.sessionId)
+          if (journey !== undefined && !["app", "renderer-closed", "replaced"].includes(stopped.reason)) {
+            Queue.offerUnsafe(queue, { journey, by: stopped.reason === "notification" ? "notification" : "lost" })
+          }
+        })),
+        (handle) => promise(() => handle.remove()),
+      )
+    }),
+  }
+})
+
+/** A browser has no service to guide with the screen off. */
+export const browserNavigation = Layer.succeed(Navigation, {
+  start: () => succeed(false),
+  update: () => succeed(false),
+  arrived: () => Effect.void,
+  stop: () => Effect.void,
+  opened: () => succeed(false),
+  ended: Stream.empty,
+})

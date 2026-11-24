@@ -187,7 +187,7 @@ describe("Maps in a browser", () => {
     // spec/app/maps/index.md, "A route is asked from coordinates or another place, which ends a pending \"Use my location\"": Google's map offers no coordinate prompt
     await press("Directions");
     await until(second.alpha, again, Screen, (s) => s.directions);
-    expect([document.querySelector("input[aria-label='Starting point']"), Boolean(button("From Office"))]).toEqual([null, true]);
+    expect([document.querySelector("input[aria-label='Starting point']")?.getAttribute("placeholder"), Boolean(button("From Office"))]).toEqual(["Place", true]);
   });
 
   it("A saved list Alpha cannot read is never written over (spec/app/maps/index.md, \"Story: Look at a place\")", async () => {

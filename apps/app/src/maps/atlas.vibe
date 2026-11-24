@@ -63,6 +63,8 @@ export interface View {
 export interface Seen {
   readonly spots: ReadonlyMap<number, Spot>
   readonly results: ReadonlyArray<number>
+  /** The places the newest search for a starting point found, in the provider's order. */
+  readonly origins: ReadonlyArray<number>
   readonly ways: ReadonlyMap<number, ReadonlyArray<Way>>
   readonly here: Here | undefined
   /** Each coverage read's answer, by the ticket of the read: the machine decides which one is in force. */
@@ -74,7 +76,7 @@ export interface Seen {
   readonly showings: number
 }
 
-const empty: Seen = { spots: new Map(), results: [], ways: new Map(), here: undefined, coverages: new Map(), view: undefined, credited: undefined, showings: 0 }
+const empty: Seen = { spots: new Map(), results: [], origins: [], ways: new Map(), here: undefined, coverages: new Map(), view: undefined, credited: undefined, showings: 0 }
 const accounts = new Map<string, number>()
 let current: Seen = empty
 const listeners = new Set<() => void>()
@@ -110,6 +112,10 @@ export const atlas = {
   /** The places a search found, in the provider's order. */
   found(places: ReadonlyArray<number>): void {
     change({ results: places })
+  },
+  /** The places a search for a starting point found. */
+  originsFound(places: ReadonlyArray<number>): void {
+    change({ origins: places })
   },
   /** The routes a plan's `ticket` brought, in the provider's order. */
   routed(ticket: number, ways: ReadonlyArray<Way>): void {
