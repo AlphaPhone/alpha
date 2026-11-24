@@ -1,7 +1,7 @@
 // spec/clock/reminders.md, "Story: See my reminders as the phone holds them"; spec/clock/notifications.md, "Story: Act on exactly the notification I see"; spec/clock/handoff.md, "Clock's answer is shown as it came, and opening Clock is never an alarm result"
 // What the phone's plugins answer, decoded before any of it reaches a machine.
 
-const Instant = Schema.Number.check(Schema.makeFilter((value: number) => Number.isSafeInteger(value) && value >= 0))
+const Instant = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }))
 const Version = Schema.optionalKey(Schema.Number)
 
 /** The phone's capability report (`DailyApps.surfaceInfo`). */
@@ -96,7 +96,7 @@ export const AgentReminderReceipt = Schema.Struct({
 })
 
 /** The proposal digest the action journal holds for an approved entry (`AlphaActionJournal.get`). */
-export const JournalDigest = Schema.Struct({ digest: Schema.String.check(Schema.makeFilter((s: string) => s.length > 0 && s.length <= 128)) })
+export const JournalDigest = Schema.Struct({ digest: Schema.String.check(Schema.isBetweenLength(1, 128)) })
 
 /** The action journal's answer to `get`: the approved entry, or null when none is kept. */
 export const JournalEntryReply = Schema.Struct({ entry: Schema.NullOr(JournalDigest) })
