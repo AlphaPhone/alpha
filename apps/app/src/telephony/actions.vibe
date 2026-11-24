@@ -394,7 +394,13 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
       for (const query of [op.contact.displayName, ...op.contact.phoneNumbers]) {
         for (const found of (numbersOf(query) catch () => [] as Candidate[])) if (!twins.some((t) => t.candidateId === found.candidateId)) twins.push(found)
       }
-      const twin = twins.find((t) => op.contact.phoneNumbers.some((n) => sameLine(n, t.number)) || t.title.toLowerCase() === op.contact.displayName.toLowerCase())
+      let twin = twins.find((t) => op.contact.phoneNumbers.some((n) => sameLine(n, t.number)) || t.title.toLowerCase() === op.contact.displayName.toLowerCase())
+      // The search matches names, so a number saved under another name ("Mother" for "Mom") is found by Android's own number matching over the whole address book (#1453).
+      if (twin === undefined && op.contact.phoneNumbers.length > 0) {
+        const held = (bridgeCall("holders", (c) => c.holders.resolve({ surface: "phone", numbers: op.contact.phoneNumbers })) catch () => [] as readonly { readonly number: string; readonly name: string | null }[])
+        const holder = held.find((h) => h.name !== null)
+        if (holder !== undefined) twin = { candidateId: "add-anyway", title: holder.name!, number: holder.number }
+      }
       const shown = try choose(runId, twin === undefined ? [] : [{ candidateId: "add-anyway", title: twin.title, number: twin.number }])
       if (twin !== undefined && shown === undefined) return try cancelled(runId, result("cancelled"))
       const clients = bridges.clients() catch () => undefined

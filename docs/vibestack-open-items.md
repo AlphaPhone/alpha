@@ -367,5 +367,5 @@ vibestack-dp is an upstream question.
 - **Telephony (#1453):**
   - ported: the contact-save review shows each line on its own wrapping line, with its strike and weight, and says Remove, Add, Keep or Rename from in words (`changeLines`, `src/web/telephony/ReviewRowsView.tsx`; its ContactChange story);
   - when more contacts match, the card says "More than N contacts match …, including" (the on-phone review now reads one row past the ten and shows its note; the card is drawn before the lookup and says nothing);
-  - a new contact's numbers are also looked up with Android's exact number matching, so a number saved under another name is shown before it is added again. The port now looks each number up through the provider's own query (`contacts.list`), not Android's exact number matching.
+  - ported: a new contact's numbers are also looked up with Android's own number matching (the image's `resolveNames`, `PhoneLookup` over the whole address book, through its own `holders` client), so a number saved under another name is shown before it is added again. Unlike develop's `AlphaContactLookup.name`, the upstream lookup does not narrow PhoneLookup's candidates to the same E.164 number.
 

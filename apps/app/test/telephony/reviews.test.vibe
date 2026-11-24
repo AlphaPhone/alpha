@@ -2,11 +2,12 @@
 import type { ExecutorCall } from "@elizaos/agent/client"
 import { assert, it } from "@effect/vitest"
 import type { ContactDetail, ContactId, ContactVersion } from "@elizaos/os/bridges/contacts"
+import { Machine as ActionsMachine } from "../../gen/telephony__actions.effect.vibe"
 import { AssistantHost } from "../../src/assistant/host.vibe"
-import { changeLines } from "../../src/telephony/actions.vibe"
+import { changeLines, TelephonyActions } from "../../src/telephony/actions.vibe"
 import { operationPorts } from "../../src/telephony/operations.vibe"
 import { TelephonyCalls } from "../../src/telephony/ports.vibe"
-import { fakePhone } from "./fakes.vibe"
+import { fakePhone, until } from "./fakes.vibe"
 
 const maya: ContactDetail = {
   id: "7" as ContactId, lookup: "k7", displayName: "Maya Chen", givenName: "Maya", familyName: "Chen", starred: false,
@@ -35,6 +36,38 @@ it("a contact change says Remove, Add, Keep or Rename from on each of its lines,
       unchanged: ["Remove Maya@example.com", "Keep 4155550100", "Keep 4155550111"],
     },
   )
+})
+
+// spec/telephony/actions.md, "A name is looked up on the phone and the owner picks the exact number, even for one match"
+it.live("a new contact's number saved under another name is shown before it is added again, and a new number adds without a review", () => effect {
+  const fake = fakePhone()
+  fake.world.holders = { "4155550199": "Mother" }
+  provide fake.layer {
+    const actions = try TelephonyActions
+    const machine = try ActionsMachine
+    const mom = { type: "contact_create", contact: { displayName: "Mom", phoneNumbers: ["4155550199"], emailAddresses: [] } }
+    const running = fork actions.run(mom, "op-twin", { text: "add Mom 415-555-0199" })
+    const asked = try until(machine.changes, (a) => a.ongoing.tag === "Choosing")
+    try machine.send({ type: "reviewDismissed", runId: "op-twin" }, "Owner")
+    const twin = try Fiber.join(running)
+    fake.world.saveAnswer = () => Promise.resolve({ status: "saved" })
+    const fresh = { type: "contact_create", contact: { displayName: "Ana", phoneNumbers: ["4155550177"], emailAddresses: [] } }
+    const added = try actions.run(fresh, "op-new", { text: "add Ana 415-555-0177" })
+    try Effect.try(() => assert.deepStrictEqual(
+      {
+        asked: Option.map(asked, (a) => a.ongoing.tag === "Choosing" ? a.ongoing.candidates : []),
+        twin: twin.settled,
+        added: added.settled,
+        looked: fake.calls.filter((c) => c.startsWith("holders:")),
+      },
+      {
+        asked: Option.some([{ candidateId: "add-anyway", title: "Mother", number: "4155550199" }]),
+        twin: "OwnerCancelled",
+        added: "Applied",
+        looked: ["holders:4155550199", "holders:4155550177"],
+      },
+    ))
+  }
 })
 
 // spec/telephony/actions.md, "A view change that shows the outcome waits for the reply that carries it"
