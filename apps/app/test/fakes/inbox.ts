@@ -23,6 +23,8 @@ export interface InboxScene {
   revoked: boolean;
   /** Every change asked of Gmail, as `<kind> <message>`, once it was dispatched. */
   readonly changes: string[];
+  /** The name of every file a dispatched send carried. */
+  readonly attached: string[];
 }
 
 const everything: GoogleStatus["grantedCapabilities"] = ["google.basic_identity", "google.gmail.triage", "google.gmail.send", "google.gmail.manage"];
@@ -48,7 +50,7 @@ export function inboxScene(): InboxScene {
       letter(3, "Win a prize", ["SPAM"]),
       letter(4, "Notes from me", ["SENT"]),
     ],
-    history: 500, offline: false, revoked: false, changes: [],
+    history: 500, offline: false, revoked: false, changes: [], attached: [],
   };
 }
 
@@ -91,7 +93,8 @@ function operation(requestId: string, kind: MailOperation["receipt"]["kind"], st
 function relabel(stored: Stored, kind: string) {
   const without = (label: string) => stored.card.labels.filter((one) => one !== label);
   const labels = kind === "mark-read" ? without("UNREAD") : kind === "mark-unread" ? [...stored.card.labels, "UNREAD"]
-    : kind === "archive" ? without("INBOX") : kind === "trash" ? [...without("INBOX"), "TRASH"] : stored.card.labels;
+    : kind === "archive" ? without("INBOX") : kind === "trash" ? [...without("INBOX"), "TRASH"]
+    : kind === "unarchive" ? [...without("INBOX"), "INBOX"] : kind === "untrash" ? [...without("TRASH").filter((one) => one !== "INBOX"), "INBOX"] : stored.card.labels;
   stored.card = { ...stored.card, labels, isUnread: labels.includes("UNREAD") };
 }
 
@@ -129,6 +132,27 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       return request.json().then(({ requestId, proposal }: { requestId: string; proposal: { kind: MailOperation["receipt"]["kind"]; messageId: string } }) => {
         asked.set(requestId, proposal);
         return Response.json(operation(requestId, proposal.kind, "prepared"));
+      });
+    },
+    (request, url) => {
+      const requestId = new RegExp(`^${operations}/([^/]+)/dispatch$`, "u").exec(url.pathname)?.[1];
+      if (request.method !== "POST" || requestId === undefined || asked.get(requestId)?.kind !== "send") return;
+      return request.json().then(({ proposal }: { proposal: { to: string[]; subject: string; bodyText: string; attachments?: { name: string }[] } }) => {
+        scene.changes.push(`send ${proposal.to.join(",")} ${proposal.subject}`);
+        scene.attached.push(...(proposal.attachments ?? []).map((file) => file.name));
+        scene.mail.push({ ...letter(scene.mail.length + 100, proposal.subject, ["SENT"], proposal.bodyText), card: { ...letter(scene.mail.length + 100, proposal.subject, ["SENT"]).card, to: proposal.to } });
+        return Response.json(operation(requestId, "send", "succeeded"));
+      });
+    },
+    (request, url) => {
+      const requestId = new RegExp(`^${operations}/([^/]+)/dispatch$`, "u").exec(url.pathname)?.[1];
+      const kind = requestId === undefined ? undefined : asked.get(requestId)?.kind;
+      if (request.method !== "POST" || requestId === undefined || (kind !== "draft-create" && kind !== "draft-replace" && kind !== "draft-delete")) return;
+      return request.json().then(({ proposal }: { proposal: { subject?: string; draftId?: string } }) => {
+        scene.changes.push(`${kind} ${proposal.subject ?? proposal.draftId ?? ""}`);
+        const done = operation(requestId, kind, "succeeded");
+        const draftId = proposal.draftId ?? `d${scene.changes.length}`;
+        return Response.json(kind === "draft-delete" ? done : { ...done, receipt: { ...done.receipt, providerResult: { draftId, messageId: `m${draftId}`, providerDigest: "b".repeat(64) } } });
       });
     },
     (request, url) => {

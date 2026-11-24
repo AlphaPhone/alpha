@@ -11,6 +11,8 @@ const notices = {
   savedMessage: { variant: "info", text: "Saved copy. Links and attachments are off." },
   imagesHidden: { variant: "info", text: "Images are hidden", action: "Show images" },
   reconnect: { variant: "warn", text: "Gmail access was withdrawn", action: "Reconnect" },
+  offline: { variant: "warn", text: "You are offline", action: "Try again" },
+  unreachable: { variant: "warn", text: "Gmail could not be reached", action: "Try again" },
   sendingOff: { variant: "warn", text: "Sending is off for this account", action: "Turn on" },
   noReplyAddress: { variant: "warn", text: "No address to reply to" },
   notEditable: { variant: "warn", text: "Alpha cannot edit this draft safely", action: "Open in Gmail" },

@@ -251,30 +251,50 @@ export function revisionOf(card: MailCard | undefined): number {
 export interface Changed {
   readonly done: boolean
   readonly known: boolean
+  /** The cloud refused it because the owner's sign-in had expired. */
+  readonly expired: boolean
+  /** What Gmail reported it did, where it did it. */
+  readonly result?: Readonly<Record<string, unknown>>
 }
 
 function endedAs(operation: MailOperation): Changed {
   const state = operation.receipt.state
-  return state === "succeeded" ? { done: true, known: true } : state === "rejected" ? { done: false, known: true } : { done: false, known: false }
+  return state === "succeeded" ? { done: true, known: true, expired: false, result: operation.receipt.providerResult ?? {} } : state === "rejected" ? { done: false, known: true, expired: false } : { done: false, known: false, expired: false }
 }
 
+/** Whether eliza's client threw because the owner's cloud sign-in is no longer valid. */
+function expiredBy(failed: Asked): boolean {
+  return failed.cause instanceof CloudError && failed.cause.failure.tag === "CloudCredentialInvalid"
+}
+
+const refusedBefore: Changed = { done: false, known: true, expired: false }
+
+/** What Gmail is asked to do in one operation, as eliza's cloud client names it. */
+export type Proposal = Parameters<Cloud.Shape["client"]["gmailPrepare"]>[0]["proposal"]
+
 /**
- * Change one message's labels in Gmail, once, as attempt `id` of the machine whose job this is: prepared under the
- * attempt's own key (the `at`th message of the attempt under a key of its own), then dispatched as Gmail reviewed it. A refusal before the dispatch is known; any failure of the
- * dispatch itself leaves it unknown.
+ * Ask Gmail for `proposal` once, as attempt `id` of the machine whose job this is: prepared under the attempt's own
+ * key (the `at`th request of the attempt under a key of its own), then dispatched as Gmail reviewed it. A refusal
+ * before the dispatch is known; any failure of the dispatch itself leaves it unknown.
  */
-export effect function relabel(id: number, account: number, message: number, kind: "mark-read" | "mark-unread" | "archive" | "unarchive" | "trash" | "untrash", at = 0): Changed!!(Cloud | Mail | Attempts) {
+export effect function operate(id: number, account: number, proposal: Proposal, at = 0): Changed!!(Cloud | Mail | Attempts) {
   const { client } = try Cloud
   const ledger = try Mail
   const key = try (try Attempts).key(id)
   const requestId = at === 0 ? key : `${key.slice(0, -4)}${at.toString(16).padStart(4, "0")}`
   const grantId = ledger.grant(account)
-  const messageId = ledger.gmailId(message)
-  if (grantId === undefined || messageId === undefined) return { done: false, known: true }
-  const proposal = { kind, messageId, expectedHistoryId: ledger.card(message)?.metadata.historyId ?? "" }
-  const prepared = asked(() => client.gmailPrepare({ grantId, requestId, proposal })) catch () => undefined
-  if (prepared === undefined) return { done: false, known: true }
+  if (grantId === undefined) return refusedBefore
+  const prepared = asked(() => client.gmailPrepare({ grantId, requestId, proposal })) catch (failed) => failed
+  if (prepared instanceof Asked) return { ...refusedBefore, expired: expiredBy(prepared) }
   if (prepared.receipt.state !== "prepared") return endedAs(prepared)
-  const dispatched = asked(() => client.gmailDispatch({ grantId, requestId, reviewDigest: prepared.receipt.reviewDigest, proposal })) catch () => undefined
-  return dispatched === undefined ? { done: false, known: false } : endedAs(dispatched)
+  const dispatched = asked(() => client.gmailDispatch({ grantId, requestId, reviewDigest: prepared.receipt.reviewDigest, proposal })) catch (failed) => failed
+  return dispatched instanceof Asked ? { done: false, known: false, expired: expiredBy(dispatched) } : endedAs(dispatched)
+}
+
+/** Change one message's labels in Gmail, once, as `operate` does, at the history revision the list read it at. */
+export effect function relabel(id: number, account: number, message: number, kind: "mark-read" | "mark-unread" | "archive" | "unarchive" | "trash" | "untrash", at = 0): Changed!!(Cloud | Mail | Attempts) {
+  const ledger = try Mail
+  const messageId = ledger.gmailId(message)
+  if (messageId === undefined) return refusedBefore
+  return try operate(id, account, { kind, messageId, expectedHistoryId: ledger.card(message)?.metadata.historyId ?? "" }, at)
 }

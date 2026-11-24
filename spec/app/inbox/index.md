@@ -184,6 +184,14 @@ pure def canSearch(s: Mailbox, query: str): bool =
 pure def search(s: Mailbox, query: str): Moved = asking(0, turned({ ...s.selected, query: query }, s))
 ```
 
+### Back from a search shows its folder without the search, before Back leaves Inbox
+
+```quint
+pure def canClearSearch(s: Mailbox): bool = s.selected.query != "" and canSearch(s, "")
+
+pure def clearSearch(s: Mailbox): Moved = search(s, "")
+```
+
 ### Refresh reads the first page again, one read at a time, and keeps the list on screen until it answers
 
 Retry after a failed read is the same.
@@ -389,6 +397,22 @@ pure def canUnchoose(s: Mailbox, message: int): bool = s.chosen.contains(message
 
 pure def unchoose(s: Mailbox, message: int): Mailbox =
   { ...s, chosen: s.chosen.exclude(Set(message)), revision: s.revision + 1 }
+```
+
+### Select all chooses every message the list shows, in one change
+
+The messages are those on screen, which the shell names; a choice that
+adds nothing is no change.
+
+```quint
+pure val shownValues = Set(Set(1), Set(1, 2))
+
+pure def canChooseAll(s: Mailbox, shown: Set[int]): bool =
+  readable(s) and s.pages > 0 and not(s.saved) and shown.size() >= 1 and not(shown.contains(0))
+    and not(shown.subseteq(s.chosen))
+
+pure def chooseAll(s: Mailbox, shown: Set[int]): Mailbox =
+  { ...s, chosen: s.chosen.union(shown), revision: s.revision + 1 }
 ```
 
 ### A swipe chooses that message alone, to be archived

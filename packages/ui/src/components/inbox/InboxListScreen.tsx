@@ -12,7 +12,7 @@ import { InboxSelectionBar, type InboxSelectionBarProps } from "./InboxSelection
 export type InboxListScreenProps = Pick<InboxListProps, "rows" | "loading" | "onLoadMore" | "loadingMore"> &
   Pick<InboxFolderBarProps, "folder" | "unavailable"> &
   Pick<InboxSearchBarProps, "onSearch"> &
-  Pick<InboxSelectionBarProps, "onArchive" | "onTrash"> & {
+  Pick<InboxSelectionBarProps, "onArchive" | "onTrash" | "onRestore" | "onChooseAll"> & {
     /** The address of the account read; the account button shows it as its picture. Left out while none is chosen. */
     account?: string;
     /** What is typed in the search field. */
@@ -51,7 +51,7 @@ export type InboxListScreenProps = Pick<InboxListProps, "rows" | "loading" | "on
  */
 export function InboxListScreen({
   account, folder, unavailable, onChooseFolder, search, onSearchChange, onSearch, notice, onNoticeAction, state, onStateAction,
-  chosen = 0, onArchive, onTrash, aside = 0, onShelf, onRefresh, onCompose, onAccount, rows, loading, onLoadMore, loadingMore,
+  chosen = 0, onArchive, onTrash, onRestore, onChooseAll, aside = 0, onShelf, onRefresh, onCompose, onAccount, rows, loading, onLoadMore, loadingMore,
 }: InboxListScreenProps) {
   const actions = (
     <>
@@ -66,7 +66,7 @@ export function InboxListScreen({
       <InboxFolderBar folder={folder} unavailable={unavailable} onChoose={onChooseFolder} />
       {notice ? <InboxNotice kind={notice} onAction={onNoticeAction} /> : null}
       {aside > 0 && onShelf ? <Button variant="secondary" size="sm" onClick={onShelf} className="self-start"><PenLine />{aside}<span className="sr-only"> drafts set aside</span></Button> : null}
-      {chosen > 0 ? <InboxSelectionBar count={chosen} onArchive={onArchive} onTrash={onTrash} /> : null}
+      {chosen > 0 ? <InboxSelectionBar count={chosen} onArchive={onArchive} onTrash={onTrash} onRestore={onRestore} onChooseAll={onChooseAll} /> : null}
       {state && rows.length === 0 && !loading ? <InboxListState kind={state} onAction={onStateAction} /> : <InboxList rows={rows} loading={loading} onLoadMore={onLoadMore} loadingMore={loadingMore} />}
     </Screen>
   );
