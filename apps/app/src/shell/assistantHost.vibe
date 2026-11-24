@@ -200,6 +200,7 @@ export function composeExecutors(families: readonly OperationPorts[]): Operation
     handoff: (operation) => owner(operation)?.handoff?.(operation) ?? true,
     present: (operation, call) => owner(operation)?.present?.(operation, call),
     tabList: (operation) => owner(operation)?.tabList?.(operation) ?? false,
+    addressedText: (operation) => owner(operation)?.addressedText?.(operation) ?? false,
   }
 }
 

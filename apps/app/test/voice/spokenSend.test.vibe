@@ -1,0 +1,359 @@
+// spec/voice/conversation.md, "Story: Send a text I reviewed by saying so"; spec/voice/conversation.md, "A reply whose only card is one addressed text keeps voice listening and says the text is ready"; spec/voice/conversation.md, "Saying the send phrase sends the bound card once, as its Send tap does, only as the next thing said and only while it is still the one live text shown in that conversation"; spec/voice/conversation.md, "A reply that needs review stops voice with the microphone off and says it waits in the chat"
+import { assert, it } from "@effect/vitest"
+import { Machine, initial as conversationStart, machine, spokenTurn, textOffered } from "../../gen/voice__conversation.effect.vibe"
+import type { Conversation } from "../../gen/voice__conversation.ts"
+import { Composer } from "../../src/assistant/composer.vibe"
+import { DeviceExecutors, type OperationPorts } from "../../src/assistant/review.vibe"
+import { emptyTranscript } from "../../src/assistant/transcript.vibe"
+import { addressedTextOf } from "../../src/telephony/operations.vibe"
+import { initial as navStart, type Nav } from "../../gen/shell__navigation.ts"
+import { talkReview, type TalkChat } from "../../src/shell/talk-review.vibe"
+import { NO_TEXT_READY, TEXT_NOT_SENT } from "../../src/voice/spoken-text.ts"
+import { talkText, type TalkReview } from "../../src/voice/talk-text.vibe"
+import { assistantOver, fakeHost, fakePreferences, fakeResident, journalNative, wireProposal } from "../assistant/fakes.vibe"
+
+const S1 = `spec/voice/conversation.md, "A reply whose only card is one addressed text keeps voice listening and says the text is ready"`
+const S2 = `spec/voice/conversation.md, "Saying the send phrase sends the bound card once, as its Send tap does, only as the next thing said and only while it is still the one live text shown in that conversation"`
+const future = "2099-01-01T00:00:00.000Z"
+const listening: Conversation = { ...conversationStart, shown: "Listening", starts: 1 }
+
+/** The chat a conversation speaks into, as a fake: each reply leaves `offer`, the card shows while `said.shown`, and each bind and send is counted. */
+function fakeReview(offer: { readonly cards: number; readonly text?: string }, said: { shown: boolean; sends: string[]; binds?: string[] }): TalkReview {
+  return {
+    replied: () => Effect.succeed(offer),
+    bind: (proposalId: string) => Effect.sync(() => { said.binds?.push(proposalId) }),
+    shown: () => Effect.sync(() => said.shown),
+    send: (proposalId: string) => Effect.sync(() => { said.sends.push(proposalId); return "Message sent." }),
+  }
+}
+
+it.effect(`"Send this text" sends the bound text once, and a second "send" does nothing (${S2})`, () => effect {
+  provide machine(listening) {
+    const held = try Machine
+    const said = { shown: true, sends: [] as string[] }
+    const text = talkText(held, fakeReview({ cards: 1, text: "p1" }, said))
+    const cards = try text.replied("u1", true, "Text Sam I'm running late")
+    const bound = (try held.get()).textBound
+    const first = try text.heard("Send this text")
+    const second = try text.heard("Send this text")
+    const third = try text.heard("send it")
+    const after = try held.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { cards, bound, first, second, third, sends: said.sends, spokenSends: after.spokenSends, textBound: after.textBound, shown: after.shown },
+      { cards: "TextBound", bound: true, first: "Message sent.", second: NO_TEXT_READY, third: undefined, sends: ["p1"], spokenSends: 1, textBound: false, shown: "Listening" },
+    ))
+  }
+})
+
+it.effect(`no card, two cards, or a card no longer shown sends nothing by voice (${S2})`, () => effect {
+  const run = (offer: { readonly cards: number; readonly text?: string }, shown: boolean) => effect {
+    provide machine(listening) {
+      const held = try Machine
+      const said = { shown, sends: [] as string[] }
+      const text = talkText(held, fakeReview(offer, said))
+      const cards = try text.replied("u1", true, "Text Sam I'm running late")
+      const answer = try text.heard("Okay, send this text.")
+      return { cards, answer, sends: said.sends.length, spokenSends: (try held.get()).spokenSends }
+    }
+  }
+  const none = try run({ cards: 0 }, true)
+  const two = try run({ cards: 2 }, true)
+  const stale = try run({ cards: 1, text: "p1" }, false)
+  try Effect.try(() => assert.deepStrictEqual({ none, two, stale }, {
+    none: { cards: "NoCards", answer: NO_TEXT_READY, sends: 0, spokenSends: 0 },
+    two: { cards: "Review", answer: NO_TEXT_READY, sends: 0, spokenSends: 0 },
+    stale: { cards: "TextBound", answer: NO_TEXT_READY, sends: 0, spokenSends: 0 },
+  }))
+})
+
+it.effect(`only the next thing said may send it: other words go to the agent and end the binding, and a new Talk never inherits it (${S2})`, () => effect {
+  provide machine(listening) {
+    const held = try Machine
+    const said = { shown: true, sends: [] as string[] }
+    const text = talkText(held, fakeReview({ cards: 1, text: "p1" }, said))
+    try text.replied("u1", true, "Text Sam I'm running late")
+    const other = try text.heard("What's the weather tomorrow")
+    const late = try text.heard("Send this text")
+    try text.replied("u2", true, "Text Sam I'm running late")
+    try held.send({ type: "stop", media: false })
+    try held.send({ type: "start", route: "Device", echoCancelled: true, live: true, muteOffered: false, admitted: true, callActive: false })
+    const restarted = try held.get()
+    const inherited = try text.heard("Send this text")
+    try Effect.try(() => assert.deepStrictEqual(
+      { other, late, restarted: [restarted.starts, restarted.textBound], inherited, sends: said.sends.length },
+      { other: undefined, late: NO_TEXT_READY, restarted: [2, false], inherited: NO_TEXT_READY, sends: 0 },
+    ))
+  }
+})
+
+it.effect(`a reply that ran no action, or voice with no chat, binds nothing and leaves the send phrase to answer that nothing is ready (${S1})`, () => effect {
+  provide machine(listening) {
+    const held = try Machine
+    const said = { shown: true, sends: [] as string[] }
+    const quiet = try talkText(held, fakeReview({ cards: 1, text: "p1" }, said)).replied("u1", false, "What time is it")
+    const chatless = talkText(held, undefined)
+    const alone = try chatless.replied("u1", true, "Text Sam")
+    const answer = try chatless.heard("Send this text")
+    const bound = (try held.get()).textBound
+    try Effect.try(() => assert.deepStrictEqual({ quiet, alone, answer, sends: said.sends.length, bound }, { quiet: "NoCards", alone: "NoCards", answer: NO_TEXT_READY, sends: 0, bound: false }))
+  }
+})
+
+it(`the model binds a text only while voice runs, and a spoken turn counts a send only for the bound, shown card (${S2})`, () => {
+  const bound = textOffered({ ...listening, shown: "Thinking" })
+  assert.deepStrictEqual(
+    {
+      sent: spokenTurn(bound, true, true).spokenSends, notShown: spokenTurn(bound, true, false).spokenSends, otherWords: spokenTurn(bound, false, true).spokenSends,
+      unbound: spokenTurn(listening, true, true).spokenSends, ended: [spokenTurn(bound, false, false).textBound, spokenTurn(bound, true, true).textBound],
+    },
+    { sent: 1, notShown: 0, otherWords: 0, unbound: 0, ended: [false, false] },
+  )
+})
+
+it(`a text is addressed only when it sends to the number its card shows (${S1})`, () => {
+  assert.deepStrictEqual(
+    [
+      addressedTextOf({ type: "sms_send", recipients: ["4155550100"], body: "On my way", subscriptionId: 7 }),
+      addressedTextOf({ type: "sms_compose", target: { kind: "number", number: "4155550100" }, body: "On my way" }),
+      addressedTextOf({ type: "sms_compose", target: { kind: "contact", query: "Sam" }, body: "On my way" }),
+      addressedTextOf({ type: "sms_compose", query: "Sam", body: "On my way" }),
+      addressedTextOf({ type: "sms_compose", target: { kind: "number", number: "4155550100" }, body: "On my way", draft: true }),
+      addressedTextOf({ type: "phone_call", target: { kind: "number", number: "4155550100" } }),
+    ],
+    [true, true, false, false, false, false],
+  )
+})
+
+/** Executors whose operations are texts: an `sms_send` is addressed, anything else is not; each run is counted. */
+function textExecutors(runs: { count: number }) {
+  const ports: OperationPorts = {
+    validate: (operation) => operation,
+    execute: async () => { runs.count += 1; return { kind: "applied" } },
+    readBack: async () => ({ kind: "found" }),
+    describe: () => ({ title: "Send a text", detail: "To 4155550100: Running late" }),
+    classOf: () => "CommsAct",
+    target: () => ({ tag: "NoTarget" }),
+    summarize: (_operation, result) => result === "Applied" ? "Message sent." : "The message was not sent.",
+    addressedText: (operation) => (operation as { readonly type?: unknown }).type === "sms_send",
+  }
+  return Layer.succeed(DeviceExecutors, { ports })
+}
+
+const sms = (id: string, message: string, expiresAt = future) => wireProposal(id, "d".repeat(64), { type: "sms_send", recipients: ["4155550100"], body: "Running late" }, message, expiresAt)
+
+effect function transcriptNow() {
+  const composer = try Composer
+  const head = try Stream.runHead(composer.transcript)
+  return Option.isSome(head) ? head.value : emptyTranscript
+}
+
+/** The chat open on c1, then the spoken turn `u7`'s reply leaving `proposals`, over review-first `asks`. */
+effect function talkTurn(proposals: unknown[], asks: boolean, runs: { count: number }, conversation = "c1") {
+  provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "ok" }, proposals }), fakeHost([]), textExecutors(runs), journalNative(new Map()), fakePreferences({ asks, shares: false })) {
+    return try talkTurnHere(proposals, conversation)
+  }
+}
+
+effect function talkTurnHere(proposals: unknown[], conversation: string, listed: readonly unknown[] = [sms("p1", "u7")]) {
+  const composer = try Composer
+  try composer.open("c1", false)
+  proposals.push(...listed)
+  const offer = try composer.talkReplied(conversation, "u7", "Text Sam I'm running late")
+  // Talk binds the card it was offered, as talkText does once the conversation counted it.
+  if (offer.text !== undefined) try composer.talkBind(offer.text)
+  const after = try transcriptNow()
+  const cards = after.rows.flatMap((row) => row.kind === "card" ? [{ id: row.card.proposalId, state: row.card.state, addressed: row.card.addressedText === true }] : [])
+  return { offer, cards, voiceText: after.voiceText }
+}
+
+it.effect(`a spoken turn's one text card shows in the chat and is bound to Talk, with "Ask before Alpha acts" on or off (${S1})`, () => effect {
+  const on = try talkTurn([], true, { count: 0 })
+  const off = try talkTurn([], false, { count: 0 })
+  const expected = { offer: { cards: 1, text: "p1" }, cards: [{ id: "p1", state: "LiveCard", addressed: true }], voiceText: "p1" }
+  try Effect.try(() => assert.deepStrictEqual({ on, off }, { on: expected, off: expected }))
+})
+
+it.effect(`the bound card is sent once by voice, as its Send tap does, and is never sent again (${S2})`, () => effect {
+  const runs = { count: 0 }
+  const proposals: unknown[] = []
+  provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "ok" }, proposals }), fakeHost([]), textExecutors(runs), journalNative(new Map())) {
+    const composer = try Composer
+    try talkTurnHere(proposals, "c1")
+    const shown = try composer.talkTextShown("c1", "p1")
+    const sent = try composer.talkSend("p1")
+    const card = (try transcriptNow()).rows.find((row) => row.kind === "card")
+    const again = try composer.talkSend("p1")
+    const shownAfter = try composer.talkTextShown("c1", "p1")
+    try Effect.try(() => assert.deepStrictEqual(
+      { shown, sent, state: card?.kind === "card" ? card.card.state : "none", again, shownAfter, runs: runs.count },
+      { shown: true, sent: "Message sent.", state: "DoneCard", again: undefined, shownAfter: false, runs: 1 },
+    ))
+  }
+})
+
+it.effect(`two text cards, another conversation, a hidden screen, a changed screen, an expired card or a released binding show no text to send (${S2})`, () => effect {
+  const runs = { count: 0 }
+  const listedTwo: unknown[] = []
+  const twoCards = effect {
+    provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "ok" }, proposals: listedTwo }), fakeHost([]), textExecutors(runs), journalNative(new Map())) {
+      const composer = try Composer
+      const turn = try talkTurnHere(listedTwo, "c1", [sms("p1", "u7"), sms("p2", "u7")])
+      return { offer: turn.offer, voiceText: turn.voiceText, shown: try composer.talkTextShown("c1", "p1") }
+    }
+  }
+  const elsewhere = try talkTurn([], false, runs, "c2")
+  const hiddenScreen = { exposure: { privateView: false, locked: false, hidden: true, connectionDialog: false }, observation: { view: "home", revision: 1, sensitive: false }, onCalendar: false, contextKey: "home" }
+  const hidden = effect {
+    const listed: unknown[] = []
+    provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "ok" }, proposals: listed }), fakeHost([], hiddenScreen), textExecutors(runs), journalNative(new Map())) {
+      return (try talkTurnHere(listed, "c1")).offer
+    }
+  }
+  const later = (change: "screen" | "expired" | "released") => effect {
+    const listed: unknown[] = []
+    provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "ok" }, proposals: listed }), fakeHost([]), textExecutors(runs), journalNative(new Map())) {
+      const composer = try Composer
+      try talkTurnHere(listed, "c1", [sms("p1", "u7", change === "expired" ? "1970-01-01T00:00:00.000Z" : future)])
+      if (change === "screen") try composer.screenChanged("calendar:", false)
+      if (change === "released") try composer.talkReleased()
+      return try composer.talkTextShown("c1", "p1")
+    }
+  }
+  const results = {
+    two: try twoCards, elsewhere: elsewhere.offer, hidden: try hidden,
+    screen: try later("screen"), expired: try later("expired"), released: try later("released"), runs: runs.count,
+  }
+  try Effect.try(() => assert.deepStrictEqual(results, {
+    two: { offer: { cards: 2 }, voiceText: undefined, shown: false }, elsewhere: { cards: 0 }, hidden: { cards: 0 },
+    screen: false, expired: false, released: false, runs: 0,
+  }))
+})
+
+it.effect(`a text to a contact name still shows its card but binds nothing to Talk (${S1})`, () => effect {
+  const listed: unknown[] = []
+  provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "ok" }, proposals: listed }), fakeHost([]), textExecutors({ count: 0 }), journalNative(new Map())) {
+    const turn = try talkTurnHere(listed, "c1", [wireProposal("p3", "e".repeat(64), { type: "sms_compose", query: "Sam", body: "Running late" }, "u7", future)])
+    try Effect.try(() => assert.deepStrictEqual(turn, { offer: { cards: 1 }, cards: [{ id: "p3", state: "LiveCard", addressed: false }], voiceText: undefined }))
+  }
+})
+
+it.effect(`a shown card whose approval does not finish is answered on the phone, never as missing and never by failing the turn (${S2})`, () => effect {
+  const run = (send: (proposalId: string) => (string | undefined)!!, shown: (proposalId: string) => boolean!!) => effect {
+    provide machine(listening) {
+      const held = try Machine
+      const review: TalkReview = { replied: () => Effect.succeed({ cards: 1, text: "p1" }), bind: () => Effect.void, shown, send }
+      const text = talkText(held, review)
+      try text.replied("u1", true, "Text Sam I'm running late")
+      return try text.heard("Send this text")
+    }
+  }
+  const unfinished = try run(() => Effect.succeed(undefined), () => Effect.succeed(true))
+  const failed = try run(() => Effect.die(new Error("listing refused")), () => Effect.succeed(true))
+  const unreadable = try run(() => Effect.succeed("Message sent."), () => Effect.die(new Error("navigation gone")))
+  try Effect.try(() => assert.deepStrictEqual({ unfinished, failed, unreadable }, { unfinished: TEXT_NOT_SENT, failed: TEXT_NOT_SENT, unreadable: NO_TEXT_READY }))
+})
+
+it.effect(`a text is bound only once the conversation counted it, so voice that stopped as the reply settled binds nothing (${S1})`, () => effect {
+  provide machine({ ...listening, shown: "Off" }) {
+    const held = try Machine
+    const said = { shown: true, sends: [] as string[], binds: [] as string[] }
+    const cards = try talkText(held, fakeReview({ cards: 1, text: "p1" }, said)).replied("u1", true, "Text Sam I'm running late")
+    const bound = (try held.get()).textBound
+    try Effect.try(() => assert.deepStrictEqual({ cards, binds: said.binds, bound }, { cards: "Review", binds: [], bound: false }))
+  }
+})
+
+/** The composer as Talk reads it, as a fake: every reply offers text card `p1`, which is shown while bound. */
+function fakeChat(said: { binds: string[]; sends: string[] }): TalkChat {
+  return {
+    talkReplied: () => Effect.succeed({ cards: 1, text: "p1" }),
+    talkBind: (proposalId: string) => Effect.sync(() => { said.binds.push(proposalId) }),
+    talkTextShown: (_conversation: string, proposalId: string) => Effect.sync(() => said.binds.includes(proposalId)),
+    talkSend: (proposalId: string) => Effect.sync(() => { said.sends.push(proposalId); return "Message sent." }),
+  }
+}
+
+it.effect(`a text is offered and sent by voice only while the owner can see the open chat: never at the bar, on a hidden page, under a layer or a hold (${S1}; ${S2})`, () => effect {
+  const sheet: Nav = { ...navStart, voice: true, chat: "Sheet" }
+  const states: Record<string, Nav> = {
+    bar: { ...navStart, voice: true },
+    sheet,
+    offscreen: sheet,
+    full: { ...sheet, chat: "Full" },
+    surface: { ...navStart, voice: true, host: "AssistantSurface" },
+    hidden: { ...sheet, hidden: true },
+    layer: { ...sheet, layers: [{ id: "menu", kind: "MenuLayer", covers: false }] },
+    held: { ...sheet, holds: ["update"] },
+  }
+  const results: Record<string, unknown> = {}
+  for (const [name, nav] of Object.entries(states)) {
+    const said = { binds: [] as string[], sends: [] as string[] }
+    const review = talkReview("c1", fakeChat(said), { get: () => Effect.succeed(nav) }, () => name !== "offscreen")
+    const offer = try review.replied("u7", "Text Sam I'm running late")
+    try review.bind("p1")
+    const shown = try review.shown("p1")
+    try review.send("p1")
+    results[name] = { offered: offer.text !== undefined, shown, sent: said.sends.length }
+  }
+  const open = { offered: true, shown: true, sent: 1 }
+  const closed = { offered: false, shown: false, sent: 0 }
+  try Effect.try(() => assert.deepStrictEqual(results, { bar: closed, sheet: open, offscreen: { offered: true, shown: false, sent: 0 }, full: open, surface: open, hidden: closed, layer: closed, held: closed }))
+})
+
+it.effect(`an older live text card in the chat, or a text the agent made unbound to this turn, shows its card but binds nothing (${S1})`, () => effect {
+  const runs = { count: 0 }
+  const older = effect {
+    const listed: unknown[] = []
+    provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "ok" }, proposals: listed }), fakeHost([]), textExecutors(runs), journalNative(new Map())) {
+      const composer = try Composer
+      const first = try talkTurnHere(listed, "c1", [sms("p1", "u7")])
+      listed.length = 0
+      listed.push(sms("p2", "u8"))
+      const second = try composer.talkReplied("c1", "u8", "Text Sam I'm running late")
+      return { first: first.offer, second }
+    }
+  }
+  const unbound = effect {
+    const listed: unknown[] = []
+    provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "ok" }, proposals: listed }), fakeHost([]), textExecutors(runs), journalNative(new Map())) {
+      return (try talkTurnHere(listed, "c1", [wireProposal("p4", "f".repeat(64), { type: "sms_send", recipients: ["4155550100"], body: "Running late" }, undefined, future)])).offer
+    }
+  }
+  const results = { older: try older, unbound: try unbound, runs: runs.count }
+  try Effect.try(() => assert.deepStrictEqual(
+    results,
+    { older: { first: { cards: 1, text: "p1" }, second: { cards: 1 } }, unbound: { cards: 1 }, runs: 0 },
+  ))
+})
+
+/** Executors whose one operation creates a note, an allow-listed direct effect with review-first off; each run is counted. */
+function noteExecutors(runs: { count: number }) {
+  const ports: OperationPorts = {
+    validate: (operation) => operation,
+    execute: async () => { runs.count += 1; return { kind: "applied" } },
+    readBack: async () => ({ kind: "found" }),
+    describe: () => ({ title: "Create note", detail: "Groceries" }),
+    classOf: () => "CreateNote",
+    target: () => ({ tag: "NoTarget" }),
+    summarize: (_operation, result) => result === "Applied" ? "Note created." : "The note was not created.",
+  }
+  return Layer.succeed(DeviceExecutors, { ports })
+}
+
+it.effect(`a spoken turn is reviewed as a typed one: an allow-listed effect runs directly with review-first off, and its card waits with it on (${S1})`, () => effect {
+  const turn = (asks: boolean) => effect {
+    const runs = { count: 0 }
+    const listed: unknown[] = []
+    provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "ok" }, proposals: listed }), fakeHost([]), noteExecutors(runs), journalNative(new Map()), fakePreferences({ asks, shares: false })) {
+      const done = try talkTurnHere(listed, "c1", [wireProposal("n1", "a".repeat(64), { type: "note_create", title: "Groceries" }, "u7", future)])
+      const receipts = (try transcriptNow()).rows.filter((row) => row.kind === "receipt").length
+      return { offer: done.offer, cards: done.cards.length, receipts, runs: runs.count }
+    }
+  }
+  const off = try turn(false)
+  const on = try turn(true)
+  try Effect.try(() => assert.deepStrictEqual({ off, on }, {
+    off: { offer: { cards: 0 }, cards: 0, receipts: 1, runs: 1 },
+    on: { offer: { cards: 1 }, cards: 1, receipts: 0, runs: 0 },
+  }))
+})

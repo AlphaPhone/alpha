@@ -1,0 +1,54 @@
+// spec/voice/conversation.md, "Story: Send a text I reviewed by saying so"; spec/voice/conversation.md, "A reply whose only card is one addressed text keeps voice listening and says the text is ready"; spec/voice/conversation.md, "Saying the send phrase sends the bound card once, as its Send tap does, only as the next thing said and only while it is still the one live text shown in that conversation"; spec/shell/navigation.md, "A layer is listed once, closes with its owner or with Back, and holds the phone while open"
+import { talking, unblocked } from "../../gen/shell__navigation.effect.vibe"
+import type { Nav } from "../../gen/shell__navigation.ts"
+import type { TalkReview } from "../voice/talk-text.vibe"
+
+/** What Talk asks of the chat's composer for the one text it may send by voice. */
+export interface TalkChat {
+  talkReplied(conversation: string, messageId: string, words: string): { readonly cards: number; readonly text?: string }!!
+  talkBind(proposalId: string): void!!
+  talkTextShown(conversation: string, proposalId: string): boolean!!
+  talkSend(proposalId: string): (string | undefined)!!
+}
+
+/** The shell's navigation as Talk reads it. */
+export interface NavigationNow {
+  get(): Nav!!
+}
+
+/** Whether the owner can see the chat's cards: it is open, on a visible page, with no layer over it and nothing holding the phone. */
+export function chatShowsCards(nav: Nav): boolean {
+  return unblocked(nav) && talking(nav)
+}
+
+/** Is this card's enabled Send control actually hit-testable in the current viewport? */
+export function talkSendVisible(proposalId: string): boolean {
+  if (typeof document === "undefined") return false
+  for (const card of document.querySelectorAll<HTMLElement>("[data-alpha-proposal-id]")) {
+    if (card.dataset.alphaProposalId !== proposalId) continue
+    const send = card.querySelector<HTMLButtonElement>("button[data-alpha-talk-send]")
+    if (send === null || send.disabled) continue
+    const rect = send.getBoundingClientRect()
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+    if (rect.width > 0 && rect.height > 0 && hit !== null && send.contains(hit)) return true
+  }
+  return false
+}
+
+/** Present the reply's card in the open chat and send it only while its own enabled control is visible. */
+export function talkReview(conversation: string, chat: TalkChat, navigation: NavigationNow, visible: (proposalId: string) => boolean): TalkReview {
+  return {
+    replied: (messageId: string, words: string) => effect {
+      const offer = try chat.talkReplied(conversation, messageId, words)
+      if (offer.text === undefined || chatShowsCards(try navigation.get())) return offer
+      return { cards: offer.cards }
+    },
+    bind: (proposalId: string) => chat.talkBind(proposalId),
+    shown: (proposalId: string) => effect {
+      return chatShowsCards(try navigation.get()) && visible(proposalId) && (try chat.talkTextShown(conversation, proposalId))
+    },
+    send: (proposalId: string) => effect {
+      return chatShowsCards(try navigation.get()) && visible(proposalId) ? try chat.talkSend(proposalId) : undefined
+    },
+  }
+}
