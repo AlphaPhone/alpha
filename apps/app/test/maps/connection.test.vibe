@@ -1,0 +1,40 @@
+// spec/maps/connection.md, "Only the newest read for the bound account installs the provider"; spec/maps/connection.md, "Changing account retires the provider; rebuilding the client for the same account keeps it"
+import { assert, it } from "@effect/vitest"
+import { Machine as Connection } from "../../gen/maps__connection.effect.vibe"
+import { noOffer } from "../../gen/maps__vocabulary.effect.vibe"
+import { connectionLayer, MapsCoverage } from "../../src/maps/connection.vibe"
+import { contentLayer, MapsContent, type CoverageInfo } from "../../src/maps/content.vibe"
+
+const coverage: CoverageInfo = {
+  providerId: "alpha-osm", kind: "OpenProvider", connectionId: "conn_0123456789abcdef", revision: "first", attribution: "© data",
+  sourceName: "OpenStreetMap", recipients: [], regions: [], offer: { ...noOffer, drive: true },
+}
+
+it.effect("An installed generation publishes its coverage together and a late refusal cannot retire it", () => effect {
+  provide connectionLayer.pipe(Layer.provideMerge(contentLayer)) {
+    const connection = try Connection
+    const concrete = try MapsCoverage
+    const content = try MapsContent
+    try connection.send({ type: "bindAccount", account: 1, client: 1 })
+    const first = (try connection.send({ type: "residentStarts" })).state.generation
+    const observing = try Deferred.make<void>()
+    const installed = try Deferred.make<CoverageInfo | undefined>()
+    fork.scoped Stream.runForEach(connection.changes, (state) => effect {
+      if (state.phase === "Reading") try Deferred.succeed(observing, undefined)
+      if (state.phase === "Installed") try Deferred.succeed(installed, (try content.get()).coverage)
+    })
+    try Deferred.await(observing)
+    try concrete.settle({ attempt: first, reply: "ValidCoverage", coverage, message: "" })
+    const published = try Deferred.await(installed)
+    const next = (try connection.send({ type: "bindAccount", account: 2, client: 2 })).state.generation
+    const cleared = (try content.get()).coverage
+    try concrete.settle({ attempt: next, reply: "ValidCoverage", coverage: { ...coverage, revision: "second" }, message: "" })
+    try concrete.settle({ attempt: first, reply: "CoverageUnavailable", message: "Old coverage failure" })
+    const final = try concrete.get()
+    const shown = try content.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { published: published?.revision, cleared, current: final.coverage?.revision, shown: shown.coverage?.revision, message: shown.message },
+      { published: "first", cleared: undefined, current: "second", shown: "second", message: "" },
+    ))
+  }
+})

@@ -1,12 +1,12 @@
 // spec/maps/connection.md, "Every Maps request goes through the Cloud client, with its own request key, and a tile comes back as its image"; spec/maps/connection.md, "A coverage read starts only for a signed-in account, and a signed-out read sends nothing"; spec/maps/connection.md, "Only the newest read for the bound account installs the provider"; spec/maps/connection.md, "Changing account retires the provider; rebuilding the client for the same account keeps it"; spec/maps/connection.md, "A request may start only on the installed provider, for its account and generation, outside a pause"; spec/maps/connection.md, "A rate-limit refusal of the current generation pauses every data request until its wait ends"
-import { type Coverage, type CoverageReply, type MapsConnection, Machine as Connection, mayRequest, mayReturn, tileAccepted } from "../../gen/maps__connection.effect.vibe"
+import { canCoverageSettles, type CoverageReply, type MapsConnection, Machine as Connection, mayRequest, mayReturn, tileAccepted } from "../../gen/maps__connection.effect.vibe"
 import type { Offer, ProviderKind, Travel } from "../../gen/maps__vocabulary.ts"
-import { noOffer } from "../../gen/maps__vocabulary.effect.vibe"
 import { CloudError, type CloudClient } from "@elizaos/cloud/client"
 import { Cloud, CloudSignedOut, CloudUnavailable } from "../platform/cloud.vibe"
 import { nativeFailureOf } from "../platform/cloud-live.vibe"
 import { CloudServices } from "../platform/cloud-services.vibe"
-import { type CoverageInfo, MapsContent } from "./content.vibe"
+import { MapsCoverage } from "./connection.vibe"
+import type { CoverageInfo } from "./content.vibe"
 import { type MapsFailure, cloudFailure, decoded, failure, pauseOf } from "./failure.vibe"
 import { place as checkedPlace, Route } from "@elizaos/plugin-maps/client/contracts"
 import { Capabilities, type Coordinate, type Place, PlaceAnswer, PlacesAnswer, RoutesAnswer, TileTypes, type TravelMode, ViewportAnswer } from "./maps.schema.vibe"
@@ -111,24 +111,25 @@ export const providerLayer = Layer.effect(MapsProvider, effect {
   const cloud = try Cloud
   const client = (try CloudServices).client
   const connection = try Connection
-  const content = try MapsContent
+  const details = try MapsCoverage
 
   effect function admitted() {
     const now = try Clock.currentTimeMillis
-    const before = try connection.get()
-    const ticked = now > before.now ? (connection.send({ type: "tick", now }) catch () => undefined) : undefined
-    const s = ticked?.state ?? before
-    if (s.phase !== "Installed") {
-      if (s.account === 0) throw failure("unauthorized", "Sign in to Cloud to use Maps.")
+    if (now > (try connection.get()).now) connection.send({ type: "tick", now }) catch () => undefined
+    const { state, coverage } = try details.get()
+    if (state.account === 0) throw failure("unauthorized", "Sign in to Cloud to use Maps.")
+    if (state.phase !== "Installed" || coverage === undefined)
       throw failure("unconfigured", "Connect a Maps provider to search places and plan routes.")
-    }
-    if (!mayRequest(s)) throw failure("rate-limited", "Maps request limit reached. Try again later.")
-    return s
+    if (!mayRequest(state)) throw failure("rate-limited", "Maps request limit reached. Try again later.")
+    return { state, coverage }
   }
 
   /** One Maps call through the typed Cloud client, which sends each request with its own idempotency key; interrupting it cancels the request. */
-  effect function request<A>(call: (client: CloudClient, signal: AbortSignal) => Promise<A>) {
-    const s: MapsConnection = try admitted()
+  effect function request<A>(s: MapsConnection, call: (client: CloudClient, signal: AbortSignal) => Promise<A>) {
+    const current = try connection.get()
+    if (!mayReturn(current, s.generation, s.account, false))
+      throw failure("unauthorized", "The Maps account changed. Search again after signing in.")
+    if (!mayRequest(current)) throw failure("rate-limited", "Maps request limit reached. Try again later.")
     const raw = tryPromise({ try: (signal) => call(client, signal), catch: (error) => error }) catch effect (error) => {
       const now = try Clock.currentTimeMillis
       const refusal = error instanceof CloudError ? refusalOf(error, now) : new CloudUnavailable({ status: 0, message: "Cloud could not be reached." })
@@ -141,37 +142,31 @@ export const providerLayer = Layer.effect(MapsProvider, effect {
     return raw
   }
 
-  effect function installed() {
-    const coverage = (try content.get()).coverage
-    if (coverage === undefined) throw failure("unconfigured", "Connect a Maps provider to search places and plan routes.")
-    return coverage
-  }
-
   return {
     effect search(query: string, near?: Coordinate) {
       const text = query.trim()
       if (text === "") return []
       if (text.length > 300) throw failure("unsupported", "Use a search of at most 300 characters.")
-      const coverage = try installed()
-      const answer = try decoded(PlacesAnswer, try request((c, signal) => c.mapsPlacesSearch(near ? { query: text, near } : { query: text }, { signal })))
+      const { state, coverage } = try admitted()
+      const answer = try decoded(PlacesAnswer, try request(state, (c, signal) => c.mapsPlacesSearch(near ? { query: text, near } : { query: text }, { signal })))
       const places: Place[] = []
       for (const raw of answer.places) places.push(try checkedPlace(raw, coverage.providerId))
       return places
     },
     effect details(id: string) {
       if (id.trim() === "" || id.length > 512) return undefined
-      const coverage = try installed()
-      const answer = try decoded(PlaceAnswer, try request((c, signal) => c.mapsPlaceDetails({ id }, { signal })))
+      const { state, coverage } = try admitted()
+      const answer = try decoded(PlaceAnswer, try request(state, (c, signal) => c.mapsPlaceDetails({ id }, { signal })))
       if (answer.place === null) return undefined
       const place = try checkedPlace(answer.place, coverage.providerId)
       if (place.id !== id) throw failure("invalid-response", "The selected place identity changed.")
       return place
     },
     effect routes(from: Coordinate, to: Coordinate, travel: Travel, alternatives: boolean) {
-      const coverage = try installed()
+      const { state, coverage } = try admitted()
       const mode = wireMode(travel)
       const asked = alternatives && coverage.offer.alternatives
-      const answer = try decoded(RoutesAnswer, try request((c, signal) => c.mapsRoutes(asked ? { from, to, mode, alternatives: true } : { from, to, mode }, { signal })))
+      const answer = try decoded(RoutesAnswer, try request(state, (c, signal) => c.mapsRoutes(asked ? { from, to, mode, alternatives: true } : { from, to, mode }, { signal })))
       const routes: Route[] = []
       for (const raw of answer.routes) routes.push(try decoded(CloudRoute, raw))
       const now = try Clock.currentTimeMillis
@@ -187,26 +182,24 @@ export const providerLayer = Layer.effect(MapsProvider, effect {
       return routes
     },
     effect viewport(area, zoom: number) {
-      const coverage = try installed()
-      const answer = try decoded(ViewportAnswer, try request((c, signal) => c.mapsViewport({ zoom: Math.max(0, Math.min(22, Math.round(zoom))), ...area }, { signal })))
+      const { state, coverage } = try admitted()
+      const answer = try decoded(ViewportAnswer, try request(state, (c, signal) => c.mapsViewport({ zoom: Math.max(0, Math.min(22, Math.round(zoom))), ...area }, { signal })))
       return answer.copyright || coverage.tiles?.attribution || coverage.attribution
     },
     effect tile(z: number, x: number, y: number) {
-      const coverage = try installed()
+      const { state, coverage } = try admitted()
       const tiles = coverage.tiles
       if (!tiles || !Number.isInteger(z) || z < tiles.minZoom || z > tiles.maxZoom || x < 0 || y < 0 || x >= 2 ** z || y >= 2 ** z)
         throw failure("unsupported", "This map tile is unavailable.")
-      const answer = try request((c, signal) => c.mapsTile({ z, x, y }, { signal }))
+      const answer = try request(state, (c, signal) => c.mapsTile({ z, x, y }, { signal }))
       const contentType = answer.contentType.split(";")[0]?.trim().toLowerCase() ?? ""
       if (!TileTypes.includes(contentType) || !tileAccepted(answer.bytes.length))
         throw failure("invalid-response", "Cloud Maps sent an invalid response.")
       return { contentType, bytes: answer.bytes }
     },
     effect readCoverage(attempt: number) {
-      effect function refused(reply: CoverageReply, message: string) {
-        connection.send({ type: "coverageSettles", attempt, reply, coverage: { kind: "NoProvider", offer: noOffer } }) catch () => undefined
-        try content.update((c) => ({ ...c, coverage: undefined, message }))
-      }
+      if (!canCoverageSettles(try connection.get(), attempt)) return
+      const refused = (reply: CoverageReply, message: string) => details.settle({ attempt, reply, message })
       const raw = cloud.json("GET", "/api/v1/maps/capabilities") catch effect (error) => {
         const reason = cloudFailure(error, try Clock.currentTimeMillis)
         try refused(replyOf(reason), reason.message)
@@ -219,10 +212,7 @@ export const providerLayer = Layer.effect(MapsProvider, effect {
       }
       if (read === undefined) return
       if (!read.available) return try refused("CoverageNotOffered", "Cloud Maps is not available yet.")
-      const info = coverageInfo(read)
-      const coverage: Coverage = { kind: info.kind, offer: info.offer }
-      const accepted = connection.send({ type: "coverageSettles", attempt, reply: "ValidCoverage", coverage }) catch () => undefined
-      if (accepted?.state.phase === "Installed") try content.update((c) => ({ ...c, coverage: info, message: "" }))
+      try details.settle({ attempt, reply: "ValidCoverage", coverage: coverageInfo(read), message: "" })
     },
   }
 })

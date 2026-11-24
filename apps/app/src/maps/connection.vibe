@@ -1,0 +1,59 @@
+// spec/maps/connection.md, "Only the newest read for the bound account installs the provider"; spec/maps/connection.md, "Changing account retires the provider; rebuilding the client for the same account keeps it"
+import { initial, machineOver, Machine as Connection, type CoverageReply, type MapsConnection } from "../../gen/maps__connection.effect.vibe"
+import { noOffer } from "../../gen/maps__vocabulary.effect.vibe"
+import { MapsContent, type CoverageInfo } from "./content.vibe"
+
+interface ProviderSnapshot {
+  readonly state: MapsConnection
+  readonly coverage?: CoverageInfo
+}
+
+interface CoverageSettlement {
+  readonly attempt: number
+  readonly reply: CoverageReply
+  readonly coverage?: CoverageInfo
+  readonly message: string
+}
+
+/** The concrete Maps coverage and the connection generation that owns it. */
+export service MapsCoverage {
+  get(): ProviderSnapshot!!
+  settle(settlement: CoverageSettlement): void!!
+}
+
+/** Publishes concrete coverage as part of accepting a connection transition, before the machine reports it. */
+export const connectionLayer = Layer.effectContext(effect {
+  const content = try MapsContent
+  const snapshot = try Ref.make<ProviderSnapshot>({ state: initial })
+  const pending = new Map<number, CoverageSettlement>()
+  const connection = try machineOver(
+    () => Effect.map(Ref.get(snapshot), (current) => current.state),
+    (next) => effect {
+      const current = try Ref.get(snapshot)
+      const settles = current.state.phase === "Reading" && next.generation === current.state.generation && next.phase !== "Reading"
+      const result = settles ? pending.get(next.generation) : undefined
+      const coverage = next.phase === "Installed" ? result?.coverage ?? current.coverage : undefined
+      if (result !== undefined) {
+        const message = next.phase === "Installed" ? "" : result.message || "Cloud Maps is not available yet."
+        try content.update((c) => ({ ...c, coverage, message }))
+      } else if (next.account !== current.state.account) {
+        try content.update((c) => ({ ...c, coverage: undefined, copyright: "" }))
+      }
+      try Ref.set(snapshot, { state: next, coverage })
+    },
+  )
+  const details: MapsCoverage.Shape = {
+    get: () => Ref.get(snapshot),
+    effect settle(result: CoverageSettlement) {
+      if (pending.has(result.attempt)) return
+      pending.set(result.attempt, result)
+      const coverage = result.coverage === undefined ? { kind: "NoProvider" as const, offer: noOffer }
+        : { kind: result.coverage.kind, offer: result.coverage.offer }
+      try Effect.ensuring(
+        Effect.ignore(connection.send({ type: "coverageSettles", attempt: result.attempt, reply: result.reply, coverage })),
+        Effect.sync(() => { pending.delete(result.attempt) }),
+      )
+    },
+  }
+  return Context.make(Connection, connection).pipe(Context.add(MapsCoverage, details))
+})

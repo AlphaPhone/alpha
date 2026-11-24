@@ -1,7 +1,7 @@
 // spec/maps/screen.md, "Back closes one layer at a time"; spec/maps/connection.md, "Changing account retires the provider; rebuilding the client for the same account keeps it"; spec/maps/guidance.md, "A fix guides only when usable, and only for the current session"; spec/maps/connection.md, "A coverage read starts only for a signed-in account, and a signed-out read sends nothing"
 import { machine as agentSurfaceMachine } from "../../gen/maps__agentSurface.effect.vibe"
 import { machine as cardsMachine } from "../../gen/maps__cards.effect.vibe"
-import { type ConnectionStep, Machine as ConnectionMachine, machine as connectionMachine } from "../../gen/maps__connection.effect.vibe"
+import { type ConnectionStep, Machine as ConnectionMachine } from "../../gen/maps__connection.effect.vibe"
 import { machine as deliveryMachine } from "../../gen/maps__delivery.effect.vibe"
 import { machine as eventReturnMachine } from "../../gen/maps__eventReturn.effect.vibe"
 import { machine as guidanceMachine } from "../../gen/maps__guidance.effect.vibe"
@@ -13,6 +13,7 @@ import { machine as selectedReadMachine } from "../../gen/maps__selectedRead.eff
 import { chatLive, portsLive, pageLinksLive } from "./adapters.vibe"
 import { agentLayer } from "./agent.vibe"
 import { MapsProvider, providerLayer } from "./cloud.vibe"
+import { connectionLayer } from "./connection.vibe"
 import { MapsContent, contentLayer } from "./content.vibe"
 import { handoffLayer } from "./handoff.vibe"
 import { locationLayer } from "./location.vibe"
@@ -57,7 +58,6 @@ const sessionLayer = Layer.effect(MapsSession, effect {
       else {
         try navigation.retire()
         try screen.providerChanged()
-        try content.update((c) => ({ ...c, coverage: undefined, copyright: "" }))
       }
     }
   }
@@ -104,8 +104,8 @@ const sessionLayer = Layer.effect(MapsSession, effect {
 })
 
 const machines = Layer.mergeAll(
-  connectionMachine(), locatorMachine(), screenMachine(), guidanceMachine(), planeMachine(), eventReturnMachine(),
-  notificationOpenMachine(), agentSurfaceMachine(), selectedReadMachine(), deliveryMachine(), cardsMachine(), savedMachine, contentLayer,
+  connectionLayer.pipe(Layer.provideMerge(contentLayer)), locatorMachine(), screenMachine(), guidanceMachine(), planeMachine(), eventReturnMachine(),
+  notificationOpenMachine(), agentSurfaceMachine(), selectedReadMachine(), deliveryMachine(), cardsMachine(), savedMachine,
 )
 
 /**
