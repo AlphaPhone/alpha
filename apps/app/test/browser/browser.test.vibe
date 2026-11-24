@@ -6,7 +6,12 @@ import { BrowserReviews } from "../../src/browser/reviews.vibe"
 import { BrowserEgress } from "../../src/browser/egress.vibe"
 import { typedAddress } from "../../src/browser/address.ts"
 import { snapshotOf } from "../../gen/browser__session.effect.vibe"
-import { callsTo, fakeHost, report, settledTabs, shownBrowser } from "./fakes.vibe"
+import { callsTo, fakeHost, loadPage, report, settledTabs, shownBrowser } from "./fakes.vibe"
+
+/** The selection a turn hands back with its view command: the observed tab's id and revision, as the agent reads them from the turn's observation. */
+function turnSelection(selection: { readonly id: string; readonly revision: string } | undefined) {
+  return selection === undefined ? undefined : { id: selection.id, revision: selection.revision }
+}
 
 // spec/browser/session.md, "Story: Browse in tabs"
 it.live("browse in tabs: a typed address loads in its own WebView, only a normal tab's page enters history, and eight tabs are the limit", () => effect {
@@ -129,7 +134,7 @@ it.live("the agent opens in the untouched tab, and a view command is reported di
       const refusedHttp = agent.openApproved("http://example.test/", false) catch (error) => error._tag
       try report(fake.events, session, { id: opened.tab, sequence: 1, navigation: "7", url: "https://example.test/", committed: true, canBack: true })
       try opened.present
-      const selection = try agent.selection()
+      const selection = turnSelection(try agent.selection())
       const dispatched = try agent.command({ subaction: "back" }, selection)
       try report(fake.events, session, { id: opened.tab, sequence: 2, navigation: "8", url: "https://example.test/next", committed: true, canBack: true })
       const stale = try agent.command({ subaction: "back" }, selection)
@@ -190,7 +195,7 @@ it.live("a view command whose native receipt names another tab or session is not
       const opened = try agent.openApproved("https://example.test/", false)
       try report(fake.events, session, { id: opened.tab, sequence: 1, navigation: "7", url: "https://example.test/", committed: true, canBack: true })
       try opened.present
-      const answer = try agent.command({ subaction: "back" }, try agent.selection())
+      const answer = try agent.command({ subaction: "back" }, turnSelection(try agent.selection()))
       const got9 = try callsTo(fake.calls, "command")
       try Effect.try(() => assert.deepStrictEqual(
         { ok: answer.ok, code: answer.ok ? "" : answer.code, sent: got9.length },
@@ -208,6 +213,9 @@ it.live("an approved open is shown only while the foreground it was approved in 
       const tabs = try BrowserTabs
       const agent = try BrowserAgent
       try settledTabs(tabs)
+      const session = (try callsTo(fake.calls, "browsingState"))[0]?.args.session as string
+      // The owner's own page is in the selected tab, so the approved opens below create their tabs rather than reuse it.
+      try loadPage(tabs, fake.events, session, "https://example.net/", "1", 1)
       const home = { ...shownBrowser, view: "" }
       try SubscriptionRef.set(fake.foreground, home)
       const left = try agent.openApproved("https://example.test/", true)

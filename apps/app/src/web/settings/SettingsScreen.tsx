@@ -122,7 +122,7 @@ export function SettingsScreen({ model, act, onClose, dialog, onDialog, notifica
   const native = model.variant !== "browser";
   const notices = [handoffWord(facts), SHADE[facts.shade], facts.roleRefused ? ROLE_NOT_CHANGED : ""].filter((n) => n !== "");
   return (
-    <div className="flex h-full flex-col bg-background text-foreground">
+    <main aria-label="Settings" className="flex h-full flex-col bg-background text-foreground">
       <header className="flex items-center gap-2 px-2 py-3">
         <Button variant="ghost" size="icon" aria-label={nav.page === "Root" ? "Close Settings" : "Back"} onClick={() => (nav.page === "Root" ? onClose() : act.back())}>
           <ArrowLeft aria-hidden className="size-5" />
@@ -158,7 +158,7 @@ export function SettingsScreen({ model, act, onClose, dialog, onDialog, notifica
           )}
         </div>
       </ScrollArea>
-    </div>
+    </main>
   );
 }
 

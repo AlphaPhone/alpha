@@ -72,7 +72,9 @@ pure val storageValues = Set(KeptOnPhone, MemoryOnly)
 ### The composer binds to the selected account and never writes another account's drafts
 
 Binding to an account shows its open draft and shelf; the drafts of every other account stay as
-they are. Only moving a new email to another From account changes two accounts at once.
+they are. Only moving a new email to another From account changes two accounts at once. The
+composer binds to the account selected now before it starts, opens, moves or reports a draft, so a
+draft started right after a selection is the selected account's and is never refused for lack of one.
 
 ```quint
 pure def canBind(s: Drafts, owner: str): bool = owner != "" and owner != s.owner

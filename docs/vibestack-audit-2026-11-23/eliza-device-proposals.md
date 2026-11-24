@@ -14,6 +14,7 @@ Vibestack paths are relative to `eliza-vs/`. Nothing was built or run; every fin
 ## Gaps
 
 ### eliza-device-proposals-01 (high, CHANGED): a "never dispatched" receipt no longer settles the request
+- Status: closed by eliza da04a04606, which is in Alpha's pin e11409812b. The client now exports `NOT_DISPATCHED = "DEVICE_NOT_DISPATCHED"` and the server's `notDispatchedCode` is that constant, so Alpha needs no mapping in `wireReceipt`. The rest of this entry describes the tree as audited.
 - Develop: the phone reports `code: "DEVICE_NOT_DISPATCHED"` (`client-coordinator.ts:4021`, `:2691`), and the agent settles it as done with no effect (`service.ts:3851-3855`, `:4129-4134`).
 - Vibestack: the server still expects `DEVICE_NOT_DISPATCHED` (`packages/agent/src/device-actions/operations.schema.vibe:96`, `codeOf` just below it). The upstream client constant is `NOT_DISPATCHED = "not_dispatched"` (`packages/agent/src/client/device-execution.vibe:86`, sent at `:291`). The upstream test hides the difference by translating it in its own adapter (`packages/agent/test/device-execution.test.vibe:80`).
 - Alpha's port sends the client constant unchanged: `alpha-vs/apps/app/src/assistant/review.vibe` `wireReceipt` passes `code` through, and Calendar, Clock, Maps and Notes executors all refuse with `NOT_DISPATCHED`.
@@ -106,7 +107,7 @@ Vibestack paths are relative to `eliza-vs/`. Nothing was built or run; every fin
 
 ## Contract mismatches with Alpha's port
 
-1. Receipt code: Alpha sends `not_dispatched`, the agent settles only `DEVICE_NOT_DISPATCHED` (gap 01).
+1. Receipt code: Alpha sends `not_dispatched`, the agent settles only `DEVICE_NOT_DISPATCHED` (gap 01). Closed by eliza da04a04606.
 2. `GET /api/client-devices/capabilities` has no `externalIdentity`; `HostedTransport.java:38` requires it (gap 09).
 3. `sms_compose.query`: upstream may put a number's dial form in it; Alpha's executor only searches contacts with it and sends rather than drafts (gap 05).
 4. Alpha advertises `phone.keypad.v1`, `contacts.show.v1`, `contacts.read.v1`, `views.telephony.v1` and `sms.reply-selected.v1`; none is in the agent's vocabulary, so they are filtered out and the matching executors never run (gaps 04, 10).

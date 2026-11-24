@@ -167,6 +167,7 @@ export const layer = Layer.effect(MailOperations, effect {
   }
 
   effect function prepare(kind: OpKind, proposal: Proposal, composer: ComposerRef, source: SendSource, requestId?: string) {
+    try follow()
     const id = requestId ?? newId()
     const held = try record()
     if (held !== undefined && held.phase === "Observed" && !held.sourceHeld && clearable(held)) try send({ type: "clear", requestId: held.requestId })
@@ -209,28 +210,41 @@ export const layer = Layer.effect(MailOperations, effect {
     return try outcomeOf(after, announcedNow)
   }
 
-  fork.scoped (effect {
-    let bound = ""
-    let grants = ""
-    let withdrawals = 0
-    for try (const a of accounts.changes) {
+  const bound = try Ref.make("")
+  const grants = try Ref.make("")
+  const following = try Semaphore.make(1)
+
+  /**
+   * Binds the journal to the selected account when the selection moved and reads its capabilities when they are new or unknown, so
+   * an operation is recorded and asked of Gmail for the same account. Runs from the account loop and before a proposal is recorded.
+   */
+  effect function follow() {
+    return try Semaphore.withPermit(following, effect {
+      const a = try accounts.get()
       const key = try accounts.selectedKey()
       const granted = JSON.stringify(a.rows.find((row) => row.id === a.selected)?.capabilities ?? [])
-      const rebound = key !== bound
+      const rebound = key !== (try Ref.get(bound))
       if (rebound) {
-        bound = key
+        try Ref.set(bound, key)
         try send({ type: "bind", owner: key })
       }
       const checked = key !== "" && a.phase === "Checked" && !a.fromDisk
       const unknown = !(try machine.get()).capabilities.known
-      if (checked && (rebound || unknown || granted !== grants)) {
-        grants = granted
+      if (checked && (rebound || unknown || granted !== (try Ref.get(grants)))) {
+        try Ref.set(grants, granted)
         const caps = gmail.capabilities(a.selected) catch () => undefined
         if (caps === undefined) try send({ type: "capabilitiesFailed", owner: key })
         else try send({ type: "capabilitiesRead", owner: key, capabilities: caps })
         const restored = try record()
         if (rebound && restored !== undefined && (restored.sourceHeld || restored.phase === "Dispatching")) try refresh()
       }
+    })
+  }
+
+  fork.scoped (effect {
+    let withdrawals = 0
+    for try (const a of accounts.changes) {
+      try follow()
       if (a.withdrawals !== withdrawals) {
         withdrawals = a.withdrawals
         try send({ type: "withdraw" })
@@ -255,6 +269,7 @@ export const layer = Layer.effect(MailOperations, effect {
         }
         return try confirm(now ?? shown)
       }
+      try follow()
       const existing = try record()
       switch (sendStep(existing !== undefined, existing ?? noRecord, shown)) {
         case "AlreadySent": return "SentBefore"

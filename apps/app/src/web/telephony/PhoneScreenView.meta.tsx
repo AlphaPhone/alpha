@@ -43,6 +43,8 @@ export const meta: ComponentMeta<PhoneScreenViewProps> = {
       await expect(args.onClearQuery).toHaveBeenCalled();
     },
     Dialing: async ({ canvasElement, args }) => {
+      // The spies in `args` are shared by every story of the file, and Default's play taps a call: count only this story's taps.
+      for (const spy of [args.onEndCall, args.onCall]) spy.mockClear();
       const phone = within(canvasElement);
       await expect(phone.getByRole("button", { name: "Call" })).toBeDisabled();
       await userEvent.click(phone.getByRole("button", { name: "End call" }));

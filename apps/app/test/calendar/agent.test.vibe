@@ -15,7 +15,7 @@ const schedule: ApprovalRecord = {
 }
 
 describe("The agent's Calendar (spec/calendar/agent.md, spec/calendar/approvals.md)", () => {
-  it.effect("an event comes back only unchanged, for the same account (spec/calendar/agent.md, \"Story: Return to the event I left Calendar from\")", () => effect {
+  it.live("an event comes back only unchanged, for the same account (spec/calendar/agent.md, \"Story: Return to the event I left Calendar from\")", () => effect {
     const agent = new CalendarAgentFake()
     agent.add("event-a", "Dentist", 1, 10)
     provide calendarOver(agent, new DeviceCalendarFake()) {

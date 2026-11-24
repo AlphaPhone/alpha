@@ -7,7 +7,7 @@ const none = () => undefined;
 
 export const meta: ComponentMeta<PasswordsScreenProps> = {
   args: { vault: unlocked, onClose: none, acts: { run: none, edit: none, askRemove: none, askReset: none, openEntry: none, closeEntry: none, refresh: none } },
-  states: {
+  examples: {
     Damaged: { vault: damaged },
     ResetAsked: { vault: { ...damaged, confirmReset: true } },
     Locked: { vault: { ...unlocked, phase: { tag: "Locked" }, entries: [] } },

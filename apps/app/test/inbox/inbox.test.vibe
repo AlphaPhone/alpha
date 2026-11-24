@@ -24,16 +24,21 @@ const card = (id: string, unread: boolean) => ({ id, threadId: `t-${id}`, subjec
 /** What the fake Cloud was asked, in order. */
 type Calls = string[]
 
-/** A fake Cloud for managed Gmail: two inbox pages, the second repeating a message, and an operation ledger that answers like Cloud's. */
-function gmailCloud(calls: Calls, options: { readonly loseDispatch?: boolean; readonly review?: Record<string, unknown>; readonly digest?: string } = {}) {
+/**
+ * A fake Cloud for managed Gmail: two inbox pages, the second repeating a message from a changed mailbox and ending the list (Cloud
+ * never answers a next token that repeats the one asked, spec/cloud/services/google/mailRead.md upstream), and an operation ledger that
+ * answers like Cloud's.
+ */
+function gmailCloud(calls: Calls, options: { readonly loseDispatch?: boolean; readonly review?: Record<string, unknown>; readonly digest?: string; readonly unreadableFirst?: boolean } = {}) {
   const ledger = new Map<string, { review: Record<string, unknown>; digest: string; state: string; kind: string }>()
   return fakeCloud({
     "GET /api/v1/eliza/google/gmail/inbox-v1/capabilities": () => { calls.push("capabilities"); return capabilities },
     "GET /api/v1/eliza/google/gmail/search": () => {
       calls.push("search")
+      if (options.unreadableFirst === true && calls.filter((c) => c === "search").length === 1) return { messages: "unreadable" }
       const later = calls.filter((c) => c === "search").length > 1
       return later
-        ? { messages: [card("m2", false), card("m3", true)], nextPageToken: "p1", syncedAt: "2026-11-21T09:31:00Z", mailboxHistoryId: "42", supportsSpamTrash: true }
+        ? { messages: [card("m2", false), card("m3", true)], nextPageToken: null, syncedAt: "2026-11-21T09:31:00Z", mailboxHistoryId: "42", supportsSpamTrash: true }
         : { messages: [card("m1", true), card("m2", false)], nextPageToken: "p1", syncedAt: "2026-11-21T09:30:00Z", mailboxHistoryId: "41", supportsSpamTrash: true }
     },
     "POST /api/v1/eliza/google/gmail/inbox-v1/operations": (body: unknown) => {
@@ -107,6 +112,48 @@ it.live("Read my mailbox page by page, and see when it changed while paging", ()
       laterIds: ["m1", "m2", "m3"], newerMail: true, laterCursor: "",
       switchedTo: grantB, switchedRows: 2,
     }))
+  }
+})
+
+// spec/inbox/mailbox.md, "A list belongs to one account, read epoch, folder and search"
+it.live("A check of the accounts again keeps the pages read, and new access to the account reads the list again", () => effect {
+  const calls: Calls = []
+  const rows = [
+    { connectionId: grantA, grantId: grantA, email: "ann@example.com", grantedCapabilities: ["google.basic_identity", "google.gmail.triage", "google.gmail.send", "google.gmail.drafts", "google.gmail.mailbox"] },
+    { connectionId: grantB, grantId: grantB, email: "ann@home.example", grantedCapabilities: ["google.basic_identity", "google.gmail.triage"] },
+  ]
+  provide app(gmailCloud(calls), undefined, rows) {
+    const accounts = try InboxAccounts
+    const mailbox = try Mailbox
+    try settle(mailbox.changes, (m) => m.phase === "ListReady" && m.rows.length === 2)
+    try mailbox.loadMore()
+    const paged = (try mailbox.get()).rows.map((r) => r.id)
+    const searches = calls.filter((c) => c === "search").length
+    try accounts.refresh()
+    try settle(accounts.changes, (a) => a.phase === "Checked")
+    rows[0] = { ...rows[0], grantedCapabilities: ["google.basic_identity", "google.gmail.triage"] }
+    try accounts.refresh()
+    try settle(mailbox.changes, (m) => m.phase === "ListReady" && m.rows.length === 2)
+    const regranted = try mailbox.get()
+    try Effect.try(() => assert.deepStrictEqual({
+      paged, rereads: calls.filter((c) => c === "search").length - searches, account: regranted.account, rows: regranted.rows.map((r) => r.id),
+    }, {
+      paged: ["m1", "m2", "m3"], rereads: 1, account: grantA, rows: ["m2", "m3"],
+    }))
+  }
+})
+
+// spec/inbox/mailbox.md, "A list belongs to one account, read epoch, folder and search"
+it.live("A list that failed is read again when the accounts are checked again", () => effect {
+  const calls: Calls = []
+  provide app(gmailCloud(calls, { unreadableFirst: true })) {
+    const accounts = try InboxAccounts
+    const mailbox = try Mailbox
+    try settle(mailbox.changes, (m) => m.phase === "ListFailed")
+    try accounts.refresh()
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    const recovered = try mailbox.get()
+    try Effect.try(() => assert.deepStrictEqual({ account: recovered.account, rows: recovered.rows.map((r) => r.id) }, { account: grantA, rows: ["m2", "m3"] }))
   }
 })
 

@@ -1,6 +1,6 @@
 // spec/maps/guidance.md, "Start begins a new session from a ready route"; spec/maps/guidance.md, "A fix guides only when usable, and only for the current session"; spec/maps/guidance.md, "Ending, the provider's retirement, a failed watch or the navigation service ends the session"; spec/maps/guidance.md, "A reroute belongs to its session; a failed or late one keeps the current route"
 import { backgroundNavigation, type NavigationBridge, NavigationBridgeFailed } from "@elizaos/plugin-maps/client/device-navigation"
-import { type Guidance, type NavEffect, type NavStep, Machine as GuidanceMachine, readingUsable } from "../../gen/maps__guidance.effect.vibe"
+import { type Guidance, type NavEffect, type NavStep, Machine as GuidanceMachine, live, readingUsable } from "../../gen/maps__guidance.effect.vibe"
 import { Machine as ScreenMachine } from "../../gen/maps__screen.effect.vibe"
 import { maySpeak, usableFix } from "../../gen/maps__vocabulary.effect.vibe"
 import { Native } from "../platform/native.vibe"
@@ -57,6 +57,8 @@ export const navigationLayer = Layer.effect(MapsNavigation, effect {
   const voice = try NavigationVoice
   const native = try Native
   const watching = try Ref.make<Fiber.Fiber<void> | undefined>(undefined)
+  /** Counts watches started and stopped: a watch runs only while the count is the one it started under. */
+  let watches = 0
   const serviceEnds = try Queue.unbounded<"notification" | "lost" | "arrived">()
   const routes = new Map<string, number>()
 
@@ -126,8 +128,10 @@ export const navigationLayer = Layer.effect(MapsNavigation, effect {
         const session = out.session
         const previous = try Ref.getAndSet(watching, undefined)
         if (previous) try Fiber.interrupt(previous)
+        watches += 1
+        const mine = watches
         const fiber = fork.detached effect {
-          Stream.runForEach(location.watch(), (fix) => onFix(session, fix)) catch effect (error) => {
+          Stream.runForEachWhile(location.watch(), (fix) => map(onFix(session, fix), () => watches === mine)) catch effect (error) => {
             try tell(error.message)
             try service.watchFailed()
             try apply({ type: "watchFailed", owner: session })
@@ -137,8 +141,11 @@ export const navigationLayer = Layer.effect(MapsNavigation, effect {
         return
       }
       case "StopWatch": {
+        watches += 1
         const fiber = try Ref.getAndSet(watching, undefined)
-        if (fiber) try Fiber.interrupt(fiber)
+        // An arriving fix stops the watch from inside it: the watch ends once that fix is handled, so the arrival is still
+        // told, offered to voice and handed to the navigation service. Interrupting it here would cut the arrival short.
+        if (fiber && fiber.id !== (try Effect.fiberId)) try Fiber.interrupt(fiber)
         return
       }
       case "PlanReroute": {
@@ -169,15 +176,22 @@ export const navigationLayer = Layer.effect(MapsNavigation, effect {
   effect function onFix(session: number, fix: Position) {
     const g = (try content.get()).guidance
     const before = try guidance.get()
-    if (!g || g.session !== session || before.session !== session) return
+    if (!g || g.session !== session || before.session !== session || !live(before.phase)) return
     const now = try Clock.currentTimeMillis
     const reading = readingOf(fix, g.route, before.step, g.marks, now)
+    // The fix is in place before the machine judges it, so whoever sees the machine's verdict reads the fix it was for.
+    const held = try content.get()
+    try content.update((c) => c.guidance?.session === session ? { ...c, position: fix, guidance: { ...c.guidance, fix } } : c)
     const after = try apply({ type: "fix", owner: session, reading })
-    if (!after) return
+    if (!after) {
+      // A fix the machine refused is not kept: the content goes back to what it held, unless something wrote after it.
+      try content.update((c) => c.position === fix && c.guidance?.fix === fix ? { ...c, position: held.position, guidance: { ...c.guidance, fix: held.guidance?.fix } } : c)
+      return
+    }
     const banner = bannerOf(g.route, g.marks, after.step, fix)
     const title = after.offRoute ? "Off route" : `${guidanceDistance(banner.distance, LOCALE)} · ${banner.instruction}`
     const text = after.offRoute ? "Open Maps to end navigation." : `${guidanceDuration(banner.remainingSeconds)} · ${guidanceDistance(banner.remainingMeters, LOCALE)} remaining`
-    try content.update((c) => c.guidance?.session === session ? { ...c, position: fix, guidance: { ...c.guidance, fix, title, text } } : c)
+    try content.update((c) => c.guidance?.session === session ? { ...c, guidance: { ...c.guidance, title, text } } : c)
     const speak = maySpeak(g.kind)
     if (!readingUsable(reading)) {
       try voice.pause()

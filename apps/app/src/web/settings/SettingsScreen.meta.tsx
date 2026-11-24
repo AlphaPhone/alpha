@@ -17,7 +17,7 @@ export const meta: ComponentMeta<SettingsScreenProps> = {
     diagnostics, aboutActs: { readLog: none, askClear: none, cancelClear: none, clear: none, exportReport: none, loadLicences: none },
     developerActs: { profile: "app", command: none, requestRole: none, toggleProfile: none },
   },
-  states: {
+  examples: {
     Root: { model: root },
     SignedOutRoot: { model: signedOutRoot },
     ImageGeneral: { model: imageGeneral },
