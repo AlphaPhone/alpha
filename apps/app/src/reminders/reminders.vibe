@@ -1,0 +1,680 @@
+// spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"; spec/app/reminders/index.md, "Story: Create, update, flag, move, complete and delete reminders with Undo"; spec/app/reminders/index.md, "Story: Sync with the resident agent and recover across restarts"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import * as Reminders from "../../gen/app__reminders.effect.vibe"
+import type { DeleteMode, Effect as Out, Event } from "../../gen/app__reminders.effect.vibe"
+import * as Alerts from "../../gen/app__reminders__alerts.effect.vibe"
+import * as Editor from "../../gen/app__reminders__editor.effect.vibe"
+import { agendaFrom } from "../home/cards.vibe"
+import * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
+import { Said, offer, say, withdraw } from "../notices/toasts.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { ask, attemptedWith } from "../platform/remote.vibe"
+import { type Attempts, fresh } from "../runtime/attempts.vibe"
+import { type Job, answer, contained, due, reacting, started, stop, together, untimed } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
+import { alertBannerStore, reminderAlerts, syncAlertsWithSnapshot } from "./alerts.vibe"
+import {
+  type ReminderEditorFields,
+  clearPersistedDraft,
+  editorDraftStore,
+  reminderEditor,
+} from "./editor.vibe"
+import {
+  type ReminderRecurrence,
+  advanceDueDate,
+  civilDayFromString,
+  civilDayNumber,
+  dueInstantMs,
+} from "./recurrence.ts"
+import {
+  DEFAULT_LIST_ID,
+  type ReminderItemRecord,
+  type ReminderListColor,
+  type ReminderListIcon,
+  type ReminderListRecord,
+  type ReminderPriority,
+  type RemindersSnapshot,
+  isItemOverdue,
+  normalizeSnapshot,
+  priorityToSpec,
+  recurrenceToSpec,
+  remindersStore,
+} from "./store.ts"
+
+const snapshotKey = "alpha.reminders.snapshot@1"
+
+const ListColorSchema = Schema.Literals(["accent", "blue", "green", "amber", "rose", "violet"])
+const ListIconSchema = Schema.Literals(["list", "home", "work", "shopping", "heart", "star", "bookmark", "bolt"])
+const RecurrenceSchema = Schema.Literals(["none", "daily", "weekdays", "weekly", "monthly", "yearly"])
+const PrioritySchema = Schema.Literals(["none", "low", "medium", "high"])
+
+const SubtaskSchema = Schema.Struct({
+  id: Schema.String,
+  title: Schema.String,
+  done: Schema.Boolean,
+})
+
+const ListSchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  color: ListColorSchema,
+  icon: ListIconSchema,
+  isDefault: Schema.Boolean,
+  order: Schema.Number,
+  createdAtMs: Schema.Number,
+  updatedAtMs: Schema.Number,
+})
+
+const ItemSchema = Schema.Struct({
+  id: Schema.String,
+  listId: Schema.String,
+  title: Schema.String,
+  notes: Schema.String,
+  dueDate: Schema.NullOr(Schema.String),
+  dueMinute: Schema.NullOr(Schema.Number),
+  alertMinutes: Schema.NullOr(Schema.Number),
+  recurrence: RecurrenceSchema,
+  priority: PrioritySchema,
+  flagged: Schema.Boolean,
+  subtasks: Schema.Array(SubtaskSchema),
+  completed: Schema.Boolean,
+  completedAtMs: Schema.NullOr(Schema.Number),
+  snoozedUntilMs: Schema.NullOr(Schema.Number),
+  notifiedAtMs: Schema.NullOr(Schema.Number),
+  agentTaskId: Schema.NullOr(Schema.String),
+  revision: Schema.Number,
+  createdAtMs: Schema.Number,
+  updatedAtMs: Schema.Number,
+})
+
+const SnapshotSchema = Schema.Struct({
+  version: Schema.Number,
+  updatedAtMs: Schema.Number,
+  lists: Schema.Array(ListSchema),
+  items: Schema.Array(ItemSchema),
+})
+
+const SnapshotJsonSchema = Schema.fromJsonString(SnapshotSchema)
+
+type PendingRequest =
+  | { readonly kind: "createItem"; readonly item: ReminderItemRecord }
+  | { readonly kind: "updateItem"; readonly item: ReminderItemRecord }
+  | { readonly kind: "completeItem"; readonly id: string; readonly item: ReminderItemRecord }
+  | { readonly kind: "reopenItem"; readonly id: string }
+  | { readonly kind: "restoreItem"; readonly id: string; readonly item: ReminderItemRecord }
+  | { readonly kind: "snoozeItem"; readonly id: string; readonly snoozedUntilMs: number }
+  | { readonly kind: "deleteItem"; readonly id: string }
+  | { readonly kind: "createList"; readonly list: ReminderListRecord }
+  | { readonly kind: "updateList"; readonly list: ReminderListRecord }
+  | { readonly kind: "deleteList"; readonly id: string; readonly mode: DeleteMode }
+
+interface ActiveUndo {
+  readonly kind: "delete" | "complete"
+  readonly itemId: string
+  readonly prior: ReminderItemRecord
+  readonly about: number
+}
+
+const pendingWrites = new Map<number, PendingRequest>()
+let activeUndo: ActiveUndo | undefined
+let undoCounter = 1
+
+function pushToHomeAgenda(snapshot: RemindersSnapshot, hiddenIds: ReadonlySet<string>, nowMs: number): void {
+  const dated = snapshot.items
+    .filter((item) => !hiddenIds.has(item.id) && item.dueDate !== null)
+    .map((item) => ({
+      due: dueInstantMs(item.dueDate, item.dueMinute) ?? nowMs,
+      overdue: isItemOverdue(item, nowMs),
+      done: item.completed,
+      title: item.title,
+    }))
+  agendaFrom.reminders(dated)
+}
+
+effect function persistAndBroadcast(snapshot: RemindersSnapshot, nowMs: number): void!!(KeyValueStore.KeyValueStore | Alerts.Machine) {
+  const view = remindersStore.replace(snapshot)
+  const encoded = Effect.try(() => JSON.stringify(view.snapshot)) catch () => undefined
+  if (encoded !== undefined) try ignore((try KeyValueStore.KeyValueStore).set(snapshotKey, encoded))
+  pushToHomeAgenda(view.snapshot, view.hiddenIds, nowMs)
+  try syncAlertsWithSnapshot(view.snapshot, nowMs)
+}
+
+effect function syncMachineFromSnapshot(snapshot: RemindersSnapshot, nowMs: number): void!!(Reminders.Machine | Alerts.Machine | KeyValueStore.KeyValueStore) {
+  try persistAndBroadcast(snapshot, nowMs)
+  const machine = try Reminders.Machine
+  const today = civilDayNumber(nowMs)
+  const before = try machine.get()
+  if (Reminders.canSetToday(before, today)) try contained(machine.send({ type: "setToday", day: today }), "advancing reminders today")
+}
+
+effect function fetchSnapshot(ticket: number): Event!!(Agent | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Reminders.Machine) {
+  const now = try (try Time).now()
+  return effect {
+    const raw = try ask(Agent, HttpClientRequest.get("/api/alpha/reminders"), SnapshotSchema)
+    const normalized = normalizeSnapshot(raw)
+    try syncMachineFromSnapshot(normalized, now)
+    remindersStore.setSyncError(null)
+    return { type: "synced", ticket, ok: true }
+  } catch () => {
+    remindersStore.setSyncError("Offline — changes kept locally")
+    return { type: "synced", ticket, ok: false }
+  }
+}
+
+function buildWriteRequest(req: PendingRequest, key: string): HttpClientRequest.HttpClientRequest {
+  switch (req.kind) {
+    case "createItem":
+      return HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/alpha/reminders/items"), { ...req.item, idempotencyKey: key })
+    case "updateItem":
+      return HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.patch(`/api/alpha/reminders/items/${encodeURIComponent(req.item.id)}`), { ...req.item, idempotencyKey: key })
+    case "completeItem":
+      return HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(`/api/alpha/reminders/items/${encodeURIComponent(req.id)}/complete`), { item: req.item, idempotencyKey: key })
+    case "reopenItem":
+      return HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(`/api/alpha/reminders/items/${encodeURIComponent(req.id)}/reopen`), { idempotencyKey: key })
+    case "restoreItem":
+      return HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(`/api/alpha/reminders/items/${encodeURIComponent(req.id)}/restore`), { item: req.item, idempotencyKey: key })
+    case "snoozeItem":
+      return HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(`/api/alpha/reminders/items/${encodeURIComponent(req.id)}/snooze`), { snoozedUntilMs: req.snoozedUntilMs, idempotencyKey: key })
+    case "deleteItem":
+      return HttpClientRequest.delete(`/api/alpha/reminders/items/${encodeURIComponent(req.id)}`, { urlParams: { idempotencyKey: key } })
+    case "createList":
+      return HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/alpha/reminders/lists"), { ...req.list, idempotencyKey: key })
+    case "updateList":
+      return HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.patch(`/api/alpha/reminders/lists/${encodeURIComponent(req.list.id)}`), { ...req.list, idempotencyKey: key })
+    case "deleteList":
+      return HttpClientRequest.delete(`/api/alpha/reminders/lists/${encodeURIComponent(req.id)}`, { urlParams: { mode: req.mode === "CascadeItems" ? "cascade" : "reassign", idempotencyKey: key } })
+  }
+}
+
+effect function flushWrite(attemptId: number): Event!!(Agent | Attempts) {
+  const pending = pendingWrites.get(attemptId)
+  pendingWrites.delete(attemptId)
+  if (pending === undefined) return { type: "writeAnswered", attemptId, confirmed: true, known: true }
+  const outcome = try attemptedWith(Agent, (key) => buildWriteRequest(pending, key), attemptId)
+  return { type: "writeAnswered", attemptId, confirmed: outcome.confirmed, known: outcome.known }
+}
+
+effect function commitDeleteWrite(attemptId: number, itemSpecId: number): Event!!(Agent | Attempts | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said) {
+  const held = activeUndo
+  if (held !== undefined && held.kind === "delete") {
+    activeUndo = undefined
+    try withdraw("reminders", held.about)
+    remindersStore.setHidden(new Set())
+    const now = try (try Time).now()
+    const current = remindersStore.snapshot().snapshot
+    const next: RemindersSnapshot = {
+      ...current,
+      version: current.version + 1,
+      updatedAtMs: now,
+      items: current.items.filter((item) => item.id !== held.itemId),
+    }
+    try persistAndBroadcast(next, now)
+    const outcome = try attemptedWith(Agent, (key) => HttpClientRequest.delete(`/api/alpha/reminders/items/${encodeURIComponent(held.itemId)}`, { urlParams: { idempotencyKey: key } }), attemptId)
+    return { type: "writeAnswered", attemptId, confirmed: outcome.confirmed, known: outcome.known }
+  }
+  const found = remindersStore.findItemBySpecId(itemSpecId)
+  if (found === undefined) return { type: "writeAnswered", attemptId, confirmed: true, known: true }
+  const outcome = try attemptedWith(Agent, (key) => HttpClientRequest.delete(`/api/alpha/reminders/items/${encodeURIComponent(found.id)}`, { urlParams: { idempotencyKey: key } }), attemptId)
+  return { type: "writeAnswered", attemptId, confirmed: outcome.confirmed, known: outcome.known }
+}
+
+function carry(fx: Out): Job<Event, Agent | Attempts | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Reminders.Machine | Toasts.Machine | Said, []> {
+  return match (fx) {
+    when { tag: "SyncFetch", let ticket }: answer("sync", fetchSnapshot(ticket), { type: "synced", ticket, ok: false });
+    when { tag: "WriteItem", let attemptId }: answer(`write:${attemptId}`, flushWrite(attemptId), { type: "writeAnswered", attemptId, confirmed: false, known: false });
+    when { tag: "WriteList", let attemptId }: answer(`write:${attemptId}`, flushWrite(attemptId), { type: "writeAnswered", attemptId, confirmed: false, known: false });
+    when { tag: "CommitDelete", let attemptId, let itemId }: answer(`delete:${attemptId}`, commitDeleteWrite(attemptId, itemId), { type: "writeAnswered", attemptId, confirmed: false, known: false });
+    when { tag: "WakeUndo" }: stop("wake");
+  }
+}
+
+function timers(state: Reminders.Reminders) {
+  return state.undo.holding === "Held"
+    ? [due<Event, []>("undo", state.undo.until, { type: "expireUndo", now: untimed })]
+    : []
+}
+
+effect function settlePendingUndoBeforeWrite(): void!!(Reminders.Machine | Toasts.Machine | Said | KeyValueStore.KeyValueStore | Alerts.Machine | Time) {
+  const machine = try Reminders.Machine
+  const cur = try machine.get()
+  if (cur.undo.holding === "Held" && cur.write.outcome !== "Sent") {
+    const held = activeUndo
+    if (held !== undefined) {
+      try withdraw("reminders", held.about)
+      if (held.kind === "complete") activeUndo = undefined
+    }
+    try contained(machine.send({ type: "expireUndo", now: cur.undo.until }), "settling active undo")
+  }
+}
+
+effect function undoHeldAction(): void!!(Reminders.Machine | Toasts.Machine | Said | KeyValueStore.KeyValueStore | Alerts.Machine | Time) {
+  const machine = try Reminders.Machine
+  const held = activeUndo
+  if (held === undefined) return
+  const now = try (try Time).now()
+  const state = try machine.get()
+  if (!Reminders.canUndoAction(state, now)) return
+  activeUndo = undefined
+  try withdraw("reminders", held.about)
+  if (held.kind === "delete") {
+    remindersStore.setHidden(new Set())
+    const current = remindersStore.snapshot().snapshot
+    pushToHomeAgenda(current, new Set(), now)
+    try contained(machine.send({ type: "undoAction", now }), "undoing reminder delete")
+    try say(`Restored “${held.prior.title}”`)
+    return
+  }
+  const current = remindersStore.snapshot().snapshot
+  const next: RemindersSnapshot = {
+    ...current,
+    version: current.version + 1,
+    updatedAtMs: now,
+    items: current.items.map((item) => (item.id === held.itemId ? { ...held.prior, updatedAtMs: now } : item)),
+  }
+  const nextAttempt = state.write.id + 1
+  pendingWrites.set(nextAttempt, { kind: "restoreItem", id: held.itemId, item: held.prior })
+  try persistAndBroadcast(next, now)
+  try contained(machine.send({ type: "undoAction", now }), "undoing reminder completion")
+  try say(`Restored “${held.prior.title}”`)
+}
+
+effect function captureUndo(): (void!!)!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said) {
+  const layer = Layer.mergeAll(
+    Layer.succeed(Reminders.Machine, try Reminders.Machine),
+    Layer.succeed(KeyValueStore.KeyValueStore, try KeyValueStore.KeyValueStore),
+    Layer.succeed(Alerts.Machine, try Alerts.Machine),
+    Layer.succeed(Time, try Time),
+    Layer.succeed(Toasts.Machine, try Toasts.Machine),
+    Layer.succeed(Said, try Said),
+  )
+  return Effect.provide(undoHeldAction(), layer)
+}
+
+/** Trigger an immediate refresh from the resident agent (called on app focus or after Ask Alpha turns). */
+export effect function syncRemindersNow(): void!!Reminders.Machine {
+  const machine = try Reminders.Machine
+  const state = try machine.get()
+  if (Reminders.canAgentChanged(state)) try contained(machine.send({ type: "agentChanged" }), "syncing reminders after agent turn")
+}
+
+/** Manually refresh reminders from the resident agent. */
+export effect function refreshRemindersList(): void!!Reminders.Machine {
+  const machine = try Reminders.Machine
+  if (Reminders.canRefresh(try machine.get())) try contained(machine.send({ type: "refresh" }), "refreshing reminders")
+}
+
+/** Input for creating a reminder item from Quick Add or the Editor sheet. */
+export interface CreateReminderInput {
+  readonly listId: string
+  readonly title: string
+  readonly notes?: string
+  readonly dueDate?: string | null
+  readonly dueMinute?: number | null
+  readonly alertMinutes?: number | null
+  readonly recurrence?: ReminderRecurrence
+  readonly priority?: ReminderPriority
+  readonly flagged?: boolean
+  readonly subtasks?: readonly { readonly id: string; readonly title: string; readonly done: boolean }[]
+}
+
+/** Create a new reminder item, update local store/Home/Alerts, and sync with the agent. */
+export effect function createReminderItem(input: CreateReminderInput): (ReminderItemRecord | undefined)!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said) {
+  const title = input.title.trim()
+  if (title === "") return undefined
+  try settlePendingUndoBeforeWrite()
+  const now = try (try Time).now()
+  const machine = try Reminders.Machine
+  const current = remindersStore.snapshot().snapshot
+  const targetList = current.lists.find((list) => list.id === input.listId) ?? current.lists[0]
+  const listId = targetList?.id ?? DEFAULT_LIST_ID
+  const dueDate = input.dueDate ?? null
+  const dueMinute = dueDate !== null ? (input.dueMinute ?? null) : null
+  const recurrence: ReminderRecurrence = dueDate !== null ? (input.recurrence ?? "none") : "none"
+  const priority: ReminderPriority = input.priority ?? "none"
+  const flagged = input.flagged ?? false
+  const alertMinutes = dueDate !== null ? (input.alertMinutes === undefined ? 0 : input.alertMinutes) : null
+  const item: ReminderItemRecord = {
+    id: `rem_${fresh()}`,
+    listId,
+    title,
+    notes: (input.notes ?? "").trim(),
+    dueDate,
+    dueMinute,
+    alertMinutes,
+    recurrence,
+    priority,
+    flagged,
+    subtasks: (input.subtasks ?? []).map((sub) => ({ ...sub })),
+    completed: false,
+    completedAtMs: null,
+    snoozedUntilMs: null,
+    notifiedAtMs: null,
+    agentTaskId: null,
+    revision: 1,
+    createdAtMs: now,
+    updatedAtMs: now,
+  }
+  const state = try machine.get()
+  const listSpecId = Math.max(1, remindersStore.specIdForList(listId))
+  const nextAttempt = state.write.id + 1
+  const nextSnapshot: RemindersSnapshot = {
+    ...current,
+    version: current.version + 1,
+    updatedAtMs: now,
+    items: [...current.items, item],
+  }
+  pendingWrites.set(nextAttempt, { kind: "createItem", item })
+  try persistAndBroadcast(nextSnapshot, now)
+  const dueDay = civilDayFromString(dueDate) ?? civilDayNumber(now)
+  try contained(machine.send({
+    type: "createItem",
+    spec: {
+      listId: listSpecId,
+      hasDue: dueDate !== null,
+      dueDay,
+      hasDueTime: dueMinute !== null,
+      dueMinute: dueMinute ?? 0,
+      repeat: recurrenceToSpec(recurrence),
+      priority: priorityToSpec(priority),
+      flagged,
+    },
+  }), "creating reminder")
+  return item
+}
+
+function replaceItemInSnapshot(current: RemindersSnapshot, updated: ReminderItemRecord, now: number): RemindersSnapshot {
+  return {
+    ...current,
+    version: current.version + 1,
+    updatedAtMs: now,
+    items: current.items.map((item) => (item.id === updated.id ? updated : item)),
+  }
+}
+
+effect function prepareItemEdit(id: string): ({ readonly current: RemindersSnapshot; readonly existing: ReminderItemRecord; readonly now: number } | undefined)!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said) {
+  try settlePendingUndoBeforeWrite()
+  const current = remindersStore.snapshot().snapshot
+  const existing = current.items.find((item) => item.id === id)
+  if (existing === undefined) return undefined
+  const now = try (try Time).now()
+  return { current, existing, now }
+}
+
+effect function commitItemWrite(
+  current: RemindersSnapshot,
+  updated: ReminderItemRecord,
+  now: number,
+  req: PendingRequest,
+): ({ readonly machine: Context.Service.Shape<typeof Reminders.Machine>; readonly itemSpecId: number })!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine) {
+  const machine = try Reminders.Machine
+  const state = try machine.get()
+  pendingWrites.set(state.write.id + 1, req)
+  try persistAndBroadcast(replaceItemInSnapshot(current, updated, now), now)
+  return { machine, itemSpecId: remindersStore.specIdForItem(updated.id) }
+}
+
+/** Update an existing reminder item from the editor or inline actions. */
+export effect function updateReminderItem(id: string, patch: Partial<CreateReminderInput>): (ReminderItemRecord | undefined)!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said) {
+  const ctx = try prepareItemEdit(id)
+  if (ctx === undefined) return undefined
+  const { current, existing, now } = ctx
+  const title = patch.title !== undefined ? patch.title.trim() : existing.title
+  if (title === "") return undefined
+  const dueDate = patch.dueDate !== undefined ? patch.dueDate : existing.dueDate
+  const dueMinute = dueDate !== null ? (patch.dueMinute !== undefined ? patch.dueMinute : existing.dueMinute) : null
+  const recurrence: ReminderRecurrence = dueDate !== null ? (patch.recurrence !== undefined ? patch.recurrence : existing.recurrence) : "none"
+  const alertMinutes = dueDate !== null ? (patch.alertMinutes !== undefined ? patch.alertMinutes : existing.alertMinutes) : null
+  const listId = patch.listId !== undefined && current.lists.some((l) => l.id === patch.listId) ? patch.listId : existing.listId
+  const updated: ReminderItemRecord = {
+    ...existing,
+    listId,
+    title,
+    notes: patch.notes !== undefined ? patch.notes.trim() : existing.notes,
+    dueDate,
+    dueMinute,
+    alertMinutes,
+    recurrence,
+    priority: patch.priority ?? existing.priority,
+    flagged: patch.flagged ?? existing.flagged,
+    subtasks: patch.subtasks !== undefined ? patch.subtasks.map((sub) => ({ ...sub })) : existing.subtasks,
+    revision: existing.revision + 1,
+    updatedAtMs: now,
+  }
+  const { machine, itemSpecId } = try commitItemWrite(current, updated, now, { kind: "updateItem", item: updated })
+  const listSpecId = Math.max(1, remindersStore.specIdForList(listId))
+  const dueDay = civilDayFromString(dueDate) ?? civilDayNumber(now)
+  if (itemSpecId > 0) {
+    try contained(machine.send({
+      type: "updateItem",
+      itemId: itemSpecId,
+      spec: {
+        listId: listSpecId,
+        hasDue: dueDate !== null,
+        dueDay,
+        hasDueTime: dueMinute !== null,
+        dueMinute: dueMinute ?? 0,
+        repeat: recurrenceToSpec(recurrence),
+        priority: priorityToSpec(updated.priority),
+        flagged: updated.flagged,
+      },
+    }), "updating reminder")
+  }
+  return updated
+}
+
+/** Save the current Editor draft (creating or updating the reminder) and settle the Editor machine. */
+export effect function saveReminderDraft(): (ReminderItemRecord | undefined)!!(Reminders.Machine | Editor.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said) {
+  const editor = try Editor.Machine
+  const fields: ReminderEditorFields = editorDraftStore.snapshot()
+  const state = try editor.get()
+  if (Editor.canSave(state)) try contained(editor.send({ type: "save" }), "saving reminder draft")
+  const payload: CreateReminderInput = {
+    listId: fields.listId,
+    title: fields.title,
+    notes: fields.notes,
+    dueDate: fields.dueDate,
+    dueMinute: fields.dueMinute,
+    alertMinutes: fields.alertMinutes,
+    recurrence: fields.recurrence,
+    priority: fields.priority,
+    flagged: fields.flagged,
+    subtasks: fields.subtasks,
+  }
+  const saved = fields.itemId === null ? try createReminderItem(payload) : try updateReminderItem(fields.itemId, payload)
+  if (saved !== undefined) {
+    const after = try editor.get()
+    if (Editor.canLanded(after)) try contained(editor.send({ type: "landed" }), "landing reminder draft")
+    else if (Editor.canClose(after)) try contained(editor.send({ type: "close" }), "closing reminder draft")
+    try clearPersistedDraft()
+  }
+  return saved
+}
+
+/** Toggle completion of a reminder: recurring items advance to their next date, and a 5s Undo toast is offered. */
+export effect function toggleReminderComplete(id: string): void!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said) {
+  const ctx = try prepareItemEdit(id)
+  if (ctx === undefined) return
+  const { current, existing, now } = ctx
+  const completing = !existing.completed
+  const recurring = completing && existing.recurrence !== "none" && existing.dueDate !== null
+  const nextDueDate = recurring && existing.dueDate !== null ? advanceDueDate(existing.dueDate, existing.recurrence) : existing.dueDate
+  const updated: ReminderItemRecord = recurring
+    ? { ...existing, dueDate: nextDueDate, snoozedUntilMs: null, notifiedAtMs: null, revision: existing.revision + 1, updatedAtMs: now }
+    : { ...existing, completed: completing, completedAtMs: completing ? now : null, snoozedUntilMs: null, revision: existing.revision + 1, updatedAtMs: now }
+  const { machine, itemSpecId } = try commitItemWrite(current, updated, now, completing ? { kind: "completeItem", id, item: updated } : { kind: "reopenItem", id })
+  const nextDueDay = civilDayFromString(nextDueDate) ?? (civilDayFromString(existing.dueDate) ?? civilDayNumber(now)) + 1
+  if (itemSpecId > 0) {
+    try contained(machine.send({ type: "toggleComplete", itemId: itemSpecId, nextDueDay, at: now }), "completing reminder")
+  }
+  if (completing) {
+    const about = undoCounter++
+    activeUndo = { kind: "complete", itemId: id, prior: existing, about }
+    const message = recurring ? `Completed “${existing.title}” · Next ${nextDueDate}` : `Completed “${existing.title}”`
+    try offer(message, "reminders", about, try captureUndo())
+  }
+}
+
+/** Toggle the flagged state of a reminder item. */
+export effect function toggleReminderFlag(id: string): void!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said) {
+  const ctx = try prepareItemEdit(id)
+  if (ctx === undefined) return
+  const { current, existing, now } = ctx
+  const updated: ReminderItemRecord = { ...existing, flagged: !existing.flagged, revision: existing.revision + 1, updatedAtMs: now }
+  const { machine, itemSpecId } = try commitItemWrite(current, updated, now, { kind: "updateItem", item: updated })
+  if (itemSpecId > 0) try contained(machine.send({ type: "toggleFlag", itemId: itemSpecId }), "flagging reminder")
+}
+
+/** Delete a reminder item immediately from view and hold for 5 seconds with an Undo toast. */
+export effect function deleteReminderItem(id: string): void!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said) {
+  const ctx = try prepareItemEdit(id)
+  if (ctx === undefined) return
+  const { current, existing, now } = ctx
+  const about = undoCounter++
+  activeUndo = { kind: "delete", itemId: id, prior: existing, about }
+  const hidden = new Set([id])
+  remindersStore.setHidden(hidden)
+  pushToHomeAgenda(current, hidden, now)
+  const machine = try Reminders.Machine
+  const itemSpecId = remindersStore.specIdForItem(id)
+  if (itemSpecId > 0) try contained(machine.send({ type: "deleteItem", itemId: itemSpecId, at: now }), "holding reminder delete")
+  try offer(`Deleted “${existing.title}”`, "reminders", about, try captureUndo())
+}
+
+/** Clear all completed reminders from the local store and agent. */
+export effect function clearCompletedReminders(): void!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Agent | Toasts.Machine | Said) {
+  try settlePendingUndoBeforeWrite()
+  const current = remindersStore.snapshot().snapshot
+  const completed = current.items.filter((item) => item.completed)
+  if (completed.length === 0) return
+  const now = try (try Time).now()
+  const remaining = current.items.filter((item) => !item.completed)
+  try persistAndBroadcast({ ...current, version: current.version + 1, updatedAtMs: now, items: remaining }, now)
+  const agent = try Agent
+  for (const item of completed) {
+    try ignore(agent.call(HttpClientRequest.delete(`/api/alpha/reminders/items/${encodeURIComponent(item.id)}`)))
+  }
+  try say(`Cleared ${completed.length} completed ${completed.length === 1 ? "reminder" : "reminders"}`)
+}
+
+/** Snooze a reminder until `snoozedUntilMs` and re-arm its resident alert. */
+export effect function snoozeReminderItem(id: string, snoozedUntilMs: number): void!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said) {
+  const ctx = try prepareItemEdit(id)
+  if (ctx === undefined) return
+  const { current, existing, now } = ctx
+  const updated: ReminderItemRecord = { ...existing, snoozedUntilMs, revision: existing.revision + 1, updatedAtMs: now }
+  const { machine, itemSpecId } = try commitItemWrite(current, updated, now, { kind: "snoozeItem", id, snoozedUntilMs })
+  if (itemSpecId > 0) {
+    const dueDay = civilDayFromString(updated.dueDate) ?? civilDayNumber(now)
+    try contained(machine.send({
+      type: "updateItem",
+      itemId: itemSpecId,
+      spec: {
+        listId: Math.max(1, remindersStore.specIdForList(updated.listId)),
+        hasDue: updated.dueDate !== null,
+        dueDay,
+        hasDueTime: updated.dueMinute !== null,
+        dueMinute: updated.dueMinute ?? 0,
+        repeat: recurrenceToSpec(updated.recurrence),
+        priority: priorityToSpec(updated.priority),
+        flagged: updated.flagged,
+      },
+    }), "snoozing reminder")
+  }
+}
+
+/** Create a custom list with name, semantic color, and icon. */
+export effect function createReminderList(name: string, color: ReminderListColor, icon: ReminderListIcon): (ReminderListRecord | undefined)!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said) {
+  const trimmed = name.trim()
+  if (trimmed === "") return undefined
+  try settlePendingUndoBeforeWrite()
+  const now = try (try Time).now()
+  const current = remindersStore.snapshot().snapshot
+  const list: ReminderListRecord = {
+    id: `list_${fresh()}`,
+    name: trimmed,
+    color,
+    icon,
+    isDefault: false,
+    order: current.lists.length,
+    createdAtMs: now,
+    updatedAtMs: now,
+  }
+  const machine = try Reminders.Machine
+  const state = try machine.get()
+  pendingWrites.set(state.write.id + 1, { kind: "createList", list })
+  try persistAndBroadcast({ ...current, version: current.version + 1, updatedAtMs: now, lists: [...current.lists, list] }, now)
+  try contained(machine.send({ type: "createList" }), "creating reminder list")
+  return list
+}
+
+/** Rename or restyle an existing custom list. */
+export effect function updateReminderList(id: string, name: string, color: ReminderListColor, icon: ReminderListIcon): void!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said) {
+  const trimmed = name.trim()
+  if (trimmed === "") return
+  try settlePendingUndoBeforeWrite()
+  const now = try (try Time).now()
+  const current = remindersStore.snapshot().snapshot
+  const existing = current.lists.find((list) => list.id === id)
+  if (existing === undefined) return
+  const updated: ReminderListRecord = { ...existing, name: trimmed, color, icon, updatedAtMs: now }
+  const machine = try Reminders.Machine
+  const state = try machine.get()
+  pendingWrites.set(state.write.id + 1, { kind: "updateList", list: updated })
+  try persistAndBroadcast({ ...current, version: current.version + 1, updatedAtMs: now, lists: current.lists.map((list) => (list.id === id ? updated : list)) }, now)
+  const listSpecId = remindersStore.specIdForList(id)
+  if (listSpecId > 0) try contained(machine.send({ type: "renameList", listId: listSpecId }), "renaming reminder list")
+}
+
+/** Delete a custom list, either reassigning its items to the default Reminders list or deleting them. */
+export effect function deleteReminderList(id: string, mode: DeleteMode): void!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said) {
+  try settlePendingUndoBeforeWrite()
+  const current = remindersStore.snapshot().snapshot
+  const target = current.lists.find((list) => list.id === id)
+  if (target === undefined || target.isDefault || target.id === DEFAULT_LIST_ID) return
+  const now = try (try Time).now()
+  const defaultId = current.lists.find((list) => list.isDefault)?.id ?? DEFAULT_LIST_ID
+  const nextLists = current.lists.filter((list) => list.id !== id)
+  const nextItems = mode === "CascadeItems"
+    ? current.items.filter((item) => item.listId !== id)
+    : current.items.map((item) => (item.listId === id ? { ...item, listId: defaultId, revision: item.revision + 1, updatedAtMs: now } : item))
+  const machine = try Reminders.Machine
+  const state = try machine.get()
+  const listSpecId = remindersStore.specIdForList(id)
+  pendingWrites.set(state.write.id + 1, { kind: "deleteList", id, mode })
+  try persistAndBroadcast({ ...current, version: current.version + 1, updatedAtMs: now, lists: nextLists, items: nextItems }, now)
+  if (listSpecId > 1) try contained(machine.send({ type: "deleteList", listId: listSpecId, mode }), "deleting reminder list")
+}
+
+/** Reset in-memory external stores for clean test isolation. */
+export function resetReminderStores(): void {
+  pendingWrites.clear()
+  activeUndo = undefined
+  undoCounter = 1
+  remindersStore.reset()
+  alertBannerStore.reset()
+  editorDraftStore.reset()
+}
+
+const hydrated = started(effect {
+  const now = try (try Time).now()
+  const raw = (try KeyValueStore.KeyValueStore).get(snapshotKey) catch () => undefined
+  if (raw !== undefined) {
+    const decoded = Schema.decodeUnknownOption(SnapshotJsonSchema)(raw)
+    if (Option.isSome(decoded)) try syncMachineFromSnapshot(decoded.value, now)
+  }
+  const machine = try Reminders.Machine
+  if (Reminders.canRefresh(try machine.get())) try contained(machine.send({ type: "refresh" }), "initial reminders sync")
+}, "hydrating reminders store")
+
+const desk = reacting(Reminders, {
+  keep: 1,
+  open: [{ type: "reopen" }],
+  carry,
+  timers,
+})
+
+/** Resident Reminders layer (desk, due-time alerting, draft editor, and local/agent hydration), ready for `resident.vibe`. */
+export const remindersResident = together(desk, reminderAlerts, reminderEditor, hydrated)
+
+/** Machines required by the Reminders area screen. */
+export type RemindersMachines = Reminders.Machine | Alerts.Machine | Editor.Machine
