@@ -60,6 +60,8 @@ export interface Board {
   /** The text a send in hand carries, the last text sent, and a send that waits for its conversation to be made. */
   outgoing: string
   lastSent: string
+  /** The exact wire text, used only to reconcile a turn without a message ID. */
+  lastSentWire: string
   /** The id the last message was posted under, as the agent keeps it, or "" where its post never said. */
   lastSentId: string
   sendWhenMade: boolean
@@ -125,6 +127,7 @@ export const talk = Layer.effect(Talk, effect {
     type: (text) => board.change({ typed: text }),
     outgoing: "",
     lastSent: "",
+    lastSentWire: "",
     lastSentId: "",
     sendWhenMade: false,
     waitingRequest: undefined,

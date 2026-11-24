@@ -80,7 +80,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/assistant/composer.md, "A message written before its conversation existed moves into the new one, then its old slot is cleared on the exact revision read"
     world.ask.metadata = [];
-    await write("Hello");
+    await write("Hello ");
     await press("Send");
     // spec/app/assistant/index.md, "A reply completes, streamed or all at once, even after the owner asked to stop it"
     await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Complete");
