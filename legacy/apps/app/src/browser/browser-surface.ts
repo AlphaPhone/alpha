@@ -1,22 +1,41 @@
 import {iconStyle} from '../icon-style';
 import { WebPlugin } from '@capacitor/core';
-import {bookmarkDocument,browsingSessionDocument} from './preference-documents';
+import {bookmarkDocument,bookmarkTitleDocument,browsingSessionDocument} from './preference-documents';
 import {normalizeBrowsing as normalize,type SavedBrowsing as Saved} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/browsing-session.ts';
 
-/** A saved bookmark row, in the native record's format: a bare address, or `{url,title}` when a title
- * was saved. Records written before titles hold bare addresses only and read back untitled. */
-type BookmarkRow = string | {url: string; title?: string};
-type BookmarkList = {urls: string[]; entries: {url: string; title?: string}[]};
-/** Control characters become spaces; trimmed; at most 300 characters (the native store's rule). */
-export const bookmarkTitle=(title:unknown)=>String(title??'').replace(/[\x00-\x1f\x7f-\x9f]/g,' ').trim().slice(0,300);
-function bookmarkRow(row:unknown):{url:string;title?:string}|undefined{
+/** As the native bookmark store (plugin-native-browser-surface BrowserBookmarkRecord): the bookmark
+ * document keeps the string-only address list previous builds read, newest first; optional titles
+ * live in a separate document bound to that exact list. A title record that no longer matches the
+ * list (a previous build edited it) is dropped, so records written before titles read back untitled.
+ * The reader also accepts the intervening `{url,title}` rows. */
+type BookmarkEntry = {url: string; title?: string};
+type BookmarkList = {urls: string[]; entries: BookmarkEntry[]};
+type TitleRecord = {addresses: string[]; titles: (string|null)[]};
+const MAX_TITLE=300;
+/** The native rule: C0 controls and DEL become spaces, trimmed, at most 300 characters without
+ * splitting a surrogate pair. Blank is no title. */
+export const bookmarkTitle=(title:unknown)=>{
+ let clean=String(title??'').replace(/[\x00-\x1f\x7f]/g,' ').trim();
+ if(clean.length>MAX_TITLE){let end=MAX_TITLE;const unit=clean.charCodeAt(end-1);if(unit>=0xd800&&unit<=0xdbff)end--;clean=clean.slice(0,end).trim();}
+ return clean;
+};
+const storedTitle=(value:unknown):value is string=>typeof value==='string'&&value!==''&&value===bookmarkTitle(value);
+function bookmarkRow(row:unknown):BookmarkEntry|undefined{
  if(typeof row==='string')return {url:row};
  const url=row&&typeof row==='object'?(row as Bag).url:undefined;
  if(typeof url!=='string')return undefined;
- const title=bookmarkTitle((row as Bag).title);return title?{url,title}:{url};
+ const title=(row as Bag).title;return storedTitle(title)?{url,title}:{url};
 }
 type Bag=Record<string,unknown>;
-function bookmarkList(rows:BookmarkRow[]):BookmarkList{const entries=rows.flatMap(row=>{const entry=bookmarkRow(row);return entry?[entry]:[];});return {urls:entries.map(entry=>entry.url),entries};}
+function bookmarkEntries(rows:unknown):BookmarkEntry[]{return Array.isArray(rows)?rows.flatMap(row=>{const entry=bookmarkRow(row);return entry?[entry]:[];}):[];}
+function withTitles(entries:BookmarkEntry[],record:unknown):BookmarkEntry[]{
+ const {addresses,titles}=(record&&typeof record==='object'?record:{}) as Partial<TitleRecord>;
+ if(!Array.isArray(addresses)||!Array.isArray(titles)||addresses.length!==entries.length||titles.length!==entries.length||
+  addresses.some((url,index)=>url!==entries[index].url)||titles.some(title=>title!==null&&!storedTitle(title)))return entries;
+ return entries.map((entry,index)=>{const title=titles[index];return title?{url:entry.url,title}:{url:entry.url};});
+}
+const titleRecord=()=>bookmarkTitleDocument.read<unknown>(()=>null).catch(()=>null);
+function bookmarkList(entries:BookmarkEntry[]):BookmarkList{return {urls:entries.map(entry=>entry.url),entries:entries.map(entry=>({...entry}))};}
 type Tab = { session: string; id: string; private: boolean; frame: HTMLIFrameElement; container: HTMLDivElement; link: HTMLAnchorElement; status:HTMLParagraphElement; history: string[]; position: number; sequence: number; navigation: number; loading: boolean; committed:boolean; error:string };
 /** Unprivileged web surfaces. Remote documents never receive the host bridge. */
 export class BrowserSurface extends WebPlugin {
@@ -77,13 +96,31 @@ export class BrowserSurface extends WebPlugin {
     }
   }
   async close(input:{session:string;id:string}) {const tab=this.tabs.get(this.key(input));tab?.container.remove();this.tabs.delete(this.key(input));}
-  async bookmarks() {return bookmarkList(await bookmarkDocument.read<BookmarkRow[]>(()=>[]));}
-  /** As the native store: an absent `title` keeps the saved one, a blank one removes it. */
-  async setBookmark(input:{url:string;saved:boolean;title?:string}) {const url=this.address(input.url);return bookmarkDocument.edit<BookmarkRow[],BookmarkList>(()=>[],rows=>{
-   const before=rows.find(row=>bookmarkRow(row)?.url===url),kept=before?bookmarkRow(before)?.title:undefined;
-   const title=input.title==null?kept:bookmarkTitle(input.title);
-   const next=rows.filter(row=>bookmarkRow(row)?.url!==url);if(input.saved)next.unshift(title?{url,title}:url);
-   rows.splice(0,rows.length,...next);return bookmarkList(rows);});}
+  async bookmarks() {return bookmarkList(withTitles(bookmarkEntries(await bookmarkDocument.read<unknown[]>(()=>[])),await titleRecord()));}
+  /** As the native store: an absent `title` keeps the saved one, a blank one removes it; ignored when
+   * removing. The address list commits first; the title record follows, bound to that list. */
+  async setBookmark(input:{url:string;saved:boolean;title?:string|null}) {
+   const url=this.address(input.url);
+   if(input.title!=null&&typeof input.title!=='string')throw Error('A bookmark title must be text.');
+   // One save at a time across tabs: the title record is read before the address list changes and
+   // written after it, so an overlapping save would otherwise read titles bound to a list that has
+   // since moved and drop every saved name.
+   return navigator.locks.request('alpha.browser.bookmark-save',()=>this.saveBookmark(url,input));
+  }
+  private async saveBookmark(url:string,input:{saved:boolean;title?:string|null}) {
+   const titles=await titleRecord();
+   const next=await bookmarkDocument.edit<unknown[],BookmarkEntry[]>(()=>[],rows=>{
+    const stored=withTitles(bookmarkEntries(rows),titles),kept=stored.find(entry=>entry.url===url)?.title;
+    const result=stored.filter(entry=>entry.url!==url);
+    if(input.saved){const title=input.title==null?kept:bookmarkTitle(input.title);result.unshift(title?{url,title}:{url});}
+    rows.splice(0,rows.length,...result.map(entry=>entry.url));return result;});
+   // Titles are display metadata: when their record cannot be written the saved addresses stand,
+   // untitled, as when a previous build edits the list.
+   const titled=next.some(entry=>entry.title);
+   const written=await bookmarkTitleDocument.edit<TitleRecord,void>(()=>({addresses:[],titles:[]}),record=>{
+    record.addresses=titled?next.map(entry=>entry.url):[];record.titles=titled?next.map(entry=>entry.title??null):[];}).then(()=>true,()=>false);
+   return bookmarkList(written?next:next.map(entry=>({url:entry.url})));
+  }
   async share(input:{session:string;id:string;url:string;navigation:number}) {const tab=this.tab(input);if(!tab.committed||tab.loading||tab.error||document.hidden||tab.container.style.display==='none'||tab.navigation!==input.navigation||tab.history[tab.position]!==input.url)throw Error('The page changed. Share it again.');if(!navigator.share)throw Error('Sharing is unavailable in this browser. Use Copy text.');await navigator.share({url:input.url});}
   async browsingState() {return browsingSessionDocument.read<Saved>(()=>normalize({})).then(normalize);}
   async saveBrowsingState(input:Partial<Saved>) {const next=normalize(input);return browsingSessionDocument.edit<Saved,Saved>(()=>normalize({}),state=>{Object.assign(state,next);return next;});}
