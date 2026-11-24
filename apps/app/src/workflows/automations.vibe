@@ -1,14 +1,14 @@
 // spec/workflows/automations.md, "Story: See all my automations even when one source fails"; spec/workflows/automations.md, "Story: Change an automation once, even when the answer is lost"; spec/workflows/agentSchedules.md, "Story: Save and run a prompt my agent sends on a schedule"; spec/workflows/agentSchedules.md, "Story: Answer a scheduled item from Workflows"
 import { type Answer, type ChangeKind, type Row, type RowKind, type Source, Machine, answerOfStatus, readOf, stored } from "../../gen/workflows__automations.effect.vibe"
 import {
-  type Draft, type TaskStatus, type Verb, definitionRow, draftProblem, editConfirmed, enableOutcome, fireOutcome, promptEditable, reminderTask,
-  reminderVerbOffered, runNowOutcome, saveConfirmed, snoozeConfirmed, snoozeUntil, taskEnded, taskOn, taskSnoozed,
+  type Draft, type TaskStatus, type Verb, draftProblem, editConfirmed, enableOutcome, fireOutcome, listedAsScheduled, promptEditable, reminderTask,
+  reminderVerbOffered, routineListing, routineStatusFor, runNowOutcome, saveConfirmed, snoozeConfirmed, snoozeUntil, taskEnded, taskOn, taskSnoozed,
 } from "../../gen/workflows__agentSchedules.effect.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 import { AgentRefused, AgentUnavailable, NotSent, Unrecognized, WorkflowApi, decoded } from "./api.vibe"
 import { deviceZone, instant, sameLocalDay } from "./ids.ts"
 import {
-  DefinitionList, DefinitionReply, Deleted, ExecuteReply, FireReply, ScheduledTaskList, TriggerList,
+  Deleted, ExecuteReply, FireReply, RoutineList, RoutineReply, ScheduledTaskList, TriggerList,
   type ScheduledTaskRecord, type TaskTrigger, TaskReply, TriggerReply, TriggerRuns,
 } from "./wire.schema.vibe"
 
@@ -69,7 +69,7 @@ export service Automations {
   allowAnother(id: number): void!!
 }
 
-const sources: ReadonlyArray<Source> = ["AutomationSource", "ScheduleSource", "DefinitionSource"]
+const sources: ReadonlyArray<Source> = ["AutomationSource", "ScheduleSource", "RoutineSource"]
 
 function statusOf(status: string): TaskStatus {
   switch (status) {
@@ -105,7 +105,7 @@ export function scheduleCode(t: TaskTrigger): string {
 }
 
 function scheduledRow(task: ScheduledTaskRecord): Row | undefined {
-  if (task.ownerVisible !== true) return undefined
+  if (task.ownerVisible !== true || !listedAsScheduled(task.kind ?? "")) return undefined
   const status = statusOf(task.state.status)
   const snoozed = taskSnoozed(status, instant(task.state.firedAt) > 0, task.state.lastDecisionLog === `snoozed until ${task.state.firedAt} (ladder reset)`)
   const manual = task.trigger.kind === "manual"
@@ -170,15 +170,16 @@ export const automations = Layer.provideMerge(Layer.effect(Automations, effect {
         const list = try decoded(ScheduledTaskList, "/api/scheduled-tasks", try agent.request("GET", "/api/scheduled-tasks?ownerVisibleOnly=1"))
         return { rows: list.tasks.flatMap((t) => { const row = scheduledRow(t); return row === undefined ? [] : [row] }), partial: false }
       }
-      case "DefinitionSource": {
-        const list = try decoded(DefinitionList, "/api/lifeops/definitions", try agent.request("GET", "/api/lifeops/definitions"))
-        const rows: Row[] = list.definitions.flatMap(({ definition }) => {
-          const listed = definitionRow(definition.metadata?.ownerSurface ?? "", definition.kind ?? "", definition.status === "archived")
-          if (listed === "NotListed") return []
+      case "RoutineSource": {
+        const path = "/api/personal-assistant/routines"
+        const list = try decoded(RoutineList, path, try agent.request("GET", path))
+        const rows: Row[] = list.routines.flatMap((routine) => {
+          const listed = routineListing(routine.status)
+          if (listed === "RoutineNotListed") return []
           return [{
-            key: `reminder:${definition.id}`, id: definition.id, target: definition.id, kind: "RoutineRow" as RowKind, enabled: definition.status === "active",
-            status: definition.status ?? "", title: definition.title ?? "", description: definition.description ?? "",
-            schedule: listed === "GoalRow" ? `goal:${definition.cadence?.kind ?? ""}` : `routine:${definition.cadence?.kind ?? ""}`, system: false,
+            key: `routine:${routine.id}`, id: routine.id, target: routine.id, kind: "RoutineRow" as RowKind, enabled: listed === "RoutineOn",
+            status: routine.status, title: routine.title, description: "",
+            schedule: `routine:${(routine.days ?? []).length === 0 ? "daily" : "weekly"}`, system: false,
           }]
         })
         return { rows, partial: false }
@@ -237,10 +238,11 @@ export const automations = Layer.provideMerge(Layer.effect(Automations, effect {
     throw sent.failure
   }
 
-  effect function setDefinition(id: string, body: Record<string, unknown>, check: (status: string | undefined) => boolean) {
-    const path = `/api/lifeops/definitions/${id}`
-    const saved = (try decoded(DefinitionReply, path, try agent.request("PUT", path, body))).definition
-    return saved.id === id && check(saved.status) ? reportOf("AnswerApplied") : reportOf("AnswerUnknown", "not-confirmed")
+  effect function setRoutine(id: string, on: boolean) {
+    const path = `/api/personal-assistant/routines/${id}`
+    const status = routineStatusFor(on)
+    const saved = (try decoded(RoutineReply, path, try agent.request("PATCH", path, { status }))).routine
+    return saved.id === id && saved.status === status ? reportOf("AnswerApplied") : reportOf("AnswerUnknown", "not-confirmed")
   }
 
   effect function taskVerb(id: string, verb: Verb, body: Record<string, unknown>) {
@@ -271,8 +273,7 @@ export const automations = Layer.provideMerge(Layer.effect(Automations, effect {
       if (row.kind !== "PromptRow" && row.kind !== "RoutineRow") return { answer: "refused" } satisfies Report
       return try settle("EnableChange", key, on, effect {
         if (row.kind === "PromptRow") return try enablePrompt(row.target, on)
-        const status = on ? "active" : "paused"
-        return try setDefinition(row.id, { status }, (saved) => saved === status)
+        return try setRoutine(row.id, on)
       })
     },
     effect remove(key: string) {
@@ -283,7 +284,7 @@ export const automations = Layer.provideMerge(Layer.effect(Automations, effect {
           const path = `/api/triggers/${row.target}`
           return (try decoded(Deleted, path, try agent.request("DELETE", path))).ok === true ? reportOf("AnswerApplied") : reportOf("AnswerUnknown", "not-confirmed")
         }
-        const path = `/api/lifeops/definitions/${row.id}`
+        const path = `/api/personal-assistant/routines/${row.id}`
         return (try decoded(Deleted, path, try agent.request("DELETE", path))).deleted === true ? reportOf("AnswerApplied") : reportOf("AnswerUnknown", "not-confirmed")
       })
     },

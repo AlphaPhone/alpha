@@ -15,7 +15,7 @@ export error AgentUnavailable { state: string }
 export error Unrecognized { path: string }
 
 /** The methods Workflows sends. */
-export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE"
+export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
 
 /** Who the agent answers for: the origin, owner and agent every stored record is fenced to. */
 export interface OwnerScope {
@@ -31,7 +31,7 @@ export const residentOrigin = "https://device.alpha.invalid"
 export function familyOf(path: string): RouteFamily {
   if (/^\/api\/triggers(\/[A-Za-z0-9][A-Za-z0-9._:-]{0,199}(\/(runs|execute))?)?$/.test(path)) return "TriggerRoutes"
   if (/^\/api\/scheduled-tasks(\?ownerVisibleOnly=1|\/[A-Za-z0-9][A-Za-z0-9._:-]{0,199}(\/(snooze|skip|complete|dismiss|escalate|acknowledge|edit|reopen|fire))?)?$/.test(path)) return "ScheduledTaskRoutes"
-  if (/^\/api\/lifeops\/definitions(\/[A-Za-z0-9][A-Za-z0-9._:-]{0,199})?$/.test(path)) return "LifeOpsRoutes"
+  if (/^\/api\/personal-assistant\/routines(\/[A-Za-z0-9][A-Za-z0-9._:-]{0,199})?$/.test(path)) return "RoutineRoutes"
   if (/^\/api\/workflow\/hosted\/(sources(\/revoke)?|loops|dossier|live-accounts|live-calendars|results(\?clientId=[A-Za-z0-9_-]{1,128}|\/ack)?|cloud-delegation\/(start|complete|status|cancel|revoke|revocations))$/.test(path)) return "HostedRoutes"
   if (/^\/api\/workflow\/phone\/(catalog|generate|validate|workflows|mutations\/[a-f0-9-]{36})$/.test(path)) return "WorkflowRoutes"
   if (/^\/api\/workflow\/(status|removed-workflows|workflows(\/[A-Za-z0-9][A-Za-z0-9._:-]{0,199}(\/[a-z-]+(\/[A-Za-z0-9-]{1,64})?)?)?|executions\/[A-Za-z0-9][A-Za-z0-9._:-]{0,199}(\/(cancel|approvals|phone-review)(\/[A-Za-z0-9._:-]+\/\d+)?)?)$/.test(path)) return "WorkflowRoutes"
@@ -40,7 +40,7 @@ export function familyOf(path: string): RouteFamily {
 }
 
 function methodOf(method: HttpMethod): Method {
-  return method === "GET" ? "Get" : method === "POST" ? "Post" : method === "PUT" ? "Put" : "Delete"
+  return method === "GET" ? "Get" : method === "POST" ? "Post" : method === "PUT" ? "Put" : method === "PATCH" ? "Patch" : "Delete"
 }
 
 /** The agent's owner routes Workflows reads and writes, each checked before it is sent. */

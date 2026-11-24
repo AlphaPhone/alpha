@@ -37,12 +37,12 @@ const reminder: Row = {
 
 /** Every source listed, a prompt on, a snoozed scheduled item and a reminder the agent keeps. */
 export const listed: Automations = {
-  ...automationsInitial, owner: "owner", automations: "Listed", schedules: "Listed", definitions: "Listed", rows: [prompt, scheduled, reminder],
+  ...automationsInitial, owner: "owner", automations: "Listed", schedules: "Listed", routines: "Listed", rows: [prompt, scheduled, reminder],
 };
 
 /** One source failed, and a change whose answer was lost is held. */
 export const heldUnknown: Automations = {
-  ...listed, definitions: "RefreshFailed", answer: "AnswerUnknown", minted: 1,
+  ...listed, routines: "RefreshFailed", answer: "AnswerUnknown", minted: 1,
   held: [{ owner: "owner", id: 1, kind: "RunChange", key: "a1", target: false }],
 };
 

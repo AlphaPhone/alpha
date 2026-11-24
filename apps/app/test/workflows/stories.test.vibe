@@ -27,6 +27,7 @@ import { WorkflowRuns } from "../../src/workflows/runs.vibe"
 import { SimulatedTriggers, SimulatedWorkflows } from "../../src/workflows/simulator.vibe"
 import { DigestSourcesService } from "../../src/workflows/sources.vibe"
 import { WorkflowsPlace, followRoute } from "../../src/workflows/place.vibe"
+import { routeCrosses } from "../../src/shell/ownerRoutes.vibe"
 import { Machine as PlaceMachine } from "../../gen/workflows__place.effect.vibe"
 import { type Handler, type NativeCall, type NativeHandler, type ReportedBrief, type Sent, engineStatus, navigationOf, statusRoute, workflowsOf } from "./fakes.vibe"
 
@@ -49,7 +50,7 @@ const workflowRoutes = (runs: ReadonlyArray<unknown>, approvals: ReadonlyArray<u
 const emptySources: Handler[] = [
   (m, p) => m === "GET" && p === "/api/workflow/workflows" ? { status: 200, data: { workflows: [] } } : undefined,
   (m, p) => m === "GET" && p === "/api/triggers" ? { status: 200, data: { triggers: [] } } : undefined,
-  (m, p) => m === "GET" && p === "/api/lifeops/definitions" ? { status: 200, data: { definitions: [] } } : undefined,
+  (m, p) => m === "GET" && p === "/api/personal-assistant/routines" ? { status: 200, data: { routines: [] } } : undefined,
 ]
 const result: DigestResult = {
   cursor: 1, runId: "r9", workflowId: "d1", workflowVersionId: "v1", templateVersion: "1", scheduledAt: "2026-11-22T06:00:00.000Z", source: {},
@@ -197,8 +198,41 @@ describe("Agent reminders (spec/workflows/agentSchedules.md, \"Story: Answer a s
       const snoozed = try list.snooze("scheduled:r1")
       const fired = try list.verb("scheduled:r1", "Fire")
       try Effect.try(() => assert.deepStrictEqual(
-        { rows, snoozed: snoozed.answer, fired: fired.answer, snoozes: sent.filter((s) => s.method === "POST" && s.path === "/api/scheduled-tasks/r1/snooze").length, lifeops: sent.some((s) => s.path.startsWith("/api/lifeops/reminders") || s.path.startsWith("/api/lifeops/occurrences")) },
+        { rows, snoozed: snoozed.answer, fired: fired.answer, snoozes: sent.filter((s) => s.method === "POST" && s.path === "/api/scheduled-tasks/r1/snooze").length, lifeops: sent.some((s) => s.path.startsWith("/api/lifeops")) },
         { rows: [["scheduled:r1", "ReminderRow", "Call the dentist"]], snoozed: "applied", fired: "refused", snoozes: 1, lifeops: false },
+      ))
+    }
+  })
+})
+
+describe("Routines (spec/workflows/agentSchedules.md, \"Story: Answer a scheduled item from Workflows\")", () => {
+  it.effect("a routine is listed from the agent's routines, once, and its switch patches its status (spec/workflows/agentSchedules.md, \"A routine is listed from the agent's routines, an archived one is not, and its switch sets its status\")", () => effect {
+    const sent: Sent[] = []
+    const water = { id: "r1", title: "Drink water", windows: ["morning"], times: [], days: [], status: "active", occurrence: null, muted: false, done: [] }
+    const archived = { ...water, id: "r2", title: "Old habit", status: "archived" }
+    const task = { taskId: "t9", kind: "personal-assistant.routine", ownerVisible: true, promptInstructions: "Drink water", state: { status: "scheduled" }, trigger: { kind: "cron", expression: "0 9 * * *", tz: "UTC" } }
+    const handlers: Handler[] = [
+      (m, p) => m === "GET" && p === "/api/personal-assistant/routines" ? { status: 200, data: { routines: [water, archived] } } : undefined,
+      ...emptySources,
+      (m, p) => m === "GET" && p.startsWith("/api/scheduled-tasks") ? { status: 200, data: { tasks: [task] } } : undefined,
+      (m, p, b) => m === "PATCH" && p === "/api/personal-assistant/routines/r1" ? { status: 200, data: { routine: { ...water, status: (b as { status: string }).status } } } : undefined,
+    ]
+    provide workflowsOf(handlers, sent) {
+      const list = try Automations
+      const held = try AutomationsMachine
+      try list.refresh()
+      const rows = (try held.get()).rows.map((r) => [r.key, r.kind, r.enabled])
+      const paused = try list.setEnabled("routine:r1", false)
+      const patch = sent.find((s) => s.method === "PATCH")
+      try Effect.try(() => assert.deepStrictEqual(
+        {
+          rows, paused: paused.answer, patch: [patch?.path, patch?.body], lifeops: sent.some((s) => s.path.startsWith("/api/lifeops")),
+          crosses: [["GET", "/api/personal-assistant/routines"], ["PATCH", "/api/personal-assistant/routines/r1"], ["DELETE", "/api/personal-assistant/routines/r1"]].map(([m, p]) => routeCrosses(m, p, true)),
+        },
+        {
+          rows: [["routine:r1", "RoutineRow", true]], paused: "applied", patch: ["/api/personal-assistant/routines/r1", { status: "paused" }], lifeops: false,
+          crosses: [true, true, true],
+        },
       ))
     }
   })

@@ -135,7 +135,7 @@ Dismiss while one has not ended, Reopen once it has. A reminder offers no Run no
 pure val reminderKind = "personal-assistant.reminder"
 pure def reminderTask(kind: str): bool = kind == reminderKind
 pure def reminderVerbOffered(s: TaskStatus, v: Verb): bool = verbOffered(s, v) and Set(Snooze, Complete, Dismiss, Reopen).contains(v)
-pure val taskKindValues = Set("personal-assistant.reminder", "personal-assistant.checkin", "")
+pure val taskKindValues = Set("personal-assistant.reminder", "personal-assistant.routine", "personal-assistant.checkin", "")
 pure def lawOnlyTheReminderKindIsAReminder(taskKind: str): bool = reminderTask(taskKind) iff taskKind == "personal-assistant.reminder"
 pure def lawAReminderIsNeverRunOrEdited(s: TaskStatus): bool = not(reminderVerbOffered(s, Fire)) and not(reminderVerbOffered(s, Edit))
 ```
@@ -203,15 +203,26 @@ pure def lawAnEditWithoutInstructionsIsNeverConfirmed(savedInstructions: str, se
   not(editConfirmed("", savedInstructions, sentTrigger, sameTrigger))
 ```
 
-### A routine or goal is listed under its surface, and an archived one is not
+### A routine is listed from the agent's routines, an archived one is not, and its switch sets its status
+
+The agent keeps the owner's routines at `/api/personal-assistant/routines` (it has no goals route):
+an active routine is listed on, a paused one off, and an archived one not at all. Turning one on or
+off sends `PATCH /api/personal-assistant/routines/{id}` with the status it shows, confirmed only by
+the routine as saved; Delete sends `DELETE` on the same route. A routine's own scheduled tasks are
+the routine, so they are not listed again among the scheduled items.
 
 ```quint
-type DefinitionRow = GoalRow | RoutineDefinition | NotListed
-pure def definitionRow(surface: str, kind: str, archived: bool): DefinitionRow =
-  if (archived) NotListed
-  else if (surface == "OWNER_GOALS") GoalRow
-  else if (surface == "OWNER_ROUTINES" or (surface == "" and (kind == "habit" or kind == "routine"))) RoutineDefinition
-  else NotListed
-pure val surfaceValues = Set("", "OWNER_GOALS", "OWNER_ROUTINES", "OWNER_REMINDERS")
-pure def lawAnArchivedDefinitionIsNotListed(surface: str, kind: str): bool = definitionRow(surface, kind, true) == NotListed
+type RoutineListing = RoutineOn | RoutineOff | RoutineNotListed
+pure def routineListing(status: str): RoutineListing =
+  if (status == "active") RoutineOn else if (status == "paused") RoutineOff else RoutineNotListed
+pure def routineStatusFor(on: bool): str = if (on) "active" else "paused"
+pure val routineKind = "personal-assistant.routine"
+pure def listedAsScheduled(taskKind: str): bool = taskKind != routineKind
+pure val routineStatusValues = Set("active", "paused", "archived", "deleted")
+pure val onValues = Set(true, false)
+pure def lawAnArchivedRoutineIsNotListed(routineStatus: str): bool =
+  routineStatus == "archived" implies routineListing(routineStatus) == RoutineNotListed
+pure def lawASwitchSendsTheStatusItShows(on: bool): bool =
+  routineListing(routineStatusFor(on)) == (if (on) RoutineOn else RoutineOff)
+pure def lawARoutineTaskIsListedOnlyAsItsRoutine(taskKind: str): bool = taskKind == routineKind implies not(listedAsScheduled(taskKind))
 ```

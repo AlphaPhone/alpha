@@ -136,7 +136,8 @@
     "automations": {
       "prefixes": [
         "/api/lifeops",
-        "/api/triggers"
+        "/api/triggers",
+        "/api/personal-assistant/routines"
       ],
       "id": "^(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$",
       "routes": [
@@ -146,11 +147,11 @@
           ],
           "paths": [
             "/api/triggers",
-            "/api/lifeops/definitions",
             "/api/lifeops/scheduled-tasks?ownerVisibleOnly=1",
             "/api/lifeops/scheduled-tasks/{id}",
             "/api/triggers/{id}",
-            "/api/triggers/{id}/runs"
+            "/api/triggers/{id}/runs",
+            "/api/personal-assistant/routines"
           ]
         },
         {
@@ -158,7 +159,6 @@
             "POST"
           ],
           "paths": [
-            "/api/lifeops/definitions",
             "/api/triggers",
             "/api/triggers/{id}/execute",
             "/api/lifeops/scheduled-tasks/{id}/snooze",
@@ -177,8 +177,15 @@
             "PUT"
           ],
           "paths": [
-            "/api/lifeops/definitions/{id}",
             "/api/triggers/{id}"
+          ]
+        },
+        {
+          "methods": [
+            "PATCH"
+          ],
+          "paths": [
+            "/api/personal-assistant/routines/{id}"
           ]
         },
         {
@@ -186,8 +193,8 @@
             "DELETE"
           ],
           "paths": [
-            "/api/lifeops/definitions/{id}",
-            "/api/triggers/{id}"
+            "/api/triggers/{id}",
+            "/api/personal-assistant/routines/{id}"
           ]
         }
       ]

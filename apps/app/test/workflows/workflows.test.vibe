@@ -41,7 +41,7 @@ describe("Workflows (spec/workflows/automations.md, \"Story: See all my automati
       try list.allowAnother(unknown.held[0]?.id ?? 0)
       const released = try held.get()
       try Effect.try(() => assert.deepStrictEqual({
-        rows: first.rows.map((r) => [r.key, r.kind, r.target]), reads: [first.automations, first.schedules, first.definitions],
+        rows: first.rows.map((r) => [r.key, r.kind, r.target]), reads: [first.automations, first.schedules, first.routines],
         enabled: [enabled.answer, enabled.word, afterEnable.held.length],
         ran: [ran.answer, again.answer, executes, unknown.answer, unknown.held.length],
         released: released.held.length,

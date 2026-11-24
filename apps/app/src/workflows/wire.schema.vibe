@@ -34,23 +34,19 @@ export schema TaskReply { task: ScheduledTaskRecord }
 /** `POST /api/scheduled-tasks/:id/fire`. */
 export schema FireReply { fire: { kind: string; task?: { taskId: string }; reason?: string; nextAttemptAtIso?: string } }
 
-/** A LifeOps definition: a reminder, routine or goal. */
-export schema LifeDefinition {
+/** One routine of `/api/personal-assistant/routines`: its title, when it comes, and whether it is active, paused or archived. */
+export schema RoutineRecord {
   id: string
-  title?: string
-  description?: string
-  status?: string
-  kind?: string
-  timezone?: string
-  metadata?: { ownerSurface?: string }
-  cadence?: { kind?: string; dueAt?: string }
+  title: string
+  status: string
+  days?: ReadonlyArray<string>
 }
 
-/** `GET /api/lifeops/definitions`. */
-export schema DefinitionList { definitions: ReadonlyArray<{ definition: LifeDefinition }> }
+/** `GET /api/personal-assistant/routines`. */
+export schema RoutineList { routines: ReadonlyArray<RoutineRecord> }
 
-/** A definition write's answer. */
-export schema DefinitionReply { definition: LifeDefinition }
+/** `PATCH /api/personal-assistant/routines/:id`: the routine as saved. */
+export schema RoutineReply { routine: RoutineRecord }
 
 /** A saved prompt. */
 export schema TriggerRecord {

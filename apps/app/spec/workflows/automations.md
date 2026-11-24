@@ -1,7 +1,7 @@
 # Automations list
 
 The Workflows list: the agent's workflows (`/api/workflow/workflows`) and prompts (`/api/triggers`), its owner-visible
-scheduled tasks, among them the reminders it keeps, and its routines and goals, each read on its own so that one
+scheduled tasks, among them the reminders it keeps, and its routines (`/api/personal-assistant/routines`), each read on its own so that one
 source failing never hides the others. A change the owner asks for is held, one per owner, until
 the agent's answer or a complete re-read settles it, so a lost answer never lets a second copy go
 (PRD AP-07; legacy `AutomationRequestSettlement`).
@@ -11,7 +11,7 @@ the agent's answer or a complete re-read settles it, so a lost answer never lets
 ### The list holds the rows of each source, how each was read, and the one change held for each owner
 
 ```quint
-type Source = AutomationSource | ScheduleSource | DefinitionSource
+type Source = AutomationSource | ScheduleSource | RoutineSource
 type Read = NotRead | Listed | NotOnAgent | NeedsOwner | RefreshFailed
 type RowKind = WorkflowRow | PromptRow | ScheduleRow | ReminderRow | RoutineRow
 type Row = { key: str, id: str, target: str, kind: RowKind, enabled: bool, status: str, title: str, description: str, schedule: str, system: bool }
@@ -20,11 +20,11 @@ type Held = { owner: str, id: int, kind: ChangeKind, key: str, target: bool }
 type Answer = NoAnswer | AnswerApplied | AnswerRefused | AnswerUnknown
 type Release = NotReleased | ByReply | ByRefusal | ByList | ByOwner
 type Automations = {
-  owner: str, automations: Read, schedules: Read, definitions: Read, partial: bool,
+  owner: str, automations: Read, schedules: Read, routines: Read, partial: bool,
   rows: List[Row], held: List[Held], busy: bool, minted: int, answer: Answer, released: Release, releasedKind: ChangeKind
 }
 pure val initial: Automations = {
-  owner: "", automations: NotRead, schedules: NotRead, definitions: NotRead, partial: false,
+  owner: "", automations: NotRead, schedules: NotRead, routines: NotRead, partial: false,
   rows: List(), held: List(), busy: false, minted: 0, answer: NoAnswer, released: NotReleased, releasedKind: CreateChange
 }
 pure val noHeld: Held = { owner: "", id: 0, kind: CreateChange, key: "", target: false }
@@ -34,12 +34,12 @@ pure val noRow: Row = { key: "", id: "", target: "", kind: WorkflowRow, enabled:
 pure def rowOf(a: Automations, key: str): Row = a.rows.select(r => r.key == key).nthOr(0, noRow)
 pure def sourceOf(kind: RowKind): Source = match kind {
   | WorkflowRow => AutomationSource | PromptRow => AutomationSource | ScheduleRow => ScheduleSource
-  | ReminderRow => ScheduleSource | RoutineRow => DefinitionSource
+  | ReminderRow => ScheduleSource | RoutineRow => RoutineSource
 }
 pure def complete(a: Automations): bool =
-  a.automations == Listed and a.schedules == Listed and a.definitions == Listed and not(a.partial)
+  a.automations == Listed and a.schedules == Listed and a.routines == Listed and not(a.partial)
 pure def readOfSource(a: Automations, source: Source): Read = match source {
-  | AutomationSource => a.automations | ScheduleSource => a.schedules | DefinitionSource => a.definitions
+  | AutomationSource => a.automations | ScheduleSource => a.schedules | RoutineSource => a.routines
 }
 pure def sourceListed(a: Automations, key: str): bool = key == "" or readOfSource(a, sourceOf(rowOf(a, key).kind)) == Listed
 ```
@@ -83,7 +83,7 @@ The rows are merged for display only: a namespaced key never writes across store
 pure def withSource(source: Source, read: Read, partial: bool, a: Automations): Automations = match source {
   | AutomationSource => { ...a, automations: read, partial: partial }
   | ScheduleSource => { ...a, schedules: read }
-  | DefinitionSource => { ...a, definitions: read }
+  | RoutineSource => { ...a, routines: read }
 }
 pure def mergeRows(kept: List[Row], incoming: List[Row]): List[Row] =
   incoming.foldl(kept, (acc, r) => if (acc.some(k => k.key == r.key)) acc else acc.append(r))
@@ -96,7 +96,7 @@ pure def alwaysNoRowsWithoutAnOwner(a: Automations): bool = a.owner == "" implie
 ```quint
 pure def canBindOwner(a: Automations, owner: str): bool = owner != "" and owner != a.owner
 pure def bindOwner(a: Automations, owner: str): Automations =
-  { ...a, owner: owner, automations: NotRead, schedules: NotRead, definitions: NotRead,
+  { ...a, owner: owner, automations: NotRead, schedules: NotRead, routines: NotRead,
     partial: false, rows: List(), busy: false, answer: NoAnswer, released: NotReleased }
 pure def sometimesSecondOwnerListed(a: Automations): bool = a.owner == "ben" and a.rows.length() > 0 and a.held.length() >= 1
 ```
@@ -138,7 +138,7 @@ pure def stepAChangeNeedsItsSourceListed(before: Automations, via: str, after: A
 pure def stepAFailedReadKeepsTheRows(before: Automations, via: str, after: Automations): bool =
   (via == "listed" and before.owner == after.owner and after.rows.length() < before.rows.length()) implies
     (readOfSource(after, AutomationSource) == Listed or readOfSource(after, ScheduleSource) == Listed or
-     readOfSource(after, DefinitionSource) == Listed)
+     readOfSource(after, RoutineSource) == Listed)
 ```
 
 ### The agent's answer releases the change, and a lost answer keeps it held

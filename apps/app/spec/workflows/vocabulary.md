@@ -178,12 +178,12 @@ A request the renderer refuses was never sent; the owner is told nothing was sen
 
 ```quint
 type Method = Get | Post | Put | Patch | Delete
-type RouteFamily = AutomationRoutes | TriggerRoutes | ScheduledTaskRoutes | LifeOpsRoutes | WorkflowRoutes | HostedRoutes | RecordRoutes | OtherRoute
+type RouteFamily = AutomationRoutes | TriggerRoutes | ScheduledTaskRoutes | RoutineRoutes | WorkflowRoutes | HostedRoutes | RecordRoutes | OtherRoute
 pure def methodAllowed(family: RouteFamily, method: Method): bool = match family {
   | AutomationRoutes => method == Get
   | TriggerRoutes => method == Get or method == Post or method == Put or method == Delete
   | ScheduledTaskRoutes => method == Get or method == Post
-  | LifeOpsRoutes => method == Get or method == Post or method == Put or method == Delete
+  | RoutineRoutes => method == Get or method == Patch or method == Delete
   | WorkflowRoutes => method == Get or method == Post
   | HostedRoutes => method == Get or method == Post
   | RecordRoutes => method == Get or method == Post or method == Patch or method == Delete

@@ -161,7 +161,6 @@ export function scheduleText(code: string): string {
     }
     case "window": return windows[value] ?? "Scheduled window";
     case "routine": return ({ daily: "Daily", times_per_day: "Several times a day", weekly: "Weekly", interval: "Repeats" } as Record<string, string>)[value] ?? "";
-    case "goal": return "Goal";
     default: return "";
   }
 }
