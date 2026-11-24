@@ -20,7 +20,10 @@ edited draft whose base is no longer current goes to review. A new draft has no 
 it simply follows the current revision. The editor takes in every snapshot in the order the collection
 published it, and acts only on the collection it has taken in: before it opens, starts, saves, leaves,
 deletes or restores a note, shows its draft or names its selection, it first takes in every snapshot the
-collection already published, so a note the agent or the recorder just saved opens at once.
+collection already published, so a note the agent or the recorder just saved opens at once. It waits at
+most 2 seconds for that: a snapshot it cannot take in by then never holds the owner or the agent back,
+and the action runs on what the editor has taken in. A snapshot whose taking in fails still counts as
+taken in, so the editor goes on to the next one.
 
 ```quint
 type Mutation = NoMutation | DeleteAfterSave | Deleting | Restoring
@@ -67,6 +70,7 @@ pure val noteIdValues = Set("", "a", "b")
 pure val notesValues = Set(Set(), Set("a"), Set("a", "b"))
 pure val trashedValues = Set(Set(), Set("b"))
 pure val revisionValues = Set(0, 1, 2, 3)
+pure val catchUpWaitMs = 2000
 pure def alwaysVersionsNonnegative(s: Editor): bool = s.version >= 0 and s.capturedVersion >= 0 and s.token >= 0 and s.nextToken >= s.token
 pure def alwaysCollectionDisjoint(s: Editor): bool = s.known.intersect(s.trash).size() == 0
 ```

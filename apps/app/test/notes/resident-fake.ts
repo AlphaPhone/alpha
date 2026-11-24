@@ -134,6 +134,8 @@ export class DeviceFake {
   released: string[][] = [];
   /** The earlier Alpha's connection store, when this phone still has one: what its `notes-records:v1:device` slot holds. */
   connection: { records?: string } | undefined;
+  /** A native call, as `plugin.method`, that never answers while it is set. */
+  stalled: string | undefined;
 
   available(plugin: string): boolean {
     if (plugin === "AlphaConnection") return this.connection !== undefined;

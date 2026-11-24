@@ -87,6 +87,29 @@ describe("Notes journeys", () => {
     }
   })
 
+  it.live("A snapshot the editor cannot take in never holds Notes back (spec/notes/editor.md, \"A draft opens from a note at the current revision, or starts as a new note\")", () => effect {
+    const agent = new NotesAgentFake()
+    const device = new DeviceFake()
+    provide notesOver(agent, device) {
+      const editor = try NotesEditor
+      const collection = try NotesCollection
+      try bound()
+      try editor.newNote("text")
+      try editor.edit({ body: "Pick up the keys" })
+      try editor.save()
+      try editor.edit({ body: "Pick up the keys and the mail" })
+      // Keeping the edit for the account that left never finishes, so the editor cannot take in the sign-out.
+      device.stalled = "ElizaSecureStore.compareAndExchange"
+      try collection.retire()
+      const shown = timeout(editor.draft(), "5 seconds") catch () => "held back"
+      const later = timeout(editor.selection(), "5 seconds") catch () => "held back"
+      try check(() => assert.deepStrictEqual(
+        { shown: typeof shown === "string" ? shown : shown?.body, later: typeof later === "string" ? later : "answered" },
+        { shown: "Pick up the keys and the mail", later: "answered" },
+      ))
+    }
+  })
+
   it.live("Erase a voice note after review and clean up its recording once the device host registers (spec/notes/cleanup.md, \"Story: Erase only the recording of the note I erased, and only once the device proves it\")", () => effect {
     const agent = new NotesAgentFake()
     const device = new DeviceFake()
