@@ -7,7 +7,7 @@ import type { View } from "../../gen/app__shell.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Device, native, registered } from "../platform/device.vibe"
 import { ask } from "../platform/remote.vibe"
-import { type Job, answer, contained, due, following, hearing, reacting, run, untimed } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, due, following, hearing, reacting, run, untimed, together } from "../runtime/reactor.vibe"
 
 module held {
   import { calendarClient } from "@elizaos/os/bridges/calendar"
