@@ -59,6 +59,10 @@ pure def setNavigating(s: EventReturn, on: bool): EventReturn = { ...s, navigati
 pure def canSetFromCalendar(s: EventReturn, on: bool): bool = s.inMaps and on != s.fromCalendar
 pure def setFromCalendar(s: EventReturn, on: bool): EventReturn = { ...s, fromCalendar: on }
 pure def offered(s: EventReturn): bool = returnable(s.origin, s)
+pure def stepAnEventPlaceEntersWithANewOrigin(before: EventReturn, via: str, after: EventReturn): bool =
+  via == "enterFromEvent" implies (after.origin > before.lastOrigin and after.origin == after.lastOrigin and after.active == 0)
+pure def stepLeavingHidingOrUnloadingRetiresTheAttempt(before: EventReturn, via: str, after: EventReturn): bool =
+  (via == "leaveMaps" or via == "hideReturn" or via == "pageHide") implies (after.active == 0 and after.attemptOrigin == 0)
 ```
 
 ### One check per tap, and only its reply for the current origin returns, once

@@ -118,4 +118,9 @@ pure val maxLabelLength = 300
 pure val maxSaved = 200
 pure def searchable(len: int): bool = len >= 1 and len <= maxSearchLength
 pure def labelFits(len: int): bool = len >= 1 and len <= maxLabelLength
+pure val charsValues = Set(0, 1, 300, 301)
+pure def lawAnEmptyOrOverlongTextIsRefused(chars: int): bool =
+  (chars < 1 or chars > maxSearchLength) implies (not(searchable(chars)) and not(labelFits(chars)))
+pure def lawOneTo300CharactersIsAccepted(chars: int): bool =
+  (chars >= 1 and chars <= 300) implies (searchable(chars) and labelFits(chars))
 ```

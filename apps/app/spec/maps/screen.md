@@ -206,6 +206,7 @@ nothing.
 
 ```quint
 pure def centersOnQuietFix(s: Screen): bool = s.choice == NoChoice and not(s.directions) and not(s.searching) and not(s.locating)
+pure def alwaysAQuietFixCentresOnlyTheBareMap(s: Screen): bool = centersOnQuietFix(s) implies mode(s) == BaseMode
 ```
 
 ### Call is offered only for a dialable number on the build that has Phone, and Copy number only for a place that is not Google's
@@ -230,6 +231,12 @@ type Region = { west: int, south: int, east: int, north: int }
 pure def insideRegion(lat: int, lng: int, r: Region): bool = lng >= r.west and lng <= r.east and lat >= r.south and lat <= r.north
 pure def outsideCoverage(lat: int, lng: int, regions: List[Region]): bool =
   regions.length() > 0 and not(regions.some(r => insideRegion(lat, lng, r)))
+pure val latValues = Set(-91000000, 0, 43730000)
+pure val lngValues = Set(0, 7420000, 181000000)
+pure val regionsValues = Set(List(), List({ west: 0, south: 0, east: 10000000, north: 50000000 }))
+pure def lawUnknownCoverageNeverSaysOutside(lat: int, lng: int): bool = not(outsideCoverage(lat, lng, List()))
+pure def lawAPlaceInsideARegionIsCovered(lat: int, lng: int, regions: List[Region]): bool =
+  regions.some(r => insideRegion(lat, lng, r)) implies not(outsideCoverage(lat, lng, regions))
 ```
 
 ## Story: Plan directions and choose a route
@@ -324,6 +331,11 @@ pure def swapEnds(s: Screen, id: int, label: str): Screen = owned(Owner, planned
     else if (s.originKind == ChosenOrigin) ResultChoice else PinChoice,
   originKind: if (s.choice == SavedChoice) SavedOrigin else ChosenOrigin, originText: label, pending: NoPending,
 }))
+pure def stepSwappingKeepsEachEndAndPlansTheReverse(before: Screen, via: str, after: Screen): bool =
+  via == "swapEnds" implies (after.directions and after.origin and after.route == Loading and after.routeRun == before.routeRun + 1
+    and (before.originKind == LocatedOrigin implies after.choice == LocationChoice)
+    and (before.originKind == SavedOrigin implies after.choice == SavedChoice)
+    and (before.choice == SavedChoice implies after.originKind == SavedOrigin))
 ```
 
 ### Back closes one layer at a time
@@ -343,6 +355,11 @@ pure def back(s: Screen): Screen = {
     else if (s.choice != NoChoice) { ...base, choice: NoChoice, choiceId: 0, details: NotAsked }
     else { ...base, searching: false, query: "", searched: "", search: NotAsked, handoffFromEvent: false })
 }
+pure def stepBackClosesOneLayer(before: Screen, via: str, after: Screen): bool =
+  via == "back" implies (
+    (before.choosingOrigin implies (not(after.choosingOrigin) and after.directions == before.directions and after.choice == before.choice))
+    and ((not(before.choosingOrigin) and before.directions) implies (not(after.directions) and after.choice == before.choice))
+    and ((not(before.choosingOrigin) and not(before.directions) and before.choice != NoChoice) implies (after.choice == NoChoice and after.query == before.query)))
 pure def returnsToEvent(s: Screen): bool =
   s.handoffFromEvent and not(s.directions) and s.choice == NoChoice and not(s.choosingOrigin)
 ```
@@ -376,6 +393,9 @@ pure def providerChanged(s: Screen): Screen = noRoute(false, {
   originKind: NoOrigin, originText: "", search: NotAsked, originSearch: NotAsked, pending: NoPending, locating: false,
 })
 pure def resumable(s: Screen): bool = s.searching and s.search == NotAsked and s.searched != "" and s.searched == s.query
+pure def stepLeavingOrHidingKeepsWhatSettled(before: Screen, via: str, after: Screen): bool =
+  (via == "leaveScreen" or via == "hideScreen") implies (after.choice == before.choice and after.query == before.query
+    and (isSettled(before.route) implies after.route == before.route) and not(after.locating) and after.pending == NoPending)
 ```
 
 ## Story: Open what another app or my agent handed to Maps
