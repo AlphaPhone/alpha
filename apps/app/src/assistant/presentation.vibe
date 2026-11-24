@@ -15,6 +15,7 @@ export const copy = {
   reviewUnavailableTitle: "Review unavailable",
   reviewUnavailable: "This request is no longer available to review. Check action history before trying again.",
   emergency: "Not during an emergency call.",
+  sayToSend: "Say “Send this text” to send it.",
   notShownHere: "Phone action not shown here",
   commsReplaced: "A newer suggestion replaced this one. Nothing was done.",
   workflowStepElsewhere: "This step belongs to a workflow. Review it in Workflows.",

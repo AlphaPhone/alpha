@@ -22,6 +22,8 @@ export type ActionCardViewProps = {
   onDecline: (card: ProposalCard) => void;
   /** Open the view a navigation-only card names. */
   onOpen?: (card: ProposalCard) => void;
+  /** A voice conversation bound this text card and waits for the owner's "Send this text". */
+  spokenSend?: boolean;
 };
 
 const keepFocus = (event: PointerEvent<HTMLButtonElement>) => { if (event.button === 0) event.preventDefault(); };
@@ -35,7 +37,7 @@ const settledTitles: Partial<Record<ProposalCard["state"], string>> = {
  * One action the agent proposed: Approve (Send for an addressed text), or Decline as a visible second button; settled cards say what happened.
  * @model spec/assistant/approvals.md
  */
-export function ActionCardView({ card, emergency, busy, now, onApprove, onDecline, onOpen }: ActionCardViewProps) {
+export function ActionCardView({ card, emergency, busy, now, onApprove, onDecline, onOpen, spokenSend = false }: ActionCardViewProps) {
   const routes = { ...initial, card: card.state, emergency };
   const approvable = canTapApprove(routes) && !busy;
   const declinable = canTapDecline(routes) && !busy;
@@ -54,6 +56,7 @@ export function ActionCardView({ card, emergency, busy, now, onApprove, onDeclin
         </ul>
       )}
       {card.items?.note !== undefined && settled === undefined && <p className="text-sm text-muted-foreground">{card.items.note}</p>}
+      {settled === undefined && spokenSend && card.addressedText === true && <p className="text-sm">{copy.sayToSend}</p>}
       {settled === undefined && expiry !== "" && <p className="flex items-center gap-1 font-mono text-xs uppercase text-muted-foreground"><Clock aria-hidden className="size-3" />{expiry}</p>}
       {settled === undefined && (
         <CardFooter className="gap-2">

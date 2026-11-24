@@ -3,6 +3,7 @@ import type { CutOff } from "../../gen/assistant__receipts.ts"
 import type { PlanAction, ReplyView } from "../../gen/assistant__reply.ts"
 import { initial as replyStart, keptNotices, noticeFits, systemNoticeShown } from "../../gen/assistant__reply.effect.vibe"
 import type { CardState } from "../../gen/assistant__approvals.ts"
+import { actionable } from "../../gen/assistant__approvals.effect.vibe"
 import type { EmailCard } from "../../gen/assistant__emailCard.ts"
 import { offerAccepted, validDraft } from "../../gen/assistant__emailCard.effect.vibe"
 import { StagedEmail } from "./payloads.schema.vibe"
@@ -65,6 +66,18 @@ export interface Transcript {
   readonly hasMore: boolean
   readonly typing: boolean
   readonly toast?: string
+  /** The text card a voice conversation bound, which waits for the owner's "Send this text" (spec/voice/conversation.md). */
+  readonly voiceText?: string
+}
+
+/**
+ * The one live, unexpired addressed text card of the rows, or undefined when there is none or more than one
+ * (spec/voice/conversation.md, "Saying the send phrase sends the bound card once, as its Send tap does, only as the next thing said and
+ * only while it is still the one live text shown in that conversation").
+ */
+export function spokenTextCard(rows: readonly Row[], now: number): ProposalCard | undefined {
+  const live = rows.flatMap((row) => row.kind === "card" && row.card.addressedText === true && actionable(row.card.state) && row.card.expiresAt > now ? [row.card] : [])
+  return live.length === 1 ? live[0] : undefined
 }
 
 /** An empty transcript. */

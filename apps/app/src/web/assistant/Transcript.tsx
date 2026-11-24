@@ -26,6 +26,8 @@ export type TranscriptProps = {
   emergency: boolean;
   /** The card whose approval or decline is in flight. */
   busyCard?: string;
+  /** The text card a voice conversation bound, which waits for the owner's "Send this text". */
+  voiceText?: string;
   /** The time expiries are shown against. */
   now: number;
   /** Shown when nothing was said yet. */
@@ -123,7 +125,7 @@ export function Transcript(props: TranscriptProps) {
               onEdit={(fields) => props.onEmail(row, "edit", fields)} onSend={(fields) => props.onEmail(row, "send", fields)}
               onDecline={() => props.onEmail(row, "decline", { to: row.to, subject: row.subject, body: row.body })} /></li>;
           case "card":
-            return <li key={row.id}><ActionCardView card={row.card} emergency={props.emergency} busy={props.busyCard !== undefined && props.busyCard !== row.card.proposalId} now={props.now} onApprove={props.onApprove} onDecline={props.onDecline} onOpen={props.onOpenCard} /></li>;
+            return <li key={row.id}><ActionCardView card={row.card} emergency={props.emergency} busy={props.busyCard !== undefined && props.busyCard !== row.card.proposalId} now={props.now} onApprove={props.onApprove} onDecline={props.onDecline} onOpen={props.onOpenCard} spokenSend={props.voiceText === row.card.proposalId} /></li>;
         }
       })}
     </ol>

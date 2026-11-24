@@ -1,0 +1,55 @@
+// spec/voice/conversation.md, "Story: Send a text I reviewed by saying so"; spec/voice/conversation.md, "A reply that needs review stops voice with the microphone off and says it waits in the chat"; spec/voice/conversation.md, "A reply whose only card is one addressed text keeps voice listening and says the text is ready"; spec/voice/conversation.md, "Saying the send phrase sends the bound card once, as its Send tap does, only as the next thing said and only while it is still the one live text shown in that conversation"
+import { Machine } from "../../gen/voice__conversation.effect.vibe"
+import { NO_TEXT_READY, sendPhraseOf } from "./spoken-text.ts"
+
+/** What the chat a voice conversation speaks into does with a spoken turn's cards. */
+export interface TalkReview {
+  /** The turn was answered as `messageId`: its cards join the chat; `text` is the one addressed text card it left, when it left no other. */
+  replied(messageId: string, words: string): { readonly cards: number; readonly text?: string }!!
+  /** Whether that card is still the one live addressed text card in this conversation's open, visible chat, under the screen it was drawn for. */
+  shown(proposalId: string): boolean!!
+  /** Send it as its Send tap does: its receipt sentence, or undefined when it was not sent. */
+  send(proposalId: string): (string | undefined)!!
+}
+
+/** What a reply's cards mean for the conversation: none, the one text card it bound, or cards that wait for review in the chat. */
+export type TalkCards = "NoCards" | "TextBound" | "Review"
+
+/** The one text card one voice conversation may send by voice, from the reply that left it to the owner's next spoken turn. */
+export interface TalkText {
+  /** The owner's next spoken turn ends the binding; the local answer when it was the send phrase, or undefined when the turn goes to the agent. */
+  heard(words: string): (string | undefined)!!
+  /** The reply to `words`, answering message `messageId`, settled; `ranActions` when it ran any action. */
+  replied(messageId: string | undefined, ranActions: boolean, words: string): TalkCards!!
+}
+
+/** The binding of one conversation over its Machine `held` and the chat's `review`, which is absent where voice has no chat. */
+export function talkText(held: Machine.Shape, review: TalkReview | undefined): TalkText {
+  let bound: { readonly proposalId: string; readonly starts: number } | undefined
+  return {
+    heard: (words: string) => effect {
+      const phrase = sendPhraseOf(words)
+      const binding = bound
+      bound = undefined
+      const before = try held.get()
+      const shown = phrase !== "NotSend" && binding !== undefined && review !== undefined && binding.starts === before.starts && (try review.shown(binding.proposalId))
+      const after = held.send({ type: "spokenTurn", sendPhrase: phrase !== "NotSend", cardShown: shown }) catch () => undefined
+      if (phrase === "NotSend" || (phrase === "Send" && binding === undefined)) return undefined
+      const sent = binding !== undefined && review !== undefined && after !== undefined && after.spokenSends > before.spokenSends
+      const said = sent ? (try review.send(binding.proposalId)) : undefined
+      return said ?? NO_TEXT_READY
+    },
+    replied: (messageId: string | undefined, ranActions: boolean, words: string) => effect {
+      if (review === undefined || messageId === undefined || !ranActions) return "NoCards" as const
+      const offer = try review.replied(messageId, words)
+      if (offer.text !== undefined) {
+        const after = held.send({ type: "textOffered" }) catch () => undefined
+        if (after !== undefined) {
+          bound = { proposalId: offer.text, starts: after.starts }
+          return "TextBound" as const
+        }
+      }
+      return offer.cards > 0 ? "Review" as const : "NoCards" as const
+    },
+  }
+}

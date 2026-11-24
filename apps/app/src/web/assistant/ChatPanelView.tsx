@@ -51,7 +51,7 @@ export function ChatPanelView(props: ChatPanelViewProps) {
           <ScrollArea className="min-h-0 flex-1 px-4">
             <Transcript
               rows={rows} typing={typing} draftEmpty={text.trim() === ""} canFork={props.canFork} cloud={props.cloud}
-              emergency={props.emergency} ownAddress={props.ownAddress} busyCard={props.busyCard} now={props.now} emptyText={copy.emptyChat}
+              emergency={props.emergency} ownAddress={props.ownAddress} busyCard={props.busyCard} voiceText={props.voiceText} now={props.now} emptyText={copy.emptyChat}
               onQuote={props.onQuote}
               onEdit={props.onEdit}
               onApprove={props.onApprove} onDecline={props.onDecline}

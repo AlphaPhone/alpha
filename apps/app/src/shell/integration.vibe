@@ -1,4 +1,4 @@
-// spec/shell/navigation.md, "Hiding the page retires what the owner was in the middle of"; spec/shell/navigation.md, "HOME returns to Home and dismisses what is open above it"; spec/shell/navigation.md, "The assistant moves between its detents, and Home keeps its bar"; spec/voice/conversation.md, "Voice starts only from the owner, on a lit, visible phone with no sensitive screen, no reset and no call"; spec/shell/overview.md, "Reminders that are overdue are reported by the reminder store and stay until handled"; spec/assistant/dock.md, "While voice owns the chat its open sheet's drag is not captured, one under way is let go, and the drag resizes again once voice ends"; spec/assistant/context.md, "A spoken turn carries the screen context a typed turn sent at that moment would"; spec/voice/conversation.md, "Out of plan allowance and credits ends voice quietly as Stop does, and the chat gets the one line"
+// spec/shell/navigation.md, "Hiding the page retires what the owner was in the middle of"; spec/shell/navigation.md, "HOME returns to Home and dismisses what is open above it"; spec/shell/navigation.md, "The assistant moves between its detents, and Home keeps its bar"; spec/voice/conversation.md, "Voice starts only from the owner, on a lit, visible phone with no sensitive screen, no reset and no call"; spec/shell/overview.md, "Reminders that are overdue are reported by the reminder store and stay until handled"; spec/assistant/dock.md, "While voice owns the chat its open sheet's drag is not captured, one under way is let go, and the drag resizes again once voice ends"; spec/assistant/context.md, "A spoken turn carries the screen context a typed turn sent at that moment would"; spec/voice/conversation.md, "Out of plan allowance and credits ends voice quietly as Stop does, and the chat gets the one line"; spec/voice/conversation.md, "Story: Send a text I reviewed by saying so"
 import { AccountBindings } from "../account/bindings.vibe"
 import { AccountSheet } from "../account/sheet.vibe"
 import { Entitlement } from "../account/entitlement.vibe"
@@ -11,9 +11,11 @@ import { Conversations } from "../assistant/conversations.vibe"
 import { DeviceFacts } from "../settings/facts.vibe"
 import { CallWatch } from "../telephony/call-bar.vibe"
 import { active } from "../../gen/voice__conversation.effect.vibe"
+import { talking as chatOpen } from "../../gen/shell__navigation.effect.vibe"
 import { busy, holdsClip } from "../../gen/voice__dictation.effect.vibe"
 import { Dictation } from "../voice/dictation.vibe"
 import { VoiceConversation } from "../voice/conversation.vibe"
+import type { TalkReview } from "../voice/talk-text.vibe"
 import { executorsLive } from "./compose/executors.vibe"
 import { fillsLive, idleFill } from "./compose/fills.vibe"
 import { Foreground } from "./foreground.vibe"
@@ -44,6 +46,19 @@ export const integrationLive = Layer.effectDiscard(effect {
   const reminders = try Reminders
   const listing = try RemindersMachine
 
+  // spec/voice/conversation.md, "Story: Send a text I reviewed by saying so": a spoken turn's cards join the chat it went to, and
+  // the one text card Talk bound is shown only while the open chat shows that conversation on a visible page.
+  function talkReview(conversation: string): TalkReview {
+    return {
+      replied: (messageId: string, words: string) => composer.talkReplied(conversation, messageId, words),
+      shown: (proposalId: string) => effect {
+        const nav = try navigation.get()
+        return !nav.hidden && chatOpen(nav) && (try composer.talkTextShown(conversation, proposalId))
+      },
+      send: (proposalId: string) => composer.talkSend(proposalId),
+    }
+  }
+
   effect function invocation() {
     const nav = try navigation.get()
     const front = try foreground.get()
@@ -62,6 +77,7 @@ export const integrationLive = Layer.effectDiscard(effect {
       chatCurrent: () => true,
       context: () => composer.turnContext(),
       outOfFunds: () => composer.talkOutOfFunds(latest?.id ?? ""),
+      review: talkReview(latest?.id ?? ""),
     }
     if (try voice.startFromInvocation(screen, start)) try navigation.send({ type: "startVoice" })
   }
@@ -84,6 +100,7 @@ export const integrationLive = Layer.effectDiscard(effect {
       chatCurrent: () => chatNow === started,
       context: () => composer.turnContext(),
       outOfFunds: () => composer.talkOutOfFunds(started),
+      review: talkReview(started),
     }
     try voice.start(start)
     if ((try voice.get()).shown === "Starting") try navigation.send({ type: "startVoice" })
@@ -98,6 +115,7 @@ export const integrationLive = Layer.effectDiscard(effect {
     for try (const now of voice.changes) {
       talking = active(now.shown) || now.shown === "Retiring"
       try assistant.voiceOwnsChat(talking || dictating)
+      if (!now.textBound) try composer.talkReleased()
     }
   })
   fork.scoped (effect {
