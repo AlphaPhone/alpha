@@ -7,7 +7,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { auditWebBundle } from "../scripts/audit-production-bundle.ts";
 import { appLinkFilters, assetLinksProblems, fingerprint, PLACEHOLDER, renderAssetLinks, TEMPLATE } from "../scripts/render-assetlinks.ts";
-import { buildEnv, partialSigningProblem, readReleaseSigner, releaseAdmission, SIGNING_ENV, signingRequested, validateReleaseSigner } from "../scripts/build-android.ts";
+import { buildEnv, parseBuildArgs, partialSigningProblem, readReleaseSigner, releaseAdmission, SIGNING_ENV, signingRequested, validateReleaseSigner } from "../scripts/build-android.ts";
 import { releaseBlockers } from "../scripts/release-blockers.ts";
 import { fontCheckFailedItem, fontLicenceLine } from "../scripts/font-license-blockers.ts";
 import { CLOUD_VOICE_CHECKS, cloudVoiceAdmission } from "../scripts/os-ported/os/apk-release-record.mjs";
@@ -15,6 +15,12 @@ import { CLOUD_VOICE_CHECKS, cloudVoiceAdmission } from "../scripts/os-ported/os
 const ALL = { ELIZAOS_KEYSTORE_PATH: "/k", ELIZAOS_KEYSTORE_PASSWORD: "p", ELIZAOS_KEY_ALIAS: "a", ELIZAOS_KEY_PASSWORD: "q" };
 const SIGNER = "a".repeat(64);
 const descriptor = (signerSha256 = SIGNER, versionCode = null) => ({ schema: 1, signerSha256, lastRelease: { versionCode, versionName: null, recordedAt: null } });
+
+test("the documented pnpm separator preserves the Android release option", () => {
+  assert.deepEqual(parseBuildArgs(["--", "--release"]), { release: true });
+  assert.deepEqual(parseBuildArgs(["--release"]), { release: true });
+  assert.throws(() => parseBuildArgs(["--", "--unknown"]), /Unknown option --unknown/);
+});
 
 test("a partial ELIZAOS_ signing set is refused by name, never by value", () => {
   assert.equal(partialSigningProblem({}), null);

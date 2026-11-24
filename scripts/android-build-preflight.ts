@@ -57,54 +57,58 @@ function readHead(directory: string) {
   }
 }
 
-const MAIN_REFS = ['refs/remotes/origin/main', 'origin/main'];
-
 const git = (directory: string, args: string[]) => execFileSync('git', ['-C', directory, ...args], {encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore']});
 
-/**
- * Whether this branch's pin is the upstream pin on origin/main or a descendant of it. A branch
- * whose lock and checkout agree but pin an older upstream builds an agent that rejects the newer
- * state a device already holds, so a consistent pin is not enough.
- *   state: 'equal' | 'descendant' | 'older' | 'unknown' (main's pin is not in vendor/eliza)
- *        | 'shallow' (vendor/eliza history too short to decide) | 'unavailable' (no origin/main ref)
- */
-export function mainPinStatus(root: string, pin: string) {
-  let mainPin: unknown = null, ref: string | null = null;
-  for (const candidate of MAIN_REFS) {
-    try {
-      mainPin = JSON.parse(git(root, ['show', `${candidate}:upstream.lock.json`])).commit;
-      ref = candidate;
-      break;
-    } catch { /* try the next spelling of the ref */ }
-  }
-  if (typeof mainPin !== 'string' || !mainPin) return {state: 'unavailable', mainPin: null, ref: null};
-  if (mainPin === pin) return {state: 'equal', mainPin, ref};
-  const upstream = path.join(root, 'vendor/eliza');
-  try { git(upstream, ['cat-file', '-e', `${mainPin}^{commit}`]); } catch { return {state: 'unknown', mainPin, ref}; }
+function releaseLock(root: string, ref: string): {branch?: string; commit?: string} | null {
   try {
-    git(upstream, ['merge-base', '--is-ancestor', mainPin, pin]);
-    return {state: 'descendant', mainPin, ref};
+    return JSON.parse(git(root, ['show', `${ref}:upstream.lock.json`]));
   } catch {
-    let shallow = false;
-    try { shallow = git(upstream, ['rev-parse', '--is-shallow-repository']).trim() === 'true'; } catch { /* treat as complete */ }
-    return {state: shallow ? 'shallow' : 'older', mainPin, ref};
+    return null;
   }
 }
 
-/** The problem a non-descendant pin reports, or null. `notes` receives what was not checked. */
-export function mainPinProblem(root: string, pin: string, {notes = []}: PinOptions = {}) {
-  const status = mainPinStatus(root, pin);
+/** Verify the SDK pin against the protected Alpha release line that owns its SDK history. */
+export function releasePinStatus(root: string, pin: string) {
+  const mainRef = 'refs/remotes/origin/main';
+  const main = releaseLock(root, mainRef);
+  const vibestack = readUpstreamPin(root).branch === 'vibestack';
+  const ref = vibestack && main?.branch !== 'vibestack'
+    ? 'refs/remotes/origin/vibestack'
+    : mainRef;
+  const baseline = ref === mainRef ? main : releaseLock(root, ref);
+  const releasePin = baseline?.commit;
+  if (!releasePin || !/^[a-f0-9]{40}$/.test(releasePin) || (vibestack && baseline?.branch !== 'vibestack')) {
+    return {state: vibestack ? 'baselineMissing' : 'unavailable', releasePin: null, ref};
+  }
+  if (releasePin === pin) return {state: 'equal', releasePin, ref};
+  const upstream = path.join(root, 'vendor/eliza');
+  try { git(upstream, ['cat-file', '-e', `${releasePin}^{commit}`]); } catch { return {state: 'unknown', releasePin, ref}; }
+  try {
+    git(upstream, ['merge-base', '--is-ancestor', releasePin, pin]);
+    return {state: 'descendant', releasePin, ref};
+  } catch {
+    let shallow = false;
+    try { shallow = git(upstream, ['rev-parse', '--is-shallow-repository']).trim() === 'true'; } catch { /* treat as complete */ }
+    return {state: shallow ? 'shallow' : 'older', releasePin, ref};
+  }
+}
+
+/** A problem prevents the build. Legacy clones without a main ref receive a note. */
+export function releasePinProblem(root: string, pin: string, {notes = []}: PinOptions = {}) {
+  const status = releasePinStatus(root, pin);
+  const branch = status.ref.replace('refs/remotes/origin/', '');
   switch (status.state) {
+    case 'baselineMissing':
+      return `The upstream pin ${pin} requires a reviewed SDK baseline on origin/${branch}. Run: git fetch origin ${branch}.`;
     case 'unavailable':
       notes.push(`No origin/main ref in this clone, so the upstream pin ${pin} was not compared with main's (git fetch origin main to check it).`);
       return null;
     case 'older':
+      return `upstream.lock.json pins ${pin}, which is older than or diverged from the pin ${status.releasePin} on ${status.ref}; an APK from it can reject state written by the newer agent on a device. Run: git fetch origin && git rebase origin/${branch} (or merge it), then git submodule update --init vendor/eliza.`;
     case 'shallow':
-      return status.state === 'older'
-        ? `upstream.lock.json pins ${pin}, which is older than or diverged from the pin ${status.mainPin} on ${status.ref}; an APK from it can reject state written by the newer agent on a device. Run: git fetch origin && git rebase origin/main (or merge it), then git submodule update --init vendor/eliza.`
-        : `vendor/eliza is a shallow clone, so it cannot show that the pin ${pin} descends from the pin ${status.mainPin} on ${status.ref}. Run: git -C vendor/eliza fetch --unshallow origin.`;
+      return `vendor/eliza is a shallow clone, so it cannot show that the pin ${pin} descends from the pin ${status.releasePin} on ${status.ref}. Run: git -C vendor/eliza fetch --unshallow origin.`;
     case 'unknown':
-      return `The upstream pin ${status.mainPin} on ${status.ref} is not in vendor/eliza, so the pin ${pin} cannot be shown to descend from it. Run: git -C vendor/eliza fetch origin.`;
+      return `The upstream pin ${status.releasePin} on ${status.ref} is not in vendor/eliza, so the pin ${pin} cannot be shown to descend from it. Run: git -C vendor/eliza fetch origin.`;
     default:
       return null;
   }
@@ -118,7 +122,7 @@ export function checkoutProblems(root: string, {voiceHost = verifyVoiceHost, not
   if (head !== pin)
     problems.push(`vendor/eliza is ${head ? `at ${head}` : 'not checked out'}; upstream.lock.json pins ${pin}. Run: git submodule update --init vendor/eliza`);
   else {
-    const older = mainPinProblem(root, pin, {notes});
+    const older = releasePinProblem(root, pin, {notes});
     if (older) problems.push(older);
   }
   problems.push(...voiceHostProblems(root, {voiceHost}));
@@ -160,12 +164,12 @@ export function strictBuildInputs(root: string, preparedSource: string | null, {
   const add = (input: string, ok: boolean, suppliedBy: InputReportRow["suppliedBy"], detail: string, action: string) => rows.push({input, state: ok ? 'ready' : 'missing', suppliedBy, detail, action: ok ? null : action});
   const pin = readUpstreamPin(root).commit;
   const head = readHead(path.join(root, 'vendor/eliza'));
-  // The checkout must match the lock, and the lock must not pin an upstream older than main's.
+  // The checkout must match the lock and retain the reviewed SDK baseline for its release line.
   const notes: string[] = [];
-  const older = head === pin ? mainPinProblem(root, pin, {notes}) : null;
+  const older = head === pin ? releasePinProblem(root, pin, {notes}) : null;
   add('pinned upstream checkout', head === pin && !older, 'script',
     [`vendor/eliza ${head ? `at ${head}` : 'not checked out'}; pin ${pin}`, ...(older ? [older] : notes)].join('; '),
-    older ? 'Rebase on origin/main (or fetch vendor/eliza), then git submodule update --init vendor/eliza' : 'git submodule update --init vendor/eliza');
+    older ? 'Apply the Git command above, then git submodule update --init vendor/eliza' : 'git submodule update --init vendor/eliza');
 
   // Every build packages on-device speech and the embedding host.
   {
@@ -242,7 +246,7 @@ async function main() {
   const notes: string[] = [];
   const pin=readUpstreamPin(root).commit;
   // Refuse an old or unknown source pin before acquiring or compiling its native inputs.
-  if(readHead(path.join(root,'vendor/eliza'))===pin&&!mainPinProblem(root,pin)) {
+  if(readHead(path.join(root,'vendor/eliza'))===pin&&!releasePinProblem(root,pin)) {
     const {preparePortableNativeInputs}=await import('./build-embedding-host.ts');
     await preparePortableNativeInputs(root);
   }

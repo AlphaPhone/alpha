@@ -237,7 +237,10 @@ automatically prepares the pinned native inputs before preparing the resident
 source and workflow worker. Run `pnpm agent:build-embedding-host` to prepare
 just the voice and embedding inputs; `pnpm android:build:inputs` reports their
 current state without building them. Build inputs must agree with the staged
-runtime and native libraries.
+runtime and native libraries. The SDK pin must match or descend from the
+protected Alpha release line. During the Vibestack transition, fetch
+`origin/vibestack` for the reviewed baseline. Once `origin/main` carries
+the Vibestack SDK, its pin becomes the baseline for that SDK history.
 
 The native producer supports Apple Silicon macOS and x86-64 Linux with glibc
 2.28 or newer. Windows developers can use an x86-64 Linux WSL environment. The

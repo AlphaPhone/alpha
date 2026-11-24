@@ -11,7 +11,6 @@ import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {parseArgs} from 'node:util';
 import {Effect} from 'effect';
-import {WORKER_EXECUTABLE, workerProvenance, verifyWorkerArtifact} from '@elizaos/plugin-workflow/worker';
 import {sha256File} from './sha256.ts';
 import {pinnedCommit} from './upstream-pin.ts';
 
@@ -20,8 +19,6 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const WORKFLOW_PACKAGE = path.join(root, 'vendor/eliza/packages/plugin-workflows');
 /** The worker artifact directory agent:stage-android reads. */
 export const WORKFLOW_WORKER_DIRECTORY = path.join(root, '.eliza/workflow-worker');
-/** The worker program inside the artifact, as the runtime payload launches it. */
-export const WORKFLOW_WORKER_EXECUTABLE = WORKER_EXECUTABLE;
 
 /** The source the worker is built from: the pinned upstream record and the installed lockfile. */
 export function workerIdentity() {
@@ -32,12 +29,15 @@ export function workerIdentity() {
 /** The staging input for stageRuntimePayload, after checking the artifact against its own manifest and identity. */
 export async function workflowWorkerArtifact(directory = WORKFLOW_WORKER_DIRECTORY) {
   if (!fs.existsSync(path.join(directory, 'manifest.json'))) throw new Error('Build the workflow worker first: pnpm agent:build-workflow-worker');
+  const {WORKER_EXECUTABLE, verifyWorkerArtifact} = await import('@elizaos/plugin-workflow/worker');
   await Effect.runPromise(verifyWorkerArtifact(directory, workerIdentity()));
-  return {dir: directory, executable: WORKFLOW_WORKER_EXECUTABLE};
+  return {dir: directory, executable: WORKER_EXECUTABLE};
 }
 
 export async function buildWorkflowWorker(outputDir = WORKFLOW_WORKER_DIRECTORY) {
   execFileSync('pnpm', ['--dir', path.join(root, 'vendor/eliza'), 'exec', 'turbo', 'run', 'build', '--filter=@elizaos/plugin-workflow'], {stdio: 'inherit'});
+  // The worker's source export depends on machines that the SDK build generates.
+  const {workerProvenance} = await import('@elizaos/plugin-workflow/worker');
   fs.rmSync(outputDir, {recursive: true, force: true});
   fs.mkdirSync(path.dirname(outputDir), {recursive: true});
   const identity = workerIdentity();
@@ -46,8 +46,8 @@ export async function buildWorkflowWorker(outputDir = WORKFLOW_WORKER_DIRECTORY)
     packageDir: WORKFLOW_PACKAGE, outputDir, identity,
     observeIdentity: () => Effect.sync(workerIdentity),
   }));
-  await workflowWorkerArtifact(outputDir);
-  return {outputDir, executable: WORKFLOW_WORKER_EXECUTABLE, phase: worker.phase};
+  const {executable} = await workflowWorkerArtifact(outputDir);
+  return {outputDir, executable, phase: worker.phase};
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
