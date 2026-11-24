@@ -4,6 +4,7 @@ import { type CalendarScene, calendarRoutes, calendarScene } from "./calendar.ts
 import { type MapsScene, mapsRoutes, mapsScene } from "./maps.ts";
 import { cloudRoutes } from "./cloud.ts";
 import { type InboxScene, inboxRoutes, inboxScene } from "./inbox.ts";
+import { type PlatformScene, platformRoutes, platformScene } from "./platform.ts";
 import { type Route, answering } from "./routes.ts";
 import { type SampleScene, sampleRoutes, sampleScene } from "./sample.ts";
 import { type LauncherScene, launcherScene } from "./launcher.ts";
@@ -33,6 +34,7 @@ export interface Scene {
   readonly files: FilesScene;
   readonly maps: MapsScene;
   readonly telephony: TelephonyScene;
+  readonly platform: PlatformScene;
 }
 
 /** A fresh world: each area adds its field here, one line each. */
@@ -48,6 +50,7 @@ export function scene(): Scene {
     files: filesScene(),
     maps: mapsScene(),
     telephony: telephonyScene(),
+    platform: platformScene(),
   };
 }
 
@@ -62,6 +65,7 @@ export function services(world: Scene) {
       ...sampleRoutes(world.sample),
       ...askRoutes(world.ask),
       ...calendarRoutes(world.calendar),
+      ...platformRoutes(world.platform),
     ]),
     cloud: answering([
       ...cloudRoutes(),

@@ -19,3 +19,4 @@ rules.
 - [Files](./files/): the phone's shared storage, a folder, a change, Recent, the preview and the Trash
 - [Maps](./maps/): search, places, directions, guidance and the map, over Cloud Maps
 - [Telephony](./telephony/): Phone, Messages, Contacts, voicemail and the call bar, on an Alpha image
+- [Platform](./platform/): the world outside the page as services: the phone, the resident agent, the cloud, what the build allows and what the earlier Alpha kept
