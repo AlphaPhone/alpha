@@ -163,7 +163,11 @@ export function distributionProblems(apk: DistributionInput, { mode, appId = CAN
   for (const name of apk.names.filter(entry => policy.developmentEntries.some(pattern => pattern.test(entry)))) {
     problems.push(`Development entry ${name} is packaged`);
   }
-  const { allowBackup, usesCleartextTraffic, networkSecurityConfig } = facts.application;
+  const { declared, debuggable, allowBackup, usesCleartextTraffic, networkSecurityConfig } = facts.application;
+  if (!declared)
+    problems.push("APK manifest has no application");
+  if (mode === "release" && debuggable !== null && debuggable !== "0x0")
+    problems.push("Release manifest must not allow debugging");
   if (usesCleartextTraffic !== "0x0")
     problems.push(`usesCleartextTraffic must be false (found ${usesCleartextTraffic ?? "unset"})`);
   if (mode === "release" && !networkSecurityConfig)
