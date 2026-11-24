@@ -1,4 +1,5 @@
 lemma openView_ensures(s: Shell, view: View)
+  ensures (inv(s) ==> canOpenView(s, view) ==> alwaysHomeDrawsAskAlpha(openView(s, view)))
   ensures (inv(s) ==> canOpenView(s, view) ==> alwaysTrailIsBounded(openView(s, view)))
   ensures (inv(s) ==> canOpenView(s, view) ==> alwaysTrailIsAdmitted(openView(s, view)))
   ensures (inv(s) ==> canOpenView(s, view) ==> alwaysDrawerIsOverHome(openView(s, view)))
@@ -16,6 +17,7 @@ lemma openView_ensures(s: Shell, view: View)
 }
 
 lemma goBack_ensures(s: Shell)
+  ensures (inv(s) ==> canGoBack(s) ==> alwaysHomeDrawsAskAlpha(goBack(s)))
   ensures (inv(s) ==> canGoBack(s) ==> alwaysTrailIsBounded(goBack(s)))
   ensures (inv(s) ==> canGoBack(s) ==> alwaysTrailIsAdmitted(goBack(s)))
   ensures (inv(s) ==> canGoBack(s) ==> alwaysDrawerIsOverHome(goBack(s)))

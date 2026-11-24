@@ -76,7 +76,7 @@ cancelled; a code says to continue in Alpha.
 
 ```quint
 pure def accepted(q: Query): bool =
-  q.states == 1 and q.stateValid and q.codes <= 1 and q.errors <= 1 and q.descriptions <= 1 and
+  q.states == 1 and q.stateValid and q.codes >= 0 and q.codes <= 1 and q.errors >= 0 and q.errors <= 1 and q.descriptions >= 0 and q.descriptions <= 1 and
   (q.descriptions == 0 or (q.errors == 1 and q.descriptionFits)) and q.knownKeys and
   (q.codes == 1 or q.errors == 1) and not(q.codes == 1 and q.errors == 1) and (q.codes == 0 or q.codeFits)
 
@@ -99,8 +99,14 @@ pure def follow(l: Landing): Landing = { ...l, phase: LandingHandedOff }
 
 ### No way back is offered while the address still holds the return
 
+Discovered by the proof: once scrubbed the address stays clear, and no
+way back is offered before the return is decided.
+
 ```quint
-pure def alwaysTheQueryLeavesBeforeALink(l: Landing): bool = l.link != NoLink implies not(l.addressHasQuery)
+pure def alwaysTheQueryLeavesBeforeALink(l: Landing): bool =
+  (l.link != NoLink implies not(l.addressHasQuery)) and
+  ((l.phase == LandingScrubbed or l.phase == LandingReady or l.phase == LandingRejected or l.phase == LandingHandedOff) implies not(l.addressHasQuery)) and
+  ((l.phase == LandingNew or l.phase == LandingParsed or l.phase == LandingScrubbed) implies l.link == NoLink)
 ```
 
 ### Only an accepted return is offered a way back, and a rejected one never is

@@ -20,10 +20,10 @@ import type { HomeMachines } from "./index.tsx";
 
 const owner = "Owner" as const;
 
-/** A tile's id on the screen: `view:<View>` for one of Alpha's own apps, `app:<key>` for an installed one. */
 /** The drawer's view on a phone; off it there is no drawer, which shows a spinner until the shell closes it. */
 const drawerView = (view: Home.Drawer) => (view === "NotOnPhone" ? "Spinner" : view);
 
+/** A tile's id on the screen: `view:<View>` for one of Alpha's own apps, `app:<key>` for an installed one. */
 const idOf = (tile: Tile): string => (tile.tag === "Own" ? `view:${tile.view}` : `app:${tile.app}`);
 
 const tileOf = (id: string): Tile => (id.startsWith("view:") ? { tag: "Own", view: id.slice("view:".length) as View } : { tag: "Installed", app: id.slice("app:".length) });

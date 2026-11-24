@@ -5,9 +5,11 @@ import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import type { Shell as Shown } from "../../gen/app__shell.effect.vibe"
 import { Device } from "../platform/device.vibe"
-import { applying, contained, following, reacting, started, together } from "../runtime/reactor.vibe"
+import { applying, following, reacting, started, together } from "../runtime/reactor.vibe"
 
 module page {
+  import type { Target } from "../../gen/app__shell__focus.ts"
+
   const focusable = "a[href], button, input, select, textarea, [tabindex], [contenteditable=true]"
   const layered = "[role=dialog], [role=alertdialog], [role=menu]"
 
@@ -28,9 +30,21 @@ module page {
   export const layeredNow = (): boolean => document.activeElement?.closest(layered) != null
   /** Whether a control with `key` is on the page. @throws {never} */
   export const shown = (key: string): boolean => key !== "" && find(key) !== undefined
-  /** Focus the control with `key`. @throws {never} */
+  /** Focus the control with `key`, waiting for an inert wrapper to clear if the layer just closed before React painted. @throws {never} */
   export function give(key: string): void {
-    find(key)?.focus()
+    const element = find(key)
+    if (element === undefined) return
+    const blocked = element.closest<HTMLElement>("[inert]")
+    if (blocked === null) {
+      element.focus()
+      return
+    }
+    const waiting = new MutationObserver(() => {
+      if (element.closest("[inert]") !== null) return
+      waiting.disconnect()
+      if (active() === "") element.focus()
+    })
+    waiting.observe(blocked, { attributes: true, attributeFilter: ["inert"] })
   }
   function targetOf(target: Target): HTMLElement | undefined {
     const main = document.querySelector("main")
@@ -89,7 +103,7 @@ function targetFor(s: Shown): Target {
   return s.trail.length > 0 ? "Title" : s.drawer ? "Search" : "HomeStart"
 }
 
-effect function tell(event: Event): Focus.Focus | undefined!!Focus.Machine {
+effect function tell(event: Event): (Focus.Focus | undefined)!!Focus.Machine {
   return effect { return try (try Focus.Machine).send(event) } catch () => undefined
 }
 
@@ -159,6 +173,7 @@ const layering = started(effect {
   let open: ReadonlyArray<string> = []
   try Stream.runForEach(layers.changes, effect (l) => {
     const now = l.open.map((layer) => layer.id)
+    if (now.some((id) => !open.includes(id))) try heardFocus()
     for (const id of now) if (!open.includes(id)) try tell({ type: "layerOpened", layer: id, opener: outside })
     for (const id of open) if (!now.includes(id)) try closed(id)
     open = now

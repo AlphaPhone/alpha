@@ -9,14 +9,16 @@ const known = new Set(["state", "code", "error", "error_description"])
 /** The counts and shapes of a return's query, from its raw search string. */
 export function queryOf(search: string): Query {
   const params = new URLSearchParams(search)
+  const rawCodes = params.getAll("code")
+  const rawErrors = params.getAll("error")
   const code = params.get("code") ?? ""
   const keys = [...params.keys()]
   return {
     states: params.getAll("state").length,
     stateValid: /^[-\w]{43}$/.test(params.get("state") ?? ""),
-    codes: params.getAll("code").filter((value) => value !== "").length,
-    codeFits: code.length <= 4096,
-    errors: params.getAll("error").filter((value) => value !== "").length,
+    codes: rawCodes.length,
+    codeFits: code.length > 0 && code.length <= 4096,
+    errors: rawErrors.length === 1 && rawErrors[0] === "" && rawCodes.length === 0 ? 0 : rawErrors.length,
     descriptions: params.getAll("error_description").length,
     descriptionFits: (params.get("error_description") ?? "").length <= 2000,
     knownKeys: keys.every((key) => known.has(key)),

@@ -26,14 +26,19 @@ export function App({ alpha }: AppProps) {
   const { state, cause, can } = useMachine(alpha.runtime);
   const layers = useLayers(alpha.runtime).state;
   const launcher = useCanvas(alpha.runtime).state?.launcher ?? false;
-  const started = useRef<{ x: number; y: number } | undefined>(undefined);
+  const startedRef = useRef<{ x: number; y: number } | undefined>(undefined);
   if (cause) return <Alert variant="destructive" className="m-6">Alpha could not read where you were</Alert>;
   if (!state) return null;
   const swiped = (event: PointerEvent<HTMLElement>) => {
-    const from = started.current;
-    started.current = undefined;
+    if (!event.isPrimary) return;
+    const from = startedRef.current;
+    startedRef.current = undefined;
     const page = event.currentTarget.getBoundingClientRect();
-    const went = from ? swipe(launcher, false, page.width, page.height, from.x, from.y, event.clientX - from.x, event.clientY - from.y) : "NoSwipe";
+    const width = page.width || window.innerWidth;
+    const height = page.height || window.innerHeight;
+    const x = event.clientX - page.left;
+    const y = event.clientY - page.top;
+    const went = from ? swipe(launcher, false, width, height, from.x, from.y, x - from.x, y - from.y) : "NoSwipe";
     if (went === "SwipeBack") void alpha.back();
     else if (went === "SwipeHome") void alpha.runtime.runPromise(home());
   };
@@ -43,8 +48,13 @@ export function App({ alpha }: AppProps) {
   return (
     <main
       ref={(page) => { if (page) page.ownerDocument.documentElement.dataset.alphaCanGoBack = String(back || (layers !== undefined && takesBack(layers))); }}
-      onPointerDown={(event) => { started.current = { x: event.clientX - event.currentTarget.getBoundingClientRect().left, y: event.clientY }; }}
+      onPointerDown={(event) => {
+        if (!event.isPrimary) return;
+        const page = event.currentTarget.getBoundingClientRect();
+        startedRef.current = { x: event.clientX - page.left, y: event.clientY - page.top };
+      }}
       onPointerUp={swiped}
+      onPointerCancel={() => { startedRef.current = undefined; }}
       className="mx-auto flex min-h-dvh max-w-md flex-col bg-background font-sans text-base text-foreground"
     >
       <div className="flex flex-1 flex-col" inert={inert}>

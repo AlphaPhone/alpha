@@ -162,7 +162,8 @@ pure def canRowsDrawn(f: Focus, list: str, found: bool, dialog: bool): bool = f.
 pure def rowsDrawn(f: Focus, list: str, found: bool, dialog: bool): Focus =
   val allowed = found and not(dialog) and not(f.rowMoved) and f.active == ""
   { ...f, rowList: "", rowKey: "", rowMoved: false, lastRow: if (allowed) f.rowKey else "",
-    active: if (allowed) f.rowKey else f.active, held: if (allowed) f.rowKey else f.held }
+    active: if (allowed) f.rowKey else f.active, held: if (allowed) f.rowKey else f.held,
+    waiting: if (allowed) "" else f.waiting }
 
 pure def stepARowIsTheOneNoted(before: Focus, via: str, after: Focus): bool =
   (via == "rowsDrawn" and after.lastRow != "") implies (after.lastRow == before.rowKey and before.active == "")

@@ -1,6 +1,5 @@
 // spec/app/home/index.md, "Story: Start Home"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import type { InstalledApp } from "@elizaos/os/bridges/definitions/system"
 import * as Home from "../../gen/app__home.effect.vibe"
 import type { Actor, Effect as Out, Event, Host } from "../../gen/app__home.effect.vibe"
 import { type Ask, waiting } from "../../gen/app__home__android.effect.vibe"
@@ -11,7 +10,7 @@ import { Device } from "../platform/device.vibe"
 import { Launcher, type Presentation, type Why } from "../platform/launcher.vibe"
 import { type Job, answer, contained, due, following, hearing, reacting, run, started, untimed, together } from "../runtime/reactor.vibe"
 import type { HomeAsk, HomeNoticeMessage } from "@repo/ui"
-import { Said, say } from "../notices/toasts.vibe"
+import { type Said, say } from "../notices/toasts.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { stepping } from "../shell/shell.vibe"
 import { catalog, labelOf } from "./catalog.vibe"
@@ -97,12 +96,14 @@ export interface Told {
 let last: Told | undefined
 const listeners = new Set<() => void>()
 
+function subscribeTold(this: void, listener: () => void): () => void {
+  listeners.add(listener)
+  return () => { listeners.delete(listener) }
+}
+
 export const told = {
   snapshot: (): Told | undefined => last,
-  subscribe(listener: () => void): () => void {
-    listeners.add(listener)
-    return () => { listeners.delete(listener) }
-  },
+  subscribe: subscribeTold,
 }
 
 // spec/app/home/index.md, "A notice shows as a toast on bare Home, inline in the open drawer, and in the edit bar while editing; told while an app or Ask Alpha is up, it is not shown"

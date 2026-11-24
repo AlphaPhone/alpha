@@ -31,10 +31,10 @@ export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine, unkn
   if (!state) return [];
   const told = others(given, image);
   const now = Math.max(state.calendar.since, state.agent.since, state.today * Cards.dayLength);
-  const open = (kind: Cards.Kind) => {
-    const event = { type: "openCard", kind, now: untimed } as const;
-    return { disabled: !can(event), onClick: () => void send(event) };
-  };
+  const open = (kind: Cards.Kind) => ({
+    disabled: !can({ type: "openCard", kind, now }),
+    onClick: () => void send({ type: "openCard", kind, now: untimed }),
+  });
   const drawn: Record<Cards.Kind, () => ReactNode> = {
     AgendaCard: () => {
       const items = Cards.candidates(state, told);
