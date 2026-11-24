@@ -37,13 +37,13 @@ export service TelephonyActions {
   /** The capabilities this device advertises: none off the image. */
   capabilities(): readonly string[]!!
   /** Run one approved operation under its operation ID; `request` is the owner's own message it came from. */
-  run(operation: unknown, operationId: string, request: unknown): ActionExecution!NotATelephonyOperation | AlreadyRan
+  run(operation: unknown, operationId: string, request: unknown): ActionExecution!(NotATelephonyOperation | AlreadyRan)
   /** The owner's Not now, a hidden or locked phone, or another view replacing the review's. */
   dismiss(): void!!
   /** What the open review shows beside its candidates: a text's body, a contact's fields before and after. */
   review(): ReviewDetails!!
   /** Read back an operation whose answer was lost: a text by its operation ID in the phone's send history; undefined while it stays unconfirmed. */
-  readBack(operation: unknown, operationId: string): ReadBack | undefined!!
+  readBack(operation: unknown, operationId: string): (ReadBack | undefined)!!
 }
 
 /** What a read-back found: the outcome the phone recorded, and the result the run would have reported. */

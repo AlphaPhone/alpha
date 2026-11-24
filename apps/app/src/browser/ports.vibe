@@ -7,7 +7,7 @@ export error ReadingSpeechFailed { reason: string }
 /** The voice area's page reading: an approved page's one-use token spoken on the phone, or the browser build's reviewed text spoken locally; page text never leaves the device. */
 export service ReadingVoice {
   /** The on-device reading binding `reviewReading` names, or undefined when no on-device voice may read a page now. */
-  binding(): Record<string, unknown> | undefined!!
+  binding(): (Record<string, unknown> | undefined)!!
   /** Whether that voice can play speech now. */
   ready(): boolean!!
   /** Speaks the page text the native host holds behind `readingToken`, until it ends or is stopped. */
@@ -28,7 +28,7 @@ export service ReadingVoice {
 /** Inbox's new draft for Share by email: it opens Inbox with the page's name as the subject and its address as the body. */
 export service PageMail {
   /** Opens a new draft; the answer is why nothing opened, or undefined when Inbox shows the draft. */
-  compose(subject: string, body: string): string | undefined!!
+  compose(subject: string, body: string): (string | undefined)!!
   static readonly defaultValue = () => ({ compose: () => succeed("Email isn’t available on this phone.") })
 }
 

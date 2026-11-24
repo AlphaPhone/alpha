@@ -30,7 +30,7 @@ const first = (title: string) => title.split(/\s+/)[0] ?? title
 /** Alpha's own answer to a list question on Phone and Messages: it filters the list on screen with a chip, never by a request. */
 export service ListAsk {
   /** Alpha's one line when it answered by filtering the list, or null when the question is for the assistant. */
-  ask(app: "phone" | "messages", text: string): string | null!!
+  ask(app: "phone" | "messages", text: string): (string | null)!!
 }
 
 /** The list answers over the Phone and Messages machines. */

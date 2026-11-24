@@ -127,7 +127,7 @@ export const layer = Layer.effect(FilesAgent, effect {
     return { status: "failed", summary: "Files could not read this filter." } satisfies AgentResult
   }
 
-  effect function listedRow(path: string): Row | null | undefined!! {
+  effect function listedRow(path: string): (Row | null | undefined)!! {
     const answer = storage.list(parentOf(path), "") catch () => undefined
     const entry = answer?.status === "ready" ? (answer.entries ?? []).find((e) => e.path === path) : undefined
     if (entry !== undefined) return toRow("", entry)

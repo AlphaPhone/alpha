@@ -39,7 +39,7 @@ export service Reader {
   /** Loads remote images of the open message only. */
   showImages(): void!!
   /** Reads an attachment of the open message as its exact bytes, or says why not. */
-  openAttachment(part: MailPart): AttachmentRefusal | undefined!!
+  openAttachment(part: MailPart): (AttachmentRefusal | undefined)!!
   /** Hands the reviewed attachment to the phone's viewer. */
   handOff(): HandoffResult!!
   /** Saves an exact copy of the reviewed attachment to Files. */
@@ -47,11 +47,11 @@ export service Reader {
   /** Closes the attachment view and cancels any handoff; false when none was shown. */
   closeAttachment(): boolean!!
   /** The review of a link of the open message, or nothing when it cannot be opened at all. */
-  reviewLink(link: MailLink): LinkReview | undefined!!
+  reviewLink(link: MailLink): (LinkReview | undefined)!!
   /** Opens a reviewed link in Alpha's Browser, if the review is still for the open message. */
   openLink(review: LinkReview): boolean!!
   /** Hands the open message, at its revision, to the current agent session in the assistant's composer; says why not otherwise. */
-  askAgent(): "not-ready" | "too-large" | "changed" | undefined!!
+  askAgent(): ("not-ready" | "too-large" | "changed" | undefined)!!
   /** Reads up to two bodies ahead into memory. */
   prefetch(rows: MailRow[]): void!!
 }

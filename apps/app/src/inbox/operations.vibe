@@ -35,19 +35,19 @@ export service MailOperations {
   readonly changes: Stream.Stream<Journal>
   get(): Journal!!
   /** The selected account's operation, if any. */
-  current(): OperationRecord | undefined!!
+  current(): (OperationRecord | undefined)!!
   /** Records a proposal and asks Gmail to review it; a send or Gmail draft save names the composer's draft. */
-  prepare(kind: OpKind, proposal: Proposal, composer: ComposerRef, source: SendSource, requestId?: string): OperationOutcome | undefined!!
+  prepare(kind: OpKind, proposal: Proposal, composer: ComposerRef, source: SendSource, requestId?: string): (OperationOutcome | undefined)!!
   /** Confirms the reviewed operation and dispatches it once. */
   confirm(shown: ComposerRef): OperationOutcome!!
   /** Sends the open draft in one step: review, confirm and dispatch, under one request id. */
   sendDraft(draft: Draft, requestId?: string): OperationOutcome!!
   /** Saves the open draft to Gmail as a new or replacing Gmail draft, after review. */
-  saveGmailDraft(draft: Draft): OperationOutcome | undefined!!
+  saveGmailDraft(draft: Draft): (OperationOutcome | undefined)!!
   /** Reads the operation's receipt again; it never dispatches. */
-  refresh(): OperationOutcome | undefined!!
+  refresh(): (OperationOutcome | undefined)!!
   /** Prepares again under the same request id after a review that did not match, or reads the receipt. */
-  retry(): OperationOutcome | undefined!!
+  retry(): (OperationOutcome | undefined)!!
   /** Discards an operation Gmail reports as not started, after the owner was warned. */
   abandon(): boolean!!
   /** Cancels an unsent review or closes a settled receipt. */
@@ -55,13 +55,13 @@ export service MailOperations {
   /** Discards an unsent review the composer no longer shows. */
   discardStale(shown: ComposerRef): boolean!!
   /** Reviews the archive of a listed message at the revision read for it now, as a swipe left asks. */
-  archiveListed(messageId: string): OperationOutcome | undefined!!
+  archiveListed(messageId: string): (OperationOutcome | undefined)!!
   /** Undoes a confirmed archive or Trash. */
-  undo(): OperationOutcome | undefined!!
+  undo(): (OperationOutcome | undefined)!!
   /** Reviews the permanent deletion of the Gmail draft the operation saved or sent from. */
-  deleteGmailDraft(): OperationOutcome | undefined!!
+  deleteGmailDraft(): (OperationOutcome | undefined)!!
   /** Opens the Gmail draft the operation saved in the composer, with its reviewed intent. */
-  continueDraft(): "opened" | "changed" | "busy" | "unavailable"!!
+  continueDraft(): ("opened" | "changed" | "busy" | "unavailable")!!
 }
 
 /** The operation shell over the journal, Gmail, the drafts and the list. */

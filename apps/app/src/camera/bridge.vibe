@@ -48,7 +48,7 @@ export service CameraBridge {
   /** Alpha's app info in Android Settings, where camera and microphone access are allowed. */
   openPrivacySettings(): void!CameraFailed
   /** One image from the system picker; undefined when the owner cancelled. */
-  pickImage(): Blob | undefined!CameraFailed
+  pickImage(): (Blob | undefined)!CameraFailed
   exportPdf(title: string, dataBase64: string): ExportReply!CameraFailed
   readPhotoSelected(id: string, revision: string): SourceBytes!CameraFailed
   /** Android takes the volume keys as Camera's shutter only while this is on; the press arrives as the page event `alpha:volume-shutter`. */

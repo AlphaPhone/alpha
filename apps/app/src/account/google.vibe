@@ -130,7 +130,7 @@ export const googleService = Layer.effect(GoogleAccounts, effect {
       match (effectOf) {
         when "ReadAccounts": readAccounts() catch () => undefined;
         when "StartConsent": startConsent() catch () => undefined;
-        when "CancelConsent": {
+        when "CancelConsent": do {
           const state = try Ref.get(workspaceState)
           if (state !== "") native.invoke("AlphaConnection", "cancelGoogleWorkspaceReturn", { state }) catch () => undefined
           try Ref.set(workspaceState, "")

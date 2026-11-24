@@ -18,15 +18,15 @@ export error FoldersUnreadable
 /** The owner's folder list on this phone. */
 export service NotesFolders {
   readonly changes: Stream.Stream<readonly NotesFolder[]>
-  list(): readonly NotesFolder[]!FoldersUnreadable | SlotUnavailable
-  create(name: string): NotesFolder!FolderRefused | FoldersChanged | FoldersUnreadable | SlotUnavailable
-  rename(id: string, name: string): NotesFolder!FolderRefused | FoldersChanged | FoldersUnreadable | SlotUnavailable
-  remove(id: string): void!FolderRefused | FoldersChanged | FoldersUnreadable | SlotUnavailable
-  findByName(name: string): NotesFolder | undefined!FoldersUnreadable | SlotUnavailable
+  list(): readonly NotesFolder[]!(FoldersUnreadable | SlotUnavailable)
+  create(name: string): NotesFolder!(FolderRefused | FoldersChanged | FoldersUnreadable | SlotUnavailable)
+  rename(id: string, name: string): NotesFolder!(FolderRefused | FoldersChanged | FoldersUnreadable | SlotUnavailable)
+  remove(id: string): void!(FolderRefused | FoldersChanged | FoldersUnreadable | SlotUnavailable)
+  findByName(name: string): (NotesFolder | undefined)!(FoldersUnreadable | SlotUnavailable)
   /** One folders event as the machine names it, applied to the stored list; false when the rules refuse it. */
-  dispatch(event: FolderEvent): boolean!FoldersChanged | FoldersUnreadable | SlotUnavailable
+  dispatch(event: FolderEvent): boolean!(FoldersChanged | FoldersUnreadable | SlotUnavailable)
   /** The stored list as the folders machine sees it. */
-  state(): FolderList!FoldersUnreadable | SlotUnavailable
+  state(): FolderList!(FoldersUnreadable | SlotUnavailable)
 }
 
 /** The key two folder names are compared by. */
@@ -39,7 +39,7 @@ export function folderState(document: FoldersDocument): FolderList {
   return { folders: document.folders.map((folder) => ({ id: folder.id, key: folderKey(folder.name) })), revision: document.revision ?? 0 }
 }
 
-effect function load(): { raw: string | undefined; document: FoldersDocument }!FoldersUnreadable | SlotUnavailable {
+effect function load(): { raw: string | undefined; document: FoldersDocument }!(FoldersUnreadable | SlotUnavailable) {
   const raw = try readSlot(slots.folders)
   if (raw === undefined) return { raw, document: { version: 1, folders: [] } }
   return { raw, document: try (decodeFolders(raw) catch effect () => { throw new FoldersUnreadable() }) }

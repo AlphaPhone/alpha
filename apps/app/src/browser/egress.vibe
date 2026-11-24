@@ -47,16 +47,17 @@ export const egressLayer = Layer.provide(Layer.effect(BrowserEgress, effect {
 
   effect function perform(out: EgressEffect) {
     match (out) {
-      when { tag: "ShareSheet", let tab, let url, let navigation }: {
+      when { tag: "ShareSheet", let tab, let url, let navigation }: do {
         const shared = host.call("share", { id: tab, url, navigation }) catch (error) => error
         if (shared instanceof BrowserCallFailed) try toasts.show(refusalText(shared.message))
         try send({ type: "shareSettled", ok: !(shared instanceof BrowserCallFailed) })
       }
-      when { tag: "ComposeEmail", let url, let title }: {
+      when { tag: "ComposeEmail", let url, let title }: do {
         const refused = try mail.compose(title || "Shared page", url)
         if (refused !== undefined) try toasts.show(refused)
+        undefined
       }
-      when { tag: "CopyLink", let url }: {
+      when { tag: "CopyLink", let url }: do {
         const copied = tryPromise(() => copyText(url)) catch () => false
         try send({ type: "copied", ok: copied !== false })
       }

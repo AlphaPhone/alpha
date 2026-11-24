@@ -35,13 +35,13 @@ export service VoicemailView {
   /** Play the open voicemail, marking it heard. */
   play(): void!!
   /** The open voicemail's decoded WAV, while it is open. */
-  wav(): Uint8Array | undefined!!
+  wav(): (Uint8Array | undefined)!!
   /** Delete the open voicemail the owner confirmed. */
   confirmDelete(): void!!
   /** Alpha's request to delete the open voicemail: the owner confirms on the phone. */
-  deleteSelected(): "deleted" | "none-selected" | "cancelled" | "failed" | "unavailable"!!
+  deleteSelected(): ("deleted" | "none-selected" | "cancelled" | "failed" | "unavailable")!!
   /** The open voicemail as Alpha may read it, or null when none is open. */
-  readSelected(): OpenVoicemailRead | null!!
+  readSelected(): (OpenVoicemailRead | null)!!
 }
 
 /** A listing as the machine's answer. */

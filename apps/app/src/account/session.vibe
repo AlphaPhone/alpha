@@ -119,7 +119,7 @@ export const sessionService = Layer.effect(CloudSession, effect {
       match (effectOf) {
         when { tag: "EnsureResident" }: try ensureResident(resident);
         when { tag: "UnbindInference" }: try unbindInference(native);
-        when { tag: "RevokeKey", let credentialId }: {
+        when { tag: "RevokeKey", let credentialId }: do {
           const revoked = try revoke(credentialId)
           native.invoke(plugin, "clearCredentialState") catch () => undefined
           try send({ type: "signOutSettled", revoked })

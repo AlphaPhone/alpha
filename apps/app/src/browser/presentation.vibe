@@ -34,7 +34,7 @@ export const presenterLayer = Layer.provide(Layer.effect(BrowserPresenter, effec
 
   effect function perform(out: PresentEffect) {
     match (out) {
-      when { tag: "Present", let request }: {
+      when { tag: "Present", let request }: do {
         const shown = host.call("present", payloadOf(request)) catch (error) => error
         if (shown instanceof BrowserCallFailed) try Ref.set(lastFailure, shown.message)
         try send({ type: "answered", ok: !(shown instanceof BrowserCallFailed) })
