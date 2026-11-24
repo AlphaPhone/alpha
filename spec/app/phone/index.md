@@ -59,7 +59,7 @@ calls seen, and a handoff to the dialer: of the typed number, or of a recent
 call's number, which the handoff names.
 
 ```quint
-type Source = TypedNumber | RecentCall
+type Source = TypedNumber | PickedNumber
 type Effect =
   | ReadLog({ ticket: int, device: bool })
   | MatchNumber({ ticket: int })
@@ -287,7 +287,7 @@ pure def editNumber(s: Phone, digits: int, typed: Typed): Moved = judged(digits,
 
 ### A number handed to Phone opens the keypad with it filled in, and never dials
 
-Contacts' Call, a voicemail's Call back, Messages' Call and Home hand Phone
+Contacts' Call and other keypad handoffs give Phone
 a number, also before Phone shows. The phone judges it and looks it up as
 if it had been typed.
 
@@ -363,7 +363,7 @@ The handoff names the number of the call tapped.
 ```quint
 pure def canDialRecent(s: Phone, number: str): bool = s.rows > 0 and s.carrier and not(s.dialled) and number != ""
 
-pure def dialRecent(s: Phone, number: str): Moved = handOff(RecentCall, number, s)
+pure def dialRecent(s: Phone, number: str): Moved = handOff(PickedNumber, number, s)
 ```
 
 ### Tapping a keypad contact hands over the contact's full number
@@ -375,7 +375,19 @@ matched contact without having to type the rest of the number.
 pure def canDialMatched(s: Phone, number: str): bool =
   s.front and s.tab == Keypad and s.matched and s.carrier and not(s.dialled) and number != ""
 
-pure def dialMatched(s: Phone, number: str): Moved = handOff(RecentCall, number, s)
+pure def dialMatched(s: Phone, number: str): Moved = handOff(PickedNumber, number, s)
+```
+
+### A voicemail callback hands the caller's number to the phone
+
+The owner's Call back button uses the caller's full number while the
+carrier is available and Voicemail is showing.
+
+```quint
+pure def canDialVoicemail(s: Phone, number: str): bool =
+  s.front and s.tab == Voicemail and s.carrier and not(s.dialled) and number != ""
+
+pure def dialVoicemail(s: Phone, number: str): Moved = handOff(PickedNumber, number, s)
 ```
 
 ### One handoff is made each time Phone is showing
@@ -391,7 +403,7 @@ pure def stepOneHandoffPerShowing(before: Phone, via: str, after: Phone, out: Li
 
 ```quint
 pure def stepOnlyANumberIsHandedOver(before: Phone, via: str, after: Phone, out: List[Effect]): bool =
-  handoffIn(out) implies ((via == "dialTyped" and dialable(before)) or (via == "dialRecent" and before.rows > 0 and before.carrier) or (via == "dialMatched" and before.matched and before.carrier))
+  handoffIn(out) implies ((via == "dialTyped" and dialable(before)) or (via == "dialRecent" and before.rows > 0 and before.carrier) or (via == "dialMatched" and before.matched and before.carrier) or (via == "dialVoicemail" and before.tab == Voicemail and before.carrier))
 ```
 
 ### The dialer's answer counts only while the same showing lasts

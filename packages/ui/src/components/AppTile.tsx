@@ -18,9 +18,9 @@ export type AppTileProps = Omit<ComponentProps<"button">, "children"> & {
 export function AppTile({ label, icon, badge, detail, variant = "home", type = "button", className, ...props }: AppTileProps) {
   const drawer = variant === "drawer";
   return (
-    <button type={type} aria-label={detail ? `${label} (${detail})` : undefined} className={cn(launcherRing, "group flex min-w-0 flex-col items-center gap-2 rounded-tile disabled:pointer-events-none disabled:opacity-50", drawer && "w-full", className)} {...props}>
-      <span aria-hidden className={cn("relative flex size-16 items-center justify-center rounded-tile bg-secondary text-foreground transition-colors duration-fast group-active:bg-accent", drawer && "size-14 rounded-drawer-icon")}>
-        {icon}
+    <button type={type} aria-label={detail ? `${label} (${detail})` : undefined} className={cn("focus-visible:outline-none", launcherRing, "group flex min-w-0 flex-col items-center gap-2 rounded-tile disabled:pointer-events-none disabled:opacity-50", drawer && "w-full", className)} {...props}>
+      <span aria-hidden className={cn("relative flex size-16 items-center justify-center rounded-tile bg-secondary text-foreground", drawer && "size-14 rounded-drawer-icon")}>
+        <span className="flex transition-opacity duration-fast ease-out group-active:opacity-55 motion-reduce:transition-none">{icon}</span>
         {badge ? <span className="absolute top-3 right-3 size-2 rounded-full bg-alpha" /> : null}
       </span>
       <span className={cn("max-w-full text-center text-xs wrap-anywhere text-muted-foreground", drawer && "text-foreground")}>{label}</span>

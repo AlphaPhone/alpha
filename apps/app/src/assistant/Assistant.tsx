@@ -25,6 +25,7 @@ import { useMachine as useSearch } from "../../gen/app__assistant__search.react.
 import { type Machine as ShellMachine, showing } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
+import { isCommsView } from "../shell/views.tsx";
 import { freedom } from "./assistant.vibe";
 import { Talk } from "./talk.vibe";
 
@@ -187,6 +188,7 @@ export function Assistant({ runtime }: AssistantProps) {
   const view = talking.context.showing.tag === "App" ? talking.context.showing.view : "Home";
   const assistantDetent = shell.state?.assistant ?? "Bar";
   const open = dockOpen(assistantDetent);
+  const comms = isCommsView(shell.state?.trail.at(-1));
   const keptHeight = assistantDetent === "Sheet" && dock.state && dock.state.kept > 0 ? dock.state.kept : undefined;
   const openWithFocus = (focusField: boolean) => {
     for (const ask of dockFocused(assistantDetent)) {
@@ -197,10 +199,12 @@ export function Assistant({ runtime }: AssistantProps) {
 
   return (
     <>
-      <AssistantConversation
+      {(!comms || open) && <AssistantConversation
         detent={assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
-        className={open ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
-        style={keptHeight ? { height: keptHeight } : undefined}
+        className={comms ? "relative w-full motion-safe:transition-[height] motion-safe:duration-[420ms]" : open ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
+        style={comms
+          ? { height: assistantDetent === "Full" ? "calc(100dvh - 52px)" : `clamp(38dvh, ${keptHeight === undefined ? "50dvh" : `${keptHeight}px`}, 60dvh)` }
+          : keptHeight ? { height: keptHeight } : undefined}
         header={{
           title: seen.titles.get(shown.chosen) ?? "Ask Alpha",
           context: { view, selected: talking.context.selected, sensitive: talking.context.sensitive },
@@ -282,7 +286,7 @@ export function Assistant({ runtime }: AssistantProps) {
           },
           onUnquote: composer.can({ type: "unquote" }) ? () => void composer.send({ type: "unquote" }) : undefined,
         }}
-      />
+      />}
       <AssistantChatHistorySheet
         open={listing}
         onOpenChange={setListing}

@@ -15,26 +15,25 @@ import { scene } from "./fakes/scene.ts";
 underAct();
 afterEach(closeAll);
 
-/** The open button of each message row of the list, by its subject. */
-const opens = () => [...document.querySelectorAll("li")].map((row) => [...row.querySelectorAll("button")].find((found) => !found.hasAttribute("aria-pressed") && found.children.length === 3)).filter((found) => found !== undefined);
-const rows = () => opens().map((found) => found.children[1]?.textContent);
+const opens = () => [...document.querySelectorAll<HTMLButtonElement>("ul[aria-label='Email messages'] button")];
+const subjectOf = (button: HTMLButtonElement) => button.querySelector("[data-inbox-subject]")?.textContent;
+const rows = () => opens().map(subjectOf);
 const row = (subject: string) => drawn(() => {
-  const found = opens().find((open) => open.children[1]?.textContent === subject);
+  const found = opens().find((open) => subjectOf(open) === subject);
   if (!found) throw new Error(`no message ${subject}`);
   found.click();
 });
-const choose = (subject: string) => drawn(() => {
-  const found = opens().find((open) => open.children[1]?.textContent === subject)?.parentElement?.querySelector("button[aria-pressed]");
-  if (!(found instanceof HTMLElement)) throw new Error(`cannot choose ${subject}`);
-  found.click();
-});
+const choose = async (subject: string) => {
+  if (!opens().some((open) => open.getAttribute("role") === "checkbox")) await menu("Select emails", "Mail options");
+  await row(subject);
+};
 const confirm = (name: string) => drawn(() => {
   const found = [...document.querySelectorAll("[role=dialog] button, [role=alertdialog] button")].find((one) => one.textContent === name);
   if (!(found instanceof HTMLElement)) throw new Error(`no ${name} in the review`);
   found.click();
 });
-const menu = (item: string) => drawn(() => {
-  button("More actions")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+const menu = (item: string, label = "More actions") => drawn(() => {
+  button(label)?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 }).then(() => drawn(() => {
   const found = [...document.querySelectorAll("[role=menuitem]")].find((one) => one.textContent === item);
   if (!(found instanceof HTMLElement)) throw new Error(`no ${item} in the menu`);
@@ -82,6 +81,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect([rows().length, Boolean(button("Load more"))]).toEqual([28, false]);
 
     // spec/app/inbox/index.md, "Choosing a folder or a search reads its first page"
+    await press("Search email");
     await search("tax");
     await until(alpha, runtime, List, (s) => s.selected.query === "tax" && s.list.status === "Loaded");
     step("3");
@@ -90,8 +90,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     // spec/app/inbox/index.md, "Back from a search shows its folder without the search, before Back leaves Inbox"
     await hardware("back");
     await until(alpha, runtime, List, (s) => s.selected.query === "" && s.list.status === "Loaded");
-    expect([rows().length, (document.querySelector("input[aria-label='Search mail']") as HTMLInputElement | null)?.value]).toEqual([25, ""]);
-    await press("Spam");
+    expect([rows().length, Boolean(button("Search email")), document.querySelector("input[aria-label='Search mail']")]).toEqual([25, true, null]);
+    await menu("Spam", "More folders");
     await until(alpha, runtime, List, (s) => s.selected.folder === "Spam" && s.list.status === "Loaded");
     step("4");
     expect(rows()).toEqual(["Win a prize"]);
