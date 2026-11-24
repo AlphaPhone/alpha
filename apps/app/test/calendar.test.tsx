@@ -11,7 +11,7 @@ import { shown } from "../src/calendar/shown.ts";
 import { civilDay, dateOf, dayStart } from "../src/calendar/time.ts";
 import type { Alpha } from "../src/runtime/area.tsx";
 import { button, closeAll, fill, hardware, later, only, open, press, underAct, until } from "./alpha.tsx";
-import { agentEvent } from "./fakes/calendar.ts";
+import { agentEvent, agentRequest } from "./fakes/calendar.ts";
 import { type Scene, scene } from "./fakes/scene.ts";
 
 underAct();
@@ -229,29 +229,51 @@ describe("on a phone", () => {
     await until(alpha, runtime, Link, (l) => l.phase === "Done" && l.said === "ConflictMany");
   });
 
-  it("Approve what the agent changes (spec/app/calendar/agent.md, \"Story: Approve what the agent changes\"; spec/app/calendar/agent.md, \"Story: Know what the agent's change did\")", async () => {
+  it("Approve what the agent changes (spec/app/calendar/agent.md, \"Story: Approve what the agent changes\"; spec/app/calendar/agent.md, \"Story: Know what the agent's change did\"; spec/app/calendar/agent.md, \"Story: Read where a Calendar request stands\")", async () => {
     const world = morning(true);
     const { alpha } = await open(world, only("view:Calendar"));
     const runtime = calendar.runtime(alpha);
     await openCalendar(alpha);
     await until(alpha, runtime, View, (s) => s.googleRows === 2);
-    const lunch = shown.of("Google", world.today).find((row) => row.title === "Team lunch");
-    if (!lunch) throw new Error("no lunch");
+    const reread = () => runtime.runPromise(View.use((machine) => machine.send({ type: "refresh" })));
+    const lunch = { source: { calendarId: "eliza-calendar/primary" }, eventId: "ev-team-lunch", expectedVersion: "1" };
 
-    // spec/app/calendar/agent.md, "A card that leaves out a field its change would set can be declined, never approved"
-    const propose = (complete: boolean) => runtime.runPromise(Changes.use((machine) => machine.send({ type: "propose", change: "Respond", reply: "Maybe", complete, id: lunch.id, series: false, managed: false, revision: 1 }, "Agent")));
-    await propose(false);
+    // spec/app/calendar/agent.md, "A card that leaves out a field its change would set can be declined, never approved"; spec/app/calendar/agent.md, "The owner declines, or the agent withdraws, and nothing is sent"
+    world.calendar.approvals.push(agentRequest("approval-1", { action: "respond_invitation", account: "owner", target: lunch, scope: "instance", response: "tentative", colour: "red" }));
+    await reread();
     await until(alpha, runtime, Changes, (a) => a.stage === "Awaiting");
-    expect([Boolean(button("Approve")), Boolean(button("Decline"))]).toEqual([false, true]);
+    expect([Boolean(button("Approve")), Boolean(button("Decline")), document.body.textContent?.includes("Approval unavailable")]).toEqual([false, true, true]);
     await press("Decline");
     await until(alpha, runtime, Changes, (a) => a.result === "Declined");
+    expect(world.calendar.writes).toEqual(["reject approval-1"]);
 
-    // spec/app/calendar/agent.md, "Only the owner approves, and approving sends the change once, under a new number"; spec/app/calendar/agent.md, "The read back says whether the change is there, and the agent is told"
-    await propose(true);
-    await until(alpha, runtime, Changes, (a) => a.stage === "Awaiting");
+    // spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it"; spec/app/calendar/agent.md, "What is sent is exactly the change approved, for the revision the agent selected"; spec/app/calendar/agent.md, "The read back says whether the change is there, and the agent is told"
+    const start = new Date(world.at(1, 15)).toISOString();
+    const end = new Date(world.at(1, 16)).toISOString();
+    world.calendar.approvals.push(agentRequest("approval-2", {
+      action: "schedule_event", account: "owner", source: { calendarId: "eliza-calendar/primary" }, recurrence: null,
+      fields: { title: "Coffee with Ana", description: "", location: "Corner cafe", startAt: start, endAt: end, isAllDay: false, timeZone: "Europe/Lisbon" },
+    }));
+    await reread();
+    await until(alpha, runtime, Changes, (a) => a.stage === "Awaiting" && a.change === "Create" && a.complete);
+    expect(["Coffee with Ana", "Corner cafe", "Europe/Lisbon", "Waiting for you"].map((text) => document.body.textContent?.includes(text))).toEqual([true, true, true, true]);
     await press("Approve");
     await until(alpha, runtime, Changes, (a) => a.result === "Done");
-    expect(world.calendar.writes).toEqual(["answer ev-team-lunch tentative"]);
+    expect(world.calendar.writes).toEqual(["reject approval-1", "approve approval-2", "create ev-coffee-with-ana"]);
+    expect(world.calendar.events.find((event) => event.title === "Coffee with Ana")?.startAt).toBe(start);
+
+    // spec/app/calendar/agent.md, "When the event changes in Google, the card waiting for the owner no longer counts"; spec/app/calendar/agent.md, "A card voided by a change in Google is shown again at the event's new revision, marked updated"
+    world.calendar.approvals.push(agentRequest("approval-3", { action: "respond_invitation", account: "owner", target: lunch, scope: "instance", response: "tentative" }));
+    await reread();
+    await until(alpha, runtime, Changes, (a) => a.stage === "Awaiting" && a.change === "Respond" && a.complete);
+    const approval = world.calendar.approvals.find((one) => one.id === "approval-3");
+    if (!approval) throw new Error("no request");
+    approval.revision = "r2";
+    await reread();
+    await until(alpha, runtime, Changes, (a) => a.updated && a.complete);
+    await press("Approve");
+    await until(alpha, runtime, Changes, (a) => a.result === "Done");
+    expect(world.calendar.writes.slice(3)).toEqual(["approve approval-3", "answer ev-team-lunch tentative"]);
   });
 });
 
@@ -295,7 +317,7 @@ describe("in a browser", () => {
     await until(alpha, runtime, View, (s) => s.open !== 0);
     expect([Boolean(button("Going")), Boolean(button("Maybe")), Boolean(button("Decline"))]).toEqual([true, true, true]);
     await press("Going");
-    await until(alpha, runtime, Editor, (e) => e.kind === "Reply" && e.write.outcome === "Confirmed" && e.latched === 0);
+    await until(alpha, runtime, Editor, (e) => e.kind === "Reply" && e.write.outcome === "Confirmed" && e.latched.length === 0);
     expect(world.calendar.writes).toEqual(["answer ev-team-lunch accepted"]);
   });
 });

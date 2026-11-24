@@ -8,7 +8,7 @@ import * as Writes from "../../gen/app__calendar__editor.effect.vibe"
 import { inFlight } from "../../gen/app__calendar__editor.ts"
 import type * as Held from "../../gen/app__calendar__deletions.effect.vibe"
 import { pageOffered } from "../../gen/app__calendar__presentation.ts"
-import { answersOffered, cancellation, ownAnswer } from "../../gen/app__calendar__writing.ts"
+import { type Provider, answersOffered, cancellation, mutability, ownAnswer } from "../../gen/app__calendar__writing.ts"
 import type * as Changes from "../../gen/app__calendar__agent.effect.vibe"
 import type * as Linking from "../../gen/app__calendar__link.effect.vibe"
 import type { AndroidCalendarEvent } from "@elizaos/os/bridges/calendar"
@@ -26,7 +26,7 @@ function phoneRow(event: AndroidCalendarEvent): Read {
   return {
     key: event.id, calendarId: event.calendarId, title: event.title ?? "", place: event.location ?? "", notes: event.body ?? "",
     begin: event.begin, end: event.end, allDay: event.allDay, recurring: event.recurring, link: "", video: "",
-    people: [], answer: "NotInvited", answerable: false, version: "",
+    people: [], answer: "NotInvited", answerable: false, managed: false, series: "", editable: true, cancel: "OrganizerCancel", version: "",
   }
 }
 
@@ -66,6 +66,11 @@ function versionOf(event: FeedEvent): string {
 }
 schema Feed { readonly state: "complete" | "partial" | "unavailable"; readonly events: FeedEvent[] }
 
+/** Which calendar an event of the agent's feed comes from, as eliza's `CalendarSourceKey` names providers. */
+const providers: Readonly<Record<string, Provider>> = {
+  eliza: "AgentProvider", google: "GoogleProvider", device: "PhoneProvider", microsoft: "MicrosoftProvider", apple_calendar: "AppleProvider", ics: "IcsProvider",
+}
+
 /** The calendar the agent manages for the owner, whose answers and deletions are the owner's to make in Google Calendar. */
 function managed(event: FeedEvent): boolean {
   return event.metadata.managed === true
@@ -89,17 +94,24 @@ function googleRow(event: FeedEvent): Read {
     key: event.id, calendarId: event.calendarId, title: event.title, place: event.location, notes: event.description,
     begin, end, allDay: event.isAllDay, recurring,
     link: pageOffered(event.provider === "google", plainHttps(page), false) ? page : "", video: event.conferenceLink ?? "",
-    people, answer, answerable: answersOffered(mode, answer, true, managed(event), recurring),
+    people, answer, answerable: answersOffered(mode, answer, true, managed(event), recurring), managed: managed(event), series: event.recurringEventId ?? "",
+    editable: mutability(providers[event.provider] ?? "IcsProvider", versionOf(event) !== "") === "Editable", cancel: mode,
     version: versionOf(event), changedAt: Date.parse(event.updatedAt),
   }
 }
 
 /** The agent's calendar for the window around `day`, or none where no Google account is connected to the agent. */
 export effect function readFeed(day: number): Option.Option<ReadonlyArray<Read>>!Failure!Agent {
+  return Option.map(try readWhole(day), (read) => read.rows)
+}
+
+// spec/app/calendar/presentation.md, "A day is free only when the read covering it was complete"
+/** The agent's calendar for the window around `day`, and whether Google gave only part of it; none where no Google account is connected to the agent. */
+effect function readWhole(day: number): Option.Option<{ readonly rows: ReadonlyArray<Read>; readonly partial: boolean }>!Failure!Agent {
   const request = HttpClientRequest.get("/api/lifeops/calendar/feed", { urlParams: feedParams(day) })
   const feed = try ask(Agent, request, Feed)
   if (feed.state === "unavailable") return Option.none()
-  return Option.some(feed.events.map(googleRow).filter((row) => Number.isFinite(row.begin) && Number.isFinite(row.end)))
+  return Option.some({ rows: feed.events.map(googleRow).filter((row) => Number.isFinite(row.begin) && Number.isFinite(row.end)), partial: feed.state === "partial" })
 }
 
 // spec/app/calendar/editor.md, "The form's edits always build on the revision of the event as last read"
@@ -112,12 +124,12 @@ const decodeRevisions = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.
 effect function readDay(source: Source, ticket: number, day: number): Event!!(PhoneCalendar | Agent | KeyValueStore.KeyValueStore) {
   if (source === "Google") {
     return effect {
-      const read = try readFeed(day)
+      const read = try readWhole(day)
       if (Option.isNone(read)) {
         shown.drop("Google")
         return { type: "googleChanged", connected: false } as Event
       }
-      return { type: "googleAnswered", ticket, ok: true, rows: shown.keep("Google", day, read.value).length } as Event
+      return { type: "googleAnswered", ticket, ok: true, rows: shown.keep("Google", day, read.value.rows, read.value.partial).length } as Event
     } catch () => ({ type: "googleAnswered", ticket, ok: false, rows: 0 })
   }
   const phone = try PhoneCalendar

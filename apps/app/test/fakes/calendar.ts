@@ -61,6 +61,8 @@ export interface CalendarScene {
   readonly creations: Map<string, string>;
   lost: boolean;
   handedOff: number;
+  /** The agent's approvals list: each Calendar request it filed (`.eliza/packages/agent/src/approvals/routes.vibe`), and how it was resolved. */
+  readonly approvals: FakeApproval[];
   /** The agent's linked sync control: its revision, whether it is paused, the Google calendar it writes to, and the state of each linked event. */
   readonly control: { revision: number; paused: boolean; destination: { connectorAccountId: string; providerCalendarId: string } | null; links: string[] };
 }
@@ -70,8 +72,51 @@ export function calendarScene(): CalendarScene {
     events: [], writes: [], keys: new Map(), down: false, stalled: false, queued: false,
     calendars: [{ id: "local", name: "Phone", writable: true, local: true }], phoneEvents: [], granted: false, asked: 0,
     creations: new Map(), lost: false, handedOff: 0,
-    control: { revision: 0, paused: true, destination: null, links: [] },
+    control: { revision: 0, paused: true, destination: null, links: [] }, approvals: [],
   };
+}
+
+/** One request of the agent's approvals list, as `GET /api/approvals` answers it. */
+export interface FakeApproval {
+  id: string;
+  state: string;
+  action: string;
+  payload: { change: Record<string, unknown>; digest: string };
+  revision: string;
+  expiresAt: string;
+}
+
+/** A Calendar change the agent filed for the owner's approval, as eliza's calendar plugin files one (`plugin/host.vibe`). */
+export function agentRequest(id: string, change: Record<string, unknown>): FakeApproval {
+  const action = change["action"] === "respond_invitation" ? (change["response"] === "declined" ? "cancel_event" : "modify_event") : String(change["action"]);
+  return { id, state: "pending", action, payload: { change, digest: id }, revision: "r1", expiresAt: "2099-01-01T00:00:00.000Z" };
+}
+
+/** Make the change a request holds, as eliza's calendar executor does once the owner approves it. */
+function execute(scene: CalendarScene, change: Record<string, unknown>): boolean {
+  const fields = (change["fields"] ?? {}) as { title?: string; description?: string; location?: string; startAt?: string; endAt?: string; isAllDay?: boolean };
+  const target = (change["target"] ?? {}) as { eventId?: string; expectedVersion?: string };
+  if (change["action"] === "schedule_event") {
+    const event = agentEvent(fields.title ?? "", Date.parse(fields.startAt ?? ""), Date.parse(fields.endAt ?? ""), { location: fields.location ?? "", isAllDay: fields.isAllDay ?? false });
+    scene.writes.push(`create ${event.id}`);
+    scene.events.push(event);
+    return true;
+  }
+  const event = scene.events.find((one) => one.id === target.eventId);
+  if (!event || etag(event) !== target.expectedVersion) return false;
+  if (change["action"] === "cancel_event") {
+    scene.writes.push(`delete ${event.id}`);
+    scene.events = scene.events.filter((one) => one !== event);
+  } else if (change["action"] === "respond_invitation") {
+    scene.writes.push(`answer ${event.id} ${String(change["response"])}`);
+    event.attendees = event.attendees.map((attendee) => (attendee.self ? { ...attendee, responseStatus: String(change["response"]) } : attendee));
+    bump(event);
+  } else {
+    scene.writes.push(`update ${event.id}`);
+    Object.assign(event, { title: fields.title ?? event.title, location: fields.location ?? event.location, startAt: fields.startAt ?? event.startAt, endAt: fields.endAt ?? event.endAt });
+    bump(event);
+  }
+  return true;
 }
 
 /** An event of the agent's own calendar from `begin` to `end`, as eliza writes one. */
@@ -99,6 +144,26 @@ export function calendarRoutes(scene: CalendarScene): Route[] {
   const primary = { connectorAccountId: "google-owner", providerCalendarId: "primary" };
   const controlView = () => ({ revision: scene.control.revision, paused: scene.control.paused, destination: scene.control.destination, pendingDispatch: null, conflicts: 0 });
   return [
+    (request, url) => (request.method === "GET" && url.pathname === "/api/approvals"
+      ? Response.json({ ownerEntityId: "owner", approvals: scene.approvals.filter((one) => one.state === (url.searchParams.get("state") ?? "pending")).toReversed() })
+      : undefined),
+    (request, url) => {
+      const found = /^\/api\/approvals\/([^/]+)\/resolve$/.exec(url.pathname);
+      if (request.method !== "POST" || !found) return;
+      const approval = scene.approvals.find((one) => one.id === decodeURIComponent(found[1] ?? ""));
+      if (!approval || approval.state !== "pending") return Response.json({ error: "not_found" }, { status: 404 });
+      return request.json().then((body: { decision: string; revision: string }) => {
+        if (body.revision !== approval.revision) return Response.json({ error: "stale_revision" }, { status: 409 });
+        scene.writes.push(`${body.decision} ${approval.id}`);
+        if (body.decision === "reject") {
+          approval.state = "rejected";
+          return Response.json({ requestId: approval.id, decision: "reject", kind: "rejected", text: "Declined." });
+        }
+        const done = execute(scene, approval.payload.change);
+        approval.state = done ? "done" : "rejected";
+        return Response.json({ requestId: approval.id, decision: "approve", kind: done ? "succeeded" : "invalidated", text: "" });
+      });
+    },
     (request, url) => (request.method === "GET" && url.pathname === `${base}/sync-control` ? Response.json(controlView()) : undefined),
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== `${base}/sync-control/destinations`) return;
@@ -136,7 +201,11 @@ export function calendarRoutes(scene: CalendarScene): Route[] {
         const again = scene.keys.get(body.idempotencyKey);
         if (again) return Response.json({ event: again, receipt: {} });
         const event = agentEvent(body.title, Date.parse(body.startAt), Date.parse(body.endAt), { description: body.description ?? "", location: body.location ?? "", isAllDay: body.isAllDay ?? false });
-        if (scene.queued) return Response.json({ approvalRequestId: "approval-1" }, { status: 202 });
+        if (scene.queued) {
+          const id = `approval-${scene.approvals.length + 1}`;
+          scene.approvals.push(agentRequest(id, { action: "schedule_event", account: "owner", source: { calendarId: "eliza-calendar/primary" }, fields: { title: body.title, description: body.description ?? "", location: body.location ?? "", startAt: body.startAt, endAt: body.endAt, isAllDay: body.isAllDay ?? false, timeZone: "UTC" }, recurrence: null }));
+          return Response.json({ approvalRequestId: id }, { status: 202 });
+        }
         scene.writes.push(`create ${event.id}`);
         scene.events.push(event);
         return changed(scene, body.idempotencyKey, event, { event, receipt: {} });

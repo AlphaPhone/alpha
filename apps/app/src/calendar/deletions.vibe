@@ -3,23 +3,25 @@ import * as Held from "../../gen/app__calendar__deletions.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__calendar__deletions.effect.vibe"
 import * as Editor from "../../gen/app__calendar__editor.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
-import { type Due, type Job, due, hearing, reacting, tell, together } from "../runtime/reactor.vibe"
+import * as Notices from "../../gen/app__shell__notices.effect.vibe"
+import { type Due, type Job, due, following, hearing, reacting, tell, together } from "../runtime/reactor.vibe"
 import { shown } from "./shown.ts"
 
-// spec/app/calendar/deletions.md, "Confirming a deletion holds it; a deletion still waiting is sent first, so the only Undo shown is the newest"; spec/app/calendar/deletions.md, "A refused send shows the event again; a sent deletion hides it until a read no longer has it unchanged"
-/** A released deletion goes to the editor, which sends it once; one the editor cannot take now ends refused, and its event shows again. */
+// spec/app/calendar/deletions.md, "Confirming a deletion holds it; a deletion still waiting is sent first, so the only Undo shown is the newest"; spec/app/calendar/deletions.md, "A refused send shows the event again and says it was not deleted; a sent deletion hides it until a read no longer has it unchanged"; spec/app/calendar/deletions.md, "A deletion is sent only when its window ended with its notice gone, when the owner leaves, when a newer one is confirmed, or when the owner sends one a restart paused, at the revision confirmed"
+/** A released deletion goes to the editor at the revision the owner confirmed, which sends it once; one the editor cannot take now ends refused, and its event shows again. */
 function carry(fx: Out): Job<Event, Editor.Machine, []> {
-  const row = shown.find(fx.id)
+  const row = shown.find(fx.id) ?? shown.lastSeen(fx.id)
   const remove: Editor.Event = {
-    type: "deleteEvent", id: fx.id, revision: row?.revision ?? 0, scope: fx.series ? "WholeSeries" : "ThisOne", repeating: row?.recurring ?? false,
+    type: "deleteEvent", id: fx.id, revision: fx.revision,
+    scope: fx.reach === "WholeSeries" ? "WholeSeries" : fx.reach === "FromThisOn" ? "ThisAndFollowing" : "ThisOne", repeating: row?.recurring ?? false,
   }
   return tell(`release ${fx.id}`, Editor.Machine, [remove], { refused: { type: "ended", id: fx.id, done: false } })
 }
 
 // spec/app/calendar/deletions.md, "The window ends only once its Undo notice is no longer shown"
-/** The Undo notice lasts the window; once it has gone, the window ends. */
+/** The Undo notice lasts the window; once it has gone, the window ends. A deletion a restart paused waits for the owner. */
 function timers(state: Held.Deletions): ReadonlyArray<Due<Event, []>> {
-  if (state.waiting === 0) return []
+  if (state.waiting === 0 || state.paused) return []
   return state.notice
     ? [due<Event, []>("notice", state.undo.until, { type: "noticeGone" })]
     : [due<Event, []>("window", state.undo.until, { type: "windowEnded", now: state.undo.until })]
@@ -33,5 +35,9 @@ const away = Stream.unwrap(effect {
 // spec/app/calendar/deletions.md, "Leaving Calendar sends a waiting deletion at once"
 const left = hearing(away, Held.Machine, (): Event => ({ type: "leave" }))
 
-/** Calendar's deletions: held in memory with their Undo window, released to the editor. */
-export const deletions = together(reacting(Held, { carry, timers }), left)
+// spec/app/calendar/deletions.md, "The Undo window is ten seconds, scaled by Android's timeout setting"
+const scaled = following(Notices.Machine, (notices) => notices.scale, Held.Machine, (scale): Event | undefined => (scale >= 100 ? { type: "scaleChanged", scale } : undefined))
+
+// spec/app/calendar/deletions.md, "A restart pauses a deletion still in its window; the owner sends it or keeps the event"
+/** Calendar's deletions: kept on the phone with their Undo window across a restart, which pauses one still waiting, and released to the editor. */
+export const deletions = together(reacting(Held, { keep: 1, open: [{ type: "restart" }], carry, timers }), left, scaled)

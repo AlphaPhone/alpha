@@ -340,12 +340,15 @@ pure def lawAnAppliedDeletionIsNeverALookupFailure(readback: Readback): bool =
     and (readbackSeen(DeleteKind, readback) == NotDeleted iff readback == ReadbackFound)
 ```
 
-### An invitation answer is sent only by the invitee, at the version shown, under a key made of the answer and that version
+### An invitation answer is sent only by the invitee, at the version shown, under a key made of the event, the answer and that version
 
-A repeated tap of the same answer is then the same request. An event the
-owner organizes, one no longer shown, or one whose version changed is
-refused before anything is sent. An answer filed for approval says only
-that it waits.
+A repeated tap of the same answer to the same event is then the same
+request, and two events at the same version never share one. The answer is
+sent without notifying guests. An event the owner organizes, one no longer
+shown, or one whose version changed is refused before anything is sent. An
+answer the agent filed for approval goes to the Calendar review the agent's
+card shows, and says only that it waits; what the screen reads out stays on
+the sentence that says the answer.
 
 ```quint
 pure def answerAdmitted(invitee: bool, versionShown: bool, keyed: bool): bool = invitee and versionShown and keyed

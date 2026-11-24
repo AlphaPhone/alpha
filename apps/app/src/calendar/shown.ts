@@ -1,7 +1,7 @@
 // spec/app/calendar/index.md, "Rows shown are for the day the calendar is anchored to, from a source it may read"; spec/app/calendar/presentation.md, "A read for a day covers the month before it through the month after next"
 import type { Source } from "../../gen/app__calendar.ts";
 import { rowShown } from "../../gen/app__calendar__presentation.ts";
-import type { OwnAnswer } from "../../gen/app__calendar__writing.ts";
+import type { Cancellation, OwnAnswer } from "../../gen/app__calendar__writing.ts";
 import { civilDay } from "./time.ts";
 
 /** One of an event's people: the organizer, or a guest with the reply the calendar gave. */
@@ -33,6 +33,14 @@ export interface Row {
   /** The owner's own answer to the invitation, and whether Going and Maybe may be offered for it. */
   readonly answer: OwnAnswer;
   readonly answerable: boolean;
+  /** Whether the event is on the calendar the agent manages for the owner, whose deletions and series changes are made in Google Calendar. */
+  readonly managed: boolean;
+  /** The series a repeating event belongs to, or "". */
+  readonly series: string;
+  /** Whether Alpha may change the event here: a versioned event of a calendar Alpha writes. */
+  readonly editable: boolean;
+  /** What deleting the event is: the organizer's cancel, the invitee's decline, or nothing where the organizer is unknown. */
+  readonly cancel: Cancellation;
   /** The provider's version of the event, which a write names, or "" where the calendar keeps none. */
   readonly version: string;
   /** The revision the form builds on: the provider's change time where it has one, otherwise one more each time a read shows it different. */
@@ -46,6 +54,8 @@ const numbers = new Map<string, number>();
 const calendars = new Map<string, number>();
 const seen = new Map<string, { readonly content: string; readonly revision: number }>();
 const windows = new Map<Source, ReadonlyArray<Row>>();
+const last = new Map<number, Row>();
+const cut = new Set<Source>();
 const listeners = new Set<() => void>();
 let version = 0;
 let present = false;
@@ -105,11 +115,14 @@ export const shown = {
     };
   },
   /** Keep what `source` answered for the window around `day`, numbered; the rows that fall on `day`. @throws {never} */
-  keep(source: Source, day: number, read: ReadonlyArray<Read>): ReadonlyArray<Row> {
+  keep(source: Source, day: number, read: ReadonlyArray<Read>, partial = false): ReadonlyArray<Row> {
+    if (partial) cut.add(source);
+    else cut.delete(source);
     const rows = read.map(({ changedAt, ...row }) => ({
       ...row, source, id: numbered(source, row.key), calendar: calendarNumber(source, row.calendarId), revision: revised(source, { ...row, changedAt }),
     }));
     windows.set(source, [...rows].sort((a, b) => a.begin - b.begin));
+    for (const row of rows) last.set(row.id, row);
     told();
     return rows.filter((row) => onDay(row, day));
   },
@@ -127,8 +140,11 @@ export const shown = {
     return both.filter((row) => rowShown(row.calendar, [...hidden])).sort((a, b) => a.begin - b.begin);
   },
   /** Forget what `source` read: an account changed or a permission went. @throws {never} */
+  /** Whether the last read of `source` said it gave only part of its window. @throws {never} */
+  partial: (source: Source): boolean => cut.has(source),
   drop(source: Source): void {
     windows.delete(source);
+    cut.delete(source);
     told();
   },
   /** Whether this phone has calendars of its own: a browser has none, and is never asked for access. @throws {never} */
@@ -146,6 +162,10 @@ export const shown = {
   restore(kept: ReadonlyArray<readonly [string, string, number]>): void {
     for (const [name, content, revision] of kept) if (!seen.has(name)) seen.set(name, { content, revision });
   },
+  /** The number an event of `source` keyed `key` has, or is given now. @throws {never} */
+  number: (source: Source, key: string): number => numbered(source, key),
+  /** The event numbered `id` as it was last read, even where the window read since no longer holds it. @throws {never} */
+  lastSeen: (id: number): Row | undefined => last.get(id),
   /** The event numbered `id`, wherever it was last read. @throws {never} */
   find(id: number): Row | undefined {
     for (const rows of windows.values()) {

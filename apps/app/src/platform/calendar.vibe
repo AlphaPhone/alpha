@@ -48,6 +48,9 @@ export interface Written {
   readonly known: boolean
 }
 
+/** What the phone's review of a deletion found: staged, with how many milliseconds its Undo window has left; for Android Calendar to review; changed since it was read; or refused. */
+export type Staged = { readonly kind: "ready"; readonly window: number } | { readonly kind: "editor" } | { readonly kind: "conflict" } | { readonly kind: "refused" }
+
 /** What the phone's own write review answered, as eliza's bridge says it (`WriteOutcome` of `@elizaos/os`). */
 function writtenOf(outcome: string): Written {
   return outcome === "Applied" ? { confirmed: true, known: true } : outcome === "Uncertain" ? { confirmed: false, known: false } : { confirmed: false, known: true }
@@ -68,8 +71,8 @@ export service PhoneCalendar {
   create(fields: AndroidCalendarEditorFields, creationId: string, separate: boolean): Written!!
   created(creationId: string): boolean!CalendarUnread
   update(pick: CalendarPick, fields: AndroidCalendarEditorFields): Written!!
-  /** Stage the deletion through the phone's review: how many milliseconds its Undo window has left, or none where the review refused it. */
-  stage(pick: CalendarPick, scope: AndroidCalendarDeletionScope): Option.Option<number>!!
+  /** Stage the deletion through the phone's review, which inspects the event as it is now. */
+  stage(pick: CalendarPick, scope: AndroidCalendarDeletionScope): Staged!!
   /** Send a staged deletion once its window is over; one the review still holds is refused, and nothing is sent. */
   dispatch(id: string): Written!!
 }
@@ -109,14 +112,14 @@ export const phoneCalendar = Layer.sync(PhoneCalendar, () => {
       const inspected = await review.inspectUpdate()
       return inspected.kind === "ready" ? writtenOf(await review.save(inspected.ticket, fields)) : refused
     }), () => lost),
-    stage: (pick: CalendarPick, scope: AndroidCalendarDeletionScope) => Effect.orElseSucceed(tryPromise(async (): Promise<Option.Option<number>> => {
+    stage: (pick: CalendarPick, scope: AndroidCalendarDeletionScope) => Effect.orElseSucceed(tryPromise(async (): Promise<Staged> => {
       const review = client().review(pick)
       const inspected = await review.inspectDeletion(scope)
-      if (inspected.kind !== "ready") return Option.none<number>()
+      if (inspected.kind !== "ready") return { kind: inspected.kind === "editor" ? "editor" : "conflict" }
       const deadline = await review.stageDeletion(inspected.ticket)
       staged.set(pick.event.id, review)
-      return Option.some(untilElapsed(deadline.expiresElapsed))
-    }), () => Option.none<number>()),
+      return { kind: "ready", window: untilElapsed(deadline.expiresElapsed) }
+    }), (): Staged => ({ kind: "refused" })),
     dispatch: (id: string) => Effect.orElseSucceed(tryPromise(async (): Promise<Written> => {
       const review = staged.get(id)
       staged.delete(id)
@@ -140,6 +143,6 @@ export const browserCalendar = Layer.succeed(PhoneCalendar, {
   create: () => succeed(refused),
   created: () => fail(absent()),
   update: () => succeed(refused),
-  stage: () => succeed(Option.none<number>()),
+  stage: () => succeed<Staged>({ kind: "refused" }),
   dispatch: () => succeed(refused),
 })
