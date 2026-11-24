@@ -8,6 +8,7 @@ import { ResidentControl } from "../../src/platform/resident-control.vibe"
 import { memoryStore } from "../../src/platform/storage.vibe"
 import { ResidentFeeds } from "../../src/platform/view-events.vibe"
 import { Microphone } from "../../src/voice/capture.vibe"
+import { refusalOf, retryVoiceQuietly } from "../../src/voice/failure.vibe"
 import { VoiceConversation } from "../../src/voice/conversation.vibe"
 import { Dictation, type DictationTarget } from "../../src/voice/dictation.vibe"
 import { layer } from "../../src/voice/layer.vibe"
@@ -216,6 +217,16 @@ it.live(`Start talking only when Alpha can listen safely (spec/voice/conversatio
     try Effect.try(() => assert.deepStrictEqual({ shown: refusedForCall.shown, notice: refusedForCall.notice, ticket, refusal: mic.refusal, captured: names(calls).includes("AlphaVoiceCloud.startLiveCapture") },
       { shown: "Off", notice: "CallHoldsMicrophone", ticket: undefined, refusal: "RefusedCall", captured: false }))
   }
+})
+
+it.effect('Only a temporary Cloud refusal is eligible for a quiet Talk retry (spec/voice/conversation.md, "A busy Cloud is retried quietly at most twice in a row; a long wait pauses voice; own keys and other failures are shown")', () => effect {
+  const canRetry = (cause: unknown) => retryVoiceQuietly(refusalOf(cause, 1_000))
+  assert.isTrue(canRetry({ status: 503 }))
+  assert.isTrue(canRetry({ code: "voice-http-429", data: { retryAfterSeconds: 2 } }))
+  for (const limitCode of ["allowance_exhausted", "subscription_required", "billing_refused", "insufficient_credits"]) {
+    assert.isFalse(canRetry({ code: "voice-http-429", data: { limitCode, retryAfterSeconds: 2 } }), limitCode)
+  }
+  assert.isFalse(canRetry({ status: 402 }))
 })
 
 it.live(`Keep a page I read and my voicemail on my phone (spec/voice/speech.md, "Story: Keep a page I read and my voicemail on my phone")`, () => effect {

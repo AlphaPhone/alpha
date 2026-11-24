@@ -16,7 +16,7 @@ import { acknowledgement, voiceReplyHooks, type Acknowledgement } from "./acknow
 import { Microphone } from "./capture.vibe"
 import { voiceAbort } from "./cloud-stream.ts"
 import { Dictation } from "./dictation.vibe"
-import { callCaused, cancelledByPhone, pausedByPhone, refusalOf } from "./failure.vibe"
+import { callCaused, cancelledByPhone, pausedByPhone, refusalOf, retryVoiceQuietly } from "./failure.vibe"
 import { newId } from "../platform/ids.ts"
 import { Latency } from "./latency.vibe"
 import { Listener, type InvocationScreen } from "./listener.vibe"
@@ -178,8 +178,7 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
         if (try send({ type: "stop", media: true })) try retire(true)
         return
       }
-      const transient = facts.status === 503 || facts.status === 429
-      try send({ type: "sessionFailed", transient, longWait: (facts.retryAfterSeconds ?? 0) > LONG_WAIT_SECONDS })
+      try send({ type: "sessionFailed", transient: retryVoiceQuietly(facts), longWait: (facts.retryAfterSeconds ?? 0) > LONG_WAIT_SECONDS })
       if ((try held.get()).shown === "Retrying") {
         try sleep(Math.max(QUIET_RETRY_WAIT_MS, (facts.retryAfterSeconds ?? 0) * 1000))
         const chatCurrent = current?.chatCurrent() ?? false

@@ -55,6 +55,10 @@ export function limitKindOf(facts: RefusalFacts): LimitKind {
   return "RateLimit"
 }
 
+export function retryVoiceQuietly(facts: RefusalFacts): boolean {
+  return facts.status === 503 || (facts.status === 429 && limitKindOf(facts) === "RateLimit")
+}
+
 /** Whether a failure is a call taking the microphone or the speaker. */
 export function callCaused(facts: RefusalFacts): boolean {
   return facts.code === "call-active" || facts.code === "capture-call-active"
