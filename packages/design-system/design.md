@@ -29,7 +29,8 @@ do next.
   dialog, `z-toast` a notice, `z-voice` the voice overlay. `z-10`, `z-20` and `z-50` order things inside one view.
 - **Motion.** `fast` for press, `base` for most changes, `slow` for entering and leaving, on
   `ease-standard`; `animate-rise` brings in a sheet, `animate-drop` a menu, `animate-fade` a screen,
-  `animate-shimmer` work in progress. Reduced motion stops them all.
+  `animate-shimmer` work in progress; on the public site `animate-float` sways the phone, `animate-enter`
+  brings in a chat message and `animate-typing` bobs a typing dot. Reduced motion stops them all.
 - **Width.** Layout follows the measured width, not the orientation: from `md` a centered reading
   column, from `lg` a list beside its detail.
 - **Dark.** Follows the system; a `.dark` or `.light` class on an ancestor overrides it.
@@ -144,10 +145,16 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `keyframes.drop` | from{opacity:0;transform:translateY(-2.25rem)}to{opacity:1;transform:none} |
 | `keyframes.fade` | from{opacity:0}to{opacity:1} |
 | `keyframes.shimmer` | from{background-position:200% 0}to{background-position:-200% 0} |
+| `keyframes.float` | 0%,100%{transform:translateY(0) rotateZ(-9deg) rotateX(9deg) rotateY(-17deg)}50%{transform:translateY(-0.55rem) rotateZ(-6deg) rotateX(5deg) rotateY(-10deg)} |
+| `keyframes.typing` | 0%,100%{opacity:0.45;transform:none}50%{opacity:1;transform:translateY(-0.2em)} |
+| `keyframes.enter` | from{opacity:0;transform:translateY(0.5em)}to{opacity:1;transform:none} |
 | `animate.rise` | rise 460ms cubic-bezier(0.19, 1, 0.22, 1) both |
 | `animate.drop` | drop 500ms cubic-bezier(0.19, 1, 0.22, 1) both |
 | `animate.fade` | fade 700ms ease both |
 | `animate.shimmer` | shimmer 2s linear infinite |
+| `animate.float` | float 12s ease-in-out infinite |
+| `animate.typing` | typing 650ms ease-in-out 2 both |
+| `animate.enter` | enter 400ms ease both |
 | `breakpoint.sm` | 40rem |
 | `breakpoint.md` | 47.5rem |
 | `breakpoint.lg` | 62.5rem |
