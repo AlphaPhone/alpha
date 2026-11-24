@@ -10,8 +10,8 @@ Maps and comes back to it.
   restart, and every write to the phone's calendar
 - [The agent's calendar](./agent.md): what the agent reads directly, and the
   changes it makes only after the owner approves the card that shows them
-- [Sync](./sync.md): the phone's calendar copied to Google, only when the
-  owner links it and turns it on
+- [Google link](./link.md): the agent's Calendar linked to the owner's
+  Google calendar, set up and paused from Calendar's Google row
 - [Sharing](./sharing.md): what a reviewed read of the phone's calendar may
   tell the agent, and which of its Calendar actions the phone offers
 - [Presentation](./presentation.md): how times, days, replies and the
