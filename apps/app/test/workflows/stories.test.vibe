@@ -354,7 +354,7 @@ describe("Digests (spec/workflows/digests.md, \"Story: See my digests and the ne
       const panel = try (try DigestsMachine).get()
       let waited = 0
       while (briefs.length === 0 && waited < 100) {
-        try Effect.sleep("20 millis")
+        try TestClock.adjust("20 millis")
         waited += 1
       }
       // spec/shell/overview.md, "The brief card shows the newest retained brief, and says when it failed or did not run"
