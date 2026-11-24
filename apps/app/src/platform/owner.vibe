@@ -1,0 +1,14 @@
+// spec/app/platform/index.md, "Story: Talk to the resident agent"
+import { Agent } from "./agent.vibe"
+import { type Failure, ask } from "./remote.vibe"
+
+const LocalOwner = Schema.Struct({
+  identity: Schema.Struct({ kind: Schema.Literal("owner"), id: Schema.NonEmptyString }),
+  access: Schema.Struct({ role: Schema.Literal("OWNER"), mode: Schema.Literal("local") }),
+})
+
+/** The identity the resident agent gives the root caller of this launch. */
+export effect function ownerAt(): string!Failure!Agent {
+  const owner = try ask(Agent, HttpClientRequest.get("/api/auth/me"), LocalOwner)
+  return owner.identity.id
+}

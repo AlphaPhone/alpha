@@ -29,5 +29,5 @@ export type InboxListStateProps = {
  */
 export function InboxListState({ kind, onAction }: InboxListStateProps) {
   const { icon, title, ...rest } = states[kind] as { icon: React.ReactNode; title: string; action?: string };
-  return <EmptyState icon={icon} title={title}>{onAction && rest.action ? <Button onClick={onAction}>{rest.action}</Button> : null}</EmptyState>;
+  return <EmptyState icon={icon} title={title} className="gap-3 px-6 pt-26 [&_svg]:size-7">{onAction && rest.action ? <Button variant="secondary" size="sm" onClick={onAction}>{rest.action}</Button> : null}</EmptyState>;
 }

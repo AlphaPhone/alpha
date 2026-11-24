@@ -3,6 +3,7 @@ import { type AskScene, askRoutes, askScene } from "./ask.ts";
 import { type CalendarScene, calendarRoutes, calendarScene } from "./calendar.ts";
 import { type ClockScene, clockRoutes, clockScene } from "./clock.ts";
 import { type MapsScene, mapsRoutes, mapsScene } from "./maps.ts";
+import { type NotesScene, notesRoutes, notesScene } from "./notes.ts";
 import { cloudRoutes } from "./cloud.ts";
 import { type InboxScene, inboxRoutes, inboxScene } from "./inbox.ts";
 import { type PlatformScene, platformRoutes, platformScene } from "./platform.ts";
@@ -33,6 +34,7 @@ export interface Scene {
   readonly reminders: RemindersScene;
   readonly files: FilesScene;
   readonly maps: MapsScene;
+  readonly notes: NotesScene;
   readonly telephony: TelephonyScene;
   readonly platform: PlatformScene;
   readonly update: UpdateScene;
@@ -52,6 +54,7 @@ export function scene(): Scene {
     reminders: remindersScene(),
     files: filesScene(),
     maps: mapsScene(),
+    notes: notesScene(),
     telephony: telephonyScene(),
     platform: platformScene(),
     update: updateScene(),
@@ -71,6 +74,7 @@ export function services(world: Scene) {
       ...calendarRoutes(world.calendar),
       ...clockRoutes(world.clock, () => world.now),
       ...remindersRoutes(world.reminders, () => world.now),
+      ...notesRoutes(world.notes),
       ...platformRoutes(world.platform),
       ...telephonyRoutes(world.telephony),
     ]),

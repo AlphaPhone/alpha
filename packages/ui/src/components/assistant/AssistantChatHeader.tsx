@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
-import { MessageSquarePlus, Search, X } from "lucide-react";
+import { ChevronDown, Maximize2, MessageSquarePlus, Minimize2, Search } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { Button } from "../Button.tsx";
 import { Mark } from "../Mark.tsx";
@@ -22,6 +22,10 @@ export type AssistantChatHeaderProps = Omit<ComponentProps<"header">, "title" | 
   making?: boolean;
   /** Puts Ask Alpha away. */
   onClose?: () => void;
+  /** The conversation is full height. Its resize action shrinks it to the sheet. */
+  expanded?: boolean;
+  /** Expands the sheet, or shrinks the full screen back to the sheet. */
+  onResize?: () => void;
 };
 
 /**
@@ -29,14 +33,13 @@ export type AssistantChatHeaderProps = Omit<ComponentProps<"header">, "title" | 
  * of the screen, and the ways to find or start a conversation.
  * @model spec/app/assistant/chats.md
  */
-export function AssistantChatHeader({ title, context, grabber, onHistory, onSearch, onNew, making = false, onClose, className, ...props }: AssistantChatHeaderProps) {
+export function AssistantChatHeader({ title, context, grabber, onHistory, onSearch, onNew, making = false, onClose, expanded, onResize, className, ...props }: AssistantChatHeaderProps) {
   return (
-    <header className={cn("flex flex-col", className)} {...props}>
-      {grabber}
-      <div className="flex min-h-14 items-center gap-1 pr-1 pl-4">
-        <span aria-hidden className="mr-2 flex size-9 shrink-0 items-center justify-center rounded-full bg-alpha text-alpha-foreground"><Mark className="size-5" aria-hidden /></span>
+    <header className={cn("relative flex shrink-0 flex-col", className)} {...props}>
+      <div className="flex min-h-11 items-center gap-0.5 px-3 pb-1">
+        <span aria-hidden className="mr-2.5 flex size-8.5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-alpha text-alpha-foreground"><Mark className="size-[118%] shrink-0" aria-hidden /></span>
         <div className="flex min-w-0 flex-1 flex-col">
-          <h2 className="min-w-0 text-lg leading-snug font-semibold">
+          <h2 className="min-w-0 text-base leading-snug font-semibold">
             {onHistory ? (
               <button type="button" aria-haspopup="dialog" aria-label={`Chats, ${title}`} onClick={onHistory} className={cn(focusRing, "flex min-h-11 w-full items-center rounded-md text-left")}><span className="truncate">{title}</span></button>
             ) : (
@@ -47,8 +50,10 @@ export function AssistantChatHeader({ title, context, grabber, onHistory, onSear
         </div>
         {onSearch ? <Button variant="ghost" size="icon" aria-label="Search chats" onClick={onSearch}><Search /></Button> : null}
         {onNew || making ? <Button variant="ghost" size="icon" aria-label="New chat" loading={making} onClick={onNew}><MessageSquarePlus /></Button> : null}
-        {onClose ? <Button variant="ghost" size="icon" aria-label="Close" onClick={onClose}><X /></Button> : null}
+        {onResize ? <Button variant="ghost" size="icon" aria-label={expanded ? "Shrink chat" : "Expand chat"} onClick={onResize}>{expanded ? <Minimize2 className="size-4.5" /> : <Maximize2 className="size-4.5" />}</Button> : null}
+        {onClose ? <Button variant="ghost" size="icon" aria-label="Minimize chat" onClick={onClose}><ChevronDown className="size-5" /></Button> : null}
       </div>
+      {grabber ? <div className="absolute top-0 left-1/2 -translate-x-1/2">{grabber}</div> : null}
     </header>
   );
 }

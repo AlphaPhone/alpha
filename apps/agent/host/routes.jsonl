@@ -42,3 +42,8 @@
 { "method": "POST", "path": "/api/alpha/reminders/items/{id}/reopen" }
 { "method": "POST", "path": "/api/alpha/reminders/items/{id}/snooze" }
 { "method": "POST", "path": "/api/alpha/reminders/items/{id}/restore" }
+{ "method": "GET", "path": "/api/auth/me" }
+{ "method": "GET", "path": "/api/workflow/workflows" }
+{ "method": "GET", "path": "/api/workflow/removed-workflows" }
+{ "method": "GET", "path": "/api/triggers" }
+{ "method": "GET", "path": "/api/triggers/{id}/runs" }
