@@ -85,10 +85,23 @@ async function publishedModelUrl(name: string) {
   return file.url;
 }
 
-async function download(url: string) {
-  const response = await fetch(url, {redirect: 'follow'});
-  if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
-  return new Uint8Array(await response.arrayBuffer());
+/**
+ * Fetches the model with a bounded retry: CI keeps no cache between runs, so one rate limit or dropped
+ * connection would otherwise fail the whole build. Only network errors, 429 and 5xx are retried; the caller
+ * still checks every byte against the pin.
+ */
+export async function download(url: string, {fetchImpl = fetch, attempts = 3, delayMs = 2000}: {fetchImpl?: typeof fetch; attempts?: number; delayMs?: number} = {}) {
+  for (let attempt = 1; ; attempt++) {
+    let status: number | undefined, failure: unknown;
+    try {
+      const response = await fetchImpl(url, {redirect: 'follow'});
+      if (response.ok) return new Uint8Array(await response.arrayBuffer());
+      status = response.status;
+    } catch (error) { failure = error; }
+    const retryable = status === undefined || status === 429 || status >= 500;
+    if (!retryable || attempt >= attempts) throw status === undefined ? failure : new Error(`${url}: HTTP ${status}`);
+    await new Promise(resolve => setTimeout(resolve, delayMs * attempt));
+  }
 }
 
 function writeAtomically(file: string, bytes: Uint8Array) {

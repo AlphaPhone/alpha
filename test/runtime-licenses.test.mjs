@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {RUNTIME_ENTRY, collectNotices, finishEntry, packagedRuntimePresent, runtimeEntries, ROOT, UNVERIFIED} from '../scripts/generate-licenses.ts';
-import {installRuntimePayload, stageEmbeddingModel} from '../scripts/stage-agent-runtime.ts';
+import {download, installRuntimePayload, stageEmbeddingModel} from '../scripts/stage-agent-runtime.ts';
 import {stageRuntimePayload} from '../scripts/upstream-os.ts';
 
 const canonicalTexts = {MIT: 'MIT terms', ISC: 'ISC terms', 'Apache-2.0': 'Apache terms'};
@@ -147,4 +147,23 @@ test('the embedding model is staged only as the pinned bytes', async t => {
   assert.deepEqual(fetched, ['https://example.test/bge.gguf']);
   assert.equal(fs.existsSync(target), false);
   assert.equal(fs.existsSync(cache), false, 'refused bytes are not cached');
+});
+
+test('the model download retries a rate limit, a server error or a dropped connection a bounded number of times', async () => {
+  const url = 'https://example.test/bge.gguf';
+  const replies = [() => new Response('', {status: 429}), () => { throw new TypeError('fetch failed'); }, () => new Response('', {status: 503}), () => new Response(new Uint8Array([7, 8]))];
+  let calls = 0;
+  const fetchImpl = async () => replies[calls++]();
+  assert.deepEqual([...await download(url, {fetchImpl, attempts: 4, delayMs: 0})], [7, 8]);
+  assert.equal(calls, 4);
+  calls = 0;
+  await assert.rejects(download(url, {fetchImpl, attempts: 2, delayMs: 0}), {name: 'TypeError', message: 'fetch failed'});
+  assert.equal(calls, 2, 'gives up after the bounded number of attempts');
+});
+
+test('the model download does not retry a refusal such as 404', async () => {
+  let calls = 0;
+  const fetchImpl = async () => { calls++; return new Response('', {status: 404}); };
+  await assert.rejects(download('https://example.test/bge.gguf', {fetchImpl, attempts: 3, delayMs: 0}), /https:\/\/example\.test\/bge\.gguf: HTTP 404/);
+  assert.equal(calls, 1);
 });
