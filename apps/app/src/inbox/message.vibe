@@ -67,13 +67,15 @@ function carry(fx: Out): Job<Event, Cloud | Mail | Inbox.Machine | Marking.Machi
 effect function marked(attempt: number, account: number, message: number, unread: boolean): MarkEvent!!(Attempts | Cloud | Mail) {
   const ended = try relabel(attempt, account, message, unread ? "mark-unread" : "mark-read")
   if (ended.done) try (try Mail).relabelled(message, unread)
-  return { type: "marked", attempt, done: ended.done, matches: ended.known }
+  return { type: "marked", attempt, done: ended.done, matches: ended.known, expired: ended.expired }
 }
 
-function carryMark(fx: MarkOut): Job<MarkEvent, Cloud | Mail, [by: Actor]> {
+function carryMark(fx: MarkOut): Job<MarkEvent, Cloud | Mail | Inbox.Machine, [by: Actor]> {
   return match (fx) {
     when { tag: "MarkMessage", let attempt, let account, let message, let unread }:
       answer(`mark ${attempt}`, marked(attempt, account, message, unread), { type: "markLost", attempt }, "World");
+    // spec/app/inbox/marking.md, "The owner's own mark that finds the cloud sign-in expired has the accounts checked again"
+    when { tag: "CheckAccounts" }: run("check", effect { try ignore((try Inbox.Machine).send({ type: "checkAccess" })) }, "World");
   }
 }
 
@@ -121,5 +123,8 @@ export const back = effect {
   if (state.link !== 0) return Exit.isSuccess(try exit(view.send({ type: "closeLink" })))
   if (state.attachment !== 0) return Exit.isSuccess(try exit(view.send({ type: "closeAttachment" })))
   if (state.message !== 0) return Exit.isSuccess(try exit(view.send({ type: "close" })))
+  // spec/app/inbox/index.md, "Back from a search shows its folder without the search, before Back leaves Inbox"
+  const list = try Inbox.Machine
+  if ((try list.get()).selected.query !== "") return Exit.isSuccess(try exit(list.send({ type: "clearSearch" })))
   return false
 }

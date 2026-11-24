@@ -259,7 +259,7 @@ export function Inbox({ runtime }: InboxProps) {
   const changes = useTimed(runtime, useChanges);
   const drafts = useDrafts(runtime);
   const shell = useShell(runtime);
-  const [query, setQuery] = useState("");
+  const [typed, setTyped] = useState<{ text: string; over: string } | undefined>();
   const [choosing, setChoosing] = useState(false);
   const [shelf, setShelf] = useState(false);
   if (cause) return <Alert variant="destructive" className="m-4">Alpha could not open Inbox</Alert>;
@@ -324,8 +324,8 @@ export function Inbox({ runtime }: InboxProps) {
           const event = { type: "chooseFolder", folder: folderOf[name] } as const;
           if (can(event)) void send(event);
         } : undefined}
-        search={query}
-        onSearchChange={setQuery}
+        search={typed && typed.over === state.selected.query ? typed.text : state.selected.query}
+        onSearchChange={(text) => setTyped({ text, over: state.selected.query })}
         onSearch={readable(state) && searchableIn(state.selected.folder, state) ? (text) => {
           const event = { type: "search", query: text } as const;
           if (can(event)) void send(event);

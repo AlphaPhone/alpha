@@ -184,6 +184,14 @@ pure def canSearch(s: Mailbox, query: str): bool =
 pure def search(s: Mailbox, query: str): Moved = asking(0, turned({ ...s.selected, query: query }, s))
 ```
 
+### Back from a search shows its folder without the search, before Back leaves Inbox
+
+```quint
+pure def canClearSearch(s: Mailbox): bool = s.selected.query != "" and canSearch(s, "")
+
+pure def clearSearch(s: Mailbox): Moved = search(s, "")
+```
+
 ### Refresh reads the first page again, one read at a time, and keeps the list on screen until it answers
 
 Retry after a failed read is the same.
