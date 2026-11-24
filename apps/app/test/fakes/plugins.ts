@@ -1,5 +1,6 @@
 import { type Faked, elizaAgent, elizaCloud, elizaSecureStore, present } from "./phone.ts";
 import type { Answering } from "./routes.ts";
+import { elizaFiles } from "./files.ts";
 import type { Scene } from "./scene.ts";
 
 /**
@@ -12,6 +13,7 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     ElizaAgent: elizaAgent(services.agent),
     ElizaCloud: elizaCloud(services.cloud, () => world.signedIn),
     ElizaSecureStore: elizaSecureStore(world.secrets, world.slots),
+    ElizaFiles: elizaFiles(world.files),
     ...(world.image ? { ElizaTelephony: present, ElizaContacts: present } : {}),
   };
 }
