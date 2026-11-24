@@ -195,9 +195,11 @@ export effect function answerRow(row: CalendarRow, answer: "accepted" | "tentati
   if (event !== undefined && row.source === "agent" && row.revision !== "") {
     try agentSettled(agent)
     const invitee = event.attendees.some((guest) => guest.self && !guest.organizer)
-    outcome = try agent.answer({ eventKey: agentEventKey(event), invitee, request: {
+    const eventKey = agentEventKey(event)
+    const digest = try promise(() => sha256Hex(JSON.stringify([eventKey, row.revision, answer])))
+    outcome = try agent.answer({ eventKey, invitee, request: {
       responseStatus: answer, calendarId: event.calendarId, expectedProviderVersion: row.revision,
-      idempotencyKey: `answer-${answer}-${row.revision.replace(/[^-a-zA-Z0-9_]/g, "").slice(0, 60)}` } })
+      idempotencyKey: `answer-${digest}` } })
   }
   const problem = answerProblem(outcome)
   if (problem !== "") try (try Notices).show(problem)

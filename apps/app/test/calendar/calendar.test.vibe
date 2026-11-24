@@ -116,6 +116,7 @@ describe("Calendar journeys (spec/calendar/agent.md, \"Story: See my agent's Cal
     // spec/calendar/agent.md, "An invitation answer is sent only by the invitee, at the version shown, and is saved only when a read shows the answer"
     const fakeAgent = new CalendarAgentFake()
     fakeAgent.invite("invite-a", "Design review", 0, 23, "needsAction")
+    fakeAgent.invite("invite-b", "Iteration review", 0, 22, "needsAction")
     fakeAgent.add("own-a", "Focus", 0, 22)
     const shown: string[] = []
     provide calendarOver(fakeAgent, new DeviceCalendarFake()), noticesInto(shown) {
@@ -123,22 +124,29 @@ describe("Calendar journeys (spec/calendar/agent.md, \"Story: See my agent's Cal
       try readCalendar(false, false)
       const agent = try AgentCalendar
       const invitation = (try agent.view()).feed!.events.find((event) => event.id === "invite-a")!
+      const sameVersion = (try agent.view()).feed!.events.find((event) => event.id === "invite-b")!
       const ownEvent = (try agent.view()).feed!.events.find((event) => event.id === "own-a")!
       const going = try answerRow(rowOf(invitation), "accepted")
+      const otherGoing = try answerRow(rowOf(sameVersion), "accepted")
       const answered = (try agent.view()).feed!.events.find((event) => event.id === "invite-a")!
       const stale = try answerRow(rowOf(invitation), "tentative")
       const own = try answerRow(rowOf(ownEvent), "accepted")
       const maybe = try answerRow(rowOf(answered), "tentative")
       const last = (try agent.view()).feed!.events.find((event) => event.id === "invite-a")!
-      const sent = fakeAgent.writes.map((write) => [write.method, write.path, (write.body as { responseStatus: string; idempotencyKey: string }).responseStatus,
-        (write.body as { idempotencyKey: string }).idempotencyKey])
+      const sent = fakeAgent.writes.map((write) => [write.method, write.path, (write.body as { responseStatus: string }).responseStatus])
+      const keys = fakeAgent.writes.map((write) => (write.body as { idempotencyKey: string }).idempotencyKey)
+      try check(() => {
+        assert.isTrue(keys.every((key) => /^answer-[a-f0-9]{64}$/u.test(key)))
+        assert.strictEqual(new Set(keys).size, keys.length)
+      })
       try check(() => assert.deepStrictEqual({
-        outcomes: [going, stale, own, maybe], reply: answered.attendees.find((guest) => guest.self)?.responseStatus,
+        outcomes: [going, otherGoing, stale, own, maybe], reply: answered.attendees.find((guest) => guest.self)?.responseStatus,
         sent, notices: shown, last: last.attendees.find((guest) => guest.self)?.responseStatus,
       }, {
-        outcomes: ["Saved", "WriteNotAdmitted", "WriteNotAdmitted", "Saved"], reply: "accepted",
-        sent: [["POST", "/api/lifeops/calendar/events/invite-a/response", "accepted", "answer-accepted-etag-1"],
-          ["POST", "/api/lifeops/calendar/events/invite-a/response", "tentative", "answer-tentative-etag-1"]],
+        outcomes: ["Saved", "Saved", "WriteNotAdmitted", "WriteNotAdmitted", "Saved"], reply: "accepted",
+        sent: [["POST", "/api/lifeops/calendar/events/invite-a/response", "accepted"],
+          ["POST", "/api/lifeops/calendar/events/invite-b/response", "accepted"],
+          ["POST", "/api/lifeops/calendar/events/invite-a/response", "tentative"]],
         notices: ["Refresh this invitation before answering it. No answer was sent.", "Refresh this invitation before answering it. No answer was sent."],
         last: "tentative",
       }))
