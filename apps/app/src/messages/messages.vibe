@@ -12,7 +12,7 @@ import { registered } from "../platform/device.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
 import { type Job, Whole, answer, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
-import { Dialer, grantOf, prefilled } from "../phone/phone.vibe"
+import { Dialer, dialing, grantOf } from "../phone/phone.vibe"
 import { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
 import { Callers } from "../phone/voicemail.vibe"
 import { on, visiting } from "../phone/visit.vibe"
@@ -223,12 +223,7 @@ effect function numbers(thread: number): ReadonlyArray<string>!!Conversations {
 
 // spec/app/messages/index.md, "Copy puts a message's text on the clipboard, Call opens Phone with the number, and a message Alpha cannot show opens in the messaging app; none changes anything here"
 effect function called(thread: number): void!!(Conversations | Dialer | PhoneMachine | Shell) {
-  const number = (try numbers(thread))[0] ?? ""
-  const handed = prefilled(number)
-  if (handed === undefined) return
-  try (try Dialer).set({ digits: handed.digits })
-  try ignore((try PhoneMachine).send(handed.event))
-  try ignore((try Shell).send({ type: "openView", view: "Phone" }))
+  try ignore(dialing((try numbers(thread))[0] ?? ""))
 }
 
 /** The messaging app, opened on the conversation's numbers, for what Alpha cannot show or send. */

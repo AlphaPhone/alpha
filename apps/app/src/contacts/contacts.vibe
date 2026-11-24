@@ -8,7 +8,7 @@ import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { Telephony, TelephonyRefused, telephony } from "../platform/telephony.vibe"
 import { type Job, answer, following, reacting, run, together } from "../runtime/reactor.vibe"
-import { Dialer, grantOf, prefilled } from "../phone/phone.vibe"
+import { Dialer, dialing, grantOf } from "../phone/phone.vibe"
 import { Callers } from "../phone/voicemail.vibe"
 import { on, visiting } from "../phone/visit.vibe"
 
@@ -164,11 +164,7 @@ effect function reached(how: Contacts.Reach): void!!(Rows | Dialer | PhoneMachin
     try (try Callers).message(number)
     return
   }
-  const handed = prefilled(number)
-  if (handed === undefined) return
-  try (try Dialer).set({ digits: handed.digits })
-  try ignore((try PhoneMachine).send(handed.event))
-  try ignore((try Shell).send({ type: "openView", view: "Phone" }))
+  try ignore(dialing(number))
 }
 
 // spec/app/contacts/index.md, "Where the phone does not let Alpha write contacts, New and Edit open the phone's own contact editor instead"
