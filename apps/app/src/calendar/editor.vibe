@@ -120,6 +120,11 @@ effect function readBackAgent(row: Row, kind: WriteKind, reply: string): Written
     : seen === "NotDeleted" ? refused : { confirmed: false, known: false }
 }
 
+/** Whether the agent filed the write for the owner's approval instead of making it: nothing changed yet, and the approval card says it waits. */
+function filed(body: unknown): boolean {
+  return typeof body === "object" && body !== null && "approvalRequestId" in body
+}
+
 // spec/app/calendar/writing.md, "An invitation answer is sent only by the invitee, at the version shown, under a key made of the answer and that version"; spec/app/calendar/writing.md, "Deleting is an organizer's cancel or an invitee's decline, and nothing when the organizer is unknown"
 /** A change, a deletion or an answer to an event of the agent's calendar, sent once at the version shown, then read back. */
 effect function sendAgent(attempt: number, kind: "Update" | "Remove" | "Reply", row: Row, scope: Scope, going: boolean): Written!!(Agent | Attempts | KeyValueStore.KeyValueStore | Editor.Machine) {
@@ -130,19 +135,22 @@ effect function sendAgent(attempt: number, kind: "Update" | "Remove" | "Reply", 
   if (kind === "Reply") {
     if (!row.answerable) return refused
     const sent = try attemptedWith(Agent, () => HttpClientRequest.post(`${event}/response`) |> HttpClientRequest.bodyJsonUnsafe(%, { responseStatus: reply, expectedProviderVersion: row.version, idempotencyKey: `answer:${reply}:${row.version}` }), attempt)
-    return sent.confirmed ? try readBackAgent(row, "AnswerKind", reply) : sent
+    if (filed(sent.body)) return refused
+    return sent.confirmed ? try readBackAgent(row, "AnswerKind", reply) : { confirmed: sent.confirmed, known: sent.known }
   }
   if (kind === "Remove") {
     const cancellationMode = row.answer !== "NotInvited" ? "decline_invitation" : "organizer_cancel"
     const sent = try attemptedWith(Agent, (key) => HttpClientRequest.delete(event, { urlParams: { ...scoped, expectedProviderVersion: row.version, idempotencyKey: key, cancellationMode } }), attempt)
-    return sent.confirmed ? try readBackAgent(row, "DeleteKind", "") : sent
+    if (filed(sent.body)) return refused
+    return sent.confirmed ? try readBackAgent(row, "DeleteKind", "") : { confirmed: sent.confirmed, known: sent.known }
   }
   const fields = try kept(0, try owner())
   const sent = try attemptedWith(Agent, (key) => HttpClientRequest.patch(event) |> HttpClientRequest.bodyJsonUnsafe(%, {
     title: fields.title.trim(), notes: fields.notes, location: fields.place, startAt: new Date(fields.begin).toISOString(), endAt: new Date(fields.end).toISOString(),
     isAllDay: fields.allDay, timeZone: zone(), ...scoped, expectedProviderVersion: row.version, idempotencyKey: key,
   }), attempt)
-  return sent.confirmed ? try readBackAgent(row, "ChangeKind", "") : sent
+  if (filed(sent.body)) return refused
+  return sent.confirmed ? try readBackAgent(row, "ChangeKind", "") : { confirmed: sent.confirmed, known: sent.known }
 }
 
 // spec/app/calendar/editor.md, "Saving sends the form once, as a new numbered write built on the revision its edits began from"; spec/app/calendar/editor.md, "No create is sent while an earlier one is in doubt, unless the owner asked for a separate event"
