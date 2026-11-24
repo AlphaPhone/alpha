@@ -67,16 +67,16 @@ export const phoneLauncherUpdates = Layer.succeed(LauncherUpdates, {
     ? Option.none()
     : Option.some({ versionCode: snapshot.appVersionCode, signer: snapshot.appSigner ?? "", launcher: true, permission: snapshot.appAutomaticUpdates === undefined ? "PermissionUnread" as const : permissions[snapshot.appAutomaticUpdates] })))),
   check: () => Effect.map(Effect.option(tryPromise(() => plugin().checkForUpdate())), Option.map((reply) => ({ feed: reply.manifest, digest: reply.manifestSha256 }))),
-  install: (release: Release, automatic: Option.Option<string>) => effect {
+  install: (release: Release, automatic: Option.Option<string>) => Effect.orElseSucceed(effect {
     const reply = try tryPromise(() => plugin().installUpdate({ ...release, ...(Option.isSome(automatic) ? { automatic: true, manifestSha256: automatic.value } : {}) }))
     return reply.status === undefined ? "Accepted" as InstallAnswer : installs[reply.status]
-  } catch () => "OfferUnavailable" as InstallAnswer,
-  activation: () => effect {
+  }, () => "OfferUnavailable" as InstallAnswer),
+  activation: () => Effect.orElseSucceed(effect {
     const state = try tryPromise(() => plugin().updateState())
     const activation: Activation = state.pending === true ? (state.phase === "paused" ? "Paused" : "Preparing") : state.outcome !== undefined || state.idle === true ? "Ended" : "NoActivation"
     const ids = state.activationId !== undefined && state.bridgeId !== undefined ? Option.some({ activationId: state.activationId, bridgeId: state.bridgeId }) : Option.none()
     return { activation, canContinue: state.canContinue === true, ids }
-  } catch () => ({ activation: "NoActivation" as Activation, canContinue: false, ids: Option.none() }),
+  }, () => ({ activation: "NoActivation" as Activation, canContinue: false, ids: Option.none<{ readonly activationId: string; readonly bridgeId: string }>() })),
   acknowledge: (ids: { readonly activationId: string; readonly bridgeId: string }, ready: boolean) => ignore(tryPromise(() => plugin().activateUpdate({ ...ids, ready, ...(ready ? { resumeEligible: true } : {}) }))),
   continueInstall: (ids: { readonly activationId: string; readonly bridgeId: string }) => ignore(tryPromise(() => plugin().continueUpdate(ids))),
   allowAutomatic: () => Effect.map(Effect.option(tryPromise(() => plugin().openUpdatePermissionSettings())), (opened) => Option.isSome(opened) && opened.value.status === "opened"),

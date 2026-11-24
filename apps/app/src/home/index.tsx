@@ -13,7 +13,7 @@ import { press } from "./press.vibe";
 export type HomeMachines = Home.Machine | PressMachine | CardsMachine;
 
 /** Back on Home: an app's menu, then Add to Home, then editing, before the shell's own. */
-const back = Effect.flatMap(Home.Machine.asEffect(), (machine) => Effect.flatMap(machine.get(), (state) => (Home.canBackOut(state) ? Effect.as(Effect.orElseSucceed(machine.send({ type: "backOut" }, "Owner"), () => undefined), true) : Effect.succeed(false))));
+const back = Effect.flatMap(Home.Machine, (machine) => Effect.flatMap(machine.get(), (state) => (Home.canBackOut(state) ? Effect.as(Effect.orElseSucceed(machine.send({ type: "backOut" }, "Owner"), () => undefined), true) : Effect.succeed(false))));
 
 /** Home, the launcher: drawn with the first paint. */
 export default area(Layer.mergeAll(home, press, cards), HomeScreen, { back });

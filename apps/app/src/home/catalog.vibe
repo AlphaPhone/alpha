@@ -5,6 +5,7 @@ import { keyOf } from "../platform/launcher.vibe"
 
 module eliza {
   import { describeLauncherApps, filterLauncherApps } from "@elizaos/os/bridges/system"
+  import type { InstalledApp } from "@elizaos/os/bridges/definitions/system"
 
   /** @throws {never} */
   export function found(apps: readonly InstalledApp[], query: string): InstalledApp[] {

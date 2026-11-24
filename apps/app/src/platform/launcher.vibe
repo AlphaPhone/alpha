@@ -3,6 +3,7 @@ import type { InstalledApp, LaunchTarget } from "@elizaos/os/bridges/definitions
 
 module held {
   import { appKey, launcherRefusalCode, systemClient } from "@elizaos/os/bridges/system"
+  import type { LaunchTarget } from "@elizaos/os/bridges/definitions/system"
 
   let made: ReturnType<typeof systemClient> | undefined
   /** eliza's client of the `ElizaSystem` plugin, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */

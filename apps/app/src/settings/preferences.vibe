@@ -45,7 +45,7 @@ const look = (): Look => (darkPhone() ? "DarkLook" : "LightLook")
 const json = <A>(schema: Schema.Codec<A, A>) => Schema.fromJsonString(schema)
 
 /** The appearance kept, or the previous Alpha's theme where Alpha has kept none; `undefined` where what is kept cannot be read. */
-effect function keptAppearance(): Appearance | undefined!!KeyValueStore.KeyValueStore {
+effect function keptAppearance(): (Appearance | undefined)!!KeyValueStore.KeyValueStore {
   const store = try KeyValueStore.KeyValueStore
   const own = store.get(keys.appearance) catch () => undefined
   if (own !== undefined) return Schema.decodeUnknownOption(json(Appearance))(own) |> Option.getOrUndefined(%)
@@ -68,11 +68,11 @@ effect function keepTheme(keep: number, chosen: Theme, legible: boolean): Event!
 }
 
 // spec/app/settings/preferences.md, "What the phone could not read is taken as asking first, loading no images and sharing nothing"; spec/app/settings/preferences.md, "The device preferences are read when Alpha starts, when Settings opens, and when Alpha comes back while Settings shows, with ten seconds to answer, never while a change or a recovery is in flight"
-effect function readChoices(): Choices | undefined!!KeyValueStore.KeyValueStore {
+effect function readChoices(): (Choices | undefined)!!KeyValueStore.KeyValueStore {
   const store = try KeyValueStore.KeyValueStore
-  const own = try store.get(keys.choices)
+  const own = store.get(keys.choices) catch () => undefined
   if (own !== undefined) return Schema.decodeUnknownOption(json(Choices))(own) |> Option.getOrUndefined(%)
-  const previous = try store.get(keys.previousChoices)
+  const previous = store.get(keys.previousChoices) catch () => undefined
   if (previous === undefined) return fresh
   const was = Schema.decodeUnknownOption(json(PreviousChoices))(previous)
   if (Option.isNone(was)) return undefined

@@ -49,7 +49,7 @@ const clicks = started(effect {
   const page = document_()
   if (page === undefined) return
   try Stream.runForEach(Stream.fromEventListener(page, "click", { capture: true }), (event) => {
-    const control = clicked(event)
+    const control = clicked(event as Parameters<typeof clicked>[0])
     const kind = Haptics.hapticForClick(control.role as Role, control.disabled, control.inert, control.checked, control.inDialog, control.destructive)
     return kind === "NoHaptic" ? Effect.void : feel(kind)
   })

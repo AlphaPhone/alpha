@@ -27,7 +27,7 @@ function hostOf(presented: Presentation): Host {
 // spec/app/home/tiles.md, "What was saved comes back as it was saved, an empty Home included; with no record Home shows its defaults"
 effect function readSaved(ticket: number): Event!!KeyValueStore.KeyValueStore {
   const store = try KeyValueStore.KeyValueStore
-  const found = try parsedTiles((key) => store.get(key) catch () => undefined)
+  const found = try parsedTiles((key) => Effect.orElseSucceed(store.get(key), () => undefined))
   return { type: "savedRead", ticket, found: found.found, tiles: found.tiles }
 }
 
@@ -138,8 +138,8 @@ export const home = Layer.mergeAll(
   hearing(Stream.unwrap(effect {
     const device = try Device
     return Stream.mapEffect((try Launcher).changes, () => device.showing())
-  }), Home.Machine, (visible) => ({ type: "appsChanged", visible }), owner),
-  hearing(Stream.unwrap(effect { return Stream.filter((try Device).visible, (shown) => shown) }), Home.Machine, () => ({ type: "resumed" }), owner),
-  following(Shell.Machine, (shell) => shell, Home.Machine, (shell) => ({ type: "shellMoved", shell }), owner),
+  }), Home.Machine, (visible) => ({ type: "appsChanged" as const, visible }), owner),
+  hearing(Stream.unwrap(effect { return Stream.filter((try Device).visible, (shown) => shown) }), Home.Machine, () => ({ type: "resumed" as const }), owner),
+  following(Shell.Machine, (shell) => shell, Home.Machine, (shell) => ({ type: "shellMoved" as const, shell }), owner),
   stepping("home", Home.Machine, Home.canBackOut),
 )
