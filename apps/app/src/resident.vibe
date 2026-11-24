@@ -2,7 +2,6 @@
 import { together, whole } from "./runtime/reactor.vibe"
 import { pages } from "./settings/pages.vibe"
 import { preferences } from "./settings/preferences.vibe"
-import { updating } from "./settings/updates.vibe"
 import { shell } from "./shell/shell.vibe"
 
 /**
@@ -14,7 +13,6 @@ const machines = together(
   shell,
   pages,
   preferences,
-  updating,
 )
 
 /** The resident machines, closed: each machine one of them follows or tells is among them. */

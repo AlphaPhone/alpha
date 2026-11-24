@@ -1,5 +1,5 @@
 // spec/app/settings/licences.md, "Story: Read the licences"; spec/app/settings/developer.md, "Story: Read the problem log"
-import { Alert, Button, ListGroup, ListRow, SearchField, Spinner } from "@repo/ui";
+import { SettingsLicenceDetail, SettingsLicencesPage, SettingsProblemLogPage, type SettingsProblemLogPageProps } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import * as DeveloperGen from "../../gen/app__settings__developer.ts";
 import { useMachine as useDeveloper } from "../../gen/app__settings__developer.react.ts";
@@ -10,9 +10,11 @@ import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import type { Time } from "../runtime/time.vibe";
 import { type Notice, Notices } from "./about.vibe";
+import type { Common } from "./Settings.tsx";
 
 export interface AboutProps {
-  runtime: ManagedRuntime.ManagedRuntime<LicencesMachine | DeveloperMachine | Notices | Time, unknown>;
+  readonly runtime: ManagedRuntime.ManagedRuntime<LicencesMachine | DeveloperMachine | Notices | Time, unknown>;
+  readonly common: Common;
 }
 
 /** Alpha's own names for the flags the notices carry; a flag it has no name for is shown as written. */
@@ -25,7 +27,7 @@ const flags: Record<string, string> = {
 const matches = (notice: Notice, query: string) => `${notice.name} ${notice.license}`.toLowerCase().includes(query.trim().toLowerCase());
 
 /** The licences, searched; one opens from the list the search shows, and Back returns to the same search. */
-export function Licences({ runtime }: AboutProps) {
+export function Licences({ runtime, common }: AboutProps) {
   const { state, send, can } = useTimed(runtime, useLicences);
   if (!state) return null;
   const notices = runtime.runSync(Notices.use((held) => held.get()));
@@ -33,66 +35,62 @@ export function Licences({ runtime }: AboutProps) {
   const open = state.licence >= 0 ? shown[state.licence] : undefined;
   if (open !== undefined) {
     return (
-      <article aria-label={open.name} className="flex flex-col gap-3">
-        <Button variant="ghost" onClick={() => void send({ type: "closeLicence" })}>Back to licences</Button>
-        <ListGroup>
-          <ListRow title={open.name} detail={`${open.version} · ${open.license}`} />
-          {(open.flags ?? []).map((flag) => <ListRow key={flag} title={flags[flag] ?? flag} />)}
-        </ListGroup>
-        <pre className="text-sm whitespace-pre-wrap">{open.text}</pre>
-      </article>
+      <SettingsLicenceDetail
+        name={open.name}
+        licence={`${open.license} · ${open.version}`}
+        flags={(open.flags ?? []).map((flag) => flags[flag] ?? flag)}
+        text={open.text}
+        onBack={() => void send({ type: "closeLicence" })}
+      />
     );
   }
   const status = state.load.read.status;
   return (
-    <>
-      {status === "Loading" && <Spinner label="Loading licences" />}
-      {status === "Failed" && <Alert variant="warn">The licences couldn't load</Alert>}
-      {status === "Loaded" && state.found === 0 && <Alert>No licences were found</Alert>}
-      {status === "Loaded" && state.found > 0 && (
-        <>
-          <SearchField aria-label="Search licences" value={state.query} onValueChange={(query) => {
-            const search = { type: "search", query, shown: notices.filter((notice) => matches(notice, query)).length } as const;
-            if (can(search)) void send(search);
-          }} />
-          <p aria-live="polite" className="px-4 text-sm text-muted-foreground">{`${state.shown} of ${state.found}`}</p>
-          <ListGroup>
-            {shown.map((notice, licence) => (
-              <ListRow key={`${notice.name}@${notice.version}`} aria-label={notice.name} title={notice.name} detail={notice.license} onClick={() => void send({ type: "openLicence", licence })} />
-            ))}
-          </ListGroup>
-        </>
-      )}
-    </>
+    <SettingsLicencesPage
+      onBack={common.onBack}
+      load={status === "Loaded" ? "loaded" : status === "Failed" ? "failed" : "loading"}
+      found={state.found}
+      query={state.query}
+      licences={shown.map((notice) => ({ name: notice.name, licence: notice.license }))}
+      onQuery={(query) => {
+        const search = { type: "search", query, shown: notices.filter((notice) => matches(notice, query)).length } as const;
+        if (can(search)) void send(search);
+      }}
+      onOpen={(licence) => void send({ type: "openLicence", licence })}
+    />
   );
 }
 
-const logWords: Record<DeveloperGen.LogWord, string> = { LogWaiting: "Reading", NoProblems: "No problems", SomeProblems: "Problems recorded", LogUnavailable: "Unavailable" };
-const stores: Record<DeveloperGen.Store, string> = { DevicePreferences: "Device preferences", DeviceRoles: "Device roles", NotificationData: "Notification data", AlertSounds: "Alert sounds" };
+const logWords: Record<DeveloperGen.LogWord, SettingsProblemLogPageProps["log"]> = { LogWaiting: "waiting", NoProblems: "none", SomeProblems: "some", LogUnavailable: "unavailable" };
+const stores: Record<DeveloperGen.Store, SettingsProblemLogPageProps["needs"][number]> = {
+  DevicePreferences: "device-preferences", DeviceRoles: "device-roles", NotificationData: "notification-data", AlertSounds: "alert-sounds",
+};
+const storesNamed = Object.fromEntries(Object.entries(stores).map(([store, name]) => [name, store])) as Record<SettingsProblemLogPageProps["needs"][number], DeveloperGen.Store>;
 
+// spec/app/settings/developer.md, "Clear is offered only for a log with problems, one at a time; once the startup area answers, the log is read again"; spec/app/settings/developer.md, "Saved data that cannot be read is listed, and each such store is handed to its owner to recover"
 /** The Problem log: what it holds, Retry when it could not be read, Clear and Export, and each store to recover. */
-export function Problems({ runtime }: AboutProps) {
+export function Problems({ runtime, common }: AboutProps) {
   const { state, can, send } = useTimed(runtime, useDeveloper);
   if (!state) return null;
-  const word = DeveloperGen.logWord(state);
   const clear = { type: "clearLog", at: untimed } as const;
   const retry = { type: "openLog", at: untimed } as const;
-  const exportIt = { type: "startExport", at: untimed } as const;
+  const startExport = { type: "startExport", at: untimed } as const;
+  const word = logWords[DeveloperGen.logWord(state)];
   return (
-    <>
-      <ListGroup>
-        <ListRow title="Problems" trailing={word === "LogWaiting" ? <Spinner size="sm" label="Reading" /> : word === "SomeProblems" ? String(state.problems) : logWords[word]} />
-        {state.needs.map((store) => {
-          const recover = { type: "recoverStore", store } as const;
-          return can(recover) && <ListRow key={store} title={`Recover ${stores[store]}`} onClick={() => void send(recover)} />;
-        })}
-      </ListGroup>
-      <div className="flex flex-wrap gap-2 px-4">
-        {word === "LogUnavailable" && can(retry) && <Button variant="outline" onClick={() => void send(retry)}>Retry</Button>}
-        {can(clear) && <Button variant="outline" onClick={() => void send(clear)}>Clear</Button>}
-        <Button variant="outline" loading={state.exporting.read.status === "Loading"} disabled={!can(exportIt)} onClick={() => void send(exportIt)}>Export diagnostics</Button>
-      </div>
-      {state.exporting.read.status === "Failed" && <Alert variant="warn">The diagnostics couldn't be shared</Alert>}
-    </>
+    <SettingsProblemLogPage
+      onBack={common.onBack}
+      log={word}
+      problems={state.problems}
+      needs={state.needs.map((store) => stores[store])}
+      clearing={state.clearing.read.status === "Loading"}
+      exporting={state.exporting.read.status === "Loading"}
+      onRetry={word === "unavailable" && can(retry) ? () => void send(retry) : undefined}
+      onClear={can(clear) ? () => void send(clear) : undefined}
+      onExport={can(startExport) ? () => void send(startExport) : undefined}
+      onRecover={(store) => {
+        const recover = { type: "recoverStore", store: storesNamed[store] } as const;
+        if (can(recover)) void send(recover);
+      }}
+    />
   );
 }

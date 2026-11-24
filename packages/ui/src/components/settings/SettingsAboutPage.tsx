@@ -14,6 +14,8 @@ export type SettingsAboutPageProps = SettingsAndroidProps &
     alphaVersion: Reading;
     /** Android's version, as the phone last said. */
     androidVersion: Reading;
+    /** The storage used, as the phone last said. */
+    storage?: Reading;
     /** What Alpha tells about the last start of an Android page. */
     told?: AndroidTold;
     /** Goes back to the first page. */
@@ -28,7 +30,7 @@ export type SettingsAboutPageProps = SettingsAndroidProps &
  * About: Alpha and its version, Android's version, Agent activity, the licences, and the way into Android's About phone.
  * @model spec/app/settings/index.md
  */
-export function SettingsAboutPage({ alphaVersion, androidVersion, told, onBack, onOpen, starting, onAndroid, place, onPlace, children }: SettingsAboutPageProps) {
+export function SettingsAboutPage({ alphaVersion, androidVersion, storage, told, onBack, onOpen, starting, onAndroid, place, onPlace, children }: SettingsAboutPageProps) {
   const at = (row: number) => placed({ place, onPlace }, row);
   return (
     <SettingsPage title="About" told={told} onBack={onBack}>
@@ -40,6 +42,7 @@ export function SettingsAboutPage({ alphaVersion, androidVersion, told, onBack, 
       <ListGroup>
         <SettingsFactRow title="Alpha" reading={alphaVersion} />
         <SettingsFactRow title="Android" reading={androidVersion} />
+        {storage ? <SettingsFactRow title="Storage" reading={storage} /> : null}
       </ListGroup>
       <ListGroup>
         <SettingsNavRow title="Agent activity" icon={<History />} onOpen={onOpen && (() => onOpen("activity"))} {...at(0)} />
