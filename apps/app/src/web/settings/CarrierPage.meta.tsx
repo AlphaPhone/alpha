@@ -31,6 +31,7 @@ export const meta: ComponentMeta<CarrierPageProps> = {
     ActiveSim: async ({ canvasElement, args }) => {
       const page = within(canvasElement);
       await expect(page.getByText("Copied")).toBeVisible();
+      await expect(page.getByText("Alpha Phone")).toBeVisible();
       await expect(page.getByRole("button", { name: "Copy ICCID" })).toBeVisible();
       await expect(page.getByRole("button", { name: "Copy EID" })).toBeVisible();
       await userEvent.click(page.getByRole("button", { name: "Choose the default SMS app in Android" }));

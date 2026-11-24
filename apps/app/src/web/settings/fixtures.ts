@@ -107,10 +107,10 @@ export const carrierIdle: Carrier = { ...carrierClosed, shown: true, epoch: 1, p
 export const carrierNoSim: Carrier = {
   ...carrierIdle, epoch: 2, phase: "CarrierShown",
   setup: {
-    ...noSetup, smsRole: "NotAlpha", dialerRole: "NotAlpha", simsStatus: "Returned",
+    ...noSetup, smsRole: "NotHeldByAlpha", dialerRole: "NotHeldByAlpha", simsStatus: "Returned",
     slots: [
       { slot: 0, imei: returned("123456789012345"), simState: returned("No SIM") },
-      { slot: 1, imei: { status: "Denied", value: "" }, simState: returned("No SIM") },
+      { slot: 1, imei: { status: "AccessDenied", value: "" }, simState: returned("No SIM") },
     ],
     hardware: { manufacturer: returned("Google"), model: returned("Pixel 10a"), device: returned("fixture"), android: returned("17"), baseband: { status: "Missing", value: "" } },
   },
@@ -120,7 +120,7 @@ export const carrierNoSim: Carrier = {
 export const carrierActive: Carrier = {
   ...carrierNoSim,
   setup: {
-    ...carrierNoSim.setup, image: true, canChooseSms: true, dialerRole: "AlphaHolds",
+    ...carrierNoSim.setup, image: true, canChooseSms: true, dialerRole: "HeldByAlpha",
     slots: [{ slot: 0, imei: returned("123456789012345"), simState: returned("Ready") }],
     sims: [{
       ...noSim, subscription: 1, slot: 0, defaultData: true, carrier: returned("T-Mobile"), simName: returned("T-Mobile"), iccid: returned("8901260000000000000"),

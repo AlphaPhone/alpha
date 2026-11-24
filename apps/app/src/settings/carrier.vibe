@@ -1,5 +1,6 @@
 // spec/settings/carrier.md, "The page reads nothing until the owner taps Show identifiers, and leaving forgets what it read"; spec/settings/carrier.md, "Each field shows what Android returned, or why it returned nothing"; spec/settings/carrier.md, "The EID is its own optional read, after the identifiers, and never delays them"; spec/settings/carrier.md, "Copy puts one identifier Android returned on the Android clipboard"
-import { Machine, copyable, type CopyTarget, type Event, type Field, type FieldStatus, type Hardware, type RoleHolder, type Setup, type Sim, type Slot } from "../../gen/settings__carrier.effect.vibe"
+import { Machine, copyable, type CopyTarget, type Event, type Field, type FieldStatus, type Hardware, type Setup, type Sim, type Slot } from "../../gen/settings__carrier.effect.vibe"
+import { type RoleHold } from "../../gen/settings__vocabulary.effect.vibe"
 import { Native } from "../platform/native.vibe"
 import { frontChanges, whileInFront } from "../telephony/front.vibe"
 import { CarrierFieldRead, CarrierRead } from "./carrier.schema.vibe"
@@ -11,7 +12,7 @@ export const CARRIER_PLUGIN = "AlphaCarrierSetup"
 const MOST = 8
 
 const STATUS: Record<CarrierFieldRead["status"], FieldStatus> = {
-  available: "Returned", "permission-denied": "Denied", unavailable: "Missing", unsupported: "Unsupported", "not-read": "NotRead",
+  available: "Returned", "permission-denied": "AccessDenied", unavailable: "Missing", unsupported: "Unsupported", "not-read": "NotRead",
 }
 
 /** A field as the page holds it: a value only where Android returned a non-empty one. */
@@ -22,9 +23,12 @@ export function fieldOf(read: CarrierFieldRead): Field {
   return value === "" ? { status: "Missing", value: "" } : { status, value }
 }
 
-function roleOf(read: CarrierFieldRead): RoleHolder {
+/** A role as Settings words it: held by Alpha or not, not offered where Android gave no answer for it, otherwise not read. */
+export function roleRead(read: CarrierFieldRead): RoleHold {
   const field = fieldOf(read)
-  return field.value === "held" ? "AlphaHolds" : field.value === "not-held" ? "NotAlpha" : "RoleUnknown"
+  if (field.value === "held") return "HeldByAlpha"
+  if (field.value === "not-held") return "NotHeldByAlpha"
+  return field.status === "Missing" ? "RoleUnavailable" : "RoleUnread"
 }
 
 function index(value: number): boolean {
@@ -47,7 +51,7 @@ export function setupOf(read: CarrierRead): Setup {
   }
   const simsStatus = STATUS[read.subscriptions.status] ?? "Missing"
   return {
-    image: read.aospImage, canChooseSms: read.canChooseSms, smsRole: roleOf(read.smsRole), dialerRole: roleOf(read.dialerRole),
+    image: read.aospImage, canChooseSms: read.canChooseSms, smsRole: roleRead(read.smsRole), dialerRole: roleRead(read.dialerRole),
     slots, simsStatus, sims: simsStatus === "Returned" ? sims : [], eid: fieldOf(read.eid), hardware,
   }
 }

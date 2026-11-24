@@ -84,8 +84,8 @@ it.live("Read what my carrier needs only when I ask, copy one IMEI, and forget i
       {
         opened: Option.some(["CarrierIdle", 0]), readOnOpen: 0,
         shown: [
-          "CarrierShown", [[0, "Returned", IMEI, "No SIM"], [1, "Denied", "", "No SIM"]], "Returned", 0,
-          "NotAlpha", "AlphaHolds", "NotRead", "Pixel 10a", "Missing",
+          "CarrierShown", [[0, "Returned", IMEI, "No SIM"], [1, "AccessDenied", "", "No SIM"]], "Returned", 0,
+          "NotHeldByAlpha", "HeldByAlpha", "NotRead", "Pixel 10a", "Missing",
         ],
         copies: [{ text: IMEI }], copied: { target: { kind: "ImeiTarget", index: 0 }, copied: true }, eidBefore: 0, eid: { status: "Returned", value: EID },
         paused: Option.some([true, 0, false]),

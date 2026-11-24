@@ -1,15 +1,15 @@
 // spec/settings/carrier.md, "Story: Read what my carrier needs to activate a SIM"; spec/settings/carrier.md, "Each field shows what Android returned, or why it returned nothing"; spec/settings/carrier.md, "The EID is its own optional read, after the identifiers, and never delays them"; spec/settings/carrier.md, "Copy puts one identifier Android returned on the Android clipboard"; spec/settings/carrier.md, "General offers the page on the phone only, and the default SMS app choice only where Alpha can take it"
 import { Antenna, CardSim, Copy, Fingerprint, RotateCw, Signal } from "lucide-react";
-import type { Carrier, CopyTarget, Field, FieldStatus, RoleHolder, Sim } from "../../../gen/settings__carrier.ts";
+import type { Carrier, CopyTarget, Field, FieldStatus, Sim } from "../../../gen/settings__carrier.ts";
 import { copyable, fieldAt, returnedValue, smsChoiceOffered } from "../../../gen/settings__carrier.ts";
 import type { SettingsPage } from "../../../gen/settings__facts.ts";
 import { ListRow, Spinner } from "../components/ui/index.ts";
 import { Section, SettingRow } from "./Rows.tsx";
+import { ROLE } from "./words.ts";
 
 const WHY: Record<FieldStatus, string> = {
-  Returned: "", Denied: "Access denied by Android", Missing: "Unavailable from Android", Unsupported: "Not supported on this phone", NotRead: "Not read",
+  Returned: "", AccessDenied: "Access denied by Android", Missing: "Unavailable from Android", Unsupported: "Not supported on this phone", NotRead: "Not read",
 };
-const ROLE: Record<RoleHolder, string> = { AlphaHolds: "Alpha Phone", NotAlpha: "Not Alpha Phone", RoleUnknown: "Unavailable from Android" };
 
 /** A field's words: Android's value, or why it returned none. */
 export function fieldText(field: Field): string {
@@ -115,8 +115,8 @@ export function CarrierPage({ carrier, acts }: CarrierPageProps) {
             ))}
           </Section>
           <Section caption="Default apps">
-            <Fact label="Default SMS app" text={ROLE[setup.smsRole]} />
-            <Fact label="Default phone app" text={ROLE[setup.dialerRole]} />
+            <Fact label="Default SMS app" text={ROLE[setup.smsRole].word} />
+            <Fact label="Default phone app" text={ROLE[setup.dialerRole].word} />
             {smsChoiceOffered(carrier) && <SettingRow label="Choose default SMS app" ariaLabel="Choose the default SMS app in Android" onHandoff={() => acts.openPage("PageDefaultApps")} />}
             <Note>If Android denies access, About phone below shows the identifiers. After choosing a default SMS app, tap Refresh identifiers.</Note>
             {!setup.image && <Note title="Phone integration">Carrier activation stays an Android task. Alpha’s Phone, Contacts and Messages need the Alpha system image.</Note>}

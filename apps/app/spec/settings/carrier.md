@@ -19,12 +19,15 @@ hands off to Android's own About phone, SIM, mobile network, APN and default app
 
 `epoch` moves with every read and every change of showing, so only the latest read answers. A field
 is what Android returned, or why it returned nothing: it denied access, it has no value, the phone
-does not support it, or it was not read.
+does not support it, or it was not read. The SMS and phone roles use the words every Settings page
+uses ([Settings vocabulary](./vocabulary.md)): held by Alpha, not held by Alpha, not offered on this
+phone, or not read.
 
 ```quint
-type FieldStatus = Returned | Denied | Missing | Unsupported | NotRead
+import vocabulary.* from "./vocabulary"
+
+type FieldStatus = Returned | AccessDenied | Missing | Unsupported | NotRead
 type Field = { status: FieldStatus, value: str }
-type RoleHolder = AlphaHolds | NotAlpha | RoleUnknown
 type Slot = { slot: int, imei: Field, simState: Field }
 type Sim = {
   subscription: int, slot: int, embedded: bool, defaultData: bool, carrier: Field, simName: Field, iccid: Field,
@@ -32,7 +35,7 @@ type Sim = {
 }
 type Hardware = { manufacturer: Field, model: Field, device: Field, android: Field, baseband: Field }
 type Setup = {
-  image: bool, canChooseSms: bool, smsRole: RoleHolder, dialerRole: RoleHolder, slots: List[Slot],
+  image: bool, canChooseSms: bool, smsRole: RoleHold, dialerRole: RoleHold, slots: List[Slot],
   simsStatus: FieldStatus, sims: List[Sim], eid: Field, hardware: Hardware,
 }
 type CarrierPhase = CarrierClosed | CarrierIdle | CarrierReading | CarrierShown | CarrierFailed
@@ -43,7 +46,7 @@ type Carrier = { shown: bool, epoch: int, phase: CarrierPhase, setup: Setup, eid
 pure val notRead: Field = { status: NotRead, value: "" }
 pure val noHardware: Hardware = { manufacturer: notRead, model: notRead, device: notRead, android: notRead, baseband: notRead }
 pure val noSetup: Setup = {
-  image: false, canChooseSms: false, smsRole: RoleUnknown, dialerRole: RoleUnknown, slots: List(),
+  image: false, canChooseSms: false, smsRole: RoleUnread, dialerRole: RoleUnread, slots: List(),
   simsStatus: NotRead, sims: List(), eid: notRead, hardware: noHardware,
 }
 pure val noSlot: Slot = { slot: -1, imei: notRead, simState: notRead }
@@ -56,13 +59,13 @@ pure val noCopy: Copy = { target: noTarget, copied: false }
 pure val initial: Carrier = { shown: false, epoch: 0, phase: CarrierClosed, setup: noSetup, eidReading: false, copy: noCopy }
 pure val ticketValues = Set(0, 1, 2, 3)
 pure val setupValues = Set(noSetup)
-  .union(Set({ ...noSetup, smsRole: NotAlpha, dialerRole: NotAlpha, simsStatus: Returned, slots: List(
+  .union(Set({ ...noSetup, smsRole: NotHeldByAlpha, dialerRole: NotHeldByAlpha, simsStatus: Returned, slots: List(
     { slot: 0, imei: { status: Returned, value: "123456789012345" }, simState: { status: Returned, value: "No SIM" } },
-    { slot: 1, imei: { status: Denied, value: "" }, simState: { status: Returned, value: "No SIM" } }) }))
-  .union(Set({ ...noSetup, image: true, canChooseSms: true, smsRole: NotAlpha, dialerRole: AlphaHolds, simsStatus: Returned,
+    { slot: 1, imei: { status: AccessDenied, value: "" }, simState: { status: Returned, value: "No SIM" } }) }))
+  .union(Set({ ...noSetup, image: true, canChooseSms: true, smsRole: NotHeldByAlpha, dialerRole: HeldByAlpha, simsStatus: Returned,
     slots: List({ slot: 0, imei: { status: Returned, value: "123456789012345" }, simState: { status: Returned, value: "Ready" } }),
     sims: List({ ...noSim, subscription: 1, slot: 0, defaultData: true, carrier: { status: Returned, value: "Carrier" }, iccid: { status: Returned, value: "8901260000000000000" } }) }))
-  .union(Set({ ...noSetup, simsStatus: Denied, eid: { status: Unsupported, value: "" } }))
+  .union(Set({ ...noSetup, simsStatus: AccessDenied, eid: { status: Unsupported, value: "" } }))
 pure val eidValues = Set({ status: Returned, value: "89049032000000000000000000000000" }).union(Set({ status: Missing, value: "" }))
 pure val targetValues = Set(noTarget)
   .union(Set({ kind: ImeiTarget, index: 0 })).union(Set({ kind: ImeiTarget, index: 1 }))
@@ -117,7 +120,7 @@ support it; the page says which, field by field, and never shows a value Android
 ```quint
 pure def returnedValue(f: Field): str = if (f.status == Returned) f.value else ""
 pure def lawOnlyAReturnedFieldHasAValue(f: Field): bool = f.status != Returned implies returnedValue(f) == ""
-pure val fValues = Set(notRead).union(Set({ status: Returned, value: "Ready" })).union(Set({ status: Denied, value: "x" }))
+pure val fValues = Set(notRead).union(Set({ status: Returned, value: "Ready" })).union(Set({ status: AccessDenied, value: "x" }))
   .union(Set({ status: Unsupported, value: "" }))
 ```
 
