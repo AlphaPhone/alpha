@@ -1,17 +1,20 @@
 // spec/agent/index.md, "Story: Build the pack only from the pinned eliza"; spec/agent/index.md, "Story: Run Alpha's agent on the phone"
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as NodeServices from "@effect/platform-node/NodeServices"
-import { buildAgentBundle, readBundleManifest } from "@elizaos/agent/bundle"
+import { readBundleManifest } from "@elizaos/agent/bundle"
 import { decodeLaunchDocument } from "@elizaos/agent/launch"
 import { defineRoutes } from "@elizaos/agent/routes"
 import { deployment } from "@repo/deployment"
-import { pinnedCheckout } from "@repo/eliza-harness/pinned"
+import { pinnedCheckout, pinnedPack } from "@repo/eliza-harness/pinned"
 import {
-  type Environment, type Manifest, characterAdmitted, cloudModel, localEmbeddings, packAdmitted, packedFor, persistMemory, personalDetailSwap,
-  policyAdmitted, privacyAdmitted, refusedActions, routeListAdmitted, secretSwap,
+  type Environment, type Manifest, bundledPlugins, calendarEdits, characterAdmitted, cloudModel, corePlugins, entryCarried, gmailChanges, googleAdmitted,
+  hostedPlugins, inputAdmitted, localEmbeddings, packAdmitted, packEntry, packedFor, packedPlugins, persistMemory, personalDetailSwap,
+  policyAdmitted, privacyAdmitted, proposalsAdmitted, refusedActions, routeListAdmitted, secretSwap, viewPlugins,
 } from "../gen/agent.effect.vibe"
 
 module node {
+  import { pathToFileURL } from "node:url"
+
   /** The words after the script on the command line. @throws {never} */
   export function words(): string[] {
     return process.argv.slice(2)
@@ -21,8 +24,13 @@ module node {
   export function root(): string {
     return (process.argv[1] ?? "").replace(/\/dist\/src\/main\.js$/, "")
   }
+
+  /** eliza's bundle builder of the clone at `dir`: the entry it ships imports that clone's agent, so the builder must be the same tree's. */
+  export function builderOf(dir: string): Promise<typeof import("@elizaos/agent/bundle")> {
+    return import(pathToFileURL(`${dir}/packages/agent/dist/src/bundle/build.js`).href) as Promise<typeof import("@elizaos/agent/bundle")>
+  }
 }
-import { root, words } from node
+import { builderOf, root, words } from node
 
 /** What makes the pack unfit to ship, in words a maker can act on. */
 export error Refused { reason: string }
@@ -37,6 +45,31 @@ schema Model { backend: "cloud"; cloudBaseUrl: string; smallModel: string; large
 schema Host {
   schema: 1; service: string; notification: { channel: string; title: string; text: string }; routes: RouteLine[]; model: Model
   embeddings: "none" | "local"; persistMemory: boolean; callerRole: "owner" | "user"; privacy: { secretSwap: boolean; piiSwap: boolean }
+  google: { gmailChanges: boolean; calendarEdits: boolean }
+}
+
+/** The export each hosted package builds its module with, as `runAgentCli`'s `hostModules` takes it. */
+const hostedExports: Readonly<Record<string, string>> = { "@elizaos/plugin-notes": "notesModule" }
+
+/** Alpha's own packages: the only one the bundle may carry is the pack's entry. */
+const alphaOwned = (name: string) => name.startsWith("@repo/") || name.startsWith("@alphacompute/")
+
+/** The pack's entry: eliza's agent command started with each bundled plugin as its package exports it, and each hosted package's module. */
+export function entrySource(bundled: readonly string[], hosted: readonly { name: string; module: string }[]): string {
+  return [
+    `import { runAgentCli } from "@elizaos/agent/cli"`,
+    ...bundled.map((name, index) => `import * as plugin${index} from ${JSON.stringify(name)}`),
+    ...hosted.map(({ name, module }, index) => `import { ${module} as host${index} } from ${JSON.stringify(name)}`),
+    "",
+    "runAgentCli({",
+    "  bundled: [",
+    ...bundled.map((name, index) => `    { packageName: ${JSON.stringify(name)}, plugin: plugin${index}.default ?? plugin${index}.plugin },`),
+    ...hosted.map(({ name }) => `    { packageName: ${JSON.stringify(name)}, plugin: undefined },`),
+    "  ],",
+    `  hostModules: new Map([${hosted.map(({ name }, index) => `[${JSON.stringify(name)}, host${index}]`).join(", ")}]),`,
+    "})",
+    "",
+  ].join("\n")
 }
 
 /** Where the pack is written: the bundle as `buildAgentBundle` publishes it, and the three files eliza's agent service reads beside it. */
@@ -87,10 +120,15 @@ effect function admittedManifest(bundle: string, pin: string) {
   const manifest = try tryPromise({ try: () => readBundleManifest(bundle), catch: () => new Refused({ reason: `${bundle} holds no manifest readable for its own bytes` }) })
   const facts: Manifest = {
     sourceCommit: manifest.sourceCommit, node: manifest.node, localInference: manifest.localInference,
-    plugins: [...manifest.plugins], actions: manifest.actions.map(({ name }) => name),
+    plugins: [...manifest.plugins], workerPinned: manifest.workflowWorkerSha256 !== undefined, actions: manifest.actions.map(({ name }) => name),
   }
   if (!packAdmitted(facts, pin)) {
-    throw new Refused({ reason: `the bundle is not the pinned eliza's (${pin}) for Node 26 with no local inference, no plugin and every allowed action: ${JSON.stringify(facts)}` })
+    throw new Refused({ reason: `the bundle is not the pinned eliza's (${pin}) for Node 26 with no local inference, the plugins ${packedPlugins.join(", ")}, a pinned workflow worker and every allowed action: ${JSON.stringify(facts)}` })
+  }
+  const names = manifest.packages.map(({ name }) => name)
+  const foreign = names.filter((name) => !inputAdmitted(name, alphaOwned(name)))
+  if (foreign.length > 0 || !entryCarried(names)) {
+    throw new Refused({ reason: `the bundle must carry the pinned eliza's packages and ${packEntry} alone of Alpha's: it carries ${foreign.join(", ") || `no ${packEntry}`}` })
   }
   return manifest
 }
@@ -101,14 +139,16 @@ effect function admittedHost(host: string, registered: readonly string[]) {
   if (!characterAdmitted(character.name, character.system.trim())) throw new Refused({ reason: "the character is not Alpha with a system prompt" })
   const policy = try decoded(`${host}/policy.json`, Policy)
   if (!policyAdmitted(policy.actions.allowed, Object.keys(policy.actions.refused), policy.plugins.load, [...registered])) {
-    throw new Refused({ reason: `the policy must allow exactly what Alpha needs and refuse ${refusedActions([...registered]).join(", ")}, loading no module` })
+    throw new Refused({ reason: `the policy must allow exactly the old phone's actions, refuse ${refusedActions([...registered]).join(", ")}, and load the pack's plugins and the agent's modules in order` })
   }
+  if (!proposalsAdmitted(policy.plugins.load, policy.actions.allowed)) throw new Refused({ reason: "the policy must load eliza's device-action modules and allow a proposal" })
   const written = try decoded(`${host}/host.json`, Host)
   try admitRoutes(written.routes)
   if (!privacyAdmitted(written.privacy.secretSwap, written.privacy.piiSwap)) throw new Refused({ reason: "the launch must ask eliza's privacy service to swap secrets and personal details" })
+  if (!googleAdmitted(written.google.gmailChanges, written.google.calendarEdits)) throw new Refused({ reason: "the launch consents to Gmail changes or calendar edits the spec does not" })
   const document = JSON.stringify({
     schema: 1, character, policy: { actions: { allowed: policy.actions.allowed }, plugins: policy.plugins },
-    model: written.model, embeddings: written.embeddings, persistMemory: written.persistMemory, callerRole: written.callerRole, privacy: written.privacy,
+    model: written.model, embeddings: written.embeddings, persistMemory: written.persistMemory, callerRole: written.callerRole, privacy: written.privacy, google: written.google,
     account: { userId: "the owner signed in on the phone", organizationId: "their organization" },
   })
   decodeLaunchDocument(document) catch effect () => { throw new Refused({ reason: "eliza's agent would refuse the launch the phone writes from these files" }) }
@@ -127,11 +167,20 @@ effect function build(name: string) {
   if (!packedFor(environment)) throw new Refused({ reason: "the local cloud has no fixed origin: a journey launches the pack against its own" })
   const where = deployment(name) catch effect () => { throw new Refused({ reason: `${name} is not a row of packages/deployment/deployments.json` }) }
   if (where.kind !== "hosted") throw new Refused({ reason: `${name} has no deployed cloud` })
-  const pin = try pinned()
   const at = places()
+  const hosted = hostedPlugins.map((name) => ({ name, module: hostedExports[name] ?? "" }))
+  const unbuilt = hosted.filter(({ module }) => module === "")
+  if (unbuilt.length > 0) throw new Refused({ reason: `no module export is known for ${unbuilt.map(({ name }) => name).join(", ")}` })
+  const pack = try pinnedPack(packedPlugins, entrySource(bundledPlugins, hosted)) catch effect (cause) => {
+    throw new Refused({ reason: `the pack's clone of the pinned eliza could not be prepared: ${cause.reason}` })
+  }
+  const builder = try tryPromise({ try: () => builderOf(pack.dir), catch: () => new Refused({ reason: `${pack.dir} holds no built bundle builder` }) })
   try tryPromise({
-    try: () => buildAgentBundle({ plugins: [], outDir: at.bundle, sourceCommit: pin.commit, sourceRoot: pin.dir }),
-    catch: (cause) => new Refused({ reason: `eliza refused to build the bundle: ${String(cause)}` }),
+    try: () => builder.buildAgentBundle({
+      plugins: packedPlugins, profiles: { core: corePlugins, views: viewPlugins, aospOnly: [], optional: [] },
+      entry: pack.entry, outDir: at.bundle, sourceCommit: pack.commit, sourceRoot: pack.dir,
+    }),
+    catch: (cause) => new Refused({ reason: `eliza refused to build the bundle: ${String(cause)} ${cause instanceof Error && "detail" in cause ? String(cause.detail) : ""}` }),
   })
   const fs = try FileSystem.FileSystem
   try fs.makeDirectory(at.host, { recursive: true })
@@ -141,6 +190,7 @@ effect function build(name: string) {
     schema: 1, service: service.service, notification: service.notification, routes: try routeLines(`${at.data}/routes.jsonl`),
     model: { backend: "cloud", cloudBaseUrl: where.cloud, smallModel: cloudModel, largeModel: cloudModel, imageModel: "" },
     embeddings: localEmbeddings ? "local" : "none", persistMemory, callerRole: "owner", privacy: { secretSwap, piiSwap: personalDetailSwap },
+    google: { gmailChanges, calendarEdits },
   }
   try fs.writeFileString(`${at.host}/host.json`, `${JSON.stringify(host, null, 2)}\n`)
   try check()
@@ -159,7 +209,8 @@ effect function check() {
   try Console.log([
     `bundle ${at.bundle}: ${files.length} files, ${bytes} bytes, agent.mjs sha256 ${manifest.bundleSha256}`,
     `sourceCommit ${manifest.sourceCommit}, node ${manifest.node}, schemaVersion ${manifest.schemaVersion}, localInference ${manifest.localInference}`,
-    `plugins [${manifest.plugins.join(", ")}], packages ${manifest.packages.length}, actions ${manifest.actions.map(({ name }) => name).join(", ")}`,
+    `plugins [${manifest.plugins.join(", ")}], packages ${manifest.packages.length}, workflow worker ${manifest.workflowWorkerSha256 ?? "none"}`,
+    `actions ${manifest.actions.map(({ name }) => name).join(", ")}`,
     `model ${JSON.stringify(host.model)}`,
     "routes admitted:",
     ...host.routes.map((route) => `  ${route.method} ${route.path}${route.stream === true ? " (stream)" : ""}`),
