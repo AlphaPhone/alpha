@@ -142,7 +142,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const show = (event: Reply.Event) => { shown.queue(() => runPromise(ignore(reply.send(event)))) }
     const chats = try (try Chats.Machine).get()
     const known = board.known(chats.chosen)
-    const text = board.outgoing
+    const text = board.outgoing.trim()
     const held = (try (try Composer.Machine).get()).held
     const quoted = held.quote > 0 ? board.latest()[held.quote - 1] : undefined
     if (known === undefined || text === "") {
