@@ -96,6 +96,7 @@ export const nativePlugins = {
     events: [],
   },
   AlphaDeletions: { reach: "AnyNative", methods: ["pending", "dismiss", "undo", "reviewReminder", "reviewAgentReminder"], events: [] },
+  AlphaCarrierSetup: { reach: "AnyNative", methods: ["read", "readEid", "openSettings"], events: ["foregroundEnded"] },
   AlphaDevice: {
     reach: "AnyNative",
     methods: [

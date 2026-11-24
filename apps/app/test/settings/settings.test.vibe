@@ -88,9 +88,10 @@ it.effect("Find a setting in a few taps (spec/settings/index.md, \"Story: Find a
   provide Layer.provideMerge(settingsPages, Layer.mergeAll(settingsMachine(), fakes, build())) {
     const pages = try SettingsPages
     const held = try SettingsMachine
-    // spec/settings/index.md, "Another surface may open only a listed section, never Developer or Passwords"
+    // spec/settings/index.md, "Another surface may open only a listed section, never Developer, Passwords or Carrier Setup"
     try pages.route("provider")
     try pages.route("developer")
+    try pages.route("carrier-setup")
     const refused = (try held.get()).page
     try pages.route("privacy")
     const section = (try held.get()).page
@@ -115,14 +116,19 @@ it.effect("Find a setting in a few taps (spec/settings/index.md, \"Story: Find a
     const notifications = (try held.get()).page
     const notificationsUp = try pages.back()
     const general = (try held.get()).page
+    try pages.open("CarrierSetup")
+    const carrier = (try held.get()).page
+    const carrierUp = try pages.back()
+    const carrierParent = (try held.get()).page
     try pages.leave()
     // spec/settings/index.md, "Calendar's row opens Calendar at its Calendars sheet, where its sources are set"
     try pages.route("calendar")
     try Effect.try(() => assert.deepStrictEqual(
-      { refused, section, up, atRoot, vaultPage, inboxPage, left, notifications, notificationsUp, general, calls },
+      { refused, section, up, atRoot, vaultPage, inboxPage, left, notifications, notificationsUp, general, carrier, carrierUp, carrierParent, calls },
       {
         refused: "Root", section: "Privacy", up: true, atRoot: false, vaultPage: "Passwords", inboxPage: "AppInbox", left: "Root",
         notifications: "Notifications", notificationsUp: true, general: "General",
+        carrier: "CarrierSetup", carrierUp: true, carrierParent: "General",
         calls: [
           "Navigation.open [\"account\",\"provider\"]", "PrivacyRow.readListener", "Navigation.open [\"calendar\",\"settings\"]", "Vault.open", "Vault.back",
           "Vault.leave", "Permissions.reopen [0]", "Navigation.open [\"calendar\",\"settings\"]",

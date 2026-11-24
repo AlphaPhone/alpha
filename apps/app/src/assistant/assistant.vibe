@@ -7,6 +7,7 @@ import { Machine as DraftsMachine, shown, slotOf, type Drafts } from "../../gen/
 import { Machine as SummonsMachine, closesSurface, startsVoice, takesLaunch, type Origin } from "../../gen/assistant__entry.effect.vibe"
 import { draftKept } from "../../gen/assistant__recovery.effect.vibe"
 import { Native } from "../platform/native.vibe"
+import { SettingsPages } from "../settings/navigation.vibe"
 import { Navigation } from "../shell/navigation.vibe"
 import { AttachmentRefused, ChatAttachments, type Picked } from "./attachments.vibe"
 import { Composer } from "./composer.vibe"
@@ -94,6 +95,7 @@ export const assistantLayer = Layer.effect(Assistant, effect {
   const host = try AssistantHost
   const files = try ChatAttachments
   const navigation = try Navigation
+  const settings = try SettingsPages
   const composer = try Composer
   const search = try ChatSearch
   const voice = try PubSub.unbounded<void>()
@@ -123,7 +125,8 @@ export const assistantLayer = Layer.effect(Assistant, effect {
     let locked = false
     let placed: Detent | undefined
     let routed: string | undefined
-    for try (const nav of navigation.changes) {
+    const screens = Stream.merge(navigation.changes, Stream.mapEffect(settings.privacyChanges, () => navigation.get()))
+    for try (const nav of screens) {
       if (nav.host === "AssistantSurface" && !surface) {
         surface = true
         fork.detached takeLaunch()

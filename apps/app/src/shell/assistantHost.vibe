@@ -17,6 +17,7 @@ import { NotesOrganize } from "../notes/organize.vibe"
 import { Build } from "../platform/build.vibe"
 import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
+import { SettingsPages, privateSettingsPage } from "../settings/navigation.vibe"
 import { CallWatch } from "../telephony/call-bar.vibe"
 import { TelephonyActions } from "../telephony/actions.vibe"
 import { advertisedOf as telephonyAdvertised } from "../telephony/operations.vibe"
@@ -64,6 +65,7 @@ const ORDINARY: PeerFacts = { optionalFields: false, takesLocation: false }
 export const assistantHostLive = Layer.effect(AssistantHost, effect {
   const navigation = try Navigation
   const foreground = try Foreground
+  const settings = try SettingsPages
   const notices = try Notices
   const session = try CloudSession
   const bindings = try AccountBindings
@@ -97,8 +99,9 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
   fork.scoped (effect {
     let inPrivate = false
     let locked = false
-    for try (const front of foreground.changes) {
-      const nowPrivate = PRIVATE_APPS.has(front.view)
+    const screens = Stream.merge(foreground.changes, Stream.mapEffect(settings.privacyChanges, () => foreground.get()))
+    for try (const front of screens) {
+      const nowPrivate = PRIVATE_APPS.has(front.view) || (front.view === "settings" && privateSettingsPage((try settings.current()).page))
       if ((nowPrivate && !inPrivate) || (front.locked && !locked)) try voice.left()
       inPrivate = nowPrivate
       locked = front.locked
@@ -118,7 +121,7 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
       const nav = try navigation.get()
       const front = try foreground.get()
       const view = nav.app === "" ? (nav.library ? "library" : "home") : nav.app
-      const privateView = PRIVATE_APPS.has(nav.app)
+      const privateView = PRIVATE_APPS.has(nav.app) || (nav.app === "settings" && privateSettingsPage((try settings.current()).page))
       const route = nav.places.find((place) => place.app === nav.app)?.route ?? ""
       const connectionDialog = (try bindings.idle()).signInOpen || nav.layers.some((layer) => layer.id.startsWith("account"))
       return {

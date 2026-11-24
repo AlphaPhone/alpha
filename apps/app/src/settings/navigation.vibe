@@ -17,8 +17,14 @@ const APPS: Record<AppRow, AppId> = {
 }
 const ELSEWHERE: Record<Elsewhere, AppId> = { PhoneInfo: "phone", AgentActivity: "assistant" }
 
+export function privateSettingsPage(page: Page): boolean {
+  return page === "Passwords" || page === "CarrierSetup"
+}
+
 /** Settings' pages: what opens from where, what each reads when it opens, Back, and the routes other surfaces send. */
 export service SettingsPages {
+  /** Which private Settings page is open, also followed by the assistant when the shell app stays the same. */
+  readonly privacyChanges: Stream.Stream<boolean>
   /** Open what a route another surface sent names: a listed section, or the app it is forwarded to. */
   route(route: string): void!!
   /** Open a page from the one shown, and read what it shows. */
@@ -82,6 +88,7 @@ export const settingsPages = Layer.effect(SettingsPages, effect {
   }
 
   return {
+    privacyChanges: Stream.changes(Stream.map(held.changes, (nav) => privateSettingsPage(nav.page))),
     effect route(route: string) {
       const forward = forwardOf(route)
       if (forward === "ToPlans") { try navigation.open("account", "plans"); return }

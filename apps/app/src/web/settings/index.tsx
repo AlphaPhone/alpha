@@ -1,7 +1,7 @@
 // spec/settings/index.md, "Story: Find a setting in a few taps"; spec/settings/index.md, "A page opens from its parent, and Back returns to that parent"; spec/settings/passwords.md, "Story: Use my saved passwords only after Android unlocks them"; spec/settings/passwords.md, "Android's Back cancels a pending confirmation first, then closes the entry shown"; spec/settings/updates.md, "Story: Let Android finish an update without losing what I typed"
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { KeyRound, Settings as Gear } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMachine as useNavigation } from "../../../gen/settings.react.ts";
 import { initial as navigationStart } from "../../../gen/settings.ts";
 import { useMachine as useAppearance } from "../../../gen/settings__appearance.react.ts";
@@ -25,8 +25,10 @@ import { initial as updatesStart } from "../../../gen/settings__updates.ts";
 import { Build } from "../../platform/build.vibe";
 import { Native } from "../../platform/native.vibe";
 import { Appearance } from "../../settings/appearance.vibe";
+import { createCarrierSession, type CarrierPage } from "../../settings/carrier.ts";
 import { Diagnostics } from "../../settings/diagnostics.vibe";
 import { DeviceFacts } from "../../settings/facts.vibe";
+import { CarrierField, CarrierSetup, PageOpened } from "../../settings/native.schema.vibe";
 import { SettingsPages } from "../../settings/navigation.vibe";
 import { Wifi } from "../../settings/network.vibe";
 import { Vault } from "../../settings/passwords.vibe";
@@ -34,21 +36,84 @@ import { Preferences } from "../../settings/preferences.vibe";
 import { PrivacyRow } from "../../settings/privacy.vibe";
 import { Reset } from "../../settings/reset.vibe";
 import { Updates } from "../../settings/updates.vibe";
+import { Foreground, type ForegroundState } from "../../shell/foreground.vibe";
 import { useAccountRows } from "../account/index.tsx";
 import type { AppScreen, AppSurface, ScreenProps } from "../app-screen.ts";
 import { NotificationsSettings } from "../shell/NotificationsPage.tsx";
+import { CarrierSetupPage } from "./CarrierSetupPage.tsx";
 import type { DevCommand } from "./DeveloperPage.tsx";
 import { backDialog, closeDialog, openDialog, useDialog } from "./dialogs.ts";
 import { PasswordsScreen } from "./PasswordsScreen.tsx";
 import { SettingsScreen } from "./SettingsScreen.tsx";
 import { UpdateActivation } from "./UpdateActivation.tsx";
-import { now, perform } from "../shell/services.ts";
+import { now, perform, watch } from "../shell/services.ts";
 import { runtime } from "./runtime.ts";
 import { testMocksBuilt } from "../../platform/build-flags.ts";
 
 const mocks = testMocksBuilt;
 
 const pages = <A,>(use: (p: SettingsPages.Shape) => Effect.Effect<A>) => perform(Effect.flatMap(Effect.service(SettingsPages), use));
+const carrierCall = (method: "read" | "readEid" | "openSettings", args?: unknown) => perform(Effect.flatMap(Effect.service(Native), (n) => n.invoke("AlphaCarrierSetup", method, args)));
+const carrierAvailable = Effect.flatMap(Effect.service(Native), (native) => native.available("AlphaCarrierSetup"));
+const carrierFront = Effect.flatMap(Effect.service(Foreground), (front) => front.get());
+const carrierVisit = Effect.flatMap(Effect.service(SettingsPages), (p) => p.current());
+
+function inFront(front: ForegroundState) {
+  return front.visible && !front.locked && front.view === "settings" && !front.assistantSurface;
+}
+
+const carrierDestination: Record<CarrierPage, string> = {
+  identifiers: "IMEI or About phone", sim: "SIMs", mobile: "mobile network", apn: "access point names", "default-sms": "default SMS app",
+};
+
+function CarrierSetupVisit({ visit }: { readonly visit: number }) {
+  const available = now(carrierAvailable, false);
+  const [notice, setNotice] = useState("");
+  const [, refresh] = useState(0);
+  const [session] = useState(() => createCarrierSession({
+    read: async () => Schema.decodeUnknownSync(CarrierSetup)(await carrierCall("read")),
+    readEid: async () => Schema.decodeUnknownSync(CarrierField)(await carrierCall("readEid")),
+    copy: (text) => perform(Effect.flatMap(Effect.service(Native), (native) => native.invoke("AlphaDevice", "copyText", { text }))),
+    current() {
+      const front = now(carrierFront, undefined);
+      const page = now(carrierVisit, undefined);
+      return now(carrierAvailable, false) && !document.hidden && front !== undefined && inFront(front) && page?.page === "CarrierSetup" && page.opened === visit;
+    },
+    changed: () => refresh((revision) => revision + 1),
+  }));
+
+  useEffect(() => {
+    if (!available) return;
+    const stopFront = watch(Effect.map(Effect.service(Foreground), (front) => front.changes), (front) => {
+      if (!inFront(front)) session.clear();
+    });
+    const stopPause = watch(Effect.map(Effect.service(Native), (native) => native.listen("AlphaCarrierSetup", "foregroundEnded")), () => session.clear());
+    const background = () => { if (document.hidden) session.clear(); };
+    document.addEventListener("visibilitychange", background);
+    window.addEventListener("pagehide", session.clear);
+    return () => {
+      document.removeEventListener("visibilitychange", background);
+      window.removeEventListener("pagehide", session.clear);
+      stopFront();
+      stopPause();
+      session.clear();
+    };
+  }, [available, session]);
+
+  function open(page: CarrierPage) {
+    setNotice("");
+    void carrierCall("openSettings", { page }).then((raw) => {
+      const opened = Schema.decodeUnknownSync(PageOpened)(raw);
+      if (opened.specific === false) setNotice(`Android Settings opened. Search for ${carrierDestination[page]}.`);
+    }).catch(() => setNotice("This Android settings page is unavailable."));
+  }
+
+  return <CarrierSetupPage {...session.snapshot()} available={available} notice={notice}
+    show={() => void session.show()} showEid={() => void session.showEid()} open={open}
+    copy={(key) => void session.copy(key).then((copied) => {
+      if (copied) setNotice("Copied to the Android clipboard.");
+    }, () => setNotice("Couldn’t copy. Keep Alpha open and unlocked."))} />;
+}
 
 /** Settings' Back: the shown page's dialog, then the vault's or the problem log's own, then one page up; false on the root. */
 async function settingsBack(): Promise<boolean> {
@@ -119,6 +184,7 @@ function SettingsApp({ onClose }: ScreenProps) {
       dialog={dialog}
       onDialog={(next) => (next === undefined ? closeDialog() : openDialog(nav, next))}
       notifications={<NotificationsSettings />}
+      carrierSetup={nav.page === "CarrierSetup" && <CarrierSetupVisit key={nav.opened} visit={nav.opened} />}
       privacy={{ route, listener: privacyMachine.state ?? privacyStart, aosp: variant === "aosp" }}
       privacyActs={{
         stop: (stop) => void perform(Effect.flatMap(Effect.service(PrivacyRow), (p) => p.stop(stop))),

@@ -8,6 +8,7 @@ test mocks.
 
 - [Vocabulary](./vocabulary.md): switches, grants and roles as Android reported them.
 - [Device facts](./facts.md): the facts read, text size, roles and Android handoffs.
+- [Carrier and SIM setup](./carrier.md): explicit reads and Android activation handoffs.
 - [Appearance](./appearance.md): light, dark or the system's choice, and legible text.
 - [Preferences](./preferences.md): what Alpha may do and read, kept on the phone.
 - [Privacy](./privacy.md): the always-on listener row and where speech goes.
@@ -30,18 +31,18 @@ shows the account's email or sign-in state and its AI provider row Own key or Cl
 reports them.
 
 ```quint
-type Page = Root | General | Display | Notifications | Network | Privacy | Permissions | Apps | Passwords
+type Page = Root | General | Display | Notifications | Network | CarrierSetup | Privacy | Permissions | Apps | Passwords
   | AppInbox | AppCamera | AppMaps | AppNotes | AppPhotos | About | Problems | Licenses | LicenseDetail | Developer
 type Settings = { page: Page, licence: int, developer: bool, opened: int }
 pure val initial: Settings = { page: Root, licence: -1, developer: false, opened: 0 }
 pure def parent(p: Page): Page =
-  if (p == Display or p == Notifications or p == Network) General
+  if (p == Display or p == Notifications or p == Network or p == CarrierSetup) General
   else if (p == Permissions) Privacy
   else if (p == Passwords or p == AppInbox or p == AppCamera or p == AppMaps or p == AppNotes or p == AppPhotos) Apps
   else if (p == Problems or p == Licenses) About
   else if (p == LicenseDetail) Licenses
   else Root
-pure val pageValues = Set(Root, General, Display, Notifications, Network, Privacy, Permissions, Apps, Passwords, AppInbox, AppPhotos, About, Problems, Licenses, Developer)
+pure val pageValues = Set(Root, General, Display, Notifications, Network, CarrierSetup, Privacy, Permissions, Apps, Passwords, AppInbox, AppPhotos, About, Problems, Licenses, Developer)
 pure val sValues = Set(initial).union(Set({ ...initial, developer: true }))
 ```
 
@@ -72,7 +73,7 @@ pure def stepTheBuildGateNeverChanges(before: Settings, after: Settings): bool =
 pure def sometimesDeveloperOpen(s: Settings): bool = s.page == Developer
 ```
 
-### Another surface may open only a listed section, never Developer or Passwords
+### Another surface may open only a listed section, never Developer, Passwords or Carrier Setup
 
 The assistant or a notice can open General, Display, Notifications, Privacy, Permissions, Apps,
 Inbox's page or About. The account, Google and the AI provider live in the Account app: the root's Account, Google &
@@ -87,7 +88,7 @@ pure def listedSection(page: Page): bool =
 pure def canOpenSection(s: Settings, page: Page): bool = listedSection(page)
 pure def openSection(s: Settings, page: Page): Settings = { ...s, page: page, opened: s.opened + 1 }
 pure def stepNoSurfaceOpensDeveloperOrPasswords(before: Settings, via: str, after: Settings): bool =
-  via == "openSection" implies (after.page != Developer and after.page != Passwords)
+  via == "openSection" implies (after.page != Developer and after.page != Passwords and after.page != CarrierSetup)
 ```
 
 ### A route names a listed section, or another app it is forwarded to
@@ -106,7 +107,8 @@ pure def sectionOf(route: str): Page =
   else if (route == "display") Display
   else if (route == "privacy") Privacy else if (route == "permissions") Permissions else if (route == "apps") Apps
   else if (route == "inbox") AppInbox else if (route == "about") About else Root
-pure def lawNoRouteOpensDeveloperOrPasswords(route: str): bool = sectionOf(route) != Developer and sectionOf(route) != Passwords
+pure def lawNoRouteOpensDeveloperOrPasswords(route: str): bool =
+  sectionOf(route) != Developer and sectionOf(route) != Passwords and sectionOf(route) != CarrierSetup
 pure def lawARouteSectionIsListed(route: str): bool = sectionOf(route) == Root or listedSection(sectionOf(route))
 ```
 

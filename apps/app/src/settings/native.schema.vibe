@@ -137,3 +137,38 @@ export schema AutofillOpened { status: "opened" }
 /** AlphaBrowser.loginFillStatus. */
 export schema LoginFill { available?: boolean }
 
+
+/** AlphaCarrierSetup returns only what Android chose to disclose during the explicit read. */
+export schema CarrierField {
+  status: "available" | "permission-denied" | "unavailable" | "unsupported" | "not-read"
+  value?: string
+}
+
+export schema CarrierSubscription {
+  subscriptionId: number
+  slotIndex: number
+  embedded: boolean
+  defaultData: boolean
+  carrier: CarrierField
+  name: CarrierField
+  iccid: CarrierField
+  operator: CarrierField
+  operatorCode: CarrierField
+  dataState: CarrierField
+  networkType: CarrierField
+  dataEnabled: CarrierField
+  roaming: CarrierField
+}
+
+export schema CarrierSetup {
+  status: "ready"
+  aospImage: boolean
+  canChooseSms: boolean
+  smsRole: CarrierField
+  dialerRole: CarrierField
+  modemCount: CarrierField
+  eid: CarrierField
+  hardware: { manufacturer: CarrierField; model: CarrierField; device: CarrierField; android: CarrierField; baseband: CarrierField }
+  slots: readonly { slotIndex: number; imei: CarrierField; simState: CarrierField }[]
+  subscriptions: { status: "available" | "permission-denied" | "unavailable" | "unsupported"; items: readonly CarrierSubscription[] }
+}

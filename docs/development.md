@@ -284,6 +284,19 @@ product build configuration. Dependency checksums remain in
 `android/gradle/verification-metadata.xml`; regenerate and review them with
 `pnpm android:deps:write-verification` after dependency changes.
 
+### Carrier activation details
+
+On Android, open **Settings → General → Carrier & SIM setup → Show identifiers**
+to check the phone's modem slots, IMEIs, carrier, active SIMs and network state.
+**Read eSIM EID (optional)** uses a separate Android service. The page clears its
+values when you leave it or background the app. An individual Copy action places
+only that identifier on the Android clipboard.
+
+Android controls access to identifiers. When the launcher cannot read a value,
+use the Android device identifiers, SIM, mobile network and APN handoffs on that
+page. Displayed identifiers and SIM state do not establish carrier compatibility,
+activation or working service.
+
 ## Device and image tooling
 
 ```sh

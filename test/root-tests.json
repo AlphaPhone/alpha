@@ -29,6 +29,7 @@
   "test/assetlinks-cloud-config.test.mjs",
   "test/avatar-initials-audit.test.mjs",
   "test/browser-native-copy.test.mjs",
+  "test/carrier-setup.test.mjs",
   "test/ci-pin-bound-scripts.test.mjs",
   "test/ci-ruleset-readback.test.mjs",
   "test/cloud-auth-wire.test.mjs",
