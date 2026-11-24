@@ -428,6 +428,7 @@ it.effect("open mock mode only in a test-mocks build, after the live collectors 
 it.live("send the resident only what the owner route table allows", () => effect {
   const phone = agent({
     ...owned,
+    "GET /api/triggers": { status: 200, data: { triggers: [] } },
     "DELETE /api/triggers/t1": { status: 200, data: { ok: true } },
     "POST /api/notes/interact": { status: 200, data: { ok: true } },
     "GET /api/notes/trash/recordings": { status: 200, data: { cleanups: [] } },
@@ -438,16 +439,18 @@ it.live("send the resident only what the owner route table allows", () => effect
     const unclaimedDelete = try Effect.flip(resident.json("DELETE", "/api/conversations/c1"))
     const eraseRead = try Effect.flip(resident.json("GET", "/api/notes/trash/erase"))
     const strayQuery = try Effect.flip(resident.json("POST", "/api/notes/interact?owner=ben", { capability: "list" }))
+    const strayOwner = try Effect.flip(resident.json("GET", "/api/triggers?ownerId=other"))
+    const triggers = try resident.json("GET", "/api/triggers")
     const allowed = try resident.json("DELETE", "/api/triggers/t1")
     const interacted = try resident.json("POST", "/api/notes/interact", { capability: "list" })
     const cleanups = try resident.json("GET", "/api/notes/trash/recordings")
     try Effect.try(() => assert.deepStrictEqual({
-      refused: [claimedWrongVerb, unclaimedDelete, eraseRead, strayQuery].map((error) => error instanceof ResidentRefused ? error.code : undefined),
-      allowed: [allowed.data, interacted.data, cleanups.data],
+      refused: [claimedWrongVerb, unclaimedDelete, eraseRead, strayQuery, strayOwner].map((error) => error instanceof ResidentRefused ? error.code : undefined),
+      allowed: [triggers.data, allowed.data, interacted.data, cleanups.data],
       sent: phone.sent.filter((request) => request.method !== "GET").map((request) => `${request.method} ${request.path}`),
     }, {
-      refused: ["InvalidRoute", "InvalidRoute", "InvalidRoute", "InvalidRoute"],
-      allowed: [{ ok: true }, { ok: true }, { cleanups: [] }],
+      refused: ["InvalidRoute", "InvalidRoute", "InvalidRoute", "InvalidRoute", "InvalidRoute"],
+      allowed: [{ triggers: [] }, { ok: true }, { ok: true }, { cleanups: [] }],
       sent: ["DELETE /api/triggers/t1", "POST /api/notes/interact"],
     }))
   }
