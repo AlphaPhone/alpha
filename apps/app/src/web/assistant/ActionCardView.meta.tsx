@@ -12,7 +12,6 @@ export const meta: ComponentMeta<ActionCardViewProps> = {
     CloseAllTabs: { card: closeTabsCard },
     WithDestination: { card: notesCard, onOpen: fn() },
     Text: { card: textCard },
-    TextWaitingForVoice: { card: textCard, spokenSend: true },
   },
   play: {
     Emergency: async ({ args, canvasElement }: { args: ActionCardViewProps; canvasElement: HTMLElement }) => {
@@ -31,11 +30,9 @@ export const meta: ComponentMeta<ActionCardViewProps> = {
     },
     Text: async ({ args, canvasElement }: { args: ActionCardViewProps; canvasElement: HTMLElement }) => {
       const canvas = within(canvasElement);
-      await expect(canvas.queryByText("Say “Send this text” to send it.")).toBeNull();
       await userEvent.click(canvas.getByRole("button", { name: "Send this text" }));
       await expect(args.onApprove).toHaveBeenCalled();
     },
-    TextWaitingForVoice: ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).getByText("Say “Send this text” to send it.")).toBeVisible(),
     Expired: ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).queryByRole("button", { name: /Approve/ })).toBeNull(),
   },
 };

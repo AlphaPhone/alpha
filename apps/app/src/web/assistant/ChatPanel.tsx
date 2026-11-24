@@ -106,7 +106,7 @@ export function ChatPanel({ open, onTalk }: ChatPanelProps) {
       canSend={sendable} unsettled={draftUnsettled(drafts)} notice={notices[drafts.notice]}
       disclosure={disclosed(inference.where) ? copy.hostedDisclosure(inference.provider) : undefined}
       canFork={transcript.conversation !== null} cloud={inference.provider}
-      emergency={emergencyNow()} ownAddress={ownAddressNow()} busyCard={busyCard} voiceText={transcript.voiceText} now={now}
+      emergency={emergencyNow()} ownAddress={ownAddressNow()} busyCard={busyCard} now={now}
       restartOffered={restartOffered} restartBusy={restartBusy}
       searching={searching}
       search={<ChatSearchPanel />}
