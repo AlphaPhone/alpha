@@ -1,7 +1,8 @@
 {
   "url": "https://github.com/elizaOS/eliza.git",
-  "branch": "vibestack",
-  "commit": "082828fdb077c4e4d3e6b3b43b75ffc556167615",
+  "branch": "main",
+  "alphaReleaseLine": "vibestack",
+  "commit": "62f3bc2be25a815b7a44616ff9f99d46b665031c",
   "appSource": "apps/app",
   "osSource": "packages/os",
   "androidSource": "packages/os/android",
