@@ -68,7 +68,7 @@ const kinds: Record<CarrierGen.Kind, string> = {
 };
 const missing: Record<CarrierGen.Status, SettingsCarrierField["missing"]> = { Returned: undefined, AccessDenied: "access-denied", Missing: "unavailable", Unsupported: "unsupported", NotRead: "not-read" };
 
-const named = (field: CarrierGen.Field) => (field.kind === "Imei" || field.kind === "SimState" ? `${kinds[field.kind]} ${field.index + 1}` : kinds[field.kind]);
+const named = (field: CarrierGen.Field) => (field.kind === "Imei" || field.kind === "SimState" || field.index > 0 ? `${kinds[field.kind]} ${field.index + 1}` : kinds[field.kind]);
 
 /** One identifier as the page shows it: what Android returned, or why it returned nothing. */
 const shown = (field: CarrierGen.Field, name: string): SettingsCarrierField =>

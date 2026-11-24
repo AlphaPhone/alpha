@@ -1,5 +1,6 @@
 // spec/app/settings/index.md, "Back shows the parent and forgets the page it closed"; spec/app/settings/licences.md, "Back from a licence returns to the same search"
 import { Effect, type Layer } from "effect";
+import { useMemo } from "react";
 import type { Page } from "../../gen/app__settings.ts";
 import * as Licensing from "../../gen/app__settings__licences.effect.vibe";
 import * as Pages from "../../gen/app__settings.effect.vibe";
@@ -24,12 +25,12 @@ const back = Licensing.Machine.use((licences) =>
         Effect.flatMap(pages.get(), (state) => (state.page === "Top" ? Effect.succeed(false) : Effect.as(Effect.orElseSucceed(pages.send({ type: "goBack" }), () => undefined), true))))));
 
 function Screen({ runtime, alpha }: Shown<Layer.Success<typeof machines> | Resident>) {
-  const further: Partial<Record<Page, Drawn>> = {
+  const further = useMemo((): Partial<Record<Page, Drawn>> => ({
     NetworkPage: ({ common }) => <Network runtime={runtime} common={common} />,
     CarrierPage: ({ common }) => <Carrier runtime={runtime} common={common} />,
     Licences: ({ common }) => <Licences runtime={runtime} common={common} />,
     Problems: ({ common }) => <Problems runtime={runtime} common={common} />,
-  };
+  }), [runtime]);
   return <Settings runtime={runtime} alpha={alpha} further={further} />;
 }
 
