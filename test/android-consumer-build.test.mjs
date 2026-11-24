@@ -78,7 +78,9 @@ fixtureTest('a release build assembles the launcher APKs and instrumentation, li
 test('a local build assembles only the debug APK and its instrumentation and records release:false', t => {
  assert.deepEqual(parseBuildArgs([]), {release: false});
  assert.deepEqual(parseBuildArgs(['--release']), {release: true});
+ assert.deepEqual(parseBuildArgs(['--', '--release']), {release: true});
  assert.throws(() => parseBuildArgs(['--release', '--release']), /Unknown option/);
+ assert.throws(() => parseBuildArgs(['--', '--debug']), /Unknown option/);
  assert.throws(() => parseBuildArgs(['--debug']), /Unknown option/);
  const f = build(t, {release: false});
  assert.deepEqual(gradleCalls(f.calls).map(call => call.args), [['--no-daemon', ':app:assembleLauncherDebug', ':app:assembleLauncherDebugAndroidTest', ':app:lint']]);

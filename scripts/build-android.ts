@@ -52,7 +52,8 @@ const USAGE = "Usage: pnpm android:build [--release]";
 
 export function parseBuildArgs(argv: readonly string[]) {
   let release = false;
-  for (const arg of argv) {
+  // pnpm forwards the separator in `pnpm android:build:local -- --release`.
+  for (const arg of argv[0] === "--" ? argv.slice(1) : argv) {
     if (arg !== "--release" || release) throw new Error(`Unknown option ${arg}. ${USAGE}`);
     release = true;
   }
