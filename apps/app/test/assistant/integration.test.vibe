@@ -8,6 +8,7 @@ import { DeviceExecutors, DeviceReview, cardDestination, commsProposalOf, type O
 import { emptyTranscript } from "../../src/assistant/transcript.vibe"
 import { CAPABILITIES_HEADER, capabilityHeaders } from "../../src/assistant/transport.vibe"
 import { AgentViews, appOfView, handoffOf } from "../../src/assistant/views.vibe"
+import { composeExecutors } from "../../src/shell/assistantHost.vibe"
 import {
   assistantOver, browserScreen, countingExecutors, fakeAdvertised, fakeBrowserPages, fakeBrowserViews, fakeComms, fakeFeeds, fakeHost, fakeMapsViews,
   fakePreferences, fakeResident, homeScreen, journalNative, noNative, wireProposal, type Seen,
@@ -139,10 +140,10 @@ it.effect("A page link stays a card even when its family grounds it (spec/assist
   }
 })
 
-// spec/assistant/review.md: Browser's executors as the direct pass sees them, where showing the tab list is its own command.
+// spec/assistant/review.md: Browser's executors as the direct pass sees them, where showing the tab list is its own command, composed with another area as the shell composes them.
 function tabListExecutors(runs: { count: number }) {
-  const ports: OperationPorts = {
-    validate: (operation) => operation,
+  const browser: OperationPorts = {
+    validate: (operation) => String((operation as { readonly type?: unknown }).type).startsWith("browser_") ? operation : undefined,
     execute: async () => { runs.count += 1; return { kind: "applied" } },
     readBack: async () => ({ kind: "found" }),
     describe: () => ({ title: "Show open tabs", detail: "Shows the list of your open tabs in Browser." }),
@@ -151,7 +152,16 @@ function tabListExecutors(runs: { count: number }) {
     summarize: () => "Showing your open tabs in Browser.",
     ownCommand: (operation) => (operation as { readonly type?: unknown }).type === "browser_tabs_show",
   }
-  return Layer.succeed(DeviceExecutors, { ports })
+  const notes: OperationPorts = {
+    validate: (operation) => (operation as { readonly type?: unknown }).type === "notes_create" ? operation : undefined,
+    execute: async () => ({ kind: "applied" }),
+    readBack: async () => ({ kind: "found" }),
+    describe: () => ({ title: "New note", detail: "" }),
+    classOf: () => "SettingsWrite",
+    target: () => ({ tag: "NoTarget" }),
+    summarize: () => "Note added.",
+  }
+  return Layer.succeed(DeviceExecutors, { ports: composeExecutors([notes, browser]) })
 }
 
 it.effect("Showing my open tabs opens without a card in any words, while another control or a grounded open that is not a command keeps its card (spec/assistant/review.md, \"The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote\")", () => effect {
