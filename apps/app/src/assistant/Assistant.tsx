@@ -158,9 +158,9 @@ export function Assistant({ runtime }: AssistantProps) {
       />
     );
   };
-  const messages = lines.map((line, at): AssistantMessageProps & { id: string } => {
-    const message = at + 1;
-    const settled = settledLine(line.id);
+  const messages = lines.map((line): AssistantMessageProps & { id: string } => {
+    const message = board.numbered(line.id);
+    const settled = message > 0 && settledLine(line.id);
     const fork = { type: "fork", message, ...free } as const;
     const quote = { type: "quote", message, recorded: settled } as const;
     const editAgain = { type: "editAgain", message, mine: line.mine, recorded: settled } as const;
@@ -171,10 +171,10 @@ export function Assistant({ runtime }: AssistantProps) {
       text: line.text,
       ...(line.quote === undefined ? {} : { quote: line.quote }),
       ...(line.failure === undefined ? {} : { children: failureCard({ kind: line.failure, fix: "NoFix", waitMs: -1 }, false) }),
-      onFork: chats.can(fork) ? () => void chats.send(fork) : undefined,
+      onFork: settled && chats.can(fork) ? () => void chats.send(fork) : undefined,
       onQuote: composer.can(quote) ? () => void composer.send(quote) : undefined,
       onEditAgain: composer.can(editAgain) ? () => { board.type(line.text); void composer.send(editAgain); } : undefined,
-      onReadAloud: chats.can(readAloud) ? () => void chats.send(readAloud) : undefined,
+      onReadAloud: message > 0 && chats.can(readAloud) ? () => void chats.send(readAloud) : undefined,
     };
   });
   // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
@@ -183,7 +183,8 @@ export function Assistant({ runtime }: AssistantProps) {
   const writingReply = seen.reply !== "" ? [{ id: "reply", author: "alpha", text: seen.reply } as const] : [];
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
   const failed = seen.failure === undefined ? [] : [{ id: "failure", author: "alpha", text: "", children: failureCard(seen.failure, true) } as const];
-  const quoted = writing.editor.quote > 0 ? lines[writing.editor.quote - 1]?.text : undefined;
+  const quoteId = writing.editor.quote > 0 ? board.messageId(writing.editor.quote) : undefined;
+  const quoted = quoteId === undefined ? undefined : lines.find((line) => line.id === quoteId)?.text;
   const view = talking.context.showing.tag === "App" ? talking.context.showing.view : "Home";
   const assistantDetent = shell.state?.assistant ?? "Bar";
   const open = dockOpen(assistantDetent);
@@ -235,6 +236,8 @@ export function Assistant({ runtime }: AssistantProps) {
         }}
         transcript={{
           messages: [...messages, ...writingReply, ...failed],
+          position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around) },
+          visible: open,
           status: shown.page.status === "Loading" ? "loading" : shown.page.status === "Failed" ? "failed" : "loaded",
           turn: status === undefined ? undefined : { status, label: seen.label === "" ? undefined : seen.label, onCheck: checkable ? () => void conversation.send(check) : undefined },
           onRetry: chats.can({ type: "reread" }) ? () => void chats.send({ type: "reread" }) : undefined,
