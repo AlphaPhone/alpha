@@ -89,9 +89,9 @@ export const letters = Layer.effect(Letters, effect {
       return try kept()
     },
     effect load() {
-      const found = readWords(store.get(key) catch () => undefined)
-      if (found === undefined) return true
-      held = { ...found, ...held }
+      const text = store.get(key) catch () => null
+      if (text === null) return false
+      held = { ...readWords(text), ...held }
       return true
     },
     effect forget(draft: number) {

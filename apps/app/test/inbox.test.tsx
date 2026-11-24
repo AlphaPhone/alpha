@@ -4,6 +4,7 @@ import { Machine as List } from "../gen/app__inbox.effect.vibe";
 import { Machine as Marks } from "../gen/app__inbox__marking.effect.vibe";
 import { Machine as Shown } from "../gen/app__inbox__message.effect.vibe";
 import { Machine as Changes } from "../gen/app__inbox__sending.effect.vibe";
+import { Machine as Writing } from "../gen/app__inbox__drafts.effect.vibe";
 import inbox from "../src/inbox/index.tsx";
 import { button, closeAll, drawn, fill, later, open, press, underAct, until } from "./alpha.tsx";
 import { letter } from "./fakes/inbox.ts";
@@ -26,17 +27,23 @@ const choose = (subject: string) => drawn(() => {
   found.click();
 });
 const confirm = (name: string) => drawn(() => {
-  const found = [...document.querySelectorAll("[role=dialog] button")].find((one) => one.textContent === name);
+  const found = [...document.querySelectorAll("[role=dialog] button, [role=alertdialog] button")].find((one) => one.textContent === name);
   if (!(found instanceof HTMLElement)) throw new Error(`no ${name} in the review`);
   found.click();
 });
 const menu = (item: string) => drawn(() => {
-  button("More actions")?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 }));
+  button("More actions")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 }).then(() => drawn(() => {
   const found = [...document.querySelectorAll("[role=menuitem]")].find((one) => one.textContent === item);
   if (!(found instanceof HTMLElement)) throw new Error(`no ${item} in the menu`);
   found.click();
 }));
+const write = (name: string, text: string) => drawn(() => {
+  const found = [...document.querySelectorAll("textarea, input")].find((field) => field.getAttribute("aria-label") === name);
+  if (!(found instanceof HTMLTextAreaElement || found instanceof HTMLInputElement)) throw new Error(`no field ${name}`);
+  Object.getOwnPropertyDescriptor(Object.getPrototypeOf(found) as object, "value")?.set?.call(found, text);
+  found.dispatchEvent(new Event("input", { bubbles: true }));
+});
 const told = () => document.body.textContent ?? "";
 const title = () => document.querySelector("main[aria-label]:not([aria-label=Inbox]), main[aria-label=Inbox]")?.getAttribute("aria-label");
 const step = (name: string) => process.stderr.write(`STEP ${name}\n`);
@@ -79,6 +86,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await row("Lunch on Friday");
     await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded");
     step("6");
+    await later(alpha, 1000);
+    process.stderr.write(`DEBUG ${JSON.stringify(await runtime.runPromise(Marks.use((m) => m.get())))} ${JSON.stringify(world.inbox.changes)}\n`);
     await until(alpha, runtime, Marks, (s) => s.attempt.outcome === "Confirmed");
     step("7");
     expect([title(), world.inbox.changes]).toEqual(["Lunch on Friday", ["mark-read g1"]]);
@@ -170,4 +179,33 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   await drawn(() => [...document.querySelectorAll("button")].find((one) => one.textContent?.includes("owner@gmail.test"))?.click());
   await until(alpha, runtime, List, (s) => s.selected.account !== 0);
   expect([rows(), told()]).toEqual([[], expect.stringContaining("Alpha cannot read this mail")]);
+});
+
+it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I reviewed\"; spec/app/inbox/drafts.md, \"Story: Write a message\")", async () => {
+  const world = { ...scene(), phone: false };
+  const { alpha } = await open(world);
+  const runtime = inbox.runtime(alpha);
+  await press("Inbox");
+  await until(alpha, runtime, List, (s) => s.list.status === "Loaded" && s.pages === 1);
+
+  // spec/app/inbox/drafts.md, "A new message, a reply, a reply to all or a forward begins as [one draft](./letter.md) says; a reply to a message with no usable address is refused and the owner told"
+  await row("Your tax return");
+  await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded");
+  await press("Reply");
+  await until(alpha, runtime, Writing, (s) => s.open && s.letter.kind === "Reply" && s.letter.recipients === 1);
+
+  // spec/app/inbox/drafts.md, "Every change to the text, recipients or attachments is an edit, counted at once"; spec/app/inbox/drafts.md, "Edits are written to the phone once typing pauses, and no later than the longest wait after a burst began, one write at a time under its own ticket"
+  await write("Message", "Thanks, it is all in order.");
+  await later(alpha, 10);
+  await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded" && s.letter.revision >= 2);
+
+  // spec/app/inbox/sending.md, "Only the owner confirms, only the review of the thing as it is now, while the account's grant allows it and, for a send, it has a valid recipient"
+  await press("Send");
+  await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "Send");
+  await confirm("Send");
+  await until(alpha, runtime, Changes, (s) => s.attempt.outcome === "Confirmed");
+  expect(world.inbox.changes).toEqual(["send s2@mail.test Re: Your tax return"]);
+
+  // spec/app/inbox/drafts.md, "Once its send is confirmed, a draft unchanged since the revision sent is forgotten; one edited after it, or whose write is in flight, is kept and marked as sent"
+  await until(alpha, runtime, Writing, (s) => !s.open && s.shelf.shelved.length === 0);
 });
