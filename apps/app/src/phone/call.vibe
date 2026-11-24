@@ -1,0 +1,71 @@
+// spec/app/phone/call.md, "Story: See my live call over every view"
+import * as Bar from "../../gen/app__phone__call.effect.vibe"
+import type { CallBar, CallPhase, Effect as Out, Event, LiveCall } from "../../gen/app__phone__call.effect.vibe"
+import { Calls } from "../platform/calls.vibe"
+import { Device } from "../platform/device.vibe"
+import { type Job, answer, due, hearing, reacting, run, stream, together, untimed } from "../runtime/reactor.vibe"
+
+/** One call as the image's in-call service reports it, and the whole report: at most eight calls. */
+const Row = Schema.Struct({
+  id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+  state: Schema.Literals(["dialing", "ringing", "active", "held"]),
+  connectedAt: Schema.NullOr(Schema.Finite.check(Schema.isGreaterThan(0))),
+})
+const Report = Schema.Struct({ calls: Schema.Array(Row).check(Schema.isMaxLength(8)) })
+
+const phases = { dialing: "Dialing", ringing: "Ringing", active: "Active", held: "Held" } as const satisfies Record<string, CallPhase>
+
+// spec/app/phone/call.md, "The bar shows only on a trusted reading, while the page shows, while a call is live"
+/** The calls of a report, or none for one the bar cannot trust. */
+function callsOf(raw: unknown): LiveCall[] | undefined {
+  const report = Option.getOrUndefined(Schema.decodeUnknownOption(Report)(raw))
+  return report?.calls.map((row) => ({ id: row.id, phase: phases[row.state], connectedAt: row.connectedAt === null ? 0 : Math.round(row.connectedAt) }))
+}
+
+/** The calls of a report as the machine takes them. */
+function reported(raw: unknown) {
+  const calls = callsOf(raw)
+  return { calls: calls ?? [], wellFormed: calls !== undefined }
+}
+
+// spec/app/phone/call.md, "A reading older than the latest one never replaces it"
+/** Telecom's calls read under `ticket`. A phone with no call plugins has no call. */
+function read(ticket: number): Stream.Stream<Event, never, Calls> {
+  return Stream.unwrap(effect {
+    const calls = try Calls
+    const raw = calls.ongoing() catch (failure) => (failure._tag === "CallsAbsent" ? { calls: [] } : undefined)
+    return Stream.succeed<Event>({ type: "refreshAnswered", ticket, ...reported(raw) })
+  })
+}
+
+// spec/app/phone/call.md, "Return and End act only on the call the bar shows, and End is asked once"
+effect function ended(callId: string): Event!!Calls {
+  const done = (try Calls).end(callId) catch () => false
+  return { type: "endAnswered", callId, ended: done }
+}
+
+function carry(fx: Out): Job<Event, Calls, []> {
+  return match (fx) {
+    when { tag: "ReadCalls", let ticket }: stream("read", read(ticket), { type: "refreshAnswered", ticket, calls: [], wellFormed: false });
+    when { tag: "ShowCall", let callId }: run("show", effect { try ignore((try Calls).show(callId)) });
+    when { tag: "EndCall", let callId }: answer("end", ended(callId), { type: "endAnswered", callId, ended: false });
+  }
+}
+
+// spec/app/phone/call.md, "The bar says Calling until the call is active, and only an active call counts a clock from its connect time"; spec/app/phone/call.md, "An ended call's bar holds its place for a moment and takes no taps"
+function timers(state: CallBar) {
+  const tick: Event = { type: "tick", at: untimed }
+  return [
+    ...(state.shown ? [due<Event, []>("tick", state.now + 1000, tick)] : []),
+    ...(state.endedUntil > state.now ? [due<Event, []>("ended", state.endedUntil, tick)] : []),
+  ]
+}
+
+const machine = reacting(Bar, { carry, timers, open: [{ type: "eligibilityChanged", eligible: true }] })
+
+const pushed = hearing(Stream.unwrap(effect { return (try Calls).reports }), Bar.Machine, (raw): Event => ({ type: "callsReported", ...reported(raw) }))
+
+const seen = hearing(Stream.unwrap(effect { return (try Device).visible }), Bar.Machine, (visible): Event => ({ type: "eligibilityChanged", eligible: visible }))
+
+/** The call strip: resident, since it is over every view; read when Alpha opens and each time the page shows. */
+export const callStrip = together(machine, pushed, seen)

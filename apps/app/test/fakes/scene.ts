@@ -10,7 +10,7 @@ import { type SampleScene, sampleRoutes, sampleScene } from "./sample.ts";
 import { type LauncherScene, launcherScene } from "./launcher.ts";
 import { type SettingsScene, settingsScene } from "./settings.ts";
 import { type FilesScene, filesScene } from "./files.ts";
-import { type TelephonyScene, telephonyScene } from "./telephony.ts";
+import { type TelephonyScene, telephonyRoutes, telephonyScene } from "./telephony.ts";
 import { type UpdateScene, updateScene } from "./update.ts";
 
 /** Everything the fake world holds, one field per area; a journey reads and changes it. */
@@ -69,6 +69,7 @@ export function services(world: Scene) {
       ...askRoutes(world.ask),
       ...calendarRoutes(world.calendar),
       ...platformRoutes(world.platform),
+      ...telephonyRoutes(world.telephony),
     ]),
     cloud: answering([
       ...cloudRoutes(),

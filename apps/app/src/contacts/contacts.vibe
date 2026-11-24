@@ -1,0 +1,209 @@
+// spec/app/contacts/index.md, "Story: Browse my contacts"; spec/app/contacts/index.md, "Story: Look at one contact"; spec/app/contacts/index.md, "Story: Add or change a contact"; spec/app/contacts/index.md, "Story: Delete a contact"; spec/app/contacts/index.md, "Story: Know what happened to my change"
+import type { AddressBookContact, AddressBookRow, ContactCursor, ContactDetail, ContactDraft, ContactId } from "@elizaos/os/bridges/contacts"
+import { Machine as Comms, type Event as CommsEvent } from "../../gen/app__phone__comms.effect.vibe"
+import * as Contacts from "../../gen/app__contacts.effect.vibe"
+import type { Change, Effect as Out, Event, Sheet } from "../../gen/app__contacts.effect.vibe"
+import { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
+import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { SystemSettings } from "../platform/systemSettings.vibe"
+import { Telephony, TelephonyRefused, telephony } from "../platform/telephony.vibe"
+import { type Job, answer, following, reacting, run, together } from "../runtime/reactor.vibe"
+import { Dialer, grantOf, prefilled } from "../phone/phone.vibe"
+import { Callers } from "../phone/voicemail.vibe"
+import { on, visiting } from "../phone/visit.vibe"
+
+/** What the form holds: a name, numbers, addresses and notes, as the owner typed them. */
+export interface Form {
+  readonly givenName: string
+  readonly familyName: string
+  readonly phones: ReadonlyArray<string>
+  readonly emails: ReadonlyArray<string>
+  readonly notes: string
+}
+
+/** What Contacts counts, kept beside it: the rows listed, the search, the open contact as the phone holds it, the form, and the number to reach. */
+export interface Book {
+  readonly rows: ReadonlyArray<AddressBookContact>
+  readonly next: ContactCursor | undefined
+  readonly sought: string
+  readonly card: ContactDetail | undefined
+  readonly form: Form
+  readonly reach: string
+}
+
+export const blankForm: Form = { givenName: "", familyName: "", phones: [], emails: [], notes: "" }
+
+const empty: Book = { rows: [], next: undefined, sought: "", card: undefined, form: blankForm, reach: "" }
+
+/** The contacts behind Contacts' counts. */
+export service Rows {
+  get(): Book!!
+  set(change: Partial<Book>): void!!
+}
+
+const rows = Layer.sync(Rows, () => {
+  let held = empty
+  return { get: () => sync(() => held), set: (change: Partial<Book>) => sync(() => { held = { ...held, ...change } }) }
+})
+
+/** What a contact has, as Contacts counts it: notes are counted only where the phone lets them be read and edited here. */
+export function sheetOf(found: ContactDetail | Form): Sheet {
+  if ("givenName" in found && "phones" in found) {
+    return { names: found.givenName.trim() + found.familyName.trim() === "" ? 0 : 1, phones: Math.min(found.phones.length, 20), emails: Math.min(found.emails.length, 20), notes: found.notes === "" ? 0 : 1, notable: true }
+  }
+  const detail = found as ContactDetail
+  return {
+    names: detail.displayName === "" ? 0 : 1, phones: Math.min(detail.phoneNumbers.length, 20), emails: Math.min(detail.emailAddresses.length, 20),
+    notes: detail.notes === undefined || detail.notes === "" ? 0 : 1, notable: detail.notes !== undefined,
+  }
+}
+
+/** A contact's name, numbers and addresses as a change leaves them, and its notes where the change names them. */
+export interface Lines {
+  readonly name: string
+  readonly phones: ReadonlyArray<string>
+  readonly emails: ReadonlyArray<string>
+  readonly notes?: string
+  readonly given?: string
+  readonly family?: string
+}
+
+// spec/app/contacts/index.md, "Save writes a form that was changed and has a name, a number or an address"
+/**
+ * `after` as the phone saves it over `card`, the contact as the phone holds it now: a number or address it already
+ * had keeps its label, its name stays as the phone holds it unless the change renames it, and notes the phone cannot
+ * edit are left out.
+ */
+export function draftFrom(card: ContactDetail | undefined, after: Lines): ContactDraft {
+  const renamed = card === undefined || after.name !== card.displayName || (after.given ?? card.givenName) !== card.givenName || (after.family ?? card.familyName) !== card.familyName
+  const notable = card === undefined || card.notes !== undefined
+  const notes = after.notes ?? card?.notes
+  return {
+    displayName: after.name,
+    ...(!renamed && card !== undefined ? { givenName: card.givenName, familyName: card.familyName } : after.given !== undefined || after.family !== undefined ? { givenName: after.given ?? "", familyName: after.family ?? "" } : {}),
+    ...(notable && notes !== undefined ? { notes } : {}),
+    phoneNumbers: after.phones.filter((number) => number.trim() !== "").map((number) => card?.phoneNumbers.find((one) => one.number === number) ?? { number, type: "mobile" }),
+    emailAddresses: after.emails.filter((address) => address.trim() !== "").map((address) => card?.emailAddresses.find((one) => one.address === address) ?? { address, type: "home" }),
+  }
+}
+
+/** The form's lines: its name as given and family name joined, unless they are the name the phone already holds. */
+export function linesOfForm(form: Form, card: ContactDetail | undefined): Lines {
+  const unrenamed = card !== undefined && form.givenName === card.givenName && form.familyName === card.familyName
+  return {
+    name: unrenamed && card !== undefined ? card.displayName : [form.givenName, form.familyName].filter((part) => part.trim() !== "").join(" "),
+    given: form.givenName, family: form.familyName, phones: form.phones, emails: form.emails, notes: form.notes,
+  }
+}
+
+// spec/app/contacts/index.md, "Only the newest list read is taken, and with it what Android says about access"
+effect function listed(ticket: number, further: boolean): Event!!(Telephony | Rows | Contacts.Machine) {
+  const store = try Rows
+  const held = try store.get()
+  const chip = (try (try Contacts.Machine).get()).chip
+  const status = telephony("status", (c) => c.phone.status()) catch () => undefined
+  const grant = grantOf(status?.permissions.contacts)
+  if (grant !== "Granted") return { type: "listed", ticket, ok: status !== undefined, grant, count: 0, further: false, editable: false }
+  const read = effect {
+    const book = try telephony("open", (c) => c.contacts.open())
+    const page = try telephony("list", (c) => c.contacts.list({ query: held.sought, limit: 50, kind: "ExplicitRead", ...(further && held.next !== undefined ? { cursor: held.next } : {}) }))
+    return { page, editable: book.writable }
+  } catch () => undefined
+  if (read === undefined) return { type: "listed", ticket, ok: false, grant, count: 0, further: false, editable: false }
+  const { page, editable } = read
+  const complete = page.contacts.filter((row: AddressBookRow): row is AddressBookContact => !("incomplete" in row) && (chip === "Everyone" || row.starred))
+  const found = further ? [...held.rows, ...complete] : complete
+  try store.set({ rows: found, next: page.next ?? undefined })
+  return { type: "listed", ticket, ok: true, grant, count: found.length, further: page.next !== null, editable }
+}
+
+// spec/app/contacts/index.md, "Only the newest read of the open contact is shown, and only if it is a contact Alpha can show"
+effect function read(ticket: number): Event!!(Telephony | Rows | Contacts.Machine) {
+  const store = try Rows
+  const contact = (try (try Contacts.Machine).get()).contact
+  const found = telephony("get", (c) => c.contacts.get(contact as ContactId, "ExplicitRead")) catch () => undefined
+  try store.set({ card: found })
+  const blank: Sheet = { names: 0, phones: 0, emails: 0, notes: 0, notable: true }
+  return { type: "contactRead", ticket, ok: found !== undefined, seen: found === undefined ? blank : sheetOf(found) }
+}
+
+/** A write's answer: made, refused, or unknown where no answer came back. */
+function answered(made: boolean, failure?: unknown): { readonly made: boolean; readonly known: boolean } {
+  return failure === undefined ? { made, known: true } : { made: false, known: !(failure instanceof TelephonyRefused && failure.code === undefined && failure.tag === "") }
+}
+
+// spec/app/contacts/index.md, "One change is written at a time, never while the last one's outcome is unknown, and never during a call that may be an emergency call"
+effect function written(id: number, change: Change): Event!!(Telephony | Rows) {
+  const held = try (try Rows).get()
+  const card = held.card
+  const outcome = effect {
+    if (change === "Create") {
+      const done = try telephony("createContact", (c) => c.contacts.createContact(draftFrom(undefined, linesOfForm(held.form, undefined))))
+      return answered(done.status === "saved")
+    }
+    if (card === undefined) return answered(false)
+    const reviewed = { id: card.id, version: card.version }
+    if (change === "Remove") {
+      const done = try telephony("remove", (c) => c.contacts.remove(reviewed))
+      return answered(done.status === "queued")
+    }
+    if (change === "Star") return answered(false)
+    const done = try telephony("updateContact", (c) => c.contacts.updateContact(reviewed, draftFrom(card, linesOfForm(held.form, card))))
+    return done.status === "unknown" ? { made: false, known: false } : answered(done.status === "saved")
+  } catch (failure) => answered(false, failure)
+  return { type: "writeAnswered", id, ...outcome }
+}
+
+// spec/app/contacts/index.md, "Call and Message open Phone or Messages with the number filled in, and do nothing else"
+effect function reached(how: Contacts.Reach): void!!(Rows | Dialer | PhoneMachine | Shell | Callers) {
+  const held = try (try Rows).get()
+  const number = held.reach !== "" ? held.reach : held.card?.phoneNumbers[0]?.number ?? ""
+  if (number === "") return
+  if (how === "Message") {
+    try (try Callers).message(number)
+    return
+  }
+  const handed = prefilled(number)
+  if (handed === undefined) return
+  try (try Dialer).set({ digits: handed.digits })
+  try ignore((try PhoneMachine).send(handed.event))
+  try ignore((try Shell).send({ type: "openView", view: "Phone" }))
+}
+
+// spec/app/contacts/index.md, "Where the phone does not let Alpha write contacts, New and Edit open the phone's own contact editor instead"
+effect function editor(fresh: boolean): void!!(Telephony | Rows | Contacts.Machine) {
+  if (fresh) {
+    try ignore(telephony("create", (c) => c.contacts.create()))
+    return
+  }
+  const contact = (try (try Contacts.Machine).get()).contact
+  const row = (try (try Rows).get()).rows.find((one) => one.id === contact)
+  if (row !== undefined) try ignore(telephony("edit", (c) => c.contacts.edit(row)))
+}
+
+function carry(fx: Out): Job<Event, Telephony | Rows | Contacts.Machine | SystemSettings | Dialer | PhoneMachine | Shell | Callers, []> {
+  return match (fx) {
+    when { tag: "Fetch", let source, let ticket }: source === "Listing"
+      ? answer("list", listed(ticket, false), { type: "listed", ticket, ok: false, grant: "Unasked", count: 0, further: false, editable: false })
+      : answer("card", read(ticket), { type: "contactRead", ticket, ok: false, seen: { names: 0, phones: 0, emails: 0, notes: 0, notable: true } });
+    when { tag: "Prompt" }: answer("prompt", effect {
+      const status = telephony("requestAccess", (c) => c.phone.requestAccess("contacts")) catch () => undefined
+      return { type: "accessReported", grant: grantOf(status?.permissions.contacts) } satisfies Event
+    }, { type: "accessReported", grant: "Unasked" });
+    when { tag: "Settings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", 0) });
+    when { tag: "Open", let app }: run("reach", reached(app));
+    when { tag: "Editor", let fresh }: run("editor", editor(fresh));
+    when { tag: "Write", let id, let change }: answer(`write ${id}`, written(id, change), { type: "writeLost" });
+  }
+}
+
+const machine = reacting(Contacts, { carry })
+
+const shown = visiting(on("Contacts"), Contacts.Machine, (showing): Event => (showing ? { type: "show" } : { type: "leave" }))
+
+// spec/app/phone/comms.md, "A view change while the conversation is open keeps the sheet's height and remembers the view it left"
+const subject = following(Contacts.Machine, (state) => (!state.front ? "" : state.opened ? `contacts:contact:${state.contact}` : "contacts:list:"), Comms,
+  (key): CommsEvent | undefined => (key === "" ? undefined : { type: "subjectShown", app: "ContactsApp", subject: key === "contacts:list:" ? "ListSubject" : "ContactSubject", key }), "Device")
+
+/** Contacts: resident, so that a form the owner was filling in waits while Contacts is not showing; it reads only while its view is in front. */
+export const contacts = together(machine, rows, shown, subject)

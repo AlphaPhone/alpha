@@ -307,12 +307,16 @@ pure def pickSim(c: Composer, sim: int): Composer = { ...c, sim: sim }
 
 ### The owner attaches up to five pictures, and removes them one by one
 
+`fits` is the phone's word that the picture is a JPEG, PNG or GIF that keeps
+the message within the carrier's MMS size; any other file is never
+attached. Several recipients or any picture go as one MMS.
+
 ```quint
 pure val maxPictures = 5
 
-pure def canAttach(c: Composer): bool = c.thread > 0 and c.pictures < maxPictures and not(bound(c))
+pure def canAttach(c: Composer, fits: bool): bool = c.thread > 0 and c.pictures < maxPictures and not(bound(c)) and fits
 
-pure def attach(c: Composer): Composer = { ...c, pictures: c.pictures + 1 }
+pure def attach(c: Composer, fits: bool): Composer = { ...c, pictures: c.pictures + 1 }
 
 pure def canDetach(c: Composer): bool = c.pictures > 0 and not(bound(c))
 

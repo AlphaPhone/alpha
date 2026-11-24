@@ -18,7 +18,9 @@ rules.
 - [Reminders](./sample/): the sample area, which only its own journeys mount: a read, a feed, an undo window and an attempt outside
 - [Text size](./sample/size.md): the second sample, which only its own journeys mount: senders, an opening that asks the phone, the phone's signals and a page-wide effect
 - [Maps](./maps/): search, places, directions, guidance and the map, over Cloud Maps
-- [Telephony](./telephony/): Phone, Messages, Contacts, voicemail and the call bar, on an Alpha image
+- [Phone](./phone/): calls, voicemail, phone details and Home cards, on an Alpha image
+- [Messages](./messages/): SMS and MMS threads, composer and send, on an Alpha image
+- [Contacts](./contacts/): the phone's address book and agent contact requests, on an Alpha image
 - [Platform](./platform/): the world outside the page as services: the phone, the resident agent, the cloud, what the build allows and what the earlier Alpha kept
 - [Image](./image/): the Alpha image, what it grants the launcher, the cable tools and the licences of what ships
 - [Updates](./update/): Alpha updating itself from its channel, and each page saving its work while it does

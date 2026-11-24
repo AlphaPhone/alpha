@@ -13,8 +13,9 @@ sent here. The agent never reads this list.
 
 ### What Contacts holds
 
-The list as last read, with its search and filter chip; the open contact as
-the phone holds it; the form; and the one change being written. A sheet
+The list as last read, with its search and filter chip, and whether the
+phone lets Alpha write contacts; the open contact as the phone holds it; the
+form; and the one change being written. A sheet
 counts what a contact has: a name, phone numbers, email addresses and
 notes, and says whether its notes can be read and edited here.
 
@@ -32,8 +33,8 @@ type Source = Listing | Card
 type Sheet = { names: int, phones: int, emails: int, notes: int, notable: bool }
 type Contacts = {
   front: bool, access: P::Permission,
-  list: R::Read, rows: int, more: bool, sought: bool, chip: Chip,
-  opened: bool, card: R::Read, held: Sheet, confirming: bool,
+  list: R::Read, rows: int, more: bool, sought: bool, chip: Chip, editable: bool,
+  opened: bool, contact: str, card: R::Read, held: Sheet, confirming: bool,
   form: Form, sheet: Sheet, dirty: bool,
   write: A::Attempt, change: Change,
 }
@@ -42,8 +43,8 @@ pure val blankSheet: Sheet = { names: 0, phones: 0, emails: 0, notes: 0, notable
 
 pure val initial: Contacts = {
   front: false, access: P::unasked,
-  list: R::unread, rows: 0, more: false, sought: false, chip: Everyone,
-  opened: false, card: R::unread, held: blankSheet, confirming: false,
+  list: R::unread, rows: 0, more: false, sought: false, chip: Everyone, editable: false,
+  opened: false, contact: "", card: R::unread, held: blankSheet, confirming: false,
   form: Shut, sheet: blankSheet, dirty: false,
   write: A::plan(0), change: Create,
 }
@@ -53,7 +54,8 @@ pure val initial: Contacts = {
 
 A read of the list or of one contact under its ticket, Android's prompt for
 address-book access, Android's Settings, Phone or Messages opened with a
-number filled in, and one change to the address book under its number.
+number filled in, the phone's own contact editor on a new contact or the
+open one, and one change to the address book under its number.
 
 ```quint
 type Effect =
@@ -61,6 +63,7 @@ type Effect =
   | Prompt
   | Settings
   | Open({ app: Reach })
+  | Editor({ fresh: bool })
   | Write({ id: int, change: Change })
 
 type Moved = { state: Contacts, out: List[Effect] }
@@ -74,6 +77,7 @@ pure def writes(out: List[Effect]): bool = out.some(e => match e { | Write(w) =>
 
 ```quint
 pure val ticketValues = Set(1, 2, 3, 4)
+pure val contactValues = Set("", "7", "8")
 pure val idValues = Set(1, 2, 3)
 pure val countValues = Set(-1, 0, 1, 2, 21)
 pure val seenValues = Set(
@@ -152,19 +156,20 @@ pure def loadMore(s: Contacts): Moved = refresh(s)
 
 ### Only the newest list read is taken, and with it what Android says about access
 
-A read that fails, or that finds access missing, shows no rows. A list read
-in full also ends the wait after a change whose outcome was unknown.
+A read that fails, or that finds access missing, shows no rows. The read
+also says whether the phone lets Alpha write contacts. A list read in full
+also ends the wait after a change whose outcome was unknown.
 
 ```quint
 pure def canListed(s: Contacts, ticket: int, count: int): bool =
   s.front and R::canAnswer(s.list, ticket) and count >= 0
 
-pure def listed(s: Contacts, ticket: int, ok: bool, grant: P::Grant, count: int, further: bool): Contacts =
+pure def listed(s: Contacts, ticket: int, ok: bool, grant: P::Grant, count: int, further: bool, editable: bool): Contacts =
   val access = P::observe(s.access, grant)
   val good = ok and P::allows(access)
   val kept = if (P::allows(access)) s else { ...s, opened: false, held: blankSheet, confirming: false, form: Shut, sheet: blankSheet, dirty: false }
   { ...kept,
-    access: access, list: R::answer(s.list, good),
+    access: access, list: R::answer(s.list, good), editable: if (good) editable else s.editable and P::allows(access),
     rows: if (good) count else 0, more: good and further and count > 0,
     write: if (good and s.write.outcome == A::Unknown) A::plan(s.write.id) else s.write }
 ```
@@ -255,12 +260,17 @@ pure def sometimesSettingsNeeded(s: Contacts): bool = s.front and P::needsSettin
 
 ### Opening a contact reads it from the phone afresh
 
-```quint
-pure def canOpenContact(s: Contacts): bool = readable(s) and s.rows > 0 and not(s.opened) and s.form == Shut
+The open contact is named by the phone's ID for it, which stays the same
+however often it is read again.
 
-pure def openContact(s: Contacts): Moved =
+```quint
+pure def canOpenContact(s: Contacts, contact: str): bool = readable(s) and s.rows > 0 and not(s.opened) and s.form == Shut and contact != ""
+
+pure def openContact(s: Contacts, contact: str): Moved =
   val card = R::ask(s.card)
-  { state: { ...s, opened: true, card: card, held: blankSheet }, out: List(Fetch({ source: Card, ticket: card.ticket })) }
+  { state: { ...s, opened: true, contact: contact, card: card, held: blankSheet }, out: List(Fetch({ source: Card, ticket: card.ticket })) }
+
+pure def alwaysAnOpenContactIsNamed(s: Contacts): bool = s.opened implies s.contact != ""
 ```
 
 ### A sheet holds at most one name and one note, twenty numbers and twenty addresses, and no notes where they are unavailable
@@ -334,13 +344,33 @@ A contact is not opened for changes while a change to the address book is
 being written.
 
 ```quint
-pure def canCompose(s: Contacts): bool = readable(s) and s.form == Shut and not(s.opened)
+pure def canCompose(s: Contacts): bool = readable(s) and s.editable and s.form == Shut and not(s.opened)
 
 pure def compose(s: Contacts): Contacts = { ...s, form: Adding, sheet: blankSheet, dirty: false }
 
-pure def canAmend(s: Contacts): bool = shown(s) and s.form == Shut and not(s.confirming) and not(pending(s))
+pure def canAmend(s: Contacts): bool = shown(s) and s.editable and s.form == Shut and not(s.confirming) and not(pending(s))
 
 pure def amend(s: Contacts): Contacts = { ...s, form: Changing, sheet: s.held, dirty: false }
+```
+
+### Where the phone does not let Alpha write contacts, New and Edit open the phone's own contact editor instead
+
+Alpha writes nothing then; the list is read again when Contacts next comes
+to the front.
+
+```quint
+pure def canComposeElsewhere(s: Contacts): bool = readable(s) and not(s.editable) and s.form == Shut and not(s.opened)
+
+pure def composeElsewhere(s: Contacts): Moved = { state: s, out: List(Editor({ fresh: true })) }
+
+pure def canAmendElsewhere(s: Contacts): bool = shown(s) and not(s.editable) and s.form == Shut and not(s.confirming)
+
+pure def amendElsewhere(s: Contacts): Moved = { state: s, out: List(Editor({ fresh: false })) }
+
+pure def stepTheFormOpensOnlyWhereAlphaMayWrite(before: Contacts, via: str, after: Contacts, out: List[Effect]): bool =
+  (before.form == Shut and after.form != Shut) implies before.editable
+
+pure def sometimesTheEditorIsHandedOver(s: Contacts): bool = shown(s) and not(s.editable) and s.list.status == R::Loaded
 ```
 
 ### The form takes a name, several numbers and addresses, and notes only where the contact's notes are available
@@ -374,11 +404,11 @@ pure def discard(s: Contacts): Contacts = { ...s, form: Shut, sheet: blankSheet,
 ### One change is written at a time, never while the last one's outcome is unknown, and never during a call that may be an emergency call
 
 `clear` is Phone's fact that no call which may be an emergency call is
-live.
+live. Nothing is written where the phone does not let Alpha write contacts.
 
 ```quint
 pure def writable(s: Contacts, clear: bool): bool =
-  clear and P::allows(s.access) and not(pending(s)) and not(uncertain(s))
+  clear and P::allows(s.access) and s.editable and not(pending(s)) and not(uncertain(s))
 
 pure def written(change: Change, s: Contacts): Moved =
   val write = A::dispatch(A::record(A::plan(s.write.id + 1)))
@@ -386,6 +416,12 @@ pure def written(change: Change, s: Contacts): Moved =
 ```
 
 ### Save writes a form that was changed and has a name, a number or an address
+
+A change names the version of the contact the phone last read, and is
+written over the contact as the phone holds it: a number or an address it
+already had keeps its label, and its name stays as the phone holds it unless
+the form renames it. A contact changed on the phone since it was read is
+refused as stale: nothing is written, and the form stays for another try.
 
 ```quint
 pure def canSave(s: Contacts, clear: bool): bool =
