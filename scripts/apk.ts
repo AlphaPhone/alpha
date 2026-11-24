@@ -1,11 +1,11 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { androidEnv, tool } from "./toolchain.ts";
-import {
-  apkDistributionProblems, extractApkWebPayload, parseApkSignerDigest, readApk, readApkSignerDigest,
-} from "../vendor/eliza/packages/os/android/apk-distribution.mjs";
-import { manifestFacts as readManifestFacts, parseXmlTree as parseAaptTree } from "../vendor/eliza/packages/os/android/android-manifest-facts.mjs";
+// Upstream decodes the aapt dumps; Alpha's release policy over those facts is its own (below).
+import { manifestFacts as readManifestFacts, parseXmlTree as parseAaptTree } from "@elizaos/os/image";
 
 export type ApkMode = "debug" | "release";
 export type ApkVariant = "launcher";
@@ -23,7 +23,7 @@ interface ManifestComponent {
   permission: string | null;
 }
 interface ManifestFacts {
-  packageName: string | undefined;
+  packageName: string | null;
   versionCodeText: string | null;
   versionCode: number | null;
   versionName: string | null;
@@ -61,20 +61,17 @@ interface ApkInspection extends DistributionInput {
   removedSpeechClasses: string[];
 }
 
-// Upstream's JS parser builds children and attributes after initialization.
+// Upstream's parser builds children and attributes after initialization.
 export const parseXmlTree = parseAaptTree as (text: string, options?: {decodeAttribute?: (encoded: string) => string}) => ManifestNode;
 export const manifestFacts = readManifestFacts as (xml: string, badging?: string) => ManifestFacts;
-const assessDistribution = apkDistributionProblems as (
-  apk: DistributionInput,
-  policy: Omit<typeof DISTRIBUTION_POLICY, "exportedComponents"> & {exportedComponents: Readonly<Record<string, string | null>>},
-  options?: DistributionOptions,
-) => {facts: ManifestFacts; problems: string[]};
 
+/** Capacitor packages the renderer here; its index marks a web payload. */
+const WEB_PAYLOAD_INDEX = "assets/public/index.html";
+const DEX_ENTRY = /^classes\d*\.dex$/;
+const TEST_ONLY_NAME = /mock|fixture/i;
 
-// Alpha's distribution policy as data for the upstream APK inspection
-// (vendor/eliza/packages/os/android/apk-distribution.mjs).
-// Development hooks no APK may package. The upstream inspection admits them only in a test-mocks
-// debug build, and Alpha never builds one, so every APK is refused if it carries them.
+// Alpha's distribution policy. Development hooks no APK may package: Alpha never builds a
+// test-mocks APK, so every APK is refused if it carries them.
 export const DEVELOPMENT_CLASSES = Object.freeze([
   "SyntheticAutofillService",
   "DevelopmentAgentPlugin",
