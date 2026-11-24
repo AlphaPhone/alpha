@@ -341,8 +341,10 @@ export const speechService = Layer.effect(Speech, effect {
       const sent = held.send({ type: "warmCloud", connection, now, inFront: facts.inFront, online: facts.online }) catch () => undefined
       if (sent === undefined) return
       const account = try routes.account()
-      const relay = native.available(RELAY) catch () => false
-      if (account.kind === "cloud" && relay) native.invoke(RELAY, "prewarmCloudSpeech", { environment: account.environment }) catch () => undefined
+      if (account.kind === "cloud") fork.detached effect {
+        const relay = native.available(RELAY) catch () => false
+        if (relay) timeout(native.invoke(RELAY, "prewarmCloudSpeech", { environment: account.environment }), WARM_LIMIT) catch () => undefined
+      }
       fork.detached effect { timeout(resident.json("POST", "/api/cloud/warm", {}), WARM_LIMIT) catch () => undefined }
     },
     effect setMuted(muted: boolean) {
