@@ -51,12 +51,12 @@ const machine = reacting(Page, { carry })
 effect function read(): void!!(LauncherUpdates | Names | Page.Machine) {
   const page = try Page.Machine
   const names = try Names
-  const read = try Effect.option((try LauncherUpdates).activation())
-  if (Option.isNone(read)) {
+  const reply = try Effect.option((try LauncherUpdates).activation())
+  if (Option.isNone(reply)) {
     try ignore(page.send({ type: "unreadable" }))
     return
   }
-  const now = read.value
+  const now = reply.value
   const number = Option.isSome(now.ids) ? try names.number(`activation:${now.ids.value.activationId}`) : (try page.get()).activation
   if (Option.isSome(now.ids)) known.set(number, now.ids.value)
   if (now.pending && number > 0) {
