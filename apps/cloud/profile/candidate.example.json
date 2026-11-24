@@ -1,0 +1,348 @@
+{
+  "version": 1,
+  "name": "Alpha Cloud",
+  "environments": {
+    "production": {
+      "name": "Alpha Cloud",
+      "api": "https://api.alphacompute.cc",
+      "web": "https://cloud.alphacompute.cc",
+      "entitlementAudience": "ai.alphacompute.alphaphone",
+      "mailSender": "noreply@alphacompute.cc",
+      "databaseIdentity": "2f0a1c1d3e4b5a69788796a5b4c3d2e1f00112233445566778899aabbccddeef",
+      "firstPartyOrigins": [
+        "https://cloud.alphacompute.cc"
+      ],
+      "capabilities": [
+        "inference",
+        "speech",
+        "maps",
+        "managedGoogle",
+        "billing"
+      ],
+      "documents": {
+        "terms": {
+          "title": "Alpha Terms",
+          "revision": "2026-11-23",
+          "sections": [
+            {
+              "title": "Your phone and its agent",
+              "paragraphs": [
+                "Alpha is a personal agent phone. Its agent runs on the phone; this cloud supplies sign-in, model inference, speech and the services the agent asks for on your behalf."
+              ]
+            },
+            {
+              "title": "Your plan",
+              "paragraphs": [
+                "A paid plan renews each month until you cancel it, and a cancellation takes effect when the paid period ends."
+              ]
+            }
+          ]
+        },
+        "privacy": {
+          "title": "Alpha Privacy",
+          "revision": "2026-11-23",
+          "sections": [
+            {
+              "title": "What the cloud keeps",
+              "paragraphs": [
+                "The cloud keeps your account, your sign-in methods, the devices signed in to it and what each paid request cost. It does not keep your conversations with Alpha."
+              ]
+            },
+            {
+              "title": "Your choices",
+              "paragraphs": [
+                "You may sign a device out, disconnect Google, or ask for your account to be deleted at any time."
+              ]
+            }
+          ]
+        }
+      },
+      "signIn": {
+        "smsCountries": [],
+        "smsHourlyBudget": 0
+      },
+      "mail": {
+        "kind": "https",
+        "url": "https://api.resend.com/emails",
+        "apiKeyEnv": "RESEND_API_KEY"
+      },
+      "sms": {
+        "kind": "none"
+      },
+      "digestKeyEnv": "CLOUD_DIGEST_KEY",
+      "sealing": {
+        "currentKeyId": "alpha-production-seal-1",
+        "keys": [
+          {
+            "keyId": "alpha-production-seal-1",
+            "env": "CLOUD_SEALING_KEY"
+          }
+        ]
+      },
+      "entitlement": {
+        "keyId": "entitlement-1",
+        "signingKeyEnv": "CLOUD_ENTITLEMENT_KEY",
+        "publicKeys": [
+          {
+            "kid": "entitlement-1",
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "RwIpsg2vaG6Q8pJcPP8rnReb71VKZqTlEMeF14ahp-E",
+            "y": "rzJhMHg6SUtsGH4dntUcMgkpnt8qM_ITn_REryydY5U"
+          }
+        ]
+      },
+      "google": {
+        "clientId": "alpha-production-web.apps.googleusercontent.com",
+        "serverClientId": "alpha-production-server.apps.googleusercontent.com",
+        "clientSecretEnv": "GOOGLE_CLIENT_SECRET",
+        "nativeSignIn": false,
+        "accountsUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+        "tokenUrl": "https://oauth2.googleapis.com/token",
+        "revokeUrl": "https://oauth2.googleapis.com/revoke",
+        "jwksUrl": "https://www.googleapis.com/oauth2/v3/certs",
+        "apiUrl": "https://www.googleapis.com",
+        "issuers": [
+          "https://accounts.google.com",
+          "accounts.google.com"
+        ]
+      },
+      "billing": {
+        "apiUrl": "https://api.stripe.com",
+        "secretKeyEnv": "STRIPE_SECRET_KEY",
+        "webhookSecretEnv": "STRIPE_WEBHOOK_SECRET",
+        "publishableKey": "pk_live_alpha",
+        "plans": {
+          "plus_monthly": {
+            "priceId": "price_alphaplus",
+            "productId": "prod_alphaplus"
+          },
+          "pro_monthly": {
+            "priceId": "price_alphapro",
+            "productId": "prod_alphapro"
+          }
+        }
+      },
+      "inference": {
+        "providers": [
+          {
+            "id": "cerebras",
+            "baseUrl": "https://api.cerebras.ai/v1",
+            "apiKeyEnv": "CEREBRAS_API_KEY"
+          }
+        ],
+        "models": [
+          {
+            "id": "qwen-3.8-27b",
+            "provider": "cerebras",
+            "upstreamModel": "qwen-3.8-27b",
+            "vision": false,
+            "defaultMaxTokens": 40960
+          }
+        ]
+      },
+      "speech": {
+        "provider": "cartesia",
+        "baseUrl": "https://api.cartesia.ai",
+        "realtimeUrl": "wss://api.cartesia.ai/stt/websocket",
+        "apiKeyEnv": "CARTESIA_API_KEY",
+        "tts": {
+          "defaultVoiceId": "alpha-voice",
+          "defaultModelId": "sonic-2",
+          "voiceIds": [
+            "alpha-voice"
+          ],
+          "modelIds": [
+            "sonic-2"
+          ],
+          "microsPerCharacter": 30
+        },
+        "stt": {
+          "languageCodes": [
+            "en",
+            "en-US"
+          ],
+          "microsPerSecond": 100
+        }
+      },
+      "maps": {
+        "provider": "google",
+        "baseUrl": "https://maps.googleapis.com",
+        "apiKeyEnv": "GOOGLE_MAPS_API_KEY",
+        "coverage": "global",
+        "datasetRevision": "2026-11"
+      }
+    },
+    "staging": {
+      "name": "Alpha Cloud",
+      "api": "https://api-staging.alphacompute.cc",
+      "web": "https://cloud-staging.alphacompute.cc",
+      "entitlementAudience": "ai.alphacompute.alphaphone",
+      "mailSender": "noreply@alphacompute.cc",
+      "databaseIdentity": "3e1b2d2e4f5c6b7a8998a7b6c5d4e3f201122334455667788990aabbccddeeff",
+      "firstPartyOrigins": [
+        "https://cloud-staging.alphacompute.cc"
+      ],
+      "capabilities": [
+        "inference",
+        "speech",
+        "maps",
+        "managedGoogle",
+        "billing"
+      ],
+      "documents": {
+        "terms": {
+          "title": "Alpha Terms",
+          "revision": "2026-11-23",
+          "sections": [
+            {
+              "title": "Your phone and its agent",
+              "paragraphs": [
+                "Alpha is a personal agent phone. Its agent runs on the phone; this cloud supplies sign-in, model inference, speech and the services the agent asks for on your behalf."
+              ]
+            },
+            {
+              "title": "Your plan",
+              "paragraphs": [
+                "A paid plan renews each month until you cancel it, and a cancellation takes effect when the paid period ends."
+              ]
+            }
+          ]
+        },
+        "privacy": {
+          "title": "Alpha Privacy",
+          "revision": "2026-11-23",
+          "sections": [
+            {
+              "title": "What the cloud keeps",
+              "paragraphs": [
+                "The cloud keeps your account, your sign-in methods, the devices signed in to it and what each paid request cost. It does not keep your conversations with Alpha."
+              ]
+            },
+            {
+              "title": "Your choices",
+              "paragraphs": [
+                "You may sign a device out, disconnect Google, or ask for your account to be deleted at any time."
+              ]
+            }
+          ]
+        }
+      },
+      "signIn": {
+        "smsCountries": [],
+        "smsHourlyBudget": 0
+      },
+      "mail": {
+        "kind": "https",
+        "url": "https://api.resend.com/emails",
+        "apiKeyEnv": "RESEND_API_KEY"
+      },
+      "sms": {
+        "kind": "none"
+      },
+      "digestKeyEnv": "CLOUD_DIGEST_KEY",
+      "sealing": {
+        "currentKeyId": "alpha-staging-seal-1",
+        "keys": [
+          {
+            "keyId": "alpha-staging-seal-1",
+            "env": "CLOUD_SEALING_KEY"
+          }
+        ]
+      },
+      "entitlement": {
+        "keyId": "entitlement-1",
+        "signingKeyEnv": "CLOUD_ENTITLEMENT_KEY",
+        "publicKeys": [
+          {
+            "kid": "entitlement-1",
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "RwIpsg2vaG6Q8pJcPP8rnReb71VKZqTlEMeF14ahp-E",
+            "y": "rzJhMHg6SUtsGH4dntUcMgkpnt8qM_ITn_REryydY5U"
+          }
+        ]
+      },
+      "google": {
+        "clientId": "alpha-staging-web.apps.googleusercontent.com",
+        "serverClientId": "alpha-staging-server.apps.googleusercontent.com",
+        "clientSecretEnv": "GOOGLE_CLIENT_SECRET",
+        "nativeSignIn": false,
+        "accountsUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+        "tokenUrl": "https://oauth2.googleapis.com/token",
+        "revokeUrl": "https://oauth2.googleapis.com/revoke",
+        "jwksUrl": "https://www.googleapis.com/oauth2/v3/certs",
+        "apiUrl": "https://www.googleapis.com",
+        "issuers": [
+          "https://accounts.google.com",
+          "accounts.google.com"
+        ]
+      },
+      "billing": {
+        "apiUrl": "https://api.stripe.com",
+        "secretKeyEnv": "STRIPE_SECRET_KEY",
+        "webhookSecretEnv": "STRIPE_WEBHOOK_SECRET",
+        "publishableKey": "pk_test_alpha",
+        "plans": {
+          "plus_monthly": {
+            "priceId": "price_alphaplusstaging",
+            "productId": "prod_alphaplusstaging"
+          },
+          "pro_monthly": {
+            "priceId": "price_alphaprostaging",
+            "productId": "prod_alphaprostaging"
+          }
+        }
+      },
+      "inference": {
+        "providers": [
+          {
+            "id": "cerebras",
+            "baseUrl": "https://api.cerebras.ai/v1",
+            "apiKeyEnv": "CEREBRAS_API_KEY"
+          }
+        ],
+        "models": [
+          {
+            "id": "qwen-3.8-27b",
+            "provider": "cerebras",
+            "upstreamModel": "qwen-3.8-27b",
+            "vision": false,
+            "defaultMaxTokens": 40960
+          }
+        ]
+      },
+      "speech": {
+        "provider": "cartesia",
+        "baseUrl": "https://api.cartesia.ai",
+        "realtimeUrl": "wss://api.cartesia.ai/stt/websocket",
+        "apiKeyEnv": "CARTESIA_API_KEY",
+        "tts": {
+          "defaultVoiceId": "alpha-voice",
+          "defaultModelId": "sonic-2",
+          "voiceIds": [
+            "alpha-voice"
+          ],
+          "modelIds": [
+            "sonic-2"
+          ],
+          "microsPerCharacter": 30
+        },
+        "stt": {
+          "languageCodes": [
+            "en",
+            "en-US"
+          ],
+          "microsPerSecond": 100
+        }
+      },
+      "maps": {
+        "provider": "google",
+        "baseUrl": "https://maps.googleapis.com",
+        "apiKeyEnv": "GOOGLE_MAPS_API_KEY",
+        "coverage": "global",
+        "datasetRevision": "2026-11"
+      }
+    }
+  }
+}
