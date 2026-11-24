@@ -102,6 +102,12 @@ export class BrowserSurface extends WebPlugin {
   async setBookmark(input:{url:string;saved:boolean;title?:string|null}) {
    const url=this.address(input.url);
    if(input.title!=null&&typeof input.title!=='string')throw Error('A bookmark title must be text.');
+   // One save at a time across tabs: the title record is read before the address list changes and
+   // written after it, so an overlapping save would otherwise read titles bound to a list that has
+   // since moved and drop every saved name.
+   return navigator.locks.request('alpha.browser.bookmark-save',()=>this.saveBookmark(url,input));
+  }
+  private async saveBookmark(url:string,input:{saved:boolean;title?:string|null}) {
    const titles=await titleRecord();
    const next=await bookmarkDocument.edit<unknown[],BookmarkEntry[]>(()=>[],rows=>{
     const stored=withTitles(bookmarkEntries(rows),titles),kept=stored.find(entry=>entry.url===url)?.title;
