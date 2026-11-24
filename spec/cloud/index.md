@@ -303,13 +303,13 @@ query asks to go back to Alpha.
 
 ```quint
 type ReturnQuery = {
-  keys: int, repeated: bool, unknown: bool, stateValid: bool,
+  given: int, repeated: bool, unknown: bool, stateValid: bool,
   hasCode: bool, codeFits: bool, hasError: bool, hasDescription: bool, descriptionFits: bool
 }
 type ReturnAnswer = Reopened | InvalidReturn | Cancelled | Continue
 
 pure def returnAnswer(q: ReturnQuery): ReturnAnswer =
-  if (q.keys == 0) Reopened
+  if (q.given == 0) Reopened
   else if (q.repeated or q.unknown or not(q.stateValid) or q.hasCode == q.hasError
     or (q.hasCode and not(q.codeFits))
     or (q.hasDescription and (not(q.hasError) or not(q.descriptionFits)))) InvalidReturn
