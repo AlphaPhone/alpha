@@ -117,6 +117,7 @@ export function askRoutes(scene: AskScene): Route[] {
         if (found[2] === undefined) return Response.json({ text: `You said: ${body.text}`, ...named(scene.said.length) });
         scene.said.push(body.text);
         keep("user", body.text);
+        Object.assign(messages.at(-1) ?? {}, { clientMessageId: (body as { clientMessageId?: string }).clientMessageId });
         return reply(scene, `r${found[1]}`, body.text, (said) => keep("assistant", said));
       });
     },

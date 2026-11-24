@@ -31,7 +31,7 @@ const titled = Schema.Struct({ ...ConversationRecord.fields, title: Schema.Strin
 const listing = () => Schema.Struct({ conversations: Schema.Array(titled) })
 const made = () => Schema.Struct({ conversation: titled })
 /** A page of a conversation's messages, and a page of search hits, as eliza's history routes give them. */
-const page = () => Schema.Struct({ messages: Schema.Array(Schema.Struct({ id: Schema.String, role: Schema.Literals(["user", "assistant"]), text: Schema.String })) })
+const page = () => Schema.Struct({ messages: Schema.Array(Schema.Struct({ id: Schema.String, role: Schema.Literals(["user", "assistant"]), text: Schema.String, clientMessageId: Schema.optionalKey(Schema.String) })) })
 const hits = () => Schema.Struct({ results: Schema.Array(Schema.Struct({ conversationId: Schema.NonEmptyString, roomId: Schema.NonEmptyString, messageId: Schema.String, text: Schema.String })) })
 const health = () => Schema.Struct({ ready: Schema.Boolean })
 
@@ -175,6 +175,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const metadata = observed(told, context)
     const result = tryPromise(() => controller.send({ text, ...(metadata === undefined ? {} : { metadata }) }, { stream: hooks })) catch () => undefined
     board.change({ reply: "", label: "" })
+    board.lastSentId = result !== undefined && "clientMessageId" in result ? result.clientMessageId : ""
     const ending = replied(ticket, result)
     if (ending.type === "failed") board.change({ failure: { kind: ending.kind, fix: fixOf(result), waitMs: waitOf(result) } })
     show(ending)
@@ -196,6 +197,7 @@ effect function aborted(turn: number): Conversation.Event!!Turns {
 }
 
 // spec/app/assistant/index.md, "The read says the reply finished anyway, was stopped for sure, was never recorded, or to look later"
+/** The message is found by the id its turn was posted under, or by its text where the post never said which. */
 effect function checked(recheck: number): Conversation.Event!!(Agent | Talk | Chats.Machine) {
   return effect {
     const { board } = try Talk
@@ -203,7 +205,7 @@ effect function checked(recheck: number): Conversation.Event!!(Agent | Talk | Ch
     const known = board.known(chats.chosen)
     if (known === undefined) return { type: "reconcile", ticket: recheck, found: "Unread" }
     const { messages } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(known.record.id)}/messages`), page())
-    const asked = messages.findLastIndex((one) => one.role === "user" && one.text === board.lastSent)
+    const asked = messages.findLastIndex((one) => one.role === "user" && (board.lastSentId === "" ? one.text === board.lastSent : one.clientMessageId === board.lastSentId))
     const found: Conversation.Found = asked < 0 ? "Unrecorded" : messages.slice(asked + 1).some((one) => one.role === "assistant") ? "Ended" : "Unended"
     return { type: "reconcile", ticket: recheck, found }
   } catch () => ({ type: "reconcile", ticket: recheck, found: "Unread" })
