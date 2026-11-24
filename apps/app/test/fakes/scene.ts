@@ -7,6 +7,7 @@ import { type Route, answering } from "./routes.ts";
 import { type SampleScene, sampleRoutes, sampleScene } from "./sample.ts";
 import { type LauncherScene, launcherScene } from "./launcher.ts";
 import { type SettingsScene, settingsScene } from "./settings.ts";
+import { type FilesScene, filesScene } from "./files.ts";
 
 /** Everything the fake world holds, one field per area; a journey reads and changes it. */
 export interface Scene {
@@ -27,6 +28,7 @@ export interface Scene {
   readonly settings: SettingsScene;
   readonly inbox: InboxScene;
   readonly calendar: CalendarScene;
+  readonly files: FilesScene;
 }
 
 /** A fresh world: each area adds its field here, one line each. */
@@ -39,6 +41,7 @@ export function scene(): Scene {
     settings: settingsScene(),
     inbox: inboxScene(),
     calendar: calendarScene(),
+    files: filesScene(),
   };
 }
 

@@ -16,3 +16,4 @@ rules.
 - [Ask Alpha](./ask/): one conversation with the resident agent
 - [Reminders](./sample/): the sample area, which only its own journeys mount: a read, a feed, an undo window and an attempt outside
 - [Text size](./sample/size.md): the second sample, which only its own journeys mount: senders, an opening that asks the phone, the phone's signals and a page-wide effect
+- [Files](./files/): the phone's shared storage, a folder, a change, Recent, the preview and the Trash

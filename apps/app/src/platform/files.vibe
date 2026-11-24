@@ -1,0 +1,50 @@
+// spec/app/files/index.md, "Files is closed, unsupported, not yet allowed, denied, at the top, reading, unavailable or showing a place"
+import type { ElizaFilesPlugin } from "@elizaos/os/bridges/definitions/files"
+import { registered } from "./device.vibe"
+
+module held {
+  import { filesClient } from "@elizaos/os/bridges/files"
+
+  let made: ReturnType<typeof filesClient> | undefined
+  /** eliza's client of the plugin, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
+  export function client(): ReturnType<typeof filesClient> {
+    return (made ??= filesClient())
+  }
+}
+import { client } from held
+
+/** The phone's plugin refused, broke or is absent: `method` is the plugin's method, `cause` what it said. */
+export error FilesFailed { method: string; cause: unknown }
+
+/**
+ * The phone's shared storage: eliza's client of its `ElizaFiles` plugin, which reads, changes, shares and opens the
+ * files with the owner's all-files access, or none where the page is no phone or its host did not register the plugin.
+ * `changed` says each time the phone saw the storage change.
+ */
+export service Files {
+  readonly plugin: Option.Option<ElizaFilesPlugin>
+  readonly changed: Stream.Stream<void>
+}
+
+/** One call of the plugin, failing with `FilesFailed` where the phone refused it, broke, or there is no plugin. */
+export effect function called<A>(method: string, call: (plugin: ElizaFilesPlugin) => Promise<A>): A!FilesFailed!Files {
+  const { plugin } = try Files
+  if (Option.isNone(plugin)) throw new FilesFailed({ method, cause: "no phone storage" })
+  return try tryPromise({ try: () => call(plugin.value), catch: (cause) => new FilesFailed({ method, cause }) })
+}
+
+const name = "ElizaFiles"
+
+/** The phone: eliza's client of `ElizaFiles` where the host registered it, and its `storageChanged` events. */
+export const phoneFiles = Layer.sync(Files, () => {
+  if (!registered(name)) return { plugin: Option.none(), changed: Stream.empty }
+  const plugin = client()
+  const changed = Stream.callback<void>((queue) => acquireRelease(
+    promise(() => plugin.addListener("storageChanged", () => { Queue.offerUnsafe(queue, undefined) })),
+    (handle) => promise(() => handle.remove()),
+  ))
+  return { plugin: Option.some(plugin), changed }
+})
+
+/** A browser: no phone storage, which Files says rather than asking for access. */
+export const browserFiles = Layer.succeed(Files, { plugin: Option.none(), changed: Stream.empty })
