@@ -1,10 +1,41 @@
-// spec/telephony/actions.md, "A view change that shows the outcome waits for the reply that carries it"
+// spec/telephony/actions.md, "A name is looked up on the phone and the owner picks the exact number, even for one match"; spec/telephony/actions.md, "A view change that shows the outcome waits for the reply that carries it"
 import type { ExecutorCall } from "@elizaos/agent/client"
 import { assert, it } from "@effect/vitest"
+import type { ContactDetail, ContactId, ContactVersion } from "@elizaos/os/bridges/contacts"
 import { AssistantHost } from "../../src/assistant/host.vibe"
+import { changeLines } from "../../src/telephony/actions.vibe"
 import { operationPorts } from "../../src/telephony/operations.vibe"
 import { TelephonyCalls } from "../../src/telephony/ports.vibe"
 import { fakePhone } from "./fakes.vibe"
+
+const maya: ContactDetail = {
+  id: "7" as ContactId, lookup: "k7", displayName: "Maya Chen", givenName: "Maya", familyName: "Chen", starred: false,
+  phoneNumbers: [{ number: "4155550100", type: "mobile" }, { number: "4155550111", type: "work" }], emailAddresses: [{ address: "Maya@example.com", type: "home" }],
+  version: "a".repeat(64) as ContactVersion,
+}
+
+// spec/telephony/actions.md, "A name is looked up on the phone and the owner picks the exact number, even for one match"
+it("a contact change says Remove, Add, Keep or Rename from on each of its lines, and a removed number never reads as kept", () => {
+  const replaced = changeLines(maya, {
+    displayName: "Maya C.",
+    phoneNumbers: [{ number: "(415) 555-0111", type: "work" }, { number: "4155550123", type: "mobile" }],
+    emailAddresses: [{ address: "maya@example.com", type: "home" }],
+  })
+  const unchanged = changeLines(maya, { displayName: "Maya Chen", phoneNumbers: maya.phoneNumbers, emailAddresses: [] })
+  assert.deepStrictEqual(
+    { replaced, unchanged: unchanged.map((line) => `${line.word} ${line.value}`) },
+    {
+      replaced: [
+        { word: "Rename from", value: "Maya Chen", number: false },
+        { word: "Remove", value: "4155550100", number: true },
+        { word: "Keep", value: "(415) 555-0111", number: true },
+        { word: "Add", value: "4155550123", number: true },
+        { word: "Keep", value: "maya@example.com", number: false },
+      ],
+      unchanged: ["Remove Maya@example.com", "Keep 4155550100", "Keep 4155550111"],
+    },
+  )
+})
 
 // spec/telephony/actions.md, "A view change that shows the outcome waits for the reply that carries it"
 it.live("a keypad step opens the way the assistant opens a view, so a voice conversation claims it instead of being left", () => effect {

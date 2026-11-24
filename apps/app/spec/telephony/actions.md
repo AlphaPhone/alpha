@@ -89,12 +89,15 @@ pure def sometimesAnUngroundedNumberRefused(a: Actions): bool = resultOf(a.ongoi
 
 Every dialable number of every matching contact is one candidate. No match finishes as not found.
 A new contact whose name or any of whose numbers is already in Contacts shows that contact as the
-one candidate, "Add anyway"; a change shows each matching contact before and after, with its `set`
+one candidate, "Add anyway". A change shows each matching contact before and after, with its `set`
 fields replaced (or added beside the existing values) and its explicit `add` and `remove` values
-applied; a change that would leave a contact exactly as it is is never offered. A name is looked
-up in at most ten contacts, reading one more to tell whether more matched; when more did, the review
-says that only the first ten are listed. A removal the
-phone stages in its Undo window is the deletion the owner approved, and reads as deleted.
+applied; a change that would leave a contact exactly as it is is never offered. Each of its numbers and addresses is a line of its own,
+never cut short, that says in words what the change does to it: "Remove" with the value struck
+through, "Add" with the value in bold, or "Keep"; a new name also shows "Rename from" with the old
+name struck through. A removed value never reads as kept, even where the strike is not seen. A name
+is looked up in at most ten contacts, reading one more to tell whether more matched; when more did,
+the review says that only the first ten are listed. A removal the phone stages in its Undo window is
+the deletion the owner approved, and reads as deleted.
 
 ```quint
 pure def canCandidatesFound(a: Actions, runId: str, by: Actor): bool = by == Device and runIdOf(a.ongoing) == runId and isResolving(a.ongoing) and formOf(a.ongoing) == ContactLookup
@@ -119,6 +122,11 @@ pure def stepALookupReachesTheGuardOnlyByTheOwnersChoice(before: Actions, via: s
 pure def stepTheChosenNumberIsTheOneShown(before: Actions, via: str, after: Actions): bool =
   via == "candidateChosen" implies candidatesOf(before.ongoing).some(x => x.number == guardedNumberOf(after.ongoing))
 pure def sometimesTheOwnerPicksAmongNames(a: Actions): bool = candidatesOf(a.ongoing).length() > 1
+type LineChange = RemoveLine | AddLine | KeepLine
+pure def lineChange(before: bool, after: bool): LineChange =
+  if (before and not(after)) RemoveLine else if (after and not(before)) AddLine else KeepLine
+pure def lawARemovedValueNeverReadsAsKept(before: bool, after: bool): bool =
+  (before and not(after)) iff lineChange(before, after) == RemoveLine
 ```
 
 ### The owner's Not now, leaving the app or a changed context ends a run that has not dispatched

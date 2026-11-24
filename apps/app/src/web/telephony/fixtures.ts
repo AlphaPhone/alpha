@@ -72,6 +72,11 @@ export const choosing: Actions = {
   ] },
   ran: ["op1"], dispatches: 0, refusals: 0,
 };
+/** A contact change choosing its one row, whose fields are `reviewChange`'s. */
+export const choosingChange: Actions = {
+  ongoing: { tag: "Choosing", runId: "op2", kind: "ContactChange", candidates: [{ candidateId: "7:replace", title: "Maya Chen", number: "7:replace" }] },
+  ran: ["op2"], dispatches: 0, refusals: 0,
+};
 
 /** Home with an unread conversation and a missed call. */
 export const attention: Attention = {

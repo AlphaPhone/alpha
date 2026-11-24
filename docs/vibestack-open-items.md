@@ -365,7 +365,7 @@ vibestack-dp is an upstream question.
   - a held step counts the turn's own delivered switch as current and nothing else; the Browser step asks whether a chat request a view change would cancel is pending (`requestHoldsViews`), not whether any request is (an automatic workflow generation is not);
   - a view step's show may settle later (the Messages draft step settles once its thread is open); the voice release path waits for it before pinning, and while a navigation commit is still placing its view, changes on the claimed view count as current, so the voice conversation is kept.
 - **Telephony (#1453):**
-  - the contact-save review shows each line on its own wrapping line, with its strike and weight, and says Remove, Add, Keep or Rename from in words;
+  - ported: the contact-save review shows each line on its own wrapping line, with its strike and weight, and says Remove, Add, Keep or Rename from in words (`changeLines`, `src/web/telephony/ReviewRowsView.tsx`; its ContactChange story);
   - when more contacts match, the card says "More than N contacts match …, including" (the on-phone review now reads one row past the ten and shows its note; the card is drawn before the lookup and says nothing);
   - a new contact's numbers are also looked up with Android's exact number matching, so a number saved under another name is shown before it is added again. The port now looks each number up through the provider's own query (`contacts.list`), not Android's exact number matching.
 
