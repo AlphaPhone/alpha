@@ -166,8 +166,9 @@ and the contacts that already hold its name or number are counted, to be
 shown first. A failed search ends the request as unavailable.
 
 ```quint
-pure def canFound(r: Request, ticket: int, matches: int, by: Actor): bool =
+pure def canFound(r: Request, ticket: int, matches: int, contact: str, by: Actor): bool =
   by == Device and r.stage == Looking and R::canAnswer(r.lookup, ticket) and matches >= 0
+    and ((matches == 1 and not(reachesANumber(r.ask)) and r.ask != AddContact) implies contact != "")
 
 pure def found(r: Request, ticket: int, ok: bool, matches: int, more: bool, unchanged: bool, contact: str, by: Actor): Moved =
   val searched = {
