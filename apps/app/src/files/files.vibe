@@ -371,8 +371,13 @@ const access = hearing(
   "Phone",
 )
 
-// spec/app/files/index.md, "The place showing is read again when asked, and only its newest answer is taken; a folder that no longer exists brings the owner back to the top and says so, never that the storage is unavailable"
-const changes = hearing(Stream.unwrap(effect { return (try Files).changed }), Browser.Machine, (): Event => ({ type: "refresh" }), "Phone")
+// spec/app/files/index.md, "The place showing is read again when asked, and only its newest answer is taken; a folder that no longer exists brings the owner back to the top and says so, never that the storage is unavailable": when the phone says the storage changed, and when Alpha comes back to the front
+const changes = hearing(
+  Stream.unwrap(effect { return Stream.merge((try Files).changed, Stream.filter((try Device).visible, (visible) => visible)) }),
+  Browser.Machine,
+  (): Event => ({ type: "refresh" }),
+  "Phone",
+)
 
 /** A volume's Trash: each item by its id, the file it was, and how long the phone keeps it. */
 const keptFor = 30 * 86_400_000

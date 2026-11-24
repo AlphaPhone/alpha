@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Browser } from "../gen/app__files.effect.vibe";
 import { Machine as Bin } from "../gen/app__files__trash.effect.vibe";
 import files from "../src/files/index.tsx";
-import { button, closeAll, fill, hardware, later, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
+import { button, closeAll, fill, hardware, later, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -93,7 +93,7 @@ describe("Files on a phone", () => {
   });
 
   it("Arrange and filter what I see (spec/app/files/index.md, \"Story: Arrange and filter what I see\")", async () => {
-    const { alpha, runtime } = await onFiles();
+    const { alpha, runtime, world } = await onFiles();
     await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
     await press("Internal storage");
     await press("Download");
@@ -114,6 +114,12 @@ describe("Files on a phone", () => {
     expect(runtime.runSync(Browser.use((m) => m.get())).search.hits.map((hit) => hit.name)).toEqual(["lease.pdf"]);
     await press("Clear the filter");
     await until(alpha, runtime, Browser, (s) => !s.search.searching);
+
+    // spec/app/files/index.md, "The place showing is read again when asked, and only its newest answer is taken; a folder that no longer exists brings the owner back to the top and says so, never that the storage is unavailable": coming back to Alpha reads the place again
+    await seen(false);
+    world.files.stored.push({ volume: "primary", path: "Download/new.txt", directory: false, mimeType: "text/plain", size: 1, modified: 9 });
+    await seen(true);
+    await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 3);
   });
 
   it("Change my files (spec/app/files/index.md, \"Story: Change my files\")", async () => {
