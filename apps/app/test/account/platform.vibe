@@ -85,6 +85,21 @@ function refused(value: Answer): value is Refusal {
   return typeof value === "object" && value !== null && typeof (value as { refuse?: unknown }).refuse === "string"
 }
 
+/** The native host answering from `native` (a `Refusal` rejects with its code) and replaying `events`, recording each call in `calls`. */
+export function nativeHost(calls: Calls, native: Record<string, Answer>, events: Record<string, ReadonlyArray<unknown>> = {}) {
+  return {
+    available: () => Effect.succeed(true),
+    invoke: (plugin: string, method: string, args?: unknown) => {
+      calls.push({ name: `${plugin}.${method}`, args })
+      const found = answer(native, `${plugin}.${method}`, args)
+      if (found === undefined) return Effect.fail(new NativeFailed({ plugin, method, message: "absent" }))
+      if (refused(found)) return Effect.fail(new NativeFailed({ plugin, method, message: "refused", code: found.refuse }))
+      return Effect.succeed(found)
+    },
+    listen: (plugin: string, event: string) => Stream.fromIterable(events[`${plugin}.${event}`] ?? [])
+  }
+}
+
 /** The platform at its boundary: the native host, Cloud and the resident answer from tables (a resident answer that is a `ResidentRefused` refuses), the resident is connected to `connected`, the app's network is `network`, and a Cloud page opened is recorded as `CloudServices.openExternal`; nothing leaves the test. */
 export function platform(calls: Calls, native: Record<string, Answer>, cloud: Record<string, Answer>, options: {
   readonly events?: Record<string, ReadonlyArray<unknown>>
@@ -98,17 +113,7 @@ export function platform(calls: Calls, native: Record<string, Answer>, cloud: Re
   const app = { ...appStart, network }
   const verified = options.connected ?? { owner: "owner-1", agent: "agent-1" }
   return Layer.mergeAll(
-    Layer.succeed(Native, {
-      available: () => Effect.succeed(true),
-      invoke: (plugin: string, method: string, args?: unknown) => {
-        calls.push({ name: `${plugin}.${method}`, args })
-        const found = answer(native, `${plugin}.${method}`, args)
-        if (found === undefined) return Effect.fail(new NativeFailed({ plugin, method, message: "absent" }))
-        if (refused(found)) return Effect.fail(new NativeFailed({ plugin, method, message: "refused", code: found.refuse }))
-        return Effect.succeed(found)
-      },
-      listen: (plugin: string, event: string) => Stream.fromIterable(options.events?.[`${plugin}.${event}`] ?? [])
-    }),
+    Layer.succeed(Native, nativeHost(calls, native, options.events)),
     Layer.succeed(Cloud, {
       base: "https://api.eliza.app",
       json: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown) => {

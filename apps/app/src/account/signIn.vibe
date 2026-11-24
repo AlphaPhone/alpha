@@ -16,6 +16,8 @@ import { CloudSession, noNews, newsOf, type SignInNews } from "./session.vibe"
 import { CodeStarted, HostStatus, MfaRequired, MfaResumed, NetworkStatus, ReadinessChanged, ServiceAnswer, SignInAnswer } from "./signIn.schema.vibe"
 
 const plugin = "AlphaCloudSignIn"
+/** How long Back waits for a cancelled verification to unwind before it reads the stored key, as the legacy app did. */
+const verifyUnwindMs = 2000
 
 /** The deployment's published Terms and Privacy, as the screen shows them. */
 export type ServiceInfo = ServiceAnswer["service"]
@@ -113,6 +115,9 @@ export const signInService = Layer.effect(SignInScreen, effect {
   const news = try Ref.make<SignInNews>(noNews)
   const epoch = try Ref.make(0)
   const retained = try Ref.make<MfaRequired | undefined>(undefined)
+  // The key stored when the running verification began (null: none; undefined: unreadable) and when it unwinds.
+  const verifyPrior = try Ref.make<string | null | undefined>(undefined)
+  const verifying = try Ref.make<Deferred.Deferred<void> | undefined>(undefined)
 
   effect function send(event: Parameters<typeof machine.send>[0]) {
     const step = machine.send(event) catch () => undefined
@@ -211,15 +216,26 @@ export const signInService = Layer.effect(SignInScreen, effect {
     try send(resending ? { type: "resendEnds", accepted: started !== undefined } : { type: "sendEnds", accepted: started !== undefined })
   }
 
+  /** The credential id of the key the host holds now: null when it holds none, undefined when the store cannot be read. */
+  effect function storedCredential() {
+    const raw = native.invoke(plugin, "credentialIdentity", { environment }) catch () => undefined
+    if (typeof raw !== "object" || raw === null) return undefined
+    const id = (raw as { credentialId?: unknown }).credentialId
+    return typeof id === "string" ? id : null
+  }
+
   effect function runVerify() {
     const turn = try begin()
     const s = try machine.get()
+    const unwound = try Deferred.make<void>()
+    try Ref.set(verifying, unwound)
+    try Ref.set(verifyPrior, try storedCredential())
     const attempt = try Ref.get(attemptId)
     const code = (try Ref.get(typed)).code
     try Ref.update(typed, (t) => ({ ...t, code: "" }))
     try Ref.set(news, noNews)
     const method = s.screen === "FactorStep" ? "verifyMfa" : methodNames[s.method].verify
-    const verified = try held(effect {
+    const verified = try ensuring(held(effect {
       const call = Effect.map(native.invoke(plugin, method, { attemptId: attempt, code }), (value) => ({ ok: true as const, value }))
       const result = call catch (error) => ({ ok: false as const, code: error._tag === "NativeFailed" ? error.code : undefined })
       if (!result.ok) return verifyRefusal(result.code)
@@ -227,12 +243,28 @@ export const signInService = Layer.effect(SignInScreen, effect {
       if (answer === undefined) return { tag: "CodeFailed" } as VerifyOutcome
       if (answer.status === "authenticated") {
         try Ref.set(news, newsOf(answer))
+        if (try stillCurrent(turn)) try send({ type: "hostCommitsKey" })
         return { tag: "CodeAccepted" } as VerifyOutcome
       }
       if (answer.attemptId !== undefined) try Ref.set(attemptId, answer.attemptId)
       return { tag: "CodeNeedsFactor", codeFactor: factorOf(answer.method) } as VerifyOutcome
-    })
+    }), Deferred.succeed(unwound, undefined))
     if (try stillCurrent(turn)) try send({ type: "verifyEnds", verified, attempt: s.attempt })
+  }
+
+  // spec/account/signIn.md, "Back ends the step in flight, then the code step, then the dialog; the required page keeps its chooser":
+  // the host stores the key before a verification answers, so Back cancels, lets the verification unwind
+  // (its own answer is dropped) and reports a key other than the one held before it as committed.
+  effect function cancelVerification() {
+    try Ref.update(epoch, (n) => n + 1)
+    native.invoke(plugin, "cancel", { requestId: try Ref.get(requestId) }) catch () => undefined
+    const running = try Ref.get(verifying)
+    if (running !== undefined) try timeoutOption(Deferred.await(running), Duration.millis(verifyUnwindMs))
+    const prior = try Ref.get(verifyPrior)
+    if (prior === undefined) return
+    const stored = try storedCredential()
+    if (stored === undefined || stored === null || stored === prior) return
+    if (enabled(try machine.get(), { type: "hostCommitsKey" })) try send({ type: "hostCommitsKey" })
   }
 
   effect function offerRetained() {
@@ -355,7 +387,10 @@ export const signInService = Layer.effect(SignInScreen, effect {
     effect back() {
       const before = try machine.get()
       if (before.work === "GoogleWork") try send({ type: "backDuringGoogle" })
-      else try send({ type: "back" })
+      else {
+        if (before.work === "Verifying") try cancelVerification()
+        try send({ type: "back" })
+      }
       const after = try machine.get()
       if (after.work !== before.work || after.screen !== before.screen) try Ref.update(epoch, (n) => n + 1)
       return entryOf(before) !== "NoEntry"

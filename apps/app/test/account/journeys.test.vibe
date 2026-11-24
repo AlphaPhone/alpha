@@ -12,7 +12,9 @@ import { AccountPresentation } from "../../src/account/presentation.vibe"
 import { CloudSession } from "../../src/account/session.vibe"
 import { AccountSheet } from "../../src/account/sheet.vibe"
 import { SignInScreen } from "../../src/account/signIn.vibe"
-import { type Answer, type Calls, account, cloudAnswers, expiresAt, found, names, now, providerStatus, signedInNative, snapshot, until } from "./platform.vibe"
+import { services } from "../../src/account/layer.vibe"
+import { Native, NativeFailed } from "../../src/platform/native.vibe"
+import { type Answer, type Calls, account, cloudAnswers, expiresAt, found, names, nativeHost, now, platform, providerStatus, signedInNative, snapshot, until } from "./platform.vibe"
 
 /** A signed-out host whose next sign-in stores `key-2`. */
 function signedOutNative(held: { key: boolean }): Record<string, Answer> {
@@ -207,6 +209,56 @@ it.live(`Back from the code step cancels the attempt and keeps the address (spec
       ))
     })
   }
+})
+
+// spec/account/signIn.md, "Story: Leave sign-in"
+it.live(`Back during a verification adopts the key the host already stored, and the chooser shows when it stored none (spec/account/signIn.md, "Story: Leave sign-in")`, () => effect {
+  const backDuringVerify = (commits: boolean) => effect {
+    const calls: Calls = []
+    const held = { key: false }
+    const asked = try Deferred.make<void>()
+    const cancelled = try Deferred.make<void>()
+    // The host as the phone has it: no saved key reads as null, and the verification stores the key, then waits, before it answers.
+    const table = { ...signedOutNative(held), "AlphaCloudSignIn.credentialIdentity": () => (held.key ? { credentialId: "key-2", expiresAt } : { credentialId: null }) }
+    const base = nativeHost(calls, table)
+    const host = {
+      ...base,
+      invoke: (plugin: string, method: string, args?: unknown) => {
+        if (method === "verifyEmail") {
+          calls.push({ name: `${plugin}.${method}`, args })
+          if (commits) held.key = true
+          return Effect.flatMap(Effect.flatMap(Deferred.succeed(asked, undefined), () => Deferred.await(cancelled)),
+            () => Effect.fail(new NativeFailed({ plugin, method, message: "cancelled", code: "cancelled" })))
+        }
+        if (method === "cancel") return Effect.flatMap(Deferred.succeed(cancelled, undefined), () => base.invoke(plugin, method, args))
+        return base.invoke(plugin, method, args)
+      }
+    }
+    provide Layer.provide(services, Layer.merge(platform(calls, table, cloudAnswers), Layer.succeed(Native, host))) {
+      return try scoped(effect {
+        const session = try CloudSession
+        const signIn = try SignInScreen
+        fork.scoped session.run()
+        fork.scoped signIn.run()
+        try until(signIn.changes, (s) => s.screen === "Choose" && s.methods.known)
+        try signIn.submit("owner@example.com")
+        try until(signIn.changes, (s) => s.screen === "CodeStep" && s.work === "NoWork")
+        fork.scoped signIn.verify("123456")
+        try Deferred.await(asked)
+        try signIn.back()
+        const after = try signIn.current()
+        const account = commits ? (try found(try until(session.changes, (s) => s.phase === "SignedIn"))).account.credentialId : (try session.current()).phase
+        return { screen: after.screen, adoptedByBack: after.adoptedByBack, adoptedDuring: after.adoptedDuring, account }
+      })
+    }
+  }
+  const stored = try backDuringVerify(true)
+  const none = try backDuringVerify(false)
+  // spec/account/signIn.md, "Back ends the step in flight, then the code step, then the dialog; the required page keeps its chooser"
+  try Effect.try(() => assert.deepStrictEqual({ stored, none }, {
+    stored: { screen: "ScreenClosed", adoptedByBack: true, adoptedDuring: "Verifying", account: "key-2" },
+    none: { screen: "Choose", adoptedByBack: false, adoptedDuring: "NoWork", account: "SignedOut" }
+  }))
 })
 
 // spec/account/signIn.md, "Story: Leave sign-in"
