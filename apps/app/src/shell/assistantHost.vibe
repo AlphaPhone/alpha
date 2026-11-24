@@ -17,6 +17,7 @@ import { NotesOrganize } from "../notes/organize.vibe"
 import { Build } from "../platform/build.vibe"
 import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
+import { SettingsPages } from "../settings/navigation.vibe"
 import { CallWatch } from "../telephony/call-bar.vibe"
 import { TelephonyActions } from "../telephony/actions.vibe"
 import { advertisedOf as telephonyAdvertised } from "../telephony/operations.vibe"
@@ -63,6 +64,7 @@ const ORDINARY: PeerFacts = { optionalFields: false, takesLocation: false }
 /** The shell's side of the assistant: the verified agent session, the screen in front, the views it opens and its toasts. */
 export const assistantHostLive = Layer.effect(AssistantHost, effect {
   const navigation = try Navigation
+  const settingsPages = try SettingsPages
   const foreground = try Foreground
   const notices = try Notices
   const session = try CloudSession
@@ -118,7 +120,8 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
       const nav = try navigation.get()
       const front = try foreground.get()
       const view = nav.app === "" ? (nav.library ? "library" : "home") : nav.app
-      const privateView = PRIVATE_APPS.has(nav.app)
+      // spec/assistant/context.md: Settings' Carrier & SIM page shows the phone's identifiers, so it is private too.
+      const privateView = PRIVATE_APPS.has(nav.app) || (nav.app === "settings" && (try settingsPages.current()).page === "Carrier")
       const route = nav.places.find((place) => place.app === nav.app)?.route ?? ""
       const connectionDialog = (try bindings.idle()).signInOpen || nav.layers.some((layer) => layer.id.startsWith("account"))
       return {

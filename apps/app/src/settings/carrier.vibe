@@ -1,0 +1,140 @@
+// spec/settings/carrier.md, "Story: Give my carrier the identifiers it asks for, and keep them nowhere else"
+import { type Carrier, type FieldStatus, Machine, copyOffered, initial } from "../../gen/settings__carrier.effect.vibe"
+import { Build } from "../platform/build.vibe"
+import { Native } from "../platform/native.vibe"
+import { attempt, call } from "./call.vibe"
+import { CarrierField, CarrierRead, PageOpened } from "./native.schema.vibe"
+
+/** What the Carrier & SIM page shows: the read's phase and, only while it shows, the identifiers it read. */
+export interface CarrierView {
+  readonly state: Carrier
+  readonly read?: CarrierRead
+  readonly eid?: CarrierField
+}
+
+/** Android's own pages the Carrier & SIM page offers. */
+export type CarrierPage = "identifiers" | "sim" | "mobile" | "apn"
+
+const STATUS: Record<CarrierField["status"], FieldStatus> = {
+  available: "Available", "permission-denied": "PermissionDenied", unavailable: "Unavailable", unsupported: "Unsupported", "not-read": "FieldNotRead",
+}
+
+/** A field's value as shown, or why Android gave none. */
+export function carrierFieldText(field: CarrierField | undefined): string {
+  if (field?.status === "available" && field.value !== undefined && field.value.trim() !== "") return field.value
+  if (field?.status === "not-read") return "Not read"
+  if (field?.status === "permission-denied") return "Access denied by Android"
+  if (field?.status === "unsupported") return "Not supported on this device"
+  return "Unavailable from Android"
+}
+
+/** The one identifier a Copy names (`imei-<slot>`, `iccid-<subscription>` or `eid`), when it has a value. */
+export function carrierIdentifier(view: CarrierView, token: string): string | undefined {
+  let field: CarrierField | undefined
+  if (token === "eid") field = view.eid
+  else if (/^imei-\d+$/.test(token)) field = view.read?.slots.find((slot) => slot.slotIndex === Number(token.slice(5)))?.imei
+  else if (/^iccid-\d+$/.test(token)) field = view.read?.subscriptions.items.find((sub) => sub.subscriptionId === Number(token.slice(6)))?.iccid
+  if (field === undefined) return undefined
+  const value = field.value?.trim() ?? ""
+  return copyOffered(STATUS[field.status], value !== "") ? value : undefined
+}
+
+/** The Carrier & SIM page: reads only on the owner's tap, holds what it read in memory only, and forgets it when the page leaves the front. */
+export service CarrierSetup {
+  readonly changes: Stream.Stream<CarrierView>
+  view(): CarrierView!!
+  /** The page came to the front; nothing is read. */
+  enter(): void!!
+  /** The page left, or Alpha went to the background: every identifier is forgotten and a pending reply is dropped. */
+  leave(): void!!
+  /** Show identifiers, or refresh them. */
+  show(): void!!
+  /** Read eSIM EID (optional). */
+  showEid(): void!!
+  /** Copy one identifier shown; false when there is none to copy. */
+  copy(token: string): boolean!!
+  /** Open Android's page for `page`; whether it opened that page rather than Settings' home. */
+  openAndroid(page: CarrierPage): boolean!!
+}
+
+/** CarrierSetup over its Machine; the identifiers live in this service's memory and nowhere else. */
+export const carrierSetup = Layer.effect(CarrierSetup, effect {
+  const held = try Machine
+  const native = try Native
+  const onPhone = (try Build).info.variant !== "browser"
+  const shown = try SubscriptionRef.make<CarrierView>({ state: initial })
+  const ask = <A,>(plugin: string, method: string, shape: Schema.ConstraintDecoder<A>, args?: unknown) =>
+    attempt(Effect.provideService(call(plugin, method, shape, args), Native, native))
+  let read: CarrierRead | undefined
+  let eid: CarrierField | undefined
+
+  effect function publish() {
+    const state = try held.get()
+    try SubscriptionRef.set(shown, {
+      state,
+      ...(state.read === "ReadShown" && read !== undefined ? { read } : {}),
+      ...(state.eid === "EidShown" && eid !== undefined ? { eid } : {}),
+    })
+  }
+
+  effect function send(event: Parameters<typeof held.send>[0]) {
+    const after = (held.send(event) catch () => undefined)
+    const state = try held.get()
+    if (state.read !== "ReadShown") read = undefined
+    if (state.eid !== "EidShown") eid = undefined
+    try publish()
+    return after
+  }
+
+  effect function leave() {
+    if ((try held.get()).current) try send({ type: "leave" })
+    read = undefined
+    eid = undefined
+    try publish()
+  }
+
+  // Android paused Alpha: the plugin fences its own reads, and the page forgets what it showed.
+  if (onPhone) try fork.scoped effect {
+    effect {
+      for try (const _ended of native.listen("AlphaCarrierSetup", "foregroundEnded")) try leave()
+    } catch () => undefined
+  }
+
+  return {
+    changes: SubscriptionRef.changes(shown),
+    view: () => SubscriptionRef.get(shown),
+    effect enter() {
+      if (!(try held.get()).current) try send({ type: "enter" })
+    },
+    leave,
+    effect show() {
+      const asked = try send({ type: "show" })
+      if (asked === undefined) return
+      const generation = asked.generation
+      const answer = onPhone ? try ask("AlphaCarrierSetup", "read", CarrierRead) : undefined
+      const current = try held.get()
+      if (answer !== undefined && current.generation === generation && current.current) read = answer
+      try send({ type: "readSettles", generation, ok: answer !== undefined })
+    },
+    effect showEid() {
+      const asked = try send({ type: "showEid" })
+      if (asked === undefined) return
+      const generation = asked.eidGeneration
+      const answer = try ask("AlphaCarrierSetup", "readEid", CarrierField)
+      const current = try held.get()
+      if (current.generation === generation && current.current && current.read === "ReadShown") eid = answer ?? { status: "unavailable" }
+      try send({ type: "eidSettles", generation })
+    },
+    effect copy(token: string) {
+      const view = try SubscriptionRef.get(shown)
+      const value = carrierIdentifier(view, token)
+      if (value === undefined || (try send({ type: "copy" })) === undefined) return false
+      const copied = try ask("AlphaDevice", "copyText", Schema.Unknown, { text: value })
+      return copied !== undefined
+    },
+    effect openAndroid(page: CarrierPage) {
+      const opened = try ask("AlphaCarrierSetup", "openSettings", PageOpened, { page })
+      return opened?.specific !== false && opened !== undefined
+    },
+  }
+})

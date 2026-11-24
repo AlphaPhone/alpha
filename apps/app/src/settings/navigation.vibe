@@ -1,9 +1,10 @@
-// spec/settings/index.md, "Story: Find a setting in a few taps"; spec/settings/index.md, "Calendar's row opens Calendar at its Calendars sheet, where its sources are set"; spec/settings/index.md, "General's Phone row opens Phone's line details on the Alpha image only, and About's Agent activity opens the assistant's activity on the phone"; spec/settings/passwords.md, "Leaving the page or the app going to the background locks the vault and forgets the visit"
+// spec/settings/index.md, "Story: Find a setting in a few taps"; spec/settings/carrier.md, "Leaving the page or Alpha going to the background clears every identifier, and a late reply is dropped"; spec/settings/index.md, "Calendar's row opens Calendar at its Calendars sheet, where its sources are set"; spec/settings/index.md, "General's Phone row opens Phone's line details on the Alpha image only, and About's Agent activity opens the assistant's activity on the phone"; spec/settings/passwords.md, "Leaving the page or the app going to the background locks the vault and forgets the visit"
 import { type AppRow, type Elsewhere, type Page, type Settings, Machine, accessSetupStep, appPage, appRoute, calendarSettingsRoute, elsewhereRoute, elsewhereShown, forwardOf, initial, machine, sectionOf } from "../../gen/settings.effect.vibe"
 import type { AppId } from "../web/app-screen.ts"
 import { Build } from "../platform/build.vibe"
 import { Navigation } from "../shell/navigation.vibe"
 import { Permissions } from "../shell/permissions.vibe"
+import { CarrierSetup } from "./carrier.vibe"
 import { Diagnostics } from "./diagnostics.vibe"
 import { DeviceFacts } from "./facts.vibe"
 import { Wifi } from "./network.vibe"
@@ -58,6 +59,7 @@ export const settingsPages = Layer.effect(SettingsPages, effect {
   const updates = try Updates
   const vault = try Vault
   const diagnostics = try Diagnostics
+  const carrier = try CarrierSetup
   const variant = (try Build).info.variant
   const onPhone = variant !== "browser"
   const aosp = variant === "aosp"
@@ -70,6 +72,7 @@ export const settingsPages = Layer.effect(SettingsPages, effect {
     if (page === "General") try updates.check(false)
     if (page === "Privacy") try privacy.readListener()
     if (page === "Passwords") try vault.open()
+    if (page === "Carrier") try carrier.enter()
     if (page === "About") try diagnostics.readLog(false)
     if (page === "Problems") try diagnostics.readLog(true)
     if (page === "Licenses") try diagnostics.loadLicences()
@@ -103,6 +106,7 @@ export const settingsPages = Layer.effect(SettingsPages, effect {
       const after = (held.send({ type: "back" }) catch () => undefined)
       if (after === undefined) return false
       if (before.page === "Passwords") try vault.leave()
+      if (before.page === "Carrier") try carrier.leave()
       return true
     },
     effect openLicence(index: number) {
@@ -126,6 +130,7 @@ export const settingsPages = Layer.effect(SettingsPages, effect {
       const before = try held.get()
       held.send({ type: "leave" }) catch () => undefined
       if (before.page === "Passwords") try vault.leave()
+      if (before.page === "Carrier") try carrier.leave()
     },
     effect accessSetup() {
       try permissions.reopen(accessSetupStep)
@@ -139,6 +144,7 @@ export const settingsFollow = Layer.effectDiscard(effect {
   const pages = try SettingsPages
   const facts = try DeviceFacts
   const vault = try Vault
+  const carrier = try CarrierSetup
   const held = try Machine
   const seen = { view: "", visible: false, route: "" }
   try fork.scoped (effect {
@@ -157,10 +163,12 @@ export const settingsFollow = Layer.effectDiscard(effect {
         if (route !== "") try pages.route(route)
         try facts.show()
         if ((try held.get()).page === "Passwords") try vault.open()
+        if ((try held.get()).page === "Carrier") try carrier.enter()
       } else if (settingsNow && route !== routeBefore && route !== "") {
         try pages.route(route)
       } else if (!settingsNow && settingsBefore) {
         try facts.hide()
+        if ((try held.get()).page === "Carrier") try carrier.leave()
         if (view !== "settings") try pages.leave()
         else try vault.leave()
       }

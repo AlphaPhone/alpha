@@ -1,4 +1,5 @@
 // spec/settings/index.md, "Story: Find a setting in a few taps"
+import { machine as carrierMachine } from "../../gen/settings__carrier.effect.vibe"
 import { machine as diagnosticsMachine } from "../../gen/settings__diagnostics.effect.vibe"
 import { machine as factsMachine } from "../../gen/settings__facts.effect.vibe"
 import { machine as networkMachine } from "../../gen/settings__network.effect.vibe"
@@ -6,6 +7,7 @@ import { machine as vaultMachine } from "../../gen/settings__passwords.effect.vi
 import { machine as privacyMachine } from "../../gen/settings__privacy.effect.vibe"
 import { machine as resetMachine } from "../../gen/settings__reset.effect.vibe"
 import { appearance, appearanceFollow } from "./appearance.vibe"
+import { carrierSetup } from "./carrier.vibe"
 import { diagnostics } from "./diagnostics.vibe"
 import { deviceFacts } from "./facts.vibe"
 import { pagesMachine, settingsFollow, settingsPages } from "./navigation.vibe"
@@ -26,6 +28,7 @@ const services = Layer.mergeAll(
   Layer.provideMerge(reset, resetMachine()),
   Layer.provideMerge(diagnostics, diagnosticsMachine()),
   Layer.provideMerge(vault, vaultMachine()),
+  Layer.provideMerge(carrierSetup, carrierMachine()),
 )
 
 const pages = Layer.provideMerge(settingsPages, pagesMachine)

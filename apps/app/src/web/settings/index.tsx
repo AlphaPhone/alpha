@@ -25,6 +25,8 @@ import { initial as updatesStart } from "../../../gen/settings__updates.ts";
 import { Build } from "../../platform/build.vibe";
 import { Native } from "../../platform/native.vibe";
 import { Appearance } from "../../settings/appearance.vibe";
+import { CarrierSetup } from "../../settings/carrier.vibe";
+import { initial as carrierStart } from "../../../gen/settings__carrier.ts";
 import { Diagnostics } from "../../settings/diagnostics.vibe";
 import { DeviceFacts } from "../../settings/facts.vibe";
 import { SettingsPages } from "../../settings/navigation.vibe";
@@ -42,7 +44,8 @@ import { backDialog, closeDialog, openDialog, useDialog } from "./dialogs.ts";
 import { PasswordsScreen } from "./PasswordsScreen.tsx";
 import { SettingsScreen } from "./SettingsScreen.tsx";
 import { UpdateActivation } from "./UpdateActivation.tsx";
-import { now, perform } from "../shell/services.ts";
+import { now, perform, useServiceStream } from "../shell/services.ts";
+import { CarrierSetupPage } from "./CarrierSetupPage.tsx";
 import { runtime } from "./runtime.ts";
 import { testMocksBuilt } from "../../platform/build-flags.ts";
 
@@ -119,6 +122,7 @@ function SettingsApp({ onClose }: ScreenProps) {
       dialog={dialog}
       onDialog={(next) => (next === undefined ? closeDialog() : openDialog(nav, next))}
       notifications={<NotificationsSettings />}
+      carrier={<CarrierApp native={variant !== "browser"} />}
       privacy={{ route, listener: privacyMachine.state ?? privacyStart, aosp: variant === "aosp" }}
       privacyActs={{
         stop: (stop) => void perform(Effect.flatMap(Effect.service(PrivacyRow), (p) => p.stop(stop))),
@@ -140,6 +144,16 @@ function SettingsApp({ onClose }: ScreenProps) {
         toggleProfile: () => { if (!mocks) return; const url = new URL(location.href); if (profile === "development") url.searchParams.delete("mode"); else url.searchParams.set("mode", "dev"); setProfile(profile === "development" ? "app" : "development"); location.assign(url.href); },
       }}
     />
+  );
+}
+
+/** The Carrier & SIM page over its session: what it read lives in the session's memory, not in the shell. */
+function CarrierApp({ native }: { native: boolean }) {
+  const view = useServiceStream("settings-carrier", Effect.map(Effect.service(CarrierSetup), (c) => c.changes), { state: carrierStart });
+  const carrier = <A,>(use: (c: CarrierSetup.Shape) => Effect.Effect<A>) => void perform(Effect.flatMap(Effect.service(CarrierSetup), use));
+  return (
+    <CarrierSetupPage view={view} native={native} onShow={() => carrier((c) => c.show())} onShowEid={() => carrier((c) => c.showEid())}
+      onCopy={(token) => carrier((c) => c.copy(token))} onAndroid={(page) => carrier((c) => c.openAndroid(page))} />
   );
 }
 

@@ -9,6 +9,7 @@ import { Machine as VaultMachine, machine as vaultMachine } from "../../gen/sett
 import { Machine as PrivacyMachine, machine as privacyMachine } from "../../gen/settings__privacy.effect.vibe"
 import { Machine as NetworkMachine, machine as networkMachine } from "../../gen/settings__network.effect.vibe"
 import { Machine as DiagnosticsMachine, machine as diagnosticsMachine } from "../../gen/settings__diagnostics.effect.vibe"
+import { machine as carrierMachine } from "../../gen/settings__carrier.effect.vibe"
 import { StorageUsage } from "../../src/files/usage.vibe"
 import { Build } from "../../src/platform/build.vibe"
 import { CrashJournal } from "../../src/platform/crash-journal.vibe"
@@ -21,6 +22,7 @@ import { Permissions } from "../../src/shell/permissions.vibe"
 import { Listener } from "../../src/voice/listener.vibe"
 import { VoiceRoute } from "../../src/voice/route.vibe"
 import { Appearance, APPEARANCE_KEY, appearance } from "../../src/settings/appearance.vibe"
+import { CarrierSetup, carrierFieldText, carrierSetup } from "../../src/settings/carrier.vibe"
 import { Diagnostics, buildReport, diagnostics, noticesOf } from "../../src/settings/diagnostics.vibe"
 import { DeviceFacts, deviceFacts } from "../../src/settings/facts.vibe"
 import { SettingsPages, settingsPages } from "../../src/settings/navigation.vibe"
@@ -84,6 +86,7 @@ it.effect("Find a setting in a few taps (spec/settings/index.md, \"Story: Find a
     Layer.succeed(DeviceFacts, recorder("DeviceFacts", calls)), Layer.succeed(Wifi, recorder("Wifi", calls)),
     Layer.succeed(PrivacyRow, recorder("PrivacyRow", calls)), Layer.succeed(Updates, recorder("Updates", calls)),
     Layer.succeed(Vault, recorder("Vault", calls, { back: false })), Layer.succeed(Diagnostics, recorder("Diagnostics", calls, { back: false })),
+    Layer.succeed(CarrierSetup, recorder("CarrierSetup", calls)),
   )
   provide Layer.provideMerge(settingsPages, Layer.mergeAll(settingsMachine(), fakes, build())) {
     const pages = try SettingsPages
@@ -140,6 +143,7 @@ it.effect("General's Phone row and About's Agent activity open the app that answ
       Layer.succeed(DeviceFacts, recorder("DeviceFacts", calls)), Layer.succeed(Wifi, recorder("Wifi", calls)),
       Layer.succeed(PrivacyRow, recorder("PrivacyRow", calls)), Layer.succeed(Updates, recorder("Updates", calls)),
       Layer.succeed(Vault, recorder("Vault", calls, { back: false })), Layer.succeed(Diagnostics, recorder("Diagnostics", calls, { back: false })),
+      Layer.succeed(CarrierSetup, recorder("CarrierSetup", calls)),
     )
     provide Layer.provideMerge(settingsPages, Layer.mergeAll(settingsMachine(), fakes, build(variant))) {
       const pages = try SettingsPages
@@ -167,6 +171,7 @@ it.effect("Back closes what a page holds open before the page (spec/settings/ind
     Layer.succeed(DeviceFacts, recorder("DeviceFacts", calls)), Layer.succeed(Wifi, recorder("Wifi", calls)),
     Layer.succeed(PrivacyRow, recorder("PrivacyRow", calls)), Layer.succeed(Updates, recorder("Updates", calls)),
     Layer.succeed(Vault, recorder("Vault", calls, { back: true })), Layer.succeed(Diagnostics, recorder("Diagnostics", calls, { back: true })),
+    Layer.succeed(CarrierSetup, recorder("CarrierSetup", calls)),
   )
   provide Layer.provideMerge(settingsPages, Layer.mergeAll(settingsMachine(), fakes, build())) {
     const pages = try SettingsPages
@@ -206,6 +211,56 @@ it.effect("See only what Android reported (spec/settings/vocabulary.md, \"Story:
     { phone: [phone.wifi, phone.dnd, phone.camera, phone.home, phone.storageTotal], browser: [browser.photos, browser.files, browser.calendar] },
     { phone: ["Unknown", "Unknown", "Unread", "RoleUnread", -1], browser: ["Partial", "Partial", "Unread"] },
   ))
+})
+
+it.effect("Give my carrier the identifiers it asks for, and keep them nowhere else (spec/settings/carrier.md, \"Story: Give my carrier the identifiers it asks for, and keep them nowhere else\")", () => effect {
+  const field = (value: string) => ({ status: "available", value })
+  let reads = 0
+  const read = {
+    status: "ready",
+    slots: [{ slotIndex: 0, imei: field("356938035643809"), simState: field("No SIM") }, { slotIndex: 1, imei: { status: "permission-denied" }, simState: field("No SIM") }],
+    subscriptions: { status: "available", items: [{ subscriptionId: 4, slotIndex: 0, embedded: false, carrier: field("Fixture"), iccid: field("8901260000000000001"), operator: field("Fixture"), networkType: field("LTE") }] },
+  }
+  const phone = android({
+    "AlphaCarrierSetup.read": () => { reads += 1; return read },
+    "AlphaCarrierSetup.readEid": { status: "unsupported" },
+    "AlphaDevice.copyText": { copied: true },
+  })
+  provide Layer.provideMerge(carrierSetup, Layer.mergeAll(carrierMachine(), phone.native, build())) {
+    const carrier = try CarrierSetup
+    // spec/settings/carrier.md, "An identifier read starts only from Show identifiers on the page in front, never on opening or returning"
+    try carrier.show()
+    const beforeEntering = reads
+    try carrier.enter()
+    const onEntering = reads
+    try carrier.show()
+    const shown = try carrier.view()
+    // spec/settings/carrier.md, "Each identifier shown has its own Copy, which works only on the page in front"
+    const imei = try carrier.copy("imei-0")
+    const denied = try carrier.copy("imei-1")
+    const iccid = try carrier.copy("iccid-4")
+    // spec/settings/carrier.md, "The eSIM EID is a separate, optional read, so an eSIM that cannot answer never holds up the SIM"
+    try carrier.showEid()
+    const eid = (try carrier.view()).eid
+    // spec/settings/carrier.md, "Leaving the page or Alpha going to the background clears every identifier, and a late reply is dropped"
+    try carrier.leave()
+    const left = try carrier.view()
+    const afterLeaving = try carrier.copy("imei-0")
+    try carrier.enter()
+    const returned = try carrier.view()
+    try Effect.try(() => assert.deepStrictEqual(
+      {
+        beforeEntering, onEntering, reads, shownImei: shown.read?.slots[0]?.imei.value, deniedText: carrierFieldText(shown.read?.slots[1]?.imei), imei, denied, iccid,
+        copied: phone.calls.filter((c) => c.name === "AlphaDevice.copyText").map((c) => c.args), eid: carrierFieldText(eid),
+        left: { read: left.read, eid: left.eid, phase: left.state.read }, afterLeaving, returned: { read: returned.read, phase: returned.state.read },
+      },
+      {
+        beforeEntering: 0, onEntering: 0, reads: 1, shownImei: "356938035643809", deniedText: "Access denied by Android", imei: true, denied: false, iccid: true,
+        copied: [{ text: "356938035643809" }, { text: "8901260000000000001" }], eid: "Not supported on this device",
+        left: { read: undefined, eid: undefined, phase: "NotRead" }, afterLeaving: false, returned: { read: undefined, phase: "NotRead" },
+      },
+    ))
+  }
 })
 
 it.effect("Read my phone's state truthfully (spec/settings/facts.md, \"Story: Read my phone's state truthfully\")", () => effect {

@@ -128,6 +128,10 @@ pure val warmValues = Set(true, false)
 
 ### A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn
 
+The private screens are Passwords, Account and Settings' Carrier & SIM setup page, which shows the
+phone's IMEIs, SIM numbers and EID (spec/settings/carrier.md): on them the view, its selection and
+its revision are not observed.
+
 The calendar day goes only to the process instance the client learned and
 compared for this turn; the location goes only to a peer whose turn
 observation support declares it. A turn retired before it is posted posts
