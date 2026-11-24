@@ -2,6 +2,7 @@
 import { assert, it } from "@effect/vitest"
 import { Build } from "../../src/platform/build.vibe"
 import { Cloud, CloudUnavailable } from "../../src/platform/cloud.vibe"
+import { lifecycleOver } from "../../src/platform/lifecycle.vibe"
 import { Native, NativeFailed } from "../../src/platform/native.vibe"
 import { Resident } from "../../src/platform/resident.vibe"
 import { ResidentControl } from "../../src/platform/resident-control.vibe"
@@ -16,6 +17,9 @@ import { layer } from "../../src/voice/layer.vibe"
 import { Listener } from "../../src/voice/listener.vibe"
 import { VoiceRoute } from "../../src/voice/route.vibe"
 import { Speech } from "../../src/voice/speech.vibe"
+import { cloudWarmUpLive } from "../../src/voice/warmup.vibe"
+import { Foreground, type ForegroundState } from "../../src/shell/foreground.vibe"
+import { initial as residentInitial, type Resident as ResidentConnection } from "../../gen/platform__resident.effect.vibe"
 import { initial as micInitial, barHeight, deniedSettingsOffered, levelBars } from "../../gen/voice__capture.effect.vibe"
 import {
   claimScreen, cleanupSettled, endpointerOf, hidden as hideConversation, initial as conversationInitial, muteSpeaker, outOfFunds, profileOf, returned as returnConversation, reviewNeeded, reviewSettled,
@@ -46,8 +50,15 @@ function refused(answer: Answer): answer is { readonly refuse: string } {
   return typeof answer === "object" && answer !== null && "refuse" in answer
 }
 
+/** What a journey changes at the platform's edge: the resident's connection, and the native events it posts. */
+interface Edge {
+  readonly control?: Layer.Layer<ResidentControl>
+  readonly events?: PubSub.PubSub<{ readonly name: string; readonly event: unknown }>
+}
+
 /** The platform at its boundary, recording what the native host and the resident were asked; nothing leaves the test. */
-function platform(calls: Calls, native: Record<string, Answer>, variant: "launcher" | "aosp" | "browser" = "launcher") {
+function platform(calls: Calls, native: Record<string, Answer>, variant: "launcher" | "aosp" | "browser" = "launcher", edge: Edge = {}) {
+  const posted = edge.events
   return Layer.mergeAll(
     Layer.succeed(Native, {
       available: (plugin: string) => Effect.succeed(plugin !== "AlphaCloudSpeechStream"),
@@ -62,7 +73,8 @@ function platform(calls: Calls, native: Record<string, Answer>, variant: "launch
         })
         return Effect.succeed(answer)
       },
-      listen: () => Stream.never,
+      listen: (_plugin: string, name: string) => posted === undefined ? Stream.never
+        : Stream.map(Stream.filter(Stream.fromPubSub(posted), (posting) => posting.name === name), (posting) => posting.event),
     }),
     Layer.succeed(Cloud, {
       base: "https://api.eliza.app",
@@ -77,7 +89,7 @@ function platform(calls: Calls, native: Record<string, Answer>, variant: "launch
       }),
       stream: () => Stream.empty,
     }),
-    Layer.succeed(ResidentControl, {
+    edge.control ?? Layer.succeed(ResidentControl, {
       changes: Stream.never,
       session: () => Effect.succeed({ owner: "owner-1", agent: "agent-1", generation: 1, epoch: 1 }),
       refreshAccount: () => Effect.void,
@@ -267,15 +279,63 @@ it.effect(`Never hear two things at once, or anything after I stopped it (spec/v
   }))
 })
 
-it.live(`Hear the reply start at once (spec/voice/speech.md, "Story: Hear the reply start at once")`, () => effect {
-  // spec/voice/speech.md, "A sent turn warms the phone's output, and Cloud is warmed at most once a minute for each connection"
+it.effect(`Hear the reply start at once (spec/voice/speech.md, "Story: Hear the reply start at once")`, () => effect {
+  // spec/voice/speech.md, "A sent turn warms the phone's output, and Cloud is warmed at most once a minute for each connection, only in front and online"
   const calls: Calls = []
-  provide voice(calls, onPhone) {
-    const speech = try Speech
-    try speech.warmCloud(1)
-    try speech.warmCloud(1)
-    try speech.warmCloud(2)
-    try Effect.try(() => assert.strictEqual(names(calls).filter((n) => n === "resident POST /api/cloud/warm").length, 2))
+  const events = try PubSub.unbounded<{ readonly name: string; readonly event: unknown }>()
+  const connection = try SubscriptionRef.make<ResidentConnection>({ ...residentInitial, phase: "Connected", generation: 1 })
+  const front = try SubscriptionRef.make<ForegroundState>({ visible: true, locked: false, screen: "home", view: "", shade: false, chat: "closed", modal: false })
+  let online = true
+  const control = Layer.succeed(ResidentControl, {
+    changes: SubscriptionRef.changes(connection),
+    session: () => Effect.map(SubscriptionRef.get(connection), (now) => now.phase === "Connected" ? { owner: "owner-1", agent: "agent-1", generation: now.generation, epoch: 1 } : undefined),
+    refreshAccount: () => Effect.void,
+    stop: () => Effect.void,
+    recovered: () => Effect.void,
+  })
+  const phone = Layer.provideMerge(layer, platform(calls, { ...onPhone, "ElizaSystem.getNetworkStatus": () => ({ connected: online }) }, "launcher", { control, events }))
+  const shown = Layer.succeed(Foreground, { changes: SubscriptionRef.changes(front), get: () => SubscriptionRef.get(front) })
+  const app = Layer.provideMerge(Layer.mergeAll(lifecycleOver(() => () => undefined), shown), phone)
+  const settle = effect { for (let round = 0; round < 20; round += 1) try Effect.yieldNow }
+  const warms = () => names(calls).filter((n) => n === "resident POST /api/cloud/warm").length
+  const see = (change: Partial<ForegroundState>) => effect {
+    try SubscriptionRef.update(front, (now) => ({ ...now, ...change }))
+    try settle
+  }
+  const network = (connected: boolean) => effect {
+    online = connected
+    try PubSub.publish(events, { name: "networkStatusChanged", event: {} })
+    try settle
+  }
+  provide Layer.provideMerge(cloudWarmUpLive, app) {
+    const conversation = try VoiceConversation
+    const seen: number[] = []
+    try settle
+    // A connection active while Alpha is in front warms once; the sheet opening within the minute does not again.
+    seen.push(warms())
+    try see({ chat: "sheet" })
+    seen.push(warms())
+    try TestClock.adjust("60 seconds")
+    try see({ chat: "closed" })
+    try see({ chat: "full" })
+    seen.push(warms())
+    // Back in front while Android confirms no network: nothing; the network coming back warms.
+    try TestClock.adjust("60 seconds")
+    try see({ visible: false })
+    try network(false)
+    try see({ visible: true })
+    seen.push(warms())
+    try network(true)
+    seen.push(warms())
+    // Talk starting warms; a new connection warms at once.
+    try TestClock.adjust("60 seconds")
+    try conversation.start({ admitted: true, callActive: false, conversationId: "c1", roomId: "c1", chatCurrent: () => true })
+    try settle
+    seen.push(warms())
+    try SubscriptionRef.update(connection, (now) => ({ ...now, generation: 2 }))
+    try settle
+    seen.push(warms())
+    try Effect.try(() => assert.deepStrictEqual(seen, [1, 1, 2, 2, 3, 4, 5]))
   }
 })
 

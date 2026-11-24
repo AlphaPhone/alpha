@@ -1,0 +1,41 @@
+// spec/voice/conversation.md, "Story: Send a text I reviewed by saying so"; spec/voice/conversation.md, "A reply whose only card is one addressed text keeps voice listening and says the text is ready"; spec/voice/conversation.md, "Saying the send phrase sends the bound card once, as its Send tap does, only as the next thing said and only while it is still the one live text shown in that conversation"; spec/shell/navigation.md, "A layer is listed once, closes with its owner or with Back, and holds the phone while open"
+import { talking, unblocked } from "../../gen/shell__navigation.effect.vibe"
+import type { Nav } from "../../gen/shell__navigation.ts"
+import type { TalkReview } from "../voice/talk-text.vibe"
+
+/** What Talk asks of the chat's composer for the one text it may send by voice. */
+export interface TalkChat {
+  talkReplied(conversation: string, messageId: string, words: string): { readonly cards: number; readonly text?: string }!!
+  talkBind(proposalId: string): void!!
+  talkTextShown(conversation: string, proposalId: string): boolean!!
+  talkSend(proposalId: string): (string | undefined)!!
+}
+
+/** The shell's navigation as Talk reads it. */
+export interface NavigationNow {
+  get(): Nav!!
+}
+
+/** Whether the owner can see the chat's cards: it is open, on a visible page, with no layer over it and nothing holding the phone. */
+export function chatShowsCards(nav: Nav): boolean {
+  return unblocked(nav) && talking(nav)
+}
+
+/**
+ * The chat `conversation` as Talk reviews into it: a text is offered for binding, and counted as shown, only while the owner can
+ * see the open chat, so Talk never says a text is ready that the owner cannot see or send.
+ */
+export function talkReview(conversation: string, chat: TalkChat, navigation: NavigationNow): TalkReview {
+  return {
+    replied: (messageId: string, words: string) => effect {
+      const offer = try chat.talkReplied(conversation, messageId, words)
+      if (offer.text === undefined || chatShowsCards(try navigation.get())) return offer
+      return { cards: offer.cards }
+    },
+    bind: (proposalId: string) => chat.talkBind(proposalId),
+    shown: (proposalId: string) => effect {
+      return chatShowsCards(try navigation.get()) && (try chat.talkTextShown(conversation, proposalId))
+    },
+    send: (proposalId: string) => chat.talkSend(proposalId),
+  }
+}

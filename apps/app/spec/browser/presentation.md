@@ -131,8 +131,10 @@ pure def sometimesRetryingAfterAFailure(p: Presenter): bool = p.failed and p.una
 ### A host control that appears or goes withdraws page input over the whole page until the next frame publishes its bounds
 
 The native router sees only the published host rects, so a control mounted but not yet measured
-would let its touch through. When one of the controls the shell watches changes (the composer, the
-pill, the conversation, toasts, Home and the find bar), the page last acknowledged below the host
+would let its touch through. Every control the shell draws over the page publishes its bounds: the
+Browser bars, the composer bar and the pill, toasts and persistent notices. When one of the controls
+the shell watches changes (the composer, the pill, the conversation, toasts and notices, Home and the
+find bar), the page last acknowledged below the host
 is presented again with the whole page as host, and the next frame measures the controls.
 
 ```quint
