@@ -176,6 +176,49 @@ pure def lawAReadingSpeaksOnlyCleanBoundedText(likelySecret: bool, linkOrEmail: 
     iff (chars >= 1 and chars <= readingMaxChars and not(linkOrEmail or likelySecret or unsayable))
 ```
 
+## Story: Hear dates and times the way a person says them
+
+> As the owner listening to Alpha, I want a date, a clock time, a range and a percentage said as I
+> would say them, so that "Mon, Nov 23, 3:30 pm" is not read out as letters, digits and colons.
+
+### A spoken reply or reading says a written date, clock time, range and percentage in words
+
+A capitalised weekday and month, in full or shortened ("Mon", "Sept."), with a day of the month is
+said in full with the day as an ordinal: "Mon, Nov 23" is "Monday, November twenty-third". A clock
+time is said in words: "3:30 pm" is "three thirty P M", "9:05" is "nine oh five", "7:00" is "seven
+o'clock" and "14:30" is "two thirty P M"; twelve with no minutes is "noon" in the afternoon and
+"midnight" in the morning ("12 pm", "0:00"). A range of clock times or short numbers joins its ends
+with "to" ("2-3 p.m.", "09:05–10:00", "5-10 minutes"), "%" is "percent", and a compound such as
+"30-minute" is said without a dash. A colon after a word is
+a pause, so a Calendar heading "Sun, Nov 22:" ends as "Sunday, November twenty-second.". Digits in
+an ISO date, a phone number or an offset such as "UTC+01:00" keep their groups, and a month name
+written in lower case ("you may 3") is left as written. Only the spoken text changes: the written
+reply is never changed, and a likely secret is refused before any of this.
+
+```quint
+type Meridiem = NoMeridiem | Morning | Afternoon
+type ClockWords = NoonWord | MidnightWord | HourAndMinutes | HourOClock | HourAlone
+pure def meridiemOf(hour: int, written: Meridiem): Meridiem =
+  if (written != NoMeridiem) written else if (hour >= 13) Afternoon else if (hour == 0) Morning else NoMeridiem
+pure def twelveHour(hour: int): int = if (hour % 12 == 0) 12 else hour % 12
+pure def clockWords(hour: int, minute: int, written: Meridiem, minutesWritten: bool): ClockWords =
+  if (minute == 0 and twelveHour(hour) == 12 and meridiemOf(hour, written) == Afternoon) NoonWord
+  else if (minute == 0 and twelveHour(hour) == 12 and meridiemOf(hour, written) == Morning) MidnightWord
+  else if (minute != 0) HourAndMinutes
+  else if (minutesWritten and meridiemOf(hour, written) == NoMeridiem) HourOClock
+  else HourAlone
+pure val hourValues = Set(0, 1, 9, 11, 12, 13, 23)
+pure val minuteValues = Set(0, 5, 30)
+pure val writtenValues = Set(NoMeridiem, Morning, Afternoon)
+pure def lawTwelveInTheAfternoonIsNoon(minutesWritten: bool): bool = clockWords(12, 0, Afternoon, minutesWritten) == NoonWord
+pure def lawTwelveInTheMorningIsMidnight(minutesWritten: bool): bool =
+  clockWords(12, 0, Morning, minutesWritten) == MidnightWord and clockWords(0, 0, NoMeridiem, minutesWritten) == MidnightWord
+pure def lawALateClockIsAfternoon(hour: int): bool = (hour >= 13 and hour <= 23) implies meridiemOf(hour, NoMeridiem) == Afternoon
+pure def lawTheHourIsSaidOnATwelveHourClock(hour: int): bool = (hour >= 0 and hour <= 23) implies (twelveHour(hour) >= 1 and twelveHour(hour) <= 12)
+pure def lawMinutesAreAlwaysSaid(hour: int, minute: int, written: Meridiem): bool =
+  minute != 0 implies clockWords(hour, minute, written, true) == HourAndMinutes
+```
+
 ## Story: Hear a short line for an action, and read the details in the chat
 
 > As the owner talking to Alpha, I want a spoken action reply, such as an email it drafted, said in

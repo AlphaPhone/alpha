@@ -285,6 +285,7 @@ export const operationPorts = effect {
       if (op.kind === "tabsShow") return TABS_SHOWN_SUMMARY
       return op.kind === "navigate" ? browserNavigationSummary(op.url) : controlSummary(op.operation)
     },
+    tabList: (operation) => decoded(operation)?.kind === "tabsShow",
     itemized: (operation) => decoded(operation)?.kind === "closeAll",
     itemize: (operation, proposalId) => decoded(operation)?.kind === "closeAll" ? listed(proposalId) : undefined,
     stillListed: (operation, proposalId) => {
