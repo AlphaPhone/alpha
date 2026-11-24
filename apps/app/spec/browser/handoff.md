@@ -6,6 +6,10 @@ refuses a stale session, document or hidden page itself). A private page leaves 
 owner confirms it. A mail, phone, text, map or app link tapped on a page is the native host's own
 handoff: it opens Android's handler for a normal tab, and in a private tab it asks "Leave private
 browsing?" in its own dialog first; the renderer only shows the notices the host sends about it.
+When an HTTPS page in a normal tab takes too long to load, the native host's own timeout notice also
+offers Open in another browser: a tap sends only that failed address to the same chooser, and only
+while that tab is still shown and still on that failed address. A private tab, a page that is not
+HTTPS, any other failure (a refused certificate among them) and the next load offer nothing.
 Every step checks again that the same page is still the one shown.
 
 ## Story: Open the page I see in another browser
