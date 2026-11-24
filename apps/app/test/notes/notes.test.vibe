@@ -87,6 +87,27 @@ describe("Notes journeys", () => {
     }
   })
 
+  it.live("Stalled storage leaves the retired editor closed and the next owner can open a draft (spec/notes/editor.md, \"Story: Keep my unsaved words on this phone when a save fails\")", () => effect {
+    const agent = new NotesAgentFake()
+    const device = new DeviceFake()
+    provide notesOver(agent, device) {
+      const editor = try NotesEditor
+      const collection = try NotesCollection
+      try bound()
+      try editor.newNote("text")
+      try editor.edit({ body: "Pick up the keys" })
+      try editor.save()
+      try editor.edit({ body: "Pick up the keys and the mail" })
+      device.stalled = "ElizaSecureStore.compareAndExchange"
+      try collection.retire()
+      const shown = timeout(editor.draft(), "2 seconds") catch () => "held back"
+      const selected = timeout(editor.selection(), "2 seconds") catch () => "held back"
+      try collection.bind("alpha/2/notes")
+      const opened = timeout(editor.newNote("text"), "2 seconds") catch () => false
+      try check(() => assert.deepStrictEqual({ shown, selected, opened }, { shown: undefined, selected: undefined, opened: true }))
+    }
+  })
+
   it.live("Erase a voice note after review and clean up its recording once the device host registers (spec/notes/cleanup.md, \"Story: Erase only the recording of the note I erased, and only once the device proves it\")", () => effect {
     const agent = new NotesAgentFake()
     const device = new DeviceFake()

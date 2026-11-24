@@ -45,7 +45,7 @@ const noticesFake = Layer.succeed(Notices, {
 export function fakes(agent: NotesAgentFake, device: DeviceFake, shown?: SubscriptionRef.SubscriptionRef<ForegroundState>, routes?: Layer.Layer<Navigation>) {
   const native = Layer.succeed(Native, {
     available: (plugin: string) => sync(() => device.available(plugin)),
-    invoke: (plugin: string, method: string, args?: unknown) => Effect.try({
+    invoke: (plugin: string, method: string, args?: unknown) => device.stalled === `${plugin}.${method}` ? Effect.never : Effect.try({
       try: () => device.invoke(plugin, method, (args ?? {}) as Record<string, unknown>),
       catch: (error) => new NativeFailed({ plugin, method, message: String(error), code: (error as { code?: string }).code }),
     }),

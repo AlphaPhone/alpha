@@ -19,6 +19,9 @@ the Trash apart; a clean draft follows the snapshot, a clean draft of a note tha
 an edited draft whose base is no longer current goes to review. A new draft has no record to overwrite,
 so it simply follows the current revision.
 A claimed saved editor never replaces or saves a dirty draft.
+Editor commands reconcile the collection currently published before acting. Retiring an owner
+clears the editor immediately. Saving the retired owner's unfinished edit to encrypted storage
+runs separately from editor reads and commands.
 
 ```quint
 type Mutation = NoMutation | DeleteAfterSave | Deleting | Restoring

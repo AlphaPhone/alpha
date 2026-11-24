@@ -2,7 +2,7 @@
 import type { NoteFormat, NoteJson, StickyNote } from "@elizaos/plugin-notes/types"
 import { playbackAllowed } from "../../gen/notes__audio.effect.vibe"
 import {
-  type Event as RecorderEvent, Machine as RecorderMachine, type Recorder, type StartRefusal, holdsRecording, machine as recorderMachine, voiceSavePlan,
+  type Event as RecorderEvent, Machine as RecorderMachine, type Recorder, type StartRefusal, drained, holdsRecording, machine as recorderMachine, voiceSavePlan,
 } from "../../gen/notes__recorder.effect.vibe"
 import { type Event as JournalEvent, Machine as JournalMachine, machine as journalMachine } from "../../gen/notes__recordingJournal.effect.vibe"
 import { Native } from "../platform/native.vibe"
@@ -131,12 +131,20 @@ const make = effect {
     const segments = status.segments ?? []
     const before = (try journal.get()).segments
     for (let index = before; index < segments.length; index += 1) try record({ type: "segmentFinished", journaled: true })
+    let held = 0
     for (const segment of segments) {
       const text = segment.text
       if (text === undefined) break
+      held += 1
       if ((try Ref.get(texts)).has(segment.segmentId)) continue
       try Ref.update(texts, (known) => new Map([...known, [segment.segmentId, text]]))
+    }
+    let journaled = (try journal.get()).texts
+    while (journaled < held) {
       try record({ type: "textJournaled" })
+      const now = (try journal.get()).texts
+      if (now === journaled) break
+      journaled = now
     }
   }
 
@@ -184,7 +192,7 @@ const make = effect {
     if (wanted === undefined) { try send({ type: "startRefused", reason: "RefusedRecovery" }); return "failed" }
     try Ref.set(digest, wanted)
     try Ref.set(folder, folderId)
-    if (!(try drain())) { try send({ type: "startRefused", reason: "RefusedMedia" }); return "failed" }
+    if (!(try drain()) || !drained(try machine.get())) { try send({ type: "startRefused", reason: "RefusedMedia" }); return "failed" }
     const existing = try status()
     if (existing !== undefined && existing.state !== "idle") {
       if (!matches(existing, wanted, existing.binding?.folderId ?? null) || existing.recordingId === undefined) {
@@ -274,10 +282,23 @@ const make = effect {
     if (stopped?.state !== "stopped" || stopped.recordingId !== id || (try recordingId()) !== id
         || !matches(stopped, try Ref.get(digest), try Ref.get(folder))) return false
     if ((try send({ type: "finishRecording" })) === undefined) return false
+    const segments = stopped.segments ?? []
+    try send({ type: "progress", segments: segments.length, longEnough: (stopped.durationMs ?? 0) >= 1000 })
+    if (segments.length === 0) {
+      if (stopped.canonicalSavePending === true || (try send({ type: "noAudio" })) === undefined) {
+        try send({ type: "voiceSaveFailed" })
+        return false
+      }
+      try record({ type: "discardPending", isOwner: true })
+      try record({ type: "retirePending" })
+      voice("discardNoteRecording", { recordingId: id }) catch () => undefined
+      try close()
+      return false
+    }
     if (stopped.canonicalSavePending === true && !(try machine.get()).savePending) try send({ type: "claim" })
     try learn(stopped)
     try record({ type: "stopPending" })
-    const words = try transcript(stopped.segments ?? [])
+    const words = try transcript(segments)
     const durationMs = Math.round(stopped.durationMs ?? (try SubscriptionRef.get(display)).durationMs)
     if (!(try saveVoice(id, words, durationMs))) { try send({ type: "voiceSaveFailed" }); return false }
     try send({ type: "voiceSaved" })
@@ -315,6 +336,7 @@ const make = effect {
     if (existing === undefined || existing.state === "idle" || existing.recordingId === undefined) return false
     const wanted = try ownerDigest()
     if (!matches(existing, wanted, existing.binding?.folderId ?? null)) return false
+    if (!(try drain()) || !drained(try machine.get())) return false
     try Ref.set(digest, wanted)
     try Ref.set(folder, existing.binding?.folderId ?? null)
     const adopted = try send({ type: "adopt", recording: try numberOf(existing.recordingId), paused: existing.state !== "recording", segments: (existing.segments ?? []).length })
