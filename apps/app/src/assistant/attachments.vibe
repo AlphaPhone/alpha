@@ -1,5 +1,6 @@
 // spec/app/assistant/attachments.md, "Each file is checked against its limits: an image is made to fit, audio and video never go, and the message's files fit together"; spec/app/assistant/composer.md, "Files chosen are added up to the upload limit of four"; spec/app/assistant/index.md, "Stored attachments are posted with their message, and a message whose attachments could not be stored never left"
-import { batchFits, fits, imageBase64Cap, reencoded } from "../../gen/app__assistant__attachments.effect.vibe"
+import * as Picker from "../../gen/app__assistant__attachments.effect.vibe"
+import { batchFits, fileBase64Cap, fits, imageBase64Cap, nameLimit, reencoded } from "../../gen/app__assistant__attachments.effect.vibe"
 import * as Composer from "../../gen/app__assistant__composer.effect.vibe"
 import { fresh } from "../runtime/attempts.vibe"
 import { type Attached, Talk } from "./talk.vibe"
@@ -46,14 +47,18 @@ module web {
     }
   }
 
-  /** Keep or remove the batch in the installation's document store, which can hold more than localStorage. */
-  export async function store(key: string, files?: readonly unknown[]): Promise<void> {
-    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+  function open(): Promise<IDBDatabase> {
+    return new Promise((resolve, reject) => {
       const opened = indexedDB.open("alpha-assistant-attachments", 1)
       opened.onupgradeneeded = () => { opened.result.createObjectStore("files") }
       opened.onsuccess = () => resolve(opened.result)
       opened.onerror = () => reject(opened.error)
     })
+  }
+
+  /** Keep or remove the batch in the installation's document store, which can hold more than localStorage. */
+  export async function store(key: string, files?: readonly unknown[]): Promise<void> {
+    const database = await open()
     try {
       await new Promise<void>((resolve, reject) => {
         const transaction = database.transaction("files", "readwrite")
@@ -67,8 +72,23 @@ module web {
       database.close()
     }
   }
+
+  /** Read each of a conversation page's files in the same readonly transaction. */
+  export async function stored(keys: readonly string[]): Promise<readonly unknown[]> {
+    const database = await open()
+    try {
+      const bucket = database.transaction("files", "readonly").objectStore("files")
+      return await Promise.all(keys.map((key) => new Promise<unknown>((resolve, reject) => {
+        const request = bucket.get(key)
+        request.onsuccess = () => resolve(request.result)
+        request.onerror = () => reject(request.error)
+      })))
+    } finally {
+      database.close()
+    }
+  }
 }
-import { compressed, read, store } from web
+import { compressed, read, store, stored } from web
 
 effect function encoded(file: File): (Attached | undefined)!! {
   const mimeType = file.type.toLowerCase()
@@ -84,6 +104,15 @@ effect function encoded(file: File): (Attached | undefined)!! {
 
 export function sameBinding(left: Composer.Binding | undefined, right: Composer.Binding): boolean {
   return left?.owner === right.owner && left.conversation === right.conversation
+}
+
+// spec/app/assistant/attachments.md, "An attachment opens in place over the conversation and closes back to it, never opening a view"
+export effect function previewFile(file: Attached): void!!(Talk | Picker.Machine) {
+  if (!images.includes(file.mimeType)) return
+  const picker = try Picker.Machine
+  if (!Picker.canPreview(try picker.get(), 1)) return
+  const { board } = try Talk
+  try ignore(picker.send({ type: "preview", attachment: board.previewFile(file) }))
 }
 
 export effect function insertFiles(binding: Composer.Binding, slot: number, files: readonly File[]): void!!(Talk | Composer.Machine) {
@@ -135,3 +164,33 @@ export effect function stageFiles(key: string, files: readonly Attached[]): bool
 }
 
 export const dropFiles = (key: string) => ignore(tryPromise(() => store(key)))
+
+export interface AttachmentHistory {
+  readonly owner: number
+  readonly conversation: string
+  readonly room: string
+}
+
+const sentKey = ({ owner, conversation, room }: AttachmentHistory, message: string) => JSON.stringify(["sent", owner, conversation, room, message])
+
+export const rememberFiles = (history: AttachmentHistory, message: string, files: readonly Attached[]) =>
+  stageFiles(sentKey(history, message), files)
+
+const savedFiles = Schema.Array(Schema.Struct({
+  id: Schema.NonEmptyString, name: Schema.String, mimeType: Schema.String, data: Schema.String,
+}).check(Schema.makeFilter(({ name, mimeType, data }) =>
+  name.length > 0 && name.length <= nameLimit && /^[A-Za-z0-9+/]+={0,2}$/.test(data) &&
+  (images.includes(mimeType) ? data.length <= imageBase64Cap : documents.includes(mimeType) && data.length <= fileBase64Cap),
+))).check(Schema.makeFilter((files) => batchFits(files.length, files.reduce((total, file) => total + file.data.length, 0))))
+
+export effect function readFiles(history: AttachmentHistory, messages: readonly string[]): ReadonlyMap<string, readonly Attached[]>!! {
+  if (messages.length === 0) return new Map()
+  const saved = tryPromise(() => stored(messages.map((message) => sentKey(history, message)))) catch () => []
+  const files = new Map<string, readonly Attached[]>()
+  for (const [index, raw] of saved.entries()) {
+    const message = messages[index]
+    const decoded = Schema.decodeUnknownOption(savedFiles)(raw)
+    if (message !== undefined && Option.isSome(decoded)) files.set(message, decoded.value)
+  }
+  return files
+}
