@@ -1,6 +1,7 @@
 // spec/app/files/trash.md, "Story: See what is in the Trash"; spec/app/files/trash.md, "Story: Bring something back"; spec/app/files/trash.md, "Story: Erase for good"; spec/app/files/trash.md, "The owner restores everything listed that is still kept, together, from a list read since the last job"; spec/app/files/trash.md, "The owner marks listed entries, one by one or every one, and a mark lasts while its entry is listed and no job has started"; spec/app/files/trash.md, "The phone keeps an item thirty days from when it went in; its days left count down from thirty and never go below zero"
-import { Alert, Button, Checkbox, Dialog, DialogContent, DialogTitle, EmptyState, ListGroup, ListRow, Spinner } from "@repo/ui";
+import { Alert, AppHeader, Button, Checkbox, Dialog, DialogContent, DialogTitle, EmptyState, ListGroup, ListRow, Spinner } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
+import { ChevronLeft, Trash2 } from "lucide-react";
 import type { Machine } from "../../gen/app__files__trash.effect.vibe";
 import { daysLeft, view } from "../../gen/app__files__trash.ts";
 import { useMachine } from "../../gen/app__files__trash.react.ts";
@@ -30,14 +31,13 @@ export function Trash({ runtime, onBack }: TrashProps) {
   const now = runtime.runSync(Time.use((time) => time.latest()));
   const left = (days: number) => (days === 1 ? "1 day left" : `${days} days left`);
   return (
-    <section aria-label="Trash" className="flex flex-col gap-3 p-4">
-      <div className="flex items-center gap-2">
-        {onBack && <Button variant="ghost" size="sm" onClick={onBack}>Files</Button>}
-        <h2 className="font-semibold">Trash</h2>
+    <section aria-label="Trash" className="flex min-h-0 flex-1 flex-col">
+      <AppHeader title="Trash" leading={onBack && <Button variant="ghost" size="icon" aria-label="Files" onClick={onBack}><ChevronLeft /></Button>}>
         {owner({ type: "refresh" }) && <Button variant="ghost" size="sm" onClick={() => tell({ type: "refresh" })}>Refresh</Button>}
         {owner({ type: "restoreAll", now: untimed }) && <Button variant="outline" size="sm" onClick={() => tell({ type: "restoreAll", now: untimed })}>Restore all</Button>}
         {owner({ type: "askToEmpty" }) && <Button variant="outline" size="sm" onClick={() => tell({ type: "askToEmpty" })}>Empty the Trash</Button>}
-      </div>
+      </AppHeader>
+      <div className="min-h-0 flex-1 touch-pan-y space-y-3 overflow-y-auto px-2 pb-28">
       {state.marked.length > 0 && (
         <div role="toolbar" aria-label="Marked" className="flex flex-wrap gap-2">
           {owner({ type: "markAll" }) && state.marked.length < state.entries.length && <Button variant="ghost" size="sm" onClick={() => tell({ type: "markAll" })}>Mark all</Button>}
@@ -50,9 +50,9 @@ export function Trash({ runtime, onBack }: TrashProps) {
       {shown === "NoAccess" && <Alert variant="warn">Alpha may not read your files</Alert>}
       {shown === "Reading" && <Spinner label="Reading the Trash" />}
       {shown === "Unreadable" && <Alert variant="destructive">The Trash cannot be read now</Alert>}
-      {shown === "Empty" && <EmptyState title="The Trash is empty" />}
+      {shown === "Empty" && <EmptyState icon={<Trash2 />} title="The Trash is empty" />}
       {state.entries.length > 0 && (
-        <ListGroup aria-label="In the Trash">
+        <ListGroup aria-label="In the Trash" surface="plain">
           {state.entries.map((entry) => {
             const restore = { type: "restore", entry, now: untimed } as const;
             const erase = { type: "askToErase", entry } as const;
@@ -61,6 +61,8 @@ export function Trash({ runtime, onBack }: TrashProps) {
               <ListRow
                 key={entry.mark}
                 title={entry.name}
+                className="min-h-15 gap-3.5 rounded-xl px-2"
+                leading={<span className="grid size-11 shrink-0 place-items-center rounded-lg bg-muted text-foreground"><Trash2 className="size-5" /></span>}
                 selected={state.marked.includes(entry.mark)}
                 trailing={(
                   <span className="flex items-center gap-1">
@@ -75,6 +77,7 @@ export function Trash({ runtime, onBack }: TrashProps) {
           })}
         </ListGroup>
       )}
+      </div>
       <Dialog open={state.erasing.showing} onOpenChange={(open) => { if (!open && owner({ type: "keepThem" })) tell({ type: "keepThem" }); }}>
         <DialogContent>
           <DialogTitle>{state.doomed.length === 1 ? `Erase “${state.doomed[0]?.name}” for good?` : `Erase ${state.doomed.length} items for good?`}</DialogTitle>
