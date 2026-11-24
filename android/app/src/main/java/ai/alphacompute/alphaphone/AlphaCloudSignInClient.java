@@ -170,16 +170,25 @@ public abstract class AlphaCloudSignInClient extends Plugin {
   final String slot = config().credentialSlot(environment);
   run(() -> {
    try {
+    final boolean pending;
+    synchronized (lock) { pending = activating.contains(environment.name); }
     withCredentialRead(() -> {
      if (destroyed) throw new IllegalStateException("Sign-in closed");
      String saved = credentials(() -> {}).read(slot);
      String id = null;
+     long expiresAt = 0;
      if (saved != null) {
       JSONObject value = new JSONObject(saved);
       String candidate = value.optString("credentialId", null);
-      if (CloudSignInFlow.validUuid(candidate) && instant(value.opt("expiresAt")) > System.currentTimeMillis()) id = candidate;
+      long expiry = instant(value.opt("expiresAt"));
+      if (CloudSignInFlow.validUuid(candidate) && expiry > System.currentTimeMillis()) {
+       id = candidate;
+       expiresAt = expiry;
+      }
      }
-     call.resolve(new JSObject().put("environment", environment.name).put("credentialId", id == null ? JSONObject.NULL : id));
+     JSObject identity = new JSObject().put("environment", environment.name).put("credentialId", id == null ? JSONObject.NULL : id);
+     if (id != null) identity.put("expiresAt", expiresAt).put("activationPending", pending);
+     call.resolve(identity);
      return null;
     });
    } catch (Exception unavailable) { call.reject("Saved sign-in could not be read", "storage"); }

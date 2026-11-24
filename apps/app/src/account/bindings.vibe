@@ -238,7 +238,7 @@ export const bindingsService = Layer.effect(AccountBindings, effect {
   effect function readEmail(owner: number) {
     const answer = Effect.flatMap(cloud.json("GET", "/api/v1/user"), Schema.decodeUnknownEffect(UserAnswer)) catch () => undefined
     if (owner !== ownerOf(try session.current())) return
-    try SubscriptionRef.update(facts, (f) => ({ ...f, email: answer?.success === true ? answer.data.email : undefined }))
+    try SubscriptionRef.update(facts, (f) => ({ ...f, email: answer?.success === true ? answer.data.email ?? undefined : undefined }))
   }
 
   fork.scoped Stream.runForEach(resident.changes, (r) => effect {

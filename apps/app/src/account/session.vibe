@@ -55,7 +55,7 @@ export service CloudSession {
   /** Load, restore the saved sign-in, settle startup, and follow the host's sign-in events; runs for the app's life. */
   run(): void!!
   /** A sign-in finished: adopt the account Cloud names for the key the host stored, with what the host said of it. */
-  adopt(news: SignInNews): void!!
+  adopt(news: SignInNews, expectedCredentialId?: string): void!!
   /** A sign-in attempt holds the slot, or released it. */
   attempt(started: boolean): void!!
   /** Sign out of the account signed in now; whether Cloud confirmed the revocation. */
@@ -66,8 +66,14 @@ export service CloudSession {
   admit(route: RouteKind): void!RouteRefused
 }
 
-effect function readIdentity(native: Native.Shape, environment: string) {
+effect function readCredentialIdentity(native: Native.Shape, environment: string) {
   return try Schema.decodeUnknownEffect(CredentialIdentity)(try native.invoke(plugin, "credentialIdentity", { environment }))
+}
+
+effect function readIdentity(native: Native.Shape, environment: string) {
+  const identity = try readCredentialIdentity(native, environment)
+  if (identity.credentialId === null || identity.expiresAt === undefined) return undefined
+  return { ...identity, credentialId: identity.credentialId, expiresAt: identity.expiresAt }
 }
 
 effect function readUser(cloud: Cloud.Shape) {
@@ -81,8 +87,10 @@ effect function readAccount(native: Native.Shape, cloud: Cloud.Shape, environmen
   if (identity === undefined) return undefined
   const user = readUser(cloud) catch () => undefined
   if (user === undefined) return undefined
+  const current = readIdentity(native, environment) catch () => undefined
+  if (current === undefined || current.credentialId !== identity.credentialId) return undefined
   const account: Account = { userId: user.id, organizationId: user.organization_id, credentialId: identity.credentialId, expiresAt: identity.expiresAt }
-  return { account, confirmed: identity.activationPending !== true }
+  return { account, confirmed: current.activationPending !== true }
 }
 
 const incompleteCodes = { "app-link-unverified": "AppLinkUnverified", storage: "StorageFailed", "activation-expired": "ActivationExpired" } as const satisfies Record<string, IncompleteCode>
@@ -129,9 +137,9 @@ export const sessionService = Layer.effect(CloudSession, effect {
     }
   }
 
-  effect function adopt(news: SignInNews) {
+  effect function adopt(news: SignInNews, expectedCredentialId?: string) {
     const read = try readAccount(native, cloud, environment)
-    if (read === undefined) return
+    if (read === undefined || (expectedCredentialId !== undefined && read.account.credentialId !== expectedCredentialId)) return
     try send(read.confirmed
       ? { type: "signInCompleted", account: read.account, created: news.created, priorUnconfirmed: news.priorUnconfirmed }
       : { type: "restore", account: read.account, confirmed: false })

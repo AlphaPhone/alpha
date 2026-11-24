@@ -1174,9 +1174,10 @@ public class CloudSignInChainTest extends ChainPluginBase {
   slots.clear();CloudSignInChainTest host=new CloudSignInChainTest();
   PluginCall missing=new PluginCall();missing.input.put("environment","production");host.credentialIdentity(missing);
   check(missing.result!=null&&missing.result.opt("credentialId")==JSONObject.NULL,"missing identity");
-  slots.put("cloud:production",new JSONObject().put("credentialId",REQUEST).put("token",NEW).put("expiresAt",System.currentTimeMillis()+60000).toString());
+  long expiresAt=System.currentTimeMillis()+60000;
+  slots.put("cloud:production",new JSONObject().put("credentialId",REQUEST).put("token",NEW).put("expiresAt",expiresAt).toString());
   PluginCall current=new PluginCall();current.input.put("environment","production");host.credentialIdentity(current);
-  check(REQUEST.equals(current.result.getString("credentialId"))&&current.result.length()==2,"only current identity and environment returned");
+  check(REQUEST.equals(current.result.getString("credentialId"))&&current.result.getLong("expiresAt")==expiresAt&&Boolean.FALSE.equals(current.result.opt("activationPending"))&&current.result.length()==4,"only identity, expiry, activation and environment returned");
   slots.put("cloud:production",new JSONObject().put("credentialId",REQUEST).put("token",NEW).put("expiresAt",1).toString());
   PluginCall expired=new PluginCall();expired.input.put("environment","production");host.credentialIdentity(expired);
   check(expired.result.opt("credentialId")==JSONObject.NULL,"expired identity not active");
