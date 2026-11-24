@@ -134,8 +134,10 @@ conversation's messages, forks one, searches messages, asks the agent's
 health and which device steps it takes; Home and Calendar
 (`apps/app/src/home/cards.vibe`, `apps/app/src/calendar/agent.vibe`) read the
 calendar feed and the calendars and create, change, answer and delete
-events through the calendar plugin; the approvals area lists the agent's
-proposals and resolves one through the approvals module. A route an area
+events through the calendar plugin. Workflows reads the owner identity,
+active and removed workflows, prompts, scheduled tasks and the runs of a
+prompt. The approvals area lists the agent's proposals and resolves one
+through the approvals module. A route an area
 fakes for want of an agent plugin is not listed: none does today. Each line
 of `apps/agent/host/routes.jsonl` is one route; the pack is refused unless
 that list is this one, and eliza's route gate admits each of its routes.
@@ -162,6 +164,12 @@ pure val pageRoutes: List[Route] = List(
   { method: Patch, path: "/api/lifeops/calendar/events/{eventId}", stream: false },
   { method: Delete, path: "/api/lifeops/calendar/events/{eventId}", stream: false },
   { method: Post, path: "/api/lifeops/calendar/events/{eventId}/response", stream: false },
+  { method: Get, path: "/api/auth/me", stream: false },
+  { method: Get, path: "/api/workflow/workflows", stream: false },
+  { method: Get, path: "/api/workflow/removed-workflows", stream: false },
+  { method: Get, path: "/api/triggers", stream: false },
+  { method: Get, path: "/api/scheduled-tasks", stream: false },
+  { method: Get, path: "/api/triggers/{id}/runs", stream: false },
 )
 pure def admitted(listed: List[Route], r: Route): bool = listed.includes(r)
 pure def routeListAdmitted(listed: List[Route]): bool =
