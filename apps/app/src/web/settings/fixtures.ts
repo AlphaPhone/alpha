@@ -1,6 +1,8 @@
 // spec/settings/index.md, "Story: Find a setting in a few taps"; spec/settings/passwords.md, "Story: Use my saved passwords only after Android unlocks them"
 import { initial as nav } from "../../../gen/settings.ts";
 import { initial as appearance } from "../../../gen/settings__appearance.ts";
+import type { Carrier, Field } from "../../../gen/settings__carrier.ts";
+import { initial as carrierClosed, noSetup, noSim } from "../../../gen/settings__carrier.ts";
 import type { Diagnostics } from "../../../gen/settings__diagnostics.ts";
 import { initial as diagnostics } from "../../../gen/settings__diagnostics.ts";
 import { initial as facts, unread } from "../../../gen/settings__facts.ts";
@@ -95,3 +97,40 @@ export const notices: Diagnostics = {
 
 /** A paused activation Android lets the owner continue. */
 export const pausedActivation = { ...updates, activation: "Paused", canContinue: true, pending: true } as const;
+
+const returned = (value: string): Field => ({ status: "Returned", value });
+
+/** Carrier & SIM setup opened, before Show identifiers. */
+export const carrierIdle: Carrier = { ...carrierClosed, shown: true, epoch: 1, phase: "CarrierIdle" };
+
+/** Carrier & SIM setup after a read on a launcher with no SIM: one IMEI returned, the other denied. */
+export const carrierNoSim: Carrier = {
+  ...carrierIdle, epoch: 2, phase: "CarrierShown",
+  setup: {
+    ...noSetup, smsRole: "NotAlpha", dialerRole: "NotAlpha", simsStatus: "Returned",
+    slots: [
+      { slot: 0, imei: returned("123456789012345"), simState: returned("No SIM") },
+      { slot: 1, imei: { status: "Denied", value: "" }, simState: returned("No SIM") },
+    ],
+    hardware: { manufacturer: returned("Google"), model: returned("Pixel 10a"), device: returned("fixture"), android: returned("17"), baseband: { status: "Missing", value: "" } },
+  },
+};
+
+/** Carrier & SIM setup on the Alpha image with an active physical SIM, the EID read and IMEI 1 copied. */
+export const carrierActive: Carrier = {
+  ...carrierNoSim,
+  setup: {
+    ...carrierNoSim.setup, image: true, canChooseSms: true, dialerRole: "AlphaHolds",
+    slots: [{ slot: 0, imei: returned("123456789012345"), simState: returned("Ready") }],
+    sims: [{
+      ...noSim, subscription: 1, slot: 0, defaultData: true, carrier: returned("T-Mobile"), simName: returned("T-Mobile"), iccid: returned("8901260000000000000"),
+      operator: returned("T-Mobile"), operatorCode: returned("310260"), dataEnabled: returned("On"), dataState: returned("Connected"),
+      networkType: returned("5G NR"), roaming: returned("Not roaming"),
+    }],
+    eid: returned("89049032000000000000000000000000"),
+  },
+  copy: { target: { kind: "ImeiTarget", index: 0 }, copied: true },
+};
+
+/** Carrier & SIM setup after a read Android did not answer. */
+export const carrierFailed: Carrier = { ...carrierIdle, epoch: 2, phase: "CarrierFailed" };

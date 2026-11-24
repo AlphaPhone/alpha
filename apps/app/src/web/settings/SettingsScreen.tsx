@@ -1,13 +1,14 @@
-// spec/settings/index.md, "Story: Find a setting in a few taps"; spec/settings/facts.md, "Story: Read my phone's state truthfully"; spec/settings/facts.md, "Story: Make Alpha my Home app"; spec/settings/facts.md, "Story: Go to Android's own page"; spec/settings/appearance.md, "Story: Choose how Alpha looks"; spec/settings/preferences.md, "Story: Decide what Alpha may do without asking"; spec/settings/network.md, "Story: Join a nearby network"; spec/settings/updates.md, "Story: Update Alpha when I choose"; spec/settings/reset.md, "Story: Erase Alpha's data on purpose"; spec/settings/index.md, "General's Phone row opens Phone's line details on the Alpha image only, and About's Agent activity opens the assistant's activity on the phone"
+// spec/settings/index.md, "Story: Find a setting in a few taps"; spec/settings/facts.md, "Story: Read my phone's state truthfully"; spec/settings/facts.md, "Story: Make Alpha my Home app"; spec/settings/facts.md, "Story: Go to Android's own page"; spec/settings/appearance.md, "Story: Choose how Alpha looks"; spec/settings/preferences.md, "Story: Decide what Alpha may do without asking"; spec/settings/network.md, "Story: Join a nearby network"; spec/settings/updates.md, "Story: Update Alpha when I choose"; spec/settings/reset.md, "Story: Erase Alpha's data on purpose"; spec/settings/index.md, "General's Phone row opens Phone's line details on the Alpha image only, and About's Agent activity opens the assistant's activity on the phone"; spec/settings/carrier.md, "General offers the page on the phone only, and the default SMS app choice only where Alpha can take it"
 import {
   AppWindow, ArrowLeft, Bell, Bot, Camera, Download, Globe, Info, LayoutGrid, Link, Mail, MapPin, MessageSquare, Mic, MicOff,
-  Monitor, NotebookText, Calendar, Folder, Images, KeyRound, Phone, RotateCw, Settings as Gear, Shield, Trash2, UserRound, Workflow,
+  Monitor, NotebookText, Calendar, Folder, Images, KeyRound, Phone, RotateCw, Settings as Gear, Shield, Smartphone, Trash2, UserRound, Workflow,
   Wifi as WifiIcon,
 } from "lucide-react";
 import type { FormEvent, ReactNode } from "react";
 import type { AppRow, Elsewhere, Page, Settings } from "../../../gen/settings.ts";
 import { appListed, elsewhereShown } from "../../../gen/settings.ts";
 import type { Appearance, Choice } from "../../../gen/settings__appearance.ts";
+import { carrierOffered } from "../../../gen/settings__carrier.ts";
 import { dark, notSaved } from "../../../gen/settings__appearance.ts";
 import type { Facts, SettingsPage } from "../../../gen/settings__facts.ts";
 import { broaderNotice, scaleNotSaved, storageKnown, textScales } from "../../../gen/settings__facts.ts";
@@ -100,6 +101,8 @@ export type SettingsScreenProps = {
   readonly onDialog: (dialog: PageDialog | undefined) => void;
   /** The notifications page the app mounts for General's Notifications. */
   readonly notifications: ReactNode;
+  /** The Carrier & SIM setup page the app mounts for General's Carrier & SIM setup. */
+  readonly carrier: ReactNode;
 }
   & Pick<PrivacyPagesProps, "privacy" | "privacyActs"> & Pick<AboutPagesProps, "diagnostics" | "aboutActs"> & Pick<DeveloperPageProps, "developerActs">;
 
@@ -114,7 +117,7 @@ function handoffWord(facts: Facts): string {
  * @model spec/settings/index.md
  * @design design.md
  */
-export function SettingsScreen({ model, act, onClose, dialog, onDialog, notifications, privacy, privacyActs, diagnostics, aboutActs, developerActs }: SettingsScreenProps) {
+export function SettingsScreen({ model, act, onClose, dialog, onDialog, notifications, carrier, privacy, privacyActs, diagnostics, aboutActs, developerActs }: SettingsScreenProps) {
   const { nav, facts } = model;
   const native = model.variant !== "browser";
   const notices = [handoffWord(facts), SHADE[facts.shade], facts.roleRefused ? ROLE_NOT_CHANGED : ""].filter((n) => n !== "");
@@ -133,6 +136,7 @@ export function SettingsScreen({ model, act, onClose, dialog, onDialog, notifica
           {nav.page === "General" && <General model={model} act={act} native={native} erasing={dialog?.kind === "erase"} onDialog={onDialog} />}
           {nav.page === "Display" && <Display model={model} act={act} native={native} />}
           {nav.page === "Notifications" && notifications}
+          {nav.page === "Carrier" && carrier}
           {nav.page === "Network" && <WifiPage network={model.network} act={act} chosen={dialog?.kind === "join" ? dialog.network : undefined} onDialog={onDialog} />}
           {nav.page === "Apps" && <AppsPage aosp={model.variant === "aosp"} act={act} />}
           {(nav.page === "AppInbox" || nav.page === "AppCamera" || nav.page === "AppMaps" || nav.page === "AppNotes" || nav.page === "AppPhotos") && (
@@ -202,6 +206,12 @@ function General({ model, act, native, erasing, onDialog }: {
       </Section>
       {elsewhereShown("PhoneInfo", model.variant === "aosp", native) && (
         <Section><SettingRow label="Phone" icon={<Phone aria-hidden className="size-5" />} ariaLabel="Phone, SIM and carrier" onOpen={() => act.openElsewhere("PhoneInfo")} /></Section>
+      )}
+      {carrierOffered(native) && (
+        <Section>
+          <SettingRow label="Carrier & SIM setup" icon={<Smartphone aria-hidden className="size-5" />} ariaLabel="Carrier & SIM setup: IMEI, SIM status and activation"
+            onOpen={() => act.open("Carrier")} />
+        </Section>
       )}
       {native && (
         <Section caption="Device">
