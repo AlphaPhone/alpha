@@ -116,6 +116,33 @@ pure def disconnect(s: Sync): Sync =
     hold: if (s.hold.holding == U::Held) U::undo(s.hold) else s.hold }
 ```
 
+### Calendar's Google row says Not connected, Couldn't check, Finish setup, Off, Synced or Needs you, from the link and the change under way alone
+
+The row says Synced only while sync is on for the linked calendar and no
+change waits, is under way, or is in doubt, in conflict or failed; a change
+paused by a restart, in doubt, in conflict or failed needs the owner.
+Disconnecting is Calendar's own: it ends this link and leaves the account
+signed in for everything else.
+
+```quint
+type Row = NotConnected | CouldNotCheck | FinishSetup | Off | UpToDate | Syncing | NeedsYou
+
+pure def rowOf(s: Sync): Row =
+  if (s.link == Unlinked) (if (s.calendars.status == R::Failed and s.granted) CouldNotCheck else NotConnected)
+  else if (s.link == Linking or s.target == 0) FinishSetup
+  else if (s.phase == Paused or s.phase == InDoubt or s.phase == Conflict or s.phase == Failed) NeedsYou
+  else if (not(s.on)) Off
+  else if (s.phase == Clear or s.phase == Done) UpToDate
+  else Syncing
+
+pure def alwaysSyncedOnlyWhenNothingIsLeft(s: Sync): bool =
+  rowOf(s) == UpToDate implies (s.on and s.link == Linked and s.target > 0 and (s.phase == Clear or s.phase == Done) and not(inFlight(s)))
+
+pure def sometimesCouldNotCheck(s: Sync): bool = rowOf(s) == CouldNotCheck
+
+pure def sometimesNeedsYouWhileOn(s: Sync): bool = rowOf(s) == NeedsYou and s.on
+```
+
 ### An account can be linked with a calendar chosen
 
 ```quint

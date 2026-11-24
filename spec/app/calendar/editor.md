@@ -92,6 +92,19 @@ pure def editEvent(s: Editor, id: int, revision: int, day: int, repeats: bool): 
     banner: NoBanner, separate: false }
 ```
 
+### A note or a scan opens a new event already filled in, as edits to review, only when no other draft is kept
+
+What the note or the scan said is the form's first edit: nothing is saved
+until the owner saves it.
+
+```quint
+pure def canFromNote(s: Editor): bool = s.form == NoForm
+
+pure def fromNote(s: Editor, day: int): Editor = { ...newEvent(s, day), draft: D::edit(D::blank), kept: true }
+
+pure def sometimesFilledFromANote(s: Editor): bool = s.form == NewEvent and s.draft.edits == 1 and s.write.id == 0 and s.kept
+```
+
 ### Each edit is counted and kept on the phone at once, unless the phone failed to keep the draft
 
 Edits wait while a save is in flight and while the owner chooses between

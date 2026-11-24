@@ -2,8 +2,8 @@
 
 What the resident agent may do with the owner's Google Calendar. It reads
 events and asks about free time whenever it likes. It creates, changes or
-deletes an event only after the owner approves a card that shows exactly
-that change; one change is under way at a time; what it changed is read
+deletes an event, or answers an invitation, only after the owner approves a
+card that shows exactly that change, every field of it; one change is under way at a time; what it changed is read
 back before the agent is told it is done. A calendar someone else manages
 refuses deletes and changes to a whole series. The
 [calendar](./index.md) shows what the agent's calendar holds.
@@ -17,7 +17,8 @@ refuses deletes and changes to a whole series. The
 
 The owner approves, the agent asks and proposes, and Google (the world)
 answers. A change names the event and the revision of it the agent
-selected.
+selected, the answer it gives an invitation, and whether its card shows
+every field the change would set.
 
 ```quint
 import read as R from "../../kit/read"
@@ -26,19 +27,20 @@ import attempt as A from "../../kit/attempt"
 
 type Actor = Owner | Agent | World
 type Query = Events | FreeTime
-type Change = Create | Update | Delete
+type Change = Create | Update | Delete | Respond
+type Reply = NoReply | Going | Maybe | NotGoing
 type Stage = Idle | Awaiting | Sending | ReadingBack
 type Result = NoResult | Done | NotFound | Refused | InDoubt | Declined | Withdrawn
 
 type AgentCalendar = {
   feed: R::Read, query: Query,
-  stage: Stage, change: Change, id: int, series: bool, managed: bool, bound: int, revision: int,
+  stage: Stage, change: Change, reply: Reply, complete: bool, id: int, series: bool, managed: bool, bound: int, revision: int,
   card: V::Review, write: A::Attempt, check: R::Read, result: Result,
 }
 
 type Effect =
   | Ask({ ticket: int, query: Query })
-  | Send({ attempt: int, change: Change, id: int, series: bool, revision: int })
+  | Send({ attempt: int, change: Change, reply: Reply, id: int, series: bool, revision: int })
   | ReadBack({ ticket: int, id: int })
   | Report({ result: Result })
 
@@ -46,7 +48,7 @@ type Acted = { state: AgentCalendar, out: List[Effect] }
 
 pure val initial: AgentCalendar = {
   feed: R::unread, query: Events,
-  stage: Idle, change: Create, id: 0, series: false, managed: false, bound: 0, revision: 0,
+  stage: Idle, change: Create, reply: NoReply, complete: false, id: 0, series: false, managed: false, bound: 0, revision: 0,
   card: V::unreviewed, write: A::plan(0), check: R::unread, result: NoResult,
 }
 
@@ -86,17 +88,43 @@ pure def sometimesReadWhileACardWaits(s: AgentCalendar): bool = s.stage == Await
 
 ### The agent proposes one change at a time, for the revision of the event it selected, and the card shows it
 
-A new event names no event; a change or a delete names one.
+A new event names no event; a change, a delete or an answer to an
+invitation names one. Only an answer to an invitation says Going, Maybe or
+No.
 
 ```quint
-pure def canPropose(s: AgentCalendar, change: Change, id: int, series: bool, managed: bool, revision: int, by: Actor): bool =
+pure def canPropose(s: AgentCalendar, change: Change, reply: Reply, complete: bool, id: int, series: bool, managed: bool, revision: int, by: Actor): bool =
   by == Agent and s.stage == Idle and revision >= 0
     and (if (change == Create) id == 0 else id > 0)
+    and ((change == Respond) iff (reply != NoReply))
     and (managed implies (change != Delete and not(series)))
 
-pure def propose(s: AgentCalendar, change: Change, id: int, series: bool, managed: bool, revision: int, by: Actor): AgentCalendar =
-  { ...s, stage: Awaiting, change: change, id: id, series: series, managed: managed, bound: revision, revision: revision,
+pure def propose(s: AgentCalendar, change: Change, reply: Reply, complete: bool, id: int, series: bool, managed: bool, revision: int, by: Actor): AgentCalendar =
+  { ...s, stage: Awaiting, change: change, reply: reply, complete: complete, id: id, series: series, managed: managed, bound: revision, revision: revision,
     card: V::present(V::revise(s.card)), result: NoResult }
+```
+
+### A card that leaves out a field its change would set can be declined, never approved
+
+The title, the day and times with their time zone, the place, the
+calendar, the occurrences and the answer to an invitation are each shown
+when the change sets them. A change Alpha cannot show whole waits for the
+owner to decline it, or for the agent to withdraw it.
+
+```quint
+pure def alwaysOnlyAWholeCardIsApproved(s: AgentCalendar): bool =
+  (s.stage == Sending or s.stage == ReadingBack) implies s.complete
+
+pure def sometimesAPartialCardWaits(s: AgentCalendar): bool = s.stage == Awaiting and not(s.complete) and V::canConfirm(s.card)
+```
+
+### An invitation is answered Going, Maybe or No only through its card
+
+```quint
+pure def alwaysOnlyAnAnswerCarriesAReply(s: AgentCalendar): bool =
+  s.stage != Idle implies ((s.change == Respond) iff (s.reply != NoReply))
+
+pure def sometimesAnInvitationAnswered(s: AgentCalendar): bool = s.result == Done and s.change == Respond and s.reply == Maybe
 ```
 
 ### A calendar someone else manages is never asked to delete an event or change a whole series
@@ -130,12 +158,12 @@ pure def alwaysAnApprovableCardShowsTheEventAsItIs(s: AgentCalendar): bool =
 ### Only the owner approves, and approving sends the change once, under a new number
 
 ```quint
-pure def canApprove(s: AgentCalendar, by: Actor): bool = by == Owner and s.stage == Awaiting and V::canConfirm(s.card)
+pure def canApprove(s: AgentCalendar, by: Actor): bool = by == Owner and s.stage == Awaiting and V::canConfirm(s.card) and s.complete
 
 pure def approve(s: AgentCalendar, by: Actor): Acted =
   val w = A::dispatch(A::record(A::plan(s.write.id + 1)))
   { state: { ...s, stage: Sending, card: V::confirm(s.card), write: w },
-    out: List(Send({ attempt: w.id, change: s.change, id: s.id, series: s.series, revision: s.bound })) }
+    out: List(Send({ attempt: w.id, change: s.change, reply: s.reply, id: s.id, series: s.series, revision: s.bound })) }
 ```
 
 ### The owner declines, or the agent withdraws, and nothing is sent
@@ -157,7 +185,7 @@ pure def withdraw(s: AgentCalendar, by: Actor): Acted =
 ```quint
 pure def stepSendsWhatWasApproved(before: AgentCalendar, via: str, after: AgentCalendar, out: List[Effect]): bool =
   out.every(e => match e {
-    | Send(x) => via == "approve" and V::canConfirm(before.card) and x.change == before.change and x.id == before.id
+    | Send(x) => via == "approve" and V::canConfirm(before.card) and before.complete and x.change == before.change and x.reply == before.reply and x.id == before.id
         and x.series == before.series and x.revision == before.bound and x.attempt == before.write.id + 1
     | _ => true
   })
@@ -213,10 +241,16 @@ pure def sent(s: AgentCalendar, attempt: int, confirmed: bool, known: bool, by: 
 
 ### The read back says whether the change is there, and the agent is told
 
+The read back finds the event or not. A deletion is there when the event is
+gone; any other change when the event is found as changed.
+
 ```quint
+pure def seen(change: Change, present: bool): bool = if (change == Delete) not(present) else present
+
 pure def canReadBack(s: AgentCalendar, ticket: int, by: Actor): bool = by == World and s.stage == ReadingBack and R::canAnswer(s.check, ticket)
 
-pure def readBack(s: AgentCalendar, ticket: int, found: bool, by: Actor): Acted =
+pure def readBack(s: AgentCalendar, ticket: int, present: bool, by: Actor): Acted =
+  val found = seen(s.change, present)
   val result = if (found) Done else NotFound
   { state: { ...s, check: R::answer(s.check, found), stage: Idle, result: result }, out: List(Report({ result: result })) }
 ```

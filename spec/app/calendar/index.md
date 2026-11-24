@@ -12,6 +12,8 @@ Maps and comes back to it.
   changes it makes only after the owner approves the card that shows them
 - [Sync](./sync.md): the phone's calendar copied to Google, only when the
   owner links it and turns it on
+- [Sharing](./sharing.md): what a reviewed read of the phone's calendar may
+  tell the agent, and which of its Calendar actions the phone offers
 
 Reminders belong to the notices area: Calendar shows them among the events,
 as many as it is told of. Which app is showing, and Back between apps, belong
@@ -23,7 +25,7 @@ to the [shell](../shell/).
 > agent's Google Calendar, as an agenda, a day, or several days side by side,
 > so that I see what is coming wherever it was written.
 
-### The calendar holds its layout, today and the day it is anchored to, what each source last read, the reminders it was told of, an open event and one overlay
+### The calendar holds its layout, today and the day it is anchored to, what each source last read and whether the phone's read was cut short, the reminders it was told of, an open event and one overlay
 
 Days are civil dates, counted in whole days: the shell passes today in, and
 nothing in Calendar keeps an offset from it. The phone's calendar needs
@@ -43,7 +45,7 @@ type Handoff = Maps | AndroidCalendar | VideoCall
 
 type Calendar = {
   layout: Layout, wide: bool, today: int, anchor: int,
-  access: P::Permission, phone: R::Read, phoneDay: int, phoneRows: int,
+  access: P::Permission, phone: R::Read, phoneDay: int, phoneRows: int, phoneLimited: bool,
   connected: bool, google: R::Read, googleDay: int, googleRows: int,
   reminders: int, overlay: Overlay,
   open: int, place: bool, video: bool, detail: Detail, event: R::Read,
@@ -60,7 +62,7 @@ type Viewed = { state: Calendar, out: List[Effect] }
 
 pure val initial: Calendar = {
   layout: Timeline, wide: false, today: 0, anchor: 0,
-  access: P::unasked, phone: R::unread, phoneDay: 0, phoneRows: 0,
+  access: P::unasked, phone: R::unread, phoneDay: 0, phoneRows: 0, phoneLimited: false,
   connected: false, google: R::unread, googleDay: 0, googleRows: 0,
   reminders: 0, overlay: NoOverlay,
   open: 0, place: false, video: false, detail: Showing, event: R::unread,
@@ -89,6 +91,7 @@ pure def readFor(day: int, s: Calendar): Viewed =
     ...s, anchor: day,
     phone: phoneRead, phoneDay: if (phone) day else s.phoneDay,
     phoneRows: if (phone and s.phoneDay == day) s.phoneRows else 0,
+    phoneLimited: phone and s.phoneDay == day and s.phoneLimited,
     google: googleRead, googleDay: if (google) day else s.googleDay,
     googleRows: if (google and s.googleDay == day) s.googleRows else 0,
   }
@@ -117,13 +120,25 @@ never older ones.
 ```quint
 pure def canPhoneAnswered(s: Calendar, ticket: int): bool = P::allows(s.access) and R::canAnswer(s.phone, ticket)
 
-pure def phoneAnswered(s: Calendar, ticket: int, ok: bool, rows: int): Calendar =
-  { ...s, phone: R::answer(s.phone, ok), phoneRows: if (ok and rows > 0) rows else 0 }
+pure def phoneAnswered(s: Calendar, ticket: int, ok: bool, rows: int, limited: bool): Calendar =
+  { ...s, phone: R::answer(s.phone, ok), phoneRows: if (ok and rows > 0) rows else 0, phoneLimited: ok and rows > 0 and limited }
 
 pure def canGoogleAnswered(s: Calendar, ticket: int): bool = s.connected and R::canAnswer(s.google, ticket)
 
 pure def googleAnswered(s: Calendar, ticket: int, ok: bool, rows: int): Calendar =
   { ...s, google: R::answer(s.google, ok), googleRows: if (ok and rows > 0) rows else 0 }
+```
+
+### A read the phone cut short is shown as limited, never as complete
+
+Android gives at most two thousand events to one read and says when it
+stopped there. The rows it gave are shown with that said; a day shown as
+limited is never shown as empty.
+
+```quint
+pure def alwaysOnlyRowsShownAreLimited(s: Calendar): bool = s.phoneLimited implies s.phoneRows > 0
+
+pure def sometimesLimited(s: Calendar): bool = s.phoneLimited and s.googleRows > 0
 ```
 
 ### Rows shown are for the day the calendar is anchored to, from a source it may read
@@ -305,7 +320,7 @@ pure def askAccess(s: Calendar): Viewed = { state: { ...s, access: P::ask(s.acce
 pure def accessAnswered(s: Calendar, grant: P::Grant): Viewed =
   val told = { ...s, access: P::observe(s.access, grant) }
   if (P::allows(told.access) and not(P::allows(s.access))) readFor(s.anchor, told)
-  else { state: { ...told, phoneRows: if (P::allows(told.access)) s.phoneRows else 0 }, out: List() }
+  else { state: { ...told, phoneRows: if (P::allows(told.access)) s.phoneRows else 0, phoneLimited: P::allows(told.access) and s.phoneLimited }, out: List() }
 ```
 
 ### After asking, "Open Calendar settings" sends the owner to Android's settings
