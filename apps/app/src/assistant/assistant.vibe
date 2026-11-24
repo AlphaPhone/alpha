@@ -7,6 +7,7 @@ import * as Composer from "../../gen/app__assistant__composer.effect.vibe"
 import * as Dock from "../../gen/app__assistant__dock.effect.vibe"
 import { zoneOf } from "../../gen/app__assistant__context.effect.vibe"
 import * as Reply from "../../gen/app__assistant__reply.effect.vibe"
+import * as Pages from "../../gen/app__settings.effect.vibe"
 import * as Search from "../../gen/app__assistant__search.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
@@ -406,10 +407,24 @@ const reached = hearing(
   (ready): Conversation.Event => ({ type: "reach", ready }),
 )
 
-// spec/app/assistant/index.md, "A screen that changed takes a new revision and stops the turn in flight; an unchanged one is ignored"
-const looked = following(Shell, (shell) => shell.trail.at(-1), Conversation.Machine, (view): Conversation.Event => ({
-  type: "look", showing: view === undefined ? { tag: "Home" } : { tag: "App", view }, zone: zone(), day: 0, selected: false, sensitive: false,
-}))
+/** The Settings pages whose screen the agent is never told: the saved passwords and the carrier's identifiers. */
+const sensitivePages: ReadonlySet<Pages.Page> = new Set(["PasswordsPage", "CarrierPage"])
+
+// spec/app/assistant/index.md, "A screen that changed takes a new revision and stops the turn in flight; an unchanged one is ignored"; spec/app/assistant/index.md, "A sensitive screen says only that it is sensitive: no selection and no day"
+const looked = started(effect {
+  const shell = try Shell
+  const settings = try Pages.Machine
+  const conversation = try Conversation.Machine
+  let taken: string | undefined
+  try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(shell.changes, settings.changes), conversation.changes), effect ([[shown, pages]]) => {
+    const view = shown.trail.at(-1)
+    const sensitive = view === "Settings" && sensitivePages.has(pages.page)
+    const seen = `${view ?? ""} ${sensitive}`
+    if (seen === taken) return
+    const event: Conversation.Event = { type: "look", showing: view === undefined ? { tag: "Home" } : { tag: "App", view }, zone: zone(), day: 0, selected: false, sensitive }
+    if (!Conversation.enabled(try conversation.get(), event) || (try contained(conversation.send(event), "telling the screen"))) taken = seen
+  })
+}, "telling the screen")
 
 // spec/app/assistant/index.md, "When another conversation is shown, the last turn stays behind with its own"
 const left = following(Chats.Machine, (chats) => chats.chosen, Conversation.Machine, (): Conversation.Event => ({ type: "leave" }))

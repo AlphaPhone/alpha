@@ -6,6 +6,8 @@ import { Machine as Chats } from "../gen/app__assistant__chats.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Reply } from "../gen/app__assistant__reply.effect.vibe";
 import { Machine as Search } from "../gen/app__assistant__search.effect.vibe";
+import * as Pages from "../gen/app__settings.effect.vibe";
+import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import type { Mount } from "../src/areas.ts";
 import assistant from "../src/assistant/index.tsx";
 import { button, closeAll, fill, hardware, open, press, underAct, until } from "./alpha.tsx";
@@ -122,6 +124,17 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await chatsList();
     await until(alpha, runtime, Chats, (s) => s.list.status === "Loaded");
     expect(rows("Chats")).toBe(2);
+
+    // spec/app/assistant/index.md, "A sensitive screen is never sent, and no reply is awaited over one": Settings showing the saved passwords is a sensitive screen.
+    await alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Settings" })));
+    await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "openSection", page: "PasswordsPage" })));
+    await until(alpha, runtime, Conversation, (s) => s.context.sensitive && s.context.showing.tag === "App");
+    await write("my password is hunter2");
+    expect([button("Send"), world.ask.said.length]).toEqual([undefined, 2]);
+    // spec/app/assistant/index.md, "A sensitive screen says only that it is sensitive: no selection and no day"
+    await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "goBack" })));
+    await until(alpha, runtime, Conversation, (s) => !s.context.sensitive);
+    expect(Boolean(button("Send"))).toBe(true);
   });
 
   // spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/chats.md, "Story: Open a message that search found"
