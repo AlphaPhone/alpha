@@ -1,5 +1,4 @@
 // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
-import { createHash } from "node:crypto";
 import type { ActionJournalPlugin } from "@elizaos/os/bridges/definitions/action-journal";
 import type { AddressBookNativePlugin } from "@elizaos/os/bridges/definitions/contacts";
 import type { MessagesNativePlugin } from "@elizaos/os/bridges/definitions/messages";
@@ -63,7 +62,8 @@ export interface TelephonyScene {
   readonly asked: unknown[];
 }
 
-const versionOf = (id: string, revision: number) => createHash("sha256").update(`${id}:${revision}`).digest("hex");
+/** A wire-shaped contact version token from the fixture's numeric ID and revision. */
+const versionOf = (id: string, revision: number) => id.padStart(32, "0") + String(revision).padStart(32, "0");
 
 /** A fresh image: a call log, two voicemails, one conversation and two contacts. */
 export function telephonyScene(): TelephonyScene {
