@@ -60,7 +60,13 @@ describe("Updates", () => {
     await until(alpha, alpha.runtime, Updates.Machine, (s) => s.permission === "Supported");
     // spec/app/update/index.md, "Android's install permission is unsupported, required, starting or supported"
     expect(document.body.textContent).toContain("Automatic updatesAllowed");
+    let letGo = () => {};
+    world.update.installHeld = new Promise<void>((resolve) => { letGo = resolve; });
     await press("Install update");
+    // spec/app/update/index.md, "Settings shows Install update with the offered version while an offer applies, and its label says when it is downloading"
+    await until(alpha, alpha.runtime, Updates.Machine, (s) => s.installing);
+    expect([document.body.textContent?.includes("Downloading update"), button("Check for updates")]).toEqual([true, undefined]);
+    letGo();
     await until(alpha, alpha.runtime, Updates.Machine, (s) => !s.installing);
     expect(world.update.installs).toEqual([{ apkUrl: "https://releases.alphacompute.cc/alpha-121.apk", sha256: apk, sizeBytes: 4096, versionCode: 121 }]);
     // spec/app/update/index.md, "After Install update, Settings says whether Android took the update, the offer is gone, Android's permission is missing, or it could not start"
@@ -83,6 +89,11 @@ describe("Updates", () => {
     await seen(false);
     await seen(true);
     await until(alpha, alpha.runtime, Updates.Machine, (s) => s.permission === "Supported");
+    // spec/app/update/index.md, "After Install update, Settings says whether Android took the update, the offer is gone, Android's permission is missing, or it could not start": a changed offer waits for the next check.
+    world.update.installAnswer = "offer-response-changed";
+    await press("Install update");
+    await until(alpha, alpha.runtime, Updates.Machine, (s) => !s.installing && s.note === "CouldNotStart");
+    expect([(await updatesOf(alpha)).offer.manifest, document.body.textContent?.includes("The update couldn’t start. Try again.")]).toEqual([0, true]);
     world.update.installAnswer = "offer-withdrawn";
     world.update.manifest = undefined;
     world.update.digest = undefined;
@@ -96,12 +107,14 @@ describe("Updates", () => {
 
   it("A failed check keeps the offer and the channel's withdrawal removes it (spec/app/update/index.md, \"Story: Keep the offer that fits this phone\")", async () => {
     const world = phoneWith([release(121)]);
-    world.update.permission = "permission-required";
+    world.update.permission = "starting";
     const { alpha } = await open(world);
     await until(alpha, alpha.runtime, Updates.Machine, (s) => s.checked === "Fine");
     // spec/app/update/index.md, "A check that fails never replaces the saved offer"
     world.update.unreadable = true;
     await about(alpha);
+    // spec/app/update/index.md, "Android's install permission is unsupported, required, starting or supported": a phone still starting says so, and installs nothing on its own.
+    expect([document.body.textContent?.includes("Automatic updatesStarting"), world.update.installs]).toEqual([true, []]);
     await press("Check for updates");
     await until(alpha, alpha.runtime, Updates.Machine, (s) => s.note === "CouldNotCheck");
     expect([(await updatesOf(alpha)).offer.release.version, (await updatesOf(alpha)).offer.manifest]).toEqual([121, 0]);

@@ -22,3 +22,4 @@ rules.
 - [Telephony](./telephony/): Phone, Messages, Contacts, voicemail and the call bar, on an Alpha image
 - [Platform](./platform/): the world outside the page as services: the phone, the resident agent, the cloud, what the build allows and what the earlier Alpha kept
 - [Image](./image/): the Alpha image, what it grants the launcher, the cable tools and the licences of what ships
+- [Updates](./update/): Alpha updating itself from its channel, and each page saving its work while it does

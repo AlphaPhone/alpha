@@ -1,33 +1,114 @@
 name: release
 
-# A v* tag that names the version in package.json builds the packaged `spec`
-# command, runs the tools' self-test through the shared cache, where CI has
-# already verified the commit, one task at a time where it has not, since one
-# runner is too small for all five at once, and attaches the tarball to a GitHub release
-# (CONTRIBUTING.md, "Releasing").
+# Alpha's launcher release (spec/release/index.md, `pnpm release` in apps/app). A push to main builds an
+# unsigned candidate numbered by its run, mirrors it privately with its signing plan, and stops. The release
+# owner reads the plan and dispatches this workflow with the candidate's run and the plan's digest: the
+# protected `release` environment signs exactly that plan's APK with Alpha's one key, delivers it with a
+# receipt, records its voice qualification, and publishes the APK first, its anonymous download verified,
+# before the manifest phones read moves. The run's ledger travels with the candidate and refuses every step
+# the spec does not allow.
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      candidate:
+        description: The run id of the candidate's build on main
+        required: true
+      plan-sha256:
+        description: The SHA-256 of the signing plan you reviewed
+        required: true
+      qualification:
+        description: The voice qualification evidence file, as a URL the runner can read
+        required: true
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
+
+env:
+  TURBO_TELEMETRY_DISABLED: "1"
 
 jobs:
-  release:
+  candidate:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    environment: turbo-cache-read
-    env:
-      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-      TURBO_CACHE: local:rw,remote:r
-      TURBO_TELEMETRY_DISABLED: "1"
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
-      - run: pnpm pack --pack-destination "$RUNNER_TEMP"
-      - run: pnpm all //#test vibestack-studio#typecheck vibestack-studio#test vibestack-studio#test:browser --concurrency=1
-      - run: pnpm selftest --only --concurrency=1
-      - run: gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP/vibestack-${GITHUB_REF_NAME#v}.tgz" --verify-tag --generate-notes
+        with:
+          job: release-candidate
+          verification: "false"
+      - run: pnpm --filter @repo/app android build --release
+      - name: Build the candidate, mirror it and plan its signing
+        working-directory: apps/app
+        run: |
+          private="$RUNNER_TEMP/candidate"
+          pnpm -s release candidate --run "$private/run.json" --number "${{ github.run_number }}" --attempt "${{ github.run_attempt }}" --apk-manifest artifacts/apk-manifest.json
+          pnpm -s release mirror --run "$private/run.json" --apk artifacts/launcher-release-unsigned.apk --to "$private"
+          pnpm -s release plan --run "$private/run.json" --apk artifacts/launcher-release-unsigned.apk --out "$private/plan.json" | tee "$private/plan-answer.json"
+          echo "Signing plan: \`$(node -p 'require(process.argv[1]).planSha256' "$private/plan-answer.json")\`" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: release-candidate
+          path: ${{ runner.temp }}/candidate
+          retention-days: 1
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: release
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+        with:
+          job: release-publish
+          verification: "false"
+      - uses: actions/download-artifact@v5
+        with:
+          name: release-candidate
+          path: ${{ runner.temp }}/candidate
+          run-id: ${{ inputs.candidate }}
+          github-token: ${{ github.token }}
+      - name: Review, sign, deliver, qualify and publish
+        working-directory: apps/app
         env:
+          ALPHA_APP_RELEASE_KEYSTORE: ${{ secrets.ALPHA_APP_RELEASE_KEYSTORE }}
+          ALPHA_APP_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ALPHA_APP_RELEASE_KEYSTORE_PASSWORD }}
           GH_TOKEN: ${{ github.token }}
+          PLAN_SHA256: ${{ inputs.plan-sha256 }}
+          QUALIFICATION: ${{ inputs.qualification }}
+        run: |
+          private="$RUNNER_TEMP/candidate"
+          run="$private/run.json"
+          unsigned=$(ls "$private"/alpha-phone-*-unsigned.apk)
+          keys="$RUNNER_TEMP/keys"
+          install -d -m 700 "$keys"
+          printf '%s' "$ALPHA_APP_RELEASE_KEYSTORE" | base64 -d > "$keys/release.p12"
+          chmod 600 "$keys/release.p12"
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner"
+          pnpm -s release review --run "$run" --plan "$private/plan.json" --plan-sha256 "$PLAN_SHA256"
+          pnpm -s release sign --run "$run" --plan "$private/plan.json" --apk "$unsigned" --out artifacts/launcher-release.apk --keystore "$keys/release.p12" --key-label alpha-release --apksigner "$apksigner"
+          rm -rf "$keys"
+          pnpm android verify
+          pnpm -s release deliver --run "$run" --apk artifacts/launcher-release.apk --apk-manifest artifacts/apk-manifest.json --to "$RUNNER_TEMP/delivered"
+          curl -fsSL --proto '=https' -o "$RUNNER_TEMP/qualification.json" "$QUALIFICATION"
+          pnpm -s release qualify --run "$run" --apk artifacts/launcher-release.apk --evidence "$RUNNER_TEMP/qualification.json"
+          number=$(node -p 'require(process.argv[1]).state.number' "$run")
+          pnpm -s release manifest --apk artifacts/launcher-release.apk --version "$number" --out "$RUNNER_TEMP/alpha-update-stable.json"
+          pnpm -s release publish --run "$run" --apk artifacts/launcher-release.apk --manifest "$RUNNER_TEMP/alpha-update-stable.json" --execute
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: release-ledger
+          path: ${{ runner.temp }}/candidate/run.json
+          retention-days: 90
