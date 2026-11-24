@@ -76,13 +76,11 @@ export async function alone<A>(at: Pick<Checkout, "commit" | "root">, work: () =
   const lock = `${at.root}.building`;
   fs.mkdirSync(path.dirname(at.root), { recursive: true });
   for (let waited = 0; ; waited += 1) {
-    let acquired: boolean;
-    try { fs.mkdirSync(lock); acquired = true; } catch { acquired = false; }
-    if (acquired) break;
+    try { fs.mkdirSync(lock); break; } catch { void 0; }
     const held = fs.statSync(lock, { throwIfNoEntry: false })?.mtimeMs;
     if (held !== undefined && Date.now() - held > 3_600_000) fs.rmSync(lock, { recursive: true, force: true });
     if (waited % 12 === 0) process.stdout.write(`another worktree is building eliza ${at.commit.slice(0, 12)}: waiting\n`);
-    await Effect.runPromise(Effect.sleep("5 seconds"));
+    await Effect.runPromise(Effect.sleep(5_000));
   }
   try { return await work(); } finally { fs.rmSync(lock, { recursive: true, force: true }); }
 }

@@ -45,7 +45,8 @@ const design = "packages/design-system"
 const writing = 'AGENTS.md, "Writing code"'
 const citation = String.raw`spec\/\S+\.md, "[^"]+"`
 const suppressible = String.raw`(?!code\/|barrel\/|no-console\b)[\w@/-]+`
-const cited = new RegExp(String.raw`^\s*${citation}(?:; ${citation})*\s*$`)
+// AGENTS.md, "Writing code": a citation's line may end with `: ` and what the step shows, and a declaration keeps its doc comment.
+const cited = new RegExp(String.raw`^\s*${citation}(?:; ${citation})*(?:: \S.*)?\s*$`)
 const suppression = new RegExp(String.raw`^ eslint-disable(?:-next-line|-line)? ${suppressible}(?:, ${suppressible})* -- \S`)
 const configs = [suppression, /^ eslint-enable\b/]
 const throwsType = String.raw`[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*`
@@ -195,6 +196,5 @@ export default withWorkspaceBarrels(defineConfig(
   { files: ["packages/ui/src/**/*.{ts,tsx}"], rules: { "no-restricted-imports": ["error", noEffects], "no-restricted-globals": ["error", ...timers], "no-restricted-properties": ["error", ...timersOf] } },
   { files: own, ignores: ["**/*.{vibe,vibex}"], languageOptions: { parser: guarded(tseslint.parser) } },
   { files: ["{apps,packages}/**/*.{vibe,vibex}"], languageOptions: { parser: guarded(vibelang) } },
-  { files: own, plugins: { code }, rules: { "no-console": "error", "code/comments": ["error", { left: commented }], "code/effects": ["error", { left: scheduled }] } },
-  { files: ["packages/ui/src/components/**"], ignores: ["**/*.meta.tsx"], rules: { "code/comments": ["error", { jsdoc: true, left: commented }] } },
+  { files: own, plugins: { code }, rules: { "no-console": "error", "code/comments": ["error", { jsdoc: true, left: commented }], "code/effects": ["error", { left: scheduled }] } },
 ), { root: import.meta.dirname })

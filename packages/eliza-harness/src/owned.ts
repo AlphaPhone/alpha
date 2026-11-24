@@ -12,11 +12,8 @@ export async function owned(name: string) {
   const operator = <A>(route: string, body?: unknown) => said<A>(`${mine.cloud.provider}/operator/${route}`, { body });
   return {
     ...mine,
-    /** What the model says to this owner's agent next, in place of repeating the owner. */
     script: (reply: Reply) => operator("model", { system: mine.system, reply }),
-    /** The messages of every call this owner's agent has made to the model. */
     asked: () => operator<{ role: string; content?: unknown }[][]>(`asked?system=${encodeURIComponent(mine.system)}`),
-    /** Ask this owner's agent directly, as the phone's plugin would, for what a journey sets up or checks. */
     agentSays: <A>(route: string, body?: unknown) => said<A>(`${mine.agent.origin}${route}`, { body, headers: { authorization: `Bearer ${mine.agent.token}` } }),
   };
 }

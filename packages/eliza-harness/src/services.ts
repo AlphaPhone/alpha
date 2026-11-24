@@ -90,7 +90,7 @@ interface Answer { readonly status: number; readonly text: string }
 function exchange(url: string, init: { method?: string; headers?: Record<string, string>; body?: unknown; within?: number } = {}): Promise<Answer> {
   return new Promise((done, fail) => {
     const body = init.body === undefined ? undefined : JSON.stringify(init.body);
-    const request = http.request(url, { method: init.method ?? (body === undefined ? "GET" : "POST"), headers: { ...(body === undefined ? {} : { "content-type": "application/json" }), ...init.headers }, ...(init.within === undefined ? {} : { timeout: init.within }) }, (response) => {
+    const request = http.request(url, { method: init.method ?? (body === undefined ? "GET" : "POST"), timeout: init.within, headers: { ...(body === undefined ? {} : { "content-type": "application/json" }), ...init.headers } }, (response) => {
       let text = "";
       response.setEncoding("utf8").on("data", (part: string) => { text += part; }).on("end", () => done({ status: response.statusCode ?? 0, text }));
     });
@@ -104,7 +104,7 @@ async function answering(url: string, gone: () => string | undefined) {
   while (!(await exchange(url, { within: 2_000 }).then((answer) => answer.status === 200, () => false))) {
     const why = gone();
     if (why !== undefined) throw new Error(why);
-    await Effect.runPromise(Effect.sleep("100 millis"));
+    await Effect.runPromise(Effect.sleep(100));
   }
 }
 
