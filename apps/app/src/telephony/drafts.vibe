@@ -10,7 +10,7 @@ import {
 import { Machine as MessagesMachine, type OutgoingState } from "../../gen/telephony__messages.effect.vibe"
 import { callerOf, refusalTag, TelephonyBridges, TelephonyRefused, TelephonyUnavailable, watchSubmittedSms } from "./bridges.vibe"
 import { newId as newOperationId } from "../platform/ids.ts"
-import { CloudSession } from "../account/layer.vibe"
+import { CloudSession } from "../account/session.vibe"
 
 /** The largest picture Messages attaches. */
 export const MMS_PICTURE_BYTES = 1024 * 1024
