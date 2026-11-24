@@ -20,7 +20,7 @@ const { commit } = reachabilityOnly
 if (!reachabilityOnly && argv.includes("--record-reachability")) {
 	// Explicit, networked refresh of the recorded compare. CI never runs this.
 	const lock = readUpstreamPin(process.cwd());
-	const base = lock.branch || "vibestack";
+	const base = lock.branch || "develop";
 	const repository = new URL(lock.url).pathname.replace(/^\//, "").replace(/\.git$/, "");
 	const api = (route: string, jq: string) =>
 		execFileSync("gh", ["api", route, "--jq", jq], { encoding: "utf8", timeout: 120_000 }).trim();

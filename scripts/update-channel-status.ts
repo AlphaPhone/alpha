@@ -2,7 +2,7 @@
 /**
  * Is over-the-air app updating working for this build's package right now?
  *
- *   node scripts/update-channel-status.ts [--download] [--json]
+ *   node --conditions=eliza-source --import vibelang/register scripts/update-channel-status.ts [--download] [--json]
  *
  * Reads the channel the installed app reads (app.config.json updateManifestUrl, the same URL Gradle
  * compiles into BuildConfig.ALPHA_UPDATE_MANIFEST_URL) anonymously, exactly as a phone does, and
