@@ -1,0 +1,55 @@
+// spec/app/telephony/phoneInfo.md, "Story: See my SIM, carrier and number on the image"; spec/app/telephony/phoneInfo.md, "Story: Keep Alpha as my phone and SMS app"
+import type { PhoneLine, TelephonyStatus } from "@elizaos/os/bridges/phone"
+import * as Info from "../../gen/app__telephony__phoneInfo.effect.vibe"
+import type { Effect as Out, Event, Holders, Line, Network, VoicemailSetup } from "../../gen/app__telephony__phoneInfo.effect.vibe"
+import { Telephony, telephony } from "../platform/telephony.vibe"
+import { type Job, answer, reacting, together } from "../runtime/reactor.vibe"
+import { visiting } from "./visit.vibe"
+
+const networks = {
+  none: "NoService", "2g": "Network2g", "3g": "Network3g", "4g": "Network4g", "5g": "Network5g", "wifi-calling": "WifiCalling", unknown: "NetworkUnknown",
+} as const satisfies Record<PhoneLine["networkType"], Network>
+
+/** A line as the page shows it: a SIM name only where it differs from the carrier's, and only what Android let Alpha read. */
+function lineOf(line: PhoneLine): Line {
+  return {
+    slot: line.slot, carrier: line.carrierName, simName: line.displayName !== line.carrierName ? line.displayName : "",
+    number: line.number ?? "", network: networks[line.networkType], roaming: line.roaming ?? false, signal: line.signalLevel ?? -1,
+    embedded: line.embedded, imei: line.imei ?? "", simSerial: line.iccid ?? "",
+  }
+}
+
+function holdersOf(status: TelephonyStatus): Holders {
+  return { phoneApp: status.defaultDialer ?? "", phoneAlpha: status.roles.dialer.held, smsApp: status.defaultSms ?? "", smsAlpha: status.roles.sms.held }
+}
+
+const setups = { CarrierReady: "VoicemailOn", CarrierUnconfigured: "VoicemailNotSetUp", CarrierUnsupported: "VoicemailNotOffered", CarrierUnread: "VoicemailUnknown" } as const satisfies Record<string, VoicemailSetup>
+
+// spec/app/telephony/phoneInfo.md, "The page reads only while it is in front, and leaving forgets what it read"
+/** The page's one read under `ticket`, after `before`: the owner's Allow or role request, where there is one. */
+effect function read(ticket: number, before: (unknown!!Telephony) | undefined): Event!!Telephony {
+  return effect {
+    if (before !== undefined) try before
+    const status = try telephony("status", (c) => c.phone.status())
+    const info = try telephony("phoneInfo", (c) => c.phone.phoneInfo())
+    const carrier = Effect.map(telephony("refreshVoicemail", (c) => c.phone.refreshVoicemail("AutomaticRead")), (listing) => listing.carrier) catch () => "CarrierUnread" as const
+    const phoneState = info.access.phoneState
+    return { type: "infoAnswered", ticket, phoneState, lines: phoneState ? info.lines.map(lineOf) : [], holders: holdersOf(status), voicemail: setups[carrier] } satisfies Event
+  } catch (): Event => ({ type: "infoFailed", ticket })
+}
+
+function carry(fx: Out): Job<Event, Telephony, []> {
+  return match (fx) {
+    when { tag: "ReadInfo", let ticket }: answer("info", read(ticket, undefined), { type: "infoFailed", ticket });
+    when { tag: "AskPhoneState", let ticket }: answer("info", read(ticket, ignore(telephony("requestAccess", (c) => c.phone.requestAccess("phoneState")))), { type: "infoFailed", ticket });
+    when { tag: "AskRole", let sms, let ticket }: answer("info", read(ticket, ignore(telephony("requestRole", (c) => c.phone.requestRole(sms ? "sms" : "dialer")))), { type: "infoFailed", ticket });
+  }
+}
+
+const machine = reacting(Info, { carry })
+
+/** Leaving Settings, or the page hiding, closes the page; only the owner's tap on its row opens it. */
+const left = visiting("Settings", Info.Machine, (shown): Event | undefined => (shown ? undefined : { type: "show", showing: false }))
+
+/** Settings → Phone: in memory, read while the page is open. */
+export const phoneInfo = together(machine, left)

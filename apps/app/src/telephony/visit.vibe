@@ -1,0 +1,23 @@
+// spec/app/telephony/common.md, "A provider is read only while its view is in front on an unlocked phone with the grant"
+import { Machine as Shell, type View, showing } from "../../gen/app__shell.effect.vibe"
+import { Device } from "../platform/device.vibe"
+import { contained, started } from "../runtime/reactor.vibe"
+
+/**
+ * Tell the machine `target` names whether `view` is in front: the app on top of the shell's trail while the page is
+ * visible, which a locked phone or another app in front hides. `told` makes the fact its event, or none; each change is
+ * told once, from Alpha's first state on.
+ */
+export function visiting<IB, Ev, Refused>(view: View, target: Context.Key<IB, { send(event: Ev): unknown!Refused }>, told: (shown: boolean) => Ev | undefined) {
+  return started(effect {
+    const shell = try Shell
+    const device = try Device
+    const to = try target
+    const visible = Stream.concat(Stream.succeed(true), device.visible)
+    const shown = Stream.map(Stream.zipLatest(Stream.map(shell.changes, (state) => showing(state, view)), visible), ([inFront, seen]) => inFront && seen)
+    try Stream.runForEach(Stream.changesWith(shown, (a, b) => a === b), effect (now) => {
+      const event = told(now)
+      if (event !== undefined) try contained(to.send(event), `visiting ${view}`)
+    })
+  }, `visiting ${view}`)
+}

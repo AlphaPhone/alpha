@@ -28,4 +28,9 @@ export const first = (place: Place, screen: Area): Mount => ({ at: place, load: 
 export const mounts: readonly Mount[] = [
   first("home", home),
   at("assistant", () => import("./ask/index.tsx")),
+  at("view:Phone", () => import("./telephony/index.tsx")),
+  at("view:Messages", () => import("./telephony/messaging.tsx")),
+  at("view:Contacts", () => import("./telephony/addressBook.tsx")),
+  at("overlay", () => import("./telephony/ongoing.tsx")),
+  at("settings/phone", () => import("./telephony/settingsPhone.tsx")),
 ];

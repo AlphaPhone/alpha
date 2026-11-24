@@ -1,6 +1,9 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"
 import { together, whole } from "./runtime/reactor.vibe"
 import { shell } from "./shell/shell.vibe"
+import { callBar } from "./telephony/callBar.vibe"
+import { messages } from "./telephony/messages.vibe"
+import { phone } from "./telephony/phone.vibe"
 
 /**
  * The machines that live from launch to exit: those another area follows or tells, and those that must act while
@@ -9,6 +12,9 @@ import { shell } from "./shell/shell.vibe"
  */
 const machines = together(
   shell,
+  callBar,
+  phone,
+  messages,
 )
 
 /** The resident machines, closed: each machine one of them follows or tells is among them. */

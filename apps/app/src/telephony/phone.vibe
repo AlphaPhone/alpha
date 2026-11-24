@@ -1,0 +1,73 @@
+// spec/app/telephony/phone.md, "Story: Read my recent calls while Phone is open"; spec/app/telephony/phone.md, "Story: Call a number myself"
+import type { TelephonyCallLogEntry } from "@elizaos/os/bridges/phone"
+import { type CallOutcome, type HandoffAnswer, type PlaceAnswer, callOutcome } from "../../gen/app__telephony__common.effect.vibe"
+import * as Phone from "../../gen/app__telephony__phone.effect.vibe"
+import type { Effect as Out, Event, Recent, RecentsAnswer } from "../../gen/app__telephony__phone.effect.vibe"
+import { Telephony, TelephonyRefused, telephony } from "../platform/telephony.vibe"
+import { type Job, answer, reacting, together, untimed } from "../runtime/reactor.vibe"
+import { visiting } from "./visit.vibe"
+
+/** The largest call-log page Phone reads: eliza's own bound. */
+export const recentsLimit = 50
+
+const placedAs: Record<string, PlaceAnswer> = {
+  CallPlaced: "TelecomPlaced", CallEmergencyHandoff: "TelecomEmergency", CallBusy: "TelecomBusy", CallUnavailable: "TelecomUnavailable",
+  CallRefused: "TelecomUnavailable", CallFailed: "TelecomFailed", CallRoleRequired: "RoleRequired", CallPermissionRequired: "GrantRequired",
+}
+const dialedAs: Record<string, HandoffAnswer> = { DialHandedOff: "HandoffOpened", DialUnavailable: "HandoffMissing", DialRefused: "HandoffMissing", DialFailed: "HandoffFailed" }
+
+// spec/app/telephony/common.md, "A call is reported started only when Telecom accepted it, and a lost answer is never "not called""
+/** The owner's tap places the call through Telecom; without the dialer role or the call grant the number opens in the system dial screen. A call that may have gone is never "not called". */
+export effect function placed(number: string): CallOutcome!!Telephony {
+  const asked = Effect.map(telephony("placeCall", (c) => c.phone.placeCall(number)), (report) => ({ report })) catch (failure) => ({ failure })
+  const answered: PlaceAnswer = "report" in asked ? placedAs[asked.report.placeStatus] ?? "TelecomFailed"
+    : asked.failure instanceof TelephonyRefused && asked.failure.code === undefined && asked.failure.tag === "" ? "PlaceLost" : "TelecomUnavailable"
+  if (answered !== "RoleRequired" && answered !== "GrantRequired") return callOutcome(answered, "NoHandoff")
+  const dialed = telephony("dial", (c) => c.phone.dial(number)) catch () => undefined
+  return callOutcome(answered, dialed === undefined ? "HandoffFailed" : dialedAs[dialed.dialStatus] ?? "HandoffFailed")
+}
+
+/** One recent call as Phone shows it: the name Telecom cached, and a call not taken as missed. */
+function recentOf(entry: TelephonyCallLogEntry): Recent {
+  const kind = entry.type === "outgoing" ? "OutboundCall" : entry.type === "missed" || entry.type === "rejected" || entry.type === "blocked" ? "MissedCall" : "InboundCall"
+  return { id: entry.id, number: entry.number, title: entry.cachedName ?? "", kind, date: entry.date, fresh: entry.isNew, seconds: entry.durationSeconds }
+}
+
+/** What a refused call-log read means for the owner: not declared, access needed, or unreadable. */
+function refusedRecents(failure: unknown): RecentsAnswer {
+  if (!(failure instanceof TelephonyRefused) || failure.tag !== "RecentCallsRefused") return { tag: "RecentsUnreadable" }
+  const refusal = (failure.cause as { refusal?: { tag?: string; admission?: string } }).refusal
+  if (refusal?.tag === "CallLogUnavailable") return { tag: "RecentsNotDeclared" }
+  if (refusal?.tag === "CallLogNotAdmitted" && refusal.admission === "PermissionRequired") return { tag: "RecentsNotGranted" }
+  return { tag: "RecentsUnreadable" }
+}
+
+// spec/app/telephony/phone.md, "Only the latest read publishes, and rows already shown stay until it answers"
+/** Recents read under `ticket`; `asking` is the owner's Allow, the only read that asks Android for call-log access. */
+effect function recents(ticket: number, asking: boolean): Event!!Telephony {
+  const read: RecentsAnswer = effect {
+    let status = try telephony("status", (c) => c.phone.status())
+    if (status.permissions.callLog === undefined) return { tag: "RecentsNotDeclared" } satisfies RecentsAnswer
+    if (asking && status.permissions.callLog !== "granted") status = try telephony("requestAccess", (c) => c.phone.requestAccess("callLog"))
+    if (status.permissions.callLog !== "granted") return { tag: "RecentsNotGranted" } satisfies RecentsAnswer
+    const page = try telephony("recentCalls", (c) => c.phone.recentCalls({ limit: recentsLimit }))
+    return { tag: "RecentsRead", calls: page.calls.map(recentOf) } satisfies RecentsAnswer
+  } catch (failure) => refusedRecents(failure)
+  return { type: "recentsAnswered", ticket, answer: read, at: untimed }
+}
+
+function carry(fx: Out): Job<Event, Telephony, []> {
+  const lost = (ticket: number): Event => ({ type: "recentsAnswered", ticket, answer: { tag: "RecentsUnreadable" }, at: untimed })
+  return match (fx) {
+    when { tag: "ReadRecents", let ticket }: answer("recents", recents(ticket, false), lost(ticket));
+    when { tag: "AskCallLog", let ticket }: answer("recents", recents(ticket, true), lost(ticket));
+    when { tag: "Place", let id, let number }: answer(`place ${id}`, Effect.map(placed(number), (result): Event => ({ type: "dialAnswered", id, result })), { type: "dialAnswered", id, result: "CallUnconfirmed" });
+  }
+}
+
+const machine = reacting(Phone, { carry })
+
+const shown = visiting("Phone", Phone.Machine, (showing): Event => ({ type: "show", showing }))
+
+/** Phone: resident, since Contacts, voicemail and Alpha hand it a number to fill in; it reads only while its view is in front. */
+export const phone = together(machine, shown)

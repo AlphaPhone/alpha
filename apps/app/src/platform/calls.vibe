@@ -1,0 +1,94 @@
+// spec/app/telephony/callBar.md, "Story: See my live call over every view"; spec/app/telephony/callBar.md, "Story: Know when a call may be an emergency call"
+
+module capacitor {
+  import { registerPlugin } from "@capacitor/core"
+
+  interface Listening { remove(): Promise<void> }
+  interface OngoingCallPlugin {
+    ongoingCall(): Promise<unknown>
+    showCall(options: { id: string }): Promise<unknown>
+    endCall(options: { id: string }): Promise<unknown>
+    addListener(event: "ongoingCall", heard: (data: unknown) => void): Promise<Listening>
+  }
+  interface CallStatePlugin {
+    callState(): Promise<unknown>
+    addListener(event: "callState", heard: (data: unknown) => void): Promise<Listening>
+  }
+
+  let made: { ongoing: OngoingCallPlugin; state: CallStatePlugin } | undefined
+  /** The image's own call plugins, registered once for the life of the page. @throws {never} */
+  export function plugins() {
+    return (made ??= { ongoing: registerPlugin<OngoingCallPlugin>("AlphaOngoingCall"), state: registerPlugin<CallStatePlugin>("AlphaCallState") })
+  }
+  /** Each report `plugin` pushes under `event`, until the listener is removed. @throws {never} */
+  export function pushed(plugin: { addListener(event: string, heard: (data: unknown) => void): Promise<Listening> }, event: string, heard: (data: unknown) => void): Promise<Listening> {
+    return plugin.addListener(event, heard)
+  }
+}
+import { plugins, pushed } from capacitor
+import { registered } from "./device.vibe"
+
+/** The phone has no call plugins here: no Alpha image, or a build without its in-call service. */
+export error CallsAbsent { method: string }
+
+/** The phone refused or did not answer. */
+export error CallsFailed { method: string; cause: unknown }
+
+/**
+ * Telecom's calls and call state, as the Alpha image's in-call service reports them (`AlphaOngoingCall`,
+ * `AlphaCallState`): each answer raw, for the telephony area to decode. eliza's phone bridge reports neither yet.
+ */
+export service Calls {
+  /** The calls Telecom holds now: `{ calls: [{ id, state, connectedAt }] }`. */
+  ongoing(): unknown!(CallsAbsent | CallsFailed)
+  /** Whether a call is live and whether it may be an emergency call: `{ inCall, emergency, emergencyLive, watching }`. */
+  state(): unknown!(CallsAbsent | CallsFailed)
+  /** Bring the call screen of `id` to the front. */
+  show(id: string): void!(CallsAbsent | CallsFailed)
+  /** End, or decline, the call `id`: whether Telecom took it. */
+  end(id: string): boolean!(CallsAbsent | CallsFailed)
+  /** Each report of the calls the phone pushes, for as long as it is read. */
+  readonly reports: Stream.Stream<unknown>
+  /** Each call-state reading the phone pushes. */
+  readonly readings: Stream.Stream<unknown>
+}
+
+/** What the phone pushes under `event` of the plugin `of` picks, for as long as the stream is read. */
+function heard(name: string, event: string, of: (found: ReturnType<typeof plugins>) => { addListener(event: string, heard: (data: unknown) => void): Promise<{ remove(): Promise<void> }> }): Stream.Stream<unknown> {
+  if (!registered(name)) return Stream.empty
+  return Stream.callback<unknown>((queue) => Effect.asVoid(acquireRelease(
+    Effect.orElseSucceed(tryPromise(() => pushed(of(plugins()), event, (data) => { Queue.offerUnsafe(queue, data) })), () => undefined),
+    (listening) => listening === undefined ? Effect.void : ignore(tryPromise(() => listening.remove())),
+  )))
+}
+
+/** On an Alpha image, the image's own call plugins; absent where its host did not register them. */
+export const phoneCalls = Layer.sync(Calls, () => {
+  effect function asked<A>(name: string, method: string, call: () => Promise<A>): A!(CallsAbsent | CallsFailed) {
+    if (!registered(name)) throw new CallsAbsent({ method })
+    return try tryPromise({ try: call, catch: (cause) => new CallsFailed({ method, cause }) })
+  }
+  return {
+    ongoing: () => asked("AlphaOngoingCall", "ongoingCall", () => plugins().ongoing.ongoingCall()),
+    state: () => asked("AlphaCallState", "callState", () => plugins().state.callState()),
+    show: (id: string) => Effect.asVoid(asked("AlphaOngoingCall", "showCall", () => plugins().ongoing.showCall({ id }))),
+    effect end(id: string) {
+      const answer = try asked("AlphaOngoingCall", "endCall", () => plugins().ongoing.endCall({ id }))
+      return typeof answer === "object" && answer !== null && "ended" in answer && answer.ended === true
+    },
+    reports: heard("AlphaOngoingCall", "ongoingCall", (found) => found.ongoing),
+    readings: heard("AlphaCallState", "callState", (found) => found.state),
+  }
+})
+
+const absent = (method: string) => Effect.fail(new CallsAbsent({ method }))
+
+/** In a browser there is never a call. */
+export const browserCalls = Layer.succeed(Calls, {
+  ongoing: () => absent("ongoingCall"),
+  state: () => absent("callState"),
+  show: () => absent("showCall"),
+  end: () => absent("endCall"),
+  reports: Stream.empty,
+  readings: Stream.empty,
+})

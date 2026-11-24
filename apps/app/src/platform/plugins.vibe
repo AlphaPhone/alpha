@@ -1,4 +1,6 @@
 // spec/kit/read.md, "Story: Read from outside"
+import { type Calls, browserCalls, phoneCalls } from "./calls.vibe"
+import { type Telephony, browserTelephony, phoneTelephony } from "./telephony.vibe"
 
 /**
  * The services over the phone's other plugins, one line per plugin in each of the three lists below: its service in
@@ -7,13 +9,19 @@
  */
 export type Plugins =
   | never
+  | Telephony
+  | Calls
 
 /** On the phone: each plugin's service over eliza's client of it (`@elizaos/os/bridges/<plugin>`). */
 export const phonePlugins = Layer.mergeAll(
   Layer.empty,
+  phoneTelephony,
+  phoneCalls,
 )
 
 /** In a browser: each plugin's service saying the phone's part is absent. */
 export const browserPlugins = Layer.mergeAll(
   Layer.empty,
+  browserTelephony,
+  browserCalls,
 )
