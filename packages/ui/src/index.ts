@@ -170,3 +170,5 @@ export * from "./components/settings/SettingsSwitchRow.tsx";
 export * from "./components/settings/SettingsTextSizePicker.tsx";
 export * from "./components/settings/SettingsTopPage.tsx";
 export type { AndroidStart as SettingsAndroidStart, AndroidTarget as SettingsAndroidTarget, AndroidTold as SettingsAndroidTold, Neighbour as SettingsNeighbour, Reading as SettingsFactReading, SettingsPageName, Access as SettingsAccess, AccessWord as SettingsAccessWord, DeviceRead as SettingsDeviceRead } from "./components/settings/vocabulary.ts";
+export * from "./components/notes/NoteRow.tsx";
+export * from "./components/notes/NotesList.tsx";
