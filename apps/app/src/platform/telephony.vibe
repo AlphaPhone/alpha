@@ -68,6 +68,14 @@ export effect function namesOf(surface: NameSurface, numbers: ReadonlyArray<stri
   return new Map(named.flatMap((one) => (one.name === null ? [] : [[one.number, one.name as string] as const])))
 }
 
+/** The SIM a text goes out on: the one picked, counted from one, or else the phone's default for texts or its only SIM; with several and no default, none. */
+export effect function textingSim(chosen: number | null): (number | undefined)!!Telephony {
+  const status = telephony("status", (c) => c.messages.status()) catch () => undefined
+  const sims = status?.subscriptions ?? []
+  if (chosen !== null) return sims[chosen - 1]?.id
+  return sims.find((one) => one.defaultSms)?.id ?? (sims.length === 1 ? sims[0].id : undefined)
+}
+
 /** One call of eliza's clients: refused before the phone where there is no image, and typed where the phone refused. */
 export effect function telephony<A>(method: string, run: (clients: TelephonyClients) => Promise<A>): A!(TelephonyAbsent | TelephonyRefused)!Telephony {
   const found = try (try Telephony).clients()

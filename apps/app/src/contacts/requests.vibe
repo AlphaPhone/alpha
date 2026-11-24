@@ -6,7 +6,7 @@ import type { PhoneNumber } from "@elizaos/os/bridges/phone"
 import * as Agent from "../../gen/app__contacts__agent.effect.vibe"
 import { Machine as PhoneMachine, clear } from "../../gen/app__phone.effect.vibe"
 import type { Ask, Effect as Out, Ending, Event } from "../../gen/app__contacts__agent.effect.vibe"
-import { Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
+import { Telephony, TelephonyRefused, namesOf, telephony, textingSim } from "../platform/telephony.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, reacting, run, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
@@ -189,9 +189,7 @@ function settled(record: SmsSendResult): { readonly done: boolean; readonly know
 /** The SIM a text goes out on: the one the agent named, the phone's default for texts, or its only SIM; with several and no default, none. */
 effect function simFor(operation: Asking | undefined): (number | undefined)!!Telephony {
   if (operation?.type === "sms_send") return operation.subscriptionId
-  const status = telephony("status", (c) => c.messages.status()) catch () => undefined
-  const sims = status?.subscriptions ?? []
-  return sims.find((one) => one.defaultSms)?.id ?? (sims.length === 1 ? sims[0].id : undefined)
+  return try textingSim(null)
 }
 
 // spec/app/contacts/agent.md, "Only the phone answers the action, and the request ends as that answer says"
