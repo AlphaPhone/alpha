@@ -583,14 +583,14 @@ describe("Notes stories", () => {
   })
 
   it.live("A note's open items become a Calendar draft I review (spec/notes/origins.md, \"Story: Turn a note into an event or a reminder I review in Calendar\")", () => effect {
-    const agent = seeded(note("call", "Clinic", "\nCall the clinic at nine", 1), note("blank", "", "", 2))
+    const agent = seeded(note("call", "Clinic", "\nCall the clinic at nine", 1), note("errands", "Errands", "", 2))
     const device = new DeviceFake()
     provide notesOver(agent, device) {
       const origins = try NotesOrigins
       try bound()
       // spec/notes/origins.md, "The draft text is the note's open action items, then its open checklist items, then its body"
       const ready = try origins.scheduleDraft("call", "event")
-      const empty = try origins.scheduleDraft("blank", "reminder")
+      const empty = try origins.scheduleDraft("errands", "reminder")
       const unknown = try origins.scheduleDraft("nobody", "event")
       try check(() => assert.deepStrictEqual(
         { ready, empty, unknown, first: scheduleSource(1, 2, false), long: scheduleStart("NoteBody", 4001, true) },
