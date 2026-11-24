@@ -201,18 +201,6 @@ export function residentStateDirectory(): string | undefined {
 	return residentState;
 }
 
-const VIEW_WORDS = new Set([
-	'assistant', 'chat', 'calendar', 'agenda', 'notes', 'files', 'downloads', 'inbox', 'mail', 'email', 'gmail', 'maps', 'browser',
-	'camera', 'photos', 'gallery', 'phone', 'dialer', 'messages', 'texts', 'contacts', 'clock', 'alarms', 'alarm', 'timer', 'reminders',
-	'settings', 'account', 'workflows', 'automations', 'passwords', 'home', 'home screen',
-]);
-
-/** Whether a travel destination names one of Alpha's own views ("take me to settings"), which Maps never routes. @throws {never} */
-export function namesAlphaView(destination: string): boolean {
-	const words = destination.toLowerCase().replace(/[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim()
-		.replace(/^(the|my|alpha) /, '').replace(/^(the|my) /, '').replace(/ (app|view|screen|page|tab)$/, '');
-	return VIEW_WORDS.has(words);
-}
 
 function ownerFile(directory: string, ownerEntityId: string): string {
 	return path.join(directory, `${createHash('sha256').update(ownerEntityId, 'utf8').digest('hex')}.json`);

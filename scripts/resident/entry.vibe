@@ -11,7 +11,7 @@ import * as files from "@elizaos/plugin-files"
 import * as workflow from "@elizaos/plugin-workflow"
 import * as maps from "@elizaos/plugin-maps"
 import * as browser from "@elizaos/plugin-browser"
-import { inferenceSocket, namesAlphaView, residentServices, residentStateDirectory, savedPlaceFiles } from "./bridges.ts"
+import { inferenceSocket, residentServices, residentStateDirectory, savedPlaceFiles } from "./bridges.ts"
 
 type PluginModule = { readonly default?: unknown; readonly plugin?: unknown }
 
@@ -19,12 +19,11 @@ function entry(packageName: string, module: PluginModule) {
   return { packageName, plugin: module.default ?? module.plugin }
 }
 
-/** Maps with Alpha's own views named, so a request for one of them is never routed as travel, and the assistant's saved places kept under the resident's state directory. */
+/** Maps with the assistant's saved places kept under the resident's state directory. */
 const mapsWithHost: AgentPlugin = {
   ...maps.mapsPlugin,
   init: async (config, runtime) => {
     await maps.mapsPlugin.init?.(config, runtime)
-    maps.registerMapsViews(runtime, namesAlphaView)
     maps.registerMapsSavedPlaces(runtime, savedPlaceFiles(residentStateDirectory))
   },
 }

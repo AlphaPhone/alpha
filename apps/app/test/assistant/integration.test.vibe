@@ -164,10 +164,12 @@ function tabListExecutors(runs: { count: number }) {
   return Layer.succeed(DeviceExecutors, { ports: composeExecutors([notes, browser]) })
 }
 
-it.effect("Asking to see my tabs opens the list, while unrelated words and other controls keep review (spec/assistant/review.md, \"The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote or my own ask for its tab list\")", () => effect {
-  const sent = effect function (text: string, operation: unknown) {
+it.effect("The tab list opens without a card only when the model proposes it for my current message (spec/assistant/review.md, \"The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote or my own ask for its tab list\")", () => effect {
+  // The mocked model decides: it proposes the operation for message "u1" (this message), for an earlier message, or nothing.
+  const sent = effect function (text: string, operation: unknown, forMessage = "u1") {
     const runs = { count: 0 }
-    provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "Here they are." }, proposals: [wireProposal("p31", digest("9"), operation, "u1")] }), fakeHost([]), tabListExecutors(runs), journalNative(new Map())) {
+    const proposals = operation === undefined ? [] : [wireProposal("p31", digest("9"), operation, forMessage)]
+    provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "Here they are." }, proposals }), fakeHost([]), tabListExecutors(runs), journalNative(new Map())) {
       const composer = try Composer
       try composer.edit(text)
       try composer.send()
@@ -178,19 +180,19 @@ it.effect("Asking to see my tabs opens the list, while unrelated words and other
   const show = { type: "browser_tabs_show" }
   const open = { type: "browser_navigate", url: "https://news.example.com/" }
   const outcomes = {
-    showMine: try sent("Show my open tabs", show),
-    asked: try sent("what tabs do I have open?", show),
-    unrelated: try sent("Show me the calendar", show),
-    declined: try sent("Do not show my open tabs", show),
+    modelProposes: try sent("Show my open tabs", show),
+    modelProposesForOtherWords: try sent("What do I have going on in Browser?", show),
+    modelProposesNothing: try sent("Show my open tabs", undefined),
+    earlierMessage: try sent("Show my open tabs", show, "u0"),
     otherControl: try sent("Show my open tabs", { type: "browser_tab_new" }),
     openCommand: try sent("Open news.example.com", open),
     openQuestion: try sent("Is news.example.com any good?", open),
   }
   try Effect.try(() => assert.deepStrictEqual(outcomes, {
-    showMine: { cards: [], runs: 1 },
-    asked: { cards: [], runs: 1 },
-    unrelated: { cards: ["LiveCard"], runs: 0 },
-    declined: { cards: ["LiveCard"], runs: 0 },
+    modelProposes: { cards: [], runs: 1 },
+    modelProposesForOtherWords: { cards: [], runs: 1 },
+    modelProposesNothing: { cards: [], runs: 0 },
+    earlierMessage: { cards: [], runs: 0 },
     otherControl: { cards: ["LiveCard"], runs: 0 },
     openCommand: { cards: [], runs: 1 },
     openQuestion: { cards: ["LiveCard"], runs: 0 },

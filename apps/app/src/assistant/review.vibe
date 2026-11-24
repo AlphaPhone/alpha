@@ -15,7 +15,6 @@ import { AdvertisedCapabilities, type WorkflowStepRef } from "./ports.vibe"
 import { actionResultText, copy, receiptTitle, unsyncedSummary } from "./presentation.vibe"
 import type { CardDestination, ItemizedSet, ProposalCard } from "./transcript.vibe"
 import { ask } from "./transport.vibe"
-import { directBrowserTabList } from "@elizaos/plugin-browser/grounding"
 import { browserCommand, writtenNumbers } from "./grounding.vibe"
 import { WithdrawableRequests } from "./withdrawable.vibe"
 
@@ -478,7 +477,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
     const op = ports.classOf(proposal.operation)
     const bound = proposal.requestMessageId === messageId
     const tabList = ports.tabList?.(proposal.operation) === true
-    const commanded = browserCommanded(browserCommand(text), tabList, tabList && directBrowserTabList(text, "Alpha"))
+    const commanded = browserCommanded(browserCommand(text), tabList, tabList && bound)
     const grounded = op !== "BrowserNavigate" || (ownerTyped(ports.target(proposal.operation, text).tag !== "NoTarget", pageLink) && commanded)
     try custodyStep({ type: "prefer", value: try preference() })
     try custodyStep({ type: "propose", op, workflow: proposal.workflow !== undefined, bound, grounded, listed: false })
