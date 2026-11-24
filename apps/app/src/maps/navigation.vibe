@@ -1,6 +1,6 @@
 // spec/maps/guidance.md, "Start begins a new session from a ready route"; spec/maps/guidance.md, "A fix guides only when usable, and only for the current session"; spec/maps/guidance.md, "Ending, the provider's retirement, a failed watch or the navigation service ends the session"; spec/maps/guidance.md, "A reroute belongs to its session; a failed or late one keeps the current route"
 import { backgroundNavigation, type NavigationBridge, NavigationBridgeFailed } from "@elizaos/plugin-maps/client/device-navigation"
-import { type Guidance, type NavEffect, type NavStep, Machine as GuidanceMachine, readingUsable } from "../../gen/maps__guidance.effect.vibe"
+import { type Guidance, type NavEffect, type NavStep, Machine as GuidanceMachine, live, readingUsable } from "../../gen/maps__guidance.effect.vibe"
 import { Machine as ScreenMachine } from "../../gen/maps__screen.effect.vibe"
 import { maySpeak, usableFix } from "../../gen/maps__vocabulary.effect.vibe"
 import { Native } from "../platform/native.vibe"
@@ -169,15 +169,17 @@ export const navigationLayer = Layer.effect(MapsNavigation, effect {
   effect function onFix(session: number, fix: Position) {
     const g = (try content.get()).guidance
     const before = try guidance.get()
-    if (!g || g.session !== session || before.session !== session) return
+    if (!g || g.session !== session || before.session !== session || !live(before.phase)) return
     const now = try Clock.currentTimeMillis
     const reading = readingOf(fix, g.route, before.step, g.marks, now)
+    // The fix is in place before the machine judges it, so whoever sees the machine's verdict reads the fix it was for.
+    try content.update((c) => c.guidance?.session === session ? { ...c, position: fix, guidance: { ...c.guidance, fix } } : c)
     const after = try apply({ type: "fix", owner: session, reading })
     if (!after) return
     const banner = bannerOf(g.route, g.marks, after.step, fix)
     const title = after.offRoute ? "Off route" : `${guidanceDistance(banner.distance, LOCALE)} · ${banner.instruction}`
     const text = after.offRoute ? "Open Maps to end navigation." : `${guidanceDuration(banner.remainingSeconds)} · ${guidanceDistance(banner.remainingMeters, LOCALE)} remaining`
-    try content.update((c) => c.guidance?.session === session ? { ...c, position: fix, guidance: { ...c.guidance, fix, title, text } } : c)
+    try content.update((c) => c.guidance?.session === session ? { ...c, guidance: { ...c.guidance, title, text } } : c)
     const speak = maySpeak(g.kind)
     if (!readingUsable(reading)) {
       try voice.pause()
