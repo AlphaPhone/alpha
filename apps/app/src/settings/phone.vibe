@@ -28,8 +28,8 @@ effect function scanned(scan: number): Network.Event!!(WiFi | Found) {
 }
 
 // spec/app/settings/network.md, "Only Android's answer to the newest join settles it, and the phone is then read again; a wrong password is said only of a join that had one"
-effect function joined(join: number, name: string, security: Network.Security, passphrase: string): Network.Event!!WiFi {
-  return { type: "joinAnswered", join, joined: try (try WiFi).join(name, security, Redacted.make(passphrase)), at: untimed }
+effect function joined(attempt: number, name: string, security: Network.Security, passphrase: string): Network.Event!!WiFi {
+  return { type: "joinAnswered", join: attempt, joined: try (try WiFi).join(name, security, Redacted.make(passphrase)), at: untimed }
 }
 
 // spec/app/settings/network.md, "Only the newest read is taken: Android's own flags for the active network, or unknown when it could not say"
@@ -100,8 +100,8 @@ function carrierTimers(state: Carrier.Carrier): ReadonlyArray<Due<Carrier.Event,
 const carrier = together(
   reacting(Carrier, { carry: carryCarrier, timers: carrierTimers }),
   // spec/app/settings/carrier.md, "Opening the page reads nothing; leaving it, the phone locking or Alpha going to the background forgets everything it read, and an answer that comes later is refused"
-  following(Pages.Machine, (state) => state.page === "CarrierPage", Carrier.Machine, (shown): Carrier.Event => (shown ? { type: "show" } : { type: "hide" })),
-  hearing(Stream.unwrap(effect { return (try Device).visible }), Carrier.Machine, (visible): Carrier.Event | undefined => (visible ? undefined : { type: "hide" })),
+  following(Pages.Machine, (state) => state.page === "CarrierPage", Carrier.Machine, (shown): Carrier.Event => (shown ? { type: "show" } : { type: "pageHidden" })),
+  hearing(Stream.unwrap(effect { return (try Device).visible }), Carrier.Machine, (visible): Carrier.Event | undefined => (visible ? undefined : { type: "pageHidden" })),
 )
 
 // spec/app/settings/passwords.md, "The vault is unavailable for a reason, locked, damaged, or unlocked still, which lists the entries"

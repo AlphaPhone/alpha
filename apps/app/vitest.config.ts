@@ -13,7 +13,7 @@ const eliza = new RegExp(`^${fs.realpathSync.native(path.join(import.meta.dirnam
  * linked from their own checkout: as in the page (vite.config.ts), they run on this package's one copy of Effect and
  * of Capacitor, so that a schema or an error of theirs is one Alpha's code can read.
  */
-export default defineConfig(async (env) => mergeConfig(await base(env), {
+export default defineConfig(async (env) => mergeConfig(typeof base === "function" ? await base(env) : await base, {
   resolve: { dedupe: ["effect", "vibelang-runtime", "@capacitor/core"] },
-  test: { globalSetup: [fileURLToPath(import.meta.resolve("@repo/eliza-harness/setup"))], server: { deps: { inline: [eliza] } } },
+  test: { globalSetup: [fileURLToPath(import.meta.resolve("@repo/eliza-harness"))], server: { deps: { inline: [eliza] } } },
 }));

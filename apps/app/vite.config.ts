@@ -2,7 +2,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import vibelang from "vibelang-vite";
 import { type Plugin, defineConfig } from "vite";
-import { eliza } from "@repo/eliza-harness/serve";
+import { eliza } from "@repo/eliza-harness";
 import { fakes } from "./test/fakes/serve.ts";
 
 /**
@@ -41,6 +41,6 @@ const guarded: Plugin = {
 
 export default defineConfig({
   plugins: [vibelang(), react(), tailwindcss(), guarded, faked ? fakes(process.env.ALPHA_AGENT, process.env.ALPHA_FAKES === "phone") : eliza()],
-  // eliza's clients are linked from their own checkout, whose Effect and Capacitor are this one's versions: one copy of each in the page.
+  /** eliza's clients are linked from their own checkout, whose Effect and Capacitor are this one's versions: one copy of each in the page. */
   resolve: { dedupe: ["effect", "vibelang-runtime", "@capacitor/core"] },
 });

@@ -5,6 +5,7 @@ import * as Prefs from "../../gen/app__settings__preferences.effect.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type Job, answer, due, following, reacting, run, stop, together, untimed } from "../runtime/reactor.vibe"
+import { versions } from "./versions.ts"
 
 module web {
   /** The licence notices shipped with Alpha, beside its page: never a remote source. */
@@ -31,12 +32,8 @@ module web {
     URL.revokeObjectURL(link.href)
     return true
   }
-  /** @throws {never} */
-  export function versions(): { readonly app: string; readonly mode: string } {
-    return { app: import.meta.env.VITE_ALPHA_VERSION ?? "development", mode: import.meta.env.MODE }
-  }
 }
-import { shared, shipped, versions } from web
+import { shared, shipped } from web
 
 /** One licence as the notices file holds it. */
 export schema Notice { name: string; version: string; license: string; text: string; flags?: ReadonlyArray<string> }
