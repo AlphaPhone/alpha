@@ -1,7 +1,7 @@
 // spec/app/maps/connection.md, "Every Maps request goes through eliza's cloud client under its own request key, and a tile comes back as its image"
-import type { LocationErrorEvent, LocationPlugin, LocationResult } from "@elizaos/os/bridges/definitions/location";
+import type { LocationErrorEvent, LocationPermissionStatus, LocationPlugin, LocationResult } from "@elizaos/os/bridges/definitions/location";
 import type { CloudClient } from "../../src/platform/cloud.vibe";
-import { type Faked, plugin } from "./phone.ts";
+import { type Faked, plugin, rejection } from "./phone.ts";
 import type { Route } from "./routes.ts";
 
 type Capabilities = Awaited<ReturnType<CloudClient["mapsCapabilities"]>>;
@@ -37,9 +37,8 @@ export interface MapsScene {
   limited: number | undefined;
   /** What each Maps request asked, by its route, and the request key it carried. */
   readonly asked: { path: string; key: string | null; body: unknown }[];
-  /** Where the fake phone is, and whether it allows location. */
+  /** Where the fake phone is. */
   here: { latitude: number; longitude: number; accuracy: number } | undefined;
-  allowed: "granted" | "denied" | "prompt";
   /** The page's listeners of the fake location plugin. */
   readonly listeners: Set<(result: LocationResult) => void>;
   /** The native watches the page started and has not cleared. */
@@ -66,7 +65,6 @@ export function mapsScene(): MapsScene {
     limited: undefined,
     asked: [],
     here: { latitude: 43.7300, longitude: 7.4200, accuracy: 8 },
-    allowed: "granted",
     listeners: new Set(),
     watches: new Set(),
   };
@@ -121,15 +119,15 @@ export function mapsRoutes(scene: MapsScene): Route[] {
   ];
 }
 
-/** `ElizaLocation` of eliza's Android package: its permission, one watch per call, and the positions the scene moves to. */
-export function elizaLocation(scene: MapsScene, now: () => number): Faked {
+/** `ElizaLocation` of eliza's Android package: the permission Settings reads, one watch per call, and the positions the scene moves to. */
+export function elizaLocation(scene: MapsScene, now: () => number, permission: () => LocationPermissionStatus): Faked {
   return plugin<LocationPlugin, { locationChange: LocationResult; error: LocationErrorEvent }>((emit) => {
     const told = (result: LocationResult) => emit("locationChange", result);
     let next = 0;
     return {
-      checkPermissions: () => Promise.resolve({ location: scene.allowed, accuracy: "precise" }),
-      requestPermissions: () => Promise.resolve({ location: scene.allowed === "prompt" ? "granted" : scene.allowed, accuracy: "precise" }),
-      getCurrentPosition: () => Promise.reject(new Error("not used by Maps")),
+      checkPermissions: () => Promise.resolve({ ...permission() }),
+      requestPermissions: () => Promise.resolve({ ...permission() }),
+      getCurrentPosition: () => Promise.reject(rejection("TIMEOUT")),
       watchPosition: () => {
         const watchId = `w${++next}`;
         scene.watches.add(watchId);

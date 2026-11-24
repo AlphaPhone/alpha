@@ -130,7 +130,7 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
         </Alert>
       )}
 
-      {can({ type: "continueDisclosure" }) && !state.link.disclosed && state.link.location.asked === false && (
+      {can({ type: "continueDisclosure" }) && !can({ type: "useMyLocation" }) && (now === "Browse" || now === "Directions") && (
         <Alert variant="info" role="dialog" aria-label="Location">
           <p>Maps uses your location to show where you are and to plan routes from it. Searches and route points go to the Maps provider; your agent is never told where you are.</p>
           <Button size="sm" onClick={() => void send({ type: "continueDisclosure" })}>Continue</Button>

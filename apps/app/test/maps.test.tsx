@@ -1,9 +1,11 @@
 // @vitest-environment happy-dom
+import { Effect } from "effect";
 import { act } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Screen } from "../gen/app__maps.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import maps from "../src/maps/index.tsx";
+import type { Alpha } from "../src/runtime/area.tsx";
 import { button, closeAll, fill, hardware, later, only, open, press, underAct, until } from "./alpha.tsx";
 import { cloudRoute, harbour, move } from "./fakes/maps.ts";
 import { scene } from "./fakes/scene.ts";
@@ -20,6 +22,11 @@ const enter = (name: string) => act(async () => {
   field.form.requestSubmit();
 });
 
+/** Open Maps from the shell, as Home's tile or the agent does. */
+const showMaps = (alpha: Alpha) => act(async () => {
+  await alpha.runtime.runPromise(Effect.ignore(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Maps" }))));
+});
+
 /** Focus the field whose accessible name is `name`. */
 const focus = (name: string) => act(async () => {
   [...document.querySelectorAll("input")].find((found) => found.getAttribute("aria-label") === name)?.focus();
@@ -34,7 +41,7 @@ describe("Maps on a phone", () => {
     const start = { latitude: 43.7300, longitude: 7.4200 };
     world.maps.routes = [cloudRoute("fast", start, harbour.coordinate, 400, 3)];
     const { alpha } = await open(world, withMaps);
-    await press("Maps");
+    await showMaps(alpha);
     const runtime = maps.runtime(alpha);
 
     // spec/app/maps/index.md, "Opening Maps, the network returning or Retry reads the coverage when no provider works, and leaves a working one alone"
@@ -92,7 +99,7 @@ describe("Maps on a phone", () => {
   it("Signed out, Maps asks Cloud nothing and says to sign in (spec/app/maps/index.md, \"Story: Connect through my cloud account\")", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
     const { alpha } = await open(world, withMaps);
-    await press("Maps");
+    await showMaps(alpha);
     const runtime = maps.runtime(alpha);
     // spec/app/maps/connection.md, "Signing in, out or to another account retires the provider and reads the new account's coverage"
     await until(alpha, runtime, Screen, (s) => s.link.account === 0 && s.link.basemap === "World");
@@ -105,7 +112,7 @@ describe("Maps in a browser", () => {
   it("Look at a place and keep it (spec/app/maps/index.md, \"Story: Look at a place\")", async () => {
     const world = scene();
     const first = await open(world, withMaps);
-    await press("Maps");
+    await showMaps(first.alpha);
     const runtime = maps.runtime(first.alpha);
     await until(first.alpha, runtime, Screen, (s) => s.link.provider !== 0);
 
@@ -125,7 +132,7 @@ describe("Maps in a browser", () => {
     // spec/app/maps/index.md, "Saved places are kept on the phone, and are what survives a restart"
     world.maps.coverage = { ...world.maps.coverage, providerId: "eliza-cloud-google" } as typeof world.maps.coverage;
     const second = await open(world, withMaps);
-    await press("Maps");
+    await showMaps(second.alpha);
     const again = maps.runtime(second.alpha);
     await until(second.alpha, again, Screen, (s) => s.saved.length === 1 && s.link.google);
     expect(Boolean(button("Quay"))).toBe(true);
@@ -143,7 +150,7 @@ describe("Maps in a browser", () => {
   it("Back off when Maps asks me to wait (spec/app/maps/connection.md, \"Story: Serve Maps through my cloud account\")", async () => {
     const world = scene();
     const { alpha } = await open(world, withMaps);
-    await press("Maps");
+    await showMaps(alpha);
     const runtime = maps.runtime(alpha);
     await until(alpha, runtime, Screen, (s) => s.link.provider !== 0);
 

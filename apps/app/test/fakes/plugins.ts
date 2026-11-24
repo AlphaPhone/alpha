@@ -5,7 +5,7 @@ import type { Answering } from "./routes.ts";
 import { elizaSystem } from "./launcher.ts";
 import { elizaFiles } from "./files.ts";
 import type { Scene } from "./scene.ts";
-import { alphaCarrierSetup, elizaLocation, elizaPasswords, elizaReset, elizaSystem, elizaWiFi } from "./settings.ts";
+import { alphaCarrierSetup, elizaPasswords, elizaReset, elizaSystem as settingsSystem, elizaWiFi } from "./settings.ts";
 import { telephonyPlugins } from "./telephony.ts";
 
 /**
@@ -20,11 +20,9 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     ElizaSecureStore: elizaSecureStore(world.secrets, world.slots),
     ElizaCalendar: elizaCalendar(world.calendar),
     ElizaFiles: elizaFiles(world.files),
-    ElizaLocation: elizaLocation(world.maps, () => world.now),
+    ElizaLocation: elizaLocation(world.maps, () => world.now, () => world.settings.location),
     ...(world.image ? { ElizaTelephony: present, ElizaContacts: present } : {}),
-    ElizaSystem: elizaSystem(world.launcher),
-    ElizaSystem: elizaSystem(world.settings),
-    ElizaLocation: elizaLocation(world.settings),
+    ElizaSystem: (emit) => ({ ...settingsSystem(world.settings)(emit), ...elizaSystem(world.launcher)(emit) }),
     ElizaReset: elizaReset(world.settings),
     ElizaWiFi: elizaWiFi(world.settings),
     ElizaPasswords: elizaPasswords(world.settings),
