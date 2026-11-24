@@ -53,9 +53,10 @@ describe("Camera on a phone", () => {
     const { alpha } = await open(world, only("home", "view:Camera", "notice"));
     const runtime = camera.runtime(alpha);
     let outcome: Promise<CaptureAnswer> | undefined;
-    await drawn(() => { outcome = runtime.runPromise(requestCapture()); });
+    await drawn(() => { outcome = runtime.runPromise(requestCapture("front")); });
     await until(alpha, runtime, Machine, (state) => state.phase === "Ready" && state.agent.stage === "Asked" && state.agent.approval.showing);
     expect(world.camera.photos).toHaveLength(0);
+    expect(world.camera.preview?.direction).toBe("front");
     await drawn(() => {
       const panel = document.querySelector("[aria-label='Camera request']");
       const approve = [...(panel?.querySelectorAll("button") ?? [])].find((control) => control.textContent === "Take photo");

@@ -57,6 +57,7 @@ export interface EditView {
 }
 
 export service OpenedPhoto {
+  readonly rendering: Semaphore.Semaphore
   current(): MediaView!!
   hold(media: MediaView): void!!
   session(): (Session | undefined)!!
@@ -65,11 +66,13 @@ export service OpenedPhoto {
   holdPreview(value: EditView | undefined): void!!
 }
 
-const opened = Layer.sync(OpenedPhoto, () => {
+const opened = Layer.effect(OpenedPhoto, effect {
+  const rendering = try Semaphore.make(1)
   let media: MediaView = { photo: 0, uri: "", local: false }
   let session: Session | undefined
   let preview: EditView | undefined
   return {
+    rendering,
     current: () => sync(() => media),
     hold: (next: MediaView) => sync(() => { if (media.local) releaseUri(media.uri); media = next }),
     session: () => sync(() => session),
@@ -88,13 +91,14 @@ effect function loaded(ticket: number, photo: number): Viewer.Event!!(Viewer.Mac
   const { rows } = try cache.displayed()
   const row = rows.get(photo)
   if (row === undefined) return failed(ticket)
-  const { phone } = try PhotosPort
+  const { phone, original } = try PhotosPort
   if (row.kind === "browser") {
     const item = row.item
-    const kind = item.file.type.startsWith("video/") ? "Clip" : "Still"
+    const kind = item.mimeType.startsWith("video/") ? "Clip" : "Still"
     const duration = kind === "Clip" ? Math.max(1, Math.round((item.duration ?? 0) * 10)) : 0
-    if (!Viewer.canLoaded(try viewing.get(), ticket, kind, duration, "Phone")) return failed(ticket)
-    try (try OpenedPhoto).hold({ photo, uri: localUri(item.file), local: true })
+    const file = original(item.id) catch () => undefined
+    if (file === undefined || !Viewer.canLoaded(try viewing.get(), ticket, kind, duration, "Phone")) return failed(ticket)
+    try (try OpenedPhoto).hold({ photo, uri: localUri(file), local: true })
     return { type: "loaded", ticket, ok: true, kind, duration, revision: try cache.revision(), favourite: false }
   }
   if (Option.isNone(phone)) return failed(ticket)
@@ -109,16 +113,23 @@ effect function loaded(ticket: number, photo: number): Viewer.Event!!(Viewer.Mac
   return { type: "loaded", ticket, ok: true, kind, duration, revision: try cache.revision(), favourite: item.favorite === true }
 }
 
-const looks = { Original: "original", Vivid: "vivid", Mono: "mono", Warm: "warm" }
+const looks: Record<Viewer.Look, string> = { Original: "none", Vivid: "vivid", Warm: "warm", Cool: "cool", Mono: "mono", Fade: "fade", Noir: "noir" }
 const operationKey = (attempt: number): string => `alpha/photos/edit/${attempt}`
 
 /** An edit preview is tied to both the open item and the latest preview revision. */
 effect function rendered(revision: number, edit: Viewer.Edit): Viewer.Event!!(Viewer.Machine | OpenedPhoto | PhotosPort) {
   const open = try OpenedPhoto
+  return try open.rendering.withPermits(1)(Effect.uninterruptible(rendering(revision, edit)))
+}
+
+effect function rendering(revision: number, edit: Viewer.Edit): Viewer.Event!!(Viewer.Machine | OpenedPhoto | PhotosPort) {
+  const open = try OpenedPhoto
   const { phone } = try PhotosPort
   const current = try open.current()
   const target = current.item
   const model = try Viewer.Machine
+  const pending = try model.get()
+  if (!Viewer.canPreviewed(pending, revision, "Phone") || pending.open !== current.photo) return { type: "previewed", revision, ok: false }
   let session = try open.session()
   if (Option.isNone(phone) || target === undefined) return { type: "editRefused", why: "NoEditor" }
   if (target.kind === "video" && (target.duration ?? 0) > 300) return { type: "editRefused", why: "TooLong" }
@@ -133,6 +144,13 @@ effect function rendered(revision: number, edit: Viewer.Edit): Viewer.Event!!(Vi
       if (value !== undefined) session = { kind: "still", value }
     }
     if (session === undefined) return { type: "editRefused", why: "NoEditor" }
+    const result = try model.get()
+    if (!result.editing || result.open !== current.photo) {
+      const { sessionId } = session.value
+      const video = session.kind === "clip"
+      try ignore(tryPromise(() => video ? phone.value.cancelVideoEdit(sessionId) : phone.value.cancelEdit(sessionId)))
+      return { type: "previewed", revision, ok: false }
+    }
     try open.holdSession(session)
   }
   const still = session.kind === "still" ? session.value : undefined

@@ -235,8 +235,12 @@ const visit = started(effect {
 const hardware = started(effect {
   const port = try CameraPort
   const camera = try Camera.Machine
-  try fork.scoped Stream.runForEach(port.volumeKeys, () => shutter())
-  try Stream.runForEach(port.signals, effect (signal) => {
+  const events = Stream.merge(port.signals, port.volumeKeys)
+  try Stream.runForEach(events, effect (signal) => {
+    if (signal === undefined) {
+      try shutter()
+      return
+    }
     const { ticket, kind } = signal
     const current = try camera.get()
     if (current.preview !== ticket) return
@@ -366,7 +370,7 @@ export effect function approveCapture(): void!!(Camera.Machine | Layers.Machine 
 }
 
 /** An agent capture opens Camera before entering the viewfinder's own single review and returns its actual outcome. */
-export effect function requestCapture(): CaptureAnswer!!(Camera.Machine | CameraAssets | Shell.Machine) {
+export effect function requestCapture(lens?: "front" | "back"): CaptureAnswer!!(Camera.Machine | CameraAssets | Shell.Machine) {
   const machine = try Camera.Machine
   if (!(try openView("Camera"))) return { result: "Blocked", cause: "Left" }
   try uncover()
@@ -377,6 +381,9 @@ export effect function requestCapture(): CaptureAnswer!!(Camera.Machine | Camera
   if (!state.showing) return { result: "Blocked", cause: "Left" }
   if (!allows(state.permission)) return { result: "Blocked", cause: "Denied" }
   if (state.phase === "Failed") return { result: "Blocked", cause: "PreviewFailed" }
+  const requested = lens === "front" ? "WantsFront" : lens === "back" ? "WantsBack" : "AsShown"
+  const framed = try contained(machine.send({ type: "agentLens", requested }, "Agent"), "choosing the requested lens")
+  if (!framed) return { result: "Blocked", cause: state.secure ? "Protected" : "Busy" }
   const asked = machine.send({ type: "agentAsk" }, "Agent") catch () => undefined
   if (asked === undefined) return { result: "Blocked", cause: state.secure ? "Protected" : "Busy" }
   const request = asked.state.agent.request

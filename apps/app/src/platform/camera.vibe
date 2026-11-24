@@ -130,6 +130,14 @@ const grantOf = (value: string): Grant => value === "granted" ? "Granted" : valu
 const directionOf = (lens: Lens) => lens === "Front" ? "front" as const : "back" as const
 const dataImage = (value: string | undefined) => value ? `data:image/jpeg;base64,${value}` : ""
 
+function libraryId(path: string, kind: "i" | "v"): string | undefined {
+  const table = kind === "i" ? "images" : "video"
+  const matched = /^content:\/\/media\/([A-Za-z0-9_-]{1,80})\/(images|video)\/media\/([1-9][0-9]*)$/.exec(path)
+  const volume = matched?.[1]
+  return volume === undefined || volume === "external" || volume === "internal" || matched?.[2] !== table
+    ? undefined : `m:${volume}:${kind}:${matched[3]}`
+}
+
 function lensFacts(bound: CameraPreviewResult, devices: ReadonlyArray<CameraDevice>): LensFacts {
   return {
     minimum: Math.round(bound.minZoom * 10),
@@ -208,13 +216,13 @@ export const phoneCamera = Layer.effect(CameraPort, effect {
       if (reply === undefined || (save && !reply.path)) return undefined
       const path = reply.path ?? ""
       const source = dataImage(reply.thumbnail ?? reply.base64) || (path === "" ? "" : playable(path))
-      return source ? { path, source, libraryId: reply.libraryId, mime: "image/jpeg", width: reply.width, height: reply.height } : undefined
+      return source ? { path, source, libraryId: reply.libraryId ?? libraryId(path, "i"), mime: "image/jpeg", width: reply.width, height: reply.height } : undefined
     },
     record: (sound: boolean) => tried(() => camera().startRecording({ ...recordingOptions, saveToGallery: true, audio: sound })),
     effect finish(): CameraMedia | undefined!! {
       const reply = tryPromise(() => camera().stopRecording()) catch () => undefined
       if (!reply?.path || reply.fileSize <= 0 || reply.duration <= 0) return undefined
-      return { path: reply.path, source: playable(reply.path), mime: reply.mimeType, width: reply.width, height: reply.height, duration: reply.duration, size: reply.fileSize }
+      return { path: reply.path, libraryId: libraryId(reply.path, "v"), source: playable(reply.path), mime: reply.mimeType, width: reply.width, height: reply.height, duration: reply.duration, size: reply.fileSize }
     },
     release: () => Effect.void,
   }

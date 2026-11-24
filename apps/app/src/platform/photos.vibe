@@ -20,7 +20,8 @@ import { phoneLibrary, reviewedLibrary } from native
 /** A browser capture, stored in the origin with its original pixels and optional camera thumbnail. */
 export interface BrowserCapture {
   readonly id: string
-  readonly file: Blob
+  readonly mimeType: string
+  readonly size: number
   readonly name: string
   readonly width: number
   readonly height: number
@@ -32,6 +33,10 @@ export interface BrowserCapture {
 module browser {
   const event = "alpha:photos-captured"
   const store = "captures"
+  const originals = "originals"
+  const earlierLibrary = "alpha.browser.photos.v1"
+  const earlierPrefix = "earlier:"
+  const earlierRows = "photos"
 
   /** @throws {never} */
   export const page = (): EventTarget => window
@@ -41,8 +46,26 @@ module browser {
 
   async function storage(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("alpha-photo-library", 1)
-      request.onupgradeneeded = () => request.result.createObjectStore(store, { keyPath: "id" })
+      const request = indexedDB.open("alpha-photo-library", 2)
+      request.onupgradeneeded = (event) => {
+        const database = request.result
+        const upgrade = request.transaction
+        if (!database.objectStoreNames.contains(store)) database.createObjectStore(store, { keyPath: "id" })
+        const data = database.createObjectStore(originals)
+        if (event.oldVersion !== 1 || upgrade === null) return
+        const walk = upgrade.objectStore(store).openCursor()
+        walk.onsuccess = () => {
+          const cursor = walk.result
+          if (!cursor) return
+          const row: unknown = cursor.value
+          if (typeof row === "object" && row !== null && "file" in row && row.file instanceof Blob) {
+            const { file, ...facts } = row
+            data.add(file, cursor.primaryKey)
+            cursor.update({ ...facts, mimeType: file.type, size: file.size })
+          }
+          cursor.continue()
+        }
+      }
       request.onsuccess = () => resolve(request.result)
       request.onerror = () => reject(request.error)
     })
@@ -55,8 +78,9 @@ module browser {
     const id = `browser:${created}:${crypto.randomUUID()}`
     try {
       await new Promise<void>((resolve, reject) => {
-        const tx = database.transaction(store, "readwrite")
-        tx.objectStore(store).add({ id, file, name, width, height, created, duration, thumbnail } satisfies BrowserCapture)
+        const tx = database.transaction([store, originals], "readwrite")
+        tx.objectStore(store).add({ id, mimeType: file.type, size: file.size, name, width, height, created, duration, thumbnail } satisfies BrowserCapture)
+        tx.objectStore(originals).add(file, id)
         tx.oncomplete = () => resolve()
         tx.onabort = () => reject(tx.error)
       })
@@ -67,18 +91,81 @@ module browser {
     return id
   }
 
+  async function previous(): Promise<IDBDatabase | undefined> {
+    if (typeof indexedDB.databases !== "function") return undefined
+    if (!(await indexedDB.databases()).some((database) => database.name === earlierLibrary)) return undefined
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(earlierLibrary)
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error)
+    })
+  }
+
+  function knownLegacy(row: unknown): BrowserCapture[] {
+    if (typeof row !== "object" || row === null || !("id" in row) || typeof row.id !== "string" || !("kind" in row)
+      || (row.kind !== "image" && row.kind !== "video") || ("trashed" in row && row.trashed === true)
+      || !("date" in row) || typeof row.date !== "number" || !Number.isSafeInteger(row.date)
+      || !("width" in row) || typeof row.width !== "number" || !("height" in row) || typeof row.height !== "number") return []
+    return [{
+      id: earlierPrefix + row.id, mimeType: row.kind === "image" ? "image/jpeg" : "video/webm",
+      name: row.kind === "image" ? "Camera.jpg" : "Camera.webm", created: row.date,
+      width: row.width, height: row.height, size: "size" in row && typeof row.size === "number" ? row.size : 0,
+      ...("duration" in row && typeof row.duration === "number" ? { duration: row.duration } : {}),
+      ...("image" in row && typeof row.image === "string" && row.image.startsWith("data:image/") ? { thumbnail: row.image } : {}),
+    }]
+  }
+
+  function stored<T>(database: IDBDatabase, name: string, id: string | undefined, read: (raw: unknown) => T): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const store = database.transaction(name).objectStore(name)
+      const request = id === undefined ? store.getAll() : store.get(id)
+      request.onsuccess = () => resolve(read(request.result))
+      request.onerror = () => reject(request.error)
+    })
+  }
+
   /** Read saved capture data from this browser origin. */
   export async function browserCaptures(): Promise<readonly BrowserCapture[]> {
     const database = await storage()
     try {
-      return await new Promise((resolve, reject) => {
-        const request = database.transaction(store).objectStore(store).getAll()
-        request.onsuccess = () => {
-          const rows: unknown = request.result
-          resolve(Array.isArray(rows) ? rows.filter(valid) : [])
-        }
-        request.onerror = () => reject(request.error)
-      })
+      const captures = await stored(database, store, undefined, (rows) => Array.isArray(rows) ? rows.filter(valid) : [])
+      const earlier = await previous()
+      if (earlier === undefined) return captures
+      try {
+        if (!earlier.objectStoreNames.contains(earlierRows)) return captures
+        const existing = await stored(earlier, earlierRows, undefined, (rows) => Array.isArray(rows) ? rows.flatMap(knownLegacy) : [])
+        return [...captures, ...existing]
+      } finally {
+        earlier.close()
+      }
+    } finally {
+      database.close()
+    }
+  }
+
+  /** Read one selected original without materializing every stored recording. */
+  export async function browserOriginal(id: string): Promise<Blob | undefined> {
+    if (id.startsWith(earlierPrefix)) return legacyOriginal(id.slice(earlierPrefix.length))
+    const database = await storage()
+    try {
+      return await stored(database, originals, id, (file) => file instanceof Blob ? file : undefined)
+    } finally {
+      database.close()
+    }
+  }
+
+  async function legacyOriginal(id: string): Promise<Blob | undefined> {
+    const database = await previous()
+    if (database === undefined) return undefined
+    try {
+      if (!database.objectStoreNames.contains(earlierRows)) return undefined
+      const current = await stored(database, earlierRows, id, (raw) => knownLegacy(raw)[0])
+      if (current === undefined) return undefined
+      const uri = current.mimeType.startsWith("image/") ? current.thumbnail
+        : database.objectStoreNames.contains("video-data") ? await stored(database, "video-data", id, (raw) => (
+          typeof raw === "object" && raw !== null && "path" in raw && typeof raw.path === "string" && raw.path.startsWith("data:video/") ? raw.path : undefined
+        )) : undefined
+      return uri ? (await fetch(uri)).blob() : undefined
     } finally {
       database.close()
     }
@@ -86,14 +173,15 @@ module browser {
 
   function valid(row: unknown): row is BrowserCapture {
     return typeof row === "object" && row !== null && "id" in row && typeof row.id === "string"
-      && "name" in row && typeof row.name === "string" && "file" in row && row.file instanceof Blob
+      && "name" in row && typeof row.name === "string" && "mimeType" in row && typeof row.mimeType === "string"
+      && "size" in row && Number.isSafeInteger(row.size)
       && "created" in row && Number.isSafeInteger(row.created)
       && "width" in row && Number.isSafeInteger(row.width) && "height" in row && Number.isSafeInteger(row.height)
       && (!("duration" in row) || row.duration === undefined || typeof row.duration === "number" && Number.isFinite(row.duration))
       && (!("thumbnail" in row) || row.thumbnail === undefined || typeof row.thumbnail === "string")
   }
 }
-import { browserCaptures, captureEvent, page, saveBrowserCapture } from browser
+import { browserCaptures, browserOriginal, captureEvent, page, saveBrowserCapture } from browser
 export { saveBrowserCapture }
 
 /** The phone's permitted library and its reviewed read surface, or the captures saved in this browser. */
@@ -102,6 +190,7 @@ export service PhotosPort {
   readonly reviewed: Option.Option<DeviceLibraryClient>
   readonly changes: Stream.Stream<void>
   captures(): readonly BrowserCapture[]!PhotosFailed
+  original(id: string): (Blob | undefined)!PhotosFailed
   handoff(id: string): void!!
   takeHandoff(): (string | undefined)!!
 }
@@ -126,7 +215,7 @@ export const phonePhotos = Layer.sync(PhotosPort, () => {
     tryPromise(() => phone.value.onLibraryChanged(() => { Queue.offerUnsafe(queue, undefined) })) catch () => undefined,
     (handle) => handle === undefined ? Effect.void : ignore(tryPromise(() => handle.remove())),
   ))
-  return { phone, reviewed, changes, captures: () => succeed([]), ...entry() }
+  return { phone, reviewed, changes, captures: () => succeed([]), original: () => succeed(undefined), ...entry() }
 })
 
 export const browserPhotos = Layer.sync(PhotosPort, () => ({
@@ -135,4 +224,5 @@ export const browserPhotos = Layer.sync(PhotosPort, () => ({
   reviewed: Option.none(),
   changes: Stream.suspend(() => Stream.as(Stream.fromEventListener(page(), captureEvent()), undefined)),
   captures: () => tryPromise({ try: browserCaptures, catch: (cause) => new PhotosFailed({ cause }) }),
+  original: (id: string) => tryPromise({ try: () => browserOriginal(id), catch: (cause) => new PhotosFailed({ cause }) }),
 }))

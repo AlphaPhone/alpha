@@ -8,7 +8,7 @@ import type { Machine } from "../../gen/app__photos__viewer.effect.vibe";
 import type { Row } from "./catalog.vibe";
 import { OpenedPhoto } from "./viewer.vibe";
 
-const filters: readonly Look[] = ["Original", "Vivid", "Mono", "Warm"];
+const filters: readonly Look[] = ["Original", "Vivid", "Warm", "Cool", "Mono", "Fade", "Noir"];
 const messages = {
   NoRefusal: "", Animated: "This photo is animated.", TooLarge: "This item is too large to edit.", TooLong: "This video is too long to edit.",
   NoRoom: "There is not enough storage to edit this video.", NoEditor: "This item cannot be edited here.",
@@ -131,7 +131,7 @@ export function MediaViewer({ runtime, before, after, row, inTrash }: Props) {
           {preview?.canReplace && allows({ type: "chooseReplace", replace: !state.replace }) && <Button variant="ghost" aria-pressed={state.replace} onClick={() => action({ type: "chooseReplace", replace: !state.replace })}>Replace original</Button>}
           {allows({ type: "retryPreview" }) && <Button variant="secondary" onClick={() => action({ type: "retryPreview" })}>Retry preview</Button>}
         </div>
-        {state.kind === "Still" ? <div className="flex justify-center gap-1">
+        {state.kind === "Still" ? <div className="flex gap-1 overflow-x-auto">
           {filters.map((look) => <Button key={look} variant={state.edit.look === look ? "secondary" : "ghost"} size="sm" aria-pressed={state.edit.look === look} disabled={state.edit.look !== look && !allows({ type: "restyle", look })} onClick={() => action({ type: "restyle", look })}>{look}</Button>)}
         </div> : <>
           <label className="flex gap-2 text-sm">Start<input type="range" className="flex-1 accent-primary" min={0} max={Math.max(0, state.edit.end - 1)} value={state.edit.start}
@@ -156,7 +156,7 @@ export function MediaViewer({ runtime, before, after, row, inTrash }: Props) {
           <dl className="grid grid-cols-2 gap-2 text-sm">
             {timestamp !== undefined && <><dt>Taken</dt><dd>{formatDate.format(timestamp)}</dd></>}
             {item !== undefined && <><dt>Dimensions</dt><dd>{item.width} × {item.height}</dd></>}
-            {item !== undefined && <><dt>Size</dt><dd>{Math.round((row?.kind === "browser" ? row.item.file.size : row?.item.size ?? 0) / 1024)} KB</dd></>}
+            {item !== undefined && <><dt>Size</dt><dd>{Math.round((item.size) / 1024)} KB</dd></>}
           </dl>
         </SheetContent>
       </Sheet>

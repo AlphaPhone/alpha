@@ -1,6 +1,8 @@
 import { Effect, Layer } from "effect";
 import { type ReactElement, Suspense, lazy } from "react";
 import { MediaHandoff, stageAttachment } from "./assistant/attachments.vibe";
+import { executeMedia } from "./assistant/media-executors.ts";
+import { MediaExecutors } from "./assistant/media-review.vibe";
 import { type Mount, type Place, mounts as every } from "./areas.ts";
 import type { Platform } from "./platform/platform.vibe";
 import { resident } from "./resident.vibe";
@@ -17,7 +19,10 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
       return assistant.runtime(alpha).runPromise(stageAttachment(file));
     }).pipe(Effect.catchCause(() => Effect.succeed(false))),
   });
-  const root = rooted(Layer.provideMerge(resident, Layer.merge(platform, media)));
+  const executors = Layer.succeed(MediaExecutors, {
+    execute: (operation, call) => Effect.tryPromise(() => executeMedia(alpha, operation, call)).pipe(Effect.orElseSucceed(() => undefined)),
+  });
+  const root = rooted(Layer.provideMerge(resident, Layer.mergeAll(platform, media, executors)));
   const placed = new Map<Place, ReactElement[]>();
   const alpha: Alpha = {
     runtime: root.runtime,

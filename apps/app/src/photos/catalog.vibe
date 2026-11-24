@@ -33,7 +33,8 @@ const period = 1024
 
 /** The time taken, in milliseconds, as shown by the platform. */
 export function taken(row: Row): number {
-  return row.kind === "browser" ? row.item.created : row.item.takenAt ?? row.item.dateTaken ?? row.item.taken ?? row.item.date
+  if (row.kind === "browser") return row.item.created
+  return [row.item.takenAt, row.item.dateTaken, row.item.taken, row.item.date].find((date) => date !== undefined && date > 0) ?? 0
 }
 
 /** The exact item and revision displayed for a native mutation. */

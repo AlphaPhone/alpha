@@ -41,6 +41,7 @@ the cause.
 ```quint
 type Mode = Photo | Video
 type Lens = Back | Front
+type RequestedLens = AsShown | WantsBack | WantsFront
 type Phase = Off | Starting | Ready | Failed
 type Said = Quiet | NotTaken | NothingRecorded | NotSaved
 type Cause = NoCause | Left | Denied | PreviewFailed | Busy | Protected
@@ -104,7 +105,7 @@ type Camera = {
   taps: int, focus: int, writing: int, confirmed: int, waited: int,
   shots: int, shot: int, shotFor: int,
   film: F::Film, filmVisit: int,
-  agent: G::Capture, cause: Cause,
+  agent: G::Capture, requestedLens: RequestedLens, cause: Cause,
   said: Said, last: int, session: Set[int],
 }
 
@@ -119,7 +120,7 @@ pure val initial: Camera = {
   taps: 0, focus: 0, writing: 0, confirmed: 0, waited: 0,
   shots: 0, shot: 0, shotFor: 0,
   film: F::initial, filmVisit: 0,
-  agent: G::initial, cause: NoCause,
+  agent: G::initial, requestedLens: AsShown, cause: NoCause,
   said: Quiet, last: 0, session: Set(),
 }
 
@@ -823,6 +824,32 @@ pure def sometimesNothingRecorded(s: Camera): bool = s.said == NothingRecorded
 > I see and approve, never while I am taking one, and to be told why when it
 > could not.
 
+### An agent may name a lens, but approval still belongs to the owner looking through it
+
+A requested lens rebinds the preview for review. The owner may frame the
+photo or change lenses, but an explicit front or back request can be
+approved and shot only on that lens.
+
+```quint
+pure def chosenLens(s: Camera): Lens =
+  if (s.requestedLens == WantsFront) Front else if (s.requestedLens == WantsBack) Back else s.lens
+
+pure def canAgentLens(s: Camera, requested: RequestedLens, by: Actor): bool =
+  G::canAsk(s.agent, by) and s.showing and not(s.secure) and P::allows(s.permission)
+    and s.phase != Failed and free(s) and s.countdown == 0
+
+pure def agentLens(s: Camera, requested: RequestedLens, by: Actor): Done =
+  val choice = { ...s, requestedLens: requested }
+  val lens = chosenLens(choice)
+  if (lens == s.lens) emit(List(), choice)
+  else {
+    val next = { ...choice, lens: lens, zoom: oneTime, flash: false, flashAuto: false }
+    if (s.phase == Ready) starting(List(StopPreview({ ticket: s.preview })), next)
+    else if (s.phase == Starting or mayStart(next)) starting(List(), next)
+    else emit(List(), next)
+  }
+```
+
 ### The agent asks only over a Camera that is showing, unlocked and allowed; an idle preview is started for it, and Ask Alpha over it is lowered
 
 The agent usually asks while the owner talks to Alpha in Ask Alpha over
@@ -847,11 +874,11 @@ pure def agentAsk(s: Camera, by: Actor): Done =
 A request asked while the preview starts waits for it.
 
 ```quint
-pure def canAgentShown(s: Camera, by: Actor): bool = G::canReshown(s.agent, by) and ready(s)
+pure def canAgentShown(s: Camera, by: Actor): bool = G::canReshown(s.agent, by) and ready(s) and chosenLens(s) == s.lens
 
 pure def agentShown(s: Camera, by: Actor): Camera = { ...s, agent: G::reshown(s.agent, by) }
 
-pure def canAgentApprove(s: Camera, by: Actor): bool = G::canApprove(s.agent, by) and ready(s)
+pure def canAgentApprove(s: Camera, by: Actor): bool = G::canApprove(s.agent, by) and ready(s) and chosenLens(s) == s.lens
 
 pure def agentApprove(s: Camera, by: Actor): Camera = { ...s, agent: G::approve(s.agent, by) }
 
@@ -895,7 +922,7 @@ pure def canAgentShoot(s: Camera, sensitive: bool, by: Actor): bool = G::canShoo
 pure def agentShoot(s: Camera, sensitive: bool, by: Actor): Done =
   val n = s.shots + 1
   if (sensitive) answering(emit(List(), blocking(Protected, s)), s)
-  else if (not(ready(s) and free(s) and s.countdown == 0)) answering(emit(List(), blocking(Busy, s)), s)
+  else if (not(ready(s) and free(s) and s.countdown == 0 and chosenLens(s) == s.lens)) answering(emit(List(), blocking(Busy, s)), s)
   else emit(List(Capture({ ticket: n, request: s.agent.request })),
     { ...s, agent: G::shoot(s.agent, by), shots: n, shot: n, shotFor: s.agent.request })
 ```

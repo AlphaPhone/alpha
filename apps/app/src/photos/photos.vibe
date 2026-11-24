@@ -7,6 +7,9 @@ import * as Change from "../../gen/app__photos__changes.effect.vibe"
 import type { Grant } from "../../gen/kit__permission.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Device } from "../platform/device.vibe"
+import { duration as noticeDuration } from "../../gen/app__notices__toasts.effect.vibe"
+import { offer, say, withdraw } from "../notices/toasts.vibe"
+import { Time } from "../runtime/time.vibe"
 import { PhotosPort } from "../platform/photos.vibe"
 import { answer, following, reacting, run, started, together, type Job } from "../runtime/reactor.vibe"
 import { Catalog, catalog, reviewed, taken, type ListedAlbum, type Row } from "./catalog.vibe"
@@ -52,7 +55,7 @@ function failedList(ticket: number): Extract<Library.Event, { type: "listed" }> 
 
 /** Read the requested page and keep its payload only when the matching ticket can still answer. */
 effect function fetched(request: Fetch): Library.Event!!(PhotosPort | Catalog | Library.Machine) {
-  const { phone, captures } = try PhotosPort
+  const { phone, captures, reviewed: deviceLibrary } = try PhotosPort
   const cache = try Catalog
   const machine = try Library.Machine
   const revision = try cache.revision()
@@ -68,7 +71,10 @@ effect function fetched(request: Fetch): Library.Event!!(PhotosPort | Catalog | 
   const { albums } = try cache.displayed()
   const album = request.album === 0 ? undefined : albums.get(request.album)
   const listed = Option.isSome(phone) ? (tryPromise(() => phonePage(phone.value, request, cursor, album)) catch () => undefined) : undefined
-  if (Option.isSome(phone) && listed === undefined) return fail
+  if (Option.isSome(phone) && listed === undefined) {
+    const scope = Option.isSome(deviceLibrary) ? (tryPromise(() => deviceLibrary.value.scope()) catch () => undefined) : undefined
+    return scope?.locked ? { type: "lockedOut", ticket: request.ticket } : fail
+  }
   const browser = Option.isNone(phone) ? (captures() catch () => undefined) : []
   if (browser === undefined || !Library.canListed(try machine.get(), request.ticket, "Phone")) return fail
   const rows: Row[] = [
@@ -109,7 +115,24 @@ export effect function changedItems(change: Change.Change, items: readonly numbe
     const shared = tryPromise(() => asked.length === 1 && asked[0] !== undefined ? phone.value.share(asked[0]) : phone.value.shareMany(asked)) catch () => undefined
     return { done: shared?.status === "opened" ? items : [], stale: [], declined: false, known: shared !== undefined }
   }
-  const reply = tryPromise(() => phone.value.changeMany(operations[change], asked)) catch () => undefined
+  const attempted = try exit(tryPromise(() => phone.value.changeMany(operations[change], asked)))
+  const reply = Exit.isSuccess(attempted) ? attempted.value : undefined
+  if (reply === undefined && Exit.isFailure(attempted)) {
+    const failure = Cause.squash(attempted.cause)
+    const cause = typeof failure === "object" && failure !== null && "cause" in failure ? failure.cause : failure
+    const code = typeof cause === "object" && cause !== null && "code" in cause ? cause.code : undefined
+    if (code === "LIBRARY_DECLINED") return { done: [], stale: [], declined: true, known: true }
+    if (code === "LIBRARY_STALE") return { done: [], stale: items, declined: false, known: true }
+  }
+  const knownRows: Row[] = []
+  const knownNumbers: number[] = []
+  for (const [index, row] of rows.entries()) {
+    const updated = reply?.outcomes[index]?.item
+    if (updated === undefined) continue
+    knownRows.push({ kind: "phone", item: updated })
+    knownNumbers.push(row.number)
+  }
+  if (knownRows.length > 0) try (try Catalog).publish(knownRows, knownNumbers)
   const done = rows.filter((row, index) => {
     const status = reply?.outcomes[index]?.status
     return status === "favorited" || status === "unfavorited" || status === "trashed" || status === "restored" || status === "unchanged"
@@ -231,4 +254,29 @@ const batches = following(Library.Machine, (state) => ({ job: state.job, visible
   ({ job, visible }): Library.Event | undefined => visible && job.left.length > 0 && job.request.outcome !== "Sent"
     ? { type: "sendNext", items: job.change === "Share" ? job.left : job.left.slice(0, batchLimit) } : undefined, "Phone")
 
-export const library = together(catalog, reacting(Library, { carry }), lifecycle, libraryChanges, batches, handoff)
+const notices = started(effect {
+  const photos = try Library.Machine
+  const time = try Time
+  const device = try Device
+  const outcomes = Stream.changesWith(Stream.map(photos.changes, (s) => ({
+    attempt: s.job.request.id, change: s.job.change, undo: s.visible && s.job.undoable,
+    outcome: s.job.request.outcome, done: s.job.done.length, missed: s.job.stale.length + s.job.skipped.length + s.job.unsure.length,
+  })), (a, b) => a.attempt === b.attempt && a.outcome === b.outcome && a.undo === b.undo)
+  let previous = 0
+  try Stream.runDrain(Stream.switchMap(outcomes, (state) => Stream.fromEffect(effect {
+    if (previous > 0) { try withdraw("Photos", previous); previous = 0 }
+    if (state.undo) {
+      const { attempt, done } = state
+      previous = attempt
+      const notice = done === 1 ? "Photo moved to Recently deleted" : `${done} photos moved to Recently deleted`
+      const scale = Option.getOrElse(try device.timeoutScale(), () => 100)
+      try offer(notice, "Photos", attempt, ignore(photos.send({ type: "undoTrash" }, "Owner")))
+      try time.until((try time.now()) + noticeDuration(notice.length, true, scale))
+      if ((try photos.get()).job.request.id === attempt) try ignore(photos.send({ type: "undoLapsed" }, "Phone"))
+      try withdraw("Photos", attempt)
+      previous = 0
+    } else if (state.outcome === "Unknown") try say("Some photo changes could not be confirmed.", true)
+  })))
+}, "Photos change notices")
+
+export const library = together(catalog, reacting(Library, { carry }), lifecycle, libraryChanges, batches, handoff, notices)

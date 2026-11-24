@@ -181,18 +181,21 @@ export function Photos({ runtime, alpha }: PhotosProps) {
         {actions.length > 0 && <ToolBar tools={actions} />}
         {!inTrash && owner({ type: "cancelRun" }) && <Button variant="secondary" className="self-center" onClick={() => talk({ type: "cancelRun" })}>Stop remaining changes</Button>}
         {inTrash && binOwner({ type: "cancelRecovery" }) && <Button variant="secondary" className="self-center" onClick={() => binTalk({ type: "cancelRecovery" })}>Stop recovery</Button>}
-        {!inTrash && owner({ type: "undoTrash" }) && <Button variant="secondary" className="self-center" onClick={() => talk({ type: "undoTrash" })}><Undo2 />Undo</Button>}
       </div>
       <ConfirmDialog open={request !== undefined} title={reviewTitle}
         confirmLabel={request?.change === "Share" ? "Share" : "Confirm"} destructive={request?.change === "Trash"}
         onConfirm={() => { const event = { type: "confirm", revision: state.revision } as const; if (agent.can(event, "Owner")) void agent.send(event, "Owner"); }}
         onCancel={() => { if (agent.can({ type: "decline" }, "Owner")) void agent.send({ type: "decline" }, "Owner"); }}>
-        {request !== undefined && `${request.items.length} ${request.items.length === 1 ? "item" : "items"}`}
+        {request !== undefined && <span className="flex flex-col gap-1">
+          <span>{request.items.length} {request.items.length === 1 ? "item" : "items"}</span>
+          <span className="max-h-28 overflow-y-auto">{request.items.map((number) => content.rows.get(number)?.item.name ?? "Photo").join(" · ")}</span>
+        </span>}
       </ConfirmDialog>
       <MediaViewer runtime={runtime} row={content.rows.get(opened)} before={index > 0 ? ids[index - 1] : undefined} after={index >= 0 ? ids[index + 1] : undefined} inTrash={inTrash} />
       <Sheet open={dialog === "NewAlbum" || dialog === "RenameAlbum" || dialog === "ChooseAlbum"} onOpenChange={(open) => { if (!open) talk({ type: "closeDialog" }); }}>
         <SheetContent title={dialog === "NewAlbum" ? "New album" : dialog === "RenameAlbum" ? "Rename album" : "Add to album"}
-          actions={dialog !== "ChooseAlbum" && <><Button variant="secondary" onClick={() => talk({ type: "closeDialog" })}>Cancel</Button><Button disabled={!owner(albumName)} onClick={() => talk(albumName)}>Save</Button></>}>
+          actions={dialog === "ChooseAlbum" ? owner({ type: "newAlbum" }) && <Button variant="secondary" onClick={() => { setName(""); talk({ type: "newAlbum" }); }}><Plus />New album</Button>
+            : <><Button variant="secondary" onClick={() => talk({ type: "closeDialog" })}>Cancel</Button><Button disabled={!owner(albumName)} onClick={() => talk(albumName)}>Save</Button></>}>
           {dialog === "ChooseAlbum" ? [...content.albums].flatMap(([number, card]) => card.owned && owner({ type: "addTo", album: number })
             ? [<ListRow key={number} title={card.title} leading={<Album />} onClick={() => talk({ type: "addTo", album: number })} />] : [])
             : <Input aria-label="Album name" maxLength={80} value={name} onChange={(event) => setName(event.currentTarget.value)} />}

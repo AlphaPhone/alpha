@@ -32,7 +32,7 @@ const changes = { trash: "Trash", share: "Share", favorite: "Favorite", unfavori
 function summary(item: MediaItem) {
   return {
     id: item.id, revision: item.mutationRevision ?? item.revision, kind: item.kind,
-    takenAt: item.takenAt ?? item.dateTaken ?? item.taken ?? item.date, width: item.width, height: item.height,
+    takenAt: [item.takenAt, item.dateTaken, item.taken, item.date].find((date) => date !== undefined && date > 0) ?? 0, width: item.width, height: item.height,
     ...(item.favorite === true ? { favorite: true as const } : {}),
     ...(item.kind === "video" && item.duration !== undefined ? { duration: Math.round(item.duration) } : {}),
   }
@@ -51,8 +51,11 @@ effect function read(op: Extract<Operation, { type: "photo_library_search" | "ph
   if (inspect && id === undefined) return undefined
   const narrowing: Assistant.Narrowing = inspect ? "AllItems" : op.favorites === true ? "FavouritesOnly"
     : op.favorites === false ? "NotFavourites" : op.kind === "image" ? "StillsOnly" : op.kind === "video" ? "VideosOnly" : "AllItems"
+  const { rows: indexed } = try (try Catalog).displayed()
+  const requestedPhoto = id === undefined ? undefined : handle(id, current.rows, indexed)
+  if (inspect && requestedPhoto === undefined) return undefined
   const wanted: Assistant.Event = inspect
-    ? { type: "askInspect", photo: 1, columns, allowed: true, secure: false }
+    ? { type: "askInspect", photo: requestedPhoto ?? 0, columns, allowed: true, secure: false }
     : { type: "askSearch", narrowing, earliest: op.from ?? 0, latest: op.to ?? Number.MAX_SAFE_INTEGER, limit: op.limit ?? 20, columns, allowed: true, secure: false }
   if (!Exit.isSuccess(try accepted(wanted, "Agent"))) return undefined
   const confirmed = try accepted({ type: "confirm", revision: current.revision }, "Owner")
@@ -96,7 +99,11 @@ export effect function photoAction(input: DeviceOperation): (Receipt | undefined
       const number = handle(input.id, now.rows, rows)
       if (number === undefined) return undefined
       const sent = try exit(viewer.send({ type: "openItem", photo: number, listed: true, secure: false, only: [], reviewing: false }, "Agent"))
-      return Exit.isSuccess(sent) ? { kind: "photos_open", opened: true } : undefined
+      if (!Exit.isSuccess(sent)) return undefined
+      const ticket = sent.value.state.read.ticket
+      const response = try Stream.runHead(Stream.filter(viewer.changes, (state) => state.read.ticket !== ticket || state.read.status !== "Loading" || state.open !== number))
+      return Option.isSome(response) && response.value.read.ticket === ticket && response.value.read.status === "Loaded" && response.value.open === number
+        ? { kind: "photos_open", opened: true } : undefined
     }
     case "photo_library_select": {
       const selected = input.ids.flatMap((id) => {
@@ -114,7 +121,11 @@ export effect function photoAction(input: DeviceOperation): (Receipt | undefined
       if (input.album !== undefined) return undefined
       const narrowing = input.favorite === true ? "Favorites" : input.kind === "video" ? "Videos" : input.text ? "Matching" : "Everything"
       const selected = try exit(library.send({ type: "narrow", narrowing, query: input.text ?? "", person: 0 }, "Agent"))
-      return Exit.isSuccess(selected) ? { kind: "photos_filter", shown: selected.value.state.rows.length, more: selected.value.state.more } : undefined
+      if (!Exit.isSuccess(selected)) return undefined
+      const ticket = selected.value.state.library.ticket
+      const response = try Stream.runHead(Stream.filter(library.changes, (state) => state.library.ticket !== ticket || state.library.status !== "Loading" || !state.visible))
+      return Option.isSome(response) && response.value.visible && response.value.library.ticket === ticket && response.value.library.status === "Loaded"
+        ? { kind: "photos_filter", shown: response.value.rows.length, more: response.value.more } : undefined
     }
     case "photo_library_review":
     case "photos_album_create":

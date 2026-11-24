@@ -1,6 +1,6 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
 import {
-  Alert, AssistantCard, AssistantChatHistorySheet, AssistantConversation, AssistantGrabber, AssistantSearchSheet, ConfirmDialog,
+  Alert, Button, AssistantCard, AssistantChatHistorySheet, AssistantConversation, AssistantGrabber, AssistantSearchSheet, ConfirmDialog,
   type AssistantAttachment, type AssistantDraftNoticeProps, type AssistantMessageProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
@@ -28,11 +28,12 @@ import { untimed } from "../runtime/reactor.vibe";
 import { MailQuestions } from "../inbox/mail-context.vibe";
 import { isCommsView } from "../shell/views.tsx";
 import { type Attachment, removeAttachment } from "./attachments.vibe";
+import { MediaReview } from "./media-review.vibe";
 import { freedom } from "./assistant.vibe";
 import { Talk } from "./talk.vibe";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | Talk | MailQuestions, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | Talk | MailQuestions | MediaReview, unknown>;
 }
 
 function turnOf(talking: Talking, label: string): AssistantTurnNoteProps["status"] | undefined {
@@ -202,6 +203,16 @@ export function Assistant({ runtime }: AssistantProps) {
   const later = { type: "scroll", around: board.numbered(lines.at(-1)?.id ?? "") } as const;
   const writingReply = seen.reply !== "" ? [{ id: "reply", author: "alpha", text: seen.reply } as const] : [];
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
+  const mediaCards = seen.media.filter((card) => !talking.context.sensitive && card.conversation === shown.chosen && card.revision === talking.context.revision).map((card) => ({
+    id: `media ${card.id}`, author: "alpha" as const, text: "", children: (
+      <div className="grid gap-2">
+        <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, action: "Approve" }}
+          onHandOn={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, true)))} />
+        <Button className="justify-self-end" variant="ghost" onClick={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, false)))}>Decline</Button>
+      </div>
+    ),
+  }));
+  const mediaNote = seen.mediaNote === "" ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote }];
   const failed = seen.failure === undefined ? [] : [{ id: "failure", author: "alpha", text: "", children: failureCard(seen.failure, true) } as const];
   const quoteId = writing.editor.quote > 0 ? board.messageId(writing.editor.quote) : undefined;
   const quoted = quoteId === undefined ? undefined : lines.find((line) => line.id === quoteId)?.text;
@@ -263,7 +274,7 @@ export function Assistant({ runtime }: AssistantProps) {
           grabber: open ? grabber : undefined,
         }}
         transcript={{
-          messages: [...messages, ...writingReply, ...failed],
+          messages: [...messages, ...writingReply, ...failed, ...mediaCards, ...mediaNote],
           position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around) },
           visible: open,
           status: shown.page.status === "Loading" ? "loading" : shown.page.status === "Failed" ? "failed" : "loaded",

@@ -3,7 +3,7 @@ import { Button, cn, focusRing, Spinner } from "@repo/ui";
 import { CameraOff, ChevronLeft, FileScan, Flashlight, FlashlightOff, Grid3x3, MicOff, RefreshCcw, Sparkles, Timer, Video, Zap, ZapOff } from "lucide-react";
 import { useCallback, useRef, type PointerEvent } from "react";
 import type { Camera as Visit, Event, Mode, Said } from "../../gen/app__camera.ts";
-import { ready, recording } from "../../gen/app__camera.ts";
+import { chosenLens, ready, recording } from "../../gen/app__camera.ts";
 import { useMachine } from "../../gen/app__camera.react.ts";
 import { allows } from "../../gen/kit__permission.ts";
 import { CameraPort, type LensFacts, type Point } from "../platform/camera.vibe";
@@ -238,12 +238,13 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
         {state.phase === "Starting" && <span className="pointer-events-none absolute inset-0 grid place-items-center"><Spinner aria-label="Starting camera" /></span>}
         <Access state={state} present={port.present} native={port.nativePreview} can={can} fire={fire} takeSilent={() => fire({ type: "startRecording", sound: false })} />
         {state.said !== "Quiet" && <button type="button" aria-label="Dismiss camera message" className={cn("absolute inset-x-4 top-3 z-10 rounded-tile bg-background/80 px-4 py-3 text-left text-sm", focusRing)} onClick={() => fire({ type: "dismiss" })}>{notices[state.said]}</button>}
-        {can({ type: "agentApprove" }) && (
+        {active && state.agent.stage === "Asked" && (
           <section aria-label="Camera request" className="absolute inset-x-4 bottom-16 z-20 mx-auto flex max-w-md flex-col gap-3 rounded-tile bg-secondary p-4 text-secondary-foreground">
             <strong>Take a photo for Alpha?</strong>
+            {state.requestedLens !== "AsShown" && <span className="text-sm text-muted-foreground">{chosenLens(state) === "Front" ? "Front camera requested" : "Back camera requested"}</span>}
             <div className="flex flex-wrap justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={() => fire({ type: "agentDecline" })}>Decline</Button>
-              <Button size="sm" onClick={() => void runtime.runPromiseExit(approveCapture())}>Take photo</Button>
+              <Button size="sm" disabled={!can({ type: "agentApprove" })} onClick={() => void runtime.runPromiseExit(approveCapture())}>Take photo</Button>
             </div>
           </section>
         )}

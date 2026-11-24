@@ -1,7 +1,7 @@
 // spec/app/files/index.md, "Story: Browse my storage"; spec/app/files/index.md, "Story: Arrange and filter what I see"; spec/app/files/index.md, "Story: Change my files"; spec/app/files/index.md, "Folders come before files in every sort: by name in the phone's order of names, by date the newest first, by size the largest first; choosing the sort again turns the order within the folders and within the files"; spec/app/files/index.md, "The owner sees a listed item's details: what it is, how big it is, when it last changed and where it is; they close when the owner closes them or moves, or when the item is no longer listed"
 import { Alert, AppHeader, Button, Checkbox, Chip, Dialog, DialogContent, DialogTitle, EmptyState, Input, ListGroup, ListRow, Menu, MenuContent, MenuItem, MenuTrigger, Progress, SearchField, Sheet, SheetContent, Spinner } from "@repo/ui";
-import { Effect, Option, type ManagedRuntime } from "effect";
-import { ArrowDown, ArrowDownWideNarrow, ArrowUp, AudioLines, ChevronRight, Download, Ellipsis, File, FileText, Folder, FolderInput, FolderOpen, HardDrive, Image, Info, LayoutGrid, List, Pencil, Plus, RefreshCw, Search, Share2, Trash2, Video, X, type LucideIcon } from "lucide-react";
+import { Effect, Option, type Layer, type ManagedRuntime } from "effect";
+import { ArrowDown, ArrowDownWideNarrow, ArrowUp, AudioLines, ScanLine, ChevronRight, Download, Ellipsis, File, FileText, Folder, FolderInput, FolderOpen, HardDrive, Image, Info, LayoutGrid, List, Pencil, Plus, RefreshCw, Search, Share2, Trash2, Video, X, type LucideIcon } from "lucide-react";
 import { Fragment, useMemo, useState, type MouseEvent } from "react";
 import type { Machine, Order } from "../../gen/app__files.effect.vibe";
 import { ahead, browse, chosen, detailed, empty, filled } from "../../gen/app__files.ts";
@@ -11,7 +11,7 @@ import { finding } from "../../gen/app__files__search.ts";
 import type { Filter } from "../../gen/app__files__search.ts";
 import type { Item, Kind } from "../../gen/app__files__shared.ts";
 import type { Machine as TrashMachine } from "../../gen/app__files__trash.effect.vibe";
-import type { Alpha } from "../runtime/area.tsx";
+import type { Alpha, Resident } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 import type { Time } from "../runtime/time.vibe";
 import { Handles } from "./handles.vibe";
@@ -22,11 +22,13 @@ import { useMachine as useRecent } from "../../gen/app__files__recent.react.ts";
 import type { Opened } from "./preview.vibe";
 import { Preview, RecentFiles } from "./Preview.tsx";
 import { Trash, Undo } from "./Trash.tsx";
+import { Scan } from "./Scan.tsx";
+import { type scan, startScan } from "./scan.vibe";
 
 export interface FilesProps {
   /** Provides Files and its Trash, `files` of files.vibe, the numbers of the phone's storage and Alpha's time. */
   alpha: Alpha;
-  runtime: ManagedRuntime.ManagedRuntime<Machine | TrashMachine | PreviewMachine | RecentMachine | Opened | Handles | Time | Shell, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<Machine | TrashMachine | PreviewMachine | RecentMachine | Opened | Handles | Time | Shell | Layer.Success<typeof scan> | Resident, unknown>;
 }
 
 const categories: readonly [Kind, string][] = [["Download", "Downloads"], ["Image", "Images"], ["Video", "Videos"], ["Audio", "Audio"], ["Document", "Documents"]];
@@ -74,6 +76,7 @@ export function Files({ runtime, alpha }: FilesProps) {
   const marked = state?.picked;
   const marks = useMemo(() => new Set(marked), [marked]);
   const back = <AppBack alpha={alpha} />;
+  const scanner = <Scan runtime={runtime} alpha={alpha} />;
   const header = (title: string) => <AppHeader title={title} leading={back} />;
   if (cause) return <>{header("Files")}<Alert variant="destructive" className="m-4">Alpha could not open Files</Alert></>;
   if (!state) return null;
@@ -82,7 +85,7 @@ export function Files({ runtime, alpha }: FilesProps) {
   const shown = browse(state);
   const label = (handle: number) => labelOf(runtime, handle);
   if (shown === "Closed") return null;
-  if (shown === "Unsupported") return <>{header("Files")}<EmptyState className="m-4" title="This phone's storage cannot be reached" /></>;
+  if (shown === "Unsupported") return <>{header("Files")}<EmptyState className="m-4" title="This phone's storage cannot be reached" />{scanner}</>;
   if (shown === "NotAsked" || shown === "NoAccess") {
     return (
       <>
@@ -90,10 +93,11 @@ export function Files({ runtime, alpha }: FilesProps) {
         <EmptyState className="m-4" title={shown === "NotAsked" ? "Alpha may not read your files yet" : "Alpha may not read your files"}>
           {owner({ type: "allow" }) && <Button onClick={() => tell({ type: "allow" })}>{shown === "NotAsked" ? "Allow" : "Open Settings"}</Button>}
         </EmptyState>
+        {scanner}
       </>
     );
   }
-  if (state.trash) return <Trash runtime={runtime} onBack={owner({ type: "closeTrash" }) ? () => tell({ type: "closeTrash" }) : undefined} />;
+  if (state.trash) return <><Trash runtime={runtime} onBack={owner({ type: "closeTrash" }) ? () => tell({ type: "closeTrash" }) : undefined} />{scanner}</>;
   const atTop = shown === "AtTop";
   const looked = finding(state.search);
   const picked = chosen(state);
@@ -164,6 +168,7 @@ export function Files({ runtime, alpha }: FilesProps) {
             <Menu>
               <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label={atTop ? "Files tools" : "Files options"}><Ellipsis /></Button></MenuTrigger>
               <MenuContent>
+                {atTop && <MenuItem onSelect={() => void runtime.runPromise(startScan())}><ScanLine />Scan document</MenuItem>}
                 {canPick && <MenuItem onSelect={() => void recent.send(pickFile, "Owner")}><FolderOpen />Open and remember a file</MenuItem>}
                 {makeFolder && <MenuItem onSelect={() => setNaming({ work: "NewFolder", name: "" })}><Plus />New folder</MenuItem>}
                 {owner(changeLayout) && <MenuItem onSelect={() => tell(changeLayout)}>{grid ? <List /> : <LayoutGrid />}{grid ? "List" : "Grid"}</MenuItem>}
@@ -362,6 +367,7 @@ export function Files({ runtime, alpha }: FilesProps) {
         </SheetContent>
       </Sheet>
       <Preview runtime={runtime} />
+      {scanner}
       <Sheet open={change.panel !== 0} onOpenChange={(open) => { if (!open && owner({ type: "closeShare" })) tell({ type: "closeShare" }); }}>
         <SheetContent title="Share">
           <ListGroup surface="plain">

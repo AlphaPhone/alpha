@@ -6,9 +6,10 @@ import { Machine as Shown } from "../gen/app__files__preview.effect.vibe";
 import { Machine as Recent } from "../gen/app__files__recent.effect.vibe";
 import { Machine as Bin } from "../gen/app__files__trash.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
-import { agentFilter, agentOpen, agentRead, approved, offer, shownAt } from "../src/files/agent.vibe";
+import { agentFilter, agentOpen, agentRead, approved, fileAction, offer, shownAt } from "../src/files/agent.vibe";
 import { showDownloads } from "../src/files/files.vibe";
 import files from "../src/files/index.tsx";
+import { called } from "../src/platform/files.vibe";
 import { button, closeAll, drawn, fill, hardware, later, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
@@ -415,7 +416,7 @@ describe("Files on a phone", () => {
     const [first] = await runtime.runPromise(shownAt([1]));
     expect([first?.name, (await runtime.runPromise(shownAt([2]))).length]).toEqual(["beach.jpg", 0]);
 
-    // spec/app/files/index.md, "The agent opens a file the owner is shown, as listed now, when no file is open over Files; otherwise it is told it failed"
+    // spec/app/files/index.md, "The agent opens a file the owner is shown, as listed or found now, when no file is open over Files; otherwise it is told it failed"
     const beach = now().items.find((item) => item.name === "beach.jpg");
     if (!beach) throw new Error("beach.jpg is not listed");
     expect((await runtime.runPromise(agentOpen(4, beach, false))).ok).toBe(true);
@@ -436,10 +437,22 @@ describe("Files on a phone", () => {
     expect(await runtime.runPromise(approved({ ticket: 8, act: "Naming", file: lease, folder, name: "lease 2026.pdf", dest: nowhere }, false))).toEqual({ ran: true, outcome: "Confirmed" });
     expect(paths(world).includes("primary:Download/lease 2026.pdf")).toBe(true);
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.some((item) => item.name === "lease 2026.pdf"));
-    const renamed = now().items.find((item) => item.name === "lease 2026.pdf");
+    const path = "Download/lease 2026.pdf";
+    const reviewed = () => runtime.runPromise(called("storageReviewedIdentities", (plugin) => plugin.storageReviewedIdentities({ volume: "primary", paths: [path] })));
+    const before = await reviewed();
+    if (!before.reviewed) throw new Error("the renamed lease cannot be reviewed");
+    const renamed = world.files.stored.find((one) => one.path === path);
     if (!renamed) throw new Error("the renamed lease is not listed");
-    expect(await runtime.runPromise(approved({ ticket: 9, act: "Deleting", file: renamed, folder, name: "", dest: nowhere }, false))).toEqual({ ran: true, outcome: "Confirmed" });
-    expect(world.files.trash.map((one) => one.was.path)).toEqual(["Download/lease 2026.pdf"]);
+    renamed.modified = 77;
+    world.files.changed();
+    await until(alpha, runtime, Browser, (s) => s.items.some((item) => item.name === "lease 2026.pdf" && item.revision === 77));
+    const call = { attemptId: 1, proposalId: "delete-lease", operationId: "delete-lease" };
+    expect(await runtime.runPromise(fileAction({ type: "files_trash", paths: [path], reviewed: before.reviewed }, call))).toEqual({ kind: "refused", code: "FILES_UNCHANGED" });
+    expect(paths(world).includes(`primary:${path}`)).toBe(true);
+    const after = await reviewed();
+    if (!after.reviewed) throw new Error("the changed lease cannot be reviewed");
+    expect(await runtime.runPromise(fileAction({ type: "files_trash", paths: [path], reviewed: after.reviewed }, { ...call, proposalId: "delete-reviewed-lease", operationId: "delete-reviewed-lease" }))).toEqual({ kind: "applied" });
+    expect(world.files.trash.map((one) => one.was.path)).toEqual([path]);
     await hardware("home");
     expect(await runtime.runPromise(approved({ ticket: 10, act: "Deleting", file: beach, folder, name: "", dest: nowhere }, false))).toEqual({ ran: false, outcome: "Refused" });
   });
