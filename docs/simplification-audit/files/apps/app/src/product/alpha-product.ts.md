@@ -11,7 +11,7 @@
 | 3 | 24 | D7 | `export function alphaNavigation(available)` — the app uses only the instance built at :55; the factory is exported for three host tests and the launcher-favorites quint harness that pass their own availability | Keep (the quint model needs it); no change | — |
 | 4 | 56-60 | D4 | Five `export const alphaX = navigation.x` aliases | Keep — they are the stable call names used by 6 app files and tests | — |
 | 5 | 25-26, 38-41 | A8 | Comments are current-behaviour descriptions ("keeps accepting the paths it was accepted with before the shared registry") — borderline changelog | Rephrase as "also accepts `/<id>` and `/apps/<id>`" | None |
-| 6 | 16 | — | Uses the `@elizaos/ui/mobile-shell/core` alias — the model for D13 | keep | — |
+| 6 | 16 | — | Uses the `upstream renderer package/mobile-shell/core` alias — the model for D13 | keep | — |
 
 ## Local types and helpers
 | Name | Kind | Lines | Twin elsewhere? (paths) | Proposed home |

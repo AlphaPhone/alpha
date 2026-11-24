@@ -19,7 +19,7 @@ import {residentRecoveryReason,residentRecoveryMessage,residentRecoveryCopy,resi
 import {anyAbortSignal} from './abort-signal';
 import {type CalendarApproval,type CalendarApprovalDecision} from './calendar-approval';
 import {CalendarApprovalClient} from './calendar-approval-client';
-import {readDevicePreferences} from '../browser/device-preferences';
+import {readDevicePreferences,refreshDevicePreferences} from '../browser/device-preferences';
 import {resolveCloudEnvironment} from './cloud-environment-selection';
 import { withResidentMapsNavigation } from '../maps/resident-relay.ts';
 import {aospImage} from './aosp-image';
@@ -45,6 +45,7 @@ import { negotiateEnabledViews } from './device-view-profile';
 import { chatNotesFolders } from './notes-folders';
 import { registerWorkflowDevice, workflowDeviceProtocol, type WorkflowDeviceProtocol } from './workflow-presentation';
 import {ClientObservationSupportSession} from './client-observation-support';
+import {clearPhoneLocation,phoneLocationEnabled,phoneLocationReader} from './phone-location';
 import {developmentIdentity,readDevelopmentIdentity,verifyDevelopmentIdentity,developmentOwnerRecovery,assertDevelopmentIdentity,developmentProfiles,type DevelopmentProfile} from '../browser/development-identity';
 import {developmentCloudKey} from '../browser/development-account-document';
 import {DevelopmentCloudAccountFixture} from '../browser/development-cloud-ui';
@@ -830,6 +831,7 @@ function update(patch: Partial<ConnectionSnapshot>) {
 // P-43: where the resident is always present no "no agent" choice is ever stored.
 function save(selection: Selection) { localStorage.setItem(SELECTION, JSON.stringify(residentAlwaysPresent && (selection.kind === 'none' || selection.kind === 'offline') ? { kind: 'resident' } : selection)); }
 function retire(name?: string) {
+  clearPhoneLocation();
   const retiringResident=active?.kind==='resident'?active.remote:undefined;
   clearClientObservationSupport();
   retireConversationEvents();
@@ -1072,6 +1074,7 @@ async function settleResidentAfterStartup() {
   update({ kind: 'recovering' });
 }
 function activate(next: Active, session: VerifiedSession, name: string) {
+  clearPhoneLocation();
   clearClientObservationSupport();
   retireConversationEvents();
   retireReadReplies();
@@ -1092,6 +1095,10 @@ function activate(next: Active, session: VerifiedSession, name: string) {
     const peer=new ClientObservationSupportSession({...session,connectionEpoch:generation},()=>epoch===generation&&active===next&&state.session===session,signal=>next.remote.request('/api/status',undefined,signal));
     clientObservationSession=peer;
     void peer.handshake(controller.signal).catch(()=>{}).finally(()=>appRequests.delete(controller));
+    // A cold platform fix can take seconds; start one now so the first turn already has a position.
+    if(isAndroid)void refreshDevicePreferences().then(()=>{
+      if(epoch===generation&&active===next)return phoneLocationReader().read(controller.signal);
+    }).catch(()=>{});
   }
   startConversationEvents(next,session);
   lastInferenceWarm=Number.NEGATIVE_INFINITY;
@@ -3279,7 +3286,7 @@ export const connectionController = {
     const authoredRequestText=text;
     const attachmentOnly=channelType==='DM'&&!!images?.length&&!text.trim();
     const turnMessage=(input:ContextEnvelope)=>attachmentOnly?{text:'',context:sanitizePhoneContext(input)}:phoneContextMessage(text,input);
-    let message = turnMessage({...context,calendarDay:undefined});
+    let message = turnMessage({...context,calendarDay:undefined,location:undefined});
     if (sending) throw new Error('Wait for the current reply before sending another message.');
     const selected = active, session = state.session, generation = epoch;
     requestedCameraContinuation=undefined;
@@ -3310,10 +3317,14 @@ export const connectionController = {
         if (!selected.remote.session || selected.remote.session.expiresAt <= Date.now()) throw Object.assign(new Error('Your session has expired. Pair again.'), { code: 'session_expired' });
       }
       const observationSession=clientObservationSession;
-      // Legacy text/alphaPhone projections remain day-free; plain-v1 alone never admits the field.
-      if(context.calendarDay&&selected.userTextFormatVersion===1&&observationSession){
-        const admitted=await observationSession.context(context,requestSignal);assertCurrent();
-        message=turnMessage(admitted);
+      // Legacy text/alphaPhone projections remain day- and position-free; plain-v1 alone never admits a field.
+      if(selected.userTextFormatVersion===1&&observationSession){
+        const location=isAndroid&&!context.sensitive?await phoneLocationReader().read(requestSignal):undefined;assertCurrent();
+        const observed={...context,location};
+        if(observed.calendarDay||observed.location){
+          const admitted=await observationSession.context(observed,requestSignal);assertCurrent();
+          message=turnMessage(admitted);
+        }
       }
       const id=await ensureSelectedConversation(selected,session,requestSignal,assertCurrent);
       if(expectedConversationId!==undefined&&id!==expectedConversationId)throw Error('The voice conversation changed.');
@@ -3334,6 +3345,7 @@ export const connectionController = {
       // The agent that keeps this owner's notes is told the phone's folder names with every message.
       const notesFolders=this.getAppRecordClient()?await chatNotesFolders():{};
       requestSignal.throwIfAborted();assertCurrent();
+      if(message.context.location&&!phoneLocationEnabled())message=turnMessage({...message.context,location:undefined});
       const options = { signal: requestSignal, clientMessageId: requestId, channelType, images, metadata: { ...(directRequestedActions?{agentActionMode:'direct-request-v1'}:{}), ...notesFolders, ...(channelType==='VOICE_DM'&&voiceTurnSignal?{voiceTurnSignal}:{}), ...(replyTo?{replyToMessageId:replyTo.messageId}:{}), ...(message.context.timeZone===undefined?{}:{uiTimeZone:message.context.timeZone}), clientDevice: { context: message.context,...(calendarAgendaSource?{calendarAgendaSource:{sourceId:calendarAgendaSource.sourceId,sourceRevision:calendarAgendaSource.sourceRevision}}:{}) }, ...boundNavigation()?.metadata(context), ...(canonicalProse?{userTextFormat:'plain-v1'}:{alphaPhone:{context:message.context}}) } };
       dispatched = { conversationId: id, at: Date.now() };
       const progress=(value:string,frame?:import('./local-agent-stream').StreamTextFrame)=>{requestSignal.throwIfAborted();if(generation!==epoch||selected!==active||state.session?.sessionId!==session.sessionId)throw Error('The connection changed.');onText?.(value,frame);};

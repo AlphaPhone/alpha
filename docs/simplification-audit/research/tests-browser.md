@@ -275,7 +275,7 @@ reading order, ~200 lines), or keep the engine and move its self-test out of the
   - `../../apps/app/src/runtime/device-record-presentation.ts` (6)
   - `cloud-deployment.generated` (4)
   - `../../scripts/local-agent-dev-bridge` (4)
-  - `../../.eliza/client-features/packages/ui/src/gestures/constants` (2, in `standalone-shell`)
+  - `upstream renderer: gestures/constants` (2, in `standalone-shell`)
   - `../../scripts/audit-production-bundle.ts` (2)
   - `../../specs/quint/refinement/check-traces.mjs` (`browser-list-focus:2`, `maps-list-focus:3`, `notes-photos-list-focus:4`)
 

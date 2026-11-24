@@ -1,6 +1,6 @@
 # specs/quint/refinement/application/launcher-favorites.mjs
 - Lines: 201 | Kind: Quint refinement harness (source campaign, `LauncherFavorites`, live) | Verdict: KEEP (owner question: move upstream, P6/D14)
-- Covers: shared launcher favourites — missing vs explicit-empty vs malformed records, v1/v2 schema, legacy view-ID alias (`alpha:workflows`→`alpha:automations`), rollback copy, storage refusal, external writes during a held load, visible reorder around hidden/uninstalled keys (generated `.eliza/client-features/plugins/plugin-native-system/src/client/launcher.ts`, `packages/ui/src/mobile-shell/mobile-launcher.ts`; Alpha supplies only `apps/app/src/product/alpha-product.ts`). Duplicates: none. Callers/importers: `test/quint-launcher-favorites.test.mjs`; aggregate `index.mjs` (T4).
+- Covers: shared launcher favourites — missing vs explicit-empty vs malformed records, v1/v2 schema, legacy view-ID alias (`alpha:workflows`→`alpha:automations`), rollback copy, storage refusal, external writes during a held load, visible reorder around hidden/uninstalled keys (generated `.eliza/client-features/plugins/plugin-native-system/src/client/launcher.ts`, `upstream renderer: mobile-shell/mobile-launcher.ts`; Alpha supplies only `apps/app/src/product/alpha-product.ts`). Duplicates: none. Callers/importers: `test/quint-launcher-favorites.test.mjs`; aggregate `index.mjs` (T4).
 
 ## Findings
 | # | Lines | Pattern | Finding | Change | Risk |

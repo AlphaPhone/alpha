@@ -1,6 +1,6 @@
 # specs/quint/application/LauncherFavorites.qnt
 - Lines: 164 | Kind: Quint model (live, `specs/quint/application/manifest.json`) | Verdict: KEEP here; owner question: move upstream (P6/D14)
-- Covers: shared launcher favourites: canonical unique order, OldWorkflows→Automations rename migration, v1/bare-v2 defaults, rollback record, write refusals (`.eliza/client-features/packages/ui/src/mobile-shell/mobile-launcher.ts`, `view-id-migration.ts`, upstream `launcher.ts`; Alpha only supplies `alpha-product.ts` navigation). Duplicates: none. Callers/importers: `scripts/check-quint.ts` (scenarios + simulation, manifest family `application`); harness `launcher-favorites.mjs` (+ `.md`) via `test/quint-launcher-favorites.test.mjs` and `test/quint-application-refinement.test.mjs` (via `specs/quint/refinement/application/index.mjs`)
+- Covers: shared launcher favourites: canonical unique order, OldWorkflows→Automations rename migration, v1/bare-v2 defaults, rollback record, write refusals (`upstream renderer: mobile-shell/mobile-launcher.ts`, `view-id-migration.ts`, upstream `launcher.ts`; Alpha only supplies `alpha-product.ts` navigation). Duplicates: none. Callers/importers: `scripts/check-quint.ts` (scenarios + simulation, manifest family `application`); harness `launcher-favorites.mjs` (+ `.md`) via `test/quint-launcher-favorites.test.mjs` and `test/quint-application-refinement.test.mjs` (via `specs/quint/refinement/application/index.mjs`)
 
 ## Findings
 | # | Lines | Pattern | Finding | Change | Risk |

@@ -5,7 +5,7 @@
 ## Findings
 | # | Lines | Pattern | Finding (with snippet) | Change | Risk |
 |---|---|---|---|---|---|
-| 1 | 1 | D13 | `../../../../.eliza/client-features/...` deep relative import. | `@eliza/packages/ui/src/platform/browser-document-store` alias. | Low. |
+| 1 | 1 | D13 | `../../../../.eliza/client-features/...` deep relative import. | `@eliza/upstream renderer: platform/browser-document-store` alias. | Low. |
 
 ## Local types and helpers
 | Name | Kind (type/interface/helper/const) | Lines | Twin elsewhere? (paths) | Proposed home |

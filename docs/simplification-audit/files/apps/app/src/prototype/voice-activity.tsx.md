@@ -1,7 +1,7 @@
 # apps/app/src/prototype/voice-activity.tsx
 - Lines: 86 | Role: React `VoiceActivity` bar animation (WAAPI keyframes per voice phase, reduced-motion aware), adapted from upstream `ChatOverlay.tsx` under the MIT notice in lines 1-29. | Verdict: KEEP (trim exports)
 - Importers: 1 product — `apps/app/src/prototype/voice-adapter.ts:11` (used at `:1347,1470,1474`). Tests: `test/voice-composer-recovery.test.mjs:7` (`tsImport`), `test/fixtures/voice-markup.mjs:13` (esbuild bundle).
-- Text/path pins: `test/support/feature-parity.mjs:436` (path). `scripts/prepare-client-features.ts:213` and `test/fixtures/shared-batch-voice.mjs:13` name **upstream** `packages/ui/src/voice/voice-activity.ts`, a different module (VAD detector) — name collision, not a reference to this file.
+- Text/path pins: `test/support/feature-parity.mjs:436` (path). `scripts/prepare-client-features.ts:213` and `test/fixtures/shared-batch-voice.mjs:13` name **upstream** `upstream renderer: voice/voice-activity.ts`, a different module (VAD detector) — name collision, not a reference to this file.
 
 ## Findings
 | # | Lines | Pattern | Finding (with snippet) | Change | Risk |

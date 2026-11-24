@@ -246,7 +246,7 @@ Examples:
 - Some modules are imported both ways. For example `packages/contracts/src/deletion-window` is imported relatively in `browser/calendar.ts:7`, `browser/daily.ts:2`, `browser/calendar-deletions.ts:1` and `browser/journal-retention.ts:1`, although the alias `@elizaos/contracts/deletion-window` exists.
 - 18 test or spec files hard-code the `../../../../.eliza` text as well.
 
-**Would an alias help? Yes.** One wildcard (tsconfig `"@eliza/*": ["./.eliza/client-features/*"]` plus a Vite `{find:/^@eliza\//, replacement:<abs>/.eliza/client-features/}`) would replace all 364 relative paths and every app-only single-file alias. Keep only the `@elizaos/*` bare names that **files inside the copied tree** import. Checked read-only, these include `@elizaos/contracts` (11 files), `@elizaos/core/schema-types` (4) and `@elizaos/ui/view-primitives` (3).
+**Would an alias help? Yes.** One wildcard (tsconfig `"@eliza/*": ["./.eliza/client-features/*"]` plus a Vite `{find:/^@eliza\//, replacement:<abs>/.eliza/client-features/}`) would replace all 364 relative paths and every app-only single-file alias. Keep only the `@elizaos/*` bare names that **files inside the copied tree** import. Checked read-only, these include `@elizaos/contracts` (11 files), `@elizaos/core/schema-types` (4) and `upstream renderer package/view-primitives` (3).
 
 **Caveat.** Node tests load app `.ts` through plain Node or vm (`test/support/strip-types.mjs`) and do not resolve Vite aliases. They need one `module.registerHooks` resolve hook in test support. That is also why `prepare-client-features.ts:345-405` rewrites seven upstream imports to relative `.ts` paths. A shared Node hook could replace those projections too (see P15).
 

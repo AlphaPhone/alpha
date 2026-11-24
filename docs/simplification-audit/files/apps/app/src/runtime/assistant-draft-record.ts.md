@@ -5,7 +5,7 @@
 ## Findings
 | # | Lines | Pattern | Finding (with snippet) | Change | Risk |
 |---|---|---|---|---|---|
-| 1 | 1-3 | D4 | `export type AssistantDraft=DurableDraft;` — a one-line rename shim (research P10). | `inbox-unsaved.ts` imports `type DurableDraft` from upstream `packages/ui/src/state/durable-draft.ts`; delete this file; remove it from the two manifest `sources` arrays and the feature-parity list. | None. |
+| 1 | 1-3 | D4 | `export type AssistantDraft=DurableDraft;` — a one-line rename shim (research P10). | `inbox-unsaved.ts` imports `type DurableDraft` from upstream `upstream renderer: state/durable-draft.ts`; delete this file; remove it from the two manifest `sources` arrays and the feature-parity list. | None. |
 
 ## Local types and helpers
 | Name | Kind | Lines | Twin elsewhere? | Proposed home |

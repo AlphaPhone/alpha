@@ -67,7 +67,7 @@ Product exports the ports need:
   (`goHome`/`openView`/`back`) as an importable module.
 - `prototype/automations-adapter.ts`: the Workflows device-reminder row handler, if ReminderOpenIntent keeps that
   branch.
-- Upstream (D14 follow-up): an inspector for `packages/ui/src/accessibility/screen-focus.ts`, or a ScreenFocusOwnership
+- Upstream (D14 follow-up): an inspector for `upstream renderer: accessibility/screen-focus.ts`, or a ScreenFocusOwnership
   harness that only observes DOM focus.
 
 ## Behaviours that would lose all coverage if the DELETEs happen

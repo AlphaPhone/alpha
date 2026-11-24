@@ -1,6 +1,6 @@
 # test/voice-capture-retirement.test.mjs
-- Lines: 40 | Kind: unit of upstream code (esbuild bundle of `.eliza/client-features/packages/ui/src/voice/voice-session-client-core.ts` with alias map to `.eliza` packages; fake WebSocket, track and AudioContext) | Verdict: DELETE
-- Covers: a fatal capture failure (track ended, graph closed, throwing error observer) retires the shared voice session client once. Duplicates: upstream `vendor/eliza/packages/ui/src/voice/__tests__/` (client tests with `voice-session-fakes.ts`). Product use: only `development-cartesia-conversation.ts` (development path). Callers/importers: `npm test` glob.
+- Lines: 40 | Kind: unit of upstream code (esbuild bundle of `upstream renderer: voice/voice-session-client-core.ts` with alias map to `.eliza` packages; fake WebSocket, track and AudioContext) | Verdict: DELETE
+- Covers: a fatal capture failure (track ended, graph closed, throwing error observer) retires the shared voice session client once. Duplicates: upstream `upstream renderer: voice/__tests__/` (client tests with `voice-session-fakes.ts`). Product use: only `development-cartesia-conversation.ts` (development path). Callers/importers: `npm test` glob.
 - Research correction: `research/tests-host.md:1406` says "imports a real app module ... merge into voice-speech integration". The module is upstream's, not the app's.
 
 ## Findings

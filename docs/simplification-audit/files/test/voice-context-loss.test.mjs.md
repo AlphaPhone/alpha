@@ -1,6 +1,6 @@
 # test/voice-context-loss.test.mjs
-- Lines: 29 | Kind: transplant of upstream code (slices `sendUplinkAudio` .. `handleServerFrame` from `.eliza/client-features/packages/ui/src/voice/voice-session-client-core.ts`, evals in `vm` with 15 fake globals) | Verdict: DELETE
-- Covers: when the renderer context getter throws, the shared voice client stops capture and sends no PCM with a generic message. Duplicates: upstream client tests (`vendor/eliza/packages/ui/src/voice/__tests__`). Callers/importers: `npm test` glob.
+- Lines: 29 | Kind: transplant of upstream code (slices `sendUplinkAudio` .. `handleServerFrame` from `upstream renderer: voice/voice-session-client-core.ts`, evals in `vm` with 15 fake globals) | Verdict: DELETE
+- Covers: when the renderer context getter throws, the shared voice client stops capture and sends no PCM with a generic message. Duplicates: upstream client tests (`upstream renderer: voice/__tests__`). Callers/importers: `npm test` glob.
 
 ## Findings
 | # | Lines | Pattern | Finding | Change | Risk |

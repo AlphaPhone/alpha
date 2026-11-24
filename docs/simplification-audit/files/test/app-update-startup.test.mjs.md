@@ -1,6 +1,6 @@
 # test/app-update-startup.test.mjs
-- Lines: 65 | Kind: unit of an upstream module (generated `.eliza/client-features/packages/ui/src/state/app-update-gate.ts`) with stub bridge | Verdict: DELETE
-- Covers: startup only probes hosts that advertise `updateState`; an unmounted WebView acknowledges its own preparation and waits through uncertain status; a successor mounts after native reconciliation; same-bridge idle releases startup. Duplicates: upstream `vendor/eliza/packages/ui/src/state/__e2e__/app-update-gate.test.ts`; Quint `specs/quint/refinement/application/mounted-update-admission.mjs` runs `watchMountedAppUpdates` from the same module. Callers/importers: `npm test`.
+- Lines: 65 | Kind: unit of an upstream module (generated `upstream renderer: state/app-update-gate.ts`) with stub bridge | Verdict: DELETE
+- Covers: startup only probes hosts that advertise `updateState`; an unmounted WebView acknowledges its own preparation and waits through uncertain status; a successor mounts after native reconciliation; same-bridge idle releases startup. Duplicates: upstream `upstream renderer: state/__e2e__/app-update-gate.test.ts`; Quint `specs/quint/refinement/application/mounted-update-admission.mjs` runs `watchMountedAppUpdates` from the same module. Callers/importers: `npm test`.
 
 ## Findings
 | # | Lines | Pattern | Finding | Change | Risk |

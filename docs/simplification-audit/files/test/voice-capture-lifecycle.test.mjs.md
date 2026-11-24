@@ -1,6 +1,6 @@
 # test/voice-capture-lifecycle.test.mjs
-- Lines: 47 | Kind: transplant of upstream code (type-stripped `.eliza/client-features/packages/ui/src/voice/voice-session-mic-capture.ts`, imports and exports regex-removed, run in `vm` with fake AudioContext/track) | Verdict: DELETE
-- Covers: `startVoiceMicCapture` releases the microphone on failed resume, track end, context close, visibility resume after Stop. Duplicates: upstream module's own tests in `vendor/eliza/packages/ui/src/voice/__tests__`. Alpha uses this module only through `apps/app/src/runtime/development-cartesia-conversation.ts` (development realtime path). Callers/importers: `npm test` glob.
+- Lines: 47 | Kind: transplant of upstream code (type-stripped `upstream renderer: voice/voice-session-mic-capture.ts`, imports and exports regex-removed, run in `vm` with fake AudioContext/track) | Verdict: DELETE
+- Covers: `startVoiceMicCapture` releases the microphone on failed resume, track end, context close, visibility resume after Stop. Duplicates: upstream module's own tests in `upstream renderer: voice/__tests__`. Alpha uses this module only through `apps/app/src/runtime/development-cartesia-conversation.ts` (development realtime path). Callers/importers: `npm test` glob.
 
 ## Findings
 | # | Lines | Pattern | Finding | Change | Risk |

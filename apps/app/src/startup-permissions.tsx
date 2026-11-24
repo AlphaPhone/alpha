@@ -320,7 +320,7 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
       {progress && !review && !target && <p className="alpha-permission-progress" role="status">Step {progress.step + 1} of {keys.length}</p>}
       <ul className="alpha-permission-rows">{keys.map(k => <li key={k} className="alpha-permission-row" aria-current={k === key ? 'step' : undefined} data-state={states[k]}>
         <span className="alpha-permission-row-icon" aria-hidden="true"><span style={iconStyle(details[k].icon)}/></span>
-        <span className="alpha-permission-label"><span className="alpha-permission-name">{details[k].title}</span>{k === key && <span className="alpha-permission-rationale">{details[k].reason}</span>}</span>
+        <span className="alpha-permission-label"><span className="alpha-permission-name">{details[k].title}</span>{k === key && <span className="alpha-permission-rationale">{native&&k==='location'?'Alpha chat, nearby places and directions':details[k].reason}</span>}</span>
         {k === key && state === 'ready' && <span className="alpha-permission-state" role="status">{stateWord(k)}</span>}
         {k === key && (chip || busy || state === 'checking') ? <button className="alpha-permission-chip" type="button" disabled={busy || state === 'checking'} onClick={() => void allow()}>{busy || state === 'checking' ? <Busy label="Checking"/> : chip}</button> : !(k === key && state === 'ready') && <span className="alpha-permission-state">{stateWord(k)}</span>}
       </li>)}</ul>

@@ -1,6 +1,6 @@
 # test/quint-drawer-interaction.test.mjs
 - Lines: 13 | Kind: Quint refinement wrapper (calls `checkDrawerInteraction` from `specs/quint/refinement/application/drawer-interaction.mjs`) | Verdict: DELETE
-- Covers: the mounted Apps drawer keeps pointer, menu and App Info ownership (22 traces) — the component is upstream `.eliza/client-features/packages/ui/src/mobile-shell/InstalledAppsGridDrawer.tsx`. Duplicates: the same driver is registered in `specs/quint/refinement/application/index.mjs` and runs again in the aggregate `test/quint-application-refinement.test.mjs`. Callers/importers: `npm test` glob (`node --test test/*.test.mjs`); nothing imports it.
+- Covers: the mounted Apps drawer keeps pointer, menu and App Info ownership (22 traces) — the component is upstream `upstream renderer: mobile-shell/InstalledAppsGridDrawer.tsx`. Duplicates: the same driver is registered in `specs/quint/refinement/application/index.mjs` and runs again in the aggregate `test/quint-application-refinement.test.mjs`. Callers/importers: `npm test` glob (`node --test test/*.test.mjs`); nothing imports it.
 
 ## Findings
 | # | Lines | Pattern | Finding | Change | Risk |

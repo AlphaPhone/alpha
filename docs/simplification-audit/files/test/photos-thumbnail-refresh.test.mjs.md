@@ -1,6 +1,6 @@
 # test/photos-thumbnail-refresh.test.mjs
 - Lines: 94 | Kind: transplant (slices `settleThumbnails`, `keepCovers`, `loadCoverThumbnails`, `setLast`, `loadLast` from `camera-adapter.ts`) + unit tests of upstream `photos-view.ts` (`readWindow`) | Verdict: DELETE (carry 2 cases into `journeys/camera-photos.spec.ts`)
-- Covers: the thumbnail cache window (240 kept, 24 per native read), stale thumbnail and cover responses after a catalog, visibility, viewer or album change, the last-capture tile, and `readWindow` cursor handling. Duplicates: `test/photos-view.test.mjs` (`readWindow`, `thumbnailPlan`), `test/browser/photos-pending-read.production.spec.ts:33` ("keeps the deep window after a catalog event and reloads evicted thumbnails"), `test/browser/photos-grid-density.spec.ts`. Callers/importers: `npm test`; `test/support/strip-types.mjs`; `.eliza/client-features/packages/ui/src/mobile-shell/photos-view.ts`.
+- Covers: the thumbnail cache window (240 kept, 24 per native read), stale thumbnail and cover responses after a catalog, visibility, viewer or album change, the last-capture tile, and `readWindow` cursor handling. Duplicates: `test/photos-view.test.mjs` (`readWindow`, `thumbnailPlan`), `test/browser/photos-pending-read.production.spec.ts:33` ("keeps the deep window after a catalog event and reloads evicted thumbnails"), `test/browser/photos-grid-density.spec.ts`. Callers/importers: `npm test`; `test/support/strip-types.mjs`; `upstream renderer: mobile-shell/photos-view.ts`.
 
 ## Findings
 | # | Lines | Pattern | Finding | Change | Risk |

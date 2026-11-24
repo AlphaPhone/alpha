@@ -1,6 +1,6 @@
 # scripts/feature-manifest.ts
 - Lines: 45 | Kind: script (inventory tool for a parity test) | Verdict: DELETE (RECOMMENDATIONS D15)
-- Covers: emits Alpha's mobile feature manifest from upstream `mobile-shell/core.ts`, the diff against Eliza's, and a `git ls-files` list of every Alpha source file ("behavioural modules") that `test/support/feature-parity.mjs` must equal. Callers: `test/feature-parity.test.mjs:8` (imports `featureParity`), `test/direct-provider-module-budget.test.mjs:9` (reads this file as text, T1). `scripts/prepare-client-features.ts:125` mentions upstream `packages/ui/src/mobile-shell/feature-manifest.ts`, a different (upstream) file, so not a caller. No npm/CI caller.
+- Covers: emits Alpha's mobile feature manifest from upstream `mobile-shell/core.ts`, the diff against Eliza's, and a `git ls-files` list of every Alpha source file ("behavioural modules") that `test/support/feature-parity.mjs` must equal. Callers: `test/feature-parity.test.mjs:8` (imports `featureParity`), `test/direct-provider-module-budget.test.mjs:9` (reads this file as text, T1). `scripts/prepare-client-features.ts:125` mentions upstream `upstream renderer: mobile-shell/feature-manifest.ts`, a different (upstream) file, so not a caller. No npm/CI caller.
 
 ## Findings
 | # | Lines | Pattern | Finding | Change | Risk |

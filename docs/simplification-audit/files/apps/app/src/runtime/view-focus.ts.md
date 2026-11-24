@@ -1,5 +1,5 @@
 # apps/app/src/runtime/view-focus.ts
-- Lines: 93 | Role: binds upstream `createScreenFocus` (`@elizaos/ui/accessibility/screen-focus`) to Alpha's screen-name targets and screen-change signals; keyboard-only focus ring. | Verdict: KEEP (minor; MOVE to `ui/`)
+- Lines: 93 | Role: binds upstream `createScreenFocus` (`upstream renderer package/accessibility/screen-focus`) to Alpha's screen-name targets and screen-change signals; keyboard-only focus ring. | Verdict: KEEP (minor; MOVE to `ui/`)
 - Importers: `main.tsx:90` (`installViewFocus()` at L407).
 - Text/path pins: Quint `specs/quint/refinement/application/screen-focus-ownership.mjs:12,168` (runs stripped text, reads `installed`), `specs/quint/application/manifest.json`, `test/accessibility-coverage.test.mjs:189`, `test/browser/view-focus.spec.ts` (uses the uninstaller and idempotence), `feature-parity.mjs`.
 

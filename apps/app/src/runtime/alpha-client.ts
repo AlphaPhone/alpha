@@ -1,7 +1,7 @@
 /** Browser-safe boundary. The composition root supplies an authenticated transport;
  * this module neither invents endpoints nor handles credentials. */
 import {validateNativeNotesReadReplyHint,validateNativeNotesReadReplyOrigin,type NativeNotesReadReplyOrigin,type NativeNotesReadReplyHint} from '../../../../.eliza/client-features/packages/contracts/src/native-notes-query.ts';
-import {parseClientCalendarDayObservation,type ClientCalendarDayObservation} from '../../../../.eliza/client-features/packages/contracts/src/client-turn-observation.ts';
+import {parseClientCalendarDayObservation,type ClientCalendarDayObservation,type ClientLocationObservation} from '../../../../.eliza/client-features/packages/contracts/src/client-turn-observation.ts';
 import type {NotesTarget} from './notes-contract';
 import type {StreamTextListener} from './local-agent-stream';
 import type {VoiceTurnSignal as SharedVoiceTurnSignal} from '@elizaos/voice/turn';
@@ -32,6 +32,8 @@ export interface ViewContext {
   timeZone?: string;
   /** Ordinary visible Calendar day; lookup context, never source or effect authority. */
   calendarDay?: ClientCalendarDayObservation;
+  /** The phone's last known position, sent only while the launcher holds the location permission. */
+  location?: ClientLocationObservation;
   /** Opaque provider IDs only. Never put document bodies or credentials here. */
   selectedObject?: {
     kind: string;

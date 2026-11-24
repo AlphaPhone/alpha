@@ -877,3 +877,11 @@ The subsequent reviewed pin `6e2a09477545dcfb4257d4719356b3df858d7143` cuts per-
 The subsequent reviewed pin `c5d440a49d3561caaa3b6d2864d0a408e2cfb941` fixes the verified per-area review findings for chat workflows, messages, calls (including emergency requests), calendar, camera, Maps, notes, contacts and Browser ([eliza#39990](https://github.com/elizaOS/eliza/pull/39990)). `bun scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
 
 The subsequent reviewed pin `032222c7feaa978c95030f06f7f773b3be3b1735` retries and rejects schema-empty Calendar update extractions instead of reading them as no change ([eliza#40017](https://github.com/elizaOS/eliza/pull/40017)) and ends a dispatched native Browser back, forward, reload or open on the tool's own text, which says the command was sent rather than that it finished, so the turn no longer fails or claims the page finished loading ([eliza#40019](https://github.com/elizaOS/eliza/pull/40019)). It also honors the bound owner request in Notes and Calendar (elizaOS/eliza#39994), reports native Google sign-in readiness for the requested app (elizaOS/eliza#39991) and records native Browser field history from document creation (elizaOS/eliza#39998); the remaining commits change staging and release tooling. `bun scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
+
+The next pin, `617b6a7badc0e063bae2490cf853cc173c9d43ca`, includes the
+location observation contract ([Eliza #39989](https://github.com/elizaOS/eliza/pull/39989)),
+idempotent note creation and owner-confirmed recording cleanup
+([Eliza #39944](https://github.com/elizaOS/eliza/pull/39944),
+[Eliza #39950](https://github.com/elizaOS/eliza/pull/39950)).
+The core catalog records the updated Notes source bytes. The mobile policy
+records the lock change for the Maps plugin's contracts dependency.

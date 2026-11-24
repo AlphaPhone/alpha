@@ -2055,7 +2055,7 @@ waits for the pin advance.
 | 5 | Move the engine tests: `OwnedPhotoEdits`/`PermittedMediaCatalog` (PhotoReplace, PhotoFilter, PhotosCatalogOrder, PhotosLibrary), speech-bridge `VoiceWorkerSettlement`, reminders `ReminderDeletionJournal` + civil recurrence, `NativeVoiceLatency`, LocalSpeechBridge drain ordering, CloudSignIn `$Attempt`, NotificationMirrorListenerService, ContactsCatalog, System*/CrashLog/StorageCatalog/SessionSpeech | U-T2 | android-05 … -12 |
 | 6 | Export the resident launch environment and the IPC refusal label set from the generated host | `TrustedPackagedWorker`, `ResidentWorkflowCrash.safeIpcRefusal` | android-10 Q4/Q7 |
 | 7 | `soong-memory.patch` → `vendor/eliza/packages/os/android/patches/` | U-O3 | android-03 #7 |
-| 8 | Export `InstalledAppsGridDrawer`, `HOLD_MS`, `SLOP`, `appsDrawerEntries` from the `@elizaos/ui/mobile-shell` index | `home-shell.ts:6` uses the alias | app-12 #15 |
+| 8 | Export `InstalledAppsGridDrawer`, `HOLD_MS`, `SLOP`, `appsDrawerEntries` from the `upstream renderer package/mobile-shell` index | `home-shell.ts:6` uses the alias | app-12 #15 |
 | 9 | plugin-maps: host `keepCloudMapsCoverage` and export the Cloud Google provider id | `maps/agent-navigation.ts`, `cloud-provider.ts:5` | app-08 Q4/Q5 |
 | 10 | plugin-workflow: export a readable-summary predicate or constant from `hosted-digests.ts`; one shared managed-route table (`managed-service-routes.ts` vs `managed-google-route-policy.ts` vs Java `CalendarSyncConsent`) | `hosted-notice-question.ts:13` | app-24 #14 |
 | 11 | Structured snooze field (instead of parsing `lastDecisionLog`); confirm the `normalizeEffectReceipts` note operation names | `automations-protocol.ts:61` | app-20 Q8 |

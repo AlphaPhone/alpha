@@ -3647,6 +3647,7 @@
       "leavingDuringWatchSetupClearsItTest",
       "deniedPermissionReportsOnceTest",
       "staleListenerHearsNothingTest",
+      "freshFixAfterClockSkewTest",
       "unconfirmedCleanupRejectsNextStartTest",
       "restartWaitsForCleanupTest",
       "stopDuringRestartSupersedesTest",
@@ -3715,7 +3716,7 @@
     },
     "abstractions": [
       "Three sessions and eight generations. One owner object; the Maps screen holds three (route origin, guidance, agent), each an instance of this model.",
-      "Fix validation is one boolean: a stale, future or malformed fix is reported as an error and stops the session.",
+      "A malformed fix reports an error and stops the session. A stale or future-dated fix is skipped without stopping the watch.",
       "The browser permission-request cancel and heading or speed fields are not modeled. The native plugin's own permission and provider state is external.",
       "The native event carries no watch identity, so every registered listener hears every fix; only the session in place delivers it.",
       "A session that registered no listener has nothing to clean up: its stop settles at once and a start that replaces it puts the new session in place in the same step. A stop between start() and that step is not modeled.",

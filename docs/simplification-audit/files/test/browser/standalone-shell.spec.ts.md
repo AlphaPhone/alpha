@@ -6,7 +6,7 @@
 | # | Lines | Pattern | Finding | Change | Risk |
 |---|---|---|---|---|---|
 | 1 | 2, 120 | A1 | `openLegacyNotes` selects the "Previous notes" source, which D1 deletes; the Notes fade case breaks with it (also seeds via `/src/runtime/browser-notes-document.ts`, line 118). | Seed notes through the current Notes UI or the canonical notes helper (`helpers/canonical-notes.ts`). | Low |
-| 2 | 3 | D13 | Imports `DEFAULT_PULL_DISTANCE` from `../../.eliza/client-features/packages/ui/src/gestures/constants` (generated upstream output). | Import through the `@eliza/*` alias once it exists, or use a test-local "past the pull threshold" distance. | None |
+| 2 | 3 | D13 | Imports `DEFAULT_PULL_DISTANCE` from `upstream renderer: gestures/constants` (generated upstream output). | Import through the `@eliza/*` alias once it exists, or use a test-local "past the pull threshold" distance. | None |
 | 3 | 32, 40, 62, 137, 141, 149, 170 | C3 | The half-sheet height formula `Math.min(h,Math.max(200,h-72),Math.max(200,Math.round(h*.6)))` is copied seven times and re-derives product layout maths. | One helper `expectHalfSheet(page)`; better, assert the detent attribute the product exposes. | None |
 | 4 | 33-44, 247 | T6 | Synthetic `PointerEvent`s dispatched in-page to test rAF batching and a same-turn late click. These pin implementation timing. | Keep the late-click fence (real bug class) via `page.mouse`; drop the "synchronous vs painted height" assertion. | Low |
 | 5 | 59, 155, 205, 258, 263, 270, 286 | T8 | Seven `waitForTimeout` (65-800 ms), including the 350 ms post-drag tap guard and the `frames()` sampler's fixed wait. | Wait on conditions; for the tap guard use `page.clock`. Keep `frames()` but poll for its completion flag. | Low |

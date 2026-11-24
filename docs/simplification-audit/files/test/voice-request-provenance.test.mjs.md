@@ -5,7 +5,7 @@
 ## Findings
 | # | Lines | Pattern | Finding | Change | Risk |
 |---|---|---|---|---|---|
-| 1 | 37-50 | T3 | Five stub modules as source strings (`connection-ui`, flags, device preferences, `@elizaos/ui` session client). The module under test is the development Cartesia path (`developmentCartesiaVoiceEnabled`), not a production path (D6). | Delete. | Low |
+| 1 | 37-50 | T3 | Five stub modules as source strings (`connection-ui`, flags, device preferences, `upstream renderer package` session client). The module under test is the development Cartesia path (`developmentCartesiaVoiceEnabled`), not a production path (D6). | Delete. | Low |
 | 2 | 53-56 | T5 | Bundles and runs `vendor/eliza` reducer directly. | Delete. | None |
 | 3 | 14-36, 82 | B4/T8 | Overwrites `globalThis.window/location/WebSocket` in the shared node:test process and restores by hand. | Delete. | None |
 | 4 | 87-110 | T2 | `text.indexOf('  async performVoiceRequestedActions(')` … `indexOf('  async continueRequestedCamera(')`: marker slice of `connection-ui.tsx` (D1 blocker for the split). Marker still present (line 2228). | Delete. | Low |

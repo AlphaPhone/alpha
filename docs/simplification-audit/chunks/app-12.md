@@ -85,7 +85,7 @@ Reports: `docs/simplification-audit/files/apps/app/src/prototype/<file>.md` for 
 12. **home-cards rename layer**: `home-cards.ts` + importers `data-adapter.ts`, `agent-calendar-adapter.ts`, `automations-adapter.ts`, `inbox-cloud-adapter.ts`, `workflow-adapter.ts`, `scripts/test-inbox-cloud-flow.ts`, `test/browser/home-daily-overview.spec.ts`, `specs/quint/application/manifest.json` HomeSurface symbols (`selectHomeAgenda` alias).
 13. **Icon mask helpers**: `home-overview-cards.ts maskIcon`, `home-shell.ts glyph` and line 296, plus the other mask builders listed above → `icon-style.ts`.
 14. **mock-attention shim**: delete `mock-attention.ts`, change `data-adapter.ts:2`, `test/support/feature-parity.mjs:387`.
-15. **Upstream**: export `InstalledAppsGridDrawer`, `HOLD_MS`, `SLOP`, `appsDrawerEntries` from `@elizaos/ui/mobile-shell` index (vendor PR), then `home-shell.ts:6` uses the alias.
+15. **Upstream**: export `InstalledAppsGridDrawer`, `HOLD_MS`, `SLOP`, `appsDrawerEntries` from `upstream renderer package/mobile-shell` index (vendor PR), then `home-shell.ts:6` uses the alias.
 
 ## Text/path pins
 - `contacts-adapter.ts`: `specs/quint/services/manifest.json:3213-3243` (local names `epoch, loading, readable, available, editor, clear`), `specs/quint/native/manifest.json:4373`, `specs/quint/refinement/services/contacts-session-replay.mjs:13`, `specs/quint/refinement/native/telephony.mjs:334`, `test/contacts-adapter.test.mjs:5` and `test/comms-settings.test.mjs:48` (import-specifier stubs), `test/support/feature-parity.mjs:364`.
