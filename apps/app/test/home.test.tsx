@@ -9,6 +9,7 @@ import { button, closeAll, drawn, fill, hardware, later, open, press, underAct, 
 import { scene } from "./fakes/scene.ts";
 import { waiting } from "../src/home/waiting.vibe";
 import { agendaFrom } from "../src/home/cards.vibe";
+import type { Scene } from "./fakes/scene.ts";
 
 underAct();
 afterEach(closeAll);
@@ -22,11 +23,15 @@ const pulled = () => drawn(() => {
   zone?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, isPrimary: true, clientX: 100, clientY: 120 }));
 });
 const alphaApps = ["view:Inbox", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Files", "view:Workflows", "view:Settings"];
+const holdingHome = (world: Scene) => {
+  world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true, holders: ["ai.alphacompute.alphaphone"] } : role);
+  return world;
+};
 
 describe("Home on a phone", () => {
   // spec/app/home/index.md, "Story: Start Home"; spec/app/home/index.md, "Story: Keep my apps on Home"; spec/app/home/index.md, "Story: Edit Home"
   it("Start Home, keep my apps on it and edit it (spec/app/home/index.md, \"Story: Start Home\"; spec/app/home/index.md, \"Story: Keep my apps on Home\"; spec/app/home/index.md, \"Story: Edit Home\")", async () => {
-    const world = { ...scene(), phone: true };
+    const world = holdingHome({ ...scene(), phone: true });
     const first = await open(world);
     const { alpha } = first;
     const homes = home.runtime(alpha);
@@ -164,7 +169,7 @@ describe("Home on a phone", () => {
 
   // spec/app/home/index.md, "Story: Pull down for notifications"
   it("Pull down for notifications (spec/app/home/index.md, \"Story: Pull down for notifications\")", async () => {
-    const world = { ...scene(), phone: true };
+    const world = holdingHome({ ...scene(), phone: true });
     world.launcher.shade = "silent";
     const { alpha } = await open(world);
     const homes = home.runtime(alpha);

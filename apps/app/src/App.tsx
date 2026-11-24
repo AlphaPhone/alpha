@@ -5,7 +5,7 @@ import { useMachine } from "../gen/app__shell.react.ts";
 import { useMachine as useCanvas } from "../gen/app__shell__keyboard.react.ts";
 import { useMachine as useLayers } from "../gen/app__shell__layers.react.ts";
 import { assistantInert, pageInert, takesBack } from "../gen/app__shell__layers.ts";
-import { swipe } from "../gen/app__shell__gestures.ts";
+import { barHeight, edge, swipe } from "../gen/app__shell__gestures.ts";
 import { useMachine as usePage } from "../gen/app__update__page.react.ts";
 import { editorsMounted } from "../gen/app__update__page.ts";
 import type { Alpha } from "./runtime/area.tsx";
@@ -18,6 +18,17 @@ export interface AppProps {
   alpha: Alpha;
 }
 
+type StartedSwipe = {
+  id: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  across: number;
+  down: number;
+  owner: string;
+};
+
 /**
  * Alpha: Home, or the app on top of the trail under its title, with Back offered exactly when the rules allow it, and
  * over them Ask Alpha, whatever covers the screen, and the notices. Each screen is its area's, drawn at its place.
@@ -27,28 +38,61 @@ export function App({ alpha }: AppProps) {
   const { state, cause, can } = useMachine(alpha.runtime);
   const layers = useLayers(alpha.runtime).state;
   const page = usePage(alpha.runtime).state;
-  const launcher = useCanvas(alpha.runtime).state?.launcher ?? false;
-  const startedRef = useRef<{ x: number; y: number } | undefined>(undefined);
+  const canvas = useCanvas(alpha.runtime).state;
+  const launcher = canvas?.launcher ?? false;
+  const startedRef = useRef<StartedSwipe | undefined>(undefined);
   if (cause) return <Alert variant="destructive" className="m-6">Alpha could not read where you were</Alert>;
   if (!state) return null;
+  const showing = state.trail.at(-1);
+  const owner = `${showing ?? "home"}:${state.assistant}:${state.drawer}:${launcher}`;
+  const beginSwipe = (event: PointerEvent<HTMLElement>) => {
+    if (!event.isPrimary || event.button !== 0 || event.defaultPrevented) return;
+    startedRef.current = undefined;
+    const target = event.target;
+    if (target instanceof Element && target.closest("input, textarea, select, [contenteditable]:not([contenteditable=false]), [data-alpha-own-gesture]")) return;
+    const element = event.currentTarget;
+    const box = element.getBoundingClientRect();
+    const width = element.offsetWidth;
+    const height = element.offsetHeight;
+    if (box.width <= 0 || box.height <= 0 || width <= 0 || height <= 0) return;
+    const across = width / box.width;
+    const down = height / box.height;
+    const x = (event.clientX - box.left) * across;
+    const y = (event.clientY - box.top) * down;
+    if (x < edge || x > width - edge || (launcher && y > height - barHeight)) {
+      startedRef.current = { id: event.pointerId, x, y, width, height, across, down, owner };
+    }
+  };
   const swiped = (event: PointerEvent<HTMLElement>) => {
     const from = startedRef.current;
+    if (from?.id !== event.pointerId) return;
     startedRef.current = undefined;
-    const page = event.currentTarget.getBoundingClientRect();
-    const went = from ? swipe(launcher, false, page.width, page.height, from.x, from.y, event.clientX - from.x, event.clientY - from.y) : "NoSwipe";
-    if (went === "SwipeBack") void alpha.back();
-    else if (went === "SwipeHome") void alpha.runtime.runPromise(home());
+    if (event.defaultPrevented || from.owner !== owner) return;
+    const element = event.currentTarget;
+    const box = element.getBoundingClientRect();
+    if (element.offsetWidth !== from.width || element.offsetHeight !== from.height) return;
+    const dx = (event.clientX - box.left) * from.across - from.x;
+    const dy = (event.clientY - box.top) * from.down - from.y;
+    const went = swipe(launcher, false, from.width, from.height, from.x, from.y, dx, dy);
+    if (went === "SwipeBack") {
+      event.preventDefault();
+      void alpha.back();
+    } else if (went === "SwipeHome") {
+      event.preventDefault();
+      void alpha.runtime.runPromise(home());
+    }
   };
   const inert = layers !== undefined && pageInert(layers);
-  const showing = state.trail.at(-1);
   const back = can({ type: "goBack" });
   return (
     <main
       data-alpha-launcher={launcher ? "" : undefined}
       ref={(page) => { if (page) page.ownerDocument.documentElement.dataset.alphaCanGoBack = String(back || (layers !== undefined && takesBack(layers))); }}
-      onPointerDown={(event) => { startedRef.current = { x: event.clientX - event.currentTarget.getBoundingClientRect().left, y: event.clientY }; }}
+      onPointerDown={beginSwipe}
       onPointerUp={swiped}
-      className="relative mx-auto flex min-h-dvh w-full flex-col bg-background font-sans text-base text-foreground sm:pointer-fine:max-w-103"
+      onPointerCancel={(event) => { if (startedRef.current?.id === event.pointerId) startedRef.current = undefined; }}
+      style={canvas?.covered ? { height: canvas.visible } : undefined}
+      className="relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground sm:pointer-fine:max-w-103"
     >
       <div className="relative flex min-h-0 flex-1 flex-col" inert={inert}>
         {page === undefined || !editorsMounted(page) ? null : showing === undefined
@@ -58,6 +102,7 @@ export function App({ alpha }: AppProps) {
               {!viewHasHeader(showing) && <AppHeader
                 title={views[showing].label}
                 leading={back && <AppBack alpha={alpha} />}
+                className="shrink-0"
               />}
               {alpha.slot(`view:${showing}`)}
             </>

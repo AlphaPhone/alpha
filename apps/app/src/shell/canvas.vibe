@@ -44,10 +44,16 @@ import { focused, measured, paged, watched } from page
 const followed = started(effect {
   if (!paged()) return
   const canvas = try Canvas.Machine
-  const presented = try (try Launcher).presentation()
+  const launcher = try Launcher
+  const device = try Device
+  const presented = try launcher.presentation()
   const tell = (event: Event) => contained(canvas.send(event), "the canvas")
   const window0 = measured()
   try tell({ type: "mount", width: window0.width, height: window0.height, launcher: presented.launcher })
+  try fork.scoped Stream.runForEach(Stream.filter(device.visible, (shown) => shown), effect () => {
+    const now = try launcher.presentation()
+    if (Canvas.canLauncherChanged(try canvas.get(), now.launcher)) try tell({ type: "launcherChanged", launcher: now.launcher })
+  })
   const changes = Stream.callback<"resize" | "focus">((queue) => acquireRelease(sync(() => watched((what) => { Queue.offerUnsafe(queue, what) })), (off) => sync(off)))
   try Stream.runForEach(changes, effect (what) => {
     if (what === "focus") {

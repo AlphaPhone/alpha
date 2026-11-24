@@ -99,6 +99,14 @@ pure def mount(c: Canvas, width: int, height: int, launcher: bool): Canvas =
 pure def typing(c: Canvas): bool = c.field != NoField
 ```
 
+### The canvas follows the Home role when Android says it has changed
+
+```quint
+pure def canLauncherChanged(c: Canvas, launcher: bool): bool = c.mounted and c.launcher != launcher
+
+pure def launcherChanged(c: Canvas, launcher: bool): Canvas = laidOut(c.base, { ...c, launcher: launcher })
+```
+
 ### The composer is covered when more than 150 points of the height without the keyboard are hidden; a cover that ends while the composer has focus puts it away, where Android does not report the keyboard itself
 
 ```quint
