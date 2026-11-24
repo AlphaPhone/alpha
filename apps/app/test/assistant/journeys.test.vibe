@@ -1,4 +1,4 @@
-// spec/assistant/dock.md, "Story: Open and size the chat with one gesture"; spec/assistant/dock.md, "Story: Size the sheet to what it shows"; spec/assistant/draft.md, "Story: Keep what I typed"; spec/assistant/conversation.md, "Story: Talk to my agent and approve what it proposes"; spec/assistant/conversation.md, "Story: Reply to or edit a message I sent"; spec/assistant/attachments.md, "Story: Attach a photo or file to my message"; spec/assistant/attachments.md, "Story: Attach only what fits"; spec/assistant/search.md, "Story: Find something I said in an earlier chat"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/decision.md, "Story: Approve or deny a workflow step once"; spec/assistant/stoppedReply.md, "Story: Know what became of a reply I stopped"; spec/assistant/context.md, "Story: Let my agent know where I am when I allow it"; spec/assistant/context.md, "Story: Tell my agent what my screen shows, and nothing more"; spec/assistant/entry.md, "Story: Summon my assistant from anywhere on the phone"; spec/assistant/noticeQuestion.md, "Story: Ask Alpha about a notification"; spec/assistant/recovery.md, "Story: See what still waits for me without the phone polling my agent"; spec/assistant/index.md, "Story: Ask my assistant from anywhere"; spec/assistant/review.md, "Story: Act only on what I asked for"; spec/assistant/recovery.md, "Story: Restart my agent when it stopped for review"
+// spec/assistant/dock.md, "Story: Open and size the chat with one gesture"; spec/assistant/dock.md, "While voice owns the chat no gesture is captured, one under way is let go, and the drag resizes again once voice ends"; spec/assistant/dock.md, "Story: Size the sheet to what it shows"; spec/assistant/draft.md, "Story: Keep what I typed"; spec/assistant/conversation.md, "Story: Talk to my agent and approve what it proposes"; spec/assistant/conversation.md, "Story: Reply to or edit a message I sent"; spec/assistant/attachments.md, "Story: Attach a photo or file to my message"; spec/assistant/attachments.md, "Story: Attach only what fits"; spec/assistant/search.md, "Story: Find something I said in an earlier chat"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/decision.md, "Story: Approve or deny a workflow step once"; spec/assistant/stoppedReply.md, "Story: Know what became of a reply I stopped"; spec/assistant/context.md, "Story: Let my agent know where I am when I allow it"; spec/assistant/context.md, "Story: Tell my agent what my screen shows, and nothing more"; spec/assistant/entry.md, "Story: Summon my assistant from anywhere on the phone"; spec/assistant/noticeQuestion.md, "Story: Ask Alpha about a notification"; spec/assistant/recovery.md, "Story: See what still waits for me without the phone polling my agent"; spec/assistant/index.md, "Story: Ask my assistant from anywhere"; spec/assistant/review.md, "Story: Act only on what I asked for"; spec/assistant/recovery.md, "Story: Restart my agent when it stopped for review"
 import { assert, it } from "@effect/vitest"
 import { Machine as DockMachine, clampSheet, halfHeight } from "../../gen/assistant__dock.effect.vibe"
 import { Machine as DraftsMachine, shown } from "../../gen/assistant__draft.effect.vibe"
@@ -88,6 +88,31 @@ it.effect("The dock rests where the shell puts it (spec/assistant/dock.md, \"Hom
     try Effect.try(() => assert.deepStrictEqual(
       { view: onPill.view, rest: onPill.chat, shell, homeView: home.view, homeChat: home.chat },
       { view: "PillView", rest: "Hidden", shell: "Sheet", homeView: "HomeView", homeChat: "Input" },
+    ))
+  }
+})
+
+it.effect("Voice holds the chat still while it owns it, and the drag resizes again after (spec/assistant/dock.md, \"While voice owns the chat no gesture is captured, one under way is let go, and the drag resizes again once voice ends\")", () => effect {
+  provide assistantOver(quietResident(), fakeHost([]), countingExecutors({ count: 0 })) {
+    const dock = try DockMachine
+    const assistant = try Assistant
+    const pressed = (label: "ResizeControl" | "NoControl") => Effect.match(dock.send({ type: "down", label }), { onSuccess: () => true, onFailure: () => false })
+    try assistant.show("Sheet")
+    try dock.send({ type: "down", label: "ResizeControl" })
+    try dock.send({ type: "move" })
+    try assistant.voiceOwnsChat(true)
+    const held = try dock.get()
+    const duringVoice = try pressed("ResizeControl")
+    try assistant.voiceOwnsChat(true)
+    const again = try dock.get()
+    try assistant.voiceOwnsChat(false)
+    const afterVoice = try pressed("ResizeControl")
+    try dock.send({ type: "move" })
+    try dock.send({ type: "settleDrag", direction: "Up", zone: "Top", flick: false, over: "NoControl" })
+    const resized = try dock.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { held: { chat: held.chat, voice: held.voice, dragging: held.drag.active, effects: held.effects }, duringVoice, again: again.voice, afterVoice, resized: { chat: resized.chat, voice: resized.voice } },
+      { held: { chat: "Sheet", voice: true, dragging: false, effects: 0 }, duringVoice: false, again: true, afterVoice: true, resized: { chat: "Full", voice: false } },
     ))
   }
 })

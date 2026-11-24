@@ -157,8 +157,6 @@ pure def canTouchOutside(d: Dock): bool = not(d.drag.active) and not(d.ghost) an
 pure def touchOutside(d: Dock): Dock = closeChat(d)
 pure def stepATouchAboveTheSheetOnlyClosesIt(before: Dock, via: str, after: Dock): bool =
   via == "touchOutside" implies (after.voice == before.voice and after.view == before.view and not(isOpen(after.chat)))
-pure def canVoiceEnds(d: Dock): bool = d.voice
-pure def voiceEnds(d: Dock): Dock = { ...d, voice: false }
 pure def alwaysHomeKeepsItsBar(d: Dock): bool = keepsItsBar(d.view == HomeView, d.chat)
 pure def alwaysAKeptBarIsHomesBar(d: Dock): bool = d.barKept implies (d.view == HomeView and d.chat == Input)
 pure def alwaysARememberedHeightIsOpen(d: Dock): bool = d.remembered implies isOpen(d.chat)
@@ -170,6 +168,26 @@ pure def sometimesFlickDismissedToPill(d: Dock): bool = d.view == PillView and d
 Opening the view an action card names keeps the chat where it is: a chat
 that was open stays open, Camera included (#1386). Only `closeChat` and a
 collapse lower it.
+
+### While voice owns the chat no gesture is captured, one under way is let go, and the drag resizes again once voice ends
+
+Voice owns the chat while a conversation runs, waits for review or
+retires, and while dictation records, transcribes or holds its clip,
+however it was started. The shell reports when voice takes the chat and
+when it gives it back. Taking it lets go of a gesture under way without
+landing it, so the sheet, the voice controls and the absent composer stay
+where they are through a drag or a swipe; once voice ends the same drag
+resizes the chat.
+
+```quint
+pure def canVoiceStarts(d: Dock): bool = not(d.voice)
+pure def voiceStarts(d: Dock): Dock = { ...(if (d.drag.active) cancelDrag(d) else d), voice: true }
+pure def canVoiceEnds(d: Dock): bool = d.voice
+pure def voiceEnds(d: Dock): Dock = { ...d, voice: false }
+pure def stepVoiceLetsGoOfAGestureWithoutLandingIt(before: Dock, via: str, after: Dock): bool =
+  via == "voiceStarts" implies (after.chat == before.chat and after.view == before.view and not(after.drag.active) and after.effects == before.effects)
+pure def sometimesVoiceHoldsTheSheet(d: Dock): bool = d.voice and d.chat == Sheet
+```
 
 ## Story: Size the sheet to what it shows
 

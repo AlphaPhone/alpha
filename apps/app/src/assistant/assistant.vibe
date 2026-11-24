@@ -1,4 +1,4 @@
-// spec/assistant/index.md, "Something handed to the assistant is only ever a draft the owner sends"; spec/assistant/index.md, "Back closes what the assistant opened before it leaves the assistant"; spec/assistant/dock.md, "Story: Open and size the chat with one gesture"; spec/assistant/dock.md, "Home keeps its bar, and a dragged height lasts only while the chat it was dragged in is open"; spec/assistant/entry.md, "An invocation opens the chat once, and starts voice only when it came by voice, unlocked, fresh and for this account"; spec/assistant/conversation.md, "A changed screen context bumps the revision and drops every proposal; a private screen stops everything"; spec/assistant/search.md, "A search answer shows only while search is open and its owner scope is the one that asked"; spec/assistant/recovery.md, "Restart is offered only while the resident is refused and holds a reviewable recovery, once per tap"
+// spec/assistant/index.md, "Something handed to the assistant is only ever a draft the owner sends"; spec/assistant/index.md, "Back closes what the assistant opened before it leaves the assistant"; spec/assistant/dock.md, "Story: Open and size the chat with one gesture"; spec/assistant/dock.md, "Home keeps its bar, and a dragged height lasts only while the chat it was dragged in is open"; spec/assistant/dock.md, "While voice owns the chat no gesture is captured, one under way is let go, and the drag resizes again once voice ends"; spec/assistant/entry.md, "An invocation opens the chat once, and starts voice only when it came by voice, unlocked, fresh and for this account"; spec/assistant/conversation.md, "A changed screen context bumps the revision and drops every proposal; a private screen stops everything"; spec/assistant/search.md, "A search answer shows only while search is open and its owner scope is the one that asked"; spec/assistant/recovery.md, "Restart is offered only while the resident is refused and holds a reviewable recovery, once per tap"
 import { Machine as DockMachine, swallowWindow, type Dock, type Surface } from "../../gen/assistant__dock.effect.vibe"
 import type { Detent } from "../../gen/assistant__detents.ts"
 import { chatOf, restOf, type Nav } from "../../gen/shell__navigation.effect.vibe"
@@ -35,6 +35,8 @@ export service Assistant {
   show(detent: Detent): void!!
   /** The owner pressed Talk: ask the voice area for a conversation. */
   requestVoice(): void!!
+  /** Voice took the chat (a conversation or dictation, however started) or gave it back; while it holds it no drag is captured. */
+  voiceOwnsChat(owned: boolean): void!!
   /** Follow Android's assist invocations, and keep the dock, the conversation and search in step with the shell, for as long as it runs. */
   follow(): void!!
   /** Back while the assistant is in front: close search, then drop a reply or edit aim; false when Back is the shell's. */
@@ -119,7 +121,6 @@ export const assistantLayer = Layer.effect(Assistant, effect {
     let context: string | undefined
     let owner: string | undefined
     let agentKey = ""
-    let voiced = false
     let locked = false
     let placed: Detent | undefined
     let routed: string | undefined
@@ -135,8 +136,6 @@ export const assistantLayer = Layer.effect(Assistant, effect {
       const view = surfaceOf(nav)
       const before = try dock.get()
       if (before.view !== view && !before.drag.active) try quiet(dock.send({ type: "navigate", view }))
-      if (voiced && !nav.voice && (try dock.get()).voice) try quiet(dock.send({ type: "voiceEnds" }))
-      voiced = nav.voice
       const shellChat = chatOf(nav)
       const now = try dock.get()
       if (placed !== undefined && shellChat !== placed && settledDock(now) && now.chat !== shellChat) try show(shellChat)
@@ -225,6 +224,10 @@ export const assistantLayer = Layer.effect(Assistant, effect {
     },
     show,
     requestVoice: () => map(PubSub.publish(voice, undefined), () => undefined),
+    voiceOwnsChat: (owned: boolean) => effect {
+      if (owned === (try dock.get()).voice) return
+      try quiet(dock.send(owned ? { type: "voiceStarts" } : { type: "voiceEnds" }))
+    },
     commsAsks: Stream.fromPubSub(asks),
     askComms,
     back: () => effect {
