@@ -29,9 +29,10 @@ module held {
   export function client(): CalendarClient {
     return (made ??= calendarClient())
   }
-  /** @throws {never} */
+  let plugin: Creations | undefined
+  /** The same plugin under the calls its typed client does not name yet, registered once like the client. @throws {never} */
   export function creations(): Creations {
-    return calendarPlugin() as unknown as Creations
+    return (plugin ??= calendarPlugin() as unknown as Creations)
   }
 }
 import { type Creations, client, creations, untilElapsed } from held
