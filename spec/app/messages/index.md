@@ -333,6 +333,25 @@ pure def canOpenThread(s: Messages, thread: int): bool = showingPane(s, Threads)
 pure def openThread(s: Messages, thread: int): Moved = openConversation(thread, s)
 ```
 
+### A message notification opens its exact conversation once access is available
+
+The phone provides the thread identifier after an owner taps its private
+notification. Alpha opens that thread even when the list is empty or
+filtered. It keeps an active delete confirmation and only acknowledges the
+notification after the conversation opens.
+
+```quint
+pure def canOpenNotice(s: Messages, thread: int): bool =
+  s.front and readable(s) and thread > 0 and not(s.confirming) and not(removing(s))
+
+pure def openNotice(s: Messages, thread: int): Moved =
+  if (s.thread == thread) { state: s, out: List() } else openConversation(thread, s)
+
+pure def stepNoticeOpensItsConversation(before: Messages, via: str, after: Messages): bool =
+  via == "openNotice" implies (after.pane == Conversation and after.thread > 0 and readable(after)
+    and not(before.confirming) and not(removing(before)))
+```
+
 ### Back returns from a conversation or the picker to the list, and reads it again
 
 ```quint
@@ -463,7 +482,10 @@ pure def confirmDelete(s: Messages, clear: bool): Moved =
 
 ### The phone's answer ends the removal it names, and the conversation is read again unless it was refused
 
-When Alpha stops waiting for the answer, the outcome is unknown.
+Android can queue the exact message for deletion. Alpha offers Undo for
+that receipt while the Android window is open. The same receipt confirms
+deletion or that the message was kept. When Alpha cannot read a settled
+outcome, the outcome stays unknown.
 
 ```quint
 pure def canRemoved(s: Messages, id: int): bool = A::canConclude(s.removal, id)

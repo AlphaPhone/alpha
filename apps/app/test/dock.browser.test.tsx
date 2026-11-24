@@ -59,7 +59,7 @@ describe("Ask Alpha dock", () => {
   });
 
   // spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/assistant/dock.md, "A press that did not move taps its control once"
-  it("Open control and grabber tap focus Sheet (spec/app/assistant/dock.md, \"Focusing or tapping the composer on the bar opens Ask Alpha as a sheet\")", async () => {
+  it("The dock mark opens and focuses Sheet on click and touch (spec/app/assistant/dock.md, \"Focusing or tapping the composer on the bar opens Ask Alpha as a sheet\")", async () => {
     await page.viewport(390, 844);
     const { runtime } = await mountDock({ view: "Browser" });
 
@@ -71,7 +71,7 @@ describe("Ask Alpha dock", () => {
     await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Bar"))));
     (document.activeElement as HTMLElement | null)?.blur();
 
-    const grabber = document.querySelector<HTMLButtonElement>("button[aria-label='Resize chat']");
+    const grabber = document.querySelector<HTMLButtonElement>("button[aria-label='Open conversation']");
     expect(grabber).not.toBeNull();
     grabber?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientY: 760, pointerId: 2, pointerType: "touch" }));
     grabber?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientY: 760, pointerId: 2, pointerType: "touch" }));

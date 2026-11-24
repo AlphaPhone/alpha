@@ -6,12 +6,20 @@ import type { Effect as Out, Event } from "../../gen/app__inbox__message.effect.
 import * as Marking from "../../gen/app__inbox__marking.effect.vibe"
 import type { Effect as MarkOut, Event as MarkEvent } from "../../gen/app__inbox__marking.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { Machine as Preferences } from "../../gen/app__settings__preferences.effect.vibe"
 import type { Actor } from "../../gen/app__inbox__access.ts"
+import { reviewMailContext, MailContextRefused } from "@elizaos/plugin-inbox/mailbox"
+import { Agent } from "../platform/agent.vibe"
+import { MailQuestions, sourceOf, type MailQuestion } from "./mail-context.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
-import { type Job, answer, contained, following, reacting, run, started, together } from "../runtime/reactor.vibe"
-import { Mail, body, faultOf, relabel, revisionOf } from "./gmail.vibe"
-import { linksOf } from "./links.ts"
+import { type Job, answer, contained, following, hearing, reacting, run, started, stream, together } from "../runtime/reactor.vibe"
+import { Mail, asked, body, faultOf, relabel, revisionOf } from "./gmail.vibe"
+import { backFromDraft } from "./composer.vibe"
+import { ownerChanges } from "./mailbox.vibe"
+import { prepareMessage } from "./mail-html.ts"
+import { ThreadPages, threadFault, threadMessage, threadPages } from "./thread.vibe"
+import { type AttachmentPreviews, attachmentPreviews, forgetPreview, handleAttachment } from "./attachment.vibe"
 
 module web {
   /** Open `url` away from Alpha's page, with nothing of the page handed to it. @throws {never} */
@@ -21,26 +29,41 @@ module web {
 }
 import { visit } from web
 
+const failedRead = (ticket: number, access: ReturnType<typeof accessOf>, fault: Message.Fault): Event =>
+  ({ type: "loaded", ticket, access, ok: false, fault, revision: 0, message: 0, position: 0, thread: 0 })
+
 // spec/app/inbox/message.md, "Only the newest read's answer is shown, while its account may still be read; a read that fails says why"
-effect function read(ticket: number, account: number, message: number): Event!!(Cloud | Mail | Inbox.Machine | Marking.Machine) {
+effect function read(ticket: number, account: number, message: number, position: number, newest: boolean): (Event | undefined)!!(Cloud | Mail | Inbox.Machine | Message.Machine | ThreadPages) {
   const ledger = try Mail
-  const list = try (try Inbox.Machine).get()
-  const access = accessOf(list, account)
-  return effect {
-    const found = try body(account, message)
-    ledger.read(ticket, found)
-    // spec/app/inbox/marking.md, "Opening an unread message marks it read once in a session, silently, and never again, even when it is not known to have worked"
-    if (found.message.isUnread) try ignore((try Marking.Machine).send({ type: "openedUnread", access, account, message }, "World"))
-    return { type: "loaded", ticket, access, ok: true, fault: "Fine", revision: revisionOf(found.message) }
-  } catch (cause) => ({ type: "loaded", ticket, access, ok: false, fault: faultOf(cause), revision: 0 })
+  const list = try Inbox.Machine
+  const view = try Message.Machine
+  const generation = ledger.generation(account)
+  const current = (state: Message.MessageView) =>
+    state.account === account && state.message === message && state.body.ticket === ticket && state.body.status === "Loading"
+  if (!current(try view.get()) || (try list.get()).selected.account !== account) return undefined
+  const anchor = ledger.card(message)
+  const found = anchor === undefined
+    ? (Effect.map(body(account, message), (loaded) => ({ body: loaded, position: 0, thread: 1 })) catch (cause) => faultOf(cause))
+    : (threadMessage(account, anchor, position, newest) catch (cause) => threadFault(cause))
+  const mailbox = try list.get()
+  if (!current(try view.get()) || mailbox.selected.account !== account || ledger.generation(account) !== generation) return undefined
+  const access = accessOf(mailbox, account)
+  if (typeof found === "string") return failedRead(ticket, access, found)
+  const number = try ledger.remember(account, found.body.message)
+  ledger.read(ticket, found.body)
+  return {
+    type: "loaded", ticket, access, ok: true, fault: "Fine", revision: revisionOf(found.body.message),
+    message: number, position: found.position, thread: found.thread,
+  }
 }
 
 // spec/app/inbox/message.md, "Only an https link without credentials in it can be reviewed and opened; any other link stays text"
-const opened = (link: number) => effect {
+const opened = (message: number, link: number) => effect {
   const state = try (try Message.Machine).get()
+  if (state.message !== message || state.body.status !== "Loaded") return
   const found = (try Mail).body(state.body.ticket)
-  const url = found === undefined ? undefined : linksOf(found.bodyText).at(link - 1)?.url
-  if (url !== undefined) visit(url)
+  const destination = found === undefined ? undefined : prepareMessage(found).links.at(link - 1)
+  if (destination?.secure) visit(destination.url)
 }
 
 // spec/app/inbox/message.md, "Only the newest read's answer is shown, while its account may still be read; a read that fails says why": a message no longer in Gmail has the list read again.
@@ -49,24 +72,73 @@ const refreshed = (account: number) => effect {
   if ((try list.get()).selected.account === account) try ignore(list.send({ type: "refresh" }))
 }
 
-function carry(fx: Out): Job<Event, Cloud | Mail | Inbox.Machine | Marking.Machine | Message.Machine | Shell, []> {
+// spec/app/inbox/message.md, "Ask Alpha is handed the message on screen, once it has loaded, named by its account, number and history revision"
+const questionAbout = (account: number, message: number, revision: number) => effect {
+  const view = try Message.Machine
+  const list = try Inbox.Machine
+  const ledger = try Mail
+  const cloud = try Cloud
+  const agent = try Agent
+  const shell = try Shell
+  const questions = try MailQuestions
+  const initial = try view.get()
+  const generation = ledger.generation(account)
+  const grant = ledger.grant(account)
+  const live = effect {
+    const shown = try view.get()
+    const mailbox = try list.get()
+    const onScreen = (try shell.get()).trail.at(-1) === "Inbox"
+    return onScreen && shown.account === account && shown.message === message && shown.revision === revision
+      && shown.body.status === "Loaded" && shown.body.ticket === initial.body.ticket && ledger.generation(account) === generation
+      && mailbox.selected.account === account && accessOf(mailbox, account).grant.read
+  }
+  const destination = effect {
+    const owner = try asked((signal) => cloud.client.account({ signal }))
+    const status = try agent.life.status()
+    if (!status.available) throw new MailContextRefused({ reason: "unselected" })
+    return { ownerId: owner.id, agentId: "alpha-resident", sessionId: String(status.epoch), origin: "alpha-resident" }
+  }
+  const opened = effect {
+    const cached = ledger.body(initial.body.ticket)
+    if (!grant || !cached || !(try live)) throw new MailContextRefused({ reason: "changed" })
+    const target = try destination
+    const review = try reviewMailContext(sourceOf(grant, cached), target)
+    if (!(try live)) throw new MailContextRefused({ reason: "changed" })
+    const current: MailQuestion["current"] = effect () => {
+      if (!(try live)) throw new MailContextRefused({ reason: "changed" })
+      const target = try destination
+      const fetched = try Effect.provideService(Effect.provideService(body(account, message), Cloud, cloud), Mail, ledger)
+      if (!(try live)) throw new MailContextRefused({ reason: "changed" })
+      return { source: sourceOf(grant, fetched), destination: target }
+    }
+    questions.show({ question: { review, current } })
+  } catch (cause) => questions.show({ failure: cause instanceof MailContextRefused && cause.reason === "too-large" ? "tooLarge" : "changed" })
+  try opened
+  try ignore(shell.send({ type: "raise", detent: "Sheet" }))
+}
+
+function carry(fx: Out): Job<Event, Cloud | Agent | MailQuestions | Mail | Inbox.Machine | Marking.Machine | Message.Machine | Shell | ThreadPages | AttachmentPreviews, []> {
   return match (fx) {
-    when { tag: "ReadMessage", let ticket, let account, let message }:
-      answer("read", read(ticket, account, message), { type: "loaded", ticket, access: { account, grant: { read: true, send: false, modify: false } }, ok: false, fault: "Unreachable", revision: 0 });
+    when { tag: "ReadMessage", let ticket, let account, let message, let position, let newest }:
+      stream("read", Stream.filter(Stream.fromEffect(read(ticket, account, message, position, newest)), (event): event is Event => event !== undefined),
+        failedRead(ticket, { account, grant: { read: true, send: false, modify: false } }, "Unreachable"));
     when { tag: "CheckAccounts" }: run("check", effect { try ignore((try Inbox.Machine).send({ type: "checkAccess" })) });
     when { tag: "RefreshList", let account }: run("refresh", refreshed(account));
-    when { tag: "OpenLink", let link }: run("link", opened(link));
-    // spec/app/inbox/message.md, "An attachment use ends as its own answer says, or unknown": eliza's cloud client has no call for an attachment's bytes, so a use is refused, and the owner told so.
-    when { tag: "HandleAttachment", let attempt }: answer(`attachment ${attempt}`, succeed<Event>({ type: "attachmentHandled", attempt, done: false, known: true }), { type: "attachmentHandled", attempt, done: false, known: true });
+    when { tag: "OpenLink", let message, let link }: run("link", opened(message, link));
+    // spec/app/inbox/message.md, "An attachment use ends as its own answer says, or unknown"
+    when { tag: "HandleAttachment", let attempt, let account, let message, let attachment, let handling }:
+      answer(`attachment ${attempt}`, handleAttachment({ tag: "HandleAttachment", attempt, account, message, attachment, handling }), { type: "attachmentHandled", attempt, done: false, known: false });
     // spec/app/inbox/message.md, "Ask Alpha is handed the message on screen, once it has loaded, named by its account, number and history revision"
-    when { tag: "AskAlpha" }: run("ask", effect { try ignore((try Shell).send({ type: "raise", detent: "Sheet" })) });
+    when { tag: "AskAlpha", let account, let message, let revision }: run("ask", questionAbout(account, message, revision));
   }
 }
 
 // spec/app/inbox/marking.md, "The answer to the mark in flight ends it; a reply that does not match the mark asked, or none, leaves it unconfirmed, and the owner is told to refresh before trying again"
 effect function marked(attempt: number, account: number, message: number, unread: boolean): MarkEvent!!(Attempts | Cloud | Mail) {
+  const ledger = try Mail
+  const generation = ledger.generation(account)
   const ended = try relabel(attempt, account, message, unread ? "mark-unread" : "mark-read")
-  if (ended.done) try (try Mail).relabelled(message, unread)
+  if (ended.done && ledger.generation(account) === generation) try ledger.relabelled(message, unread)
   return { type: "marked", attempt, done: ended.done, matches: ended.known, expired: ended.expired }
 }
 
@@ -79,15 +151,6 @@ function carryMark(fx: MarkOut): Job<MarkEvent, Cloud | Mail | Inbox.Machine, [b
   }
 }
 
-/** Each fact `fact` reads from the list after the first, as an event of `target`: what changed while the area was open. */
-function afterLaunch<I, A, Ev, By extends ReadonlyArray<unknown>>(fact: (list: Inbox.Mailbox) => A, target: Context.Key<I, { send(event: Ev, ...by: By): unknown!unknown }>, told: (fact: A) => Ev, ...by: By) {
-  return started(effect {
-    const list = try Inbox.Machine
-    const to = try target
-    try Stream.runForEach(Stream.drop(Stream.changes(Stream.map(list.changes, fact)), 1), (value) => contained(to.send(told(value), ...by), "following the list"))
-  }, "following the list")
-}
-
 // spec/app/inbox/message.md, "Closing the message, losing read access to its account, a new cloud session, or a restart leaves nothing open and no read that could still answer"
 const access = started(effect {
   const list = try Inbox.Machine
@@ -97,27 +160,49 @@ const access = started(effect {
     if (shown.account === 0) return
     try contained(view.send({ type: "accessChanged", access }), "the grant of the message open")
     // spec/app/inbox/message.md, "While the list shows its saved copy and access is being checked, a message saved on the phone opens from there, marked as saved"
-    if (known && shown.fromPhone) try contained(view.send({ type: "accessKnown", access, remote: false }), "access known")
+    if (known && shown.fromPhone) {
+      const remote = (try (try Preferences).get()).images
+      try contained(view.send({ type: "accessKnown", access, remote }), "access known")
+    }
   })
 }, "the grant of the message open")
 
 const sessions = together(
-  afterLaunch((list) => list.signedIn, Message.Machine, (): Event => ({ type: "sessionChanged" })),
-  afterLaunch((list) => list.signedIn, Marking.Machine, (): MarkEvent => ({ type: "sessionChanged" }), "World"),
+  hearing(ownerChanges, Message.Machine, (): Event => ({ type: "sessionChanged" })),
+  hearing(ownerChanges, Marking.Machine, (): MarkEvent => ({ type: "sessionChanged" }), "World"),
 )
 
 // spec/app/inbox/marking.md, "A list read afresh lets unconfirmed marks be tried again, and the owner can put the message away"
 const afresh = following(Inbox.Machine, (list) => (list.list.status === "Loaded" && !list.saved ? list.list.ticket : 0), Marking.Machine, (ticket): MarkEvent | undefined => (ticket === 0 ? undefined : { type: "refreshed" }), "World")
 
+// spec/app/inbox/marking.md, "Opening an unread message marks it read once in a session, silently, and never again, even when it is not known to have worked"
+const openedUnread = started(effect {
+  const list = try Inbox.Machine
+  const view = try Message.Machine
+  const ledger = try Mail
+  const marks = try Marking.Machine
+  const loaded = Stream.filter(view.changes, (state) => state.body.status === "Loaded")
+  try Stream.runForEach(Stream.changesWith(loaded, (a, b) => a.body.ticket === b.body.ticket), effect (state) => {
+    const mailbox = try list.get()
+    const current = try view.get()
+    if (current.body.ticket !== state.body.ticket || current.body.status !== "Loaded" || mailbox.selected.account !== state.account ||
+      ledger.body(state.body.ticket)?.message.isUnread !== true) return
+    try ignore(marks.send({
+      type: "openedUnread", access: accessOf(mailbox, state.account), account: state.account, message: state.message,
+    }, "World"))
+  })
+}, "marking the message on screen")
+
 const viewing = reacting(Message, { keep: 1, open: [{ type: "restart" }], carry })
 const marking = reacting(Marking, { keep: 1, open: [{ type: "restart" }, "World"], carry: carryMark })
 
 /** A message opened from the list, and its marks: kept across restarts, read through the owner's cloud, and told what the list knows of access. */
-export const reading = together(viewing, marking, access, sessions, afresh)
+export const reading = together(viewing, marking, access, sessions, afresh, openedUnread, threadPages, attachmentPreviews, forgetPreview)
 
 // spec/app/inbox/message.md, "Closing the message, losing read access to its account, a new cloud session, or a restart leaves nothing open and no read that could still answer"
 /** Back from a message: a review open closes first, then the message, and the list is Inbox's own last step. */
 export const back = effect {
+  if (try backFromDraft) return true
   const view = try Message.Machine
   const state = try view.get()
   if (state.link !== 0) return Exit.isSuccess(try exit(view.send({ type: "closeLink" })))

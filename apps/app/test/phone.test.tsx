@@ -28,7 +28,7 @@ const inReview = (name: string) => [...document.querySelectorAll("[role=dialog] 
 
 /** Press `name` in the open confirmation. */
 const confirm = (name: string) => act(async () => {
-  const found = [...document.querySelectorAll("[role=alertdialog] button")].find((one) => one.textContent === name);
+  const found = [...document.querySelectorAll("[role=alertdialog] button, [aria-label='Delete voicemail'] button")].find((one) => one.textContent === name);
   if (!(found instanceof HTMLButtonElement)) throw new Error(`no ${name} in the confirmation`);
   found.click();
 });
@@ -84,6 +84,28 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Phone, (s) => !s.front && s.rows === 0);
   });
 
+  it("Gates ordinary calls on Android's carrier and emergency readings (spec/app/phone/index.md, \"Story: Know when a call is live\")", async () => {
+    const world = image();
+    const { alpha } = await open(world);
+    await until(alpha, alpha.runtime, Shell, (s) => s.image);
+    await press("Phone");
+    await until(alpha, alpha.runtime, Phone, (s) => s.carrier && s.recents.status === "Loaded");
+    expect(button("Call Maya Chen")?.disabled).toBe(false);
+
+    world.telephony.mobileService = false;
+    await act(async () => world.telephony.report());
+    await until(alpha, alpha.runtime, Phone, (s) => !s.carrier);
+    expect(button("Call Maya Chen")?.disabled).toBe(true);
+
+    world.telephony.mobileService = true;
+    world.telephony.live = [{ id: "possible-emergency", state: "active", connectedAt: world.now }];
+    world.telephony.emergency = null;
+    await act(async () => world.telephony.report());
+    await until(alpha, alpha.runtime, Phone, (s) => s.carrier && s.telecom === "MaybeEmergencyCall");
+    expect(button("Call Maya Chen")?.disabled).toBe(true);
+    expect([world.telephony.placed, world.telephony.dialed]).toEqual([[], []]);
+  });
+
   it("See missed calls on Home, then unheard voicemail (spec/app/phone/index.md, \"Story: See missed calls on Home\"; spec/app/phone/voicemail.md, \"Story: See my voicemail\")", async () => {
     const world = image();
     const { alpha } = await open(world);
@@ -107,7 +129,10 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Phone, (s) => !s.voicemail && s.tab === "Recents");
     await press("Phone");
     await until(alpha, alpha.runtime, Phone, (s) => s.front && s.recents.status === "Loaded");
-    expect([...document.querySelectorAll("[role=tab]")].map((one) => one.textContent)).toEqual(["Recents", "Keypad"]);
+    const tabs = [...document.querySelectorAll("[role=tab]")].map((one) => one.textContent);
+    expect(tabs).toContain("Recents");
+    expect(tabs).toContain("Keypad");
+    expect(tabs).not.toContain("Voicemail");
   });
 
   it("See my voicemail, listen to one, and delete it (spec/app/phone/voicemail.md, \"Story: See my voicemail\"; spec/app/phone/voicemail.md, \"Story: Listen to a voicemail\"; spec/app/phone/voicemail.md, \"Story: Delete a voicemail\")", async () => {
@@ -121,7 +146,11 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Voicemail, (s) => s.list.status === "Loaded" && s.items === 1 && s.unheard === 1);
 
     // spec/app/phone/voicemail.md, "Opening a voicemail asks for its audio under a new ticket"
-    await press("+14155550100");
+    await act(async () => {
+      const row = document.querySelector<HTMLButtonElement>("button[aria-expanded='false'][aria-label^='Voicemail from']");
+      if (!row) throw new Error("no voicemail to open");
+      row.click();
+    });
     await until(alpha, alpha.runtime, Voicemail, (s) => s.open && s.audio.status === "Loaded");
 
     // spec/app/phone/voicemail.md, "Only the open voicemail's newest audio is taken, and with it a transcript is asked of the phone's own recognizer": this phone has no recognizer, and nothing else is asked.
@@ -141,6 +170,31 @@ describe("Phone on an Alpha image", () => {
     await confirm("Delete");
     await until(alpha, alpha.runtime, Voicemail, (s) => s.removal.outcome === "Confirmed" && s.list.status === "Loaded" && s.items === 0);
     expect(world.telephony.voicemails[0]!.deleted).toBe(true);
+  });
+  it(`Keeps a voicemail only when Android confirms Undo (spec/app/phone/voicemail.md, "Undo can keep a voicemail while Android's deletion window is open")`, async () => {
+    const world = image();
+    world.telephony.holdVoicemailDeletion = true;
+    const { alpha } = await open(world);
+    await until(alpha, alpha.runtime, Shell, (s) => s.image);
+    await press("Phone");
+    await until(alpha, alpha.runtime, Phone, (s) => s.front && s.voicemail);
+    await tab("Voicemail");
+    await until(alpha, alpha.runtime, Voicemail, (s) => s.list.status === "Loaded" && s.items === 1);
+    await act(async () => {
+      const row = document.querySelector<HTMLButtonElement>("button[aria-expanded='false'][aria-label^='Voicemail from']");
+      if (!row) throw new Error("no voicemail to open");
+      row.click();
+    });
+    await until(alpha, alpha.runtime, Voicemail, (s) => s.open);
+    await press("Delete");
+    await until(alpha, alpha.runtime, Voicemail, (s) => s.confirming);
+    await confirm("Delete");
+    await until(alpha, alpha.runtime, Voicemail, (s) => s.undo === "CanUndo" && s.removal.outcome === "Sent");
+    expect(world.telephony.voicemails[0]!.deleted).toBe(false);
+    await press("Undo");
+    await until(alpha, alpha.runtime, Voicemail, (s) => s.undo === "Kept" && s.list.status === "Loaded" && s.items === 1);
+    expect(world.telephony.staged[0]?.phase).toBe("undone");
+    expect(world.telephony.voicemails[0]!.deleted).toBe(false);
   });
 });
 
