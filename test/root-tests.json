@@ -49,6 +49,7 @@
   "test/gradle-verification.test.mjs",
   "test/host-test-json.test.mjs",
   "test/instrumentation-outcome-status.test.mjs",
+  "test/licenses.test.mjs",
   "test/manifest-label-strings.test.mjs",
   "test/maps-dataset-manifest.test.mjs",
   "test/native-media-fork.test.mjs",
@@ -70,6 +71,8 @@
   "test/release-signing.test.mjs",
   "test/renderer-recovery-budget.test.mjs",
   "test/resident-android-json-compile.test.mjs",
+  "test/runtime-licenses.test.mjs",
+  "test/sbom.test.mjs",
   "test/shared-ui-overrides.test.mjs",
   "test/sign-release-apks.test.mjs",
   "test/update-apk-admission.test.mjs",
@@ -229,15 +232,6 @@
    ],
    "reason": "They need the harness and image scripts that are still to be rewritten onto @elizaos/os/image (removed campaign scripts, upstream releasetools fixtures, prepare-local-agent.ts).",
    "movedTo": "Not moved yet: the scripts/os-ported and harness rewrite (docs/vibestack-open-items.md, Tooling)."
-  },
-  {
-   "files": [
-    "test/licenses.test.mjs",
-    "test/runtime-licenses.test.mjs",
-    "test/sbom.test.mjs"
-   ],
-   "reason": "They read bun.lock and the legacy bundle manifests; the generator now reads pnpm-lock.yaml and upstream's manifest.json.",
-   "movedTo": "Not moved yet: port the notice and SBOM tests to pnpm-lock.yaml (docs/vibestack-open-items.md, Tooling)."
   },
   {
    "files": [

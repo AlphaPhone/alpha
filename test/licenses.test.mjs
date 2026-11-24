@@ -3,16 +3,18 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import JSON5 from 'json5';
+import YAML from 'yaml';
 import {
-  ROOT, ALLOWLIST, NO_FONT_LICENCE, UNKNOWN, UNVERIFIED, generate, collectNotices, detectLicenceFromText, mergeLicences, mergeNotices, loadTemplates, packageNotice,
+  ROOT, ALLOWLIST, NO_FONT_LICENCE, UNKNOWN, UNVERIFIED, generate, collectNotices, detectLicenceFromText, mergeLicences, mergeNotices, loadTemplates, packageNotice, productionLockPackages,
 } from '../scripts/generate-licenses.ts';
 import {FLAGS, classifyLicence, licenceFlagLines, licenceFlagRecords, obligationNote} from '../scripts/licence-policy.ts';
 import {releaseBlockers} from '../scripts/release-blockers.ts';
+import {LOCKFILE, SHIPPING_IMPORTER, readPnpmLock} from '../scripts/pnpm-lock.ts';
 
 const fresh = generate(ROOT, {packagedRuntime: false});
-// bun.lock is JSON with trailing commas.
-const lock = JSON5.parse(fs.readFileSync(path.join(ROOT, 'bun.lock'), 'utf8'));
+const lock = YAML.parse(fs.readFileSync(path.join(ROOT, LOCKFILE), 'utf8'));
+/** Where pnpm installed a shipped package for the app importer (its key in the flat lock view). */
+const installedKey = name => productionLockPackages(readPnpmLock(ROOT), ROOT).find(pkg => pkg.name === name).key;
 
 // Policy P-09: a licence never fails generation. Copyleft, unknown, unverified and text-less
 // entries are flagged; only broken input is an error. These checks are source evidence, not legal review.
@@ -171,12 +173,12 @@ test('an item with no recorded reason is still listed and flagged; reason files 
 });
 
 test('a production dependency with a copyleft or unknown licence is listed and flagged, never an error', t => {
-  const dir = scratchRoot(t, {ownNodeModules: true});
+  const dir = scratchRoot(t);
   const before = collectNotices(dir, {packagedRuntime: false}).entries.length;
-  // bun.lock records no licence: the inventory reads the one each installed package declares.
+  // pnpm-lock.yaml records no licence: the inventory reads the one each installed package declares.
   for (const [name, license] of [['react', 'SSPL-1.0'], ['react-dom', 'AGPL-3.0-or-later'], ['scheduler', 'LGPL-3.0-only']]) {
-    const installed = path.join(dir, 'node_modules', name), source = fs.realpathSync(installed);
-    fs.rmSync(installed);
+    const source = fs.realpathSync(path.join(ROOT, installedKey(name))), installed = ownPath(dir, installedKey(name));
+    fs.rmSync(installed, {recursive: true, force: true});
     fs.cpSync(source, installed, {recursive: true});
     const manifest = JSON.parse(fs.readFileSync(path.join(installed, 'package.json'), 'utf8'));
     fs.writeFileSync(path.join(installed, 'package.json'), JSON.stringify({...manifest, license}));
@@ -190,7 +192,7 @@ test('a production dependency with a copyleft or unknown licence is listed and f
   // The installed file is MIT text, so the text of the newly declared licence is added from licenses/.
   assert.deepEqual([entry('react-dom').flags, entry('react-dom').textSource], [['copyleft-strong', 'network-copyleft', 'licence-text-missing-from-package'], 'package-and-spdx-canonical']);
   assert.match(entry('react-dom').text, /MIT License[\s\S]*GNU AFFERO GENERAL PUBLIC LICENSE/);
-  const repository = JSON.parse(fs.readFileSync(path.join(ROOT, 'node_modules/react-dom/package.json'), 'utf8')).repository.url.replace(/\.git$/, '');
+  const repository = JSON.parse(fs.readFileSync(path.join(ROOT, installedKey('react-dom'), 'package.json'), 'utf8')).repository.url.replace(/\.git$/, '');
   assert.ok(entry('react-dom').obligations[0].note.includes(`Corresponding source: ${entry('react-dom').source} (repository: ${repository}).`), entry('react-dom').obligations[0].note);
   assert.match(entry('react-dom').source, /react-dom-\d+\.\d+\.\d+\.tgz$/, 'the source is the package at its exact version');
   assert.match(entry('react-dom').obligations[1].note, /network use/);
@@ -207,20 +209,22 @@ test('a production dependency with a copyleft or unknown licence is listed and f
 });
 
 test('broken input still fails: a corrupted or missing package manifest is an error, not a flag', t => {
-  const dir = scratchRoot(t, {ownNodeModules: true});
+  const dir = scratchRoot(t);
   const altered = structuredClone(lock);
-  // Locked production dependencies of the root manifest: [name@version, registry, manifest, integrity].
+  // Locked production dependencies of the shipping importer: the importer edge, the package and its snapshot.
   for (const [name, version] of [['broken-manifest', '1.0.0'], ['not-installed', '2.0.0']]) {
-    altered.workspaces[''].dependencies[name] = version;
-    altered.packages[name] = [`${name}@${version}`, '', {}, 'sha512-fixture'];
+    altered.importers[SHIPPING_IMPORTER].dependencies[name] = {specifier: version, version};
+    altered.packages[`${name}@${version}`] = {resolution: {integrity: 'sha512-fixture'}};
+    altered.snapshots[`${name}@${version}`] = {};
   }
-  fs.writeFileSync(path.join(dir, 'bun.lock'), JSON.stringify(altered));
-  fs.mkdirSync(path.join(dir, 'node_modules/broken-manifest'));
-  fs.writeFileSync(path.join(dir, 'node_modules/broken-manifest/package.json'), '{"name": "broken-manifest", "version": ');
-  fs.writeFileSync(path.join(dir, 'node_modules/broken-manifest/index.js'), 'module.exports = 1;');
+  fs.writeFileSync(path.join(dir, LOCKFILE), YAML.stringify(altered));
+  const broken = ownPath(dir, 'node_modules/.pnpm/broken-manifest@1.0.0/node_modules/broken-manifest');
+  fs.mkdirSync(broken, {recursive: true});
+  fs.writeFileSync(path.join(broken, 'package.json'), '{"name": "broken-manifest", "version": ');
+  fs.writeFileSync(path.join(broken, 'index.js'), 'module.exports = 1;');
   const result = collectNotices(dir, {packagedRuntime: false});
   assert.ok(result.errors.some(error => /^broken-manifest@1\.0\.0: unreadable or corrupted package\.json/.test(error)), result.errors.join('\n'));
-  assert.ok(result.errors.some(error => error === 'not-installed@2.0.0: not installed at node_modules/not-installed; run bun install --frozen-lockfile'));
+  assert.ok(result.errors.some(error => error === 'not-installed@2.0.0: not installed at node_modules/.pnpm/not-installed@2.0.0/node_modules/not-installed; run pnpm install --frozen-lockfile'), result.errors.join('\n'));
   assert.equal(result.errors.length, 2);
 });
 
@@ -237,28 +241,48 @@ test('Paradee notices preserve the eSpeak license', () => {
   assert.match(espeak.text, /GNU GENERAL PUBLIC LICENSE/);
 });
 
-function scratchRoot(t, {ownNodeModules = false} = {}) {
+/**
+ * Makes rel (under dir) writable without touching the installation: each linked directory on the way is
+ * replaced by a real one whose entries link to the original's. Returns the absolute path, which may not exist.
+ */
+function ownPath(dir, rel) {
+  let current = dir;
+  for (const part of rel.split('/')) {
+    current = path.join(current, part);
+    let stat;
+    try { stat = fs.lstatSync(current); } catch { fs.mkdirSync(current); continue; }
+    if (!stat.isSymbolicLink() || !fs.statSync(current).isDirectory()) continue;
+    const target = fs.realpathSync(current);
+    fs.rmSync(current);
+    fs.mkdirSync(current);
+    for (const name of fs.readdirSync(target)) fs.symlinkSync(path.join(target, name), path.join(current, name));
+  }
+  return current;
+}
+
+function scratchRoot(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-licenses-'));
   t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
   for (const name of ['vendor', 'android']) fs.symlinkSync(path.join(ROOT, name), path.join(dir, name));
-  if (ownNodeModules) {
-    // A writable node_modules whose entries point at the installed packages, so a test can add one.
-    const installed = fs.realpathSync(path.join(ROOT, 'node_modules'));
-    fs.mkdirSync(path.join(dir, 'node_modules'));
-    for (const name of fs.readdirSync(installed)) fs.symlinkSync(path.join(installed, name), path.join(dir, 'node_modules', name));
-  } else fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(dir, 'node_modules'));
+  // A test that changes an installed package first makes its path its own (ownPath); the rest stays linked.
+  fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(dir, 'node_modules'));
   fs.mkdirSync(path.join(dir, 'apps/app'), {recursive: true});
-  fs.symlinkSync(path.join(ROOT, 'apps/app/public'), path.join(dir, 'apps/app/public'));
-  for (const name of ['package.json', 'bun.lock', 'upstream.lock.json', 'app.config.json']) fs.copyFileSync(path.join(ROOT, name), path.join(dir, name));
+  for (const name of ['public', 'node_modules']) fs.symlinkSync(path.join(ROOT, 'apps/app', name), path.join(dir, 'apps/app', name));
+  for (const name of ['package.json', 'apps/app/package.json', LOCKFILE, 'upstream.lock.json', 'app.config.json']) fs.copyFileSync(path.join(ROOT, name), path.join(dir, name));
   fs.cpSync(path.join(ROOT, 'licenses'), path.join(dir, 'licenses'), {recursive: true});
   return dir;
 }
 
-test('the Lucide icon notice comes from the copied icons, not an npm package', () => {
+test('the copied Lucide icons carry their own notice; a lucide-react the app installs is a separate npm entry', () => {
   const record = JSON.parse(fs.readFileSync(path.join(ROOT, 'apps/app/public/icons/lucide/source.json'), 'utf8'));
   const lucide = fresh.entries.filter(entry => /lucide/i.test(entry.name));
-  assert.deepEqual(lucide.map(entry => [entry.name, entry.version, entry.license, entry.source]), [[record.package, record.version, 'ISC AND MIT', record.repository]]);
-  assert.match(lucide[0].text, /^ISC License[\s\S]*derived from the Feather project[\s\S]*The MIT License/);
+  const copied = lucide.filter(entry => entry.source === record.repository);
+  assert.deepEqual(copied.map(entry => [entry.name, entry.version, entry.license]), [[record.package, record.version, 'ISC AND MIT']]);
+  assert.match(copied[0].text, /^ISC License[\s\S]*derived from the Feather project[\s\S]*The MIT License/);
+  // The renderer also imports lucide-react (apps/app/package.json): listed from pnpm-lock.yaml like any shipped package.
+  const installed = productionLockPackages(readPnpmLock(ROOT), ROOT).filter(pkg => /lucide/i.test(pkg.name));
+  assert.deepEqual(lucide.filter(entry => !copied.includes(entry)).map(entry => [entry.name, entry.version, entry.source]),
+    installed.map(pkg => [pkg.name, pkg.version, pkg.resolved]));
 });
 
 test('one notice per component and version keeps every licence term, source, text and flag', () => {
