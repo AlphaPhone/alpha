@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "Story: Go where the conversation takes me"
+// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "Story: Go where the conversation takes me"; spec/app/voice/index.md, "A spoken reply says a written date, clock time, range and percentage in words"; spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"
 import { type Context, Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Shell from "../gen/app__shell.effect.vibe";
@@ -100,8 +100,8 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
       () => ({ warm: world.voice.warmSpeechOutputCalls, local: world.voice.localSpeechStatusCalls, live: world.voice.liveCaptureStatusCalls }),
     );
     const afterWarm = await getVoice(runtime);
-    expect([afterWarm.phase, afterWarm.mic, afterWarm.prompting, world.voice.startLiveCaptureCalls, world.ask.cloudWarmCalls]).toEqual([
-      "Idle", "Off", false, 0, 0,
+    expect([afterWarm.phase, afterWarm.mic, afterWarm.prompting, world.voice.startLiveCaptureCalls, world.ask.cloudWarmCalls, world.voice.relayWarmups]).toEqual([
+      "Idle", "Off", false, 0, 0, [],
     ]);
 
     const extraProbe = runtime.runPromise(Effect.flatMap(VoiceBridge, (b) => b.probeStatus(true)));
@@ -135,12 +135,12 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     await sendVoice(runtime, { type: "accountChanged", account: "CloudAccount", key: 1 });
     await sendVoice(runtime, { type: "chooseNetworkSpeech", agree: true });
     await sendVoice(runtime, { type: "returned" });
-    await untilCondition(runtime, () => world.ask.cloudWarmCalls >= 1);
-    expect(world.ask.cloudWarmCalls).toBeGreaterThanOrEqual(1);
+    await untilCondition(runtime, () => world.ask.cloudWarmCalls >= 1 && world.voice.relayWarmups.length >= 1);
+    expect([world.ask.cloudWarmCalls >= 1, [...new Set(world.voice.relayWarmups)], world.voice.startCloudSpeechCalls]).toEqual([true, ["production"], 0]);
   });
 
-  // spec/app/voice/index.md, "Alpha's reply is spoken a sentence at a time, sentences streamed before the reply is complete included, and only for the current turn"
-  it("streams multi-sentence replies incrementally with append chaining and returns to listening", async () => {
+  // spec/app/voice/index.md, "Alpha's reply is spoken a sentence at a time, sentences streamed before the reply is complete included, and only for the current turn"; spec/app/voice/index.md, "A spoken reply says a written date, clock time, range and percentage in words"
+  it("streams multi-sentence replies incrementally with append chaining, says dates and times in words, and returns to listening", async () => {
     const world = { ...scene(), phone: true };
     world.ask.nextReplyChunks = [
       "First sentence is ready. ",
@@ -158,6 +158,39 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
       { text: "Final sentence wraps up.", append: true },
     ]);
     expect(world.voice.engineHeld).toBe(true);
+
+    world.ask.nextReplyChunks = [
+      "Sun, Nov 22:\n",
+      "Dentist Mon, Nov 23 at 3:30 pm, about 5–10 minutes. ",
+      "Then 9:05 to 10:00, and lunch at 12 pm. Battery is at 80%.",
+    ];
+    await speakUtterance(runtime, world, "What is on my calendar");
+    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 2 && s.turn === 3);
+    expect(world.voice.spoken.slice(3).map((one) => one.text)).toEqual([
+      "Sunday, November twenty-second.",
+      "Dentist Monday, November twenty-third at three thirty P M, about 5 to 10 minutes.",
+      "Then nine oh five to ten o'clock, and lunch at noon.",
+      "Battery is at 80 percent.",
+    ]);
+    expect(world.ask.kept.get("c1")?.messages.at(-1)?.text).toBe("Sun, Nov 22:\nDentist Mon, Nov 23 at 3:30 pm, about 5–10 minutes. Then 9:05 to 10:00, and lunch at 12 pm. Battery is at 80%.");
+  });
+
+  // spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"
+  it("keeps listening after another refusal, and ends quietly with nothing spoken when Cloud refuses a spoken turn for spent funds", async () => {
+    const world = { ...scene(), phone: true };
+    const runtime = await startListening(world);
+
+    world.ask.refusal = "provider_issue";
+    await speakUtterance(runtime, world, "What's the weather");
+    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 1 && s.turn === 2);
+
+    world.ask.refusal = "allowance_exhausted";
+    await speakUtterance(runtime, world, "And tomorrow");
+    await until(runtime, Voice.Machine, (s) => s.phase === "Idle");
+    const ended = await getVoice(runtime);
+    expect([ended.phase, ended.mic, ended.failure, ended.engineHeld, ended.sent, world.voice.engineHeld, world.voice.activeMicSession, world.voice.startLiveCaptureCalls, world.voice.spoken]).toEqual([
+      "Idle", "Off", "NoFailure", false, 2, false, undefined, 2, [],
+    ]);
   });
 
   // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"
