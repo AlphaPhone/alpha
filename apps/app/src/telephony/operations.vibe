@@ -4,7 +4,6 @@ import type { Op, Target } from "../../gen/assistant__review.effect.vibe"
 import type { Result } from "../../gen/assistant__receipts.effect.vibe"
 import type { Settled } from "../../gen/telephony__actions.effect.vibe"
 import type { OperationPorts } from "../assistant/review.vibe"
-import { Navigation } from "../shell/navigation.vibe"
 import { AlreadyRan, composeTargetOf, contactNumbersGrounded, contactNumbersOf, grounded, NotATelephonyOperation, telephonyOperationOf, TelephonyActions, type Present, type Refusal, type TelephonyOperation, type TelephonyType } from "./actions.vibe"
 import { TelephonyBridges } from "./bridges.vibe"
 import { TelephonyCalls } from "./ports.vibe"
@@ -184,13 +183,12 @@ const KEPT = 32
 /**
  * The telephony family of the assistant's device executors: each approved operation runs once through TelephonyActions under
  * its operation ID, grounded by the owner's own words, and a view change that shows the outcome follows once its journal entry and
- * receipt settled and the reply carrying it ended.
+ * receipt settled and the turn carrying it delivered its reply and its own view change (TelephonyCalls.show).
  */
 export const operationPorts = effect {
   const actions = try TelephonyActions
   const bridges = try TelephonyBridges
   const calls = try TelephonyCalls
-  const navigation = try Navigation
   const settled = new Map<string, RunOutcome>()
   const shows = new Map<string, Present>()
 
@@ -208,8 +206,7 @@ export const operationPorts = effect {
   }
 
   effect function showAfterReply(call: ExecutorCall, present: Present) {
-    try calls.settled(call)
-    navigation.open(present.app, present.route) catch () => false
+    try calls.show(call, present.app, present.route)
   }
 
   effect function run(operation: unknown, call: ExecutorCall) {

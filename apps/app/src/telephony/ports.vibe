@@ -28,10 +28,14 @@ export interface TelephonyCallFacts {
 export service TelephonyCalls {
   /** What the assistant knows of the call: whether it was reviewed and the owner's own words. */
   of(call: ExecutorCall): TelephonyCallFacts!!
-  /** Ends once the chat request carrying this call's reply has settled, so a view change after it never cuts that reply short (#1433). */
-  settled(call: ExecutorCall): void!!
+  /**
+   * Open `app` at `route`, the view that shows this call's outcome, once the chat turn carrying its reply has delivered that reply and its
+   * own view change: it never cuts the reply short (#1433) nor races the turn's own navigation, and a spoken turn carries its conversation
+   * there rather than reading the move as the owner leaving (#1453). Unprovided, no view is opened.
+   */
+  show(call: ExecutorCall, app: string, route: string): void!!
   static readonly defaultValue = () => ({
     of: () => succeed({ reviewed: false, ownerText: "" }),
-    settled: () => Effect.void,
+    show: () => Effect.void,
   })
 }

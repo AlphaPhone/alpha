@@ -5,7 +5,8 @@ import { Machine as ContactsMachine } from "../../gen/telephony__contacts.effect
 import { Machine as DraftsMachine, slotOf } from "../../gen/telephony__drafts.effect.vibe"
 import { Machine as PhoneMachine } from "../../gen/telephony__phone.effect.vibe"
 import { Assistant } from "../../src/assistant/assistant.vibe"
-import { TelephonyActions } from "../../src/telephony/actions.vibe"
+import { contactChangeLines, TelephonyActions } from "../../src/telephony/actions.vibe"
+import { Machine as ActionsMachine } from "../../gen/telephony__actions.effect.vibe"
 import { barEligibleIn } from "../../src/telephony/front.vibe"
 import { askFromList } from "../../src/telephony/list-ask.vibe"
 import { advertisedOf, classOf, handoffOf } from "../../src/telephony/operations.vibe"
@@ -202,4 +203,44 @@ it("Calls, texts, reads and contact changes are reviewed comms acts, and only re
       advertised: ["sms.send.v1"],
     },
   )
+})
+
+it("A contact change says in words what it renames, removes, adds and keeps (spec/telephony/actions.md, \"A name is looked up on the phone and the owner picks the exact number, even for one match\")", () => {
+  const before = { id: "1", lookup: "k1", version: "a".repeat(64), displayName: "Test Alpha", givenName: "Test", familyName: "Alpha", starred: false, phoneNumbers: [{ number: "+14155550100", type: "mobile" as const }], emailAddresses: [{ address: "ta@example.com", type: "home" as const }] }
+  const draft = (phoneNumbers: { number: string; type: "mobile" | "work" }[], displayName = "Test Alpha") => ({ displayName, phoneNumbers, emailAddresses: [{ address: "TA@example.com", type: "home" as const }] })
+  const next = { number: "4155550101", type: "mobile" as const }
+  const marks = (lines: ReturnType<typeof contactChangeLines>) => lines.map((line) => [line.change, line.text])
+  assert.deepStrictEqual({
+    // A replace names the number that goes as removed, never as if it stays; an address differing only in case is kept.
+    replace: marks(contactChangeLines(before, draft([next]))),
+    // An add keeps the old number however it is written.
+    add: marks(contactChangeLines(before, draft([{ number: "(415) 555-0100", type: "mobile" }, next]))),
+    rename: marks(contactChangeLines(before, draft([before.phoneNumbers[0]!], "T. Alpha"))),
+  }, {
+    replace: [["remove", "+14155550100"], ["add", "4155550101"], ["keep", "TA@example.com"]],
+    add: [["keep", "(415) 555-0100"], ["add", "4155550101"], ["keep", "TA@example.com"]],
+    rename: [["rename", "Test Alpha"], ["keep", "+14155550100"], ["keep", "TA@example.com"]],
+  })
+})
+
+it.live("A new contact's Add anyway review never says more contacts match (spec/telephony/actions.md, \"A name is looked up on the phone and the owner picks the exact number, even for one match\")", () => effect {
+  const fake = fakePhone()
+  provide fake.layer {
+    const actions = try TelephonyActions
+    const machine = try ActionsMachine
+    // Eleven contacts match the new contact's name: a listing would say more than ten match, a twin search does not.
+    try sync(() => {
+      fake.world.contacts = Array.from({ length: 11 }, (_, at) => ({ id: String(at + 1), lookup: `k${at + 1}`, name: `Maya ${at + 1}`, revision: "r1", starred: false, phones: [`41555502${String(at).padStart(2, "0")}`], emails: [] }))
+    })
+    const run = fork actions.run({ type: "contact_create", contact: { displayName: "Maya", phoneNumbers: ["4155550200"], emailAddresses: [] } }, "op-twin", { text: "add Maya 415-555-0200" })
+    try until(machine.changes, (a) => a.ongoing.tag === "Choosing" || a.ongoing.tag === "Finished")
+    const choosing = try machine.get()
+    const review = try actions.review()
+    try actions.dismiss()
+    const done = try Fiber.join(run)
+    try Effect.try(() => assert.deepStrictEqual(
+      { candidates: choosing.ongoing.tag === "Choosing" ? choosing.ongoing.candidates.map((c) => [c.candidateId, c.title]) : [], more: review.more, settled: done.settled },
+      { candidates: [["add-anyway", "Maya 1"]], more: undefined, settled: "OwnerCancelled" },
+    ))
+  }
 })

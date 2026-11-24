@@ -1,9 +1,14 @@
 // spec/telephony/actions.md, "A name is looked up on the phone and the owner picks the exact number, even for one match"; spec/telephony/actions.md, "The owner's Not now, leaving the app or a changed context ends a run that has not dispatched"
 import { MessageSquare, Phone as PhoneIcon, Plus, Save, Trash2, X } from "lucide-react";
 import { candidatesOf, type Actions } from "../../../gen/telephony__actions.ts";
-import type { ReviewDetails } from "../../telephony/actions.vibe";
+import type { ChangeLine, ReviewDetails } from "../../telephony/actions.vibe";
 import { Avatar, Button } from "../components/ui/index.ts";
 import { displayNumber } from "./present.ts";
+
+const CHANGE_WORD: Record<ChangeLine["change"], string> = { rename: "Rename from ", remove: "Remove ", add: "Add ", keep: "Keep " };
+/** How a marked line reads: struck and muted when it goes, strong when it is added. */
+const CHANGE_STYLE: Record<ChangeLine["change"], string> = { rename: "line-through text-muted-foreground", remove: "line-through text-muted-foreground", add: "font-semibold", keep: "" };
+const changeText = (line: ChangeLine) => CHANGE_WORD[line.change] + (line.number ? displayNumber(line.text) : line.text);
 
 export interface ReviewRowsViewProps {
   /** The approved action's run, choosing among candidates. */
@@ -31,7 +36,9 @@ export function ReviewRowsView({ actions, details, onChoose, onDismiss }: Review
       {details.more !== undefined && <p role="note" className="text-sm text-muted-foreground">{`More than ${details.more} contacts match. Only the first ${details.more} are listed.`}</p>}
       {candidatesOf(actions.ongoing).map((c) => {
         const change = details.changes?.[c.candidateId];
-        const lines = change
+        const marked = change?.lines;
+        const lines = marked ? marked.map(changeText)
+          : change
           ? change.after
             ? [...change.after.phoneNumbers.map((p) => displayNumber(p.number)), ...change.after.emailAddresses.map((e) => e.address)]
             : [...change.before.phoneNumbers.map((p) => displayNumber(p.number))].slice(0, 2)
@@ -44,7 +51,11 @@ export function ReviewRowsView({ actions, details, onChoose, onDismiss }: Review
             <Avatar name={c.title} size="sm" />
             <span className="min-w-0 flex-1">
               <span className="block truncate">{kind === "ContactAdd" ? "Add anyway" : c.title}</span>
-              <span className="block truncate text-sm text-muted-foreground">{lines.join(" · ")}</span>
+              {marked
+                ? marked.map((line, at) => (
+                  <span key={at} data-change={line.change} className={`block text-sm tabular-nums [overflow-wrap:anywhere] ${CHANGE_STYLE[line.change]}`}>{changeText(line)}</span>
+                ))
+                : <span className="block truncate text-sm text-muted-foreground">{lines.join(" · ")}</span>}
             </span>
             <Icon aria-hidden className={kind === "ContactRemove" ? "text-destructive" : "text-primary"} />
           </button>

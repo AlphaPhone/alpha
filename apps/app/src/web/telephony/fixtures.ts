@@ -9,6 +9,8 @@ import type { MessageRow, Messages } from "../../../gen/telephony__messages.ts";
 import type { Phone } from "../../../gen/telephony__phone.ts";
 import type { PhoneFacts } from "../../../gen/telephony__phoneInfo.ts";
 import type { Voicemail } from "../../../gen/telephony__voicemail.ts";
+import type { ContactId, ContactVersion } from "@elizaos/os/bridges/contacts";
+import type { ReviewDetails } from "../../telephony/actions.vibe";
 import type { OpenCard } from "../../telephony/comms.vibe";
 import type { UndoView } from "../../telephony/undo.vibe";
 
@@ -68,6 +70,28 @@ export const choosing: Actions = {
     { candidateId: "8:4155550111", title: "Maya Ortiz", number: "4155550111" },
   ] },
   ran: ["op1"], dispatches: 0, refusals: 0,
+};
+
+/** A contact change waiting for the owner's pick: it renames the contact, removes one number and adds another. */
+export const choosingChange: Actions = {
+  ongoing: { tag: "Choosing", runId: "op2", kind: "ContactChange", candidates: [{ candidateId: "1:replace", title: "T. Alpha", number: "1:replace" }] },
+  ran: ["op2"], dispatches: 0, refusals: 0,
+};
+
+/** The before and after of `choosingChange`, as marked lines. */
+export const changeDetails: ReviewDetails = {
+  changes: {
+    "1:replace": {
+      before: { id: "1" as ContactId, lookup: "k1", version: "a".repeat(64) as ContactVersion, displayName: "Test Alpha", givenName: "Test", familyName: "Alpha", starred: false, phoneNumbers: [{ number: "+14155550100", type: "mobile" }], emailAddresses: [{ address: "ta@example.com", type: "home" }] },
+      after: { displayName: "T. Alpha", phoneNumbers: [{ number: "4155550101", type: "mobile" }], emailAddresses: [{ address: "ta@example.com", type: "home" }] },
+      lines: [
+        { change: "rename", text: "Test Alpha" },
+        { change: "remove", text: "+14155550100", number: true },
+        { change: "add", text: "4155550101", number: true },
+        { change: "keep", text: "ta@example.com" },
+      ],
+    },
+  },
 };
 
 /** Home with an unread conversation and a missed call. */

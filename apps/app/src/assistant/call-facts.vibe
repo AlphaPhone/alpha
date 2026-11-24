@@ -1,10 +1,10 @@
 // spec/assistant/context.md, "Every assistant request carries the capabilities this phone advertises of those the agent offered, and none when it offered none"; spec/assistant/review.md, "A comms card is staged on the comms bar when it is listed, and only the stage's open, live proposal is approved, once"; spec/assistant/review.md, "A workflow-bound proposal runs only from its own run's step review, once, and its executor knows the run"; spec/assistant/review.md, "The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote"; spec/browser/pageContext.md, "An exact link of the page the latest message carried keeps its open card, and opens only after the owner approves it"; spec/telephony/actions.md, "A view change that shows the outcome waits for the reply that carries it"
 import type { ExecutorCall } from "@elizaos/agent/client"
-import { Machine as SendsMachine } from "../../gen/assistant__send.effect.vibe"
 import { BrowserCallFacts } from "../browser/ports.vibe"
 import { CameraCallFacts } from "../camera/ports.vibe"
 import type { TelephonyCalls } from "../telephony/ports.vibe"
 import { Composer } from "./composer.vibe"
+import { AssistantHost } from "./host.vibe"
 import { AdvertisedCapabilities } from "./ports.vibe"
 import { CAPABILITIES_HEADER, capabilityHeaders } from "./transport.vibe"
 import { DeviceReview } from "./review.vibe"
@@ -33,16 +33,18 @@ export const browserCallFactsLive = Layer.effect(BrowserCallFacts, effect {
   }
 })
 
-/** The assistant's part of Telephony's calls, for the shell to fill into `TelephonyCalls`: whether a call was reviewed, the owner's words, and the end of the chat request carrying its reply (#1433). */
+/**
+ * The assistant's part of Telephony's calls, for the shell to fill into `TelephonyCalls`: whether a call was reviewed, the owner's words,
+ * and the view that shows its outcome, opened once the turn carrying its reply delivered that reply and its own view change (#1433, #1453).
+ * The view opens through the host, so a spoken turn carries its conversation there.
+ */
 export effect function telephonyCallsFromAssistant() {
   const review = try DeviceReview
-  const sends = try SendsMachine
+  const composer = try Composer
+  const host = try AssistantHost
   const calls: TelephonyCalls.Shape = {
     of: (call: ExecutorCall) => map(review.callFacts(call), (facts) => ({ reviewed: facts.reviewed, ownerText: facts.ownerText })),
-    settled: () => effect {
-      if (!(try sends.get()).typing) return
-      try Stream.runHead(Stream.filter(sends.changes, (state) => !state.typing))
-    },
+    show: (_call: ExecutorCall, app: string, route: string) => composer.afterTurn(host.openView(app, route)),
   }
   return calls
 }

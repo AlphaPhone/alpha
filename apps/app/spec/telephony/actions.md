@@ -91,9 +91,13 @@ Every dialable number of every matching contact is one candidate. No match finis
 A new contact whose name or any of whose numbers is already in Contacts shows that contact as the
 one candidate, "Add anyway"; a change shows each matching contact before and after, with its `set`
 fields replaced (or added beside the existing values) and its explicit `add` and `remove` values
-applied; a change that would leave a contact exactly as it is is never offered. A name is looked
-up in at most ten contacts, reading one more to tell whether more matched; when more did, the review
-says that only the first ten are listed. A removal the
+applied; a change that would leave a contact exactly as it is is never offered. A change's row says
+each line in words, each on its own wrapping line: "Rename from" the old name, then "Remove" every
+number or address it drops (struck through), then "Add" or "Keep" each one the saved contact holds
+(an added one strong). A number is the same line however it is written, so one being removed never
+reads as kept (#1453). A name is looked up in at most ten contacts, reading one more to tell whether
+more matched; when more did, the review says that only the first ten are listed. The search for a
+new contact's twins lists no matches, so its "Add anyway" review never says that. A removal the
 phone stages in its Undo window is the deletion the owner approved, and reads as deleted.
 
 ```quint
@@ -236,9 +240,11 @@ pure def sometimesDraftedInsteadOfSent(a: Actions): bool = kindOf(a.ongoing) == 
 ### A view change that shows the outcome waits for the reply that carries it
 
 Opening the keypad, a conversation with Alpha's draft, or a filtered Contacts list shows what an
-approved or direct action did. It runs at once when no chat request is in flight, and otherwise
-only once the request carrying the action's reply has ended, so it never reads as the owner
-leaving and never stops that reply (#1433). Nothing is dialed or sent by it.
+approved or direct action did. It runs at once when no chat turn is in progress, and otherwise
+only once the turn carrying the action's reply has delivered that reply and its own view change,
+so it never reads as the owner leaving, never stops that reply (#1433) and never races the turn's
+own navigation. It opens through the assistant, so a spoken turn carries its conversation to the
+view rather than ending (#1453). Nothing is dialed or sent by it.
 
 ```quint
 type ReplyState = ReplyInFlight | ReplySettled

@@ -54,6 +54,11 @@ export service Composer {
   replaceRow(row: Row): void!!
   /** The screen under the assistant changed to `contextKey`; `sensitive` when it is one the assistant never observes. */
   screenChanged(contextKey: string, sensitive: boolean): void!!
+  /**
+   * Run `step`, a view change an action of the turn in progress performs, once that turn has delivered its reply and its own view
+   * change, as part of the turn's own navigation; at once when no turn is in progress. A failed or stopped turn runs its steps too (#1453).
+   */
+  afterTurn(step: Effect.Effect<unknown>): void!!
   /** Back while a reply or an edit is aimed: drop the aim; false when nothing was aimed. */
   back(): boolean!!
   /** The open draft as voice dictation fills it: dictated words are appended, and words dictated into an empty draft and sent unchanged time the turn as a voice turn. */
@@ -100,6 +105,8 @@ export const composerLayer = Layer.effect(Composer, effect {
   let acting = 0
   let ownKey: string | undefined
   let dictated: { readonly text: string; readonly binding: string } | undefined
+  /** The view steps each turn in progress holds (`afterTurn`), newest turn last. */
+  let turnSteps: Array<Array<Effect.Effect<unknown>>> = []
   const quiet = <E>(work: Effect.Effect<unknown, E>) => map(work, () => true) catch () => false
 
   effect function rows(change: (rows: readonly Row[]) => readonly Row[]) {
@@ -268,7 +275,22 @@ export const composerLayer = Layer.effect(Composer, effect {
     if (done.status === "delivered") ownKey = (try host.screen()).contextKey
     return done
   }
+  /** The turn's held view steps run in order after its reply and its own view change, counted as its own screen change (#1453). */
+  effect function release(steps: Array<Effect.Effect<unknown>>) {
+    turnSteps = turnSteps.filter((held) => held !== steps)
+    if (steps.length === 0) return
+    acting += 1
+    try ensuring(effect {
+      while (steps.length > 0) try Effect.ignore(steps.shift()!)
+      ownKey = (try host.screen()).contextKey
+    }, sync(() => { acting -= 1 }))
+  }
   effect function send(handed?: string) {
+    const steps: Array<Effect.Effect<unknown>> = []
+    turnSteps.push(steps)
+    return try ensuring(sendTurn(handed), release(steps))
+  }
+  effect function sendTurn(handed?: string) {
     const identity = try host.identity()
     if (identity === undefined) {
       try host.toast(copy.noAgent)
@@ -601,6 +623,14 @@ export const composerLayer = Layer.effect(Composer, effect {
         },
       }
       return target
+    },
+    afterTurn: (step: Effect.Effect<unknown>) => effect {
+      const held = turnSteps[turnSteps.length - 1]
+      if (held !== undefined) {
+        held.push(step)
+        return
+      }
+      try Effect.ignore(step)
     },
     back: () => effect {
       if ((try SubscriptionRef.get(target)) === undefined) return false

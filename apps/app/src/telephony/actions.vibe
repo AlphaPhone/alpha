@@ -61,7 +61,37 @@ export interface ReviewDetails {
   readonly body?: string
   /** More contacts matched than the review lists, which shows this many. */
   readonly more?: number
-  readonly changes?: Readonly<Record<string, { readonly before: ContactDetail; readonly after?: ContactDraft }>>
+  /** Each offered contact before and after; a change also as marked lines (`contactChangeLines`), a removal without them. */
+  readonly changes?: Readonly<Record<string, { readonly before: ContactDetail; readonly after?: ContactDraft; readonly lines?: readonly ChangeLine[] }>>
+}
+
+/** One line of a contact change under review: the name it renames from, or a number or address it removes, adds or keeps. */
+export interface ChangeLine {
+  readonly change: "rename" | "remove" | "add" | "keep"
+  /** The name, number or address as the contact holds it. */
+  readonly text: string
+  /** The text is a phone number, which the review shows formatted. */
+  readonly number?: true
+}
+
+/**
+ * A contact change as marked lines (#1453): "Rename from" the old name when the name changes, then every number and address the change
+ * removes, then those of the saved contact, each added or kept. A number is the same line written either way ("+14155550100",
+ * "(415) 555-0100"), an address without case, so a number being removed never reads as kept.
+ */
+export function contactChangeLines(before: Pick<ContactDetail, "displayName" | "phoneNumbers" | "emailAddresses">, after: ContactDraft): readonly ChangeLine[] {
+  const holds = (draft: ContactDraft, line: ChangeLine) => line.number
+    ? draft.phoneNumbers.some((p) => sameLine(p.number, line.text))
+    : draft.emailAddresses.some((e) => e.address.toLowerCase() === line.text.toLowerCase())
+  const lines = (draft: ContactDraft): ChangeLine[] => [
+    ...draft.phoneNumbers.map((p) => ({ change: "keep" as const, text: p.number, number: true as const })),
+    ...draft.emailAddresses.map((e) => ({ change: "keep" as const, text: e.address })),
+  ]
+  return [
+    ...(after.displayName !== before.displayName ? [{ change: "rename" as const, text: before.displayName }] : []),
+    ...lines(before).filter((line) => !holds(after, line)).map((line) => ({ ...line, change: "remove" as const })),
+    ...lines(after).map((line) => holds(before, line) ? line : { ...line, change: "add" as const }),
+  ]
 }
 
 /**
@@ -239,10 +269,13 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
     if (found) try Ref.update(review, (details) => ({ ...details, more: LOOKUP_LIMIT }))
   }
 
-  /** Every dialable number of every matching contact, one candidate per number; at most `LOOKUP_LIMIT` contacts, one more read to tell whether more matched. */
-  effect function numbersOf(query: string) {
+  /**
+   * Every dialable number of every matching contact, one candidate per number; at most `LOOKUP_LIMIT` contacts, one more read to tell whether more matched.
+   * `listed` is false for a search whose matches the review does not list as such (a new contact's twins), which never says more contacts match.
+   */
+  effect function numbersOf(query: string, listed = true) {
     const page = try bridgeCall("list", (c) => c.contacts.list({ query, limit: LOOKUP_LIMIT + 1, kind: "ExplicitRead" }))
-    try more(page.contacts.length > LOOKUP_LIMIT || page.next != null)
+    if (listed) try more(page.contacts.length > LOOKUP_LIMIT || page.next != null)
     const out: Candidate[] = []
     for (const row of page.contacts.slice(0, LOOKUP_LIMIT)) {
       if ("incomplete" in row) continue
@@ -366,7 +399,7 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
       }
       const twins: Candidate[] = []
       for (const query of [op.contact.displayName, ...op.contact.phoneNumbers]) {
-        for (const found of (numbersOf(query) catch () => [] as Candidate[])) if (!twins.some((t) => t.candidateId === found.candidateId)) twins.push(found)
+        for (const found of (numbersOf(query, false) catch () => [] as Candidate[])) if (!twins.some((t) => t.candidateId === found.candidateId)) twins.push(found)
       }
       const twin = twins.find((t) => op.contact.phoneNumbers.some((n) => sameLine(n, t.number)) || t.title.toLowerCase() === op.contact.displayName.toLowerCase())
       const shown = try choose(runId, twin === undefined ? [] : [{ candidateId: "add-anyway", title: twin.title, number: twin.number }])
@@ -388,7 +421,7 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
         }
       }
       if (options.length === 0) return try finishEarly(runId, result("not-found"), "NothingFound")
-      try Ref.update(review, (details) => ({ ...details, changes: Object.fromEntries(options.map((o) => [o.candidate.candidateId, { before: o.before, after: o.after }])) }))
+      try Ref.update(review, (details) => ({ ...details, changes: Object.fromEntries(options.map((o) => [o.candidate.candidateId, { before: o.before, after: o.after, ...(o.after === undefined ? {} : { lines: contactChangeLines(o.before, o.after) }) }])) }))
       const chosenNumber = try choose(runId, options.map((o) => o.candidate))
       const now = try actions.get()
       if (chosenNumber === undefined || now.ongoing.tag !== "Guarding") return try cancelled(runId, result("cancelled"))

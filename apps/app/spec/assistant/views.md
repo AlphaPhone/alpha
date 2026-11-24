@@ -33,7 +33,11 @@ negative result within 1.5 seconds; a lost result is never sent again. A
 view this phone does not have, a page inside a view it does have, or a
 binding for another renderer is reported in the chat and nothing is
 claimed. A view switch the delivery makes is the assistant's own and does
-not retire the turn's cards.
+not retire the turn's cards. A view an action of the same turn opens (the
+keypad, a filtered Contacts list, a Messages draft) waits until this
+delivery is done, so it never makes the turn's own screen look changed; it
+then opens as part of the turn's own navigation, and a spoken turn carries
+its conversation there (#1453).
 
 ```quint
 type Delivered = NothingPrepared | DeliveredView | UnknownView | UnavailableView

@@ -198,6 +198,48 @@ it.effect("Have my agent open the screen it means (spec/assistant/views.md, \"A 
   }
 })
 
+/** Executors whose every operation opens a view its own action shows, as the keypad does: each applied run hands `step` to `steps`. */
+function viewStepExecutors(runs: { count: number }, steps: { add?: () => void }) {
+  const ports: OperationPorts = {
+    validate: (operation) => operation,
+    execute: async () => { runs.count += 1; return { kind: "applied" } },
+    readBack: async () => ({ kind: "found" }),
+    describe: () => ({ title: "Open the keypad", detail: "", destination: "phone" }),
+    classOf: () => "OpenView",
+    target: () => ({ tag: "NoTarget" }),
+    summarize: () => "The keypad is open.",
+    present: () => steps.add?.(),
+  }
+  return Layer.succeed(DeviceExecutors, { ports })
+}
+
+it.effect("A turn's own view step opens after its reply and its own view change (spec/assistant/views.md, \"A prepared view opens once under a returned claim, only while the screen and the session are the ones the turn was sent from, and every claim is settled once\")", () => effect {
+  const seen: Seen = { calls: [] }
+  const order: string[] = []
+  const runs = { count: 0 }
+  const steps: { add?: () => void } = {}
+  const keypad = wireProposal("k1", digest("k"), { type: "phone_keypad" }, "u1")
+  const script: { turn: { kind: "reply"; text: string }; proposals: unknown[]; actionResults: { action: string; data: unknown }[] } = { turn: { kind: "reply", text: "Here is the keypad." }, proposals: [keypad], actionResults: [] }
+  // Each step says how many of the turn's view results the resident had been sent when it ran.
+  const viewResults = () => seen.calls.filter((call) => call.path === "/api/views/interact-result").length
+  provide assistantOver(fakeResident(seen, script), fakeHost([]), viewStepExecutors(runs, steps), journalNative(new Map())) {
+    const composer = try Composer
+    const views = try AgentViews
+    steps.add = () => { runFork(composer.afterTurn(sync(() => { order.push(`keypad after ${viewResults()} view result`) }))) }
+    const binding = { clientId: views.clientId, requestId: "req-chat", viewId: "chat", viewType: "gui", installationId: "i1" }
+    script.actionResults = [{ action: "OPEN_VIEW", data: { values: { viewId: "chat", label: "chat", navigationPrepared: true, navigationBinding: binding } } }]
+    try composer.edit("Open the keypad")
+    try composer.send()
+    const held = [...order]
+    // With no turn in progress a view step runs at once.
+    try composer.afterTurn(sync(() => { order.push("alone") }))
+    try Effect.try(() => assert.deepStrictEqual(
+      { runs: runs.count, held, after: order },
+      { runs: 1, held: ["keypad after 1 view result"], after: ["keypad after 1 view result", "alone"] },
+    ))
+  }
+})
+
 it.effect("Let my agent press back or reload only on the page I am looking at (spec/assistant/views.md, \"A view command is claimed once, refused under \"Ask before Alpha acts\", run only in Browser, and answered once\")", () => effect {
   const answered = effect function (asks: boolean) {
     const seen: Seen = { calls: [] }
