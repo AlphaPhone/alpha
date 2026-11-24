@@ -25,6 +25,8 @@ export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "o
   unavailable?: "away" | "sensitive";
   /** What waits to go with the message. */
   attachments?: AssistantAttachment[];
+  /** Which files could not be attached or saved with the message. */
+  attachmentNotice?: string;
   /** How many files the upload allows. */
   limit?: number;
   /** The message the next send quotes. */
@@ -65,7 +67,7 @@ const reasons = { away: "Alpha cannot be reached", sensitive: "This screen is pr
  * @model spec/app/assistant/composer.md
  */
 export function AssistantComposer({
-  variant = "sheet", value, onValueChange, closed = false, notice, unavailable, attachments = [], limit = 4, quote, editing = false, lift,
+  variant = "sheet", value, onValueChange, closed = false, notice, unavailable, attachments = [], attachmentNotice, limit = 4, quote, editing = false, lift,
   onSend, onStop, stopping = false, onAttach, onTalk, onOpen, onFocusField, fieldRef, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
 }: AssistantComposerProps) {
   const written = value.trim() !== "" || attachments.length > 0;
@@ -74,6 +76,7 @@ export function AssistantComposer({
     <div data-host-chrome={bar ? "" : undefined} className={cn("flex flex-col gap-2", bar ? "z-dock touch-none rounded-tile border border-border bg-popover p-2 shadow-lg" : "border-t border-border bg-background px-3 py-2", className)} style={lift ? { marginBottom: lift, ...style } : style} {...props}>
       {notice ? <AssistantDraftNotice {...notice} /> : null}
       {unavailable ? <Banner variant="warn">{reasons[unavailable]}</Banner> : null}
+      {attachmentNotice ? <Banner variant="warn">{attachmentNotice}</Banner> : null}
       {attachments.length ? <AssistantPendingAttachments attachments={attachments} limit={limit} onRemove={onRemoveAttachment} onPreview={onPreviewAttachment} /> : null}
       {quote ? <AssistantQuoteBar kind="quote" text={quote} onRemove={onUnquote} /> : null}
       {editing ? <AssistantQuoteBar kind="editing" /> : null}

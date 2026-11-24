@@ -12,7 +12,7 @@ import type { Machine as ChatsMachine } from "../../gen/app__assistant__chats.ef
 import { making, unsure } from "../../gen/app__assistant__chats.ts";
 import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import type { Composer as Writing, Machine as ComposerMachine } from "../../gen/app__assistant__composer.effect.vibe";
-import { textLimit } from "../../gen/app__assistant__composer.ts";
+import { content, textLimit } from "../../gen/app__assistant__composer.ts";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
 import type { Machine as DockMachine } from "../../gen/app__assistant__dock.effect.vibe";
 import { focused as dockFocused, isOpen as dockOpen } from "../../gen/app__assistant__dock.ts";
@@ -27,7 +27,8 @@ import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { isCommsView } from "../shell/views.tsx";
 import { freedom } from "./assistant.vibe";
-import { Talk } from "./talk.vibe";
+import { acceptedFiles, insertFiles, removeFile, sameBinding } from "./attachments.vibe";
+import { type Attached, Talk } from "./talk.vibe";
 
 export interface AssistantProps {
   runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | Talk, unknown>;
@@ -60,10 +61,15 @@ function noticeOf(writing: Writing): AssistantDraftNoticeProps["status"] | undef
   return undefined;
 }
 
-function waiting(writing: Writing): AssistantAttachment[] {
+function chip(file: Attached): AssistantAttachment {
+  const { id, name, mimeType } = file;
+  return mimeType.startsWith("image/") ? { id, name, kind: "image", src: `data:${mimeType};base64,${file.data}` } : { id, name, kind: "file" };
+}
+
+function waiting(writing: Writing, files: readonly Attached[]): AssistantAttachment[] {
   const { editor } = writing;
   return [
-    ...Array.from({ length: editor.files }, (_, at): AssistantAttachment => ({ id: `file ${at + 1}`, kind: "file", name: `File ${at + 1}` })),
+    ...files.slice(0, editor.files).map(chip),
     ...(editor.mail ? [{ id: "mail", kind: "mail", name: "Mail" } as const] : []),
     ...(editor.transcript ? [{ id: "transcript", kind: "transcript", name: "Transcript" } as const] : []),
     ...(editor.shown ? [{ id: "shown", kind: "image", name: "Photo" } as const] : []),
@@ -110,6 +116,8 @@ export function Assistant({ runtime }: AssistantProps) {
   const [listing, setListing] = useState(false);
   const [words, setWords] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const fileTarget = useRef<{ binding: Writing["binding"]; slot: number } | undefined>(undefined);
   if (conversation.cause || chats.cause || composer.cause || reply.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Ask Alpha</Alert>;
   const [talking, shown, writing, finding] = [conversation.state, chats.state, composer.state, search.state];
   if (!talking || !shown || !writing || !finding) return null;
@@ -118,7 +126,7 @@ export function Assistant({ runtime }: AssistantProps) {
   const hold = { type: "hold", askable: askable(talking) } as const;
   const start = { type: "start", ...free } as const;
   const newChat = shown.chosen === 0;
-  const sendable = newChat ? writing.editor.text && !writing.long && chats.can(start) && askable(talking) : composer.can(hold);
+  const sendable = newChat ? content(writing.editor) && !writing.long && chats.can(start) && askable(talking) : composer.can(hold);
   const status = turnOf(talking, seen.label);
   const notice = noticeOf(writing);
   const check = { type: "checkForReply" } as const;
@@ -170,6 +178,7 @@ export function Assistant({ runtime }: AssistantProps) {
       id: line.id,
       author: line.mine ? "owner" : "alpha",
       text: line.text,
+      ...(line.attachments === undefined ? {} : { attachments: line.attachments.map(chip) }),
       ...(line.quote === undefined ? {} : { quote: line.quote }),
       ...(line.failure === undefined ? {} : { children: failureCard({ kind: line.failure, fix: "NoFix", waitMs: -1 }, false) }),
       onFork: settled && chats.can(fork) ? () => void chats.send(fork) : undefined,
@@ -199,6 +208,13 @@ export function Assistant({ runtime }: AssistantProps) {
 
   return (
     <>
+      <input ref={fileInput} type="file" accept={acceptedFiles} multiple hidden onChange={(event) => {
+        const target = fileTarget.current;
+        fileTarget.current = undefined;
+        const files = Array.from(event.currentTarget.files ?? []);
+        event.currentTarget.value = "";
+        if (target && files.length > 0) void runtime.runPromise(insertFiles(target.binding, target.slot, files));
+      }} />
       {(!comms || open) && <AssistantConversation
         detent={assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
         className={comms ? "relative w-full motion-safe:transition-[height] motion-safe:duration-[420ms]" : open ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
@@ -267,13 +283,19 @@ export function Assistant({ runtime }: AssistantProps) {
             onCheck: writing.unsettled && conversation.can(check) ? () => void conversation.send(check) : undefined,
           },
           unavailable: !talking.ready ? "away" : talking.context.sensitive ? "sensitive" : undefined,
-          attachments: waiting(writing),
+          attachments: waiting(writing, sameBinding(seen.filesBinding, writing.binding) ? seen.files : []),
+          attachmentNotice: seen.attachmentNotice,
           quote: quoted,
           editing: writing.editor.editing > 0,
           onOpen: !open ? () => openWithFocus(true) : undefined,
           onSend: sendable && !inFlight(talking.turn) ? send : undefined,
           onStop: conversation.can({ type: "stop" }) ? () => void conversation.send({ type: "stop" }) : undefined,
           stopping: talking.turn.stopping,
+          onAttach: composer.can({ type: "attach", count: 1 }) ? () => {
+            fileTarget.current = { binding: writing.binding, slot: writing.read.ticket };
+            openWithFocus(false);
+            fileInput.current?.click();
+          } : undefined,
           onFocusField: () => openWithFocus(false),
           onClick: !open ? (event) => {
             if (event.target instanceof Element && event.target.closest("button, textarea")) return;
@@ -281,8 +303,8 @@ export function Assistant({ runtime }: AssistantProps) {
           } : undefined,
           onRemoveAttachment: (id) => {
             if (id === "question") void composer.send({ type: "removeQuestion" });
-            else if (id.startsWith("file ")) void composer.send({ type: "removeFile" });
             else if (id === "mail" || id === "transcript" || id === "shown") void composer.send({ type: "detach", kind: detached[id] });
+            else void runtime.runPromise(removeFile(id));
           },
           onUnquote: composer.can({ type: "unquote" }) ? () => void composer.send({ type: "unquote" }) : undefined,
         }}

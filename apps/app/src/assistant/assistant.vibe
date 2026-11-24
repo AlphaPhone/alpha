@@ -14,9 +14,10 @@ import { stepping } from "../shell/shell.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { ask, outcomeOf } from "../platform/remote.vibe"
-import { Attempts } from "../runtime/attempts.vibe"
+import { Attempts, fresh } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, following, reacting, run, started, stream, tell, together, untimed } from "../runtime/reactor.vibe"
 import { type Board, type Line, Talk, talk } from "./talk.vibe"
+import { dropFiles, sameBinding, stageFiles } from "./attachments.vibe"
 
 service Turns {
   readonly controller: TurnController
@@ -145,9 +146,12 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const chats = try history.get()
     const known = board.known(chats.chosen)
     const text = board.outgoing
-    const held = (try (try Composer.Machine).get()).held
+    const composer = try (try Composer.Machine).get()
+    const held = composer.held
+    const staged = board.staged
+    const files = staged?.ticket === ticket && staged.hold === composer.hold && sameBinding(staged.binding, composer.binding) ? staged.files : []
     const quoted = board.line(chats.chosen, held.quote)
-    if (known === undefined || text === "" || (held.quote > 0 && quoted === undefined)) {
+    if (known === undefined || (text.trim() === "" && files.length === 0) || (held.quote > 0 && quoted === undefined) || held.files !== files.length) {
       Queue.offerUnsafe(queue, { type: "refuse", ticket })
       Queue.endUnsafe(queue)
       return
@@ -161,7 +165,11 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       return
     }
     const pageTicket = (try history.get()).page.ticket
-    const mine: Line = { id: `sent ${ticket}`, mine: true, text, ...(quoted === undefined ? {} : { quote: quoted.text }) }
+    const mine: Line = {
+      id: `sent ${ticket}`, mine: true, text,
+      ...(quoted === undefined ? {} : { quote: quoted.text }),
+      ...(files.length === 0 ? {} : { attachments: files }),
+    }
     board.append(pageTicket, chats.chosen, mine)
     board.lastSent = text
     let heard = false
@@ -185,7 +193,8 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       },
     }
     const metadata = { ...observed(told, context), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
-    const result = tryPromise(() => controller.send({ text, ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks })) catch () => undefined
+    const images = files.map(({ data, mimeType, name }) => ({ data, mimeType, name }))
+    const result = tryPromise(() => controller.send({ text, ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks })) catch () => undefined
     board.change({ reply: "", label: "" })
     board.lastSentId = result !== undefined && "clientMessageId" in result ? result.clientMessageId : ""
     const ending = replied(ticket, result)
@@ -230,10 +239,46 @@ effect function checked(recheck: number): Conversation.Event!!(Agent | Talk | Ch
   } catch () => ({ type: "reconcile", ticket: recheck, found: "Unread" })
 }
 
-effect function settled(hold: number, sent: boolean): Composer.Event!!Talk {
+// spec/app/assistant/index.md, "Stored attachments are posted with their message, and a message whose attachments could not be stored never left"
+effect function staged(ticket: number, attachments: number): Conversation.Event!!(Conversation.Machine | Composer.Machine | Talk) {
+  const conversation = try Conversation.Machine
+  const composer = try Composer.Machine
+  const before = try composer.get()
+  const turn = (try conversation.get()).turn
   const { board } = try Talk
-  if (!sent) giveBack(board)
-  return sent ? { type: "commit", hold } : { type: "release", hold }
+  const snapshot = board.snapshot()
+  const files = sameBinding(snapshot.filesBinding, before.binding) ? snapshot.files : []
+  const rejected: Conversation.Event = { type: "uploaded", ticket, ok: false }
+  if (turn.send.id !== ticket || turn.send.outcome !== "Recorded" || turn.hold !== before.hold || before.away !== "Asked") return rejected
+  if (files.length !== attachments || files.length !== before.held.files) return rejected
+  const key = fresh()
+  if (!(try stageFiles(key, files))) {
+    board.change({ attachmentNotice: "Could not save the attachments. Try again." })
+    return rejected
+  }
+  const current = try composer.get()
+  const pending = try conversation.get()
+  if (!sameBinding(before.binding, current.binding) || current.hold !== before.hold || !Conversation.canUploaded(pending, ticket)) {
+    try dropFiles(key)
+    return rejected
+  }
+  board.staged = { ticket, hold: before.hold, binding: before.binding, key, files }
+  return { type: "uploaded", ticket, ok: true }
+}
+
+effect function settled(hold: number, sent: boolean): void!!(Talk | Composer.Machine) {
+  const composer = try Composer.Machine
+  const { board } = try Talk
+  const event: Composer.Event = sent ? { type: "commit", hold } : { type: "release", hold }
+  if (!Composer.enabled(try composer.get(), event)) return
+  if (sent) board.change({ files: [], filesBinding: undefined, attachmentNotice: "" })
+  else giveBack(board)
+  try contained(composer.send(event), "settling the composer")
+  const staged = board.staged
+  if (staged?.hold === hold) {
+    board.staged = undefined
+    try dropFiles(staged.key)
+  }
 }
 
 function giveBack(board: Board) {
@@ -245,7 +290,7 @@ function giveBack(board: Board) {
 function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Agent | Turns | Talk | Chats.Machine | Composer.Machine | Conversation.Machine | Reply.Machine | Shell, []> {
   return match (fx) {
     when { tag: "CheckSupport", let support }: answer("support", supported(support), { type: "supported", ticket: support, ok: false, takes: false });
-    when { tag: "Upload", let ticket }: answer("upload", succeed<Conversation.Event>({ type: "uploaded", ticket, ok: false }), { type: "uploaded", ticket, ok: false });
+    when { tag: "Upload", let ticket, let attachments }: answer("upload", staged(ticket, attachments), { type: "uploaded", ticket, ok: false });
     when { tag: "Post", let ticket, let told, let context }: stream("post", posted(ticket, told, context), { type: "lose", ticket });
     when { tag: "Withdraw" }: run("withdraw", effect {
       const { controller } = try Turns
@@ -253,10 +298,7 @@ function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Agent | Tur
     });
     when { tag: "Abort", let turn }: answer("abort", aborted(turn), { type: "answerAbort", ticket: turn, confirmed: false });
     when { tag: "ReadReply", let recheck }: answer("check", checked(recheck), { type: "reconcile", ticket: recheck, found: "Unread" });
-    when { tag: "Settle", let hold, let sent }: run(`settle ${hold}`, effect {
-      const event = try settled(hold, sent)
-      try contained((try Composer.Machine).send(event), "settling the composer")
-    });
+    when { tag: "Settle", let hold, let sent }: run(`settle ${hold}`, settled(hold, sent));
     when { tag: "Prompted" }: run("prompted", Effect.void);
     when { tag: "Kept", let messages }: run("kept", effect { try contained((try Chats.Machine).send({ type: "kept", messages }), "counting kept messages") });
     when { tag: "Reread" }: run("reread", effect { try contained((try Chats.Machine).send({ type: "reread" }), "reading again") });
@@ -481,8 +523,11 @@ const bound = started(effect {
   try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(chats.changes, composer.changes), conversation.changes), effect ([[shown, writing], talking]) => {
     const here = writing.binding.conversation
     if (shown.chosen !== here) {
-      const moving = here === 0 && shown.chosen > 0 && (writing.editor.text || writing.draft.sync !== "Kept")
-      try contained(composer.send(moving ? { type: "adopt", conversation: shown.chosen } : { type: "bind", conversation: shown.chosen }), "binding the composer")
+      const moving = here === 0 && shown.chosen > 0 && (Composer.content(writing.editor) || writing.draft.sync !== "Kept")
+      const bound = try contained(composer.send(moving ? { type: "adopt", conversation: shown.chosen } : { type: "bind", conversation: shown.chosen }), "binding the composer")
+      if (bound && sameBinding(board.snapshot().filesBinding, writing.binding)) {
+        board.change(moving ? { filesBinding: { owner: writing.binding.owner, conversation: shown.chosen } } : { files: [], filesBinding: undefined, attachmentNotice: "" })
+      }
       return
     }
     if (board.sendWhenMade && here > 0 && writing.source === 0 && writing.clear.outcome !== "Sent") {
