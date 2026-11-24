@@ -66,8 +66,10 @@ test('a bookmark keeps its page name across a cold start; one saved before names
  // A private tab is not restored after the restart, so only the bookmark can carry the name.
  await menu(page,'New private tab');await navigate(page,'Lentil soup');
  await menu(page,'Bookmark');
- const saved=()=>page.evaluate(async()=>{const {bookmarkDocument}=await import('/src/browser/preference-documents.ts');return bookmarkDocument.read<unknown[]>(()=>[]);});
- await expect.poll(saved).toEqual([{url:'https://library.example/Lentil%20soup',title:'Lentil soup'},'https://library.example/Old%20page']);
+ // As the native store: the address list keeps the format previous builds read; the titles sit
+ // beside it, bound to that exact list.
+ const saved=()=>page.evaluate(async()=>{const {bookmarkDocument,bookmarkTitleDocument}=await import('/src/browser/preference-documents.ts');return [await bookmarkDocument.read<unknown[]>(()=>[]),await bookmarkTitleDocument.read<unknown>(()=>null)];});
+ await expect.poll(saved).toEqual([['https://library.example/Lentil%20soup','https://library.example/Old%20page'],{addresses:['https://library.example/Lentil%20soup','https://library.example/Old%20page'],titles:['Lentil soup',null]}]);
  await page.reload();
  await openBrowser(page);
  await menu(page,'Bookmarks and history');
@@ -79,6 +81,16 @@ test('a bookmark keeps its page name across a cold start; one saved before names
  await expect(old).not.toContainText('Old page');
  await list.getByRole('searchbox',{name:'Search bookmarks',exact:true}).fill('lentil');
  await expect(named).toBeVisible();await expect(old).toHaveCount(0);
+ // A previous build that edits the address list leaves the titles behind; they are dropped and the
+ // edited list stands.
+ await page.evaluate(async()=>{const {bookmarkDocument}=await import('/src/browser/preference-documents.ts');await bookmarkDocument.edit<string[],void>(()=>[],rows=>{rows.splice(1,1);});});
+ await page.reload();
+ await openBrowser(page);
+ await menu(page,'Bookmarks and history');
+ const rewritten=library(page).getByRole('button',{name:'https://library.example/Lentil%20soup',exact:true});
+ await expect(rewritten).toContainText('library.example/Lentil%20soup');
+ await expect(rewritten).not.toContainText('Lentil soup');
+ await expect(library(page).getByRole('button',{name:'https://library.example/Old%20page',exact:true})).toHaveCount(0);
 });
 
 test('Show in Files from the Downloads list opens Files at Downloads',async({page})=>{
