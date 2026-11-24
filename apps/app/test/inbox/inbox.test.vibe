@@ -29,11 +29,11 @@ function gmailCloud(calls: Calls, options: { readonly loseDispatch?: boolean; re
   const ledger = new Map<string, { review: Record<string, unknown>; digest: string; state: string; kind: string }>()
   return fakeCloud({
     "GET /api/v1/eliza/google/gmail/inbox-v1/capabilities": () => { calls.push("capabilities"); return capabilities },
-    "GET /api/v1/eliza/google/gmail/search": () => {
+    "GET /api/v1/eliza/google/gmail/search": (_: unknown, path: string) => {
       calls.push("search")
-      const later = calls.filter((c) => c === "search").length > 1
+      const later = new URL(path, "https://cloud.test").searchParams.get("pageToken") === "p1"
       return later
-        ? { messages: [card("m2", false), card("m3", true)], nextPageToken: "p1", syncedAt: "2026-11-21T09:31:00Z", mailboxHistoryId: "42", supportsSpamTrash: true }
+        ? { messages: [card("m2", false), card("m3", true)], nextPageToken: null, syncedAt: "2026-11-21T09:31:00Z", mailboxHistoryId: "42", supportsSpamTrash: true }
         : { messages: [card("m1", true), card("m2", false)], nextPageToken: "p1", syncedAt: "2026-11-21T09:30:00Z", mailboxHistoryId: "41", supportsSpamTrash: true }
     },
     "POST /api/v1/eliza/google/gmail/inbox-v1/operations": (body: unknown) => {

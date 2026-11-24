@@ -86,7 +86,7 @@ export function routeFetch(answer: (method: string, path: string, body: unknown)
   };
 }
 
-/** The answer a fake Cloud gives from `routes` keyed `"METHOD /path"`: data or a function of the body; signed out, a 401. @throws {never} */
+/** The answer a fake Cloud gives from `routes` keyed `"METHOD /path"`: data or a function of the body and requested path; signed out, a 401. @throws {never} */
 export function answerRoute(
   routes: { readonly [route: string]: unknown },
   statuses: { readonly [route: string]: number } | undefined,
@@ -100,7 +100,7 @@ export function answerRoute(
   if (!Object.hasOwn(routes, key)) return { status: 404, data: { error: "not_found" } };
   const route = routes[key];
   try {
-    return { status: statuses?.[key] ?? 200, data: typeof route === "function" ? (route as (body: unknown) => unknown)(body) : route };
+    return { status: statuses?.[key] ?? 200, data: typeof route === "function" ? (route as (body: unknown, path: string) => unknown)(body, path) : route };
   } catch {
     return { status: 500, data: { error: "service_unavailable" } };
   }

@@ -19,7 +19,7 @@ export const grantA = "grant-a"
 export const grantB = "grant-b"
 
 /** A 64-hex review digest the fake ledger answers with. */
-export const zeroDigest = "0".repeat(64)
+const zeroDigest = "0".repeat(64)
 
 /** One listed message as Cloud renders it. */
 export function card(id: string, unread: boolean, starred = false) {
@@ -66,7 +66,11 @@ export function mailCloud(log: Calls, routes: { readonly [route: string]: unknow
       log.cloud.push("search")
       return { messages: [card("m1", true), card("m2", false)], nextPageToken: null, syncedAt: "2026-11-21T09:30:00Z", mailboxHistoryId: "41", supportsSpamTrash: false }
     },
-    "GET /api/v1/eliza/google/gmail/read": () => { log.cloud.push("read"); return readMessage("m1", true) },
+    "GET /api/v1/eliza/google/gmail/read": (_: unknown, path: string) => {
+      log.cloud.push("read")
+      const messageId = new URL(path, "https://cloud.test").searchParams.get("messageId") ?? ""
+      return readMessage(messageId, messageId === "m1")
+    },
     [`${inbox}/thread`]: () => {
       log.cloud.push("thread")
       return { version: 1, threadId: "t-m1", historyId: "41", total: 1, offset: 0, nextOffset: null, messages: [{ ...readMessage("m1", true), historyId: "41" }] }
