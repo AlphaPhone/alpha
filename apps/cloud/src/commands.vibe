@@ -1,38 +1,26 @@
-// spec/cloud/rollout.md, "Story: Deploy an environment without reading a secret into the repository"; spec/cloud/index.md, "Story: Move phones to Alpha Cloud only when the owner takes the cutover"
-import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
-import * as NodeServices from "@effect/platform-node/NodeServices"
+// spec/cloud/rollout.md, "Story: Deploy an environment without reading a secret into the repository"; spec/cloud/provisioning.md, "The steps run in one order, the same for staging and production, each one command"
 import type { CloudEnvironment } from "@elizaos/cloud/profile"
 import { Machine, machine } from "../gen/cloud__rollout.effect.vibe"
-import { alphaCloudName } from "../gen/cloud.effect.vibe"
+import { ownCloudName } from "../gen/cloud.effect.vibe"
 import { deploy, elizaosCloud, packageDirectory, privateDirectory, profiled, readSecrets, reconciled, recordResources, registrationInto, renderInto, resourcesOf, settledSecrets, workerSecrets, wrangler, type Component } from "./operator.vibe"
-import { alphaHosts, deploymentTable } from "./profile.vibe"
-import { checkRuntimeConfig } from "./runtime-config.vibe"
+import { candidates } from "./candidate.vibe"
 import { smoke } from "./smoke.vibe"
-
-module node {
-  /** @throws {never} */
-  export function commandLine(): ReadonlyArray<string> {
-    return process.argv.slice(2)
-  }
-}
-import { commandLine } from node
 
 /** The command line names an unknown command or misses a flag. */
 export error UsageInvalid { message: string }
 /** A public gate of the deployed environment did not pass. */
 export error NotReady { report: string }
 
-const usage = [
-  "usage: alpha-cloud cutover | runtime-config",
-  "     | alpha-cloud profile --inputs <file> --out <file>",
-  "     | alpha-cloud registration --inputs <file> --environment production|staging --out <file>",
-  "     | alpha-cloud render|check --inputs <file> --environment <e> [--resources <file>] [--out <dir>]",
-  "     | alpha-cloud secrets --environment <e> --env-file <file> [--apply] [--frozen]",
-  "     | alpha-cloud provision --environment <e> --env-file <file> [--write] [--resources <file>]",
-  "     | alpha-cloud preflight --environment <e> [--env-file <file>] [--resources <file>]",
-  "     | alpha-cloud migrate|register|prices --environment <e> --inputs <file> --env-file <file>",
-  "     | alpha-cloud deploy --environment <e> --inputs <file> --env-file <file> [--component api|edge|all] [--resources <file>]",
-  "     | alpha-cloud smoke --environment <e>",
+/** Every command of Alpha's own cloud on Cloudflare; `check` and `registration` are main's. */
+export const usage = [
+  "usage: node dist/src/main.js check | registration",
+  "     | render|bundle --profile <file> --environment production|staging [--resources <file>] [--out <dir>]",
+  "     | secrets --environment <e> --env-file <file> [--apply] [--frozen] [--resources <file>]",
+  "     | provision --environment <e> --env-file <file> [--write] [--resources <file>]",
+  "     | preflight --environment <e> [--env-file <file>] [--resources <file>]",
+  "     | migrate|register|prices --environment <e> --profile <file> --env-file <file>",
+  "     | deploy --environment <e> --profile <file> --env-file <file> [--component api|edge|all] [--resources <file>]",
+  "     | smoke --environment <e>",
 ].join("\n")
 
 interface Flags { readonly values: ReadonlyMap<string, string>; readonly on: ReadonlySet<string> }
@@ -71,36 +59,13 @@ effect function componentOf(found: Flags): Component!UsageInvalid {
   return value
 }
 
-effect function cutover() {
-  const table = try deploymentTable()
-  return { cutover: table.cutover, production: table.production, staging: table.staging }
-}
-
-effect function profile(found: Flags) {
-  const { profile } = try profiled(try required(found, "inputs"))
-  const out = try required(found, "out")
-  try (try FileSystem.FileSystem).writeFileString(out, JSON.stringify(profile, null, 2) + "\n")
-  return { profile: out }
-}
-
-effect function registration(found: Flags) {
-  const environment = try environmentOf(found)
-  const { profile } = try profiled(try required(found, "inputs"))
-  return try scoped(effect {
-    const written = try registrationInto(try privateDirectory(), profile, environment)
-    const out = try required(found, "out")
-    try (try FileSystem.FileSystem).copyFile(written.file, out)
-    return { registration: out, clientId: written.clientId, environment }
-  })
-}
-
 effect function render(found: Flags, bundle: boolean) {
   const environment = try environmentOf(found)
-  const { inputs, profile } = try profiled(try required(found, "inputs"))
+  const { profile } = try profiled(try required(found, "profile"))
   const resources = try resourcesOf(found.values.get("resources"))
   const path = try Path.Path
   const out = path.resolve(found.values.get("out") ?? path.join(try packageDirectory(), "rendered"))
-  const rendered = try renderInto(out, profile, environment, resources[environment], inputs)
+  const rendered = try renderInto(out, profile, environment, resources[environment])
   if (bundle) for (const config of [rendered.api, rendered.edge]) try wrangler(["deploy", "--dry-run", "--config", config, "--outdir", path.join(out, `bundle-${path.basename(config, ".json")}`)])
   return { ...rendered, bundled: bundle }
 }
@@ -128,28 +93,29 @@ effect function resources(found: Flags, creating: boolean) {
   const environment = try environmentOf(found)
   const file = found.values.get("env-file")
   const values = file === undefined ? {} : try readSecrets(file)
-  const table = try deploymentTable()
   const path = try Path.Path
   const recorded = found.values.get("resources") ?? path.join(try packageDirectory(), "resources.json")
   const ids = try resourcesOf(recorded)
-  const verified = try Effect.provide(reconciled(environment, table, ids, values.DATABASE_URL, creating), FetchHttpClient.layer)
-  if (creating && found.on.has("write")) try recordResources(recorded, environment, ids[environment], verified)
-  return { environment, verified, written: creating && found.on.has("write") }
+  provide FetchHttpClient.layer {
+    const verified = try reconciled(environment, ids, values.DATABASE_URL, creating)
+    if (creating && found.on.has("write")) try recordResources(recorded, environment, ids[environment], verified)
+    return { environment, verified, written: creating && found.on.has("write") }
+  }
 }
 
 effect function database(found: Flags, command: "migrate" | "register" | "prices") {
   const environment = try environmentOf(found)
   const values = try readSecrets(try required(found, "env-file"))
-  const { profile } = try profiled(try required(found, "inputs"))
+  const { profile } = try profiled(try required(found, "profile"))
   const store = values.DATABASE_URL
   if (command !== "prices" && !store) throw new UsageInvalid({ message: "the secrets file has no DATABASE_URL" })
   return try scoped(effect {
     const written = try registrationInto(try privateDirectory(), profile, environment)
-    const deployment = ["--profile", written.profileFile, "--environment", environment]
+    const at = ["--profile", written.profileFile, "--environment", environment]
     switch (command) {
-      case "migrate": try elizaosCloud(["migrate", ...deployment, "--store", store], values); break
-      case "register": try elizaosCloud(["client", "apply", "--file", written.file, ...deployment, "--store", store], values); break
-      case "prices": try elizaosCloud(["prices", "check", ...deployment], values); break
+      case "migrate": try elizaosCloud(["migrate", ...at, "--store", store], values); break
+      case "register": try elizaosCloud(["client", "apply", "--file", written.file, ...at, "--store", store], values); break
+      case "prices": try elizaosCloud(["prices", "check", ...at], values); break
     }
     return { environment, command, clientId: written.clientId }
   })
@@ -157,29 +123,26 @@ effect function database(found: Flags, command: "migrate" | "register" | "prices
 
 effect function smokeOf(found: Flags) {
   const environment = try environmentOf(found)
-  const hosts = alphaHosts(try deploymentTable())[environment]
-  const gates = try Effect.provide(smoke(environment, hosts, alphaCloudName), FetchHttpClient.layer)
-  return { environment, ready: gates.every((gate) => gate.passed), gates }
+  const candidate = (try candidates())[environment]
+  provide FetchHttpClient.layer {
+    const gates = try smoke(environment, { api: candidate.cloud, web: `https://${candidate.appLinkHost}` }, ownCloudName)
+    return { environment, ready: gates.every((gate) => gate.passed), gates }
+  }
 }
 
-/** Alpha Cloud's operator command line: the cutover state, the runtime check, the profile, the registration, rendering, secrets, resources, the database steps, deploying and the public gates. */
-export effect function cli(argv: ReadonlyArray<string>) {
-  const [command, ...rest] = argv
+/** One command of Alpha's own cloud on Cloudflare, by its name and flags; what it did, as JSON for the operator. */
+export effect function operate(command: string | undefined, rest: ReadonlyArray<string>) {
   switch (command) {
-    case "cutover": try flags(rest, []); return try cutover()
-    case "runtime-config": try flags(rest, []); return try checkRuntimeConfig(try deploymentTable())
-    case "profile": return try profile(try flags(rest, ["inputs", "out"]))
-    case "registration": return try registration(try flags(rest, ["inputs", "environment", "out"]))
-    case "render": return try render(try flags(rest, ["inputs", "environment", "resources", "out"]), false)
-    case "check": return try render(try flags(rest, ["inputs", "environment", "resources", "out"]), true)
+    case "render": return try render(try flags(rest, ["profile", "environment", "resources", "out"]), false)
+    case "bundle": return try render(try flags(rest, ["profile", "environment", "resources", "out"]), true)
     case "secrets": return try secrets(try flags(rest, ["environment", "env-file", "resources"], ["apply", "frozen"]))
     case "provision": return try resources(try flags(rest, ["environment", "env-file", "resources"], ["write"]), true)
     case "preflight": return try resources(try flags(rest, ["environment", "env-file", "resources"]), false)
-    case "migrate": case "register": case "prices": return try database(try flags(rest, ["environment", "inputs", "env-file"]), command)
+    case "migrate": case "register": case "prices": return try database(try flags(rest, ["environment", "profile", "env-file"]), command)
     case "deploy": {
-      const found = try flags(rest, ["environment", "inputs", "env-file", "component", "resources"])
-      const at = { environment: try environmentOf(found), inputs: try required(found, "inputs"), secrets: try required(found, "env-file"), component: try componentOf(found), resources: found.values.get("resources") }
-      return try Effect.provide(deploy(at), FetchHttpClient.layer)
+      const found = try flags(rest, ["environment", "profile", "env-file", "component", "resources"])
+      const at = { environment: try environmentOf(found), profile: try required(found, "profile"), secrets: try required(found, "env-file"), component: try componentOf(found), resources: found.values.get("resources") }
+      provide FetchHttpClient.layer { return try deploy(at) }
     }
     case "smoke": {
       const result = try smokeOf(try flags(rest, ["environment"]))
@@ -189,10 +152,3 @@ export effect function cli(argv: ReadonlyArray<string>) {
     default: throw new UsageInvalid({ message: command === undefined ? usage : `unknown command ${command}\n${usage}` })
   }
 }
-
-effect function main() {
-  const result = try cli(commandLine())
-  try Console.log(JSON.stringify(result, null, 2))
-}
-
-if (import.meta.main) NodeRuntime.runMain(Effect.provide(main(), NodeServices.layer))

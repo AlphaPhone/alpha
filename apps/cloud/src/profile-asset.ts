@@ -1,5 +1,5 @@
-// spec/cloud/index.md, "The API Worker serves only while the profile in its assets is the text its pinned digest names, and otherwise asks the caller to retry"
-import { workerAnswer } from "../gen/cloud.ts";
+// spec/cloud/rollout.md, "The API Worker serves only while the profile in its assets is the text its pinned digest names, and otherwise asks the caller to retry"
+import { workerAnswer } from "../gen/cloud__rollout.ts";
 
 /** Where the rendered API Worker's static assets hold the environment's profile, beside eliza's return pages. */
 export const PROFILE_ASSET = "alpha-cloud/profile.json";

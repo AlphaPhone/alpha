@@ -2,12 +2,17 @@
 import { parseProfile, type CloudProfile, type EnvironmentProfile } from "@elizaos/cloud/profile"
 import { nativeAssetLinks } from "@elizaos/cloud/worker"
 import { registrationOf, type Environment, type Registration, type Statement } from "../gen/cloud.effect.vibe"
+import candidate from "../profile/candidate.example.json" with { type: "json" }
 import production from "../profile/production.example.json" with { type: "json" }
 import staging from "../profile/staging.json" with { type: "json" }
 import seed from "../seed/staging.json" with { type: "json" }
 
-/** Alpha's profiles by the name `@repo/deployment` gives each: `staging` runs locally and is the hosted staging's reference, `production` is the example an operator completes. */
-export const profiles = { staging: { file: "profile/staging.json", json: staging as unknown }, production: { file: "profile/production.example.json", json: production as unknown } }
+/** Alpha's profiles by the name `@repo/deployment` gives each: `staging` runs locally and is the hosted staging's reference, `production` is the example an operator completes, and `candidate` the example of Alpha's own cloud at the cut-over candidates. */
+export const profiles = {
+  staging: { file: "profile/staging.json", json: staging as unknown },
+  production: { file: "profile/production.example.json", json: production as unknown },
+  candidate: { file: "profile/candidate.example.json", json: candidate as unknown },
+}
 
 /** The staging seed: Alpha's client, as the local cloud registers it before it serves. */
 export const stagingSeed = seed

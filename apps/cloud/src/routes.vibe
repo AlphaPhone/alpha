@@ -1,0 +1,36 @@
+// spec/cloud/index.md, "Story: Reach my account's services from the app"; spec/cloud/index.md, "Each route of Alpha's cloud table is one of eliza's device routes by method and path, buffered, outside sign-in, and needs no account session"; spec/cloud/index.md, "The table lists every route Alpha's screens and eliza's managed mail client send, each with the query keys they send"
+import { deviceRoutes, type DeviceRoute } from "@elizaos/cloud/client"
+import { cloudTable, pageRoute, signInPrefixes, type Auth, type TableRoute } from "../gen/cloud.effect.vibe"
+
+const wireVerb = { Get: "GET", Post: "POST", Patch: "PATCH", Delete: "DELETE" } as const
+
+/** One route of the table as eliza's route gate reads it (`spec/agent/access/routes.md`): any value for each query key it lists. */
+function wireRoute(route: TableRoute) {
+  const query = route.query.map((key) => ({ key, accepts: { kind: "any" as const } }))
+  return { method: wireVerb[route.verb], path: route.path, ...(query.length === 0 ? {} : { query }) }
+}
+
+/** The table the app hands eliza's `ElizaCloud` plugin: one group of Alpha's routes under `/api`, each request id as eliza's own routes take it. */
+export const elizaCloudRoutes = [{ prefixes: ["/api"], id: "[A-Za-z0-9][A-Za-z0-9._:@+-]{0,511}", routes: cloudTable.map(wireRoute) }]
+
+function samePath(route: TableRoute, device: DeviceRoute): boolean {
+  const segments = route.path.slice(1).split("/")
+  return segments.length === device.path.length && segments.every((segment, at) => {
+    const piece = device.path[at]
+    return /^\{\w+\}$/.test(segment) ? piece?.tag === "Param" : piece?.tag === "Literal" && piece.text === segment
+  })
+}
+
+function authOf(device: DeviceRoute | undefined): Auth {
+  return device === undefined || device.auth === "Public" ? "Public" : device.auth === "KeyOrSession" ? "KeyOrSession" : "SessionOnly"
+}
+
+/** Why eliza would refuse the table, one line per route it would refuse: empty when every route is one it loads. */
+export function tableProblems(table: ReadonlyArray<TableRoute> = cloudTable): ReadonlyArray<string> {
+  return table.flatMap((route) => {
+    const found = deviceRoutes.filter((device) => device.method === route.verb && samePath(route, device))
+    const underSignIn = signInPrefixes.some((prefix) => route.path.startsWith(prefix))
+    const listing = { matches: found.length, buffered: true, auth: authOf(found[0]) }
+    return pageRoute(listing, underSignIn) ? [] : [`${wireVerb[route.verb]} ${route.path}: ${found.length === 1 ? (underSignIn ? "belongs to sign-in" : "needs an account session") : `matches ${found.length} of eliza's device routes`}`]
+  })
+}

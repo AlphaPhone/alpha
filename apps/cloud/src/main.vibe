@@ -1,10 +1,13 @@
-// spec/cloud/index.md, "Story: Know which cloud the app talks to"; spec/cloud/index.md, "Story: Register Alpha's app with the cloud"; spec/cloud/provisioning.md, "The steps run in one order, the same for staging and production, each one command"
+// spec/cloud/index.md, "Story: Know which cloud the app talks to"; spec/cloud/index.md, "Story: Register Alpha's app with the cloud"; spec/cloud/index.md, "Story: Keep Alpha's own cloud ready for the cutover"; spec/cloud/index.md, "Story: Reach my account's services from the app"; spec/cloud/provisioning.md, "The steps run in one order, the same for staging and production, each one command"
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { deployment } from "@repo/deployment"
-import { assetLinksNameAlpha, candidateApart, profileFits, type Environment } from "../gen/cloud.effect.vibe"
+import { assetLinksNameAlpha, candidateApart, profileFits, returnsOffApi, type Environment } from "../gen/cloud.effect.vibe"
 import { commandOf, taskAt, total } from "../gen/cloud__provisioning.effect.vibe"
 import { assetLinks, entryOf, loopbackOnly, profileNamed, registrationAt, stagingSeed } from "./alpha.vibe"
+import { candidateProblems, candidates } from "./candidate.vibe"
+import { operate } from "./commands.vibe"
+import { tableProblems } from "./routes.vibe"
 
 module node {
   /** @throws {never} */
@@ -13,9 +16,6 @@ module node {
   }
 }
 import { commandLine } from node
-
-/** The command line names no command this program has. */
-export error UsageInvalid { message: string }
 
 /** What `check` found wrong, one line each. */
 export error CheckFailed { problems: ReadonlyArray<string> }
@@ -47,13 +47,18 @@ effect function check() {
     const profile = { api: settings.api, webHost: settings.web.replace(/^https:\/\//, "") }
     if (!profileFits(row, profile)) problems.push(`${name}: the profile answers at ${profile.api} for ${profile.webHost}, and @repo/deployment at ${row.cloud} for ${row.appLinkHost}`)
     if (!candidateApart(row, row.cutoverCandidate)) problems.push(`${name}: the cut-over candidate names a host of the cloud it would replace`)
+    if (!returnsOffApi(registration, settings.api)) problems.push(`${name}: a return of Alpha's registration lies on the API origin ${settings.api}`)
     const statements = try assetLinks(registration, settings.api)
     if (!assetLinksNameAlpha(statements, environment)) problems.push(`${name}: the asset links do not name Alpha's package with the ${name} signers alone`)
     if (environment === "Staging" && JSON.stringify(stagingSeed.clients) !== JSON.stringify([entryOf(registration)])) problems.push("seed/staging.json is not Alpha's staging registration")
     try Console.log(`${name}: ${row.cloud}, App Links on ${row.appLinkHost}; asset links ${JSON.stringify(statements)}`)
   }
+  const candidate = try profileNamed("candidate")
+  problems.push(...candidateProblems(candidate, try candidates()).map((problem) => `the candidate's profile: ${problem}`))
+  try Console.log(`candidate: Alpha's own cloud at ${candidate.environments.production.api} and ${candidate.environments.staging.api}, recorded and not used`)
+  problems.push(...tableProblems().map((problem) => `the cloud route table: ${problem}`))
   if (problems.length > 0) throw new CheckFailed({ problems })
-  try Console.log("Alpha's profiles, seed and registrations keep every rule of spec/cloud/index.md")
+  try Console.log("Alpha's profiles, seed, registrations and cloud route table keep every rule of spec/cloud/index.md")
 }
 
 /** What the operator of the shipped Eliza Cloud enters for Alpha's app: one registration file per environment, applied by the steps of provisioning in order. Nothing is sent anywhere. */
@@ -67,10 +72,10 @@ effect function registration() {
 }
 
 effect function main() {
-  const [command] = commandLine()
+  const [command, ...rest] = commandLine()
   if (command === "check") return try check()
   if (command === "registration") return try registration()
-  throw new UsageInvalid({ message: "usage: node dist/src/main.js check | registration" })
+  try Console.log(JSON.stringify(try operate(command, rest), null, 2))
 }
 
 if (import.meta.main) NodeRuntime.runMain(Effect.provide(main(), NodeServices.layer))

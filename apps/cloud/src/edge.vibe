@@ -1,5 +1,5 @@
-// spec/cloud/edge.md, "Story: Bring me back to the app when its link did not open"
-import { edgeAnswer, edgeRoute, type Route } from "../gen/cloud__edge.effect.vibe"
+// spec/cloud/rollout.md, "Story: Bring me back to the app when its link did not open"
+import { edgeAnswer, edgeRoute, type Route } from "../gen/cloud__rollout.effect.vibe"
 import { EdgeRequest, EdgeResponse, forwardedHeaders } from "./edge-platform.ts"
 
 /** The API Worker as the web host reaches it: a Cloudflare service binding, never a public fetch. */
