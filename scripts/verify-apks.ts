@@ -2,7 +2,7 @@ import {androidIdentity, stageAndroidIdentity, verifyAndroidIdentity} from './an
 /**
  * Verify the launcher APKs of one build and record the result in apk-manifest.json.
  *
- *   node scripts/verify-apks.ts [--signer-api-level=N] [--cloud-voice-evidence=FILE]
+ *   node --conditions=eliza-source --import vibelang/register scripts/verify-apks.ts [--signer-api-level=N] [--cloud-voice-evidence=FILE]
  *
  * It verifies the debug APK, and the release APK unless the build record says the build was
  * debug-only (`release: false`, a local `pnpm android:build:local`).
@@ -54,7 +54,7 @@ import {readNativeBuildReceipt} from './native-build-inputs.ts';
 import { apkPermissions, checkListenerPermissions, checkListenerSpeechBundle, listenerPackage } from "./aosp-listener.ts";
 
 import {cloudVoiceAdmission} from './os-ported/os/apk-release-record.mjs';
-const USAGE = "Usage: node scripts/verify-apks.ts [--signer-api-level=N] [--cloud-voice-evidence=FILE]";
+const USAGE = "Usage: node --conditions=eliza-source --import vibelang/register scripts/verify-apks.ts [--signer-api-level=N] [--cloud-voice-evidence=FILE]";
 interface RuntimePackaging {
   apk: string;
   runtime: "PACKAGED";

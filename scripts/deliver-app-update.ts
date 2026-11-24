@@ -226,7 +226,7 @@ export async function main(argv: string[], {root = process.cwd(), log = console.
   let variant: string | undefined, apkManifest = 'artifacts/apk-manifest.json', notes: string | undefined;
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i], value = argv[++i];
-    if (!value || value.startsWith('--')) throw Error('Usage: node scripts/deliver-app-update.ts --variant launcher [--apk-manifest FILE] [--notes TEXT]');
+    if (!value || value.startsWith('--')) throw Error('Usage: node --conditions=eliza-source --import vibelang/register scripts/deliver-app-update.ts --variant launcher [--apk-manifest FILE] [--notes TEXT]');
     if (flag === '--variant') variant = value;
     else if (flag === '--apk-manifest') apkManifest = value;
     else if (flag === '--notes') notes = value;

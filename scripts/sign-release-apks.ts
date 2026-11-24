@@ -3,9 +3,9 @@
  * Sign Alpha's unsigned release APKs with the application key held outside Gradle
  * through a reviewed signing ceremony.
  *
- *   node scripts/sign-release-apks.ts --keys-dir DIR [--key-name alphaphone_app] [OPTIONS]
- *   node scripts/sign-release-apks.ts --pkcs11-config FILE --key-label LABEL [OPTIONS]
- *   node scripts/sign-release-apks.ts --keystore FILE --key-label LABEL [OPTIONS]
+ *   node --conditions=eliza-source --import vibelang/register scripts/sign-release-apks.ts --keys-dir DIR [--key-name alphaphone_app] [OPTIONS]
+ *   node --conditions=eliza-source --import vibelang/register scripts/sign-release-apks.ts --pkcs11-config FILE --key-label LABEL [OPTIONS]
+ *   node --conditions=eliza-source --import vibelang/register scripts/sign-release-apks.ts --keystore FILE --key-label LABEL [OPTIONS]
  *   OPTIONS: [--apk UNSIGNED.apk --out SIGNED.apk] [--apksigner PATH] [--no-verify] [--dry-run]
  *
  * Gradle signs a release only from a keystore file (ELIZAOS_KEYSTORE_*). Alpha's application key
@@ -72,9 +72,9 @@ interface SigningOptions {
 }
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 const USAGE = [
-  "Usage: node scripts/sign-release-apks.ts --keys-dir DIR [--key-name alphaphone_app] [OPTIONS]",
-  "       node scripts/sign-release-apks.ts --pkcs11-config FILE --key-label LABEL [OPTIONS]",
-  "       node scripts/sign-release-apks.ts --keystore FILE --key-label LABEL [OPTIONS]",
+  "Usage: node --conditions=eliza-source --import vibelang/register scripts/sign-release-apks.ts --keys-dir DIR [--key-name alphaphone_app] [OPTIONS]",
+  "       node --conditions=eliza-source --import vibelang/register scripts/sign-release-apks.ts --pkcs11-config FILE --key-label LABEL [OPTIONS]",
+  "       node --conditions=eliza-source --import vibelang/register scripts/sign-release-apks.ts --keystore FILE --key-label LABEL [OPTIONS]",
   "OPTIONS: [--apk UNSIGNED.apk --out SIGNED.apk] [--apksigner PATH] [--no-verify] [--dry-run]",
 ].join("\n");
 
