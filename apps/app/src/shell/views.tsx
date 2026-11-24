@@ -1,10 +1,10 @@
-import { Calendar, Camera, Folder, Globe, Image, type LucideIcon, Mail, MapPin, MessageSquare, Phone, Settings, StickyNote, UserRound, Workflow } from "lucide-react";
+import { Calendar, Camera, Folder, Globe, Image, type LucideIcon, MailOpen, MapPin, MessageSquare, Phone, Settings, StickyNote, UserRound, Workflow } from "lucide-react";
 import type { View } from "../../gen/app__shell.ts";
 
 export const views = {
   Phone: { label: "Phone", icon: Phone },
   Messages: { label: "Messages", icon: MessageSquare },
-  Inbox: { label: "Inbox", icon: Mail },
+  Inbox: { label: "Inbox", icon: MailOpen },
   Calendar: { label: "Calendar", icon: Calendar },
   Browser: { label: "Browser", icon: Globe },
   Camera: { label: "Camera", icon: Camera },

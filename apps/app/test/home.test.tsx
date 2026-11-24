@@ -8,7 +8,7 @@ import home from "../src/home/index.tsx";
 import { button, closeAll, drawn, fill, hardware, later, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import { waiting } from "../src/home/waiting.vibe";
-import { agendaFrom } from "../src/home/cards.vibe";
+import { fromAreas } from "../src/home/cards.vibe";
 
 underAct();
 afterEach(closeAll);
@@ -89,16 +89,55 @@ describe("Home on a phone", () => {
     expect(agenda()?.textContent).toMatch(/^NextDentist/);
 
     // spec/app/home/cards.md, "The agenda draws on both calendars and the reminders saved on the phone, leaving out a calendar Calendar hides and a reminder already done"
-    await drawn(() => agendaFrom.hidden([2]));
+    await drawn(() => fromAreas.hidden([2]));
     expect(agenda()?.textContent).toMatch(/^NextStandup/);
-    await drawn(() => agendaFrom.reminders([{ due: day + 7 * hour, overdue: true, done: false, title: "Call the bank" }, { due: day, overdue: true, done: true, title: "Paid rent" }]));
+    await drawn(() => fromAreas.reminders([{ due: day + 7 * hour, overdue: true, done: false, title: "Call the bank" }, { due: day, overdue: true, done: true, title: "Paid rent" }]));
     // spec/app/home/cards.md, "Under an overdue reminder the card also names the next item that is not overdue, so the reminder never hides it"
     expect(agenda()?.textContent).toMatch(/^OverdueCall the bank.*Standup/);
 
     // spec/app/home/cards.md, "A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed"
     await drawn(() => agenda()?.click());
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Calendar");
-    await drawn(() => { agendaFrom.reminders([]); agendaFrom.hidden([]); });
+    await drawn(() => { fromAreas.reminders([]); fromAreas.hidden([]); });
+  });
+
+  // spec/app/home/cards.md, "Story: The other cards"; spec/app/home/cards.md, "Story: Open my day from a card"
+  it("See what waits in my apps on Home's cards and open one (spec/app/home/cards.md, \"Story: The other cards\"; spec/app/home/cards.md, \"Story: Open my day from a card\")", async () => {
+    const world = { ...scene(), phone: true, image: true };
+    const { alpha } = await open(world);
+    await until(alpha, home.runtime(alpha), Home.Machine, (h) => h.tiles.load.status === "Loaded");
+    await until(alpha, alpha.runtime, Shell, (s) => s.image);
+    const card = (title: string) => [...document.querySelectorAll("section[aria-label='Your day'] > button")].find((found) => found.textContent?.startsWith(title));
+
+    // spec/app/home/cards.md, "The Messages and Phone cards show their waiting rows, only on an Alpha image, and are not drawn without a row"; spec/app/home/cards.md, "The mail card shows the unread count, senders and subjects only, never a message body; marked not up to date when Inbox's page is not, and not drawn without an account or a row"
+    await drawn(() => {
+      fromAreas.messages([{ title: "Ana", detail: "Lunch at one?" }]);
+      fromAreas.phone([]);
+      fromAreas.mail({ connected: true, unread: 4, rows: [{ title: "Bank", detail: "Statement ready" }], current: false });
+    });
+    expect([card("Messages") !== undefined, card("Phone") !== undefined, card("Unread")?.textContent]).toEqual([true, false, expect.stringMatching(/Not up to date/)]);
+
+    // spec/app/home/cards.md, "The Workflows card shows the first two enabled rows and how many more, marked when they are not current, stale or partly unavailable, and is not drawn without a row"; spec/app/home/cards.md, "The brief card shows the brief kept for Home, or that its run failed, and is not drawn without one"
+    await drawn(() => {
+      fromAreas.flows({ rows: [{ title: "Morning brief", detail: "Daily" }, { title: "Inbox sweep", detail: "Hourly" }, { title: "Rent", detail: "Monthly" }], freshness: "SomeUnavailable" });
+      fromAreas.brief({ outcome: "RunFailed", at: 7 * 3_600_000 });
+    });
+    expect(card("Workflows")?.textContent).toMatch(/Morning brief.*Inbox sweep.*\+1 more/);
+    expect(card("Workflows")?.textContent).not.toMatch(/Rent/);
+
+    // spec/app/home/cards.md, "The row holds the agenda, Messages, Phone, mail, brief and Workflows cards in that order, each only when drawn, and is not drawn when none is"
+    expect([...document.querySelectorAll("section[aria-label='Your day'] > button")].map((found) => ["Messages", "Unread", "Brief", "Workflows"].find((title) => found.textContent?.startsWith(title)))).toEqual(["Messages", "Unread", "Brief", "Workflows"]);
+
+    // spec/app/home/cards.md, "A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed"
+    await drawn(() => card("Unread")?.click());
+    await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Inbox");
+    await hardware("home");
+    await drawn(() => card("Brief")?.click());
+    await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Workflows");
+
+    await drawn(() => { fromAreas.messages([]); fromAreas.mail({ connected: false, unread: 0, rows: [], current: false }); fromAreas.flows({ rows: [], freshness: "UpToDate" }); fromAreas.brief(undefined); });
+    await hardware("home");
+    expect(document.querySelector("section[aria-label='Your day']")).toBeNull();
   });
 
   // spec/app/home/index.md, "Story: See the apps on this phone"; spec/app/home/index.md, "Story: Find an app and see its details"; spec/app/home/index.md, "Story: Open an app"

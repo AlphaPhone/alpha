@@ -1,4 +1,4 @@
-// spec/app/home/index.md, "Story: Open an app"; spec/app/home/index.md, "On the assistant alone Home shows no tile and no card"; spec/app/home/index.md, "Story: Edit Home"; spec/app/home/index.md, "Story: Find an app and see its details"; spec/app/home/index.md, "Story: Pull down for notifications"
+// spec/app/home/index.md, "Story: Open an app"; spec/app/home/cards.md, "The row holds the agenda, Messages, Phone, mail, brief and Workflows cards in that order, each only when drawn, and is not drawn when none is"; spec/app/home/index.md, "On the assistant alone Home shows no tile and no card"; spec/app/home/index.md, "Story: Edit Home"; spec/app/home/index.md, "Story: Find an app and see its details"; spec/app/home/index.md, "Story: Pull down for notifications"
 import type { InstalledApp } from "@elizaos/os/bridges/definitions/system";
 import { AppsDrawer, HomeScreen, type HomeInstalledApp, type HomeTileItem, InstalledAppIcon } from "@repo/ui";
 import { useSyncExternalStore } from "react";
@@ -12,7 +12,7 @@ import type { Resident, Shown } from "../runtime/area.tsx";
 import { untimed } from "../runtime/reactor.vibe";
 import { feel } from "../shell/haptics.vibe";
 import { views } from "../shell/views.tsx";
-import { Agenda } from "./Agenda.tsx";
+import { useDayCards } from "./Cards.tsx";
 import { catalog, labelOf } from "./catalog.vibe";
 import { told } from "./home.vibe";
 import { waiting } from "./waiting.vibe";
@@ -50,6 +50,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   const known = useSyncExternalStore(catalog.subscribe, catalog.snapshot, catalog.snapshot);
   const inline = useSyncExternalStore(told.subscribe, told.snapshot, told.snapshot);
   const waits = useSyncExternalStore(waiting.subscribe, waiting.snapshot, waiting.snapshot);
+  const day = useDayCards(runtime, shell.state?.image ?? false);
   const h = home.state;
   const s = shell.state;
   if (!h || !s || h.host === "AssistantOnly") return null;
@@ -73,7 +74,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
     <>
       <HomeScreen
         date={today ? new Date(today * 86_400_000).toLocaleDateString([], { weekday: "long", day: "numeric" }) : undefined}
-        cards={Home.showsCards(h) ? [<Agenda key="agenda" runtime={runtime} />, <div key="others" className="contents">{alpha.slot("home/cards")}</div>] : []}
+        cards={Home.showsCards(h) ? day : []}
         tiles={h.tiles.load.status === "Loaded" ? Home.tilesShown(h, s).map((tile) => tileItem(tile, known.apps, tile.tag === "Own" ? waits.get(tile.view) : undefined, h.editing)) : undefined}
         editing={h.editing}
         onOpenTile={(id) => {

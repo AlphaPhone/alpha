@@ -9,6 +9,7 @@ inside the shell and moves through it.
 - [Focus](./focus.md): where focus goes when the screen changes under the owner
 - [Gestures](./gestures.md): what a swipe on the page means
 - [Haptics](./haptics.md): touch feedback
+- [Landing](./landing.md): coming back to Alpha from a provider's consent page
 
 ## Story: Move between Home and the apps
 
@@ -79,6 +80,23 @@ pure def height(detent: Detent): int =
 pure def canRaise(s: Shell, detent: Detent): bool = not(s.drawer) and height(detent) > height(s.assistant)
 
 pure def raise(s: Shell, detent: Detent): Shell = { ...s, assistant: detent }
+```
+
+### On Phone, Messages and Contacts the app's own bar stands in for Ask Alpha at rest, until Ask Alpha rises
+
+These apps draw one bar that addresses the person on screen or Alpha, so
+Ask Alpha's bar is not drawn over them; raised, Ask Alpha is drawn above
+the app again. On Home and every other app Ask Alpha's bar is always drawn.
+
+```quint
+pure def barApp(view: View): bool = view == Phone or view == Messages or view == Contacts
+
+pure def askAlphaDrawn(s: Shell): bool =
+  s.assistant != Bar or s.trail.length() == 0 or not(barApp(s.trail.nthOr(s.trail.length() - 1, Settings)))
+
+pure def alwaysHomeDrawsAskAlpha(s: Shell): bool = s.trail.length() == 0 implies askAlphaDrawn(s)
+
+pure def sometimesAnAppsBarStandsInForAskAlpha(s: Shell): bool = not(askAlphaDrawn(s))
 ```
 
 ### Back closes one layer: the drawer, then Ask Alpha by a step, then the app on top
