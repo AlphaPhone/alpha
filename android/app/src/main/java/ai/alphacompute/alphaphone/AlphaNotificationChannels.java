@@ -1,5 +1,6 @@
 package ai.alphacompute.alphaphone;
 
+import ai.elizaos.app.AlphaNotificationProjection;
 import android.app.NotificationChannel;
 import android.app.NotificationChannelGroup;
 import android.app.NotificationManager;
@@ -21,8 +22,9 @@ import java.util.Set;
  * shared canonical notice routing (NativeNotificationChannels.isReminderChannelBlocked), the
  * workflow, Gmail and brief posters, and foreground-service notices, which Android hides without
  * stopping the service. {@link #registerGroups} names these groups to the shared routing
- * (elizaOS/eliza#39953), so Alpha's own group on eliza_updates is not read as an owner
- * customisation and high-priority occurrence alerts still move to eliza_notifications. Reminder
+ * (NativeNotificationChannels.setHostAssignedGroups, reached through AlphaNotificationProjection),
+ * so Alpha's own group on eliza_updates is not read as an owner customisation and high-priority
+ * occurrence alerts still move to eliza_notifications. Reminder
  * channels stay ungrouped: the shared reminder store (ReminderStore.allowed) decides from the
  * channel alone, so a blocked group would hide reminders it reports as allowed. Call and text
  * channels stay ungrouped so that blocking a group never hides an incoming call or text.
@@ -58,7 +60,7 @@ final class AlphaNotificationChannels {
   new Row(AlphaNavigationService.CHANNEL,0,0,ONGOING),
  };
  /** Names Alpha's groups to the shared notice routing. Called once per process before any notice is posted (AlphaApplication). */
- static void registerGroups(){ai.elizaos.app.AlphaNotificationProjection.setHostAssignedGroups(GROUP_IDS);}
+ static void registerGroups(){AlphaNotificationProjection.setHostAssignedGroups(GROUP_IDS);}
  /** Safe to repeat: a channel whose name, description and group already match is left alone. */
  static void describe(Context context){
   try{

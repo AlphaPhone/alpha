@@ -89,11 +89,3 @@ native notice copy is still in Java. Which languages launch is not yet decided.
 APK builds, native emulator/HOME checks, full AOSP boot, real services, physical
 hardware and user acceptance remain distinct. No existing failure is retired by
 changing the prose.
-
-Carrier setup must read actual device IMEIs independently of SIM activation when
-Android permits access, show per-field denial/unavailable states and provide
-Android Settings recovery. Identifier reads require an explicit foreground,
-unlocked action; values are cleared on leaving/backgrounding and never become
-routine snapshots, diagnostics, saved shell state or agent context. EID is an
-optional separate read. These surfaces do not establish hardware/carrier or
-activation acceptance.

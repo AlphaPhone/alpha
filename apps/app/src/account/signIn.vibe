@@ -1,7 +1,7 @@
-// spec/account/signIn.md, "Story: Choose how to sign in"; spec/account/signIn.md, "Story: Sign in with Google"; spec/account/signIn.md, "Story: Sign in with a code"; spec/account/signIn.md, "Story: Leave sign-in"; spec/account/signIn.md, "Story: Read the service's terms before signing in"
+// spec/account/signIn.md, "Story: Choose how to sign in"; spec/account/signIn.md, "Story: Sign in with Google"; spec/account/signIn.md, "Story: Sign in with a code"; spec/account/signIn.md, "A typed phone number is sent in international form"; spec/account/signIn.md, "Back during a verification adopts a key the host already stored"; spec/account/signIn.md, "Story: Leave sign-in"; spec/account/signIn.md, "Story: Read the service's terms before signing in"
 import {
   type CodeMethod, type FactorKind, type Host, type Methods, type Net, type SignIn, type SignInEffect, type VerifyOutcome,
-  Machine as SignInMachine, canTapGoogle, enabled, entryOf, machine as signInMachine, mayReopenGoogle, readinessWaitMs, sentAs, unknownMethods
+  Machine as SignInMachine, canTapGoogle, countryOf, enabled, entryOf, machine as signInMachine, mayReopenGoogle, readinessWaitMs, unknownMethods
 } from "../../gen/account__signIn.effect.vibe"
 import type { Net as LifeNet } from "../../gen/platform__lifecycle.ts"
 import { Build } from "../platform/build.vibe"
@@ -13,11 +13,9 @@ import { Resident } from "../platform/resident.vibe"
 import { freshKey } from "./deployment.ts"
 import { ensureResident } from "./inference.vibe"
 import { CloudSession, noNews, newsOf, type SignInNews } from "./session.vibe"
-import { CodeStarted, HostStatus, MfaRequired, MfaResumed, NetworkStatus, ReadinessChanged, ServiceAnswer, SignInAnswer } from "./signIn.schema.vibe"
+import { CodeStarted, HeldKey, HostStatus, MfaRequired, MfaResumed, NetworkStatus, ReadinessChanged, ServiceAnswer, SignInAnswer } from "./signIn.schema.vibe"
 
 const plugin = "AlphaCloudSignIn"
-/** How long Back waits for a cancelled verification to unwind before it reads the stored key, as the legacy app did. */
-const verifyUnwindMs = 2000
 
 /** The deployment's published Terms and Privacy, as the screen shows them. */
 export type ServiceInfo = ServiceAnswer["service"]
@@ -54,24 +52,6 @@ export service SignInScreen {
 
 const methodNames = { EmailCode: { start: "startEmail", verify: "verifyEmail", field: "email" }, PhoneCode: { start: "startPhone", verify: "verifyPhone", field: "phone" } } as const
 
-/** The phone number the owner typed, in the E.164 form the host accepts; a number it cannot place keeps no separators and is refused. */
-export function normalizeSignInPhone(typed: string): string {
-  const text = typed.trim()
-  const plus = text.startsWith("+")
-  const digits = text.slice(plus ? 1 : 0).replace(/[\s().-]/g, "")
-  const kind = plus ? "WithPlus" : digits.startsWith("00") ? "WithZeroZero" : /^[0-9]{10}$/.test(digits) ? "TenDigits" : /^1[0-9]{10}$/.test(digits) ? "ElevenFromOne" : "OtherNumber"
-  const sent = sentAs(kind)
-  if (sent === "KeepsItsPlus" || sent === "PlusAdded") return `+${digits}`
-  if (sent === "PlusForZeroZero") return `+${digits.slice(2)}`
-  if (sent === "PlusOneAdded") return `+1${digits}`
-  return digits
-}
-
-/** What the address field holds, as it is sent for the chosen method. */
-function sentAddress(method: CodeMethod, address: string): string {
-  return method === "PhoneCode" ? normalizeSignInPhone(address) : address.trim()
-}
-
 /** What Android says of the network, as AppLifecycle reports it and with its validation fact on the phone, as the screen's network state. */
 export function netOf(status: NetworkStatus, android: boolean): Net {
   if (status.connected === false) return "NetOffline"
@@ -90,6 +70,20 @@ export function verifyRefusal(code: string | undefined): VerifyOutcome {
   if (code === "invalid-code") return { tag: "CodeWrong" }
   if (code === "expired" || code === "attempts-exhausted") return { tag: "CodeUsedUp" }
   return { tag: "CodeFailed" }
+}
+
+/** The number the host takes (E.164) from what the owner typed: separators go, `+` or `00` keeps the dialled country, and only a North American length is given +1. */
+export function internationalNumber(typed: string): string {
+  const text = typed.trim()
+  const plus = text.startsWith("+")
+  // Only separators are dropped: letters or other symbols stay, so such a number is refused, not rewritten.
+  const rest = (plus ? text.slice(1) : text).replace(/[\s().-]/g, "")
+  const zeroZero = !plus && rest.startsWith("00")
+  const digits = zeroZero ? rest.slice(2) : rest
+  const country = countryOf(plus ? "PlusDialled" : zeroZero ? "ZeroZeroDialled" : "Undialled", /^[0-9]*$/.test(digits) ? digits.length : 0, digits.startsWith("1"))
+  if (country === "CountryDialled") return `+${digits}`
+  if (country === "NorthAmerican") return digits.length === 10 ? `+1${digits}` : `+${digits}`
+  return digits
 }
 
 /** The second verification a host answer names. */
@@ -115,9 +109,8 @@ export const signInService = Layer.effect(SignInScreen, effect {
   const news = try Ref.make<SignInNews>(noNews)
   const epoch = try Ref.make(0)
   const retained = try Ref.make<MfaRequired | undefined>(undefined)
-  // The key stored when the running verification began (null: none; undefined: unreadable) and when it unwinds.
-  const verifyPrior = try Ref.make<string | null | undefined>(undefined)
-  const verifying = try Ref.make<Deferred.Deferred<void> | undefined>(undefined)
+  // The key the host held when the verification in flight began; undefined when it could not be read.
+  const priorKey = try Ref.make<string | null | undefined>(undefined)
 
   effect function send(event: Parameters<typeof machine.send>[0]) {
     const step = machine.send(event) catch () => undefined
@@ -153,6 +146,30 @@ export const signInService = Layer.effect(SignInScreen, effect {
     try send({ type: "probeSettles", methods: unknownMethods, lateFollows: true })
     const late = try Fiber.join(reading)
     try send({ type: "lateMethods", methods: methodsOf(late) })
+  }
+
+  /** What the host is sent for the address the owner typed: a phone number in international form. */
+  effect function sentAddress(address: string) {
+    return (try machine.get()).method === "PhoneCode" ? internationalNumber(address) : address.trim()
+  }
+
+  /** Which key the host holds now: its ID, null for none, undefined when the host could not say. */
+  effect function heldKey() {
+    const read = effect {
+      return try Schema.decodeUnknownEffect(HeldKey)(try native.invoke(plugin, "credentialIdentity", { environment }))
+    } catch () => undefined
+    return read === undefined ? undefined : read.credentialId ?? null
+  }
+
+  /** Back during a verification: the host may have stored its key already, and a cancel after that commit announces nothing. */
+  effect function settleVerification() {
+    // The verification's own answer is dropped from here on; the host's store says whether it committed.
+    try Ref.update(epoch, (n) => n + 1)
+    const prior = try Ref.get(priorKey)
+    if (prior === undefined) return
+    native.invoke(plugin, "cancel", { requestId: try Ref.get(requestId) }) catch () => undefined
+    const now = try heldKey()
+    if (now !== undefined && now !== null && now !== prior) try send({ type: "hostCommitsKey" })
   }
 
   effect function held<A>(work: A!!) {
@@ -216,26 +233,19 @@ export const signInService = Layer.effect(SignInScreen, effect {
     try send(resending ? { type: "resendEnds", accepted: started !== undefined } : { type: "sendEnds", accepted: started !== undefined })
   }
 
-  /** The credential id of the key the host holds now: null when it holds none, undefined when the store cannot be read. */
-  effect function storedCredential() {
-    const raw = native.invoke(plugin, "credentialIdentity", { environment }) catch () => undefined
-    if (typeof raw !== "object" || raw === null) return undefined
-    const id = (raw as { credentialId?: unknown }).credentialId
-    return typeof id === "string" ? id : null
-  }
-
   effect function runVerify() {
     const turn = try begin()
     const s = try machine.get()
-    const unwound = try Deferred.make<void>()
-    try Ref.set(verifying, unwound)
-    try Ref.set(verifyPrior, try storedCredential())
     const attempt = try Ref.get(attemptId)
     const code = (try Ref.get(typed)).code
     try Ref.update(typed, (t) => ({ ...t, code: "" }))
     try Ref.set(news, noNews)
     const method = s.screen === "FactorStep" ? "verifyMfa" : methodNames[s.method].verify
-    const verified = try ensuring(held(effect {
+    // An unreadable store records nothing, so a Back during this verification then adopts nothing.
+    try Ref.set(priorKey, undefined)
+    try Ref.set(priorKey, try heldKey())
+    if (!(try stillCurrent(turn))) return
+    const verified = try held(effect {
       const call = Effect.map(native.invoke(plugin, method, { attemptId: attempt, code }), (value) => ({ ok: true as const, value }))
       const result = call catch (error) => ({ ok: false as const, code: error._tag === "NativeFailed" ? error.code : undefined })
       if (!result.ok) return verifyRefusal(result.code)
@@ -248,23 +258,8 @@ export const signInService = Layer.effect(SignInScreen, effect {
       }
       if (answer.attemptId !== undefined) try Ref.set(attemptId, answer.attemptId)
       return { tag: "CodeNeedsFactor", codeFactor: factorOf(answer.method) } as VerifyOutcome
-    }), Deferred.succeed(unwound, undefined))
+    })
     if (try stillCurrent(turn)) try send({ type: "verifyEnds", verified, attempt: s.attempt })
-  }
-
-  // spec/account/signIn.md, "Back ends the step in flight, then the code step, then the dialog; the required page keeps its chooser":
-  // the host stores the key before a verification answers, so Back cancels, lets the verification unwind
-  // (its own answer is dropped) and reports a key other than the one held before it as committed.
-  effect function cancelVerification() {
-    try Ref.update(epoch, (n) => n + 1)
-    native.invoke(plugin, "cancel", { requestId: try Ref.get(requestId) }) catch () => undefined
-    const running = try Ref.get(verifying)
-    if (running !== undefined) try timeoutOption(Deferred.await(running), Duration.millis(verifyUnwindMs))
-    const prior = try Ref.get(verifyPrior)
-    if (prior === undefined) return
-    const stored = try storedCredential()
-    if (stored === undefined || stored === null || stored === prior) return
-    if (enabled(try machine.get(), { type: "hostCommitsKey" })) try send({ type: "hostCommitsKey" })
   }
 
   effect function offerRetained() {
@@ -373,11 +368,11 @@ export const signInService = Layer.effect(SignInScreen, effect {
       if (canTapGoogle(try machine.get())) try send({ type: "tapGoogle" })
     },
     effect submit(address: string) {
-      try Ref.set(typed, { address: sentAddress((try machine.get()).method, address), code: "" })
+      try Ref.set(typed, { address: try sentAddress(address), code: "" })
       try send({ type: "submitAddress" })
     },
     effect resend(address: string) {
-      try Ref.set(typed, { address: sentAddress((try machine.get()).method, address), code: "" })
+      try Ref.set(typed, { address: try sentAddress(address), code: "" })
       try send({ type: "resend" })
     },
     effect verify(code: string) {
@@ -388,7 +383,7 @@ export const signInService = Layer.effect(SignInScreen, effect {
       const before = try machine.get()
       if (before.work === "GoogleWork") try send({ type: "backDuringGoogle" })
       else {
-        if (before.work === "Verifying") try cancelVerification()
+        if (before.work === "Verifying") try settleVerification()
         try send({ type: "back" })
       }
       const after = try machine.get()

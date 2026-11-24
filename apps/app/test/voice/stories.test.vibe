@@ -10,7 +10,7 @@ import { ResidentFeeds } from "../../src/platform/view-events.vibe"
 import { Microphone } from "../../src/voice/capture.vibe"
 import { VoiceConversation } from "../../src/voice/conversation.vibe"
 import { Dictation, speechGateOf } from "../../src/voice/dictation.vibe"
-import { callCaused, cancelledByPhone, failureMessage, limitKindOf, pausedByPhone, refusalOf } from "../../src/voice/failure.vibe"
+import { callCaused, cancelledByPhone, failureMessage, limitKindOf, outOfFundsCode, pausedByPhone, refusalOf } from "../../src/voice/failure.vibe"
 import { Latency, VOICE_TIMING_FORMAT } from "../../src/voice/latency.vibe"
 import { layer } from "../../src/voice/layer.vibe"
 import { Listener } from "../../src/voice/listener.vibe"
@@ -18,7 +18,7 @@ import { VoiceRoute } from "../../src/voice/route.vibe"
 import { Speech } from "../../src/voice/speech.vibe"
 import { initial as micInitial, barHeight, deniedSettingsOffered, levelBars } from "../../gen/voice__capture.effect.vibe"
 import {
-  claimScreen, cleanupSettled, endpointerOf, hidden as hideConversation, initial as conversationInitial, muteSpeaker, profileOf, returned as returnConversation, reviewNeeded, reviewSettled,
+  claimScreen, cleanupSettled, endpointerOf, hidden as hideConversation, initial as conversationInitial, muteSpeaker, outOfFunds, profileOf, returned as returnConversation, reviewNeeded, reviewSettled,
   screenPinned, screenSettled, sessionFailed, start as startConversation, stop as stopConversation, typedSend,
 } from "../../gen/voice__conversation.effect.vibe"
 import { initial as dictationInitial, start as startDictation } from "../../gen/voice__dictation.effect.vibe"
@@ -209,6 +209,23 @@ it.live(`End voice cleanly, and never lose what I type (spec/voice/conversation.
     try conversation.typedSend(() => Effect.sync(() => { delivered += 1 }), () => true)
     try Effect.try(() => assert.strictEqual(delivered, 1))
   }
+})
+
+it.effect(`Out of plan allowance and credits ends Talk quietly (spec/voice/conversation.md, "Out of plan allowance and credits ends voice quietly as Stop does, and the chat gets the one line")`, () => effect {
+  const speaking = { ...talking, shown: "Speaking" as const, notice: "CannotInterrupt" as const }
+  const withMedia = outOfFunds(speaking, true)
+  const noMedia = outOfFunds({ ...talking, shown: "Listening" as const }, false)
+  const funds = (cause: unknown) => outOfFundsCode(refusalOf(cause, 0).code)
+  try Effect.try(() => assert.deepStrictEqual({
+    withMedia: [withMedia.shown, withMedia.notice, withMedia.muted], noMedia: [noMedia.shown, noMedia.notice],
+    codes: {
+      credits: funds({ code: "insufficient_credits" }), allowance: funds({ code: "allowance_exhausted" }),
+      voiceAllowance: funds({ code: "voice-http-429", data: { limitCode: "allowance_exhausted" } }), busy: funds({ code: "voice-http-503" }), billingHold: funds({ code: "billing_hold_active" }),
+    },
+  }, {
+    withMedia: ["Retiring", "NoNotice", false], noMedia: ["Off", "NoNotice"],
+    codes: { credits: true, allowance: true, voiceAllowance: false, busy: false, billingHold: false },
+  }))
 })
 
 it.effect(`Keep talking on a screen the agent opens for me (spec/voice/conversation.md, "Story: Keep talking on a screen the agent opens for me")`, () => effect {

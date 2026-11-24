@@ -32,7 +32,7 @@ type SignIn = {
   screen: Screen, work: Work, fault: Fault, method: CodeMethod, factor: FactorKind, methods: Methods, net: Net,
   automatic: bool, latch: bool, probes: int, late: bool, readinessOwner: bool, lateAdopted: int, lateDropped: int,
   attempt: int, attempts: int, stale: bool, prefill: bool, address: bool, cooldown: bool,
-  storedKey: int, adoptedKey: int, priorKey: int, hostCommitted: bool, adoptedByBack: bool, adoptedDuring: Work, drafted: bool
+  storedKey: int, adoptedKey: int, priorKey: int, hostCommitted: bool, adoptedByBack: bool, drafted: bool
 }
 pure val unknownMethods: Methods = { known: false, google: false, email: false, phone: false }
 pure val initial: SignIn = {
@@ -40,7 +40,7 @@ pure val initial: SignIn = {
   screen: ScreenClosed, work: NoWork, fault: NoFault, method: EmailCode, factor: TotpFactor, methods: unknownMethods, net: NetUnknown,
   automatic: false, latch: false, probes: 0, late: false, readinessOwner: false, lateAdopted: 0, lateDropped: 0,
   attempt: 0, attempts: 0, stale: false, prefill: false, address: false, cooldown: false,
-  storedKey: 0, adoptedKey: 0, priorKey: 0, hostCommitted: false, adoptedByBack: false, adoptedDuring: NoWork, drafted: false
+  storedKey: 0, adoptedKey: 0, priorKey: 0, hostCommitted: false, adoptedByBack: false, drafted: false
 }
 pure def canFixHost(s: SignIn, host: Host, boundary: bool): bool = not(s.hostFixed) and s.probes == 0 and s.work == NoWork
 pure def fixHost(s: SignIn, host: Host, boundary: bool): SignIn = { ...s, host: host, commitBoundary: boundary and host == BrowserHost, hostFixed: true }
@@ -158,8 +158,8 @@ pure def sometimesOfflineChooser(s: SignIn): bool = s.screen == Choose and s.net
 
 ### Google waits for the host, and a stored key is adopted or its attempt keeps running
 
-The host stores the new key before its waiting call answers, for Google and for a code or second
-verification alike. Back during the wait cancels the attempt; with a commit boundary a key already stored keeps the attempt running, and without one a
+The host stores the new key before its waiting call answers. Back during the wait cancels the
+attempt; with a commit boundary a key already stored keeps the attempt running, and without one a
 key other than the one held before is adopted instead of being hidden behind the chooser. While it
 waits, Reopen Google page ends the attempt as Back does and starts a new one, for a Google page the
 owner closed or lost; it is not offered once the host has committed a key behind a boundary.
@@ -187,7 +187,7 @@ pure def googleEnds(s: SignIn, result: GoogleOutcome): SignInStep = match result
 pure def canBackDuringGoogle(s: SignIn): bool = s.work == GoogleWork
 pure def backDuringGoogle(s: SignIn): SignInStep =
   if (s.commitBoundary and s.hostCommitted) { state: s, out: List() }
-  else if (not(s.commitBoundary) and s.storedKey != s.priorKey) { state: { ...signedInFrom(s.storedKey, s), adoptedByBack: true, adoptedDuring: GoogleWork }, out: List(CancelAttempt, Adopted) }
+  else if (not(s.commitBoundary) and s.storedKey != s.priorKey) { state: { ...signedInFrom(s.storedKey, s), adoptedByBack: true }, out: List(CancelAttempt, Adopted) }
   else { state: { ...s, work: NoWork, screen: Choose, fault: NoFault, prefill: false }, out: List(CancelAttempt) }
 pure def mayReopenGoogle(s: SignIn): bool = s.work == GoogleWork and s.screen == GoogleWait and not(s.commitBoundary and s.hostCommitted)
 pure def sometimesGoogleReopenable(s: SignIn): bool = mayReopenGoogle(s) and s.storedKey == s.priorKey
@@ -245,23 +245,27 @@ pure def cooldownEnds(s: SignIn): SignIn = { ...s, cooldown: false }
 pure def sometimesFailedResendKeepsTheAttempt(s: SignIn): bool = s.fault == ResendFailed and s.screen == CodeStep and s.attempt != 0
 ```
 
-### A typed phone number is sent in E.164, and no country is guessed
+### A typed phone number is sent in international form
 
-The host accepts only an E.164 number, so the number the owner typed is sent, resent and shown on
-the code step in that form: spaces, dashes, dots and parentheses are dropped and nothing else is
-(letters stay, so the number is refused rather than rewritten); a leading `+` is kept; a leading
-`00` becomes `+`; a bare ten-digit number, or eleven digits starting with 1, is a North American
-number and gains `+1` or `+`. Anything else is sent without its separators and the host refuses it.
+The host takes a number in international (E.164) form only. Spaces, dashes, dots and parentheses
+the owner types are dropped, and a leading `+` keeps the country the owner dialled; a leading `00`
+dials a country too and becomes `+`. A bare ten-digit number, or eleven digits starting with 1, is
+a North American number (`+1`). Any other number is sent without its separators and the host
+refuses it, asking for a country code: no country is guessed for it. Letters or other symbols are
+never dropped, so such a number is refused rather than rewritten.
 
 ```quint
-type TypedNumber = WithPlus | WithZeroZero | TenDigits | ElevenFromOne | OtherNumber
-type SentNumber = KeepsItsPlus | PlusForZeroZero | PlusOneAdded | PlusAdded | NoPlusAdded
-pure def sentAs(typed: TypedNumber): SentNumber =
-  if (typed == WithPlus) KeepsItsPlus else if (typed == WithZeroZero) PlusForZeroZero
-  else if (typed == TenDigits) PlusOneAdded else if (typed == ElevenFromOne) PlusAdded else NoPlusAdded
-pure def lawOnlyANorthAmericanNumberGainsItsCountry(typed: TypedNumber): bool =
-  (sentAs(typed) == PlusOneAdded or sentAs(typed) == PlusAdded) iff (typed == TenDigits or typed == ElevenFromOne)
-pure def lawAnUnrecognisedNumberGainsNoCountry(typed: TypedNumber): bool = typed == OtherNumber implies sentAs(typed) == NoPlusAdded
+type Dialled = PlusDialled | ZeroZeroDialled | Undialled
+type CountryCode = CountryDialled | NorthAmerican | NoCountry
+pure def countryOf(dialled: Dialled, digits: int, leadingOne: bool): CountryCode =
+  if (dialled != Undialled) CountryDialled
+  else if (digits == 10 or (digits == 11 and leadingOne)) NorthAmerican
+  else NoCountry
+pure val digitsValues = Set(0, 7, 10, 11, 12)
+pure def lawADialledCountryIsKept(digits: int, leadingOne: bool): bool =
+  countryOf(PlusDialled, digits, leadingOne) == CountryDialled and countryOf(ZeroZeroDialled, digits, leadingOne) == CountryDialled
+pure def lawOnlyANorthAmericanLengthGetsACountry(digits: int, leadingOne: bool): bool =
+  (countryOf(Undialled, digits, leadingOne) == NorthAmerican) iff (digits == 10 or (digits == 11 and leadingOne))
 ```
 
 ### An address typed and not yet sent is the owner's work in progress
@@ -318,6 +322,23 @@ pure def sometimesSpentCode(s: SignIn): bool = s.stale and s.work == NoWork
 pure def sometimesSignedInWithACode(s: SignIn): bool = s.signedIn and s.adoptedKey >= 1 and s.attempts >= 1 and not(s.adoptedByBack)
 ```
 
+### Back during a verification adopts a key the host already stored
+
+As for Google, the host stores the new key before its waiting verification answers, and a cancel
+that reaches it after that commit announces nothing. Back during a code or second-factor
+verification cancels it; a key other than the one held when the verification began, stored by the
+host before the cancel reached it, is adopted instead of being hidden behind the chooser. A
+verification the host refused, or one with no answer, stored no key and returns to the chooser as
+before.
+
+```quint
+pure def stepBackDuringAVerificationNeverHidesAStoredKey(before: SignIn, via: str, after: SignIn): bool =
+  (via == "back" and before.work == Verifying and before.storedKey != before.priorKey)
+    implies (after.signedIn and after.adoptedKey == before.storedKey and after.screen == ScreenClosed)
+pure def sometimesVerificationAdoptedByBack(s: SignIn): bool =
+  s.adoptedByBack and s.screen == ScreenClosed and s.attempts >= 1 and s.adoptedKey == s.storedKey
+```
+
 ## Story: Leave sign-in
 
 > As the owner, Back takes me one step out of sign-in, and the required page stays until I am
@@ -327,10 +348,8 @@ pure def sometimesSignedInWithACode(s: SignIn): bool = s.signedIn and s.adoptedK
 
 During a check, Back ends it, and an owner's check still ensures the agent; on the required or
 first-run page the check ends on its chooser, offering email while readiness is unknown, so the page
-is never left blank. During a send or a verification it cancels that attempt. The host stores the
-key before a verification answers and cancelling cannot unstore it, so once the cancel has unwound,
-a key other than the one held when the verification began is adopted instead of the chooser being
-shown; the verification's own late answer is still dropped. On the required or first-run page showing its chooser with
+is never left blank. During a send or a verification it cancels that attempt; a verification whose
+key the host already stored is adopted instead. On the required or first-run page showing its chooser with
 nothing pending, Back changes nothing. In the Account app, Back from the chooser of a sign-in the owner
 opened while signed out closes it and leaves Account too, since nothing of Account is behind it.
 
@@ -348,7 +367,7 @@ pure def back(s: SignIn): SignInStep = {
       out: if (s.automatic) List() else List(EnsureResident) }
   else if (s.work == SavingOwnKeys) { state: { ...s, work: NoWork }, out: List() }
   else if (s.work == Verifying and s.storedKey != s.priorKey)
-    { state: { ...signedInFrom(s.storedKey, s), adoptedByBack: true, adoptedDuring: Verifying }, out: List(CancelAttempt, Adopted) }
+    { state: { ...signedInFrom(s.storedKey, s), adoptedByBack: true }, out: List(CancelAttempt, Adopted) }
   else if (s.work != NoWork) { state: chooserFrom(fill, s), out: List(CancelAttempt) }
   else if (s.screen == CodeStep or s.screen == FactorStep) { state: chooserFrom(fill, s), out: List(CancelAttempt) }
   else if (page) { state: s, out: List() }
@@ -358,8 +377,6 @@ pure def stepTheRequiredPageKeepsItsChooser(before: SignIn, via: str, after: Sig
   (via == "back" and entryOf(before) == RequiredEntry and before.work == NoWork and before.screen == Choose) implies after == before
 pure def alwaysAShownPageHasAChooserOrACheck(s: SignIn): bool =
   (isPage(entryOf(s)) and s.latch and s.work != SavingOwnKeys) implies (s.screen != ScreenClosed or s.work == Probing)
-pure def sometimesAdoptedByBackAfterCode(s: SignIn): bool =
-  s.adoptedByBack and s.adoptedDuring == Verifying and s.screen == ScreenClosed and s.adoptedKey == s.storedKey
 pure def sometimesBackClosedTheDialog(s: SignIn): bool = entryOf(s) == NoEntry and s.probes >= 1 and s.work == NoWork and s.screen == ScreenClosed and not(s.signedIn)
 ```
 

@@ -287,26 +287,29 @@ product build configuration. Dependency checksums remain in
 ### Carrier activation details
 
 On Android, **Settings → General → Carrier & SIM setup → Show identifiers** reads
-this phone’s IMEI slots before a SIM is installed, and the active SIM's ICCID and
-network (`AlphaCarrierSetup`, spec/settings/carrier.md). **Read eSIM EID (optional)**
-is a separate explicit read so an unavailable eSIM service cannot block physical-SIM
-setup. Each available identifier has its own Copy. Values stay in the page's memory
-and clear on leaving or backgrounding; they are not in snapshots, diagnostics, saved
-app state or the assistant's context, and the page is a private screen to the assistant.
+this phone's IMEI for each modem slot (before a SIM is installed), each active
+SIM's ICCID and network state, and the hardware and baseband
+(`AlphaCarrierSetupPlugin`, `apps/app/spec/settings/carrier.md`). **Read EID
+(optional)** is a separate explicit read, so an eSIM service that never answers
+cannot hold up physical-SIM setup. Each returned identifier has its own Copy
+row. Values stay in the page's memory while it is in front and clear when the
+page is left, the phone locks or Android pauses Alpha; they never reach storage,
+diagnostics or the agent.
 
-Android controls access. Default SMS/carrier eligibility or an actual signature
-grant can permit identifiers; an ordinary APK install does not acquire privileged
-phone access. The page shows denied and unavailable states and opens Android's
-About phone, SIM, mobile network and APN settings. Displayed identifiers do not
-establish carrier compatibility, activation, working calls or data, or
-physical-device acceptance.
+Android controls access. Default SMS eligibility or an actual signature grant
+can permit identifiers; an ordinary APK install does not acquire privileged
+phone access. The launcher declares the optional signature permission without
+claiming a grant. The page shows each field's denial or absence and opens
+Android's About phone, SIMs, mobile network, APN and default apps pages.
+Displayed identifiers do not establish carrier compatibility, activation,
+working calls or data, or physical-device acceptance.
 
 ## Device and image tooling
 
 ```sh
 pnpm test:android:instrumentation -- --owned-emulator --avd <avd> --serial emulator-NNNN
 pnpm aosp:stage -- --target cuttlefish --aosp-source <aosp-checkout> --apk artifacts/launcher-debug.apk --development
-node scripts/verify-aosp-listener.ts --serial <serial> --user 0
+node --conditions=eliza-source --import vibelang/register scripts/verify-aosp-listener.ts --serial <serial> --user 0
 ```
 
 Instrumentation uses an owned disposable emulator. Image staging takes
@@ -551,11 +554,11 @@ leave Alpha idle in the foreground. Allow one full 15-minute check interval
 plus download time.
 
 ```sh
-node scripts/verify-wireless-launcher-update.ts before --serial <serial> \
+node --conditions=eliza-source --import vibelang/register scripts/verify-wireless-launcher-update.ts before --serial <serial> \
   --distribution sideload --apk-manifest <baseline>/apk-manifest.json --out <new-before.json>
 # Disconnect USB/ADB, restore the phone's network, and return to idle HOME.
 # Let Alpha discover and install the update. Reconnect after the observed result.
-node scripts/verify-wireless-launcher-update.ts after --serial <serial> \
+node --conditions=eliza-source --import vibelang/register scripts/verify-wireless-launcher-update.ts after --serial <serial> \
   --before <before.json> --apk-manifest <update>/apk-manifest.json --out <new-after.json>
 ```
 
@@ -591,7 +594,7 @@ After both rounds, compare the eight receipts offline. For each distribution
 supply the first before/after pair followed by the second before/after pair.
 
 ```sh
-node scripts/verify-wireless-launcher-update.ts matrix \
+node --conditions=eliza-source --import vibelang/register scripts/verify-wireless-launcher-update.ts matrix \
   --sideload stock-1-before.json --sideload stock-1-after.json \
   --sideload stock-2-before.json --sideload stock-2-after.json \
   --image-preinstalled image-1-before.json --image-preinstalled image-1-after.json \

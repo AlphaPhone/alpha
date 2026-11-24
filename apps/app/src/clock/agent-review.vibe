@@ -1,5 +1,5 @@
 // spec/clock/agentReview.md, "Story: Let the agent ask Clock only with my approval on the phone"; spec/clock/agentReview.md, "A new owner retires the review: one not yet approved is cancelled, and nothing is confirmed after"
-import { CloudSession, ownerOf } from "../account/layer.vibe"
+import { CloudSession, ownerOf } from "../account/session.vibe"
 import { Machine as ReviewMachine, machine as reviewMachine } from "../../gen/clock__agentReview.effect.vibe"
 import type { HandoffStatus } from "../../gen/clock__vocabulary.ts"
 import { AgentClockOperation, ClockReviewAnswer } from "./native.schema.vibe"

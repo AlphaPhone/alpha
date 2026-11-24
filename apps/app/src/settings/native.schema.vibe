@@ -37,7 +37,7 @@ export schema StorageAccess { access?: "granted" | "denied" }
 /** AlphaDevice.setTextScale. */
 export schema TextScale { textScalePercent: number }
 
-/** ElizaSystem.openSettingsPage, and AlphaDevice.openSettings for Android's Settings home. */
+/** ElizaSystem.openSettingsPage, AlphaDevice.openSettings for Android's Settings home, and AlphaCarrierSetup.openSettings for its SIMs and APN pages. */
 export schema PageOpened { status: "opened"; specific?: boolean }
 
 /** ElizaSystem.openNotificationShade. */
@@ -137,20 +137,3 @@ export schema AutofillOpened { status: "opened" }
 /** AlphaBrowser.loginFillStatus. */
 export schema LoginFill { available?: boolean }
 
-
-/** One AlphaCarrierSetup field: its value, or why Android gave none. */
-export schema CarrierField { status: "available" | "permission-denied" | "unavailable" | "unsupported" | "not-read"; value?: string }
-
-/** AlphaCarrierSetup.read: the modem slots' IMEIs and SIM states and the subscriptions; the EID is read separately. */
-export schema CarrierRead {
-  status: "ready"
-  modemCount?: CarrierField
-  slots: Array<{ slotIndex: number; imei: CarrierField; simState: CarrierField }>
-  subscriptions: {
-    status: "available" | "permission-denied" | "unavailable" | "unsupported" | "not-read"
-    items: Array<{
-      subscriptionId: number; slotIndex: number; embedded: boolean
-      carrier: CarrierField; iccid: CarrierField; operator: CarrierField; networkType: CarrierField
-    }>
-  }
-}

@@ -9,8 +9,6 @@ import { Button, Input, Skeleton } from "../components/ui/index.ts";
 /** The shown place, its details' phase, what Google's terms and the build allow, and the place actions. */
 export type PlaceSheetProps = {
   shown: Shown;
-  /** What the place is, under its name (spec/maps/screen.md, "A place says what it is under its name"). */
-  subtitle: string;
   /** The provider details' phase; details are shown only once they belong to this place. */
   details: Phase;
   /** The place is Google's: no save, share, rename or copy. */
@@ -36,7 +34,7 @@ export type PlaceSheetProps = {
 };
 
 /**
- * The place sheet: its name, where it is, the provider's hours, phone and website, and what the owner may do with it.
+ * The place sheet: its name, the provider's category for it, where it is, the provider's hours, phone and website, and what the owner may do with it.
  * @model spec/maps/screen.md
  * @design design.md
  */
@@ -44,12 +42,17 @@ export function PlaceSheet(p: PlaceSheetProps) {
   const editing = p.editing;
   const place = p.shown.place && p.shown.place.id === p.shown.providerPlaceId ? p.shown.place : undefined;
   const name = p.shown.label === "Your location" ? "My location" : p.shown.label;
+  // The provider sends its categories most specific first; the first names the place ("Pharmacy").
+  const category = place?.categories?.[0];
   const dialable = place?.phone && /^\+?[0-9]+$/.test(place.phone.replace(/[() .-]/g, "")) ? place.phone : undefined;
   return (
     <section aria-label={name} className="flex flex-col gap-3 p-4">
       <header className="flex items-start gap-2">
         {editing === undefined ? (
-          <h2 className="flex-1 font-display text-2xl">{name}</h2>
+          <div className="flex-1">
+            <h2 className="font-display text-2xl">{name}</h2>
+            {category && <p className="text-sm font-medium">{category}</p>}
+          </div>
         ) : (
           <form className="flex flex-1 gap-2" onSubmit={(e) => { e.preventDefault(); p.onRename(editing); p.onEditing(undefined); }}>
             <Input autoFocus aria-label="Place name" value={editing} maxLength={300} onChange={(e) => p.onEditing(e.target.value)} />
@@ -61,7 +64,6 @@ export function PlaceSheet(p: PlaceSheetProps) {
         )}
         <Button variant="ghost" size="icon" aria-label="Close" onClick={p.onClose}><X aria-hidden /></Button>
       </header>
-      {editing === undefined && <p className="-mt-2 text-sm text-muted-foreground">{p.subtitle}</p>}
       <p className="text-muted-foreground">{place?.address ?? coordinateLabel(p.shown.coordinate)}</p>
       {p.details === "Loading" && <Skeleton className="h-5 w-2/3" />}
       {place?.openingHours && <p>{place.openingHours}</p>}

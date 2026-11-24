@@ -151,6 +151,8 @@ pure def alwaysHiddenHoldsNoInput(s: Screen): bool = s.hidden implies s.pending 
 
 A result or the agent's place is shown under its own name at once, and its
 provider details are fetched; they are shown only for the place still open.
+Under its name the sheet shows the most specific category those details carry
+(for example "Pharmacy"), and no category line when they carry none.
 Opening a place retires the route of the place before it. A pin drops where
 the owner holds a finger still for 500 milliseconds (moving more than 10
 pixels is a pan) or opens the map's menu, never during guidance.
@@ -171,27 +173,6 @@ pure def closePlace(s: Screen): Screen = owned(Owner, noRoute(true, {
 }))
 pure def alwaysDetailsBelongToAPlace(s: Screen): bool = s.details != NotAsked implies s.choice != NoChoice
 pure def sometimesPlaceDetailed(s: Screen): bool = s.choice == ResultChoice and s.details == Ready
-```
-
-### A place says what it is under its name
-
-A provider place shows its provider's most specific category (the first one its details list, for
-example "Pharmacy") once its details belong to it, and "Place" when it has none; a saved place says
-"Saved on this device", the phone's position "Your location", and a dropped pin or any other point
-"Selected location". What a place is comes from how it was opened, never from the words shown.
-
-```quint
-type Subtitle = FirstCategory | GenericPlace | SavedOnPhone | YourLocation | SelectedLocation
-pure def subtitleOf(choice: Choice, providerPlace: bool, hasCategory: bool): Subtitle =
-  if (choice == LocationChoice) YourLocation
-  else if (choice == SavedChoice) SavedOnPhone
-  else if (choice == PinChoice or not(providerPlace)) SelectedLocation
-  else if (hasCategory) FirstCategory
-  else GenericPlace
-pure def lawAPinIsNeverNamedAsAProviderPlace(providerPlace: bool, hasCategory: bool): bool =
-  subtitleOf(PinChoice, providerPlace, hasCategory) == SelectedLocation
-pure def lawOnlyAProviderPlaceShowsACategory(choice: Choice, providerPlace: bool, hasCategory: bool): bool =
-  subtitleOf(choice, providerPlace, hasCategory) == FirstCategory implies (providerPlace and hasCategory)
 ```
 
 ### Locating shows the phone's position, or uses it as the starting point in directions

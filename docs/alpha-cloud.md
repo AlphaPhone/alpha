@@ -69,7 +69,7 @@ is readable, every request is answered `503`, retryable, and no scheduled sweep 
 | `scripts/local-cloud.ts` (`pnpm cloud:local`) | The same Cloud on this computer (`elizaos-cloud serve`, PGlite, loopback mail), for development and contract checks. |
 | `.github/workflows/cloud-deploy.yml` | Manual, main-only deploy per environment. |
 | `android/.../AlphaBillingAuthorityPlugin.java`, `BillingAuthorityRoutes.java` | Native account session for plan changes and cancellation. |
-| `scripts/update-channel-status.ts` (`node scripts/update-channel-status.ts`) | Live OTA channel check. |
+| `scripts/update-channel-status.ts` (`node --conditions=eliza-source --import vibelang/register scripts/update-channel-status.ts`) | Live OTA channel check. |
 
 ## 3. Secrets and operator inputs
 
@@ -186,9 +186,8 @@ funds (subscription allowances only). A top-up surface is a separate change.
 ## 6. OTA updates
 
 Installed `ai.alphacompute.alphaphone` builds read the channel in `app.config.json` (`updateManifestUrl`,
-currently `https://github.com/eliza-research/alpha/releases/download/app-stable-alphacompute/alpha-update-stable.json`;
-an older canonical APK built for `alphacompute/alpha` needs one signed in-place install to switch feeds).
-`node scripts/update-channel-status.ts` checks that channel the way a phone does. As of 2026-11-15 it fails: nothing
+currently `https://github.com/eliza-research/alpha/releases/download/app-stable-alphacompute/alpha-update-stable.json`).
+`node --conditions=eliza-source --import vibelang/register scripts/update-channel-status.ts` checks that channel the way a phone does. As of 2026-11-15 it fails: nothing
 has been published there. The only published channel is the legacy package's `app-stable`
 (versionCode 75). Version 78 of `ai.alphacompute.alphaphone` was signed on 2026-11-15 (Release
 `sign`, run 43700907933) with the current release certificate and delivered only to private QA.
@@ -199,7 +198,7 @@ To make OTA work:
 2. Run **Release** with `operation: publish`, `workflow_commit` = the reviewed main commit, and the
    reviewed `alpha-qualified-app-update/v1` JSON. That publishes the APK first, checks the anonymous
    download, then moves the stable pointer on `app-stable-alphacompute`.
-3. Run `node scripts/update-channel-status.ts --download` until every gate passes. Then check a real phone's
+3. Run `node --conditions=eliza-source --import vibelang/register scripts/update-channel-status.ts --download` until every gate passes. Then check a real phone's
    Settings → Update. Channel evidence is not device acceptance.
 
 The version must exceed 75, the retained legacy floor; v78 does. OS (A/B image) OTA is a separate,

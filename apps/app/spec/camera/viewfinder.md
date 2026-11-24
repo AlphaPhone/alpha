@@ -2,7 +2,7 @@
 
 One Camera visit: the preview Android's `ElizaCamera` runs while Camera is in
 front, the Photo and Video modes and the capture mode native has bound, the
-shutter, the self-timer, flash, Video's light, zoom, the framing grid, the
+shutter, the self-timer, flash, Video's light, zoom, the photo aspect ratio, the framing grid, the
 volume-key shutter and the notices that offer Retry. Portrait Camera is laid
 out above an open conversation sheet, so only a full conversation, or a sheet
 in landscape, covers its viewfinder; a covering conversation keeps the
@@ -22,9 +22,9 @@ type Recording = RecordingIdle | RecordingActive | RecordingFinishing
 type StopCause = NoStop | OwnerStopped | LimitStopped | LeftCamera
 type Flash = FlashOff | FlashAuto | FlashOn
 type Lens = BackLens | FrontLens
-type Aspect = FourThree | SixteenNine
 type RecordStart = RecordingStarted | MicrophoneRefused | RecordingNotStarted
 type Grant = AccessGranted | AccessNotGranted | AccessUnreadable
+type Aspect = Aspect4x3 | Aspect16x9
 type Camera = {
   visible: bool, onScreen: bool, chat: Chat, landscape: bool, graceOver: bool, hold: bool,
   phase: Phase, epoch: int, released: bool, notice: Notice,
@@ -32,14 +32,16 @@ type Camera = {
   recording: Recording, withSound: bool, noSoundChosen: bool, stopCause: StopCause, saidMaxLength: bool, micDenied: bool,
   timer: int, countdown: int, capturing: bool, pendingShot: bool, elapsed: int, recordedBytes: int,
   flash: Flash, hasFlash: bool, light: bool, lens: Lens, zoom: int, widest: int, longest: int, grid: bool,
-  browserRecorder: bool, lightAtStart: bool, zoomAtStart: int, aspect: Aspect, bothAspects: bool,
+  aspect: Aspect, aspectChoice: bool,
+  browserRecorder: bool, lightAtStart: bool, zoomAtStart: int,
   volumeKeys: bool, modal: bool, photos: int, lastShotChat: Chat, lastId: str, lastImage: str
 }
 ```
 
 ### A visit starts in Photo mode with the back camera, nothing running and every control off
 
-Zoom is in tenths: 10 is 1×.
+Zoom is in tenths: 10 is 1×. Photos start at the camera's own 4:3, with no other ratio offered
+until the bound camera lists one.
 
 ```quint
 pure val initial: Camera = {
@@ -49,7 +51,8 @@ pure val initial: Camera = {
   recording: RecordingIdle, withSound: true, noSoundChosen: false, stopCause: NoStop, saidMaxLength: false, micDenied: false,
   timer: 0, countdown: 0, capturing: false, pendingShot: false, elapsed: 0, recordedBytes: 0,
   flash: FlashOff, hasFlash: false, light: false, lens: BackLens, zoom: 10, widest: 10, longest: 10, grid: false,
-  browserRecorder: false, lightAtStart: false, zoomAtStart: 10, aspect: FourThree, bothAspects: false,
+  aspect: Aspect4x3, aspectChoice: false,
+  browserRecorder: false, lightAtStart: false, zoomAtStart: 10,
   volumeKeys: false, modal: false, photos: 0, lastShotChat: ChatHidden, lastId: "", lastImage: ""
 }
 pure def ready(c: Camera): bool = c.phase == PreviewReady
@@ -288,7 +291,7 @@ or a zoom the camera no longer has.
 ```quint
 pure def canFlip(c: Camera, ok: bool): bool = active(c) and ready(c) and not(recordingBusy(c)) and not(c.capturing)
 pure def flip(c: Camera, ok: bool): Camera =
-  if (ok) { ...c, lens: if (c.lens == BackLens) FrontLens else BackLens, flash: FlashOff, light: false, zoom: 10, countdown: 0, aspect: FourThree, bothAspects: false }
+  if (ok) { ...c, lens: if (c.lens == BackLens) FrontLens else BackLens, flash: FlashOff, light: false, zoom: 10, countdown: 0 }
   else { ...c, flash: FlashOff, light: false, zoom: 10 }
 pure def stepFlipResetsLensSettings(before: Camera, via: str, after: Camera): bool =
   via == "flip" implies (after.flash == FlashOff and not(after.light) and after.zoom == 10)
@@ -309,29 +312,32 @@ pure def canToggleGrid(c: Camera): bool = c.visible and ready(c)
 pure def toggleGrid(c: Camera): Camera = { ...c, grid: not(c.grid) }
 ```
 
-### Photo mode offers 4:3 or 16:9 only when the bound camera lists both, and a new ratio restarts an idle preview
+### Photo mode offers 4:3 or 16:9 when the bound camera lists both, and a new ratio restarts the preview with it
 
-The ratios are read from the camera's device list once its preview is ready (the browser build
-lists none); a reply for an older preview is dropped. A ratio the camera does not list falls back to
-4:3, and switching cameras returns to 4:3 until the new camera's list is read. Only an idle Photo
-preview changes it: never under a capture, a countdown, a recording, a request holding Camera or a
-sheet over it such as a scan review. The preview restarts with the ratio; 4:3 sends no option, so the
-default request is unchanged. The viewfinder frame and the framing grid follow the ratio in Photo
-mode (9:16 upright for 16:9, 3:4 otherwise) and 4:3 in Video mode.
+Once a preview is ready, and again after each flip to the other camera, Camera reads the photo
+ratios its camera lists: Android lists 4:3 and 16:9, the browser none, so the browser offers no
+choice. 4:3 is the camera's default and the preview is started without a ratio; 16:9 is started as
+the preview's capture ratio. A new ratio stops the preview and starts another with it, so it is
+chosen only over an idle Photo preview: no countdown, capture, recording, mode change, request,
+notice or dialog. A list read during a capture or a recording still offers or withdraws the choice.
+A camera that no longer lists 16:9 goes back to 4:3 the same way, so that waits for an idle preview. The ratio is kept like the grid, across cameras. The preview fills the
+viewfinder and shows a centred part of the photo in either ratio, so the grid stays drawn over the
+whole viewfinder.
 
 ```quint
-pure def canAspectsRead(c: Camera, ticket: int, both: bool): bool = ready(c) and ticket == c.epoch
-pure def aspectsRead(c: Camera, ticket: int, both: bool): Camera = { ...c, bothAspects: both, aspect: if (both) c.aspect else FourThree }
-pure def otherAspect(a: Aspect): Aspect = if (a == FourThree) SixteenNine else FourThree
-pure def canPickAspect(c: Camera, ratio: Aspect): bool =
-  active(c) and ready(c) and c.mode == PhotoMode and c.recording == RecordingIdle and c.countdown == 0 and not(c.capturing)
-    and not(c.pendingShot) and not(c.hold) and not(c.modal) and not(c.binding) and c.bothAspects and ratio != c.aspect
-pure def pickAspect(c: Camera, ratio: Aspect): Camera =
-  { ...c, aspect: ratio, phase: PreviewStarting, epoch: c.epoch + 1, light: false, volumeKeys: false }
-pure def framedAspect(c: Camera): Aspect = if (c.mode == PhotoMode) c.aspect else FourThree
-pure val ratioValues = Set(FourThree, SixteenNine)
-pure def alwaysSixteenNineOnlyWhenListed(c: Camera): bool = c.aspect == SixteenNine implies c.bothAspects
-pure def sometimesSixteenNine(c: Camera): bool = c.aspect == SixteenNine and ready(c) and c.mode == PhotoMode
+pure def aspectAfter(a: Aspect): Aspect = if (a == Aspect4x3) Aspect16x9 else Aspect4x3
+pure def canAspectsListed(c: Camera, both: bool): bool =
+  ready(c) and c.notice == NoNotice and (both or c.aspect == Aspect4x3 or (not(recordingBusy(c)) and not(c.capturing)))
+pure def aspectsListed(c: Camera, both: bool): Camera =
+  if (both) { ...c, aspectChoice: true }
+  else if (c.aspect == Aspect16x9) { ...stopView(NoStop, c), aspect: Aspect4x3, aspectChoice: false }
+  else { ...c, aspectChoice: false }
+pure def canCycleAspect(c: Camera): bool =
+  active(c) and ready(c) and c.mode == PhotoMode and c.aspectChoice and not(recordingBusy(c)) and c.countdown == 0
+    and not(c.capturing) and not(c.binding) and not(c.hold) and not(c.modal) and c.notice == NoNotice
+pure def cycleAspect(c: Camera): Camera = { ...stopView(NoStop, c), aspect: aspectAfter(c.aspect) }
+pure def alwaysWideOnlyWhenListed(c: Camera): bool = c.aspect == Aspect16x9 implies c.aspectChoice
+pure def sometimesWideRatio(c: Camera): bool = c.aspect == Aspect16x9 and ready(c)
 ```
 
 ### A volume key press is rechecked: one shutter press, or the keys go back to Android

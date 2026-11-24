@@ -1,140 +1,123 @@
-// spec/settings/carrier.md, "Story: Give my carrier the identifiers it asks for, and keep them nowhere else"
-import { type Carrier, type FieldStatus, Machine, copyOffered, initial } from "../../gen/settings__carrier.effect.vibe"
-import { Build } from "../platform/build.vibe"
+// spec/settings/carrier.md, "The page reads nothing until the owner taps Show identifiers, and leaving forgets what it read"; spec/settings/carrier.md, "Each field shows what Android returned, or why it returned nothing"; spec/settings/carrier.md, "The EID is its own optional read, after the identifiers, and never delays them"; spec/settings/carrier.md, "Copy puts one identifier Android returned on the Android clipboard"
+import { Machine, copyable, type CopyTarget, type Event, type Field, type FieldStatus, type Hardware, type Setup, type Sim, type Slot } from "../../gen/settings__carrier.effect.vibe"
+import { type RoleHold } from "../../gen/settings__vocabulary.effect.vibe"
 import { Native } from "../platform/native.vibe"
-import { attempt, call } from "./call.vibe"
-import { CarrierField, CarrierRead, PageOpened } from "./native.schema.vibe"
+import { frontChanges, whileInFront } from "../telephony/front.vibe"
+import { CarrierFieldRead, CarrierRead } from "./carrier.schema.vibe"
 
-/** What the Carrier & SIM page shows: the read's phase and, only while it shows, the identifiers it read. */
-export interface CarrierView {
-  readonly state: Carrier
-  readonly read?: CarrierRead
-  readonly eid?: CarrierField
+/** The Alpha plugin that reads carrier activation details and opens Android's SIM and APN pages. */
+export const CARRIER_PLUGIN = "AlphaCarrierSetup"
+
+/** At most this many modem slots and active SIMs are shown; Android reports one or two. */
+const MOST = 8
+
+const STATUS: Record<CarrierFieldRead["status"], FieldStatus> = {
+  available: "Returned", "permission-denied": "AccessDenied", unavailable: "Missing", unsupported: "Unsupported", "not-read": "NotRead",
 }
 
-/** Android's own pages the Carrier & SIM page offers. */
-export type CarrierPage = "identifiers" | "sim" | "mobile" | "apn"
-
-const STATUS: Record<CarrierField["status"], FieldStatus> = {
-  available: "Available", "permission-denied": "PermissionDenied", unavailable: "Unavailable", unsupported: "Unsupported", "not-read": "FieldNotRead",
+/** A field as the page holds it: a value only where Android returned a non-empty one. */
+export function fieldOf(read: CarrierFieldRead): Field {
+  const status = STATUS[read.status] ?? "Missing"
+  const value = typeof read.value === "string" ? read.value.trim() : ""
+  if (status !== "Returned") return { status, value: "" }
+  return value === "" ? { status: "Missing", value: "" } : { status, value }
 }
 
-/** A field's value as shown, or why Android gave none. */
-export function carrierFieldText(field: CarrierField | undefined): string {
-  if (field?.status === "available" && field.value !== undefined && field.value.trim() !== "") return field.value
-  if (field?.status === "not-read") return "Not read"
-  if (field?.status === "permission-denied") return "Access denied by Android"
-  if (field?.status === "unsupported") return "Not supported on this device"
-  return "Unavailable from Android"
+/** A role as Settings words it: held by Alpha or not, not offered where Android gave no answer for it, otherwise not read. */
+export function roleRead(read: CarrierFieldRead): RoleHold {
+  const field = fieldOf(read)
+  if (field.value === "held") return "HeldByAlpha"
+  if (field.value === "not-held") return "NotHeldByAlpha"
+  return field.status === "Missing" ? "RoleUnavailable" : "RoleUnread"
 }
 
-/** The one identifier a Copy names (`imei-<slot>`, `iccid-<subscription>` or `eid`), when it has a value. */
-export function carrierIdentifier(view: CarrierView, token: string): string | undefined {
-  let field: CarrierField | undefined
-  if (token === "eid") field = view.eid
-  else if (/^imei-\d+$/.test(token)) field = view.read?.slots.find((slot) => slot.slotIndex === Number(token.slice(5)))?.imei
-  else if (/^iccid-\d+$/.test(token)) field = view.read?.subscriptions.items.find((sub) => sub.subscriptionId === Number(token.slice(6)))?.iccid
-  if (field === undefined) return undefined
-  const value = field.value?.trim() ?? ""
-  return copyOffered(STATUS[field.status], value !== "") ? value : undefined
+function index(value: number): boolean {
+  return Number.isSafeInteger(value) && value >= 0
 }
 
-/** The Carrier & SIM page: reads only on the owner's tap, holds what it read in memory only, and forgets it when the page leaves the front. */
+/** What one read returned, bounded to the slots and SIMs the page shows. */
+export function setupOf(read: CarrierRead): Setup {
+  const slots: Slot[] = read.slots.filter((slot) => index(slot.slotIndex)).slice(0, MOST)
+    .map((slot) => ({ slot: slot.slotIndex, imei: fieldOf(slot.imei), simState: fieldOf(slot.simState) }))
+  const sims: Sim[] = read.subscriptions.items.filter((sim) => index(sim.subscriptionId)).slice(0, MOST).map((sim) => ({
+    subscription: sim.subscriptionId, slot: Number.isSafeInteger(sim.slotIndex) ? sim.slotIndex : -1, embedded: sim.embedded,
+    defaultData: sim.defaultData, carrier: fieldOf(sim.carrier), simName: fieldOf(sim.name), iccid: fieldOf(sim.iccid),
+    operator: fieldOf(sim.operator), operatorCode: fieldOf(sim.operatorCode), dataEnabled: fieldOf(sim.dataEnabled),
+    dataState: fieldOf(sim.dataState), networkType: fieldOf(sim.networkType), roaming: fieldOf(sim.roaming),
+  }))
+  const hardware: Hardware = {
+    manufacturer: fieldOf(read.hardware.manufacturer), model: fieldOf(read.hardware.model), device: fieldOf(read.hardware.device),
+    android: fieldOf(read.hardware.android), baseband: fieldOf(read.hardware.baseband),
+  }
+  const simsStatus = STATUS[read.subscriptions.status] ?? "Missing"
+  return {
+    image: read.aospImage, canChooseSms: read.canChooseSms, smsRole: roleRead(read.smsRole), dialerRole: roleRead(read.dialerRole),
+    slots, simsStatus, sims: simsStatus === "Returned" ? sims : [], eid: fieldOf(read.eid), hardware,
+  }
+}
+
+/** Settings → General → Carrier & SIM setup: reads only on the owner's tap, while the page is in front, and forgets on leaving. */
 export service CarrierSetup {
-  readonly changes: Stream.Stream<CarrierView>
-  view(): CarrierView!!
-  /** The page came to the front; nothing is read. */
-  enter(): void!!
-  /** The page left, or Alpha went to the background: every identifier is forgotten and a pending reply is dropped. */
-  leave(): void!!
-  /** Show identifiers, or refresh them. */
-  show(): void!!
-  /** Read eSIM EID (optional). */
-  showEid(): void!!
-  /** Copy one identifier shown; false when there is none to copy. */
-  copy(token: string): boolean!!
-  /** Open Android's page for `page`; whether it opened that page rather than Settings' home. */
-  openAndroid(page: CarrierPage): boolean!!
+  /** One visit of the page: each stretch in front on an unlocked phone opens it empty, and leaving it or Android pausing Alpha forgets what it read. */
+  visit(): void!!
+  /** Show identifiers, or Refresh identifiers: one read of everything but the EID. */
+  read(): void!!
+  /** The optional EID read, after the identifiers. */
+  readEid(): void!!
+  /** Copy one identifier the page shows to the Android clipboard. */
+  copy(target: CopyTarget): void!!
 }
 
-/** CarrierSetup over its Machine; the identifiers live in this service's memory and nowhere else. */
+/** The page over its in-memory Machine and `AlphaCarrierSetup`; nothing it reads is stored, logged or given to the agent. */
 export const carrierSetup = Layer.effect(CarrierSetup, effect {
-  const held = try Machine
   const native = try Native
-  const onPhone = (try Build).info.variant !== "browser"
-  const shown = try SubscriptionRef.make<CarrierView>({ state: initial })
-  const ask = <A,>(plugin: string, method: string, shape: Schema.ConstraintDecoder<A>, args?: unknown) =>
-    attempt(Effect.provideService(call(plugin, method, shape, args), Native, native))
-  let read: CarrierRead | undefined
-  let eid: CarrierField | undefined
+  const carrier = try Machine
+  const front = try frontChanges()
+  const tell = effect (event: Event) => carrier.send(event) catch () => undefined
 
-  effect function publish() {
-    const state = try held.get()
-    try SubscriptionRef.set(shown, {
-      state,
-      ...(state.read === "ReadShown" && read !== undefined ? { read } : {}),
-      ...(state.eid === "EidShown" && eid !== undefined ? { eid } : {}),
-    })
-  }
-
-  effect function send(event: Parameters<typeof held.send>[0]) {
-    const after = (held.send(event) catch () => undefined)
-    const state = try held.get()
-    if (state.read !== "ReadShown") read = undefined
-    if (state.eid !== "EidShown") eid = undefined
-    try publish()
-    return after
-  }
-
-  effect function leave() {
-    if ((try held.get()).current) try send({ type: "leave" })
-    read = undefined
-    eid = undefined
-    try publish()
-  }
-
-  // Android paused Alpha: the plugin fences its own reads, and the page forgets what it showed.
-  if (onPhone) try fork.scoped effect {
-    effect {
-      for try (const _ended of native.listen("AlphaCarrierSetup", "foregroundEnded")) try leave()
-    } catch () => undefined
+  effect function ask<A>(method: string, shape: Schema.ConstraintDecoder<A>) {
+    const raw = try native.invoke(CARRIER_PLUGIN, method)
+    return try Schema.decodeUnknownEffect(shape)(raw)
   }
 
   return {
-    changes: SubscriptionRef.changes(shown),
-    view: () => SubscriptionRef.get(shown),
-    effect enter() {
-      if (!(try held.get()).current) try send({ type: "enter" })
+    effect visit() {
+      try whileInFront(front, effect () => {
+        try ensuring(effect {
+          if ((try tell({ type: "carrierShown" })) === undefined) return
+          effect {
+            for try (const _paused of native.listen(CARRIER_PLUGIN, "foregroundEnded")) {
+              try tell({ type: "carrierPaused" })
+            }
+          } catch () => undefined
+          try Effect.never
+        }, effect { try tell({ type: "carrierHidden" }) })
+      })
     },
-    leave,
-    effect show() {
-      const asked = try send({ type: "show" })
+    effect read() {
+      const asked = try tell({ type: "readAsked" })
       if (asked === undefined) return
-      const generation = asked.generation
-      const answer = onPhone ? try ask("AlphaCarrierSetup", "read", CarrierRead) : undefined
-      const current = try held.get()
-      if (answer !== undefined && current.generation === generation && current.current) read = answer
-      try send({ type: "readSettles", generation, ok: answer !== undefined })
+      const answer = (ask("read", CarrierRead) catch () => undefined)
+      if (answer === undefined) {
+        try tell({ type: "readFailed", ticket: asked.epoch })
+        return
+      }
+      try tell({ type: "readAnswered", ticket: asked.epoch, setup: setupOf(answer) })
     },
-    effect showEid() {
-      const asked = try send({ type: "showEid" })
+    effect readEid() {
+      const asked = try tell({ type: "eidAsked" })
       if (asked === undefined) return
-      const generation = asked.eidGeneration
-      const answer = try ask("AlphaCarrierSetup", "readEid", CarrierField)
-      const current = try held.get()
-      if (current.generation === generation && current.current && current.read === "ReadShown") eid = answer ?? { status: "unavailable" }
-      try send({ type: "eidSettles", generation })
+      const answer = (ask("readEid", CarrierFieldRead) catch () => undefined)
+      // A refusal is no answer: it may only mean an earlier read is still with the eSIM service, so the EID stays not read.
+      const eid: Field = answer === undefined ? { status: "NotRead", value: "" } : fieldOf(answer)
+      try tell({ type: "eidAnswered", ticket: asked.epoch, eid })
     },
-    effect copy(token: string) {
-      const view = try SubscriptionRef.get(shown)
-      const value = carrierIdentifier(view, token)
-      if (value === undefined || (try send({ type: "copy" })) === undefined) return false
-      const copied = try ask("AlphaDevice", "copyText", Schema.Unknown, { text: value })
-      return copied !== undefined
-    },
-    effect openAndroid(page: CarrierPage) {
-      const opened = try ask("AlphaCarrierSetup", "openSettings", PageOpened, { page })
-      return opened?.specific !== false && opened !== undefined
+    effect copy(target: CopyTarget) {
+      const before = try carrier.get()
+      const text = copyable(before, target)
+      if (text === "") return
+      const outcome = (Effect.as(native.invoke("AlphaDevice", "copyText", { text }), "copied") catch () => "failed")
+      try tell({ type: "copyAnswered", ticket: before.epoch, target, copied: outcome === "copied" })
     },
   }
 })

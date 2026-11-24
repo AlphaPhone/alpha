@@ -1,7 +1,8 @@
-// spec/assistant/dock.md, "Story: Open and size the chat with one gesture"; spec/assistant/dock.md, "Home keeps its bar, and a dragged height lasts only while the chat it was dragged in is open"; spec/assistant/dock.md, "Story: Size the sheet to what it shows"; spec/assistant/dock.md, "A click the platform still owes a gesture is swallowed inside its window"
+// spec/assistant/dock.md, "Story: Open and size the chat with one gesture"; spec/assistant/dock.md, "Home keeps its bar, and a dragged height lasts only while the chat it was dragged in is open"; spec/assistant/dock.md, "Story: Size the sheet to what it shows"; spec/assistant/dock.md, "A click the platform still owes a gesture is swallowed inside its window"; spec/browser/presentation.md, "A host control that appears or goes withdraws page input over the whole page until the next frame publishes its bounds"
 import { Maximize2, Minimize2, Sparkles } from "lucide-react";
 import { useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { clampSheet, halfHeight, isFlick, isTap, zoneOf, type Control, type Direction, type Dock, type Zone } from "../../../gen/assistant__dock.ts";
+import { HOST_CHROME } from "../browser/measure.ts";
 import { Button } from "../components/ui/index.ts";
 import { cn } from "../lib/cn.ts";
 
@@ -131,7 +132,7 @@ export function AssistantDockView(props: AssistantDockViewProps) {
           </div>
         </div>
       ) : chat === "Input" ? (
-        <div className="pointer-events-auto flex items-center gap-2 rounded-t-xl bg-background px-3 py-2 shadow-md" data-alpha-input-drag-background=""
+        <div {...{ [HOST_CHROME]: "" }} className="pointer-events-auto flex items-center gap-2 rounded-t-xl bg-background px-3 py-2 shadow-md" data-alpha-input-drag-background=""
           onPointerDown={press("NoControl")} onPointerMove={drag} onPointerUp={lift("NoControl")} onPointerCancel={cancel}>
           <Button variant="ghost" className="flex-1 justify-start text-muted-foreground" aria-label="Open conversation"
             onPointerDown={(event) => { event.stopPropagation(); press("OpenControl")(event); }} onPointerUp={(event) => { event.stopPropagation(); lift("OpenControl")(event); }}>
@@ -139,7 +140,7 @@ export function AssistantDockView(props: AssistantDockViewProps) {
           </Button>
         </div>
       ) : (
-        <Button className="pointer-events-auto mx-auto mb-[max(env(safe-area-inset-bottom),12px)] rounded-full" aria-label="Type"
+        <Button {...{ [HOST_CHROME]: "" }} className="pointer-events-auto mx-auto mb-[max(env(safe-area-inset-bottom),12px)] rounded-full" aria-label="Type"
           onPointerDown={press("TypeControl")} onPointerMove={drag} onPointerUp={lift("TypeControl")} onPointerCancel={cancel}>
           <Sparkles aria-hidden className="size-4" />Alpha
         </Button>

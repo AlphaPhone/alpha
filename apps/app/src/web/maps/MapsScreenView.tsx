@@ -9,7 +9,7 @@ import { basemapFor, creditsFor, type MapPlane as Plane } from "../../../gen/map
 import type { SavedItem } from "../../../gen/maps__savedPlaces.ts";
 import { canBack, mode, type Screen } from "../../../gen/maps__screen.ts";
 import { maySpeak, restricted } from "../../../gen/maps__vocabulary.ts";
-import { placeSubtitle, type MapsContentState } from "../../maps/content.vibe";
+import type { MapsContentState } from "../../maps/content.vibe";
 import { offered, outsideShown, savedFor } from "../../maps/screen.vibe";
 import type { ScreenProps } from "../app-screen.ts";
 import { Button } from "../components/ui/index.ts";
@@ -125,7 +125,7 @@ export function MapsScreenView({ route, onClose, screen, guidance, plane, saved,
                 onSearch={(text) => act((s) => Effect.andThen(s.screen.typeQuery(text), s.screen.submitSearch()))} onClearRecent={() => act((s) => s.screen.clearRecent())} />
             )}
             {view === "PlaceMode" && shown && (
-              <PlaceSheet shown={shown} subtitle={placeSubtitle(shown, screen.choice)} details={screen.details} restricted={restricted(shown.kind)} saved={savedShown}
+              <PlaceSheet shown={shown} details={screen.details} restricted={restricted(shown.kind)} saved={savedShown}
                 canDirections={screen.details === "Ready" && offered(c, screen.travel)} canCall={aosp}
                 onDirections={() => act((s) => s.screen.openDirections())}
                 onToggleSaved={(name) => act((s) => s.screen.toggleSaved(name))}

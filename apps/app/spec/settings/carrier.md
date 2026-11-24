@@ -1,98 +1,179 @@
 # Carrier & SIM setup
 
-General's Carrier & SIM setup page shows what a carrier asks for when a SIM is activated: each
-modem slot's IMEI and SIM state, each subscription's ICCID, carrier and network, and, read
-separately, the eSIM EID (PRD AP-12). The identifiers are read by `AlphaCarrierSetup` only when the
-owner asks, live only in this page's memory, and are gone the moment the page is left or Alpha goes
-to the background. They are never in a snapshot, the diagnostics export, saved shell state or the
-assistant's context: the page is a private screen to the assistant (spec/assistant/context.md). Each
-available identifier has its own Copy. A field Android did not give says why: access denied,
-unavailable or not supported. Android's About phone, SIM, mobile network and access point pages are
-one tap away, for what Alpha cannot change.
+Settings → General → Carrier & SIM setup on the phone (PRD AP-12): what a carrier asks for to
+activate a SIM on this phone. Only when the owner taps Show identifiers does Alpha read, through
+`AlphaCarrierSetup`, the IMEI and SIM state of each modem slot (with or without a SIM in it), each
+active SIM's carrier, ICCID, network operator, MCC/MNC, mobile data and roaming, which apps hold
+the SMS and phone roles, and the hardware and baseband. The eSIM's EID is a separate, optional read,
+so an eSIM service that never answers cannot hold up a physical SIM's setup. Each value shows what
+Android returned or why it did not. Values live only in this page's memory while it is in front on
+an unlocked phone: they are never stored, logged, put in a diagnostics report or given to the
+agent, and leaving the page, the phone locking or Alpha going to the background forgets them. The
+launcher is installed nonprivileged, so Android may deny the IMEI and the ICCID; the page then
+hands off to Android's own About phone, SIM, mobile network, APN and default apps pages
+([Device facts](./facts.md), "Story: Go to Android's own page"), where Alpha changes nothing.
 
 ## Domain
 
-### The page holds whether it is in front, the identifier read and the optional eSIM read, under one generation
+### The page holds its showing, the read in flight, what Android returned of each field, and the last copy
 
-`generation` fences replies: every read, refresh and clearing starts a new one, and a reply is taken
-only for the generation it was asked under. `eidGeneration` is the generation an eSIM read was asked
-under.
+`epoch` moves with every read and every change of showing, so only the latest read answers. A field
+is what Android returned, or why it returned nothing: it denied access, it has no value, the phone
+does not support it, or it was not read. The SMS and phone roles use the words every Settings page
+uses ([Settings vocabulary](./vocabulary.md)): held by Alpha, not held by Alpha, not offered on this
+phone, or not read.
 
 ```quint
-type ReadPhase = NotRead | Reading | ReadShown | ReadFailed
-type EidPhase = EidNotRead | EidReading | EidShown
-type Carrier = { current: bool, read: ReadPhase, eid: EidPhase, generation: int, eidGeneration: int, reads: int, copies: int, dropped: int }
-pure val initial: Carrier = { current: false, read: NotRead, eid: EidNotRead, generation: 0, eidGeneration: 0, reads: 0, copies: 0, dropped: 0 }
-pure def forgotten(fresh: int, c: Carrier): Carrier = { ...c, read: NotRead, eid: EidNotRead, generation: fresh }
-pure val generationValues = Set(0, 1, 2, 3)
+import vocabulary.* from "./vocabulary"
+
+type FieldStatus = Returned | AccessDenied | Missing | Unsupported | NotRead
+type Field = { status: FieldStatus, value: str }
+type Slot = { slot: int, imei: Field, simState: Field }
+type Sim = {
+  subscription: int, slot: int, embedded: bool, defaultData: bool, carrier: Field, simName: Field, iccid: Field,
+  operator: Field, operatorCode: Field, dataEnabled: Field, dataState: Field, networkType: Field, roaming: Field,
+}
+type Hardware = { manufacturer: Field, model: Field, device: Field, android: Field, baseband: Field }
+type Setup = {
+  image: bool, canChooseSms: bool, smsRole: RoleHold, dialerRole: RoleHold, slots: List[Slot],
+  simsStatus: FieldStatus, sims: List[Sim], eid: Field, hardware: Hardware,
+}
+type CarrierPhase = CarrierClosed | CarrierIdle | CarrierReading | CarrierShown | CarrierFailed
+type TargetKind = NoTarget | ImeiTarget | IccidTarget | EidTarget
+type CopyTarget = { kind: TargetKind, index: int }
+type Copy = { target: CopyTarget, copied: bool }
+type Carrier = { shown: bool, epoch: int, phase: CarrierPhase, setup: Setup, eidReading: bool, copy: Copy }
+pure val notRead: Field = { status: NotRead, value: "" }
+pure val noHardware: Hardware = { manufacturer: notRead, model: notRead, device: notRead, android: notRead, baseband: notRead }
+pure val noSetup: Setup = {
+  image: false, canChooseSms: false, smsRole: RoleUnread, dialerRole: RoleUnread, slots: List(),
+  simsStatus: NotRead, sims: List(), eid: notRead, hardware: noHardware,
+}
+pure val noSlot: Slot = { slot: -1, imei: notRead, simState: notRead }
+pure val noSim: Sim = {
+  subscription: -1, slot: -1, embedded: false, defaultData: false, carrier: notRead, simName: notRead, iccid: notRead,
+  operator: notRead, operatorCode: notRead, dataEnabled: notRead, dataState: notRead, networkType: notRead, roaming: notRead,
+}
+pure val noTarget: CopyTarget = { kind: NoTarget, index: -1 }
+pure val noCopy: Copy = { target: noTarget, copied: false }
+pure val initial: Carrier = { shown: false, epoch: 0, phase: CarrierClosed, setup: noSetup, eidReading: false, copy: noCopy }
+pure val ticketValues = Set(0, 1, 2, 3)
+pure val setupValues = Set(noSetup)
+  .union(Set({ ...noSetup, smsRole: NotHeldByAlpha, dialerRole: NotHeldByAlpha, simsStatus: Returned, slots: List(
+    { slot: 0, imei: { status: Returned, value: "123456789012345" }, simState: { status: Returned, value: "No SIM" } },
+    { slot: 1, imei: { status: AccessDenied, value: "" }, simState: { status: Returned, value: "No SIM" } }) }))
+  .union(Set({ ...noSetup, image: true, canChooseSms: true, smsRole: NotHeldByAlpha, dialerRole: HeldByAlpha, simsStatus: Returned,
+    slots: List({ slot: 0, imei: { status: Returned, value: "123456789012345" }, simState: { status: Returned, value: "Ready" } }),
+    sims: List({ ...noSim, subscription: 1, slot: 0, defaultData: true, carrier: { status: Returned, value: "Carrier" }, iccid: { status: Returned, value: "8901260000000000000" } }) }))
+  .union(Set({ ...noSetup, simsStatus: AccessDenied, eid: { status: Unsupported, value: "" } }))
+pure val eidValues = Set({ status: Returned, value: "89049032000000000000000000000000" }).union(Set({ status: Missing, value: "" }))
+  .union(Set(notRead))
+pure val targetValues = Set(noTarget)
+  .union(Set({ kind: ImeiTarget, index: 0 })).union(Set({ kind: ImeiTarget, index: 1 }))
+  .union(Set({ kind: IccidTarget, index: 1 })).union(Set({ kind: EidTarget, index: -1 }))
 ```
 
-## Story: Give my carrier the identifiers it asks for, and keep them nowhere else
+## Story: Read what my carrier needs to activate a SIM
 
-> As the owner activating a SIM, I tap Show identifiers to see my IMEIs and SIM numbers, copy the
-> one my carrier asks for, and know they leave the screen as soon as I do.
+> As the owner setting up a carrier, I want Settings to show this phone's IMEI, SIM state, ICCID,
+> EID, carrier and network facts when I ask, copy one to give the carrier, and forget them all when
+> I leave the page.
 
-### An identifier read starts only from Show identifiers on the page in front, never on opening or returning
+### The page reads nothing until the owner taps Show identifiers, and leaving forgets what it read
 
-Opening the page, coming back to it or Alpha returning to the foreground reads nothing; only the
-owner's Show identifiers (or Refresh identifiers) tap does, one read at a time.
+Opening the page, coming back to Alpha or unlocking the phone reads nothing. A read that answers
+after the page left, after Android paused Alpha, or after a newer read began changes nothing. The
+IMEI is read for every modem slot Android reports, before and without any SIM.
 
 ```quint
-pure def canEnter(c: Carrier): bool = not(c.current)
-pure def enter(c: Carrier): Carrier = { ...c, current: true }
-pure def canShow(c: Carrier): bool = c.current and c.read != Reading
-pure def show(c: Carrier): Carrier = { ...forgotten(c.generation + 1, c), read: Reading, reads: c.reads + 1 }
-pure def canReadSettles(c: Carrier, generation: int, ok: bool): bool = c.read == Reading and generation >= 0
-pure def readSettles(c: Carrier, generation: int, ok: bool): Carrier =
-  if (generation != c.generation or not(c.current)) { ...c, dropped: c.dropped + 1 }
-  else { ...c, read: if (ok) ReadShown else ReadFailed }
-pure def stepEnteringReadsNothing(before: Carrier, via: str, after: Carrier): bool = via == "enter" implies after.reads == before.reads
-pure def sometimesShown(c: Carrier): bool = c.read == ReadShown
+pure def canCarrierShown(c: Carrier): bool = not(c.shown)
+pure def carrierShown(c: Carrier): Carrier = { ...initial, shown: true, epoch: c.epoch + 1, phase: CarrierIdle }
+pure def canCarrierHidden(c: Carrier): bool = c.shown
+pure def carrierHidden(c: Carrier): Carrier = { ...initial, epoch: c.epoch + 1 }
+pure def canCarrierPaused(c: Carrier): bool = c.shown and c.phase != CarrierIdle
+pure def carrierPaused(c: Carrier): Carrier = { ...initial, shown: true, epoch: c.epoch + 1, phase: CarrierIdle }
+pure def canReadAsked(c: Carrier): bool = c.shown and c.phase != CarrierReading
+pure def readAsked(c: Carrier): Carrier =
+  { ...c, epoch: c.epoch + 1, phase: CarrierReading, setup: noSetup, eidReading: false, copy: noCopy }
+pure def canReadAnswered(c: Carrier, ticket: int, setup: Setup): bool = c.phase == CarrierReading and ticket == c.epoch
+pure def readAnswered(c: Carrier, ticket: int, setup: Setup): Carrier = { ...c, phase: CarrierShown, setup: setup }
+pure def canReadFailed(c: Carrier, ticket: int): bool = c.phase == CarrierReading and ticket == c.epoch
+pure def readFailed(c: Carrier, ticket: int): Carrier = { ...c, phase: CarrierFailed }
+pure def alwaysShownExactlyWhileOpen(c: Carrier): bool = c.shown iff c.phase != CarrierClosed
+pure def alwaysOnlyAShownReadHoldsIdentifiers(c: Carrier): bool =
+  c.phase != CarrierShown implies (c.setup == noSetup and not(c.eidReading) and c.copy == noCopy)
+pure def stepAReadBeginsOnlyWhenTheOwnerAsks(before: Carrier, via: str, after: Carrier): bool =
+  (after.phase == CarrierReading and before.phase != CarrierReading) implies via == "readAsked"
+pure def stepOnlyTheLatestReadAnswers(before: Carrier, via: str, after: Carrier): bool =
+  (via == "readAnswered" or via == "readFailed") implies (before.phase == CarrierReading and after.epoch == before.epoch)
+pure def stepLeavingForgetsEverything(before: Carrier, via: str, after: Carrier): bool =
+  (via == "carrierHidden" or via == "carrierPaused") implies (after.setup == noSetup and after.copy == noCopy and after.epoch > before.epoch)
+pure def sometimesIdentifiersShown(c: Carrier): bool = c.phase == CarrierShown and c.setup.slots.length() > 1
+pure def sometimesAnActiveSimShown(c: Carrier): bool = c.phase == CarrierShown and c.setup.sims.length() > 0
+pure def sometimesTheReadFailed(c: Carrier): bool = c.phase == CarrierFailed
 ```
 
-### Leaving the page or Alpha going to the background clears every identifier, and a late reply is dropped
+### Each field shows what Android returned, or why it returned nothing
 
-A reply to a read asked before the page was left, even if the owner came back, shows nothing.
+Android may deny the IMEI or ICCID to a nonprivileged launcher, have no value for a field, or not
+support it; the page says which, field by field, and never shows a value Android did not return.
 
 ```quint
-pure def canLeave(c: Carrier): bool = c.current
-pure def leave(c: Carrier): Carrier = { ...forgotten(c.generation + 1, c), current: false }
-pure def alwaysIdentifiersOnlyOnThePageInFront(c: Carrier): bool = (c.read == ReadShown or c.eid == EidShown) implies c.current
-pure def sometimesALateReplyDropped(c: Carrier): bool = c.current and c.read == Reading and c.dropped >= 1 and c.reads >= 2
+pure def returnedValue(f: Field): str = if (f.status == Returned) f.value else ""
+pure def lawOnlyAReturnedFieldHasAValue(f: Field): bool = f.status != Returned implies returnedValue(f) == ""
+pure val fValues = Set(notRead).union(Set({ status: Returned, value: "Ready" })).union(Set({ status: AccessDenied, value: "x" }))
+  .union(Set({ status: Unsupported, value: "" }))
 ```
 
-### The eSIM EID is a separate, optional read, so an eSIM that cannot answer never holds up the SIM
+### The EID is its own optional read, after the identifiers, and never delays them
 
-`Read eSIM EID (optional)` is offered once the identifiers show. Refreshing them while the eSIM read
-is pending drops its reply.
+The first read never asks the eSIM service; the owner asks for the EID separately, and a phone
+without an eSIM offers no EID read. A read Android refused without answering, such as one asked
+while an earlier read is still with the eSIM service, leaves the EID not read, so it is never shown
+as unavailable and can be asked again.
 
 ```quint
-pure def canShowEid(c: Carrier): bool = c.current and c.read == ReadShown and c.eid != EidReading
-pure def showEid(c: Carrier): Carrier = { ...c, eid: EidReading, eidGeneration: c.generation }
-pure def canEidSettles(c: Carrier, generation: int): bool = c.eid == EidReading and generation >= 0
-pure def eidSettles(c: Carrier, generation: int): Carrier =
-  if (generation != c.generation or generation != c.eidGeneration or not(c.current) or c.read != ReadShown) { ...c, eid: EidNotRead }
-  else { ...c, eid: EidShown }
-pure def alwaysAnEidOnlyBesideTheIdentifiers(c: Carrier): bool = c.eid == EidShown implies c.read == ReadShown
-pure def sometimesEidShown(c: Carrier): bool = c.eid == EidShown
+pure def canEidAsked(c: Carrier): bool = c.phase == CarrierShown and not(c.eidReading) and c.setup.eid.status != Unsupported
+pure def eidAsked(c: Carrier): Carrier = { ...c, eidReading: true }
+pure def canEidAnswered(c: Carrier, ticket: int, eid: Field): bool = c.eidReading and ticket == c.epoch
+pure def eidAnswered(c: Carrier, ticket: int, eid: Field): Carrier =
+  { ...c, eidReading: false, setup: { ...c.setup, eid: eid }, copy: noCopy }
+pure def alwaysTheEidIsReadOnlyWhileShown(c: Carrier): bool = c.eidReading implies c.phase == CarrierShown
+pure def stepTheEidChangesOnlyByItsOwnRead(before: Carrier, via: str, after: Carrier): bool =
+  (before.phase == CarrierShown and after.phase == CarrierShown and after.setup.eid != before.setup.eid) implies via == "eidAnswered"
+pure def sometimesTheEidRead(c: Carrier): bool = c.phase == CarrierShown and c.setup.eid.status == Returned
 ```
 
-### Each identifier shown has its own Copy, which works only on the page in front
+### Copy puts one identifier Android returned on the Android clipboard
 
-Copy puts exactly that one value on the clipboard; a field with no value has no Copy.
+Only an IMEI, an ICCID or the EID the page shows can be copied, one at a time, and the page marks
+the one copied or says it could not be copied.
 
 ```quint
-pure def canCopy(c: Carrier): bool = c.current and c.read == ReadShown
-pure def copy(c: Carrier): Carrier = { ...c, copies: c.copies + 1 }
-pure def stepCopyingReadsNothing(before: Carrier, via: str, after: Carrier): bool =
-  via == "copy" implies (after.reads == before.reads and after.read == before.read)
+pure def fieldAt(c: Carrier, t: CopyTarget): Field =
+  if (t.kind == ImeiTarget) c.setup.slots.select(s => s.slot == t.index).nthOr(0, noSlot).imei
+  else if (t.kind == IccidTarget) c.setup.sims.select(s => s.subscription == t.index).nthOr(0, noSim).iccid
+  else if (t.kind == EidTarget) c.setup.eid
+  else notRead
+pure def copyable(c: Carrier, t: CopyTarget): str = if (c.phase == CarrierShown) returnedValue(fieldAt(c, t)) else ""
+pure def canCopyAnswered(c: Carrier, ticket: int, target: CopyTarget, copied: bool): bool =
+  ticket == c.epoch and copyable(c, target) != ""
+pure def copyAnswered(c: Carrier, ticket: int, target: CopyTarget, copied: bool): Carrier = { ...c, copy: { target: target, copied: copied } }
+pure def alwaysTheCopyNamesAShownIdentifier(c: Carrier): bool = c.copy != noCopy implies copyable(c, c.copy.target) != ""
+pure def lawNothingIsCopyableBeforeARead(target: CopyTarget): bool = copyable(initial, target) == ""
+pure def sometimesCopied(c: Carrier): bool = c.copy.copied
 ```
 
-### A field Android did not give says why
+### General offers the page on the phone only, and the default SMS app choice only where Alpha can take it
+
+A browser has no carrier to read; the launcher and the Alpha image both offer the page. The choice of default SMS app hands off to Android's default apps
+page only when Android reports the SMS role available to Alpha and not held by it, which is on the
+Alpha image.
 
 ```quint
-type FieldStatus = Available | PermissionDenied | Unavailable | Unsupported | FieldNotRead
-pure def copyOffered(status: FieldStatus, hasValue: bool): bool = status == Available and hasValue
-pure def lawOnlyAnAvailableValueIsCopied(status: FieldStatus, hasValue: bool): bool =
-  copyOffered(status, hasValue) implies (status == Available and hasValue)
+pure def carrierOffered(aosp: bool, onPhone: bool): bool = onPhone
+pure def lawNoCarrierPageInABrowser(aosp: bool): bool = not(carrierOffered(aosp, false))
+pure def lawOfferedOnTheLauncherAndTheImage(aosp: bool): bool = carrierOffered(aosp, true)
+pure def smsChoiceOffered(c: Carrier): bool = c.phase == CarrierShown and c.setup.canChooseSms
+pure def alwaysNoSmsChoiceBeforeARead(c: Carrier): bool = c.phase != CarrierShown implies not(smsChoiceOffered(c))
 ```

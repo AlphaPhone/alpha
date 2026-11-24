@@ -1,8 +1,7 @@
-// spec/camera/viewfinder.md, "Story: Take photos"; spec/camera/viewfinder.md, "Story: Record videos"; spec/camera/viewfinder.md, "Story: Recover when the camera is denied or stops"; spec/camera/focus.md, "Story: Focus where I tap"
+// spec/camera/viewfinder.md, "Story: Take photos"; spec/camera/viewfinder.md, "Story: Record videos"; spec/camera/viewfinder.md, "Story: Recover when the camera is denied or stops"; spec/camera/focus.md, "Story: Focus where I tap"; spec/camera/viewfinder.md, "Photo mode offers 4:3 or 16:9 when the bound camera lists both, and a new ratio restarts the preview with it"
 import { Camera as CameraIcon, ChevronLeft, CameraOff, Flashlight, FlashlightOff, Grid3x3, MicOff, RefreshCcw, Timer, Zap, ZapOff } from "lucide-react";
 import { useRef } from "react";
-import type { Aspect, Camera, Event } from "../../../gen/camera__viewfinder.ts";
-import { framedAspect, otherAspect } from "../../../gen/camera__viewfinder.ts";
+import type { Camera, Event } from "../../../gen/camera__viewfinder.ts";
 import { cn, focusRing } from "../lib/cn.ts";
 import { Button } from "../components/ui/index.ts";
 import { accessDetail, recordingLabel } from "../../camera/messages.vibe";
@@ -26,10 +25,10 @@ export interface CameraActions {
   cycleTimer(): void;
   /** The framing grid on or off. */
   toggleGrid(): void;
+  /** The photo aspect ratio 4:3 or 16:9. */
+  cycleAspect(): void;
   /** Video's light on or off. */
   toggleLight(): void;
-  /** Photo's 4:3 or 16:9. */
-  pickAspect(ratio: Aspect): void;
   /** Focus at a point of the viewfinder, each coordinate from 0 to 1. */
   focusAt(x: number, y: number): void;
   /** Restart a denied or stopped camera. */
@@ -63,8 +62,6 @@ export interface CameraViewProps {
 }
 
 const ZOOM_STOPS: readonly [number, string][] = [[5, ".5"], [10, "1×"], [20, "2"], [50, "5"]];
-
-const ASPECT_LABEL: Record<Aspect, string> = { FourThree: "4:3", SixteenNine: "16:9" };
 
 /**
  * Camera: the viewfinder, its controls, the shutter and the last capture.
@@ -114,10 +111,8 @@ export function CameraView({ camera, said, can, browser, actions }: CameraViewPr
         }}
       >
         {camera.grid && camera.phase === "PreviewReady" && (
-          <span aria-hidden className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <span className="grid w-full grid-cols-3 grid-rows-3" style={{ aspectRatio: framedAspect(camera) === "SixteenNine" ? "9 / 16" : "3 / 4" }}>
-              {Array.from({ length: 9 }, (_, at) => <span key={at} className="border border-background/40" />)}
-            </span>
+          <span aria-hidden className="pointer-events-none absolute inset-0 grid grid-cols-3 grid-rows-3">
+            {Array.from({ length: 9 }, (_, at) => <span key={at} className="border border-background/40" />)}
           </span>
         )}
         {camera.capturing && <span aria-hidden className="pointer-events-none absolute inset-0 animate-pulse bg-background/20" />}
@@ -139,16 +134,16 @@ export function CameraView({ camera, said, can, browser, actions }: CameraViewPr
             {camera.timer > 0 && <span className="font-mono text-xs">{camera.timer}</span>}
           </Button>
         )}
+        {photo && can({ type: "cycleAspect" }) && (
+          <Button variant="ghost" size="icon" className="w-auto min-w-9 px-2 font-mono text-xs" aria-label={`Aspect ratio ${camera.aspect === "Aspect16x9" ? "16:9" : "4:3"}`} onClick={actions.cycleAspect}>
+            {camera.aspect === "Aspect16x9" ? "16:9" : "4:3"}
+          </Button>
+        )}
         {can({ type: "toggleGrid" }) && <Button variant="ghost" size="icon" aria-label="Framing grid" aria-pressed={camera.grid} onClick={actions.toggleGrid}><Grid3x3 /></Button>}
         {photo && can({ type: "cycleFlash" }) && (
           <Button variant="ghost" size="icon" aria-label={camera.flash === "FlashAuto" ? "Flash auto" : camera.flash === "FlashOn" ? "Flash on" : "Flash off"} onClick={actions.cycleFlash}>
             {camera.flash === "FlashOff" ? <ZapOff /> : <Zap />}
             {camera.flash === "FlashAuto" && <span className="font-mono text-xs">A</span>}
-          </Button>
-        )}
-        {photo && can({ type: "pickAspect", ratio: otherAspect(camera.aspect) }) && (
-          <Button variant="ghost" size="sm" aria-label={`Photo aspect ratio ${ASPECT_LABEL[camera.aspect]}`} onClick={() => actions.pickAspect(otherAspect(camera.aspect))}>
-            <span className="font-mono text-xs">{ASPECT_LABEL[camera.aspect]}</span>
           </Button>
         )}
         {!photo && can({ type: "toggleLight" }) && (

@@ -1,11 +1,13 @@
-// spec/settings/index.md, "Story: Find a setting in a few taps"; spec/settings/index.md, "A page opens from its parent, and Back returns to that parent"; spec/settings/passwords.md, "Story: Use my saved passwords only after Android unlocks them"; spec/settings/passwords.md, "Android's Back cancels a pending confirmation first, then closes the entry shown"; spec/settings/updates.md, "Story: Let Android finish an update without losing what I typed"
+// spec/settings/index.md, "Story: Find a setting in a few taps"; spec/settings/index.md, "A page opens from its parent, and Back returns to that parent"; spec/settings/passwords.md, "Story: Use my saved passwords only after Android unlocks them"; spec/settings/passwords.md, "Android's Back cancels a pending confirmation first, then closes the entry shown"; spec/settings/updates.md, "Story: Let Android finish an update without losing what I typed"; spec/settings/carrier.md, "The page reads nothing until the owner taps Show identifiers, and leaving forgets what it read"
 import { Effect } from "effect";
 import { KeyRound, Settings as Gear } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useMachine as useNavigation } from "../../../gen/settings.react.ts";
 import { initial as navigationStart } from "../../../gen/settings.ts";
 import { useMachine as useAppearance } from "../../../gen/settings__appearance.react.ts";
 import { dark, initial as appearanceStart } from "../../../gen/settings__appearance.ts";
+import { useMachine as useCarrier } from "../../../gen/settings__carrier.react.ts";
+import { initial as carrierStart } from "../../../gen/settings__carrier.ts";
 import { useMachine as useDiagnostics } from "../../../gen/settings__diagnostics.react.ts";
 import { initial as diagnosticsStart } from "../../../gen/settings__diagnostics.ts";
 import { useMachine as useFacts } from "../../../gen/settings__facts.react.ts";
@@ -26,7 +28,6 @@ import { Build } from "../../platform/build.vibe";
 import { Native } from "../../platform/native.vibe";
 import { Appearance } from "../../settings/appearance.vibe";
 import { CarrierSetup } from "../../settings/carrier.vibe";
-import { initial as carrierStart } from "../../../gen/settings__carrier.ts";
 import { Diagnostics } from "../../settings/diagnostics.vibe";
 import { DeviceFacts } from "../../settings/facts.vibe";
 import { SettingsPages } from "../../settings/navigation.vibe";
@@ -40,12 +41,12 @@ import { useAccountRows } from "../account/index.tsx";
 import type { AppScreen, AppSurface, ScreenProps } from "../app-screen.ts";
 import { NotificationsSettings } from "../shell/NotificationsPage.tsx";
 import type { DevCommand } from "./DeveloperPage.tsx";
+import { CarrierPage } from "./CarrierPage.tsx";
 import { backDialog, closeDialog, openDialog, useDialog } from "./dialogs.ts";
 import { PasswordsScreen } from "./PasswordsScreen.tsx";
 import { SettingsScreen } from "./SettingsScreen.tsx";
 import { UpdateActivation } from "./UpdateActivation.tsx";
-import { now, perform, useServiceStream } from "../shell/services.ts";
-import { CarrierSetupPage } from "./CarrierSetupPage.tsx";
+import { now, perform, start } from "../shell/services.ts";
 import { runtime } from "./runtime.ts";
 import { testMocksBuilt } from "../../platform/build-flags.ts";
 
@@ -122,7 +123,7 @@ function SettingsApp({ onClose }: ScreenProps) {
       dialog={dialog}
       onDialog={(next) => (next === undefined ? closeDialog() : openDialog(nav, next))}
       notifications={<NotificationsSettings />}
-      carrier={<CarrierApp native={variant !== "browser"} />}
+      carrier={<CarrierSettings />}
       privacy={{ route, listener: privacyMachine.state ?? privacyStart, aosp: variant === "aosp" }}
       privacyActs={{
         stop: (stop) => void perform(Effect.flatMap(Effect.service(PrivacyRow), (p) => p.stop(stop))),
@@ -147,13 +148,24 @@ function SettingsApp({ onClose }: ScreenProps) {
   );
 }
 
-/** The Carrier & SIM page over its session: what it read lives in the session's memory, not in the shell. */
-function CarrierApp({ native }: { native: boolean }) {
-  const view = useServiceStream("settings-carrier", Effect.map(Effect.service(CarrierSetup), (c) => c.changes), { state: carrierStart });
-  const carrier = <A,>(use: (c: CarrierSetup.Shape) => Effect.Effect<A>) => void perform(Effect.flatMap(Effect.service(CarrierSetup), use));
+const carrier = <A,>(use: (c: CarrierSetup.Shape) => Effect.Effect<A>) => perform(Effect.flatMap(Effect.service(CarrierSetup), use));
+
+/** Carrier & SIM setup while it is mounted: each stretch in front opens it empty, and leaving forgets what it read. */
+function CarrierSettings() {
+  const state = useCarrier(runtime).state ?? carrierStart;
+  const visit = useCallback((node: HTMLElement | null) => {
+    if (!node) return;
+    return start(Effect.flatMap(Effect.service(CarrierSetup), (c) => c.visit()));
+  }, []);
   return (
-    <CarrierSetupPage view={view} native={native} onShow={() => carrier((c) => c.show())} onShowEid={() => carrier((c) => c.showEid())}
-      onCopy={(token) => carrier((c) => c.copy(token))} onAndroid={(page) => carrier((c) => c.openAndroid(page))} />
+    <div ref={visit} className="contents">
+      <CarrierPage carrier={state} acts={{
+        read: () => void carrier((c) => c.read()),
+        readEid: () => void carrier((c) => c.readEid()),
+        copy: (target) => void carrier((c) => c.copy(target)),
+        openPage: (page) => void perform(Effect.flatMap(Effect.service(DeviceFacts), (f) => f.openPage(page))),
+      }} />
+    </div>
   );
 }
 

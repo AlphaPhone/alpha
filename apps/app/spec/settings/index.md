@@ -16,8 +16,8 @@ test mocks.
 - [Reset](./reset.md): erasing Alpha's data after a native review.
 - [Diagnostics](./diagnostics.md): the problem log, the diagnostics export and the licences.
 - [Passwords](./passwords.md): Alpha's password vault, unlocked only by Android.
+- [Carrier & SIM setup](./carrier.md): IMEI, SIM, ICCID and EID read on request, for activating a SIM.
 - [Native custody](./native.md): what the native updater, reset and stores guarantee the renderer.
-- [Carrier & SIM setup](./carrier.md): the identifiers a carrier asks for, read only on request and kept nowhere.
 
 ## Story: Find a setting in a few taps
 
@@ -27,7 +27,7 @@ test mocks.
 ### Settings has a root, four categories and the pages each category opens
 
 General's Notifications opens the notifications page Clock's mirror keeps, and its Carrier & SIM
-setup opens the page of identifiers a carrier asks for (spec/settings/carrier.md). The root's Account row
+setup opens the page that reads a carrier's activation details on request ([Carrier & SIM setup](./carrier.md)). The root's Account row
 shows the account's email or sign-in state and its AI provider row Own key or Cloud, as the account
 reports them.
 

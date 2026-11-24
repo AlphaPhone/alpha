@@ -36,9 +36,6 @@ public final class AlphaNotificationProjection {
         public boolean acceptPage(JSONObject envelope, JSONObject requestedCursor) throws Exception { return inbox.acceptPage(envelope, requestedCursor); }
     }
 
-    /** Names the channel groups Alpha itself assigns, so the shared routing does not read them as the owner's customisation. */
-    public static void setHostAssignedGroups(java.util.Collection<String> groups) { NativeNotificationChannels.setHostAssignedGroups(groups); }
-
     public static boolean post(Context context, Class<? extends Activity> tapComponent, String owner, JSONObject notification) throws Exception {
         return NativeNotificationProjector.post(context, tapComponent, owner, notification);
     }
@@ -56,4 +53,7 @@ public final class AlphaNotificationProjection {
     public static JSONObject page(JSONObject input, JSONObject cursor) throws Exception { return NativeNotificationWire.page(input, cursor); }
 
     public static String view(String deepLink) { return NativeNotificationRoute.view(deepLink); }
+
+    /** The channel groups Alpha itself assigns to eliza_updates, so the shared routing does not read them as an owner choice. */
+    public static void setHostAssignedGroups(java.util.Collection<String> groups) { NativeNotificationChannels.setHostAssignedGroups(groups); }
 }

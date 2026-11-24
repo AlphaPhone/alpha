@@ -7,7 +7,7 @@ import { GoogleAccounts } from "../../src/account/google.vibe"
 import { authorityOf, stripePageAllowed } from "../../src/account/deployment.ts"
 import { clefAllows, limitDisplay, limitOfError, limitOfRefusal, readLimit } from "../../src/account/limits.vibe"
 import { CloudUnavailable } from "../../src/platform/cloud.vibe"
-import { normalizeSignInPhone, SignInScreen } from "../../src/account/signIn.vibe"
+import { SignInScreen } from "../../src/account/signIn.vibe"
 import {
   accountRowsOf, agentBindingOf, attentionOf, connectionFactsOf, idleOf, mapsBindingOf, planLimitOf, powerLaunchOf, readyChipsOf, storageOwnerOf, voiceAccountOf
 } from "../../src/account/bindings.vibe"
@@ -139,11 +139,6 @@ it.live(`Connect Google for one capability after a current read, keeping what it
 })
 
 // spec/account/limits.md, "Story: Know when I can use a limited service again"
-it.effect(`Send a typed phone number in E.164 (spec/account/signIn.md, "A typed phone number is sent in E.164, and no country is guessed")`, () => effect {
-  const typed = [" (415) 555-0100 ", "1-415-555-0100", "0044 20 7946 0958", "+44 (20) 7946-0958", "+1 (415) 555-010a", "020 7946 0958"]
-  try Effect.try(() => assert.deepStrictEqual(typed.map(normalizeSignInPhone), ["+14155550100", "+14155550100", "+442079460958", "+442079460958", "+1415555010a", "02079460958"]))
-})
-
 it.effect(`Read a refusal's wait (spec/account/limits.md, "Story: Know when I can use a limited service again")`, () => effect {
   const at = 1_000_000
   const fromBody = readLimit(null, { error: { code: "rate_limited", retryAfterSeconds: 0.2 } }, at)

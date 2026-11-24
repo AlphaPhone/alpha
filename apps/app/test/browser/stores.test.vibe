@@ -40,6 +40,40 @@ it.live("a bookmark is written only after the list was read, keeps the page's na
   })
 })
 
+// spec/browser/bookmarks.md, "A read replaces the marks with the store's list, keeping each saved name, and a failed read is reported, or offered for recovery once when the list is damaged"
+it.live("after a cold start each bookmark has the name the store sealed with it, a save sends the page's name and a removal sends none", () => effect {
+  const bread = { url: "https://recipes.test/bread", title: "Bread" }
+  const fake = try fakeHost({
+    answers: {
+      bookmarks: () => ({ urls: [bread.url, "https://old.test/"], entries: [bread, { url: "https://old.test/" }] }),
+      setBookmark: (args) => args.saved === true
+        ? { urls: [String(args.url), bread.url], entries: [{ url: String(args.url), ...(typeof args.title === "string" ? { title: args.title } : {}) }, bread] }
+        : { urls: [bread.url], entries: [bread] },
+    },
+  })
+  try scoped(effect {
+    provide fake.live {
+      const marks = try BrowserBookmarks
+      try marks.refresh(false)
+      const cold = (try marks.get()).marks
+      try marks.set("https://example.test/a", "Article", true)
+      const saved = (try marks.get()).marks
+      try marks.set("https://example.test/a", "Article", false)
+      try marks.set("https://example.test/b", "https://example.test/b", true)
+      const writes = (try callsTo(fake.calls, "setBookmark")).map((c) => ({ url: c.args.url, saved: c.args.saved, title: c.args.title }))
+      try Effect.try(() => assert.deepStrictEqual({ cold, saved, writes }, {
+        cold: [bread, { url: "https://old.test/", title: "" }],
+        saved: [{ url: "https://example.test/a", title: "Article" }, bread],
+        writes: [
+          { url: "https://example.test/a", saved: true, title: "Article" },
+          { url: "https://example.test/a", saved: false, title: undefined },
+          { url: "https://example.test/b", saved: true, title: undefined },
+        ],
+      }))
+    }
+  })
+})
+
 // spec/browser/bookmarks.md, "Opening Browser, resuming the app, a visible return and a changed bookmark document each ask for one refresh"
 it.live("another tab's change to the bookmark document is read again, and another session's is not", () => effect {
   const saved = try Ref.make<readonly string[]>([])

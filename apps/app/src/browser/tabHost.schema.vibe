@@ -17,6 +17,7 @@ export schema StateChanged {
   readonly private?: boolean
   readonly surfaceResumed?: boolean
   readonly externalOnly?: boolean
+  readonly elsewhereUrl?: string
 }
 
 /** A pop-up or `target=_blank` link the host opened as a tab. */
@@ -62,9 +63,16 @@ export schema ShowDownloads {
   readonly session: string
 }
 
-/** The bookmark list the store returned. */
+/** One saved bookmark with the name the store sealed with it, when it has one. */
+export schema MarkEntry {
+  readonly url: string
+  readonly title?: string
+}
+
+/** The bookmark list the store returned; a host from before bookmark names sends `urls` only. */
 export schema MarkList {
   readonly urls: ReadonlyArray<string>
+  readonly entries?: ReadonlyArray<MarkEntry>
 }
 
 /** One saved tab. */

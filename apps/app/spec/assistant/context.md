@@ -128,10 +128,6 @@ pure val warmValues = Set(true, false)
 
 ### A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn
 
-The private screens are Passwords, Account and Settings' Carrier & SIM setup page, which shows the
-phone's IMEIs, SIM numbers and EID (spec/settings/carrier.md): on them the view, its selection and
-its revision are not observed.
-
 The calendar day goes only to the process instance the client learned and
 compared for this turn; the location goes only to a peer whose turn
 observation support declares it. A turn retired before it is posted posts
@@ -147,6 +143,31 @@ pure def lawAnUnobservedScreenSendsNoOptionalField(onCalendar: bool, peerFields:
 pure val peerFieldsValues = Set({ compared: true, declaresLocation: true }, { compared: false, declaresLocation: true }, { compared: true, declaresLocation: false })
 pure def lawAnUncomparedPeerGetsNoDay(observed: bool, onCalendar: bool): bool =
   not(sendsDay(observed, onCalendar, { compared: false, declaresLocation: true }))
+```
+
+### A spoken turn carries the screen context a typed turn sent at that moment would
+
+Each turn of a voice conversation reads the screen again when it is sent
+and tells the agent what a typed message sent then would: the observation
+with its calendar day, location and selected record, the Browser page
+beside it, and the direct-request mode of [Review](./review.md), each by
+the rules of this spec. A private screen sends none of it. The view fields
+of a typed turn's own view claim stay with typed turns; a voice
+conversation follows the agent's screen through its own claim
+(`spec/voice/conversation.md`).
+
+```quint
+type TurnSource = TypedTurn | SpokenTurn
+type TurnField = ObservationField | PageField | DirectModeField | ViewClaimField
+pure def carries(source: TurnSource, part: TurnField, observed: bool, directMode: bool): bool =
+  if (part == ViewClaimField) source == TypedTurn
+  else if (part == DirectModeField) directMode
+  else sendsObservation(observed)
+pure def lawASpokenTurnCarriesWhatATypedTurnDoesButItsViewClaim(part: TurnField, observed: bool, directMode: bool): bool =
+  part != ViewClaimField implies carries(SpokenTurn, part, observed, directMode) == carries(TypedTurn, part, observed, directMode)
+pure def lawASpokenTurnNeverCarriesAViewClaim(observed: bool, directMode: bool): bool = not(carries(SpokenTurn, ViewClaimField, observed, directMode))
+pure def lawAPrivateScreenSendsNoScreenToEither(source: TurnSource, directMode: bool): bool =
+  not(carries(source, ObservationField, false, directMode)) and not(carries(source, PageField, false, directMode))
 ```
 
 ## Story: Let my agent read the page I have open in Browser

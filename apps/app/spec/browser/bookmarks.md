@@ -1,7 +1,9 @@
 # Bookmarks
 
 Browser's bookmarks live in the native host's store (the browser build keeps them in an owner
-document), at most 100 HTTPS addresses, newest first. The renderer keeps one serial queue of reads
+document), at most 100 HTTPS addresses, newest first. The store seals the page's name with each
+address it saves, so a bookmark keeps its name across a cold start; a host or a record from before
+names returns addresses only, and those bookmarks show their site. The renderer keeps one serial queue of reads
 and writes: refreshes are coalesced, a write first reads the list when it has not been read, and a
 damaged saved list is offered for recovery once instead of being written over. Which page may be
 bookmarked is [page egress](./egress.md)'s rule.
@@ -44,7 +46,8 @@ pure def alwaysTheStageMatchesTheQueue(b: Bookmarks): bool =
   (b.stage == Idle iff b.queue.length() == 0) and (b.stage == WritingMarks implies not(isRefresh(firstOp(b.queue))))
 pure val urlValues = Set("https://example.test/", "https://other.test/")
 pure val titleValues = Set("", "Example")
-pure val urlsValues: Set[List[str]] = Set(List(), List("https://example.test/"), List("https://other.test/", "https://example.test/"))
+pure val entriesValues: Set[List[Mark]] = Set(List(), List({ url: "https://example.test/", title: "" }),
+  List({ url: "https://other.test/", title: "Other" }, { url: "https://example.test/", title: "" }))
 ```
 
 ### Opening Browser, resuming the app, a visible return and a changed bookmark document each ask for one refresh
@@ -63,6 +66,9 @@ pure def alwaysOneRefreshWaits(b: Bookmarks): bool =
 
 ### A bookmark change waits its turn, reads the list first when it was not read, and is applied only by the store
 
+A save sends the page's name with its address; a removal, or a page with no name of its own, sends
+none, and the store then keeps the name it has.
+
 ```quint
 pure def canRequestSave(b: Bookmarks, url: str, title: str, saved: bool): bool = not(b.disposed) and url != ""
 pure def requestSave(b: Bookmarks, url: str, title: str, saved: bool): BookmarksChange =
@@ -74,18 +80,21 @@ pure def sometimesASaveWaitsForItsRead(b: Bookmarks): bool = b.stage == ReadingM
 
 ### A read replaces the marks with the store's list, keeping each saved name, and a failed read is reported, or offered for recovery once when the list is damaged
 
-A save whose read failed is dropped: nothing is written over a list the renderer could not read.
-After disposal a read changes nothing.
+The store's list comes with the name it saved for each address. The name of the change just
+saved comes first, then the name this session already shows (it is the newer one), then the stored
+name; with none of them the bookmark shows its site. A save whose read failed is dropped: nothing is
+written over a list the renderer could not read. After disposal a read changes nothing.
 
 ```quint
-pure def titled(urls: List[str], marks: List[Mark], change: MarkChange): List[Mark] =
-  urls.listMap(u => { url: u, title: if (change.saved and u == change.url and change.title != "") change.title
-    else marks.foldl("", (found, m) => if (m.url == u) m.title else found) })
+pure def knownTitle(marks: List[Mark], url: str): str = marks.foldl("", (found, m) => if (m.url == url) m.title else found)
+pure def titled(entries: List[Mark], marks: List[Mark], change: MarkChange): List[Mark] =
+  entries.listMap(e => { url: e.url, title: if (change.saved and e.url == change.url and change.title != "") change.title
+    else if (knownTitle(marks, e.url) != "") knownTitle(marks, e.url) else e.title })
 pure val noChange: MarkChange = { url: "", title: "", saved: false }
-pure def canReadSettled(b: Bookmarks, ok: bool, urls: List[str], damaged: bool, missing: bool): bool = b.stage == ReadingMarks
-pure def readSettled(b: Bookmarks, ok: bool, urls: List[str], damaged: bool, missing: bool): BookmarksChange = {
+pure def canReadSettled(b: Bookmarks, ok: bool, entries: List[Mark], damaged: bool, missing: bool): bool = b.stage == ReadingMarks
+pure def readSettled(b: Bookmarks, ok: bool, entries: List[Mark], damaged: bool, missing: bool): BookmarksChange = {
   val refresh = isRefresh(firstOp(b.queue))
-  val read = { ...b, marks: titled(urls, b.marks, noChange), hydrated: true, recovery: false }
+  val read = { ...b, marks: titled(entries, b.marks, noChange), hydrated: true, recovery: false }
   val recovering = runQueue(true, { ...b, hydrated: false, recovery: true })
   val unread = runQueue(true, { ...b, hydrated: false })
   if (b.disposed) runQueue(true, b)
@@ -101,11 +110,11 @@ pure def sometimesRecoveryOffered(b: Bookmarks): bool = b.recovery and b.stage =
 ### A write the store accepted moves its address to the front or removes it, and a refused one is reported
 
 ```quint
-pure def canWriteSettled(b: Bookmarks, ok: bool, urls: List[str]): bool = b.stage == WritingMarks
-pure def writeSettled(b: Bookmarks, ok: bool, urls: List[str]): BookmarksChange = {
+pure def canWriteSettled(b: Bookmarks, ok: bool, entries: List[Mark]): bool = b.stage == WritingMarks
+pure def writeSettled(b: Bookmarks, ok: bool, entries: List[Mark]): BookmarksChange = {
   val following = runQueue(true, b)
   if (b.disposed) following
-  else if (ok) runQueue(true, { ...b, marks: titled(urls, b.marks, changeOf(firstOp(b.queue))) })
+  else if (ok) runQueue(true, { ...b, marks: titled(entries, b.marks, changeOf(firstOp(b.queue))) })
   else { state: following.state, out: List(ReportMarksFailed).concat(following.out) }
 }
 pure def stepDisposedBookmarksNeverChange(before: Bookmarks, after: Bookmarks): bool =

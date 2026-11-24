@@ -1,6 +1,6 @@
-// spec/maps/screen.md, "The screen holds the search, the chosen place, the starting point and the route request"; spec/maps/screen.md, "A place says what it is under its name"; spec/maps/vocabulary.md, "A Google place is never saved, shared, renamed or copied, and Google guidance is never spoken"
+// spec/maps/screen.md, "The screen holds the search, the chosen place, the starting point and the route request"; spec/maps/vocabulary.md, "A Google place is never saved, shared, renamed or copied, and Google guidance is never spoken"
 import type { Offer, ProviderKind } from "../../gen/maps__vocabulary.ts"
-import { type Choice, maxRecent, recentRemembered, subtitleOf } from "../../gen/maps__screen.effect.vibe"
+import { maxRecent, recentRemembered } from "../../gen/maps__screen.effect.vibe"
 import type { Position } from "./geometry.vibe"
 import type { Coordinate, EventOrigin, Place, Recipient, Route } from "./maps.schema.vibe"
 
@@ -28,18 +28,6 @@ export interface Shown {
   readonly savedId?: number
   readonly providerId?: string
   readonly providerPlaceId?: string
-}
-
-/** The line under the shown place's name, by how it was opened and the details that belong to it. */
-export function placeSubtitle(shown: Shown, choice: Choice): string {
-  const details = shown.place !== undefined && shown.place.id === shown.providerPlaceId ? shown.place : undefined
-  const category = details?.categories?.[0] ?? ""
-  const subtitle = subtitleOf(choice, shown.providerPlaceId !== undefined, category !== "")
-  if (subtitle === "FirstCategory") return category
-  if (subtitle === "GenericPlace") return "Place"
-  if (subtitle === "SavedOnPhone") return "Saved on this device"
-  if (subtitle === "YourLocation") return "Your location"
-  return "Selected location"
 }
 
 /** The guidance session's route and the fix it last measured. */

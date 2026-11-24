@@ -22,6 +22,8 @@ public final class AlphaBrowserCopy {
   public static final String LOADING = "Loading page…";
   /** Shown when a download left the tab without a page. */
   public static final String DOWNLOAD_REQUESTED = "Download requested. Enter an address to keep browsing.";
+  /** Shown when a load the host started went to a link for another app and left no page. */
+  public static final String LEFT_WEB = "This address goes to another app. Enter an address to keep browsing.";
   /** A page error the table below does not know. */
   public static final String PAGE_ERROR_FALLBACK = "The page didn’t load. Reload to try again.";
 
@@ -42,6 +44,7 @@ public final class AlphaBrowserCopy {
     errors.put("Sign-in was cancelled. Reload to try again.", "Sign-in cancelled. Reload to try again.");
     errors.put("Sign-in failed. Reload to try again.", "Sign-in didn’t work. Reload to try again.");
     errors.put("Loading stopped. Reload from the menu to try again.", "Loading stopped. Reload from the menu to try again.");
+    errors.put("This site has no secure (HTTPS) connection.", "This site has no secure (HTTPS) connection, so it can’t be opened.");
     errors.put("Browser renderer stopped. Close this tab and open a new one.", "This tab stopped working. Close it and open a new one.");
     PAGE_ERRORS = java.util.Collections.unmodifiableMap(errors);
   }
@@ -136,4 +139,10 @@ public final class AlphaBrowserCopy {
   public static final String LEAVE_PRIVATE_TITLE = "Leave private browsing?";
   public static final String LEAVE_PRIVATE_LINK = "This link opens another app. That app isn’t part of your private tab.";
   public static final String OPEN_APP = "Open app";
+
+  // ---- Form resubmission ---------------------------------------------------------------------------
+
+  public static final String RESUBMIT_TITLE = "Send the form again?";
+  public static final String RESUBMIT_MESSAGE = "This page came from a form you sent. Reloading sends it again, which can repeat what the site did, such as an order or a payment.";
+  public static final String RESUBMIT = "Send again";
 }

@@ -20,7 +20,7 @@ export type Calls = Array<{ readonly name: string; readonly args: unknown; reado
 /** A native refusal with the plugin's code, as `PluginCall.reject(message, code)` gives it. */
 export interface Refusal { readonly refuse: string }
 
-/** A fixed answer, or one computed from the call's arguments. */
+/** A fixed answer, or one computed from the call's arguments; a native answer may be an Effect the host is still working on. */
 export type Answer = unknown
 
 /** The test's clock origin and a key that expires in 30 days. */
@@ -81,23 +81,13 @@ function answer(table: Record<string, Answer>, key: string, args: unknown): Answ
   return typeof found === "function" ? (found as (args: unknown) => unknown)(args) : found
 }
 
-function refused(value: Answer): value is Refusal {
-  return typeof value === "object" && value !== null && typeof (value as { refuse?: unknown }).refuse === "string"
+/** An answer the host is still working on: a test's native answer may be an Effect that answers, or refuses with the plugin's failure, when it ends. */
+function working(value: Answer): value is unknown!NativeFailed {
+  return Effect.isEffect(value)
 }
 
-/** The native host answering from `native` (a `Refusal` rejects with its code) and replaying `events`, recording each call in `calls`. */
-export function nativeHost(calls: Calls, native: Record<string, Answer>, events: Record<string, ReadonlyArray<unknown>> = {}) {
-  return {
-    available: () => Effect.succeed(true),
-    invoke: (plugin: string, method: string, args?: unknown) => {
-      calls.push({ name: `${plugin}.${method}`, args })
-      const found = answer(native, `${plugin}.${method}`, args)
-      if (found === undefined) return Effect.fail(new NativeFailed({ plugin, method, message: "absent" }))
-      if (refused(found)) return Effect.fail(new NativeFailed({ plugin, method, message: "refused", code: found.refuse }))
-      return Effect.succeed(found)
-    },
-    listen: (plugin: string, event: string) => Stream.fromIterable(events[`${plugin}.${event}`] ?? [])
-  }
+function refused(value: Answer): value is Refusal {
+  return typeof value === "object" && value !== null && typeof (value as { refuse?: unknown }).refuse === "string"
 }
 
 /** The platform at its boundary: the native host, Cloud and the resident answer from tables (a resident answer that is a `ResidentRefused` refuses), the resident is connected to `connected`, the app's network is `network`, and a Cloud page opened is recorded as `CloudServices.openExternal`; nothing leaves the test. */
@@ -113,7 +103,19 @@ export function platform(calls: Calls, native: Record<string, Answer>, cloud: Re
   const app = { ...appStart, network }
   const verified = options.connected ?? { owner: "owner-1", agent: "agent-1" }
   return Layer.mergeAll(
-    Layer.succeed(Native, nativeHost(calls, native, options.events)),
+    Layer.succeed(Native, {
+      available: () => Effect.succeed(true),
+      invoke: (plugin: string, method: string, args?: unknown) => {
+        calls.push({ name: `${plugin}.${method}`, args })
+        const found = answer(native, `${plugin}.${method}`, args)
+        if (found === undefined) return Effect.fail(new NativeFailed({ plugin, method, message: "absent" }))
+        // An answer that is an Effect is the host still working: it answers, or refuses, when that Effect does.
+        if (working(found)) return found
+        if (refused(found)) return Effect.fail(new NativeFailed({ plugin, method, message: "refused", code: found.refuse }))
+        return Effect.succeed(found)
+      },
+      listen: (plugin: string, event: string) => Stream.fromIterable(options.events?.[`${plugin}.${event}`] ?? [])
+    }),
     Layer.succeed(Cloud, {
       base: "https://api.eliza.app",
       json: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown) => {

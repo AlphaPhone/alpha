@@ -1,4 +1,4 @@
-// spec/settings/index.md, "Story: Find a setting in a few taps"; spec/settings/facts.md, "Story: Read my phone's state truthfully"; spec/settings/facts.md, "Story: Make Alpha my Home app"; spec/settings/facts.md, "Story: Go to Android's own page"; spec/settings/appearance.md, "Story: Choose how Alpha looks"; spec/settings/preferences.md, "Story: Decide what Alpha may do without asking"; spec/settings/network.md, "Story: Join a nearby network"; spec/settings/updates.md, "Story: Update Alpha when I choose"; spec/settings/reset.md, "Story: Erase Alpha's data on purpose"; spec/settings/index.md, "General's Phone row opens Phone's line details on the Alpha image only, and About's Agent activity opens the assistant's activity on the phone"
+// spec/settings/index.md, "Story: Find a setting in a few taps"; spec/settings/facts.md, "Story: Read my phone's state truthfully"; spec/settings/facts.md, "Story: Make Alpha my Home app"; spec/settings/facts.md, "Story: Go to Android's own page"; spec/settings/appearance.md, "Story: Choose how Alpha looks"; spec/settings/preferences.md, "Story: Decide what Alpha may do without asking"; spec/settings/network.md, "Story: Join a nearby network"; spec/settings/updates.md, "Story: Update Alpha when I choose"; spec/settings/reset.md, "Story: Erase Alpha's data on purpose"; spec/settings/index.md, "General's Phone row opens Phone's line details on the Alpha image only, and About's Agent activity opens the assistant's activity on the phone"; spec/settings/carrier.md, "General offers the page on the phone only, and the default SMS app choice only where Alpha can take it"
 import {
   AppWindow, ArrowLeft, Bell, Bot, Camera, Download, Globe, Info, LayoutGrid, Link, Mail, MapPin, MessageSquare, Mic, MicOff,
   Monitor, NotebookText, Calendar, Folder, Images, KeyRound, Phone, RotateCw, Settings as Gear, Shield, Smartphone, Trash2, UserRound, Workflow,
@@ -8,6 +8,7 @@ import type { FormEvent, ReactNode } from "react";
 import type { AppRow, Elsewhere, Page, Settings } from "../../../gen/settings.ts";
 import { appListed, elsewhereShown } from "../../../gen/settings.ts";
 import type { Appearance, Choice } from "../../../gen/settings__appearance.ts";
+import { carrierOffered } from "../../../gen/settings__carrier.ts";
 import { dark, notSaved } from "../../../gen/settings__appearance.ts";
 import type { Facts, SettingsPage } from "../../../gen/settings__facts.ts";
 import { broaderNotice, scaleNotSaved, storageKnown, textScales } from "../../../gen/settings__facts.ts";
@@ -100,7 +101,7 @@ export type SettingsScreenProps = {
   readonly onDialog: (dialog: PageDialog | undefined) => void;
   /** The notifications page the app mounts for General's Notifications. */
   readonly notifications: ReactNode;
-  /** The Carrier & SIM setup page the app mounts for General's row; it holds what it read itself. */
+  /** The Carrier & SIM setup page the app mounts for General's Carrier & SIM setup. */
   readonly carrier: ReactNode;
 }
   & Pick<PrivacyPagesProps, "privacy" | "privacyActs"> & Pick<AboutPagesProps, "diagnostics" | "aboutActs"> & Pick<DeveloperPageProps, "developerActs">;
@@ -206,9 +207,12 @@ function General({ model, act, native, erasing, onDialog }: {
       {elsewhereShown("PhoneInfo", model.variant === "aosp", native) && (
         <Section><SettingRow label="Phone" icon={<Phone aria-hidden className="size-5" />} ariaLabel="Phone, SIM and carrier" onOpen={() => act.openElsewhere("PhoneInfo")} /></Section>
       )}
-      <Section>
-        <SettingRow label="Carrier & SIM setup" icon={<Smartphone aria-hidden className="size-5" />} ariaLabel="Carrier & SIM setup: IMEI, SIM status and activation" onOpen={() => act.open("Carrier")} />
-      </Section>
+      {carrierOffered(model.variant === "aosp", native) && (
+        <Section>
+          <SettingRow label="Carrier & SIM setup" icon={<Smartphone aria-hidden className="size-5" />} ariaLabel="Carrier & SIM setup: IMEI, SIM status and activation"
+            onOpen={() => act.open("Carrier")} />
+        </Section>
+      )}
       {native && (
         <Section caption="Device">
           <SettingRow label="Wi-Fi" icon={<WifiIcon aria-hidden className="size-5" />} state={SWITCH[read.wifi]} onOpen={() => act.open("Network")} />
