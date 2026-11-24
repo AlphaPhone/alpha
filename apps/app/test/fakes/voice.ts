@@ -1,6 +1,7 @@
 // spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"
+import type { ElizaSignInPlugin } from "@elizaos/os/bridges/definitions/sign-in";
 import type { CloudStreamEvent, ElizaCloudSpeechPlugin } from "@elizaos/os/bridges/definitions/voice";
-import { type Faked, plugin } from "./phone.ts";
+import { type Faked, plugin, rejection } from "./phone.ts";
 
 export interface SpokenSentence {
   readonly text: string;
@@ -25,6 +26,12 @@ export interface VoiceScene {
   startLiveCaptureCalls: number;
   stopLiveCaptureCalls: number;
   startCloudSpeechCalls: number;
+  readonly cloudStarts: { readonly environment: string; readonly credentialId: string }[];
+  readonly relayWarmups: string[];
+  relayWarmupHangs: boolean;
+  onDevice: boolean;
+  credentialId: string;
+  streamTiming: unknown;
   stopCloudSpeechCalls: number;
   hushCalls: number;
   readonly spoken: SpokenSentence[];
@@ -50,6 +57,12 @@ export function voiceScene(): VoiceScene {
     startLiveCaptureCalls: 0,
     stopLiveCaptureCalls: 0,
     startCloudSpeechCalls: 0,
+    cloudStarts: [],
+    relayWarmups: [],
+    relayWarmupHangs: false,
+    onDevice: true,
+    credentialId: "cred-1",
+    streamTiming: { format: "alpha-cloud-stream-timing-v1", records: [] },
     stopCloudSpeechCalls: 0,
     hushCalls: 0,
     spoken: [],
@@ -123,11 +136,24 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
   };
 }
 
+/** What `SpeechStreamBridgePlugin.java` answers beyond eliza's TypeScript definition: the relay's warm-up and its timing records. */
+type RelayExtras = {
+  prewarmCloudSpeech(input: { environment: string }): Promise<unknown>;
+  cloudStreamTiming(input: Record<string, never>): Promise<unknown>;
+};
+
 export function elizaCloudSpeech(voice: VoiceScene): Faked {
-  return plugin<ElizaCloudSpeechPlugin, { cloudSpeechEvent: CloudStreamEvent }>((emit) => {
+  return plugin<ElizaCloudSpeechPlugin & RelayExtras, { cloudSpeechEvent: CloudStreamEvent }>((emit) => {
     voice.emitCloud = (event) => emit("cloudSpeechEvent", event);
     return {
-      startCloudSpeech: ({ sessionId }) => {
+      prewarmCloudSpeech: ({ environment }) => {
+        voice.relayWarmups.push(environment);
+        return voice.relayWarmupHangs ? new Promise<never>(() => undefined) : Promise.resolve();
+      },
+      cloudStreamTiming: () => Promise.resolve(voice.streamTiming),
+      startCloudSpeech: ({ sessionId, environment, credentialId }) => {
+        voice.cloudStarts.push({ environment, credentialId });
+        if (credentialId !== voice.credentialId) return Promise.reject(rejection("Voice is already active or unavailable"));
         voice.startCloudSpeechCalls += 1;
         voice.activeMicSession = sessionId;
         return Promise.resolve({ sessionId, sampleRate: 16000, echoCancelled: true });
@@ -154,4 +180,16 @@ export function elizaCloudSpeech(voice: VoiceScene): Faked {
       },
     };
   });
+}
+
+/** `ElizaSignInPlugin.java`'s `status`: the registered cloud's readiness and the account its key belongs to. */
+export function elizaSignIn(voice: VoiceScene, signedIn: () => boolean): Faked {
+  return plugin<Pick<ElizaSignInPlugin, "status">>(() => ({
+    status: ({ environment }) => Promise.resolve({
+      environment, methodsKnown: true, email: true, sms: false, google: false, googleMode: "browser",
+      account: signedIn()
+        ? { signedIn: true, userId: "user-1", organizationId: "org-1", credentialId: voice.credentialId, keyExpiresAt: 4_102_444_800_000 }
+        : { signedIn: false },
+    }),
+  }));
 }
