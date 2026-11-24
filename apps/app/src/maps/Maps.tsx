@@ -144,12 +144,12 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
     const at = pointIn(typed);
     if (at !== undefined && can({ type: "pinAt", lat: at.lat, lng: at.lng })) return void send({ type: "pinAt", lat: at.lat, lng: at.lng });
     const query = recentOf(state.recent, typed.trim());
-    if (can({ type: "search", query })) void send({ type: "search", query });
+    if (can({ type: "search", query, chars: query.length })) void send({ type: "search", query, chars: query.length });
   };
   const typing = (text: string) => {
     setTyped(text);
     const query = recentOf(state.recent, text.trim());
-    if (can({ type: "typeQuery", query, now: untimed })) void send({ type: "typeQuery", query, now: untimed });
+    if (can({ type: "typeQuery", query, chars: query.length, now: untimed })) void send({ type: "typeQuery", query, chars: query.length, now: untimed });
   };
   const startFrom = () => {
     if (can({ type: "findOrigin", query: start.trim() })) void send({ type: "findOrigin", query: start.trim() });
@@ -293,7 +293,7 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
             <ListGroup heading="Recent">
               {state.recent.map((query) => (
                 <ListRow key={query} asChild title={query}>
-                  <button type="button" aria-label={query} disabled={!can({ type: "search", query })} onClick={() => { if (!can({ type: "search", query })) return; setTyped(query); void send({ type: "search", query }); }} />
+                  <button type="button" aria-label={query} disabled={!can({ type: "search", query, chars: query.length })} onClick={() => { if (!can({ type: "search", query, chars: query.length })) return; setTyped(query); void send({ type: "search", query, chars: query.length }); }} />
                 </ListRow>
               ))}
               {can({ type: "clearRecent" }) && <Button size="sm" variant="ghost" onClick={() => void send({ type: "clearRecent" })}>Clear</Button>}
