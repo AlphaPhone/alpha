@@ -40,6 +40,8 @@ export interface MapsScene {
   /** Where the fake phone is, and whether it allows location. */
   here: { latitude: number; longitude: number; accuracy: number } | undefined;
   allowed: "granted" | "denied" | "prompt";
+  /** How precisely Android lets Alpha locate the phone, once location is allowed. */
+  precision: "precise" | "approximate";
   /** The page's listeners of the fake location plugin. */
   readonly listeners: Set<(result: LocationResult) => void>;
   /** The native watches the page started and has not cleared. */
@@ -67,6 +69,7 @@ export function mapsScene(): MapsScene {
     asked: [],
     here: { latitude: 43.7300, longitude: 7.4200, accuracy: 8 },
     allowed: "granted",
+    precision: "approximate",
     listeners: new Set(),
     watches: new Set(),
   };
@@ -121,14 +124,14 @@ export function mapsRoutes(scene: MapsScene): Route[] {
   ];
 }
 
-/** `ElizaLocation` of eliza's Android package: its permission, one watch per call, and the positions the scene moves to. */
+/** `ElizaLocation` of eliza's Android package: its permission, which Maps and Settings read, one watch per call, and the positions the scene moves to. */
 export function elizaLocation(scene: MapsScene, now: () => number): Faked {
   return plugin<LocationPlugin, { locationChange: LocationResult; error: LocationErrorEvent }>((emit) => {
     const told = (result: LocationResult) => emit("locationChange", result);
     let next = 0;
     return {
-      checkPermissions: () => Promise.resolve({ location: scene.allowed, accuracy: "precise" }),
-      requestPermissions: () => Promise.resolve({ location: scene.allowed === "prompt" ? "granted" : scene.allowed, accuracy: "precise" }),
+      checkPermissions: () => Promise.resolve({ location: scene.allowed, accuracy: scene.precision }),
+      requestPermissions: () => Promise.resolve({ location: scene.allowed === "prompt" ? "granted" : scene.allowed, accuracy: scene.precision }),
       getCurrentPosition: () => Promise.reject(new Error("not used by Maps")),
       watchPosition: () => {
         const watchId = `w${++next}`;

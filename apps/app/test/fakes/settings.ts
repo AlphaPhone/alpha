@@ -1,8 +1,8 @@
 // spec/app/settings/index.md, "Story: Find a setting and come back"
 import type { DataResetPlugin } from "@elizaos/os/bridges/definitions/reset";
-import type { LocationPermissionStatus, LocationPlugin } from "@elizaos/os/bridges/definitions/location";
-import type { AndroidRoleStatus, NativeCrashEntry, SystemFacts, SystemHostPlugin, SystemPlugin, SystemSettingsPage } from "@elizaos/os/bridges/definitions/system";
+import type { AndroidRoleStatus, LaunchTarget, LauncherAppsChange, NativeCrashEntry, SystemFacts, SystemHostPlugin, SystemPlugin, SystemSettingsPage } from "@elizaos/os/bridges/definitions/system";
 import type { ApprovedJoinResult, ConnectOptions, ConnectivityResult, WiFiNetwork, WiFiPlugin } from "@elizaos/os/bridges/definitions/wifi";
+import type { LauncherScene } from "./launcher.ts";
 import { type Faked, plugin, rejection } from "./phone.ts";
 
 /** A field as Alpha's `AlphaCarrierSetup` plugin reports one. */
@@ -14,7 +14,6 @@ export interface SettingsScene {
   roles: AndroidRoleStatus[];
   launcher: boolean;
   version: string;
-  location: LocationPermissionStatus;
   /** Reads of the phone's facts wait for this before they answer. */
   gate: Promise<unknown>;
   /** Android takes the Home role for Alpha when its dialog closes. */
@@ -37,7 +36,7 @@ export function settingsScene(): SettingsScene {
       { role: "home", androidRole: "android.app.role.HOME", held: false, holders: ["com.android.launcher3"], available: true },
       { role: "assistant", androidRole: "android.app.role.ASSISTANT", held: false, holders: [], available: true },
     ],
-    launcher: true, version: "1.4.0", location: { location: "granted", accuracy: "approximate" },
+    launcher: true, version: "1.4.0",
     gate: Promise.resolve(), grantsHome: true, opened: [], crashes: [], reset: { status: "cancelled", message: "Nothing was reset." }, reviews: [],
     networks: [{ ssid: "home", bssid: "00:11:22:33:44:55", rssi: -50, frequency: 2412, capabilities: "[WPA2-PSK-CCMP]", secured: true, security: "wpa2" }],
     joinAnswer: "connected", joins: [], connectivity: { online: true, validated: true, captivePortal: false, ssid: "home" },
@@ -53,63 +52,70 @@ const page = (scene: SettingsScene, name: string) => {
   return Promise.resolve();
 };
 
-/** `SystemPlugin.java`, the `ElizaSystem` plugin, as far as Settings reads and opens it. */
-export function elizaSystem(scene: SettingsScene): Faked {
-  return plugin<SystemPlugin & SystemHostPlugin>(() => ({
-    listLauncherApps: () => Promise.resolve({ apps: [] }),
-    launchApp: () => Promise.resolve(),
-    resolveDefaultApp: () => Promise.resolve({ role: "dial", available: false }),
-    openDefaultApp: () => Promise.resolve(),
-    getStatus: async () => {
-      await scene.gate;
-      return { packageName: "ai.alphacompute.alphaphone", roles: scene.roles.map((role) => ({ ...role })) };
-    },
-    requestRole: ({ role }) => {
-      if (role === "home" && scene.grantsHome) scene.roles = scene.roles.map((one) => (one.role === "home" ? { ...one, held: true, holders: ["ai.alphacompute.alphaphone"] } : one));
-      return Promise.resolve({ role, held: scene.grantsHome, resultCode: scene.grantsHome ? -1 : 0 });
-    },
-    openSettings: () => page(scene, "home"),
-    openNetworkSettings: () => page(scene, "network"),
-    getDeviceSettings: () => Promise.resolve({ brightness: 50, brightnessMode: "manual", canWriteSettings: false, volumes: [] }),
-    setScreenBrightness: () => Promise.reject(rejection("unsupported")),
-    setVolume: () => Promise.reject(rejection("unsupported")),
-    setFlashlight: () => Promise.resolve({ available: false, enabled: false }),
-    openWriteSettings: () => page(scene, "write-settings"),
-    openDisplaySettings: () => page(scene, "display"),
-    openSoundSettings: () => page(scene, "sound"),
-    getSystemFacts: async () => {
-      await scene.gate;
-      return { ...scene.facts };
-    },
-    openSettingsPage: ({ page: asked }: { page: SystemSettingsPage }) => {
-      scene.opened.push(asked);
-      return Promise.resolve({ status: "opened", page: asked, specific: asked !== "mobile" });
-    },
-    openNotificationShade: () => Promise.resolve({ status: "unsupported" }),
-    getBuildInfo: () => Promise.resolve({ launcher: scene.launcher, version: scene.version }),
-    getLaunchInfo: () => Promise.resolve({ assistant: false }),
-    getLocaleInfo: () => Promise.resolve({ locale: "en-US", hour24: false }),
-    openAppInfo: ({ packageName }) => page(scene, `app-info ${packageName}`),
-    openClock: () => Promise.reject(rejection("unsupported")),
-    crashLog: () => Promise.resolve({ entries: scene.crashes.map((entry) => ({ ...entry })), exitHistory: true }),
-    recordRendererFailure: () => Promise.resolve(),
-    clearCrashLog: () => {
-      scene.crashes = [];
-      return Promise.resolve();
-    },
-  }));
-}
-
-/** The `ElizaLocation` plugin, as far as Settings asks what it may do. */
-export function elizaLocation(scene: SettingsScene): Faked {
-  return plugin<LocationPlugin>(() => ({
-    getCurrentPosition: () => Promise.reject(rejection("TIMEOUT")),
-    watchPosition: () => Promise.reject(rejection("unsupported")),
-    clearWatch: () => Promise.resolve(),
-    checkPermissions: () => Promise.resolve({ ...scene.location }),
-    requestPermissions: () => Promise.resolve({ ...scene.location }),
-    removeAllListeners: () => Promise.resolve(),
-  }));
+/**
+ * `SystemPlugin.java`, the `ElizaSystem` plugin, as far as Home and Settings ask it: Home's apps, opening one or its
+ * info page, the shade and how Alpha is presented, from `home`; the phone's facts, roles and pages, from `scene`.
+ */
+export function elizaSystem(home: LauncherScene, scene: SettingsScene): Faked {
+  return plugin<SystemPlugin & SystemHostPlugin, { launcherAppsChanged: LauncherAppsChange }>((emit) => {
+    home.changed = () => emit("launcherAppsChanged", { reason: "changed" });
+    const known = (target: LaunchTarget) => target.packageName === "ai.alphacompute.alphaphone" || home.apps.some((app) => app.packageName === target.packageName);
+    return {
+      listLauncherApps: () => (home.unlisted ? Promise.reject(rejection("failed")) : Promise.resolve({ apps: home.apps })),
+      launchApp(target) {
+        home.opened.push(target.packageName);
+        const refused = home.refusing.get(target.packageName) ?? (known(target) ? undefined : "not-installed");
+        return refused === undefined ? Promise.resolve() : Promise.reject(rejection(refused));
+      },
+      resolveDefaultApp: () => Promise.resolve({ role: "dial", available: false }),
+      openDefaultApp: () => Promise.resolve(),
+      getStatus: async () => {
+        await scene.gate;
+        return { packageName: "ai.alphacompute.alphaphone", roles: scene.roles.map((role) => ({ ...role })) };
+      },
+      requestRole: ({ role }) => {
+        if (role === "home" && scene.grantsHome) scene.roles = scene.roles.map((one) => (one.role === "home" ? { ...one, held: true, holders: ["ai.alphacompute.alphaphone"] } : one));
+        return Promise.resolve({ role, held: scene.grantsHome, resultCode: scene.grantsHome ? -1 : 0 });
+      },
+      openSettings: () => page(scene, "home"),
+      openNetworkSettings: () => page(scene, "network"),
+      getDeviceSettings: () => Promise.resolve({ brightness: 50, brightnessMode: "manual", canWriteSettings: false, volumes: [] }),
+      setScreenBrightness: () => Promise.reject(rejection("unsupported")),
+      setVolume: () => Promise.reject(rejection("unsupported")),
+      setFlashlight: () => Promise.resolve({ available: false, enabled: false }),
+      openWriteSettings: () => page(scene, "write-settings"),
+      openDisplaySettings: () => page(scene, "display"),
+      openSoundSettings: () => page(scene, "sound"),
+      getSystemFacts: async () => {
+        await scene.gate;
+        return { ...scene.facts };
+      },
+      openSettingsPage: ({ page: asked }: { page: SystemSettingsPage }) => {
+        scene.opened.push(asked);
+        return Promise.resolve({ status: "opened", page: asked, specific: asked !== "mobile" });
+      },
+      openNotificationShade() {
+        home.shades += 1;
+        const shade = home.shade;
+        return shade === "silent" ? new Promise(() => {}) : Promise.resolve({ status: shade });
+      },
+      getBuildInfo: () => Promise.resolve({ launcher: home.launcher && scene.launcher, version: scene.version }),
+      getLaunchInfo: () => Promise.resolve({ assistant: home.assistant }),
+      getLocaleInfo: () => Promise.resolve({ locale: "en-US", hour24: false }),
+      openAppInfo(target) {
+        home.infos.push(target.packageName);
+        scene.opened.push(`app-info ${target.packageName}`);
+        return known(target) ? Promise.resolve() : Promise.reject(rejection("not-installed"));
+      },
+      openClock: () => Promise.reject(rejection("unsupported")),
+      crashLog: () => Promise.resolve({ entries: scene.crashes.map((entry) => ({ ...entry })), exitHistory: true }),
+      recordRendererFailure: () => Promise.resolve(),
+      clearCrashLog: () => {
+        scene.crashes = [];
+        return Promise.resolve();
+      },
+    };
+  });
 }
 
 /** The `ElizaReset` plugin: Android's review answers only that nothing was reset. */

@@ -40,7 +40,6 @@ const guarded: Plugin = {
 };
 
 export default defineConfig({
-  define: { "import.meta.env.ALPHA_TEST_MOCKS": JSON.stringify(process.env.ELIZA_DEV_ALLOW_TEST_MOCKS === "1") },
   plugins: [vibelang(), react(), tailwindcss(), guarded, faked ? fakes(process.env.ALPHA_AGENT, process.env.ALPHA_FAKES === "phone") : eliza()],
   // eliza's clients are linked from their own checkout, whose Effect and Capacitor are this one's versions: one copy of each in the page.
   resolve: { dedupe: ["effect", "vibelang-runtime", "@capacitor/core"] },
