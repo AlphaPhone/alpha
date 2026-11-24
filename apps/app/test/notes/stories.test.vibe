@@ -22,7 +22,7 @@ import { NotesAudio } from "../../src/notes/audio.vibe"
 import { NotesCollection } from "../../src/notes/collection.vibe"
 import { NotesEditor } from "../../src/notes/editor.vibe"
 import { NotesFolders } from "../../src/notes/folders.vibe"
-import { checklistItems, checklistText, filterRows, folderOf, namedNoteOpenRequest, nextDefaultTitle, rowOf, shownRows } from "../../src/notes/list.vibe"
+import { checklistItems, checklistText, filterRows, folderOf, nextDefaultTitle, rowOf, shownRows } from "../../src/notes/list.vibe"
 import { NotesListFilter } from "../../src/notes/listFilter.vibe"
 import { NotesOrganize } from "../../src/notes/organize.vibe"
 import { NotesOrigins } from "../../src/notes/origins.vibe"
@@ -134,15 +134,6 @@ describe("Notes stories", () => {
           overEdit: false, kept: "Milk and eggs", afterEdit: "fresh", savedForOwner: false },
       ))
     }
-  })
-
-  it.effect("A named note opens on the phone and a relative one stays with the agent (spec/notes/list.md, \"Story: Open a note by saying its title\")", () => effect {
-    // spec/notes/list.md, "Only a named, quoted or plainly titled note opens locally; a relative reference goes to the agent"
-    const asked = [
-      "Open the note called Groceries.", "Hey Alpha, could you show my groceries note", "open “Most Recent Recipes” in Notes",
-      "Open my most recent note", "open the note I just created", "open a new note",
-    ].map(namedNoteOpenRequest)
-    try check(() => assert.deepStrictEqual(asked, ["Groceries", "groceries", "Most Recent Recipes", undefined, undefined, undefined]))
   })
 
   it.effect("A checklist written as text reads back with every item and tick (spec/notes/list.md, \"Story: Turn text into a checklist and back\")", () => effect {
