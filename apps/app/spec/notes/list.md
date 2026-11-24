@@ -147,7 +147,7 @@ pure def lawDefaultTitleIsNew(highest: int): bool = nextDefaultNumber(highest) =
 ### The agent opens the one saved note I named, and never over another note's unsaved edit
 
 The request goes to the agent with the turn, which finds exactly one saved note by its title, its recency
-or an earlier reference, asks which one when several match, and prepares Notes at that note's id
+or an earlier reference, asks which one when several match, and prepares Notes' saved editor at that note
 (spec/assistant/views.md). Notes then opens it in the editor as opening it from the list does, but saves
 nothing on the owner's behalf: while another note, or a new note, has an unsaved edit, nothing opens and
 that edit stays as it is. A note the collection on the phone does not hold yet, such as one the agent
