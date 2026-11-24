@@ -28,6 +28,10 @@ jobs:
       - name: Install pnpm
         run: npm install --global pnpm@10.24.0
       - run: pnpm install --frozen-lockfile
+      # Promotion refuses a pin the upstream branch cannot reach, or a recorded compare that is not for the pin
+      # (refresh it with scripts/verify-upstream.ts --record-reachability). Pull requests only warn (verify.yml).
+      - name: Upstream branch reaches the pin
+        run: node --conditions=eliza-source --import vibelang/register scripts/verify-upstream.ts --reachability-only --upstream-reachability=fail
       # The proof stage runs Dafny; the explore stage drives Bombadil in Chromium.
       - name: Install Dafny
         run: bash scripts/ci/prepare-dafny.sh
