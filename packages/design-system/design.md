@@ -24,7 +24,8 @@ do next.
   `text-subject` and `text-snippet` line by line; `text-meta` is a status line under a header, and `text-body`
   the text of a message or of a field being typed; `text-2xs` is the time under a text message or a
   keypad key's letters; `text-keypad-number` the number being dialled, `text-keypad-digit` a key's
-  digit and `text-keypad-letters` the letters under it. `text-lead` is the street of the next turn,
+  digit and `text-keypad-letters` the letters under it; `text-contact-name` and `text-contact-initials`, in
+  `font-display`, are a contact's name and initials at the top of their card. `text-lead` is the street of the next turn,
   `text-title` a document's name over its preview, and `text-figure` and `text-figure-sm` a route's time.
 - **Shape.** `radius` is a card or a row group; `rounded-home-card` is a Home overview card;
   `rounded-drawer-icon` rounds an installed app icon; `rounded-option` is a row of a floating menu and
@@ -151,6 +152,11 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.keypad-number.size` | 2.375rem |
 | `text.keypad-number.leading` | 1.2 |
 | `text.keypad-number.tracking` | 0.02em |
+| `text.contact-name.size` | 2.125rem |
+| `text.contact-name.leading` | 1.1 |
+| `text.contact-name.tracking` | -0.01em |
+| `text.contact-initials.size` | 2.625rem |
+| `text.contact-initials.leading` | 1 |
 | `weight.light` | 300 |
 | `weight.normal` | 400 |
 | `weight.medium` | 500 |
