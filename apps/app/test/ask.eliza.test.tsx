@@ -39,7 +39,7 @@ it("Talk to my agent, through eliza's agent and cloud (spec/app/ask/index.md, \"
   // spec/app/ask/index.md, "Only the turn under way is heard: its reply so far, then the whole reply, or that it did not finish"
   await until(alpha, asking, Ask, (s) => s.turn.outcome === "Confirmed");
   expect(lines()).toEqual(["Say hello.", "Hello from the cloud."]);
-  expect((await mine.asked()).at(-1)).toEqual([{ role: "system", content: expect.stringContaining(mine.system) }, { role: "user", content: expect.stringMatching(/^Say hello\.(\n|$)/) }]);
+  expect((await mine.asked()).at(-1)).toEqual([{ role: "system", content: expect.stringContaining(mine.system) as unknown }, { role: "user", content: expect.stringMatching(/^Say hello\.(\n|$)/) as unknown }]);
   expect(await balance()).toBeLessThan(mine.granted);
 
   // spec/app/ask/index.md, "The owner stops the reply under way once, and the agent is asked to stop that conversation's turn"

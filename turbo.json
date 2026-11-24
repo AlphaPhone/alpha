@@ -354,7 +354,10 @@
         "@repo/deployment#test",
         "@repo/cloud#build",
         "@repo/cloud#typecheck",
-        "@repo/cloud#test"
+        "@repo/cloud#test",
+        "@repo/site#build",
+        "@repo/site#typecheck",
+        "@repo/site#test"
       ],
       "cache": false
     },
@@ -366,7 +369,8 @@
         "@repo/agent#typecheck",
         "@repo/deployment#typecheck",
         "@repo/cloud#typecheck",
-        "vibestack-studio#typecheck"
+        "vibestack-studio#typecheck",
+        "@repo/site#typecheck"
       ],
       "inputs": [
         "apps/**",
