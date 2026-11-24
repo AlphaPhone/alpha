@@ -1,6 +1,6 @@
 # Share
 
-How the shown page leaves the Browser at the owner's own request: the share
+How the page leaves the Browser at the owner's own request: the share
 panel (Android's share sheet, copying the link or an email draft), and
 opening the page in another browser where it needs what Alpha's tabs cannot
 do, such as a passkey, or where a tab could not load it at all. Whether the
@@ -24,7 +24,7 @@ import review as V from "../../kit/review"
 type Kind = Normal | Private
 type Dest = System | Copy | Email
 type Notice = Quiet | NoPage | Changed | Copied | ClipboardRefused | Passkeys | NoBrowser | NotOpened
-type Failure = Unreachable | Untrusted
+type Failure = Unreachable | Untrusted | Refused
 type Effect = Sheet({ panel: int }) | CopyLink({ panel: int }) | Draft({ panel: int }) | Elsewhere({ confirmed: bool })
 type Share = {
   panel: int, sent: int, review: V::Review,
@@ -115,30 +115,37 @@ pure def sometimesCopied(s: Share): bool = s.notice == Copied and s.sent > 1
 pure def passkeyAsked(s: Share): Share = { ...s, passkey: true, notice: Passkeys }
 ```
 
-### A page that could not load or timed out may open in another browser; one whose certificate was refused may not
+### A page that could not load or timed out at an HTTPS address may open in another browser; any other failure may not
 
 Both are failures of the network or the web view, which another browser may
-get past. A refused certificate stays refused, and the failed page's own
-message says why. A stopped load is not a failure, and a refused address
-never loaded.
+get past. The tab says which failure it was: unreachable for a page that
+could not load or timed out, untrusted for a refused certificate, and refused
+for everything else it reports as a failure, such as an address Alpha does
+not open, a web view that is not there, a sign-in that was cancelled or
+failed, a password kept from an insecure page or a load the owner stopped.
+A refused certificate stays refused, and the page's own failure message says
+why. The tab also says whether the failed address is an HTTPS one; a failed
+page has no secure mark, as it never committed.
 
 ```quint
-pure def pageFailed(s: Share, failure: Failure): Share = { ...s, stranded: failure == Unreachable }
+pure def pageFailed(s: Share, failure: Failure, https: bool): Share = { ...s, stranded: failure == Unreachable and https }
 ```
 
-### "Open externally" is offered where the page needs another browser, for an HTTPS page; a private tab's page asks the owner first
+### "Open externally" is offered where the page needs another browser: a page that asked for a passkey, from the menu, or a normal tab's page that could not be reached at an HTTPS address, beside its failure message
 
-A page that asked for a passkey offers it from the menu. A normal tab's page
-that failed at an HTTPS address offers it beside its failure message, so a
-site the tab cannot load is not a dead end; for that page, secure means its
-address is an HTTPS one.
+A page that asked for a passkey leaves only as an HTTPS page, and a private
+tab's page asks the owner first. A failed page has already shown that its
+address is an HTTPS one, so it leaves without a secure mark; a private
+tab's failed page is not offered another browser.
 
 ```quint
+pure def leavesFailed(s: Share, kind: Kind): bool = s.stranded and kind == Normal
+
 pure def canOpenExternally(s: Share, kind: Kind, secure: bool): bool =
-  (s.passkey or (s.stranded and kind == Normal and secure)) and not(busy(s))
+  (s.passkey or leavesFailed(s, kind)) and not(busy(s))
 
 pure def openExternally(s: Share, kind: Kind, secure: bool): Step =
-  if (not(secure)) { state: { ...s, notice: NoPage }, out: List() }
+  if (not(secure or leavesFailed(s, kind))) { state: { ...s, notice: NoPage }, out: List() }
   else if (kind == Private) { state: { ...s, privately: true, confirmed: false, handoff: V::present(s.handoff) }, out: List() }
   else { state: { ...s, privately: false, confirmed: false, launching: true }, out: List(Elsewhere({ confirmed: false })) }
 ```
@@ -181,12 +188,33 @@ pure def lawOnlySecurePagesLeave(kind: Kind): bool =
   openExternally({ ...initial, passkey: true }, kind, false).out.length() == 0
 ```
 
-### A failed page leaves only from a normal tab, at an HTTPS address, and never after its certificate was refused
+### Only an unreachable HTTPS address makes a failed page leave, and only from a normal tab
+
+A certificate that was refused, any other failure and an http address keep
+the page in the tab, whatever the shell says of its secure mark.
 
 ```quint
-pure def lawAFailedPageLeavesOnlyWhenAnotherBrowserMayReachIt(kind: Kind, secure: bool): bool =
-  not(canOpenExternally(pageFailed(initial, Untrusted), kind, secure)) and
-    (canOpenExternally(pageFailed(initial, Unreachable), kind, secure) iff (kind == Normal and secure))
+pure def lawAFailedPageLeavesOnlyWhenAnotherBrowserMayReachIt(kind: Kind, secure: bool, failure: Failure, https: bool): bool =
+  val s = pageFailed(initial, failure, https)
+  (canOpenExternally(s, kind, secure) iff (failure == Unreachable and https and kind == Normal)) and
+    (openExternally(s, kind, false).out.length() > 0 iff (failure == Unreachable and https and kind == Normal))
+```
+
+### The next load of the page ends the offer for a failed page
+
+So a reload, or going to another address, never sends the page that failed.
+
+```quint
+pure def lawTheNextLoadEndsTheOffer(kind: Kind, secure: bool): bool =
+  not(canOpenExternally(pageChanged(pageFailed(initial, Unreachable, true)), kind, secure))
+```
+
+### Only a failure marks the page as one another browser may reach, and every load clears it
+
+```quint
+pure def stepOnlyAFailureStrandsThePage(before: Share, via: str, after: Share): bool =
+  ((after.stranded and not(before.stranded)) implies via == "pageFailed") and
+    (via == "pageChanged" implies not(after.stranded))
 ```
 
 ### A confirmed private page can open elsewhere, and there can be no other browser
