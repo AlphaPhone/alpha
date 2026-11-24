@@ -4,7 +4,7 @@
 # image that is on the phone now cannot be put back.
 #   CONFIRM_FLASH=yes ALPHA_DIR=/path/to/alpha VERSION_CODE=632 ./06-flash.sh
 # Optional: ROLLBACK_IMG=/path/to/imgNNN.zip (default: ~/.cache/alpha-v612/image/img<running build>.zip)
-#           ALLOW_UNPROVEN_ROLLBACK=yes   flash although the phone's launcher bytes could not be matched to the legacy APK
+#           ROLLBACK_RECEIPT=/path/to/image-evidence.json (default: img<running build>.evidence.json beside the image)
 # Before running: the owner has agreed to this flash, and no other session is flashing or driving the phone.
 set -euo pipefail
 . "$(dirname "$0")/env.sh"
@@ -12,6 +12,9 @@ set -euo pipefail
 [ "$#" = 0 ] || die "this script takes no arguments (and never passes -w)"
 IMG=$WORK/img$VERSION_CODE.zip
 need "$IMG"; need "$WORK/Launcher$VERSION_CODE.apk"
+EVIDENCE="$(dirname "$0")/lib/image-evidence.py"
+NEWSHA=$(python3 -I "$EVIDENCE" check "$WORK/image-evidence.json" "alpha.v$VERSION_CODE" "$IMG" "$(sha256_of "$WORK/Launcher$VERSION_CODE.apk")") \
+  || die "the image or signed launcher does not match the output of step 5"
 if pgrep -af 'fastboot' | grep -v pgrep; then die "a fastboot process is already running: another session is flashing"; fi
 [ "$(timeout 10 "$ADB" -s "$SERIAL" get-state 2>/dev/null)" = device ] || die "phone $SERIAL is not in adb 'device' state"
 
@@ -34,17 +37,15 @@ case "$INC" in alpha.v*) ;; *) die "the phone runs '$INC', not a local alpha.vNN
 
 say "2/6 Rollback artifacts: the image on the phone now, its launcher, and the tree's vendor/alphaphone backup"
 RBIMG=${ROLLBACK_IMG:-$LEGACY_IMAGE_DIR/img${INC#alpha.v}.zip}
+RBEVIDENCE=${ROLLBACK_RECEIPT:-${RBIMG%.zip}.evidence.json}
 [ -f "$RBIMG" ] || die "rollback image $RBIMG does not exist: cannot return to $INC, not flashing"
+need "$RBEVIDENCE"
 echo "testing $RBIMG (2 GB, about a minute)"; unzip -tq "$RBIMG" > /dev/null || die "rollback image $RBIMG is corrupt"
 cp --reflink=auto "$RBIMG" "$RB/rollback-img.zip"
-RBSHA=$(sha256_of "$RB/rollback-img.zip")
-# Tie the rollback image to the phone: the launcher on the phone must be the legacy APK that image was built from.
-RBAPK=$LEGACY_IMAGE_DIR/Launcher${INC#alpha.v}.apk
 DEVSHA=$(adbsh sha256sum /product/priv-app/AlphaPhone/AlphaPhone.apk | cut -d' ' -f1 || true)
-if [ -f "$RBAPK" ] && [ "$DEVSHA" = "$(sha256_of "$RBAPK")" ]; then echo "phone launcher == $RBAPK ($DEVSHA)"; cp --reflink=auto "$RBAPK" "$RB/rollback-launcher.apk"
-elif [ "${ALLOW_UNPROVEN_ROLLBACK:-no}" = yes ]; then echo "WARN: phone launcher $DEVSHA not matched to $RBAPK; continuing because ALLOW_UNPROVEN_ROLLBACK=yes"
-else die "the phone's launcher ($DEVSHA) is not $RBAPK, so $RBIMG is not proven to be the image on the phone. Find the right image or set ALLOW_UNPROVEN_ROLLBACK=yes"
-fi
+RBSHA=$(python3 -I "$EVIDENCE" check "$RBEVIDENCE" "$INC" "$RB/rollback-img.zip" "$DEVSHA") \
+  || die "the rollback image and the phone's launcher must match the same verified build record"
+cp "$RBEVIDENCE" "$RB/rollback-image-evidence.json"
 VBK=$ROLLBACK_DIR/vendor-alphaphone-before-v$VERSION_CODE
 [ -d "$VBK" ] || die "no vendor/alphaphone backup at $VBK (step 4 writes it)"
 cat > "$RB/ROLLBACK.md" <<EOF
@@ -67,7 +68,7 @@ echo "rollback recipe: $RB/ROLLBACK.md"
 
 say "3/6 Testing the new image $IMG"
 unzip -tq "$IMG" > /dev/null || die "new image zip is corrupt"
-NEWSHA=$(sha256_of "$IMG"); echo "new image sha256 $NEWSHA"
+echo "new image sha256 $NEWSHA"
 printf '{"startedAt":"%s","image":"%s","imageSha256":"%s","wipe":false,"from":"%s","rollback":"%s"}\n' "$(date -Is)" "$IMG" "$NEWSHA" "$FP" "$RB/rollback-img.zip" > "$WORK/flash-start.json"
 
 say "4/6 Rebooting to the bootloader"
@@ -78,27 +79,14 @@ getvar() { timeout 10 "$FASTBOOT" -s "$SERIAL" getvar "$1" 2>&1 | sed -n "s/^$1:
 [ "$(getvar unlocked)" = yes ] || die "bootloader is not unlocked ('$FASTBOOT -s $SERIAL reboot' returns to the current image)"
 echo "bootloader $(getvar version-bootloader)  baseband $(getvar version-baseband)  (2026-11-22 flashes: stallion-17.0-15819938 / g5400i-260604-260807-B-16035863)"
 
-say "5/6 fastboot update (no wipe), with a stall watchdog; up to 3 attempts"
-DONE=0
-for attempt in 1 2 3; do
-  echo "flash attempt $attempt $(date +%T)"
-  "$FASTBOOT" -s "$SERIAL" update "$IMG" > "$WORK/flash.fb.$attempt.log" 2>&1 &
-  FB=$!; last=0; still=0; stalled=0
-  while kill -0 "$FB" 2>/dev/null; do
-    sleep 15; r=$(awk '/rchar/{print $2}' "/proc/$FB/io" 2>/dev/null || echo 0)
-    if [ "$r" = "$last" ]; then still=$((still + 15)); else still=0; fi; last=$r
-    echo "$(date +%T) read=$r stalled=${still}s"
-    # v617 (2026-11-20): transfers stalled before the first partition; killing and retrying worked.
-    if [ "$still" -ge 120 ]; then echo "STALLED attempt $attempt: stopping fastboot"; kill "$FB" 2>/dev/null || true; sleep 2; kill -9 "$FB" 2>/dev/null || true; stalled=1; break; fi
-  done
-  rc=0; wait "$FB" 2>/dev/null || rc=$?
-  tail -6 "$WORK/flash.fb.$attempt.log" || true
-  if [ "$stalled" = 0 ] && [ "$rc" = 0 ]; then DONE=1; break; fi
-  echo "attempt $attempt failed (rc=$rc stalled=$stalled); waiting for the bootloader to answer"
-  for i in $(seq 1 60); do timeout 8 "$FASTBOOT" -s "$SERIAL" getvar product 2>&1 | grep -qi product && break; sleep 5; done
-done
-printf '{"finishedAt":"%s","imageSha256":"%s","wipe":false,"ok":%s}\n' "$(date -Is)" "$NEWSHA" "$DONE" > "$WORK/flash-result.json"
-[ "$DONE" = 1 ] || die "FLASH FAILED after 3 attempts. The phone is in the bootloader and may hold a partial image. Roll back: $RB/ROLLBACK.md"
+say "5/6 fastboot update (no wipe)"
+FLASH_LOG=$WORK/flash.fastboot.log
+rc=0
+"$FASTBOOT" -s "$SERIAL" update "$IMG" > "$FLASH_LOG" 2>&1 || rc=$?
+tail -n 6 "$FLASH_LOG"
+if [ "$rc" = 0 ]; then done=true; else done=false; fi
+printf '{"finishedAt":"%s","imageSha256":"%s","wipe":false,"ok":%s}\n' "$(date -Is)" "$NEWSHA" "$done" > "$WORK/flash-result.json"
+[ "$rc" = 0 ] || die "fastboot exited $rc and the phone may hold a partial image. Check $FLASH_LOG and use $RB/ROLLBACK.md"
 
 say "6/6 Waiting for the new image to boot (up to 10 minutes)"
 timeout 300 "$ADB" -s "$SERIAL" wait-for-device || die "the phone did not come back on adb within 5 minutes. Roll back: $RB/ROLLBACK.md"

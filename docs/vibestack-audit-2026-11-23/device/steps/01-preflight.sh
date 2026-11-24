@@ -92,8 +92,10 @@ if [ "$(timeout 10 "$ADB" -s "$SERIAL" get-state 2>/dev/null)" != device ]; then
   PKGS=$(adbsh pm list packages -f || true); grep -E "=$PKG$" <<<"$PKGS" || true
   for r in HOME DIALER SMS; do echo "$r: $(adbsh cmd role get-role-holders android.app.role.$r)"; done
   CONN=$(adbsh dumpsys connectivity || true); grep -q 'VPN CONNECTED' <<<"$CONN" && warn "a VPN is connected (gnirehtet without its relay black-holes traffic; see RUNBOOK step 1)" || ok "no VPN connected"
-  INC=$(adbsh getprop ro.build.version.incremental); RB=$LEGACY_IMAGE_DIR/img${INC#alpha.v}.zip
+  INC=$(adbsh getprop ro.build.version.incremental); RB=${ROLLBACK_IMG:-$LEGACY_IMAGE_DIR/img${INC#alpha.v}.zip}
+  RB_EVIDENCE=${ROLLBACK_RECEIPT:-${RB%.zip}.evidence.json}
   [ -f "$RB" ] && ok "rollback image for the running build exists: $RB" || bad "no rollback image $RB for the running build $INC: do not flash until one exists"
+  [ -f "$RB_EVIDENCE" ] && ok "rollback build record exists: $RB_EVIDENCE" || bad "no verified rollback build record at $RB_EVIDENCE"
 fi
 
 say "Result"

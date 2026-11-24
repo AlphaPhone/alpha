@@ -217,10 +217,11 @@ Work files go to `device/work/v$VERSION_CODE/`, rollback artifacts to `device/ro
   build number changed). `Android.bp` changes this time, so Soong must regenerate its ninja file: the v40 build of
   2026-11-07, the last one with that kind of change, took about 87 min at `-j2`.
 - Artifact: `out/target/product/stallion/alpha_stallion_phone-img.zip`, copied to `work/v$N/img$N.zip` (about 2.09 GB).
-- Verify: `exit=0` in `work/v$N/image-build.log`; the launcher installed in `out/` is versionCode `$N` (and
-  normally byte-identical to the signed APK: the module is `presigned` + `preprocessed`); installed libraries equal
+- Verify: `exit=0` in `work/v$N/image-build.log`; the launcher installed in `out/` is versionCode `$N` and
+  byte-identical to the signed APK (the module is `presigned` + `preprocessed`); installed libraries equal
   the staged list; the telephony override, capability overlay, privapp allow-list and image feature files are in the
-  staging directories; the zip lists `system.img`, `product.img`, `vbmeta.img`, `android-info.txt`.
+  staging directories. The zip contains one nonempty entry each for `system.img`, `product.img`, `vbmeta.img`, and
+  `android-info.txt`. Step 5 writes the build identifier, image SHA-256 and launcher SHA-256 to `image-evidence.json`.
 - Failed before:
   - 2026-11-18 `build-v611` try 1: `signal: segmentation fault` in a notice-generation step after 24 s
     (P-core fault); a retry on E-cores passed.
@@ -238,17 +239,18 @@ Work files go to `device/work/v$VERSION_CODE/`, rollback artifacts to `device/ro
 - Runs: directly (fastboot is light). Refuses without `CONFIRM_FLASH=yes`, with any argument, when another
   fastboot is running, when `VERSION_CODE` does not exceed the installed one, or when a /data update shadows the
   system app.
-- Saves rollback artifacts first (section 3) and refuses to flash when the rollback image is missing, corrupt, or
-  not proven to be the image on the phone.
-- Then: `adb reboot bootloader`; checks `product=stallion`, `unlocked=yes`; **`fastboot -s 67091JEA313850 update
-  work/v$N/img$N.zip`** with no `-w`; a watchdog stops a transfer that makes no progress for 120 s and retries (3
-  attempts); waits for adb and `sys.boot_completed=1` (10 min).
+- Verifies the image and its signed launcher against step 5's receipt. Before entering the bootloader, it saves
+  the rollback artifacts and verifies that the rollback image, installed build and installed launcher match the
+  same prior build record.
+- Then: `adb reboot bootloader`, check `product=stallion` and `unlocked=yes`, run one `fastboot update` without
+  `-w`, and wait for adb and `sys.boot_completed=1` (10 min). The update log is `flash.fastboot.log`. If the
+  command fails, use the log and the saved rollback instructions to decide how to recover.
 - Duration: 137 s for the flash itself (`flash626.log`), about 2.5 min with the reboots.
 - What a good flash looks like: `Setting current slot to 'b'`, boot/init_boot/dtbo/vendor_kernel_boot/pvmfw/
   vendor_boot/vbmeta written, 13 sparse `super` chunks, `Rebooting`, `Finished`. `fastboot update` writes the
   **current** slot: the old image is overwritten, there is no A/B copy to fall back to.
-- Failed before: 2026-11-20 v617, two flashes stalled before the first partition (`read=74773 stalled=90s`);
-  killing fastboot and retrying once the bootloader answered worked (`flash617auto.sh`, ported here).
+- Failed before: 2026-11-20 v617, two flashes stalled before the first partition. A quiet host-side read counter
+  can also reflect an in-progress partition write. Observe the fastboot log and device state before intervening.
 - No wipe is safe because the image's platform key is the AOSP test key in both the tree and on the phone
   (note of 2026-11-15) and the launcher keeps the debug key.
 
@@ -273,11 +275,12 @@ Work files go to `device/work/v$VERSION_CODE/`, rollback artifacts to `device/ro
 
 Keep these **before** flashing (step 6 does 1-4 and refuses to flash without 1 and 5):
 
-1. The image the phone runs now: `~/.cache/alpha-v612/image/img630.zip` (2,091,502,335 bytes, 09:01 today),
-   reflink-copied to `rollback/<time>-before-v$N/rollback-img.zip` with its sha256. Step 6 ties it to the phone by
-   comparing the phone's `/product/priv-app/AlphaPhone/AlphaPhone.apk` hash with `Launcher630.apk`
-   (`e974c438bd5ad245c018910b62c85db9e3518c74c271a2d78ea33adcf7d04a2c`, the APK that image was built from).
-2. The legacy signed launcher `~/.cache/alpha-v612/image/Launcher630.apk`.
+1. The image the phone runs now: `~/.cache/alpha-v612/image/img630.zip`. Step 6 copies it to
+   `rollback/<time>-before-v$N/rollback-img.zip`.
+2. The verified build record for that image, `img630.evidence.json` by default or the path in `ROLLBACK_RECEIPT`.
+   It uses the same fields as step 5's receipt. For an older image, obtain the hashes from its build records or
+   verify the build identifier and launcher inside the archived image. Step 6 matches the saved image hash and
+   the hash of the launcher installed on the phone to this record.
 3. The phone's state: `getprop`, `dumpsys package`, package list, roles, a screenshot (also in `baseline/`).
 4. `ROLLBACK.md` with the exact commands, written next to them.
 5. The tree's `vendor/alphaphone` as it was: `rollback/vendor-alphaphone-before-v$N` (step 4). Note it holds the

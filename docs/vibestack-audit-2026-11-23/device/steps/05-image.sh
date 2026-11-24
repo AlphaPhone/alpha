@@ -41,8 +41,11 @@ fi
 OK=0
 for i in $(seq 1 "$TRIES"); do
   say "Image build try $i/$TRIES: lunch $LUNCH, BUILD_NUMBER=alpha.v$VERSION_CODE, m droid + target-files-package updatepackage (heavy.sh, ${IMAGE_MEM_GB:-10} GB cap)"
-  "$HEAVY" "$AOSP" "${IMAGE_MEM_GB:-10}" bash "$STEPS/lib/build-image-inner.sh" "$VERSION_CODE" "$LOG" "${IMAGE_GOMEMLIMIT:-8GiB}" "${IMAGE_JOBS:-4}" || echo "heavy.sh returned $? (the log decides)"
-  if grep -q '^exit=0' "$LOG"; then echo "image ok try$i $(grep '^seconds=' "$LOG") $(date +%T)" | tee -a "$SUM"; OK=1; break; fi
+  : > "$LOG"
+  if "$HEAVY" "$AOSP" "${IMAGE_MEM_GB:-10}" bash "$STEPS/lib/build-image-inner.sh" "$VERSION_CODE" "$LOG" "${IMAGE_GOMEMLIMIT:-8GiB}" "${IMAGE_JOBS:-4}" \
+    && grep -q '^exit=0$' "$LOG"; then
+    echo "image ok try$i $(grep '^seconds=' "$LOG") $(date +%T)" | tee -a "$SUM"; OK=1; break
+  fi
   cp "$LOG" "$WORK/image-build.try$i.log"
   echo "image fail try$i $(date +%T)" | tee -a "$SUM"; tail -12 "$LOG"
   if grep -q 'exit status 137' "$LOG"; then echo "exit status 137 = killed for memory (the cgroup cap or systemd-oomd). See RUNBOOK step 5 before retrying."; fi
@@ -54,8 +57,8 @@ say "Checking the built image"
 BUILT=$INSTALLED/AlphaPhone.apk
 need "$BUILT"
 BUILT_BADGING=$("$BT/aapt2" dump badging "$BUILT"); grep -q "^package: name='$PKG' versionCode='$VERSION_CODE' " <<<"$BUILT_BADGING" || die "the launcher installed in out/ is not versionCode $VERSION_CODE"
-[ "$(sha256_of "$BUILT")" = "$(sha256_of "$APK")" ] && echo "installed launcher is byte-identical to the signed APK" \
-  || echo "WARN: installed launcher bytes differ from the signed APK (versionCode matches); check its signature: $BT/apksigner verify --print-certs $BUILT"
+[ "$(sha256_of "$BUILT")" = "$(sha256_of "$APK")" ] || die "installed launcher does not match the signed APK"
+echo "installed launcher is byte-identical to the signed APK"
 echo "installed libraries: $(ls "$INSTALLED/lib/arm64" | tr '\n' ' ')"
 python3 -I - "$VENDOR/native-libraries.json" "$INSTALLED/lib/arm64" <<'PY'
 import json, os, sys
@@ -70,7 +73,7 @@ grep -h 'ro.build.fingerprint\|ro.system.build.fingerprint' "$PRODUCT_OUT/system
 
 say "Copying the image zip out of the shared out/ directory"
 cp --reflink=auto "$IMG_ZIP" "$WORK/img$VERSION_CODE.zip"
+python3 -I "$STEPS/lib/image-evidence.py" record "$WORK/image-evidence.json" "alpha.v$VERSION_CODE" "$WORK/img$VERSION_CODE.zip" "$BUILT"
 echo "img$VERSION_CODE.zip sha256=$(sha256_of "$WORK/img$VERSION_CODE.zip") bytes=$(stat -c %s "$WORK/img$VERSION_CODE.zip")" | tee -a "$SUM"
-unzip -l "$WORK/img$VERSION_CODE.zip" | grep -E 'product.img|system.img|android-info.txt|vbmeta.img' || die "image zip lacks expected partitions"
 sync
 echo "IMAGE DONE: $WORK/img$VERSION_CODE.zip (image-build evidence only; not a boot)"
