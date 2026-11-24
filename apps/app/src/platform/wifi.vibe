@@ -1,0 +1,75 @@
+// spec/app/settings/network.md, "Story: Join a nearby network"; spec/app/settings/network.md, "Story: See whether I am online"
+import type { JoinableWiFiSecurity, WiFiSecurity } from "@elizaos/os/bridges/definitions/wifi"
+import type { Joined, Scan, Security } from "../../gen/app__settings__network.ts"
+
+module held {
+  import { wifiClient } from "@elizaos/os/bridges/wifi"
+
+  let made: ReturnType<typeof wifiClient> | undefined
+  /** eliza's client of the `ElizaWiFi` plugin, made once. @throws {never} */
+  export function client(): ReturnType<typeof wifiClient> {
+    return (made ??= wifiClient())
+  }
+}
+import { client } from held
+
+/** One network a scan found: its name, how strong it is, and its security as Android parsed it. */
+export interface Nearby {
+  readonly name: string
+  readonly strength: number
+  readonly security: Security
+}
+
+/** What one scan found, or why it could not scan. */
+export interface Scanned {
+  readonly scan: Scan
+  readonly networks: ReadonlyArray<Nearby>
+}
+
+/** The phone's Wi-Fi: networks around it, a join through Android's approval, and whether it is online. */
+export service WiFi {
+  scan(): Scanned!!
+  /** Android's approval to save `name`, with the passphrase the owner typed, which goes straight to Android. */
+  join(name: string, security: Security, passphrase: Redacted.Redacted<string>): Joined!!
+  /** Whether the phone is online, as Android reports it, or none where it could not say. */
+  connectivity(): Option.Option<{ readonly online: boolean; readonly validated: boolean; readonly portal: boolean }>!!
+}
+
+const securities: Readonly<Record<WiFiSecurity, Security>> = { open: "OpenNet", owe: "EnhancedOpen", wpa2: "Wpa2", wpa3: "Wpa3", eap: "Enterprise", wep: "Wep" }
+const joinable: Readonly<Partial<Record<Security, JoinableWiFiSecurity>>> = { OpenNet: "open", EnhancedOpen: "owe", Wpa2: "wpa2", Wpa3: "wpa3" }
+const answers = { connected: "Connected", captivePortal: "Portal", declined: "Declined", unverified: "Unverified", notConnected: "NotConnected", wrongPassword: "WrongPassword", savedNetwork: "AlreadySaved" } as const
+
+effect function scanned(): Scanned!! {
+  const wifi = client()
+  const permission = try Effect.option(tryPromise(() => wifi.checkPermissions()))
+  if (Option.isSome(permission) && permission.value.location !== "granted") return { scan: "NeedsLocation", networks: [] }
+  const found = try Effect.option(tryPromise(() => wifi.listAvailableNetworks({ joinable: false })))
+  if (Option.isNone(found)) return { scan: "ScanUnavailable", networks: [] }
+  return {
+    scan: "Found",
+    networks: found.value.networks.map((network) => ({ name: network.ssid, strength: network.rssi, security: network.security === undefined ? (network.secured ? "Wpa2" : "OpenNet") : securities[network.security] })),
+  }
+}
+
+effect function joined(name: string, security: Security, passphrase: Redacted.Redacted<string>): Joined!! {
+  const kind = joinable[security]
+  if (kind === undefined) return "JoinRefused"
+  const password = Redacted.value(passphrase)
+  const answer = try Effect.option(tryPromise(() => client().addNetworkWithApproval({ ssid: name, security: kind, ...(password === "" ? {} : { password }) })))
+  return Option.isSome(answer) ? answers[answer.value.status] : "JoinRefused"
+}
+
+/** On the phone: eliza's client of the `ElizaWiFi` plugin. */
+export const phoneWiFi = Layer.succeed(WiFi, {
+  scan: scanned,
+  join: joined,
+  connectivity: () => Effect.map(Effect.option(tryPromise(() => client().getConnectivity())), Option.map((read) => ({ online: read.online, validated: read.validated, portal: read.captivePortal }))),
+})
+
+/** A browser has no Wi-Fi of its own. */
+export const browserWiFi = Layer.succeed(WiFi, {
+  scan: () => succeed<Scanned>({ scan: "ScanUnavailable", networks: [] }),
+  join: () => succeed<Joined>("JoinRefused"),
+  connectivity: () => succeed(Option.none()),
+})
+

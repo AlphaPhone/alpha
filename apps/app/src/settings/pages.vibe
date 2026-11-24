@@ -1,0 +1,110 @@
+// spec/app/settings/index.md, "Story: Find a setting and come back"
+import * as Android from "../../gen/app__settings__android.effect.vibe"
+import * as Facts from "../../gen/app__settings__facts.effect.vibe"
+import * as Pages from "../../gen/app__settings.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Device, native } from "../platform/device.vibe"
+import { SystemSettings } from "../platform/systemSettings.vibe"
+import { type Job, answer, due, following, hearing, reacting, run, stop, together, untimed } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
+
+module web {
+  /** Whether this is a development build: the Developer page and its Problem log exist only there. @throws {never} */
+  export function development(): boolean {
+    return import.meta.env.DEV || import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS === "1"
+  }
+}
+import { development } from web
+
+const settingsShowing = (shell: Parameters<typeof showing>[0]) => showing(shell, "Settings")
+
+// spec/app/settings/index.md, "The build says once whether it is a development build, and the phone whether Alpha runs on a phone and on an Alpha image"
+const admitting = effect {
+  const { image } = try (try Device).capabilities()
+  const admit: Pages.Event = { type: "admit", development: development(), phone: native(), image }
+  return [admit] as const
+}
+
+// spec/app/settings/index.md, "Each page links to what another area owns there": what the shell can open is opened; every other neighbour draws its own row at `settings/<neighbour>`.
+function handed(fx: Pages.Effect): Job<Pages.Event, Shell, []> {
+  return match (fx) {
+    when { tag: "Handed", let neighbour }: run(`hand ${neighbour}`, effect {
+      const shell = try Shell
+      if (neighbour === "GoogleAndEmail") try ignore(shell.send({ type: "openView", view: "Inbox" }))
+      if (neighbour === "CalendarAccount" || neighbour === "CalendarBackups") try ignore(shell.send({ type: "openView", view: "Calendar" }))
+      if (neighbour === "Conversations") try ignore(shell.send({ type: "raise", detent: "Full" }))
+    });
+    when { tag: "ReviewAccess" }: stop("access");
+  }
+}
+
+/** Where the owner is in Settings, from launch: a notice or Ask Alpha may open a section of it. */
+export const pages = reacting(Pages, { open: admitting, carry: handed })
+
+// spec/app/settings/facts.md, "Only the newest asking's answer is taken, and it replaces everything shown"
+effect function readPhone(ticket: number): Facts.Event!!SystemSettings {
+  const report = try (try SystemSettings).report()
+  return { type: "answered", ticket, reported: [...report.readings], grants: [...report.grants], home: report.home, assistant: report.assistant, launcher: report.launcher }
+}
+
+// spec/app/settings/facts.md, "When Android's dialog closes, the phone is read again if Settings is showing, and the role shown is what that read reports"; spec/app/settings/facts.md, "A Home request not ended within a minute is given up, never taken as granted, and the phone is read again if Settings is showing"
+effect function requestedHome(request: number): Facts.Event!!(SystemSettings | Shell | Facts.Machine | Time) {
+  const { request: asked } = try (try Facts.Machine).get()
+  const ended = effect {
+    try (try SystemSettings).requestHome()
+    return "ended" as const
+  }
+  const late = effect {
+    try (try Time).until(asked.due)
+    return "late" as const
+  }
+  const how = try race(ended, late)
+  const shown = settingsShowing(try (try Shell).get())
+  return how === "ended" ? { type: "homeRequestEnded", request, at: untimed, showing: shown } : { type: "giveUpOnHome", now: untimed, at: untimed, showing: shown }
+}
+
+function readFacts(fx: Facts.Effect): Job<Facts.Event, SystemSettings | Shell | Facts.Machine | Time, []> {
+  return match (fx) {
+    when { tag: "ReadPhone", let ticket }: answer("read", readPhone(ticket), { type: "abandon", now: untimed });
+    when { tag: "RequestHome", let request }: answer("home", requestedHome(request), { type: "giveUpOnHome", now: untimed, at: untimed, showing: false });
+  }
+}
+
+// spec/app/settings/facts.md, "A read not answered within ten seconds is abandoned, and every fact is then unavailable"
+function factTimers(state: Facts.Facts) {
+  return state.read.read.status === "Loading" ? [due<Facts.Event, []>("abandon", state.read.due, { type: "abandon", now: untimed })] : []
+}
+
+const factsMachine = reacting(Facts, { carry: readFacts, timers: factTimers })
+
+// spec/app/settings/facts.md, "Opening Settings and Refresh read the phone; Alpha coming back to the front reads it again if Settings is showing"; spec/app/settings/facts.md, "Leaving Settings retires the read in flight and forgets what was shown, so the next opening waits for a fresh answer"
+const factsShown = following(Shell, settingsShowing, Facts.Machine, (shown): Facts.Event => (shown ? { type: "refresh", at: untimed } : { type: "leave" }))
+
+const factsResumed = hearing(
+  Stream.unwrap(effect {
+    const device = try Device
+    const shell = try Shell
+    return Stream.mapEffect(Stream.filter(device.visible, (visible) => visible), () => Effect.map(shell.get(), settingsShowing))
+  }),
+  Facts.Machine,
+  (shown): Facts.Event => ({ type: "resume", at: untimed, showing: shown }),
+)
+
+// spec/app/settings/android.md, "Android says whether it opened that page, a nearby one, or none"
+effect function opened(start: number, target: Android.Target, channel: number): Android.Event!!SystemSettings {
+  return { type: "androidAnswered", start, opened: try (try SystemSettings).open(target, channel) }
+}
+
+function startAndroid(fx: Android.Effect): Job<Android.Event, SystemSettings, []> {
+  return answer("android", opened(fx.start, fx.target, fx.channel), { type: "giveUpOnAndroid", now: untimed })
+}
+
+// spec/app/settings/android.md, "A start not answered within ten seconds is given up, Alpha says Android did not answer, and the owner may try again"
+function androidTimers(state: Android.Android) {
+  return state.start.read.status === "Loading" ? [due<Android.Event, []>("start", state.start.due, { type: "giveUpOnAndroid", now: untimed })] : []
+}
+
+const androidMachine = reacting(Android, { carry: startAndroid, timers: androidTimers })
+
+/** What the Settings screen reads beside where the owner is: the phone's facts and the hand-overs to Android's own pages. */
+export const facts = together(factsMachine, factsShown, factsResumed, androidMachine)

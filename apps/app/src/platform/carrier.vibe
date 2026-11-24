@@ -1,0 +1,85 @@
+// spec/app/settings/carrier.md, "Story: Read what my carrier needs to activate a SIM"
+import type { Field, Kind, Status } from "../../gen/app__settings__carrier.ts"
+
+module held {
+  import { registerPlugin } from "@capacitor/core"
+
+  /** What `AlphaCarrierSetup` reports of one field: what Android returned, or why it returned nothing. */
+  export interface Reported { status: "available" | "permission-denied" | "unavailable" | "unsupported" | "not-read"; value?: string }
+  /** `AlphaCarrierSetup.read`: Alpha's own plugin, which reads on request only. */
+  export interface Setup {
+    canChooseSms: boolean
+    smsRole: Reported
+    dialerRole: Reported
+    eid: Reported
+    hardware: Record<"manufacturer" | "model" | "baseband", Reported>
+    slots: Array<{ slotIndex: number; imei: Reported; simState: Reported }>
+    subscriptions: { items: Array<{ subscriptionId: number; embedded: boolean; carrier: Reported; iccid: Reported; operator: Reported; operatorCode: Reported; dataEnabled: Reported; roaming: Reported }> }
+  }
+  export interface CarrierPlugin {
+    read(): Promise<Setup>
+    readEid(): Promise<Reported>
+  }
+
+  let made: CarrierPlugin | undefined
+  /** The plugin, registered once for the life of the page. @throws {never} */
+  export function plugin(): CarrierPlugin {
+    return (made ??= registerPlugin<CarrierPlugin>("AlphaCarrierSetup"))
+  }
+  /** Put `text` on the clipboard. */
+  export async function copied(text: string): Promise<void> {
+    await navigator.clipboard.writeText(text)
+  }
+}
+import { type Reported, type Setup, copied, plugin } from held
+
+/** What one read of the carrier's identifiers found, and whether there is an eSIM and Alpha can take the SMS role. */
+export interface Identifiers {
+  readonly fields: ReadonlyArray<Field>
+  readonly esim: boolean
+  readonly smsChoice: boolean
+}
+
+/** The phone's modems, SIMs and their identifiers, read only when the owner asks. */
+export service CarrierSetup {
+  read(): Option.Option<Identifiers>!!
+  readEid(): Field!!
+  copy(text: string): boolean!!
+}
+
+const statuses: Readonly<Record<Reported["status"], Status>> = { available: "Returned", "permission-denied": "AccessDenied", unavailable: "Missing", unsupported: "Unsupported", "not-read": "NotRead" }
+
+function fieldOf(kind: Kind, index: number, reported: Reported): Field {
+  const status = reported.value === undefined && reported.status === "available" ? "Missing" : statuses[reported.status]
+  return { kind, index, status, value: status === "Returned" ? reported.value ?? "" : "" }
+}
+
+function fieldsOf(setup: Setup): ReadonlyArray<Field> {
+  return [
+    ...setup.slots.flatMap((slot) => [fieldOf("Imei", slot.slotIndex, slot.imei), fieldOf("SimState", slot.slotIndex, slot.simState)]),
+    ...setup.subscriptions.items.flatMap((sim) => [
+      fieldOf("CarrierName", sim.subscriptionId, sim.carrier), fieldOf("Iccid", sim.subscriptionId, sim.iccid), fieldOf("Operator", sim.subscriptionId, sim.operator),
+      fieldOf("OperatorCode", sim.subscriptionId, sim.operatorCode), fieldOf("MobileData", sim.subscriptionId, sim.dataEnabled), fieldOf("Roaming", sim.subscriptionId, sim.roaming),
+    ]),
+    fieldOf("SmsRole", 0, setup.smsRole), fieldOf("PhoneRole", 0, setup.dialerRole),
+    fieldOf("Manufacturer", 0, setup.hardware.manufacturer), fieldOf("Model", 0, setup.hardware.model), fieldOf("Baseband", 0, setup.hardware.baseband),
+  ]
+}
+
+/** On the phone: Alpha's `AlphaCarrierSetup` plugin. */
+export const phoneCarrierSetup = Layer.succeed(CarrierSetup, {
+  read: () => Effect.map(Effect.option(tryPromise(() => plugin().read())), Option.map((setup): Identifiers => ({
+    fields: fieldsOf(setup),
+    esim: setup.subscriptions.items.some((sim) => sim.embedded) || setup.eid.status !== "unsupported",
+    smsChoice: setup.canChooseSms,
+  }))),
+  readEid: () => Effect.map(Effect.option(tryPromise(() => plugin().readEid())), (eid) => (Option.isSome(eid) ? fieldOf("Imei", 0, eid.value) : fieldOf("Imei", -1, { status: "not-read" }))),
+  copy: (text: string) => Effect.map(Effect.option(tryPromise(() => copied(text))), Option.isSome),
+})
+
+/** A browser has no carrier to read. */
+export const browserCarrierSetup = Layer.succeed(CarrierSetup, {
+  read: () => succeed(Option.none<Identifiers>()),
+  readEid: () => succeed(fieldOf("Imei", -1, { status: "not-read" })),
+  copy: () => succeed(false),
+})
