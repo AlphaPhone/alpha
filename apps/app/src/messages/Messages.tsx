@@ -16,10 +16,11 @@ import { useMachine as useComposer } from "../../gen/app__messages__composer.rea
 import { when } from "../phone/words.ts";
 import { Drafts, prepare } from "./composer.vibe";
 import { Conversations, Inbox } from "./messages.vibe";
+import { CommsBar, type CommsServices } from "../phone/CommsBar.tsx";
 
 export interface MessagesProps {
   /** Provides Messages' and the composer's machines, both resident, Phone's, for whether a call may be an emergency call, and what they count. */
-  runtime: ManagedRuntime.ManagedRuntime<MessagesMachine | ComposerMachine | PhoneMachine | Inbox | Conversations | Drafts, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<MessagesMachine | ComposerMachine | PhoneMachine | Inbox | Conversations | Drafts | CommsServices, unknown>;
 }
 
 const titleOf = (row: ThreadRow) => ("incomplete" in row ? "Conversation" : row.addresses.join(", "));
@@ -59,8 +60,8 @@ export function Messages({ runtime }: MessagesProps) {
           </div>
           {state.sought && <Chip onClear={() => search("")} clearLabel="Clear the search">{query}</Chip>}
           <div className="flex gap-2" role="group" aria-label="Show">
-            <Button size="sm" variant={state.chip === "AllThreads" ? "default" : "outline"} disabled={!can({ type: "pickChip", chip: "AllThreads" }) && state.chip !== "AllThreads"} onClick={() => void send({ type: "pickChip", chip: "AllThreads" })}>All</Button>
-            <Button size="sm" variant={state.chip === "UnreadThreads" ? "default" : "outline"} disabled={!can({ type: "pickChip", chip: "UnreadThreads" }) && state.chip !== "UnreadThreads"} onClick={() => void send({ type: "pickChip", chip: "UnreadThreads" })}>Unread</Button>
+            <Button size="sm" variant={state.chip === "AllThreads" ? "primary" : "outline"} disabled={!can({ type: "pickChip", chip: "AllThreads" }) && state.chip !== "AllThreads"} onClick={() => void send({ type: "pickChip", chip: "AllThreads" })}>All</Button>
+            <Button size="sm" variant={state.chip === "UnreadThreads" ? "primary" : "outline"} disabled={!can({ type: "pickChip", chip: "UnreadThreads" }) && state.chip !== "UnreadThreads"} onClick={() => void send({ type: "pickChip", chip: "UnreadThreads" })}>Unread</Button>
           </div>
           {state.list.status === "Loading" && state.threads === 0 && <Spinner label="Reading conversations" />}
           {threadsFailed(state) && <Banner variant="destructive" action={can({ type: "retryThreads" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "retryThreads" })}>Retry</Button>}>Conversations could not be read</Banner>}
@@ -82,6 +83,7 @@ export function Messages({ runtime }: MessagesProps) {
       )}
       {state.pane === "Conversation" && <Conversation runtime={runtime} />}
       {state.pane === "Picker" && <Picker runtime={runtime} />}
+      <CommsBar runtime={runtime} />
     </section>
   );
 }
@@ -188,7 +190,7 @@ function Compose({ runtime }: MessagesProps) {
       {state.sims > 1 && (
         <div className="flex gap-2" role="group" aria-label="SIM">
           {Array.from({ length: state.sims }, (_, at) => at + 1).map((sim) => (
-            <Button key={sim} size="sm" variant={state.sim === sim ? "default" : "outline"} disabled={!can({ type: "pickSim", sim })} onClick={() => void send({ type: "pickSim", sim })}>{`SIM ${sim}`}</Button>
+            <Button key={sim} size="sm" variant={state.sim === sim ? "primary" : "outline"} disabled={!can({ type: "pickSim", sim })} onClick={() => void send({ type: "pickSim", sim })}>{`SIM ${sim}`}</Button>
           ))}
         </div>
       )}

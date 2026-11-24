@@ -62,7 +62,7 @@ effect function acted(id: number, ask: Ask): Event!!(Telephony | Requested | Att
   return effect {
     if (ask === "Dial") {
       const report = try telephony("dial", (c) => c.phone.dial(numberOf(held)))
-      return { type: "acted", id, done: report.dialStatus === "handed-off", known: true } satisfies Event
+      return { type: "acted", id, done: report.dialStatus === "DialHandedOff", known: true } satisfies Event
     }
     if (ask === "Text") {
       const operation = (try (try Attempts).key(id)) as OperationId

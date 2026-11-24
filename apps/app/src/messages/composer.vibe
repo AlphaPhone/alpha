@@ -46,7 +46,7 @@ const outgoingKey = "alpha/messages/outgoing@1"
 
 module text {
   /** What the store kept for the send in hand, without its pictures, which are never kept. @throws {never} */
-  export function keptSend(raw: string | undefined): Outgoing | undefined {
+  export function keptSend(raw: string | undefined): { thread: number; to: string[]; body: string; sim: number | null; pictures: never[]; status: undefined } | undefined {
     if (raw === undefined) return undefined
     try {
       const found = JSON.parse(raw)
@@ -56,7 +56,7 @@ module text {
     }
   }
   /** The send in hand as the store keeps it. @throws {never} */
-  export function keepSend(outgoing: Outgoing): string {
+  export function keepSend(outgoing: { readonly pictures: ReadonlyArray<unknown> }): string {
     return JSON.stringify({ ...outgoing, pictures: [] })
   }
 }
@@ -67,7 +67,9 @@ const drafts = Layer.effect(Drafts, effect {
   let pictures: ReadonlyArray<Picture> = []
   let outgoing = Option.fromNullishOr(keptSend(store.get(outgoingKey) catch () => undefined))
   return {
-    text: (thread: number) => Effect.map(store.get(draftKey(thread)), (found) => found ?? "") catch () => "",
+    effect text(thread: number): string!! {
+      return (store.get(draftKey(thread)) catch () => undefined) ?? ""
+    },
     write: (thread: number, text: string) => ignore(store.set(draftKey(thread), text)),
     drop: (thread: number) => ignore(store.remove(draftKey(thread))),
     pictures: () => sync(() => pictures),
@@ -81,7 +83,7 @@ const drafts = Layer.effect(Drafts, effect {
 })
 
 /** The SIM a send goes out on: the one chosen, or the phone's default for texts. */
-effect function simOf(chosen: number | null): number | undefined!!Telephony {
+effect function simOf(chosen: number | null): (number | undefined)!!Telephony {
   if (chosen !== null) return chosen
   const status = telephony("status", (c) => c.messages.status()) catch () => undefined
   return status?.subscriptions?.find((one) => one.defaultSms)?.id ?? status?.subscriptions?.[0]?.id
@@ -152,7 +154,7 @@ function carry(fx: Out): Job<Event, Telephony | Drafts | Attempts | Conversation
     }, { type: "accessReported", need, grant: "Unasked" });
     when { tag: "OpenSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", 0) });
     when { tag: "OpenMessagingApp" }: run("elsewhere", effect { try elsewhere((try (try Composer.Machine).get()).thread) });
-    when { tag: "Sending", let effect: inner }: sending(inner);
+    when { tag: "Sending" }: sending(fx.effect);
   }
 }
 

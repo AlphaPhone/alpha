@@ -10,10 +10,11 @@ import type { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe";
 import { clear } from "../../gen/app__phone.ts";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
 import { type Form, Rows, blankForm, sheetOf } from "./contacts.vibe";
+import { CommsBar, type CommsServices } from "../phone/CommsBar.tsx";
 
 export interface ContactsProps {
   /** Provides Contacts' machine, resident, Phone's, for whether a call may be an emergency call, and what Contacts counts. */
-  runtime: ManagedRuntime.ManagedRuntime<ContactsMachine | PhoneMachine | Rows, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ContactsMachine | PhoneMachine | Rows | CommsServices, unknown>;
 }
 
 /**
@@ -55,8 +56,8 @@ export function Contacts({ runtime }: ContactsProps) {
           </div>
           {state.sought && <Chip onClear={() => search("")} clearLabel="Clear the search">{query}</Chip>}
           <div className="flex gap-2" role="group" aria-label="Show">
-            <Button size="sm" variant={state.chip === "Everyone" ? "default" : "outline"} disabled={!can({ type: "pick", chip: "Everyone" }) && state.chip !== "Everyone"} onClick={() => void send({ type: "pick", chip: "Everyone" })}>All</Button>
-            <Button size="sm" variant={state.chip === "Favourites" ? "default" : "outline"} disabled={!can({ type: "pick", chip: "Favourites" }) && state.chip !== "Favourites"} onClick={() => void send({ type: "pick", chip: "Favourites" })}>Favourites</Button>
+            <Button size="sm" variant={state.chip === "Everyone" ? "primary" : "outline"} disabled={!can({ type: "pick", chip: "Everyone" }) && state.chip !== "Everyone"} onClick={() => void send({ type: "pick", chip: "Everyone" })}>All</Button>
+            <Button size="sm" variant={state.chip === "Favourites" ? "primary" : "outline"} disabled={!can({ type: "pick", chip: "Favourites" }) && state.chip !== "Favourites"} onClick={() => void send({ type: "pick", chip: "Favourites" })}>Favourites</Button>
           </div>
           {state.list.status === "Loading" && state.rows === 0 && <Spinner label="Reading contacts" />}
           {listFailed(state) && <Banner variant="destructive" action={can({ type: "refresh" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "refresh" })}>Retry</Button>}>Contacts could not be read</Banner>}
@@ -73,6 +74,7 @@ export function Contacts({ runtime }: ContactsProps) {
           {can({ type: "loadMore" }) && <Button variant="outline" onClick={() => void send({ type: "loadMore" })}>More contacts</Button>}
         </>
       )}
+      <CommsBar runtime={runtime} />
     </section>
   );
 }

@@ -33,11 +33,11 @@ export service Conversations {
 
 module text {
   /** What the store kept: the conversations in the order they were numbered, from 1. @throws {never} */
-  export function kept(raw: string | undefined): Conversation[] {
+  export function kept(raw: string | undefined): { id: string; addresses: string[] }[] {
     if (raw === undefined) return []
     try {
       const found: unknown = JSON.parse(raw)
-      return Array.isArray(found) ? found.filter((one): one is Conversation => typeof one?.id === "string" && Array.isArray(one?.addresses)) : []
+      return Array.isArray(found) ? found.filter((one): one is { id: string; addresses: string[] } => typeof one?.id === "string" && Array.isArray(one?.addresses)) : []
     } catch {
       return []
     }

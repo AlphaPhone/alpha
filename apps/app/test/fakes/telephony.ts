@@ -295,7 +295,11 @@ function journal(world: TelephonyScene): Faked {
 function ongoing(world: TelephonyScene): Faked {
   return (emit) => {
     const snapshot = () => ({ calls: world.live.map((one) => ({ ...one })) });
-    world.report = () => emit("ongoingCall", snapshot());
+    const told = world.report;
+    world.report = () => {
+      told();
+      emit("ongoingCall", snapshot());
+    };
     return {
       ongoingCall: () => Promise.resolve(snapshot()),
       showCall: ({ id }: { id: string }) => Promise.resolve({ shown: world.live.some((one) => one.id === id) }),
@@ -309,10 +313,17 @@ function ongoing(world: TelephonyScene): Faked {
   };
 }
 
+/** `AlphaCallState`: whether a call is live and whether it may be an emergency call, read and pushed with each report. */
 function callState(world: TelephonyScene): Faked {
-  return () => ({
-    callState: () => Promise.resolve({ inCall: world.live.length > 0, emergency: world.live.length > 0 ? world.emergency : false, emergencyLive: world.live.length > 0 && world.emergency !== false, watching: true }),
-  });
+  return (emit) => {
+    const reading = () => ({ inCall: world.live.length > 0, emergency: world.live.length > 0 ? world.emergency : false, emergencyLive: world.live.length > 0 && world.emergency !== false, watching: true });
+    const told = world.report;
+    world.report = () => {
+      told();
+      emit("callState", reading());
+    };
+    return { callState: () => Promise.resolve(reading()) };
+  };
 }
 
 /** The telephony plugins an Alpha image's host registers. */

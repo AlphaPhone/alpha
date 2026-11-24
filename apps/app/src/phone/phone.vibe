@@ -3,7 +3,7 @@ import type { AddressBookRow } from "@elizaos/os/bridges/contacts"
 import type { TelephonyCallLogEntry, TelephonyPermissionState } from "@elizaos/os/bridges/phone"
 import * as Phone from "../../gen/app__phone.effect.vibe"
 import type { Effect as Out, Event, Filter, Telecom, Typed } from "../../gen/app__phone.effect.vibe"
-import type { kit__permission_Grant as Grant } from "../../gen/app__phone.effect.vibe"
+import type { kit__permission_Grant as Grant } from "../../gen/app__phone.ts"
 import { Calls } from "../platform/calls.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { Telephony, telephony } from "../platform/telephony.vibe"
@@ -82,10 +82,10 @@ effect function handoff(ticket: number, typed: boolean): Event!!(Telephony | Dia
   const held = try (try Dialer).get()
   const number = typed ? held.digits : held.tapped
   const report = telephony("dial", (c) => c.phone.dial(number)) catch () => undefined
-  return { type: "dialAnswered", ticket, opened: report?.dialStatus === "handed-off" }
+  return { type: "dialAnswered", ticket, opened: report?.dialStatus === "DialHandedOff" }
 }
 
-function carry(fx: Out): Job<Event, Telephony | Dialer | Phone.Machine | SystemSettings, []> {
+function carry(fx: Out): Job<Event, Telephony | Dialer | Phone.Machine | SystemSettings | Calls, []> {
   return match (fx) {
     when { tag: "ReadLog", let ticket }: answer("log", readLog(ticket), { type: "recentsRead", ticket, ok: false, grant: "Unasked", count: 0 });
     when { tag: "MatchNumber", let ticket }: answer("match", matchNumber(ticket), { type: "numberMatched", ticket, found: false });

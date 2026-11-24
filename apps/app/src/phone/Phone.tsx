@@ -12,10 +12,11 @@ import { useMachine as useVoicemail } from "../../gen/app__phone__voicemail.reac
 import { Dialer } from "./phone.vibe";
 import { Voicemails } from "./voicemail.vibe";
 import { judge, when } from "./words.ts";
+import { CommsBar, type CommsServices } from "./CommsBar.tsx";
 
 export interface PhoneProps {
   /** Provides Phone's and Voicemail's machines, both resident, and what they count. */
-  runtime: ManagedRuntime.ManagedRuntime<PhoneMachine | VoicemailMachine | Dialer | Voicemails, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<PhoneMachine | VoicemailMachine | Dialer | Voicemails | CommsServices, unknown>;
 }
 
 const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"];
@@ -72,8 +73,8 @@ export function Phone({ runtime }: PhoneProps) {
           <SearchField aria-label="Call or ask" placeholder="Call or ask" value={query} onValueChange={search} />
           {state.sought && <Chip onClear={() => search("")} clearLabel="Clear the search">{query}</Chip>}
           <div className="flex gap-2" role="group" aria-label="Show">
-            <Button size="sm" variant={state.chip === "AllCalls" ? "default" : "outline"} disabled={!can({ type: "pickChip", chip: "AllCalls" }) && state.chip !== "AllCalls"} onClick={() => void send({ type: "pickChip", chip: "AllCalls" })}>All</Button>
-            <Button size="sm" variant={state.chip === "MissedCalls" ? "default" : "outline"} disabled={!can({ type: "pickChip", chip: "MissedCalls" }) && state.chip !== "MissedCalls"} onClick={() => void send({ type: "pickChip", chip: "MissedCalls" })}>Missed</Button>
+            <Button size="sm" variant={state.chip === "AllCalls" ? "primary" : "outline"} disabled={!can({ type: "pickChip", chip: "AllCalls" }) && state.chip !== "AllCalls"} onClick={() => void send({ type: "pickChip", chip: "AllCalls" })}>All</Button>
+            <Button size="sm" variant={state.chip === "MissedCalls" ? "primary" : "outline"} disabled={!can({ type: "pickChip", chip: "MissedCalls" }) && state.chip !== "MissedCalls"} onClick={() => void send({ type: "pickChip", chip: "MissedCalls" })}>Missed</Button>
           </div>
           {state.recents.status === "Loading" && rows.length === 0 && <Spinner label="Reading recent calls" />}
           {logNeeded(state) && (
@@ -109,6 +110,7 @@ export function Phone({ runtime }: PhoneProps) {
           <VoicemailTab runtime={runtime} />
         </TabsContent>
       </Tabs>
+      <CommsBar runtime={runtime} />
     </section>
   );
 }
