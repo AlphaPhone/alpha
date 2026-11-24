@@ -1,0 +1,113 @@
+// spec/app/files/index.md, "Story: Let the agent read my files"
+import * as Browser from "../../gen/app__files.effect.vibe"
+import type { Action, Event, Offer } from "../../gen/app__files.effect.vibe"
+import type { Place } from "../../gen/app__files__change.effect.vibe"
+import * as Shown from "../../gen/app__files__preview.effect.vibe"
+import type { Filter } from "../../gen/app__files__search.effect.vibe"
+import type { Item } from "../../gen/app__files__shared.effect.vibe"
+import type { Outcome } from "../../gen/kit__attempt.effect.vibe"
+import { Files } from "../platform/files.vibe"
+import { Handles, type Spot } from "./handles.vibe"
+
+/** What Files told the agent of one of its requests: whether it was done, and the files it found or opened. */
+export interface Told {
+  readonly ok: boolean
+  readonly items: ReadonlyArray<Item>
+}
+
+/** How an approved request ended: whether Files ran it at all, and its outcome. */
+export interface Receipt {
+  readonly ran: boolean
+  readonly outcome: Outcome
+}
+
+/**
+ * The agent's requests and the approvals waiting on what Files answers, each by its number: an answer is handed to
+ * the one waiting for it, and one nobody waits for, such as a request a restart cut off, is dropped.
+ */
+export service Answers {
+  expect(request: number): Deferred.Deferred<Told>!!
+  tell(request: number, told: Told): void!!
+  expectReceipt(ticket: number): Deferred.Deferred<Receipt>!!
+  receipt(ticket: number, receipt: Receipt): void!!
+}
+
+function waitingFor<A>() {
+  const waiting = new Map<number, Deferred.Deferred<A>>()
+  return {
+    expect: (key: number) => sync(() => {
+      const made = Deferred.makeUnsafe<A>()
+      waiting.set(key, made)
+      return made
+    }),
+    settle: (key: number, value: A) => sync(() => {
+      const found = waiting.get(key)
+      waiting.delete(key)
+      if (found !== undefined) Deferred.doneUnsafe(found, Effect.succeed(value))
+    }),
+  }
+}
+
+export const answers = Layer.sync(Answers, () => {
+  const told = waitingFor<Told>()
+  const receipts = waitingFor<Receipt>()
+  return { expect: told.expect, tell: told.settle, expectReceipt: receipts.expect, receipt: receipts.settle }
+})
+
+/** Send `event` as `by` and wait for what Files tells the agent of `request`; an event the rules refuse outright failed. */
+effect function asked(request: number, event: Event, by: Browser.Actor): Told!!(Answers | Browser.Machine) {
+  const waiting = try (try Answers).expect(request)
+  const sent = try exit((try Browser.Machine).send(event, by))
+  if (Exit.isFailure(sent)) try (try Answers).tell(request, { ok: false, items: [] })
+  return try Deferred.await(waiting)
+}
+
+// spec/app/files/index.md, "The phone offers Files to an agent that takes Files' operations, and naming files by their place among the results shown only beside them; a request the phone cannot take is never shown for approval"
+/** What this phone offers the agent of Files: its operations where the phone has shared storage, and positions beside them. */
+export const offer: Offer!!Files = effect {
+  return Browser.offered(Option.isSome((try Files).plugin), true)
+}
+
+// spec/app/files/index.md, "A position names a result on screen, counting from one; a request naming a position that is not shown names nothing and leaves no card, and a card keeps the files it showed"
+/** The results on screen the agent named by position, as Files shows them now, for the approvals area to bind on its card; none where any is not shown. */
+export effect function shownAt(positions: ReadonlyArray<number>): ReadonlyArray<Item>!!Browser.Machine {
+  return Browser.atPositions((try (try Browser.Machine).get()).search.hits, [...positions])
+}
+
+// spec/app/files/index.md, "The agent reads a folder for itself, and only its newest reading is told to it; it is told it failed without access or on a protected screen"
+/** The agent reads the folder at `spot`, by kind and text, for itself; `guarded` is the approvals area's fact that the screen is protected. */
+export effect function agentRead(request: number, spot: Spot, wanted: Filter, guarded: boolean): Told!!(Answers | Browser.Machine | Handles) {
+  const target = try (try Handles).of(spot)
+  return try asked(request, { type: "agentLook", request, target, wanted, guarded }, "Agent")
+}
+
+// spec/app/files/index.md, "The agent sets the owner's filter on Files on screen, and is told how many it found; otherwise it is told it failed"
+export effect function agentFilter(request: number, wanted: Filter, guarded: boolean): Told!!(Answers | Browser.Machine) {
+  return try asked(request, { type: "agentFilter", request, wanted, guarded }, "Agent")
+}
+
+// spec/app/files/index.md, "The agent opens a file the owner is shown, as listed now, when no file is open over Files; otherwise it is told it failed"
+export effect function agentOpen(request: number, file: Item, guarded: boolean): Told!!(Answers | Browser.Machine | Shown.Machine) {
+  const previewing = Shown.showing(try (try Shown.Machine).get())
+  return try asked(request, { type: "agentOpen", request, file, previewing, guarded }, "Agent")
+}
+
+/** A request the owner approved: what it does, to which file shown in which folder, the new name or the destination it names. */
+export interface Approved {
+  readonly ticket: number
+  readonly act: Action
+  readonly file: Item
+  readonly folder: number
+  readonly name: string
+  readonly dest: Place
+}
+
+// spec/app/files/index.md, "An approved request runs only in Files on screen, in the folder the owner approved, on a screen that is not protected, and on the item as it was shown; otherwise the agent is told it did not run"
+/** Hand Files a request the owner approved, and wait for how it ended; an email account never takes a file the phone cannot read out. */
+export effect function approved(request: Approved, guarded: boolean): Receipt!!(Answers | Browser.Machine) {
+  const answers = try Answers
+  const waiting = try answers.expectReceipt(request.ticket)
+  const sent = try exit((try Browser.Machine).send({ type: "approve", ...request, guarded, mail: false }, "Phone"))
+  if (Exit.isFailure(sent)) try answers.receipt(request.ticket, { ran: false, outcome: "Refused" })
+  return try Deferred.await(waiting)
+}

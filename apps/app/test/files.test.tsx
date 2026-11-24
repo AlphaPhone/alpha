@@ -5,6 +5,7 @@ import { Machine as Browser } from "../gen/app__files.effect.vibe";
 import { Machine as Shown } from "../gen/app__files__preview.effect.vibe";
 import { Machine as Recent } from "../gen/app__files__recent.effect.vibe";
 import { Machine as Bin } from "../gen/app__files__trash.effect.vibe";
+import { agentFilter, agentOpen, agentRead, approved, offer, shownAt } from "../src/files/agent.vibe";
 import { showDownloads } from "../src/files/files.vibe";
 import files from "../src/files/index.tsx";
 import { button, closeAll, fill, hardware, later, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
@@ -142,7 +143,7 @@ describe("Files on a phone", () => {
     expect(world.files.calls.filter((call) => call.startsWith("storageRequestAccess"))).toEqual(["storageRequestAccess", "storageRequestAccess settings", "storageRequestAccess settings"]);
   });
 
-  it("Arrange and filter what I see (spec/app/files/index.md, \"Story: Arrange and filter what I see\")", async () => {
+  it("Arrange and filter what I see (spec/app/files/index.md, \"Story: Arrange and filter what I see\"; spec/app/files/search.md, \"Story: Filter what I see\")", async () => {
     const { alpha, runtime, world } = await onFiles();
     await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
     await press("Internal storage");
@@ -182,7 +183,7 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 3);
   });
 
-  it("Change my files (spec/app/files/index.md, \"Story: Change my files\")", async () => {
+  it("Change my files (spec/app/files/index.md, \"Story: Change my files\"; spec/app/files/change.md, \"Story: Change my files\"; spec/app/files/destination.md, \"Story: Choose a destination\"; spec/app/files/change.md, \"Story: Share what I selected\")", async () => {
     const { alpha, runtime, world } = await onFiles();
     await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
     await press("Internal storage");
@@ -259,6 +260,14 @@ describe("Files on a phone", () => {
     await press("Copy");
     await until(alpha, runtime, Browser, (s) => s.change.sending.outcome === "Confirmed" && s.change.sentTo === "Copy");
     expect(await navigator.clipboard.readText()).toBe("Internal storage/Download/dunes.jpg");
+    // spec/app/files/change.md, "The sheet goes away when the owner closes it or Files is hidden, and when the selection changes the owner is told it sent nothing; a sheet never opens again"
+    await select("dunes.jpg");
+    await press("Share");
+    await until(alpha, runtime, Browser, (s) => s.change.panel !== 0);
+    await select("beach.jpg");
+    await until(alpha, runtime, Browser, (s) => s.change.panel === 0 && s.change.stale);
+    expect(document.body.textContent?.includes("The selection changed, so nothing was shared")).toBe(true);
+    await press("Cancel");
 
     // spec/app/files/index.md, "An approved request runs only in Files on screen, in the folder the owner approved, on a screen that is not protected, and on the item as it was shown; otherwise the agent is told it did not run"
     await select("dunes.jpg");
@@ -328,7 +337,60 @@ describe("Files on a phone", () => {
     expect(button("notes.txt")).toBeUndefined();
   });
 
-  it("Come back after a restart (spec/app/files/index.md, \"Story: Come back after a restart\"; spec/app/files/trash.md, \"Story: Come back to the Trash after a restart\"; spec/app/files/preview.md, \"Story: Come back to a preview after a restart\")", async () => {
+  it("Let the agent read my files (spec/app/files/index.md, \"Story: Let the agent read my files\")", async () => {
+    const { alpha, runtime, world } = await onFiles();
+    await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
+    await press("Internal storage");
+    await press("Download");
+    await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 2);
+    const now = () => runtime.runSync(Browser.use((m) => m.get()));
+    const everything = { text: "", kind: "Other", anyKind: true } as const;
+    // spec/app/files/index.md, "The phone offers Files to an agent that takes Files' operations, and naming files by their place among the results shown only beside them; a request the phone cannot take is never shown for approval"
+    expect(await runtime.runPromise(offer)).toEqual({ operations: true, positions: true });
+
+    // spec/app/files/index.md, "The agent reads a folder for itself, and only its newest reading is told to it; it is told it failed without access or on a protected screen"
+    // spec/app/files/index.md, "The agent's reading and opening change nothing the owner is working on"
+    const read = await runtime.runPromise(agentRead(1, { volume: "primary", path: "Documents" }, { text: "NOTES", kind: "Other", anyKind: true }, false));
+    expect([read.ok, read.items.map((item) => item.name), now().trail.length, now().items.length]).toEqual([true, ["notes.txt"], 2, 2]);
+    expect((await runtime.runPromise(agentRead(2, { volume: "primary", path: "Documents" }, everything, true))).ok).toBe(false);
+
+    // spec/app/files/index.md, "The agent sets the owner's filter on Files on screen, and is told how many it found; otherwise it is told it failed"
+    const filtered = await runtime.runPromise(agentFilter(3, { text: "", kind: "Image", anyKind: false }, false));
+    expect([filtered.ok, filtered.items.map((item) => item.name), now().search.filter.kind]).toEqual([true, ["beach.jpg"], "Image"]);
+    // spec/app/files/index.md, "A position names a result on screen, counting from one; a request naming a position that is not shown names nothing and leaves no card, and a card keeps the files it showed"
+    const [first] = await runtime.runPromise(shownAt([1]));
+    expect([first?.name, (await runtime.runPromise(shownAt([2]))).length]).toEqual(["beach.jpg", 0]);
+
+    // spec/app/files/index.md, "The agent opens a file the owner is shown, as listed now, when no file is open over Files; otherwise it is told it failed"
+    const beach = now().items.find((item) => item.name === "beach.jpg");
+    if (!beach) throw new Error("beach.jpg is not listed");
+    expect((await runtime.runPromise(agentOpen(4, beach, false))).ok).toBe(true);
+    await until(alpha, runtime, Shown, (s) => s.viewer !== 0 && s.item === beach.id);
+    expect((await runtime.runPromise(agentOpen(5, beach, false))).ok).toBe(false);
+    await press("Close");
+    await until(alpha, runtime, Shown, (s) => s.viewer === 0);
+    await press("Clear the filter");
+    await until(alpha, runtime, Browser, (s) => !s.search.searching);
+
+    // spec/app/files/index.md, "An approved request runs only in Files on screen, in the folder the owner approved, on a screen that is not protected, and on the item as it was shown; otherwise the agent is told it did not run"
+    // spec/app/files/index.md, "An approved request acts on its own item alone, in the folder showing, and never while Files is away"
+    const lease = now().items.find((item) => item.name === "lease.pdf");
+    if (!lease) throw new Error("lease.pdf is not listed");
+    const folder = now().trail.at(-1) ?? 0;
+    const nowhere = { folder: 0, path: [], names: [] };
+    expect(await runtime.runPromise(approved({ ticket: 7, act: "Naming", file: lease, folder, name: "lease 2026.pdf", dest: nowhere }, true))).toEqual({ ran: false, outcome: "Refused" });
+    expect(await runtime.runPromise(approved({ ticket: 8, act: "Naming", file: lease, folder, name: "lease 2026.pdf", dest: nowhere }, false))).toEqual({ ran: true, outcome: "Confirmed" });
+    expect(paths(world).includes("primary:Download/lease 2026.pdf")).toBe(true);
+    await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.some((item) => item.name === "lease 2026.pdf"));
+    const renamed = now().items.find((item) => item.name === "lease 2026.pdf");
+    if (!renamed) throw new Error("the renamed lease is not listed");
+    expect(await runtime.runPromise(approved({ ticket: 9, act: "Deleting", file: renamed, folder, name: "", dest: nowhere }, false))).toEqual({ ran: true, outcome: "Confirmed" });
+    expect(world.files.trash.map((one) => one.was.path)).toEqual(["Download/lease 2026.pdf"]);
+    await hardware("home");
+    expect(await runtime.runPromise(approved({ ticket: 10, act: "Deleting", file: beach, folder, name: "", dest: nowhere }, false))).toEqual({ ran: false, outcome: "Refused" });
+  });
+
+  it("Come back after a restart (spec/app/files/index.md, \"Story: Come back after a restart\"; spec/app/files/change.md, \"Story: Come back to my changes after a restart\"; spec/app/files/trash.md, \"Story: Come back to the Trash after a restart\"; spec/app/files/preview.md, \"Story: Come back to a preview after a restart\")", async () => {
     const world = { ...scene(), phone: true };
     // spec/app/files/recent.md, "The earlier Alpha's Recent is carried over once, while this one is still empty: each document it held access to becomes a row of its own, the newest first; one it held without access, and the document it had open, are not carried"
     localStorage.setItem("alpha.files.recent.v1", JSON.stringify([
@@ -358,9 +420,17 @@ describe("Files on a phone", () => {
     await until(second.alpha, second.runtime, Browser, (s) => s.layout === "Grid" && s.order === "ByName");
     await until(second.alpha, second.runtime, Shown, (s) => s.viewer === 0);
     await until(second.alpha, second.runtime, Recent, (s) => s.rows.length === 2 && s.rows.filter((row) => row.grant === 0).length === 1);
+
+    // spec/app/files/change.md, "A restart reports a change or a share cut off as unknown, the change's items unknown too, and closes the choice and the sheet"
+    await select("notes.txt");
+    await press("Share");
+    await until(second.alpha, second.runtime, Browser, (s) => s.change.panel !== 0);
+    await second.close();
+    const third = await onFiles(world);
+    await until(third.alpha, third.runtime, Browser, (s) => s.open && s.listing.status === "Loaded" && s.change.panel === 0 && s.picked.length === 0);
   });
 
-  it("Delete into the Trash and bring it back (spec/app/files/trash.md, \"Story: Delete into the Trash\"; spec/app/files/trash.md, \"Story: Bring something back\"; spec/app/files/trash.md, \"Story: Erase for good\")", async () => {
+  it("Delete into the Trash and bring it back (spec/app/files/trash.md, \"Story: Delete into the Trash\"; spec/app/files/trash.md, \"Story: See what is in the Trash\"; spec/app/files/trash.md, \"Story: Bring something back\"; spec/app/files/trash.md, \"Story: Erase for good\")", async () => {
     const { alpha, runtime, world } = await onFiles();
     await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
     await press("Internal storage");
@@ -447,6 +517,21 @@ describe("Files on a phone", () => {
     await press("Restore all");
     await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Confirmed" && s.entries.length === 0 && s.listing.status === "Loaded");
     expect([world.files.trash, paths(world).filter((path) => path.endsWith("a.txt") || path.endsWith("b.txt"))]).toEqual([[], ["card:b.txt", "primary:Download/a.txt"]]);
+
+    // spec/app/files/trash.md, "The owner is shown what will be erased, one item, the marked items or everything listed, and a change to the list voids the confirmation"
+    world.files.trash.push(
+      { id: "14", was: { volume: "primary", path: "Download/e.txt", directory: false, mimeType: "text/plain", size: 1, modified: 1 }, deletedAt: world.files.now },
+      { id: "15", was: { volume: "card", path: "f.txt", directory: false, mimeType: "text/plain", size: 1, modified: 1 }, deletedAt: world.files.now },
+    );
+    await press("Refresh");
+    await until(alpha, runtime, Bin, (s) => s.listing.status === "Loaded" && s.entries.length === 2);
+    await press("Empty the Trash");
+    await until(alpha, runtime, Bin, (s) => s.erasing.showing && s.doomed.length === 2);
+    await pressOnTop("Erase");
+    await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Confirmed" && s.entries.length === 0 && s.listing.status === "Loaded");
+    expect(world.files.trash).toEqual([]);
+    // spec/app/files/trash.md, "The Trash is closed, without access, reading, unreadable, empty or listing"
+    expect(document.body.textContent?.includes("The Trash is empty")).toBe(true);
     await hardware("home");
   });
 });

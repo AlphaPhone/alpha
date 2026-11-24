@@ -8,12 +8,13 @@ import * as Bin from "../../gen/app__files__trash.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import { Files, FilesFailed, called } from "../platform/files.vibe"
-import { type Job, answer, applying, due, following, hearing, reacting, run, stop, together, untimed } from "../runtime/reactor.vibe"
+import { type Job, answer, applying, due, following, hearing, reacting, run, together, untimed } from "../runtime/reactor.vibe"
 import { Handles, type Spot, handles } from "./handles.vibe"
 import * as Shown from "../../gen/app__files__preview.effect.vibe"
 import * as Recent from "../../gen/app__files__recent.effect.vibe"
 import { Documents } from "../platform/documents.vibe"
 import { Opened, preview, taken, view } from "./preview.vibe"
+import { Answers, answers } from "./agent.vibe"
 
 module names {
   /** Whether `name` contains `text`, as the owner reads it: letters compared without their case. @throws {never} */
@@ -185,14 +186,15 @@ effect function destination(ticket: number, trail: ReadonlyArray<number>): Event
 }
 
 // spec/app/files/index.md, "The agent reads a folder for itself, and only its newest reading is told to it; it is told it failed without access or on a protected screen"
-effect function peeked(ticket: number, folder: number): Event!!(Files | Handles) {
+effect function peeked(ticket: number, folder: number, wanted: Filter): Event!!(Files | Handles) {
   return effect {
     const found = try spotOf(folder)
     if (Option.isNone(found)) return { type: "agentLooked", ticket, ok: false, entries: [] }
     const { volume, path } = found.value
     const reply = try called("storageList", (plugin) => plugin.storageList({ volume, path }))
     if (reply.status !== "ready") return { type: "agentLooked", ticket, ok: false, entries: [] }
-    return { type: "agentLooked", ticket, ok: true, entries: try itemsOf(volume, reply.entries ?? []) }
+    const matching = (reply.entries ?? []).filter((entry) => containsText(entry.name, wanted.text) && (wanted.anyKind || kindOf(entry) === wanted.kind))
+    return { type: "agentLooked", ticket, ok: true, entries: try itemsOf(volume, matching) }
   } catch () => ({ type: "agentLooked", ticket, ok: false, entries: [] })
 }
 
@@ -372,7 +374,7 @@ effect function allowed(settings: boolean): Event!!(Files | Browser.Machine) {
   return try reported(true)
 }
 
-function carry(fx: Out): Job<Event, Files | Handles | Browser.Machine | Bin.Machine | Documents | Opened | Recent.Machine | Shown.Machine, [by: Actor]> {
+function carry(fx: Out): Job<Event, Files | Handles | Browser.Machine | Bin.Machine | Documents | Opened | Recent.Machine | Shown.Machine | Answers, [by: Actor]> {
   return match (fx) {
     when { tag: "AskAccess" }: answer("access", allowed(false), { type: "accessReported", grant: "Denied", supported: true }, "Phone");
     when { tag: "OpenSettings" }: answer("access", allowed(true), { type: "accessReported", grant: "Denied", supported: true }, "Phone");
@@ -380,8 +382,8 @@ function carry(fx: Out): Job<Event, Files | Handles | Browser.Machine | Bin.Mach
     when { tag: "Look", let ticket, let trail, let category, let inCategory }: answer("look", looked(ticket, trail, category, inCategory), { type: "listed", ticket, ok: false, gone: false, complete: false, entries: [] }, "Phone");
     when { tag: "Search", let ticket, let where, let filter }: answer("search", searched(ticket, where, filter), { type: "searched", ticket, ok: false, complete: false, entries: [] }, "Phone");
     when { tag: "LookInto", let ticket, let trail }: answer("sheet", destination(ticket, trail), { type: "destRead", ticket, ok: false, entries: [] }, "Phone");
-    when { tag: "AgentLook", let ticket, let folder }: answer("peek", peeked(ticket, folder), { type: "agentLooked", ticket, ok: false, entries: [] }, "Phone");
-    when { tag: "Tell" }: stop("tell");
+    when { tag: "AgentLook", let ticket, let folder, let filter }: answer("peek", peeked(ticket, folder, filter), { type: "agentLooked", ticket, ok: false, entries: [] }, "Phone");
+    when { tag: "Tell", let request, let ok, let items }: run(`tell ${request}`, effect { try (try Answers).tell(request, { ok, items }) }, "Phone");
     when { tag: "Perform", let ticket, let work, let items, let name, let folder, let dest, let replace }: answer(`perform ${ticket}`, performed(ticket, work, items, name, folder, dest, replace), { type: "finished", ticket, done: [], failed: [] }, "Phone");
     when { tag: "ToTrash", let items, let approval }: run("trash", ignore(effect {
       const shown = (try (try Browser.Machine).get()).items
@@ -391,7 +393,7 @@ function carry(fx: Out): Job<Event, Files | Handles | Browser.Machine | Bin.Mach
     when { tag: "Show", let item, let siblings }: run("show", view(item, siblings), "Phone");
     when { tag: "Share", let ticket, let channel, let items }: answer(`share ${ticket}`, shared(ticket, channel, items), { type: "shareEnded", ticket, opened: false, known: false }, "Phone");
     when { tag: "Taken", let items }: run("taken", taken(items), "Phone");
-    when { tag: "Receipt" }: stop("receipt");
+    when { tag: "Receipt", let ticket, let ran, let outcome }: run(`receipt ${ticket}`, effect { try (try Answers).receipt(ticket, { ran, outcome }) }, "Phone");
   }
 }
 
@@ -548,7 +550,7 @@ effect function erased(number: number, entries: ReadonlyArray<Bin.Entry>): Bin.E
   } catch () => jobDone(number, [], false)
 }
 
-function carryBin(fx: Bin.Effect): Job<Bin.Event, Files | Handles | Browser.Machine | Recent.Machine | Shown.Machine, [by: Bin.Actor]> {
+function carryBin(fx: Bin.Effect): Job<Bin.Event, Files | Handles | Browser.Machine | Recent.Machine | Shown.Machine | Answers, [by: Bin.Actor]> {
   return match (fx) {
     when { tag: "Look", let ticket }: answer("look", binLooked(ticket), { type: "listed", ticket, ok: false, rows: [], now: untimed }, "Phone");
     when { tag: "Bin", let ticket, let items }: answer(`job ${ticket}`, binned(ticket, items), jobDone(ticket, [], false), "Phone");
@@ -558,7 +560,7 @@ function carryBin(fx: Bin.Effect): Job<Bin.Event, Files | Handles | Browser.Mach
       try taken(items)
       try (try Browser.Machine).send({ type: "refresh" }, "Phone")
     }), "Phone");
-    when { tag: "Receipt" }: stop("receipt");
+    when { tag: "Receipt", let ticket, let ran, let outcome }: run(`receipt ${ticket}`, effect { try (try Answers).receipt(ticket, { ran, outcome }) }, "Phone");
   }
 }
 
@@ -596,7 +598,7 @@ effect function watch(place: { trail: ReadonlyArray<number>; category?: Kind } |
 const watching = applying(Browser.Machine, watched, watch)
 
 /** Files and its Trash, kept across restarts, carried out through the phone's storage and told by the shell whether Files shows. */
-export const files = Layer.provideMerge(together(browsing, onScreen, access, changes, watching, binning, trashAccess, trashShown, preview), handles)
+export const files = Layer.provideMerge(together(browsing, onScreen, access, changes, watching, binning, trashAccess, trashShown, preview), Layer.merge(handles, answers))
 
 // spec/app/files/index.md, "Another area opens Files at Downloads: the Download folder of the main volume where the phone has one, else the Downloads category; the owner's own move to the top, a volume or a category ends that walk"
 /** Show Files at Downloads for another area, such as the Browser's Show in Files: Back from there returns to that area. */
