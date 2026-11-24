@@ -4,6 +4,7 @@ package ai.alphacompute.alphaphone;
 import ai.eliza.plugins.actionjournal.ActionJournal;
 import ai.eliza.plugins.actionjournal.ActionJournalConfiguration;
 import ai.eliza.plugins.actionjournal.ActionJournalPlugin;
+import ai.eliza.plugins.actionjournal.deletion.DeferredDeletionCoordinator;
 import android.content.Context;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import org.json.JSONObject;
@@ -26,4 +27,11 @@ public final class AlphaActionJournalPlugin extends ActionJournalPlugin {
  }
 
  @Override protected ActionJournal createJournal() { return journal(getContext()); }
+
+ @Override protected DeferredDeletionCoordinator deletions() {
+  if (!AlphaImageCapability.verified(getContext()) || !AlphaDevicePlugin.shareForeground(getActivity())) {
+   throw new SecurityException("Open and unlock Alpha to review pending deletions.");
+  }
+  return AlphaTelephonyDeletions.get(getContext());
+ }
 }

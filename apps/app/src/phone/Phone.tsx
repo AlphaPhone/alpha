@@ -1,7 +1,7 @@
 // spec/app/phone/index.md, "Story: See my recent calls"; spec/app/phone/index.md, "Story: Give Alpha the call log"; spec/app/phone/index.md, "Story: Type a number"; spec/app/phone/index.md, "Story: Call a number"; spec/app/phone/voicemail.md, "Story: Listen to a voicemail"; spec/app/phone/voicemail.md, "Story: Delete a voicemail"
 import type { TelephonyCallLogEntry } from "@elizaos/os/bridges/phone";
 import { Alert, Button, Chip, Input, Spinner, Tabs, TabsContent, cn, focusRing } from "@repo/ui";
-import type { ManagedRuntime } from "effect";
+import { Effect, type ManagedRuntime } from "effect";
 import { ArrowDownLeft, ArrowUpRight, Delete, Phone as Call } from "lucide-react";
 import { memo, useCallback, useRef } from "react";
 import { Machine as PhoneMachine, type Tab } from "../../gen/app__phone.effect.vibe";
@@ -12,7 +12,7 @@ import { useMachine as useVoicemail } from "../../gen/app__phone__voicemail.reac
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Alpha } from "../runtime/area.tsx";
 import { Time } from "../runtime/time.vibe";
-import { Dialer, keypadDigits } from "./phone.vibe";
+import { Dialer, type Dialing, keypadDigits } from "./phone.vibe";
 import { Player, Voicemails } from "./voicemail.vibe";
 import { callerTitle, displayNumber, judge, shortWhen } from "./words.ts";
 import { CommsBar, type CommsServices } from "./CommsBar.tsx";
@@ -64,14 +64,14 @@ export function Phone({ runtime, alpha }: PhoneProps) {
   const zeroDown = useRef<number | undefined>(undefined);
   const longZero = useRef(false);
   const dialRecent = useCallback((number: string) => {
-    void runtime.runPromiseExit(PhoneMachine.use((machine) => machine.send({ type: "dialRecent", number })));
+    void runtime.runPromiseExit(Effect.flatMap(PhoneMachine, (machine) => machine.send({ type: "dialRecent", number })));
   }, [runtime]);
   if (phone.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Phone</Alert>;
   const { state, can, send } = phone;
   if (!state) return null;
-  const dialer = runtime.runSync(Dialer.use((held) => held.get()));
-  const now = runtime.runSync(Time.use((time) => time.latest()));
-  const set = (change: Parameters<Dialer["set"]>[0]) => runtime.runSync(Dialer.use((held) => held.set(change)));
+  const dialer = runtime.runSync(Effect.flatMap(Dialer, (held) => held.get()));
+  const now = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
+  const set = (change: Partial<Dialing>) => runtime.runSync(Effect.flatMap(Dialer, (held) => held.set(change)));
   const edit = (number: string) => {
     const digits = keypadDigits(number);
     const event = { type: "editNumber", digits: digits.length, typed: judge(digits) } as const;
@@ -81,7 +81,7 @@ export function Phone({ runtime, alpha }: PhoneProps) {
     }
   };
   const changeDigit = (key?: string) => {
-    const current = runtime.runSync(Dialer.use((held) => held.get())).digits;
+    const current = runtime.runSync(Effect.flatMap(Dialer, (held) => held.get())).digits;
     const digits = key === undefined ? current.slice(0, -1) : current + key;
     const event = { type: key === undefined ? "takeBack" : "press", typed: judge(digits) } as const;
     if (can(event)) {
@@ -143,7 +143,7 @@ export function Phone({ runtime, alpha }: PhoneProps) {
                   <span className="truncate">{dialer.matched}</span><span className="shrink-0 text-muted-foreground tabular-nums">{displayNumber(dialer.matchedNumber)}</span>
                 </Button>
               )}
-              {state.typed === "Dialable" && !state.carrier && <p role="status" className="text-center text-sm text-muted-foreground">No mobile network. Emergency calls only.</p>}
+              {state.typed === "Dialable" && !state.carrier && <p role="status" className="text-center text-sm text-muted-foreground">Only emergency calls are available.</p>}
             </div>
             <div role="group" aria-label="Keypad" className="grid shrink-0 grid-cols-3 justify-items-center gap-x-3 gap-y-[calc(var(--dial-key)*.15)] px-9">
               {keys.map(([key, letters]) => (
@@ -185,4 +185,3 @@ export function Phone({ runtime, alpha }: PhoneProps) {
     </section>
   );
 }
-

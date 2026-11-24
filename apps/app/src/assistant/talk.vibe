@@ -3,6 +3,8 @@ import { ConversationRecord } from "@elizaos/agent/client"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import type { Binding } from "../../gen/app__assistant__composer.effect.vibe"
 import type { Failure, Fix } from "../../gen/app__assistant__reply.ts"
+import type { MailQuestion } from "../inbox/mail-context.vibe"
+import type { CommsPrompt } from "../phone/comms.vibe"
 
 /** One file selected by the owner, with the bytes admitted by the Ask Alpha attachment policy. */
 export interface Attached {
@@ -17,8 +19,9 @@ export interface StagedFiles {
   readonly ticket: number
   readonly hold: number
   readonly binding: Binding
-  readonly key: string
+  readonly key?: string
   readonly files: readonly Attached[]
+  readonly mail?: MailQuestion
 }
 
 /** One message of the conversation showing, as the agent keeps it. */
@@ -92,6 +95,8 @@ export interface Board {
   sendWhenMade: boolean
   staged: StagedFiles | undefined
   previewFile(file: Attached): number
+  waitingRequest: CommsPrompt | undefined
+  postingRequest: CommsPrompt | undefined
   change(patch: Partial<Seen>): void
   /** The number of the conversation the agent names `record`, given the first time it is seen; its title where one is given. */
   numberOf(record: ConversationRecord, title?: string): number
@@ -162,6 +167,8 @@ export const talk = Layer.effect(Talk, effect {
       board.change({ preview: { ticket, file } })
       return ticket
     },
+    waitingRequest: undefined,
+    postingRequest: undefined,
     change: (patch) => {
       seen = { ...seen, ...patch }
       for (const listener of listeners) listener()

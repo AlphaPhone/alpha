@@ -89,6 +89,7 @@ export function App({ alpha }: AppProps) {
   const inert = layers !== undefined && pageInert(layers);
   const comms = isCommsView(showing);
   const side = showing === undefined && canvas?.landscape;
+  const strip = comms && state.assistant === "Full";
   const back = can({ type: "goBack" });
   const canGoBack = String(back || (layers !== undefined && takesBack(layers)));
   return (
@@ -108,9 +109,10 @@ export function App({ alpha }: AppProps) {
           const document = node?.ownerDocument.documentElement;
           if (document && document.dataset.alphaCanGoBack !== canGoBack) document.dataset.alphaCanGoBack = canGoBack;
         }}
-        className={cn("relative flex min-h-0 min-w-0 flex-1 flex-col", showing !== undefined && "overflow-auto overscroll-contain")}
-        inert={inert}
+        className={cn("relative flex min-h-0 min-w-0 flex-1 flex-col", showing !== undefined && "overflow-auto overscroll-contain", strip && "overflow-hidden")}
+        inert={inert || strip}
       >
+        {comms && alpha.slot("phone/stage")}
         {page === undefined || !editorsMounted(page) ? null : showing === undefined
           ? alpha.slot("home")
           : (

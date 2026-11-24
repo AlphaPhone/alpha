@@ -10,11 +10,28 @@ export interface Stored {
   files: MailMessage["attachments"];
 }
 
+type DraftFixture = {
+  readonly id: string;
+  readonly messageId: string;
+  readonly providerDigest: string;
+  readonly content: {
+    readonly to: readonly string[];
+    readonly cc: readonly string[];
+    readonly bcc: readonly string[];
+    readonly subject: string;
+    readonly bodyText: string;
+    readonly plainText: boolean;
+    readonly threaded: boolean;
+    readonly attachmentCount: number;
+  };
+};
+
 /** What the fake cloud holds of the owner's Gmail, and how it behaves; a journey changes it between steps. */
 export interface InboxScene {
   /** The owner's Google connection, by its address, with what Google consented to; none where it is undefined. */
   google: { email: string; connection: string; capabilities: GoogleStatus["grantedCapabilities"] } | undefined;
   readonly mail: Stored[];
+  readonly drafts: Map<string, DraftFixture>;
   /** Gmail's history: it moves with every change to the mailbox. */
   history: number;
   /** Every request is lost on the way, as when the phone is offline. */
@@ -50,7 +67,7 @@ export function inboxScene(): InboxScene {
       letter(3, "Win a prize", ["SPAM"]),
       letter(4, "Notes from me", ["SENT"]),
     ],
-    history: 500, offline: false, revoked: false, changes: [], attached: [],
+    history: 500, offline: false, revoked: false, changes: [], attached: [], drafts: new Map(),
   };
 }
 
@@ -107,13 +124,14 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       if (!url.pathname.startsWith(`${google}/`)) return;
       if (scene.offline) return lost();
       if (!scene.revoked) revokedSeen = false;
-      if (scene.revoked && (url.pathname !== `${google}/status` || revokedSeen)) {
+      if (scene.revoked && (![`${google}/status`, `${google}/accounts`].includes(url.pathname) || revokedSeen)) {
         revokedSeen = true;
         return refused(403, "google_reauth_required");
       }
       return undefined;
     },
     (request, url) => (request.method === "GET" && url.pathname === `${google}/status` ? Response.json(status(scene)) : undefined),
+    (request, url) => (request.method === "GET" && url.pathname === `${google}/accounts` ? Response.json(scene.google === undefined ? [] : [status(scene)]) : undefined),
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== `${google}/gmail/search`) return;
       const size = Number(url.searchParams.get("maxResults") ?? "25");
@@ -131,6 +149,36 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       if (!stored) return refused(404, "not_found");
       const read: MailMessage = { message: stored.card, bodyText: stored.body, bodyHtml: stored.html, bodyHtmlStatus: stored.html === null ? "none" : "available", attachments: stored.files };
       return Response.json(read);
+    },
+    (request, url) => {
+      if (request.method !== "GET" || url.pathname !== `${google}/gmail/inbox-v1/thread`) return;
+      const threadId = url.searchParams.get("threadId");
+      const historyId = String(scene.history);
+      const expected = url.searchParams.get("historyId");
+      const offset = Number(url.searchParams.get("offset") ?? "0");
+      const thread = scene.mail.filter(({ card }) => card.threadId === threadId)
+        .toSorted((left, right) => left.card.receivedAt.localeCompare(right.card.receivedAt));
+      if (!thread.length) return refused(404, "not_found");
+      if (expected !== null && expected !== historyId) return refused(409, "stale_revision");
+      const messages = thread.slice(offset, offset + 25).map((stored) => ({
+        message: stored.card, bodyText: stored.body, bodyHtml: stored.html,
+        bodyHtmlStatus: stored.html === null ? "none" : "available", attachments: stored.files,
+        historyId: stored.card.metadata.historyId,
+      }));
+      const next = offset + messages.length;
+      return Response.json({ version: 1, threadId, historyId, total: thread.length, offset, nextOffset: next < thread.length ? next : null, messages });
+    },
+    (request, url) => {
+      if (request.method !== "GET") return;
+      if (url.pathname === `${google}/gmail/inbox-v1/drafts`) {
+        const drafts = [...scene.drafts.values()].map(({ id, messageId, content }) => ({
+          draftId: id, messageId, subject: content.subject, to: content.to, snippet: content.bodyText, updatedAt: null,
+        }));
+        return Response.json({ version: 1, drafts, nextPageToken: null });
+      }
+      if (url.pathname !== `${google}/gmail/inbox-v1/draft`) return;
+      const draft = scene.drafts.get(url.searchParams.get("draftId") ?? "");
+      return draft ? Response.json({ ...draft, version: 1 }) : refused(404, "not_found");
     },
     (request, url) => {
       if (request.method !== "POST" || url.pathname !== operations) return;
@@ -153,11 +201,21 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       const requestId = new RegExp(`^${operations}/([^/]+)/dispatch$`, "u").exec(url.pathname)?.[1];
       const kind = requestId === undefined ? undefined : asked.get(requestId)?.kind;
       if (request.method !== "POST" || requestId === undefined || (kind !== "draft-create" && kind !== "draft-replace" && kind !== "draft-delete")) return;
-      return request.json().then(({ proposal }: { proposal: { subject?: string; draftId?: string } }) => {
+      return request.json().then(({ proposal }: { proposal: { to?: string[]; cc?: string[]; bcc?: string[]; subject?: string; bodyText?: string; mode?: string; draftId?: string; attachments?: unknown[] } }) => {
         scene.changes.push(`${kind} ${proposal.subject ?? proposal.draftId ?? ""}`);
         const done = operation(requestId, kind, "succeeded");
         const draftId = proposal.draftId ?? `d${scene.changes.length}`;
-        return Response.json(kind === "draft-delete" ? done : { ...done, receipt: { ...done.receipt, providerResult: { draftId, messageId: `m${draftId}`, providerDigest: "b".repeat(64) } } });
+        if (kind === "draft-delete") {
+          scene.drafts.delete(draftId);
+          return Response.json(done);
+        }
+        const messageId = `m${draftId}`;
+        const providerDigest = (kind === "draft-create" ? "b" : "c").repeat(64);
+        scene.drafts.set(draftId, {
+          id: draftId, messageId, providerDigest,
+          content: { to: proposal.to ?? [], cc: proposal.cc ?? [], bcc: proposal.bcc ?? [], subject: proposal.subject ?? "", bodyText: proposal.bodyText ?? "", plainText: true, threaded: proposal.mode !== "compose", attachmentCount: proposal.attachments?.length ?? 0 },
+        });
+        return Response.json({ ...done, receipt: { ...done.receipt, providerResult: { draftId, messageId, providerDigest } } });
       });
     },
     (request, url) => {

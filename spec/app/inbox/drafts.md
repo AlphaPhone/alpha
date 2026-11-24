@@ -76,6 +76,8 @@ pure val draftValues = Set(1, 2, 3, 4)
 pure val revisionValues = Set(0, 1, 2, 3)
 pure val heldValues = Set(1, 2)
 pure val gmailValues = Set(1, 2)
+pure val recipientsValues = Set(0, 1, 3)
+pure val invalidValues = Set(0, 1)
 pure val weight_written = 4
 ```
 
@@ -629,14 +631,21 @@ pure def copyRead(s: Composer, ticket: int, ok: bool, found: bool, held: int, gm
 
 ### On a clash the owner chooses Restore my edits or Use latest saved draft, is told which was kept, and the choice is written to the phone
 
+The latest draft is offered if Alpha can edit it whole. Its recipients
+replace the earlier recipients. A threaded, rich or attached copy stays
+in Gmail.
+
 ```quint
 pure def canRestoreMine(s: Composer): bool = editable(s) and D::canChoose(s.letter.draft)
 
 pure def restoreMine(s: Composer): Written = touched(L::mine(s.letter), { ...s, notice: MineRestored })
 
-pure def canUseSaved(s: Composer): bool = editable(s) and D::canChoose(s.letter.draft)
+pure def canUseSaved(s: Composer, recipients: int, invalid: int, intact: bool): bool =
+  editable(s) and D::canChoose(s.letter.draft) and intact and 0 <= invalid and invalid <= recipients
 
-pure def useSaved(s: Composer): Written = touched(L::theirs(s.letter), { ...s, notice: SavedTaken })
+pure def useSaved(s: Composer, recipients: int, invalid: int, intact: bool): Written =
+  val chosen = L::theirs(s.letter)
+  touched({ ...chosen, kind: L::Saved, toReplyTo: false, recipients: recipients, invalid: invalid, attachments: 0, mib: 0, textOnly: false }, { ...s, notice: SavedTaken })
 ```
 
 ### A draft unsure of its Gmail copy, or at a clash, is handed to nothing until that is settled
@@ -686,13 +695,18 @@ instead. A draft with headers Alpha cannot edit safely, more than one
 body section, or too long, is not opened.
 
 ```quint
-pure def canEditSaved(s: Composer, access: Access, account: int, gmail: int, held: int): bool =
+pure def canEditSaved(s: Composer, access: Access, account: int, gmail: int, held: int, recipients: int, invalid: int): bool =
   free(s) and gmail != 0 and held >= 1 and allowsFor(access, account, Reading)
+    and 0 <= invalid and invalid <= recipients
     and not(s.shelf.shelved.exists(k => S::held(s.shelf, k).gmail == gmail))
 
-pure def editSaved(s: Composer, access: Access, account: int, gmail: int, held: int, intact: bool): Composer =
-  if (not(intact)) { ...s, notice: NotEditable }
-  else opened(L::fromGmail(s.made + 1, s.session, account, gmail, held), false, { ...s, made: s.made + 1 })
+pure def editSaved(s: Composer, access: Access, account: int, gmail: int, held: int, intact: bool, recipients: int, invalid: int): Written =
+  if (not(intact)) { state: { ...s, notice: NotEditable }, out: List() }
+  else {
+    val l = L::fromGmail(s.made + 1, s.session, account, gmail, held)
+    val next = { ...l, recipients: recipients, invalid: invalid }
+    keeping(next, opened(next, false, { ...s, made: s.made + 1 }))
+  }
 
 pure def stepEditingASavedDraftReplacesNone(before: Composer, via: str, after: Composer): bool =
   via == "editSaved" implies (
