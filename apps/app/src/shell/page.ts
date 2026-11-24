@@ -94,6 +94,21 @@ export function focusedField(): "ComposerField" | "OtherField" | "NoField" {
   return "NoField";
 }
 
+/** Whether the addressed text's enabled Send control can be hit in the current viewport. @throws {never} */
+export function talkSendVisible(proposalId: string): boolean {
+  if (typeof document === "undefined") return false;
+  for (const card of document.querySelectorAll<HTMLElement>("[data-alpha-proposal-id]")) {
+    if (card.dataset.alphaProposalId !== proposalId) continue;
+    const send = card.querySelector<HTMLButtonElement>("button[data-alpha-talk-send]");
+    if (send === null || send.disabled) continue;
+    const rect = send.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) continue;
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    if (send.contains(hit)) return true;
+  }
+  return false;
+}
+
 /** The focus key of the focused control: its `data-alpha-focus`, else its id, else empty. @throws {never} */
 export function focusedKey(): string {
   const element = document.activeElement;

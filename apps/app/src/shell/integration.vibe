@@ -21,8 +21,8 @@ import { Foreground } from "./foreground.vibe"
 import { handoffsLive } from "./handoffs.vibe"
 import { Navigation } from "./navigation.vibe"
 import { Overview } from "./overview.vibe"
-import { pageEvents, pageHidden } from "./page.ts"
-import { talkReview, talkSendVisible } from "./talk-review.vibe"
+import { pageEvents, pageHidden, talkSendVisible } from "./page.ts"
+import { talkReview } from "./talk-review.vibe"
 
 /**
  * What the other areas follow of the shell: the foreground, HOME, covering screens, voice leaving and returning, the assistant's

@@ -21,20 +21,6 @@ export function chatShowsCards(nav: Nav): boolean {
   return unblocked(nav) && talking(nav)
 }
 
-/** Is this card's enabled Send control actually hit-testable in the current viewport? */
-export function talkSendVisible(proposalId: string): boolean {
-  if (typeof document === "undefined") return false
-  for (const card of document.querySelectorAll<HTMLElement>("[data-alpha-proposal-id]")) {
-    if (card.dataset.alphaProposalId !== proposalId) continue
-    const send = card.querySelector<HTMLButtonElement>("button[data-alpha-talk-send]")
-    if (send === null || send.disabled) continue
-    const rect = send.getBoundingClientRect()
-    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
-    if (rect.width > 0 && rect.height > 0 && hit !== null && send.contains(hit)) return true
-  }
-  return false
-}
-
 /** Present the reply's card in the open chat and send it only while its own enabled control is visible. */
 export function talkReview(conversation: string, chat: TalkChat, navigation: NavigationNow, visible: (proposalId: string) => boolean): TalkReview {
   return {
