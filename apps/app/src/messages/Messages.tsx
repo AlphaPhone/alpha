@@ -165,6 +165,7 @@ function MessageText({ text }: { text: string }) {
   for (const matched of text.matchAll(messageURL)) {
     const found = matched[0];
     const offset = matched.index;
+    if (offset === undefined) continue;
     const raw = found.replace(/[.,!?;:]+$/u, "").replace(/\)+$/u, (ending) => {
       const excess = (found.match(/\)/gu)?.length ?? 0) - (found.match(/\(/gu)?.length ?? 0);
       return ending.slice(0, Math.max(0, ending.length - Math.max(0, excess)));
