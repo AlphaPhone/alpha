@@ -16,7 +16,7 @@ import type { Row } from "../../../gen/workflows__automations.ts";
 import { initial as placeStart } from "../../../gen/workflows__place.ts";
 import { Automations, type PromptInput, type PromptRunLine, type Report } from "../../workflows/automations.vibe";
 import { WorkflowClockDraft } from "../../workflows/clock-draft.vibe";
-import { WorkflowDefinitions, type ChangeOutcome, type Described, type ScheduleNote } from "../../workflows/definitions.vibe";
+import { WorkflowDefinitions, type ActivationOutcome, type ActivationReview, type ChangeOutcome, type Described, type ScheduleNote } from "../../workflows/definitions.vibe";
 import { Digests } from "../../workflows/digests.vibe";
 import { PhoneSteps } from "../../workflows/notices.vibe";
 import { WorkflowsPlace } from "../../workflows/place.vibe";
@@ -71,13 +71,14 @@ export function WorkflowsScreen({ onClose }: WorkflowsScreenProps) {
   const [draftText, setDraftText] = useState("");
   const [textKept, setTextKept] = useState(true);
   const [clockOutcome, setClockOutcome] = useState<ClockOutcome | undefined>(undefined);
-  const [activation, setActivation] = useState<boolean | undefined>(undefined);
+  const [activation, setActivation] = useState<ActivationReview | undefined>(undefined);
   const [removedRows, setRemovedRows] = useState<ReadonlyArray<Row> | "unavailable" | undefined>(undefined);
-  const [activeOutcome, setActiveOutcome] = useState<ChangeOutcome | undefined>(undefined);
+  const [activeOutcome, setActiveOutcome] = useState<ActivationOutcome | undefined>(undefined);
   const list = automations.state;
   const held = list?.held.find((h) => h.owner === list.owner);
   const where = place.state ?? placeStart;
   const overlay = where.overlay;
+  const reviewedActivation = activation?.workflowId === where.target && activation.owner === lifecycle.state?.owner ? activation : undefined;
   const runOutput = runs.state === undefined ? undefined : outputs.get(runs.state.selected);
   const namedRemoval = sheet.removalGrant !== undefined;
 
@@ -145,7 +146,7 @@ export function WorkflowsScreen({ onClose }: WorkflowsScreenProps) {
       {...(report === undefined ? {} : { report })}
       {...(history === undefined ? {} : { history })}
       {...(removedRows === undefined ? {} : { removedRows })}
-      {...(activation === undefined ? {} : { activation })}
+      {...(reviewedActivation === undefined ? {} : { activation: reviewedActivation.on })}
       {...(activeOutcome === undefined ? {} : { activeOutcome })}
       {...(runOutcome === undefined ? {} : { runOutcome })}
       {...(change === undefined ? {} : { change })}
@@ -184,14 +185,18 @@ export function WorkflowsScreen({ onClose }: WorkflowsScreenProps) {
           }
         }),
       }}
-      onAskActive={(on) => { setActiveOutcome(undefined); setActivation(on); }}
+      onAskActive={(on) => {
+        const opened = lifecycle.state;
+        if (!opened?.opened || opened.workflowId !== where.target) return;
+        setActiveOutcome(undefined);
+        setActivation({ owner: opened.owner, workflowId: opened.workflowId, version: opened.version, on });
+      }}
       onConfirmActive={() => {
-        const on = activation === true;
-        const workflowId = where.target;
+        if (reviewedActivation === undefined) return;
         setActivation(undefined);
-        void perform(WorkflowDefinitions.use((d) => d.setActive(workflowId, on))).then((outcome) => {
+        void perform(WorkflowDefinitions.use((d) => d.setActive(reviewedActivation))).then((outcome) => {
           setActiveOutcome(outcome);
-          void perform(Automations.use((a) => a.refresh()));
+          void perform(Effect.all([Automations.use((a) => a.refresh()), WorkflowDefinitions.use((d) => d.refresh())], { concurrency: "unbounded" }));
         });
       }}
       onCancelActive={() => setActivation(undefined)}

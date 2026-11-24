@@ -11,7 +11,7 @@ import type { Lifecycle } from "../../../gen/workflows__lifecycle.ts";
 import type { Place } from "../../../gen/workflows__place.ts";
 import type { Runs } from "../../../gen/workflows__runs.ts";
 import type { PromptInput, PromptRunLine, Report } from "../../workflows/automations.vibe";
-import type { ChangeOutcome, Described, ScheduleNote } from "../../workflows/definitions.vibe";
+import type { ActivationOutcome, ChangeOutcome, Described, ScheduleNote } from "../../workflows/definitions.vibe";
 import type { PlaceSheet } from "../../workflows/place.vibe";
 import type { RunOutcome } from "../../workflows/runs.vibe";
 import type { PhoneCalendars } from "../../workflows/sources.vibe";
@@ -96,7 +96,7 @@ export interface WorkflowsScreenViewProps {
   /** The on or off the owner is reviewing for the open workflow. */
   activation?: boolean;
   /** What the agent said about the last on or off. */
-  activeOutcome?: ChangeOutcome;
+  activeOutcome?: ActivationOutcome;
   runOutcome?: RunOutcome;
   /** What the last workflow change ended as. */
   change?: ChangeOutcome;
@@ -205,7 +205,7 @@ export function WorkflowsScreenView({
                 <h2 className="truncate font-display text-2xl">{workflowRow.title}</h2>
                 {workflowRow.description !== "" && <p className="text-sm text-muted-foreground">{workflowRow.description}</p>}
               </div>
-              <Switch aria-label={workflowRow.enabled ? "Turn off" : "Turn on"} checked={workflowRow.enabled} disabled={activation !== undefined} className="min-h-12 min-w-12"
+              <Switch aria-label={workflowRow.enabled ? "Turn off" : "Turn on"} checked={workflowRow.enabled} disabled={activation !== undefined || lifecycle?.opened !== true || lifecycle.workflowId !== where.target} className="min-h-12 min-w-12"
                 onCheckedChange={onAskActive} />
             </header>
           )}
@@ -216,9 +216,10 @@ export function WorkflowsScreenView({
               : "It stops running on its schedule until you turn it on again."}</p>
           </ReviewDialog>
           {activeOutcome !== undefined && activeOutcome !== "saved" && (
-            <Alert variant="warn" role="status" className="mx-4 text-sm">{activeOutcome === "refused"
-              ? "Your agent didn’t make this change. A workflow you run by hand can’t be turned on."
-              : "Your agent didn’t confirm this change. Check the workflow before trying again."}</Alert>
+            <Alert variant="warn" role="status" className="mx-4 text-sm">{activeOutcome === "stale"
+              ? "The workflow changed. Review the current version to try again."
+              : activeOutcome === "refused" ? "Your agent didn’t make this change. Check the workflow before trying again."
+                : "Your agent didn’t confirm this change. Check the workflow before trying again."}</Alert>
           )}
           {steps !== undefined && (
             <PhoneStepReview steps={steps} {...(sheet.step === undefined ? {} : { review: sheet.step })} canTap={can.tapStep} onTap={onTapStep} />

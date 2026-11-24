@@ -1,12 +1,12 @@
 // spec/workflows/lifecycle.md, "Story: Remove a workflow only once its runs have settled, and restore it safely"; spec/workflows/authoring.md, "Story: Describe a workflow and keep only what this phone can do"; spec/workflows/authoring.md, "The unsent description is kept for its owner across closing and reopening"; spec/workflows/authoring.md, "Story: Save exactly the draft I reviewed, once"; spec/workflows/scheduling.md, "A generated draft that changes the schedule is refused"; spec/workflows/scheduling.md, "Story: Schedule a typed workflow at a local time"; spec/workflows/scheduling.md, "Story: Have my schedules run only while my phone and agent are on"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import {
-  type PhoneWorkflowCatalog, type PhoneWorkflowSpec, type PhoneWorkflowTrigger, type RemoteWorkflow, WorkflowActivationRejected, WorkflowLifecycleRejected,
-  WorkflowMetadataRejected, WorkflowPauseRejected, WorkflowResponseInvalid, WorkflowTypedRejected, phoneTriggerClockChangeNote, workflowSpecDigest, workflowUuid,
+  type PhoneWorkflowCatalog, type PhoneWorkflowSpec, type PhoneWorkflowTrigger, type RemoteWorkflow, WorkflowLifecycleRejected,
+  WorkflowMetadataRejected, WorkflowResponseInvalid, WorkflowTypedRejected, parseRemoteWorkflow, phoneTriggerClockChangeNote, workflowSpecDigest, workflowUuid,
 } from "@elizaos/plugin-workflow/client"
 import { type TypedTrigger, generatedKeepsSchedule, missedWindowMs, validTrigger } from "../../gen/workflows__scheduling.effect.vibe"
 import { type WorkflowScopeCategory, checkWorkflowScope } from "@elizaos/plugin-workflow/scope"
-import { type LifeOp, type LifeReply, Machine as LifecycleMachine, stored as lifecycleStored } from "../../gen/workflows__lifecycle.effect.vibe"
+import { type LifeOp, type LifeReply, Machine as LifecycleMachine, activationReviewMatches, stored as lifecycleStored } from "../../gen/workflows__lifecycle.effect.vibe"
 import { type Category, Machine as DraftMachine, keptTextShown, scopeRefused, stored as draftStored } from "../../gen/workflows__authoring.effect.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 import { WorkflowApi } from "./api.vibe"
@@ -19,6 +19,17 @@ export const DRAFT_TEXT_KEY = ownerKey("device", "workflows/draft-text")
 
 /** What a definition change ended as, for the screen to word. */
 export type ChangeOutcome = "saved" | "replayed" | "refused" | "unknown" | "busy" | "cancelling"
+
+/** The workflow and version displayed when the owner opened the activation review. */
+export interface ActivationReview {
+  readonly owner: string
+  readonly workflowId: string
+  readonly version: number
+  readonly on: boolean
+}
+
+/** A stale review must be opened again before the agent can change the workflow. */
+export type ActivationOutcome = "saved" | "stale" | "refused" | "unknown"
 
 /** What describing a workflow gave: a draft, or the refusal shown before anything was sent. */
 export type Described =
@@ -75,8 +86,8 @@ export service WorkflowDefinitions {
   resend(): ChangeOutcome!!
   /** Leave a review or a resend review; false when none was open, so Back is someone else's. */
   back(): boolean!!
-  /** Turn a workflow on or off at its current version; a manual typed workflow is never activated. */
-  setActive(workflowId: string, on: boolean): ChangeOutcome!!
+  /** Turn a workflow on or off at the reviewed version; a manual typed workflow is never activated. */
+  setActive(review: ActivationReview): ActivationOutcome!!
   /** Describe a phone workflow; a refused description sends nothing. */
   describe(prompt: string): Described!!
   /** Save the reviewed draft once: the first tap shows the current draft for review. */
@@ -260,12 +271,32 @@ export const definitions = Layer.provideMerge(Layer.provideMerge(Layer.effect(Wo
     effect back() {
       return ((life.send({ type: "back" }) catch () => undefined)) !== undefined
     },
-    effect setActive(workflowId: string, on: boolean) {
+    effect setActive(review: ActivationReview) {
+      const { owner, workflowId, version, on } = review
+      const state = try life.get()
+      if (!activationReviewMatches(state, owner, workflowId, version) || (try ownerOf()) !== owner)
+        return "stale" satisfies ActivationOutcome
+      const reviewedVersion = try seen.versionId(workflowId, version)
+      if (reviewedVersion === "") return "stale" satisfies ActivationOutcome
       const workflow = (client.detail(workflowId) catch () => undefined)
-      if (workflow === undefined) return "unknown" satisfies ChangeOutcome
-      if (on && manualTyped(workflow)) return "refused" satisfies ChangeOutcome
-      const answer = (effect { return try (on ? client.activate(workflowId, workflow.versionId) : client.pause(workflowId, workflow.versionId)) } catch (error) =>
-        error instanceof WorkflowActivationRejected || error instanceof WorkflowPauseRejected ? "refused" : "unknown")
+      if (workflow === undefined) return "unknown" satisfies ActivationOutcome
+      if (workflow.id !== workflowId || workflow.versionId !== reviewedVersion || (try ownerOf()) !== owner)
+        return "stale" satisfies ActivationOutcome
+      if (on && manualTyped(workflow)) return "refused" satisfies ActivationOutcome
+      const status = client.status() catch () => undefined
+      if (status === undefined) return "unknown" satisfies ActivationOutcome
+      if (!status.typedSchedules) return "refused" satisfies ActivationOutcome
+      if ((try ownerOf()) !== owner) return "stale" satisfies ActivationOutcome
+      // The general client supports older engines by sending an unversioned request.
+      // A change reviewed here must always carry the version that was shown.
+      const action = on ? "activate" : "deactivate"
+      const path = `/api/workflow/workflows/${encodeURIComponent(workflowId)}/${action}`
+      const answer = (effect {
+        return try parseRemoteWorkflow(try agent.request("POST", path, { expectedVersionId: reviewedVersion }))
+      } catch (error) => {
+        if (error._tag === "AgentRefused") return error.code === "WORKFLOW_ACTIVATION_NOT_APPLIED" ? "stale" : "refused"
+        return "unknown"
+      })
       if (typeof answer === "string") return answer
       return answer.id === workflowId && answer.active === on ? "saved" : "unknown"
     },
