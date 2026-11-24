@@ -58,8 +58,8 @@ pure val doneValues = Set(List(), List(1), List(1, 2))
 pure val failedValues = Set(List(), List(2))
 pure val itemsValues =
   Set(List())
-    .union(Set(List({ id: 1, name: "a", revision: 1, kind: F::Document, volume: 1 })))
-    .union(Set(List({ id: 1, name: "a", revision: 1, kind: F::Document, volume: 1 }, { id: 2, name: "b", revision: 1, kind: F::Folder, volume: 1 })))
+    .union(Set(List({ id: 1, name: "a", revision: 1, kind: F::Document, volume: 1, bytes: 0 })))
+    .union(Set(List({ id: 1, name: "a", revision: 1, kind: F::Document, volume: 1, bytes: 0 }, { id: 2, name: "b", revision: 1, kind: F::Folder, volume: 1, bytes: 0 })))
 pure val destValues =
   Set({ folder: 2, path: List(1), names: List("a") })
     .union(Set({ folder: 3, path: List(1, 2), names: List() }))
@@ -67,7 +67,10 @@ pure val destValues =
     .union(Set({ folder: 6, path: List(9), names: List() }))
 ```
 
-### A change fits its items: a new name is free in the folder, one item is renamed, and nothing moves into itself, into a folder inside itself, or to where it already is
+### A change fits its items: a new name is free in the folder, one item is renamed, and nothing moves into itself, into a folder inside itself, to where it already is, or to another volume
+
+A destination's volume is the first step of its path, or the destination
+itself at a volume's root; the phone moves and copies within one volume.
 
 ```quint
 pure def fits(work: Work, items: List[F::Item], names: List[str], folder: int, name: str, dest: Place): bool =
@@ -75,6 +78,7 @@ pure def fits(work: Work, items: List[F::Item], names: List[str], folder: int, n
   else if (work == Rename) items.length() == 1 and F::freeName(name, names)
   else items.length() > 0 and not(items.some(i => i.id == dest.folder or dest.path.includes(i.id)))
     and (work == CopyTo or dest.folder != folder)
+    and items.every(i => i.volume == dest.path.nthOr(0, dest.folder))
 
 pure def clashes(work: Work, items: List[F::Item], dest: Place): bool =
   (work == MoveTo or work == CopyTo) and items.some(i => dest.names.includes(i.name))

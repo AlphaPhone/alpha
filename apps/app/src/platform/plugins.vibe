@@ -10,6 +10,7 @@ import { type Location, browserLocation, phoneLocation } from "./location.vibe"
 import { type Calls, browserCalls, phoneCalls } from "./calls.vibe"
 import { type Telephony, browserTelephony, phoneTelephony } from "./telephony.vibe"
 import { type VoiceBridge, browserVoiceBridge, phoneVoiceBridge } from "./voice.vibe"
+import { type Documents, browserDocuments, phoneDocuments } from "./documents.vibe"
 
 export type Plugins =
   | never
@@ -24,6 +25,7 @@ export type Plugins =
   | Telephony
   | Calls
   | VoiceBridge
+  | Documents
 
 export const phonePlugins = Layer.mergeAll(
   Layer.empty,
@@ -38,6 +40,7 @@ export const phonePlugins = Layer.mergeAll(
   phoneTelephony,
   phoneCalls,
   phoneVoiceBridge,
+  phoneDocuments,
 )
 
 export const browserPlugins = Layer.mergeAll(
@@ -53,4 +56,5 @@ export const browserPlugins = Layer.mergeAll(
   browserTelephony,
   browserCalls,
   browserVoiceBridge,
+  browserDocuments,
 )

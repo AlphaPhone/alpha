@@ -1,5 +1,6 @@
 // spec/app/files/index.md, "Story: Browse my storage"
 import type { ElizaFilesPlugin, FileOutcomeRow, FilesAccess, StorageEntry, StorageVolume, TrashEntry } from "@elizaos/os/bridges/definitions/files";
+import type { SelectedDocumentsPlugin } from "@elizaos/os/bridges/definitions/media";
 import { type Faked, plugin } from "./phone.ts";
 
 /** One file or folder the fake storage holds, by its volume and its path from that volume's root. */
@@ -34,8 +35,19 @@ export interface FilesScene {
   gate: Promise<unknown>;
   /** The time the phone's clock says, for what it writes. */
   now: number;
-  /** Tell the page the storage changed, as the plugin's `storageChanged` event does; set once the page listens. */
+  /** The most rows a listing and a search give, as `StorageBrowser.LIST_MAX` and `StorageCatalog.QUERY_MAX` are. */
+  listMost: number;
+  queryMost: number;
+  /** Tell the page the storage changed, as the plugin's `storageChanged` event does: only while it watches a place, as `storageWatch` registers one. */
   changed: () => void;
+  /** The place the page asked the phone to watch, if any: a folder as `volume:path`, or a category. */
+  watching: string | undefined;
+  /** Methods the phone refuses outright, answering `failed`. */
+  readonly refusing: string[];
+  /** The selections Alpha gave back. */
+  readonly forgotten: string[];
+  /** What a text file says, by path, where it is not its default words. */
+  readonly texts: Record<string, string>;
 }
 
 const file = (volume: string, path: string, mimeType: string, size = 100, modified = 1): Stored => ({ volume, path, directory: false, mimeType, size, modified });
@@ -54,7 +66,7 @@ export function filesScene(): FilesScene {
       folder("primary", "Documents/Old"),
       file("card", "song.mp3", "audio/mpeg", 4_000, 2),
     ],
-    trash: [], shared: [], opened: [], calls: [], gate: Promise.resolve(), now: 10, changed: () => {},
+    trash: [], shared: [], opened: [], calls: [], gate: Promise.resolve(), now: 10, listMost: 5_000, queryMost: 500, changed: () => {}, watching: undefined, refusing: [], forgotten: [], texts: {},
   };
 }
 
@@ -66,13 +78,16 @@ const entry = (one: Stored): StorageEntry => ({ path: one.path, name: leaf(one.p
 /** `ElizaFiles`, the phone's storage plugin of eliza's Android package, over `scene`: it answers as `FilesPlugin.java` does. */
 export function elizaFiles(scene: FilesScene): Faked {
   return plugin<ElizaFilesPlugin, { storageChanged: undefined }>((emit) => {
-    scene.changed = () => emit("storageChanged", undefined);
+    scene.changed = () => { if (scene.watching !== undefined) emit("storageChanged", undefined); };
     const denied = () => scene.access !== "granted";
     const refused = () => ({ status: scene.access === "unsupported" ? "unavailable" as const : "denied" as const, access: scene.access });
     const on = (volume: string | undefined) => volume ?? "primary";
     const find = (volume: string, path: string) => scene.stored.find((one) => one.volume === volume && one.path === path);
     const inside = (volume: string, path: string) => scene.stored.filter((one) => one.volume === volume && (one.path === path || one.path.startsWith(`${path}/`)));
     const called = (method: string) => scene.calls.push(method);
+    const identity = (one: Stored) => `${one.path}@${one.modified}:${one.size}`.padEnd(43, "_").slice(0, 43).replace(/[^A-Za-z0-9_-]/g, "_");
+    const unchanged = (volume: string, paths: readonly string[], reviewed: readonly string[] | undefined) =>
+      (path: string) => { const found = find(volume, path); return reviewed === undefined || (found !== undefined && reviewed[paths.indexOf(path)] === identity(found)); };
     function moved(volume: string, path: string, dest: string, copy: boolean): FileOutcomeRow {
       const found = find(volume, path);
       if (!found) return { path, status: "missing" };
@@ -103,7 +118,8 @@ export function elizaFiles(scene: FilesScene): Faked {
         if (denied()) return refused();
         const there = on(volume);
         if (path !== "" && !find(there, path)?.directory) return { status: "missing" };
-        return { status: "ready", entries: scene.stored.filter((one) => one.volume === there && one.path !== path && parent(one.path) === path).map(entry), truncated: false };
+        const rows = scene.stored.filter((one) => one.volume === there && one.path !== path && parent(one.path) === path).map(entry);
+        return { status: "ready", entries: rows.slice(0, scene.listMost), truncated: rows.length > scene.listMost };
       },
       storageCategory({ category }) {
         called("storageCategory");
@@ -112,7 +128,7 @@ export function elizaFiles(scene: FilesScene): Faked {
           : category === "documents" ? one.mimeType === "application/pdf" || one.mimeType.startsWith("text/")
           : one.mimeType.startsWith(`${category.replace(/s$/, "")}/`);
         const entries = scene.stored.filter((one) => one.volume === "primary" && !one.directory && of(one)).map(entry);
-        return Promise.resolve({ status: "ready", entries, count: entries.length, truncated: false });
+        return Promise.resolve({ status: "ready", entries, count: entries.length, bytes: entries.reduce((sum, one) => sum + one.size, 0), truncated: false });
       },
       storageQuery({ text, mimePrefix, documents, folder }) {
         called("storageQuery");
@@ -122,14 +138,17 @@ export function elizaFiles(scene: FilesScene): Faked {
           && (text === undefined || leaf(one.path).toLowerCase().includes(text.toLowerCase()))
           && (mimePrefix === undefined || one.mimeType.startsWith(mimePrefix))
           && (!documents || one.mimeType === "application/pdf" || one.mimeType.startsWith("text/"))).map(entry);
-        return Promise.resolve({ status: "ready", entries, truncated: false });
+        return Promise.resolve({ status: "ready", entries: entries.slice(0, scene.queryMost) });
       },
-      storageReviewedIdentities({ paths }) {
-        return Promise.resolve({ status: "ready", reviewed: paths.map((path) => `${path}@1`) });
+      storageReviewedIdentities({ volume, paths }) {
+        called("reviewed");
+        const found = paths.map((path) => find(on(volume), path));
+        return Promise.resolve(found.every((one) => one !== undefined) ? { status: "ready", reviewed: found.map((one) => identity(one as Stored)) } : { status: "missing" });
       },
-      storageTransfer({ volume, paths, dest, copy }) {
+      storageTransfer({ volume, paths, dest, copy, reviewed }) {
         called(copy ? "copy" : "move");
-        return Promise.resolve({ status: "ready", outcomes: paths.map((path) => moved(on(volume), path, dest, copy)) });
+        const same = unchanged(on(volume), paths, reviewed);
+        return Promise.resolve({ status: "ready", outcomes: paths.map((path): FileOutcomeRow => (same(path) ? moved(on(volume), path, dest, copy) : { path, status: "changed" })) });
       },
       storageRename({ volume, path, name }) {
         called("rename");
@@ -147,11 +166,13 @@ export function elizaFiles(scene: FilesScene): Faked {
         scene.stored.push(folder(on(volume), path, scene.now));
         return Promise.resolve({ status: "ready", path });
       },
-      storageTrash({ volume, paths }) {
+      storageTrash({ volume, paths, reviewed }) {
         called("trash");
+        const same = unchanged(on(volume), paths, reviewed);
         return Promise.resolve({ status: "ready", outcomes: paths.map((path): FileOutcomeRow => {
           const found = find(on(volume), path);
           if (!found) return { path, status: "missing" };
+          if (!same(path)) return { path, status: "changed" };
           const id = String(scene.trash.length + 1);
           for (const one of inside(on(volume), path)) scene.stored.splice(scene.stored.indexOf(one), 1);
           scene.trash.push({ id, was: found, deletedAt: scene.now });
@@ -167,6 +188,7 @@ export function elizaFiles(scene: FilesScene): Faked {
       },
       storageRestore({ ids }) {
         called("restore");
+        if (scene.refusing.includes("storageRestore")) return Promise.resolve({ status: "failed" });
         return Promise.resolve({ status: "ready", outcomes: ids.map((id): FileOutcomeRow => {
           const found = scene.trash.find((one) => one.id === id);
           if (!found) return { path: id, status: "missing" };
@@ -195,8 +217,48 @@ export function elizaFiles(scene: FilesScene): Faked {
         const found = find("primary", path);
         return Promise.resolve(found ? { status: "selected", action: "files", selectionId: `selection:${path}`, name: leaf(path), mimeType: found.mimeType, canRename: true } : { status: "missing" });
       },
-      storageWatch: () => Promise.resolve({ status: "ready" }),
-      storageUnwatch: () => Promise.resolve({ status: "ready" }),
+      storageWatch(input) {
+        called("storageWatch");
+        scene.watching = input.category ?? `${on(input.volume)}:${input.path ?? ""}`;
+        return Promise.resolve({ status: "ready" });
+      },
+      storageUnwatch() {
+        called("storageUnwatch");
+        scene.watching = undefined;
+        return Promise.resolve({ status: "ready" });
+      },
+    };
+  });
+}
+
+/** The documents the fake phone holds for Alpha, as eliza's `SelectedDocuments` host answers: a text's words, a picture's address, a PDF's pages. */
+export function selectedDocuments(scene: FilesScene): Faked {
+  return plugin<SelectedDocumentsPlugin, Record<string, never>>(() => {
+    const held = (selectionId: string) => scene.stored.find((one) => `selection:${one.path}` === selectionId && !scene.forgotten.includes(selectionId));
+    return {
+      restoreSelected: () => Promise.resolve({ status: "unavailable", message: "" }),
+      describeSelected({ selectionId }) {
+        const found = held(selectionId);
+        return Promise.resolve(found ? { status: "selected", selectionId, name: leaf(found.path), mimeType: found.mimeType, uri: `content://${found.path}`, size: found.size, modified: found.modified } : { status: "renamed-reselect", message: "" });
+      },
+      renameSelected: () => Promise.resolve({ status: "unsupported", message: "" }),
+      pdfSelected({ selectionId, page }) {
+        const found = held(selectionId);
+        return Promise.resolve(found?.mimeType === "application/pdf" ? { status: "rendered", message: "", page, pageCount: 3, imageUri: `page://${found.path}/${page}` } : { status: "unsupported", message: "" });
+      },
+      readSelected({ selectionId }) {
+        const found = held(selectionId);
+        return Promise.resolve(found ? { status: "read", message: "", text: scene.texts[found.path] ?? `The words of ${leaf(found.path)}`, mimeType: found.mimeType, bytes: found.size } : { status: "unavailable", message: "" });
+      },
+      openSelected({ selectionId }) {
+        scene.opened.push(selectionId);
+        return Promise.resolve({ status: "opened", message: "" });
+      },
+      shareSelected: () => Promise.resolve({ status: "opened", message: "" }),
+      forgetSelected({ selectionId }) {
+        scene.forgotten.push(selectionId);
+        return Promise.resolve();
+      },
     };
   });
 }
