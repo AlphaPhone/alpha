@@ -38,7 +38,7 @@ export function InboxList({ rows, loading = false, onLoadMore, loadingMore = fal
   }
   return (
     <div className="flex flex-col gap-2">
-      <ul aria-busy={loading || undefined} className="-mx-4 flex flex-col">
+      <ul aria-label="Email messages" aria-busy={loading || undefined} className="-mx-4 flex flex-col">
         {rows.map(({ id, ...row }) => (
           <li key={id}><InboxMessageRow {...row} /></li>
         ))}
