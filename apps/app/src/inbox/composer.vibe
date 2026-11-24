@@ -227,8 +227,9 @@ export const layer = Layer.effect(MailComposer, effect {
       return try start(try fresh(fields))
     },
     effect reply(mode: "ReplyMode" | "ReplyAllMode" | "ForwardMode") {
+      try bindSelected()
       const r = try reader.get()
-      if (r.phase !== "BodyShown") return "not-ready"
+      if (r.phase !== "BodyShown" || r.account !== (try accounts.get()).selected) return "not-ready"
       const a = try mine()
       if (hasDraft(a.open) && a.open.fields.replyMessage === r.body.id && a.open.fields.mode === modeNames[mode]) {
         try send({ type: "resume" })

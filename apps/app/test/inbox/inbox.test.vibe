@@ -13,7 +13,7 @@ import { BrowserAgent } from "../../src/browser/agent.vibe"
 import { FilePicker } from "../../src/files/picker.vibe"
 import { Preferences } from "../../src/settings/preferences.vibe"
 import { Assistant } from "../../src/assistant/assistant.vibe"
-import { layer as inbox, InboxAccounts, Mailbox, MailComposer, MailOperations, MailNoticesShell } from "../../src/inbox/layer.vibe"
+import { layer as inbox, InboxAccounts, Mailbox, MailComposer, MailOperations, MailNoticesShell, Reader } from "../../src/inbox/layer.vibe"
 import { losingAnswer } from "./lost.ts"
 
 const grantA = "grant-a"
@@ -98,14 +98,16 @@ it.live("Read my mailbox page by page, and see when it changed while paging", ()
     try accounts.choose(grantB)
     try settle(mailbox.changes, (m) => m.account === grantB && m.phase === "ListReady")
     const switched = try mailbox.get()
+    const reader = try Reader
+    const reading = try reader.get()
     try Effect.try(() => assert.deepStrictEqual({
       selected: first.account, firstIds: first.rows.map((r) => r.id), cursor: first.cursor,
       laterIds: later.rows.map((r) => r.id), newerMail: later.newerMail, laterCursor: later.cursor,
-      switchedTo: switched.account, switchedRows: switched.rows.length,
+      switchedTo: switched.account, switchedRows: switched.rows.length, readerAccount: reading.account,
     }, {
       selected: grantA, firstIds: ["m1", "m2"], cursor: "p1",
       laterIds: ["m1", "m2", "m3"], newerMail: true, laterCursor: "",
-      switchedTo: grantB, switchedRows: 2,
+      switchedTo: grantB, switchedRows: 2, readerAccount: grantB,
     }))
   }
 })
