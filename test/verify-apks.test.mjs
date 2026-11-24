@@ -178,8 +178,9 @@ test('archive retains actual flag-off APK web bytes and refuses a mock payload',
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const publicDir = path.join(dir, 'assets/public');
   fs.mkdirSync(publicDir, { recursive: true });
+  const index = `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; base-uri 'none'"></head><body>Actual APK payload</body></html>`;
   fs.writeFileSync(path.join(publicDir, 'build-flags.json'), JSON.stringify({ testMocks }));
-  fs.writeFileSync(path.join(publicDir, 'index.html'), '<html>Actual APK payload</html>');
+  fs.writeFileSync(path.join(publicDir, 'index.html'), index);
   const apkFile = path.join(dir, 'app.apk');
   execFileSync('zip', ['-q', '-r', apkFile, 'assets'], { cwd: dir });
   // Working assets may be restored to a different mode after the APK was built.
@@ -188,7 +189,7 @@ test('archive retains actual flag-off APK web bytes and refuses a mock payload',
   const digest = file => createHash("sha256").update(fs.readFileSync(file)).digest("hex");
   await archiveWebPayload(apkFile, archived, digest(apkFile));
   assert.equal(readBuildFlags(archived).testMocks, testMocks);
-  assert.equal(fs.readFileSync(path.join(archived, 'index.html'), 'utf8'), '<html>Actual APK payload</html>');
+  assert.equal(fs.readFileSync(path.join(archived, 'index.html'), 'utf8'), index);
   fs.writeFileSync(path.join(dir, 'assets/public/build-flags.json'), JSON.stringify({ testMocks: true }));
   const mockApk = path.join(dir, 'mock.apk');
   execFileSync('zip', ['-q', '-r', mockApk, 'assets'], { cwd: dir });
