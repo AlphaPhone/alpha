@@ -15,7 +15,7 @@ import { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { type Row, shown } from "./shown.ts"
-import { civilDay, dayStart, readWindow, zone } from "./time.ts"
+import { civilDay, dayStart, feedParams, zone } from "./time.ts"
 
 /** What the owner typed into the form, kept on the phone as it is typed: the spec counts the edits, this holds them. */
 export schema Fields {
@@ -75,7 +75,7 @@ export effect function typed(fields: Fields, edit: Event) {
 /** Notes or Scan hand Calendar what they read as an event for `day`: kept as the form's draft, for the owner to review and save. */
 export effect function fromNote(fields: Fields, day: number) {
   const editor = try Editor.Machine
-  if (!editor.can({ type: "fromNote", day })) return false
+  if (!Editor.canFromNote(try editor.get())) return false
   if (!(try keep(fields, try owner()))) return false
   return try contained(editor.send({ type: "fromNote", day }), "opening the note's event")
 }
@@ -106,11 +106,8 @@ schema Found {
 }
 
 // spec/app/calendar/writing.md, "An applied create, change or answer is read back; only a read back that finds it as asked says saved"; spec/app/calendar/writing.md, "An applied deletion is never reported as an event Calendar could not look up"
-/** Read `row` back from the agent's calendar after a write of `kind` it confirmed, and say how the write ended. */
-effect function readBackAgent(row: Row, kind: WriteKind, reply: string): Written!!Agent {
-  const range = readWindow(civilDay(row.begin))
-  const urlParams = { timeMin: new Date(range.begin).toISOString(), timeMax: new Date(range.end).toISOString(), timeZone: zone() }
-  const found = ask(Agent, HttpClientRequest.get(`${calendarBase}/feed`, { urlParams }), Found) catch () => undefined
+/** How a write of `kind` to `row` ended, by what its read back `found`: nothing where the read back failed. */
+function endedBy(found: Found | undefined, row: Row, kind: WriteKind, reply: string): Written {
   const event = found?.events.find((candidate) => candidate.id === row.key)
   const readback: Readback = found === undefined ? "ReadbackFailed"
     : kind === "AnswerKind" ? answerReadback(event !== undefined, event?.attendees.some((person) => person.self && person.responseStatus === reply) ?? false)
@@ -118,6 +115,13 @@ effect function readBackAgent(row: Row, kind: WriteKind, reply: string): Written
   const seen = readbackSeen(kind, readback)
   return seen === "Saved" || seen === "Deleted" || seen === "DeletedByReceipt" ? { confirmed: true, known: true }
     : seen === "NotDeleted" ? refused : { confirmed: false, known: false }
+}
+
+/** Read `row` back from the agent's calendar after a write of `kind` it confirmed, and say how the write ended. */
+effect function readBackAgent(row: Row, kind: WriteKind, reply: string): Written!!Agent {
+  const urlParams = feedParams(civilDay(row.begin))
+  const found = ask(Agent, HttpClientRequest.get(`${calendarBase}/feed`, { urlParams }), Found) catch () => undefined
+  return endedBy(found, row, kind, reply)
 }
 
 /** Whether the agent filed the write for the owner's approval instead of making it: nothing changed yet, and the approval card says it waits. */

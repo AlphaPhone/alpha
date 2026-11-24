@@ -37,6 +37,12 @@ export function readWindow(day: number): { begin: number; end: number } {
   return { begin: dayStart(monthStart(day, windowFirstMonth(0))), end: dayStart(monthStart(day, windowLastMonth(0) + 1)) };
 }
 
+/** A read of the agent's calendar over the window around civil `day`, in the phone's own time zone. @throws {never} */
+export function feedParams(day: number): { timeMin: string; timeMax: string; timeZone: string } {
+  const range = readWindow(day);
+  return { timeMin: new Date(range.begin).toISOString(), timeMax: new Date(range.end).toISOString(), timeZone: zone() };
+}
+
 /** The Monday that starts the week of a civil day. @throws {never} */
 export function weekStart(civil: number): number {
   return civil - ((dateOf(civil).getDay() + 6) % 7);

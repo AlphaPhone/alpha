@@ -9,7 +9,7 @@ import * as View from "../../gen/app__calendar.effect.vibe"
 import { refreshes } from "../../gen/app__calendar__agent.ts"
 import { Time } from "../runtime/time.vibe"
 import { type Row, shown } from "./shown.ts"
-import { civilDay, dayStart, readWindow, zone } from "./time.ts"
+import { civilDay, dayStart, feedParams, zone } from "./time.ts"
 
 const base = "/api/lifeops/calendar"
 
@@ -64,8 +64,7 @@ effect function send(change: Out & { tag: "Send" }): Event!!(Agent | Attempts) {
 /** The read back's answer, over the window around the event's own day, or a failed read back where the agent could not be read. */
 effect function readBack(ticket: number, id: number): Event!!(Agent | Time) {
   const row = shown.find(id)
-  const range = readWindow(row === undefined ? civilDay(try (try Time).now()) : civilDay(row.begin))
-  const urlParams = { timeMin: new Date(range.begin).toISOString(), timeMax: new Date(range.end).toISOString(), timeZone: zone() }
+  const urlParams = feedParams(row === undefined ? civilDay(try (try Time).now()) : civilDay(row.begin))
   const listed = ask(Agent, HttpClientRequest.get(`${base}/feed`, { urlParams }), Listed) catch () => undefined
   if (listed === undefined) return { type: "readBackFailed", ticket }
   return { type: "readBack", ticket, present: listed.events.some((event) => event.id === (row?.key ?? "")) }

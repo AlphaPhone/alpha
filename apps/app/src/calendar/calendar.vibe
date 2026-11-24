@@ -19,7 +19,7 @@ import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type Job, answer, contained, due, following, hearing, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { type Person, type Read, shown } from "./shown.ts"
-import { civilDay, dayStart, localDate, openLink, plainHttps, readWindow, zone } from "./time.ts"
+import { civilDay, dayStart, feedParams, localDate, openLink, plainHttps, readWindow } from "./time.ts"
 
 /** An event of the phone's calendars as the screen shows it. */
 function phoneRow(event: AndroidCalendarEvent): Read {
@@ -55,20 +55,20 @@ schema FeedEvent {
   readonly attendees: ReadonlyArray<FeedAttendee>
   readonly recurringEventId?: string | null
   readonly updatedAt: string
-  readonly metadata: Readonly<Record<string, unknown>>
-  readonly organizer: Readonly<Record<string, unknown>> | null
+  readonly metadata: { readonly etag?: string; readonly managed?: boolean }
+  readonly organizer: { readonly self?: boolean } | null
 }
 
 /** The version a write names, as eliza's `eventVersion` of `@elizaos/plugin-calendar` reads it: the provider's etag, or the change time. */
 function versionOf(event: FeedEvent): string {
-  const etag = event.metadata["etag"]
-  return typeof etag === "string" && etag !== "" ? etag : event.updatedAt
+  const etag = event.metadata.etag ?? ""
+  return etag !== "" ? etag : event.updatedAt
 }
 schema Feed { readonly state: "complete" | "partial" | "unavailable"; readonly events: FeedEvent[] }
 
 /** The calendar the agent manages for the owner, whose answers and deletions are the owner's to make in Google Calendar. */
 function managed(event: FeedEvent): boolean {
-  return event.metadata["managed"] === true
+  return event.metadata.managed === true
 }
 
 // spec/app/calendar/presentation.md, "An event's page is offered only for a Google event at a plain HTTPS address without credentials"; spec/app/calendar/writing.md, "An invitee answers Going or Maybe from the invitation; Decline stays the deletion's decline"
@@ -77,7 +77,7 @@ function googleRow(event: FeedEvent): Read {
   const begin = event.isAllDay ? localDate(event.startAt) : Date.parse(event.startAt)
   const end = event.isAllDay ? localDate(event.endAt) : Date.parse(event.endAt)
   const own = event.attendees.find((person) => person.self && !person.organizer)
-  const organizes = event.provider === "eliza" || event.organizer?.["self"] === true || event.attendees.some((person) => person.self && person.organizer)
+  const organizes = event.provider === "eliza" || event.organizer?.self === true || event.attendees.some((person) => person.self && person.organizer)
   const answer = ownAnswer(own !== undefined, own?.responseStatus ?? "")
   const recurring = (event.recurringEventId ?? "") !== ""
   const mode = cancellation(organizes, own !== undefined, false, false)
@@ -96,10 +96,7 @@ function googleRow(event: FeedEvent): Read {
 
 /** The agent's calendar for the window around `day`, or none where no Google account is connected to the agent. */
 export effect function readFeed(day: number): Option.Option<ReadonlyArray<Read>>!Failure!Agent {
-  const range = readWindow(day)
-  const request = HttpClientRequest.get("/api/lifeops/calendar/feed", {
-    urlParams: { timeMin: new Date(range.begin).toISOString(), timeMax: new Date(range.end).toISOString(), timeZone: zone() },
-  })
+  const request = HttpClientRequest.get("/api/lifeops/calendar/feed", { urlParams: feedParams(day) })
   const feed = try ask(Agent, request, Feed)
   if (feed.state === "unavailable") return Option.none()
   return Option.some(feed.events.map(googleRow).filter((row) => Number.isFinite(row.begin) && Number.isFinite(row.end)))
@@ -171,7 +168,7 @@ function carry(fx: Out): Job<Event, PhoneCalendar | Agent | SystemSettings | She
         return { type: "accessAnswered", grant: granted ? "Granted" : "Denied" } as Event
       }, { type: "accessAnswered", grant: "Denied" });
     when { tag: "OpenCalendarSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", 0) });
-    when { tag: "OpenAccountSettings" }: run("account", effect { try (try Shell.Machine).send({ type: "openView", view: "Settings" }) });
+    when { tag: "OpenAccountSettings" }: run("account", effect { try contained((try Shell.Machine).send({ type: "openView", view: "Settings" }), "opening Settings") });
   }
 }
 
