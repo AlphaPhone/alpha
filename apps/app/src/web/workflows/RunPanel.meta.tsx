@@ -10,6 +10,16 @@ export const meta: ComponentMeta<RunPanelProps> = {
   examples: {
     MissedSelected: { runs: { ...withHistory, selected: "r1" } },
     WithOutput: { output: "Three meetings today; dentist at 4." },
+    FailedWithSteps: {
+      details: {
+        events: [
+          { type: "RunStarted", at: "2026-11-22T07:00:00.000Z", node: "" },
+          { type: "NodeFailed", at: "2026-11-22T07:00:02.000Z", node: "read" },
+          { type: "RunFailed", at: "2026-11-22T07:00:02.000Z", node: "" },
+        ],
+        reason: "StoppedWithError",
+      },
+    },
     OutcomeUnknown: { runs: unknownRun, can: { ...can, review: false, reconcile: true }, outcome: "unknown" },
   },
 };

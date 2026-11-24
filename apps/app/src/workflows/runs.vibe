@@ -1,11 +1,11 @@
-// spec/workflows/runs.md, "Story: Open a workflow and see its runs"; spec/workflows/runs.md, "Story: Run the version I reviewed exactly once"; spec/workflows/runs.md, "Story: Stop a run I started"; spec/workflows/runs.md, "Story: Run a missed occurrence when I choose"; spec/workflows/runs.md, "A notice opens exactly the run it names"
+// spec/workflows/runs.md, "Story: Open a workflow and see its runs"; spec/workflows/runs.md, "Story: Run the version I reviewed exactly once"; spec/workflows/runs.md, "Story: Stop a run I started"; spec/workflows/runs.md, "Story: Run a missed occurrence when I choose"; spec/workflows/runs.md, "A notice opens exactly the run it names"; spec/workflows/runs.md, "The run shown lists its steps, newest last, and says why a run the agent reports an error for stopped"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import {
   type WorkflowNoticeRoute, type WorkflowRun, WorkflowAdmissionRejected, WorkflowResponseInvalid, isRecordedMissedExecution, openWorkflowNotice,
   parseWorkflowRun, parseWorkflowRunDeepLink, workflowRunDeepLink,
 } from "@elizaos/plugin-workflow/client"
-import { type Entry, Machine, autoRefreshes, refreshAfter, stored } from "../../gen/workflows__runs.effect.vibe"
-import { occurred } from "../../gen/workflows__vocabulary.effect.vibe"
+import { type Entry, Machine, autoRefreshes, eventsKept, refreshAfter, stored } from "../../gen/workflows__runs.effect.vibe"
+import { type StopReason, occurred, stopReason } from "../../gen/workflows__vocabulary.effect.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 import { type OwnerScope, WorkflowApi } from "./api.vibe"
 import { sha256Hex } from "./ids.ts"
@@ -20,6 +20,19 @@ export error RunNotFound { runId: string }
 
 /** What the run confirmation and the receipt say happened. */
 export type RunOutcome = "started" | "recovered" | "unknown" | "not-admitted" | "version-changed" | "busy" | "refused"
+
+/** One step of a run as the agent read it: the engine's event type, when, and the step it names ("" for none). */
+export interface RunEvent {
+  readonly type: string
+  readonly at: string
+  readonly node: string
+}
+
+/** A run's steps, oldest first, and why it stopped when the agent reported an error for it; never the error's own text. */
+export interface RunDetails {
+  readonly events: ReadonlyArray<RunEvent>
+  readonly reason: StopReason
+}
 
 /** The version ids seen of each workflow, as the whole numbers the run and lifecycle specs compare. */
 export service WorkflowVersions {
@@ -59,6 +72,8 @@ export service WorkflowRuns {
   bind(): void!!
   /** Each run's own output as last read, by run id, for the open workflow of the current owner: a workflow's content, shown as it is. */
   readonly outputs: Stream.Stream<ReadonlyMap<string, string>>
+  /** Each run's steps and stop reason as last read, by run id, for the open workflow of the current owner. */
+  readonly details: Stream.Stream<ReadonlyMap<string, RunDetails>>
 }
 
 export const versions = Layer.effect(WorkflowVersions, effect {
@@ -100,11 +115,18 @@ export const runs = Layer.provideMerge(Layer.effect(WorkflowRuns, effect {
   const seen = try WorkflowVersions
   const client = agent.workflow
   const outputs = try SubscriptionRef.make<ReadonlyMap<string, string>>(new Map())
+  const details = try SubscriptionRef.make<ReadonlyMap<string, RunDetails>>(new Map())
 
   // spec/workflows/vocabulary.md: only a run's own output is shown as it is, never the agent's error text.
-  effect function keepOutputs(read: ReadonlyArray<WorkflowRun>) {
+  // spec/workflows/runs.md: each run's steps and stop reason are kept with it, the error's own text never.
+  effect function keepRuns(read: ReadonlyArray<WorkflowRun>) {
     const said = read.flatMap((run) => typeof run.output === "string" && run.output.trim() !== "" ? [[run.id, run.output] as const] : [])
     if (said.length > 0) try SubscriptionRef.update(outputs, (known) => new Map([...known, ...said]))
+    const steps = read.map((run) => [run.id, {
+      events: run.events.slice(-eventsKept).map((e) => ({ type: e.type, at: e.at, node: e.node ?? "" })),
+      reason: stopReason(typeof run.error === "string" && run.error !== "", run.status, run.reconciliation?.state ?? ""),
+    } satisfies RunDetails] as const)
+    if (steps.length > 0) try SubscriptionRef.update(details, (known) => new Map([...known, ...steps]))
   }
 
   effect function owner() {
@@ -116,6 +138,7 @@ export const runs = Layer.provideMerge(Layer.effect(WorkflowRuns, effect {
     if ((try held.get()).owner === current) return
     held.send({ type: "switchOwner", owner: current }) catch () => undefined
     try SubscriptionRef.set(outputs, new Map())
+    try SubscriptionRef.set(details, new Map())
   }
 
   effect function openWorkflow(workflowId: string) {
@@ -129,12 +152,12 @@ export const runs = Layer.provideMerge(Layer.effect(WorkflowRuns, effect {
     held.send({ type: "openWorkflow", owner: who.owner, workflowId: workflow.id, version, typed: workflow.phoneSpec !== undefined }) catch () => undefined
     const executions = (client.executions(workflow.id) catch () => undefined)
     if (executions !== undefined) held.send({ type: "historyRead", entries: executions.map(entryOf) }) catch () => undefined
-    if (executions !== undefined) try keepOutputs(executions)
+    if (executions !== undefined) try keepRuns(executions)
     return true
   }
 
   effect function show(run: WorkflowRun) {
-    try keepOutputs([run])
+    try keepRuns([run])
     held.send({ type: "showRun", runId: run.id, finished: run.finished, cancelRequested: false, status: run.status, reconciliation: run.reconciliation?.state ?? "" }) catch () => undefined
   }
 
@@ -175,7 +198,7 @@ export const runs = Layer.provideMerge(Layer.effect(WorkflowRuns, effect {
     if (!autoRefreshes(before)) return 0
     const run = (client.receipt(before.shown.runId, before.shown.workflowId) catch () => undefined)
     if (run === undefined) return refreshAfter(first, false, true)
-    try keepOutputs([run])
+    try keepRuns([run])
     held.send({ type: "receiptRead", runId: run.id, finished: run.finished, cancelRequested: false, status: run.status, reconciliation: run.reconciliation?.state ?? "" }) catch () => undefined
     const after = try held.get()
     return autoRefreshes(after) ? refreshAfter(first, after.shown.status !== before.shown.status, false) : 0
@@ -187,6 +210,7 @@ export const runs = Layer.provideMerge(Layer.effect(WorkflowRuns, effect {
 
   return {
     outputs: SubscriptionRef.changes(outputs),
+    details: SubscriptionRef.changes(details),
     effect open(runId: string) {
       const answer = (agent.request("GET", `/api/workflow/executions/${runId}`) catch effect () => { throw new RunNotFound({ runId }) })
       const raw = typeof answer === "object" && answer !== null ? (answer as { execution?: unknown }).execution : undefined
@@ -262,6 +286,7 @@ export const runs = Layer.provideMerge(Layer.effect(WorkflowRuns, effect {
       if (who === undefined || who.owner === (try held.get()).owner) return
       held.send({ type: "switchOwner", owner: who.owner }) catch () => undefined
       try SubscriptionRef.set(outputs, new Map())
+      try SubscriptionRef.set(details, new Map())
       const { previous } = try held.get()
       if (previous.runId === "") return
       held.send({ type: "cancelPrevious" }) catch () => undefined

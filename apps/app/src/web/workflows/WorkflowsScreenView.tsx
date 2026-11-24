@@ -13,7 +13,7 @@ import type { Runs } from "../../../gen/workflows__runs.ts";
 import type { PromptInput, PromptRunLine, Report } from "../../workflows/automations.vibe";
 import type { ActivationNote, ChangeOutcome, Described, ScheduleNote } from "../../workflows/definitions.vibe";
 import type { PlaceSheet } from "../../workflows/place.vibe";
-import type { RunOutcome } from "../../workflows/runs.vibe";
+import type { RunDetails, RunOutcome } from "../../workflows/runs.vibe";
 import type { PhoneCalendars } from "../../workflows/sources.vibe";
 import { Alert, Button, EmptyState, Sheet, SheetContent, ListRow, Switch } from "../components/ui/index.ts";
 import { AutomationDetail, type AutomationDetailProps } from "./AutomationDetail.tsx";
@@ -87,6 +87,8 @@ export interface WorkflowsScreenViewProps {
   zone: string;
   /** The selected run's own output. */
   runOutput?: string;
+  /** The selected run's steps and why it stopped. */
+  runDetails?: RunDetails;
   /** What the last change of the automation shown reported. */
   report?: Report;
   /** The shown prompt's run history. */
@@ -156,7 +158,7 @@ export interface WorkflowsScreenViewProps {
  * @design design.md
  */
 export function WorkflowsScreenView({
-  place: where, list, waiting, runs, lifecycle, steps, digests, sources, authoring, clockDraft, sheet, can, onPhone, zone, runOutput, report, history, removedRows,
+  place: where, list, waiting, runs, lifecycle, steps, digests, sources, authoring, clockDraft, sheet, can, onPhone, zone, runOutput, runDetails, report, history, removedRows,
   activation, activationNote, activeOutcome, runOutcome, change, runNowReview, promptEditing, draftText, textKept, described, note, clockOutcome, calendars, sourceOutcome,
   onBack, onAdd, onCloseSheet, onOpenRow, onAllowAnother, onToggleRemoved, rowActions, onAskActive, onConfirmActive, onCancelActive, onTapStep, runActions,
   lifecycleActions, notifications, background, digestActions, onOpenDraft, onOpenPrompt, onOpenDigests, onOpenSources, onOpenClockDraft, clockActions, onSavePrompt, draftActions, sourceActions,
@@ -238,6 +240,7 @@ export function WorkflowsScreenView({
           )}
           <RunPanel runs={runs} {...(runOutcome === undefined ? {} : { outcome: runOutcome })}
             {...(runOutput === undefined ? {} : { output: runOutput })}
+            {...(runDetails === undefined ? {} : { details: runDetails })}
             can={can.runs} {...runActions} />
           {lifecycle !== undefined && (
             <LifecycleControls lifecycle={lifecycle} name={workflowName} {...(change === undefined ? {} : { outcome: change })}

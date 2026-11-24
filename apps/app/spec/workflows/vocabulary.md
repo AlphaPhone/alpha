@@ -33,7 +33,7 @@ pure def runWord(status: str): RunWord =
   else if (status == "waiting-timer") WaitingTimer
   else if (status == "skipped") RunSkipped
   else RunUnknown
-pure val statusValues = Set("succeeded", "success", "finished", "error", "waiting-approval", "engine-internal", "", "snoozed", "fired")
+pure val statusValues = Set("succeeded", "success", "finished", "error", "cancelled", "waiting-approval", "engine-internal", "", "snoozed", "fired")
 pure def lawEverySuccessReadsFinished(status: str): bool =
   (status == "success" or status == "succeeded" or status == "finished") iff runWord(status) == RunFinished
 pure def lawAnUnlistedStatusIsUnknown(status: str): bool =
@@ -70,6 +70,34 @@ type Shown = AlphaSentence | ContextFallback | OwnContent
 pure def shown(known: bool, content: bool): Shown =
   if (content) OwnContent else if (known) AlphaSentence else ContextFallback
 pure def lawAgentDiagnosticsAreNeverContent(known: bool): bool = shown(known, false) != OwnContent
+```
+
+### A run's steps read in Alpha's words, and a run the agent reports an error for says why without the error text
+
+Each engine event of a run reads as Alpha's label for it (Run started, Step failed, Approval
+requested, Timer set and the like); an event type Alpha has no label for reads as Step update. A run
+the agent reports an error for says why in a fixed sentence, by what is known of it: its outcome is
+unknown, the agent is still checking it, it was cancelled, or else it stopped with an error on the
+agent. A run with no error reported gives no reason, and the agent's own error text is never shown
+(legacy `workflowEventLabel`, `workflowRunErrorText`).
+
+```quint
+pure val labelledEvents = Set("RunStarted", "RunFinished", "RunFailed", "RunCancelled", "RunContinuedAsNew", "NodeStarted", "NodeFinished",
+  "NodeFailed", "NodeSkipped", "NodeRetrying", "ApprovalRequested", "ApprovalGranted", "ApprovalDenied", "TimerCreated", "TimerFired",
+  "TimerCancelled", "progress")
+pure def eventLabelled(eventType: str): bool = labelledEvents.contains(eventType)
+type StopReason = NoStopReason | StoppedOutcomeUnknown | StillChecking | StoppedCancelled | StoppedWithError
+pure def stopReason(reported: bool, status: str, reconciliation: str): StopReason =
+  if (not(reported)) NoStopReason
+  else if (reconciliation == "outcome-unknown") StoppedOutcomeUnknown
+  else if (reconciliation == "worker-running") StillChecking
+  else if (status == "cancelled") StoppedCancelled
+  else StoppedWithError
+pure val eventTypeValues = Set("RunStarted", "NodeFailed", "SomethingNew")
+pure val reconciliationValues = Set("", "outcome-unknown", "worker-running")
+pure def lawAnUnknownEventIsAStepUpdate(eventType: str): bool = eventType == "SomethingNew" implies not(eventLabelled(eventType))
+pure def lawNoErrorGivesNoReason(status: str, reconciliation: str): bool = stopReason(false, status, reconciliation) == NoStopReason
+pure def lawAReportedErrorAlwaysGivesAReason(status: str, reconciliation: str): bool = stopReason(true, status, reconciliation) != NoStopReason
 ```
 
 ### An automation status Alpha has no word for reads as Unknown, and a snoozed item shows no word

@@ -70,6 +70,20 @@ pure def historyRead(r: Runs, entries: List[Entry]): Runs = { ...r, history: ent
 pure def alwaysAShownRunIsTheCurrentOwners(r: Runs): bool = r.shown.runId != "" implies (r.shown.owner == r.owner and r.shown.workflowId == r.workflowId)
 ```
 
+### The run shown lists its steps, newest last, and says why a run the agent reports an error for stopped
+
+The run shown lists the events the agent read for it (at most its last 100), each with Alpha's label,
+its time and the step it names, and under its output the reason a run the agent reports an error for
+stopped, both as spec/workflows/vocabulary.md words them. They are read with the run and kept per
+run, and another owner's are never shown.
+
+```quint
+pure val eventsKept = 100
+pure def shownEvents(read: int): int = if (read > eventsKept) eventsKept else if (read < 0) 0 else read
+pure val readValues = Set(0, 3, 100, 101)
+pure def lawAtMostAHundredStepsAreShown(read: int): bool = shownEvents(read) <= eventsKept
+```
+
 ### A newer definition ends a confirmation of the older one
 
 ```quint

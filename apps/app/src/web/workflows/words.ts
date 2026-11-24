@@ -1,5 +1,5 @@
 // spec/workflows/vocabulary.md, "Story: Read my workflows in Alpha's words"; spec/workflows/agentSchedules.md, "Story: Answer a scheduled item from Workflows"; spec/workflows/digests.md, "Story: Read a digest's state plainly"
-import type { RunWord, StatusWord, ChangeWord, Occurred } from "../../../gen/workflows__vocabulary.ts";
+import type { RunWord, StatusWord, ChangeWord, Occurred, StopReason } from "../../../gen/workflows__vocabulary.ts";
 import type { LoopWord, DigestNotice } from "../../../gen/workflows__digests.ts";
 import type { ReportWord } from "../../workflows/automations.vibe";
 
@@ -9,6 +9,28 @@ export const runWords: Record<RunWord, string> = {
   RunFinished: "Finished", RunPaused: "Paused", RunQueued: "Queued", RunRunning: "Running",
   WaitingApproval: "Waiting for approval", WaitingEvent: "Waiting for an event", WaitingQuota: "Waiting for capacity",
   WaitingTimer: "Waiting for a timer", RunSkipped: "Skipped", RunUnknown: "Status unknown",
+};
+
+/** Alpha's label for each engine event of a run (spec/workflows/vocabulary.md, labelledEvents; legacy workflowEventLabel). */
+const eventLabels: Record<string, string> = {
+  RunStarted: "Run started", RunFinished: "Run finished", RunFailed: "Run failed", RunCancelled: "Run cancelled", RunContinuedAsNew: "Continued as a new run",
+  NodeStarted: "Step started", NodeFinished: "Step finished", NodeFailed: "Step failed", NodeSkipped: "Step skipped", NodeRetrying: "Step retried",
+  ApprovalRequested: "Approval requested", ApprovalGranted: "Approved", ApprovalDenied: "Denied",
+  TimerCreated: "Timer set", TimerFired: "Timer went off", TimerCancelled: "Timer cancelled", progress: "Progress",
+};
+
+/** Alpha's label for one run event; an event type Alpha has no label for reads as a step update. */
+export function eventLabel(type: string): string {
+  return Object.hasOwn(eventLabels, type) ? eventLabels[type] : "Step update";
+}
+
+/** Why a run the agent reports an error for stopped, never the error's own text (legacy workflowRunErrorText). */
+export const stopReasonSentences: Record<StopReason, string> = {
+  NoStopReason: "",
+  StoppedOutcomeUnknown: "Your agent lost track of this run before it finished, so what it did is unknown. Check before running it again.",
+  StillChecking: "Your agent is still checking whether this run is going. Refresh in a moment.",
+  StoppedCancelled: "This run was cancelled before it finished.",
+  StoppedWithError: "This run stopped with an error on your agent.",
 };
 
 /** How an occurrence that did not run reads. */

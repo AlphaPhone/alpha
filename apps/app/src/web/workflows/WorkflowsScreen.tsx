@@ -23,7 +23,7 @@ import { HostedResults } from "../../workflows/results.vibe";
 import { PhoneSteps } from "../../workflows/notices.vibe";
 import { WorkflowsPlace } from "../../workflows/place.vibe";
 import type { AlarmRequest } from "../../workflows/ports.vibe";
-import { WorkflowRuns, type RunOutcome } from "../../workflows/runs.vibe";
+import { WorkflowRuns, type RunDetails, type RunOutcome } from "../../workflows/runs.vibe";
 import { DigestSourcesService, type ImpactRow, type PhoneCalendars, type RevokeOutcome } from "../../workflows/sources.vibe";
 import { deviceZone } from "../../workflows/ids.ts";
 import type { ScreenProps } from "../app-screen.ts";
@@ -56,6 +56,7 @@ export function WorkflowsScreen({ onClose }: WorkflowsScreenProps) {
   const place = usePlace(runtime);
   const sheet = usePlaceSheet();
   const outputs = useServiceStream("workflows.outputs", WorkflowRuns.use((r) => Effect.succeed(r.outputs)), new Map<string, string>());
+  const details = useServiceStream("workflows.details", WorkflowRuns.use((r) => Effect.succeed(r.details)), new Map<string, RunDetails>());
   const [onPhone] = useState(() => {
     void perform(Automations.use((a) => a.refresh()));
     void perform(WorkflowClockDraft.use((c) => c.enter()));
@@ -83,6 +84,7 @@ export function WorkflowsScreen({ onClose }: WorkflowsScreenProps) {
   const where = place.state ?? placeStart;
   const overlay = where.overlay;
   const runOutput = runs.state === undefined ? undefined : outputs.get(runs.state.selected);
+  const runDetails = runs.state === undefined ? undefined : details.get(runs.state.selected);
   const namedRemoval = sheet.removalGrant !== undefined;
 
   const act = (program: Parameters<typeof perform<Report>>[0]) => void perform(program).then(setReport);
@@ -146,6 +148,7 @@ export function WorkflowsScreen({ onClose }: WorkflowsScreenProps) {
       onPhone={onPhone}
       zone={deviceZone()}
       {...(runOutput === undefined ? {} : { runOutput })}
+      {...(runDetails === undefined ? {} : { runDetails })}
       {...(report === undefined ? {} : { report })}
       {...(history === undefined ? {} : { history })}
       {...(removedRows === undefined ? {} : { removedRows })}

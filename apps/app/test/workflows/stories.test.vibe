@@ -28,6 +28,7 @@ import { SimulatedTriggers, SimulatedWorkflows } from "../../src/workflows/simul
 import { DigestSourcesService } from "../../src/workflows/sources.vibe"
 import { WorkflowsPlace, followRoute } from "../../src/workflows/place.vibe"
 import { routeCrosses } from "../../src/shell/ownerRoutes.vibe"
+import { eventLabel, stopReasonSentences } from "../../src/web/workflows/words.ts"
 import { Machine as PlaceMachine } from "../../gen/workflows__place.effect.vibe"
 import { type Handler, type NativeCall, type NativeHandler, type ReportedBrief, type Sent, engineStatus, navigationOf, statusRoute, workflowsOf } from "./fakes.vibe"
 
@@ -326,6 +327,31 @@ describe("Runs (spec/workflows/runs.md, \"Story: Open a workflow and see its run
       try Effect.try(() => assert.deepStrictEqual(
         { opened, workflow: state.workflowId, history: state.history.map((e) => [e.runId, e.occurred, e.finished]), missedNow, output: outputs?.get("r1") },
         { opened: true, workflow: "w1", history: [["r1", "Ran", true]], missedNow: false, output: "Saved the brief." },
+      ))
+    }
+  })
+
+  it.effect("a failed run lists its steps in Alpha's words and says why it stopped, never with the agent's error text (spec/workflows/runs.md, \"The run shown lists its steps, newest last, and says why a run the agent reports an error for stopped\"; spec/workflows/vocabulary.md, \"A run's steps read in Alpha's words, and a run the agent reports an error for says why without the error text\")", () => effect {
+    const failed = {
+      ...execution("r1", true), status: "failed", error: { message: "ECONNRESET" },
+      events: [
+        { runId: "r1", workflowId: "w1", type: "RunStarted", timestamp: "2026-11-22T07:00:00.000Z" },
+        { runId: "r1", workflowId: "w1", type: "NodeFailed", timestamp: "2026-11-22T07:00:02.000Z", nodeId: "read" },
+        { runId: "r1", workflowId: "w1", type: "SomethingNew", timestamp: "2026-11-22T07:00:03.000Z" },
+      ],
+    }
+    provide workflowsOf(workflowRoutes([failed, { ...execution("r2", true), events: [] }]), []) {
+      const runs = try WorkflowRuns
+      try runs.openWorkflow("w1")
+      const details = Option.getOrUndefined(try Stream.runHead(runs.details))
+      const shown = details?.get("r1")
+      const text = [...(shown?.events ?? []).map((e) => eventLabel(e.type)), stopReasonSentences[shown?.reason ?? "NoStopReason"]]
+      try Effect.try(() => assert.deepStrictEqual(
+        { text, nodes: shown?.events.map((e) => e.node), finished: details?.get("r2")?.reason, leaked: JSON.stringify([...(details ?? new Map()).entries()]).includes("ECONNRESET") },
+        {
+          text: ["Run started", "Step failed", "Step update", "This run stopped with an error on your agent."], nodes: ["", "read", ""],
+          finished: "NoStopReason", leaked: false,
+        },
       ))
     }
   })
