@@ -1,12 +1,13 @@
-// spec/camera/edit.md, "Story: Edit a photo and keep the original"; spec/camera/copyIntent.md, "Story: Never lose track of a copy that may have been saved"; spec/camera/videoEdit.md, "Story: Trim a video into a copy"; spec/camera/videoEdit.md, "Story: Recover a video copy that may exist"
+// spec/camera/edit.md, "Story: Edit a photo and keep the original"; spec/camera/copyIntent.md, "Story: Never lose track of a copy that may have been saved"; spec/camera/copyIntent.md, "A request the previous Alpha left pending is admitted once, into an empty slot"; spec/camera/videoEdit.md, "Story: Trim a video into a copy"; spec/camera/videoEdit.md, "Story: Recover a video copy that may exist"
 import { Machine as EditMachine, type CropArea, type Edit, type Event as EditEvent, type Look, type SaveAnswer, type SaveMode } from "../../gen/camera__edit.effect.vibe"
-import { Machine as IntentMachine } from "../../gen/camera__copyIntent.effect.vibe"
+import { Machine as IntentMachine, canAdoptPrevious } from "../../gen/camera__copyIntent.effect.vibe"
 import { Machine as VideoMachine, type Event as VideoEvent, type VideoSave } from "../../gen/camera__videoEdit.effect.vibe"
 import { LOOKS, fromArea } from "./imageEdit.ts"
 import { PhotoLibrary } from "./library.vibe"
 import { photosText } from "./messages.vibe"
 import { CameraNotices } from "./notices.vibe"
 import { PhotosFailed, PhotoStore } from "./photos.vibe"
+import { forgetPreviousPendingCopy, previousPendingCopy } from "./previous.ts"
 
 const EDITOR = 1
 const RECOVERY = 2
@@ -51,6 +52,11 @@ export const mediaEditor = Layer.effect(MediaEditor, effect {
   let videoSession: { sessionId: string; operationId: string; id: string; revision: string } | undefined
 
   intents.send({ type: "restart" }) catch () => undefined
+  const previous = previousPendingCopy()
+  if (previous !== undefined) {
+    if (canAdoptPrevious(try intents.get(), previous)) intents.send({ type: "adoptPrevious", token: previous }) catch () => undefined
+    if ((try intents.get()).slot.token === previous) forgetPreviousPendingCopy(previous)
+  }
 
   effect function say(text: string) {
     try notices.say(text, false)

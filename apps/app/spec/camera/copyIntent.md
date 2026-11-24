@@ -69,3 +69,22 @@ pure def canRecover(s: Intents, caller: int): bool = callers.contains(caller) an
 pure def recover(s: Intents, caller: int): Intents = { ...s, held: s.held.put(caller, s.slot) }
 pure def sometimesRecoveredAfterRestart(s: Intents): bool = s.restarts > 0 and s.slot != noIntent and heldBy(s, 1) == s.slot
 ```
+
+### A request the previous Alpha left pending is admitted once, into an empty slot
+
+On the phone the previous Alpha kept the one pending request's operation id on its own. When the
+camera starts and the slot is empty, that request is admitted as a new admission that no flow holds
+yet, so its outcome is checked before another request is admitted, and the previous record is removed
+only after the slot reads back with it. An occupied slot, or a previous record that is not an
+operation id, leaves both as they are. The browser build kept its request where this version reads
+it, so it has nothing to take.
+
+```quint
+pure def canAdoptPrevious(s: Intents, token: str): bool = s.slot == noIntent and token != ""
+pure def adoptPrevious(s: Intents, token: str): Intents =
+  { ...s, slot: { token: token, revision: s.serial + 1 }, serial: s.serial + 1, admitted: s.admitted + 1 }
+pure def stepThePreviousRequestOnlyFillsAnEmptySlot(before: Intents, via: str, after: Intents): bool =
+  via == "adoptPrevious" implies (before.slot == noIntent and after.slot.token != "" and after.held == before.held)
+pure def sometimesThePreviousRequestIsRecovered(s: Intents): bool = s.slot.token == "op-b" and heldBy(s, 2) == s.slot and s.restarts == 0
+pure val eval_witness_sometimesThePreviousRequestIsRecovered = (("adoptPrevious", "op-b"), ("recover", 2))
+```

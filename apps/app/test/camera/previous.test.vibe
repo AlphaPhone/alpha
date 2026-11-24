@@ -1,0 +1,28 @@
+// spec/camera/copyIntent.md, "Story: Never lose track of a copy that may have been saved"
+// @vitest-environment happy-dom
+import { assert, it } from "@effect/vitest"
+import { Machine as Intents } from "../../gen/camera__copyIntent.effect.vibe"
+import { MediaEditor } from "../../src/camera/editor.vibe"
+import { cameraOver, phone } from "./support.vibe"
+
+const PREVIOUS = "alpha.photos.pending-copy.v1"
+
+it.live("a copy the previous Alpha left pending is checked, not forgotten (spec/camera/copyIntent.md, \"A request the previous Alpha left pending is admitted once, into an empty slot\")", () => effect {
+  try sync(() => { globalThis.localStorage.setItem(PREVIOUS, "op-a") })
+  const asked: string[] = []
+  const device = phone({
+    "AlphaPhotos.editResult": (args) => { asked.push((args as { operationId: string }).operationId); return { status: "saved", operationId: "op-a", id: "m:9" } },
+  })
+  provide cameraOver(device) {
+    const editor = try MediaEditor
+    const intents = try Intents
+    const adopted = try intents.get()
+    const left = try sync(() => globalThis.localStorage.getItem(PREVIOUS))
+    try editor.recover()
+    const checked = try intents.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { slot: adopted.slot.token, admitted: adopted.admitted, left, asked, cleared: checked.slot.token },
+      { slot: "op-a", admitted: 1, left: null, asked: ["op-a"], cleared: "" },
+    ))
+  }
+})
