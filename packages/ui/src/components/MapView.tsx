@@ -1,5 +1,6 @@
 import * as maplibregl from "maplibre-gl";
 import type { GeoJSONSource, Map as MapLibre, StyleSpecification } from "maplibre-gl";
+import mapWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { Compass, Minus, Plus } from "lucide-react";
 import { type ReactNode, useCallback, useRef, useState } from "react";
 import { cn } from "../lib/cn.ts";
@@ -194,6 +195,7 @@ export function MapView(props: MapViewProps) {
     let instance: MapLibre;
     let styleLoaded = false;
     try {
+      maplibregl.setWorkerUrl(mapWorkerUrl);
       instance = new maplibregl.Map({
         container: node, style: styleOf(chosen, protocol), center: [0, 20], zoom: 1.5, attributionControl: false,
         ...(chosen.kind === "raster" ? { minZoom: chosen.minZoom, maxZoom: chosen.maxZoom } : {}),
