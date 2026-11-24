@@ -31,13 +31,14 @@ export interface ComposeProps {
 
 const titles = { Fresh: "new", Reply: "reply", ReplyAll: "replyAll", Forward: "forward", Saved: "saved" } as const;
 
-/** How the last operation on `letter` stands, while it is worth telling. */
-function outcomeOf(ops: Operations, letter: Letter): InboxSendOutcomeProps["outcome"] | undefined {
+/** How the last operation on `letter` stands, while it is worth telling: an unknown send as the check of Sent settled it. */
+function outcomeOf(ops: Operations, letter: Letter, checked: readonly number[]): InboxSendOutcomeProps["outcome"] | undefined {
   if (ops.draft !== letter.id || ops.kind !== "Send" || ops.of !== ops.session) return undefined;
   const outcome = ops.attempt.outcome;
   if (outcome === "Recorded" || outcome === "Sent") return "sending";
   if (outcome === "Confirmed") return "sent";
   if (outcome === "Refused") return ops.withdrawn ? "stopped" : "refused";
+  if (outcome === "Unknown" && letter.doubt.attempt === 0 && checked.includes(ops.attempt.id)) return letter.sent === 0 ? "notSent" : "foundSent";
   if (outcome === "Unknown") return "unknown";
   return undefined;
 }
@@ -95,7 +96,18 @@ export function Compose({ runtime, list }: ComposeProps) {
   const confirm = { type: "confirm", revision: letter.revision, access, now: untimed } as const;
   const reviewed = ops.state.kind === "Send" || ops.state.kind === "SaveDraft" || ops.state.kind === "ReplaceDraft" || ops.state.kind === "DeleteDraft";
   const reviewing = ops.state.review.showing && ops.state.draft === draft && reviewed;
-  const outcome = outcomeOf(ops.state, letter);
+  const told = outcomeOf(ops.state, letter, state.checked);
+  // spec/app/inbox/drafts.md, "An unknown send is checked once, by reading Gmail's Sent for it, while its account may be read and no new send of the draft is handed over"
+  const check = { type: "checkSent", draft, access } as const;
+  // spec/app/inbox/sending.md, "An outcome that is unknown or confirmed is never sent again, and a later operation never hides an unknown one the owner has not seen"
+  const again = { type: "prepare", kind: "Send", access, letter, kept, again: true } as const;
+  const outcome: InboxSendOutcomeProps | undefined = told === undefined ? undefined : {
+    outcome: told,
+    onCheckSent: told === "unknown" && can(check, "Owner") ? () => void send(check, "Owner") : undefined,
+    checking: state.check.status === "Loading",
+    onSendAgain: told !== "sending" && told !== "sent" && ops.can(again, "Owner") && !ops.can(sending, "Owner") ? () => void ops.send(again, "Owner") : undefined,
+    onDismiss: ops.can({ type: "dismissOutcome" }, "Owner") ? () => void ops.send({ type: "dismissOutcome" }, "Owner") : undefined,
+  };
   const aside = { type: "setAside" } as const;
   // spec/app/inbox/adding.md, "A file is attached to the draft open only once the picker gives one that fits within the room its account leaves; one too large, unreadable or without room is refused and said so"
   const attach = { type: "attach", draft } as const;
@@ -132,7 +144,7 @@ export function Compose({ runtime, list }: ComposeProps) {
         onRemoveAttachment={(id) => detach(id)?.()}
         onAttach={adding.can(attach) && canAttach(letter, policy, 1) ? () => void adding.send(attach) : undefined}
         notice={refused}
-        outcome={outcome === undefined ? undefined : { outcome }}
+        outcome={outcome}
         storage={ready(state) ? undefined : state.load.status === "Failed" ? "unavailable" : "checking"}
         onReloadStorage={can({ type: "reload" }, "World") ? () => void send({ type: "reload" }, "World") : undefined}
         keeping={keepingOf(state)}
