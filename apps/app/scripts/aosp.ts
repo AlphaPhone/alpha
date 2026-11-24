@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// spec/app/image/index.md, "Story: Stage Alpha into an image"; spec/app/image/index.md, "Story: Keep the phone and messages on Alpha's phone"; spec/app/image/index.md, "Story: Let a handed-over phone update its launcher on its own"; spec/app/image/index.md, "Story: Update an Alpha Pixel by cable, and get back"; spec/app/image/index.md, "Story: Sign Alpha's releases with one key"; spec/release/os.md, "Story: Enrol the image's updater"; spec/release/os.md, "Story: Update an image by hand"; spec/release/os.md, "Story: Recover an image"
+// spec/app/image/index.md, "Story: Stage Alpha into an image"; spec/app/image/index.md, "Story: Keep the phone and messages on Alpha's phone"; spec/app/image/index.md, "Story: Let a handed-over phone update its launcher on its own"; spec/app/image/index.md, "Story: Update an Alpha Pixel by cable, and get back"; spec/app/image/index.md, "Story: Sign Alpha's releases with one key"; spec/release/os.md, "Story: Enrol the image's updater"; spec/release/os.md, "Story: Update an image by hand"; spec/release/os.md, "Story: Recover an image"; spec/release/os.md, "Story: Run the drills"; spec/release/os.md, "Enrolment is staged only with exactly the pinned profile, and staged disabled"; spec/release/os.md, "A drill's result is recorded by the release owner only once that drill has been run, and a failed drill takes back physical recovery and turns the updater off"
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,6 +16,8 @@ import {
   alphaChannel, alphaPrivileged, channelIsAlphas, firstBootGrants, grantsAdmitted, imageTelephony, listenerImage, privilegedAdmitted, provisionsHome, readsChannel,
   readsSourceLock, signerRecordAdmitted, stageProblems, type OtaCommand, type Patch, type Stage, type Target,
 } from "../gen/app__image.ts";
+import * as Os from "../gen/release__os.ts";
+import { ReleaseRefused, ledger } from "./release.ts";
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -31,7 +33,7 @@ export class InputUnreadable extends Data.TaggedError("InputUnreadable")<{ reado
 /** Reads and checks done before any tool runs, as the failure they are. */
 const attempt = <A>(read: () => A) => Effect.try({
   try: read,
-  catch: (cause) => cause instanceof UsageError || cause instanceof StageRefused ? cause : new InputUnreadable({ message: cause instanceof Error ? cause.message : String(cause) }),
+  catch: (cause) => cause instanceof UsageError || cause instanceof StageRefused || cause instanceof ReleaseRefused ? cause : new InputUnreadable({ message: cause instanceof Error ? cause.message : String(cause) }),
 });
 
 const PRODUCTS: Readonly<Record<Target, string>> = { Cuttlefish: "aosp/cuttlefish.json", Pixel10a: "aosp/pixel10a.json" };
@@ -71,6 +73,7 @@ const USAGE = [
   "pnpm aosp record --request FILE",
   "pnpm aosp keys generate --output NEW_DIR --passphrase-file FILE [--organization NAME] [--only a,b] | keys decrypt --input DIR --output NEW_DIR --passphrase-file FILE [--only a,b]",
   "pnpm aosp enroll --checkout DIR --certificate PEM --product-makefile-sha256 HEX --receipt NEW_FILE [--execute]",
+  "pnpm aosp os --ledger FILE stage | pass --gate GATE | enable | check --from RECORD|stock --to RECORD | start | interrupt | resume | finish | retain-known-good | fallback --to stock --image FILE | fallback --to known-good | drill --drill DRILL --passed|--failed",
 ].join("\n");
 
 interface Flags {
@@ -299,7 +302,83 @@ const enroll = (argv: readonly string[]) => Effect.gen(function* () {
   return yield* enrollUpdater({ checkout, descriptor: place(PRODUCTS.Pixel10a), channel, certificate, productMakefileSha256, receipt, execute: found.switches.has("execute") });
 });
 
-const commands = { stage, ota, verify, sign, record, keys, enroll } as const;
+const GATES: Readonly<Record<string, Os.Gate>> = {
+  "signed-image": "SignedImage", "channel": "ChannelGate", "trust": "Trust", "selinux": "Selinux", "engine": "Engine",
+  "physical-recovery": "PhysicalRecovery", "cache-retention": "CacheRetention", "candidate-recovery": "CandidateRecovery",
+};
+const DRILLS: Readonly<Record<string, Os.Drill>> = {
+  "signed-update": "SignedUpdate", "interrupted-update": "InterruptedUpdate", "compatible-rollback": "CompatibleRollback", "stock-recovery": "StockRecovery",
+};
+
+/** The profile the image's enrolment stages: the pilot enrolment's manifest, hosts, product, device and certificate, with the channel's verified-boot key. */
+function enrolledProfile(): Os.Profile {
+  const pilot = json(ENROLLMENT) as { readonly manifestUrl: string; readonly hosts: readonly string[]; readonly product: string; readonly device: string; readonly otaCertificateSha256: string; readonly rotatePlatformOrAVBKeys: boolean; readonly wipeData: boolean };
+  const channel = json(CHANNEL) as { readonly avbPublicKeySha256: string };
+  return {
+    manifest: pilot.manifestUrl, hosts: pilot.hosts.join(" "), product: pilot.product, device: pilot.device,
+    certificate: pilot.otaCertificateSha256, avb: channel.avbPublicKeySha256, rotate: pilot.rotatePlatformOrAVBKeys, wipe: pilot.wipeData,
+  };
+}
+
+/** A signed release record as the OS spec reads it, or the stock image. */
+function imageRecord(file: string): Os.ImageRecord {
+  if (file === "stock") return Os.stock;
+  const record = JSON.parse(readFileSync(file, "utf8")) as {
+    readonly build: { readonly dateUtc: string | number }; readonly product: string; readonly device: string;
+    readonly certificates: { readonly releasekey: string }; readonly verifiedBoot: { readonly publicKeySha256: string };
+    readonly payload?: { readonly metadata?: Readonly<Record<string, string>> };
+  };
+  return {
+    build: Number(record.build.dateUtc), product: record.product, device: record.device, certificate: record.certificates.releasekey,
+    avb: record.verifiedBoot.publicKeySha256, wipe: record.payload?.metadata?.["ota-wipe"] === "yes",
+  };
+}
+
+/** The OS event a command line names, read before the ledger is opened. */
+function osEvent(argv: readonly string[]): Os.Event {
+  const [name = "", ...rest] = argv;
+  switch (name) {
+    case "stage": return { type: "stage", profile: enrolledProfile() };
+    case "enable": case "interrupt": case "resume": case "finish": return { type: name };
+    case "start": return { type: "startApply" };
+    case "retain-known-good": return { type: "retainKnownGood" };
+    case "pass": {
+      const gate = GATES[required(flags(rest, { valued: ["gate"] }), "gate")[0] ?? ""];
+      if (gate === undefined) throw new UsageError({ message: `--gate takes ${Object.keys(GATES).join(", ")}` });
+      return { type: "pass", gate };
+    }
+    case "check": {
+      const [from = "", to = ""] = required(flags(rest, { valued: ["from", "to"] }), "from", "to");
+      return { type: "check", base: imageRecord(from), goal: imageRecord(to) };
+    }
+    case "fallback": {
+      const found = flags(rest, { valued: ["to", "image"] });
+      const [to = ""] = required(found, "to");
+      if (to !== "stock" && to !== "known-good") throw new UsageError({ message: "--to takes stock or known-good" });
+      const image = found.values.image;
+      if ((to === "stock") !== (image !== undefined)) throw new UsageError({ message: "--image names the stock factory image, and only for --to stock" });
+      return { type: "fallback", toStock: to === "stock", image: image === undefined ? "" : sha256File(image) };
+    }
+    case "drill": {
+      const found = flags(rest, { valued: ["drill"], switches: ["passed", "failed"] });
+      const drill = DRILLS[required(found, "drill")[0] ?? ""];
+      if (drill === undefined) throw new UsageError({ message: `--drill takes ${Object.keys(DRILLS).join(", ")}` });
+      if (found.switches.has("passed") === found.switches.has("failed")) throw new UsageError({ message: "say --passed or --failed" });
+      return { type: "recordDrill", drill, passed: found.switches.has("passed") };
+    }
+    default: throw new UsageError({ message: `os takes stage, pass, enable, check, start, interrupt, resume, finish, retain-known-good, fallback or drill, not ${name || "nothing"}` });
+  }
+}
+
+/** The release owner's record of the image's updater, its gates, the updates applied by hand and the drills, each step held to the OS spec. */
+const os = (argv: readonly string[]) => Effect.gen(function* () {
+  const [flag, file, ...rest] = argv;
+  if (flag !== "--ledger" || file === undefined) return yield* new UsageError({ message: "os needs --ledger FILE first" });
+  const event = yield* attempt(() => osEvent(rest));
+  return yield* attempt(() => ledger<Os.Os, Os.Event>(Os, file).take(event));
+});
+
+const commands = { stage, ota, verify, sign, record, keys, enroll, os } as const;
 
 /** One `pnpm aosp` command, as an effect over Node's services. */
 export const aosp = (argv: readonly string[]) => Effect.suspend(() => {

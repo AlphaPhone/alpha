@@ -39,6 +39,8 @@ export interface UpdateScene {
   /** What `installUpdate` answers: none for an install Android took. */
   installAnswer?: "offer-unavailable" | "offer-withdrawn" | "offer-response-changed" | "starting" | "permission-required" | "unsupported";
   state: UpdateState;
+  /** While set, an install waits for it before Android answers. */
+  installHeld?: Promise<void>;
   /** While set, `updateState` cannot be read. */
   stateUnreadable?: boolean;
   readonly checks: number[];
@@ -78,7 +80,7 @@ export function alphaDevice(scene: UpdateScene, now: () => number): Faked {
       },
       installUpdate: (options: UpdateScene["installs"][number]) => {
         scene.installs.push(options);
-        return Promise.resolve(scene.installAnswer === undefined ? {} : { status: scene.installAnswer });
+        return (scene.installHeld ?? Promise.resolve()).then(() => (scene.installAnswer === undefined ? {} : { status: scene.installAnswer }));
       },
       updateState: () => (scene.stateUnreadable === true ? Promise.reject(rejection("Update state unreadable")) : Promise.resolve({ ...scene.state })),
       activateUpdate: (options: { activationId: string; ready: boolean }) => {

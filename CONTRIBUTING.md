@@ -130,10 +130,14 @@ errors in subscribers, since Node reports a thrown subscriber error as an uncaug
 
 ## Releasing
 
-Set `version` in the root `package.json`, merge to `main`, and push the tag `v<version>` from it.
-`.github/workflows/release.yml` reuses the `build` task when it runs `pnpm pack`. Then it runs the remaining shard prerequisites
-and `pnpm selftest --only --concurrency=1` with the CI cache keys and attaches the tarball to a GitHub release of that tag.
-A project installs it as [vibestack/README.md, "Using it from another package"](vibestack/README.md#using-it-from-another-package) says.
+Alpha's launcher is released by `.github/workflows/release.yml` over `pnpm release` in `apps/app`
+([spec/release/index.md](spec/release/index.md)). A push to `main` builds an unsigned candidate numbered by its
+run, mirrors it privately and writes its signing plan, whose digest the run's summary shows. Read the plan, then
+dispatch the workflow with the candidate's run id, that digest and the voice qualification evidence: the protected
+`release` environment signs exactly the planned APK, delivers it with a receipt, qualifies it and publishes the APK
+before the manifest. Once the manifest reads back naming the release, run `pnpm release record` with the run's
+ledger and commit the raised floor in `apps/app/aosp/signing/release-signer.json` in a reviewed pull request.
+
 ## Architecture
 
 The spec owns the rules and state; generated code is its runtime contract.

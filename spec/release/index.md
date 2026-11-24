@@ -66,7 +66,10 @@ pure def build(s: Channel, number: int, attempt: int, blockers: Blockers): Chann
 
 The verification of the APKs records, for each one, why it may not be
 distributed. A build with any such reason is never mirrored, signed or
-published.
+published. A candidate is built unsigned, so a signer other than Alpha's
+one key blocks it but the missing signature does not; once it is signed,
+its verification must record it signed by that key and distributable
+before it is delivered.
 
 ```quint
 type Blockers = {
