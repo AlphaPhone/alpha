@@ -57,15 +57,20 @@ public final class BrowserStorageFormatInstrumentedTest {
    AlphaBrowserStores.bookmarks(context).change(second,true);
    JSONArray savedBookmarks=new JSONArray(decode(bookmarkKey,bookmarks.getString("sealed",null)));
    assertEquals(second,savedBookmarks.getString(0));assertEquals(first,savedBookmarks.getString(1));
-   // A page name is sealed with its address; the bookmark saved before titles reads back untitled,
-   // and saving again without a title keeps the saved one.
+   // A page name is sealed beside the address list, which keeps the string-only format previous
+   // builds read. The bookmark saved before titles reads back untitled, and saving again without a
+   // title keeps the saved one.
    AlphaBrowserStores.bookmarks(context).change(second,true,"Second page");
    AlphaBrowserStores.bookmarks(context).change(second,true,null);
    savedBookmarks=new JSONArray(decode(bookmarkKey,bookmarks.getString("sealed",null)));
-   assertEquals(second,savedBookmarks.getJSONObject(0).getString("url"));assertEquals("Second page",savedBookmarks.getJSONObject(0).getString("title"));
-   assertEquals(first,savedBookmarks.getString(1));
+   assertEquals(second,savedBookmarks.getString(0));assertEquals(first,savedBookmarks.getString(1));
+   JSONArray savedTitles=new JSONObject(decode(bookmarkKey,bookmarks.getString("sealed-titles",null))).getJSONArray("titles");
+   assertEquals("Second page",savedTitles.getString(0));assertTrue(savedTitles.isNull(1));
    java.util.List<BrowserBookmarkRecord.Entry> entries=AlphaBrowserStores.bookmarks(context).entries();
    assertEquals("Second page",entries.get(0).title);assertNull(entries.get(1).title);
+   // A previous build that rewrites the address list leaves the titles behind; they are dropped.
+   assertTrue(bookmarks.edit().putString("sealed",encode(bookmarkKey,new JSONArray().put(second).put(first).toString())).commit());
+   assertNull(AlphaBrowserStores.bookmarks(context).entries().get(0).title);
    JSONObject state=new JSONObject().put("history",new JSONArray().put(first)).put("tabs",new JSONArray().put(new JSONObject().put("id","tab-one").put("url",first).put("title","Fixture"))).put("cur","tab-one");
    assertTrue(session.edit().putString("sealed",encode(sessionKey,state.toString())).putString("permissions",encode(sessionKey,new JSONObject().put(origin,new JSONObject().put("camera",true)).toString())).commit());
    BrowserSessionStore store=AlphaBrowserStores.session(context);
