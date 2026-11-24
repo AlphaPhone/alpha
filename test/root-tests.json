@@ -79,6 +79,7 @@
   "test/upstream-pin-guard.test.mjs",
   "test/upstream-reachability.test.mjs",
   "test/voice-host-absent-admission.test.mjs",
+  "test/voice-host-record.test.mjs",
   "test/wallet-disabled.test.mjs",
   "test/wireless-install-history.test.mjs"
  ],
@@ -375,10 +376,9 @@
     "test/pilot-units.test.mjs",
     "test/qualified-app-update.test.mjs",
     "test/runtime-source-clone.test.mjs",
-    "test/test-helpers.test.mjs",
-    "test/voice-host-record.test.mjs"
+    "test/test-helpers.test.mjs"
    ],
-   "reason": "They fail at the pin for other legacy reasons: bun.lock and the legacy promotion jobs (ci-required-checks), legacy candidate source trees (app-update-candidate, qualified-app-update, runtime-source-clone), the removed embedding producer (embedding-*), the bun.lock SBOM generator (voice-host-record), legacy harness runners (installed-upgrade-runner, native-permission-runner, digest-restart-input, test-helpers), the browser proof export inputs, the listener SystemUI loader, legacy test imports (agent-calendar-mutation, maps-reroute-freshness) and the packaged runtime layout (pilot-units).",
+   "reason": "They fail at the pin for other legacy reasons: bun.lock and the legacy promotion jobs (ci-required-checks), legacy candidate source trees (app-update-candidate, qualified-app-update, runtime-source-clone), the removed embedding producer (embedding-*), legacy harness runners (installed-upgrade-runner, native-permission-runner, digest-restart-input, test-helpers), the browser proof export inputs, the listener SystemUI loader, legacy test imports (agent-calendar-mutation, maps-reroute-freshness) and the packaged runtime layout (pilot-units).",
    "movedTo": "Not moved yet (docs/vibestack-open-items.md, Tooling)."
   }
  ]
