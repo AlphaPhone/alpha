@@ -52,13 +52,13 @@ without guessing whether Android or a person chose it. This is not an IME migrat
 A fresh-image test must still show that the shipped image's initial IME is Alpha LatinIME;
 a preserved unrelated selection does not prove that factory default.
 
-Navigation is selected last, after the roles and keyboard are confirmed. While first-run
-eligibility holds and no overlay in Android's navigation-bar-mode category is enabled for
-the current user, Provision enables Android's stock gestural overlay exclusively in that
-category and reads it back. An enabled mode, including one chosen while setup runs, is kept.
-If the image has no gestural overlay or Android refuses the change, setup still completes on
-the framework's three-button fallback (`config_navBarInteractionMode` 0), which also remains
-a Settings choice.
+Navigation is selected last, after the keyboard and palette presets and a final role and
+eligibility check. While first-run eligibility holds and no overlay in Android's
+navigation-bar-mode category is enabled for the current user, Provision enables Android's
+stock gestural overlay exclusively in that category and reads it back. An enabled mode,
+including one chosen while setup runs, is kept. If the image has no gestural overlay or
+Android refuses or fails the change, setup still completes on the framework's three-button
+fallback (`config_navBarInteractionMode` 0), which also remains a Settings choice.
 
 The settings and update path come from pinned Android 17 source. The null-token fallback
 in `InputMethodManager.setInputMethod` explicitly recommends direct secure-setting updates;
