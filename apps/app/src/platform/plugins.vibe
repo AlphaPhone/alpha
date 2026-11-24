@@ -7,6 +7,7 @@ import { type SystemSettings, browserSystemSettings, phoneSystemSettings } from 
 import { type WiFi, browserWiFi, phoneWiFi } from "./wifi.vibe"
 import { type PhoneCalendar, browserCalendar, phoneCalendar } from "./calendar.vibe"
 import { type Files, browserFiles, phoneFiles } from "./files.vibe"
+import { type Location, browserLocation, phoneLocation } from "./location.vibe"
 
 /**
  * The services over the phone's other plugins, one line per plugin in each of the three lists below: its service in
@@ -23,6 +24,7 @@ export type Plugins =
   | LauncherUpdates
   | PhoneCalendar
   | Files
+  | Location
 
 /** On the phone: each plugin's service over eliza's client of it (`@elizaos/os/bridges/<plugin>`). */
 export const phonePlugins = Layer.mergeAll(
@@ -35,6 +37,7 @@ export const phonePlugins = Layer.mergeAll(
   phoneLauncherUpdates,
   phoneCalendar,
   phoneFiles,
+  phoneLocation,
 )
 
 /** In a browser: each plugin's service saying the phone's part is absent. */
@@ -48,4 +51,5 @@ export const browserPlugins = Layer.mergeAll(
   browserLauncherUpdates,
   browserCalendar,
   browserFiles,
+  browserLocation,
 )

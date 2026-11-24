@@ -34,4 +34,5 @@ export const mounts: readonly Mount[] = [
   at("view:Inbox", () => import("./inbox/index.tsx")),
   at("view:Calendar", () => import("./calendar/index.tsx")),
   at("view:Files", () => import("./files/index.tsx")),
+  at("view:Maps", () => import("./maps/index.tsx")),
 ];
