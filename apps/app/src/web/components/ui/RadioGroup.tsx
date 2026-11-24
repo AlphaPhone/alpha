@@ -4,8 +4,16 @@ import { cn, focusRing } from "../../lib/cn.ts";
 
 export type RadioGroupProps = ComponentProps<typeof RadioGroupPrimitive.Root>;
 
-export function RadioGroup({ className, ...props }: RadioGroupProps) {
-  return <RadioGroupPrimitive.Root className={cn("grid gap-2", className)} {...props} />;
+export function RadioGroup({ className, disabled, onClick, ...props }: RadioGroupProps) {
+  return (
+    <RadioGroupPrimitive.Root
+      className={cn("grid gap-2", className)}
+      {...props}
+      aria-disabled={disabled || props["aria-disabled"]}
+      disabled={disabled}
+      onClick={disabled ? undefined : onClick}
+    />
+  );
 }
 
 export type RadioGroupItemProps = ComponentProps<typeof RadioGroupPrimitive.Item>;
