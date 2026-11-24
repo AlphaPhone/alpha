@@ -74,7 +74,7 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `foreground` | oklch(0 0 0) | oklch(1 0 0) |
 | `card` | oklch(0.98510365 0 0) | oklch(0.14957712 0 0) |
 | `card-foreground` | oklch(0 0 0) | oklch(1 0 0) |
-| `popover` | oklch(1 0 0) | oklch(0.19573496 0 0) |
+| `popover` | oklch(1 0 0) | oklch(0 0 0) |
 | `popover-foreground` | oklch(0 0 0) | oklch(1 0 0) |
 | `primary` | oklch(0.45201372 0.31321437 264.05202064) | oklch(0.70366126 0.15682550 277.95756294) |
 | `primary-foreground` | oklch(1 0 0) | oklch(0 0 0) |
