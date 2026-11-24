@@ -1,0 +1,14 @@
+{
+  "clients": [
+    {
+      "clientId": "ai.alphacompute.alphaphone",
+      "displayName": "Alpha",
+      "androidPackage": "ai.alphacompute.alphaphone",
+      "certFingerprints": [
+        "ED:BF:CA:CB:1D:A6:89:00:8B:F4:E7:D6:75:17:6C:30:2D:EC:F8:31:61:A8:77:EB:8B:1D:E4:FF:AE:04:45:ED"
+      ],
+      "signInReturn": "https://staging.eliza.app/alphaphone/auth/callback",
+      "billingReturn": "https://staging.eliza.app/alphaphone/billing/return"
+    }
+  ]
+}

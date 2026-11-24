@@ -1,4 +1,0 @@
-{
-  "production": {"api": "https://api.alphacompute.cc", "web": "https://cloud.alphacompute.cc", "services": "https://cloud.alphacompute.cc", "tenant": "alphacompute", "name": "Alpha Cloud", "entitlementAudience": "ai.alphacompute.alphaphone", "alphaCloud": true},
-  "staging": {"api": "https://api-staging.alphacompute.cc", "web": "https://cloud-staging.alphacompute.cc", "services": "https://cloud-staging.alphacompute.cc", "tenant": "alphacompute-staging", "name": "Alpha Cloud", "entitlementAudience": "ai.alphacompute.alphaphone", "alphaCloud": true}
-}

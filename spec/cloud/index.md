@@ -1,22 +1,15 @@
 # Cloud
 
-Alpha's cloud services are the upstream elizaOS cloud: its API Worker is
-re-exported from the pinned upstream, which specifies its own routes and
-storage. What Alpha owns is which deployment the app talks to, what the
-phone may ask of it, the small Worker in front of its web host, the session
-rules the phone keeps for anything that touches money, and how an operator
-brings a deployment up. This spec states the deployments and the one policy
-every build agrees on; its children state the rest.
+Alpha's cloud is eliza's: `@elizaos/cloud` at the pin, which specifies its
+own profile, routes, sign-in, device keys, entitlement, plans and billing
+(`.eliza/spec/cloud/`). What Alpha owns, and this spec states, is which
+deployment the app talks to in each environment, how Alpha's app is
+registered with it as a native client, what its asset links must say, how
+an operator brings a deployment up, and the gates a local cloud must pass.
+The profiles, the seed and the commands that check them are `apps/cloud`.
 
-- [Edge](./edge.md): the Worker in front of the web host, and the only paths it answers
-- [Routes](./routes.md): what the phone may ask of the cloud, and the pages it may open
-- [Transport](./transport.md): the gate every request of the page passes, and whose answers it hands back
-- [Sign-in](./signIn.md): the token exchange and acknowledgement, with the key kept in the phone's secure store
-- [Entitlement](./entitlement.md): the signed, short-lived statement of the owner's plan
-- [Billing session](./session.md): a session proven by an emailed code, held in memory for an hour at most
-- [Billing](./billing.md): changing or cancelling a plan, each change reviewed and then confirmed
-- [Provisioning](./provisioning.md): how an operator brings a deployment up, staging before production
-- [Local cloud](./local.md): the same cloud on a developer's computer, and its contract gates
+- [Local cloud](./local.md): eliza's own server on this computer, and the gates Alpha's contract passes on it
+- [Provisioning](./provisioning.md): the operator's commands, in order, each read back before the next
 
 ## Story: Know which cloud the app talks to
 
@@ -24,175 +17,108 @@ every build agrees on; its children state the rest.
 > my sign-in, my plan and my mail never go to a host the product did not
 > choose.
 
-### A deployment has a production and a staging environment, each with an API host, a web host, a services host, a tenant and an entitlement audience
+### A hosted environment's profile answers at its deployment's cloud and keeps its returns on its deployment's App Link host
 
-Two clouds exist: the one the app ships against today, and the product's
-own, which stays dormant until the cut-over. Every host is reached over a
-secure connection on the usual port.
+`@repo/deployment` names the cloud and the App Link host of each
+environment; the profile that environment's deployment names says the same
+API origin and has its web origin on that host. The local environment runs
+the staging profile on this computer, where the cloud's origin is known only
+once it listens.
 
 ```quint
-type Cloud = Shipped | Own
+type Hosts = { cloud: str, appLinkHost: str }
+type ProfileHosts = { api: str, webHost: str }
+
+pure def profileFits(deployment: Hosts, profile: ProfileHosts): bool =
+  profile.api == deployment.cloud and profile.webHost == deployment.appLinkHost
+```
+
+### A cut-over candidate names neither the cloud nor the App Link host it would replace
+
+The candidate is the product's own cloud, recorded and not used until the
+decision on where Alpha's cloud runs is taken.
+
+```quint
+pure def candidateApart(serving: Hosts, candidate: Hosts): bool =
+  candidate.cloud != serving.cloud and candidate.appLinkHost != serving.appLinkHost
+    and candidate.cloud != serving.appLinkHost and candidate.appLinkHost != serving.cloud
+```
+
+## Story: Register Alpha's app with the cloud
+
+> As the owner, I want the cloud to send my sign-in back only to Alpha's
+> own app, signed by Alpha's own key, so that no other app can take my
+> account's key.
+
+What a registration holds and how the cloud admits a client is eliza's
+(`spec/cloud/nativeClients/registry.md`, "Story: Admit only a registered
+native client"); applying it is eliza's `client apply`
+(`spec/cloud/nativeClients/registry.md`, "Story: Apply my app's
+registration from its reviewed file").
+
+### Alpha registers one client in each environment, under its own package and name
+
+```quint
 type Environment = Production | Staging
-type Row = { api: str, web: str, services: str, tenant: str, audience: str, own: bool }
+type ReturnUrl = { origin: str, path: str }
+type Registration = {
+  clientId: str, environment: Environment, displayName: str, androidPackage: str,
+  certFingerprints: List[str], signInReturn: ReturnUrl, billingReturn: ReturnUrl
+}
 
-pure def row(cloud: Cloud, environment: Environment): Row =
-  if (cloud == Shipped and environment == Production)
-    { api: "api.eliza.app", web: "eliza.app", services: "cloud.eliza.app", tenant: "elizacloud", audience: "eliza-alpha-phone", own: false }
-  else if (cloud == Shipped)
-    { api: "api-staging.eliza.app", web: "staging.eliza.app", services: "cloud-staging.eliza.app", tenant: "elizacloud-staging", audience: "eliza-alpha-phone", own: false }
-  else if (environment == Production)
-    { api: "api.alphacompute.ai", web: "cloud.alphacompute.ai", services: "cloud.alphacompute.ai", tenant: "alphacompute", audience: "ai.alphacompute.alphaphone", own: true }
-  else
-    { api: "api-staging.alphacompute.ai", web: "cloud-staging.alphacompute.ai", services: "cloud-staging.alphacompute.ai", tenant: "alphacompute-staging", audience: "ai.alphacompute.alphaphone", own: true }
+pure val alphaPackage = "ai.alphacompute.alphaphone"
+pure val alphaName = "Alpha"
 ```
 
-### The two environments of a cloud have different API hosts and tenants, and one entitlement audience
+### Production trusts only the release signer, and staging also the debug signer
+
+The release signer is the public digest of the key Alpha's distributed
+builds are signed with (`legacy/android/release-signer.json`). The debug
+signer is the digest of the Android host's debug keystore; it is added here
+when the Android area brings that keystore in, and until then staging trusts
+the release signer alone.
 
 ```quint
-pure def lawEnvironmentsAreApart(cloud: Cloud): bool =
-  val production = row(cloud, Production)
-  val staging = row(cloud, Staging)
-  production.api != staging.api and production.web != staging.web
-    and production.tenant != staging.tenant and production.audience == staging.audience
+pure val releaseSigner = "ED:BF:CA:CB:1D:A6:89:00:8B:F4:E7:D6:75:17:6C:30:2D:EC:F8:31:61:A8:77:EB:8B:1D:E4:FF:AE:04:45:ED"
+pure val debugSigners: List[str] = List()
+
+pure def signersOf(environment: Environment): List[str] =
+  if (environment == Staging) List(releaseSigner).concat(debugSigners) else List(releaseSigner)
 ```
 
-### The product's own cloud is marked on both its environments, and the shipped cloud on neither
+### The release signer is never a debug signer
+
+A debug keystore is in the repository; a release signed by it could be
+installed over a phone by anyone who holds the repository.
 
 ```quint
-pure def lawOwnIsMarkedOnBoth(cloud: Cloud, environment: Environment): bool =
-  row(cloud, environment).own == (cloud == Own)
+pure def lawTheReleaseSignerIsNoDebugSigner(environment: Environment): bool =
+  not(debugSigners.includes(releaseSigner)) and signersOf(environment).nthOr(0, "") == releaseSigner
 ```
 
-### The product's own cloud names no host or tenant of the cloud shipped today
+### Each return is on the environment's web origin, at the paths Alpha's App Links have always opened, and Alpha keeps no connect return
+
+The sign-in and billing returns are the paths phones installed before this
+rebuild already open (`/alphaphone/auth/callback`,
+`/alphaphone/billing/return`). A Google connection finished for Alpha shows
+eliza's own page as connected (`spec/cloud/returnPages.md`, "A Google
+connection finished for an enabled registration without a connect return
+shows ReturnToApp as connected, with no action").
 
 ```quint
-pure def lawOwnNamesNothingShipped(environment: Environment, other: Environment): bool =
-  val own = row(Own, environment)
-  val shipped = row(Shipped, other)
-  own.api != shipped.api and own.web != shipped.web and own.services != shipped.services
-    and own.api != shipped.web and own.web != shipped.api and own.tenant != shipped.tenant
+pure def registrationOf(environment: Environment, web: str): Registration = {
+  clientId: alphaPackage, environment: environment, displayName: alphaName, androidPackage: alphaPackage,
+  certFingerprints: signersOf(environment),
+  signInReturn: { origin: web, path: "/alphaphone/auth/callback" },
+  billingReturn: { origin: web, path: "/alphaphone/billing/return" }
+}
 ```
 
-## Story: Build every part of the app against one policy
-
-> As the product's maintainer, I want the page, the Android app and the
-> build to name the same cloud, and a build to stop when they do not, so
-> that no part of a phone signs in somewhere the rest does not.
-
-### The policy names the cloud distributed builds use; a development build may switch to the product's own cloud as a candidate
-
-The page's constants, the Android app's constants and the build's
-settings are each generated from the policy, and each names the cloud it
-was generated for. The switch selects the product's own cloud for a
-development, test or validation build only, while the product still ships
-against the other one.
+### An environment's asset links hold exactly one statement for Alpha's package, naming that environment's signers
 
 ```quint
-type Output = Page | Android | Settings
-type Deployment = { policy: Cloud, candidate: bool, page: Cloud, android: Cloud, settings: Cloud }
-type Effect = Built({ cloud: Cloud, distribution: bool })
-type Moved = { state: Deployment, out: List[Effect] }
+type Statement = { packageName: str, fingerprints: List[str] }
 
-pure val initial: Deployment = { policy: Shipped, candidate: false, page: Shipped, android: Shipped, settings: Shipped }
-
-pure def selected(s: Deployment): Cloud = if (s.candidate) Own else s.policy
-```
-
-### The switch is turned on only while the product ships against the other cloud
-
-```quint
-pure def canSwitchOn(s: Deployment): bool = s.policy == Shipped and not(s.candidate)
-
-pure def switchOn(s: Deployment): Deployment = { ...s, candidate: true }
-
-pure def canSwitchOff(s: Deployment): bool = s.candidate
-
-pure def switchOff(s: Deployment): Deployment = { ...s, candidate: false }
-```
-
-### Generating writes every output from the policy as it is now
-
-```quint
-pure def generate(s: Deployment): Deployment =
-  val cloud = selected(s)
-  { ...s, page: cloud, android: cloud, settings: cloud }
-```
-
-### An output can be changed by hand, or left behind when the policy moves
-
-```quint
-pure def edit(s: Deployment, output: Output, cloud: Cloud): Deployment =
-  if (output == Page) { ...s, page: cloud }
-  else if (output == Android) { ...s, android: cloud }
-  else { ...s, settings: cloud }
-```
-
-### The check passes only when every output names the cloud the policy selects
-
-```quint
-pure def agrees(s: Deployment): bool =
-  val cloud = selected(s)
-  s.page == cloud and s.android == cloud and s.settings == cloud
-```
-
-### A build runs only when the check passes, and a distributed build never on a candidate
-
-A candidate build has its own credential namespace, so a phone that runs it
-signs in afresh, and it cannot be distributed by accident.
-
-```quint
-pure def canBuild(s: Deployment, distribution: bool): bool =
-  agrees(s) and (distribution implies not(s.candidate))
-
-pure def build(s: Deployment, distribution: bool): Moved =
-  { state: s, out: List(Built({ cloud: selected(s), distribution: distribution })) }
-
-pure def stepABuildIsAdmittedByTheCheck(before: Deployment, after: Deployment, out: List[Effect]): bool =
-  out.every(e => match e {
-    | Built(b) => agrees(before) and b.cloud == selected(before) and (b.distribution implies not(before.candidate))
-  })
-```
-
-### The cut-over moves distributed builds to the product's own cloud only once it answers in both environments and the release carries the credential migration
-
-Phones then sign in again: accounts, plans and Google grants do not move
-by themselves. Whether the cloud answers is what [Provisioning](./provisioning.md)
-reports after its smoke test in staging and production.
-
-```quint
-pure def canCutOver(s: Deployment, live: bool, migration: bool): bool =
-  s.policy == Shipped and not(s.candidate) and live and migration
-
-pure def cutOver(s: Deployment, live: bool, migration: bool): Deployment = { ...s, policy: Own }
-```
-
-### A candidate build exists only before the cut-over
-
-```quint
-pure def alwaysTheSwitchIsForTheShippedCloud(s: Deployment): bool = s.candidate implies s.policy == Shipped
-```
-
-### The policy changes only at the cut-over, and never back
-
-```quint
-pure def stepThePolicyMovesOnlyAtTheCutOver(before: Deployment, via: str, after: Deployment): bool =
-  (after.policy != before.policy implies via == "cutOver") and (before.policy == Own implies after.policy == Own)
-```
-
-### An output can disagree with the policy, and the check then refuses every build
-
-```quint
-pure def sometimesAnOutputIsStale(s: Deployment): bool = not(agrees(s))
-```
-
-### A development build can run against the product's own cloud as a candidate
-
-```quint
-pure def sometimesRehearsing(s: Deployment): bool = s.candidate and agrees(s)
-```
-
-### The product can cut over to its own cloud
-
-```quint
-pure def sometimesCutOver(s: Deployment): bool = s.policy == Own and agrees(s)
+pure def assetLinksNameAlpha(statements: List[Statement], environment: Environment): bool =
+  statements.select(s => s.packageName == alphaPackage) == List({ packageName: alphaPackage, fingerprints: signersOf(environment) })
 ```

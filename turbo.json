@@ -317,7 +317,10 @@
         "@repo/agent#test",
         "@repo/deployment#build",
         "@repo/deployment#typecheck",
-        "@repo/deployment#test"
+        "@repo/deployment#test",
+        "@repo/cloud#build",
+        "@repo/cloud#typecheck",
+        "@repo/cloud#test"
       ],
       "cache": false
     },
@@ -328,6 +331,7 @@
         "@repo/eliza-harness#typecheck",
         "@repo/agent#typecheck",
         "@repo/deployment#typecheck",
+        "@repo/cloud#typecheck",
         "vibestack-studio#typecheck"
       ],
       "inputs": [

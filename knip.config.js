@@ -96,6 +96,16 @@ export default {
         "test/**/*.{ts,vibe,vibex}"
       ]
     },
+    "apps/cloud": {
+      "entry": [
+        "src/main.vibe",
+        "test/**/*.test.{ts,vibe}"
+      ],
+      "project": [
+        "src/**/*.{ts,vibe,vibex}",
+        "test/**/*.{ts,vibe,vibex}"
+      ]
+    },
     "vibestack/studio": {
       "entry": [
         "src/main.vibe",
