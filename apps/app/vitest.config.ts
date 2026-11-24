@@ -1,3 +1,4 @@
+import { registerHooks } from "node:module";
 import tailwindcss from "@tailwindcss/vite";
 import { defaultClientConditions, defaultExternalConditions, defaultServerConditions, type Plugin } from "vite";
 import { project } from "../../vendor/eliza/vibestack/testing/vitest.ts";
@@ -19,5 +20,15 @@ const elizaSource: Plugin = {
     },
   }),
 };
+
+/**
+ * The generated schema and contract tests load each module in this Node process (generate.ts imports it through
+ * `vibelang/register`), outside Vite, so Node's own resolution takes the same condition: an upstream module then loads
+ * from its source as in the tests, instead of from a `dist/` that may not be built.
+ */
+registerHooks({
+  resolve: (specifier, context, next) =>
+    next(specifier, context.conditions.includes("eliza-source") ? context : { ...context, conditions: ["eliza-source", ...context.conditions] }),
+});
 
 export default project({ root: import.meta.dirname, plugins: [elizaSource, tailwindcss()] });
