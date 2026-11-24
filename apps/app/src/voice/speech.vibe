@@ -28,11 +28,10 @@ export interface ReadingBinding {
   readonly expiresAt: number
 }
 
-/** What a Cloud warm-up may go under: Alpha in front, a network Android has not confirmed down, and no turn in flight. */
+/** What a Cloud warm-up may go under: Alpha in front and a network Android has not confirmed down. */
 export interface WarmFacts {
   readonly inFront: boolean
   readonly online: boolean
-  readonly idle: boolean
 }
 
 /** How a passage is spoken: queued behind the one playing, and told when its first audio starts. */
@@ -69,7 +68,7 @@ export service Speech {
   entry(recorderOpen: boolean): VoiceEntry!!
   /** Prime the phone's output after a sent turn; advisory. */
   warmDevice(): void!!
-  /** Warm Cloud speech for `connection`, at most once a minute and only as `facts` allow; advisory, so a failure is ignored. */
+  /** Warm Cloud speech for `connection`, at most once a minute and only as `facts` allow; the request runs on its own fiber, so the caller never waits on it, and its failure is ignored. */
   warmCloud(connection: number, facts: WarmFacts): void!!
   /** Mute or unmute only the speech output; false when the phone cannot. */
   setMuted(muted: boolean): boolean!!
@@ -337,8 +336,8 @@ export const speechService = Layer.effect(Speech, effect {
     effect warmDevice() { native.invoke("AlphaVoiceCloud", "warmSpeechOutput", {}) catch () => undefined },
     effect warmCloud(connection: number, facts: WarmFacts) {
       const now = try Clock.currentTimeMillis
-      const sent = held.send({ type: "warmCloud", connection, now, inFront: facts.inFront, online: facts.online, idle: facts.idle }) catch () => undefined
-      if (sent !== undefined) timeout(resident.json("POST", "/api/cloud/warm", {}), WARM_LIMIT) catch () => undefined
+      const sent = held.send({ type: "warmCloud", connection, now, inFront: facts.inFront, online: facts.online }) catch () => undefined
+      if (sent !== undefined) fork.detached effect { timeout(resident.json("POST", "/api/cloud/warm", {}), WARM_LIMIT) catch () => undefined }
     },
     effect setMuted(muted: boolean) {
       const through = stream

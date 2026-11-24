@@ -1,4 +1,4 @@
-// spec/voice/speech.md, "A sent turn warms the phone's output, and Cloud is warmed at most once a minute for each connection, only in front, online and between turns"
+// spec/voice/speech.md, "A sent turn warms the phone's output, and Cloud is warmed at most once a minute for each connection, only in front and online"
 import type { Net } from "../../gen/platform__lifecycle.ts"
 import { AppLifecycle } from "../platform/lifecycle.vibe"
 import { ResidentControl } from "../platform/resident-control.vibe"
@@ -8,8 +8,9 @@ import { Speech } from "./speech.vibe"
 
 /**
  * Warms Cloud for the resident's connection when Alpha comes to the front, the assistant sheet opens, Talk starts, a connection
- * becomes active or Android's network comes back. Each source's first value is where it starts, not a change; the warm-up shows
- * nothing, and the speech machine decides whether it goes.
+ * becomes active or Android's network comes back. The first foreground, network and Talk values are where those sources start,
+ * not changes; a connection already active when this starts warms once. The warm-up shows nothing, its request does not hold
+ * up the follower that asked for it, and the speech machine decides whether it goes.
  */
 export const cloudWarmUpLive = Layer.effectDiscard(effect {
   const speech = try Speech
@@ -23,7 +24,7 @@ export const cloudWarmUpLive = Layer.effectDiscard(effect {
     if (session === undefined) return
     const front = try foreground.get()
     const app = try lifecycle.get()
-    try speech.warmCloud(session.generation, { inFront: front.visible, online: app.network !== "NetOffline", idle: app.inFlight === 0 })
+    try speech.warmCloud(session.generation, { inFront: front.visible, online: app.network !== "NetOffline" })
   }
 
   fork.scoped (effect {

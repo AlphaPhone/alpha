@@ -2,7 +2,7 @@
 import { assert, it } from "@effect/vitest"
 import { Build } from "../../src/platform/build.vibe"
 import { Cloud, CloudUnavailable } from "../../src/platform/cloud.vibe"
-import { lifecycleOver, AppLifecycle } from "../../src/platform/lifecycle.vibe"
+import { lifecycleOver } from "../../src/platform/lifecycle.vibe"
 import { Native, NativeFailed } from "../../src/platform/native.vibe"
 import { Resident } from "../../src/platform/resident.vibe"
 import { ResidentControl } from "../../src/platform/resident-control.vibe"
@@ -280,7 +280,7 @@ it.effect(`Never hear two things at once, or anything after I stopped it (spec/v
 })
 
 it.effect(`Hear the reply start at once (spec/voice/speech.md, "Story: Hear the reply start at once")`, () => effect {
-  // spec/voice/speech.md, "A sent turn warms the phone's output, and Cloud is warmed at most once a minute for each connection, only in front, online and between turns"
+  // spec/voice/speech.md, "A sent turn warms the phone's output, and Cloud is warmed at most once a minute for each connection, only in front and online"
   const calls: Calls = []
   const events = try PubSub.unbounded<{ readonly name: string; readonly event: unknown }>()
   const connection = try SubscriptionRef.make<ResidentConnection>({ ...residentInitial, phase: "Connected", generation: 1 })
@@ -308,7 +308,6 @@ it.effect(`Hear the reply start at once (spec/voice/speech.md, "Story: Hear the 
     try settle
   }
   provide Layer.provideMerge(cloudWarmUpLive, app) {
-    const lifecycle = try AppLifecycle
     const conversation = try VoiceConversation
     const seen: number[] = []
     try settle
@@ -328,21 +327,15 @@ it.effect(`Hear the reply start at once (spec/voice/speech.md, "Story: Hear the 
     seen.push(warms())
     try network(true)
     seen.push(warms())
-    // Back in front while a turn is in flight: nothing.
-    try TestClock.adjust("60 seconds")
-    try lifecycle.turnSent()
-    try see({ visible: false })
-    try see({ visible: true })
-    seen.push(warms())
-    try lifecycle.turnSettled()
     // Talk starting warms; a new connection warms at once.
+    try TestClock.adjust("60 seconds")
     try conversation.start({ admitted: true, callActive: false, conversationId: "c1", roomId: "c1", chatCurrent: () => true })
     try settle
     seen.push(warms())
     try SubscriptionRef.update(connection, (now) => ({ ...now, generation: 2 }))
     try settle
     seen.push(warms())
-    try Effect.try(() => assert.deepStrictEqual(seen, [1, 1, 2, 2, 3, 3, 4, 5]))
+    try Effect.try(() => assert.deepStrictEqual(seen, [1, 1, 2, 2, 3, 4, 5]))
   }
 })
 
