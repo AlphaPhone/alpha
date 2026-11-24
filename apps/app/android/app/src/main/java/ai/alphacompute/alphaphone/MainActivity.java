@@ -15,6 +15,7 @@ public class MainActivity extends BridgeActivity {
  private static final String HOME = "window.dispatchEvent(new Event('launcher-home'))";
 
  @Override public void onCreate(Bundle state) {
+  if (isHome(getIntent())) SmsNoticeOpenRequest.clear();
   SplashScreen.installSplashScreen(this);
   registerPlugin(ai.eliza.os.agent.AgentPlugin.class);
   registerPlugin(ai.eliza.plugins.signin.ElizaSignInPlugin.class);
@@ -73,7 +74,11 @@ public class MainActivity extends BridgeActivity {
  }
 
  @Override protected void onNewIntent(Intent intent) {
+  boolean home = isHome(intent);
+  if (home) SmsNoticeOpenRequest.clear();
   super.onNewIntent(intent);
-  if (getBridge() != null && intent != null && intent.hasCategory(Intent.CATEGORY_HOME)) getBridge().getWebView().evaluateJavascript(HOME, null);
+  if (getBridge() != null && home) getBridge().getWebView().evaluateJavascript(HOME, null);
  }
+
+ private static boolean isHome(Intent intent) { return intent != null && intent.hasCategory(Intent.CATEGORY_HOME); }
 }

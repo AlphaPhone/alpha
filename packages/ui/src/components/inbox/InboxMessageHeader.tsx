@@ -1,4 +1,6 @@
+import { ChevronDown } from "lucide-react";
 import { Avatar } from "../Avatar.tsx";
+import { focusRing } from "../../lib/cn.ts";
 
 export type InboxMessageHeaderProps = {
   /** Who sent it, as the sender wrote the name. */
@@ -23,30 +25,26 @@ export type InboxMessageHeaderProps = {
 export function InboxMessageHeader({ sender, address, to, cc, replyTo, date }: InboxMessageHeaderProps) {
   return (
     <div className="flex items-start gap-3">
-      <Avatar name={sender} />
-      <dl className="grid min-w-0 flex-1 grid-cols-[auto_1fr] gap-x-3 text-sm">
-        <dt className="sr-only">From</dt>
-        <dd className="col-span-2 flex items-baseline gap-2">
-          <span className="min-w-0 flex-1 truncate text-base font-semibold">{sender}</span>
-          <span className="shrink-0 text-xs text-muted-foreground">{date}</span>
-        </dd>
-        <dt className="sr-only">Address</dt>
-        <dd className="col-span-2 truncate text-muted-foreground">{address}</dd>
-        <dt className="text-muted-foreground">To</dt>
-        <dd className="min-w-0 break-words">{to}</dd>
-        {cc ? (
-          <>
-            <dt className="text-muted-foreground">Cc</dt>
-            <dd className="min-w-0 break-words">{cc}</dd>
-          </>
-        ) : null}
-        {replyTo ? (
-          <>
-            <dt className="text-muted-foreground">Reply-To</dt>
-            <dd className="min-w-0 break-words">{replyTo}</dd>
-          </>
-        ) : null}
-      </dl>
+      <Avatar name={sender} className="size-11 shrink-0" />
+      <details className="group min-w-0 flex-1">
+        <summary aria-label="Show message details" className={`${focusRing} flex min-h-11 cursor-pointer list-none flex-col justify-center rounded-sm`}>
+          <span className="flex min-w-0 items-center gap-1 text-base font-semibold">
+            <span className="truncate">{sender || "Unknown sender"}</span>
+            <ChevronDown aria-hidden className="size-4 shrink-0 text-muted-foreground group-open:rotate-180" />
+          </span>
+          <span className="truncate text-xs text-muted-foreground">{to ? `To ${to}` : "Undisclosed recipients"}{date ? ` · ${date}` : ""}</span>
+        </summary>
+        <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 rounded-md bg-muted p-3 text-sm [overflow-wrap:anywhere]">
+          <dt className="text-muted-foreground">From</dt>
+          <dd>{address && address !== sender ? `${sender} <${address}>` : sender || "Unknown sender"}</dd>
+          <dt className="text-muted-foreground">To</dt>
+          <dd>{to || "Undisclosed recipients"}</dd>
+          {cc ? <><dt className="text-muted-foreground">Cc</dt><dd>{cc}</dd></> : null}
+          {replyTo ? <><dt className="text-muted-foreground">Reply-To</dt><dd>{replyTo}</dd></> : null}
+          <dt className="text-muted-foreground">Date</dt>
+          <dd>{date}</dd>
+        </dl>
+      </details>
     </div>
   );
 }
