@@ -10,13 +10,13 @@ const none = () => undefined;
 export const meta: ComponentMeta<WorkflowsScreenViewProps> = {
   args: {
     place: atList, list: listedWithWorkflow, waiting: [], clockDraft: clockDraftClosed, sheet: emptySheet, can: allowedGates, onPhone: true, zone: "Europe/Paris",
-    draftText: "", textKept: true,
+    draftText: "", textKept: true, notifications: true, background: false,
     onBack: none, onAdd: none, onCloseSheet: none, onOpenRow: none, onAllowAnother: none, onToggleRemoved: none, onAskActive: none, onConfirmActive: none,
     onCancelActive: none, onTapStep: none, onOpenDraft: none, onOpenPrompt: none, onOpenDigests: none, onOpenSources: none, onOpenClockDraft: none, onSavePrompt: none,
     rowActions: { onSwitch: none, onRun: none, onVerb: none, onSnooze: none, onEdit: none, onDelete: none, onEditPrompt: none },
     runActions: { onReview: none, onConfirm: none, onReconcile: none, onReviewResend: none, onResend: none, onCancel: none, onSelect: none, onRunMissedNow: none },
     lifecycleActions: { onReview: none, onConfirm: none, onReviewResend: none, onResend: none, onBack: none },
-    digestActions: { onToggle: none, onReviewRunNow: none, onRunNow: none, onCloseRunNow: none, onRetry: none, onDiscard: none, onOpenResult: none },
+    digestActions: { onToggle: none, onReviewRunNow: none, onRunNow: none, onCloseRunNow: none, onRetry: none, onDiscard: none, onOpenResult: none, onNotifications: none, onBackground: none },
     clockActions: { onPrepare: none, onApprove: none, onCancel: none },
     draftActions: { onTextChange: none, onDescribe: none, onSave: none, onRecover: none, onResend: none, onDiscard: none },
     sourceActions: {

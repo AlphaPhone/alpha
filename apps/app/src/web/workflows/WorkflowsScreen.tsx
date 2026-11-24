@@ -1,10 +1,11 @@
-// spec/workflows/index.md; spec/workflows/place.md, "Story: Move inside Workflows and come back with Back"; spec/workflows/automations.md, "Story: See all my automations even when one source fails"; spec/workflows/runs.md, "A notice opens exactly the run it names"; spec/workflows/clockDraft.md, "Story: Set an alarm a workflow suggests, from Workflows"; spec/workflows/digestSources.md, "Story: Renew my phone source before its week ends"; spec/workflows/digestSources.md, "Removing a grant Account names needs only Alpha in front, and clears this session's grant only once confirmed"; spec/workflows/authoring.md, "The unsent description is kept for its owner across closing and reopening"; spec/workflows/authoring.md, "The previous version's draft comes in once, only while none is kept, and its slot clears only after the kept draft reads back"
+// spec/workflows/index.md; spec/workflows/place.md, "Story: Move inside Workflows and come back with Back"; spec/workflows/automations.md, "Story: See all my automations even when one source fails"; spec/workflows/runs.md, "A notice opens exactly the run it names"; spec/workflows/clockDraft.md, "Story: Set an alarm a workflow suggests, from Workflows"; spec/workflows/digestSources.md, "Story: Renew my phone source before its week ends"; spec/workflows/digestSources.md, "Removing a grant Account names needs only Alpha in front, and clears this session's grant only once confirmed"; spec/workflows/authoring.md, "The unsent description is kept for its owner across closing and reopening"; spec/workflows/hostedResults.md, "Background delivery is configured only on Android, by one attempt that a pause retires"; spec/workflows/authoring.md, "The previous version's draft comes in once, only while none is kept, and its slot clears only after the kept draft reads back"
 import type { MissedRunNow } from "@elizaos/plugin-workflow/digests";
 import { Effect } from "effect";
 import { useState } from "react";
 import { useMachine as useAutomations } from "../../../gen/workflows__automations.react.ts";
 import { useMachine as useAuthoring } from "../../../gen/workflows__authoring.react.ts";
 import { useMachine as useDigests } from "../../../gen/workflows__digests.react.ts";
+import { useMachine as useResults } from "../../../gen/workflows__hostedResults.react.ts";
 import { useMachine as useSources } from "../../../gen/workflows__digestSources.react.ts";
 import { useMachine as useLifecycle } from "../../../gen/workflows__lifecycle.react.ts";
 import { useMachine as useNotices } from "../../../gen/workflows__notices.react.ts";
@@ -18,6 +19,7 @@ import { Automations, type PromptInput, type PromptRunLine, type Report } from "
 import { WorkflowClockDraft } from "../../workflows/clock-draft.vibe";
 import { WorkflowDefinitions, type ChangeOutcome, type Described, type ScheduleNote } from "../../workflows/definitions.vibe";
 import { Digests } from "../../workflows/digests.vibe";
+import { HostedResults } from "../../workflows/results.vibe";
 import { PhoneSteps } from "../../workflows/notices.vibe";
 import { WorkflowsPlace } from "../../workflows/place.vibe";
 import type { AlarmRequest } from "../../workflows/ports.vibe";
@@ -47,6 +49,7 @@ export function WorkflowsScreen({ onClose }: WorkflowsScreenProps) {
   const authoring = useAuthoring(runtime);
   const steps = useSteps(runtime);
   const digests = useDigests(runtime);
+  const results = useResults(runtime);
   const sources = useSources(runtime);
   const notices = useNotices(runtime);
   const clockDraft = useClockDraft(runtime);
@@ -213,6 +216,8 @@ export function WorkflowsScreen({ onClose }: WorkflowsScreenProps) {
         onResend: () => void perform(WorkflowDefinitions.use((d) => d.resend())).then(setChange),
         onBack: () => void perform(WorkflowDefinitions.use((d) => d.back())),
       }}
+      notifications={results.state?.enabled ?? true}
+      {...(onPhone ? { background: results.state?.background === "BackgroundOn" || results.state?.background === "Beginning" || results.state?.background === "Configuring" } : {})}
       digestActions={{
         onToggle: (loop, on) => void perform(Digests.use((d) => d.toggle(loop.id, on))),
         onReviewRunNow: (result) => void perform(Digests.use((d) => d.runNowOffer(result.runId))).then((offer) => {
@@ -224,6 +229,8 @@ export function WorkflowsScreen({ onClose }: WorkflowsScreenProps) {
         onRetry: () => void perform(Digests.use((d) => d.retry())),
         onDiscard: () => void perform(Digests.use((d) => d.discard())),
         onOpenResult: (result) => void at((p) => p.show("DigestsView", where.target === result.runId ? "" : result.runId)),
+        onNotifications: (on) => void perform(HostedResults.use((h) => h.setNotifications(on))),
+        onBackground: (on) => void perform(HostedResults.use((h) => h.background(on))),
       }}
       // spec/workflows/authoring.md: the sheet opens on the draft this phone keeps, the previous version's taken in once.
       onOpenDraft={() => void perform(WorkflowDefinitions.use((d) => Effect.all([d.keptText(), d.restore()]))).then(([text, kept]) => {

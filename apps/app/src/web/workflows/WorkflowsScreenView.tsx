@@ -132,7 +132,11 @@ export interface WorkflowsScreenViewProps {
   onTapStep: PhoneStepReviewProps["onTap"];
   runActions: Pick<RunPanelProps, "onReview" | "onConfirm" | "onReconcile" | "onReviewResend" | "onResend" | "onCancel" | "onSelect" | "onRunMissedNow">;
   lifecycleActions: Pick<LifecycleControlsProps, "onReview" | "onConfirm" | "onReviewResend" | "onResend" | "onBack">;
-  digestActions: Pick<DigestPanelProps, "onToggle" | "onReviewRunNow" | "onRunNow" | "onCloseRunNow" | "onRetry" | "onDiscard" | "onOpenResult">;
+  /** Whether finished digests post a notice. */
+  notifications: boolean;
+  /** Whether background checks are on or being configured; undefined in the browser build, which has none. */
+  background?: boolean;
+  digestActions: Pick<DigestPanelProps, "onToggle" | "onReviewRunNow" | "onRunNow" | "onCloseRunNow" | "onRetry" | "onDiscard" | "onOpenResult" | "onNotifications" | "onBackground">;
   onOpenDraft: () => void;
   onOpenPrompt: () => void;
   onOpenDigests: () => void;
@@ -153,7 +157,7 @@ export function WorkflowsScreenView({
   place: where, list, waiting, runs, lifecycle, steps, digests, sources, authoring, clockDraft, sheet, can, onPhone, zone, runOutput, report, history, removedRows,
   activation, activeOutcome, runOutcome, change, runNowReview, promptEditing, draftText, textKept, described, note, clockOutcome, calendars, sourceOutcome,
   onBack, onAdd, onCloseSheet, onOpenRow, onAllowAnother, onToggleRemoved, rowActions, onAskActive, onConfirmActive, onCancelActive, onTapStep, runActions,
-  lifecycleActions, digestActions, onOpenDraft, onOpenPrompt, onOpenDigests, onOpenSources, onOpenClockDraft, clockActions, onSavePrompt, draftActions, sourceActions,
+  lifecycleActions, notifications, background, digestActions, onOpenDraft, onOpenPrompt, onOpenDigests, onOpenSources, onOpenClockDraft, clockActions, onSavePrompt, draftActions, sourceActions,
 }: WorkflowsScreenViewProps) {
   const overlay = where.overlay;
   const workflowRow = list?.rows.find((r) => r.kind === "WorkflowRow" && r.target === where.target);
@@ -236,6 +240,7 @@ export function WorkflowsScreenView({
       {where.view === "DigestsView" && digests !== undefined && (
         <DigestPanel digests={digests} deviceZone={zone} {...(where.target === "" ? {} : { opened: where.target })}
           {...(overlay === "RunNowOverlay" && runNowReview !== undefined ? { runNowReview } : {})}
+          notifications={notifications} {...(background === undefined ? {} : { background })}
           can={can.digests} {...digestActions} />
       )}
 

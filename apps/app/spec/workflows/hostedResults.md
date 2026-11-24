@@ -72,6 +72,8 @@ pure def sometimesSuperseded(h: HostedResults): bool = h.notices.some(n => n.pha
 
 ### Turning notifications off or on changes what is posted next, never a notice already decided
 
+The digest panel offers this as its Notifications switch, on while notifications are on.
+
 ```quint
 pure def canSetNotifications(h: HostedResults, on: bool): bool = on != h.enabled
 pure def setNotifications(h: HostedResults, on: bool): HostedResults = { ...h, enabled: on }
@@ -159,7 +161,10 @@ pure def sometimesComposed(h: HostedResults): bool = h.composed
 
 ### Background delivery is configured only on Android, by one attempt that a pause retires
 
-A cancelled reservation is retired before any configuration is admitted.
+A cancelled reservation is retired before any configuration is admitted. On Android the digest
+panel offers this as its Background checks switch, on while delivery is being configured or is on;
+turning it on begins background delivery and turning it off pauses it. The browser build has no such
+switch.
 
 ```quint
 pure def canStartBackground(h: HostedResults): bool = h.owner != "" and (h.background == BackgroundIdle or h.background == BackgroundOff) and h.begins < 3

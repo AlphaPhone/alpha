@@ -1,4 +1,4 @@
-// spec/workflows/digests.md, "Story: See my digests and the newest brief, read only for my account"; spec/workflows/digests.md, "Story: Change a digest once, even when the answer is lost"; spec/workflows/digests.md, "Story: Read a digest's state plainly"; spec/workflows/hostedResults.md, "A result shown in the panel withdraws its notice, and the panel's scope posts silently"
+// spec/workflows/digests.md, "Story: See my digests and the newest brief, read only for my account"; spec/workflows/hostedResults.md, "Turning notifications off or on changes what is posted next, never a notice already decided"; spec/workflows/hostedResults.md, "Background delivery is configured only on Android, by one attempt that a pause retires"; spec/workflows/digests.md, "Story: Change a digest once, even when the answer is lost"; spec/workflows/digests.md, "Story: Read a digest's state plainly"; spec/workflows/hostedResults.md, "A result shown in the panel withdraws its notice, and the panel's scope posts silently"
 import type { MissedRunNow } from "@elizaos/plugin-workflow/digests";
 import { Newspaper } from "lucide-react";
 import { useState } from "react";
@@ -24,6 +24,12 @@ export interface DigestPanelProps {
   onRetry: () => void;
   onDiscard: () => void;
   onOpenResult: (result: ResultRow) => void;
+  /** Whether result notifications are on. */
+  notifications: boolean;
+  /** Whether background checks are on or being configured; undefined in the browser build, which has none. */
+  background?: boolean;
+  onNotifications: (on: boolean) => void;
+  onBackground: (on: boolean) => void;
 }
 
 const notRun = { missed: occurredWords.Missed, overlap: occurredWords.Overlapped, unavailable: occurredWords.SourceUnavailable } as Record<string, string>;
@@ -33,7 +39,10 @@ const notRun = { missed: occurredWords.Missed, overlap: occurredWords.Overlapped
  * @model spec/workflows/digests.md
  * @design design.md
  */
-export function DigestPanel({ digests, deviceZone, can, opened, runNowReview, onToggle, onReviewRunNow, onRunNow, onCloseRunNow, onRetry, onDiscard, onOpenResult }: DigestPanelProps) {
+export function DigestPanel({
+  digests, deviceZone, can, opened, runNowReview, onToggle, onReviewRunNow, onRunNow, onCloseRunNow, onRetry, onDiscard, onOpenResult,
+  notifications, background, onNotifications, onBackground,
+}: DigestPanelProps) {
   const [toggle, setToggle] = useState<{ loop: LoopRow; on: boolean } | undefined>(undefined);
   const notice = digestNotices[digests.notice];
   return (
@@ -65,6 +74,18 @@ export function DigestPanel({ digests, deviceZone, can, opened, runNowReview, on
             </li>
           );
         })}
+      </ul>
+      <ul aria-label="Digest delivery" className="flex flex-col">
+        <li className="flex items-center gap-2 pr-4">
+          <ListRow className="flex-1" title="Notifications" detail={notifications ? "A finished digest posts a notice." : "Finished digests post no notice."} />
+          <Switch aria-label="Notifications" checked={notifications} className="min-h-12 min-w-12" onCheckedChange={onNotifications} />
+        </li>
+        {background !== undefined && (
+          <li className="flex items-center gap-2 pr-4">
+            <ListRow className="flex-1" title="Background checks" detail={background ? "Your phone fetches results while Alpha is closed." : "Results arrive when you open Alpha."} />
+            <Switch aria-label="Background checks" checked={background} className="min-h-12 min-w-12" onCheckedChange={onBackground} />
+          </li>
+        )}
       </ul>
       <ol aria-label="Digest results" className="flex flex-col">
         {digests.results.map((result) => (
