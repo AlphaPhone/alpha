@@ -8,11 +8,12 @@ import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { Time } from "../runtime/time.vibe"
-import { type Job, answer, contained, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, hearing, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import type { Event as DraftEvent } from "../../gen/app__inbox__drafts.effect.vibe"
 import { Letters } from "./composer.vibe"
 import { Mail, operate, relabel } from "./gmail.vibe"
+import { ownerChanges } from "./mailbox.vibe"
 
 const labels = { Archive: "archive", Trash: "trash", Unarchive: "unarchive", Untrash: "untrash" } as const
 
@@ -49,7 +50,7 @@ effect function drafted(attempt: number, kind: Kind, account: number, draft: num
   const letters = try Letters
   const words = letters.words(draft)
   const copy = letters.copy(gmail)
-  if (kind !== "SaveDraft" && copy === undefined) return { type: "answered", attempt, done: false, matches: true, gmail: 0 }
+  if (kind !== "SaveDraft" && copy?.account !== account) return { type: "answered", attempt, done: false, matches: true, gmail: 0 }
   const ended = kind === "DeleteDraft"
     ? try operate(attempt, account, { kind: "draft-delete", draftId: copy?.id ?? "", expectedDigest: copy?.digest ?? "", confirmPermanentDelete: true })
     : try operate(attempt, account, {
@@ -60,7 +61,7 @@ effect function drafted(attempt: number, kind: Kind, account: number, draft: num
     })
   const id = ended.result?.["draftId"]
   const digest = ended.result?.["providerDigest"]
-  const saved = ended.done && kind !== "DeleteDraft" && typeof id === "string" && typeof digest === "string" ? letters.copied(id, digest) : 0
+  const saved = ended.done && kind !== "DeleteDraft" && typeof id === "string" && typeof digest === "string" ? letters.copied(account, id, digest) : 0
   return { type: "answered", attempt, done: ended.done && (kind === "DeleteDraft" || saved !== 0), matches: ended.known, gmail: saved }
 }
 
@@ -131,16 +132,15 @@ const told = started(effect {
   const operations = try Sending.Machine
   const list = try Inbox.Machine
   const facts = Stream.zipLatest(list.changes, operations.changes) |> Stream.map(%, ([mailbox, held]) => ({
-    access: accessOf(mailbox, held.account), revision: mailbox.revision, signedIn: mailbox.signedIn, review: held.review.showing && !Sending.ofDraft(held.kind),
+    access: accessOf(mailbox, held.account), revision: mailbox.revision, review: held.review.showing && !Sending.ofDraft(held.kind),
   }))
-  let signedIn: boolean | undefined
   try Stream.runForEach(Stream.changesWith(facts, (a, b) => JSON.stringify(a) === JSON.stringify(b)), effect (fact) => {
     try contained(operations.send({ type: "accessChanged", access: fact.access }, "World"), "the grant of the change")
     if (fact.review) try ignore(operations.send({ type: "outdated", revision: fact.revision }, "World"))
-    if (signedIn !== undefined && signedIn !== fact.signedIn) try contained(operations.send({ type: "sessionChanged" }, "World"), "the cloud session")
-    signedIn = fact.signedIn
   })
 }, "following the list")
 
+const sessions = hearing(ownerChanges, Sending.Machine, (): Event => ({ type: "sessionChanged" }), "World")
+
 /** Archive, Trash and their restores: kept across restarts, held for the undo window, and sent through the owner's cloud. */
-export const operations = together(reacting(Sending, { keep: 1, open: [{ type: "restart" }, "World"], carry }), released, dispatched, told)
+export const operations = together(reacting(Sending, { keep: 1, open: [{ type: "restart" }, "World"], carry }), released, dispatched, told, sessions)

@@ -15,26 +15,25 @@ import { scene } from "./fakes/scene.ts";
 underAct();
 afterEach(closeAll);
 
-/** The open button of each message row of the list, by its subject. */
-const opens = () => [...document.querySelectorAll("li")].map((row) => [...row.querySelectorAll("button")].find((found) => !found.hasAttribute("aria-pressed") && found.children.length === 3)).filter((found) => found !== undefined);
-const rows = () => opens().map((found) => found.children[1]?.textContent);
+const opens = () => [...document.querySelectorAll<HTMLButtonElement>("ul[aria-label='Email messages'] button")];
+const subjectOf = (button: HTMLButtonElement) => button.querySelector("[data-inbox-subject]")?.textContent;
+const rows = () => opens().map(subjectOf);
 const row = (subject: string) => drawn(() => {
-  const found = opens().find((open) => open.children[1]?.textContent === subject);
+  const found = opens().find((open) => subjectOf(open) === subject);
   if (!found) throw new Error(`no message ${subject}`);
   found.click();
 });
-const choose = (subject: string) => drawn(() => {
-  const found = opens().find((open) => open.children[1]?.textContent === subject)?.parentElement?.querySelector("button[aria-pressed]");
-  if (!(found instanceof HTMLElement)) throw new Error(`cannot choose ${subject}`);
-  found.click();
-});
+const choose = async (subject: string) => {
+  if (!opens().some((open) => open.getAttribute("role") === "checkbox")) await menu("Select emails", "Mail options");
+  await row(subject);
+};
 const confirm = (name: string) => drawn(() => {
   const found = [...document.querySelectorAll("[role=dialog] button, [role=alertdialog] button")].find((one) => one.textContent === name);
   if (!(found instanceof HTMLElement)) throw new Error(`no ${name} in the review`);
   found.click();
 });
-const menu = (item: string) => drawn(() => {
-  button("More actions")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+const menu = (item: string, label = "More actions") => drawn(() => {
+  button(label)?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 }).then(() => drawn(() => {
   const found = [...document.querySelectorAll("[role=menuitem]")].find((one) => one.textContent === item);
   if (!(found instanceof HTMLElement)) throw new Error(`no ${item} in the menu`);
@@ -65,6 +64,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
   it("See my mail (spec/app/inbox/index.md, \"Story: See my mail\")", async () => {
     const world = { ...scene(), phone };
     for (let at = 5; at <= 30; at += 1) world.inbox.mail.push(letter(at, `Newsletter ${at}`, ["INBOX"]));
+    const earlierLunch = letter(0, "Earlier lunch plan", ["SENT"], "Could you make it Friday?");
+    world.inbox.mail.push({ ...earlierLunch, card: { ...earlierLunch.card, threadId: "t1" } });
     const first = await open(world);
     const { alpha } = first;
     const runtime = inbox.runtime(alpha);
@@ -82,6 +83,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect([rows().length, Boolean(button("Load more"))]).toEqual([28, false]);
 
     // spec/app/inbox/index.md, "Choosing a folder or a search reads its first page"
+    await press("Search email");
     await search("tax");
     await until(alpha, runtime, List, (s) => s.selected.query === "tax" && s.list.status === "Loaded");
     step("3");
@@ -90,8 +92,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     // spec/app/inbox/index.md, "Back from a search shows its folder without the search, before Back leaves Inbox"
     await hardware("back");
     await until(alpha, runtime, List, (s) => s.selected.query === "" && s.list.status === "Loaded");
-    expect([rows().length, (document.querySelector("input[aria-label='Search mail']") as HTMLInputElement | null)?.value]).toEqual([25, ""]);
-    await press("Spam");
+    expect([rows().length, Boolean(button("Search email")), document.querySelector("input[aria-label='Search mail']")]).toEqual([25, true, null]);
+    await menu("Spam", "More folders");
     await until(alpha, runtime, List, (s) => s.selected.folder === "Spam" && s.list.status === "Loaded");
     step("4");
     expect(rows()).toEqual(["Win a prize"]);
@@ -107,6 +109,14 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Marks, (s) => s.attempt.outcome === "Confirmed");
     step("7");
     expect([title(), world.inbox.changes]).toEqual(["Lunch on Friday", ["mark-read g1"]]);
+
+    // spec/app/inbox/message.md, "Previous and next move one place through the thread"
+    await action("Previous message");
+    await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded" && s.position === 0);
+    expect([title(), told()]).toEqual(["Earlier lunch plan", expect.stringContaining("Could you make it Friday?")]);
+    await action("Next message");
+    await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded" && s.position === 1);
+    expect(title()).toBe("Lunch on Friday");
 
     // spec/app/inbox/message.md, "Only an https link without credentials in it can be reviewed and opened; any other link stays text"
     const visited = vi.spyOn(window, "open").mockReturnValue(null);
@@ -209,9 +219,9 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   expect([rows(), told()]).toEqual([[], expect.stringContaining("Alpha cannot read this mail")]);
 });
 
-it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I reviewed\"; spec/app/inbox/drafts.md, \"Story: Write a message\"; spec/app/inbox/adding.md, \"Story: Add files and people to my draft\"; spec/app/inbox/suggestion.md, \"Story: Review what is offered into my email\"; spec/app/inbox/sending.md, \"Story: Save my draft to Gmail, or delete it there, knowingly\")", async () => {
+it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I reviewed\"; spec/app/inbox/drafts.md, \"Story: Write a message\"; spec/app/inbox/drafts.md, \"Story: Set a draft aside or discard it\"; spec/app/inbox/adding.md, \"Story: Add files and people to my draft\"; spec/app/inbox/suggestion.md, \"Story: Review what is offered into my email\"; spec/app/inbox/sending.md, \"Story: Save my draft to Gmail, or delete it there, knowingly\")", async () => {
   const world = { ...scene(), phone: false };
-  const { alpha } = await open(world);
+  const { alpha, close } = await open(world);
   const runtime = inbox.runtime(alpha);
   await tile("Inbox");
   await until(alpha, runtime, List, (s) => s.list.status === "Loaded" && s.pages === 1);
@@ -219,7 +229,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   // spec/app/inbox/drafts.md, "A new message, a reply, a reply to all or a forward begins as [one draft](./letter.md) says; a reply to a message with no usable address is refused and the owner told"
   await row("Your tax return");
   await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded");
-  await press("Reply");
+  await menu("Reply");
   await until(alpha, runtime, Writing, (s) => s.open && s.letter.kind === "Reply" && s.letter.recipients === 1);
 
   // spec/app/inbox/drafts.md, "Every change to the text, recipients or attachments is an edit, counted at once"; spec/app/inbox/drafts.md, "Edits are written to the phone once typing pauses, and no later than the longest wait after a burst began, one write at a time under its own ticket"
@@ -258,13 +268,63 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await later(alpha, 10);
   await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded");
 
+  // spec/app/inbox/drafts.md, "Before a draft with a Gmail copy is saved over it, and whenever the draft is unsure of that copy, Gmail's copy is read, one read at a time, while its account may be read"
+  await menu("Check Gmail copy");
+  await until(alpha, runtime, Writing, (s) => s.lookup.status === "Loaded" && s.letter.verified === s.letter.revision && !s.pending && s.write.status === "Loaded");
+  await menu("Save to Gmail");
+  await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "ReplaceDraft");
+  await confirm("Cancel");
+  await until(alpha, runtime, Changes, (s) => !s.review.showing);
+
   // spec/app/inbox/sending.md, "Only the owner confirms, only the review of the thing as it is now, while the account's grant allows it and, for a send, it has a valid recipient"
   await press("Send");
   await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "Send");
+  expect(document.querySelector('[role=dialog] [aria-label="Message"]')?.textContent).toBe("Thanks, it is all in order.\n\nSee you on Friday.");
+  expect(world.inbox.changes).toEqual(["draft-create Re: Your tax return"]);
   await confirm("Send");
   await until(alpha, runtime, Changes, (s) => s.attempt.outcome === "Confirmed");
   expect([world.inbox.changes.at(-1), world.inbox.attached]).toEqual(["send s2@mail.test Re: Your tax return", ["receipt.txt"]]);
 
   // spec/app/inbox/drafts.md, "Once its send is confirmed, a draft unchanged since the revision sent is forgotten; one edited after it, or whose write is in flight, is kept and marked as sent"
   await until(alpha, runtime, Writing, (s) => !s.open && s.shelf.shelved.length === 0);
+
+  // spec/app/inbox/drafts.md, "A draft is set aside only once it is wholly kept on the phone, and comes back exactly as it was set aside"
+  await press("Back to the list");
+  await until(alpha, runtime, Shown, (s) => s.message === 0);
+  // spec/app/inbox/drafts.md, "A draft from Gmail's Drafts opens only with no draft open and none set aside that holds it, and only when Alpha can open it whole; otherwise the owner is offered Open in Gmail"
+  world.inbox.drafts.set("plain-remote", {
+    id: "plain-remote", messageId: "remote-message", providerDigest: "a".repeat(64),
+    content: { to: ["guest@example.test"], cc: [], bcc: [], subject: "A remote draft", bodyText: "Already in Gmail.", plainText: true, threaded: false, attachmentCount: 0 },
+  });
+  await menu("Drafts", "More folders");
+  await until(alpha, runtime, List, (s) => s.selected.folder === "DraftsFolder" && s.list.status === "Loaded");
+  await row("A remote draft");
+  await until(alpha, runtime, Writing, (s) => s.open && s.letter.kind === "Saved" && s.letter.recipients === 1 && s.stored);
+  expect(document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.value).toBe("Already in Gmail.");
+  await menu("Discard");
+  await confirm("Discard");
+  await until(alpha, runtime, Writing, (s) => !s.open);
+  expect(world.inbox.drafts.has("plain-remote")).toBe(true);
+  await press("Inbox");
+  await until(alpha, runtime, List, (s) => s.selected.folder === "Incoming" && s.list.status === "Loaded");
+
+  await press("Compose");
+  await until(alpha, runtime, Writing, (s) => s.open);
+  await fill("Add to To", "unfinished@");
+  await write("Message", "Keep these words.");
+  await hardware("back");
+  await until(alpha, runtime, Writing, (s) => !s.open && s.shelf.shelved.length === 1);
+  await close();
+
+  const again = await open(world);
+  const restored = inbox.runtime(again.alpha);
+  await until(again.alpha, restored, Writing, (s) => !s.open && s.shelf.shelved.length === 1);
+  await press("1 drafts set aside");
+  await press("Keep these words.No recipient");
+  await until(again.alpha, restored, Writing, (s) => s.open);
+  expect([
+    document.querySelector<HTMLInputElement>('input[aria-label="Add to To"]')?.value,
+    document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.value,
+    world.inbox.changes.length,
+  ]).toEqual(["unfinished@", "Keep these words.", 2]);
 });

@@ -81,7 +81,7 @@ export function HomeScreen({
   return (
     <div inert={covered || undefined} className={cn("flex h-full min-h-0 flex-1 flex-col bg-background text-base text-foreground", className)}>
       <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto pb-[calc(--spacing(27)+env(safe-area-inset-bottom))]">
-        <PullZone onPull={onPullDown} className="min-h-[max(--spacing(16),calc(env(safe-area-inset-top)+--spacing(3)))] shrink-0">
+        <PullZone onPull={onPullDown} className="min-h-[calc(env(safe-area-inset-top)+--spacing(3))] shrink-0">
           <h1 className="sr-only">Home</h1>
         </PullZone>
         {editing ? <HomeEditBar onShowHidden={onShowHidden} onDone={onDone} notice={notice} className="pb-3" /> : null}

@@ -36,6 +36,27 @@ export function checkout(): Checkout {
 
 const stamp = (at: Checkout) => path.join(at.root, ".alpha/ready.json");
 
+const clientPackages = [
+  { name: "@elizaos/plugin-inbox", entry: "packages/plugin-inbox/dist/src/client/index.js" },
+  { name: "@elizaos/plugin-notes", entry: "packages/plugin-notes/dist/src/client.js" },
+  { name: "@elizaos/plugin-workflow", entry: "packages/plugin-workflows/dist/src/client/index.js" },
+];
+
+interface ReadyStamp {
+  readonly commit?: string;
+  readonly clients?: readonly string[];
+}
+
+function readStamp(at: Checkout): ReadyStamp {
+  const file = stamp(at);
+  return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) as ReadyStamp : {};
+}
+
+function missingClients(at: Checkout, before: ReadyStamp) {
+  return clientPackages.filter(({ name, entry }) =>
+    before.commit !== at.commit || before.clients?.includes(name) !== true || !fs.existsSync(path.join(at.root, entry)));
+}
+
 const versionOf = (file: string, name: string) => (JSON.parse(fs.readFileSync(file, "utf8")) as { dependencies?: Record<string, string> }).dependencies?.[name];
 
 /**
@@ -53,7 +74,8 @@ function linked(at: Checkout) {
 }
 
 export function ready(at: Checkout = checkout()): boolean {
-  return fs.existsSync(stamp(at)) && (JSON.parse(fs.readFileSync(stamp(at), "utf8")) as { commit?: string }).commit === at.commit;
+  const before = readStamp(at);
+  return before.commit === at.commit && missingClients(at, before).length === 0;
 }
 
 /** The checkout, or the command that makes it. */
@@ -94,7 +116,15 @@ export async function prepare() {
 }
 
 async function build(at: Checkout) {
-  if (ready(at)) return;
+  const before = readStamp(at);
+  const clients = missingClients(at, before);
+  if (before.commit !== at.commit) await buildBase(at);
+  else if (clients.length === 0) return;
+  for (const { name } of clients) run(at.root, "pnpm", "--filter", name, "build");
+  fs.writeFileSync(stamp(at), JSON.stringify({ commit: at.commit, clients: clientPackages.map(({ name }) => name) }));
+}
+
+async function buildBase(at: Checkout) {
   const source = process.env.ALPHA_ELIZA_SOURCE ?? lock.remote;
   if (!fs.existsSync(path.join(at.root, ".git"))) {
     fs.mkdirSync(path.dirname(at.root), { recursive: true });
@@ -110,7 +140,6 @@ async function build(at: Checkout) {
   };
   await buildAgentBundle({ plugins: [], outDir: at.bundle, sourceCommit: at.commit, sourceRoot: at.root });
   process.stdout.write(`agent bundle: ${Math.round((Date.now() - started) / 1000)} s\n`);
-  fs.writeFileSync(stamp(at), JSON.stringify({ commit: at.commit }));
 }
 
 /** After `pnpm install`: link the checkout where it is built, and say the one command where it is not. Installing never builds it. */

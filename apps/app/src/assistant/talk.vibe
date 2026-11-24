@@ -3,6 +3,7 @@ import type { ConversationRecord } from "@elizaos/agent/client"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import type { Failure, Fix } from "../../gen/app__assistant__reply.ts"
 import type { Sighting } from "../platform/location.vibe"
+import type { CommsPrompt } from "../phone/comms.vibe"
 
 /** One message of the conversation showing, as the agent keeps it. */
 export interface Line {
@@ -73,6 +74,8 @@ export interface Board {
   forgetPosition(): void
   /** The remembered position for `ticket`, if the locator still holds that ticket. */
   positionFor(ticket: number): Sighting | undefined
+  waitingRequest: CommsPrompt | undefined
+  postingRequest: CommsPrompt | undefined
   change(patch: Partial<Seen>): void
   /** The number of the conversation the agent names `record`, given the first time it is seen; its title where one is given. */
   numberOf(record: ConversationRecord, title?: string): number
@@ -141,6 +144,8 @@ export const talk = Layer.effect(Talk, effect {
     rememberPosition: (ticket, sighting) => { position = { ticket, sighting } },
     forgetPosition: () => { position = undefined },
     positionFor: (ticket) => (position?.ticket === ticket ? position.sighting : undefined),
+    waitingRequest: undefined,
+    postingRequest: undefined,
     change: (patch) => {
       seen = { ...seen, ...patch }
       for (const listener of listeners) listener()

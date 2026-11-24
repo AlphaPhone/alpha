@@ -26,6 +26,8 @@ export type InboxDraftReviewProps = {
   bcc?: InboxRecipient[];
   /** The subject. */
   subject: string;
+  /** The full text that will be sent or saved, as the owner wrote it. */
+  text: string;
   /** The names of the attachments. */
   attachments?: string[];
   /** A send of a draft already sent, or whose send is unknown, which the owner chose to review again: it may already have gone. */
@@ -45,13 +47,13 @@ export type InboxDraftReviewProps = {
 const lines = ["to", "cc", "bcc"] as const;
 
 /**
- * What a draft operation will do, shown as it would go: from, recipients, subject and attachments. A replacement and a
+ * What a draft operation will do, shown as it would go: from, recipients, subject, text and attachments. A replacement and a
  * deletion say they cannot be undone, a send with no recipient asks for one, and a change to the draft stops the
  * review until it is looked at again.
  *
  * @model spec/app/inbox/sending.md
  */
-export function InboxDraftReview({ open, operation, from, to, cc = [], bcc = [], subject, attachments = [], repeat = false, changed = false, onConfirm, confirming = false, onReviewAgain, onCancel }: InboxDraftReviewProps) {
+export function InboxDraftReview({ open, operation, from, to, cc = [], bcc = [], subject, text, attachments = [], repeat = false, changed = false, onConfirm, confirming = false, onReviewAgain, onCancel }: InboxDraftReviewProps) {
   const { title, confirm } = operations[operation];
   const people = { to, cc, bcc };
   const unaddressed = operation === "send" && (to.length + cc.length + bcc.length === 0 || [...to, ...cc, ...bcc].some((r) => !r.valid));
@@ -95,6 +97,7 @@ export function InboxDraftReview({ open, operation, from, to, cc = [], bcc = [],
               </>
             ) : null}
           </dl>
+          {operation !== "deleteCopy" ? <section aria-label="Message" className="min-w-0 border-t pt-4"><p className="text-base wrap-anywhere whitespace-pre-wrap">{text || "(no message)"}</p></section> : null}
         </div>
       </SheetContent>
     </Sheet>

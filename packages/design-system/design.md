@@ -13,19 +13,31 @@ do next.
   the text color on `x`, and each pair meets WCAG AA in both themes.
 - **Edges.** `border` divides and may be faint. `input` is the edge of a control and `ring` the keyboard
   focus: both stand at least 3:1 off `background` and `card` in both themes (WCAG 1.4.11).
-- **Meaning.** `primary` is the accent as text and as the main action: Alpha blue on white, a lighter
-  blue on black where Alpha blue cannot be read. `destructive`, `ok`, `warn` and `info` are states,
-  `call` a live or answerable call, `record` a running recording. A state color always sits beside a
+- **Meaning.** `primary` is the accent as text, a link and a mark: Alpha blue on white, a lighter
+  blue on black where Alpha blue cannot be read. What the accent fills, the main action, a switch that is on
+  and a chosen box or radio, is `alpha` with `alpha-foreground`, Alpha blue in both themes. `destructive`, `ok`, `warn` and `info` are states,
+  `call` a live or answerable call, `dial` the button that places one, `record` a running recording. A state color always sits beside a
   word or an accessible name, never alone.
 - **Type.** `font-sans` is Public Sans, for everything read or pressed. `font-display` is Denton, with
   Fraunces behind it, at weight `light`: a screen's one title, the date on Home, a large figure. The sizes
-  are in rem, so Android's text size scales them: `base` is body text, `3xl` a screen title, `4xl` the
-  Home date. `tracking-caps` with `text-xs` is a small uppercase label.
-- **Shape.** `radius` is a card or a row group; `rounded-home-card` is a Home overview card;
-  `rounded-drawer-icon` rounds an installed app icon. `rounded-tile` is an app tile, a menu and a dialog;
+  are in rem, so Android's text size scales them: `base` is body text, `md` a row title or a field,
+  `caption` and `sm` the quieter line beside it, `xl` an app's header title, `3xl` a screen title, `4xl` the
+  Home date. Text up to `lg` is set at Public Sans's own line height (1.175), as develop sets it; copy that
+  is read at length takes `leading-normal`. `tracking-caps` with `text-xs` is a small uppercase label; `text-label` names an app tile on
+  Home and in the drawer. A list row reads `text-base`,
+  `text-subject` and `text-snippet` line by line; `text-meta` is a status line under a header, and `text-body`
+  the text of a message or of a field being typed; `text-2xs` is the time under a text message or a
+  keypad key's letters; `text-keypad-number` the number being dialled, `text-keypad-digit` a key's
+  digit and `text-keypad-letters` the letters under it; `text-contact-name` and `text-contact-initials`, in
+  `font-display`, are a contact's name and initials at the top of their card. `text-lead` is the street of the next turn,
+  `text-title` a document's name over its preview, and `text-figure` and `text-figure-sm` a route's time.
+  `leading-row` sets `text-body` as a note's or a routine's title in a list.
+- **Shape.** `radius` is a card; `rounded-group` a group of rows; `rounded-panel` a notice or a search bar; `rounded-home-card` is a Home overview card;
+  `rounded-drawer-icon` rounds an installed app icon; `rounded-option` is a row of a floating menu and
+  `rounded-box` the box of a list row's selection check. `rounded-tile` is an app tile, a menu and a dialog;
   `rounded-sheet` the top of a bottom sheet; `rounded-full` a button, a chip and the Ask Alpha bar.
   Everything pressed is at least 44px in both directions.
-- **Elevation.** `shadow-sm` lifts a control, `shadow-md` a menu or dialog, `shadow-lg` the Ask Alpha
+- **Elevation.** `shadow-sm` lifts a control, `shadow-menu` a menu, `shadow-md` a dialog or a notice, `shadow-lg` the Ask Alpha
   bar, `shadow-sheet` a bottom sheet.
 - **Layers.** `z-dock` is the Ask Alpha bar, `z-sheet` the conversation and bottom sheets, `z-dialog` a
   dialog, `z-toast` a notice, `z-voice` the voice overlay. `z-10`, `z-20` and `z-50` order things inside one view.
@@ -83,6 +95,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `alpha-foreground` | oklch(1 0 0) | — |
 | `call` | oklch(0.509 0.134 149.4) | oklch(0.614 0.162 149.3) |
 | `record` | oklch(0.578 0.206 29) | oklch(0.663 0.224 28.3) |
+| `dial` | oklch(0.614 0.162 149.3) | — |
+| `dial-foreground` | oklch(1 0 0) | — |
 
 | Token | Value |
 | --- | --- |
@@ -91,19 +105,41 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `rounded.sheet` | 1.75rem |
 | `rounded.home-card` | 1.875rem |
 | `rounded.drawer-icon` | 1.125rem |
+| `rounded.option` | 0.625rem |
+| `rounded.box` | 0.375rem |
+| `rounded.group` | 1.625rem |
+| `rounded.panel` | 1.5rem |
 | `font.sans` | "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif |
 | `font.display` | Denton, Fraunces, Georgia, serif |
 | `font.mono` | ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace |
+| `text.2xs.size` | 0.6875rem |
+| `text.2xs.leading` | 1.4 |
 | `text.xs.size` | 0.75rem |
-| `text.xs.leading` | 1.25 |
+| `text.xs.leading` | 1.175 |
+| `text.label.size` | 0.75rem |
+| `text.label.leading` | 1.1667 |
+| `text.meta.size` | 0.8125rem |
+| `text.meta.leading` | 1.25 |
+| `text.snippet.size` | 0.84375rem |
+| `text.snippet.leading` | 1.2 |
+| `text.caption.size` | 0.8125rem |
+| `text.caption.leading` | 1.175 |
 | `text.sm.size` | 0.875rem |
-| `text.sm.leading` | 1.4 |
+| `text.sm.leading` | 1.175 |
+| `text.subject.size` | 0.90625rem |
+| `text.subject.leading` | 1.2 |
 | `text.base.size` | 0.9375rem |
-| `text.base.leading` | 1.4 |
+| `text.base.leading` | 1.175 |
+| `text.body.size` | 1rem |
+| `text.body.leading` | 1.6 |
+| `text.md.size` | 1rem |
+| `text.md.leading` | 1.175 |
 | `text.lg.size` | 1.0625rem |
-| `text.lg.leading` | 1.4 |
+| `text.lg.leading` | 1.175 |
+| `text.lead.size` | 1.1875rem |
+| `text.lead.leading` | 1.2 |
 | `text.xl.size` | 1.25rem |
-| `text.xl.leading` | 1.25 |
+| `text.xl.leading` | 1.2 |
 | `text.2xl.size` | 1.5rem |
 | `text.2xl.leading` | 1.2 |
 | `text.3xl.size` | 2rem |
@@ -112,8 +148,28 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.4xl.size` | 2.5rem |
 | `text.4xl.leading` | 1.08 |
 | `text.4xl.tracking` | -0.01em |
+| `text.figure.size` | 2.75rem |
+| `text.figure.leading` | 1 |
 | `text.home-display.size` | 1.625rem |
 | `text.home-display.leading` | 1.1 |
+| `text.title.size` | 1.75rem |
+| `text.title.leading` | 1.15 |
+| `text.title.tracking` | -0.01em |
+| `text.figure-sm.size` | 1.875rem |
+| `text.figure-sm.leading` | 1.05 |
+| `text.keypad-letters.size` | 0.59375rem |
+| `text.keypad-letters.leading` | 1.15 |
+| `text.keypad-letters.tracking` | 0.14em |
+| `text.keypad-digit.size` | 1.875rem |
+| `text.keypad-digit.leading` | 1 |
+| `text.keypad-number.size` | 2.375rem |
+| `text.keypad-number.leading` | 1.2 |
+| `text.keypad-number.tracking` | 0.02em |
+| `text.contact-name.size` | 2.125rem |
+| `text.contact-name.leading` | 1.1 |
+| `text.contact-name.tracking` | -0.01em |
+| `text.contact-initials.size` | 2.625rem |
+| `text.contact-initials.leading` | 1 |
 | `weight.light` | 300 |
 | `weight.normal` | 400 |
 | `weight.medium` | 500 |
@@ -122,6 +178,7 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `leading.none` | 1 |
 | `leading.tight` | 1.1 |
 | `leading.snug` | 1.25 |
+| `leading.row` | 1.3 |
 | `leading.normal` | 1.4 |
 | `leading.relaxed` | 1.6 |
 | `tracking.tight` | -0.01em |
@@ -140,6 +197,7 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `shadow.md` | 0 8px 24px oklch(0 0 0 / 0.12) |
 | `shadow.lg` | 0 12px 34px oklch(0 0 0 / 0.16) |
 | `shadow.sheet` | 0 -10px 40px oklch(0 0 0 / 0.12) |
+| `shadow.menu` | 0 4px 20px oklch(0 0 0 / 0.12) |
 | `keyframes.rise` | from{opacity:0;transform:translateY(1.75rem)}to{opacity:1;transform:none} |
 | `keyframes.drop` | from{opacity:0;transform:translateY(-2.25rem)}to{opacity:1;transform:none} |
 | `keyframes.fade` | from{opacity:0}to{opacity:1} |
