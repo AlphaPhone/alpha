@@ -1263,14 +1263,14 @@
     "step": "step",
     "invariant": "safety",
     "tests": [
-      "approvedDialogHandsOffItsLeaseTest",
+      "attachmentAdmissionReadsExactLeaseTest",
       "successorReviewRetiresPendingReadTest",
       "shadeReentryCannotReviveReadTest",
       "foregroundAndLockRetireReadTest",
       "currentReadKeepsUnavailableReportTest"
     ],
     "invariants": [
-      "DialogHasExactLease",
+      "QueuedAttachmentHasExactLease",
       "CurrentOwnerIsActive",
       "RetiredReadHasNoEffect",
       "ComposedNoticeWasReviewed"
@@ -1278,17 +1278,17 @@
     "sources": [
       "apps/app/src/prototype/notifications-adapter.ts",
       "apps/app/src/prototype/context-selection.ts",
-      "apps/app/src/browser/content-question.ts",
+      "apps/app/src/prototype/own-notice-question.ts",
       "apps/app/src/main.tsx"
     ],
     "stateMapping": {
       "shade/screen/hidden/live/epoch": "Synthetic committed shell state, actual DOM visibility event and renderer lifetime counter",
-      "owner/dialog/reviews/pending": "Exact adapter lease identity, actual JSDOM dialog and controlled readback records",
-      "composed/reported/staleEffect": "Observed closed composer and report calls and the active lease at publication"
+      "composed/reported/staleEffect": "Observed closed composer and report calls and the active lease at publication",
+      "owner/queued/reviews/pending": "Exact adapter lease, controlled attachment admission and native readback"
     },
     "abstractions": [
       "Simulated development shade, two own notices, up to three review leases and controlled final list outcomes.",
-      "Actual dialog approval and cancellation run in JSDOM. Physical browser focus and top-layer behavior, Android delivery and provider calls are outside this projection."
+      "Attachment staging and cancellation run in closed JSDOM. Native delivery and provider calls remain outside this projection."
     ]
   },
   {
@@ -3193,14 +3193,14 @@
     "step": "step",
     "invariant": "safety",
     "tests": [
-      "closedReviewLeavesNoticePendingTest",
+      "declinedBytesLeaveNoticePendingTest",
       "exactRecheckBeforeConsumptionTest",
-      "consumptionCanOutliveAnInterruptedReviewTest",
+      "consumptionCanOutliveAnInterruptedAttachmentTest",
       "resolverDropsOverlapAndCanRetryTest"
     ],
     "sources": [
       "apps/app/src/runtime/hosted-notice-question.ts",
-      "apps/app/src/browser/content-question.ts",
+      "apps/app/src/prototype/own-notice-question.ts",
       "apps/app/src/prototype/context-selection.ts",
       "apps/app/src/runtime/hosted-digests.ts",
       ".eliza/client-features/plugins/plugin-native-browser-surface/src/page-reading.ts",
@@ -3208,8 +3208,8 @@
       "apps/app/src/ui/digests/hosted-digests.ts"
     ],
     "abstractions": [
-      "Actual hosted question review and shared text/digest rules, exact retained token readback, draft publication after acknowledgement and overlap refusal.",
-      "One reviewed native question and bounded synthetic owner, composer and notice settlement. Physical DOM input and mounted panel/provider interactions are separate."
+      "Mounted hosted attachment staging, retained token recheck after byte admission and overlap refusal through closed native ports.",
+      "One result, a bounded owner/composer lifetime and exact source, with local file and prompt observed by the composer port."
     ]
   },
   {
@@ -3508,11 +3508,11 @@
       "unavailableComposerPreservesTapTest",
       "wrongSourceNeverOpensTest",
       "interruptedQuestionPreservesTapTest",
-      "explicitDismissalDiscardsExactTapTest",
+      "declinedAttachmentKeepsExactTapTest",
       "rejectedNativeSettlementKeepsTapTest"
     ],
     "invariants": [
-      "DialogOwnedByCurrent",
+      "QueuedAttachmentOwnedByCurrent",
       "FailureOwnedByCurrent",
       "DraftRequiresSettlement",
       "StagesAreDisjoint"
@@ -3521,10 +3521,10 @@
       "apps/app/src/runtime/hosted-digest-ui.tsx",
       "apps/app/src/runtime/source-renewal-question.ts",
       "apps/app/src/runtime/hosted-notice-question.ts",
-      "apps/app/src/browser/content-question.ts"
+      "apps/app/src/prototype/own-notice-question.ts"
     ],
     "abstractions": [
-      "Mounted notification Ask review, exact reread, native settlement, composer admission and publication within two digest binding lifetimes.",
+      "Mounted notification Ask stages a local attachment. Exact recheck and native settlement follow byte admission within two digest binding lifetimes.",
       "Controlled Android bridge, native tap slot and composer. Source renewal mutation and native posting are separate."
     ]
   },
@@ -5568,24 +5568,24 @@
     "invariant": "safety",
     "tests": [
       "questionIsDraftedTest",
-      "homeDuringConsumeStillDraftsTest",
+      "homeDuringConsumeStagesNothingTest",
       "homeDuringRecheckSpendsNothingTest",
-      "dismissReleasesTapTest",
+      "declinedBytesKeepTapTest",
       "changedNoticeAfterConsumeIsReportedTest",
       "unreviewableNoticeIsRefusedTest"
     ],
     "invariants": [
       "DraftNeedsSpentTap",
-      "ReleaseExcludesConsume",
+      "ConsumeNeedsAdmittedBytes",
       "ClosedOnce",
       "EndedWhenSettled",
       "SpentTapIsReported",
       "ChangedNoticeDraftsNothing",
-      "CancelBeforeConsumeStops"
+      "RetiredStagesNothing"
     ],
     "witnesses": [
-      "DraftAfterCancelWitness",
-      "ReleasedWitness",
+      "SpentAfterCancelWitness",
+      "RefusedBytesWitness",
       "SpentButNotKeptWitness"
     ],
     "sources": [
@@ -5598,41 +5598,23 @@
       },
       {
         "path": "apps/app/src/prototype/own-notice-question.ts",
-        "name": "canceled"
+        "name": "stageNoticeQuestion"
       },
       {
         "path": "apps/app/src/prototype/own-notice-question.ts",
-        "name": "composing"
-      },
-      {
-        "path": "apps/app/src/prototype/own-notice-question.ts",
-        "name": "ended"
-      },
-      {
-        "path": "apps/app/src/prototype/own-notice-question.ts",
-        "name": "consumed"
-      },
-      {
-        "path": "apps/app/src/prototype/own-notice-question.ts",
-        "name": "recheck"
-      },
-      {
-        "path": "apps/app/src/prototype/own-notice-question.ts",
-        "name": "release"
+        "name": "noticeQuestionFile"
       }
     ],
     "stateMapping": {
-      "phase": "The review sheet, the recheck and the consume call of one question",
-      "canceled/composing/ended": "The three flags of reviewOwnNoticeQuestion",
-      "closedCalls": "Calls of options.closed",
-      "consumed/released/composed": "options.consume, options.release and options.compose calls",
-      "current/report": "options.current() and the message passed to options.report"
+      "phase": "Queued attachment admission, source recheck and continued native consume",
+      "current/canceled/committing/ended": "Live publisher, retirement, accepted composer bytes and completed staging state",
+      "closedCalls/consumed/composed": "Actual helper close, native consume and composer observations",
+      "report": "Actual source or custody failure notice"
     },
     "abstractions": [
-      "One notification tap and one question. Reviewability, the sensitive-text check and the excerpt are one admission class.",
-      "Home and a lost window focus are one abort action. The sheet closing after Compose is not a dismissal and changes nothing.",
-      "The sheet hands a question over only for a notification that is still current; choosing Compose for one that changed leaves the sheet open and is not a transition here.",
-      "A failed release is reported by the publisher and is outside this model; the composer that receives the draft is modeled elsewhere."
+      "One exact notification tap, two composer byte-admission outcomes, and bounded held recheck or consume outcomes.",
+      "Home and lost focus retire staging. A spend already dispatched may settle, and can never populate a retired composer.",
+      "This scenario observes the native custody boundary through synthetic publisher ports. Attachment capacity, encoding and ownership binding are modeled by the composer."
     ]
   },
   {
@@ -7016,7 +6998,8 @@
       "interactionKeepsTokenTest",
       "changedTargetKeepsLinkTest",
       "blockedCheckDoesNothingTest",
-      "questionReleasedTest",
+      "questionBlocksCheckWhileStagingTest",
+      "declinedAttachmentKeepsQuestionTokenTest",
       "queuedCheckDroppedByQuestionTest",
       "queuedCheckDroppedWhileBlockedTest",
       "changedReminderKeepsQuestionTokenTest",
@@ -7040,7 +7023,8 @@
       "NewerTapWaitsForOwnerWitness"
     ],
     "sources": [
-      "apps/app/src/prototype/reminder-adapter.ts"
+      "apps/app/src/prototype/reminder-adapter.ts",
+      "apps/app/src/prototype/own-notice-question.ts"
     ],
     "symbols": [
       {
@@ -7068,8 +7052,8 @@
         "name": "consumeReminderTap"
       },
       {
-        "path": "apps/app/src/prototype/reminder-adapter.ts",
-        "name": "releaseReminderQuestion"
+        "path": "apps/app/src/prototype/own-notice-question.ts",
+        "name": "stageNoticeQuestion"
       },
       {
         "path": "apps/app/src/prototype/reminder-adapter.ts",
@@ -7087,16 +7071,16 @@
     "stateMapping": {
       "nativeToken/issued/retained/targetListed/question/lastConsumed": "Native pending reminder tap, its retained target and consumption",
       "interaction/interactionAt/blocked": "tapInteraction fence and the eligibility gates",
-      "banner/detail/questionOpen": "reminderTapPending, the opened reminder detail and the open question review",
+      "banner/detail/questionOpen": "reminderTapPending, the opened reminder detail and the pending question attachment",
       "busy/requested/stage/captured/capturedQuestion": "tapBusy, tapRequested, the awaited step of checkReminderTap and the token and question flag it read"
     },
     "abstractions": [
       "Up to three taps; native keeps the newest pending token, so an earlier unconsumed one is replaced.",
       "blocked merges a hidden page, an open connection chooser, a sensitive context and an open Calendar form.",
-      "The reminder list read and the target comparison are one listed/not-listed answer; the reviewed question is consume or release.",
+      "The reminder list read and the target comparison are one listed/not-listed answer. Declined or interrupted attachment preparation keeps the current token.",
       "Native token storage and its own recheck of source, occurrence and revision are modeled as \"consume only the current token\".",
-      "A check that ends runs a queued explicit request in the same turn; the request is dropped when the page is blocked or a question review is open, and the saved-link banner is then the only way back to the newer tap.",
-      "The question review consumes only after reading the token and the reminder again (shown page, open detail, unchanged and listed reminder); otherwise it releases.",
+      "A check that ends runs a queued explicit request in the same turn; the request is dropped when the page is blocked or a question attachment is staging, and the saved-link banner is then the only way back to the newer tap.",
+      "After attachment byte admission, the question can consume only after reading the same token and reminder again while the exact detail is visible. Refusal leaves that token pending.",
       "RetainedReminderTapAdmission covers the admission after the detail render callback; this model covers the single check, its queued request and the token reads around it."
     ]
   },
@@ -8793,7 +8777,7 @@
       }
     ],
     "stateMapping": {
-      "view/chat/voice": "shell state S().view, S().chat and S().voice",
+      "view/chat/voice": "shell state S().view and S().chat; voice is shell.chatOwnedByVoice: S().voice, or the voice adapter's chat recorder (a Talk conversation, dictation or the panel retiring either), which leaves S().voice off",
       "drag": "shell.chatMotion: the captured pointer, the detent and view it started in, moved, and the pressed control's tap action",
       "swallowAge/dragAge": "Date.now() minus shell.swallow and shell.chatDraggedAt against the 350 ms window, in ticks",
       "ghost/ghostLabel": "the compatibility click the platform delivers after pointerup, and the control under the finger",

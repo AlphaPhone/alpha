@@ -319,14 +319,15 @@ async function guidanceTargets(page, viewports) {
           const information = page.locator('[data-alpha-maps-root] summary[aria-label="Map information and credits"]');
           await information.tap();
           await expect(information.locator('..')).toHaveAttribute('open', '');
-          const coordinates = information.locator('..').getByRole('button', {name:'Enter coordinates', exact:true});
-          await coordinates.scrollIntoViewIfNeeded();
-          const coordinateHit=await coordinates.evaluate(node => {
-            const box = node.getBoundingClientRect(), hit=document.elementFromPoint(box.left+box.width/2,box.top+box.height/2);
-            return {owned:node.contains(hit),box:box.toJSON(),hit:hit?.outerHTML.slice(0,500)};
+          const disclosure = information.locator('..').locator('.alpha-map-info');
+          await expect(disclosure).toBeVisible();
+          await expect(disclosure.getByRole('button', {name:'Enter coordinates', exact:true})).toHaveCount(0);
+          const closeHit = await information.evaluate(node => {
+            const box = node.getBoundingClientRect();
+            const hit = document.elementFromPoint(box.left+box.width/2,box.top+box.height/2);
+            return node.contains(hit);
           });
-          if(!coordinateHit.owned)await page.screenshot({path:'/tmp/alpha-maps-legacy-disclosure-hit.png'});
-          assert.ok(coordinateHit.owned, `${width}×${height} at ${percent}%: The open disclosure owns its first action ${JSON.stringify(coordinateHit)}`);
+          assert.ok(closeHit, `${width}×${height} at ${percent}%: The open map disclosure can be closed`);
           await information.tap();
           await expect(information.locator('..')).not.toHaveAttribute('open', '');
         }

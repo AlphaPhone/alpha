@@ -31,6 +31,7 @@ export const BROWSER_REFUSALS: ReadonlyMap<string, string> = new Map([
   ["Enter an HTTP or HTTPS address without credentials", "Enter an HTTP or HTTPS address without a username or password."],
   ["Saved bookmarks could not be read. Existing bookmarks were not changed.", "Saved bookmarks couldn’t be read. They weren’t changed."],
   ["Only HTTPS addresses without embedded credentials can be bookmarked.", "Only HTTPS addresses without a username or password can be bookmarked."],
+  ["A bookmark title must be text.", "Bookmark not saved. Its name wasn’t text."],
   [
     "Bookmark could not be saved. The device stores up to 100 bookmarks; existing data was not changed.",
     "Bookmark not saved. Alpha keeps up to 100 bookmarks; nothing else changed.",

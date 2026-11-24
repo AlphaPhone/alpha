@@ -14,7 +14,22 @@ test(pdfTest,async({page})=>{
  expect(result).toEqual({text:'Browser PDF',status:'rendered',count:2,width:400,height:600,page:1,ink:true,released:true,forgotten:true});
  await page.getByRole('button',{name:'Files',exact:true}).click();await page.getByRole('button',{name:'Internal storage',exact:true}).click();await page.getByRole('button',{name:'Open pages.pdf',exact:true}).click();await expect(page.getByRole('img',{name:'Page 1 of 2',exact:true})).toBeVisible();await page.getByRole('button',{name:'Next PDF page',exact:true}).click();await expect(page.getByRole('img',{name:'Page 2 of 2',exact:true})).toBeVisible();await page.getByRole('button',{name:'File actions',exact:true}).click();
   await page.getByRole('button',{name:'Ask Alpha',exact:true}).click();
-  await page.getByRole('button',{name:/^Edit excerpt from /}).click();const question=page.getByRole('dialog',{name:'Ask about selected content'});await expect(question.getByRole('heading')).toHaveText('Ask Alpha');await expect(question.getByLabel('Selected source',{exact:true})).toHaveText('pages.pdf · page 2');await expect(question.getByRole('textbox',{name:'Content excerpt'})).toHaveValue('Browser PDF');await expect(question.getByRole('img',{name:'Image for question review'})).toBeVisible();await expect(question.getByRole('button',{name:'Extract text locally',exact:true})).toBeEnabled();await question.getByRole('button',{name:'Cancel',exact:true}).click();await page.screenshot({path:'test-results/dev-parity-ui/pdf.png'});
+  await expect(page.getByRole('button',{name:'Remove pages.pdf',exact:true})).toBeVisible();
+  await expect(page.getByRole('dialog',{name:'Ask about selected content'})).toHaveCount(0);
+  await page.getByRole('button',{name:'Remove pages.pdf',exact:true}).click();
+  await page.screenshot({path:'test-results/dev-parity-ui/pdf.png'});
+});
+test('a document preview keeps named folders without repeating the primary volume',async({page})=>{
+ await page.evaluate(async()=>{
+  const {registerPlugin}=await import('/src/platform-plugins.ts');
+  const files=registerPlugin<any>('AlphaFiles');
+  await files.importDirectory([{path:'Briefs/checklist.txt',file:new File(['Pack the tripod plate.'],'checklist.txt',{type:'text/plain'})}],'Shoot');
+ });
+ const button=(name:string)=>page.getByRole('button',{name,exact:true});
+ await button('Files').click();await button('Internal storage').click();
+ await button('Open Shoot').click();await button('Open Briefs').click();await button('Open checklist.txt').click();
+ const preview=page.locator('[data-alpha-subview="files-preview"]');
+ await expect(preview.getByText('text/plain · selected on this device · Shoot › Briefs',{exact:true})).toBeVisible();
 });
 test('Files renderer confirms folder creation and closes its mutation dialog',async({page})=>{
  await page.getByRole('button',{name:'Files',exact:true}).click();await page.getByRole('button',{name:'Internal storage',exact:true}).click();
@@ -66,24 +81,26 @@ const importAndOpen=async(page:import('@playwright/test').Page,name:string,conte
  await page.getByRole('button',{name:'Files',exact:true}).click();await page.getByRole('button',{name:'Internal storage',exact:true}).click();await page.getByRole('button',{name:'Open '+name,exact:true}).click();
 };
 const recentNames=(page:import('@playwright/test').Page)=>page.evaluate(()=>(JSON.parse(localStorage.getItem('alpha.files.recent.v1')||'[]') as {name:string}[]).map(row=>row.name));
-for(const [label,name,content,excerpt] of [['a UTF-8 BOM text file','bom.txt','\uFEFFByte order mark',undefined],['a long text file within the preview bound','long-preview.txt','x'.repeat(1_500_000),'The long log']] as const)
- test(`Ask Alpha links the source of ${label}`,async({page})=>{
+for(const [label,name,content] of [['a UTF-8 BOM text file','bom.txt','\uFEFFByte order mark'],['a long text file within the preview bound','long-preview.txt','x'.repeat(1_500_000)]] as const)
+ test(`Ask Alpha stages the exact bytes of ${label} without retaining a source link`,async({page})=>{
   await observeFileQuestionEffects(page);await importAndOpen(page,name,content);await page.getByRole('button',{name:'File actions',exact:true}).click();
   await page.getByRole('button',{name:'Ask Alpha',exact:true}).click();
-  expect(await fileQuestionEffects(page)).toEqual({reads:1,retains:0,sends:0});
-  await page.getByRole('button',{name:/^Edit excerpt from /}).click();
-  const question=page.getByRole('dialog',{name:'Ask about selected content'});if(excerpt)await question.getByRole('textbox',{name:'Content excerpt'}).fill(excerpt);
-  await expect(question.getByRole('checkbox')).toBeChecked();await question.getByRole('button',{name:'Use in conversation'}).click();
-  await expect(question).toHaveCount(0);await expect(page.getByRole('textbox',{name:'Message Alpha',exact:true})).toHaveValue(new RegExp('Source: '+name));
-  const retained=await page.evaluate(()=>{
+  await expect(page.getByRole('button',{name:'Remove '+name,exact:true})).toBeVisible();
+  await expect(page.getByRole('dialog',{name:'Ask about selected content'})).toHaveCount(0);
+  await expect(page.getByRole('textbox',{name:'Message Alpha',exact:true})).toHaveValue('Explain this file');
+  const staged=await page.evaluate(async()=>{
    const screen=document.querySelector('[data-screen]') as any,key=Object.keys(screen).find(key=>key.startsWith('__reactFiber$'))!;let fiber=screen[key];
    while(fiber&&!(fiber.stateNode&&typeof fiber.stateNode.api==='function'&&typeof fiber.stateNode.S==='function'))fiber=fiber.return;
-   if(!fiber)throw Error('Mounted shell unavailable');return structuredClone(fiber.stateNode.reviewedSourceDraft);
+   if(!fiber)throw Error('Mounted shell unavailable');
+   return Promise.all(fiber.stateNode.fileAttachments.map(async ({name,mimeType,data}:any)=>{
+    const bytes=Uint8Array.from(atob(data),character=>character.charCodeAt(0));
+    const digest=await crypto.subtle.digest('SHA-256',bytes);
+    return {name,mimeType,sha256:Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join('')};
+   }));
   });
-  expect(retained.source).toEqual({version:1,name,mimeType:'text/plain',size:Buffer.byteLength(content),sha256:createHash('sha256').update(content).digest('hex'),reference:expect.stringMatching(/^b1:[a-f0-9-]{36}$/)});
-  expect(JSON.stringify(retained.source).length).toBeLessThan(512);expect(retained.source).not.toHaveProperty('dataBase64');expect(retained.source).not.toHaveProperty('text');
-  expect(retained.draft.length).toBeLessThan(512);if(excerpt)expect(retained.draft).toContain(excerpt);
-  expect(await fileQuestionEffects(page)).toEqual({reads:3,retains:1,sends:0});
+  expect(staged).toHaveLength(1);
+  expect(staged[0]).toEqual({name,mimeType:'text/plain',sha256:createHash('sha256').update(content).digest('hex')});
+  expect(await fileQuestionEffects(page)).toEqual({reads:1,retains:0,sends:0});
  });
 // Observe the actual source boundary, without replacing its result or the send behavior.
 async function observeFileQuestionEffects(page:import('@playwright/test').Page){
@@ -111,9 +128,8 @@ for(const [name,bytes] of [['long.txt',2_500_000],['huge.txt',6*1024*1024]] as c
   expect(await recentNames(page)).toEqual([]);
   expect(await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');return (await registerPlugin<any>('AlphaFiles').list({})).entries.map((row:any)=>({name:row.name,size:row.size}));})).toEqual([{name,size:bytes}]);
  });
-test('a file above the link limit can contribute a deliberate text excerpt',async({page})=>{
- // A real image remains reviewable under #927. Its actual bytes exceed the separate source-link
- // limit, so the original refusal/unlink UI path is exercised without inventing a text preview.
+test('a large file stages a labelled image preview in one tap',async({page})=>{
+ // Exercise the real selection bridge size refusal and the shared browser image intake.
  await observeFileQuestionEffects(page);
  const bytes=await page.evaluate(async()=>{
   const canvas=document.createElement('canvas');canvas.width=canvas.height=1536;const context=canvas.getContext('2d')!,image=context.createImageData(1536,1536);let random=0x12345678;
@@ -125,17 +141,12 @@ test('a file above the link limit can contribute a deliberate text excerpt',asyn
  await page.getByRole('button',{name:'Files',exact:true}).click();await page.getByRole('button',{name:'Internal storage',exact:true}).click();await page.getByRole('button',{name:'Open oversized.png',exact:true}).click();
  await page.getByRole('button',{name:'File actions',exact:true}).click();
  await page.getByRole('button',{name:'Ask Alpha',exact:true}).click();
- await expect(page.getByText('File too large. Choose Use excerpt in File actions.',{exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Preview attached oversized.png (preview)',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Remove oversized.png (preview)',exact:true})).toBeVisible();
  await expect(page.getByRole('dialog',{name:'Ask about selected content'})).toHaveCount(0);
- await page.getByRole('button',{name:'File actions',exact:true}).click();
- await page.getByRole('button',{name:'Use excerpt',exact:true}).click();
- const question=page.getByRole('dialog',{name:'Ask about selected content'}),image=question.getByRole('img',{name:'Image for question review'});
- await expect.poll(()=>image.evaluate((element:HTMLImageElement)=>element.complete&&element.naturalWidth===1536&&element.naturalHeight===1536)).toBe(true);
- await question.getByRole('textbox',{name:'Content excerpt'}).fill('The large image');await expect(question.getByRole('checkbox')).toHaveCount(0);
+ await expect(page.getByRole('textbox',{name:'Message Alpha',exact:true})).toHaveValue('Explain this file');
  expect(await fileQuestionEffects(page)).toEqual({reads:1,retains:0,sends:0});
- await question.getByRole('button',{name:'Use in conversation'}).click();await expect(question).toHaveCount(0);
- await expect(page.getByRole('textbox',{name:'Message Alpha',exact:true})).toHaveValue('What does this mean?\n\nSource: oversized.png\n\nThe large image');
- expect(await fileQuestionEffects(page)).toEqual({reads:1,retains:0,sends:0});
+
 });
 test('renaming a browsed file preserves bytes and does not create an obsolete Recent grant',async({page})=>{
  await importAndOpen(page,'report.txt','Quarterly');expect(await recentNames(page)).toEqual([]);

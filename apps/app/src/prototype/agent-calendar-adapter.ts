@@ -52,9 +52,9 @@ const OWNER_ERRORS:[RegExp,string][]=[
 ];
 /** The shared calendar API client's refusals are worded by Alpha (ui/calendar/calendar-api-messages.ts); a native
  * rejection Alpha has no words for reads as 'Couldn’t update', and Alpha's own runtime errors keep their message. */
-function calendarErrorText(error:unknown):string{
+function calendarErrorText(error:unknown,fallback="Couldn’t update"):string{
  const message=errorText(error,typeof error==='string'?error:'');
- return OWNER_ERRORS.find(([pattern])=>pattern.test(message))?.[1]??refusalText(typeof error==='string'?new Error(error):error,CALENDAR_API_REFUSALS,'Couldn’t update');
+ return OWNER_ERRORS.find(([pattern])=>pattern.test(message))?.[1]??refusalText(typeof error==='string'?new Error(error):error,CALENDAR_API_REFUSALS,fallback);
 }
 const SCOPE_LABEL:Record<string,string>={instance:'This occurrence',this_and_following:'This and following',series:'Entire series'};
 const nativeCalendarScope=(shell:Bag|undefined)=>!!shell&&Capacitor.getPlatform()==='android'&&shell.vget('calendar').calendarAuthority==='android-native';
@@ -118,7 +118,7 @@ export function installAgentCalendarAdapter(Component:any,views:Bag){
  const refresh=(force=false)=>{if(!owner?.live||!controller)return;const target=port(),window=range(owner.S().view==='calendar'?owner.vget('calendar'):{}),key=JSON.stringify([target?.identity,target?.scope,window]);if(!force&&requestKey===key)return;requestKey=key;if(!target?.current()){if(!bootstrapCurrent()||controller.state.savedAt==null)void controller.refresh(window);void restoreBeforeAgent(window);return;}void controller.refresh(window);};
  // One end-time wake, foreground events, and a one-minute re-read while Calendar is the open, visible view. No background reads.
  const POLL_MS=60000;let poll:ReturnType<typeof setInterval>|undefined;
- const pollOpenCalendar=()=>{if(!owner?.live||!controller||document.hidden||owner.S().view!=='calendar'||deviceCalendarScope(owner)||controller.state.mutating||!port()?.current())return;refresh(true);};
+ const pollOpenCalendar=()=>{if(!owner?.live||!controller||document.hidden||owner.S().view!=='calendar'||owner.vget('calendar').open||deviceCalendarScope(owner)||controller.state.mutating||!port()?.current())return;refresh(true);};
  const readNext=()=>{if(!owner?.live||!controller)return;controller.invalidateNext();if(document.hidden)return;refresh(true);};
  const watchNextEnd=()=>{clearTimeout(nextEnded);const end=Date.parse(controller?.state.next?.event?.endAt??'');if(end>Date.now())nextEnded=setTimeout(readNext,Math.min(end-Date.now()+1000,2147483647));};
  const resumed=()=>{if(document.hidden)deletes.leave();else if(owner?.live)readNext();};

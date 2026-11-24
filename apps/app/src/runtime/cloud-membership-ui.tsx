@@ -7,8 +7,6 @@ import {useCloudSubscriptionSummary} from '../ui/components/settings/cloud-subsc
 export type MembershipBalance='checking'|'zero'|'funded'|'member'|'unavailable';
 /** A plan is needed before the account can use Cloud inference. */
 export const FUNDING_NEEDED='Plan needed';
-/** Cloud declined a turn for this account's billing: the chat's one answer, beside this sheet. */
-export function fundingRefusedReply(serviceName:string):string {void serviceName;return 'Billing declined';}
 function endLabel(endsAt:number):string {
  const date=new Date(endsAt).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'});
  const days=Math.ceil((endsAt-Date.now())/86400000);

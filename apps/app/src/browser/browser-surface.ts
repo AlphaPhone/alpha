@@ -11,8 +11,9 @@ type BookmarkList = {urls: string[]; entries: {url: string; title?: string}[]};
 export const bookmarkTitle=(title:unknown)=>String(title??'').replace(/[\x00-\x1f\x7f-\x9f]/g,' ').trim().slice(0,300);
 function bookmarkRow(row:unknown):{url:string;title?:string}|undefined{
  if(typeof row==='string')return {url:row};
- if(!row||typeof row!=='object'||typeof (row as Bag).url!=='string')return undefined;
- const title=bookmarkTitle((row as Bag).title);return title?{url:(row as Bag).url,title}:{url:(row as Bag).url};
+ const url=row&&typeof row==='object'?(row as Bag).url:undefined;
+ if(typeof url!=='string')return undefined;
+ const title=bookmarkTitle((row as Bag).title);return title?{url,title}:{url};
 }
 type Bag=Record<string,unknown>;
 function bookmarkList(rows:BookmarkRow[]):BookmarkList{const entries=rows.flatMap(row=>{const entry=bookmarkRow(row);return entry?[entry]:[];});return {urls:entries.map(entry=>entry.url),entries};}

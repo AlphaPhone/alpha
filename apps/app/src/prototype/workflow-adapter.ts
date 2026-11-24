@@ -306,7 +306,14 @@ export function installWorkflowAdapter(Component:any,views:Bag){
    if(runHidden(result.run.id,result.run.workflowId)){const token=peeked.token??null;heldTap=token?{token,question:!!peeked.question}:null;tapUnopened=false;publish();if(request==='user'||token!==toastedTap){toastedTap=token;shell.toast('Other account');}return;}
    heldTap=null;tapUnopened=false;
    if(result.question){
-    noticeQuestion=reviewWorkflowNoticeQuestion({result,current,recheck:()=>resolveWorkflowTap(native,bound,signal),consume:()=>native.consumeWorkflowTap({token:result.token,noticeRevision:result.notice?.revision}),discard:()=>native.consumeWorkflowTap({token:result.token,discard:true}),compose:draft=>shell.api(shell.S().view).composeContentQuestion(draft),report:message=>shell.toast(message),closed:()=>{noticeQuestion=undefined;}});
+    const hold=()=>{if(current()){heldTap={token:result.token,question:true};publish();}};
+    noticeQuestion=reviewWorkflowNoticeQuestion({
+     result,current,recheck:()=>resolveWorkflowTap(native,bound,signal),
+     consume:()=>native.consumeWorkflowTap({token:result.token,noticeRevision:result.notice?.revision}),
+     attach:selection=>shell.api(shell.S().view).attachSelectedFile(selection),report:message=>shell.toast(message),
+     closed:attached=>{noticeQuestion=undefined;if(!attached)hold();},
+    });
+    if(!noticeQuestion)hold();
     return;
    }
    // This run is already open from the same tap; only its consume is repeated.

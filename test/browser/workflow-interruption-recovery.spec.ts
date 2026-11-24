@@ -190,7 +190,7 @@ test('a new-workflow save that never reached the agent can be sent again once an
 });
 
 test('an edit the agent refused because the workflow changed saves nothing and unlocks the draft',async({page})=>{
- await setup(page);await seed(page);await openFixture(page);await page.getByRole('button',{name:'Change',exact:true}).click();await expect(page.getByRole('button',{name:'Add Read step',exact:true})).toBeVisible();
+ await setup(page);await seed(page);await openFixture(page);await page.getByLabel('Workflow actions',{exact:true}).click();await page.getByRole('button',{name:'Change',exact:true}).click();await expect(page.getByRole('button',{name:'Add Read step',exact:true})).toBeVisible();
  await page.getByRole('textbox',{name:'Workflow name',exact:true}).fill('Edited too late');await rule(page,{method:'POST',suffix:'/phone-spec',kind:'refuse-typed',times:1});
  await page.getByRole('button',{name:'Save workflow',exact:true}).click();await expect(page.getByLabel('Workflow save review',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Save workflow',exact:true}).click();
  await expect(page.locator('[role=status]').filter({hasText:'Changed on agent'})).toBeVisible();
@@ -199,7 +199,7 @@ test('an edit the agent refused because the workflow changed saves nothing and u
  await expect(page.getByRole('textbox',{name:'Workflow name',exact:true})).toHaveValue('Edited too late');expect(await posts(page,'/phone-spec')).toHaveLength(1);
  expect((await stored(page)).workflows.map(row=>row.name)).toEqual(['Execution fixture']);
  await page.getByRole('button',{name:'Discard local draft',exact:true}).click();await page.getByRole('button',{name:'Confirm discard local draft',exact:true}).click();
- await page.getByRole('button',{name:'Change',exact:true}).click();await expect(page.getByRole('textbox',{name:'Workflow name',exact:true})).toHaveValue('Execution fixture');
+ await page.getByLabel('Workflow actions',{exact:true}).click();await page.getByRole('button',{name:'Change',exact:true}).click();await expect(page.getByRole('textbox',{name:'Workflow name',exact:true})).toHaveValue('Execution fixture');
 });
 
 test('a typed workflow is presented as manual-trigger only: no schedule is offered, implied or enabled',async({page})=>{
@@ -228,19 +228,19 @@ test('editing while a run awaits approval leaves that run on its reviewed versio
  await setup(page);const saved=await seed(page,'phone');await openFixture(page);await runNow(page).click();await runNow(page).click();
  await expect(page.getByRole('button',{name:'Cancel run',exact:true})).toBeVisible();await expect(page.getByText('Waiting for approval',{exact:true}).first()).toBeVisible();
  await page.getByRole('button',{name:'Back to Execution fixture',exact:true}).click();
- await page.getByRole('button',{name:'Change',exact:true}).click();await expect(page.getByText('Run in progress',{exact:true}).first()).toBeVisible();
+ await page.getByLabel('Workflow actions',{exact:true}).click();await page.getByRole('button',{name:'Change',exact:true}).click();await expect(page.getByText('Run in progress',{exact:true}).first()).toBeVisible();
  await page.locator('[data-alpha-subview="workflows-builder"] summary').filter({hasText:'More options'}).click();await page.getByRole('textbox',{name:'Workflow description',exact:true}).fill('Edited during a pending run');await page.getByRole('button',{name:'Save workflow',exact:true}).click();await expect(page.getByLabel('Workflow save review',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Save workflow',exact:true}).click();
  await expect(page.getByText('Edited during a pending run',{exact:true})).toBeVisible();await expect(runNow(page)).toBeVisible();
  // One workflow at a new version; the waiting run is untouched and nothing new was started by the edit.
  const data=await stored(page);expect(data.workflows).toHaveLength(1);expect(data.workflows[0].versionId).not.toBe(saved.versionId);expect(data.runs.map(run=>[run.workflowVersionId,run.finished])).toEqual([[saved.versionId,false]]);expect(await posts(page,'/run')).toHaveLength(1);
  await page.getByRole('button',{name:'Waiting for approval execution',exact:true}).click();await expect(page.getByText('Older version',{exact:true})).toBeVisible();await page.locator('.workflow-run-details[aria-label="Workflow execution details"] > summary').click();await expect(page.getByText(saved.versionId,{exact:true})).toBeVisible();
  // Removal is refused while it is unfinished; the explicit disposition is cancelling that exact run.
- await page.getByRole('button',{name:'Back to Execution fixture',exact:true}).click();await page.getByRole('button',{name:'Remove workflow',exact:true}).click();
+ await page.getByRole('button',{name:'Back to Execution fixture',exact:true}).click();await page.getByLabel('Workflow actions',{exact:true}).click();await page.getByRole('button',{name:'Remove workflow',exact:true}).click();
  await expect(page.getByText('Cancel runs first',{exact:true}).first()).toBeVisible();expect(await posts(page,'/lifecycle')).toHaveLength(0);
  await page.getByRole('button',{name:'Waiting for approval execution',exact:true}).click();await page.getByRole('button',{name:'Cancel run',exact:true}).click();await page.getByRole('button',{name:'Confirm cancel',exact:true}).click();
  await expect.poll(async()=>(await stored(page)).runs.map(run=>run.finished)).toEqual([true]);
  const notes=await page.evaluate(async()=>(await (await import('/src/runtime/browser-notes-document.ts')).browserNotesPort.read())?.raw||'');expect(notes).not.toContain('Pending workflow note');
- await page.getByRole('button',{name:'Back to Execution fixture',exact:true}).click();await page.getByRole('button',{name:'Remove workflow',exact:true}).click();
+ await page.getByRole('button',{name:'Back to Execution fixture',exact:true}).click();await page.getByLabel('Workflow actions',{exact:true}).click();await page.getByRole('button',{name:'Remove workflow',exact:true}).click();
  await expect(page.getByText('Keeps history; stops future runs.',{exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:'Remove',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Cancel',exact:true})).toBeVisible();
  expect(await posts(page,'/lifecycle')).toHaveLength(0);expect(await posts(page,'/run')).toHaveLength(1);

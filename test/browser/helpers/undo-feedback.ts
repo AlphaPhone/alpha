@@ -18,11 +18,11 @@ async function releaseToastInput(page:Page){
  if((await toastObservation(page)).focusedInside)await page.keyboard.press('Tab');
  await expect.poll(async()=>{const state=await toastObservation(page);return state.focusedInside||state.held;}).toBe(false);
 }
-/** The caller installed/paused its clock before the deletion. Preserve the full real 10 s offer. */
-export async function finishUndoWindow(page:Page){
+/** The caller installed/paused its clock before the deletion. Preserve the full product offer. */
+export async function finishUndoWindow(page:Page,durationMs=10_000){
  await releaseToastInput(page);
  const undo=page.locator('[data-alpha-toast]').getByRole('button',{name:'Undo',exact:true});
  await expect(undo).toBeVisible();
- await page.clock.fastForward(9999);await expect(undo).toBeVisible();
+ await page.clock.fastForward(durationMs-1);await expect(undo).toBeVisible();
  await page.clock.fastForward(1);
 }

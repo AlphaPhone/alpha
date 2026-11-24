@@ -9,6 +9,48 @@ import {
 
 import { openRetainedNativeNotes } from './helpers/native-notes';
 
+for (const outgoing of ['clear','different body','saved draft'] as const) {
+  test('Gmail with review off handles '+outgoing+' without a review card', async ({page})=>{
+    const foreign=await fenceNetwork(page);
+    await flagOffAndroid(page,{
+      accounts:[{connectionId:'owned-grant',email:'owner@example.invalid',connected:true,messages:[]}],
+      emailDraft:{to:['crew@example.invalid'],subject:'Shoot plan',body:'Bring the tripod.'},
+    });
+    await residentHome(page);
+    await button(page,'Open conversation').click();
+    const composer=page.getByRole('textbox',{name:'Message Alpha',exact:true});
+    if(outgoing==='saved draft'){
+      await composer.fill('Draft an email to crew@example.invalid about the shoot.');
+      await composer.press('Enter');
+      await expect(page.locator('[data-alpha-message-text]').filter({hasText:/Email draft saved/})).toBeVisible({timeout:15000});
+      expect(await harness(page,f=>f.mail.dispatches.length)).toBe(0);
+      await composer.fill('Send this email.');
+    }else await composer.fill('Send an email to crew@example.invalid with subject Shoot plan saying '+(outgoing==='clear'?'Bring the tripod.':'Bring the notebook.'));
+    await composer.press('Enter');
+    if(outgoing==='different body'){
+      await expect(page.locator('[data-alpha-message-text]').filter({hasText:/^Tell me the exact email address, subject and message before I send\.$/})).toBeVisible({timeout:15000});
+      expect(await harness(page,f=>f.mail.dispatches.length)).toBe(0);
+    }else{
+      await expect(page.locator('[data-alpha-message-text]').filter({hasText:/^Email sent\.$/})).toBeVisible({timeout:15000});
+      expect(await harness(page,f=>f.mail.dispatches.length)).toBe(1);
+      if(outgoing==='saved draft'){
+        expect(await harness(page,f=>f.posts)).toEqual(['Draft an email to crew@example.invalid about the shoot.']);
+        await composer.fill('Send this email.');
+        await composer.press('Enter');
+        await expect(page.locator('[data-alpha-message-text]').filter({hasText:/Which email draft should I send/})).toBeVisible();
+        expect(await harness(page,f=>({posts:f.posts.length,sends:f.mail.dispatches.length}))).toEqual({posts:1,sends:1});
+        await page.reload();
+        await residentHome(page);
+        await button(page,'Open conversation').click();
+        await expect(page.locator('[data-alpha-message-text]').filter({hasText:/Sent\.\s+To: crew@example.invalid\s+Subject: Shoot plan/})).toBeVisible();
+        expect(await harness(page,f=>f.mail.dispatches.length)).toBe(0);
+      }
+    }
+    await expect(page.getByRole('region',{name:'Email draft',exact:true})).toHaveCount(0);
+    expect(foreign).toEqual([]);
+  });
+}
+
 for (const decision of [
   'send',
   'discard',
@@ -22,6 +64,7 @@ for (const decision of [
       decision,
     async ({ page }) => {
       const foreign = await fenceNetwork(page);
+      await page.addInitScript(()=>localStorage.setItem('alpha.browser.device.v1',JSON.stringify({askBeforeAgentActions:true})));
       await flagOffAndroid(page, {
         accounts: [
           {

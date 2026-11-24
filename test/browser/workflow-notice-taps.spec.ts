@@ -4,7 +4,7 @@ import {installResidentAgentPlugin} from './helpers/resident-agent-plugin';
 import {test,expect} from '@playwright/test';
 const ownerFence=(ownerId:string)=>({owner:{origin:'https://device.alpha.invalid',ownerId,agentId:'fixture-agent'}});
 // Production renderer and authenticated connection; controlled transport/native queue, no real notification.
-for(const scenario of ['lookup-unavailable','lookup-unavailable-navigation','ask','ask-cancel','ask-changed','ask-owner','ask-sensitive','two','other-owner','wrong-version','unconfirmed','navigation-race','owner-race','reconnect','owner-change','queue-changed','builder-race','new-tap-during-read'] as const){
+for(const scenario of ['lookup-unavailable','lookup-unavailable-navigation','ask','ask-interrupted','ask-changed','ask-owner','ask-sensitive','two','other-owner','wrong-version','unconfirmed','navigation-race','owner-race','reconnect','owner-change','queue-changed','builder-race','new-tap-during-read'] as const){
  test('scoped native workflow tap '+scenario,async({page})=>{
  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
   await installResidentAgentPlugin(page);
@@ -43,7 +43,7 @@ for(const scenario of ['lookup-unavailable','lookup-unavailable-navigation','ask
      if(method==='request'){
       const path=input.path;let body:any;
       if(input.method==='POST'&&path.startsWith('/api/workflow/'))throw Error('Unexpected effect');
-      if(path.startsWith('/api/workflow/executions/')){f.reads=(f.reads||0)+1;if(f.receiptUnavailable){f.receiptFailures=(f.receiptFailures||0)+1;return {status:503,body:'{"error":"Synthetic retained receipt unavailable"}'};}if(f.queueChanged){f.taps.reverse();f.queueChanged=false;}if(f.hold)await new Promise(r=>f.release=r);body={execution:{id:path.split('/').at(-1),workflowId:'flow',workflowVersionId:f.wrongVersion?'v2':'v1',status:'completed',finished:true,startedAt:'2026-10-01T12:00:00Z',output:'Verified retained result '+path.split('/').at(-1),events:[]}};return {status:200,body:JSON.stringify(body)};}
+      if(path.startsWith('/api/workflow/executions/')){f.reads=(f.reads||0)+1;if(f.receiptUnavailable){f.receiptFailures=(f.receiptFailures||0)+1;return {status:503,body:'{"error":"Synthetic retained receipt unavailable"}'};}if(f.queueChanged){f.taps.reverse();f.queueChanged=false;}if(f.hold)await new Promise(r=>f.release=r);if(f.holdAsk&&f.reads===2)await new Promise(r=>f.releaseAsk=r);body={execution:{id:path.split('/').at(-1),workflowId:'flow',workflowVersionId:f.wrongVersion?'v2':'v1',status:'completed',finished:true,startedAt:'2026-10-01T12:00:00Z',output:'Verified retained result '+path.split('/').at(-1),events:[]}};return {status:200,body:JSON.stringify(body)};}
       if(path==='/api/workflow/workflows/flow')return {status:200,body:JSON.stringify({id:'flow',name:'Notice workflow',versionId:'v1',active:false,steps:[]})};
 
       if(path==='/api/auth/me')body={identity:{kind:'owner',id:f.owner||'fixture-owner'},access:{role:'OWNER',mode:'session'}};
@@ -95,7 +95,10 @@ for(const scenario of ['lookup-unavailable','lookup-unavailable-navigation','ask
   const {connectionController:c}=await import('/src/runtime/connection-ui.tsx');const s=c.getSnapshot().session!,b=c.getWorkflowClient()!,f=(window as any).deliveryFixture;
   const tap=(id:string)=>({scope:b.scope,origin:s.origin,ownerId:s.ownerId,agentId:s.agentId,workflowId:'flow',runId:id,versionId:'v1',token:id,operationId:'operation-'+id,bindingHash:'b'.repeat(64),retained:true});
   f.pendingReads=0;f.taps=scenario==='two'?[tap('run1')]:[tap('run1'),tap('run2')];f.second=tap('run2');if(scenario==='other-owner')f.taps[0].ownerId='another-owner';if(scenario==='wrong-version')f.wrongVersion=true;if(scenario==='queue-changed')f.queueChanged=true;if(scenario==='unconfirmed')f.taps[0].retained=false;if(['navigation-race','owner-race','reconnect','owner-change','builder-race','new-tap-during-read'].includes(scenario))f.hold=true;
-  if(scenario.startsWith('ask')){f.taps=[{...tap('run1'),question:true,notice:{id:'notice1',revision:'revision1',source:'own',appLabel:'Alpha Phone',title:'Completed task',text:'Public result text'}}];}
+  if(scenario.startsWith('ask')){
+   f.holdAsk=['ask-interrupted','ask-changed','ask-owner'].includes(scenario);
+   f.taps=[{...tap('run1'),question:true,notice:{id:'notice1',revision:'revision1',source:'own',appLabel:'Alpha Phone',title:'Completed task',text:scenario==='ask-sensitive'?'Your verification code is 123456':'Public result text'}}];
+  }
   document.dispatchEvent(new Event('visibilitychange'));
  },scenario);
  if(scenario.startsWith('lookup-unavailable')){
@@ -139,31 +142,25 @@ for(const scenario of ['lookup-unavailable','lookup-unavailable-navigation','ask
   await expect(page.getByText('Verified retained result run1',{exact:true})).toBeVisible();
   await expect.poll(()=>page.evaluate(()=>(window as any).deliveryFixture.consumed||[])).toEqual(['run1']);
  }else if(scenario.startsWith('ask')){
-  const review=page.getByRole('dialog',{name:'Ask about selected content'});
-  await expect(review.getByRole('textbox',{name:'Content excerpt'})).toHaveValue('Completed task\nPublic result text');
-  expect(await page.evaluate(()=>(window as any).deliveryFixture.consumed||[])).toEqual([]);
-  if(scenario==='ask-cancel'){
-   await review.getByRole('button',{name:'Cancel',exact:true}).click();await expect(review).toHaveCount(0);
-   // Cancel is the user's decision: the tap is settled natively and the review does not reopen on return.
-   await expect.poll(()=>page.evaluate(()=>(window as any).deliveryFixture.discarded||[])).toEqual(['run1']);
-   const reads=await page.evaluate(()=>{const f=(window as any).deliveryFixture,before=f.pendingReads;document.dispatchEvent(new Event('visibilitychange'));return before;});
-   await expect.poll(()=>page.evaluate(()=>(window as any).deliveryFixture.pendingReads)).toBeGreaterThan(reads);
-   await expect(review).toHaveCount(0);
-  }
-  else if(scenario==='ask-owner'){await page.evaluate(async()=>{const {connectionController:c}=await import('/src/runtime/connection-ui.tsx');await c.offline();});await expect(review).toHaveCount(0);}
-  else {
-   if(scenario==='ask-sensitive'){await review.getByRole('textbox',{name:'Content excerpt'}).fill('Your verification code is 123456');await review.getByRole('button',{name:'Use in conversation',exact:true}).click();await expect(review.getByRole('status')).toContainText('Remove secrets first');await review.getByRole('button',{name:'Cancel',exact:true}).click();}
-   else {
-    await review.getByRole('textbox',{name:'Content excerpt'}).fill('Reviewed public text');
+  const chip=page.getByRole('button',{name:'Remove Alpha Phone notification.txt',exact:true});
+  if(scenario==='ask'){
+   await expect(chip).toBeVisible();
+   await expect(page.getByRole('textbox',{name:'Message Alpha',exact:true})).toHaveValue('Help me with this notification.');
+   await expect.poll(()=>page.evaluate(()=>(window as any).deliveryFixture.consumed||[])).toEqual(['run1']);
+  }else{
+   if(scenario==='ask-sensitive')await expect(page.getByText('Gone',{exact:true})).toBeVisible();
+   else{
+    await expect.poll(()=>page.evaluate(()=>Boolean((window as any).deliveryFixture.releaseAsk))).toBe(true);
     if(scenario==='ask-changed')await page.evaluate(()=>{(window as any).deliveryFixture.taps[0].notice.text='Replaced text';});
-    await review.getByRole('button',{name:'Use in conversation',exact:true}).click();
-    if(scenario==='ask'){await expect(page.getByRole('textbox',{name:'Message Alpha',exact:true})).toHaveValue('Help me with this notification.\n\nSource: Alpha Phone notification\n\nReviewed public text');await expect.poll(()=>page.evaluate(()=>(window as any).deliveryFixture.consumed||[])).toEqual(['run1']);}
-    else await expect(page.getByText('Changed',{exact:true})).toBeVisible();
+    if(scenario==='ask-interrupted')await page.evaluate(()=>window.dispatchEvent(new Event('launcher-home')));
+    if(scenario==='ask-owner')await page.evaluate(async()=>{const {connectionController:c}=await import('/src/runtime/connection-ui.tsx');await c.offline();});
+    await page.evaluate(()=>(window as any).deliveryFixture.releaseAsk());
+    if(scenario==='ask-changed')await expect(page.getByText('Changed',{exact:true})).toBeVisible();
    }
+   await expect(chip).toHaveCount(0);
+   expect(await page.evaluate(()=>({consumed:(window as any).deliveryFixture.consumed||[],discarded:(window as any).deliveryFixture.discarded||[]}))).toEqual({consumed:[],discarded:[]});
   }
-  if(scenario!=='ask')expect(await page.evaluate(()=>(window as any).deliveryFixture.consumed||[])).toEqual([]);
-  if(scenario==='ask-sensitive')await expect.poll(()=>page.evaluate(()=>(window as any).deliveryFixture.discarded||[])).toEqual(['run1']);
-  if(scenario==='ask-owner')expect(await page.evaluate(()=>(window as any).deliveryFixture.discarded||[])).toEqual([]);
+  await expect(page.getByRole('dialog',{name:'Ask about selected content'})).toHaveCount(0);
  }else if(scenario==='two'){
   await expect(page.getByText('Verified retained result run1',{exact:true})).toBeVisible();await expect.poll(()=>page.evaluate(()=>(window as any).deliveryFixture.consumed?.length)).toBe(1);
   await page.evaluate(()=>{const f=(window as any).deliveryFixture;f.taps.push(f.second);document.dispatchEvent(new Event('visibilitychange'));});

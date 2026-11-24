@@ -15,7 +15,6 @@ import {errorNotice,ERROR_TOAST} from '../runtime/error-notice';
 import type {MailAttachment} from '../runtime/inbox-attachment';
 import {readMediaCopyIntent,admitMediaCopyIntent,acknowledgeMediaCopyIntent,mediaCopyIntentDocument,type MediaCopyIntent} from '../runtime/media-copy-intent';
 import {createInlineModal} from '../runtime/inline-modal';
-import {reviewContentQuestion} from '../browser/content-question';
 import {createCaptureRevisions,captureUnchanged} from './context-selection';
 import {createDeviceLibrary,setMainLibraryHost,LibraryAgentRefusal,runHostItemsRequest,type HostOperation} from './photo-library-adapter';
 import type {PhotosViewResult} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/photos-view-contract.ts';
@@ -139,7 +138,7 @@ export function cameraFrameQuestionRequested(text:unknown):boolean{
  if(typeof text!=='string'||text.length>200)return false;
  return FRAME_QUESTION.test(text.toLowerCase().replace(/[‘’]/g,"'").trim());
 }
-/** Opens the reviewed question on one unsaved frame of the live preview, with the asked question. */
+/** Stages one unsaved frame with the question in the chat composer. */
 export function askAboutCameraFrame(question:string):boolean{return frameQuestion?.(question)??false;}
 const browserMode=!Capacitor.isNativePlatform();
 const camera:typeof nativeCamera=browserMode?browserCamera:nativeCamera;
@@ -1397,15 +1396,23 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       closeScan=openScanReview(image,(text,id)=>owner.saveScannedNote?.(text,id)??Promise.resolve(false),draft=>{if(disposed||!owner.isActive())return false;return owner.reviewScannedCalendarDraft?.(draft)??false;},'selected');
     });
   }
-  function askCameraFrame(owner:Bag,question?:string):boolean{
+  function askCameraFrame(owner:Bag,question='What am I looking at?'):boolean{
     if(session.recording||session.recordingStarting||session.finalizing||session.capturing||session.phase!=='ready')return false;
-    closeQuestion?.();const token=session.token();
-    closeQuestion=reviewContentQuestion({name:'Camera frame',text:'',question,current:()=>session.current(token),compose:draft=>owner.composeContentQuestion(draft),image:async signal=>{const photo=await camera.capturePhoto({format:'jpeg',quality:85,saveToGallery:false});signal.throwIfAborted();if(!photo.base64)throw Error('Camera frame unavailable.');return new Blob([Uint8Array.from(atob(photo.base64),char=>char.charCodeAt(0))],{type:'image/jpeg'});}});
+    const token=session.token();
+    void owner.attachSelectedFile({
+      current:()=>session.current(token)&&cameraViewVisible(),
+      prompt:question,
+      read:async(current:()=>boolean)=>{
+        const photo=await camera.capturePhoto({format:'jpeg',quality:85,saveToGallery:false});
+        if(!current())return;
+        if(!photo.base64)throw Error('Camera frame unavailable.');
+        return decodedFile({name:'Camera frame.jpg',mimeType:'image/jpeg',dataBase64:photo.base64});
+      },
+    });
     return true;
   }
   frameQuestion=question=>{
     const owner=api;if(disposed||!owner||!cameraViewVisible())return false;
-    // The conversation stays where it is: the frame review is a modal dialog above it.
     return askCameraFrame(owner,question);
   };
   /** The reviewed item is still the listed one at the revision the review started with:

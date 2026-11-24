@@ -5,7 +5,7 @@ export class BrowserReviews {
   private pending = new Map<string, () => void>();
   cancel(id: string) { this.pending.get(id)?.(); }
   cancelAll() { for (const cancel of [...this.pending.values()]) cancel(); }
-  async confirm(id: string, title: string, details: string, confirmLabel = 'Confirm', options?: {signal?:AbortSignal;current?:()=>boolean}): Promise<boolean> {
+  async confirm(id: string, title: string, details: string, confirmLabel = 'Confirm', options?: {signal?:AbortSignal;current?:()=>boolean;cancelLabel?:string;destructive?:boolean}): Promise<boolean> {
     const current=()=>{try{return !options?.signal?.aborted&&options?.current?.()!==false;}catch{return false;}};
     if (this.pending.has(id) || !current() || document.hidden || document.documentElement.dataset.devBackground==='true' || browserScreenLocked()) return false;
     const previous = document.activeElement as HTMLElement | null;
@@ -17,10 +17,10 @@ export class BrowserReviews {
 
       const heading = document.createElement('h2'); heading.textContent = title;
       const body = document.createElement('p'); body.textContent = details;
-      const cancel = document.createElement('button'); cancel.textContent = 'Cancel';
+      const cancel = document.createElement('button'); cancel.textContent = options?.cancelLabel ?? 'Cancel';
       const approve = document.createElement('button'); approve.textContent = confirmLabel;
       // An action that removes or overwrites something is set apart from Cancel (review.css).
-      if (/^(Delete|Discard|Erase|Remove|Replace|Clear|Reset|Sign out)\b/.test(confirmLabel)) approve.dataset.destructive = '';
+      if (options?.destructive || /^(Delete|Discard|Erase|Remove|Replace|Clear|Reset|Sign out)\b/.test(confirmLabel)) approve.dataset.destructive = '';
 
       let settled = false;
       const finish = (confirmed: boolean) => {

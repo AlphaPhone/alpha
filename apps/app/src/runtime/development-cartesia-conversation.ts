@@ -141,7 +141,15 @@ export async function developmentCartesiaConversation(input:{binding:VoiceConver
     completedRequest={messageId,traceId,proof};
     remember(performedMessages,messageId);
     remember(performedTurns,traceId);
-    navigationTask=navigationTask.then(async()=>{current();if(currentTurn!==traceId||!directActions)return;const receipts=await connectionController.performVoiceRequestedActions(input.binding,messageId,lifecycle.signal,undefined,proof);current();for(const receipt of receipts)input.onActionResult?.(receipt.summary);reconcile();}).catch(error=>{if(!stopped)input.onError(asError(error,'Voice action could not be verified.'));});
+    navigationTask=navigationTask.then(async()=>{
+     current();if(currentTurn!==traceId||!directActions)return;
+     const receipts=await connectionController.performVoiceRequestedActions(input.binding,messageId,lifecycle.signal,undefined,proof);
+     proof.current();
+     for(const receipt of receipts){
+      input.onActionResult?.(receipt.summary);
+     }
+     reconcile();
+    }).catch(error=>{if(!stopped)input.onError(asError(error,'Voice action could not be verified.'));});
    }
 
   },

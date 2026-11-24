@@ -445,7 +445,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
       cloudCredit:cloudCredit(directionsOpen),
       hasNativeMap:true, globalBasemap:globalMap, regionalBasemap:!!region && basemap === region,
       cloudBasemap:!!raster && basemap === raster && !googleMaps, googleMaps, googleMapsLogo,
-      mapInfoControl:!googleMaps,
+      mapInfoControl:!googleMaps && !!(region || coverage),
       googleMapMissing:googleMaps && !basemap,
       mapLabel:googleMaps ? 'Google Maps' : globalMap ? 'World map' : basemap === region && region ? 'Regional map' : basemap ? 'Cloud map' : 'Map',
       mapAttribution:region && basemap === region ? region.attribution : raster && basemap === raster ? (planeBasemap === raster && mapCopyright || raster.attribution) : '',
@@ -476,7 +476,6 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
       nativeLocationLabel:status.locationBusy?status.locationLabel:'My location',nativeLocationDenied:status.locationDenied,nativeStatusControls:status.controls,
       nativeLocationHelp:status.locationHelp,
       nativeLocationSettings:()=>{if(!active())return;void device.openSettings({page:'privacy'}).catch(()=>{if(!disposed&&currentApi.isActive())screen.notify('Couldn’t open settings');});},
-      nativeManualLocation:()=>{if(!active())return;screen.manualLocation();queueMicrotask(()=>{if(active())document.querySelector<HTMLInputElement>('input[aria-label="Search places"]')?.focus();});},
       nativeMapRetry:status.mapRetry,
       retryNativeMap:()=>{
         if(!active())return;

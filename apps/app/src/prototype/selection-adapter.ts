@@ -1,13 +1,13 @@
-import {decodedFile,type SelectedChatFile} from './chat-attachment-files';
+import {acceptsChatAttachment,chatAttachmentFileLimit,decodedFile,type SelectedChatFile} from './chat-attachment-files';
 import {reviewFileEmail} from './file-email-review';
 import {AttachmentNotice} from '../ui/mailbox/drafts-controller';
 import {registerPlugin} from '../platform-plugins';
 import {reviewMailAttachment} from '../runtime/inbox-attachment';
-import type {DocumentSourceLink as Source} from '../../../../.eliza/client-features/plugins/plugin-files/src/documents/source-links.ts';
+import {MAX_CHAT_ATTACHMENT_NAME_LENGTH} from '../../../../.eliza/client-features/packages/core/src/chat-upload-limits.ts';
+import type {ViewContext} from '../runtime/alpha-client';
 import type {AlphaMailAttachmentsPlugin} from '../native/alpha-mail-attachments';
 import type {AlphaFilesPlugin,AlphaFilesBrowserMethods} from '../native/alpha-files';
-const sourceFiles=registerPlugin<Pick<AlphaMailAttachmentsPlugin,'readSelected'|'retainSourceReference'>>('AlphaMailAttachments');
-import {reviewContentQuestion,SourceUnavailableError} from '../browser/content-question';
+const sourceFiles=registerPlugin<Pick<AlphaMailAttachmentsPlugin,'readSelected'>>('AlphaMailAttachments');
 import {sensitiveReadingText} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-reading.ts';
 import { installFilesBrowserAdapter } from '../ui/files/files-browser-adapter.ts';
 import { formatSize, selectedPreviewText, shortDate, typeLabel } from '../ui/files/storage-presentation.ts';
@@ -19,7 +19,7 @@ import { createInlineModal } from '../runtime/inline-modal';
 import {ERROR_TOAST} from '../runtime/error-notice';
 
 type Bag = Record<string, any>;
-type Selection = { result: NativeResult; status: string; text?: string; pdf?: {page:number;count:number;image:string}; epoch: number; renames?: number; mediaFailed?:boolean; excerptOnly?:'size'|'sensitive' };
+type Selection = { result: NativeResult; status: string; text?: string; pdf?: {page:number;count:number;image:string}; epoch: number; renames?: number; mediaFailed?:boolean; sensitive?: boolean };
 
 function previewMedia(result:NativeResult) {
   const native=Capacitor.isNativePlatform(),uri=result.uri,mime=result.mimeType||'';
@@ -59,12 +59,12 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
   };
   const marker = '__native_selected_document';
   const rememberedPicker = (id:string) => filesIndex.list().some(row=>row.selectionId===id&&row.kind==='selected'&&row.status==='ready');
-  let closeQuestion:(()=>void)|undefined;
+  let closeEmail:(()=>void)|undefined;
   const release = (id: string) => { void DailyApps.forgetSelected({ selectionId: id }).catch(() => selectedApi?.toast('Reopen Files')); };
   /** Closing keeps a Recent selection's grant so Recent can reopen it; Forget
    * (or eviction from Recent) is what releases it. */
   const clear = (forget = false) => {
-    closeQuestion?.();closeQuestion=undefined;
+    closeEmail?.();closeEmail=undefined;
     mediaRef(null);
     epoch++;
     const id = current?.result.selectionId;
@@ -77,7 +77,32 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
   };
   const refresh = () => selectedApi?.setView('files', { nativeSelectionEpoch: epoch });
   /** The open selection's exact identity: its picker capability, the epoch it was accepted at and its rename count. */
-  const publish = () => window.dispatchEvent(new CustomEvent('alpha-selected-context', { detail: current?.result.selectionId && current.result.status === 'selected' ? { kind: 'document', id: current.result.selectionId, revision: String(current.epoch) + (current.renames ? '.' + current.renames : '') } : null }));
+  const selectionContext = (selection: Selection | undefined) => selection?.result.selectionId && selection.result.status === 'selected'
+    ? {kind:'document',id:selection.result.selectionId,revision:String(selection.epoch)+(selection.renames ? '.'+selection.renames : '')}
+    : null;
+  const publish = () => window.dispatchEvent(new CustomEvent('alpha-selected-context', {detail:selectionContext(current)}));
+
+  async function readSelected(selected:Selection,stillCurrent:()=>boolean) {
+    const file=await sourceFiles.readSelected({selectionId:selected.result.selectionId!});
+    const checked=await reviewMailAttachment(file);
+    if(!stillCurrent()||checked.sha256!==file.sha256||checked.size!==file.size||
+       file.name!==(selected.result.name||'Selected document')||file.mimeType!==(selected.result.mimeType||'application/octet-stream')||
+       (file.mimeType==='text/plain'&&selected.text!==undefined&&checked.text?.replace(/^\uFEFF/,'')!==selected.text))
+      throw Error('The file changed. Reopen it before attaching.');
+    return file;
+  }
+
+  views.files.readOpenTextForVoice = async (expected:ViewContext['selectedObject'],assertCurrent:()=>void):Promise<File|undefined> => {
+    const selected=current,identity=selectionContext(selected);
+    if(!selected||!identity||expected?.kind!==identity.kind||expected.id!==identity.id||expected.revision!==identity.revision||
+       selected.result.mimeType!=='text/plain'||!selected.text?.trim()||selected.sensitive)return;
+    const stillOpen=()=>selected===current&&selectedApi?.get('files').open===marker&&!document.hidden;
+    assertCurrent();
+    if(!stillOpen())return;
+    const file=await readSelected(selected,stillOpen);
+    assertCurrent();
+    return decodedFile(file);
+  };
   const open = async (api: Bag, selection:Selection, download=false) => {
     const selectionId = selection.result.selectionId;
     const active=()=>current===selection&&api.isActive()&&!document.hidden;
@@ -106,7 +131,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
       const response = await DailyApps.pdfSelected({selectionId: selected.result.selectionId!, page});
       if (current !== selected) return;
       if (response.status === 'rendered' && (response.imageUri?.startsWith('file://') || (!Capacitor.isNativePlatform() && response.imageUri?.startsWith('blob:'))) && Number.isInteger(response.pageCount) && Number.isInteger(response.page)) {
-        current = {...selected, text:response.text, excerptOnly:selected.excerptOnly ?? (sensitiveReadingText(response.text??'')?'sensitive':undefined), pdf: {page:response.page!, count:response.pageCount!, image:response.imageUri!.startsWith('blob:') ? response.imageUri! : Capacitor.convertFileSrc(response.imageUri!) + '?page=' + page + '&v=' + Date.now()}, status: selectedDocumentText(response, 'PDF loaded')};
+        current = {...selected, text:response.text, sensitive:selected.sensitive || sensitiveReadingText(response.text??''), pdf: {page:response.page!, count:response.pageCount!, image:response.imageUri!.startsWith('blob:') ? response.imageUri! : Capacitor.convertFileSrc(response.imageUri!) + '?page=' + page + '&v=' + Date.now()}, status: selectedDocumentText(response, 'PDF loaded')};
       } else { current = {...selected, pdf: undefined, status: response.status === 'rendered' ? 'PDF preview unavailable' : selectedDocumentText(response, 'PDF preview unavailable')}; }
       refresh();
     } catch { if(current === selected){current={...selected,pdf:undefined,status:'No preview'};refresh();} }
@@ -179,70 +204,75 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
       const image = mime.startsWith('image/') && (uri?.startsWith('content://') || (!Capacitor.isNativePlatform() && uri?.startsWith('blob:'))) ? Capacitor.convertFileSrc(uri) : undefined;
       const close = () => { clear(); api.set({ open: null }); };
       const forget = () => { clear(true); api.set({ open: null }); };
-      const canAsk=selected.result.status==='selected'&&(!!selected.text?.trim()||!!image||!!selected.pdf?.image);
-      const questionCurrent=()=>sameSelection()&&api.isActive()&&api.get(module).open===marker&&!document.hidden;
-      const linkable = !!selected.result.selectionId && ['text/plain','application/pdf','image/png','image/jpeg','image/webp'].includes(mime);
-      const readSelected = async () => {
-        const file = await sourceFiles.readSelected({selectionId:selected.result.selectionId!}).catch(error => {
-          if (error?.code === 'too-large') throw new SourceUnavailableError('This file is too large to link as a source. Turn off the source link to ask without one.');
-          throw error;
-        });
-        const checked = await reviewMailAttachment(file);
-        if (!questionCurrent() || checked.sha256 !== file.sha256 || checked.size !== file.size ||
-            file.name !== name || file.mimeType !== mime ||
-            (mime === 'text/plain' && selected.text !== undefined && checked.text?.replace(/^\uFEFF/, '') !== selected.text)) {
-          throw Error('The file changed. Reopen it before attaching.');
-        }
-        return file;
-      };
-      const link = async (file: Awaited<ReturnType<typeof readSelected>>): Promise<Source> => {
-        const reference = file.sourceReferenceVersion === 1
-          ? (await sourceFiles.retainSourceReference({selectionId:selected.result.selectionId!,sha256:file.sha256})).reference
-          : undefined;
-        if (!questionCurrent()) throw Error('The selected file changed.');
-        return {version:1,name:file.name,mimeType:file.mimeType,sha256:file.sha256,size:file.size,...(reference ? {reference} : {})};
-      };
-      const editExcerpt: SelectedChatFile['edit'] = (compose, current, question) => {
-        if (!current() || !questionCurrent()) return;
-        closeQuestion?.();
-        closeQuestion = reviewContentQuestion({
-          name: selected.pdf ? name+' · page '+(selected.pdf.page+1) : name,
-          text:selected.text??'', question, current:()=>current() && questionCurrent(),
-          validate:text=>!sensitiveReadingText(text), compose,
-          ...(linkable && selected.excerptOnly!=='size' ? {source:async()=>link(await readSelected())} : {}),
-          ...(image||selected.pdf ? {image:async(signal:AbortSignal)=>(await fetch(image||selected.pdf!.image,{signal})).blob()} : {}),
-        });
-      };
+      const questionCurrent=()=>sameSelection()&&api.isActive()&&api.get(module).open===marker&&!document.hidden&&!renameBusy;
+      const fullFile = !!selected.result.selectionId && ['text/plain','application/pdf','image/png','image/jpeg','image/webp'].includes(mime);
+      const imagePreview = selected.mediaFailed ? undefined : selected.pdf?.image || (acceptsChatAttachment(name,mime) ? image : undefined);
+      const canAsk = selected.result.status==='selected' && !selected.sensitive && (!!selected.text?.trim() || !!imagePreview);
       const ask = () => {
         if (!canAsk || !questionCurrent()) return;
-        const review = () => editExcerpt(api.composeContentQuestion,questionCurrent);
-        if (module !== 'files' || !linkable || selected.excerptOnly) {
-          review();
-          return;
-        }
-        closeQuestion?.();
-        api.attachSelectedFile({
-          current:questionCurrent, edit:editExcerpt,
-          read:async stillCurrent=>{
-            try {
-              const file=await readSelected();
-              if (!stillCurrent()) return undefined;
-              return decodedFile(file);
-            } catch(error) {
-              if (!(error instanceof SourceUnavailableError)) throw error;
-              if (stillCurrent() && current) {
-                current={...current,excerptOnly:'size'};
-                refresh();
-                api.toast('File too large. Choose Use excerpt in File actions.');
+        closeEmail?.();
+        closeEmail=undefined;
+        return api.attachSelectedFile({
+          current: questionCurrent,
+          read: async stillCurrent => {
+            if (!stillCurrent()) return;
+            if (fullFile) {
+              try {
+                const file = await readSelected(selected,stillCurrent);
+                return decodedFile(file);
+              } catch (error) {
+                if ((error as {code?:string})?.code!=='too-large') throw error;
               }
-              return undefined;
             }
+            if (!stillCurrent()) return;
+            // Use only the bounded, already loaded preview after the full read hits its size cap.
+            const excerpt = selected.text?.slice(0,12000).trim();
+            if (excerpt && sensitiveReadingText(excerpt)) throw Error('This preview contains sensitive text.');
+            const suffix = selected.pdf ? ` (page ${selected.pdf.page+1})` : '';
+            if (excerpt) {
+              const label = `${suffix} (excerpt).txt`;
+              return new File([excerpt],name.slice(0,MAX_CHAT_ATTACHMENT_NAME_LENGTH-label.length)+label,{type:'text/plain'});
+            }
+            if (imagePreview) {
+              const response = await fetch(imagePreview);
+              const type = response.headers.get('content-type')?.split(';',1)[0] || '';
+              const limit = chatAttachmentFileLimit(type);
+              const body = response.body;
+              if (!stillCurrent() || !response.ok || !body || !type.startsWith('image/') || !acceptsChatAttachment(name,type) || Number(response.headers.get('content-length'))>limit) {
+                await body?.cancel();
+                if (!stillCurrent()) return;
+                throw Error('This file has no attachable preview.');
+              }
+              const reader = body.getReader();
+              const chunks: Uint8Array<ArrayBuffer>[] = [];
+              let size = 0;
+              try {
+                while (stillCurrent()) {
+                  const part = await reader.read();
+                  if (!stillCurrent()) return;
+                  if (part.done) break;
+                  size += part.value.byteLength;
+                  if (size>limit) throw Error('This preview is too large to attach.');
+                  chunks.push(part.value);
+                }
+                if (!stillCurrent()) return;
+                if (size) {
+                  const label = `${suffix} (preview)`;
+                  return new File(chunks,name.slice(0,MAX_CHAT_ATTACHMENT_NAME_LENGTH-label.length)+label,{type});
+                }
+              } finally {
+                await reader.cancel();
+                reader.releaseLock();
+              }
+            }
+            throw Error('This file has no attachable preview.');
           },
+          ...(module==='photos' ? {prompt:'Explain this photo'} : {}),
         } satisfies SelectedChatFile);
       };
       const email=()=>{
-        closeQuestion?.();
-        closeQuestion=reviewFileEmail({
+        closeEmail?.();
+        closeEmail=reviewFileEmail({
           read:async()=>{const file=await sourceFiles.readSelected({selectionId:selected.result.selectionId!});if(file.name!==name||file.mimeType!==mime)throw new AttachmentNotice('Selected file changed. Select it again.');return file;},
           current:()=>sameSelection()&&api.isActive()&&api.get(module).open===marker&&!renameBusy,
           target:()=>views.inbox.fileEmailTarget(),insert:(file,token,live)=>views.inbox.attachReviewedFile(file,token,live),
@@ -257,7 +287,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
           canEmail:typeof views.inbox.fileEmailTarget==='function'&&selected.result.status==='selected'&&['text/plain','application/pdf','image/png','image/jpeg','image/webp'].includes(mime),email,
           // Offered only when Messages can take this picture: a PNG or JPEG whose known size is within its limit. readPicture rechecks the bytes.
           canMessage:typeof views.messages?.sharePicture==='function'&&selected.result.status==='selected'&&(mime==='image/png'||mime==='image/jpeg')&&views.messages.pictureFits?.(mime,selected.result.size)===true,
-          message:()=>views.messages.sharePicture(async()=>decodedFile(await readSelected()),questionCurrent),
+          message:()=>views.messages.sharePicture(async()=>decodedFile(await readSelected(selected,questionCurrent)),questionCurrent),
           name, nativeSelectionId:selected.result.selectionId, base: name, ext: '', canForget:true, forget, ...previewMeta(selected.result,mime), d: '',
           textBody: selected.pdf ? '' : selected.text || '', isPdf: !!selected.pdf, pdfImage: selected.pdf?.image || '', pdfLabel: selected.pdf ? 'Page ' + (selected.pdf.page+1) + ' of ' + selected.pdf.count : '', pdfPrevious: () => selected.pdf && selected.pdf.page > 0 ? pdfPage(selected.pdf.page-1,api) : undefined, pdfNext: () => selected.pdf && selected.pdf.page+1 < selected.pdf.count ? pdfPage(selected.pdf.page+1,api) : undefined, pdfHasPrevious: !!selected.pdf && selected.pdf.page > 0, pdfHasNext: !!selected.pdf && selected.pdf.page+1 < selected.pdf.count, paper: '#FFFFFF', isPhoto: false,
           mediaImage:media?.kind==='image',mediaVideo:media?.kind==='video',mediaAudio:media?.kind==='audio',mediaUrl:media?.url,mediaRef,
@@ -266,7 +296,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
           canOpenElsewhere:selected.result.status==='selected'&&!!selected.result.selectionId,
           openElsewhereLabel:Capacitor.isNativePlatform()?'Open in Android':'Download file',openElsewhere:()=>void open(api,selected,!Capacitor.isNativePlatform()),
           renaming: !!st.renaming, notRenaming: !st.renaming, rn: typeof st.rn === 'string' ? st.rn : name, onRn: (event: Event) => api.set({rn:(event.target as HTMLInputElement).value}), saveRn: () => rename(api), rnKey: (event: KeyboardEvent) => {if(event.key === 'Enter'){event.preventDefault();void rename(api);}if(event.key === 'Escape')api.set({renaming:false});}, asking: false, asked: false, canAsk,
-          askLabel: linkable && !selected.excerptOnly ? 'Ask Alpha' : 'Use excerpt', ask, close,
+          askLabel: 'Ask Alpha', ask, close,
           startRename: () => selected.result.status === 'renamed-reselect' ? api.toast('Reselect file') : api.set({renaming:true,rn:name}),
           share: () => share(api), move: () => api.toast('Can’t move here'), del: () => api.toast('Delete in Android'),
         };
@@ -302,7 +332,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
     try {
       const response = await DailyApps.readSelected({ selectionId: result.selectionId });
       if (epoch !== requestEpoch || current?.result.selectionId !== result.selectionId) return;
-      current = { ...current, text: response.status === 'read' ? response.text : undefined, status: selectedPreviewText(response), excerptOnly:response.status==='read'&&sensitiveReadingText(response.text??'')?'sensitive':undefined };
+      current = { ...current, text: response.status === 'read' ? response.text : undefined, status: selectedPreviewText(response), sensitive:response.status==='read'&&sensitiveReadingText(response.text??'') };
       // Native currently returns status "read"; use only a successful text result.
       refresh();
     } catch {

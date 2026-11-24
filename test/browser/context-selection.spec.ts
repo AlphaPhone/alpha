@@ -9,7 +9,7 @@ test.describe.configure({timeout:60_000});
 // ran these tests out of time under load (as in #700).
 test.use({contextOptions:{reducedMotion:'reduce'}});
 // MVP-13: folder, notification and capture questions keep the exact selected identity and
-// revision. A switch, delete or revoke during review adds nothing and never sends a neighbor.
+// revision. A switch, delete or revoke before staging adds nothing and never sends a neighbor.
 const offline=(page:Page)=>page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
 const selectedObject=(page:Page)=>page.evaluate(async()=>(await import('/src/runtime/alpha-client.ts')).alphaClient.getState().context.selectedObject??null);
 const composer=(page:Page)=>page.getByRole('textbox',{name:'Message Alpha',exact:true});
@@ -28,28 +28,48 @@ test.describe('notification',()=>{
  }
  const rows=[{id:'context-first',title:'Call the clinic',body:'Ask about Tuesday'},{id:'context-second',title:'Water the plants',body:'Neighbor reminder'}];
  const ask=(page:Page)=>page.getByRole('button',{name:'Ask Alpha about this Alpha Phone notification',exact:true});
- test('only own notifications offer a question, and the reviewed text is what reaches the draft',async({page})=>{
+ const chip=(page:Page)=>page.getByRole('button',{name:'Remove Alpha Phone notification.txt',exact:true});
+ async function holdRecheck(page:Page){
+  await page.evaluate(async()=>{
+   const {BrowserNotifications}=await import('/src/browser/notifications.ts');
+   const list=BrowserNotifications.prototype.list;
+   const {promise,resolve}=Promise.withResolvers<void>();
+   const state=(window as any).noticeRecheck={started:false,completed:false,release:resolve};
+   const selected=Array.from(document.querySelectorAll('button[aria-label^="Ask Alpha about this"]'))
+    .find(button=>button.parentElement?.textContent?.includes('Call the clinic'));
+   if(!selected)throw Error('Expected the selected reminder action');
+   let armed=false;
+   selected.addEventListener('click',()=>{armed=true;},{capture:true,once:true});
+   BrowserNotifications.prototype.list=async function(){
+    if(!armed)return list.call(this);
+    BrowserNotifications.prototype.list=list;
+    state.started=true;
+    await promise;
+    try{return await list.call(this);}
+    finally{state.completed=true;}
+   };
+  });
+ }
+ test('only own notifications offer a question and the selected one stages in chat',async({page})=>{
   await post(page,rows);await expect(page.getByText('Ask about Tuesday',{exact:true})).toBeVisible();await expect(page.getByText('Other app title · Other app text',{exact:true})).toBeVisible();
   await expect(ask(page)).toHaveCount(2);await expect(page.getByRole('button',{name:/^Ask Alpha about this Mail/})).toHaveCount(0);
   await page.locator('.alpha-shade-list > div',{hasText:'Call the clinic'}).getByRole('button',{name:/^Ask Alpha/}).click();
-  // Pressing the row selects exactly that notification as opaque context while the shade is open.
-  expect(await selectedObject(page)).toMatchObject({kind:'notification',id:'context-first',accountId:'own'});
-  const dialog=review(page);await expect(dialog.getByRole('heading')).toHaveText('Ask Alpha');await expect(dialog.getByLabel('Selected source',{exact:true})).toHaveText('Alpha Phone notification');
-  await expect(dialog.getByRole('textbox',{name:'Content excerpt'})).toHaveValue('Call the clinic\nAsk about Tuesday');
-  // Verification codes are not placed in a draft.
-  await dialog.getByRole('textbox',{name:'Content excerpt'}).fill('Your verification code is 481516');await dialog.getByRole('button',{name:'Use in conversation',exact:true}).click();
-  await expect(dialog.getByRole('status')).toHaveText('Remove secrets first');
-  await dialog.getByRole('textbox',{name:'Content excerpt'}).fill('Call the clinic');await dialog.getByRole('button',{name:'Use in conversation',exact:true}).click();
-  await expect(composer(page)).toHaveValue('Help me with this notification.\n\nSource: Alpha Phone notification\n\nCall the clinic');
+  await expect(chip(page)).toHaveCount(1);
+  await expect(review(page)).toHaveCount(0);
+  await expect(composer(page)).toHaveValue('Help me with this notification.');
   // The selection does not outlive the shade.
   expect((await selectedObject(page))?.kind).not.toBe('notification');
+  await chip(page).click();await expect(chip(page)).toHaveCount(0);
  });
- test('a notification review ends with the shade it was opened from',async({page})=>{
-  await post(page,rows);await page.locator('.alpha-shade-list > div',{hasText:'Call the clinic'}).getByRole('button',{name:/^Ask Alpha/}).click();
-  const dialog=review(page);await expect(dialog.getByRole('textbox',{name:'Content excerpt'})).toHaveValue(/Call the clinic/);
-  // Home closes the shade underneath the review; the notification text must not stay on screen.
+ test('closing the shade ends a pending notification attachment',async({page})=>{
+  await post(page,rows);await expect(page.getByText('Ask about Tuesday',{exact:true})).toBeVisible();await holdRecheck(page);
+  await page.locator('.alpha-shade-list > div',{hasText:'Call the clinic'}).getByRole('button',{name:/^Ask Alpha/}).click();
+  await expect.poll(()=>page.evaluate(()=>(window as any).noticeRecheck.started)).toBe(true);
+  await expect(chip(page)).toHaveCount(0);
   await page.evaluate(()=>window.dispatchEvent(new Event('launcher-home')));
-  await expect(dialog).toHaveCount(0);await expect(page.getByText('Ask about Tuesday',{exact:true})).not.toBeInViewport();
+  await page.evaluate(()=>(window as any).noticeRecheck.release());
+  await expect.poll(()=>page.evaluate(()=>(window as any).noticeRecheck.completed)).toBe(true);
+  await expect(chip(page)).toHaveCount(0);await expect(page.getByText('Ask about Tuesday',{exact:true})).not.toBeInViewport();
   await expect.poll(()=>selectedObject(page)).toBeNull();
  });
  test('a row whose content Android withheld offers no question',async({page})=>{
@@ -68,15 +88,16 @@ test.describe('notification',()=>{
   await expect(ask(page)).toHaveCount(1);
   await expect(page.locator('.alpha-shade-list > div',{hasText:'Stand up'}).getByRole('button',{name:/^Ask Alpha/})).toHaveCount(1);
  });
- test('dismissing the reviewed notification never sends its neighbor',async({page})=>{
-  await post(page,rows);await page.locator('.alpha-shade-list > div',{hasText:'Call the clinic'}).getByRole('button',{name:/^Ask Alpha/}).click();
-  const dialog=review(page);await expect(dialog.getByRole('textbox',{name:'Content excerpt'})).toHaveValue(/Call the clinic/);
+ test('dismissing the selected notification before staging never attaches its neighbor',async({page})=>{
+  await post(page,rows);await expect(page.getByText('Ask about Tuesday',{exact:true})).toBeVisible();await holdRecheck(page);
+  await page.locator('.alpha-shade-list > div',{hasText:'Call the clinic'}).getByRole('button',{name:/^Ask Alpha/}).click();
+  await expect.poll(()=>page.evaluate(()=>(window as any).noticeRecheck.started)).toBe(true);
+  await expect(chip(page)).toHaveCount(0);
   await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');const notices=registerPlugin<any>('AlphaNotifications');const row=(await notices.list()).items.find((item:any)=>item.id==='context-first');await notices.dismiss({id:row.id,revision:row.revision,source:'own'});});
-  await dialog.getByRole('button',{name:'Use in conversation',exact:true}).click();
-  // Either the open review reports the change or the final re-read refuses it; nothing is composed.
-  await expect(page.getByText(/^(Selection changed|Gone|Changed|Couldn’t check)$/)).toBeVisible();
+  await page.evaluate(()=>(window as any).noticeRecheck.release());
+  await expect.poll(()=>page.evaluate(()=>(window as any).noticeRecheck.completed)).toBe(true);
+  await expect(chip(page)).toHaveCount(0);
   await expect(composer(page)).toHaveCount(0);
-  if(await dialog.count())await dialog.getByRole('button',{name:'Cancel',exact:true}).click();
   await expect(page.getByText('Neighbor reminder',{exact:true})).toBeVisible();await expect(page.getByText('Ask about Tuesday',{exact:true})).toHaveCount(0);
  });
  test('hosted-result, digest and workflow notices offer no question; reminder rows still do',async({page})=>{

@@ -100,6 +100,40 @@ test('removing an earlier bookmark preserves the focused link and its destinatio
   await expect(page.frameLocator('[data-browser-surface] iframe').getByRole('heading',{name:'/two',exact:true})).toBeVisible();
 });
 
+test('a bookmark from a private tab keeps the page title without a history visit', async ({page}) => {
+  const url = 'https://focus.example/private-reference';
+  const title = 'Private reference';
+  await page.addInitScript(() => localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({kind: 'offline'})));
+  await page.route(url, route => route.fulfill({contentType: 'text/html', body: '<h1>Private reference</h1>'}));
+  await page.goto('/');
+  await page.evaluate(async ({url, title}) => {
+    const {BrowserSurface} = await import('/src/browser/browser-surface.ts');
+    const prototype = BrowserSurface.prototype as any;
+    const notify = prototype.notifyListeners;
+    prototype.notifyListeners = function (event: string, data: {url?: string}, ...rest: unknown[]) {
+      return notify.call(this, event, event === 'stateChanged' && data?.url === url ? {...data, title} : data, ...rest);
+    };
+    (window as any).Capacitor.isNativePlatform = () => true;
+  }, {url, title});
+  await page.getByRole('button', {name: 'Browser', exact: true}).click();
+  await page.getByRole('button', {name: 'Menu', exact: true}).click();
+  await page.getByRole('button', {name: 'New private tab', exact: true}).click();
+  const address = page.getByRole('textbox', {name: 'Address', exact: true});
+  await address.fill(url);
+  await address.press('Enter');
+  await expect(page.frameLocator('[data-browser-surface]:visible iframe').getByRole('heading', {name: title, exact: true})).toBeVisible();
+
+  await page.getByRole('button', {name: 'Menu', exact: true}).click();
+  await page.getByRole('button', {name: 'Bookmark', exact: true}).click();
+  await page.getByRole('button', {name: 'Menu', exact: true}).click();
+  await page.getByRole('button', {name: 'Bookmarks and history', exact: true}).click();
+  const library = page.locator('[data-alpha-subview="browser-library"]');
+  const row = library.getByRole('button', {name: url, exact: true});
+  await expect(row).toContainText(title);
+  await library.getByRole('button', {name: 'History', exact: true}).click();
+  await expect(row).toHaveCount(0);
+});
+
 for (const viewport of [{width:390,height:844},{width:1280,height:900}]) {
   test.describe(`delayed saved session at ${viewport.width}px`, () => {
     test.use({viewport});

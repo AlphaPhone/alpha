@@ -79,17 +79,6 @@ test('Photos tabs stay aligned in Albums and selection opens the real media libr
  await page.getByLabel('Photos tools',{exact:true}).click();await select.click();await expect(page.getByRole('button',{name:'Cancel selection',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Delete selected',exact:true})).toBeVisible();
 });
 
-test('image question review is compact and only stages explicitly reviewed text',async({page},info)=>{
- await page.goto('/');await page.evaluate(async()=>{
-  const canvas=document.createElement('canvas');canvas.width=320;canvas.height=180;const c=canvas.getContext('2d')!;c.fillStyle='#d6a667';c.fillRect(0,0,320,180);const blob=await new Promise<Blob>(resolve=>canvas.toBlob(b=>resolve(b!)));
-  (window as any).questionDraft=null;(await import('/src/browser/content-question.ts')).reviewContentQuestion({name:'Video preview frame',text:'',current:()=>true,compose:text=>(window as any).questionDraft=text,image:async()=>blob});
- });
- const review=page.getByRole('dialog',{name:'Ask about selected content'});await expect(review.getByRole('img')).toBeVisible();
- const proceed=review.getByRole('button',{name:'Use in conversation',exact:true});await expect(proceed).toBeDisabled();await review.getByRole('textbox',{name:'Content excerpt'}).fill('A synthetic tan frame.');
- await expect(proceed).toBeEnabled();expect(await review.evaluate(el=>el.getBoundingClientRect().width)).toBeLessThanOrEqual(388);await page.screenshot({path:info.outputPath('image-question-review.png')});
- await proceed.click();await expect(review).toHaveCount(0);expect(await page.evaluate(()=>(window as any).questionDraft)).toContain('A synthetic tan frame.');
-});
-
 for(const endpoint of ['start','end'] as const)test(`trim ${endpoint} handle can save its minimum span`,async({page})=>{
  await page.goto('/');await page.getByRole('button',{name:'Photos',exact:true}).focus();await page.evaluate(async()=>{
   const canvas=document.createElement('canvas');canvas.width=320;canvas.height=180;canvas.getContext('2d')!.fillStyle='#d6a667';canvas.getContext('2d')!.fillRect(0,0,320,180);const stream=canvas.captureStream(10);const chunks:BlobPart[]=[];const recorder=new MediaRecorder(stream);recorder.ondataavailable=e=>chunks.push(e.data);const done=new Promise<void>(resolve=>recorder.onstop=()=>resolve());recorder.start();await new Promise(r=>setTimeout(r,250));recorder.stop();await done;stream.getTracks().forEach(t=>t.stop());

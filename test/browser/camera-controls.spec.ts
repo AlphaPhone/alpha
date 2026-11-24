@@ -153,6 +153,25 @@ test('a zoomed recording stops when its camera source ends',async({page})=>{
  expect(saved.count).toBe(1);expect(saved.kind).toBe('video');expect(saved.bytes).toBeGreaterThan(0);expect(saved.size).toBe(saved.bytes);expect(saved.streams).toBeGreaterThan(1);expect(saved.released).toBe(true);
  await expect(page.getByRole('alert',{name:'Can’t start camera',exact:true})).toBeVisible();
 });
+test('switching to Photo closes the microphone notice without starting a video', async ({page}) => {
+  await page.evaluate(() => {
+    const getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    navigator.mediaDevices.getUserMedia = async constraints => {
+      if (constraints?.audio) throw new DOMException('Synthetic microphone denial', 'NotAllowedError');
+      return getUserMedia(constraints);
+    };
+  });
+  await page.getByRole('button', {name: 'Video mode', exact: true}).click();
+  await page.getByRole('button', {name: 'Start recording', exact: true}).click();
+  const notice = page.getByRole('alert', {name: 'Mic off', exact: true});
+  await expect(notice).toBeVisible();
+
+  await page.getByRole('button', {name: 'Photo mode', exact: true}).click();
+  await expect(notice).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Take photo', exact: true})).toBeVisible();
+  await expect(page.getByRole('timer', {name: 'Recording', exact: true})).toHaveCount(0);
+});
+
 test('Camera offers only Video and Photo, puts Switch camera in the header and shows no focus box on a tapped mode',async({page})=>{
  const root=page.locator('[data-alpha-camera-root]');
  for(const name of ['Scan document','Ask mode','Ask about this'])await expect(root.getByRole('button',{name,exact:true})).toHaveCount(0);

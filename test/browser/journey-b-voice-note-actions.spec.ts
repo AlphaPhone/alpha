@@ -96,6 +96,10 @@ async function openHandoffDayInCalendar(page:Page,titles:string){
  await expect(page.getByRole('region',{name:'Calendar timeline'})).toBeVisible();
 }
 
+test.beforeEach(async({page})=>{
+ await page.addInitScript(()=>localStorage.setItem('alpha.browser.device.v1',JSON.stringify({askBeforeAgentActions:true})));
+});
+
 test('Journey B: recorded note UI and retained scheduling contract save one event and reminder, then edit and delete them',async({page})=>{
  page.setDefaultTimeout(15_000);
  const dialogs:string[]=[];

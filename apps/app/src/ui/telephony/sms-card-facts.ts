@@ -1,24 +1,11 @@
-/**
- * What an agent's text card says before the owner taps Approve. Approve sends the text at once, with
- * no dialog after it, so the card carries what Android's send review used to add: the SIM it goes
- * from, how many linked texts a long one becomes, and that the carrier may charge.
- */
-/** The fields of a telephony status SIM row (TelephonySubscription) a card names. */
-type SmsSim = {id: number; slot: number; displayName: string; carrierName: string};
+/** The visible message details of a validated SMS proposal. */
+export type SmsReviewPreview = {recipient: string; body: string; note: string};
 
-export const SMS_CARRIER_CHARGES = 'Your carrier may charge for texts.';
-
-let sims: readonly SmsSim[] = [];
-/** Messages records the SIMs it read, so a card can name the one a text goes from. */
-export function rememberSmsSims(rows: readonly SmsSim[] | undefined) {
-  sims = rows ? rows.map(({id, slot, displayName, carrierName}) => ({id, slot, displayName, carrierName})) : [];
-}
-/** "SIM 1 · Work (Carrier)" for a SIM Messages has read, or undefined. Shown on the phone only. */
-export function smsSimLabel(subscriptionId: number): string | undefined {
-  const sim = sims.find(row => row.id === subscriptionId);
-  if (!sim) return undefined;
-  const name = sim.displayName.trim(), carrier = sim.carrierName.trim();
-  return `SIM ${sim.slot + 1}${name ? ` · ${name}` : ''}${carrier && carrier !== name ? ` (${carrier})` : ''}`;
+export function smsReviewCopy(recipient: string, body: string, note: string) {
+  return {
+    smsPreview: {recipient, body, note},
+    description: [recipient, body, note].filter(Boolean).join('\n\n'),
+  };
 }
 
 // GSM 03.38 default alphabet and its extension table (each extension character costs two septets).
@@ -67,6 +54,6 @@ export function smsSendFacts(recipients: number, body: string, draftsInOpenThrea
   if (recipients > 1) lines.push('Each person gets their own text. This isn’t a group message.');
   const count = smsPartEstimate(body);
   if (count > 1) lines.push(`${recipients > 1 ? 'Each person likely gets it' : 'It likely goes'} as ${count} linked texts.`);
-  lines.push(`Approve sends it right away.${draftsInOpenThread ? ` ${SMS_OPEN_THREAD_DRAFT}` : ''} ${SMS_CARRIER_CHARGES}`);
+  if (draftsInOpenThread) lines.push(SMS_OPEN_THREAD_DRAFT);
   return lines.join('\n');
 }

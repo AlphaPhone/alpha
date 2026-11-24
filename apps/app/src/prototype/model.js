@@ -1,6 +1,7 @@
 import { testMocksEnabled } from '../build-flags';
 import { externalVoiceInvocationEnabled } from '../runtime/voice-entry-policy';
 import { nextDefaultNoteTitle } from '../runtime/note-default-title';
+import { NOTES_DELETE_TOAST_MS } from '../runtime/notes-trash-policy';
 import { accessibilityTimeoutScale } from '../runtime/accessibility-timeout';
 import { recordRendererFailure } from '../runtime/crash-log';
 import { errorNotice, ERROR_TOAST } from "../runtime/error-notice";
@@ -755,7 +756,7 @@ function msgSetDraft(api, pid, d) { api.set(msgDraftsPatch(api.get("messages"), 
 function msgSubmit(api, pid) {
   var s = api.get("messages"); var fs = msgFiles(api, s.attach); var d = msgDraft(s, pid);
   var tx = String(d.text).trim(); if (!tx && !fs.length) return null;
-  return msgSend(api, pid, tx, null, fs, Object.assign(msgDraftsPatch(s, pid, emptyDraft()), { tray: false, attach: null }));
+  return msgSend(api, pid, tx, null, fs, Object.assign(msgDraftsPatch(s, pid, emptyDraft()), { attach: null }));
 }
 /* Send on the draft bubble (AC-15): the same Send, then the bubble shows as sent and Alpha notes it quietly. */
 function msgBubbleSend(api, pid) {
@@ -768,7 +769,7 @@ function msgBubbleSend(api, pid) {
 }
 function msgOpenThread(api, pid, local) {
   var st = api.get("messages"); var u = Object.assign({}, st.unread); delete u[pid];
-  api.set({ thread: pid, compose: null, unread: u, tray: false, q: "", local: local !== false });
+  api.set({ thread: pid, compose: null, unread: u, q: "", local: local !== false });
 }
 /* A draft Alpha placed is shown where it will be sent: the stage moves to that thread with the chat
    kept open (over the list, it returns with Back), or Messages opens on it from another app. */
@@ -825,7 +826,7 @@ function msgBar(st, api) {
 
 registerView("messages", {
   title: "Messages", icon: "bubble", aliases: ["texts", "sms", "text"],
-  state: { threads: MSG_SEED, unread: MSG_UNREAD, extra: [], botI: {}, thread: null, compose: null, text: "", drafts: {}, attach: null, tray: false, typing: null, q: "", filter: null, searching: false, sentDraft: null, local: false, slide: null },
+  state: { threads: MSG_SEED, unread: MSG_UNREAD, extra: [], botI: {}, thread: null, compose: null, text: "", drafts: {}, attach: null, typing: null, q: "", filter: null, searching: false, sentDraft: null, local: false, slide: null },
   persist: ["threads", "unread", "extra"],
   jumps: [[null, "Messages"], ["thread", "Thread"], ["new", "New message"]],
   preset: function (sub) {
@@ -834,7 +835,6 @@ registerView("messages", {
   },
   badge: function (st) { var u = st.unread || {}; return Object.keys(u).some(function (k) { return u[k] > 0; }); },
   back: function (st, api) {
-    if (st.tray) { api.set({ tray: false }); return true; }
     // Opened from this app's list: back to the list. Deep-linked (contacts, shade, chat, share): hand back to the shell's stack.
     if (st.thread || st.compose) { var u = Object.assign({}, st.unread); var tp = st.thread || st.compose; if (typeof tp === "string") delete u[tp]; api.set({ thread: null, compose: null, text: "", attach: null, q: "", unread: u }); return !!st.local; }
     // Back closes the header search and the filter it typed, as in Inbox.
@@ -1015,11 +1015,7 @@ registerView("messages", {
           undo: function () { msgSetDraft(api, tp, draftUndone(msgDraft(api.get("messages"), tp))); }
         } : null,
         atts: atts.map(function (f) { return { name: f.name, rm: function () { api.set({ attach: (api.get("messages").attach || []).filter(function (x) { return x !== f.id; }) }); } }; }),
-        hasAtts: atts.length > 0,
-        tray: !!st.tray, trayCss: st.tray ? "background:var(--fg);color:var(--bg);transform:rotate(45deg)" : "background:var(--s2);color:var(--fg)",
-        toggleTray: function () { api.set({ tray: !api.get("messages").tray }); },
-        camera: function () { api.open("camera", { mode: "photo" }); },
-        photos: MSG_PHOTOS.map(function (g, i) { return { css: "background:" + imgBg("msg" + i, g), label: "Send photo " + (i + 1), pick: function () { msgSend(api, tp, null, i); api.set({ tray: false }); } }; })
+        hasAtts: atts.length > 0
       };
     }
 
@@ -1051,7 +1047,7 @@ registerView("messages", {
     var fl = st.filter;
     return {
       nativePrototype: true,
-      convos: convos, listStage: listStage,
+      convos: convos, listStage: listStage, listCovered: !listStage,
       newMsg: function () { api.set({ compose: true, q: "", local: true }); },
       filterChip: fl && fl.by === "alpha" ? { label: fl.label, clearLabel: "Clear filter " + fl.label, clear: function () { api.set({ filter: null }); } } : null,
       // Header search (the Inbox pattern): it types the same owner list filter as the bar (AC-22).
@@ -3233,16 +3229,16 @@ var NOTES_RED = "var(--alpha-notes-red)";
 
 var NOTES_WAVE = []; (function () { for (var i = 0; i < 56; i++) NOTES_WAVE.push(Math.round(8 + 26 * Math.abs(Math.sin(i * 0.9) * Math.cos(i * 0.37)) + (i % 3) * 3)); })();
 var NT = { pend: false, playI: null, undoT: null, holdT: null, held: null, itemKeys: null };
-/* Render keys for the open checklist's items, so removing one item does not hand its row (and the
-   focus in it) to the item below. Keys are view-only: saved items carry no id. A new note's first
-   save swaps its draft id for the saved one; the open checklist keeps its keys across that swap. */
+
+/* An open checklist keeps its render keys across the first save, when its draft becomes a record.
+   The keys are view state and never become part of a saved item. */
 function notesItemKeys(id, count) {
-  var k = NT.itemKeys;
-  if (k && k.id !== id && String(k.id).indexOf("draft-") === 0) k.id = id;
-  if (!k || k.id !== id) k = NT.itemKeys = { id: id, keys: [], next: 0 };
-  while (k.keys.length < count) k.keys.push("item-" + (++k.next));
-  if (k.keys.length > count) k.keys.length = count;
-  return k.keys.slice();
+  var state = NT.itemKeys;
+  if (state && state.id !== id && String(state.id).indexOf("draft-") === 0) state.id = id;
+  if (!state || state.id !== id) state = NT.itemKeys = { id: id, keys: [], next: 0 };
+  while (state.keys.length < count) state.keys.push("item-" + (++state.next));
+  state.keys.length = count;
+  return state.keys;
 }
 
 function notesFmt(sec) { if (!Number.isFinite(sec)) return ""; sec = Math.max(0, Math.floor(sec)); return Math.floor(sec / 60) + ":" + pad2(sec % 60); }
@@ -3292,7 +3288,7 @@ function notesAway(api) {
   return p;
 }
 function notesUndoable(api, note, idx, label) {
-  api.toast(label, { undo: function () { var s = api.get("notes"); if (recordById(s.list, note.id)) return; var l = s.list.slice(); l.splice(Math.min(idx, l.length), 0, note); api.set({ list: l }); } });
+  api.toast(label, { durationMs: NOTES_DELETE_TOAST_MS, undo: function () { var s = api.get("notes"); if (recordById(s.list, note.id)) return; var l = s.list.slice(); l.splice(Math.min(idx, l.length), 0, note); api.set({ list: l }); } });
 }
 async function notesDelete(api, id) {
   if (api.canonicalNotes) return api.canonicalNotes.remove(id, api);
@@ -3337,10 +3333,11 @@ registerView("notes", {
     if (st.sheet) { api.set({ sheet: null }); return true; }
     if (st.menu) { api.set({ menu: null }); return true; }
     if (st.open) { notesClose(api); return true; }
+    if (api.canonicalNotes?.endSelection()) return true;
     if (st.filter) { api.set({ filter: null }); return true; }
     return false;
   },
-  onLeave: function (api) { var p = notesAway(api); if (p) api.set(p); },
+  onLeave: function (api) { api.canonicalNotes?.endSelection(); var p = notesAway(api); if (p) api.set(p); },
   suggestions: function (st, api) {
     var n = st.open ? recordById(st.list, st.open) : null;
     if (n && n.kind === "voice") {
@@ -3385,7 +3382,7 @@ registerView("notes", {
       var voiceDur = n.kind === "voice" ? (typeof n.dur === "number" ? n.dur : n.audio && typeof n.audio.durationMs === "number" ? n.audio.durationMs / 1000 : null) : null;
       var preview = notePreview(n) || (n.audio && typeof n.audio.transcript === "string" ? n.audio.transcript.trim().slice(0, 240) : "");
       return {
-        id: n.id, title: n.title || "Untitled", date: noteDateLabel(n, now) || (typeof n.when === "string" ? n.when : ""),
+        id: n.id, title: n.title || "Untitled", actionLabel: "Open " + (n.title || "Untitled"), date: noteDateLabel(n, now) || (typeof n.when === "string" ? n.when : ""),
         preview: (voiceDur != null ? notesFmt(voiceDur) + (preview ? " · " : "") : "") + preview,
         isVoice: n.kind === "voice", isLink: n.kind === "link", pinned: !!n.pinned,
         current: st.open === n.id ? "true" : "false", open: function () { api.set(Object.assign(notesLeave(api, n.id), { pos: 0, menu: null })); }
@@ -3396,6 +3393,7 @@ registerView("notes", {
     /* open note */
     var n = st.open ? recordById(list, st.open) : null;
     var isEdit = !!n && (n.kind === "text" || n.kind === "list");
+    if (!n || n.kind !== "list") NT.itemKeys = null;
     var ed = null, vo = null, lk = null;
     var common = n ? {
       close: function () { notesClose(api); },
@@ -3411,6 +3409,8 @@ registerView("notes", {
       onTitle: function (e) { notesUpd(api, n.id, { title: e.target.value }); }
     } : null;
     if (isEdit) {
+      var items = n.items || [];
+      var itemKeys = n.kind === "list" ? notesItemKeys(n.id, items.length) : [];
       ed = Object.assign({}, common, {
         isText: n.kind === "text", isList: n.kind === "list",
         saveStatus: "",
@@ -3422,18 +3422,23 @@ registerView("notes", {
           if (n.kind === "text") notesUpd(api, n.id, { kind: "list", body: "", items: checklistItems(n.body) });
           else notesUpd(api, n.id, { kind: "text", items: [], body: checklistText(n.items) });
         },
-        items: (function (items) { var keys = notesItemKeys(n.id, items.length); return items.map(function (it, i) {
+        items: items.map(function (it, i) {
           var itemLabel = String(it.t || "").trim() || "item";
           return {
-            key: keys[i], t: it.t, done: it.done, idx: i, css: it.done ? "text-decoration: line-through; color: var(--mut)" : "",
+            key: itemKeys[i], t: it.t, done: it.done, idx: i, css: it.done ? "text-decoration: line-through; color: var(--mut)" : "",
             box: it.done ? "background: var(--fg); color: var(--bg)" : "box-shadow: inset 0 0 0 1.5px var(--mut); color: transparent",
             label: (it.done ? "Uncheck " : "Check ") + itemLabel,
             removeLabel: "Remove " + itemLabel,
             toggle: function () { notesUpd(api, n.id, function (x) { return { items: x.items.map(function (y, j) { return j === i ? Object.assign({}, y, { done: !y.done }) : y; }) }; }); },
             onText: function (e) { var v = e.target.value; notesUpd(api, n.id, function (x) { return { items: x.items.map(function (y, j) { return j === i ? Object.assign({}, y, { t: v }) : y; }) }; }); },
-            remove: function () { if (NT.itemKeys && NT.itemKeys.id === n.id) NT.itemKeys.keys.splice(i, 1); notesUpd(api, n.id, function (x) { return { items: x.items.filter(function (y, j) { return j !== i; }) }; }); }
+            remove: function () {
+              notesUpd(api, n.id, function (x) {
+                if (NT.itemKeys && NT.itemKeys.id === n.id) NT.itemKeys.keys.splice(i, 1);
+                return { items: x.items.filter(function (y, j) { return j !== i; }) };
+              });
+            }
           };
-        }); })(n.items || []),
+        }),
         newItem: st.newItem || "",
         onNew: function (e) { api.set({ newItem: e.target.value }); },
         addItem: function () { var v = String(api.get("notes").newItem || "").trim(); if (!v) return; notesUpd(api, n.id, function (x) { return { items: (x.items || []).concat([{ t: v, done: false }]) }; }); api.set({ newItem: "" }); },
@@ -5219,7 +5224,7 @@ class Component extends DCLogic {
     // identical to the one it would wait behind is not queued again. The queue holds at most three
     // notices: when it overflows, the oldest notice of the lowest rank goes (passive, then Undo,
     // then error).
-    var next = { msg: msg, undo: opts.undo || null, kind: opts.kind === "error" ? "error" : undefined }, rank = this.toastRank;
+    var next = { msg: msg, undo: opts.undo || null, kind: opts.kind === "error" ? "error" : undefined, durationMs: opts.durationMs }, rank = this.toastRank;
     var passiveShown = this.toastActive && !this.undoFn && !this.toastKind;
     if (this.toastActive && !(passiveShown && rank(next) > 0)) {
       var queue = this.toastQueue || (this.toastQueue = []), last = queue[queue.length - 1];
@@ -5266,7 +5271,8 @@ class Component extends DCLogic {
     this.toastSequence = (this.toastSequence || 0) + 1;
     // Undo stays as long as the reviewed-deletion notice (10 s) so the two restore offers match.
     var scale = accessibilityTimeoutScale();
-    this.toastDuration = Math.max(opts.undo ? 10000 : 1900, Math.min(12000, String(msg).length * 50 + 500)) * scale;
+    var defaultDuration = Math.max(opts.undo ? 10000 : 1900, Math.min(12000, String(msg).length * 50 + 500));
+    this.toastDuration = (Number.isFinite(opts.durationMs) ? Math.max(1900, Math.min(12000, opts.durationMs)) : defaultDuration) * scale;
     this.undoFn = opts.undo || null;
     this.toastKind = opts.kind === "error" ? "error" : ""; this.toastMessage = msg;
     this.toastReadMin = opts.undo || this.toastKind ? this.toastDuration : Math.min(this.toastDuration, 1900 * scale);
@@ -5295,7 +5301,7 @@ class Component extends DCLogic {
       if (heldFocus && doc?.activeElement === doc.body && origin?.isConnected && !origin.closest("[inert],[hidden]")) origin.focus({ preventScroll: true });
       var next = self.toastQueue?.shift();
       if (next) {
-        self.showToast(next.msg, { undo: next.undo, kind: next.kind });
+        self.showToast(next.msg, next);
         if (heldFocus) { self.toastHeld = false; self.scheduleToast(); }
       }
     });
@@ -6046,6 +6052,7 @@ class Component extends DCLogic {
       viewBg: imm.dark ? "var(--alpha-black)" : "var(--bg)", viewFg: imm.dark ? "var(--alpha-white)" : "var(--fg)", sbColor: sbColor, homeIndicatorColor: out.photos && out.photos.albumManager ? "var(--fg)" : sbColor,
       systemShell: P.systemShell !== false,
       showAppBack: P.systemShell === false && isOn && isView && !S.shade,
+      closeWorkflowActions: function (event) { event.currentTarget.closest("details").open = false; },
       // A fresh Home or Talk press is intentional even immediately after opening chat.
       chatControlPointer: function (event) { if (event.isPrimary !== false && event.button === 0) self.swallow = 0; },
       backToApps: function (event) { var fromChat = event && event.currentTarget && event.currentTarget.hasAttribute("data-alpha-chat-home"); if (fromChat && event.detail > 0 && self.swallowed()) return; self.goHome(); },

@@ -1,4 +1,5 @@
 import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
+import {chooseCalendarEventAction} from './helpers/browser-calendar';
 import {returnToApps} from './app-navigation';
 import {test,expect,type Page} from '@playwright/test';
 
@@ -11,18 +12,23 @@ async function connect(page:Page){
   const agentId='12345678-1234-4234-8234-123456789abc';
   const calendar={provider:'eliza',side:'owner',grantId:'eliza-calendar',connectorAccountId:'fixture-account',accountEmail:null,calendarId:'primary',summary:'Fixture Calendar',description:null,primary:true,accessRole:'owner',backgroundColor:null,foregroundColor:null,timeZone:'UTC',selected:true,includeInFeed:true,selectionVersion:0};
   const events:any[]=[];
-  const fixture=w.calendarChatFixture={feedReads:0,unexpected:[] as string[]};
+  const fixture=w.calendarChatFixture={feedReads:0,unexpected:[] as string[],deletes:0,finishDelete:null as (()=>void)|null};
   // The built-in calendar's read routes, as the agent's CalendarService answers them.
-  w.calendarChatRecords=(target:string)=>{
+  w.calendarChatRecords=(target:string,method:string)=>{
    const url=new URL(target,location.origin),path=url.pathname,ok=(data:any)=>data;
    if(path==='/api/lifeops/calendar/feed'){fixture.feedReads++;return ok({calendarId:'primary',events,source:'cache',state:'complete',sources:[],timeMin:url.searchParams.get('timeMin'),timeMax:url.searchParams.get('timeMax'),syncedAt:new Date().toISOString()});}
    if(path==='/api/lifeops/calendar/calendars')return ok({calendars:[calendar]});
    if(path==='/api/lifeops/calendar/next-context')return ok({event:null,readScope:{selection:'next_event',timeMin:new Date().toISOString(),timeMax:new Date(Date.now()+86400000).toISOString(),exhaustive:false},calendarFeedState:'complete',calendarSources:[],startsAt:null,startsInMinutes:null,attendeeCount:0,attendeeNames:[],location:null,conferenceLink:null,preparationChecklist:[],linkedMailState:'unavailable',linkedMailError:null,linkedMail:[]});
+   if(path==='/api/lifeops/calendar/events/chat-event'&&method==='DELETE'){
+    if(url.searchParams.get('expectedProviderVersion')!=='"chat-event-v1"')throw Error('Expected the reviewed event version');
+    fixture.deletes++;
+    return new Promise(resolve=>{fixture.finishDelete=()=>{events.length=0;resolve({outcome:'deleted',cancellationMode:'organizer_cancel',event:null});};});
+   }
    if(path==='/api/notes/state')return ok({success:true,data:{notes:[],trash:[],revision:0}});
    throw Error('Unexpected Calendar fixture route '+path);
   };
   const at=(hour:number)=>new Date(new Date().setHours(hour,0,0,0)).toISOString();
-  const event=(title:string,hour:number,version:number)=>({id:'chat-event',externalId:'chat-event',agentId,provider:calendar.provider,side:calendar.side,grantId:calendar.grantId,connectorAccountId:calendar.connectorAccountId,calendarId:calendar.calendarId,title,description:'',location:'',status:'confirmed',startAt:at(hour),endAt:at(hour+1),isAllDay:false,timezone:'UTC',htmlLink:null,conferenceLink:null,organizer:null,attendees:[],metadata:{etag:`"chat-event-v${version}"`},syncedAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
+  const event=(title:string,hour:number,version:number)=>({id:'chat-event',externalId:'chat-event',agentId,provider:calendar.provider,side:calendar.side,grantId:calendar.grantId,connectorAccountId:calendar.connectorAccountId,calendarId:calendar.calendarId,title,description:'',location:'',status:'confirmed',startAt:at(hour),endAt:at(hour+1),isAllDay:false,timezone:'UTC',htmlLink:null,conferenceLink:null,organizer:{self:true},attendees:[],metadata:{etag:`"chat-event-v${version}"`},syncedAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
   const receipt=(operation:string)=>({receiptId:crypto.randomUUID(),operation,resource:{kind:'calendar.event',id:'chat-event'},artifacts:[],idempotency:{key:null,replayed:false},observedAt:new Date().toISOString(),outcome:'applied',commit:{kind:'durable',id:crypto.randomUUID(),committedAt:new Date().toISOString()}});
   w.Capacitor={PluginHeaders:[{name:'AlphaConnection',methods:methods(['request','cancel','secureRead','secureWrite','secureCompareExchange','secureRemove'])}],nativePromise:async(plugin:string,method:string,input:any)=>{
    if(plugin!=='AlphaConnection')throw Error('Unexpected native call');
@@ -56,7 +62,7 @@ async function connect(page:Page){
  // the same session and identity, with the record port answered by the fixture's calendar.
  await page.evaluate(async()=>{
   const {connectionController:c}=await import('/src/runtime/connection-ui.tsx');
-  const request=async(path:string,method:string,_body:unknown,signal:AbortSignal)=>{signal.throwIfAborted();if(method!=='GET')throw Error('The Calendar chat fixture admits no record write');return (window as any).calendarChatRecords(path);};
+  const request=async(path:string,method:string,_body:unknown,signal:AbortSignal)=>{signal.throwIfAborted();if(method!=='GET'&&method!=='DELETE')throw Error('Unsupported Calendar fixture method');return (window as any).calendarChatRecords(path,method);};
   c.getAppRecordClient=()=>{const session=c.getSnapshot().session;return session?{sessionId:session.sessionId,scope:undefined,identity:session,current:()=>c.getSnapshot().session===session,request} as any:null;};
  });
  await returnToApps(page);
@@ -97,4 +103,26 @@ test('the open Calendar follows an event the agent adds, changes and deletes fro
  await minimize();await expect(page.getByText('No events',{exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:/Late lunch with Sam/})).toHaveCount(0);
  expect((await fixture(page)).unexpected).toEqual([]);
+});
+
+test('a one-off event deletion uses Yes and No and shows progress while the write is pending',async({page})=>{
+ await connect(page);await say(page,'Add lunch with Sam at noon');
+ await expect(page.getByText('Added “Lunch with Sam” to your calendar.',{exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Minimize chat',exact:true}).press('Enter');
+ await page.getByRole('button',{name:'Calendar',exact:true}).click();
+ const event=page.getByRole('button',{name:/^Lunch with Sam,/});
+ await event.click();
+ await chooseCalendarEventAction(page,'Delete event');
+ const review=page.getByRole('dialog',{name:'Delete event?',exact:true});
+ await expect(review).toContainText('Lunch with Sam');
+ await review.getByRole('button',{name:'No',exact:true}).click();
+ expect(await page.evaluate(()=>(window as any).calendarChatFixture.deletes)).toBe(0);
+ await chooseCalendarEventAction(page,'Delete event');
+ await review.getByRole('button',{name:'Yes',exact:true}).click();
+ await expect(review).toHaveCount(0);
+ await expect(page.getByText('Deleting…',{exact:true})).toBeVisible();
+ await expect.poll(()=>page.evaluate(()=>(window as any).calendarChatFixture.deletes)).toBe(1);
+ await page.evaluate(()=>(window as any).calendarChatFixture.finishDelete());
+ await expect(event).toHaveCount(0);
+ await expect(page.getByText('Deleting…',{exact:true})).toHaveCount(0);
 });

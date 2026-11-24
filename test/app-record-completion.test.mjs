@@ -4,7 +4,7 @@
 // Evidence class: unit test of the pure receipt mapping; not an agent, model or device run.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {appRecordInvalidations,NOTES_INVALIDATED_EVENT,CALENDAR_INVALIDATED_EVENT} from '../apps/app/src/runtime/app-record-completion.ts';
+import {appRecordInvalidations,noteCreationTarget,NOTES_INVALIDATED_EVENT,CALENDAR_INVALIDATED_EVENT} from '../apps/app/src/runtime/app-record-completion.ts';
 
 const observedAt='2026-11-17T10:00:00.000Z';
 const uuid=n=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
@@ -43,4 +43,13 @@ test('one reply yields one Notes refresh at the newest revision, or none named w
  // A malformed receipt list is skipped; the valid result beside it still refreshes.
  assert.deepEqual(appRecordInvalidations([{effectReceipts:'nope'},result(applied('update',{revision:2}))]),[{event:NOTES_INVALIDATED_EVENT,revision:2}]);
  assert.ok(!appRecordInvalidations([result(applied('create',{revision:1}))]).some(hint=>hint.event===CALENDAR_INVALIDATED_EVENT));
+});
+
+test('one saved or identically reused note supplies the creation target',()=>{
+ const a=applied('create',{noteId:'a',revision:4}), b=applied('create',{noteId:'b',revision:5});
+ assert.deepEqual(noteCreationTarget([result(a,a)]),{id:'a',reused:false});
+ assert.deepEqual(noteCreationTarget([result(replay('b'))]),{id:'b',reused:true});
+ assert.equal(noteCreationTarget([result(a,b)]),undefined);
+ assert.equal(noteCreationTarget([result(a,applied('delete',{noteId:'a',revision:5}))]),undefined);
+ assert.equal(noteCreationTarget([{effectReceipts:'malformed'}]),undefined);
 });

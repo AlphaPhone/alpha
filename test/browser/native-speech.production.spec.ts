@@ -1,6 +1,6 @@
 import {openRetainedNativeNotes} from './helpers/native-notes';
 import {test,expect,type Page} from '@playwright/test';
-import {button} from './flag-off-android';
+import {button,harness} from './flag-off-android';
 import {setupNativeSpeech as setup} from './native-speech-fixture';
 const voice=(page:Page)=>page.getByRole('region',{name:'Voice conversation',exact:true});
 // Inline voice errors are announced beside, not inside, the recorder region.
@@ -45,6 +45,26 @@ test('production chat captures locally, transcribes locally, plays local reply a
  const linked=await page.evaluate(()=>{const f=(window as any).nativeSpeech;return {stages:f.stages,turns:f.turns};});
  expect(linked.stages.slice(0,2)).toEqual(['asr-final','request:linked']);expect(linked.turns).toEqual(['7d3c1a52-6d5e-4e0f-9a43-5c1d2e3f4a5b']);
  await button(page,'Stop voice conversation').click();await expect(voice(page)).toHaveCount(0);await expect.poll(()=>page.evaluate(()=>(window as any).nativeSpeech.stopped)).toBeGreaterThan(0);await noCloud(page,foreign);
+});
+test('spoken confirmation sends the saved Gmail draft without another agent turn',async({page})=>{
+ const foreign=await setup(page,{gmail:{
+  accounts:[{connectionId:'owned-grant',email:'owner@example.invalid',connected:true,messages:[]}],
+  emailDraft:{to:['crew@example.invalid'],subject:'Shoot plan',body:'Bring the tripod.'},
+ }});
+ await button(page,'Open conversation').click();
+ const composer=page.getByRole('textbox',{name:'Message Alpha',exact:true});
+ await composer.fill('Draft an email to crew@example.invalid about the shoot.');
+ await composer.press('Enter');
+ await expect(page.locator('[data-alpha-message-text]').filter({hasText:/^Email draft saved/})).toBeVisible({timeout:15000});
+ expect(await harness(page,f=>f.mail.dispatches.length)).toBe(0);
+ await page.evaluate(()=>{(window as any).nativeSpeech.transcript='Send this email.';});
+ await button(page,'Talk').click();
+ await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+ await utterance(page);
+ await expect.poll(()=>page.evaluate(()=>(window as any).nativeSpeech.spoken)).toEqual(['Email sent.']);
+ expect(await harness(page,f=>({posts:f.posts.length,sends:f.mail.dispatches.length}))).toEqual({posts:1,sends:1});
+ await button(page,'Stop voice conversation').click();
+ await noCloud(page,foreign);
 });
 test('unavailable local speech offers keyboard without trying network speech',async({page})=>{
  const foreign=await setup(page);await page.evaluate(()=>(window as any).nativeSpeech.ready=false);await button(page,'Talk').click();await expect(voice(page)).toHaveAttribute('data-voice-state','error');await expect(voiceError(page)).toHaveCount(0);await expect(button(page,'Try voice again')).toHaveCount(0);await expect.poll(()=>retainedVoiceTranscript(page)).toMatchObject({state:'error',failure:'Voice could not start. Try again, or use the keyboard.'});await button(page,'Minimize chat').click();await expect(voice(page)).toHaveCount(0);await button(page,'Type').click();await expect(page.locator('textarea[data-alpha-composer]')).toBeVisible();expect(await page.evaluate(()=>(window as any).nativeSpeech.starts)).toBe(0);await noCloud(page,foreign);

@@ -190,7 +190,10 @@ test('sort is folders first, then name, date or size; breadcrumbs follow the pat
  assert.deepEqual(storage.sortEntries(rows,'name').map(r=>r.name),['Zed','a.pdf','b.pdf','file10.pdf']);
  assert.deepEqual(storage.sortEntries(rows,'date').map(r=>r.name),['Zed','b.pdf','file10.pdf','a.pdf']);
  assert.deepEqual(storage.sortEntries(rows,'size').map(r=>r.name),['Zed','a.pdf','file10.pdf','b.pdf']);
- assert.deepEqual(labels.breadcrumbs('DCIM/Camera'),[{label:'Internal storage',path:''},{label:'DCIM',path:'DCIM'},{label:'Camera',path:'DCIM/Camera'}]);
+ const folders=[{label:'DCIM',path:'DCIM'},{label:'Camera',path:'DCIM/Camera'}];
+ assert.deepEqual(labels.breadcrumbs('DCIM/Camera'),folders);
+ assert.deepEqual(labels.breadcrumbs('DCIM/Camera','SD card'),[{label:'SD card',path:''},...folders]);
+ assert.deepEqual(labels.breadcrumbs(''),[]);
  assert.equal(labels.formatFree({free:38.2*1024**3,total:128*1024**3}),'38.2 GB free of 128 GB');
 });
 

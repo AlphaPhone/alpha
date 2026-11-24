@@ -60,7 +60,6 @@ export function installChatTools(Component: {prototype: Shell}) {
     };
     this.chatToolsModal ??= createInlineModal(closeMenu);
     this.chatSearchModal ??= createInlineModal(closeSearch);
-    const upload=()=>{closeMenu();output.attachFiles();};
     const search = (append = false) => {
       shell.chatSearchAbort?.abort();
       const query = String(shell.chatSearchQuery || '').trim();
@@ -137,20 +136,29 @@ export function installChatTools(Component: {prototype: Shell}) {
       message.isAgent && (HISTORY_HINT.test(String(message.displayText || '')) || HISTORY_HINT.test(String(message.c?.sub || '')))
         ? {...message, historyLink: history} : message);
     const turning=!!this.S().typing||!!this.draftSendPending||!!this.composerDraft?.holding;
-    if(turning)this.chatToolsOpen=false;
+    const messages=output.messages;
+    const attachments=output.showComposer&&output.barTarget==='person'&&(!messages?.nativeManaged||messages.showComposer)?messages?.attachmentMenu:null;
+    if((turning&&this.chatToolsOpen==='chat')||(!attachments&&this.chatToolsOpen==='messages'))this.chatToolsOpen=false;
+    const inMessages=this.chatToolsOpen==='messages';
+    const toggle=(menu:'chat'|'messages')=>{shell.chatToolsOpen=shell.chatToolsOpen===menu?false:menu;shell.setState({});};
     output.chatTools = {
       ...output.chatTools,
-      label:'Chat actions',searchable:true,
+      label:inMessages?'Message attachments':'Chat actions',searchable:!inMessages,
       visible:!turning,
       open: !!this.chatToolsOpen,
-      disabled: !!output.attachFilesDisabled || !!this.chatAttachmentAbort,
+      disabled:typeof output.attachFiles!=='function'||!!output.attachFilesDisabled||!!this.chatAttachmentAbort,
       fileBusy:!!this.chatAttachmentAbort,
-      toggle: () => {shell.chatToolsOpen = !shell.chatToolsOpen;shell.setState({});},
+      messageAttachments:!!attachments,
+      messageOpen:inMessages,
+      messageBusy:!!attachments?.busy,
+      toggle:()=>toggle('chat'),
+      toggleMessages:()=>toggle('messages'),
       close: closeMenu,
       pointer:(event:Event)=>event.stopPropagation(),
       inside:(event:Event)=>event.stopPropagation(),
       ref: this.chatToolsModal.ref,
-      upload: () => void upload(),
+      camera:()=>{closeMenu();void attachments?.camera();},
+      upload:()=>{closeMenu();if(inMessages){void attachments?.media();}else{output.attachFiles?.();}},
       canNewChat: !!connection.session && !connection.busy,
       newChat,
       hasHistory,

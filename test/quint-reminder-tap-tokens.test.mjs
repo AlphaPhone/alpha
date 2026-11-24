@@ -10,7 +10,7 @@ const model = {path: 'specs/quint/application/ReminderTapTokens.qnt', module: 'R
   goals: {
     secondTapConsumed: 's.lastConsumed == 2',
     questionConsumed: 's.lastConsumed != 0 and s.question and s.questionOpen == 0 and s.detail == s.lastConsumed',
-    questionReleased: 's.question and s.questionOpen == 0 and s.banner and s.detail == s.nativeToken and s.nativeToken != 0 and not(s.busy)',
+    questionKeptAfterDeclinedAttachment: 's.question and s.questionOpen == 0 and s.banner and s.detail == s.nativeToken and s.nativeToken != 0 and not(s.busy)',
     questionKeptForChangedReminder: 's.question and s.questionOpen == 0 and s.detail == s.nativeToken and not(s.retained) and not(s.busy) and s.banner',
     newerTapLeftAfterOpen: 's.detail != 0 and s.nativeToken > s.detail and s.lastConsumed == 0 and not(s.busy) and s.banner',
     queuedCheckRuns: 's.stage == "list" and s.captured == 2 and s.detail == 0 and s.lastConsumed == 0',
@@ -42,7 +42,6 @@ async function replay(compiled, trace) {
       native.lastConsumed = native.token; native.token = 0;
       return {};
     },
-    releaseReminderQuestion: () => ({}),
   });
   const shell = new f.Shell();
   shell.componentDidMount();
@@ -88,8 +87,10 @@ async function replay(compiled, trace) {
     else if (action === 'confirm') await f.settle('pendingReminderTap');
     else if (action === 'afterOpen') { f.commits.shift()(); await f.idle(); }
     else if (action === 'closeQuestion') {
-      // The review asks the adapter whether the question may still be answered, then consumes or releases.
+      // A refused or interrupted attachment terminates staging without spending the native tap.
+      // After byte admission, the attachment commit asks the adapter to recheck the exact reminder.
       const review = f.state.question;
+      const pendingToken = native.token;
       let allowed = false;
       if (picks.flag) {
         const recheck = review.recheck();
@@ -98,7 +99,8 @@ async function replay(compiled, trace) {
         if (f.waiting('listReminders')) await f.settle('listReminders');
         allowed = await recheck;
       }
-      await (allowed ? review.consume() : review.release());
+      if (allowed) await review.consume();
+      else assert.equal(native.token, pendingToken, 'declined staging keeps the current native tap');
       f.state.question = undefined;
       review.closed();
       await f.idle();

@@ -71,11 +71,11 @@ const REVIEWED_HANDLERS: Readonly<Record<string, readonly string[]>> = {
     'replyModal restore retry seek send toggle toggleNotes writeReply',
   ],
   messages: [
-    'allow askDelete attachFile call camera clear clearSearch click close closeNew',
+    'allow askDelete call clear clearSearch click close closeNew',
     'closeSearch compose context copy discard down edit focus go goNum key loadMore menuKey',
-    'move nativeAttach nativeBack nativeHandoff nativeLoadMore nativeRead nativeRefresh',
+    'move nativeBack nativeHandoff nativeLoadMore nativeRead nativeRefresh',
     'nativeSendAccess nativeSimAccess newMsg onKey onQ onRecipientInput onSearch onText open',
-    'openFile openPhoto openSearch pick remove rm send submitSearch toggleContacts toggleTray',
+    'openFile openPhoto openSearch pick remove rm send submitSearch toggleContacts',
     'undo up who',
   ],
   inbox: [
@@ -116,7 +116,7 @@ const REVIEWED_HANDLERS: Readonly<Record<string, readonly string[]>> = {
   ],
   maps: [
     'backToEvent call clearQ close copyPhone dirs end focusQ go mapRef nativeApplyName',
-    'nativeEdit nativeLocation nativeLocationSettings nativeManualLocation nativeRename',
+    'nativeEdit nativeLocation nativeLocationSettings nativeRename',
     'onOrigin onQ openInMapsApp originFocus originKey originLocation qKey recenter',
     'retryNativeMap rootRef save searchLead share shareEta start web',
     'clearRecent compassRef northUp swap',
@@ -161,7 +161,7 @@ const REVIEWED_HANDLERS: Readonly<Record<string, readonly string[]>> = {
     'changeScheduleInstructions changeScheduleMinute close closeSheet confirm',
     'connectCalendars createDeviceReminder createDigest createPrompt createReminder',
     'createWorkflow del deny describe detailFocus digestLink discard down edit generateDraft',
-    'history lifecycleCancel lifecycleConfirm localHistory modalRef newFlow onDescription',
+    'lifecycleCancel lifecycleConfirm modalRef newFlow onDescription',
     'onGenerationPrompt onLabel onMatch onName onSnooze onText onTime open openClock',
     'openFilters openNotificationSettings phoneReview phoneStopSpeech phoneSync pick prepare',
     'refresh resend run runFocus save saveScheduleEdit stepModal tMinus tPlus tap toggle',

@@ -1,3 +1,4 @@
+import {openNotesTrash} from './helpers/notes-menu';
 import {test,expect,type Page} from '@playwright/test';
 import {canonicalNotesFixture,openCanonicalNotes} from './helpers/canonical-notes';
 const snapshot=(page:import('@playwright/test').Page)=>page.evaluate(()=>(window as any).canonicalNotesFixture.state);
@@ -17,7 +18,7 @@ async function replaceTrashEntry(page:Page,deletedAt:string){
 
 test('canonical Trash dates the deletion and requires a fresh review after its selected entry changes',async({page})=>{
  await canonicalNotesFixture(page,{trash:[{note:trashedNote,deletedAt:'2026-11-08T12:00:00Z'}]});await openCanonicalNotes(page);
- await page.getByRole('button',{name:'Recently deleted',exact:true}).click();
+ await openNotesTrash(page);
  const trash=page.locator('[data-alpha-subview="notes-trash"]'),row=trash.getByRole('button',{name:'A trashed note',exact:true});
  await row.click();const review=page.getByRole('dialog',{name:'Recover “A trashed note”?',exact:true});await expect(review).toBeVisible();
  const revision=await replaceTrashEntry(page,'2026-11-09T12:00:00Z');
@@ -154,7 +155,7 @@ test('canonical Notes UI creates, edits, trashes and restores the same committed
  await expect.poll(()=>snapshot(page).then((s:any)=>s.notes.length)).toBe(0);
  await expect(page.getByText('Deleted',{exact:true})).toBeVisible();
  // The agent's restore-only Trash is the Recently deleted folder: no retention line, no Empty, no Delete now.
- await page.getByRole('button',{name:'Recently deleted',exact:true}).click();
+ await openNotesTrash(page);
  const trash=page.locator('[data-alpha-subview="notes-trash"]');
  await expect(trash.getByRole('button',{name:'Empty Recently deleted',exact:true})).toHaveCount(0);
  await trash.getByRole('button',{name:'Canonical browser note',exact:true}).click();
@@ -515,7 +516,7 @@ test('read recovery cannot replace a no-draft uncertain interaction with a read-
   f.state.trash=[{note:{id:'restore-uncertain',title:'Uncertain restore',body:'\nExact recoverable body',color:'yellow',createdAt:'2026-10-31T10:00:00.000Z',updatedAt:'2026-10-31T10:00:00.000Z'},deletedAt:'2026-10-31T10:01:00.000Z'}];
  });
  await refreshCanonicalRead(page);
- await page.getByRole('button',{name:'Recently deleted',exact:true}).click();
+ await openNotesTrash(page);
  const restore=page.locator('[data-alpha-subview="notes-trash"]').getByRole('button',{name:'Uncertain restore',exact:true});
  await expect(restore).toBeVisible();
  await page.evaluate(()=>(window as any).canonicalNotesFixture.failAfterApplied=true);
@@ -613,4 +614,38 @@ for(const stale of [false,true])test(`recording summary uses canonical update an
   const sent=await writes();expect(sent).toHaveLength(1);expect(sent[0].body.capability).toBe('update-note');expect(sent[0].body.params).toMatchObject({id,expectedRevision:1});
  }
  expect(foreign).toEqual([]);expect(errors).toEqual([]);
+});
+
+test('typing a unique shorthand on Home opens the saved editor without writing the note',async({page})=>{
+ await canonicalNotesFixture(page,{notes:[
+  {...trashedNote,id:'different-list',title:'Browser Preview'},
+  {...trashedNote,id:'dinner-list',title:'Browser Grocery Rehearsal',body:'\nLimes and cheese.'},
+ ]});
+ const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});
+ await input.fill('open browser grocery note');
+ await input.press('Enter');
+ const editor=page.locator('[data-alpha-subview="notes-editor"]');
+ await expect(editor.getByRole('textbox',{name:'Title',exact:true})).toHaveValue('Browser Grocery Rehearsal');
+ await expect(editor.getByRole('textbox',{name:'Note',exact:true})).toHaveValue('Limes and cheese.');
+ expect(await page.evaluate(()=>(window as any).canonicalNotesFixture.requests.some((request:any)=>request.method==='POST'))).toBe(false);
+});
+
+test('opening a saved title can replace a clean editor and preserves a dirty draft',async({page})=>{
+ await canonicalNotesFixture(page,{notes:[
+  {...trashedNote,id:'first-note',title:'First note'},
+  {...trashedNote,id:'second-note',title:'Second note',body:'\nSecond body.'},
+ ]});
+ const result=await page.evaluate(async()=>{
+  const {connectionController}=await import('/src/runtime/connection-ui.tsx');
+  const {CanonicalNotesUi}=await import('/src/prototype/canonical-notes-ui.ts');
+  const notes=new CanonicalNotesUi(connectionController.getAppRecordClient()!,{paint(){},review(){}});
+  try{
+   await notes.refresh();
+   const first=notes.openSaved('first-note'),second=notes.openSaved('second-note');
+   notes.editor.edit({body:'Unsaved edits'});
+   const dirtySwitch=notes.openSaved('first-note');
+   return {first,second,dirtySwitch,open:notes.open,body:notes.editor.draft?.body};
+  }finally{notes.retire();}
+ });
+ expect(result).toEqual({first:true,second:true,dirtySwitch:false,open:'second-note',body:'Unsaved edits'});
 });

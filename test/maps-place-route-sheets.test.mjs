@@ -231,19 +231,6 @@ test('a failed position on open shows no message', async () => {
   } finally { m.restore(); }
 });
 
-test('Enter coordinates keeps its prompt; the visit does not look for the position again', async () => {
-  const {m} = await mount();
-  try {
-    await settle();
-    assert.equal(m.harness.locationStarts, 1);
-    m.harness.screen.manualLocation();
-    m.render(); await settle();
-    m.render(); await settle();
-    assert.equal(m.harness.screen.view().status.text, 'Type a latitude and longitude in Search, then press Enter.');
-    assert.equal(m.harness.locationStarts, 1);
-  } finally { m.restore(); }
-});
-
 test('a fix that arrives while the owner types a search leaves the map where it is', async () => {
   const {m} = await mount();
   try {

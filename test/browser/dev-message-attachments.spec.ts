@@ -2,8 +2,15 @@ import {test,expect,Page} from '@playwright/test';
 // The one bottom bar is the composer (AP-16); the thread's draft slot is kept per thread.
 const field=(page:Page)=>page.locator('[data-alpha-bar-field="person"]');
 const sendButton=(page:Page)=>page.locator('[data-alpha-input-bar]').getByRole('button',{name:'Send',exact:true});
+const attachmentsButton=(page:Page)=>page.locator('[data-alpha-input-bar]').getByRole('button',{name:'Message attachments',exact:true});
+async function chooseAttachment(page:Page,name='Add media'){
+ await attachmentsButton(page).click();
+ const chooser=page.waitForEvent('filechooser');
+ await page.getByRole('dialog',{name:'Message attachments',exact:true}).getByRole('button',{name,exact:true}).click();
+ return chooser;
+}
 async function open(page:Page){await page.getByRole('button',{name:'Messages',exact:true}).click();await page.getByRole('button',{name:/^(Unread, )?Maya Chen$/}).click();}
-async function attach(page:Page){const picker=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Attach PDF, image or TXT',exact:true}).click();await (await picker).setFiles({name:'message.txt',mimeType:'text/plain',buffer:Buffer.from('Café\r\nExact message bytes')});await expect(page.getByRole('button',{name:'Remove message.txt',exact:true})).toBeVisible();}
+async function attach(page:Page){const picker=await chooseAttachment(page);await picker.setFiles({name:'message.txt',mimeType:'text/plain',buffer:Buffer.from('Café\r\nExact message bytes')});await expect(page.getByRole('button',{name:'Remove message.txt',exact:true})).toBeVisible();}
 test.beforeEach(async({page})=>{await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));await page.goto('/?mode=dev');await open(page);});
 test('the draft returns after reload; send and reload retain exact attachment bytes and preview',async({page})=>{
  const external:string[]=[];page.on('request',r=>{if(/^https?:/.test(r.url())&&!r.url().startsWith('http://127.0.0.1:'))external.push(r.url());});await field(page).fill('Message with file');await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem('alpha.dev.app.messages')||'{}').drafts?.maya?.text)).toBe('Message with file');await page.reload();await open(page);await expect(field(page)).toHaveValue('Message with file');await attach(page);await sendButton(page).click();await expect(page.getByRole('button',{name:'Open message.txt',exact:true})).toBeVisible();const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('alpha.dev.app.messages')!));expect(saved.drafts.maya).toBeUndefined();expect(saved.threads.maya.filter((m:any)=>m.text==='Message with file')).toHaveLength(1);expect(Buffer.from(saved.threads.maya.find((m:any)=>m.file==='message.txt').browserAttachment.dataBase64,'base64').toString()).toBe('Café\r\nExact message bytes');await page.reload();await open(page);await page.getByRole('button',{name:'Open message.txt',exact:true}).click();await expect(page.getByRole('dialog',{name:'Reviewed attachment'})).toContainText('Exact message bytes');expect(external).toEqual([]);
@@ -12,31 +19,62 @@ test('failed send retains selected bytes and text and retry stores one attachmen
  await attach(page);await field(page).fill('Retry attached message');await page.evaluate(()=>{const set=Storage.prototype.setItem;(window as any).restore=()=>Storage.prototype.setItem=set;Storage.prototype.setItem=function(k,v){if(k==='alpha.dev.app.messages')throw Error('Full');return set.call(this,k,v);};});await sendButton(page).click();await expect(page.getByRole('button',{name:'Remove message.txt',exact:true})).toBeVisible();await expect(field(page)).toHaveValue('Retry attached message');await page.evaluate(()=>(window as any).restore());await sendButton(page).click();const rows=await page.evaluate(()=>JSON.parse(localStorage.getItem('alpha.dev.app.messages')!).threads.maya);expect(rows.filter((m:any)=>m.file==='message.txt')).toHaveLength(1);expect(rows.filter((m:any)=>m.text==='Retry attached message')).toHaveLength(1);
 });
 test('late selection after Home is discarded and invalid replacement keeps existing file',async({page})=>{
- const picker=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Attach PDF, image or TXT',exact:true}).click();const choice=await picker;await page.evaluate(()=>window.dispatchEvent(new Event('launcher-home')));await choice.setFiles({name:'late.txt',mimeType:'text/plain',buffer:Buffer.from('late')});await open(page);await expect(page.getByRole('button',{name:'Remove late.txt',exact:true})).toHaveCount(0);await attach(page);const second=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Attach PDF, image or TXT',exact:true}).click();await (await second).setFiles({name:'bad.txt',mimeType:'text/plain',buffer:Buffer.from([0,255])});await expect(page.getByRole('button',{name:'Attach PDF, image or TXT',exact:true})).toBeEnabled();await expect(page.getByRole('button',{name:'Remove message.txt',exact:true})).toBeVisible();
+ const picker=await chooseAttachment(page);const choice=picker;await page.evaluate(()=>window.dispatchEvent(new Event('launcher-home')));await choice.setFiles({name:'late.txt',mimeType:'text/plain',buffer:Buffer.from('late')});await open(page);await expect(page.getByRole('button',{name:'Remove late.txt',exact:true})).toHaveCount(0);await attach(page);const second=await chooseAttachment(page);await second.setFiles({name:'bad.txt',mimeType:'text/plain',buffer:Buffer.from([0,255])});await expect(attachmentsButton(page)).toBeEnabled();await expect(page.getByRole('button',{name:'Remove message.txt',exact:true})).toBeVisible();
 });
 test('a text-only draft kept across reload is removed in the same write as its send',async({page})=>{
  await field(page).fill('Saved text-only draft');await page.reload();await open(page);await expect(field(page)).toHaveValue('Saved text-only draft');await sendButton(page).click();const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('alpha.dev.app.messages')!));expect(saved.drafts.maya).toBeUndefined();expect(saved.threads.maya.filter((m:any)=>m.text==='Saved text-only draft')).toHaveLength(1);
 });
 
 test('device retirement rejects a late file selection and unlocks attachment controls',async({page})=>{
- const picker=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Attach PDF, image or TXT',exact:true}).click();const choice=await picker;
+ const picker=await chooseAttachment(page);const choice=picker;
  await page.evaluate(()=>window.dispatchEvent(new Event('alpha:device-state')));
  await choice.setFiles({name:'retired.txt',mimeType:'text/plain',buffer:Buffer.from('Retired selection')});
- await expect(page.getByRole('button',{name:'Attach PDF, image or TXT',exact:true})).toBeEnabled();
+ await expect(attachmentsButton(page)).toBeEnabled();
  await expect(page.getByRole('button',{name:'Remove retired.txt',exact:true})).toHaveCount(0);
  await attach(page);
 });
 test('device retirement during attachment review prevents late adoption',async({page})=>{
  await page.evaluate(()=>{const digest=crypto.subtle.digest.bind(crypto.subtle);let release:()=>void;const gate=new Promise<void>(resolve=>release=resolve);(window as any).releaseReview=()=>release();crypto.subtle.digest=async(...args:any[])=>{(window as any).reviewWaiting=true;await gate;return (digest as any)(...args);};});
- const picker=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Attach PDF, image or TXT',exact:true}).click();await (await picker).setFiles({name:'reviewing.txt',mimeType:'text/plain',buffer:Buffer.from('Review pending')});
+ const picker=await chooseAttachment(page);await picker.setFiles({name:'reviewing.txt',mimeType:'text/plain',buffer:Buffer.from('Review pending')});
  await expect.poll(()=>page.evaluate(()=>(window as any).reviewWaiting)).toBe(true);
  await page.evaluate(()=>{window.dispatchEvent(new Event('alpha:device-state'));(window as any).releaseReview();});
- await expect(page.getByRole('button',{name:'Attach PDF, image or TXT',exact:true})).toBeEnabled();
+ await expect(attachmentsButton(page)).toBeEnabled();
  await expect(page.getByRole('button',{name:'Remove reviewing.txt',exact:true})).toHaveCount(0);
 });
 test('PNG attachment retains binary bytes and opens a decoded image after reload',async({page})=>{
- const encoded=await page.evaluate(()=>{const canvas=document.createElement('canvas');canvas.width=3;canvas.height=2;const ctx=canvas.getContext('2d')!;ctx.fillStyle='#e02424';ctx.fillRect(0,0,3,2);return canvas.toDataURL('image/png').split(',')[1];});const picker=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Attach PDF, image or TXT',exact:true}).click();await (await picker).setFiles({name:'pixels.png',mimeType:'image/png',buffer:Buffer.from(encoded,'base64')});await expect(page.getByRole('button',{name:'Remove pixels.png',exact:true})).toBeVisible();await sendButton(page).click();await page.reload();await open(page);await page.getByRole('button',{name:'Open pixels.png',exact:true}).click();const image=page.frameLocator('iframe[title="pixels.png"]').locator('img');await expect(image).toBeVisible();await expect.poll(()=>image.evaluate((el:HTMLImageElement)=>[el.naturalWidth,el.naturalHeight])).toEqual([3,2]);expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('alpha.dev.app.messages')!).threads.maya.find((m:any)=>m.file==='pixels.png').browserAttachment.dataBase64)).toBe(encoded);
+ const encoded=await page.evaluate(()=>{const canvas=document.createElement('canvas');canvas.width=3;canvas.height=2;const ctx=canvas.getContext('2d')!;ctx.fillStyle='#e02424';ctx.fillRect(0,0,3,2);return canvas.toDataURL('image/png').split(',')[1];});const picker=await chooseAttachment(page);await picker.setFiles({name:'pixels.png',mimeType:'image/png',buffer:Buffer.from(encoded,'base64')});await expect(page.getByRole('button',{name:'Remove pixels.png',exact:true})).toBeVisible();await sendButton(page).click();await page.reload();await open(page);await page.getByRole('button',{name:'Open pixels.png',exact:true}).click();const image=page.frameLocator('iframe[title="pixels.png"]').locator('img');await expect(image).toBeVisible();await expect.poll(()=>image.evaluate((el:HTMLImageElement)=>[el.naturalWidth,el.naturalHeight])).toEqual([3,2]);expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('alpha.dev.app.messages')!).threads.maya.find((m:any)=>m.file==='pixels.png').browserAttachment.dataBase64)).toBe(encoded);
 });
 test('PDF attachment download after reload preserves the original complete document',async({page})=>{
- const {PDFDocument}=await import('pdf-lib');const {readFile}=await import('node:fs/promises');const pdf=await PDFDocument.create();pdf.addPage([300,400]).drawText('Local Messages PDF');const bytes=Buffer.from(await pdf.save());const picker=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Attach PDF, image or TXT',exact:true}).click();await (await picker).setFiles({name:'message.pdf',mimeType:'application/pdf',buffer:bytes});await expect(page.getByRole('button',{name:'Remove message.pdf',exact:true})).toBeVisible();await sendButton(page).click();await page.reload();await open(page);await page.getByRole('button',{name:'Open message.pdf',exact:true}).click();const dialog=page.getByRole('dialog',{name:'Reviewed attachment'});await expect(dialog.locator('iframe')).toHaveAttribute('title','message.pdf');const pending=page.waitForEvent('download');await dialog.getByRole('link',{name:'Download',exact:true}).click();const download=await pending;expect(download.suggestedFilename()).toBe('message.pdf');const result=await readFile((await download.path())!);expect(result).toEqual(bytes);expect((await PDFDocument.load(result)).getPageCount()).toBe(1);
+ const {PDFDocument}=await import('pdf-lib');const {readFile}=await import('node:fs/promises');const pdf=await PDFDocument.create();pdf.addPage([300,400]).drawText('Local Messages PDF');const bytes=Buffer.from(await pdf.save());const picker=await chooseAttachment(page);await picker.setFiles({name:'message.pdf',mimeType:'application/pdf',buffer:bytes});await expect(page.getByRole('button',{name:'Remove message.pdf',exact:true})).toBeVisible();await sendButton(page).click();await page.reload();await open(page);await page.getByRole('button',{name:'Open message.pdf',exact:true}).click();const dialog=page.getByRole('dialog',{name:'Reviewed attachment'});await expect(dialog.locator('iframe')).toHaveAttribute('title','message.pdf');const pending=page.waitForEvent('download');await dialog.getByRole('link',{name:'Download',exact:true}).click();const download=await pending;expect(download.suggestedFilename()).toBe('message.pdf');const result=await readFile((await download.path())!);expect(result).toEqual(bytes);expect((await PDFDocument.load(result)).getPageCount()).toBe(1);
+});
+
+
+test('the thread owns one Back and its only attachment control is the composer plus',async({page})=>{
+ await expect(page.getByRole('button',{name:/^Back(?: to (?:apps|messages))?$/})).toHaveCount(1);
+ await expect(page.getByRole('button',{name:'Back to messages',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Message attachments',exact:true})).toHaveCount(1);
+ await expect(attachmentsButton(page)).toBeVisible();
+ await expect(page.locator('[data-alpha-message-composer]').getByRole('button')).toHaveCount(0);
+ await attachmentsButton(page).click();
+ const menu=page.getByRole('dialog',{name:'Message attachments',exact:true});
+ await expect(menu.getByRole('button')).toHaveText(['Camera','Add media']);
+ await page.keyboard.press('Escape');
+ await expect(menu).toHaveCount(0);
+ await page.getByRole('button',{name:'Back to messages',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Back to apps',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'New message',exact:true}).click();
+ await expect(page.getByRole('button',{name:/^Back(?: to (?:apps|messages))?$/})).toHaveCount(1);
+ await expect(page.getByRole('button',{name:'Back to messages',exact:true})).toBeVisible();
+});
+
+test('Camera requests a picture and stages it in the same unsent draft',async({page})=>{
+ const capture=await chooseAttachment(page,'Camera');
+ expect(await capture.element().getAttribute('capture')).toBe('environment');
+ const image=await page.evaluate(()=>document.createElement('canvas').toDataURL('image/png').split(',')[1]);
+ await capture.setFiles({name:'camera.png',mimeType:'image/png',buffer:Buffer.from(image,'base64')});
+ await expect(page.getByRole('button',{name:'Remove camera.png',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Open camera.png',exact:true})).toHaveCount(0);
+ await expect(sendButton(page)).toBeEnabled();
+ await sendButton(page).click();
+ await expect(page.getByRole('button',{name:'Open camera.png',exact:true})).toBeVisible();
 });

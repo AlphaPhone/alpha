@@ -2,6 +2,8 @@ import type { AgentReply } from '../runtime/alpha-client';
 import { connectionController } from '../runtime/connection-ui';
 import { inboxLocalStore } from '../runtime/inbox-local-store';
 import { editCoalescer, type EditCoalescer } from '../runtime/inbox-edit-coalescer';
+import { cachedDevicePreferences, readDevicePreferences } from '../browser/device-preferences';
+import { emailOwnerRequest, ownerCommand, sendsSavedEmail } from '../ui/device-actions/owner-request';
 import {
   agentEmailDraft,
   draftMailRecipients,
@@ -19,6 +21,7 @@ type Card = {
   literalTo?: boolean;
   subject: string;
   body: string;
+  plainDraft?: true;
   state: 'draft' | 'declined' | 'sending' | 'sent' | 'rejected' | 'uncertain';
 };
 /** An edited draft card waiting to be written, with the shelf revision it was made on. */
@@ -74,6 +77,21 @@ function save(shelf: Shelf, card: Card, expected: Card['state'] | undefined, rev
   return write;
 }
 
+async function updateCard(shelf:Shelf, card:Card, changes:Partial<Card>) {
+  const latest=shelf.cards.get(card.messageId)!;
+  const next={...latest,...changes};
+  await save(shelf,next,latest.state);
+  shelf.cards.set(card.messageId,next);
+  return next;
+}
+
+type EmailAccount={from:string;grant:string;token:string};
+function resolvedEmailRecipients(text:string,from:string) {
+  return text.split(',').map(value=>
+    ['self','me','myself'].includes(value.trim().toLowerCase()) ? from : value.trim()
+  ).join(', ');
+}
+
 const statusText = {
   draft: '',
   declined: 'Not sent.',
@@ -82,6 +100,12 @@ const statusText = {
   rejected: 'Gmail rejected this email.',
   uncertain: 'Delivery is unconfirmed. Check the receipt in Inbox.',
 } satisfies Record<Card['state'], string>;
+
+function plainEmailDraftText(card:Card,to:string) {
+  const status=card.state==='draft'?'Email draft saved.':statusText[card.state];
+  const details=`${status}\nTo: ${to}\nSubject: ${card.subject}`;
+  return card.state==='draft'?`${details}\n\n${card.body}\n\nSay “Send this email” when it’s ready.`:details;
+}
 
 /** Restore local chat drafts by their original reply. The Inbox journal owns provider effects. */
 export function installAgentEmailCards(
@@ -141,24 +165,126 @@ export function installAgentEmailCards(
     return shelf;
   }
 
-  p.stageAgentEmailDraft = async function (reply: AgentReply) {
+  async function sendCard(shell:Bag,shelf:Shelf,card:Card,account:EmailAccount,
+                          recipients:string[],current:()=>boolean) {
+    if(!current()||card.state!=='draft'||shelf.busy.has(card.messageId))return;
+    shelf.busy.add(card.messageId);
+    shelf.notices.delete(card.messageId);
+    const refresh=()=>{if(shell.live&&draftScope()===shelf.scope)shell.setState({});};
+    refresh();
+    try{
+      // A waiting edit is written first, in order; Send sends exactly the content it stored.
+      shelf.edits.get(card.messageId)?.flush();
+      const sending=await updateCard(shelf,card,{to:recipients.join(', '),literalTo:true,from:account.from,grant:account.grant,state:'sending'});
+      if(!current()){
+        await updateCard(shelf,card,{state:'draft'});
+        return 'Email was not sent. The account or conversation changed.';
+      }
+      try{
+        const result=await views.inbox.sendAgentEmail(
+          sending.id,{to:recipients,subject:sending.subject,body:sending.body},account.token,current,
+        );
+        const state: 'draft'|'sent'|'rejected'|'uncertain'=result?.state==='unsent'?'draft':result?.state==='sent'?'sent':result?.state==='rejected'?'rejected':'uncertain';
+        await updateCard(shelf,card,{state});
+        if(state==='draft'){
+          const message=result?.detail||'Email was not sent. Check Inbox.';
+          shelf.notices.set(card.messageId,message);
+          return message;
+        }
+        return state==='sent'?'Email sent.':statusText[state];
+      }catch{
+        await updateCard(shelf,card,{state:'uncertain'});
+        return statusText.uncertain;
+      }
+    }catch{
+      const message='Couldn’t save the email draft. Check Inbox before trying again.';
+      shelf.notices.set(card.messageId,message);
+      return message;
+    }finally{
+      shelf.busy.delete(card.messageId);
+      refresh();
+    }
+  }
+
+  p.sendSavedAgentEmail = async function (authoredText:string,turnCurrent:()=>boolean) {
+    if(!sendsSavedEmail(authoredText))return;
+    const shelf=shelfFor(this);
+    const current=()=>turnCurrent()&&this.live&&!document.hidden&&
+      (shelf?draftScope()===shelf.scope:!draftScope());
+    const reviewOn=async()=>(await readDevicePreferences().catch(()=>({askBeforeAgentActions:true}))).askBeforeAgentActions;
+    if(!current()||await reviewOn()||!current())return;
+    const choose='Which email draft should I send? Give me its recipient, subject and message.';
+    if(!shelf)return choose;
+    try{
+      await shelf.ready;
+      if(!current())return;
+      await views.inbox.readyAgentEmailAccount?.();
+      if(!current()||await reviewOn()||!current())return;
+      const account:EmailAccount|null=views.inbox.agentEmailAccount?.();
+      const unsent=[...shelf.cards.values()].filter(row=>row.state==='draft'&&row.plainDraft&&(!row.grant||row.grant===account?.grant));
+      if(unsent.length!==1)return choose;
+      if(!account)return 'Which Gmail account should I send from? Open Inbox to check the account.';
+      const card=unsent[0];
+      const recipients=draftMailRecipients(resolvedEmailRecipients(card.to,account.from));
+      if(!recipients||recipients.length!==1)return 'What email address should I send this to?';
+      return await sendCard(this,shelf,card,account,recipients,()=>
+        current()&&cachedDevicePreferences()?.askBeforeAgentActions===false&&views.inbox.agentEmailAccount?.()?.token===account.token)
+        ?? 'Check Inbox for delivery status.';
+    }catch{return 'I couldn’t open the email draft. Check Inbox before trying again.';}
+  };
+
+  p.stageAgentEmailDraft = async function (reply: AgentReply, authoredText='', turnCurrent:()=>boolean=()=>true) {
+    if(sendsSavedEmail(authoredText))return false;
     const draft = agentEmailDraft(reply.actionResults, reply.userMessageId);
     const shelf = draft && shelfFor(this);
     if (
-      !draft || !shelf || !reply.messageId || !reply.messageBinding ||
+      !shelf || !reply.messageId || !reply.messageBinding ||
       reply.messageBinding.conversationId !== connectionController.getSelectedConversationId() ||
       JSON.stringify(reply.messageBinding.session) !== JSON.stringify(connectionController.getSnapshot().session)
     ) return false;
     try {
       await shelf.ready;
-      if (!this.live || draftScope() !== shelf.scope || shelf.cards.has(reply.messageId)) return false;
-      const account = views.inbox.agentEmailAccount?.();
-      const card: Card = {
+      const current=()=>turnCurrent()&&this.live&&!document.hidden&&draftScope()===shelf.scope;
+      if (!current() || shelf.cards.has(reply.messageId)) return false;
+      const direct=!(await readDevicePreferences().catch(()=>({askBeforeAgentActions:true}))).askBeforeAgentActions;
+      if(!current())return false;
+      const explicit=direct?emailOwnerRequest(authoredText):undefined;
+      const draftRequested=/^(?:draft|compose|write)\s+(?:an?\s+)?(?:email|mail)\b/i.test(ownerCommand(authoredText));
+      const report=(text:string)=>{if(current())this.agentSay(text);return text;};
+      if(explicit)await views.inbox.readyAgentEmailAccount?.();
+      if(!current())return false;
+      const account:EmailAccount|null=views.inbox.agentEmailAccount?.();
+      let card:Card|undefined;
+      if(draft){
+        card = {
         ...draft, to: draft.to.join(', '), messageId: reply.messageId,
         from: account?.from ?? '', grant: account?.grant ?? '', state: 'draft',
-      };
-      await save(shelf, card, undefined);
-      shelf.cards.set(card.messageId, card);
+        ...(direct&&draftRequested?{plainDraft:true as const}:{}),
+        };
+        await save(shelf, card, undefined);
+        shelf.cards.set(card.messageId, card);
+      }
+      if(direct){
+        if(card&&explicit){
+          if(!account||card.grant&&card.grant!==account.grant)return report('Which Gmail account should I send from? Open Inbox to check the account.');
+          const recipients=draftMailRecipients(resolvedEmailRecipients(card.to,account.from));
+          if(!recipients||recipients.length!==1)return report('What email address should I send this to?');
+          if(resolvedEmailRecipients(explicit.recipient,account.from).toLowerCase()!==recipients[0].toLowerCase()||
+              explicit.subject!==card.subject||explicit.body!==card.body)
+            return report('Tell me the exact email address, subject and message before I send.');
+          if((await readDevicePreferences().catch(()=>({askBeforeAgentActions:true}))).askBeforeAgentActions)return true;
+          const status=await sendCard(this,shelf,card,account,recipients,()=>
+            current()&&views.inbox.agentEmailAccount?.()?.token===account.token);
+          return status?report(status):false;
+        }
+        if(card&&draftRequested){
+          if(current())this.setState({});
+          return plainEmailDraftText(card,account?resolvedEmailRecipients(card.to,account.from):card.to);
+        }
+        if(card)return report('What email address, subject and message should I send?');
+        return false;
+      }
+      if(!card)return false;
       if (this.live && draftScope() === shelf.scope) {
         this.setState({});
         void Promise.resolve(views.inbox.readyAgentEmailAccount?.())
@@ -177,6 +303,7 @@ export function installAgentEmailCards(
   p.renderVals = function () {
     const out = render.call(this), shelf = shelfFor(this);
     if (!shelf?.cards.size) return out;
+    const reviewOff=cachedDevicePreferences()?.askBeforeAgentActions===false;
     const selectedAccount = views.inbox.agentEmailAccount?.();
     out.msgs = (out.msgs || []).map((message: Bag) => {
       const card = shelf.cards.get(message.id);
@@ -188,19 +315,18 @@ export function installAgentEmailCards(
         ['self', 'me', 'myself'].includes(value.trim().toLowerCase()) ? account.from : value.trim()
       ).join(', ');
       const to = addressLine(card);
+      if(reviewOff){
+        if(!card.plainDraft)return message;
+        const displayText=plainEmailDraftText(card,to);
+        return {...message,displayText,hasCalendarText:true,canUseInEmail:false,
+          messageActionsLabel:message.messageActionsLabel?'Message actions: '+displayText:message.messageActionsLabel};
+      }
       const current = () =>
         this.live && !document.hidden && draftScope() === shelf.scope &&
         shelf.cards.get(card.messageId)?.id === card.id;
       const sameAccount = () =>
         current() && views.inbox.agentEmailAccount?.()?.token === account?.token;
       const refresh = () => { if (this.live && draftScope() === shelf.scope) this.setState({}); };
-      const update = async (changes: Partial<Card>) => {
-        const latest = shelf.cards.get(card.messageId)!;
-        const next = { ...latest, ...changes };
-        await save(shelf, next, latest.state);
-        shelf.cards.set(card.messageId, next);
-        return next;
-      };
       const reportError = () => { shelf.notices.set(card.messageId, 'Couldn’t save the draft. Try again.'); };
       const edit = (key: 'to' | 'subject' | 'body', event: Event) => {
         if (!account || !sameAccount() || shelf.busy.has(card.messageId)) return;
@@ -225,33 +351,18 @@ export function installAgentEmailCards(
         if (latest.state !== 'draft') return;
         const addressText = addressLine(latest);
         const recipients = draftMailRecipients(addressText);
-        if (send && (!account || !recipients || !latest.body.trim() || this.S().typing || !sameAccount())) return;
+        if(send){
+          if(account&&recipients&&latest.body.trim()&&!this.S().typing&&sameAccount())
+            await sendCard(this,shelf,latest,account,recipients,sameAccount);
+          return;
+        }
         shelf.busy.add(card.messageId);
         shelf.notices.delete(card.messageId);
         // A waiting edit is written before the decision, in order, so it never lands over it.
         shelf.edits.get(card.messageId)?.flush();
         refresh();
         try {
-          const address = account ? { to: addressText, literalTo: true, from: account.from, grant: account.grant } : {};
-          // Nothing is prepared unless this write of the shown content succeeds; Send sends what it stored.
-          const sending = await update({ ...address, state: send ? 'sending' : 'declined' });
-          if (!send || !account || !recipients) return;
-          if (!sameAccount()) {
-            await update({ state: 'draft' });
-            return;
-          }
-          try {
-            const result = await views.inbox.sendAgentEmail(
-              sending.id, { to: recipients, subject: sending.subject, body: sending.body }, account.token, sameAccount,
-            );
-            await update({ state: result?.state === 'unsent' ? 'draft' :
-              result?.state === 'sent' || result?.state === 'rejected' ? result.state : 'uncertain' });
-            if (result?.state === 'unsent')
-              shelf.notices.set(card.messageId, result.detail || 'Email was not sent. Check Inbox.');
-          } catch {
-            // The persisted sending state also survives a process exit or an unavailable journal.
-            await update({ state: 'uncertain' });
-          }
+          await updateCard(shelf,latest,{state:'declined'});
         } catch {
           reportError();
         } finally {

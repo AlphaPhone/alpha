@@ -247,6 +247,17 @@ test('every fixed error a hosted digest run records keeps its reason in Alpha’
 
 // --- Chat: a workflow the agent saved, changed or started (plugin-workflow WORKFLOW action) -----
 const chat=await import('../apps/app/src/runtime/action-message-presentation.ts');
+
+test('a phone approval instruction requires a real review on the reply',()=>{
+  const seen='Already prepped that for you, Carson, saying test. Just tap approve on your phone and it sends.';
+  assert.equal(chat.isPhoneReviewInstruction(seen),true);
+  assert.equal(chat.phoneReviewReply(seen,false),'I couldn’t open a review card for this request.');
+  assert.equal(chat.phoneReviewReply(seen,true),seen);
+  assert.equal(chat.phoneReviewReply('Review this request on your phone before it can run.',false),'I couldn’t open a review card for this request.');
+  const instructions='If you see an approval card, tap Approve on your phone.';
+  assert.equal(chat.phoneReviewReply(instructions,false),instructions);
+});
+
 test('every WORKFLOW action sentence the agent delivers unparaphrased reads in Alpha’s words',()=>{
  // Text bound to effect receipts is the action's canonical reply: core delivers it exactly as written.
  assert.match(vendor('packages/core/src/runtime/action-handler-settlement.ts'),/callbackText !== expectedText/);

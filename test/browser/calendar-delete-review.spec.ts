@@ -46,7 +46,8 @@ test('an event changed while its review is open is not deleted',async({page})=>{
  // Another window edits the same event while the review is open.
  await page.evaluate(async()=>{const {calendarDocument}=await import('/src/browser/calendar-store.ts');await calendarDocument.edit(()=>({sourceRevision:'',events:[]}) as any,(data:any)=>{data.events[0].title='Edited elsewhere';data.events[0].revision='other-window';});});
  await review.getByRole('button',{name:'Delete event',exact:true}).click();
- await expect(page.getByText('Changed',{exact:true})).toBeVisible();
+ await expect(page.getByRole('status').filter({hasText:'Event changed.'})).toBeVisible();
+ await expect(page.locator('[data-alpha-toast]').filter({hasText:'Event changed.'})).toHaveCount(0);
  expect(await titles(page)).toEqual(['Edited elsewhere']);
 });
 test('a second Delete activation while a review is open cannot delete or stack reviews',async({page})=>{

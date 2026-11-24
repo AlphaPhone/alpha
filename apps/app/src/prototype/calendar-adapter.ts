@@ -424,34 +424,42 @@ export function installCalendarAdapter(Component: any, views: Bag, options:{acti
       const uncertain=owner?.calendarWriteUncertain?.eventId===selected.alphaCalendarId;
       out.ev.busy=Boolean(owner?.calendarSaving||uncertain);
       out.ev.uncertain=uncertain;out.ev.checkUncertain=()=>{if(!loading)void refresh(true);};
+      const deleteFeedback=state.nativeDeleteFeedback?.eventId===selected.alphaCalendarId?state.nativeDeleteFeedback:undefined;
+      out.ev.deleteStatus=deleteFeedback?.text;
       const deleteSelection=async(scope?:'series')=>{
         if(!owner||owner.calendarSaving||owner.calendarWriteUncertain?.eventId===selected.alphaCalendarId)return;
         const currentOwner=owner,event=selected.nativeEvent,expected=expectedOf(event);
-        currentOwner.calendarSaving=true;api.set({});let dispatched=false;
+        const current=()=>owner===currentOwner&&!document.hidden&&api.isActive()&&api.get('calendar').open===selected.id&&!api.get('calendar').form;
+        const report=(text:string,pending=false)=>{
+          if(current())api.set({nativeDeleteFeedback:{eventId:selected.alphaCalendarId,text,pending}});
+        };
+        currentOwner.calendarSaving=true;report('Checking event…',true);let dispatched=false;
         try{
           const inspected=await (Capacitor.isNativePlatform()?calendar.inspectDeletion({id:event.id,calendarId:event.calendarId,expected,...(scope?{scope}:{})}):calendar.inspect({id:event.id,calendarId:event.calendarId,expected}));
-          if(owner!==currentOwner||api.get('calendar').open!==selected.id)return;
-          if(inspected.status==='external'){api.toast('Delete in Calendar');external();return;}
-          if(inspected.status!=='ready'){api.toast('Changed');await refresh(false,true);return;}
+          if(!current())return;
+          if(inspected.status==='external'){external();return;}
+          if(inspected.status!=='ready'){report('Event changed.');await refresh(false,true);return;}
           dispatched=true;
           const result=await (Capacitor.isNativePlatform()?calendar.removeScoped({eventId:inspected.eventId,sourceId:inspected.sourceId,sourceRevision:inspected.sourceRevision,revision:inspected.revision}):calendar.remove({id:event.id,calendarId:event.calendarId,expected,revision:inspected.revision}));
           if(owner!==currentOwner)return;
-          if(result.status==='queued'){const current=api.get('calendar');if(!document.hidden&&api.isActive()&&current.open===selected.id&&!current.form){api.set({open:null,openDay:null});}refreshDeletionViews();}
-          else if(result.status==='deleted'){
+          if(result.status==='queued'){
+            if(current())api.set({open:null,openDay:null,nativeDeleteFeedback:null});
+            refreshDeletionViews();
+          }else if(result.status==='deleted'){
             const linked=Capacitor.isNativePlatform()?eventNoteOriginId(event):!event.seriesId&&!/:occ:-?\d+$/.test(String(event.id))?String(event.id):undefined;
             if(linked)void forgetNoteOrigin('event',linked);
-            // The receipt belongs to the deleted event, not a newer detail or draft.
-            const current=api.get('calendar');
-            if(!document.hidden&&api.isActive()&&current.open===selected.id&&!current.form){
-              api.set({open:null,openDay:null});api.toast('Event deleted.');
-            }
+            if(current())api.set({open:null,openDay:null,nativeDeleteFeedback:null});
             await refresh(false,true);
-          }
-          else if(result.status==='conflict'){api.toast('Changed');await refresh(false,true);}
-          else if(result.status==='unknown'){currentOwner.calendarWriteUncertain={eventId:selected.alphaCalendarId,kind:'delete',begin:event.begin};api.toast('Unconfirmed');}
-          else if(result.status!=='cancelled')api.toast('Unavailable');
-        }catch{if(dispatched){currentOwner.calendarWriteUncertain={eventId:selected.alphaCalendarId,kind:'delete',begin:event.begin};api.toast('Unconfirmed');}else api.toast('Unavailable');}
-        finally{currentOwner.calendarSaving=false;if(owner===currentOwner)api.set({});}
+          }else if(result.status==='conflict'){report('Event changed.');await refresh(false,true);}
+          else if(result.status==='unknown')currentOwner.calendarWriteUncertain={eventId:selected.alphaCalendarId,kind:'delete',begin:event.begin};
+          else if(result.status!=='cancelled')report('Couldn’t delete this event.');
+        }catch{
+          if(dispatched)currentOwner.calendarWriteUncertain={eventId:selected.alphaCalendarId,kind:'delete',begin:event.begin};
+          else report('Couldn’t verify this event.');
+        }finally{
+          currentOwner.calendarSaving=false;
+          if(owner===currentOwner)api.set(current()&&api.get('calendar').nativeDeleteFeedback?.pending?{nativeDeleteFeedback:null}:{});
+        }
       };
       out.ev.del=()=>deleteSelection();
       if(Capacitor.isNativePlatform()&&selected.nativeEvent.recurring){out.ev.browserSeries=true;out.ev.day+=' · Repeating event · deletion applies to this occurrence';out.ev.deleteSeries=()=>deleteSelection('series');out.ev.editSeries=()=>{external();};}

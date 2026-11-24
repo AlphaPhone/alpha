@@ -1,3 +1,4 @@
+import {openWorkflowActions} from './workflow-navigation';
 import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import {returnToApps} from './app-navigation';
 import {test,expect,type Page} from '@playwright/test';
@@ -108,18 +109,18 @@ test('a workflow renamed, removed and restored from chat follows in its open det
  await expect(page.locator('[data-alpha-message-text]').filter({hasText:'Removed “Daily brief”. It no longer runs. You can restore it later.'})).toBeVisible();
  await expect(card('Removed')).toBeVisible();
  await expect.poll(async()=>(await fixture(page)).detailReads).toBe(3);
- await minimize();await expect(page.getByRole('button',{name:'Restore workflow',exact:true})).toBeVisible();
+ await minimize();await openWorkflowActions(page);await expect(page.getByRole('button',{name:'Restore workflow',exact:true})).toBeVisible();
  await page.getByRole('button',{name:'Back to workflows',exact:true}).click();
  await expect(list.getByText('Daily brief',{exact:true})).toHaveCount(0);
  // The removed workflow can still be read, so its card opens it, as removed.
  await page.getByRole('button',{name:'Open conversation',exact:true}).click();
  await card('Removed').getByRole('button',{name:'Open workflow',exact:true}).click();
- await expect(page.getByRole('heading',{name:'Daily brief',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Restore workflow',exact:true})).toBeVisible();
+ await expect(page.getByRole('heading',{name:'Daily brief',exact:true})).toBeVisible();await openWorkflowActions(page);await expect(page.getByRole('button',{name:'Restore workflow',exact:true})).toBeVisible();
 
  await say(page,'Restore this');
  await expect(page.locator('[data-alpha-message-text]').filter({hasText:'Restored “Daily brief”. It is off until you turn it on.'})).toBeVisible();
  await expect(card('Restored')).toBeVisible();
- await minimize();await expect(page.getByRole('button',{name:'Remove workflow',exact:true})).toBeVisible();
+ await minimize();await openWorkflowActions(page);await expect(page.getByRole('button',{name:'Remove workflow',exact:true})).toBeVisible();
  await page.getByRole('button',{name:'Back to workflows',exact:true}).click();
  await expect(list.getByText('Daily brief',{exact:true}).first()).toBeVisible();
 });

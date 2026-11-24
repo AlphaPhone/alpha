@@ -18,7 +18,6 @@ async function compilePhotosWindow(extraSources = []) {
     ["../runtime/media-copy-intent", `export const readMediaCopyIntent=async()=>null;export const admitMediaCopyIntent=${unused("copy")},acknowledgeMediaCopyIntent=${unused("copy")},mediaCopyIntentDocument=${unused("copy")};`],
     ["../runtime/inline-modal", "export const createInlineModal=()=>({ref(){}});"],
     ["./file-email-review", `export const reviewFileEmail=${unused("email")};`],
-    ["../browser/content-question", `export const reviewContentQuestion=${unused("question")};`],
     ["./video-edit-review", `export const openVideoEditReview=${unused("video edit")};`],
     ["./scan-review", `export class ScanKeepError extends Error{};export const openScanReview=${unused("scan")};`],
     ["./scan-pdf", `export class ScanPdfExportError extends Error{};export const systemPickerActive=()=>false,scanExportTitle=${unused("scan title")},exportScanPdf=${unused("scan PDF")},scanPdfRetryable=${unused("scan retry")},duringSystemPicker=${unused("scan picker")};`]

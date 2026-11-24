@@ -71,7 +71,7 @@ test('reviewed Files and Photos send exact bytes only on explicit attachment-onl
    // Compare only after the screen has taken the new viewport height; before that both boxes are stale.
    return sheet&&screen&&screen.y+screen.height<=height+1?Math.abs(sheet.y+sheet.height-screen.y-screen.height):Infinity;
   }).toBeLessThan(1);
-  expect(await picker.evaluate(el=>{
+  await expect.poll(()=>picker.evaluate(el=>{
    const rect=el.getBoundingClientRect();
    return el.contains(document.elementFromPoint(rect.x+rect.width/2,rect.bottom-2));
   })).toBe(true);
@@ -235,6 +235,39 @@ test('a Files preview attaches the exact file to an editable prompt and waits fo
  await expect(page.getByRole('dialog',{name:'Save summary'})).toHaveCount(0);
  await page.screenshot({path:testInfo.outputPath('file-reply-in-chat.png'),animations:'disabled'});
  await expect(page.getByRole('button',{name:'Remove Reviewed notes.txt',exact:true})).toHaveCount(0);
+ expect(outbound).toEqual([]);
+});
+
+test('a voice question about the open file sends its verified text attachment',async({page})=>{
+ const outbound=await ready(page);
+ await page.evaluate(async()=>{
+  const {Component}=await import('/src/prototype/model.js');
+  const {BrowserMailAttachments}=await import('/src/browser/mail-attachments.ts');
+  const fixture=(window as any).attachmentFixture;
+  const read=BrowserMailAttachments.prototype.readSelected;
+  BrowserMailAttachments.prototype.readSelected=function(input){fixture.reads++;return read.call(this,input);};
+  const render=Component.prototype.renderVals;
+  Component.prototype.renderVals=function(){fixture.shell=this;return render.call(this);};
+ });
+ await page.getByRole('button',{name:'Files',exact:true}).click();
+ await page.getByRole('button',{name:'Internal storage',exact:true}).click();
+ await page.getByRole('button',{name:'Open Reviewed notes.txt',exact:true}).click();
+ await expect(page.getByText('first bytes',{exact:true})).toBeVisible();
+ const sent=await page.evaluate(async()=>{
+  const fixture=(window as any).attachmentFixture;
+  const signal=new AbortController().signal;
+  const prepared=await fixture.shell.prepareVoiceConversation(signal);
+  for(const text of ['How are you?', 'What is a good translation of "in this file"?', 'What should I bring according to this file?']){
+   await fixture.shell.sendVoiceTurn({...prepared,text,signal,turnId:crypto.randomUUID(),assertCurrent:()=>{},
+    voiceTurnSignal:{nextSpeaker:'agent',agentShouldSpeak:true,source:'fixture'}});
+  }
+  return {reads:fixture.reads,sends:fixture.sends.map(({text,images}:any)=>({text:text.split('[USER MESSAGE]\n').at(-1),images}))};
+ });
+ expect(sent).toEqual({reads:1,sends:[
+  {text:'How are you?'},
+  {text:'What is a good translation of "in this file"?'},
+  {text:'What should I bring according to this file?',images:[{name:'Reviewed notes.txt',mimeType:'text/plain',data:Buffer.from('first bytes').toString('base64')}]},
+ ]});
  expect(outbound).toEqual([]);
 });
 

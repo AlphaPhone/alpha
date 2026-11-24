@@ -506,7 +506,7 @@ test('loops D and F in the web build: digests and mail name the missing account 
   expect(foreign).toEqual([]);
 });
 
-test('loops E and J05 in the web build: page content requires review and no development vault is offered', async ({ page }) => {
+test('loops E and J05 in the web build: page controls and the development vault stay out of the menu', async ({ page }) => {
   test.setTimeout(120_000);
   const foreign = await fenceNetwork(page, ['public-fixture.test']);
   const url = 'https://public-fixture.test/harbour';
@@ -521,15 +521,12 @@ test('loops E and J05 in the web build: page content requires review and no deve
   // The web build cannot verify TLS for the framed page and does not claim it.
   await expect(page.getByRole('img', { name: 'Secure connection', exact: true })).toHaveCount(0);
   await button(page, 'Menu').click();
-  // A committed web page offers an explicit review of a separately fetched copy;
-  // the frame itself is never certified as TLS or silently added to agent context.
   await expect(button(page, 'Share')).toHaveCount(0);
-  await button(page, 'Ask about page').click();
-  const review = page.getByRole('dialog', { name: 'Ask about selected content' });
-  await expect(review).toBeVisible();
-  await expect(review.getByRole('textbox', { name: 'Content excerpt' })).toHaveValue(/The ferry leaves at nine from pier four/);
-  await review.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await expect(review).toHaveCount(0);
+  await expect(button(page, 'Ask about page')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await button(page, 'Chat actions').click();
+  await expect(button(page, 'Attach page')).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Ask about selected content' })).toHaveCount(0);
   await page.goto('/');
   await button(page, 'Settings').click();
   await expect(button(page, 'Passwords')).toHaveCount(0);
@@ -581,7 +578,7 @@ test('loop J01 in the web build: a scanned event remains in review without an au
   expect(foreign).toEqual([]);
 });
 
-test('loop J03 in the web build: a chosen document can be reviewed for a question, and with no agent nothing is sent or saved', async ({ page }) => {
+test('loop J03 in the web build: a chosen document stages locally, and with no agent nothing is sent or saved', async ({ page }) => {
   test.setTimeout(120_000);
   const foreign = await fenceNetwork(page);
   await page.addInitScript(offline);
@@ -597,14 +594,13 @@ test('loop J03 in the web build: a chosen document can be reviewed for a questio
   await button(page, 'Open garden-report.txt').click();
   await button(page, 'File actions').click();
   await button(page, 'Ask Alpha').click();
-  await page.getByRole('button', { name: /^Edit excerpt from / }).click();
-  const question = page.getByRole('dialog', { name: 'Ask about selected content' });
-  await expect(question.getByRole('textbox', { name: 'Content excerpt' })).toHaveValue('Public fact: twelve raised beds.');
-  await question.getByRole('button', { name: 'Use in conversation', exact: true }).click();
+  const remove=button(page, 'Remove garden-report.txt');
+  await expect(remove).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Ask about selected content' })).toHaveCount(0);
   await button(page, 'Send').click();
   await expect(page.locator('.alpha-connection').getByText('Android only', { exact: true })).toBeVisible();
   // The refused send gets its text back with no line under the composer (owner, 2026-11-03).
-  await expect.poll(() => page.locator('textarea[data-alpha-composer]').evaluateAll(fields => fields.some(field => (field as HTMLTextAreaElement).value.includes('Public fact: twelve raised beds.')))).toBe(true);
+  await expect.poll(() => page.locator('textarea[data-alpha-composer]').evaluateAll(fields => fields.some(field => (field as HTMLTextAreaElement).value==='Explain this file'))).toBe(true);
   await expect(page.getByRole('status', { name: 'Assistant draft status' })).toHaveCount(0);
   await expect(page.getByText('Your message is back in the composer')).toHaveCount(0);
   await expect(page.getByText('Review summary note', { exact: true })).toHaveCount(0);
@@ -634,10 +630,6 @@ async function openHarbour(page: Page) {
   const tab = await native(page, f => f.browser.created.at(-1)) as string;
   expect(await native(page, f => f.browser.navigations)).toEqual([HARBOUR]);
   return tab;
-}
-async function askAboutHarbour(page: Page) {
-  await button(page, 'Menu').click();
-  await button(page, 'Ask about page').click();
 }
 /** The notes saved in the Keystore-backed Notes slot of the stub (its envelope holds the collection's bytes). */
 const savedNotes = (page: Page) => native(page, f => { const slot = f.slots['notes-records:v1:device']; return slot ? JSON.parse(JSON.parse(slot).currentRaw).records : []; }) as Promise<any[]>;

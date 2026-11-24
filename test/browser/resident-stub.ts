@@ -29,8 +29,9 @@ export type StubStream =
   | 'hold'
   /** The turn fails on the agent with this upstream failure kind, in a `done` or `error` frame.
    * `runtime`: the exact `done` frame the agent's conversation stream writes when a Cloud 402 ends a
-   * turn before any text (fullText is upstream's credits reply, `failureKind` with no terminalFailure). */
-  | { failure: string; frame: 'done' | 'error'; runtime?: boolean };
+   * turn before any text (fullText is upstream's credits reply, `failureKind` with no terminalFailure).
+   * `code`: Cloud's own refusal code on the terminal failure (`terminalFailure.code`). */
+  | { failure: string; frame: 'done' | 'error'; runtime?: boolean; code?: string };
 /** One Cloud Maps place in the deployed `/api/v1/maps` shape. */
 export interface StubMapsPlace { id: string; name: string; latitude: number; longitude: number; address?: string }
 /** Eliza Cloud Maps (#412) behind the synthetic Cloud: capabilities, places/search and routes only.
@@ -295,7 +296,7 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
         setTimeout(() => {
           emit(streamId, { type: 'response', status: 200, headers: { 'content-type': 'text/event-stream' } });
           if (mode === 'drop') { emit(streamId, { type: 'complete', error: 'Stream interrupted. Outcome unknown; check history before retrying.' }); return; }
-          const terminalFailure = { kind: mode.failure, message: 'PRIVATE_PROVIDER_ERROR_CANARY', transient: false };
+          const terminalFailure = { kind: mode.failure, message: 'PRIVATE_PROVIDER_ERROR_CANARY', transient: false, ...(mode.code ? { code: mode.code } : {}) };
           if (mode.runtime) data(streamId, { agentName: 'Alpha', messageId: crypto.randomUUID(), userMessageId, failureKind: mode.failure, type: 'done', fullText: 'The configured AI provider is out of credits or quota. Add credits or increase its quota, then try again.' });
           else if (mode.frame === 'error') data(streamId, { type: 'error', message: 'PRIVATE_PROVIDER_ERROR_CANARY', failureKind: mode.failure, terminalFailure });
           else data(streamId, { type: 'done', fullText: 'PRIVATE_PROVIDER_ERROR_CANARY', agentName: 'Alpha', failureKind: mode.failure, terminalFailure });

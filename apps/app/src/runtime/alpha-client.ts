@@ -67,6 +67,10 @@ export interface ActionProposal {
   reviewDestination?:'home'|'notes'|'calendar';
   /** Validated exact target for navigation only. Opening it never approves the operation. */
   reviewNoteTarget?:NotesTarget;
+  /** Presentation of a validated SMS operation. Approval remains bound to the original proposal. */
+  smsReview?: 'draft' | 'addressed-draft' | 'send' | 'recipient' | 'reply-draft';
+  smsPreview?: import('../ui/telephony/sms-card-facts').SmsReviewPreview;
+  /** Authored draft displayed in plain chat when action review is off. */
   title: string;
   /** Human-readable exact target/action review. Must contain no secret values. */
   description: string;
@@ -86,11 +90,12 @@ export interface ConversationMessageTarget {
 /** A committed voice turn omits the text end-of-turn score (voice-adapter.ts `turnSignal`). */
 export type VoiceTurnSignal = Omit<SharedVoiceTurnSignal,'endOfTurnProbability'>&{endOfTurnProbability?:number};
 export type ChatChannel = 'DM' | 'VOICE_DM';
+export type RequestedViewProjection = (view: string, signal: AbortSignal) => Promise<boolean>;
 export interface VoiceConversationBinding { conversationId:string;session:VerifiedSession;connectionEpoch:number }
 export interface ReadReplyBinding extends VoiceConversationBinding {cloudAccount:string}
 /** Local host projection invoked only inside the canonical claimed view effect. Never wire metadata or authority. */
 export interface VoiceNavigationContinuation {
- apply(view:string,current:()=>void,commit:(chat:string,onCommitted:(context:ContextEnvelope)=>void)=>Promise<boolean>):Promise<boolean>;
+ apply(view:string,current:()=>void,commit:(chat:string,onCommitted:(context:ContextEnvelope)=>void)=>Promise<boolean>,expectedSelection?:{kind:string;id:string}):Promise<boolean>;
  finish(delivered:boolean):ContextEnvelope|undefined;
 }
 /**
@@ -156,6 +161,7 @@ export interface VerifiedSessionTransport {
     signal: AbortSignal;
     onText?:StreamTextListener;
     onReplyReady?:(results:readonly unknown[]|undefined)=>void;
+    projectRequestedView?:RequestedViewProjection;
     replyTo?: ConversationMessageTarget;
     workflowStep?: boolean;
   }): Promise<AgentReply>;
@@ -163,6 +169,7 @@ export interface VerifiedSessionTransport {
   execute(input: {
     requestId: string;
     proposal: ActionProposal;
+    approval?: "send-draft";
     context: ContextEnvelope;
     signal: AbortSignal;
   }): Promise<OperationReceipt>;
@@ -227,12 +234,13 @@ export class AlphaClient {
   private localSelection: string | null = null;
   private active: AbortController | null = null;
   private activeWorkflow = false;
-  /** The context revision the request in flight answers for; moves only with `ownPageChange`. */
+  /** The request's revision follows only its own admitted navigation. */
   private activeRevision = 0;
   /** A page the request in flight changes itself (the agent's own Browser back, forward or reload). */
   private ownPageChange: { active: AbortController; kind: string; id: string } | null = null;
   /** A view the request in flight brings forward itself (the agent's own Maps navigation request). */
   private ownViewOpen: { active: AbortController; view: string } | null = null;
+  private ownViewChange: { active: AbortController; from: string; to: string } | null = null;
   /** Each context an own page change published, keyed by its revision, with the context it replaced. */
   private ownMoves = new Map<number, ContextEnvelope>();
   private proposals = new Map<string, ActionProposal>();
@@ -364,6 +372,7 @@ export class AlphaClient {
     this.activeWorkflow = false;
     this.ownPageChange = null;
     this.ownViewOpen = null;
+    this.ownViewChange = null;
     this.ownMoves.clear();
     this.transport = null;
     this.proposals.clear();
@@ -374,22 +383,44 @@ export class AlphaClient {
     this.emit();
   }
   /** A local selection can retire approvals without publishing its identifier to the agent. */
-  setViewContext(context: ViewContext, localSelection: string | null = null): void {
+  setViewContext(context: ViewContext, localSelection: string | null = null, openingBrowserTab?: string): void {
     const next = copyContext(context, this.context.revision);
     const selection = next.sensitive ? null : localSelection;
     if (selection === this.localSelection && JSON.stringify(next) === JSON.stringify(this.context)) return;
-    const ownChange = this.isOwnPageChange(next, selection) || this.isOwnViewOpen(next), previous = this.context;
+    const promisedView = this.ownViewChange;
+    const ownView = !!promisedView && promisedView.active === this.active &&
+      !this.context.sensitive && !next.sensitive && this.context.view === promisedView.from && next.view === promisedView.to;
+    this.ownViewChange = null;
+    // The Notes list publishes its source when its initial read finishes. No note
+    // was selected, and an already open Talk session still owns the same screen.
+    const notesSourceLoaded = !this.context.sensitive && !next.sensitive &&
+      this.context.view === "notes" && next.view === "notes" &&
+      this.localSelection === null && selection === null && !this.context.selectedObject &&
+      next.selectedObject?.kind === "canonical-note-source" && next.selectedObject.id === "notes" &&
+      this.context.timeZone === next.timeZone;
+    // A new Browser page can redirect or finish after its agent-owned presentation.
+    // The visible tab still owns Talk, but a turn or approval for the earlier document
+    // must not acquire the new document's authority.
+    const ownBrowserLoad = !!openingBrowserTab && !this.context.sensitive && !next.sensitive &&
+      this.context.view === "browser" && next.view === "browser" &&
+      this.localSelection === null && selection === null &&
+      this.context.selectedObject?.kind === "browser-tab" && this.context.selectedObject.id === openingBrowserTab &&
+      next.selectedObject?.kind === "browser-tab" && next.selectedObject.id === openingBrowserTab &&
+      this.context.timeZone === next.timeZone;
+    const ownChange = ownView || this.isOwnPageChange(next, selection) || this.isOwnViewOpen(next), previous = this.context;
     this.localSelection = selection;
     this.context = copyContext(context, this.context.revision + 1);
     this.proposals.clear();
-    // The request's own page command moved the page it acts on: the reply continues and answers
-    // for the new document. Approvals bound to the earlier document are still retired above.
-    if (ownChange) {
-      this.activeRevision = this.context.revision;
+    // A view or page change committed by this request keeps its reply in flight.
+    // Approvals stay bound to the earlier screen and are retired above.
+    if (ownChange || notesSourceLoaded || ownBrowserLoad) {
+      if (ownChange) this.activeRevision = this.context.revision;
       if (this.ownMoves.size >= 32) this.ownMoves.clear();
       this.ownMoves.set(this.context.revision, previous);
-    } else {
-      this.ownMoves.clear();
+    } else this.ownMoves.clear();
+    // Passive source updates preserve the conversation and still retire a turn
+    // bound to the previous source. A page question must read the selected revision.
+    if (!ownChange) {
       if(!this.activeWorkflow||next.sensitive){this.active?.abort();this.active=null;this.activeWorkflow=false;this.ownPageChange=null;this.ownViewOpen=null;}
     }
     this.emit();
@@ -409,6 +440,14 @@ export class AlphaClient {
     const prior = this.ownPageChange?.active === active ? this.ownPageChange : null;
     const admitted = this.ownPageChange = { active, kind: page.kind, id: page.id };
     return () => { if (this.ownPageChange === admitted) this.ownPageChange = prior; };
+  }
+  /** Admit the one screen change projected by the current turn's exact, authenticated action. */
+  admitOwnViewChange(view: string): () => void {
+    const active = this.active;
+    if (!active || this.activeWorkflow || this.context.sensitive || view === this.context.view)
+      return () => {};
+    const admitted = this.ownViewChange = { active, from: this.context.view, to: view };
+    return () => { if (this.ownViewChange === admitted) this.ownViewChange = null; };
   }
   /**
    * Called while the request in flight runs a phone command that brings `view` forward itself:
@@ -547,6 +586,7 @@ export class AlphaClient {
         controller.signal.removeEventListener("abort", abortListener);
       if (this.ownPageChange?.active === controller) this.ownPageChange = null;
       if (this.ownViewOpen?.active === controller) this.ownViewOpen = null;
+      if (this.ownViewChange?.active === controller) this.ownViewChange = null;
       if (this.active === controller) {
         this.active = null;
         this.activeWorkflow = false;
@@ -567,7 +607,7 @@ export class AlphaClient {
       return reply.text;
     },signal,automatic);
   }
-  async send(text: string, onText?:StreamTextListener, replyTo?:ConversationMessageTarget,onReplyReady?:(results:readonly unknown[]|undefined)=>void,options?:{channelType:ChatChannel;requestId?:string;signal?:AbortSignal;expectedConversationId?:string;voiceTurnSignal?:VoiceTurnSignal;images?:Array<{data:string;mimeType:string;name:string}>}): Promise<AgentReply> {
+  async send(text: string, onText?:StreamTextListener, replyTo?:ConversationMessageTarget,onReplyReady?:(results:readonly unknown[]|undefined)=>void,options?:{channelType:ChatChannel;requestId?:string;signal?:AbortSignal;expectedConversationId?:string;voiceTurnSignal?:VoiceTurnSignal;images?:Array<{data:string;mimeType:string;name:string}>;projectRequestedView?:RequestedViewProjection}): Promise<AgentReply> {
     if (!text.trim() && !(options?.channelType==='DM'&&options.images?.length)) throw new Error("Enter a message.");
     if(options?.channelType==='VOICE_DM'&&replyTo)throw Error("A voice turn cannot resend or edit a selected message.");
     return this.run(async (transport, context, signal) => {
@@ -577,6 +617,7 @@ export class AlphaClient {
         ...(options?{channelType:options.channelType,expectedConversationId:options.expectedConversationId,voiceTurnSignal:options.voiceTurnSignal}:{}),
         text,
         images:options?.images,
+        projectRequestedView:options?.projectRequestedView,
         ...(replyTo?{replyTo}:{}),
         context,
         signal,
@@ -642,10 +683,12 @@ export class AlphaClient {
     },options?.signal);
   }
   /** Call only after the user reviews and explicitly approves this exact proposal. */
-  async approve(proposalId: string): Promise<OperationReceipt> {
+  async approve(proposalId: string, approvalSignal?: AbortSignal, approval?: "send-draft", approvedDescription?: string): Promise<OperationReceipt> {
     const proposal = this.proposals.get(proposalId);
     if (
       !proposal ||
+      (approval === "send-draft" && proposal.smsReview !== "addressed-draft" && proposal.smsReview !== "draft") ||
+      (approvedDescription !== undefined && proposal.description !== approvedDescription) ||
       proposal.expiresAt <= Date.now() ||
       proposal.contextRevision !== this.context.revision ||
       this.consumed.has(proposalId)
@@ -662,6 +705,7 @@ export class AlphaClient {
       const receipt = await transport.execute({
         requestId: crypto.randomUUID(),
         proposal: { ...proposal },
+        ...(approval ? { approval } : {}),
         context,
         signal,
       });
@@ -677,7 +721,7 @@ export class AlphaClient {
         );
       }
       return { ...receipt };
-    });
+    }, approvalSignal);
   }
 }
 export const alphaClient = new AlphaClient();

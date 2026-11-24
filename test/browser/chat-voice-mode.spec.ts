@@ -1,6 +1,7 @@
 import {test,expect,type Page} from '@playwright/test';
 // The closing sheet keeps an inert composer briefly; interact with the one exposed to users.
 import {preloadPageModules} from './helpers/page-modules';
+import {settled} from './helpers/settled';
 
 const voice=(page:Page)=>page.getByRole('region',{name:'Voice conversation',exact:true});
 async function setup(page:Page,signed=true,theme='light'){
@@ -164,6 +165,43 @@ for(const theme of ['light','dark'])test(`compact chat header and voice controls
   await page.screenshot({path:info.outputPath('chat-voice-'+theme+'-'+detent+'.png'),animations:'disabled'});
  }
  await page.getByRole('button',{name:'Minimize chat',exact:true}).click();await noMedia(page);
+});
+
+// Voice owns the open sheet, a Talk conversation and dictation alike: dragging its handle up or down
+// neither moves the voice controls nor draws the text composer or the bar under them, and voice
+// outlives the release. Once voice stops, the same drag resizes the chat.
+const sheetVoice={
+ Talk:{region:'Voice conversation',state:'listening',stop:'Stop voice conversation',start:(page:Page)=>page.getByRole('button',{name:'Talk',exact:true}).click()},
+ // Dictation records in the open sheet through the component API (there is no chat dictation
+ // button); the synthetic port reports this browser's speech ready, so the recording runs.
+ dictation:{region:'Voice transcription',state:'recording',stop:'Discard transcription',start:async(page:Page)=>{
+  await page.getByRole('button',{name:'Open conversation',exact:true}).click();await expect.poll(()=>page.evaluate(()=>(window as any).chatVoiceFixture.shell.S().chat)).toBe('sheet');
+  await page.evaluate(async()=>{const {BrowserVoice}=await import('/src/browser/voice.ts');BrowserVoice.prototype.localSpeechStatus=async()=>({ready:true,execution:'browser'}) as any;(window as any).chatVoiceFixture.shell.startTranscription();});
+ }},
+};
+for(const [mode,owner] of Object.entries(sheetVoice))test(`dragging the chat during ${mode} keeps the voice controls in place; after it the drag resizes the chat`,async({page},info)=>{
+ const recorder=page.getByRole('region',{name:owner.region,exact:true});
+ await setup(page);await owner.start(page);await expect(recorder).toHaveAttribute('data-voice-state',owner.state);await settled(page);
+ const shown=()=>page.evaluate(()=>{const panel=document.querySelector('[data-alpha-layer="conversation"]')!,recorder=panel.querySelector('[data-alpha-chat-recorder]')?.getBoundingClientRect();
+  return {chat:(window as any).chatVoiceFixture.shell.S().chat,height:Math.round(panel.getBoundingClientRect().height),voiceTop:recorder?Math.round(recorder.top):null,voiceBottom:recorder?Math.round(recorder.bottom):null,
+   textComposers:document.querySelectorAll('textarea[data-alpha-composer]').length,bars:document.querySelectorAll('[data-alpha-input-bar]').length,pills:document.querySelectorAll('[data-alpha-layer="pill"]').length};});
+ const capture=()=>page.evaluate(()=>{const f=(window as any).chatVoiceFixture;return {active:f.active,starts:f.starts,cancels:f.cancels};});
+ const frames=()=>page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve()))));
+ const handle=async()=>{const box=(await page.getByRole('button',{name:'Resize chat',exact:true}).boundingBox())!;return {x:box.x+box.width/2,y:box.y+box.height/2};};
+ const pinned=await shown(),recording=await capture();expect(pinned).toMatchObject({chat:'sheet',textComposers:0,bars:0,pills:0});expect(pinned.voiceTop).not.toBeNull();expect(recording.active).not.toBeNull();
+ let {x,y}=await handle();await page.mouse.move(x,y);await page.mouse.down();
+ for(const dy of [-160,160]){await page.mouse.move(x,y+dy,{steps:8});await frames();expect(await shown(),`${mode} held through a drag to ${dy}px`).toEqual(pinned);}
+ await page.screenshot({path:info.outputPath(`${mode}-drag-held.png`),animations:'disabled'});
+ // Released over the transcript, away from the handle, so no click on the handle follows.
+ await page.waitForTimeout(160);await page.mouse.up();await settled(page);
+ expect(await shown()).toEqual(pinned);await expect(recorder).toHaveAttribute('data-voice-state',owner.state);expect(await capture()).toEqual(recording);
+ await recorder.getByRole('button',{name:owner.stop,exact:true}).click();await expect(page.locator('[data-alpha-chat-recorder]')).toHaveCount(0);await settled(page);
+ const text=await shown();expect(text).toMatchObject({chat:'sheet',voiceTop:null,textComposers:1});
+ ({x,y}=await handle());await page.mouse.move(x,y);await page.mouse.down();await page.mouse.move(x,y-160,{steps:8});await frames();
+ const dragging=await shown();expect(dragging.height).toBeGreaterThan(text.height+100);expect(dragging.textComposers).toBe(1);
+ await page.waitForTimeout(160);await page.mouse.up();await settled(page);
+ const released=await shown();expect(['sheet','full']).toContain(released.chat);expect(released.height).toBeGreaterThan(text.height+100);
+ await noMedia(page);
 });
 
 for(const theme of ['light','dark'])test(`paused Notes voice keeps real review and Stop controls visible at compact height: ${theme}`,async({page},info)=>{

@@ -137,7 +137,6 @@ if (!fixture) {
   selected = installSelectedDocumentAdapter(Component, VIEWS);
   installPrototypeCameraAdapter(Component, VIEWS);
   installAgentAdapter(Component, VIEWS);
-  installChatTools(Component);
   installReminderAdapter(Component, VIEWS);
   installCalendarAdapter(Component, VIEWS, {active:deviceCalendarScope});
   if(isAndroid){installContactsAdapter(Component,VIEWS);installSmsAdapter(Component,VIEWS,secureConnectionStore);installPhoneAdapter(Component,VIEWS);}
@@ -186,6 +185,7 @@ if (!fixture) {
   installSharePanelAdapter(Component,VIEWS);
 }
 if(devSurfacesEnabled&&simulatedApps)installSimulatedApps(Component,VIEWS,simulatedApps);
+installChatTools(Component);
 if(developmentAgentWorkflows){installWorkflowAdapter(Component,VIEWS);installAutomationsAdapter(Component,VIEWS);}
 installSubviewAccessibility(VIEWS);
 installCalendarMonthFocus(Component, VIEWS);
@@ -375,7 +375,7 @@ function Phone() {
     else if(action==='resume'){delete document.documentElement.dataset.devBackground;shell.unlock();window.dispatchEvent(new Event('focus'));}
     if(['power','unlock','boot','background','resume'].includes(action))window.dispatchEvent(new Event('alpha:device-state'));
   }}/>}{testMocksEnabled && mock && <div className="mock-mode-banner" role="status"><span>Mock mode · simulated data and actions</span><button onClick={() => { void connectionController.offline().then(() => { const url = new URL(location.href); url.searchParams.delete('mode'); url.searchParams.delete('start'); location.assign(url.href); }); }}>Exit mock mode</button></div>}{startupPending && !chooserCommitted && <div className="alpha-startup-loading" role="status" aria-label="Loading Alpha"><span className="alpha-compute-mark"/></div>}<div data-alpha-startup-shell inert={startupPending} aria-hidden={startupPending ? true : undefined} style={{width:'100%',height:'100%',opacity:startupPending ? 0 : 1,pointerEvents:startupPending ? 'none' : undefined}}><Component configureChatPull={(surface:{scale:number})=>setPullScale(surface.scale)} chatPullBinding={chatPullBinding} phoneSurface assistantSurface={assistantSurface} onCloseAssistant={closeAssistant} onReopenStartupAccess={!fixture && !assistantSurface ? reopenStartupPermissions : undefined} systemShell={launcherPresentation} systemShade={systemShade} nativeSystemChrome={isAndroid || !launcherPresentation} initial={testMocksEnabled && fixture ? query.get('start') || 'home' : 'home'} theme={initialTheme} ref={(value: any) => { shell = value; if (value && pendingNotices.length) queueMicrotask(() => { if (shell === value && value.live) flushNotices(value); }); }} /></div>
-{!fixture && <><ConnectionChooser onPresentation={setChooserCommitted} /><GoogleConnectionsPanel />{!assistantSurface && <><HostedDigestPanel canComposeQuestion={questionTarget} composeQuestion={(draft,sessionId)=>{if(!questionTarget(sessionId))return false;shell.api(shell.S().view).composeContentQuestion(draft);return true;}} /><StartupPermissions active={startupPermissionsActive(connection)} /></>}</>}</>;
+{!fixture && <><ConnectionChooser onPresentation={setChooserCommitted} /><GoogleConnectionsPanel />{!assistantSurface && <><HostedDigestPanel canComposeQuestion={questionTarget} attachQuestion={async (selection,sessionId)=>questionTarget(sessionId)&&shell.api(shell.S().view).attachSelectedFile(selection)} /><StartupPermissions active={startupPermissionsActive(connection)} /></>}</>}</>;
 }
 /** Android's locale and 24-hour setting; WebView Intl alone does not follow the latter. */
 async function applyDeviceLocale() {

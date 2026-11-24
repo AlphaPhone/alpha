@@ -14,6 +14,7 @@ const TITLES = ['PRIVATE_DENTIST_TITLE', 'PRIVATE_BIRTHDAY_TITLE', 'PRIVATE_OUTS
 async function connect(page: Page, mode: Mode) {
   await page.addInitScript((mode) => {
     const w = window as any, store = new Map();
+    localStorage.setItem('alpha.browser.device.v1', JSON.stringify({ askBeforeAgentActions: true }));
     const agentId = '12345678-1234-4234-8234-123456789abc';
     const now = new Date(), start = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1), end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 2);
     const fixture = w.availabilityFixture = { posts: 0, decisions: 0, claims: 0, receipts: [] as any[], journal: [] as string[], retained: null as any, proposal: null as any, sent: null as any, capabilityHeader: '', window: { start: start.toISOString(), end: end.toISOString() } };

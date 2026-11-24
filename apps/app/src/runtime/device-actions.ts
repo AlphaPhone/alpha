@@ -32,6 +32,7 @@ import {
   type WorkflowNoticeRoute,
   type WorkflowPresentationOperation,
 } from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts';
+import type { ContactMatch } from './telephony-executor';
 import {
   CAMERA_CONTEXT_NOTICE,
   ContextNotice,
@@ -40,7 +41,6 @@ import {
   replyDeviceProposalIds,
   requestedCameraNeedsCameraView,
 } from '../ui/device-actions/client-coordinator';
-import {smsSimLabel} from '../ui/telephony/sms-card-facts';
 import type {BrowserTabsClosing, ContactMatchNames} from '../ui/device-actions/client-coordinator';
 import {isCalendarOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts';
 import {isNotesOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-contract.ts';
@@ -83,8 +83,6 @@ export const alphaDeviceActionProfile: DeviceActionClientProfile<ContextEnvelope
   mapsSelectionCurrent:validateMapsSelectedObject,
   namedCalendarReadTarget,
   foregroundHidden:()=>typeof document!=='undefined'&&document.hidden,
-  // An SMS card names the SIM it goes from; Approve sends it with no dialog after.
-  simLabel:smsSimLabel,
 };
 /** Runs an approved Browser open or control for the device executor. One that Browser refused
  * before any effect closes the attempt as not started, with Browser's reason; any other failure
@@ -134,10 +132,19 @@ let contactReviewMatches: ((query:string,signal:AbortSignal)=>Promise<ContactMat
 export function setContactReviewMatches(read: (query:string,signal:AbortSignal)=>Promise<ContactMatchNames|null>) {
   contactReviewMatches=read;
 }
+let smsReviewRecipient: ((query:string,signal:AbortSignal)=>Promise<ContactMatch|null>)|undefined;
+export function setSmsReviewRecipient(read: (query:string,signal:AbortSignal)=>Promise<ContactMatch|null>) {
+  smsReviewRecipient=read;
+}
+type SmsRecipientChoice = (query:string,body:string,signal:AbortSignal)=>Promise<ContactMatch|null|'not-found'>;
+let chooseSmsRecipient: SmsRecipientChoice | undefined;
+export function setChooseSmsRecipient(choose: SmsRecipientChoice) {
+  chooseSmsRecipient=choose;
+}
 export class DeviceActions extends DeviceActionCoordinator<ContextEnvelope,WorkflowPhoneReview> {
   constructor(session: VerifiedSession, credential: DeviceCredential, scope: string,
     request: (path: string, body: unknown | undefined, signal: AbortSignal) => Promise<unknown>,
     journal: ActionJournal, execute: DeviceExecutor, recover?:DeviceRecovery, reminderTimingV2=false, reminderCreate=false, executeForeground?:ForegroundReviewExecutor) {
-    super({session,credential,scope,request,journal,execute,recover,reminderTimingV2,reminderCreate,executeForeground,filesIdentity:async(paths,signal)=>{if(!filesReviewIdentity)throw Error('Files is unavailable');return filesReviewIdentity(paths,signal);},filesShownPaths:async(shown,signal)=>{if(!filesShownPaths)throw Error('Files is unavailable');return filesShownPaths(shown,signal);},profile:alphaDeviceActionProfile},{currentRequestBrowserPolicy:true,currentRequestTelephonyPolicy:true,browserTabNeedsChoice:target=>!!browserTabNeedsChoice?.(target),browserTabsClosing:proposalId=>browserTabsClosing?.(proposalId)??null,contactMatches:async(query,signal)=>contactReviewMatches?contactReviewMatches(query,signal):null});
+    super({session,credential,scope,request,journal,execute,recover,reminderTimingV2,reminderCreate,executeForeground,filesIdentity:async(paths,signal)=>{if(!filesReviewIdentity)throw Error('Files is unavailable');return filesReviewIdentity(paths,signal);},filesShownPaths:async(shown,signal)=>{if(!filesShownPaths)throw Error('Files is unavailable');return filesShownPaths(shown,signal);},profile:alphaDeviceActionProfile},{currentRequestBrowserPolicy:true,currentRequestTelephonyPolicy:true,browserTabNeedsChoice:target=>!!browserTabNeedsChoice?.(target),browserTabsClosing:proposalId=>browserTabsClosing?.(proposalId)??null,contactMatches:async(query,signal)=>contactReviewMatches?contactReviewMatches(query,signal):null,smsRecipient:async(query,signal)=>smsReviewRecipient?smsReviewRecipient(query,signal):null,chooseSmsRecipient:async(query,body,signal)=>chooseSmsRecipient?chooseSmsRecipient(query,body,signal):null});
   }
 }

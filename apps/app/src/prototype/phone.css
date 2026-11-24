@@ -22,6 +22,8 @@ html [data-mobile-shell-tile]:active [data-mobile-shell-tile-face]{background:va
 /* Native insets are screen CSS pixels; the phone canvas may be scaled. Standalone
  * already fits its WebView inside the bars and supplies zero remaining inset. */
 .alpha-phone {
+  --alpha-top-inset:calc(max(var(--native-top-inset,0px),env(safe-area-inset-top,0px)) / var(--phone-scale,1));
+  --alpha-telephony-header-top:max(44px,calc(var(--alpha-top-inset) + 8px));
   --alpha-bottom-clearance:max(28px,calc((max(var(--native-bottom-inset,0px),env(safe-area-inset-bottom,0px)) + 12px) / var(--phone-scale,1)));
   --alpha-notice-top:max(48px,calc(var(--alpha-header-clearance,0px) + 8px),calc((max(var(--native-top-inset,0px),env(safe-area-inset-top,0px)) + 12px) / var(--phone-scale,1)));
 }
@@ -297,6 +299,19 @@ html:not(.standalone-app) [data-alpha-layer="home"][data-alpha-home-fits="true"]
 .alpha-end-button{width:44px;height:44px;min-width:44px;border-radius:22px;background:var(--alpha-call-red);color:var(--alpha-white);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
 .alpha-live-dot{width:8px;height:8px;border-radius:4px;background:var(--alpha-call-green);display:inline-block;flex-shrink:0}
 .alpha-stage-header{display:flex;align-items:center;gap:4px;min-height:56px;padding:0 8px;box-sizing:border-box;flex-shrink:0}
+:is(.alpha-telephony-screen,[data-alpha-phone-prototype]:has(>[data-alpha-phone-header])) {
+  box-sizing:border-box;
+  padding-top:var(--alpha-telephony-header-top);
+}
+.standalone-app .alpha-phone { --alpha-telephony-header-top:calc(var(--alpha-top-inset) + 2px); }
+[data-screen][data-alpha-call-bar-on="true"] { --alpha-telephony-header-top:0px; }
+:is([data-alpha-phone-header],[data-alpha-contacts-header],[data-alpha-messages-header]) > [data-alpha-app-title] {
+  min-width:0;
+  margin:0;
+  font-size:32px;
+  letter-spacing:-.01em;
+}
+:is([data-alpha-phone-header],[data-alpha-messages-header]) > [data-alpha-app-title] { flex:1; }
 /* Before startup decides between sign-in, access setup and Home: the mark alone, after a pause (main.tsx). */
 .alpha-startup-loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;font-size:56px;animation:fade .7s .3s both}
 .alpha-update-startup{position:fixed;inset:0;display:grid;align-content:center;justify-items:center;gap:16px;width:100%;height:100%;max-width:none;max-height:none;box-sizing:border-box;margin:0;border:0;padding:24px;background:var(--alpha-white);color:var(--alpha-black);font:16px 'Public Sans',sans-serif}
@@ -784,10 +799,8 @@ button[aria-label$=" on or off"][aria-pressed]::before { content:""; position:ab
 .mail-folder-check{margin-inline-start:auto;width:18px;height:18px;mask-image:url('/icons/lucide/check.svg');-webkit-mask-image:url('/icons/lucide/check.svg')}
 @media(hover:hover){.mail-folder-option:not(:disabled):hover{background:var(--s2)}}
 
-.note-source-dialog .content-question-help{font-size:.875em;color:var(--mut);margin:0 0 16px;line-height:1.5}
 .note-source-dialog textarea{display:block;border:1px solid var(--line);border-radius:12px;background:var(--s1);color:inherit;resize:vertical;min-height:72px}
 .note-source-dialog textarea:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
-.note-source-dialog button.content-question-primary{background:var(--acc);color:var(--alpha-white)}
 .note-source-dialog footer{flex-direction:row-reverse}
 .note-source-dialog footer button{flex:1 1 120px}
 .note-source-dialog [role=status]:empty{display:none}
@@ -837,7 +850,6 @@ html.alpha-text-xl:not(.alpha-landscape) .alpha-map-credits:not([data-google-map
 .alpha-map-info p svg { width:16px; height:16px; flex-shrink:0; }
 .alpha-map-info .alpha-map-credit-links { display:block; padding:0; border-radius:0; background:none; box-shadow:none; font-size:12px; color:var(--mut); }
 .alpha-map-info .alpha-map-credit-links a { color:inherit; text-decoration:underline; }
-.alpha-map-info > button { justify-self:start; min-height:40px; padding:0 14px; border-radius:20px; background:var(--s2); color:var(--fg); font:inherit; font-weight:600; }
 .alpha-landscape .alpha-map-credits { bottom:12px!important; }
 .alpha-landscape [data-alpha-maps-root]:not([data-alpha-maps-guidance="true"]) > .alpha-map-credits {
   right:calc(var(--alpha-dock-width,min(440px,50%)) + 12px);
@@ -888,15 +900,6 @@ html.alpha-text-xl:not(.alpha-landscape) .alpha-map-credits:not([data-google-map
 
 .calendar-search-input::-webkit-search-cancel-button,.calendar-search-input::-webkit-search-decoration,.mail-search-input::-webkit-search-cancel-button,.mail-search-input::-webkit-search-decoration,.contacts-search-input::-webkit-search-cancel-button,.contacts-search-input::-webkit-search-decoration,.messages-search-input::-webkit-search-cancel-button,.messages-search-input::-webkit-search-decoration{-webkit-appearance:none;appearance:none;display:none}
 
-.content-question-dialog{padding:20px;border-radius:24px;max-height:min(calc(100dvh - 24px),calc(var(--phone-height,100dvh) - 24px))}
-.content-question-dialog h2{font:600 22px/1.25 'Public Sans',system-ui,sans-serif;margin:0 0 4px;letter-spacing:-.015em}
-.content-question-source{font-size:13px;line-height:1.4;color:var(--source-mut,var(--alpha-gray-66));margin:0 0 12px;overflow-wrap:anywhere}
-.content-question-dialog .content-question-help{font-size:13px;line-height:1.4;margin:0 0 12px;color:var(--source-mut,var(--alpha-gray-66))}
-.content-question-dialog label{font-size:14px;font-weight:500}
-.content-question-dialog textarea{font-size:16px!important;line-height:1.4!important;resize:none;background:var(--source-s2,var(--alpha-gray-f3));border:0;border-radius:12px;min-height:72px}
-.content-question-dialog footer{gap:8px;padding-top:4px}
-.content-question-dialog footer button{font-size:15px;font-weight:600;min-height:48px}
-.content-question-dialog button.content-question-primary{background:var(--source-acc,var(--alpha-blue));color:var(--alpha-white)}
 
 .mail-addresses{min-width:0;flex:1;overflow-wrap:anywhere}
 .mail-addresses summary{display:block;list-style:none;cursor:pointer;min-height:44px}
@@ -938,6 +941,11 @@ html.alpha-text-xl:not(.alpha-landscape) .alpha-map-credits:not([data-google-map
 .alpha-action-review.alpha-bar-review button { min-height:48px; }
 .alpha-bar-review button + button { border-top:1px solid var(--line); }
 .alpha-bar-review button > div { min-width:0; flex-grow:1; }
+/* Keep the authored text legible and visually separate from the metadata on its review. */
+.sms-review-row > span:first-child,[data-alpha-chat-proposal]:has(.sms-review-body) [data-alpha-proposal-detail] { display:none!important; }
+.sms-review-recipient,.sms-review-note { display:block; color:var(--mut); overflow-wrap:anywhere; }
+.sms-review-recipient { margin-top:4px; }
+.sms-review-body { display:block; margin:6px 0; padding:10px 12px; border-radius:12px; background:var(--bg); box-shadow:inset 0 0 0 1px var(--line); color:var(--fg); font-size:17px; font-weight:500; line-height:1.45; white-space:pre-wrap; overflow-wrap:anywhere; }
 .alpha-bar-review-title { font-size:14px; font-weight:600; }
 .alpha-bar-review-text { font-size:13px; color:var(--mut); }
 /* Decline is one short row: its explanation stays in the chat card. */
@@ -965,11 +973,13 @@ html.alpha-text-xl:not(.alpha-landscape) .alpha-map-credits:not([data-google-map
 /* Notes folders, filter chip and the editor's ⋯ menu. */
 .notes-folders { scrollbar-width:none; }
 .notes-folders::-webkit-scrollbar { display:none; }
-.notes-chip { display:inline-flex; align-items:center; gap:6px; flex-shrink:0; min-height:48px; padding:0 16px; border-radius:24px; background:var(--s2); color:var(--fg); font-size:14px; font-weight:500; white-space:nowrap; }
-.notes-chip[aria-pressed="true"] { background:var(--fg); color:var(--bg); }
 .notes-menu { position:absolute; right:10px; top:56px; z-index:12; min-width:208px; padding:6px; border-radius:16px; background:var(--s1); box-shadow:0 10px 30px rgba(0,0,0,.2); }
 .notes-menu button { display:flex; align-items:center; gap:12px; width:100%; min-height:48px; padding:0 12px; border-radius:10px; color:var(--fg); font-size:15px; text-align:left; box-sizing:border-box; }
 .notes-menu hr { border:0; border-top:1px solid var(--line); margin:4px 0; }
+.notes-selection-done { min-height:44px; padding:0 12px; font-weight:600; }
+.notes-select-check { display:grid; place-items:center; flex:none; width:22px; height:22px; margin-top:2px; border:1.5px solid var(--mut); border-radius:7px; }
+.notes-row[aria-pressed="true"] .notes-select-check { border-color:var(--acct); background:var(--acct); color:var(--bg); }
+.notes-select-check .i { width:15px; height:15px; }
 
 .maps-chat-card { background:var(--s2);padding:16px;border-radius:16px;display:flex;flex-direction:column;gap:6px;overflow-wrap:anywhere; }
 .maps-chat-card strong { font-size:15px;line-height:1.4; }
@@ -1000,11 +1010,17 @@ html.alpha-text-xl:not(.alpha-landscape) .alpha-map-credits:not([data-google-map
 .schedule-controls { display:flex; align-items:center; gap:8px; }
 .schedule-controls > button,.schedule-controls summary { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:44px; border-radius:22px; cursor:pointer; }
 .schedule-controls > button { padding:0 16px; background:var(--fg); color:var(--bg); }
+.schedule-controls > button[aria-label="Run now"] { width:44px; flex:none; padding:0; }
+.schedule-controls > button[aria-label="Run now"] > .workflow-run-label { display:none; }
+.schedule-controls > .workflow-primary-run { background:var(--acc); color:var(--alpha-white); }
 .schedule-controls summary { width:44px; background:var(--s2); list-style:none; }
 .schedule-controls summary::-webkit-details-marker { display:none; }
 .schedule-controls details { position:relative; }
 .schedule-controls details > div { position:absolute; z-index:4; left:0; min-width:10em; padding:4px; background:var(--bg); box-shadow:0 4px 20px var(--shc); border:1px solid var(--line); border-radius:16px; }
-.schedule-controls details button { display:block; text-align:start; width:100%; min-height:44px; padding:4px 12px; }
+.schedule-controls details button { display:flex; align-items:center; gap:10px; text-align:start; width:100%; min-height:44px; padding:8px 12px; }
+.schedule-controls details button .i { flex-shrink:0; }
+.schedule-controls details button span { min-width:0; overflow-wrap:anywhere; }
+.workflow-detail-actions details > div { left:auto; right:0; }
 .schedule-instructions { display:grid; gap:6px; }
 .schedule-instructions textarea { min-height:6em; padding:12px; border-radius:12px; font:inherit; background:var(--s2);color:var(--fg); }
 
@@ -1121,7 +1137,7 @@ html[data-alpha-browser-underlay] [data-alpha-layer="app"]{background:linear-gra
 html[data-alpha-browser-underlay] .alpha-phone::after { display:none; }
 /* Match the surface that reaches the bottom of the canvas. */
 .alpha-phone:has([data-alpha-camera-root],[data-alpha-subview="photos-viewer"])::after { background:var(--alpha-black); }
-.alpha-phone:has([data-alpha-album-manager])::after { background:var(--s1); }
+.alpha-phone:has([data-alpha-album-manager],[data-alpha-notes-recovery])::after { background:var(--s1); }
 :is([data-alpha-contact-editor],[data-alpha-phone],[data-alpha-messages],[data-alpha-contacts-bar]) :is(input,textarea) { border:0; outline:0; font-family:inherit; color:inherit; }
 .alpha-phone-tabs { display:flex; justify-content:center; padding:0 16px 8px; flex-shrink:0; }
 .alpha-phone-tabs > [role="group"] { display:flex; gap:2px; padding:3px; max-width:100%; border-radius:24px; background:var(--s2); }
@@ -1129,8 +1145,9 @@ html[data-alpha-browser-underlay] .alpha-phone::after { display:none; }
 .alpha-phone-tabs button[aria-pressed="true"] { background:var(--fg); color:var(--bg); }
 .alpha-phone-tabs svg { width:20px; height:20px; }
 .alpha-phone-tabs button > span { position:absolute; top:8px; right:16px; width:8px; height:8px; border-radius:4px; background:var(--acct); }
-[data-alpha-contacts-screen] > :is(.alpha-phone-tabs,[data-alpha-contacts-bar]) { margin-top:52px; }
-[data-alpha-contacts-screen] > .alpha-phone-tabs + [data-alpha-contacts-bar] { margin-top:0; }
+[data-alpha-phone-header] > .alpha-phone-tabs { padding:0; }
+[data-alpha-phone-header] > .alpha-phone-tabs button { width:46px; }
+[data-alpha-phone-header] > .alpha-phone-tabs button > span { right:8px; }
 .alpha-keypad { container-type:size; }
 .alpha-keypad > div { --k:clamp(48px,calc((100cqh - var(--alpha-dock-reserve,108px) - 96px) / 5.5),78px); }
 .alpha-pulse { animation: fade 1s ease-in-out infinite alternate; }
@@ -1190,6 +1207,7 @@ html[data-alpha-browser-underlay] .alpha-phone::after { display:none; }
 .chat-pending-files{display:flex;flex-wrap:wrap;gap:6px;padding:4px 12px}
 .chat-pending-files button{display:inline-flex;align-items:center;gap:6px;max-width:100%;min-height:42px;padding:4px 10px;border:1px solid var(--line);border-radius:18px;background:var(--s2);color:var(--fg);overflow-wrap:anywhere;text-align:left}
 .chat-file-chip{display:inline-flex;align-items:center;max-width:100%;background:var(--s2);border:1px solid var(--line);border-radius:18px;overflow:hidden}
+.chat-file-label{display:flex;align-items:center;gap:6px;min-width:0;padding:4px 0 4px 10px;overflow-wrap:anywhere}
 .chat-file-chip img{width:26px;height:26px;object-fit:cover;border-radius:6px}
 .chat-file-chip button{border:0;background:transparent;border-radius:0}.chat-file-chip button:last-child{min-width:44px;justify-content:center}
 .chat-pending-files .i{flex:none;width:16px;height:16px}
@@ -1251,3 +1269,19 @@ html[data-alpha-browser-underlay] .alpha-phone::after { display:none; }
 .chat-email-draft button { padding:0 14px; min-height:44px; border-radius:22px; background:var(--s2); }
 .chat-email-draft button:last-child { background:var(--fg); color:var(--bg); }
 .chat-email-draft button:disabled { opacity:.45; }
+
+.sms-recipient-picker { display:grid; gap:12px; min-width:0; padding:14px; border:1px solid var(--line); border-radius:22px; background:var(--bg); }
+.sms-recipient-picker p { margin:0; font-size:15px; overflow-wrap:anywhere; white-space:pre-wrap; }
+.sms-recipient-picker fieldset { min-width:0; margin:0; padding:0; border:0; }
+.sms-recipient-picker legend { margin-bottom:8px; padding:0; font-size:15px; font-weight:600; }
+.sms-recipient-picker label { display:flex; align-items:center; gap:12px; min-height:52px; padding:8px 12px; border-radius:14px; cursor:pointer; }
+.sms-recipient-picker label:has(input:checked) { background:var(--s2); }
+.sms-recipient-picker input[type="radio"] { appearance:auto; width:20px; height:20px; margin:0; flex:none; accent-color:var(--acc); cursor:inherit; }
+.sms-recipient-picker label > span { display:grid; gap:2px; min-width:0; overflow-wrap:anywhere; }
+.sms-recipient-picker label strong { font-size:15px; font-weight:600; }
+.sms-recipient-picker label span span { color:var(--mut); font-size:14px; font-variant-numeric:tabular-nums; }
+.sms-recipient-actions { display:flex; justify-content:flex-end; gap:8px; }
+.sms-recipient-actions button { min-height:44px; padding:0 16px; border-radius:22px; background:var(--s2); color:var(--fg); font-size:14px; font-weight:600; }
+.sms-recipient-actions button:last-child { background:var(--acc); color:var(--alpha-white); }
+.sms-recipient-actions button:disabled { background:var(--s2); color:var(--mut); cursor:default; }
+.sms-recipient-picker :is(input,button):focus-visible { outline:2px solid var(--acct); outline-offset:2px; }

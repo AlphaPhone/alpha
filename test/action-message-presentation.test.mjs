@@ -1,7 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {build} from 'esbuild';
 // One bundle, so the device hour-cycle preference reaches the same locale-time module the helpers read.
 const bundle=await build({stdin:{contents:"export * from './apps/app/src/runtime/action-message-presentation.ts';export {setLocalePreferences} from './apps/app/src/prototype/locale-time.ts';",resolveDir:process.cwd(),loader:'ts'},bundle:true,platform:'node',format:'esm',write:false});
-const {spokenActionReply,projectActionMessages,browserNavigationSummary,succeededBrowserDestination,mapsChatText,approvalExpiryText,emptyChatNotice,setLocalePreferences}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'));
+const {spokenActionReply,projectActionMessages,browserNavigationSummary,succeededBrowserDestination,mapsChatText,approvalExpiryText,emptyChatNotice,setLocalePreferences,VIEW_OPEN_UNCONFIRMED}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'));
 const notice='Review on phone';
 const old='Opened an approved HTTPS destination in a new browser tab. Page loading is not verified.';
 const legacySummary='Opened example.com.';
@@ -47,6 +47,21 @@ test('receipt names the created tab and refuses a malformed or non-HTTPS destina
  assert.equal(browserNavigationSummary('https://example.com/path'),tabCreated);
  assert.throws(()=>browserNavigationSummary('http://example.com/'));
  assert.throws(()=>browserNavigationSummary('not a URL'));
+});
+
+test('history keeps the verified Browser dispatch and omits only its own premature view fallback',()=>{
+ const receipt={id:'device-receipt:p',from:'agent',text:tabCreated,deviceReceipt:true,browserDestination:'https://example.com/'};
+ const fallback={id:'first',from:'agent',text:VIEW_OPEN_UNCONFIRMED};
+ const rows=[user,fallback,receipt,{...user,id:'next'},{...fallback,id:'second'}];
+ const shown=projectActionMessages(render(rows),rows);
+ assert.deepEqual(shown.map(m=>m.id),['user','device-receipt:p','next','second']);
+ assert.equal(shown[1].displayText,tabCreated);
+ assert.equal(shown[3].displayText,VIEW_OPEN_UNCONFIRMED);
+ assert.equal(rows[1].text,VIEW_OPEN_UNCONFIRMED);
+ const compound=[{...user,text:'Open example.com and show my calendar'},fallback,receipt];
+ assert.deepEqual(projectActionMessages(render(compound),compound).map(m=>m.id),['user','first','device-receipt:p']);
+ const otherSite=[{...user,text:'Open example.org'},fallback,receipt];
+ assert.deepEqual(projectActionMessages(render(otherSite),otherSite).map(m=>m.id),['user','first','device-receipt:p']);
 });
 
 test('a completed Browser card preserves its unsynced receipt notice',()=>{

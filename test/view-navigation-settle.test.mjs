@@ -47,3 +47,16 @@ test('a retired session posts nothing after the claim',async()=>{
  const f=fixture({claim:()=>f.retire()});
  await assert.rejects(f.client.deliver(f.results,f.client.capture(f.state),switchTo(f)));assert.equal(f.replies().length,0);f.client.dispose();
 });
+test('a saved note is acknowledged only for that exact editor, even when Notes opened',async()=>{
+ for(const selectedId of ['saved-note','other-note']){
+  const f=fixture();f.results[0].values.noteId='saved-note';
+  const result=await f.client.deliver(f.results,f.client.capture(f.state),async(view,current,noteId)=>{
+   current();assert.equal(noteId,'saved-note');
+   f.state={view,revision:2,sensitive:false,selectedObject:{kind:'canonical-note',id:selectedId}};
+   return true;
+  });
+  if(selectedId==='saved-note'){assert.equal(result.status,'delivered');assert.equal(f.replies()[0].success,true);}
+  else{assert.equal(result.status,'unknown');negativeOnce(f);}
+  f.client.dispose();
+ }
+});

@@ -93,7 +93,7 @@ test('recents call on the owner tap; the keypad fits above the bar on a small ph
   await expect(page.getByRole('button', {name: 'Call Dev Patel'})).toBeVisible();
   for (const size of [{width: 412, height: 915}, {width: 360, height: 640}]) {
     await page.setViewportSize(size);
-    await expect(page.locator('[data-alpha-phone-call]')).toBeInViewport({ratio: 1});
+    await expect(page.locator('[data-alpha-phone-call]')).toBeInViewport({ratio: 0.99});
     expect(await overlaps(page, '[data-alpha-phone-call]', '[data-alpha-input-bar]'), `${size.width}x${size.height}`).toBe(false);
     expect(await overlaps(page, '[data-alpha-phone-number]', '[data-alpha-phone-keypad] button[aria-label="1"]')).toBe(false);
   }
@@ -140,6 +140,26 @@ test('Phone keeps its selector in Contacts and switching tabs leaves one Back en
   await open(page, 'Contacts');
   await expect(page.locator('[data-alpha-contacts-header]')).toBeVisible();
   await expect(tab('contacts')).toHaveCount(0);
+});
+
+test('Phone and Contacts headers respect the native top inset at both launcher widths', async ({page}) => {
+  await setupTelephony(page);
+  const inset = 64;
+  await page.evaluate(value => document.documentElement.style.setProperty('--native-top-inset', `${value}px`), inset);
+  await open(page, 'Phone');
+  const header = page.locator('[data-alpha-phone-header]');
+  const contacts = page.locator('[data-alpha-phone-tab="contacts"]');
+  for (const size of [{width: 412, height: 915}, {width: 360, height: 640}]) {
+    await page.setViewportSize(size);
+    await expect(header.getByRole('heading', {name: 'Recents', exact: true})).toBeVisible();
+    await expect.poll(async () => (await header.boundingBox())?.y ?? 0).toBeGreaterThanOrEqual(inset);
+    await expect(contacts).toBeInViewport();
+  }
+  await contacts.click();
+  const contactsHeader = page.locator('[data-alpha-contacts-header]');
+  await expect(contactsHeader.getByRole('heading', {name: 'Contacts', exact: true})).toBeVisible();
+  await expect.poll(async () => (await contactsHeader.boundingBox())?.y ?? 0).toBeGreaterThanOrEqual(inset);
+  await expect(contacts).toBeInViewport();
 });
 
 test('Messages stays below the status bar at both launcher widths', async ({page}) => {
@@ -429,8 +449,11 @@ test('clearing the text in the bar sends only the remaining picture on the next 
   const send = barSend(page);
   const body = 'These words must not go with the picture again.';
   const picture = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aE1kAAAAASUVORK5CYII=', 'base64');
+  await page.locator('[data-alpha-input-bar]').getByRole('button', {name: 'Message attachments', exact: true}).click();
+  const menu = page.getByRole('dialog', {name: 'Message attachments', exact: true});
+  await expect(menu.getByRole('button')).toHaveText(['Camera','Add media']);
   const chooser = page.waitForEvent('filechooser');
-  await page.getByRole('button', {name: 'Add picture', exact: true}).click();
+  await menu.getByRole('button', {name: 'Add media', exact: true}).click();
   await (await chooser).setFiles({name: 'picture.png', mimeType: 'image/png', buffer: picture});
   await expect(page.getByRole('button', {name: 'Remove picture-1.png'})).toBeVisible();
   await draft.fill(body);

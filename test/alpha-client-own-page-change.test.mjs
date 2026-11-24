@@ -112,6 +112,27 @@ test('without an admitted own change, a page move breaks the sent context',async
  assert.equal(client.continuesContext(sent),false);
 });
 
+test('the approved tab finishing its first load keeps Talk without letting an old page request finish',async()=>{
+ const {client,reply}=await turn(tab('1'));
+ const sent=client.getState().context;
+ client.setViewContext(tab('2'),null,'session:tab-1');
+ await assert.rejects(reply,cancelled);
+ assert.equal(client.continuesContext(sent),true,'the initial load stays in the same conversation');
+ assert.equal(client.getState().context.revision,sent.revision+1);
+ client.setViewContext(tab('3'));
+ assert.equal(client.continuesContext(sent),false,'a later page move without the initial load retires the lineage');
+});
+
+test('a late Browser load cannot carry a conversation across tabs or a sensitive view',()=>{
+ for(const context of [tab('2','session:tab-2'),{...tab('2'),sensitive:true}]){
+  const client=new AlphaClient();
+  client.setViewContext(tab('1'));
+  const before=client.getState().context;
+  client.setViewContext(context,null,'session:tab-1');
+  assert.equal(client.continuesContext(before),false);
+ }
+});
+
 test('a second command refused before dispatch keeps the first command\'s page move admitted',async()=>{
  const {client,agent,reply}=await turn(tab('1'));
  client.admitOwnPageChange({kind:'browser-tab',id:'session:tab-1'});

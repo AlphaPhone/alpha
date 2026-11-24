@@ -23,7 +23,7 @@ import {openBrowserCalendar} from './helpers/browser-calendar';
 // Maps offers an explicit "Back to event" control when it was opened from an event's location; it
 // returns to that exact event and never replays the hand-off. System Back still works as before.
 import {test, expect, type Page} from '@playwright/test';
-test.use({locale:'en-US'});
+test.use({locale:'en-US',timezoneId:'America/Los_Angeles'});
 
 const address = '12 Market Street, Test Town';
 const LOG = 'journey-j04-maps';

@@ -4057,6 +4057,7 @@
       "apps/app/src/prototype/workflow-adapter.ts",
       "apps/app/src/runtime/workflow-device-contract.ts",
       "apps/app/src/prototype/workflow-notice-question.ts",
+      "apps/app/src/prototype/own-notice-question.ts",
       "android/app/src/main/java/ai/alphacompute/alphaphone/WorkflowNoticeTaps.java",
       "apps/app/src/ui/workflows/workflow-messages.ts"
     ],
@@ -4110,8 +4111,8 @@
         "name": "reviewWorkflowNoticeQuestion"
       },
       {
-        "path": "apps/app/src/prototype/workflow-notice-question.ts",
-        "name": "discard"
+        "path": "apps/app/src/prototype/workflow-adapter.ts",
+        "name": "dismissTap"
       },
       {
         "path": "android/app/src/main/java/ai/alphacompute/alphaphone/WorkflowNoticeTaps.java",
@@ -4126,7 +4127,7 @@
       "ledger/question": "the tap row of the shared notice route ledger (new, pending, consumed) and its Ask flag",
       "tapBusy/tapRequested/tapDeferred/recheck": "the read in progress and the three ways another check is owed",
       "operation/generation/epoch/staleDrop": "the workflow operation, the view generation, the generation a read began under, and a read that ended under another one",
-      "noticeQuestion/asked/composed": "the open question review and its outcome",
+      "noticeQuestion/asked/composed": "the notification attachment staging operation and its outcome",
       "openedTap/runOpen/opens": "the token of a run opened before its consume, the open run, and how often it was opened"
     },
     "abstractions": [
@@ -4134,7 +4135,7 @@
       "Taps for another account, unavailable executions and a failed native lookup leave the tap pending without a new check; they are not modeled.",
       "The authenticated receipt and workflow reads are one step. Their failure reports the tap as retained.",
       "A view reset drops the running operation without its completion step, so a deferred check then waits for the next operation or event. The model keeps that behavior.",
-      "The native ledger is the shared notice route contract; here it is one row that a tap makes pending, a canceled question returns to new, and a consume ends."
+      "The native ledger is the shared notice route contract; here it is one row that a tap makes pending, an explicit dismissal returns to new, and a consume ends."
     ],
     "sharedSources": [
       "plugins/plugin-native-notifications/android/src/main/java/ai/eliza/plugins/notifications/NoticeRoutes.java",

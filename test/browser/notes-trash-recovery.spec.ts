@@ -1,3 +1,4 @@
+import {openNotesTrash} from './helpers/notes-menu';
 import {expectPendingToast,finishUndoWindow} from './helpers/undo-feedback';
 import {openLegacyNotes} from './helpers/legacy-notes';
 import { returnToApps } from './app-navigation';
@@ -76,7 +77,7 @@ test('Trash written under a larger limit stays readable, restorable and purgeabl
  expect(rewritten()).toBeGreaterThan(0);
  expect(await page.evaluate(async()=>(await import('/src/runtime/notes-trash-policy.ts')).NOTES_TRASH_MAX_ENTRIES)).toBe(2);
  expect(await trashEntries(page)).toEqual(stored);
- await page.getByRole('button',{name:'Recently deleted',exact:true}).click();
+ await openNotesTrash(page);
  const trash=page.locator('[data-alpha-subview="notes-trash"]');
  for(const title of ['Alpha','Bravo','Charlie'])await expect(trash.getByText(title,{exact:true})).toBeVisible();
  await expect(trash.getByText('Trash could not be read',{exact:false})).toHaveCount(0);
@@ -113,7 +114,7 @@ test('Trash written under a larger limit stays readable, restorable and purgeabl
  expect(await page.evaluate(async()=>JSON.stringify((await (await import('/src/browser/documents.ts')).browserDocuments.read('alpha.browser.notes-trash.v1'))??null).includes('Delta body'))).toBe(false);
 
  // Restorable above the limit: the exact record returns.
- await page.getByRole('button',{name:'Recently deleted',exact:true}).click();
+ await openNotesTrash(page);
  await rowAction(page,'Alpha','Recover');
  await expect(page.getByText('Alpha restored',{exact:true})).toBeVisible();
  expect((await savedRecords(page)).find((n:any)=>n.title==='Alpha')).toEqual(original.find((n:any)=>n.title==='Alpha'));
@@ -161,7 +162,7 @@ test('a note edited after a full Trash refused it is not deleted by the earlier 
  await expectPendingToast(page,'Note changed');
  expect((await savedRecords(page)).map((note:any)=>[note.title,note.body])).toEqual([['Changing','Newer text']]);
  expect((await trashEntries(page)).map((entry:any)=>entry.note.title)).toEqual(['Filler']);
- await finishUndoWindow(page);
+ await finishUndoWindow(page,4_000);
  await expect(page.getByText('Note changed',{exact:true})).toBeVisible();
  await expect(full).toHaveCount(0);
  const saved=await savedRecords(page);
@@ -198,7 +199,7 @@ test('a permanent-delete confirmation in a stale view never drops the Trash copy
  await expectPendingToast(page,'Note changed');
  expect((await trashEntries(page)).find((entry:any)=>entry.id===row.id)).toEqual(row);
  expect(await savedRecords(page)).toEqual([]);
- await finishUndoWindow(page);
+ await finishUndoWindow(page,4_000);
  await expect(page.getByText('Note changed',{exact:true})).toBeVisible();
  // The other view's Trash row, with the newer text, is exactly as it was written.
  const entries=await trashEntries(page);
@@ -219,7 +220,8 @@ test('a voice note refused by a full Trash is erased with its own recording only
  await deleteNote(page,'Filler');
  const filler=await trashEntries(page);
 
- await page.getByRole('button',{name:'Open Full memo',exact:true}).click();
+ // Tap the row beside the still-visible Undo toast to preserve its queued feedback.
+ await page.getByRole('button',{name:'Open Full memo',exact:true}).click({position:{x:12,y:24}});
  await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menu',{name:'Note actions'}).getByRole('menuitem',{name:'Delete',exact:true}).click();
  const full=page.getByRole('dialog',{name:'Full'});
  await expect(full.getByRole('button',{name:'Delete permanently',exact:true})).toBeVisible();await expect(full).not.toContainText('was not deleted');
@@ -235,7 +237,7 @@ test('a voice note refused by a full Trash is erased with its own recording only
  expect((await savedRecords(page)).map((note:any)=>note.id)).toEqual(['other-voice']);
  expect((await describeAudio(page,'full-audio')).transcript).toBe('');
  expect(await pendingDeletions(page)).toEqual([]);expect(await trashEntries(page)).toEqual(filler);
- await finishUndoWindow(page);
+ await finishUndoWindow(page,4_000);
  await expect(page.getByText('Full memo and its recording deleted forever',{exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:'Undo',exact:true})).toHaveCount(0);
  expect((await savedRecords(page)).map((n:any)=>n.id)).toEqual(['other-voice']);
@@ -272,13 +274,13 @@ test('a stale Trash row of a note that is then deleted permanently is dropped, s
  expect((await trashEntries(page)).map((e:any)=>e.note.title).sort()).toEqual(['Filler','Stale memo','Stale text']);
  const full=page.getByRole('dialog',{name:'Full'});
 
- await page.getByRole('button',{name:'Open Stale text',exact:true}).click();
+ await page.getByRole('button',{name:'Open Stale text',exact:true}).click({position:{x:12,y:24}});
  await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menu',{name:'Note actions'}).getByRole('menuitem',{name:'Delete',exact:true}).click();
  await full.getByRole('button',{name:'Delete permanently',exact:true}).click();
  await expectPendingToast(page,'Stale text deleted forever');
  expect((await trashEntries(page)).map((entry:any)=>entry.note.title).sort()).toEqual(['Filler','Stale memo']);
  expect((await savedRecords(page)).some((note:any)=>note.title==='Stale text')).toBe(false);
- await finishUndoWindow(page);
+ await finishUndoWindow(page,4_000);
  await expect(page.getByText('Stale text deleted forever',{exact:true})).toBeVisible();
  expect((await trashEntries(page)).map((e:any)=>e.note.title).sort()).toEqual(['Filler','Stale memo']);
  // The full Undo offer is finished; subsequent passive feedback uses ordinary elapsed time.
@@ -295,7 +297,7 @@ test('a stale Trash row of a note that is then deleted permanently is dropped, s
  expect(await pendingDeletions(page)).toEqual([]);
  const erased=await describeAudio(page,'stale-audio');
  expect(erased.transcript).toBe('');expect(erased.expired).toBe(true);
- await page.getByRole('button',{name:'Recently deleted',exact:true}).click();
+ await openNotesTrash(page);
  const trash=page.locator('[data-alpha-subview="notes-trash"]');
  await expect(trash.getByText('Filler',{exact:true})).toBeVisible();
  await expect(trash.getByText('Stale memo',{exact:true})).toHaveCount(0);
@@ -350,7 +352,7 @@ test('a clock moved backwards never purges early or extends the label, and the p
  // Ten days in the past, across a restart: kept, never more than 30 days shown, deletedAt not rewritten.
  await page.clock.setSystemTime(entry.deletedAt-10*DAY);
  await page.reload();await openNotes(page);
- await page.getByRole('button',{name:'Recently deleted',exact:true}).click();
+ await openNotesTrash(page);
  const trash=page.locator('[data-alpha-subview="notes-trash"]');
  await expect(trash.getByRole('button',{name:'Clock note, 30 days left',exact:true})).toBeVisible();
  expect(await trashEntries(page)).toEqual([entry]);
@@ -359,7 +361,7 @@ test('a clock moved backwards never purges early or extends the label, and the p
  await page.clock.setSystemTime(entry.deletedAt+30*DAY-5*60_000);
  await page.reload();await openNotes(page);
  expect(await trashEntries(page)).toEqual([entry]);
- await page.getByRole('button',{name:'Recently deleted',exact:true}).click();
+ await openNotesTrash(page);
  await expect(trash.getByRole('button',{name:'Clock note, 1 day left',exact:true})).toBeVisible();
 
  // A restore while the clock is wrong reinstates the exact record.

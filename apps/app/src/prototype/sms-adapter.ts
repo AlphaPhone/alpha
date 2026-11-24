@@ -4,7 +4,6 @@ import {registerPlugin} from '../platform-plugins';
 import {aospImage} from '../runtime/aosp-image';
 import {createSmsSession,mmsProblemLabel,mmsReceiptLabel,receiptLabel} from '../runtime/image-sms';
 import {smsSubscriptionRevision} from '../runtime/sms-subscription-revision';
-import {rememberSmsSims} from '../ui/telephony/sms-card-facts';
 import {createAospTelephony,registerTelephonyProfile,MMS_MAX_ATTACHMENTS,reviewMms,reviewSms,type AlphaTelephonyPlugin,type MmsAttachmentDraft,type MmsReview,type SmsMessage,type SmsReviewProblem,type SmsSendResult} from '../runtime/aosp-telephony';
 import {createNativeSmsDraftShelf,reviewedDraft,type ReviewedSms,type SmsDraft,type SmsDraftStore} from '../runtime/native-sms-drafts';
 import {watchReturnToApp} from './native-adapter';
@@ -723,7 +722,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   addPictures([picture]);
  };
  /** Picking pictures only changes the draft; nothing is read beyond the files the owner chose. */
- function attach(){if(!active||!editable())return;if(attachments.length>=MMS_MAX_ATTACHMENTS){notice='Max 5 pictures';changed();return;}const token=lifecycle,draft=draftRevision,input=document.createElement('input');input.type='file';input.accept=Object.keys(MMS_PICTURES).join(',');input.multiple=true;
+ function attach(camera:boolean){if(!inFront()||!editable()||picking)return;if(attachments.length>=MMS_MAX_ATTACHMENTS){notice='Max 5 pictures';changed();return;}const token=lifecycle,draft=draftRevision,input=document.createElement('input');input.type='file';input.accept=Object.keys(MMS_PICTURES).join(',');input.multiple=!camera;if(camera)input.setAttribute('capture','environment');
   /* A result that arrives while the page is still hidden waits for it to show again; pagehide always ends the pick. */
   const done=(event?:Event)=>{if(document.hidden&&event?.type!=='pagehide')return;window.removeEventListener('pagehide',done);if(!picking)return;picking=false;sync();};input.oncancel=()=>done();window.addEventListener('pagehide',done);
   input.onchange=async()=>{done();const files=[...(input.files||[])];input.value='';try{const picked:Omit<MmsAttachmentDraft,'name'>[]=[];for(const file of files)picked.push(await readPicture(file));
@@ -867,6 +866,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   let newestIn=-1;bubbles.forEach((row,index)=>{if(row.inbound)newestIn=index;});
   return {
    needsAccess:access&&!showNew,showList:!access&&!state.thread&&!composing,showThread,showNew,showComposer:showComposer&&!picker,
+   attachmentMenu:status?.mmsSend?{busy:!editable()||state.busy||picking,media:()=>attach(false),camera:()=>attach(true)}:null,
    showNewButton:!state.thread&&!composing,readFailed:!status&&!state.busy,showEmpty:!!status&&!state.busy&&state.threads.length===0,
    compose:()=>compose(),closeNew,
    recipientValue:picker?picker.query:recipients,recipientPlaceholder:picker?'Recipient '+(sendingTo.length+1):'To',
@@ -937,7 +937,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
  const nativeThreads=session.state.threads.map(row=>isIncompleteSmsRow(row)
   ? {id:row.id,label:'Conversation content unavailable',snippet:'Use the system messaging app to view this conversation.',open:()=>{notice='Content unavailable. Use the system messaging app to view this conversation.';changed();}}
   : {...row,label:row.addresses.join(', ')||'Conversation',open:()=>chooseThread(row.id,row.addresses)});
- return {nativeManaged:true,nativePrototype:false,nativeStatus:session.state.message,nativeRows,nativeThreads,nativeInThread:!!session.state.thread,nativeBack:closeThread,nativeMore:!!session.state.next,nativeBusy:!editable()||session.state.busy,nativeRefresh:()=>{void session.refresh();void reconcile();void reconcileMms();},nativeLoadMore:()=>void session.refresh(true),nativeRead:()=>void permission('sms'),nativeSendAccess:()=>void permission('sendSms'),nativeSimAccess:()=>void permission('phoneState'),nativeSims:(session.state.status?.subscriptions||[]).map(row=>({...row,label:`SIM ${row.slot+1}: ${row.displayName}`,pick:()=>{if(!editable())return;receipt=null;notice='';sim=String(row.id);draftRevision++;operationId='';resetMms(false);retainDraft();changed();}})),nativeRecipients:recipients,nativeBody:body,nativeOnRecipients:(event:Event)=>{if(draftThread===null&&!session.state.thread)edit(value=>recipients=value)(event);},nativeOnBody:(event:Event)=>ownerTyped((event.target as HTMLTextAreaElement).value),nativeSend:()=>void send(),nativeSendMms:()=>void sendMms(),nativeAttach:()=>attach(),nativeMmsAvailable:!!session.state.status?.mmsSend,nativeAttachments:attachments.map((item,index)=>({label:`${item.name} · ${Math.max(1,Math.round(item.bytes.length/1024))} KB`,remove:()=>{if(!editable())return;attachments.splice(index,1);draftRevision++;operationId='';resetMms(false);receipt=null;notice='';retainDraft();changed();}})),nativeHandoff:()=>void handoff(),nativeClear:()=>{if(!editable())return;clearDraft();if(draftThread===null)recipients='';retainDraft();changed();},
+ return {nativeManaged:true,nativePrototype:false,nativeStatus:session.state.message,nativeRows,nativeThreads,nativeInThread:!!session.state.thread,nativeBack:closeThread,nativeMore:!!session.state.next,nativeBusy:!editable()||session.state.busy,nativeRefresh:()=>{void session.refresh();void reconcile();void reconcileMms();},nativeLoadMore:()=>void session.refresh(true),nativeRead:()=>void permission('sms'),nativeSendAccess:()=>void permission('sendSms'),nativeSimAccess:()=>void permission('phoneState'),nativeSims:(session.state.status?.subscriptions||[]).map(row=>({...row,label:`SIM ${row.slot+1}: ${row.displayName}`,pick:()=>{if(!editable())return;receipt=null;notice='';sim=String(row.id);draftRevision++;operationId='';resetMms(false);retainDraft();changed();}})),nativeRecipients:recipients,nativeBody:body,nativeOnRecipients:(event:Event)=>{if(draftThread===null&&!session.state.thread)edit(value=>recipients=value)(event);},nativeOnBody:(event:Event)=>ownerTyped((event.target as HTMLTextAreaElement).value),nativeSend:()=>void send(),nativeSendMms:()=>void sendMms(),nativeAttachments:attachments.map((item,index)=>({label:`${item.name} · ${Math.max(1,Math.round(item.bytes.length/1024))} KB`,remove:()=>{if(!editable())return;attachments.splice(index,1);draftRevision++;operationId='';resetMms(false);receipt=null;notice='';retainDraft();changed();}})),nativeHandoff:()=>void handoff(),nativeClear:()=>{if(!editable())return;clearDraft();if(draftThread===null)recipients='';retainDraft();changed();},
   ...designed(nativeThreads,viewApi)};};
  if(shelf)p.flushMessagesForAppUpdate=async function(current:()=>boolean){
   if(owner!==this||!current()||busy||picking||draftLoading)throw Error('Finish the current Messages activity before updating');
@@ -951,7 +951,6 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
    if(owner!==this||!inFront())return;
    const subscriptions=session.state.status?.subscriptions??[];
    // A text card proposed from this context names its SIM (runtime/sms-card-facts.ts).
-   rememberSmsSims(subscriptions);
    const soleSubscription=subscriptions.length===1?subscriptions[0]:undefined;
    const selected=sim?subscriptions.find(row=>String(row.id)===sim):soleSubscription;
    if(selected)return {kind:'sms-subscription',id:String(selected.id),revision:smsSubscriptionRevision(selected)};

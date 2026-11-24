@@ -70,8 +70,6 @@ async function compile(extraSources, native) {
             {'./alpha-client': 'export const alphaClient={getState:()=>globalThis.hostedDigestRefreshPorts.context()};'}],
           [resolve(root, 'apps/app/src/runtime/hosted-notice-question.ts'),
             {'./alpha-client': 'export const alphaClient={getState:()=>globalThis.hostedDigestRefreshPorts.context()};'}],
-          [resolve(root, 'apps/app/src/browser/content-question.ts'),
-            {'../prototype/local-ocr': 'export const recognizeLocalText=()=>{throw Error("Unused image OCR")};'}],
         ] : []),
       ]);
       const modules = new Map();

@@ -20,13 +20,15 @@ function observe(state) {
   const owner = idOf(state.binding, 'session-');
   const held = kind => qset(state.requests.filter(row => row.kind === kind && !row.done).map(row => row.id));
   const effects = discard => qset(state.settlements.filter(([, value]) => value === discard).map(([id]) => id));
-  const drafts = state.compositions.map(({draft, session}) => {
-    assert.equal(draft, 'Help me understand this source renewal.\n\nSource: Scheduled source renewal notification\n\nAccess for your daily brief expires soon. Renew it to keep your brief updated.');
+  const drafts = state.compositions.map(({prompt,name,text,session}) => {
+    assert.equal(prompt,'Help me understand this source renewal.');
+    assert.equal(name,'Source renewal.txt');
+    assert.equal(text,'Access for your daily brief expires soon. Renew it to keep your brief updated.');
     return idOf(session, 'session-');
   });
   assert.ok(messages.has(state.message), 'Unexpected renewal status '+state.message);
   return {'s.owner': owner, 's.visited': qset(state.visited), 's.pending': idOf(state.renewalTap, 'tap-'),
-    's.exact': state.renewalExact, 's.dialog': state.renewalDialog ? owner : 0, 's.reading': held('renewal-read'),
+    's.exact': state.renewalExact, 's.queued': state.renewalQueued ? owner : 0, 's.reading': held('renewal-read'),
     's.settling': held('renewal-settle'), 's.attempts': effects(false), 's.discarded': effects(true),
     's.drafts': qset(drafts), 's.sensitive': state.sensitive, 's.composer': state.canCompose, 's.notice': messages.get(state.message)};
 }
@@ -85,8 +87,8 @@ export async function checkSourceRenewalQuestion(extraSources = []) {
     return results;
   }, [driver, ...extraSources], {native: true});
   return checkTraces(boundInputs({model: 'SourceRenewalQuestion', traces, sources, scope: 'bounded-orchestration', assumptions: [
-    'The actual mounted digest panel, renewal question, shared tap resolver and content dialog execute in Chromium. Android bridge, digest transport, sensitive-context and conversation ports are controlled.',
+    'The actual mounted digest panel, renewal attachment staging and shared tap resolver execute in Chromium. Android bridge, digest transport, sensitive-context and conversation ports are controlled.',
     'Attach groups owner publication, held history, and successful source/loop/inbox refresh. Two unique binding lifetimes and at most one approved question in flight per owner. Tap effects are projected as owner sets, not counters.',
-    'Hidden interruption and failure ownership are compared through dialog retirement, exact native settlement, status and draft publication. Native scheduling, actual Android events, interactive renewal rebind and composition after source mutation remain separate.',
+    'Attachment admission and retirement, exact native settlement, status and draft publication are observed. Native scheduling, actual Android events and interactive renewal rebind have separate evidence.',
   ]}));
 }

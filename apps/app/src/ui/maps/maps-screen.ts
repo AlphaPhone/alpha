@@ -1079,18 +1079,6 @@ export class MapsScreenController {
     }
   }
 
-  /** Manual location: Maps clears and asks for coordinates in the search field. */
-  manualLocation(): void {
-    if (this.disposed || !this.host.active()) return;
-    this.release();
-    // Same visit: the coordinate prompt is not replaced by a fresh look for the position.
-    this.openedLocate = true;
-    this.query = "";
-    this.searching = false;
-    this.message = "Type a latitude and longitude in Search, then press Enter.";
-    this.invalidate();
-  }
-
   /** The user moved the map during navigation; the camera stops following. */
   stopFollowing(): void {
     if (!this.navigating || !this.follow) return;
@@ -1654,9 +1642,9 @@ export class MapsScreenController {
           : this.mapState;
     const mapText =
       this.mapState === "error"
-        ? "Map rendering is unavailable. Retry the map, or use coordinates and saved places."
+        ? "Map rendering is unavailable. Retry the map or open a saved place."
         : outsideCoverage
-          ? `This location is outside ${coverage?.name ?? ""} ${coverage?.mapRestricted ? "map" : "search and route"} coverage. Its coordinates are retained.`
+          ? `This location is outside ${coverage?.name ?? ""} ${coverage?.mapRestricted ? "map" : "search and route"} coverage.`
           : mapState === "loading"
             ? "Loading map…"
             : !coverage?.mapRestricted
@@ -1769,7 +1757,7 @@ export class MapsScreenController {
         locationHelp:
           locationState === "denied"
             ? this.host.deniedLocationHelp ||
-              "Allow location in settings, or enter coordinates."
+              "Allow location in Settings to show your position."
             : "Location access does not share it with your agent.",
         mapRetry: this.mapState === "error",
         mapsAppHandoff: !!mapsAppText && this.mapsAppAvailable === true,

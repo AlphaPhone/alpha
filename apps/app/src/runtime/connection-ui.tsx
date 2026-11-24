@@ -33,7 +33,7 @@ import {isRecord} from '../lib/parse';
 import {sameJson} from '../lib/json';
 import {sessionKey} from '../lib/session-key';
 import {deviceTimeZone} from '../lib/civil-date';
-import type {ConversationMessageTarget, ChatChannel, VoiceConversationBinding,VoiceTurnSignal,ReadReplyBinding,NativeNotesReadReplyHint} from './alpha-client';
+import type {ConversationMessageTarget, ChatChannel, VoiceConversationBinding,VoiceTurnSignal,ReadReplyBinding,NativeNotesReadReplyHint,RequestedViewProjection} from './alpha-client';
 import {ViewNavigationClient,type NavigationAttempt} from './view-navigation';
 import {captureConversationChoice,selectConversation,conversationSelectionDocument,type ConversationChoice} from './conversation-selection';
 import {developmentDigestDocument} from '../browser/development-digest-document';
@@ -61,7 +61,7 @@ import { pauseHostedBackground } from './hosted-background';
 import {developmentDeviceStore,developmentActionJournal} from './local-agent-storage';
 import { reviewLocalRecovery,archiveLocalRecovery,stopLocalAgent,localAgentBootStatus, configureLocalProvider, bindResidentCloudProvider, LocalCloudProviderStopUnconfirmed, LocalAgentProtocol, nativeVoiceTraceId, localAgentPackaged, localAgentRefusal, localAgentStopped, browserLocalAgentEnabled, localProviderStatus, clearLocalProvider, clearLocalProviderIfCurrent, providerStatusLabel, LOCAL_PROVIDER_MODEL, selectLocalProvider,editLocalProviderKeys,removeLocalProviderKey,type LocalProviderKey,type ManagedLocalProviderStatus,type LocalProviderStatus } from './local-agent';
 import { presentDeviceRecordOperation } from './device-record-presentation';
-import {actionResultText,checkinDisplayText, succeededBrowserDestination, systemNoticeDisplayText, systemNoticeKind, type SystemNoticeKind } from './action-message-presentation';
+import {actionResultText,checkinDisplayText,isPhoneReviewInstruction,phoneReviewReply, succeededBrowserDestination, systemNoticeDisplayText, systemNoticeKind, type SystemNoticeKind } from './action-message-presentation';
 import type { MessagePage } from './remote-protocol';
 import type {DeviceRecovery,CurrentDeviceActionRequest} from "./device-actions";
 import type { WorkflowPhoneReview } from './workflow-device-contract';
@@ -81,6 +81,7 @@ import { cloudServiceName, cloudSignInHandOffAvailable, CloudProtocol, CloudProt
 import { googleOutcome as signInOutcome, type CloudSignInGoogleOutcome, CloudSignInError, normalizeSignInCode, normalizeSignInPhone, signInFailureMessage as formatSignInFailureMessage, signInReadiness, signInReadinessChanged, validSignInEmail, validSignInPhone, type CloudSignInAuthenticated } from './cloud-sign-in';
 import { entitlementErrorText } from '../ui/cloud/subscription-presentation.ts';
 import { deviceActionRefusal } from '../ui/device-actions/device-action-messages.ts';
+import { ownerActionFollowUp } from '../ui/device-actions/owner-request.ts';
 import { checkEntitlement, clearEntitlementKeyCache, describeSubscription, EntitlementError, EntitlementRefresher, isEntitlementSignInFailure, residentAdmissionOutcome, cloudUnreachable, CloudIdentityUnreachable, identityReadRefused, CHOOSE_PLAN_LABEL, MANAGE_PLAN_LABEL, planAdmission, readServiceLimit, redeemFailureMessage, redeemSuccessMessage, serviceLimitMessage, subscriptionSummary, SubscriptionRedeemError, type ServiceLimit, type SubscriptionView } from './subscription-entitlement';
 import { RemoteProtocol, RemoteProtocolError } from './remote-protocol';
 import { offeredByEither, phoneContextMessage, sanitizePhoneContext, selectDeviceCapabilities } from './phone-context';
@@ -93,7 +94,8 @@ import { Busy, StatusDot, type StatusTone } from './status-ui';
 import { cloudCredentialStore, cloudSelfRevocationSupported, cloudSignIn, cloudSignInGoogle, cloudSignInPhone, remoteCredentialStore, nativeCloudRequest, nativeRemoteRequest, openConnectionBrowser, secureConnectionStore } from './native-connection';
 import { findStoppedUserTurn, type StoppedUserTurn as StoppedTurn } from '../ui/api/conversation-turn-controller.ts';
 import './connection-ui.css';
-import {CloudMembershipControls,FUNDING_NEEDED,fundingRefusedReply,type MembershipBalance} from './cloud-membership-ui';
+import {CloudMembershipControls,FUNDING_NEEDED,type MembershipBalance} from './cloud-membership-ui';
+import {outOfFundsCode,outOfFundsNotice,outOfFundsResetsAt} from './out-of-funds-notice';
 import {CloudPlanManager,CloudFundsManager} from './cloud-plan-ui';
 import type {BillingAuthorityPort} from './cloud-plans';
 
@@ -221,7 +223,7 @@ export type SignInView =
 /** `revokeDevice` revokes this phone's enrollment on the agent; `deviceSlot` names its installation key. */
 type Enrollment = { revokeDevice?: (signal: AbortSignal) => Promise<boolean>; deviceSlot?: string; deviceHeaders?: Record<string,string> };
 type DeviceRequest=(path:string,body:unknown|undefined,signal:AbortSignal)=>Promise<unknown>;
-type Active = ({ kind: 'resident'; remote: LocalAgentProtocol; origin: string; actions?: DeviceActions; workflowProtocol?: WorkflowDeviceProtocol } | { kind: 'remote' | 'local'; remote: RemoteProtocol; origin: string; actions?: DeviceActions; workflowProtocol?: WorkflowDeviceProtocol }) & Enrollment & { request?:DeviceRequest; viewNavigation?:ViewNavigationClient; userTextFormatVersion?:1 };
+type Active = ({ kind: 'resident'; remote: LocalAgentProtocol; origin: string; actions?: DeviceActions; workflowProtocol?: WorkflowDeviceProtocol; development?: true } | { kind: 'remote' | 'local'; remote: RemoteProtocol; origin: string; actions?: DeviceActions; workflowProtocol?: WorkflowDeviceProtocol }) & Enrollment & { request?:DeviceRequest; viewNavigation?:ViewNavigationClient; userTextFormatVersion?:1 };
 const SELECTION = 'alpha.connection.selection.v1';
 // The development chooser exists only on an explicitly flagged development server.
 const browserDevProfile = devSurfacesEnabled && devProfileQuery;
@@ -1229,7 +1231,7 @@ async function connectRemote(kind: 'remote' | 'local', origin: string, code: str
 async function connectDevelopment(profile:DevelopmentProfile,signal:AbortSignal){
  if(!browserDevProfile)throw Error('Development mode required.');
  // This explicitly gated browser fixture implements reminder v2; real peers still negotiate it.
- const identity=await readDevelopmentIdentity(profile,signal);const client=new LocalAgentProtocol(developmentBridge(profile,identity));const {session,name}=await client.connect(signal);signal.throwIfAborted();const credential={...developmentCredential(profile,identity),capabilities:[FILES_CAPABILITY,NOTES_LIST_FILTER_CAPABILITY]},scope=await actionScope(sessionKey(client.origin,session.ownerId,session.agentId,credential.installationId));const actions=new DeviceActions(session,credential,scope,(path,body,signal)=>client.request(path,body,signal),developmentJournal(profile,identity),(op,id,context,signal,binding,workflowRoute,journalIdentity,agendaSource)=>deviceExecutor(op,id,context,signal,binding,workflowRoute,journalIdentity,agendaSource),(op,id,binding,signal)=>deviceRecovery?deviceRecovery(op,id,binding,signal):Promise.resolve({status:'unknown'}),true,true);await retire();signal.throwIfAborted();await verifyDevelopmentIdentity(identity,signal);const workflowProtocol=await workflowDeviceProtocol(signal);save({kind:'development',profile,...(identity.account?{account:identity.account}:{})});activate({kind:'resident',remote:client,origin:client.origin,actions,workflowProtocol},session,name);
+ const identity=await readDevelopmentIdentity(profile,signal);const client=new LocalAgentProtocol(developmentBridge(profile,identity));const {session,name}=await client.connect(signal);signal.throwIfAborted();const credential={...developmentCredential(profile,identity),capabilities:[FILES_CAPABILITY,NOTES_LIST_FILTER_CAPABILITY]},scope=await actionScope(sessionKey(client.origin,session.ownerId,session.agentId,credential.installationId));const actions=new DeviceActions(session,credential,scope,(path,body,signal)=>client.request(path,body,signal),developmentJournal(profile,identity),(op,id,context,signal,binding,workflowRoute,journalIdentity,agendaSource)=>deviceExecutor(op,id,context,signal,binding,workflowRoute,journalIdentity,agendaSource),(op,id,binding,signal)=>deviceRecovery?deviceRecovery(op,id,binding,signal):Promise.resolve({status:'unknown'}),true,true);await retire();signal.throwIfAborted();await verifyDevelopmentIdentity(identity,signal);const workflowProtocol=await workflowDeviceProtocol(signal);save({kind:'development',profile,...(identity.account?{account:identity.account}:{})});activate({kind:'resident',remote:client,origin:client.origin,actions,workflowProtocol,development:true},session,name);
  await restoreSavedHistory(signal);
 }
 /** Native's identity read during a bind failed without Cloud refusing the key (transport, 408, 429, 5xx). */
@@ -1631,7 +1633,8 @@ function restoredMessages(items:Record<string,unknown>[]):RestoredMessage[] {
     const notice=item.role==='assistant'?systemNoticeKind(item.text):undefined;
     if(notice)return {id:item.id,from:'agent',text:systemNoticeDisplayText(notice),systemNotice:notice};
     const failureKind=item.role==='assistant'&&item.interrupted!==true&&failureKindOf(item)&&!calendarRefusalKept(item)?failureKindOf(item):undefined;
-    if(failureKind)return {id:item.id,from:'agent',text:Object.hasOwn(RESTORED_FAILURES,failureKind)?RESTORED_FAILURES[failureKind]:'This reply couldn’t be completed.',unfinished:true,failureKind};
+    // Out of funds by Cloud's own code: the live chat's one line, without a reset date that may have passed.
+    if(failureKind)return {id:item.id,from:'agent',text:outOfFundsCode(terminalCodeOf(item))?outOfFundsNotice('chat'):Object.hasOwn(RESTORED_FAILURES,failureKind)?RESTORED_FAILURES[failureKind]:'This reply couldn’t be completed.',unfinished:true,failureKind};
     const displayText=item.source==='lifeops-checkin'?checkinDisplayText(item):undefined;
     return {id:item.id,...(typeof item.forkSourceMessageId==='string'&&typeof item.forkSourceRoomId==='string'?{forkSourceMessageId:item.forkSourceMessageId,forkSourceRoomId:item.forkSourceRoomId,...(typeof item.forkAttachmentMessageId==='string'&&typeof item.forkAttachmentConversationId==='string'?{forkAttachmentMessageId:item.forkAttachmentMessageId,forkAttachmentConversationId:item.forkAttachmentConversationId}:{})}:{}),...(typeof item.clientMessageId==='string'?{clientMessageId:item.clientMessageId}:{}),from:item.role==='user'?'user':'agent',text:item.role==='user'?restoredText(item.text,item.userTextFormat):item.interrupted===true&&!item.text?'This reply did not finish.':item.text,...(item.role==='assistant'&&item.interrupted===true?{unfinished:true as const}:{}),...(displayText===undefined?{}:{displayText})};
   });
@@ -1660,7 +1663,8 @@ const pairingRetired = () => 'Pairing unavailable';
 const residentSignInExpired = () => 'Sign-in expired';
 /** Owner-facing states for upstream's CHAT_FAILURE_KINDS (pinned contracts `chat.ts`). Each says
  * what happened and what to do next; none retries the message. Every known kind has one (replyFailure);
- * only an unknown kind keeps the generic text. */
+ * `insufficient_credits` is a Cloud billing refusal (its ServiceLimit), and only an unknown kind
+ * keeps the generic text. */
 export const REPLY_FAILURES = {
   hosted_unreachable: 'Reply failed',
   provider_unreachable: 'Reply failed',
@@ -1668,16 +1672,16 @@ export const REPLY_FAILURES = {
   context_overflow: 'Too long',
   missing_capability: 'Not supported',
   planner_exhaustion: 'Couldn’t finish',
-  handler_error: 'Partly done · Check first',
+  handler_error: 'Couldn’t finish',
   reply_generation_error: 'No reply',
   persistence_error: 'Reply not saved',
   local_inference: 'No answer',
   coding_failure: 'Unconfirmed',
-  insufficient_credits: 'Billing declined',
 } as const;
 /** Test mocks only: a development agent without a model provider (constant-folded out of production). */
 const NO_PROVIDER_DEVELOPMENT = testMocksEnabled ? 'The agent has no model provider configured. Set one up on the agent; nothing was retried.' : '';
-/** Saved failed replies show this static copy, never the agent's prose or today's plan state. */
+/** Saved failed replies show this static copy, never the agent's prose or today's plan state.
+ * One that Cloud's code says was out of funds shows the chat's out-of-funds line (restoredMessages). */
 export const RESTORED_FAILURES: Record<string,string> = {
   no_provider: 'AI replies were off for this message.',
   insufficient_credits: 'This message was declined for billing.',
@@ -1699,6 +1703,11 @@ function failureKindOf(value:unknown):string|undefined {
   const kind=terminalFailure&&typeof terminalFailure==='object'?(terminalFailure as {kind?:unknown}).kind:undefined;
   return typeof kind==='string'?kind:undefined;
 }
+/** Cloud refused this account for billing: the Subscription sheet with its credits and membership
+ * code actions opens with a fresh balance once the turn ends, for a chat turn and for Talk alike. */
+function fundingRefusal(){update({fundingRefused:true,membershipDismissed:false});void refreshMembershipBalance();}
+/** The chat's out-of-funds line (out-of-funds-notice.ts), with the refusal's reset or else the verified plan's. */
+function chatOutOfFunds(limit:ServiceLimit|null):string {return outOfFundsNotice('chat',outOfFundsResetsAt(Date.now(),limit,state.residentSubscription,state.membershipPlan));}
 /** The error a failed reply surfaces. Cloud's own refusal (rate limit, used allowance, no active
  * plan, billing) carries its retry information and is presented as such; the phone never retries,
  * upgrades or buys anything. Mapped kinds carry `failureKind` (and `serviceLimit` for Cloud limits)
@@ -1707,12 +1716,14 @@ function replyFailure(kind:string|undefined,selected:Active,limit:ServiceLimit|n
   const failed=(text:string,extra:Record<string,unknown>={})=>Object.assign(new AlphaClientError('transport-failed',text),{failureKind:kind},extra);
   if(kind==='interrupted')return failed('Didn’t finish');
   if(selected.kind==='resident'&&(limit?.kind==='subscription-required'||limit?.kind==='billing-refused'))connectionController.recheckPlanAfterRefusal();
-  // A billing refusal of a signed-in account: one answer in the chat, and the Subscription
-  // sheet with its credits and membership code actions opens with a fresh balance once the turn ends.
+  // A billing refusal of a signed-in account: one answer in the chat, and the Subscription sheet.
   const funding=limit?.kind==='billing-refused'&&!!state.cloudAccount;
-  if(limit)update({lastServiceLimit:{...limit,observedAt:Date.now()},...(funding?{fundingRefused:true,membershipDismissed:false}:{})});
-  if(funding){void refreshMembershipBalance();return Object.assign(new AlphaClientError('transport-failed',fundingRefusedReply(cloudServiceName(cloud.environment))),{failureKind:kind??limit.kind,serviceLimit:limit.kind,planAction:'funding'});}
-  if(limit)return Object.assign(new AlphaClientError('transport-failed',serviceLimitMessage(limit, Date.now(), cloudServiceName(cloud.environment))),{failureKind:kind??limit.kind,serviceLimit:limit.kind});
+  if(limit)update({lastServiceLimit:{...limit,observedAt:Date.now()}});
+  if(funding)fundingRefusal();
+  // That answer is the out-of-funds line Talk posts too only when Cloud's own code says the plan
+  // allowance and credits are used up; a billing hold or a bare billing kind stays 'Billing declined'.
+  const funds=outOfFundsCode(terminalCode);
+  if(limit)return Object.assign(new AlphaClientError('transport-failed',funds?chatOutOfFunds(limit):serviceLimitMessage(limit, Date.now(), cloudServiceName(cloud.environment))),{failureKind:kind??limit.kind,serviceLimit:limit.kind},funding?{planAction:'funding'}:{},funds?{outOfFunds:true}:{});
   if(kind==='rate_limited')return failed(serviceLimitMessage(null,Date.now(),cloudServiceName(cloud.environment)));
   const noProvider=REPLY_FAILURES.no_provider_resident;
   // The on-device agent without Eliza Cloud inference (no plan, offline, signed out): the same honest
@@ -1730,7 +1741,6 @@ function replyFailure(kind:string|undefined,selected:Active,limit:ServiceLimit|n
     // A revoked key reaches the sign-in path through the (throttled) plan check.
     connectionController.recheckPlanAfterRefusal();
   }
-  // insufficient_credits normally arrives as a Cloud billing refusal (readServiceLimit above).
   const text=kind==='provider_issue'||kind==='generation_timeout'?(resident?REPLY_FAILURES.hosted_unreachable:REPLY_FAILURES.provider_unreachable)
     :kind==='no_provider'?(resident||!testMocksEnabled?noProvider:NO_PROVIDER_DEVELOPMENT)
     :kind==='coding_mutation_unverified'||kind==='coding_verification_failed'||kind==='coding_tool_failure'?REPLY_FAILURES.coding_failure
@@ -2094,6 +2104,7 @@ export const connectionController = {
   },
   subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
   getSnapshot() { return state; },
+  isDevelopmentConnection() { return browserDevProfile && active?.kind === 'resident' && active.development === true; },
   getSelectedConversationId(){return active&&state.session?conversationMemory.get(conversationKey(state.session)):undefined;},
   async assistantDraftBinding(signal:AbortSignal){
     const selected=active,session=state.session,generation=epoch;
@@ -2150,7 +2161,7 @@ export const connectionController = {
   setDeviceExecutor(executor: DeviceExecutor) { deviceExecutor = executor; },
   setForegroundExecutor(executor: ForegroundReviewExecutor) { foregroundExecutor = executor; },
   setDeviceReadReview(review:(proposal:ActionProposal,context:ContextEnvelope,signal:AbortSignal)=>Promise<void>){deviceReadReview=review;},
-  async execute(proposal: ActionProposal, context: ContextEnvelope, signal: AbortSignal): Promise<OperationReceipt> {
+  async execute(proposal: ActionProposal, context: ContextEnvelope, signal: AbortSignal, approval?: "send-draft"): Promise<OperationReceipt> {
     const selected = active;
     if (!selected || !selected.actions) return { proposalId: proposal.id, status: 'denied', summary: 'Not supported' };
     const session=state.session!,sessionId=session.sessionId,generation=epoch,account=JSON.stringify(service?.identity??null),conversation=conversationMemory.get(conversationKey(session)),review=deviceReadReview;
@@ -2162,7 +2173,7 @@ export const connectionController = {
         await review(proposal,context,signal);signal.throwIfAborted();
         if(selected!==active||generation!==epoch||state.session!==session||conversationMemory.get(conversationKey(session))!==conversation||JSON.stringify(service?.identity??null)!==account||document.hidden||state.open)throw Error('The Notes review changed. Nothing was shared.');
       }
-      return selected.actions!.approve(proposal.id, context, signal);
+      return selected.actions!.approve(proposal.id, context, signal, approval, approval==='send-draft'?proposal.description:undefined);
     })();
     actionReceipts.set(proposal.id, { sessionId, result });
     // A refusal (before the journal reserved anything) can be approved again; a settled receipt stays.
@@ -2187,6 +2198,9 @@ export const connectionController = {
     return calendarApprovals.read(id,signal);
   },
   async resolveCalendarApproval(row:CalendarApproval,decision:CalendarApprovalDecision,signal:AbortSignal){return calendarApprovals.resolve(row,decision,signal);},
+  matchesSmsReviewRecipient(proposalId:string,spoken:string):boolean {
+    return active?.actions?.matchesSmsReviewRecipient(proposalId,spoken)===true;
+  },
   async pendingActions(context:ContextEnvelope,signal:AbortSignal):Promise<ActionProposal[]> {
     const selected=active,session=state.session,generation=epoch,history=state.history;
     if(!selected?.actions||!session||state.open||state.busy||document.hidden||context.sensitive)return [];
@@ -2202,7 +2216,7 @@ export const connectionController = {
     current();if(!sameJson(choice,after))throw Error('Saved conversation selection changed.');
     return proposals;
   },
-  async approvePendingAction(id:string,context:ContextEnvelope,signal:AbortSignal):Promise<OperationReceipt> {
+  async approvePendingAction(id:string,context:ContextEnvelope,signal:AbortSignal,approval?: 'send-draft',approvedDescription?:string):Promise<OperationReceipt> {
     // Refresh authenticated state and exact source preconditions at the tap. No
     // cached chat prose or prior approval can authorize a recovered proposal.
     const selected=active,session=state.session;
@@ -2210,8 +2224,9 @@ export const connectionController = {
     signal.throwIfAborted();
     if(active!==selected||state.session!==session)throw Error('The agent changed.');
     const proposal=proposals.find(proposal=>proposal.id===id);
-    if(!proposal)throw Error('No longer pending');
-    return this.execute(proposal,context,signal);
+    if(!proposal||approval==='send-draft'&&proposal.smsReview!=='draft'&&proposal.smsReview!=='addressed-draft')throw Error('No longer pending');
+    if(approvedDescription!==undefined&&proposal.description!==approvedDescription)throw Error('The text draft changed. Review it again before sending.');
+    return this.execute(proposal,context,signal,approval);
   },
   getWorkflowPresentationProtocol():1|2 { return active?.actions && (active.workflowProtocol ?? 1) >= 2 ? 2 : 1; },
   /** The protocol admitted by this agent for the current enrolled device. */
@@ -2469,6 +2484,9 @@ export const connectionController = {
     await refreshMembershipBalance();
     if(expected&&service===expected)connectionController.recheckPlanNow();
   },
+  /** Cloud refused Talk's speech session for funds: the Subscription sheet opens as after a refused
+   * chat turn (replyFailure). */
+  noteFundsRefusal(){if(state.cloudAccount)fundingRefusal();},
   /** The chat's offer after a Cloud billing refusal: the same Subscription sheet while the
    * refusal applies (it closes by itself once Cloud admits the account again), else the plan panel. */
   openFunding(){
@@ -3286,7 +3304,7 @@ export const connectionController = {
     try{current();const conversationId=await ensureSelectedConversation(selected,session,controller.signal,current);current();return {conversationId,session:{...session},connectionEpoch:generation};}
     finally{signal.removeEventListener('abort',cancel);releaseOperation(controller);}
   },
-  async send(text: string, context: ContextEnvelope, requestId: string, signal: AbortSignal, onText?:import('./local-agent-stream').StreamTextListener,replyTo?:ConversationMessageTarget,onReplyReady?:(results:readonly unknown[]|undefined)=>void,channelType:ChatChannel='DM',expectedConversationId?:string,voiceTurnSignal?:VoiceTurnSignal,images?:Array<{data:string;mimeType:string;name:string}>,workflowStep=false): Promise<{ ignored?:true;messageId?:string;userMessageId?:string;messageBinding?:{conversationId:string;session:VerifiedSession};text: string; proposals?: ActionProposal[]; actionResults?:readonly unknown[]; planAction?: 'plan' | 'retry' | 'sign-in' }> {
+  async send(text: string, context: ContextEnvelope, requestId: string, signal: AbortSignal, onText?:import('./local-agent-stream').StreamTextListener,replyTo?:ConversationMessageTarget,onReplyReady?:(results:readonly unknown[]|undefined)=>void,channelType:ChatChannel='DM',expectedConversationId?:string,voiceTurnSignal?:VoiceTurnSignal,images?:Array<{data:string;mimeType:string;name:string}>,workflowStep=false,projectRequestedView?:RequestedViewProjection): Promise<{ ignored?:true;messageId?:string;userMessageId?:string;messageBinding?:{conversationId:string;session:VerifiedSession};text: string; proposals?: ActionProposal[]; actionResults?:readonly unknown[]; planAction?: 'plan' | 'retry' | 'sign-in' }> {
     if(!ownProviderSelected()&&state.cloudAccount&&state.membershipBalance==='zero')throw fundingNeeded();
     // P-43: before the resident has a session, say it is starting (or recovering); nothing is sent.
     if (!active && residentAlwaysPresent) throw noSessionError('');
@@ -3367,7 +3385,7 @@ export const connectionController = {
       if(browserPage&&((actionPreferences as {agentBrowserPageEnabled?:boolean}).agentBrowserPageEnabled!==true||observedBrowserTab(message.context)?.id!==browserPage.tabId||observedBrowserTab(message.context)?.revision!==browserPage.revision))browserPage=undefined;
       const options = { signal: requestSignal, clientMessageId: requestId, channelType, images, metadata: { ...(directRequestedActions?{agentActionMode:'direct-request-v1'}:{}), ...notesFolders, ...(channelType==='VOICE_DM'&&voiceTurnSignal?{voiceTurnSignal}:{}), ...(replyTo?{replyToMessageId:replyTo.messageId}:{}), ...(message.context.timeZone===undefined?{}:{uiTimeZone:message.context.timeZone}), clientDevice: { context: message.context,...(browserPage?{browserPage}:{}),...(calendarAgendaSource?{calendarAgendaSource:{sourceId:calendarAgendaSource.sourceId,sourceRevision:calendarAgendaSource.sourceRevision}}:{}) }, ...boundNavigation()?.metadata(context), ...(canonicalProse?{userTextFormat:'plain-v1'}:{alphaPhone:{context:message.context}}) } };
       dispatched = { conversationId: id, at: Date.now() };
-      const progress=(value:string,frame?:import('./local-agent-stream').StreamTextFrame)=>{requestSignal.throwIfAborted();if(generation!==epoch||selected!==active||state.session?.sessionId!==session.sessionId)throw Error('The connection changed.');onText?.(value,frame);};
+      const progress=(value:string,frame?:import('./local-agent-stream').StreamTextFrame)=>{requestSignal.throwIfAborted();if(generation!==epoch||selected!==active||state.session?.sessionId!==session.sessionId)throw Error('The connection changed.');if(!isPhoneReviewInstruction(value))onText?.(value,frame);};
       const replyReady=(results:readonly unknown[]|undefined)=>{assertCurrent();onReplyReady?.(results);};
       const voiceTurnId=isAndroid&&selected.kind==='resident'&&channelType==='VOICE_DM'?activeVoiceTurn():undefined;
       const voiceTraceId=voiceTurnId?nativeVoiceTraceId(requestId):undefined;
@@ -3413,12 +3431,16 @@ export const connectionController = {
       for(const key of ['messageId','userMessageId'] as const)if(reply[key]!==undefined&&!validateUuid(reply[key]))throw Error('The agent returned an invalid message identity.');
       if (typeof reply.text !== 'string') throw new Error('The agent returned an invalid response.');
       let proposals: ActionProposal[] | undefined, notices: string[] = [],cameraProposalOnly=false;
+      let directReply:string|undefined;
       const completedReads:NonNullable<AgentReply['completedReads']>=[];
       const completedActions:OperationReceipt[]=[];
       if (selected.actions) {
         // A pending action that does not fit this screen, time zone or negotiated support is
         // named to the owner instead of being dropped; it stays unapprovable.
-        try { const authoredRequest=typeof reply.userMessageId==='string'&&validateUuid(reply.userMessageId)?{messageId:reply.userMessageId,text:authoredRequestText,current:assertCurrent,...(browserPage?.links?.length?{pageLinks:Object.freeze(browserPage.links.map(link=>link.url))}:{})}:undefined;
+        try { const projectView=projectRequestedView
+          ? (findViewActionHandoff(reply.actionResults)?'canonical' as const:projectRequestedView)
+          : undefined;
+          const authoredRequest=typeof reply.userMessageId==='string'&&validateUuid(reply.userMessageId)?{messageId:reply.userMessageId,text:authoredRequestText,current:assertCurrent,projectView,...(browserPage?.links?.length?{pageLinks:Object.freeze(browserPage.links.map(link=>link.url))}:{})}:undefined;
           let items = await selected.actions.pendingReview(context, requestSignal,authoredRequest);
           if(!failed&&directRequestedActions&&typeof reply.userMessageId==='string'&&validateUuid(reply.userMessageId)){
             const performed=await selected.actions.performRequested(reply.userMessageId,context,requestSignal,async()=>!(await readDevicePreferences(requestSignal)).askBeforeAgentActions,undefined,authoredRequest);
@@ -3427,6 +3449,9 @@ export const connectionController = {
             assertCurrent();
             if(performed.length){
               completedActions.push(...performed);
+              const communication=performed.find(receipt=>items.some(item=>item.proposal?.id===receipt.proposalId&&
+                (!!item.proposal.smsReview||item.proposal.title==='Place call')));
+              if(communication)directReply=communication.summary;
               for(const receipt of performed){const proposal=items.find(item=>item.proposal?.id===receipt.proposalId)?.proposal;if(receipt.status==='succeeded'&&receipt.readReply&&proposal?.readReply)completedReads.push({proposal,receipt});}
               items=await selected.actions.pendingReview(message.context,requestSignal,authoredRequest);
             }
@@ -3439,7 +3464,14 @@ export const connectionController = {
           // pending reviews of other turns, announced or not, never keep the current screen.
           const replyProposals=Array.isArray(reply.actionResults)?replyDeviceProposalIds(reply.actionResults):undefined;
           cameraProposalOnly=requestedCameraNeedsCameraView(replyProposals?items:turnItems,typeof reply.userMessageId==='string'?reply.userMessageId:undefined,!!findViewActionHandoff(reply.actionResults),replyProposals);
-          proposals = turnItems.flatMap(item => item.proposal ? [item.proposal] : []); notices.push(...turnItems.flatMap(item => item.notice ? [item.notice.slice(0, 500)] : []));notices=[...new Set(notices)].slice(0,5); }
+          proposals = turnItems.flatMap(item => item.proposal ? [item.proposal] : []);
+          if(directRequestedActions&&!failed){
+            const smsReviews=proposals.filter(proposal=>proposal.smsReview);
+            const remaining=proposals.find(proposal=>!proposal.smsReview&&!completedActions.some(receipt=>receipt.proposalId===proposal.id));
+            if(remaining&&!directReply&&smsReviews.length===0)directReply=ownerActionFollowUp(remaining,authoredRequestText);
+            proposals=smsReviews;
+          }
+          notices.push(...turnItems.flatMap(item => item.notice ? [item.notice.slice(0, 500)] : []));notices=[...new Set(notices)].slice(0,5); }
         catch { update({ message: 'Actions not checked' }); }
       }
       requestSignal.throwIfAborted();
@@ -3467,7 +3499,7 @@ export const connectionController = {
       if(!failed&&(state.lastServiceLimit||state.fundingRefused))update({lastServiceLimit:null,fundingRefused:false});
       return { text: responseFailure
         ? `${responseFailure.message} Review the action below.`
-        : ignored?'':reply.text, ...(ignored&&!responseFailure?{ignored:true as const}:{}), ...(completedReads.length?{completedReads}:{}), ...(completedActions.length?{completedActions}:{}), ...(notices.length ? { notices } : {}), ...(!responseFailure?{...(typeof reply.messageId==='string'?{messageId:reply.messageId}:{}),messageBinding}:{}), ...recorded, ...(proposals ? { proposals } : {}), ...(!failed&&Array.isArray(reply.actionResults)?{actionResults:reply.actionResults}:{}) };
+        : directReply??(ignored?'':phoneReviewReply(reply.text,!!proposals?.length)), ...(ignored&&!responseFailure&&!directReply?{ignored:true as const}:{}), ...(completedReads.length?{completedReads}:{}), ...(completedActions.length?{completedActions}:{}), ...(notices.length ? { notices } : {}), ...(!responseFailure?{...(typeof reply.messageId==='string'?{messageId:reply.messageId}:{}),messageBinding}:{}), ...recorded, ...(proposals ? { proposals } : {}), ...(!failed&&Array.isArray(reply.actionResults)?{actionResults:reply.actionResults}:{}) };
     } catch (error) {
       // Nothing carrying the message left this phone (no conversation, offline, changed owner, or a
       // Stop before the post): the composer keeps the text instead of reporting an unknown outcome.
@@ -3490,7 +3522,9 @@ export const connectionController = {
         // A limit on the request itself is also the account panel's latest Cloud limit, with its retry time.
         const limit = refused ? null : readServiceLimit(error);
         if (limit) update({ lastServiceLimit: { ...limit, observedAt: Date.now() } });
-        const limited = refused ? Object.assign(new AlphaClientError('transport-failed', 'Busy · not sent'), { refusedBeforeTurn: true }) : new AlphaClientError('transport-failed', serviceLimitMessage(limit, Date.now(), cloudServiceName(cloud.environment)));
+        // Cloud's own out-of-funds code (allowance_exhausted) on the refusal: the chat's one out-of-funds line.
+        const funds = !refused && outOfFundsCode((error as { data?: { error?: { code?: unknown } } }).data?.error?.code);
+        const limited = refused ? Object.assign(new AlphaClientError('transport-failed', 'Busy · not sent'), { refusedBeforeTurn: true }) : funds ? Object.assign(new AlphaClientError('transport-failed', chatOutOfFunds(limit)), { outOfFunds: true }) : new AlphaClientError('transport-failed', serviceLimitMessage(limit, Date.now(), cloudServiceName(cloud.environment)));
         // Rate-limited before the post (creating or reading the conversation): still provably unsent.
         mark(limited); throw limited;
       }

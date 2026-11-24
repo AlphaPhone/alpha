@@ -24,6 +24,35 @@ test('select, move together into a folder, delete to Trash, restore, and Empty o
  await page.getByRole('button',{name:'Empty',exact:true}).click();await page.getByRole('dialog',{name:'Empty Trash?',exact:true}).getByRole('button',{name:'Empty',exact:true}).click();await expect(page.getByRole('button',{name:'two.txt',exact:true})).toHaveCount(0);
  await page.reload();expect(await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');const f=registerPlugin<any>('AlphaFiles');const all=await f.storageList({path:'Destination'});return all.entries.map((e:any)=>e.name);})).toEqual(['one.txt']);
 });
+test('Move starts at the root from a folder and omits the primary storage breadcrumb', async ({page}) => {
+  await page.evaluate(async () => {
+    const {registerPlugin} = await import('/src/platform-plugins.ts');
+    const files = registerPlugin<any>('AlphaFiles');
+    await files.storageCreateFolder({parent: '', name: 'Source'});
+    await files.storageCreateFolder({parent: '', name: 'Target'});
+    const source = (await files.list({})).entries.find((entry: {name: string}) => entry.name === 'Source');
+    await files.importFile(new File(['note'], 'move.txt', {type: 'text/plain'}), source.id);
+  });
+  await openStorage(page);
+  const path = page.getByRole('navigation', {name: 'Folder path'});
+  await expect(path).toHaveCount(0);
+  await page.getByRole('button', {name: 'Open Source', exact: true}).click();
+  await expect(path).toHaveText('Source');
+  await startSelect(page);
+  await page.getByRole('button', {name: 'Select move.txt', exact: true}).click();
+  await page.getByRole('toolbar', {name: 'Selection actions'}).getByRole('button', {name: 'Move', exact: true}).click();
+
+  const picker = page.getByRole('dialog', {name: 'Move to', exact: true});
+  const target = picker.getByRole('button', {name: 'Open Target', exact: true});
+  const parent = picker.getByRole('button', {name: 'Parent folder', exact: true});
+  await expect(target).toBeVisible();
+  await expect(picker.getByText('Internal storage', {exact: true})).toHaveCount(0);
+  await expect(parent).toHaveCount(0);
+  await target.click();
+  await expect(picker.getByText('Target', {exact: true})).toBeVisible();
+  await parent.click();
+  await expect(target).toBeVisible();
+});
 test('a move into a folder that already has the name keeps both files',async({page})=>{
  await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');const f=registerPlugin<any>('AlphaFiles');await f.importFile(new File(['outer'],'a.txt',{type:'text/plain'}));await f.storageCreateFolder({parent:'',name:'Target'});const target=(await f.list({})).entries.find((r:any)=>r.name==='Target');await f.importFile(new File(['inner'],'a.txt',{type:'text/plain'}),target.id);});
  await openStorage(page);await startSelect(page);await page.getByRole('button',{name:'Select a.txt',exact:true}).click();await page.getByRole('toolbar',{name:'Selection actions'}).getByRole('button',{name:'Move',exact:true}).click();

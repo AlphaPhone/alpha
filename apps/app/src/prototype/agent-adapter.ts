@@ -3,18 +3,19 @@ import {createImagePreview} from '../runtime/image-preview';
 import {ChatAttachmentPicker,encodeChatAttachments} from './attachment-picker';
 import {storedChatFiles,type ChatFile,type SelectedChatFile} from './chat-attachment-files';
 import {CHAT_IMAGE_MIME_TYPE_SET,MAX_CHAT_UPLOAD_ATTACHMENTS} from '../../../../.eliza/client-features/packages/core/src/chat-upload-limits';
-import type {AgentReply,VerifiedSession} from '../runtime/alpha-client';
+import type {AgentReply,ContextEnvelope,VerifiedSession} from '../runtime/alpha-client';
+import {noteCreationTarget} from '../runtime/app-record-completion';
 import {browserDocuments} from '../browser/documents';
 import {projectNoteForModel,type StickyNote} from '../../../../.eliza/client-features/plugins/plugin-notes/src/types.ts';
 import type {VoiceStartupStage} from '../runtime/diagnostics-export';
 import {cloudServiceName} from '../runtime/cloud-protocol';
-import {actionResultText,approvalExpiryText,emptyChatNotice,browserControlSummary,browserNavigationSummary,runBrowserPresentation,collapseSystemNotices,projectActionMessages,spokenActionReply,workflowReplyText} from '../runtime/action-message-presentation';
+import {actionResultText,approvalExpiryText,emptyChatNotice,browserControlSummary,browserNavigationSummary,runBrowserPresentation,collapseSystemNotices,projectActionMessages,spokenActionReply,VIEW_OPEN_UNCONFIRMED,workflowReplyText} from '../runtime/action-message-presentation';
 import {workflowChanges,workflowViewRefusal,type WorkflowChange} from '../runtime/automation-completion';
 import {CanonicalNotesUi} from './canonical-notes-ui';
 import {openExistingBrowserNotes,openExistingDeviceNotes,LegacyNotesAbsent,LegacyNotesDraftOnly,browserPreviousNotesAvailability,devicePreviousNotesAvailability} from './legacy-notes-access';
 import {executeNamedCalendarRead,type NamedCalendarReadProvider} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/client/named-read.ts';
 import {reconcileNotesEditor} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/notes-draft.ts';
-import {approvedBrowserOpen,CAMERA_CONTEXT_NOTICE,DeviceActionNotStarted,presentOpenView,publishCommittedDeviceChanges,setBrowserTabNeedsChoice,setBrowserTabsClosing,setContactReviewMatches,setFilesReviewIdentity,setFilesShownPaths} from '../runtime/device-actions';
+import {approvedBrowserOpen,CAMERA_CONTEXT_NOTICE,DeviceActionNotStarted,presentOpenView,publishCommittedDeviceChanges,setBrowserTabNeedsChoice,setBrowserTabsClosing,setChooseSmsRecipient,setContactReviewMatches,setFilesReviewIdentity,setFilesShownPaths,setSmsReviewRecipient} from '../runtime/device-actions';
 import {executeViewInteraction} from '../runtime/view-navigation';
 import {askAboutCameraFrame,captureAgentPhoto,cameraFrameQuestionRequested,cameraScanRequested,library as photoLibrary,requestCameraScan} from './camera-adapter';
 import {isCameraCapture} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
@@ -29,7 +30,7 @@ import {isSmsSend,validateSmsResult,smsAgentHash,smsDeviceStatus} from '../runti
 import {isPhoneDial,dialDeviceStatus,type PhoneDialResult} from '../runtime/phone-dial-contract';
 import {phoneDialResultText,smsSendResultText} from '../ui/telephony/telephony-receipt-text';
 import {isTelephonyAction} from '../runtime/telephony-actions-contract';
-import {CONTACT_CALL_LOOKUP_LIMIT,contactCallOptions,contactWriteTargets,refuseTelephonyAction,type TelephonyPorts} from '../runtime/telephony-executor';
+import {CONTACT_CALL_LOOKUP_LIMIT,contactCallOptions,contactWriteTargets,refuseTelephonyAction,type ContactMatch,type TelephonyPorts} from '../runtime/telephony-executor';
 import {contactChoiceName} from '../ui/telephony/telephony-messages';
 import {normalizePhoneNumber} from '../runtime/aosp-telephony';
 import {askTelephonyReview} from './telephony-review';
@@ -50,6 +51,8 @@ import {isNativeNotesQuery} from '../../../../.eliza/client-features/packages/co
 import {executeNotesQuery} from './notes-query-executor';
 import {executeNotesOrganize,notesOrganizeShellHost} from './notes-organize-executor';
 import {notesRecorderControl} from './notes-recorder-control';
+import {cachedDevicePreferences,readDevicePreferences} from '../browser/device-preferences';
+import {homeOpenRequest,namedNoteOpenRequest,openAfterNoteCreate,referencedNoteOpenRequest,sendsSavedEmail} from '../ui/device-actions/owner-request';
 import {canonicalNotesListContextAllowed} from '../../../../.eliza/client-features/packages/contracts/src/device-reviews.ts';
 import {isNotesOrganizeOperation,notesOrganizeContextAllowed} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-organize-contract.ts';
 import {readNotesFolders,editNotesFolders} from '../runtime/notes-folders';
@@ -350,6 +353,23 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     signal.throwIfAborted();
     return found&&{names:found.contacts.map(contact=>contactChoiceName(contact.displayName)),more:found.more};
   });
+  const smsRecipientMatches=async(query:string,signal:AbortSignal)=>{
+    if(!aospImage)return [];
+    const client=createAospTelephony(registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),true);
+    const matches=contactCallOptions(await client.searchContacts(query,CONTACT_CALL_LOOKUP_LIMIT),normalizePhoneNumber);
+    signal.throwIfAborted();
+    return matches;
+  };
+  setSmsReviewRecipient(async(query,signal)=>{
+    const matches=await smsRecipientMatches(query,signal);
+    return matches.length===1&&matches[0].name.toLowerCase()===query.trim().toLowerCase()?matches[0]:null;
+  });
+  setChooseSmsRecipient(async(query,body,signal)=>{
+    const options=await smsRecipientMatches(query,signal);
+    if(!options.length)return 'not-found';
+    const choice=await askTelephonyReview({kind:'message',options,body,draftOnly:false},signal);
+    return choice===null?null:options[choice]??null;
+  });
   let activeShell:Shell|null=null,notesRecovery:AbortController|null=null;
   /** Visible modal panels that are not <dialog>s (digest panel, inline reviews), topmost last. */
   function modalPanels(){
@@ -472,7 +492,25 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
   }
   function proposalCard(proposal:import('../runtime/alpha-client').ActionProposal){
     const home=proposal.reviewDestination==='home',notes=proposal.reviewDestination==='notes',calendar=proposal.reviewDestination==='calendar';
-    return {type:'generic',icon:'check',title:home?'Review Notes on Home':notes?'Review note':calendar?'Choose event in Calendar':proposal.title,sub:home?'Open Home to choose and review a note. Nothing is shared yet.':notes?'Open the matching note to review this request. Nothing changes until you approve it.':calendar?'Choose the matching event, then review what to share. Nothing changes yet.':proposal.description,proposalId:proposal.id,privateNotesRead:proposal.privateNotesRead,reviewDestination:proposal.reviewDestination,reviewNoteTarget:proposal.reviewNoteTarget,expiresAt:proposal.expiresAt};
+    const approvalLabel=proposal.smsReview==='addressed-draft'||proposal.smsReview==='send'?'Send':
+      proposal.smsReview==='draft'||proposal.smsReview==='recipient'?'Choose recipient':proposal.reviewDestination?'Open':'Approve';
+    return {type:'generic',icon:'check',title:home?'Review Notes on Home':notes?'Review note':calendar?'Choose event in Calendar':proposal.title,sub:home?'Open Home to choose and review a note. Nothing is shared yet.':notes?'Open the matching note to review this request. Nothing changes until you approve it.':calendar?'Choose the matching event, then review what to share. Nothing changes yet.':proposal.description,approvalLabel,smsReview:proposal.smsReview,smsPreview:proposal.smsPreview,proposalId:proposal.id,privateNotesRead:proposal.privateNotesRead,reviewDestination:proposal.reviewDestination,reviewNoteTarget:proposal.reviewNoteTarget,expiresAt:proposal.expiresAt};
+  }
+  const sendThisText=/^(?:yes[,]?\s+)?send this (?:text|message|draft)[.!]?$/i;
+  const spokenConfirmationLead=/^(?:(?:yes|yeah|yep|okay|ok|sure|hmm+|um+|uh)[,.!]?\s+)*(?:go ahead and )?/iu;
+  const sendReviewedText=/^(?:(?:i think )?i (?:want to|wanna|would like to|want you to) |i['’]d like to |let['’]s )?send (?:it|this(?: (?:text|message|draft))?|the (?:text|message|draft))(?:\s+to\s+(.+?))?[.!?]?$/iu;
+  function visibleSmsReview(proposalId:string):boolean {
+    if(document.hidden||document.querySelector('dialog[open]'))return false;
+    const rows=Array.from(document.querySelectorAll<HTMLElement>('[data-alpha-voice-send-review]'))
+      .filter(row=>row.dataset.alphaVoiceSendReview===proposalId&&!row.closest('[inert],[hidden],[aria-hidden="true"]'));
+    return rows.some(row=>{
+      const clip=row.closest('[data-alpha-transcript]')?.getBoundingClientRect();
+      const review=row.getBoundingClientRect();
+      if(!clip||review.height<=0||review.top<Math.max(clip.top,0)-1||
+        review.bottom>Math.min(clip.bottom,window.innerHeight)+1||getComputedStyle(row).visibility!=='visible')return false;
+      const hit=document.elementFromPoint(review.left+review.width/2,review.top+review.height/2);
+      return !!hit&&row.contains(hit);
+    });
   }
   /**
    * AP-16 D8/AC-26: on a Phone, Messages or Contacts screen a pending action is one proposal card
@@ -490,7 +528,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const call=proposal.title==='Place call',target=callTargetOf(proposal);
     // AC-20: name and number; the phone's contacts fill in what the proposal leaves out (sayProposal).
     const text=target?callCardText(target,null,displayNumber):{title:call?'Call contact':proposal.title,detail:proposal.description};
-    return {...review,id:proposal.id,kind:call?'call':'other',title:text.title,detail:text.detail,sub:text.detail,button:call?'Call':'Approve',acts:true,act:{mod:'alpha',fn:'execute'},args:{proposalId:proposal.id}};
+    return {...review,id:proposal.id,kind:call?'call':'other',title:text.title,detail:text.detail,sub:text.detail,button:call?'Call':review.approvalLabel,acts:true,act:{mod:'alpha',fn:'execute'},args:{proposalId:proposal.id}};
   }
   /** A card update that also moves a proposal card's shown detail and state. */
   function cardWith(card:Shell,patch:Shell){
@@ -592,7 +630,10 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         });
       },Math.min(2147483647,Math.max(0,Math.ceil(nearest-Date.now())+1)));
     };
-    void connectionController.pendingActions(currentContext,controller.signal).then(proposals=>{
+    void readDevicePreferences(controller.signal).then(async prefs=>{
+      const proposals=await connectionController.pendingActions(currentContext,controller.signal);
+      return prefs.askBeforeAgentActions?proposals:proposals.filter(proposal=>proposal.smsReview);
+    }).then(proposals=>{
       if(!current())return;
       for(const proposal of proposals)if(proposal.readReply)retainReadReply(shell,proposal);
       shell.setState((previous:Shell)=>{
@@ -600,9 +641,18 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         const pending=new Map(proposals.map(proposal=>[proposal.id,proposal]));
         const msgs=previous.msgs.map((message:Shell)=>{
           const card=message.card;
-          if(!card?.proposalId||card.done||card.type==='proposal'&&card.state!=='open')return message;
+          if(!card?.proposalId||card.done||card.type==='proposal'&&card.state!=='open'||
+            cachedDevicePreferences()?.askBeforeAgentActions===false&&!card.smsReview)return message;
           const proposal=pending.get(card.proposalId);
           if(proposal){
+            const voiceReview=shell.pendingVoiceSmsReview;
+            // The resident also lists the current turn's proposal as pending. Keep the live
+            // review when the refresh returns the exact same recipient, text and binding.
+            if(voiceReview?.id===proposal.id&&!card.recovered&&!card.reviewUnavailable&&
+              voiceReview.revision===currentContext.revision&&proposal.contextRevision===voiceReview.revision&&
+              proposal.description===voiceReview.details&&card.sub===voiceReview.details&&
+              proposal.smsReview===card.smsReview&&proposal.expiresAt===voiceReview.expiresAt&&
+              proposal.expiresAt>Date.now())return message;
             if(card.recovered&&!card.reviewUnavailable&&card.expiresAt===proposal.expiresAt&&card.privateNotesRead===proposal.privateNotesRead&&card.reviewDestination===proposal.reviewDestination&&JSON.stringify(card.reviewNoteTarget)===JSON.stringify(proposal.reviewNoteTarget)&&JSON.stringify(card.proposalSession)===JSON.stringify(connection.session))return message;
             return {...message,card:{...card,...(card.type==='proposal'?commsProposal(proposal):proposalCard(proposal)),recovered:true,proposalSession:connection.session,reviewUnavailable:false}};
           }
@@ -657,6 +707,84 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     if(view==='home')shell.goHome(chat);else shell.openView(view,undefined,chat);
     return true;
   }
+  type NoteRequest = {title:string}|{id:string};
+  const recentNotes=new WeakMap<Shell,{conversationId:string;session:VerifiedSession;messageId:string;id:string}>();
+  function recentNote(shell:Shell,text:string,conversationId:string|undefined,session:VerifiedSession|null|undefined): NoteRequest|undefined {
+    const note=recentNotes.get(shell);
+    if(note&&note.conversationId===conversationId&&JSON.stringify(note.session)===JSON.stringify(session)&&
+      shell.S().msgs?.findLast((message:Shell)=>message.from==='user')?.id===note.messageId&&referencedNoteOpenRequest(text))return {id:note.id};
+  }
+  async function resolveNote(shell:Shell,request:NoteRequest,current:()=>void):Promise<
+    {notes:CanonicalNotesUi;id:string;title:string}|{message:string}
+  > {
+    current();
+    syncCanonicalNotes(shell);
+    const notes:CanonicalNotesUi|null=shell.canonicalNotesUi;
+    const unavailable={message:'I couldn’t read your saved notes. Try again from Notes.'};
+    if(shell.notesSourceMode!=='canonical'||!notes?.current)return unavailable;
+    // The visible Notes collection already owns its current records and receives invalidations.
+    // Refresh offscreen or on first load. A second foreground read can briefly retire the list's context.
+    if('id' in request||shell.S().view!=='notes'||notes.controller.revision===null){
+      try{await notes.refresh();}catch{return unavailable;}
+    }
+    current();
+    if(shell.canonicalNotesUi!==notes||!notes.current||notes.pending)return unavailable;
+    const saved=notes.notes();
+    let note:typeof saved[number]|undefined;
+    if('id' in request){
+      note=saved.find(candidate=>candidate.id===request.id);
+      if(!note)return {message:'I couldn’t find that saved note.'};
+    }else{
+      const {title}=request;
+      const titleKey=(value:string)=>value.normalize('NFC').trim().replace(/\s+/g,' ').toLowerCase();
+      const key=titleKey(title),exact=saved.filter(note=>titleKey(note.title)===key);
+      const words=(value:string)=>titleKey(value).match(/[\p{L}\p{N}]+/gu)??[];
+      const query=words(title);
+      // Shorthand must match complete title words in order and identify one saved note.
+      const matches=exact.length||!query.length?exact:saved.filter(note=>{
+        let next=0;
+        for(const word of words(note.title))if(word===query[next])next++;
+        return next===query.length;
+      });
+      if(matches.length>1)return {message:exact.length?
+        `More than one note is titled “${title}”. Open Notes and choose the one you want.`:
+        `More than one note matches “${title}”. Give me the full title.`};
+      note=matches[0];
+      if(!note)return {message:`I couldn’t find a note titled “${title}”.`};
+    }
+    if(notes.dirty&&notes.open!==note.id)return {message:'Finish the unsaved edits in your note before opening another one.'};
+    return {notes,id:note.id,title:note.title};
+  }
+  function openNamedNote(shell:Shell,target:{notes:CanonicalNotesUi;id:string},chat?:string,onCommitted?:(value:import('../runtime/alpha-client').ContextEnvelope)=>void):Promise<boolean>{
+    if(shell.canonicalNotesUi!==target.notes||!target.notes.openSaved(target.id))return Promise.resolve(false);
+    if(!openInternalView(shell,'notes',chat))return Promise.resolve(false);
+    return new Promise((resolve,reject)=>shell.setState({},()=>{
+      try{
+        context(shell);
+        const observed=alphaClient.getState().context;
+        const opened=shell.live&&!document.hidden&&!observed.sensitive&&observed.view==='notes'
+          &&shell.canonicalNotesUi===target.notes&&target.notes.open===target.id;
+        if(opened)onCommitted?.(observed);
+        resolve(opened);
+      }catch(error){reject(error);}
+    }));
+  }
+  async function openVoiceDestination(shell:Shell,target:'home'|{notes:CanonicalNotesUi;id:string},navigation:import('../runtime/alpha-client').VoiceNavigationContinuation,current:()=>void,accept:(value:ContextEnvelope)=>void):Promise<boolean>{
+    let opened=false;
+    try{
+      opened=target==='home'
+        ?await navigation.apply('home',current,(chat,onCommitted)=>commitNavigation(shell,'home',()=>openInternalView(shell,'home',chat),onCommitted))
+        :await navigation.apply('notes',current,(chat,onCommitted)=>openNamedNote(shell,target,chat,onCommitted),{kind:'canonical-note',id:target.id});
+      return opened;
+    }finally{
+      const next=navigation.finish(opened);
+      if(next)accept(next);
+    }
+  }
+  function noteCreationReply(reused:boolean,title?:string):string {
+    if(title!==undefined)return `${reused?'Opened':'Saved and opened'} “${title}” in Notes.`;
+    return reused?'That note is already saved. I couldn’t open it.':'I saved the note, but couldn’t open it.';
+  }
   /** Opens Camera for a photo the agent proposed without showing Camera: the same navigation as the Camera app icon. */
   function openRequestedCamera(shell:Shell):Promise<boolean>{
     return new Promise<boolean>((resolve,reject)=>{
@@ -665,17 +793,32 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       shell.setState({},()=>{try{context(shell);resolve(shell.live&&shell.S().view==='camera'&&!alphaClient.getState().context.sensitive);}catch(error){reject(error);}});
     });
   }
+  function commitNavigation(shell:Shell,view:string,show:()=>boolean,onCommitted?:(value:ContextEnvelope)=>void):Promise<boolean>{
+    if(!show())return Promise.resolve(false);
+    return new Promise((resolve,reject)=>shell.setState({},()=>{
+      try{
+        context(shell);
+        const actual=alphaClient.getState().context;
+        const opened=shell.live&&!document.hidden&&!actual.sensitive&&actual.view===view;
+        if(opened)onCommitted?.(actual);
+        resolve(opened);
+      }catch(error){reject(error);}
+    }));
+  }
   async function deliverChatNavigation(shell:Shell,navigation:ReturnType<typeof connectionController.captureViewNavigation>,results:readonly unknown[]|undefined,current?:()=>void,continuation?:import('../runtime/alpha-client').VoiceNavigationContinuation){
     if(!navigation||!results?.length)return false;
     const attempt={...navigation.attempt,current:()=>{navigation.attempt.current();current?.();}};
-    const delivered=await navigation.client.deliver(results,attempt,(view,check)=>{
-      const commit=(chat?:string,onCommitted?:(value:import('../runtime/alpha-client').ContextEnvelope)=>void)=>new Promise<boolean>((resolve,reject)=>{
-        try{check();if(!openInternalView(shell,view,chat)){resolve(false);return;}shell.setState({},()=>{try{context(shell);const switched=shell.live&&(shell.S().view||'home')===view;if(switched)onCommitted?.(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}
-      });
+    const delivered=await navigation.client.deliver(results,attempt,async(view,check,noteId)=>{
+      const target=noteId?await resolveNote(shell,{id:noteId},check):undefined;
+      if(target&&'message' in target)return false;
+      const commit=(chat?:string,onCommitted?:(value:ContextEnvelope)=>void)=>{
+        check();
+        return target?openNamedNote(shell,target,chat,onCommitted):commitNavigation(shell,view,()=>openInternalView(shell,view,chat),onCommitted);
+      };
       // Keep an open conversation at its current detent during typed navigation.
       // Read at delivery time so closing it while a reply is pending stays respected.
       const chat=shell.S().chat;
-      return continuation?continuation.apply(view,check,commit):commit(chat==='sheet'||chat==='full'?chat:undefined);
+      return continuation?continuation.apply(view,check,commit,target?{kind:'canonical-note',id:target.id}:undefined):commit(chat==='sheet'||chat==='full'?chat:undefined);
     });
     if(delivered.status==='unavailable'&&shell.live){
       // A page inside an app this phone has: say where it is. Nothing was opened or acknowledged.
@@ -878,7 +1021,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     this.dialogBackObserver = new MutationObserver(() => updateBackAvailability(this));
     this.dialogBackObserver.observe(document.body, {subtree:true, childList:true, attributes:true, attributeFilter:['open','inert']});
     // A refused send puts its text back with no line under the composer (owner, 2026-11-03).
-    this.composerDraft=new AssistantDraftController(assistantDraftStore,()=>String(this.S().draft||''),(text,expected,current)=>new Promise<void>(resolve=>{if(!this.live||current&&!current()){resolve();return;}this.setState((previous:Shell)=>{if(current&&!current()||expected!==undefined&&String(previous.draft||'')!==expected)return null;if(this.startupDraft!==null)this.startupDraft=undefined;this.reviewedSourceDraft=null;return {draft:text};},resolve);}),()=>{if(this.live)this.setState({});},{notSent:''});
+    this.composerDraft=new AssistantDraftController(assistantDraftStore,()=>String(this.S().draft||''),(text,expected,current)=>new Promise<void>(resolve=>{if(!this.live||current&&!current()){resolve();return;}this.setState((previous:Shell)=>{if(current&&!current()||expected!==undefined&&String(previous.draft||'')!==expected)return null;if(this.startupDraft!==null)this.startupDraft=undefined;return {draft:text};},resolve);}),()=>{if(this.live)this.setState({});},{notSent:''});
     this.refreshDraftBinding=()=>{this.draftBindingAbort?.abort();if(residentAlwaysPresent&&!connectionController.getSnapshot().session){this.draftBindingTask=Promise.resolve();return;}const controller=this.draftBindingAbort=new AbortController();this.draftBindingTask=connectionController.assistantDraftBinding(controller.signal).then(async key=>{if(!this.live||controller.signal.aborted)return;const review=await firstSendReview(this,key,controller.signal);if(!this.live||controller.signal.aborted)return;await this.composerDraft.open(review.open??key);if(review.moved&&this.composerDraft.binding===key)settleFirstSendSlot(this,review.moved,key,String(this.S().draft||''),()=>this.live&&this.composerDraft.binding===key);}).catch(()=>{if(this.live&&!controller.signal.aborted)this.composerDraft.unavailable();});};
     this.refreshDraftBinding();
     const initialConnection = connectionController.getSnapshot();
@@ -908,7 +1051,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         this.startupDraft=null;
         cancelMessageContext(this);
         this.cancelVoiceScrollFollow();
-        this.closeSummaryReview?.();this.chatImagePreview=null;this.cameraAttachment=null;this.reviewedSourceDraft=null;this.transcriptAttachment=null;this.mailAttachment=null;this.fileAttachments=[];
+        this.closeSummaryReview?.();this.chatImagePreview=null;this.cameraAttachment=null;this.transcriptAttachment=null;this.mailAttachment=null;this.fileAttachments=[];
         clearMapsSelection();
         this.connectionSession = session;
         alphaClient.disconnect();
@@ -919,7 +1062,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       const history = connectionController.getSnapshot().history;
       if (history && history.sessionId === session && this.restoredHistory !== history) {
-        if(!history.automatic){this.ownerConversationChoices=(this.ownerConversationChoices||0)+1;this.draftRecoveryAbort?.abort();this.draftBindingAbort?.abort();this.composerDraft.retire(false);draftBindingAfterPaint=true;cancelMessageContext(this);this.reviewedSourceDraft=null;this.transcriptAttachment=null;this.cameraAttachment=null;this.mailAttachment=null;this.fileAttachments=[];}
+        if(!history.automatic){this.ownerConversationChoices=(this.ownerConversationChoices||0)+1;this.draftRecoveryAbort?.abort();this.draftBindingAbort?.abort();this.composerDraft.retire(false);draftBindingAfterPaint=true;cancelMessageContext(this);this.transcriptAttachment=null;this.cameraAttachment=null;this.mailAttachment=null;this.fileAttachments=[];}
         this.restoredHistory = history;
         const attachmentSession=connectionController.getSnapshot().session;
         if(attachmentSession)void restoreAttachments(history.messages,attachmentSession,history.conversationId).then(messages=>{
@@ -1012,10 +1155,10 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if (connection.session) {
         alphaClient.attachVerifiedTransport({
           session: connection.session,
-          send: ({ text, context, requestId, signal, onText, replyTo, onReplyReady, channelType, expectedConversationId,voiceTurnSignal,images,workflowStep }) => trackDispatch(this,()=>connectionController.send(text, context, requestId, signal, onText,replyTo,onReplyReady,channelType,expectedConversationId,voiceTurnSignal,images,workflowStep)),
+          send: ({ text, context, requestId, signal, onText, replyTo, onReplyReady, channelType, expectedConversationId,voiceTurnSignal,images,workflowStep,projectRequestedView }) => trackDispatch(this,()=>connectionController.send(text, context, requestId, signal, onText,replyTo,onReplyReady,channelType,expectedConversationId,voiceTurnSignal,images,workflowStep,projectRequestedView)),
           // Remote text is not authority to execute device actions. This path
           // accepts chat only until the server supports verified proposals.
-          execute: ({ proposal, context, signal }) => connectionController.execute(proposal, context, signal),
+          execute: ({ proposal, context, signal, approval }) => connectionController.execute(proposal, context, signal, approval),
         }, connection.kind === 'local' ? { developmentOrigin: connection.session.origin } : {});
         return;
       }
@@ -1158,6 +1301,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         const viewStep=(view:string,step:(detent?:string)=>void|Promise<unknown>)=>()=>alphaClient.afterRequestSettles({view,current:stepCurrent,show:step});
         const ports:TelephonyPorts={
           current,ask:askTelephonyReview,normalize:normalizePhoneNumber,
+          reviewedSmsRecipient:(journalIdentity as {smsRecipient?:ContactMatch}|undefined)?.smsRecipient,
+          directContactDelete:(journalIdentity as {directContactDelete?:true}|undefined)?.directContactDelete,
           searchContacts:(query,limit)=>client.searchContacts(query,limit),
           // Android's exact number matching (AlphaTelephonyPlugin.contactForNumber), so a new contact's
           // number already saved under another name is shown before it is added again.
@@ -1471,7 +1616,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       if (operation.type === 'open_view') {
         // Navigation changes the view epoch; journal completion still runs after it.
-        if(!openInternalView(this,operation.view))return {status:'failed',summary:'This view is unavailable.'};
+        if(!openInternalView(this,operation.view,this.S().chat))return {status:'failed',summary:'This view is unavailable.'};
         return { status: 'succeeded', summary: presentOpenView(operation.view).appliedSummary };
       }
       const browserControl=isBrowserControl(operation);
@@ -1689,8 +1834,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       this.setState((previous:Shell)=>({chat:'sheet',shade:false,draft:previous.draft?.trim()?previous.draft:'Summarize this for me'}));
     };
     api.attachSelectedFile=(selection: SelectedChatFile)=>pickChatAttachments(this, selection);
-    api.composeContentQuestion=(draft:string,source?:Source)=>{
-      this.reviewedSourceDraft={draft,source:sourceOf(source)};
+    api.composeContentQuestion=(draft:string)=>{
       context(this);this.setState({chat:'sheet',shade:false,draft});
     };
     api.assist = (notice: string) => {
@@ -1735,8 +1879,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     this.chatAttachmentPicker??=new ChatAttachmentPicker(()=>this.live&&this.setState({}));
     return this.chatAttachmentPicker.choose(signal,maximum,current,returnFocus);
   };
-  const selectedFiles=new WeakMap<ChatFile,{selection:SelectedChatFile; thumbnail?:string}>();
-  async function pickChatAttachments(shell:Shell, selection?:SelectedChatFile){
+  async function pickChatAttachments(shell:Shell, selection?:SelectedChatFile):Promise<boolean>{
     const binding=attachmentBinding(),view=shell.S().view;
     const existing:ChatFile[]=shell.fileAttachments??=[];
     const camera=shell.cameraAttachment;
@@ -1749,14 +1892,10 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         :shell.messageEditTarget?'Finish or cancel the message edit first.'
         :shell.S().typing?'Wait for Alpha to finish replying.'
         :'Can’t attach the file right now. Try again in a moment.');
-      return;
-    }
-    if (selection && shell.fileAttachmentScope===binding && existing.some(file=>selectedFiles.get(file)?.selection.current())) {
-      shell.setState({chat:'sheet',shade:false});
-      return;
+      return false;
     }
     const maximum=MAX_CHAT_UPLOAD_ATTACHMENTS-existing.length-(camera?1:0);
-    if(maximum<1){shell.toast('Remove an attachment before adding another.');return;}
+    if(maximum<1){shell.toast('Remove an attachment before adding another.');return false;}
     const abort=shell.chatAttachmentAbort=new AbortController();
     const current=()=>!abort.signal.aborted&&(!selection||selection.current())&&shell.live&&!document.hidden&&shell.S().view===view&&
       attachmentBinding()===binding&&shell.fileAttachments===existing&&shell.cameraAttachment===camera&&
@@ -1765,26 +1904,27 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     for(const event of ['pagehide','launcher-home','alpha:device-state'])window.addEventListener(event,retire,{signal:abort.signal});
     const unsubscribe=connectionController.subscribe(()=>{if(!current())abort.abort();});
     try{
+      if(!current())return false;
       const selected=selection ? await selection.read(current) : undefined;
-      if (!current() || (selection && !selected)) return;
+      if (!current() || (selection && !selected)) return false;
       const files:File[]=selected ? [selected] : await shell.chooseLocalAttachments(abort.signal,maximum,current);
-      if(!current()||!files.length)return;
+      if(!current()||!files.length)return false;
       const encoded=await encodeChatAttachments(files);
-      if(!current())return;
-      if(!attachmentBatchFits([...existing,...encoded],camera?.image)){shell.toast('Choose fewer or smaller files.');return;}
+      if(!current())return false;
+      const additions = (selection ? encoded.filter(file=>!existing.some(item=>
+        file.name===item.name&&file.mimeType===item.mimeType&&file.data===item.data)) : encoded)
+        .map(file=>({...file,id:crypto.randomUUID()}));
+      if(!attachmentBatchFits([...existing,...additions],camera?.image)){shell.toast('Choose fewer or smaller files.');return false;}
+      if(selection?.commit&&(!await selection.commit(current)||!current()))return false;
       shell.fileAttachmentScope=binding;
-      const additions = encoded.map(file=>({...file,id:crypto.randomUUID()}));
-      if (selection && selected) {
-        const file=additions[0];
-        const thumbnail=CHAT_IMAGE_MIME_TYPE_SET.has(file.mimeType)?`data:${file.mimeType};base64,${file.data}`:undefined;
-        selectedFiles.set(file, {selection,thumbnail});
-      }
       shell.fileAttachments=[...existing,...additions];
       if (selected) {
-        shell.setState((previous:Shell)=>({chat:'sheet',shade:false,draft:previous.draft?.trim()?previous.draft:'Explain this file'}));
+        shell.setState((previous:Shell)=>({chat:'sheet',shade:false,draft:previous.draft?.trim()?previous.draft:selection?.prompt??'Explain this file'}));
       } else if(shell.S().chat!=='full')shell.setState({chat:'sheet'});else shell.setState({});
+      return true;
     }catch(error){
       if(current())shell.toast(errorNotice(error,'The attachment could not open.'),ERROR_TOAST);
+      return false;
     }finally{
       abort.abort();unsubscribe();
       if(shell.chatAttachmentAbort===abort){shell.chatAttachmentAbort=undefined;if(shell.live)shell.setState({});}
@@ -1817,6 +1957,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
   }
   p.renderVals = function () {
     const out = originalVals.call(this);
+    if(this.S().view!=='workflows'&&cachedDevicePreferences()?.askBeforeAgentActions===false&&out.msgs)
+      out.msgs=out.msgs.filter((row:Shell)=>!row.c?.proposalId||row.c.smsReview||row.c.done||row.c.state==='done'||row.c.state==='replaced');
     const composeTarget=this.messageEditTarget||this.messageReplyTarget;
     this.chatImageModal??=createImagePreview(()=>{this.chatImagePreview=null;this.setState({});});
     out.chatImagePreview=out.isOn&&!this.S().secure?this.chatImagePreview||'':'';
@@ -1888,22 +2030,11 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     out.attachFilesDisabled=!!(this.S().typing||this.draftSendPending||this.composerDraft?.holding||this.messageEditTarget);
     out.hasPendingFiles=!!this.fileAttachments?.length;
     out.pendingFiles=(this.fileAttachments??[]).map((file:ChatFile)=>{
-      const item=selectedFiles.get(file);
+      const thumbnail=CHAT_IMAGE_MIME_TYPE_SET.has(file.mimeType)?`data:${file.mimeType};base64,${file.data}`:undefined;
       return {
-      id:file.id,name:file.name,reviewable:!!item,plain:!item,thumbnail:item?.thumbnail,document:!item?.thumbnail,
-      editLabel:'Edit excerpt from '+file.name,edit:()=>{
-        const binding=attachmentBinding(), draft=this.S().draft;
-        const current=()=>this.live && !document.hidden && this.fileAttachmentScope===binding &&
-          attachmentBinding()===binding && this.fileAttachments?.includes(file) && this.S().draft===draft &&
-          !this.S().typing && !this.draftSendPending && !this.composerDraft?.holding;
-        if(!item || !current())return;
-        if(!item.selection.current()){this.toast('Reopen the file to edit its excerpt.');return;}
-        item.selection.edit((text,source)=>{
-          if(!current())return;
-          this.fileAttachments=this.fileAttachments.filter((entry:ChatFile)=>entry!==file);
-          this.api(this.S().view).composeContentQuestion(text,source);
-        },current,draft==='Explain this file'?undefined:draft);
-      },
+      id:file.id,name:file.name,previewable:!!thumbnail,thumbnail,document:!thumbnail,
+      previewLabel:'Preview attached '+file.name,
+      preview:()=>{if(thumbnail&&this.fileAttachments?.includes(file)){this.chatImagePreview=thumbnail;this.setState({});}},
       removeLabel:'Remove '+file.name,disabled:!!(this.S().typing||this.draftSendPending||this.composerDraft?.holding),remove:()=>{
         if(this.S().typing||this.draftSendPending||this.composerDraft?.holding)return;
         this.fileAttachments=(this.fileAttachments??[]).filter((item:ChatFile)=>item!==file);
@@ -1927,7 +2058,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       // title repeated as the detail and no second copy printed above it.
       if(c.systemNotice&&m.cGeneric)return {...m,cGeneric:false,cNotice:true,noticeSub:c.sub&&c.sub!==c.title?c.sub:'',hasCalendarText:m.hasCalendarText&&m.displayText!==c.sub&&m.displayText!==c.title};
       const waitingForReply=!!c.recovered&&this.S().typing;
-      if(m.cProposal&&waitingForReply)return {...m,proposalDisabled:true};
+      const voiceSendId=(c.smsReview==='send'||c.smsReview==='addressed-draft')&&!c.done&&!c.recovered&&!c.reviewUnavailable&&this.pendingVoiceSmsReview?.id===c.proposalId&&this.voiceConversationActive?.()?c.proposalId:'';
+      const smsPreview=c.proposalId&&!c.done&&!c.reviewUnavailable?c.smsPreview:undefined;
+      if(m.cProposal)return {...m,voiceSendId,proposalSmsPreview:smsPreview,...(waitingForReply?{proposalDisabled:true}:{})};
       if(!c.proposalId||c.done||c.reviewUnavailable||!m.cGeneric)return m;
       const message=live.find(item=>item.card===c);if(!message)return m;
       // Only the card being approved or declined shows progress; the others stay readable but wait.
@@ -1936,7 +2069,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       const held=!proposalCanAct(c,this.emergencyLive?.()===true);
       // A card that only leads to the screen where the choice is made says Open, not Approve.
       return {...m,hasCalendarText:m.hasCalendarText&&m.displayText!==c.sub,cGeneric:false,cDigest:true,actionReviewClass:'alpha-action-review',cameraReview:c.title===CAMERA_REVIEW_TITLE,rows:[
-        {ini:'',who:approving?'Working…':c.title,text:held?'Not during an emergency call.':typeof c.sub==='string'&&c.sub.startsWith(c.title+'\n')?c.sub.slice(c.title.length+1):c.sub,label:approving||held?'':c.reviewDestination?'Open':'Approve',expiry:approving||held?'':approvalExpiryText(c.expiresAt),icon:c.reviewDestination?ic.right:ic.check,keepComposerFocus,disabled:busy||held||waitingForReply,open:()=>{if(!busy&&!held)void this.cardAct(message);}},
+        {ini:'',who:approving?'Working…':c.title,smsPreview:held?undefined:smsPreview,smsReviewClass:smsPreview&&!held?'sms-review-row':'',text:held?'Not during an emergency call.':smsPreview?'':typeof c.sub==='string'&&c.sub.startsWith(c.title+'\n')?c.sub.slice(c.title.length+1):c.sub,label:approving||held?'':c.approvalLabel??(c.reviewDestination?'Open':'Approve'),expiry:approving||held?'':approvalExpiryText(c.expiresAt),voiceSendId:busy||held||waitingForReply?'':voiceSendId,reviewTextStyle:c.smsReview?'white-space:pre-wrap;overflow-wrap:anywhere;':'',icon:c.reviewDestination?ic.right:ic.check,keepComposerFocus,disabled:busy||held||waitingForReply,open:()=>{if(!busy&&!held)void this.cardAct(message);}},
         {ini:'',who:declining?'Declining…':'',text:'Keep things as they are.',label:declining?'':'Decline',ariaLabel:declining?'Declining…':'Decline Keep things as they are.',secondaryAction:true,icon:ic.x,keepComposerFocus,disabled:busy,open:()=>{if(!busy)void this.declineCard(message);}},
       ]};
     });
@@ -2060,20 +2193,135 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         if(!delivered)throw Error('The voice screen change could not be confirmed.');
         return true;
       }
-      delivered=await input.navigation.apply(target,current,(chat,onCommitted)=>new Promise<boolean>((resolve,reject)=>{try{current();if(!openInternalView(this,target,chat)){resolve(false);return;}this.setState({},()=>{try{current();context(this);const switched=(this.S().view||'home')===target&&!alphaClient.getState().context.sensitive;if(switched)onCommitted(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}}));return delivered;}finally{input.navigation.finish(delivered);}
+      delivered=await input.navigation.apply(target,current,(chat,onCommitted)=>{
+        current();
+        return commitNavigation(this,target,()=>openInternalView(this,target,chat),onCommitted);
+      });
+      return delivered;
+    }finally{input.navigation.finish(delivered);}
   };
-  p.sendVoiceTurn = async function(input:{text:string;turnId:string;voiceTurnSignal:import('../runtime/alpha-client').VoiceTurnSignal;signal:AbortSignal;binding:import('../runtime/alpha-client').VoiceConversationBinding;context:import('../runtime/alpha-client').ContextEnvelope;assertCurrent:()=>void;onProgress?:(value:BatchProgressCue)=>void;onReplyStarted?:()=>void;onText?:(text:string,frame:import('../runtime/voice-assistant').AssistantTextFrame)=>void;supersedes?:string;navigation?:import('../runtime/alpha-client').VoiceNavigationContinuation}){
+  p.sendVoiceTurn = async function(input:{text:string;turnId:string;voiceTurnSignal:import('../runtime/alpha-client').VoiceTurnSignal;signal:AbortSignal;approvalSignal?:AbortSignal;talkGeneration?:number;binding:import('../runtime/alpha-client').VoiceConversationBinding;context:import('../runtime/alpha-client').ContextEnvelope;assertCurrent:()=>void;onProgress?:(value:BatchProgressCue)=>void;onReplyStarted?:()=>void;onText?:(text:string,frame:import('../runtime/voice-assistant').AssistantTextFrame)=>void;supersedes?:string;navigation?:import('../runtime/alpha-client').VoiceNavigationContinuation}){
     const {text,turnId,signal,binding}=input;let acceptedContext=input.context;
     const belongs=()=>{try{signal.throwIfAborted();input.assertCurrent();return this.live&&!document.hidden&&connectionController.voiceConversationCurrent(binding)&&alphaClient.continuesContext(acceptedContext);}catch{return false;}};
     const current=()=>{signal.throwIfAborted();input.assertCurrent();context(this);if(!belongs())throw Error('The voice conversation changed.');};
     current();if(alphaClient.getState().pending||this.S().typing||this.draftSendPending)throw Error('Wait for the current conversation turn.');
+    const reviewed=this.pendingVoiceSmsReview;
+    this.pendingVoiceSmsReview=undefined;
+    // The immediate next accepted microphone turn can confirm exactly one displayed Send card.
+    // Never send the confirmation to the model or reopen a consumed approval.
+    const spokenCommand=text.trim().replace(spokenConfirmationLead,'');
+    const approvalPhrase=reviewed?sendReviewedText.exec(spokenCommand):null;
+    if(sendThisText.test(spokenCommand)||approvalPhrase){
+      const message=reviewed&&input.approvalSignal&&reviewed.generation===input.talkGeneration&&
+        reviewed.conversationId===binding.conversationId&&reviewed.revision===input.context.revision&&
+        reviewed.expiresAt>Date.now()&&this.emergencyLive?.()!==true&&visibleSmsReview(reviewed.id)
+        ?this.S().msgs.find((m:Shell)=>m.card?.proposalId===reviewed.id&&(m.card.smsReview==='send'||m.card.smsReview==='addressed-draft')&&
+          m.card.sub===reviewed.details&&!m.card.done&&!m.card.recovered&&!m.card.reviewUnavailable&&
+          (m.card.type!=='proposal'||m.card.state==='open')):undefined;
+      input.approvalSignal?.throwIfAborted();
+      this.setState((previous:Shell)=>({msgs:[...previous.msgs,{id:turnId,from:'user',text}]}));
+      const namedRecipient=approvalPhrase?.[1],pendingId=message?.card?.proposalId;
+      if(namedRecipient&&(!pendingId||!connectionController.matchesSmsReviewRecipient(pendingId,namedRecipient))){
+        if(message)this.pendingVoiceSmsReview=reviewed;
+        const answer="That recipient doesn’t match the current text. Check the recipient shown before sending.";
+        const replyId=`voice-review:${turnId}`;
+        this.agentSay(answer,undefined,{id:replyId,deviceReceipt:true},belongs);
+        return {requestId:turnId,conversationId:binding.conversationId,userMessageId:turnId,assistantMessageId:replyId,text:answer,complete:true,localVoiceReply:true as const};
+      }
+      const receipt=message?await this.cardAct(message,input.approvalSignal,message.card.smsReview==='addressed-draft'?'send-draft':undefined):undefined;
+      current();
+      const answer=receipt?.summary??(message?'I couldn’t confirm the send. Check Messages before trying again.':'Give me the recipient and message you want to send.');
+      const replyId=receipt?`device-receipt:${receipt.proposalId}`:`voice-review:${turnId}`;
+      if(!receipt)this.agentSay(answer,undefined,{id:replyId,deviceReceipt:true},belongs);
+      return {requestId:turnId,conversationId:binding.conversationId,userMessageId:turnId,assistantMessageId:replyId,text:answer,complete:true,localVoiceReply:true as const};
+    }
+    if(sendsSavedEmail(text)){
+      this.draftSendPending=true;
+      let savedEmailReply:string|undefined;
+      try{savedEmailReply=await this.sendSavedAgentEmail?.(text,belongs);}
+      finally{this.draftSendPending=false;}
+      current();
+      if(savedEmailReply){
+        const replyId=`voice-email:${turnId}`;
+        this.setState((previous:Shell)=>({msgs:[...previous.msgs,{id:turnId,from:'user',text}]}));
+        this.agentSay(savedEmailReply,undefined,{id:replyId},belongs);
+        return {requestId:turnId,conversationId:binding.conversationId,userMessageId:turnId,assistantMessageId:replyId,text:savedEmailReply,complete:true,localVoiceReply:true as const};
+      }
+    }
+    const noteTitle=input.navigation?namedNoteOpenRequest(text):undefined;
+    const noteRequest=noteTitle?{title:noteTitle}:recentNote(this,text,binding.conversationId,binding.session);
+    const localRequest=homeOpenRequest(text)?'home':noteRequest;
+    if(localRequest&&input.navigation){
+      this.voiceSendTurnId=turnId;
+      try{
+        let answer:string;
+        const open=(target:Parameters<typeof openVoiceDestination>[1])=>openVoiceDestination(this,target,input.navigation!,current,next=>{acceptedContext=next;});
+        if(localRequest==='home'){
+          const opened=input.context.view==='home'||await open('home');
+          answer=opened?'You’re on Home.':'I couldn’t open Home.';
+        }else{
+          const target=await resolveNote(this,localRequest,current);
+          current();
+          if('message' in target)answer=target.message;
+          else{
+            const opened=await open(target);
+            answer=opened?`Opened “${target.title}” in Notes.`:'I couldn’t open that note. Try again from Notes.';
+            if(opened)recentNotes.set(this,{conversationId:binding.conversationId,session:binding.session,messageId:turnId,id:target.id});
+          }
+        }
+        current();
+        const replyId=`voice-view-open:${turnId}`;
+        this.setState((previous:Shell)=>({msgs:[...previous.msgs,{id:turnId,from:'user',text}]}));
+        this.agentSay(answer,undefined,{id:replyId},belongs);
+        return {requestId:turnId,conversationId:binding.conversationId,userMessageId:turnId,assistantMessageId:replyId,text:answer,complete:true,localVoiceReply:true as const};
+      }finally{
+        if(this.voiceSendTurnId===turnId)this.voiceSendTurnId=undefined;
+      }
+    }
     this.voiceSendTurnId=turnId;
     const navigation=connectionController.captureViewNavigation(input.context),userId=crypto.randomUUID(),streamId=crypto.randomUUID();let streamed=false;
     // A keypad, Contacts or Messages step this turn's request performs waits for the reply and the
     // turn's own navigation, then carries the conversation to its view (below). A step that cannot
     // follow the conversation (Browser) runs once the turn has ended, as before.
     const viewSteps=alphaClient.holdTurnViewSteps(),afterTurn:Array<()=>void>=[];
+    const continuation=input.navigation;
+    const revealCreatedNote=!!continuation&&openAfterNoteCreate(text);
+    const projectRequestedView=continuation?async(target:string,actionSignal:AbortSignal)=>{
+      const view=alphaViewKey(target);
+      const check=()=>{actionSignal.throwIfAborted();current();};
+      check();
+      if(!view)return false;
+      if(view===(this.S().view||'home'))return true;
+      let delivered=false;
+      const release=alphaClient.admitOwnViewChange(view);
+      try{
+        delivered=await continuation.apply(view,check,(chat,onCommitted)=>new Promise<boolean>((resolve,reject)=>{
+          try{
+            check();
+            if(!openInternalView(this,view,chat)){resolve(false);return;}
+            this.setState({},()=>{try{
+              check();
+              const next=alphaClient.getState().context;
+              if(next.view!==view||next.sensitive){resolve(false);return;}
+              onCommitted(next);resolve(true);
+            }catch(error){reject(error);}});
+          }catch(error){reject(error);}
+        }));
+      }finally{
+        release();
+        const next=continuation.finish(delivered);
+        if(next)acceptedContext=next;
+      }
+      return delivered&&acceptedContext.view===view;
+    }:undefined;
     try{
+      // An explicit question about the open text file sends it as a one-turn attachment.
+      // Ordinary voice turns continue to send only the opaque selected-object observation.
+      const asksAboutFile=/^(?:(?:hey alpha|alpha|please)[,\s]+)*(?:(?:can|could|would) you (?:please )?)?(?:(?:summari[sz]e|explain|read|translate|tell me about)|(?:what|which|who|where|when|why|how)\b[^.!?\n"“”]*\b(?:according to|based on|from|in|does|is|contains?))\s+(?:this|the (?:open|current|selected)) (?:file|document)\b/iu.test(text.trim());
+      const file:File|undefined=input.context.view==='files'&&asksAboutFile
+        ?await views.files.readOpenTextForVoice?.(input.context.selectedObject,current):undefined;
+      const images=file?await encodeChatAttachments([file]):undefined;
+      current();
       // A turn sent at a pause and taken back unheard when the user kept speaking: its local user
       // message and streamed draft leave the conversation view, and this turn carries the joined text.
       const replaced=input.supersedes&&this.voiceTurnMessages?.turnId===input.supersedes?this.voiceTurnMessages.ids:[];
@@ -2084,15 +2332,15 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       const replyStarted=(event:Event)=>{const value=(event as CustomEvent<BatchProgressCue>).detail;if(belongs()&&value.turnId===turnId&&value.conversationId===binding.conversationId&&value.ownerId===binding.session.ownerId)input.onReplyStarted?.();};
       batchVoiceProgressEvents.addEventListener('progress',progress);
       batchVoiceReplyEvents.addEventListener('reply',replyStarted);
-      let reply;
+      let reply:AgentReply;
       // Only confirmed text reaches the voice session's early speech. Provisional text (a Stage-1
       // draft or action status) is shown but never spoken, and after it this turn's confirmed reply
       // decides what is spoken.
       let provisionalSeen=false;
       try{reply=await alphaClient.send(text,(value,frame)=>{current();streamed=true;
         if(frame?.provisional!==false)provisionalSeen=true;
-        else if(input.onText&&!provisionalSeen&&(!frame.direct||spokenActionReply(text,{text:value})===value))try{input.onText(value,{origin:'model',provisional:false,...(frame.direct?{direct:true}:{})});}catch{/* Early speech is advisory; the confirmed reply still plays. */}
-        this.setState((previous:Shell)=>belongs()?{msgs:previous.msgs.some((m:Shell)=>m.id===streamId)?previous.msgs.map((m:Shell)=>m.id===streamId?{...m,text:value}:m):[...previous.msgs,{id:streamId,from:'agent',text:value,streaming:true}]}:null);},undefined,undefined,{channelType:'VOICE_DM',requestId:turnId,signal,expectedConversationId:binding.conversationId,voiceTurnSignal:input.voiceTurnSignal});}
+        else if(input.onText&&!revealCreatedNote&&!provisionalSeen&&!VIEW_OPEN_UNCONFIRMED.startsWith(value.trim())&&(!frame.direct||spokenActionReply(text,{text:value})===value))try{input.onText(value,{origin:'model',provisional:false,...(frame.direct?{direct:true}:{})});}catch{/* Early speech is advisory; the confirmed reply still plays. */}
+        this.setState((previous:Shell)=>belongs()?{msgs:previous.msgs.some((m:Shell)=>m.id===streamId)?previous.msgs.map((m:Shell)=>m.id===streamId?{...m,text:value}:m):[...previous.msgs,{id:streamId,from:'agent',text:value,streaming:true}]}:null);},undefined,undefined,{channelType:'VOICE_DM',requestId:turnId,signal,expectedConversationId:binding.conversationId,voiceTurnSignal:input.voiceTurnSignal,projectRequestedView,...(images?{images}:{})});}
       finally{batchVoiceProgressEvents.removeEventListener('progress',progress);batchVoiceReplyEvents.removeEventListener('reply',replyStarted);}
       input.onReplyStarted?.();
       current();const identity=reply.messageBinding;
@@ -2109,11 +2357,26 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(!reply.messageId||!reply.userMessageId||!identity||identity.conversationId!==binding.conversationId||JSON.stringify(identity.session)!==JSON.stringify(binding.session)||!reply.text.trim())throw Error('The voice reply could not be matched to this conversation. Check history before speaking again.');
       await new Promise<void>(resolve=>this.setState((previous:Shell)=>belongs()?(()=>{const delivered=(id?:string)=>!!id&&previous.msgs.some((m:Shell)=>m.id===id);const kept=previous.msgs.filter((m:Shell)=>m.id!==streamId&&!(m.id===userId&&delivered(reply.userMessageId))).map((m:Shell)=>m.id===userId?{...m,id:reply.userMessageId,messageBinding:identity}:m);return {msgs:delivered(reply.messageId)?kept.map((m:Shell)=>m.id===reply.messageId?enrichSettledAssistant(m,planActionCard(reply.planAction),identity):m):[...kept,{id:reply.messageId,from:'agent',text:reply.text,messageBinding:identity,streaming:false,card:planActionCard(reply.planAction)??null}]};})():null,resolve));current();
       keepWorkflowChanges(this,reply,belongs);
-      const emailCardReady=await this.stageAgentEmailDraft?.(reply)===true;
+      const emailOutcome=await this.stageAgentEmailDraft?.(reply,text,belongs);
+      const emailCardReady=emailOutcome===true;
+      const created=noteCreationTarget(reply.actionResults);
+      if(created)recentNotes.set(this,{...identity,messageId:reply.userMessageId,id:created.id});
       const beforeNavigation=alphaClient.getState().context;
-      let delivered=await deliverChatNavigation(this,navigation,reply.actionResults,current,input.navigation);
-      let nextContext=input.navigation?.finish(delivered);if(nextContext)acceptedContext=nextContext;
-      if(delivered&&(nextContext||!input.navigation))viewSteps.moved(beforeNavigation);
+      let delivered=false;
+      let presentedReply=reply;
+      let nextContext:ContextEnvelope|undefined;
+      if(created&&revealCreatedNote&&continuation&&!reply.proposals?.length){
+        const target=await resolveNote(this,created,current);
+        if('id' in target)delivered=await openVoiceDestination(this,target,continuation,current,next=>{acceptedContext=next;});
+        const text=noteCreationReply(created.reused,delivered&&'title' in target?target.title:undefined);
+        current();
+        this.setState((previous:Shell)=>({msgs:previous.msgs.map((m:Shell)=>m.id===reply.messageId?{...m,text}:m)}));
+        presentedReply={...reply,text};
+      }else{
+        delivered=await deliverChatNavigation(this,navigation,reply.actionResults,current,input.navigation);
+        nextContext=input.navigation?.finish(delivered);if(nextContext)acceptedContext=nextContext;
+        if(delivered&&(nextContext||!input.navigation))viewSteps.moved(beforeNavigation);
+      }
       current();
       // A spoken photo request the agent answered without showing Camera opens Camera here first,
       // through the voice session's own navigation hold, so the photo is taken on the visible viewfinder.
@@ -2159,9 +2422,20 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       for(const receipt of reply.completedActions||[])if(!(reply.completedReads||[]).some(read=>read.receipt.proposalId===receipt.proposalId))this.agentSay(receipt.summary,undefined,{id:`device-receipt:${receipt.proposalId}`,deviceReceipt:true});
       const completedActions=reply.completedActions;
       if(completedActions?.length)this.setState({},()=>{if(this.live&&connectionController.voiceConversationCurrent(binding,false))for(const receipt of completedActions)publishCommittedDeviceChanges(receipt,alphaClient,binding.session);});
-      const review=!!reply.proposals?.length||pendingNotice||emailCardReady;
-      const speechText=spokenActionReply(text,reply,emailCardReady);
-      return {requestId:turnId,conversationId:identity.conversationId,userMessageId:reply.userMessageId,assistantMessageId:reply.messageId,text:reply.text,...(speechText===reply.text?{}:{speechText}),complete:!review,...(review?{reviewRequired:true}:{}),...(awaiting?.length?{awaitingUserInput:{proposalId:awaiting[0].id,digest:awaiting[0].readReply!.digest}}:{})};
+      // The SMS card can wait for its owner's input while Talk remains available.
+      // Receipt of the card itself never authorizes the SMS.
+      const smsReview=!pendingNotice&&!emailCardReady&&reply.proposals?.length===1?reply.proposals[0].smsReview:undefined;
+      const review=(!smsReview||smsReview==='reply-draft')&&(!!reply.proposals?.length||pendingNotice||emailCardReady);
+      if((smsReview==='send'||smsReview==='addressed-draft')&&input.talkGeneration!==undefined&&input.approvalSignal){
+        const proposal=reply.proposals![0];
+        this.pendingVoiceSmsReview={id:proposal.id,generation:input.talkGeneration,conversationId:binding.conversationId,revision:proposal.contextRevision,expiresAt:proposal.expiresAt,details:proposal.description};
+      }
+      const speechText=typeof emailOutcome==='string'?emailOutcome:smsReview==='draft'?'Who should get this text? Say their full name or choose a recipient on your phone.'
+        :smsReview==='addressed-draft'?'Your draft is ready. Review it on your phone. You can confirm by voice.'
+        :smsReview==='send'?'Review the text on your phone. You can confirm by voice or tap Send.'
+        :smsReview==='recipient'?'Choose the recipient on your phone before sending.'
+        :spokenActionReply(text,presentedReply,emailCardReady);
+      return {requestId:turnId,conversationId:identity.conversationId,userMessageId:reply.userMessageId,assistantMessageId:reply.messageId,text:presentedReply.text,...(speechText===presentedReply.text?{}:{speechText}),complete:!review,...(review?{reviewRequired:true}:{}),...(awaiting?.length?{awaitingUserInput:{proposalId:awaiting[0].id,digest:awaiting[0].readReply!.digest}}:{})};
     }catch(error){
       input.navigation?.finish(false);
       if(streamed&&this.live)this.setState((previous:Shell)=>this.voiceSendTurnId===turnId&&connectionController.voiceConversationCurrent(binding,false)?{msgs:previous.msgs.map((m:Shell)=>m.id===streamId?{...m,streaming:false,interrupted:true}:m)}:null);
@@ -2198,13 +2472,71 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     // A prompt sent from elsewhere (a suggestion, a Calendar decision, a reviewed email) is not the
     // composer's text: the composer keeps its draft, its saved copy, its reply target and source.
     const fromComposer=argument===undefined;
+    const plainComposer=fromComposer&&!hasBinaryAttachment&&!edit&&!reply&&!this.mailAttachment&&!this.transcriptAttachment;
+    const noteTitle=plainComposer?namedNoteOpenRequest(text):undefined;
+    const noteSession=connectionController.getSnapshot().session;
+    const noteRequest=noteTitle?{title:noteTitle}:plainComposer?recentNote(this,text,selectedConversation,noteSession):undefined;
+    const localRequest=plainComposer&&homeOpenRequest(text)?'home':noteRequest;
+    if(localRequest){
+      const bound=sendBinding();
+      context(this);
+      if(alphaClient.getState().context.sensitive||connectionController.getSnapshot().open)return;
+      const revision=alphaClient.getState().context.revision;
+      const current=()=>{
+        context(this);
+        const observed=alphaClient.getState().context;
+        if(!this.live||document.hidden||observed.sensitive||observed.revision!==revision||
+           connectionController.getSnapshot().open||sendBinding()!==bound||this.S().view!==view||
+           String(this.S().draft||'')!==text||this.mailAttachment||this.transcriptAttachment||
+           this.cameraAttachment||this.fileAttachments?.length||this.messageReplyTarget||this.messageEditTarget)
+          throw Error('The conversation changed.');
+      };
+      this.draftSendPending=true;
+      try{
+        const target=localRequest==='home'?'home':await resolveNote(this,localRequest,current);
+        current();
+        const chat=this.S().chat==='full'?'full':'sheet';
+        const messageId=crypto.randomUUID();
+        this.setState((previous:Shell)=>({draft:'',chat,msgs:[...previous.msgs,{id:messageId,from:'user',text}]}));
+        let answer:string;
+        if(target==='home'){
+          const opened=view==='home'||await commitNavigation(this,'home',()=>openInternalView(this,'home',chat));
+          answer=opened?'You’re on Home.':'I couldn’t open Home.';
+        }else{
+          answer='message' in target?target.message:'I couldn’t open that note. Try again from Notes.';
+          if('id' in target&&await openNamedNote(this,target,chat)){
+            answer=`Opened “${target.title}” in Notes.`;
+            if(selectedConversation&&noteSession)recentNotes.set(this,{conversationId:selectedConversation,session:noteSession,messageId,id:target.id});
+          }
+        }
+        if(this.live&&!document.hidden&&sendBinding()===bound)this.agentSay(answer);
+      }catch{
+        if(this.live&&!document.hidden&&sendBinding()===bound)this.toast('Couldn’t open that note.');
+      }finally{this.draftSendPending=false;}
+      return;
+    }
+    if(sendsSavedEmail(text)&&fromComposer&&!hasBinaryAttachment&&!edit&&!reply&&!this.mailAttachment&&!this.transcriptAttachment){
+      const bound=sendBinding();
+      const current=()=>this.live&&!document.hidden&&!connectionController.getSnapshot().open&&
+        sendBinding()===bound&&this.S().view===view&&String(this.S().draft||'')===text;
+      this.draftSendPending=true;
+      let savedEmailReply:string|undefined;
+      try{savedEmailReply=await this.sendSavedAgentEmail?.(text,current);}
+      finally{this.draftSendPending=false;}
+      if(!current())return;
+      if(savedEmailReply){
+        this.setState((previous:Shell)=>({draft:'',msgs:[...previous.msgs,{id:crypto.randomUUID(),from:'user',text}]}));
+        this.agentSay(savedEmailReply);
+        return;
+      }
+    }
     // No draft identity exists until the resident has an owner session. Report readiness
     // before asking its durable draft controller to reserve an unbound send.
     const readiness=connectionController.getSnapshot();
     if(residentAlwaysPresent&&!readiness.session){this.toast(agentPendingText(readiness),ERROR_TOAST);return;}
     // Scanning is not a Camera mode: asking to scan in Camera opens scan review on one frame, on this phone.
     if(!hasBinaryAttachment&&!this.messageEditTarget&&s.view==='camera'&&cameraScanRequested(text)&&requestCameraScan()){if(fromComposer)this.setState({draft:''});return;}
-    if(!hasBinaryAttachment&&!this.messageEditTarget&&s.view==='camera'&&cameraFrameQuestionRequested(text)&&askAboutCameraFrame(text.trim())){if(fromComposer)this.setState({draft:''});return;}
+    if(!hasBinaryAttachment&&!this.messageEditTarget&&s.view==='camera'&&cameraFrameQuestionRequested(text)&&askAboutCameraFrame(text.trim()))return;
     const editTarget:ConversationMessageTarget|undefined=this.messageEditTarget,replyTarget:ConversationMessageTarget|undefined=fromComposer?this.messageReplyTarget:undefined,editView=s.view;
     if(editTarget){
       // An app action must not replace or abandon the user's open edit.
@@ -2225,7 +2557,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         this.toast(errorNotice(error,'Couldn’t open the edited conversation. Nothing was sent.'),ERROR_TOAST);return;}
       finally{this.draftSendPending=false;}
     }
-    let sourceDraft=fromComposer&&this.reviewedSourceDraft?.draft===text?sourceOf(this.reviewedSourceDraft.source):undefined;
+    let sourceDraft:Source|undefined;
     context(this);
     const transcript=fromComposer?this.transcriptAttachment:null;
     const mail=fromComposer?(this.mailAttachment??null):null;
@@ -2264,7 +2596,6 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       finally{this.draftSendPending=false;}
     }
-    const reviewedSource=fromComposer?this.reviewedSourceDraft:null;if(fromComposer)this.reviewedSourceDraft=null;
     // Everything this send later shows belongs to the agent connection it was sent on.
     const sameChat=()=>connectionController.getSnapshot().session?.sessionId===sessionId;
     const userId=crypto.randomUUID(),streamedId=crypto.randomUUID();let streamed=false;
@@ -2310,13 +2641,27 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         if(expectedSession&&(JSON.stringify(connectionController.getSnapshot().session)!==JSON.stringify(expectedSession)||document.hidden))throw new NotDispatched('Agent changed. Review this message again.');
       }catch(error){throw error instanceof NotDispatched?error:new NotDispatched(error instanceof Error?error.message:'The agent connection is unavailable. Nothing was sent.');}
       const sourceSession=connectionController.getSnapshot().session;
-      navigation=connectionController.captureViewNavigation(alphaClient.getState().context);
-      // The request becomes pending after the render above; render again so Stop is offered before any streamed text.
-      queueMicrotask(()=>{if(this.live&&alphaClient.getState().pending)this.setState({});});
+      const projectRequestedView=async(target:string,signal:AbortSignal)=>{
+        signal.throwIfAborted();
+        const view=alphaViewKey(target);
+        if(!view||!this.live||document.hidden||attempt.stop.signal.aborted||
+          connectionController.getSnapshot().session!==sourceSession||!ownerStayed()||
+          alphaClient.getState().context.revision!==revision)return false;
+        if(view===(this.S().view||'home'))return true;
+        const release=alphaClient.admitOwnViewChange(view);
+        try{return await commitNavigation(this,view,()=>openInternalView(this,view,this.S().chat));}
+        finally{release();}
+      };
+      const navigationContext=alphaClient.getState().context;
+      navigation=connectionController.captureViewNavigation(navigationContext);
       if(!transcriptCurrent())throw new NotDispatched('The recording changed. Attach the transcript again.');
       if(mail){await mail.validate();if((this.mailAttachment??null)!==mail)throw new NotDispatched('The attached email changed. Nothing was sent.');}
       if(sentAttachment?.fileAttachments?.length&&(!sameChat()||!filesCurrent()||!this.live||document.hidden))
         throw new NotDispatched('The chat attachment changed. Nothing was sent.');
+      const attachmentImages = sentAttachment&&(sentAttachment.fileAttachments?.length||sentAttachment.cameraAttachment)
+        ?[...(sentAttachment.fileAttachments??[]).map(({data,mimeType,name})=>({data,mimeType,name})),...(sentAttachment.cameraAttachment?[{data:sentAttachment.cameraAttachment.image.split(',')[1],mimeType:'image/jpeg',name:'Camera photo'}]:[])]
+        :undefined;
+      const images=attachmentImages;
       // The planning label shows only until the first reply text; it is never kept as a message.
       const showStatus=(event:Event)=>{if(this.live&&!streamed&&this.sendAttempt===attempt)this.setState({turnStatus:(event as CustomEvent<string>).detail});};
       localTurnStatus.addEventListener('label',showStatus);
@@ -2325,6 +2670,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       // this turn's own navigation are delivered (below), never before or racing that delivery.
       viewSteps=alphaClient.holdTurnViewSteps();
       // The Notes view context carries the exact selected record and revision.
+      // Wait until attachments are ready, then render Stop as soon as the send is pending.
+      queueMicrotask(()=>{if(this.live&&alphaClient.getState().pending)this.setState({});});
       try{reply = await alphaClient.send(requestText,value=>{
         attempt.streamed=true;
         if(!this.live)return;
@@ -2334,7 +2681,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           if(!streamFrame&&!document.hidden)streamFrame=requestAnimationFrame(()=>{streamFrame=0;if(this.live)flushStream();});
         }
         else{streamed=true;this.setState((previous:Shell)=>({turnStatus:'',msgs:[...previous.msgs,{id:streamedId,from:'agent',text:value,card:null,streaming:true}]}));}
-      },replyTarget,results=>{readyNavigation=results;},{channelType:'DM',requestId:userId,expectedConversationId:filesAtStart?.length?selectedConversation:undefined,images:sentAttachment&&(sentAttachment.fileAttachments?.length||sentAttachment.cameraAttachment)?[...(sentAttachment.fileAttachments??[]).map(({data,mimeType,name})=>({data,mimeType,name})),...(sentAttachment.cameraAttachment?[{data:sentAttachment.cameraAttachment.image.split(',')[1],mimeType:'image/jpeg',name:'Camera photo'}]:[])]:undefined});}
+      },replyTarget,results=>{readyNavigation=results;},{channelType:'DM',requestId:userId,expectedConversationId:filesAtStart?.length?selectedConversation:undefined,images,projectRequestedView});}
       // Before settlement, stop, or failure renders: a late frame must not overwrite the final text.
       finally{localTurnStatus.removeEventListener('label',showStatus);flushStream();}
       // Only the composer's own send holds its draft; a prompt from elsewhere never settles it.
@@ -2360,8 +2707,10 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       // A conversation delivery can land the saved reply before this rename; keep its content and enrich only a missing plan control.
       if(streamed)this.setState((previous:Shell)=>settlementCurrent()?{msgs:reply.messageId&&previous.msgs.some((m:Shell)=>m.id===reply.messageId)?previous.msgs.filter((m:Shell)=>m.id!==streamedId).map((m:Shell)=>m.id===reply.messageId?enrichSettledAssistant(m,planCard,identity):m):previous.msgs.map((m:Shell)=>m.id===streamedId?{...m,id:reply.messageId||m.id,messageBinding:reply.messageId?identity:undefined,text:reply.text,streaming:false,...(planCard?{card:planCard}:{})}:m)}:null);else this.agentSay(reply.text,planCard,reply.messageId&&identity?{id:reply.messageId,messageBinding:identity}:undefined,settlementCurrent);
       if(reply.userMessageId&&identity)await new Promise<void>(resolve=>this.setState((previous:Shell)=>settlementCurrent()?{msgs:previous.msgs.map((m:Shell)=>m.id===userId?{...m,id:reply.userMessageId,messageBinding:identity}:m)}:null,resolve));
+      const created=noteCreationTarget(reply.actionResults);
+      if(created&&identity&&reply.userMessageId&&settlementCurrent())recentNotes.set(this,{...identity,messageId:reply.userMessageId,id:created.id});
       keepWorkflowChanges(this,reply,settlementCurrent);
-      await this.stageAgentEmailDraft?.(reply);
+      await this.stageAgentEmailDraft?.(reply,text,settlementCurrent);
       if(this.messageReplyTarget===replyTarget)this.messageReplyTarget=undefined;
       let cameraOpened=false,cameraReceipts=0;
       if(sourceDraft&&sourceSession&&JSON.stringify(sourceSession)===JSON.stringify(connectionController.getSnapshot().session))this.agentSay('Review this answer before saving it with its source.',{type:'generic',icon:'note',title:'Review summary note',sub:sourceDraft.name,sourceSummary:{source:sourceDraft,text:reply.text,session:sourceSession}});
@@ -2372,7 +2721,21 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       try{
         const beforeNavigation=alphaClient.getState().context;
-        let delivered=await deliverNavigation(reply.actionResults);
+        let delivered=false;
+        if(created&&plainComposer&&openAfterNoteCreate(text)&&!reply.proposals?.length&&settlementCurrent()&&
+          !attempt.stop.signal.aborted&&alphaClient.continuesContext(navigationContext)){
+          const current=()=>{
+            attempt.stop.signal.throwIfAborted();
+            if(!settlementCurrent()||document.hidden||connectionController.getSnapshot().open||
+              !alphaClient.continuesContext(navigationContext))throw Error('The conversation changed.');
+          };
+          const target=await resolveNote(this,created,current);
+          current();
+          delivered='id' in target&&await openNamedNote(this,target,this.S().chat);
+          const text=noteCreationReply(created.reused,delivered&&'title' in target?target.title:undefined);
+          const messageId=reply.messageId||streamedId;
+          this.setState((previous:Shell)=>settlementCurrent()?{msgs:previous.msgs.map((m:Shell)=>m.id===messageId?{...m,text}:m)}:null);
+        }else delivered=await deliverNavigation(reply.actionResults);
         if(delivered)viewSteps.moved(beforeNavigation);
         // The agent may propose the photo without showing Camera in the same turn. When that photo is this reply's
         // (bound to this message, or named by the reply's own receipt on an ask-first phone) and no other review of
@@ -2407,7 +2770,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         // Nothing reached the agent: put the text back and drop the unsent bubble. Never resend.
         // The text back in the composer says it was not sent; only a refusal with its own reason is
         // shown, and the private local preview keeps a held composer send's refusal out of toasts as before.
-        if(this.live){const previewHeld=fromComposer&&privateLocalPreviewEnabled&&this.composerDraft?.holding===true;this.setState((previous:Shell)=>({msgs:previous.msgs.filter((item:Shell)=>item.id!==userId)}));const released=fromComposer?releaseComposerSend(this,heldKey,heldText,undurableText,{sameChat:sendChat,stayed:ownerStayed}):'kept';if(reviewedSource&&!this.reviewedSourceDraft)this.reviewedSourceDraft=reviewedSource;if(!previewHeld){if(released==='lost')this.toast(UNSENT_NOT_RESTORED,ERROR_TOAST);else if(e instanceof NotDispatched)this.toast(message);else if(e instanceof AlphaClientError&&(['unconfigured','sensitive','busy'].includes(e.code)||(e as {refusedBeforeTurn?:unknown}).refusedBeforeTurn===true))this.toast('Not sent. '+message);else if(released==='restored')this.toast('Not sent. Your message is back in the composer.');else if(!fromComposer)this.toast('Not sent.');}}
+        if(this.live){const previewHeld=fromComposer&&privateLocalPreviewEnabled&&this.composerDraft?.holding===true;this.setState((previous:Shell)=>({msgs:previous.msgs.filter((item:Shell)=>item.id!==userId)}));const released=fromComposer?releaseComposerSend(this,heldKey,heldText,undurableText,{sameChat:sendChat,stayed:ownerStayed}):'kept';if(!previewHeld){if(released==='lost')this.toast(UNSENT_NOT_RESTORED,ERROR_TOAST);else if(e instanceof NotDispatched)this.toast(message);else if(e instanceof AlphaClientError&&(['unconfigured','sensitive','busy'].includes(e.code)||(e as {refusedBeforeTurn?:unknown}).refusedBeforeTurn===true))this.toast('Not sent. '+message);else if(released==='restored')this.toast('Not sent. Your message is back in the composer.');else if(!fromComposer)this.toast('Not sent.');}}
         else if(fromComposer)this.composerDraft?.release();
       }else{
         const sessionRetired=attempt.residentSessionRetired===true;
@@ -2502,7 +2865,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     this.setState({ msgs: this.S().msgs.map((m: Shell) => m.id === message.id ? { ...m, card: cardWith(m.card, { done: true, declined: true, title: 'Declined', sub: result.message }) } : m) });
   };
   const originalCardAct=p.cardAct;
-  p.cardAct = async function (message: Shell) {
+  p.cardAct = async function (message: Shell, voiceSignal?:AbortSignal, approveAs?: "send-draft") {
     const card = message.card || {};
     // AC-26: a replaced or finished proposal never acts. A view's own proposal (a fixture call or
     // "Screen it") is dispatched by the shell to that view's action; live ones are approved below.
@@ -2569,7 +2932,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(card.expiresAt<=Date.now()){
         this.setState((previous:Shell)=>({msgs:previous.msgs.map((m:Shell)=>m.id===message.id?{...m,card:cardWith(m.card,{reviewUnavailable:true,title:'Review expired',sub:'This review has expired. Request a new action if still needed.'})}:m)}));return;
       }
+      const abortVoiceApproval=()=>this.pendingActionApproval?.abort(voiceSignal?.reason);
       try {
+        voiceSignal?.throwIfAborted();
         context(this);
         const session=connectionController.getSnapshot().session;
         if(card.recovered&&JSON.stringify(card.proposalSession)!==JSON.stringify(session))throw Error('The agent changed. Review this action again.');
@@ -2596,13 +2961,16 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         }
         this.pendingActionRecoveryAbort?.abort();
         const approval=this.pendingActionApproval=new AbortController();
+        voiceSignal?.addEventListener('abort',abortVoiceApproval,{once:true});
         this.pendingActionApprovalProposalId=card.proposalId;
         this.pendingActionApprovalContext=alphaClient.getState().context;this.pendingActionApprovalSession=session;this.setState({});
         const sessionId = session?.sessionId;
         const beforeView = this.S().view;
         let receipt;
         const readLease=this.readReplyLeases?.get(card.proposalId);
-        try { receipt = card.recovered?await connectionController.approvePendingAction(card.proposalId,alphaClient.getState().context,approval.signal):await alphaClient.approve(card.proposalId); }
+        const approvalMode=approveAs??(card.smsReview==='draft'||card.smsReview==='addressed-draft'?'send-draft':undefined);
+        const approvedDescription=approvalMode==='send-draft'?card.sub:undefined;
+        try { receipt = card.recovered?await connectionController.approvePendingAction(card.proposalId,alphaClient.getState().context,approval.signal,approvalMode,approvedDescription):await alphaClient.approve(card.proposalId,approval.signal,approvalMode,approvedDescription); }
         catch (error) {
           // Navigation may cancel the context-bound chat wait after the effect.
           // Await only that already-started journaled action; never execute again.
@@ -2626,8 +2994,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           if(!alphaClient.getState().pending)this.notesCommittedHandler?.();
           publishCommittedDeviceChanges(receipt,alphaClient,session);
         }});
+        return receipt;
       } catch (e) { const readLease=this.readReplyLeases?.get(card.proposalId);if(this.live&&(!readLease||readLease.phase!=='cancelled'&&connectionController.readReplyCurrent(readLease.binding))&&(!card.recovered||JSON.stringify(card.proposalSession)===JSON.stringify(connectionController.getSnapshot().session)))this.agentSay(deviceActionFailureText(e)); }
-      finally {this.pendingActionApproval=null;this.pendingActionApprovalProposalId=null;if(this.live){context(this);this.setState({});}}
+      finally {voiceSignal?.removeEventListener('abort',abortVoiceApproval);this.pendingActionApproval=null;this.pendingActionApprovalProposalId=null;if(this.live){context(this);this.setState({});}}
     } else if (card.go) this.openView(card.go.view, card.go.patch);
   };
   p.startVoice = async function () {

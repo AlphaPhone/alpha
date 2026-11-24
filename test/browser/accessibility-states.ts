@@ -68,7 +68,7 @@ const press = async (page: Page, steps: string[]) => {
       await page.getByLabel('Message actions', {exact: true}).click();
     }
     // Share note and Delete are entries of the Note actions menu.
-    await (step === 'Photos tools' || step === 'Message actions' ? page.getByLabel(step, {exact: true}) : page.getByRole(step === 'Share note' || step === 'Delete' ? 'menuitem' : 'button', {name: step, exact: true}).first()).click();
+    await (['Photos tools', 'Message actions', 'Workflow actions'].includes(step) ? page.getByLabel(step, {exact: true}) : page.getByRole(step === 'Share note' || step === 'Delete' ? 'menuitem' : 'button', {name: step, exact: true}).first()).click();
   }
 };
 /** The named subview is on screen and exposed (not retired behind another subview). */
@@ -204,7 +204,7 @@ export const MOCK_STATES: State[] = [
   mock('files:preview', ['Rename']),
   // Deleting a fixture file shows the toast with Undo over the folder.
   mock('files:preview', ['File actions', 'Delete file']),
-  mock('workflows:flow', ['Change'], 'workflows-builder'),
+  mock('workflows:flow', ['Workflow actions', 'Change'], 'workflows-builder'),
   // The builder's trigger and step sheets. (Settings' Connections page and its per-service sheets
   // were removed; the Google accounts panel is swept live as 'Settings Google'.)
   mock('workflows', ['Add to Workflows', 'Edit When step'], 'workflows-builder'),

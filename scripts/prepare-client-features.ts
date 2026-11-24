@@ -55,6 +55,7 @@ export const CLIENT_FEATURE_PATHS = [
   // Import-free leaf of browser-request-grounding.
   'packages/contracts/src/strip-trailing-punctuation.ts',
   'packages/contracts/src/phone-dial.ts',
+  'packages/contracts/src/spoken-phone-number.ts',
   'packages/contracts/src/device-action-execution.ts',
   'packages/contracts/src/client-turn-observation.ts',
   'packages/contracts/src/contracts/remote-agent-pairing.ts',

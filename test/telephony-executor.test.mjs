@@ -85,7 +85,7 @@ test('a review that is no longer current stops before anything happens', async (
 test('a text to a contact shows who matched, then sends under the proposal id; an unknown outcome is not a failure', async () => {
   let p = ports();
   let result = await run({type: 'sms_compose', query: 'Priya', body: 'On my way'}, p, 'proposal-9');
-  assert.deepEqual(did(p, 'ask').map(row => row[1]), [{kind: 'message', options: [{id: '1', name: 'Priya Nair', number: '+14155550132'}], body: 'On my way'}], 'one match is still confirmed with its name and number');
+  assert.deepEqual(did(p, 'ask').map(row => row[1]), [{kind: 'message', options: [{id: '1', name: 'Priya Nair', number: '+14155550132'}], body: 'On my way', draftOnly: false}], 'one match is still confirmed with its name and number');
   assert.deepEqual(did(p, 'sms'), [['sms', '+14155550132', 'On my way', 'proposal-9']]);
   assert.deepEqual(result.telephonyResult, {kind: 'sms-compose', status: 'submitted'}); assert.equal(result.status, 'succeeded');
   // The lookup is a fuzzy filter: the owner can see it matched someone else and stop it.
@@ -113,18 +113,35 @@ test('a reply for the open conversation is placed as a draft and never sent', as
     assert.equal(did(p, 'sms').length + did(p, 'search').length + did(p, 'ask').length, 0, 'nothing is looked up, asked or sent');
   }
 });
-test('a text to the contact whose conversation is open becomes a draft there instead of a separate review', async () => {
+test('explicitly drafting a text to the open contact leaves an editable draft', async () => {
   let p = ports({draftInOpenThread: (body, number) => { p.log.push(['draft', body, number]); return 'drafted'; }});
-  let result = await run({type: 'sms_compose', query: 'Priya', body: 'On my way'}, p);
+  let result = await run({type: 'sms_compose', query: 'Priya', body: 'On my way', draft: true}, p);
   assert.deepEqual(result.telephonyResult, {kind: 'sms-compose', status: 'drafted'}); assert.equal(result.status, 'succeeded');
   assert.deepEqual(did(p, 'draft'), [['draft', 'On my way', '+14155550132']], 'only the conversation with exactly that number');
   assert.equal(did(p, 'sms').length, 0, 'the draft is not sent'); assert.equal(did(p, 'ask').length, 0, 'the open conversation already shows who it is');
-  // A message is being sent or has pictures there, or another conversation is open: the reviewed send is used as before.
-  for (const status of ['occupied', 'none-selected', 'unavailable']) {
-    p = ports({draftInOpenThread: () => status});
-    result = await run({type: 'sms_compose', query: 'Priya', body: 'On my way'}, p, 'proposal-3');
-    assert.deepEqual(did(p, 'sms'), [['sms', '+14155550132', 'On my way', 'proposal-3']], status); assert.equal(did(p, 'ask').length, 1, status);
+});
+test('an approved send to an open thread sends once without modifying its draft', async () => {
+  for (const target of [{kind: 'contact', query: 'Priya'}, {kind: 'number', number: '+14155550132'}]) {
+    const p = ports({draftInOpenThread: (body, number) => { p.log.push(['draft', body, number]); return 'drafted'; }});
+    const result = await run({type: 'sms_compose', target, body: 'On my way'}, p, 'proposal-3');
+    assert.deepEqual(did(p, 'draft'), []);
+    assert.deepEqual(did(p, 'sms'), [['sms', '+14155550132', 'On my way', 'proposal-3']]);
+    assert.equal(did(p, 'ask').length, target.kind === 'contact' ? 1 : 0);
     assert.deepEqual(result.telephonyResult, {kind: 'sms-compose', status: 'submitted'});
+  }
+});
+test('the exact recipient displayed on a reviewed card needs no second choice and is rechecked', async () => {
+  const reviewedSmsRecipient = {id: '1', name: 'Priya Nair', number: '+14155550132'};
+  const operation = {type: 'sms_compose', target: {kind: 'contact', query: 'Priya Nair'}, body: 'On my way'};
+  const p = ports({reviewedSmsRecipient});
+  assert.equal((await run(operation, p)).telephonyResult.status, 'submitted');
+  assert.deepEqual(did(p, 'ask'), []);
+  assert.deepEqual(did(p, 'sms'), [['sms', '+14155550132', 'On my way', 'op-1']]);
+  for (const rows of [[reyes], [priya, reyes], [{...priya, phoneNumbers: ['+14155550199']}]]){
+    const stale = ports({reviewedSmsRecipient,searchContacts:async()=>rows});
+    assert.equal((await run(operation, stale)).telephonyResult.status, 'unavailable');
+    assert.deepEqual(did(stale, 'ask'), []);
+    assert.deepEqual(did(stale, 'sms'), []);
   }
 });
 test('a contact change shows before and after and writes under the version that was shown', async () => {
@@ -286,13 +303,9 @@ test('a text to an exact number is sent straight from its approved card; a named
   assert.deepEqual(did(p, 'sms'), [['sms', '+14155550100', 'Running late', 'proposal-4']]);
   assert.equal(did(p, 'ask').length + did(p, 'search').length, 0, 'the approval card already showed the number');
   assert.deepEqual(result.telephonyResult, {kind: 'sms-compose', status: 'submitted'}); assert.equal(result.present, undefined);
-  // That number's conversation is open: the text goes into its field, as it does for a contact.
-  p = ports({draftInOpenThread: (body, number) => { p.log.push(['draft', body, number]); return 'drafted'; }});
-  result = await run({type: 'sms_compose', target: {kind: 'number', number: '+14155550100'}, body: 'Running late'}, p);
-  assert.deepEqual(result.telephonyResult, {kind: 'sms-compose', status: 'drafted'}); assert.equal(did(p, 'sms').length, 0);
   p = ports();
   result = await run({type: 'sms_compose', target: {kind: 'contact', query: 'Priya'}, body: 'Running late'}, p);
-  assert.deepEqual(did(p, 'ask')[0][1], {kind: 'message', options: [{id: '1', name: 'Priya Nair', number: '+14155550132'}], body: 'Running late'});
+  assert.deepEqual(did(p, 'ask')[0][1], {kind: 'message', options: [{id: '1', name: 'Priya Nair', number: '+14155550132'}], body: 'Running late', draftOnly: false});
   assert.deepEqual(did(p, 'sms')[0].slice(1, 3), ['+14155550132', 'Running late']);
 });
 test('a draft-only text opens that conversation with the text in its field and never sends', async () => {
@@ -308,7 +321,7 @@ test('a draft-only text opens that conversation with the text in its field and n
   // A contact is chosen on the phone first; a dismissal drafts nothing.
   p = ports();
   result = await run(draft({kind: 'contact', query: 'Priya'}), p);
-  assert.equal(did(p, 'ask').length, 1); assert.deepEqual(did(p, 'draft-for'), [['draft-for', '+14155550132', 'See you at 7']]); assert.equal(did(p, 'sms').length, 0);
+  assert.equal(did(p, 'ask')[0][1].draftOnly, true); assert.deepEqual(did(p, 'draft-for'), [['draft-for', '+14155550132', 'See you at 7']]); assert.equal(did(p, 'sms').length, 0);
   p = ports({ask: async () => null});
   result = await run(draft({kind: 'contact', query: 'Priya'}), p);
   assert.deepEqual(result.telephonyResult, {kind: 'sms-compose', status: 'cancelled'}); assert.equal(did(p, 'draft-for').length, 0); assert.equal(result.present, undefined);

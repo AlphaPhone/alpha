@@ -3,7 +3,14 @@ import {test,expect,type Page} from '@playwright/test';
 const key='alpha.dev.app.workflows';
 const state=(page:Page)=>page.evaluate(key=>JSON.parse(localStorage.getItem(key)!),key);
 async function open(page:Page){await page.getByRole('button',{name:'Workflows',exact:true}).click();await page.getByText('History flow',{exact:true}).click();}
-async function history(page:Page){await page.getByRole('button',{name:'Workflow history',exact:true}).click();return page.getByRole('dialog',{name:'Workflow history',exact:true});}
+async function history(page:Page){
+ await page.evaluate(async key=>{
+  const {openWorkflowHistory}=await import('/src/browser/workflow-history.ts');
+  const state=()=>JSON.parse(localStorage.getItem(key)!);
+  openWorkflowHistory(()=>{const {flows,localRuns}=state();return {flows,localRuns};},patch=>localStorage.setItem(key,JSON.stringify({...state(),...patch})),()=>false);
+ },key);
+ return page.getByRole('dialog',{name:'Workflow history',exact:true});
+}
 test.beforeEach(async({page})=>{
  await page.clock.setFixedTime(new Date('2026-10-02T07:00:00'));
  await page.addInitScript(()=>{const revoke=URL.revokeObjectURL;(window as any).revokedHistory=[];URL.revokeObjectURL=url=>{(window as any).revokedHistory.push(url);revoke.call(URL,url);};localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));if(!localStorage.getItem('alpha.dev.app.workflows')){const runs=['ok','fail','skip','cancelled','interrupted'].map((status,i)=>({id:'run-'+i,flowId:996,status,when:'Saved',sum:status,dur:'1 s',out:'Exact output '+i,log:[],cursor:0,inflight:null}));localStorage.setItem('alpha.dev.app.workflows',JSON.stringify({flows:[{id:996,name:'History flow',on:true,short:'Recover local capacity',summary:'Local history',trig:{kind:'time',days:'Every day',t:8},steps:[{k:'Do',t:'Turn on Do Not Disturb',apps:['Settings']}],runs}],localRuns:Object.fromEntries(runs.map(run=>[run.id,run]))}));localStorage.setItem('alpha.browser.workflow-notices.v1',JSON.stringify({rows:[{id:'workflow:prior',text:'Keep receipt',revision:'r',phase:'dismissed'}]}));}});
@@ -26,7 +33,7 @@ test('failed storage write preserves all history',async({page})=>{
 });
 test('full run journal can be reclaimed and execute a fresh run',async({page})=>{
  await page.evaluate(key=>{const s=JSON.parse(localStorage.getItem(key)!);s.flows[0].runs=[s.flows[0].runs[0]];s.flows[0].runs[0].out='x'.repeat(980000);s.localRuns={'run-0':s.flows[0].runs[0]};localStorage.setItem(key,JSON.stringify(s));},key);await page.reload();await open(page);await page.getByRole('button',{name:'Run now',exact:true}).click();await expect.poll(async()=>(await state(page)).flows[0].runs[0].status).toBe('fail');expect((await state(page)).flows[0].runs[0].sum).toContain('history is full');
- const dialog=await history(page);await dialog.getByRole('button',{name:'Remove finished runs',exact:true}).click();await dialog.getByRole('button',{name:'Confirm remove',exact:true}).click();await dialog.getByRole('button',{name:'Close history'}).click();await page.getByRole('button',{name:'Run now',exact:true}).click();await expect.poll(async()=>(await state(page)).flows[0].runs[0].status).toBe('ok');expect(await page.evaluate(async()=>JSON.parse((await (await import('/src/browser/preference-documents.ts')).devicePreferencesDocument.readRaw())!).doNotDisturb)).toBe(true);
+ const dialog=await history(page);await dialog.getByRole('button',{name:'Remove finished runs',exact:true}).click();await dialog.getByRole('button',{name:'Confirm remove',exact:true}).click();await dialog.getByRole('button',{name:'Close history'}).click();await page.reload();await open(page);await page.getByRole('button',{name:'Run now',exact:true}).click();await expect.poll(async()=>(await state(page)).flows[0].runs[0].status).toBe('ok');expect(await page.evaluate(async()=>JSON.parse((await (await import('/src/browser/preference-documents.ts')).devicePreferencesDocument.readRaw())!).doNotDisturb)).toBe(true);
 });
 test('a running workflow disables removal',async({page})=>{
  await page.evaluate(async()=>{const {BrowserDevice}=await import('/src/browser/device.ts');BrowserDevice.prototype.setSensor=()=>new Promise(()=>{});});await page.getByRole('button',{name:'Run now',exact:true}).click();await expect.poll(async()=>(await state(page)).flows[0].runs[0].status).toBe('running');const dialog=await history(page);await expect(dialog.getByRole('button',{name:'Remove finished runs',exact:true})).toBeDisabled();await expect(dialog.getByRole('status',{name:'Run history status',exact:true})).toContainText('Runs active');

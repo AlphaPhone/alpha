@@ -1,6 +1,7 @@
 import {findMapsCardRegions,type MapsCardPlace,type MapsCardSpec} from '../ui/components/chat/message-maps-parser.ts';
 import {guidanceDistance,guidanceDuration} from '../maps/guidance.ts';
 import {formatTime} from '../prototype/locale-time';
+import {browserDestinationMatches,directBrowserDestination} from '../../../../.eliza/client-features/packages/contracts/src/browser-request-grounding.ts';
 import {systemNoticeText} from '../../../../.eliza/client-features/packages/core/src/types/system-notice.ts';
 import type {BrowserControlOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts';
 /** Display only. Stored messages, proposals and journal receipts are never rewritten. */
@@ -28,7 +29,21 @@ export function emptyChatNotice(shownMessages: number, hasSession: boolean, pend
 }
 const REVIEW_TEXT = 'Review on phone';
 const REVIEW_INSTRUCTION = 'Review this request on your phone before it can run.';
+// A model's instruction to use a live approval control is advisory until this
+// turn has an admitted review. Generic explanations such as "if you see an
+// approval card..." do not imply there is a live control to use.
+const PHONE_APPROVAL_COMMAND = /(?:^|[.!?]\s+)(?:just\s+)?(?:tap|press|click)\s+(?:the\s+)?["“]?(?:approve|confirm)\b(?:["”])?(?=\s|[.!?,]|$)/i;
+export function isPhoneReviewInstruction(text: string): boolean {
+  const reply=text.trim();
+  return reply===REVIEW_TEXT||reply===REVIEW_INSTRUCTION||PHONE_APPROVAL_COMMAND.test(reply);
+}
+export function phoneReviewReply(text: string, hasReview: boolean): string {
+  return !hasReview&&isPhoneReviewInstruction(text)?'I couldn’t open a review card for this request.':text;
+}
+
 const LEGACY_BROWSER_RECEIPT = 'Opened an approved HTTPS destination in a new browser tab. Page loading is not verified.';
+// The planner settles before Alpha can present a tab from the turn's device receipt.
+export const VIEW_OPEN_UNCONFIRMED = 'I couldn’t confirm that the requested screen opened.';
 // Presentation only: preserve the journal while explaining uncertainty safely.
 export function actionResultText(text: string): string {
   return text === 'The action could not reach a confirmed result.'
@@ -137,9 +152,15 @@ export function projectActionMessages(rendered: Message[], source: Message[]): M
       if (message.from === 'agent' && (message.text === REVIEW_TEXT
         || (outcomeShown && message.text === REVIEW_INSTRUCTION))) hidden.add(message.id);
     }
+    const failure=turn.find(message=>message.from==='agent'&&!message.card&&!message.deviceReceipt&&message.text===VIEW_OPEN_UNCONFIRMED);
+    if(failure&&turn[0]?.from==='user'&&typeof turn[0].text==='string'){
+      const destination=directBrowserDestination(turn[0].text,'Alpha');
+      if(visibleActions.some(message=>message.deviceReceipt===true&&!message.card&&
+        browserDestinationMatches({type:'browser_navigate',url:message.browserDestination},destination)))hidden.add(failure.id);
+    }
     // A shown agent reply already answers a requested Browser open. Only a succeeded browser receipt
     // carries browserDestination; failures and other device receipts stay visible.
-    if (!turn.some(message => renderedIds.has(message.id) && message.from === 'agent' && !message.deviceReceipt && !message.card && !message.interrupted && message.text !== REVIEW_TEXT && message.text !== REVIEW_INSTRUCTION && typeof message.text === 'string' && message.text.trim())) return;
+    if (!turn.some(message => renderedIds.has(message.id) && !hidden.has(message.id) && message.from === 'agent' && !message.deviceReceipt && !message.card && !message.interrupted && message.text !== REVIEW_TEXT && message.text !== REVIEW_INSTRUCTION && message.text !== VIEW_OPEN_UNCONFIRMED && typeof message.text === 'string' && message.text.trim())) return;
     for (const message of turn) if (message.from === 'agent' && message.deviceReceipt === true && !message.card && message.browserDestination) hidden.add(message.id);
   };
   for (const message of source) { if (message.from === 'user') { finish(); turn = []; } turn.push(message); } finish();
