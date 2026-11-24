@@ -51,7 +51,9 @@ pure val queryValues = Set("", "invoice")
 
 The search field is open while the owner has opened it or a search is listed. Back with a search
 listed returns to its folder and closes the field; Back with the field open and nothing searched yet
-closes the field. Either way Back is the Inbox's, not the shell's.
+closes the field. Either way Back is the Inbox's, not the shell's. Showing another list, as choosing
+another folder or account does, closes a field opened with nothing searched, as the earlier app did;
+the field then stays closed until the owner opens it again.
 
 ```quint
 pure def searchShown(s: Mailbox): bool = s.searchOpen or s.query != ""
@@ -61,6 +63,8 @@ pure def canCloseSearch(s: Mailbox): bool = s.searchOpen and s.query == ""
 pure def closeSearch(s: Mailbox): Mailbox = { ...s, searchOpen: false }
 pure def stepClosingASearchChangesOnlyTheField(before: Mailbox, via: str, after: Mailbox): bool =
   via == "closeSearch" implies (after == { ...before, searchOpen: false } and not(searchShown(after)))
+pure def stepShowingAnotherListClosesTheField(before: Mailbox, via: str, after: Mailbox): bool =
+  via == "show" implies not(after.searchOpen)
 pure def alwaysAnOpenSearchHasAnAccount(s: Mailbox): bool = not(s.searchOpen) or s.account != ""
 pure def sometimesSearchOpenEmpty(s: Mailbox): bool = s.searchOpen and s.query == ""
 ```

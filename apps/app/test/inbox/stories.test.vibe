@@ -333,6 +333,23 @@ it.live("Back closes an open search field with nothing searched, and is the shel
   }
 })
 
+// spec/inbox/mailbox.md, "Back closes an open search, with or without a query"
+it.live("Choosing another folder closes a search field opened with nothing searched, and Back is then the shell's", () => effect {
+  const log = calls()
+  provide inboxApp(log, mailCloud(log)) {
+    const mailbox = try Mailbox
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try mailbox.openSearch()
+    const opened = (try mailbox.get()).searchOpen
+    try mailbox.setFolder("SentFolder")
+    const after = try mailbox.get()
+    const back = try inboxBack()
+    try Effect.try(() => assert.deepStrictEqual(
+      { opened, folder: after.folder, open: after.searchOpen, back: back.taken },
+      { opened: true, folder: "SentFolder", open: false, back: false }))
+  }
+})
+
 // spec/inbox/drafts.md, "Opening a Gmail draft opens its local copy when there is one, and otherwise sets the open draft aside first"
 it.live("Continue a Gmail draft here as a local draft bound to it", () => effect {
   const log = calls()
