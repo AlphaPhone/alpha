@@ -621,6 +621,7 @@ export const maps = together(
     ([imprecise, spoken]): Ev | undefined => (imprecise && spoken >= 0 ? { type: "stopSpeaking" } : undefined)),
   following(Screen.Machine, (state) => [state.place, state.details.status] as const, Screen.Machine, ([place, status]): Ev | undefined => (status !== "Idle" || (atlas.spot(place)?.id ?? "") === "" ? undefined : { type: "readDetails", place })),
   following(Screen.Machine, (state) => [state.link.plane, state.link.basemap === "Cloud"] as const, Credits.Machine, ([plane, raster]): CreditsEv => ({ type: "drawnOn", plane, raster })),
+  following(Screen.Machine, (state) => [state.link.plane, state.link.surface] as const, Credits.Machine, ([plane, surface]): CreditsEv | undefined => (surface === "Drawn" ? { type: "planeDrawn", plane } : undefined)),
 )
 
 // spec/app/maps/index.md, "An event's place opens on its card once Maps is on screen, never over navigation, and Maps remembers the event"

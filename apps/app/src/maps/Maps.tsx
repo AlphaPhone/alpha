@@ -302,6 +302,7 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
       {state.notice !== "NoNotice" && <p role="status" className="text-sm text-muted-foreground">{notices[state.notice]}</p>}
       {state.copyNotice !== "Uncopied" && <p role="status" className="text-sm text-muted-foreground">{copies[state.copyNotice]}</p>}
       {state.guideNotice !== "Quiet" && <Alert variant="info">{told[state.guideNotice]}</Alert>}
+      {state.missedFix && <p role="status" className="text-sm text-muted-foreground">No location fix arrived.</p>}
 
       {(now === "Browse" || now === "Search") && saved.length > 0 && (
         <ListGroup heading="Saved">
