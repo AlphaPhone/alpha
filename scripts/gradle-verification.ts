@@ -226,8 +226,8 @@ export function checkVerification(root: string) {
   if (!metadata.components.some(item => item.group === 'com.android.tools.build' && item.name === 'aapt2')) problems.push('aapt2 is not recorded: the metadata was not generated from a real build');
   for (const script of buildScripts(root)) {
     const file = path.join(root, script);
-    // An included project that cannot be read was not reviewed; the checkout or bun install --frozen-lockfile is incomplete.
-    if (!fs.existsSync(file)) { problems.push(`${script} is missing: the repositories it declares cannot be checked (git submodule update --init vendor/eliza; bun install --frozen-lockfile)`); continue; }
+    // An included project that cannot be read was not reviewed; the checkout or pnpm install --frozen-lockfile is incomplete.
+    if (!fs.existsSync(file)) { problems.push(`${script} is missing: the repositories it declares cannot be checked (git submodule update --init vendor/eliza; pnpm install --frozen-lockfile)`); continue; }
     for (const repository of declaredRepositories(fs.readFileSync(file, 'utf8'))) {
       const problem = repositoryProblem(repository);
       if (problem) problems.push(`${script} declares repository ${repository}, which ${problem}; reviewed: ${ALLOWED_REPOSITORIES.join(', ')} and maven { } naming ${ALLOWED_REPOSITORY_URLS.join(' or ')}`);
