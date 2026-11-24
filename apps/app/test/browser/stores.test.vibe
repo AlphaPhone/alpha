@@ -40,6 +40,39 @@ it.live("a bookmark is written only after the list was read, keeps the page's na
   })
 })
 
+// spec/browser/bookmarks.md, "A read replaces the marks with the store's list, keeping each saved name, and a failed read is reported, or offered for recovery once when the list is damaged"
+it.live("saved titles come from the host, and a mismatched title list cannot overwrite the last good list", () => effect {
+  const url = "https://recipes.test/bread"
+  const later = "https://example.test/"
+  const firstTitle = "Weekend bread"
+  let entries: readonly { readonly url: string; readonly title?: string }[] = [{ url, title: firstTitle }]
+  const fake = try fakeHost({ answers: {
+    bookmarks: () => ({ urls: [url], entries }),
+    setBookmark: (args) => ({ urls: [later, url], entries: [{ url: later, title: args.title }, { url }] }),
+  } })
+  try scoped(effect {
+    provide fake.live {
+      const marks = try BrowserBookmarks
+      try marks.refresh(false)
+      const restored = (try marks.get()).marks
+      entries = [{ url: later, title: "Unrelated" }]
+      try marks.refresh(false)
+      const afterMismatch = (try marks.get()).marks
+      entries = [{ url }]
+      try marks.refresh(false)
+      const cleared = (try marks.get()).marks
+      try marks.set(later, "New title", true)
+      const saved = (try marks.get()).marks
+      try Effect.try(() => {
+        assert.deepStrictEqual(restored, [{ url, title: firstTitle }])
+        assert.deepStrictEqual(afterMismatch, restored)
+        assert.deepStrictEqual(cleared, [{ url, title: "" }])
+        assert.deepStrictEqual(saved, [{ url: later, title: "New title" }, { url, title: "" }])
+      })
+    }
+  })
+})
+
 // spec/browser/bookmarks.md, "Opening Browser, resuming the app, a visible return and a changed bookmark document each ask for one refresh"
 it.live("another tab's change to the bookmark document is read again, and another session's is not", () => effect {
   const saved = try Ref.make<readonly string[]>([])

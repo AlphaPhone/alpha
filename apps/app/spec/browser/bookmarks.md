@@ -18,6 +18,7 @@ then says nothing over another screen.
 
 ```quint
 type Mark = { url: str, title: str }
+type StoredMarks = Addresses({ urls: List[str] }) | NamedMarks({ entries: List[Mark] })
 type MarkChange = { url: str, title: str, saved: bool }
 type BookmarkOp = Refresh | Save(MarkChange)
 type MarkStage = Idle | ReadingMarks | WritingMarks
@@ -44,7 +45,13 @@ pure def alwaysTheStageMatchesTheQueue(b: Bookmarks): bool =
   (b.stage == Idle iff b.queue.length() == 0) and (b.stage == WritingMarks implies not(isRefresh(firstOp(b.queue))))
 pure val urlValues = Set("https://example.test/", "https://other.test/")
 pure val titleValues = Set("", "Example")
-pure val urlsValues: Set[List[str]] = Set(List(), List("https://example.test/"), List("https://other.test/", "https://example.test/"))
+pure val storedValues: Set[StoredMarks] = Set(
+  Addresses({ urls: List() }),
+  Addresses({ urls: List("https://example.test/") }),
+  Addresses({ urls: List("https://other.test/", "https://example.test/") }),
+  NamedMarks({ entries: List({ url: "https://example.test/", title: "Saved title" }) }),
+  NamedMarks({ entries: List({ url: "https://example.test/", title: "" }) }),
+)
 ```
 
 ### Opening Browser, resuming the app, a visible return and a changed bookmark document each ask for one refresh
@@ -74,18 +81,25 @@ pure def sometimesASaveWaitsForItsRead(b: Bookmarks): bool = b.stage == ReadingM
 
 ### A read replaces the marks with the store's list, keeping each saved name, and a failed read is reported, or offered for recovery once when the list is damaged
 
-A save whose read failed is dropped: nothing is written over a list the renderer could not read.
-After disposal a read changes nothing.
+When the host supplies matching title entries, its list is authoritative. An entry without a
+title clears the displayed title. An older host that supplies addresses can keep the last
+observed titles for those addresses. A save whose read failed is dropped. After disposal a
+read changes nothing.
 
 ```quint
 pure def titled(urls: List[str], marks: List[Mark], change: MarkChange): List[Mark] =
   urls.listMap(u => { url: u, title: if (change.saved and u == change.url and change.title != "") change.title
     else marks.foldl("", (found, m) => if (m.url == u) m.title else found) })
 pure val noChange: MarkChange = { url: "", title: "", saved: false }
-pure def canReadSettled(b: Bookmarks, ok: bool, urls: List[str], damaged: bool, missing: bool): bool = b.stage == ReadingMarks
-pure def readSettled(b: Bookmarks, ok: bool, urls: List[str], damaged: bool, missing: bool): BookmarksChange = {
+pure def shownMarks(stored: StoredMarks, previous: List[Mark], change: MarkChange): List[Mark] =
+  match stored {
+    | Addresses(x) => titled(x.urls, previous, change)
+    | NamedMarks(x) => x.entries
+  }
+pure def canReadSettled(b: Bookmarks, ok: bool, stored: StoredMarks, damaged: bool, missing: bool): bool = b.stage == ReadingMarks
+pure def readSettled(b: Bookmarks, ok: bool, stored: StoredMarks, damaged: bool, missing: bool): BookmarksChange = {
   val refresh = isRefresh(firstOp(b.queue))
-  val read = { ...b, marks: titled(urls, b.marks, noChange), hydrated: true, recovery: false }
+  val read = { ...b, marks: shownMarks(stored, b.marks, noChange), hydrated: true, recovery: false }
   val recovering = runQueue(true, { ...b, hydrated: false, recovery: true })
   val unread = runQueue(true, { ...b, hydrated: false })
   if (b.disposed) runQueue(true, b)
@@ -101,11 +115,11 @@ pure def sometimesRecoveryOffered(b: Bookmarks): bool = b.recovery and b.stage =
 ### A write the store accepted moves its address to the front or removes it, and a refused one is reported
 
 ```quint
-pure def canWriteSettled(b: Bookmarks, ok: bool, urls: List[str]): bool = b.stage == WritingMarks
-pure def writeSettled(b: Bookmarks, ok: bool, urls: List[str]): BookmarksChange = {
+pure def canWriteSettled(b: Bookmarks, ok: bool, stored: StoredMarks): bool = b.stage == WritingMarks
+pure def writeSettled(b: Bookmarks, ok: bool, stored: StoredMarks): BookmarksChange = {
   val following = runQueue(true, b)
   if (b.disposed) following
-  else if (ok) runQueue(true, { ...b, marks: titled(urls, b.marks, changeOf(firstOp(b.queue))) })
+  else if (ok) runQueue(true, { ...b, marks: shownMarks(stored, b.marks, changeOf(firstOp(b.queue))) })
   else { state: following.state, out: List(ReportMarksFailed).concat(following.out) }
 }
 pure def stepDisposedBookmarksNeverChange(before: Bookmarks, after: Bookmarks): bool =

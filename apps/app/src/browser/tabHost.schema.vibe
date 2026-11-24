@@ -62,9 +62,13 @@ export schema ShowDownloads {
   readonly session: string
 }
 
+/** A bookmark title is optional on both the original and the title-aware host. */
+schema MarkEntry { readonly url: string; readonly title?: string }
+
 /** The bookmark list the store returned. */
 export schema MarkList {
   readonly urls: ReadonlyArray<string>
+  readonly entries?: ReadonlyArray<MarkEntry>
 }
 
 /** One saved tab. */
