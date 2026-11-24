@@ -2,8 +2,8 @@
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports -- ConversationRecord is the schema `schema Created` decodes with, a value the projection ESLint reads does not show
 import { ConversationRecord, TurnController, createRuntimeJsonClient } from "@elizaos/agent/client"
 import { describe, expect, it } from "@effect/vitest"
-import { configurationExit, coreActions, entryCarried, packedPlugins, refusedActions, workerAdmitted } from "../gen/agent.effect.vibe"
-import { type Running, call, launchFor, listed, manifest, pinnedWorker, ready, socketBridge, startPhoneAgent, startRun } from "./phone.ts"
+import { configurationExit, coreActions, entryCarried, packedPlugins, policyAdmitted, proposalsAdmitted, refusedActions, workerAdmitted } from "../gen/agent.effect.vibe"
+import { type Running, call, launchFor, listed, manifest, pinnedWorker, policy, ready, socketBridge, startPhoneAgent, startRun } from "./phone.ts"
 
 type Run = Awaited<ReturnType<typeof startRun>>
 
@@ -35,18 +35,8 @@ schema Created { conversation: ConversationRecord }
 schema Listed { conversations: { id: string }[] }
 schema Replied { fullText: string }
 schema Interacted { success: boolean; result: { state?: { notes: { content: string }[] } } }
-schema Approvals { approvals: unknown[] }
-
-module node {
-  import fs from "node:fs"
-  import path from "node:path"
-
-  /** The policy the build wrote beside the bundle. */
-  export function policy() {
-    return JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "../dist/host/policy.json"), "utf8")) as { actions: { allowed: string[]; refused: Record<string, string> } }
-  }
-}
-import { policy } from node
+schema Approval { id: string }
+schema Approvals { approvals: Approval[] }
 
 describe("Build the pack only from the pinned eliza", () => {
   // spec/agent/index.md, "A pack is admitted only when its manifest names the pinned commit, Node 26, no local inference, the plugins it carries, a pinned workflow worker and every allowed action"
@@ -55,11 +45,13 @@ describe("Build the pack only from the pinned eliza", () => {
   it("Build the pack only from the pinned eliza", () => {
     const built = manifest()
     const registered = built.actions.map(({ name }) => name)
-    const { actions } = policy()
+    const { actions, plugins } = policy()
     expect({ plugins: [...built.plugins].sort(), localInference: built.localInference, worker: /^[a-f0-9]{64}$/.test(built.workflowWorkerSha256 ?? "") })
       .toEqual({ plugins: [...packedPlugins].sort(), localInference: false, worker: true })
     expect(entryCarried(built.packages.map(({ name }) => name))).toBe(true)
     expect(built.packages.filter(({ name }) => name.startsWith("@repo/") || name.startsWith("@alphacompute/")).map(({ name }) => name)).toEqual(["@repo/agent-pack-entry"])
+    expect(policyAdmitted(actions.allowed, Object.keys(actions.refused), plugins.load, registered)).toBe(true)
+    expect(proposalsAdmitted(plugins.load, actions.allowed)).toBe(true)
     expect(Object.keys(actions.refused).sort()).toEqual(refusedActions(registered).sort())
     expect(Object.keys(actions.refused)).toContain("CALCULATE")
     expect(coreActions.every((name) => actions.allowed.includes(name))).toBe(true)
@@ -119,7 +111,7 @@ describe("Run Alpha's agent on the phone", () => {
     try Effect.try(() => expect({ kept: known.conversations.some(({ id }) => id === conversation.id), status: answer.status, fullText })
       .toEqual({ kept: true, status: 200, fullText: "You said: Which word?" }))
     const refused = try Effect.try(() => run.place("refused"))
-    const worker = { workflowWorker: { ...pinnedWorker(), sha256: "0".repeat(64) } }
+    const worker = { workflowWorker: { ...(try Effect.try(() => pinnedWorker())), sha256: "0".repeat(64) } }
     const launch = try promise(() => launchFor(run.cloud, run.key, refused, worker))
     const code = try promise(() => startPhoneAgent(launch, refused, run.cloud, run.key).exited)
     try Effect.try(() => expect(code).toBe(configurationExit))

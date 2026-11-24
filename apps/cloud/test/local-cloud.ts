@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { CloudProfile } from "@elizaos/cloud/profile";
-import { ended, freePort, paymentKey, plans, scratch, served, startProvider } from "@repo/eliza-harness/services";
+import { ended, freePort, paymentKey, plans, scratch, served, startProvider } from "@repo/eliza-harness";
 import type { EdgeEnv } from "../src/edge.vibe";
 import { edgeWorker } from "../src/edge.vibe";
 import type { Hosts } from "../gen/cloud.ts";

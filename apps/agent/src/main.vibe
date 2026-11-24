@@ -5,7 +5,7 @@ import { readBundleManifest } from "@elizaos/agent/bundle"
 import { decodeLaunchDocument } from "@elizaos/agent/launch"
 import { defineRoutes } from "@elizaos/agent/routes"
 import { deployment } from "@repo/deployment"
-import { pinnedCheckout, pinnedPack } from "@repo/eliza-harness/pinned"
+import { pinnedCheckout, pinnedPack } from "@repo/eliza-harness"
 import {
   type Environment, type Manifest, bundledPlugins, calendarEdits, characterAdmitted, cloudModel, corePlugins, entryCarried, gmailChanges, googleAdmitted,
   hostedPlugins, inputAdmitted, localEmbeddings, packAdmitted, packEntry, packedFor, packedPlugins, persistMemory, personalDetailSwap,
@@ -14,6 +14,7 @@ import {
 
 module node {
   import { pathToFileURL } from "node:url"
+  import type * as AgentBundle from "@elizaos/agent/bundle"
 
   /** The words after the script on the command line. @throws {never} */
   export function words(): string[] {
@@ -26,8 +27,8 @@ module node {
   }
 
   /** eliza's bundle builder of the clone at `dir`: the entry it ships imports that clone's agent, so the builder must be the same tree's. */
-  export function builderOf(dir: string): Promise<typeof import("@elizaos/agent/bundle")> {
-    return import(pathToFileURL(`${dir}/packages/agent/dist/src/bundle/build.js`).href) as Promise<typeof import("@elizaos/agent/bundle")>
+  export function builderOf(dir: string): Promise<typeof AgentBundle> {
+    return import(pathToFileURL(`${dir}/packages/agent/dist/src/bundle/build.js`).href) as Promise<typeof AgentBundle>
   }
 }
 import { builderOf, root, words } from node
@@ -58,12 +59,12 @@ const alphaOwned = (name: string) => name.startsWith("@repo/") || name.startsWit
 export function entrySource(bundled: readonly string[], hosted: readonly { name: string; module: string }[]): string {
   return [
     `import { runAgentCli } from "@elizaos/agent/cli"`,
-    ...bundled.map((name, index) => `import * as plugin${index} from ${JSON.stringify(name)}`),
+    ...bundled.map((name, index) => `import plugin${index} from ${JSON.stringify(name)}`),
     ...hosted.map(({ name, module }, index) => `import { ${module} as host${index} } from ${JSON.stringify(name)}`),
     "",
     "runAgentCli({",
     "  bundled: [",
-    ...bundled.map((name, index) => `    { packageName: ${JSON.stringify(name)}, plugin: plugin${index}.default ?? plugin${index}.plugin },`),
+    ...bundled.map((name, index) => `    { packageName: ${JSON.stringify(name)}, plugin: plugin${index} },`),
     ...hosted.map(({ name }) => `    { packageName: ${JSON.stringify(name)}, plugin: undefined },`),
     "  ],",
     `  hostModules: new Map([${hosted.map(({ name }, index) => `[${JSON.stringify(name)}, host${index}]`).join(", ")}]),`,
@@ -171,7 +172,7 @@ effect function build(name: string) {
   const hosted = hostedPlugins.map((name) => ({ name, module: hostedExports[name] ?? "" }))
   const unbuilt = hosted.filter(({ module }) => module === "")
   if (unbuilt.length > 0) throw new Refused({ reason: `no module export is known for ${unbuilt.map(({ name }) => name).join(", ")}` })
-  const pack = try pinnedPack(packedPlugins, entrySource(bundledPlugins, hosted)) catch effect (cause) => {
+  const pack = pinnedPack(packedPlugins, entrySource(bundledPlugins, hosted)) catch effect (cause) => {
     throw new Refused({ reason: `the pack's clone of the pinned eliza could not be prepared: ${cause.reason}` })
   }
   const builder = try tryPromise({ try: () => builderOf(pack.dir), catch: () => new Refused({ reason: `${pack.dir} holds no built bundle builder` }) })

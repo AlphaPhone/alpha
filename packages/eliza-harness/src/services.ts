@@ -6,6 +6,7 @@ import https from "node:https";
 import { type AddressInfo, createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { Effect } from "effect";
 import { prepared } from "./checkout.ts";
 
 /** What the model answers next: the pieces of a reply, or one piece and then nothing until the caller gives up. */
@@ -89,11 +90,11 @@ interface Answer { readonly status: number; readonly text: string }
 function exchange(url: string, init: { method?: string; headers?: Record<string, string>; body?: unknown; within?: number } = {}): Promise<Answer> {
   return new Promise((done, fail) => {
     const body = init.body === undefined ? undefined : JSON.stringify(init.body);
-    const request = http.request(url, { method: init.method ?? (body === undefined ? "GET" : "POST"), headers: { ...(body === undefined ? {} : { "content-type": "application/json" }), ...init.headers } }, (response) => {
+    const request = http.request(url, { method: init.method ?? (body === undefined ? "GET" : "POST"), headers: { ...(body === undefined ? {} : { "content-type": "application/json" }), ...init.headers }, ...(init.within === undefined ? {} : { timeout: init.within }) }, (response) => {
       let text = "";
       response.setEncoding("utf8").on("data", (part: string) => { text += part; }).on("end", () => done({ status: response.statusCode ?? 0, text }));
     });
-    if (init.within !== undefined) request.setTimeout(init.within, () => request.destroy(new Error("no answer in time")));
+    if (init.within !== undefined) request.on("timeout", () => request.destroy(new Error("no answer in time")));
     request.on("error", fail).end(body);
   });
 }
@@ -103,7 +104,7 @@ async function answering(url: string, gone: () => string | undefined) {
   while (!(await exchange(url, { within: 2_000 }).then((answer) => answer.status === 200, () => false))) {
     const why = gone();
     if (why !== undefined) throw new Error(why);
-    await new Promise((done) => setTimeout(done, 100));
+    await Effect.runPromise(Effect.sleep("100 millis"));
   }
 }
 
