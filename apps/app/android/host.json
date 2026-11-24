@@ -1,0 +1,58 @@
+{
+  "schema": 2,
+  "sdk": { "min": 29, "target": 36, "compile": 36 },
+  "releaseMinify": true,
+  "kotlin": false,
+  "nativeLibraries": "extract-16k",
+  "manifest": { "root": "consumer", "path": "android/app/manifests/main/AndroidManifest.xml" },
+  "manifestPlaceholders": { "appOrientation": "unspecified" },
+  "flavors": [
+    { "name": "launcher", "manifest": { "root": "consumer", "path": "android/app/manifests/launcher/AndroidManifest.xml" } }
+  ],
+  "buildConfigFields": [
+    { "name": "AOSP_BUILD", "type": "boolean", "value": false }
+  ],
+  "buildTypes": {
+    "release": {
+      "abiFilters": ["arm64-v8a"],
+      "shrinkResources": true,
+      "proguardFiles": [{ "root": "consumer", "path": "android/app/proguard-rules.pro" }]
+    }
+  },
+  "versionOverride": { "versionCode": "ELIZAOS_VERSION_CODE", "versionName": "ELIZAOS_VERSION_NAME" },
+  "signing": {
+    "storeFile": "ELIZAOS_KEYSTORE_PATH",
+    "storePassword": "ELIZAOS_KEYSTORE_PASSWORD",
+    "keyAlias": "ELIZAOS_KEY_ALIAS",
+    "keyPassword": "ELIZAOS_KEY_PASSWORD"
+  },
+  "osModules": [
+    { "module": "runtime-files" },
+    { "module": "agent-service" },
+    { "module": "secure-store" },
+    { "module": "sign-in" },
+    { "module": "system" },
+    { "module": "calendar" },
+    { "module": "contacts" },
+    { "module": "action-journal" },
+    { "module": "messages" },
+    { "module": "phone" },
+    { "module": "passwords" },
+    { "module": "filesystem" },
+    { "module": "location" },
+    { "module": "wifi" }
+  ],
+  "modules": [
+    { "name": "capacitor-android", "source": { "root": "dependencies", "path": "@capacitor/android/capacitor" } }
+  ],
+  "dependencies": [
+    { "configuration": "implementation", "module": "androidx.appcompat:appcompat", "toolchainVersion": "androidxAppCompatVersion" },
+    { "configuration": "implementation", "module": "androidx.core:core-splashscreen", "toolchainVersion": "coreSplashScreenVersion" },
+    { "configuration": "implementation", "module": "androidx.webkit:webkit", "toolchainVersion": "androidxWebkitVersion" }
+  ],
+  "agent": {
+    "host": { "root": "consumer", "path": "android/agent/host.json" },
+    "character": { "root": "consumer", "path": "android/agent/character.json" },
+    "policy": { "root": "consumer", "path": "android/agent/policy.json" }
+  }
+}
