@@ -58,14 +58,14 @@ the device. This branch rebuilds it on the stack below.
   application, its tests, every build, release and device script. What
   `legacy/` runs with Bun is rebuilt for Node when its area is rebuilt; no
   Bun command, lock file or runtime comes across.
-- **Alpha is built on Eliza's own Vibestack branch.** The on-device agent,
+- **Alpha is built on Eliza's own Vibestack line.** The on-device agent,
   the Android device package and the hosted services are
-  [elizaOS/eliza](https://github.com/elizaOS/eliza) on its `vibestack`
-  branch: `@elizaos/agent`, `@elizaos/os`, `@elizaos/cloud` and the plugins,
-  at a pinned commit. Use what they export, and never restate their state or
-  wire shapes here. Never edit their checkout: make shared changes upstream
-  and advance the pin. `legacy/` still records the older `develop` pin it
-  was built on, for reading only.
+  [elizaOS/eliza](https://github.com/elizaOS/eliza) on its `develop`
+  branch, eliza's Vibestack line: `@elizaos/agent`, `@elizaos/os`,
+  `@elizaos/cloud` and the plugins, at a pinned commit. Use what they export,
+  and never restate their state or wire shapes here. Never edit their
+  checkout: make shared changes upstream and advance the pin. `legacy/` still
+  records the older pin it was built on, for reading only.
 - **Do not import another product's interface or identity.**
 - **The pin is `eliza.lock.json`.** `pnpm eliza` builds that commit outside
   the repository, once, and links it as `.eliza`. Stay on the newest commit

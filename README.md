@@ -27,7 +27,7 @@ on Effect, and the interface in React on one design system.
 
 The on-device agent, the Android device package and the hosted services
 are the open-source [elizaOS](https://github.com/elizaOS/eliza) packages on
-its `vibestack` branch, at a pinned commit.
+its `develop` branch, eliza's Vibestack line, at a pinned commit.
 
 ## Setup and checks
 

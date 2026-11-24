@@ -16,7 +16,7 @@ checks this package's types, proofs, tests and page (SPEC.md, "One spec tree").
 
 ## eliza's agent and cloud
 
-Alpha's resident agent, its cloud and the phone's plugins are eliza's (`elizaOS/eliza`, branch `vibestack`), pinned in
+Alpha's resident agent, its cloud and the phone's plugins are eliza's (`elizaOS/eliza`, branch `develop`, its Vibestack line), pinned in
 [`eliza.lock.json`](../../eliza.lock.json). The agent and the cloud run as their own Node 26 processes from a checkout
 outside the repository, built once per pinned commit and shared by every worktree. The page imports eliza's clients
 (`@elizaos/agent/client`, `@elizaos/cloud/client`, `@elizaos/os/bridges/*`) through `.eliza`, a link to that checkout
