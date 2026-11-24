@@ -82,7 +82,7 @@ describe("Update an Alpha Pixel by cable, and get back (spec/app/image/index.md,
     expect(await run("ota", "check", "--from", installed, "--to", write(directory, "lower.json", release(10, 2))))
       .toMatchObject({ ok: false, tag: "OtaRefused", said: "A rollback index decreased or disappeared" });
     expect(await run("ota", "check", "--from", installed, "--to", write(directory, "foreign.json", { ...release(10, 3), product: "alpha_cf_x86_64_phone" })))
-      .toMatchObject({ ok: false, tag: "OtaRefused", said: "The release records do not belong to the enrolled channel" });
+      .toMatchObject({ ok: false, tag: "SigningRefused", said: "The release belongs to another channel, product, or device" });
   });
 
   it("gives each operator command Alpha's channel and stock source lock only where it reads them", () => {
