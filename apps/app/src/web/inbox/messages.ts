@@ -39,7 +39,7 @@ export const newerMail = "Newer mail arrived while this list was loading. Load n
 export const composerRefusal: Record<ComposerRefusal, string> = {
   "no-account": "Connect a Gmail account first.",
   "drafts-full": "Local drafts are full. Delete one in Drafts first.",
-  changed: "The saved draft changed. Reload before continuing.",
+  changed: "The saved draft changed, so it was opened again. Your last edit was not kept.",
   "no-reply-address": "This message has no reply address.",
   "unclear-recipient": "A recipient is unclear. Check the addresses.",
   "not-movable": "Replies, forwards and Gmail drafts stay with the account they came from.",
@@ -55,6 +55,7 @@ export const composerRefusal: Record<ComposerRefusal, string> = {
   duplicate: "This file is already attached.",
   "not-ready": "Wait for drafts to load.",
   "too-long": "The draft would be too long. Nothing was added.",
+  "draft-too-large": "This email is too large to keep on the phone. Remove an attachment.",
 };
 
 /** What an attachment admission refusal tells the owner. */
@@ -87,6 +88,8 @@ export const operationOutcome: Record<OperationOutcome, string> = {
   NotStarted: "Gmail reports this was not started. A late request could still arrive.",
   Unsent: "Nothing was sent.",
   Refused: "This account has not allowed this change. Nothing was changed.",
+  NotKept: "This phone could not save the record of this change, so nothing was sent or changed.",
+  TooLarge: "This email is too large to send. Remove an attachment. Nothing was sent.",
   Discarded: "The email changed after review, so the review was discarded. Nothing was sent.",
   SignedOut: "Sign-in expired. Sign in again, then check the review.",
 };
@@ -152,3 +155,6 @@ export const journalNotice: Record<JournalNotice, string> = {
   AccessWithdrawn: "Access to change this mailbox was withdrawn, so the waiting review was discarded.",
   AnswerRefused: "Gmail's answer did not match this operation, so the saved receipt was kept.",
 }
+
+/** What the Inbox says for as long as its drafts run only in memory. */
+export const draftsNotKept = "Drafts could not be saved on this phone. Copy what you need before closing.";

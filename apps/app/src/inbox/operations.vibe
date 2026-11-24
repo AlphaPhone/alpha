@@ -1,7 +1,8 @@
 // spec/inbox/operations.md, "Story: Change or send from my mailbox once, as I reviewed it"; spec/inbox/operations.md, "Swiping a listed message left reviews its archive at its current revision, and swiping right changes nothing"; spec/inbox/operations.md, "Send of the email on screen continues its open operation, and an unresolved one blocks another"; spec/inbox/operations.md, "Sent is said once, by the step that first learns of the success, and an unresolved send opens its receipt"; spec/inbox/operations.md, "Story: Clean up after a send, and say Sent once"; spec/inbox/drafts.md, "A confirmed send removes only the exact copy that was sent and marks other versions as earlier"
 import {
   type Event as JournalEvent, type Journal, type OpKind, type Proposal, type ComposedMail, type ComposerRef, type SendSource, type OperationRecord, type Receipt,
-  Machine as JournalMachine, recordOf, noRecord, sendStep, clearable, swipeArchives, swipeDistance, cleanupReady, undoable, undoKind, mayContinueDraft, mayDeleteGmailDraft, isLabelKind, notStarted
+  Machine as JournalMachine, recordOf, noRecord, sendStep, clearable, swipeArchives, swipeDistance, cleanupReady, undoable, undoKind, mayContinueDraft, mayDeleteGmailDraft, isLabelKind, notStarted,
+  proposalLimit
 } from "../../gen/inbox__operations.effect.vibe"
 import { type Event as DraftsEvent, type DraftFields, type Draft, type Mode, Machine as DraftsMachine, continuedDraft } from "../../gen/inbox__drafts.effect.vibe"
 import { InboxAccounts } from "./accounts.vibe"
@@ -11,7 +12,7 @@ import { canonicalJson, jsonBytes } from "./text.ts"
 import { newId } from "../platform/ids.ts"
 
 /** What a send or change came to, as the owner is told. */
-export type OperationOutcome = "Sent" | "SentBefore" | "AwaitingReview" | "Changed" | "Rejected" | "Uncertain" | "NotStarted" | "Unsent" | "Refused" | "Discarded" | "SignedOut"
+export type OperationOutcome = "Sent" | "SentBefore" | "AwaitingReview" | "Changed" | "Rejected" | "Uncertain" | "NotStarted" | "Unsent" | "Refused" | "NotKept" | "TooLarge" | "Discarded" | "SignedOut"
 
 const modes: Record<Mode, ComposedMail["mode"]> = { ComposeMode: "ComposeMail", ReplyMode: "ReplyMail", ReplyAllMode: "ReplyAllMail", ForwardMode: "ForwardMail" }
 const draftModes: Record<ComposedMail["mode"], Mode> = { ComposeMail: "ComposeMode", ReplyMail: "ReplyMode", ReplyAllMail: "ReplyAllMode", ForwardMail: "ForwardMode" }
@@ -25,9 +26,26 @@ export function composedMail(fields: DraftFields): ComposedMail {
   }
 }
 
-/** The composer's reference to a draft as a review binds it: its id and its exact content. */
+/**
+ * The composer's reference to a draft as a review binds it: its id and its exact content, each attachment named by its name, type,
+ * size and SHA-256 rather than its bytes, which the proposal carries once.
+ */
 export function composerRef(draft: Draft): ComposerRef {
-  return { draftId: draft.id, content: canonicalJson(draft.fields) }
+  const files = draft.fields.files.map((f) => ({ name: f.name, nameKey: f.nameKey, mimeType: f.mimeType, bytes: f.bytes, sha256: f.sha256 }))
+  return { draftId: draft.id, content: canonicalJson({ ...draft.fields, files }) }
+}
+
+/** The fields a composer send or Gmail draft save showed, with its attachments' bytes taken back from the proposal. */
+function shownFields(r: OperationRecord): DraftFields | undefined {
+  if (r.proposal.tag !== "MessageProposal") return undefined
+  const files = r.proposal.mail.files
+  try {
+    const shown = JSON.parse(r.composer.content) as DraftFields
+    if (shown.files.length !== files.length || shown.files.some((f, i) => f.sha256 !== files[i]!.sha256 || f.name !== files[i]!.name)) return undefined
+    return { ...shown, files }
+  } catch {
+    return undefined
+  }
 }
 
 /** The reviewed operations of the selected account. */
@@ -55,8 +73,6 @@ export service MailOperations {
   abandon(): boolean!!
   /** Cancels an unsent review or closes a settled receipt. */
   clear(): boolean!!
-  /** Discards an unsent review the composer no longer shows. */
-  discardStale(shown: ComposerRef): boolean!!
   /** Reviews the archive of a listed message at the revision read for it now, as a swipe left asks. */
   archiveListed(messageId: string): (OperationOutcome | undefined)!!
   /** Undoes a confirmed archive or Trash. */
@@ -84,6 +100,11 @@ export const layer = Layer.effect(MailOperations, effect {
 
   effect function send(event: JournalEvent) {
     return machine.send(event) catch () => undefined
+  }
+
+  /** Adopts a dispatch or receipt answer; one the journal refuses keeps the saved receipt, and the owner is told it did not match. */
+  effect function answered(requestId: string, receipt: Receipt) {
+    if ((try send({ type: "answered", requestId, receipt })) === undefined) try send({ type: "answerRefused", requestId })
   }
 
   effect function grant() {
@@ -118,7 +139,7 @@ export const layer = Layer.effect(MailOperations, effect {
       }
     }
     if (cleanupReady(r)) {
-      const copy = Effect.try(() => JSON.parse(r.composer.content) as DraftFields) catch () => undefined
+      const copy = shownFields(r)
       if (copy !== undefined) drafts.send({ type: "sent", owner: r.owner, id: r.source.localDraft, copy } satisfies DraftsEvent) catch () => undefined
     }
     return (try send({ type: "announce", requestId: r.requestId })) !== undefined
@@ -150,6 +171,7 @@ export const layer = Layer.effect(MailOperations, effect {
     const held = try record()
     if (held !== undefined && held.phase === "Observed" && !held.sourceHeld && clearable(held)) try send({ type: "clear", requestId: held.requestId })
     const bytes = jsonBytes(wireProposal(kind, proposal))
+    if (bytes > proposalLimit) return "TooLarge"
     const started = try send({ type: "prepare", requestId: id, kind, proposal, composer, source, bytes })
     if (started === undefined) return "Refused"
     return try review(id)
@@ -157,13 +179,14 @@ export const layer = Layer.effect(MailOperations, effect {
 
   effect function confirm(shown: ComposerRef): OperationOutcome!! {
     const r = try record()
-    if (r === undefined || !journalKept) return "Refused"
+    if (r === undefined) return "Refused"
+    if (!journalKept) return "NotKept"
     const confirmed = try send({ type: "confirm", requestId: r.requestId, shown })
     if (confirmed === undefined) return "Refused"
     const account = try grant()
     const receipt = gmail.dispatch(account, r.requestId, r.receipt.digest, r.kind, r.proposal) catch () => undefined
     if (receipt === undefined) return "Uncertain"
-    try send({ type: "answered", requestId: r.requestId, receipt })
+    try answered(r.requestId, receipt)
     const after = try record()
     const announcedNow = after !== undefined ? try settle(after) : false
     return (try outcomeOf(after, announcedNow)) ?? "Uncertain"
@@ -180,7 +203,7 @@ export const layer = Layer.effect(MailOperations, effect {
     const receipt = try read()
     if (r === undefined || receipt === undefined) return try outcomeOf(r, false)
     if (r.sourceHeld) try send({ type: "sourceConfirmed", requestId: r.requestId, receipt })
-    else try send({ type: "answered", requestId: r.requestId, receipt })
+    else try answered(r.requestId, receipt)
     const after = try record()
     const announcedNow = after !== undefined ? try settle(after) : false
     return try outcomeOf(after, announcedNow)
@@ -271,16 +294,12 @@ export const layer = Layer.effect(MailOperations, effect {
       const r = try record()
       const receipt = try read()
       if (r === undefined || receipt === undefined || receipt.receiptState !== "PreparedReceipt") return false
-      try send({ type: "answered", requestId: r.requestId, receipt })
+      try answered(r.requestId, receipt)
       return (try send({ type: "abandon", requestId: r.requestId })) !== undefined
     },
     effect clear() {
       const r = try record()
       return r !== undefined && (try send({ type: "clear", requestId: r.requestId })) !== undefined
-    },
-    effect discardStale(shown: ComposerRef) {
-      const r = try record()
-      return r !== undefined && (try send({ type: "discardStale", requestId: r.requestId, shown })) !== undefined
     },
     effect archiveListed(messageId: string) {
       const fresh = gmail.read(try grant(), messageId) catch () => undefined
@@ -308,7 +327,7 @@ export const layer = Layer.effect(MailOperations, effect {
       const fresh = gmail.draft(try grant(), r.receipt.draftId) catch () => undefined
       if (fresh === undefined) return "unavailable"
       if (fresh.digest !== r.receipt.providerDigest) return "changed"
-      const reviewed = Effect.try(() => JSON.parse(r.composer.content) as DraftFields) catch () => undefined
+      const reviewed = shownFields(r)
       if (reviewed === undefined) return "unavailable"
       const fields: DraftFields = { ...reviewed, mode: draftModes[r.proposal.mail.mode], replyMessage: r.proposal.mail.replyMessage }
       const draft = continuedDraft(newId(), { draftId: fresh.draftId, digest: fresh.digest }, fields)

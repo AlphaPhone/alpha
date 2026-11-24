@@ -13,7 +13,7 @@ import { BrowserAgent } from "../../src/browser/agent.vibe"
 import { FilePicker } from "../../src/files/picker.vibe"
 import { Preferences } from "../../src/settings/preferences.vibe"
 import { Assistant } from "../../src/assistant/assistant.vibe"
-import { layer as inbox, InboxAccounts, Mailbox, MailComposer, MailOperations, MailNoticesShell } from "../../src/inbox/layer.vibe"
+import { layer as inbox, DraftsKept, InboxAccounts, Mailbox, MailComposer, MailOperations, MailNoticesShell } from "../../src/inbox/layer.vibe"
 import { losingAnswer } from "./lost.ts"
 
 const grantA = "grant-a"
@@ -178,5 +178,56 @@ it.live("A notice tap is spent first and then opens the Inbox list of its accoun
     try notices.handleTap()
     const s = try notices.get()
     try Effect.try(() => assert.deepStrictEqual({ tap: s.tap, spent: s.spent, consumed, opened }, { tap: "OpenedList", spent: true, consumed: [{ token: "tap-1" }], opened: ["inbox"] }))
+  }
+})
+
+/** `ElizaSecureStore` whose answer for the one slot `failing` names cannot be read, as a phone whose kept mail cannot be read answers it. */
+function unreadableSlot(failing: string) {
+  const slots = new Map<string, string>()
+  return fakeNative({
+    ElizaSecureStore: {
+      get: (args: unknown) => {
+        const key = (args as { key: string }).key
+        return key === failing ? { value: 42 } : { value: slots.get(key) ?? null }
+      },
+      set: (args: unknown) => { const { key, value } = args as { key: string; value: string }; slots.set(key, value); return {} },
+      remove: (args: unknown) => ({ removed: slots.delete((args as { key: string }).key) }),
+    }
+  })
+}
+
+// spec/inbox/operations.md, "Confirming records the dispatch before Gmail is asked, and only for the email the composer still shows"
+it.live("A send the phone cannot keep a record of says so, and nothing is dispatched", () => effect {
+  const calls: Calls = []
+  const review = { kind: "send", from: "ann@example.com", to: ["bo@example.com"], cc: [], bcc: [], subject: "Friday", mode: "compose", bodyText: "Noon works.", attachments: [], forwardedAttachments: [] }
+  const digest = try sha256Hex(JSON.stringify(review))
+  provide app(gmailCloud(calls, { review, digest }), unreadableSlot("device:alpha/device/inbox/operations")) {
+    const composer = try MailComposer
+    const operations = try MailOperations
+    const mailbox = try Mailbox
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try settle(operations.changes, (j) => j.capabilities.known)
+    try settle(composer.changes, (d) => d.owner !== "")
+    try composer.compose()
+    const open = (try composer.mine()).open
+    try composer.edit({ ...open.fields, toList: ["bo@example.com"], subject: "Friday", body: "Noon works." }, "")
+    try composer.flush()
+    const outcome = try operations.sendDraft((try composer.mine()).open, "r-send")
+    try Effect.try(() => assert.deepStrictEqual({ outcome, dispatches: calls.filter((c) => c === "dispatch").length }, { outcome: "NotKept", dispatches: 0 }))
+  }
+})
+
+// spec/inbox/drafts.md, "Drafts running only in memory say so"
+it.live("Drafts the phone cannot keep run in memory and say so, and the open email can still be written", () => effect {
+  const calls: Calls = []
+  provide app(gmailCloud(calls), unreadableSlot("device:alpha/device/inbox/drafts")) {
+    const composer = try MailComposer
+    const mailbox = try Mailbox
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try settle(composer.changes, (s) => s.owner !== "")
+    const kept = (try DraftsKept).kept
+    const refusal = try composer.compose({ toList: ["bo@example.com"], subject: "Plan", body: "Draft text", files: [] })
+    const open = (try composer.mine()).open.fields.subject
+    try Effect.try(() => assert.deepStrictEqual({ kept, refusal, open }, { kept: false, refusal: undefined, open: "Plan" }))
   }
 })

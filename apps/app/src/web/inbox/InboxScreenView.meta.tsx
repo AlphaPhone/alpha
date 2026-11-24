@@ -12,7 +12,7 @@ const shown = { open: true, top: true, show: none, hide: none };
 export const meta: ComponentMeta<InboxScreenViewProps> = {
   args: {
     onClose: none, accounts: workOnly, mailbox: inboxList, reader: readerClosed, drafts: noDrafts, journal: journalIdle, selection: notSelecting,
-    reviewLayer: closed, linkLayer: closed, act: none, answer: none,
+    reviewLayer: closed, linkLayer: closed, draftsKept: true, composerReloads: 0, act: none, answer: none,
   },
   examples: {
     Restoring: { accounts: restoringAccounts },
@@ -24,6 +24,7 @@ export const meta: ComponentMeta<InboxScreenViewProps> = {
     ReadOnlyAccount: { accounts: personalSelected },
     MessageLoading: { reader: loadingMessage },
     Message: { reader: openMessage, drafts: draftAside },
+    DraftsOnlyInMemory: { drafts: composing, draftsKept: false },
     SendReview: { drafts: composing, journal: journalSendReview, reviewLayer: shown },
     ArchiveUnconfirmed: { journal: journalUnknown, reviewLayer: shown },
   },

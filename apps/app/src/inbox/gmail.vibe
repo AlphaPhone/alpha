@@ -73,7 +73,8 @@ export function wireKind(kind: OpKind): GmailInboxOperationKind {
   return wireKinds[kind]
 }
 
-function opKind(kind: GmailInboxOperationKind): OpKind {
+/** The operation kind a wire name stands for. */
+export function opKind(kind: GmailInboxOperationKind): OpKind {
   return (Object.keys(wireKinds) as OpKind[]).find((k) => wireKinds[k] === kind) ?? "SendKind"
 }
 
@@ -126,7 +127,8 @@ function body(read: GmailReadResult): MailBody {
   }
 }
 
-function receiptOf(w: GmailInboxReceipt, result: typeof WireProviderResult.Type | null): Receipt {
+/** A receipt as managed Gmail answered it, with its decoded provider result. */
+export function receiptOf(w: GmailInboxReceipt, result: typeof WireProviderResult.Type | null): Receipt {
   return {
     requestId: w.requestId, receiptKind: opKind(w.kind), digest: w.reviewDigest, receiptState: receiptStates[w.state],
     messageId: result?.messageId ?? "", historyId: result?.historyId ?? "", draftId: result?.draftId ?? "",
@@ -138,7 +140,8 @@ function fileLine(f: WireReviewedFile): FileLine {
   return { name: f.name, mimeType: f.mimeType ?? "", bytes: f.size, sha256: f.sha256 }
 }
 
-function reviewOf(r: typeof WireReview.Type): Review {
+/** A review as managed Gmail answered it. */
+export function reviewOf(r: typeof WireReview.Type): Review {
   return {
     sender: r.from, toList: r.to ?? [], ccList: r.cc ?? [], bccList: r.bcc ?? [], subject: r.subject ?? "",
     files: (r.attachments ?? []).map(fileLine), forwarded: (r.forwardedAttachments ?? []).map(fileLine)

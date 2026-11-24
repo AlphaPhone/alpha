@@ -1,4 +1,5 @@
-// spec/inbox/drafts.md, "A draft the previous version kept comes into its account's Drafts once, and the previous slots clear only after every draft is kept"
+// spec/inbox/drafts.md, "A draft the previous version kept comes into its account's Drafts once, and the previous slots clear only after every draft is kept"; spec/inbox/operations.md, "An operation the previous version recorded stays the account's operation until its receipt settles"
+import { WireProviderResult, WireReview } from "./wire.schema.vibe"
 
 /** One slot answer of `ElizaSecureStore.get`. */
 export schema PreviousSlot {
@@ -88,6 +89,78 @@ export schema PreviousRecovery {
   toQ: string
 }
 
+/** An attachment of a previous operation's proposal. */
+export schema PreviousProposalFile {
+  name: string
+  mimeType: string
+  dataBase64: string
+}
+
+/** The originals a previous forward proposal named. */
+export schema PreviousProposalForward {
+  messageId: string
+  historyId: string
+  partIds: string[]
+}
+
+/** A previous operation's proposal, as managed Gmail took it. */
+export schema PreviousProposal {
+  kind: "send" | "draft-create" | "draft-replace" | "draft-delete" | "archive" | "unarchive" | "trash" | "untrash" | "mark-read" | "mark-unread" | "star" | "unstar"
+  mode?: "compose" | "reply" | "reply-all" | "forward"
+  to?: string[]
+  cc?: string[]
+  bcc?: string[]
+  subject?: string
+  bodyText?: string
+  attachments?: PreviousProposalFile[]
+  forwardAttachments?: PreviousProposalForward
+  replyMessageId?: string
+  draftId?: string
+  expectedDigest?: string
+  messageId?: string
+  expectedHistoryId?: string
+}
+
+/** A previous operation's receipt, as managed Gmail answered it; its provider result is read with the receipt's own wire schema. */
+export schema PreviousReceipt {
+  requestId: string
+  kind: "send" | "draft-create" | "draft-replace" | "draft-delete" | "archive" | "unarchive" | "trash" | "untrash" | "mark-read" | "mark-unread" | "star" | "unstar"
+  reviewDigest: string
+  state: "prepared" | "dispatched" | "succeeded" | "rejected" | "outcome-unknown"
+  rejectionCode?: string | null
+}
+
+/** The Gmail draft a previous send was made from. */
+export schema PreviousOperationProvider {
+  draftId: string
+  providerDigest: string
+}
+
+/** The local draft a previous send was made from. */
+export schema PreviousOperationSource {
+  draftId: string
+  savedRevision?: string
+  providerDraft?: PreviousOperationProvider
+}
+
+/** The composer draft a previous send or Gmail draft save was bound to. */
+export schema PreviousOperationComposer {
+  draftId: string
+}
+
+/** The one operation the previous version kept for an account and Gmail grant; its review is read with the review's own wire schema. */
+export schema PreviousOperation {
+  version: number
+  owner: string
+  grantId: string
+  requestId: string
+  proposal: PreviousProposal
+  phase: "preparing" | "review" | "dispatching" | "observed"
+  receipt: PreviousReceipt | null
+  source?: PreviousOperationSource
+  composer?: PreviousOperationComposer
+}
+
 /** Decodes an `ElizaSecureStore.get` answer. */
 export const decodePreviousSlot = Schema.decodeUnknownEffect(PreviousSlot)
 /** Decodes a previous saved draft from its stored JSON. */
@@ -98,3 +171,19 @@ export const decodePreviousShelf = Schema.decodeUnknownEffect(Schema.fromJsonStr
 export const decodePreviousRecoveryEnvelope = Schema.decodeUnknownEffect(Schema.fromJsonString(PreviousRecoveryEnvelope))
 /** Decodes a previous recovery copy from its envelope's text. */
 export const decodePreviousRecovery = Schema.decodeUnknownEffect(Schema.fromJsonString(PreviousRecovery))
+/** Decodes a previous operation record from its stored JSON. */
+export const decodePreviousOperation = Schema.decodeUnknownEffect(Schema.fromJsonString(PreviousOperation))
+
+/** The provider result of a previous operation's receipt. */
+export schema PreviousAnswerReceipt {
+  providerResult?: WireProviderResult | null
+}
+
+/** What a previous operation record holds as managed Gmail answered it: its review and its receipt's provider result. */
+export schema PreviousAnswers {
+  review?: WireReview | null
+  receipt?: PreviousAnswerReceipt | null
+}
+
+/** Decodes the review and provider result of a previous operation record from its stored JSON. */
+export const decodePreviousAnswers = Schema.decodeUnknownEffect(Schema.fromJsonString(PreviousAnswers))

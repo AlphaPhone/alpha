@@ -15,7 +15,7 @@ import { layer as accounts } from "./accounts.vibe"
 import { layer as reader } from "./reader.vibe"
 import { layer as mailbox } from "./mailbox.vibe"
 import { JournalKept, layer as operations } from "./operations.vibe"
-import { layer as composer } from "./composer.vibe"
+import { DraftsKept, layer as composer } from "./composer.vibe"
 import { layer as selection } from "./selection.vibe"
 import { layer as notices } from "./notices.vibe"
 import { mailSenderFill } from "./handoffs.vibe"
@@ -28,7 +28,7 @@ export { InboxAccounts } from "./accounts.vibe"
 export { Reader } from "./reader.vibe"
 export { Mailbox } from "./mailbox.vibe"
 export { MailOperations } from "./operations.vibe"
-export { MailComposer } from "./composer.vibe"
+export { DraftsKept, MailComposer } from "./composer.vibe"
 export { MailSelection } from "./selection.vibe"
 export { MailNoticesShell } from "./notices.vibe"
 export { MailSuggestions } from "./suggestions.vibe"
@@ -39,10 +39,12 @@ export { inboxCapabilities } from "./handoffs.vibe"
 export { keepPreviousDrafts } from "./previous.vibe"
 export type { ComposerBack } from "./composer.vibe"
 
-/** The drafts and operation journal kept in the phone's mail store, each held for review and started fresh where what is kept is not a state; a journal only in memory says so, and nothing is dispatched from it. */
+/** The drafts and operation journal kept in the phone's mail store, each held for review and started fresh where what is kept is not a state; drafts or a journal only in memory say so, and nothing is dispatched from such a journal. */
 export const mailMachines = Layer.provide(
   Layer.mergeAll(
-    storedOrHeld(keys.drafts, decodeDrafts, storedDrafts(keys.drafts), draftsMachine()),
+    storedOrHeld(keys.drafts, decodeDrafts,
+      Layer.merge(storedDrafts(keys.drafts), Layer.succeed(DraftsKept, { kept: true })),
+      Layer.merge(draftsMachine(), Layer.succeed(DraftsKept, { kept: false }))),
     storedOrHeld(keys.operations, decodeJournal,
       Layer.merge(storedJournal(keys.operations), Layer.succeed(JournalKept, { kept: true })),
       Layer.merge(journalMachine(), Layer.succeed(JournalKept, { kept: false }))),

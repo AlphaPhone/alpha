@@ -3,7 +3,7 @@ import { assert, it } from "@effect/vitest"
 import { MailProtocolFailed, sha256Hex } from "@elizaos/plugin-inbox/mailbox"
 import { fakeNative } from "../../src/platform/layers.vibe"
 import { failureOf } from "../../src/inbox/gmail.vibe"
-import { suggestRecipients } from "../../src/inbox/composer.vibe"
+import { outgoing, suggestRecipients } from "../../src/inbox/composer.vibe"
 import { composerRef } from "../../src/inbox/operations.vibe"
 import { senderImageFacts } from "../../src/inbox/text.ts"
 import { emailShareTarget } from "../../src/inbox/shareTarget.vibe"
@@ -34,6 +34,7 @@ const sendReview = { kind: "send", from: "ann@example.com", to: ["bo@example.com
 
 effect function writeFriday() {
   const composer = try MailComposer
+  try settle(composer.changes, (d) => d.owner !== "")
   try composer.compose()
   const open = (try composer.mine()).open
   try composer.edit({ ...open.fields, toList: ["bo@example.com"], subject: "Friday", body: "Noon works." }, "")
@@ -426,6 +427,57 @@ it.live("Clean up after a send and say Sent once: a recheck of the same receipt 
     try Effect.try(() => assert.deepStrictEqual(
       { sent, recheck, tapAgain, announced, cleared, dispatches: log.cloud.filter((c) => c === "dispatch").length },
       { sent: "Sent", recheck: "SentBefore", tapAgain: "SentBefore", announced: ["r-send"], cleared: true, dispatches: 1 }))
+  }
+})
+
+// spec/inbox/operations.md, "An answer is adopted only for the same request, kind and review, and an outcome never goes back"
+it.live("A prepared answer after a recorded outcome is refused: the saved receipt stays and the owner is told", () => effect {
+  const log = calls()
+  const digest = try sha256Hex(JSON.stringify(sendReview))
+  const answers = ["succeeded", "prepared"]
+  const routes = {
+    ...sendRoutes(log, true),
+    "GET /api/v1/eliza/google/gmail/inbox-v1/operations/r-send": () => {
+      const state = answers.shift() ?? "prepared"
+      return { version: 1, providerExactlyOnce: false, receipt: { requestId: "r-send", kind: "send", reviewDigest: digest, state, providerResult: state === "succeeded" ? { messageId: "sent-1" } : null, rejectionCode: null } }
+    },
+  }
+  provide inboxApp(log, mailCloud(log, routes, { review: sendReview, digest })) {
+    const mailbox = try Mailbox
+    const operations = try MailOperations
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try settle(operations.changes, (j) => j.capabilities.known)
+    const lost = try operations.sendDraft(try writeFriday(), "r-send")
+    const sent = try operations.refresh()
+    try operations.refresh()
+    const kept = try operations.current()
+    const notice = (try operations.get()).notice
+    try Effect.try(() => assert.deepStrictEqual(
+      { lost, sent, notice, phase: kept?.phase, receipt: kept?.receipt.receiptState },
+      { lost: "Uncertain", sent: "Sent", notice: "AnswerRefused", phase: "Observed", receipt: "SucceededReceipt" }))
+  }
+})
+
+// spec/inbox/drafts.md, "Edits apply only to the open draft at the revision they were made on"; spec/inbox/operations.md, "An account holds at most one operation, and a kind is offered only when the account allows it"
+it.live("An edit or send too large for the phone says so, and an edit the draft cannot take is reloaded instead", () => effect {
+  const log = calls()
+  provide inboxApp(log, mailCloud(log)) {
+    const mailbox = try Mailbox
+    const composer = try MailComposer
+    const operations = try MailOperations
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try settle(operations.changes, (j) => j.capabilities.known)
+    const draft = try writeFriday()
+    try composer.edit({ ...draft.fields, body: "x".repeat(9 * 1024 * 1024) }, "")
+    const tooLarge = try composer.flush()
+    try composer.edit({ ...draft.fields, mode: "ForwardMode" }, "")
+    const changed = try composer.flush()
+    const kept = (try composer.mine()).open
+    const big = outgoing("big.pdf", "application/pdf", 6000000, "a".repeat(64), "A".repeat(8000000))
+    const send = try operations.sendDraft({ ...kept, fields: { ...kept.fields, files: [big] } }, "r-big")
+    try Effect.try(() => assert.deepStrictEqual(
+      { tooLarge, changed, body: kept.fields.body, mode: kept.fields.mode, send, prepared: log.cloud.filter((c) => c.startsWith("prepare")).length },
+      { tooLarge: "draft-too-large", changed: "changed", body: "Noon works.", mode: "ComposeMode", send: "TooLarge", prepared: 0 }))
   }
 })
 

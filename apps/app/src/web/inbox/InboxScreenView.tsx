@@ -5,7 +5,7 @@ import { useState } from "react";
 import { readable, showsConnect, mayChangeMail, type MailAccounts } from "../../../gen/inbox__accounts.ts";
 import { visibleFolders, draftsView, type Folder, type Mailbox as MailboxState } from "../../../gen/inbox__mailbox.ts";
 import type { MailLink, Reader as ReaderState } from "../../../gen/inbox__reader.ts";
-import { accountOf, hasDraft, type Drafts } from "../../../gen/inbox__drafts.ts";
+import { accountOf, hasDraft, saysNotKept, type Drafts } from "../../../gen/inbox__drafts.ts";
 import { recordOf, kindAllowed, isComposerKind, type Journal } from "../../../gen/inbox__operations.ts";
 import type { Selection } from "../../../gen/inbox__selection.ts";
 import { InboxAccounts } from "../../inbox/accounts.vibe";
@@ -22,7 +22,7 @@ import { DraftsList } from "./DraftsList.tsx";
 import { MailList } from "./MailList.tsx";
 import { LinkReviewDialog, MessageView } from "./MessageView.tsx";
 import { ReviewSheet } from "./ReviewSheet.tsx";
-import { admissionRefusal, attachmentRefusal, composerRefusal, folderNames, journalNotice, operationOutcome, outcomeFeedback } from "./messages.ts";
+import { admissionRefusal, attachmentRefusal, composerRefusal, draftsNotKept, folderNames, journalNotice, operationOutcome, outcomeFeedback } from "./messages.ts";
 import type { AppServices } from "../runtime.ts";
 import type { act as runAction, answer as runAnswer } from "../shell/services.ts";
 import type { useLayer } from "../shell/useLayer.ts";
@@ -48,6 +48,10 @@ export interface InboxScreenViewProps extends ScreenProps {
   reviewLayer: InboxLayer;
   /** The link review's navigation layer. */
   linkLayer: InboxLayer;
+  /** Whether the drafts are kept in the phone's mail store, rather than only in memory. */
+  draftsKept: boolean;
+  /** How many times the composer had to show the saved draft again because an edit over it was refused. */
+  composerReloads: number;
   /** Runs one Inbox effect without awaiting it. */
   act: typeof runAction;
   /** Runs one Inbox effect and hands its answer on. */
@@ -59,7 +63,7 @@ export interface InboxScreenViewProps extends ScreenProps {
  * the account's one operation.
  * @model spec/inbox/mailbox.md
  */
-export function InboxScreenView({ onClose, accounts, mailbox, reader, drafts, journal, selection, reviewLayer, linkLayer, act, answer }: InboxScreenViewProps) {
+export function InboxScreenView({ onClose, accounts, mailbox, reader, drafts, journal, selection, reviewLayer, linkLayer, draftsKept, composerReloads, act, answer }: InboxScreenViewProps) {
   const [notice, setNotice] = useState("");
   const [search, setSearch] = useState({ shown: mailbox.query, open: mailbox.query !== "", text: mailbox.query });
   if (search.shown !== mailbox.query) setSearch({ shown: mailbox.query, open: mailbox.query !== "", text: mailbox.query });
@@ -69,6 +73,7 @@ export function InboxScreenView({ onClose, accounts, mailbox, reader, drafts, jo
   const [link, setLink] = useState<(LinkReview & { text: string }) | undefined>(undefined);
   const closeLink = () => { setLink(undefined); linkLayer.hide(); };
 
+  const draftsOnlyInMemory = saysNotKept(draftsKept ? "KeptOnPhone" : "MemoryOnly");
   const mine = accountOf(drafts.owner, drafts);
   const caps = journal.capabilities;
   const record = journal.records.some((r) => r.owner === journal.owner) ? recordOf(journal.owner, journal) : undefined;
@@ -123,9 +128,10 @@ export function InboxScreenView({ onClose, accounts, mailbox, reader, drafts, jo
   const openDraft = mine.open;
   return (
     <main className="flex h-full flex-col overflow-y-auto">
+      {draftsOnlyInMemory && <p role="alert" className="sticky top-0 bg-card px-4 py-2 text-sm shadow-md">{draftsNotKept}</p>}
       {mine.composing && hasDraft(openDraft) ? (
         <ComposerView
-          key={`${openDraft.id}:${openDraft.fields.files.length}:${openDraft.fields.forward.parts.length}`}
+          key={`${openDraft.id}:${openDraft.fields.files.length}:${openDraft.fields.forward.parts.length}:${composerReloads}`}
           draft={openDraft} account={account} accounts={readableRows} busy={busy}
           canSend={writable && caps.send} canSaveToGmail={writable && caps.providerDrafts}
           onEdit={(fields, pendingTo) => act(Effect.flatMap(Effect.service(MailComposer), (c) => c.edit(fields, pendingTo)))}

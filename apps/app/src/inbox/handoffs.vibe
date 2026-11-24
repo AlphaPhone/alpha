@@ -14,7 +14,7 @@ function answerOf(outcome: OperationOutcome | undefined): SendAnswer {
   switch (outcome) {
     case "Sent": case "SentBefore": return "Delivered"
     case "Rejected": return "GmailRejected"
-    case "Unsent": case "Refused": case "Discarded": case "SignedOut": case "NotStarted": case "AwaitingReview": case undefined: return "Unsent"
+    case "Unsent": case "Refused": case "NotKept": case "TooLarge": case "Discarded": case "SignedOut": case "NotStarted": case "AwaitingReview": case undefined: return "Unsent"
     default: return "NoAnswer"
   }
 }

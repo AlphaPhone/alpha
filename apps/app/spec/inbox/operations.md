@@ -20,7 +20,8 @@ the next change the owner starts, so one archive or send never blocks the next.
 
 Send needs send access, Gmail drafts need draft access, archive and Trash need mailbox changes, star
 changes need stars and read changes need read state; a forward with original attachments also needs
-forwarding of originals. A proposal over 7.5 MiB is refused before it is recorded.
+forwarding of originals. A proposal over 7.5 MiB is refused before it is recorded, and the owner is
+told it is too large rather than that the account refused it.
 
 ```quint
 import attachments.* from "./attachments"
@@ -100,7 +101,9 @@ pure val dxValues = Set(-120, -10, 120)
 ### A proposal is recorded under its request id before Gmail reviews it
 
 The composer's draft id and the exact content it showed are recorded with a send or a Gmail draft
-save; a send also records the local draft it came from. Only one operation per account can wait.
+save, each attachment in that content named by its name, type, size and SHA-256, since the proposal
+already carries its bytes once; a send also records the local draft it came from. Only one operation
+per account can wait.
 
 ```quint
 type ReceiptState = NoReceipt | PreparedReceipt | DispatchedReceipt | SucceededReceipt | RejectedReceipt | UnknownReceipt
@@ -189,7 +192,8 @@ the composer still showing exactly the reviewed draft, read again once Gmail's r
 email edited while Gmail reviewed it has that review discarded and is not sent. The operation is
 stored as dispatching before the request leaves, so a lost answer can never lead to a second
 dispatch; a journal running only in memory, because the kept one could not be read or set apart,
-confirms nothing.
+confirms nothing, and the owner is told the phone could not save the record of the change rather
+than that the account refused it.
 
 ```quint
 pure def canConfirm(s: Journal, requestId: str, shown: ComposerRef): bool = {
@@ -201,7 +205,8 @@ pure def confirm(s: Journal, requestId: str, shown: ComposerRef): Journal = with
 pure def findRecord(owner: str, requestId: str, s: Journal): OperationRecord = s.records.foldl(noRecord, (found, r) => if (r.owner == owner and r.requestId == requestId) r else found)
 pure def stepADispatchFollowsAConfirmedReview(before: Journal, via: str, after: Journal): bool =
   after.records.every(r => (r.phase == Dispatching and findRecord(r.owner, r.requestId, before).phase != Dispatching) implies
-    (via == "confirm" and findRecord(r.owner, r.requestId, before).phase == Reviewing))
+    ((via == "confirm" and findRecord(r.owner, r.requestId, before).phase == Reviewing)
+     or (via == "adoptPrevious" and not(hasRecord(r.owner, before)))))
 pure val shownValues = composerValues
 pure def sometimesDispatching(s: Journal): bool = s.records.some(r => r.phase == Dispatching)
 ```
@@ -286,7 +291,8 @@ A dispatch or receipt answer must name the request, its kind and its review dige
 mailbox change must name the message it was for. A prepared answer to a dispatching operation means
 Gmail has not started it yet: the operation stays dispatching, and the owner may discard it after a
 warning that a late request could still arrive. A prepared answer after an outcome was recorded is
-refused, and the saved receipt is kept.
+refused, and so is any answer for another request, kind or review: the saved receipt is kept, and
+the owner is told that Gmail's answer did not match the operation.
 
 ```quint
 pure def labelTarget(proposal: Proposal): str = match proposal { | LabelProposal(x) => x.messageId | _ => "" }
@@ -302,6 +308,11 @@ pure def answered(s: Journal, requestId: str, receipt: Receipt): Journal = {
   val r = recordOf(s.owner, s)
   withRecord({ ...r, receipt: receipt, phase: if (receipt.receiptState == PreparedReceipt) Dispatching else Observed }, s)
 }
+pure def canAnswerRefused(s: Journal, requestId: str): bool = hasRecord(s.owner, s) and recordOf(s.owner, s).requestId == requestId
+pure def answerRefused(s: Journal, requestId: str): Journal = { ...s, notice: AnswerRefused }
+pure def stepARefusedAnswerKeepsTheSavedReceipt(before: Journal, via: str, after: Journal): bool =
+  via == "answerRefused" implies after.records == before.records
+pure def sometimesAnswerRefused(s: Journal): bool = s.notice == AnswerRefused and s.records != List()
 pure def notStarted(r: OperationRecord): bool = r.phase == Dispatching and r.receipt.receiptState == PreparedReceipt
 pure def stepAnOutcomeNeverReturnsToReview(before: Journal, after: Journal): bool =
   before.records.every(r => r.phase == Observed implies (findRecord(r.owner, r.requestId, after).phase == Observed or not(after.records.some(o => o.owner == r.owner and o.requestId == r.requestId))))
@@ -360,6 +371,51 @@ pure def withdraw(s: Journal): Journal = {
 pure def stepWithdrawalKeepsAnAttemptedOperation(before: Journal, via: str, after: Journal): bool =
   via == "withdraw" implies before.records.every(r => (r.phase == Dispatching or r.phase == Observed) implies after.records.includes(r))
 pure def sometimesWithdrawnReviewDiscarded(s: Journal): bool = s.notice == AccessWithdrawn
+```
+
+### An operation the previous version recorded stays the account's operation until its receipt settles
+
+The previous version kept each account's one operation in the phone's secure slots (in the browser
+build, its private storage), under the account's environment, user, organization and Gmail grant.
+When the composer binds to an account, before the previous drafts come in, an operation recorded
+there that was dispatching, or whose outcome was not known yet, becomes that account's operation
+here under its own request id, kind, proposal, review and receipt. It is the dispatch the previous
+version confirmed, not a new one: it blocks every send until a read of its receipt says what
+happened, and nothing dispatches it again. A send that had succeeded from a local draft comes in
+held, as a send restored after a restart is, so its local copy is removed or marked as an earlier
+version once a fresh receipt read agrees. One that was still being prepared or reviewed is dropped,
+since nothing left the phone, and so is any other settled one. The previous slot is cleared once the
+operation is kept in the phone's mail store or was dropped; a slot that does not read back, or whose
+operation the account cannot take because it already holds one, stays.
+
+```quint
+pure def unsettledAttempt(r: OperationRecord): bool =
+  (r.phase == Dispatching or r.phase == Observed) and not(r.sourceHeld)
+  and r.receipt.receiptState != NoReceipt and r.receipt.receiptState != SucceededReceipt and r.receipt.receiptState != RejectedReceipt
+  and not(r.phase == Observed and r.receipt.receiptState == PreparedReceipt)
+pure def heldSentCopy(r: OperationRecord): bool =
+  r.kind == SendKind and r.phase == Observed and r.receipt.receiptState == SucceededReceipt and r.receipt.messageId != "" and r.source != noSource and r.sourceHeld
+pure def adoptable(r: OperationRecord): bool =
+  r.owner != "" and r.requestId != "" and r.receipt.requestId == r.requestId and r.receipt.receiptKind == r.kind and r.receipt.digest != ""
+  and proposalFits(r.kind, r.proposal) and (isComposerKind(r.kind) iff r.composer.draftId != "") and (r.kind == SendKind or r.source == noSource)
+  and (unsettledAttempt(r) or heldSentCopy(r))
+pure def canAdoptPrevious(s: Journal, previous: OperationRecord): bool = adoptable(previous) and not(hasRecord(previous.owner, s))
+pure def adoptPrevious(s: Journal, previous: OperationRecord): Journal = withRecord(previous, s)
+pure def lawAnAdoptedOperationIsExactlyThePreviousOne(s: Journal, previous: OperationRecord): bool =
+  canAdoptPrevious(s, previous) implies recordOf(previous.owner, adoptPrevious(s, previous)) == previous
+pure def lawAnAdoptedAttemptBlocksEverySend(previous: OperationRecord, shown: ComposerRef): bool =
+  unsettledAttempt(previous) implies (sendStep(true, previous, shown) == ReadReceipt and not(clearable(previous)))
+pure def lawAnAdoptedSendCleansUpOnlyAfterAFreshRead(previous: OperationRecord): bool = heldSentCopy(previous) implies not(cleanupReady(previous))
+pure val previous1: OperationRecord = { ...noRecord, owner: "o1", requestId: "p1", kind: SendKind,
+  proposal: MessageProposal({ mail: mail1, draftId: "", expectedDigest: "" }), phase: Dispatching, review: review1,
+  receipt: { ...prepared1, requestId: "p1" }, composer: { draftId: "d1", content: "c1" }, source: { localDraft: "d1", revision: 1, gmailDraft: "", gmailDigest: "" } }
+pure val previousValues = Set(previous1)
+  .union(Set({ ...previous1, owner: "o2", kind: ArchiveKind, proposal: LabelProposal({ messageId: "m1", expectedHistoryId: "h1" }), phase: Observed,
+    receipt: { ...prepared1, requestId: "p1", receiptKind: ArchiveKind, receiptState: UnknownReceipt }, composer: noComposer, source: noSource }))
+  .union(Set({ ...previous1, phase: Reviewing }))
+  .union(Set({ ...previous1, phase: Observed, sourceHeld: true, receipt: { ...prepared1, requestId: "p1", receiptState: SucceededReceipt, messageId: "s1" } }))
+  .union(Set({ ...previous1, phase: Observed, receipt: { ...prepared1, requestId: "p1", receiptState: RejectedReceipt } }))
+pure def sometimesAPreviousOperationAdopted(s: Journal): bool = s.records.some(r => r.requestId == "p1" and r.phase == Dispatching)
 ```
 
 ## Story: Clean up after a send, and say Sent once

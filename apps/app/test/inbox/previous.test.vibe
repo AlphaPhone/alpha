@@ -1,10 +1,11 @@
-// spec/inbox/drafts.md, "Story: Keep the drafts I wrote before this version"; spec/inbox/operations.md, "The phone advertises the agent's local email draft only when the agent offers it"
+// spec/inbox/drafts.md, "Story: Keep the drafts I wrote before this version"; spec/inbox/operations.md, "An operation the previous version recorded stays the account's operation until its receipt settles"; spec/inbox/operations.md, "The phone advertises the agent's local email draft only when the agent offers it"
 import { assert, it } from "@effect/vitest"
 import { fakeNative, fakeResident, buildInfo } from "../../src/platform/layers.vibe"
 import { memoryStore } from "../../src/platform/storage.vibe"
-import { layer as inbox, InboxAccounts, Mailbox, MailComposer, inboxCapabilities, keepPreviousDrafts } from "../../src/inbox/layer.vibe"
+import { layer as inbox, InboxAccounts, Mailbox, MailComposer, MailOperations, inboxCapabilities, keepPreviousDrafts } from "../../src/inbox/layer.vibe"
 import { previousOwners } from "../../src/inbox/previous.vibe"
 import { sha256Hex } from "../../src/inbox/text.ts"
+import { Notices } from "../../src/shell/notices.vibe"
 import { calls, grantA, mailCloud, neighbors, settle } from "./support.vibe"
 
 const previous = JSON.stringify(["production", "u1", "org1", grantA])
@@ -116,6 +117,97 @@ it.live("A previous draft of another account is never brought in, and its slot i
 it.effect("An account outside Eliza Cloud has no previous drafts", () => effect {
   const alpha = JSON.stringify(["AlphaCloud/Production", "u1", "org1", grantA])
   try Effect.try(() => assert.deepStrictEqual({ alpha: previousOwners(alpha, [grantA]), broken: previousOwners("not json", [grantA]) }, { alpha: [], broken: [] }))
+})
+
+// spec/inbox/drafts.md, "A draft the previous version kept comes into its account's Drafts once, and the previous slots clear only after every draft is kept"
+it.live("Previous drafts that do not fit a full Drafts are counted for the owner, and their slot is kept", () => effect {
+  const log = calls()
+  const shown: string[] = []
+  const ownerHash = try tryPromise({ try: () => sha256Hex(previous), catch: (cause) => cause })
+  const shelfSlot = `inbox-drafts:v1:shelf:${ownerHash}`
+  const items = Array.from({ length: 51 }, (_, i) => ({ draft: previousDraft(`p-${i}`), toQ: "" }))
+  const slots = new Map<string, string>([[shelfSlot, JSON.stringify({ version: 1, owner: previous, items })]])
+  const notices = Layer.succeed(Notices, { show: (message: string) => sync(() => { shown.push(message) }) } as unknown as Notices.Shape)
+  provide Layer.provideMerge(inbox, Layer.mergeAll(mailCloud(log), secureStore(slots), fakeResident({}), buildInfo(), memoryStore, neighbors(log), notices)) {
+    const accounts = try InboxAccounts
+    const mailbox = try Mailbox
+    const composer = try MailComposer
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try settle(composer.changes, (s) => s.accounts.some((a) => a.shelf.length === 50))
+    const again = try keepPreviousDrafts(try accounts.selectedKey())
+    try Effect.try(() => assert.deepStrictEqual(
+      { again, told: shown.includes("1 earlier draft could not be brought over because Drafts is full. Delete some drafts to bring them in."), left: slots.has(shelfSlot) },
+      { again: 0, told: true, left: true }))
+  }
+})
+
+// spec/inbox/operations.md, "An operation the previous version recorded stays the account's operation until its receipt settles"
+it.live("A send the previous version was dispatching blocks every send until its receipt settles, and is never dispatched again", () => effect {
+  const log = calls()
+  const key = try tryPromise({ try: () => sha256Hex(JSON.stringify([JSON.stringify(["production", "u1", "org1"]), grantA])), catch: (cause) => cause })
+  const operationSlot = `inbox-operation:v1:${key}`
+  const proposal = { kind: "send", mode: "compose", to: ["bo@example.com"], cc: [], bcc: [], subject: "Lunch", bodyText: "Saved body", attachments: [] }
+  const review = { kind: "send", from: "ann@example.com", to: ["bo@example.com"], cc: [], bcc: [], subject: "Lunch", mode: "compose", bodyText: "Saved body", attachments: [], forwardedAttachments: [] }
+  const ledger = { state: "outcome-unknown" }
+  const slots = new Map<string, string>([
+    [operationSlot, JSON.stringify({
+      version: 1, owner: JSON.stringify(["production", "u1", "org1"]), grantId: grantA, requestId: "r-prev", proposal, phase: "dispatching", review,
+      receipt: { requestId: "r-prev", kind: "send", reviewDigest: "f".repeat(64), state: "prepared", providerResult: null, rejectionCode: null },
+      source: { draftId: "p-sent", savedRevision: "rev-p-sent" }, composer: { draftId: "p-sent" },
+    })],
+    [`inbox-drafts:v1:${previous}`, JSON.stringify(previousDraft("p-sent"))],
+  ])
+  const receipt = () => {
+    log.cloud.push("receipt")
+    return { version: 1, providerExactlyOnce: false, receipt: { requestId: "r-prev", kind: "send", reviewDigest: "f".repeat(64), state: ledger.state, providerResult: ledger.state === "succeeded" ? { messageId: "sent-1" } : null, rejectionCode: null } }
+  }
+  const cloud = mailCloud(log, { "GET /api/v1/eliza/google/gmail/inbox-v1/operations/r-prev": receipt })
+  provide Layer.provideMerge(inbox, Layer.mergeAll(cloud, secureStore(slots), fakeResident({}), buildInfo(), memoryStore, neighbors(log))) {
+    const mailbox = try Mailbox
+    const composer = try MailComposer
+    const operations = try MailOperations
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try settle(composer.changes, (s) => s.accounts.some((a) => a.shelf.some((d) => d.id === "p-sent")))
+    try settle(operations.changes, (j) => j.records.some((r) => r.requestId === "r-prev" && r.receipt.receiptState === "UnknownReceipt"))
+    const adopted = try operations.current()
+    try composer.compose()
+    const open = (try composer.mine()).open
+    try composer.edit({ ...open.fields, toList: ["cy@example.com"], subject: "Another", body: "Hi" }, "")
+    const blocked = try composer.send()
+    ledger.state = "succeeded"
+    const settled = try operations.refresh()
+    const shelf = (try composer.mine()).shelf
+    try Effect.try(() => assert.deepStrictEqual({
+      adopted: { requestId: adopted?.requestId, phase: adopted?.phase, kind: adopted?.kind, source: adopted?.source.localDraft },
+      blocked, settled, sentCopyLeft: shelf.some((d) => d.id === "p-sent"),
+      prepared: log.cloud.filter((c) => c.startsWith("prepare")).length, slotLeft: slots.has(operationSlot),
+    }, {
+      adopted: { requestId: "r-prev", phase: "Observed", kind: "SendKind", source: "p-sent" },
+      blocked: "Uncertain", settled: "Sent", sentCopyLeft: false,
+      prepared: 0, slotLeft: false,
+    }))
+  }
+})
+
+// spec/inbox/operations.md, "An operation the previous version recorded stays the account's operation until its receipt settles"
+it.live("A review the previous version never confirmed is dropped, and nothing of it is kept", () => effect {
+  const log = calls()
+  const key = try tryPromise({ try: () => sha256Hex(JSON.stringify([JSON.stringify(["production", "u1", "org1"]), grantA])), catch: (cause) => cause })
+  const operationSlot = `inbox-operation:v1:${key}`
+  const slots = new Map<string, string>([[operationSlot, JSON.stringify({
+    version: 1, owner: JSON.stringify(["production", "u1", "org1"]), grantId: grantA, requestId: "r-review",
+    proposal: { kind: "archive", messageId: "m1", expectedHistoryId: "41" }, phase: "review", review: null,
+    receipt: { requestId: "r-review", kind: "archive", reviewDigest: "f".repeat(64), state: "prepared", providerResult: null, rejectionCode: null },
+  })]])
+  provide inboxOver(log, slots) {
+    const accounts = try InboxAccounts
+    const mailbox = try Mailbox
+    const operations = try MailOperations
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try keepPreviousDrafts(try accounts.selectedKey())
+    const held = try operations.current()
+    try Effect.try(() => assert.deepStrictEqual({ held: held?.requestId, slotLeft: slots.has(operationSlot) }, { held: undefined, slotLeft: false }))
+  }
 })
 
 // spec/inbox/operations.md, "The phone advertises the agent's local email draft only when the agent offers it"

@@ -2,7 +2,7 @@
 import {
   type Event as DraftsEvent, type Drafts, type Draft, type DraftFields, type AccountDrafts, type DraftPick, type ForwardSource,
   Machine as DraftsMachine, accountOf, emptyFields, noDraft, noForward, noProvider, hasDraft, meaningful, shelfRoom, replyRecipients, replyCopies,
-  forwardKeepsOriginals, editableHere, threadReply, coalesceDelay, editDelay, editMaximumWait, draftBytesLimit, recipientSuggestions
+  forwardKeepsOriginals, editableHere, threadReply, coalesceDelay, editDelay, editMaximumWait, draftBytesLimit, recipientSuggestions, editRefusal
 } from "../../gen/inbox__drafts.effect.vibe"
 import { type OutgoingFile, type Admission, admit, handoffOutcome, type HandoffOutcome, fileAccepted } from "../../gen/inbox__attachments.effect.vibe"
 import { Machine as JournalMachine } from "../../gen/inbox__operations.effect.vibe"
@@ -24,6 +24,7 @@ import { newId } from "../platform/ids.ts"
 export type ComposerRefusal =
   | "no-account" | "drafts-full" | "changed" | "no-reply-address" | "unclear-recipient" | "not-movable" | "destination-busy"
   | "edit-in-gmail" | "gmail-draft-changed" | "admission" | FileRefusal | "file-changed" | "account-changed" | "duplicate" | "not-ready" | "too-long"
+  | "draft-too-large"
 
 /** A file the owner picked or shared, before it is checked. */
 export interface PickedFile { readonly name: string; readonly mimeType: string; readonly dataBase64: string; readonly sha256?: string }
@@ -34,9 +35,17 @@ export interface ComposerBack { readonly taken: boolean; readonly refusal?: Comp
 /** What a new email starts with. */
 export interface Prefill { readonly toList: string[]; readonly subject: string; readonly body: string; readonly files: OutgoingFile[] }
 
+/** Whether the drafts are the ones kept in the phone's mail store, or only a copy in memory because the kept ones could not be read or set apart. */
+export service DraftsKept {
+  readonly kept: boolean
+  static readonly defaultValue = () => ({ kept: true })
+}
+
 /** The composer of the selected account and its Drafts. */
 export service MailComposer {
   readonly changes: Stream.Stream<Drafts>
+  /** Counts each time the composer must show the saved draft again because an edit over it was refused. */
+  readonly reloads: Stream.Stream<number>
   get(): Drafts!!
   /** The selected account's drafts. */
   mine(): AccountDrafts!!
@@ -109,7 +118,9 @@ export const layer = Layer.effect(MailComposer, effect {
   const scope = try Effect.scope
   const waiting = try Ref.make<{ fields: DraftFields; pendingTo: string; first: number } | undefined>(undefined)
   const timer = try Ref.make<Fiber.Fiber<unknown, unknown> | undefined>(undefined)
-  const conflict = try Ref.make(false)
+  const refused = try Ref.make<ComposerRefusal | undefined>(undefined)
+  const reloads = try PubSub.unbounded<number>()
+  const reloaded = try Ref.make(0)
   const writing = try Semaphore.make(1)
   const notices = try Effect.serviceOption(Notices)
 
@@ -129,13 +140,21 @@ export const layer = Layer.effect(MailComposer, effect {
       const open = (try mine()).open
       if (!hasDraft(open)) return undefined
       const next = { ...open, fields: w.fields, pendingTo: w.pendingTo }
-      const done = try send({ type: "edit", id: open.id, revision: open.revision, edits: w.fields, pendingTo: w.pendingTo, bytes: jsonBytes(next) })
-      if (done === undefined) {
-        const already = try Ref.getAndSet(conflict, true)
-        if (!already && Option.isSome(notices)) try notices.value.show("The saved draft changed. Reload it before continuing; your last edit was not kept.")
-        return "changed"
+      const bytes = jsonBytes(next)
+      const done = try send({ type: "edit", id: open.id, revision: open.revision, edits: w.fields, pendingTo: w.pendingTo, bytes })
+      if (done !== undefined) {
+        try Ref.set(refused, undefined)
+        return undefined
       }
-      return undefined
+      if (editRefusal(w.fields, bytes) === "EditTooLarge") {
+        const before = try Ref.getAndSet(refused, "draft-too-large")
+        if (before !== "draft-too-large" && Option.isSome(notices)) try notices.value.show("This email is too large to keep on the phone. Remove an attachment; your last edit was not kept.")
+        return "draft-too-large"
+      }
+      try Ref.set(refused, "changed")
+      if (Option.isSome(notices)) try notices.value.show("The saved draft changed, so it was opened again. Your last edit was not kept.")
+      try PubSub.publish(reloads, try Ref.updateAndGet(reloaded, (n) => n + 1))
+      return "changed"
     })
   }
 
@@ -152,7 +171,7 @@ export const layer = Layer.effect(MailComposer, effect {
     const a = accountOf(s.owner, s)
     if (!shelfRoom(a.shelf, a.open)) return "drafts-full"
     const opened = try send({ type: "openDraft", draft, bytes: jsonBytes(draft) })
-    try Ref.set(conflict, false)
+    try Ref.set(refused, undefined)
     return opened === undefined ? "changed" : undefined
   }
 
@@ -213,6 +232,7 @@ export const layer = Layer.effect(MailComposer, effect {
 
   return {
     changes: machine.changes,
+    reloads: Stream.fromPubSub(reloads),
     get: () => machine.get(),
     mine,
     effect compose(prefill?: Prefill) {
@@ -297,7 +317,7 @@ export const layer = Layer.effect(MailComposer, effect {
     },
     hide,
     effect resume() {
-      try Ref.set(conflict, false)
+      try Ref.set(refused, undefined)
       try send({ type: "resume" })
     },
     effect openShelved(id: string, confirmed: boolean) {

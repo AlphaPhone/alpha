@@ -55,6 +55,20 @@ pure def alwaysAnAccountIsKeptOnce(s: Drafts): bool = s.accounts.every(a => a.ow
 pure def alwaysTheComposerShowsAnOpenDraft(s: Drafts): bool = s.accounts.every(a => a.composing implies hasDraft(a.open))
 ```
 
+### Drafts running only in memory say so
+
+Where the kept drafts cannot be read, or a value that is not drafts cannot be set apart, Drafts runs
+in memory for this session, and for as long as it does the Inbox says that drafts could not be saved
+on this phone, so the owner copies what they need before closing. It never shows a draft as kept
+while nothing is kept.
+
+```quint
+type DraftsStorage = KeptOnPhone | MemoryOnly
+pure def saysNotKept(storage: DraftsStorage): bool = storage == MemoryOnly
+pure def lawDraftsOnlyInMemoryAlwaysSaySo(storage: DraftsStorage): bool = (storage == MemoryOnly) iff saysNotKept(storage)
+pure val storageValues = Set(KeptOnPhone, MemoryOnly)
+```
+
 ### The composer binds to the selected account and never writes another account's drafts
 
 Binding to an account shows its open draft and shelf; the drafts of every other account stay as
@@ -110,7 +124,11 @@ pure def sometimesShelved(s: Drafts): bool = s.accounts.some(a => a.shelf.length
 ### Edits apply only to the open draft at the revision they were made on
 
 An edit from the composer names the draft and the revision it was typed over; an edit over an older
-revision (another window saved meanwhile) is refused, and the composer reloads before continuing.
+revision (another window saved meanwhile), or one that changes what the draft keeps fixed, is
+refused, and the composer reloads the saved draft before continuing, saying so each time. An edit
+that would make the draft larger than the phone keeps, or past its recipient or file limits, is
+refused as too large instead: the composer keeps what was typed, so the owner can remove an
+attachment, and the draft is saved again once it fits.
 A reply keeps its mode, its subject and the message it answers; forwarded originals can only be
 removed; files are added only through the attachment policy.
 
@@ -139,6 +157,11 @@ pure def attach(s: Drafts, id: str, revision: int, file: OutgoingFile, policy: A
   val a = accountOf(s.owner, s)
   withAccount({ ...a, open: { ...a.open, revision: a.open.revision + 1, fields: { ...a.open.fields, files: a.open.fields.files.append(file) } } }, s)
 }
+type EditRefusal = EditTooLarge | EditReload
+pure def editRefusal(edits: DraftFields, bytes: int): EditRefusal = if (not(fieldsBounded(edits)) or bytes > draftBytesLimit) EditTooLarge else EditReload
+pure def lawATooLargeEditIsNeverToldAsAChange(edits: DraftFields, bytes: int): bool = bytes > draftBytesLimit implies editRefusal(edits, bytes) == EditTooLarge
+pure def lawAnEditWithinTheLimitsIsReloaded(edits: DraftFields, bytes: int): bool =
+  (fieldsBounded(edits) and bytes >= 0 and bytes <= draftBytesLimit) implies editRefusal(edits, bytes) == EditReload
 pure def stepAnEditAdvancesTheRevision(before: Drafts, via: str, after: Drafts): bool =
   (via == "edit" or via == "attach") implies accountOf(before.owner, after).open.revision == accountOf(before.owner, before).open.revision + 1
 pure def alwaysTheOpenDraftFitsItsLimits(s: Drafts): bool = s.accounts.every(a => fieldsBounded(a.open.fields))
@@ -202,6 +225,14 @@ pure def deleteShelved(s: Drafts, picks: List[DraftPick]): Drafts = {
   val a = accountOf(s.owner, s)
   withAccount({ ...a, shelf: a.shelf.select(d => not(picks.some(p => p.id == d.id))) }, s)
 }
+pure def lawDeleteRemovesOnlyThePicked(s: Drafts, picks: List[DraftPick]): bool = {
+  val before = accountOf(s.owner, s)
+  val after = accountOf(s.owner, deleteShelved(s, picks))
+  canDeleteShelved(s, picks) implies (picks.every(p => not(onShelf(after.shelf, p.id)))
+    and before.shelf.every(d => picks.some(p => p.id == d.id) or after.shelf.includes(d)) and after.open == before.open)
+}
+pure def stepDeleteNeverTouchesTheOpenDraft(before: Drafts, via: str, after: Drafts): bool =
+  via == "deleteShelved" implies accountOf(before.owner, after).open == accountOf(before.owner, before).open
 pure val picksValues = Set(List({ id: "d1", revision: 1 })).union(Set(List({ id: "d1", revision: 2 }))).union(Set(List({ id: "d2", revision: 1 })))
 ```
 
@@ -399,7 +430,8 @@ only when its edits were typed over that saved revision; a saved draft saved aga
 base is newer, keeps its place, and the stale copy is dropped. A draft already open or shelved is kept, so a second pass adds nothing. Only
 the account bound now receives drafts, a full shelf takes none, and the previous slots are cleared
 only once every meaningful draft is kept, so an interrupted pass resumes on the next binding; an
-unreadable slot is never cleared. On the phone, each previous slot is first moved out of the earlier
+unreadable slot is never cleared. When drafts are left out because Drafts is full, the owner is told
+how many, and that deleting some brings them in. On the phone, each previous slot is first moved out of the earlier
 connection plugin's encrypted slot of the same name into the secure store, as spec/platform/storage.md
 moves a legacy slot, before it is read.
 
@@ -421,6 +453,9 @@ pure def stepKeepingAPreviousDraftOnlyAddsToTheShelf(before: Drafts, via: str, a
 pure def stepAKeptPreviousDraftIsOnTheShelf(before: Drafts, via: str, after: Drafts): bool =
   via == "keepPrevious" implies accountOf(before.owner, after).shelf.length() == accountOf(before.owner, before).shelf.length() + 1
 pure def lawPreviousSlotsWaitForEveryDraft(kept: int, total: int): bool = kept < total implies not(previousSlotsClear(kept, total))
+pure def previousLeftOut(kept: int, total: int): int = if (total > kept) total - kept else 0
+pure def lawEveryDraftLeftOutIsCounted(kept: int, total: int): bool =
+  (0 <= kept and kept <= total) implies (previousLeftOut(kept, total) == 0 iff previousSlotsClear(kept, total))
 pure val keptValues = Set(0, 1, 2)
 pure val totalValues = Set(0, 1, 2)
 pure def sometimesAPreviousDraftKept(s: Drafts): bool = s.accounts.some(a => a.shelf.some(d => d.id == "d1") and not(a.composing))

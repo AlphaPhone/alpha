@@ -1,16 +1,21 @@
-// spec/inbox/drafts.md, "Story: Keep the drafts I wrote before this version"; spec/inbox/drafts.md, "A draft the previous version kept comes into its account's Drafts once, and the previous slots clear only after every draft is kept"; spec/platform/storage.md, "A legacy slot is cleared only once the secure store holds a value for it"
+// spec/inbox/drafts.md, "Story: Keep the drafts I wrote before this version"; spec/inbox/drafts.md, "A draft the previous version kept comes into its account's Drafts once, and the previous slots clear only after every draft is kept"; spec/inbox/operations.md, "An operation the previous version recorded stays the account's operation until its receipt settles"; spec/platform/storage.md, "A legacy slot is cleared only once the secure store holds a value for it"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { type Draft, type DraftFields, type Mode, Machine as DraftsMachine, accountOf, emptyFields, noDraft, noForward, noProvider, meaningful, previousKept, previousSlotsClear } from "../../gen/inbox__drafts.effect.vibe"
+import { type Draft, type DraftFields, type Mode, Machine as DraftsMachine, accountOf, emptyFields, noDraft, noForward, noProvider, meaningful, previousKept, previousLeftOut, previousSlotsClear } from "../../gen/inbox__drafts.effect.vibe"
 import type { OutgoingFile } from "../../gen/inbox__attachments.ts"
+import { type OperationRecord, type Proposal, type SendSource, Machine as JournalMachine, adoptable, noReview } from "../../gen/inbox__operations.effect.vibe"
 import { GoogleAccounts } from "../account/layer.vibe"
 import { adoptLegacySlot } from "../platform/legacy-slots.vibe"
 import { Native } from "../platform/native.vibe"
+import { Notices } from "../shell/notices.vibe"
 import { mailAccountOf } from "./accounts.vibe"
 import { outgoing } from "./composer.vibe"
+import { opKind, receiptOf, reviewOf } from "./gmail.vibe"
+import { JournalKept, MailOperations, composedMail, composerRef } from "./operations.vibe"
 import { checkMailFile, isRefusal } from "./files.ts"
 import { jsonBytes, oneLineSubject, ownerParts, sha256Hex } from "./text.ts"
 import {
-  type PreviousDraft, decodePreviousSlot, decodePreviousDraft, decodePreviousShelf, decodePreviousRecoveryEnvelope, decodePreviousRecovery
+  type PreviousDraft, type PreviousOperation, type PreviousAnswers, decodePreviousSlot, decodePreviousDraft, decodePreviousShelf, decodePreviousRecoveryEnvelope, decodePreviousRecovery,
+  decodePreviousOperation, decodePreviousAnswers
 } from "./previous.schema.vibe"
 
 const SECURE_STORE = "ElizaSecureStore"
@@ -33,6 +38,61 @@ export function previousOwners(owner: string, grants: readonly string[]): string
   if (environment === undefined) return []
   const names = [...new Set(grants.filter((grant) => grant !== ""))]
   return names.map((grant) => JSON.stringify([environment, parts.userId, parts.organizationId, grant]))
+}
+
+/** The account and Gmail grant name the previous version kept an account's operation under, for each name `grants` gives its grant; none outside Eliza Cloud. */
+export function previousOperationOwners(owner: string, grants: readonly string[]): { readonly owner: string; readonly grant: string }[] {
+  const parts = ownerParts(owner)
+  if (parts === undefined) return []
+  const environment = previousEnvironments[parts.environment]
+  if (environment === undefined) return []
+  const previous = JSON.stringify([environment, parts.userId, parts.organizationId])
+  return [...new Set(grants.filter((grant) => grant !== ""))].map((grant) => ({ owner: previous, grant }))
+}
+
+/**
+ * A previous operation as the bound account `owner`'s operation here, under its own request id, kind, proposal, review and receipt;
+ * a send from a local draft that had succeeded comes in held for a fresh receipt read. None for one that never reached Gmail's review.
+ */
+export effect function previousOperationOf(op: PreviousOperation, answers: PreviousAnswers, owner: string): (OperationRecord | undefined)!! {
+  if (op.receipt === null || (op.phase !== "dispatching" && op.phase !== "observed")) return undefined
+  const kind = opKind(op.proposal.kind)
+  const p = op.proposal
+  const review = answers.review ?? undefined
+  const result = answers.receipt?.providerResult ?? null
+  const receipt = receiptOf({ ...op.receipt, providerResult: null, rejectionCode: op.receipt.rejectionCode ?? null }, result)
+  let proposal: Proposal
+  let composer = { draftId: "", content: "" }
+  switch (p.kind) {
+    case "send": case "draft-create": case "draft-replace": {
+      const forwarded = review?.forwardedAttachments ?? []
+      const forward = p.forwardAttachments === undefined ? undefined : {
+        messageId: p.forwardAttachments.messageId, historyId: p.forwardAttachments.historyId,
+        parts: p.forwardAttachments.partIds.map((partId) => {
+          const line = forwarded.find((f) => f.partId === partId)
+          return { partId, name: line?.name ?? "", mimeType: line?.mimeType ?? "", size: line?.size ?? 0 }
+        })
+      }
+      const draft = try previousDraftOf({
+        version: 1, id: op.requestId, revision: "", owner: "", to: p.to ?? [], cc: p.cc, bcc: p.bcc, attachments: p.attachments, forward,
+        subject: p.subject ?? "", body: p.bodyText ?? "", mode: p.mode, reply: p.replyMessageId === undefined ? undefined : { messageId: p.replyMessageId, threadId: "" }
+      }, "")
+      const replacing = p.kind === "draft-replace"
+      proposal = { tag: "MessageProposal", mail: composedMail(draft.fields), draftId: replacing ? p.draftId ?? "" : "", expectedDigest: replacing ? p.expectedDigest ?? "" : "" }
+      composer = composerRef({ ...draft, id: op.composer?.draftId ?? op.source?.draftId ?? `previous:${op.requestId}` })
+      break
+    }
+    case "draft-delete": proposal = { tag: "DraftDeleteProposal", draftId: p.draftId ?? "", expectedDigest: p.expectedDigest ?? "" }; break
+    default: proposal = { tag: "LabelProposal", messageId: p.messageId ?? "", expectedHistoryId: p.expectedHistoryId ?? "" }
+  }
+  const source: SendSource = kind === "SendKind" && op.source !== undefined
+    ? { localDraft: op.source.draftId, revision: 1, gmailDraft: op.source.providerDraft?.draftId ?? "", gmailDigest: op.source.providerDraft?.providerDigest ?? "" }
+    : { localDraft: "", revision: 0, gmailDraft: "", gmailDigest: "" }
+  return {
+    owner, requestId: op.requestId, kind, proposal, phase: op.phase === "dispatching" ? "Dispatching" : "Observed",
+    review: review === undefined ? noReview : reviewOf(review), receipt, composer, source,
+    sourceHeld: kind === "SendKind" && receipt.receiptState === "SucceededReceipt" && op.source !== undefined
+  }
 }
 
 /** The mode of a previous draft, as the previous version read a draft without one. */
@@ -63,9 +123,16 @@ export effect function previousDraftOf(draft: PreviousDraft, toQ: string): Draft
   }
 }
 
-/** Bring the drafts the previous version kept for the bound account `owner` onto its shelf, then clear each previous slot whose drafts are all kept; the count of drafts kept. */
+/**
+ * Bring what the previous version kept for the bound account `owner` in: first its unsettled operation into the journal, so it blocks
+ * every send until its receipt is read, then its drafts onto its shelf, clearing each previous slot once what it held is kept here;
+ * an adopted operation's receipt is then read. The count of drafts kept.
+ */
 export effect function keepPreviousDrafts(owner: string) {
   const machine = try DraftsMachine
+  const journal = try JournalMachine
+  const journalKept = (try JournalKept).kept
+  const operations = try MailOperations
   const google = try GoogleAccounts
   const native = try Native
   const store = try KeyValueStore.KeyValueStore
@@ -134,42 +201,93 @@ export effect function keepPreviousDrafts(owner: string) {
     return found
   }
 
-  const rows = (google.list() catch () => [])
-  const grants = [parts.grant, ...rows.filter((row) => mailAccountOf(row).id === parts.grant).flatMap((row) => [row.connectionId, row.grantId ?? ""])]
-  let kept = 0
-  for (const previous of previousOwners(owner, grants)) {
-    const slots = try slotsOf(previous)
-    const savedRevisions = new Map<string, string>()
-    for (const slot of slots) for (const row of slot.drafts) if (row.base === undefined) savedRevisions.set(row.draft.id, row.draft.revision)
-    const converted = new Map<string, Draft>()
-    for (const slot of slots) {
-      for (const row of slot.drafts) {
-        if (converted.has(row.draft.id) || row.draft.id === "") continue
-        const saved = savedRevisions.get(row.draft.id)
-        if (row.base !== undefined && saved !== undefined && saved !== row.base) continue
-        converted.set(row.draft.id, try previousDraftOf(row.draft, row.toQ))
+  effect function keepPreviousOperation(previous: string, grant: string): boolean!! {
+    const key = try hash(JSON.stringify([previous, grant]))
+    if (key === "") return false
+    const slot = `${prefix}inbox-operation:v1:${key}`
+    const raw = (read(slot) catch () => undefined)
+    if (raw === undefined) return false
+    const op = (decodePreviousOperation(raw) catch () => undefined)
+    if (op === undefined || op.version !== 1 || op.owner !== previous || op.grantId !== grant) return false
+    const answers = (decodePreviousAnswers(raw) catch () => ({}))
+    const record = try previousOperationOf(op, answers, owner)
+    if (record === undefined || !adoptable(record)) {
+      const settled = record !== undefined && (record.receipt.receiptState === "SucceededReceipt" || record.receipt.receiptState === "RejectedReceipt")
+      if (op.phase === "preparing" || op.phase === "review" || settled) (clear(slot, raw) catch () => undefined)
+      return false
+    }
+    const adopted = (journal.send({ type: "adoptPrevious", previous: record }) catch () => undefined) !== undefined
+    const held = (try journal.get()).records.some((r) => r.owner === owner && r.requestId === record.requestId)
+    if (held && journalKept) (clear(slot, raw) catch () => undefined)
+    return adopted
+  }
+
+  effect function readAdoptedReceipt() {
+    if ((try journal.get()).owner !== owner) {
+      const bound = (timeout(Stream.runHead(Stream.filter(journal.changes, (s) => s.owner === owner)), "5 seconds") catch () => Option.none())
+      if (Option.isNone(bound)) return
+    }
+    (operations.refresh() catch () => undefined)
+  }
+
+  effect function keepDrafts(grants: string[]): number!! {
+    let kept = 0
+    let wanted = 0
+    let found = 0
+    for (const previous of previousOwners(owner, grants)) {
+      const slots = try slotsOf(previous)
+      const savedRevisions = new Map<string, string>()
+      for (const slot of slots) for (const row of slot.drafts) if (row.base === undefined) savedRevisions.set(row.draft.id, row.draft.revision)
+      const converted = new Map<string, Draft>()
+      for (const slot of slots) {
+        for (const row of slot.drafts) {
+          if (converted.has(row.draft.id) || row.draft.id === "") continue
+          const saved = savedRevisions.get(row.draft.id)
+          if (row.base !== undefined && saved !== undefined && saved !== row.base) continue
+          converted.set(row.draft.id, try previousDraftOf(row.draft, row.toQ))
+        }
+      }
+      for (const draft of converted.values()) {
+        const s = try machine.get()
+        if (s.owner !== owner) return kept
+        const a = accountOf(owner, s)
+        if (!meaningful(draft) || previousKept(a, draft.id)) continue
+        const shelfBytes = jsonBytes([...a.shelf, draft])
+        const done = (machine.send({ type: "keepPrevious", owner, draft, shelfBytes }) catch () => undefined)
+        if (done !== undefined) kept += 1
+      }
+      const after = try machine.get()
+      if (after.owner !== owner) return kept
+      const account = accountOf(owner, after)
+      for (const draft of converted.values()) {
+        if (!meaningful(draft)) continue
+        wanted += 1
+        if (previousKept(account, draft.id)) found += 1
+      }
+      for (const slot of slots) {
+        const settled = slot.drafts.filter((row) => {
+          const draft = converted.get(row.draft.id)
+          return draft === undefined || !meaningful(draft) || previousKept(account, draft.id)
+        }).length
+        if (previousSlotsClear(settled, slot.drafts.length)) (clear(slot.slot, slot.raw) catch () => undefined)
       }
     }
-    for (const draft of converted.values()) {
-      const s = try machine.get()
-      if (s.owner !== owner) return kept
-      const a = accountOf(owner, s)
-      if (!meaningful(draft) || previousKept(a, draft.id)) continue
-      const shelfBytes = jsonBytes([...a.shelf, draft])
-      const done = (machine.send({ type: "keepPrevious", owner, draft, shelfBytes }) catch () => undefined)
-      if (done !== undefined) kept += 1
+    const left = previousLeftOut(found, wanted)
+    const notices = try Effect.serviceOption(Notices)
+    if (left > 0 && Option.isSome(notices)) {
+      try notices.value.show(`${left === 1 ? "1 earlier draft" : `${left} earlier drafts`} could not be brought over because Drafts is full. Delete some drafts to bring them in.`)
     }
-    const after = try machine.get()
-    if (after.owner !== owner) return kept
-    const account = accountOf(owner, after)
-    for (const slot of slots) {
-      const settled = slot.drafts.filter((row) => {
-        const draft = converted.get(row.draft.id)
-        return draft === undefined || !meaningful(draft) || previousKept(account, draft.id)
-      }).length
-      if (previousSlotsClear(settled, slot.drafts.length)) (clear(slot.slot, slot.raw) catch () => undefined)
-    }
+    return kept
   }
+
+  const rows = (google.list() catch () => [])
+  const grants = [parts.grant, ...rows.filter((row) => mailAccountOf(row).id === parts.grant).flatMap((row) => [row.connectionId, row.grantId ?? ""])]
+  let adopted = false
+  for (const previous of previousOperationOwners(owner, grants)) {
+    if (try keepPreviousOperation(previous.owner, previous.grant)) adopted = true
+  }
+  const kept = try keepDrafts(grants)
+  if (adopted) try readAdoptedReceipt()
   return kept
 }
 
