@@ -1,213 +1,84 @@
-// spec/app/calendar/index.md, "The agent's answer publishes only for the account it was asked for; a failure keeps the rows when they were only read again, and an integrity failure never does"; spec/app/calendar/index.md, "The agent's answer is read for the account that sent it; a write whose answer was lost is unknown, never sent again"
-import type { Event, FeedReply, Layout, ProviderReply, ReadbackReply, Row, Scope, WriteKind } from "../../gen/app__calendar.effect.vibe"
+// spec/app/calendar/agent.md, "Story: Let the agent read my calendar"; spec/app/calendar/agent.md, "Story: Approve what the agent changes"; spec/app/calendar/agent.md, "Story: Know what the agent's change did"
+import * as Changes from "../../gen/app__calendar__agent.effect.vibe"
+import type { Actor, Effect as Out, Event, Query, Reply } from "../../gen/app__calendar__agent.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
-import { Refused, ask, attemptedWith } from "../platform/remote.vibe"
-import { localDate, readRange, utcDate, zone } from "./time.ts"
-
-/**
- * One attendee of an event in the agent's Calendar, as eliza's `@elizaos/plugin-calendar` answers it: only what Alpha
- * shows. eliza's typed client of these routes (`@elizaos/plugin-calendar/client`) is not part of what the pinned build
- * links, so the answers are decoded here, field by field, as far as Alpha reads them.
- */
-const Attendee = Schema.Struct({
-  email: Schema.NullOr(Schema.String),
-  displayName: Schema.NullOr(Schema.String),
-  responseStatus: Schema.NullOr(Schema.String),
-  self: Schema.Boolean,
-  organizer: Schema.Boolean,
-})
-
-const AgentEvent = Schema.Struct({
-  id: Schema.String,
-  provider: Schema.String,
-  title: Schema.String,
-  description: Schema.String,
-  location: Schema.String,
-  status: Schema.String,
-  startAt: Schema.String,
-  endAt: Schema.String,
-  isAllDay: Schema.Boolean,
-  htmlLink: Schema.NullOr(Schema.String),
-  organizer: Schema.NullOr(Schema.Record(Schema.String, Schema.Unknown)),
-  attendees: Schema.Array(Attendee),
-  metadata: Schema.Record(Schema.String, Schema.Unknown),
-  recurrence: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String))),
-  recurringEventId: Schema.optionalKey(Schema.NullOr(Schema.String)),
-  updatedAt: Schema.String,
-})
-type AgentEvent = typeof AgentEvent.Type
-
-const Feed = Schema.Struct({
-  events: Schema.Array(AgentEvent),
-  state: Schema.Literals(["complete", "partial", "unavailable"]),
-  timeMin: Schema.String,
-  timeMax: Schema.String,
-})
-
-schema Listed { readonly calendarId: string }
-schema Calendars { readonly calendars: ReadonlyArray<Listed> }
-
-/** What a change of the agent's Calendar answers: the change applied, queued for approval, or confirmed with nothing to show. */
-const Changed = Schema.Union([
-  Schema.Struct({ approvalRequestId: Schema.String }),
-  Schema.Struct({ deleted: Schema.Literal(true) }),
-  Schema.Struct({ event: AgentEvent }),
-  Schema.Struct({ confirmed: Schema.Literal(true) }),
-])
-
-/** What the form sends as a write's edits: Alpha's own fields of one event, decoded where the shell reads them back. */
-export schema Edits {
-  readonly title: string
-  readonly place: string
-  readonly notes: string
-  readonly begin: number
-  readonly end: number
-  readonly allDay: boolean
-}
+import { ask, attemptedWith } from "../platform/remote.vibe"
+import { Attempts } from "../runtime/attempts.vibe"
+import { type Job, answer, reacting, run, stream } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
+import { type Row, shown } from "./shown.ts"
+import { civilDay, dayStart, zone } from "./time.ts"
 
 const base = "/api/lifeops/calendar"
 
-module web {
-  /** `text` as the provider's link, where it is a plain HTTPS address without credentials, or nothing. @throws {never} */
-  export function safeLink(text: string | null): string {
-    if (text === null) return ""
-    try {
-      const url = new URL(text)
-      return url.protocol === "https:" && url.username === "" && url.password === "" ? url.href : ""
-    } catch {
-      return ""
-    }
-  }
-  /** An instant as the provider writes one. @throws {never} */
-  export function iso(ms: number): string {
-    return new Date(ms).toISOString()
-  }
-  /** `text` as an instant, or NaN. @throws {never} */
-  export function instant(text: string): number {
-    return Date.parse(text)
-  }
-  /** The form's edits from the text the machine carries, untrusted. @throws {never} */
-  export function json(text: string): unknown {
-    try { return JSON.parse(text) as unknown } catch { return undefined }
-  }
-}
-import { instant, iso, json, safeLink } from web
+/** What a read of the agent's calendar says, as far as Calendar asks: whether Google answered. */
+schema Answered { readonly state: "complete" | "partial" | "unavailable" }
 
-/** The version a write of the event must name: eliza's `eventVersion`, the provider's etag, else when it last changed. */
-function versionOf(event: AgentEvent): string {
-  const etag = event.metadata["etag"]
-  return typeof etag === "string" && etag !== "" ? etag : event.updatedAt
+/** What a read back finds of one event: whether it is listed. */
+schema Listed { readonly events: ReadonlyArray<{ readonly id: string }> }
+
+/** The window the agent's reads cover: today and the six days after. */
+function week(now: number) {
+  const today = civilDay(now)
+  return { timeMin: new Date(dayStart(today)).toISOString(), timeMax: new Date(dayStart(today + 7)).toISOString(), timeZone: zone() }
 }
 
-/** An event of the agent's Calendar as a row of the screen. */
-export function rowOf(event: AgentEvent): Row {
-  const own = event.attendees.find((attendee) => attendee.self)
-  const organizer = event.provider === "eliza" || event.organizer?.["self"] === true || own?.organizer === true || (own === undefined && event.attendees.length === 0)
-  const begin = event.isAllDay ? localDate(event.startAt) : instant(event.startAt)
-  const end = event.isAllDay ? localDate(event.endAt) : instant(event.endAt)
-  return {
-    id: event.id, source: "AgentSource", title: event.title, place: event.location, notes: event.description,
-    begin, end, allDay: event.isAllDay, version: versionOf(event),
-    writable: event.provider === "eliza" || event.provider === "google",
-    organizer, invited: !organizer && own !== undefined, answer: own?.responseStatus ?? "",
-    recurring: (event.recurringEventId ?? null) !== null || (event.recurrence ?? []).length > 0, series: event.recurringEventId ?? "",
-    people: event.attendees.map((attendee) => ({ name: attendee.displayName ?? attendee.email ?? "", organizer: attendee.organizer, reply: attendee.responseStatus ?? "" })),
-    link: safeLink(event.htmlLink),
+// spec/app/calendar/agent.md, "The agent reads events or free time directly, at any moment, and only the newest answer counts"
+effect function read(ticket: number, query: Query): Event!!(Agent | Time) {
+  const window = week(try (try Time).now())
+  const path = query === "FreeTime" ? `${base}/next-context` : `${base}/feed`
+  const answered = ask(Agent, HttpClientRequest.get(path, { urlParams: window }), Answered) catch () => undefined
+  return { type: "feedAnswered", ticket, ok: answered !== undefined && answered.state !== "unavailable" }
+}
+
+const replies: Readonly<Record<Reply, string>> = { NoReply: "", Going: "accepted", Maybe: "tentative", NotGoing: "declined" }
+
+// spec/app/calendar/agent.md, "What is sent is exactly the change approved, for the revision the agent selected"
+/** The request that carries an approved change under its idempotency key: the event as the agent selected it. */
+function request(change: Out & { tag: "Send" }, row: Row | undefined, key: string) {
+  const event = encodeURIComponent(row?.key ?? "")
+  const version = String(change.revision)
+  const scope = change.series ? "all" : "this"
+  switch (change.change) {
+    case "Create":
+      return HttpClientRequest.post(`${base}/events`) |> HttpClientRequest.bodyJsonUnsafe(%, { title: row?.title ?? "", startAt: new Date(row?.begin ?? 0).toISOString(), endAt: new Date(row?.end ?? 0).toISOString(), timeZone: zone(), idempotencyKey: key })
+    case "Update":
+      return HttpClientRequest.patch(`${base}/events/${event}`) |> HttpClientRequest.bodyJsonUnsafe(%, { title: row?.title, recurrenceScope: scope, expectedProviderVersion: version, idempotencyKey: key })
+    case "Delete":
+      return HttpClientRequest.delete(`${base}/events/${event}`, { urlParams: { recurrenceScope: scope, expectedProviderVersion: version, idempotencyKey: key, cancellationMode: "organizer_cancel" } })
+    case "Respond":
+      return HttpClientRequest.post(`${base}/events/${event}/response`) |> HttpClientRequest.bodyJsonUnsafe(%, { responseStatus: replies[change.reply], expectedProviderVersion: version, idempotencyKey: key })
   }
 }
 
-function feedRequest(range: { begin: number; end: number }) {
-  return HttpClientRequest.get(`${base}/feed`, { urlParams: { side: "owner", timeMin: iso(range.begin), timeMax: iso(range.end), timeZone: zone() } })
+// spec/app/calendar/agent.md, "A change Google confirms is read back; a refused or unknown one ends there and is reported"
+effect function send(change: Out & { tag: "Send" }): Event!!(Agent | Attempts) {
+  const row = shown.find(change.id)
+  const { outcome } = try attemptedWith(Agent, (key) => request(change, row, key), change.attempt, Schema.Unknown)
+  return { type: "sent", attempt: change.attempt, ...outcome }
 }
 
-/** The events of `range`, or how the read failed: refused, or another failure. */
-effect function feedOf(range: { begin: number; end: number }) {
-  return effect {
-    const feed = try ask(Agent, feedRequest(range), Feed)
-    return { feed: Option.some(feed), refused: false }
-  } catch (failure) => ({ feed: Option.none<typeof Feed.Type>(), refused: failure instanceof Refused && (failure.status === 401 || failure.status === 403) })
+// spec/app/calendar/agent.md, "The read back says whether the change is there, and the agent is told"
+/** The read back's answer, or nothing where the agent could not be read: the change then waits to be read back after a restart. */
+function readBack(ticket: number, id: number): Stream.Stream<Event, never, Agent | Time> {
+  return Stream.unwrap(effect {
+    const key = shown.find(id)?.key ?? ""
+    const window = week(try (try Time).now())
+    const listed = ask(Agent, HttpClientRequest.get(`${base}/feed`, { urlParams: window }), Listed) catch () => undefined
+    return listed === undefined ? Stream.empty : Stream.succeed<Event>({ type: "readBack", ticket, present: listed.events.some((event) => event.id === key) })
+  })
 }
 
-// spec/app/calendar/index.md, "The agent's answer publishes only for the account it was asked for; a failure keeps the rows when they were only read again, and an integrity failure never does"
-/** Read the agent's Calendar for what the screen shows: the feed of the span and the calendars it lists, under `ticket`. */
-export effect function readAgent(ticket: number, today: number, layout: Layout, day: number, month: number): Event!!Agent {
-  const range = readRange(today, layout, day, month)
-  const [read, listed] = try.all [feedOf(range), ask(Agent, HttpClientRequest.get(`${base}/calendars`, { urlParams: { side: "owner" } }), Calendars) |> Effect.option(%)]
-  if (Option.isNone(read.feed)) return { type: "agentRead", ticket, feed: read.refused ? "FeedRefused" : "FeedFailed", calendarsListed: Option.isSome(listed), rows: [] }
-  const feed = read.feed.value
-  const answered = instant(feed.timeMin) === range.begin && instant(feed.timeMax) === range.end
-  const reply: FeedReply = !answered ? "FeedWrongWindow" : feed.state === "complete" ? "FeedComplete" : feed.state === "partial" ? "FeedPartial" : "FeedUnavailable"
-  const rows = feed.events.filter((event) => event.status !== "cancelled").map(rowOf)
-  return { type: "agentRead", ticket, feed: reply, calendarsListed: Option.isSome(listed), rows }
-}
+const world: Actor = "World"
 
-/** The form's edits, or nothing where the text is not them. */
-effect function editsOf(text: string): Option.Option<Edits>!! {
-  return try (Schema.decodeUnknownEffect(Edits)(json(text)) |> Effect.option(%))
-}
-
-function times(edits: Edits) {
-  return edits.allDay
-    ? { startAt: utcDate(edits.begin), endAt: utcDate(edits.end), isAllDay: true }
-    : { startAt: iso(edits.begin), endAt: iso(edits.end), isAllDay: false }
-}
-
-const scopes: Record<Scope, string> = { HideEvent: "instance", HideFollowing: "this_and_following", HideSeries: "series" }
-
-/** The request a write sends, made with its idempotency key, or nothing where the edits are not readable. */
-function writing(kind: WriteKind, target: string, version: string, edits: Option.Option<Edits>, answer: string, decline: boolean, scope: Scope): Option.Option<(key: string) => HttpClientRequest.HttpClientRequest> {
-  const event = `${base}/events/${encodeURIComponent(target)}`
-  return match (kind) {
-    when "CreateEvent": Option.map(edits, (fields) => (key: string) => HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(`${base}/events`), {
-      title: fields.title, description: fields.notes, location: fields.place, ...times(fields), timeZone: zone(), idempotencyKey: key,
-    }));
-    when "UpdateEvent": Option.map(edits, (fields) => (key: string) => HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.patch(event), {
-      title: fields.title, notes: fields.notes, location: fields.place, ...times(fields), timeZone: zone(), expectedProviderVersion: version, idempotencyKey: key,
-    }));
-    when "AnswerInvitation": Option.some((key: string) => HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(`${event}/response`), {
-      responseStatus: answer, notifyAttendees: false, expectedProviderVersion: version, idempotencyKey: key,
-    }));
-    when "DeleteEvent": Option.some((key: string) => HttpClientRequest.delete(event, { urlParams: {
-      expectedProviderVersion: version, idempotencyKey: key, cancellationMode: decline ? "decline_invitation" : "organizer_cancel", recurrenceScope: scopes[scope],
-    } }));
+function carry(fx: Out): Job<Event, Agent | Time, [by: Actor]> {
+  return match (fx) {
+    when { tag: "Ask", let ticket, let query }: answer("ask", read(ticket, query), { type: "feedAnswered", ticket, ok: false }, world);
+    when { tag: "Send" }: answer(`send ${fx.attempt}`, send(fx), { type: "sent", attempt: fx.attempt, confirmed: false, known: false }, world);
+    when { tag: "ReadBack", let ticket, let id }: stream("read back", readBack(ticket, id), { type: "restart" }, world);
+    when { tag: "Report" }: run("report", succeed(undefined), world);
   }
 }
 
-// spec/app/calendar/index.md, "The agent's answer is read for the account that sent it; a write whose answer was lost is unknown, never sent again"
-/** Send write `id` once, under its attempt's key, and say how the agent answered it. */
-export effect function sendWrite(id: number, kind: WriteKind, target: string, version: string, edits: string, decline: boolean, scope: Scope) {
-  const request = writing(kind, target, version, try editsOf(edits), edits, decline, scope)
-  if (Option.isNone(request)) return { type: "sent" as const, id, provider: "ProviderRefused" as ProviderReply }
-  const { outcome, answer } = try attemptedWith(Agent, request.value, id, Changed)
-  const provider: ProviderReply = !outcome.known ? "ProviderUnknown"
-    : !outcome.confirmed ? "ProviderRefused"
-    : Option.isSome(answer) && "approvalRequestId" in answer.value ? "ProviderQueued"
-    : "ProviderApplied"
-  return { type: "sent" as const, id, provider }
-}
-
-// spec/app/calendar/index.md, "An applied create or change is read back through the same calendar; only a readback that finds it says saved"
-/** Read the agent's Calendar again around the event a write applied, and say whether it holds what was reviewed. */
-export effect function readBack(id: number, kind: WriteKind, target: string, edits: string, begin: number): Event!!Agent {
-  const fields = try editsOf(edits)
-  const at = kind === "DeleteEvent" || kind === "AnswerInvitation" || Option.isNone(fields) ? begin : fields.value.begin
-  const range = { begin: Math.max(0, at - 86_400_000), end: at + 2 * 86_400_000 }
-  const answered = try (ask(Agent, feedRequest(range), Feed) |> Effect.option(%))
-  if (Option.isNone(answered)) return { type: "readBack", id, readback: "ReadbackFailed" }
-  const events = answered.value.events.filter((event) => event.status !== "cancelled")
-  const found = match (kind) {
-    when "DeleteEvent": events.some((event) => event.id === target);
-    when "AnswerInvitation": events.some((event) => event.id === target && event.attendees.some((attendee) => attendee.self && attendee.responseStatus === edits));
-    when "CreateEvent": Option.isSome(fields) && events.some((event) => holds(event, fields.value));
-    when "UpdateEvent": Option.isSome(fields) && events.some((event) => event.id === target && holds(event, fields.value));
-  }
-  const readback: ReadbackReply = found ? "ReadbackFound" : "ReadbackMissing"
-  return { type: "readBack", id, readback }
-}
-
-/** Whether the agent's event holds the fields the owner reviewed. */
-function holds(event: AgentEvent, fields: Edits): boolean {
-  const row = rowOf(event)
-  return row.title === fields.title && row.place === fields.place && row.allDay === fields.allDay
-    && row.begin === fields.begin && (fields.allDay || row.end === fields.end)
-}
+/** The agent's changes to the owner's Google Calendar: kept across restarts, which end what was in flight. */
+export const changes = reacting(Changes, { keep: 1, open: [{ type: "restart" }, world], carry })

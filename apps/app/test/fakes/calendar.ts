@@ -1,6 +1,6 @@
 // spec/app/calendar/index.md, "Story: See only what the current read found, for the current account"
 import type { AndroidCalendarEvent, AndroidCalendarList, AndroidCalendarPlugin, AndroidCalendarRow } from "@elizaos/os/bridges/definitions/calendar";
-import { type Faked, plugin } from "./phone.ts";
+import { type Faked, plugin, rejection } from "./phone.ts";
 import type { Route } from "./routes.ts";
 
 /** One attendee of an event, as eliza's `@elizaos/plugin-calendar` answers it. */
@@ -57,12 +57,17 @@ export interface CalendarScene {
   phoneEvents: AndroidCalendarEvent[];
   granted: boolean;
   asked: number;
+  /** The phone's journal of creations, by creation identity; a create the phone cannot confirm; how often Android Calendar was handed a form. */
+  readonly creations: Map<string, string>;
+  lost: boolean;
+  handedOff: number;
 }
 
 export function calendarScene(): CalendarScene {
   return {
     events: [], writes: [], keys: new Map(), down: false, stalled: false, queued: false,
     calendars: [{ id: "local", name: "Phone", writable: true, local: true }], phoneEvents: [], granted: false, asked: 0,
+    creations: new Map(), lost: false, handedOff: 0,
   };
 }
 
@@ -144,12 +149,24 @@ export function calendarRoutes(scene: CalendarScene): Route[] {
   ];
 }
 
+/** The calls of `CalendarPlugin.java` eliza's typed client does not name yet: a create under a creation identity, and its receipts. */
+interface Creations {
+  save(input: { id?: string; title: string; body?: string; location?: string; begin: number; end: number; calendarId: string; creationId?: string; separateCreation?: boolean; expected?: { revision: string } }): Promise<{ status: string; id?: string; calendarId?: string; creationId?: string }>;
+  pendingCreations(): Promise<{ status: string; creations: { creationId: string; status: string }[] }>;
+}
+
+/** The phone event `id` as the plugin compares it: its revision is what it says. */
+const revisionOf = (event: AndroidCalendarEvent) => JSON.stringify([event.title, event.body, event.location, event.begin, event.end]);
+
 /**
- * `CalendarPlugin.java`, the `ElizaCalendar` plugin, as far as a read goes: Android's one prompt for Calendar access,
- * and the phone's calendars and events of a range, which it lists only once access is granted.
+ * `CalendarPlugin.java`, the `ElizaCalendar` plugin: Android's one prompt for Calendar access, the phone's calendars
+ * and events of a range, which it lists only once access is granted, a create journaled under its creation identity
+ * (`lost` makes the next one's answer unknown, as a write the phone could not confirm), a change of the event as last inspected, and
+ * a deletion the phone's own review confirmed.
  */
 export function elizaCalendar(scene: CalendarScene): Faked {
-  return plugin<AndroidCalendarPlugin>(() => ({
+  const find = (id: string) => scene.phoneEvents.find((event) => event.id === id);
+  return plugin<Omit<AndroidCalendarPlugin, "save"> & Creations>(() => ({
     checkPermissions: () => Promise.resolve({ calendar: scene.granted ? "granted" : "prompt" }),
     requestAccess() {
       scene.asked += 1;
@@ -161,10 +178,39 @@ export function elizaCalendar(scene: CalendarScene): Faked {
       return Promise.resolve({ status: "ready", calendars: scene.calendars, events: scene.phoneEvents.filter((event) => event.begin < end && event.end > begin), truncated: false });
     },
     open: () => Promise.resolve({ status: "opened" }),
-    insertHandoff: () => Promise.resolve({ status: "unavailable" }),
-    inspect: () => Promise.resolve({ status: "unavailable" }),
-    save: () => Promise.resolve({ status: "conflict" }),
-    inspectDeletion: () => Promise.resolve({ status: "unavailable" }),
-    dispatchDeletion: () => Promise.resolve({ status: "unknown" }),
+    insertHandoff() {
+      scene.handedOff += 1;
+      return Promise.resolve({ status: "opened", alertsPrefilled: false });
+    },
+    inspect({ id }) {
+      const event = find(id);
+      return Promise.resolve(event ? { status: "ready", revision: revisionOf(event), sourceRevision: revisionOf(event) } : { status: "conflict" });
+    },
+    save(input) {
+      if (input.id === undefined || input.id === "") {
+        const id = `p${scene.phoneEvents.length + 1}`;
+        scene.phoneEvents.push({ id, calendarId: "local", title: input.title, body: input.body ?? "", location: input.location ?? "", begin: input.begin, end: input.end, allDay: false, recurring: false, creationId: input.creationId ?? "" });
+        scene.creations.set(input.creationId ?? "", "saved");
+        if (scene.lost) return Promise.reject(rejection("Calendar write could not be confirmed. Check creation receipts before retrying."));
+        return Promise.resolve({ status: "saved", id, calendarId: "local", creationId: input.creationId ?? "" });
+      }
+      const event = find(input.id);
+      if (!event || input.expected?.revision !== revisionOf(event)) return Promise.resolve({ status: "conflict" });
+      Object.assign(event, { title: input.title, body: input.body ?? "", location: input.location ?? "", begin: input.begin, end: input.end });
+      return Promise.resolve({ status: "saved", id: event.id, calendarId: event.calendarId });
+    },
+    pendingCreations: () => Promise.resolve({ status: "ready", creations: [...scene.creations].map(([creationId, status]) => ({ creationId, status })) }),
+    inspectDeletion({ id }) {
+      const event = find(id);
+      if (!event) return Promise.resolve({ status: "conflict" });
+      return Promise.resolve({
+        status: "ready", recurrence: "one-off", writable: true, revision: revisionOf(event), sourceRevision: revisionOf(event),
+        evidence: { selectedRow: "ParentRow", sync: "LocalUnsynced", sourceCurrent: true, bounded: true, otherExceptions: false, liveException: "NoLiveException", instances: 1, begin: event.begin, finish: event.end, exceptionOriginal: 0 },
+      });
+    },
+    dispatchDeletion({ id }) {
+      scene.phoneEvents = scene.phoneEvents.filter((event) => event.id !== id);
+      return Promise.resolve({ status: "committed", readback: { parentAfter: "ParentGone", fieldsMatch: true, exclusionExact: true, cancelledAtStart: 0, instanceRemains: false } });
+    },
   }));
 }
