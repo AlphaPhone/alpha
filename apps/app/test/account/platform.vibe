@@ -20,7 +20,7 @@ export type Calls = Array<{ readonly name: string; readonly args: unknown; reado
 /** A native refusal with the plugin's code, as `PluginCall.reject(message, code)` gives it. */
 export interface Refusal { readonly refuse: string }
 
-/** A fixed answer, or one computed from the call's arguments. */
+/** A fixed answer, or one computed from the call's arguments; a native answer may be an Effect the host is still working on. */
 export type Answer = unknown
 
 /** The test's clock origin and a key that expires in 30 days. */
@@ -81,6 +81,11 @@ function answer(table: Record<string, Answer>, key: string, args: unknown): Answ
   return typeof found === "function" ? (found as (args: unknown) => unknown)(args) : found
 }
 
+/** An answer the host is still working on: a test's native answer may be an Effect that answers, or refuses with the plugin's failure, when it ends. */
+function working(value: Answer): value is unknown!NativeFailed {
+  return Effect.isEffect(value)
+}
+
 function refused(value: Answer): value is Refusal {
   return typeof value === "object" && value !== null && typeof (value as { refuse?: unknown }).refuse === "string"
 }
@@ -104,6 +109,8 @@ export function platform(calls: Calls, native: Record<string, Answer>, cloud: Re
         calls.push({ name: `${plugin}.${method}`, args })
         const found = answer(native, `${plugin}.${method}`, args)
         if (found === undefined) return Effect.fail(new NativeFailed({ plugin, method, message: "absent" }))
+        // An answer that is an Effect is the host still working: it answers, or refuses, when that Effect does.
+        if (working(found)) return found
         if (refused(found)) return Effect.fail(new NativeFailed({ plugin, method, message: "refused", code: found.refuse }))
         return Effect.succeed(found)
       },

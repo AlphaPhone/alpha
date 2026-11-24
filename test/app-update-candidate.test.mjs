@@ -15,7 +15,7 @@ test('uploaded artifact metadata retries transient visibility and transport fail
   let calls = 0, waits = 0;
   const result = await uploadedCandidateMetadata('4242', 'controlled-token', {
     request: async (url, options) => {
-      assert.equal(url, 'https://api.github.com/repos/alphacompute/alpha/actions/artifacts/4242');
+      assert.equal(url, 'https://api.github.com/repos/eliza-research/alpha/actions/artifacts/4242');
       assert.equal(options.redirect, 'error');
       assert.equal(options.headers.Authorization, 'Bearer controlled-token');
       assert.ok(options.signal instanceof AbortSignal);
@@ -89,8 +89,8 @@ test('retired-channel inventory sets a version floor while the receipt binds onl
   };
   f.state.legacyMissing = false;
   f.state.legacyPages = [[{name: 'alpha-phone-703.apk'}]];
-  for (const repository of ['alphacompute/alpha', 'alphacompute/alphaphone']) {
-    f.state.legacyPointer = pointer(legacyManifestUrl.replace('alphacompute/alpha', repository), 704);
+  for (const repository of ['eliza-research/alpha', 'eliza-research/alphaphone', 'alphacompute/alpha', 'alphacompute/alphaphone']) {
+    f.state.legacyPointer = pointer(legacyManifestUrl.replace('eliza-research/alpha', repository), 704);
     const initial = await candidateVersion(f);
     assert.equal(initial.observedFloor, 704, repository);
     assert.equal(initial.manifestSha256, null);
@@ -102,7 +102,7 @@ test('retired-channel inventory sets a version floor while the receipt binds onl
   f.state.legacyPages = [[{name: 'alpha-update-stable.json'}]];
   f.state.legacyPointer = null;
   await assert.rejects(candidateVersion(f), /not anonymously readable/);
-  f.state.legacyPointer = pointer(legacyManifestUrl.replace('alphacompute/alpha', 'other-owner/alpha'), 704);
+  f.state.legacyPointer = pointer(legacyManifestUrl.replace('eliza-research/alpha', 'other-owner/alpha'), 704);
   await assert.rejects(candidateVersion(f), /Malformed stable pointer/);
 });
 
@@ -200,7 +200,7 @@ fixtureTest('archive measurement binds the actual artifact metadata and expanded
       repository_id: 1396333361, head_repository_id: 1396333361}};
   const options = {...f, archive: archive.relative, env: {...f.env, ALPHA_CANDIDATE_ARTIFACT_ID: '4242',
     ALPHA_CANDIDATE_ARTIFACT_SHA256: 'a'.repeat(64)}, api: args => {
-      assert.deepEqual(args, ['repos/alphacompute/alpha/actions/artifacts/4242']); return uploaded;
+      assert.deepEqual(args, ['repos/eliza-research/alpha/actions/artifacts/4242']); return uploaded;
     }};
   const files = fs.readdirSync(archive.output);
   const expandedBytes = files.reduce((sum, file) => sum + fs.statSync(path.join(archive.output, file)).size, 0);
