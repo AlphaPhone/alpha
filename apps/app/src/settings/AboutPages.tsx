@@ -58,7 +58,7 @@ export function Licences({ runtime }: AboutProps) {
           <p aria-live="polite" className="px-4 text-sm text-muted-foreground">{`${state.shown} of ${state.found}`}</p>
           <ListGroup>
             {shown.map((notice, licence) => (
-              <ListRow key={`${notice.name}@${notice.version}`} title={notice.name} detail={notice.license} onClick={() => void send({ type: "openLicence", licence })} />
+              <ListRow key={`${notice.name}@${notice.version}`} aria-label={notice.name} title={notice.name} detail={notice.license} onClick={() => void send({ type: "openLicence", licence })} />
             ))}
           </ListGroup>
         </>

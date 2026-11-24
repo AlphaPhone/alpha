@@ -50,7 +50,7 @@ export function Network({ runtime }: PhoneProps) {
       {joined !== undefined && <Alert variant={state.joined === "Connected" ? "ok" : "warn"}>{joined}</Alert>}
       <ListGroup heading="Nearby">
         {state.scanning.read.status === "Loading" && <Spinner label="Scanning" />}
-        {networks.map((network) => <ListRow key={network.name} title={network.name} detail={securities[network.security]} selected={chosen?.name === network.name} onClick={() => { choose(network); setPassphrase(""); }} />)}
+        {networks.map((network) => <ListRow key={network.name} aria-label={network.name} title={network.name} detail={securities[network.security]} selected={chosen?.name === network.name} onClick={() => { choose(network); setPassphrase(""); }} />)}
       </ListGroup>
       {chosen && (
         <form className="flex flex-col gap-2 px-4" onSubmit={(event) => {
@@ -130,7 +130,7 @@ export function Passwords({ runtime }: PhoneProps) {
       {open === undefined
         ? (
           <ListGroup>
-            {state.entries.map((entry) => <ListRow key={entry.id} title={entry.label} detail={entry.username} onClick={() => void send({ type: "openEntry", id: entry.id })} />)}
+            {state.entries.map((entry) => <ListRow key={entry.id} aria-label={entry.label} title={entry.label} detail={entry.username} onClick={() => void send({ type: "openEntry", id: entry.id })} />)}
           </ListGroup>
         )
         : (

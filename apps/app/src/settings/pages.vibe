@@ -11,7 +11,7 @@ import { Time } from "../runtime/time.vibe"
 module web {
   /** Whether this is a development build: the Developer page and its Problem log exist only there. @throws {never} */
   export function development(): boolean {
-    return import.meta.env.DEV || import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS === "1"
+    return import.meta.env.DEV
   }
 }
 import { development } from web
