@@ -1,0 +1,85 @@
+// spec/app/update/index.md, "Alpha holds what the phone reports, the owner's activity, the check, the saved offer and whether an install is under way"; spec/app/update/index.md, "A signed-out phone resting on its untouched sign-in card is idle; a card touched in any way is an open screen"; spec/app/update/page.md, "When every area has saved its drafts the page answers ready, and otherwise it refuses"
+import type { SignInCard } from "../../gen/app__update.effect.vibe"
+
+module web {
+  const nonText = new Set(["checkbox", "radio", "button", "submit", "reset", "range", "color", "file", "image", "hidden"])
+
+  /** Whether the element with focus is a field the owner writes in. @throws {never} */
+  export function fieldFocused(): boolean {
+    const element = document.activeElement
+    if (!(element instanceof HTMLElement)) return false
+    if (element.isContentEditable) return true
+    if (element instanceof HTMLTextAreaElement) return !element.readOnly
+    return element instanceof HTMLInputElement && !element.readOnly && !nonText.has(element.type)
+  }
+  /** Ends the edit in the field with focus, so what it holds, composed text included, reaches its area's kept state. @throws {never} */
+  export function endEdit(): void {
+    if (fieldFocused() && document.activeElement instanceof HTMLElement) document.activeElement.blur()
+  }
+  /** @throws {never} */
+  export const pages = (): EventTarget => document
+}
+import { endEdit, fieldFocused, pages } from web
+
+/** What an area is doing that an update waits for, as that area reports it. */
+export interface Engagement {
+  /** A voice turn is under way. */
+  readonly voice: boolean
+  /** The connection to the agent is taking a step: signing in, starting or switching. */
+  readonly connecting: boolean
+  /** A Notes or chat recording is open. */
+  readonly recording: boolean
+  /** The required sign-in card of a signed-out phone, at rest on its first step or touched. */
+  readonly card: SignInCard
+}
+
+/** Nothing under way, and no sign-in card. */
+export const resting: Engagement = { voice: false, connecting: false, recording: false, card: "NoCard" }
+
+/**
+ * What the areas other than the shell report of the owner's activity, for updates: each area reports its own part,
+ * in place of its last report, and an update waits while any area is engaged.
+ */
+export service Engagements {
+  report(area: string, engagement: Partial<Engagement>): void!!
+  /** Every area's report together, now and after each change. */
+  readonly changes: Stream.Stream<Engagement>
+  /** Whether a field the owner writes in has focus, now and after each change of focus. */
+  readonly typing: Stream.Stream<boolean>
+  /** Ends the edit in the field with focus; whether no field holds one afterwards. */
+  endEdit(): boolean!!
+}
+
+const cards: ReadonlyArray<SignInCard> = ["NoCard", "Resting", "Touched"]
+
+function together(reports: Iterable<Partial<Engagement>>): Engagement {
+  let all = resting
+  for (const one of reports) {
+    all = {
+      voice: all.voice || one.voice === true,
+      connecting: all.connecting || one.connecting === true,
+      recording: all.recording || one.recording === true,
+      card: cards[Math.max(cards.indexOf(all.card), cards.indexOf(one.card ?? "NoCard"))] ?? "Touched",
+    }
+  }
+  return all
+}
+
+/** The reports, one page's worth: what an area reported goes when the page does. */
+export const engagements = Layer.effect(Engagements, effect {
+  const reports = new Map<string, Partial<Engagement>>()
+  const now = try SubscriptionRef.make(resting)
+  const focus = Stream.merge(Stream.fromEventListener(pages(), "focusin"), Stream.fromEventListener(pages(), "focusout"))
+  return {
+    report: (area: string, engagement: Partial<Engagement>) => effect {
+      reports.set(area, engagement)
+      try SubscriptionRef.set(now, together(reports.values()))
+    },
+    changes: SubscriptionRef.changes(now),
+    typing: Stream.concat(Stream.sync(fieldFocused), Stream.map(focus, () => fieldFocused())),
+    endEdit: () => sync(() => {
+      endEdit()
+      return !fieldFocused()
+    }),
+  }
+})

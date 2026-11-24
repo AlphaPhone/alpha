@@ -103,7 +103,7 @@ function carry(fx: Out, state: () => Cards.Cards!!): Job<Event, unknown, []> {
   }
 }
 
-const current = () => flatMap(Cards.Machine.asEffect(), (machine) => machine.get())
+const current = () => flatMap(Cards.Machine, (machine) => machine.get())
 
 /** The cards, kept across restarts for their tickets: looked at when Home shows, when Alpha comes back to the front and when the day turns. */
 export const cards = Layer.mergeAll(

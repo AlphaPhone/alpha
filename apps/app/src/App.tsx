@@ -1,4 +1,4 @@
-// spec/app/shell/index.md, "Story: Move between Home and the apps"; spec/app/shell/gestures.md, "A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back"; spec/app/shell/layers.md, "The page under a layer or a hold takes no touch, and a covering layer or a hold takes none for Ask Alpha either"
+// spec/app/shell/index.md, "Story: Move between Home and the apps"; spec/app/shell/gestures.md, "A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back"; spec/app/shell/layers.md, "The page under a layer or a hold takes no touch, and a covering layer or a hold takes none for Ask Alpha either"; spec/app/update/page.md, "A page that was not mounted mounts its editors only once no update is pending"
 import { Alert, AppHeader, Button } from "@repo/ui";
 import { ChevronLeft } from "lucide-react";
 import { type PointerEvent, useRef } from "react";
@@ -6,6 +6,8 @@ import { useMachine } from "../gen/app__shell.react.ts";
 import { useMachine as useLayers } from "../gen/app__shell__layers.react.ts";
 import { assistantInert, pageInert, takesBack } from "../gen/app__shell__layers.ts";
 import { swipe } from "../gen/app__shell__gestures.ts";
+import { useMachine as usePage } from "../gen/app__update__page.react.ts";
+import { editorsMounted } from "../gen/app__update__page.ts";
 import type { Alpha } from "./runtime/area.tsx";
 import { views } from "./shell/views.tsx";
 
@@ -22,6 +24,7 @@ export interface AppProps {
 export function App({ alpha }: AppProps) {
   const { state, cause, can } = useMachine(alpha.runtime);
   const layers = useLayers(alpha.runtime).state;
+  const page = usePage(alpha.runtime).state;
   const started = useRef<{ x: number; y: number } | undefined>(undefined);
   if (cause) return <Alert variant="destructive" className="m-6">Alpha could not read where you were</Alert>;
   if (!state) return null;
@@ -42,7 +45,7 @@ export function App({ alpha }: AppProps) {
       className="mx-auto flex min-h-dvh max-w-md flex-col bg-background font-sans text-base text-foreground"
     >
       <div className="flex flex-1 flex-col" inert={inert}>
-        {showing === undefined
+        {page === undefined || !editorsMounted(page) ? null : showing === undefined
           ? alpha.slot("home")
           : (
             <>

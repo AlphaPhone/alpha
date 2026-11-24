@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// spec/app/release/index.md, "Story: Stage Alpha into an image"; spec/app/release/index.md, "Story: Keep the phone and messages on Alpha's phone"; spec/app/release/index.md, "Story: Let a handed-over phone update its launcher on its own"; spec/app/release/index.md, "Story: Update an Alpha Pixel by cable, and get back"; spec/app/release/index.md, "Story: Sign Alpha's releases with one key"
+// spec/app/image/index.md, "Story: Stage Alpha into an image"; spec/app/image/index.md, "Story: Keep the phone and messages on Alpha's phone"; spec/app/image/index.md, "Story: Let a handed-over phone update its launcher on its own"; spec/app/image/index.md, "Story: Update an Alpha Pixel by cable, and get back"; spec/app/image/index.md, "Story: Sign Alpha's releases with one key"; spec/release/os.md, "Story: Enrol the image's updater"; spec/release/os.md, "Story: Update an image by hand"; spec/release/os.md, "Story: Recover an image"
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -15,7 +15,7 @@ import { Data, Effect } from "effect";
 import {
   alphaChannel, alphaPrivileged, channelIsAlphas, firstBootGrants, grantsAdmitted, imageTelephony, listenerImage, privilegedAdmitted, provisionsHome, readsChannel,
   readsSourceLock, signerRecordAdmitted, stageProblems, type OtaCommand, type Patch, type Stage, type Target,
-} from "../gen/app__release.ts";
+} from "../gen/app__image.ts";
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 

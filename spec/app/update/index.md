@@ -19,25 +19,27 @@ The manifest describes each release by its variant (the launcher is the only
 one Alpha installs), the digest of the certificate that signs it, its
 version, its download address (whether it is HTTPS, carries credentials, and
 its length), the digest and size of the APK, and the lengths of its version
-name and notes. A digest or signer is a positive number standing for 64
-lowercase hexadecimal characters; anything else is 0. A feed is one release,
-or an index of releases, with the digest of the manifest's bytes.
+name and notes, with the name and notes themselves as the feed gives them. A
+digest or signer is a positive number standing for 64 lowercase hexadecimal
+characters; anything else is 0. A feed is one release, or an index of
+releases, with the digest of the manifest's bytes.
 
 ```quint
 import read as R from "../../kit/read"
+import release as Rel from "../../release"
 
 type Variant = Launcher | OtherVariant
 type Release = {
   variant: Variant, signer: int, version: int, digest: int, bytes: int,
-  https: bool, credentials: bool, url: int, name: int, notes: int,
+  https: bool, credentials: bool, url: int, name: int, notes: int, versionName: str, releaseNotes: str,
 }
 type Feed = { index: bool, releases: List[Release], manifest: int }
 
 pure val noRelease: Release = {
   variant: OtherVariant, signer: 0, version: 0, digest: 0, bytes: 0,
-  https: false, credentials: false, url: 0, name: 0, notes: 0,
+  https: false, credentials: false, url: 0, name: 0, notes: 0, versionName: "", releaseNotes: "",
 }
-pure val maxBytes = 2147483648
+pure val maxBytes = Rel::maxApkBytes
 pure val maxUrl = 2048
 pure val maxReleases = 16
 pure val maxName = 64
@@ -101,10 +103,18 @@ pure def offerFrom(f: Feed, signer: int): Offer =
 
 ### A version name is shown only when it has 1 to 64 characters, and notes only when they have at most 500
 
+A version name with a control character in it counts as no name. Settings
+shows the offer's version name beside its version, and its notes under it.
+
 ```quint
 pure def nameShown(r: Release): bool = r.name >= 1 and r.name <= maxName
 
 pure def notesShown(r: Release): bool = r.notes <= maxNotes
+
+pure def offerName(s: Updates): str = if (nameShown(s.offer.release)) s.offer.release.versionName else ""
+
+pure def offerNotes(s: Updates): str =
+  if (s.offer.release.notes > 0 and notesShown(s.offer.release)) s.offer.release.releaseNotes else ""
 ```
 
 ## Story: Keep the offer that fits this phone
@@ -118,29 +128,33 @@ The phone reports the installed version, its signing root and the install
 permission. The owner's activity is reported by the shell and the other
 areas; whether Alpha is in front (not behind another app or Ask Alpha's
 own surface), whether a call is up and whether audio is in its normal mode
-are reported by the phone. `asked` says the running check came from Settings; `note` is what
-Settings says after such a check.
+are reported by the phone. A voice turn, a step of the connection to the
+agent, a Notes or chat recording and the sign-in card are reported by their
+areas. `asked` says the running check came from Settings; `note` is what
+Settings says after such a check. `deferrals` counts the automatic updates
+Android put off in a row, and `retryAt` is when the next may start. Times
+are Alpha's, in milliseconds.
 
 ```quint
 type Permission = Unsupported | Required | Starting | Supported
 type Checked = Never | Fine | Missed
-type Note = Silent | Ready | NothingNew | CouldNotCheck
+type Note = Silent | Ready | NothingNew | CouldNotCheck | Installing | NoLongerOffered | NeedsPermission | CouldNotStart
 type Activity = {
-  home: bool, open: bool, typing: bool, voice: bool, dialog: bool, busy: bool, front: bool, call: bool, audio: bool,
+  home: bool, open: bool, typing: bool, voice: bool, dialog: bool, busy: bool, recording: bool, front: bool, call: bool, audio: bool,
 }
 type Updates = {
   installed: int, signer: int, permission: Permission, visible: bool, activity: Activity,
   check: R::Read, asked: bool, checked: Checked, checkedAt: int,
-  offer: Offer, installing: bool, automatic: bool, note: Note,
+  offer: Offer, installing: bool, automatic: bool, note: Note, deferrals: int, retryAt: int,
 }
 
 pure val unknownActivity: Activity = {
-  home: false, open: false, typing: false, voice: false, dialog: false, busy: false, front: false, call: false, audio: false,
+  home: false, open: false, typing: false, voice: false, dialog: false, busy: false, recording: false, front: false, call: false, audio: false,
 }
 pure val initial: Updates = {
   installed: 0, signer: 0, permission: Unsupported, visible: false, activity: unknownActivity,
   check: R::unread, asked: false, checked: Never, checkedAt: 0,
-  offer: noOffer, installing: false, automatic: false, note: Silent,
+  offer: noOffer, installing: false, automatic: false, note: Silent, deferrals: 0, retryAt: 0,
 }
 ```
 
@@ -187,6 +201,35 @@ pure def alwaysTheOfferIsThisPhones(s: Updates): bool =
 pure def sometimesAnOfferApplies(s: Updates): bool = applies(s)
 ```
 
+## Story: Start again where Alpha left off
+
+> As the owner, I want Alpha, after a restart, to remember the update it
+> found and when it last checked, and never to wait on a check or an install
+> it can no longer finish.
+
+### A restart keeps the installed version, the signing root, the saved offer, the last check and the deferrals, and forgets the permission, the owner's activity, a check or install under way, and the note
+
+The permission and the activity are read again, after a reboot too, when
+Android may be starting once more. A check under way is taken as failed, so
+its late answer is refused; an offer kept from before waits for a check
+that succeeds before an automatic update.
+
+```quint
+pure def restart(s: Updates): Updates =
+  {
+    ...initial, installed: s.installed, signer: s.signer, checked: s.checked, checkedAt: s.checkedAt,
+    offer: { ...s.offer, manifest: 0 }, check: if (s.check.status == R::Loading) R::answer(s.check, false) else s.check,
+    deferrals: s.deferrals, retryAt: s.retryAt,
+  }
+```
+
+### An offer kept across a restart can wait for a check
+
+```quint
+pure def sometimesKeptAcrossARestart(s: Updates): bool =
+  applies(s) and s.offer.manifest == 0 and s.permission == Unsupported and not(s.visible) and s.checked == Fine
+```
+
 ## Story: Check for updates
 
 > As the owner, I want Alpha to look for updates on its own while I use it,
@@ -203,8 +246,8 @@ pure def observeActivity(s: Updates, activity: Activity): Updates = { ...s, acti
 ### A check is due fifteen minutes after one that was answered, a minute after one that failed, and at once before the first or when the clock went back
 
 ```quint
-pure val interval = 900
-pure val retry = 60
+pure val interval = 900000
+pure val retry = 60000
 
 pure def dueAfter(checked: Checked, checkedAt: int, now: int): bool =
   checked == Never or now < checkedAt or now - checkedAt >= (if (checked == Missed) retry else interval)
@@ -323,11 +366,36 @@ pure def sometimesCouldNotCheck(s: Updates): bool = s.note == CouldNotCheck
 
 ### The owner is idle only on Home with nothing open, not typing, no voice, no dialog and the connection not busy, and the phone is quiet only with Alpha in front, no call and normal audio
 
+Open is an app, the drawer, Ask Alpha raised, a sheet or menu, a screen with
+a step of its own such as Home being edited, or anything else holding the
+phone. A recording under way is not idle either.
+
 ```quint
 pure def ownerIdle(a: Activity): bool =
-  a.home and not(a.open) and not(a.typing) and not(a.voice) and not(a.dialog) and not(a.busy)
+  a.home and not(a.open) and not(a.typing) and not(a.voice) and not(a.dialog) and not(a.busy) and not(a.recording)
 
 pure def phoneQuiet(a: Activity): bool = a.front and not(a.call) and a.audio
+```
+
+### A signed-out phone resting on its untouched sign-in card is idle; a card touched in any way is an open screen
+
+The required sign-in card of a phone that is signed out rests on Home at
+its first step, with nothing typed and nothing in flight, and focuses its
+own empty field. That is neither an open screen nor typing, so a phone
+handed to someone new still updates on its own; any entry, a later step or
+work in flight blocks.
+
+```quint
+type SignInCard = NoCard | Resting | Touched
+
+pure def withSignIn(activity: Activity, card: SignInCard): Activity =
+  if (card == Touched) { ...activity, open: true } else activity
+
+pure def lawARestingCardIsNoActivity(activity: Activity): bool =
+  withSignIn(activity, Resting) == activity
+
+pure def lawATouchedCardBlocks(activity: Activity): bool =
+  not(ownerIdle(withSignIn(activity, Touched)))
 ```
 
 ### Any one activity keeps an automatic update from starting
@@ -335,7 +403,7 @@ pure def phoneQuiet(a: Activity): bool = a.front and not(a.call) and a.audio
 ```quint
 pure def lawAnyActivityBlocks(activity: Activity): bool =
   (not(activity.home) or activity.open or activity.typing or activity.voice or activity.dialog or activity.busy
-    or not(activity.front) or activity.call or not(activity.audio))
+    or activity.recording or not(activity.front) or activity.call or not(activity.audio))
     implies not(ownerIdle(activity) and phoneQuiet(activity))
 ```
 
@@ -356,12 +424,14 @@ pure def install(s: Updates): Acted =
 
 ### An automatic update starts only on screen, with the owner idle, the phone quiet, Android's permission, and an offer from a check that succeeded
 
-```quint
-pure def canStartAutomatically(s: Updates): bool =
-  s.visible and ownerIdle(s.activity) and phoneQuiet(s.activity) and s.permission == Supported
-    and applies(s) and s.offer.manifest > 0 and free(s)
+An automatic update Android put off waits for its retry time first.
 
-pure def startAutomatically(s: Updates): Acted =
+```quint
+pure def canStartAutomatically(s: Updates, now: int): bool =
+  s.visible and ownerIdle(s.activity) and phoneQuiet(s.activity) and s.permission == Supported
+    and applies(s) and s.offer.manifest > 0 and free(s) and now >= s.retryAt
+
+pure def startAutomatically(s: Updates, now: int): Acted =
   { state: { ...s, installing: true, automatic: true }, out: List(offered(s, true)) }
 ```
 
@@ -392,17 +462,95 @@ pure def stepAnAutomaticInstallWaitsForIdle(before: Updates, after: Updates, out
 
 ### When the install ends, is put off, or finds its offer changed or withdrawn, Alpha is free again
 
-A changed offer waits for a new check before an automatic update; a
-withdrawn one is removed.
+Android puts an install off while it is still starting, while its
+permission is missing, where it cannot install Alpha's updates itself, or
+for a reason of its own; the first three say what Android's permission is
+now. A changed offer waits for a new check before an automatic update; a
+withdrawn one is removed, and a check falls due at once.
 
 ```quint
-type Ending = Finished | Deferred | OfferChanged | OfferWithdrawn
+type Ending = Finished | Deferred | OfferChanged | OfferWithdrawn | WhileStarting | WithoutPermission | WithoutSupport
+
+pure def putOff(ending: Ending): bool =
+  ending == Deferred or ending == WhileStarting or ending == WithoutPermission or ending == WithoutSupport
+
+pure def permissionAfter(p: Permission, ending: Ending): Permission =
+  if (ending == WithoutPermission) Required
+  else if (ending == WithoutSupport) Unsupported
+  else if (ending == WhileStarting and not(booted(p))) Starting
+  else p
 
 pure def canEndInstall(s: Updates): bool = s.installing
 
-pure def endInstall(s: Updates, ending: Ending): Updates =
+pure def endInstall(s: Updates, ending: Ending, now: int): Updates =
   val offer = if (ending == OfferWithdrawn) noOffer else if (ending == OfferChanged) { ...s.offer, manifest: 0 } else s.offer
-  { ...s, installing: false, automatic: false, offer: offer }
+  val deferred = s.automatic and putOff(ending)
+  val deferrals = if (not(deferred)) 0 else if (s.deferrals >= maxDeferrals) maxDeferrals else s.deferrals + 1
+  {
+    ...s, installing: false, automatic: false, offer: offer, deferrals: deferrals,
+    retryAt: if (deferred) now + backoff(deferrals) else s.retryAt,
+    permission: permissionAfter(s.permission, ending),
+    checked: if (ending == OfferWithdrawn) Never else s.checked,
+    note: if (s.automatic) s.note else installNote(ending),
+  }
+```
+
+### After Install update, Settings says whether Android took the update, the offer is gone, Android's permission is missing, or it could not start
+
+```quint
+pure def installNote(ending: Ending): Note =
+  if (ending == Finished) Installing
+  else if (ending == OfferWithdrawn) NoLongerOffered
+  else if (ending == WithoutPermission) NeedsPermission
+  else CouldNotStart
+```
+
+### An install Android refused for its permission offers Allow automatic updates at once
+
+```quint
+pure def stepARefusalForThePermissionOffersAllow(before: Updates, via: str, after: Updates): bool =
+  (via == "endInstall" and after.note == NeedsPermission and before.note != NeedsPermission) implies canAllowAutomatic(after)
+```
+
+### An automatic update Android put off is tried again after a minute, then two, four and eight, and then every fifteen
+
+Android puts one off while it is still starting, while its permission is
+missing, or while the phone is busy; trying again at once would only be put
+off again.
+
+```quint
+pure val maxDeferrals = 5
+
+pure def backoff(deferrals: int): int =
+  if (deferrals <= 1) retry else if (deferrals == 2) 2 * retry else if (deferrals == 3) 4 * retry
+  else if (deferrals == 4) 8 * retry else interval
+
+pure def lawTheBackoffIsAMinuteToFifteen(deferrals: int): bool = backoff(deferrals) >= retry and backoff(deferrals) <= interval
+
+pure def alwaysDeferralsAreBounded(s: Updates): bool = s.deferrals >= 0 and s.deferrals <= maxDeferrals
+```
+
+### An automatic update can wait to be tried again
+
+```quint
+pure def sometimesWaitingToRetry(s: Updates): bool = s.deferrals > 0 and not(s.installing)
+```
+
+### Every check and every install ends, so Settings never waits on one for ever
+
+A check that never answers within a minute is answered as unreadable, by
+the shell's own deadline. An install is ended by Alpha's updater itself,
+which gives up on a download, a verification or a staging that has not
+finished within six hours; the shell never ends one the updater still runs.
+
+```quint
+pure def leadsToTheCheckEnds(s: Updates, later: Updates): bool =
+  s.check.status == R::Loading implies later.check.status != R::Loading
+
+pure def leadsToTheInstallEnds(s: Updates, later: Updates): bool = s.installing implies not(later.installing)
+
+pure val fair_answer = "weak"
+pure val fair_endInstall = "weak"
 ```
 
 ### An automatic install can start
@@ -466,25 +614,36 @@ pure def sometimesPermissionRequired(s: Updates): bool = s.permission == Require
 ```quint
 pure def installRowShown(s: Updates): bool = applies(s)
 
-pure def installLabel(s: Updates): str =
-  if (s.installing and not(s.automatic)) "Downloading update" else "Install update"
+pure def downloading(s: Updates): bool = s.installing and not(s.automatic)
+
+pure def installLabel(s: Updates): str = if (downloading(s)) "Downloading update" else "Install update"
 ```
 
 ### Check for updates says when it is checking
 
 ```quint
-pure def checkLabel(s: Updates): str =
-  if (s.check.status == R::Loading and s.asked) "Checking for updates" else "Check for updates"
+pure def checking(s: Updates): bool = s.check.status == R::Loading and s.asked
+
+pure def checkLabel(s: Updates): str = if (checking(s)) "Checking for updates" else "Check for updates"
 ```
 
 ### After a check from Settings, the status row says what it found
+
+After Install update, it says what came of it.
 
 ```quint
 pure def noteText(s: Updates): str =
   if (s.note == Ready) "A compatible update is ready below."
   else if (s.note == NothingNew) "No compatible update was offered."
   else if (s.note == CouldNotCheck) "Couldn’t check for updates. Try again."
+  else if (s.note == Installing) "Android is installing the update."
+  else if (s.note == NoLongerOffered) "The update is no longer offered."
+  else if (s.note == NeedsPermission) "Allow Alpha to install updates, then try again."
+  else if (s.note == CouldNotStart) "The update couldn’t start. Try again."
   else ""
+
+pure def noteIsTrouble(s: Updates): bool =
+  s.note == CouldNotCheck or s.note == NeedsPermission or s.note == CouldNotStart
 ```
 
 ### What the simulator tries
@@ -492,12 +651,12 @@ pure def noteText(s: Updates): str =
 ```quint
 pure def good(signer: int, version: int): Release =
   { variant: Launcher, signer: signer, version: version, digest: version, bytes: 1,
-    https: true, credentials: false, url: 40, name: 4, notes: 0 }
+    https: true, credentials: false, url: 40, name: 4, notes: 0, versionName: "1.21", releaseNotes: "" }
 
 pure val installedValues = Set(0, 1, 2, 3)
 pure val signerValues = Set(1, 2)
 pure val ticketValues = Set(1, 2, 3, 4)
-pure val nowValues = Set(0, 30, 60, 900, 2000)
+pure val nowValues = Set(0, 30000, 60000, 900000, 2000000)
 pure val quiet: Activity = { ...unknownActivity, home: true, front: true, audio: true }
 pure val activityValues =
   Set(quiet)
@@ -505,6 +664,7 @@ pure val activityValues =
     .union(Set({ ...quiet, call: true }))
     .union(Set({ ...quiet, dialog: true }))
     .union(Set({ ...quiet, front: false }))
+    .union(Set({ ...quiet, recording: true }))
     .union(Set(unknownActivity))
 pure val releaseValues = Set(good(1, 2)).union(Set({ ...good(1, 2), https: false })).union(Set(noRelease))
 pure val manifestValues = Set(7, 8)

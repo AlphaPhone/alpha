@@ -1,16 +1,16 @@
-# Release
+# Image
 
 How Alpha reaches a phone inside its own image: the launcher staged into an
 AOSP product, the Cuttlefish x86_64 phone for validation or the Pixel 10a
-(stallion) for the hardware; the release signed with Alpha's own keys; the
-update carried to a Pixel by cable, with a way back; and the licences of
-what ships. eliza's image tools do that work and keep their own rules
-(eliza's `spec/os/image/` and `spec/os/update/`); this area says what Alpha
-chooses on top of them, and `pnpm aosp` (`apps/app/scripts/aosp.vibe`)
-carries it out with Alpha's product files in `apps/app/aosp/`. A staged
-product, a signed release and the record of either are staging evidence: an
-image boot, an applied update and the owner's acceptance are each shown by
-their own step, never by these.
+(stallion) for the hardware; what the image grants the launcher; the image
+carried to a Pixel by cable, with a way back; and the licences of what
+ships. How a release is built, signed and published, and the OS image's own
+update channel, are [Release](../../release/); this area is what Alpha's
+`pnpm aosp` (`apps/app/scripts/aosp.ts`) checks on top of eliza's image
+tools (eliza's `spec/os/image/` and `spec/os/update/`), with Alpha's product
+files in `apps/app/aosp/`. A staged product, a signed release and the record
+of either are staging evidence: an image boot, an applied update and the
+owner's acceptance are each shown by their own step, never by these.
 
 - [Licences](./licences.md): what Alpha ships, the licence of each part, and what a licence flags
 
@@ -208,8 +208,9 @@ pure def lawNoMessageCallOrHistoryIsGrantedAtFirstBoot(grant: str): bool = never
 
 ### Alpha has one update channel, stable, for alpha_stallion_phone on stallion, and refuses downgrades
 
-`apps/app/aosp/pixel10a-ota-channel.json` is that channel; eliza's operator
-checks every candidate and fallback against it.
+`apps/app/aosp/pixel10a-ota-channel.json` is that channel, the file form of
+the profile [OS](../../release/os.md) pins; eliza's operator checks every
+candidate and fallback against it.
 
 ```quint
 type Channel = { name: str, product: str, device: str, downgradeAllowed: bool }
@@ -247,9 +248,10 @@ pure def lawAFallbackReadsOnlyTheJournal(command: OtaCommand): bool =
 
 ### Alpha signs with one release key and never rotates it: a signer record that still carries a rotation is refused
 
-Phones of Alpha's version 49, signed by the old key, are wiped rather than
-updated in place, so nothing reads a rotation lineage any more; a record
-that names one is refused rather than ignored.
+This is the signer record's side of [Release](../../release/)'s one signer
+and no rotation. Phones of Alpha's version 49, signed by the old key, are
+wiped rather than updated in place, so nothing reads a rotation lineage any
+more; a record that names one is refused rather than ignored.
 
 ```quint
 type SignerRecord = { rotation: bool }
