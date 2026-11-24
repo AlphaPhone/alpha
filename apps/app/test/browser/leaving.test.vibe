@@ -2,9 +2,10 @@
 import { assert, it } from "@effect/vitest"
 import { BrowserEgress } from "../../src/browser/egress.vibe"
 import { BrowserHandoff } from "../../src/browser/handoff.vibe"
+import { PAGE_LOAD_TIMEOUT } from "../../src/browser/messages.ts"
 import { BrowserReviews } from "../../src/browser/reviews.vibe"
 import { BrowserTabs } from "../../src/browser/session.vibe"
-import { callsTo, emit, fakeHost, loadPage, sessionOf, settledTabs } from "./fakes.vibe"
+import { callsTo, emit, fakeHost, loadPage, sessionOf, settledTabs, shownBrowser } from "./fakes.vibe"
 
 // spec/browser/handoff.md, "Story: Open the page I see in another browser"
 it.live("a normal HTTPS page goes to another browser at once, a private one only after the owner confirms it, and a declined one never leaves", () => effect {
@@ -32,6 +33,40 @@ it.live("a normal HTTPS page goes to another browser at once, a private one only
         [normal, "https://example.test/", "1", false],
         ["bpriv", "https://private.test/", "4", true],
       ]))
+    }
+  })
+})
+
+// spec/browser/handoff.md, "A normal HTTPS page that timed out can be opened in another browser from its error panel"
+it.live("the timeout action hands over only the currently visible normal native tab's timed-out HTTPS address", () => effect {
+  const fake = try fakeHost({ answers: { openExternalBrowser: () => new Error("No other installed browser can open this page.") } })
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const handoff = try BrowserHandoff
+      try settledTabs(tabs)
+      const session = try sessionOf(fake.calls)
+      const url = "https://example.test/"
+      const id = try loadPage(tabs, fake.events, session, url, "1", 1)
+      const shown = { id, url, navigation: "2" }
+      try handoff.retryTimedOutPage({ ...shown, navigation: "1" })
+      try emit(fake.events, "stateChanged", { session, ...shown, sequence: 2, error: PAGE_LOAD_TIMEOUT })
+      try handoff.retryTimedOutPage({ ...shown, navigation: "1" })
+      try SubscriptionRef.set(fake.foreground, { ...shownBrowser, locked: true })
+      try handoff.retryTimedOutPage(shown)
+      try SubscriptionRef.set(fake.foreground, shownBrowser)
+      try handoff.retryTimedOutPage(shown)
+      try tabs.dispatch({ type: "openTab", id: "bpriv", profile: "Private" })
+      try loadPage(tabs, fake.events, session, url, "1", 1)
+      const privatePage = { ...shown, id: "bpriv" }
+      try emit(fake.events, "stateChanged", { session, ...privatePage, sequence: 2, error: PAGE_LOAD_TIMEOUT })
+      try handoff.retryTimedOutPage(privatePage)
+      const calls = try callsTo(fake.calls, "openExternalBrowser")
+      const notices = try Ref.get(fake.toasts)
+      try Effect.try(() => assert.deepStrictEqual(
+        { calls: calls.map(({ args }) => args), notices },
+        { calls: [{ ...shown, timedOut: true, session }], notices: ["No other browser on this phone can open this page."] },
+      ))
     }
   })
 })

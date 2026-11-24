@@ -13,6 +13,7 @@ import { covered, curTab, initial as noSession, isPrivateTab } from "../../../ge
 import { settledSecurely } from "../../../gen/browser__page.ts";
 import { pageShareable } from "../../../gen/browser__pageContext.ts";
 import { newTabId } from "../../browser/address.ts";
+import { timedOutPageOf } from "../../browser/handoff.vibe";
 import { pageAddress } from "../../browser/page-context.ts";
 import { Foreground, type ForegroundState } from "../../shell/foreground.vibe";
 import type { ScreenProps } from "../app-screen.ts";
@@ -74,6 +75,7 @@ export function BrowserScreen({ route, onClose }: BrowserScreenProps) {
   const marked = bookmarks.marks.some((m) => m.url === tab.page.url);
   const finding = session.find.tab !== "" && session.find.tab === session.cur;
   const shareable = pageShareable(foreground.visible && !foreground.locked && foreground.view === "browser", isPrivateTab(session, session.cur), tab.stage === "Live" && settledSecurely(tab.page), pageAddress(tab.page.url) !== undefined);
+  const timedOut = timedOutPageOf(session, foreground);
   const measure = (viewport: HTMLElement) => watchViewport(viewport, () => {
     const facts = {
       inBrowser: foreground.visible && foreground.view === "browser", home: foreground.screen === "home" && !foreground.locked,
@@ -89,7 +91,8 @@ export function BrowserScreen({ route, onClose }: BrowserScreenProps) {
         <Button variant="ghost" size="icon" aria-label="Home" onClick={onClose}><ChevronDown aria-hidden /></Button>
         {finding && <div className="flex-1"><FindBar session={session} onQuery={(q) => run(({ tabs }) => tabs.typeFind(q))} onMove={(forward) => run(({ tabs }) => tabs.dispatch({ type: "moveFind", forward }))} onClose={() => run(({ tabs }) => tabs.dispatch({ type: "closeFind" }))} /></div>}
       </div>
-      <PageViewport key={session.cur} session={session} measure={measure} />
+      <PageViewport key={session.cur} session={session} measure={measure}
+        onRetryElsewhere={timedOut === undefined ? undefined : () => run(({ handoff }) => handoff.retryTimedOutPage(timedOut))} />
       <BrowserToolbar session={session}
         onCommand={(command) => run(({ tabs }) => tabs.dispatch({ type: "runCommand", command }))}
         onAddress={() => run(({ tabs }) => tabs.dispatch({ type: "startEditing" }))}

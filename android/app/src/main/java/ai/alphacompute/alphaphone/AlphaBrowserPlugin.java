@@ -149,6 +149,7 @@ public class AlphaBrowserPlugin extends Plugin {
   }
  }
  private final android.os.Handler navigationHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+ private static final String PAGE_LOAD_TIMEOUT="This page is taking too long. Check your connection, then reload from the menu.";
  /** Hosts (by private prefix) whose leftover ephemeral profiles this process already purged. One
   * flag per identity, so a second host subclass in the same process still purges its own. */
  private static final Set<String> cleanedProfiles=Collections.synchronizedSet(new HashSet<>());
@@ -344,7 +345,7 @@ public class AlphaBrowserPlugin extends Plugin {
   clearTimeout(t); t.loading=true; t.committed=false; t.error=""; t.httpStatus=0; t.finishedUrl="";
   t.startedMain=startedCallback?t.url:null;
   t.web.setVisibility(View.INVISIBLE); t.message.setText(AlphaBrowserCopy.LOADING); t.message.setVisibility(View.VISIBLE);
-  t.timeout=()->{if(t.loading&&!t.dead)fail(t,"This page is taking too long. Check your connection, then reload from the menu.");};
+  t.timeout=()->{if(t.loading&&!t.dead)fail(t,PAGE_LOAD_TIMEOUT);};
   navigationHandler.postDelayed(t.timeout,30000);
  }
  private void dispose(Tab t) {
@@ -1115,13 +1116,18 @@ public class AlphaBrowserPlugin extends Plugin {
   for(Tab tab:tabs.values())disableAutofill(tab);
   shareOutstanding=true;try{pageShare.launch(Intent.createChooser(send,AlphaBrowserCopy.SHARE_PAGE));}catch(RuntimeException failure){shareOutstanding=false;throw failure;}
  }); }
- /** Explicit user handoff of the unchanged visible HTTPS page to an installed browser. */
+ /** Explicit user handoff of the unchanged visible HTTPS page, or a normal tab's timed-out attempt. */
  @PluginMethod public void openExternalBrowser(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;
   Tab t=tabs.get(call.getString("id"));
+  boolean timedOut=Boolean.TRUE.equals(call.getBoolean("timedOut"));
+  String changed="The visible HTTPS page changed. Review it again before leaving "+config().hostName+".";
   if(!Objects.equals(session,call.getString("session"))||t==null||t.dead||paused||destroyed||shareOutstanding||pickerOutstanding
-   ||!Objects.equals(presentedId,t.id)||!t.web.isShown()||!t.committed||t.loading||!t.error.isEmpty()
-   ||!Objects.equals(call.getString("navigation"),String.valueOf(t.navigation))||!Objects.equals(call.getString("url"),t.url)||!Objects.equals(t.web.getUrl(),t.url)
-   ||!BrowserExternalPage.allowed(t.url,getBridge().getWebView().getUrl())||(t.priv&&!Boolean.TRUE.equals(call.getBoolean("privateConfirmed")))){call.reject("The visible HTTPS page changed. Review it again before leaving "+config().hostName+".");return;}
+   ||!Objects.equals(presentedId,t.id)||t.loading||!Objects.equals(call.getString("navigation"),String.valueOf(t.navigation))
+   ||!Objects.equals(call.getString("url"),t.url)||!BrowserExternalPage.allowed(t.url,getBridge().getWebView().getUrl())){call.reject(changed);return;}
+  if(timedOut){
+   if(t.priv||t.committed||!PAGE_LOAD_TIMEOUT.equals(t.error)||!t.frame.isShown()||!AlphaDevicePlugin.shareForeground(getActivity())){call.reject(changed);return;}
+  }else if(!t.web.isShown()||!t.committed||!t.error.isEmpty()||!Objects.equals(t.web.getUrl(),t.url)
+   ||(t.priv&&!Boolean.TRUE.equals(call.getBoolean("privateConfirmed")))){call.reject(changed);return;}
   Intent view=new Intent(Intent.ACTION_VIEW,Uri.parse(t.url)).addCategory(Intent.CATEGORY_BROWSABLE);
   java.util.ArrayList<Intent> candidates=new java.util.ArrayList<>();java.util.HashSet<String> seen=new java.util.HashSet<>();
   for(android.content.pm.ResolveInfo info:externalBrowserResolver.apply(BrowserExternalHandoff.browserProbe())){
@@ -1131,7 +1137,7 @@ public class AlphaBrowserPlugin extends Plugin {
     if(seen.add(component.flattenToString()))candidates.add(new Intent(view).setComponent(component));
    }
   }
-  if(candidates.isEmpty()){call.reject("No other installed browser can open this page. Use a password or another sign-in method.");return;}
+  if(candidates.isEmpty()){call.reject(timedOut?"No other installed browser can open this page.":"No other installed browser can open this page. Use a password or another sign-in method.");return;}
   Intent chooser=Intent.createChooser(candidates.remove(0),AlphaBrowserCopy.OPEN_ELSEWHERE);
   chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS,candidates.toArray(new Intent[0]));
   for(Tab tab:tabs.values())disableAutofill(tab);

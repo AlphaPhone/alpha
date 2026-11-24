@@ -2,20 +2,22 @@
 import { ExternalLink, Globe } from "lucide-react";
 import { type Session, curTab } from "../../../gen/browser__session.ts";
 import { pageErrorText, PROFILE_UNSUPPORTED } from "../../browser/messages.ts";
-import { EmptyState, Spinner } from "../components/ui/index.ts";
+import { Button, EmptyState, Spinner } from "../components/ui/index.ts";
 
 /** The session whose selected tab the viewport stands in for, and how the screen measures it. */
 export interface PageViewportProps {
   session: Session;
   /** Receives the viewport element as it mounts, to measure it; returns how to stop. */
   measure?: (viewport: HTMLElement) => () => void;
+  /** For a native normal tab's HTTPS timeout, retry the same address in another installed browser. */
+  onRetryElsewhere?: () => void;
 }
 
 /**
  * Where the selected tab's page is drawn. A native page sits below Alpha's WebView, so this area stays transparent over it; a new tab, a failed page and a missing WebView feature are shown here instead.
  * @model spec/browser/session.md
  */
-export function PageViewport({ session, measure }: PageViewportProps) {
+export function PageViewport({ session, measure, onRetryElsewhere }: PageViewportProps) {
   const tab = curTab(session);
   const priv = tab.profile === "Private";
   const blank = tab.stage === "Unborn" && tab.restoreUrl === "" && tab.nav.url === "";
@@ -29,6 +31,7 @@ export function PageViewport({ session, measure }: PageViewportProps) {
       {tab.page.failed && (
         <div role="alert" className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background p-8 text-center">
           <p>{pageErrorText(tab.page.problem)}</p>
+          {onRetryElsewhere !== undefined && <Button variant="outline" onClick={onRetryElsewhere}>Open in another browser<ExternalLink aria-hidden className="size-4" /></Button>}
           {session.host === "WebHost" && tab.page.url && <a href={tab.page.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary">Open in browser<ExternalLink aria-hidden className="size-4" /></a>}
         </div>
       )}

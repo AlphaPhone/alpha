@@ -92,6 +92,26 @@ pure def sometimesAPrivatePageLeft(h: Handoff): bool = h.launched.some(l => l.pr
 pure def retire(h: Handoff): Handoff = { ...h, visit: h.visit + 1 }
 ```
 
+### A normal HTTPS page that timed out can be opened in another browser from its error panel
+
+Only the selected, uncovered native tab offers this action. The address and navigation on the
+button must still match the tab when the owner taps. Android checks the same timeout and tab,
+then offers the usual chooser. Private tabs and other loading errors offer no action.
+
+```quint
+type TimedOutPage = { id: str, url: str, navigation: str }
+pure val expectedValues = Set({ id: "t1", url: "https://example.test/", navigation: "1" })
+pure val newerValues = Set("1", "2")
+pure def timeoutHandoffOffered(native: bool, visibleTab: bool, priv: bool, secure: bool, timedOut: bool): bool =
+  native and visibleTab and not(priv) and secure and timedOut
+pure def sameTimedOutPage(expected: TimedOutPage, observed: TimedOutPage): bool =
+  expected.id == observed.id and expected.url == observed.url and expected.navigation == observed.navigation
+pure def lawATimeoutOffersHandoffOnlyInANormalTab(native: bool, visibleTab: bool, secure: bool, timedOut: bool): bool =
+  not(timeoutHandoffOffered(native, visibleTab, true, secure, timedOut)) and timeoutHandoffOffered(true, true, false, true, true)
+pure def lawAReloadRetiresTheOldOffer(expected: TimedOutPage, newer: str): bool =
+  newer != expected.navigation implies not(sameTimedOutPage(expected, { ...expected, navigation: newer }))
+```
+
 ## Story: Leave a private page for another app only when I say so
 
 > As the owner, I want a link to mail, phone, messages, maps or another app tapped in a private

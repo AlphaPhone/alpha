@@ -45,9 +45,10 @@ public final class BrowserExternalHandoffInstrumentedTest {
   IntentFilter missing=new IntentFilter(Intent.ACTION_VIEW);missing.addDataScheme("https");assertFalse(BrowserExternalHandoff.genericHttps(missing));
  }
  private static ResolveInfo browser(String pkg,boolean browser){ResolveInfo info=new ResolveInfo();info.filter=new IntentFilter(Intent.ACTION_VIEW);info.filter.addCategory(Intent.CATEGORY_DEFAULT);info.filter.addCategory(Intent.CATEGORY_BROWSABLE);info.filter.addDataScheme("https");if(!browser)info.filter.addDataAuthority("accounts.example",null);info.activityInfo=new ActivityInfo();info.activityInfo.packageName=pkg;info.activityInfo.name=pkg+".Main";info.activityInfo.enabled=true;info.activityInfo.exported=true;info.activityInfo.applicationInfo=new ApplicationInfo();info.activityInfo.applicationInfo.enabled=true;return info;}
- @Test public void normalHandoffUsesOnlyExactPageAndRefusesStaleOrUnresolvableTargets()throws Exception{exercise(false);}
+ @Test public void normalHandoffUsesOnlyExactPageAndRefusesStaleOrUnresolvableTargets()throws Exception{exercise(false,false);}
+ @Test public void timeoutHandoffUsesOnlyTheFailedVisibleNavigation()throws Exception{exercise(false,true);}
  @Test public void privateHandoffRequiresExplicitReviewAndTransfersNoProfileData()throws Exception{
-  org.junit.Assume.assumeTrue("Private tabs need secure scoped deletion",WebViewFeature.isFeatureSupported(WebViewFeature.DELETE_BROWSING_DATA));exercise(true);
+  org.junit.Assume.assumeTrue("Private tabs need secure scoped deletion",WebViewFeature.isFeatureSupported(WebViewFeature.DELETE_BROWSING_DATA));exercise(true,false);
  }
  /** A tapped phone link in a private tab asks "Leave private browsing?" first; the dial pad opens
   * only after Open app. In a normal tab the same tap opens it at once. The dial pad is intercepted. */
@@ -94,7 +95,12 @@ public final class BrowserExternalHandoffInstrumentedTest {
    }finally{instrumentation.removeMonitor(monitor);}
   }
  }
- private void exercise(boolean priv)throws Exception{
+ private static Call call(String session,boolean priv,boolean timedOut)throws Exception{
+  Call call=new Call(session,priv);
+  if(timedOut)call.getData().put("timedOut",true).put("navigation","8");
+  return call;
+ }
+ private void exercise(boolean priv,boolean timedOut)throws Exception{
   String session=UUID.randomUUID().toString();AtomicReference<AlphaBrowserPlugin> plugin=new AtomicReference<>();AtomicReference<WebView> web=new AtomicReference<>();AtomicReference<Object> tab=new AtomicReference<>();AtomicReference<Intent> outgoing=new AtomicReference<>();
   Instrumentation instrumentation=InstrumentationRegistry.getInstrumentation();CountDownLatch loaded=new CountDownLatch(1);
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
@@ -126,26 +132,39 @@ public final class BrowserExternalHandoffInstrumentedTest {
    Instrumentation.ActivityMonitor monitor=new Instrumentation.ActivityMonitor(){@Override public Instrumentation.ActivityResult onStartActivity(Intent intent){outgoing.set(new Intent(intent));return new Instrumentation.ActivityResult(Activity.RESULT_CANCELED,null);}};
    instrumentation.addMonitor(monitor);
    try{
+    if(timedOut){
+     BoundedActivityScenario.main(()->{try{
+      Method loading=AlphaBrowserPlugin.class.getDeclaredMethod("loading",tab.get().getClass());
+      loading.setAccessible(true);loading.invoke(plugin.get(),tab.get());
+      Call stillLoading=call(session,false,true);plugin.get().openExternalBrowser(stillLoading);
+      assertNotNull("A page still loading is refused",stillLoading.error);
+      ((Runnable)get(tab.get(),"timeout")).run();
+      assertNull("A timeout alone opens nothing",outgoing.get());
+     }catch(Exception failure){throw new AssertionError(failure);}});
+    }
     if(priv){Call unconfirmed=new Call(session,false);plugin.get().openExternalBrowser(unconfirmed);unconfirmed.await();assertNotNull(unconfirmed.error);assertNull(outgoing.get());}
     for(String field:new String[]{"session","navigation","url"}){
-     Call stale=new Call(session,true);stale.getData().put(field,field.equals("url")?URL+"changed":"stale");plugin.get().openExternalBrowser(stale);stale.await();assertNotNull("Stale "+field+" refused",stale.error);assertNull(outgoing.get());
+     Call stale=call(session,true,timedOut);stale.getData().put(field,field.equals("url")?URL+"changed":"stale");plugin.get().openExternalBrowser(stale);stale.await();assertNotNull("Stale "+field+" refused",stale.error);assertNull(outgoing.get());
     }
     // Diagnose fixture readiness on the same UI turn as the single dispatch.
     // Never relax production visibility or exact committed-page admission.
-    Call accepted=new Call(session,priv);
+    Call accepted=call(session,priv,timedOut);
     BoundedActivityScenario.main(()->{try{
      AlphaBrowserPlugin p=plugin.get();Object t=tab.get();
      assertEquals("Fixture session still current",session,get(p,"session"));
      assertEquals("Fixture remains presented","handoff",get(p,"presentedId"));
      assertFalse("Activity must be resumed",(Boolean)get(p,"paused"));
      assertFalse("Plugin must be alive",(Boolean)get(p,"destroyed"));
-     assertTrue("Child WebView attached and visible",web.get().isShown());
-     assertEquals("Synthetic native page URL",URL,web.get().getUrl());
-     assertEquals("Committed tab URL",URL,get(t,"url"));
-     assertEquals("Navigation identity",7L,get(t,"navigation"));
-     assertEquals("Committed",true,get(t,"committed"));
+     assertTrue("The tab's frame is visible",((FrameLayout)get(t,"frame")).isShown());
+     if(!timedOut){
+      assertTrue("Child WebView attached and visible",web.get().isShown());
+      assertEquals("Synthetic native page URL",URL,web.get().getUrl());
+      assertEquals("No page failure","",get(t,"error"));
+     }
+     assertEquals("Tab URL",URL,get(t,"url"));
+     assertEquals("Navigation identity",timedOut?8L:7L,get(t,"navigation"));
+     assertEquals("Committed",!timedOut,get(t,"committed"));
      assertEquals("Finished",false,get(t,"loading"));
-     assertEquals("No page failure","",get(t,"error"));
      assertTrue("HTTPS page is external to privileged host",BrowserExternalPage.allowed(URL,p.getBridge().getWebView().getUrl()));
      p.openExternalBrowser(accepted);
     }catch(Exception failure){throw new AssertionError(failure);}});
@@ -153,9 +172,9 @@ public final class BrowserExternalHandoffInstrumentedTest {
     Intent chooser=outgoing.getAndSet(null);assertNotNull("Actual chooser dispatch intercepted",chooser);assertEquals(Intent.ACTION_CHOOSER,chooser.getAction());
     Intent target=chooser.getParcelableExtra(Intent.EXTRA_INTENT);assertNotNull(target);assertEquals(Intent.ACTION_VIEW,target.getAction());assertEquals(URL,target.getDataString());assertEquals("fixture.browser",target.getComponent().getPackageName());assertEquals(Collections.singleton(Intent.CATEGORY_BROWSABLE),target.getCategories());assertNull("No cookies, form or page contents",target.getExtras());assertNull(target.getClipData());assertNull(target.getSelector());assertEquals(0,target.getFlags());assertEquals("Duplicate and own/deep-link targets excluded",0,chooser.getParcelableArrayExtra(Intent.EXTRA_INITIAL_INTENTS).length);
     BoundedActivityScenario.main(()->{try{set(plugin.get(),"externalBrowserResolver",(Function<Intent,List<ResolveInfo>>)intent->Collections.emptyList());}catch(Exception failure){throw new AssertionError(failure);}});
-    Call absent=new Call(session,priv);plugin.get().openExternalBrowser(absent);absent.await();assertNotNull(absent.error);assertTrue(absent.error,absent.error.contains("No other installed browser"));assertNull(outgoing.get());
+    Call absent=call(session,priv,timedOut);plugin.get().openExternalBrowser(absent);absent.await();assertNotNull(absent.error);assertTrue(absent.error,absent.error.contains("No other installed browser"));assertNull(outgoing.get());
     BoundedActivityScenario.main(()->{try{((FrameLayout)get(tab.get(),"frame")).setVisibility(View.GONE);}catch(Exception failure){throw new AssertionError(failure);}});
-    Call hidden=new Call(session,priv);plugin.get().openExternalBrowser(hidden);hidden.await();assertNotNull(hidden.error);assertNull(outgoing.get());
+    Call hidden=call(session,priv,timedOut);plugin.get().openExternalBrowser(hidden);hidden.await();assertNotNull(hidden.error);assertNull(outgoing.get());
    }finally{instrumentation.removeMonitor(monitor);}
   }
  }

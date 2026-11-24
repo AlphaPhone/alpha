@@ -1,10 +1,10 @@
-// spec/browser/handoff.md, "Story: Open the page I see in another browser"
-import { type Event, type HandoffEffect, type ShownPage, Machine, machine } from "../../gen/browser__handoff.effect.vibe"
-import { type Session, curTab } from "../../gen/browser__session.effect.vibe"
+// spec/browser/handoff.md, "Story: Open the page I see in another browser"; spec/browser/handoff.md, "A normal HTTPS page that timed out can be opened in another browser from its error panel"
+import { type Event, type HandoffEffect, type ShownPage, type TimedOutPage, Machine, machine, sameTimedOutPage, timeoutHandoffOffered } from "../../gen/browser__handoff.effect.vibe"
+import { type Session, covered, curTab } from "../../gen/browser__session.effect.vibe"
 import { isSettled } from "../../gen/browser__page.effect.vibe"
 import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
 import { Toasts } from "../shell/toasts.vibe"
-import { HANDOFF_NOTICES, refusalText } from "./messages.ts"
+import { HANDOFF_NOTICES, PAGE_LOAD_TIMEOUT, refusalText } from "./messages.ts"
 import { BrowserPresenter } from "./presentation.vibe"
 import { BrowserReviews } from "./reviews.vibe"
 import { BrowserTabs } from "./session.vibe"
@@ -14,6 +14,8 @@ import { BrowserCallFailed, TabHost } from "./tabHost.vibe"
 export service BrowserHandoff {
   /** The menu's Open in another browser. */
   openExternal(): void!!
+  /** The error panel's Open in another browser, bound to the address the button offered. */
+  retryTimedOutPage(expected: TimedOutPage): void!!
   /** Follows the Browser view's visits, retiring a handoff whose view was left or hidden; never returns. */
   follow(): void!!
 }
@@ -22,6 +24,16 @@ const PRESENTATION_SETTLES = "150 millis"
 
 function browserShown(state: ForegroundState): boolean {
   return state.visible && !state.locked && state.screen === "home" && state.view === "browser"
+}
+
+/** The only timeout that the renderer may offer to send to another browser. */
+export function timedOutPageOf(session: Session, foreground: ForegroundState): TimedOutPage | undefined {
+  const tab = curTab(session)
+  const shown = browserShown(foreground) && foreground.chat === "closed" && !foreground.shade && !foreground.modal && !covered(session) && tab.stage === "Live"
+  const timedOut = tab.page.failed && !tab.page.loading && !tab.page.committed && tab.page.problem === PAGE_LOAD_TIMEOUT
+  return timeoutHandoffOffered(session.host === "NativeHost", shown, tab.profile === "Private", tab.page.secure, timedOut)
+    ? { id: tab.id, url: tab.page.url, navigation: tab.page.navigation }
+    : undefined
 }
 
 /** The selected tab's page as a handoff reads it. */
@@ -88,6 +100,12 @@ export const handoffLayer = Layer.provide(Layer.effect(BrowserHandoff, effect {
         try presenter.forget()
         try send({ type: "cleaned" })
       }
+    },
+    effect retryTimedOutPage(expected: TimedOutPage) {
+      const current = timedOutPageOf(try tabs.get(), try foreground.get())
+      if (!host.onDevice || current === undefined || !sameTimedOutPage(expected, current)) return
+      const opened = host.call("openExternalBrowser", { ...current, timedOut: true }) catch (error) => error
+      if (opened instanceof BrowserCallFailed) try toasts.show(refusalText(opened.message))
     },
     effect follow() {
       let was = false

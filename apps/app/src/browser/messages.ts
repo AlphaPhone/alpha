@@ -6,6 +6,8 @@ import type { ReadingProblem } from "../../gen/browser__reading.ts";
 
 /** Alpha's sentence when the WebView lacks isolated profiles. */
 export const PROFILE_UNSUPPORTED = "Update WebView";
+/** The native host's terminal page-load timeout, which lets a normal HTTPS page be retried elsewhere. */
+export const PAGE_LOAD_TIMEOUT = "This page is taking too long. Check your connection, then reload from the menu.";
 /** The native tab host's refusal for a WebView without isolated profiles. */
 export const PROFILE_UNSUPPORTED_NATIVE = "This Android WebView does not support isolated browser profiles";
 /** Why Read aloud and Ask about page are unavailable on this device. */
@@ -57,6 +59,7 @@ const REFUSALS: ReadonlyMap<string, string> = new Map([
   ["Only public HTTPS pages are shared", "Only public HTTPS pages are shared with Alpha."],
   ["The visible HTTPS page changed. Review it again before leaving Alpha.", "The page changed. Review it again before leaving Alpha."],
   ["No other installed browser can open this page. Use a password or another sign-in method.", "No other browser on this phone can open this page. Use a password or another way to sign in."],
+  ["No other installed browser can open this page.", "No other browser on this phone can open this page."],
   ["The other browser could not be opened. Your page remains in Alpha.", "The other browser didn’t open. Your page is still open in Alpha."],
   ["Select an available speech route before reading", "Choose an available voice before reading."],
   ["Reading unavailable on a sensitive or unverified page", SENSITIVE_PAGE],
@@ -94,7 +97,7 @@ const NOTICES: ReadonlyMap<string, string> = new Map([
 ]);
 
 const PAGE_ERRORS: ReadonlyMap<string, string> = new Map([
-  ["This page is taking too long. Check your connection, then reload from the menu.", "The page is taking too long to load. Check your connection, then reload from the menu."],
+  [PAGE_LOAD_TIMEOUT, "The page is taking too long to load. Check your connection, then reload from the menu."],
   ["This address type is not supported.", "Browser can’t open this kind of address."],
   ["Isolated browser renderer is unavailable.", "Browser can’t show pages right now. Close this tab and open a new one."],
   ["Secure connection failed. The certificate was not accepted.", "Secure connection failed: the site’s certificate wasn’t accepted."],
