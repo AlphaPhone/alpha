@@ -114,6 +114,26 @@ pure def lawACancelFailsNothing(styleLoaded: bool, tileError: bool): bool = not(
 pure def zoomServed(zoom: int, minZoom: int, maxZoom: int): bool = zoom >= minZoom and zoom <= maxZoom
 ```
 
+### Tiles in flight are bounded by the native request pool, and a cancelled tile gives its place back
+
+A tile is fetched through the Cloud client over the phone's native Cloud plugin, whose pool runs at
+most four requests at once; the rest wait their turn. A tile MapLibre stops asking for is cancelled
+with its request, so it never holds a place in the pool. Raising the pool to the previous Alpha's
+sixteen is a change to the upstream plugin.
+
+```quint
+pure val tileWorkers = 4
+pure def tilesRunning(wanted: int, dropped: int): int = {
+  val live = if (wanted > dropped) wanted - dropped else 0
+  if (live < tileWorkers) live else tileWorkers
+}
+pure val wantedValues = Set(0, 3, 4, 16)
+pure val droppedValues = Set(0, 1, 16)
+pure def lawTilesRunAtMostThePool(wanted: int, dropped: int): bool =
+  tilesRunning(wanted, dropped) >= 0 and tilesRunning(wanted, dropped) <= tileWorkers
+pure def lawACancelledTileHoldsNoPlace(wanted: int): bool = tilesRunning(wanted, wanted) == 0
+```
+
 ### The camera goes to what the owner picked, on every map
 
 Every map Alpha draws, the world map and the Cloud rasters alike, covers the world, so the camera
