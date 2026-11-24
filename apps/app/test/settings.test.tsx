@@ -82,8 +82,8 @@ describe("Settings", () => {
     await until(alpha, machines, Facts.Machine, (s) => s.read.read.status === "Loaded");
     const shown = await machines.runPromise(Facts.Machine.use((facts) => facts.get()));
     // spec/app/settings/facts.md, "Only the newest asking's answer is taken, and it replaces everything shown": what the phone did not report is unavailable, never guessed.
-    expect([Facts.word(shown, "Wifi"), Facts.word(shown, "Bluetooth"), Facts.word(shown, "Versions"), Facts.accessWord(shown, "LocationAccess"), Facts.accessWord(shown, "CameraAccess")])
-      .toEqual(["Reported", "Unavailable", "Reported", "Approximate", "AccessUnavailable"]);
+    expect([Facts.word(shown, "Wifi"), Facts.word(shown, "Bluetooth"), Facts.word(shown, "Versions"), Facts.word(shown, "AndroidVersion"), Facts.accessWord(shown, "LocationAccess"), Facts.accessWord(shown, "CameraAccess"), Facts.accessWord(shown, "MicrophoneAccess")])
+      .toEqual(["Reported", "Unavailable", "Reported", "Reported", "Approximate", "AccessUnavailable", "Off"]);
     // spec/app/settings/facts.md, "A read not answered within ten seconds is abandoned, and every fact is then unavailable"
     let answer = () => {};
     world.settings.gate = new Promise<void>((done) => { answer = done; });
@@ -131,7 +131,9 @@ describe("Settings", () => {
       await press("Notifications");
       await tap("Alpha's alerts");
       await until(alpha, machines, Android.Machine, (s) => s.target === "AlphaAlerts" && s.start.read.status === "Loaded");
-      expect(world.settings.opened).toEqual(["wifi", "mobile", "app-info ai.alphacompute.alphaphone"]);
+      await tap("Reminders");
+      await until(alpha, machines, Android.Machine, (s) => s.target === "AlertChannel" && s.start.read.status === "Loaded");
+      expect(world.settings.opened).toEqual(["wifi", "mobile", "notifications", "channel opaque-reminders"]);
     });
   });
 

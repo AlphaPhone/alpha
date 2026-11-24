@@ -41,7 +41,7 @@ export const pages = together(
 // spec/app/settings/facts.md, "Only the newest asking's answer is taken, and it replaces everything shown"
 effect function readPhone(ticket: number): Facts.Event!!SystemSettings {
   const report = try (try SystemSettings).report()
-  return { type: "answered", ticket, reported: [...report.readings], grants: [...report.grants], home: report.home, assistant: report.assistant, launcher: report.launcher }
+  return { type: "answered", ticket, reported: [...report.readings], grants: [...report.grants], alerts: [...report.alerts], home: report.home, assistant: report.assistant, launcher: report.launcher }
 }
 
 // spec/app/settings/facts.md, "When Android's dialog closes, the phone is read again if Settings is showing, and the role shown is what that read reports"; spec/app/settings/facts.md, "A Home request not ended within a minute is given up, never taken as granted, and the phone is read again if Settings is showing"
@@ -94,7 +94,7 @@ const factsResumed = hearing(
 )
 
 // spec/app/settings/android.md, "Android says whether it opened that page, a nearby one, or none"
-effect function opened(start: number, target: Android.Target, channel: number): Android.Event!!SystemSettings {
+effect function opened(start: number, target: Android.Target, channel: string): Android.Event!!SystemSettings {
   return { type: "androidAnswered", start, opened: try (try SystemSettings).open(target, channel) }
 }
 

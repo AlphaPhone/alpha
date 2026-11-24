@@ -1,4 +1,4 @@
-lemma handOff_ensures(s: Android, page: app__settings_Page, target: Target, channel: int, at: int)
+lemma handOff_ensures(s: Android, page: app__settings_Page, target: Target, channel: string, at: int)
   ensures (inv(s) ==> canHandOff(s, page, target, channel, at) ==> alwaysAlphaSaysWhatAndroidSaid(handOff(s, page, target, channel, at).state))
   ensures (inv(s) ==> canHandOff(s, page, target, channel, at) ==> stepOneAndroidStartAtATime(s, "handOff", handOff(s, page, target, channel, at).state, handOff(s, page, target, channel, at).out))
 {

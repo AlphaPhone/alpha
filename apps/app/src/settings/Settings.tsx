@@ -142,6 +142,7 @@ function reading(facts: FactsGen.Facts | undefined, fact: FactsGen.Fact): Settin
   if (word === "Unavailable") return { word: "unavailable" };
   const value = facts.reported.find((one) => one.fact === fact)?.value ?? "";
   if (value === "on") return { word: "reported", value: "On", status: "ok" };
+  if (value === "some off") return { word: "reported", value: "Some off", status: "warn" };
   if (value === "off") return { word: "reported", value: "Off", status: "off" };
   if (fact === "Sound") return { word: "reported", value: sounds[value] ?? value };
   if (fact === "Battery") return { word: "reported", value: value.endsWith(" charging") ? `${value.replace(" charging", "")}%, charging` : `${value}%` };
@@ -290,7 +291,7 @@ function Permissions({ runtime, common }: PageProps) {
 }
 
 // spec/app/settings/facts.md, "Set as Home is offered when the newest answer reported a Home role that Alpha can take and does not hold, one request at a time"
-function Phone({ runtime, common }: PageProps) {
+function Phone({ runtime, alpha, common }: PageProps) {
   const { state, can, send } = useTimed(runtime, useFacts);
   if (!state) return null;
   const request = { type: "requestHome", at: untimed } as const;
@@ -301,7 +302,9 @@ function Phone({ runtime, common }: PageProps) {
       assistant={roleWords[FactsGen.roleWord(state, state.assistant)]}
       requesting={loading(state.request)}
       onRequestHome={can(request) ? () => void send(request) : undefined}
-    />
+    >
+      {alpha.slot("settings/phone")}
+    </SettingsPhonePage>
   );
 }
 
@@ -341,9 +344,8 @@ function App({ runtime, common, app }: PageProps & { app: "inbox" | "workflows" 
 
 function About({ runtime, alpha, common }: PageProps) {
   const facts = useFacts(runtime).state;
-  const done = facts !== undefined && FactsGen.word(facts, "Versions") !== "Waiting";
   return (
-    <SettingsAboutPage {...common} alphaVersion={reading(facts, "Versions")} androidVersion={done ? { word: "unavailable" } : { word: "waiting" }} storage={reading(facts, "Storage")}>
+    <SettingsAboutPage {...common} alphaVersion={reading(facts, "Versions")} androidVersion={reading(facts, "AndroidVersion")} storage={reading(facts, "Storage")}>
       {alpha.slot("settings/about")}
       {alpha.slot("settings/update")}
     </SettingsAboutPage>
@@ -386,7 +388,10 @@ const drawn: Partial<Record<Page, Drawn>> = {
   General,
   Display,
   Sound: ({ runtime, common }) => <SettingsSoundPage {...common} sound={reading(useFacts(runtime).state, "Sound")} />,
-  Notifications: ({ runtime, common }) => <SettingsNotificationsPage {...common} alerts={reading(useFacts(runtime).state, "Alerts")} channels={[]} />,
+  Notifications: ({ runtime, common }) => {
+    const facts = useFacts(runtime).state;
+    return <SettingsNotificationsPage {...common} alerts={reading(facts, "Alerts")} channels={facts?.alerts ?? []} />;
+  },
   Battery: ({ runtime, common }) => <SettingsBatteryPage {...common} battery={reading(useFacts(runtime).state, "Battery")} />,
   PhonePage: Phone,
   Privacy,
@@ -418,7 +423,7 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
   if (!state) return null;
   const page = state.page;
   const goBack = { type: "goBack" } as const;
-  const start = android.state && loading(android.state.start) ? { target: targetNames[android.state.target], channel: android.state.channel > 0 ? android.state.channel : undefined } : undefined;
+  const start = android.state && loading(android.state.start) ? { target: targetNames[android.state.target], channel: android.state.channel || undefined } : undefined;
   const common: Common = {
     onBack: can(goBack) ? () => void send(goBack) : undefined,
     onOpen: (name) => {
@@ -431,7 +436,7 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
     },
     starting: start,
     onAndroid: ({ target, channel }) => {
-      const handOff = { type: "handOff", page, target: targetsNamed[target], channel: channel ?? 0, at: untimed } as const;
+      const handOff = { type: "handOff", page, target: targetsNamed[target], channel: channel ?? "", at: untimed } as const;
       if (android.can(handOff)) void android.send(handOff);
     },
     told: android.state && toldWords[android.state.told],

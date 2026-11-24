@@ -9,7 +9,7 @@ export type SettingsNotificationsPageProps = SettingsAndroidProps & {
   /** Whether Alpha's alerts are on, as the phone last said. */
   alerts: Reading;
   /** Alpha's alert channels, each with its own page in Android's settings. */
-  channels: { id: number; name: string }[];
+  channels: readonly { id: string; name: string; blocked: boolean }[];
   /** What Alpha tells about the last start of an Android page. */
   told?: AndroidTold;
   /** Goes back to General. */
@@ -32,8 +32,8 @@ export function SettingsNotificationsPage({ alerts, channels, told, onBack, onHa
       </ListGroup>
       {channels.length ? (
         <ListGroup heading="Channels">
-          {channels.map(({ id, name }) => (
-            <SettingsAndroidRow key={id} target="alert-channel" channel={id} title={name} icon={<Hash />} {...android} />
+          {channels.map(({ id, name, blocked }) => (
+            <SettingsAndroidRow key={id} target="alert-channel" channel={id} title={name} icon={<Hash />} reading={blocked ? { word: "reported", value: "Off", status: "off" } : undefined} {...android} />
           ))}
         </ListGroup>
       ) : null}

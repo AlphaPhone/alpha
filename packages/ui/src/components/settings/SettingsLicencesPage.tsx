@@ -8,7 +8,7 @@ import { ChevronRight } from "lucide-react";
 import { placed, type SettingsPlaceProps } from "./vocabulary.ts";
 
 /** A licence in the list: what it is for and the licence it is under. */
-export type SettingsLicenceItem = { name: string; licence: string };
+export type SettingsLicenceItem = { name: string; licence: string; version?: string; source?: string };
 
 export type SettingsLicencesPageProps = SettingsPlaceProps & {
   /** How the load of the licence file stands: under way, done, or failed. */
@@ -43,7 +43,7 @@ export function SettingsLicencesPage({ load, found, query, licences, onQuery, on
       {load === "loaded" && licences.length ? (
         <ListGroup heading={query ? `${licences.length} of ${found}` : `${found} licences`}>
           {licences.map((licence, index) => (
-            <ListRow key={licence.name} title={licence.name} detail={licence.licence} trailing={<ChevronRight aria-hidden className="size-5" />} onClick={onOpen && (() => onOpen(index))} {...placed({ place, onPlace }, index)} />
+            <ListRow key={JSON.stringify([licence.name, licence.version, licence.source])} title={licence.name} detail={licence.version ? `${licence.version} · ${licence.licence}` : licence.licence} trailing={<ChevronRight aria-hidden className="size-5" />} onClick={onOpen && (() => onOpen(index))} {...placed({ place, onPlace }, index)} />
           ))}
         </ListGroup>
       ) : null}

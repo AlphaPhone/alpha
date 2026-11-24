@@ -58,6 +58,8 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(ai.eliza.plugins.passwords.PasswordsPlugin.class);
   registerPlugin(AlphaBrowserPlugin.class);
   registerPlugin(AlphaCalendarPlugin.class);
+  registerPlugin(AlphaNotificationsPlugin.class);
+  registerPlugin(AlphaPhotosPermissionsPlugin.class);
   registerPlugin(AlphaResetPlugin.class);
   registerPlugin(AlphaActionJournalPlugin.class);
   registerPlugin(AlphaDevicePlugin.class);

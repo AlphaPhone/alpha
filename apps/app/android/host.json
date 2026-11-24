@@ -35,6 +35,8 @@
     { "module": "calendar" },
     { "module": "contacts" },
     { "module": "action-journal" },
+    { "module": "notifications" },
+    { "module": "media" },
     { "module": "messages" },
     { "module": "phone" },
     { "module": "passwords" },

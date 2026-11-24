@@ -19,6 +19,7 @@ module held {
   export interface CarrierPlugin {
     read(): Promise<Setup>
     readEid(): Promise<Reported>
+    openSettings(input: { page: "sim" | "apn" }): Promise<{ status: "opened"; specific: boolean }>
   }
 
   let made: CarrierPlugin | undefined
@@ -45,6 +46,12 @@ export service CarrierSetup {
   read(): Option.Option<Identifiers>!!
   readEid(): Field!!
   copy(text: string): boolean!!
+}
+
+/** Ask Alpha's carrier bridge for Android's SIMs or access point page. */
+export effect function openCarrierSettings(page: "sim" | "apn"): ("exact" | "nearby" | "refused")!! {
+  const result = tryPromise(() => plugin().openSettings({ page })) catch () => undefined
+  return result?.status !== "opened" ? "refused" : result.specific === true ? "exact" : "nearby"
 }
 
 const statuses: Readonly<Record<Reported["status"], Status>> = { available: "Returned", "permission-denied": "AccessDenied", unavailable: "Missing", unsupported: "Unsupported", "not-read": "NotRead" }
