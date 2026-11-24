@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import {registerHooks} from "node:module";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -11,6 +12,20 @@ const bundle = `${main}/assets/agent/agent.mjs`;
 const embedding = `${main}/assets/agent/models/bge.gguf`;
 const node = abi => `${main}/jniLibs/${abi}/libeliza_node.so`;
 const voice = abi => `${main}/jniLibs/${abi}/libelizainference.so`;
+
+test("workflow worker preparation loads before the SDK has built its worker", async t => {
+  const output = fs.mkdtempSync(path.join(os.tmpdir(), "alpha-workflow-worker-"));
+  t.after(() => fs.rmSync(output, {recursive: true, force: true}));
+  const hook = registerHooks({
+    resolve(specifier, context, next) {
+      if (specifier === "@elizaos/plugin-workflow/worker") throw new Error("The SDK worker has not been built");
+      return next(specifier, context);
+    },
+  });
+  t.after(() => hook.deregister());
+  const {workflowWorkerArtifact} = await import("../scripts/build-workflow-worker.ts");
+  await assert.rejects(workflowWorkerArtifact(output), /Build the workflow worker first/);
+});
 
 test("the SDK's staged assets and both Node libraries land in Alpha's source set on each run", t => {
   const work = fs.mkdtempSync(path.join(os.tmpdir(), "alpha-runtime-publication-"));
