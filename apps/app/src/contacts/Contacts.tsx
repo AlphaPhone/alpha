@@ -53,6 +53,7 @@ export function Contacts({ runtime }: ContactsProps) {
           <div className="flex items-center gap-2">
             <SearchField className="flex-1" aria-label="Search or ask" placeholder="Search or ask" value={query} onValueChange={search} />
             {can({ type: "compose" }) && <Button size="icon" aria-label="New contact" onClick={() => { set({ form: blankForm }); void send({ type: "compose" }); }}><Plus /></Button>}
+            {can({ type: "composeElsewhere" }) && <Button size="icon" aria-label="New contact" onClick={() => void send({ type: "composeElsewhere" })}><Plus /></Button>}
           </div>
           {state.sought && <Chip onClear={() => search("")} clearLabel="Clear the search">{query}</Chip>}
           <div className="flex gap-2" role="group" aria-label="Show">
@@ -115,6 +116,7 @@ function Card({ runtime, safe }: ContactsProps & { safe: boolean }) {
               runtime.runSync(Rows.use((rows) => rows.set({ form: { givenName: card.givenName, familyName: card.familyName, phones: card.phoneNumbers.map((one) => one.number), emails: card.emailAddresses.map((one) => one.address), notes: card.notes ?? "" } })));
               void send({ type: "amend" });
             }}>Edit</Button>}
+            {can({ type: "amendElsewhere" }) && <Button variant="outline" onClick={() => void send({ type: "amendElsewhere" })}>Edit</Button>}
             {can({ type: "askDelete" }) && <Button variant="destructive" onClick={() => void send({ type: "askDelete" })}>Delete</Button>}
           </div>
         </>

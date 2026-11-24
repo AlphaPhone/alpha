@@ -103,16 +103,18 @@ effect function listed(ticket: number, further: boolean): Event!!(Telephony | Ro
   const chip = (try (try Contacts.Machine).get()).chip
   const status = telephony("status", (c) => c.phone.status()) catch () => undefined
   const grant = grantOf(status?.permissions.contacts)
-  if (grant !== "Granted") return { type: "listed", ticket, ok: status !== undefined, grant, count: 0, further: false }
-  const page = effect {
-    try telephony("open", (c) => c.contacts.open())
-    return try telephony("list", (c) => c.contacts.list({ query: held.sought, limit: 50, kind: "ExplicitRead", ...(further && held.next !== undefined ? { cursor: held.next } : {}) }))
+  if (grant !== "Granted") return { type: "listed", ticket, ok: status !== undefined, grant, count: 0, further: false, editable: false }
+  const read = effect {
+    const book = try telephony("open", (c) => c.contacts.open())
+    const page = try telephony("list", (c) => c.contacts.list({ query: held.sought, limit: 50, kind: "ExplicitRead", ...(further && held.next !== undefined ? { cursor: held.next } : {}) }))
+    return { page, editable: book.writable }
   } catch () => undefined
-  if (page === undefined) return { type: "listed", ticket, ok: false, grant, count: 0, further: false }
+  if (read === undefined) return { type: "listed", ticket, ok: false, grant, count: 0, further: false, editable: false }
+  const { page, editable } = read
   const complete = page.contacts.filter((row: AddressBookRow): row is AddressBookContact => !("incomplete" in row) && (chip === "Everyone" || row.starred))
   const found = further ? [...held.rows, ...complete] : complete
   try store.set({ rows: found, next: page.next ?? undefined })
-  return { type: "listed", ticket, ok: true, grant, count: found.length, further: page.next !== null }
+  return { type: "listed", ticket, ok: true, grant, count: found.length, further: page.next !== null, editable }
 }
 
 // spec/app/contacts/index.md, "Only the newest read of the open contact is shown, and only if it is a contact Alpha can show"
@@ -168,10 +170,21 @@ effect function reached(how: Contacts.Reach): void!!(Rows | Dialer | PhoneMachin
   try ignore((try Shell).send({ type: "openView", view: "Phone" }))
 }
 
+// spec/app/contacts/index.md, "Where the phone does not let Alpha write contacts, New and Edit open the phone's own contact editor instead"
+effect function editor(fresh: boolean): void!!(Telephony | Rows | Contacts.Machine) {
+  if (fresh) {
+    try ignore(telephony("create", (c) => c.contacts.create()))
+    return
+  }
+  const contact = (try (try Contacts.Machine).get()).contact
+  const row = (try (try Rows).get()).rows.find((one) => one.id === contact)
+  if (row !== undefined) try ignore(telephony("edit", (c) => c.contacts.edit(row)))
+}
+
 function carry(fx: Out): Job<Event, Telephony | Rows | Contacts.Machine | SystemSettings | Dialer | PhoneMachine | Shell | Callers, []> {
   return match (fx) {
     when { tag: "Fetch", let source, let ticket }: source === "Listing"
-      ? answer("list", listed(ticket, false), { type: "listed", ticket, ok: false, grant: "Unasked", count: 0, further: false })
+      ? answer("list", listed(ticket, false), { type: "listed", ticket, ok: false, grant: "Unasked", count: 0, further: false, editable: false })
       : answer("card", read(ticket), { type: "contactRead", ticket, ok: false, seen: { names: 0, phones: 0, emails: 0, notes: 0, notable: true } });
     when { tag: "Prompt" }: answer("prompt", effect {
       const status = telephony("requestAccess", (c) => c.phone.requestAccess("contacts")) catch () => undefined
@@ -179,6 +192,7 @@ function carry(fx: Out): Job<Event, Telephony | Rows | Contacts.Machine | System
     }, { type: "accessReported", grant: "Unasked" });
     when { tag: "Settings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", 0) });
     when { tag: "Open", let app }: run("reach", reached(app));
+    when { tag: "Editor", let fresh }: run("editor", editor(fresh));
     when { tag: "Write", let id, let change }: answer(`write ${id}`, written(id, change), { type: "writeLost" });
   }
 }

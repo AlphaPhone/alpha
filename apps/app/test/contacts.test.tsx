@@ -68,6 +68,23 @@ describe("Contacts on an Alpha image", () => {
     expect([world.telephony.placed, world.telephony.dialed]).toEqual([[], []]);
   });
 
+  it("Add or change a contact in the phone's own editor where Alpha may not write contacts (spec/app/contacts/index.md, \"Story: Add or change a contact\")", async () => {
+    const world = image();
+    world.telephony.editable = false;
+    const { alpha } = await open(world);
+    await until(alpha, alpha.runtime, Shell, (s) => s.contacts);
+    await press("Contacts");
+    await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 2 && !s.editable);
+
+    // spec/app/contacts/index.md, "Where the phone does not let Alpha write contacts, New and Edit open the phone's own contact editor instead"
+    await press("New contact");
+    await press("Maya Chen");
+    await until(alpha, alpha.runtime, Contacts, (s) => s.opened && s.card.status === "Loaded");
+    await press("Edit");
+    await until(alpha, alpha.runtime, Contacts, () => world.telephony.editors.length === 2);
+    expect([world.telephony.editors, (await alpha.runtime.runPromise(Contacts.use((machine) => machine.get()))).form, world.telephony.people.map((one) => one.revision)]).toEqual([["new", "7"], "Shut", [1, 1]]);
+  });
+
   it("Approve what the agent asked: a text, a change, a new contact (spec/app/contacts/agent.md, \"Story: Let the agent ask for a call or a contact change\"; spec/app/contacts/agent.md, \"Story: Approve what the agent asked\"; spec/app/contacts/agent.md, \"Story: Learn how the request ended\")", async () => {
     const world = image();
     const { alpha } = await open(world);

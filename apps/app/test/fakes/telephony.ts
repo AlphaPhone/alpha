@@ -38,6 +38,10 @@ export interface TelephonyScene {
   sent: { operationId: string; recipients: string[]; body: string }[];
   journal: Map<string, Record<string, unknown>>;
   contacts: boolean;
+  /** Whether the phone lets Alpha write contacts, beside reading them. */
+  editable: boolean;
+  /** The phone's own contact editor, each time it was opened: on a new contact, or on the contact named. */
+  editors: string[];
   people: Person[];
   staged: { id: string; kind: string; target: Record<string, unknown>; phase: string; deadline: { expiresAt: number } }[];
   live: Live[];
@@ -75,6 +79,8 @@ export function telephonyScene(): TelephonyScene {
     sent: [],
     journal: new Map(),
     contacts: true,
+    editable: true,
+    editors: [],
     people: [
       { id: "7", displayName: "Maya Chen", givenName: "Maya", familyName: "Chen", phoneNumbers: [{ number: "+14155550100", type: "mobile" }], emailAddresses: [], notes: "Climbing on Tuesdays", revision: 1 },
       { id: "8", displayName: "Ben Ortiz", givenName: "Ben", familyName: "Ortiz", phoneNumbers: [{ number: "+14155550122", type: "mobile" }], emailAddresses: [], revision: 1 },
@@ -229,7 +235,7 @@ function telephony(world: TelephonyScene): Faked {
 /** `ElizaContacts`: the address book, over `world`. */
 function contacts(world: TelephonyScene): Faked {
   return plugin<AddressBookNativePlugin>(() => {
-    const status = () => ({ available: true, readable: world.contacts, writable: world.contacts });
+    const status = () => ({ available: true, readable: world.contacts, writable: world.contacts && world.editable });
     const find = (id: string) => world.people.find((one) => one.id === id);
     return {
       status: () => Promise.resolve(status()),
@@ -245,8 +251,14 @@ function contacts(world: TelephonyScene): Faked {
           more: found.length > limit,
         });
       },
-      create: () => Promise.resolve({ status: "returned" }),
-      edit: () => Promise.resolve({ status: "returned" }),
+      create: () => {
+        world.editors.push("new");
+        return Promise.resolve({ status: "returned" });
+      },
+      edit: ({ id }: { id: string }) => {
+        world.editors.push(id);
+        return Promise.resolve({ status: "returned" });
+      },
       get: ({ id }) => {
         const one = find(id);
         if (one === undefined) return Promise.reject(new Error("Contact not found"));
