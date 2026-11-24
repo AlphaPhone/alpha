@@ -107,6 +107,29 @@ pure def canGoHome(s: Shell): bool = layers(s) > 0
 pure def goHome(s: Shell): Shell = { ...s, trail: List(), drawer: false, assistant: Bar }
 ```
 
+### Agent navigation shows an admitted app or Home without lowering Ask Alpha
+
+When the agent navigates during an open conversation or voice session, the
+drawer closes and Ask Alpha stays at its current height so the conversation
+is not interrupted.
+
+```quint
+pure def canAgentOpenView(s: Shell, view: View): bool = available(s, view) and not(showing(s, view))
+
+pure def agentOpenView(s: Shell, view: View): Shell =
+  val grown = s.trail.append(view)
+  { ...s, trail: if (grown.length() > maxTrail) grown.tail() else grown, drawer: false }
+
+pure def canAgentGoHome(s: Shell): bool = s.trail.length() > 0 or s.drawer
+
+pure def agentGoHome(s: Shell): Shell = { ...s, trail: List(), drawer: false }
+
+pure def stepAgentNavigationKeepsAssistant(before: Shell, via: str, after: Shell): bool =
+  (via == "agentOpenView" or via == "agentGoHome") implies (after.assistant == before.assistant and not(after.drawer))
+
+pure def sometimesAgentNavigatesKeepingSheet(s: Shell): bool = s.assistant == Sheet and s.trail.length() > 0
+```
+
 ### When Alpha opens again the trail is kept, and the drawer and Ask Alpha are closed
 
 ```quint

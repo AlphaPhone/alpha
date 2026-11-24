@@ -1,4 +1,4 @@
-import type { ComponentProps } from "react";
+import type { ComponentProps, Ref } from "react";
 import { ArrowUp, Mic, Paperclip, Square } from "lucide-react";
 import { cn } from "../../lib/cn.ts";
 import { Banner } from "../Banner.tsx";
@@ -45,8 +45,10 @@ export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "o
   onTalk?: () => void;
   /** Opens the conversation from the bar. */
   onOpen?: () => void;
-  /** Called when the field takes focus: on the bar this raises Ask Alpha to typing. */
+  /** Called when the field takes focus: on the bar this opens Ask Alpha as a sheet. */
   onFocusField?: () => void;
+  /** Ref to the composer field so a tap on the resting bar can focus it synchronously. */
+  fieldRef?: Ref<HTMLTextAreaElement>;
   /** Removes a pending attachment. */
   onRemoveAttachment?: (id: string) => void;
   /** Opens a pending image over the conversation. */
@@ -64,12 +66,12 @@ const reasons = { away: "Alpha cannot be reached", sensitive: "This screen is pr
  */
 export function AssistantComposer({
   variant = "sheet", value, onValueChange, closed = false, notice, unavailable, attachments = [], limit = 4, quote, editing = false, lift,
-  onSend, onStop, stopping = false, onAttach, onTalk, onOpen, onFocusField, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
+  onSend, onStop, stopping = false, onAttach, onTalk, onOpen, onFocusField, fieldRef, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
 }: AssistantComposerProps) {
   const written = value.trim() !== "" || attachments.length > 0;
   const bar = variant === "bar";
   return (
-    <div className={cn("flex flex-col gap-2", bar ? "z-dock rounded-tile border border-border bg-popover p-2 shadow-lg" : "border-t border-border bg-background px-3 py-2", className)} style={lift ? { marginBottom: lift, ...style } : style} {...props}>
+    <div data-host-chrome={bar ? "" : undefined} className={cn("flex flex-col gap-2", bar ? "z-dock touch-none rounded-tile border border-border bg-popover p-2 shadow-lg" : "border-t border-border bg-background px-3 py-2", className)} style={lift ? { marginBottom: lift, ...style } : style} {...props}>
       {notice ? <AssistantDraftNotice {...notice} /> : null}
       {unavailable ? <Banner variant="warn">{reasons[unavailable]}</Banner> : null}
       {attachments.length ? <AssistantPendingAttachments attachments={attachments} limit={limit} onRemove={onRemoveAttachment} onPreview={onPreviewAttachment} /> : null}
@@ -81,13 +83,15 @@ export function AssistantComposer({
         ) : null}
         <Button variant="ghost" size="icon" aria-label="Attach" disabled={!onAttach || closed} onClick={onAttach}><Paperclip /></Button>
         <Textarea
+          ref={fieldRef}
+          data-alpha-composer=""
           aria-label="Message Alpha"
           rows={1}
           value={value}
           disabled={closed}
           onChange={(event) => onValueChange(event.target.value)}
           onFocus={onFocusField}
-          className="max-h-40 min-w-0 flex-1 rounded-full border-0 bg-transparent px-2"
+          className="max-h-40 min-w-0 flex-1 touch-auto rounded-full border-0 bg-transparent px-2"
         />
         {onStop || stopping ? (
           <Button size="icon" aria-label="Stop reply" loading={stopping} className="bg-foreground text-background hover:bg-foreground/90" onClick={onStop}><Square fill="currentColor" /></Button>
