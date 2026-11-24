@@ -1,5 +1,10 @@
 // spec/kit/read.md, "Story: Read from outside"
 import { type Launcher, browserLauncher, phoneLauncher } from "./launcher.vibe"
+import { type CarrierSetup, browserCarrierSetup, phoneCarrierSetup } from "./carrier.vibe"
+import { type LauncherUpdates, browserLauncherUpdates, phoneLauncherUpdates } from "./launcherUpdates.vibe"
+import { type Passwords, browserPasswords, phonePasswords } from "./passwords.vibe"
+import { type SystemSettings, browserSystemSettings, phoneSystemSettings } from "./systemSettings.vibe"
+import { type WiFi, browserWiFi, phoneWiFi } from "./wifi.vibe"
 
 /**
  * The services over the phone's other plugins, one line per plugin in each of the three lists below: its service in
@@ -9,15 +14,30 @@ import { type Launcher, browserLauncher, phoneLauncher } from "./launcher.vibe"
 export type Plugins =
   | never
   | Launcher
+  | SystemSettings
+  | WiFi
+  | Passwords
+  | CarrierSetup
+  | LauncherUpdates
 
 /** On the phone: each plugin's service over eliza's client of it (`@elizaos/os/bridges/<plugin>`). */
 export const phonePlugins = Layer.mergeAll(
   Layer.empty,
   phoneLauncher,
+  phoneSystemSettings,
+  phoneWiFi,
+  phonePasswords,
+  phoneCarrierSetup,
+  phoneLauncherUpdates,
 )
 
 /** In a browser: each plugin's service saying the phone's part is absent. */
 export const browserPlugins = Layer.mergeAll(
   Layer.empty,
   browserLauncher,
+  browserSystemSettings,
+  browserWiFi,
+  browserPasswords,
+  browserCarrierSetup,
+  browserLauncherUpdates,
 )

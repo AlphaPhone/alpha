@@ -30,4 +30,5 @@ export const mounts: readonly Mount[] = [
   at("assistant", () => import("./ask/index.tsx")),
   at("notice", () => import("./shell/Notices.tsx")),
   at("assistant", () => import("./assistant/index.tsx")),
+  at("view:Settings", () => import("./settings/index.tsx")),
 ];
