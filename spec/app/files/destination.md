@@ -35,7 +35,7 @@ pure val ticketValues = Set(1, 2, 3)
 pure val trailValues = Set(List(), List(1), List(1, 4), List(0))
 pure val entriesValues =
   Set(List())
-    .union(Set(List({ id: 4, name: "a", revision: 1, kind: F::Folder, volume: 1 }, { id: 2, name: "b", revision: 1, kind: F::Image, volume: 1 })))
+    .union(Set(List({ id: 4, name: "a", revision: 1, kind: F::Folder, volume: 1, bytes: 0 }, { id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0 })))
 ```
 
 ### Going to a place shows it afresh: the volumes at once, or a folder after it is read
