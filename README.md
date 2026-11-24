@@ -295,8 +295,11 @@ copy the agent's database off a phone you own, audit the copy outside the
 repository and delete it after (it holds the owner's conversations); run the
 probe again, alone on the key, when the provider or model changes. On this
 tree's runtime the model calls are in the on-device store's `device_records`
-(collection `logs`), which a port of the audit must read. A change to what
-the agent sends shows:
+(collection `logs`), which a port of the audit must read. That runbook also
+records what eliza's pin already settles: since elizaOS/eliza#40250 every
+request with tools carries `RESTORE_CONTEXT` in one form, so it no longer
+changes the cached prefix, and #40249 bounds the re-send on the direct
+route. A change to what the agent sends shows:
 
 - the audit on a phone running it: input per turn, the allowance left and
   the provider's cached share;
@@ -339,7 +342,9 @@ Alpha `develop`.
   `--listener-qualification`, and `--patch` `chip`, `ops`,
   `protected-power` and `sense-policy`; without the qualification it is
   refused ([`spec/app/release/`](spec/app/release/index.md)), where develop
-  staged an unqualified record with `--development`.
+  staged an unqualified record with `--development`. The stager takes the
+  qualification's SHA-256 from the file it is given; develop instead had it
+  enrolled as `listenerQualificationSha256` in its Pixel 10a product record.
 - One AOSP build runs at a time, each image with a new `BUILD_NUMBER`, or
   the package manager keeps stale metadata.
 
