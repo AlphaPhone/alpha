@@ -24,7 +24,11 @@ const card = (id: string, unread: boolean) => ({ id, threadId: `t-${id}`, subjec
 /** What the fake Cloud was asked, in order. */
 type Calls = string[]
 
-/** A fake Cloud for managed Gmail: two inbox pages, the second repeating a message, and an operation ledger that answers like Cloud's. */
+/**
+ * A fake Cloud for managed Gmail: two inbox pages, the second repeating a message from a changed mailbox and ending the list (Cloud
+ * never answers a next token that repeats the one asked, spec/cloud/services/google/mailRead.md upstream), and an operation ledger that
+ * answers like Cloud's.
+ */
 function gmailCloud(calls: Calls, options: { readonly loseDispatch?: boolean; readonly review?: Record<string, unknown>; readonly digest?: string } = {}) {
   const ledger = new Map<string, { review: Record<string, unknown>; digest: string; state: string; kind: string }>()
   return fakeCloud({
@@ -33,7 +37,7 @@ function gmailCloud(calls: Calls, options: { readonly loseDispatch?: boolean; re
       calls.push("search")
       const later = calls.filter((c) => c === "search").length > 1
       return later
-        ? { messages: [card("m2", false), card("m3", true)], nextPageToken: "p1", syncedAt: "2026-11-21T09:31:00Z", mailboxHistoryId: "42", supportsSpamTrash: true }
+        ? { messages: [card("m2", false), card("m3", true)], nextPageToken: null, syncedAt: "2026-11-21T09:31:00Z", mailboxHistoryId: "42", supportsSpamTrash: true }
         : { messages: [card("m1", true), card("m2", false)], nextPageToken: "p1", syncedAt: "2026-11-21T09:30:00Z", mailboxHistoryId: "41", supportsSpamTrash: true }
     },
     "POST /api/v1/eliza/google/gmail/inbox-v1/operations": (body: unknown) => {
