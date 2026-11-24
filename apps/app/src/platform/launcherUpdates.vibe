@@ -1,0 +1,94 @@
+// spec/app/settings/updates.md, "Story: Update Alpha when I choose"; spec/app/settings/updates.md, "Story: Get updates hands-off"
+import type { Activation, InstallAnswer, Permission } from "../../gen/app__settings__updates.ts"
+
+module held {
+  import { registerPlugin } from "@capacitor/core"
+
+  /** `AlphaDevicePlugin.java`, Alpha's own updater: it checks the feed, and verifies, stages and installs a release, Android deciding each install. */
+  export interface AlphaDevicePlugin {
+    snapshot(): Promise<{ appVersionCode?: number; appSigner?: string; appAutomaticUpdates?: "starting" | "permission-required" | "supported" | "unsupported" }>
+    checkForUpdate(): Promise<{ manifest?: string; manifestSha256?: string }>
+    installUpdate(options: { apkUrl: string; sha256: string; sizeBytes: number; versionCode: number; automatic?: boolean; manifestSha256?: string }): Promise<{ status?: "offer-unavailable" | "offer-withdrawn" | "offer-response-changed" | "starting" | "permission-required" | "unsupported" }>
+    updateState(): Promise<{ pending?: boolean; phase?: "preparing" | "paused"; activationId?: string; bridgeId?: string; canContinue?: boolean; automatic?: boolean; outcome?: string; idle?: boolean }>
+    activateUpdate(options: { activationId: string; bridgeId: string; ready: boolean; resumeEligible?: boolean }): Promise<void>
+    continueUpdate(options: { activationId: string; bridgeId: string }): Promise<void>
+    openUpdatePermissionSettings(): Promise<{ status: "opened" | "unsupported" }>
+  }
+
+  let made: AlphaDevicePlugin | undefined
+  /** @throws {never} */
+  export function plugin(): AlphaDevicePlugin {
+    return (made ??= registerPlugin<AlphaDevicePlugin>("AlphaDevice"))
+  }
+}
+import { plugin } from held
+
+/** What the launcher installed reports of itself. */
+export interface Installed {
+  readonly versionCode: number
+  readonly signer: string
+  readonly launcher: boolean
+  readonly permission: Permission
+}
+
+/** One release the updater is asked to install: exactly the bytes the feed reviewed. */
+export interface Release {
+  readonly apkUrl: string
+  readonly sha256: string
+  readonly sizeBytes: number
+  readonly versionCode: number
+}
+
+/** Android's activation of a staged update, and the ids that name it. */
+export interface Activated {
+  readonly activation: Activation
+  readonly canContinue: boolean
+  readonly ids: Option.Option<{ readonly activationId: string; readonly bridgeId: string }>
+}
+
+/** Alpha's own launcher updates, through its `AlphaDevice` plugin. */
+export service LauncherUpdates {
+  installed(): Option.Option<Installed>!!
+  /** The raw feed and the digest Android computed over its bytes, or none where the feed could not be read. */
+  check(): Option.Option<{ readonly feed: string | undefined; readonly digest: string | undefined }>!!
+  install(release: Release, automatic: Option.Option<string>): InstallAnswer!!
+  activation(): Activated!!
+  acknowledge(ids: { readonly activationId: string; readonly bridgeId: string }, ready: boolean): void!!
+  continueInstall(ids: { readonly activationId: string; readonly bridgeId: string }): void!!
+  allowAutomatic(): boolean!!
+}
+
+const permissions = { starting: "AndroidStarting", "permission-required": "PermissionRequired", supported: "AutomaticAllowed", unsupported: "AutomaticUnsupported" } as const
+const installs = { "offer-unavailable": "OfferUnavailable", "offer-withdrawn": "OfferWithdrawn", "offer-response-changed": "OfferChanged", starting: "StillStarting", "permission-required": "NeedsPermission", unsupported: "Unsupported" } as const
+
+/** On the phone: Alpha's `AlphaDevice` plugin. */
+export const phoneLauncherUpdates = Layer.succeed(LauncherUpdates, {
+  installed: () => Effect.map(Effect.option(tryPromise(() => plugin().snapshot())), Option.flatMap((snapshot) => (snapshot.appVersionCode === undefined
+    ? Option.none()
+    : Option.some({ versionCode: snapshot.appVersionCode, signer: snapshot.appSigner ?? "", launcher: true, permission: snapshot.appAutomaticUpdates === undefined ? "PermissionUnread" as const : permissions[snapshot.appAutomaticUpdates] })))),
+  check: () => Effect.map(Effect.option(tryPromise(() => plugin().checkForUpdate())), Option.map((reply) => ({ feed: reply.manifest, digest: reply.manifestSha256 }))),
+  install: (release: Release, automatic: Option.Option<string>) => effect {
+    const reply = try tryPromise(() => plugin().installUpdate({ ...release, ...(Option.isSome(automatic) ? { automatic: true, manifestSha256: automatic.value } : {}) }))
+    return reply.status === undefined ? "Accepted" as InstallAnswer : installs[reply.status]
+  } catch () => "OfferUnavailable" as InstallAnswer,
+  activation: () => effect {
+    const state = try tryPromise(() => plugin().updateState())
+    const activation: Activation = state.pending === true ? (state.phase === "paused" ? "Paused" : "Preparing") : state.outcome !== undefined || state.idle === true ? "Ended" : "NoActivation"
+    const ids = state.activationId !== undefined && state.bridgeId !== undefined ? Option.some({ activationId: state.activationId, bridgeId: state.bridgeId }) : Option.none()
+    return { activation, canContinue: state.canContinue === true, ids }
+  } catch () => ({ activation: "NoActivation" as Activation, canContinue: false, ids: Option.none() }),
+  acknowledge: (ids: { readonly activationId: string; readonly bridgeId: string }, ready: boolean) => ignore(tryPromise(() => plugin().activateUpdate({ ...ids, ready, ...(ready ? { resumeEligible: true } : {}) }))),
+  continueInstall: (ids: { readonly activationId: string; readonly bridgeId: string }) => ignore(tryPromise(() => plugin().continueUpdate(ids))),
+  allowAutomatic: () => Effect.map(Effect.option(tryPromise(() => plugin().openUpdatePermissionSettings())), (opened) => Option.isSome(opened) && opened.value.status === "opened"),
+})
+
+/** A browser installs nothing. */
+export const browserLauncherUpdates = Layer.succeed(LauncherUpdates, {
+  installed: () => succeed(Option.none<Installed>()),
+  check: () => succeed(Option.none()),
+  install: () => succeed<InstallAnswer>("OfferUnavailable"),
+  activation: () => succeed<Activated>({ activation: "NoActivation", canContinue: false, ids: Option.none() }),
+  acknowledge: () => Effect.void,
+  continueInstall: () => Effect.void,
+  allowAutomatic: () => succeed(false),
+})

@@ -32,8 +32,8 @@ A load that failed, or found none, is tried again the next time the page
 opens. A load has ten seconds to finish.
 
 ```quint
-pure val loadLimit = 10
-pure val atValues = Set(0, 4, 20)
+pure val loadLimit = 10000
+pure val atValues = Set(0, 4000, 20000)
 
 pure def loadedSome(s: Licences): bool = s.load.read.status == R::Loaded and s.found > 0
 
@@ -63,7 +63,7 @@ pure def loaded(s: Licences, load: int, ok: bool, found: int): Licences =
 ### A load not finished within ten seconds is given up as one that could not load
 
 ```quint
-pure val nowValues = Set(0, 4, 20, 40)
+pure val nowValues = Set(0, 4000, 20000, 40000)
 
 pure def canGiveUpOnLoad(s: Licences, now: int): bool = T::canGiveUp(s.load, now)
 
@@ -112,6 +112,19 @@ pure def search(s: Licences, query: str, shown: int): Licences = { ...s, query: 
 
 pure def alwaysTheSearchNarrowsTheLoadedList(s: Licences): bool =
   0 <= s.shown and s.shown <= s.found and (s.query == "" implies s.shown == s.found)
+```
+
+### A licence is shown with its name, version and terms, and each flag by Alpha's name for it, or as written when Alpha has none
+
+The names are Copyleft, Network copyleft, Weak copyleft, Share-alike data,
+Unknown license, No license file in package, License unverified,
+Permissive, newly listed, Not open-source terms, Proprietary, license held
+by owner, and Proprietary, no license recorded.
+
+```quint
+pure def flagShown(listed: bool, label: str, flag: str): str = if (listed) label else flag
+
+pure def lawAnUnlistedFlagIsShownAsWritten(flag: str): bool = flagShown(false, "", flag) == flag
 ```
 
 ### A licence opens only from the list the search shows

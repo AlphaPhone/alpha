@@ -1,0 +1,56 @@
+// spec/app/files/shared.md, "A file has a number, a name, a revision that changes whenever the file does, a kind, and the storage volume it is on"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+
+/** A place of the phone's storage: a volume's root where `path` is empty, or a file or folder under it. */
+export interface Spot {
+  readonly volume: string
+  readonly path: string
+}
+
+/**
+ * The numbers Files gives the volumes, files and folders of the phone's storage, which names each by its volume's id
+ * and its path from the volume's root. A spot keeps its number for good, across restarts, so a number Files kept
+ * still names the place it named; a moved file is a new spot.
+ */
+export service Handles {
+  of(spot: Spot): number!!
+  spot(handle: number): Option.Option<Spot>!!
+}
+
+module text {
+  /** @throws {never} */
+  export function keyed(spot: Spot): string {
+    return JSON.stringify([spot.volume, spot.path])
+  }
+  /** What the store kept: the spots in the order they were numbered, from 1. @throws {never} */
+  export function kept(raw: string | undefined): Spot[] {
+    if (raw === undefined) return []
+    try {
+      const found: unknown = JSON.parse(raw)
+      return Array.isArray(found) ? found.filter((one): one is Spot => typeof one?.volume === "string" && typeof one?.path === "string") : []
+    } catch {
+      return []
+    }
+  }
+}
+import { keyed, kept } from text
+
+const key = "alpha/files/handles@1"
+
+/** The numbers, kept in the store as the list of spots in the order they were given. */
+export const handles = Layer.effect(Handles, effect {
+  const store = try KeyValueStore.KeyValueStore
+  const spots = kept(store.get(key) catch () => undefined)
+  const numbers = new Map(spots.map((spot, at) => [keyed(spot), at + 1]))
+  return {
+    effect of(spot: Spot): number!! {
+      const known = numbers.get(keyed(spot))
+      if (known !== undefined) return known
+      spots.push({ volume: spot.volume, path: spot.path })
+      numbers.set(keyed(spot), spots.length)
+      try ignore(store.set(key, JSON.stringify(spots)))
+      return spots.length
+    },
+    spot: (handle: number) => sync(() => Option.fromNullishOr(spots[handle - 1])),
+  }
+})

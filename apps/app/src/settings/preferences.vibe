@@ -1,0 +1,193 @@
+// spec/app/settings/preferences.md, "Story: Choose how Alpha looks"; spec/app/settings/preferences.md, "Story: Keep my preferences through a restart"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import * as Prefs from "../../gen/app__settings__preferences.effect.vibe"
+import type { Effect as Out, Event, Look, Sender, Share, Theme } from "../../gen/app__settings__preferences.effect.vibe"
+import * as Pages from "../../gen/app__settings.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Device } from "../platform/device.vibe"
+import { type Due, type Job, answer, applying, due, following, hearing, reacting, run, together, untimed } from "../runtime/reactor.vibe"
+
+module web {
+  /** @throws {never} */
+  export function darkPhone(): boolean {
+    return typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches
+  }
+  /** Each change of the phone's own look. @throws {never} */
+  export function phoneLooks(): EventTarget | undefined {
+    return typeof matchMedia === "function" ? matchMedia("(prefers-color-scheme: dark)") : undefined
+  }
+  /** The page drawn light or dark, whatever the phone's look, as the design system's `.light` and `.dark` say. @throws {never} */
+  export function drawn(dark: boolean): void {
+    document.documentElement.classList.toggle("dark", dark)
+    document.documentElement.classList.toggle("light", !dark)
+  }
+}
+import { darkPhone, drawn, phoneLooks } from web
+
+/** Where the phone keeps the appearance and the device preferences, and where the previous Alpha kept its own. */
+const keys = { appearance: "alpha.appearance", choices: "alpha.preferences", previousAppearance: "alpha.appearance.v1", previousChoices: "alpha.browser.device.v1" }
+
+schema Appearance { theme: "System" | "Light" | "Dark"; legible: boolean }
+schema Choices { askFirst: boolean; images: boolean; shares: ReadonlyArray<"AgentLocation" | "BrowserPage" | "GmailChanges" | "CalendarEdits"> }
+schema PreviousChoices {
+  askBeforeAgentActions?: boolean
+  agentLocationEnabled?: boolean
+  agentBrowserPageEnabled?: boolean
+  agentGmailChanges?: boolean
+  agentCalendarEdits?: boolean
+  autoLoadMailImages?: boolean
+}
+
+/** What a new phone holds: Alpha asks first, loads no images, and may use the location and the open Browser page and change Gmail and Calendar. */
+const fresh: Choices = { askFirst: true, images: false, shares: ["AgentLocation", "BrowserPage", "GmailChanges", "CalendarEdits"] }
+
+const look = (): Look => (darkPhone() ? "DarkLook" : "LightLook")
+const json = <A>(schema: Schema.Codec<A, A>) => Schema.fromJsonString(schema)
+
+/** The appearance kept, or the previous Alpha's theme where Alpha has kept none; `undefined` where what is kept cannot be read. */
+effect function keptAppearance(): Appearance | undefined!!KeyValueStore.KeyValueStore {
+  const store = try KeyValueStore.KeyValueStore
+  const own = store.get(keys.appearance) catch () => undefined
+  if (own !== undefined) return Schema.decodeUnknownOption(json(Appearance))(own) |> Option.getOrUndefined(%)
+  const previous = store.get(keys.previousAppearance) catch () => undefined
+  return { theme: previous === "dark" ? "Dark" : previous === "system" ? "System" : "Light", legible: false }
+}
+
+// spec/app/settings/preferences.md, "Alpha starts with the appearance and legible text it kept, or Light and ordinary text when nothing readable was kept, and the phone's look; it reads the text size and the device preferences again, and drops what was in flight"
+const starting = effect {
+  const kept = try keptAppearance()
+  const start: Event = { type: "start", at: untimed, kept: kept?.theme ?? "Light", keptLegible: kept?.legible ?? false, readable: kept !== undefined, look: look() }
+  return [start, "Phone"] as const
+}
+
+// spec/app/settings/preferences.md, "A choice shows at once and is kept on the phone, one at a time, with ten seconds to be kept"
+effect function keepTheme(keep: number, chosen: Theme, legible: boolean): Event!!KeyValueStore.KeyValueStore {
+  const store = try KeyValueStore.KeyValueStore
+  const ok = effect { try store.set(keys.appearance, JSON.stringify({ theme: chosen, legible })); return true } catch () => false
+  return { type: "themeKept", keep, ok }
+}
+
+// spec/app/settings/preferences.md, "What the phone could not read is taken as asking first, loading no images and sharing nothing"; spec/app/settings/preferences.md, "The device preferences are read when Alpha starts, when Settings opens, and when Alpha comes back while Settings shows, with ten seconds to answer, never while a change or a recovery is in flight"
+effect function readChoices(): Choices | undefined!!KeyValueStore.KeyValueStore {
+  const store = try KeyValueStore.KeyValueStore
+  const own = try store.get(keys.choices)
+  if (own !== undefined) return Schema.decodeUnknownOption(json(Choices))(own) |> Option.getOrUndefined(%)
+  const previous = try store.get(keys.previousChoices)
+  if (previous === undefined) return fresh
+  const was = Schema.decodeUnknownOption(json(PreviousChoices))(previous)
+  if (Option.isNone(was)) return undefined
+  const on = (value: boolean | undefined, share: Share) => ((value ?? fresh.shares.includes(share)) ? [share] : [])
+  return {
+    askFirst: was.value.askBeforeAgentActions ?? fresh.askFirst,
+    images: was.value.autoLoadMailImages ?? fresh.images,
+    shares: [
+      ...on(was.value.agentLocationEnabled, "AgentLocation"), ...on(was.value.agentBrowserPageEnabled, "BrowserPage"),
+      ...on(was.value.agentGmailChanges, "GmailChanges"), ...on(was.value.agentCalendarEdits, "CalendarEdits"),
+    ],
+  }
+}
+
+effect function documentRead(docRead: number): Event!!KeyValueStore.KeyValueStore {
+  const choices = readChoices() catch () => undefined
+  return choices === undefined
+    ? { type: "documentRead", docRead, readable: false, askFirst: true, images: false, shares: [] }
+    : { type: "documentRead", docRead, readable: true, askFirst: choices.askFirst, images: choices.images, shares: [...choices.shares] }
+}
+
+effect function saved(save: number, choices: Choices): Event!!KeyValueStore.KeyValueStore {
+  const store = try KeyValueStore.KeyValueStore
+  const ok = effect { try store.set(keys.choices, JSON.stringify(choices)); return true } catch () => false
+  return { type: "documentSaved", save, ok }
+}
+
+// spec/app/settings/preferences.md, "When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again"
+effect function recovered(recovery: number): Event!!KeyValueStore.KeyValueStore {
+  const store = try KeyValueStore.KeyValueStore
+  const ok = effect { try store.set(keys.choices, JSON.stringify(fresh)); return true } catch () => false
+  return { type: "recovered", recovery, ok, at: untimed }
+}
+
+// spec/app/settings/preferences.md, "The size shown is the one the phone says it applied; when it cannot say, Alpha says so and reads the size again"
+effect function sizeApplied(sizeAsk: number, percent: number): Event!!Device {
+  const kept = try (try Device).setTextScale(percent)
+  return { type: "sizeApplied", sizeAsk, result: kept ? "Applied" : "NotConfirmed", percent, at: untimed }
+}
+
+effect function sizeAsked(sizeAsk: number): Event!!Device {
+  const kept = try (try Device).textScale()
+  return { type: "sizeReported", sizeAsk, percent: Option.getOrElse(kept, () => 100) }
+}
+
+// spec/app/settings/preferences.md, "Asked to change the appearance, the agent opens Display and changes nothing"
+const openDisplay = effect {
+  try ignore((try Shell).send({ type: "openView", view: "Settings" }))
+  try ignore((try Pages.Machine).send({ type: "openSection", page: "Display" }))
+}
+
+function carry(fx: Out): Job<Event, KeyValueStore.KeyValueStore | Device | Shell | Pages.Machine, [by: Sender]> {
+  return match (fx) {
+    when { tag: "KeepTheme", let keep, let chosen, let chosenLegible }: answer("keep", keepTheme(keep, chosen, chosenLegible), { type: "themeKept", keep, ok: false }, "Phone");
+    when { tag: "OpenDisplay" }: run("display", openDisplay, "Phone");
+    when { tag: "SetTextSize", let sizeAsk, let percent }: answer("size", sizeApplied(sizeAsk, percent), { type: "sizeApplied", sizeAsk, result: "NotConfirmed", percent, at: untimed }, "Phone");
+    when { tag: "ReadTextSize", let sizeRead }: answer("size", sizeAsked(sizeRead), { type: "giveUpOnSize", now: untimed, at: untimed }, "Phone");
+    when { tag: "ReadDocument", let docRead }: answer("document", documentRead(docRead), { type: "giveUpOnDocument", now: untimed }, "Phone");
+    when { tag: "SaveDocument", let save, let saveAskFirst, let saveImages, let saveShares }: answer("save", saved(save, { askFirst: saveAskFirst, images: saveImages, shares: saveShares }), { type: "documentSaved", save, ok: false }, "Phone");
+    when { tag: "RecoverDocument", let recovery }: answer("recover", recovered(recovery), { type: "giveUpOnRecovery", now: untimed, at: untimed }, "Phone");
+  }
+}
+
+// spec/app/settings/timed.md, "An asking whose time has come is given up as failed, and its answer is then refused"
+function timers(state: Prefs.Preferences): ReadonlyArray<Due<Event, [by: Sender]>> {
+  const waits: ReadonlyArray<[boolean, string, number, Event]> = [
+    [state.keeping.read.status === "Loading", "keep", state.keeping.due, { type: "giveUpKeeping", now: untimed }],
+    [state.sizing.read.status === "Loading", "size", state.sizing.due, { type: "giveUpOnSize", now: untimed, at: untimed }],
+    [state.document.read.status === "Loading", "document", state.document.due, { type: "giveUpOnDocument", now: untimed }],
+    [state.saving.read.status === "Loading", "save", state.saving.due, { type: "giveUpOnSaving", now: untimed }],
+    [state.recovering.read.status === "Loading", "recover", state.recovering.due, { type: "giveUpOnRecovery", now: untimed, at: untimed }],
+  ]
+  return waits.flatMap(([busy, key, at, event]) => (busy ? [due<Event, [by: Sender]>(key, at, event, "Phone")] : []))
+}
+
+const machine = reacting(Prefs, { open: starting, carry, timers })
+
+// spec/app/settings/preferences.md, "The device preferences are read when Alpha starts, when Settings opens, and when Alpha comes back while Settings shows, with ten seconds to answer, never while a change or a recovery is in flight"
+const opened = following(Shell, (shell) => showing(shell, "Settings"), Prefs.Machine, (shown): Event | undefined => (shown ? { type: "opened", at: untimed } : undefined), "Phone")
+
+const resumed = hearing(
+  Stream.unwrap(effect {
+    const device = try Device
+    const shell = try Shell
+    return Stream.mapEffect(Stream.filter(device.visible, (visible) => visible), () => Effect.map(shell.get(), (state) => showing(state, "Settings")))
+  }),
+  Prefs.Machine,
+  (shown): Event | undefined => (shown ? { type: "resumed", at: untimed, showing: true } : undefined),
+  "Phone",
+)
+
+// spec/app/settings/preferences.md, "Alpha is light or dark as chosen, and follows the phone when the choice is System"
+const phoneLook = hearing(
+  Stream.suspend(() => {
+    const target = phoneLooks()
+    return target === undefined ? Stream.empty : Stream.fromEventListener(target, "change")
+  }),
+  Prefs.Machine,
+  (): Event => ({ type: "phoneLookChanged", look: look() }),
+  "Phone",
+)
+
+const looked = applying(Prefs.Machine, (state) => Prefs.shown(state), effect (shown) => {
+  try sync(() => drawn(shown === "DarkLook"))
+})
+
+// spec/app/settings/preferences.md, "Legible text is turned on or off by the owner and kept with the appearance, the same way"
+const legible = applying(Prefs.Machine, (state) => state.legible, effect (on) => {
+  try (try Device).mark("legible", on ? "" : undefined)
+})
+
+// spec/app/settings/preferences.md, "At 150 percent other areas lay out one column"
+const large = applying(Prefs.Machine, Prefs.largeText, effect (on) => {
+  try (try Device).mark("large-text", on ? "" : undefined)
+})
+
+/** The owner's preferences, from launch: the look and the text the whole page follows, and what other areas ask before they act. */
+export const preferences = together(machine, opened, resumed, phoneLook, looked, legible, large)

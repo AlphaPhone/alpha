@@ -73,8 +73,8 @@ pure def lawAReturnIsTakenOnce(number: int, now: int): bool =
   canReturn(v, number + 1) and not(canReturn(back(v), number + 1)) and not(canReturnCold(coldBack(orphaned(v)), number + 1))
     and not(canReturn(ended(v), number + 1)) and not(canReturnCold(ended(orphaned(v)), number + 1))
 
-pure def lawAnOlderVisitIsNeverReturned(number: int, older: int, now: int): bool =
-  older <= number implies not(canReturn(go({ open: true, number: number, orphan: false, at: 0 }, now), older))
+pure def lawAnOlderVisitIsNeverReturned(number: int, earlier: int, now: int): bool =
+  earlier <= number implies not(canReturn(go({ open: true, number: number, orphan: false, at: 0 }, now), earlier))
 
 pure def lawVisitsStayWellFormed(open: bool, number: int, orphan: bool, now: int): bool =
   val v = { open: open, number: number, orphan: orphan, at: 0 }

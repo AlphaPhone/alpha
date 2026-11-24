@@ -33,18 +33,33 @@ const base64 = (bytes: Uint8Array) => btoa(Array.from(bytes, (one) => String.fro
 /**
  * `AgentPlugin.java`, the `ElizaAgent` plugin: `request` answers `{ status, data }`, where data is the JSON of the
  * agent's body, null for none, or its text; `requestStream` answers `{ id }`, then emits a head and each chunk as
- * `streamData` and one `streamEnd`; `abort` ends either. It relays a path under `/api/`, a JSON object and no header.
+ * `streamData` and one `streamEnd`; `abort` ends either. It relays a path under `/api/`, a JSON object and the headers
+ * its channel admits; `subscribeEvents` answers `{ id }`, then emits each event the agent publishes on the topic as
+ * `agentEvent`, until `unsubscribeEvents`.
  */
 export function elizaAgent(agent: Answering): Faked {
   return plugin<ElizaAgentPlugin, AgentEvents>((emit) => {
     const calls = new Map<string, AbortController>();
     const status = (): Promise<AgentStatus> => Promise.resolve({ available: true, state: "running", epoch: 1, requestBodyLimit: 1_048_576 });
-    function asked({ method, path, body }: AgentRequest, id: string) {
+    function asked({ method, path, body, headers }: AgentRequest, id: string) {
       if (typeof method !== "string" || typeof path !== "string" || !path.startsWith("/api/")) throw rejection("RouteRefused");
       if (id === "" || calls.has(id)) throw rejection("IdInUse");
       const gone = new AbortController();
       calls.set(id, gone);
-      return new Request(new URL(path, "http://agent.phone"), { method, signal: gone.signal, ...(body === undefined ? {} : { body: JSON.stringify(body), headers: { "content-type": "application/json" } }) });
+      return new Request(new URL(path, "http://agent.phone"), { method, signal: gone.signal, headers: { ...headers, ...(body === undefined ? {} : { "content-type": "application/json" }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    }
+    async function listen(id: string, request: Request) {
+      let index = 0;
+      const response = await agent(request).catch(() => undefined);
+      const reader = response?.body?.pipeThrough(new TextDecoderStream()).getReader();
+      request.signal.addEventListener("abort", () => void reader?.cancel(), { once: true });
+      let held = "";
+      for (let read = await reader?.read().catch(() => undefined); read && !read.done; read = await reader?.read().catch(() => undefined)) {
+        const parts = (held + read.value).split("\n\n");
+        held = parts.pop() ?? "";
+        for (const part of parts) if (part.startsWith("data: ")) emit("agentEvent", { id, kind: "event", index: index++, event: JSON.parse(part.slice(6)) as Record<string, unknown> });
+      }
+      if (calls.delete(id)) emit("agentEvent", { id, kind: "end" });
     }
     async function pump(id: string, request: Request) {
       let index = 0;
@@ -96,7 +111,14 @@ export function elizaAgent(agent: Answering): Faked {
         }
       },
       abort: aborted,
-      subscribeEvents: () => Promise.reject(rejection("RouteRefused")),
+      subscribeEvents({ id, topic, clientId }) {
+        try {
+          void listen(id, asked({ method: "GET", path: `/api/events?topic=${topic}${clientId === undefined ? "" : `&clientId=${clientId}`}` }, id));
+          return Promise.resolve({ id });
+        } catch (cause) {
+          return Promise.reject(cause instanceof Error ? cause : rejection("Broken"));
+        }
+      },
       unsubscribeEvents: aborted,
       reviewRecovery: () => Promise.resolve({ kind: "unavailable" }),
       archiveRecovery: () => Promise.resolve({ kind: "unavailable" }),
