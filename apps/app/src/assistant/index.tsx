@@ -18,7 +18,7 @@ import { keyboardVoice } from "../shell/canvas.vibe";
 import { TalkControls } from "../voice/TalkControls.tsx";
 import { DictationControls } from "../voice/DictationControls.tsx";
 import { Assistant } from "./Assistant.tsx";
-import { assistantBack, assisting, spokenScreen } from "./assistant.vibe";
+import { assistantBack, assisting } from "./assistant.vibe";
 import { copyMessage, emailDestination, emailMessage } from "./message-actions.vibe";
 import { dictate } from "./dictation.vibe";
 import { aloud } from "./read-aloud.vibe";
@@ -27,7 +27,7 @@ import { beginTalk, commsVoicePanel, talkFromComms } from "./voice-entry.vibe";
 const voiceOwnsComposer = (state: VoiceState) => !quiet(state) || state.recorder.stage !== "Closed";
 
 const screens = together(
-  assisting, voiceArea, aloud, talkFromComms, commsVoicePanel, spokenScreen,
+  assisting, voiceArea, aloud, talkFromComms, commsVoicePanel,
   following(Voice, voiceOwnsComposer, Dock, (on) => ({ type: "voicing", on, now: untimed } as const)),
   applying(Voice, voiceOwnsComposer, keyboardVoice),
 );
@@ -58,12 +58,11 @@ function LiveAssistant({ runtime }: Shown<Layer.Success<typeof screens> | Reside
       useInEmail: destination ? (selection) => void runtime.runPromise(emailMessage(selection, destination)) : undefined,
     }}
     speech={{
-      showUnavailableTalk: !available,
-      onTalk: canTalk ? () => void runtime.runPromise(beginTalk()) : undefined,
+      onTalk: canTalk ? () => void runtime.runPromise(beginTalk()) : !available && noCall ? () => undefined : undefined,
       onDictate: canDictate ? () => void runtime.runPromise(dictate()) : undefined,
-      voice: (compact) => recorder !== undefined && recorder.stage !== "Closed" && recorder.field === "ComposerField"
+      voice: recorder !== undefined && recorder.stage !== "Closed" && recorder.field === "ComposerField"
         ? <DictationControls runtime={runtime} />
-        : voice.state !== undefined && !quiet(voice.state) ? <TalkControls runtime={runtime} compact={compact} trailing={<VoiceEnd runtime={runtime} />} /> : undefined,
+        : voice.state !== undefined && !quiet(voice.state) ? <TalkControls runtime={runtime} trailing={<VoiceEnd runtime={runtime} />} /> : undefined,
     }}
   />;
 }
