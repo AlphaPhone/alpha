@@ -72,6 +72,7 @@ export * from "./components/assistant/AssistantSummaryCard.tsx";
 export * from "./components/assistant/AssistantTranscript.tsx";
 export * from "./components/assistant/AssistantTurnNote.tsx";
 export * from "./components/assistant/AssistantWorkflowCard.tsx";
+export * from "./components/assistant/replyMarkdown.ts";
 export * from "./components/home/AddToHomeSheet.tsx";
 export * from "./components/home/HomeAgendaCard.tsx";
 export * from "./components/home/HomeBriefCard.tsx";

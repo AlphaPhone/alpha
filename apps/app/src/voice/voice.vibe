@@ -20,6 +20,7 @@ import { fresh } from "../runtime/attempts.vibe"
 import { type Job, answer, applying, contained, due, following, hearing, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
 import { signedIn } from "./account.vibe"
 import { replyBlocks } from "../assistant/words.ts"
+import { replyWords } from "@repo/ui"
 import { dictationClock } from "./dictation-clock.vibe"
 
 const views: ReadonlyArray<Shell.View> = [
@@ -350,7 +351,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       Queue.offerUnsafe(queue, { type: "agentNavigates", session, place })
     }
     const say = (sentence: string) => {
-      memory.enqueueSentence(turn, spokenForm(sentence))
+      memory.enqueueSentence(turn, spokenForm(replyWords(sentence, true)))
       Queue.offerUnsafe(queue, { type: "sentence", session, turn })
     }
     const sayFrom = (written: string, final: boolean) => {
