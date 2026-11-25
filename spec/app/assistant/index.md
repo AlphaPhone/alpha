@@ -113,6 +113,7 @@ type Effect =
   | Reread({ turn: int, recheck: int })
   | Arrived({ recorded: bool })
   | Navigate({ turn: int, view: S::View })
+  | NavigateFiles({ turn: int, source: List[S::View], panel: S::Detent, route: int })
   | Navigated({ turn: int, opened: bool })
 type Moved = { state: Conversation, out: List[Effect] }
 
@@ -139,7 +140,8 @@ pure def lost(t: Turn): Turn =
 ### What the simulator tries
 
 Tickets as far as twenty events can count them, the first holds and card
-prompts, two days, and Home, Calendar and Notes.
+prompts, two days, and Home, Calendar and Notes. Files continuations try
+empty and occupied trails, low and open panels, and recent route numbers.
 
 ```quint
 pure val ticketValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
@@ -149,6 +151,9 @@ pure val attachmentsValues = Set(0, 2)
 pure val dayValues = Set(0, 3)
 pure val showingValues = Set(Home).union(Set(App({ view: S::Calendar }))).union(Set(App({ view: S::Notes })))
 pure val viewValues = Set(S::Calendar, S::Notes)
+pure val sourceValues = Set(List(), List(S::Calendar), List(S::Notes), List(S::Notes, S::Calendar), List(S::Files))
+pure val panelValues = Set(S::Bar, S::Sheet, S::Full)
+pure val routeValues = Set(0, 1, 2, 3, 6)
 pure val weight_supported = 4
 pure val weight_uploaded = 4
 pure val weight_hear = 8
@@ -780,6 +785,29 @@ pure def navigate(c: Conversation, ticket: int, view: S::View): Moved =
   { state: { ...c, opening: A::dispatch(A::record(A::plan(ticket))) }, out: List(Navigate({ turn: ticket, view: view })) }
 ```
 
+### An explicit Files continuation opens only from the same app trail and Ask Alpha panel
+
+The completed turn names its source trail and panel in the shell request.
+It uses the same single opening ticket as any other completed reply.
+
+```quint
+pure def canNavigateFiles(c: Conversation, ticket: int, source: List[S::View], panel: S::Detent, route: int): bool =
+  canNavigate(c, ticket, S::Files) and not(c.turn.stopping) and route >= 0
+    and (panel == S::Sheet or panel == S::Full)
+    and match c.context.showing {
+      | Home => source.length() == 0
+      | App(app) => app.view != S::Files and source.length() > 0
+          and source.nthOr(source.length() - 1, app.view) == app.view
+    }
+
+pure def navigateFiles(c: Conversation, ticket: int, source: List[S::View], panel: S::Detent, route: int): Moved =
+  { state: { ...c, opening: A::dispatch(A::record(A::plan(ticket))) },
+    out: List(NavigateFiles({ turn: ticket, source: source, panel: panel, route: route })) }
+
+pure val eval_witness_canNavigateFiles = (("reach", true), ("ask", 1, 0, 0), ("finish", 1),
+  ("navigateFiles", 1, List(), S::Sheet, 1))
+```
+
 ### The agent is told once whether the view opened
 
 ```quint
@@ -796,6 +824,8 @@ pure def stepAViewIsOpenedOncePerTurn(before: Conversation, via: str, after: Con
   out.every(e => match e {
     | Navigate(n) => before.opening.id < n.turn and n.turn == after.turn.send.id and after.opening.outcome == A::Sent
         and not(after.context.sensitive) and after.turn.revision == after.context.revision
+    | NavigateFiles(n) => before.opening.id < n.turn and n.turn == after.turn.send.id and after.opening.outcome == A::Sent
+        and not(after.turn.stopping) and not(after.context.sensitive) and after.turn.revision == after.context.revision
     | Navigated(r) => before.opening.outcome == A::Sent and r.turn == before.opening.id and after.opening.outcome != A::Sent
     | _ => true
   })

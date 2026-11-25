@@ -131,6 +131,15 @@ export const filesReadContext: (FilesReadContext | undefined)!!(Browser.Machine 
   return { where: Browser.where(files), listing: files.listing.ticket, search: files.search.query.ticket }
 }
 
+// spec/app/files/index.md, "An exact Files request from another screen may open Files once after the typed reply finishes"
+export const readyFilesReadContext: (FilesReadContext | undefined)!!(Browser.Machine | Shown.Machine) = effect {
+  const machine = try Browser.Machine
+  const ready = try Effect.timeoutOption(Stream.runHead(Stream.filter(machine.changes, (s) =>
+    Browser.readyForFilesContinuation(s) || (s.open && s.storage.status === "Failed"))), "10 seconds")
+  if (Option.isNone(ready) || Option.isNone(ready.value) || !Browser.readyForFilesContinuation(ready.value.value)) return undefined
+  return try filesReadContext
+}
+
 // spec/app/files/index.md, "A position names a result on screen, counting from one; a request naming a position that is not shown names nothing and leaves no card, and a card keeps the files it showed"
 /** The results on screen the agent named by position, as Files shows them now, for the approvals area to bind on its card; none where any is not shown. */
 export effect function shownAt(positions: ReadonlyArray<number>): ReadonlyArray<Item>!!Browser.Machine {
@@ -362,9 +371,8 @@ effect function filterFiles(operation: Extract<DeviceOperation, { type: "files_f
   const request = try (try Answers).next()
   const wanted: Filter = { text: text ?? "", kind: kindWanted ?? "Other", anyKind: kindWanted === undefined, from: first, to: last }
   if (folder === undefined) {
-    const shown = try machine.get()
-    if (shown.trash || (alreadyInFiles && !(try promise(current)))) return notShown
-    const filtered = try agentFilter(request, wanted, false)
+    if (alreadyInFiles && !(try promise(current))) return notShown
+    const filtered = try asked(request, { type: "agentFilterAt", request, wanted, openedTrail: [], guarded: false }, "Agent")
     return finishFilter(filtered, report)
   }
   const available = called("storageList", (plugin) => plugin.storageList({ volume: primary, path: folder })) catch () => undefined

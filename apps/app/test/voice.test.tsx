@@ -660,6 +660,47 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
   });
 
+  // spec/app/voice/index.md, "An exact spoken Files request may follow its own leased navigation once"
+  it("follows a named Files request from Home and leaves an unpublished ordinal there", async () => {
+    const world = { ...scene(), phone: true, image: true, signedIn: false };
+    world.ask.metadata = [];
+    const filter = { type: "files_filter", kind: "pdf", folder: "Download" } as const;
+    const review = textReview(world.notes.owner, "ordinal", { type: "files_open", shown: 1 });
+    world.telephony.textReview = review;
+    const { alpha } = await open(world, [...talkMounts, { at: "view:Files", load: () => import("../src/files/index.tsx") }]);
+    const area = assistant.runtime(alpha);
+    await drawnUntil(alpha, area, Conversation, (s) => s.ready && s.observing && s.context.showing.tag === "Home");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
+    await drawnUntil(alpha, alpha.runtime, Preferences, (s) => s.document.read.status === "Loaded" && !s.askFirst);
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
+
+    const speak = async (id: string, text: string, sent: number) => {
+      review.proposal.id = id;
+      review.proposal.state = "pending";
+      review.proposal.payload.requestMessageId = `m${world.ask.said.length + 1}u`;
+      world.ask.nextReplyChunks = ["There is a Files request."];
+      world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: {
+        proposalId: id, state: "pending", executed: false, awaitingDeviceExecution: true, directRequest: true, approvalRequired: false,
+      } }];
+      speakUtterance(world, text);
+      await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === sent && s.phase === "Listening" && s.mic === "On");
+    };
+
+    await speak("ordinal", "Open result 1", 1);
+    expect(review.claims).toEqual([]);
+    expect(alpha.runtime.runSync(Shell.Machine.use((machine) => machine.get())).trail).toEqual([]);
+    expect(world.ask.metadata.at(-1)).not.toMatchObject({ voiceUi: { agentActionMode: "direct-request-v1" } });
+
+    review.proposal.payload.operation = filter;
+    await speak("named-filter", "Show PDFs in Download", 2);
+    expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "named-filter" })]);
+    expect(alpha.runtime.runSync(Shell.Machine.use((machine) => machine.get()))).toMatchObject({ trail: ["Files"], assistant: "Bar" });
+    expect(world.voice.spoken.some((said) => said.text.includes("Showing 1 item in Files"))).toBe(true);
+    await press("Stop voice conversation");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
+  });
+
   // spec/app/assistant/context.md, "A spoken request about the open document attaches it for that turn"
   it.each([
     { text: "The shipment arrives on Wednesday", secret: false },
