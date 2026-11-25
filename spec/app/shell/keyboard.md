@@ -87,7 +87,7 @@ pure def lawARotationWhileTypingSwapsTheSides(base: Base, h: int): bool =
 pure def laidOut(base: Base, c: Canvas): Canvas =
   val landscape = c.width > base.h
   val canvas = if (c.launcher and not(landscape)) reference else if (landscape or c.width >= reference) c.width else reference
-  { ...c, base: base, landscape: landscape, canvasWidth: canvas, wide: canvas >= wideCanvas }
+  withLayout(c.textScale, { ...c, base: base, landscape: landscape, canvasWidth: canvas, wide: canvas >= wideCanvas })
 
 pure def canMount(c: Canvas, width: int, height: int, launcher: bool): bool = not(c.mounted) and width > 0 and height > 0
 
@@ -185,7 +185,9 @@ pure def canMeasureText(c: Canvas, scale: int): bool = scale > 0 and scale != c.
 pure def measureText(c: Canvas, scale: int): Canvas = withLayout(scale, c)
 
 pure def alwaysLargeTextIsOnePane(c: Canvas): bool =
-  (c.textScale >= 150 implies (c.agenda and not(c.split) and c.days == 1)) and c.days >= 1 and c.days <= 7
+  (c.textScale >= 150 implies (c.agenda and not(c.split) and c.days == 1))
+    and (c.textScale < 150 implies (not(c.agenda) and c.split == (c.canvasWidth >= splitCanvas) and c.days == daysFor(c.canvasWidth, c.textScale)))
+    and c.days >= 1 and c.days <= 7
 
 pure def lawWiderTextFewerColumns(canvas: int): bool = daysFor(canvas, 200) <= daysFor(canvas, 100)
 
@@ -199,8 +201,8 @@ pure def sometimesTheAgendaAtLargeText(c: Canvas): bool = c.agenda and c.mounted
 
 ### Ask Alpha's footprint is what it covers now and its bar alone, which is never more; while nothing of Ask Alpha shows, the last footprint stays
 
-The header clearance is the bottom of the header that shows: an app's, the
-drawer's, an open sheet's, or Ask Alpha's own when it fills the screen.
+The header clearance is the bottom of the header that shows: an app's, an
+open sheet's, or Ask Alpha's own when it fills the screen.
 
 ```quint
 pure def canDockMeasured(c: Canvas, clearance: int, bar: int): bool = bar > 0 and bar <= clearance

@@ -24,7 +24,7 @@ it("Move between Home and the apps, and find the same place after the page is op
   await close();
   await open(world, withSample);
   await expect.element(page.getByRole("heading", { name: "Notes" })).toBeVisible();
-  // spec/app/shell/index.md, "Back closes one layer: the drawer, then Ask Alpha by a step, then the app on top"
+  // spec/app/shell/index.md, "Back closes one layer: Ask Alpha by a step, then the app on top"
   await page.getByRole("button", { name: "Back" }).click();
   await expect.element(page.getByRole("button", { name: "Notes" })).toBeVisible();
   expect(trail()).toEqual([]);

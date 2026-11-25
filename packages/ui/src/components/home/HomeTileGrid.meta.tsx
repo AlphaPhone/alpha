@@ -30,11 +30,11 @@ const onRemove = fn();
 const onMove = fn();
 
 export const meta: ComponentMeta<HomeTileGridProps> = {
-  args: { tiles: homeTiles, onOpen, onBeginEditing, onRemove, onMove, onOpenDrawer: fn() },
+  args: { tiles: homeTiles, onOpen, onBeginEditing, onRemove, onMove },
   examples: {
-    Editing: { tiles: unbadged, editing: true, onOpenDrawer: undefined },
-    "Editing while saving": { tiles: unbadged, editing: true, onRemove: undefined, onMove: undefined, onOpenDrawer: undefined },
-    "Off the phone": { onOpenDrawer: undefined, onBeginEditing: undefined },
+    Editing: { tiles: unbadged, editing: true },
+    "Editing while saving": { tiles: unbadged, editing: true, onRemove: undefined, onMove: undefined },
+    "Off the phone": { onBeginEditing: undefined },
   },
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
@@ -46,13 +46,12 @@ export const meta: ComponentMeta<HomeTileGridProps> = {
       await userEvent.click(inbox);
       await fireEvent.contextMenu(canvas.getByRole("button", { name: "Maps" }));
       await expect([onOpen.mock.calls, onBeginEditing.mock.calls.length]).toEqual([[["Inbox"]], 1]);
-      await expect(canvas.getByRole("button", { name: "Apps" })).toHaveAttribute("aria-haspopup", "dialog");
+      await expect(canvas.queryByRole("button", { name: "Apps" })).toBeNull();
     },
     Editing: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onMove.mockClear();
       onRemove.mockClear();
       const canvas = within(canvasElement);
-      await expect(canvas.queryByRole("button", { name: "Apps" })).toBeNull();
       canvas.getByRole("button", { name: "Phone" }).focus();
       await userEvent.keyboard("{ArrowRight}");
       await userEvent.keyboard("{ArrowLeft}");

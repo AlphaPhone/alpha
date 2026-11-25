@@ -33,7 +33,7 @@ const hostOf = (origin: string) => URL.parse(origin)?.host ?? origin
 const inZone = (host: string, zone: string) => host === zone || host.endsWith("." + zone)
 
 /** The profile text the API Worker reads from its assets: byte for byte the text CLOUD_PROFILE_SHA256 names. */
-export function profileText(profile: CloudProfile): string {
+function profileText(profile: CloudProfile): string {
   return JSON.stringify(profile)
 }
 
@@ -50,12 +50,12 @@ export interface RenderPaths {
 }
 
 /** The NATIVE_CLIENT_REGISTRY eliza's Worker reads: Alpha's registration of the environment, enabled, exactly as `client apply` writes it. */
-export function registryVariable(registration: Registration, environment: CloudEnvironment): string {
+function registryVariable(registration: Registration, environment: CloudEnvironment): string {
   return JSON.stringify([{ ...entryOf(registration), environment, enabled: true }])
 }
 
 /** The plain variables of one environment's API Worker: its profile's origins and database, Alpha's registration, and the plan the Worker sells. */
-export function apiVars(profile: CloudProfile, environment: CloudEnvironment, registration: Registration): Readonly<Record<string, string>> {
+function apiVars(profile: CloudProfile, environment: CloudEnvironment, registration: Registration): Readonly<Record<string, string>> {
   const settings = profile.environments[environment]
   const plan = settings.billing?.plans.plus_monthly
   const signIn = entryOf(registration).signInReturn
@@ -78,7 +78,7 @@ export function apiVars(profile: CloudProfile, environment: CloudEnvironment, re
 }
 
 /** The plain variables of one environment's web host Worker: the origins it forwards between, the same as its API Worker's. */
-export function edgeVars(profile: CloudProfile, environment: CloudEnvironment): Readonly<Record<string, string>> {
+function edgeVars(profile: CloudProfile, environment: CloudEnvironment): Readonly<Record<string, string>> {
   const settings = profile.environments[environment]
   return { CLOUD_ENVIRONMENT: environment, PUBLIC_API_ORIGIN: settings.api, WEB_ORIGIN: settings.web }
 }
