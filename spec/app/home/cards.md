@@ -437,12 +437,12 @@ pure def briefCard(brief: Outcome): BriefCard =
   if (brief == Finished) BriefShown else if (brief == RunFailed) FailureShown else NoBriefCard
 ```
 
-### The row holds the agenda, Messages, Phone, mail, brief and Workflows cards in that order, each only when drawn, and is not drawn when none is
+### The row holds the agenda, Messages, Phone, Workflows, mail and brief cards in that order, each only when drawn, and is not drawn when none is
 
 ```quint
 type Kind = AgendaCard | MessagesCard | PhoneCard | MailCard | BriefOfToday | WorkflowsCard
 
-pure val cardOrder: List[Kind] = List(AgendaCard, MessagesCard, PhoneCard, MailCard, BriefOfToday, WorkflowsCard)
+pure val cardOrder: List[Kind] = List(AgendaCard, MessagesCard, PhoneCard, WorkflowsCard, MailCard, BriefOfToday)
 
 pure def drawn(c: Cards, now: int, o: Others, kind: Kind): bool =
   if (kind == AgendaCard) agendaCard(c, now, o) != Hidden

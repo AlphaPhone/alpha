@@ -41,6 +41,7 @@ const clientPackages = [
   { name: "@elizaos/plugin-inbox-client", entry: "packages/plugin-inbox-client/dist/src/index.js" },
   { name: "@elizaos/plugin-maps-client", entry: "packages/plugin-maps-client/dist/src/index.js" },
   { name: "@elizaos/plugin-notes-client", entry: "packages/plugin-notes-client/dist/src/index.js" },
+  { name: "@elizaos/plugin-wallet-client", entry: "packages/plugin-wallet-client/dist/src/index.js" },
   { name: "@elizaos/plugin-workflow-client", entry: "packages/plugin-workflow-client/dist/src/index.js" },
 ];
 

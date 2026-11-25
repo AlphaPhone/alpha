@@ -18,6 +18,7 @@ import { Rows } from "../contacts/contacts.vibe";
 import { Conversations, Inbox, titleOf } from "../messages/messages.vibe";
 import { useCommsDock } from "./CommsBar.tsx";
 import { CallAvatar } from "./CallAvatar.tsx";
+import { Handset, hangupButton } from "./icons.ts";
 
 /** The current subject of the Phone, Contacts or Messages stage. */
 export type CommsTargetServices = CallMachine | CommsMachine | MessagesMachine | ContactsMachine | ShellMachine | Rows | Conversations | Inbox;
@@ -27,13 +28,13 @@ export function VoiceEnd({ runtime }: { runtime: ManagedRuntime.ManagedRuntime<C
   const calls = useCall(runtime);
   const end = { type: "endAsked", callId: calls.state ? shownCall(calls.state.calls).id : "" } as const;
   if (!comms || endPlace(comms) !== "EndOnVoicePanel" || !calls.can(end)) return null;
-  return <Button size="icon" variant="destructive" aria-label="End call" onClick={() => void calls.send(end)}><Phone className="rotate-135" /></Button>;
+  return <Button size="icon" className={hangupButton} aria-label="End call" onClick={() => void calls.send(end)}><Handset aria-hidden className="size-5 rotate-135" /></Button>;
 }
 
 /** The other target beside Ask Alpha, or its reduced view when Ask Alpha is full. */
 export function CommsTarget({ runtime, placement }: {
   runtime: ManagedRuntime.ManagedRuntime<CommsTargetServices, unknown>;
-  placement: "composer" | "strip";
+  placement: "composer" | "strip" | "context";
 }) {
   const shell = useShell(runtime);
   const calls = useCall(runtime);
@@ -51,10 +52,11 @@ export function CommsTarget({ runtime, placement }: {
     : view === "Contacts" && contacts?.opened ? runtime.runSync(Rows.use((held) => held.get())).card?.displayName ?? ""
     : "";
   const shouldShowCall = call !== undefined && (view === "Phone" || placement === "strip");
+  if (placement === "context") return <>{call !== undefined && view === "Phone" ? "Call" : person === "" ? view : `${person} · ${view}`}</>;
   if (placement === "composer") {
     if (!shouldShowCall && person === "") return null;
     return (
-      <Button size="icon" variant="ghost" className="size-11 shrink-0" aria-label={shouldShowCall ? "Back to the call" : `Back to ${view === "Messages" ? "texting " : ""}${person}`} onClick={dock.close}>
+      <Button size="icon" variant="ghost" className="size-11 shrink-0 bg-accent" aria-label={shouldShowCall ? "Back to the call" : `Back to ${view === "Messages" ? "texting " : ""}${person}`} onClick={dock.close}>
         {shouldShowCall ? <Phone /> : <CallAvatar name={person} />}
       </Button>
     );
@@ -68,7 +70,7 @@ export function CommsTarget({ runtime, placement }: {
         <span className="min-w-0 flex-1 truncate text-left">{shouldShowCall ? "Ongoing call" : person === "" ? view : `${person} · ${view}`}</span>
         <ChevronDown aria-hidden />
       </Button>
-      {shouldShowCall && calls.can(end) && (!comms || endPlace(comms) !== "EndOnVoicePanel") && <Button size="icon" variant="destructive" aria-label="End call" onClick={() => void calls.send(end)}><Phone className="rotate-135" /></Button>}
+      {shouldShowCall && calls.can(end) && (!comms || endPlace(comms) !== "EndOnVoicePanel") && <Button size="icon" className={hangupButton} aria-label="End call" onClick={() => void calls.send(end)}><Handset aria-hidden className="size-5 rotate-135" /></Button>}
     </div>
   );
 }

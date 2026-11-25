@@ -73,14 +73,14 @@ describe("Maps on a phone", () => {
     expect(world.maps.asked.at(-1)?.body).toMatchObject({ from: start, to: harbour.coordinate, mode: "drive" });
 
     // spec/app/maps/index.md, "Directions are asked for a way of travelling the provider offers, and another way asks again from the same start"
-    expect(button("Transit")).toBeUndefined();
+    expect(button("Transit")?.getAttribute("aria-disabled")).toBe("true");
     await press("Walk");
     await until(alpha, runtime, Screen, (s) => s.trip.travel === "Walk" && s.trip.plan.status === "Loaded");
     expect(world.maps.asked.at(-1)?.body).toMatchObject({ mode: "walk" });
 
     // spec/app/maps/index.md, "The provider's routes are listed in order, and choosing one shows it and sends no new request"
     const asked = world.maps.asked.length;
-    await press("Alternative 1: 1 min, 500 m");
+    await press(/^Alternative 1, 1 min, /);
     await until(alpha, runtime, Screen, (s) => s.chosen === 1 && s.trip.turns === 4);
     expect(world.maps.asked.length).toBe(asked);
 

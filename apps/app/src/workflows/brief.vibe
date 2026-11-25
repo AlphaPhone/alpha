@@ -135,11 +135,10 @@ const brief = started(effect {
     const latest = latestRetainedBrief(saved)
     const current: ToldBrief | undefined = latest === undefined ? undefined
       : latest.status === "failed" || latest.status === "cancelled"
-        ? { outcome: "RunFailed", at: Date.parse(latest.ranAt) }
+        ? { outcome: "RunFailed", at: Date.parse(latest.ranAt), ...(latest.summary ? { summary: latest.summary } : {}) }
         : { outcome: "Finished", at: Date.parse(latest.ranAt), summary: latest.summary }
     const previous = fromAreas.snapshot().brief
-    if (current?.outcome !== previous?.outcome || current?.at !== previous?.at ||
-      (current?.outcome === "Finished" && previous?.outcome === "Finished" && current.summary !== previous.summary)) {
+    if (current?.outcome !== previous?.outcome || current?.at !== previous?.at || current?.summary !== previous?.summary) {
       fromAreas.brief(current)
     }
   }

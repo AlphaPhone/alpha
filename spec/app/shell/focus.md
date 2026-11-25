@@ -173,7 +173,10 @@ pure def sometimesARowGetsFocusBack(f: Focus): bool = f.lastRow != ""
 
 ### Home's tiles show a focus ring only while the owner moves by keyboard; every other control, a field above all, shows its ring whenever it has focus
 
-A Tab or an arrow key starts moving by keyboard and a press ends it.
+A Tab or an arrow key starts moving by keyboard and a press ends it. Home's
+cards are launchers like its tiles. Home's first control is its first app,
+not a card, since the cards come and go as their areas read; it takes focus
+without scrolling.
 
 ```quint
 pure def canKeyed(f: Focus): bool = not(f.keyboard)
