@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Code, Info, LayoutGrid, Mic, RefreshCw, Settings, Shield, UserRound } from "lucide-react";
+import { Code, Info, LayoutGrid, Mic, Settings, Shield, UserRound } from "lucide-react";
 import { ListGroup } from "../ListGroup.tsx";
 import { StatusDot } from "../StatusDot.tsx";
 import { SettingsAndroidRow } from "./SettingsAndroidRow.tsx";
@@ -73,7 +73,6 @@ export function SettingsTopPage({ developer = false, onPhone = true, actions, ac
       {onPhone ? (
         <ListGroup>
           <SettingsAndroidRow target="android-home" title="Android settings" icon={<Settings />} {...android} {...at(7)} />
-          <SettingsAndroidRow target="accounts-sync" title="Accounts and sync" icon={<RefreshCw />} {...android} {...at(8)} />
         </ListGroup>
       ) : null}
       {children}
