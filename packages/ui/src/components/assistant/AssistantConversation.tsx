@@ -12,8 +12,8 @@ export type AssistantConversationProps = Omit<ComponentProps<"section">, "childr
   attachmentNotice?: string;
   /** The messages and the turn's state. */
   transcript: AssistantTranscriptProps;
-  /** The recorded transcript being reviewed within the open conversation. */
-  voiceReview?: ReactNode;
+  /** The dictation recorder within the open conversation. */
+  voicePanel?: ReactNode;
   /** The composer at the foot. */
   composer: AssistantComposerProps;
   /** How far Ask Alpha is raised: resting on its bar, open as a half-screen sheet, or filling the screen. */
@@ -25,9 +25,10 @@ export type AssistantConversationProps = Omit<ComponentProps<"section">, "childr
  * Keeping the composer mounted in one slot across detents preserves focus and the native keyboard session on tap.
  * @model spec/app/assistant/index.md
  */
-export function AssistantConversation({ header, attachmentNotice, transcript, voiceReview, composer, detent = "sheet", className, ...props }: AssistantConversationProps) {
+export function AssistantConversation({ header, attachmentNotice, transcript, voicePanel, composer, detent = "sheet", className, ...props }: AssistantConversationProps) {
   const resting = detent === "bar";
   const full = detent === "full";
+  const panel = resting ? undefined : voicePanel;
   return (
     <section
       aria-label="Ask Alpha"
@@ -43,13 +44,13 @@ export function AssistantConversation({ header, attachmentNotice, transcript, vo
       )}
       {...props}
     >
-      <div hidden={resting} className={cn("min-h-0 flex-1 basis-auto flex-col", resting ? "hidden" : "flex", voiceReview && "overflow-y-auto")}>
+      <div hidden={resting} className={cn("min-h-0 flex-1 basis-auto flex-col", resting ? "hidden" : "flex", panel && "overflow-y-auto")}>
         <AssistantChatHeader {...header} grabber={full ? undefined : header.grabber} />
         {attachmentNotice && <Alert variant="warn" className="mx-3 shrink-0">{attachmentNotice}</Alert>}
-        {voiceReview}
+        {panel}
         <AssistantTranscript {...transcript} className={cn("flex-1", transcript.className)} />
       </div>
-      <AssistantComposer {...composer} hidden={Boolean(voiceReview) || composer.hidden} variant={resting ? "bar" : "sheet"} />
+      <AssistantComposer {...composer} voice={panel ? undefined : composer.voice} hidden={Boolean(panel) || composer.hidden} variant={resting ? "bar" : "sheet"} />
     </section>
   );
 }

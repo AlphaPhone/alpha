@@ -489,6 +489,33 @@ pure def sometimesAReplyBreaksOff(c: Conversation): bool = c.turn.reply == Broke
 pure def sometimesTheAgentIsAwayWithACheckToDo(c: Conversation): bool = not(c.ready) and c.check == LookLater
 ```
 
+### Alpha asks the agent to warm up at launch, on return to the foreground and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it
+
+The first reply after opening Alpha should come as fast as the second, so
+Alpha asks the agent to warm its model (`POST /api/turns/warm`, eliza's
+`spec/agent/conversation/planning.md`) when the owner may talk soon: when
+Ask Alpha first loads at launch, each time Alpha returns to the
+foreground, and each time Ask Alpha leaves its bar for typing, the sheet or
+the full screen. It asks only when the agent's status says it can answer
+(signed in, or on a key of the owner's, and not blocked) and no sensitive
+screen shows, where no message is sent either, and with the enrolled
+device's headers, so the warm-up builds the tools this phone's turns are
+offered; a warm-up that finds the device not yet enrolled shares the one
+enrollment a message would wait for, never a second. The agent keeps the
+warm-ups at least four minutes apart and pays for nothing more; the
+warm-up is detached and bounded as a whole, never holds the screen, and
+its answer and any failure are dropped without a word.
+
+```quint
+type WarmTrigger = Launched | Foreground | Raised
+pure def raisedFromTheBar(before: S::Detent, after: S::Detent): bool = before == S::Bar and after != S::Bar
+pure def asksWarmUp(trigger: WarmTrigger, canRespond: bool, sensitive: bool): bool = canRespond and not(sensitive)
+pure def lawAnAgentThatCannotAnswerIsNeverWarmed(trigger: WarmTrigger, sensitive: bool): bool = not(asksWarmUp(trigger, false, sensitive))
+pure def lawNoWarmUpOverASensitiveScreen(trigger: WarmTrigger, canRespond: bool): bool = not(asksWarmUp(trigger, canRespond, true))
+pure def lawEveryRaiseFromTheBarIsATrigger(after: S::Detent): bool = raisedFromTheBar(S::Bar, after) iff after != S::Bar
+pure def lawMovingAboveTheBarIsNoTrigger(before: S::Detent, after: S::Detent): bool = before != S::Bar implies not(raisedFromTheBar(before, after))
+```
+
 ## Story: Stop a reply
 
 > As the owner, I want Stop reply to end the turn at once, to take back a

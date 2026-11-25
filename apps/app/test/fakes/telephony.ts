@@ -44,8 +44,8 @@ export interface TelephonyScene {
   texts: Text[];
   /** Leaves the staged SMS deletion open so the owner can Undo. */
   holdMessageDeletion: boolean;
-  /** Whether the bridge carries Android's acknowledgment after staging a deletion. */
-  deletionReply: "complete" | "lost" | "malformed";
+  /** What reaches Alpha when it asks Android to stage a deletion. */
+  deletionReply: "complete" | "lost" | "malformed" | "refused";
   readonly deletionAttempts: string[];
   smsNotice: { threadId: string; token: string } | undefined;
   /** Every text the radio was handed: the operation it was reviewed under, and to whom. */
@@ -289,6 +289,7 @@ function telephony(world: TelephonyScene): Faked {
       },
       deleteMessage: (reference) => {
         world.deletionAttempts.push(reference.id);
+        if (world.deletionReply === "refused") return Promise.reject(rejection("The default messaging app is required", "role-required"));
         const found = world.texts.find((one) => `sms:${one.id}` === reference.id);
         if (found === undefined) return Promise.resolve({ status: "not-found", message: { ...reference } });
         if (!world.holdMessageDeletion) world.texts = world.texts.filter((one) => one !== found);

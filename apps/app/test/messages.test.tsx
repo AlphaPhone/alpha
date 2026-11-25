@@ -272,9 +272,12 @@ describe("Messages on an Alpha image", () => {
     ]);
   });
 
-  it("Shows an unknown outcome when Android loses the message deletion acknowledgment (spec/app/messages/index.md, \"The phone's answer ends the removal it names, and the conversation is read again unless it was refused\")", async () => {
+  it.each([
+    { reply: "lost", outcome: "Unknown", staged: true },
+    { reply: "refused", outcome: "Refused", staged: false },
+  ] as const)("Ends a $reply Android message deletion as $outcome (spec/app/messages/index.md, \"The phone's answer ends the removal it names, and the conversation is read again unless it was refused\")", async ({ reply, outcome, staged }) => {
     const world = image();
-    world.telephony.deletionReply = "lost";
+    world.telephony.deletionReply = reply;
     world.telephony.holdMessageDeletion = true;
     const { alpha } = await openImage(world);
     await openMessages(alpha);
@@ -285,10 +288,10 @@ describe("Messages on an Alpha image", () => {
     await press("Delete");
     await ready(alpha.runtime, Messages, "Message deletion confirmation", (state) => state.confirming);
     await confirm("Delete");
-    await ready(alpha.runtime, Messages, "Message deletion unknown", (state) => state.removal.outcome === "Unknown");
-    expect(document.body.textContent).toContain("Alpha cannot tell whether the message was deleted");
+    await ready(alpha.runtime, Messages, "Message deletion ended", (state) => state.removal.outcome === outcome);
+    expect(document.body.textContent?.includes("Alpha cannot tell whether the message was deleted")).toBe(outcome === "Unknown");
     expect(button("Undo")).toBeUndefined();
-    expect(world.telephony.staged).toMatchObject([{ kind: "message", phase: "queued", target: { id: "sms:1" } }]);
+    expect(world.telephony.staged).toMatchObject(staged ? [{ kind: "message", phase: "queued", target: { id: "sms:1" } }] : []);
     expect(world.telephony.deletionAttempts).toEqual(["sms:1"]);
   });
 

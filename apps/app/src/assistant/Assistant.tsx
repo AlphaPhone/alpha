@@ -53,7 +53,7 @@ export interface AssistantProps {
   runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview | Documents | Agent, unknown>;
   messageActions?: MessageActions;
   speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & {
-    voiceReview?: ReactNode;
+    voicePanel?: ReactNode;
     keyboard?: TalkStopReceipt;
     voice?: (presentation: { compactDock: boolean; atBar: boolean; onKeyboard: VoiceKeyboard }) => ReactNode;
   };
@@ -266,7 +266,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const reviewed = useSyncExternalStore(mailStore.subscribe, mailStore.snapshot);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const focusOnRevealRef = useRef(false);
-  const { voice: renderVoice, voiceReview, keyboard, ...speechProps } = speech ?? {};
+  const { voice: renderVoice, voicePanel, keyboard, ...speechProps } = speech ?? {};
   const keyboardOwner = useCallback(() => keyboardScope(runtime), [runtime]);
   const { onKeyboard, takeFocus } = useTalkKeyboard(composerRef, keyboardOwner, keyboard);
   const currentView = shell.state?.trail.at(-1);
@@ -422,7 +422,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       <AssistantAttachments runtime={runtime} attachments={attachments} preview={previewed} targetRef={fileTargetRef} composerRef={composerRef} />
       {onComms && full && <CommsTarget runtime={runtime} placement="strip" />}
       {(!onComms || open) && <AssistantConversation
-        voiceReview={voiceReview}
+        voicePanel={voicePanel}
         detent={assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
         className={onComms ? "relative w-full motion-safe:transition-[height] motion-safe:duration-[420ms]" : open ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
         style={onComms
