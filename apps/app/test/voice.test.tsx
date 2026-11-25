@@ -383,26 +383,43 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
   });
 
   // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"
-  it("keeps voice active and the microphone open when an agent action needs review in chat, and settling review does not stop voice", async () => {
-    const world = { ...scene(), phone: true, signedIn: false };
-    world.ask.nextReplyChunks = ["[APPROVAL:send_email] Draft ready for your review in chat."];
-    const runtime = await startListening(world);
+  it("keeps Talk listening during a confirmed chat review and its decision", async () => {
+    const world = { ...scene(), phone: true, image: true, signedIn: false };
+    const review = textReview(world.notes.owner, "spoken-folder", { type: "files_folder_create", parent: "Download", name: "Review folder" });
+    world.telephony.textReview = review;
+    const { alpha } = await open(world, talkMounts);
+    const area = assistant.runtime(alpha);
+    await drawnUntil(alpha, area, Conversation, (state) => state.ready && state.observing);
+    await drawnUntil(alpha, area, Composer, (state) => state.slot === "Open" && state.binding.owner > 0);
+    await drawnUntil(alpha, alpha.runtime, Preferences, (state) => state.document.read.status === "Loaded");
+    await drawn(() => alpha.runtime.runPromise(Preferences.use((machine) => machine.send({ type: "setAskFirst", askFirst: true, at: untimed }, "Owner"))));
+    await drawnUntil(alpha, alpha.runtime, Preferences, (state) => state.askFirst);
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");
+    world.ask.nextReplyChunks = [""];
+    world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: {
+      proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true,
+    } }];
 
-    speakUtterance(world, "Send the draft email");
-    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.reviewPending && s.sent === 1);
+    speakUtterance(world, "Create a Review folder in Downloads");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On" && state.reviewPending);
+    expect(document.body.textContent).toContain("Review in chat");
+    expect([world.voice.engineHeld, world.voice.activeMicSession !== undefined, world.voice.spoken]).toEqual([true, true, []]);
+    expect(review.claims).toEqual([]);
 
-    const duringReview = await getVoice(runtime);
-    expect([duringReview.phase, duringReview.mic, duringReview.reviewPending, duringReview.engineHeld, world.voice.activeMicSession !== undefined]).toEqual([
-      "Listening", "On", true, true, true,
-    ]);
-    expect(world.voice.hushCalls).toBeGreaterThanOrEqual(1);
-    expect(world.voice.spoken).toEqual([]);
-
-    await sendVoice(runtime, { type: "reviewSettled" });
-    const afterSettle = await getVoice(runtime);
-    expect([afterSettle.phase, afterSettle.mic, afterSettle.reviewPending, afterSettle.engineHeld, world.voice.activeMicSession !== undefined]).toEqual([
-      "Listening", "On", false, true, true,
-    ]);
+    const decision = Promise.withResolvers<void>();
+    review.decisionGate = decision.promise;
+    try {
+      await press("Decline");
+      await drawn(() => vi.waitFor(() => expect(button("Decline")?.disabled).toBe(true)));
+      expect(document.body.textContent).toContain("Review in chat");
+    } finally {
+      decision.resolve();
+    }
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On" && !state.reviewPending);
+    expect([button("Decline"), review.proposal.state, review.claims, world.voice.activeMicSession !== undefined]).toEqual([undefined, "rejected", [], true]);
+    expect(document.body.textContent).not.toContain("Review in chat");
   });
 
   // spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/voice/index.md, "Voice keeps talking after a navigation only when it is the one the conversation asked for; any other ends it"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"
@@ -517,6 +534,33 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect(waveform()).toBeNull();
   });
 
+  it("ends Talk for a call behind the call screen and waits for the owner to start it again (spec/app/voice/index.md, \"A phone call ends Talk and Alpha tells the owner once\")", async () => {
+    const world = { ...scene(), phone: true, image: true, signedIn: false };
+    const { alpha, area } = await onComposer(world);
+    await drawnUntil(alpha, alpha.runtime, Phone, (state) => state.telecom === "NoCall");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");
+
+    await seen(false);
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle" && state.mic === "Off");
+    world.telephony.live = [{ id: "talk-interrupted", state: "active", connectedAt: world.now }];
+    await drawn(() => world.telephony.report());
+    await drawnUntil(alpha, alpha.runtime, Phone, (state) => state.telecom === "OrdinaryCall");
+    world.telephony.live = [];
+    await drawn(() => world.telephony.report());
+    await drawnUntil(alpha, alpha.runtime, Phone, (state) => state.telecom === "NoCall");
+    await seen(true);
+    await drawn(() => vi.waitFor(() => expect(document.body.textContent).toContain("Voice paused for a phone call.")));
+    expect([world.voice.startLiveCaptureCalls, world.voice.activeMicSession]).toEqual([1, undefined]);
+
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");
+    expect(world.voice.startLiveCaptureCalls).toBe(2);
+    await press("Stop voice conversation");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle");
+  });
+
   it("restores the local speaker before unrelated playback when Talk stops during a mute (spec/app/voice/index.md, \"Speaker mute is offered after the current speech bridge confirms gain control\")", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
     const { alpha, area } = await onComposer(world);
@@ -628,6 +672,9 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     const { alpha, area } = await onComposer(world);
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.route.account === "CloudAccount" && s.route.consent && s.warmed);
     await settleComposer(alpha, () => world.voice.relayWarmups.length === 1);
+    await drawnUntil(alpha, area, Conversation, (s) => s.ready && s.observing);
+    await drawnUntil(alpha, area, Composer, (state) => state.slot === "Open");
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "raise", detent: "Sheet" }))));
 
     await press("Talk");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
@@ -635,6 +682,24 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect([world.voice.cloudStarts, world.voice.activeMicSession !== undefined, button("Talk")]).toEqual([
       [{ environment: "production", credentialId: "cred-owner-9" }], true, undefined,
     ]);
+
+    // spec/app/voice/index.md, "What the owner says is shown as it is heard"
+    const preview = () => document.querySelector('[aria-label="Heard so far, not sent"]')?.textContent;
+    const sessionId = world.voice.activeMicSession;
+    await drawn(() => {
+      world.voice.emitCloud?.({ type: "speech-start", sessionId });
+      world.voice.emitCloud?.({ type: "transcript", sessionId, text: "Looking up my calendar", final: false });
+    });
+    await settled(() => preview() === "Looking up my calendar");
+    expect(world.ask.said).toEqual([]);
+    await press("Mute microphone");
+    await settled(() => preview() === undefined);
+    await drawn(() => {
+      world.voice.emitCloud?.({ type: "transcript", sessionId, text: "A retired capture", final: false });
+      world.voice.emitCloud?.({ type: "speech-end", sessionId, text: "" });
+    });
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.muted && state.mic === "Off");
+    expect(preview()).toBeUndefined();
 
     await press("Stop voice conversation");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle" && s.mic === "Off");
@@ -725,7 +790,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
   });
 
   // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"
-  it("shows a spoken text in its open chat for touch review and keeps confirmation local", async () => {
+  it("accepts one spoken confirmation of the entire current text review without asking the agent again", async () => {
     const world = { ...scene(), phone: true, image: true, signedIn: false };
     const operation = { type: "sms_send", recipients: ["+14155550100"], body: "Meet upstairs.\nBring the keys.", subscriptionId: 1 } as const;
     const review = textReview(world.notes.owner, "spoken-reviewed-sms", operation);
@@ -762,11 +827,34 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect(document.body.textContent).toContain(operation.body);
     expect([review.decisions, review.claims, world.telephony.sent]).toEqual([[], [], []]);
 
-    speakUtterance(world, "Send this text.");
-    await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 2 && state.phase === "Listening" && state.mic === "On");
+    const send = button("Approve");
+    const card = send?.closest<HTMLElement>("[data-alpha-review]");
+    const viewport = card?.closest<HTMLElement>("[role='log']");
+    if (send === undefined || !card || !viewport) throw new Error("The addressed text was not drawn in the conversation");
+    const bounds = new DOMRect(8, 8, 300, 92);
+    const hit = vi.spyOn(document, "elementFromPoint").mockReturnValue(send);
+    const cardBounds = vi.spyOn(card, "getBoundingClientRect").mockReturnValue(bounds);
+    const sendBounds = vi.spyOn(send, "getBoundingClientRect").mockReturnValue(new DOMRect(16, 58, 60, 30));
+    const viewportBounds = vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 320, 120));
+    try {
+      speakUtterance(world, "Send this text.");
+      await vi.waitFor(() => expect(review.confirmations).toHaveLength(1));
+      await drawn(() => review.confirmations[0]?.confirm());
+      await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 2 && !state.reviewPending && state.phase === "Listening" && state.mic === "On");
+      speakUtterance(world, "Send this text.");
+      await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 3 && state.phase === "Listening" && state.mic === "On");
+    } finally {
+      for (const confirmation of review.confirmations) confirmation.confirm();
+      hit.mockRestore();
+      cardBounds.mockRestore();
+      sendBounds.mockRestore();
+      viewportBounds.mockRestore();
+    }
     expect(world.ask.said).toEqual(["Start this chat", text]);
-    expect(button("Approve")).toBeDefined();
-    expect([review.decisions, review.claims, world.telephony.sent]).toEqual([[], [], []]);
+    expect(button("Approve")).toBeUndefined();
+    expect([review.decisions, review.claims, world.telephony.sent]).toEqual([
+      [review.proposal.id], [review.proposal.id], [{ operationId: review.proposal.id, recipients: [...operation.recipients], body: operation.body }],
+    ]);
   });
 
   // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view"

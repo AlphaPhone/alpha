@@ -21,7 +21,7 @@ import { heading } from "./parse.ts";
 import { precomputeSimulations, prepareSimulationReceipts } from "./formal.ts";
 import { exec, run as tool, toolCpuSeconds } from "./run.ts";
 import { pendingSpecs, showPending, writeLedger } from "./review.ts";
-import { filesUnder, packageScripts, testInputs, testReceipt, writeWhole } from "./util.ts";
+import { fileCitations, filesUnder, packageScripts, testInputs, testReceipt, writeWhole } from "./util.ts";
 import { profile } from "./testing/profile.ts";
 import { installChromium } from "./chromium.ts";
 import { hostedCachedFixture, isolatedInstalls } from "./selftests/install.ts";
@@ -2586,6 +2586,8 @@ function eachCheck() {
     assert.ok(elsewhere.said("tests", /^pass/), elsewhere.text);
     fs.writeFileSync(path.join(root, "package.json"), manifest({}));
     const cite = (heading: string) => `// spec/index.md, ${JSON.stringify(heading)}\n`;
+    const quoted = 'A pending "Use my location" ends when Maps closes';
+    assert.deepEqual(fileCitations("src/maps.vibe", cite(quoted)), [{ at: "src/maps.vibe:1", spec: "spec/index.md", heading: quoted }]);
     const cites = ["Story: Check out", "Only a non-empty draft can be submitted", "Refunds are instant"].map(cite).join("");
     fs.mkdirSync(path.join(root, "test/journeys"), { recursive: true });
     fs.writeFileSync(path.join(root, "test/journeys/checkout.test.ts"), `import { assert, it } from "@effect/vitest";\nimport { noted } from "../../src/notes.vibe";\n\n${cites}it("a journey", () => assert.ok(noted));\n`);

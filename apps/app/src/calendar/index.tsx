@@ -19,6 +19,7 @@ const back = Effect.gen(function* () {
   const tried: ReadonlyArray<Effect.Effect<unknown, unknown>> = [
     form.send({ type: "close" }),
     view.send({ type: "closeOverlay" }),
+    view.send({ type: "closeReminder" }),
     view.send({ type: "closeEvent" }),
   ];
   for (const step of tried) if (yield* Effect.match(step, { onFailure: () => false, onSuccess: () => true })) return true;

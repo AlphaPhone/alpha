@@ -64,10 +64,12 @@ final class AlphaMessagesComposerPort {
    return;
   }
   if (active != null && id.equals(active.getCallbackId())) return;
-  boolean mms = "mms".equals(kind);
+  boolean mms = "mms".equals(kind), approved = "approved-sms".equals(kind);
   JSObject draft = request.getJSObject("draft");
+  JSObject approval = approved ? request.getJSObject("approval") : null;
   ComposerCall call = new ComposerCall(reply, id, mms, draft == null ? new JSObject() : draft);
-  if (request.length() != 3 || !draftShape(draft, mms) || !(mms || "sms".equals(kind))) {
+  if (request.length() != (approved ? 4 : 3) || !draftShape(draft, mms)
+    || (approved ? approval == null : !(mms || "sms".equals(kind)))) {
    call.reject("Invalid Messages draft.", "composer-not-started");
    return;
   }
@@ -78,7 +80,7 @@ final class AlphaMessagesComposerPort {
   }
   active = call;
   try {
-   plugin.sendComposed(activity, view, call, mms, () -> !call.cancelled.get(), bridge::execute);
+   plugin.sendComposed(activity, view, call, mms, approval, () -> !call.cancelled.get(), bridge::execute);
   } catch (RuntimeException stopped) {
    call.reject("The Messages send could not be confirmed.");
   }

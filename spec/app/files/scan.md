@@ -85,7 +85,7 @@ pure def editable(s: Scan): bool = pagesEditable(s) and s.search.stage != Search
 pure val imageValues = Set(1, 2, 3)
 pure val frameValues = Set(1)
 pure val replacingValues = Set(0, 1)
-pure val atValues = Set(-1, 0, 1, 2)
+pure val slotValues = Set(-1, 0, 1, 2)
 pure val earlierValues = Set(1, 2, 3)
 pure val laterValues = Set(1, 2, 3)
 pure val ticketValues = Set(1, 2, 3)
@@ -153,6 +153,7 @@ pure def loaded(s: Scan, ticket: int, ok: bool, readable: bool, base: int, pages
 ### A selected image or live Camera frame opens a transient text review, reads text immediately, and becomes a multi-page document only at the owner's request
 
 The image does not enter the Photos library or replace the saved Files draft.
+Discovered by the proof: closing a scan during draft deletion could allow a transient image to open before deletion settled. A draft read or deletion must settle before the transient image opens.
 A Camera frame can be kept in Photos at the owner's request. The owner can correct its text, review links, save a note,
 review an event, and save a PDF. Choosing Multi-page adds page controls
 to this review, leaving the saved Files draft alone.
@@ -160,16 +161,17 @@ to this review, leaving the saved Files draft alone.
 ```quint
 pure def canStartImage(s: Scan, frame: int, by: Actor): bool =
   by == Phone and not(s.open) and not(exporting(s)) and frame > 0 and not(s.keeping.stored) and not(D::unsaved(s.keeping.draft))
+    and s.keeping.loading.status == R::Idle and not(K::deleting(s.keeping))
 
-pure def imageReview(s: Scan, camera: bool): Moved =
+pure def imageReview(camera: bool, s: Scan): Moved =
   val image = s.images + 1
   val opened = { ...s, origin: SelectedImage, open: true, images: image, pages: List({ ...K::noPage, image: image, camera: camera }), problem: NoProblem }
   recognize(opened, image, Owner)
 
-pure def startImage(s: Scan, frame: int, by: Actor): Moved = imageReview(s, false)
+pure def startImage(s: Scan, frame: int, by: Actor): Moved = imageReview(false, s)
 
 pure def canStartCameraImage(s: Scan, frame: int, by: Actor): bool = canStartImage(s, frame, by)
-pure def startCameraImage(s: Scan, frame: int, by: Actor): Moved = imageReview(s, true)
+pure def startCameraImage(s: Scan, frame: int, by: Actor): Moved = imageReview(true, s)
 
 pure def canShowPages(s: Scan, by: Actor): bool = by == Owner and s.origin == SelectedImage and editable(s)
 pure def showPages(s: Scan, by: Actor): Scan = { ...s, origin: SelectedDocument }
@@ -237,30 +239,30 @@ pure def canRemove(s: Scan, image: int, by: Actor): bool = by == Owner and edita
 
 pure def remove(s: Scan, image: int, by: Actor): Scan = edited(s.pages.select(p => p.image != image), s)
 
-pure def adjacentPages(pages: List[K::Page], at: int, earlier: int, later: int): bool =
-  at >= 0 and at < pages.length() - 1 and earlier > 0 and later > 0 and earlier != later
-    and pages.nthOr(at, K::noPage).image == earlier and pages.nthOr(at + 1, K::noPage).image == later
+pure def adjacentPages(pages: List[K::Page], slot: int, earlier: int, later: int): bool =
+  slot >= 0 and slot < pages.length() - 1 and earlier > 0 and later > 0 and earlier != later
+    and pages.nthOr(slot, K::noPage).image == earlier and pages.nthOr(slot + 1, K::noPage).image == later
     and pages.select(p => p.image == earlier or p.image == later).length() == 2
 
-pure def swappedPages(pages: List[K::Page], at: int): List[K::Page] =
-  val valid = at >= 0 and at < pages.length() - 1
-  val first = pages.nthOr(at, K::noPage)
-  val second = pages.nthOr(if (valid) at + 1 else -1, K::noPage)
+pure def swappedPages(pages: List[K::Page], slot: int): List[K::Page] =
+  val valid = slot >= 0 and slot < pages.length() - 1
+  val first = pages.nthOr(slot, K::noPage)
+  val second = pages.nthOr(if (valid) slot + 1 else -1, K::noPage)
   if (valid) pages.listMap(p => if (p.image == first.image) second else if (p.image == second.image) first else p)
   else pages
 
-pure def canSwapPages(s: Scan, at: int, earlier: int, later: int, by: Actor): bool =
-  by == Owner and editable(s) and adjacentPages(s.pages, at, earlier, later)
+pure def canSwapPages(s: Scan, slot: int, earlier: int, later: int, by: Actor): bool =
+  by == Owner and editable(s) and adjacentPages(s.pages, slot, earlier, later)
 
-pure def swapPages(s: Scan, at: int, earlier: int, later: int, by: Actor): Scan =
-  edited(swappedPages(s.pages, at), s)
+pure def swapPages(s: Scan, slot: int, earlier: int, later: int, by: Actor): Scan =
+  edited(swappedPages(s.pages, slot), s)
 
-pure def lawAdjacentPagesSwapWhole(pages: List[K::Page], at: int, earlier: int, later: int): bool =
-  val swapped = swappedPages(pages, at)
-  adjacentPages(pages, at, earlier, later) implies
+pure def lawAdjacentPagesSwapWhole(pages: List[K::Page], slot: int, earlier: int, later: int): bool =
+  val swapped = swappedPages(pages, slot)
+  adjacentPages(pages, slot, earlier, later) implies
     (swapped.length() == pages.length() and swapped.every(p => pages.includes(p))
-      and swapped.nthOr(at, K::noPage) == pages.nthOr(at + 1, K::noPage)
-      and swapped.nthOr(at + 1, K::noPage) == pages.nthOr(at, K::noPage))
+      and swapped.nthOr(slot, K::noPage) == pages.nthOr(slot + 1, K::noPage)
+      and swapped.nthOr(slot + 1, K::noPage) == pages.nthOr(slot, K::noPage))
 
 pure val eval_witness_canSwapPages = (("start", Owner), ("add", 1, 0, false, Phone),
   ("add", 1, 0, true, Phone), ("swapPages", 0, 1, 2, Owner))
@@ -268,8 +270,11 @@ pure val eval_witness_canSwapPages = (("start", Owner), ("add", 1, 0, false, Pho
 
 ### Every page shows an image already made
 
+Discovered by the proof: with an empty scan, a negative counter could assign a negative image number to the first page. The counter starts at zero and stays nonnegative.
+
 ```quint
-pure def alwaysPagesShowImagesMade(s: Scan): bool = s.pages.every(p => p.image > 0 and p.image <= s.images)
+pure def alwaysPagesShowImagesMade(s: Scan): bool =
+  s.images >= 0 and s.pages.every(p => p.image > 0 and p.image <= s.images)
 ```
 
 ### A scan can hold several pages, resume a draft, find its draft unreadable, and offer to load it over its pages
@@ -499,7 +504,10 @@ pure def sometimesTheDraftIsDeletedFromTheScan(s: Scan): bool = s.keeping.discar
 The open review names the exact pages and their text revisions. It keeps
 previously read text, including a page that was blank. Reading or editing
 in this review writes nothing. Back retires only the review it was sent
-for. A change to the source retires that review.
+for. A change to the source retires that review. Back can stop conversion
+before a write is requested. If the write was already requested, Back returns
+to the scanner and shows that the write remains unconfirmed. This closes the
+review and keeps the pending write's ticket until the phone reports its outcome.
 Keep text is an explicit draft edit. Save PDF starts the ordinary numbered
 save with the reviewed layer. Only a confirmed or unconfirmed write can
 then keep that layer in the draft. A refusal leaves the review available.
@@ -528,16 +536,16 @@ pure def canSearchRead(s: Scan, ticket: int, image: int, by: Actor): bool =
     and s.search.remaining.nthOr(0, 0) == image and s.pages.some(p => p.image == image and p.text == 0)
 
 pure def searchRead(s: Scan, ticket: int, image: int, ok: bool, by: Actor): Moved =
-  if (ok) searchNext({ ...s.search, remaining: s.search.remaining.tail() }, s)
+  if (ok and s.search.remaining.length() > 0) searchNext({ ...s.search, remaining: s.search.remaining.tail() }, s)
   else { state: { ...s, search: { ...s.search, stage: SearchFailed } }, out: List() }
 
 pure def canCancelSearch(s: Scan, ticket: int, by: Actor): bool =
-  ticket == s.search.ticket and s.search.stage != SearchClosed
-    and (by == Phone or s.search.stage != SearchSaving or s.pdf.outcome == A::Recorded)
+  ticket == s.search.ticket and s.search.stage != SearchClosed and (by == Phone or s.open)
 
 pure def cancelSearch(s: Scan, ticket: int, by: Actor): Scan =
-  { ...s, search: closeSearch(ticket),
-    pdf: if (s.search.stage == SearchSaving and s.pdf.outcome == A::Recorded) A::plan(s.pdf.id + 1) else s.pdf }
+  val waiting = s.search.stage == SearchSaving
+  { ...s, search: { ...closeSearch(ticket), tried: waiting and s.pdf.outcome == A::Sent },
+    pdf: if (waiting and s.pdf.outcome == A::Recorded) A::plan(s.pdf.id + 1) else s.pdf }
 
 pure def reviewedPage(old: K::Page, p: K::Page): bool =
   p.text == p.image and p.camera == old.camera and
@@ -623,10 +631,12 @@ pure def exported(s: Scan, ticket: int, confirmed: bool, known: bool, by: Actor)
 ### While the PDF is being made, the pages do not change and no text is read
 
 Discovered by simulation: text read from a page could arrive while the
-PDF was being drawn without it.
+PDF was being drawn without it. A final export answer can release the pages of a closed transient scan after recording its outcome.
 
 ```quint
-pure def stepExportingFreezesThePages(before: Scan, after: Scan): bool = exporting(before) implies after.pages == before.pages
+pure def stepExportingFreezesThePages(before: Scan, via: str, after: Scan): bool =
+  exporting(before) implies
+    (after.pages == before.pages or (via == "exported" and not(exporting(after)) and before.origin != Document and not(before.open) and after.pages.length() == 0))
 
 pure def alwaysNoTextIsReadDuringAnExport(s: Scan): bool = exporting(s) implies s.text.reading.status != R::Loading
 ```

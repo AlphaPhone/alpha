@@ -387,11 +387,15 @@ function replaceItemInSnapshot(current: RemindersSnapshot, updated: ReminderItem
   }
 }
 
-effect function prepareItemEdit(id: string): ({ readonly current: RemindersSnapshot; readonly existing: ReminderItemRecord; readonly now: number } | undefined)!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said | PhoneReminders) {
+effect function prepareItemEdit(id: string, expectedRevision?: number): ({ readonly current: RemindersSnapshot; readonly existing: ReminderItemRecord; readonly now: number } | undefined)!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said | PhoneReminders) {
+  if (expectedRevision !== undefined) {
+    const active = remindersStore.snapshot()
+    if (active.hiddenIds.has(id) || active.snapshot.items.find((item) => item.id === id)?.revision !== expectedRevision) return undefined
+  }
   try settlePendingUndoBeforeWrite()
   const current = remindersStore.snapshot().snapshot
   const existing = current.items.find((item) => item.id === id)
-  if (existing === undefined) return undefined
+  if (existing === undefined || (expectedRevision !== undefined && existing.revision !== expectedRevision)) return undefined
   const now = try (try Time).now()
   return { current, existing, now }
 }
@@ -486,8 +490,8 @@ export effect function saveReminderDraft(): (ReminderItemRecord | undefined)!!(R
 }
 
 /** Toggle completion of a reminder: recurring items advance to their next date, and a 5s Undo toast is offered. */
-export effect function toggleReminderComplete(id: string): void!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said | PhoneReminders) {
-  const ctx = try prepareItemEdit(id)
+export effect function toggleReminderComplete(id: string, expectedRevision?: number): void!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said | PhoneReminders) {
+  const ctx = try prepareItemEdit(id, expectedRevision)
   if (ctx === undefined) return
   const { current, existing, now } = ctx
   const completing = !existing.completed
@@ -520,8 +524,8 @@ export effect function toggleReminderFlag(id: string): void!!(Reminders.Machine 
 }
 
 /** Delete a reminder item immediately from view and hold for 5 seconds with an Undo toast. */
-export effect function deleteReminderItem(id: string): void!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said | PhoneReminders) {
-  const ctx = try prepareItemEdit(id)
+export effect function deleteReminderItem(id: string, expectedRevision?: number): void!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said | PhoneReminders) {
+  const ctx = try prepareItemEdit(id, expectedRevision)
   if (ctx === undefined) return
   const { current, existing, now } = ctx
   const about = undoCounter++

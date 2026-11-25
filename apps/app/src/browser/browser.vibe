@@ -114,12 +114,12 @@ export effect function pageOf(tab: number): Page!!Pages {
   return try promise(() => runtime.runPromise(Address.Machine.use((machine) => machine.get())))
 }
 
-effect function tellPage(tab: number, event: PageEvent): boolean!!Pages {
+export effect function tellPage(tab: number, event: PageEvent): boolean!!Pages {
   const runtime = try (try Pages).of(tab)
   return try promise(() => runtime.runPromiseExit(Address.Machine.use((machine) => machine.send(event))).then((ended) => Exit.isSuccess(ended)))
 }
 
-effect function tellTabs(event: TabsEvent): boolean!!Tabs.Machine {
+export effect function tellTabs(event: TabsEvent): boolean!!Tabs.Machine {
   return try ((try Tabs.Machine).send(event) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))
 }
 
