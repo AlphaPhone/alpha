@@ -39,8 +39,15 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
   const voicemail = useVoicemail(runtime).state;
   const shell = useShell(runtime);
   const held = runtime.runSync(Effect.flatMap(Rows, (rows) => rows.get()));
-  const groups = useMemo(() => Object.entries(Object.groupBy(held.rows, (row) =>
-    Array.from(row.name.trim())[0]?.toLocaleUpperCase() ?? "#")), [held.rows]);
+  const groups = useMemo(() => {
+    const grouped = Object.groupBy(held.rows, ({ name }) => {
+      const letter = name.trim().charAt(0).normalize("NFD").charAt(0).toUpperCase();
+      return /^[A-Z]$/.test(letter) ? letter : "#";
+    });
+    return Object.entries(grouped)
+      .sort(([left], [right]) => Number(left === "#") - Number(right === "#") || left.localeCompare(right))
+      .map(([letter, rows]) => [letter, rows?.toSorted((left, right) => left.name.localeCompare(right.name))] as const);
+  }, [held.rows]);
   const favourites = useMemo(() => held.rows.filter((row) => row.starred), [held.rows]);
   if (contacts.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Contacts</Alert>;
   const { state, can, send } = contacts;
