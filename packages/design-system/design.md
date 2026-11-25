@@ -16,7 +16,9 @@ do next.
 - **Meaning.** `primary` is the accent as text, a link and a mark: Alpha blue on white, a lighter
   blue on black where Alpha blue cannot be read. What the accent fills, the main action, a switch that is on
   and a chosen box or radio, is `alpha` with `alpha-foreground`, Alpha blue in both themes. `destructive`, `ok`, `warn` and `info` are states,
-  `call` a live or answerable call, `dial` the button that places one, `record` a running recording. A state color always sits beside a
+  `call` a live or answerable call (the same green in both themes, behind white text), `call-ended` the moment after one ends,
+  `dial` the button that places one, `hangup` the red behind or inside a control that ends a call or removes a recording,
+  never text, and `record` a running recording. A state color always sits beside a
   word or an accessible name, never alone.
 - **Type.** `font-sans` is Public Sans, for everything read or pressed. `font-display` is Denton, with
   Fraunces behind it, at weight `light`: a screen's display title on the launcher, the date on Home, a large figure. The sizes
@@ -34,7 +36,7 @@ do next.
   digit and `text-keypad-letters` the letters under it; `text-contact-name` and `text-contact-initials`, in
   `font-display`, are a contact's name and initials at the top of their card. `text-lead` is the street of the next turn,
   `text-title` a document's name over its preview and Notes' Recently deleted header on the launcher, and `text-figure` and `text-figure-sm` a route's time.
-  `leading-row` sets `text-body` as a note's or a routine's title in a list.
+  `leading-row` sets `text-body` as a note's or a routine's title in a list, and `leading-transcript` a transcript read back, such as a voicemail's.
   `text-badge` is a video's length over a thumbnail and `text-tile-name` an album's name under its cover.
   `text-headline` is an open voice or link note's title and `text-quote` a clip kept from a page.
   `text-tab-count` in a `rounded-tab-count` outline is the Browser's count of open tabs.
@@ -52,8 +54,8 @@ do next.
   button and a chip, `rounded-dock` the Ask Alpha bar and `rounded-dock-compact` its compact controls.
   Everything pressed is at least 44px in both directions.
 - **Elevation.** `shadow-sm` lifts a control, `shadow-menu` a menu, `shadow-md` a dialog or a notice, `shadow-lg` a raised card,
-  `shadow-dock` the floating Ask Alpha bar, `shadow-dock-compact` its compact controls, and `shadow-sheet` a bottom sheet.
-  Both dock shadows have a `-dark` variant for black surfaces.
+  `shadow-dock` the floating Ask Alpha bar, `shadow-dock-compact` its compact controls, `shadow-bar` the ongoing-call bar over a view,
+  and `shadow-sheet` a bottom sheet. The dock and bar shadows have a `-dark` variant for black surfaces.
 - **Layers.** `z-dock` is the Ask Alpha bar, `z-sheet` the conversation and bottom sheets, `z-dialog` a
   dialog, `z-toast` a notice, `z-voice` the voice overlay. `z-10`, `z-20` and `z-50` order things inside one view.
 - **Motion.** `fast` for press, `base` for most changes, `slow` for entering and leaving, on
@@ -115,8 +117,10 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `voice-paused` | oklch(0.42871365 0.17763819 275.87797693) | oklch(0.49371435 0.17497524 277.85975720) |
 | `voice-processing` | oklch(0.35317586 0.24472654 264.05202064) | oklch(0.53252567 0.26097330 273.09464102) |
 | `voice-speaking` | oklch(0.46315925 0.30554663 264.59166337) | — |
-| `call` | oklch(0.509 0.134 149.4) | oklch(0.614 0.162 149.3) |
+| `call` | oklch(0.509 0.134 149.4) | — |
+| `call-ended` | oklch(0.4495 0 0) | — |
 | `record` | oklch(0.578 0.206 29) | oklch(0.663 0.224 28.3) |
+| `hangup` | oklch(0.6082 0.209 25.26) | — |
 | `dial` | oklch(0.614 0.162 149.3) | — |
 | `dial-foreground` | oklch(1 0 0) | — |
 
@@ -204,14 +208,13 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.title.tracking` | -0.01em |
 | `text.figure-sm.size` | 1.875rem |
 | `text.figure-sm.leading` | 1.05 |
-| `text.keypad-letters.size` | 0.59375rem |
-| `text.keypad-letters.leading` | 1.15 |
-| `text.keypad-letters.tracking` | 0.14em |
-| `text.keypad-digit.size` | 1.875rem |
+| `text.keypad-letters.size` | 0.6875rem |
+| `text.keypad-letters.leading` | 1.1 |
+| `text.keypad-letters.tracking` | 0.12em |
+| `text.keypad-digit.size` | 1.8525rem |
 | `text.keypad-digit.leading` | 1 |
-| `text.keypad-number.size` | 2.375rem |
-| `text.keypad-number.leading` | 1.2 |
-| `text.keypad-number.tracking` | 0.02em |
+| `text.keypad-number.size` | 2.25rem |
+| `text.keypad-number.leading` | 1.175 |
 | `text.contact-name.size` | 2.125rem |
 | `text.contact-name.leading` | 1.1 |
 | `text.contact-name.tracking` | -0.01em |
@@ -264,6 +267,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `shadow.dock-dark` | 0 14px 40px oklch(0 0 0 / 0.45) |
 | `shadow.dock-compact` | 0 12px 34px oklch(0 0 0 / 0.12) |
 | `shadow.dock-compact-dark` | 0 12px 34px oklch(0 0 0 / 0.45) |
+| `shadow.bar` | 0 2px 8px oklch(0 0 0 / 0.12) |
+| `shadow.bar-dark` | 0 2px 8px oklch(0 0 0 / 0.45) |
 | `keyframes.rise` | from{opacity:0;transform:translateY(1.75rem)}to{opacity:1;transform:none} |
 | `keyframes.drop` | from{opacity:0;transform:translateY(-2.25rem)}to{opacity:1;transform:none} |
 | `keyframes.fade` | from{opacity:0}to{opacity:1} |
