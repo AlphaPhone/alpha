@@ -1,6 +1,6 @@
 // spec/app/phone/voicemail.md, "Story: See my voicemail"; spec/app/phone/voicemail.md, "Story: Listen to a voicemail"; spec/app/phone/voicemail.md, "Story: Read what was said"; spec/app/phone/voicemail.md, "Story: Answer a voicemail"; spec/app/phone/voicemail.md, "Story: Delete a voicemail"
 import type { StagedDeletion, ListedVoicemail, VoicemailId, VoicemailListing } from "@elizaos/os-bridges"
-import { Machine as PhoneMachine, liveCall } from "../../gen/app__phone.effect.vibe"
+import { Machine as PhoneMachine, clear, liveCall } from "../../gen/app__phone.effect.vibe"
 import * as Voicemail from "../../gen/app__phone__voicemail.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__phone__voicemail.effect.vibe"
 import { type Telephony, deletionRefused, namesOf, telephony } from "../platform/telephony.vibe"
@@ -15,9 +15,18 @@ export interface Heard {
   readonly audio: string
   readonly transcript: string
   readonly deletion: StagedDeletion | undefined
+  readonly confirmation: VoicemailConfirmation | undefined
 }
 
-const nothing: Heard = { rows: [], open: "", audio: "", transcript: "", deletion: undefined }
+/** The item shown when the owner opens its inline delete confirmation. */
+interface VoicemailConfirmation {
+  readonly id: VoicemailId
+  readonly opening: number
+  readonly witness: string | undefined
+  readonly expiresAt: number | undefined
+}
+
+const nothing: Heard = { rows: [], open: "", audio: "", transcript: "", deletion: undefined, confirmation: undefined }
 
 /** The voicemails behind Voicemail's counts. */
 export service Voicemails {
@@ -34,6 +43,18 @@ const voicemails = Layer.sync(Voicemails, () => {
 effect function opened(): Option.Option<ListedVoicemail>!!Voicemails {
   const held = try (try Voicemails).get()
   return Option.fromNullishOr(held.rows.find((row) => row.id === held.open))
+}
+
+// spec/app/phone/voicemail.md, "Delete asks first, stops playback, and Keep closes the question"
+export effect function askVoicemailDeletion(id: VoicemailId, expected?: { readonly opening: number; readonly witness: string; readonly expiresAt: number }) {
+  const machine = try Voicemail.Machine
+  const store = try Voicemails
+  const state = try machine.get()
+  const row = Option.getOrUndefined(try opened())
+  if (!Voicemail.canAskDelete(state) || row?.id !== id
+    || (expected !== undefined && (expected.opening !== state.audio.ticket || expected.witness !== row.deletionWitness))) return false
+  try store.set({ confirmation: { id, opening: state.audio.ticket, witness: row.deletionWitness, expiresAt: expected?.expiresAt } })
+  return try contained(machine.send({ type: "askDelete" }), "confirming deletion of the open voicemail")
 }
 
 // spec/app/phone/voicemail.md, "Only the newest read of the list is shown, and nothing without a carrier"
@@ -124,15 +145,22 @@ effect function settlement(id: number, requested: StagedDeletion): Event!!(Telep
 }
 
 // spec/app/phone/voicemail.md, "The phone's answer ends the removal it names"
-effect function removed(id: number): Event!!(Telephony | Voicemails | Time | Voicemail.Machine) {
-  const open = try opened()
-  if (Option.isNone(open)) return { type: "removed", id, done: false, known: true, kept: false }
-  const voicemail: VoicemailId = open.value.id
-  const answer = try Effect.result(telephony("deleteVoicemail", (c) => c.phone.deleteVoicemail(voicemail)))
+effect function removed(id: number): Event!!(Telephony | Voicemails | Time | PhoneMachine | Voicemail.Machine) {
+  const row = Option.getOrUndefined(try opened())
+  const store = try Voicemails
+  const { confirmation } = try store.get()
+  const state = try (try Voicemail.Machine).get()
+  try store.set({ confirmation: undefined })
+  if (confirmation === undefined || row?.id !== confirmation.id || row.deletionWitness !== confirmation.witness
+    || !state.front || !state.open || state.audio.ticket !== confirmation.opening || state.removal.id !== id
+    || (confirmation.expiresAt !== undefined && ((try (try Time).now()) >= confirmation.expiresAt || !clear(try (try PhoneMachine).get())))) {
+    return { type: "removed", id, done: false, known: true, kept: false }
+  }
+  const answer = try Effect.result(telephony("deleteVoicemail", (c) => c.phone.deleteVoicemail(confirmation.id, confirmation.witness)))
   if (Result.isFailure(answer)) return { type: "removed", id, done: false, kept: false, known: deletionRefused(answer.failure) }
   const report = answer.success
   if (report.status !== "queued") return { type: "removed", id, done: false, known: true, kept: false }
-  try (try Voicemails).set({ deletion: report.deletion })
+  try store.set({ deletion: report.deletion })
   try ignore((try Voicemail.Machine).send({ type: "removalStaged", id }))
   return try settlement(id, report.deletion)
 }

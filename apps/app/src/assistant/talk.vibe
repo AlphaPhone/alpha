@@ -154,6 +154,7 @@ export interface Board {
 export service Talk {
   readonly board: Board
   readonly attachmentLock: Semaphore.Semaphore
+  readonly writer: Semaphore.Semaphore
   /** Seal the previous seat, or open the verified conversation catalogue and say if it was selected before. */
   seat(next: DraftSeat | undefined): boolean!!
   /** Record which verified catalogue the settled numeric Chat state belongs to. */
@@ -361,5 +362,5 @@ export const talk = Layer.effect(Talk, effect {
       return true
     } catch () => false
   }
-  return { board, attachmentLock: try Semaphore.make(1), seat, markSeat }
+  return { board, attachmentLock: try Semaphore.make(1), writer: try Semaphore.make(1), seat, markSeat }
 })

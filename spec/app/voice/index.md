@@ -40,7 +40,7 @@ type Voice = {
   speaker: Output, speakerTicket: int,
   network: bool, disclosing: bool, retries: int, retryAt: int,
   queued: int, played: int, replied: bool, playing: int,
-  failure: D::Failure, latched: bool, claim: int, followed: int,
+  failure: D::Failure, latched: bool, claim: int, claimRoute: int, followed: int,
   warmed: bool, engineHeld: bool, reviewPending: bool,
   prompting: bool, recorder: D::Recorder, permission: P::Permission, route: R::Route,
 }
@@ -50,7 +50,7 @@ pure val initial: Voice = {
   speaker: SpeakerUnknown, speakerTicket: 0,
   network: false, disclosing: false, retries: 0, retryAt: 0,
   queued: 0, played: 0, replied: false, playing: 0,
-  failure: D::NoFailure, latched: false, claim: 0, followed: 0,
+  failure: D::NoFailure, latched: false, claim: 0, claimRoute: 0, followed: 0,
   warmed: false, engineHeld: false, reviewPending: false,
   prompting: false, recorder: D::initial, permission: P::unasked, route: R::signedOut,
 }
@@ -59,6 +59,8 @@ pure val sessionValues = Set(1, 2, 3, 4, 5)
 pure val speakerTicketValues = Set(1, 2, 3, 4)
 pure val turnValues = Set(1, 2, 3, 4, 5)
 pure val placeValues = Set(1, 2)
+pure val sourceRouteValues = Set(0, 1, 2)
+pure val arrivedRouteValues = Set(1, 2, 3)
 pure val keyValues = Set(0, 1, 2)
 pure val nowValues = Set(0, 30, 90, 700)
 pure val waitValues = Set(0, 20, 120)
@@ -111,8 +113,7 @@ type Effect =
   | SetSpeakerOutput({ session: int, speakerTicket: int, muted: bool })
   | Hush({ turn: int })
   | Shut({ session: int, keyboard: bool })
-  | Navigate({ place: int })
-  | NavigateFiles({ session: int, turn: int, place: int })
+  | Navigate({ session: int, turn: int, place: int, sourceRoute: int })
   | Record({ ticket: int })
   | Transcribe({ ticket: int, network: bool, automatic: bool })
   | Abandon({ recording: int })
@@ -199,7 +200,7 @@ pure def begin(network: bool, v: Voice): Change =
   else if (P::canAsk(v.permission))
     { state: { ...v, network: network, mic: Asking, prompting: true, permission: P::ask(v.permission) }, out: List(AskMicrophone) }
   else
-    { state: { ...v, phase: Failed, failure: D::Denied, network: false, mic: Off, engineHeld: false, reviewPending: false, claim: 0 },
+    { state: { ...v, phase: Failed, failure: D::Denied, network: false, mic: Off, engineHeld: false, reviewPending: false, claim: 0, claimRoute: 0 },
       out: releaseOut(v) }
 
 pure def canStartTalking(v: Voice, now: int): bool =
@@ -531,6 +532,17 @@ pure def alwaysAQuietConversationHoldsNothing(v: Voice): bool =
         and not(v.engineHeld) and not(v.reviewPending)))
 ```
 
+### Talk keeps what it sends in the selected Ask Alpha conversation
+
+Starting Talk leaves the selected conversation and typed draft alone. A
+first accepted utterance uses the owner's selected conversation. From a
+blank chat, the first utterance may ask Chats to make one conversation
+while the editor is empty and no other send is in hand. An unsent draft
+keeps its own slot. Typed and spoken turns take the same exclusive posting
+place while either may still reach the agent. The recorded user and reply
+rows appear under the identities the agent confirms, on the latest page
+of that conversation. Opening older history keeps its place.
+
 ### What was heard but not sent is never counted as sent
 
 The owner sees it as "Heard so far, not sent". A turn still being heard,
@@ -650,7 +662,7 @@ A stop is settled once the microphone and speech are confirmed off.
 ```quint
 pure def shutDown(failure: D::Failure, keyboard: bool, v: Voice): Change =
   { state: { ...v, phase: Stopping, failure: failure, mic: closedMic(v.mic), disclosing: false, retryAt: 0,
-      queued: 0, played: 0, replied: false, playing: 0, claim: 0, engineHeld: false, reviewPending: false, speaker: SpeakerUnknown },
+      queued: 0, played: 0, replied: false, playing: 0, claim: 0, claimRoute: 0, engineHeld: false, reviewPending: false, speaker: SpeakerUnknown },
     out: List(Shut({ session: v.session, keyboard: keyboard })).concat(releaseOut(v)) }
 
 pure def canStop(v: Voice, keyboard: bool): bool = talking(v)
@@ -715,7 +727,7 @@ pure def canPauseForCall(v: Voice): bool = talking(v) and v.mic != Asking and no
 
 pure def pauseForCall(v: Voice): Change =
   { state: { ...v, phase: Paused, turn: v.turn + 1, mic: closedMic(v.mic), queued: 0, played: 0, replied: false,
-      playing: 0, retryAt: 0, claim: 0 },
+      playing: 0, retryAt: 0, claim: 0, claimRoute: 0 },
     out: List(Hush({ turn: v.turn })).concat(closeOut(v)) }
 
 pure def canCallEnded(v: Voice): bool = v.phase == Paused
@@ -744,7 +756,7 @@ pure def canSpeechFailed(v: Voice, session: int, fault: R::Fault, wait: int, dev
 pure def speechFailed(v: Voice, session: int, fault: R::Fault, wait: int, deviceReady: bool, now: int): Change =
   val route = if (deviceReady) R::noteFailure(v.route, fault, wait, now) else R::clearHold(v.route)
   val transient = fault == R::Brief or fault == R::RateLimited
-  val base = { ...v, route: route, queued: 0, played: 0, replied: false, playing: 0, claim: 0, speaker: SpeakerUnknown }
+  val base = { ...v, route: route, queued: 0, played: 0, replied: false, playing: 0, claim: 0, claimRoute: 0, speaker: SpeakerUnknown }
   val shut = List(Shut({ session: v.session, keyboard: false }))
   val onPhone = begin(false, { ...base, phase: Starting, session: v.session + 1, turn: v.turn + 1, heard: false, mic: Off })
   if (v.network and R::fallsBack(fault) and v.played == 0 and v.queued == 0 and deviceReady)
@@ -782,19 +794,26 @@ pure def sometimesSecondQuietRetry(v: Voice): bool = v.retries == 2 and v.retryA
 
 ### An active voice conversation may ask the shell to open Home or any admitted screen
 
-Place 1 names Home and every higher place names an admitted app. The claim
-survives across turn boundaries until the shell finishes or declines the
-navigation, so an agent navigation that completes after the reply returns
-to listening never stops voice.
+Place 1 names Home and every higher place names an admitted app. A
+completed reply's prepared view takes precedence over its textual navigation
+tag. A streaming preview cannot move the shell. An admitted navigation
+belongs to the current voice turn and the source route that it was sent
+from. Once admitted, its claim remains until the shell's route is observed
+or the shell declines to move.
 
 ```quint
-pure def canAgentNavigates(v: Voice, session: int, place: int): bool =
-  (v.phase == Listening or v.phase == Thinking or v.phase == Speaking)
-    and session == v.session and v.claim == 0 and place > 0
+pure def canAgentNavigates(v: Voice, session: int, turn: int, place: int, sourceRoute: int): bool =
+  canSentence(v, session, turn) and v.claim == 0 and place > 0 and sourceRoute >= 0
 
-pure def agentNavigates(v: Voice, session: int, place: int): Change =
-  { state: { ...v, claim: place }, out: List(Navigate({ place: place })) }
+pure def agentNavigates(v: Voice, session: int, turn: int, place: int, sourceRoute: int): Change =
+  { state: { ...v, claim: place, claimRoute: sourceRoute + 1 }, out: List(Navigate({ session: session, turn: turn, place: place, sourceRoute: sourceRoute })) }
 
+pure def stepNavigationBelongsToItsTurn(before: Voice, after: Voice, out: List[Effect]): bool =
+  out.every(e => match e {
+    | Navigate(n) => before.claim == 0 and after.claim == n.place and after.claimRoute == n.sourceRoute + 1
+      and canSentence(before, n.session, n.turn)
+    | _ => true
+  })
 ```
 
 ### An exact spoken Files request may follow its own leased navigation once
@@ -803,23 +822,9 @@ After its reply finishes, the agent's one direct filter, or open by path,
 can open Files from another screen when the same voice turn, source and
 direct-action permission still hold; the turn keeps its words for the
 phone's result only once the agent proposes a Files action. A result
-position only refers to an existing Files listing.
-Talk follows this move only when its guarded route write is accepted. Stop
-and the owner's navigation can retire the request before the file action.
-
-```quint
-pure def canAgentNavigatesFiles(v: Voice, session: int, turn: int, place: int): bool =
-  canSentence(v, session, turn) and canAgentNavigates(v, session, place)
-
-pure def agentNavigatesFiles(v: Voice, session: int, turn: int, place: int): Change =
-  { state: { ...v, claim: place }, out: List(NavigateFiles({ session: session, turn: turn, place: place })) }
-
-pure def stepFilesNavigationBelongsToItsTurn(before: Voice, after: Voice, out: List[Effect]): bool =
-  out.every(e => match e {
-    | NavigateFiles(n) => before.claim == 0 and after.claim == n.place and canSentence(before, n.session, n.turn)
-    | _ => true
-  })
-```
+position only refers to an existing Files listing. It uses the same spoken
+navigation claim. Stop and the owner's navigation can retire the request
+before the file action.
 
 ### A navigation claim is released when the shell does not open its destination
 
@@ -828,24 +833,30 @@ pure def canClaimReleased(v: Voice, session: int): bool =
   talking(v) and session == v.session and v.claim != 0
 
 pure def claimReleased(v: Voice, session: int): Voice =
-  { ...v, claim: 0 }
+  { ...v, claim: 0, claimRoute: 0 }
 ```
 
 ### Voice keeps talking after a navigation only when it is the one the conversation asked for; any other ends it
 
-```quint
-pure def canNavigated(v: Voice, place: int): bool = place > 0
+The shell names the exact route and whether Talk wrote it. Arriving manually
+at the requested destination still ends Talk.
 
-pure def navigated(v: Voice, place: int): Change =
+```quint
+pure def canNavigated(v: Voice, place: int, arrivedRoute: int, spoken: bool): bool =
+  place > 0 and arrivedRoute > 0
+
+pure def navigated(v: Voice, place: int, arrivedRoute: int, spoken: bool): Change =
   if (not(talking(v))) { state: v, out: List() }
-  else if (v.claim != 0 and place == v.claim) { state: { ...v, claim: 0, followed: place }, out: List() }
+  else if (spoken and v.claim != 0 and place == v.claim and v.claimRoute == arrivedRoute)
+    { state: { ...v, claim: 0, claimRoute: 0, followed: place }, out: List() }
   else shutDown(D::NoFailure, false, v)
 
 pure def stepVoiceFollowsOnlyItsOwnNavigation(before: Voice, via: str, after: Voice): bool =
   (via == "navigated" and talking(before) and talking(after)) implies (before.claim != 0 and after.followed == before.claim)
 
 pure def alwaysAClaimBelongsToAnActiveConversation(v: Voice): bool =
-  (v.claim != 0 implies (v.phase == Listening or v.phase == Transcribing or v.phase == Thinking or v.phase == Speaking)) and v.claim >= 0
+  (v.claim != 0 implies (v.phase == Listening or v.phase == Transcribing or v.phase == Thinking or v.phase == Speaking))
+    and v.claim >= 0 and v.claimRoute >= 0 and ((v.claim == 0) == (v.claimRoute == 0))
 
 pure def sometimesFollowedItsNavigation(v: Voice): bool = v.followed != 0 and talking(v)
 
