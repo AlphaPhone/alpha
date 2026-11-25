@@ -128,6 +128,8 @@ pure val weight_openVolume = 40
 pure val weight_openFolder = 10
 pure val weight_listed = 100
 pure val weight_openCategory = 5
+pure val weight_openCategoryGroup = 2
+pure val groupTrailValues = Set(List(1), List(1, 4), List(1, 4, 5))
 pure val weight_toggle = 30
 pure val weight_selectAll = 15
 pure val weight_askToDelete = 20
@@ -371,9 +373,29 @@ pure def canOpenTop(s: Files, by: Actor): bool = by == Owner and allowed(s) and 
 pure def openTop(s: Files, by: Actor): Moved = entered(List(), false, F::Other, { ...s, handed: false })
 
 pure def stepMovingStartsAfresh(before: Files, via: str, after: Files): bool =
-  (via == "openFolder" or via == "openCrumb" or via == "openVolume" or via == "openCategory" or via == "openTop") implies
+  (via == "openFolder" or via == "openCrumb" or via == "openVolume" or via == "openCategory" or via == "openCategoryGroup" or via == "openTop") implies
     (after.items.length() == 0 and after.picked.length() == 0 and not(after.deleting.showing)
       and (atTop(after) or (after.listing.status == R::Loading and after.listing.ticket == before.listing.ticket + 1)))
+```
+
+### Images and Videos show the phone's folder groups with their counts and open the folder chosen
+
+The phone supplies the folder counts with its latest answer, or groups
+the entries that answer actually read. The owner opens a group from that
+answer's ticket. The group opens the full folder at its path, and the
+filter, when used, still shows individual results.
+
+```quint
+pure def grouped(s: Files): bool =
+  s.inCategory and (s.category == F::Image or s.category == F::Video) and not(s.search.searching)
+
+pure def canOpenCategoryGroup(s: Files, groupTrail: List[int], ticket: int, by: Actor): bool =
+  by == Owner and grouped(s) and browse(s) == Showing and s.listing.ticket == ticket
+    and groupTrail.length() > 0 and groupTrail.every(id => id > 0)
+    and s.volumes.some(v => v.id == groupTrail.nthOr(0, 0))
+
+pure def openCategoryGroup(s: Files, groupTrail: List[int], ticket: int, by: Actor): Moved =
+  entered(groupTrail, false, F::Other, { ...s, handed: false })
 ```
 
 ### The top offers the Trash, which shows until the owner goes back or anywhere else
@@ -847,12 +869,12 @@ pure def selected(picked: List[int], s: Files): Files =
     sheet: if (picked != s.picked) M::close(s.sheet) else s.sheet,
     deleting: if (s.deleting.showing) V::revise(s.deleting) else s.deleting }
 
-pure def canToggle(s: Files, target: int, by: Actor): bool = by == Owner and browse(s) == Showing and has(s.items, target)
+pure def canToggle(s: Files, target: int, by: Actor): bool = by == Owner and browse(s) == Showing and not(grouped(s)) and has(s.items, target)
 
 pure def toggle(s: Files, target: int, by: Actor): Files =
   selected(if (s.picked.includes(target)) s.picked.select(id => id != target) else s.picked.append(target), s)
 
-pure def canSelectAll(s: Files, by: Actor): bool = by == Owner and browse(s) == Showing and s.items.length() > 0
+pure def canSelectAll(s: Files, by: Actor): bool = by == Owner and browse(s) == Showing and not(grouped(s)) and s.items.length() > 0
 
 pure def selectAll(s: Files, by: Actor): Files = selected(s.items.listMap(i => i.id), s)
 

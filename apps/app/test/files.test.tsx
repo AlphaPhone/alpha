@@ -95,7 +95,11 @@ describe("Files on a phone", () => {
     await press("Files");
     await press("Images");
     await until(alpha, runtime, Browser, (s) => s.inCategory && s.listing.status === "Loaded");
-    expect(listed()).toEqual(["beach.jpg"]);
+    // spec/app/files/index.md, "Images and Videos show the phone's folder groups with their counts and open the folder chosen"
+    expect(button("Open Download")?.textContent).toContain("1");
+    await press("Open Download");
+    await until(alpha, runtime, Browser, (s) => !s.inCategory && s.listing.status === "Loaded");
+    expect(listed().sort()).toEqual(["beach.jpg", "lease.pdf"]);
 
     // spec/app/files/index.md, "A place is called empty only after the phone read all of it; a reading cut short keeps what it read"
     world.files.listMost = 1;
@@ -718,7 +722,14 @@ describe("Files on a phone", () => {
     await press("Trash");
     await until(alpha, runtime, Bin, (s) => s.open && s.listing.status === "Loaded");
     // spec/app/files/trash.md, "The owner restores a listed item before its time, from a list read since the last job"
-    await press("Restore beach.jpg");
+    // spec/app/files/trash.md, "The owner opens a listed Trash item's details and can restore or ask to erase that same item"
+    await press("beach.jpg");
+    await until(alpha, runtime, Bin, (s) => s.details !== 0);
+    expect(document.querySelector("[aria-label='Trash item details']")?.textContent).toContain("Internal storage › Download");
+    await hardware("back");
+    await until(alpha, runtime, Bin, (s) => s.open && s.details === 0);
+    await press("beach.jpg");
+    await pressOnTop("Restore");
     await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Confirmed" && s.entries.length === 0 && s.listing.status === "Loaded");
     expect(paths(world).includes("primary:Download/beach.jpg")).toBe(true);
 
@@ -726,7 +737,8 @@ describe("Files on a phone", () => {
     world.files.trash.push({ id: "9", was: { volume: "primary", path: "Download/old.txt", directory: false, mimeType: "text/plain", size: 1, modified: 1 }, deletedAt: world.files.now });
     await press("Refresh");
     await until(alpha, runtime, Bin, (s) => s.listing.status === "Loaded" && s.entries.length === 1);
-    await press("Erase old.txt");
+    await press("old.txt");
+    await pressOnTop("Delete now");
     await pressOnTop("Erase");
     await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Confirmed" && s.entries.length === 0);
     expect(world.files.trash).toEqual([]);
@@ -736,7 +748,8 @@ describe("Files on a phone", () => {
     world.files.refusing.push("storageRestore");
     await press("Refresh");
     await until(alpha, runtime, Bin, (s) => s.listing.status === "Loaded" && s.entries.length === 1);
-    await press("Restore c.txt");
+    await press("c.txt");
+    await pressOnTop("Restore");
     await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Refused" && s.listing.status === "Loaded");
     world.files.refusing.splice(0);
 
