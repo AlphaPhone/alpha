@@ -36,7 +36,11 @@ Compute" (line 10); eliza's launch needs one, so that line, with the name, is
 its start. eliza's tools, notes and results name the person in the
 conversation "the owner", which the model repeated back to them, so the
 prompt also tells the agent to speak to that person as "you", never as "the
-owner" or "the user". The words are in `apps/agent/host/character.json`.
+owner" or "the user". The model also described example.com from memory when
+asked to summarize "this page" on Home, where no page goes with the turn, so
+the prompt tells the agent that it sees a web page only in the latest
+message's Browser page, and with none to say that no page is open rather
+than describe one. The words are in `apps/agent/host/character.json`.
 
 ```quint
 pure val characterName: str = "Alpha"
