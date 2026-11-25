@@ -239,9 +239,9 @@ const calls = following(PhoneMachine, liveCall, Voicemail.Machine, (live): Event
 module audio {
   /** The current clip's local playback position and changes. */
   export interface PlaybackPosition {
-    subscribe(wake: () => void): () => void
-    position(): number
-    seek(seconds: number): void
+    readonly subscribe: (wake: () => void) => () => void
+    readonly position: () => number
+    readonly seek: (seconds: number) => void
   }
 
   /** Create the one audio element for voicemail playback. @throws {never} */
@@ -249,7 +249,7 @@ module audio {
     return new Audio()
   }
   /** Listen only while a playback control is mounted. @throws {never} */
-  export function positionOf(element: HTMLAudioElement): { subscribe(wake: () => void): () => void; position(): number; seek(seconds: number): void } {
+  export function positionOf(element: HTMLAudioElement): PlaybackPosition {
     const events = ["timeupdate", "seeking", "seeked", "ended", "emptied"]
     return {
       subscribe: (wake: () => void) => {

@@ -11,6 +11,12 @@ import { Device } from "../platform/device.vibe"
 import { Talk, type Line } from "./talk.vibe"
 import { wordsOf } from "./words.ts"
 
+// spec/app/assistant/chats.md, "A message's words can be selected without opening its actions"
+export effect function holdMessagePress(held: () => void): void!! {
+  try sleep(Duration.millis(Chats.messageActionHoldMillis))
+  try sync(held)
+}
+
 /** The exact page and recorded message offered by the transcript. */
 export interface MessageSelection {
   readonly conversation: number

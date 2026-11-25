@@ -15,6 +15,7 @@ import { Machine as Messages } from "../gen/app__messages.effect.vibe";
 import { Machine as Phone } from "../gen/app__phone.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Dock } from "../gen/app__assistant__dock.effect.vibe";
+import { Machine as Speaker } from "../gen/app__voice__output.effect.vibe";
 import { Machine as Locator } from "../gen/app__assistant__context.effect.vibe";
 import { Machine as Files } from "../gen/app__files.effect.vibe";
 import { Machine as FilePreview } from "../gen/app__files__preview.effect.vibe";
@@ -24,6 +25,7 @@ import { dictate } from "../src/assistant/dictation.vibe";
 import assistant from "../src/assistant/index.tsx";
 import files from "../src/files/index.tsx";
 import { button, closeAll, drawn, fill, later, open, press, seen, underAct, until as drawnUntil } from "./alpha.tsx";
+import { publish } from "./fakes/platform.ts";
 import { scene, type Scene } from "./fakes/scene.ts";
 import { prepared } from "./fakes/notes.ts";
 import { textReview } from "./fakes/text-review.ts";
@@ -742,8 +744,25 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
 
     await press("Talk");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
+    await drawn(() => vi.waitFor(() => expect([...world.platform.listening].some(({ topic }) => topic === "voice")).toBe(true)));
+    const seenInterim = () => document.querySelector("[data-alpha-voice-interim]")?.textContent;
+    const capture = world.voice.activeMicSession;
+    const say = (sessionId: string | undefined, phase: string, extra = {}) => publish(world.platform, "voice", {
+      type: "agent_event", stream: "voice-transcript",
+      payload: { type: "voice-transcript", sessionId, turnId: "spoken-now", phase, ...extra },
+    });
+    const previousPosts = world.ask.said.length;
+    await drawn(() => {
+      say(capture, "speech-start");
+      say(capture, "partial", { seq: 1, text: "And then" });
+      say(capture, "partial", { seq: 1, text: "Duplicate partial" });
+      say("an-earlier-capture", "partial", { seq: 2, text: "Outside the capture" });
+    });
+    await drawn(() => vi.waitFor(() => expect(seenInterim()).toBe("And then")));
+    expect(world.ask.said).toHaveLength(previousPosts);
     speakUtterance(world, "And now?");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 1 && s.phase === "Listening");
+    expect(seenInterim()).toBeUndefined();
     expect([world.ask.said.at(-1), world.ask.metadata.length, world.ask.metadata.at(-1)]).toEqual(["And now?", 3, typed]);
     // spec/app/voice/index.md, "Talk keeps what it sends in the selected Ask Alpha conversation"
     expect(world.ask.opened).toBe(1);
@@ -1045,7 +1064,9 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await press("Stop recording");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Recorded");
     expect([clock(), marks()]).toEqual(["0:59", 0]);
-    await press("Record again");
+    await press("Discard transcription");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Closed");
+    await drawn(() => area.runPromise(dictate()));
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Ready");
     expect([clock(), marks()]).toEqual(["0:00", 0]);
     await press("Start recording");
@@ -1078,5 +1099,134 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     const after = await area.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()));
     expect([after.recorder.stage, after.permission.asked]).toEqual(["Closed", true]);
     expect([document.querySelector("[role=alertdialog], [role=alert], [role=note], [role=status], section[aria-label='Voice transcription']"), world.voice.permission]).toEqual([null, "denied"]);
+  });
+
+  // spec/app/voice/index.md, "Closing the recorder abandons any recording or transcription it was waiting for"
+  it.each(["ready", "confirmed", "view changed", "unconfirmed"] as const)("switches from dictation to the owning keyboard after closure (%s)", async (outcome) => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const { alpha } = await open(world, talkMounts);
+    const area = assistant.runtime(alpha);
+    await drawnUntil(alpha, area, Composer, (state) => state.slot === "Open");
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "raise", detent: "Sheet" }))));
+    const editor = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
+    expect(editor).not.toBeNull();
+    await fill("Message Alpha", "Draft stays here");
+    await drawn(() => area.runPromise(dictate()));
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Ready");
+
+    if (outcome !== "ready") {
+      await press("Start recording");
+      await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Recording");
+    }
+    const canceling = Promise.withResolvers<void>();
+    const settled = Promise.withResolvers<void>();
+    let called = false;
+    world.voice.recordingCancelGate = async () => {
+      called = true;
+      canceling.resolve();
+      await settled.promise;
+      if (outcome === "unconfirmed") throw new Error("Microphone cleanup did not settle");
+    };
+    try {
+      await drawn(() => button("Switch to keyboard")?.focus());
+      await press("Switch to keyboard");
+      if (outcome !== "ready") {
+        await canceling.promise;
+        const state = await area.runPromise(Effect.flatMap(Voice.Machine, (machine) => machine.get()));
+        expect(state.recorder.stage).toBe("Recording");
+        expect(document.activeElement).not.toBe(editor);
+        if (outcome === "view changed") {
+          await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "openView", view: "Notes" }))));
+        }
+      }
+    } finally {
+      settled.resolve();
+    }
+
+    expect(called).toBe(outcome !== "ready");
+    if (outcome === "unconfirmed") {
+      await drawn(async () => { for (let turn = 0; turn < 20; turn += 1) await area.runPromise(Effect.yieldNow); });
+      expect(button("Stop recording")).toBeDefined();
+    } else {
+      await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Closed");
+    }
+    if (outcome === "confirmed" || outcome === "ready") {
+      expect(document.activeElement).toBe(editor);
+      expect(editor?.value).toBe("Draft stays here");
+    } else {
+      expect(document.activeElement).not.toBe(editor);
+    }
+    expect(world.ask.said).toEqual([]);
+  });
+
+  // spec/app/voice/output.md, "Stopping, or losing what is read (another conversation, another screen, a hidden page, a closed chat), stops the reading"
+  it("listens to the current reviewed words on the phone and never plays words edited during preparation", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const { alpha } = await open(world, talkMounts);
+    const area = assistant.runtime(alpha);
+    await drawnUntil(alpha, area, Composer, (state) => state.slot === "Open");
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "raise", detent: "Sheet" }))));
+    await drawn(() => area.runPromise(dictate()));
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Ready");
+    await press("Start recording");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Recording");
+    await press("Stop recording");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Review");
+
+    const preparing = Promise.withResolvers<void>();
+    const settled = Promise.withResolvers<void>();
+    world.voice.synthesisGate = async () => {
+      preparing.resolve();
+      await settled.promise;
+    };
+    try {
+      await press("Listen to transcript");
+      await preparing.promise;
+      await drawnUntil(alpha, area, Speaker, (state) => state.stage === "Preparing");
+      expect(button("Stop audio")).toBeDefined();
+      await fill("Review transcript", "My revised words");
+      await drawnUntil(alpha, area, Speaker, (state) => state.stage === "Silent" && state.outcome === "Stopped");
+    } finally {
+      world.voice.synthesisGate = undefined;
+      settled.resolve();
+    }
+    expect(world.voice.speakerMutedAtPlayback).toEqual([]);
+    await press("Listen to transcript");
+    await drawnUntil(alpha, area, Speaker, (state) => state.stage === "Silent" && state.outcome === "Finished");
+    expect(world.voice.spoken.map(({ text, channel }) => ({ text, channel }))).toEqual([
+      { text: "Dictated note", channel: "local" }, { text: "My revised words", channel: "local" },
+    ]);
+    expect(world.voice.speakerMutedAtPlayback).toEqual([false]);
+    expect(world.ask.said).toEqual([]);
+  });
+
+  // spec/app/voice/dictation.md, "After an unsuccessful recognition, the owner may type the transcript in Ask Alpha"
+  it("types a kept clip's transcript after recognition fails and adds only the reviewed words to the draft", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const { alpha } = await open(world, talkMounts);
+    const area = assistant.runtime(alpha);
+    await drawnUntil(alpha, area, Composer, (state) => state.slot === "Open");
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "raise", detent: "Sheet" }))));
+    await fill("Message Alpha", "Original draft");
+    await drawn(() => area.runPromise(dictate()));
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Ready");
+    await press("Start recording");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Recording");
+    world.voice.transcriptionFailures = 1;
+    await press("Stop recording");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Recorded");
+    expect(button("Transcribe on this phone")).toBeDefined();
+    expect(button("Record again")).toBeUndefined();
+    await press("Type transcript instead");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Review");
+    const review = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Review transcript"]');
+    expect(review?.value).toBe("");
+    expect(button("Use in draft")?.disabled).toBe(true);
+    await fill("Review transcript", "Typed transcript");
+    await press("Use in draft");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Closed");
+    expect(document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]")?.value).toBe("Original draft\nTyped transcript");
+    expect(world.voice.dictationClips).toHaveLength(1);
+    expect(world.ask.said).toEqual([]);
   });
 });

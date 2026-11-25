@@ -1,4 +1,4 @@
-// spec/app/approvals/index.md, "Story: One action at a time"; spec/app/approvals/proposal.md, "Story: Decide"; spec/app/photos/agent.md, "Story: Let Alpha read my library"; spec/app/phone/comms.md, "Story: Approve what Alpha proposes, one thing at a time"; spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"; spec/app/assistant/index.md, "Alpha asks the agent to warm up at launch, on return to the foreground and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it"
+// spec/app/browser/index.md, "Story: Let the agent open a page"; spec/app/approvals/index.md, "Story: One action at a time"; spec/app/approvals/proposal.md, "Story: Decide"; spec/app/photos/agent.md, "Story: Let Alpha read my library"; spec/app/phone/comms.md, "Story: Approve what Alpha proposes, one thing at a time"; spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"; spec/app/assistant/index.md, "Alpha asks the agent to warm up at launch, on return to the foreground and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it"
 import { DeviceExecution, NOT_DISPATCHED, type ConversationRecord, type DeviceAgent, type ExecutorCall, type JournalIdentity, type RuntimeRequestHeaders } from "@elizaos/agent"
 import { mayRunDirectly, readOperation, readResult, type DeviceOperation } from "@elizaos/agent"
 import type { PhoneNumber } from "@elizaos/os-bridges"
@@ -151,6 +151,8 @@ const filesCapabilities = ["files.browser.v1", "files.shown-target.v1"]
 const phoneCapabilities = ["phone.keypad.v1", "phone.dial.v1", "phone.call.v1", "views.telephony.v1", "sms.compose.v1", "sms.compose.v2", "sms.send.v1", "messages.read.v1", "sms.latest-sender.v1", "sms.latest-sender.v2", "voicemail.read.v1", "voicemail.delete.v1"]
 
 const needsMessage = (operation: DeviceOperation): boolean => operation.type === "sms_reply_selected" || operation.type === "messages_read_selected"
+const sendsText = (operation: DeviceOperation | undefined): boolean =>
+  operation?.type === "sms_send" || (operation?.type === "sms_compose" && !composeDraftOnly(operation))
 
 export type DirectFilesOperation = Extract<DeviceOperation, { type: "files_filter" | "files_open" }>
 
@@ -316,7 +318,7 @@ function commsReview(operation: DeviceOperation): boolean {
 }
 
 function spokenOperation(proposal: Proposal, opened: Session, message: string, reply: DeviceActionReply,
-  actions: ReadonlyMap<string, ReplyAction>, at: number): DeviceOperation | undefined {
+  actions: ReadonlyMap<string, ReplyAction>, at: number): ReturnType<typeof operation> {
   if (proposal.state !== "pending" || proposal.payload.workflow !== undefined ||
     actions.get(proposal.id) !== "Review" || !fromThisEnrollment(proposal, opened)) return undefined
   const expires = Date.parse(proposal.expiresAt)
@@ -439,6 +441,7 @@ function operation(raw: unknown) {
     case "files_share":
     case "files_move":
     case "files_trash":
+    case "browser_navigate":
       return value
     default:
       return notesOperation(value)
@@ -447,6 +450,12 @@ function operation(raw: unknown) {
 
 function composeDetails(value: Extract<DeviceOperation, { type: "sms_compose" }>, recipient: string): string {
   return `${recipient}\n${value.body}`
+}
+
+/** The address a page card shows: its host and path, as the Browser's own card shows it. */
+function pageWords(url: string): string {
+  const parsed = URL.parse(url)
+  return parsed === null ? url : `${parsed.host}${parsed.pathname === "/" ? "" : parsed.pathname}${parsed.search}`
 }
 
 function words(value: NonNullable<ReturnType<typeof operation>>): { title: string; detail: string } {
@@ -485,6 +494,7 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
     case "files_share": return { title: "Share in Android", detail: "paths" in value ? value.paths.join(", ") : "Review the selected files" }
     case "files_move": return { title: "Move files", detail: "paths" in value ? `${value.paths.join(", ")} → ${value.dest || "Internal storage"}` : value.dest || "Internal storage" }
     case "files_trash": return { title: "Move to Trash", detail: "paths" in value ? value.paths.join(", ") : "Review the selected files" }
+    case "browser_navigate": return { title: "Open this page?", detail: pageWords(value.url) }
   }
 }
 
@@ -824,7 +834,7 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
         if (origin === undefined || (request !== undefined && request !== message) || !fromThisEnrollment(proposal, opened)
           || !(try reviewContext(revision, view)) || !(try enrollmentIsCurrent(opened)) || !isLatest(opened) || !(try reviewContext(revision, view))) return undefined
       } else if (request === undefined) {
-        if (!(commsReview(op) || filesOperation) || !currentReview || !reviewFromReply(proposal, opened, actions)) return undefined
+        if (!(commsReview(op) || filesOperation || op.type === "browser_navigate") || !currentReview || !reviewFromReply(proposal, opened, actions)) return undefined
       } else if (request !== message || (filesOperation && (!fromThisEnrollment(proposal, opened)
         || (actions.get(proposal.id) !== "Review" && actions.get(proposal.id) !== "Direct")))) return undefined
       const selected = needsMessage(op)
@@ -1068,9 +1078,10 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         const visible = operation(proposal.payload.operation)
         const labelled = visible === undefined ? { title: "Phone action", detail: "" } : words(visible)
         const unsettled = toSettle(proposal) && (try hasReceipt(opened, proposal))
-        const text = visible?.type === "sms_send"
+        const text = sendsText(visible)
         const recovered = text && unsettled ? try recoverText(opened, proposal) : undefined
-        return { proposal: proposal.id, ...labelled, outcome: recovered ?? outcome, declinable: readyToDecline(proposal, at), unsettled: unsettled && !text }
+        const reported = text && proposal.state === "reconciliation_required" ? "Phone could not confirm the send" : outcome
+        return { proposal: proposal.id, ...labelled, outcome: recovered ?? reported, declinable: readyToDecline(proposal, at), unsettled: unsettled && !text }
       }, { concurrency: 4 })
       if (!(try enrollmentIsCurrent(opened))) return undefined
       return rows.filter((row) => row !== undefined)
@@ -1087,7 +1098,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
           return result !== undefined
         }
         if (!toSettle(found) || !(try hasReceipt(opened, found))) return false
-        if (operation(found.payload.operation)?.type === "sms_send") return (try recoverText(opened, found)) !== undefined
+        if (sendsText(operation(found.payload.operation))) return (try recoverText(opened, found)) !== undefined
         const result = tryPromise(() => opened.execute.confirmReview(found.id, action === "happened" ? "ReviewedApplied" : "ReviewedNotApplied")) catch () => "refused"
         return result === "sent"
       })

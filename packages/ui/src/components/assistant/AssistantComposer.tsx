@@ -142,10 +142,11 @@ export function AssistantComposer({
   const compact = bar && onType !== undefined;
   const swiping = usePillSwipe(compact ? onSwipeUp : undefined);
   const targeting = !bar && placeholder !== undefined;
+  const frame = bar ? "mx-4 [--alpha-composer-rest:1.75rem]" : "mx-3 [--alpha-composer-rest:1.875rem]";
   const pull = useAssistantPull<HTMLTextAreaElement>(fieldPull, true);
   const acting = Boolean(onAttach || onSearch || onNew || making || onHistory) && !closed;
   return (
-    <div role={compact ? "group" : undefined} aria-label={compact ? "Assistant controls" : undefined} data-alpha-compact-dock={compact ? "" : undefined} data-host-chrome={bar ? "" : undefined} className={cn("flex shrink-0 flex-col gap-2", bar ? "mx-4 mb-[max(1.75rem,calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))_+_0.75rem))]" : "mx-3 mb-[max(1.875rem,calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))_+_0.75rem))]", className)} style={lift ? { marginBottom: lift, ...style } : style} {...props}>
+    <div role={compact ? "group" : undefined} aria-label={compact ? "Assistant controls" : undefined} data-alpha-compact-dock={compact ? "" : undefined} data-host-chrome={bar ? "" : undefined} className={cn("flex shrink-0 flex-col gap-2", frame, !compact && !targeting && !voice && "not-in-data-[alpha-native]:[--alpha-composer-fit:clamp(0px,calc((412px_-_100vw)_/_11),2px)]", "mb-[max(calc(var(--alpha-composer-rest)_-_var(--alpha-composer-fit,0px)),calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))_+_0.75rem))]", className)} style={lift ? { marginBottom: lift, ...style } : style} {...props}>
       {notice ? <AssistantDraftNotice {...notice} /> : null}
       {unavailable ? <span role="status" className="sr-only">{reasons[unavailable]}</span> : null}
       {!compact && attachments.length ? <AssistantPendingAttachments attachments={attachments} limit={limit} onRemove={onRemoveAttachment} onPreview={onPreviewAttachment} /> : null}
@@ -153,7 +154,7 @@ export function AssistantComposer({
       {!compact && editing ? <AssistantQuoteBar kind="editing" /> : null}
       {voiceNotice}
       {voice}
-      <div {...swiping} hidden={Boolean(voice)} className={cn("items-center bg-secondary", voice ? "hidden" : "flex", compact ? "touch-none gap-0.5 self-center rounded-dock-compact p-1.25 shadow-dock-compact dark:shadow-dock-compact-dark" : bar ? "min-h-18.5 touch-pan-y gap-1 rounded-dock py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark" : cn("min-h-17 touch-pan-y gap-1.5 rounded-sheet py-1.5 pr-1.5", targeting ? "pl-1.5 ring-[1.5px] ring-primary ring-inset" : "pl-5"))}>
+      <div {...swiping} hidden={Boolean(voice)} className={cn("items-center bg-secondary", voice ? "hidden" : "flex", compact ? "touch-none gap-0.5 self-center rounded-dock-compact p-1.25 shadow-dock-compact dark:shadow-dock-compact-dark" : bar ? "min-h-[calc(--spacing(18.5)_-_2_*_var(--alpha-composer-fit,0px))] touch-pan-y gap-1 rounded-dock py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark" : cn("min-h-[calc(--spacing(17)_-_2_*_var(--alpha-composer-fit,0px))] touch-pan-y gap-1.5 rounded-sheet py-1.5 pr-1.5", targeting ? "pl-1.5 ring-[1.5px] ring-primary ring-inset" : "pl-5"))}>
         {leading}
         {bar ? opener ?? (onOpen ? (
           <Button size="icon" aria-label="Open conversation" className="overflow-hidden bg-alpha text-alpha-foreground hover:bg-alpha/90" onClick={onOpen}><Mark aria-hidden className="size-[118%]" /></Button>

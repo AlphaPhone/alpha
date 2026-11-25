@@ -11,7 +11,7 @@ import * as Voice from "../../gen/app__voice.effect.vibe"
 import type { Field } from "../../gen/app__voice__dictation.ts"
 import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
-import { Views, delivery, preparedIn, resendWithoutMode } from "../assistant/views.vibe"
+import { Views, delivery, pageIn, preparedIn, resendWithoutMode } from "../assistant/views.vibe"
 import { filesOnlyHeaders, MediaReview, sameFiles, spokenText } from "../assistant/media-review.vibe"
 import { Talk, type Attached, type DraftSeat } from "../assistant/talk.vibe"
 import type { MessageSmsRequest } from "../messages/agent-sim.vibe"
@@ -99,6 +99,7 @@ export interface VoiceMemory {
   readonly playLock: Semaphore.Semaphore
   dictatedText: string
   dictatedDurationMs: number | undefined
+  transcriptReading: { readonly review: number; readonly scene: string; readonly words: string } | undefined
   fillTarget: { readonly field: Field; readonly filling: number; readonly apply: (words: string) => void!! } | undefined
   spokenNavigation: SpokenNavigation | undefined
   /** The observation and the open Files document a turn sent now from `shown` takes with it, read as Ask Alpha reads them. */
@@ -147,6 +148,7 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
     playLock,
     dictatedText: "",
     dictatedDurationMs: undefined,
+    transcriptReading: undefined,
     fillTarget: undefined,
     spokenNavigation: undefined,
     screen: undefined,
@@ -218,10 +220,12 @@ effect function prepareInterim(session: number): (InterimCapture | undefined)!!I
     const now = board.known(chat.chosen)?.record
     return !showing.sensitive && showing.revision === context.revision && now?.id === record?.id && now?.roomId === record?.roomId
   }
-  const voiceRoute = (try voice.get()).route
+  const { route: voiceRoute, network } = try voice.get()
+  const retired = new AbortController()
   const capture: InterimCapture = {
+    retired: retired.signal,
     current: (state) => memory.interimCapture === capture && state.session === session
-      && state.route.account === voiceRoute.account && state.route.key === voiceRoute.key && state.network && !state.muted
+      && state.route.account === voiceRoute.account && state.route.key === voiceRoute.key && state.network === network && !state.muted
       && Voice.talking(state) && (state.mic === "Opening" || state.mic === "On") && Effect.runSync(scopeIsCurrent),
     show(text) {
       const state = Effect.runSync(voice.get())
@@ -233,9 +237,11 @@ effect function prepareInterim(session: number): (InterimCapture | undefined)!!I
       if (memory.interimCapture === capture) memory.publishInterim(undefined)
     },
     retire() {
-      if (memory.interimCapture !== capture) return
-      memory.interimCapture = undefined
-      memory.publishInterim(undefined)
+      if (memory.interimCapture === capture) {
+        memory.interimCapture = undefined
+        memory.publishInterim(undefined)
+      }
+      retired.abort()
     },
   }
   memory.interimCapture = capture
@@ -246,7 +252,7 @@ effect function prepareInterim(session: number): (InterimCapture | undefined)!!I
 export const interimLiveness = started(effect {
   const { memory } = try VoiceWords
   const context = try Effect.context<InterimContext>()
-  memory.prepareInterim = (session) => Effect.provideContext(prepareInterim(session), context)
+  const prepare = (session: number) => Effect.provideContext(prepareInterim(session), context)
   const { board } = try Talk
   const chats = try Chats
   const conversation = try Conversation
@@ -258,7 +264,7 @@ export const interimLiveness = started(effect {
     sync(() => board.subscribe(() => { Queue.offerUnsafe(queue, undefined) })),
     (off) => sync(off),
   ))
-  const changes = Stream.mergeAll([
+  const sources: ReadonlyArray<Stream.Stream<void | boolean>> = [
     boardChanges,
     Stream.as(chats.changes, undefined),
     Stream.as(conversation.changes, undefined),
@@ -266,8 +272,9 @@ export const interimLiveness = started(effect {
     Stream.as(shell.changes, undefined),
     Stream.as(layers.changes, undefined),
     Stream.filter(device.visible, (shown) => !shown),
-  ], { concurrency: "unbounded" })
-  try Stream.runForEach(changes, effect (visible) => {
+  ]
+  const changes = Stream.mergeAll(sources, { concurrency: "unbounded" })
+  const watch = Stream.runForEach(changes, effect (visible) => {
     const capture = memory.interimCapture
     if (capture === undefined) return
     if (visible === false) { capture.retire(); return }
@@ -275,6 +282,14 @@ export const interimLiveness = started(effect {
     if (!capture.current(state)) capture.retire()
     else if (state.phase !== "Listening" || state.mic !== "On" || memory.interimSnapshot()?.turn !== state.turn) capture.clear()
   })
+  try Effect.ensuring(effect {
+    memory.prepareInterim = prepare
+    try watch
+  }, sync(() => {
+    if (memory.prepareInterim !== prepare) return
+    memory.prepareInterim = undefined
+    memory.interimCapture?.retire()
+  }))
 }, "retiring the Talk preview with its capture")
 
 // spec/app/voice/index.md, "Using the transcript fills the field dictation started in, and dictation never sends"
@@ -666,10 +681,12 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       : filesReport ?? (result?.kind === "Replied" ? result.reply.text : "")
     if (sms === undefined && !awaitingFiles && result?.kind === "Replied" && result.reply.failureKind === undefined) {
       const actions = result.reply.actionResults
+      const page = admittedScreen && views !== undefined ? pageIn(actions, views.clientId) : undefined
       const prepared = admittedScreen && views !== undefined ? preparedIn(actions, views.clientId) : undefined
-      if (views !== undefined && prepared !== undefined) {
+      const held = page !== undefined ? { asked, page } : prepared !== undefined ? { asked, handoff: prepared } : undefined
+      if (views !== undefined && held !== undefined) {
         const sameSource = effect { return (try atSource) && (try shell.get()).route === sourceRoute }
-        try views.spoken({ asked, handoff: prepared }, sameSource, (place) =>
+        try views.spoken(held, sameSource, (place) =>
           openRouteForVoice(placeOf(place === "Home" ? undefined : place), sourceRoute, session, turn, atSource, memory, voice, shell))
       } else if (!actions.some((action) => action.action === "VIEWS")) {
         const requested = requestedDestination(finalText)
@@ -864,7 +881,7 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
     when { tag: "OpenSettings" }: run("openSettings", effect { try (try SystemSettings).open("AppPermissions", "") });
     when { tag: "Listen", let session, let network }: answer("mic", effect {
       const prepare = (try VoiceWords).memory.prepareInterim
-      const preview = network && prepare !== undefined ? try prepare(session) : undefined
+      const preview = prepare === undefined ? undefined : try prepare(session)
       return effect {
         try (try VoiceBridge).openMic(session, network, preview)
         return { type: "micOpened", session } as const
@@ -1037,6 +1054,7 @@ const discardedDictation = applying(Voice.Machine, (voice) => voice.recorder, ef
   memory.fillTarget = undefined
   memory.dictatedText = ""
   memory.dictatedDurationMs = undefined
+  memory.transcriptReading = undefined
 })
 
 const bridgeEvents = hearing(

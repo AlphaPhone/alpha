@@ -6,7 +6,7 @@ import { HomeCard, type HomeCardLine, HomeCardLines } from "./HomeCard.tsx";
 export type HomeWorkflowsFreshness = "UpToDate" | "NotCurrent" | "Stale" | "SomeUnavailable";
 
 export type HomeWorkflowsCardProps = Omit<ComponentProps<"button">, "children" | "title"> & {
-  /** The first two enabled workflows: name over status. */
+  /** The first two enabled workflows, shown by name. */
   lines: readonly HomeCardLine[];
   /** How many more are enabled. */
   more: number;
@@ -26,7 +26,7 @@ export function HomeWorkflowsCard({ lines, more, freshness, ...props }: HomeWork
   const foot = marks[freshness] ?? (more > 0 ? `+${more} more` : "View workflows");
   return (
     <HomeCard icon={<Workflow />} status={foot} {...props}>
-      <HomeCardLines lines={lines} />
+      <HomeCardLines lines={lines.map(({ title }) => ({ title, detail: "" }))} />
     </HomeCard>
   );
 }

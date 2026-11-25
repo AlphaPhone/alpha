@@ -322,9 +322,13 @@ pure def micFailed(v: Voice, session: int): Change =
 ### What the owner says is shown as it is heard
 
 In the open conversation, the listening microphone can show the current
-capture's interim words as “Heard so far, not sent”. The preview stays
-out of drafts and history. It clears when the capture, owner, chat or
-screen context changes, the microphone is muted, or Talk leaves Listening.
+capture's interim words as “Heard so far, not sent”. The words come from
+that capture's admitted relay or resident stream. On-device previews are
+displayed only for the current utterance and follow its event sequence.
+The final reported by the microphone still controls sending. The preview
+stays out of drafts and history. It clears when the capture, owner, chat
+or screen context changes, the microphone is muted, or Talk leaves
+Listening.
 
 ```quint
 pure def canSpeechHeard(v: Voice, session: int): bool = v.phase == Listening and v.mic == On and session == v.session
@@ -1064,6 +1068,14 @@ pure def canEdit(v: Voice, words: bool): bool = D::canEdit(v.recorder, words)
 pure def edit(v: Voice, words: bool): Voice = { ...v, recorder: D::edit(v.recorder, words) }
 ```
 
+### Ask Alpha can review typed words for the clip that recognition could not transcribe
+
+```quint
+pure def canTypeTranscript(v: Voice, ticket: int): bool = D::canTypeTranscript(v.recorder, ticket)
+
+pure def typeTranscript(v: Voice, ticket: int): Voice = { ...v, recorder: D::typeTranscript(v.recorder, ticket) }
+```
+
 ### Using the transcript fills the field dictation started in, and dictation never sends
 
 A messaging bar's dictation fills that bar, never Ask Alpha. The fill names
@@ -1086,6 +1098,9 @@ pure def stepDictationFillsItsOwnField(before: Voice, after: Voice, out: List[Ef
 ### Closing the recorder abandons any recording or transcription it was waiting for
 
 A clip kept for a recognition retry or review is also discarded when the recorder closes.
+Switch to keyboard does the same for Ask Alpha dictation. While the recorder
+has starting, live or kept audio, the keyboard waits for their cancellation
+to settle. Focus returns to the same draft only if it still owns that field.
 
 ```quint
 pure def canCloseRecorder(v: Voice): bool = D::canCloseRecorder(v.recorder)

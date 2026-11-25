@@ -10,7 +10,8 @@ import com.getcapacitor.annotation.Permission;
  @Permission(alias="legacyStorage", strings={Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE})
 })
 public final class AlphaFilesPlugin extends FilesPlugin {
- @Override protected String trashFolder() { return ".Trash-alpha"; }
+ static final String TRASH_FOLDER = ".Trash-alpha";
+ @Override protected String trashFolder() { return TRASH_FOLDER; }
  @Override protected SelectionRegistry selections() {
   return AlphaSelectedDocumentsPlugin.documents(getContext())::authorize;
  }
