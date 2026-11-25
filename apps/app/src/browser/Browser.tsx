@@ -96,7 +96,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
             secure={state.secure}
             private={state.kind === "Private"}
             tabs={tabs.open.length}
-            onEdit={cover("Address") && (() => { setTyped(shown?.url ?? ""); void browser.send({ type: "cover", layer: "Address" }); })}
+            onEdit={cover("Address") && (() => { setTyped(`${host}${path}`); void browser.send({ type: "cover", layer: "Address" }); })}
             onStop={can({ type: "stop" }) ? () => void send({ type: "stop" }) : undefined}
             onBack={can({ type: "goBack" }) ? () => void send({ type: "goBack" }) : undefined}
             onForward={can({ type: "goForward" }) ? () => void send({ type: "goForward" }) : undefined}
