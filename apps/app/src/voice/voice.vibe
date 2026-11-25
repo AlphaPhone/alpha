@@ -761,12 +761,14 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       const chats = Option.getOrUndefined(try Effect.serviceOption(Chats))
       const talk = Option.getOrUndefined(try Effect.serviceOption(Talk))
       if (conversation === undefined || chats === undefined || talk === undefined) { finishLocally(); return }
+      const before = talk.board.snapshot().mediaNote
       try (review.decide(card, true, "Speech")
         |> Effect.provideService(%, Conversation, conversation)
         |> Effect.provideService(%, Chats, chats)
         |> Effect.provideService(%, Talk, talk))
-      const note = chat?.snapshot().mediaNote
-      finishLocally(note?.conversation === card.conversation ? note.text : "I couldn’t confirm the send. Check Messages before trying again.")
+      const note = talk.board.snapshot().mediaNote
+      if (!Voice.canSentence(try voice.get(), session, turn)) { finishLocally(); return }
+      finishLocally(note !== before && note?.conversation === card.conversation ? note.text : "I couldn’t confirm the send. Check Messages before trying again.")
       return
     }
     const current = effect { return Voice.canSentence(try voice.get(), session, turn) }
