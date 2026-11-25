@@ -209,7 +209,8 @@ pure def sometimesEngineHeldWhileListening(v: Voice): bool = v.phase == Listenin
 ### Before audio first leaves the phone, the owner is shown what is sent and where, and decides
 
 Agreeing uses the network service; declining keeps this conversation, and
-later ones on that account, on the phone.
+later ones on that account, on the phone. An Alpha Cloud account has
+answered when it signed in, so only an account that has not is asked here.
 
 ```quint
 pure def canAnswerDisclosure(v: Voice, agree: bool, now: int): bool = v.disclosing and v.phase == Starting
@@ -770,13 +771,16 @@ pure def sometimesFollowedAgentNavigationWhileListening(v: Voice): bool = v.phas
 ### Signing in, out or to another account changes the route, invalidates warmup, and ends a running conversation
 
 An account or provider key is told with its key, and signing out with none.
+Signing in to Alpha Cloud is the owner's agreement to have speech processed
+there, as it was in the existing app: Talk asks nothing more.
 
 ```quint
 pure def canAccountChanged(v: Voice, account: R::Account, key: int): bool =
   if (account == R::SignedOut) key == 0 else key > 0
 
 pure def accountChanged(v: Voice, account: R::Account, key: int): Change =
-  val signedIn = { ...v, warmed: false, route: R::changeAccount(v.route, account, key) }
+  val changed = R::changeAccount(v.route, account, key)
+  val signedIn = { ...v, warmed: false, route: if (account == R::CloudAccount) R::decide(changed, true) else changed }
   if (talking(v)) shutDown(D::NoFailure, false, signedIn) else { state: signedIn, out: List() }
 ```
 

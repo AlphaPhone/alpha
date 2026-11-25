@@ -201,6 +201,16 @@ effect function signedInKey(accounts: ReturnType<typeof signInAccounts>): Creden
   return status.account.credentialId
 }
 
+/** Who the phone's sign-in says holds its Cloud key now, or unknown where there is no sign-in to ask or it did not answer. */
+function signedInAccount(): CloudSignIn!! {
+  return registered(SIGN_IN_PLUGIN)
+    ? Effect.orElseSucceed(
+      Effect.map(tryPromise(() => signInAccounts().status({ environment: CLOUD_ENVIRONMENT })), (status): CloudSignIn =>
+        status.account.kind === "signedIn" ? { kind: "signedIn", credential: status.account.credentialId } : { kind: "signedOut" }),
+      (): CloudSignIn => ({ kind: "unknown" }))
+    : succeed<CloudSignIn>({ kind: "unknown" })
+}
+
 /** Each sign-in the phone settles on an account, as eliza's sign-in client hears it. */
 function settledSignIns(): Stream.Stream<void> {
   return Stream.callback<void>((queue) => effect {
@@ -424,10 +434,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
       cachedStatus = undefined
       cloudKey = undefined
     }),
-    forgetAccount: () => sync(() => {
-      cloudKey = undefined
-      if (activeSession === 0) cloudStream = undefined
-    }),
+    forgetAccount: () => sync(() => { cloudKey = undefined; if (activeSession === 0) cloudStream = undefined }),
     holdEngine: () => registered(LOCAL_PLUGIN)
       ? Effect.orElseSucceed(Effect.map(tryPromise(() => localPlugin().holdSpeechEngine({})), (res) => res.held === true), () => false)
       : succeed(false),
@@ -440,13 +447,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     hush,
     shut,
     events: makeNativeEvents(eventSubscribers, () => activeSession),
-    account: () => registered(SIGN_IN_PLUGIN)
-      ? Effect.orElseSucceed(
-        Effect.map(tryPromise(() => signInAccounts().status({ environment: CLOUD_ENVIRONMENT })), (status): CloudSignIn =>
-          status.account.kind === "signedIn" ? { kind: "signedIn", credential: status.account.credentialId } : { kind: "signedOut" }),
-        (): CloudSignIn => ({ kind: "unknown" }))
-      : succeed<CloudSignIn>({ kind: "unknown" }),
-    signIns: settledSignIns(),
+    account: signedInAccount, signIns: settledSignIns(),
     effect startRecording(ticket: number): RecordedClip!VoiceBridgeFailed {
       if (!registered(LOCAL_PLUGIN)) throw new VoiceBridgeFailed({ method: "startRecording", cause: "no-voice-plugin" })
       const started = try tryPromise({
