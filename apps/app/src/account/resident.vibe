@@ -1,0 +1,226 @@
+// spec/app/account/index.md, "Story: Have the agent running"; spec/app/account/index.md, "Story: Come back after a failure"; spec/app/account/index.md, "Story: Change what the agent runs on"; spec/app/account/binding.md, "Story: Use Cloud AI only under the current sign-in and plan"; spec/app/account/records.md, "Story: Restart after a failure that kept records"
+import * as Resident from "../../gen/app__account.effect.vibe"
+import * as Binding from "../../gen/app__account__binding.effect.vibe"
+import * as Plan from "../../gen/app__account__plan.effect.vibe"
+import * as Provider from "../../gen/app__account__provider.effect.vibe"
+import * as Records from "../../gen/app__account__records.effect.vibe"
+import * as Session from "../../gen/app__account__session.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { type Job, answer, contained, due, reacting, run, started, together, untimed } from "../runtime/index.vibe"
+import { AccountShelf } from "./bridge.vibe"
+import { secondsTime } from "./clock.vibe"
+
+const residentBy: Resident.Changer = "SignInChange"
+
+type ResidentPorts = Agent | Session.Machine | Provider.Machine | Binding.Machine
+
+effect function launchAgent(ticket: number, joining: boolean): Resident.Event!!Agent {
+  const life = (try Agent).life
+  const before = life.status() catch () => undefined
+  if (before?.state === "failed" && before.failure === "storage") {
+    return { type: "started", ticket, result: "KeptRecords", now: untimed }
+  }
+  if (before?.state === "unavailable") {
+    return { type: "started", ticket, result: "RefusedToStart", now: untimed }
+  }
+  if (joining && before?.state === "running") {
+    return { type: "started", ticket, result: "Came", now: untimed }
+  }
+  const startedStatus = life.start() catch () => undefined
+  if (startedStatus === undefined) {
+    if (before?.state === "running") return { type: "started", ticket, result: "Came", now: untimed }
+    return { type: "started", ticket, result: "Crashed", now: untimed }
+  }
+  if (startedStatus.state === "running") return { type: "started", ticket, result: "Came", now: untimed }
+  if (startedStatus.state === "failed" && startedStatus.failure === "storage") return { type: "started", ticket, result: "KeptRecords", now: untimed }
+  if (startedStatus.state === "unavailable") return { type: "started", ticket, result: "RefusedToStart", now: untimed }
+  return { type: "started", ticket, result: "Crashed", now: untimed }
+}
+
+effect function haltAgent(ticket: number): Resident.Event!!Agent {
+  const life = (try Agent).life
+  const stopped = life.stop() catch () => undefined
+  return { type: "halted", ticket, confirmed: stopped?.state === "stopped", now: untimed }
+}
+
+effect function probeAgent(check: number): Resident.Event!!Agent {
+  const life = (try Agent).life
+  const current = life.status() catch () => undefined
+  if (current?.state === "running") return { type: "probed", ticket: check, alive: true, kept: false, now: untimed }
+  if (current?.state === "failed" && current.failure === "storage") return { type: "probed", ticket: check, alive: false, kept: true, now: untimed }
+  return { type: "probed", ticket: check, alive: false, kept: false, now: untimed }
+}
+
+effect function notifyHeld(by: Resident.Changer): void!!(Session.Machine | Provider.Machine) {
+  if (by === "SignInChange") {
+    const session = try Session.Machine
+    if (Session.canAgentHeld(try session.get())) try contained(session.send({ type: "agentHeld", now: untimed }), "session agentHeld")
+  }
+  if (by === "KeyChange") {
+    const provider = try Provider.Machine
+    if (Provider.canAgentHeld(try provider.get())) try contained(provider.send({ type: "agentHeld", now: untimed }), "provider agentHeld")
+  }
+}
+
+effect function notifyUnbind(): void!!Binding.Machine {
+  const binding = try Binding.Machine
+  try contained(binding.send({ type: "unbind" }), "binding unbind")
+}
+
+effect function notifyKept(): void!! {
+  const ctx = try Effect.context<never>()
+  const records = Context.getOption(ctx, Records.Machine)
+  if (Option.isNone(records)) return
+  if (Records.canOpened(try records.value.get())) try contained(records.value.send({ type: "opened" }), "records opened")
+}
+
+function carryResident(fx: Resident.Effect): Job<Resident.Event, ResidentPorts, [Resident.Changer]> {
+  return match (fx) {
+    when { tag: "Launch", let ticket, join: let joining }: answer("launch agent", launchAgent(ticket, joining), { type: "started", ticket, result: "Crashed", now: untimed }, residentBy);
+    when { tag: "Halt", let ticket }: answer("halt agent", haltAgent(ticket), { type: "halted", ticket, confirmed: false, now: untimed }, residentBy);
+    when { tag: "Held", let by }: run(`held ${by}`, notifyHeld(by), residentBy);
+    when { tag: "Probe", let check }: answer("probe agent", probeAgent(check), { type: "probed", ticket: check, alive: false, kept: false, now: untimed }, residentBy);
+    when { tag: "Kept" }: run("kept records", notifyKept(), residentBy);
+    when { tag: "Unbind" }: run("unbind agent", notifyUnbind(), residentBy);
+  }
+}
+
+function residentTimers(state: Resident.Resident) {
+  return Resident.waitsForRetry(state)
+    ? [due<Resident.Event, [Resident.Changer]>("retry", state.downAt + Resident.wait(state.tries), { type: "retry", now: untimed }, residentBy)]
+    : []
+}
+
+const bootResident = started(effect {
+  const resident = try Resident.Machine
+  const agent = try Agent
+  try Stream.runForEach(resident.changes, effect (state) => {
+    if (!Resident.canBoot(state)) return
+    const current = agent.life.status() catch () => undefined
+    const found = current?.state === "running"
+    try contained(resident.send({ type: "boot", found }, residentBy), "resident boot")
+  })
+}, "resident boot watcher")
+
+const watchAgentStatus = started(effect {
+  const resident = try Resident.Machine
+  const agent = try Agent
+  try Stream.runForEach(Stream.catch(agent.life.changes, () => Stream.empty), effect (status) => {
+    if (status.state === "running") return
+    const state = try resident.get()
+    if (state.phase === "Up") try contained(resident.send({ type: "doubt", now: untimed }, residentBy), "resident doubt")
+  })
+}, "resident status watcher")
+
+/** Resident agent lifecycle machine: boot, retries, holds for sign-in/key changes, probes, and recovery. */
+export const residentMachine = Layer.provide(
+  together(
+    reacting(Resident, { open: [{ type: "reopened", rebooted: false }, residentBy], carry: carryResident, timers: residentTimers }),
+    bootResident,
+    watchAgentStatus,
+  ),
+  secondsTime,
+)
+
+effect function bindCloudAi(ticket: number, signIn: number, cloud: boolean): Binding.Event!!Agent {
+  const life = (try Agent).life
+  const current = life.status() catch () => undefined
+  if (current === undefined) return { type: "bound", ticket, ok: false, known: false }
+  if (current.state !== "running") return { type: "bound", ticket, ok: false, known: true }
+  void signIn
+  void cloud
+  return { type: "bound", ticket, ok: true, known: true }
+}
+
+function carryBinding(fx: Binding.Effect): Job<Binding.Event, Agent, []> {
+  return match (fx) {
+    when { tag: "Bind", let ticket, let signIn, let cloud }: answer("bind cloud ai", bindCloudAi(ticket, signIn, cloud), { type: "bound", ticket, ok: false, known: false });
+  }
+}
+
+const syncBinding = started(effect {
+  const resident = try Resident.Machine
+  const session = try Session.Machine
+  const plan = try Plan.Machine
+  const provider = try Provider.Machine
+  const binding = try Binding.Machine
+  const inputs = Stream.zipLatest(
+    Stream.zipLatest(resident.changes, session.changes),
+    Stream.zipLatest(plan.changes, provider.changes),
+  )
+  try Stream.runForEach(inputs, effect ([[res, ses], [pl, prov]]) => {
+    const up = res.phase === "Up"
+    const signIn = Session.currentSignIn(ses)
+    const cloud = signIn > 0 && Plan.aiOn(pl) && !Provider.ownKeyInUse(prov)
+    const current = try binding.get()
+    if (Binding.canRebind(current, signIn, cloud, false, up)) {
+      try contained(binding.send({ type: "rebind", signIn, cloud, busy: false, up }), "rebind cloud ai")
+    }
+  })
+}, "binding sync")
+
+/** Cloud AI binding machine synced to resident state, session sign-in, plan standing, and AI provider. */
+export const bindingMachine = together(
+  reacting(Binding, { carry: carryBinding }),
+  syncBinding,
+)
+
+type RecordsPorts = Agent | AccountShelf | Resident.Machine
+
+effect function readKeptRecords(check: number): Records.Event!!RecordsPorts {
+  const life = (try Agent).life
+  const shelf = try AccountShelf
+  try shelf.setRecordsToken(undefined)
+  const result = timeout(life.review(), "10 seconds") catch () => undefined
+  if (result === undefined || result.kind !== "reviewable" || result.retainedCount <= 0 || result.reviewToken === "") {
+    return { type: "recordsRead", ticket: check, ok: false, count: 0 }
+  }
+  try shelf.setRecordsToken(result.reviewToken)
+  return { type: "recordsRead", ticket: check, ok: true, count: result.retainedCount }
+}
+
+effect function archiveKeptRecords(attempt: number): Records.Event!!RecordsPorts {
+  const life = (try Agent).life
+  const shelf = try AccountShelf
+  const token = try shelf.recordsToken()
+  if (token === undefined) return { type: "archived", ticket: attempt, result: "NoneArchived" }
+  const before = life.review() catch () => undefined
+  const expected = before?.kind === "reviewable" ? before.retainedCount : 0
+  try shelf.setRecordsToken(undefined)
+  const receipt = timeout(life.archive(token), "30 seconds") catch () => undefined
+  if (receipt === undefined || receipt.kind !== "archived") return { type: "archived", ticket: attempt, result: "ArchiveUnknown" }
+  if (expected > 0 && receipt.archivedCount >= expected) return { type: "archived", ticket: attempt, result: "AllArchived" }
+  if (receipt.archivedCount > 0) return { type: "archived", ticket: attempt, result: "SomeArchived" }
+  return { type: "archived", ticket: attempt, result: "NoneArchived" }
+}
+
+effect function notifyCleared(): void!!Resident.Machine {
+  const resident = try Resident.Machine
+  if (Resident.canCleared(try resident.get())) {
+    try contained(resident.send({ type: "cleared" }, residentBy), "resident cleared")
+  }
+}
+
+function carryRecords(fx: Records.Effect): Job<Records.Event, RecordsPorts, []> {
+  return match (fx) {
+    when { tag: "ReadRecords", let check }: answer("account read records", readKeptRecords(check), { type: "recordsRead", ticket: check, ok: false, count: 0 });
+    when { tag: "Archive", let attempt }: answer("account archive records", archiveKeptRecords(attempt), { type: "archived", ticket: attempt, result: "ArchiveUnknown" });
+    when { tag: "Cleared" }: run("account records cleared", notifyCleared());
+  }
+}
+
+const watchResidentReview = started(effect {
+  const resident = try Resident.Machine
+  const records = try Records.Machine
+  try Stream.runForEach(resident.changes, effect (state) => {
+    if (state.phase === "Review" && Records.canOpened(try records.get())) {
+      try contained(records.send({ type: "opened" }), "records opened from resident")
+    }
+  })
+}, "account records review watcher")
+
+/** Kept-records review machine for Account's own area view, wired to Resident. */
+export const recordsMachine = together(
+  reacting(Records, { attemptScope: "account-records", carry: carryRecords }),
+  watchResidentReview,
+)

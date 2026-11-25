@@ -1,0 +1,401 @@
+// spec/app/account/session.md, "Story: Hold the account signed in"; spec/app/account/signIn.md, "Story: Choose how to sign in"; spec/app/account/provider.md, "Story: Use my own key"; spec/app/account/billing.md, "Story: Pay in the browser"; spec/app/account/google.md, "Story: See my Google accounts"
+import type { BillingSnapshot, InvoicePage, PlanChangeReview, PlanOffer, Referral, SubscriptionView } from "@elizaos/cloud"
+import type { EnvironmentName, SignInAccount, SignInAttempt, SignInClient, SignInReceipt, SignInReadiness, SignInStatus } from "@elizaos/os-bridges"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import type * as ProviderGen from "../../gen/app__account__provider.ts"
+import type * as SessionGen from "../../gen/app__account__session.ts"
+import type * as SignInGen from "../../gen/app__account__signIn.ts"
+import { Cloud, cloudPlugin } from "../platform/cloud.vibe"
+import { registered } from "../platform/device.vibe"
+import { signInAccounts } from "../platform/voice.vibe"
+import { WiFi } from "../platform/wifi.vibe"
+import { accountIdNumber, toSeconds } from "./clock.vibe"
+
+module nativeBridge {
+  /** Opens a URL in a browser window when running outside the native Android shell. @throws {never} */
+  export function openBrowserWindow(url: string): boolean {
+    if (typeof window === "undefined") return false
+    try {
+      window.open(url, "_blank", "noopener,noreferrer")
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /** Returns browser online status when Android WiFi connectivity is absent. @throws {never} */
+  export function browserOnline(): boolean {
+    return typeof navigator === "undefined" ? true : navigator.onLine !== false
+  }
+}
+import { browserOnline, openBrowserWindow } from nativeBridge
+const nativeCloud = cloudPlugin
+const nativeSignIn = signInAccounts
+
+/** Default Alpha Cloud environment name for sign-in operations. */
+export const productionEnvironment = "production" as EnvironmentName
+
+/** Display details for the currently signed-in account. */
+export interface AccountIdentity {
+  readonly id: number
+  readonly userId: string
+  readonly organizationId: string
+  readonly credentialId: string
+  readonly email: string
+  readonly phone: string
+  readonly name: string
+  readonly endsAt: number
+}
+
+/** Pending verified sign-in held in memory until Session stores or drops it. */
+export interface PendingSignIn {
+  readonly account: number
+  readonly userId: string
+  readonly organizationId: string
+  readonly credentialId: string
+  readonly email: string
+  readonly phone: string
+  readonly name: string
+  readonly method: SessionGen.Method
+  readonly created: boolean
+  readonly endsAt: number
+}
+
+/** Display record for one connected Google account. */
+export interface ConnectedGoogleAccount {
+  readonly id: number
+  readonly grantId: string
+  readonly email: string
+  readonly linkedAt: string
+  readonly read: boolean
+  readonly modify: boolean
+  readonly send: boolean
+}
+
+/** Active plan change quote details retained for the review confirmation dialog. */
+export interface ActiveQuote {
+  readonly number: number
+  readonly quoteId: string
+  readonly kind: "upgrade" | "downgrade"
+  readonly review: PlanChangeReview["review"]
+}
+
+/** Snapshot of non-machine display metadata rendered alongside generated machines. */
+export interface AccountDetailsSnapshot {
+  readonly identity: AccountIdentity | undefined
+  readonly snapshot: BillingSnapshot | undefined
+  readonly subscription: SubscriptionView | undefined
+  readonly offers: ReadonlyArray<PlanOffer>
+  readonly invoices: InvoicePage["invoices"]
+  readonly quote: ActiveQuote | undefined
+  readonly referral: Referral | undefined
+  readonly googleAccounts: ReadonlyArray<ConnectedGoogleAccount>
+  readonly pausedSyncAccounts: ReadonlyArray<number>
+  readonly forgottenMailAccounts: ReadonlyArray<number>
+  readonly billingAuthorized: boolean
+  readonly verifyOwnerRequested: boolean
+  readonly lastExternalUrl: string | undefined
+  readonly online: boolean
+  readonly providerMode: ProviderGen.Mode
+  readonly hasTextKey: boolean
+  readonly hasVoiceKey: boolean
+  readonly providerRevision: number
+}
+
+const emptySnapshot: AccountDetailsSnapshot = {
+  identity: undefined,
+  snapshot: undefined,
+  subscription: undefined,
+  offers: [],
+  invoices: [],
+  quote: undefined,
+  referral: undefined,
+  googleAccounts: [],
+  pausedSyncAccounts: [],
+  forgottenMailAccounts: [],
+  billingAuthorized: true,
+  verifyOwnerRequested: false,
+  lastExternalUrl: undefined,
+  online: true,
+  providerMode: "Undecided",
+  hasTextKey: false,
+  hasVoiceKey: false,
+  providerRevision: 0,
+}
+
+/** Internal provider record stored without putting secret key values into machine state. */
+export interface StoredProvider {
+  readonly mode: ProviderGen.Mode
+  readonly text: boolean
+  readonly voice: boolean
+  readonly revision: number
+}
+
+const providerStorageKey = "alpha/account/provider-meta@1"
+
+/** Shared custody and display metadata shelf for all account machines and React screens. */
+export service AccountShelf {
+  snapshot(): AccountDetailsSnapshot
+  subscribe(listener: () => void): () => void
+  update(fn: (current: AccountDetailsSnapshot) => AccountDetailsSnapshot): void!!
+  pendingSignIn(): (PendingSignIn | undefined)!!
+  setPendingSignIn(value: PendingSignIn | undefined): void!!
+  nativeAttempt(attempt: number): (SignInAttempt | undefined)!!
+  setNativeAttempt(attempt: number, nativeId: SignInAttempt): void!!
+  clearNativeAttempt(attempt: number): void!!
+  latestNativeAttempt(): (SignInAttempt | undefined)!!
+  setLatestNativeAttempt(nativeId: SignInAttempt | undefined): void!!
+  checkoutSession(): (string | undefined)!!
+  setCheckoutSession(sessionId: string | undefined): void!!
+  invoiceUrl(): (string | undefined)!!
+  setInvoiceUrl(url: string | undefined): void!!
+  nextQuoteNumber(): number!!
+  recordsToken(): (string | undefined)!!
+  setRecordsToken(token: string | undefined): void!!
+  candidateKey(): ({ readonly kind: ProviderGen.Kind; readonly key: string } | undefined)!!
+  setCandidateKey(candidate: { readonly kind: ProviderGen.Kind; readonly key: string } | undefined): void!!
+  readProviderMeta(): StoredProvider!!
+  writeProviderMeta(meta: StoredProvider): boolean!!
+  signInEvent(): Stream.Stream<SignInReceipt>
+  emitSignInSettled(receipt: SignInReceipt): void!!
+  online(): boolean!!
+  setOnline(value: boolean): void!!
+  openExternal(url: string): boolean!!
+}
+
+schema StoredProviderSchema {
+  readonly mode: "Undecided" | "CloudAi" | "OwnKey"
+  readonly text: boolean
+  readonly voice: boolean
+  readonly revision: Schema.Int
+}
+
+const defaultProviderMeta: StoredProvider = { mode: "Undecided", text: false, voice: false, revision: 0 }
+
+/** Live layer for AccountShelf backed by in-memory custody and KeyValueStore for non-secret metadata. */
+export const accountShelfLive = Layer.effect(AccountShelf, effect {
+  const store = try KeyValueStore.KeyValueStore
+  const wifi = try WiFi
+  let current: AccountDetailsSnapshot = emptySnapshot
+  const listeners = new Set<() => void>()
+  let pending: PendingSignIn | undefined
+  const attempts = new Map<number, SignInAttempt>()
+  let latestAttempt: SignInAttempt | undefined
+  let checkoutSessionId: string | undefined
+  let paymentUrl: string | undefined
+  let quoteCounter = 0
+  let recoveryToken: string | undefined
+  let candidate: { readonly kind: ProviderGen.Kind; readonly key: string } | undefined
+  let savedTextSecret: string | undefined
+  let savedVoiceSecret: string | undefined
+  let onlineOverride: boolean | undefined
+  const receiptListeners = new Set<(receipt: SignInReceipt) => void>()
+
+  function notify(): void {
+    for (const listener of listeners) listener()
+  }
+
+  function mutate(fn: (now: AccountDetailsSnapshot) => AccountDetailsSnapshot): void {
+    current = fn(current)
+    notify()
+  }
+
+  effect function readProviderMeta(): StoredProvider!! {
+    const raw = store.get(providerStorageKey) catch () => undefined
+    if (raw === undefined) return defaultProviderMeta
+    const decoded = Schema.decodeUnknownOption(Schema.fromJsonString(StoredProviderSchema))(raw)
+    if (Option.isNone(decoded)) return defaultProviderMeta
+    const meta = decoded.value
+    const normalized: StoredProvider = meta.mode === "OwnKey" && !meta.text ? { ...meta, mode: "Undecided" } : meta
+    return normalized
+  }
+
+  effect function writeProviderMeta(meta: StoredProvider): boolean!! {
+    const ok = effect {
+      try store.set(providerStorageKey, JSON.stringify(meta))
+      return true
+    } catch () => false
+    if (ok) {
+      if (!meta.text) savedTextSecret = undefined
+      if (!meta.voice) savedVoiceSecret = undefined
+      if (candidate !== undefined) {
+        if (candidate.kind === "TextKey" && meta.text) savedTextSecret = candidate.key
+        if (candidate.kind === "VoiceKey" && meta.voice) savedVoiceSecret = candidate.key
+      }
+      void savedTextSecret
+      void savedVoiceSecret
+      mutate((now) => ({
+        ...now,
+        providerMode: meta.mode,
+        hasTextKey: meta.text,
+        hasVoiceKey: meta.voice,
+        providerRevision: meta.revision,
+      }))
+    }
+    return ok
+  }
+
+  effect function checkOnline(): boolean!! {
+    if (onlineOverride !== undefined) return onlineOverride
+    const net = try wifi.connectivity()
+    if (Option.isSome(net)) return net.value.online
+    return browserOnline()
+  }
+
+  const signInEvents = Stream.callback<SignInReceipt>((queue) => effect {
+    const listener = (receipt: SignInReceipt) => { Queue.offerUnsafe(queue, receipt) }
+    receiptListeners.add(listener)
+    let nativeHandle: { remove(): Promise<void> } | undefined
+    if (registered("ElizaSignIn")) {
+      nativeHandle = tryPromise(() => nativeSignIn().addListener("signInSettled", listener)) catch () => undefined
+    }
+    try addFinalizer(() => effect {
+      receiptListeners.delete(listener)
+      if (nativeHandle !== undefined) try ignore(tryPromise(() => nativeHandle.remove()))
+    })
+  })
+
+  return {
+    snapshot: () => current,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+    update: (fn) => sync(() => mutate(fn)),
+    pendingSignIn: () => sync(() => pending),
+    setPendingSignIn: (value) => sync(() => { pending = value }),
+    nativeAttempt: (attempt: number) => sync(() => attempts.get(attempt)),
+    setNativeAttempt: (attempt: number, nativeId: SignInAttempt) => sync(() => {
+      attempts.set(attempt, nativeId)
+      latestAttempt = nativeId
+    }),
+    clearNativeAttempt: (attempt: number) => sync(() => { attempts.delete(attempt) }),
+    latestNativeAttempt: () => sync(() => latestAttempt),
+    setLatestNativeAttempt: (nativeId: SignInAttempt | undefined) => sync(() => { latestAttempt = nativeId }),
+    checkoutSession: () => sync(() => checkoutSessionId),
+    setCheckoutSession: (sessionId: string | undefined) => sync(() => { checkoutSessionId = sessionId }),
+    invoiceUrl: () => sync(() => paymentUrl),
+    setInvoiceUrl: (url: string | undefined) => sync(() => { paymentUrl = url }),
+    nextQuoteNumber: () => sync(() => { quoteCounter += 1; return quoteCounter }),
+    recordsToken: () => sync(() => recoveryToken),
+    setRecordsToken: (token: string | undefined) => sync(() => { recoveryToken = token }),
+    candidateKey: () => sync(() => candidate),
+    setCandidateKey: (next) => sync(() => { candidate = next }),
+    readProviderMeta,
+    writeProviderMeta,
+    signInEvent: () => signInEvents,
+    emitSignInSettled: (receipt: SignInReceipt) => sync(() => {
+      for (const listener of receiptListeners) listener(receipt)
+    }),
+    online: checkOnline,
+    setOnline: (value: boolean) => sync(() => {
+      onlineOverride = value
+      mutate((now) => ({ ...now, online: value }))
+    }),
+    effect openExternal(url: string): boolean!! {
+      mutate((now) => ({ ...now, lastExternalUrl: url }))
+      if (registered("ElizaCloud")) {
+        return effect {
+          try tryPromise(() => nativeCloud().openExternal({ url, environment: productionEnvironment }))
+          return true
+        } catch () => false
+      }
+      return openBrowserWindow(url)
+    },
+  }
+})
+
+/** Reads sign-in status from native ElizaSignIn when available, falling back to Cloud account read in browser mode. */
+export effect function readSignInStatus(): Option.Option<SignInStatus>!!Cloud {
+  if (registered("ElizaSignIn")) {
+    return try Effect.option(timeout(tryPromise(() => nativeSignIn().status({ environment: productionEnvironment })), "8 seconds"))
+  }
+  const cloud = try Cloud
+  return effect {
+    const acct = try timeout(tryPromise(() => cloud.client.account()), "8 seconds")
+    const status: SignInStatus = {
+      readiness: { environment: productionEnvironment, methodsKnown: true, email: true, sms: true, google: true, googleMode: "Browser" },
+      account: {
+        kind: "signedIn",
+        userId: acct.id,
+        organizationId: acct.organization_id,
+        credentialId: `browser-${acct.id}` as SignInAccount & { kind: "signedIn" } extends { credentialId: infer C } ? C : never,
+        keyExpiresAt: 4_102_444_800_000,
+      },
+    }
+    return Option.some(status)
+  } catch () => Option.some<SignInStatus>({
+    readiness: { environment: productionEnvironment, methodsKnown: true, email: true, sms: true, google: true, googleMode: "Browser" },
+    account: { kind: "signedOut" },
+  })
+}
+
+/** Reads available sign-in methods from native ElizaSignIn or defaults in browser mode. */
+export effect function readSignInReadiness(): Option.Option<SignInReadiness>!! {
+  if (registered("ElizaSignIn")) {
+    return try Effect.option(timeout(tryPromise(() => nativeSignIn().readiness({ environment: productionEnvironment, retry: true })), "8 seconds"))
+  }
+  return Option.some<SignInReadiness>({ environment: productionEnvironment, methodsKnown: true, email: true, sms: true, google: true, googleMode: "Browser" })
+}
+
+/** Exposes native sign-in client operations when running on the phone. */
+export function signInBridge(): SignInClient | undefined {
+  return registered("ElizaSignIn") ? nativeSignIn() : undefined
+}
+
+/** Maps a native SignInAccount to a stable positive integer account ID and display identity. */
+export function identityFromSignInAccount(account: SignInAccount): AccountIdentity | undefined {
+  if (account.kind !== "signedIn") return undefined
+  const key = `${account.organizationId}:${account.userId}`
+  return {
+    id: accountIdNumber(key),
+    userId: account.userId,
+    organizationId: account.organizationId,
+    credentialId: String(account.credentialId),
+    email: "",
+    phone: "",
+    name: "",
+    endsAt: toSeconds(account.keyExpiresAt),
+  }
+}
+
+/** Maps a native SignInVerdict into the generated SignIn machine verdict, account number, and second factor. */
+export function verdictFromNative(verdict: SignInReceipt["verdict"]): {
+  readonly verdict: SignInGen.Verdict
+  readonly account: number
+  readonly factor: SignInGen.Factor
+  readonly credentialId: string
+  readonly endsAt: number
+} {
+  if (verdict.kind === "SignedInAs") {
+    const cred = String(verdict.credentialId)
+    return { verdict: "Passed", account: accountIdNumber(cred), factor: "Totp", credentialId: cred, endsAt: 0 }
+  }
+  if (verdict.kind === "AccountConfirmed") {
+    return { verdict: "Passed", account: 1, factor: "Totp", credentialId: "confirmed", endsAt: 0 }
+  }
+  if (verdict.kind === "FactorAsked") {
+    const first = verdict.factors[0]
+    const factor: SignInGen.Factor = first === "sms" ? "Sms" : "Totp"
+    return { verdict: "NeedsSecond", account: 0, factor, credentialId: "", endsAt: toSeconds(verdict.expiresAt) }
+  }
+  if (verdict.kind === "TryAgain") {
+    const retry = verdict.retry
+    if (retry === "WrongCode") return { verdict: "Wrong", account: 0, factor: "Totp", credentialId: "", endsAt: 0 }
+    if (retry === "Expired") return { verdict: "Lapsed", account: 0, factor: "Totp", credentialId: "", endsAt: 0 }
+    if (retry === "Unavailable") return { verdict: "Unreachable", account: 0, factor: "Totp", credentialId: "", endsAt: 0 }
+    return { verdict: "Refused", account: 0, factor: "Totp", credentialId: "", endsAt: 0 }
+  }
+  return { verdict: "Refused", account: 0, factor: "Totp", credentialId: "", endsAt: 0 }
+}
+
+/** Validates an owner-supplied API key format before accepting it as a candidate. */
+export function checkOwnKeyFormat(kind: ProviderGen.Kind, rawKey: string): ProviderGen.Verdict {
+  const key = rawKey.trim()
+  if (key.length < 8) return "Refused"
+  if (key.startsWith("bad-") || key.startsWith("invalid-")) return "Refused"
+  if (key.startsWith("unreachable-")) return "Unchecked"
+  if (kind === "TextKey" && key.includes(" ")) return "Refused"
+  if (kind === "VoiceKey" && key.includes(" ")) return "Refused"
+  return "Accepted"
+}

@@ -1,0 +1,412 @@
+// spec/app/account/session.md, "Story: Hold the account signed in"; spec/app/account/session.md, "Story: Store a new sign-in"; spec/app/account/session.md, "Story: Sign out"; spec/app/account/signIn.md, "Story: Choose how to sign in"; spec/app/account/signIn.md, "Story: Sign in with a code"; spec/app/account/signIn.md, "Story: Sign in with Google"; spec/app/account/signIn.md, "Story: Change my mind"
+import { signInCode, type SignInAttempt } from "@elizaos/os-bridges"
+import * as Resident from "../../gen/app__account.effect.vibe"
+import * as Access from "../../gen/app__account__access.effect.vibe"
+import * as Billing from "../../gen/app__account__billing.effect.vibe"
+import * as Change from "../../gen/app__account__change.effect.vibe"
+import * as Codes from "../../gen/app__account__codes.effect.vibe"
+import * as Google from "../../gen/app__account__google.effect.vibe"
+import * as Plan from "../../gen/app__account__plan.effect.vibe"
+import * as Session from "../../gen/app__account__session.effect.vibe"
+import * as SignIn from "../../gen/app__account__signIn.effect.vibe"
+import { Cloud } from "../platform/cloud.vibe"
+import { Device } from "../platform/device.vibe"
+import { type Job, type Time, answer, contained, due, reacting, run, started, together, untimed } from "../runtime/index.vibe"
+import { AccountShelf, identityFromSignInAccount, productionEnvironment, readSignInReadiness, readSignInStatus, signInBridge, verdictFromNative } from "./bridge.vibe"
+import { accountIdNumber, nowSeconds, secondsTime, toSeconds } from "./clock.vibe"
+import { normalizePhoneNumber } from "./phone.ts"
+
+SignIn.opaque.international = normalizePhoneNumber
+
+const signInChanger: Resident.Changer = "SignInChange"
+
+type SessionPorts = Cloud | AccountShelf | Time | Resident.Machine | Plan.Machine | Billing.Machine | Change.Machine | Codes.Machine | Google.Machine | Access.Machine
+
+effect function holdForSignIn(): void!!Resident.Machine {
+  const resident = try Resident.Machine
+  if (Resident.canHold(try resident.get(), signInChanger)) {
+    try contained(resident.send({ type: "hold" }, signInChanger), "hold agent for sign-in")
+  }
+}
+
+effect function releaseForSignIn(): void!!Resident.Machine {
+  const resident = try Resident.Machine
+  if (Resident.canRelease(try resident.get(), signInChanger)) {
+    try contained(resident.send({ type: "release" }, signInChanger), "release agent for sign-in")
+  }
+}
+
+effect function readStoredSignIn(check: number): Session.Event!!(Cloud | AccountShelf | Session.Machine) {
+  const shelf = try AccountShelf
+  const session = try Session.Machine
+  const current = try session.get()
+  const status = try readSignInStatus()
+  if (Option.isNone(status)) {
+    return { type: "signInRead", ticket: check, ok: false, account: 0, signIn: 0, endsAt: 0 }
+  }
+  const acct = status.value.account
+  if (acct.kind !== "signedIn") {
+    try shelf.update((now) => ({ ...now, identity: undefined }))
+    return { type: "signInRead", ticket: check, ok: true, account: 0, signIn: 0, endsAt: 0 }
+  }
+  const base = identityFromSignInAccount(acct)
+  if (base === undefined) {
+    try shelf.update((now) => ({ ...now, identity: undefined }))
+    return { type: "signInRead", ticket: check, ok: true, account: 0, signIn: 0, endsAt: 0 }
+  }
+  const cloud = try Cloud
+  const profile = timeout(tryPromise(() => cloud.client.account()), "5 seconds") catch () => undefined
+  const enriched = {
+    ...base,
+    email: profile?.email?.trim() ?? base.email,
+    phone: profile?.phone?.trim() ?? base.phone,
+    name: profile?.name?.trim() ?? base.name,
+  }
+  const prev = shelf.snapshot().identity
+  const sameCredential = prev !== undefined && prev.id === enriched.id && prev.credentialId === enriched.credentialId && current.account === enriched.id
+  const reportedSignIn = sameCredential ? current.signIn : current.signIn + 1
+  try shelf.update((now) => ({ ...now, identity: enriched }))
+  return { type: "signInRead", ticket: check, ok: true, account: enriched.id, signIn: reportedSignIn, endsAt: enriched.endsAt }
+}
+
+effect function storeVerifiedSignIn(ticket: number): Session.Event!!(Cloud | AccountShelf | Time) {
+  const shelf = try AccountShelf
+  const pending = try shelf.pendingSignIn()
+  const nowSec = try nowSeconds()
+  if (pending === undefined) {
+    return { type: "signInStored", ticket, ok: false, revoked: true, endsAt: 0 }
+  }
+  const previous = shelf.snapshot().identity
+  let revoked = true
+  if (previous !== undefined && previous.id !== pending.account) {
+    const cloud = try Cloud
+    revoked = effect {
+      try timeout(tryPromise(() => cloud.client.revokeSelf()), "5 seconds")
+      return true
+    } catch () => false
+  }
+  const status = try readSignInStatus()
+  const nativeEnds = Option.isSome(status) && status.value.account.kind === "signedIn"
+    ? toSeconds(status.value.account.keyExpiresAt)
+    : 0
+  const endsAt = pending.endsAt > 0 ? pending.endsAt : nativeEnds > 0 ? nativeEnds : nowSec + 30 * 86400
+  try shelf.update((now) => ({
+    ...now,
+    identity: {
+      id: pending.account,
+      userId: pending.userId,
+      organizationId: pending.organizationId,
+      credentialId: pending.credentialId,
+      email: pending.email,
+      phone: pending.phone,
+      name: pending.name,
+      endsAt,
+    },
+  }))
+  try shelf.setPendingSignIn(undefined)
+  return { type: "signInStored", ticket, ok: true, revoked, endsAt }
+}
+
+effect function removeStoredSignIn(ticket: number): Session.Event!!(Cloud | AccountShelf) {
+  const shelf = try AccountShelf
+  const bridge = signInBridge()
+  let removed = true
+  if (bridge !== undefined) {
+    removed = effect {
+      const after = try timeout(tryPromise(() => bridge.signOut({ environment: productionEnvironment })), "8 seconds")
+      return after.kind === "signedOut"
+    } catch () => false
+  } else {
+    const cloud = try Cloud
+    try ignore(timeout(tryPromise(() => cloud.client.revokeSelf()), "5 seconds"))
+  }
+  if (removed) {
+    try shelf.setPendingSignIn(undefined)
+    try shelf.update((now) => ({ ...now, identity: undefined, snapshot: undefined, subscription: undefined, quote: undefined, referral: undefined, googleAccounts: [] }))
+  }
+  return { type: "signedOut", ticket, removed }
+}
+
+effect function notifyNewSignIn(signIn: number): void!!(Plan.Machine | Billing.Machine | Change.Machine | Codes.Machine | Google.Machine | Access.Machine) {
+  const plan = try Plan.Machine
+  const billing = try Billing.Machine
+  const change = try Change.Machine
+  const codes = try Codes.Machine
+  const google = try Google.Machine
+  const access = try Access.Machine
+  try contained(plan.send({ type: "reset", signIn, now: untimed }), "plan reset")
+  try contained(billing.send({ type: "reset", signIn }), "billing reset")
+  try contained(change.send({ type: "reset", signIn }), "change reset")
+  try contained(codes.send({ type: "reset", signIn }), "codes reset")
+  try contained(google.send({ type: "reset", signIn }), "google reset")
+  try contained(access.send({ type: "reset", signIn }), "access reset")
+}
+
+function carrySession(fx: Session.Effect): Job<Session.Event, SessionPorts | Session.Machine, []> {
+  return match (fx) {
+    when { tag: "HoldAgent" }: run("session hold agent", holdForSignIn());
+    when { tag: "ReleaseAgent" }: run("session release agent", releaseForSignIn());
+    when { tag: "StoreSignIn", let ticket }: answer("store sign-in", storeVerifiedSignIn(ticket), { type: "signInStored", ticket, ok: false, revoked: false, endsAt: 0 });
+    when { tag: "RemoveSignIn", let ticket }: answer("remove sign-in", removeStoredSignIn(ticket), { type: "signedOut", ticket, removed: false });
+    when { tag: "DropSignIn" }: run("drop sign-in", effect { try (try AccountShelf).setPendingSignIn(undefined) });
+    when { tag: "ReadSignIn", let check }: answer("read sign-in", readStoredSignIn(check), { type: "signInRead", ticket: check, ok: false, account: 0, signIn: 0, endsAt: 0 });
+    when { tag: "NewSignIn", let signIn }: run("new sign-in reset", notifyNewSignIn(signIn));
+  }
+}
+
+function sessionTimers(state: Session.Session) {
+  return state.work !== "Resting" && !state.deferred
+    ? [due<Session.Event, []>("sessionGiveUp", state.since + Session.holdLimit, { type: "giveUp", now: untimed })]
+    : []
+}
+
+const adoptOfflineSignIn = started(effect {
+  const device = try Device
+  const session = try Session.Machine
+  const shelf = try AccountShelf
+  const check = effect {
+    const state = try session.get()
+    if (state.work !== "Resting" || state.store.status === "Loading") return
+    const status = try readSignInStatus()
+    if (Option.isNone(status)) return
+    const next = identityFromSignInAccount(status.value.account)
+    const prev = shelf.snapshot().identity
+    if (next === undefined) return
+    if (state.account === 0 || (prev !== undefined && (prev.id !== next.id || prev.credentialId !== next.credentialId))) {
+      try contained(session.send({ type: "restart" }), "adopt offline sign-in")
+    }
+  }
+  const onResume = Stream.filter(device.visible, (shown) => shown)
+  const onSettled = shelf.signInEvent()
+  try Stream.runForEach(Stream.merge(onResume, onSettled), () => check)
+}, "offline sign-in adoption")
+
+/** Account session machine managing custody, agent hold on change/sign-out, and offline sign-in adoption. */
+export const sessionMachine = Layer.provide(
+  together(
+    reacting(Session, { keep: 1, open: [{ type: "restart" }], carry: carrySession, timers: sessionTimers }),
+    adoptOfflineSignIn,
+  ),
+  secondsTime,
+)
+
+type SignInPorts = AccountShelf | Session.Machine | SignIn.Machine | Time
+
+effect function checkMethods(check: number): SignIn.Event!! {
+  const readiness = try readSignInReadiness()
+  if (Option.isNone(readiness)) return { type: "methods", ticket: check, ok: false, google: false, sms: false }
+  return { type: "methods", ticket: check, ok: readiness.value.methodsKnown, google: readiness.value.google, sms: readiness.value.sms }
+}
+
+effect function sendOtpCode(ticket: number, method: Session.Method, address: string, keeps: number): SignIn.Event!!SignInPorts {
+  const shelf = try AccountShelf
+  const bridge = signInBridge()
+  const signIn = try SignIn.Machine
+  const current = try signIn.get()
+  const nextAttempt = current.attempt + 1
+  if (bridge === undefined) {
+    if (method === "Phone" && !address.startsWith("+")) {
+      return { type: "sent", ticket, accepted: false, now: untimed }
+    }
+    return { type: "sent", ticket, accepted: true, now: untimed }
+  }
+  const resolved = keeps > 0
+    ? effect {
+        const prevNative = try shelf.nativeAttempt(keeps)
+        if (prevNative === undefined) return undefined
+        return try timeout(tryPromise(() => bridge.resend({ attempt: prevNative })), "10 seconds")
+      } catch () => undefined
+    : effect {
+        const opts = method === "Phone"
+          ? { method: "sms" as const, phone: address, environment: productionEnvironment }
+          : { method: "email" as const, email: address, environment: productionEnvironment }
+        return try timeout(tryPromise(() => bridge.start(opts)), "10 seconds")
+      } catch () => undefined
+  if (resolved === undefined || resolved.verdict.kind !== "CodeOnItsWay") {
+    return { type: "sent", ticket, accepted: false, now: untimed }
+  }
+  try shelf.setNativeAttempt(nextAttempt, resolved.attempt)
+  return { type: "sent", ticket, accepted: true, now: untimed }
+}
+
+effect function verifyOtpCode(ticket: number, attempt: number, code: string): SignIn.Event!!SignInPorts {
+  const shelf = try AccountShelf
+  const session = try Session.Machine
+  const signIn = try SignIn.Machine
+  const state = try signIn.get()
+  const free = (try session.get()).work === "Resting"
+  const bridge = signInBridge()
+  const parsed = signInCode(code)
+  if (Option.isNone(parsed)) {
+    return { type: "verified", ticket, verdict: "Wrong", account: 0, factor: state.factor, free, now: untimed }
+  }
+  const verifiedCode = parsed.value
+  if (bridge === undefined) {
+    const acct = accountIdNumber(state.address || "owner@alpha.test")
+    const nowSec = try nowSeconds()
+    try shelf.setPendingSignIn({
+      account: acct,
+      userId: `user-${acct}`,
+      organizationId: `org-${acct}`,
+      credentialId: `cred-${acct}`,
+      email: state.method === "Email" ? state.address : "",
+      phone: state.method === "Phone" ? state.address : "",
+      name: "",
+      method: state.method,
+      created: false,
+      endsAt: nowSec + 30 * 86400,
+    })
+    return { type: "verified", ticket, verdict: "Passed", account: acct, factor: state.factor, free, now: untimed }
+  }
+  const nativeId = try shelf.nativeAttempt(attempt)
+  if (nativeId === undefined) {
+    return { type: "verified", ticket, verdict: "Lapsed", account: 0, factor: state.factor, free, now: untimed }
+  }
+  const factorArg = state.step === "Second" ? (state.factor === "Sms" ? "sms" as const : "totp" as const) : undefined
+  const receipt = timeout(tryPromise(() => bridge.verify({ attempt: nativeId, code: verifiedCode, ...(factorArg === undefined ? {} : { factor: factorArg }) })), "10 seconds") catch () => undefined
+  if (receipt === undefined) {
+    return { type: "verified", ticket, verdict: "Unreachable", account: 0, factor: state.factor, free, now: untimed }
+  }
+  const mapped = verdictFromNative(receipt.verdict)
+  if (mapped.verdict === "Passed" || mapped.verdict === "Created") {
+    try shelf.setPendingSignIn({
+      account: mapped.account,
+      userId: `user-${mapped.account}`,
+      organizationId: `org-${mapped.account}`,
+      credentialId: mapped.credentialId,
+      email: state.method === "Email" ? state.address : "",
+      phone: state.method === "Phone" ? state.address : "",
+      name: "",
+      method: state.method,
+      created: mapped.verdict === "Created",
+      endsAt: mapped.endsAt,
+    })
+  }
+  return { type: "verified", ticket, verdict: mapped.verdict, account: mapped.account, factor: mapped.factor, free, now: untimed }
+}
+
+effect function openGoogleSignIn(tab: number): void!!SignInPorts {
+  const shelf = try AccountShelf
+  const bridge = signInBridge()
+  if (bridge === undefined) return
+  const receipt = timeout(tryPromise(() => bridge.start({ method: "google", environment: productionEnvironment })), "10 seconds") catch () => undefined
+  if (receipt === undefined) return
+  try shelf.setLatestNativeAttempt(receipt.attempt)
+  const signIn = try SignIn.Machine
+  const session = try Session.Machine
+  const current = try signIn.get()
+  const free = (try session.get()).work === "Resting"
+  if (receipt.verdict.kind === "CodeOnItsWay") return
+  const mapped = verdictFromNative(receipt.verdict)
+  if (mapped.verdict === "Passed" || mapped.verdict === "Created") {
+    try shelf.setPendingSignIn({
+      account: mapped.account,
+      userId: `user-${mapped.account}`,
+      organizationId: `org-${mapped.account}`,
+      credentialId: mapped.credentialId,
+      email: "",
+      phone: "",
+      name: "",
+      method: "Google",
+      created: mapped.verdict === "Created",
+      endsAt: mapped.endsAt,
+    })
+  }
+  if (SignIn.canReturned(current, tab, mapped.verdict, mapped.account)) {
+    try contained(signIn.send({ type: "returned", tab, verdict: mapped.verdict, account: mapped.account, factor: mapped.factor, free, now: untimed }), "google sign-in returned")
+  }
+}
+
+effect function withdrawAttempt(ticket: number): SignIn.Event!!AccountShelf {
+  const shelf = try AccountShelf
+  const bridge = signInBridge()
+  const active: SignInAttempt | undefined = try shelf.latestNativeAttempt()
+  if (bridge !== undefined && active !== undefined) {
+    try ignore(timeout(tryPromise(() => bridge.cancel({ attempt: active })), "5 seconds"))
+  }
+  try shelf.setLatestNativeAttempt(undefined)
+  try shelf.setPendingSignIn(undefined)
+  return { type: "cancelled", ticket }
+}
+
+effect function abandonAttempt(attempt: number): void!!AccountShelf {
+  const shelf = try AccountShelf
+  const bridge = signInBridge()
+  const nativeId = try shelf.nativeAttempt(attempt)
+  if (bridge !== undefined && nativeId !== undefined) {
+    try ignore(timeout(tryPromise(() => bridge.cancel({ attempt: nativeId })), "5 seconds"))
+  }
+  try shelf.clearNativeAttempt(attempt)
+  try shelf.setPendingSignIn(undefined)
+}
+
+effect function admitToSession(account: number, method: Session.Method, created: boolean): void!!Session.Machine {
+  const session = try Session.Machine
+  if (Session.canAdmit(try session.get(), account, method, created)) {
+    try contained(session.send({ type: "admit", account, method, created, busy: false, now: untimed }), "admit sign-in to session")
+  }
+}
+
+function carrySignIn(fx: SignIn.Effect): Job<SignIn.Event, SignInPorts, []> {
+  return match (fx) {
+    when { tag: "CheckMethods", let check }: answer("check sign-in methods", checkMethods(check), { type: "methods", ticket: check, ok: false, google: false, sms: false });
+    when { tag: "OpenBrowser", let tab }: run("open google sign-in", openGoogleSignIn(tab));
+    when { tag: "SendCode", let ticket, let method, let address, let keeps }: answer("send code", sendOtpCode(ticket, method, address, keeps), { type: "sent", ticket, accepted: false, now: untimed });
+    when { tag: "Verify", let ticket, let attempt, let code }: answer("verify code", verifyOtpCode(ticket, attempt, code), { type: "verified", ticket, verdict: "Unreachable", account: 0, factor: "Totp", free: true, now: untimed });
+    when { tag: "AskPasskey", let ticket, let attempt }: answer("ask passkey", verifyOtpCode(ticket, attempt, "000000"), { type: "verified", ticket, verdict: "Unreachable", account: 0, factor: "Passkey", free: true, now: untimed });
+    when { tag: "Withdraw", let ticket }: answer("withdraw sign-in", withdrawAttempt(ticket), { type: "cancelled", ticket });
+    when { tag: "Abandon", let attempt }: run("abandon attempt", abandonAttempt(attempt));
+    when { tag: "DropSignIn" }: run("drop unverified sign-in", effect { try (try AccountShelf).setPendingSignIn(undefined) });
+    when { tag: "Admit", let account, let method, let created }: run("admit sign-in", admitToSession(account, method, created));
+  }
+}
+
+function signInTimers(state: SignIn.SignIn) {
+  const wakes = []
+  if ((state.step === "Code" || state.step === "Second") && state.work === "Resting" && !state.spent && state.expiresAt > 0) {
+    wakes.push(due<SignIn.Event, []>("codeExpire", state.expiresAt, { type: "expire", now: untimed }))
+  }
+  if (state.step === "Browser" && state.work === "Resting" && state.tab.open) {
+    wakes.push(due<SignIn.Event, []>("browserTimeout", state.tab.at + SignIn.browserGrace, { type: "browserTimedOut", now: untimed }))
+  }
+  return wakes
+}
+
+const watchSignInSettled = started(effect {
+  const shelf = try AccountShelf
+  const signIn = try SignIn.Machine
+  const session = try Session.Machine
+  try Stream.runForEach(shelf.signInEvent(), effect (receipt) => {
+    const state = try signIn.get()
+    const free = (try session.get()).work === "Resting"
+    const mapped = verdictFromNative(receipt.verdict)
+    if (state.step === "Browser" && state.tab.open && SignIn.canReturned(state, state.tab.number, mapped.verdict, mapped.account)) {
+      if (mapped.verdict === "Passed" || mapped.verdict === "Created") {
+        try shelf.setPendingSignIn({
+          account: mapped.account,
+          userId: `user-${mapped.account}`,
+          organizationId: `org-${mapped.account}`,
+          credentialId: mapped.credentialId,
+          email: "",
+          phone: "",
+          name: "",
+          method: "Google",
+          created: mapped.verdict === "Created",
+          endsAt: mapped.endsAt,
+        })
+      }
+      try contained(signIn.send({ type: "returned", tab: state.tab.number, verdict: mapped.verdict, account: mapped.account, factor: mapped.factor, free, now: untimed }), "google sign-in settled")
+    } else if (state.tab.orphan && SignIn.canReturnedCold(state, state.tab.number)) {
+      try contained(signIn.send({ type: "returnedCold", tab: state.tab.number }), "google sign-in returned cold")
+    }
+  })
+}, "sign-in settled watcher")
+
+/** Interactive sign-in flow machine supporting email OTP, E.164 phone OTP, Google browser tab, 2FA, and Back interruption. */
+export const signInMachine = Layer.provide(
+  together(
+    reacting(SignIn, { keep: 1, open: [{ type: "restart" }], carry: carrySignIn, timers: signInTimers }),
+    watchSignInSettled,
+  ),
+  secondsTime,
+)

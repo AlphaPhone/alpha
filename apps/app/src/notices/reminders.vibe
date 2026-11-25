@@ -1,0 +1,345 @@
+// spec/app/notices/reminder.md, "Story: Have the agent set a reminder"; spec/app/notices/reminder.md, "Story: Be reminded on time"; spec/app/notices/reminders.md, "Story: See my reminders as they are"; spec/app/notices/reminders.md, "Story: Have the agent set reminders"; spec/app/notices/reminders.md, "Story: Pick up reminders after a restart"
+import type { Actor } from "../../gen/app__approvals__operation.ts"
+import type * as Reminder from "../../gen/app__notices__reminder.effect.vibe"
+import * as NoticeReminders from "../../gen/app__notices__reminders.effect.vibe"
+import type * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
+import { PhoneReminders } from "../platform/reminders.vibe"
+import { Whole, contained } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
+import { type Said, say } from "./toasts.vibe"
+
+/** Metadata for a notice-side scheduled reminder. */
+export interface NoticeReminderDetail {
+  readonly number: number
+  readonly title: string
+  readonly body: string
+}
+
+/** Outcome returned by the host for a reminder operation or read-back. */
+export interface ReminderOperationOutcome {
+  readonly result: Reminder.Answer
+  readonly reason: Reminder.Reason
+}
+
+/** Injectable hooks for notice-side reminder alarms, listing, withdrawal, and re-arming. */
+export interface NoticeRemindersHooks {
+  list(ticket: number): boolean!!
+  operate(number: number, attempt: number, change: Reminder.Change, at: number, detail: NoticeReminderDetail): ReminderOperationOutcome!!
+  readBack(number: number, attempt: number, change: Reminder.Change, at: number, detail: NoticeReminderDetail): ReminderOperationOutcome!!
+  withdraw(number: number, detail: NoticeReminderDetail): void!!
+  arm(number: number, revision: number, at: number, detail: NoticeReminderDetail): void!!
+}
+
+/** Observable log of notice-side reminder coordination effects. */
+export interface NoticeRemindersSnapshot {
+  readonly details: ReadonlyMap<number, NoticeReminderDetail>
+  readonly operated: ReadonlyArray<{ readonly number: number; readonly attempt: number; readonly change: Reminder.Change; readonly at: number }>
+  readonly readBacks: ReadonlyArray<{ readonly number: number; readonly attempt: number }>
+  readonly withdrawn: ReadonlyArray<number>
+  readonly armed: ReadonlyArray<{ readonly number: number; readonly revision: number; readonly at: number }>
+  readonly readFailures: number
+}
+
+export interface NoticeRemindersDeskService {
+  snapshot(): NoticeRemindersSnapshot
+  subscribe(listener: () => void): () => void
+  setHooks(hooks: Partial<NoticeRemindersHooks>): void
+  register(detail: NoticeReminderDetail): void
+  detailOf(number: number): NoticeReminderDetail | undefined
+  reset(): void
+  performList(ticket: number): boolean!!PhoneReminders
+  performOperate(number: number, attempt: number, change: Reminder.Change, at: number): ReminderOperationOutcome!!PhoneReminders
+  performReadBack(number: number, attempt: number, change: Reminder.Change, at: number): ReminderOperationOutcome!!PhoneReminders
+  performWithdraw(number: number): void!!PhoneReminders
+  performArm(number: number, revision: number, at: number): void!!PhoneReminders
+  noteReadFailure(): void
+}
+
+export service NoticeRemindersDesk: NoticeRemindersDeskService {}
+
+const noticeRemindersDesk = Layer.sync(NoticeRemindersDesk, () => {
+  const details = new Map<number, NoticeReminderDetail>()
+  let operated: Array<{ readonly number: number; readonly attempt: number; readonly change: Reminder.Change; readonly at: number }> = []
+  let readBacks: Array<{ readonly number: number; readonly attempt: number }> = []
+  let withdrawn: number[] = []
+  let armed: Array<{ readonly number: number; readonly revision: number; readonly at: number }> = []
+  let readFailures = 0
+  let hooks: Partial<NoticeRemindersHooks> = {}
+  const listeners = new Set<() => void>()
+  const buildSnap = (): NoticeRemindersSnapshot => ({
+    details: new Map(details),
+    operated: [...operated],
+    readBacks: [...readBacks],
+    withdrawn: [...withdrawn],
+    armed: [...armed],
+    readFailures,
+  })
+  let current: NoticeRemindersSnapshot = buildSnap()
+  const emit = () => {
+    current = buildSnap()
+    for (const listener of [...listeners]) listener()
+  }
+  const fallback = (number: number): NoticeReminderDetail =>
+    details.get(number) ?? { number, title: `Reminder #${number}`, body: "" }
+  return {
+    snapshot: () => current,
+    subscribe(listener: () => void): () => void {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+    setHooks(next: Partial<NoticeRemindersHooks>): void {
+      hooks = { ...hooks, ...next }
+    },
+    register(detail: NoticeReminderDetail): void {
+      details.set(detail.number, detail)
+      emit()
+    },
+    detailOf: (number: number) => details.get(number),
+    reset(): void {
+      details.clear()
+      operated = []
+      readBacks = []
+      withdrawn = []
+      armed = []
+      readFailures = 0
+      hooks = {}
+      emit()
+    },
+    performList: (ticket: number) => effect {
+      if (hooks.list !== undefined) return try hooks.list(ticket)
+      const phone = try PhoneReminders
+      if (!phone.present) return true
+      const found = try Effect.option(phone.list())
+      return Option.isSome(found)
+    },
+    performOperate: (number: number, attempt: number, change: Reminder.Change, at: number) => effect {
+      const detail = fallback(number)
+      operated.push({ number, attempt, change, at })
+      emit()
+      if (hooks.operate !== undefined) return try hooks.operate(number, attempt, change, at, detail)
+      const phone = try PhoneReminders
+      if (phone.present && (change === "Schedule" || change === "Snooze" || change === "Reopen") && at > 0) {
+        const scheduled = try Effect.option(phone.schedule({ id: String(number), title: detail.title, body: detail.body, at, dueAt: at, alertMinutes: 0 }))
+        if (Option.isNone(scheduled)) return { result: "Unalerted" as const, reason: "AlarmFailed" as const }
+      }
+      return { result: "Done" as const, reason: "NoReason" as const }
+    },
+    performReadBack: (number: number, attempt: number, change: Reminder.Change, at: number) => effect {
+      const detail = fallback(number)
+      readBacks.push({ number, attempt })
+      emit()
+      if (hooks.readBack !== undefined) return try hooks.readBack(number, attempt, change, at, detail)
+      return { result: "Done" as const, reason: "NoReason" as const }
+    },
+    performWithdraw: (number: number) => effect {
+      const detail = fallback(number)
+      withdrawn.push(number)
+      emit()
+      if (hooks.withdraw !== undefined) {
+        try hooks.withdraw(number, detail)
+        return
+      }
+      const phone = try PhoneReminders
+      if (phone.present) {
+        const id = String(number)
+        const target = { sourceId: id, sourceRevision: "1", reminderId: id, occurrenceId: id, revision: "1" }
+        try ignore(phone.cancel({ id, target, operationId: `withdraw-${id}`, bindingHash: id }))
+      }
+    },
+    performArm: (number: number, revision: number, at: number) => effect {
+      const detail = fallback(number)
+      armed.push({ number, revision, at })
+      emit()
+      if (hooks.arm !== undefined) {
+        try hooks.arm(number, revision, at, detail)
+        return
+      }
+      const phone = try PhoneReminders
+      if (phone.present && at > 0) {
+        try ignore(phone.schedule({ id: String(number), title: detail.title, body: detail.body, at, dueAt: at, alertMinutes: 0 }))
+      }
+    },
+    noteReadFailure(): void {
+      readFailures += 1
+      emit()
+    },
+  }
+})
+
+effect function runEffect(
+  fx: NoticeReminders.Effect,
+  dispatch: (event: NoticeReminders.Event, by: Actor) => void!!,
+): void!!(NoticeRemindersDesk | PhoneReminders | Toasts.Machine | Said) {
+  const desk = try NoticeRemindersDesk
+  if (fx.tag === "Listing") {
+    if (fx.failed) {
+      desk.noteReadFailure()
+      try ignore(say("Couldn't read your reminders", true))
+    } else {
+      const ok = try desk.performList(fx.ticket)
+      try dispatch({ type: "listed", ticket: fx.ticket, ok }, "Phone")
+    }
+    return
+  }
+  const { reminder, does } = fx
+  switch (does.act) {
+    case "Operate": {
+      const outcome = try desk.performOperate(reminder, does.number, does.change, does.at)
+      try dispatch({ type: "answer", number: reminder, attempt: does.number, result: outcome.result, reason: outcome.reason }, "Phone")
+      return
+    }
+    case "ReadBack": {
+      const outcome = try desk.performReadBack(reminder, does.number, does.change, does.at)
+      try dispatch({ type: "answer", number: reminder, attempt: does.number, result: outcome.result, reason: outcome.reason }, "Phone")
+      return
+    }
+    case "Withdraw": {
+      try desk.performWithdraw(reminder)
+      return
+    }
+    case "Arm": {
+      try desk.performArm(reminder, does.number, does.at)
+      return
+    }
+  }
+}
+
+// spec/app/notices/reminders.md, "Alpha reads the owner's reminders, and only the newest read's answer is taken; the list is then current, or still marked out of date and its failure said once"
+/** Trigger a fresh read of the owner's notice-side reminders list. */
+export effect function readNoticeReminders(): boolean!!NoticeReminders.Machine {
+  const machine = try NoticeReminders.Machine
+  if (!NoticeReminders.canRead(try machine.get(), "Phone")) return false
+  return try contained(machine.send({ type: "read" }, "Phone"), "reading notice reminders")
+}
+
+// spec/app/notices/reminders.md, "The agent creates a reminder under a new number; while one is unconfirmed or not saved, another needs the owner's explicit choice, and past a few the agent is refused and the owner told until one is saved or discarded"
+/** Create a reminder approved by the owner and dispatch its scheduling operation. */
+export effect function createNoticeReminder(input: {
+  readonly number: number
+  readonly title: string
+  readonly body?: string
+  readonly at: number
+  readonly daily?: boolean
+  readonly approval: number
+  readonly insisted?: boolean
+  readonly signedIn: number
+}): boolean!!(NoticeReminders.Machine | NoticeRemindersDesk | Time) {
+  const machine = try NoticeReminders.Machine
+  const now = try (try Time).now()
+  const daily = input.daily ?? false
+  const insisted = input.insisted ?? false
+  const state = try machine.get()
+  if (!NoticeReminders.canCreate(state, input.number, input.at, daily, now, input.approval, insisted, input.signedIn, "Agent")) {
+    if (NoticeReminders.canRefuseCreate(state, "Agent")) {
+      try ignore(machine.send({ type: "refuseCreate" }, "Agent"))
+    }
+    return false
+  }
+  ;(try NoticeRemindersDesk).register({ number: input.number, title: input.title, body: input.body ?? "" })
+  const created = try contained(
+    machine.send({ type: "create", number: input.number, at: input.at, daily, now, approval: input.approval, insisted, signedIn: input.signedIn }, "Agent"),
+    "creating notice reminder",
+  )
+  if (created && NoticeReminders.canOperate(try machine.get(), input.number, now, "Phone")) {
+    try ignore(machine.send({ type: "operate", number: input.number, now }, "Phone"))
+  }
+  return created
+}
+
+// spec/app/notices/reminder.md, "Android posts a scheduled reminder only once its time has come, for the alarm of its current revision, while notifications may show"
+/** Ring a scheduled reminder at its current revision once its time has arrived and notifications are allowed. */
+export effect function ringNoticeReminder(number: number, revision: number, notifications: boolean): boolean!!(NoticeReminders.Machine | Time) {
+  const machine = try NoticeReminders.Machine
+  const now = try (try Time).now()
+  if (!NoticeReminders.canDue(try machine.get(), number, now, revision, notifications, "Phone")) return false
+  return try contained(machine.send({ type: "due", number, now, revision, notifications }, "Phone"), "ringing notice reminder")
+}
+
+// spec/app/notices/reminders.md, "The owner's decisions, the phone's ringing, changes made elsewhere and a deletion carried out reach the reminder they name"
+/** Apply an owner decision (Complete, Snooze, Reopen, Cancel) to a reminder and dispatch the operation. */
+export effect function decideNoticeReminder(input: {
+  readonly number: number
+  readonly change: Reminder.Change
+  readonly seen: number
+  readonly fresh: number
+  readonly target: number
+  readonly signedIn: number
+}): boolean!!(NoticeReminders.Machine | Time) {
+  const machine = try NoticeReminders.Machine
+  const now = try (try Time).now()
+  if (!NoticeReminders.canDecide(try machine.get(), input.number, input.change, input.seen, input.fresh, input.target, now, input.signedIn, "Owner")) return false
+  const ok = try contained(
+    machine.send({ type: "decide", number: input.number, change: input.change, seen: input.seen, fresh: input.fresh, target: input.target, now, signedIn: input.signedIn }, "Owner"),
+    "deciding notice reminder",
+  )
+  if (ok && NoticeReminders.canOperate(try machine.get(), input.number, now, "Phone")) {
+    try ignore(machine.send({ type: "operate", number: input.number, now }, "Phone"))
+  }
+  return ok
+}
+
+// spec/app/notices/reminders.md, "A restart marks every reminder to be picked up and the list out of date, and each reminder is then picked up once: read back if a change was sent, armed again if it has a time"
+/** Restart notice-side reminders and recover each one (reading back sent changes and re-arming scheduled alarms). */
+export effect function restartAndRecoverNoticeReminders(): void!!NoticeReminders.Machine {
+  const machine = try NoticeReminders.Machine
+  if (NoticeReminders.canRestart(try machine.get(), "Phone")) {
+    try ignore(machine.send({ type: "restart" }, "Phone"))
+  }
+  const interrupted = [...(try machine.get()).interrupted]
+  for (const number of interrupted) {
+    if (NoticeReminders.canRecover(try machine.get(), number, "Phone")) {
+      try ignore(machine.send({ type: "recover", number }, "Phone"))
+    }
+  }
+}
+
+const noticeRemindersMachine = Layer.provide(
+  Layer.effect(NoticeReminders.Machine, effect {
+    const inner = try NoticeReminders.Machine
+    const whole = try Whole
+    const desk = try NoticeRemindersDesk
+    const phone = try PhoneReminders
+    const runOut = (out: ReadonlyArray<NoticeReminders.Effect>): void!! => effect {
+      if (out.length === 0) return
+      const ctx = try whole.context
+      for (const fx of out) {
+        try contained(
+          Effect.provideContext(
+            Effect.provideService(
+              Effect.provideService(
+                runEffect(fx, (nextEvent, nextBy) => effect {
+                  const nextMoved = inner.send(nextEvent, nextBy) catch () => undefined
+                  if (nextMoved !== undefined) try runOut(nextMoved.out)
+                }),
+                NoticeRemindersDesk,
+                desk,
+              ),
+              PhoneReminders,
+              phone,
+            ),
+            ctx as Context.Context<Toasts.Machine | Said>,
+          ),
+          "notice reminder effect",
+        )
+      }
+    }
+    return {
+      changes: inner.changes,
+      get: inner.get,
+      effect send(event, by, isCurrent) {
+        const moved = try inner.send(event, by, isCurrent)
+        try runOut(moved.out)
+        return moved
+      },
+      effect receive(input, by) {
+        const moved = try inner.receive(input, by)
+        try runOut(moved.out)
+        return moved
+      },
+    }
+  }),
+  NoticeReminders.machine(),
+)
+
+/** Notice-side reminder scheduling, ringing, and post-restart alarm recovery coordinator. */
+export const noticeReminders = Layer.provideMerge(noticeRemindersMachine, noticeRemindersDesk)

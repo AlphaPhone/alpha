@@ -1,0 +1,67 @@
+// spec/app/startup/journal.md, "Story: Remember what went wrong"; spec/app/startup/journal.md, "A new entry pushes out the oldest once fifty are held"; spec/app/startup/journal.md, "At each start the journal drops what is older than thirty days, or dated further ahead than that"; spec/app/startup/journal.md, "Only a development build shows the journal"
+import * as Journal from "../../gen/app__startup__journal.effect.vibe"
+import { testMocks } from "../platform/device.vibe"
+import { SystemSettings } from "../platform/systemSettings.vibe"
+import { contained, reacting, started, together, untimed } from "../runtime/reactor.vibe"
+
+// spec/app/startup/journal.md, "A failure Alpha sees itself is recorded when it happens"
+/** Record a failure observed by Alpha itself into the bounded startup journal. */
+export effect function recordFailure(kind: Journal.Kind): boolean!!Journal.Machine {
+  const journal = try Journal.Machine
+  const state = try journal.get()
+  if (!Journal.canRecord(state, kind)) return false
+  return try contained(journal.send({ type: "record", kind, now: untimed }), "recording startup failure")
+}
+
+// spec/app/startup/journal.md, "Each exit Android reports is recorded once, at the time it happened"
+/** Record one numbered Android exit if newer than the last exit recorded. */
+export effect function harvestExit(exit: number, kind: Journal.Kind, at: number): boolean!!Journal.Machine {
+  const journal = try Journal.Machine
+  const state = try journal.get()
+  if (!Journal.canHarvest(state, exit, kind)) return false
+  return try contained(journal.send({ type: "harvest", exit, kind, at }), "harvesting Android exit")
+}
+
+// spec/app/startup/journal.md, "At each start the journal drops what is older than thirty days, or dated further ahead than that"
+/** Drop entries outside the 30-day retention window relative to Alpha's clock. */
+export effect function pruneJournal(): boolean!!Journal.Machine {
+  return try contained((try Journal.Machine).send({ type: "prune", now: untimed }), "pruning startup journal")
+}
+
+// spec/app/startup/journal.md, "Only a development build clears the journal, and cleared exits do not come back"
+/** Clear the journal entries when running in a development build. */
+export effect function clearJournal(testBuild: boolean = testMocks()): boolean!!Journal.Machine {
+  const journal = try Journal.Machine
+  const state = try journal.get()
+  if (!Journal.canClear(state, testBuild)) return false
+  return try contained(journal.send({ type: "clear", testBuild }), "clearing startup journal")
+}
+
+// spec/app/startup/journal.md, "Each exit Android reports is recorded once, at the time it happened"
+/** Read Android's problem log and harvest any crash or ANR exits newer than the last recorded exit. */
+export effect function harvestSystemProblems(): void!!(Journal.Machine | SystemSettings) {
+  const found = try (try SystemSettings).problems()
+  if (Option.isNone(found)) return
+  const journal = try Journal.Machine
+  let exit = (try journal.get()).seen
+  for (const problem of found.value) {
+    exit += 1
+    const kind: Journal.Kind = typeof problem.reason === "string" && problem.reason.toLowerCase().includes("anr") ? "StoppedAnswering" : "Crashed"
+    const at = typeof problem.at === "number" && Number.isFinite(problem.at) ? problem.at : untimed
+    if (Journal.canHarvest(try journal.get(), exit, kind)) {
+      try ignore(journal.send({ type: "harvest", exit, kind, at }))
+    }
+  }
+}
+
+const journalMachine = reacting(Journal, {
+  keep: 1,
+  open: [{ type: "prune", now: untimed }],
+})
+
+const harvesting = started(effect {
+  try harvestSystemProblems()
+}, "harvesting startup problem exits")
+
+/** Persistent bounded startup failure journal (capacity 50, 30-day retention). */
+export const startupJournal = together(journalMachine, harvesting)

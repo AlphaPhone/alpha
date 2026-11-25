@@ -55,4 +55,10 @@ export const mounts: readonly Mount[] = [
   at("settings/update", () => import("./update/index.tsx")),
   at("overlay", () => import("./update/overlay.tsx")),
   at("view:Browser", () => import("./browser/index.tsx")),
+  at("overlay", () => import("./approvals/index.tsx")),
+  at("overlay", () => import("./passwords/index.tsx")),
+  at("overlay", () => import("./startup/index.tsx")),
+  at("overlay", () => import("./notices/Shade.tsx")),
+  at("notice", () => import("./notices/UndoBar.tsx")),
+  at("settings/account", () => import("./account/index.tsx").then((m) => ({ default: m.accountSettingsArea }))),
 ];

@@ -1,0 +1,336 @@
+// spec/app/startup/index.md, "Story: Come up knowing where Alpha runs"; spec/app/startup/index.md, "Story: Start in mock mode only in a test build"; spec/app/startup/index.md, "Story: Show the surface that fits"; spec/app/startup/index.md, "Story: Wait for the agent"; spec/app/startup/index.md, "Story: Be called up as the assistant"; spec/app/startup/call.md, "Story: Listen only when I just asked for it"
+import * as Startup from "../../gen/app__startup.effect.vibe"
+import type * as Access from "../../gen/app__startup__access.effect.vibe"
+import type * as Call from "../../gen/app__startup__call.ts"
+import type * as Recovery from "../../gen/app__startup__recovery.effect.vibe"
+import * as Shell from "../../gen/app__shell.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { Device, native, testMocks } from "../platform/device.vibe"
+import { SystemSettings } from "../platform/systemSettings.vibe"
+import { type Job, answer, contained, due, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
+import { startupInstance } from "./instance.vibe"
+import { startupJournal } from "./journal.vibe"
+import { closeAssistantSurface, startupRecovery } from "./recovery.vibe"
+import { beginWalkthrough, startupReview } from "./settingsAccess.vibe"
+
+/** Phone facts returned by a Startup read. */
+export interface StartupFacts {
+  readonly launcher: boolean
+  readonly assistant: boolean
+  readonly image: boolean
+  readonly pregrants: boolean
+  readonly contacts: boolean
+  readonly locale: string
+  readonly hours: Startup.TimeStyle
+}
+
+/** Recorded assistant invocation raised once Startup admits a call. */
+export interface RaisedCall {
+  readonly origin: Call.Origin
+  readonly listening: boolean
+  readonly cold: boolean
+}
+
+/** Snapshot of Startup host metadata (formatting, raised calls, and agent connection retry state). */
+export interface StartupHostSnapshot {
+  readonly presentation: Startup.Presentation | undefined
+  readonly locale: string
+  readonly hours: Startup.TimeStyle
+  readonly raisedCalls: ReadonlyArray<RaisedCall>
+  readonly retryCount: number
+  readonly retrying: boolean
+  readonly retryBackoffMs: number
+  readonly agentHealthy: boolean | undefined
+}
+
+/** Optional hooks for testing or native integration of Startup reads, flags, and agent health. */
+export interface StartupHooks {
+  readonly phone?: boolean
+  readonly testBuild?: boolean
+  readonly mockAsked?: boolean
+  readonly fixturesAsked?: boolean
+  readFacts?(ticket: number): Option.Option<StartupFacts>!!
+  checkAgent?(): Startup.Outcome!!
+  onRaise?(call: RaisedCall): void!!
+}
+
+/** Injectable host desk for Startup boot, formatting, agent retry, and assistant call dispatch. */
+export interface StartupDeskService {
+  snapshot(): StartupHostSnapshot
+  subscribe(listener: () => void): () => void
+  setHooks(hooks: Partial<StartupHooks>): void
+  reset(): void
+  bootArgs(): { readonly phone: boolean; readonly testBuild: boolean; readonly mockAsked: boolean; readonly fixturesAsked: boolean }
+  readFacts(ticket: number): Option.Option<StartupFacts>!!(Device | SystemSettings)
+  checkAgent(): Startup.Outcome!!Agent
+  recordFormat(locale: string, hours: Startup.TimeStyle): void
+  recordPresentation(presentation: Startup.Presentation): void
+  recordRaise(call: RaisedCall): void!!
+  beginRetry(): number
+  finishRetry(outcome: Startup.Outcome): void
+}
+
+export service StartupDesk: StartupDeskService {}
+
+module env {
+  /** Browser locale when available; cautious fallback otherwise. @throws {never} */
+  export function currentLocale(): string {
+    return typeof navigator !== "undefined" && typeof navigator.language === "string" && navigator.language !== ""
+      ? navigator.language
+      : "en-US"
+  }
+  /** Query-string check for mock or fixture flags (only ever honored when testBuild is true). @throws {never} */
+  export function queryFlag(name: string): boolean {
+    if (typeof window === "undefined") return false
+    try {
+      const value = new URLSearchParams(window.location.search).get(name)
+      return value === "1" || value === "true"
+    } catch {
+      return false
+    }
+  }
+}
+import { currentLocale, queryFlag } from env
+
+const initialHost: StartupHostSnapshot = {
+  presentation: undefined,
+  locale: "en-US",
+  hours: "ByLocale",
+  raisedCalls: [],
+  retryCount: 0,
+  retrying: false,
+  retryBackoffMs: 0,
+  agentHealthy: undefined,
+}
+
+const startupDesk = Layer.sync(StartupDesk, () => {
+  let state: StartupHostSnapshot = initialHost
+  let hooks: Partial<StartupHooks> = {}
+  const listeners = new Set<() => void>()
+  const emit = (next: StartupHostSnapshot) => {
+    state = next
+    for (const listener of [...listeners]) listener()
+  }
+  return {
+    snapshot: () => state,
+    subscribe(listener: () => void): () => void {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+    setHooks(next: Partial<StartupHooks>): void {
+      hooks = { ...hooks, ...next }
+    },
+    reset(): void {
+      hooks = {}
+      emit(initialHost)
+    },
+    bootArgs() {
+      return {
+        phone: hooks.phone ?? native(),
+        testBuild: hooks.testBuild ?? testMocks(),
+        mockAsked: hooks.mockAsked ?? queryFlag("mock"),
+        fixturesAsked: hooks.fixturesAsked ?? queryFlag("fixtures"),
+      }
+    },
+    readFacts: (ticket: number) => effect {
+      if (hooks.readFacts !== undefined) return try hooks.readFacts(ticket)
+      const [caps, report] = try.all [(try Device).capabilities(), (try SystemSettings).report()]
+      return Option.some<StartupFacts>({
+        launcher: report.launcher,
+        assistant: false,
+        image: caps.image,
+        pregrants: caps.image,
+        contacts: caps.contacts,
+        locale: currentLocale(),
+        hours: "ByLocale",
+      })
+    },
+    checkAgent: () => effect {
+      if (hooks.checkAgent !== undefined) return try hooks.checkAgent()
+      const agent = try Agent
+      const health = try Effect.option(tryPromise(() => agent.runtime.request("/api/health")))
+      return Option.isSome(health) ? "Connected" as const : "Unreachable" as const
+    },
+    recordFormat(locale: string, hours: Startup.TimeStyle): void {
+      emit({ ...state, locale, hours })
+    },
+    recordPresentation(presentation: Startup.Presentation): void {
+      emit({ ...state, presentation })
+    },
+    recordRaise: (call: RaisedCall) => effect {
+      emit({ ...state, raisedCalls: [...state.raisedCalls, call] })
+      if (hooks.onRaise !== undefined) try hooks.onRaise(call)
+    },
+    beginRetry(): number {
+      const retryCount = state.retryCount + 1
+      const retryBackoffMs = Math.min(8000, 1000 * Math.pow(2, retryCount - 1))
+      emit({ ...state, retryCount, retrying: true, retryBackoffMs })
+      return retryBackoffMs
+    },
+    finishRetry(outcome: Startup.Outcome): void {
+      emit({ ...state, retrying: false, agentHealthy: outcome === "Connected" })
+    },
+  }
+})
+
+// spec/app/startup/index.md, "The first answer decides the surface, tells Home which it is, and begins the walkthrough off the assistant-only surface; every answer says what the phone admits and how it writes times"
+effect function readStartupFacts(ticket: number): Startup.Event!!(StartupDesk | Device | SystemSettings) {
+  const found = try (try StartupDesk).readFacts(ticket)
+  if (Option.isNone(found)) return { type: "miss", ticket }
+  const facts = found.value
+  return {
+    type: "learn",
+    ticket,
+    launcher: facts.launcher,
+    assistant: facts.assistant,
+    image: facts.image,
+    pregrants: facts.pregrants,
+    contacts: facts.contacts,
+    locale: facts.locale,
+    hours: facts.hours,
+  }
+}
+
+function carry(fx: Startup.Effect): Job<Startup.Event, StartupDesk | Device | SystemSettings | Shell.Machine | Access.Machine | Recovery.Machine, []> {
+  return match (fx) {
+    when { tag: "ReadFacts", let ticket }: answer(`startup-facts-${ticket}`, readStartupFacts(ticket), { type: "miss", ticket } as const);
+    when { tag: "Admit", let image, let contacts }: run("startup-admit", effect {
+      try ignore((try Shell.Machine).send({ type: "admit", image, contacts }))
+    });
+    when { tag: "Format", let locale, let hours }: run("startup-format", effect {
+      (try StartupDesk).recordFormat(locale, hours)
+    });
+    when { tag: "Present", let presentation }: run("startup-present", effect {
+      (try StartupDesk).recordPresentation(presentation)
+      try (try Device).mark("presentation", presentation)
+    });
+    when { tag: "Walk", let phone, let pregrants }: run("startup-walk", beginWalkthrough(phone, pregrants));
+    when { tag: "Raise", let origin, let listening, let cold }: run("startup-raise", effect {
+      try (try StartupDesk).recordRaise({ origin, listening, cold })
+      try ignore((try Shell.Machine).send({ type: "raise", detent: "Full" }))
+    });
+    when { tag: "CloseSurface" }: run("startup-close-surface", ignore(closeAssistantSurface()));
+  }
+}
+
+const bootMachine = reacting(Startup, {
+  open: effect {
+    const args = (try StartupDesk).bootArgs()
+    return [{ type: "start", phone: args.phone, testBuild: args.testBuild, mockAsked: args.mockAsked, fixturesAsked: args.fixturesAsked, at: untimed }] as const
+  },
+  carry,
+  timers: (state) => {
+    const list: Array<ReturnType<typeof due<Startup.Event, []>>> = []
+    const readDue = state.askedAt + 10000
+    if (Startup.canLate(state, state.facts.ticket, readDue)) {
+      list.push(due<Startup.Event, []>("startup-read-timeout", readDue, { type: "late", ticket: state.facts.ticket, now: readDue }))
+    }
+    const waitDue = state.startedAt + 30000
+    if (Startup.canTimedOut(state, waitDue)) {
+      list.push(due<Startup.Event, []>("startup-agent-timeout", waitDue, { type: "timedOut", now: waitDue }))
+    }
+    return list
+  },
+})
+
+// spec/app/startup/index.md, "Coming back to the front reads the facts again"
+const resuming = started(effect {
+  const device = try Device
+  const boot = try Startup.Machine
+  try Stream.runForEach(Stream.filter(device.visible, (shown) => shown), effect () => {
+    if (Startup.canResume(try boot.get())) {
+      try ignore(boot.send({ type: "resume", now: untimed }))
+    }
+  })
+}, "startup facts resume")
+
+// spec/app/startup/index.md, "The connection resolves once: connected, unreachable, offline or being recovered, each said on Home"
+/** Resolve Startup's agent connection wait once. */
+export effect function resolveConnection(how: Startup.Outcome): boolean!!(Startup.Machine | StartupDesk) {
+  const boot = try Startup.Machine
+  if (!Startup.canResolve(try boot.get(), how)) return false
+  const ok = try contained(boot.send({ type: "resolve", how }), "resolving startup connection")
+  if (ok) (try StartupDesk).finishRetry(how)
+  return ok
+}
+
+// spec/app/startup/index.md, "Story: Wait for the agent"
+/** Retry connecting to the resident agent with bounded exponential backoff, updating StartupDesk and resolving Startup if still Pending. */
+export effect function retryAgentConnection(): Startup.Outcome!!(Startup.Machine | StartupDesk | Agent | Time) {
+  const desk = try StartupDesk
+  const backoff = desk.beginRetry()
+  const time = try Time
+  try time.until((try time.now()) + backoff)
+  const outcome = try desk.checkAgent()
+  desk.finishRetry(outcome)
+  const boot = try Startup.Machine
+  if (Startup.canResolve(try boot.get(), outcome)) {
+    try ignore(boot.send({ type: "resolve", how: outcome }))
+  }
+  return outcome
+}
+
+// spec/app/startup/index.md, "Mock mode shows its banner on every surface, and Exit mock mode leaves it"
+/** Exit mock mode when currently mocking. */
+export effect function exitMockMode(): boolean!!Startup.Machine {
+  const boot = try Startup.Machine
+  if (!Startup.canExitMock(try boot.get())) return false
+  return try contained(boot.send({ type: "exitMock" }), "exiting mock mode")
+}
+
+// spec/app/startup/index.md, "The assistant surface notes each call when it arrives, and the newest replaces one not yet taken"
+/** Note an incoming assistant invocation on the assistant surface (or while starting). */
+export effect function summonAssistant(
+  origin: Call.Origin,
+  trusted: boolean,
+  locked: boolean,
+  cold: boolean,
+  account: number,
+): boolean!!Startup.Machine {
+  const boot = try Startup.Machine
+  if (!Startup.canSummon(try boot.get())) return false
+  return try contained(boot.send({ type: "summon", origin, trusted, locked, cold, at: untimed, account }), "summoning assistant")
+}
+
+// spec/app/startup/index.md, "A call is taken once Home takes input, and raises Ask Alpha listening only as Call says"
+/** Take the waiting assistant call once the surface is usable. */
+export effect function takeAssistantCall(over: boolean, account: number): boolean!!Startup.Machine {
+  const boot = try Startup.Machine
+  if (!Startup.canTake(try boot.get(), over)) return false
+  return try contained(boot.send({ type: "take", over, account, now: untimed }), "taking assistant call")
+}
+
+// spec/app/startup/index.md, "Close asks for the assistant surface to end, which Recovery ends once"
+/** Close the assistant-only surface. */
+export effect function closeAssistant(): boolean!!Startup.Machine {
+  const boot = try Startup.Machine
+  if (!Startup.canLeave(try boot.get())) return false
+  return try contained(boot.send({ type: "leave" }), "closing assistant surface")
+}
+
+// spec/app/startup/index.md, "The connection resolves once: connected, unreachable, offline or being recovered, each said on Home"
+const probing = started(effect {
+  const boot = try Startup.Machine
+  const desk = try StartupDesk
+  try Stream.runHead(Stream.filter(boot.changes, (state) => state.facts.status !== "Idle"))
+  const outcome = try desk.checkAgent()
+  if (outcome !== "Pending" && Startup.canResolve(try boot.get(), outcome)) {
+    try ignore(boot.send({ type: "resolve", how: outcome }))
+    desk.finishRetry(outcome)
+  }
+}, "probing resident agent connection")
+
+/** Startup core machines without Access.Machine (safe alongside existing `startupReview` in resident.vibe). */
+export const startupCore = together(
+  startupDesk,
+  bootMachine,
+  resuming,
+  probing,
+  startupInstance,
+  startupJournal,
+  startupRecovery,
+)
+
+/** Complete Startup resident layer combining boot, instance, journal, recovery, and access walkthrough/review. */
+export const startupResident = together(startupCore, startupReview)

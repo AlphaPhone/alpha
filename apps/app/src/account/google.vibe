@@ -1,0 +1,204 @@
+// spec/app/account/google.md, "Story: See my Google accounts"; spec/app/account/google.md, "Story: Connect a Google account"; spec/app/account/google.md, "Story: Disconnect a Google account"; spec/app/account/access.md, "Story: Decide what the agent may change in Google"
+import type { GoogleStatus } from "@elizaos/cloud"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import * as Access from "../../gen/app__account__access.effect.vibe"
+import * as Google from "../../gen/app__account__google.effect.vibe"
+import * as Session from "../../gen/app__account__session.effect.vibe"
+import { Cloud } from "../platform/cloud.vibe"
+import { Device } from "../platform/device.vibe"
+import { ask } from "../platform/remote.vibe"
+import { type Job, answer, contained, due, reacting, run, started, together, untimed } from "../runtime/index.vibe"
+import { AccountShelf, type ConnectedGoogleAccount } from "./bridge.vibe"
+import { accountIdNumber, secondsTime } from "./clock.vibe"
+
+const GoogleAccountEntry = Schema.Struct({
+  connected: Schema.Boolean,
+  identity: Schema.NullOr(Schema.Struct({ email: Schema.String })),
+  grantedCapabilities: Schema.Array(Schema.String),
+  connectionId: Schema.NullOr(Schema.String),
+  linkedAt: Schema.NullOr(Schema.String),
+})
+
+const GoogleAccountsList = Schema.Array(GoogleAccountEntry)
+
+function linkFromCaps(id: number, caps: ReadonlyArray<string>): Google.Link {
+  const modify = caps.includes("google.gmail.manage") || caps.includes("google.gmail.drafts")
+  const read = modify || caps.includes("google.gmail.triage") || caps.includes("google.gmail.mailbox")
+  const send = caps.includes("google.gmail.send")
+  return { id, read, modify, send }
+}
+
+function mappedAccounts(entries: ReadonlyArray<{ readonly connected: boolean; readonly identity: { readonly email: string } | null; readonly grantedCapabilities: ReadonlyArray<string>; readonly connectionId: string | null; readonly linkedAt: string | null }>): {
+  readonly links: Google.Link[]
+  readonly display: ReadonlyArray<ConnectedGoogleAccount>
+} {
+  const links: Google.Link[] = []
+  const display: ConnectedGoogleAccount[] = []
+  for (const item of entries) {
+    if (!item.connected) continue
+    const grantId = item.connectionId ?? ""
+    const email = item.identity?.email ?? ""
+    const key = grantId || email
+    if (key === "") continue
+    const id = accountIdNumber(key)
+    const link = linkFromCaps(id, item.grantedCapabilities)
+    links.push(link)
+    display.push({ id, grantId, email, linkedAt: item.linkedAt ?? "", read: link.read, modify: link.modify, send: link.send })
+  }
+  return { links, display }
+}
+
+effect function readGoogleAccounts(check: number): Google.Event!!(Cloud | AccountShelf) {
+  const cloud = try Cloud
+  const shelf = try AccountShelf
+  return effect {
+    const listed = ask(Cloud, HttpClientRequest.get("/api/v1/eliza/google/accounts"), GoogleAccountsList) catch () => undefined
+    if (listed !== undefined) {
+      const mapped = mappedAccounts(listed)
+      try shelf.update((now) => ({ ...now, googleAccounts: mapped.display }))
+      return { type: "listed", ticket: check, ok: true, links: mapped.links } satisfies Google.Event
+    }
+    const single: GoogleStatus = try timeout(tryPromise(() => cloud.client.googleStatus()), "10 seconds")
+    const mapped = mappedAccounts([single])
+    try shelf.update((now) => ({ ...now, googleAccounts: mapped.display }))
+    return { type: "listed", ticket: check, ok: true, links: mapped.links } satisfies Google.Event
+  } catch () => ({ type: "listed", ticket: check, ok: false, links: [] } satisfies Google.Event)
+}
+
+type GoogleCapability = "google.basic_identity" | "google.calendar.read" | "google.calendar.write" | "google.gmail.drafts" | "google.gmail.mailbox" | "google.gmail.manage" | "google.gmail.send" | "google.gmail.triage"
+
+effect function openGoogleConsent(read: boolean, modify: boolean, send: boolean): void!!(Cloud | AccountShelf) {
+  const cloud = try Cloud
+  const shelf = try AccountShelf
+  const capabilities: GoogleCapability[] = ["google.basic_identity", "google.calendar.read", "google.calendar.write"]
+  if (read || modify) {
+    capabilities.push("google.gmail.triage", "google.gmail.mailbox")
+  }
+  if (modify) {
+    capabilities.push("google.gmail.manage", "google.gmail.drafts")
+  }
+  if (send) {
+    capabilities.push("google.gmail.send")
+  }
+  const startedConnect = timeout(tryPromise(() => cloud.client.googleConnect({ capabilities })), "10 seconds") catch () => undefined
+  if (startedConnect !== undefined) {
+    try shelf.openExternal(startedConnect.authUrl)
+  }
+}
+
+effect function disconnectGoogleAccount(ticket: number, account: number): Google.Event!!(Cloud | AccountShelf) {
+  const cloud = try Cloud
+  const shelf = try AccountShelf
+  const found = shelf.snapshot().googleAccounts.find((item) => item.id === account)
+  const choice = found !== undefined && found.grantId !== "" ? { grantId: found.grantId } : undefined
+  try ignore(timeout(tryPromise(() => cloud.client.googleDisconnect(choice)), "10 seconds"))
+  return { type: "disconnectAnswered", ticket }
+}
+
+function carryGoogle(fx: Google.Effect): Job<Google.Event, Cloud | AccountShelf, []> {
+  return match (fx) {
+    when { tag: "ReadAccounts", let check }: answer("read google accounts", readGoogleAccounts(check), { type: "listed", ticket: check, ok: false, links: [] });
+    when { tag: "OpenConsent", let read, let modify, let send }: run("open google consent", openGoogleConsent(read, modify, send));
+    when { tag: "Disconnect", let ticket, let account }: answer("disconnect google", disconnectGoogleAccount(ticket, account), { type: "disconnectAnswered", ticket });
+    when { tag: "PauseSync", let account }: run(`pause sync ${account}`, effect {
+      try (try AccountShelf).update((now) => ({
+        ...now,
+        pausedSyncAccounts: now.pausedSyncAccounts.includes(account) ? now.pausedSyncAccounts : [...now.pausedSyncAccounts, account],
+      }))
+    });
+    when { tag: "ResumeSync", let account }: run(`resume sync ${account}`, effect {
+      try (try AccountShelf).update((now) => ({
+        ...now,
+        pausedSyncAccounts: now.pausedSyncAccounts.filter((one) => one !== account),
+      }))
+    });
+    when { tag: "Forget", let account }: run(`forget mail ${account}`, effect {
+      try (try AccountShelf).update((now) => ({
+        ...now,
+        forgottenMailAccounts: now.forgottenMailAccounts.includes(account) ? now.forgottenMailAccounts : [...now.forgottenMailAccounts, account],
+      }))
+    });
+  }
+}
+
+function googleTimers(state: Google.Google) {
+  return state.tab.open
+    ? [due<Google.Event, []>("googleConsentTimeout", state.tab.at + Google.consentLimit, { type: "consentTimedOut", now: untimed })]
+    : []
+}
+
+const resumeGoogleConsent = started(effect {
+  const device = try Device
+  const google = try Google.Machine
+  try Stream.runForEach(Stream.filter(device.visible, (shown) => shown), effect () => {
+    const current = try google.get()
+    if (Google.canResumed(current)) {
+      try contained(google.send({ type: "resumed" }), "google consent resumed")
+    }
+  })
+}, "google consent resume watcher")
+
+/** Connected Google accounts, OAuth consent browser visit, and disconnect readback machine. */
+export const googleMachine = Layer.provide(
+  together(
+    reacting(Google, { keep: 1, open: [{ type: "restart", signIn: 0 }], carry: carryGoogle, timers: googleTimers }),
+    resumeGoogleConsent,
+  ),
+  secondsTime,
+)
+
+schema StoredAccessSchema {
+  readonly mail: boolean
+  readonly calendar: boolean
+}
+
+function accessStorageKey(account: number): string {
+  return `alpha/account/google-access/${account}@1`
+}
+
+type AccessPorts = KeyValueStore.KeyValueStore | Device | Session.Machine
+
+effect function readAgentAccess(check: number): Access.Event!!AccessPorts {
+  const store = try KeyValueStore.KeyValueStore
+  const session = try (try Session.Machine).get()
+  if (session.account <= 0) {
+    return { type: "accessRead", ticket: check, ok: true, mail: false, calendar: false }
+  }
+  const raw = store.get(accessStorageKey(session.account)) catch () => undefined
+  if (raw === undefined) {
+    return { type: "accessRead", ticket: check, ok: true, mail: false, calendar: false }
+  }
+  const decoded = Schema.decodeUnknownOption(Schema.fromJsonString(StoredAccessSchema))(raw)
+  if (Option.isNone(decoded)) {
+    return { type: "accessRead", ticket: check, ok: true, mail: false, calendar: false }
+  }
+  return { type: "accessRead", ticket: check, ok: true, mail: decoded.value.mail, calendar: decoded.value.calendar }
+}
+
+effect function saveAgentAccess(ticket: number, mail: boolean, calendar: boolean): Access.Event!!AccessPorts {
+  const device = try Device
+  const store = try KeyValueStore.KeyValueStore
+  const session = try (try Session.Machine).get()
+  const enforced = try device.agentConsent({ gmailChanges: mail, calendarEdits: calendar })
+  if (!enforced) {
+    return { type: "accessSaved", ticket, ok: false }
+  }
+  if (session.account > 0) {
+    const written = effect {
+      try store.set(accessStorageKey(session.account), JSON.stringify({ mail, calendar }))
+      return true
+    } catch () => false
+    return { type: "accessSaved", ticket, ok: written }
+  }
+  return { type: "accessSaved", ticket, ok: true }
+}
+
+function carryAccess(fx: Access.Effect): Job<Access.Event, AccessPorts, []> {
+  return match (fx) {
+    when { tag: "ReadAccess", let check }: answer("read google access", readAgentAccess(check), { type: "accessRead", ticket: check, ok: false, mail: false, calendar: false });
+    when { tag: "SaveAccess", let ticket, let mail, let calendar }: answer("save google access", saveAgentAccess(ticket, mail, calendar), { type: "accessSaved", ticket, ok: false });
+  }
+}
+
+/** Per-sign-in agent Google write toggles (mail changes and calendar edits), enforced via Device.agentConsent. */
+export const accessMachine = reacting(Access, { keep: 1, open: [{ type: "restart" }], carry: carryAccess })

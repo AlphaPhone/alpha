@@ -1,4 +1,15 @@
-// spec/app/startup/recovery.md, "Story: See that something went wrong, and get out of it"; spec/app/startup/recovery.md, "Story: Keep my drafts through a rebuild"
+// spec/app/startup/recovery.md, "Story: See that something went wrong, and get out of it"; spec/app/startup/recovery.md, "Story: Come back after the page is lost"; spec/app/startup/recovery.md, "Story: Keep my drafts through a rebuild"
+import * as Layers from "../../gen/app__shell__layers.effect.vibe"
+import type { Target } from "../../gen/app__settings__android.ts"
+import type { Actor } from "../../gen/app__startup__actor.ts"
+import type * as Journal from "../../gen/app__startup__journal.effect.vibe"
+import * as Recovery from "../../gen/app__startup__recovery.effect.vibe"
+import { SystemSettings } from "../platform/systemSettings.vibe"
+import { Job, answer, contained, reacting, run, started, together, untimed, wake } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
+import { Engagements } from "../update/activity.vibe"
+import { recordFailure } from "./journal.vibe"
+
 module page {
   /** Reloads after the owner's press before a shell or any editor opened. The failed shell's runtime is never needed for this. @throws {never} */
   export function reloadBeforeMount(): void {
@@ -6,3 +17,248 @@ module page {
   }
 }
 export { reloadBeforeMount } from page
+
+/** Hooks for testing or integrating native WebView rebuild, draft flush, and Switch Home handoffs. */
+export interface RecoveryHooks {
+  flushDrafts(side: Recovery.Side, ticket: number): Option.Option<boolean>!!
+  rebuildPage(side: Recovery.Side, page: number, at: number): void!!
+  switchHome(route: Recovery.Route, ticket: number): boolean!!
+  cancelDialogs(side: Recovery.Side): void!!
+}
+
+/** Injectable host coordinator for Recovery side effects and draft-flush hooks. */
+export interface RecoveryDeskService {
+  readonly rebuilds: ReadonlyArray<{ readonly side: Recovery.Side; readonly page: number; readonly at: number }>
+  readonly cancelledDialogs: ReadonlyArray<Recovery.Side>
+  readonly switchAttempts: ReadonlyArray<Recovery.Route>
+  setHooks(hooks: Partial<RecoveryHooks>): void
+  registerDraftFlusher(flusher: (side: Recovery.Side) => boolean!!): () => void
+  reset(): void
+  flushDrafts(side: Recovery.Side, ticket: number): Option.Option<boolean>!!Engagements
+  rebuildPage(side: Recovery.Side, page: number, at: number): void!!
+  switchHome(route: Recovery.Route, ticket: number): boolean!!SystemSettings
+  cancelDialogs(side: Recovery.Side): void!!Layers.Machine
+}
+
+export service RecoveryDesk: RecoveryDeskService {}
+
+const routeTargets: Record<Recovery.Route, Target> = {
+  Chooser: "AndroidHome",
+  DefaultApps: "DefaultApps",
+  AndroidSettings: "DisplaySettings",
+}
+
+const recoveryHold = "startup-recovery"
+
+const recoveryDesk = Layer.sync(RecoveryDesk, () => {
+  const rebuilds: Array<{ readonly side: Recovery.Side; readonly page: number; readonly at: number }> = []
+  const cancelledDialogs: Recovery.Side[] = []
+  const switchAttempts: Recovery.Route[] = []
+  const flushers = new Set<(side: Recovery.Side) => boolean!!>()
+  let hooks: Partial<RecoveryHooks> = {}
+  return {
+    rebuilds,
+    cancelledDialogs,
+    switchAttempts,
+    setHooks(next: Partial<RecoveryHooks>): void {
+      hooks = { ...hooks, ...next }
+    },
+    registerDraftFlusher(flusher: (side: Recovery.Side) => boolean!!): () => void {
+      flushers.add(flusher)
+      return () => { flushers.delete(flusher) }
+    },
+    reset(): void {
+      rebuilds.length = 0
+      cancelledDialogs.length = 0
+      switchAttempts.length = 0
+      flushers.clear()
+      hooks = {}
+    },
+    flushDrafts: (side: Recovery.Side, ticket: number) => effect {
+      if (hooks.flushDrafts !== undefined) return try hooks.flushDrafts(side, ticket)
+      const ended = try (try Engagements).endEdit()
+      let ok = ended
+      for (const flusher of flushers) {
+        const saved = (try flusher(side))
+        ok = ok && saved
+      }
+      return Option.some(ok)
+    },
+    rebuildPage: (side: Recovery.Side, pageNumber: number, at: number) => effect {
+      rebuilds.push({ side, page: pageNumber, at })
+      if (hooks.rebuildPage !== undefined) try hooks.rebuildPage(side, pageNumber, at)
+    },
+    switchHome: (route: Recovery.Route, ticket: number) => effect {
+      switchAttempts.push(route)
+      if (hooks.switchHome !== undefined) return try hooks.switchHome(route, ticket)
+      const opened = try (try SystemSettings).open(routeTargets[route], "")
+      return opened !== "NotAtAll"
+    },
+    cancelDialogs: (side: Recovery.Side) => effect {
+      cancelledDialogs.push(side)
+      if (hooks.cancelDialogs !== undefined) {
+        try hooks.cancelDialogs(side)
+        return
+      }
+      const layers = try Layers.Machine
+      const state = try layers.get()
+      for (const layer of state.open) {
+        if (layer.kind === "DialogLayer" && Layers.canCloseLayer(try layers.get(), layer.id)) {
+          try ignore(layers.send({ type: "closeLayer", id: layer.id }))
+        }
+      }
+    },
+  }
+})
+
+// spec/app/startup/recovery.md, "Reload first asks every area holding a draft on that surface to put it on the phone, and rebuilds when they have"
+effect function runFlush(side: Recovery.Side, ticket: number): Option.Option<Recovery.Event>!!(RecoveryDesk | Engagements) {
+  const result = try (try RecoveryDesk).flushDrafts(side, ticket)
+  if (Option.isNone(result)) return Option.none()
+  return Option.some<Recovery.Event>({ type: "flushed", side, ticket, ok: result.value, now: untimed })
+}
+
+function carry(fx: Recovery.Effect): Job<Recovery.Event, RecoveryDesk | Journal.Machine | Layers.Machine | SystemSettings | Engagements | Time, [Actor]> {
+  return match (fx) {
+    when { tag: "Record", let kind }: run(`recovery-record-${kind}`, ignore(recordFailure(kind)), "Owner" as Actor);
+    when { tag: "CancelDialogs", let side }: run(`recovery-cancel-${side}`, effect { try (try RecoveryDesk).cancelDialogs(side) }, "Owner" as Actor);
+    when { tag: "Rebuild", let side, let page, let at }: wake(
+      `recovery-rebuild-${side}`,
+      at,
+      { type: "rebuilt", side, number: page, at: untimed } as const,
+      "Owner" as Actor,
+    );
+    when { tag: "Flush", let side, let ticket }: Job.Run({
+      key: `recovery-flush-${side}`,
+      answers: Stream.unwrap(effect {
+        const res = try runFlush(side, ticket)
+        return Option.isSome(res) ? Stream.succeed(res.value) : Stream.empty
+      }),
+      lost: Option.some<Recovery.Event>({ type: "flushed", side, ticket, ok: false, now: untimed }),
+      by: ["Owner" as Actor],
+    });
+    when { tag: "SwitchHome", let route, let ticket }: answer(
+      `recovery-switch-${ticket}`,
+      effect {
+        const opened = try (try RecoveryDesk).switchHome(route, ticket)
+        return opened ? { type: "opened", ticket } as const : { type: "notOpened", ticket } as const
+      },
+      { type: "notOpened", ticket } as const,
+      "Owner" as Actor,
+    );
+  }
+}
+
+const recoveryMachine = reacting(Recovery, { carry })
+
+// spec/app/startup/recovery.md, "The page is rebuilt when its time has come, under its own number, unless its surface was closed"
+const recordingRebuilds = started(effect {
+  const recovery = try Recovery.Machine
+  const desk = try RecoveryDesk
+  let homeNumber = 1
+  let assistantNumber = 1
+  try Stream.runForEach(recovery.changes, effect (state) => {
+    if (state.home.number > homeNumber) {
+      homeNumber = state.home.number
+      try desk.rebuildPage("HomeSide", state.home.number, state.home.due)
+    }
+    if (state.assistant.number > assistantNumber) {
+      assistantNumber = state.assistant.number
+      try desk.rebuildPage("AssistantSide", state.assistant.number, state.assistant.due)
+    }
+  })
+}, "observing recovery page rebuilds")
+
+// spec/app/startup/recovery.md, "A page that fails to start or to draw shows one 'Something went wrong' screen over its surface"
+const holdingHome = started(effect {
+  const layers = try Layers.Machine
+  try Stream.runForEach(Stream.changes(Stream.map((try Recovery.Machine).changes, Recovery.stuck)), effect (isStuck) => {
+    const over = try layers.get()
+    const event: Layers.Event | undefined = isStuck
+      ? (Layers.canHold(over, recoveryHold) ? { type: "hold", id: recoveryHold } : undefined)
+      : (Layers.canRelease(over, recoveryHold) ? { type: "release", id: recoveryHold } : undefined)
+    if (event !== undefined) try ignore(contained(layers.send(event), "holding Home during recovery"))
+  })
+}, "holding Home while recovery screen shows")
+
+// spec/app/startup/recovery.md, "A page that starts runs once it has drawn"
+/** Mark `side` as having completed its first paint. */
+export effect function markPageDrawn(side: Recovery.Side): boolean!!Recovery.Machine {
+  const recovery = try Recovery.Machine
+  if (!Recovery.canDrawn(try recovery.get(), side)) return false
+  return try contained(recovery.send({ type: "drawn", side }, "Owner"), "marking page drawn")
+}
+
+// spec/app/startup/recovery.md, "A failure before the page has drawn, or a failure to draw at any time, shows the failure screen once, cancels every dialog open on its surface, and is recorded"
+/** Report a page failure on HomeSide or AssistantSide. */
+export effect function reportPageFailure(side: Recovery.Side, kind: Journal.Kind): boolean!!Recovery.Machine {
+  const recovery = try Recovery.Machine
+  if (!Recovery.canBreaks(try recovery.get(), side, kind)) return false
+  return try contained(recovery.send({ type: "breaks", side, kind }, "Owner"), "reporting page failure")
+}
+
+// spec/app/startup/recovery.md, "A phone without Android's WebView says so, is recorded, and is never rebuilt"
+/** Report that Android WebView is unavailable so `side` cannot be built. */
+export effect function reportUnbuildable(side: Recovery.Side): boolean!!Recovery.Machine {
+  const recovery = try Recovery.Machine
+  if (!Recovery.canUnbuildable(try recovery.get(), side)) return false
+  return try contained(recovery.send({ type: "unbuildable", side }, "Owner"), "reporting missing WebView")
+}
+
+// spec/app/startup/recovery.md, "A page reports its own loss, of a death newer than the one it was built after; what it held but had not written is lost with it"
+/** Report that `side` lost its renderer process. */
+export effect function reportPageLost(side: Recovery.Side, crashed: boolean, death: number, launcher: boolean): boolean!!Recovery.Machine {
+  const recovery = try Recovery.Machine
+  if (!Recovery.canLost(try recovery.get(), side, death)) return false
+  return try contained(recovery.send({ type: "lost", side, crashed, death, launcher, now: untimed }, "Owner"), "reporting lost page")
+}
+
+// spec/app/startup/recovery.md, "A surface coming back rebuilds the page it lost while hidden"
+/** Mark `side` visible or hidden. */
+export effect function setSurfaceVisibility(side: Recovery.Side, visible: boolean, launcher: boolean): boolean!!Recovery.Machine {
+  const recovery = try Recovery.Machine
+  const state = try recovery.get()
+  if (visible) {
+    if (!Recovery.canShown(state, side)) return false
+    return try contained(recovery.send({ type: "shown", side, launcher, now: untimed }, "Owner"), "showing recovery surface")
+  }
+  if (!Recovery.canHidden(state, side)) return false
+  return try contained(recovery.send({ type: "hidden", side }, "Owner"), "hiding recovery surface")
+}
+
+// spec/app/startup/recovery.md, "Reload first asks every area holding a draft on that surface to put it on the phone, and rebuilds when they have"
+/** Request Reload for `side`, flushing drafts before rebuilding. Only the Owner may trigger it. */
+export effect function requestReload(side: Recovery.Side, by: Actor = "Owner"): boolean!!(Recovery.Machine | Time) {
+  const recovery = try Recovery.Machine
+  const now = try (try Time).now()
+  if (!Recovery.canReload(try recovery.get(), side, by, now)) return false
+  return try contained(recovery.send({ type: "reload", side, now: untimed }, by), "requesting recovery reload")
+}
+
+// spec/app/startup/recovery.md, "When the drafts could not be written, or five seconds pass unanswered, the screen says unsaved edits would be lost, and only the owner's Reload anyway rebuilds over them"
+/** Request Reload anyway for `side` after drafts failed or timed out. Only the Owner may trigger it. */
+export effect function requestReloadAnyway(side: Recovery.Side, by: Actor = "Owner"): boolean!!(Recovery.Machine | Time) {
+  const recovery = try Recovery.Machine
+  const now = try (try Time).now()
+  if (!Recovery.canReloadAnyway(try recovery.get(), side, by, now)) return false
+  return try contained(recovery.send({ type: "reloadAnyway", side, now: untimed }, by), "requesting reload anyway")
+}
+
+// spec/app/startup/recovery.md, "Switch Home opens Android's choice of Home, then its default apps, then its Settings, from the failure screen or a phone without WebView, only where Alpha is Home"
+/** Request Switch Home from a stuck launcher Home surface. Only the Owner may trigger it. */
+export effect function requestSwitchHome(launcher: boolean, by: Actor = "Owner"): boolean!!Recovery.Machine {
+  const recovery = try Recovery.Machine
+  if (!Recovery.canSwitchHome(try recovery.get(), by, launcher)) return false
+  return try contained(recovery.send({ type: "switchHome", launcher }, by), "requesting switch Home")
+}
+
+// spec/app/startup/recovery.md, "Closing the assistant surface ends it, once, and nothing rebuilds it"
+/** Close the assistant surface permanently so it is never rebuilt. */
+export effect function closeAssistantSurface(): boolean!!Recovery.Machine {
+  const recovery = try Recovery.Machine
+  if (!Recovery.canClosedSurface(try recovery.get())) return false
+  return try contained(recovery.send({ type: "closedSurface" }, "Owner"), "closing assistant surface")
+}
+
+/** Resident recovery coordinator for HomeSide and AssistantSide surfaces. */
+export const startupRecovery = together(recoveryMachine, recoveryDesk, recordingRebuilds, holdingHome)

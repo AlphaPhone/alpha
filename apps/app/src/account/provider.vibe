@@ -1,0 +1,125 @@
+// spec/app/account/provider.md, "Story: See where my requests go"; spec/app/account/provider.md, "Story: Use my own key"; spec/app/account/provider.md, "Story: Choose Cloud or my key"; spec/app/account/provider.md, "Story: Restart or erase"
+import * as Resident from "../../gen/app__account.effect.vibe"
+import * as Provider from "../../gen/app__account__provider.effect.vibe"
+import * as SignIn from "../../gen/app__account__signIn.effect.vibe"
+import { type Job, answer, contained, due, following, reacting, run, together, untimed } from "../runtime/index.vibe"
+import { AccountShelf, checkOwnKeyFormat } from "./bridge.vibe"
+import { secondsTime } from "./clock.vibe"
+
+const keyChanger: Resident.Changer = "KeyChange"
+
+type ProviderPorts = AccountShelf | Resident.Machine
+
+effect function readProviderStatus(check: number): Provider.Event!!AccountShelf {
+  const shelf = try AccountShelf
+  const meta = try shelf.readProviderMeta()
+  try shelf.update((now) => ({
+    ...now,
+    providerMode: meta.mode,
+    hasTextKey: meta.text,
+    hasVoiceKey: meta.voice,
+    providerRevision: meta.revision,
+  }))
+  return { type: "reported", ticket: check, ok: true, mode: meta.mode, text: meta.text, voice: meta.voice, revision: meta.revision }
+}
+
+effect function checkCandidateKey(ticket: number, kind: Provider.Kind, key: string): Provider.Event!!AccountShelf {
+  const shelf = try AccountShelf
+  const verdict = checkOwnKeyFormat(kind, key)
+  if (verdict === "Accepted") {
+    try shelf.setCandidateKey({ kind, key: key.trim() })
+  } else {
+    try shelf.setCandidateKey(undefined)
+  }
+  return { type: "keyChecked", ticket, verdict }
+}
+
+effect function commitCandidateKey(ticket: number, kind: Provider.Kind, select: boolean, expected: number): Provider.Event!!AccountShelf {
+  const shelf = try AccountShelf
+  const candidate = try shelf.candidateKey()
+  const current = try shelf.readProviderMeta()
+  if (candidate === undefined || candidate.kind !== kind || current.revision !== expected) {
+    return { type: "used", ticket, ok: false, revision: current.revision }
+  }
+  const nextRevision = current.revision + 1
+  const next = kind === "TextKey"
+    ? { mode: select ? ("OwnKey" as const) : current.mode, text: true, voice: current.voice, revision: nextRevision }
+    : { mode: current.mode, text: current.text, voice: true, revision: nextRevision }
+  const ok = try shelf.writeProviderMeta(next)
+  try shelf.setCandidateKey(undefined)
+  return { type: "used", ticket, ok, revision: ok ? nextRevision : current.revision }
+}
+
+effect function selectProviderMode(ticket: number, mode: Provider.Mode, expected: number): Provider.Event!!AccountShelf {
+  const shelf = try AccountShelf
+  const current = try shelf.readProviderMeta()
+  if (current.revision !== expected || (mode === "OwnKey" && !current.text)) {
+    return { type: "selected", ticket, ok: false, revision: current.revision }
+  }
+  const nextRevision = current.revision + 1
+  const ok = try shelf.writeProviderMeta({ ...current, mode, revision: nextRevision })
+  return { type: "selected", ticket, ok, revision: ok ? nextRevision : current.revision }
+}
+
+effect function removeSavedKey(ticket: number, kind: Provider.Kind, expected: number): Provider.Event!!AccountShelf {
+  const shelf = try AccountShelf
+  const current = try shelf.readProviderMeta()
+  if (current.revision !== expected) {
+    return { type: "removed", ticket, ok: false, revision: current.revision }
+  }
+  const nextRevision = current.revision + 1
+  const next = kind === "TextKey"
+    ? { mode: current.mode === "OwnKey" ? ("Undecided" as const) : current.mode, text: false, voice: current.voice, revision: nextRevision }
+    : { mode: current.mode, text: current.text, voice: false, revision: nextRevision }
+  const ok = try shelf.writeProviderMeta(next)
+  return { type: "removed", ticket, ok, revision: ok ? nextRevision : current.revision }
+}
+
+effect function holdForKey(): void!!Resident.Machine {
+  const resident = try Resident.Machine
+  if (Resident.canHold(try resident.get(), keyChanger)) {
+    try contained(resident.send({ type: "hold" }, keyChanger), "hold agent for key change")
+  }
+}
+
+effect function releaseForKey(): void!!Resident.Machine {
+  const resident = try Resident.Machine
+  if (Resident.canRelease(try resident.get(), keyChanger)) {
+    try contained(resident.send({ type: "release" }, keyChanger), "release agent for key change")
+  }
+}
+
+function carryProvider(fx: Provider.Effect): Job<Provider.Event, ProviderPorts, []> {
+  return match (fx) {
+    when { tag: "ReadProvider", let check }: answer("read provider", readProviderStatus(check), { type: "reported", ticket: check, ok: false, mode: "Undecided", text: false, voice: false, revision: 0 });
+    when { tag: "CheckKey", let ticket, let kind, let key }: answer("check key", checkCandidateKey(ticket, kind, key), { type: "keyChecked", ticket, verdict: "Unchecked" });
+    when { tag: "DropKey" }: run("drop candidate key", effect { try (try AccountShelf).setCandidateKey(undefined) });
+    when { tag: "UseKey", let ticket, let kind, let select, let expected }: answer("use key", commitCandidateKey(ticket, kind, select, expected), { type: "used", ticket, ok: false, revision: expected });
+    when { tag: "SelectProvider", let ticket, let mode, let expected }: answer("select provider", selectProviderMode(ticket, mode, expected), { type: "selected", ticket, ok: false, revision: expected });
+    when { tag: "RemoveKey", let ticket, let kind, let expected }: answer("remove key", removeSavedKey(ticket, kind, expected), { type: "removed", ticket, ok: false, revision: expected });
+    when { tag: "HoldAgent" }: run("provider hold agent", holdForKey());
+    when { tag: "ReleaseAgent" }: run("provider release agent", releaseForKey());
+  }
+}
+
+function providerTimers(state: Provider.Provider) {
+  return state.work === "Waiting" || state.work === "Using" || state.work === "Selecting" || state.work === "Removing"
+    ? [due<Provider.Event, []>("providerGiveUp", state.since + Provider.holdLimit, { type: "giveUp", now: untimed })]
+    : []
+}
+
+const ownKeyEndsRequiredSignIn = following(
+  Provider.Machine,
+  (state) => Provider.ownKeyInUse(state),
+  SignIn.Machine,
+  (ownKey): SignIn.Event | undefined => (ownKey ? { type: "keyInUse", ownKey: true } : undefined),
+)
+
+/** AI provider selection machine supporting Alpha Cloud, own Cerebras key, and independent voice key swaps. */
+export const providerMachine = Layer.provide(
+  together(
+    reacting(Provider, { keep: 1, open: [{ type: "restart" }], carry: carryProvider, timers: providerTimers }),
+    ownKeyEndsRequiredSignIn,
+  ),
+  secondsTime,
+)

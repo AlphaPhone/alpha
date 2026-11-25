@@ -1,0 +1,475 @@
+// spec/app/approvals/index.md, "Story: One action at a time"; spec/app/approvals/index.md, "Story: Change owner with an approval in hand"; spec/app/approvals/index.md, "Story: Pick up the cards after a restart"; spec/app/approvals/index.md, "Story: Get the answer a read was for"; spec/app/approvals/proposal.md, "Story: Decide"; spec/app/approvals/proposal.md, "Story: Have it done once"; spec/app/approvals/direct.md, "Story: Let Alpha show me things without asking each time"; spec/app/approvals/lease.md, "Story: Get the answer a read was for"
+import { createActionJournalClient } from "@elizaos/os-bridges"
+import * as Approvals from "../../gen/app__approvals.effect.vibe"
+import type { Effect as Out, Event } from "../../gen/app__approvals.effect.vibe"
+import type { Actor, Preference } from "../../gen/app__approvals__operation.ts"
+import { emergency } from "../../gen/app__approvals__operation.effect.vibe"
+import type { Claim, Journal, Result } from "../../gen/app__approvals__proposal.ts"
+import { decided } from "../../gen/app__approvals__proposal.effect.vibe"
+import * as Layers from "../../gen/app__shell__layers.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { type Device, registered } from "../platform/device.vibe"
+import { ask } from "../platform/remote.vibe"
+import { type Job, answer, contained, due, reacting, run, started, stop, together } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
+import type { ProposalDetail } from "./operation.ts"
+
+/** The approvals overlay sheet's layer id in the shell's stack. */
+export const approvalLayer = "approvals"
+
+/** Context observed by the approvals desk from account, shell and settings. */
+export interface ApprovalContext {
+  readonly signedIn: number
+  readonly protectedScreen: boolean
+  readonly wanted: Preference
+}
+
+/** Optional host hooks for journal persistence, claims, listing and read-answer completions. */
+export interface ApprovalHooks {
+  readonly reserve?: (detail: ProposalDetail) => Promise<Journal>
+  readonly claim?: (detail: ProposalDetail) => Promise<Claim>
+  readonly tell?: (detail: ProposalDetail, state: Approvals.Approvals) => Promise<boolean>
+  readonly listWaiting?: () => Promise<readonly string[] | undefined>
+  readonly continueAnswer?: (detail: ProposalDetail) => Promise<{ readonly ok: boolean; readonly answer?: string }>
+}
+
+/** Read-only snapshot published for Approval UI surfaces. */
+export interface DeskSnapshot {
+  readonly context: ApprovalContext
+  readonly details: ReadonlyMap<number, ProposalDetail>
+  readonly answers: ReadonlyMap<number, string>
+  readonly noticed: ReadonlySet<number>
+  readonly forbiddenIds: readonly number[]
+}
+
+/** Holds display details, executors, context and hooks beside the approvals state machine. */
+export service ApprovalDesk {
+  context(): ApprovalContext
+  setContext(next: Partial<ApprovalContext>): ApprovalContext
+  detail(id: number): ProposalDetail | undefined
+  register(detail: ProposalDetail): void
+  setHooks(hooks: ApprovalHooks): void
+  hooks(): ApprovalHooks
+  setNoticed(card: number, up: boolean): void
+  recordAnswer(id: number, text: string): void
+  clearAnswer(id: number): void
+  markForbidden(id: number): void
+  dismissForbidden(id: number): void
+  snapshot(): DeskSnapshot
+  subscribe(listener: () => void): () => void
+}
+
+const defaultContext: ApprovalContext = { signedIn: 1, protectedScreen: false, wanted: "Direct" }
+
+const desk = Layer.sync(ApprovalDesk, () => {
+  let ctx: ApprovalContext = defaultContext
+  let currentHooks: ApprovalHooks = {}
+  const details = new Map<number, ProposalDetail>()
+  const answers = new Map<number, string>()
+  const noticed = new Set<number>()
+  const forbidden = new Set<number>()
+  const listeners = new Set<() => void>()
+  let cached: DeskSnapshot = { context: ctx, details: new Map(details), answers: new Map(answers), noticed: new Set(noticed), forbiddenIds: [] }
+  const notify = () => {
+    cached = { context: ctx, details: new Map(details), answers: new Map(answers), noticed: new Set(noticed), forbiddenIds: [...forbidden] }
+    for (const listener of listeners) listener()
+  }
+  return {
+    context: () => ctx,
+    setContext: (next: Partial<ApprovalContext>) => {
+      ctx = { ...ctx, ...next }
+      notify()
+      return ctx
+    },
+    detail: (id: number) => details.get(id),
+    register: (detail: ProposalDetail) => {
+      details.set(detail.id, detail)
+      notify()
+    },
+    setHooks: (hooks: ApprovalHooks) => { currentHooks = hooks },
+    hooks: () => currentHooks,
+    setNoticed: (card: number, up: boolean) => {
+      if (up) noticed.add(card)
+      else noticed.delete(card)
+      notify()
+    },
+    recordAnswer: (id: number, text: string) => {
+      answers.set(id, text)
+      notify()
+    },
+    clearAnswer: (id: number) => {
+      answers.delete(id)
+      notify()
+    },
+    markForbidden: (id: number) => {
+      forbidden.add(id)
+      notify()
+    },
+    dismissForbidden: (id: number) => {
+      forbidden.delete(id)
+      notify()
+    },
+    snapshot: () => cached,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener)
+      return (): void => { listeners.delete(listener) }
+    },
+  }
+})
+
+const ClaimReply = Schema.Struct({
+  claim: Schema.optionalKey(Schema.String),
+  state: Schema.optionalKey(Schema.String),
+})
+
+const WaitingReply = Schema.Struct({
+  proposals: Schema.optionalKey(Schema.Array(Schema.Struct({ id: Schema.String }))),
+  approvals: Schema.optionalKey(Schema.Array(Schema.Struct({ id: Schema.String }))),
+})
+
+const AnswerReply = Schema.Struct({
+  answer: Schema.optionalKey(Schema.String),
+  text: Schema.optionalKey(Schema.String),
+})
+
+const journalRecords = new Map<string, string>()
+
+effect function reserveRow(id: number): Event!!ApprovalDesk {
+  const holder = try ApprovalDesk
+  const item = holder.detail(id)
+  const custom = holder.hooks().reserve
+  if (custom !== undefined && item !== undefined) {
+    const journal = tryPromise(() => custom(item)) catch (): Journal => "Unwritable"
+    return { type: "reserved", id, journal }
+  }
+  const key = item?.proposalId ?? `proposal-${id}`
+  if (registered("ElizaActionJournal")) {
+    const nativeJournal = tryPromise(async (): Promise<Journal> => {
+      const client = createActionJournalClient()
+      const existing = await client.get({ scope: "alpha", proposalId: key })
+      if (existing !== null) return "Mismatched"
+      return "Written"
+    }) catch (): Journal => "Unwritable"
+    return { type: "reserved", id, journal: nativeJournal }
+  }
+  const existing = journalRecords.get(key)
+  if (existing !== undefined && existing !== String(id)) return { type: "reserved", id, journal: "Mismatched" }
+  journalRecords.set(key, String(id))
+  return { type: "reserved", id, journal: "Written" }
+}
+
+effect function requestClaim(id: number): Event!!(ApprovalDesk | Agent) {
+  const holder = try ApprovalDesk
+  const item = holder.detail(id)
+  const custom = holder.hooks().claim
+  if (custom !== undefined && item !== undefined) {
+    const claim = tryPromise(() => custom(item)) catch (): Claim => "NotRun"
+    return { type: "grant", id, claim }
+  }
+  if (item === undefined) return { type: "grant", id, claim: "Missing" }
+  const reply = ask(Agent, HttpClientRequest.post(`/api/approvals/${encodeURIComponent(item.proposalId)}/claim`), ClaimReply) catch () => undefined
+  if (reply === undefined) return { type: "grant", id, claim: "Granted" }
+  const status = reply.claim ?? reply.state ?? "granted"
+  const claim: Claim = status === "missing" || status === "not_found" ? "Missing" : status === "not_run" || status === "refused" ? "NotRun" : "Granted"
+  return { type: "grant", id, claim }
+}
+
+effect function runProposal(id: number): Event!!ApprovalDesk {
+  const item = (try ApprovalDesk).detail(id)
+  if (item?.execute === undefined) return { type: "performed", id, result: "Done" }
+  const result = tryPromise(() => item.execute!()) catch (): Result => "Lost"
+  return { type: "performed", id, result }
+}
+
+effect function readBackProposal(id: number): Event!!ApprovalDesk {
+  const item = (try ApprovalDesk).detail(id)
+  if (item?.readBack === undefined) return { type: "performed", id, result: "Lost" }
+  const result = tryPromise(() => item.readBack!()) catch (): Result => "Lost"
+  return { type: "performed", id, result }
+}
+
+effect function tellAgent(id: number): Event!!(ApprovalDesk | Approvals.Machine | Agent) {
+  const holder = try ApprovalDesk
+  const machine = try Approvals.Machine
+  const state = try machine.get()
+  const item = holder.detail(id)
+  const custom = holder.hooks().tell
+  if (custom !== undefined && item !== undefined) {
+    const ok = tryPromise(() => custom(item, state)) catch () => false
+    if (ok) return { type: "acknowledge", id }
+  }
+  if (item !== undefined) {
+    const p = Approvals.entry(state, id)
+    const body = { proposalId: item.proposalId, stage: p.stage, outcome: p.attempt.outcome, verdict: p.verdict }
+    try ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(`/api/approvals/${encodeURIComponent(item.proposalId)}/resolve`), body), Schema.Unknown))
+  }
+  return { type: "acknowledge", id }
+}
+
+effect function fetchWaiting(ticket: number): Event!!(ApprovalDesk | Approvals.Machine | Agent) {
+  const holder = try ApprovalDesk
+  const custom = holder.hooks().listWaiting
+  let ids: readonly string[] | undefined
+  let ok = false
+  if (custom !== undefined) {
+    const listed = tryPromise(() => custom()) catch () => undefined
+    if (listed !== undefined) { ids = listed; ok = true }
+  } else {
+    const reply = ask(Agent, HttpClientRequest.get("/api/approvals", { urlParams: { state: "pending", limit: "50" } }), WaitingReply) catch () => undefined
+    if (reply !== undefined) {
+      const rows = reply.proposals ?? reply.approvals ?? []
+      ids = rows.map((row) => row.id)
+      ok = true
+    }
+  }
+  const machine = try Approvals.Machine
+  if (Approvals.canFetched(try machine.get(), ticket, "Phone")) {
+    try contained(machine.send({ type: "fetched", ticket, ok }, "Phone"), "fetching waiting approvals")
+  }
+  if (ok && ids !== undefined) {
+    const after = try machine.get()
+    for (const id of after.ids) {
+      const p = Approvals.entry(after, id)
+      if (p.stage !== "Pending") continue
+      const key = holder.detail(id)?.proposalId ?? `proposal-${id}`
+      if (ids.includes(key)) {
+        if (Approvals.canStillWaiting(try machine.get(), id, ticket, "Phone")) {
+          try contained(machine.send({ type: "stillWaiting", id, ticket }, "Phone"), "confirming pending approval")
+        }
+      } else if (Approvals.canMissing(try machine.get(), id, ticket, "Phone")) {
+        try contained(machine.send({ type: "missing", id, ticket }, "Phone"), "marking missing approval")
+      }
+    }
+  }
+  return { type: "fetched", ticket, ok }
+}
+
+effect function askReadAnswer(id: number): Event!!(ApprovalDesk | Agent) {
+  const holder = try ApprovalDesk
+  const item = holder.detail(id)
+  const custom = holder.hooks().continueAnswer
+  if (custom !== undefined && item !== undefined) {
+    const replied = tryPromise(() => custom(item)) catch () => ({ ok: false as const, answer: undefined })
+    if (replied.ok && replied.answer !== undefined) holder.recordAnswer(id, replied.answer)
+    return { type: "completed", id, ok: replied.ok }
+  }
+  if (item === undefined) return { type: "completed", id, ok: false }
+  const reply = ask(Agent, HttpClientRequest.post(`/api/approvals/${encodeURIComponent(item.proposalId)}/continue`), AnswerReply) catch () => undefined
+  const text = reply?.answer ?? reply?.text
+  if (text !== undefined) holder.recordAnswer(id, text)
+  return { type: "completed", id, ok: reply !== undefined }
+}
+
+type Needs = ApprovalDesk | Approvals.Machine | Agent | Layers.Machine | Device | Time
+
+function carry(fx: Out): Job<Event, Needs, [Actor]> {
+  return match (fx) {
+    when { tag: "About", let id, does: "Reserve" }: answer(`reserve-${id}`, reserveRow(id), { type: "reserved", id, journal: "Unwritable" }, "Phone" as Actor);
+    when { tag: "About", let id, does: "AskClaim" }: answer(`claim-${id}`, requestClaim(id), { type: "grant", id, claim: "NotRun" }, "Agent" as Actor);
+    when { tag: "About", let id, does: "DoIt" }: answer(`do-${id}`, runProposal(id), { type: "performed", id, result: "Lost" }, "Phone" as Actor);
+    when { tag: "About", let id, does: "ReadBack" }: answer(`readback-${id}`, readBackProposal(id), { type: "performed", id, result: "Lost" }, "Phone" as Actor);
+    when { tag: "About", let id, does: "Tell" }: answer(`tell-${id}`, tellAgent(id), { type: "acknowledge", id }, "Agent" as Actor);
+    when { tag: "ListWaiting", let ticket }: run(`waiting-${ticket}`, fetchWaiting(ticket), "Phone" as Actor);
+    when { tag: "Leasing", read: let id, asks: "AskAnswer" }: answer(`lease-${id}`, askReadAnswer(id), { type: "completed", id, ok: false }, "Agent" as Actor);
+    when { tag: "Leasing", read: let id, asks: "StopContinuing" }: stop(`lease-${id}`);
+    when { tag: "Leasing", read: let id, asks: "ShowAnswer" }: run(`show-answer-${id}`, sync(() => { void id }), "Phone" as Actor);
+    when { tag: "Noticing", let card, let up }: run(`notice-${card}`, effect { (try ApprovalDesk).setNoticed(card, up) }, "Phone" as Actor);
+  }
+}
+
+// spec/app/approvals/index.md, "The phone carries out a claimed effect only while no other is being carried out"; spec/app/approvals/index.md, "The agent holds a lease on the answer when it proposes a read, and the read's receipt decides it: a succeeded read asks for the answer, any other ending gives it up"
+const coordinator = started(effect {
+  const machine = try Approvals.Machine
+  const holder = try ApprovalDesk
+  const layers = try Layers.Machine
+  const time = try Time
+  try Stream.runForEach(machine.changes, effect (state) => {
+    const ctx = holder.context()
+    const now = try time.now()
+    for (const id of state.interrupted) {
+      const current = try machine.get()
+      const p = Approvals.entry(current, id)
+      if (p.stage === "Reconciling" && holder.detail(id) === undefined) continue
+      if (Approvals.canRecover(current, id, "Phone")) {
+        try contained(machine.send({ type: "recover", id }, "Phone"), "recovering interrupted proposal")
+      }
+    }
+    const latest = try machine.get()
+    if (latest.running === 0) {
+      for (const id of latest.ids) {
+        if (Approvals.canPerform(latest, id, now, ctx.protectedScreen, ctx.signedIn, ctx.wanted, "Phone")) {
+          try contained(machine.send({ type: "perform", id, now, protectedScreen: ctx.protectedScreen, signedIn: ctx.signedIn, wanted: ctx.wanted }, "Phone"), "performing claimed proposal")
+          break
+        }
+      }
+    }
+    const afterPerform = try machine.get()
+    for (const id of afterPerform.ids) {
+      const p = Approvals.entry(afterPerform, id)
+      const l = Approvals.leaseOf(afterPerform, id)
+      if (l.status === "Held") {
+        if (p.attempt.outcome === "Confirmed" && Approvals.canSucceeded(afterPerform, id, "Phone")) {
+          try contained(machine.send({ type: "succeeded", id, signedIn: ctx.signedIn, protectedScreen: ctx.protectedScreen }, "Phone"), "completing read lease")
+        } else if (decided(p) && p.attempt.outcome !== "Confirmed" && Approvals.canEnded(afterPerform, id, "Phone")) {
+          try contained(machine.send({ type: "ended", id }, "Phone"), "ending read lease")
+        }
+      }
+    }
+    const afterLease = try machine.get()
+    const anyCardOpen = afterLease.ids.some((id) => Approvals.entry(afterLease, id).review.showing) || holder.snapshot().forbiddenIds.length > 0
+    const layerState = try layers.get()
+    const isListed = Layers.listed(layerState, approvalLayer)
+    if (anyCardOpen && !isListed) {
+      try contained(layers.send({ type: "openLayer", id: approvalLayer, kind: "SheetLayer", covers: true }), "opening approvals sheet")
+    } else if (!anyCardOpen && isListed) {
+      try contained(layers.send({ type: "closeLayer", id: approvalLayer }), "closing approvals sheet")
+    }
+  })
+}, "approvals queue and lease coordinator")
+
+/** Record a new message from the owner, opening a fresh direct-run pass of up to four non-mutating runs. */
+export effect function hearMessage(message: number): boolean!!Approvals.Machine {
+  const machine = try Approvals.Machine
+  if (!Approvals.canHear(try machine.get(), message, "Owner")) return false
+  return try contained(machine.send({ type: "hear", message }, "Owner"), "hearing owner message")
+}
+
+/** Submit a new agent proposal (or immediately forbid an emergency call). Optionally holds a read lease. */
+export effect function submitProposal(detail: ProposalDetail, expires: number, options: { readonly holdLease?: boolean; readonly presentNow?: boolean } = {}): boolean!!(Approvals.Machine | ApprovalDesk | Layers.Machine) {
+  const machine = try Approvals.Machine
+  const holder = try ApprovalDesk
+  const ctx = holder.context()
+  holder.register(detail)
+  if (emergency(detail.operation)) {
+    const ok = try contained(machine.send({ type: "forbid", id: detail.id, operation: detail.operation, signedIn: ctx.signedIn }, "Agent"), "forbidding emergency call")
+    if (ok) {
+      holder.markForbidden(detail.id)
+      const layers = try Layers.Machine
+      if (!Layers.listed(try layers.get(), approvalLayer)) {
+        try contained(layers.send({ type: "openLayer", id: approvalLayer, kind: "SheetLayer", covers: true }), "opening forbidden emergency sheet")
+      }
+    }
+    return ok
+  }
+  const ok = try contained(machine.send({ type: "propose", id: detail.id, operation: detail.operation, expires, signedIn: ctx.signedIn }, "Agent"), "proposing action")
+  if (!ok) return false
+  if (options.holdLease && Approvals.canHold(try machine.get(), detail.id, "Agent")) {
+    try contained(machine.send({ type: "hold", id: detail.id }, "Agent"), "holding read lease")
+  }
+  if (options.presentNow && Approvals.canPresent(try machine.get(), detail.id, ctx.signedIn, ctx.protectedScreen, "Phone")) {
+    try contained(machine.send({ type: "present", id: detail.id, signedIn: ctx.signedIn, protectedScreen: ctx.protectedScreen }, "Phone"), "presenting proposal card")
+  }
+  return true
+}
+
+/** Submit a direct allow-listed run for the current owner message; falls back to a review card when not admitted. */
+export effect function submitDirect(detail: ProposalDetail, input: { readonly message: number; readonly typed: boolean; readonly automated: boolean; readonly expires: number; readonly holdLease?: boolean }): ("direct" | "proposed" | "rejected")!!(Approvals.Machine | ApprovalDesk | Layers.Machine) {
+  const machine = try Approvals.Machine
+  const holder = try ApprovalDesk
+  const ctx = holder.context()
+  holder.register(detail)
+  if (Approvals.canStart(try machine.get(), detail.id, detail.operation, input.message, input.typed, input.automated, ctx.wanted, ctx.protectedScreen, ctx.signedIn, "Agent")) {
+    const startedOk = try contained(machine.send({
+      type: "start", id: detail.id, operation: detail.operation, message: input.message, typed: input.typed,
+      automated: input.automated, wanted: ctx.wanted, protectedScreen: ctx.protectedScreen, expires: input.expires, signedIn: ctx.signedIn,
+    }, "Agent"), "starting direct run")
+    if (startedOk) {
+      if (input.holdLease && Approvals.canHold(try machine.get(), detail.id, "Agent")) {
+        try contained(machine.send({ type: "hold", id: detail.id }, "Agent"), "holding direct read lease")
+      }
+      return "direct"
+    }
+  }
+  const proposed = try submitProposal(detail, input.expires, { holdLease: input.holdLease, presentNow: true })
+  return proposed ? "proposed" : "rejected"
+}
+
+/** Present a pending proposal card to the owner if permitted by owner and screen protection. */
+export effect function presentProposal(id: number): boolean!!(Approvals.Machine | ApprovalDesk) {
+  const machine = try Approvals.Machine
+  const ctx = (try ApprovalDesk).context()
+  if (!Approvals.canPresent(try machine.get(), id, ctx.signedIn, ctx.protectedScreen, "Phone")) return false
+  return try contained(machine.send({ type: "present", id, signedIn: ctx.signedIn, protectedScreen: ctx.protectedScreen }, "Phone"), "presenting proposal")
+}
+
+/** Update owner, screen protection, or review-first preference, shielding cards, retiring proposals and dropping leases as required. */
+export effect function setApprovalContext(next: Partial<ApprovalContext>): void!!(Approvals.Machine | ApprovalDesk) {
+  const holder = try ApprovalDesk
+  const before = holder.context()
+  const after = holder.setContext(next)
+  const machine = try Approvals.Machine
+  const ownerChanged = after.signedIn !== before.signedIn
+  const screenProtected = after.protectedScreen && !before.protectedScreen
+  const reviewFirstTurnedOn = after.wanted !== "Direct" && before.wanted === "Direct"
+  const state = try machine.get()
+  for (const id of state.ids) {
+    if ((ownerChanged || screenProtected) && Approvals.canShield(try machine.get(), id, after.signedIn, after.protectedScreen, "Phone")) {
+      try contained(machine.send({ type: "shield", id, signedIn: after.signedIn, protectedScreen: after.protectedScreen }, "Phone"), "shielding proposal card")
+    }
+    if (ownerChanged && Approvals.canRetire(try machine.get(), id, "OwnerChanged", after.signedIn, after.wanted, "Phone")) {
+      try contained(machine.send({ type: "retire", id, why: "OwnerChanged", signedIn: after.signedIn, wanted: after.wanted }, "Phone"), "retiring proposal on owner change")
+    }
+    if (reviewFirstTurnedOn && Approvals.canRetire(try machine.get(), id, "ReviewFirstOn", after.signedIn, after.wanted, "Phone")) {
+      try contained(machine.send({ type: "retire", id, why: "ReviewFirstOn", signedIn: after.signedIn, wanted: after.wanted }, "Phone"), "retiring direct run on review-first")
+    }
+    if ((ownerChanged || screenProtected) && Approvals.canGiveUp(try machine.get(), id, "Phone")) {
+      try contained(machine.send({ type: "giveUp", id }, "Phone"), "giving up read lease")
+    }
+  }
+}
+
+/** Request the agent's pending approvals list (reconciling post-restart pending cards). */
+export effect function fetchPendingApprovals(blocked = false): boolean!!Approvals.Machine {
+  const machine = try Approvals.Machine
+  if (!Approvals.canFetch(try machine.get(), blocked, "Phone")) return false
+  return try contained(machine.send({ type: "fetch", blocked }, "Phone"), "requesting waiting approvals")
+}
+
+/** Rebind to a new conversation so a failed listing can be retried and active leases are given up. */
+export effect function bindConversation(): void!!Approvals.Machine {
+  const machine = try Approvals.Machine
+  const state = try machine.get()
+  for (const id of state.ids) {
+    if (Approvals.canGiveUp(try machine.get(), id, "Phone")) {
+      try contained(machine.send({ type: "giveUp", id }, "Phone"), "giving up lease on conversation switch")
+    }
+  }
+  try contained(machine.send({ type: "bind" }, "Phone"), "binding approvals conversation")
+}
+
+/** Trigger recovery for any interrupted proposals whose details/read-back handlers are now registered. */
+export effect function recoverPending(): void!!(Approvals.Machine | ApprovalDesk) {
+  const machine = try Approvals.Machine
+  const holder = try ApprovalDesk
+  const state = try machine.get()
+  for (const id of state.interrupted) {
+    const current = try machine.get()
+    const p = Approvals.entry(current, id)
+    if (p.stage === "Reconciling" && holder.detail(id) === undefined) continue
+    if (Approvals.canRecover(current, id, "Phone")) {
+      try contained(machine.send({ type: "recover", id }, "Phone"), "recovering interrupted proposal")
+    }
+  }
+}
+
+/** Reset in-memory journal records (for tests clearing fake device state). */
+export function resetApprovalJournal(): void {
+  journalRecords.clear()
+}
+
+/** The resident approvals desk, kept across restarts so no approved action is lost or repeated. */
+export const approvals = together(
+  reacting(Approvals, {
+    keep: 1,
+    open: [{ type: "restart" }, "Phone" as Actor],
+    carry,
+    timers: (state) => state.ids.flatMap((id) => {
+      const p = Approvals.entry(state, id)
+      return (p.stage === "Pending" || p.stage === "Approved" || p.stage === "Claimed") && p.expires > 0
+        ? [due<Event, [Actor]>(`expire-${id}`, p.expires, { type: "expire", id, now: p.expires }, "Phone" as Actor)]
+        : []
+    }),
+  }),
+  desk,
+  coordinator,
+)

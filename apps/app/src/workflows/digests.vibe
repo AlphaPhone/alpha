@@ -1,12 +1,18 @@
-// spec/app/digests/index.md, "Story: See my digests"; spec/app/digests/index.md, "Story: Receive results without losing or repeating one"; spec/app/digests/schedules.md, "Story: Keep my digest schedules"
+// spec/app/digests/index.md, "Story: See my digests"; spec/app/digests/index.md, "Story: Receive results without losing or repeating one"; spec/app/digests/schedules.md, "Story: Keep my digest schedules"; spec/app/digests/sources.md, "Story: Consent to a source for a while"; spec/app/digests/sources.md, "Story: Choose the phone's calendars"; spec/app/digests/sources.md, "Story: Renew a source's access"; spec/app/digests/sources.md, "Story: Keep sources to their owner and through a restart"
 import type * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { type WorkflowRequest, WorkflowHttpError, WorkflowLifecycleRejected, workflowHttpError, type DigestLoop, type DigestResult, type DigestSource, type DigestSpec, digestSourceState, hostedDigestProtocol } from "@elizaos/plugin-workflow-client"
 import * as List from "../../gen/app__workflows__list.effect.vibe"
 import * as Plan from "../../gen/app__digests__schedules.effect.vibe"
 import type { Change, Effect as Out, Event, Template } from "../../gen/app__digests__schedules.effect.vibe"
+import * as Sources from "../../gen/app__digests__sources.effect.vibe"
+import type { Effect as SourceEffect, Event as SourceEvent, Kind as SourceKind } from "../../gen/app__digests__sources.effect.vibe"
+import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
+import { type Said, say } from "../notices/toasts.vibe"
 import { Agent } from "../platform/agent.vibe"
+import { PhoneCalendar } from "../platform/calendar.vibe"
 import { launchOwnerAt, sameResidentOwner } from "../platform/owner.vibe"
-import { type Job, answer, applying, following, reacting, together } from "../runtime/reactor.vibe"
+import { SystemSettings } from "../platform/systemSettings.vibe"
+import { type Job, answer, applying, contained, due, following, reacting, run, together } from "../runtime/reactor.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { Time } from "../runtime/time.vibe"
 import { WorkflowsApi } from "./api.vibe"
@@ -219,7 +225,9 @@ export effect function pickDigestSource(source: number): void!!(Plan.Machine | D
   try ignore(plan.send({ type: "pickSource", source, fresh }))
 }
 
-export effect function backDigests(): boolean!!Plan.Machine {
+export effect function backDigests(): boolean!!(Plan.Machine | Sources.Machine) {
+  const sources = try Sources.Machine
+  if (Sources.canCancelConsent(try sources.get())) { try ignore(sources.send({ type: "cancelConsent" })); return true }
   const plan = try Plan.Machine
   const state = try plan.get()
   if (Plan.canCancelReview(state)) { try ignore(plan.send({ type: "cancelReview" })); return true }
@@ -227,4 +235,183 @@ export effect function backDigests(): boolean!!Plan.Machine {
   return false
 }
 
-export const digests = together(reacting(Plan, { carry }), words, place, saving)
+const sourceKinds: readonly SourceKind[] = ["PhoneCalendars", "PhoneReminders", "Google", "Snapshot"]
+const hourMs = 3_600_000
+
+/** Converts a millisecond timestamp to whole hours for the digest sources clock. */
+export function digestHour(ms: number): number {
+  return Math.max(0, Math.floor(ms / hourMs))
+}
+
+/** Recorded digest source consents, renewals and answered reads kept beside Sources.Machine. */
+export interface DigestSourceRecord {
+  readonly kind: SourceKind
+  readonly until: number
+  readonly revision: number
+  readonly scope: number
+}
+
+/** Holds phone-side digest source grants, chosen calendars, renewal notices and answered read tickets. */
+export service DigestSourceShelf {
+  granted(kind: SourceKind): DigestSourceRecord | undefined
+  recordGrant(record: DigestSourceRecord): void
+  clearGrant(kind: SourceKind): void
+  recordAnswer(ticket: number, kind: SourceKind, items: number): void
+  answered(ticket: number): { readonly kind: SourceKind; readonly items: number } | undefined
+  setRenewal(kind: SourceKind, until: number | undefined): void
+  renewals(): ReadonlyMap<SourceKind, number>
+  setChosenCalendars(ids: readonly string[]): void
+  chosenCalendars(): readonly string[]
+}
+
+const sourceShelf = Layer.sync(DigestSourceShelf, () => {
+  const grants = new Map<SourceKind, DigestSourceRecord>()
+  const answers = new Map<number, { readonly kind: SourceKind; readonly items: number }>()
+  const activeRenewals = new Map<SourceKind, number>()
+  let chosen: readonly string[] = []
+  return {
+    granted: (kind: SourceKind) => grants.get(kind),
+    recordGrant: (record: DigestSourceRecord) => { grants.set(record.kind, record) },
+    clearGrant: (kind: SourceKind) => { grants.delete(kind) },
+    recordAnswer: (ticket: number, kind: SourceKind, items: number) => { answers.set(ticket, { kind, items }) },
+    answered: (ticket: number) => answers.get(ticket),
+    setRenewal: (kind: SourceKind, until: number | undefined) => {
+      if (until === undefined) activeRenewals.delete(kind)
+      else activeRenewals.set(kind, until)
+    },
+    renewals: () => new Map(activeRenewals),
+    setChosenCalendars: (ids: readonly string[]) => { chosen = [...ids] },
+    chosenCalendars: () => chosen,
+  }
+})
+
+type SourceNeeds = DigestSourceShelf | PhoneCalendar | SystemSettings | WorkflowsApi | Toasts | Said | Time
+
+effect function readSourceCalendars(ticket: number): SourceEvent!!(PhoneCalendar | DigestSourceShelf | Time) {
+  const calendar = try PhoneCalendar
+  const shelf = try DigestSourceShelf
+  const now = try (try Time).now()
+  const listed = calendar.list({ begin: now, end: now + 7 * 24 * hourMs }) catch () => undefined
+  if (listed === undefined || listed.status !== "ready") return { type: "calendarsListed", ticket, ok: false, count: 0, missing: false }
+  const seenIds = new Set(listed.events.map((ev) => ev.calendarId).filter((id): id is string => typeof id === "string" && id.length > 0))
+  const chosen = shelf.chosenCalendars()
+  const missing = chosen.some((id) => !seenIds.has(id))
+  const count = Math.max(seenIds.size, chosen.length > 0 && !missing ? chosen.length : 0)
+  return { type: "calendarsListed", ticket, ok: true, count, missing }
+}
+
+effect function requestSourceCalendarAccess(): SourceEvent!!PhoneCalendar {
+  const calendar = try PhoneCalendar
+  const granted = calendar.requestAccess() catch () => false
+  return { type: "calendarAccess", grant: granted ? "Granted" : "Denied" }
+}
+
+function carrySources(fx: SourceEffect): Job<SourceEvent, SourceNeeds, []> {
+  return match (fx) {
+    when { tag: "GrantSource", let kind, let until, let revision, let scope }: run(`source-grant-${kind}`, effect {
+      (try DigestSourceShelf).recordGrant({ kind, until, revision, scope })
+    });
+    when { tag: "RevokeSource", let kind }: run(`source-revoke-${kind}`, effect {
+      (try DigestSourceShelf).clearGrant(kind)
+    });
+    when { tag: "AnswerRead", let ticket, let kind, let items }: run(`source-answer-${ticket}`, effect {
+      (try DigestSourceShelf).recordAnswer(ticket, kind, items)
+    });
+    when { tag: "WantRenewal", let kind, let until }: run(`source-renew-${kind}`, effect {
+      (try DigestSourceShelf).setRenewal(kind, until)
+      try say(`Renew ${kind} access for digests`)
+    });
+    when { tag: "DropRenewal", let kind }: run(`source-drop-renew-${kind}`, effect {
+      (try DigestSourceShelf).setRenewal(kind, undefined)
+    });
+    when { tag: "ReadCalendars", let ticket }: answer(`source-calendars-${ticket}`, readSourceCalendars(ticket), { type: "calendarsListed", ticket, ok: false, count: 0, missing: false });
+    when { tag: "AskCalendarAccess" }: answer("source-calendar-access", requestSourceCalendarAccess(), { type: "calendarAccess", grant: "Denied" });
+    when { tag: "OpenSettings" }: run("source-open-settings", effect { try ignore((try SystemSettings).open("AppPermissions", "")) });
+  }
+}
+
+// spec/app/digests/sources.md, "When another owner signs in, the previous owner's consents no longer answer reads, and their renewal notices are dropped"
+const sourceOwner = applying(List.Machine, (state) => state.owner,
+  effect (owner: number) => {
+    const sources = try Sources.Machine
+    if (Sources.canOwnerChanged(try sources.get(), owner)) {
+      try contained(sources.send({ type: "ownerChanged", owner }), "updating digest source owner")
+    }
+  })
+
+/** Open the consent review for a digest source covering `hours` (1..720) and `scope`. */
+export effect function reviewDigestSource(kind: SourceKind, hours: number, scope: number): boolean!!Sources.Machine {
+  const sources = try Sources.Machine
+  if (!Sources.canReviewConsent(try sources.get(), kind, hours, scope)) return false
+  return try contained(sources.send({ type: "reviewConsent", kind, hours, scope }), "reviewing digest source consent")
+}
+
+/** Confirm the currently shown digest source consent review at the current clock hour. */
+export effect function confirmDigestSource(): boolean!!(Sources.Machine | Time) {
+  const sources = try Sources.Machine
+  const now = digestHour(try (try Time).now())
+  if (!Sources.canConfirmConsent(try sources.get(), now)) return false
+  return try contained(sources.send({ type: "confirmConsent", now }), "confirming digest source consent")
+}
+
+/** Cancel the currently shown digest source consent review. */
+export effect function cancelDigestSource(): boolean!!Sources.Machine {
+  const sources = try Sources.Machine
+  if (!Sources.canCancelConsent(try sources.get())) return false
+  return try contained(sources.send({ type: "cancelConsent" }), "cancelling digest source consent")
+}
+
+/** Revoke consent for a digest source immediately, dropping any renewal notice. */
+export effect function revokeDigestSource(kind: SourceKind): boolean!!Sources.Machine {
+  const sources = try Sources.Machine
+  if (!Sources.canRevoke(try sources.get(), kind)) return false
+  return try contained(sources.send({ type: "revoke", kind }), "revoking digest source consent")
+}
+
+/** Answer an agent read request for a digest source, capped at 12 items and refused without active consent. */
+export effect function answerDigestRead(ticket: number, kind: SourceKind, revision: number, items: number): boolean!!(Sources.Machine | Time) {
+  const sources = try Sources.Machine
+  const now = digestHour(try (try Time).now())
+  if (!Sources.canReadAsked(try sources.get(), ticket, kind, revision, items, now)) return false
+  return try contained(sources.send({ type: "readAsked", ticket, kind, revision, items, now }), "answering digest source read")
+}
+
+/** Open the renewal review for an expired source when tapped from its notice. */
+export effect function openSourceRenewal(kind: SourceKind): boolean!!Sources.Machine {
+  const sources = try Sources.Machine
+  if (!Sources.canRenewalOpened(try sources.get(), kind)) return false
+  return try contained(sources.send({ type: "renewalOpened", kind }), "opening digest source renewal")
+}
+
+/** Ask Android for phone calendar access once for digest source selection. */
+export effect function askDigestCalendarAccess(): boolean!!Sources.Machine {
+  const sources = try Sources.Machine
+  if (!Sources.canAskCalendarAccess(try sources.get())) return false
+  return try contained(sources.send({ type: "askCalendarAccess" }), "asking calendar access for digests")
+}
+
+/** List the phone's calendars for digest source selection. */
+export effect function listDigestCalendars(): boolean!!Sources.Machine {
+  const sources = try Sources.Machine
+  if (!Sources.canListCalendars(try sources.get())) return false
+  return try contained(sources.send({ type: "listCalendars" }), "listing calendars for digests")
+}
+
+/** Digest sources consent, calendar selection and renewal machine, persisted across restarts. */
+export const digestSources = together(
+  reacting(Sources, {
+    keep: 1,
+    open: [{ type: "restart" }],
+    carry: carrySources,
+    timers: (state) => sourceKinds.flatMap((kind) => {
+      const src = Sources.sourceOf(state, kind)
+      return src.consent === "Granted" && !src.renewal && src.until > 0
+        ? [due<SourceEvent, []>(`digest-source-expire-${kind}`, src.until * hourMs, { type: "expired", kind, now: src.until })]
+        : []
+    }),
+  }),
+  sourceShelf,
+  sourceOwner,
+)
+
+export const digests = together(reacting(Plan, { carry }), digestSources, words, place, saving)

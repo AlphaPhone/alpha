@@ -1,0 +1,420 @@
+// spec/app/account/plan.md, "Story: Know my plan"; spec/app/account/plan.md, "Story: Keep my plan up to date"; spec/app/account/billing.md, "Story: Pay in the browser"; spec/app/account/change.md, "Story: Change or cancel my plan"; spec/app/account/codes.md, "Story: Redeem a code"; spec/app/account/codes.md, "Story: Share or apply a referral"
+import { CloudError, isCredentialInvalid, networkError, normalizeSubscriptionCode, planAdmission, planFromSnapshot, redeemFailureForStatus, subscriptionView } from "@elizaos/cloud"
+import * as Billing from "../../gen/app__account__billing.effect.vibe"
+import * as Change from "../../gen/app__account__change.effect.vibe"
+import * as Codes from "../../gen/app__account__codes.effect.vibe"
+import * as Plan from "../../gen/app__account__plan.effect.vibe"
+import * as Session from "../../gen/app__account__session.effect.vibe"
+import { Cloud } from "../platform/cloud.vibe"
+import { Device } from "../platform/device.vibe"
+import { Attempts, type Job, Time, answer, contained, due, reacting, run, started, together, untimed } from "../runtime/index.vibe"
+import { AccountShelf } from "./bridge.vibe"
+import { nowSeconds, secondsTime, toSeconds } from "./clock.vibe"
+
+type PlanPorts = Cloud | AccountShelf | Time | Session.Machine | Billing.Machine | Change.Machine | Codes.Machine
+
+function usagePercentOf(granted: number, available: number): number {
+  if (granted <= 0) return -1
+  const used = Math.max(0, granted - Math.max(0, available))
+  return Math.min(100, Math.max(0, Math.round((used / granted) * 100)))
+}
+
+effect function checkCloudPlan(ticket: number): Plan.Event!!PlanPorts {
+  const cloud = try Cloud
+  const shelf = try AccountShelf
+  const session = try Session.Machine
+  const signIn = Session.currentSignIn(try session.get())
+  const nowMs = try (try Time).now()
+  const nowSec = Math.floor(nowMs / 1000)
+  const online = try shelf.online()
+  if (signIn <= 0) {
+    return { type: "unanswered", ticket, online, signIn: 0, now: untimed }
+  }
+  if (!online) {
+    return { type: "unanswered", ticket, online: false, signIn, now: untimed }
+  }
+  return effect {
+    const snap = try timeout(tryPromise({
+      try: () => cloud.client.snapshot(),
+      catch: (cause) => cause instanceof CloudError ? cause : networkError(cause),
+    }), "10 seconds")
+    const view = subscriptionView(snap, nowMs)
+    const planView = planFromSnapshot(snap)
+    const admission = planAdmission(planView)
+    try shelf.update((now) => ({ ...now, snapshot: snap, subscription: view }))
+    const usage = snap.allowance === null ? -1 : usagePercentOf(snap.allowance.granted, snap.allowance.available)
+    const tier: Plan.Tier = snap.plan.key === "pro_monthly" ? "Pro" : "Plus"
+    const ending = Boolean(snap.subscription?.cancelAtPeriodEnd)
+    const revision = snap.subscription?.revision ?? 1
+    if (admission === "Admit" || admission === "AdmitWithWarning") {
+      const paid = planView.tag === "PlanPaid"
+      const rawUntil = snap.plan.effectiveUntil ?? snap.subscription?.periodEnd ?? null
+      const untilSec = rawUntil !== null && toSeconds(rawUntil) > nowSec ? toSeconds(rawUntil) : nowSec + 3600
+      const paidToRaw = snap.subscription?.periodEnd ?? snap.plan.effectiveUntil ?? null
+      const paidTo = paidToRaw !== null && toSeconds(paidToRaw) > nowSec ? toSeconds(paidToRaw) : nowSec + Plan.graceWindow
+      const verified: Plan.Verified = {
+        kind: paid ? "Signed" : "Credits",
+        tier,
+        until: untilSec,
+        paidTo: paid ? paidTo : 0,
+        ending,
+        revision,
+        usage,
+      }
+      return { type: "checked", ticket, answer: verified, signIn, now: untimed } satisfies Plan.Event
+    }
+    const noPlan: Plan.Verified = { kind: "NoPlan", tier, until: 0, paidTo: 0, ending: false, revision, usage }
+    return { type: "checked", ticket, answer: noPlan, signIn, now: untimed } satisfies Plan.Event
+  } catch (cause): Plan.Event => {
+    if (cause instanceof CloudError && isCredentialInvalid(cause)) {
+      const refused: Plan.Verified = { kind: "SignInRefused", tier: "Plus", until: 0, paidTo: 0, ending: false, revision: 0, usage: -1 }
+      return { type: "checked", ticket, answer: refused, signIn, now: untimed }
+    }
+    return { type: "unanswered", ticket, online, signIn, now: untimed }
+  }
+}
+
+effect function endSignInFromPlan(): void!!Session.Machine {
+  const session = try Session.Machine
+  if (Session.canCloudRefused(try session.get(), "CloudSignIn")) {
+    try contained(session.send({ type: "cloudRefused", source: "CloudSignIn", busy: false, now: untimed }), "plan end sign-in")
+  }
+}
+
+effect function notifyPlanAnswered(): void!!(Billing.Machine | Change.Machine | Codes.Machine) {
+  const billing = try Billing.Machine
+  const change = try Change.Machine
+  const codes = try Codes.Machine
+  if (Billing.canPlanAnswered(try billing.get())) try contained(billing.send({ type: "planAnswered" }), "billing planAnswered")
+  if (Change.canPlanAnswered(try change.get())) try contained(change.send({ type: "planAnswered" }), "change planAnswered")
+  if (Codes.canPlanAnswered(try codes.get())) try contained(codes.send({ type: "planAnswered" }), "codes planAnswered")
+}
+
+function carryPlan(fx: Plan.Effect): Job<Plan.Event, PlanPorts, []> {
+  return match (fx) {
+    when { tag: "Check", let ticket }: answer("check plan", checkCloudPlan(ticket), { type: "unanswered", ticket, online: false, signIn: 1, now: untimed });
+    when { tag: "EndSignIn" }: run("plan end sign-in", endSignInFromPlan());
+    when { tag: "Answered" }: run("plan answered", notifyPlanAnswered());
+  }
+}
+
+function planTimers(state: Plan.Plan) {
+  const wakes = []
+  if ((state.standing === "Member" || state.standing === "Funded") && state.until > 0) {
+    wakes.push(due<Plan.Event, []>("planLapse", state.until, { type: "passTime", now: untimed }))
+  }
+  if (state.standing === "Grace" && state.kept.until > 0) {
+    wakes.push(due<Plan.Event, []>("planGraceEnd", state.kept.until, { type: "passTime", now: untimed }))
+  }
+  return wakes
+}
+
+/** Plan standing, 7-day offline grace window, billing refusal, and automatic renewal machine. */
+export const planMachine = Layer.provide(
+  reacting(Plan, { keep: 1, open: [{ type: "restart", signIn: 0, now: untimed }], carry: carryPlan, timers: planTimers }),
+  secondsTime,
+)
+
+type BillingPorts = Cloud | AccountShelf | Attempts | Session.Machine | Plan.Machine | Billing.Machine
+
+effect function readOffersAndInvoices(check: number): Billing.Event!!(Cloud | AccountShelf) {
+  const cloud = try Cloud
+  const shelf = try AccountShelf
+  return effect {
+    const offers = try timeout(tryPromise(() => cloud.client.plans()), "10 seconds")
+    const invoicesPage = timeout(tryPromise(() => cloud.client.invoices({ limit: 20 })), "10 seconds") catch () => undefined
+    try shelf.update((now) => ({
+      ...now,
+      offers,
+      invoices: invoicesPage?.invoices ?? now.invoices,
+    }))
+    return { type: "offersRead", ticket: check, ok: true } satisfies Billing.Event
+  } catch () => ({ type: "offersRead", ticket: check, ok: false } satisfies Billing.Event)
+}
+
+effect function openCheckoutVisit(visit: number, tier: Plan.Tier): void!!BillingPorts {
+  const cloud = try Cloud
+  const shelf = try AccountShelf
+  const attempts = try Attempts
+  const billing = try Billing.Machine
+  const key = try attempts.key(visit)
+  const planKey = tier === "Pro" ? "pro_monthly" as const : "plus_monthly" as const
+  const startedCheckout = timeout(tryPromise(() => cloud.client.startCheckout({ planKey, idempotencyKey: key, presentation: "mobile" })), "10 seconds") catch () => undefined
+  if (startedCheckout === undefined) return
+  if (startedCheckout.status === "open") {
+    try shelf.setCheckoutSession(startedCheckout.sessionId)
+    if ("checkoutUrl" in startedCheckout) {
+      try shelf.openExternal(startedCheckout.checkoutUrl)
+    }
+    return
+  }
+  if (startedCheckout.status === "completed") {
+    const current = try billing.get()
+    if (Billing.canReturned(current, visit, 0)) {
+      try contained(billing.send({ type: "returned", visit, now: untimed }), "checkout already completed")
+    }
+  }
+}
+
+effect function openFundsVisit(): void!!(Cloud | AccountShelf) {
+  const cloud = try Cloud
+  const shelf = try AccountShelf
+  const portalUrl = timeout(tryPromise(() => cloud.client.billingPortal()), "10 seconds") catch () => undefined
+  if (portalUrl !== undefined) try shelf.openExternal(portalUrl)
+}
+
+effect function openInvoiceVisit(): void!!(Cloud | AccountShelf) {
+  const cloud = try Cloud
+  const shelf = try AccountShelf
+  const heldUrl = try shelf.invoiceUrl()
+  if (heldUrl !== undefined) {
+    try shelf.openExternal(heldUrl)
+    return
+  }
+  const portalUrl = timeout(tryPromise(() => cloud.client.billingPortal()), "10 seconds") catch () => undefined
+  if (portalUrl !== undefined) try shelf.openExternal(portalUrl)
+}
+
+effect function confirmCheckoutAttempt(attempt: number): Billing.Event!!(Cloud | AccountShelf) {
+  const cloud = try Cloud
+  const shelf = try AccountShelf
+  const sessionId = try shelf.checkoutSession()
+  if (sessionId === undefined) return { type: "checkoutConfirmed", attempt, result: "NotKnown" }
+  return effect {
+    const answerCheckout = try timeout(tryPromise(() => cloud.client.confirmCheckout(sessionId)), "10 seconds")
+    if (answerCheckout.status === "completed") {
+      try shelf.setCheckoutSession(undefined)
+      return { type: "checkoutConfirmed", attempt, result: "Settled" } satisfies Billing.Event
+    }
+    return { type: "checkoutConfirmed", attempt, result: "NotPaid" } satisfies Billing.Event
+  } catch () => ({ type: "checkoutConfirmed", attempt, result: "NotKnown" } satisfies Billing.Event)
+}
+
+effect function requestPlanCheck(): void!!(Session.Machine | Plan.Machine) {
+  const signIn = Session.currentSignIn(try (try Session.Machine).get())
+  const plan = try Plan.Machine
+  if (Plan.canCheckNow(try plan.get(), signIn)) {
+    try contained(plan.send({ type: "checkNow", signIn }), "check plan now")
+  }
+}
+
+function carryBilling(fx: Billing.Effect): Job<Billing.Event, BillingPorts, []> {
+  return match (fx) {
+    when { tag: "ReadOffers", let check }: answer("read offers", readOffersAndInvoices(check), { type: "offersRead", ticket: check, ok: false });
+    when { tag: "OpenCheckout", let visit, let tier }: run("open checkout", openCheckoutVisit(visit, tier));
+    when { tag: "OpenFunds" }: run("open funds", openFundsVisit());
+    when { tag: "OpenInvoice" }: run("open invoice", openInvoiceVisit());
+    when { tag: "ConfirmCheckout", let attempt }: answer("confirm checkout", confirmCheckoutAttempt(attempt), { type: "checkoutConfirmed", attempt, result: "NotKnown" });
+    when { tag: "CheckPlan" }: run("billing check plan", requestPlanCheck());
+  }
+}
+
+function billingTimers(state: Billing.Billing) {
+  const wakes = []
+  if (state.visit.open) {
+    wakes.push(due<Billing.Event, []>("billingVisitTimeout", state.visit.at + Billing.visitLimit, { type: "visitTimedOut", now: untimed }))
+  }
+  if (state.pending && state.confirm.outcome !== "Sent" && state.pendingEnds > 0) {
+    wakes.push(due<Billing.Event, []>("checkoutExpire", state.pendingEnds, { type: "checkoutExpired", now: untimed }))
+  }
+  return wakes
+}
+
+const resumeBillingVisit = started(effect {
+  const device = try Device
+  const billing = try Billing.Machine
+  try Stream.runForEach(Stream.filter(device.visible, (shown) => shown), effect () => {
+    const current = try billing.get()
+    if (Billing.canResumed(current, 0)) {
+      try contained(billing.send({ type: "resumed", now: untimed }), "billing visit resumed")
+    }
+  })
+}, "billing resume watcher")
+
+/** Browser checkout, funds, invoice continuation, and checkout confirmation machine. */
+export const billingMachine = Layer.provide(
+  together(
+    reacting(Billing, { keep: 1, open: [{ type: "restart" }], carry: carryBilling, timers: billingTimers }),
+    resumeBillingVisit,
+  ),
+  secondsTime,
+)
+
+type ChangePorts = Cloud | AccountShelf | Attempts | Time | Session.Machine | Plan.Machine | Billing.Machine
+
+effect function askPlanChangeQuote(ticket: number, tier: Plan.Tier, revision: number): Change.Event!!ChangePorts {
+  const cloud = try Cloud
+  const shelf = try AccountShelf
+  const snap = shelf.snapshot().snapshot
+  const subscriptionId = snap?.subscription?.id
+  if (subscriptionId === undefined) return { type: "quoted", ticket, ok: false, quote: 0, ends: 0 }
+  const kind = tier === "Pro" ? "upgrade" as const : "downgrade" as const
+  const targetPlanKey = tier === "Pro" ? "pro_monthly" as const : "plus_monthly" as const
+  return effect {
+    const res = try timeout(tryPromise(() => cloud.client.reviewPlanChange(kind, { subscriptionId, expectedRevision: revision, targetPlanKey })), "10 seconds")
+    const num = try shelf.nextQuoteNumber()
+    const nowSec = try nowSeconds()
+    const ends = toSeconds(res.review.expiresAt) || (nowSec + 600)
+    try shelf.update((now) => ({ ...now, quote: { number: num, quoteId: res.quoteId, kind, review: res.review } }))
+    return { type: "quoted", ticket, ok: true, quote: num, ends } satisfies Change.Event
+  } catch () => ({ type: "quoted", ticket, ok: false, quote: 0, ends: 0 } satisfies Change.Event)
+}
+
+effect function mapCommandResult(command: { readonly commandId: string; readonly status: string }): Change.Result!!(Cloud | AccountShelf) {
+  if (command.status === "succeeded") return "Applied"
+  if (command.status === "awaiting_payment") {
+    const cloud = try Cloud
+    const shelf = try AccountShelf
+    const pay = timeout(tryPromise(() => cloud.client.continuePayment(command.commandId)), "10 seconds") catch () => undefined
+    if (pay !== undefined) try shelf.setInvoiceUrl(pay.url)
+    return "PayNeeded"
+  }
+  if (command.status === "dispatched") return "NotYet"
+  if (command.status === "rejected") return "NotMade"
+  return "NotKnown"
+}
+
+function changeErrorResult(cause: unknown): Change.Result {
+  if (cause instanceof CloudError) {
+    const tag = cause.failure.tag
+    if (tag === "CloudCredentialInvalid" || tag === "CloudConsentRequired") return "NotAuthorized"
+    if (tag === "CloudRefused" || tag === "CloudInsufficientCredits" || tag === "CloudAllowanceExhausted") return "NotMade"
+  }
+  return "NotKnown"
+}
+
+effect function confirmQuotedChange(attempt: number): Change.Event!!ChangePorts {
+  const cloud = try Cloud
+  const shelf = try AccountShelf
+  const attempts = try Attempts
+  const quote = shelf.snapshot().quote
+  if (quote === undefined) return { type: "concluded", attempt, result: "NotMade" }
+  const key = try attempts.key(attempt)
+  return effect {
+    const command = try timeout(tryPromise(() => cloud.client.confirmPlanChange(quote.kind, { quoteId: quote.quoteId, idempotencyKey: key })), "10 seconds")
+    const result = try mapCommandResult(command)
+    return { type: "concluded", attempt, result } satisfies Change.Event
+  } catch (cause) => ({ type: "concluded", attempt, result: changeErrorResult(cause) } satisfies Change.Event)
+}
+
+effect function cancelSubscriptionAtEnd(attempt: number, revision: number): Change.Event!!ChangePorts {
+  const cloud = try Cloud
+  const shelf = try AccountShelf
+  const attempts = try Attempts
+  const subscriptionId = shelf.snapshot().snapshot?.subscription?.id
+  if (subscriptionId === undefined) return { type: "concluded", attempt, result: "NotMade" }
+  const key = try attempts.key(attempt)
+  return effect {
+    const command = try timeout(tryPromise(() => cloud.client.cancelSubscription({ subscriptionId, expectedRevision: revision, idempotencyKey: key })), "10 seconds")
+    const result = try mapCommandResult(command)
+    return { type: "concluded", attempt, result } satisfies Change.Event
+  } catch (cause) => ({ type: "concluded", attempt, result: changeErrorResult(cause) } satisfies Change.Event)
+}
+
+effect function keepSubscriptionGoing(attempt: number, revision: number): Change.Event!!ChangePorts {
+  const cloud = try Cloud
+  const shelf = try AccountShelf
+  const attempts = try Attempts
+  const subscriptionId = shelf.snapshot().snapshot?.subscription?.id
+  if (subscriptionId === undefined) return { type: "concluded", attempt, result: "NotMade" }
+  const key = try attempts.key(attempt)
+  return effect {
+    const review = try timeout(tryPromise(() => cloud.client.undoReview()), "10 seconds")
+    const command = try timeout(tryPromise(() => cloud.client.undoCancel({ subscriptionId, expectedRevision: revision, idempotencyKey: key, quoteId: review.quoteId })), "10 seconds")
+    const result = try mapCommandResult(command)
+    return { type: "concluded", attempt, result } satisfies Change.Event
+  } catch (cause) => ({ type: "concluded", attempt, result: changeErrorResult(cause) } satisfies Change.Event)
+}
+
+effect function payChangeInvoice(): void!!Billing.Machine {
+  const billing = try Billing.Machine
+  if (Billing.canPayInvoice(try billing.get(), 0)) {
+    try contained(billing.send({ type: "payInvoice", now: untimed }), "billing payInvoice")
+  }
+}
+
+function carryChange(fx: Change.Effect): Job<Change.Event, ChangePorts, []> {
+  return match (fx) {
+    when { tag: "AskQuote", let ticket, let tier, let revision }: answer("ask quote", askPlanChangeQuote(ticket, tier, revision), { type: "quoted", ticket, ok: false, quote: 0, ends: 0 });
+    when { tag: "ConfirmChange", let attempt }: answer("confirm change", confirmQuotedChange(attempt), { type: "concluded", attempt, result: "NotKnown" });
+    when { tag: "CancelAtEnd", let attempt, let revision }: answer("cancel plan", cancelSubscriptionAtEnd(attempt, revision), { type: "concluded", attempt, result: "NotKnown" });
+    when { tag: "KeepGoing", let attempt, let revision }: answer("keep plan", keepSubscriptionGoing(attempt, revision), { type: "concluded", attempt, result: "NotKnown" });
+    when { tag: "PayInvoice" }: run("pay change invoice", payChangeInvoice());
+    when { tag: "VerifyOwner" }: run("verify billing owner", effect { try (try AccountShelf).update((now) => ({ ...now, billingAuthorized: false, verifyOwnerRequested: true })) });
+    when { tag: "CheckPlan" }: run("change check plan", requestPlanCheck());
+  }
+}
+
+/** Plan upgrade, downgrade, cancellation, and keep-plan machine. */
+export const changeMachine = Layer.provide(
+  reacting(Change, { keep: 1, open: [{ type: "restart" }], carry: carryChange }),
+  secondsTime,
+)
+
+type CodesPorts = Cloud | AccountShelf | Attempts | Session.Machine | Plan.Machine
+
+effect function redeemGiftCode(attempt: number, rawCode: string): Codes.Event!!CodesPorts {
+  const cloud = try Cloud
+  const attempts = try Attempts
+  const key = try attempts.key(attempt)
+  const normalized = normalizeSubscriptionCode(rawCode) ?? rawCode.trim().toUpperCase()
+  return effect {
+    const result = try timeout(tryPromise({
+      try: () => cloud.client.redeem({ code: normalized, idempotencyKey: key }),
+      catch: (cause) => cause instanceof CloudError ? cause : networkError(cause),
+    }), "10 seconds")
+    return { type: "redeemed", attempt, ok: result.kind === "redeemed", known: true } satisfies Codes.Event
+  } catch (cause): Codes.Event => {
+    if (cause instanceof CloudError) {
+      const failure = redeemFailureForStatus(cause)
+      if (failure !== undefined && failure.kind !== "RateLimited" && failure.kind !== "Unavailable") {
+        return { type: "redeemed", attempt, ok: false, known: true }
+      }
+      if (cause.failure.tag === "CloudRefused" || cause.failure.tag === "CloudCredentialInvalid") {
+        return { type: "redeemed", attempt, ok: false, known: true }
+      }
+    }
+    return { type: "redeemed", attempt, ok: false, known: false }
+  }
+}
+
+effect function readOwnReferral(check: number): Codes.Event!!(Cloud | AccountShelf) {
+  const cloud = try Cloud
+  const shelf = try AccountShelf
+  return effect {
+    const ref = try timeout(tryPromise(() => cloud.client.referral()), "10 seconds")
+    try shelf.update((now) => ({ ...now, referral: ref }))
+    return { type: "referralRead", ticket: check, ok: true } satisfies Codes.Event
+  } catch () => ({ type: "referralRead", ticket: check, ok: false } satisfies Codes.Event)
+}
+
+effect function applyFriendReferral(attempt: number, code: string): Codes.Event!!Cloud {
+  const cloud = try Cloud
+  return effect {
+    try timeout(tryPromise({
+      try: () => cloud.client.applyReferral(code.trim()),
+      catch: (cause) => cause instanceof CloudError ? cause : networkError(cause),
+    }), "10 seconds")
+    return { type: "referralApplied", attempt, result: "CodeTaken" } satisfies Codes.Event
+  } catch (cause): Codes.Event => {
+    if (cause instanceof CloudError && cause.failure.tag === "CloudRefused") {
+      const refCode = String(cause.failure.code)
+      if (refCode.includes("NotFound") || refCode.includes("Invalid") || refCode.includes("Bad")) return { type: "referralApplied", attempt, result: "CodeInvalid" }
+      if (refCode.includes("Conflict")) return { type: "referralApplied", attempt, result: "CodeUsed" }
+      return { type: "referralApplied", attempt, result: "CodeRefused" }
+    }
+    return { type: "referralApplied", attempt, result: "CodeUnknown" }
+  }
+}
+
+function carryCodes(fx: Codes.Effect): Job<Codes.Event, CodesPorts, []> {
+  return match (fx) {
+    when { tag: "Redeem", let attempt, let code }: answer("redeem code", redeemGiftCode(attempt, code), { type: "redeemed", attempt, ok: false, known: false });
+    when { tag: "ReadReferral", let check }: answer("read referral", readOwnReferral(check), { type: "referralRead", ticket: check, ok: false });
+    when { tag: "ApplyReferral", let attempt, let code }: answer("apply referral", applyFriendReferral(attempt, code), { type: "referralApplied", attempt, result: "CodeUnknown" });
+    when { tag: "CheckPlan" }: run("codes check plan", requestPlanCheck());
+  }
+}
+
+/** Gift/promo code redemption and referral sharing/application machine. */
+export const codesMachine = reacting(Codes, { keep: 1, open: [{ type: "restart" }], carry: carryCodes })
