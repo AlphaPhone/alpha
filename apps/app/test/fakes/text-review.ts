@@ -26,6 +26,7 @@ export function textReview(agentId: string, id: string, operation: ReviewOperati
     journal: new Map<string, JournalEntry>(),
     confirmations: [] as Confirmation[],
     decisions: [] as string[],
+    decisionGate: undefined as Promise<void> | undefined,
     claims: [] as string[],
     receipts: [] as unknown[],
   };
@@ -77,11 +78,17 @@ export function textReviewRoute(review: TextReviewScene, subjectUserId: string):
     }
     if (request.method !== "POST" || !resource.startsWith(`proposals/${proposal.id}/`)) return reject(404);
     const step = resource.split("/").at(-1);
-    return readJsonBody(request).then((body) => {
+    return readJsonBody(request).then(async (body) => {
       if (body.digest !== proposal.digest) return reject(409);
       if (step === "decision" && proposal.state === "pending" && body.decision === "approve") {
         review.decisions.push(proposal.id);
         proposal.state = "approved";
+        return Response.json({ digest: proposal.digest, proposal });
+      }
+      if (step === "decision" && proposal.state === "pending" && body.decision === "reject") {
+        review.decisions.push(proposal.id);
+        await review.decisionGate;
+        proposal.state = "rejected";
         return Response.json({ digest: proposal.digest, proposal });
       }
       if (step === "claim" && proposal.state === "approved") {

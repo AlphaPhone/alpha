@@ -388,26 +388,43 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
   });
 
   // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"
-  it("keeps voice active and the microphone open when an agent action needs review in chat, and settling review does not stop voice", async () => {
-    const world = { ...scene(), phone: true, signedIn: false };
-    world.ask.nextReplyChunks = ["[APPROVAL:send_email] Draft ready for your review in chat."];
-    const runtime = await startListening(world);
+  it("keeps Talk listening during a confirmed chat review and its decision", async () => {
+    const world = { ...scene(), phone: true, image: true, signedIn: false };
+    const review = textReview(world.notes.owner, "spoken-folder", { type: "files_folder_create", parent: "Download", name: "Review folder" });
+    world.telephony.textReview = review;
+    const { alpha } = await open(world, talkMounts);
+    const area = assistant.runtime(alpha);
+    await drawnUntil(alpha, area, Conversation, (state) => state.ready && state.observing);
+    await drawnUntil(alpha, area, Composer, (state) => state.slot === "Open" && state.binding.owner > 0);
+    await drawnUntil(alpha, alpha.runtime, Preferences, (state) => state.document.read.status === "Loaded");
+    await drawn(() => alpha.runtime.runPromise(Preferences.use((machine) => machine.send({ type: "setAskFirst", askFirst: true, at: untimed }, "Owner"))));
+    await drawnUntil(alpha, alpha.runtime, Preferences, (state) => state.askFirst);
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");
+    world.ask.nextReplyChunks = [""];
+    world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: {
+      proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true,
+    } }];
 
-    speakUtterance(world, "Send the draft email");
-    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.reviewPending && s.sent === 1);
+    speakUtterance(world, "Create a Review folder in Downloads");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On" && state.reviewPending);
+    expect(document.body.textContent).toContain("Review in chat");
+    expect([world.voice.engineHeld, world.voice.activeMicSession !== undefined, world.voice.spoken]).toEqual([true, true, []]);
+    expect(review.claims).toEqual([]);
 
-    const duringReview = await getVoice(runtime);
-    expect([duringReview.phase, duringReview.mic, duringReview.reviewPending, duringReview.engineHeld, world.voice.activeMicSession !== undefined]).toEqual([
-      "Listening", "On", true, true, true,
-    ]);
-    expect(world.voice.hushCalls).toBeGreaterThanOrEqual(1);
-    expect(world.voice.spoken).toEqual([]);
-
-    await sendVoice(runtime, { type: "reviewSettled" });
-    const afterSettle = await getVoice(runtime);
-    expect([afterSettle.phase, afterSettle.mic, afterSettle.reviewPending, afterSettle.engineHeld, world.voice.activeMicSession !== undefined]).toEqual([
-      "Listening", "On", false, true, true,
-    ]);
+    const decision = Promise.withResolvers<void>();
+    review.decisionGate = decision.promise;
+    try {
+      await press("Decline");
+      await drawn(() => vi.waitFor(() => expect(button("Decline")?.disabled).toBe(true)));
+      expect(document.body.textContent).toContain("Review in chat");
+    } finally {
+      decision.resolve();
+    }
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On" && !state.reviewPending);
+    expect([button("Decline"), review.proposal.state, review.claims, world.voice.activeMicSession !== undefined]).toEqual([undefined, "rejected", [], true]);
+    expect(document.body.textContent).not.toContain("Review in chat");
   });
 
   // spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/voice/index.md, "Voice keeps talking after a navigation only when it is the one the conversation asked for; any other ends it"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"

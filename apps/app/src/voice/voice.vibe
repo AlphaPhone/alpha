@@ -68,7 +68,6 @@ export interface VoiceMemory {
   playbackTurn: number
   playbackEpoch: number
   readonly playLock: Semaphore.Semaphore
-  reviewNotice: string
   dictatedText: string
   dictatedDurationMs: number | undefined
   fillTarget: { readonly field: Field; readonly filling: number; readonly apply: (words: string) => void!! } | undefined
@@ -103,7 +102,6 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
     playbackTurn: 0,
     playbackEpoch: 0,
     playLock,
-    reviewNotice: "",
     dictatedText: "",
     dictatedDurationMs: undefined,
     fillTarget: undefined,
@@ -182,13 +180,7 @@ module pure {
     return /^(?:(?:yes|okay|ok|please)[,\s]+)*send\s+this\s+text[.!?]?$/iu.test(spoken)
   }
 
-  const reviewTag = /\[(APPROVAL|PROPOSAL|REVIEW|DRAFT|CALENDAR_APPROVAL|EMAIL_DRAFT)\b/i
   const navigateTag = /\[NAVIGATE:([a-zA-Z]+)\]/i
-
-  /** @throws {never} */
-  export function replyNeedsReview(text: string): boolean {
-    return reviewTag.test(text)
-  }
 
   /** @throws {never} */
   export function requestedDestination(text: string): string | undefined {
@@ -310,7 +302,7 @@ module pure {
       .replace(/\s+/g, " ")
   }
 }
-import { addressedSms, replyNeedsReview, requestedDestination, smsConfirmation, speakableText, spokenForm, takeCompleteSentences } from pure
+import { addressedSms, requestedDestination, smsConfirmation, speakableText, spokenForm, takeCompleteSentences } from pure
 
 function placeForDestination(name: string): number | undefined {
   const lowered = name.toLowerCase()
@@ -345,9 +337,8 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     const observed = told && screen !== undefined && memory.screen !== undefined ? try memory.screen(screen.context) : undefined
     const recipient = addressedSms(spoken)
     const existing = chat?.snapshot().media
-    if (existing?.some((card) => card.spokenSms !== undefined)) {
-      chat?.change({ media: existing.filter((card) => card.spokenSms === undefined) })
-      if (Voice.canReviewSettled(try voice.get())) try ignore(voice.send({ type: "reviewSettled" }))
+    if (existing?.some((card) => card.spokenSms !== undefined && card.decision !== "Deciding")) {
+      chat?.change({ media: existing.filter((card) => card.spokenSms === undefined || card.decision === "Deciding") })
     }
     const room = chatPage?.chosen === lease.conversation && chatPage.page.status === "Loaded" ? record : undefined
     const selection = observed?.sms?.selection
@@ -397,9 +388,10 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       for (const sentence of split.ready) say(sentence)
     }
     let awaitingFiles = false
+    let proposing = false
+    let usedDirect = false
     const feed = (written: string, provisional: boolean) => {
-      if (provisional || awaitingFiles || sms !== undefined) return
-      if (replyNeedsReview(written)) return
+      if (provisional || proposing || sms !== undefined) return
       const clean = speakableText(replyBlocks(written, true).words)
       if (clean.length <= shown.length) return
       shown = clean
@@ -426,10 +418,12 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     const alreadyInFiles = showing?.tag === "App" && showing.view === "Files"
     const selected = observation?.metadata?.observation?.selectedObject
     const mayAskFiles = sms === undefined && sameScreen && images.length === 0 && selected?.kind !== "document"
-    const review = mayAskFiles ? Option.getOrUndefined(try Effect.serviceOption(MediaReview)) : undefined
-    const files = review === undefined || !alreadyInFiles ? undefined : try review.filesContext()
-    const origin = review === undefined || alreadyInFiles ? undefined : try review.filesOrigin(true)
-    const enrolled = review === undefined || (files === undefined && origin === undefined) ? undefined : try review.session()
+    const review = sms === undefined && sameScreen ? Option.getOrUndefined(try Effect.serviceOption(MediaReview)) : undefined
+    const files = review === undefined || !mayAskFiles || !alreadyInFiles ? undefined : try review.filesContext()
+    const origin = review === undefined || !mayAskFiles || alreadyInFiles ? undefined : try review.filesOrigin(true)
+    const enrolled = review === undefined ? undefined : try review.session()
+    const target = review === undefined || enrolled === undefined ? undefined : try review.messageTarget()
+    const voicemail = review === undefined || enrolled === undefined ? undefined : try review.voicemailTarget()
     const currentRequest = effect {
       return (try lease.current)
         && controller.conversation?.id === record.id && controller.conversation?.roomId === record.roomId
@@ -464,13 +458,19 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       onPreview: feed, onAcknowledgment: cue,
       onTool: (name: string) => {
         toolRan = true
-        if (direct !== undefined && name === "PROPOSE_DEVICE_ACTION") awaitingFiles = true
+        if (name === "PROPOSE_DEVICE_ACTION") {
+          proposing = true
+          awaitingFiles = usedDirect
+        }
       },
     }
     const sent = effect (files: typeof direct) => {
+      usedDirect = files !== undefined
+      proposing = false
+      awaitingFiles = false
       const metadata = admittedScreen ? { ...observation?.metadata, ...(views === undefined ? {} : delivery(views.clientId, files === undefined ? undefined : "direct-files-only-v1")) } : {}
       const headers = sms === undefined
-        ? (files === undefined ? undefined : filesOnlyHeaders(files))
+        ? (files === undefined ? ((try atSource) ? enrolled?.headers : undefined) : filesOnlyHeaders(files))
         : { ...sms.opened.headers, "x-eliza-device-capabilities": "sms.send.v1" }
       return tryPromise(() => controller.send({
         text: spoken, channelType: "VOICE_DM", ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }),
@@ -497,7 +497,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     }
     if (result?.kind === "Replied") try lease.settle(result, spoken)
     let filesReport: string | undefined
-    if (direct !== undefined && review !== undefined && awaitingFiles && streamed
+    if (usedDirect && direct !== undefined && review !== undefined && awaitingFiles && streamed
       && result?.kind === "Replied" && result.reply.userMessageId !== undefined && result.reply.failureKind === undefined) {
       const message = result.reply.userMessageId
       const report = (note: string) => { filesReport = note }
@@ -520,7 +520,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       && result.reply.userMessageId !== undefined && result.reply.failureKind === undefined && (try smsCurrent)) {
       const card = try smsReview.spokenSms(sms.opened, result.reply.userMessageId, result.reply.actionResults, {
         recipient: sms.recipient, selection: sms.selection, conversation: sms.conversation, revision: sms.revision,
-        room: sms.room, current: smsCurrent,
+        room: sms.room, session, current: smsCurrent,
       })
       if (card !== undefined && (try smsCurrent) && Voice.canSentence(try voice.get(), session, turn)) {
         chat.change({ media: [...chat.snapshot().media, card] })
@@ -548,10 +548,40 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       Queue.endUnsafe(queue)
       return
     }
+    let asks = smsShown
+    if (!usedDirect && review !== undefined && enrolled !== undefined && chat !== undefined && chats !== undefined
+      && chatPage !== undefined && chatPage.around === 0 && conversation !== undefined && screen !== undefined && streamed
+      && result?.kind === "Replied" && result.reply.userMessageId !== undefined && result.reply.failureKind === undefined
+      && (try atSource) && (try shell.get()).route === sourceRoute && (try lease.verified)) {
+      const message = result.reply.userMessageId
+      const revision = screen.context.revision
+      const pageTicket = chatPage.page.ticket
+      const reply = {
+        clientMessageId: result.clientMessageId, conversationId: record.id, pageTicket, actionResults: result.reply.actionResults,
+        spoken: { session, current: lease.verified },
+        ...(observation?.sms === undefined ? {} : { sms: observation.sms }),
+        ...(voicemail === undefined ? {} : { voicemail }),
+      }
+      const before = try shell.get()
+      let panelRoute = sourceRoute
+      if (before.assistant === "Bar" && (try review.hasSpokenReview(enrolled, message, reply))) {
+        const raised = try contained(shell.send({ type: "raise", detent: "Sheet" }, (state) => state.route === sourceRoute
+          && state.assistant === "Bar" && Effect.runSync(atSource)), "showing the review from Talk")
+        if (raised) panelRoute += 1
+      }
+      const panel = try shell.get()
+      if ((panel.assistant === "Sheet" || panel.assistant === "Full") && panel.route === panelRoute && (try atSource)
+        && (try chats.get()).page.ticket === pageTicket) {
+        const cards = try Effect.provideService(review.pending(enrolled, message, lease.conversation, revision, target, reply), Conversation, conversation)
+        if (cards.length > 0 && (try atSource) && (try lease.verified) && (try shell.get()).route === panelRoute && (try chats.get()).page.ticket === pageTicket) {
+          const existing = chat.snapshot().media
+          chat.change({ media: [...existing, ...cards.filter((card) => !existing.some((same) => same.id === card.id && same.digest === card.digest))] })
+          asks = true
+        }
+      }
+    }
     memory.lastReply = finalText
-    const asks = smsShown || replyNeedsReview(finalText)
     if (asks) {
-      memory.reviewNotice = finalText
       Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: true })
       Queue.endUnsafe(queue)
       return
@@ -685,13 +715,18 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
     when { tag: "Send", let session, let turn }: stream(`send ${session}:${turn}`, sendVoiceTurn(session, turn), { type: "replyEnds", session, turn, asks: false });
     when { tag: "Play", let session, let turn }: answer(`play ${session}:${turn}:${fresh()}`, effect {
       const { memory } = try VoiceWords
+      const bridge = try VoiceBridge
+      const voice = try Voice.Machine
       const epoch = memory.playbackEpoch
+      const current = effect {
+        return memory.playbackEpoch === epoch && Voice.canSentencePlayed(try voice.get(), session, turn)
+      }
       try Semaphore.withPermit(memory.playLock, effect {
-        if (memory.playbackEpoch !== epoch) return
+        if (!(try current)) return
+        try bridge.awaitSpeechOutputWarmup(session)
+        if (!(try current)) return
         const piece = memory.dequeueSentence(turn)
-        if (piece !== undefined) {
-          try ignore((try VoiceBridge).playSentence(session, turn, piece.text, piece.append))
-        }
+        if (piece !== undefined) try ignore(bridge.playSentence(session, turn, piece.text, piece.append))
       })
       return { type: "sentencePlayed", session, turn }
     }, { type: "sentencePlayed", session, turn });

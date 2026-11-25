@@ -153,6 +153,7 @@ pure def loaded(s: Scan, ticket: int, ok: bool, readable: bool, base: int, pages
 ### A selected image or live Camera frame opens a transient text review, reads text immediately, and becomes a multi-page document only at the owner's request
 
 The image does not enter the Photos library or replace the saved Files draft.
+Discovered by the proof: closing a scan during draft deletion could allow a transient image to open before deletion settled. A draft read or deletion must settle before the transient image opens.
 A Camera frame can be kept in Photos at the owner's request. The owner can correct its text, review links, save a note,
 review an event, and save a PDF. Choosing Multi-page adds page controls
 to this review, leaving the saved Files draft alone.
@@ -160,16 +161,17 @@ to this review, leaving the saved Files draft alone.
 ```quint
 pure def canStartImage(s: Scan, frame: int, by: Actor): bool =
   by == Phone and not(s.open) and not(exporting(s)) and frame > 0 and not(s.keeping.stored) and not(D::unsaved(s.keeping.draft))
+    and s.keeping.loading.status == R::Idle and not(K::deleting(s.keeping))
 
-pure def imageReview(s: Scan, camera: bool): Moved =
+pure def imageReview(camera: bool, s: Scan): Moved =
   val image = s.images + 1
   val opened = { ...s, origin: SelectedImage, open: true, images: image, pages: List({ ...K::noPage, image: image, camera: camera }), problem: NoProblem }
   recognize(opened, image, Owner)
 
-pure def startImage(s: Scan, frame: int, by: Actor): Moved = imageReview(s, false)
+pure def startImage(s: Scan, frame: int, by: Actor): Moved = imageReview(false, s)
 
 pure def canStartCameraImage(s: Scan, frame: int, by: Actor): bool = canStartImage(s, frame, by)
-pure def startCameraImage(s: Scan, frame: int, by: Actor): Moved = imageReview(s, true)
+pure def startCameraImage(s: Scan, frame: int, by: Actor): Moved = imageReview(true, s)
 
 pure def canShowPages(s: Scan, by: Actor): bool = by == Owner and s.origin == SelectedImage and editable(s)
 pure def showPages(s: Scan, by: Actor): Scan = { ...s, origin: SelectedDocument }
@@ -268,8 +270,11 @@ pure val eval_witness_canSwapPages = (("start", Owner), ("add", 1, 0, false, Pho
 
 ### Every page shows an image already made
 
+Discovered by the proof: with an empty scan, a negative counter could assign a negative image number to the first page. The counter starts at zero and stays nonnegative.
+
 ```quint
-pure def alwaysPagesShowImagesMade(s: Scan): bool = s.pages.every(p => p.image > 0 and p.image <= s.images)
+pure def alwaysPagesShowImagesMade(s: Scan): bool =
+  s.images >= 0 and s.pages.every(p => p.image > 0 and p.image <= s.images)
 ```
 
 ### A scan can hold several pages, resume a draft, find its draft unreadable, and offer to load it over its pages
@@ -528,7 +533,7 @@ pure def canSearchRead(s: Scan, ticket: int, image: int, by: Actor): bool =
     and s.search.remaining.nthOr(0, 0) == image and s.pages.some(p => p.image == image and p.text == 0)
 
 pure def searchRead(s: Scan, ticket: int, image: int, ok: bool, by: Actor): Moved =
-  if (ok) searchNext({ ...s.search, remaining: s.search.remaining.tail() }, s)
+  if (ok and s.search.remaining.length() > 0) searchNext({ ...s.search, remaining: s.search.remaining.tail() }, s)
   else { state: { ...s, search: { ...s.search, stage: SearchFailed } }, out: List() }
 
 pure def canCancelSearch(s: Scan, ticket: int, by: Actor): bool =
@@ -623,10 +628,12 @@ pure def exported(s: Scan, ticket: int, confirmed: bool, known: bool, by: Actor)
 ### While the PDF is being made, the pages do not change and no text is read
 
 Discovered by simulation: text read from a page could arrive while the
-PDF was being drawn without it.
+PDF was being drawn without it. A final export answer can release the pages of a closed transient scan after recording its outcome.
 
 ```quint
-pure def stepExportingFreezesThePages(before: Scan, after: Scan): bool = exporting(before) implies after.pages == before.pages
+pure def stepExportingFreezesThePages(before: Scan, via: str, after: Scan): bool =
+  exporting(before) implies
+    (after.pages == before.pages or (via == "exported" and not(exporting(after)) and before.origin != Document and not(before.open) and after.pages.length() == 0))
 
 pure def alwaysNoTextIsReadDuringAnExport(s: Scan): bool = exporting(s) implies s.text.reading.status != R::Loading
 ```
