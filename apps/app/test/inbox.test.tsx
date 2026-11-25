@@ -157,11 +157,13 @@ it("Star and mark the mail I reviewed (spec/app/inbox/sending.md, \"Story: Chang
   const world = scene();
   const { alpha } = await openInbox(world);
   const runtime = inbox.runtime(alpha);
-  const subjects: readonly [string, string] = ["Notes for the 3:00 review", "Dinner Friday?"];
-  await tile("Inbox");
+  const first = "Notes for the 3:00 review";
+  const second = "Dinner Friday?";
+  const subjects = [first, second];
+  await openInboxFromHome(alpha);
   await until(alpha, runtime, List, (state) => state.list.status === "Loaded");
-  await select(subjects[0]);
-  await row(subjects[1]);
+  await choose(first);
+  await row(second);
   await until(alpha, runtime, List, (state) => state.chosen.length === subjects.length);
   await menu("Star", "Mail options");
   await until(alpha, runtime, Changes, (state) => state.review.showing && state.kind === "Star");
@@ -173,8 +175,8 @@ it("Star and mark the mail I reviewed (spec/app/inbox/sending.md, \"Story: Chang
   await until(alpha, runtime, List, (state) => state.selected.folder === "Starred" && state.list.status === "Loaded");
   expect(rows()).toEqual(subjects);
 
-  await select(subjects[0]);
-  await row(subjects[1]);
+  await choose(first);
+  await row(second);
   await until(alpha, runtime, List, (state) => state.chosen.length === subjects.length);
   await menu("Mark as read", "Mail options");
   await until(alpha, runtime, Changes, (state) => state.review.showing && state.kind === "MarkRead");
@@ -189,12 +191,12 @@ it("Delete the reviewed phone drafts (spec/app/inbox/drafts.md, \"The owner can 
   const first = await openInbox(world);
   const { alpha } = first;
   const runtime = inbox.runtime(alpha);
-  await tile("Inbox");
+  await openInboxFromHome(alpha);
   await until(alpha, runtime, List, (state) => state.list.status === "Loaded");
   for (const [at, subject] of ["Notes for Monday", "Dinner arrangements"].entries()) {
     await press("Compose");
     await until(alpha, runtime, Writing, (state) => state.open);
-    await write("Subject", subject);
+    await fill("Subject", subject);
     await later(alpha, 10);
     await until(alpha, runtime, Writing, (state) => state.stored && state.letter.revision >= 1 && !state.pending);
     await press("Back from draft");
