@@ -682,7 +682,7 @@ effect function openAndroidDraft(port: AndroidDraftPort, offer: IncomingSmsDraft
     if (latest?.token !== offer.token || !(try current()) || (try store.newDraft()) !== before) return false
     const draft = { ...before, recipients, body: offer.body, revision: before.revision + 1 }
     const thread = try numberForNew(draft)
-    const event = { type: "openAndroidDraft", current: true, empty: true, revision: draft.revision, thread } as const
+    const event = { type: "openAndroidDraft", requestCurrent: true, empty: true, revision: draft.revision, thread } as const
     const canOpen = effect {
       return (try current()) && canOpenAndroidDraft(try messages.get(), true, true, draft.revision, thread)
         && !newDraftHeld(try composer.get(), before.revision)

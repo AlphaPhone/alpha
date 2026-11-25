@@ -603,10 +603,10 @@ already in use changes nothing. The filled draft opens in New, leaving
 Send to the owner.
 
 ```quint
-pure def canOpenAndroidDraft(s: Messages, current: bool, empty: bool, revision: int, thread: int): bool =
-  current and empty and canStartNewDraft(s, revision, thread) and revision > s.newDraft.revision and thread > 0
+pure def canOpenAndroidDraft(s: Messages, requestCurrent: bool, empty: bool, revision: int, thread: int): bool =
+  requestCurrent and empty and canStartNewDraft(s, revision, thread) and revision > s.newDraft.revision and thread > 0
 
-pure def openAndroidDraft(s: Messages, current: bool, empty: bool, revision: int, thread: int): Moved =
+pure def openAndroidDraft(s: Messages, requestCurrent: bool, empty: bool, revision: int, thread: int): Moved =
   startNewDraft(s, revision, thread)
 
 pure def stepAndroidDraftOpensItsNewVisit(before: Messages, via: str, after: Messages): bool =
