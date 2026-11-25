@@ -1,0 +1,77 @@
+// spec/app/voice/index.md, "Using the transcript fills the field dictation started in, and dictation never sends"
+import { MMS_MAX_BODY } from "@elizaos/os/bridges/definitions/messages"
+import * as Composer from "../../gen/app__messages__composer.effect.vibe"
+import * as Messages from "../../gen/app__messages.effect.vibe"
+import { Machine as Phone } from "../../gen/app__phone.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import * as Voice from "../../gen/app__voice.effect.vibe"
+import { say, type Said } from "../notices/toasts.vibe"
+import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
+import { Device } from "../platform/device.vibe"
+import { VoiceBridge } from "../platform/voice.vibe"
+import { contained, started, together } from "../runtime/reactor.vibe"
+import { VoiceWords, openDictation, voiceWithCalls, voicing } from "../voice/voice.vibe"
+import { Drafts } from "./composer.vibe"
+
+const remainingInMessages = (where: Messages.Messages): boolean => where.front && where.pane === "Conversation" && Messages.readable(where)
+
+/** Leaving the open text or raising Ask Alpha puts away its recorder, even if native recognition is still running. */
+const messageDictation = started(effect {
+  const shell = try Shell
+  const messages = try Messages.Machine
+  const voice = try Voice.Machine
+  const origin = Stream.zipLatest(shell.changes, messages.changes)
+  const changes = Stream.changesWith(origin, ([view, page], [nextView, nextPage]) =>
+    view.assistant === nextView.assistant && view.trail.at(-1) === nextView.trail.at(-1) && page.thread === nextPage.thread
+      && page.page.ticket === nextPage.page.ticket && remainingInMessages(page) === remainingInMessages(nextPage))
+  let previous: { thread: number; ticket: number } | undefined
+  try Stream.runForEach(changes, effect ([view, page]) => {
+    const keep = showing(view, "Messages") && view.assistant === "Bar" && remainingInMessages(page)
+    const same = keep && previous?.thread === page.thread && previous.ticket === page.page.ticket
+    previous = keep ? { thread: page.thread, ticket: page.page.ticket } : undefined
+    if (same) return
+    const current = try voice.get()
+    if (current.recorder.field === "MessagesBar" && Voice.canCloseRecorder(current)) try contained(voice.send({ type: "closeRecorder" }), "discarding dictation for the previous conversation")
+  })
+}, "observing the message dictation target")
+
+/** Messages and Ask Alpha use the same lazily activated voice machine for this launch. */
+export const voiceArea = together(voicing, voiceWithCalls, messageDictation)
+
+/** Start dictating to the conversation that owns the visible person input. */
+export effect function dictateMessage(thread: number): void!!(Composer.Machine | Messages.Machine | Phone | Shell | Voice.Machine | VoiceWords | VoiceBridge | Device | Drafts | Toasts | Said) {
+  const messages = try Messages.Machine
+  const composer = try Composer.Machine
+  const phone = try Phone
+  const shell = try Shell
+  const voice = try Voice.Machine
+  const device = try Device
+  const drafts = try Drafts
+  const context = try messages.get()
+  const ticket = context.page.ticket
+  const editableHere = effect {
+    const view = try shell.get()
+    const place = try messages.get()
+    const draft = try composer.get()
+    return showing(view, "Messages") && view.assistant === "Bar" && place.front && place.pane === "Conversation"
+      && place.thread === thread && place.page.ticket === ticket && Messages.readable(place) && draft.thread === thread
+      && Composer.canTypeText(draft, false) && (try phone.get()).telecom === "NoCall" && (try device.showing())
+  }
+  if (!(try editableHere)) return
+  if (!(try (try VoiceBridge).available())) {
+    try say("Dictation is unavailable. You can still type your message.", true)
+    return
+  }
+  const opened = try openDictation("MessagesBar", effect (words: string) => {
+    if (!(try editableHere)) return
+    const before = try drafts.text(thread)
+    const next = before.trim() === "" ? words : `${before.trimEnd()} ${words}`
+    if (next.length > MMS_MAX_BODY) {
+      try say("That transcription would make the message too long", true)
+      return
+    }
+    try drafts.write(thread, next)
+    if (!(try contained(composer.send({ type: "typeText", empty: false }), "putting dictation in the message draft")) && (try drafts.text(thread)) === next) try drafts.write(thread, before)
+  })
+  if (opened) try contained(voice.send({ type: "startRecording" }), "starting message dictation")
+}

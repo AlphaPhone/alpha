@@ -11,10 +11,10 @@ import { MediaExecutors } from "../src/assistant/media-review.vibe";
 import { aloud } from "../src/assistant/read-aloud.vibe";
 import { agentAt } from "../src/platform/agent.vibe";
 import { cloudAt } from "../src/platform/cloud.vibe";
+import { voiceArea } from "../src/messages/dictation.vibe";
 import { pagePlatform } from "../src/platform/platform.vibe";
 import { resident } from "../src/resident.vibe";
 import { together, whole } from "../src/runtime/reactor.vibe";
-import { voicing } from "../src/voice/voice.vibe";
 
 const closers: (() => Promise<void>)[] = [];
 
@@ -43,7 +43,7 @@ export async function mountDock({ view = "Browser", withToast = false, flush }: 
     Layer.succeed(MediaHandoff, { attach: () => Effect.succeed(false) }),
     Layer.succeed(MediaExecutors, { execute: () => Effect.succeed(undefined) }),
   );
-  const runtime = ManagedRuntime.make(Layer.provideMerge(whole(together(assisting, voicing, aloud)), Layer.provideMerge(resident, platform)));
+  const runtime = ManagedRuntime.make(Layer.provideMerge(whole(together(assisting, voiceArea, aloud)), Layer.provideMerge(resident, platform)));
   const host = document.body.appendChild(document.createElement("div"));
   const reactRoot = createRoot(host);
   await run(async () => {

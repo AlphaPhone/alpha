@@ -9,13 +9,13 @@ import { Machine as Voice, type Voice as VoiceState } from "../../gen/app__voice
 import { useMachine as useVoice } from "../../gen/app__voice.react.ts";
 import { quiet } from "../../gen/app__voice.ts";
 import { useMachine as useSpeaker } from "../../gen/app__voice__output.react.ts";
+import { voiceArea } from "../messages/dictation.vibe";
 import { VoiceBridge } from "../platform/voice.vibe";
 import { area, type Resident, type Shown } from "../runtime/area.tsx";
 import { applying, following, together, untimed } from "../runtime/reactor.vibe";
 import { keyboardVoice } from "../shell/canvas.vibe";
 import { TalkControls } from "../voice/TalkControls.tsx";
 import { DictationControls } from "../voice/DictationControls.tsx";
-import { voiceWithCalls, voicing } from "../voice/voice.vibe";
 import { Assistant } from "./Assistant.tsx";
 import { assistantBack, assisting } from "./assistant.vibe";
 import { copyMessage, emailDestination, emailMessage } from "./message-actions.vibe";
@@ -25,7 +25,7 @@ import { aloud } from "./read-aloud.vibe";
 const voiceOwnsComposer = (state: VoiceState) => !quiet(state) || state.recorder.stage !== "Closed";
 
 const screens = together(
-  assisting, voicing, voiceWithCalls, aloud,
+  assisting, voiceArea, aloud,
   following(Voice, voiceOwnsComposer, Dock, (on) => ({ type: "voicing", on, now: untimed } as const)),
   applying(Voice, voiceOwnsComposer, keyboardVoice),
 );
