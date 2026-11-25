@@ -3,13 +3,15 @@ import react from "@vitejs/plugin-react";
 import vibelang from "vibelang-vite";
 import { type Plugin, defineConfig } from "vite";
 import { eliza } from "@repo/eliza-harness/serve";
-import { fakes } from "./test/fakes/serve.ts";
+import { fakePhone, fakes } from "./test/fakes/serve.ts";
 
 /**
  * `pnpm dev` serves the page over eliza's agent and cloud; the explore stage, and `ALPHA_FAKES=1 pnpm dev`, over the
  * journeys' fakes as a browser reaches them, and `ALPHA_FAKES=phone pnpm dev` as an Alpha image's plugins do.
+ * `ALPHA_PHONE=1 pnpm dev` serves eliza's agent and cloud through the fake phone's plugins, as an Alpha image reaches them.
  */
 const faked = process.env.SPEC_TESTS !== undefined || (process.env.ALPHA_FAKES ?? "") !== "";
+const phoned = process.env.ALPHA_PHONE === "1";
 
 /**
  * The built page's Content-Security-Policy, the first element of its head (spec/app/platform/index.md, "A built page
@@ -40,7 +42,7 @@ const guarded: Plugin = {
 };
 
 export default defineConfig({
-  plugins: [vibelang(), react(), tailwindcss(), guarded, faked ? fakes(process.env.ALPHA_AGENT, process.env.ALPHA_FAKES === "phone") : eliza()],
+  plugins: [vibelang(), react(), tailwindcss(), guarded, ...(faked ? [fakes(process.env.ALPHA_AGENT, process.env.ALPHA_FAKES === "phone")] : [eliza(), ...(phoned ? [fakePhone()] : [])])],
   /** eliza's clients are linked from their own checkout, whose Effect and Capacitor are this one's versions: one copy of each in the page. */
   resolve: { dedupe: ["effect", "vibelang-runtime", "@capacitor/core"] },
   // spec/app/platform/index.md, "Mocks, fixtures and developer surfaces exist only when the build allows test mocks": the page reads the build's allowance as `import.meta.env.ELIZA_DEV_ALLOW_TEST_MOCKS`.

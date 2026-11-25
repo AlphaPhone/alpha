@@ -67,6 +67,12 @@ describe("Home on a phone", () => {
     const second = await open(world);
     await until(second.alpha, home.runtime(second.alpha), Home.Machine, (h) => h.tiles.load.status === "Loaded" && h.tiles.load.ticket === 2);
     expect(tiles().at(-1)).toBe("view:Notes");
+
+    // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it": the same saved tiles on an Alpha image that grants contacts show Phone, Messages and Contacts in Home order too.
+    await second.close();
+    const third = await open({ ...world, image: true });
+    await until(third.alpha, home.runtime(third.alpha), Home.Machine, (h) => h.tiles.load.status === "Loaded" && h.tiles.load.ticket === 3);
+    expect(tiles()).toEqual(["view:Phone", "view:Messages", ...alphaApps.slice(0, 6), "view:Contacts", ...alphaApps.slice(7).filter((tile) => tile !== "view:Notes"), "view:Notes"]);
   });
 
   // spec/app/home/cards.md, "Story: See my day at a glance"; spec/app/home/cards.md, "Story: The agenda card"; spec/app/home/cards.md, "Story: Open my day from a card"
@@ -100,6 +106,32 @@ describe("Home on a phone", () => {
     await drawn(() => agenda()?.click());
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Calendar");
     await drawn(() => { agendaFrom.reminders([]); agendaFrom.hidden([]); });
+    await closeAll();
+
+    // spec/app/home/cards.md, "Story: See my day at a glance": Home names the day as it is where the owner is, west of UTC after its midnight as well as east of it. Home itself carries no date heading, as on the earlier Alpha; the agenda card names its event's day.
+    const zone = process.env.TZ;
+    const tuesday = Date.UTC(2026, 10, 24);
+    const named: Array<string | null | undefined> = [];
+    const local: string[] = [];
+    try {
+      for (const [where, at] of [["America/Los_Angeles", tuesday + 8 * hour], ["America/Los_Angeles", tuesday + 27 * hour], ["UTC", tuesday + 8 * hour], ["Asia/Tokyo", tuesday + 8 * hour], ["Asia/Tokyo", tuesday - 3 * hour]] as const) {
+        process.env.TZ = where;
+        const there = { ...scene(), phone: true, now: at };
+        there.calendar.granted = true;
+        there.calendar.calendars.push({ id: "1", name: "Work", writable: true, local: true });
+        there.calendar.phoneEvents = [{ id: "a", calendarId: "1", title: "Standup", begin: at + 2 * hour, end: at + 3 * hour, allDay: false, recurring: false }];
+        const opened = await open(there);
+        await until(opened.alpha, home.runtime(opened.alpha), Cards.Machine, (c) => c.calendar.source === "Ready" && c.calendar.items.length === 1);
+        expect(document.querySelector("h1")?.textContent).toBe("Home");
+        named.push(agenda()?.getAttribute("aria-label"));
+        local.push(new Date(at + 2 * hour).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", timeZone: where }));
+        await opened.close();
+      }
+    } finally {
+      process.env.TZ = zone;
+    }
+    expect(new Set(local).size).toBe(1);
+    expect(named.every((label, at) => label?.startsWith(`Open calendar event: Standup, ${local[at]},`))).toBe(true);
   });
 
   // spec/app/home/index.md, "Story: See the apps on this phone"; spec/app/home/index.md, "Story: Find an app and see its details"; spec/app/home/index.md, "Story: Open an app"

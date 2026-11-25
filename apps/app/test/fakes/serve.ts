@@ -30,6 +30,18 @@ function developed(world: Scene): Scene {
   return world;
 }
 
+/** The page's first script: the fake phone's plugins, which reach the dev server's /agent and /cloud as an Alpha image's native code would. */
+const phoned = [{ tag: "script", attrs: { type: "module", src: "/test/fakes/page.ts" }, injectTo: "head-prepend" as const }];
+
+/**
+ * The fake phone over whatever agent and cloud the dev server answers, eliza's own included: `ALPHA_PHONE=1 pnpm dev`
+ * shows Alpha as an Alpha image draws it, Phone, Messages and Contacts on Home among the rest, with eliza's agent and
+ * cloud behind it. `apply: "serve"` keeps it out of every build.
+ */
+export function fakePhone(): Plugin {
+  return { name: "alpha-fake-phone", apply: "serve", transformIndexHtml: () => phoned };
+}
+
 /**
  * The fake agent and cloud at the dev server's /agent and /cloud, from the routes the journeys use, so that `pnpm dev`
  * and the explore stage run with no agent; `apply: "serve"` keeps it out of every build. With `real` the agent is the one at that address.
@@ -40,7 +52,7 @@ export function fakes(real?: string, phone = false): Plugin {
   return {
     name: "alpha-fakes",
     apply: "serve",
-    transformIndexHtml: () => (phone ? [{ tag: "script", attrs: { type: "module", src: "/test/fakes/page.ts" }, injectTo: "head-prepend" }] : []),
+    transformIndexHtml: () => (phone ? phoned : []),
     configureServer(server) {
       if (real === undefined) server.middlewares.use("/agent", (incoming, outgoing) => void relay(agent, incoming, outgoing));
       server.middlewares.use("/cloud", (incoming, outgoing) => void relay(cloud, incoming, outgoing));

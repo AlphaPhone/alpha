@@ -47,7 +47,8 @@ pnpm verify   # everything CI runs
 names), and links it as `.eliza`; every worktree shares that build, and
 typecheck, test, build and dev say so where it is missing. `pnpm dev` starts
 eliza's cloud command and its agent as processes of that run, with a scripted
-model in place of a paid one, and stops them with it. `ALPHA_FAKES=1 pnpm dev`
+model in place of a paid one, and stops them with it; `ALPHA_PHONE=1 pnpm dev`
+reaches them through the fake phone's plugins, as an Alpha image does. `ALPHA_FAKES=1 pnpm dev`
 serves the app over the journeys' fakes instead, and `ALPHA_FAKES=phone` over
 the fake phone's plugins.
 
