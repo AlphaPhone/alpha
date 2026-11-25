@@ -1,5 +1,6 @@
 package ai.alphacompute.alphaphone;
 
+import ai.eliza.plugins.media.DocumentBytes;
 import ai.eliza.plugins.media.MediaLibraryKey;
 import ai.eliza.plugins.media.OwnedAlbums;
 import ai.eliza.plugins.media.OwnedCaptures;
@@ -429,6 +430,15 @@ public class AlphaPhotosPlugin extends PermittedPhotosPlugin {
 
   @PluginMethod
   public void readMessagePicture(PluginCall call) {
+    readOriginalPicture(call, SmsSendJournal.MAX_MMS_BYTES, Set.of("image/jpeg", "image/png"));
+  }
+
+  @PluginMethod
+  public void readEmailPicture(PluginCall call) {
+    readOriginalPicture(call, DocumentBytes.MAX_BYTES, Set.of("image/jpeg", "image/png", "image/webp"));
+  }
+
+  private void readOriginalPicture(PluginCall call, int limit, Set<String> types) {
     submitRead(call, () -> {
       String id = call.getString("id", "");
       String revision = call.getString("revision", "");
@@ -450,8 +460,8 @@ public class AlphaPhotosPlugin extends PermittedPhotosPlugin {
           JSObject item = permitted.read(id, revision, false);
           String mime = resolver.getType(uri);
           long size = item.getLong("size");
-          if (!("image/jpeg".equals(mime) || "image/png".equals(mime)) || size <= 0 || size > SmsSendJournal.MAX_MMS_BYTES)
-            throw new IOException("The selected photo is not an MMS picture");
+          if (mime == null || !types.contains(mime) || size <= 0 || size > limit)
+            throw new IOException("The selected photo exceeds its attachment type or size limit");
           return new SelectedPhotoCopy.Metadata(item.getString("name"), mime, size,
               item.getString("revision"), item.getString("identity"));
         }
@@ -470,7 +480,8 @@ public class AlphaPhotosPlugin extends PermittedPhotosPlugin {
           };
         }
       }, current);
-      if (picture.bytes.length > SmsSendJournal.MAX_MMS_BYTES) throw new IOException("MMS picture exceeds its limit");
+      if (picture.bytes.length > limit) throw new IOException("The selected picture exceeds its attachment limit");
+      DocumentBytes.validate(picture.metadata.name, picture.metadata.mime, picture.bytes);
       current.check();
       JSObject result = new JSObject();
       result.put("name", picture.metadata.name);

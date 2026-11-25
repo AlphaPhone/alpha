@@ -500,13 +500,15 @@ export effect function prepare(thread: number, selectedSim: TelephonySubscriptio
 
 module pictureData {
   /** @throws {never} */
-  export function pictureBytes(data: string, type: "image/png" | "image/jpeg", size: number, max: number): Uint8Array | undefined {
+  export function pictureBytes(data: string, type: "image/png" | "image/jpeg" | "image/webp", size: number, max: number): Uint8Array | undefined {
     if (data.length % 4 !== 0 || data.length > Math.ceil(max / 3) * 4) return undefined
     try {
       const decoded = atob(data)
       if (decoded.length !== size) return undefined
       const signature = type === "image/png" ? [137, 80, 78, 71, 13, 10, 26, 10] : [255, 216, 255]
-      if (!signature.every((byte, at) => decoded.charCodeAt(at) === byte)) return undefined
+      const signatureMatches = type === "image/webp" ? decoded.startsWith("RIFF") && decoded.slice(8, 12) === "WEBP"
+        : signature.every((byte, at) => decoded.charCodeAt(at) === byte)
+      if (!signatureMatches) return undefined
       return Uint8Array.from(decoded, (byte) => byte.charCodeAt(0))
     } catch {
       return undefined

@@ -18,7 +18,7 @@ function ownedKey(row: Pick<FixtureRow, "id" | "kind">): string {
 
 export interface FixturePicture {
   readonly name: string;
-  readonly mimeType: "image/png" | "image/jpeg";
+  readonly mimeType: "image/png" | "image/jpeg" | "image/webp";
   readonly size: number;
   readonly dataBase64: string;
 }
@@ -32,7 +32,7 @@ export interface PhotosScene {
   readCount: number;
   readonly saves: string[];
   readonly editLookups: string[];
-  messagePicture?: (picture: Reviewed) => Promise<FixturePicture>;
+  selectedPicture?: (picture: Reviewed) => Promise<FixturePicture>;
 }
 
 export function photosScene(): PhotosScene {
@@ -47,7 +47,8 @@ export function photosScene(): PhotosScene {
 export function alphaPhotos(scene: PhotosScene): Faked {
   type Used = "libraryAccess" | "requestLibraryAccess" | "watchLibrary" | "list" | "listPermitted" | "read" | "readPermitted"
     | "thumbnails" | "beginEdit" | "previewEdit" | "saveEdit" | "editResult" | "cancelEdit" | "albums" | "openLibrarySettings";
-  return plugin<Pick<PhotosPlugin, Used> & { readMessagePicture(input: Reviewed): Promise<FixturePicture> }, { libraryChanged: undefined }>((emit) => {
+  type Originals = { readMessagePicture(input: Reviewed): Promise<FixturePicture>; readEmailPicture(input: Reviewed): Promise<FixturePicture> };
+  return plugin<Pick<PhotosPlugin, Used> & Originals, { libraryChanged: undefined }>((emit) => {
     scene.changed = () => { if (scene.watching) emit("libraryChanged", undefined); };
     const listed = (rows: readonly ListedRow[], thumbnails?: boolean) => rows.map(({ image, ...row }) => thumbnails ? { ...row, image } : row);
     const owned = () => scene.rows.filter((item) => item.owned).map(({ owned: _owned, ...item }) => ({
@@ -55,6 +56,10 @@ export function alphaPhotos(scene: PhotosScene): Faked {
       id: ownedKey(item),
     }));
     const available = () => scene.access.scope === "denied" ? owned() : scene.rows;
+    const selectedPicture = (input: Reviewed) => {
+      const item = scene.access.scope === "denied" ? undefined : scene.rows.find((row) => row.id === input.id && row.mutationRevision === input.revision);
+      return item && scene.selectedPicture ? scene.selectedPicture(input) : Promise.reject(new Error("This picture is unavailable"));
+    };
     const session = "alpha-test-photo-edit";
     const preview = { sessionId: session, operationId: session, image: photo, width: 1, height: 1, reduced: false, maxEdge: 1024, filter: "none", canReplace: true };
     return {
@@ -85,10 +90,8 @@ export function alphaPhotos(scene: PhotosScene): Faked {
         if (item === undefined) return Promise.reject(new Error("This item is unavailable"));
         return Promise.resolve(listed([item], pixels)[0]);
       },
-      readMessagePicture(input) {
-        const item = scene.access.scope === "denied" ? undefined : scene.rows.find((row) => row.id === input.id && row.mutationRevision === input.revision);
-        return item && scene.messagePicture ? scene.messagePicture(input) : Promise.reject(new Error("This picture is unavailable"));
-      },
+      readMessagePicture: selectedPicture,
+      readEmailPicture: selectedPicture,
       read({ id }) {
         scene.readCount++;
         const candidates = /^(?:v:)?[1-9][0-9]*$/.test(id) ? owned() : scene.access.scope === "denied" ? [] : scene.rows;

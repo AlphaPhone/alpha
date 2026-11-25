@@ -9,15 +9,18 @@ module native {
   import { deviceLibraryClient, deviceLibraryPlugin, photosClient } from "@elizaos/os-bridges"
   import type { DeviceLibraryClient, PhotosClient, PhotosPlugin, Reviewed } from "@elizaos/os-bridges"
 
-  const MessagePicture = Schema.Struct({
+  export const photoEmailMaxBytes = 5 * 1024 * 1024
+  const OriginalPicture = Schema.Struct({
     name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(120)),
-    mimeType: Schema.Literals(["image/png", "image/jpeg"]),
-    size: Schema.Int.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(MMS_MAX_TOTAL_BYTES)),
-    dataBase64: Schema.String.check(Schema.isMaxLength(Math.ceil(MMS_MAX_TOTAL_BYTES / 3) * 4)),
+    mimeType: Schema.Literals(["image/png", "image/jpeg", "image/webp"]),
+    size: Schema.Int.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(photoEmailMaxBytes)),
+    dataBase64: Schema.String.check(Schema.isMaxLength(Math.ceil(photoEmailMaxBytes / 3) * 4)),
   })
-  export type PhotoMessagePicture = typeof MessagePicture.Type
+  export type PhotoOriginalPicture = typeof OriginalPicture.Type
+  export type PhotoAttachmentUse = "email" | "message"
   interface NativePictures {
     readMessagePicture(input: Reviewed): Promise<unknown>
+    readEmailPicture(input: Reviewed): Promise<unknown>
   }
   let nativePictures: (PhotosPlugin & NativePictures) | undefined
 
@@ -25,8 +28,12 @@ module native {
     return (nativePictures ??= registerPlugin<PhotosPlugin & NativePictures>(name))
   }
 
-  export async function readMessagePicture(pluginName: string, picture: Reviewed): Promise<PhotoMessagePicture> {
-    return Schema.decodeUnknownSync(MessagePicture)(await selectedPhotos(pluginName).readMessagePicture(picture))
+  export async function readOriginalPicture(pluginName: string, picture: Reviewed, use: PhotoAttachmentUse): Promise<PhotoOriginalPicture> {
+    const bridge = selectedPhotos(pluginName)
+    const reply = Schema.decodeUnknownSync(OriginalPicture)(await (use === "email" ? bridge.readEmailPicture(picture) : bridge.readMessagePicture(picture)))
+    if (use === "message" && (reply.mimeType === "image/webp" || reply.size > MMS_MAX_TOTAL_BYTES || reply.dataBase64.length > Math.ceil(MMS_MAX_TOTAL_BYTES / 3) * 4))
+      throw new Error("The original does not fit in Messages")
+    return reply
   }
 
   let library: PhotosClient | undefined
@@ -42,7 +49,9 @@ module native {
     return (reviewed ??= deviceLibraryClient(deviceLibraryPlugin(name), name))
   }
 }
-import { phoneLibrary, readMessagePicture, reviewedLibrary, type PhotoMessagePicture } from native
+import { phoneLibrary, photoEmailMaxBytes, readOriginalPicture, reviewedLibrary, type PhotoAttachmentUse, type PhotoOriginalPicture } from native
+export { photoEmailMaxBytes }
+export type { PhotoAttachmentUse }
 
 module browser {
   import { browserPhotoThumbnail, type BrowserEditFrame } from "./photoCanvas.vibe"
@@ -744,7 +753,7 @@ export service PhotosPort {
   readonly changes: Stream.Stream<void>
   readonly browser: Option.Option<BrowserLibrary>
   original(id: string): (Blob | undefined)!PhotosFailed
-  messagePicture(picture: Reviewed): (PhotoMessagePicture | undefined)!PhotosFailed
+  attachmentPicture(picture: Reviewed, use: PhotoAttachmentUse): (PhotoOriginalPicture | undefined)!PhotosFailed
   capture(id: string): (BrowserSource | undefined)!PhotosFailed
   saveEdit(request: BrowserEditSave): BrowserEditReceipt!PhotosFailed
   editResult(operation: string): BrowserEditReceipt!PhotosFailed
@@ -777,8 +786,8 @@ export const phonePhotos = Layer.sync(PhotosPort, () => {
     (handle) => handle === undefined ? Effect.void : ignore(tryPromise(() => handle.remove())),
   )))
   return { phone, reviewed, changes, browser: Option.none<BrowserLibrary>(), original: () => succeed(undefined),
-    messagePicture: (picture: Reviewed) => Option.isNone(phone) ? succeed(undefined) : tryPromise({
-      try: () => readMessagePicture(photosName, picture), catch: (cause) => new PhotosFailed({ cause }),
+    attachmentPicture: (picture: Reviewed, use: PhotoAttachmentUse) => Option.isNone(phone) ? succeed(undefined) : tryPromise({
+      try: () => readOriginalPicture(photosName, picture, use), catch: (cause) => new PhotosFailed({ cause }),
     }), capture: () => succeed(undefined),
     saveEdit: () => succeed({ status: "not-started" } as const), editResult: () => succeed({ status: "not-started" } as const), ...entry() }
 })
@@ -789,7 +798,7 @@ export const browserPhotos = Layer.sync(PhotosPort, () => ({
   reviewed: Option.none(),
   changes: Stream.suspend(() => Stream.as(Stream.fromEventListener(page(), captureEvent()), undefined)),
   browser: Option.some(browserLibrary),
-  messagePicture: () => succeed(undefined),
+  attachmentPicture: () => succeed(undefined),
   original: (id: string) => tryPromise({ try: () => browserOriginal(id), catch: (cause) => new PhotosFailed({ cause }) }),
   capture: (id: string) => tryPromise({ try: () => browserCapture(id), catch: (cause) => new PhotosFailed({ cause }) }),
   saveEdit: (request: BrowserEditSave) => tryPromise({ try: () => saveBrowserEdit(request), catch: (cause) => new PhotosFailed({ cause }) }),

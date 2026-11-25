@@ -75,7 +75,7 @@ type Effect =
   | WriteCopy({ attempt: int, photo: int, revision: int, edit: Edit, replace: bool })
   | FindCopy({ attempt: int, ticket: int })
   | AskAbout({ photo: int, revision: int })
-  | Compose({ photo: int, revision: int })
+  | Compose({ photo: int, revision: int, ticket: int })
   | TextPicture({ photo: int, revision: int, ticket: int })
   | Request({ change: C::Change, photo: int, revision: int })
 ```
@@ -386,8 +386,9 @@ pure def sometimesSecureShown(s: Viewer): bool = s.secure and shown(s)
 ### Only the owner sends the revision showing to Alpha, to an email or to Android's share sheet, favourites it, or deletes it, and never from the lock screen
 
 Asking Alpha raises Ask Alpha with this item, which the shell shows; Inbox
-composes the email; the phone sends only the revision named and refuses one
-that changed since. A share, a favourite or a delete is carried out by
+offers the permitted JPEG, PNG or WebP original for email, up to 5 MiB,
+under the same open view and revision. Inbox keeps its own account and draft
+review. A later read of another revision or a closed viewer cannot offer a file. A share, a favourite or a delete is carried out by
 Photos as a change of that one item, which offers Undo after a delete;
 deleting moves on to the neighbour Photos lists, or closes the viewer when
 there is none.
@@ -397,9 +398,9 @@ pure def canAskAlpha(s: Viewer, by: Actor): bool = by == Owner and shown(s) and 
 
 pure def askAlpha(s: Viewer, by: Actor): Done = emit(List(AskAbout({ photo: s.open, revision: s.revision })), { ...s, playing: false })
 
-pure def canEmail(s: Viewer, by: Actor): bool = canAskAlpha(s, by)
+pure def canEmail(s: Viewer, by: Actor): bool = canAskAlpha(s, by) and s.kind == Still
 
-pure def email(s: Viewer, by: Actor): Done = emit(List(Compose({ photo: s.open, revision: s.revision })), { ...s, playing: false })
+pure def email(s: Viewer, by: Actor): Done = emit(List(Compose({ photo: s.open, revision: s.revision, ticket: s.read.ticket })), { ...s, playing: false })
 
 pure def canShare(s: Viewer, by: Actor): bool = canAskAlpha(s, by)
 
@@ -421,7 +422,8 @@ pure def trashOpen(s: Viewer, neighbour: int, by: Actor): Done =
 pure def stepItemLeavesOnlyByTheOwner(before: Viewer, via: str, after: Viewer, out: List[Effect]): bool =
   out.every(e => match e {
     | AskAbout(a) => via == "askAlpha" and a.photo == before.open and a.revision == before.revision and shown(before) and not(before.secure)
-    | Compose(c) => via == "email" and c.photo == before.open and c.revision == before.revision and shown(before) and not(before.secure)
+    | Compose(c) => via == "email" and c.photo == before.open and c.revision == before.revision
+        and c.ticket == before.read.ticket and canEmail(before, Owner)
     | TextPicture(p) => via == "useInMessages" and p.photo == before.open and p.revision == before.revision
         and p.ticket == before.read.ticket and canUseInMessages(before, Owner)
     | Request(r) =>
