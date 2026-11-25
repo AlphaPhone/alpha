@@ -1,9 +1,9 @@
 import { cn, focusRing } from "./cn.ts";
 
-/** The look of a field a person types or chooses in; a single-line one is 48px, as tall as a `Button`. */
+/** The look of a field a person types or chooses in: filled, as develop's are; a single-line one is 48px, as tall as a `Button`. */
 export const field = cn(
   focusRing,
-  "w-full rounded-lg border border-input bg-background px-4 text-base text-foreground placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:focus-visible:outline-destructive",
+  "w-full rounded-lg border border-transparent bg-secondary px-3.5 text-md text-foreground placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:focus-visible:outline-destructive",
 );
 
 /** The panel of a menu or of a select's list, floating over the page. */
