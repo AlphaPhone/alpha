@@ -121,6 +121,38 @@ pure def policyAdmitted(allowed: List[str], refused: List[str], loaded: List[str
   sameNames(allowed, allowedActions) and sameNames(refused, refusedActions(registered)) and loaded == loadList and product == productPluginName
 ```
 
+### Each Clock action names the fields the model may fill, and its first field is which operation, so a call that fills them runs instead of being refused before it starts
+
+eliza refuses a call before its action runs when the call carries a field
+the action does not name, and then reports that the call did not start,
+even when a later call does the work. So each Clock action names what the
+model may fill. `CLOCK_ALARM`: the operation (set, update, toggle, delete,
+list, snooze or dismiss), the alarm's id, the hour (0 to 23) and minute,
+the repeat days, a label, whether it is on, the snooze minutes, the sound
+and whether it vibrates. `CLOCK_TIMER`: the operation (start, pause,
+resume, add_time, reset, cancel, dismiss or list), the timer's id, a
+length in seconds (the time to add, for add_time) and a label. `CLOCK_WORLD`:
+the operation (time_in, add_city, remove_city or list), the pinned city's
+id and the city or time zone. Every field may be left out: the action then
+reads the owner's words, as before.
+
+```quint
+pure val clockActions: List[str] = List("CLOCK_ALARM", "CLOCK_TIMER", "CLOCK_WORLD")
+pure val alarmFields: List[str] = List("action", "id", "hour", "minute", "days", "label", "enabled", "snoozeMinutes", "sound", "vibrate")
+pure val timerFields: List[str] = List("action", "id", "durationSeconds", "label")
+pure val worldFields: List[str] = List("action", "id", "city")
+pure val alarmOperations: List[str] = List("set", "update", "toggle", "delete", "list", "snooze", "dismiss")
+pure val timerOperations: List[str] = List("start", "pause", "resume", "add_time", "reset", "cancel", "dismiss", "list")
+pure val worldOperations: List[str] = List("time_in", "add_city", "remove_city", "list")
+pure def clockFieldsOf(a: str): List[str] =
+  if (a == "CLOCK_ALARM") alarmFields else if (a == "CLOCK_TIMER") timerFields else if (a == "CLOCK_WORLD") worldFields else List()
+pure def clockOperationsOf(a: str): List[str] =
+  if (a == "CLOCK_ALARM") alarmOperations else if (a == "CLOCK_TIMER") timerOperations else if (a == "CLOCK_WORLD") worldOperations else List()
+pure def lawEachClockActionNamesItsOperationFirst(a: str): bool =
+  clockActions.includes(a) implies (alphaAppActions.includes(a) and clockFieldsOf(a).nthOr(0, "") == "action" and clockOperationsOf(a).length() > 0)
+pure def clockFieldsAdmitted(a: str, named: List[str]): bool = named == clockFieldsOf(a)
+```
+
 ### A proposed device step goes through eliza's device-action module, and the phone says which steps it takes
 
 The old agent asked the phone to do things on the device (create an event,

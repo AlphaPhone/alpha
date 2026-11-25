@@ -5,6 +5,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { AlphaAppsStore, alphaAppsPluginName, createAlphaAppsPlugin } from "../src/plugins/index.ts";
 import { advanceDueDate } from "../src/plugins/store.ts";
+import { alarmFields, alarmOperations, timerFields, timerOperations, worldFields, worldOperations } from "../gen/agent.ts";
 import type { AgentRoute, AgentRuntimeLike, ClockSnapshot, ReminderItemRecord, RemindersSnapshot } from "../src/plugins/types.ts";
 
 const emptyMessage = (text: string, metadata?: Record<string, unknown>) =>
@@ -135,6 +136,29 @@ describe("Alpha product plugin: Clock actions, provider, and routes", () => {
     expect(store.getClock().world).toHaveLength(0);
     await alarmAction.handler(runtime, emptyMessage("Delete alarm"), emptyState, { parameters: { action: "delete", id: alarmId } });
     expect(store.getClock().alarms).toHaveLength(0);
+  });
+
+  // spec/agent/index.md, "Each Clock action names the fields the model may fill, and its first field is which operation, so a call that fills them runs instead of being refused before it starts"
+  it("runs a Clock call the model filled in, with nothing read from the owner's words", async () => {
+    const store = new AlphaAppsStore({ now: () => Date.UTC(2026, 10, 24, 14, 0, 0) });
+    const { runtime } = makeFakeRuntime();
+    const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime });
+    const named = (name: string) => plugin.actions!.find((a) => a.name === name)!;
+    const call = (name: string, parameters: Record<string, unknown>) => named(name).handler(runtime, emptyMessage(""), emptyState, { parameters });
+    const declared = (name: string) => [named(name).parameters?.map((p) => p.name), named(name).parameters?.[0]?.schema.enum];
+    expect([declared("CLOCK_ALARM"), declared("CLOCK_TIMER"), declared("CLOCK_WORLD")])
+      .toEqual([[alarmFields, alarmOperations], [timerFields, timerOperations], [worldFields, worldOperations]]);
+
+    expect((await call("CLOCK_ALARM", { action: "set", hour: 7, minute: 30, days: ["monday", "friday"], label: "Standup", snoozeMinutes: 5, sound: "chime", vibrate: false }))?.success).toBe(true);
+    expect(store.getClock().alarms).toEqual([expect.objectContaining({ hour: 7, minute: 30, daysMask: 34, label: "Standup", snoozeMinutes: 5, sound: "chime", vibrate: false, enabled: true })]);
+
+    const started = await call("CLOCK_TIMER", { action: "start", durationSeconds: 300, label: "pasta" });
+    const timerId = (started?.data as { timer: { id: string } }).timer.id;
+    await call("CLOCK_TIMER", { action: "add_time", id: timerId, durationSeconds: 60 });
+    expect(store.getClock().timers).toEqual([expect.objectContaining({ label: "pasta", remainingMs: 360_000, status: "running" })]);
+
+    expect((await call("CLOCK_WORLD", { action: "add_city", city: "Tokyo" }))?.success).toBe(true);
+    expect(store.getClock().world.map((c) => c.timeZone)).toEqual(["Asia/Tokyo"]);
   });
 
   // spec/agent/index.md, "The page reaches exactly the routes its platform services call, and nothing else"

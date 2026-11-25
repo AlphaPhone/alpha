@@ -4,6 +4,9 @@ import {
   type AlphaAppsStore, isValidTimeZone, normalizeSound,
 } from "./store.ts";
 import {
+  alarmFields, alarmOperations, timerFields, timerOperations, worldFields, worldOperations,
+} from "../../gen/agent.ts";
+import {
   type AgentAction, type AgentProvider, type AgentRoute, type ClockAlarmRecord, type ClockTimerRecord,
   type WorldCityRecord, asRecord, readBoolean, readNumber, readRawString, readString,
 } from "./types.ts";
@@ -365,17 +368,49 @@ function handleClockWorld(store: AlphaAppsStore, params: Record<string, unknown>
 }
 
 type ClockActionResult = NonNullable<Awaited<ReturnType<AgentAction["handler"]>>>;
+type ClockParameter = NonNullable<AgentAction["parameters"]>[number];
+type ClockFieldSchema = Omit<ClockParameter, "name">;
+
+const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+
+const operationField = (operations: readonly string[], what: string): ClockFieldSchema => ({
+  description: `Which operation on ${what}. Leave out to have it read from the owner's words.`,
+  schema: { type: "string", enum: [...operations] },
+});
+
+const clockFieldSchemas: Readonly<Partial<Record<string, ClockFieldSchema>>> = {
+  id: { description: "The id of the alarm, timer or pinned city, as CLOCK_CONTEXT or a list names it.", schema: { type: "string" } },
+  hour: { description: "The alarm's hour, 0 to 23, in the phone's time zone.", schema: { type: "number", minimum: 0, maximum: 23 } },
+  minute: { description: "The alarm's minute, 0 to 59.", schema: { type: "number", minimum: 0, maximum: 59 } },
+  days: { description: "The days the alarm repeats on. Leave out for an alarm that rings once.", schema: { type: "array", items: { type: "string", enum: dayNames } } },
+  label: { description: "A short label, such as \"Standup\" or \"pasta\".", schema: { type: "string" } },
+  enabled: { description: "Whether the alarm is on.", schema: { type: "boolean" } },
+  snoozeMinutes: { description: "How many minutes a snooze lasts.", schema: { type: "number", minimum: 1 } },
+  sound: { description: "The alarm's sound.", schema: { type: "string", enum: ["radar", "chime", "pulse", "gentle", "classic"] } },
+  vibrate: { description: "Whether the alarm vibrates.", schema: { type: "boolean" } },
+  durationSeconds: { description: "The timer's length in seconds; for add_time, the seconds to add.", schema: { type: "number", minimum: 1 } },
+  city: { description: "A city or IANA time zone, such as \"Tokyo\" or \"Europe/Paris\".", schema: { type: "string" } },
+};
+
+function clockParameters(fields: readonly string[], operations: readonly string[], what: string): ClockParameter[] {
+  return fields.flatMap((name) => {
+    const field = name === "action" ? operationField(operations, what) : clockFieldSchemas[name];
+    return field === undefined ? [] : [{ name, required: false, ...field }];
+  });
+}
 
 function makeClockAction(
   name: string,
   similes: string[],
   description: string,
+  parameters: ClockParameter[],
   run: (params: Record<string, unknown>, text: string) => ClockActionResult,
 ): AgentAction {
   const action: AgentAction = {
     name,
     similes,
     description,
+    parameters,
     validate: () => Promise.resolve(true),
     handler: async (_runtime, message, _state, options, callback) => {
       const params = asRecord(asRecord(options).parameters ?? asRecord(options));
@@ -396,18 +431,21 @@ export function clockActions(store: AlphaAppsStore, timeZone: string): AgentActi
       "CLOCK_ALARM",
       ["SET_ALARM", "MANAGE_ALARM", "SNOOZE_ALARM", "DISMISS_ALARM"],
       "Create, update, toggle, delete, list, snooze, or dismiss alarms in Alpha Clock.",
+      clockParameters(alarmFields, alarmOperations, "an alarm"),
       (params, text) => handleClockAlarm(store, timeZone, params, text),
     ),
     makeClockAction(
       "CLOCK_TIMER",
       ["START_TIMER", "SET_TIMER", "PAUSE_TIMER", "CANCEL_TIMER"],
       "Start, pause, resume, extend (+time), reset, cancel, dismiss, or list countdown timers in Alpha Clock.",
+      clockParameters(timerFields, timerOperations, "a timer"),
       (params, text) => handleClockTimer(store, params, text),
     ),
     makeClockAction(
       "CLOCK_WORLD",
       ["WORLD_CLOCK", "TIME_IN_CITY"],
       "Check current time in a city or manage pinned World Clock cities in Alpha Clock.",
+      clockParameters(worldFields, worldOperations, "World Clock"),
       (params, text) => handleClockWorld(store, params, text),
     ),
   ];
