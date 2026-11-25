@@ -90,9 +90,9 @@ describe("Files on a phone", () => {
     expect(listed().sort()).toEqual(["Documents", "Download"]);
     // spec/app/files/index.md, "Opening Files reads the storage and the place it left, and leaving Files drops every read, the selection, the confirmation and the sheets": a place is read once, however often the screen draws it
     const reads = world.files.calls.filter((call) => call === "storageList").length;
-    await choose("Grid");
-    await choose("List");
-    await choose("Name");
+    await choose("Grid view");
+    await choose("List view");
+    await choose("Name A–Z");
     expect([world.files.calls.filter((call) => call === "storageList").length, runtime.runSync(Browser.use((m) => m.get())).trail.length]).toEqual([reads, 1]);
     await openRow("Documents");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 2);
@@ -224,13 +224,13 @@ describe("Files on a phone", () => {
     await press("Download");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 2);
     // spec/app/files/index.md, "The owner chooses a grid or a list, and a sort; choosing the same sort again reverses it"
-    await choose("Name");
+    await choose("Name A–Z");
     expect(listed()).toEqual(["beach.jpg", "lease.pdf"]);
-    await choose("Name");
+    await choose("Name Z–A");
     expect(listed()).toEqual(["lease.pdf", "beach.jpg"]);
-    await choose("Size");
+    await choose("Largest first");
     expect(listed()).toEqual(["beach.jpg", "lease.pdf"]);
-    await choose("Size");
+    await choose("Smallest first");
     expect(listed()).toEqual(["lease.pdf", "beach.jpg"]);
     // spec/app/files/index.md, "The owner sets a filter of a kind and a text for the place showing, as a chip the owner sees and clears; only what matches both is shown"
     await choose("Filter files");
@@ -277,14 +277,16 @@ describe("Files on a phone", () => {
 
     // spec/app/files/index.md, "A change starts from the selection, of the folder showing, into a destination only as the Move to sheet last read it, as Changes allows it"
     await select("lease.pdf");
-    await press("Move or copy");
+    await press("Move");
     // spec/app/files/index.md, "The owner opens the Move to sheet for the selection, at the folder showing, and goes through the volumes and folders in it"
-    await pressOnTop("Storage");
+    await pressOnTop("Parent folder");
+    await until(alpha, runtime, Browser, (s) => s.sheet.trail.length === 1);
+    await pressOnTop("Parent folder");
     await until(alpha, runtime, Browser, (s) => s.sheet.trail.length === 0);
-    expect([Boolean(buttonOnTop("Internal storage")), Boolean(buttonOnTop("SD card"))]).toEqual([true, false]);
-    await pressOnTop("Internal storage");
+    expect([buttonOnTop("Open Internal storage")?.disabled, buttonOnTop("Open SD card")?.disabled]).toEqual([false, true]);
+    await pressOnTop("Open Internal storage");
     await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded");
-    await pressOnTop("Documents");
+    await pressOnTop("Open Documents");
     await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded" && s.sheet.trail.length === 2);
     // spec/app/files/index.md, "A new folder in the destination picker uses the parent as shown and opens the new folder in that picker"
     await pressOnTop("New folder");
@@ -292,7 +294,7 @@ describe("Files on a phone", () => {
     await pressOnTop("Create");
     await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded" && s.sheet.trail.length === 3);
     expect([document.querySelector("nav[aria-label='Destination path']")?.textContent?.includes("Filed copies"), paths(world).includes("primary:Documents/Filed copies")]).toEqual([true, true]);
-    await pressOnTop("Documents");
+    await pressOnTop("Parent folder");
     await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded" && s.sheet.trail.length === 2 && s.picked.length === 1);
     await pressOnTop("Move here");
     // spec/app/files/index.md, "A change ends as its answer says, what a move took away is told, and the place is read again"
@@ -301,10 +303,10 @@ describe("Files on a phone", () => {
 
     // spec/app/files/change.md, "A change starts when none is under way and nothing of it is still unknown; when names clash in the destination the owner is asked first, and an approved request keeps both"
     await select("beach.jpg");
-    await press("Move or copy");
-    await pressOnTop("Internal storage");
+    await press("Copy");
+    await pressOnTop("Parent folder");
     await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded");
-    await pressOnTop("Download");
+    await pressOnTop("Open Download");
     await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded" && s.sheet.trail.length === 2);
     await pressOnTop("Copy here");
     await until(alpha, runtime, Browser, (s) => s.change.clash.showing);
@@ -315,10 +317,10 @@ describe("Files on a phone", () => {
     // spec/app/files/change.md, "A file of the same name is replaced only when the owner chose to replace it, never for the agent"
     for (let round = 0; round < 2; round += 1) {
       await select("beach.jpg");
-      await press("Move or copy");
-      await pressOnTop("Internal storage");
+      await press("Copy");
+      await pressOnTop("Parent folder");
       await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded");
-      await pressOnTop("Documents");
+      await pressOnTop("Open Documents");
       await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded" && s.sheet.trail.length === 2);
       await pressOnTop("Copy here");
       if (runtime.runSync(Effect.flatMap(Browser, (m) => m.get())).change.clash.showing) await press("Replace");
@@ -330,7 +332,7 @@ describe("Files on a phone", () => {
     // spec/app/files/index.md, "One request leaves for each change, for items listed as they are now or the file shown, and only when the owner starts, chooses or renames it, or approved it"
     await choose("New folder");
     await fill("Name", "Taxes");
-    await press("Make");
+    await pressOnTop("Create");
     await until(alpha, runtime, Browser, (s) => s.change.work === "NewFolder" && s.change.attempt.outcome === "Confirmed" && s.listing.status === "Loaded");
     await select("beach.jpg (2)");
     await press("Rename");
@@ -364,8 +366,8 @@ describe("Files on a phone", () => {
     await select("dunes.jpg");
     const dunes = world.files.stored.find((one) => one.path === "Download/dunes.jpg");
     if (dunes) dunes.modified = 99;
-    await press("Move or copy");
-    await pressOnTop("Taxes");
+    await press("Move");
+    await pressOnTop("Open Taxes");
     await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded" && s.sheet.trail.length === 3);
     await pressOnTop("Move here");
     await until(alpha, runtime, Browser, (s) => s.change.work === "MoveTo" && s.change.attempt.outcome === "Refused" && s.listing.status === "Loaded");
@@ -888,8 +890,8 @@ describe("Files on a phone", () => {
     await press("Internal storage");
     await openRow("Documents");
     await until(first.alpha, first.runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 2);
-    await choose("Name");
-    await choose("Grid");
+    await choose("Name A–Z");
+    await choose("Grid view");
     await press("notes.txt");
     await until(first.alpha, first.runtime, Shown, (s) => s.content.status === "Loaded");
     await first.close();
@@ -1046,7 +1048,7 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Confirmed" && s.entries.length === 0 && s.listing.status === "Loaded");
     expect(world.files.trash).toEqual([]);
     // spec/app/files/trash.md, "The Trash is closed, without access, reading, unreadable, empty or listing"
-    expect(document.body.textContent?.includes("The Trash is empty")).toBe(true);
+    expect(document.body.textContent?.includes("Trash is empty. Items in Trash are deleted after 30 days.")).toBe(true);
     await hardware("home");
   });
 });
