@@ -1,7 +1,7 @@
 // spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Organise my notes"; spec/app/notes/editor.md, "Story: Write a note"; spec/app/notes/trash.md, "Story: Delete a note and get it back"
 import { Alert, AppHeader, Button, Chip, EmptyState, Input, LinkNoteView, Menu, MenuContent, MenuItem, MenuTrigger, NoteEditor as NoteForm, NoteRow, NotesList as NoteRows, Spinner, VoiceNoteView } from "@repo/ui";
-import { ArrowLeft, Ellipsis, FileDown, Folder, Mail, MessageSquare, Mic, Plus, Trash2 } from "lucide-react";
 import { Effect } from "effect";
+import { ArrowLeft, Ellipsis, FileDown, Folder, Mail, MessageSquare, Mic, Plus, Trash2 } from "lucide-react";
 import { useState, useSyncExternalStore, type FormEvent } from "react";
 import * as Notes from "../../gen/app__notes.ts";
 import * as Editor from "../../gen/app__notes__editor.ts";
@@ -18,7 +18,7 @@ import { useMachine as useVoice } from "../../gen/app__notes__voice.react.ts";
 import { NoteDocuments } from "../platform/noteDocuments.vibe";
 import { NoteDevice } from "../platform/noteDevice.vibe";
 import { unfinished } from "../../gen/app__notes__recording.ts";
-import type { Alpha, Resident } from "../runtime/area.tsx";
+import type { Alpha } from "../runtime/area.tsx";
 import { untimed } from "../runtime/reactor.vibe";
 import { useTimed } from "../runtime/react.ts";
 import { AppBack } from "../shell/AppBack.tsx";
@@ -59,15 +59,16 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
   const actions = useActions(runtime);
   const bin = useTrash(runtime).state;
   const transfer = useTransfer(runtime);
-  const hasDocuments = runtime.runSync(NoteDocuments.use((device) => Effect.succeed(device.available)));
+  const hasDocuments = runtime.runSync(NoteDocuments).available;
+  const writer = runtime.runSync(NoteEditor);
   const [next, setNext] = useState("");
   const current = writing.state;
   if (!current?.showing) return null;
   const owner = (event: Editor.Event) => writing.can(event, "Owner");
   const send = (event: Editor.Event) => void writing.send(event, "Owner");
-  const edit = (fields: Partial<Fields>) => void runtime.runPromise(NoteEditor.use((writer) => writer.typed(fields)));
+  const edit = (fields: Partial<Fields>) => void runtime.runPromise(writer.typed(fields));
   const action = (kind: "close" | "save" | "takeSaved" | "keepMine" | "keepAsNew") =>
-    void runtime.runPromise(NoteEditor.use((writer) => writer[kind]()));
+    void runtime.runPromise(writer[kind]());
   const close = owner({ type: "close" }) ? () => action("close") : undefined;
   const checklist = saved.kind === "Checklist";
   const deletion: Editor.Event = { type: "deleteNote", ready: bin !== undefined && Trash.ready(bin) };
@@ -155,7 +156,7 @@ function TrashScreen({ runtime, collection }: { readonly runtime: Runtime; reado
           {state.question === "AskFull" ? "Recently deleted is full." : state.question === "AskEmpty" ? "Permanently delete every note in Recently deleted?" : "Permanently delete this note?"}
           <div className="mt-2 flex gap-2">
             {owner({ type: "cancel" }) && <Button variant="secondary" onClick={() => send({ type: "cancel" })}>Cancel</Button>}
-            {state.question !== "AskFull" && owner({ type: "confirm", now: untimed, storage: true }) && <Button variant="destructive" onClick={() => send({ type: "confirm", now: untimed, storage: true })}>Delete forever</Button>}
+            {state.question !== "AskFull" && owner({ type: "confirm", storage: true, now: untimed }) && <Button variant="destructive" onClick={() => send({ type: "confirm", storage: true, now: untimed })}>Delete forever</Button>}
           </div>
         </Alert>}
         {opened ? <article className="pb-4"><h2 className="font-display text-2xl">{titleOf(opened.note)}</h2><p className="whitespace-pre-wrap">{opened.note.body}</p></article> : state.entries.map((entry) => {
@@ -262,10 +263,11 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
   const recorder = useRecorder(runtime).state;
   const previous = usePrevious(runtime);
   const transfer = useTransfer(runtime);
-  const hasDocuments = runtime.runSync(NoteDocuments.use((device) => Effect.succeed(device.available)));
-  const hasMic = runtime.runSync(NoteDevice.use((device) => Effect.succeed(device.available)));
-  const content = runtime.runSync(NoteContent.use((read) => Effect.succeed(read)));
-  const data = useSyncExternalStore((listener) => content.subscribe(listener), () => content.snapshot(), () => content.snapshot());
+  const hasDocuments = runtime.runSync(NoteDocuments).available;
+  const hasMic = runtime.runSync(NoteDevice).available;
+  const writer = runtime.runSync(NoteEditor);
+  const content = runtime.runSync(NoteContent);
+  const data = useSyncExternalStore(content.subscribe, content.snapshot, content.snapshot);
   const [form, setForm] = useState<Form>();
   const [folderName, setFolderName] = useState("");
   const state = list.state;
@@ -325,7 +327,7 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
     <section aria-label="Notes" data-alpha-subview="notes-list" className="flex min-h-0 flex-1 flex-col">
       <AppHeader title="Notes" leading={<AppBack alpha={alpha} />}>
         {available && hasMic && !Editor.waiting(writing) && <Button size="icon" variant="ghost" aria-label="Record voice note" onClick={() => void runtime.runPromise(record)}><Mic /></Button>}
-        {editor.can(newNote, "Owner") && <Button size="icon" variant="ghost" aria-label="New note" onClick={() => void runtime.runPromise(NoteEditor.use((writer) => writer.newNote("Text", available, state.filter, false)))}><Plus /></Button>}
+        {editor.can(newNote, "Owner") && <Button size="icon" variant="ghost" aria-label="New note" onClick={() => void runtime.runPromise(writer.newNote("Text", available, state.filter, false))}><Plus /></Button>}
         {bin.can(openTrash, "Owner") && <Menu>
           <MenuTrigger asChild><Button size="icon" variant="ghost" aria-label="Notes options"><Ellipsis /></Button></MenuTrigger>
           <MenuContent align="end">
@@ -352,9 +354,9 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
           {writing.unreadable && hasDocuments && transfer.can(rescueDraft, "Owner") && <Button size="sm" onClick={() => void transfer.send(rescueDraft, "Owner")}>Save out draft</Button>}
           {editor.can({ type: "askDrop" }, "Owner") && <Button size="sm" variant="secondary" onClick={() => void editor.send({ type: "askDrop" }, "Owner")}>Discard draft</Button>}
           {writing.dropping && editor.can({ type: "cancelDrop" }, "Owner") && <Button size="sm" variant="secondary" onClick={() => void editor.send({ type: "cancelDrop" }, "Owner")}>Keep draft</Button>}
-          {editor.can({ type: "dropDraft" }, "Owner") && <Button size="sm" variant="destructive" onClick={() => void runtime.runPromise(NoteEditor.use((writer) => writer.discard()))}>Discard permanently</Button>}
+          {editor.can({ type: "dropDraft" }, "Owner") && <Button size="sm" variant="destructive" onClick={() => void runtime.runPromise(writer.discard())}>Discard permanently</Button>}
           {editor.can(reopen, "Owner") && <Button size="sm" onClick={() => void editor.send(reopen, "Owner")}>Reopen</Button>}
-          {editor.can({ type: "discardDraft" }, "Owner") && <Button size="sm" variant="secondary" onClick={() => void runtime.runPromise(NoteEditor.use((writer) => writer.discard()))}>Discard</Button>}
+          {editor.can({ type: "discardDraft" }, "Owner") && <Button size="sm" variant="secondary" onClick={() => void runtime.runPromise(writer.discard())}>Discard</Button>}
         </div>}
         {state.writing.outcome === "Unknown" && <Alert variant="warn">Alpha couldn't confirm the last change</Alert>}
         {state.writing.outcome === "Refused" && <Alert variant="warn">The note or folder couldn't be changed</Alert>}
@@ -374,7 +376,7 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
 }
 
 /** @model spec/app/notes/index.md */
-export function NotesScreen({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime: import("effect").ManagedRuntime.ManagedRuntime<Resident, unknown> }) {
+export function NotesScreen({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime: Runtime }) {
   const notes = useNotes(runtime);
   if (notes.cause) return <Alert variant="destructive" className="m-4">Alpha couldn't open Notes</Alert>;
   if (notes.state === undefined) return null;

@@ -22,7 +22,7 @@ describe("Ask Alpha dock and shell navigation", () => {
     const textarea = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
     expect(section?.getAttribute("data-alpha-detent")).toBe("bar");
     expect(document.querySelectorAll("[data-host-chrome]").length).toBeGreaterThanOrEqual(3);
-    expect(textarea).not.toBeNull();
+    expect(textarea?.placeholder).toBe("Ask about this page");
 
     await act(async () => {
       textarea?.focus();
@@ -35,6 +35,40 @@ describe("Ask Alpha dock and shell navigation", () => {
     expect(document.querySelector("textarea[data-alpha-composer]")).toBe(textarea);
     expect(document.activeElement).toBe(textarea);
     expect(section?.getAttribute("data-alpha-detent")).toBe("sheet");
+  });
+
+  // spec/app/shell/index.md, "Ask Alpha rises to typing, a sheet or the full screen, never over the drawer"
+  it.each(["Calendar", "Settings"] as const)("opens the wide composer from %s's compact dock without opening the sheet", async (view) => {
+    const { runtime } = await mountDock({ view, flush: underAct });
+    const dock = document.querySelector("[data-alpha-compact-dock]");
+    const field = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
+    expect(field?.hidden).toBe(true);
+    expect(Array.from(dock?.querySelectorAll("button") ?? [], (button) => button.getAttribute("aria-label"))).toEqual(["Open conversation", "Type", "Talk"]);
+
+    await act(async () => {
+      dock?.querySelector<HTMLButtonElement>("button[aria-label='Type']")?.click();
+      await runtime.runPromise(Effect.flatMap(Shell, (machine) => Stream.runHead(Stream.filter(machine.changes, (state) => state.assistant === "Typing"))));
+    });
+
+    expect(field).toBe(document.querySelector("textarea[data-alpha-composer]"));
+    expect(document.activeElement).toBe(field);
+    expect(field?.hidden).toBe(false);
+    expect(document.querySelector("section[aria-label='Ask Alpha']")?.getAttribute("data-alpha-detent")).toBe("bar");
+
+    await act(async () => {
+      await runtime.runPromise(Effect.flatMap(Canvas, (machine) => Stream.runHead(Stream.filter(machine.changes, (state) => state.field === "Composer"))));
+      await runtime.runPromise(Effect.flatMap(Canvas, (machine) => machine.send({ type: "keyboardReported", shown: true, voice: false })));
+      await runtime.runPromise(Effect.flatMap(Canvas, (machine) => machine.send({ type: "keyboardReported", shown: false, voice: false })));
+      await runtime.runPromise(Effect.flatMap(Shell, (machine) => Stream.runHead(Stream.filter(machine.changes, (state) => state.assistant === "Bar"))));
+    });
+    expect(field?.hidden).toBe(true);
+
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>("button[aria-label='Open conversation']")?.click();
+      await runtime.runPromise(Effect.flatMap(Shell, (machine) => Stream.runHead(Stream.filter(machine.changes, (state) => state.assistant === "Sheet"))));
+    });
+
+    expect(document.querySelector("section[aria-label='Ask Alpha']")?.getAttribute("data-alpha-detent")).toBe("sheet");
   });
 
   // spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/assistant/dock.md, "Ask Alpha put away forgets the height its sheet was left at"

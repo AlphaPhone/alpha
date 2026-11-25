@@ -100,7 +100,7 @@ export const press = (name: string) => drawn(() => {
 
 /** Press the button named `name` on the sheet or dialog on top, where the page behind it may hold one of the same name. */
 export const pressOnTop = (name: string) => drawn(() => {
-  const top = [...document.querySelectorAll("[role=dialog]")].at(-1);
+  const top = [...document.querySelectorAll("[role=dialog], [role=alertdialog]")].at(-1);
   const found = top && [...top.querySelectorAll("button")].find((one) => (one.getAttribute("aria-label") ?? one.textContent) === name);
   if (!found) throw new Error(`no button ${name} on top`);
   found.click();

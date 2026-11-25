@@ -74,16 +74,17 @@ export function InboxListScreen({
     focusSearchAfterCloseRef.current = true;
     onCloseSearch?.();
   };
+  const compose = onCompose ?? (state === "signedOut" ? onStateAction : undefined);
   const actions = (
     <>
       {onRefresh || loading ? <Button variant="ghost" size="icon" aria-label="Refresh" loading={loading} disabled={!onRefresh} onClick={onRefresh}><RotateCw /></Button> : null}
-      <Button variant="ghost" size="icon" aria-label="Search email" disabled={!onOpenSearch} onClick={onOpenSearch} ref={(button) => {
+      {state !== "signedOut" && <Button variant="ghost" size="icon" aria-label="Search email" disabled={!onOpenSearch} onClick={onOpenSearch} ref={(button) => {
         if (button && focusSearchAfterCloseRef.current) {
           focusSearchAfterCloseRef.current = false;
           button.focus();
         }
-      }}><Search /></Button>
-      <Button variant="ghost" size="icon" aria-label="Compose" disabled={!onCompose} onClick={onCompose}><Plus /></Button>
+      }}><Search /></Button>}
+      <Button variant="ghost" size="icon" aria-label="Compose" disabled={!compose} onClick={compose}><Plus /></Button>
       {onStartSelection || onFinishSelection || onAccount || (aside > 0 && onShelf) ? (
         <Menu>
           <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Mail options"><Ellipsis /></Button></MenuTrigger>
@@ -107,7 +108,8 @@ export function InboxListScreen({
       actions={searching ? undefined : actions}
       className="[&_header>h1]:pl-0.5 [&_main>div]:gap-2 [&_main>div]:pt-1"
     >
-      {searching || !onChooseFolder ? null : <InboxFolderBar folder={folder} unavailable={unavailable} onChoose={onChooseFolder} />}
+      {!searching && state !== "signedOut" && onChooseFolder ? <InboxFolderBar folder={folder} unavailable={unavailable} onChoose={onChooseFolder} /> : null}
+      {state === "signedOut" && onStateAction ? <Button variant="secondary" size="sm" className="ml-1 self-start px-3 font-medium" onClick={onStateAction}>Connect Eliza Cloud</Button> : null}
       {notice ? <InboxNotice kind={notice} onAction={onNoticeAction} /> : null}
       {chosen > 0 ? <InboxSelectionBar count={chosen} onArchive={onArchive} onTrash={onTrash} onRestore={onRestore} /> : null}
       {rows.length === 0 && loading ? <InboxListState kind="loading" />

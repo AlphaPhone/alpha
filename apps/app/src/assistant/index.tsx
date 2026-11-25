@@ -9,23 +9,25 @@ import { Machine as Voice, type Voice as VoiceState } from "../../gen/app__voice
 import { useMachine as useVoice } from "../../gen/app__voice.react.ts";
 import { quiet } from "../../gen/app__voice.ts";
 import { useMachine as useSpeaker } from "../../gen/app__voice__output.react.ts";
+import { voiceArea } from "../messages/dictation.vibe";
 import { VoiceBridge } from "../platform/voice.vibe";
+import { VoiceEnd } from "../phone/CommsTarget.tsx";
 import { area, type Resident, type Shown } from "../runtime/area.tsx";
 import { applying, following, together, untimed } from "../runtime/reactor.vibe";
 import { keyboardVoice } from "../shell/canvas.vibe";
 import { TalkControls } from "../voice/TalkControls.tsx";
 import { DictationControls } from "../voice/DictationControls.tsx";
-import { voiceWithCalls, voicing } from "../voice/voice.vibe";
 import { Assistant } from "./Assistant.tsx";
 import { assistantBack, assisting } from "./assistant.vibe";
 import { copyMessage, emailDestination, emailMessage } from "./message-actions.vibe";
 import { dictate } from "./dictation.vibe";
 import { aloud } from "./read-aloud.vibe";
+import { beginTalk, commsVoicePanel, talkFromComms } from "./voice-entry.vibe";
 
 const voiceOwnsComposer = (state: VoiceState) => !quiet(state) || state.recorder.stage !== "Closed";
 
 const screens = together(
-  assisting, voicing, voiceWithCalls, aloud,
+  assisting, voiceArea, aloud, talkFromComms, commsVoicePanel,
   following(Voice, voiceOwnsComposer, Dock, (on) => ({ type: "voicing", on, now: untimed } as const)),
   applying(Voice, voiceOwnsComposer, keyboardVoice),
 );
@@ -48,9 +50,6 @@ function LiveAssistant({ runtime }: Shown<Layer.Success<typeof screens> | Reside
   const canDictate = available && noCall && audioFree && composer.state?.away === "Free" && composer.can({ type: "edit", blank: false, long: false }) && voice.can({ type: "openRecorder", target: "ComposerField" });
   const recorder = voice.state?.recorder;
   const readingAllowed = noCall && speaker !== undefined && !speaker.latched && voice.state !== undefined && quiet(voice.state) && recorder?.stage === "Closed" && runtime.runSync(bridge.canRead());
-  const startTalk = () => void runtime.runPromise(keyboardVoice(true)).then(() => voice.send(talk)).then((sent) => {
-    if (sent._tag === "Failure") void runtime.runPromise(keyboardVoice(false));
-  });
   return <Assistant
     runtime={runtime}
     canReadAloud={readingAllowed}
@@ -59,11 +58,11 @@ function LiveAssistant({ runtime }: Shown<Layer.Success<typeof screens> | Reside
       useInEmail: destination ? (selection) => void runtime.runPromise(emailMessage(selection, destination)) : undefined,
     }}
     speech={{
-      onTalk: canTalk ? startTalk : undefined,
+      onTalk: canTalk ? () => void runtime.runPromise(beginTalk()) : undefined,
       onDictate: canDictate ? () => void runtime.runPromise(dictate()) : undefined,
       voice: recorder !== undefined && recorder.stage !== "Closed" && recorder.field === "ComposerField"
         ? <DictationControls runtime={runtime} />
-        : voice.state !== undefined && !quiet(voice.state) ? <TalkControls runtime={runtime} /> : undefined,
+        : voice.state !== undefined && !quiet(voice.state) ? <TalkControls runtime={runtime} trailing={<VoiceEnd runtime={runtime} />} /> : undefined,
     }}
   />;
 }
