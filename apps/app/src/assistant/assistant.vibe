@@ -137,8 +137,10 @@ function viewOf(showing: Conversation.Showing): string {
 }
 
 // spec/app/assistant/index.md, "The agent is told the view, the time zone, the day only from Calendar, and whether something is selected"; spec/app/assistant/context.md, "The day and the location go only to a peer that takes them, and a sensitive screen sends no optional field"; spec/app/assistant/context.md, "The time zone told is the one the phone's interface shows, else the one the screen reported, else the one the agent was launched with, else the host's"
-function observed(told: boolean, context: Conversation.Context, selectedObject?: RendererNote) {
+function observed(told: boolean, context: Conversation.Context, selectedNote?: RendererNote) {
   if (!told) return undefined
+  const section = Pages.selectionOf(context.section)
+  const selectedObject = context.sensitive ? undefined : section === "" ? selectedNote : { kind: "settings", id: section }
   return encodeTurnContext({
     observation: { view: viewOf(context.showing), revision: context.revision, sensitive: context.sensitive, timeZone: zoneOf(context.zone, "", "", zone()), ...(selectedObject === undefined ? {} : { selectedObject }) },
   }, { optionalFields: true })
@@ -498,9 +500,6 @@ const reached = hearing(
   (ready): Conversation.Event => ({ type: "reach", ready }),
 )
 
-/** The Settings pages whose screen the agent is never told: the carrier's identifiers (and Passwords once ported). */
-const sensitivePages: ReadonlySet<Pages.Page> = new Set(["CarrierPage"])
-
 // spec/app/assistant/index.md, "A screen that changed takes a new revision and stops the turn in flight; an unchanged one is ignored"; spec/app/assistant/index.md, "A sensitive screen says only that it is sensitive: no selection and no day"
 const looked = started(effect {
   const shell = try Shell
@@ -511,11 +510,12 @@ const looked = started(effect {
   const selection = Stream.zipLatest(noteSubjects, conversation.changes)
   try Stream.runForEach(Stream.zipLatest(page, selection), effect ([[shown, pages], [note]]) => {
     const view = shown.trail.at(-1)
-    const sensitive = view === "Settings" && sensitivePages.has(pages.page)
+    const section: Pages.Page = view === "Settings" ? pages.page : "Top"
+    const sensitive = view === "Settings" && Pages.sensitive(pages)
     const selected = view === "Notes" && !sensitive && note > 0
-    const seen = `${view ?? ""} ${sensitive} ${selected ? note : ""}`
+    const seen = `${view ?? ""} ${section} ${sensitive} ${selected ? note : ""}`
     if (seen === taken) return
-    const event: Conversation.Event = { type: "look", showing: view === undefined ? { tag: "Home" } : { tag: "App", view }, zone: zone(), day: 0, selected, sensitive }
+    const event: Conversation.Event = { type: "look", showing: view === undefined ? { tag: "Home" } : { tag: "App", view }, zone: zone(), day: 0, selected, sensitive, section }
     if (!Conversation.enabled(try conversation.get(), event) || (try contained(conversation.send(event), "telling the screen"))) taken = seen
   })
 }, "telling the screen")

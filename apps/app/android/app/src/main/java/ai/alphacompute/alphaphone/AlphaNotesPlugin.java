@@ -128,7 +128,7 @@ public final class AlphaNotesPlugin extends Plugin {
 
   @PluginMethod public void start(PluginCall call) {
     onMain(call, () -> {
-      if (!front || inCall() || player != null || getPermissionState("microphone") != PermissionState.GRANTED) {
+      if (!front || locked() || inCall() || player != null || getPermissionState("microphone") != PermissionState.GRANTED) {
         call.reject("The microphone is unavailable");
         return;
       }
@@ -146,7 +146,7 @@ public final class AlphaNotesPlugin extends Plugin {
         case "Pause" -> call.resolve(recorder().pause(id));
         case "End" -> call.resolve(recorder().stop(id));
         case "Resume" -> {
-          if (!front || inCall() || player != null) { call.reject("The microphone is unavailable"); return; }
+          if (!front || locked() || inCall() || player != null) { call.reject("The microphone is unavailable"); return; }
           JSObject status = recorder().resume(id);
           AlphaNoteRecordingService.start(getContext(), id);
           call.resolve(status);
@@ -205,7 +205,7 @@ public final class AlphaNotesPlugin extends Plugin {
 
   @PluginMethod public void play(PluginCall call) {
     onMain(call, () -> {
-      if (!front || inCall()) { call.reject("Playback is unavailable"); return; }
+      if (!front || locked() || inCall()) { call.reject("Playback is unavailable"); return; }
       String id = RecordingStore.id(call.getString("audioId"));
       RecordingStore store = recordings();
       String note = call.getString("noteId");
@@ -265,6 +265,35 @@ public final class AlphaNotesPlugin extends Plugin {
         store.remove(audioId, noteId, operation, () -> {});
         call.resolve(JSObject.fromJSONObject(store.purge(audioId, noteId, operation, () -> {})));
       });
+    });
+  }
+
+  @PluginMethod public void share(PluginCall call) {
+    onMain(call, () -> {
+      if (!front || locked()) { call.reject("Open Notes to share a draft"); return; }
+      String title = call.getString("title", "");
+      String text = call.getString("text", "");
+      boolean mail = "Email".equals(call.getString("channel"));
+      if (title.length() > 240 || text.length() > 80_000) { call.reject("This note is too long to share"); return; }
+      Intent draft = new Intent(Intent.ACTION_SENDTO, android.net.Uri.parse(mail ? "mailto:" : "smsto:"));
+      if (mail) draft.putExtra(Intent.EXTRA_SUBJECT, title).putExtra(Intent.EXTRA_TEXT, text);
+      else draft.putExtra("sms_body", title.isBlank() ? text : title + "\n\n" + text);
+      getActivity().startActivity(draft);
+      call.resolve();
+    });
+  }
+
+  private boolean locked() {
+    android.app.KeyguardManager keyguard = getContext().getSystemService(android.app.KeyguardManager.class);
+    return keyguard == null || keyguard.isDeviceLocked();
+  }
+
+  @PluginMethod public void settings(PluginCall call) {
+    onMain(call, () -> {
+      Intent page = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+          android.net.Uri.parse("package:" + getContext().getPackageName()));
+      getActivity().startActivity(page);
+      call.resolve();
     });
   }
 

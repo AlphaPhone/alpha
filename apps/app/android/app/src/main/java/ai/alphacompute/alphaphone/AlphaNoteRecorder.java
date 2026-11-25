@@ -217,7 +217,7 @@ final class AlphaNoteRecorder {
 
  synchronized JSObject pause(String recordingId){
   owned(recordingId);
-  if("recording".equals(state)&&recorder!=null){recorder.pause();pausedAt=SystemClock.elapsedRealtime();state="paused";main.removeCallbacks(rollover);publish();}
+  if("recording".equals(state)&&recorder!=null){finishCurrent();state="paused";publish();}
   return status();
  }
  synchronized JSObject resume(String recordingId) throws IOException {

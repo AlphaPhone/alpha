@@ -61,10 +61,12 @@ import type { Alpha } from "../runtime/area.tsx";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import type { Time } from "../runtime/time.vibe";
+import type { Machine as AccessReviewMachine } from "../../gen/app__startup__access.effect.vibe";
+import { AccessReview } from "../startup/SettingsAccess.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 
 /** What every Settings page reads: where the owner is, the phone's facts, the hand-overs to Android, the preferences, the reset and the developer tools. */
-export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | FactsMachine | ActivityMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ShellMachine | Time, unknown>;
+export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | FactsMachine | AccessReviewMachine | ActivityMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ShellMachine | Time, unknown>;
 
 /** What the frame gives each page: the runtime, Alpha's places, and the props every page shares. */
 export interface PageProps {
@@ -267,13 +269,13 @@ function Display({ runtime, common }: PageProps) {
   );
 }
 
-// spec/app/settings/preferences.md, "Story: Decide whether Alpha asks before it acts"; spec/app/settings/preferences.md, "When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again"; spec/app/settings/index.md, "Set up Alpha access on Privacy, and each access on Permissions, open the walkthrough to review that one access"
+// spec/app/settings/preferences.md, "Story: Decide whether Alpha asks before it acts"; spec/app/settings/preferences.md, "When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again"; spec/app/settings/index.md, "Set up Alpha access opens all permissions in review, and each row on Permissions opens that one access"
 function Privacy({ runtime, alpha, common }: PageProps) {
   const device = useDevice(runtime);
   const { can, send } = usePages(runtime);
   if (!device) return null;
   const { recovery, ...shown } = device;
-  const review = { type: "reviewAccess", access: "NotificationsAccess" } as const;
+  const review = { type: "reviewAllAccess" } as const;
   return (
     <>
       {recovery}
@@ -389,15 +391,23 @@ const agentWords: Record<ActivityGen.AgentWord, NonNullable<Parameters<typeof Se
 
 /** Agent activity as reported by the resident host, with the conversation controls owned by Ask Alpha. */
 function Activity({ runtime, alpha, common }: PageProps) {
-  const { state, can, send } = useActivity(runtime);
+  const { state, can, send } = useTimed(runtime, useActivity);
   if (!state) return null;
   const retry = { type: "recover", how: "Retry", connection: state.connection } as const;
+  const refresh = { type: "refreshActions", connection: state.connection, at: untimed } as const;
+  const decline = (proposal: string) => ({ type: "decline", proposal, connection: state.connection, at: untimed }) as const;
+  const settle = (proposal: string, happened: boolean) => ({ type: "reconcileAction", proposal, happened, connection: state.connection, at: untimed }) as const;
   return (
     <SettingsActivityPage
       onBack={common.onBack}
       connection={connections[state.connection]}
-      actions={[]}
-      journalUnavailable
+      actions={state.rows.map((row) => ({ ...row, declinable: can(decline(row.proposal)), unsettled: can(settle(row.proposal, true)) }))}
+      reading={state.connection === "Ready" && (state.journal.read.status === "Idle" || state.journal.read.status === "Loading")}
+      failed={state.journal.read.status === "Failed"}
+      unconfirmed={state.wordResult === "WordUnconfirmed"}
+      onRefresh={can(refresh) ? () => void send(refresh) : undefined}
+      onDecline={(proposal) => { if (can(decline(proposal))) void send(decline(proposal)); }}
+      onReconcile={(proposal, happened) => { if (can(settle(proposal, happened))) void send(settle(proposal, happened)); }}
       onRecover={can(retry) ? () => void send(retry) : undefined}
       onHandOver={common.onHandOver}
     >
@@ -484,6 +494,7 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
     <section aria-label="Settings" className="flex h-full min-h-0 flex-col">
       {state.phone && facts.state?.read.read.status === "Failed" && (page === "Top" || page === "General") ? <Banner variant="warn">The phone did not answer</Banner> : null}
       {Shown ? <Shown runtime={runtime} alpha={alpha} common={common} /> : null}
+      <AccessReview runtime={runtime} />
     </section>
   );
 }

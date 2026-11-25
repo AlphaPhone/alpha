@@ -222,17 +222,43 @@ pure def sometimesProblemLogShowing(s: Settings): bool = s.page == Problems
 pure def sometimesPhonePageShowing(s: Settings): bool = s.page == PhonePage
 ```
 
-### Carrier & SIM setup is a sensitive screen, and only on a phone
+### Carrier & SIM setup and Phone are sensitive screens, only on a phone
 
-While it shows, the identifiers stay on the phone: the assistant is told
-only that the screen is sensitive, and admits nothing that acts on it
-([assistant](../assistant/index.md)). No other page of Settings is
-sensitive.
+While either page shows, phone numbers and identifiers stay on the phone.
+The assistant is told only that the screen is sensitive and admits
+nothing that acts on it ([assistant](../assistant/index.md)).
 
 ```quint
-pure def sensitive(s: Settings): bool = s.page == CarrierPage
+pure def sensitive(s: Settings): bool = s.page == CarrierPage or s.page == PhonePage
 
 pure def alwaysASensitivePageIsOnAPhone(s: Settings): bool = sensitive(s) implies s.phone
+```
+
+### An ordinary Settings section is described to Ask Alpha by its public name alone
+
+The name is the fixed section identifier in the view. No entered value, phone fact, permission, licence text or diagnostic record is part of it. The first page and the carrier, phone, network, activity, developer and licence pages send no selection.
+
+```quint
+pure def selectionOf(page: Page): str =
+  if (page == General) "settings-general"
+  else if (page == Display) "display"
+  else if (page == Sound) "sound"
+  else if (page == Notifications) "notifications"
+  else if (page == Battery) "battery"
+  else if (page == Privacy) "settings-privacy"
+  else if (page == Permissions) "settings-permissions"
+  else if (page == Apps) "settings-apps"
+  else if (page == InboxApp) "settings-app-inbox"
+  else if (page == WorkflowsApp) "settings-app-workflows"
+  else if (page == CalendarApp) "calendar"
+  else if (page == CameraApp) "settings-app-camera"
+  else if (page == PhotosApp) "photos"
+  else if (page == MapsApp) "settings-app-maps"
+  else if (page == NotesApp) "settings-app-notes"
+  else if (page == About) "about"
+  else ""
+
+pure def lawNoSensitiveSettingsSelection(s: Settings): bool = sensitive(s) implies selectionOf(s.page) == ""
 ```
 
 ### Carrier & SIM setup can be showing on a phone that is no Alpha image

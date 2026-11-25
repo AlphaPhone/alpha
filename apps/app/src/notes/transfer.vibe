@@ -76,7 +76,7 @@ effect function written(fx: Extract<Transfer.Effect, { readonly tag: "Imports" |
   const note = collection.noteByNumber.get(fx.note)
   const draft = try content.draft()
   const saved = note === undefined ? undefined : noteShareText(note)
-  const body = fx.draft && draft?.owner === identity ? wordsOf(draft)
+  const body = fx.draft ? (draft?.owner === identity ? wordsOf(draft) : try content.rawDraft(identity))
     : collection.version === fx.revision && saved !== undefined ? `${saved.title}\n${saved.text}` : undefined
   if (body === undefined) return failed
   const outcome = try (try NoteDocuments).write(handle, body)

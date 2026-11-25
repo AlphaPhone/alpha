@@ -51,7 +51,8 @@ view group (maps, browser) (`packages/agent/src/runtime/core-plugins.ts` there,
 its own subpaths now), `-calendar`, `-inbox`, `-notes`, `-files`,
 `-workflow`, `-maps` and `-browser`, and the pack carries each in the same
 group. Notes exports no plugin, only a module the entry builds
-(`notesModule`), so it is hosted rather than bundled. Scheduling is now the
+(`notesModule`), so it is hosted rather than bundled. Alpha opens Notes
+with three days of Trash retention. Scheduling is now the
 agent's own `scheduled-tasks`, `tasks` and `triggers` modules; the
 proposal of a device step is its `device-actions` module, and a drafted
 reply its `reply-draft`; approvals, notifications, views and the task
@@ -68,6 +69,7 @@ whose only action is the calculator the old agent never had.
 pure val corePlugins: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-notes", "@elizaos/plugin-files", "@elizaos/plugin-workflow")
 pure val viewPlugins: List[str] = List("@elizaos/plugin-maps", "@elizaos/plugin-browser")
 pure val hostedPlugins: List[str] = List("@elizaos/plugin-notes")
+pure val notesTrashDays = 3
 pure val packedPlugins: List[str] = corePlugins.concat(viewPlugins)
 pure val bundledPlugins: List[str] = packedPlugins.select(p => not(hostedPlugins.includes(p)))
 pure val agentModules: List[str] = List("@elizaos/agent/device-actions", "@elizaos/agent/reply-draft", "@elizaos/agent/approvals", "@elizaos/agent/notifications", "@elizaos/agent/views", "@elizaos/agent/scheduled-tasks", "@elizaos/agent/tasks", "@elizaos/agent/triggers", "@elizaos/agent/surface")
@@ -145,7 +147,8 @@ execution and approval receipts. It sends the owner's exact-version
 approval, lifecycle and run decisions and reads back their outcomes.
 The builder reads the phone catalogue, generates and validates drafts,
 saves the reviewed spec and checks save receipts. Workflows also sends
-the owner's prompt and scheduled task changes.
+the owner's prompt and scheduled task changes. Scheduled Digests reads
+hosted sources, loops and retained results, and acknowledges an opened result.
 Notes reads the same owner identity and calls the Notes module to
 read and edit notes, erase Trash and finish recording cleanup. The approvals
 area lists the agent's proposals and resolves one
@@ -220,6 +223,10 @@ pure val pageRoutes: List[Route] = List(
   { method: Get, path: "/api/notes/trash/recordings", stream: false },
   { method: Post, path: "/api/notes/trash/recordings/complete", stream: false },
   { method: Get, path: "/api/workflow/status", stream: false },
+  { method: Get, path: "/api/workflow/hosted/loops", stream: false },
+  { method: Get, path: "/api/workflow/hosted/sources", stream: false },
+  { method: Get, path: "/api/workflow/hosted/results", stream: false },
+  { method: Post, path: "/api/workflow/hosted/results/ack", stream: false },
   { method: Get, path: "/api/workflow/workflows/{id}", stream: false },
   { method: Get, path: "/api/workflow/workflows/{id}/executions", stream: false },
   { method: Get, path: "/api/workflow/executions/{id}", stream: false },

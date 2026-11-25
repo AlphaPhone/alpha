@@ -240,7 +240,7 @@ effect function phoneReport(): PhoneReport!! {
 
 const browserPermissions: Readonly<Partial<Record<Access, string>>> = { CameraAccess: "camera", MicrophoneAccess: "microphone", LocationAccess: "geolocation", NotificationsAccess: "notifications" }
 
-const permission = (grant: Grant | undefined, on = true) => Option.map(Option.fromUndefinedOr(grant), (value) => ({ grant: value, on }))
+const permission = (grant: Grant | undefined, on = true) => Option.map(Option.fromNullishOr(grant), (value) => ({ grant: value, on }))
 
 effect function phoneAccess(access: Access) {
   switch (access) {

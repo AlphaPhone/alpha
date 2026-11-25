@@ -13,9 +13,10 @@ import type { Neighbour } from "./vocabulary.ts";
 
 /** An action as the approvals area recorded it: what it was, whether it can still be declined, whether its outcome is unsettled. */
 export type SettingsActionItem = {
-  proposal: number;
+  proposal: string;
   title: string;
   detail?: string;
+  outcome?: string;
   declinable: boolean;
   unsettled: boolean;
 };
@@ -29,8 +30,8 @@ export type SettingsActivityPageProps = {
   reading?: boolean;
   /** The last read failed or was not answered in time. */
   failed?: boolean;
-  /** The device has no journal connection. */
-  journalUnavailable?: boolean;
+  /** The last decision was sent or attempted and the agent could not confirm it. */
+  unconfirmed?: boolean;
   /** Conversation commands owned by Ask Alpha. */
   children?: ReactNode;
   /** This is a development build, which links the agent's restart details. */
@@ -42,9 +43,9 @@ export type SettingsActivityPageProps = {
   /** Reads the journal again; offered while the agent is ready and no read is in flight. */
   onRefresh?: () => void;
   /** Declines a proposal. */
-  onDecline?: (proposal: number) => void;
+  onDecline?: (proposal: string) => void;
   /** Says whether an action whose outcome the agent could not see happened. */
-  onReconcile?: (proposal: number, happened: boolean) => void;
+  onReconcile?: (proposal: string, happened: boolean) => void;
   /** Hands over to Ask Alpha for the conversations, or to the account area for the agent's restart details. */
   onHandOver?: (neighbour: Neighbour) => void;
 };
@@ -54,16 +55,16 @@ export type SettingsActivityPageProps = {
  * phone, each declined or settled by the owner, and the conversations.
  * @model spec/app/settings/activity.md
  */
-export function SettingsActivityPage({ connection, actions, reading = false, failed = false, journalUnavailable = false, children, development = false, onBack, onRecover, onRefresh, onDecline, onReconcile, onHandOver }: SettingsActivityPageProps) {
+export function SettingsActivityPage({ connection, actions, reading = false, failed = false, unconfirmed = false, children, development = false, onBack, onRecover, onRefresh, onDecline, onReconcile, onHandOver }: SettingsActivityPageProps) {
   const ready = connection === "ready";
   return (
     <SettingsPage
       title="Agent activity"
       onBack={onBack} backLabel="Back to About"
-      actions={ready && !journalUnavailable ? <Button variant="ghost" size="icon" aria-label="Refresh actions" loading={reading} disabled={!onRefresh} onClick={onRefresh}><RotateCw /></Button> : undefined}
+      actions={ready ? <Button variant="ghost" size="icon" aria-label="Refresh actions" loading={reading} disabled={!onRefresh} onClick={onRefresh}><RotateCw /></Button> : undefined}
     >
       {ready ? null : <SettingsAgentRecovery connection={connection} onRecover={onRecover} />}
-      {ready && journalUnavailable ? <Banner variant="warn">Phone actions are unavailable</Banner> : null}
+      {unconfirmed ? <Banner variant="warn">Alpha could not confirm the action decision</Banner> : null}
       {failed ? <Banner variant="warn">The actions could not be read{actions.length ? ". Showing the last read" : ""}</Banner> : null}
       {ready && actions.length ? (
         <ListGroup heading="Phone actions">
@@ -71,7 +72,7 @@ export function SettingsActivityPage({ connection, actions, reading = false, fai
             <SettingsActionRow
               key={action.proposal}
               title={action.title}
-              detail={action.detail}
+              detail={[action.outcome, action.detail].filter(Boolean).join(" · ")}
               declinable={action.declinable}
               unsettled={action.unsettled}
               onDecline={onDecline && (() => onDecline(action.proposal))}
@@ -81,7 +82,7 @@ export function SettingsActivityPage({ connection, actions, reading = false, fai
         </ListGroup>
       ) : null}
       {ready && !actions.length && reading ? <Skeleton className="h-16 rounded-lg" /> : null}
-      {ready && !actions.length && !reading && !failed && !journalUnavailable ? <EmptyState title="No phone actions" /> : null}
+      {ready && !actions.length && !reading && !failed ? <EmptyState title="No phone actions" /> : null}
       {!ready && connection !== "unpackaged" ? <EmptyState title="Actions load when the agent is ready" /> : null}
       {children}
       <ListGroup>

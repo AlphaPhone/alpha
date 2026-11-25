@@ -3,10 +3,15 @@ import * as Android from "../../gen/app__settings__android.effect.vibe"
 import * as Facts from "../../gen/app__settings__facts.effect.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { type Machine as AccessReview } from "../../gen/app__startup__access.effect.vibe"
+import { type Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
+import { type Said } from "../notices/toasts.vibe"
+import { type Cloud } from "../platform/cloud.vibe"
 import { Device, native } from "../platform/device.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { type Job, answer, due, following, hearing, reacting, run, stop, together, untimed } from "../runtime/reactor.vibe"
+import { type Job, answer, due, following, hearing, reacting, run, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
+import { openReview } from "../startup/settingsAccess.vibe"
 import { development } from "./build.ts"
 
 const settingsShowing = (shell: Parameters<typeof showing>[0]) => showing(shell, "Settings")
@@ -19,7 +24,7 @@ const admitting = effect {
 }
 
 // spec/app/settings/index.md, "Each page links to what another area owns there": what the shell can open is opened; the other neighbours draw on the places Settings offers them.
-function handed(fx: Pages.Effect): Job<Pages.Event, Shell | Device, []> {
+function handed(fx: Pages.Effect): Job<Pages.Event, Shell | Device | AccessReview | Cloud | Toasts | Said, []> {
   return match (fx) {
     when { tag: "Handed", let neighbour }: run(`hand ${neighbour}`, effect {
       const shell = try Shell
@@ -27,7 +32,8 @@ function handed(fx: Pages.Effect): Job<Pages.Event, Shell | Device, []> {
       if (neighbour === "CalendarAccount" || neighbour === "CalendarBackups") try ignore(shell.send({ type: "openView", view: "Calendar" }))
       if (neighbour === "Conversations") try ignore(shell.send({ type: "raise", detent: "Full" }))
     });
-    when { tag: "ReviewAccess" }: stop("access");
+    when { tag: "ReviewAccess", let access }: run("access review", openReview(access));
+    when { tag: "ReviewAllAccess" }: run("access review", openReview(undefined));
   }
 }
 

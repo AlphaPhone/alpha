@@ -24,6 +24,8 @@ module native {
     purge(input: { readonly audioId: string; readonly noteId: string; readonly operationId: string }): Promise<unknown>
     consumeOpen(): Promise<unknown>
     previousExists(): Promise<unknown>
+    share(input: { readonly channel: "Email" | "Messages"; readonly title: string; readonly text: string }): Promise<unknown>
+    settings(): Promise<unknown>
     readPrevious(input: { readonly area: Earlier }): Promise<unknown>
     addListener(event: "recordingChanged" | "openRequested", received: (value: unknown) => void): Promise<PluginListenerHandle>
   }
@@ -84,6 +86,8 @@ export service NoteDevice {
   purge(receipt: NotesTrashRecordingCleanup): boolean!!
   consumeOpen(): boolean!!
   previousExists(): boolean!!
+  share(channel: "Email" | "Messages", title: string, text: string): void!!
+  settings(): void!!
   earlier(area: Earlier): (string | null)!RecordingUnavailable
 }
 
@@ -128,6 +132,8 @@ export const noteDevice = Layer.sync(NoteDevice, () => {
       return typeof result === "object" && result !== null && "status" in result && result.status === "purged"
     },
     consumeOpen: () => Effect.map(read(Offered, (native) => native.consumeOpen()) catch () => ({ open: false }), ({ open }) => open),
+    share: (channel: "Email" | "Messages", title: string, text: string) => ignore(asked((native) => native.share({ channel, title, text }))),
+    settings: () => ignore(asked((native) => native.settings())),
     previousExists: () => Effect.map(read(EarlierPresence, (native) => native.previousExists()) catch () => ({ present: false }), ({ present }) => present),
     earlier: (area: Earlier) => available ? Effect.map(read(EarlierText, (native) => native.readPrevious({ area })), (read) => read.text) : succeed(null),
   }

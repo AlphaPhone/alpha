@@ -8,6 +8,7 @@ import { Machine as Voice, silent } from "../../gen/app__notes__voice.effect.vib
 import { Machine as Link } from "../../gen/app__notes__linkNote.effect.vibe"
 import { Machine as Trash } from "../../gen/app__notes__trash.effect.vibe"
 import type { Actor } from "../../gen/app__notes__note.effect.vibe"
+import { Machine as Calls } from "../../gen/app__phone__call.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import type { Agent } from "../platform/agent.vibe"
@@ -15,10 +16,33 @@ import { NoteStore } from "../platform/notes.vibe"
 import { NoteDevice, type Tape, ownerDigest, noteDevice } from "../platform/noteDevice.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
-import { type Job, answer, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { type Job, answer, following, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { NoteContent, numberOf } from "./content.vibe"
 
 const phone: Actor = "Phone"
+
+export service RecordingDisplay {
+  snapshot(): { readonly seconds: number; readonly peak: number }
+  subscribe(listener: () => void): () => void
+  tell(seconds: number, peak: number): void!!
+}
+
+const display = Layer.sync(RecordingDisplay, () => {
+  let shown = { seconds: 0, peak: 0 }
+  const waiting = new Set<() => void>()
+  return {
+    snapshot: () => shown,
+    subscribe(listener: () => void) {
+      waiting.add(listener)
+      return () => { waiting.delete(listener) }
+    },
+    tell: (seconds: number, peak: number) => sync(() => {
+      if (shown.seconds === seconds && shown.peak === peak) return
+      shown = { seconds, peak }
+      for (const listener of waiting) listener()
+    }),
+  }
+})
 
 type Scope = Rec.Machine | Mic.Machine | Notes | Editor | Voice | Link | Trash | Shell | Device | NoteDevice | NoteContent | NoteStore | Agent
 
@@ -226,7 +250,7 @@ function microphone(fx: Mic.Effect): Job<Mic.Event, Scope, [Actor]> {
       return { type: "answered", grant, ready } satisfies Mic.Event
     }, { type: "answered", grant: "Unasked", ready: false }, phone);
     when { tag: "Records" }: run("record", start(fx.folder), phone);
-    when { tag: "OpensSettings" }: run("settings", effect { try ignore((try Shell).send({ type: "openView", view: "Settings" })) }, phone);
+    when { tag: "OpensSettings" }: run("settings", effect { try (try NoteDevice).settings() }, phone);
   }
 }
 
@@ -253,9 +277,11 @@ const updates = started(effect {
   const recorder = try Rec.Machine
   const devicePage = try Device
   const shell = try Shell
+  const shown = try RecordingDisplay
   const report = effect (tape: Tape) => {
     const content = try (try NoteContent).collection()
     if (content.owner === "" || tape.binding?.ownerDigest !== (try promise(() => ownerDigest(content.owner)))) return
+    try shown.tell(Math.trunc((tape.durationMs ?? 0) / 1000), Math.max(0, Math.min(1, tape.peak ?? 0)))
     try samples(tape, content.owner)
     const state = try recorder.get()
     if (tape.state === "stopped" && (state.phase === "Recording" || state.phase === "Paused")) {
@@ -276,6 +302,9 @@ const updates = started(effect {
   try Stream.runForEach(Stream.merge(device.changed, ticks), report)
 }, "watch the phone’s Notes recorder")
 
+const calls = following(Calls, (state) => state.calls.length > 0, Rec.Machine,
+  (active): Rec.Event => ({ type: active ? "callStarted" : "callEnded" }), phone)
+
 export const recording = Layer.provideMerge(together(
   reacting(Rec, { keep: 1, open: effect {
     const device = try NoteDevice
@@ -284,4 +313,5 @@ export const recording = Layer.provideMerge(together(
   }, carry }),
   reacting(Mic, { keep: 1, open: [{ type: "restart" }, phone], carry: microphone }),
   updates,
-), noteDevice)
+  calls,
+), Layer.merge(noteDevice, display))

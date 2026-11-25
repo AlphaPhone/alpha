@@ -1,11 +1,12 @@
 // spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Organise my notes"; spec/app/notes/editor.md, "Story: Write a note"; spec/app/notes/trash.md, "Story: Delete a note and get it back"
 import { Alert, AppHeader, Button, Checkbox, Chip, EmptyState, Input, Menu, MenuContent, MenuItem, MenuTrigger, NoteRow, NotesList as NoteRows, Spinner, Textarea } from "@repo/ui";
-import { ArrowLeft, AudioLines, Ellipsis, FileDown, Folder, ListChecks, Mic, Plus, Trash2, X } from "lucide-react";
+import { ArrowLeft, AudioLines, Ellipsis, FileDown, Folder, Mail, MessageSquare, ListChecks, Mic, Plus, Trash2, X } from "lucide-react";
 import { Effect } from "effect";
 import { useState, useSyncExternalStore, type FormEvent } from "react";
 import * as Notes from "../../gen/app__notes.ts";
 import * as Editor from "../../gen/app__notes__editor.ts";
 import * as Trash from "../../gen/app__notes__trash.ts";
+import { useMachine as useActions } from "../../gen/app__notes__actions.react.ts";
 import { useMachine as useNotes } from "../../gen/app__notes.react.ts";
 import { useMachine as useEditor } from "../../gen/app__notes__editor.react.ts";
 import { useMachine as useTrash } from "../../gen/app__notes__trash.react.ts";
@@ -21,7 +22,7 @@ import type { Alpha, Resident } from "../runtime/area.tsx";
 import { untimed } from "../runtime/reactor.vibe";
 import { useTimed } from "../runtime/react.ts";
 import { AppBack } from "../shell/AppBack.tsx";
-import { type Collection, type DraftWords, NoteContent, hasContent, numberOf } from "./content.vibe";
+import { type Collection, type DraftWords, NoteContent, audioIdOf, hasContent, numberOf } from "./content.vibe";
 import { type Fields, NoteEditor } from "./editor.vibe";
 import { enter } from "./notes.vibe";
 import { record } from "./recording.vibe";
@@ -55,6 +56,7 @@ function TransferNotice({ runtime }: { readonly runtime: Runtime }) {
 
 function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly saved: DraftWords }) {
   const writing = useEditor(runtime);
+  const actions = useActions(runtime);
   const bin = useTrash(runtime).state;
   const transfer = useTransfer(runtime);
   const hasDocuments = runtime.runSync(NoteDocuments.use((device) => Effect.succeed(device.available)));
@@ -72,6 +74,8 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
   const deletion: Editor.Event = { type: "deleteNote", ready: bin !== undefined && Trash.ready(bin) };
   const deletable = owner(deletion);
   const exporting = { type: "exportNote", note: current.note, revision: current.draft.base } as const;
+  const sharing = { type: "openMenu", note: current.note, link: current.link, saved: current.draft.sync === "Kept" && !current.deleting } as const;
+  const shared = sharing.saved && current.link.tie === "NoLink" && (actions.can(sharing, "Owner") || actions.state?.open === true);
   const exportable = hasDocuments && current.draft.sync === "Kept" && transfer.can(exporting, "Owner");
   const editable = owner({ type: "edit", kept: true });
   return (
@@ -80,9 +84,16 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
         {editable && <Button aria-label={folder ? "Switch to text" : "Make a checklist"} aria-pressed={folder} size="icon" variant="ghost"
           onClick={() => edit(folder ? { kind: "Text", body: saved.items.map((row) => row.t).join("\n") }
             : { kind: "Checklist", items: saved.body.split("\n").filter((line) => line.trim() !== "").map((t) => ({ t, done: false })), body: "" })}><ListChecks /></Button>}
-        {(deletable || exportable) && <Menu>
+        {(deletable || exportable || shared) && <Menu onOpenChange={(open) => {
+          if (open && actions.can(sharing, "Owner")) void actions.send(sharing, "Owner");
+          if (!open && actions.can({ type: "closeMenu" }, "Owner")) void actions.send({ type: "closeMenu" }, "Owner");
+        }}>
           <MenuTrigger asChild><Button aria-label="Note actions" size="icon" variant="ghost"><Ellipsis /></Button></MenuTrigger>
           <MenuContent align="end">
+            {shared && actions.state?.open && <>
+              <MenuItem onSelect={() => void actions.send({ type: "share", channel: "Email", mark: 0 }, "Owner")}><Mail /> Share by email</MenuItem>
+              <MenuItem onSelect={() => void actions.send({ type: "share", channel: "Messages", mark: 0 }, "Owner")}><MessageSquare /> Share in Messages</MenuItem>
+            </>}
             {exportable && <MenuItem onSelect={() => void transfer.send(exporting, "Owner")}><FileDown /> Save as text</MenuItem>}
             {deletable && <MenuItem destructive onSelect={() => send(deletion)}><Trash2 /> Delete</MenuItem>}
           </MenuContent>
@@ -192,6 +203,7 @@ function LinkedNote({ runtime, collection }: { readonly runtime: Runtime; readon
 
 function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonly collection: Collection }) {
   const voice = useVoice(runtime);
+  const audio = runtime.runSync(NoteDevice.use((device) => Effect.succeed(device.available)));
   const state = voice.state;
   if (!state?.showing) return null;
   const note = collection.noteByNumber.get(state.note);
@@ -199,11 +211,13 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
   const text = Array.isArray(data?.lines) ? data.lines.flatMap((line) => typeof line === "object" && line !== null && "t" in line && typeof line.t === "string" ? [line.t] : []) : [];
   const summary = Array.isArray(data?.summary) ? data.summary.filter((line): line is string => typeof line === "string") : [];
   const play = { type: "play", from: 0 } as const;
+  const stop = { type: "stopPlaying" } as const;
   return <section aria-label="Voice note" className="flex flex-1 flex-col">
     <AppHeader title="Voice note" leading={<Button variant="ghost" size="icon" aria-label="Back to notes" onClick={() => void voice.send({ type: "back" }, "Owner")}><ArrowLeft /></Button>} />
     <article className="flex flex-col gap-3 px-6">
       <h1 className="font-display text-3xl">{note === undefined ? "Voice note" : titleOf(note)}</h1>
-      {voice.can(play, "Owner") && <Button className="self-start" variant="secondary" onClick={() => void voice.send(play, "Owner")}><AudioLines /> Play recording</Button>}
+      {audio && note !== undefined && audioIdOf(note) !== "" && voice.can(play, "Owner") && <Button className="self-start" variant="secondary" onClick={() => void voice.send(play, "Owner")}><AudioLines /> Play recording</Button>}
+      {voice.can(stop, "Owner") && <Button className="self-start" variant="secondary" onClick={() => void voice.send(stop, "Owner")}>Stop playback</Button>}
       {state.play.status === "Failed" && <Alert variant="warn">This recording couldn't be played</Alert>}
       {summary.length > 0 && <section><h2 className="text-sm font-semibold">Summary</h2>{summary.map((line, index) => <p key={index}>{line}</p>)}</section>}
       {text.length > 0 && <section><h2 className="text-sm font-semibold">Transcript</h2>{text.map((line, index) => <p key={index}>{line}</p>)}</section>}
@@ -244,22 +258,27 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
   const openTrash = { type: "show", covered: false } as const;
   const showPrevious = { type: "show", covered: false } as const;
   const importText = { type: "importText", available: available && !Editor.waiting(writing) } as const;
+  const rescueDraft = { type: "rescueDraft", note: writing.note, unreadable: writing.unreadable } as const;
   const reopen = { type: "reopenDraft", covered: false } as const;
+  const shown = Notes.shown(state).filter((item) => item.id !== writing.note || writing.showing || !Editor.waiting(writing));
+  const first = shown[0];
+  const canOpen = first !== undefined && can({ type: "openRow", id: first.id, covered: Editor.waiting(writing) });
+  const canOrganize = Notes.mayWrite(state, false);
   const row = (entry: Notes.Row) => {
     const note = collection.noteByNumber.get(entry.id);
     if (note === undefined) return null;
     const open = { type: "openRow", id: entry.id, covered: Editor.waiting(writing) } as const;
     const pin: Notes.Event = { type: "change", c: { ...Notes.nothing, note: entry.id, base: entry.revision, op: entry.pinned ? "Unpin" : "Pin" }, covered: false };
-    return <div key={entry.id} className="group flex items-start border-b border-border">
+    return <div key={entry.id} className="group flex items-start border-b border-border [contain-intrinsic-size:auto_4rem] [content-visibility:auto]">
       <NoteRow className="min-w-0 flex-1 border-0" title={titleOf(note)} aria-label={`Open ${titleOf(note)}`}
         date={dated(note, collection.readAt)} preview={preview(note)} voice={entry.kind === "Voice"}
-        onClick={can(open) ? () => listEvent(open) : undefined} />
-      {can(pin) && <Menu><MenuTrigger asChild><Button aria-label={`${titleOf(note)} options`} size="icon" variant="ghost" className="mt-1"><Ellipsis /></Button></MenuTrigger>
+        onClick={canOpen ? () => listEvent(open) : undefined} />
+      {canOrganize && <Menu><MenuTrigger asChild><Button aria-label={`${titleOf(note)} options`} size="icon" variant="ghost" className="mt-1"><Ellipsis /></Button></MenuTrigger>
         <MenuContent align="end">
           <MenuItem onSelect={() => listEvent(pin)}>{entry.pinned ? "Unpin" : "Pin"}</MenuItem>
           {[{ id: 0, name: "No folder" }, ...state.folders].map((folder) => {
             const move: Notes.Event = { type: "change", c: { ...Notes.nothing, op: "Move", note: entry.id, base: entry.revision, folder: folder.id }, covered: false };
-            return can(move) && <MenuItem key={folder.id} onSelect={() => listEvent(move)}>Move to {folder.name}</MenuItem>;
+            return folder.id !== entry.folder && <MenuItem key={folder.id} onSelect={() => listEvent(move)}>Move to {folder.name}</MenuItem>;
           })}
         </MenuContent></Menu>}
     </div>;
@@ -273,7 +292,6 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
     const changed = folderChange(form.op, form.op === "RenameFolder" ? form.folder.id : 0, folderName.trim());
     if (can(changed)) { listEvent(changed); setForm(undefined); setFolderName(""); }
   };
-  const shown = Notes.shown(state).filter((item) => item.id !== writing.note || writing.showing || !Editor.waiting(writing));
   const pinned = shown.filter((item) => item.pinned);
   const rest = shown.filter((item) => !item.pinned);
   return (
@@ -303,7 +321,11 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
           <Button type="button" variant="ghost" onClick={() => setForm(undefined)}>Cancel</Button>
         </form>}
         {Editor.waiting(writing) && !writing.showing && <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md bg-muted p-2">
-          <span className="mr-auto text-sm">Unsaved {draft?.title.trim() || "note"}</span>
+          <span className="mr-auto text-sm">{writing.unreadable ? "The unsaved draft could not be read back" : `Unsaved ${draft?.title.trim() || "note"}`}</span>
+          {writing.unreadable && hasDocuments && transfer.can(rescueDraft, "Owner") && <Button size="sm" onClick={() => void transfer.send(rescueDraft, "Owner")}>Save out draft</Button>}
+          {editor.can({ type: "askDrop" }, "Owner") && <Button size="sm" variant="secondary" onClick={() => void editor.send({ type: "askDrop" }, "Owner")}>Discard draft</Button>}
+          {writing.dropping && editor.can({ type: "cancelDrop" }, "Owner") && <Button size="sm" variant="secondary" onClick={() => void editor.send({ type: "cancelDrop" }, "Owner")}>Keep draft</Button>}
+          {editor.can({ type: "dropDraft" }, "Owner") && <Button size="sm" variant="destructive" onClick={() => void runtime.runPromise(NoteEditor.use((writer) => writer.discard()))}>Discard permanently</Button>}
           {editor.can(reopen, "Owner") && <Button size="sm" onClick={() => void editor.send(reopen, "Owner")}>Reopen</Button>}
           {editor.can({ type: "discardDraft" }, "Owner") && <Button size="sm" variant="secondary" onClick={() => void runtime.runPromise(NoteEditor.use((writer) => writer.discard()))}>Discard</Button>}
         </div>}

@@ -1,4 +1,5 @@
 // spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Open a note"; spec/app/notes/index.md, "Story: Organise my notes"; spec/app/notes/index.md, "Story: Another owner never sees my notes"
+import * as Actions from "../../gen/app__notes__actions.effect.vibe"
 import * as Notes from "../../gen/app__notes.effect.vibe"
 import * as Editor from "../../gen/app__notes__editor.effect.vibe"
 import * as Link from "../../gen/app__notes__linkNote.effect.vibe"
@@ -15,6 +16,7 @@ import { Device } from "../platform/device.vibe"
 import { NoteStore, noteStore } from "../platform/notes.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { type Job, answer, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { actions } from "./actions.vibe"
 import { NoteContent, formatChanged, fromSaved, noteContent, numberOf } from "./content.vibe"
 import { NoteEditor, editing } from "./editor.vibe"
 import { ownerRecords, recording } from "./recording.vibe"
@@ -85,9 +87,9 @@ effect function opened(row: Notes.Row) {
     try ignore((try Link.Machine).send({ type: "openLink", note: id, revision, kind, origin, link, covered: false }, "Owner"))
   } else if (Notes.viewFor(kind) === "Listening") {
     const format = note.format?.data
-    const segments = Array.isArray(format?.segments) ? format.segments.length : typeof format?.audioId === "string" ? 1 : 0
-    const heard = Array.isArray(format?.lines) ? format.lines.length : 0
-    const summary = Array.isArray(format?.summary) ? format.summary.length : 0
+    const segments = Array.isArray(format?.segments) ? Math.max(1, format.segments.length) : 1
+    const heard = Array.isArray(format?.lines) && format.lines.length > 0 ? segments : 0
+    const summary = Array.isArray(format?.summary) && format.summary.length > 0 ? heard : 0
     try ignore((try Voice.Machine).send({ type: "openVoice", note: id, revision, segments, heard, summary, covered: false }, "Owner"))
   } else {
     const editor = try Editor.Machine
@@ -120,13 +122,18 @@ export effect function enter() {
   try ignore(trash.send({ type: "ownerChanged", owner }, phone))
   try ignore(link.send({ type: "ownerChanged", owner }, phone))
   try ignore(voice.send({ type: "ownerChanged", owner }, phone))
+  try ignore((try Actions.Machine).send({ type: "ownerChanged", owner }, phone))
   try ownerRecords(owner)
   try ownerEarlier(owner)
   try ignore((try Transfer.Machine).send({ type: "ownerChanged", owner }, phone))
   if (owner === 0) return
-  const draft = content.readDraft(identity) catch () => undefined
+  const recovered = try exit(content.readDraft(identity))
+  const held = try editor.get()
+  const draft = Exit.isSuccess(recovered) ? recovered.value : undefined
+  if (draft === undefined && held.owner === owner && Editor.waiting(held) && !held.showing) {
+    try ignore(editor.send({ type: "restart", readable: false }, phone))
+  }
   if (draft !== undefined && draft.owner === identity) {
-    const held = try editor.get()
     if (Editor.waiting(held)) try content.showDraft(draft)
     else {
       const accepted = editor.send({ type: "draftFound", note: draft.id === "" ? 0 : numberOf("note", draft.id), made: draft.made,
@@ -149,7 +156,7 @@ const opening = started(effect {
 }, "enter Notes")
 
 /** The Notes view observes these resident machines. The agent's store is opened only when Notes is requested. */
-export const notes = Layer.provideMerge(together(reacting(Notes, { carry }), editing, trashing, sides, recording, previous, transfers, opening), Layer.merge(noteStore, noteContent))
+export const notes = Layer.provideMerge(together(reacting(Notes, { carry }), editing, trashing, sides, recording, previous, transfers, actions, opening), Layer.merge(noteStore, noteContent))
 
 effect function took() {
   const prior = try Previous.Machine

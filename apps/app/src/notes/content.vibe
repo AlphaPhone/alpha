@@ -150,6 +150,7 @@ export service NoteContent {
   draft(): (DraftWords | undefined)!!
   showDraft(draft: DraftWords | undefined): void!!
   keepDraft(draft: DraftWords): boolean!!
+  rawDraft(owner: string): (string | undefined)!!
   readDraft(owner: string): (DraftWords | undefined)!UnreadableNotes
   dropDraft(owner: string): boolean!!
   capture(ticket: number, sent: DraftWords): void!!
@@ -221,6 +222,10 @@ export const noteContent = Layer.effect(NoteContent, effect {
         return true
       }
     }),
+    effect rawDraft(owner: string) {
+      const stored = vault.read(slotFor("draft", owner)) catch () => Option.none()
+      return Option.isSome(stored) ? Redacted.value(stored.value) : undefined
+    },
     effect readDraft(owner: string) {
       const raw = vault.read(slotFor("draft", owner)) catch (error) => error.code === "absent" ? Option.none() : undefined
       if (raw === undefined) throw new UnreadableNotes({ kind: "draft" })
