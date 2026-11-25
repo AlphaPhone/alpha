@@ -233,7 +233,9 @@ function carry(fx: Out): Job<Event, Telephony | Rows | Contacts.Machine | System
       ? answer("list", listed(ticket, further), { type: "listed", ticket, ok: false, grant: "Unasked", count: 0, further: false, editable: false })
       : answer("card", read(ticket), { type: "contactRead", ticket, ok: false, seen: { names: 0, phones: 0, emails: 0, notes: 0, notable: true } });
     when { tag: "Prompt" }: answer("prompt", effect {
-      const status = telephony("requestAccess", (c) => c.phone.requestAccess("contacts")) catch () => undefined
+      const permission = telephony("request contact permissions", (c) => c.contacts.requestPermissions()) catch () => undefined
+      if (permission?.readable === true) return { type: "accessReported", grant: "Granted" } satisfies Event
+      const status = telephony("contact permission status", (c) => c.phone.status()) catch () => undefined
       return { type: "accessReported", grant: grantOf(status?.permissions.contacts) } satisfies Event
     }, { type: "accessReported", grant: "Unasked" });
     when { tag: "Settings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", "") });

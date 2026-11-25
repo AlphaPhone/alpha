@@ -34,13 +34,16 @@ const write = (name: string, text: string) => act(async () => {
 });
 
 describe("Contacts on an Alpha image", () => {
-  it("Browse my contacts, look at one, change it and delete it (spec/app/contacts/index.md, \"Story: Browse my contacts\"; spec/app/contacts/index.md, \"Story: Know what happened to my change\"; spec/app/contacts/index.md, \"Story: Look at one contact\"; spec/app/contacts/index.md, \"Story: Add or change a contact\"; spec/app/contacts/index.md, \"Story: Delete a contact\")", async () => {
+  it("Browse my contacts, look at one, change it and delete it (spec/app/contacts/index.md, \"Story: Browse my contacts\"; spec/app/contacts/index.md, \"Story: Give Alpha access to my contacts\"; spec/app/contacts/index.md, \"Story: Know what happened to my change\"; spec/app/contacts/index.md, \"Story: Look at one contact\"; spec/app/contacts/index.md, \"Story: Add or change a contact\"; spec/app/contacts/index.md, \"Story: Delete a contact\")", async () => {
     const world = image();
+    world.telephony.contacts = false;
     const { alpha } = await open(world);
     await until(alpha, alpha.runtime, Shell, (s) => s.contacts);
 
     // spec/app/contacts/index.md, "Contacts reads the list each time it comes to the front"
     await press("Contacts");
+    await until(alpha, alpha.runtime, Contacts, (s) => s.front && s.list.status === "Failed" && s.rows === 0);
+    await press("Allow");
     await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 2);
 
     await write("Search or ask", "Maya");
