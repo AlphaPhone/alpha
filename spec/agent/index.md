@@ -33,7 +33,10 @@ and the bio is the one the old agent was given
 (the old tree's agent identity script at `26e827f06`, line 14). The old agent had no system
 prompt of its own and kept its preset's origin line, "{{name}}, made by Alpha
 Compute" (line 10); eliza's launch needs one, so that line, with the name, is
-it. The words are in `apps/agent/host/character.json`.
+its start. eliza's tools, notes and results name the person in the
+conversation "the owner", which the model repeated back to them, so the
+prompt also tells the agent to speak to that person as "you", never as "the
+owner" or "the user". The words are in `apps/agent/host/character.json`.
 
 ```quint
 pure val characterName: str = "Alpha"
