@@ -1,6 +1,6 @@
 // spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/index.md, "Story: Select photos"; spec/app/photos/index.md, "Story: Change albums from what I am looking at"
 import { Effect } from "effect";
-import { Camera, ChevronLeft, ChevronRight, Ellipsis, Folder, Heart, Image, Images, ListChecks, Pencil, Plus, ScanText, Search, Share2, Trash2, Video, X } from "lucide-react";
+import { Camera, ChevronLeft, ChevronRight, Ellipsis, Folder, Heart, Image, Images, ListChecks, Pencil, Plus, Search, Share2, Trash2, Video, X } from "lucide-react";
 import { useCallback, useRef, useState, type ReactNode } from "react";
 import { Alert, AppHeader, Button, Chip, ConfirmDialog, Dialog, DialogContent, DialogTitle, EmptyState, Input, ListRow, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, Spinner, cn, dockClearance } from "@repo/ui";
 import { useMachine as useLibrary } from "../../gen/app__photos.react.ts";
@@ -35,10 +35,10 @@ interface Tool {
   readonly run: () => void;
 }
 
-/** v121's selection bar: a line on top, each action an icon over its name, clear of the Ask Alpha dock. */
+/** v121's selection bar: a line on top, each action an icon over its name, 24px higher than the Ask Alpha dock clearance alone, as v121 placed it. */
 function ToolBar({ tools }: { tools: readonly Tool[] }) {
   return (
-    <div role="toolbar" aria-label="Selection actions" className={cn("flex shrink-0 items-start justify-around border-t border-border bg-background px-3 pt-2.5", dockClearance)}>
+    <div role="toolbar" aria-label="Selection actions" className={cn("mb-6 flex shrink-0 items-start justify-around border-t border-border bg-background px-3 pt-2.5", dockClearance)}>
       {tools.map(({ icon, label, run }) => <button key={label} type="button" className="flex min-h-12 min-w-16 flex-col items-center gap-0.75 text-xs text-foreground focus-visible:outline-focus focus-visible:outline-offset-focus [&_svg]:size-5.5" onClick={run}>{icon}{label}</button>)}
     </div>
   );
@@ -262,7 +262,7 @@ export function Photos({ runtime, alpha }: PhotosProps) {
     {selection && (inTrash ? binOwner({ type: "selectAll" }) : owner({ type: "selectAll" })) && <Button variant="ghost" className="h-11 px-3 text-body font-semibold whitespace-nowrap text-primary hover:text-primary" onClick={() => inTrash ? binTalk({ type: "selectAll" }) : talk({ type: "selectAll" })}>Select all</Button>}
     {!selection && (menu.length > 0 || scanFromMenu) && <Menu><MenuTrigger asChild><Button variant="ghost" size="icon" ref={toolsRef} aria-label="Photos tools"><Ellipsis /></Button></MenuTrigger>
       <MenuContent>{menu.map(({ icon, label, run }) => <MenuItem key={label} onSelect={run}>{icon}{label}</MenuItem>)}
-        {scanFromMenu && <MenuItem onSelect={openScanPicker}><ScanText />Scan image text</MenuItem>}
+        {scanFromMenu && <MenuItem onSelect={openScanPicker}><Image />Scan image text</MenuItem>}
       </MenuContent></Menu>}
   </AppHeader>;
   return (
