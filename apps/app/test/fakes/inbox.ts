@@ -1,5 +1,5 @@
 // spec/app/inbox/index.md, "Story: See my mail"
-import type { GoogleStatus, MailCard, MailMessage, MailOperation, MailSearch } from "@elizaos/cloud";
+import type { createCloudClient, GoogleStatus, MailCard, MailMessage, MailOperation, MailSearch } from "@elizaos/cloud";
 import type { OpaqueMailAttachment } from "@elizaos/plugin-inbox-client";
 import type { Route } from "./routes.ts";
 
@@ -27,6 +27,9 @@ type DraftFixture = {
     readonly attachmentCount: number;
   };
 };
+
+type Proposal = Parameters<ReturnType<typeof createCloudClient>["gmailPrepare"]>[0]["proposal"];
+type Delivery = Extract<Proposal, { mode: string }>;
 
 /** What the fake cloud holds of the owner's Gmail, and how it behaves; a journey changes it between steps. */
 export interface InboxScene {
@@ -121,6 +124,8 @@ function matches(stored: Stored, query: string): boolean {
 const refused = (status: number, error: string) => Response.json({ error }, { status });
 const google = "/api/v1/eliza/google";
 const operations = `${google}/gmail/inbox-v1/operations`;
+const sha = (bytes: Uint8Array<ArrayBuffer>) => crypto.subtle.digest("SHA-256", bytes)
+  .then((digest) => Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(""));
 
 function status(scene: InboxScene): GoogleStatus {
   const linked = scene.google;
@@ -148,7 +153,16 @@ function relabel(stored: Stored, kind: string) {
 }
 
 export function inboxRoutes(scene: InboxScene): Route[] {
-  const asked = new Map<string, { kind: MailOperation["receipt"]["kind"]; messageId: string }>();
+  const asked = new Map<string, Proposal>();
+  const forwarded = (source: Delivery["forwardAttachments"]) => {
+    if (source === undefined) return [];
+    const original = scene.mail.find(({ card }) => card.id === source.messageId && card.metadata.historyId === source.historyId);
+    return source.partIds.flatMap((id) => {
+      const file = original?.files.find((part) => part.partId === id);
+      const bytes = original?.attachmentData?.[id];
+      return file && bytes ? [{ file, bytes }] : [];
+    });
+  };
   const lost = () => Promise.reject(new TypeError("offline"));
   let revokedSeen = false;
   return [
@@ -224,24 +238,35 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       if (historyId === undefined || stored?.card.metadata.historyId !== historyId) return refused(409, "stale_revision");
       scene.attachmentReads.push(`${messageId}/${partId}`);
       const dataBase64 = btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(""));
-      return crypto.subtle.digest("SHA-256", bytes).then((digest) => Response.json({
-        version: 1, messageId, historyId, ...file, dataBase64, sha256: Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(""),
-      }));
+      return sha(bytes).then((sha256) => Response.json({ version: 1, messageId, historyId, ...file, dataBase64, sha256 }));
     },
     (request, url) => {
       if (request.method !== "POST" || url.pathname !== operations) return;
-      return request.json().then(({ requestId, proposal }: { requestId: string; proposal: { kind: MailOperation["receipt"]["kind"]; messageId: string } }) => {
+      return request.json().then(async ({ requestId, proposal }: { requestId: string; proposal: Proposal }) => {
+        const prepared = operation(requestId, proposal.kind, "prepared");
+        if ("mode" in proposal && proposal.forwardAttachments) {
+          const parts = forwarded(proposal.forwardAttachments);
+          if (parts.length !== proposal.forwardAttachments.partIds.length) return refused(409, "stale_revision");
+          const forwardedAttachments = await Promise.all(parts.map(async ({ file, bytes }) => ({
+            partId: file.partId, name: file.name, mimeType: file.mimeType, size: bytes.byteLength, sha256: await sha(bytes),
+          })));
+          asked.set(requestId, proposal);
+          return Response.json({ ...prepared, review: { from: scene.google?.email ?? "", to: proposal.to ?? [], cc: proposal.cc ?? [], bcc: proposal.bcc ?? [], subject: proposal.subject, bodyText: proposal.bodyText, attachments: [], forwardedAttachments } });
+        }
         asked.set(requestId, proposal);
-        return Response.json(operation(requestId, proposal.kind, "prepared"));
+        return Response.json(prepared);
       });
     },
     (request, url) => {
       const requestId = new RegExp(`^${operations}/([^/]+)/dispatch$`, "u").exec(url.pathname)?.[1];
       if (request.method !== "POST" || requestId === undefined || asked.get(requestId)?.kind !== "send") return;
-      return request.json().then(({ proposal }: { proposal: { to: string[]; subject: string; bodyText: string; attachments?: { name: string }[] } }) => {
-        scene.changes.push(`send ${proposal.to.join(",")} ${proposal.subject}`);
-        scene.attached.push(...(proposal.attachments ?? []).map((file) => file.name));
-        scene.mail.push({ ...letter(scene.mail.length + 100, proposal.subject, ["SENT"], proposal.bodyText), card: { ...letter(scene.mail.length + 100, proposal.subject, ["SENT"]).card, to: proposal.to } });
+      return request.json().then(({ proposal }: { proposal: Delivery }) => {
+        const parts = forwarded(proposal.forwardAttachments);
+        if (proposal.forwardAttachments && parts.length !== proposal.forwardAttachments.partIds.length) return refused(409, "stale_revision");
+        const to = proposal.to ?? [];
+        scene.changes.push(`send ${to.join(",")} ${proposal.subject}`);
+        scene.attached.push(...(proposal.attachments ?? []).map((file) => file.name), ...parts.map(({ file }) => file.name));
+        scene.mail.push({ ...letter(scene.mail.length + 100, proposal.subject, ["SENT"], proposal.bodyText), card: { ...letter(scene.mail.length + 100, proposal.subject, ["SENT"]).card, to } });
         return Response.json(operation(requestId, "send", "succeeded"));
       });
     },
@@ -270,8 +295,9 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       const requestId = new RegExp(`^${operations}/([^/]+)/dispatch$`, "u").exec(url.pathname)?.[1];
       if (request.method !== "POST" || requestId === undefined) return;
       const proposal = asked.get(requestId);
-      const stored = scene.mail.find((one) => one.card.id === proposal?.messageId);
-      if (!proposal || !stored) return refused(404, "not_found");
+      if (!proposal || !("messageId" in proposal)) return refused(404, "not_found");
+      const stored = scene.mail.find((one) => one.card.id === proposal.messageId);
+      if (!stored) return refused(404, "not_found");
       relabel(stored, proposal.kind);
       scene.history += 1;
       scene.changes.push(`${proposal.kind} ${proposal.messageId}`);
