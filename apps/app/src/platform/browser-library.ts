@@ -1,5 +1,5 @@
 // spec/app/files/recent.md, "Story: Pick a file with the system picker"; spec/app/files/preview.md, "Open elsewhere hands the file over to read only"
-import type { DocumentHandoff, PdfPage } from "@elizaos/os/bridges/definitions/media";
+import type { DocumentHandoff, PdfPage } from "@elizaos/os-bridges";
 
 /** The file the owner selected, or nothing when the browser chooser closed. */
 export function selectedFile(signal: AbortSignal): Promise<File | undefined> {

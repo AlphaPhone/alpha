@@ -2,9 +2,9 @@
 import {
   FilesVolume, type FilesFilter, LibraryStore, type RowOutcome, type SelectedFile, type VolumeRefused,
   importLibraryFile, importLibraryFolder, indexedLibrary, librarySelections, libraryVolume, validName,
-} from "@elizaos/plugin-files/client"
-import type { ElizaFilesPlugin, FileOutcomeRow, FilesResult } from "@elizaos/os/bridges/definitions/files"
-import type { DocumentHandoff, PdfPage, SelectedDocument, SelectedDocumentsClient, SelectionId } from "@elizaos/os/bridges/definitions/media"
+} from "@elizaos/plugin-files-client"
+import type { ElizaFilesPlugin, FileOutcomeRow, FilesResult } from "@elizaos/os-bridges"
+import type { DocumentHandoff, PdfPage, SelectedDocument, SelectedDocumentsClient, SelectionId } from "@elizaos/os-bridges"
 import { bytesOf, downloadCopy, pdfPage, previewOf, releasePreview, selectedFile, shareCopy } from "./browser-library.ts"
 import { Documents, browserDocuments } from "./documents.vibe"
 import { Files, browserFiles } from "./files.vibe"
@@ -122,7 +122,7 @@ const webLibrary = Layer.effectContext(effect {
     storageRename: ({ path, name }) => announce(volume.rename(path, name), (path) => ({ path })),
     storageCreateFolder: ({ parent, name }) => announce(volume.createFolder(parent, name), (path) => ({ path })),
     storageTrash: (input) => announce(volume.trash(input), outcomes),
-    storageTrashList: () => answer(volume.trashList(), (items) => ({ items })),
+    storageTrashList: () => answer(volume.trashList(), (items) => ({ items: items.filter((item) => item.unreadable !== true) })),
     storageRestore: ({ ids }) => announce(volume.restore(ids), outcomes),
     storageEmptyTrash: ({ ids, confirmed }) => announce(volume.emptyTrash(ids, confirmed), (count) => ({ count })),
     storageShare: ({ paths }) => Effect.runPromise(Effect.match(volume.share(paths), { onFailure: storageFailure, onSuccess: (count) => ({ status: "opened", count } as const) })),

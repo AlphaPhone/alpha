@@ -283,6 +283,9 @@ importers:
       '@elizaos/agent':
         specifier: link:../../.eliza/packages/agent
         version: link:../../.eliza/packages/agent
+      '@elizaos/agent-host':
+        specifier: link:../../.eliza/packages/agent-host
+        version: link:../../.eliza/packages/agent-host
       '@repo/deployment':
         specifier: workspace:*
         version: link:../../packages/deployment
@@ -338,18 +341,21 @@ importers:
       '@elizaos/os':
         specifier: link:../../.eliza/packages/os
         version: link:../../.eliza/packages/os
-      '@elizaos/plugin-files':
-        specifier: link:../../.eliza/packages/plugin-files
-        version: link:../../.eliza/packages/plugin-files
-      '@elizaos/plugin-inbox':
-        specifier: link:../../.eliza/packages/plugin-inbox
-        version: link:../../.eliza/packages/plugin-inbox
-      '@elizaos/plugin-notes':
-        specifier: link:../../.eliza/packages/plugin-notes
-        version: link:../../.eliza/packages/plugin-notes
-      '@elizaos/plugin-workflow':
-        specifier: link:../../.eliza/packages/plugin-workflows
-        version: link:../../.eliza/packages/plugin-workflows
+      '@elizaos/os-bridges':
+        specifier: link:../../.eliza/packages/os-bridges
+        version: link:../../.eliza/packages/os-bridges
+      '@elizaos/plugin-files-client':
+        specifier: link:../../.eliza/packages/plugin-files-client
+        version: link:../../.eliza/packages/plugin-files-client
+      '@elizaos/plugin-inbox-client':
+        specifier: link:../../.eliza/packages/plugin-inbox-client
+        version: link:../../.eliza/packages/plugin-inbox-client
+      '@elizaos/plugin-notes-client':
+        specifier: link:../../.eliza/packages/plugin-notes-client
+        version: link:../../.eliza/packages/plugin-notes-client
+      '@elizaos/plugin-workflow-client':
+        specifier: link:../../.eliza/packages/plugin-workflow-client
+        version: link:../../.eliza/packages/plugin-workflow-client
       '@repo/design-system':
         specifier: workspace:*
         version: link:../../packages/design-system
@@ -456,6 +462,9 @@ importers:
       '@elizaos/cloud':
         specifier: link:../../.eliza/packages/cloud
         version: link:../../.eliza/packages/cloud
+      '@elizaos/cloud-worker':
+        specifier: link:../../.eliza/packages/cloud-worker
+        version: link:../../.eliza/packages/cloud-worker
       '@repo/deployment':
         specifier: workspace:*
         version: link:../../packages/deployment

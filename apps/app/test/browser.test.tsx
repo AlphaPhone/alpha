@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
 import { Machine as Page } from "../gen/app__browser__address.effect.vibe";
+import { Machine as Library } from "../gen/app__browser__library.effect.vibe";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
@@ -30,7 +31,32 @@ const go = (text: string) => drawn(async () => {
   form.requestSubmit();
 });
 
+const libraryTab = (name: "History" | "Bookmarks") => drawn(() => {
+  const tab = button(name);
+  if (!tab) throw new Error(`no Library tab ${name}`);
+  tab.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+});
+
 describe("The Browser on a phone", () => {
+  it("Opens the saved Library (spec/app/browser/library.md, \"Story: Keep bookmarks\"; spec/app/browser/library.md, \"Story: Look back through history\")", async () => {
+    const world = { ...scene(), phone: true, image: true };
+    const { alpha, runtime } = await onBrowser(world);
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    await press("Menu");
+    await press("Library, bookmarks and history");
+    await until(alpha, runtime, Library, (s) => s.read.status === "Loaded");
+    await libraryTab("History");
+    expect([...document.querySelectorAll("button")].some((row) => row.textContent?.includes("news.example/on-device-agents"))).toBe(true);
+    await libraryTab("Bookmarks");
+    const bookmark = [...document.querySelectorAll("button")].find((row) => row.textContent?.includes("Keys in the chip"));
+    if (!bookmark) throw new Error("saved bookmark is missing");
+    await drawn(() => bookmark.click());
+    const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
+    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
+    await until(alpha, page, Page, (s) => s.phase === "Shown");
+    expect([...world.browser.tabs.values()].map((one) => one.history[one.at])).toEqual(["https://enclave.example/keys-in-hardware"]);
+  });
+
   it("Open a page and watch it load (spec/app/browser/address.md, \"Story: Go where I typed\"; spec/app/browser/address.md, \"Story: Watch a page load\"; spec/app/browser/address.md, \"Story: Find in page\")", async () => {
     const { alpha, runtime, world } = await onBrowser();
     // spec/app/browser/index.md, "A launch reads the saved session, and may ask again after a failed read"

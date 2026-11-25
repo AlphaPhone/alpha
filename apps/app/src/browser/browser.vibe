@@ -1,6 +1,6 @@
 // spec/app/browser/address.md, "Story: Find in page"; spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/index.md, "Story: Keep my tabs through a restart"; spec/app/browser/index.md, "Story: Save the session"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"
 import type * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { browsingSnapshot, restoreBrowsing } from "@elizaos/os/bridges/browsing-session"
+import { browsingSnapshot, DEFAULT_BROWSING_LIMITS, restoreBrowsing, savedBrowserUrl } from "@elizaos/os-bridges"
 import * as Tabs from "../../gen/app__browser.effect.vibe"
 import type { Browser, Effect as TabsOut, Event as TabsEvent } from "../../gen/app__browser.effect.vibe"
 import * as Address from "../../gen/app__browser__address.effect.vibe"
@@ -12,7 +12,7 @@ import { type Job, Whole, answer, contained, due, reacting, run, started, stream
 import type { Time } from "../runtime/time.vibe"
 
 module page {
-  import { isSecureWebAddress } from "@elizaos/os/browser/address"
+  import { isSecureWebAddress } from "@elizaos/os-bridges"
   import type { Input } from "../../gen/app__browser__address.ts"
 
   /** Whether `href` came over HTTPS with a host. @throws {never} */
@@ -81,6 +81,10 @@ export service Pages {
   sought(tab: number): { readonly text: string; readonly index: number }!!
   stood(tab: number, index: number): void!!
   end(tab: number): void!!
+  /** The saved and newly committed normal-tab addresses in recent-first order. */
+  visits(): readonly string[]!!
+  keepVisits(history: readonly string[]): void!!
+  visit(url: string): void!!
 }
 
 effect function pageOf(tab: number): Page!!Pages {
@@ -111,23 +115,28 @@ effect function restoredFrom(ticket: number): TabsEvent!!(TabHost | Pages | Tabs
   return effect {
     const saved = try hosted("browsingState", (plugin, session) => plugin.browsingState({ session }))
     const s = try (try Tabs.Machine).get()
-    const back = restoreBrowsing(saved, { visits: [] }, s.untouched)
+    const pages = try Pages
+    const back = restoreBrowsing(saved, { visits: try pages.visits() }, s.untouched)
+    const cur = tabOf(back.cur ?? "")
+    const shown = s.kept.includes(cur) ? cur : (s.kept[0] ?? 0)
+    if (!Tabs.canRestored(s, ticket, shown)) return { type: "restored", ticket, ok: false, shown }
+    try pages.keepVisits(back.visits)
     for (const row of back.restored) {
       const tab = tabOf(row.id)
-      if (s.kept.includes(tab)) try (try Pages).aim(tab, row.url)
+      if (s.kept.includes(tab)) try pages.aim(tab, row.url)
     }
-    const cur = tabOf(back.cur ?? "")
-    return { type: "restored", ticket, ok: true, shown: s.kept.includes(cur) ? cur : (s.kept[0] ?? 0) }
+    return { type: "restored", ticket, ok: true, shown }
   } catch () => ({ type: "restored", ticket, ok: false, shown: 0 })
 }
 
 // spec/app/browser/index.md, "A stale session is written once it has been read, one write at a time, and never while browsing data is being cleared"
-effect function written(write: number): TabsEvent!!(TabHost | Tabs.Machine) {
+effect function written(write: number): TabsEvent!!(TabHost | Tabs.Machine | Pages) {
   return effect {
     const host = try TabHost
     const s = try (try Tabs.Machine).get()
+    const visits = try (try Pages).visits()
     const snapshot = browsingSnapshot(
-      { tabs: s.open.map((tab) => ({ id: idOf(tab), priv: s.privates.includes(tab) })), visits: [], cur: idOf(s.selected) },
+      { tabs: s.open.map((tab) => ({ id: idOf(tab), priv: s.privates.includes(tab) })), visits, cur: idOf(s.selected) },
       (id) => host.session.info(id),
     )
     try hosted("saveBrowsingState", (plugin, session) => plugin.saveBrowsingState({ session, ...snapshot }))
@@ -146,9 +155,29 @@ function carryTabs(fx: TabsOut): Job<TabsEvent, TabHost | Pages | Tabs.Machine, 
       try (try Pages).end(tab)
     });
     when { tag: "Save", let write }: answer("save", written(write), { type: "saved", ticket: write, ok: false, now: untimed });
-    when { tag: "Erase" }: answer("erase", hosted("clearBrowsingData", (plugin, session) => plugin.clearBrowsingData({ session })) |> Effect.as(%, { type: "erased", ok: true } as TabsEvent) |> Effect.orElseSucceed(%, () => ({ type: "erased", ok: false }) as TabsEvent), { type: "erased", ok: false });
+    when { tag: "Erase" }: answer("erase", erased(), { type: "erased", ok: false });
     when { tag: "Halt" }: run("halt", Effect.void);
   }
+}
+
+effect function erased(): TabsEvent!!(TabHost | Pages) {
+  return effect {
+    try hosted("clearBrowsingData", (plugin, session) => plugin.clearBrowsingData({ session }))
+    try (try Pages).keepVisits([])
+    return { type: "erased", ok: true }
+  } catch () => ({ type: "erased", ok: false })
+}
+
+// spec/app/browser/library.md, "A page that commits in a normal tab is counted in history, which keeps the newest hundred"
+effect function visited(tab: number, load: number): void!!(Pages | TabHost | Tabs.Machine) {
+  const tabs = try (try Tabs.Machine).get()
+  if (!Tabs.canTouch(tabs, tab) || tabs.erasing === "Running") return
+  const page = try pageOf(tab)
+  const host = try TabHost
+  const url = host.session.info(idOf(tab))?.url
+  if (page.load !== load || page.phase !== "Shown" || !savedBrowserUrl(url)) return
+  try (try Pages).visit(url)
+  try tellTabs({ type: "touch", tab })
 }
 
 // spec/app/browser/address.md, "Submitting text opens it, searches for it or says why not, and blank text is not submitted"; spec/app/browser/address.md, "Back and forward move through the tab's own pages"; spec/app/browser/address.md, "Reload loads a shown, failed or stopped page again"
@@ -177,7 +206,7 @@ function carryPage(tab: number) {
   return (fx: PageOut): Job<PageEvent, TabHost | Pages | Tabs.Machine, []> => match (fx) {
     when { tag: "Go", let load, let way }: stream(`go ${tab}`, Stream.fromEffect(went(tab, load, way)) |> Stream.filter(%, (event) => event.type === "failed"), { type: "failed", load });
     when { tag: "Halt" }: run(`halt ${tab}`, ignore(hosted("command", (plugin, session) => plugin.command({ session, id: idOf(tab), command: "stop" }))));
-    when { tag: "Visit" }: run(`visit ${tab}`, tellTabs({ type: "touch", tab }));
+    when { tag: "Visit", let load }: run(`visit ${tab}`, visited(tab, load));
     when { tag: "Find" }: run(`find ${tab}`, ignore(effect {
       const { text } = try (try Pages).sought(tab)
       try hosted("find", (plugin, session) => plugin.find({ session, id: idOf(tab), query: text }))
@@ -193,6 +222,7 @@ const pages = Layer.effect(Pages, effect {
   const made = new Map<number, PageRuntime>()
   const aims = new Map<number, string>()
   const finds = new Map<number, { text: string; index: number }>()
+  let history: readonly string[] = []
   return {
     effect of(tab: number): PageRuntime!! {
       const known = made.get(tab)
@@ -210,6 +240,11 @@ const pages = Layer.effect(Pages, effect {
     seek: (tab: number, text: string) => sync(() => { finds.set(tab, { text, index: 0 }) }),
     sought: (tab: number) => sync(() => finds.get(tab) ?? { text: "", index: 0 }),
     stood: (tab: number, index: number) => sync(() => { finds.set(tab, { text: finds.get(tab)?.text ?? "", index }) }),
+    visits: () => sync(() => history),
+    keepVisits: (visits: readonly string[]) => sync(() => { history = visits }),
+    visit: (url: string) => sync(() => {
+      history = [url, ...history.filter((visit) => visit !== url)].slice(0, DEFAULT_BROWSING_LIMITS.history)
+    }),
     effect end(tab: number): void!! {
       const runtime = made.get(tab)
       made.delete(tab)

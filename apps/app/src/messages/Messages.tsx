@@ -1,6 +1,8 @@
 // spec/app/messages/index.md, "Story: See my conversations"; spec/app/messages/index.md, "Story: Read a conversation"; spec/app/messages/index.md, "Story: Act on a message"; spec/app/messages/index.md, "Story: Start a new message"; spec/app/messages/composer.md, "Story: Keep my draft"; spec/app/messages/composer.md, "Story: Send a message"
-import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY, MMS_MAX_RECIPIENTS } from "@elizaos/os/bridges/definitions/messages";
-import type { MessageRow, ThreadRow } from "@elizaos/os/bridges/messages";
+import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY, MMS_MAX_RECIPIENTS } from "@elizaos/os-bridges";
+import type { MessageRow, ThreadRow } from "@elizaos/os-bridges";
+import { normalizePhoneNumber } from "@elizaos/os-bridges";
+import type { TelephonySubscription } from "@elizaos/os-bridges";
 import { Alert, Avatar, Banner, Button, Chip, ConfirmDialog, Input, Menu, MenuContent, MenuItem, MenuTrigger, SearchField, Spinner, Textarea } from "@repo/ui";
 import type { Layer, ManagedRuntime } from "effect";
 import { ArrowUp, Camera, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, ImagePlus, Mic, Pencil, Phone as Call, Plus, RefreshCw, Search, Send, Sparkles, Square, Trash2, X } from "lucide-react";
@@ -11,10 +13,9 @@ import { content, noMatches, noThreads, smsNeeded, threadsFailed } from "../../g
 import { useMachine as useMessages } from "../../gen/app__messages.react.ts";
 import { delivered, sentAll, uncertain } from "../../gen/app__messages__sending.ts";
 import { useMachine as useComposer } from "../../gen/app__messages__composer.react.ts";
-import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/phone";
 import { Time } from "../runtime/time.vibe";
 import { shortWhen } from "../phone/words.ts";
-import { Drafts, attachAll, prepare, supported } from "./composer.vibe";
+import { Drafts, attachAll, prepare, sameSubscription, supported } from "./composer.vibe";
 import { Conversations, Inbox, titleOf } from "./messages.vibe";
 import { CommsBar, useCommsDock } from "../phone/CommsBar.tsx";
 import type { Resident } from "../runtime/area.tsx";
@@ -355,11 +356,14 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
   const picturesInput = useRef<HTMLInputElement>(null);
   const cameraInput = useRef<HTMLInputElement>(null);
   const focus = useRef(false);
+  const [simChoice, selectSim] = useState<{ thread: number; subscription: TelephonySubscription }>();
+  const selectedSim = simChoice?.thread === thread ? simChoice.subscription : undefined;
   const { state, can, send } = composer;
   if (!state || !phone || state.thread !== thread || addresses.length === 0) return <CommsBar runtime={runtime} />;
   const person = { label: title, initials: initials(title) };
   const text = state.slot.author === "Nobody" ? "" : runtime.runSync(Drafts.use((drafts) => drafts.text(thread)));
   const pictures = runtime.runSync(Drafts.use((drafts) => drafts.pictures()));
+  const subscriptions = runtime.runSync(Drafts.use((drafts) => drafts.subscriptions()));
   const write = (next: string) => {
     const event = { type: "typeText", empty: next.length === 0 } as const;
     if (!can(event)) return;
@@ -370,10 +374,11 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
   const here = outgoing.thread === thread;
   const checking = here && uncertain(outgoing);
   const sendNow = { type: "send", supported: runtime.runSync(supported(state.recipients, pictures.length)), clear: clear(phone) } as const;
-  const sendable = (checking || Boolean(text.trim()) || pictures.length > 0) && can(sendNow);
+  const simReady = selectedSim === undefined ? state.sims <= 1 : subscriptions.some((sim) => sameSubscription(sim, selectedSim));
+  const sendable = (checking || simReady && (Boolean(text.trim()) || pictures.length > 0)) && can(sendNow);
   const submit = () => {
     if (!sendable) return;
-    runtime.runSync(prepare(thread, state.sims > 1 ? state.sim : null));
+    if (!checking && !runtime.runSync(prepare(thread, selectedSim))) return;
     void send(sendNow);
   };
   const edit = () => {
@@ -466,12 +471,20 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
             void send({ type: "detach" });
           } : undefined} clearLabel={`Remove ${picture.name}`}>{picture.name}</Chip>
         ))}
-        {state.sims > 1 && (
+        {(subscriptions.length > 1 || selectedSim !== undefined && subscriptions.length === 1) && (
           <div className="flex flex-wrap gap-1.5" role="group" aria-label="SIM">
-            {Array.from({ length: state.sims }, (_, at) => at + 1).map((sim) => (
-              <Button key={sim} size="sm" aria-pressed={state.sim === sim} variant={state.sim === sim ? "primary" : "secondary"} disabled={!can({ type: "pickSim", sim }) && state.sim !== sim}
-                onClick={() => { if (can({ type: "pickSim", sim })) void send({ type: "pickSim", sim }); }}>{`SIM ${sim}`}</Button>
-            ))}
+            {subscriptions.map((subscription, at) => {
+              const pick = { type: "pickSim", sim: at + 1 } as const;
+              const canPick = can(pick);
+              const samePosition = state.simInfo.grant === "Granted" && (state.sim === pick.sim || state.sims === 1);
+              const picked = selectedSim !== undefined && sameSubscription(subscription, selectedSim);
+              return <Button key={subscription.id} size="sm" aria-pressed={picked} variant={picked ? "primary" : "secondary"} disabled={!canPick && !samePosition}
+                onClick={() => {
+                  if (!canPick && !samePosition) return;
+                  selectSim({ thread, subscription });
+                  if (canPick) void send(pick);
+                }}>{`SIM ${subscription.slot + 1}`}</Button>;
+            })}
           </div>
         )}
         {(["SendAccess", "SimAccess"] as const).map((need) => {

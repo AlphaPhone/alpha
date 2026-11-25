@@ -1,5 +1,5 @@
 // spec/app/notes/actions.md, "Story: Share a note, or make a reminder or event from it"; spec/app/notes/actions.md, "Nothing is sent or scheduled from Notes: only the note open under the menu is handed over, as a draft, once per choice"
-import { noteShareText } from "@elizaos/plugin-notes/format"
+import { noteShareText } from "@elizaos/plugin-notes-client"
 import * as Actions from "../../gen/app__notes__actions.effect.vibe"
 import { Machine as Editor } from "../../gen/app__notes__editor.effect.vibe"
 import type { Actor } from "../../gen/app__notes__note.effect.vibe"

@@ -1,5 +1,5 @@
 // spec/agent/index.md, "Story: Run Alpha's agent on the phone"
-import type { AgentPlugin, ModuleContext, ModuleFactory } from "@elizaos/agent";
+import type { AgentPlugin, ModuleContext, ModuleFactory } from "@elizaos/agent-host";
 import { Effect } from "effect";
 import { clockActions, clockProvider, clockRoutes } from "./clock.ts";
 import { remindersAction, remindersProvider, remindersRoutes } from "./reminders.ts";

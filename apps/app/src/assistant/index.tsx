@@ -18,7 +18,7 @@ import { keyboardVoice } from "../shell/canvas.vibe";
 import { TalkControls } from "../voice/TalkControls.tsx";
 import { DictationControls } from "../voice/DictationControls.tsx";
 import { Assistant } from "./Assistant.tsx";
-import { assistantBack, assisting } from "./assistant.vibe";
+import { assistantBack, assisting, spokenScreen } from "./assistant.vibe";
 import { copyMessage, emailDestination, emailMessage } from "./message-actions.vibe";
 import { dictate } from "./dictation.vibe";
 import { aloud } from "./read-aloud.vibe";
@@ -27,7 +27,7 @@ import { beginTalk, commsVoicePanel, talkFromComms } from "./voice-entry.vibe";
 const voiceOwnsComposer = (state: VoiceState) => !quiet(state) || state.recorder.stage !== "Closed";
 
 const screens = together(
-  assisting, voiceArea, aloud, talkFromComms, commsVoicePanel,
+  assisting, voiceArea, aloud, talkFromComms, commsVoicePanel, spokenScreen,
   following(Voice, voiceOwnsComposer, Dock, (on) => ({ type: "voicing", on, now: untimed } as const)),
   applying(Voice, voiceOwnsComposer, keyboardVoice),
 );

@@ -1,5 +1,5 @@
 // spec/app/phone/details.md, "Story: See my SIM, carrier and number on the image"; spec/app/phone/details.md, "Story: Keep Alpha as my phone and SMS app"
-import type { PhoneLine, TelephonyStatus } from "@elizaos/os/bridges/phone"
+import type { PhoneLine, TelephonyStatus } from "@elizaos/os-bridges"
 import * as Info from "../../gen/app__phone__details.effect.vibe"
 import type { Effect as Out, Event, Holders, Line, Network, VoicemailSetup } from "../../gen/app__phone__details.effect.vibe"
 import { Telephony, telephony } from "../platform/telephony.vibe"

@@ -1,6 +1,6 @@
 // spec/app/files/preview.md, "Story: Look at a file"; spec/app/files/preview.md, "Story: Act on the file I am looking at"; spec/app/files/preview.md, "Story: Get a file back when access was lost"; spec/app/files/recent.md, "Story: Find what I opened lately"
-import type { SelectedDocumentsClient, SelectionId } from "@elizaos/os/bridges/definitions/media"
-import { MMS_MAX_TOTAL_BYTES } from "@elizaos/os/bridges/definitions/messages"
+import type { SelectedDocumentsClient, SelectionId } from "@elizaos/os-bridges"
+import { MMS_MAX_TOTAL_BYTES } from "@elizaos/os-bridges"
 import { type Machine as TextMessages } from "../../gen/app__messages.effect.vibe"
 import { type Machine as MessageComposer } from "../../gen/app__messages__composer.effect.vibe"
 import { type Drafts as MessageDrafts, handOverPicture, pictureMessagingReady } from "../messages/composer.vibe"

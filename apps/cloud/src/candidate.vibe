@@ -1,5 +1,5 @@
 // spec/cloud/index.md, "Story: Keep Alpha's own cloud ready for the cutover"; spec/cloud/index.md, "The candidates of production and staging share no host"; spec/cloud/index.md, "The candidate's profile answers at the candidate's cloud and keeps its returns on the candidate's App Link host"; spec/cloud/index.md, "Alpha's own cloud offers inference, speech, maps, managed Google and billing, under Alpha's name, its entitlements for Alpha's package"; spec/cloud/index.md, "Chat on Alpha's own cloud is Alpha's model, and a request that names no cap is quoted and sent at the longest reply its provider generates"
-import type { CloudEnvironment, CloudProfile } from "@elizaos/cloud/profile"
+import type { CloudEnvironment, CloudProfile } from "@elizaos/cloud"
 import { deployment } from "@repo/deployment"
 import { candidateProfileFits, candidatesSeparate, chatModelFits, mailsAsAlpha, offersAlphasServices, returnsOffApi, type Hosts } from "../gen/cloud.effect.vibe"
 import { registrationAt } from "./alpha.vibe"

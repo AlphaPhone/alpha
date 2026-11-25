@@ -1,18 +1,18 @@
 // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
-import type { DeferredDeletionsClient, StagedDeletion } from "@elizaos/os/bridges/action-journal"
-import type { AddressBookClient, ContactNamesClient, NameSurface } from "@elizaos/os/bridges/contacts"
-import type { MessagesClient, MmsBinding, MmsSendResult, OperationId } from "@elizaos/os/bridges/messages"
-import type { PhoneClient, PhoneNumber } from "@elizaos/os/bridges/phone"
+import type { DeferredDeletionsClient, StagedDeletion } from "@elizaos/os-bridges"
+import type { AddressBookClient, ContactNamesClient, NameSurface } from "@elizaos/os-bridges"
+import type { MessagesClient, MmsBinding, MmsSendResult, OperationId } from "@elizaos/os-bridges"
+import type { PhoneClient, PhoneNumber } from "@elizaos/os-bridges"
 
 module held {
   import { registerPlugin } from "@capacitor/core"
   import { Schema } from "effect"
-  import { createDeferredDeletions, type ActionJournalPlugin, type StagedDeletion } from "@elizaos/os/bridges/action-journal"
-  import { rejectionCode } from "@elizaos/os/bridges/bridge"
-  import { addressBookPlugin, createAddressBookClient, createContactNames } from "@elizaos/os/bridges/contacts"
-  import { messagesClient, type MessagesNativePlugin } from "@elizaos/os/bridges/messages"
-  import { parseMmsSendResult, type MmsBinding, type OperationId } from "@elizaos/os/bridges/definitions/messages"
-  import { phoneClient, type PhoneNativePlugin, type PhoneNumber } from "@elizaos/os/bridges/phone"
+  import { createDeferredDeletions, type ActionJournalPlugin, type StagedDeletion } from "@elizaos/os-bridges"
+  import { rejectionCode } from "@elizaos/os-bridges"
+  import { addressBookPlugin, createAddressBookClient, createContactNames } from "@elizaos/os-bridges"
+  import { messagesClient, type MessagesNativePlugin } from "@elizaos/os-bridges"
+  import { parseMmsSendResult, type MmsBinding, type OperationId } from "@elizaos/os-bridges"
+  import { phoneClient, type PhoneNativePlugin, type PhoneNumber } from "@elizaos/os-bridges"
 
   type OwnerDialPlugin = PhoneNativePlugin & {
     classifyDialNumber(input: { number: PhoneNumber }): Promise<unknown>

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { NOT_DISPATCHED } from "@elizaos/agent/client";
+import { NOT_DISPATCHED } from "@elizaos/agent";
 import { type Context, Effect, type ManagedRuntime, Stream } from "effect";
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -14,7 +14,7 @@ import { Machine as Page } from "../gen/app__browser__address.effect.vibe";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { executeMedia } from "../src/assistant/media-executors.ts";
 import { readAgentSms } from "../src/messages/agent-send.vibe";
-import { Pages } from "../src/browser/browser.vibe";
+import { idOf, Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
 import home from "../src/home/index.tsx";
 import messages from "../src/messages/index.tsx";
@@ -97,6 +97,33 @@ async function composeAction(name: string) {
 }
 
 describe("Messages on an Alpha image", () => {
+  it("Requires a new choice when a SIM is replaced and keeps that choice when rows reorder (spec/app/messages/composer.md, \"Story: Send a message\")", async () => {
+    const world = image();
+    const first = world.telephony.subscriptions[0]!;
+    const second = { id: 2, slot: 1, displayName: "Travel", carrierName: "Travel", defaultSms: false, defaultVoice: false };
+    world.telephony.subscriptions = [first, second];
+    const { alpha } = await openImage(world);
+    await openMessages(alpha);
+    await ready(alpha.runtime, Messages, "Messages read", (state) => state.list.status === "Loaded" && state.threads === 1);
+    await press("Maya Chen");
+    await ready(alpha.runtime, Composer, "Two SIMs loaded", (state) => state.thread > 0 && state.sims === 2 && state.simInfo.grant === "Granted");
+    await write("Message", "Use the reviewed line");
+    await press("SIM 2");
+
+    const replacement = { ...second, id: 9 };
+    world.telephony.subscriptions = [replacement, first];
+    await press("Send");
+    await ready(alpha.runtime, Composer, "Old SIM refused", (state) => state.outgoing.denied && state.slot.author === "OwnerWrote");
+    expect(world.telephony.sent).toEqual([]);
+
+    await press("SIM 2");
+    world.telephony.subscriptions = [first, replacement];
+    await press("Send");
+    await ready(alpha.runtime, Composer, "Replacement SIM sent", (state) => state.outgoing.op.outcome === "Confirmed");
+    expect(world.telephony.sent).toHaveLength(1);
+    expect(world.telephony.journal.get(world.telephony.sent[0]!.operationId)).toMatchObject({ subscriptionId: 9, status: "sent" });
+  });
+
   it("See my conversations, read one, and send a message once (spec/app/messages/index.md, \"Story: See my conversations\"; spec/app/messages/composer.md, \"Story: Let Alpha suggest a draft\"; spec/app/messages/index.md, \"Story: Read a conversation\"; spec/app/messages/composer.md, \"Story: Send a message\"; spec/app/messages/sending.md, \"Story: Send a message once\"; spec/app/messages/sending.md, \"Story: Know whether it arrived\")", async () => {
     const world = image();
     world.telephony.live = [];
@@ -342,13 +369,14 @@ describe("Messages on an Alpha image", () => {
     await act(async () => links[0]?.click());
     await ready(alpha.runtime, Shell, "Alpha image admitted", (state) => state.trail.at(-1) === "Browser");
     const runtime = browser.runtime(alpha);
-    await ready(runtime, Tabs, "new Browser tab", (state) => state.selected > 1);
+    const linkTab = await vi.waitFor(() => {
+      const committed = [...world.browser.tabs.values()].filter((one) => one.committed && !one.private && one.history.at(-1) === "http://news.example/lunch");
+      if (committed.length !== 1 || !committed[0]) throw new Error(`Browser host did not commit the tapped URL: ${JSON.stringify(world.browser.calls)}`);
+      return committed[0];
+    }, { timeout: 12_000 });
+    await ready(runtime, Tabs, "selected Browser link tab", (state) => idOf(state.selected) === linkTab.id);
     const tab = runtime.runSync(Effect.map(Tabs.use((machine) => machine.get()), (state) => state.selected));
     const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
-    await vi.waitFor(() => {
-      const committed = [...world.browser.tabs.values()].filter((one) => one.committed && !one.private && one.history.at(-1) === "http://news.example/lunch");
-      if (committed.length !== 1) throw new Error(`Browser host did not commit the tapped URL: ${JSON.stringify(world.browser.calls)}`);
-    }, { timeout: 12_000 });
-    await ready(page, Page, "Browser link page", (state) => state.phase === "Shown");
+    await ready(page, Page, "Browser link page", (state) => state.phase === "Shown" && !state.secure);
   });
 });

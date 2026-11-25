@@ -8,11 +8,13 @@ import { VoiceBridge } from "../src/platform/voice.vibe";
 import { together, untimed, whole } from "../src/runtime/reactor.vibe";
 import { shell } from "../src/shell/shell.vibe";
 import { placeOf, type VoiceWords, voicing } from "../src/voice/voice.vibe";
+import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Dock } from "../gen/app__assistant__dock.effect.vibe";
+import { Machine as Locator } from "../gen/app__assistant__context.effect.vibe";
 import type { Mount } from "../src/areas.ts";
 import { dictate } from "../src/assistant/dictation.vibe";
 import assistant from "../src/assistant/index.tsx";
-import { button, closeAll, drawn, open, press, seen, underAct, until as drawnUntil } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, open, press, seen, underAct, until as drawnUntil } from "./alpha.tsx";
 import { scene, type Scene } from "./fakes/scene.ts";
 import { fakeWorld } from "./fakes/world.vibe";
 
@@ -480,6 +482,34 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await seen(false);
     await seen(true);
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.route.account === "SignedOut" && !s.route.consent);
+  });
+
+  // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
+  it("a spoken turn tells the agent the same screen a typed turn sent at that moment does, location and view claim included", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const { alpha } = await open(world, talkMounts);
+    const area = assistant.runtime(alpha);
+    await drawnUntil(alpha, area, Conversation, (s) => s.ready && s.observing);
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
+    world.ask.metadata = [];
+
+    await fill("Message Alpha", "What is on my screen?");
+    await press("Send");
+    await drawnUntil(alpha, area, Conversation, (s) => s.turn.send.id === 1 && s.turn.reply === "Complete");
+    await drawnUntil(alpha, area, Locator, (s) => s.gpsAt >= 0);
+    await fill("Message Alpha", "And now?");
+    await press("Send");
+    await drawnUntil(alpha, area, Conversation, (s) => s.turn.send.id === 2 && s.turn.reply === "Complete");
+    const typed = world.ask.metadata.at(-1);
+    expect(typed).toMatchObject({ observation: { view: "home", sensitive: false, location: { latitude: 43.73, longitude: 7.42 } }, viewDelivery: "completed-action" });
+
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
+    speakUtterance(world, "And now?");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 1 && s.phase === "Listening");
+    expect([world.ask.said.at(-1), world.ask.metadata.length, world.ask.metadata.at(-1)]).toEqual(["And now?", 3, typed]);
+    await press("Stop voice conversation");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
   });
 
   // spec/app/voice/index.md, "Starting asks for the microphone the first time, opens it once it is allowed, and holds the speech engine while talking"; spec/app/voice/index.md, "Audio leaves the phone only on a route the owner agreed to"; spec/app/voice/index.md, "A failed conversation ends quietly: why it failed is kept only until voice returns to idle, and nothing is shown"

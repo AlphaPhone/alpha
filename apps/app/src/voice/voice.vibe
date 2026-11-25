@@ -1,6 +1,6 @@
 // spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"; spec/app/voice/index.md, "A spoken reply says a written date, clock time, range and percentage in words"; spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"
-import { ConversationRecord, TurnController } from "@elizaos/agent/client"
-import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
+import { ConversationRecord, TurnController, type TurnContext } from "@elizaos/agent"
+import { Machine as Conversation, type Context as Screen } from "../../gen/app__assistant.effect.vibe"
 import { Machine as Phone } from "../../gen/app__phone.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
@@ -42,6 +42,8 @@ export interface VoiceMemory {
   reviewNotice: string
   dictatedText: string
   fillTarget: { readonly field: Field; readonly filling: number; readonly apply: (words: string) => void!! } | undefined
+  /** The observation a turn sent now from `shown` tells the agent, read as Ask Alpha reads it, once Ask Alpha is shown. */
+  screen: ((shown: Screen) => (TurnContext | undefined)!!) | undefined
   enqueueSentence(turn: number, text: string): void
   dequeueSentence(turn: number): { readonly text: string; readonly append: boolean } | undefined
   clearQueued(): void
@@ -65,6 +67,7 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
     reviewNotice: "",
     dictatedText: "",
     fillTarget: undefined,
+    screen: undefined,
     enqueueSentence(turn: number, text: string) {
       if (memory.playbackTurn !== turn) {
         memory.playbackTurn = turn
@@ -306,7 +309,9 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       shown = clean
       sayFrom(clean, false)
     }
-    const result = tryPromise(() => controller.send({ text: spoken, ...(told && views !== undefined ? { metadata: delivery(views.clientId) } : {}) }, { stream: { onPreview: feed } })) catch () => undefined
+    const observation = told && screen !== undefined && memory.screen !== undefined ? try memory.screen(screen.context) : undefined
+    const metadata = { ...observation, ...(told && views !== undefined ? delivery(views.clientId) : {}) }
+    const result = tryPromise(() => controller.send({ text: spoken, ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: { onPreview: feed } })) catch () => undefined
     if (isCloudFundsRefusal(result)) {
       memory.lastReply = ""
       Queue.offerUnsafe(queue, { type: "refusedForFunds", session, turn })
