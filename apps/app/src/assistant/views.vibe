@@ -1,5 +1,7 @@
 // spec/app/assistant/index.md, "Story: Let Alpha open what it is talking about"; spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
+import type { TurnResult } from "@elizaos/agent"
 import * as Conversation from "../../gen/app__assistant.effect.vibe"
+import { resent } from "../../gen/app__assistant__context.effect.vibe"
 import type { Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe"
 import { Machine as Shell, type Detent, type View, canAgentGoHome, parseEvent, showing } from "../../gen/app__shell.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
@@ -102,14 +104,23 @@ export const handoffs = Layer.effect(Views, effect {
   }
 })
 
+// spec/app/assistant/context.md, "A turn an agent refuses whole for a direct-request mode it does not know is sent once more without it"
+/** Whether the agent refused a turn that asked `direct` whole for its voice view context, as one older than the mode does, so it goes once more without it. */
+export function resendWithoutMode(result: TurnResult | undefined, direct: boolean): boolean {
+  return resent(result?.kind !== "NotAccepted" ? "TurnAccepted" : result.refusal?.code === "VOICE_UI_CONTEXT_INVALID" ? "ContextRefused" : "OtherRefusal", direct)
+}
+
+/** The direct Files requests a turn asks for: with the review cards a typed turn shows, or with none, as a spoken turn has. */
+export type DirectFilesMode = "direct-files-v1" | "direct-files-only-v1"
+
 // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
 /** What a turn told of the screen adds so the agent may hand back a view to open on it: views as completed actions, this screen, and its saved-note editor. */
-export function delivery(clientId: string, directFiles: boolean = false) {
+export function delivery(clientId: string, directFiles?: DirectFilesMode) {
   return {
     viewDelivery: "completed-action" as const,
     viewClientId: clientId,
     voiceUi: { viewDelivery: "completed-action" as const, uiClientId: clientId, uiNotesEditor: "saved-note-v1" as const,
-      ...(directFiles ? { agentActionMode: "direct-files-v1" as const } : {}) },
+      ...(directFiles === undefined ? {} : { agentActionMode: directFiles }) },
   }
 }
 

@@ -713,7 +713,8 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
     const outside = reply.outsideFiles
     const directOutside = outside === undefined ? [] : answer.filter((proposal) => directFromReply(proposal, opened, message, actions, "Outside", at))
     const [candidate] = directOutside
-    if (outside !== undefined && candidate !== undefined && directOutside.length === 1 && (try outside.current)) {
+    const continued = outside !== undefined && candidate !== undefined && directOutside.length === 1 && (try outside.current) ? candidate : undefined
+    if (outside !== undefined && continued !== undefined) {
       const current = effect {
         const state = try view.get()
         return (try outside.current) && state.turn.send.id === outside.ticket && state.turn.reply === "Complete" && !state.turn.stopping
@@ -724,7 +725,7 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
       }
       const { source, panel, route } = outside.origin
       const open = () => navigateFilesForReply(view, outside.ticket, source, panel, route)
-      outside.hold(Effect.asVoid(continueInFiles(opened, candidate, { ...outside, current }, { view, revision, moved, open, changes: view.changes })))
+      outside.hold(Effect.asVoid(continueInFiles(opened, continued, { ...outside, current }, { view, revision, moved, open, changes: view.changes })))
     }
     for (const [id, pin] of pinnedFiles) if (pin.expiresAt <= at) pinnedFiles.delete(id)
     const cards = try Effect.forEach(answer, effect (proposal) => {
@@ -734,7 +735,7 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
       if (op === undefined || !Number.isFinite(expiresAt) || expiresAt <= at) return undefined
       const filesOperation = op.type.startsWith("files_")
       const request = proposal.payload.requestMessageId
-      if (filesOperation && outside !== undefined && actions.get(proposal.id) === "Direct") return undefined
+      if (proposal.id === continued?.id) return undefined
       const readsContent = reviewedRead(op)
       const origin = readsContent ? exactReadOrigin(proposal, message, reply) : undefined
       if (readsContent && !acceptsRead(opened, op)) return undefined
