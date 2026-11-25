@@ -140,11 +140,11 @@ function stageVoice(env: NodeJS.ProcessEnv) {
     ], { env: { ...env, ELIZA_INFERENCE_ENGINE_DIR: engine } });
   }
   voiceRecord(directory);
-  return [
-    "-PelizaSpeechBridgeCapacitor=true",
-    `-PelizaInferenceEngineDir=${engine}`,
-    `-PelizaParadeeNativeDir=${directory}`,
-  ];
+  return {
+    ORG_GRADLE_PROJECT_elizaSpeechBridgeCapacitor: "true",
+    ORG_GRADLE_PROJECT_elizaInferenceEngineDir: engine,
+    ORG_GRADLE_PROJECT_elizaParadeeNativeDir: directory,
+  };
 }
 
 /** Alpha's agent pack (apps/agent), built from the pinned eliza for the production cloud. */
@@ -282,7 +282,7 @@ const consumerModule: string = "@elizaos/os/android/build-consumer.mjs";
 export async function build(release: boolean) {
   const env = environment();
   refuseOn(inputProblems(env));
-  const voiceGradle = stageVoice(env);
+  const voiceProperties = stageVoice(env);
   buildPack();
   const runtime = await stageRuntime();
   buildWeb();
@@ -293,7 +293,7 @@ export async function build(release: boolean) {
   const { buildAndroidConsumer } = (await import(consumerModule)) as BuildConsumer;
   buildAndroidConsumer({
     root: app,
-    environment: env,
+    environment: { ...env, ...voiceProperties },
     variants: [variant],
     release,
     lint: false,
@@ -304,7 +304,6 @@ export async function build(release: boolean) {
     androidTestOutput: "instrumentation",
     mappings: release,
     signing: { environment: signingNames },
-    gradleArguments: voiceGradle,
     prepare: [{ command: join(app, "node_modules/.bin/cap"), args: ["copy", "android"] }],
     record: {
       name: "build-config.json",
