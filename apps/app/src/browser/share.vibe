@@ -1,15 +1,20 @@
-// spec/app/browser/share.md, "Story: Share the page"; spec/app/browser/share.md, "The answer for the current choice says whether it was carried out"
+// spec/app/browser/share.md, "Story: Share the page"; spec/app/browser/share.md, "The answer for the current choice says whether it was carried out"; spec/app/browser/share.md, "Story: Open the page in another browser"
 import { isSecureWebAddress, type BrowserPageBinding } from "@elizaos/os-bridges"
 import { Machine as Tabs } from "../../gen/app__browser.effect.vibe"
 import * as Share from "../../gen/app__browser__share.effect.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import * as Inbox from "../../gen/app__inbox.effect.vibe"
+import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
+import { type EmailDestination, emailDestination } from "../assistant/message-actions.vibe"
+import type { Machine as Suggestions } from "../../gen/app__inbox__suggestion.effect.vibe"
+import { type Offers, useInEmail } from "../inbox/suggestion.vibe"
 import { type Said, say } from "../notices/toasts.vibe"
 import { TabHost, hosted } from "../platform/browser.vibe"
 import { type FrameRequest } from "../platform/browserWeb.vibe"
 import { Device } from "../platform/device.vibe"
 import { type Job, answer, contained, following, reacting, started, together } from "../runtime/reactor.vibe"
-import { Pages, idOf, pageOf, presentForAction } from "./browser.vibe"
+import { Pages, idOf, leaving, pageOf, presentForAction } from "./browser.vibe"
 
 module page {
   /** Whether the Browser's document is in the foreground. @throws {never} */
@@ -67,8 +72,14 @@ effect function currentPage(binding: ViewedPage): boolean!!(Shell | Tabs | TabHo
   return host.session.current(binding, id)
 }
 
-/** Share the shown native page or copy the exact shown address from the Browser menu. */
-export effect function offerShare(dest: "System" | "Copy", link: ViewedPage | undefined) {
+// spec/app/browser/share.md, "Choosing where to send the page sends it once, if it is still the page the panel opened on, and closes the panel"
+/** The Inbox account a shared link starts an email in, or none while Inbox could not take one now. */
+export const mailTarget: (EmailDestination | undefined)!!(Inbox.Machine | Drafts.Machine) = effect {
+  return emailDestination(try (try Inbox.Machine).get(), try (try Drafts.Machine).get())
+}
+
+/** Share the shown native page, copy the exact shown address or start an email with it, from the Browser menu. */
+export effect function offerShare(dest: "System" | "Copy" | "Email", link: ViewedPage | undefined) {
   const tabs = try Tabs
   const selected = try tabs.get()
   if (selected.layer !== "Menu" || !showing(try (try Shell).get(), "Browser") || !foreground()) return
@@ -95,7 +106,22 @@ export effect function offerShare(dest: "System" | "Copy", link: ViewedPage | un
 const absent = (panel: number): Share.Event => ({ type: "delivered", panel, ok: false, shown: false })
 const noBrowser: Share.Event = { type: "launched", ok: false, found: false }
 
-effect function delivered(panel: number, dest: "System" | "Copy") {
+// spec/app/browser/share.md, "The other browser opens, or the owner is told that none could and the page is still here"
+/** Open the page in front in another browser, and say at the top of the screen when none could. */
+effect function launched(confirmed: boolean) {
+  const event = try leaving(confirmed)
+  if (event.type === "launched" && !event.ok) try say(event.found ? "The other browser did not open. The page is still here." : "No other browser on this phone can open this page.", true)
+  return event
+}
+
+/** Hand `url` to Inbox, which shows it for review before it goes into an email, as v121 did. Whether Inbox took it. */
+effect function drafted(url: string) {
+  const target = try mailTarget
+  if (target === undefined) return false
+  return try useInEmail(url, "Browser", { target: "NewEmail", account: target.account, message: 0, draft: target.draft }, true)
+}
+
+effect function delivered(panel: number, dest: "System" | "Copy" | "Email") {
   const pages = (try SharePages).pages
   const link = pages.get(panel)
   pages.delete(panel)
@@ -109,10 +135,12 @@ effect function delivered(panel: number, dest: "System" | "Copy") {
   const host = try TabHost
   const ok = dest === "Copy"
     ? try (try Device).copyText(link.url)
+    : dest === "Email" ? try drafted(link.url)
     : "load" in link ? false : (try presentForAction(link.id)) && (try currentPage(link)) && (try contained(hosted("share", (plugin) => plugin.share(host.session.guard(link))), "opening the Browser share sheet"))
   const shown = try currentPage(link)
   if (shown && Share.canDelivered(try machine.get(), panel, ok, shown)) {
     if (dest === "Copy") try say(ok ? "Link copied" : "Clipboard unavailable", !ok)
+    else if (dest === "Email" && !ok) try say("Could not start an email with this link.", true)
     else if (!ok) try say("Could not open the share sheet.", true)
   }
   return { type: "delivered", panel, ok, shown } satisfies Share.Event
@@ -191,13 +219,20 @@ effect function launchOtherBrowser(confirmed: boolean): Share.Event!!(SharePages
   return { type: "launched", ok, found: true }
 }
 
+// spec/app/browser/share.md, "Story: Open the page in another browser"; spec/app/browser/share.md, "Only an unreachable HTTPS address makes a failed page leave, and only from a normal tab"
+/** Open the reviewed page when one is held (the menu's hand-off or a private web frame), and otherwise a normal tab's failed page at the HTTPS address the host named. */
+effect function elsewhereOf(confirmed: boolean) {
+  if ((try SharePages).external.page !== undefined) return try launchOtherBrowser(confirmed)
+  return try launched(confirmed)
+}
+
 const sharingPage = reacting(Share, {
-  carry(fx: Share.Effect): Job<Share.Event, SharePages | Share.Machine | Shell | Tabs | TabHost | Pages | Device | Toasts | Said, []> {
+  carry(fx: Share.Effect): Job<Share.Event, SharePages | Share.Machine | Shell | Tabs | TabHost | Pages | Device | Toasts | Said | Inbox.Machine | Drafts.Machine | Suggestions | Offers, []> {
     return match (fx) {
       when { tag: "Sheet", let panel }: answer("share the page", delivered(panel, "System"), absent(panel));
       when { tag: "CopyLink", let panel }: answer("copy the page link", delivered(panel, "Copy"), absent(panel));
-      when { tag: "Draft", let panel }: answer("retire the unavailable draft handoff", succeed(absent(panel)), absent(panel));
-      when { tag: "Elsewhere", let confirmed }: answer("open the reviewed Browser page", launchOtherBrowser(confirmed), noBrowser);
+      when { tag: "Draft", let panel }: answer("start an email with the page link", delivered(panel, "Email"), absent(panel));
+      when { tag: "Elsewhere", let confirmed }: answer("open the page in another browser", elsewhereOf(confirmed), noBrowser);
     }
   },
 })

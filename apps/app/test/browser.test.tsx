@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { Effect } from "effect";
+import { act } from "react";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
@@ -10,11 +11,15 @@ import { Machine as Settings } from "../gen/app__settings.effect.vibe";
 import { Machine as Share } from "../gen/app__browser__share.effect.vibe";
 import { Machine as Site } from "../gen/app__browser__site.effect.vibe";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
+import { Machine as Inbox } from "../gen/app__inbox.effect.vibe";
+import { Machine as Offering } from "../gen/app__inbox__suggestion.effect.vibe";
 import { Machine as Shell, showing } from "../gen/app__shell.effect.vibe";
 import assistant from "../src/assistant/index.tsx";
 import { Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
 import home from "../src/home/index.tsx";
+import inbox from "../src/inbox/index.tsx";
+import { Offers } from "../src/inbox/suggestion.vibe";
 import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import { textReview } from "./fakes/text-review.ts";
@@ -29,6 +34,34 @@ async function onBrowser(world = { ...scene(), phone: true, image: true }) {
   const runtime = browser.runtime(running.alpha);
   await press("Browser");
   return { ...running, world, runtime };
+}
+
+/** Alpha on an Alpha image with the Browser on screen and Ask Alpha's bar over it. */
+async function askingOnBrowser(world = { ...scene(), phone: true, image: true }) {
+  const running = await open(world, only("home", "assistant", "notice", "view:Browser"));
+  await until(running.alpha, home.runtime(running.alpha), Home, (h) => h.tiles.load.status === "Loaded");
+  const runtime = browser.runtime(running.alpha);
+  await press("Browser");
+  await until(running.alpha, runtime, Tabs, (s) => s.hydrated);
+  const asking = assistant.runtime(running.alpha);
+  await until(running.alpha, asking, Conversation, (c) => c.ready && c.context.showing.tag === "App");
+  return { ...running, world, runtime, asking };
+}
+
+/** Ask Alpha from the bar over the Browser, and wait for the reply to end. */
+async function ask(running: Awaited<ReturnType<typeof askingOnBrowser>>, text: string) {
+  const { alpha, asking, world } = running;
+  world.ask.metadata = [];
+  await act(async () => {
+    const box = [...document.querySelectorAll("textarea")].find((one) => one.getAttribute("aria-label") === "Message Alpha" || one.getAttribute("aria-label") === "Ask about this page");
+    if (!box) throw new Error("no composer");
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(box, text);
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+  await press("Send");
+  await until(alpha, asking, Conversation, (c) => c.turn.reply === "Complete" && (world.ask.metadata?.length ?? 0) > 0);
+  return world.ask.metadata?.[0] as { observation?: { view?: string }; browserPage?: { url?: string; text?: string; tabId?: string } } | undefined;
 }
 
 const go = (text: string) => drawn(async () => {
@@ -305,6 +338,108 @@ describe("The Browser on a phone", () => {
     await until(alpha, runtime, Tabs, (s) => s.erasing === "Asked");
     await press("Clear data");
     await until(alpha, runtime, Tabs, (s) => s.erasing === "Kept" && s.privates.length === 1 && s.kept.length === 0);
+  });
+  it("Open the page in another browser (spec/app/browser/share.md, \"Story: Open the page in another browser\")", async () => {
+    const { alpha, runtime, world } = await onBrowser();
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    world.browser.failing.set("plain.example", "insecure");
+    world.browser.failing.set("down.example", "unreachable");
+    const tab = () => runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
+
+    // spec/app/browser/share.md, "Only an unreachable HTTPS address makes a failed page leave, and only from a normal tab": an http-only site has no way out.
+    await go("plain.example");
+    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab())));
+    await until(alpha, page, Page, (p) => p.phase === "Failed");
+    expect(button("Open in browser")).toBeUndefined();
+
+    await go("down.example/today");
+    await until(alpha, page, Page, (p) => p.phase === "Failed");
+    // The button sits under the Browser's own bar, above the page, never near Ask Alpha.
+    const offer = button("Open in browser");
+    const place = document.querySelector("[data-alpha-browser-page]");
+    expect(offer !== undefined && place !== null && (offer.compareDocumentPosition(place) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0).toBe(true);
+    await press("Open in browser");
+    await until(alpha, page, Page, () => world.browser.elsewhere.length === 1);
+    expect(world.browser.elsewhere).toEqual(["https://down.example/today"]);
+
+    // spec/app/browser/share.md, "The next load of the page ends the offer for a failed page"
+    world.browser.failing.clear();
+    await go("news.example/on-device-agents");
+    await until(alpha, page, Page, (p) => p.phase === "Shown");
+    expect(button("Open in browser")).toBeUndefined();
+  });
+
+  it("Email the page, as v121 did (spec/app/browser/share.md, \"Choosing where to send the page sends it once, if it is still the page the panel opened on, and closes the panel\"; spec/app/inbox/suggestion.md, \"Alpha suggests text only for a draft; the owner hands text over from elsewhere in Alpha into a draft, a new reply or a new email; either replaces an offer not yet used\")", async () => {
+    const world = { ...scene(), phone: true, image: true };
+    const { alpha } = await open(world, only("home", "notice", "view:Browser", "view:Inbox"));
+    await until(alpha, home.runtime(alpha), Home, (h) => h.tiles.load.status === "Loaded");
+    await drawn(() => {
+      const tile = document.querySelector<HTMLButtonElement>("[data-home-tile='view:Inbox']");
+      if (!tile) throw new Error("No Inbox home tile");
+      tile.click();
+    });
+    const letters = inbox.runtime(alpha);
+    await until(alpha, letters, Inbox, (state) => state.list.status === "Loaded" && state.selected.account !== 0);
+    await hardware("back");
+    await press("Browser");
+    const runtime = browser.runtime(alpha);
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    await go("news.example/on-device-agents");
+    const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
+    await until(alpha, runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab))), Page, (p) => p.phase === "Shown");
+    await press("Menu");
+    await press("Email this page");
+    // spec/app/inbox/suggestion.md, "Only the owner is shown it, against the draft as it is now; showing it again after the draft changed shows it against the change": the link waits in Inbox for the owner's review.
+    await until(alpha, letters, Offering, (s) => s.text !== 0);
+    const offered = letters.runSync(Effect.flatMap(Offering, (machine) => machine.get()));
+    expect(letters.runSync(Effect.map(Offers, (offers) => offers.text(offered.text)))).toBe("https://news.example/on-device-agents");
+    expect(world.inbox.drafts.size).toBe(0);
+  });
+
+  it("Let my agent read the page I have open in Browser (spec/app/assistant/context.md, \"Story: Let my agent read the page I have open in Browser\")", async () => {
+    const running = await askingOnBrowser();
+    const { alpha, runtime } = running;
+    // happy-dom lays nothing out: give the page's place the size Android's web view takes, so the tab is presented there.
+    const measure = HTMLElement.prototype.getBoundingClientRect;
+    const laidOut = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.hasAttribute("data-alpha-browser-page") ? new DOMRect(0, 64, 412, 700) : measure.call(this);
+    });
+    onTestFinished(() => laidOut.mockRestore());
+    await go("news.example/on-device-agents");
+    const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
+    await until(alpha, runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab))), Page, (p) => p.phase === "Shown");
+
+    // spec/app/assistant/context.md, "A turn carries the page Browser hands it for the tab in front, beside the observation, only to a peer that declares it"
+    const shown = await ask(running, "Summarize this page");
+    expect(shown?.observation?.view).toBe("browser");
+    expect(shown?.browserPage).toMatchObject({ url: "https://news.example/on-device-agents", tabId: `tab${tab}` });
+    expect(shown?.browserPage?.text).toContain("agent");
+
+    // A private tab is never read.
+    await press("Menu");
+    await press("New private tab");
+    await until(alpha, runtime, Tabs, (s) => s.privates.includes(s.selected));
+    await go("news.example/on-device-agents");
+    const secret = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
+    await until(alpha, runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(secret))), Page, (p) => p.phase === "Shown");
+    expect((await ask(running, "Summarize this page"))?.browserPage).toBeUndefined();
+  });
+
+  it("History is kept through a restart (spec/app/browser/library.md, \"Story: Look back through history\"; spec/app/browser/index.md, \"Story: Save the session\")", async () => {
+    const first = await onBrowser();
+    await until(first.alpha, first.runtime, Tabs, (s) => s.hydrated);
+    await go("enclave.example/keys-in-hardware");
+    const tab = first.runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
+    await until(first.alpha, first.runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab))), Page, (p) => p.phase === "Shown");
+    // spec/app/browser/index.md, "A stale session is written once it has been read, one write at a time, and never while browsing data is being cleared": the session written keeps history.
+    await until(first.alpha, first.runtime, Tabs, (s) => !s.stale && first.world.browser.saved.history[0] === "https://enclave.example/keys-in-hardware");
+    const kept = [...first.world.browser.saved.history];
+    expect(kept.length).toBeGreaterThan(0);
+
+    await closeAll();
+    const again = await onBrowser(first.world);
+    await until(again.alpha, again.runtime, Tabs, (s) => s.hydrated);
+    expect(again.runtime.runSync(Effect.flatMap(Pages, (pages) => pages.history())).map((row) => row.url)).toEqual(kept);
   });
 
   it("The agent's page opens only on my Open on the Browser's card, even an address I typed, and a card left from an earlier request never opens (spec/app/browser/index.md, \"Story: Let the agent open a page\"; spec/app/browser/index.md, \"The agent opens only an HTTPS address with no user name or password in it, in a new normal tab, one at a time\"; spec/app/browser/index.md, \"The agent gives its tab up when it is done\"; spec/app/assistant/index.md, \"A complete reply may open one view, once, while the screen it was asked from still shows\")", async () => {

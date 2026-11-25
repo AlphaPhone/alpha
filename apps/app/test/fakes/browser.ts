@@ -20,6 +20,10 @@ interface Held {
   navigation: number;
   loading: boolean;
   committed: boolean;
+  /** The host's failure sentence for the load, or empty. */
+  error: string;
+  /** The HTTPS address another browser may reach, set only for a normal tab's https page the network failed. */
+  elsewhere: string;
   /** The matches of what is being found, and the one stood on. */
   matches: number;
   match: number;
@@ -39,6 +43,10 @@ export interface BrowserScene {
   readonly handedOff: (BrowserPageGuard & { readonly privateConfirmed?: boolean })[];
   showInFiles: (() => void) | undefined;
   navigateFromPage?: (id: string, url: string) => void;
+  /** Hosts whose pages fail: `unreachable` as the network fails, `insecure` as a site with no HTTPS connection. */
+  readonly failing: Map<string, "unreachable" | "insecure">;
+  /** The addresses `openFailedPage` opened in another browser. */
+  readonly elsewhere: string[];
 }
 
 /** develop's fixture photographs, served beside the fakes. */
@@ -153,6 +161,8 @@ export function browserScene(): BrowserScene {
     tabs: new Map(),
     shown: undefined,
     calls: [],
+    failing: new Map(),
+    elsewhere: [],
     shared: [],
     handedOff: [],
     showInFiles: undefined,
@@ -167,7 +177,7 @@ const surface = "data-fake-browser-page";
  * over the place the Browser marks, as Android lays the web view there; here it draws develop's reference pages.
  */
 export function alphaBrowser(world: BrowserScene): Faked {
-  return plugin<BrowserTabHostPlugin, TabEvents>((emit) => {
+  return plugin<BrowserTabHostPlugin & { openFailedPage(options: BrowserPageGuard): Promise<void>; pageContext(options: BrowserPageGuard): Promise<Record<string, unknown>> }, TabEvents>((emit) => {
     let session = "";
     const stateOf = (tab: Held): BrowserTabState => {
       const url = tab.history[tab.at];
@@ -175,7 +185,8 @@ export function alphaBrowser(world: BrowserScene): Faked {
         session, id: tab.id, sequence: tab.sequence, navigation: String(tab.navigation),
         ...(url === undefined ? {} : { url, title: titleOf(url) }),
         loading: tab.loading, committed: tab.committed, progress: tab.loading ? 30 : 100,
-        canBack: tab.at > 0, canForward: tab.at < tab.history.length - 1, private: tab.private,
+        canBack: tab.at > 0, canForward: tab.at < tab.history.length - 1, private: tab.private, error: tab.error,
+        ...(tab.elsewhere === "" ? {} : { elsewhereUrl: tab.elsewhere }),
       };
     };
     const found = (tab: Held) => void Promise.resolve().then(() => emit("findResult", { session, id: tab.id, navigation: String(tab.navigation), index: tab.match, count: tab.matches, done: true }));
@@ -204,7 +215,15 @@ export function alphaBrowser(world: BrowserScene): Faked {
     };
     const commit = (tab: Held, navigation: number) => void Promise.resolve().then(() => {
       if (tab.navigation !== navigation || !world.tabs.has(tab.id)) return;
+      const url = tab.history[tab.at] ?? "";
       tab.loading = false;
+      const failing = world.failing.get(URL.parse(url)?.host ?? "");
+      if (failing !== undefined) {
+        tab.error = failing === "insecure" ? "This site has no secure (HTTPS) connection." : "Page could not load.";
+        tab.elsewhere = failing === "unreachable" && !tab.private && url.startsWith("https://") ? url : "";
+        told(tab);
+        return;
+      }
       tab.committed = true;
       told(tab);
       draw();
@@ -215,6 +234,8 @@ export function alphaBrowser(world: BrowserScene): Faked {
       tab.navigation += 1;
       tab.loading = true;
       tab.committed = false;
+      tab.error = "";
+      tab.elsewhere = "";
       told(tab);
       commit(tab, tab.navigation);
     };
@@ -233,7 +254,7 @@ export function alphaBrowser(world: BrowserScene): Faked {
       create: ({ session: asked, id, private: privateTab }) => {
         world.calls.push("create");
         session = asked;
-        const tab: Held = { id, private: privateTab === true, history: [], at: -1, sequence: 0, navigation: 0, loading: false, committed: false, matches: 0, match: 0 };
+        const tab: Held = { id, private: privateTab === true, history: [], at: -1, sequence: 0, navigation: 0, loading: false, committed: false, matches: 0, match: 0, error: "", elsewhere: "" };
         world.tabs.set(id, tab);
         return Promise.resolve(stateOf(tab));
       },
@@ -250,6 +271,8 @@ export function alphaBrowser(world: BrowserScene): Faked {
         tab.navigation += 1;
         tab.loading = true;
         tab.committed = false;
+        tab.error = "";
+        tab.elsewhere = "";
         told(tab);
         commit(tab, tab.navigation);
         return Promise.resolve(stateOf(tab));
@@ -351,6 +374,12 @@ export function alphaBrowser(world: BrowserScene): Faked {
           return Promise.reject(rejection("The page changed"));
         }
         world.handedOff.push(request);
+        return Promise.resolve();
+      },
+      openFailedPage: (options) => {
+        const tab = held(options);
+        if (tab.elsewhere === "" || tab.elsewhere !== options.url || String(tab.navigation) !== options.navigation) return Promise.reject(rejection("The page changed. Try again from the page."));
+        world.elsewhere.push(options.url);
         return Promise.resolve();
       },
       downloads: ({ session: requested }) => {
