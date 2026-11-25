@@ -980,7 +980,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
         // onset can continue the same utterance before the reply hold mutes it.
         // This adds at most 400 ms after the final, only on Cloud streaming.
         // When the capture reports hardware AEC (fullDuplex), keep capture open across replies.
-        },streamingCloud?{openMic:openMicrophoneAvailable(),timing:{shortGapMs:0,longGapMs:400}}:openMic?{openMic:true,pipelineSpeech:true,timing:OPEN_MIC_TIMING}:undefined);
+        },streamingCloud?{timing:{shortGapMs:0,longGapMs:400}}:openMic?{openMic:true,pipelineSpeech:true,timing:OPEN_MIC_TIMING}:undefined);
         replySpeech?.hold();
         conversationLive=assistant;conversationVoice=assistant;conversationInterim='';conversationLevels=[];started=Date.now();
         try{await assistant.start();current();return;}
@@ -1046,9 +1046,15 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   Component.prototype.voiceConversationActive=function(){return retirement?.shell===this||chatDestination?.shell===this&&chatDestination?.mode!=='dictation'&&stage!=='closed';};
   // Carries an active voice conversation across an agent-initiated view open (open_view, files_open,
   // Maps relay, or Browser presentation outside held ViewSteps) without triggering shell-navigation-unowned.
+  // Resolves true when `target` is in front. A navigation the conversation cannot own (none is active,
+  // another owned move is in progress, or the conversation no longer continues its context) still
+  // opens the view, unowned, so the shell's navigation guard ends the conversation as before.
   Component.prototype.runOwnedVoiceViewNavigation=async function(target:string,commit:(detent?:string)=>boolean|void|Promise<boolean|void>){
     const chat=chatDestination,token=generation;
-    if(!chat||chat.shell!==this||chat.mode==='dictation'||!chatCurrent()||ownedNavigation)return false;
+    const landedOn=(result:boolean|void)=>result!==false&&this.live!==false&&(this.S().view||'home')===target;
+    let continues=false;
+    try{continues=!conversationPrepared||this.voiceConversationCurrent?.(conversationPrepared)===true;}catch{continues=false;}
+    if(!chat||chat.shell!==this||chat.mode==='dictation'||!chatCurrent()||ownedNavigation||!continues)return landedOn(await commit());
     const from=this.S().chat,toSheet=from==='hidden'&&(target==='home'||this.defaultChat?.(target)==='input');
     const detent=toSheet?'sheet':from;
     const held={chat,view:target,detent,applying:true,placing:true,turnId:this.voiceSendTurnId??''};
@@ -1061,8 +1067,8 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     try{result=await pending;}
     catch(error){held.placing=false;if(ownedNavigation===held)ownedNavigation=undefined;throw error;}
     finally{held.placing=false;}
-    if(ownedNavigation!==held||token!==generation||chatDestination!==chat)return false;
-    const landed=result!==false&&(this.S().view||'home')===target;
+    const landed=landedOn(result);
+    if(ownedNavigation!==held||token!==generation||chatDestination!==chat)return landed;
     if(!landed){ownedNavigation=undefined;return false;}
     try{
       if(conversationPrepared){
@@ -1078,7 +1084,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     }catch{
       if(ownedNavigation===held)ownedNavigation=undefined;
       cleanup(true,true,'owned-navigation-unconfirmed');
-      return false;
+      return landed;
     }
   };
   function maybeStartDictation(){if(chatDestination?.mode==='dictation'&&chatCurrent()&&stage==='ready'&&onDeviceReady&&!busy)void primary();}

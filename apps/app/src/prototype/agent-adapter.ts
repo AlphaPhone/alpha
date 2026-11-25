@@ -1682,7 +1682,16 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         presentBrowser:()=>alphaClient.afterRequestSettles({
           view:'browser',
           current:()=>{if(!ready()){show(()=>false);throw Error('Browser presentation is no longer current.');}},
-          show:detent=>show(ready,detent),
+          // A held voice turn passes its detent. Outside one (a Browser card approved in chat while
+          // Talk keeps listening), an active conversation still owns the switch, as open_view does.
+          show:detent=>{
+            if(detent===undefined&&this.voiceConversationActive?.()&&typeof this.runOwnedVoiceViewNavigation==='function')
+              return this.runOwnedVoiceViewNavigation('browser',(owned?:string)=>new Promise<boolean>((resolve,reject)=>{
+                try{show(ready,owned);this.setState({},()=>{try{context(this);resolve(this.live&&this.S().view==='browser'&&!alphaClient.getState().context.sensitive);}catch(error){reject(error);}});}
+                catch(error){reject(error);}
+              })).catch(()=>false);
+            return show(ready,detent);
+          },
         }),
         presentBrowserSkipped:()=>show(()=>false) };
     });
@@ -2215,6 +2224,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const bindingPromise=connectionController.prepareVoiceConversation(signal);
     const draftPromise=Promise.resolve(this.draftBindingTask);
     const attachPromise=Promise.resolve(this.connectAgent());
+    // Both start before the binding resolves; one that rejects after an earlier throw is not unhandled.
+    void draftPromise.catch(()=>{});void attachPromise.catch(()=>{});
     mark?.('conversation-selection');const binding=await bindingPromise;signal.throwIfAborted();
     mark?.('draft-binding');await draftPromise;signal.throwIfAborted();context(this);
     if(!this.live||document.hidden||!connectionController.voiceConversationCurrent(binding)||JSON.stringify(alphaClient.getState().context)!==expected)throw Error('The voice conversation changed.');
