@@ -10,6 +10,9 @@ import { shell } from "../src/shell/shell.vibe";
 import { placeOf, VoiceWords, voicing } from "../src/voice/voice.vibe";
 import { DictationClock } from "../src/voice/dictation-clock.vibe";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
+import { Machine as Chats } from "../gen/app__assistant__chats.effect.vibe";
+import { Machine as Messages } from "../gen/app__messages.effect.vibe";
+import { Machine as Phone } from "../gen/app__phone.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Dock } from "../gen/app__assistant__dock.effect.vibe";
 import { Machine as Locator } from "../gen/app__assistant__context.effect.vibe";
@@ -672,6 +675,52 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect([world.ask.said.at(-1), world.ask.metadata.length, world.ask.metadata.at(-1)]).toEqual(["And now?", 3, typed]);
     await press("Stop voice conversation");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
+  });
+
+  // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"
+  it("shows a spoken text in its open chat for touch review and keeps confirmation local", async () => {
+    const world = { ...scene(), phone: true, image: true, signedIn: false };
+    const operation = { type: "sms_send", recipients: ["+14155550100"], body: "Meet upstairs.\nBring the keys.", subscriptionId: 1 } as const;
+    const review = textReview(world.notes.owner, "spoken-reviewed-sms", operation);
+    world.telephony.textReview = review;
+    world.ask.metadata = [];
+    const { alpha } = await open(world, [...talkMounts, { at: "view:Messages", load: () => import("../src/messages/index.tsx") }]);
+    const area = assistant.runtime(alpha);
+    await drawnUntil(alpha, area, Conversation, (state) => state.ready && state.observing);
+    await fill("Message Alpha", "Start this chat");
+    await press("Send");
+    await drawnUntil(alpha, area, Conversation, (state) => state.turn.reply === "Complete");
+    await drawnUntil(alpha, area, Chats, (state) => state.chosen > 0 && state.page.status === "Loaded");
+    const room = [...world.ask.kept.values()].find((one) => one.messages.some((line) => line.text === "Start this chat"));
+    if (room === undefined) throw new Error("The visible chat was not saved");
+
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "openView", view: "Messages" }))));
+    await drawnUntil(alpha, alpha.runtime, Messages, (state) => state.front && state.sms.grant === "Granted" && state.list.status === "Loaded");
+    await drawnUntil(alpha, alpha.runtime, Phone, (state) => state.telecom === "NoCall");
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "raise", detent: "Sheet" }))));
+    await drawnUntil(alpha, area, Conversation, (state) => state.context.showing.tag === "App" && state.context.showing.view === "Messages");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");
+
+    world.ask.nextReplyChunks = ["Review the text on your phone."];
+    world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: {
+      proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true,
+    } }];
+    const text = "Text +14155550100 saying Meet upstairs. Bring the keys.";
+    speakUtterance(world, text);
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 1 && state.reviewPending && state.phase === "Listening" && state.mic === "On");
+    expect(room.messages.some((line) => line.role === "user" && line.text === text)).toBe(true);
+    expect(world.ask.metadata.at(-1)).toMatchObject({ observation: { selectedObject: { kind: "sms-subscription", id: "1" } } });
+    expect(button("Approve")).toBeDefined();
+    expect(document.body.textContent).toContain(operation.body);
+    expect([review.decisions, review.claims, world.telephony.sent]).toEqual([[], [], []]);
+
+    speakUtterance(world, "Send this text.");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 2 && state.phase === "Listening" && state.mic === "On");
+    expect(world.ask.said).toEqual(["Start this chat", text]);
+    expect(button("Approve")).toBeDefined();
+    expect([review.decisions, review.claims, world.telephony.sent]).toEqual([[], [], []]);
   });
 
   // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view"

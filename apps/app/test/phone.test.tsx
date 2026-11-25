@@ -442,6 +442,66 @@ describe("Phone on an Alpha image", () => {
     await vi.waitFor(() => expect(document.body.textContent).toContain("The reviewed read answered the original request."));
   });
 
+  it(`Deletes the reviewed voicemail only after Phone confirms the same provider row (spec/app/phone/voicemail.md, "Story: Delete a voicemail")`, async () => {
+    const world = image();
+    const original = { id: 11, number: "+14155550100", date: 1_700_000_100_000, heard: false, deleted: false,
+      name: "Ada", transcript: "Original voicemail", deletionWitness: `v1:${"a".repeat(64)}` };
+    const replacement = { ...original, transcript: "Replacement voicemail", deletionWitness: `v1:${"b".repeat(64)}` };
+    world.telephony.voicemails = [original];
+    const review = textReview(world.notes.owner, "delete-voicemail-original", { type: "voicemail_delete_selected" });
+    world.telephony.textReview = review;
+    const { alpha } = await openPhoneWorld(world);
+    const runtime = assistant.runtime(alpha);
+    await until(alpha, alpha.runtime, Shell, (state) => state.image);
+    await openPhone(alpha);
+    await until(alpha, alpha.runtime, Phone, (state) => state.voicemail && state.telecom === "NoCall");
+    await tab("Voicemail");
+
+    const ask = async (request: string) => {
+      await until(alpha, alpha.runtime, Voicemail, (state) => state.open && state.audio.status === "Loaded");
+      await until(alpha, runtime, Conversation, (state) => state.ready && state.context.showing.tag === "App" && state.context.showing.view === "Phone");
+      await press("Open Alpha");
+      await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+      world.ask.nextReplyChunks = ["Review the deletion in Phone."];
+      world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: {
+        proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true,
+      } }];
+      await fill("Ask Alpha", request);
+      await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+      await press("Send");
+      await vi.waitFor(() => expect(button("Approve")).toBeDefined());
+      await press("Approve");
+      await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Bar");
+      await until(alpha, alpha.runtime, Voicemail, (state) => state.confirming);
+    };
+
+    await until(alpha, alpha.runtime, Voicemail, (state) => state.list.status === "Loaded" && state.items === 1);
+    await pressVoicemailRow();
+    await ask("Delete the voicemail I have open.");
+    expect(world.telephony.deletionAttempts).toEqual([]);
+    world.telephony.voicemails = [replacement];
+    await confirm("Delete");
+    await until(alpha, alpha.runtime, Voicemail, (state) => state.removal.outcome === "Refused");
+    await vi.waitFor(() => expect(review.receipts).toHaveLength(1));
+    expect([world.telephony.staged, replacement.deleted]).toEqual([[], false]);
+
+    await pressVoicemailRow(true);
+    await until(alpha, alpha.runtime, Voicemail, (state) => !state.open);
+    await tab("Recents");
+    await tab("Voicemail");
+    await until(alpha, alpha.runtime, Voicemail, (state) => state.list.status === "Loaded" && state.items === 1);
+    await pressVoicemailRow();
+    review.proposal.id = "delete-voicemail-replacement";
+    review.proposal.state = "pending";
+    await ask("Delete this voicemail now.");
+    await confirm("Delete");
+    await until(alpha, alpha.runtime, Voicemail, (state) => state.removal.outcome === "Confirmed");
+    await vi.waitFor(() => expect(review.receipts.at(-1)).toMatchObject({ outcome: "applied", operationId: review.proposal.id,
+      result: { kind: "voicemail-delete", status: "deleted" } }));
+    expect(world.telephony.staged).toMatchObject([{ target: { id: "11", witness: replacement.deletionWitness } }]);
+    expect(replacement.deleted).toBe(true);
+  });
+
   it(`Shows only the transcript of the current opening (spec/app/phone/voicemail.md, "Only the open voicemail's newest transcript is shown")`, async () => {
     const world = image();
     const first = Promise.withResolvers<string>();
