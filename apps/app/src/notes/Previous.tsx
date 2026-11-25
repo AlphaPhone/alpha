@@ -1,6 +1,6 @@
 // spec/app/notes/previous.md, "Story: Look at the notes from before"
 import { Alert, AppHeader, Button, EmptyState, NoteRow, Spinner } from "@repo/ui";
-import { ArrowLeft } from "lucide-react";
+import { ChevronLeft } from "lucide-react";
 import type { Event } from "../../gen/app__notes__previous.ts";
 import { useMachine } from "../../gen/app__notes__previous.react.ts";
 import type { Alpha } from "../runtime/area.tsx";
@@ -26,7 +26,7 @@ export function Previous({ runtime }: { readonly runtime: Alpha["runtime"] }) {
   return (
     <section aria-label="Notes on this phone" className="flex min-h-0 flex-1 flex-col">
       <AppHeader title={opened === undefined ? "On this phone" : opened.title || "Untitled"} detail={opened !== undefined} leading={can(back) && <Button size="icon" variant="ghost"
-        aria-label={opened === undefined ? "Return to Notes" : "Back to previous notes"} onClick={() => send(back)}><ArrowLeft /></Button>} />
+        aria-label={opened === undefined ? "Return to Notes" : "Back to previous notes"} onClick={() => send(back)}><ChevronLeft /></Button>} />
       <div className="flex flex-col gap-3 px-4 pb-12">
         {state.read.status === "Loading" && <Spinner className="self-center" label="Reading previous notes" />}
         {state.read.status === "Failed" && <Alert variant="warn">The notes from this phone couldn't be read.
