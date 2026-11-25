@@ -45,12 +45,20 @@ interface ReviewTarget extends ReviewedItem {
 export interface FileReview {
   readonly targets: readonly ReviewTarget[]
   readonly where?: Where
+  readonly parent?: ReviewedParent
+}
+
+interface ReviewedParent {
+  readonly path: string
+  readonly place: Place
+  readonly token?: string
 }
 
 export interface ReviewedBatch {
   readonly targets: readonly ReviewTarget[]
   readonly where: Where
   readonly current: () => Promise<boolean>
+  readonly parent?: ReviewedParent
 }
 
 export service Answers {
@@ -237,11 +245,19 @@ effect function byPaths(paths: readonly string[]): ReadonlyArray<Item | undefine
 /** Resolve the entry before its path is displayed on an approval. The agent's proposal itself never changes. */
 export effect function reviewFileAction(operation: DeviceOperation): (FileReview | undefined)!!(Files | Browser.Machine | Handles | Device) {
   if (!(try (try Device).showing())) return undefined
-  if (operation.type !== "files_open" && operation.type !== "files_move" && operation.type !== "files_trash" && operation.type !== "files_share") return undefined
+  if (operation.type !== "files_open" && operation.type !== "files_move" && operation.type !== "files_trash" && operation.type !== "files_share" && operation.type !== "files_folder_create") return undefined
   const state = try (try Browser.Machine).get()
   const opening = operation.type === "files_open"
   if (!opening && (!state.open || state.trash || !Browser.allowed(state))) return undefined
   const place = Browser.where(state)
+  if (operation.type === "files_folder_create") {
+    const path = operation.parent
+    const token = path === "" ? undefined : (try reviewedPaths([path]))?.[0]
+    if (path !== "" && token === undefined) return undefined
+    const parent = try destination(path)
+    if (parent === undefined || !(try (try Device).showing())) return undefined
+    return { targets: [], where: place, parent: { path, place: parent, ...(token === undefined ? {} : { token }) } }
+  }
   const snapshot = "shown" in operation ? try byShown(typeof operation.shown === "number" ? [operation.shown] : operation.shown) : undefined
   const paths = "paths" in operation ? operation.paths : "path" in operation ? [operation.path] : snapshot?.map((one) => one.path)
   if (paths === undefined || paths.length === 0 || paths.length > 50 || new Set(paths).size !== paths.length) return undefined
@@ -328,9 +344,12 @@ export effect function fileAction(operation: DeviceOperation, call: ExecutorCall
       return filtered.ok ? applied : notShown
     }
     case "files_folder_create": {
-      if (!(try primaryAt(folder, operation.parent))) return notShown
-      const file: Item = { id: 0, name: "", kind: "Other", volume: 0, bytes: 0, revision: 0 }
-      const receipt = try approved({ ticket: request, act: "Making", file, folder, name: operation.name, dest: nowhere }, false)
+      const parent = review?.parent
+      if (parent === undefined || parent.path !== operation.parent || review?.where === undefined || !(try promise(current))) return unchanged
+      try answers.bind(request, { targets: [], where: review.where, parent, current })
+      const receipt = try ensuring(admitted(request, {
+        type: "approveNewFolder", ticket: request, name: operation.name, parentPlace: parent.place, reviewedFrom: review.where, guarded: false,
+      }), answers.clear(request))
       return result(receipt)
     }
     case "files_share":

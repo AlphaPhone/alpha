@@ -361,8 +361,11 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
     runtime.runSync(Drafts.use((drafts) => drafts.write(thread, next)));
     void send(event);
   };
+  const outgoing = state.outgoing;
+  const here = outgoing.thread === thread;
+  const checking = here && uncertain(outgoing);
   const sendNow = { type: "send", supported: runtime.runSync(supported(state.recipients, pictures.length)), clear: clear(phone) } as const;
-  const sendable = (Boolean(text.trim()) || pictures.length > 0) && can(sendNow);
+  const sendable = (checking || Boolean(text.trim()) || pictures.length > 0) && can(sendNow);
   const submit = () => {
     if (!sendable) return;
     runtime.runSync(prepare(thread, state.sims > 1 ? state.sim : null));
@@ -375,9 +378,6 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
     focus.current = true;
     dock.close();
   };
-  const outgoing = state.outgoing;
-  const here = outgoing.thread === thread;
-  const checking = here && uncertain(outgoing);
   const sendLabel = checking ? "Check send status" : "Send";
   const alpha = state.slot.author === "AlphaWrote";
   const addressed = title === addresses.join(", ") ? title : `${title} · ${addresses.join(", ")}`;

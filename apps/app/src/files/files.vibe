@@ -353,9 +353,24 @@ effect function performed(ticket: number, work: string, items: ReadonlyArray<Ite
     if (work === "NewFolder") {
       const at = try spotOf(folder)
       if (Option.isNone(at)) return { type: "finished", ticket, done, failed: [folder] }
+      const change = (try (try Browser.Machine).get()).change
+      if (change.attempt.id !== ticket) return unknown
+      if (change.approval > 0) {
+        const approved = try (try Answers).reviewed(change.approval)
+        const parent = approved?.parent
+        const refused: Event = { type: "finished", ticket, done, failed: [folder] }
+        if (approved === undefined || parent === undefined || at.value.volume !== primary || at.value.path !== parent.path || folder !== parent.place.folder) return refused
+        if (parent.token !== undefined) {
+          const read = try called("storageReviewedIdentities", (plugin) => plugin.storageReviewedIdentities({ volume: primary, paths: [parent.path] }))
+          if (read.status !== "ready" || read.reviewed?.length !== 1 || read.reviewed[0] !== parent.token) return refused
+        }
+        if (!(try reviewCurrent(approved))) return refused
+      }
       const reply = try called("storageCreateFolder", (plugin) => plugin.storageCreateFolder({ volume: at.value.volume, parent: at.value.path, name }))
-      if (reply.status === "ready" && reply.path !== undefined) done.push(try (try Handles).of({ volume: at.value.volume, path: reply.path }))
-      else failed.push(folder)
+      if (reply.status === "ready") {
+        if (reply.path === undefined || reply.path === "" || parentOf(reply.path) !== at.value.path) return unknown
+        done.push(try (try Handles).of({ volume: at.value.volume, path: reply.path }))
+      } else failed.push(folder)
       return { type: "finished", ticket, done, failed }
     }
     if (work === "Rename") {
