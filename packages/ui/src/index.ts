@@ -210,3 +210,6 @@ export * from "./components/photos/PhotoTrashRow.tsx";
 export * from "./components/browser/BrowserMenu.tsx";
 export * from "./components/browser/BrowserTabs.tsx";
 export * from "./components/browser/BrowserFindBar.tsx";
+export * from "./components/wallet/WalletAddress.tsx";
+export * from "./components/wallet/WalletAmount.tsx";
+export * from "./components/wallet/WalletQr.tsx";
