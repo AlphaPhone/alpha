@@ -207,7 +207,7 @@ function ReminderRow({
         aria-label={item.flagged ? `Unflag ${item.title}` : `Flag ${item.title}`}
         aria-pressed={item.flagged}
         onClick={() => onToggleFlag(item.id)}
-        className={item.flagged ? "text-warn" : "text-muted-foreground"}
+        className={item.flagged ? "text-primary [&_svg]:fill-current" : "text-muted-foreground"}
       >
         <Star className="size-4" />
       </Button>
