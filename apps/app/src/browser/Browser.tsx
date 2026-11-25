@@ -1,6 +1,6 @@
 // spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/index.md, "Story: Let the agent open a page"; spec/app/browser/share.md, "Story: Share the page"; spec/app/browser/share.md, "Story: Open the page in another browser"; spec/app/browser/library.md, "Story: Keep bookmarks"; spec/app/browser/library.md, "Story: Look back through history"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"; spec/app/browser/address.md, "Story: Browse privately"
-import { Alert, Banner, Button, BrowserAddressBar, Card, ListRow, Sheet, SheetContent, BrowserFindBar, BrowserBar, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserTabs, ConfirmDialog, PrivateMark } from "@repo/ui";
-import { Bookmark, BookmarkMinus, ChevronLeft, ExternalLink, History, Plus, RotateCw, Search, Share2, Square, Trash2 } from "lucide-react";
+import { Alert, Button, BrowserAddressBar, Card, ListRow, Sheet, SheetContent, BrowserFindBar, BrowserBar, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserTabs, ConfirmDialog, PrivateMark } from "@repo/ui";
+import { ArrowUpRight, ChevronLeft, Clock, ExternalLink, Plus, RotateCw, Search, Share2, Square, Star, Trash2, X } from "lucide-react";
 import { Effect } from "effect";
 import { useState, useSyncExternalStore } from "react";
 import { canAskErase, canCancelErase, canConfirmErase, canOpenTab } from "../../gen/app__browser.ts";
@@ -89,11 +89,12 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     can({ type: "stop" }) && { label: "Stop", name: "Stop loading", icon: <Square />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => send({ type: "stop" })); } },
     canOpenTab(tabs, "Normal") && { label: "New tab", icon: <Plus />, onSelect: () => opening("Normal")?.() },
     canOpenTab(tabs, "Private") && { label: "Private tab", name: "New private tab", icon: <PrivateMark aria-hidden />, onSelect: () => opening("Private")?.() },
-    can({ type: "openFind" }) && { label: "Find", name: "Find in page", icon: <Search />, onSelect: () => { setFinding(""); void browser.send({ type: "uncover" }).then(() => send({ type: "openFind" })); } },
-    committed !== "" && !marked && library.can(mark) && { label: "Bookmark", name: "Bookmark this page", icon: <Bookmark />, onSelect: marking(mark) },
-    marked && library.can({ type: "unmark" }) && { label: "Remove bookmark", icon: <BookmarkMinus />, onSelect: marking({ type: "unmark" }) },
-    browser.can({ type: "cover", layer: "Library" }) && { label: "History", name: "Bookmarks and history", icon: <History />, onSelect: () => void browser.send({ type: "cover", layer: "Library" }) },
+    committed !== "" && !marked && library.can(mark) && { label: "Bookmark", name: "Bookmark this page", icon: <Star />, onSelect: marking(mark) },
+    marked && library.can({ type: "unmark" }) && { label: "Bookmarked", name: "Remove bookmark", icon: <Star className="fill-current" />, onSelect: marking({ type: "unmark" }) },
+    browser.can({ type: "cover", layer: "Library" }) && { label: "Library", name: "Bookmarks and history", icon: <Clock />, onSelect: () => void browser.send({ type: "cover", layer: "Library" }) },
     share.can({ type: "openPanel", ready }) && { label: "Share", icon: <Share2 />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => share.send({ type: "openPanel", ready })); } },
+    can({ type: "openFind" }) && { label: "Find", name: "Find in page", icon: <Search />, onSelect: () => { setFinding(""); void browser.send({ type: "uncover" }).then(() => send({ type: "openFind" })); } },
+    share.can(elsewhere) && { label: "Open externally", name: "Open in another browser", icon: <ArrowUpRight />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => share.send(elsewhere)); } },
     canAskErase(tabs) && { label: "Clear all", name: "Clear all browsing data", icon: <Trash2 />, onSelect: () => void browser.send({ type: "askErase" }) },
   ];
   const stood = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.sought(tab)));
@@ -110,11 +111,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   });
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      {tabs.agent !== 0 && (
-        <Banner action={browser.can({ type: "takeOver" }) && <Button size="sm" variant="outline" onClick={() => void browser.send({ type: "takeOver" })}>Stop and take over</Button>}>
-          Alpha is using a tab
-        </Banner>
-      )}
+
       {editing
         ? <BrowserAddressBar leading={leading} value={typed} onValueChange={setTyped} onSubmit={submit} onCancel={() => void browser.send({ type: "uncover" })} />
         : <BrowserBar
@@ -132,6 +129,18 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
             onMenu={cover("Menu")}
           />}
       {state.phase === "Loading" && <div role="progressbar" aria-label="Loading website" className="h-0.75 shrink-0 overflow-hidden bg-secondary"><div className="h-full w-1/3 bg-primary" /></div>}
+      {tabs.agent !== 0 && (
+        <div role="status" className="mx-3 mt-0.5 mb-2 flex shrink-0 items-center gap-3 rounded-full bg-alpha py-1.5 pr-1.5 pl-4.5 text-alpha-foreground motion-safe:animate-drop">
+          <span aria-hidden className="size-2 shrink-0 rounded-full bg-alpha-foreground" />
+          <span className="grow text-sm font-semibold">Alpha is using a tab</span>
+          {browser.can({ type: "takeOver" }) && (
+            <button type="button" aria-label="Stop and take over" onClick={() => void browser.send({ type: "takeOver" })}
+              className="flex size-10 shrink-0 items-center justify-center rounded-full bg-alpha-foreground text-alpha focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-alpha-foreground">
+              <X aria-hidden className="size-4.5" />
+            </button>
+          )}
+        </div>
+      )}
       <div inert={tabs.layer !== "Uncovered"} className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
         {state.phase === "Blank"
           ? <BrowserNewTab private={state.kind === "Private"} onSearch={cover("Address") && (() => { setTyped(""); void browser.send({ type: "cover", layer: "Address" }); })} />
