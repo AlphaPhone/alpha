@@ -220,7 +220,7 @@ async function handleRemindersManage(
   if (op === "list" || op === "query") {
     const items = queryReminders(store, params, timeZone);
     const lines = items.map((item) => `- ${item.title}${formatDueSummary(item)}${item.flagged ? " [flagged]" : ""}${item.priority !== "none" ? ` [${item.priority}]` : ""} (${item.id})`);
-    return { success: true, text: lines.length === 0 ? "No matching reminders." : `Reminders:\n${lines.join("\n")}`, data: { op, items, lists: store.getReminders().lists } };
+    return { success: true, text: lines.length === 0 ? "No matching reminders." : `Reminders:\n${lines.join("\n")}`, data: { op, items, lists: store.getReminders().lists, readOnlyOperation: true } };
   }
   if (op === "create") {
     const title = readString(params, "title") ?? text.trim();
@@ -311,14 +311,14 @@ export function remindersAction(store: AlphaAppsStore, timeZone: string): AgentA
   const action: AgentAction = {
     name: "REMINDERS_MANAGE",
     similes: ["MANAGE_REMINDERS", "ALPHA_REMINDERS", "REMINDER_LISTS"],
-    description: "Create, list, query, update, complete, reopen, snooze, reschedule, flag, move, delete reminders, manage custom lists, and add/toggle subtasks in Alpha Reminders.",
+    description: "Manage reminders, custom lists, subtasks, flags, priorities, and smart views in the Alpha Reminders app (use this for Alpha Reminders lists, items, subtasks, flags, and smart views; use OWNER_REMINDERS for scheduled nudge or escalation reminders).",
     parameters: [
       {
         name: "op", description: "What to do: list or query reminders, create, update, complete, reopen, snooze, flag, move or delete one, add or toggle a subtask, or create, rename or delete a list.", required: true,
         schema: { type: "string", enum: ["list", "query", "create", "update", "complete", "reopen", "snooze", "flag", "move", "delete", "add_subtask", "toggle_subtask", "create_list", "rename_list", "delete_list"] },
       },
       { name: "title", description: "The reminder's title to create one; for other operations, the title of the reminder to act on.", required: false, schema: { type: "string" } },
-      { name: "id", description: "The reminder's id, as the Reminders context lists it, to act on one reminder.", required: false, schema: { type: "string" } },
+      { name: "id", description: "The reminder's id from a prior list or query call in this turn, to act on one reminder.", required: false, schema: { type: "string" } },
       { name: "newTitle", description: "A new title for update.", required: false, schema: { type: "string" } },
       { name: "notes", description: "The reminder's notes.", required: false, schema: { type: "string" } },
       { name: "dueDate", description: "The day it is due, as YYYY-MM-DD in the owner's time zone.", required: false, schema: { type: "string" } },

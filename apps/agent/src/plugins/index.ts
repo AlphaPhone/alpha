@@ -40,6 +40,18 @@ export function createAlphaAppsPlugin(options: {
   const plugin: AgentPlugin = {
     name: alphaAppsPluginName,
     description: "Alpha first-party Clock and Reminders actions, providers, views, and HTTP sync routes.",
+    init: (_config, runtime) => {
+      const contexts = (runtime as { contexts?: { tryRegister?: (ctx: unknown) => void } } | undefined)?.contexts;
+      contexts?.tryRegister?.({
+        id: "clock",
+        label: "Clock",
+        description: "Alarms, countdown timers, and world clock.",
+        descriptionCompressed: "Alarms, timers, and world clock.",
+        sensitivity: "personal",
+        cacheScope: "agent",
+      });
+      return Promise.resolve();
+    },
     actions: [...clockActions(store, timeZone), remindersAction(store, timeZone)],
     providers: [clockProvider(store, timeZone), remindersProvider(store, timeZone)],
     views,

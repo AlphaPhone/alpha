@@ -271,6 +271,15 @@ The file belongs only to the spoken turn and does not enter the typed draft.
 ```quint
 type OpenDocumentTurn = { filesShowing: bool, readable: bool, explicitlyRequested: bool, sensitive: bool, currentTurn: bool }
 
+pure val docValues: Set[OpenDocumentTurn] = Set(
+  { filesShowing: true, readable: true, explicitlyRequested: true, sensitive: false, currentTurn: true },
+  { filesShowing: true, readable: true, explicitlyRequested: true, sensitive: true, currentTurn: true },
+  { filesShowing: true, readable: false, explicitlyRequested: true, sensitive: false, currentTurn: true },
+  { filesShowing: false, readable: true, explicitlyRequested: true, sensitive: false, currentTurn: true },
+  { filesShowing: true, readable: true, explicitlyRequested: false, sensitive: false, currentTurn: true },
+  { filesShowing: true, readable: true, explicitlyRequested: true, sensitive: false, currentTurn: false },
+)
+
 pure def sendsOpenDocument(source: Source, doc: OpenDocumentTurn): bool =
   source == Spoken and doc.filesShowing and doc.readable and doc.explicitlyRequested and not(doc.sensitive) and doc.currentTurn
 

@@ -7,7 +7,10 @@
 { "method": "POST", "path": "/api/conversations/{id}/messages" }
 { "method": "POST", "path": "/api/conversations/{id}/messages/stream", "stream": true }
 { "method": "POST", "path": "/api/conversations/{id}/fork" }
+{ "method": "POST", "path": "/api/turns/warm" }
 { "method": "POST", "path": "/api/turns/{roomId}/abort" }
+{ "method": "POST", "path": "/api/views/interact-claim" }
+{ "method": "POST", "path": "/api/views/interact-result" }
 { "method": "GET", "path": "/api/client-devices/capabilities" }
 { "method": "POST", "path": "/api/client-devices/register" }
 { "method": "GET", "path": "/api/client-devices/context" }

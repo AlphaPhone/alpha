@@ -246,7 +246,7 @@ function handleClockAlarm(store: AlphaAppsStore, timeZone: string, params: Recor
   const snapshot = store.getClock();
   if (op === "list") {
     const lines = snapshot.alarms.map((a) => `${formatHourMinute(a.hour, a.minute)}${a.label ? ` (${a.label})` : ""} — ${a.enabled ? a.phase : "off"} [${a.id}]`);
-    return { success: true, text: lines.length === 0 ? "No alarms set." : `Alarms:\n${lines.join("\n")}`, data: { op, alarms: snapshot.alarms } };
+    return { success: true, text: lines.length === 0 ? "No alarms set." : `Alarms:\n${lines.join("\n")}`, data: { op, alarms: snapshot.alarms, readOnlyOperation: true } };
   }
   if (op === "set" || op === "create") {
     const parsed = parseAlarmTime(params, text);
@@ -306,7 +306,7 @@ function handleClockTimer(store: AlphaAppsStore, params: Record<string, unknown>
   const snapshot = store.getClock();
   if (op === "list") {
     const lines = snapshot.timers.map((t) => `${t.label || "Timer"}: ${formatDuration(t.remainingMs)} (${t.status}) [${t.id}]`);
-    return { success: true, text: lines.length === 0 ? "No timers active." : `Timers:\n${lines.join("\n")}`, data: { op, timers: snapshot.timers } };
+    return { success: true, text: lines.length === 0 ? "No timers active." : `Timers:\n${lines.join("\n")}`, data: { op, timers: snapshot.timers, readOnlyOperation: true } };
   }
   if (op === "start" || op === "create") {
     const durationMs = parseTimerDurationMs(params, text);
@@ -343,7 +343,7 @@ function handleClockWorld(store: AlphaAppsStore, params: Record<string, unknown>
   const snapshot = store.getClock();
   if (op === "list") {
     const lines = snapshot.world.map((c) => `${c.city} (${c.timeZone}): ${formatClockTime(nowMs, c.timeZone)}`);
-    return { success: true, text: lines.length === 0 ? "No pinned world cities." : `World clock:\n${lines.join("\n")}`, data: { op, world: snapshot.world } };
+    return { success: true, text: lines.length === 0 ? "No pinned world cities." : `World clock:\n${lines.join("\n")}`, data: { op, world: snapshot.world, readOnlyOperation: true } };
   }
   const query = readString(params, "city") ?? readString(params, "timeZone") ?? readString(params, "query") ?? text.replace(/.*?\b(?:in|add|pin|remove|delete)\s+/i, "").replace(/[?.!]+$/, "").trim();
   if (op === "remove_city") {
@@ -361,7 +361,7 @@ function handleClockWorld(store: AlphaAppsStore, params: Record<string, unknown>
     const added = store.addWorldCity(resolved);
     return { success: true, text: `Added ${added.city} (${formatClockTime(nowMs, added.timeZone)}) to World Clock.`, data: { op, city: added } };
   }
-  return { success: true, text: `It is ${formatClockTime(nowMs, resolved.timeZone)} in ${resolved.city}.`, data: { op: "time_in", city: resolved, formatted: formatClockTime(nowMs, resolved.timeZone) } };
+  return { success: true, text: `It is ${formatClockTime(nowMs, resolved.timeZone)} in ${resolved.city}.`, data: { op: "time_in", city: resolved, formatted: formatClockTime(nowMs, resolved.timeZone), readOnlyOperation: true } };
 }
 
 type ClockActionResult = NonNullable<Awaited<ReturnType<AgentAction["handler"]>>>;
@@ -369,7 +369,7 @@ type ClockActionResult = NonNullable<Awaited<ReturnType<AgentAction["handler"]>>
 type ClockParameters = NonNullable<AgentAction["parameters"]>;
 
 const idParameter = (thing: string): ClockParameters[number] =>
-  ({ name: "id", description: `The ${thing}'s id, as the Clock context lists it, to act on one ${thing}.`, required: false, schema: { type: "string" } });
+  ({ name: "id", description: `The ${thing}'s id from a prior list call in this turn, to act on one ${thing}.`, required: false, schema: { type: "string" } });
 const labelParameter = (thing: string): ClockParameters[number] =>
   ({ name: "label", description: `The ${thing}'s name, only when the owner gave one.`, required: false, schema: { type: "string" } });
 

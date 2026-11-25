@@ -393,7 +393,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
         ], { concurrency: "unbounded" })
         : Effect.void
       const warmCloud = network
-        ? ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/cloud/warm"), {}), Schema.Unknown))
+        ? ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/turns/warm"), {}), Schema.Unknown))
         : Effect.void
       if (network && registered(CLOUD_STREAM_PLUGIN)) {
         const relay = relayPlugin()
@@ -458,8 +458,8 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
       return capture.fullDuplex
     }
     if (!registered(LOCAL_PLUGIN)) throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "no-voice-plugin" })
-    const live = tryPromise(() => localPlugin().liveCaptureStatus({})) catch () => undefined
-    if (live?.available !== true || live.nativeTransport !== true) {
+    const status = try probeStatus(true)
+    if (!status.liveCapture) {
       throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "resident-speech-transport-unavailable" })
     }
     if (!(try restoreLocalOutput((owner) => owner !== session))) {
@@ -761,7 +761,7 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
     effect prewarm(network: boolean): void!!Agent {
       if (!network || warmedCloud) return
       warmedCloud = true
-      try ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/cloud/warm"), {}), Schema.Unknown))
+      try ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/turns/warm"), {}), Schema.Unknown))
     },
     streamTimings: () => succeed<unknown>(undefined),
     probeStatus: () => succeed<SpeechStatus>({ ready: false, ttsReady: false, liveCapture: false }),

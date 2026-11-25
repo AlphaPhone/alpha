@@ -1,7 +1,8 @@
-// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"; spec/app/voice/index.md, "A spoken reply says a written date, clock time, range and percentage in words"; spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"
+// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"; spec/app/voice/index.md, "A spoken reply says a written date, clock time, range and percentage in words"; spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"; spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s"
 import { ConversationRecord, TurnController, type TurnContext } from "@elizaos/agent"
 import { Machine as Conversation, type Context as Screen } from "../../gen/app__assistant.effect.vibe"
 import { sendsOpenDocument } from "../../gen/app__assistant__context.effect.vibe"
+import { cueBoundMs, cueOnReply } from "../../gen/app__assistant__reply.ts"
 import { Machine as Phone } from "../../gen/app__phone.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
@@ -36,7 +37,7 @@ export interface VoiceMemory {
   conversation: ConversationRecord | undefined
   heardText: string
   lastReply: string
-  readonly queuedSentences: string[]
+  readonly queuedSentences: Array<{ readonly text: string; readonly cue: boolean }>
   dispatchedSentences: number
   playbackTurn: number
   playbackEpoch: number
@@ -50,8 +51,9 @@ export interface VoiceMemory {
     readonly attachment: Attached | undefined
     readonly explicitlyRequested: boolean
   }!!) | undefined
-  enqueueSentence(turn: number, text: string): void
-  dequeueSentence(turn: number): { readonly text: string; readonly append: boolean } | undefined
+  enqueueSentence(turn: number, text: string, cue?: boolean): void
+  dropPendingCue(turn: number): boolean
+  dequeueSentence(turn: number): { readonly text: string; readonly append: boolean; readonly cue: boolean } | undefined
   clearQueued(): void
 }
 
@@ -74,21 +76,29 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
     dictatedText: "",
     fillTarget: undefined,
     screen: undefined,
-    enqueueSentence(turn: number, text: string) {
+    enqueueSentence(turn: number, text: string, cue = false) {
       if (memory.playbackTurn !== turn) {
         memory.playbackTurn = turn
         memory.queuedSentences.length = 0
         memory.dispatchedSentences = 0
       }
-      memory.queuedSentences.push(text)
+      memory.queuedSentences.push({ text, cue })
+    },
+    dropPendingCue(turn: number) {
+      if (memory.playbackTurn !== turn) return false
+      const idx = memory.queuedSentences.findIndex((entry) => entry.cue)
+      if (idx < 0) return false
+      if (cueOnReply("Preparing") !== "Dropped") return false
+      memory.queuedSentences.splice(idx, 1)
+      return true
     },
     dequeueSentence(turn: number) {
       if (memory.playbackTurn !== turn) return undefined
-      const text = memory.queuedSentences.shift()
-      if (text === undefined) return undefined
+      const entry = memory.queuedSentences.shift()
+      if (entry === undefined) return undefined
       const append = memory.dispatchedSentences > 0
       memory.dispatchedSentences += 1
-      return { text, append }
+      return { text: entry.text, append, cue: entry.cue }
     },
     clearQueued() {
       memory.playbackEpoch += 1
@@ -297,8 +307,8 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       navClaimed = true
       Queue.offerUnsafe(queue, { type: "agentNavigates", session, place })
     }
-    const say = (sentence: string) => {
-      memory.enqueueSentence(turn, spokenForm(sentence))
+    const say = (sentence: string, cue = false) => {
+      memory.enqueueSentence(turn, spokenForm(sentence), cue)
       Queue.offerUnsafe(queue, { type: "sentence", session, turn })
     }
     const sayFrom = (written: string, final: boolean) => {
@@ -306,6 +316,9 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       said += split.consumed
       for (const sentence of split.ready) say(sentence)
     }
+    let ackSpoken = false
+    let readyHandled = false
+    let viewDispatched = false
     const feed = (written: string, provisional: boolean) => {
       if (provisional) return
       emitNavigation(written)
@@ -314,6 +327,31 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       if (clean.length <= shown.length) return
       shown = clean
       sayFrom(clean, false)
+    }
+    const acknowledge = (cue: string) => {
+      if (ackSpoken || readyHandled) return
+      const clean = speakableText(cue).trim()
+      if (clean === "") return
+      ackSpoken = true
+      say(clean, true)
+    }
+    const ready = (fullText: string, actionResults: ReadonlyArray<{ readonly action: string; readonly data: unknown }>) => {
+      if (readyHandled) return
+      readyHandled = true
+      memory.dropPendingCue(turn)
+      if (sameScreen && views !== undefined && !viewDispatched) {
+        const prepared = preparedIn(actionResults, views.clientId)
+        if (prepared !== undefined) {
+          viewDispatched = true
+          void Effect.runPromise(views.spoken({ asked, handoff: prepared }))
+        }
+      }
+      memory.lastReply = fullText
+      emitNavigation(fullText)
+      if (replyNeedsReview(fullText)) return
+      const full = speakableText(fullText)
+      if (full.length > shown.length) shown = full
+      sayFrom(full.length >= shown.length ? full : shown, true)
     }
     const observation = told && screen !== undefined && memory.screen !== undefined ? try memory.screen(screen.context, spoken) : undefined
     const current = Option.isSome(conversation) ? try conversation.value.get() : undefined
@@ -336,7 +374,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     const metadata = sameScreen ? { ...observation?.metadata, ...(views === undefined ? {} : delivery(views.clientId)) } : {}
     const result = tryPromise(() => controller.send({
       text: spoken, channelType: "VOICE_DM", ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }),
-    }, { stream: { onPreview: feed } })) catch () => undefined
+    }, { stream: { onPreview: feed, onAcknowledgment: acknowledge, onReady: ready } })) catch () => undefined
     if (isCloudFundsRefusal(result)) {
       memory.lastReply = ""
       Queue.offerUnsafe(queue, { type: "refusedForFunds", session, turn })
@@ -344,17 +382,22 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       return
     }
     const finalText = result?.kind === "Replied" ? result.reply.text : ""
-    const prepared = sameScreen && views !== undefined && result?.kind === "Replied" ? preparedIn(result.reply.actionResults, views.clientId) : undefined
-    if (views !== undefined && prepared !== undefined) try views.spoken({ asked, handoff: prepared })
+    const prepared = !viewDispatched && sameScreen && views !== undefined && result?.kind === "Replied" ? preparedIn(result.reply.actionResults, views.clientId) : undefined
+    if (views !== undefined && prepared !== undefined) {
+      viewDispatched = true
+      try views.spoken({ asked, handoff: prepared })
+    }
     memory.lastReply = finalText
     emitNavigation(finalText)
     const asks = replyNeedsReview(finalText)
     if (asks) {
+      memory.dropPendingCue(turn)
       memory.reviewNotice = finalText
       Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: true })
       Queue.endUnsafe(queue)
       return
     }
+    memory.dropPendingCue(turn)
     const full = speakableText(finalText)
     sayFrom(full.length >= shown.length ? full : shown, true)
     Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false })
@@ -411,7 +454,8 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
         if (memory.playbackEpoch !== epoch) return
         const piece = memory.dequeueSentence(turn)
         if (piece !== undefined) {
-          try ignore((try VoiceBridge).playSentence(session, turn, piece.text, piece.append))
+          const play = ignore((try VoiceBridge).playSentence(session, turn, piece.text, piece.append))
+          try (piece.cue ? Effect.asVoid(Effect.timeoutOption(play, cueBoundMs)) : play)
         }
       })
       return { type: "sentencePlayed", session, turn }

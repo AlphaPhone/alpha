@@ -679,4 +679,33 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect([after.recorder.stage, after.permission.asked]).toEqual(["Closed", true]);
     expect([document.querySelector("[role=alertdialog], [role=alert], [role=note], [role=status], section[aria-label='Voice transcription']"), world.voice.permission]).toEqual([null, "denied"]);
   });
+
+  // spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s"
+  it("speaks acknowledgment cues at once and begins speaking the reply on reply_ready before done without duplicating on done", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const runtime = await startListening(world);
+
+    let releaseDone: (() => void) | undefined;
+    world.ask.acknowledgment = "Let me check.";
+    world.ask.nextReplyChunks = ["You have no alarms set."];
+    world.ask.nextReplyProvisional = true;
+    world.ask.holdDoneAfterReady = new Promise<void>((resolve) => { releaseDone = resolve; });
+
+    speakUtterance(world, "Check my alarms");
+    // Spoken acknowledgment starts at once and reply begins speaking from `reply_ready` BEFORE `done` is released.
+    await untilCondition(
+      runtime,
+      () => world.voice.spoken.some((entry) => entry.text.includes("You have no alarms set.")),
+      () => world.voice.spoken,
+    );
+    expect(world.voice.spoken.map((entry) => ({ text: entry.text, append: entry.append }))).toEqual([
+      { text: "Let me check.", append: false },
+      { text: "You have no alarms set.", append: true },
+    ]);
+
+    releaseDone?.();
+    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 1 && s.turn === 2);
+    expect(world.voice.spoken.filter((entry) => entry.text.includes("You have no alarms set.")).length).toBe(1);
+    world.ask.acknowledgment = undefined;
+  });
 });
