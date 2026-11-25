@@ -428,7 +428,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           fieldRef: composerField,
           value: subject === undefined ? seen.typed : request,
           onValueChange: type,
-          placeholder: onComms ? "Ask Alpha" : assistantDetent === "Bar" && currentView === "Browser" ? "Ask about this page" : undefined,
+          placeholder: onComms ? "Ask Alpha" : undefined,
           leading: onComms ? <CommsTarget runtime={runtime} placement="composer" /> : undefined,
           closed: subject === undefined && !composer.can({ type: "edit", blank: false, long: false }),
           notice: notice === undefined || onComms ? undefined : {

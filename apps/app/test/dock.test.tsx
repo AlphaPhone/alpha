@@ -65,7 +65,7 @@ describe("Ask Alpha dock and shell navigation", () => {
     const textarea = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
     expect(section?.getAttribute("data-alpha-detent")).toBe("bar");
     expect(document.querySelectorAll("[data-host-chrome]").length).toBeGreaterThanOrEqual(3);
-    expect(textarea?.placeholder).toBe("Ask about this page");
+    expect(textarea?.placeholder).toBe("Ask Alpha");
 
     await act(async () => {
       textarea?.focus();

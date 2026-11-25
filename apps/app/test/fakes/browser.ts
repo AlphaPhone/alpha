@@ -35,6 +35,7 @@ export interface BrowserScene {
   /** Every call the page made, by method. */
   readonly calls: string[];
   readonly shared: BrowserPageGuard[];
+  readonly external: (BrowserPageGuard & { readonly privateConfirmed?: boolean })[];
   /** Simulate a page-initiated redirect when Android next places a tab. */
   redirectOnPresent?: string;
   showInFiles: (() => void) | undefined;
@@ -139,6 +140,7 @@ export function browserScene(): BrowserScene {
     shown: undefined,
     calls: [],
     shared: [],
+    external: [],
     showInFiles: undefined,
   };
 }
@@ -311,7 +313,14 @@ export function alphaBrowser(world: BrowserScene): Faked {
         world.shared.push(options);
         return Promise.resolve(stateOf(tab));
       },
-      openExternalBrowser: () => Promise.resolve(),
+      openExternalBrowser: (options) => {
+        const tab = held(options);
+        if (world.shown?.id !== tab.id || !tab.committed || tab.loading || options.navigation !== String(tab.navigation) || options.url !== tab.history[tab.at] || (tab.private && !options.privateConfirmed)) {
+          return Promise.reject(rejection("Current page changed"));
+        }
+        world.external.push(options);
+        return Promise.resolve();
+      },
       downloads: ({ session: requested }) => {
         world.calls.push("downloads");
         world.showInFiles = () => {

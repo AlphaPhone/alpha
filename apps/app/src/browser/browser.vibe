@@ -5,6 +5,7 @@ import * as Tabs from "../../gen/app__browser.effect.vibe"
 import type { Browser, Effect as TabsOut, Event as TabsEvent } from "../../gen/app__browser.effect.vibe"
 import * as Address from "../../gen/app__browser__address.effect.vibe"
 import type { Effect as PageOut, Event as PageEvent, Page } from "../../gen/app__browser__address.effect.vibe"
+import { Machine as Settings } from "../../gen/app__settings.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Machine as Layers, pageInert } from "../../gen/app__shell__layers.effect.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
@@ -377,6 +378,17 @@ effect function present(tab: number, host: TabHost.Shape): void!! {
   try ignore(tryPromise(() => tab === 0 || place === undefined
     ? plugin.value.present({ session: host.session.session, id: null })
     : plugin.value.present({ session: host.session.session, id: idOf(tab), ...place })))
+}
+
+// spec/app/settings/index.md, "A notice or Ask Alpha may open a section directly, at its top, and Back from it goes to its parent"
+/** Open Alpha's Passwords settings while leaving the same Browser tab available on Back. */
+export const openPasswords: void!!(Tabs.Machine | TabHost | Shell | Settings) = effect {
+  const shell = try Shell
+  if (Option.isNone((try TabHost).plugin) || !showing(try shell.get(), "Browser") || (try (try Tabs.Machine).get()).layer !== "Menu") return
+  if (!(try tellTabs({ type: "uncover" }))) return
+  if (try contained(shell.send({ type: "openView", view: "Settings" }), "opening Settings")) {
+    try contained((try Settings).send({ type: "openSection", page: "PasswordsPage" }), "opening Passwords settings")
+  }
 }
 
 // spec/app/browser/downloads.md, "Story: Download a file"

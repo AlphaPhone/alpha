@@ -1,6 +1,6 @@
 // spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"; spec/app/browser/address.md, "Story: Browse privately"
 import { Button, BrowserAddressBar, type BrowserAddressChoice, BrowserAddressChoices, BrowserFindBar, BrowserBar, BrowserLibrary, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserTabs, ConfirmDialog, PrivateMark } from "@repo/ui";
-import { ChevronLeft, Download, History, Link, Plus, RotateCw, Search, Share2, Square, Star, Trash2 } from "lucide-react";
+import { ChevronLeft, Download, ExternalLink, History, Link, Lock, Plus, RotateCw, Search, Share2, Square, Star, Trash2 } from "lucide-react";
 import { Effect, Option } from "effect";
 import { useState } from "react";
 import { canAskErase, canCancelErase, canConfirmErase, canOpenTab } from "../../gen/app__browser.ts";
@@ -18,9 +18,9 @@ import { TabHost } from "../platform/browser.vibe";
 import type { Alpha, Resident } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 import type { ManagedRuntime } from "effect";
-import { Pages, type PageRuntime, addressOf, copyWebLink, idOf, inputOf, openDownloads, placed } from "./browser.vibe";
+import { Pages, type PageRuntime, addressOf, copyWebLink, idOf, inputOf, openDownloads, openPasswords, placed } from "./browser.vibe";
 import { LibraryRows, markPage, setMark } from "./library.vibe";
-import { type SharePages, offerShare } from "./share.vibe";
+import { SharePages, cancelExternal, offerShare, reviewExternal } from "./share.vibe";
 
 export interface BrowserProps {
   /** Provides the Browser's tabs and each tab's page, `browser` of browser.vibe, over the resident machines and the phone's tab host. */
@@ -70,9 +70,13 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const editing = tabs.layer === "Address";
   const native = Option.isSome(tabHost.plugin);
   const hasLibrary = native || tabHost.web !== undefined;
-  const nativeBinding = native && state.phase === "Shown" ? tabHost.session.pageBinding(idOf(tab)) : undefined;
+  const nativeBinding = native && state.phase === "Shown" ? tabHost.session.pageBinding(idOf(tab), { https: true }) : undefined;
   const canShare = native && share.can({ type: "openPanel", ready: nativeBinding !== undefined });
   const privateTab = state.kind === "Private";
+  const canOpenExternally = nativeBinding !== undefined && share.can({ type: "openExternally", kind: state.kind, secure: true });
+  const reviewedPage = share.state?.handoff.showing
+    ? runtime.runSync(Effect.map(SharePages, ({ external }) => external.page))
+    : undefined;
   const readSuggestions = () => hasLibrary ? loadLibrary(runtime) : undefined;
   const cover = (layer: State["layer"]) => (browser.can({ type: "cover", layer }) ? () => void browser.send({ type: "cover", layer }) : undefined);
   const leading = <AppBack alpha={alpha} />;
@@ -129,6 +133,8 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     canShare && { label: "Share", icon: <Share2 />, onSelect: () => void runtime.runPromise(offerShare("System", nativeBinding)) },
     canShare && nativeBinding !== undefined && { label: "Copy link", icon: <Link />, onSelect: () => void runtime.runPromise(offerShare("Copy", nativeBinding)) },
     binding !== undefined && "load" in binding && { label: "Copy link", icon: <Link />, onSelect: () => void runtime.runPromise(copyWebLink(binding)) },
+    native && { label: "Passwords", name: "Password manager", icon: <Lock />, onSelect: () => void runtime.runPromise(openPasswords) },
+    canOpenExternally && { label: "Open externally", name: "Open externally, passkeys unsupported here", icon: <ExternalLink />, onSelect: () => void runtime.runPromise(reviewExternal(nativeBinding)) },
     native && can({ type: "openFind" }) && { label: "Find", name: "Find in page", icon: <Search />, onSelect: () => { setFinding(""); void browser.send({ type: "uncover" }).then(() => send({ type: "openFind" })); } },
     canAskErase(tabs) && { label: "Clear all", name: "Clear all browsing data", icon: <Trash2 />, onSelect: () => void browser.send({ type: "askErase" }) },
   ];
@@ -190,6 +196,12 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
           onNewPrivate={opening("Private")}
         />
       )}
+      <ConfirmDialog open={tabs.layer === "Menu" && reviewedPage !== undefined}
+        title="Open this private page in another browser?" confirmLabel="Open externally"
+        onConfirm={() => { if (share.can({ type: "confirmExternally" })) void share.send({ type: "confirmExternally" }); }}
+        onCancel={() => void runtime.runPromise(cancelExternal)}>
+        The other browser may save {reviewedPage ? new URL(reviewedPage.url).host : "this page"} in its history.
+      </ConfirmDialog>
       <ConfirmDialog open={tabs.erasing === "Asked"} title="Clear browsing data?" confirmLabel="Clear" destructive
         onConfirm={() => { if (canConfirmErase(tabs)) void browser.send({ type: "confirmErase" }); }}
         onCancel={() => { if (canCancelErase(tabs)) void browser.send({ type: "cancelErase" }); }}>

@@ -6,7 +6,7 @@ import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { say } from "../notices/toasts.vibe"
 import { TabHost, hosted } from "../platform/browser.vibe"
 import { Device } from "../platform/device.vibe"
-import { answer, contained, following, reacting, started, together } from "../runtime/reactor.vibe"
+import { answer, contained, reacting, started, together } from "../runtime/reactor.vibe"
 import { currentPage, idOf, prepareNativePage } from "./browser.vibe"
 
 module page {
@@ -20,9 +20,10 @@ import { foreground } from page
 /** The exact page each admitted choice can use, held until that choice is carried out. */
 export service SharePages {
   readonly pages: Map<number, BrowserPageBinding>
+  readonly external: { page: BrowserPageBinding | undefined }
 }
 
-const choices = Layer.sync(SharePages, () => ({ pages: new Map<number, BrowserPageBinding>() }))
+const choices = Layer.sync(SharePages, () => ({ pages: new Map<number, BrowserPageBinding>(), external: { page: undefined } }))
 
 /** Share the shown native page or copy its address, as selected in the Browser's menu. */
 export effect function offerShare(dest: "System" | "Copy", link: BrowserPageBinding | undefined) {
@@ -45,6 +46,29 @@ export effect function offerShare(dest: "System" | "Copy", link: BrowserPageBind
   pages.clear()
   pages.set(panel, link)
   if (!(try contained(share.send({ type: "choose", dest }), "choosing where to send the Browser page"))) pages.delete(panel)
+}
+
+// spec/app/browser/share.md, "Story: Open the page in another browser"
+/** Hold exactly the native page the menu showed, including its navigation and private status. */
+export effect function reviewExternal(link: BrowserPageBinding) {
+  if (!(try currentPage(link, "Menu"))) return
+  const share = try Share.Machine
+  const kind = link.private ? "Private" : "Normal"
+  const event = { type: "openExternally", kind, secure: true } as const
+  if (!Share.enabled(try share.get(), event)) return
+  const held = (try SharePages).external
+  if (held.page !== undefined) return
+  held.page = link
+  if (!(try contained(share.send(event), "reviewing the page for another browser"))) held.page = undefined
+}
+
+/** Cancel the private review on Back or on the owner's cancel button. */
+export const cancelExternal = effect {
+  const machine = try Share.Machine
+  if (!Share.canCancelExternally(try machine.get())) return false
+  const held = (try SharePages).external
+  held.page = undefined
+  return try contained(machine.send({ type: "cancelExternally" }), "keeping the private page in Alpha")
 }
 
 const absent = (panel: number): Share.Event => ({ type: "delivered", panel, ok: false, shown: false })
@@ -73,12 +97,31 @@ effect function delivered(panel: number, dest: "System" | "Copy") {
   return { type: "delivered", panel, ok, shown } satisfies Share.Event
 }
 
+effect function launched(confirmed: boolean) {
+  const held = (try SharePages).external
+  const link = held.page
+  held.page = undefined
+  if (link === undefined || !(try currentPage(link, "Menu"))) return noBrowser
+  const host = try TabHost
+  if (!host.session.mayOpenElsewhere(link, link.id, confirmed)) return noBrowser
+  const tabs = try Tabs
+  if (!(try contained(tabs.send({ type: "uncover" }), "closing the Browser menu"))) return noBrowser
+  if (!(try prepareNativePage(link)) || !host.session.mayOpenElsewhere(link, link.id, confirmed)) {
+    if (foreground() && showing(try (try Shell).get(), "Browser")) try say("The page changed. Try again from the page.", true)
+    return noBrowser
+  }
+  const guard = host.session.guard(link)
+  const ok = try contained(hosted("openExternalBrowser", (plugin) => plugin.openExternalBrowser({ ...guard, privateConfirmed: confirmed })), "opening another browser")
+  if (!ok && (try currentPage(link, "Uncovered"))) try say("Could not open another browser. Your page is still in Alpha.", true)
+  return { type: "launched", ok, found: true } satisfies Share.Event
+}
+
 const sharingPage = reacting(Share, {
   carry: (fx: Share.Effect) => match (fx) {
     when { tag: "Sheet", let panel }: answer("share the page", delivered(panel, "System"), absent(panel));
     when { tag: "CopyLink", let panel }: answer("copy the page link", delivered(panel, "Copy"), absent(panel));
     when { tag: "Draft", let panel }: answer("retire the unavailable draft handoff", succeed(absent(panel)), absent(panel));
-    when { tag: "Elsewhere" }: answer("retire the unavailable browser handoff", succeed(noBrowser), noBrowser);
+    when { tag: "Elsewhere", let confirmed }: answer("open another browser", launched(confirmed), noBrowser);
   },
 })
 
@@ -86,10 +129,22 @@ const leftBrowser = started(effect {
   const share = try Share.Machine
   const view = Stream.map((try Shell).changes, (shell) => showing(shell, "Browser"))
   const visible = Stream.map(Stream.zipLatest(view, (try Device).visible), ([browser, shown]) => browser && shown)
-  try Stream.runForEach(Stream.filter(Stream.changes(visible), (shown) => !shown), () => contained(share.send({ type: "hidden" }), "retiring Browser sharing"))
+  try Stream.runForEach(Stream.filter(Stream.changes(visible), (shown) => !shown), () => effect {
+    const held = (try SharePages).external
+    held.page = undefined
+    try contained(share.send({ type: "hidden" }), "retiring Browser sharing")
+  })
 }, "Browser sharing visibility")
 
-const changedTab = following(Tabs, (tabs) => tabs.selected, Share.Machine, () => ({ type: "pageChanged" } as const))
+const changedTab = started(effect {
+  const share = try Share.Machine
+  const held = (try SharePages).external
+  const selected = Stream.changes(Stream.map((try Tabs).changes, (tabs) => tabs.selected))
+  try Stream.runForEach(selected, effect (tab) => {
+    if (held.page !== undefined && held.page.id !== idOf(tab)) held.page = undefined
+    try contained(share.send({ type: "pageChanged" }), "retiring sharing for the previous Browser tab")
+  })
+}, "Browser sharing selection")
 
 /** Delivery receipts arrive through the Share machine and each tap can dispatch its held page once. */
 export const sharing = Layer.provideMerge(together(sharingPage, leftBrowser, changedTab), choices)
