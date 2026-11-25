@@ -14,7 +14,7 @@ import { Machine as Page } from "../gen/app__browser__address.effect.vibe";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { executeMedia } from "../src/assistant/media-executors.ts";
 import { readAgentSms } from "../src/messages/agent-send.vibe";
-import { Pages } from "../src/browser/browser.vibe";
+import { idOf, Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
 import home from "../src/home/index.tsx";
 import messages from "../src/messages/index.tsx";
@@ -342,13 +342,14 @@ describe("Messages on an Alpha image", () => {
     await act(async () => links[0]?.click());
     await ready(alpha.runtime, Shell, "Alpha image admitted", (state) => state.trail.at(-1) === "Browser");
     const runtime = browser.runtime(alpha);
-    await ready(runtime, Tabs, "new Browser tab", (state) => state.selected > 1);
+    const linkTab = await vi.waitFor(() => {
+      const committed = [...world.browser.tabs.values()].filter((one) => one.committed && !one.private && one.history.at(-1) === "http://news.example/lunch");
+      if (committed.length !== 1 || !committed[0]) throw new Error(`Browser host did not commit the tapped URL: ${JSON.stringify(world.browser.calls)}`);
+      return committed[0];
+    }, { timeout: 12_000 });
+    await ready(runtime, Tabs, "selected Browser link tab", (state) => idOf(state.selected) === linkTab.id);
     const tab = runtime.runSync(Effect.map(Tabs.use((machine) => machine.get()), (state) => state.selected));
     const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
-    await vi.waitFor(() => {
-      const committed = [...world.browser.tabs.values()].filter((one) => one.committed && !one.private && one.history.at(-1) === "http://news.example/lunch");
-      if (committed.length !== 1) throw new Error(`Browser host did not commit the tapped URL: ${JSON.stringify(world.browser.calls)}`);
-    }, { timeout: 12_000 });
-    await ready(page, Page, "Browser link page", (state) => state.phase === "Shown");
+    await ready(page, Page, "Browser link page", (state) => state.phase === "Shown" && !state.secure);
   });
 });
