@@ -359,8 +359,9 @@ export const characterOf = (email: string) => ({ name: "Alpha", system: `You are
 
 /**
  * Start the agent pack the phone ships (`pnpm --filter @repo/agent build`) as the owner's, over `state`, with `key` as
- * its cloud credential: its bundle, the plugins and modules its policy loads, the actions it allows and the workflow
- * worker it pins; `persist` keeps its conversations in `state`.
+ * its cloud credential: its bundle, the plugins and modules its policy loads, the actions it allows, the workflow
+ * worker it pins and the phone's host context revision, so an enrolled device is offered and shown its proposals as on
+ * the phone; `persist` keeps its conversations in `state`.
  */
 export async function startAgent(state: string, cloud: Cloud, key: DeviceKey, character: { name: string; system: string }, persist: boolean): Promise<Agent> {
   const pack = await builtPack();
@@ -373,6 +374,7 @@ export async function startAgent(state: string, cloud: Cloud, key: DeviceKey, ch
     model: { backend: "cloud", cloudBaseUrl: cloud.api, smallModel: cloud.model, largeModel: cloud.model, imageModel: cloud.model },
     account: { userId: key.accountId, organizationId: key.organizationId },
     embeddings: "none", persistMemory: persist, callerRole: "owner",
+    ...(pack.hostContextRevision === undefined ? {} : { hostContextRevision: pack.hostContextRevision }),
   }), { mode: 0o600 });
   const token = base64url(randomBytes(32));
   const port = await freePort();

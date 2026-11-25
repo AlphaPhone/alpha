@@ -1,9 +1,9 @@
 import * as maplibregl from "maplibre-gl";
 import type { GeoJSONSource, Map as MapLibre, StyleSpecification } from "maplibre-gl";
 import mapWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
-import { Compass, Minus, Plus } from "lucide-react";
+import { Minus, Plus } from "lucide-react";
 import { type ReactNode, useCallback, useRef, useState } from "react";
-import { cn } from "../lib/cn.ts";
+import { cn, focusRing } from "../lib/cn.ts";
 import { Button } from "./Button.tsx";
 
 /** A point of the map in degrees. */
@@ -74,6 +74,10 @@ export interface MapViewProps {
   drawn?: boolean;
   /** Whether to show zoom buttons alongside the compass. */
   zoomControls?: boolean;
+  /** Where the camera first stands, before any `camera` moves it; the whole world from above Africa unless given. */
+  opening?: { at: MapPoint; zoom: number };
+  /** How far the compass stands from the foot of the map, in pixels, when it stands over the map's corner rather than with the zoom buttons. */
+  compassBottom?: number;
   onReady: (surface: number) => void;
   onTrouble: (surface: number, trouble: MapTrouble) => void;
   onPin: (key: string) => void;
@@ -118,6 +122,21 @@ function dot(className: string, label: string, onClick?: () => void): HTMLElemen
   return element;
 }
 
+/** The map accent, `--map`, read from the page: MapLibre's marker and route line take a color, not a class. */
+const mapAccent = (node: HTMLElement) => getComputedStyle(node).getPropertyValue("--map").trim() || "currentColor";
+
+/** Where the phone is: a dot in the map accent ringed in white, the same in both themes. */
+function puck(): HTMLElement {
+  const element = document.createElement("span");
+  element.setAttribute("role", "img");
+  element.setAttribute("aria-label", "Your location");
+  element.className = "pointer-events-none relative block size-7";
+  const spot = document.createElement("span");
+  spot.className = "absolute top-1.25 left-1.25 size-4.5 rounded-full border-3 border-alpha-foreground bg-map shadow-sm";
+  element.append(spot);
+  return element;
+}
+
 interface Painted {
   readonly markers: maplibregl.Marker[];
   here: maplibregl.Marker | undefined;
@@ -132,10 +151,16 @@ function paint(map: MapLibre, painted: Painted, props: MapViewProps, onPin: (key
   const pins = JSON.stringify(props.pins.map((pin) => [pin.key, pin.at, pin.chosen === true]));
   if (pins !== painted.pins) {
     for (const marker of painted.markers.splice(0)) marker.remove();
+    const accent = mapAccent(map.getContainer());
     for (const pin of props.pins) {
-      const look = pin.chosen ? "size-5 bg-destructive" : "size-4 bg-primary";
-      const element = dot(`rounded-full border-2 border-background shadow ${look}`, pin.label, () => onPin(pin.key));
-      painted.markers.push(new maplibregl.Marker({ element }).setLngLat([pin.at.lng, pin.at.lat]).addTo(map));
+      const marker = pin.chosen
+        ? new maplibregl.Marker({ color: accent })
+        : new maplibregl.Marker({ element: dot("size-5.5 cursor-pointer rounded-full border-3 border-map bg-alpha-foreground p-0 shadow-sm", pin.label, () => onPin(pin.key)) });
+      if (pin.chosen) {
+        marker.getElement().setAttribute("role", "img");
+        marker.getElement().setAttribute("aria-label", pin.label);
+      }
+      painted.markers.push(marker.setLngLat([pin.at.lng, pin.at.lat]).addTo(map));
     }
     painted.pins = pins;
   }
@@ -143,8 +168,7 @@ function paint(map: MapLibre, painted: Painted, props: MapViewProps, onPin: (key
   if (spot !== painted.spot) {
     painted.here?.remove();
     painted.here = props.here === undefined ? undefined
-      : new maplibregl.Marker({ element: dot("size-3 rounded-full border-2 border-background bg-primary ring-4 ring-primary/30", "Your location") })
-        .setLngLat([props.here.lng, props.here.lat]).addTo(map);
+      : new maplibregl.Marker({ element: puck() }).setLngLat([props.here.lng, props.here.lat]).addTo(map);
     painted.spot = spot;
   }
   const route = JSON.stringify(props.line ?? []);
@@ -174,7 +198,7 @@ const apart = (a: { x: number; y: number }, b: { x: number; y: number }) => Math
  * nothing: whether a trouble breaks the map, whether the compass shows and what a press does are its owner's.
  */
 export function MapView(props: MapViewProps) {
-  const { label, surface, style, drawn = true, zoomControls = true, children, className } = props;
+  const { label, surface, style, drawn = true, zoomControls = true, compassBottom, children, className } = props;
   const latestRef = useRef(props);
   const [map, setMap] = useState<MapLibre>();
   const [turn, setTurn] = useState({ bearing: 0, pitch: 0 });
@@ -185,6 +209,7 @@ export function MapView(props: MapViewProps) {
     if (!node || !drawn) return;
     const protocol = `alphamap${++protocols}`;
     const chosen = latestRef.current.style;
+    const opening = latestRef.current.opening;
     if (chosen.kind === "raster") {
       maplibregl.addProtocol(protocol, async (params, abort) => {
         const address = /:\/\/tiles\/(\d{1,2})\/(\d{1,7})\/(\d{1,7})$/.exec(params.url);
@@ -199,7 +224,8 @@ export function MapView(props: MapViewProps) {
     try {
       maplibregl.setWorkerUrl(mapWorkerUrl);
       instance = new maplibregl.Map({
-        container: node, style: styleOf(chosen, protocol), center: [0, 20], zoom: 1.5, attributionControl: false,
+        container: node, style: styleOf(chosen, protocol), attributionControl: false,
+        center: opening === undefined ? [0, 20] : [opening.at.lng, opening.at.lat], zoom: opening?.zoom ?? 1.5,
         ...(chosen.kind === "raster" ? { minZoom: chosen.minZoom, maxZoom: chosen.maxZoom } : {}),
       });
     } catch {
@@ -211,7 +237,7 @@ export function MapView(props: MapViewProps) {
     instance.once("style.load", () => { styleLoaded = true; });
     instance.on("load", () => {
       instance.addSource("route", { type: "geojson", data: lineOf([]) });
-      instance.addLayer({ id: "route-line", type: "line", source: "route", paint: { "line-width": 6, "line-color": getComputedStyle(node).getPropertyValue("--primary") || "currentColor" } });
+      instance.addLayer({ id: "route-line", type: "line", source: "route", paint: { "line-width": 6, "line-color": mapAccent(node) } });
       paintedRef.current = { markers: [], here: undefined, pins: "", spot: "", route: "", camera: "" };
       paint(instance, paintedRef.current, latestRef.current, pin);
       setMap(instance);
@@ -273,20 +299,26 @@ export function MapView(props: MapViewProps) {
     map?.getCanvas().focus({ preventScroll: true });
   };
 
+  const compass = map && props.compass(turn.bearing, turn.pitch) && (
+    <button type="button" aria-label="Turn map north up" onClick={northUp}
+      className={cn(focusRing, "flex size-12 items-center justify-center rounded-full bg-background text-foreground shadow-float ring-1 ring-border active:bg-accent dark:shadow-float-dark")}>
+      <svg aria-hidden viewBox="0 0 24 24" className="size-5.5 fill-none stroke-current stroke-2" style={{ transform: `rotate(${-turn.bearing}deg)` }}><path d="M12 3l6 18-6-4-6 4z" strokeLinejoin="round" /></svg>
+    </button>
+  );
+
   return (
     <div className={cn("relative h-72 w-full overflow-hidden rounded-lg bg-muted", className)}>
       <span ref={repaint} hidden />
       <div key={styleKey} ref={mount} role="application" aria-label={label} data-alpha-own-gesture="" className="size-full" />
-      {map && (
+      {map && zoomControls && (
         <div className="absolute top-2 right-2 flex flex-col gap-1">
-          {zoomControls && <Button size="icon" variant="outline" aria-label="Zoom in" onClick={() => map.zoomIn()}><Plus /></Button>}
-          {zoomControls && <Button size="icon" variant="outline" aria-label="Zoom out" onClick={() => map.zoomOut()}><Minus /></Button>}
-          {props.compass(turn.bearing, turn.pitch) && (
-            <Button size="icon" variant="outline" aria-label="Turn map north up" onClick={northUp}>
-              <Compass aria-hidden style={{ transform: `rotate(${-turn.bearing}deg)` }} />
-            </Button>
-          )}
+          <Button size="icon" variant="outline" aria-label="Zoom in" onClick={() => map.zoomIn()}><Plus /></Button>
+          <Button size="icon" variant="outline" aria-label="Zoom out" onClick={() => map.zoomOut()}><Minus /></Button>
+          {compassBottom === undefined && compass}
         </div>
+      )}
+      {map && (!zoomControls || compassBottom !== undefined) && compass && (
+        <div className="absolute right-4.5 z-10" style={{ bottom: compassBottom === undefined ? undefined : `min(${compassBottom}px, calc(100% - 116px))`, top: compassBottom === undefined ? 8 : undefined }}>{compass}</div>
       )}
       {children}
     </div>
