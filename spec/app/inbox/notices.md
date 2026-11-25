@@ -9,6 +9,15 @@ notifications, are the notices area's; a tap comes back here as
 `tapped`, naming the account and message, and opens that message in
 Inbox.
 
+The earlier Alpha checked mail in the background on a native schedule of
+its own, keeping what it watched and where it had read to in the
+encrypted slot `gmail-background:v1`, bound to the cloud key it had. This
+Alpha leaves that slot unread, as [adoption](../platform/adoption.md)
+says, and its check stops with the earlier schedule: after the update,
+watching starts afresh for the account selected in the list, from a
+starting point of its own, so mail that came before that point is not
+noticed.
+
 The shell passes the grant of the account it names as the list holds it,
 whether notifications may be posted, the account selected in the list
 whenever it changes, and tells when the cloud credential changed. Inbox

@@ -542,6 +542,22 @@ pure def chooseAccount(s: Mailbox, account: int): Moved =
   if (readable(placed)) asking(0, placed) else { state: emptied(account, placed), out: List() }
 ```
 
+### The account the owner last chose in the earlier Alpha is chosen once, where the accounts have answered and none is selected, while it is connected
+
+The earlier Alpha kept the Gmail connection last chosen for each cloud
+owner (the cloud environment, user and organization) in the page's
+storage, under `alpha.gmail.account-choice.v1:<owner>`. It moves as
+[adoption](../platform/adoption.md) says: a connection no longer
+connected, or a value that cannot be read, stays where it was.
+
+```quint
+pure def takesTheEarlierChoice(s: Mailbox, account: int): bool =
+  s.accounts.status == R::Loaded and s.selected.account == 0 and canChooseAccount(s, account)
+
+pure def lawAnEarlierChoiceNeverReplacesTheOwnersOwn(s: Mailbox, account: int): bool =
+  s.selected.account != 0 implies not(takesTheEarlierChoice(s, account))
+```
+
 ### A new cloud session starts from nothing, and checks the accounts only once signed in
 
 Signing out, or another owner signing in, drops the selection, the

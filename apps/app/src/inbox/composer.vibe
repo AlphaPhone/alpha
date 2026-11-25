@@ -37,6 +37,8 @@ module pure {
     readonly answers: string | undefined
     /** How Gmail is asked to send it. */
     readonly mode: "compose" | "reply" | "reply-all" | "forward"
+    /** The earlier Alpha's draft this one was carried over from: its account's grant and its own id. */
+    readonly earlier?: string
   }
 
   /** The drafts kept under `text`, or none where nothing readable is kept. @throws {never} */
@@ -86,6 +88,10 @@ export service Letters {
   /** Read back what the phone kept; whether it could be read. */
   load(): boolean!!
   forget(draft: number): void!!
+  /** Whether a draft carried over from the earlier Alpha's draft `earlier` is held. */
+  adopted(earlier: string): boolean
+  /** Hold `words` as the words of `draft` and write them to the phone; nothing of them stays where the phone did not keep them. */
+  adopt(draft: number, words: Words): boolean!!
   clear(): void!!
   /** Gmail's copy of a draft, by the number the rules know it by: its draft id and the digest Gmail holds it at. */
   copy(gmail: number): Copy | undefined
@@ -130,6 +136,14 @@ export const letters = Layer.effect(Letters, effect {
       const { [String(draft)]: _gone, ...rest } = held
       held = rest
       try ignore(kept())
+    },
+    adopted: (earlier: string) => Object.values(held).some((words) => words.earlier === earlier),
+    effect adopt(draft: number, words: Words) {
+      const before = held
+      held = { ...held, [String(draft)]: words }
+      const ok = try kept()
+      if (!ok) held = before
+      return ok
     },
     effect clear() {
       held = {}

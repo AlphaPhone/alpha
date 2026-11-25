@@ -357,11 +357,16 @@ pure def alwaysAnUnseenUnknownIsOfThisSession(s: Operations): bool =
 ### A draft already sent, or whose send is unknown, is never sent again without the owner choosing to
 
 Discovered by the proof: the owner's choice holds for the whole
-operation, through a refusal and a review again.
+operation, through a refusal and a review again. So does a draft the
+earlier Alpha sent, or whose send it could not confirm.
 
 ```quint
 pure def alwaysASendAgainIsChosen(s: Operations): bool =
   (s.kind == Send and s.repeat) implies s.again
+
+pure def lawAnEarlierSendIsSentAgainOnlyByChoice(access: Access, before: L::Before): bool =
+  before != L::NotSent implies
+    not(canPrepare(initial, Send, access, L::earlier(1, 0, L::Fresh, 1, 1, 0, 0, 0, false, 0, before), true, false, Owner))
 ```
 
 ### Only the operation in flight tells how it ended, once: the draft is cleared only after a fresh confirmation of its send, and a stopped operation tells its draft nothing went out

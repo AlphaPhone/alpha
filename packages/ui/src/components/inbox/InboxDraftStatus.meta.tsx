@@ -16,6 +16,7 @@ export const meta: ComponentMeta<InboxDraftStatusProps> = {
     "Unsure of the copy": { gmail: "unsure" },
     "Already sent": { sent: "already" },
     "Earlier version sent": { sent: "earlier", gmail: "unsaved" },
+    "May have been sent": { sent: "maybe" },
   },
   play: {
     "Not kept": async ({ canvasElement }: { canvasElement: HTMLElement }) => {

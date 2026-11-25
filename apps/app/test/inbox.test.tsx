@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Machine as List } from "../gen/app__inbox.effect.vibe";
@@ -350,6 +351,56 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
     document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.value,
     world.inbox.changes.length,
   ]).toEqual(["unfinished@", "Keep these words.", 2]);
+});
+
+it("Keep the drafts the earlier Alpha kept (spec/app/inbox/drafts.md, \"Story: Keep the drafts the earlier Alpha kept\")", async () => {
+  const world = { ...scene(), phone: true };
+  const hex = (text: string) => createHash("sha256").update(text).digest("hex");
+  const owner = JSON.stringify(["production", "u1", "o1"]);
+  const draftOwner = JSON.stringify(["production", "u1", "o1", "grant-1"]);
+  const draft = (id: string, to: string, subject: string, body: string) => ({ version: 1, id, revision: `${id}-1`, owner: draftOwner, to: [to], subject, body, mode: "compose" });
+  const contract = draft("c1", "lee@example.test", "Contract signed", "Attached and signed.");
+  const slots = {
+    saved: `inbox-drafts:v1:${draftOwner}`,
+    shelf: `inbox-drafts:v1:shelf:${hex(draftOwner)}`,
+    unsaved: `inbox-drafts:v1:unsaved:${hex(JSON.stringify(["inbox-unsaved", "app", draftOwner]))}`,
+    operation: `inbox-operation:v1:${hex(JSON.stringify([owner, "grant-1"]))}`,
+  };
+  world.platform.earlier.set(slots.saved, JSON.stringify(draft("a1", "ana@example.test", "Lunch on Friday", "Shall we meet at noon?")));
+  world.platform.earlier.set(slots.shelf, JSON.stringify({
+    version: 1, owner: draftOwner,
+    items: [{ draft: draft("b1", "bo@example.test", "Budget notes", "The numbers for May."), toQ: "" }, { draft: contract, toQ: "" }],
+  }));
+  world.platform.earlier.set(slots.operation, JSON.stringify({
+    version: 1, owner, grantId: "grant-1", requestId: "earlier-send", phase: "dispatching", review: {}, receipt: null, source: { draftId: "c1" },
+    proposal: { kind: "send", mode: "compose", to: contract.to, cc: [], bcc: [], subject: contract.subject, bodyText: contract.body },
+  }));
+  world.platform.earlier.set(slots.unsaved, "not what the earlier Alpha wrote");
+  world.inbox.receipts.set("earlier-send", "outcome-unknown");
+  const { alpha, close } = await open(world);
+  const runtime = inbox.runtime(alpha);
+
+  // spec/app/inbox/drafts.md, "A draft the earlier Alpha kept is set aside on the shelf as a whole draft of its account, while there is room, never opened, handed to anything or put in place of another"
+  await tile("Inbox");
+  await until(alpha, runtime, Writing, (s) => !s.open && s.shelf.shelved.length === 3);
+  // spec/app/platform/adoption.md, "A value is moved by copying it only where the new place is still empty, and its earlier place is cleared only once the new place holds a value": a slot that cannot be read stays where it was
+  await until(alpha, runtime, Writing, () => !world.platform.earlier.has(slots.saved) && !world.platform.earlier.has(slots.shelf));
+  // spec/app/inbox/drafts.md, "An earlier operation that never left the phone is dropped; a send whose receipt says it went marks its draft sent, one refused leaves it unsent, and any other leaves it marked as possibly sent"
+  expect([...world.platform.earlier.keys()]).toEqual([slots.unsaved]);
+  await close();
+
+  const again = await open(world);
+  const restored = inbox.runtime(again.alpha);
+  await tile("Inbox");
+  await until(again.alpha, restored, Writing, (s) => !s.open && s.shelf.shelved.length === 3);
+  await press("3 drafts set aside");
+  await press("Attached and signed.lee@example.test");
+  await until(again.alpha, restored, Writing, (s) => s.open && s.letter.doubt.attempt === 0 && s.letter.doubt.revision === 1);
+  expect([
+    document.querySelector<HTMLInputElement>('input[aria-label="Subject"]')?.value,
+    told(),
+    world.inbox.changes,
+  ]).toEqual(["Contract signed", expect.stringContaining("May have been sent"), []]);
 });
 
 // spec/app/home/cards.md, "The mail card shows the unread count, senders and subjects only, never a message body; marked not up to date when Inbox's page is not, and not drawn without an account or a row"

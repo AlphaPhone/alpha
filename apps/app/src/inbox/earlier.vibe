@@ -1,0 +1,212 @@
+// spec/app/inbox/drafts.md, "Story: Keep the drafts the earlier Alpha kept"; spec/app/inbox/index.md, "The account the owner last chose in the earlier Alpha is chosen once, where the accounts have answered and none is selected, while it is connected"; spec/app/platform/adoption.md, "A value is moved by copying it only where the new place is still empty, and its earlier place is cleared only once the new place holds a value"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import * as Inbox from "../../gen/app__inbox.effect.vibe"
+import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
+import type { Phase, Receipt } from "../../gen/app__inbox__drafts.effect.vibe"
+import type { Before, Kind } from "../../gen/app__inbox__letter.ts"
+import { type Place, adopt, earlierSlot, keptAt } from "../platform/adoption.vibe"
+import { Cloud } from "../platform/cloud.vibe"
+import { contained, started } from "../runtime/reactor.vibe"
+import { mibOf } from "./adding.vibe"
+import { type Words, Letters, acceptable, nothing } from "./composer.vibe"
+import { Mail, asked } from "./gmail.vibe"
+
+module digest {
+  /** The SHA-256 of `text`, in lower-case hex, as the earlier Alpha named its slots by it. */
+  export async function sha256Hex(text: string): Promise<string> {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
+  }
+}
+import { sha256Hex } from digest
+
+const Addresses = Schema.Array(Schema.String)
+const EarlierDraft = Schema.Struct({
+  version: Schema.Literal(1), id: Schema.NonEmptyString, owner: Schema.String,
+  to: Addresses, cc: Schema.optionalKey(Addresses), bcc: Schema.optionalKey(Addresses),
+  subject: Schema.String, body: Schema.String,
+  attachments: Schema.optionalKey(Schema.Array(Schema.Struct({ name: Schema.String, mimeType: Schema.String, dataBase64: Schema.String }))),
+  forward: Schema.optionalKey(Schema.Struct({ parts: Schema.Array(Schema.Unknown) })),
+  provider: Schema.optionalKey(Schema.Struct({ draftId: Schema.NonEmptyString, providerDigest: Schema.NonEmptyString })),
+  mode: Schema.optionalKey(Schema.Literals(["compose", "reply", "reply-all", "forward"])),
+  reply: Schema.optionalKey(Schema.Struct({ messageId: Schema.String })),
+  earlierThanSent: Schema.optionalKey(Schema.Literal(true)),
+})
+type EarlierDraft = typeof EarlierDraft.Type
+
+const Saved = Schema.fromJsonString(EarlierDraft)
+const Shelved = Schema.fromJsonString(Schema.Struct({ version: Schema.Literal(1), owner: Schema.String, items: Schema.Array(Schema.Struct({ draft: EarlierDraft })) }))
+const Retained = Schema.fromJsonString(Schema.Struct({ version: Schema.Literal(1), binding: Schema.String, text: Schema.String }))
+const Unsaved = Schema.fromJsonString(Schema.Struct({ version: Schema.Literal(1), owner: Schema.String, draft: EarlierDraft }))
+const Journal = Schema.fromJsonString(Schema.Struct({
+  version: Schema.Literal(1), owner: Schema.String, grantId: Schema.String, requestId: Schema.NonEmptyString,
+  proposal: Schema.Struct({
+    kind: Schema.String, to: Schema.optionalKey(Addresses), cc: Schema.optionalKey(Addresses), bcc: Schema.optionalKey(Addresses),
+    subject: Schema.optionalKey(Schema.String), bodyText: Schema.optionalKey(Schema.String),
+  }),
+  phase: Schema.Literals(["preparing", "review", "dispatching", "observed"]),
+  receipt: Schema.NullOr(Schema.Struct({ state: Schema.String })),
+  source: Schema.optionalKey(Schema.Struct({ draftId: Schema.NonEmptyString })),
+}))
+type Journal = typeof Journal.Type
+
+/** The cloud environments the earlier Alpha signed in to, each of which named its own owner. */
+const environments = ["production", "staging"] as const
+
+const phases: { readonly [P in Journal["phase"]]: Phase } = { preparing: "Preparing", review: "Reviewing", dispatching: "Dispatching", observed: "Observed" }
+const receipts: Readonly<Partial<{ [state: string]: Receipt }>> = {
+  prepared: "Prepared", dispatched: "Dispatched", "outcome-unknown": "OutcomeUnknown", succeeded: "Succeeded", rejected: "Rejected",
+}
+const kinds: { readonly [M in NonNullable<EarlierDraft["mode"]>]: Kind } = { compose: "Fresh", reply: "Reply", "reply-all": "ReplyAll", forward: "Forward" }
+
+const receiptOf = (state: string | undefined): Receipt => (state === undefined ? undefined : receipts[state]) ?? "NoReceipt"
+
+/** What the earlier Alpha's drafts say, read from `place`, as `decode` reads it: none where the place is empty, cannot be read, or holds no draft of `owner`. */
+effect function draftsAt(place: Place<string>, decode: (text: string) => ReadonlyArray<EarlierDraft> | undefined): (ReadonlyArray<EarlierDraft> | undefined)!! {
+  const text = place.read() catch () => Option.none<string>()
+  return Option.isNone(text) ? undefined : decode(text.value)
+}
+
+const decoded = <A>(schema: Schema.Decoder<A>, text: string): A | undefined => Schema.decodeUnknownOption(schema)(text) |> Option.getOrUndefined(%)
+
+/** The words of `draft`, as this Alpha's composer keeps them. */
+function wordsOf(draft: EarlierDraft, grant: string): Words {
+  return {
+    ...nothing, to: draft.to, cc: draft.cc ?? [], bcc: draft.bcc ?? [], subject: draft.subject, text: draft.body,
+    files: (draft.attachments ?? []).map(({ name, mimeType, dataBase64 }) => ({ name, mimeType, data: dataBase64, size: Math.floor(dataBase64.replace(/=+$/u, "").length * 3 / 4) })),
+    answers: draft.reply?.messageId, mode: draft.mode ?? (draft.reply === undefined ? "compose" : "reply"), earlier: `${grant}/${draft.id}`,
+  }
+}
+
+const same = (a: ReadonlyArray<string> | undefined, b: ReadonlyArray<string>) => JSON.stringify(a ?? []) === JSON.stringify(b)
+
+/** Whether `record` sent `words` as they are. */
+const sentAsIs = (record: Journal, words: Words) =>
+  same(record.proposal.to, words.to) && same(record.proposal.cc, words.cc) && same(record.proposal.bcc, words.bcc) &&
+  record.proposal.subject === words.subject && record.proposal.bodyText === words.text
+
+// spec/app/inbox/drafts.md, "A draft the earlier Alpha kept is set aside on the shelf as a whole draft of its account, while there is room, never opened, handed to anything or put in place of another"
+/** Set `draft` aside as a draft of `account`, marked as the earlier operation `record` left it; whether it is now held. */
+effect function adoptDraft(draft: EarlierDraft, account: number, grant: string, record: Journal | undefined, receipt: Receipt): boolean!!(Letters | Drafts.Machine) {
+  const letters = try Letters
+  const composer = try Drafts.Machine
+  const words = wordsOf(draft, grant)
+  if (letters.adopted(words.earlier ?? "")) return true
+  const addresses = [...words.to, ...words.cc, ...words.bcc]
+  const megabytes = words.files.reduce((sum, file) => sum + mibOf(file.size), 0)
+  const before: Before = record?.proposal.kind === "send" && record.source?.draftId === draft.id
+    ? Drafts.beforeOf(phases[record.phase], receipt, sentAsIs(record, words))
+    : draft.earlierThanSent === true ? "SentEarlier" : "NotSent"
+  const copy = draft.provider === undefined ? 0 : letters.copied(account, draft.provider.draftId, draft.provider.providerDigest)
+  const event = {
+    type: "adopt", account, kind: kinds[words.mode], recipients: addresses.length, invalid: addresses.filter((one) => !acceptable(one)).length,
+    files: words.files.length, megabytes, textOnly: words.mode === "forward" && (draft.forward?.parts.length ?? 0) > 0, copy, before,
+  } as const
+  const state = try composer.get()
+  if (!Drafts.canAdopt(state, event.account, event.kind, event.recipients, event.invalid, event.files, event.megabytes, event.textOnly, event.copy, event.before)) return false
+  const number = state.made + 1
+  if (!(try letters.adopt(number, words))) return false
+  const sent = try exit(composer.send(event, "World"))
+  if (Exit.isSuccess(sent) && sent.value.state.made === number) return true
+  try letters.forget(number)
+  return false
+}
+
+/** The receipt `record` stands at: the one the earlier Alpha saved where it settles it, else the cloud's answer now, else the one saved. */
+effect function receiptNow(record: Journal, grant: string): Receipt!!Cloud {
+  const saved = receiptOf(record.receipt?.state)
+  if (Drafts.receiptSettles(saved) || !Drafts.leftThePhone(phases[record.phase])) return saved
+  const { client } = try Cloud
+  const read = effect { return try asked((signal) => client.gmailReceipt({ grantId: grant, requestId: record.requestId }, { signal })) } catch () => undefined
+  const now = receiptOf(read?.receipt.state)
+  return now === "NoReceipt" ? saved : now
+}
+
+/** Every draft and the operation the earlier Alpha kept for one account of `environment`'s owner, moved to the shelf. */
+effect function adoptAccount(environment: string, user: string, organization: string, account: number, grant: string): void!!(Cloud | Letters | Drafts.Machine) {
+  const owner = JSON.stringify([environment, user, organization])
+  const draftOwner = JSON.stringify([environment, user, organization, grant])
+  const hashed = (text: string) => tryPromise(() => sha256Hex(text))
+  const named = effect {
+    return { shelf: try hashed(draftOwner), unsaved: try hashed(JSON.stringify(["inbox-unsaved", "app", draftOwner])), operation: try hashed(JSON.stringify([owner, grant])) }
+  } catch () => undefined
+  if (named === undefined) return
+  const operation = earlierSlot(`inbox-operation:v1:${named.operation}`)
+  const kept = operation.read() catch () => Option.none<string>()
+  const record = Option.isNone(kept) ? undefined : decoded(Journal, kept.value)
+  const ours = record !== undefined && record.owner === owner && record.grantId === grant ? record : undefined
+  const receipt = ours === undefined ? "NoReceipt" : try receiptNow(ours, grant)
+  const places: ReadonlyArray<readonly [Place<string>, (text: string) => ReadonlyArray<EarlierDraft> | undefined]> = [
+    [earlierSlot(`inbox-drafts:v1:unsaved:${named.unsaved}`), (text) => {
+      const retained = decoded(Retained, text)
+      if (retained?.binding !== JSON.stringify(["inbox-unsaved", "app", draftOwner])) return undefined
+      if (retained.text === "") return []
+      const unsaved = decoded(Unsaved, retained.text)
+      return unsaved?.owner === draftOwner ? [unsaved.draft] : undefined
+    }],
+    [earlierSlot(`inbox-drafts:v1:${draftOwner}`), (text) => { const draft = decoded(Saved, text); return draft === undefined ? undefined : [draft] }],
+    [earlierSlot(`inbox-drafts:v1:shelf:${named.shelf}`), (text) => { const shelf = decoded(Shelved, text); return shelf?.owner === draftOwner ? shelf.items.map(({ draft }) => draft) : undefined }],
+  ]
+  for (const [place, decode] of places) {
+    const drafts = try draftsAt(place, decode)
+    if (drafts === undefined) continue
+    let all = true
+    for (const draft of drafts) {
+      if (draft.owner !== draftOwner || !(try adoptDraft(draft, account, grant, ours, receipt))) all = false
+    }
+    if (all) try ignore(place.clear())
+  }
+  if (ours === undefined) return
+  const draft = ours.source?.draftId
+  const aside = draft !== undefined && (try Letters).adopted(`${grant}/${draft}`)
+  if (Drafts.recordCleared(phases[ours.phase], receipt, ours.proposal.kind === "send", aside)) try ignore(operation.clear())
+}
+
+const Choice = Schema.fromJsonString(Schema.NonEmptyString)
+
+// spec/app/inbox/index.md, "The account the owner last chose in the earlier Alpha is chosen once, where the accounts have answered and none is selected, while it is connected"
+/** Choose the Gmail connection the earlier Alpha last chose for `owner`, where none is selected yet. */
+effect function adoptChoice(owner: string): void!!(Mail | Inbox.Machine | KeyValueStore.KeyValueStore) {
+  const list = try Inbox.Machine
+  const ledger = try Mail
+  const state = try list.get()
+  const selection: Place<number> = {
+    effect read() {
+      const now = try list.get()
+      return now.selected.account === 0 ? Option.none() : Option.some(now.selected.account)
+    },
+    effect write(account: number) { try ignore(list.send({ type: "chooseAccount", account })) },
+    clear: () => Effect.void,
+  }
+  const chosen = (text: string) => {
+    const grant = decoded(Choice, text)
+    const account = state.connected.find((linked) => grant !== undefined && ledger.grant(linked.account) === grant)?.account
+    return account !== undefined && Inbox.takesTheEarlierChoice(state, account) ? Option.some(account) : Option.none<number>()
+  }
+  try ignore(adopt(try keptAt(`alpha.gmail.account-choice.v1:${owner}`), selection, chosen))
+}
+
+/** Move what the earlier Alpha kept of the signed-in owner's mail, for each account the phone may read. */
+effect function adoptEarlier(): void!!(Cloud | Mail | Letters | Drafts.Machine | Inbox.Machine | KeyValueStore.KeyValueStore) {
+  const { client } = try Cloud
+  const ledger = try Mail
+  const who = effect { return try asked((signal) => client.account({ signal })) } catch () => undefined
+  if (who === undefined) return
+  for (const { account } of (try (try Inbox.Machine).get()).connected) {
+    const grant = ledger.grant(account)
+    if (grant === undefined) continue
+    for (const environment of environments) try adoptAccount(environment, who.id, who.organization_id, account, grant)
+  }
+  for (const environment of environments) try adoptChoice(JSON.stringify([environment, who.id, who.organization_id]))
+}
+
+/** Once Inbox knows the owner, the accounts it may read and the drafts kept on the phone, the earlier Alpha's drafts move to the shelf. */
+export const adopting = started(effect {
+  const list = try Inbox.Machine
+  const composer = try Drafts.Machine
+  const ledger = try Mail
+  const ready = Stream.zipLatest(list.changes, composer.changes) |> Stream.map(%, ([mailbox, drafts]) =>
+    mailbox.signedIn && mailbox.accounts.status === "Loaded" && Drafts.ready(drafts)
+      ? `${ledger.generation()}/${drafts.session}/${mailbox.connected.map(({ account }) => `${account}:${ledger.grant(account) ?? ""}`).join(",")}` : "")
+  try Stream.runForEach(Stream.filter(Stream.changes(ready), (known) => known !== ""), () => contained(adoptEarlier(), "keeping the earlier Alpha's drafts"))
+}, "keeping the earlier Alpha's drafts")
