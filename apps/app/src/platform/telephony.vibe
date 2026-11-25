@@ -2,7 +2,7 @@
 import type { DeferredDeletionsClient, StagedDeletion } from "@elizaos/os-bridges"
 import type { AddressBookClient, ContactNamesClient, NameSurface } from "@elizaos/os-bridges"
 import type { MessagesClient, MmsBinding, MmsSendResult, OperationId } from "@elizaos/os-bridges"
-import type { PhoneClient, PhoneNumber } from "@elizaos/os-bridges"
+import type { PhoneClient, PhoneNumber, TelephonySubscription } from "@elizaos/os-bridges"
 
 module held {
   import { registerPlugin } from "@capacitor/core"
@@ -128,6 +128,11 @@ export effect function namesOf(surface: NameSurface, numbers: ReadonlyArray<stri
   if (asked.length === 0) return new Map()
   const named = telephony("names", (c) => c.names.resolve({ surface, numbers: asked })) catch () => []
   return new Map(named.flatMap((one) => (one.name === null ? [] : [[one.number, one.name as string] as const])))
+}
+
+/** The SIM a text goes out on when none was picked: the phone's default for texts or its only SIM; with several and no default, none. */
+export function textingDefault(sims: ReadonlyArray<TelephonySubscription>): number | undefined {
+  return sims.find((one) => one.defaultSms)?.id ?? (sims.length === 1 ? sims[0].id : undefined)
 }
 
 /** One call of eliza's clients: refused before the phone where there is no image, and typed where the phone refused. */

@@ -84,7 +84,7 @@ export function VoiceNoteView({ title, meta, playback, summary = [], actions = [
             <Mark aria-hidden className="size-4.5 shrink-0 text-primary" /> Ask Alpha
           </button>}
           {onCopyTranscript && <button type="button" onClick={onCopyTranscript} className={transcriptAction}>
-            <Copy aria-hidden className="size-4.5 shrink-0" /> Copy text
+            <Copy aria-hidden className="size-4.5 shrink-0" />{"Copy text"}
           </button>}
         </div>}
         <div className={card}>

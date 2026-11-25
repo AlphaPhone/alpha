@@ -6,6 +6,7 @@ import { PhoneReminders } from "../platform/reminders.vibe"
 import { attemptedWith } from "../platform/remote.vibe"
 import type { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, due, reacting, run, together, untimed } from "../runtime/reactor.vibe"
+import { externalStore } from "../runtime/store.ts"
 import { Time } from "../runtime/time.vibe"
 import { advanceDueDate, alertInstantMs } from "./recurrence.ts"
 import { type ReminderItemRecord, type RemindersSnapshot, remindersStore } from "./store.ts"
@@ -33,38 +34,29 @@ export interface RingingBannerState {
   readonly item: ReminderItemRecord
 }
 
-let bannerState: RingingBannerState | undefined
-const bannerListeners = new Set<() => void>()
-
-function emitBanner(next: RingingBannerState | undefined): void {
-  bannerState = next
-  for (const listener of [...bannerListeners]) listener()
-}
+const banner = externalStore<RingingBannerState | undefined>(undefined)
 
 /** External store for the currently ringing due-reminder notification banner. */
 export const alertBannerStore = {
-  snapshot: (): RingingBannerState | undefined => bannerState,
-  subscribe(listener: () => void): () => void {
-    bannerListeners.add(listener)
-    return () => { bannerListeners.delete(listener) }
-  },
+  snapshot: banner.snapshot,
+  subscribe: banner.subscribe,
   reset(): void {
-    emitBanner(undefined)
+    banner.set(undefined)
   },
 }
 
 effect function syncBannerFromMachine(): void!!Alerts.Machine {
   const state = try (try Alerts.Machine).get()
   if (state.bannerId === 0) {
-    emitBanner(undefined)
+    banner.set(undefined)
     return
   }
   const entry = Alerts.entryOf(state.entries, state.bannerId)
   const item = remindersStore.findItemBySpecId(state.bannerId)
   if (entry.phase === "Ringing" && item !== undefined && !item.completed) {
-    emitBanner({ specId: state.bannerId, revision: entry.revision, item })
+    banner.set({ specId: state.bannerId, revision: entry.revision, item })
   } else {
-    emitBanner(undefined)
+    banner.set(undefined)
   }
 }
 

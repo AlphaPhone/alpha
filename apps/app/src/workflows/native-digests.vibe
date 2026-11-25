@@ -1,8 +1,10 @@
 // spec/app/digests/index.md, "Android supplies one verified view of retained results and background checks"
+import type { DigestResult } from "@elizaos/plugin-workflow-client"
 import * as Digests from "../../gen/app__digests.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import { Machine as Listing, canOpenDigestNotice, digestNoticeReady } from "../../gen/app__workflows__list.effect.vibe"
+import { attachToAlpha, MediaHandoff } from "../assistant/attachments.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { type NativeDigestNotice, type NativeDigestSnapshot, nativeDigestsAvailable, peekNativeDigestNotice, sameDigestNoticeResult, settleNativeDigestNotice } from "../platform/hosted-digests.vibe"
@@ -219,6 +221,80 @@ export effect function enableDigestNotifications(owner: number, lease: string): 
   if (identity === undefined || active.owner !== owner || active.place.tag !== "ListingDigests" ||
     !Shell.showing(try shell.get(), "Workflows") || !(try rows.sameDigestOwner(identity, owner)) || !(try device.showing())) return false
   return try (try DigestHistory).nativeEnableNotifications(identity, lease)
+}
+
+module question {
+  import { digestSummaryText, type DigestResult } from "@elizaos/plugin-workflow-client"
+  import { sensitiveReadingText } from "@elizaos/os-bridges"
+  import { Base64 } from "effect/encoding"
+
+  /** The result offers only the readable excerpt shown in Workflows. @throws {never} */
+  export function digestQuestionExcerpt(row: DigestResult): string | undefined {
+    const shown = digestSummaryText(row).trim()
+    if (shown === "" || shown === "No readable summary was returned. Open execution details to inspect this result." || sensitiveReadingText(shown)) return undefined
+    return Array.from(shown).slice(0, 2_000).join("").trimEnd()
+  }
+
+  /** The complete text the owner reviewed must still be what the result shows. @throws {never} */
+  export function sameDigestQuestionText(first: DigestResult, second: DigestResult): boolean {
+    return digestSummaryText(first) === digestSummaryText(second)
+  }
+
+  /** The bytes the owner offered to Ask Alpha. @throws {never} */
+  export function savedResultData(excerpt: string): string {
+    return Base64.encode(excerpt)
+  }
+}
+export { digestQuestionExcerpt } from question
+import { digestQuestionExcerpt, sameDigestQuestionText, savedResultData } from question
+
+// spec/app/digests/index.md, "Ask Alpha about a result hands that result to Ask Alpha"
+export effect function askAboutNativeDigest(owner: number, lease: string, row: DigestResult): void!!(
+  Agent | Device | Shell.Machine | Layers.Machine | Listing | Rows | DigestHistory | NativeDigestPanel | Digests.Machine | MediaHandoff
+) {
+  const excerpt = digestQuestionExcerpt(row)
+  if (excerpt === undefined) return
+  const model = try Digests.Machine
+  const listing = try Listing
+  const state = try Shell.Machine
+  const layers = try Layers.Machine
+  const device = try Device
+  const rows = try Rows
+  const panel = try NativeDigestPanel
+  const history = try DigestHistory
+  const agent = try Agent
+  const observedOwner = launchOwnerAt() catch () => undefined
+  if (observedOwner === undefined || !panel.available) return
+  const identity = observedOwner
+  const sameRow = (candidate: DigestResult) =>
+    candidate.cursor === row.cursor && sameDigestNoticeResult(candidate, row) && sameDigestQuestionText(candidate, row)
+
+  effect function showing(): boolean!! {
+    const active = try listing.get()
+    const shell = try state.get()
+    const presentation = panel.snapshot()
+    return active.owner === owner && active.place.tag === "ListingDigests" && active.place.result === row.cursor
+      && (active.place.notice.runId === "" || sameDigestNoticeResult(active.place.notice, row))
+      && Shell.showing(shell, "Workflows") && shell.assistant === "Bar" && !Layers.pageInert(try layers.get())
+      && (try device.showing()) && presentation.owner === owner && presentation.delivery?.lease === lease
+      && presentation.delivery.rows.some(sameRow) && (try rows.sameDigestOwner(identity, owner))
+  }
+
+  const current = effect {
+    if (!(try showing())) return false
+    const activeOwner = Effect.provideService(launchOwnerAt(), Agent, agent) catch () => undefined
+    if (!sameResidentOwner(identity, activeOwner)) return false
+    const retained = try history.nativeSnapshot(identity)
+    return retained?.lease === lease && retained.rows.some(sameRow) && (try showing())
+  }
+  if (!(try current)) return
+  const moved = model.send({ type: "askAbout", owner, result: row.cursor, retained: true }) catch () => undefined
+  const ask = moved?.out.find((entry) => entry.tag === "AskAlpha")
+  if (ask?.tag !== "AskAlpha" || ask.owner !== owner || ask.result !== row.cursor) return
+  try ignore(attachToAlpha({
+    id: `digest-result:${owner}:${row.runId}:${row.cursor}`,
+    name: "Saved result.txt", mimeType: "text/plain", data: savedResultData(excerpt),
+  }, current, "Help me understand this saved result."))
 }
 
 export const nativeDigestDelivery = together(panel, visible, notices)
