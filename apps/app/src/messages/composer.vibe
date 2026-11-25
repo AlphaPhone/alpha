@@ -3,10 +3,12 @@ import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY, MMS_MAX_RECIPIENTS, MMS_MAX_TOTAL_BYTES } from "@elizaos/os/bridges/definitions/messages"
 import { mmsBinding, type MmsAttachmentType, type MmsBinding, type MmsReview, type OperationId, type SmsReview, type SmsSendResult, type SmsSendStatus } from "@elizaos/os/bridges/messages"
 import type { PhoneNumber } from "@elizaos/os/bridges/phone"
+import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/phone"
 import * as Composer from "../../gen/app__messages__composer.effect.vibe"
-import type { Effect as Out, Event } from "../../gen/app__messages__composer.effect.vibe"
+import type { Author, Effect as Out, Event } from "../../gen/app__messages__composer.effect.vibe"
 import type { Effect as SendOut } from "../../gen/app__messages__sending.effect.vibe"
 import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
+import { type Place, adopt, earlierSlot } from "../platform/adoption.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { ask } from "../platform/remote.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
@@ -14,7 +16,7 @@ import { Telephony, TelephonyAbsent, TelephonyRefused, telephony } from "../plat
 import { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, applying, contained, following, hearing, reacting, run, started, stream, together } from "../runtime/reactor.vibe"
 import { grantOf } from "../phone/phone.vibe"
-import { Conversations, Inbox, elsewhere } from "./messages.vibe"
+import { type Conversation, Conversations, Inbox, elsewhere } from "./messages.vibe"
 
 /** A picture the owner attached: what the phone says it is, and its bytes. */
 export interface Picture {
@@ -34,6 +36,8 @@ export interface Outgoing {
   readonly operation: OperationId | undefined
   readonly mms: MmsReceiptBinding | undefined
   readonly status: SmsSendStatus | undefined
+  /** The composer's number for this send where it is one the earlier Alpha recorded, whose operation is its own and not this Alpha's key. */
+  readonly earlier: number | undefined
 }
 
 interface MmsReceiptBinding {
@@ -89,7 +93,7 @@ module text {
   }
 
   /** What the store kept for the send in hand. It never keeps an attachment's bytes. @throws {never} */
-  export function keptSend(raw: string | undefined): { thread: number; to: string[]; body: string; sim: number | null; pictures: never[]; pictured: boolean; operation: OperationId | undefined; mms: Binding | undefined; status: undefined } | undefined {
+  export function keptSend(raw: string | undefined): { thread: number; to: string[]; body: string; sim: number | null; pictures: never[]; pictured: boolean; operation: OperationId | undefined; mms: Binding | undefined; status: undefined; earlier: number | undefined } | undefined {
     if (raw === undefined) return undefined
     try {
       const found = record(JSON.parse(raw))
@@ -99,6 +103,7 @@ module text {
       return {
         thread: found.thread, to: found.to, body: found.body, sim: found.sim, pictures: [], pictured: found.pictured !== false,
         operation: operationIdOf(found.operation) ?? undefined, mms: retainedBinding(found.mms), status: undefined,
+        earlier: typeof found.earlier === "number" && Number.isSafeInteger(found.earlier) && found.earlier > 0 ? found.earlier : undefined,
       }
     } catch {
       return undefined
@@ -119,8 +124,69 @@ module text {
   export function canDigest(): boolean {
     return typeof globalThis.crypto?.subtle?.digest === "function"
   }
+
+  const earlierNumber = /^\+?\d{2,20}$/
+  const earlierOperation = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+  const earlierPicture = /^picture-[1-9]\d{0,8}\.(jpg|png|gif)$/
+
+  /** A send the earlier Alpha recorded for its draft: the operation it journaled, to the numbers and on the SIM it named. */
+  export interface EarlierSend { kind: "sms" | "mms"; id: OperationId; recipients: string[]; subscriptionId: number }
+
+  /** A draft the earlier Alpha kept: its numbers, its text and whether the owner asked Alpha for it, its pictures, and the send it had recorded. */
+  export interface EarlierDraft {
+    recipients: string[]
+    body: string
+    asked: boolean
+    pictures: { name: string; contentType: (typeof MMS_ATTACHMENT_TYPES)[number]; bytes: Uint8Array }[]
+    send: EarlierSend | undefined
+  }
+
+  function earlierPictureOf(value: unknown): EarlierDraft["pictures"][number] | undefined {
+    const fields = record(value)
+    const type = MMS_ATTACHMENT_TYPES.find((kind) => kind === fields?.contentType)
+    if (fields === undefined || type === undefined || typeof fields.name !== "string" || !earlierPicture.test(fields.name)
+      || typeof fields.bytes !== "string" || fields.bytes.length > Math.ceil(MMS_MAX_TOTAL_BYTES / 3) * 4) return undefined
+    const bytes = Uint8Array.from(atob(fields.bytes), (one) => one.charCodeAt(0))
+    return bytes.length === 0 || bytes.length > MMS_MAX_TOTAL_BYTES ? undefined : { name: fields.name, contentType: type, bytes }
+  }
+
+  function earlierSendOf(value: unknown, mms: boolean): EarlierSend | null | undefined {
+    if (value === null) return null
+    const fields = record(value)
+    const id = operationIdOf(fields?.id)
+    if (fields === undefined || (fields.kind !== "sms" && fields.kind !== "mms") || (fields.kind === "mms") !== mms
+      || id === null || !earlierOperation.test(id) || typeof fields.subscriptionId !== "number" || !Number.isInteger(fields.subscriptionId)
+      || fields.subscriptionId < 0 || fields.subscriptionId > 2147483647 || !Array.isArray(fields.recipients) || fields.recipients.length === 0
+      || fields.recipients.length > 10 || !fields.recipients.every((one): one is string => typeof one === "string" && earlierNumber.test(one))) return undefined
+    return { kind: fields.kind, id, recipients: fields.recipients, subscriptionId: fields.subscriptionId }
+  }
+
+  /**
+   * What the earlier Alpha kept in its draft slot `slot`, checked as it checked it when it read it back, or undefined for
+   * a value it would have refused, one whose pictures exceed what one message carries, or a send this Alpha would send
+   * otherwise: as SMS a single plain text, and as MMS a group or pictures. @throws {never}
+   */
+  export function earlierDraft(raw: string, slot: string): EarlierDraft | undefined {
+    try {
+      const found = record(JSON.parse(raw))
+      if (found === undefined || found.binding !== slot || typeof found.recipients !== "string" || found.recipients.length > 512
+        || typeof found.body !== "string" || found.body.length > 1600 || (found.origin !== "owner" && found.origin !== "asked")
+        || typeof found.sim !== "string" || !/^\d{0,10}$/.test(found.sim)
+        || !Array.isArray(found.pictures) || found.pictures.length > MMS_MAX_ATTACHMENTS) return undefined
+      const pictures = found.pictures.map(earlierPictureOf)
+      if (!pictures.every((one) => one !== undefined) || pictures.reduce((sum, one) => sum + one.bytes.length, 0) > MMS_MAX_TOTAL_BYTES) return undefined
+      const recorded = record(found.operation)
+      const mms = pictures.length > 0 || (Array.isArray(recorded?.recipients) && recorded.recipients.length > 1)
+      const send = earlierSendOf(found.operation, mms)
+      if (send === undefined) return undefined
+      const recipients = found.recipients.split(",").map((one) => one.trim()).filter((one) => one !== "")
+      return { recipients, body: found.body, asked: found.origin === "asked", pictures, send: send ?? undefined }
+    } catch {
+      return undefined
+    }
+  }
 }
-import { canDigest, keepSend, keptSend, matchesBinding } from text
+import { canDigest, earlierDraft, keepSend, keptSend, matchesBinding, type EarlierDraft, type EarlierSend } from text
 
 const drafts = Layer.effect(Drafts, effect {
   const store = try KeyValueStore.KeyValueStore
@@ -236,10 +302,17 @@ effect function radioed(id: number): Event!!(Drafts | Telephony) {
   return status === undefined || status === "unknown" || status === "submitted" ? { type: "lost" } : { type: "partSent", id, ok: sentStatuses.has(status) }
 }
 
+/** The operation of the composer's send `id`: this Alpha's key for it, or the earlier Alpha's own where that send was carried in from it. */
+effect function operationOf(id: number): OperationId!!(Drafts | Attempts) {
+  const held = try (try Drafts).outgoing()
+  if (Option.isSome(held) && held.value.earlier === id && held.value.operation !== undefined) return held.value.operation
+  return (try (try Attempts).key(id)) as OperationId
+}
+
 // spec/app/messages/sending.md, "The journal read back settles an unknown outcome: sent, or never sent"
 effect function readBack(id: number): Event!!(Telephony | Drafts | Attempts | Composer.Machine) {
   const held = try (try Drafts).outgoing()
-  const operation = (try (try Attempts).key(id)) as OperationId
+  const operation = try operationOf(id)
   const state = try (try Composer.Machine).get()
   if (Option.isNone(held) || held.value.operation !== operation || held.value.thread !== state.outgoing.thread) {
     return { type: "readBack", id, wasSent: false, known: false }
@@ -255,8 +328,7 @@ function sending(fx: SendOut): Job<Event, Telephony | Drafts | Attempts | Compos
     when { tag: "Radio", let id, let recipient }: answer(`radio ${id} ${recipient}`, radioed(id), { type: "lost" });
     when { tag: "ReadJournal", let id }: answer(`read back ${id}`, readBack(id), { type: "readBack", id, wasSent: false, known: false });
     when { tag: "Tombstone", let id }: run("retired", effect {
-      const operation = (try (try Attempts).key(id)) as OperationId
-      try (try Drafts).retireOutgoing(operation)
+      try (try Drafts).retireOutgoing(try operationOf(id))
     });
   }
 }
@@ -306,6 +378,95 @@ function carry(fx: Out): Job<Event, Telephony | Drafts | Attempts | Conversation
   }
 }
 
+/** A draft the earlier Alpha kept, as the composer takes it: who wrote its text, the text, its pictures, and the send it had recorded. */
+interface Carried {
+  readonly author: Author
+  readonly body: string
+  readonly pictures: ReadonlyArray<Picture>
+  readonly send: EarlierSend | undefined
+}
+
+/** A draft of the earlier Alpha's that its conversation did not take, or whose text or send the phone did not keep. */
+error NotCarried { thread: number }
+
+/** What a conversation that holds a draft or a send of its own holds, as far as carrying an earlier one is concerned. */
+const ownDraft: Carried = { author: "Nobody", body: "", pictures: [], send: undefined }
+
+const newMessageSlot = "sms-draft:v1:new"
+
+function carriedOf(draft: EarlierDraft): Carried {
+  return { author: draft.body === "" ? "Nobody" : draft.asked ? "AlphaWrote" : "OwnerWrote", body: draft.body, pictures: draft.pictures, send: draft.send }
+}
+
+/** The send the earlier Alpha recorded, in hand as the composer's send `earlier`: its own operation, numbers and SIM, and its pictures' binding for an MMS. */
+effect function carriedSend(thread: number, body: string, pictures: ReadonlyArray<Picture>, send: EarlierSend, earlier: number): (Outgoing | undefined)!! {
+  const outgoing: Outgoing = {
+    thread, to: send.recipients, body, sim: send.subscriptionId, pictures, pictured: pictures.length > 0,
+    operation: send.id, mms: undefined, status: undefined, earlier,
+  }
+  if (send.kind === "sms") return outgoing
+  const bound = tryPromise(() => mmsBinding(mmsReview(outgoing, send.subscriptionId))) catch () => undefined
+  return bound === undefined ? undefined : { ...outgoing, mms: { hash: bound.hash, attachments: bound.binding.attachments } }
+}
+
+// spec/app/messages/composer.md, "The earlier Alpha's draft for a conversation is carried into it once, as it opens holding no draft or send of its own, and a send that draft had recorded comes with it as one whose outcome is unknown"; spec/app/platform/adoption.md, "A value is moved by copying it only where the new place is still empty, and its earlier place is cleared only once the new place holds a value"
+/**
+ * Carry the earlier Alpha's drafts into the conversation `thread` as it opens: the one it kept for the phone's
+ * conversation, then the new message's where its numbers are exactly the conversation's. The pictures to attach once
+ * the conversation is open.
+ */
+effect function carryEarlier(thread: number, conversation: Conversation): ReadonlyArray<Picture>!!(Drafts | Composer.Machine) {
+  const store = try Drafts
+  const machine = try Composer.Machine
+  let pictures: ReadonlyArray<Picture> = []
+  const numbers = new Set(conversation.addresses.map((one) => normalizePhoneNumber(one)))
+  const ours = (draft: EarlierDraft) => draft.recipients.length === numbers.size && draft.recipients.every((one) => {
+    const number = normalizePhoneNumber(one)
+    return number !== null && numbers.has(number)
+  })
+  const current: Place<Carried> = {
+    effect read() {
+      return Composer.holdsItsOwn(try machine.get(), thread) ? Option.some(ownDraft) : Option.none()
+    },
+    effect write(carried: Carried) {
+      const state = try machine.get()
+      const recipients = carried.send?.recipients.length ?? 0
+      if (carried.author === "Nobody" && carried.send === undefined) {
+        pictures = carried.pictures
+        return
+      }
+      if (!Composer.canAdoptDraft(state, thread, carried.author, recipients)) throw new NotCarried({ thread })
+      if (carried.send !== undefined) {
+        const send = try carriedSend(thread, carried.body, carried.pictures, carried.send, state.outgoing.op.id + 1)
+        if (send === undefined || !(try store.bindOutgoing(send))) throw new NotCarried({ thread })
+      }
+      if (carried.author !== "Nobody") {
+        try store.write(thread, carried.body)
+        if ((try store.text(thread)) !== carried.body) throw new NotCarried({ thread })
+      }
+      if (!(try contained(machine.send({ type: "adoptDraft", thread, author: carried.author, recipients }), "the earlier draft"))) throw new NotCarried({ thread })
+      if (carried.send === undefined) pictures = carried.pictures
+    },
+    clear: () => Effect.void,
+  }
+  const slots = conversation.id === "" ? [newMessageSlot] : [`sms-draft:v1:${conversation.id}`, newMessageSlot]
+  for (const slot of slots) {
+    const kept = earlierSlot(slot)
+    const earlier: Place<string> = slot !== newMessageSlot ? kept : {
+      effect read() {
+        return Option.filter(try kept.read(), (raw) => {
+          const draft = earlierDraft(raw, slot)
+          return draft !== undefined && ours(draft)
+        })
+      },
+      write: kept.write,
+      clear: kept.clear,
+    }
+    try adopt(earlier, current, (raw: string) => Option.map(Option.fromNullishOr(earlierDraft(raw, slot)), carriedOf))
+  }
+  return pictures
+}
+
 // spec/app/messages/composer.md, "A restart closes the conversation and keeps the saved drafts, the send, access and the SIMs the phone has"
 const machine = reacting(Composer, { keep: 1, open: [{ type: "restart" }], carry })
 
@@ -322,8 +483,10 @@ const opened = started(effect {
     const conversation = try numbering.get(thread)
     const recipients = Option.isSome(conversation) ? conversation.value.addresses.length : 0
     const event: Event = thread === 0 ? { type: "closeDraft" } : { type: "openDraft", thread, recipients }
+    const carried = Option.isSome(conversation) && Composer.canOpenDraft(try composer.get(), thread, recipients) ? try carryEarlier(thread, conversation.value) : []
     if ((try composer.get()).thread === thread || (try contained(composer.send(event), "the open conversation"))) taken = thread
     if (thread === 0) return
+    try attachPictures(thread, carried)
     const status = telephony("status", (c) => c.messages.status()) catch () => undefined
     const count = status?.subscriptions?.length ?? 0
     if (status !== undefined) {
@@ -385,27 +548,35 @@ export effect function prepare(thread: number, sim: number | null): void!!(Draft
   const conversation = try (try Conversations).get(thread)
   const to = Option.isSome(conversation) ? conversation.value.addresses : []
   const pictures = try store.pictures()
-  try store.setOutgoing({ thread, to, body: state.slot.author === "Nobody" ? "" : try store.text(thread), sim, pictures, pictured: pictures.length > 0, operation: undefined, mms: undefined, status: undefined })
+  try store.setOutgoing({ thread, to, body: state.slot.author === "Nobody" ? "" : try store.text(thread), sim, pictures, pictured: pictures.length > 0, operation: undefined, mms: undefined, status: undefined, earlier: undefined })
 }
 
 // spec/app/messages/composer.md, "The owner attaches up to five pictures, and removes them one by one"
-/** Attach the owner's chosen files in turn: each the phone's MMS takes, a JPEG, PNG or GIF within its size with those before, is attached while the composer takes one. */
-export effect function attachAll(files: ReadonlyArray<File>): void!!(Drafts | Composer.Machine) {
+/** Attach `pictures` in turn to the conversation `thread` while it is open: each that keeps the message within MMS's size with those before, while the composer takes one. */
+effect function attachPictures(thread: number, pictures: ReadonlyArray<Picture>): void!!(Drafts | Composer.Machine) {
   const store = try Drafts
   const machine = try Composer.Machine
-  const thread = (try machine.get()).thread
-  for (const file of files) {
-    if (!(MMS_ATTACHMENT_TYPES as ReadonlyArray<string>).includes(file.type) || file.size <= 0 || file.size > MMS_MAX_TOTAL_BYTES) continue
-    const bytes = tryPromise(() => file.arrayBuffer()) catch () => undefined
-    if (bytes === undefined) continue
+  for (const picture of pictures) {
     const current = try machine.get()
     if (current.thread !== thread) return
     const held = try store.pictures()
-    const fits = !held.some((one) => one.name === file.name) && held.reduce((sum, one) => sum + one.bytes.length, 0) + bytes.byteLength <= MMS_MAX_TOTAL_BYTES
+    const fits = !held.some((one) => one.name === picture.name) && held.reduce((sum, one) => sum + one.bytes.length, 0) + picture.bytes.length <= MMS_MAX_TOTAL_BYTES
     if (!Composer.canAttach(current, fits)) continue
-    try store.setPictures([...held, { name: file.name, contentType: file.type as MmsAttachmentType, bytes: new Uint8Array(bytes) }])
+    try store.setPictures([...held, picture])
     try ignore(machine.send({ type: "attach", fits }))
   }
+}
+
+/** Attach the owner's chosen files in turn: each the phone's MMS takes, a JPEG, PNG or GIF within its size with those before, is attached while the composer takes one. */
+export effect function attachAll(files: ReadonlyArray<File>): void!!(Drafts | Composer.Machine) {
+  const thread = (try (try Composer.Machine).get()).thread
+  const pictures: Picture[] = []
+  for (const file of files) {
+    if (!(MMS_ATTACHMENT_TYPES as ReadonlyArray<string>).includes(file.type) || file.size <= 0 || file.size > MMS_MAX_TOTAL_BYTES) continue
+    const bytes = tryPromise(() => file.arrayBuffer()) catch () => undefined
+    if (bytes !== undefined) pictures.push({ name: file.name, contentType: file.type as MmsAttachmentType, bytes: new Uint8Array(bytes) })
+  }
+  try attachPictures(thread, pictures)
 }
 
 // spec/app/messages/composer.md, "An edited draft is saved for its conversation, one save at a time"
