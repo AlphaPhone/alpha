@@ -195,7 +195,8 @@ function operation(requestId: string, kind: MailOperation["receipt"]["kind"], st
 /** What a dispatched label change does to the mailbox. */
 function relabel(stored: Stored, kind: string) {
   const without = (label: string) => stored.card.labels.filter((one) => one !== label);
-  const labels = kind === "mark-read" ? without("UNREAD") : kind === "mark-unread" ? [...stored.card.labels, "UNREAD"]
+  const labels = kind === "mark-read" ? without("UNREAD") : kind === "mark-unread" ? [...without("UNREAD"), "UNREAD"]
+    : kind === "star" ? [...without("STARRED"), "STARRED"] : kind === "unstar" ? without("STARRED")
     : kind === "archive" ? without("INBOX") : kind === "trash" ? [...without("INBOX"), "TRASH"]
     : kind === "unarchive" ? [...without("INBOX"), "INBOX"] : kind === "untrash" ? [...without("TRASH").filter((one) => one !== "INBOX"), "INBOX"] : stored.card.labels;
   stored.card = { ...stored.card, labels, isUnread: labels.includes("UNREAD") };

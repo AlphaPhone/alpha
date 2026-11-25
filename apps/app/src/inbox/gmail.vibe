@@ -502,9 +502,9 @@ export effect function operate(id: number, account: number, proposal: Proposal, 
 }
 
 /** Change one message's labels in Gmail, once, as `operate` does, at the history revision the list read it at. */
-export effect function relabel(id: number, account: number, message: number, kind: "mark-read" | "mark-unread" | "archive" | "unarchive" | "trash" | "untrash", at = 0): Changed!!(Cloud | Mail | Attempts) {
+export effect function relabel(id: number, account: number, message: number, kind: "mark-read" | "mark-unread" | "archive" | "unarchive" | "trash" | "untrash" | "star" | "unstar", at = 0, history?: string): Changed!!(Cloud | Mail | Attempts) {
   const ledger = try Mail
   const messageId = ledger.gmailId(message, account)
   if (messageId === undefined) return refusedBefore
-  return try operate(id, account, { kind, messageId, expectedHistoryId: ledger.card(message)?.metadata.historyId ?? "" }, { at })
+  return try operate(id, account, { kind, messageId, expectedHistoryId: history ?? ledger.card(message)?.metadata.historyId ?? "" }, { at })
 }
