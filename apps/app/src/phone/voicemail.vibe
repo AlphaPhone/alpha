@@ -3,7 +3,7 @@ import type { StagedDeletion, ListedVoicemail, VoicemailId, VoicemailListing } f
 import { Machine as PhoneMachine, liveCall } from "../../gen/app__phone.effect.vibe"
 import * as Voicemail from "../../gen/app__phone__voicemail.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__phone__voicemail.effect.vibe"
-import { type Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
+import { type Telephony, deletionRefused, namesOf, telephony } from "../platform/telephony.vibe"
 import { recognizesVoicemail, transcribeVoicemail } from "../platform/voice.vibe"
 import { type Job, answer, applying, contained, following, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
@@ -128,15 +128,13 @@ effect function removed(id: number): Event!!(Telephony | Voicemails | Time | Voi
   const open = try opened()
   if (Option.isNone(open)) return { type: "removed", id, done: false, known: true, kept: false }
   const voicemail: VoicemailId = open.value.id
-  return effect {
-    const answer = try telephony("deleteVoicemail", (c) => c.phone.deleteVoicemail(voicemail))
-    if (answer.status === "queued") {
-      try (try Voicemails).set({ deletion: answer.deletion })
-      try ignore((try Voicemail.Machine).send({ type: "removalStaged", id }))
-      return try settlement(id, answer.deletion)
-    }
-    return { type: "removed", id, done: false, known: true, kept: false } satisfies Event
-  } catch (failure) => ({ type: "removed", id, done: false, kept: false, known: !(failure instanceof TelephonyRefused && failure.code === undefined && failure.tag === "") } satisfies Event)
+  const answer = try Effect.result(telephony("deleteVoicemail", (c) => c.phone.deleteVoicemail(voicemail)))
+  if (Result.isFailure(answer)) return { type: "removed", id, done: false, kept: false, known: deletionRefused(answer.failure) }
+  const report = answer.success
+  if (report.status !== "queued") return { type: "removed", id, done: false, known: true, kept: false }
+  try (try Voicemails).set({ deletion: report.deletion })
+  try ignore((try Voicemail.Machine).send({ type: "removalStaged", id }))
+  return try settlement(id, report.deletion)
 }
 
 // spec/app/phone/voicemail.md, "Undo can keep a voicemail while Android's deletion window is open"

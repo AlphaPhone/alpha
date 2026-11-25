@@ -14,6 +14,8 @@ export type SheetContentProps = Omit<ComponentProps<typeof DialogPrimitive.Conte
   description?: ReactNode;
   /** The sheet's buttons, in a row at its foot, each as wide as the others. */
   actions?: ReactNode;
+  /** The dimmed backdrop where the sheet has its own surface treatment. */
+  overlayClassName?: string;
 };
 
 /** A task that rises from the foot of the screen: holds a `SheetTrigger` and a `SheetContent`. */
@@ -28,10 +30,10 @@ export const SheetTrigger = DialogPrimitive.Trigger;
 export const SheetClose = DialogPrimitive.Close;
 
 /** The panel at the foot of a dimmed page: its title, a body that scrolls, and its actions. Escape and a press outside dismiss it. */
-export function SheetContent({ title, description, actions, className, children, ...props }: SheetContentProps) {
+export function SheetContent({ title, description, actions, overlayClassName, className, children, ...props }: SheetContentProps) {
   return (
     <DialogPrimitive.Portal>
-      <DialogOverlay className="z-sheet" />
+      <DialogOverlay className={cn("z-sheet", overlayClassName)} />
       <DialogPrimitive.Content
         {...(description ? {} : { "aria-describedby": undefined })}
         className={cn(
