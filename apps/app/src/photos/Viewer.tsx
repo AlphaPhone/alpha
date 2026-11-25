@@ -1,7 +1,7 @@
-import { Album, ChevronLeft, ChevronRight, Crop, Ellipsis, Heart, Info, Mail, MessageCircle, Pause, Pencil, Play, RotateCw, Share2, Sparkles, Trash2, Undo2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Crop, Ellipsis, FolderInput, Heart, Info, Mail, MessageCircle, Pause, Pencil, Play, RotateCw, Share2, Trash2, Undo2, X } from "lucide-react";
 import { Effect, Exit, type ManagedRuntime } from "effect";
 import { useCallback, useId, useRef, useState, type PointerEvent, type RefCallback } from "react";
-import { Button, Input, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, cn, dockClearance } from "@repo/ui";
+import { Button, Input, Mark, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, cn, dockClearance } from "@repo/ui";
 import { useMachine } from "../../gen/app__photos__viewer.react.ts";
 import { canPlay, maxZoom, panUnits, type Event, type Look, type Pan, type Viewer as ViewerState } from "../../gen/app__photos__viewer.ts";
 import type { Machine } from "../../gen/app__photos__viewer.effect.vibe";
@@ -158,8 +158,8 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onBack, back
   const useInMessages = !inTrash && showing && allows({ type: "useInMessages" }) && photoMessageType(current.item) !== undefined
     && runtime.runSync(Effect.flatMap(Device, (device) => device.capabilities())).image;
   const photosMenu = [
-    !inTrash && state.kind === "Still" && allows({ type: "askAlpha" }) && { label: "Ask Alpha", icon: <Sparkles />, select: () => action({ type: "askAlpha" }) },
-    onAddToAlbum && { label: "Add to album", icon: <Album />, select: onAddToAlbum },
+    !inTrash && state.kind === "Still" && allows({ type: "askAlpha" }) && { label: "Ask Alpha", icon: <Mark aria-hidden className="size-5" />, select: () => action({ type: "askAlpha" }) },
+    onAddToAlbum && { label: "Add to album", icon: <FolderInput />, select: onAddToAlbum },
     !inTrash && photoEmailAllowed(current.item) && allows({ type: "email" }) && { label: "Email", icon: <Mail />, select: () => action({ type: "email" }) },
     useInMessages && { label: "Use in Messages", icon: <MessageCircle />, select: () => action({ type: "useInMessages" }) },
     !inTrash && allows({ type: "share" }) && { label: "Share", icon: <Share2 />, select: () => action({ type: "share" }) },
@@ -272,7 +272,7 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onBack, back
         {after !== undefined && <Button className="sr-only focus:not-sr-only" variant="ghost" size="icon" aria-label="Next photo" onClick={() => action({ type: "swipe", neighbour: after })}><ChevronRight /></Button>}
       </div>}
       <Sheet open={state.info} onOpenChange={(open) => { if (!open) action({ type: "toggleInfo" }); }}>
-        <SheetContent title={name} actions={onAddToAlbum && <Button variant="secondary" onClick={onAddToAlbum}><Album />Add to album</Button>}>
+        <SheetContent title={name} actions={onAddToAlbum && <Button variant="secondary" onClick={onAddToAlbum}><FolderInput />Add to album</Button>}>
           <dl className="grid grid-cols-2 gap-2 text-sm">
             {date && <><dt>Taken</dt><dd>{formatDate.format(date)} {formatTime.format(date)}</dd></>}
             {item !== undefined && <><dt>Dimensions</dt><dd>{item.width} × {item.height}</dd></>}
