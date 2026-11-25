@@ -19,6 +19,7 @@ import { type VoiceEvent, VoiceBridge } from "../platform/voice.vibe"
 import { fresh } from "../runtime/attempts.vibe"
 import { type Job, answer, applying, contained, due, following, hearing, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
 import { signedIn } from "./account.vibe"
+import { replyBlocks } from "../assistant/words.ts"
 import { dictationClock } from "./dictation-clock.vibe"
 
 const views: ReadonlyArray<Shell.View> = [
@@ -363,7 +364,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       if (provisional || awaitingFiles) return
       emitNavigation(written)
       if (replyNeedsReview(written)) return
-      const clean = speakableText(written)
+      const clean = speakableText(replyBlocks(written, true).words)
       if (clean.length <= shown.length) return
       shown = clean
       sayFrom(clean, false)
@@ -465,7 +466,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       Queue.endUnsafe(queue)
       return
     }
-    const full = speakableText(finalText)
+    const full = speakableText(replyBlocks(finalText).words)
     sayFrom(full.length >= shown.length ? full : shown, true)
     Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false })
     Queue.endUnsafe(queue)
