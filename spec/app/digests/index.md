@@ -163,6 +163,11 @@ pure def askAbout(d: Digests, result: int): Moved = { state: d, out: List(AskAlp
 ### Background checks and notifications are asked one at a time each and shown as the platform last took them
 
 Browser result checks are a setting for the verified owner on this browser.
+Alpha confirms the launch owner's identity belongs to the same resident
+agent named by local auth. Consent and retained history are scoped to
+that verified pair. An older agent-only record proves neither its owner
+nor their consent and stays sealed. A verified owner starts with checks
+off until they choose otherwise.
 The browser answers with what it durably saved; Android supplies its own
 delivery and notification settings.
 

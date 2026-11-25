@@ -10,6 +10,7 @@ export interface NotesScene {
   notes: StickyNote[];
   revision: number;
   owner: string;
+  ownerIdentity: string;
   trash: NonNullable<NotesSnapshot["trash"]>;
   creations: Map<string, string>;
   readonly audio: Map<string, { readonly noteId: string; readonly durationMs: number }>;
@@ -49,6 +50,7 @@ export function notesScene(now = Date.now()): NotesScene {
     refusing: false,
     views: [],
     owner: "agent-owner",
+    ownerIdentity: "cloud-owner",
     trash: [],
     creations: new Map(),
     audio: new Map(),
@@ -200,6 +202,10 @@ export function notesRoutes(scene: NotesScene): Route[] {
     (request, url) => {
       if (request.method === "GET" && url.pathname === "/api/auth/me") {
         return Response.json({ identity: { kind: "owner", id: scene.owner }, access: { role: "OWNER", mode: "local" } });
+      }
+      if (request.method === "GET" && url.pathname === "/api/client-devices/capabilities") {
+        return Response.json({ protocol: 1, agentId: scene.owner, identityId: scene.ownerIdentity,
+          deviceActions: { protocol: 1, capabilities: [] } });
       }
       if (request.method === "GET" && url.pathname === "/api/notes/state") {
         return scene.failing ? refused(503) : Response.json({ success: true, data: snapshot(scene) });

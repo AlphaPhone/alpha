@@ -6,12 +6,13 @@ import { Machine as WorkflowList } from "../../gen/app__workflows__list.effect.v
 import { fromAreas, type ToldBrief } from "../home/cards.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
-import { ownerAt } from "../platform/owner.vibe"
+import { type ResidentOwner, launchOwnerAt, residentOwnerKey, sameResidentOwner } from "../platform/owner.vibe"
 import { started, together } from "../runtime/reactor.vibe"
 import { Rows } from "./list.vibe"
 
-export function digestScope(owner: string): string {
-  return `alpha/workflows/digests/${encodeURIComponent(owner)}`
+/** Old agent-only keys carry no verified owner. Leave their results and consent sealed. */
+export function digestScope(owner: ResidentOwner): string {
+  return `alpha/workflows/digests-v2/${encodeURIComponent(residentOwnerKey(owner))}`
 }
 
 interface DigestRead {
@@ -22,23 +23,23 @@ interface DigestRead {
 /** One inbox writer for Workflows and visible-browser checks. Home only reads the committed history. */
 export service DigestHistory {
   readonly changes: Stream.Stream<void>
-  read(owner: string): (readonly DigestResult[] | undefined)!!
-  sync(owner: string, protocol: HostedDigestProtocol): DigestRead!!
+  read(owner: ResidentOwner): (readonly DigestResult[] | undefined)!!
+  sync(owner: ResidentOwner, protocol: HostedDigestProtocol): DigestRead!!
 }
 
 const history = Layer.effect(DigestHistory, effect {
   const changed = try PubSub.sliding<void>(1)
   const round = (try Semaphore.make(1)).withPermits(1)
   const store = try KeyValueStore.KeyValueStore
-  const inboxFor = (owner: string) => Effect.provideService(digestInbox(digestScope(owner)), KeyValueStore.KeyValueStore, store)
+  const inboxFor = (owner: ResidentOwner) => Effect.provideService(digestInbox(digestScope(owner)), KeyValueStore.KeyValueStore, store)
   let generation = 0
   return {
     changes: Stream.fromPubSub(changed),
-    read: (owner: string) => round(effect {
+    read: (owner: ResidentOwner) => round(effect {
       const inbox = try inboxFor(owner)
       return inbox.history() catch () => undefined
     }),
-    sync: (owner: string, protocol: HostedDigestProtocol) => round(effect {
+    sync: (owner: ResidentOwner, protocol: HostedDigestProtocol) => round(effect {
       const inbox = try inboxFor(owner)
       const fresh = inbox.sync(protocol, ++generation) catch () => undefined
       const rows = fresh ?? (inbox.history() catch () => undefined)
@@ -66,15 +67,21 @@ const brief = started(effect {
 
   const read = effect (available: boolean | void) => {
     const owner = (try list.get()).owner
-    const identity = available !== false && owner > 0 ? (ownerAt() catch () => "") : ""
-    const scope = identity !== "" && (try rows.sameOwner(identity, owner)) ? digestScope(identity) : undefined
+    const identity = available !== false && owner > 0 ? (launchOwnerAt() catch () => undefined) : undefined
+    const scope = identity !== undefined && (try rows.sameDigestOwner(identity, owner)) ? digestScope(identity) : undefined
     if (scope !== bound) {
       bound = scope
       fromAreas.brief(undefined)
     }
-    if (scope === undefined) return
+    if (identity === undefined || scope === undefined) return
     const saved = try history.read(identity)
-    if (saved === undefined || (ownerAt() catch () => "") !== identity || (try list.get()).owner !== owner) return
+    const confirmed = launchOwnerAt() catch () => undefined
+    if (!sameResidentOwner(identity, confirmed) || (try list.get()).owner !== owner || !(try rows.sameDigestOwner(identity, owner))) {
+      bound = undefined
+      fromAreas.brief(undefined)
+      return
+    }
+    if (saved === undefined) return
     const latest = latestRetainedBrief(saved)
     const current: ToldBrief | undefined = latest === undefined ? undefined
       : latest.status === "failed" || latest.status === "cancelled"

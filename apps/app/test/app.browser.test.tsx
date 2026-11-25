@@ -85,6 +85,8 @@ it("Checks for a browser brief outside Workflows only after this owner opts in (
   const world = scene();
   const hosted: NonNullable<typeof world.workflows.hosted> = { entries: [], reads: 0, acknowledgements: [] };
   world.workflows.hosted = hosted;
+  const oldConsent = `alpha/workflows/digests/${encodeURIComponent(world.notes.owner)}/visible-checks`;
+  localStorage.setItem(oldConsent, "on");
   const { alpha } = await open(world, only("home", "view:Workflows"));
   const home = () => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goHome" })));
   const listing = () => alpha.runtime.runPromise(Effect.flatMap(Workflows, (workflows) => workflows.get()));
@@ -98,6 +100,7 @@ it("Checks for a browser brief outside Workflows only after this owner opts in (
   await until(alpha, alpha.runtime, Workflows, (state) => state.owner > 0 && state.list.status === "Loaded");
   await later(alpha, 60_001);
   expect([hosted.reads, hosted.acknowledgements]).toEqual([0, []]);
+  expect(localStorage.getItem(oldConsent)).toBe("on");
 
   await scheduled();
   await expect.element(page.getByText("No digest results yet")).toBeVisible();
@@ -129,7 +132,7 @@ it("Checks for a browser brief outside Workflows only after this owner opts in (
   await expect.element(toggle()).toBeChecked();
   await home();
   const oldOwner = (await listing()).owner;
-  world.notes.owner = "next-browser-owner";
+  world.notes.ownerIdentity = "next-browser-owner";
   await seen(false);
   await seen(true);
   await until(alpha, alpha.runtime, Workflows, (state) => state.owner > oldOwner);

@@ -5,7 +5,7 @@ import * as Digests from "../../gen/app__digests.effect.vibe"
 import { Machine as Listing } from "../../gen/app__workflows__list.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Device, native } from "../platform/device.vibe"
-import { ownerAt } from "../platform/owner.vibe"
+import { type ResidentOwner, launchOwnerAt, sameResidentOwner } from "../platform/owner.vibe"
 import { applying, started, together } from "../runtime/reactor.vibe"
 import { WorkflowsApi } from "./api.vibe"
 import { DigestHistory, digestScope } from "./brief.vibe"
@@ -20,16 +20,16 @@ module page {
 import { locksAvailable } from page
 
 const browserChecks = (): boolean => !native() && locksAvailable()
-const preference = (identity: string): string => `${digestScope(identity)}/visible-checks`
+const preference = (identity: ResidentOwner): string => `${digestScope(identity)}/visible-checks`
 
 const binding = applying(Listing, (state) => ({ owner: state.owner, open: state.place.tag === "ListingDigests" }), effect ({ owner, open }) => {
   if (!browserChecks()) return
   const model = try Digests.Machine
   if ((try model.get()).owner !== owner) {
     const store = try KeyValueStore.KeyValueStore
-    const identity = owner > 0 ? (ownerAt() catch () => "") : ""
-    const verified = identity !== "" && (try (try Rows).sameOwner(identity, owner))
-    const backgroundOn = verified && (store.get(preference(identity)) catch () => undefined) === "on"
+    const identity = owner > 0 ? (launchOwnerAt() catch () => undefined) : undefined
+    const verified = identity !== undefined && (try (try Rows).sameDigestOwner(identity, owner))
+    const backgroundOn = identity !== undefined && verified && (store.get(preference(identity)) catch () => undefined) === "on"
     if ((try (try Listing).get()).owner !== owner) return
     try ignore(model.send({ type: "ownerChanged", owner: verified ? owner : 0, backgroundOn, noticesOn: false }))
   }
@@ -44,15 +44,16 @@ export effect function setBrowserDigestChecks(owner: number, on: boolean): void!
   const rows = try Rows
   const device = try Device
   const store = try KeyValueStore.KeyValueStore
-  const identity = ownerAt() catch () => ""
+  const identity = launchOwnerAt() catch () => undefined
   const listing = try list.get()
-  if (identity === "" || listing.owner !== owner || listing.place.tag !== "ListingDigests" ||
-    !(try rows.sameOwner(identity, owner)) || !(try device.showing())) return
+  if (identity === undefined || listing.owner !== owner || listing.place.tag !== "ListingDigests" ||
+    !(try rows.sameDigestOwner(identity, owner)) || !(try device.showing())) return
   const moved = model.send({ type: "setBackground", on }, (state) => state.owner === owner) catch () => undefined
   const request = moved?.out.find((command) => command.tag === "SetBackground")
   if (request?.tag !== "SetBackground") return
   const applied = effect {
-    if ((ownerAt() catch () => "") !== identity || !(try rows.sameOwner(identity, owner))) return false
+    const confirmed = launchOwnerAt() catch () => undefined
+    if (!sameResidentOwner(identity, confirmed) || !(try rows.sameDigestOwner(identity, owner))) return false
     try store.set(preference(identity), request.on ? "on" : "off")
     return true
   } catch () => false
@@ -74,16 +75,16 @@ const checks = started(effect {
   const inbox = try DigestHistory
 
   const poll = effect (owner: number): void!!Agent => {
-    const identity = ownerAt() catch () => ""
-    if (identity === "") return
+    const identity = launchOwnerAt() catch () => undefined
+    if (identity === undefined) return
     const allowed = effect {
       return canCheck(try model.get(), owner) && (try list.get()).owner === owner &&
-        (try rows.sameOwner(identity, owner)) && (try device.showing())
+        (try rows.sameDigestOwner(identity, owner)) && (try device.showing())
     }
     if (!(try allowed)) return
     const ownsRequest = effect {
-      const current = Effect.provideService(ownerAt(), Agent, agent) catch () => ""
-      return current === identity && (try allowed)
+      const current = Effect.provideService(launchOwnerAt(), Agent, agent) catch () => undefined
+      return sameResidentOwner(identity, current) && (try allowed)
     }
     const checked: WorkflowRequest = effect (path: string, body: unknown) => {
       if (!(try ownsRequest)) throw workflowHttpError(0, {})
