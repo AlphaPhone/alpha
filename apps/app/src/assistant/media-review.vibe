@@ -508,39 +508,21 @@ const notStarted = "Alpha couldn’t start that action."
 const sameTarget = (one: MessageDraftTarget | undefined, other: MessageDraftTarget | undefined): boolean =>
   one !== undefined && other !== undefined && one.thread === other.thread && one.ticket === other.ticket
 
-export const mediaReview = Layer.effect(MediaReview, effect {
-  const agent = try Agent
-  const { runtime, life } = agent
-  const executors = try MediaExecutors
-  const device = try Device
-  const telephony = try Telephony
-  const messages = try Messages
-  const shell = try Shell
-  const layers = try Layers.Machine
-  const preferences = try Prefs.Machine
-  const smsContext = try Effect.context<SmsSelectionContext>()
-  const sameSms = (selection: SmsSelection) => Effect.provideContext(currentSmsSelection(selection), smsContext)
-  const lock = try Semaphore.make(1)
-  let latest: Session | undefined
-  const scopes = new Map<string, ApprovalScope>()
-  const pinnedFiles = new Map<string, { readonly digest: string; readonly files: FileReview; readonly expiresAt: number }>()
-  const guarded = (operation: DeviceOperation, call: ExecutorCall) => runPromise(effect {
-    const scope = scopes.get(call.proposalId)
-    if (scope === undefined || !(try scope.active)) return { kind: "refused", code: NOT_DISPATCHED }
-    const foreground = scope.foregroundFiles === undefined ? undefined : try scope.foregroundFiles
-    if (scope.foregroundFiles !== undefined && foreground === undefined) return { kind: "refused", code: NOT_DISPATCHED }
-    const continueDraft = scope.continueDraft
-    const current = foreground?.current ?? scope.active
-    const files = foreground?.files ?? scope.files
-    if (foreground !== undefined && !(try current)) return { kind: "refused", code: NOT_DISPATCHED }
-    return try executors.execute(operation, call, { current: () => runPromise(current), ...(scope.target === undefined ? {} : { target: scope.target }),
-      ...(continueDraft === undefined ? {} : { continueDraft: () => runPromise(continueDraft) }),
-      ...(scope.sms === undefined ? {} : { sms: scope.sms }), ...(files === undefined ? {} : { files }),
-      ...(scope.reportFiles === undefined ? {} : { reportFiles: scope.reportFiles }), ...(scope.phone === undefined ? {} : { phone: scope.phone }) })
-  })
-  const readBack = (operation: DeviceOperation, call: ExecutorCall) => operation.type === "sms_send"
-    ? runPromise(readAgentSms(operation, call) |> Effect.provideService(%, Device, device) |> Effect.provideService(%, Telephony, telephony))
-    : Promise.resolve(undefined)
+interface FilesReviewContext {
+  readonly device: Device.Shape
+  readonly shell: Shell.Shape
+  readonly layers: Layers.Machine.Shape
+  readonly preferences: Prefs.Machine.Shape
+  readonly executors: MediaExecutors.Shape
+  readonly lock: Semaphore.Semaphore
+  readonly scopes: Map<string, ApprovalScope>
+  readonly isLatest: (opened: Session) => boolean
+  readonly enrollmentIsCurrent: (opened: Session) => Effect.Effect<boolean>
+  readonly proposals: (opened: Session) => Effect.Effect<readonly Proposal[] | undefined>
+}
+
+function filesActions(context: FilesReviewContext) {
+  const { device, shell, layers, preferences, executors, lock, scopes, isLatest, enrollmentIsCurrent, proposals } = context
   effect function filesDirectAllowed(): boolean!! {
     const prefs = try preferences.get()
     return Prefs.free(prefs) && !Prefs.asksBeforeActing(prefs, "FilesAction") && (try device.showing()) && !Layers.pageInert(try layers.get())
@@ -556,40 +538,6 @@ export const mediaReview = Layer.effect(MediaReview, effect {
     const current = try shell.get()
     if (!canAgentOpenFilesFrom(current, current.trail, current.assistant, current.route, spoken)) return undefined
     return { source: [...current.trail], destination: agentOpenView(current, "Files").trail, panel: current.assistant, route: current.route, spoken }
-  }
-  effect function messageTarget(): (MessageDraftTarget | undefined)!! {
-    if (!(try device.showing()) || !showing(try shell.get(), "Messages")) return undefined
-    const state = try messages.get()
-    return state.front && state.pane === "Conversation" && state.page.status === "Loaded" && state.sms.grant === "Granted" ? { thread: state.thread, ticket: state.page.ticket } : undefined
-  }
-  effect function session(): (Session | undefined)!! {
-    if (!registered("AlphaMediaEnrollment") || !registered("ElizaActionJournal")) return undefined
-    const status = life.status() catch () => undefined
-    if (status?.state !== "running") { latest = undefined; pinnedFiles.clear(); return undefined }
-    if (latest?.epoch === status.epoch) return latest
-    pinnedFiles.clear()
-    const owner = Effect.provideService(ownerAt(), Agent, agent) catch () => undefined
-    const { image } = try device.capabilities()
-    latest = owner === undefined ? undefined : (enrolled(status.epoch, owner, image, runtime, guarded, readBack) catch () => undefined)
-    const fresh = latest
-    if (fresh !== undefined) try ignore(tryPromise(() => fresh.execute.sync()))
-    return latest
-  }
-  effect function proposals(opened: Session): (readonly Proposal[] | undefined)!! {
-    const answer = (tryPromise(() => runtime.request(`${prefix}/proposals`, undefined, opened.headers)) |> flatMap(%, Schema.decodeUnknownEffect(listed))) catch () => undefined
-    if (answer === undefined || opened !== latest) return undefined
-    return answer.proposals
-  }
-  effect function enrollmentIsCurrent(opened: Session): boolean!! {
-    const status = life.status() catch () => undefined
-    const owner = Effect.provideService(ownerAt(), Agent, agent) catch () => ""
-    const front = (tryPromise(() => enrollment().authority()) |> map(%, (one) => one.active === true)) catch () => false
-    return status?.state === "running" && status.epoch === opened.epoch && owner === opened.identity.ownerId && front && (try device.showing())
-  }
-  effect function reviewContext(revision: number, conversation: Conversation.Shape): boolean!! {
-    const showing = (try conversation.get()).context
-    const { assistant } = try shell.get()
-    return showing.revision === revision && !showing.sensitive && (assistant === "Sheet" || assistant === "Full") && (try device.showing())
   }
   effect function executeDirectFiles(opened: Session, proposal: { id: string; digest: string; expiresAt: number; operation: DeviceOperation },
     active: Effect.Effect<boolean>, current: Effect.Effect<boolean>, report: (note: string) => void,
@@ -620,7 +568,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
   effect function actOnFiles(opened: Session, card: DirectFilesTarget, request: DirectFiles): boolean!! {
     return try lock.withPermits(1)(effect {
       const matching = effect {
-        return opened === latest && (try request.current)
+        return isLatest(opened) && (try request.current)
           && (try Clock.currentTimeMillis) < card.expiresAt && sameFiles(request.files, try filesContext())
       }
       const active = effect { return (try matching) && (try enrollmentIsCurrent(opened)) && (try matching) }
@@ -635,7 +583,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       const { view, revision, moved, open, changes } = steps
       const expiresAt = Date.parse(proposal.expiresAt)
       const live = effect {
-        return opened === latest && (try request.current) && !(try view.get()).context.sensitive
+        return isLatest(opened) && (try request.current) && !(try view.get()).context.sensitive
           && (try Clock.currentTimeMillis) < expiresAt && (try filesDirectAllowed())
       }
       const source = effect {
@@ -680,6 +628,212 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       return try executeDirectFiles(opened, { id: proposal.id, digest: proposal.digest, expiresAt, operation }, active, report, request.report, undefined, foreground)
     })
   }
+  effect function spokenFiles(opened: Session, message: string, request: DirectFiles, results: DeviceActionReply["actionResults"]): boolean!! {
+    const actions = repliedDeviceActions(results)
+    if (![...actions.values()].some((action) => action === "Direct") || !(try request.current)) return false
+    const answer = try proposals(opened)
+    const at = try Clock.currentTimeMillis
+    const matching = answer?.filter((proposal) => proposal.state === "pending" && proposal.payload.workflow === undefined
+      && proposal.payload.requestMessageId === message && actions.get(proposal.id) === "Direct" && fromThisEnrollment(proposal, opened)
+      && Date.parse(proposal.expiresAt) > at)
+    if (matching === undefined || matching.length !== 1) return false
+    const offer = matching[0]
+    if (offer === undefined) return false
+    const exact = readOperation(offer.payload.operation)
+    if (exact === undefined || !sameFileOperation(request.operation, exact.operation) || !mayRunDirectly(exact, "NoBinding", true)) return false
+    const op = exact.operation
+    const files = op.type === "files_open" ? try executors.reviewFiles(op) : undefined
+    if (op.type === "files_open" && files === undefined) return false
+    return try actOnFiles(opened, { id: offer.id, digest: offer.digest, expiresAt: Date.parse(offer.expiresAt), operation: op,
+      ...(files === undefined ? {} : { files }) }, request)
+  }
+  effect function spokenFilesFrom(opened: Session, message: string, request: FilesContinuation, route: FilesRouteSteps, results: DeviceActionReply["actionResults"]): boolean!! {
+    if (!request.origin.spoken || !(try request.current)) return false
+    const actions = repliedDeviceActions(results)
+    if (![...actions.values()].some((action) => action === "Direct")) return false
+    const answer = try proposals(opened)
+    const at = try Clock.currentTimeMillis
+    const candidates = answer?.filter((proposal) => directFromReply(proposal, opened, message, actions, request.operation, at))
+    const candidate = candidates?.[0]
+    if (candidate === undefined || candidates?.length !== 1) return false
+    return try continueInFiles(opened, candidate, request, route)
+  }
+  return { methods: { filesContext, filesOrigin, spokenFiles, spokenFilesFrom }, actOnFiles, continueInFiles }
+}
+
+interface PinnedFileReview {
+  readonly digest: string
+  readonly files: FileReview
+  readonly expiresAt: number
+}
+
+interface PendingReviewContext {
+  readonly proposals: (opened: Session) => Effect.Effect<readonly Proposal[] | undefined>
+  readonly messageTarget: () => Effect.Effect<MessageDraftTarget | undefined>
+  readonly reviewContext: (revision: number, view: Conversation.Shape) => Effect.Effect<boolean>
+  readonly enrollmentIsCurrent: (opened: Session) => Effect.Effect<boolean>
+  readonly isLatest: (opened: Session) => boolean
+  readonly sameSms: (selection: SmsSelection) => Effect.Effect<boolean>
+  readonly executors: MediaExecutors.Shape
+  readonly telephony: Telephony.Shape
+  readonly pinnedFiles: Map<string, PinnedFileReview>
+  readonly actOnFiles: ReturnType<typeof filesActions>["actOnFiles"]
+  readonly continueInFiles: ReturnType<typeof filesActions>["continueInFiles"]
+}
+
+function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pending"] {
+  const { proposals, messageTarget, reviewContext, enrollmentIsCurrent, isLatest, sameSms, executors, telephony, pinnedFiles, actOnFiles, continueInFiles } = context
+  return effect (opened: Session, message: string, conversation: number, revision: number, target: MessageDraftTarget | undefined, reply: DeviceActionReply) => {
+    const view = try Conversation
+    const answer = try proposals(opened)
+    if (answer === undefined) return []
+    const bound = sameTarget(target, try messageTarget()) ? target : undefined
+    const actions = repliedDeviceActions(reply.actionResults)
+    const currentReview = answer.some((proposal) => reviewFromReply(proposal, opened, actions)) && (try reviewContext(revision, view))
+      && (try enrollmentIsCurrent(opened)) && isLatest(opened) && (try reviewContext(revision, view))
+    const at = try Clock.currentTimeMillis
+    const outside = reply.outsideFiles
+    const directOutside = outside === undefined ? [] : answer.filter((proposal) => directFromReply(proposal, opened, message, actions, outside.operation, at))
+    const [candidate] = directOutside
+    if (outside !== undefined && candidate !== undefined && directOutside.length === 1 && (try outside.current)) {
+      const current = effect {
+        const state = try view.get()
+        return (try outside.current) && state.turn.send.id === outside.ticket && state.turn.reply === "Complete" && !state.turn.stopping
+      }
+      const moved = effect {
+        const state = try view.get()
+        return state.opening.id === outside.ticket && state.opening.outcome === "Confirmed"
+      }
+      const { source, panel, route } = outside.origin
+      const open = () => navigateFilesForReply(view, outside.ticket, source, panel, route)
+      outside.hold(Effect.asVoid(continueInFiles(opened, candidate, { ...outside, current }, { view, revision, moved, open, changes: view.changes })))
+    }
+    for (const [id, pin] of pinnedFiles) if (pin.expiresAt <= at) pinnedFiles.delete(id)
+    const cards = try Effect.forEach(answer, effect (proposal) => {
+      if (proposal.state !== "pending" || proposal.payload.workflow !== undefined) return undefined
+      const op = operation(proposal.payload.operation)
+      const expiresAt = Date.parse(proposal.expiresAt)
+      if (op === undefined || !Number.isFinite(expiresAt) || expiresAt <= at) return undefined
+      const filesOperation = op.type.startsWith("files_")
+      const request = proposal.payload.requestMessageId
+      if (filesOperation && outside !== undefined && actions.get(proposal.id) === "Direct") return undefined
+      if (request === undefined) {
+        if (!(commsReview(op) || filesOperation) || !currentReview || !reviewFromReply(proposal, opened, actions)) return undefined
+      } else if (request !== message || (filesOperation && (!fromThisEnrollment(proposal, opened)
+        || (actions.get(proposal.id) !== "Review" && actions.get(proposal.id) !== "Direct")))) return undefined
+      const selected = needsMessage(op)
+      if (selected && bound === undefined) return undefined
+      const sms = op.type === "sms_send" ? reply.sms?.selection : undefined
+      if (op.type === "sms_send" && reply.sms !== undefined && (sms === undefined || sms.subscription.id !== op.subscriptionId || !(try sameSms(sms)))) return undefined
+      const named = op.type === "files_open" || op.type === "files_share" || op.type === "files_move" || op.type === "files_trash" || op.type === "files_folder_create"
+      let files: FileReview | undefined
+      if (named) {
+        const existing = pinnedFiles.get(proposal.id)
+        if (existing !== undefined && existing.digest !== proposal.digest) return undefined
+        const resolved = existing?.files ?? (try executors.reviewFiles(op))
+        if (!isLatest(opened)) return undefined
+        const held = pinnedFiles.get(proposal.id)
+        if (held !== undefined && held.digest !== proposal.digest) return undefined
+        if (held === undefined && resolved !== undefined && pinnedFiles.size < 256) {
+          pinnedFiles.set(proposal.id, { digest: proposal.digest, files: resolved, expiresAt })
+        }
+        files = pinnedFiles.get(proposal.id)?.files
+        if (files === undefined) return undefined
+      }
+      const detail = words(op)
+      const labelled = sms === undefined ? detail : { ...detail, detail: `SIM ${sms.subscription.slot + 1}\n${detail.detail}` }
+      const query = namedReviewQuery(op)
+      if (query !== undefined && (!(try reviewContext(revision, view)) || !(try enrollmentIsCurrent(opened)) || !(try reviewContext(revision, view)))) return undefined
+      const phone = query === undefined ? undefined : try Effect.provideService(phoneContactChoices(query), Telephony, telephony)
+      if (phone !== undefined && (!isLatest(opened) || !(try reviewContext(revision, view)))) return undefined
+      const card: MediaCard = { id: proposal.id, digest: proposal.digest, operation: op, expiresAt, message, conversation, revision, enrollmentId: opened.identity.enrollmentId, ...labelled,
+        ...(selected && bound !== undefined ? { target: bound } : {}),
+        ...(sms === undefined ? {} : { sms }),
+        ...(request === undefined || filesOperation || phone !== undefined || op.type === "sms_compose" ? { reviewRequest: reply.clientMessageId } : {}),
+        ...(phone === undefined ? {} : { phone }),
+        ...(files === undefined ? {} : { files, detail: op.type === "files_folder_create" ? labelled.detail : files.targets.map((target) => target.path).join(", ")
+          + (op.type === "files_move" ? ` → ${op.dest || "Internal storage"}` : "") }) }
+      return { card, fromTerminal: request === undefined }
+    }, { concurrency: 4 })
+    const visible = visibleCards(cards, currentReview && isLatest(opened) && (try reviewContext(revision, view)))
+    const owner = reply.directFiles
+    if (owner === undefined || !(try owner.current)) return visible
+    const direct = visible.find((card) => answer.some((proposal) =>
+      proposal.id === card.id && directFromReply(proposal, opened, message, actions, owner.operation, at)))
+    if (direct === undefined) return visible
+    const current = effect { return (try owner.current) && (try reviewContext(revision, view)) }
+    return (try actOnFiles(opened, direct, { ...owner, current })) ? visible.filter((card) => card !== direct) : visible
+  }
+}
+
+export const mediaReview = Layer.effect(MediaReview, effect {
+  const agent = try Agent
+  const { runtime, life } = agent
+  const executors = try MediaExecutors
+  const device = try Device
+  const telephony = try Telephony
+  const messages = try Messages
+  const shell = try Shell
+  const layers = try Layers.Machine
+  const preferences = try Prefs.Machine
+  const smsContext = try Effect.context<SmsSelectionContext>()
+  const sameSms = (selection: SmsSelection) => Effect.provideContext(currentSmsSelection(selection), smsContext)
+  const lock = try Semaphore.make(1)
+  let latest: Session | undefined
+  const isLatest = (opened: Session) => opened === latest
+  const scopes = new Map<string, ApprovalScope>()
+  const pinnedFiles = new Map<string, PinnedFileReview>()
+  const guarded = (operation: DeviceOperation, call: ExecutorCall) => runPromise(effect {
+    const scope = scopes.get(call.proposalId)
+    if (scope === undefined || !(try scope.active)) return { kind: "refused", code: NOT_DISPATCHED }
+    const foreground = scope.foregroundFiles === undefined ? undefined : try scope.foregroundFiles
+    if (scope.foregroundFiles !== undefined && foreground === undefined) return { kind: "refused", code: NOT_DISPATCHED }
+    const continueDraft = scope.continueDraft
+    const current = foreground?.current ?? scope.active
+    const files = foreground?.files ?? scope.files
+    if (foreground !== undefined && !(try current)) return { kind: "refused", code: NOT_DISPATCHED }
+    return try executors.execute(operation, call, { current: () => runPromise(current), ...(scope.target === undefined ? {} : { target: scope.target }),
+      ...(continueDraft === undefined ? {} : { continueDraft: () => runPromise(continueDraft) }),
+      ...(scope.sms === undefined ? {} : { sms: scope.sms }), ...(files === undefined ? {} : { files }),
+      ...(scope.reportFiles === undefined ? {} : { reportFiles: scope.reportFiles }), ...(scope.phone === undefined ? {} : { phone: scope.phone }) })
+  })
+  const readBack = (operation: DeviceOperation, call: ExecutorCall) => operation.type === "sms_send"
+    ? runPromise(readAgentSms(operation, call) |> Effect.provideService(%, Device, device) |> Effect.provideService(%, Telephony, telephony))
+    : Promise.resolve(undefined)
+  effect function messageTarget(): (MessageDraftTarget | undefined)!! {
+    if (!(try device.showing()) || !showing(try shell.get(), "Messages")) return undefined
+    const state = try messages.get()
+    return state.front && state.pane === "Conversation" && state.page.status === "Loaded" && state.sms.grant === "Granted" ? { thread: state.thread, ticket: state.page.ticket } : undefined
+  }
+  effect function session(): (Session | undefined)!! {
+    if (!registered("AlphaMediaEnrollment") || !registered("ElizaActionJournal")) return undefined
+    const status = life.status() catch () => undefined
+    if (status?.state !== "running") { latest = undefined; pinnedFiles.clear(); return undefined }
+    if (latest?.epoch === status.epoch) return latest
+    pinnedFiles.clear()
+    const owner = Effect.provideService(ownerAt(), Agent, agent) catch () => undefined
+    const { image } = try device.capabilities()
+    latest = owner === undefined ? undefined : (enrolled(status.epoch, owner, image, runtime, guarded, readBack) catch () => undefined)
+    const fresh = latest
+    if (fresh !== undefined) try ignore(tryPromise(() => fresh.execute.sync()))
+    return latest
+  }
+  effect function proposals(opened: Session): (readonly Proposal[] | undefined)!! {
+    const answer = (tryPromise(() => runtime.request(`${prefix}/proposals`, undefined, opened.headers)) |> flatMap(%, Schema.decodeUnknownEffect(listed))) catch () => undefined
+    if (answer === undefined || opened !== latest) return undefined
+    return answer.proposals
+  }
+  effect function enrollmentIsCurrent(opened: Session): boolean!! {
+    const status = life.status() catch () => undefined
+    const owner = Effect.provideService(ownerAt(), Agent, agent) catch () => ""
+    const front = (tryPromise(() => enrollment().authority()) |> map(%, (one) => one.active === true)) catch () => false
+    return status?.state === "running" && status.epoch === opened.epoch && owner === opened.identity.ownerId && front && (try device.showing())
+  }
+  effect function reviewContext(revision: number, conversation: Conversation.Shape): boolean!! {
+    const showing = (try conversation.get()).context
+    const { assistant } = try shell.get()
+    return showing.revision === revision && !showing.sensitive && (assistant === "Sheet" || assistant === "Full") && (try device.showing())
+  }
   effect function hasReceipt(opened: Session, proposal: Proposal): boolean!! {
     if (proposal.execution === undefined) return false
     const decoded = (tryPromise(() => journal().get(proposal.id)) |> flatMap(%, Schema.decodeUnknownEffect(journalBinding))) catch () => undefined
@@ -699,6 +853,12 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       ? recovered.result.tag === "Applied" ? "Phone confirmed the text request" : "The phone did not send the text"
       : undefined
   }
+  const { methods: files, actOnFiles, continueInFiles } = filesActions({
+    device, shell, layers, preferences, executors, lock, scopes, isLatest, enrollmentIsCurrent, proposals,
+  })
+  const pending = pendingProposals({
+    proposals, messageTarget, reviewContext, enrollmentIsCurrent, isLatest, sameSms, executors, telephony, pinnedFiles, actOnFiles, continueInFiles,
+  })
   return {
     session,
     effect history() {
@@ -739,119 +899,8 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       })
     },
     messageTarget,
-    filesOrigin,
-    filesContext,
-    effect spokenFiles(opened, message, request, results) {
-      const actions = repliedDeviceActions(results)
-      if (![...actions.values()].some((action) => action === "Direct") || !(try request.current)) return false
-      const answer = try proposals(opened)
-      const at = try Clock.currentTimeMillis
-      const matching = answer?.filter((proposal) => proposal.state === "pending" && proposal.payload.workflow === undefined
-        && proposal.payload.requestMessageId === message && actions.get(proposal.id) === "Direct" && fromThisEnrollment(proposal, opened)
-        && Date.parse(proposal.expiresAt) > at)
-      if (matching === undefined || matching.length !== 1) return false
-      const offer = matching[0]
-      if (offer === undefined) return false
-      const exact = readOperation(offer.payload.operation)
-      if (exact === undefined || !sameFileOperation(request.operation, exact.operation) || !mayRunDirectly(exact, "NoBinding", true)) return false
-      const op = exact.operation
-      const files = op.type === "files_open" ? try executors.reviewFiles(op) : undefined
-      if (op.type === "files_open" && files === undefined) return false
-      return try actOnFiles(opened, { id: offer.id, digest: offer.digest, expiresAt: Date.parse(offer.expiresAt), operation: op,
-        ...(files === undefined ? {} : { files }) }, request)
-    },
-    effect spokenFilesFrom(opened, message, request, route, results) {
-      if (!request.origin.spoken || !(try request.current)) return false
-      const actions = repliedDeviceActions(results)
-      if (![...actions.values()].some((action) => action === "Direct")) return false
-      const answer = try proposals(opened)
-      const at = try Clock.currentTimeMillis
-      const candidates = answer?.filter((proposal) => directFromReply(proposal, opened, message, actions, request.operation, at))
-      const candidate = candidates?.[0]
-      if (candidate === undefined || candidates?.length !== 1) return false
-      return try continueInFiles(opened, candidate, request, route)
-    },
-    effect pending(opened: Session, message: string, conversation: number, revision: number, target: MessageDraftTarget | undefined, reply: DeviceActionReply) {
-      const view = try Conversation
-      const answer = try proposals(opened)
-      if (answer === undefined) return []
-      const bound = sameTarget(target, try messageTarget()) ? target : undefined
-      const actions = repliedDeviceActions(reply.actionResults)
-      const currentReview = answer.some((proposal) => reviewFromReply(proposal, opened, actions)) && (try reviewContext(revision, view))
-        && (try enrollmentIsCurrent(opened)) && opened === latest && (try reviewContext(revision, view))
-      const at = try Clock.currentTimeMillis
-      const outside = reply.outsideFiles
-      const directOutside = outside === undefined ? [] : answer.filter((proposal) => directFromReply(proposal, opened, message, actions, outside.operation, at))
-      const [candidate] = directOutside
-      if (outside !== undefined && candidate !== undefined && directOutside.length === 1 && (try outside.current)) {
-        const current = effect {
-          const state = try view.get()
-          return (try outside.current) && state.turn.send.id === outside.ticket && state.turn.reply === "Complete" && !state.turn.stopping
-        }
-        const moved = effect {
-          const state = try view.get()
-          return state.opening.id === outside.ticket && state.opening.outcome === "Confirmed"
-        }
-        const { source, panel, route } = outside.origin
-        const open = () => navigateFilesForReply(view, outside.ticket, source, panel, route)
-        outside.hold(Effect.asVoid(continueInFiles(opened, candidate, { ...outside, current }, { view, revision, moved, open, changes: view.changes })))
-      }
-      for (const [id, pin] of pinnedFiles) if (pin.expiresAt <= at) pinnedFiles.delete(id)
-      const cards = try Effect.forEach(answer, effect (proposal) => {
-        if (proposal.state !== "pending" || proposal.payload.workflow !== undefined) return undefined
-        const op = operation(proposal.payload.operation)
-        const expiresAt = Date.parse(proposal.expiresAt)
-        if (op === undefined || !Number.isFinite(expiresAt) || expiresAt <= at) return undefined
-        const filesOperation = op.type.startsWith("files_")
-        const request = proposal.payload.requestMessageId
-        if (filesOperation && outside !== undefined && actions.get(proposal.id) === "Direct") return undefined
-        if (request === undefined) {
-          if (!(commsReview(op) || filesOperation) || !currentReview || !reviewFromReply(proposal, opened, actions)) return undefined
-        } else if (request !== message || (filesOperation && (!fromThisEnrollment(proposal, opened)
-          || (actions.get(proposal.id) !== "Review" && actions.get(proposal.id) !== "Direct")))) return undefined
-        const selected = needsMessage(op)
-        if (selected && bound === undefined) return undefined
-        const sms = op.type === "sms_send" ? reply.sms?.selection : undefined
-        if (op.type === "sms_send" && reply.sms !== undefined && (sms === undefined || sms.subscription.id !== op.subscriptionId || !(try sameSms(sms)))) return undefined
-        const named = op.type === "files_open" || op.type === "files_share" || op.type === "files_move" || op.type === "files_trash" || op.type === "files_folder_create"
-        let files: FileReview | undefined
-        if (named) {
-          const existing = pinnedFiles.get(proposal.id)
-          if (existing !== undefined && existing.digest !== proposal.digest) return undefined
-          const resolved = existing?.files ?? (try executors.reviewFiles(op))
-          if (opened !== latest) return undefined
-          const held = pinnedFiles.get(proposal.id)
-          if (held !== undefined && held.digest !== proposal.digest) return undefined
-          if (held === undefined && resolved !== undefined && pinnedFiles.size < 256) {
-            pinnedFiles.set(proposal.id, { digest: proposal.digest, files: resolved, expiresAt })
-          }
-          files = pinnedFiles.get(proposal.id)?.files
-          if (files === undefined) return undefined
-        }
-        const detail = words(op)
-        const labelled = sms === undefined ? detail : { ...detail, detail: `SIM ${sms.subscription.slot + 1}\n${detail.detail}` }
-        const query = namedReviewQuery(op)
-        if (query !== undefined && (!(try reviewContext(revision, view)) || !(try enrollmentIsCurrent(opened)) || !(try reviewContext(revision, view)))) return undefined
-        const phone = query === undefined ? undefined : try Effect.provideService(phoneContactChoices(query), Telephony, telephony)
-        if (phone !== undefined && (opened !== latest || !(try reviewContext(revision, view)))) return undefined
-        const card: MediaCard = { id: proposal.id, digest: proposal.digest, operation: op, expiresAt, message, conversation, revision, enrollmentId: opened.identity.enrollmentId, ...labelled,
-          ...(selected && bound !== undefined ? { target: bound } : {}),
-          ...(sms === undefined ? {} : { sms }),
-          ...(request === undefined || filesOperation || phone !== undefined || op.type === "sms_compose" ? { reviewRequest: reply.clientMessageId } : {}),
-          ...(phone === undefined ? {} : { phone }),
-          ...(files === undefined ? {} : { files, detail: op.type === "files_folder_create" ? labelled.detail : files.targets.map((target) => target.path).join(", ")
-            + (op.type === "files_move" ? ` → ${op.dest || "Internal storage"}` : "") }) }
-        return { card, fromTerminal: request === undefined }
-      }, { concurrency: 4 })
-      const visible = visibleCards(cards, currentReview && opened === latest && (try reviewContext(revision, view)))
-      const owner = reply.directFiles
-      if (owner === undefined || !(try owner.current)) return visible
-      const direct = visible.find((card) => answer.some((proposal) =>
-        proposal.id === card.id && directFromReply(proposal, opened, message, actions, owner.operation, at)))
-      if (direct === undefined) return visible
-      const current = effect { return (try owner.current) && (try reviewContext(revision, view)) }
-      return (try actOnFiles(opened, direct, { ...owner, current })) ? visible.filter((card) => card !== direct) : visible
-    },
+    ...files,
+    pending,
     effect choosePhone(card: MediaCard, choice: number) {
       const { board } = try Talk
       const view = try Conversation
