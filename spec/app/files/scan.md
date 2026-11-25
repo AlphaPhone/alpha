@@ -504,7 +504,10 @@ pure def sometimesTheDraftIsDeletedFromTheScan(s: Scan): bool = s.keeping.discar
 The open review names the exact pages and their text revisions. It keeps
 previously read text, including a page that was blank. Reading or editing
 in this review writes nothing. Back retires only the review it was sent
-for. A change to the source retires that review.
+for. A change to the source retires that review. Back can stop conversion
+before a write is requested. If the write was already requested, Back returns
+to the scanner and shows that the write remains unconfirmed. This closes the
+review and keeps the pending write's ticket until the phone reports its outcome.
 Keep text is an explicit draft edit. Save PDF starts the ordinary numbered
 save with the reviewed layer. Only a confirmed or unconfirmed write can
 then keep that layer in the draft. A refusal leaves the review available.
@@ -537,12 +540,12 @@ pure def searchRead(s: Scan, ticket: int, image: int, ok: bool, by: Actor): Move
   else { state: { ...s, search: { ...s.search, stage: SearchFailed } }, out: List() }
 
 pure def canCancelSearch(s: Scan, ticket: int, by: Actor): bool =
-  ticket == s.search.ticket and s.search.stage != SearchClosed
-    and (by == Phone or s.search.stage != SearchSaving or s.pdf.outcome == A::Recorded)
+  ticket == s.search.ticket and s.search.stage != SearchClosed and (by == Phone or s.open)
 
 pure def cancelSearch(s: Scan, ticket: int, by: Actor): Scan =
-  { ...s, search: closeSearch(ticket),
-    pdf: if (s.search.stage == SearchSaving and s.pdf.outcome == A::Recorded) A::plan(s.pdf.id + 1) else s.pdf }
+  val waiting = s.search.stage == SearchSaving
+  { ...s, search: { ...closeSearch(ticket), tried: waiting and s.pdf.outcome == A::Sent },
+    pdf: if (waiting and s.pdf.outcome == A::Recorded) A::plan(s.pdf.id + 1) else s.pdf }
 
 pure def reviewedPage(old: K::Page, p: K::Page): bool =
   p.text == p.image and p.camera == old.camera and
