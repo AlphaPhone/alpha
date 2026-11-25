@@ -106,6 +106,7 @@ const back = { type: "goBack" } as const;
 
 function DeviceReview({ runtime, card }: { runtime: AssistantProps["runtime"]; card: MediaCard }) {
   const decide = (approve: boolean) => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, approve)));
+  const textCard = card.phone?.tag !== "Choices" && card.phone?.tag !== "Unavailable" && card.operation.type === "sms_send";
   return (
     <div className="grid gap-2">
       {card.phone?.tag === "Choices" ? (
@@ -121,14 +122,13 @@ function DeviceReview({ runtime, card }: { runtime: AssistantProps["runtime"]; c
         </div>
       ) : card.phone?.tag === "Unavailable" ? (
         <Alert role="status">{card.phone.reason}</Alert>
-      ) : card.operation.type === "sms_send" ? (
-        <SmsReviewCard to={card.operation.recipients.join(", ")} body={card.operation.body} note="Confirm the text and SIM in Android to send it."
-          onSend={() => decide(true)} onDecline={() => decide(false)} />
+      ) : textCard && card.operation.type === "sms_send" ? (
+        <SmsReviewCard to={card.operation.recipients.join(", ")} body={card.operation.body} onSend={() => decide(true)} onDecline={() => decide(false)} />
       ) : (
         <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, action: card.operation.type === "sms_compose" ? "Open draft" : "Approve" }}
           onHandOn={() => decide(true)} />
       )}
-      {card.operation.type !== "sms_send" && <Button className="justify-self-end" variant="ghost" onClick={() => decide(false)}>Decline</Button>}
+      {!textCard && <Button className="justify-self-end" variant="ghost" onClick={() => decide(false)}>Decline</Button>}
     </div>
   );
 }

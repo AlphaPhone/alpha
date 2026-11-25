@@ -383,14 +383,14 @@ describe("Messages on an Alpha image", () => {
     };
 
     await ask("unrelated-proposal", "Text +14155550100 from SIM 1 saying Meet at the front door");
-    expect([button("Approve"), review.decisions, review.confirmations, world.telephony.sent]).toEqual([undefined, [], [], []]);
+    expect([button("Send this text"), review.decisions, review.confirmations, world.telephony.sent]).toEqual([undefined, [], [], []]);
 
     await ask(review.proposal.id, "Use SIM 1 to send +14155550100 the text Meet at the front door");
-    await vi.waitFor(() => expect(button("Approve")).toBeDefined());
-    expect(document.body.textContent).toContain("Review this text on your phone");
+    await vi.waitFor(() => expect(button("Send this text")).toBeDefined());
+    expect(document.body.textContent).toContain(`To ${sms.recipients[0]}`);
     expect(document.body.textContent).toContain(sms.body);
     expect([review.decisions, review.confirmations, world.telephony.sent]).toEqual([[], [], []]);
-    await press("Approve");
+    await press("Send this text");
     try {
       await vi.waitFor(() => expect(review.confirmations).toHaveLength(1));
       const confirmation = review.confirmations[0];
@@ -452,23 +452,23 @@ describe("Messages on an Alpha image", () => {
 
     const opaqueRevision: unknown = expect.stringMatching(/^[a-f0-9-]{36}$/u);
     expect(await ask()).toBeUndefined();
-    expect(button("Approve")).toBeUndefined();
+    expect(button("Send this text")).toBeUndefined();
     await choose("SIM 1");
     expect(await ask()).toEqual({ kind: "sms-subscription", id: String(first.id), revision: opaqueRevision });
-    expect(button("Approve")).toBeUndefined();
+    expect(button("Send this text")).toBeUndefined();
     await giveBack();
     await press("Back");
     await ready(alpha.runtime, Messages, "Conversation closed", (state) => state.pane === "Threads");
     await press("Maya Chen");
     await ready(alpha.runtime, Messages, "Conversation reopened", (state) => state.pane === "Conversation" && state.page.status === "Loaded");
     expect(await ask()).toBeUndefined();
-    expect(button("Approve")).toBeUndefined();
+    expect(button("Send this text")).toBeUndefined();
     await choose("SIM 2");
     expect(await ask()).toEqual({ kind: "sms-subscription", id: String(second.id), revision: opaqueRevision });
-    await vi.waitFor(() => expect(button("Approve")).toBeDefined());
+    await vi.waitFor(() => expect(button("Send this text")).toBeDefined());
 
     world.telephony.subscriptions = [first, { ...second, carrierName: "Replacement carrier" }];
-    await press("Approve");
+    await press("Send this text");
     await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "failed", operationId: review.proposal.id })]));
     expect([review.confirmations, world.telephony.sent]).toEqual([[], []]);
   });
