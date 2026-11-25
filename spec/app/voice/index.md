@@ -220,7 +220,7 @@ pure def answerDisclosure(v: Voice, agree: bool, now: int): Change =
   begin(onNetwork(route, now), { ...v, disclosing: false, route: route })
 ```
 
-### Android's answer to the prompt opens the microphone, or shows that it was denied
+### Android's answer to the prompt opens the microphone, or ends the start quietly when it was denied
 
 The prompt is answered for whichever is waiting on it: the conversation or
 the recorder.
@@ -938,7 +938,7 @@ pure def closeRecorder(v: Voice): Change =
 ```quint
 pure def alwaysTheRecorderKeepsItsRules(v: Voice): bool =
   D::alwaysAClipIsKeptOnlyAfterRecording(v.recorder) and D::alwaysWordsOnlyInReview(v.recorder)
-    and D::alwaysAFailureWaitsForTheOwner(v.recorder) and D::alwaysTicketsAreCounted(v.recorder)
+    and D::alwaysAFailureWaitsInItsStage(v.recorder) and D::alwaysTicketsAreCounted(v.recorder)
 
 pure def sometimesDictationUnderReview(v: Voice): bool = v.recorder.stage == D::Review and v.recorder.field == D::PhoneBar
 
