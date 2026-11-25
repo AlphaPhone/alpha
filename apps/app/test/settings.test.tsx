@@ -281,7 +281,7 @@ describe("Settings", () => {
     const text = await sharedFiles[0]?.text();
     const report = JSON.parse(text ?? "{}");
     expect([report.format, report.roles, report.problems.count, report.permissions, text?.includes("launcher3"), text?.includes("ai.alphacompute"), text?.includes("\"session\""), report.talk]).toEqual([
-      "alpha-diagnostics/v1", [{ role: "home", held: false, available: true }, { role: "assistant", held: false, available: true }], 2, { FilesAccess: true, LocationAccess: true }, false, false, false,
+      "alpha-diagnostics/v1", [{ role: "home", held: false, available: true }, { role: "assistant", held: false, available: true }], 2, { CalendarAccess: true, FilesAccess: true, LocationAccess: true, MicrophoneAccess: false, NotificationsAccess: true }, false, false, false,
       { format: "alpha-cloud-stream-timing-v1", sessions: [{ sttConnectedMs: 812, firstFrameSentMs: 815, consentRetry: true }, { sttConnectedMs: 390, firstFrameSentMs: null, consentRetry: false }] },
     ]);
     // spec/app/settings/developer.md, "Clear is offered only for a log with problems, one at a time; once the startup area answers, the log is read again": Clear asks first, and backing out clears nothing.
@@ -345,7 +345,8 @@ describe("Settings", () => {
     await seen(false);
     await until(alpha, machines, Carrier.Machine, (s) => s.fields.length === 0 && !s.showing);
     await seen(true);
-    await until(alpha, machines, Carrier.Machine, (s) => s.showing && s.read.read.status === "Idle" && s.fields.length === 0);
+    // spec/app/settings/timed.md, "Leaving a screen retires its asking: nothing is waited for, and a late answer is refused": a finished read stays finished, its fields forgotten, and coming back asks nothing.
+    await until(alpha, machines, Carrier.Machine, (s) => s.showing && s.read.read.status !== "Loading" && s.read.read.ticket === 1 && s.fields.length === 0 && s.eid.status === "NotRead" && s.copied === "NotCopied");
     await press("Show identifiers");
     await until(alpha, machines, Carrier.Machine, (s) => s.read.read.status === "Loaded" && s.fields.length > 0);
   });

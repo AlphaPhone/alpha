@@ -42,9 +42,8 @@ effect function action(fx: Extract<Trash.Effect, { readonly tag: "Does" }>): Tra
   const store = try NoteStore
   const snapshot = store.read() catch () => undefined
   if (snapshot?.trash === undefined) return failed
-  const entries = snapshot.trash
   const note = snapshot.notes.find((row) => numberOf("note", row.id) === subject)
-  const entry = entries.find((row) => numberOf("note", row.note.id) === subject)
+  const entry = snapshot.trash.find((row) => numberOf("note", row.note.id) === subject)
   if (act !== "Sweep" && snapshot.revision + 1 !== revision) return failed
   return effect {
     switch (act) {
@@ -65,7 +64,7 @@ effect function action(fx: Extract<Trash.Effect, { readonly tag: "Does" }>): Tra
         return done
       case "Sweep": {
         let latest = snapshot.revision
-        for (const row of entries.filter((item) => Date.parse(item.deletedAt) + Trash.retention <= asOf)) {
+        for (const row of (snapshot.trash ?? []).filter((item) => Date.parse(item.deletedAt) + Trash.retention <= asOf)) {
           const erased = try store.erase({ scope: "entry", id: row.note.id, deletedAt: row.deletedAt, expectedRevision: latest })
           latest = erased.state.revision
         }
@@ -77,23 +76,27 @@ effect function action(fx: Extract<Trash.Effect, { readonly tag: "Does" }>): Tra
   } catch (error) => error.known && act !== "Sweep" ? failed : lost
 }
 
-effect function cleanRecorded(ids: ReadonlyArray<number>): boolean!!(Agent | NoteStore | NoteDevice) {
+/** Whether every recording went, and whether the phone could tell: an unread store or an unanswered acknowledgement leaves it unknown. */
+effect function cleanRecorded(ids: ReadonlyArray<number>): { readonly ok: boolean; readonly known: boolean }!!(Agent | NoteStore | NoteDevice) {
+  const unknown = { ok: false, known: false }
   const identity = ownerAt() catch () => ""
-  if (identity === "") return false
+  if (identity === "") return unknown
   const store = try NoteStore
   const snapshot = store.read() catch () => undefined
   const receipts = store.cleanup() catch () => undefined
-  if (snapshot === undefined || receipts === undefined || (ownerAt() catch () => "") !== identity) return false
+  if (snapshot === undefined || receipts === undefined || (ownerAt() catch () => "") !== identity) return unknown
   const device = try NoteDevice
   const retained = new Set([...snapshot.notes, ...(snapshot.trash ?? []).map((entry) => entry.note)].map(audioIdOf))
   let ok = true
+  let known = true
   for (const receipt of receipts) {
     if (!ids.includes(numberOf("recording", receipt.audioId))) continue
     if (retained.has(receipt.audioId) || !(try device.purge(receipt))) { ok = false; continue }
-    const acknowledged = store.cleaned(receipt) catch () => false
-    ok = ok && acknowledged
+    const acknowledged = store.cleaned(receipt) catch () => undefined
+    if (acknowledged === undefined) known = false
+    ok = ok && acknowledged === true
   }
-  return ok
+  return { ok, known }
 }
 
 function carry(fx: Trash.Effect): Job<Trash.Event, Agent | NoteStore | NoteDevice | NoteContent | Trash.Machine | KeyValueStore.KeyValueStore | Notes | Editor, [Actor]> {
@@ -108,10 +111,7 @@ function carry(fx: Trash.Effect): Job<Trash.Event, Agent | NoteStore | NoteDevic
       return { type: "kept", ticket: fx.ticket, ok: kept } satisfies Trash.Event
     }, { type: "kept", ticket: fx.ticket, ok: false }, phone);
     when { tag: "Does" }: answer(`action ${fx.ticket}`, action(fx), { type: "finished", ticket: fx.ticket, verdict: "Lost", revision: fx.revision }, phone);
-    when { tag: "ErasesAudio" }: answer(`audio ${fx.ticket}`, effect {
-      const ok = try cleanRecorded(fx.recordings)
-      return { type: "audioErased", ticket: fx.ticket, ok, known: ok } satisfies Trash.Event
-    }, { type: "audioErased", ticket: fx.ticket, ok: false, known: false }, phone);
+    when { tag: "ErasesAudio" }: answer(`audio ${fx.ticket}`, effect { return { type: "audioErased", ticket: fx.ticket, ...(try cleanRecorded(fx.recordings)) } satisfies Trash.Event }, { type: "audioErased", ticket: fx.ticket, ok: false, known: false }, phone);
     when { tag: "Changed" }: run("notes changed", effect { try ignore((try Notes).send({ type: "storeChanged" }, phone)) }, phone);
     when { tag: "Answers" }: run(`deletion ${fx.ticket}`, effect {
       try ignore((try Editor).send({ type: "deleted", ticket: fx.ticket, binned: fx.binned, told: fx.told }, phone))
