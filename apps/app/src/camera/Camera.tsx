@@ -1,7 +1,7 @@
 // spec/app/camera/index.md, "Story: Open the camera"; spec/app/camera/index.md, "Story: Frame the shot"; spec/app/camera/index.md, "Story: Take photos and videos"; spec/app/camera/index.md, "Story: Let Alpha take a photo"
 import { Button, cn, focusRing, Spinner } from "@repo/ui";
 import { CameraOff, ChevronLeft, FileScan, Flashlight, FlashlightOff, Grid3x3, MicOff, RefreshCcw, Sparkles, Timer, Video, Zap, ZapOff } from "lucide-react";
-import { useCallback, useRef, type PointerEvent } from "react";
+import { useCallback, useRef, type PointerEvent, type RefCallback } from "react";
 import type { Camera as Visit, Event, Mode, Said } from "../../gen/app__camera.ts";
 import { chosenLens, ready, recording } from "../../gen/app__camera.ts";
 import { useMachine } from "../../gen/app__camera.react.ts";
@@ -29,7 +29,7 @@ function Viewfinder({ state, native, zoom, focusAt, bind }: {
   native: boolean;
   zoom(tenths: number): void;
   focusAt(point: Point): void;
-  bind(video: HTMLVideoElement): () => void;
+  bind: RefCallback<HTMLVideoElement>;
 }) {
   const pointers = useRef(new Map<number, Point>());
   const pinch = useRef<{ distance: number; zoom: number } | undefined>(undefined);
