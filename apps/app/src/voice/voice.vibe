@@ -11,7 +11,7 @@ import type { Field } from "../../gen/app__voice__dictation.ts"
 import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { Views, delivery, preparedIn, resendWithoutMode } from "../assistant/views.vibe"
-import { filesOnlyHeaders, MediaReview, sameFiles } from "../assistant/media-review.vibe"
+import { filesOnlyHeaders, MediaReview, sameFiles, spokenText } from "../assistant/media-review.vibe"
 import { Talk, type Attached, type DraftSeat } from "../assistant/talk.vibe"
 import type { MessageSmsRequest } from "../messages/agent-sim.vibe"
 import { sendShowing } from "../contacts/requests.vibe"
@@ -564,7 +564,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       const pageTicket = chatPage.page.ticket
       const reply = {
         clientMessageId: result.clientMessageId, conversationId: record.id, pageTicket, actionResults: result.reply.actionResults,
-        spoken: { session, current: lease.verified },
+        spoken: { session, turn, current: lease.verified },
         ...(observation?.sms === undefined ? {} : { sms: observation.sms }),
         ...(voicemail === undefined ? {} : { voicemail }),
       }
@@ -617,11 +617,17 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       return
     }
     if (smsConfirmation(spoken)) {
-      const card = chat?.snapshot().media.find((one) => one.spokenSms !== undefined)
+      const state = try voice.get()
+      const offered = chat?.snapshot().media.filter((one) => {
+        const text = spokenText(one)
+        return text !== undefined && Voice.addressedTextConfirmation(state, text.session, text.turn, true)
+      })
+      const cards = offered?.filter((one) => sendShowing(one.id))
+      const card = cards?.length === 1 ? cards[0] : undefined
+      const request = card === undefined ? undefined : spokenText(card)
       const review = Option.getOrUndefined(try Effect.serviceOption(MediaReview))
-      if (review === undefined || card?.spokenSms === undefined || !(try card.spokenSms.current)
-        || !Voice.addressedTextConfirmation(try voice.get(), card.spokenSms.session, card.spokenSms.turn, sendShowing(card.id))) {
-        finishLocally(card === undefined ? "There’s no text open for review." : "Check the whole text review before sending.")
+      if (review === undefined || card === undefined || request === undefined || !(try request.current)) {
+        finishLocally(offered?.length ? "Check the whole text review before sending." : "There’s no text open for review.")
         return
       }
       const conversation = Option.getOrUndefined(try Effect.serviceOption(Conversation))
