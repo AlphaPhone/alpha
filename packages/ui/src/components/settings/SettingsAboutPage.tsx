@@ -43,7 +43,7 @@ export function SettingsAboutPage({ alphaVersion, androidVersion, onPhone = true
         </span>
         <h2 className="font-display text-title font-light">Alpha Phone</h2>
         <p className="text-caption text-muted-foreground">
-          {alphaVersion.word === "reported" ? `Version ${alphaVersion.value}` : <SettingsReading reading={alphaVersion} />}
+          {alphaVersion.word === "reported" ? `Version ${alphaVersion.value}` : !onPhone && alphaVersion.word === "unavailable" ? "Development preview" : <SettingsReading reading={alphaVersion} />}
         </p>
       </div>
       {onPhone ? (
