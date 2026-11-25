@@ -708,8 +708,8 @@ pure def canRecordingStarted(s: Camera, by: Actor): bool = by == Phone and F::ca
 
 pure def recordingStarted(s: Camera, ok: bool, now: int, by: Actor): Done =
   val begun = F::started(s.film, ok, now)
-  val current = if (begun.stage == F::Running and not(holds(s))) F::stop(begun, now) else begun
-  filming(current, now, s)
+  val held = if (begun.stage == F::Running and not(holds(s))) F::stop(begun, now) else begun
+  filming(held, now, s)
 
 pure def canTick(s: Camera, now: int, by: Actor): bool = by == Phone and F::canTick(s.film, now)
 

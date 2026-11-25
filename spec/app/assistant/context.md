@@ -259,6 +259,26 @@ pure def lawASensitiveScreenSendsNoScreen(source: Source, direct: bool): bool =
     and not(carries(source, ViewClaim, false, direct))
 ```
 
+### A spoken request about the open document attaches it for that turn
+
+When Files is showing a readable text document and the owner explicitly
+asks aloud about this file or the open document, Alpha attaches the text
+that Files confirmed for that same preview and send. An ordinary spoken or
+typed turn can name only the opaque selection. Secret text, an unreadable
+file, and a file whose selection or contents changed supply no attachment.
+The file belongs only to the spoken turn and does not enter the typed draft.
+
+```quint
+type OpenDocumentTurn = { filesShowing: bool, readable: bool, explicitlyRequested: bool, sensitive: bool, currentTurn: bool }
+
+pure def sendsOpenDocument(source: Source, doc: OpenDocumentTurn): bool =
+  source == Spoken and doc.filesShowing and doc.readable and doc.explicitlyRequested and not(doc.sensitive) and doc.currentTurn
+
+pure def lawAnOpenDocumentNeedsItsCurrentSpokenRequest(source: Source, doc: OpenDocumentTurn): bool =
+  sendsOpenDocument(source, doc) implies
+    (source == Spoken and doc.filesShowing and doc.readable and doc.explicitlyRequested and not(doc.sensitive) and doc.currentTurn)
+```
+
 ## Story: Let my agent read the page I have open in Browser
 
 > As the owner, when I ask about the page I have open in Browser, I want my

@@ -9,6 +9,9 @@ import { Machine as Recent } from "../gen/app__files__recent.effect.vibe";
 import { everything } from "../gen/app__files__search.effect.vibe";
 import { Machine as Bin } from "../gen/app__files__trash.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
+import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
+import { Machine as Preferences } from "../gen/app__settings__preferences.effect.vibe";
+import assistant from "../src/assistant/index.tsx";
 import { Machine as Messages } from "../gen/app__messages.effect.vibe";
 import { Machine as MessageComposer } from "../gen/app__messages__composer.effect.vibe";
 import { Drafts as MessageDrafts } from "../src/messages/composer.vibe";
@@ -22,6 +25,7 @@ import files from "../src/files/index.tsx";
 import { called } from "../src/platform/files.vibe";
 import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
+import { textReview } from "./fakes/text-review.ts";
 
 underAct();
 afterEach(closeAll);
@@ -103,6 +107,18 @@ describe("Files on a phone", () => {
     await press("Open Download");
     await until(alpha, runtime, Browser, (s) => !s.inCategory && s.listing.status === "Loaded");
     expect(listed().sort()).toEqual(["beach.jpg", "lease.pdf"]);
+
+    // spec/app/files/index.md, "The owner opens a file that is listed or found, with the names beside it, and Recent remembers it": formats without a preview go directly to Android
+    world.files.stored.push({ volume: "primary", path: "Download/archive.zip", directory: false, mimeType: "application/zip", size: 100, modified: 3 });
+    await choose("Refresh");
+    await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 3);
+    world.files.refusing.push("storageOpen");
+    await press("archive.zip");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Android could not open this file"));
+    world.files.refusing.pop();
+    await press("archive.zip");
+    await vi.waitFor(() => expect(world.files.opened).toEqual(["Download/archive.zip"]));
+    expect(document.querySelector('[aria-label="File actions"]')).toBeNull();
 
     // spec/app/files/index.md, "A place is called empty only after the phone read all of it; a reading cut short keeps what it read"
     world.files.listMost = 1;
@@ -402,12 +418,21 @@ describe("Files on a phone", () => {
     await vi.waitFor(() => expect(world.files.shared).toEqual([[notesSelection]]));
 
     const updated = world.files.stored.find((file) => file.path === "Documents/notes.txt");
-    if (updated) updated.modified = 11;
-    world.files.texts["Documents/notes.txt"] = "These are the revised notes";
+    if (updated === undefined) throw new Error("the fixture lost the previewed notes");
+    world.files.texts[updated.path] = "These are the revised notes";
+    world.files.stored.splice(world.files.stored.indexOf(updated), 1, {
+      ...updated, modified: 11, size: new TextEncoder().encode(world.files.texts[updated.path]).length,
+    });
     world.files.changed();
     await until(alpha, runtime, Shown, (s) => s.revision === 11 && s.content.status === "Loaded");
     expect(document.querySelector("pre")?.textContent).toBe("These are the revised notes");
 
+    // spec/app/files/preview.md, "Ask Alpha, Transcribe and Open elsewhere hand the file on and change nothing here"
+    world.files.texts[updated.path] = "These are the altered notes";
+    await choose("Ask Alpha", "File actions");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Alpha could not attach this file"));
+    expect(document.querySelector("pre")?.textContent).toBe("These are the revised notes");
+    world.files.texts[updated.path] = "These are the revised notes";
     await choose("Ask Alpha", "File actions");
     await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
     await press("Remove notes.txt");
@@ -439,7 +464,7 @@ describe("Files on a phone", () => {
 
     // spec/app/files/preview.md, "A file that holds a verification code or another secret is never handed to Ask Alpha"
     world.files.stored.push({ volume: "primary", path: "Download/code.txt", directory: false, mimeType: "text/plain", size: 30, modified: 4 });
-    world.files.texts["Download/code.txt"] = "Your verification code is 482913";
+    world.files.texts["Download/code.txt"] = "A service API key must stay here";
     await choose("Refresh");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 3);
     await press("code.txt");
@@ -689,6 +714,48 @@ describe("Files on a phone", () => {
 
     await hardware("home");
     expect(await runtime.runPromise(approved({ ticket: 10, act: "Deleting", file: beach, folder, name: "", dest: nowhere }, false))).toEqual({ ran: false, outcome: "Refused" });
+  });
+
+  it('Opens or filters only what the owner asked for directly (spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view")', async () => {
+    const world = { ...scene(), phone: true, image: true };
+    const filter = { type: "files_filter", kind: "pdf", folder: "Download" } as const;
+    const review = textReview(world.notes.owner, "unasked-filter", filter);
+    world.telephony.textReview = review;
+    const { alpha, runtime } = await onFiles(world, "assistant");
+    const chat = assistant.runtime(alpha);
+    await until(alpha, runtime, Browser, (s) => s.access === "Granted" && s.storage.status === "Loaded");
+    await until(alpha, alpha.runtime, Preferences, (s) => s.document.read.status === "Loaded" && !s.askFirst);
+    await until(alpha, chat, Conversation, (s) => s.ready);
+    await press("Open conversation");
+    await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
+
+    const send = async (id: string, text: string) => {
+      review.proposal.id = id;
+      review.proposal.state = "pending";
+      review.proposal.payload.requestMessageId = `m${world.ask.said.length + 1}u`;
+      const reads = review.pendingReads;
+      world.ask.nextReplyChunks = ["I found a Files action."];
+      world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
+      await fill("Message Alpha", text);
+      await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+      await press("Send");
+      await until(alpha, chat, Conversation, (s) => review.pendingReads > reads && s.turn.reply === "Complete");
+    };
+
+    await send("unasked-filter", "What is in my Downloads?");
+    await vi.waitFor(() => expect(button("Approve")).toBeDefined());
+    expect(review.decisions).toEqual([]);
+
+    await send("asked-filter", "Show PDFs in Download");
+    await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "asked-filter" })]));
+    expect(document.body.textContent).toContain("Showing 1 item in Files.");
+    expect(button("Approve")).toBeUndefined();
+
+    review.proposal.payload.operation = { type: "files_open", path: "Documents/notes.txt" };
+    world.files.refusing.push("readSelected");
+    await send("refused-open", "Open Documents/notes.txt");
+    await vi.waitFor(() => expect(review.receipts.at(-1)).toMatchObject({ outcome: "failed", operationId: "refused-open" }));
+    expect(document.body.textContent).not.toContain("Opened the requested item in Files.");
   });
 
   it("Come back after a restart (spec/app/files/index.md, \"Story: Come back after a restart\"; spec/app/files/change.md, \"Story: Come back to my changes after a restart\"; spec/app/files/trash.md, \"Story: Come back to the Trash after a restart\"; spec/app/files/preview.md, \"Story: Come back to a preview after a restart\")", async () => {

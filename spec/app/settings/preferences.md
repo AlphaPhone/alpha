@@ -289,15 +289,15 @@ pure def sometimesNoTextSizeOnThisPhone(s: Preferences): bool = s.notice == Size
 > As the owner, I want Alpha to ask me before it acts unless I turned that
 > off, and to keep asking whenever it cannot tell what I chose.
 
-### Ask before Alpha acts covers the agent's actions on the web, with the camera and on photos
+### Ask before Alpha acts covers the agent's actions on the web, with the camera, in Photos and Files
 
 The approvals area asks it before carrying one out. Writing a note and
 moving between Alpha's own screens are never held for it.
 
 ```quint
-type Act = WebAction | CameraAction | PhotosAction | NoteWrite | InAppMove
+type Act = WebAction | CameraAction | PhotosAction | FilesAction | NoteWrite | InAppMove
 
-pure def governed(act: Act): bool = act == WebAction or act == CameraAction or act == PhotosAction
+pure def governed(act: Act): bool = act == WebAction or act == CameraAction or act == PhotosAction or act == FilesAction
 ```
 
 ### The device preferences are read when Alpha starts, when Settings opens, when Alpha comes back while Settings shows, and after a change the phone did not answer in time, with ten seconds to answer, never while a change or a recovery is in flight

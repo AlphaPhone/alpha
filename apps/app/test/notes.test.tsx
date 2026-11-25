@@ -395,13 +395,14 @@ describe("Notes", () => {
     world.ask.nextActions = (metadata) => [prepared(String((metadata as { viewClientId?: unknown }).viewClientId), "notes", true)];
     await drawn(() => Promise.resolve(world.voice.emitLocal?.("liveCaptureTranscript", { captureId: world.voice.activeMicSession, final: { turnId: "spoken", text: "open my shopping list note", mode: "device" } })));
     const results = () => world.notes.views.filter((one) => one.path === "result").map((one) => one.body.result);
-    await drawn(() => vi.waitFor(() => expect(world.ask.said).toEqual(["open my shopping list note"])));
+    await rendered(() => expect(world.ask.said).toEqual(["open my shopping list note"]));
     expect(world.ask.metadata[0]).toMatchObject({ viewDelivery: "completed-action", voiceUi: { uiNotesEditor: "saved-note-v1" } });
-    await drawn(() => vi.waitFor(() => expect(results()).toHaveLength(1)));
-    expect(results()).toEqual([{ switched: true, shown: { kind: "saved-note", noteId: "shopping" } }]);
+    await rendered(() => expect(world.notes.views[0]).toMatchObject({ path: "claim", body: { viewId: "notes", targetProtocol: "saved-note-v1" } }));
     await rendered(async () => {
+      expect(results()).toEqual([{ switched: true, shown: { kind: "saved-note", noteId: "shopping" } }]);
+      const shell = await alpha.runtime.runPromise(Shell.use((machine) => machine.get()));
       const editor = await alpha.runtime.runPromise(Editor.use((machine) => machine.get()));
-      expect([editor.showing, editorTitle()]).toEqual([true, "shopping list"]);
+      expect([showing(shell, "Notes"), editor.showing, editorTitle()]).toEqual([true, true, "shopping list"]);
     });
   });
 });
