@@ -126,8 +126,7 @@ export function deletionRefused(failure: TelephonyAbsent | TelephonyRefused): bo
   if (failure.method === "deleteVoicemail" && (failure.tag === "NativeRejection" || failure.tag === "MalformedReply")
     && typeof cause === "object" && cause !== null && "method" in cause
     && (cause.method === "status" || cause.method === "voicemailStatus")) return true
-  return failure.tag === "NativeRejection" && (failure.code === "invalid" || failure.code === "permission-required"
-    || failure.code === "role-required")
+  return failure.code === "invalid" || failure.code === "permission-required" || failure.code === "role-required"
 }
 
 /** The phone's telephony, through eliza's clients of the image's plugins; absent off the image. */

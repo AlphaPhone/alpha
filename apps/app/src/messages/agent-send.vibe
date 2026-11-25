@@ -41,12 +41,21 @@ export effect function reviewAgentSms(op: Sms, call: ExecutorCall, current: () =
   if (status?.sendMode !== "direct" || status.permissions.sendSms !== "granted" || !status.subscriptions?.some((sim) => sim.id === wanted.review.subscriptionId)) return refused
   if (selection !== undefined && (status.permissions.sms !== "granted" || status.permissions.phoneState !== "granted" || !activeSmsSelection(selection, status.subscriptions))) return refused
   if (!(tryPromise(current) catch () => false) || !(try device.showing()) || !clear(try phone.get())) return refused
-  const receipt = telephony("sendSms", (client) => client.messages.sendSms(wanted.review, wanted.id)) catch (failure) => {
+  let receipt = telephony("sendSms", (client) => client.messages.sendSms(wanted.review, wanted.id)) catch (failure) => {
     if (failure instanceof TelephonyAbsent || (failure instanceof TelephonyRefused &&
       (failure.tag === "BridgeUnavailable" || failure.tag === "InvalidMessageRequest" || failure.tag === "SmsSendNotAttempted"))) return null
     return undefined
   }
-  return receipt === null ? refused : resultOf(receipt)
+  if (receipt === null) return refused
+  // Only the carrier can advance a submission. Every follow-up reads the same native receipt.
+  for (let read = 0; receipt?.status === "submitted" && read < 6; read += 1) {
+    try sleep("500 millis")
+    if (!(try device.showing())) break
+    const updated = timeout(telephony("smsSendResult", (client) => client.messages.smsSendResult(wanted.review, wanted.id)), "500 millis") catch () => undefined
+    if (updated === undefined) break
+    receipt = updated
+  }
+  return resultOf(receipt)
 }
 
 /** Recovery only reads the phone's receipt for the same body, recipients, operation ID and subscription. */
@@ -55,7 +64,7 @@ export effect function readAgentSms(op: Sms, call: ExecutorCall): unknown!!(Devi
   const device = try Device
   if (wanted === undefined || !(try device.capabilities()).image || !(try device.showing())) return undefined
   const receipt = telephony("smsSendResult", (client) => client.messages.smsSendResult(wanted.review, wanted.id)) catch () => undefined
-  if (!(try device.showing())) return undefined
+  if (!(try device.showing()) || receipt?.status === "submitted") return undefined
   const result = resultOf(receipt)
   return result?.kind === "applied" ? { kind: "found", result: result.result } : result
 }
