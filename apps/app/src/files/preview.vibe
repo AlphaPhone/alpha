@@ -365,7 +365,7 @@ function parentPath(path: string): string {
 }
 
 // spec/app/files/preview.md, "Rename, Move to and Move to Trash act on the storage-backed preview still showing"
-effect function actOnViewed(viewer: number, item: number, revision: number, action: Shown.StorageAction, name: string): void!!(PreviewWorkspace | Toasts | Said) {
+effect function actOnViewed(viewer: number, item: number, revision: number, operation: Shown.StorageAction, name: string): void!!(PreviewWorkspace | Toasts | Said) {
   const applied = effect {
     const recent = try Recent.Machine
     const row = (try recent.get()).shown
@@ -390,7 +390,7 @@ effect function actOnViewed(viewer: number, item: number, revision: number, acti
     if (described.size !== undefined && described.size !== listed.size) return false
     const root = try handle.of({ volume, path: "" })
     const exact: Item = { id: item, volume: root, name: listed.name, revision, bytes: Math.max(0, Math.trunc(listed.size)), kind: storageKind(listed) }
-    if (action === "RenameFile") {
+    if (operation === "RenameFile") {
       const ticket = (try files.get()).change.attempt.id + 1
       const siblings = (reply.entries ?? []).map((one) => one.name)
       try files.send({ type: "renameShown", file: exact, name, siblings }, "Owner")
@@ -423,7 +423,7 @@ effect function actOnViewed(viewer: number, item: number, revision: number, acti
     }
     const now = try files.get()
     if (now.inCategory || now.trail.length !== parentTrail.length || !now.trail.every((id, at) => id === parentTrail[at]) || !(try samePreview(viewer, item, revision, grant))) return false
-    try files.send({ type: "stagePreviewFile", file: exact, ticket: now.listing.ticket, trashing: action === "TrashFile" }, "Phone")
+    try files.send({ type: "stagePreviewFile", file: exact, ticket: now.listing.ticket, trashing: operation === "TrashFile" }, "Phone")
     return true
   } catch () => false
   if (!applied) try say("Files could not confirm the action for this file", true)
@@ -449,7 +449,7 @@ function carryShown(fx: Shown.Effect): Job<Shown.Event, PreviewWorkspace | Media
       }
     }), "Phone");
     when { tag: "ShareFile", let viewer, let item, let revision }: run(`share ${viewer}`, shareViewed(viewer, item, revision), "Phone");
-    when { tag: "ActOnStoredFile", let viewer, let item, let revision, let action, let name }: run(`act on file ${viewer}`, actOnViewed(viewer, item, revision, action, name), "Phone");
+    when { tag: "ActOnStoredFile", let viewer, let item, let revision, let operation, let name }: run(`act on file ${viewer}`, actOnViewed(viewer, item, revision, operation, name), "Phone");
     when { tag: "Forget", let item }: run("forget", effect { try ignore((try Recent.Machine).send({ type: "forget", key: item }, "Owner")) }, "Phone");
     when { tag: "Lost", let item }: run("lost", toRecent({ type: "lapsed", key: item }), "Phone");
     when { tag: "SelectAgain", let item }: run("again", effect { try ignore((try Recent.Machine).send({ type: "openPicker", replacing: item }, "Owner")) }, "Phone");

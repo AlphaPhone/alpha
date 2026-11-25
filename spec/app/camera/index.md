@@ -58,7 +58,7 @@ Android's camera and microphone prompts and its Settings, and the shell's
 "Unlock to continue"; a preview started or stopped, each under its own
 number; the flash, the zoom and the focus point; a photo, for the owner or
 for the agent's request; a recording started, stopped or checked; the
-scanner in Files; the last capture opened in Photos, limited on the lock
+transient scanner's live frame; the last capture opened in Photos, limited on the lock
 screen to what was taken there; Ask Alpha about the live frame or the last
 capture; asking the shell to lower Ask Alpha so the owner sees the
 viewfinder the agent asks to use; and the agent's answer: how its request
@@ -79,7 +79,7 @@ type Effect =
   | StartRecording({ sound: bool })
   | StopRecording
   | CheckRecording({ video: int })
-  | OpenScan
+  | OpenScan({ ticket: int })
   | OpenLast({ photo: int, only: Set[int] })
   | AskAbout({ photo: int })
   | Uncover
@@ -103,7 +103,7 @@ type Camera = {
   mode: Mode, lens: Lens, flash: bool, flashAuto: bool, zoom: int,
   grid: bool, wide: bool, delay: int, countdown: int, nextCount: int,
   taps: int, focus: int, writing: int, confirmed: int, waited: int,
-  shots: int, shot: int, shotFor: int,
+  shots: int, shot: int, shotFor: int, readingFrame: bool,
   film: F::Film, filmVisit: int,
   agent: G::Capture, requestedLens: RequestedLens, cause: Cause,
   said: Said, last: int, session: Set[int],
@@ -118,7 +118,7 @@ pure val initial: Camera = {
   mode: Photo, lens: Back, flash: false, flashAuto: false, zoom: oneTime,
   grid: false, wide: false, delay: 0, countdown: 0, nextCount: 0,
   taps: 0, focus: 0, writing: 0, confirmed: 0, waited: 0,
-  shots: 0, shot: 0, shotFor: 0,
+  shots: 0, shot: 0, shotFor: 0, readingFrame: false,
   film: F::initial, filmVisit: 0,
   agent: G::initial, requestedLens: AsShown, cause: NoCause,
   said: Quiet, last: 0, session: Set(),
@@ -248,7 +248,7 @@ a recording under way is stopped and finished first.
 ```quint
 pure def retiring(now: int, out: List[Effect], c: Camera): Done =
   val released = {
-    ...c, shot: 0, shotFor: 0, focus: 0, writing: 0, confirmed: 0, countdown: 0, nextCount: 0,
+    ...c, shot: 0, shotFor: 0, readingFrame: false, focus: 0, writing: 0, confirmed: 0, countdown: 0, nextCount: 0,
     agent: if (c.agent.stage == G::Shooting) G::lost(c.agent, Phone) else c.agent,
   }
   if (c.film.stage == F::Running) emit(out.append(StopRecording), { ...released, film: F::stop(c.film, now) })
@@ -298,7 +298,7 @@ pure def canPreviewLost(s: Camera, ticket: int, by: Actor): bool =
 
 pure def previewLost(s: Camera, ticket: int, by: Actor): Done =
   val failed = blocking(PreviewFailed, {
-    ...s, phase: Failed, shot: 0, shotFor: 0, focus: 0, writing: 0, confirmed: 0, countdown: 0, nextCount: 0,
+    ...s, phase: Failed, shot: 0, shotFor: 0, readingFrame: false, focus: 0, writing: 0, confirmed: 0, countdown: 0, nextCount: 0,
     said: if (s.shot != 0 and s.shotFor == 0) NotTaken else s.said,
     agent: if (s.agent.stage == G::Shooting) G::lost(s.agent, Phone) else s.agent,
   })
@@ -640,7 +640,7 @@ A photo the phone could not save is said in the banner.
 pure def remember(photo: int, c: Camera): Camera =
   { ...c, last: photo, session: if (c.secure) c.session.union(Set(photo)) else c.session }
 
-pure def canCaptured(s: Camera, ticket: int, by: Actor): bool = by == Phone and s.shot != 0 and ticket == s.shot
+pure def canCaptured(s: Camera, ticket: int, by: Actor): bool = by == Phone and s.shot != 0 and ticket == s.shot and not(s.readingFrame)
 
 pure def captured(s: Camera, ticket: int, photo: int, by: Actor): Done =
   val answered = {
@@ -952,6 +952,7 @@ pure def alwaysOneShutterOnTheCamera(s: Camera): bool =
     and ((s.agent.stage == G::Shooting) iff (s.shot != 0 and s.shotFor != 0))
     and (s.shotFor != 0 implies s.shotFor == s.agent.request)
     and (s.shot == 0 implies s.shotFor == 0)
+    and (s.readingFrame implies (s.shot != 0 and s.shotFor == 0 and not(s.secure)))
     and (s.shot != 0 implies (s.showing and not(recording(s))))
     and G::alwaysResultsAreHonest(s.agent)
 ```
@@ -1043,7 +1044,7 @@ pure def alwaysSecureShowsOnlyItsSession(s: Camera): bool =
 pure def stepTheLockScreenOpensNothingElse(before: Camera, after: Camera, out: List[Effect]): bool =
   out.every(e => match e {
     | OpenLast(o) => before.secure implies (o.only.contains(o.photo) and o.only.subseteq(before.session))
-    | OpenScan => not(before.secure)
+    | OpenScan(o) => not(before.secure)
     | OpenSettings => not(before.secure)
     | AskAccess => not(before.secure)
     | AskMicrophone => not(before.secure)
@@ -1078,16 +1079,29 @@ pure def sometimesEarlierRecordingFinishing(s: Camera): bool = s.secure and s.sh
 
 ## Story: Scan a document
 
-> As the owner, I want "Scan document" in Camera to take me to scanning,
-> which Files owns.
+> As the owner, I want to read and review text in the current viewfinder frame,
+> and return to Camera when I close it.
 
-### "Scan document" hands the camera to the scanner in Files, except on the lock screen
+### Scanning takes the current live Photo frame without adding a capture to Photos
 
-Camera is left as when the owner leaves it; Files' scanner takes the camera.
+The unlocked owner holds the same shutter as a photo until the phone answers.
+A scan covers Camera during review and leaves the last photo alone. Leaving
+Camera releases that shutter and the later frame is discarded.
 
 ```quint
-pure def canScanDocument(s: Camera, by: Actor): bool = by == Owner and s.showing and not(s.secure) and free(s)
+pure def canScanDocument(s: Camera, by: Actor): bool =
+  by == Owner and ready(s) and s.mode == Photo and not(s.secure) and free(s)
+    and s.countdown == 0 and not(G::open(s.agent))
 
-pure def scanDocument(s: Camera, now: int, by: Actor): Done =
-  answering(retiring(now, List(OpenScan), blocking(Left, { ...s, showing: false, covered: false })), s)
+pure def scanDocument(s: Camera, by: Actor): Done =
+  val ticket = s.shots + 1
+  emit(List(OpenScan({ ticket: ticket })), { ...s, shots: ticket, shot: ticket, readingFrame: true })
+
+pure def canScannedFrame(s: Camera, ticket: int, by: Actor): bool =
+  by == Phone and s.readingFrame and s.shot == ticket
+
+pure def scannedFrame(s: Camera, ticket: int, ok: bool, by: Actor): Camera =
+  { ...s, shot: 0, readingFrame: false, said: if (ok) Quiet else NotTaken }
+
+pure val fair_scannedFrame = "weak"
 ```

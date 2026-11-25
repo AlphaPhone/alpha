@@ -67,7 +67,7 @@ type Effect =
   | Transcribe({ item: int })
   | OpenElsewhere({ item: int, revision: int, writable: bool })
   | ShareFile({ viewer: int, item: int, revision: int })
-  | ActOnStoredFile({ viewer: int, item: int, revision: int, action: StorageAction, name: str })
+  | ActOnStoredFile({ viewer: int, item: int, revision: int, operation: StorageAction, name: str })
   | Lost({ item: int })
   | SelectAgain({ item: int })
   | Forget({ item: int })
@@ -317,11 +317,11 @@ Trash confirmation. A successful rename reopens the same document with
 its new name when that preview is still showing.
 
 ```quint
-pure def canActOnStoredFile(s: Preview, action: StorageAction, name: str, stored: bool, by: Actor): bool =
-  by == Owner and usable(s) and stored and (action != RenameFile or F::freeName(name, s.siblings))
+pure def canActOnStoredFile(s: Preview, operation: StorageAction, name: str, stored: bool, by: Actor): bool =
+  by == Owner and usable(s) and stored and (operation != RenameFile or F::freeName(name, s.siblings))
 
-pure def actOnStoredFile(s: Preview, action: StorageAction, name: str, stored: bool, by: Actor): Moved =
-  { state: s, out: List(ActOnStoredFile({ viewer: s.viewer, item: s.item, revision: s.revision, action: action, name: name })) }
+pure def actOnStoredFile(s: Preview, operation: StorageAction, name: str, stored: bool, by: Actor): Moved =
+  { state: s, out: List(ActOnStoredFile({ viewer: s.viewer, item: s.item, revision: s.revision, operation: operation, name: name })) }
 
 pure def stepAStoredActionNamesTheExactPreview(before: Preview, via: str, after: Preview, out: List[Effect]): bool =
   out.every(e => match e {

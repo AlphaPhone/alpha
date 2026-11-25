@@ -70,9 +70,9 @@ export function Preview({ runtime }: PreviewProps) {
   const showDetails = file !== undefined && usable(state);
   const detailsOpen = showDetails && details?.viewer === state.viewer && details.revision === state.revision;
   const ownFile = file !== undefined && recent.state.shown.origin === "InFolder" && files.state !== undefined && previewActionReady(files.state);
-  const move = { type: "actOnStoredFile", action: "MoveFile", name: "", stored: ownFile } as const;
-  const trash = { type: "actOnStoredFile", action: "TrashFile", name: "", stored: ownFile } as const;
-  const editName = { type: "actOnStoredFile", action: "RenameFile", name: rename?.name.trim() ?? "", stored: ownFile } as const;
+  const move = { type: "actOnStoredFile", operation: "MoveFile", name: "", stored: ownFile } as const;
+  const trash = { type: "actOnStoredFile", operation: "TrashFile", name: "", stored: ownFile } as const;
+  const editName = { type: "actOnStoredFile", operation: "RenameFile", name: rename?.name.trim() ?? "", stored: ownFile } as const;
   const renaming = ownFile && rename?.viewer === state.viewer && rename.revision === state.revision;
   const showRename = owner({ ...editName, name: "/" });
   const place = file?.storage;
