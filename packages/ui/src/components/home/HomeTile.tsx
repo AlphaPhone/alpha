@@ -26,17 +26,17 @@ export function HomeTile({ label, icon, badge, editing = false, onRemove, drop, 
     <div className={cn("relative flex justify-center", dragging && "rounded-tile outline-2 outline-offset-2 outline-primary outline-dashed", className)}>
       {drop ? <span aria-hidden className={cn("absolute inset-y-2 w-1 rounded-full bg-primary", drop === "before" ? "-left-1.5" : "-right-1.5")} /> : null}
       <div className="relative">
-        <AppTile label={label} icon={icon} badge={editing ? undefined : badge} className={cn(editing && "touch-none")} {...props} />
+        <AppTile label={label} icon={icon} badge={editing ? undefined : badge} className={cn(editing && "touch-none *:first:animate-wiggle *:first:motion-reduce:animate-none")} {...props} />
         {editing ? (
           <button
             type="button"
             aria-label={`Remove ${label}`}
             disabled={!onRemove}
             onClick={onRemove}
-            className={cn(focusRing, "absolute -top-3.5 -left-3.5 flex size-11 items-center justify-center rounded-full disabled:opacity-50")}
+            className={cn(focusRing, "absolute -top-4 -left-4 flex size-11 items-center justify-center rounded-full disabled:opacity-50")}
           >
-            <span aria-hidden className="flex size-6 items-center justify-center rounded-full bg-foreground text-background shadow-sm">
-              <Minus className="size-4" />
+            <span aria-hidden className="flex size-6 items-center justify-center rounded-full bg-foreground text-background">
+              <Minus className="size-3.5" />
             </span>
           </button>
         ) : null}

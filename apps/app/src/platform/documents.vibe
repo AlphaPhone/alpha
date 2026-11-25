@@ -1,25 +1,78 @@
-// spec/app/files/preview.md, "Story: Look at a file"
-import type { SelectedDocumentsClient } from "@elizaos/os/bridges/definitions/media"
+// spec/app/files/preview.md, "Story: Look at a file"; spec/app/files/preview.md, "Story: Act on the file I am looking at"; spec/app/files/recent.md, "Story: Pick a file with the system picker"
+import type { SelectedDocumentsClient, SelectionId } from "@elizaos/os/bridges/definitions/media"
 import { registered } from "./device.vibe"
 
 module held {
-  import type { SelectedDocumentsClient } from "@elizaos/os/bridges/definitions/media"
-  import { selectedDocumentsClient, selectedDocumentsPlugin } from "@elizaos/os/bridges/media"
+  import { Capacitor, registerPlugin } from "@capacitor/core"
+  import type { SelectedDocumentsClient, SelectedDocumentsPlugin } from "@elizaos/os/bridges/definitions/media"
+  import { selectedDocumentsClient } from "@elizaos/os/bridges/media"
 
+  export interface SelectedDocumentHost extends SelectedDocumentsPlugin {
+    pickSelected(): Promise<unknown>
+    attachmentSelected(input: { selectionId: string }): Promise<unknown>
+  }
+
+  let plugin: SelectedDocumentHost | undefined
   let made: SelectedDocumentsClient | undefined
+
+  /** @throws {never} */
+  export function host(name: string): SelectedDocumentHost {
+    return (plugin ??= registerPlugin<SelectedDocumentHost>(name))
+  }
+
   /** @throws {never} */
   export function client(name: string): SelectedDocumentsClient {
-    return (made ??= selectedDocumentsClient(selectedDocumentsPlugin(name), name))
+    return (made ??= selectedDocumentsClient(host(name), name))
+  }
+
+  /** @throws {never} */
+  export function previewUrl(uri: string): string {
+    return Capacitor.convertFileSrc(uri)
   }
 }
-import { client } from held
+import { client, host, previewUrl } from held
+export { previewUrl }
+
+const Choice = Schema.Struct({ selectionId: Schema.String })
+const Selection = Schema.NonEmptyString.pipe(Schema.brand("SelectionId"))
+const Attachment = Schema.Struct({
+  name: Schema.NonEmptyString,
+  mimeType: Schema.NonEmptyString,
+  dataBase64: Schema.NonEmptyString,
+})
+
+export interface DocumentAttachment {
+  readonly name: string
+  readonly mimeType: string
+  readonly dataBase64: string
+}
 
 export service Documents {
   readonly client: Option.Option<SelectedDocumentsClient>
+  pick(): Option.Option<SelectionId>!!
+  attachment(selectionId: SelectionId): Option.Option<DocumentAttachment>!!
 }
 
 const name = "SelectedDocuments"
 
-export const phoneDocuments = Layer.sync(Documents, () => ({ client: registered(name) ? Option.some(client(name)) : Option.none() }))
+export const browserDocuments = Layer.succeed(Documents, {
+  client: Option.none(),
+  pick: () => succeed(Option.none()),
+  attachment: () => succeed(Option.none()),
+})
 
-export const browserDocuments = Layer.succeed(Documents, { client: Option.none() })
+export const phoneDocuments = Layer.sync(Documents, () => ({
+  client: registered(name) ? Option.some(client(name)) : Option.none(),
+  effect pick(): Option.Option<SelectionId>!! {
+    return effect {
+      const choice = try Schema.decodeUnknownEffect(Choice)(try tryPromise(() => host(name).pickSelected()))
+      return Option.some(try Schema.decodeUnknownEffect(Selection)(choice.selectionId))
+    } catch () => Option.none()
+  },
+  effect attachment(selectionId: SelectionId): Option.Option<DocumentAttachment>!! {
+    return effect {
+      const data = try Schema.decodeUnknownEffect(Attachment)(try tryPromise(() => host(name).attachmentSelected({ selectionId })))
+      return Option.some(data)
+    } catch () => Option.none()
+  },
+}))
