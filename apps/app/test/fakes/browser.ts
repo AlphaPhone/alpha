@@ -43,6 +43,8 @@ export interface BrowserScene {
   showInFiles: (() => void) | undefined;
   /** Hosts whose pages fail: `unreachable` as the network fails, `insecure` as a site with no HTTPS connection. */
   readonly failing: Map<string, "unreachable" | "insecure">;
+  /** Hosts whose pages keep loading until the page stops them. */
+  readonly holding: Set<string>;
   /** The addresses `openFailedPage` opened in another browser. */
   readonly elsewhere: string[];
 }
@@ -160,6 +162,7 @@ export function browserScene(): BrowserScene {
     shown: undefined,
     calls: [],
     failing: new Map(),
+    holding: new Set(),
     elsewhere: [],
     shared: [],
     showInFiles: undefined,
@@ -212,8 +215,9 @@ export function alphaBrowser(world: BrowserScene): Faked {
     };
     const commit = (tab: Held, navigation: number) => void Promise.resolve().then(() => {
       if (tab.navigation !== navigation || !world.tabs.has(tab.id)) return;
-      tab.loading = false;
       const url = tab.history[tab.at] ?? "";
+      if (world.holding.has(URL.parse(url)?.host ?? "")) return;
+      tab.loading = false;
       const failing = world.failing.get(URL.parse(url)?.host ?? "");
       if (failing !== undefined) {
         tab.error = failing === "insecure" ? "This site has no secure (HTTPS) connection." : "Page could not load.";

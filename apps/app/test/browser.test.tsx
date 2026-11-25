@@ -330,6 +330,7 @@ describe("The Browser on a phone", () => {
     const world = { ...scene(), phone: true, image: true };
     const review = textReview(world.notes.owner, "open-a-page", { type: "browser_navigate", url: "https://news.example/on-device-agents" }, "m1u");
     world.telephony.textReview = review;
+    world.browser.holding.add("news.example");
     const running = await askingOnBrowser(world);
     const { alpha, runtime } = running;
     const owner = runtime.runSync(Tabs.use((m) => m.get())).selected;
@@ -344,9 +345,7 @@ describe("The Browser on a phone", () => {
     // spec/app/browser/index.md, "The agent opens only an HTTPS address with no user name or password in it, in a new normal tab, one at a time"
     await until(alpha, runtime, Tabs, (s) => s.agent !== 0 && s.native.includes(s.agent));
     const agentTab = runtime.runSync(Tabs.use((m) => m.get())).agent;
-    expect(agentTab).not.toBe(owner);
-    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(agentTab)));
-    await until(alpha, page, Page, (p) => p.phase === "Shown");
+    expect([agentTab === owner, runtime.runSync(Tabs.use((m) => m.get())).selected]).toEqual([false, owner]);
     expect(world.browser.tabs.get(`tab${agentTab}`)?.history).toEqual(["https://news.example/on-device-agents"]);
     await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied" })]));
     expect(review.decisions).toEqual([review.proposal.id]);
@@ -354,6 +353,7 @@ describe("The Browser on a phone", () => {
     // spec/app/browser/index.md, "\"Stop and take over\" stops the agent and gives its tab to the owner"
     await press("Stop and take over");
     await until(alpha, runtime, Tabs, (s) => s.agent === 0);
+    expect(button("Stop and take over")).toBeUndefined();
   });
 
   it("Declining the agent's page tells the agent and opens nothing (spec/app/approvals/proposal.md, \"Story: Decide\")", async () => {
@@ -384,16 +384,21 @@ describe("The Browser on a phone", () => {
   });
 
   it("The agent's page is refused unless it is HTTPS with no user name, still approved, and the only agent tab (spec/app/browser/index.md, \"The agent opens only an HTTPS address with no user name or password in it, in a new normal tab, one at a time\")", async () => {
-    const { alpha, runtime } = await onBrowser();
+    const { alpha, runtime, world } = await onBrowser();
     await until(alpha, runtime, Tabs, (s) => s.hydrated);
     const approved = (operation: unknown, current = true) => act(async () => executeMedia(alpha, operation as DeviceOperation, {} as ExecutorCall, { current: async () => current }));
     expect(await approved({ type: "browser_navigate", url: "http://news.example/on-device-agents" })).toMatchObject({ kind: "refused" });
     expect(await approved({ type: "browser_navigate", url: "https://me:secret@news.example/on-device-agents" })).toMatchObject({ kind: "refused" });
     expect(await approved({ type: "browser_navigate", url: "https://news.example/on-device-agents" }, false)).toMatchObject({ kind: "refused" });
-    expect(runtime.runSync(Tabs.use((m) => m.get())).agent).toBe(0);
+    const before = runtime.runSync(Tabs.use((m) => m.get()));
+    expect(before.agent).toBe(0);
     expect(await approved({ type: "browser_navigate", url: "https://news.example/on-device-agents" })).toEqual({ kind: "applied" });
+    // spec/app/browser/index.md, "The agent gives its tab up when it is done": once its page has loaded, the next page the owner approves opens too.
+    await until(alpha, runtime, Tabs, (s) => s.agent === 0 && s.open.length === before.open.length + 1);
+    world.browser.holding.add("enclave.example");
+    expect(await approved({ type: "browser_navigate", url: "https://enclave.example/keys-in-hardware" })).toEqual({ kind: "applied" });
     await until(alpha, runtime, Tabs, (s) => s.agent !== 0);
-    expect(await approved({ type: "browser_navigate", url: "https://enclave.example/keys-in-hardware" })).toMatchObject({ kind: "refused" });
+    expect(await approved({ type: "browser_navigate", url: "https://news.example/on-device-agents" })).toMatchObject({ kind: "refused" });
     expect(await approved({ type: "browser_tabs_show" }, false)).toMatchObject({ kind: "refused" });
   });
 

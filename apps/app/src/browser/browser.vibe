@@ -465,6 +465,8 @@ const told = started(effect {
       }
       try tellPage(tab, { type: "committed", load: now.load, secure: secure(info.url ?? "") })
     }
+    // spec/app/browser/index.md, "The agent gives its tab up when it is done": opening a page is all the agent does with its tab, so it is done once that page has loaded or failed.
+    if ((try pageOf(tab)).phase !== "Loading" && (try (try Tabs.Machine).get()).agent === tab) try tellTabs({ type: "agentDone" })
   })
 }, "the tab host")
 
