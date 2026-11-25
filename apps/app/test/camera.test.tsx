@@ -66,6 +66,6 @@ describe("Camera on a phone", () => {
     await until(alpha, runtime, Machine, (state) => state.agent.stage === "Over");
     expect(await outcome).toMatchObject({ result: "Taken", media: { libraryId: "image-1" } });
     expect(world.camera.photos).toHaveLength(1);
-    expect(button("Open last capture in Photos")).toBeDefined();
+    expect(button("Open last photo")).toBeDefined();
   });
 });

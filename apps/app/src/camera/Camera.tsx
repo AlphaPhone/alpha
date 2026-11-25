@@ -5,6 +5,8 @@ import { useCallback, useRef, type PointerEvent } from "react";
 import type { Camera as Visit, Event, Mode, Said } from "../../gen/app__camera.ts";
 import { chosenLens, ready, recording } from "../../gen/app__camera.ts";
 import { useMachine } from "../../gen/app__camera.react.ts";
+import type { Clock, Film } from "../../gen/app__camera__recording.ts";
+import { nearLimit, remaining, timer } from "../../gen/app__camera__recording.ts";
 import { allows } from "../../gen/kit__permission.ts";
 import { CameraPort, type LensFacts, type Point } from "../platform/camera.vibe";
 import type { Resident, Shown } from "../runtime/area.tsx";
@@ -21,8 +23,10 @@ type Fire = (event: Event) => void;
 const stops = [[5, ".5"], [10, "1"], [20, "2"], [50, "5"], [100, "10"]] as const;
 const notices = { Quiet: "", NotTaken: "Photo not taken", NothingRecorded: "Nothing recorded", NotSaved: "Save unconfirmed" } satisfies Record<Said, string>;
 
-const clock = (seconds: number) =>
-  `${Math.floor(seconds / 60).toString().padStart(2, "0")}:${(seconds % 60).toString().padStart(2, "0")}`;
+const read = ({ minutes, seconds }: Clock) => `${minutes}:${seconds.toString().padStart(2, "0")}`;
+
+/** The recording's elapsed time, and the time left once a limit is a minute away. */
+const timed = (film: Film) => nearLimit(film) ? `${read(timer(film))} · ${read(remaining(film))} left` : read(timer(film));
 
 function Viewfinder({ state, native, zoom, focusAt, bind }: {
   state: Visit;
@@ -215,7 +219,7 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
       <header className="z-10 flex min-h-13 items-center justify-end gap-1 overflow-x-auto bg-background px-2 landscape:col-span-2">
         {shell.can({ type: "goBack" }) && <Button variant="ghost" size="icon" aria-label="Back to apps" onClick={() => void alpha.back()}><ChevronLeft /></Button>}
         <span className="flex-1" />
-        {inProgress && <span role="timer" aria-label="Recording" className="flex items-center gap-2 rounded-full bg-background/75 px-3 py-1 text-sm font-semibold tabular-nums"><span aria-hidden className="size-2 rounded-full bg-record" />{clock(state.film.elapsed)}</span>}
+        {inProgress && <span role="timer" aria-label="Recording" className="flex items-center gap-2 rounded-full bg-background/75 px-3 py-1 text-sm font-semibold tabular-nums"><span aria-hidden className="size-2 rounded-full bg-record" />{timed(state.film)}</span>}
         {can({ type: "flip" }) && <Button variant="ghost" size="icon" aria-label="Switch camera" onClick={() => fire({ type: "flip" })}><RefreshCcw /></Button>}
         {can({ type: "cycleDelay" }) && (
           <Button variant="ghost" size="icon" className="relative" aria-label={state.delay === 0 ? "Timer off" : `Timer ${state.delay} seconds`} aria-pressed={state.delay !== 0} onClick={() => fire({ type: "cycleDelay" })}>
@@ -281,7 +285,7 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
         )}
         <div className="grid grid-cols-[1fr_auto_1fr] items-center justify-items-center px-4 landscape:grid-cols-1 landscape:gap-2">
           {last && can({ type: "openLast" }) ? (
-            <button type="button" aria-label="Open last capture in Photos" onClick={() => fire({ type: "openLast" })} className={cn("size-13 overflow-hidden rounded-drawer-icon border border-foreground/70", focusRing)}>
+            <button type="button" aria-label={last.mime.startsWith("video/") ? "Open last video" : "Open last photo"} onClick={() => fire({ type: "openLast" })} className={cn("size-13 overflow-hidden rounded-drawer-icon border border-foreground/70", focusRing)}>
               {last.mime.startsWith("video/") && !last.thumbnail ? <Video aria-hidden className="m-auto size-5" /> : <img src={last.thumbnail ?? last.source} alt="" className="size-full object-cover" />}
             </button>
           ) : <span />}
