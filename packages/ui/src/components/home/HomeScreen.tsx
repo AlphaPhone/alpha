@@ -48,6 +48,9 @@ export type HomeScreenProps = {
   className?: string;
 };
 
+/** Fit the 412-point Home proportions on narrow phones, keeping app faces at least 48px. */
+const homeSpacing = "[--alpha-home-spacing:clamp(3px,calc(100cqi/103),var(--spacing))]";
+
 /**
  * Home: the day's cards and the owner's tiles; while editing, the edit bar and Add to Home. A pull down on its
  * empty space asks Android for its notifications.
@@ -58,14 +61,14 @@ export function HomeScreen({
   onShowHidden, onDone, notice, adding = false, hidden = [], onAddToHome, onCloseAdding = () => undefined, className,
 }: HomeScreenProps) {
   return (
-    <div inert={covered || undefined} className={cn("flex h-full min-h-0 flex-1 flex-col bg-background text-base text-foreground", className)}>
-      <div ref={scrollRef} className={cn(dockClearance, "flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-y-contain")}>
-        <div className={cn("shrink-0", launcher ? "min-h-[max(--spacing(16),calc(max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))+--spacing(3)))]" : "min-h-[calc(max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))+--spacing(3))]")}>
+    <div inert={covered || undefined} className={cn("@container flex h-full min-h-0 flex-1 flex-col bg-background text-base text-foreground", className)}>
+      <div ref={scrollRef} className={cn(dockClearance, homeSpacing, "flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-y-contain")}>
+        <div className={cn("shrink-0", launcher ? "min-h-[max(calc(var(--alpha-home-spacing)*16),calc(max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))+--spacing(3)))]" : "min-h-[calc(max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))+var(--alpha-home-spacing)*3)]")}>
           <h1 className="sr-only">Home</h1>
         </div>
         {editing ? <HomeEditBar onShowHidden={onShowHidden} onDone={onDone} notice={notice} className="pb-3" /> : null}
         {cards.length > 0 ? <HomeCardRow>{cards}</HomeCardRow> : null}
-        <div aria-hidden className="h-6 shrink-0" />
+        <div aria-hidden className="h-[calc(var(--alpha-home-spacing)*6)] shrink-0" />
         {tiles ? (
           <HomeTileGrid
             tiles={tiles}

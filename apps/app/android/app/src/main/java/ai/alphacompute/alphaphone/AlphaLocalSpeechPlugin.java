@@ -50,6 +50,25 @@ public final class AlphaLocalSpeechPlugin extends LocalSpeechBridgePlugin {
   return PasswordSurfaces.visible();
  }
 
+ private boolean dictationInFront() {
+  return AlphaDevicePlugin.shareForeground(getActivity()) && !PasswordSurfaces.visible();
+ }
+
+ @PluginMethod public void dictationForeground(PluginCall call) {
+  mainHandler().post(() -> call.resolve(new JSObject().put("available", dictationInFront())));
+ }
+
+ @Override @PluginMethod public void transcribeLocalRecording(PluginCall call) {
+  if (!Boolean.TRUE.equals(call.getBoolean("automatic", false))) {
+   super.transcribeLocalRecording(call);
+   return;
+  }
+  mainHandler().post(() -> {
+   if (dictationInFront()) super.transcribeLocalRecording(call);
+   else call.reject("Open Alpha to transcribe the recording.", "dictation-obscured");
+  });
+ }
+
  @PluginMethod public void transcribeVoicemail(PluginCall call) {
   final long id;
   final String requestId;

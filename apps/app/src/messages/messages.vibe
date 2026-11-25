@@ -1,10 +1,6 @@
 // spec/app/messages/index.md, "Story: See my conversations"; spec/app/messages/index.md, "Story: Read a conversation"; spec/app/messages/index.md, "Story: Act on a message"; spec/app/messages/index.md, "Story: Start a new message"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import type { StagedDeletion } from "@elizaos/os/bridges/action-journal"
-import type { AddressBookContact } from "@elizaos/os/bridges/contacts"
-import { threadIdOf } from "@elizaos/os/bridges/definitions/messages"
-import type { MessageCursor, MessageDeleteReference, MessageRow, ThreadCursor, ThreadId, ThreadRow } from "@elizaos/os/bridges/messages"
-import type { PhoneNumber } from "@elizaos/os/bridges/phone"
+import { type StagedDeletion, type AddressBookContact, threadIdOf, type MessageCursor, type MessageDeleteReference, type MessageRow, type ThreadCursor, type ThreadId, type ThreadRow, type PhoneNumber } from "@elizaos/os-bridges"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import * as Messages from "../../gen/app__messages.effect.vibe"
 import type { Effect as Out, Event, Need, Page } from "../../gen/app__messages.effect.vibe"
@@ -20,7 +16,7 @@ import { Dialer, grantOf, prefilled } from "../phone/phone.vibe"
 import { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
 import { Callers } from "../phone/voicemail.vibe"
 import { on, visiting } from "../phone/visit.vibe"
-import { matches } from "../phone/words.ts"
+import { displayNumber, matches } from "../phone/words.ts"
 
 module nativeNotice {
   import { type PluginListenerHandle, registerPlugin } from "@capacitor/core"
@@ -122,9 +118,9 @@ export interface Texts {
 
 const empty: Texts = { threads: [], threadsNext: undefined, sought: "", messagesThread: 0, messages: [], messagesNext: undefined, chosen: "", deleteTarget: undefined, choices: [], choicesNext: undefined, typed: "", names: new Map() }
 
-/** A conversation's title: the contacts' names for its numbers, and a number no contact holds as it is. */
+/** A conversation's title: the contacts' names for its numbers, and readable numbers for the rest. */
 export function titleOf(addresses: ReadonlyArray<string>, names: ReadonlyMap<string, string>): string {
-  return addresses.map((address) => names.get(address) ?? address).join(", ")
+  return addresses.map((address) => names.get(address) || displayNumber(address)).join(", ")
 }
 
 /** The rows behind Messages' counts. */

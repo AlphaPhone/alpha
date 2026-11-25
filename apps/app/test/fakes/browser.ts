@@ -1,5 +1,5 @@
 // spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/address.md, "Story: Watch a page load"
-import type { BrowserBookmarkList, BrowserSavedState, BrowserTabHostPlugin, BrowserTabState } from "@elizaos/os/bridges/definitions/tab-host";
+import type { BrowserBookmarkList, BrowserSavedState, BrowserTabHostPlugin, BrowserTabState } from "@elizaos/os-bridges";
 import { type Faked, plugin, rejection } from "./phone.ts";
 
 interface TabEvents {

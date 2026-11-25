@@ -1,12 +1,12 @@
 // spec/app/camera/index.md, "Story: Open the camera"; spec/app/camera/index.md, "Story: Frame the shot"; spec/app/camera/index.md, "Story: Take photos and videos"
 import type { Grant } from "../../gen/kit__permission.ts"
 import type { Lens, Mode } from "../../gen/app__camera.ts"
-import type { CameraDevice, CameraPreviewResult } from "@elizaos/os/bridges/camera"
+import type { CameraDevice, CameraPreviewResult } from "@elizaos/os-bridges"
 import { registered } from "./device.vibe"
 
 module native {
   import { Capacitor, registerPlugin } from "@capacitor/core"
-  import { type CameraClient, cameraClient, cameraPlugin } from "@elizaos/os/bridges/camera"
+  import { type CameraClient, cameraClient, cameraPlugin } from "@elizaos/os-bridges"
 
   let plugin: ReturnType<typeof cameraPlugin> | undefined
   let client: CameraClient | undefined
@@ -140,6 +140,14 @@ function libraryId(path: string, kind: "i" | "v"): string | undefined {
   const volume = matched?.[1]
   return volume === undefined || volume === "external" || volume === "internal" || matched?.[2] !== table
     ? undefined : `m:${volume}:${kind}:${matched[3]}`
+}
+
+// spec/app/camera/index.md, "The last capture opens in Photos"
+export function ownedCaptureId(path: string, video: boolean): string | undefined {
+  const row = /^content:\/\/media\/external\/(images|video)\/media\/([1-9][0-9]*)$/.exec(path)
+  const id = row?.[2]
+  if (id === undefined || row?.[1] !== (video ? "video" : "images")) return undefined
+  return video ? "v:" + id : id
 }
 
 function frameDimensions(size: CameraPreviewResult["captureSize"]): { width?: number; height?: number } {

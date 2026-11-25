@@ -13,13 +13,14 @@ import { Time } from "../runtime/time.vibe"
 import { waiting } from "../home/waiting.vibe"
 import { applying, contained, started, together } from "../runtime/reactor.vibe"
 import { recentsLimit } from "./phone.vibe"
+import { displayNumber } from "./words.ts"
 
 /** A row of one of Home's cards, with when it came, so the newest leads. */
 interface Dated extends Row { readonly date: number }
 
 const cardRows = 2
 
-const callerOf = (row: { readonly cachedName: string | null; readonly number: string }): string => row.cachedName || row.number || "Unknown caller"
+const callerOf = (row: { readonly cachedName: string | null; readonly number: string }): string => row.cachedName || displayNumber(row.number) || "Unknown caller"
 
 const clockLength = (seconds: number): string => {
   const total = Math.max(0, Math.floor(seconds))
@@ -29,7 +30,7 @@ const clockLength = (seconds: number): string => {
 /** Home's Messages card as v121 drew it: the unread conversations, newest first, counted, with when the newest came. */
 function unreadCard(unread: ReadonlyArray<{ readonly date: number; readonly snippet: string; readonly addresses: ReadonlyArray<string> }>, now: number) {
   const newest = [...unread].sort((a, b) => b.date - a.date)
-  const rows = newest.slice(0, cardRows).map((row) => ({ title: row.addresses.join(", ") || "Unknown sender", detail: row.snippet }))
+  const rows = newest.slice(0, cardRows).map((row) => ({ title: row.addresses.map(displayNumber).join(", ") || "Unknown sender", detail: row.snippet }))
   return { rows, says: { count: String(unread.length), status: newest.length ? shortWhen(newest[0].date, now) : "", label: `Open Messages, ${unread.length} unread` } }
 }
 

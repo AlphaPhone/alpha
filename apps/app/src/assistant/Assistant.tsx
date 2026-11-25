@@ -14,7 +14,7 @@ import type { Machine as ChatsMachine } from "../../gen/app__assistant__chats.ef
 import { making, unsure } from "../../gen/app__assistant__chats.ts";
 import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import type { Composer as Writing, Machine as ComposerMachine } from "../../gen/app__assistant__composer.effect.vibe";
-import { content, textLimit } from "../../gen/app__assistant__composer.ts";
+import { attachments as attachmentCount, content, maxFiles, textLimit } from "../../gen/app__assistant__composer.ts";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
 import type { Machine as DockMachine } from "../../gen/app__assistant__dock.effect.vibe";
 import { focused as dockFocused, isOpen as dockOpen } from "../../gen/app__assistant__dock.ts";
@@ -33,17 +33,20 @@ import { MailQuestions } from "../inbox/mail-context.vibe";
 import { home } from "../shell/shell.vibe";
 import { isCommsView } from "../shell/views.tsx";
 import { MediaReview } from "./media-review.vibe";
+import { Documents } from "../platform/documents.vibe";
+import { AttachmentSources } from "./AttachmentSources.tsx";
 import { askComms, freedom } from "./assistant.vibe";
-import { acceptedFiles, insertFiles, previewFile, removeFile, sameBinding } from "./attachments.vibe";
+import { acceptedFiles, acceptedPhotos, chooseDocument, type FileTarget, insertFiles, previewFile, readChosenDocument, removeFile, sameBinding } from "./attachments.vibe";
 import { chip, type MessageActions, useMessageRows } from "./history.tsx";
 import { ReplyFailure } from "./ReplyFailure.tsx";
 import { type Attached, type Line, Talk } from "./talk.vibe";
 import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx";
+import { CommsBriefing } from "../phone/comms.vibe";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | Talk | MailQuestions | LayersMachine | MediaReview, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview | Documents, unknown>;
   messageActions?: MessageActions;
-  speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "voice" | "voiceNotice">;
+  speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voice" | "voiceNotice">;
   canReadAloud?: boolean;
 }
 
@@ -123,8 +126,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       if (assistantDetent === "Typing") element.focus();
     }
   }, [assistantDetent, compact]);
-  const fileInput = useRef<HTMLInputElement>(null);
-  const fileTarget = useRef<{ binding: Writing["binding"]; slot: number } | undefined>(undefined);
+  const fileTargetRef = useRef<FileTarget | undefined>(undefined);
   const [talking, shown, writing, finding] = [conversation.state, chats.state, composer.state, search.state];
   const free = talking && shown && writing ? freedom(talking, writing, shown.chosen) : { replying: true, holding: true };
   const lines = !shown || (shown.page.status === "Idle" && shown.chosen === 0) ? emptyLines : seen.pages.get(shown.page.ticket)?.lines ?? emptyLines;
@@ -147,6 +149,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const start = { type: "start", ...free } as const;
   const newChat = shown.chosen === 0;
   const subject = onComms ? comms.state?.key : undefined;
+  const brief = subject !== undefined && comms.state?.briefed === subject && shell.state?.trail.at(-1) === "Phone"
+    ? runtime.runSync(CommsBriefing.use((reading) => reading.forSubject(subject))) : "";
   const request = subject === undefined ? "" : (comms.state?.requests.find((draft) => draft.about === subject)?.request ?? "");
   const sendable = subject !== undefined
     ? request.trim() !== "" && request.length <= textLimit && askable(talking) && (!newChat || chats.can(start))
@@ -256,13 +260,34 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         src={`data:${previewed.mimeType};base64,${previewed.data}`}
         onOpenChange={(open) => { if (!open && attachments.can({ type: "closePreview" })) void attachments.send({ type: "closePreview" }); }}
       />}
-      <input ref={fileInput} type="file" accept={acceptedFiles} multiple hidden onChange={(event) => {
-        const target = fileTarget.current;
-        fileTarget.current = undefined;
-        const files = Array.from(event.currentTarget.files ?? []);
-        event.currentTarget.value = "";
-        if (target && files.length > 0) void runtime.runPromise(insertFiles(target.binding, target.slot, files));
-      }} />
+      {attachments.state?.open && <AttachmentSources
+        tab={attachments.state.tab}
+        room={attachments.state.room}
+        accept={attachments.state.tab === "Photos" ? acceptedPhotos : acceptedFiles}
+        chooseDocument={runtime.runSync(Documents).client._tag === "Some" ? async () => {
+          const chosen = await runtime.runPromise(chooseDocument());
+          if (chosen) return { id: chosen.id, name: chosen.name, bytes: chosen.bytes, load: () => runtime.runPromise(readChosenDocument(chosen.id)) };
+        } : undefined}
+        onClose={() => {
+          fileTargetRef.current = undefined;
+          void attachments.send({ type: "cancel" });
+        }}
+        onReturnFocus={() => composerRef.current?.parentElement?.querySelector<HTMLButtonElement>('button[aria-label="Chat actions"]')?.focus()}
+        onTab={(tab) => void attachments.send({ type: "switchTab", tab })}
+        onAttach={async (selected) => {
+          const target = fileTargetRef.current;
+          if (!target) return false;
+          const files = await Promise.all(selected.map((file) => file.load()));
+          const current = () => fileTargetRef.current === target;
+          if (files.some((file) => file === undefined) || !current()) return false;
+          const accepted = await runtime.runPromise(insertFiles(target, files.filter((file) => file !== undefined), current));
+          if (accepted && current()) {
+            fileTargetRef.current = undefined;
+            await attachments.send({ type: "cancel" });
+          }
+          return accepted;
+        }}
+      />}
       {onComms && full && <CommsTarget runtime={runtime} placement="strip" />}
       {(!onComms || open) && <AssistantConversation
         detent={assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
@@ -284,7 +309,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         attachmentNotice={onComms ? undefined : seen.attachmentNotice}
         transcript={{
           messages,
-          liveMessages: [...writingReply, ...failed, ...mediaCards, ...mediaNote],
+          liveMessages: [...(brief === "" ? [] : [{ id: `briefing:${subject}`, author: "alpha" as const, text: brief }]), ...writingReply, ...failed, ...mediaCards, ...mediaNote],
           position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around) },
           visible: open,
           status: shown.page.status === "Loading" ? "loading" : shown.page.status === "Failed" ? "failed" : "loaded",
@@ -337,9 +362,11 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           onStop: conversation.can({ type: "stop" }) ? () => void conversation.send({ type: "stop" }) : undefined,
           stopping: talking.turn.stopping,
           onAttach: !onComms && composer.can({ type: "attach", count: 1 }) ? () => {
-            fileTarget.current = { binding: writing.binding, slot: writing.read.ticket };
+            const request = { type: "openPicker", room: maxFiles - attachmentCount(writing.editor) } as const;
+            if (!attachments.can(request)) return;
+            fileTargetRef.current = { binding: writing.binding, slot: writing.read.ticket, revision: talking.context.revision };
             openWithFocus(false);
-            fileInput.current?.click();
+            void attachments.send(request);
           } : undefined,
           onFocusField: assistantDetent === "Typing" ? undefined : () => openWithFocus(false),
           onHistory: () => {

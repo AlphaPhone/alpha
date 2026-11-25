@@ -1,5 +1,5 @@
 // spec/cloud/rollout.md, "Story: Serve one reviewed profile from the API Worker"; spec/cloud/rollout.md, "The API Worker serves only while the profile in its assets is the text its pinned digest names, and otherwise asks the caller to retry"
-import { cloudWorker, type CloudBindings, type WorkerExecution } from "@elizaos/cloud/worker"
+import { cloudWorker, type CloudBindings, type WorkerExecution } from "@elizaos/cloud-worker"
 import { profileUnavailable, readProfileAsset, type AssetFetcher } from "./profile-asset.ts"
 
 /** The API Worker's bindings: eliza's, with the profile read from the static assets and pinned by its digest, since the profile is larger than a Worker variable may be. */

@@ -1,6 +1,4 @@
-import type { ExecutorCall } from "@elizaos/agent/client";
-import { NOT_DISPATCHED } from "@elizaos/agent/client";
-import type { DeviceOperation } from "@elizaos/agent/operations";
+import { type ExecutorCall, NOT_DISPATCHED, type DeviceOperation } from "@elizaos/agent";
 import type { Alpha } from "../runtime/area.tsx";
 import type { ReviewAuthority } from "./media-review.vibe";
 
@@ -15,6 +13,10 @@ export async function executeMedia(alpha: Alpha, operation: DeviceOperation, cal
   if (operation.type === "sms_reply_selected" || operation.type === "sms_compose") {
     const { messageAction } = await import("../messages/agent.vibe");
     return alpha.runtime.runPromise(messageAction(operation, authority.target, authority.current));
+  }
+  if (operation.type === "sms_send") {
+    const { reviewAgentSms } = await import("../messages/agent-send.vibe");
+    return alpha.runtime.runPromise(reviewAgentSms(operation, call, authority.current));
   }
   if (operation.type === "messages_read_selected") {
     const { shareSelectedMessage } = await import("../messages/agent.vibe");

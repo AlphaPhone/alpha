@@ -1,6 +1,6 @@
 // spec/app/photos/agent.md, "Story: Let Alpha read my library"; spec/app/photos/agent.md, "Story: Let Alpha change my photos"
-import type { DeviceOperation, OperationResultOf } from "@elizaos/agent/operations"
-import type { MediaItem } from "@elizaos/os/bridges/definitions/media"
+import type { DeviceOperation, OperationResultOf } from "@elizaos/agent"
+import type { MediaItem } from "@elizaos/os-bridges"
 import * as Library from "../../gen/app__photos.effect.vibe"
 import type { Actor } from "../../gen/app__photos__actor.effect.vibe"
 import * as Assistant from "../../gen/app__photos__agent.effect.vibe"
@@ -12,7 +12,7 @@ import { Catalog, type Row } from "./catalog.vibe"
 
 module mediaIds {
   import { Schema } from "effect"
-  import { MediaId } from "@elizaos/os/bridges/media.schema"
+  import { MediaId } from "@elizaos/os-bridges"
 
   /** @throws {never} */
   export function mediaId(id: string) {
@@ -55,10 +55,10 @@ effect function read(op: Extract<Operation, { type: "photo_library_search" | "ph
   const { rows: indexed } = try (try Catalog).displayed()
   const requestedPhoto = id === undefined ? undefined : handle(id, current.rows, indexed)
   if (inspect && requestedPhoto === undefined) return undefined
-  const columns = [...Assistant.sharedFields]
+  const fields = { columns: [...Assistant.sharedFields], allowed: true, secure: false }
   const wanted: Assistant.Event = inspect
-    ? { type: "askInspect", photo: requestedPhoto ?? 0, columns, allowed: true, secure: false }
-    : { type: "askSearch", narrowing, earliest: op.from ?? 0, latest: op.to ?? Number.MAX_SAFE_INTEGER, limit: op.limit ?? 20, columns, allowed: true, secure: false }
+    ? { type: "askInspect", photo: requestedPhoto ?? 0, ...fields }
+    : { type: "askSearch", narrowing, earliest: op.from ?? 0, latest: op.to ?? Number.MAX_SAFE_INTEGER, limit: op.limit ?? 20, ...fields }
   if (!Exit.isSuccess(try accepted(wanted, "Agent"))) return undefined
   const confirmed = try accepted({ type: "confirm", revision: current.revision }, "Owner")
   if (!Exit.isSuccess(confirmed)) return undefined

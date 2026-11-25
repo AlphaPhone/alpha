@@ -1,5 +1,5 @@
 // spec/app/settings/activity.md, "Story: Help the agent recover"
-import type { AgentStatus } from "@elizaos/os/bridges/definitions/agent"
+import type { AgentStatus } from "@elizaos/os-bridges"
 import { MediaReview } from "../assistant/media-review.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
 import * as Activity from "../../gen/app__settings__activity.effect.vibe"

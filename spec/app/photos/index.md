@@ -29,7 +29,9 @@ The Library tab lists photos and videos, narrowed to favourites, videos, a
 person or a search; the Albums tab lists albums, and an album opened from it
 lists its items. Either list is read a page at a time from the phone's
 library, at a revision the phone numbers: each change to the library has a
-higher one.
+higher one. A browser's library consists of captures and images saved in
+that browser and needs no phone permission. It has the same Favorites,
+custom albums, selection and Recently deleted controls.
 
 ```quint
 import permission as P from "../../kit/permission"

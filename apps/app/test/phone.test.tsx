@@ -5,6 +5,7 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Machine as Phone } from "../gen/app__phone.effect.vibe";
 import { Machine as Strip } from "../gen/app__phone__call.effect.vibe";
+import { Machine as Comms } from "../gen/app__phone__comms.effect.vibe";
 import { Machine as Voicemail } from "../gen/app__phone__voicemail.effect.vibe";
 import { Machine as Agent } from "../gen/app__contacts__agent.effect.vibe";
 import { at } from "../src/areas.ts";
@@ -227,6 +228,12 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Voicemail, (s) => s.unheard === 1);
     await pressPhoneCard();
     await until(alpha, alpha.runtime, Voicemail, (s) => s.front && s.list.status === "Loaded" && s.items === 1);
+
+    // spec/app/phone/comms.md, "A subject is briefed once, only with the conversation open, and never from fixtures"
+    await press("Open Alpha");
+    await until(alpha, alpha.runtime, Comms, (state) => state.height === "SheetOpen" && state.briefed === state.key);
+    const briefing = [...document.querySelectorAll('[aria-label="Ask Alpha"] article')].filter((row) => row.textContent?.includes("You have 1 new voicemail."));
+    expect(briefing).toHaveLength(1);
 
     // spec/app/phone/index.md, "The Voicemail tab is offered only while the carrier's visual voicemail is ready"
     world.telephony.carrier = "unconfigured";

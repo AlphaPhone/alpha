@@ -152,8 +152,8 @@ const backgrounded = started(effect {
   try Stream.runForEach(Stream.filter((try Device).visible, (shown) => !shown), () => contained(canvas.send({ type: "background" }), "the canvas"))
 }, "the canvas going to the background")
 
-// spec/app/shell/keyboard.md, "The canvas is landscape when the window is wider than its height without the keyboard; the launcher lays a portrait phone out at 412 points, and a canvas of 760 or more is wide"
-const marked = applying(Canvas.Machine, (c) => ({ landscape: c.landscape, wide: c.wide, covered: c.covered, split: c.split, agenda: c.agenda }), effect (marks) => {
+// spec/app/shell/keyboard.md, "The canvas is landscape when the window is wider than its height without the keyboard; the launcher lays a portrait phone out at 412 points, and a canvas of 760 or more is wide"; spec/app/shell/keyboard.md, "Above 150% text, larger than Alpha's own largest size, an app's header gives its title a row of its own under the way back and the screen's actions"
+const marked = applying(Canvas.Machine, (c) => ({ landscape: c.landscape, wide: c.wide, covered: c.covered, split: c.split, agenda: c.agenda, "title-row": Canvas.titleRow(c) }), effect (marks) => {
   const device = try Device
   for (const [name, on] of Object.entries(marks)) try device.mark(name, on ? "" : undefined)
 })

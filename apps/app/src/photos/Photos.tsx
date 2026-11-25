@@ -1,8 +1,8 @@
 // spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/index.md, "Story: Select photos"; spec/app/photos/index.md, "Story: Change albums from what I am looking at"
 import { Effect } from "effect";
-import { Album, ChevronLeft, ChevronRight, Ellipsis, Heart, Image, Images, ListChecks, Plus, ScanText, Search, Share2, Trash2, Undo2, X } from "lucide-react";
+import { Album, ChevronLeft, ChevronRight, Ellipsis, Folder, Heart, Image, Images, ListChecks, Plus, ScanText, Search, Share2, Trash2, Undo2, X } from "lucide-react";
 import { useCallback, useRef, useState, type ReactNode } from "react";
-import { Alert, AppHeader, Button, Chip, ConfirmDialog, Dialog, DialogContent, DialogTitle, EmptyState, Input, ListRow, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, Spinner, cn } from "@repo/ui";
+import { Alert, AppHeader, Button, Chip, ConfirmDialog, Dialog, DialogContent, DialogTitle, EmptyState, Input, ListRow, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, Spinner, cn, dockClearance } from "@repo/ui";
 import { useMachine as useLibrary } from "../../gen/app__photos.react.ts";
 import { useMachine as useTrash } from "../../gen/app__photos__trash.react.ts";
 import { useMachine as useAgent } from "../../gen/app__photos__agent.react.ts";
@@ -35,7 +35,7 @@ interface Tool {
 
 function ToolBar({ tools }: { tools: readonly Tool[] }) {
   return (
-    <div role="toolbar" aria-label="Selection actions" className="flex shrink-0 justify-around gap-1 border-t border-border bg-background px-2 py-2">
+    <div role="toolbar" aria-label="Selection actions" className={cn("flex shrink-0 justify-around gap-1 border-t border-border bg-background px-2 pt-2", dockClearance)}>
       {tools.map(({ icon, label, run }) => <Button key={label} variant="ghost" className="h-auto min-h-12 flex-col gap-1 px-2 py-1 text-xs" onClick={run}>{icon}{label}</Button>)}
     </div>
   );
@@ -45,7 +45,7 @@ type PhotosProps = Shown<PhotosRuntime>;
 
 const imageTypes = "image/jpeg,image/png,image/webp";
 
-type ImagePreview = { readonly source: File; readonly frame: BrowserEditFrame };
+type ImagePreview = { readonly source: File; readonly frame: BrowserEditFrame; readonly reading: AbortSignal };
 
 interface ImageChoiceProps {
   readonly runtime: PhotosProps["runtime"];
@@ -77,6 +77,7 @@ function ImageChoice({ runtime, choice, canScan, close, focusTools }: ImageChoic
     return () => node.removeEventListener("cancel", cancel);
   }, [finishPick]);
   function beginPick(event: React.MouseEvent<HTMLInputElement>) {
+    if (ownsPickerRef.current) return;
     if (runtime.runSync(Effect.flatMap(PhotoChooser, (picker) => picker.begin()))) ownsPickerRef.current = true;
     else event.preventDefault();
   }
@@ -94,18 +95,21 @@ function ImageChoice({ runtime, choice, canScan, close, focusTools }: ImageChoic
     const prepared = await runtime.runPromiseExit(Effect.tryPromise(() => renderBrowserPhoto(source, { turns: 0, look: "none", whiteBackground: true })), { signal: reading.signal });
     if (reading.signal.aborted) return;
     if (prepared._tag !== "Success") { describe("Unsupported image."); return; }
-    show({ source, frame: prepared.value });
+    show({ source, frame: prepared.value, reading: reading.signal });
     describe(`${source.name} · ${prepared.value.width} × ${prepared.value.height} copy`);
   }
   async function scan() {
-    if (!picture) return;
+    if (!picture || picture.reading.aborted) return;
+    finishPick();
     const chosen = await runtime.runPromiseExit(consumeImageChoice(choice));
     if (chosen._tag !== "Success" || !chosen.value) return;
     await runtime.runPromiseExit(Effect.flatMap(PhotoChooser, (picker) => picker.begin()).pipe(Effect.flatMap((began) =>
       began ? scanSelectedImage(picture.source) : Effect.void)));
   }
   function save() {
-    if (picture) void runtime.runPromiseExit(importImageChoice(choice, picture.frame, `${picture.source.name.replace(/\.[^.]+$/, "") || "Photo"}.jpg`));
+    if (!picture || picture.reading.aborted) return;
+    finishPick();
+    void runtime.runPromiseExit(importImageChoice(choice, picture.frame, `${picture.source.name.replace(/\.[^.]+$/, "") || "Photo"}.jpg`));
   }
   return <Dialog open onOpenChange={(open) => { if (!open) close(); }}>
     <DialogContent ref={connect} aria-describedby={undefined} onCloseAutoFocus={(event) => { event.preventDefault(); focusTools(); }}>
@@ -248,7 +252,7 @@ export function Photos({ runtime, alpha }: PhotosProps) {
     : owner({ type: "openSettings" }) ? { label: "Open settings", event: { type: "openSettings" } as const } : undefined;
   const albumName = { type: "saveAlbum", name: name.trim(), letters: Array.from(name.trim()).length } satisfies Event;
   const cancelSelection = () => inTrash ? binTalk({ type: "endSelect" }) : talk({ type: "endSelect" });
-  const header = <AppHeader title={title} className="shrink-0"
+  const header = <AppHeader title={title} detail={Boolean(selection) || inTrash || album !== undefined} className="shrink-0"
     leading={<Button variant="ghost" size="icon" aria-label={selection ? "Cancel selection" : inTrash || album ? "Back to albums" : "Back to apps"}
       onClick={() => selection ? cancelSelection() : void alpha.back()}>{selection ? <X /> : <ChevronLeft />}</Button>}>
     {selection && (inTrash ? binOwner({ type: "selectAll" }) : owner({ type: "selectAll" })) && <Button variant="ghost" onClick={() => inTrash ? binTalk({ type: "selectAll" }) : talk({ type: "selectAll" })}>Select all</Button>}
@@ -269,12 +273,12 @@ export function Photos({ runtime, alpha }: PhotosProps) {
       <div inert={opened !== 0} aria-hidden={opened !== 0 || undefined} className="flex min-h-0 flex-1 flex-col" data-alpha-subview="photos-list">
         {header}
         {!selection && !inTrash && !album && (owner({ type: "showTab", tab: "Library" }) || owner({ type: "showTab", tab: "Albums" })) &&
-          <div role="group" aria-label="Photos sections" className="mx-4 mb-3 grid shrink-0 grid-cols-2 gap-1 rounded-xl bg-secondary p-1">
-            {([{ tab: "Library", icon: <Images /> }, { tab: "Albums", icon: <Album /> }] as const).map(({ tab, icon }) => <Button key={tab}
+          <div role="group" aria-label="Photos sections" className={cn("mx-4 grid shrink-0 grid-cols-2 gap-1 rounded-xl bg-secondary p-1", state.tab === "Library" && allow === undefined ? "mb-7" : "mb-3")}>
+            {([{ tab: "Library", icon: <Images /> }, { tab: "Albums", icon: <Folder /> }] as const).map(({ tab, icon }) => <Button key={tab}
               variant="ghost" className={cn("h-11 rounded-lg", state.tab === tab && "bg-foreground text-background hover:bg-foreground/90")} aria-pressed={state.tab === tab}
               onClick={() => { setSearching(false); talk({ type: "showTab", tab }); }}>{icon}{tab}</Button>)}
           </div>}
-        {!inTrash && !selection && !album && state.tab === "Library" && allow && <Button variant="secondary" aria-label={allow.label} className="mx-4 mb-2 justify-start rounded-xl px-4" onClick={() => talk(allow.event)}>
+        {!inTrash && !selection && !album && !browser && state.tab === "Library" && allow && <Button variant="secondary" aria-label={allow.label} className="mx-4 mb-2 justify-start rounded-xl px-4" onClick={() => talk(allow.event)}>
           <Image className="text-alpha" />{allow.event.type === "openSettings" ? allow.label : "Allow all"}<ChevronRight className="ml-auto size-4.5 text-muted-foreground" />
         </Button>}
         {!inTrash && state.tab === "Library" && searching && <form className="mx-4 mb-2 flex shrink-0 gap-2" onSubmit={(event) => { event.preventDefault(); talk(narrow(query.trim() ? "Matching" : "Everything", query.trim())); setSearching(false); }}>

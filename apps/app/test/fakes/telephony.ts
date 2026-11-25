@@ -1,9 +1,9 @@
 // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
-import type { ActionJournalPlugin } from "@elizaos/os/bridges/definitions/action-journal";
-import type { AddressBookNativePlugin } from "@elizaos/os/bridges/definitions/contacts";
-import type { MessagesNativePlugin } from "@elizaos/os/bridges/definitions/messages";
-import type { PhoneNativePlugin } from "@elizaos/os/bridges/definitions/phone";
-import { mmsBinding, smsBindingHash } from "@elizaos/os/bridges/messages";
+import type { ActionJournalPlugin } from "@elizaos/os-bridges";
+import type { AddressBookNativePlugin } from "@elizaos/os-bridges";
+import type { MessagesNativePlugin } from "@elizaos/os-bridges";
+import type { PhoneNativePlugin, TelephonySubscription } from "@elizaos/os-bridges";
+import { mmsBinding, smsBindingHash } from "@elizaos/os-bridges";
 import { type Faked, plugin, rejection } from "./phone.ts";
 import type { Route } from "./routes.ts";
 
@@ -32,6 +32,7 @@ export interface TelephonyScene {
   dialed: string[];
   carrier: "ready" | "unconfigured" | "unsupported";
   mobileService: boolean | undefined;
+  subscriptions: TelephonySubscription[];
   callStateKnown: boolean;
   readonly emergencyNumbers: Set<string>;
   voicemails: HeldVoicemail[];
@@ -94,6 +95,7 @@ export function telephonyScene(): TelephonyScene {
     dialed: [],
     carrier: "ready",
     mobileService: true,
+    subscriptions: [{ id: 1, slot: 0, displayName: "Carrier", carrierName: "Carrier", defaultSms: true, defaultVoice: true }],
     callStateKnown: true,
     emergencyNumbers: new Set(["911", "112"]),
     voicemails: [{ id: 11, number: "+14155550100", date: 1_700_000_100_000, heard: false, deleted: false }],
@@ -163,7 +165,7 @@ function telephony(world: TelephonyScene): Faked {
       sendMode: "direct", mmsSend: true,
       roles: { dialer: { available: true, held: world.dialer, eligible: true }, sms: { available: true, held: true, eligible: true } },
       defaultDialer: world.dialer ? "ai.alphacompute.alphaphone" : "com.android.dialer", defaultSms: "ai.alphacompute.alphaphone",
-      subscriptions: [{ id: 1, slot: 0, displayName: "Carrier", carrierName: "Carrier", defaultSms: true, defaultVoice: true }], defaultSmsSubscriptionId: 1,
+      subscriptions: world.subscriptions, defaultSmsSubscriptionId: world.subscriptions.find((line) => line.defaultSms)?.id ?? null,
     });
     const smsGranted = () => {
       if (world.sms !== "granted") throw rejection("SMS access is not granted", "permission-required");
