@@ -242,7 +242,7 @@ export function CalendarSearchBar({ onClose, className, ...props }: CalendarSear
   return (
     <div role="search" className={cn("mx-4 mb-2 flex shrink-0 items-center gap-1 rounded-tile bg-secondary pr-1 pl-3.5", className)}>
       <Search aria-hidden className="size-4.5 shrink-0 text-muted-foreground" />
-      <input type="search" enterKeyHint="search" autoComplete="off" className={cn(bare, "h-11 p-0")} {...props} />
+      <input type="search" enterKeyHint="search" autoComplete="off" className={cn(bare, "h-11 p-0 [&::-webkit-search-cancel-button]:appearance-none")} {...props} />
       <button type="button" aria-label="Close search" onClick={onClose} className={cn(focusRing, "inline-flex size-11 shrink-0 items-center justify-center rounded-tile active:bg-accent [&_svg]:size-5.5")}><X aria-hidden /></button>
     </div>
   );
