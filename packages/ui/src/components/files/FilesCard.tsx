@@ -25,9 +25,9 @@ export type FilesCardProps = {
 };
 
 /** The look of a pill a Files card goes ahead with: 44px, the accent filled. */
-export const filesCardConfirm = cn(focusRing, "min-h-11 rounded-full bg-alpha px-4.5 font-semibold text-alpha-foreground disabled:opacity-50");
+export const filesCardConfirm = cn(focusRing, "min-h-11 rounded-full bg-alpha px-4.5 text-base font-semibold text-alpha-foreground disabled:opacity-50");
 /** The look of the plain words a Files card backs out with. */
-export const filesCardCancel = cn(focusRing, "min-h-11 rounded-full px-4.5");
+export const filesCardCancel = cn(focusRing, "min-h-11 rounded-full px-4.5 text-base");
 
 /**
  * A Files question or set of facts, as a card resting above Ask Alpha at the foot of the screen over a light scrim: a
@@ -42,8 +42,8 @@ export function FilesCard({ open, onOpenChange, title, message, children, cancel
           aria-describedby={undefined}
           className={cn("fixed inset-x-4 bottom-30 z-dialog mx-auto max-h-3/4 max-w-sm overflow-y-auto rounded-sheet bg-background px-5 pt-5.5 pb-6 text-foreground outline-none motion-safe:animate-rise", className)}
         >
-          <DialogPrimitive.Title className="mb-1.5 font-display text-home-display font-light wrap-anywhere">{title}</DialogPrimitive.Title>
-          {message ? <p className="mb-3 text-base leading-normal wrap-anywhere text-muted-foreground">{message}</p> : null}
+          <DialogPrimitive.Title className="mb-1.5 font-display text-home-display leading-field font-light wrap-anywhere">{title}</DialogPrimitive.Title>
+          {message ? <p className="mb-3 text-base leading-chat wrap-anywhere text-muted-foreground">{message}</p> : null}
           {children}
           {cancelLabel || confirmLabel ? (
             <div className="mt-4.5 flex flex-wrap justify-end gap-2.5">
