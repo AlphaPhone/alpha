@@ -1,6 +1,6 @@
 // spec/app/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence every line stays code"
 import { describe, expect, it } from "vitest";
-import { replyBlocks, wordsOf } from "../src/assistant/words.ts";
+import { replyBlocks, withoutTurnTags, wordsOf } from "../src/assistant/words.ts";
 
 const card = '[MAPSCARD]\n{"kind":"locate","intent":"place-near","prompt":"Where are you?","query":"coffee shops"}\n[/MAPSCARD]';
 const share = "[CHOICE:maps-share id=maps-share-1]\nYes, share the location of Blue Bottle.=Share location\nNo, do not share it.=Don't share\n[/CHOICE]";
@@ -26,15 +26,22 @@ describe("a reply's words as the owner reads and hears them", () => {
 });
 
 describe("a reply's words without the agent's turn tag (spec/app/assistant/reply.md, \"The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one\")", () => {
-  it("takes the tag out wherever it stands, in either bracket and any case, holds back one still being written, and never reads the owner's words", () => {
+  it("takes the exact tag out of prose, holds back one still being written, and never reads the owner's words", () => {
     expect([
-      wordsOf({ mine: false, text: "It is [ANSWER] Paris.</promise>" }),
-      wordsOf({ mine: false, text: "```\n[answer] ls\n```" }),
+      wordsOf({ mine: false, text: "It is [answer] Paris." }),
       replyBlocks("Paris <pro", true).words,
+      replyBlocks("Paris [answer]", true).words,
       replyBlocks("Paris <pro").words,
-      replyBlocks("Paris [about](https://example.com)", true).words,
       wordsOf({ mine: true, text: "<promise> [answer] mine" }),
-    ]).toEqual(["It is Paris.", "ls", "Paris", "Paris <pro", "Paris [about](https://example.com)", "<promise> [answer] mine"]);
+    ]).toEqual(["It is Paris.", "Paris", "Paris", "Paris <pro", "<promise> [answer] mine"]);
+  });
+
+  it("keeps a type, a closing tag, another case, code and a link's words as written, whole and streamed", () => {
+    const survives = ["useState<Answer>(null)", "Promise<Answer>", "```xml\n<answer>42</answer>\n```", "[answer](https://example.com)", "Run `[answer]` as written.", "Say [ANSWER] or </promise>."];
+    for (const text of survives) {
+      expect([withoutTurnTags(text), withoutTurnTags(text, true), replyBlocks(text).words]).toEqual([text, text, text]);
+      for (let at = 1; at <= text.length; at++) expect(text.startsWith(replyBlocks(text.slice(0, at), true).words)).toBe(true);
+    }
   });
 });
 
