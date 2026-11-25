@@ -29,11 +29,11 @@ export const meta: ComponentMeta<StartupAccessRowProps> = {
     },
     "Android answering": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onAct.mockClear();
-      const button = within(canvasElement).getByRole("button", { name: "Allow" });
+      const button = within(canvasElement).getByRole("button", { name: "Checking" });
       await fireEvent.click(button);
       await expect([button.getAttribute("aria-busy"), onAct.mock.calls.length]).toEqual(["true", 0]);
     },
-    "Being read": ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).queryByRole("button")).toBeNull(),
+    "Being read": ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).getByRole("button", { name: "Checking" })).toBeDisabled(),
     "Not the step": ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).queryByText("Photos and text scans")).toBeNull(),
   },
 };

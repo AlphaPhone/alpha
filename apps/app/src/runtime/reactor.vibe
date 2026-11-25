@@ -157,7 +157,7 @@ export effect function contained<R = never>(work: unknown!unknown!R, what: strin
 }
 
 /** Where a machine's state is kept: under the spec's own path, so no two machines share a key, and a version the area raises when the state's shape changes. */
-function storeKey(machine: string, version: number): string {
+export function storeKey(machine: string, version: number): string {
   return `alpha/${machine.replace(/^.*\/spec\//, "").replace(/\.md#Machine$/, "")}@${version}`
 }
 

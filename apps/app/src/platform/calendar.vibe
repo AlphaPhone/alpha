@@ -44,6 +44,15 @@ module held {
 }
 import { type Creations, type OptionEvent, client, creations, untilElapsed } from held
 
+/** Android's calendar permission state before or after its one owner-triggered request. */
+export effect function calendarAccess(request: boolean): (string | undefined)!! {
+  if (!registered("ElizaCalendar")) return undefined
+  return effect {
+    if (request) try tryPromise(() => client().requestAccess())
+    return (try tryPromise(() => creations().checkPermissions())).calendar
+  } catch () => undefined
+}
+
 /** The phone's calendar could not be read or written: the plugin refused, or did not answer. */
 export error CalendarUnread { cause: unknown }
 
