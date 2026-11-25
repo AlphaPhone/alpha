@@ -4,7 +4,7 @@ import {
   type AssistantAttachment, type AssistantComposerProps, type AssistantDraftNoticeProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { type ReactNode, useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { Conversation as Talking, Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe";
 import { askable, inFlight, pending } from "../../gen/app__assistant.ts";
 import { useMachine as useConversation } from "../../gen/app__assistant.react.ts";
@@ -47,7 +47,7 @@ import { displayNumber } from "../phone/words.ts";
 export interface AssistantProps {
   runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview | Documents, unknown>;
   messageActions?: MessageActions;
-  speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voice" | "voiceNotice">;
+  speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & { voice?: (compact: boolean) => ReactNode };
   canReadAloud?: boolean;
 }
 
@@ -337,6 +337,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         }}
         composer={{
           ...speech,
+          voice: speech?.voice?.(compact),
           onDictate: onComms || inFlight(talking.turn) || !speech?.onDictate ? undefined : () => {
             openWithFocus(false);
             speech.onDictate?.();
