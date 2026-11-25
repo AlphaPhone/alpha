@@ -40,7 +40,6 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     ...(world.image ? telephonyPlugins(world.telephony, () => world.now) : {}),
     AlphaDevice: (emit) => ({ ...alphaDevice(world.update, () => world.now)(emit), ...settingsHost(world.settings), ...alphaAgentConsent(world.settings), ...cameraKeys(world.camera) }),
     ElizaNotifications: elizaNotices(world.settings),
-    ...(world.image ? telephonyPlugins(world.telephony) : {}),
     ElizaPasswords: elizaPasswords(world.settings),
     AlphaConnection: alphaConnection(world.platform),
     ...(world.voice.onDevice ? { AlphaVoiceCloud: alphaVoiceCloud(world.voice) } : {}),
