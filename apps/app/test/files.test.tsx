@@ -772,6 +772,18 @@ describe("Files on a phone", () => {
     expect(document.body.textContent).toContain("Showing 1 item in Files.");
     expect(button("Approve")).toBeUndefined();
 
+    // spec/app/assistant/context.md, "A turn an agent refuses whole for a direct-request mode it does not know is sent once more without it"
+    world.ask.knowsNoActionMode = true;
+    world.ask.metadata = [];
+    world.ask.nextReplyChunks = ["Your Downloads hold a lease and a photo."];
+    await fill("Message Alpha", "what is in my downloads?");
+    await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+    await press("Send");
+    await until(alpha, chat, Conversation, (s) => s.turn.reply === "Complete");
+    expect(world.ask.metadata.map((one) => readTurnContext({ content: { metadata: one } }).voiceUi?.agentActionMode)).toEqual(["direct-files-v1", undefined]);
+    expect(document.body.textContent).toContain("Your Downloads hold a lease and a photo.");
+    world.ask.knowsNoActionMode = false;
+
     review.proposal.payload.operation = { type: "files_open", path: "Documents/notes.txt" };
     world.files.refusing.push("readSelected");
     await send("refused-open", "open my notes file", "Direct");

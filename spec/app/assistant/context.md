@@ -260,6 +260,22 @@ pure def lawASensitiveScreenSendsNoScreen(source: Source, direct: bool): bool =
     and not(carries(source, ViewClaim, false, direct))
 ```
 
+### A turn an agent refuses whole for a direct-request mode it does not know is sent once more without it
+
+An agent older than the direct-request mode a turn asks for refuses the
+whole turn as an invalid voice view context, before it records the owner's
+words. The turn is then sent once more, the same in every other part,
+without the mode, so it is answered with no direct action; any other
+refusal stands.
+
+```quint
+type TurnAnswer = TurnAccepted | ContextRefused | OtherRefusal
+pure def resent(answer: TurnAnswer, askedDirect: bool): bool = askedDirect and answer == ContextRefused
+pure def lawOnlyAContextRefusalOfADirectTurnIsResent(answer: TurnAnswer, askedDirect: bool): bool =
+  resent(answer, askedDirect) implies (askedDirect and answer == ContextRefused)
+pure def lawATurnWithoutTheModeIsNeverResent(answer: TurnAnswer): bool = not(resent(answer, false))
+```
+
 ### A turn asked while Files shows a readable document attaches it for that turn
 
 When Files is showing a readable text document, each turn the owner asks,
