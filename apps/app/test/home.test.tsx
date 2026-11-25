@@ -332,8 +332,7 @@ describe("Home on a phone", () => {
       fromAreas.flows({ rows: [{ title: "Morning brief", detail: "Daily" }, { title: "Inbox sweep", detail: "Hourly" }, { title: "Rent", detail: "Monthly" }], freshness: "SomeUnavailable" });
       fromAreas.brief({ outcome: "RunFailed", at: 7 * 3_600_000 });
     });
-    expect(card("Morning brief")?.textContent).toMatch(/Morning brief.*Inbox sweep.*Some unavailable/);
-    expect(card("Morning brief")?.textContent).not.toMatch(/Rent/);
+    expect(card("Morning brief")?.textContent).toBe("Morning briefInbox sweepSome unavailable");
 
     // spec/app/home/cards.md, "The row holds the agenda, Messages, Phone, Workflows, mail and brief cards in that order, each only when drawn, and is not drawn when none is"
     expect([...document.querySelectorAll("section[aria-label='Your day'] > button")].map((found) => ["Messages", "Morning brief", "4 unread", "Latest brief"].find((title) => found.textContent?.startsWith(title) || found.getAttribute("aria-label")?.startsWith(`Open ${title}`)))).toEqual(["Messages", "Morning brief", "4 unread", "Latest brief"]);
