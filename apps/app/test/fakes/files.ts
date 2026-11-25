@@ -303,6 +303,7 @@ export function selectedDocuments(scene: FilesScene): Faked {
         return Promise.resolve(found?.mimeType === "application/pdf" ? { status: "rendered", message: "", page, pageCount: 3, imageUri: `page://${found.path}/${page}` } : { status: "unsupported", message: "" });
       },
       readSelected({ selectionId }) {
+        if (scene.refusing.includes("readSelected")) return Promise.resolve({ status: "failed", message: "" });
         const found = held(selectionId);
         return Promise.resolve(found ? { status: "read", message: "", text: scene.texts[found.path] ?? `The words of ${leaf(found.path)}`, mimeType: found.mimeType, bytes: found.size } : { status: "unavailable", message: "" });
       },

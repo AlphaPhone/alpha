@@ -706,6 +706,25 @@ pure def sometimesAFilterFollowedTheOwner(s: Files): bool = S::finding(s.search)
 > see and open a file I am shown, never on a protected screen, without
 > moving what I am working on, and always answered.
 
+### An explicit request to open or filter Files may act directly on the same idle Files view
+
+The phone remembers the place and the list and search tickets when the
+owner sends a typed request from Files. When the resident proposes that
+message's exact read-only operation, the phone may carry it out once if
+the owner allows direct action, the same place and tickets still show
+and the open viewer is empty. A different request, an unreadable
+preference, or a work item in progress keeps the usual review. The
+agent gets a result receipt without the opened file's contents. An open
+counts only when that folder loaded or that file could be shown.
+
+```quint
+pure def freeForDirectRead(s: Files): bool =
+  s.open and allowed(s) and not(s.trash) and s.picked.length() == 0 and s.details == 0
+    and not(s.deleting.showing) and not(C::busy(s.change)) and not(C::asking(s.change))
+    and s.change.panel == 0 and not(s.sheet.open)
+    and s.listing.status != R::Loading and s.search.query.status != R::Loading
+```
+
 ### The agent reads a folder for itself, and only its newest reading is told to it; it is told it failed without access or on a protected screen
 
 Whether the screen is protected is the approvals area's fact. The agent
