@@ -1,9 +1,35 @@
 import { Effect, ManagedRuntime, Option } from "effect";
 import { expect, it } from "vitest";
-import twoPages from "../../../legacy/android/app/src/androidTest/assets/inbox-fixtures/two-page.pdf?url";
 import { Documents } from "../src/platform/documents.vibe";
 import { Files } from "../src/platform/files.vibe";
 import { browserLibrary } from "../src/platform/library.vibe";
+
+function makeTwoPagePdf(): Blob {
+  const encoder = new TextEncoder();
+  const chunks: string[] = ["%PDF-1.4\n"];
+  let size = encoder.encode(chunks[0]).length;
+  const offsets: number[] = [0];
+  const add = (body: string) => {
+    const id = offsets.length;
+    offsets.push(size);
+    const part = `${id} 0 obj\n${body}\nendobj\n`;
+    chunks.push(part);
+    size += encoder.encode(part).length;
+  };
+  const p1 = "0.1 0.2 0.8 rg 20 20 160 160 re f\n";
+  const p2 = "0.8 0.2 0.1 rg 40 40 120 120 re f\n";
+  add("<< /Type /Catalog /Pages 2 0 R >>");
+  add("<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>");
+  add("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 5 0 R >>");
+  add("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 6 0 R >>");
+  add(`<< /Length ${p1.length} >>\nstream\n${p1}endstream`);
+  add(`<< /Length ${p2.length} >>\nstream\n${p2}endstream`);
+  const xref = size;
+  chunks.push(`xref\n0 ${offsets.length}\n0000000000 65535 f \n`);
+  for (const offset of offsets.slice(1)) chunks.push(`${String(offset).padStart(10, "0")} 00000 n \n`);
+  chunks.push(`trailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+  return new Blob(chunks, { type: "application/pdf" });
+}
 
 async function pick(file: File, runtime: ManagedRuntime.ManagedRuntime<Documents | Files, never>) {
   const pending = runtime.runPromise(Effect.flatMap(Documents, (documents) => documents.pick()));
@@ -58,8 +84,7 @@ it("imports a chosen file, opens its text, and finds it again in a new browser l
 
 // spec/app/files/preview.md, "A page is shown only when the worker drew it in isolation and handed it over unwritable"
 it("draws the selected PDF one page at a time", async () => {
-  const response = await fetch(twoPages);
-  const file = new File([await response.blob()], `alpha-pdf-${crypto.randomUUID()}.pdf`, { type: "application/pdf" });
+  const file = new File([makeTwoPagePdf()], `alpha-pdf-${crypto.randomUUID()}.pdf`, { type: "application/pdf" });
   const runtime = ManagedRuntime.make(browserLibrary);
   try {
     const id = await pick(file, runtime);

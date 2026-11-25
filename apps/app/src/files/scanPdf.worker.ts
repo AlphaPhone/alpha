@@ -22,7 +22,10 @@ async function encode(image: Blob) {
     if (!context) throw new Error("Document canvas is unavailable");
     context.drawImage(bitmap, 0, 0, width, height);
     const result = await canvas.convertToBlob({ type: "image/jpeg", quality: .87 });
-    return { jpeg: new Uint8Array(await result.arrayBuffer()), width, height };
+    if (result.type !== "image/jpeg") throw new Error("JPEG encoding is unavailable");
+    const jpeg = new Uint8Array(await result.arrayBuffer());
+    if (jpeg.length < 2 || jpeg[0] !== 0xff || jpeg[1] !== 0xd8) throw new Error("Invalid JPEG header");
+    return { jpeg, width, height };
   } finally {
     bitmap.close();
   }
@@ -39,7 +42,10 @@ async function makeDocument(images: readonly Blob[]) {
     const bytes = typeof part === "string" ? writer.encode(part) : part;
     size += bytes.byteLength;
     if (size > limit) throw new Error("Document exceeds its size limit");
-    chunks.push(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+    const buffer = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
+      ? bytes.buffer as ArrayBuffer
+      : bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    chunks.push(buffer);
   }
   function object(id: number, content: string | Uint8Array[]) {
     offsets[id] = size;
@@ -48,7 +54,7 @@ async function makeDocument(images: readonly Blob[]) {
     else for (const part of content) append(part);
     append("\nendobj\n");
   }
-  append("%PDF-1.4\n");
+  append(new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a, 0x25, 0xe2, 0xe3, 0xcf, 0xd3, 0x0a]));
   object(1, "<< /Type /Catalog /Pages 2 0 R >>");
   object(2, `<< /Type /Pages /Count ${images.length} /Kids [${images.map((_, index) => `${index * 3 + 3} 0 R`).join(" ")}] >>`);
   for (const [index, input] of images.entries()) {
@@ -56,8 +62,8 @@ async function makeDocument(images: readonly Blob[]) {
     const page = index * 3 + 3;
     const fields = { image: page + 1, paint: page + 2 };
     const scale = Math.min((paper.width - paper.border * 2) / width, (paper.height - paper.border * 2) / height);
-    const w = Math.floor(width * scale);
-    const h = Math.floor(height * scale);
+    const w = Math.max(1, Math.floor(width * scale));
+    const h = Math.max(1, Math.floor(height * scale));
     const paint = `q ${w} 0 0 ${h} ${(paper.width - w) / 2} ${(paper.height - h) / 2} cm /PageImage Do Q\n`;
     object(page, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${paper.width} ${paper.height}] /Resources << /XObject << /PageImage ${fields.image} 0 R >> >> /Contents ${fields.paint} 0 R >>`);
     object(fields.image, drawing(jpeg, width, height));

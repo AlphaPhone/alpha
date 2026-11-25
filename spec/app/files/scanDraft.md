@@ -190,7 +190,7 @@ pure def canDiscarded(k: Keeping, ticket: int): bool = A::canConclude(k.discard,
 
 pure def discarded(k: Keeping, ticket: int, confirmed: bool, known: bool): Keeping =
   val ended = A::conclude(k.discard, confirmed, known)
-  if (ended.outcome == A::Confirmed) { ...k, discard: ended, stored: false, broken: false, saved: List(), current: true } else { ...k, discard: ended }
+  if (ended.outcome == A::Confirmed) { ...k, discard: ended, stored: false, broken: false, saved: List(), current: true, draft: F::readAt(0, k.draft) } else { ...k, discard: ended }
 
 pure def stepOnlyTheOwnerDeletesADraft(before: Keeping, via: str, after: Keeping): bool =
   (before.stored and not(after.stored)) implies (via == "discarded" or via == "loaded")

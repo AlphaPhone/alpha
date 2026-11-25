@@ -6,7 +6,7 @@ import { Machine as Library } from "../gen/app__photos.effect.vibe";
 import { Machine as Viewer } from "../gen/app__photos__viewer.effect.vibe";
 import { requestCapture, type CaptureAnswer } from "../src/camera/camera.vibe";
 import camera from "../src/camera/index.tsx";
-import { photosArea } from "../src/photos/index.tsx";
+import photosArea from "../src/photos/index.tsx";
 import { button, closeAll, drawn, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
@@ -67,7 +67,8 @@ describe("Camera on a phone", () => {
 
     await press("Back to apps");
     await hardware("back");
-    expect(button("Video mode")).toBeDefined();
+    expect(button("Viewfinder. Tap to focus or pinch to zoom")).toBeDefined();
+    expect(button("Record video")?.getAttribute("aria-busy")).toBe("true");
     expect(world.camera.savedVideos).toHaveLength(0);
     await drawn(recorderOpened);
     await until(alpha, runtime, Machine, (state) => state.film.stage === "Saved");
@@ -339,5 +340,44 @@ describe("Camera on a phone", () => {
     expect(await outcome).toMatchObject({ result: "Taken", media: { libraryId: "image-1" } });
     expect(world.camera.photos).toHaveLength(1);
     expect(button("Open last capture in Photos")).toBeDefined();
+  });
+
+  it("Recovers tap-to-focus after a lost pointer capture during pinch (spec/app/camera/index.md, \"Story: Frame the shot\")", async () => {
+    const world = { ...scene(), phone: true };
+    const { alpha } = await open(world, only("home", "view:Camera", "notice"));
+    const runtime = camera.runtime(alpha);
+    await press("Camera");
+    await until(alpha, runtime, Machine, (state) => state.phase === "Ready");
+
+    const viewfinder = button("Viewfinder. Tap to focus or pinch to zoom");
+    if (!viewfinder) throw new Error("viewfinder button is missing");
+    viewfinder.getBoundingClientRect = () => new DOMRect(0, 52, 390, 500);
+
+    await drawn(() => {
+      viewfinder.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, clientX: 100, clientY: 200 }));
+      viewfinder.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 2, clientX: 200, clientY: 200 }));
+      viewfinder.dispatchEvent(new PointerEvent("lostpointercapture", { bubbles: true, pointerId: 1 }));
+      viewfinder.dispatchEvent(new PointerEvent("lostpointercapture", { bubbles: true, pointerId: 2 }));
+      viewfinder.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1, clientX: 180, clientY: 250 }));
+      viewfinder.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1, clientX: 195, clientY: 300 }));
+    });
+    await until(alpha, runtime, Machine, (state) => state.focus > 0 && state.confirmed === state.focus);
+    expect(world.camera.focus.length).toBeGreaterThan(0);
+  });
+
+  it("Checks and saves a truncated recording when size exceeds 100 MB (spec/app/camera/recording.md, \"Reaching 100 MB stops the recording and keeps what fits: a piece that would not fit is left out, never the whole video\")", async () => {
+    const world = { ...scene(), phone: true };
+    const { alpha } = await open(world, only("home", "view:Camera", "notice"));
+    const runtime = camera.runtime(alpha);
+    await press("Camera");
+    await until(alpha, runtime, Machine, (state) => state.phase === "Ready");
+    await press("Video mode");
+    await press("Record video");
+    await until(alpha, runtime, Machine, (state) => state.film.stage === "Running");
+
+    await drawn(() => runtime.runPromise(Effect.flatMap(Machine, (m) => m.send({ type: "chunk", piece: 10_000, now: 0 }, "Phone"))));
+    await drawn(() => runtime.runPromise(Effect.flatMap(Machine, (m) => m.send({ type: "chunk", piece: 104_857_600, now: 0 }, "Phone"))));
+    await until(alpha, runtime, Machine, (state) => state.film.stage === "Saved" && state.film.truncated && state.film.checked);
+    expect(world.camera.savedVideos).toHaveLength(1);
   });
 });

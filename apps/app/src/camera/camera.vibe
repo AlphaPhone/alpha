@@ -176,8 +176,14 @@ effect function take(ticket: number): Camera.Event!!(CameraPort | CameraAssets |
 
 effect function observeSize(bytes: number): void!!Camera.Machine {
   const camera = try Camera.Machine
-  const total = Math.min(Film.maxBytes, Math.floor(bytes))
-  if (Camera.canRecordingSize(try camera.get(), total, "Phone")) try tell({ type: "recordingSize", total, now: untimed })
+  const current = try camera.get()
+  const reported = Math.floor(bytes)
+  if (reported > Film.maxBytes) {
+    const piece = reported - current.film.bytes
+    if (Camera.canChunk(current, piece, "Phone")) try tell({ type: "chunk", piece, now: untimed })
+    return
+  }
+  if (Camera.canRecordingSize(current, reported, "Phone")) try tell({ type: "recordingSize", total: reported, now: untimed })
 }
 
 effect function finish(): Camera.Event!!(CameraPort | CameraAssets | Camera.Machine) {
@@ -185,6 +191,10 @@ effect function finish(): Camera.Event!!(CameraPort | CameraAssets | Camera.Mach
   const camera = try Camera.Machine
   const before = try camera.get()
   const captured = try port.finish()
+  if ((try camera.get()).film.stage !== "Stopping") {
+    if (captured !== undefined) try port.release(captured)
+    return { type: "recordingEnded", ok: false, video: 0, now: untimed }
+  }
   if (captured?.size !== undefined) try observeSize(captured.size)
   const media = captured === undefined ? undefined : try saved(captured, before.film.elapsed)
   if (captured !== undefined && media === undefined) try port.release(captured)
@@ -215,7 +225,8 @@ function carry(fx: Camera.Effect): CameraJob {
     case "StopRecording": return answer("finish recording", finish(), { type: "recordingEnded", ok: false, video: 0, now: untimed }, "Phone")
     case "CheckRecording": return answer("check recording", effect {
       const asset = try (try CameraAssets).read(fx.video)
-      return { type: "recordingVerified", ok: asset !== undefined, now: untimed } as const
+      const ok = asset !== undefined && (asset.size === undefined || asset.size > 0)
+      return { type: "recordingVerified", ok, now: untimed } as const
     }, { type: "recordingVerified", ok: false, now: untimed }, "Phone")
     case "OpenScan": return answer(`scan frame ${fx.ticket}`, scanFrame(fx.ticket), { type: "scannedFrame", ticket: fx.ticket, ok: false }, "Phone")
     case "OpenLast": return run("open last capture", fx.only.length === 0 ? openLast(fx.photo) : Effect.void, "Phone")
@@ -279,7 +290,8 @@ const hardware = started(effect {
     const current = try camera.get()
     if (current.preview !== ticket) return
     if (kind !== "preview-lost") {
-      try observeSize(signal.size)
+      const limitHit = (kind as string) === "size-limit-reached" || (kind === "recording-finished" && signal.size >= Film.maxBytes)
+      try observeSize(limitHit ? Film.maxBytes + 1 : signal.size)
       if (kind === "recording-finished" && (try camera.get()).film.stage === "Running") try tell({ type: "recordingInterrupted", now: untimed })
       return
     }
@@ -294,6 +306,21 @@ const volume = applying(Camera.Machine, Camera.volumeShutter, effect (enabled: b
 
 const mode = applying(Camera.Machine, (state) => ({ ticket: state.phase === "Ready" ? state.preview : 0, mode: state.mode }), effect ({ ticket, mode }: { ticket: number; mode: Camera.Mode }) => {
   if (ticket > 0) try (try CameraPort).mode(mode)
+})
+
+const reapplyZoom = applying(Camera.Machine, (state) => ({ ticket: state.phase === "Ready" ? state.preview : 0, zoom: state.zoom }), effect ({ ticket, zoom }: { ticket: number; zoom: number }) => {
+  if (ticket > 0 && zoom !== 10) try (try CameraPort).zoom(zoom)
+})
+
+const reapplyFlash = applying(Camera.Machine, (state) => ({
+  ticket: state.phase === "Ready" ? state.preview : 0,
+  flash: state.flash,
+  flashAuto: state.flashAuto,
+  video: state.mode === "Video",
+}), effect ({ ticket, flash, flashAuto, video }: { ticket: number; flash: boolean; flashAuto: boolean; video: boolean }) => {
+  if (ticket > 0 && (flash || flashAuto)) {
+    try (try CameraPort).flash(flashAuto ? "auto" : video ? "torch" : "on")
+  }
 })
 
 const approval = started(effect {
@@ -346,6 +373,10 @@ const latest = applying(Camera.Machine, (s) => s.showing && !s.secure ? s.visit 
   try tell({ type: "lastSeen", visit, previous, newest })
 })
 
+effect function readVideoItem(native: PhotosClient, key: typeof MediaId.Type) {
+  return tryPromise(() => native.read({ id: key })) catch () => undefined
+}
+
 const videoThumbnail = started(effect {
   const { phone } = try PhotosPort
   if (Option.isNone(phone)) return
@@ -356,13 +387,19 @@ const videoThumbnail = started(effect {
   try Stream.runDrain(Stream.switchMap(candidates, (id) => id === 0 ? Stream.empty : Stream.fromEffectDrain(effect {
     const capture = try assets.read(id)
     if (capture === undefined || capture.thumbnail || !capture.mime.startsWith("video/")) return
-    const owned = ownedCaptureId(capture.path, true)
+    const owned = capture.libraryId ?? ownedCaptureId(capture.path, true)
     const key = Option.getOrUndefined(Schema.decodeUnknownOption(MediaId)(owned))
     if (key === undefined) return
-    const item = tryPromise(() => native.read({ id: key })) catch () => undefined
-    if (item === undefined || item.id !== key || item.kind !== "video" || item.trashed || item.size !== capture.size) return
-    if (item.image && /^data:image\/(jpeg|png|webp);base64,/.test(item.image) && Camera.savedVideoThumbnail(try machine.get()) === id)
-      try assets.setThumbnail(id, item.image)
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      if (attempt > 0) try sleep(300)
+      if (Camera.savedVideoThumbnail(try machine.get()) !== id) return
+      const item = try readVideoItem(native, key)
+      if (item === undefined || item.id !== key || item.kind !== "video" || item.trashed || item.size !== capture.size) return
+      if (item.image && /^data:image\/(jpeg|png|webp);base64,/.test(item.image)) {
+        if (Camera.savedVideoThumbnail(try machine.get()) === id) try assets.setThumbnail(id, item.image)
+        return
+      }
+    }
   })))
 }, "saved camera video thumbnail")
 
@@ -434,7 +471,7 @@ effect function askAbout(photo: number) {
   try attachToAlpha({ id: `camera:${before.visit}:${photo}:${before.preview}`, name: "Camera.jpg", mimeType: from.mime, data: result })
 }
 
-export const camera = together(reacting(Camera, { carry, timers }), assets, visit, hardware, volume, mode, approval, latest, videoThumbnail)
+export const camera = together(reacting(Camera, { carry, timers }), assets, visit, hardware, volume, mode, reapplyZoom, reapplyFlash, approval, latest, videoThumbnail)
 
 /** Take one step within Camera before handing Back to the shell. */
 export const cameraBack = effect {
@@ -486,7 +523,12 @@ export effect function requestCapture(lens?: "front" | "back"): CaptureAnswer!!(
   const machine = try Camera.Machine
   if (!(try openView("Camera"))) return { result: "Blocked", cause: "Left" }
   try uncover()
-  const visible = Stream.filter(machine.changes, (state) => state.showing && (allows(state.permission) || state.permission.asked))
+  let sawShowing = false
+  const visible = Stream.filter(machine.changes, (state) => {
+    if (state.showing) sawShowing = true
+    if (sawShowing && !state.showing) return true
+    return state.showing && (allows(state.permission) || state.permission.asked)
+  })
   const opened = timeout(Stream.runHead(visible), 90000) catch () => Option.none<Camera.Camera>()
   if (Option.isNone(opened)) return { result: "Expired", cause: "NoCause" }
   const state = try machine.get()
@@ -497,7 +539,12 @@ export effect function requestCapture(lens?: "front" | "back"): CaptureAnswer!!(
   const framed = try contained(machine.send({ type: "agentLens", requested }, "Agent"), "choosing the requested lens")
   if (!framed) return { result: "Blocked", cause: state.secure ? "Protected" : "Busy" }
   const asked = machine.send({ type: "agentAsk" }, "Agent") catch () => undefined
-  if (asked === undefined) return { result: "Blocked", cause: state.secure ? "Protected" : "Busy" }
+  if (asked === undefined) {
+    if (requested !== "AsShown") {
+      try contained(machine.send({ type: "agentLens", requested: "AsShown" }, "Agent"), "clearing the requested lens")
+    }
+    return { result: "Blocked", cause: state.secure ? "Protected" : "Busy" }
+  }
   const request = asked.state.agent.request
   const settled = Stream.filter(machine.changes, (next) => next.agent.request >= request && next.agent.stage === "Over")
   const answered = ensuring(

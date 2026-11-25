@@ -10,7 +10,7 @@ import inbox from "../src/inbox/index.tsx";
 import { Incoming } from "../src/inbox/adding.vibe";
 import { Machine as MessageComposer } from "../gen/app__messages__composer.effect.vibe";
 import { Drafts as MessageDrafts } from "../src/messages/composer.vibe";
-import { photosArea } from "../src/photos/index.tsx";
+import photosArea from "../src/photos/index.tsx";
 import { button, closeAll, drawn, fill, hardware, only, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import type { FixturePicture } from "./fakes/photos.ts";
@@ -171,4 +171,40 @@ it("Resume an already-sent photo edit from an older viewer record (spec/app/phot
   expect(localStorage.getItem(kept + ".epoch")).toBe("earlier-viewer");
   expect(localStorage.getItem("alpha/photos/edit/4")).toBe(operationId);
   expect(localStorage.getItem(kept + ".unreadable")).toBeNull();
+});
+
+it("Keep Viewer open on Limited-to-Limited library updates and offer both Limited permission actions (spec/app/photos/index.md, \"Story: Give Photos access\"; spec/app/photos/viewer.md, \"Story: Look at a photo or video\")", async () => {
+  const world = { ...scene(), phone: true };
+  const { alpha } = await open(world, only("home", "view:Photos", "notice"));
+  await press("Photos");
+  const runtime = photosArea.runtime(alpha);
+  await until(alpha, runtime, Library, (state) => state.library.status === "Loaded" && state.access.grant === "Denied");
+  await press("Allow access");
+  await until(alpha, runtime, Library, (state) => state.library.status === "Loaded" && state.access.asked);
+  world.photos.access = { scope: "selected", images: "selected", videos: "denied" };
+  await drawn(() => {
+    world.photos.changed();
+  });
+  await until(alpha, runtime, Library, (state) => state.library.status === "Loaded" && state.access.grant === "Limited");
+  expect([Boolean(button("Choose items or allow all")), Boolean(button("Allow all photos"))]).toEqual([true, true]);
+
+  await press("Park.jpg");
+  await until(alpha, runtime, Viewer, (state) => state.read.status === "Loaded" && state.open > 0);
+  const opened = runtime.runSync(Viewer.use((viewer) => viewer.get())).open;
+  await drawn(() => {
+    world.photos.changed();
+  });
+  await until(alpha, runtime, Library, (state) => state.access.grant === "Limited" && state.library.status === "Loaded");
+  expect(runtime.runSync(Viewer.use((viewer) => viewer.get())).open).toBe(opened);
+
+  const viewport = document.querySelector<HTMLElement>("[aria-label='Photo viewer']");
+  expect(viewport).not.toBeNull();
+  if (viewport) {
+    viewport.setPointerCapture = () => { throw new DOMException("Not active", "InvalidStateError"); };
+    await drawn(() => {
+      viewport.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, pointerType: "touch", clientX: 50, clientY: 50 }));
+      viewport.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 1, pointerType: "touch", clientX: 50, clientY: 50 }));
+    });
+  }
+  expect(runtime.runSync(Viewer.use((viewer) => viewer.get())).open).toBe(opened);
 });

@@ -9,14 +9,15 @@ import * as Bin from "../../gen/app__files__trash.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
-import type { Said } from "../notices/toasts.vibe"
+import { type Said, say } from "../notices/toasts.vibe"
 import { Files, FilesFailed, called } from "../platform/files.vibe"
 import { type Job, answer, applying, due, following, hearing, reacting, run, together, untimed } from "../runtime/reactor.vibe"
+import { scopedShelf, type Shelf } from "../runtime/shelf.vibe"
 import { scan, scanBack } from "./scan.vibe"
 import type { Machine as ScanMachine } from "../../gen/app__files__scan.effect.vibe"
 import type { Machine as CorrectionMachine } from "../../gen/app__files__correction.effect.vibe"
 import { Handles, type Spot, handles } from "./handles.vibe"
-import { kindOf } from "./entries.vibe"
+import { kindOf, parentPath } from "./entries.vibe"
 import { TrashFacts, type TrashItemFacts, trashFacts } from "./trashFacts.vibe"
 import { type CategoryGroups, categoryGroups, groupsFor } from "./category.vibe"
 import * as Shown from "../../gen/app__files__preview.effect.vibe"
@@ -56,10 +57,6 @@ module names {
     }
   }
   /** @throws {never} */
-  export function parentOf(path: string): string {
-    return path.slice(0, Math.max(0, path.lastIndexOf("/")))
-  }
-  /** @throws {never} */
   export function joined(folder: string, name: string): string {
     return folder === "" ? name : `${folder}/${name}`
   }
@@ -67,14 +64,19 @@ module names {
   export async function copied(text: string): Promise<void> {
     await navigator.clipboard.writeText(text)
   }
+  const collator = new Intl.Collator()
+  /** @throws {never} */
+  export function compareNames(first: string, second: string): number {
+    return collator.compare(first, second)
+  }
 }
-import { containsText, copied, joined, parentOf, upgradedFilter, upgradedTrash } from names
-export { parentOf }
+import { compareNames, containsText, copied, joined, upgradedFilter, upgradedTrash } from names
+export { parentPath as parentOf }
 
 // spec/app/files/index.md, "A name matches a text when the phone's comparison says it contains it; every name contains the empty text and itself"
 Browser.opaque.containsText = containsText
 // spec/app/files/index.md, "Folders come before files in every sort: by name in the phone's order of names, by date the newest first, by size the largest first; choosing the sort again turns the order within the folders and within the files"
-Browser.opaque.nameBefore = (first: string, second: string) => first.localeCompare(second) < 0
+Browser.opaque.nameBefore = (first: string, second: string) => compareNames(first, second) < 0
 
 /** The phone's category for a kind Files lists as one. */
 const categories: Partial<Record<Kind, FilesCategory>> = { Download: "downloads", Image: "images", Video: "videos", Audio: "audio", Document: "documents" }
@@ -95,7 +97,7 @@ effect function itemsOf(volume: string, entries: ReadonlyArray<StorageEntry>, ki
       id,
       name: entry.name,
       revision: Math.max(0, Math.trunc(entry.modified)),
-      kind: kind ?? kindOf(entry),
+      kind: entry.directory ? "Folder" : (kind ?? kindOf(entry)),
       volume: root,
       bytes: entry.directory ? 0 : Math.max(0, Math.trunc(entry.size)),
     })
@@ -131,16 +133,21 @@ effect function measured(ticket: number): Event!!(Files | Handles) {
 
 // spec/app/files/index.md, "The top shows how many files each category holds and the room they take, and how many items the Trash holds, as the storage was last read"
 effect function tallied(volumes: ReadonlyArray<string>): Tally!!Files {
-  const counts: Count[] = []
-  for (const [kind, category] of Object.entries(categories) as [Kind, FilesCategory][]) {
-    const reply = called("storageCategory", (plugin) => plugin.storageCategory({ category, countOnly: true })) catch () => undefined
-    if (reply?.status === "ready") counts.push({ kind, items: Math.max(0, Math.trunc(reply.count ?? reply.entries?.length ?? 0)), bytes: Math.max(0, Math.trunc(reply.bytes ?? 0)) })
-  }
-  let trashed = 0
-  for (const volume of volumes.length === 0 ? [primary] : volumes) {
-    const reply = called("storageTrashList", (plugin) => plugin.storageTrashList({ volume })) catch () => undefined
-    if (reply?.status === "ready") trashed += (reply.items ?? []).length
-  }
+  const categoryEntries = Object.entries(categories) as [Kind, FilesCategory][]
+  const [countsRaw, trashCounts] = try.all [
+    Effect.forEach(categoryEntries, effect ([kind, category]) => {
+      const reply = called("storageCategory", (plugin) => plugin.storageCategory({ category, countOnly: true })) catch () => undefined
+      return reply?.status === "ready"
+        ? { kind, items: Math.max(0, Math.trunc(reply.count ?? reply.entries?.length ?? 0)), bytes: Math.max(0, Math.trunc(reply.bytes ?? 0)) }
+        : undefined
+    }, { concurrency: 5 }),
+    Effect.forEach(volumes.length === 0 ? [primary] : volumes, effect (volume) => {
+      const reply = called("storageTrashList", (plugin) => plugin.storageTrashList({ volume })) catch () => undefined
+      return reply?.status === "ready" ? (reply.items ?? []).length : 0
+    }, { concurrency: 4 }),
+  ]
+  const counts = countsRaw.filter((one): one is Count => one !== undefined)
+  const trashed = trashCounts.reduce((sum, count) => sum + count, 0)
   return { counts, trashed }
 }
 
@@ -305,10 +312,10 @@ effect function reviewCurrent(binding: ReviewedBatch): boolean!!(Browser.Machine
 
 // spec/app/files/index.md, "An approved request runs only in Files on screen, in the folder the owner approved, on a screen that is not protected, and on the item as it was shown; otherwise the agent is told it did not run"
 /**
- * Which of `paths` in `folder` the phone still holds as `items` were shown, at the same revision and size, with the
+ * Which of `paths` across their parent folders the phone still holds as `items` were shown, at the same revision and size, with the
  * identity the phone gives each so that its own write refuses one that changed after; the rest changed and are not sent.
  */
-effect function asShown(volume: string, folder: string, paths: ReadonlyMap<string, number>, items: ReadonlyArray<Item>, binding?: ReviewedBatch): { kept: string[]; reviewed: string[]; changed: number[] }!!Files {
+effect function asShown(volume: string, paths: ReadonlyMap<string, number>, items: ReadonlyArray<Item>, binding?: ReviewedBatch): { kept: string[]; reviewed: string[]; changed: number[] }!!Files {
   if (binding !== undefined) {
     const identities = new Map(binding.targets.map((entry) => [entry.path, entry]))
     const kept: string[] = []
@@ -323,8 +330,12 @@ effect function asShown(volume: string, folder: string, paths: ReadonlyMap<strin
     }
     return { kept, reviewed, changed }
   }
-  const there = called("storageList", (plugin) => plugin.storageList({ volume, path: folder })) catch () => undefined
-  const now = new Map((there?.status === "ready" ? there.entries ?? [] : []).map((entry) => [entry.path, entry]))
+  const parents = [...new Set([...paths.keys()].map(parentPath))]
+  const listings = try Effect.forEach(parents, effect (folder) => {
+    const there = called("storageList", (plugin) => plugin.storageList({ volume, path: folder })) catch () => undefined
+    return there?.status === "ready" ? (there.entries ?? []) : []
+  }, { concurrency: 4 })
+  const now = new Map(listings.flat().map((entry) => [entry.path, entry]))
   const kept: string[] = []
   const changed: number[] = []
   for (const [path, id] of paths) {
@@ -394,7 +405,7 @@ effect function performed(ticket: number, work: string, items: ReadonlyArray<Ite
       }
       const reply = try called("storageCreateFolder", (plugin) => plugin.storageCreateFolder({ volume: at.value.volume, parent: target, name }))
       if (reply.status === "ready") {
-        if (reply.path === undefined || reply.path === "" || parentOf(reply.path) !== target) return unknown
+        if (reply.path === undefined || reply.path === "" || parentPath(reply.path) !== target) return unknown
         done.push(try (try Handles).of({ volume: at.value.volume, path: reply.path }))
       } else failed.push(folder)
       return { type: "finished", ticket, done, failed }
@@ -405,7 +416,7 @@ effect function performed(ticket: number, work: string, items: ReadonlyArray<Ite
       if (item === undefined || Option.isNone(at)) return { type: "finished", ticket, done, failed: items.map((one) => one.id) }
       if (folder === 0) {
         const { volume, path } = at.value
-        const parent = parentOf(path)
+        const parent = parentPath(path)
         const read = try called("storageList", (plugin) => plugin.storageList({ volume, path: parent }))
         const entry = read.status === "ready" ? read.entries?.find((one) => one.path === path) : undefined
         const active = try (try Browser.Machine).get()
@@ -425,7 +436,7 @@ effect function performed(ticket: number, work: string, items: ReadonlyArray<Ite
     const binding = try (try Answers).reviewed(change.approval)
     if (change.approval !== 0 && (binding === undefined || !(try reviewCurrent(binding)))) return { type: "finished", ticket, done, failed: items.map((item) => item.id) }
     for (const [volume, paths] of try pathsOf(items)) {
-      const shown = try asShown(volume, parentOf(paths.keys().next().value ?? ""), paths, items, binding)
+      const shown = try asShown(volume, paths, items, binding)
       failed.push(...shown.changed)
       const identity = new Map(shown.kept.map((path, at) => [path, shown.reviewed[at] ?? ""]))
       for (const path of [...paths.keys()]) if (!identity.has(path)) paths.delete(path)
@@ -443,7 +454,7 @@ effect function performed(ticket: number, work: string, items: ReadonlyArray<Ite
 }
 
 // spec/app/files/index.md, "The owner opens the share sheet for a selection of one to a hundred files and no folder while none is open, shares from it, and Android says whether it could open it"; spec/app/files/change.md, "Each sheet sends once, by email when an account can take it, through the phone's chooser, as copied text or saved through the system picker, and then goes away; sharing by text message is not offered"
-effect function shared(ticket: number, channel: string, items: ReadonlyArray<Item>, approval: number): Event!!(Files | Handles | Answers | Browser.Machine | Shell | Device) {
+effect function shared(ticket: number, channel: string, items: ReadonlyArray<Item>, approval: number): Event!!(Files | Handles | Answers | Browser.Machine | Shell | Device | Toasts | Said) {
   return effect {
     if (approval > 0) {
       const bound = try (try Answers).reviewed(approval)
@@ -463,7 +474,14 @@ effect function shared(ticket: number, channel: string, items: ReadonlyArray<Ite
         const volume = Option.isSome(spot) ? try numbered.label(try numbered.of({ volume: spot.value.volume, path: "" })) : Option.none<string>()
         lines.push(Option.isSome(spot) ? `${Option.getOrElse(volume, () => spot.value.volume)}/${spot.value.path}` : item.name)
       }
-      try tryPromise(() => copied(lines.join("\n")))
+      const text = lines.join("\n")
+      const wroteNative = try (try Device).copyText(text)
+      const wroteWeb = Exit.isSuccess(try exit(tryPromise(() => copied(text))))
+      const wrote = wroteNative || wroteWeb
+      if (!wrote) {
+        try say("Could not copy to clipboard", true)
+        return { type: "shareEnded", ticket, opened: false, known: true }
+      }
       return { type: "shareEnded", ticket, opened: true, known: true }
     }
     if (channel !== "Chooser") return { type: "shareEnded", ticket, opened: false, known: true }
@@ -493,7 +511,11 @@ effect function allowed(settings: boolean): Event!!(Files | Browser.Machine) {
   return try reported(true)
 }
 
-function carry(fx: Out): Job<Event, Files | Handles | Browser.Machine | Bin.Machine | Documents | Opened | Recent.Machine | Shown.Machine | Answers | CategoryGroups | Device | Shell | Toasts | Said, [by: Actor]> {
+/** Scoped shelf holding each item handed to the Trash as Files showed it then, checked against phone writes. */
+class Trashing extends Context.Service<Trashing, Shelf<ReadonlyMap<number, Item>>>()("@repo/app/files/Trashing") {}
+const trashingShelf = scopedShelf(Trashing, (): ReadonlyMap<number, Item> => new Map())
+
+function carry(fx: Out): Job<Event, Files | Handles | Browser.Machine | Bin.Machine | Documents | Opened | Recent.Machine | Shown.Machine | Answers | CategoryGroups | Device | Shell | Toasts | Said | Trashing, [by: Actor]> {
   return match (fx) {
     when { tag: "AskAccess" }: answer("access", allowed(false), { type: "accessReported", grant: "Denied", supported: true }, "Phone");
     when { tag: "OpenSettings" }: answer("access", allowed(true), { type: "accessReported", grant: "Denied", supported: true }, "Phone");
@@ -504,13 +526,21 @@ function carry(fx: Out): Job<Event, Files | Handles | Browser.Machine | Bin.Mach
     when { tag: "AgentLook", let ticket, let folder, let filter }: answer("peek", peeked(ticket, folder, filter), { type: "agentLooked", ticket, ok: false, entries: [] }, "Phone");
     when { tag: "Tell", let request, let ok, let items, let complete }: run(`tell ${request}`, effect { try (try Answers).tell(request, { ok, items, complete }) }, "Phone");
     when { tag: "Perform", let ticket, let work, let items, let name, let folder, let dest, let replace, let downloads }: answer(`perform ${ticket}`, performed(ticket, work, items, name, folder, dest, replace, downloads), { type: "finished", ticket, done: [], failed: [] }, "Phone");
-    when { tag: "ToTrash", let items, let approval }: run("trash", ignore(effect {
+    when { tag: "ToTrash", let items, let approval }: run("trash", effect {
       if (approval === 0 || (try (try Answers).reviewed(approval)) === undefined) {
         const shown = (try (try Browser.Machine).get()).items
-        for (const item of shown) if (items.includes(item.id)) trashing.set(item.id, item)
+        const shelf = try Trashing
+        shelf.update((current) => {
+          const next = new Map(current)
+          for (const item of shown) if (items.includes(item.id)) next.set(item.id, item)
+          return next
+        })
       }
-      try (try Bin.Machine).send({ type: "moveToTrash", items, approval }, "Phone")
-    }), "Phone");
+      const sent = try exit((try Bin.Machine).send({ type: "moveToTrash", items, approval }, "Phone"))
+      if (Exit.isFailure(sent) && approval > 0) {
+        try (try Answers).receipt(approval, { ran: false, outcome: "Refused" })
+      }
+    }, "Phone");
     when { tag: "Show", let item, let siblings, let owner }: run("show", view(item, siblings, owner), "Phone");
     when { tag: "Share", let ticket, let channel, let items, let approval }: answer(`share ${ticket}`, shared(ticket, channel, items, approval), { type: "shareEnded", ticket, opened: false, known: false }, "Phone");
     when { tag: "Taken", let items }: run("taken", taken(items), "Phone");
@@ -554,14 +584,15 @@ const access = hearing(
 
 // spec/app/files/index.md, "The place showing is read again when asked, and only its newest answer is taken; a folder that no longer exists brings the owner back to the top and says so, never that the storage is unavailable": when the phone says the storage changed, and when Alpha comes back to the front
 const changes = hearing(
-  Stream.unwrap(effect { return Stream.merge((try Files).changed, Stream.filter((try Device).visible, (visible) => visible)) }),
+  Stream.unwrap(effect {
+    const browser = try Browser.Machine
+    const resumed = Stream.filterEffect(Stream.filter((try Device).visible, (visible) => visible), () => Effect.map(browser.get(), Browser.allowed))
+    return Stream.merge((try Files).changed, resumed)
+  }),
   Browser.Machine,
   (): Event => ({ type: "refresh" }),
   "Phone",
 )
-
-/** Each item handed to the Trash as Files showed it then, which the phone's write checks it against. */
-const trashing = new Map<number, Item>()
 
 /** A volume's Trash: each item by its id, the file it was. */
 const trashPath = (id: string) => `\u0000trash/${id}`
@@ -619,7 +650,7 @@ function jobDone(number: number, results: ReadonlyArray<Bin.Entry>, known: boole
 const window = 5_000
 
 // spec/app/files/trash.md, "A job ends as its answer says for each item: only what the phone confirmed is done, and the rest was refused or is unknown"
-effect function binned(number: number, items: ReadonlyArray<number>): Bin.Event!!(Files | Handles | Answers | Bin.Machine | Browser.Machine | Shell | Device | TrashFacts) {
+effect function binned(number: number, items: ReadonlyArray<number>): Bin.Event!!(Files | Handles | Answers | Bin.Machine | Browser.Machine | Shell | Device | TrashFacts | Trashing) {
   return effect {
     const ids = new Set<string>()
     let answered = 0
@@ -627,11 +658,25 @@ effect function binned(number: number, items: ReadonlyArray<number>): Bin.Event!
     if (state.attempt.id !== number) return jobDone(number, [], false)
     const binding = try (try Answers).reviewed(state.job.approval)
     if (state.job.approval !== 0 && (binding === undefined || !(try reviewCurrent(binding)))) return jobDone(number, [], true)
-    const shown = binding !== undefined ? binding.targets.filter((one) => items.includes(one.item.id)).map((one) => one.item)
-      : items.flatMap((id) => { const item = trashing.get(id); trashing.delete(id); return item === undefined ? [] : [item] })
+    const shelf = try Trashing
+    let shown: Item[]
+    if (binding !== undefined) {
+      shown = binding.targets.filter((one) => items.includes(one.item.id)).map((one) => one.item)
+    } else {
+      const takenItems: Item[] = []
+      shelf.update((current) => {
+        const next = new Map(current)
+        for (const id of items) {
+          const item = next.get(id)
+          if (item !== undefined) { takenItems.push(item); next.delete(id) }
+        }
+        return next
+      })
+      shown = takenItems
+    }
     answered += items.length - shown.length
     for (const [volume, paths] of try pathsOf(shown)) {
-      const asked = try asShown(volume, parentOf(paths.keys().next().value ?? ""), paths, shown, binding)
+      const asked = try asShown(volume, paths, shown, binding)
       answered += asked.changed.length
       const identity = new Map(asked.kept.map((path, at) => [path, asked.reviewed[at] ?? ""]))
       const batch = try batched("storageTrash", asked.kept, (plugin, part) => plugin.storageTrash({ volume, paths: part, reviewed: part.map((path) => identity.get(path) ?? "") }))
@@ -711,7 +756,7 @@ effect function erased(number: number, entries: ReadonlyArray<Bin.Entry>): Bin.E
   } catch () => jobDone(number, [], false)
 }
 
-function carryBin(fx: Bin.Effect): Job<Bin.Event, Files | Handles | Bin.Machine | Browser.Machine | Recent.Machine | Shown.Machine | Answers | Device | Shell | TrashFacts, [by: Bin.Actor]> {
+function carryBin(fx: Bin.Effect): Job<Bin.Event, Files | Handles | Bin.Machine | Browser.Machine | Recent.Machine | Shown.Machine | Answers | Device | Shell | TrashFacts | Trashing, [by: Bin.Actor]> {
   return match (fx) {
     when { tag: "Look", let ticket }: answer("look", binLooked(ticket), { type: "listed", ticket, ok: false, rows: [], now: untimed }, "Phone");
     when { tag: "Bin", let ticket, let items }: answer(`job ${ticket}`, binned(ticket, items), jobDone(ticket, [], false), "Phone");
@@ -775,7 +820,7 @@ effect function watch(place: { trail: ReadonlyArray<number>; category?: Kind } |
 const watching = applying(Browser.Machine, watched, watch)
 
 /** Files and its Trash, kept across restarts, carried out through the phone's storage and told by the shell whether Files shows. */
-export const files = Layer.provideMerge(together(browsing, onScreen, access, changes, watching, binning, trashAccess, trashShown, preview, scan), Layer.mergeAll(handles, answers, categoryGroups, trashFacts))
+export const files = Layer.provideMerge(together(browsing, onScreen, access, changes, watching, binning, trashAccess, trashShown, preview, scan), Layer.mergeAll(handles, answers, categoryGroups, trashFacts, trashingShelf))
 
 // spec/app/files/index.md, "Another area opens Files at Downloads: the Download folder of the main volume where the phone has one, else the Downloads category; the owner's own move to the top, a volume or a category ends that walk"
 /** Show Files at Downloads for another area, such as the Browser's Show in Files: Back from there returns to that area. */

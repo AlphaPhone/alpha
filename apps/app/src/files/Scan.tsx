@@ -2,13 +2,14 @@
 import { Alert, Button, Input, Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger, DialogClose, cn, focusRing } from "@repo/ui";
 import { Effect, type Layer } from "effect";
 import { ArrowDown, Camera, Crop, FileDown, ImagePlus, Save, Trash2 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useState, useSyncExternalStore, type ReactNode } from "react";
 import { useMachine as useCorrection } from "../../gen/app__files__correction.react.ts";
 import { useMachine } from "../../gen/app__files__scan.react.ts";
 import { pageLimit } from "../../gen/app__files__scanDraft.ts";
 import type { Page } from "../../gen/app__files__scanDraft.ts";
 import type { Event } from "../../gen/app__files__scan.ts";
 import type { Resident, Shown } from "../runtime/area.tsx";
+import { scanNoteLimit } from "./entries.vibe";
 import { ScanCorrection } from "./ScanCorrection.tsx";
 import { ScanAssets, addScanImage, editScanLine, exportScan, noteContent, reviewCalendarEvent, type scan } from "./scan.vibe";
 
@@ -22,7 +23,7 @@ function PickPage({ capture, children, replacing, selected, label }: {
   label: string;
 }) {
   return (
-    <label className={cn("relative inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full bg-secondary px-4 text-sm font-semibold text-secondary-foreground focus-within:outline-ring", focusRing)}>
+    <label className="relative inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full bg-secondary px-4 text-sm font-semibold text-secondary-foreground has-[:focus-visible]:outline-solid has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-ring has-[:focus-visible]:outline-offset-focus">
       {children}
       <Input
         type="file"
@@ -40,9 +41,35 @@ function PickPage({ capture, children, replacing, selected, label }: {
   );
 }
 
+function ScanLineInput({ index, text, disabled, onCommit }: {
+  index: number;
+  text: string;
+  disabled: boolean;
+  onCommit: (value: string) => Promise<unknown>;
+}) {
+  const [draft, setDraft] = useState<{ readonly base: string; readonly value: string }>({ base: text, value: text });
+  const shown = draft.base === text ? draft.value : text;
+  return (
+    <label className="mb-1 block">
+      <span className="sr-only">Line {index + 1}</span>
+      <Input
+        value={shown}
+        disabled={disabled}
+        className="w-full text-sm"
+        maxLength={2_000}
+        onChange={(event) => setDraft({ base: text, value: event.currentTarget.value })}
+        onBlur={(event) => {
+          const value = event.currentTarget.value;
+          void onCommit(value).finally(() => setDraft({ base: text, value: text }));
+        }}
+      />
+    </label>
+  );
+}
+
 function NoteReview({ runtime, pages, save }: { runtime: Shown<Runtime>["runtime"]; pages: ReadonlyArray<Page>; save: () => void }) {
   const content = runtime.runSync(noteContent(pages));
-  const allowed = content !== undefined && content.trim() !== "" && content.length <= 20_241;
+  const allowed = content !== undefined && content.trim() !== "" && content.length <= scanNoteLimit;
   return (
     <DialogContent aria-describedby={undefined} closeLabel="Close note review" className="max-h-[86dvh] overflow-y-auto">
       <DialogTitle>Make note from scanned text</DialogTitle>
@@ -57,6 +84,8 @@ function NoteReview({ runtime, pages, save }: { runtime: Shown<Runtime>["runtime
 export function Scan({ runtime }: Shown<Runtime>) {
   const { state, can, send } = useMachine(runtime);
   const correction = useCorrection(runtime);
+  const assetsShelf = runtime.runSync(Effect.flatMap(ScanAssets, (assets) => assets.version()));
+  useSyncExternalStore(assetsShelf.subscribe, assetsShelf.snapshot, assetsShelf.snapshot);
   if (!state?.open) return null;
   const allowed = (event: Event) => can(event, "Owner");
   const fire = (event: Event) => { if (allowed(event)) void send(event, "Owner"); };
@@ -77,7 +106,6 @@ export function Scan({ runtime }: Shown<Runtime>) {
     <Dialog open onOpenChange={(open) => { if (!open) fire({ type: "close" }); }}>
       <DialogContent aria-describedby={undefined} closeLabel={selectedImage ? "Cancel scan" : "Close document"} className="flex max-h-[min(90dvh,46rem)] flex-col overflow-y-auto">
         <DialogTitle>{selectedImage ? "Scan text" : "Scan document"}</DialogTitle>
-        {selectedImage && <p className="text-sm text-muted-foreground">On device</p>}
         {allowed({ type: "showPages" }) && <Button variant="secondary" size="sm" onClick={() => fire({ type: "showPages" })}>Multi-page</Button>}
         {state.keeping.broken && <Alert variant="destructive">The saved draft could not be read.</Alert>}
         {allowed({ type: "resume" }) && (
@@ -106,13 +134,14 @@ export function Scan({ runtime }: Shown<Runtime>) {
               const event = state.text.eventOf.image === image && state.text.eventOf.edits === edits ? state.text.event : undefined;
               const suggestion = event !== undefined && state.text.found ? runtime.runSync(Effect.flatMap(ScanAssets, (assets) => assets.event(event.ticket))) : undefined;
               const replace = can({ type: "add", frame: state.images + 1, replacing: image, camera: true }, "Phone");
+              const canEdit = allowed({ type: "editText", image, links: 0 }) && !busy;
               const number = at + 1;
               return (
                 <li key={image} className="grid gap-2 rounded-tile bg-card p-3">
                   {!selectedImage && <p className="font-semibold">Page {number}</p>}
                   {page !== undefined && <img src={page.uri} alt={selectedImage ? "Selected image" : `Document page ${number}`} className="max-h-32 w-full object-contain" loading="lazy" />}
                   <div className="flex flex-wrap gap-2">
-                    {replace && correction.can(begin, "Owner") && <Button variant="secondary" size="sm" aria-label={`Correct page ${number}`} onClick={() => void correction.send(begin, "Owner")}><Crop />Correct</Button>}
+                    {!busy && correction.can(begin, "Owner") && <Button variant="secondary" size="sm" aria-label={`Correct page ${number}`} onClick={() => void correction.send(begin, "Owner")}><Crop />Correct</Button>}
                     {replace && <PickPage capture replacing={image} selected={selected} label={`Retake page ${number}`}><Camera className="size-4" aria-hidden />Retake</PickPage>}
                     {replace && <PickPage capture={false} replacing={image} selected={selected} label={`Replace page ${number}`}><ImagePlus className="size-4" aria-hidden />Replace</PickPage>}
                     {allowed({ type: "moveToEnd", image }) && at < state.pages.length - 1 && <Button variant="secondary" size="sm" aria-label={`Move page ${number} to end`} onClick={() => fire({ type: "moveToEnd", image })}><ArrowDown /></Button>}
@@ -134,13 +163,15 @@ export function Scan({ runtime }: Shown<Runtime>) {
                   {blank && <p className="text-sm text-muted-foreground">No text found</p>}
                   {!blank && words !== undefined && (
                     <details open={selectedImage || undefined}>
-                      <summary className="font-semibold">{selectedImage ? "Scanned text" : "Review page text"}</summary>
+                      <summary className={cn("cursor-pointer rounded-sm font-semibold", focusRing)}>{selectedImage ? "Scanned text" : "Review page text"}</summary>
                       {words.lines.length === 0 ? <p className="whitespace-pre-wrap">{words.text}</p> : words.lines.map((line, index) => (
-                        <label key={`${line.x}:${line.y}:${line.width}:${line.height}`} className="mb-1 block">
-                          <span className="sr-only">Line {index + 1}</span>
-                          <Input defaultValue={line.text} className="w-full rounded-sm border border-input bg-background p-2 text-sm" maxLength={2_000}
-                            onBlur={(event) => void runtime.runPromiseExit(editScanLine(image, index, event.currentTarget.value))} />
-                        </label>
+                        <ScanLineInput
+                          key={`${image}:${line.x}:${line.y}:${line.width}:${line.height}:${line.text.slice(0, 16)}`}
+                          index={index}
+                          text={line.text}
+                          disabled={!canEdit}
+                          onCommit={(value) => runtime.runPromiseExit(editScanLine(image, index, value))}
+                        />
                       ))}
                     </details>
                   )}
@@ -150,7 +181,7 @@ export function Scan({ runtime }: Shown<Runtime>) {
             })}
           </ol>
         )}
-        {state.problem !== "NoProblem" && <Alert variant="destructive">{state.problem === "TooLarge" ? "This document is too large to save." : "The PDF could not be prepared."}</Alert>}
+        {state.problem !== "NoProblem" && <Alert variant="destructive">{state.problem === "TooLarge" ? "This document is too large to save." : state.problem === "TooMuchText" ? "This scan has too much text for a searchable PDF." : "The PDF could not be prepared."}</Alert>}
         {state.pdf.outcome === "Refused" && <Alert variant="destructive">The PDF was not saved.</Alert>}
         {state.pdf.outcome === "Unknown" && <Alert variant="destructive">Saving the PDF could not be confirmed.</Alert>}
         {state.text.note.outcome === "Unknown" && <Alert variant="destructive">Saving the note could not be confirmed.</Alert>}

@@ -1,6 +1,7 @@
 // spec/app/photos/index.md, "Only the newest read's answer is shown, only while Photos is showing, and a further page only adds older items"
 import type { MediaCursor, MediaItem, OwnedAlbum, Reviewed } from "@elizaos/os-bridges"
 import type { BrowserAlbum, BrowserCapture } from "../platform/photos.vibe"
+import { createShelf, type Shelf } from "../runtime/shelf.vibe"
 
 /** The payload behind a numbered item. Its native revision is the one shown to the owner. */
 export type Row = { readonly kind: "phone"; readonly item: MediaItem } | { readonly kind: "browser"; readonly item: BrowserCapture }
@@ -22,17 +23,22 @@ export interface CatalogView {
 /** Native and browser payloads, separate from the machine's accepted identities. */
 export service Catalog {
   index(rows: readonly Row[]): number[]!!
+  lookup(ids: readonly string[]): number[]!!
   shelves(albums: readonly ListedAlbum[], trashed: number): number[]!!
+  updateAlbum(number: number, album: ListedAlbum): void!!
   displayed(): CatalogView!!
+  view(): Shelf<CatalogView>!!
   publish(rows: readonly Row[], numbers: readonly number[]): void!!
   cursor(bin: boolean): (MediaCursor | null)!!
   next(bin: boolean, cursor: MediaCursor | null): void!!
   revision(): number!!
   changed(): void!!
+  clearRows(): void!!
   clear(): void!!
 }
 
-const period = 1024
+const period = 2048
+const maxKnownHandles = 10_000
 
 /** The time taken, in milliseconds, as shown by the platform. */
 export function taken(row: Row): number {
@@ -49,6 +55,7 @@ export function reviewed(row: Row | undefined): Reviewed | undefined {
 export const catalog = Layer.sync(Catalog, () => {
   const rows = new Map<number, Row>()
   const numbers = new Map<string, number>()
+  const used = new Set<number>()
   const ranks = new Map<number, number>()
   const albums = new Map<number, ListedAlbum>()
   const albumNumbers = new Map<string, number>()
@@ -56,38 +63,91 @@ export const catalog = Layer.sync(Catalog, () => {
   let trash: MediaCursor | null = null
   let revision = 1
   let trashCount = 0
+  const empty = (): CatalogView => ({ rows: new Map(), albums: new Map(), trashCount: 0 })
+  const shelf = createShelf<CatalogView>(empty(), { reset: empty })
+  function notify() {
+    shelf.set({ rows: new Map(rows), albums: new Map(albums), trashCount })
+  }
+  function allocate(dateMs: number): number {
+    const date = Math.max(1, Math.min(Math.floor(Number.MAX_SAFE_INTEGER / period) - 1, Math.trunc(dateMs)))
+    const time = date * period
+    const floor = (date - 1) * period + 1
+    let candidate = ranks.get(time) ?? time
+    while (candidate >= floor && used.has(candidate)) candidate -= 1
+    if (candidate < floor) {
+      candidate = time + 1
+      while (used.has(candidate)) candidate += 1
+    } else {
+      ranks.set(time, candidate - 1)
+    }
+    used.add(candidate)
+    return candidate
+  }
   return {
     index: (page: readonly Row[]) => sync(() => page.map((row) => {
       const known = numbers.get(row.item.id)
       if (known !== undefined) return known
-      const date = Math.max(1, Math.min(Math.floor(Number.MAX_SAFE_INTEGER / period) - 1, Math.trunc(taken(row))))
-      const time = date * period
-      const number = ranks.get(time) ?? time
-      ranks.set(time, number - 1)
+      const number = allocate(taken(row))
       numbers.set(row.item.id, number)
       return number
     })),
-    shelves: (shelf: readonly ListedAlbum[], trashed: number) => sync(() => {
+    lookup: (ids: readonly string[]) => sync(() => ids.map((id) => {
+      const known = numbers.get(id)
+      if (known !== undefined) return known
+      const number = allocate(1)
+      numbers.set(id, number)
+      return number
+    })),
+    shelves: (shelfList: readonly ListedAlbum[], trashed: number) => sync(() => {
       albums.clear()
       trashCount = trashed
-      return shelf.map((album) => {
+      const ids = shelfList.map((album) => {
         const number = albumNumbers.get(album.target) ?? albumNumbers.size + 1
         albumNumbers.set(album.target, number)
         albums.set(number, album)
         return number
       })
+      notify()
+      return ids
     }),
-    displayed: () => sync(() => ({ rows, albums, trashCount })),
+    updateAlbum: (number: number, album: ListedAlbum) => sync(() => {
+      albums.set(number, album)
+      notify()
+    }),
+    displayed: () => sync(() => shelf.get()),
+    view: () => sync(() => shelf),
     publish: (page: readonly Row[], ids: readonly number[]) => sync(() => {
       page.forEach((row, at) => {
         const id = ids[at]
         if (id !== undefined) rows.set(id, row)
       })
+      notify()
     }),
     cursor: (bin: boolean) => sync(() => bin ? trash : listing),
     next: (bin: boolean, cursor: MediaCursor | null) => sync(() => { if (bin) trash = cursor; else listing = cursor }),
     revision: () => sync(() => revision),
     changed: () => sync(() => { revision += 1 }),
-    clear: () => sync(() => { rows.clear(); albums.clear(); listing = null; trash = null; trashCount = 0; revision += 1 }),
+    clearRows: () => sync(() => {
+      rows.clear()
+      listing = null
+      trash = null
+      trashCount = 0
+      revision += 1
+      notify()
+    }),
+    clear: () => sync(() => {
+      rows.clear()
+      albums.clear()
+      listing = null
+      trash = null
+      trashCount = 0
+      revision += 1
+      if (numbers.size > maxKnownHandles) {
+        numbers.clear()
+        used.clear()
+        ranks.clear()
+      }
+      notify()
+    }),
   }
 })

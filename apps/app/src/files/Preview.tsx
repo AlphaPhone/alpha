@@ -1,8 +1,7 @@
 // spec/app/files/preview.md, "Story: Look at a file"; spec/app/files/preview.md, "Story: Act on the file I am looking at"; spec/app/files/preview.md, "Story: Get a file back when access was lost"; spec/app/files/recent.md, "Story: Find what I opened lately"; spec/app/files/preview.md, "The caption and Details show facts for the exact document held"
-import { validName } from "@elizaos/plugin-files-client";
-import { Alert, Button, Dialog, DialogContent, DialogTitle, FilesRow, Input, Menu, MenuContent, MenuItem, MenuTrigger, Spinner } from "@repo/ui";
+import { Alert, Button, Dialog, DialogContent, DialogTitle, FilesRow, Input, Menu, MenuContent, MenuItem, MenuTrigger, Spinner, cn, dockClearance } from "@repo/ui";
 import { Effect, Option, type ManagedRuntime } from "effect";
-import { useState } from "react";
+import { useCallback, useRef, useState, useSyncExternalStore } from "react";
 import { ChevronLeft, ChevronRight, Ellipsis, ExternalLink, FileText, FolderInput, Info, Mail, MessageCircle, Pause, Pencil, Play, Share2, Sparkles, Trash2, X } from "lucide-react";
 import type { Machine as Browser } from "../../gen/app__files.effect.vibe";
 import { previewActionReady } from "../../gen/app__files.ts";
@@ -18,7 +17,7 @@ import type { Machine as Inbox } from "../../gen/app__inbox.effect.vibe";
 import { useMachine as useInbox } from "../../gen/app__inbox.react.ts";
 import type { Machine as Drafts } from "../../gen/app__inbox__drafts.effect.vibe";
 import { useMachine as useDrafts } from "../../gen/app__inbox__drafts.react.ts";
-import { changedOn, folderLocation, parentPath, sized } from "./entries.vibe";
+import { changedOn, folderLocation, parentPath, sized, validFileName } from "./entries.vibe";
 import { Handles } from "./handles.vibe";
 import { Opened, emailAccount, pictureFits } from "./preview.vibe";
 
@@ -46,12 +45,25 @@ export function Preview({ runtime, today }: PreviewProps) {
   const inbox = useInbox(runtime);
   const drafts = useDrafts(runtime);
   const files = useFiles(runtime);
+  const contentShelf = runtime.runSync(Effect.flatMap(Opened, (opened) => opened.contentShelf()));
+  const content = useSyncExternalStore(contentShelf.subscribe, contentShelf.snapshot, contentShelf.snapshot);
   const [details, setDetails] = useState<{ readonly viewer: number; readonly revision: number }>();
   const [rename, setRename] = useState<{ readonly viewer: number; readonly revision: number; readonly name: string }>();
-  if (!state || !recent.state || !showing(state) || shell.state?.assistant === "Sheet" || shell.state?.assistant === "Full") return null;
+  const mediaRef = useRef<HTMLMediaElement | null>(null);
+  const playing = state?.playing ?? false;
+  const syncMedia = useCallback((node: HTMLMediaElement | null) => {
+    mediaRef.current = node;
+    if (!node) return;
+    if (playing && node.paused) {
+      void node.play().catch(() => { if (can({ type: "play" }, "Owner")) void send({ type: "play" }, "Owner"); });
+    } else if (!playing && !node.paused) {
+      node.pause();
+    }
+  }, [playing, can, send]);
+  if (!state || !recent.state || !showing(state) || shell.state?.assistant === "Sheet" || shell.state?.assistant === "Full"
+    || files.state?.sheet.open || files.state?.deleting.showing || files.state?.change.clash.showing) return null;
   const owner = <E extends Parameters<typeof can>[0]>(event: E) => can(event, "Owner");
   const tell = <E extends Parameters<typeof send>[0]>(event: E) => void send(event, "Owner");
-  const content = runtime.runSync(Effect.flatMap(Opened, (opened) => opened.content()));
   const mine = content.viewer === state.viewer && loaded(state);
   const grant = recent.state.shown.key === state.item ? recent.state.shown.grant : 0;
   const file = Option.getOrUndefined(runtime.runSync(Effect.flatMap(Opened, (opened) => opened.grant(grant))));
@@ -59,14 +71,11 @@ export function Preview({ runtime, today }: PreviewProps) {
   const name = file?.name ?? lapsedName ?? Option.getOrUndefined(runtime.runSync(Effect.flatMap(Handles, (handles) => handles.label(state.item)))) ?? "File";
   const mediaProps = {
     "aria-label": name,
+    controls: true,
     preload: "metadata",
     onEnded: () => { if (state.playing && owner({ type: "play" })) tell({ type: "play" }); },
-    ref: (node: HTMLMediaElement | null) => {
-      if (node && state.playing && node.paused) {
-        void node.play().catch(() => { if (owner({ type: "play" })) tell({ type: "play" }); });
-      }
-      else if (node && !state.playing && !node.paused) node.pause();
-    },
+    onError: () => { if (state.playing && owner({ type: "play" })) tell({ type: "play" }); },
+    ref: syncMedia,
   } as const;
   const askAlpha = owner({ type: "askAlpha" });
   const openElsewhere = owner({ type: "openElsewhere" });
@@ -100,7 +109,7 @@ export function Preview({ runtime, today }: PreviewProps) {
   return (
     <Dialog open onOpenChange={(open) => { if (!open && owner({ type: "close" })) tell({ type: "close" }); }}>
       <DialogContent aria-label="Preview" aria-describedby={undefined} className="inset-x-0 top-0 flex h-dvh max-h-none w-full max-w-none translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 bg-background p-0 text-foreground shadow-none sm:pointer-fine:max-w-103">
-        <div className="flex min-h-13 shrink-0 items-center gap-0.5 px-2 pt-[env(safe-area-inset-top)] [&_button]:size-13">
+        <div className="flex min-h-13 shrink-0 items-center gap-0.5 px-2 pt-[var(--alpha-safe-top)] [&_button]:size-13">
           {owner({ type: "close" }) && <Button variant="ghost" size="icon" aria-label="Close" onClick={() => tell({ type: "close" })}><ChevronLeft /></Button>}
           <div className="flex-1" />
           {(askAlpha || openElsewhere || forget || email || owner(picture) || share || showDetails || showRename || owner(move) || owner(trash)) && (
@@ -121,14 +130,14 @@ export function Preview({ runtime, today }: PreviewProps) {
             </Menu>
           )}
         </div>
-        <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto px-6 pt-1 pb-42">
+        <div className={cn("min-h-0 flex-1 touch-pan-y overflow-y-auto px-6 pt-1", dockClearance)}>
           <DialogTitle className="font-display text-title font-light break-words">{name}</DialogTitle>
           {facts !== undefined && <p className="mt-2.5 mb-5 flex items-start gap-2.5 text-sm text-muted-foreground"><FileText aria-hidden className="size-4.5 shrink-0" /><span className="min-w-0 break-words">{caption}</span></p>}
           {state.attempt.outcome === "Unknown" && state.offered.item === state.item && state.offered.revision === state.revision && <Alert variant="warn">Check Inbox before offering this file again</Alert>}
           {!usable(state) && <Alert variant="warn">Alpha can no longer read this file</Alert>}
           {state.content.status === "Loading" && <Spinner label="Opening the file" />}
-          {state.content.status === "Failed" && <Alert variant="warn">{state.why === "Locked" ? "This PDF is locked" : state.why === "TooLarge" ? "This file is too large to show" : state.why === "TooSlow" ? "This PDF took too long to open" : "This file cannot be shown here"}</Alert>}
-          {state.drawing.status === "Failed" && <Alert variant="warn">This page cannot be shown</Alert>}
+          {state.content.status === "Failed" && <Alert variant="warn">{state.why === "Locked" ? "This PDF is locked" : state.why === "TooLarge" ? "This file is too large to show" : state.why === "TooSlow" ? "This PDF took too long to open" : state.why === "Unsealed" ? "This PDF could not be opened safely" : "This file cannot be shown here"}</Alert>}
+          {state.drawing.status === "Failed" && <Alert variant="warn">{state.why === "Unsealed" ? "This page could not be opened safely" : "This page cannot be shown"}</Alert>}
           {mine && content.text !== undefined && <pre className="font-mono text-base leading-normal whitespace-pre-wrap break-words">{content.text}</pre>}
           {mine && state.kind === "Photo" && content.uri !== undefined && <img alt={name} src={content.uri} decoding="async" className="mx-auto w-full max-h-[55dvh] object-contain" />}
           {mine && state.kind === "Media" && content.uri !== undefined && (file?.mimeType.startsWith("audio/") ? <audio {...mediaProps} src={content.uri} className="w-full" /> : <video {...mediaProps} src={content.uri} className="mx-auto w-full max-h-[55dvh]" />)}
@@ -148,12 +157,12 @@ export function Preview({ runtime, today }: PreviewProps) {
             <DialogTitle>Rename</DialogTitle>
             <form className="flex flex-col gap-3" onSubmit={(event) => {
               event.preventDefault();
-              if (!owner(editName) || !validName(editName.name) || editName.name === name) return;
+              if (!owner(editName) || validFileName(editName.name) === undefined || editName.name === name) return;
               tell(editName);
               setRename(undefined);
             }}>
               <Input aria-label="Name" value={rename?.name ?? ""} onChange={(event) => setRename(rename && { ...rename, name: event.target.value })} />
-              <Button type="submit" disabled={!owner(editName) || !validName(editName.name) || editName.name === name}>Rename</Button>
+              <Button type="submit" disabled={!owner(editName) || validFileName(editName.name) === undefined || editName.name === name}>Rename</Button>
             </form>
           </DialogContent>
         </Dialog>

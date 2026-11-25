@@ -274,7 +274,7 @@ pure def enter(s: Files, by: Actor): Moved = arrived(entered(s.trail, s.inCatego
 
 pure def shut(open: bool, s: Files): Moved =
   { state: { ...s, open: open, storage: F::drop(s.storage), volumes: List(), tally: untallied, listing: F::drop(s.listing), items: List(), partial: false, picked: List(),
-      details: 0, handed: false,
+      trash: false, details: 0, handed: false,
       search: S::stop(s.search), deleting: V::dismiss(s.deleting), change: C::retire(s.change), sheet: M::close(s.sheet) },
     out: unanswered(s.search) }
 
@@ -284,8 +284,8 @@ pure def leave(s: Files, by: Actor): Moved = shut(false, s)
 
 pure def alwaysNothingIsReadOrHeldWhileClosed(s: Files): bool =
   not(s.open) implies (s.listing.status != R::Loading and s.storage.status != R::Loading and s.search.query.status != R::Loading
-    and s.picked.length() == 0 and s.search.hits.length() == 0 and not(s.deleting.showing) and s.change.panel == 0 and not(s.sheet.open)
-    and s.details == 0)
+    and s.picked.length() == 0 and s.search.hits.length() == 0 and not(s.deleting.showing) and s.change.panel == 0 and not(s.change.clash.showing) and not(s.sheet.open)
+    and not(s.trash) and s.details == 0)
 ```
 
 ### When the phone says Alpha may read the storage the place is read, and when it takes access away, or says the storage cannot be reached at all, everything read is dropped
@@ -1051,11 +1051,11 @@ pure def stepADestinationIsAFolderAsRead(before: Files, via: str, after: Files):
   (via == "begin" and moving(after.change.work) and after.change.attempt.id != before.change.attempt.id) implies
     (M::ready(before.sheet) and after.change.dest == M::place(before.sheet))
 
-pure def canKeepBoth(s: Files, by: Actor): bool = by == Owner and C::canKeepBoth(s.change)
+pure def canKeepBoth(s: Files, by: Actor): bool = by == Owner and s.open and allowed(s) and C::canKeepBoth(s.change)
 
 pure def keepBoth(s: Files, by: Actor): Moved = { state: { ...s, change: C::keepBoth(s.change) }, out: performing(C::keepBoth(s.change), s) }
 
-pure def canReplaceThem(s: Files, by: Actor): bool = by == Owner and C::canReplaceThem(s.change)
+pure def canReplaceThem(s: Files, by: Actor): bool = by == Owner and s.open and allowed(s) and C::canReplaceThem(s.change)
 
 pure def replaceThem(s: Files, by: Actor): Moved = { state: { ...s, change: C::replaceThem(s.change) }, out: performing(C::replaceThem(s.change), s) }
 

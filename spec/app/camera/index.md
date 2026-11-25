@@ -614,7 +614,7 @@ losing the preview, being covered, changing mode or flipping the lens cancels
 it too, so no delayed shot can be taken on a different viewfinder.
 
 ```quint
-pure def canStartDelay(s: Camera, by: Actor): bool = canShutter(s, by) and s.delay > 0
+pure def canStartDelay(s: Camera, by: Actor): bool = canShutter(s, by) and s.delay > 0 and s.agent.stage != G::Approved
 
 pure def startDelay(s: Camera, now: int, by: Actor): Camera =
   { ...s, countdown: s.delay, nextCount: now + F::second }

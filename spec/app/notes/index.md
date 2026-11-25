@@ -170,7 +170,7 @@ pure def listed(s: Notes, ticket: int, ok: bool, version: int, rows: List[Row], 
   val keptFolders = if (good) folders else List()
   val gone = if (good) s.folders.select(f => not(hasFolder(folders, f.id))).listMap(f => f.id) else List()
   val read = R::answer(s.read, good)
-  val shown = { ...s, read: read, rows: if (good) tidy else List(), folders: keptFolders, shelf: shelf,
+  val shown = { ...s, read: read, rows: if (good) tidy else List(), folders: keptFolders, shelf: if (good) shelf else s.shelf,
     version: if (good) version else s.version, retired: s.retired.concat(gone),
     filter: if (hasFolder(keptFolders, s.filter)) s.filter else 0, review: V::revise(s.review), again: false }
   if (stale) { state: { ...s, read: R::ask(s.read) }, out: List(Lists({ ticket: s.read.ticket + 1, owner: s.owner })) }

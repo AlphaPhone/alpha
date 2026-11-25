@@ -5,9 +5,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Screen } from "../gen/app__maps.effect.vibe";
 import { Machine as Credits } from "../gen/app__maps__credits.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
+import { Atlas } from "../src/maps/atlas.vibe";
+import { measured, meters, pointIn, toLine } from "../src/maps/geometry.ts";
 import maps from "../src/maps/index.tsx";
 import type { Alpha } from "../src/runtime/area.tsx";
-import { button, closeAll, fill, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
 import { cloudRoute, gallery, harbour, move } from "./fakes/maps.ts";
 import { scene } from "./fakes/scene.ts";
 
@@ -17,19 +19,19 @@ afterEach(closeAll);
 const withMaps = only("home", "view:Maps");
 
 /** Press Enter in the field whose accessible name is `name`. */
-const enter = (name: string) => act(async () => {
+const enter = (name: string) => drawn(() => {
   const field = [...document.querySelectorAll("input")].find((found) => found.getAttribute("aria-label") === name);
   if (!field?.form) throw new Error(`no form around ${name}`);
   field.form.requestSubmit();
 });
 
 /** Open Maps from the shell, as Home's tile or the agent does. */
-const showMaps = (alpha: Alpha) => act(async () => {
-  await alpha.runtime.runPromise(Effect.ignore(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Maps" }))));
-});
+const showMaps = (alpha: Alpha) => drawn(() =>
+  alpha.runtime.runPromise(Effect.ignore(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Maps" })))),
+);
 
 /** Focus the field whose accessible name is `name`. */
-const focus = (name: string) => act(async () => {
+const focus = (name: string) => drawn(() => {
   [...document.querySelectorAll("input")].find((found) => found.getAttribute("aria-label") === name)?.focus();
 });
 
@@ -67,7 +69,7 @@ describe("Maps on a phone", () => {
     await press("Harbour Cafe");
     await until(alpha, runtime, Screen, (s) => s.place !== 0 && s.sheet === "Half");
 
-    // spec/app/maps/index.md, "\"Use my location\" locates once when allowed, asks when it may, and otherwise opens Settings"; spec/app/maps/index.md, "A fix goes to whoever holds the location"
+    // spec/app/maps/index.md, "A fix goes to whoever holds the location"
     await press("Directions");
     await until(alpha, runtime, Screen, (s) => s.trip.route !== 0 && s.trip.origin === "MyLocation" && s.link.locator === "Nobody");
     expect(world.maps.asked.at(-1)?.body).toMatchObject({ from: start, to: harbour.coordinate, mode: "drive" });
@@ -135,7 +137,7 @@ describe("Maps on a phone", () => {
     await press("Recenter");
     await until(alpha, runtime, Screen, (s) => s.following);
 
-    // spec/app/maps/index.md, "Leaving Maps keeps guidance with its service and ends it without; a pending \"Use my location\" and the Calendar return end": locking the phone is leaving
+    // spec/app/maps/index.md, "Story: Keep guiding away from Maps": locking the phone is leaving
     await seen(false);
     await until(alpha, runtime, Screen, (s) => s.trip.away && s.trip.guidance === "Going");
 
@@ -145,7 +147,7 @@ describe("Maps on a phone", () => {
     await until(alpha, runtime, Screen, (s) => !s.trip.away && s.trip.guidance === "Going");
     await seen(false);
     await until(alpha, runtime, Screen, (s) => s.trip.away);
-    await act(async () => { world.maps.guidance.stop?.("notification"); });
+    await drawn(() => { world.maps.guidance.stop?.("notification"); });
     await until(alpha, runtime, Screen, (s) => s.trip.guidance === "Stopped" && s.guideNotice === "StoppedFromNotification" && s.link.locator === "Nobody");
     await seen(true);
     await until(alpha, runtime, Screen, (s) => !s.trip.away);
@@ -156,7 +158,7 @@ describe("Maps on a phone", () => {
     await until(alpha, runtime, Screen, (s) => s.trip.service === "Running" && s.guideNotice === "Quiet");
     await seen(false);
     await until(alpha, runtime, Screen, (s) => s.trip.away);
-    await act(async () => { world.maps.guidance.stop?.("task-removed"); });
+    await drawn(() => { world.maps.guidance.stop?.("task-removed"); });
     await until(alpha, runtime, Screen, (s) => s.trip.guidance === "Stopped" && s.guideNotice === "PausedAway");
     await seen(true);
     await until(alpha, runtime, Screen, (s) => !s.trip.away);
@@ -225,7 +227,8 @@ describe("Maps in a browser", () => {
     await first.close();
 
     // spec/app/maps/index.md, "Saved places are kept on the phone, and are what survives a restart"
-    world.maps.coverage = { ...world.maps.coverage, providerId: "eliza-cloud-google" } as typeof world.maps.coverage;
+    if (!world.maps.coverage.available) throw new Error("expected available coverage");
+    world.maps.coverage = { ...world.maps.coverage, providerId: "eliza-cloud-google" };
     const second = await open(world, withMaps);
     await showMaps(second.alpha);
     const again = maps.runtime(second.alpha);
@@ -250,7 +253,7 @@ describe("Maps in a browser", () => {
     await until(second.alpha, again, Credits, (s) => !s.infoOpen);
     await until(second.alpha, again, Screen, (s) => s.place !== 0);
 
-    // spec/app/maps/index.md, "A route is asked from coordinates or another place, which ends a pending \"Use my location\"": Google's map offers no coordinate prompt
+    // spec/app/maps/index.md, "Story: Get directions": Google's map offers no coordinate prompt
     await press("Directions");
     await until(second.alpha, again, Screen, (s) => s.directions);
     await fill("Starting point", "Off");
@@ -297,7 +300,7 @@ describe("Maps in a browser", () => {
     await later(alpha, 400);
     expect([world.maps.asked.length, (await runtime.runPromise(Effect.flatMap(Screen, (screen) => screen.get()))).recent]).toEqual([asked, ["gallery"]]);
 
-    // spec/app/maps/index.md, "The card shares the place or the arrival time, opens its website, or opens it in the phone's maps app"; spec/app/maps/index.md, "A copied number is told: \"Number copied\" or \"Couldn't copy\""
+    // spec/app/maps/index.md, "The card shares the place or the arrival time, opens its website, or opens it in the phone's maps app"
     await press("Harbour Gallery");
     await until(alpha, runtime, Screen, (s) => s.place !== 0);
     expect(button("Copy phone number")).toBeUndefined();
@@ -360,5 +363,80 @@ describe("Maps in a browser", () => {
     await until(alpha, runtime, Screen, (s) => s.search.status === "Failed" && s.link.held === 60);
     await later(alpha, 60_000);
     await until(alpha, runtime, Screen, (s) => s.link.held === 0);
+  });
+
+  it("Handles antimeridian, empty-line, and coordinate edge cases in geometry (spec/app/maps/navigation.md, \"A fix moves guidance only when it is precise, fresh and close: arrival within 25 meters, a turn passed within 40 meters or beyond 60, the route left beyond 75\")", () => {
+    expect(pointIn("+43.73, +7.42")).toEqual({ lat: 43_730_000, lng: 7_420_000 });
+    expect(pointIn(".5, -.5")).toEqual({ lat: 500_000, lng: -500_000 });
+    expect(pointIn("-0, -0")).toEqual({ lat: 0, lng: 0 });
+    expect(Object.is(pointIn("-0, -0")?.lat, -0)).toBe(false);
+
+    const west = { lat: 0, lng: 179_999_000 };
+    const east = { lat: 0, lng: -179_999_000 };
+    expect(meters(west, east)).toBeLessThan(300);
+    expect(toLine({ lat: 0, lng: 180_000_000 }, [west, east])).toBeLessThan(50);
+
+    const empty = measured(west, { line: [], turns: [] }, 0);
+    expect(Number.isFinite(empty.toRoute)).toBe(true);
+    expect(empty.toEnd).toBeGreaterThan(25);
+    expect(empty.beyond).toBe(0);
+
+    const a = { lat: 43_730_000, lng: 7_420_000 };
+    const turn = { lat: 43_731_000, lng: 7_420_000 };
+    const b = { lat: 43_731_000, lng: 7_421_000 };
+    const beforeTurn = measured({ lat: 43_730_500, lng: 7_420_000 }, { line: [a, turn, b], turns: [a, turn, b] }, 0);
+    const pastTurn = measured({ lat: 43_731_000, lng: 7_420_800 }, { line: [a, turn, b], turns: [a, turn, b] }, 0);
+    expect(beforeTurn.beyond).toBe(0);
+    expect(pastTurn.beyond).toBeGreaterThan(50);
+  });
+
+  it("Isolates Atlas per runtime, clears details on leave, skips coordinate search debounce, and refuses Google without tiles (spec/app/maps/index.md, \"A place's details are read from its provider once it is on the card, and shown only while it still is\"; spec/app/maps/connection.md, \"Google's content is drawn only on Google's own map, whose only credit is the Google Maps badge\")", async () => {
+    const world = scene();
+    const first = await open(world, withMaps);
+    await showMaps(first.alpha);
+    const runtime = maps.runtime(first.alpha);
+    await until(first.alpha, runtime, Screen, (s) => s.link.provider !== 0);
+
+    await focus("Search Maps");
+    await fill("Search Maps", "43.73, 7.42");
+    await later(first.alpha, 450);
+    expect(world.maps.asked).toEqual([]);
+    expect((await runtime.runPromise(Effect.flatMap(Screen, (screen) => screen.get()))).recent).toEqual([]);
+
+    await fill("Search Maps", "harbour");
+    await enter("Search Maps");
+    await until(first.alpha, runtime, Screen, (s) => s.search.status === "Loaded" && s.results === 2);
+    await fill("Search Maps", "");
+    await until(first.alpha, runtime, Screen, (s) => s.query === "" && s.results === 0);
+
+    await fill("Search Maps", "cafe");
+    await enter("Search Maps");
+    await until(first.alpha, runtime, Screen, (s) => s.search.status === "Loaded" && s.results === 1);
+    await press("Harbour Cafe");
+    await until(first.alpha, runtime, Screen, (s) => s.place !== 0 && s.details.status === "Loaded");
+    await press("Save");
+    await until(first.alpha, runtime, Screen, (s) => s.saved.length === 1);
+    expect(localStorage.getItem("alpha/maps/saved@1")).not.toContain("+377 93 15 00 00");
+
+    const place = (await runtime.runPromise(Effect.flatMap(Screen, (screen) => screen.get()))).place;
+    const store = await runtime.runPromise(Atlas);
+    expect(store.spot(place)?.phone).toBe("+377 93 15 00 00");
+    await seen(false);
+    await until(first.alpha, runtime, Screen, (s) => s.trip.away);
+    await later(first.alpha, 10);
+    expect(store.spot(place)?.phone).toBeUndefined();
+    await first.close();
+    localStorage.clear();
+
+    if (!world.maps.coverage.available) throw new Error("expected available coverage");
+    world.maps.coverage = { ...world.maps.coverage, providerId: "eliza-cloud-google" };
+    const second = await open(world, withMaps);
+    await showMaps(second.alpha);
+    const again = maps.runtime(second.alpha);
+    await until(second.alpha, again, Screen, (s) => s.link.google);
+    const secondStore = await again.runPromise(Atlas);
+    expect(secondStore).not.toBe(store);
+    expect(secondStore.spot(place)).toBeUndefined();
+    expect(document.body.textContent).toContain("The Google map is missing.");
   });
 });

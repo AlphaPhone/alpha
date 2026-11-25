@@ -1049,6 +1049,41 @@ describe("Files on a phone", () => {
     expect(document.body.textContent?.includes("The Trash is empty")).toBe(true);
     await hardware("home");
   });
+
+  it("Hide Preview behind Move-to Sheet, avoid invisible checkbox hit-stealing, and trash multi-folder selections (spec/app/files/preview.md, \"Story: Act on the file I am looking at\"; spec/app/files/index.md, \"Story: Change my files\")", async () => {
+    const { alpha, runtime, world } = await onFiles();
+    await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
+    await press("Internal storage");
+    await press("Download");
+    await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 2);
+
+    const hiddenCheck = document.querySelector<HTMLElement>("[aria-label='Select lease.pdf']");
+    expect(hiddenCheck?.className).toContain("pointer-events-none");
+
+    await press("lease.pdf");
+    await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded");
+    expect(document.querySelector("[aria-label='Preview']")).not.toBeNull();
+    await choose("Move to", "File actions");
+    await until(alpha, runtime, Browser, (s) => s.sheet.open && s.sheet.reading.status === "Loaded");
+    expect(document.querySelector("[aria-label='Preview']")).toBeNull();
+    await hardware("back");
+    await until(alpha, runtime, Browser, (s) => !s.sheet.open);
+    expect(document.querySelector("[aria-label='Preview']")).not.toBeNull();
+    await press("Close");
+    await until(alpha, runtime, Shown, (s) => s.viewer === 0);
+    await press("Cancel");
+
+    await choose("Browse storage");
+    await until(alpha, runtime, Browser, (s) => s.trail.length === 0 && !s.inCategory);
+    await press("Documents");
+    await until(alpha, runtime, Browser, (s) => s.inCategory && s.listing.status === "Loaded" && s.items.length >= 2);
+    await select("lease.pdf");
+    await select("notes.txt");
+    await press("Delete");
+    await pressOnTop("Delete");
+    await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Confirmed" && s.binned.length === 2);
+    expect(world.files.trash.map((one) => one.was.path).toSorted()).toEqual(["Documents/notes.txt", "Download/lease.pdf"]);
+  });
 });
 
 describe("Files in a browser", () => {

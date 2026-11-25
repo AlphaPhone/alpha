@@ -228,7 +228,7 @@ been. Once the owner's action leaves Recently deleted empty, it closes.
 type Verdict = Done | Denied | NoRoom | Lost
 
 pure def remaining(s: Trash): List[Entry] =
-  if (s.act == Discard) s.entries.append({ id: s.subject, at: s.asOf, revision: s.revision, recording: s.loose })
+  if (s.act == Discard) (if (has(s.entries, s.subject)) s.entries else s.entries.append({ id: s.subject, at: s.asOf, revision: s.revision, recording: s.loose }))
   else if (s.act == Recover or s.act == Erase) s.entries.select(e => e.id != s.subject)
   else if (s.act == EmptyAll) List()
   else if (s.act == Sweep) s.entries.select(e => not(due(e, s.asOf)))
@@ -657,7 +657,9 @@ pure def canOwnerChanged(s: Trash, owner: int, by: Actor): bool = by == Phone an
 
 pure def ownerChanged(s: Trash, owner: int, by: Actor): Trash =
   { ...s, owner: owner, showing: false, read: dropped(s.read), entries: List(), opened: 0, holding: 0,
-    question: NoQuestion, review: V::dismiss(s.review), pending: false, unsure: false, failed: false,
+    question: NoQuestion, target: 0, refused: 0, loose: 0, review: V::dismiss(s.review),
+    act: Sweep, subject: 0, revision: 0, asOf: 0, recordings: List(),
+    pending: false, unsure: false, failed: false,
     attempt: if (s.attempt.outcome == A::Recorded) A::plan(s.attempt.id) else cutOff(s.attempt), audio: cutOff(s.audio) }
 ```
 

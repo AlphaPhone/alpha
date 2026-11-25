@@ -1,7 +1,8 @@
 // spec/app/files/scan.md, "Story: Arrange the pages"; spec/app/files/scan.md, "Story: Keep the scan as I work"; spec/app/files/scan.md, "Story: Make the PDF, and keep the photo"
-import { createScanDraftStore, scannedLinks, type ScanTextLine } from "@elizaos/plugin-files-client"
+import type { ScanTextLine } from "@elizaos/plugin-files-client"
 import { registered } from "../platform/device.vibe"
 import type { Page } from "../../gen/app__files__scanDraft.ts"
+import { loadFilesClient } from "./entries.vibe"
 
 export interface ScanImage {
   readonly blob: Blob
@@ -28,9 +29,8 @@ module web {
   import type { PdfReceipt, ScanImage, ScanSaved, StoredPage } from "./scanStore.vibe"
   // eslint-disable-next-line boundaries/no-unknown-dependencies -- Vite resolves the worker loader to this directory’s scan PDF worker.
   import Draw from "./scanPdf.worker.ts?worker"
-  import { admittedTextLayer } from "@elizaos/plugin-files-client"
-  import { scannedLinks } from "@elizaos/plugin-files-client"
   import { registerPlugin } from "@capacitor/core"
+  import { loadFilesClient } from "./entries.vibe"
 
   interface ScanWriter {
     begin(input: { length: number }): Promise<{ id: string }>
@@ -52,6 +52,7 @@ module web {
     const plugin = (android ??= registerPlugin<ScanWriter>("AlphaScan"))
     let id: string | undefined
     let opened = false
+    let saved = false
     try {
       id = (await plugin.begin({ length: pdf.size })).id
       for (let offset = 0; offset < pdf.size; offset += chunk) {
@@ -59,11 +60,18 @@ module web {
         await plugin.append({ id, offset, data: base64(part) })
       }
       opened = true
-      return await plugin.save({ id })
+      const receipt: unknown = await plugin.save({ id })
+      if (receipt === null || typeof receipt !== "object" || !("confirmed" in receipt) || !("known" in receipt)
+        || typeof receipt.confirmed !== "boolean" || typeof receipt.known !== "boolean") {
+        return { confirmed: false, known: false }
+      }
+      saved = receipt.confirmed
+      const selectionId = "selectionId" in receipt && typeof receipt.selectionId === "string" ? receipt.selectionId : undefined
+      return { confirmed: receipt.confirmed, known: receipt.known, selectionId }
     } catch {
       return { confirmed: false, known: !opened }
     } finally {
-      if (id !== undefined) await plugin.abandon({ id }).catch(() => undefined)
+      if (id !== undefined && !saved) await plugin.abandon({ id }).catch(() => undefined)
     }
   }
 
@@ -96,35 +104,53 @@ module web {
     })
   }
 
-  function valid(value: unknown): value is ScanSaved {
-    if (value === null || typeof value !== "object" || !("revision" in value) || !Number.isSafeInteger(value.revision) || !("pages" in value)) return false
-    return Array.isArray(value.pages) && value.pages.length <= 20 && value.pages.every((one) =>
-      one !== null && typeof one === "object" && one.blob instanceof Blob && formats.has(one.blob.type)
-        && Number.isSafeInteger(one.width) && Number.isSafeInteger(one.height) && one.page !== null && typeof one.page === "object"
-        && Number.isSafeInteger(one.page.image) && one.page.image > 0 && typeof one.page.camera === "boolean"
-        && (one.page.text === 0
-          ? one.words === undefined && one.page.blank === false && one.page.edits === 0 && one.page.links === 0
-          : one.page.text === one.page.image && typeof one.page.blank === "boolean"
-            && Number.isSafeInteger(one.page.edits) && one.page.edits >= 0
-            && one.words !== null && typeof one.words === "object" && typeof one.words.text === "string"
-            && one.words.text.length <= 100_000 && admittedTextLayer(one.words.lines) !== undefined
-            && Array.isArray(one.words.links) && JSON.stringify(scannedLinks(one.words.text)) === JSON.stringify(one.words.links)
-            && one.page.links === (one.page.blank ? 0 : one.words.links.length)),
-    )
+  function valid(
+    value: unknown,
+    admittedTextLayer: (lines: unknown) => unknown,
+    scannedLinks: (text: string) => ReadonlyArray<string>,
+  ): value is ScanSaved {
+    if (value === null || typeof value !== "object" || !("revision" in value) || !Number.isSafeInteger(value.revision) || (value.revision as number) < 0 || !("pages" in value)) return false
+    if (!Array.isArray(value.pages) || value.pages.length > 20) return false
+    const seen = new Set<number>()
+    return value.pages.every((one) => {
+      if (one === null || typeof one !== "object" || !(one.blob instanceof Blob) || !formats.has(one.blob.type)
+        || one.blob.size < 1 || one.blob.size > 16 * 1024 * 1024
+        || !Number.isSafeInteger(one.width) || one.width < 1 || one.width > 10_000
+        || !Number.isSafeInteger(one.height) || one.height < 1 || one.height > 10_000
+        || one.width * one.height > 32_000_000
+        || one.page === null || typeof one.page !== "object"
+        || !Number.isSafeInteger(one.page.image) || one.page.image <= 0 || seen.has(one.page.image)
+        || typeof one.page.camera !== "boolean") return false
+      seen.add(one.page.image)
+      return one.page.text === 0
+        ? one.words === undefined && one.page.blank === false && one.page.edits === 0 && one.page.links === 0
+        : one.page.text === one.page.image && typeof one.page.blank === "boolean"
+          && Number.isSafeInteger(one.page.edits) && one.page.edits >= 0
+          && one.words !== null && typeof one.words === "object" && typeof one.words.text === "string"
+          && one.words.text.length <= 100_000 && admittedTextLayer(one.words.lines) !== undefined
+          && Array.isArray(one.words.links) && one.words.links.length <= 10
+          && JSON.stringify(scannedLinks(one.words.text)) === JSON.stringify(one.words.links)
+          && one.page.links === (one.page.blank ? 0 : one.words.links.length)
+    })
   }
 
   export async function loadDraft(): Promise<ScanSaved | "damaged" | undefined> {
     const db = await database()
+    let raw: unknown
     try {
-      return await new Promise((resolve, reject) => {
+      raw = await new Promise((resolve, reject) => {
         const request = db.transaction(table).objectStore(table).get(key)
-        request.onsuccess = () => resolve(request.result === undefined ? undefined : valid(request.result) ? request.result : "damaged")
+        request.onsuccess = () => resolve(request.result)
         request.onerror = () => reject(request.error)
       })
     } finally { db.close() }
+    if (raw === undefined) return undefined
+    const client = await loadFilesClient()
+    return valid(raw, client.admittedTextLayer, client.scannedLinks) ? raw : "damaged"
   }
 
   export async function changeDraft(base: number, pages: ReadonlyArray<StoredPage> | undefined): Promise<{ landed: boolean; revision: number }> {
+    const client = await loadFilesClient()
     const db = await database()
     try {
       return await new Promise((resolve, reject) => {
@@ -135,12 +161,27 @@ module web {
         let revision = 0
         read.onsuccess = () => {
           const current: unknown = read.result
-          if (current !== undefined && !valid(current)) { tx.abort(); return }
-          revision = current === undefined ? 0 : current.revision
+          const okay = current !== undefined && valid(current, client.admittedTextLayer, client.scannedLinks)
+          if (pages === undefined) {
+            if (current !== undefined && !okay) {
+              landed = true
+              revision = 0
+              place.delete(key)
+              return
+            }
+            revision = current === undefined ? 0 : (current as ScanSaved).revision
+            if (revision !== base) return
+            landed = true
+            revision = 0
+            place.delete(key)
+            return
+          }
+          if (current !== undefined && !okay) { tx.abort(); return }
+          revision = current === undefined ? 0 : (current as ScanSaved).revision
           if (revision !== base) return
           revision += 1
           landed = true
-          place.put({ revision, pages: pages ?? [] }, key)
+          place.put({ revision, pages }, key)
         }
         tx.oncomplete = () => resolve({ landed, revision })
         tx.onabort = () => reject(tx.error)
@@ -155,9 +196,21 @@ module web {
         if (signal.aborted) { reject(signal.reason); return }
         const aborted = () => reject(signal.reason)
         signal.addEventListener("abort", aborted, { once: true })
-        worker.onmessage = ({ data }: MessageEvent<{ pdf: Blob } | { problem: "TooLarge" | "NotDrawn" }>) => {
+        worker.onmessage = ({ data }: MessageEvent<unknown>) => {
           signal.removeEventListener("abort", aborted)
-          resolve(data)
+          if (data !== null && typeof data === "object" && "pdf" in data && data.pdf instanceof Blob) {
+            resolve({ pdf: data.pdf })
+            return
+          }
+          if (data !== null && typeof data === "object" && "problem" in data && (data.problem === "TooLarge" || data.problem === "NotDrawn")) {
+            resolve({ problem: data.problem })
+            return
+          }
+          resolve({ problem: "NotDrawn" })
+        }
+        worker.onmessageerror = () => {
+          signal.removeEventListener("abort", aborted)
+          reject(new Error("The PDF worker message could not be read"))
         }
         worker.onerror = () => {
           signal.removeEventListener("abort", aborted)
@@ -168,7 +221,7 @@ module web {
     } finally { worker.terminate() }
   }
 
-  function download(pdf: Blob): PdfReceipt {
+  function download(pdf: Blob): { receipt: PdfReceipt; uri: string } {
     const uri = source(pdf)
     const link = document.createElement("a")
     link.href = uri
@@ -176,14 +229,13 @@ module web {
     document.body.append(link)
     try {
       link.click()
-      return { confirmed: false, known: false }
+      return { receipt: { confirmed: false, known: false }, uri }
     } finally {
       link.remove()
-      release(uri)
     }
   }
 
-  export async function savePdf(pdf: Blob): Promise<PdfReceipt> {
+  export async function savePdf(pdf: Blob): Promise<{ receipt: PdfReceipt; uri?: string }> {
     const page = window as Window & {
       showSaveFilePicker?: (input: { suggestedName: string; types: { description: string; accept: Record<string, string[]> }[] }) => Promise<FileSystemFileHandle>
     }
@@ -192,15 +244,17 @@ module web {
     try {
       selected = await page.showSaveFilePicker({ suggestedName: "Scanned document.pdf", types: [{ description: "PDF", accept: { "application/pdf": [".pdf"] } }] })
     } catch (cause) {
-      return cause instanceof DOMException && cause.name === "AbortError" ? { confirmed: false, known: true } : download(pdf)
+      return cause instanceof DOMException && cause.name === "AbortError" ? { receipt: { confirmed: false, known: true } } : download(pdf)
     }
+    let writer: FileSystemWritableFileStream | undefined
     try {
-      const writer = await selected.createWritable()
+      writer = await selected.createWritable()
       await writer.write(pdf)
       await writer.close()
-      return { confirmed: true, known: true }
+      return { receipt: { confirmed: true, known: true } }
     } catch {
-      return { confirmed: false, known: false }
+      if (writer !== undefined) await writer.abort().catch(() => undefined)
+      return { receipt: { confirmed: false, known: false } }
     }
   }
 
@@ -239,13 +293,13 @@ module web {
 import { changeDraft, copyText, drawPdf, loadDraft, openLink, photoData, release, rotateImage, saveAndroid, savePdf, scanImage, source } from web
 export { changeDraft, copyText, drawPdf, openLink, photoData, release, rotateImage, scanImage, source }
 
-const previous = createScanDraftStore("alpha.browser.scan-draft.v1")
-
 /** Adopt an older scan once, retaining its page order, original bytes and reviewed text. */
 export effect function readDraft(): (ScanSaved | "damaged" | undefined)!! {
   const current = tryPromise(loadDraft) catch () => "damaged" as const
   if (current !== undefined) return current
-  const legacy = previous.readScanDraft() catch () => "damaged" as const
+  const client = tryPromise(loadFilesClient) catch () => undefined
+  if (client === undefined) return undefined
+  const legacy = client.createScanDraftStore("alpha.browser.scan-draft.v1").readScanDraft() catch () => "damaged" as const
   if (legacy === undefined || legacy === "damaged") return legacy
   const pages: StoredPage[] = []
   for (const [index, file] of legacy.pages.entries()) {
@@ -253,7 +307,7 @@ export effect function readDraft(): (ScanSaved | "damaged" | undefined)!! {
     if (image === undefined) return "damaged"
     const lines = legacy.textLayers?.[index]
     const text = lines?.map((line) => line.text).join("\n").trim()
-    const words = lines === undefined || lines === null || text === undefined ? undefined : { text, lines, links: scannedLinks(text) }
+    const words = lines === undefined || lines === null || text === undefined ? undefined : { text, lines, links: client.scannedLinks(text) }
     const id = index + 1
     pages.push({
       ...image, words,
@@ -266,5 +320,15 @@ export effect function readDraft(): (ScanSaved | "damaged" | undefined)!! {
 }
 
 export effect function writePdf(pdf: Blob): PdfReceipt!! {
-  return tryPromise(() => registered("AlphaScan") ? saveAndroid(pdf) : savePdf(pdf)) catch () => ({ confirmed: false, known: false })
+  if (registered("AlphaScan")) return tryPromise(() => saveAndroid(pdf)) catch () => ({ confirmed: false, known: false })
+  const saved = tryPromise(() => savePdf(pdf)) catch () => undefined
+  if (saved === undefined) return { confirmed: false, known: false }
+  const uri = saved.uri
+  if (uri !== undefined) {
+    try ignore(Effect.forkDetach(effect {
+      try sleep("60 seconds")
+      try sync(() => release(uri))
+    }))
+  }
+  return saved.receipt
 }

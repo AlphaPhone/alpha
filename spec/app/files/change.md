@@ -233,9 +233,9 @@ pure def shareEnded(c: Change, ticket: int, opened: bool, known: bool): Change =
 ```quint
 pure def canRetire(c: Change): bool = c.panel != 0
 
-pure def retire(c: Change): Change = { ...c, panel: 0, sharing: List() }
+pure def retire(c: Change): Change = { ...c, panel: 0, sharing: List(), clash: V::dismiss(c.clash) }
 
-pure def invalidate(c: Change): Change = { ...c, panel: 0, sharing: List(), stale: c.stale or c.panel != 0 }
+pure def invalidate(c: Change): Change = { ...c, panel: 0, sharing: List(), clash: V::dismiss(c.clash), stale: c.stale or c.panel != 0 }
 
 pure def stepSheetsAreNumberedAfresh(before: Change, after: Change): bool =
   after.panels >= before.panels and (after.panel == 0 or after.panel == before.panel or after.panel > before.panels)

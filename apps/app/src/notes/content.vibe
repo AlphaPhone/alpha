@@ -15,7 +15,6 @@ module pure {
     for (const char of `${kind}:${id}`) hash = BigInt.asUintN(64, (hash ^ BigInt(char.codePointAt(0) ?? 0)) * 1099511628211n)
     return Number(hash & 0xfffffffffffffn) + 1
   }
-
 }
 import { numberOf } from pure
 export { numberOf }
@@ -23,11 +22,18 @@ export { numberOf }
 /** The stored modification time or when the agent last updated the note. */
 export function moment(note: StickyNote): number {
   const saved = note.format?.data.modifiedAt
-  const modified = typeof saved === "string" ? Date.parse(saved) : typeof saved === "number" ? saved : NaN
-  return Number.isFinite(modified) ? modified : Date.parse(note.updatedAt)
+  const modified = typeof saved === "string" ? Date.parse(saved) : typeof saved === "number" ? saved : Number.NaN
+  if (Number.isFinite(modified)) return modified
+  const updated = Date.parse(note.updatedAt)
+  return Number.isFinite(updated) ? updated : 0
 }
 
-schema Item { readonly t: string; readonly done: boolean }
+const LinkSource = Schema.Struct({
+  tie: Schema.Literals(["NoLink", "PageLink", "FileLink", "AudioLink"]),
+  id: Schema.Int,
+  mark: Schema.Int,
+})
+schema Item { readonly t: string; readonly done: boolean; readonly id?: string }
 const Items = Schema.Array(Item)
 const Draft = Schema.Struct({
   owner: Schema.NonEmptyString,
@@ -40,8 +46,10 @@ const Draft = Schema.Struct({
   title: Schema.String,
   body: Schema.String,
   items: Items,
+  link: Schema.optionalKey(LinkSource),
 })
 export type DraftWords = typeof Draft.Type
+export type ChecklistItem = typeof Item.Type
 
 const FolderFile = Schema.Struct({
   version: Schema.Literal(1),
@@ -120,7 +128,7 @@ export function savedVoice(note: StickyNote) {
 }
 
 /** The note's Source, named by the existing canonical metadata. */
-function sourced(note: StickyNote): { readonly origin: Origin; readonly source: Source } {
+export function sourced(note: StickyNote): { readonly origin: Origin; readonly source: Source } {
   const data = note.format?.data
   const audio = audioIdOf(note)
   const url = data?.url
@@ -141,15 +149,16 @@ function sourced(note: StickyNote): { readonly origin: Origin; readonly source: 
 /** What the editor displays from an exact canonical note snapshot. */
 export function fromSaved(note: StickyNote, owner: string, base: number): DraftWords {
   const list = Schema.decodeUnknownOption(Items)(note.format?.data.items)
+  const items = Option.getOrElse(list, () => []).map((item, index) => ({ ...item, id: item.id ?? `${note.id}:${index}` }))
   return {
     owner, id: note.id, made: 0, creation: note.id, base, folder: 0, kind: kindOf(note) === "Checklist" ? "Checklist" : "Text",
-    title: note.title, body: note.body.startsWith("\n") ? note.body.slice(1) : note.body, items: Option.getOrElse(list, () => []),
+    title: note.title, body: note.title !== "" && note.body.startsWith("\n") ? note.body.slice(1) : note.body, items, link: sourced(note).source,
   }
 }
 
 /** A new unsaved editor, separate from the notes last read. */
 export function newWords(owner: string, made: number, folder: number, kind: DraftWords["kind"]): DraftWords {
-  return { owner, id: "", made, creation: fresh(), base: 0, folder, kind, title: "", body: "", items: [] }
+  return { owner, id: "", made, creation: fresh(), base: 0, folder, kind, title: "", body: "", items: [], link: unlinked }
 }
 
 export function wordsOf(draft: DraftWords): string {
@@ -158,7 +167,7 @@ export function wordsOf(draft: DraftWords): string {
 
 export function formatOf(draft: DraftWords, existing?: StickyNote, folder?: NoteFolder): NoteFormat {
   const data: NoteFormat["data"] = { ...existing?.format?.data, ...(folder === undefined ? {} : { folderId: folder.id }) }
-  if (draft.kind === "Checklist") return { kind: "list", data: { ...data, items: draft.items.map(({ t, done }) => ({ t, done })) } }
+  if (draft.kind === "Checklist") return { kind: "list", data: { ...data, items: draft.items.map(({ t, done }) => ({ t: t.slice(0, 500), done })) } }
   const { items: _items, ...remaining } = data
   return { kind: "text", data: remaining }
 }
@@ -179,6 +188,7 @@ export error FolderChanged
 export service NoteContent {
   readonly snapshot: () => { readonly collection: Collection; readonly draft: DraftWords | undefined }
   readonly subscribe: (listener: () => void) => () => void
+  readonly updateDraft: (fn: (current: DraftWords) => DraftWords) => DraftWords | undefined
   collection(): Collection!!
   publish(owner: string, state: NotesSnapshot): Collection!UnreadableNotes
   clear(): void!!
@@ -189,6 +199,7 @@ export service NoteContent {
   readDraft(owner: string): (DraftWords | undefined)!UnreadableNotes
   dropDraft(owner: string): boolean!!
   capture(ticket: number, sent: DraftWords): void!!
+  dropCapture(ticket: number, sent: DraftWords): void!!
   take(ticket: number): (DraftWords | undefined)!!
   changeFolders(owner: string, seen: number, op: "AddFolder" | "RenameFolder" | "RemoveFolder", folder: number, entered: string): void!(UnreadableNotes | FolderChanged)
 }
@@ -205,7 +216,7 @@ export const noteContent = Layer.effect(NoteContent, effect {
   const saves = new Map<number, DraftWords>()
   const subscribers = new Set<() => void>()
   const gate = try Semaphore.make(1)
-  const emit = () => { for (const listener of subscribers) listener() }
+  const emit = () => { for (const listener of [...subscribers]) listener() }
 
   effect function folders(owner: string): typeof FolderFile.Type!UnreadableNotes {
     const kept = vault.read(slotFor("folders", owner)) catch (error) => error.code === "absent" ? Option.none() : undefined
@@ -222,6 +233,13 @@ export const noteContent = Layer.effect(NoteContent, effect {
     subscribe(listener: () => void) {
       subscribers.add(listener)
       return () => { subscribers.delete(listener) }
+    },
+    updateDraft(fn: (current: DraftWords) => DraftWords) {
+      if (state.draft === undefined) return undefined
+      const next = fn(state.draft)
+      state = { ...state, draft: next }
+      emit()
+      return next
     },
     collection: () => sync(() => state.collection),
     effect publish(owner: string, reply: NotesSnapshot) {
@@ -259,7 +277,9 @@ export const noteContent = Layer.effect(NoteContent, effect {
     }),
     effect rawDraft(owner: string) {
       const stored = vault.read(slotFor("draft", owner)) catch () => Option.none()
-      return Option.isSome(stored) ? Redacted.value(stored.value) : undefined
+      if (Option.isSome(stored)) return Redacted.value(stored.value)
+      const fallback = fallbackDraft.get(owner)
+      return fallback === undefined ? undefined : JSON.stringify(fallback)
     },
     effect readDraft(owner: string) {
       const raw = vault.read(slotFor("draft", owner)) catch (error) => error.code === "absent" ? Option.none() : undefined
@@ -274,6 +294,7 @@ export const noteContent = Layer.effect(NoteContent, effect {
       return effect { try vault.remove(slotFor("draft", owner)); return true } catch (error) => error.code === "absent" || error.code === "not_found"
     }),
     capture: (ticket: number, sent: DraftWords) => sync(() => { saves.set(ticket, sent) }),
+    dropCapture: (ticket: number, sent: DraftWords) => sync(() => { if (saves.get(ticket) === sent) saves.delete(ticket) }),
     take: (ticket: number) => sync(() => { const sent = saves.get(ticket); saves.delete(ticket); return sent }),
     changeFolders: (owner: string, seen: number, op: "AddFolder" | "RenameFolder" | "RemoveFolder", key: number, entered: string) =>
       gate.withPermit(effect {

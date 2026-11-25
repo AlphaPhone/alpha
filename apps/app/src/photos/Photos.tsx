@@ -1,7 +1,7 @@
 // spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/index.md, "Story: Select photos"; spec/app/photos/index.md, "Story: Change albums from what I am looking at"
 import { Effect } from "effect";
 import { Album, ChevronLeft, ChevronRight, Ellipsis, Folder, Heart, Image, Images, ListChecks, Plus, ScanText, Search, Share2, Trash2, Undo2, X } from "lucide-react";
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Alert, AppHeader, Button, Chip, ConfirmDialog, Dialog, DialogContent, DialogTitle, EmptyState, Input, ListRow, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, Spinner, cn, dockClearance } from "@repo/ui";
 import { useMachine as useLibrary } from "../../gen/app__photos.react.ts";
 import { useMachine as useTrash } from "../../gen/app__photos__trash.react.ts";
@@ -61,6 +61,7 @@ interface ImageChoiceProps {
 function ImageChoice({ runtime, choice, canScan, close, focusTools }: ImageChoiceProps) {
   const readingRef = useRef<AbortController | undefined>(undefined);
   const ownsPickerRef = useRef(false);
+  const scanningRef = useRef(false);
   const [picture, setPicture] = useState<ImagePreview>();
   const [status, setStatus] = useState("");
   const finishPick = useCallback(() => {
@@ -84,7 +85,8 @@ function ImageChoice({ runtime, choice, canScan, close, focusTools }: ImageChoic
     else event.preventDefault();
   }
   async function prepare(source: File | undefined) {
-    if (!finishPick() || source === undefined) return;
+    finishPick();
+    if (source === undefined) return;
     readingRef.current?.abort();
     const reading = new AbortController();
     readingRef.current = reading;
@@ -103,8 +105,9 @@ function ImageChoice({ runtime, choice, canScan, close, focusTools }: ImageChoic
   async function scan() {
     if (!picture || picture.reading.aborted) return;
     finishPick();
+    scanningRef.current = true;
     const chosen = await runtime.runPromiseExit(consumeImageChoice(choice));
-    if (chosen._tag !== "Success" || !chosen.value) return;
+    if (chosen._tag !== "Success" || !chosen.value) { scanningRef.current = false; return; }
     await runtime.runPromiseExit(Effect.flatMap(PhotoChooser, (picker) => picker.begin()).pipe(Effect.flatMap((began) =>
       began ? scanSelectedImage(picture.source) : Effect.void)));
   }
@@ -114,7 +117,10 @@ function ImageChoice({ runtime, choice, canScan, close, focusTools }: ImageChoic
     void runtime.runPromiseExit(importImageChoice(choice, picture.frame, `${picture.source.name.replace(/\.[^.]+$/, "") || "Photo"}.jpg`));
   }
   return <Dialog open onOpenChange={(open) => { if (!open) close(); }}>
-    <DialogContent ref={connect} aria-describedby={undefined} onCloseAutoFocus={(event) => { event.preventDefault(); focusTools(); }}>
+    <DialogContent ref={connect} aria-describedby={undefined} onCloseAutoFocus={(event) => {
+      event.preventDefault();
+      if (!scanningRef.current) focusTools();
+    }}>
       <DialogTitle>Choose an image</DialogTitle>
       <Input ref={pickerInput} type="file" aria-label="Image file" accept={imageTypes} onClick={beginPick} onChange={(event) => {
         const selected = event.currentTarget.files?.[0];
@@ -156,11 +162,12 @@ export function Photos({ runtime, alpha }: PhotosProps) {
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
   const [name, setName] = useState("");
+  const catalogShelf = runtime.runSync(Effect.flatMap(Catalog, (catalog) => catalog.view()));
+  const content = useSyncExternalStore(catalogShelf.subscribe, catalogShelf.snapshot, catalogShelf.snapshot);
   const state = library.state;
   const bin = trash.state;
   if (library.cause || viewer.cause || trash.cause) return <Alert variant="destructive" className="m-4">Photos could not open.</Alert>;
   if (!state || !bin) return <Spinner className="m-auto" aria-label="Opening Photos" />;
-  const content = runtime.runSync(Effect.flatMap(Catalog, (catalog) => catalog.displayed()));
   const inTrash = bin.open;
   const secure = state.secure;
   const secureItems = state.only;
@@ -244,7 +251,7 @@ export function Photos({ runtime, alpha }: PhotosProps) {
   const canScan = scan.state !== undefined && scan.can({ type: "startImage", frame: scan.state.images + 1 }, "Phone");
   const browser = !native();
   const chooseImage = { type: "openImageChoice", browser } satisfies Event;
-  if (!inTrash && opened === 0 && browser && (state.choosingImage || owner(chooseImage))) {
+  if (!inTrash && opened === 0 && browser && owner(chooseImage)) {
     menu.push({ label: "Choose image", icon: <Image />, run: () => talk(chooseImage) });
   }
   const scanFromMenu = !browser && !selection && !inTrash && opened === 0 && state.visible && !secure && canScan;
@@ -255,10 +262,15 @@ export function Photos({ runtime, alpha }: PhotosProps) {
     : request?.change === "Trash" ? "Move photos to Recently deleted?"
     : request?.change === "Share" ? "Share photos?"
     : request?.change === "Unfavorite" ? "Remove from Favorites?" : "Favorite photos?";
-  const allow = owner({ type: "askAccess" }) ? { label: "Allow access", event: { type: "askAccess" } as const }
-    : owner({ type: "pickItems" }) ? { label: "Choose items or allow all", event: { type: "pickItems" } as const }
-    : owner({ type: "openSettings" }) ? { label: "Open settings", event: { type: "openSettings" } as const } : undefined;
+  const accessPrompts: Array<{ readonly label: string; readonly event: Event }> = [];
+  if (owner({ type: "askAccess" })) accessPrompts.push({ label: "Allow access", event: { type: "askAccess" } });
+  if (owner({ type: "pickItems" })) accessPrompts.push({ label: "Choose items or allow all", event: { type: "pickItems" } });
+  if (owner({ type: "openSettings" })) {
+    accessPrompts.push({ label: state.access.grant === "Limited" ? "Allow all photos" : "Open settings", event: { type: "openSettings" } });
+  }
   const albumName = { type: "saveAlbum", name: name.trim(), letters: Array.from(name.trim()).length } satisfies Event;
+  const customAlbumRows = [...content.albums].flatMap(([number, card]) => card.owned && owner({ type: "addTo", album: number })
+    ? [<ListRow key={number} title={card.title} leading={<Album />} onClick={() => talk({ type: "addTo", album: number })} />] : []);
   const cancelSelection = () => inTrash ? binTalk({ type: "endSelect" }) : talk({ type: "endSelect" });
   const header = <AppHeader title={title} detail={Boolean(selection) || inTrash || album !== undefined} className="shrink-0"
     leading={<Button variant="ghost" size="icon" aria-label={selection ? "Cancel selection" : inTrash || album ? "Back to albums" : "Back to apps"}
@@ -269,35 +281,40 @@ export function Photos({ runtime, alpha }: PhotosProps) {
         {scanFromMenu && <MenuItem onSelect={openScanPicker}><ScanText />Scan image text</MenuItem>}
       </MenuContent></Menu>}
   </AppHeader>;
+  const canConfirmForever = binOwner({ type: "confirmForever" });
   return (
     <section aria-label="Photos" className="relative flex min-h-0 flex-1 flex-col bg-background">
-      <Input ref={scanPicker} type="file" accept={imageTypes} className="hidden" onChange={(event) => {
+      {!browser && <Input ref={scanPicker} type="file" accept={imageTypes} className="hidden" onChange={(event) => {
         const source = event.currentTarget.files?.[0];
         event.currentTarget.value = "";
         if (source) void runtime.runPromiseExit(scanSelectedImage(source));
         else runtime.runSync(Effect.flatMap(PhotoChooser, (picker) => picker.finish()));
-      }} />
+      }} />}
       {browser && state.choosingImage && <ImageChoice key={state.imageChoice} runtime={runtime} choice={state.imageChoice} canScan={canScan}
         close={() => talk({ type: "closeImageChoice", choice: state.imageChoice })} focusTools={() => toolsRef.current?.focus({ preventScroll: true })} />}
       <Scan runtime={runtime} alpha={alpha} />
       <div inert={opened !== 0} aria-hidden={opened !== 0 || undefined} className="flex min-h-0 flex-1 flex-col" data-alpha-subview="photos-list">
         {header}
         {!selection && !inTrash && !album && (owner({ type: "showTab", tab: "Library" }) || owner({ type: "showTab", tab: "Albums" })) &&
-          <div role="group" aria-label="Photos sections" className={cn("mx-4 grid shrink-0 grid-cols-2 gap-1 rounded-xl bg-secondary p-1", state.tab === "Library" && allow === undefined ? "mb-7" : "mb-3")}>
+          <div role="group" aria-label="Photos sections" className="mx-4 mb-3 grid shrink-0 grid-cols-2 gap-1 rounded-xl bg-secondary p-1">
             {([{ tab: "Library", icon: <Images /> }, { tab: "Albums", icon: <Folder /> }] as const).map(({ tab, icon }) => <Button key={tab}
               variant="ghost" className={cn("h-11 rounded-lg", state.tab === tab && "bg-foreground text-background hover:bg-foreground/90")} aria-pressed={state.tab === tab}
               onClick={() => { setSearching(false); talk({ type: "showTab", tab }); }}>{icon}{tab}</Button>)}
           </div>}
-        {!inTrash && !selection && !album && !browser && state.tab === "Library" && allow && <Button variant="secondary" aria-label={allow.label} className="mx-4 mb-2 justify-start rounded-xl px-4" onClick={() => talk(allow.event)}>
-          <Image className="text-alpha" />{allow.event.type === "openSettings" ? allow.label : "Allow all"}<ChevronRight className="ml-auto size-4.5 text-muted-foreground" />
-        </Button>}
+        {!inTrash && !selection && !album && !browser && state.tab === "Library" && accessPrompts.map(({ label, event }) => (
+          <Button key={label} variant="secondary" aria-label={label} className="mx-4 mb-2 justify-start rounded-xl px-4" onClick={() => talk(event)}>
+            <Image className="shrink-0 text-primary" />{label}<ChevronRight className="ms-auto size-4.5 shrink-0 text-muted-foreground" />
+          </Button>
+        ))}
         {!inTrash && state.tab === "Library" && searching && <form className="mx-4 mb-2 flex shrink-0 gap-2" onSubmit={(event) => { event.preventDefault(); talk(narrow(query.trim() ? "Matching" : "Everything", query.trim())); setSearching(false); }}>
-          <Input type="search" aria-label="Search photos" value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
+          <Input type="search" aria-label="Search photos" value={query} onChange={(event) => setQuery(event.currentTarget.value)}
+            onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); setSearching(false); } }} />
           <Button type="submit" variant="secondary" aria-label="Search"><Search /></Button>
         </form>}
         {!inTrash && state.filter !== "Everything" && owner(narrow("Everything")) &&
           <div className="mx-4 mb-2 self-start"><Chip clearLabel="Clear filter" onClear={() => { setQuery(""); talk(narrow("Everything")); }}>{state.query || state.filter}</Chip></div>}
-        {albumList && <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto px-4 pb-28" data-alpha-app-scroll="photos">
+        {inTrash && bin.expired && <Alert className="mx-4 mb-2">The deletion confirmation expired. Review Recently deleted again.</Alert>}
+        {albumList && <div className={cn("min-h-0 flex-1 touch-pan-y overflow-y-auto px-4", dockClearance)} data-alpha-app-scroll="photos">
           <div className="grid grid-cols-2 gap-3 pt-2">
             {state.albums.map((number) => {
               const card = content.albums.get(number);
@@ -308,7 +325,7 @@ export function Photos({ runtime, alpha }: PhotosProps) {
                 <span className="relative grid aspect-square w-full place-items-center overflow-hidden rounded-xl bg-secondary">
                   {card.cover ? <img src={card.cover} alt="" loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover" /> : <Symbol className="size-7 text-muted-foreground" />}
                 </span>
-                <span className="mt-1.5 flex min-w-0 items-center gap-1 text-base font-semibold"><Symbol className="size-4" /><span className="truncate">{card.title}</span></span>
+                <span className="mt-1.5 flex min-w-0 items-center gap-1 text-base font-semibold"><Symbol className="size-4 shrink-0" /><span className="truncate">{card.title}</span></span>
                 <span className="text-caption font-normal text-muted-foreground">{card.count}</span>
               </Button>;
             })}
@@ -316,7 +333,7 @@ export function Photos({ runtime, alpha }: PhotosProps) {
           {binOwner(openBin) && <ListRow title="Recently deleted" leading={<Trash2 />} trailing={<span className="flex items-center gap-3 text-sm text-muted-foreground">{content.trashCount}<ChevronRight /></span>} className="mt-5" onClick={() => binTalk(openBin)} />}
         </div>}
         {!albumList && (rows.length > 0 || canMore) &&
-          <MediaGrid rows={rows} runtime={runtime} revision={inTrash ? bin.revision : state.revision} trash={inTrash} density={state.density} resize={(density) => { void library.send({ type: "setDensity", density }, "Owner"); }} selection={selection ? new Set(selected) : undefined} grouped={!album && !inTrash} now={runtime.runSync(Effect.flatMap(Time, (time) => time.latest()))} open={open} start={!selection && canStart ? (number) => { void select(number); } : undefined}
+          <MediaGrid rows={rows} runtime={runtime} revision={inTrash ? bin.revision : state.revision} trash={inTrash} density={state.density} resize={(density) => talk({ type: "setDensity", density })} selection={selection ? new Set(selected) : undefined} grouped={!album && !inTrash} now={runtime.runSync(Effect.flatMap(Time, (time) => time.latest()))} open={open} start={!selection && canStart ? (number) => { void select(number); } : undefined}
             more={canMore ? () => inTrash ? binTalk({ type: "loadMore" }) : talk({ type: "loadMore" }) : undefined} />}
         {status === "Loading" && <div role="status" aria-label="Loading photos" className="grid place-items-center p-5"><Spinner /></div>}
         {status === "Loaded" && !albumList && rows.length === 0 && <EmptyState className="m-4" icon={<Images />} title={inTrash ? "Recently deleted is empty" : state.filter !== "Everything" ? "No matches" : "No photos"} />}
@@ -324,8 +341,8 @@ export function Photos({ runtime, alpha }: PhotosProps) {
           {(inTrash ? binOwner({ type: "retry" }) : owner({ type: "retry" })) && <Button variant="secondary" onClick={() => inTrash ? binTalk({ type: "retry" }) : talk({ type: "retry" })}>Try again</Button>}
         </EmptyState>}
         {actions.length > 0 && <ToolBar tools={actions} />}
-        {!inTrash && owner({ type: "cancelRun" }) && <Button variant="secondary" className="self-center" onClick={() => talk({ type: "cancelRun" })}>Stop remaining changes</Button>}
-        {inTrash && binOwner({ type: "cancelRecovery" }) && <Button variant="secondary" className="self-center" onClick={() => binTalk({ type: "cancelRecovery" })}>Stop recovery</Button>}
+        {!inTrash && owner({ type: "cancelRun" }) && <div className={cn("flex shrink-0 justify-center pt-2", dockClearance)}><Button variant="secondary" onClick={() => talk({ type: "cancelRun" })}>Stop remaining changes</Button></div>}
+        {inTrash && binOwner({ type: "cancelRecovery" }) && <div className={cn("flex shrink-0 justify-center pt-2", dockClearance)}><Button variant="secondary" onClick={() => binTalk({ type: "cancelRecovery" })}>Stop recovery</Button></div>}
       </div>
       <ConfirmDialog open={request !== undefined} title={reviewTitle}
         confirmLabel={request?.change === "Share" ? "Share" : "Confirm"} destructive={request?.change === "Trash"}
@@ -338,27 +355,27 @@ export function Photos({ runtime, alpha }: PhotosProps) {
       </ConfirmDialog>
       <MediaViewer runtime={runtime} onBack={() => { void alpha.back(); }} backToCamera={backToCamera}
         row={content.rows.get(opened)} before={index > 0 ? ids[index - 1] : undefined} after={index >= 0 ? ids[index + 1] : undefined} inTrash={inTrash}
-        onAddToAlbum={!inTrash && (offPageCamera ? canAddCamera && owner(cameraAlbum) : canStart && ids.includes(opened))
+        onAddToAlbum={!inTrash && state.shelf.write.outcome !== "Sent" && (offPageCamera ? canAddCamera && owner(cameraAlbum) : canStart && ids.includes(opened))
           ? () => {
             if (offPageCamera && viewer.state !== undefined) void runtime.runPromiseExit(openCameraAlbum(opened, cameraAlbum.revision, viewer.state.read.ticket));
             else void viewerSelection("add");
           } : undefined}
-        onRecover={inTrash && canStart ? () => { void viewerSelection("recover"); } : undefined}
-        onDelete={inTrash && canStart ? () => { void viewerSelection("delete"); } : undefined} />
+        onRecover={inTrash && bin.read.status === "Loaded" && canStart ? () => { void viewerSelection("recover"); } : undefined}
+        onDelete={inTrash && bin.read.status === "Loaded" && canStart ? () => { void viewerSelection("delete"); } : undefined} />
       <Sheet open={dialog === "NewAlbum" || dialog === "RenameAlbum" || dialog === "ChooseAlbum"} onOpenChange={(open) => { if (!open) talk({ type: "closeDialog" }); }}>
         <SheetContent title={dialog === "NewAlbum" ? "New album" : dialog === "RenameAlbum" ? "Rename album" : "Add to album"}
           actions={dialog === "ChooseAlbum" ? owner({ type: "newAlbum" }) && <Button variant="secondary" onClick={() => { setName(""); talk({ type: "newAlbum" }); }}><Plus />New album</Button>
             : <><Button variant="secondary" onClick={() => talk({ type: "closeDialog" })}>Cancel</Button><Button disabled={!owner(albumName)} onClick={() => talk(albumName)}>Save</Button></>}>
-          {dialog === "ChooseAlbum" ? [...content.albums].flatMap(([number, card]) => card.owned && owner({ type: "addTo", album: number })
-            ? [<ListRow key={number} title={card.title} leading={<Album />} onClick={() => talk({ type: "addTo", album: number })} />] : [])
+          {dialog === "ChooseAlbum"
+            ? (customAlbumRows.length > 0 ? customAlbumRows : <p className="py-2 text-sm text-muted-foreground">No custom albums yet.</p>)
             : <Input aria-label="Album name" maxLength={80} value={name} onChange={(event) => setName(event.currentTarget.value)} />}
         </SheetContent>
       </Sheet>
       <ConfirmDialog open={dialog === "DeleteAlbum"} title={`Delete ${album?.title ?? "album"}?`} destructive confirmLabel="Delete"
-        loading={!owner({ type: "confirmDelete" })} onConfirm={() => talk({ type: "confirmDelete" })} onCancel={() => talk({ type: "closeDialog" })} />
-      <ConfirmDialog open={bin.confirm.showing} title="Delete photos forever" destructive confirmLabel="Delete forever"
-        onConfirm={() => binTalk(binOwner({ type: "confirmForever" }) ? { type: "confirmForever" } : { type: "cancelForever" })} onCancel={() => binTalk({ type: "cancelForever" })}>
-        {binOwner({ type: "confirmForever" }) ? `${bin.prepared.length} items` : "The selection changed. Review Recently deleted again."}
+        loading={state.shelf.write.outcome === "Sent"} onConfirm={() => talk({ type: "confirmDelete" })} onCancel={() => talk({ type: "closeDialog" })} />
+      <ConfirmDialog open={bin.confirm.showing} title="Delete photos forever" destructive={canConfirmForever} confirmLabel={canConfirmForever ? "Delete forever" : "OK"}
+        onConfirm={() => binTalk(canConfirmForever ? { type: "confirmForever" } : { type: "cancelForever" })} onCancel={() => binTalk({ type: "cancelForever" })}>
+        {canConfirmForever ? `${bin.prepared.length} items` : "The selection changed. Review Recently deleted again."}
       </ConfirmDialog>
     </section>
   );

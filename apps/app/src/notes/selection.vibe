@@ -29,7 +29,7 @@ type NoteSubjects = { readonly note: number; readonly owner: number; readonly re
 
 function chosen(list: List, editor: Writing, link: Dialog, voice: VoiceNote): number {
   if (list.read.status !== "Loaded" || list.owner === 0) return 0
-  if (editor.showing && editor.owner === list.owner && editor.draft.sync === "Kept" && !editor.deleting) return editor.note
+  if (editor.showing && editor.owner === list.owner && editor.draft.sync === "Kept" && editor.draft.base === list.version && !editor.deleting) return editor.note
   if (link.showing && link.owner === list.owner && link.revision === list.version && !link.changed) return link.note
   if (voice.showing && voice.owner === list.owner && voice.revision === list.version) return voice.note
   return 0
@@ -49,10 +49,10 @@ export const noteSubjects = Stream.unwrap(effect {
 
 /** Only identifiers cross to the agent. The agent reads its own saved words after receiving an owner turn. */
 export effect function notesSelection(): (RendererNote | undefined)!!NotesSelection {
-  const shell = try Shell
-  if (!showing(try shell.get(), "Notes")) return undefined
+  const shell = try (try Shell).get()
+  if (!showing(shell, "Notes")) return undefined
   const identity = ownerAt() catch () => ""
-  if (identity === "" || !(try (try Device).showing()) || !showing(try shell.get(), "Notes") || pageInert(try (try Layers).get())) return undefined
+  if (identity === "" || !(try (try Device).showing()) || pageInert(try (try Layers).get())) return undefined
   if ((try (try Previous).get()).showing || (try (try Trash).get()).showing || unfinished(try (try Recorder).get())) return undefined
   const list = try (try Notes).get()
   const editor = try (try Editor).get()
