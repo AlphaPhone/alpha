@@ -8,7 +8,7 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import maps from "../src/maps/index.tsx";
 import { handedOver, tile } from "../src/maps/maps.vibe";
 import type { Alpha } from "../src/runtime/area.tsx";
-import { button, closeAll, fill, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
+import { button, closeAll, fill, hardware, later, only, open, press, seen, underAct, until as reached } from "./alpha.tsx";
 import { cloudRoute, gallery, harbour, move, speech } from "./fakes/maps.ts";
 import { scene } from "./fakes/scene.ts";
 
@@ -16,6 +16,18 @@ underAct();
 afterEach(closeAll);
 
 const withMaps = only("home", "view:Maps");
+
+/** `until`, failing with the last state it saw when that state does not come within ten seconds. */
+const until: typeof reached = async (alpha, runtime, key, ok) => {
+  let last: unknown;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, fail) => { timer = setTimeout(() => fail(new Error(`not reached; last state: ${JSON.stringify(last)?.slice(0, 4000)}`)), 10_000); });
+  try {
+    await Promise.race([reached(alpha, runtime, key, (state) => { last = state; return ok(state); }), late]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
 
 /** Press Enter in the field whose accessible name is `name`. */
 const enter = (name: string) => act(async () => {
@@ -40,6 +52,7 @@ const results = () => [...document.querySelectorAll("section[aria-label=Maps] bu
 describe("Maps on a phone", () => {
   it("Search for a place, get directions and navigate (spec/app/maps/index.md, \"Story: Search for a place\"; spec/app/maps/index.md, \"Story: Get directions\"; spec/app/maps/index.md, \"Story: Navigate\")", async () => {
     const world = { ...scene(), phone: true };
+    world.settings.location = { location: "granted", accuracy: "precise" };
     const start = { latitude: 43.7300, longitude: 7.4200 };
     world.maps.routes = [cloudRoute("fast", start, harbour.coordinate, 400, 3), cloudRoute("scenic", start, harbour.coordinate, 500, 4)];
     const { alpha } = await open(world, withMaps);
@@ -70,7 +83,6 @@ describe("Maps on a phone", () => {
 
     // spec/app/maps/index.md, "\"Use my location\" locates once when allowed, asks when it may, and otherwise opens Settings"; spec/app/maps/index.md, "A fix goes to whoever holds the location"
     await press("Directions");
-    await press("From my location");
     await until(alpha, runtime, Screen, (s) => s.trip.route !== 0 && s.trip.origin === "MyLocation" && s.link.locator === "Nobody");
     expect(world.maps.asked.at(-1)?.body).toMatchObject({ from: start, to: harbour.coordinate, mode: "drive" });
 
@@ -113,6 +125,7 @@ describe("Maps on a phone", () => {
   it("Keep guiding away from Maps (spec/app/maps/index.md, \"Story: Keep guiding away from Maps\"; spec/app/maps/navigation.md, \"Story: Keep guiding with the screen off\"; spec/app/maps/navigation.md, \"Story: Hear the next instruction\")", async () => {
     const heard = speech();
     const world = { ...scene(), phone: true };
+    world.settings.location = { location: "granted", accuracy: "precise" };
     const start = { latitude: 43.7300, longitude: 7.4200 };
     world.maps.routes = [cloudRoute("fast", start, harbour.coordinate, 400, 3)];
     const { alpha } = await open(world, withMaps);
@@ -125,7 +138,6 @@ describe("Maps on a phone", () => {
     await until(alpha, runtime, Screen, (s) => s.search.status === "Loaded" && s.results === 1);
     await press("Harbour Cafe");
     await press("Directions");
-    await press("From my location");
     await until(alpha, runtime, Screen, (s) => s.trip.route !== 0 && s.trip.plan.status === "Loaded");
 
     // spec/app/maps/index.md, "Start guides along the route shown, with location allowed"; spec/app/maps/index.md, "Android confirms or loses the service of this journey"
@@ -173,6 +185,7 @@ describe("Maps on a phone", () => {
     await act(async () => { world.maps.guidance.stop?.("task-removed"); });
     await until(alpha, runtime, Screen, (s) => s.trip.guidance === "Stopped" && s.guideNotice === "PausedAway");
     await seen(true);
+    await until(alpha, runtime, Screen, (s) => !s.trip.away);
     expect(document.body.textContent).toContain("Navigation paused while the app is in the background. Tap Start to resume.");
 
     // spec/app/maps/index.md, "Arriving with Maps away is told once on the phone"
@@ -342,6 +355,7 @@ describe("Maps in a browser", () => {
     expect(world.maps.asked.at(-1)?.body).toMatchObject({ from: gallery.coordinate, to: harbour.coordinate });
     expect(button("Copy number")).toBeUndefined();
     await hardware("back");
+    await hardware("back");
     await until(alpha, runtime, Screen, (s) => !s.directions && s.place === before.startPlace);
     await press("Copy number");
     await until(alpha, runtime, Screen, (s) => s.copyNotice !== "Uncopied");
@@ -451,7 +465,7 @@ describe("Maps in a browser", () => {
     expect([Boolean(button("Continue")), button("My location")]).toEqual([true, undefined]);
     world.settings.location = { location: "denied" };
     await press("Continue");
-    await until(alpha, runtime, Screen, (s) => s.link.disclosed && !s.link.prompting && s.link.location === "Denied");
+    await until(alpha, runtime, Screen, (s) => s.link.disclosed && !s.link.prompting && s.link.location.grant === "Denied");
     expect(world.maps.watches.size).toBe(0);
     // spec/app/maps/index.md, "Settings opens only once Android has said no"; spec/app/maps/index.md, "\"Use my location\" locates once when allowed, asks when it may, and otherwise opens Settings"
     await press("My location");
@@ -461,6 +475,7 @@ describe("Maps in a browser", () => {
 
   it("\"Use my location\" gives up when no fix arrives, and the quiet fix on opening says nothing (spec/app/maps/index.md, \"Story: Use my location\"; spec/app/maps/connection.md, \"Story: Use my location\")", async () => {
     const world = { ...scene(), phone: true };
+    world.settings.location = { location: "granted", accuracy: "precise" };
     world.maps.here = undefined;
     const { alpha } = await open(world, withMaps);
     await showMaps(alpha);
