@@ -106,7 +106,9 @@ const outcomes: Readonly<Partial<Record<string, string>>> = {
 const cameraCapabilities = ["camera.capture-photo.v1", "camera.capture-lens.v1", "camera.capture-library-id.v1"]
 const photosCapabilities = ["photos.library.v1", "photos.view.v1"]
 const filesCapabilities = ["files.browser.v1", "files.shown-target.v1"]
-const phoneCapabilities = ["phone.keypad.v1", "phone.dial.v1", "phone.call.v1", "views.telephony.v1", "sms.compose.v1", "sms.compose.v2"]
+const phoneCapabilities = ["phone.keypad.v1", "phone.dial.v1", "phone.call.v1", "views.telephony.v1", "sms.compose.v1", "sms.compose.v2", "messages.read.v1"]
+
+const needsMessage = (operation: DeviceOperation): boolean => operation.type === "sms_reply_selected" || operation.type === "messages_read_selected"
 
 export interface MediaCard {
   readonly id: string
@@ -138,6 +140,7 @@ function operation(raw: unknown) {
   switch (value.type) {
     case "phone_keypad":
     case "sms_reply_selected":
+    case "messages_read_selected":
       return value
     case "phone_dial":
     case "phone_call":
@@ -177,6 +180,7 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
     case "phone_dial": return { title: "Open the phone dialer", detail: value.target.kind === "number" ? value.target.number : "Phone" }
     case "phone_call": return { title: "Call", detail: value.target.kind === "number" ? value.target.number : "Phone" }
     case "sms_reply_selected": return { title: "Draft a reply in Messages", detail: value.body }
+    case "messages_read_selected": return { title: "Share open messages", detail: "Share up to 20 recent messages from the open conversation with the agent." }
     case "sms_compose": return { title: `Draft a text to ${"target" in value && value.target.kind === "number" ? value.target.number : "the recipient"}`, detail: value.body }
     case "camera_capture_photo": return { title: "Take a photo", detail: value.lens === undefined ? "Open the viewfinder to review the shot" : `Open the ${value.lens === "front" ? "front" : "rear"} camera to review the shot` }
     case "photos_filter": return { title: "Filter Photos", detail: value.text ?? "Show the requested photos in your library" }
@@ -264,6 +268,7 @@ effect function enrolled(epoch: number, owner: string, image: boolean, runtime: 
 
 function completion(op: DeviceOperation, synced: boolean): string {
   switch (op.type) {
+    case "messages_read_selected": return synced ? "Shared the open messages with the agent." : "Open messages prepared. Agent receipt pending."
     case "photos_album_create":
     case "photos_share":
     case "photo_library_review": return "Continue the review in Photos."
@@ -295,9 +300,9 @@ export const mediaReview = Layer.effect(MediaReview, effect {
     return try executors.execute(operation, call, { current: () => runPromise(scope.active), ...(scope.target === undefined ? {} : { target: scope.target }), ...(scope.files === undefined ? {} : { files: scope.files }) })
   })
   effect function messageTarget(): (MessageDraftTarget | undefined)!! {
-    if (!showing(try shell.get(), "Messages")) return undefined
+    if (!(try device.showing()) || !showing(try shell.get(), "Messages")) return undefined
     const state = try messages.get()
-    return state.front && state.pane === "Conversation" && state.page.status === "Loaded" ? { thread: state.thread, ticket: state.page.ticket } : undefined
+    return state.front && state.pane === "Conversation" && state.page.status === "Loaded" && state.sms.grant === "Granted" ? { thread: state.thread, ticket: state.page.ticket } : undefined
   }
   effect function session(): (Session | undefined)!! {
     if (!registered("AlphaMediaEnrollment") || !registered("ElizaActionJournal")) return undefined
@@ -381,7 +386,8 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         const op = operation(proposal.payload.operation)
         const expiresAt = Date.parse(proposal.expiresAt)
         if (op === undefined || !Number.isFinite(expiresAt) || expiresAt <= at) return undefined
-        if (op.type === "sms_reply_selected" && bound === undefined) return undefined
+        const selected = needsMessage(op)
+        if (selected && bound === undefined) return undefined
         const named = op.type === "files_open" || op.type === "files_share" || op.type === "files_move" || op.type === "files_trash" || op.type === "files_folder_create"
         let files: FileReview | undefined
         if (named) {
@@ -399,11 +405,12 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         }
         const labelled = words(op)
         return { id: proposal.id, digest: proposal.digest, operation: op, expiresAt, message, conversation, revision, enrollmentId: opened.identity.enrollmentId, ...labelled,
-          ...(op.type === "sms_reply_selected" && bound !== undefined ? { target: bound } : {}),
+          ...(selected && bound !== undefined ? { target: bound } : {}),
           ...(files === undefined ? {} : { files, detail: op.type === "files_folder_create" ? labelled.detail : files.targets.map((target) => target.path).join(", ")
             + (op.type === "files_move" ? ` → ${op.dest || "Internal storage"}` : "") }) }
       }, { concurrency: 4 })
-      return cards.filter((card) => card !== undefined)
+      const firstRead = cards.find((card) => card?.operation.type === "messages_read_selected")
+      return cards.filter((card) => card !== undefined && (card.operation.type !== "messages_read_selected" || card === firstRead))
     },
     effect decide(card: MediaCard, approve: boolean) {
       const { board } = try Talk
