@@ -10,7 +10,7 @@ import { PhotosPort } from "../platform/photos.vibe"
 import { reacting, run, started, together, type Job } from "../runtime/reactor.vibe"
 import { Catalog, type Row } from "./catalog.vibe"
 
-module wire {
+module mediaIds {
   import { Schema } from "effect"
   import { MediaId } from "@elizaos/os/bridges/media.schema"
 
@@ -20,13 +20,12 @@ module wire {
     return read._tag === "Some" ? read.value : undefined
   }
 }
-import { mediaId } from wire
+import { mediaId } from mediaIds
 
 type Names = "photos_filter" | "photos_open" | "photos_album_create" | "photos_share" | "photo_library_search" | "photo_library_inspect" | "photo_library_select" | "photo_library_review"
 type Operation = Extract<DeviceOperation, { type: Names }>
 type Receipt = OperationResultOf<Names>
 
-const columns: readonly Assistant.Field[] = ["Identity", "Revision", "ItemKind", "Taken", "Dimensions"]
 const changes = { trash: "Trash", share: "Share", favorite: "Favorite", unfavorite: "Unfavorite" } as const
 
 /** Only the public metadata admitted by the pinned agent contract. */
@@ -55,6 +54,7 @@ effect function read(op: Extract<Operation, { type: "photo_library_search" | "ph
   const { rows: indexed } = try (try Catalog).displayed()
   const requestedPhoto = id === undefined ? undefined : handle(id, current.rows, indexed)
   if (inspect && requestedPhoto === undefined) return undefined
+  const columns = [...Assistant.sharedFields]
   const wanted: Assistant.Event = inspect
     ? { type: "askInspect", photo: requestedPhoto ?? 0, columns, allowed: true, secure: false }
     : { type: "askSearch", narrowing, earliest: op.from ?? 0, latest: op.to ?? Number.MAX_SAFE_INTEGER, limit: op.limit ?? 20, columns, allowed: true, secure: false }
