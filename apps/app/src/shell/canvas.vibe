@@ -6,6 +6,8 @@ import { Launcher } from "../platform/launcher.vibe"
 import { applying, contained, reacting, started, together } from "../runtime/reactor.vibe"
 
 module page {
+  export type Heard = "resize" | "focus" | "front" | number | { readonly keyboard: boolean }
+
   /** The window as measured: its width, its height, and the height left to the page above the keyboard. @throws {never} */
   export function measured(): { width: number; height: number; visible: number } {
     const width = Math.round(window.innerWidth)
@@ -20,39 +22,116 @@ module page {
     if (active.closest("[data-alpha-composer]")) return "Composer"
     return active.matches("input, textarea, [contenteditable=true]") ? "OtherField" : "NoField"
   }
+
+  /** Android's most recent IME report, if this page has received one. @throws {never} */
+  export function nativeKeyboard(): boolean | undefined {
+    if (typeof document === "undefined") return undefined
+    const kept = document.documentElement.dataset.alphaNativeKeyboard
+    return kept === "true" ? true : kept === "false" ? false : undefined
+  }
+
   /** Each change of the window, of the space above the keyboard and of focus. @throws {never} */
-  export function watched(heard: (what: "resize" | "focus") => void): () => void {
+  export function watched(heard: (what: Heard) => void): () => void {
     const resize = () => heard("resize")
     const focus = () => heard("focus")
+    const front = () => heard("front")
+    const insets = (event: Event) => {
+      const detail: unknown = event instanceof CustomEvent ? event.detail : undefined
+      if (typeof detail === "object" && detail !== null && "keyboard" in detail && typeof detail.keyboard === "boolean") heard({ keyboard: detail.keyboard })
+    }
+    const probe = document.createElement("span")
+    probe.setAttribute("aria-hidden", "true")
+    probe.style.cssText = "position:absolute;inset:0 auto auto 0;width:0;overflow:hidden;visibility:hidden;pointer-events:none;font-size:6.25rem;line-height:1;white-space:nowrap;contain:layout"
+    probe.textContent = "M"
+    document.body.append(probe)
+    const text = () => {
+      const size = Number.parseFloat(getComputedStyle(document.documentElement).fontSize)
+      const scale = probe.offsetHeight || (Number.isFinite(size) && size > 0 ? Math.round(size / 16 * 100) : 100)
+      heard(scale)
+    }
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(text)
+    observer?.observe(probe)
+    const changed = new MutationObserver(text)
+    changed.observe(document.documentElement, { attributes: true, attributeFilter: ["style"] })
+    text()
     window.addEventListener("resize", resize)
+    window.addEventListener("focus", front)
+    window.addEventListener("alpha-insets", insets)
     window.visualViewport?.addEventListener("resize", resize)
     document.addEventListener("focusin", focus)
     document.addEventListener("focusout", focus)
+    const keyboard = nativeKeyboard()
+    if (keyboard !== undefined) heard({ keyboard })
     return () => {
       window.removeEventListener("resize", resize)
+      window.removeEventListener("focus", front)
+      window.removeEventListener("alpha-insets", insets)
       window.visualViewport?.removeEventListener("resize", resize)
       document.removeEventListener("focusin", focus)
       document.removeEventListener("focusout", focus)
+      observer?.disconnect()
+      changed.disconnect()
+      probe.remove()
     }
   }
   /** @throws {never} */
   export const paged = (): boolean => typeof window !== "undefined" && typeof document !== "undefined"
+
+  /** Publish measured text scale for CSS alongside the canvas state. @throws {never} */
+  export function sized(scale: number): void {
+    if (typeof document !== "undefined") document.documentElement.style.setProperty("--alpha-text-scale", String(scale / 100))
+  }
+
+  /** Put away the composer if it still owns the field. @throws {never} */
+  export function releaseComposer(): void {
+    if (typeof document !== "undefined" && document.activeElement instanceof HTMLElement && document.activeElement.matches("[data-alpha-composer]")) {
+      document.activeElement.blur()
+    }
+  }
 }
-import { focused, measured, paged, watched } from page
+import { type Heard, focused, measured, nativeKeyboard, paged, releaseComposer, sized, watched } from page
+
+// spec/app/shell/keyboard.md, "Where Android reports the keyboard, the keyboard hiding puts the composer away, unless it hid to hand the composer to voice"
+/** Preserve the focused composer during a voice handoff on a phone reporting its keyboard. */
+export effect function keyboardVoice(voice: boolean): void!!Canvas.Machine {
+  const shown = nativeKeyboard()
+  if (shown === undefined) return
+  const canvas = try Canvas.Machine
+  const state = try canvas.get()
+  if (state.voice !== voice && Canvas.canKeyboardReported(state, shown, voice)) try contained(canvas.send({ type: "keyboardReported", shown, voice }), "the keyboard")
+}
 
 // spec/app/shell/keyboard.md, "At the same width, a shorter window while a field has focus is the keyboard; a new width while a field has focus, within a fifth of the height kept, is a rotation, and the width kept stands in for the new height; any other change takes the height measured"
 const followed = started(effect {
   if (!paged()) return
   const canvas = try Canvas.Machine
-  const presented = try (try Launcher).presentation()
+  const launcher = try Launcher
+  const device = try Device
+  const presented = try launcher.presentation()
   const tell = (event: Event) => contained(canvas.send(event), "the canvas")
   const window0 = measured()
   try tell({ type: "mount", width: window0.width, height: window0.height, launcher: presented.launcher })
-  const changes = Stream.callback<"resize" | "focus">((queue) => acquireRelease(sync(() => watched((what) => { Queue.offerUnsafe(queue, what) })), (off) => sync(off)))
+  const dom = Stream.callback<Heard>((queue) => acquireRelease(sync(() => watched((what) => { Queue.offerUnsafe(queue, what) })), (off) => sync(off)))
+  const changes = Stream.merge(dom, Stream.as(Stream.filter(device.visible, (shown) => shown), "front" as const))
   try Stream.runForEach(changes, effect (what) => {
+    if (what === "front") {
+      const now = try launcher.presentation()
+      if (Canvas.canLauncherChanged(try canvas.get(), now.launcher)) try tell({ type: "launcherChanged", launcher: now.launcher })
+      return
+    }
+    const state = try canvas.get()
+    if (typeof what === "object") {
+      const shown = what.keyboard
+      if (state.keyboard !== (shown || state.voice ? "Shown" : "Hidden")) try tell({ type: "keyboardReported", shown, voice: state.voice })
+      return
+    }
+    if (typeof what === "number") {
+      if (Canvas.canMeasureText(state, what)) try tell({ type: "measureText", scale: what })
+      return
+    }
     if (what === "focus") {
       const field: Field = focused()
-      if ((try canvas.get()).field !== field) try tell({ type: "focusField", focus: field })
+      if (state.field !== field) try tell({ type: "focusField", focus: field })
       return
     }
     const now = measured()
@@ -72,5 +151,11 @@ const marked = applying(Canvas.Machine, (c) => ({ landscape: c.landscape, wide: 
   for (const [name, on] of Object.entries(marks)) try device.mark(name, on ? "" : undefined)
 })
 
+// spec/app/shell/keyboard.md, "From 150% text a list and its item take one pane each and Calendar shows its day as an agenda; below it, a list splits from a 1000-point canvas, and Calendar shows as many 240-point day columns as fit beside its 76-point times, widened with the text, at most seven"
+const text = applying(Canvas.Machine, (c) => c.textScale, (scale) => sync(() => sized(scale)))
+
+// spec/app/shell/keyboard.md, "Only the composer is put away, and only when it had focus"
+const release = applying(Canvas.Machine, (c) => c.released, (count) => sync(() => { if (count > 0) releaseComposer() }))
+
 /** The canvas, in memory: measured when the shell mounts and at every change of the window, and marked on the page. */
-export const canvas = together(reacting(Canvas, {}), followed, backgrounded, marked)
+export const canvas = together(reacting(Canvas, {}), followed, backgrounded, marked, text, release)

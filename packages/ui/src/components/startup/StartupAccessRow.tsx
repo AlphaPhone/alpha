@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Bell, Calendar, Camera, Folder, Images, MapPin, Mic } from "lucide-react";
+import { cn } from "../../lib/cn.ts";
 import { Button } from "../Button.tsx";
-import { ListRow } from "../ListRow.tsx";
 import { StatusDot, type StatusDotProps } from "../StatusDot.tsx";
 import type { StartupAccess, StartupAccessAction, StartupAccessWord } from "./vocabulary.ts";
 
@@ -52,22 +52,18 @@ export function StartupAccessRow({ access, word, current = false, action, busy =
   const { title, reason, icon } = names[access];
   const { label, status } = words[word];
   return (
-    <ListRow
-      title={title}
-      detail={current && status !== "ok" ? reason : undefined}
-      leading={icon}
-      selected={current}
-      aria-current={current ? "step" : undefined}
-      trailing={
-        <>
-          <StatusDot status={status} label={label} showLabel={!action || status === "ok"} />
-          {action ? (
-            <Button variant="outline" size="sm" loading={busy} disabled={!onAct && !busy} onClick={onAct}>
-              {action}
-            </Button>
-          ) : null}
-        </>
-      }
-    />
+    <li className="flex min-h-14 items-center gap-3.5 border-b border-border py-1" aria-current={current ? "step" : undefined}>
+      <span aria-hidden className="grid size-9 shrink-0 place-items-center rounded-full bg-secondary [&>svg]:size-5">{icon}</span>
+      <span className="min-w-0 flex-1 leading-normal wrap-anywhere">
+        <span className={cn("block", current && "font-medium")}>{title}</span>
+        {current ? <span className="block text-sm text-muted-foreground">{reason}</span> : null}
+      </span>
+      {!action || status === "ok" ? <StatusDot status={status} label={label} showLabel className="text-sm text-muted-foreground" /> : null}
+      {action ? (
+        <Button size="sm" className="bg-alpha font-normal text-alpha-foreground hover:bg-alpha/90 active:bg-alpha/80" loading={busy} disabled={!onAct && !busy} onClick={onAct}>
+          {action}
+        </Button>
+      ) : null}
+    </li>
   );
 }

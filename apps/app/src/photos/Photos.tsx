@@ -1,178 +1,223 @@
-// spec/app/photos/index.md, "Story: Give Photos access"; spec/app/photos/index.md, "Story: See what Alpha took without library access"; spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/index.md, "Story: Select photos"
-import { Alert, Banner, Button, Chip, EmptyState, MediaTile, SearchField, Spinner, Tabs, TabsList, TabsTrigger } from "@repo/ui";
-import { Heart, ImageOff, Share2, Trash2, X } from "lucide-react";
-import { useState } from "react";
-import type { Tab } from "../../gen/app__photos.effect.vibe";
-import { useMachine } from "../../gen/app__photos.react.ts";
+// spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/index.md, "Story: Select photos"; spec/app/photos/index.md, "Story: Change albums from what I am looking at"
+import { Effect } from "effect";
+import { Album, ChevronLeft, ChevronRight, Ellipsis, Heart, Image, Images, ListChecks, Plus, Search, Share2, Trash2, Undo2, X } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { Alert, AppHeader, Button, Chip, ConfirmDialog, EmptyState, Input, ListRow, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, Spinner, cn } from "@repo/ui";
+import { useMachine as useLibrary } from "../../gen/app__photos.react.ts";
+import { useMachine as useTrash } from "../../gen/app__photos__trash.react.ts";
+import { useMachine as useAgent } from "../../gen/app__photos__agent.react.ts";
 import { useMachine as useViewer } from "../../gen/app__photos__viewer.react.ts";
-import { running } from "../../gen/app__photos__changes.ts";
-import { type PhotosProps, albumOf, latestOf, lengthOf, sections, seenOf } from "./shown.ts";
-import { Viewer } from "./Viewer.tsx";
+import type { Event, Filter } from "../../gen/app__photos.ts";
+import type { Event as TrashEvent } from "../../gen/app__photos__trash.ts";
+import type { Shown, Resident } from "../runtime/area.tsx";
+import { Catalog } from "./catalog.vibe";
+import { MediaGrid } from "./Grid.tsx";
+import { MediaViewer } from "./Viewer.tsx";
+import type { agentPhotos } from "./agent.vibe";
+import type { library } from "./photos.vibe";
+import type { trash } from "./trash.vibe";
+import type { viewer } from "./viewer.vibe";
+import type { Layer } from "effect";
 
-const counted = (n: number) => (n === 1 ? "1 item" : `${n} items`);
+type PhotosRuntime = Layer.Success<typeof agentPhotos> | Layer.Success<typeof library> | Layer.Success<typeof viewer> | Layer.Success<typeof trash> | Resident;
 
-/**
- * Photos: the Library grid narrowed by a filter or a search, the Albums tab and an album open, a selection and the
- * one run of changes it starts, and the Viewer over them; each control offered exactly when the rules take it.
- * @model spec/app/photos/index.md
- */
-export function Photos({ runtime }: PhotosProps) {
-  const { state, cause, can, send } = useMachine(runtime);
-  const viewer = useViewer(runtime);
-  const [query, setQuery] = useState("");
-  if (cause) return <Alert variant="destructive" className="m-4">Alpha could not open Photos</Alert>;
-  if (!state) return null;
-  const owner = <E extends Parameters<typeof can>[0]>(event: E) => can(event, "Owner");
-  const tell = <E extends Parameters<typeof send>[0]>(event: E) => void send(event, "Owner");
-  const { access, job } = state;
-  const rows = [...state.rows].sort((a, b) => b - a);
-  const items = state.tab === "Library" || state.album !== 0;
-  const search = query.trim();
-  const narrowing = { type: "narrow", narrowing: search === "" ? "Everything" : "Matching", query: search, person: 0 } as const;
-  const filter = (to: "Everything" | "Favorites" | "Videos") => ({ type: "narrow", narrowing: to, query: "", person: 0 }) as const;
-  const busy = running(job);
-  const ended = !busy && job.requests > 0;
+interface Tool {
+  readonly icon: ReactNode;
+  readonly label: string;
+  readonly run: () => void;
+}
+
+function ToolBar({ tools }: { tools: readonly Tool[] }) {
   return (
-    <section aria-label="Photos" className="flex flex-col gap-3 p-4">
-      {state.selecting ? (
-        <div className="flex items-center gap-2">
-          {owner({ type: "endSelect" }) && <Button variant="ghost" size="icon" aria-label="Cancel selection" onClick={() => tell({ type: "endSelect" })}><X /></Button>}
-          <h2 className="flex-1 text-lg font-semibold">{state.selected.length === 0 ? "Select" : String(state.selected.length)}</h2>
-          {owner({ type: "selectAll" }) && state.selected.length < state.rows.length && <Button variant="ghost" size="sm" onClick={() => tell({ type: "selectAll" })}>Select all</Button>}
-        </div>
-      ) : (
-        <div className="flex items-center gap-2">
-          <Tabs value={state.tab} onValueChange={(tab) => tell({ type: "showTab", tab: tab as Tab })} className="flex-1">
-            <TabsList aria-label="Photos sections">
-              <TabsTrigger value="Library" disabled={!owner({ type: "showTab", tab: "Library" }) && state.tab !== "Library"}>Library</TabsTrigger>
-              <TabsTrigger value="Albums" disabled={!owner({ type: "showTab", tab: "Albums" }) && state.tab !== "Albums"}>Albums</TabsTrigger>
-            </TabsList>
-          </Tabs>
-          {owner({ type: "startSelect" }) && <Button variant="ghost" size="sm" onClick={() => tell({ type: "startSelect" })}>Select</Button>}
-        </div>
-      )}
+    <div role="toolbar" aria-label="Selection actions" className="flex shrink-0 justify-around gap-1 border-t border-border bg-background px-2 py-2">
+      {tools.map(({ icon, label, run }) => <Button key={label} variant="ghost" className="h-auto min-h-12 flex-col gap-1 px-2 py-1 text-xs" onClick={run}>{icon}{label}</Button>)}
+    </div>
+  );
+}
 
-      {access.grant === "Unasked" && owner({ type: "askAccess" }) && (
-        <Banner action={<Button size="sm" onClick={() => tell({ type: "askAccess" })}>Allow</Button>}>Allow Alpha to see your photos. Until then Photos shows what Alpha's camera took.</Banner>
-      )}
-      {access.grant === "Denied" && (
-        <Banner variant="warn" action={owner({ type: "openSettings" }) ? <Button size="sm" onClick={() => tell({ type: "openSettings" })}>Open settings</Button> : undefined}>
-          Alpha may not see your photos. Photos shows what Alpha's camera took.
-        </Banner>
-      )}
-      {access.grant === "Limited" && !state.selecting && (
-        <Banner action={<div className="flex gap-1">
-          {owner({ type: "pickItems" }) && <Button size="sm" variant="ghost" onClick={() => tell({ type: "pickItems" })}>Choose items</Button>}
-          {owner({ type: "openSettings" }) && <Button size="sm" onClick={() => tell({ type: "openSettings" })}>Allow all</Button>}
-        </div>}>Alpha sees only the photos you chose.</Banner>
-      )}
+export interface PhotosProps extends Shown<PhotosRuntime> {}
 
-      {state.selecting && (
-        <div role="toolbar" aria-label="Change the selection" className="flex gap-2">
-          {owner({ type: "favouriteSelected" }) && <Button variant="secondary" size="sm" onClick={() => tell({ type: "favouriteSelected" })}><Heart />{state.selected.every((photo) => state.starred.includes(photo)) ? "Remove from favorites" : "Add to favorites"}</Button>}
-          {owner({ type: "shareSelected" }) && <Button variant="secondary" size="sm" onClick={() => tell({ type: "shareSelected" })}><Share2 />Share</Button>}
-          {owner({ type: "trashSelected" }) && <Button variant="destructive" size="sm" onClick={() => tell({ type: "trashSelected" })}><Trash2 />Delete</Button>}
-        </div>
-      )}
-
-      {state.tab === "Library" && !state.selecting && (
-        <div className="flex flex-col gap-2">
-          <form className="contents" onSubmit={(submitted) => { submitted.preventDefault(); if (owner(narrowing)) tell(narrowing); }}>
-            <SearchField aria-label="Search photos" placeholder="Search photos" value={query} onValueChange={(text) => {
-              setQuery(text);
-              const cleared = filter("Everything");
-              if (text.trim() === "" && owner(cleared)) tell(cleared);
-            }} />
-          </form>
-          <div className="flex gap-2">
-            {([["Favorites", "Favorites"], ["Videos", "Videos"]] as const).map(([to, name]) => {
-              const on = state.filter === to;
-              const event = filter(on ? "Everything" : to);
-              return <Chip key={to} pressed={on} disabled={!owner(event)} onPressedChange={() => tell(event)}>{name}</Chip>;
+/** The Library, Albums and Recently deleted, with the viewer and edit surfaces over the grid. */
+export function Photos({ runtime, alpha }: PhotosProps) {
+  const library = useLibrary(runtime);
+  const trash = useTrash(runtime);
+  const viewer = useViewer(runtime);
+  const agent = useAgent(runtime);
+  const [searching, setSearching] = useState(false);
+  const [query, setQuery] = useState("");
+  const [name, setName] = useState("");
+  const state = library.state;
+  const bin = trash.state;
+  if (library.cause || viewer.cause || trash.cause) return <Alert variant="destructive" className="m-4">Photos could not open.</Alert>;
+  if (!state || !bin) return <Spinner className="m-auto" aria-label="Opening Photos" />;
+  const content = runtime.runSync(Effect.flatMap(Catalog, (catalog) => catalog.displayed()));
+  const inTrash = bin.open;
+  const secure = state.secure;
+  const secureItems = state.only;
+  const selection = inTrash ? bin.selecting : state.selecting;
+  const selected = inTrash ? bin.selected : state.selected;
+  const opened = viewer.state?.open ?? 0;
+  const album = content.albums.get(state.album);
+  const albumList = state.tab === "Albums" && state.album === 0 && !inTrash;
+  const ids = [...(inTrash ? bin.rows : state.rows)].sort((a, b) => b - a);
+  const rows = ids.flatMap((number) => {
+    const row = content.rows.get(number);
+    return row === undefined ? [] : [{ number, row }];
+  });
+  const index = ids.indexOf(opened);
+  const starred = new Set(state.starred);
+  const favourites = selected.length > 0 && selected.every((number) => starred.has(number));
+  const title = selection ? `${selected.length} selected` : inTrash ? "Recently deleted" : album?.title ?? "Photos";
+  const owner = (event: Event) => library.can(event, "Owner");
+  const binOwner = (event: TrashEvent) => trash.can(event, "Owner");
+  const talk = (event: Event) => { if (owner(event)) void library.send(event, "Owner"); };
+  const binTalk = (event: TrashEvent) => { if (binOwner(event)) void trash.send(event, "Owner"); };
+  const openBin = { type: "enter", allowed: state.access.grant === "Granted" || state.access.grant === "Limited", secure: state.secure } satisfies TrashEvent;
+  const narrow = (filter: Filter, words = "") => ({ type: "narrow", narrowing: filter, query: words, person: 0 } satisfies Event);
+  const canStart = inTrash ? binOwner({ type: "startSelect" }) : owner({ type: "startSelect" });
+  const canMore = inTrash ? binOwner({ type: "loadMore" }) : owner({ type: "loadMore" });
+  const start = () => inTrash ? binTalk({ type: "startSelect" }) : talk({ type: "startSelect" });
+  const open = (number: number) => {
+    if (selection) {
+      if (inTrash) binTalk({ type: "toggle", photo: number }); else talk({ type: "toggle", photo: number });
+      return;
+    }
+    const event = { type: "openItem", photo: number, listed: ids.includes(number), secure, only: secureItems, reviewing: false } as const;
+    if (viewer.can(event, "Owner")) void viewer.send(event, "Owner");
+  };
+  const select = async (photo: number): Promise<boolean> => {
+    if (!canStart) return false;
+    if (inTrash) {
+      const sent = await trash.send({ type: "startSelect" }, "Owner");
+      return sent._tag === "Success" && (await trash.send({ type: "toggle", photo }, "Owner"))._tag === "Success";
+    }
+    const sent = await library.send({ type: "startSelect" }, "Owner");
+    return sent._tag === "Success" && (await library.send({ type: "toggle", photo }, "Owner"))._tag === "Success";
+  };
+  const viewerSelection = async (kind: "add" | "recover" | "delete") => {
+    if (opened === 0 || !viewer.can({ type: "close" }, "Owner")) return;
+    const closed = await viewer.send({ type: "close" }, "Owner");
+    if (closed._tag !== "Success" || !await select(opened)) return;
+    if (kind === "add") void library.send({ type: "chooseAlbum" }, "Owner");
+    else void trash.send({ type: kind === "recover" ? "recoverSelected" : "deleteForever" }, "Owner");
+  };
+  const actions: Tool[] = [];
+  const menu: Tool[] = [];
+  function add(label: string, event: Event, icon: ReactNode, group = actions) {
+    if (owner(event)) group.push({ icon, label, run: () => talk(event) });
+  }
+  function binAdd(label: string, event: TrashEvent, icon: ReactNode, group = actions) {
+    if (binOwner(event)) group.push({ icon, label, run: () => binTalk(event) });
+  }
+  if (selection && inTrash) {
+    binAdd("Recover", { type: "recoverSelected" }, <Undo2 />);
+    binAdd("Delete", { type: "deleteForever" }, <Trash2 />);
+  } else if (selection) {
+    add("Share", { type: "shareSelected" }, <Share2 />);
+    add(favourites ? "Unfavorite" : "Favorite", { type: "favouriteSelected" }, <Heart />);
+    add("Add to album", { type: "chooseAlbum" }, <Album />);
+    if (album?.owned) add("Remove from album", { type: "removeSelected" }, <X />);
+    add("Delete", { type: "trashSelected" }, <Trash2 />);
+  } else {
+    if (canStart) menu.push({ label: "Select", icon: <ListChecks />, run: start });
+    if (owner(narrow("Matching", "photo"))) menu.push({ label: "Search", icon: <Search />, run: () => setSearching(true) });
+    add("Favorites", narrow("Favorites"), <Heart />, menu);
+    add("Videos", narrow("Videos"), <Images />, menu);
+    if (owner({ type: "newAlbum" })) menu.push({ label: "New album", icon: <Plus />, run: () => { setName(""); talk({ type: "newAlbum" }); } });
+    if (album?.owned && owner({ type: "renameAlbum" })) menu.push({ label: "Rename album", icon: <Album />, run: () => { setName(album.title); talk({ type: "renameAlbum" }); } });
+    if (album?.owned) add("Delete album", { type: "deleteAlbum" }, <Trash2 />, menu);
+  }
+  const status = inTrash ? bin.read.status : state.library.status;
+  const dialog = state.shelf.dialog;
+  const request = agent.state?.stage === "Shown" ? agent.state.request : undefined;
+  const reviewTitle = request?.ask === "Collect" ? `Create album ${request.name}?`
+    : request?.change === "Trash" ? "Move photos to Recently deleted?"
+    : request?.change === "Share" ? "Share photos?"
+    : request?.change === "Unfavorite" ? "Remove from Favorites?" : "Favorite photos?";
+  const allow = owner({ type: "askAccess" }) ? { label: "Allow access", event: { type: "askAccess" } as const }
+    : owner({ type: "pickItems" }) ? { label: "Choose items or allow all", event: { type: "pickItems" } as const }
+    : owner({ type: "openSettings" }) ? { label: "Open settings", event: { type: "openSettings" } as const } : undefined;
+  const albumName = { type: "saveAlbum", name: name.trim(), letters: Array.from(name.trim()).length } satisfies Event;
+  const cancelSelection = () => inTrash ? binTalk({ type: "endSelect" }) : talk({ type: "endSelect" });
+  const header = <AppHeader title={title} className="shrink-0"
+    leading={<Button variant="ghost" size="icon" aria-label={selection ? "Cancel selection" : inTrash || album ? "Back to albums" : "Back to apps"}
+      onClick={() => selection ? cancelSelection() : void alpha.back()}>{selection ? <X /> : <ChevronLeft />}</Button>}>
+    {selection && (inTrash ? binOwner({ type: "selectAll" }) : owner({ type: "selectAll" })) && <Button variant="ghost" onClick={() => inTrash ? binTalk({ type: "selectAll" }) : talk({ type: "selectAll" })}>Select all</Button>}
+    {!selection && menu.length > 0 && <Menu><MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Photos tools"><Ellipsis /></Button></MenuTrigger>
+      <MenuContent>{menu.map(({ icon, label, run }) => <MenuItem key={label} onSelect={run}>{icon}{label}</MenuItem>)}</MenuContent></Menu>}
+  </AppHeader>;
+  return (
+    <section aria-label="Photos" className="relative flex min-h-0 flex-1 flex-col bg-background">
+      <div inert={opened !== 0} aria-hidden={opened !== 0 || undefined} className="flex min-h-0 flex-1 flex-col" data-alpha-subview="photos-list">
+        {header}
+        {!selection && !inTrash && !album && (owner({ type: "showTab", tab: "Library" }) || owner({ type: "showTab", tab: "Albums" })) &&
+          <div role="group" aria-label="Photos sections" className="mx-4 mb-2 grid shrink-0 grid-cols-2 gap-1 rounded-full bg-secondary p-1">
+            {([{ tab: "Library", icon: <Images /> }, { tab: "Albums", icon: <Album /> }] as const).map(({ tab, icon }) => <Button key={tab}
+              variant="ghost" className={cn("rounded-full", state.tab === tab && "bg-background")} aria-pressed={state.tab === tab}
+              onClick={() => { setSearching(false); talk({ type: "showTab", tab }); }}>{icon}{tab}</Button>)}
+          </div>}
+        {!inTrash && !selection && !album && state.tab === "Library" && allow && <Button variant="secondary" className="mx-4 mb-2 justify-start rounded-xl" onClick={() => talk(allow.event)}>
+          <Image />{allow.label}<ChevronRight className="ml-auto" />
+        </Button>}
+        {!inTrash && state.tab === "Library" && searching && <form className="mx-4 mb-2 flex shrink-0 gap-2" onSubmit={(event) => { event.preventDefault(); talk(narrow(query.trim() ? "Matching" : "Everything", query.trim())); setSearching(false); }}>
+          <Input type="search" aria-label="Search photos" value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
+          <Button type="submit" variant="secondary" aria-label="Search"><Search /></Button>
+        </form>}
+        {!inTrash && state.filter !== "Everything" && owner(narrow("Everything")) &&
+          <div className="mx-4 mb-2 self-start"><Chip clearLabel="Clear filter" onClear={() => { setQuery(""); talk(narrow("Everything")); }}>{state.query || state.filter}</Chip></div>}
+        {albumList && <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto px-3 pb-28" data-alpha-app-scroll="photos">
+          <div className="grid grid-cols-2 gap-3">
+            {state.albums.map((number) => {
+              const card = content.albums.get(number);
+              const event = { type: "openAlbum", album: number } satisfies Event;
+              if (!card || !owner(event)) return null;
+              return <Button key={number} variant="secondary" className="aspect-[1.5] h-auto flex-col items-start justify-end rounded-xl p-4 text-left" onClick={() => talk(event)}>
+                <Images className="mb-auto size-7" /><span className="font-display text-2xl">{card.title}</span>{card.owned && <span className="text-xs text-muted-foreground">{card.owned.count}</span>}
+              </Button>;
             })}
           </div>
-        </div>
-      )}
-
-      {busy && (
-        <Banner action={owner({ type: "cancelRun" }) ? <Button size="sm" variant="ghost" onClick={() => tell({ type: "cancelRun" })}>Stop</Button> : undefined}>
-          <span className="flex items-center gap-2"><Spinner size="sm" aria-hidden />Changing {counted(job.left.length + job.sending.length + job.done.length)}</span>
-        </Banner>
-      )}
-      {ended && job.change === "Share" && job.done.length === 0 && !busy && <Alert variant="warn">Android couldn't open sharing</Alert>}
-      {ended && job.stale.length > 0 && <Alert variant="warn">{counted(job.stale.length)} changed since you chose them, so they were left as they were</Alert>}
-      {ended && job.unsure.length > 0 && <Alert variant="warn">Alpha can't tell whether {counted(job.unsure.length)} changed. Photos was read again.</Alert>}
-
-      {state.album !== 0 && (
-        <div className="flex items-center gap-2">
-          {owner({ type: "closeAlbum" }) && <Button variant="ghost" size="sm" onClick={() => tell({ type: "closeAlbum" })}>Albums</Button>}
-          <h2 className="text-lg font-semibold">{albumOf(runtime, state.album)?.name ?? "Album"}</h2>
-        </div>
-      )}
-
-      {state.locked ? (
-        <EmptyState title="Unlock the phone, then reopen Photos" />
-      ) : state.library.status === "Failed" ? (
-        <Alert variant="destructive" className="items-center">
-          <span className="flex-1">Photos couldn't be read</span>
-          {owner({ type: "retry" }) && <Button size="sm" variant="outline" onClick={() => tell({ type: "retry" })}>Try again</Button>}
-        </Alert>
-      ) : state.library.status === "Loading" && rows.length === 0 ? (
-        <Spinner label="Loading photos" className="self-center" />
-      ) : rows.length === 0 && state.library.status === "Loaded" ? (
-        <EmptyState icon={<ImageOff />} title={!items ? "No albums yet" : state.filter === "Matching" ? "Nothing matches" : state.filter === "Favorites" ? "No favorites yet" : state.filter === "Videos" ? "No videos yet" : "No photos yet"} />
-      ) : !items ? (
-        <ul aria-label="Albums" className="grid grid-cols-2 gap-3">
-          {rows.map((album) => {
-            const found = albumOf(runtime, album);
-            const open = { type: "openAlbum", album } as const;
-            return (
-              <li key={album}>
-                <Button variant="secondary" className="h-auto w-full flex-col items-start rounded-lg p-3" disabled={!owner(open)} onClick={() => tell(open)}>
-                  <span>{found?.name ?? "Album"}</span>
-                  <span className="text-sm font-normal text-muted-foreground">{counted(found?.count ?? 0)}</span>
-                </Button>
-              </li>
-            );
-          })}
-        </ul>
-      ) : (
-        <div aria-label="Listed" className="-mx-4 flex flex-col gap-1">
-          {sections(rows, (photo) => seenOf(runtime, photo)?.item.date, latestOf(runtime)).map(({ heading, photos }) => (
-            <section key={`${heading} ${photos[0]}`} aria-label={heading}>
-              <div className="flex items-baseline justify-between gap-2 px-4 pt-2.5 pb-2">
-                <h2 className="text-base font-semibold">{heading}</h2>
-                <span className="text-sm text-muted-foreground">{photos.length}</span>
-              </div>
-              <ul className="grid grid-cols-4 gap-0.5">
-                {photos.map((photo) => {
-                  const seen = seenOf(runtime, photo)?.item;
-                  const toggle = { type: "toggle", photo } as const;
-                  const view = { type: "openItem", photo, listed: true, secure: state.secure, only: state.only, reviewing: false } as const;
-                  const video = seen?.kind === "video";
-                  const tap = state.selecting ? (owner(toggle) ? () => tell(toggle) : undefined) : viewer.state && viewer.can(view, "Owner") ? () => void viewer.send(view, "Owner") : undefined;
-                  const taken = seen ? new Date(seen.date).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" }) : "";
-                  return (
-                    <li key={photo}>
-                      <MediaTile
-                        src={seen?.image}
-                        label={`${video ? "Video" : "Photo"}${taken ? `, ${taken}` : ""}`}
-                        duration={video ? lengthOf(Math.round((seen?.duration ?? 0) / 100)) : undefined}
-                        favourite={state.starred.includes(photo)}
-                        selected={state.selecting ? state.selected.includes(photo) : undefined}
-                        onClick={tap}
-                        disabled={tap === undefined}
-                      />
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-          ))}
-        </div>
-      )}
-      {owner({ type: "loadMore" }) && <Button variant="outline" className="self-center" onClick={() => tell({ type: "loadMore" })}>Show more</Button>}
-      <Viewer runtime={runtime} rows={rows} />
+          {binOwner(openBin) && <ListRow title="Recently deleted" leading={<Trash2 />} trailing={<ChevronRight />} className="mt-5" onClick={() => binTalk(openBin)} />}
+        </div>}
+        {!albumList && (rows.length > 0 || canMore) &&
+          <MediaGrid rows={rows} selection={selection ? new Set(selected) : undefined} grouped={!album && !inTrash} open={open} start={!selection && canStart ? (number) => { void select(number); } : undefined}
+            more={canMore ? () => inTrash ? binTalk({ type: "loadMore" }) : talk({ type: "loadMore" }) : undefined} />}
+        {status === "Loading" && <div role="status" aria-label="Loading photos" className="grid place-items-center p-5"><Spinner /></div>}
+        {status === "Loaded" && !albumList && rows.length === 0 && <EmptyState className="m-4" icon={<Images />} title={inTrash ? "Recently deleted is empty" : state.filter !== "Everything" ? "No matches" : "No photos"} />}
+        {status === "Failed" && <EmptyState className="m-4" title={state.locked ? "Unlock the phone, then reopen Photos" : "Couldn’t load photos"}>
+          {(inTrash ? binOwner({ type: "retry" }) : owner({ type: "retry" })) && <Button variant="secondary" onClick={() => inTrash ? binTalk({ type: "retry" }) : talk({ type: "retry" })}>Try again</Button>}
+        </EmptyState>}
+        {actions.length > 0 && <ToolBar tools={actions} />}
+        {!inTrash && owner({ type: "cancelRun" }) && <Button variant="secondary" className="self-center" onClick={() => talk({ type: "cancelRun" })}>Stop remaining changes</Button>}
+        {inTrash && binOwner({ type: "cancelRecovery" }) && <Button variant="secondary" className="self-center" onClick={() => binTalk({ type: "cancelRecovery" })}>Stop recovery</Button>}
+      </div>
+      <ConfirmDialog open={request !== undefined} title={reviewTitle}
+        confirmLabel={request?.change === "Share" ? "Share" : "Confirm"} destructive={request?.change === "Trash"}
+        onConfirm={() => { const event = { type: "confirm", revision: state.revision } as const; if (agent.can(event, "Owner")) void agent.send(event, "Owner"); }}
+        onCancel={() => { if (agent.can({ type: "decline" }, "Owner")) void agent.send({ type: "decline" }, "Owner"); }}>
+        {request !== undefined && <span className="flex flex-col gap-1">
+          <span>{request.items.length} {request.items.length === 1 ? "item" : "items"}</span>
+          <span className="max-h-28 overflow-y-auto">{request.items.map((number) => content.rows.get(number)?.item.name ?? "Photo").join(" · ")}</span>
+        </span>}
+      </ConfirmDialog>
+      <MediaViewer runtime={runtime} row={content.rows.get(opened)} before={index > 0 ? ids[index - 1] : undefined} after={index >= 0 ? ids[index + 1] : undefined} inTrash={inTrash}
+        onAddToAlbum={!inTrash && canStart ? () => { void viewerSelection("add"); } : undefined}
+        onRecover={inTrash && canStart ? () => { void viewerSelection("recover"); } : undefined}
+        onDelete={inTrash && canStart ? () => { void viewerSelection("delete"); } : undefined} />
+      <Sheet open={dialog === "NewAlbum" || dialog === "RenameAlbum" || dialog === "ChooseAlbum"} onOpenChange={(open) => { if (!open) talk({ type: "closeDialog" }); }}>
+        <SheetContent title={dialog === "NewAlbum" ? "New album" : dialog === "RenameAlbum" ? "Rename album" : "Add to album"}
+          actions={dialog === "ChooseAlbum" ? owner({ type: "newAlbum" }) && <Button variant="secondary" onClick={() => { setName(""); talk({ type: "newAlbum" }); }}><Plus />New album</Button>
+            : <><Button variant="secondary" onClick={() => talk({ type: "closeDialog" })}>Cancel</Button><Button disabled={!owner(albumName)} onClick={() => talk(albumName)}>Save</Button></>}>
+          {dialog === "ChooseAlbum" ? [...content.albums].flatMap(([number, card]) => card.owned && owner({ type: "addTo", album: number })
+            ? [<ListRow key={number} title={card.title} leading={<Album />} onClick={() => talk({ type: "addTo", album: number })} />] : [])
+            : <Input aria-label="Album name" maxLength={80} value={name} onChange={(event) => setName(event.currentTarget.value)} />}
+        </SheetContent>
+      </Sheet>
+      <ConfirmDialog open={dialog === "DeleteAlbum"} title={`Delete ${album?.title ?? "album"}?`} destructive confirmLabel="Delete"
+        loading={!owner({ type: "confirmDelete" })} onConfirm={() => talk({ type: "confirmDelete" })} onCancel={() => talk({ type: "closeDialog" })} />
+      <ConfirmDialog open={bin.confirm.showing} title="Delete photos forever" destructive confirmLabel="Delete forever"
+        onConfirm={() => binTalk(binOwner({ type: "confirmForever" }) ? { type: "confirmForever" } : { type: "cancelForever" })} onCancel={() => binTalk({ type: "cancelForever" })}>
+        {binOwner({ type: "confirmForever" }) ? `${bin.prepared.length} items` : "The selection changed. Review Recently deleted again."}
+      </ConfirmDialog>
     </section>
   );
 }

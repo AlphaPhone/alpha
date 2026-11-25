@@ -1,10 +1,10 @@
 // spec/app/messages/index.md, "Story: See my conversations"; spec/app/messages/index.md, "Story: Read a conversation"; spec/app/messages/index.md, "Story: Act on a message"; spec/app/messages/index.md, "Story: Start a new message"; spec/app/messages/composer.md, "Story: Keep my draft"; spec/app/messages/composer.md, "Story: Send a message"
-import { MMS_ATTACHMENT_TYPES } from "@elizaos/os/bridges/definitions/messages";
+import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY, MMS_MAX_RECIPIENTS } from "@elizaos/os/bridges/definitions/messages";
 import type { MessageRow, ThreadRow } from "@elizaos/os/bridges/messages";
 import { Alert, Avatar, Banner, Button, Chip, ConfirmDialog, SearchField, Spinner, Textarea } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { Camera, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, ImagePlus, Phone as Call, Plus, Search, Send, Sparkles, SquarePen, Trash2 } from "lucide-react";
-import { memo, useCallback, useRef, useState, type MouseEvent, type PointerEvent } from "react";
+import { Camera, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, ImagePlus, Phone as Call, Plus, RefreshCw, Search, Send, Sparkles, SquarePen, Trash2 } from "lucide-react";
+import { memo, useCallback, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from "react";
 import type { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe";
 import { clear } from "../../gen/app__phone.ts";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
@@ -24,6 +24,7 @@ export interface MessagesProps {
   /** Provides Messages' and the composer's machines, both resident, Phone's, for whether a call may be an emergency call, and what they count. */
   runtime: ManagedRuntime.ManagedRuntime<MessagesMachine | ComposerMachine | PhoneMachine | Inbox | Conversations | Drafts | CommsServices, unknown>;
   onBack?: (() => void) | undefined;
+  onOpenLink?: ((href: string) => void) | undefined;
 }
 
 
@@ -32,6 +33,7 @@ type MessagesUI = ReturnType<typeof useMessages>;
 const header = "flex min-h-12 shrink-0 items-center gap-1 px-2";
 const contactRow = "flex min-h-15 w-full items-center gap-3 px-5 py-1.5 text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring";
 const messageURL = /\bhttps?:\/\/[^\s<>"']+/giu;
+const noMessages: ReadonlyArray<MessageRow> = [];
 
 function firstName(title: string) {
   return /^[+(\d]/.test(title) || title.includes(",") ? title : (title.split(/\s+/, 1)[0] ?? title);
@@ -51,7 +53,7 @@ function clearChoice(runtime: MessagesProps["runtime"]) {
  * Only the owner's Send sends. Alpha's draft is marked as Alpha's and never sends itself.
  * @model spec/app/messages/index.md
  */
-export function Messages({ runtime, onBack }: MessagesProps) {
+export function Messages({ runtime, onBack, onOpenLink }: MessagesProps) {
   const messages = useMessages(runtime);
   if (messages.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Messages</Alert>;
   const { state } = messages;
@@ -59,7 +61,7 @@ export function Messages({ runtime, onBack }: MessagesProps) {
   return (
     <section data-alpha-messages aria-label="Messages" className="flex h-full min-h-0 flex-col overflow-hidden">
       {state.pane === "Threads" && <Threads runtime={runtime} messages={messages} onBack={onBack} />}
-      {state.pane === "Conversation" && <Conversation key={state.thread} runtime={runtime} messages={messages} />}
+      {state.pane === "Conversation" && <Conversation key={state.thread} runtime={runtime} messages={messages} onOpenLink={onOpenLink} />}
       {state.pane === "Picker" && <Picker runtime={runtime} messages={messages} />}
     </section>
   );
@@ -149,25 +151,36 @@ function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesPr
           </div>
         </>
       )}
-      <CommsBar runtime={runtime} closed={smsNeeded(state) ? undefined : <SearchField className="min-w-0 flex-1" aria-label="Search or ask" placeholder="Search or ask" value={sought} onValueChange={search} />} />
+      <CommsBar runtime={runtime} closed={smsNeeded(state) ? undefined : (ask) => (
+        <form className="min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); ask(sought.trim()); }}>
+          <SearchField data-alpha-composer aria-label="Search or ask" placeholder="Search or ask" value={sought} onValueChange={search} />
+        </form>
+      )} />
     </>
   );
 }
 
 /** Inline URL text, escaped by React. Whitespace and punctuation outside each URL are preserved. */
-function MessageText({ text }: { text: string }) {
+function MessageText({ text, onOpenLink }: { text: string; onOpenLink?: MessagesProps["onOpenLink"] }) {
   const parts = [];
   let consumed = 0;
   for (const matched of text.matchAll(messageURL)) {
     const found = matched[0];
     const offset = matched.index;
+    if (offset === undefined) continue;
     const raw = found.replace(/[.,!?;:]+$/u, "").replace(/\)+$/u, (ending) => {
       const excess = (found.match(/\)/gu)?.length ?? 0) - (found.match(/\(/gu)?.length ?? 0);
       return ending.slice(0, Math.max(0, ending.length - Math.max(0, excess)));
     });
     const parsed = URL.parse(raw);
     if (!parsed?.hostname || parsed.username || parsed.password) continue;
-    parts.push(text.slice(consumed, offset), <a className="underline underline-offset-2" href={parsed.href} target="_blank" rel="noopener noreferrer" key={offset}>{raw}</a>);
+    parts.push(text.slice(consumed, offset), (
+      <a className="underline underline-offset-2" href={parsed.href} target="_blank" rel="noopener noreferrer" key={offset} onClick={onOpenLink ? (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpenLink(parsed.href);
+      } : undefined}>{raw}</a>
+    ));
     consumed = offset + raw.length;
   }
   return <>{parts}{text.slice(consumed)}</>;
@@ -178,7 +191,7 @@ interface BubbleActions {
   remove?: (() => void) | undefined;
 }
 
-const Bubble = memo(function Bubble({ row, choose, actions }: { row: MessageRow; choose: (id: string) => void; actions?: BubbleActions | undefined }) {
+const Bubble = memo(function Bubble({ row, choose, actions, onOpenLink }: { row: MessageRow; choose: (id: string) => void; actions?: BubbleActions | undefined; onOpenLink?: MessagesProps["onOpenLink"] }) {
   const trigger = useRef<HTMLDivElement>(null);
   const pointer = useRef<{ x: number; y: number; at: number } | null>(null);
   const complete = "incomplete" in row ? undefined : row;
@@ -223,7 +236,7 @@ const Bubble = memo(function Bubble({ row, choose, actions }: { row: MessageRow;
         {!complete ? <p className="rounded-tile bg-muted px-4 py-2.5 text-base">{label}</p> : (
           <>
             {complete.attachments > 0 && <span className="flex items-center gap-1.5 text-sm text-muted-foreground"><PictureIcon className="size-4" aria-hidden />{complete.attachments === 1 ? "1 picture" : `${complete.attachments} pictures`}</span>}
-            {complete.body && <p data-alpha-message-body className={`rounded-tile px-4 py-2.5 text-base whitespace-pre-wrap wrap-anywhere ${outgoing ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground"}`}><MessageText text={complete.body} /></p>}
+            {complete.body && <p data-alpha-message-body className={`rounded-tile px-4 py-2.5 text-md whitespace-pre-wrap wrap-anywhere ${outgoing ? "bg-foreground text-background" : "bg-secondary text-secondary-foreground"}`}><MessageText text={complete.body} onOpenLink={onOpenLink} /></p>}
           </>
         )}
         <span data-alpha-message-meta className="px-1.5 text-xs text-muted-foreground">{[when(row.date), status].filter(Boolean).join(" · ")}</span>
@@ -245,17 +258,27 @@ const Bubble = memo(function Bubble({ row, choose, actions }: { row: MessageRow;
 });
 
 /** One conversation: provider rows, their actions, and the draft belonging to this exact thread. */
-function Conversation({ runtime, messages: { state, can, send } }: MessagesProps & { messages: MessagesUI }) {
+function Conversation({ runtime, messages: { state, can, send }, onOpenLink }: MessagesProps & { messages: MessagesUI }) {
   const phone = usePhone(runtime).state;
   const [selected, setSelected] = useState("");
   const scroll = useRef<HTMLDivElement>(null);
   const nearEnd = useRef(true);
   const held = runtime.runSync(Inbox.use((inbox) => inbox.get()));
-  const rows = state?.shown.rows ? held.messages : [];
+  const rows = state?.shown.rows && held.messagesThread === state.thread ? held.messages : noMessages;
+  const chronological = useMemo(() => rows.toReversed(), [rows]);
   const latest = rows[0]?.id;
   const anchor = useCallback((element: HTMLDivElement | null) => {
     if (element && latest && nearEnd.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
   }, [latest]);
+  const viewport = useCallback((element: HTMLDivElement | null) => {
+    scroll.current = element;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const resize = new ResizeObserver(() => {
+      if (nearEnd.current) element.scrollTop = element.scrollHeight;
+    });
+    resize.observe(element);
+    return () => { resize.disconnect(); scroll.current = null; };
+  }, []);
   const choose = useCallback((id: string) => {
     runtime.runSync(Inbox.use((inbox) => inbox.set({ chosen: id })));
     setSelected(id);
@@ -268,7 +291,11 @@ function Conversation({ runtime, messages: { state, can, send } }: MessagesProps
   const confirm = { type: "confirmDelete", clear: clear(phone) } as const;
   const actions = selectedRow && !("incomplete" in selectedRow) && !state.confirming && content(state) ? {
     copy: selectedRow.body && can({ type: "copy" }) ? () => { void send({ type: "copy" }); } : undefined,
-    remove: state.removal.outcome !== "Unknown" && can({ type: "askDelete" }) ? () => { void send({ type: "askDelete" }); } : undefined,
+    remove: state.smsApp && state.removal.outcome !== "Unknown" && can({ type: "askDelete" }) ? () => {
+      const { id, kind, threadId, date } = selectedRow;
+      runtime.runSync(Inbox.use((inbox) => inbox.set({ deleteTarget: { id, kind, threadId, date } })));
+      void send({ type: "askDelete" });
+    } : undefined,
   } : undefined;
   return (
     <>
@@ -278,7 +305,7 @@ function Conversation({ runtime, messages: { state, can, send } }: MessagesProps
         <h1 data-alpha-messages-title className="min-w-0 flex-1 truncate pl-1.5 text-lg font-bold">{title}</h1>
         {addresses.length === 1 && can({ type: "call" }) && <Button variant="ghost" size="icon" aria-label={`Call ${title}`} onClick={() => void send({ type: "call" })}><Call /></Button>}
       </header>
-      <div ref={scroll} data-alpha-messages-thread className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-4 pb-3" onScroll={(event) => {
+      <div ref={viewport} data-alpha-messages-thread className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-4 pb-3" onScroll={(event) => {
         const viewport = event.currentTarget;
         nearEnd.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 64;
       }}>
@@ -287,14 +314,14 @@ function Conversation({ runtime, messages: { state, can, send } }: MessagesProps
           {state.page.status === "Failed" && <Banner variant="destructive">The conversation could not be read</Banner>}
           {can({ type: "earlierMessages" }) && <Button className="self-center" size="icon" variant="secondary" aria-label="Earlier messages" onClick={() => void send({ type: "earlierMessages" })}><ChevronUp /></Button>}
           <div role="log" aria-label="Messages" className="mt-auto flex flex-col gap-1.5">
-            {rows.toReversed().map((row) => <Bubble key={row.id} row={row} choose={choose} actions={row.id === selected && (actions?.copy || actions?.remove) ? actions : undefined} />)}
+            {chronological.map((row) => <Bubble key={row.id} row={row} choose={choose} actions={row.id === selected && (actions?.copy || actions?.remove) ? actions : undefined} onOpenLink={onOpenLink} />)}
           </div>
           {selectedRow && "incomplete" in selectedRow && can({ type: "openElsewhere" }) && <Button size="sm" variant="outline" className="self-start" onClick={() => void send({ type: "openElsewhere" })}>Open in messaging app</Button>}
           <div ref={anchor} aria-hidden />
         </div>
       </div>
       {state.removal.outcome === "Unknown" && <Banner variant="warn">Alpha cannot tell whether the message was deleted</Banner>}
-      {state.removal.outcome === "Refused" && <Banner variant="destructive">The message was not deleted</Banner>}
+      {state.removal.outcome === "Refused" && held.deleteTarget && <Banner variant="destructive">The message was not deleted</Banner>}
       <ConfirmDialog open={state.confirming} title="Delete message?" confirmLabel="Delete" destructive
         onConfirm={() => void (selectedRow && !("incomplete" in selectedRow) && can(confirm) && send(confirm))} onCancel={() => void (can({ type: "keep" }) && send({ type: "keep" }))}>Delete this message from this phone?</ConfirmDialog>
       <Compose runtime={runtime} title={title} addresses={addresses} thread={state.thread} />
@@ -321,8 +348,9 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
     void send(event);
   };
   const sendNow = { type: "send", supported: runtime.runSync(supported(state.recipients, pictures.length)), clear: clear(phone) } as const;
+  const sendable = (Boolean(text.trim()) || pictures.length > 0) && can(sendNow);
   const submit = () => {
-    if (!can(sendNow)) return;
+    if (!sendable) return;
     runtime.runSync(prepare(thread, state.sims > 1 ? state.sim : null));
     void send(sendNow);
   };
@@ -335,6 +363,8 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
   };
   const outgoing = state.outgoing;
   const here = outgoing.thread === thread;
+  const checking = here && uncertain(outgoing);
+  const sendLabel = checking ? "Check send status" : "Send";
   const alpha = state.slot.author === "AlphaWrote";
   const addressed = title === addresses.join(", ") ? title : `${title} · ${addresses.join(", ")}`;
   const draft = text && (alpha || dock.open);
@@ -354,14 +384,14 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
             }} />
         </label>
       ))}
-      <Textarea className="max-h-[min(10.5rem,28dvh)] min-w-0 flex-1 overflow-y-auto" aria-label="Message" placeholder={`Text ${firstName(title)}`} value={text} readOnly={!editable}
+      <Textarea className="max-h-[min(10.5rem,28dvh)] min-w-0 flex-1 overflow-y-auto" aria-label="Message" placeholder={`Text ${firstName(title)}`} value={text} maxLength={MMS_MAX_BODY} readOnly={!editable}
         ref={(element) => {
           field.current = element;
           if (element && focus.current) { focus.current = false; element.focus(); }
         }}
         onChange={(event) => write(event.target.value)} />
       {can({ type: "suggest" }) && <Button variant="ghost" size="icon" aria-label="Let Alpha suggest a reply" onClick={() => void send({ type: "suggest" })}><Sparkles /></Button>}
-      {can(sendNow) && <Button size="icon" aria-label="Send" data-alpha-bar-send onClick={submit}><Send /></Button>}
+      {sendable && <Button size="icon" aria-label={sendLabel} data-alpha-bar-send onClick={submit}>{checking ? <RefreshCw /> : <Send />}</Button>}
     </div>
   );
   return (
@@ -376,7 +406,7 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
           <div className="flex shrink-0 flex-wrap justify-end gap-1 py-1">
             {can({ type: "undo" }) && <Button size="sm" variant="ghost" onClick={() => void send({ type: "undo" })}>Don't send</Button>}
             {editable && <Button size="sm" variant="outline" data-alpha-draft-edit onClick={edit}>Edit</Button>}
-            {dock.open && <Button size="sm" data-alpha-draft-send disabled={!can(sendNow)} onClick={submit}>Send</Button>}
+            {dock.open && <Button size="sm" data-alpha-draft-send disabled={!sendable} onClick={submit}>{sendLabel}</Button>}
           </div>
         </div>
       )}
@@ -387,7 +417,7 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
             {can({ type: "takeSaved" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "takeSaved" })}>Use the saved draft</Button>}
           </>}>Another draft was saved for this conversation</Banner>
         )}
-        {here && uncertain(outgoing) && <Banner variant="warn">Check whether your message went before attempting another send.</Banner>}
+        {checking && <Banner variant="warn">Alpha is still waiting for the send result</Banner>}
         {here && outgoing.denied && <Banner variant="destructive">The phone did not send the message</Banner>}
         {here && outgoing.op.outcome === "Refused" && !outgoing.denied && outgoing.failed > 0 && <Banner variant="destructive">The message did not reach everyone</Banner>}
         {here && sentAll(outgoing) && <p role="status" className="basis-full text-xs text-muted-foreground">{`${delivered(outgoing) ? "Delivered" : "Sent"} to ${title}`}</p>}
@@ -414,7 +444,7 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
           if (can(settings)) return <Button key={need} size="sm" variant="outline" onClick={() => void send(settings)}>{`Open Settings for ${right} access`}</Button>;
           return null;
         })}
-        {can(handoff) && <Button size="sm" variant="outline" onClick={() => void send(handoff)}>Review in messaging app</Button>}
+        {can(handoff) && <Button size="sm" variant="outline" onClick={() => void send(handoff)}>{pictures.length > 0 ? "Review text in messaging app" : "Review in messaging app"}</Button>}
       </div>
       <CommsBar runtime={runtime} person={person} closed={messageForm} />
     </>
@@ -441,7 +471,7 @@ function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { m
   };
   const to = typed.split(",").map((part) => part.trim());
   const parsed = to.map((part) => /^\+?[\d\s().-]+$/u.test(part) && part.replace(/\D/gu, "").length >= 3 ? normalizePhoneNumber(part) : null);
-  const numbers = parsed.every((number) => number !== null) ? [...new Set(parsed)] : [];
+  const numbers = parsed.length <= MMS_MAX_RECIPIENTS && parsed.every((number) => number !== null) ? [...new Set(parsed)] : [];
   const allow = { type: "allow", need: "ContactsAccess" } as const;
   const settings = { type: "goToSettings", need: "ContactsAccess" } as const;
   return (

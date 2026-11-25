@@ -14,15 +14,16 @@ import type { Machine as CommsMachine } from "../../gen/app__phone__comms.effect
 import { endPlace } from "../../gen/app__phone__comms.ts";
 import { useMachine as useComms } from "../../gen/app__phone__comms.react.ts";
 import { Dialer } from "./phone.vibe";
+import { CommsPrompts } from "./comms.vibe";
 
 /** The services for the targets in the communications dock. */
-export type CommsServices = CommsMachine | BarMachine | ShellMachine | PhoneMachine | Dialer;
+export type CommsServices = CommsMachine | BarMachine | ShellMachine | PhoneMachine | Dialer | CommsPrompts;
 type DockRuntime = ManagedRuntime.ManagedRuntime<CommsServices, unknown>;
 
 export interface CommsBarProps {
   runtime: DockRuntime;
   /** What the owner can write or do while the sheet is closed. */
-  closed?: ReactNode;
+  closed?: ReactNode | ((ask: (query: string) => void) => ReactNode);
   /** The person this view is about. */
   person?: { label: string; initials: string };
 }
@@ -31,7 +32,7 @@ export interface CommsBarProps {
 export function useCommsDock(runtime: ManagedRuntime.ManagedRuntime<ShellMachine, unknown>) {
   const { state, can, send } = useShell(runtime);
   return {
-    open: state !== undefined && state.assistant !== "Bar",
+    open: state?.assistant === "Sheet" || state?.assistant === "Full",
     close: () => {
       if (state?.assistant === "Full") void send({ type: "goBack" });
       if (state?.assistant !== "Bar" && can({ type: "goBack" })) void send({ type: "goBack" });
@@ -47,22 +48,25 @@ export function CommsBar({ runtime, closed, person }: CommsBarProps) {
   const comms = useComms(runtime);
   const bar = useBar(runtime);
   const shell = useShell(runtime);
-  if (!shell.state || shell.state.assistant !== "Bar") return null;
+  if (!shell.state || shell.state.assistant === "Sheet" || shell.state.assistant === "Full") return null;
   const raise = { type: "raise", detent: "Sheet" } as const;
   const end = { type: "endAsked", callId: bar.state ? shownCall(bar.state.calls).id : "" } as const;
   const ending = comms.state && endPlace(comms.state) === "EndBesideBar" && bar.can(end);
   const opening = shell.can(raise);
-  const open = (query = "") => {
+  const open = async (query = "") => {
     if (!opening) return;
-    if (query !== "" && comms.state) void comms.send({ type: "requestTyped", about: comms.state.key, request: query }, "Owner");
-    void shell.send(raise);
+    const about = comms.state?.key;
+    const text = query.trim();
+    if (text !== "" && about !== undefined) await comms.send({ type: "requestTyped", about, request: text }, "Owner");
+    await shell.send(raise);
+    if (text !== "" && about !== undefined) await runtime.runPromise(CommsPrompts.use((prompts) => prompts.submit({ about, text })));
   };
   const phone = shell.state.trail.at(-1) === "Phone";
   const placeholder = ending ? "Ask during call" : phone ? "Call or ask" : person ? `Ask about ${person.label.split(" ")[0]}` : "Search or ask";
   return (
-    <div data-alpha-comms-dock="" data-host-chrome="" className="sticky bottom-0 z-dock mt-auto flex shrink-0 items-end gap-2 bg-background px-3 py-2">
-      <Button size="icon" aria-label="Open Alpha" className="size-11 shrink-0 bg-alpha text-alpha-foreground hover:bg-alpha/90" disabled={!opening} onClick={() => open()}><Mark aria-hidden /></Button>
-      {closed ?? <CommsQuery runtime={runtime} phone={phone && !ending} placeholder={placeholder} onAsk={open} />}
+    <div data-alpha-comms-dock="" data-host-chrome="" className="sticky bottom-0 z-dock mx-[3.9%] mt-auto mb-[max(clamp(1.5rem,6.8vw,1.75rem),calc(env(safe-area-inset-bottom)_+_0.75rem))] flex min-h-[clamp(4rem,18vw,4.625rem)] shrink-0 items-center gap-1 rounded-full bg-secondary px-2 py-1.5 shadow-lg">
+      <Button size="icon" aria-label="Open Alpha" className="size-11 shrink-0 overflow-hidden bg-alpha text-alpha-foreground hover:bg-alpha/90" disabled={!opening} onClick={() => void open()}><Mark className="size-[118%]" aria-hidden /></Button>
+      {typeof closed === "function" ? closed((query) => void open(query)) : closed ?? <CommsQuery runtime={runtime} phone={phone && !ending} placeholder={placeholder} onAsk={(query) => void open(query)} />}
       {ending && <Button variant="destructive" size="icon" className="size-11 shrink-0" aria-label="End call" onClick={() => void bar.send(end)}><PhoneOff /></Button>}
     </div>
   );
@@ -70,15 +74,16 @@ export function CommsBar({ runtime, closed, person }: CommsBarProps) {
 
 function CommsQuery({ runtime, phone, placeholder, onAsk }: { runtime: DockRuntime; phone: boolean; placeholder: string; onAsk: (query: string) => void }) {
   const machine = usePhone(runtime);
-  const query = phone ? runtime.runSync(Dialer.use((dialer) => dialer.get())).sought : undefined;
+  const filtering = phone && machine.can({ type: "search", typed: true });
+  const query = filtering ? runtime.runSync(Dialer.use((dialer) => dialer.get())).sought : undefined;
   return (
-    <form className="flex min-w-0 flex-1 items-center gap-1 rounded-full border border-border bg-muted px-1" onSubmit={(event) => {
+    <form className="flex min-w-0 flex-1 items-center gap-1 px-1" onSubmit={(event) => {
       event.preventDefault();
       const value = new FormData(event.currentTarget).get("query");
       if (typeof value === "string") onAsk(value.trim());
     }}>
-      <Input name="query" data-alpha-composer="" aria-label={placeholder} placeholder={placeholder} value={query}
-        onChange={phone ? (event) => {
+      <Input key={filtering ? "search" : "ask"} name="query" data-alpha-composer="" aria-label={placeholder} placeholder={placeholder} value={query}
+        onChange={filtering ? (event) => {
           const sought = event.target.value;
           runtime.runSync(Dialer.use((dialer) => dialer.set({ sought, filterLabel: "" })));
           const search = { type: "search", typed: sought.trim() !== "" } as const;

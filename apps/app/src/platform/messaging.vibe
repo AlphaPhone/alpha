@@ -1,0 +1,271 @@
+// spec/kit/read.md, "Story: Read from outside"; spec/app/platform/index.md, "A refusal carries a wait only when the other side answered 429 with a whole number of seconds, at most a day"; spec/app/platform/index.md, "Only a 2xx answer is the reply; every other status is a refusal"
+import { replied } from "../../gen/app__platform.effect.vibe"
+import { type Failure, type Listening, type Wired, Garbled, Refused, Unreachable, parsed, patience, refusal, sse } from "./remote.vibe"
+
+module web {
+  function toBase64Url(bytes: Uint8Array): string {
+    let binary = ""
+    for (const byte of bytes) binary += String.fromCharCode(byte)
+    return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "")
+  }
+
+  /** Cryptographically random URL-safe base64 string of `byteLength` bytes. @throws {never} */
+  export function randomBase64Url(byteLength: number): string {
+    const buf = new Uint8Array(byteLength)
+    crypto.getRandomValues(buf)
+    return toBase64Url(buf)
+  }
+
+  /** SHA-256 base64url digest of `verifier` for OAuth2 PKCE S256. @throws {never} */
+  export async function sha256Base64Url(verifier: string): Promise<string> {
+    const encoded = new TextEncoder().encode(verifier)
+    const digest = await crypto.subtle.digest("SHA-256", encoded)
+    return toBase64Url(new Uint8Array(digest))
+  }
+
+  /** Join `base`, `path`, and defined query parameters into one URL string without double slashes. @throws {never} */
+  export function buildUrl(base: string, path: string, params: Readonly<Record<string, string | undefined>>): string {
+    const trimmedBase = base.endsWith("/") ? base.slice(0, -1) : base
+    const normalizedPath = path.startsWith("/") ? path : `/${path}`
+    const search = new URLSearchParams()
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== "") search.set(key, value)
+    }
+    const query = search.toString()
+    return query === "" ? `${trimmedBase}${normalizedPath}` : `${trimmedBase}${normalizedPath}?${query}`
+  }
+}
+import { buildUrl, randomBase64Url, sha256Base64Url } from web
+
+/** Supported first-class user-account messaging providers. */
+export type ProviderName = "slack" | "telegram"
+
+/** Provider rejected a call for rate limiting (`429 Retry-After` or `FLOOD_WAIT_<N>`). */
+export error RateLimited { provider: ProviderName; retryAfter: number; code: string }
+
+/** User session or OAuth token is missing, invalid, expired, or revoked (`401` / `token_revoked` / `AUTH_KEY_UNREGISTERED`). */
+export error AuthRevoked { provider: ProviderName; code: string }
+
+/** Authenticated user lacks permission for the requested action (`403` / `CHAT_WRITE_FORBIDDEN` / `cant_update_message`). */
+export error Forbidden { provider: ProviderName; code: string }
+
+/** Client or provider rejected a bot or app token where only user-account authentication is permitted. */
+export error BotTokenRejected { provider: ProviderName; reason: string }
+
+/** Provider returned a structured domain-level error code. */
+export error ProviderError { provider: ProviderName; code: string; status: number }
+
+/** Unified failure union across transport, decoding, auth, rate-limiting, permissions, and provider errors. */
+export type MessagingFailure = Failure | RateLimited | AuthRevoked | Forbidden | BotTokenRejected | ProviderError
+
+/** Isolated secret session credentials kept outside spec machines and KeyValueStore JSON. */
+export interface StoredSecret {
+  readonly accessToken: Redacted.Redacted<string>
+  readonly refreshToken?: Redacted.Redacted<string>
+  readonly expiresAt?: number
+}
+
+/** Isolated secret session store for messaging accounts; secrets stay Redacted in platform memory or native secure storage. */
+export interface SessionStore {
+  get(key: string): Option.Option<StoredSecret>!!
+  set(key: string, secret: StoredSecret): void!!
+  delete(key: string): void!!
+  clear(): void!!
+  keys(): ReadonlyArray<string>!!
+}
+
+/** Platform service holding messaging user tokens isolated from renderer state and KeyValueStore persistence. */
+export service MessagingSessions: SessionStore {}
+
+/** Wrap raw user-account tokens into a `Redacted` session secret record. */
+export function secretOf(accessToken: string, refreshToken?: string, expiresAt?: number): StoredSecret {
+  return {
+    accessToken: Redacted.make(accessToken),
+    ...(refreshToken === undefined ? {} : { refreshToken: Redacted.make(refreshToken) }),
+    ...(expiresAt === undefined ? {} : { expiresAt }),
+  }
+}
+
+/** Extract the raw access token at the outbound HTTP boundary only. */
+export function tokenValue(secret: StoredSecret): string {
+  return Redacted.value(secret.accessToken)
+}
+
+/** Extract the raw refresh token at the outbound HTTP boundary only. */
+export function refreshTokenValue(secret: StoredSecret): string | undefined {
+  return secret.refreshToken === undefined ? undefined : Redacted.value(secret.refreshToken)
+}
+
+/** Isolated in-memory `SessionStore` whose contents never enter `KeyValueStore` or serialized machine state. */
+export function createSessionStore(): SessionStore {
+  const entries = new Map<string, StoredSecret>()
+  return {
+    get: (key: string) => sync(() => {
+      const found = entries.get(key)
+      return found === undefined ? Option.none() : Option.some(found)
+    }),
+    set: (key: string, secret: StoredSecret) => sync(() => { entries.set(key, secret) }),
+    delete: (key: string) => sync(() => { entries.delete(key) }),
+    clear: () => sync(() => { entries.clear() }),
+    keys: () => sync(() => Array.from(entries.keys())),
+  }
+}
+
+/** Default `MessagingSessions` layer backed by an isolated in-memory secret map. */
+export const messagingSessions = Layer.sync(MessagingSessions, createSessionStore)
+
+/** OAuth2 PKCE S256 verifier/challenge pair. */
+export interface PkcePair {
+  readonly verifier: string
+  readonly challenge: string
+  readonly method: "S256"
+}
+
+/** Generate a fresh OAuth2 PKCE S256 verifier and challenge pair. */
+export effect function createPkcePair(): PkcePair!! {
+  const verifier = randomBase64Url(32)
+  const challenge = try promise(() => sha256Base64Url(verifier))
+  return { verifier, challenge, method: "S256" }
+}
+
+/** Generate a fresh URL-safe OAuth2 CSRF `state` token. */
+export function randomState(): string {
+  return randomBase64Url(24)
+}
+
+/** Build a URL from `base`, `path`, and optional query parameters. */
+export function joinBaseUrl(base: string, path: string, params: Readonly<Record<string, string | undefined>>): string {
+  return buildUrl(base, path, params)
+}
+
+/** Omit `undefined` values from an object before JSON encoding. */
+export function compactRecord(input: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
+}
+
+/** Convert defined primitive query parameters into string entries for `HttpClientRequest`. */
+export function stringParams(params: Readonly<Record<string, string | number | boolean | undefined>>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) out[key] = String(value)
+  }
+  return out
+}
+
+/** Attach an `Authorization: Bearer` header to `request`. */
+export function bearerRequest(request: HttpClientRequest.HttpClientRequest, token: string): HttpClientRequest.HttpClientRequest {
+  return HttpClientRequest.bearerToken(request, token)
+}
+
+/** Attach an `Idempotency-Key` header when `idempotencyKey` is non-empty. */
+export function idempotentRequest(request: HttpClientRequest.HttpClientRequest, idempotencyKey?: string): HttpClientRequest.HttpClientRequest {
+  return idempotencyKey !== undefined && idempotencyKey !== ""
+    ? HttpClientRequest.setHeader(request, "idempotency-key", idempotencyKey)
+    : request
+}
+
+/** Build a JSON POST request with optional Bearer token and idempotency key. */
+export function jsonPost(
+  path: string,
+  body: Readonly<Record<string, unknown>>,
+  token?: string,
+  idempotencyKey?: string,
+): HttpClientRequest.HttpClientRequest {
+  const base = HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(path), compactRecord(body))
+  const withAuth = token === undefined ? base : bearerRequest(base, token)
+  return idempotentRequest(withAuth, idempotencyKey)
+}
+
+/** Build a GET request with query parameters and optional Bearer token. */
+export function queryGet(
+  path: string,
+  params: Readonly<Record<string, string | number | boolean | undefined>>,
+  token?: string,
+): HttpClientRequest.HttpClientRequest {
+  const base = HttpClientRequest.get(path, { urlParams: stringParams(params) })
+  return token === undefined ? base : bearerRequest(base, token)
+}
+
+/** Parse a `Retry-After` integer header value in seconds, falling back when missing or non-numeric. */
+export function parseRetryAfter(header: string | undefined, fallbackSeconds: number): number {
+  if (header === undefined) return fallbackSeconds
+  const trimmed = header.trim()
+  if (!/^\d+$/.test(trimmed)) return fallbackSeconds
+  const parsedValue = Number(trimmed)
+  return Number.isSafeInteger(parsedValue) && parsedValue >= 0 ? parsedValue : fallbackSeconds
+}
+
+/** Decode an untrusted JSON payload using `schema`, failing with `Garbled` on mismatch. */
+export effect function decodeWith<A>(schema: Schema.Decoder<A>, value: unknown): A!Garbled {
+  return Schema.decodeUnknownEffect(schema)(value) catch effect (cause) => { throw new Garbled({ cause }) }
+}
+
+/** Translate transport-level `Refused` statuses (`429`, `401`, `403`) into typed messaging failures. */
+export function mapHttpFailure(provider: ProviderName, failure: Failure): MessagingFailure {
+  return match (failure) {
+    when Refused: failure.status === 429
+      ? new RateLimited({ provider, retryAfter: failure.wait ?? 1, code: "rate_limited" })
+      : failure.status === 401
+        ? new AuthRevoked({ provider, code: "unauthorized" })
+        : failure.status === 403
+          ? new Forbidden({ provider, code: "forbidden" })
+          : failure;
+    default: failure;
+  }
+}
+
+/** Decoded HTTP response with status, headers, and parsed JSON body. */
+export interface OpenedJson {
+  readonly status: number
+  readonly headers: Readonly<Record<string, string>>
+  readonly body: unknown
+}
+
+/** Open an HTTP request via `wired` and read + parse its JSON body within `patience`. */
+export effect function openJson(wired: Wired, request: HttpClientRequest.HttpClientRequest): OpenedJson!(Unreachable | Garbled) {
+  const opened = try wired.open(request)
+  const text = timeout(opened.text, patience) catch effect (cause) => { throw new Unreachable({ cause }) }
+  const body = try parsed(text)
+  return { status: opened.status, headers: opened.headers, body }
+}
+
+/** Execute a JSON request through `wired`, routing non-2xx responses to `onErrorStatus` and 2xx responses to `decodeOk`. */
+export effect function executeJson<A>(
+  wired: Wired,
+  request: HttpClientRequest.HttpClientRequest,
+  onErrorStatus: (opened: OpenedJson) => MessagingFailure,
+  decodeOk: (opened: OpenedJson) => A!MessagingFailure,
+): A!MessagingFailure {
+  const opened = try openJson(wired, request)
+  if (!replied(opened.status)) throw onErrorStatus(opened)
+  return try decodeOk(opened)
+}
+
+/** Open an authenticated SSE stream via `wired`, translating non-2xx or JSON error responses into typed `MessagingFailure`s. */
+export function openEventStream<A>(
+  wired: Wired,
+  provider: ProviderName,
+  request: HttpClientRequest.HttpClientRequest,
+  schema: Schema.Decoder<A>,
+  onErrorBody: (status: number, body: unknown, retryAfter: string | undefined) => MessagingFailure,
+  listening?: Listening,
+): Stream.Stream<A, MessagingFailure> {
+  return Stream.unwrap(effect {
+    const opened = try wired.open(request)
+    const retryAfter = opened.headers["retry-after"]
+    const contentType = opened.headers["content-type"] ?? ""
+    if (!replied(opened.status) || contentType.includes("application/json")) {
+      const text = timeout(opened.text, patience) catch effect (cause) => { throw new Unreachable({ cause }) }
+      const body = parsed(text) catch () => undefined
+      throw onErrorBody(opened.status, body, retryAfter)
+    }
+    return sse(opened.body, listening)
+      |> Stream.mapError(%, (failure) => mapHttpFailure(provider, failure))
+      |> Stream.mapEffect(%, (data) => decodeWith(schema, data))
+  })
+}
+
+/** Map a non-2xx HTTP status with no structured error body into a `MessagingFailure`. */
+export function fallbackStatusError(provider: ProviderName, status: number, retryAfter: string | undefined): MessagingFailure {
+  return mapHttpFailure(provider, refusal(status, retryAfter))
+}

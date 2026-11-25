@@ -20,7 +20,7 @@ import { untimed } from "../runtime/reactor.vibe";
 import type { Time } from "../runtime/time.vibe";
 import { Incoming, mibOf } from "./adding.vibe";
 import { Offers, fits } from "./suggestion.vibe";
-import { Letters, type Words, acceptable, backFromDraft, policy } from "./composer.vibe";
+import { Letters, type Words, acceptable, backFromDraft, choiceOf, policy, restoreMyEdits, useLatestSavedDraft } from "./composer.vibe";
 import { Mail } from "./gmail.vibe";
 
 export interface ComposeProps {
@@ -93,9 +93,20 @@ export function Compose({ runtime, list }: ComposeProps) {
   });
   const kept = state.stored && flushed(state);
   const addressed = Object.values(typing).every((value) => value.trim() === "");
+  const changeFrom = (account: number) => ({ type: "changeFrom", account, access: accessOf(list, account), typing: !addressed }) as const;
+  const accounts = runtime.runSync(Mail.use((mail) => Effect.sync(() => [
+    { id: String(letter.account), email: from, grant: access.grant },
+    ...list.connected.filter(({ account }) => can(changeFrom(account), "Owner")).map(({ account, grant }) => ({ id: String(account), email: mail.email(account), grant })),
+  ])));
   const sending = { type: "prepare", kind: "Send", access, letter, kept: kept && addressed, again: false } as const;
   // spec/app/inbox/sending.md, "Story: Save my draft to Gmail, or delete it there, knowingly"
   const saving = { type: "prepare", kind: letter.gmail === 0 ? "SaveDraft" : "ReplaceDraft", access, letter, kept: kept && addressed, again: false } as const;
+  const lookUp = { type: "lookUp", access } as const;
+  const checkCopy = !letter.unsure && kept && addressed && can(lookUp, "Owner") ? () => void send(lookUp, "Owner") : undefined;
+  const clash = letter.draft.sync === "Conflicted";
+  const copy = clash ? runtime.runSync(Letters.use((all) => Effect.sync(() => all.copy(letter.gmail)))) : undefined;
+  const latest = choiceOf(copy);
+  const gmail = clash ? "clash" : letter.unsure ? "unsure" : letter.draft.sync === "Saving" ? "saving" : letter.gmail === 0 ? "none" : letter.draft.sync === "Edited" ? "unsaved" : "saved";
   const deleting = { type: "prepare", kind: "DeleteDraft", access, letter, kept, again: false } as const;
   const confirm = { type: "confirm", revision: letter.revision, access, now: untimed } as const;
   const reviewed = ops.state.kind === "Send" || ops.state.kind === "SaveDraft" || ops.state.kind === "ReplaceDraft" || ops.state.kind === "DeleteDraft";
@@ -119,8 +130,12 @@ export function Compose({ runtime, list }: ComposeProps) {
     <>
       <InboxComposer
         kind={titles[letter.kind]}
-        accounts={[{ id: String(letter.account), email: from, grant: access.grant }]}
+        accounts={accounts}
         from={String(letter.account)}
+        onFromChange={accounts.length > 1 ? (id) => {
+          const event = changeFrom(Number(id));
+          if (can(event, "Owner")) void send(event, "Owner");
+        } : undefined}
         to={line("to")}
         cc={line("cc")}
         bcc={line("bcc")}
@@ -131,16 +146,21 @@ export function Compose({ runtime, list }: ComposeProps) {
         attachments={words.files.map((file, at) => ({ id: String(at), name: file.name }))}
         onRemoveAttachment={(id) => detach(id)?.()}
         onAttach={adding.can(attach) && canAttach(letter, policy, 1) ? () => void adding.send(attach) : undefined}
-        notice={refused}
+        notice={refused ?? (state.lookup.status === "Failed" ? "unreachable" : state.notice === "MineRestored" ? "mineRestored" : state.notice === "SavedTaken" ? "savedTaken" : letter.textOnly ? "forwardTextOnly" : undefined)}
+        onNoticeAction={refused === undefined && state.lookup.status === "Failed" ? checkCopy : undefined}
         outcome={outcome === undefined ? undefined : { outcome }}
         storage={ready(state) ? undefined : state.load.status === "Failed" ? "unavailable" : "checking"}
         onReloadStorage={can({ type: "reload" }, "World") ? () => void send({ type: "reload" }, "World") : undefined}
         keeping={keepingOf(state)}
-        gmail={letter.gmail === 0 ? "none" : letter.unsure ? "unsure" : "saved"}
+        gmail={gmail}
+        clash={clash}
+        onRestoreMine={copy?.seen && can({ type: "restoreMine" }, "Owner") ? () => void runtime.runPromise(restoreMyEdits()) : undefined}
+        onUseSaved={latest && can(latest, "Owner") ? () => void runtime.runPromise(useLatestSavedDraft()) : undefined}
         sent={letter.sent === 0 ? "none" : letter.sent === letter.revision ? "already" : "earlier"}
         onKeepAgain={can({ type: "keepAgain" }, "World") ? () => void send({ type: "keepAgain" }, "World") : undefined}
         onSend={ops.can(sending, "Owner") ? () => void ops.send(sending, "Owner") : undefined}
         onSaveToGmail={ops.can(saving, "Owner") ? () => void ops.send(saving, "Owner") : undefined}
+        onCheckCopy={checkCopy}
         onDeleteGmailCopy={ops.can(deleting, "Owner") ? () => void ops.send(deleting, "Owner") : undefined}
         onSetAside={ready(state) && (can(aside, "Owner") || state.pending || state.unkept || state.write.status === "Loading") ? () => void runtime.runPromise(backFromDraft) : undefined}
         onDiscard={can({ type: "askDiscard" }, "Owner") ? () => void send({ type: "askDiscard" }, "Owner") : undefined}
@@ -235,6 +255,7 @@ export function Suggested({ runtime }: { runtime: ComposeProps["runtime"] }) {
   const letter = state.target !== "ToDraft" ? undefined : composer.open && composer.letter.id === state.draft ? composer.letter : held(composer.shelf, state.draft);
   const revision = letter?.revision ?? 0;
   const text = runtime.runSync(Offers.use((offers) => Effect.sync(() => offers.text(state.text))));
+  const account = runtime.runSync(Mail.use((mail) => Effect.sync(() => mail.email(letter?.account ?? state.account))));
   const before = letter === undefined ? "" : runtime.runSync(Letters.use((all) => Effect.sync(() => all.words(letter.id).text)));
   const review = { type: "review", revision } as const;
   // spec/app/inbox/suggestion.md, "Only the owner puts it in, once, as it was last shown, into the draft as it still is, adding or replacing as the owner chooses; text that does not fit is refused whole and the offer stays"
@@ -251,6 +272,7 @@ export function Suggested({ runtime }: { runtime: ComposeProps["runtime"] }) {
       text={text}
       from={state.from === "Agent" ? "alpha" : "owner"}
       source={runtime.runSync(Offers.use((offers) => Effect.sync(() => offers.source(state.text))))}
+      account={account}
       target={targets[state.target]}
       tooLong={state.blocked}
       onAdd={state.target === "ToDraft" ? using(true) : using(false)}

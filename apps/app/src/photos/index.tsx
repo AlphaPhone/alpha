@@ -1,6 +1,13 @@
+// spec/app/photos/index.md, "Story: Browse the library"
 import { area } from "../runtime/area.tsx";
 import { Photos } from "./Photos.tsx";
-import { back, photos } from "./photos.vibe";
+import { library } from "./photos.vibe";
+import { trash } from "./trash.vibe";
+import { viewer } from "./viewer.vibe";
+import { back } from "./area.vibe";
+import { together } from "../runtime/reactor.vibe";
+import { agentPhotos } from "./agent.vibe";
 
-/** Photos, at its view (areas.ts): the phone's photo library, its albums and the Viewer, held in memory while Alpha runs. */
-export default area(photos, Photos, { back });
+export const photosArea = area(together(library, viewer, trash, agentPhotos), Photos, { back });
+
+export default photosArea;

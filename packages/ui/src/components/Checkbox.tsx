@@ -13,8 +13,8 @@ export type CheckboxProps = Omit<ComponentProps<typeof CheckboxPrimitive.Root>, 
 export function Checkbox({ invalid = false, className, ...props }: CheckboxProps) {
   return (
     <CheckboxPrimitive.Root aria-invalid={invalid || undefined} className={cn(markTarget, className)} {...props}>
-      <span className="relative flex size-6 items-center justify-center text-primary-foreground">
-        <svg aria-hidden viewBox="0 0 24 24" className="absolute inset-0 size-full fill-background stroke-input stroke-2 transition-colors duration-fast ease-standard group-aria-invalid:stroke-destructive group-data-[state=checked]:fill-primary group-data-[state=checked]:stroke-primary group-data-[state=indeterminate]:fill-primary group-data-[state=indeterminate]:stroke-primary">
+      <span className="relative flex size-6 items-center justify-center text-alpha-foreground">
+        <svg aria-hidden viewBox="0 0 24 24" className="absolute inset-0 size-full fill-background stroke-input stroke-2 transition-colors duration-fast ease-standard group-aria-invalid:stroke-destructive group-data-[state=checked]:fill-alpha group-data-[state=checked]:stroke-alpha group-data-[state=indeterminate]:fill-alpha group-data-[state=indeterminate]:stroke-alpha">
           <rect x="1" y="1" width="22" height="22" rx="6" />
         </svg>
         <CheckboxPrimitive.Indicator className="relative flex">
