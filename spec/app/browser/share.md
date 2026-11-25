@@ -179,6 +179,20 @@ pure def openExternally(s: Share, kind: Kind, secure: bool): Step =
   else { state: { ...s, privately: false, confirmed: false, launching: true }, out: List(Elsewhere({ confirmed: false })) }
 ```
 
+### The owner can review opening a shown private web frame in another browser
+
+The button offers the currently visible private frame at its requested
+HTTPS address. The enclosing browser gives the address the owner entered,
+without claiming that the opaque frame's connection was verified. The exact
+page stays bound to the review until the owner confirms or cancels.
+
+```quint
+pure def canReviewPrivateFrame(s: Share, ready: bool): bool = ready and not(busy(s))
+
+pure def reviewPrivateFrame(s: Share, ready: bool): Share =
+  { ...s, privately: true, confirmed: false, handoff: V::present(s.handoff), notice: Quiet }
+```
+
 ### The owner confirms the private page as shown, or cancels
 
 ```quint

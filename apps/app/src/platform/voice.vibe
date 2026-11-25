@@ -164,7 +164,8 @@ export error VoiceBridgeFailed { method: string; cause: unknown }
 /** Recognition ran on the confirmed clip, stayed in custody, or could not start. */
 export type DictationAnswer =
   | { readonly kind: "recognized"; readonly text: string; readonly durationMs: number | undefined }
-  | { readonly kind: "lost" | "obscured" | "failed" }
+  | { readonly kind: "obscured" | "failed"; readonly durationMs: number | undefined }
+  | { readonly kind: "lost" }
 
 export service VoiceBridge {
   available(): boolean!!
@@ -742,7 +743,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
         try: () => localPlugin().transcribeLocalRecording({ requestId: fresh(), recordingId: clip.recordingId, automatic }),
         catch: (cause): "obscured" | "failed" => asRecord(cause)?.code === "dictation-obscured" ? "obscured" : "failed",
       }) catch (kind) => kind
-      return typeof result === "string" ? { kind: result } : { kind: "recognized", text: result.text ?? "", durationMs: clip.durationMs }
+      return typeof result === "string" ? { kind: result, durationMs: clip.durationMs } : { kind: "recognized", text: result.text ?? "", durationMs: clip.durationMs }
     },
     effect abandon(ticket: number): void!! {
       retiredRecording = Math.max(retiredRecording, ticket)
