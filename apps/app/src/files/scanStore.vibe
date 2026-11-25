@@ -42,6 +42,13 @@ module web {
   let android: ScanWriter | undefined
   const chunk = 256 * 1024
 
+  function base64(bytes: Uint8Array): string {
+    const parts: string[] = []
+    const step = 8192
+    for (let at = 0; at < bytes.length; at += step) parts.push(String.fromCharCode(...bytes.subarray(at, at + step)))
+    return btoa(parts.join(""))
+  }
+
   export async function saveAndroid(pdf: Blob): Promise<PdfReceipt> {
     const plugin = (android ??= registerPlugin<ScanWriter>("AlphaScan"))
     let id: string | undefined
@@ -50,7 +57,7 @@ module web {
       id = (await plugin.begin({ length: pdf.size })).id
       for (let offset = 0; offset < pdf.size; offset += chunk) {
         const part = new Uint8Array(await pdf.slice(offset, Math.min(pdf.size, offset + chunk)).arrayBuffer())
-        await plugin.append({ id, offset, data: part.toBase64() })
+        await plugin.append({ id, offset, data: base64(part) })
       }
       opened = true
       return await plugin.save({ id })
@@ -173,7 +180,7 @@ module web {
       return { confirmed: false, known: false }
     } finally {
       link.remove()
-      requestAnimationFrame(() => release(uri))
+      release(uri)
     }
   }
 
@@ -227,7 +234,7 @@ module web {
 
   export async function photoData(file: Blob): Promise<string> {
     const bytes = new Uint8Array(await file.arrayBuffer())
-    return bytes.toBase64()
+    return base64(bytes)
   }
 }
 import { changeDraft, copyText, drawPdf, loadDraft, openLink, photoData, release, rotateImage, saveAndroid, savePdf, scanImage, source } from web

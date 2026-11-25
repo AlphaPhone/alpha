@@ -250,7 +250,7 @@ const player = Layer.sync(Player, () => {
 })
 
 // spec/app/phone/voicemail.md, "Play needs the audio, and never plays during a call"
-const played = applying(Voicemail.Machine, (state) => ({ front: state.front, open: state.open, ticket: state.audio.ticket, ready: state.open && state.audio.status === "Loaded", playback: state.playback }), effect ({ open, ready, playback }) => {
+const played = applying(Voicemail.Machine, (state) => ({ front: state.front, open: state.open, ticket: state.audio.ticket, ready: state.open && state.audio.status === "Loaded", playback: state.playback }), effect ({ open, ready, playback, ticket }) => {
   const element = try (try Player).element()
   const store = try Voicemails
   const audio = ready ? (try store.get()).audio : ""
@@ -262,8 +262,9 @@ const played = applying(Voicemail.Machine, (state) => ({ front: state.front, ope
     return
   }
   sourceOf(element, audio)
-  promise(() => element.play()) catch effect () => {
-    try ignore((try Voicemail.Machine).send({ type: "pause" }))
+  tryPromise(() => element.play()) catch effect () => {
+    const machine = try Voicemail.Machine
+    if ((try machine.get()).audio.ticket === ticket) try ignore(machine.send({ type: "pause" }))
   }
 })
 

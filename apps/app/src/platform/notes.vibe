@@ -1,0 +1,60 @@
+// spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/editor.md, "Story: Write a note"; spec/app/notes/trash.md, "Story: Erase for good"
+import { RuntimeRequestError } from "@elizaos/agent/client"
+import { createNotesClient, type NotesInteractResult } from "@elizaos/plugin-notes/client"
+import type { NoteFormat, NotesSnapshot, NotesTrashErase, NotesTrashRecordingCleanup, StickyNote } from "@elizaos/plugin-notes/types"
+import { Agent } from "./agent.vibe"
+
+module transport {
+  import type { NotesTransport } from "@elizaos/plugin-notes/client"
+  import type { Runtime } from "./agent.vibe"
+
+  /** The agent's own authenticated client carries Notes' protocol. Its client decodes each unknown reply. @throws {never} */
+  export function via(runtime: Runtime): NotesTransport {
+    return {
+      async fetch<T>(path: string, { body, signal }: Parameters<NotesTransport["fetch"]>[1]): Promise<T> {
+        signal?.throwIfAborted()
+        const payload: unknown = body === undefined ? undefined : JSON.parse(body)
+        const reply = await runtime.request(path, payload)
+        signal?.throwIfAborted()
+        return reply as T
+      },
+    }
+  }
+}
+import { via } from transport
+
+/** The agent's answer could not confirm a Notes operation. */
+export error NotesFailed { cause: unknown; known: boolean }
+
+export service NoteStore {
+  read(): NotesSnapshot!NotesFailed
+  create(input: { readonly content: string; readonly format: NoteFormat; readonly creationId: string; readonly color?: StickyNote["color"] }): NotesInteractResult!NotesFailed
+  update(input: { readonly id: string; readonly expectedRevision: number; readonly content?: string; readonly format: NoteFormat }): NotesInteractResult!NotesFailed
+  discard(id: string): NotesInteractResult!NotesFailed
+  recover(id: string, expectedRevision: number): NotesInteractResult!NotesFailed
+  erase(review: NotesTrashErase): { readonly erased: number; readonly recordingCleanup: readonly NotesTrashRecordingCleanup[]; readonly state: NotesSnapshot }!NotesFailed
+  cleanup(): readonly NotesTrashRecordingCleanup[]!NotesFailed
+  cleaned(receipt: NotesTrashRecordingCleanup): boolean!NotesFailed
+}
+
+function failed(cause: unknown): NotesFailed {
+  return new NotesFailed({ cause, known: cause instanceof RuntimeRequestError && cause.status >= 400 && cause.status < 500 })
+}
+
+/** Notes is stored and decoded by Eliza's Notes module on the same agent as Ask Alpha. */
+export const noteStore = Layer.effect(NoteStore, effect {
+  const client = createNotesClient(via((try Agent).runtime))
+  return {
+    read: () => tryPromise({ try: (signal) => client.readState(signal), catch: failed }),
+    create: (input: { readonly content: string; readonly format: NoteFormat; readonly creationId: string; readonly color?: StickyNote["color"] }) =>
+      tryPromise({ try: (signal) => client.interact("create-note", { ...input, forceNew: true }, signal), catch: failed }),
+    update: (input: { readonly id: string; readonly expectedRevision: number; readonly content?: string; readonly format: NoteFormat }) =>
+      tryPromise({ try: (signal) => client.interact("update-note", { ...input }, signal), catch: failed }),
+    discard: (id: string) => tryPromise({ try: (signal) => client.interact("delete-note", { id }, signal), catch: failed }),
+    recover: (id: string, expectedRevision: number) =>
+      tryPromise({ try: (signal) => client.interact("restore-note", { id, expectedRevision }, signal), catch: failed }),
+    erase: (review: NotesTrashErase) => tryPromise({ try: (signal) => client.eraseTrash(review, signal), catch: failed }),
+    cleanup: () => tryPromise({ try: (signal) => client.readTrashRecordingCleanup(signal), catch: failed }),
+    cleaned: (receipt: NotesTrashRecordingCleanup) => tryPromise({ try: (signal) => client.completeTrashRecordingCleanup(receipt, signal), catch: failed }),
+  }
+})

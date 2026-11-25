@@ -16,10 +16,16 @@ const motion = Object.assign(new EventTarget(), { matches: false });
 vi.stubGlobal("matchMedia", () => motion);
 
 const closing: (() => Promise<void>)[] = [];
+let reading: Demo["scene"] = "Home";
+vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+  const passages = [...document.querySelectorAll<HTMLElement>("[data-passage]")];
+  return { top: passages.indexOf(this) <= passages.findIndex((passage) => passage.dataset.passage === reading) ? 0 : 10_000 } as DOMRect;
+});
+
 afterEach(async () => {
   for (const close of closing.splice(0)) await close();
   motion.matches = false;
-  shown(true);
+  reading = "Home";
 });
 
 async function open() {
@@ -33,120 +39,139 @@ async function open() {
     act(() => root.unmount());
     await runtime.dispose();
   });
+  const settled = () => act(async () => {
+    for (let turn = 0; turn < 8; turn += 1) await runtime.runPromise(Effect.yieldNow);
+  });
+  await settled();
   const until = (ok: (demo: Demo) => boolean) => act(() => runtime.runPromise(Effect.flatMap(Machine, (machine) => Stream.runHead(Stream.filter(machine.changes, ok)))));
   const later = async (ms: number, ok: (demo: Demo) => boolean = () => true) => {
     await act(() => runtime.runPromise(TestClock.adjust(ms)));
     await until(ok);
   };
   const state = () => runtime.runPromise(Effect.flatMap(Machine, (machine) => machine.get()));
-  const press = (name: string) => act(async () => {
-    const found = button(name);
-    if (!found || found.disabled || found.getAttribute("aria-disabled") === "true") throw new Error(`no button ${name} to press`);
-    found.click();
-    await runtime.runPromise(Effect.void);
-  });
-  return { until, later, state, press };
+  const scroll = async (scene: Demo["scene"]) => {
+    reading = scene;
+    act(() => {
+      window.dispatchEvent(new Event("scroll"));
+    });
+    await until((demo) => demo.scene === scene);
+    await settled();
+  };
+  return { until, later, state, scroll, settled };
 }
 
-const button = (name: string) => [...document.querySelectorAll("button")].find((found) => found.getAttribute("aria-label") === name);
+const phone = () => document.querySelector('[role="img"][aria-label^="An Alpha phone"]')!;
 
+const says = (text: string) => (phone().textContent ?? "").includes(text);
 
-function shown(visible: boolean) {
-  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (visible ? "visible" : "hidden") });
-  document.dispatchEvent(new Event("visibilitychange"));
-}
+const at = (demo: Demo) => [demo.scene, demo.beat, demo.whole];
 
-const at = (demo: Demo) => [demo.scene, demo.beat, demo.whole, demo.playing];
+const text = () => [says("Text Priya I’m running 10 minutes late"), phone().querySelector("[data-typing]") !== null, says("Running about 10 minutes late."), says("Cancel"), phone().querySelector("[data-touch]") !== null, says("I’ll tell you when she replies.")];
 
-const phone = () => document.querySelector('[role="img"][aria-label^="Alpha Home"]')!;
-
-const swaying = () => !phone().classList.contains("[animation-play-state:paused]");
-
-const chat = () => {
-  const screen = phone();
-  const text = screen.textContent ?? "";
-  return [text.includes("What’s on my calendar today?"), screen.querySelectorAll("i").length === 3, text.includes("Two things this afternoon."), screen.querySelectorAll("time").length];
-};
-
-describe('Watch Alpha at work (spec/site/index.md, "Story: Watch Alpha at work")', () => {
-  it('plays Home, the staged chat and the Calendar, and starts over (spec/site/index.md, "The phone shows Home, then the chat, then the Calendar, and starts over, each for its own time")', async () => {
+describe('Walk through what Alpha does (spec/site/index.md, "Story: Walk through what Alpha does")', () => {
+  it('opens on Home, asks its four questions in the Ask Alpha bar and starts over (spec/site/index.md, "The phone shows Home, the calendar, a text, a map, the inbox and a spoken note, each staged in beats")', async () => {
     const { later, state } = await open();
-    // spec/site/index.md, "When the page opens it plays from Home, unless the visitor asks for less motion"
-    expect(at(await state())).toEqual(["Home", 0, false, true]);
-    await later(2_700, (demo) => demo.scene === "Chat");
-    // spec/site/index.md, "A beat moves on only while the demo plays in sight, once its time has come"
-    for (const [beat, ms] of [[1, 410], [2, 410], [3, 1_350], [4, 290], [5, 220]]) await later(ms, (demo) => demo.beat === beat);
-    expect(at(await state())).toEqual(["Chat", 5, false, true]);
-    await later(4_820, (demo) => demo.scene === "Calendar");
-    await later(3_900, (demo) => demo.scene === "Home");
-    expect(at(await state())).toEqual(["Home", 0, false, true]);
+    // spec/site/index.md, "When the page opens the phone is on Home, shown whole for a visitor who asks for less motion"
+    expect([at(await state()), says("Ask Alpha"), phone().querySelector("[data-sheet]")?.getAttribute("data-sheet")]).toEqual([["Home", 0, false], true, "closed"]);
+    const asked: unknown[] = [];
+    for (const [beat, ms] of [[1, 1_600], [2, 3_000], [3, 3_000], [4, 3_000]]) {
+      await later(ms, (demo) => demo.beat === beat);
+      asked.push(phone().querySelector("[data-question]")?.textContent);
+    }
+    expect(asked).toEqual(["What’s on my calendar today?", "Text Priya I’m running late", "Coffee near lunch?", "What needs me in my inbox?"]);
+    // spec/site/index.md, "A beat moves on once its time has come, Home starting over and every other scene resting on its last beat"
+    await later(3_000, (demo) => demo.beat === 0);
+    expect([at(await state()), says("Ask Alpha")]).toEqual([["Home", 0, false], true]);
   });
 
-  it('pauses and goes on, out of sight too, and shows a picked scene (spec/site/index.md, "Pausing keeps the time the beat has left, and playing again goes on from it")', async () => {
-    const { later, until, state, press } = await open();
-    const swayed = [swaying()];
-    await later(1_000);
-    await press("Pause automatic playback");
-    await later(10_000);
-    expect([at(await state()), (await state()).left]).toEqual([["Home", 0, false, false], 1_700]);
-    swayed.push(swaying());
-    await press("Pause automatic playback");
-    swayed.push(swaying());
-    await later(1_700, (demo) => demo.scene === "Chat");
-
-    shown(false);
-    await until((demo) => demo.hidden);
-    await later(10_000);
-    expect(at(await state())).toEqual(["Chat", 0, false, true]);
-    swayed.push(swaying());
-    shown(true);
-    await later(410, (demo) => demo.beat === 1);
-    expect([...swayed, swaying()]).toEqual([true, false, true, false, true]);
-
-    // spec/site/index.md, "A scene the visitor picks is shown from its start, and whole where the demo is not playing or the visitor asks for less motion"
-    await press("Show Calendar");
-    expect([at(await state()), button("Show Calendar")?.getAttribute("aria-disabled")]).toEqual([["Calendar", 0, false, true], "true"]);
-    await press("Pause automatic playback");
-    await press("Show Chat");
-    expect(at(await state())).toEqual(["Chat", 0, true, false]);
+  it('shows the scene of the passage the visitor scrolls to, and sends the text only after the touch on Send (spec/site/index.md, "The phone shows the scene of the passage the visitor has reached, from its start")', async () => {
+    const { later, state, scroll } = await open();
+    await later(1_600, (demo) => demo.beat === 1);
+    await scroll("Text");
+    expect([at(await state()), phone().querySelector("[data-sheet]")?.getAttribute("data-sheet"), text()]).toEqual([["Text", 0, false], "open", [false, false, false, false, false, false]]);
+    const seen: unknown[] = [];
+    for (const [beat, ms] of [[1, 730], [2, 650], [3, 1_100], [4, 1_500], [5, 650], [6, 500]]) {
+      await later(ms, (demo) => demo.beat === beat);
+      seen.push(text());
+    }
+    expect(seen).toEqual([
+      [true, false, false, false, false, false],
+      [true, true, false, false, false, false],
+      [true, false, true, true, false, false],
+      [true, false, true, true, true, false],
+      [true, false, true, false, false, false],
+      [true, false, true, false, false, true],
+    ]);
+    // spec/site/index.md, "A beat moves on once its time has come, Home starting over and every other scene resting on its last beat"
+    await later(60_000);
+    expect(at(await state())).toEqual(["Text", 6, false]);
+    await scroll("Calendar");
+    expect([at(await state()), says("Running about 10 minutes late.")]).toEqual([["Calendar", 0, false], false]);
+    await scroll("Home");
+    expect([at(await state()), phone().querySelector("[data-sheet]")?.getAttribute("data-sheet")]).toEqual([["Home", 0, false], "closed"]);
   });
 
-  it('pauses for a visitor who asks for less motion (spec/site/index.md, "A visitor who comes to ask for less motion has the demo paused and the scene shown whole")', async () => {
-    const first = await open();
-    await first.later(3_000, (demo) => demo.scene === "Chat");
+  it('shows each scene whole for a visitor who asks for less motion, and plays it from its start when they stop asking (spec/site/index.md, "A visitor who comes to ask for less motion has the scene shown whole, and one who stops asking sees it play from its start")', async () => {
+    const { later, until, state, scroll, settled } = await open();
+    await scroll("Text");
+    await later(730, (demo) => demo.beat === 1);
     motion.matches = true;
     act(() => {
       motion.dispatchEvent(new Event("change"));
     });
-    await first.until((demo) => demo.still);
-    expect(at(await first.state())).toEqual(["Chat", 0, true, false]);
-
-    const second = await open();
-    expect(at(await second.state())).toEqual(["Home", 0, true, false]);
-    await second.later(10_000);
-    expect(at(await second.state())).toEqual(["Home", 0, true, false]);
+    await until((demo) => demo.still);
+    // spec/site/index.md, "A part of a scene shows from its beat on, the typing only during its own, and all but the typing when shown whole"
+    expect([at(await state()), text()]).toEqual([["Text", 0, true], [true, false, true, false, false, true]]);
+    await later(60_000);
+    expect(at(await state())).toEqual(["Text", 0, true]);
+    await scroll("Voice");
+    expect([at(await state()), says("Take a note. The studio gate code is 4417."), says("Saved to Notes")]).toEqual([["Voice", 0, true], true, true]);
+    motion.matches = false;
+    act(() => {
+      motion.dispatchEvent(new Event("change"));
+    });
+    await until((demo) => !demo.still);
+    await settled();
+    expect([at(await state()), says("Take a note."), says("Saved to Notes")]).toEqual([["Voice", 0, false], false, false]);
+    await later(880, (demo) => demo.beat === 1);
+    expect(says("Take a note.")).toBe(true);
   });
 
-  it('shows each part of the chat from its beat, and all but the typing when shown whole (spec/site/index.md, "The chat shows the question, the agent typing, its answer and the two events, each from its beat, and all but the typing when shown whole")', async () => {
-    const { later, press } = await open();
-    await later(2_700, (demo) => demo.scene === "Chat");
-    expect(chat()).toEqual([false, false, false, 0]);
-    const seen: unknown[] = [];
-    for (const [beat, ms] of [[1, 410], [2, 410], [3, 1_350], [4, 290], [5, 220]]) {
-      await later(ms, (demo) => demo.beat === beat);
-      seen.push(chat());
+  it('rests on Home, whole, for a visitor who opens the page asking for less motion (spec/site/index.md, "When the page opens the phone is on Home, shown whole for a visitor who asks for less motion")', async () => {
+    motion.matches = true;
+    const { later, state } = await open();
+    expect(at(await state())).toEqual(["Home", 0, true]);
+    await later(60_000);
+    expect([at(await state()), says("Ask Alpha"), phone().querySelector("[data-question]")]).toEqual([["Home", 0, true], true, null]);
+  });
+
+  it('answers the calendar, finds coffee, sums up the inbox and saves a spoken note, each to its last beat (spec/site/index.md, "The phone shows Home, the calendar, a text, a map, the inbox and a spoken note, each staged in beats")', async () => {
+    const { later, scroll } = await open();
+    const played: unknown[] = [];
+    for (const [scene, beats, shown] of [
+      ["Calendar", [730, 650, 1_100, 260, 220], ["Two things this afternoon.", "Lunch · Priya", "Video call"]],
+      ["Maps", [730, 650, 1_100, 420, 200, 200, 200], ["Three within a five-minute walk.", "Fog & Filter", "Second Sun"]],
+      ["Inbox", [730, 650, 1_200, 300, 260, 260, 500], ["Three need you. The other 41 can wait.", "Dana Okafor", "Draft replies"]],
+      ["Voice", [880, 450, 450, 450, 450, 900], ["Listening", "is 4417.", "Saved to Notes"]],
+    ] as const) {
+      await scroll(scene);
+      const before = shown.map(says);
+      for (const [index, ms] of beats.entries()) await later(ms, (demo) => demo.beat === index + 1);
+      played.push([scene, before.slice(1), shown.map(says), phone().querySelector("[data-typing]")]);
     }
-    expect(seen).toEqual([[true, false, false, 0], [true, true, false, 0], [true, false, true, 0], [true, false, true, 1], [true, false, true, 2]]);
-    await press("Pause automatic playback");
-    await press("Show Calendar");
-    await press("Show Chat");
-    expect(chat()).toEqual([true, false, true, 2]);
+    expect(played).toEqual([
+      ["Calendar", [false, false], [true, true, true], null],
+      ["Maps", [false, false], [true, true, true], null],
+      ["Inbox", [false, false], [true, true, true], null],
+      ["Voice", [false, false], [true, true, true], null],
+    ]);
   });
 
-  it('draws the page with no controls before the demo starts, so it shows without its script (spec/site/index.md, "When the page opens it plays from Home, unless the visitor asks for less motion")', async () => {
+  it('draws the page whole in its HTML, with Home on the phone and the way to GitHub, so it reads without its script (spec/site/index.md, "Before the page has opened the phone rests on Home")', async () => {
     const page = document.body.appendChild(document.createElement("div"));
     page.innerHTML = renderToString(<Site runtime={ManagedRuntime.make(Layer.provide(demo, browserPage))} />);
-    expect([page.querySelector("h1") !== null, page.querySelectorAll("img").length, page.querySelector('[aria-label="Phone demo controls"]')]).toEqual([true, 3, null]);
+    const links = [...page.querySelectorAll("a")].filter((link) => link.textContent.includes("Get Alpha on GitHub")).map((link) => link.getAttribute("href"));
+    expect([page.querySelector("h1")?.textContent, page.querySelectorAll("[data-passage]").length, page.querySelector("[data-scene]")?.getAttribute("data-scene"), links, (page.textContent ?? "").includes("Pixel 10a")]).toEqual(["Your phone.Your agent.", 6, "Home", ["https://github.com/eliza-research/alpha", "https://github.com/eliza-research/alpha"], true]);
     const runtime = ManagedRuntime.make(Layer.provideMerge(demo, Layer.merge(browserPage, TestClock.layer())));
     const mismatches: unknown[] = [];
     const root = await act(async () => {
@@ -159,33 +184,19 @@ describe('Watch Alpha at work (spec/site/index.md, "Story: Watch Alpha at work")
       await runtime.dispose();
     });
     await act(() => runtime.runPromise(Effect.flatMap(Machine, (machine) => Stream.runHead(Stream.filter(machine.changes, (demo) => demo.started)))));
-    expect([mismatches, page.querySelector('[aria-label="Phone demo controls"]') !== null]).toEqual([[], true]);
+    expect(mismatches).toEqual([]);
   });
 
-  it('stays paused when the visitor stops asking for less motion, and plays again when asked (spec/site/index.md, "A visitor who comes to ask for less motion has the demo paused and the scene shown whole")', async () => {
-    motion.matches = true;
-    const { until, later, state, press } = await open();
-    motion.matches = false;
-    act(() => {
-      motion.dispatchEvent(new Event("change"));
-    });
-    await until((demo) => !demo.still);
-    await later(10_000);
-    expect(at(await state())).toEqual(["Home", 0, true, false]);
-    await press("Pause automatic playback");
-    await later(2_700, (demo) => demo.scene === "Chat");
-    expect(at(await state())).toEqual(["Chat", 0, false, true]);
-  });
-
-  it('gives a beat told after a stall its full time, never running through beats at once (spec/site/index.md, "A beat moves on only while the demo plays in sight, once its time has come")', async () => {
+  it('gives a beat told after a stall its full time, never running through beats at once (spec/site/index.md, "A beat moves on once its time has come, Home starting over and every other scene resting on its last beat")', async () => {
     const [paced, stalled] = await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
       const told = yield* Machine;
-      yield* told.send({ type: "start", now: 0, still: false, hidden: false });
-      yield* told.send({ type: "tick", now: 2_800 });
+      yield* told.send({ type: "start", now: 0, still: false });
+      yield* told.send({ type: "show", scene: "Calendar", now: 0 });
+      yield* told.send({ type: "tick", now: 800 });
       const first = (yield* told.get()).due;
       yield* told.send({ type: "tick", now: 100_000 });
       return [first, yield* told.get()] as const;
     }).pipe(Effect.provide(machine()))));
-    expect([paced, stalled.beat, stalled.due]).toEqual([3_110, 1, 100_410]);
+    expect([paced, stalled.beat, stalled.due]).toEqual([1_380, 2, 101_100]);
   });
 });

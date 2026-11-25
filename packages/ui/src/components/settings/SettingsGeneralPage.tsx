@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { AppWindow, Battery, Bell, Bluetooth, Lock, Phone, Plane, Signal, Smartphone, Sun, Volume2, Wifi, WifiCog } from "lucide-react";
 import { ListGroup } from "../ListGroup.tsx";
 import { SettingsAndroidRow } from "./SettingsAndroidRow.tsx";
@@ -41,6 +42,10 @@ export type SettingsGeneralPageProps = SettingsAndroidProps &
     onRequestHome?: () => void;
     /** What Alpha said about the last reset attempt. */
     said?: SettingsResetNoticeProps["said"];
+    /** Update rows owned by the update area. */
+    updates?: ReactNode;
+    /** Commands in the General header. */
+    actions?: ReactNode;
   };
 
 const themes = { system: "System", light: "Light", dark: "Dark" } as const;
@@ -50,11 +55,11 @@ const themes = { system: "System", light: "Light", dark: "Dark" } as const;
  * and default apps, and Erase all data at the foot. Rows are numbered by slot, as on the first page.
  * @model spec/app/settings/index.md
  */
-export function SettingsGeneralPage({ wifi, bluetooth, mobileData, theme, alerts, image = false, told, onBack, onOpen, onPhone = false, reviewing, onErase, requestingHome, onRequestHome, said, starting, onAndroid, place, onPlace }: SettingsGeneralPageProps) {
+export function SettingsGeneralPage({ wifi, bluetooth, mobileData, theme, alerts, image = false, told, onBack, onOpen, onPhone = false, reviewing, onErase, requestingHome, onRequestHome, said, updates, starting, onAndroid, place, onPlace, actions }: SettingsGeneralPageProps) {
   const at = (row: number) => placed({ place, onPlace }, row);
   const android = { starting, onAndroid };
   return (
-    <SettingsPage title="General" told={told} onBack={onBack}>
+    <SettingsPage title="General" told={told} onBack={onBack} backLabel="Back to Settings" actions={actions}>
       {said ? <SettingsResetNotice said={said} /> : null}
       {onPhone ? (
         <ListGroup>
@@ -80,6 +85,7 @@ export function SettingsGeneralPage({ wifi, bluetooth, mobileData, theme, alerts
         <SettingsAndroidRow target="default-apps" title="Default apps" icon={<AppWindow />} {...android} {...at(10)} />
         {!image && (requestingHome || onRequestHome) ? <SettingsSetAsHomeRow requesting={requestingHome} onRequest={onRequestHome} {...at(14)} /> : null}
       </ListGroup>
+      {updates}
       {onPhone ? (
         <ListGroup>
           <SettingsResetRow reviewing={reviewing} onErase={onErase} {...at(11)} />

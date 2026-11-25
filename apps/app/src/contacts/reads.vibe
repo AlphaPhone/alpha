@@ -8,6 +8,7 @@ import { Machine as ComposerMachine } from "../../gen/app__messages__composer.ef
 import { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
 import { Machine as VoicemailMachine } from "../../gen/app__phone__voicemail.effect.vibe"
 import { Telephony, telephony } from "../platform/telephony.vibe"
+import { Device } from "../platform/device.vibe"
 import { contained } from "../runtime/reactor.vibe"
 import { Drafts } from "../messages/composer.vibe"
 import { Conversations, Inbox, titleOf } from "../messages/messages.vibe"
@@ -65,10 +66,12 @@ effect function voicemail(): unknown!!(VoicemailMachine | Voicemails) {
 }
 
 // spec/app/contacts/agent.md, "The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it"
-effect function contact(): unknown!!(ContactsMachine | Rows) {
+effect function contact(): unknown!!(ContactsMachine | Rows | Shell | Device) {
   const state = try (try ContactsMachine).get()
+  const shell = try (try Shell).get()
   const card = (try (try Rows).get()).card
-  if (readOf(openedAs(state.opened, state.card.status === "Loaded" && card !== undefined)) === "NoneSelected" || card === undefined) return { kind: "contact-read", status: "none-selected" }
+  const open = state.front && state.opened && state.form === "Shut" && shell.trail.at(-1) === "Contacts" && (try (try Device).showing())
+  if (readOf(openedAs(open, state.card.status === "Loaded" && card?.id === state.contact)) === "NoneSelected" || card === undefined) return { kind: "contact-read", status: "none-selected" }
   const values = (all: ReadonlyArray<string>) => all.map((one) => one.trim()).filter((one) => one !== "").slice(0, 32)
   return {
     kind: "contact-read", status: "read",
@@ -108,17 +111,27 @@ effect function keypad(number: string | undefined): unknown!!(Dialer | PhoneMach
 
 /** Contacts, opened on `query`: the agent learns only whether a contact matched. */
 effect function shown(query: string): unknown!!(Telephony | Rows | ContactsMachine | Shell) {
-  const page = effect {
-    try telephony("open", (c) => c.contacts.open())
-    return try telephony("list", (c) => c.contacts.list({ query, limit: 1 }))
-  } catch () => undefined
-  if (page === undefined) return { kind: "contact-show", status: "unavailable" }
-  try (try Rows).set({ sought: query })
-  try contained((try Shell).send({ type: "openView", view: "Contacts" }), "the agent's search")
+  const unavailable = { kind: "contact-show", status: "unavailable" }
+  const access = telephony("open", (c) => c.contacts.open()) catch () => undefined
+  if (access === undefined || !access.readable) return unavailable
+  const shell = try Shell
+  try contained(shell.send({ type: "openView", view: "Contacts" }), "the agent's search")
+  if ((try shell.get()).trail.at(-1) !== "Contacts") return unavailable
   const machine = try ContactsMachine
-  try Stream.runHead(Stream.filter(machine.changes, (s) => s.front && (s.list.status === "Loaded" || s.list.status === "Failed")))
-  try ignore(machine.send({ type: "search", typed: true }))
-  return { kind: "contact-show", status: page.contacts.length > 0 ? "shown" : "not-found" }
+  const current = try Effect.timeoutOption(Stream.runHead(Stream.filter(machine.changes, (s) => s.front && (s.list.status === "Loaded" || s.list.status === "Failed"))), "8 seconds")
+  if (Option.isNone(current) || Option.isNone(current.value) || current.value.value.form !== "Shut") return unavailable
+  if (current.value.value.opened) try ignore(machine.send({ type: "closeContact" }))
+  if (current.value.value.chip !== "Everyone") try ignore(machine.send({ type: "pick", chip: "Everyone" }))
+  try (try Rows).set({ sought: query })
+  const search = machine.send({ type: "search", typed: true }) catch () => undefined
+  if (search === undefined) return unavailable
+  const ticket = search.state.list.ticket
+  const answer = try Effect.timeoutOption(Stream.runHead(Stream.filter(machine.changes, (s) => !s.front ||
+    s.list.ticket > ticket || (s.list.ticket === ticket && s.list.status !== "Loading"))), "8 seconds")
+  if (Option.isNone(answer) || Option.isNone(answer.value)) return unavailable
+  const currentAnswer = answer.value.value
+  if (!currentAnswer.front || currentAnswer.list.ticket !== ticket || currentAnswer.list.status !== "Loaded") return unavailable
+  return { kind: "contact-show", status: currentAnswer.rows > 0 ? "shown" : "not-found" }
 }
 
 // spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"
@@ -141,7 +154,7 @@ effect function drafted(body: string, number: string | undefined): ("drafted" | 
 }
 
 /** The phone's answer to the agent's read, opening or draft, as eliza's schema for it reads it. Nothing it does calls, sends or writes. */
-export effect function answerReading(operation: Reading): unknown!!(Telephony | MessagesMachine | Inbox | Conversations | VoicemailMachine | Voicemails | ContactsMachine | Rows | Dialer | PhoneMachine | Shell | ComposerMachine | Drafts | Callers) {
+export effect function answerReading(operation: Reading): unknown!!(Telephony | MessagesMachine | Inbox | Conversations | VoicemailMachine | Voicemails | ContactsMachine | Rows | Dialer | PhoneMachine | Shell | ComposerMachine | Drafts | Callers | Device) {
   switch (operation.type) {
     case "messages_read_selected": return checked(operation, try thread(), { kind: "messages-read", status: "unavailable" })
     case "voicemail_read_selected": return checked(operation, try voicemail(), { kind: "voicemail-read", status: "unavailable" })

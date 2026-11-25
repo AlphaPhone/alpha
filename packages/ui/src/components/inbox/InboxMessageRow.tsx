@@ -64,25 +64,26 @@ export function InboxMessageRow({ sender, subject, snippet, time, unread = false
       aria-label={`${unread ? "Unread, " : ""}${sender}, ${subject}${attachment ? ", has attachments" : ""}`}
       disabled={selecting ? !onChosenChange : !onOpen} onClick={activate}
       onPointerDown={start} onPointerUp={end} onPointerCancel={() => { swipeFromRef.current = undefined; }}
-      className={cn(focusRing, "flex w-full touch-pan-y items-start gap-3.5 px-5 py-3 text-left focus-visible:-outline-offset-focus", chosen && "bg-accent")}
+      className={cn(focusRing, "flex w-full touch-pan-y items-start gap-3.5 bg-background px-5 py-3.25 text-left focus-visible:-outline-offset-focus")}
     >
       {selecting ? (
-        <span aria-hidden className={cn("mt-2 flex size-6 shrink-0 items-center justify-center rounded-full border", chosen ? "border-primary bg-primary text-primary-foreground" : "border-input")}>
+        <span aria-hidden className={cn("mt-2 grid size-5.5 flex-none place-items-center rounded-box border text-background", chosen ? "border-foreground bg-foreground" : "border-muted-foreground")}>
           {chosen ? <Check className="size-4" /> : null}
         </span>
       ) : null}
-      <Avatar name={sender} className="size-11" />
+      <Avatar name={sender} className="size-11 text-sm font-bold" />
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="flex items-center gap-1.5">
-          <span className={cn("min-w-0 flex-1 truncate text-base", unread ? "font-bold" : "font-medium")}>{sender}</span>
+        <span className="flex h-4.25 items-center gap-1.5 leading-tight">
+          <span className={cn("min-w-0 truncate text-base leading-tight", unread ? "font-bold" : "font-medium")}>{sender}</span>
+          <span className="flex-1" />
           {attachment ? <Paperclip aria-hidden className="size-3.5 shrink-0 text-muted-foreground" /> : null}
-          <span className="shrink-0 text-xs text-muted-foreground">{time}</span>
+          <span className="shrink-0 text-xs leading-tight whitespace-nowrap text-muted-foreground">{time}</span>
         </span>
-        <span className="mt-0.5 flex items-center gap-2">
-          <span data-inbox-subject="" className="min-w-0 flex-1 truncate text-sm">{subject}</span>
+        <span className="mt-0.5 flex h-4.25 items-center gap-2 leading-tight">
+          <span data-inbox-subject="" className={cn("min-w-0 flex-1 truncate text-subject leading-tight", unread && "font-semibold")}>{subject}</span>
           <span aria-hidden className={cn("size-2 shrink-0 rounded-full", unread && "bg-primary")} />
         </span>
-        <span className="mt-0.5 truncate text-sm text-muted-foreground">{snippet}</span>
+        <span className="mt-0.5 block h-4 truncate text-snippet leading-tight text-muted-foreground">{snippet}</span>
       </span>
     </button>
   );

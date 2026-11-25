@@ -1,7 +1,6 @@
-// spec/app/phone/voicemail.md, "Closing the voicemail returns to the list"; spec/app/messages/index.md, "Back returns from a conversation or the picker to the list, and reads it again"; spec/app/contacts/index.md, "Closing the contact returns to the list"; spec/app/phone/details.md, "The page reads only while it is in front, and leaving forgets what it read"
+// spec/app/phone/voicemail.md, "Closing the voicemail returns to the list"; spec/app/messages/index.md, "Back returns from a conversation or the picker to the list, and reads it again"; spec/app/contacts/index.md, "Closing the contact returns to the list"
 import * as Contacts from "../../gen/app__contacts.effect.vibe"
 import * as Messages from "../../gen/app__messages.effect.vibe"
-import * as Info from "../../gen/app__phone__details.effect.vibe"
 import * as Voicemail from "../../gen/app__phone__voicemail.effect.vibe"
 import { contained } from "../runtime/reactor.vibe"
 
@@ -32,12 +31,8 @@ export const contactsBack = effect {
   const step = state.confirming ? { type: "keep" } as const
     : state.form !== "Shut" && !Contacts.pending(state) ? { type: "discard" } as const
     : state.opened ? { type: "closeContact" } as const
+    : Contacts.canEndSearch(state) ? { type: "endSearch" } as const
     : undefined
   return try stepped(contacts, step)
 }
 
-/** Back on Settings → Phone closes the page. */
-export const detailsBack = effect {
-  const info = try Info.Machine
-  return try stepped(info, (try info.get()).shown ? { type: "show", showing: false } as const : undefined)
-}

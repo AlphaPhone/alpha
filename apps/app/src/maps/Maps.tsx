@@ -1,6 +1,6 @@
 // spec/app/maps/index.md, "Story: Move between the screen's modes"; spec/app/maps/index.md, "Story: Search for a place"; spec/app/maps/index.md, "Story: Look at a place"; spec/app/maps/index.md, "Story: Get directions"; spec/app/maps/index.md, "Story: Navigate"; spec/app/maps/index.md, "Story: Use my location"; spec/app/maps/index.md, "Story: Let the agent help with Maps"; spec/app/maps/credits.md, "Story: See the map for what I am looking at"
 import { Alert, Banner, Button, cn, Input, type MapCamera, MapsChip, MapsPillButton, MapsPlaceRow, MapsRoundButton, MapsSearchBar, MapsSheet, MapsStatusCard, type MapStyle, MapView, Spinner } from "@repo/ui";
-import { ArrowUpDown, Bike, Bus, Car, Check, ChevronLeft, Clock, ExternalLink, Footprints, Globe, Info, LocateFixed, type LucideIcon, MapPin, Navigation, Phone, Search, Share2, Star, X } from "lucide-react";
+import { ArrowUpDown, Bike, Bus, Car, Check, ChevronLeft, Clock, Coffee, Dumbbell, ExternalLink, Footprints, Fuel, Globe, Info, LocateFixed, type LucideIcon, MapPin, Navigation, Phone, Search, Share2, ShoppingCart, SquarePlus, Star, Utensils, X } from "lucide-react";
 import { useState, useSyncExternalStore } from "react";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { untimed } from "../runtime/reactor.vibe";
@@ -23,6 +23,12 @@ import { coverageOf, settled, tile } from "./maps.vibe";
 
 const ways: ReadonlyArray<{ travel: Travel; label: string; icon: LucideIcon }> = [
   { travel: "Drive", label: "Drive", icon: Car }, { travel: "Transit", label: "Transit", icon: Bus }, { travel: "Walk", label: "Walk", icon: Footprints }, { travel: "Bicycle", label: "Bike", icon: Bike },
+];
+
+/** The kinds of place the search sheet offers before anything is typed, each searched for by its words. */
+const kindsOfPlace: ReadonlyArray<{ label: string; query: string; icon: LucideIcon }> = [
+  { label: "Coffee", query: "coffee", icon: Coffee }, { label: "Food", query: "food", icon: Utensils }, { label: "Gas", query: "gas station", icon: Fuel },
+  { label: "Pharmacy", query: "pharmacy", icon: SquarePlus }, { label: "Groceries", query: "groceries", icon: ShoppingCart }, { label: "Gym", query: "gym", icon: Dumbbell },
 ];
 
 /** How tall the search sheet stands at each of its heights: raised, it stops under the search field. */
@@ -267,6 +273,14 @@ function SearchSheet({ screen, state, seen, saved, height, onRecent }: { screen:
       <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto pb-30">
         {state.search.status === "Loading" && <Spinner className="mx-5 my-2" label="Searching" />}
         {state.search.status === "Failed" && !holding(state.link) && <p role="status" className="px-5 py-2 text-sm text-muted-foreground">The search failed.</p>}
+        {state.query === "" && (
+          <nav aria-label="Kinds of place" className="flex touch-pan-x gap-2 overflow-x-auto px-5 pt-1 pb-3.5 [scrollbar-width:none]">
+            {kindsOfPlace.map(({ label, query, icon: Icon }) => (
+              <MapsChip key={query} tone="fill" label={label} icon={<Icon />} disabled={!can({ type: "search", query, chars: query.length })}
+                onClick={() => { onRecent(query); void send({ type: "search", query, chars: query.length }); }} />
+            ))}
+          </nav>
+        )}
         {state.query === "" && state.recent.length > 0 && (
           <div>
             <div className="flex items-center justify-between pr-3 pl-5">

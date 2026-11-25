@@ -6,7 +6,7 @@ import type { Effect as Out, Event } from "../../gen/app__workflows__list.effect
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { fromAreas } from "../home/cards.vibe"
 import type { Shell as ShellState } from "../../gen/app__shell.effect.vibe"
-import { Agent } from "../platform/agent.vibe"
+import type { Agent } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { type Job, answer, applying, reacting, started, together } from "../runtime/reactor.vibe"
@@ -162,13 +162,19 @@ export effect function backList(): boolean!!List.Machine {
 // spec/app/home/cards.md, "The Workflows card shows the first two enabled rows and how many more, marked when they are not current, stale or partly unavailable, and is not drawn without a row"
 const place = (current: ShellState) => showing(current, "Workflows") ? "Workflows" : current.trail.length === 0 ? "Home" : "Away"
 
-const followPage = applying(Shell, place, effect (at) => {
+const followPage = applying(Shell, (current) => {
+  const at = place(current)
+  return { at, assistant: at === "Workflows" && current.assistant !== "Bar" }
+}, effect ({ at, assistant }) => {
   if (at !== "Workflows") {
     const list = try List.Machine
     try ignore(list.send({ type: "dismissFilters" }))
-    try ignore(list.send({ type: "closePlace" }))
+    while (List.canClosePlace(try list.get())) {
+      const closed = (map(list.send({ type: "closePlace" }), () => true) catch () => false)
+      if (!closed) break
+    }
   }
-  if (at !== "Away") try refresh()
+  if (at === "Home" || (at === "Workflows" && !assistant)) try refresh()
 })
 
 const followForeground = started(effect {
