@@ -1,6 +1,14 @@
 import type { ComponentProps } from "react";
-import { Calendar } from "lucide-react";
+import { createLucideIcon } from "lucide-react";
 import { HomeCard } from "./HomeCard.tsx";
+
+/** lucide-react 1.18.0's calendar, which v121 drew on Home: a day lower than today's lucide calendar, with longer rings and the rule on 10. */
+const Calendar = createLucideIcon("calendar", [
+  ["path", { d: "M8 2v4", key: "1cmpym" }],
+  ["path", { d: "M16 2v4", key: "4m81vk" }],
+  ["rect", { width: "18", height: "18", x: "3", y: "4", rx: "2", key: "1hopcy" }],
+  ["path", { d: "M3 10h18", key: "8toen8" }],
+]);
 
 /** An event or a reminder as the agenda card shows it. */
 export type HomeAgendaItem = {
