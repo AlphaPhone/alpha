@@ -2,7 +2,7 @@
 import { Button, Input, Mark } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import { ArrowUp, Mic, PhoneOff } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useRef, useState } from "react";
 import type { Machine as ShellMachine } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe";
@@ -14,12 +14,11 @@ import type { Machine as CommsMachine } from "../../gen/app__phone__comms.effect
 import { endPlace } from "../../gen/app__phone__comms.ts";
 import { useMachine as useComms } from "../../gen/app__phone__comms.react.ts";
 import { Dialer } from "./phone.vibe";
-import { CommsPrompts } from "./comms.vibe";
+import { CommsPrompts, commsHeld } from "./comms.vibe";
 
 /** The services for the targets in the communications dock. */
 export type CommsServices = CommsMachine | BarMachine | ShellMachine | PhoneMachine | Dialer | CommsPrompts;
 type DockRuntime = ManagedRuntime.ManagedRuntime<CommsServices, unknown>;
-const talkHoldMs = 500;
 const holdMovement = 10;
 
 export interface CommsBarProps {
@@ -50,13 +49,15 @@ export function CommsBar({ runtime, closed, person }: CommsBarProps) {
   const comms = useComms(runtime);
   const bar = useBar(runtime);
   const shell = useShell(runtime);
-  const hold = useRef<{ id: number; x: number; y: number; timer: number }>(undefined);
+  const hold = useRef<{ id: number; x: number; y: number; cancel: () => void }>(undefined);
   const skipTap = useRef(false);
-  const release = () => {
-    if (hold.current) window.clearTimeout(hold.current.timer);
+  const release = useCallback(() => {
+    hold.current?.cancel();
     hold.current = undefined;
-  };
-  useEffect(() => () => { if (hold.current) window.clearTimeout(hold.current.timer); }, []);
+  }, []);
+  const holdButton = useCallback((node: HTMLButtonElement | null) => {
+    if (node) return release;
+  }, [release]);
   if (!shell.state || shell.state.assistant === "Sheet" || shell.state.assistant === "Full") return null;
   const raise = { type: "raise", detent: "Sheet" } as const;
   const end = { type: "endAsked", callId: bar.state ? shownCall(bar.state.calls).id : "" } as const;
@@ -80,16 +81,19 @@ export function CommsBar({ runtime, closed, person }: CommsBarProps) {
   const placeholder = ending ? "Ask during call" : phone ? "Call or ask" : person ? `Ask about ${person.label.split(" ")[0]}` : "Search or ask";
   return (
     <div data-alpha-comms-dock="" data-host-chrome="" className="sticky bottom-0 z-dock mx-[3.9%] mt-auto mb-[max(clamp(1.5rem,6.8vw,1.75rem),calc(env(safe-area-inset-bottom)_+_0.75rem))] flex min-h-[clamp(4rem,18vw,4.625rem)] shrink-0 items-center gap-1 rounded-full bg-secondary px-2 py-1.5 shadow-lg">
-      <Button size="icon" aria-label="Open Alpha" className="size-11 shrink-0 touch-none overflow-hidden bg-alpha text-alpha-foreground hover:bg-alpha/90" disabled={!opening}
+      <Button ref={holdButton} size="icon" aria-label="Open Alpha" className="size-11 shrink-0 touch-none overflow-hidden bg-alpha text-alpha-foreground hover:bg-alpha/90" disabled={!opening}
         onPointerDown={(event) => {
           if (!event.isPrimary || event.button !== 0) return;
           release();
           skipTap.current = false;
-          event.currentTarget.setPointerCapture?.(event.pointerId);
-          hold.current = { id: event.pointerId, x: event.clientX, y: event.clientY, timer: window.setTimeout(() => {
+          const id = event.pointerId;
+          event.currentTarget.setPointerCapture?.(id);
+          const fiber = runtime.runFork(commsHeld(() => {
+            if (hold.current?.id !== id) return;
             skipTap.current = true;
             talk();
-          }, talkHoldMs) };
+          }));
+          hold.current = { id, x: event.clientX, y: event.clientY, cancel: () => fiber.interruptUnsafe() };
         }}
         onPointerMove={(event) => {
           const from = hold.current;

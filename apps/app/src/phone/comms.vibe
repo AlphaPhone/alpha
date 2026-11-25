@@ -44,6 +44,11 @@ const prompts = Layer.effect(CommsPrompts, effect {
   }
 })
 
+export effect function commsHeld(held: () => void): void!! {
+  try sleep("500 millis")
+  try sync(held)
+}
+
 // spec/app/phone/comms.md, "End is beside the bar when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn"
 const calls = following(Phone, (phone) => ({ live: liveCall(phone), emergencyCall: liveCall(phone) && !clear(phone) }), Comms.Machine, (call): Event => ({ type: "callChanged", ...call }), "Device")
 
