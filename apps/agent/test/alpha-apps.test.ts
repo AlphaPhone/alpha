@@ -5,8 +5,9 @@ import os from "node:os";
 import path from "node:path";
 import { defineRoutes } from "@elizaos/agent";
 import { describe, expect, it } from "vitest";
+import { pageQueries } from "../gen/agent.ts";
 import { AlphaAppsStore, alphaAppsPluginName, createAlphaAppsPlugin, notesTranscriptionRoutes } from "../src/plugins/index.ts";
-import { advanceDueDate } from "../src/plugins/store.ts";
+import { advanceDueDate, civilToEpochMs } from "../src/plugins/store.ts";
 import type { AgentRoute, AgentRuntimeLike } from "../src/plugins/types.ts";
 
 const emptyMessage = (text: string, metadata?: Record<string, unknown>) =>
@@ -418,11 +419,17 @@ describe("Alpha product plugin: Reminders actions, provider, recurrence, and rou
       const nextItem = (completed?.data as { nextItem: ReminderItemRecord | null }).nextItem;
       expect(nextItem?.dueDate).toBe("2026-12-01");
       expect(nextItem?.subtasks.every((s) => !s.done)).toBe(true);
+      expect(nextItem?.agentTaskId).not.toBe(item.agentTaskId);
+      expect(tasks.some((task) => task.trigger.atIso?.startsWith("2026-12-01"))).toBe(true);
 
       const deleted = await callRoute(routes, "DELETE", "/api/alpha/reminders/items/{id}", { params: { id: nextItem!.id } });
       expect(deleted.status).toBe(200);
       const restored = await callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/restore", { params: { id: nextItem!.id } });
       expect(restored.status).toBe(200);
+
+      const badRestore = await callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/restore", { params: { id: "missing-id" }, body: { item: {} } });
+      expect(badRestore.status).toBe(404);
+      expect(store.getReminders().items.every((entry) => typeof entry.id === "string" && Number.isFinite(entry.revision))).toBe(true);
 
       const listDeleted = await callRoute(routes, "DELETE", "/api/alpha/reminders/lists/{id}", { params: { id: workListId }, query: { mode: "reassign" } });
       expect(listDeleted.status).toBe(200);
@@ -605,6 +612,90 @@ describe("Alpha product plugin: Reminders actions, provider, recurrence, and rou
     expect(completed.body.item).toMatchObject({ id: selected.id, completed: false, dueDate: "2027-03-16", history: [
       { revision: selected.revision, dueAtMs: Date.UTC(2027, 2, 13, 9, 30), completedAtMs: now, skippedDates: 2 },
     ] });
+  });
+
+  // spec/agent/index.md, "The page reaches exactly the routes its platform services call, and nothing else"
+  // spec/agent/index.md, "The page names the query values each gated route can receive"
+  it("admits every page route and query parameter the phone app calls on the resident agent", () => {
+    const rawLines = fs.readFileSync(path.join(import.meta.dirname, "../host/routes.jsonl"), "utf8").split("\n").filter((line) => line.trim() !== "");
+    const spelled = { GET: "Get", POST: "Post", PUT: "Put", PATCH: "Patch", DELETE: "Delete" } as const;
+    const routes = rawLines.map((line) => {
+      const route = JSON.parse(line) as { method: keyof typeof spelled; path: string; stream?: boolean };
+      const query = pageQueries
+        .filter(({ method, path: routePath }) => method === spelled[route.method] && routePath === route.path)
+        .map(({ key, kind, value }) => ({
+          key,
+          accepts: kind === "AnyQuery" ? { kind: "any" as const }
+            : kind === "PatternQuery" ? { kind: "pattern" as const, pattern: value } : { kind: "pinned" as const, value },
+        }));
+      return query.length === 0 ? route : { ...route, query };
+    });
+    const gate = defineRoutes(routes);
+    const required = [
+      { method: "DELETE" as const, target: "/api/alpha/reminders/items/rem-1" },
+      { method: "DELETE" as const, target: "/api/alpha/reminders/lists/list-1?mode=cascade" },
+      { method: "DELETE" as const, target: "/api/lifeops/calendar/events/ev-1?expectedProviderVersion=v1&idempotencyKey=key-1&cancellationMode=organizer_cancel&notifyAttendees=false&recurrenceScope=instance" },
+      { method: "POST" as const, target: "/api/views/interact-claim" },
+      { method: "POST" as const, target: "/api/views/interact-result" },
+      { method: "POST" as const, target: "/api/messages/reply-draft" },
+      { method: "POST" as const, target: "/api/cloud/warm" },
+      { method: "GET" as const, target: "/api/lifeops/calendar/sync-control" },
+      { method: "POST" as const, target: "/api/lifeops/calendar/sync-control" },
+      { method: "GET" as const, target: "/api/lifeops/calendar/sync-control/destinations" },
+      { method: "GET" as const, target: "/api/lifeops/calendar/links" },
+    ];
+    for (const check of required) {
+      const admission = gate.admit({ method: check.method, target: check.target, streamed: false, body: undefined });
+      expect({ ...check, tag: admission.tag }).toEqual({ ...check, tag: "Admitted" });
+    }
+  });
+
+  // spec/agent/index.md, "Story: Run Alpha's agent on the phone"
+  it("resolves DST civil times accurately and guards list mutations, task reconciliation, and malformed clock sync", async () => {
+    const formatLocal = (ms: number, timeZone: string) =>
+      new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(ms));
+    const springLa = civilToEpochMs("2026-03-08", 7 * 60, "America/Los_Angeles");
+    expect(springLa).not.toBeNull();
+    expect(formatLocal(springLa!, "America/Los_Angeles")).toBe("03/08/2026, 07:00");
+    const fallNy = civilToEpochMs("2026-11-01", 3 * 60, "America/New_York");
+    expect(fallNy).not.toBeNull();
+    expect(formatLocal(fallNy!, "America/New_York")).toBe("11/01/2026, 03:00");
+
+    const store = new AlphaAppsStore({ now: () => Date.UTC(2026, 10, 24, 15, 0, 0) });
+    const { runtime } = makeFakeRuntime([
+      { taskId: "owner-task-1", kind: "personal-assistant.reminder", ownerVisible: true, promptInstructions: "First", status: "Scheduled", trigger: { kind: "once", atIso: "2026-11-24T16:00:00.000Z" }, metadata: { title: "First", priority: "medium" } },
+      { taskId: "owner-task-2", kind: "personal-assistant.reminder", ownerVisible: true, promptInstructions: "Second", status: "Scheduled", trigger: { kind: "once", atIso: "2026-11-24T17:00:00.000Z" }, metadata: { title: "Second", priority: "low" } },
+    ]);
+    const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime });
+    const action = plugin.actions!.find((a) => a.name === "REMINDERS_MANAGE")!;
+    const routes = plugin.routes!;
+
+    const listed = await action.handler(runtime, emptyMessage("List"), emptyState, { parameters: { op: "list" } });
+    expect(listed?.success).toBe(true);
+    const reconciled = store.getReminders().items;
+    expect(new Set(reconciled.map((i) => i.id)).size).toBe(2);
+    expect(reconciled.map((i) => i.priority).sort()).toEqual(["low", "medium"]);
+
+    const renameMissing = await action.handler(runtime, emptyMessage("Rename"), emptyState, { parameters: { op: "rename_list", listName: "NoSuchList", name: "Hijacked" } });
+    expect(renameMissing?.success).toBe(false);
+    expect(store.getReminders().lists.find((l) => l.id === "default")?.name).toBe("Reminders");
+
+    const moveMissing = await action.handler(runtime, emptyMessage("Move"), emptyState, { parameters: { op: "move", id: reconciled[0].id, listName: "NoSuchList" } });
+    expect(moveMissing?.success).toBe(false);
+
+    const filterMissing = await action.handler(runtime, emptyMessage("Query"), emptyState, { parameters: { op: "list", listName: "NoSuchList" } });
+    expect((filterMissing?.data as { items: unknown[] }).items).toEqual([]);
+
+    const missingSub = await action.handler(runtime, emptyMessage("Toggle"), emptyState, { parameters: { op: "toggle_subtask", id: reconciled[0].id, subtaskTitle: "Does not exist" } });
+    expect(missingSub?.success).toBe(false);
+
+    const createdAlarm = await callRoute(routes, "POST", "/api/alpha/clock/alarms", { body: { hour: 7, minute: 0, sound: "chime" } });
+    const alarmId = (createdAlarm.body.alarm as { id: string }).id;
+    const patchedBadSound = await callRoute(routes, "PATCH", "/api/alpha/clock/alarms/{id}", { params: { id: alarmId }, body: { sound: "invalid_sound" } });
+    expect((patchedBadSound.body.alarm as { sound: string }).sound).toBe("chime");
+
+    const malformedSync = await callRoute(routes, "PUT", "/api/alpha/clock", { body: { alarms: [null, {}], timers: [null], world: [null] } });
+    expect(malformedSync.status).toBe(200);
   });
 });
 
