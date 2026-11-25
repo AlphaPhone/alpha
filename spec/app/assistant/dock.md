@@ -237,6 +237,12 @@ pure def stepOneGestureAsksOnce(before: Dock, via: str, after: Dock, out: List[E
 
 ### A press does one thing: a tap is never also a drag, and a late click never taps
 
+As on v121, the resting bar drags from anywhere on it, not only its handle:
+from its background, the Alpha mark and an empty field. Nothing is taken
+until the finger moves a few points, so a tap stays a tap. Its other
+controls (Send, Talk, Stop, the chat actions) keep their own presses, and a
+field with a draft in it scrolls by finger instead of dragging.
+
 ```quint
 pure def stepAPressDoesOneThing(before: Dock, via: str, after: Dock, out: List[Effect]): bool =
   out.every(e => match e {
