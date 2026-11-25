@@ -192,7 +192,9 @@ phone lists them (`apps/app/src/shell/order.ts`), and eliza's agent service
 writes them into the launch (`spec/os/agentService/config.md`). Each id is
 the app's name in lower case, which the phone's renderer opens as that app.
 Clock and Reminders keep the other names the product plugin gave them, at
-most four each, as a launch allows. The model chooses which view a request means, by one of
+most four each, as a launch allows. Home is also named the home screen and
+the launcher, the phone's own names for it, so that next to Maps' directions
+home it reads as a screen and not a place. The model chooses which view a request means, by one of
 these names; nothing matches the owner's words. Whether a prepared view
 opens is the phone's: an app the phone does not admit, or any app over a
 sensitive screen, stays closed (`spec/app/assistant/index.md`, "Story: Let
@@ -201,7 +203,7 @@ Alpha open what it is talking about").
 ```quint
 type LaunchView = { id: str, label: str, path: str, aliases: List[str] }
 pure val launchViews: List[LaunchView] = List(
-  { id: "home", label: "Home", path: "/home", aliases: List() },
+  { id: "home", label: "Home", path: "/home", aliases: List("home screen", "launcher") },
   { id: "phone", label: "Phone", path: "/phone", aliases: List() },
   { id: "messages", label: "Messages", path: "/messages", aliases: List() },
   { id: "inbox", label: "Inbox", path: "/inbox", aliases: List() },
