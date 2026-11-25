@@ -10,7 +10,8 @@ import { OpenedPhoto, photoEmailAllowed, photoLook, photoMessageType, type Media
 import { photoLooks } from "../platform/photoCanvas.vibe";
 import { ClipEditor } from "./ClipEditor.tsx";
 import { CropFrame, CropHeader, editFrame, editHeader, editTool } from "./CropFrame.tsx";
-import { headingOf, trashDaysLabel, trashDaysLeft } from "./Grid.tsx";
+import { trashDaysLabel, trashDaysLeft } from "./Grid.tsx";
+import { headingOf } from "../runtime/dateHeading.ts";
 import { Time } from "../runtime/time.vibe";
 import { Device } from "../platform/device.vibe";
 
