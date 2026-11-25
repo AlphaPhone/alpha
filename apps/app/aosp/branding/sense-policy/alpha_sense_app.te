@@ -34,7 +34,20 @@ allow alpha_sense_app {
     permission_checker_service
 }:service_manager find;
 
-# Keep the app domain outside the network socket and port grants.
-neverallow alpha_sense_app self:{ tcp_socket udp_socket rawip_socket icmp_socket packet_socket } {
+# Keep the app domain outside network socket, netlink, Bluetooth/tunnel/vsock and netd grants.
+neverallow alpha_sense_app self:{
+    tcp_socket
+    udp_socket
+    rawip_socket
+    icmp_socket
+    packet_socket
+    netlink_route_socket
+    sctp_socket
+    bluetooth_socket
+    tun_socket
+    vsock_socket
+} {
     create connect bind listen accept
 };
+neverallow alpha_sense_app { netd dnsproxyd_socket fwmarkd_socket }:sock_file write;
+neverallow alpha_sense_app netd:unix_stream_socket connectto;

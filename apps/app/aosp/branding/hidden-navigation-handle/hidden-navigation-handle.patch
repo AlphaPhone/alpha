@@ -19,7 +19,7 @@
 +    @Override
 +    public void draw(Canvas canvas) {
 +        if (getId() == R.id.stashed_handle
-+                && getResources().getBoolean(R.bool.config_alpha_home_back_only)) {
++                && getResources().getBoolean(R.bool.config_alpha_hide_navigation_handle)) {
 +            return;
 +        }
 +        super.draw(canvas);

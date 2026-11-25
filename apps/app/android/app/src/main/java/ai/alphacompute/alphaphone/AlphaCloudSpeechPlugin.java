@@ -49,15 +49,25 @@ public final class AlphaCloudSpeechPlugin extends SpeechStreamBridgePlugin {
 
  @Override protected void credentialRefused(String environment, String credentialId, String reason) { authority.refused(environment, credentialId, reason); }
 
+ void cancelReadingSpeech(String requestId) {
+  if (requestId == null || requestId.isBlank()) return;
+  retireSpeechAuthority();
+ }
+
  @Override protected String diagnosticFormat() { return "alpha-cloud-stream-timing-v1"; }
 
  private Map<String, String> origins() {
   Map<String, String> origins = new HashMap<>();
   try {
-   String config = getBridge().getConfig().getPluginConfiguration(SIGN_IN).getConfigJSON().toString();
+   com.getcapacitor.Bridge bridge = getBridge();
+   com.getcapacitor.CapConfig capConfig = bridge == null ? null : bridge.getConfig();
+   com.getcapacitor.PluginConfig pluginConfig = capConfig == null ? null : capConfig.getPluginConfiguration(SIGN_IN);
+   org.json.JSONObject json = pluginConfig == null ? null : pluginConfig.getConfigJSON();
+   if (json == null) return origins;
+   String config = json.toString();
    for (SignInRegistration.Environment environment : SignInRegistration.parse(CredentialJson.object(CredentialJson.parse(config), SIGN_IN)).environments())
     origins.put(environment.name, environment.apiOrigin);
-  } catch (IllegalArgumentException refused) {
+  } catch (IllegalArgumentException | NullPointerException refused) {
    origins.clear();
   }
   return origins;

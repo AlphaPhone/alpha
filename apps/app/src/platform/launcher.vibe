@@ -104,10 +104,10 @@ export const phoneLauncher = Layer.effect(Launcher, effect {
       const handed = tryPromise(() => system.openNotificationShade()) catch () => undefined
       return handed === undefined ? refused(undefined) : handed.status === "opened" ? { done: true } : refused(handed.status)
     },
-    changes: Stream.callback<void>((queue) => acquireRelease(
-      promise(() => system.addListener("launcherAppsChanged", () => { Queue.offerUnsafe(queue, undefined) })),
-      (listening) => ignore(tryPromise(() => listening.remove())),
-    )),
+    changes: Stream.callback<void>((queue) => Effect.asVoid(acquireRelease(
+      Effect.orElseSucceed(tryPromise(() => system.addListener("launcherAppsChanged", () => { Queue.offerUnsafe(queue, undefined) })), () => undefined),
+      (listening) => listening === undefined ? Effect.void : ignore(tryPromise(() => listening.remove())),
+    ))),
   }
 })
 

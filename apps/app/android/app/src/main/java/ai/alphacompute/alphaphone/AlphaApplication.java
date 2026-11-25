@@ -16,6 +16,7 @@ public final class AlphaApplication extends Application {
 
  @Override public void onCreate() {
   super.onCreate();
+  if (android.os.Process.isIsolated() || AlphaResetPlugin.RESET.isRecoveryProcess(this, getProcessName())) return;
   AlphaAgentCredentials credentials = new AlphaAgentCredentials(this);
   AgentService.useCredentials(credentials);
   HostedDigestDelivery digests = getPackageName().equals(getProcessName())

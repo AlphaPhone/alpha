@@ -5,14 +5,14 @@ import type { MessagesClient, MmsBinding, MmsSendResult, OperationId } from "@el
 import type { PhoneClient, PhoneNumber, TelephonySubscription } from "@elizaos/os-bridges"
 
 module held {
-  import { registerPlugin } from "@capacitor/core"
   import { Schema, Semaphore } from "effect"
   import { createDeferredDeletions, type ActionJournalPlugin, type StagedDeletion } from "@elizaos/os-bridges"
   import { rejectionCode } from "@elizaos/os-bridges"
-  import { addressBookPlugin, createAddressBookClient, createContactNames } from "@elizaos/os-bridges"
+  import { createAddressBookClient, createContactNames, type AddressBookNativePlugin } from "@elizaos/os-bridges"
   import { messagesClient, type MessagesNativePlugin } from "@elizaos/os-bridges"
   import { parseMmsSendResult, type MmsBinding, type OperationId } from "@elizaos/os-bridges"
   import { phoneClient, type PhoneNativePlugin, type PhoneNumber } from "@elizaos/os-bridges"
+  import { plugin as capacitorPlugin } from "./capacitor.ts"
   import { composerPlugin } from "./composerPort.vibe"
 
   type OwnerDialPlugin = PhoneNativePlugin & {
@@ -53,10 +53,25 @@ module held {
     return phase === "deleted" || phase === "undone" || phase === "conflict" || phase === "unknown" ? phase : undefined
   }
 
-  function make() {
-    const journal = registerPlugin<Journal>("ElizaActionJournal")
-    const nativePhone = registerPlugin<OwnerDialPlugin & MessagesNativePlugin>("ElizaTelephony")
-    const addressBook = addressBookPlugin()
+  const unavailableContacts = (): Promise<never> => Promise.reject(Object.assign(new Error("ElizaContacts is not registered"), { code: "UNIMPLEMENTED" }))
+
+  const absentAddressBook: AddressBookNativePlugin = {
+    openAddressBook: unavailableContacts,
+    listContacts: unavailableContacts,
+    getContact: unavailableContacts,
+    resolveContactNames: unavailableContacts,
+    createContact: unavailableContacts,
+    updateContact: unavailableContacts,
+    deleteContact: unavailableContacts,
+    stageContactDeletion: unavailableContacts,
+    contactDeletionReceipt: unavailableContacts,
+    contactChangeReceipt: unavailableContacts,
+  } as unknown as AddressBookNativePlugin
+
+  function make(withContacts: boolean) {
+    const journal = capacitorPlugin<Journal>("ElizaActionJournal")
+    const nativePhone = capacitorPlugin<OwnerDialPlugin & MessagesNativePlugin>("ElizaTelephony")
+    const addressBook = withContacts ? capacitorPlugin<AddressBookNativePlugin>("ElizaContacts") : absentAddressBook
     return {
       deletions: createDeferredDeletions(journal),
       deletionReceipt: (staged: StagedDeletion) => deletionReceipt(journal, staged),
@@ -75,10 +90,11 @@ module held {
       names: createContactNames(addressBook),
     }
   }
-  let made: ReturnType<typeof make> | undefined
+  let madeWithContacts: ReturnType<typeof make> | undefined
+  let madeWithoutContacts: ReturnType<typeof make> | undefined
   /** eliza's clients of the image's telephony and contacts plugins, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
-  export function clients() {
-    return (made ??= make())
+  export function clients(withContacts: boolean) {
+    return withContacts ? (madeWithContacts ??= make(true)) : (madeWithoutContacts ??= make(false))
   }
   /** The code a plugin rejected a call with, or none for an answer that never came. @throws {never} */
   export function codeOf(cause: unknown): string | undefined {
@@ -154,15 +170,24 @@ export effect function sendFromComposer<A>(trustedTap: boolean, current: () => P
   return try nativeCall("composerSend", (signal) => send(clients.composer(trustedTap, signal, current)))
 }
 
+const addressBookTimeout = "15 seconds"
+
 /** The address book keeps one read ticket, shared by list, card and number searches. A new read waits until the outstanding native answer settles. */
 export effect function readAddressBook<A>(method: string, read: (book: AddressBookClient) => Promise<A>): A!(TelephonyAbsent | TelephonyRefused)!Telephony {
   const clients = try (try Telephony).clients()
-  return try clients.addressBookRead.withPermit(Effect.uninterruptible(nativeCall(method, () => read(clients.contacts))))
+  return try clients.addressBookRead.withPermit(effect {
+    return timeout(nativeCall(method, () => read(clients.contacts)), addressBookTimeout) catch effect (cause) => match (cause) {
+      when TelephonyRefused: throw cause;
+      default: throw new TelephonyRefused({ method, code: undefined, tag: "Timeout", cause });
+    }
+  })
 }
 
 /** On an Alpha image: eliza's own clients of `ElizaTelephony`, `ElizaContacts` and `ElizaActionJournal`, which the image's host registers. */
 export const phoneTelephony = Layer.succeed(Telephony, {
-  clients: (): TelephonyClients!TelephonyAbsent => registered("ElizaTelephony") ? sync(() => clients()) : Effect.fail(new TelephonyAbsent({ method: "clients" })),
+  clients: (): TelephonyClients!TelephonyAbsent => registered("ElizaTelephony")
+    ? sync(() => clients(registered("ElizaContacts")))
+    : Effect.fail(new TelephonyAbsent({ method: "clients" })),
 })
 
 /** In a browser there is no image: every call is refused before anything is asked. */

@@ -1,7 +1,7 @@
 // spec/app/update/index.md, "Story: Check for updates"; spec/app/update/index.md, "Story: Install an update"; spec/app/update/index.md, "Story: Allow automatic updates"; spec/app/update/page.md, "Story: Open Alpha while an update is pending"
 
 module held {
-  import { registerPlugin } from "@capacitor/core"
+  import { plugin as capacitorPlugin } from "./capacitor.ts"
 
   interface Listening { remove(): Promise<void> }
 
@@ -17,15 +17,14 @@ module held {
     addListener(event: "alphaUpdateReady" | "alphaUpdateSettled", heard: () => void): Promise<Listening>
   }
 
-  let made: AlphaDevicePlugin | undefined
   /** @throws {never} */
   export function plugin(): AlphaDevicePlugin {
-    return (made ??= registerPlugin<AlphaDevicePlugin>("AlphaDevice"))
+    return capacitorPlugin<AlphaDevicePlugin>("AlphaDevice")
   }
   /** Each time Android says an update is ready to activate or has settled. @throws {never} */
   export function listen(heard: () => void): () => void {
     const handles = (["alphaUpdateReady", "alphaUpdateSettled"] as const).map((event) => plugin().addListener(event, heard).catch(() => undefined))
-    return () => { for (const handle of handles) void handle.then((one) => one?.remove()) }
+    return () => { for (const handle of handles) void handle.then((one) => one?.remove().catch(() => undefined)) }
   }
 }
 import { listen, plugin } from held
@@ -128,7 +127,9 @@ export const phoneLauncherUpdates = Layer.succeed(LauncherUpdates, {
   answer: (ids: Ids, ready: boolean) => asked("activateUpdate", () => plugin().activateUpdate({ ...ids, ready, ...(ready ? { resumeEligible: true } : {}) })),
   continueInstall: (ids: Ids) => asked("continueUpdate", () => plugin().continueUpdate(ids)),
   allowAutomatic: () => Effect.map(Effect.option(asked("openUpdatePermissionSettings", () => plugin().openUpdatePermissionSettings())), (opened) => Option.isSome(opened) && opened.value.status === "opened"),
-  told: Stream.callback<void>((queue) => Effect.acquireRelease(sync(() => listen(() => Queue.offerUnsafe(queue, undefined))), (stop) => sync(stop))),
+  told: Stream.suspend(() => registered(updater)
+    ? Stream.callback<void>((queue) => Effect.asVoid(Effect.acquireRelease(sync(() => listen(() => Queue.offerUnsafe(queue, undefined))), (stop) => sync(stop))))
+    : Stream.empty),
 })
 
 /** A browser updates nothing: there is no updater to ask, and so no update pending. */

@@ -18,9 +18,12 @@ policy denies direct network socket creation and does not add network, broad
 privileged-app, platform-app or audio HAL domain membership.
 
 The pinned CP2A release and its inherited configs leave
-`android.content.pm.ignore_mac_permissions_package` disabled. This flag changes
-how Android interprets the certificate-and-package stanza, so an image release
-must verify the built policy and the installed process and data contexts. Host
-staging tests cover the source and build-selection contract. G7 requires an
-enforcing build and on-device evidence, including the microphone and indicator
-checks under the dedicated domain.
+`android.content.pm.ignore_mac_permissions_package` disabled (`false`). Because `AlphaPhone`
+and `AlphaSense` currently share `alphaphone_app.x509.pem`, a `<package>` stanza is required
+in `mac_permissions.xml`; if `ignore_mac_permissions_package` were ever enabled, `AlphaSense`
+would silently fall back to network-capable `priv_app`. Assert `ignore_mac_permissions_package=false`
+at build time, verify the built policy and installed process/data contexts on-device, and plan
+a dedicated signing key for `AlphaSense` in the next offline key ceremony so `seapp_contexts`
+does not depend on `<package>` scoping. Host staging tests cover the source and build-selection
+contract. G7 requires an enforcing build and on-device evidence, including the microphone and
+indicator checks under the dedicated domain.

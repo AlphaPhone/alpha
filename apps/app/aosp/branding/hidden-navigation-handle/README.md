@@ -1,7 +1,8 @@
 # Hide Alpha's taskbar navigation indicator
 
-This patch changes only drawing for Launcher3's `R.id.stashed_handle` when the existing
-`config_alpha_home_back_only` product flag is true. Other uses of `StashedHandleView`,
+This patch changes only drawing for Launcher3's `R.id.stashed_handle` when the dedicated
+`config_alpha_hide_navigation_handle` product flag is true (decoupled from
+`config_alpha_home_back_only`, which stays `false` so Recents remains enabled). Other uses of `StashedHandleView`,
 including the bubble-bar handle, call the original `View.draw()`. The view, its layout,
 visibility, sampling, animations, touch regions, insets and accessibility properties stay
 unchanged. No Home, Back, Recents or horizontal-switch behavior is changed here.
@@ -32,7 +33,7 @@ revision, affected-file hashes and the existing default-off Alpha bool supplied 
 `home-back-keyboard.patch`. It makes no source changes unless `--apply` is added. Exact
 already-applied source is recognized; drift, symlinks and partial state are rejected.
 
-`scripts/stage-alpha-os-branding.py` does not apply this patch. Test the indicator across light/dark content, Home/app/lockscreen,
+`apps/app/scripts/aosp.ts` does not apply this branding patch yet; apply it with `apply.py` on the reviewed Launcher3 checkout. Test the indicator across light/dark content, Home/app/lockscreen,
 keyboard, rotation, transient taskbar states, and long press. Preserve working Home, edge
 Back, IME and accessibility fallback. Confirm bubble-bar affordances still render. No wipe
 or user-setting rewrite is part of this change.

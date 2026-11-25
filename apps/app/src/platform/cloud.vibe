@@ -7,12 +7,13 @@ import { CLOUD_ENVIRONMENT, signInAccounts } from "./voice.vibe"
 import { WiFi, phoneWiFi } from "./wifi.vibe"
 
 module held {
-  import { cloudClient } from "@elizaos/os-bridges"
+  import { cloudClient, type ElizaCloudPlugin } from "@elizaos/os-bridges"
+  import { plugin as capacitorPlugin } from "./capacitor.ts"
 
   let made: ReturnType<typeof cloudClient> | undefined
   /** eliza's client of the plugin, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
   export function client(): ReturnType<typeof cloudClient> {
-    return (made ??= cloudClient())
+    return (made ??= cloudClient(capacitorPlugin<ElizaCloudPlugin>("ElizaCloud")))
   }
 }
 import { client } from held
@@ -57,8 +58,22 @@ module web {
       : false
     return { url, method: init?.method ?? "GET", headers: Object.fromEntries(new Headers(init?.headers)), body, signal: init?.signal ?? undefined }
   }
+  /** Combine an optional caller signal with a bounded deadline signal. @throws {never} */
+  export function boundedSignal(parent: AbortSignal | undefined, milliseconds: number): { readonly signal: AbortSignal | undefined; readonly release: () => void } {
+    if (typeof AbortSignal.timeout !== "function") return { signal: parent, release: () => undefined }
+    const deadline = AbortSignal.timeout(milliseconds)
+    if (parent === undefined) return { signal: deadline, release: () => undefined }
+    const merged = new AbortController()
+    const relay = () => merged.abort(parent.aborted ? parent.reason : deadline.reason)
+    if (parent.aborted) relay()
+    else {
+      parent.addEventListener("abort", relay, { once: true })
+      deadline.addEventListener("abort", relay, { once: true })
+    }
+    return { signal: merged.signal, release: () => { parent.removeEventListener("abort", relay); deadline.removeEventListener("abort", relay) } }
+  }
 }
-import { answer, asked, unauthorized } from web
+import { answer, asked, boundedSignal, unauthorized } from web
 
 /** eliza's client takes an origin and a fetch: this origin is never reached, since each platform's fetch below sends by its own way. */
 const placeholder = "https://cloud.invalid"
@@ -136,14 +151,30 @@ function relayed(method: string, path: string, query: Readonly<Record<string, st
   return { method: method as CloudMethod, path: path as CloudPath, query, headers: ours(headers), ...(body === undefined ? {} : { body }) }
 }
 
+const relayTimeoutMs = 10_000
+
+function singleValuedQuery(params: URLSearchParams): Record<string, string> | undefined {
+  const query: Record<string, string> = {}
+  for (const [key, value] of params.entries()) {
+    if (Object.hasOwn(query, key)) return undefined
+    query[key] = value
+  }
+  return query
+}
+
 /** The cloud on the phone as a `Remote`: one whole answer per request. The plugin streams nothing, so a stream is never sent. */
 function plugged(relay: Relay, wifi: WiFi.Shape): Remote {
   return {
     effect call(request: HttpClientRequest.HttpClientRequest): unknown!Failure {
+      if (request.body._tag !== "Empty" && request.body._tag !== "Uint8Array") {
+        throw new Unsent({ cause: "the phone relays only JSON to the cloud" })
+      }
       const text = request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : ""
       const body = text === "" ? undefined : parsed(text) catch effect (cause) => { throw new Unsent({ cause }) }
+      const query = singleValuedQuery(new URLSearchParams(UrlParams.toString(request.urlParams)))
+      if (query === undefined) throw new Unsent({ cause: "duplicate query parameters cannot be relayed" })
       const headers = Object.fromEntries(Object.entries(request.headers).filter((one): one is [string, string] => typeof one[1] === "string"))
-      const sent = relayed(request.method, request.url, Object.fromEntries(new URLSearchParams(UrlParams.toString(request.urlParams))), headers, body)
+      const sent = relayed(request.method, request.url, query, headers, body)
       if (sent === undefined) throw new Unsent({ cause: `the phone relays no ${request.method} to the cloud` })
       try networked(wifi)
       const reply = timeout(tryPromise({ try: (signal) => relay.request({ ...sent, signal }), catch: undelivered }), patience) catch effect (cause) => match (cause) {
@@ -162,20 +193,36 @@ function plugged(relay: Relay, wifi: WiFi.Shape): Remote {
 function relaying(relay: Relay, wifi: WiFi.Shape): typeof globalThis.fetch {
   return async (input, init) => {
     const { url, method, headers, body, signal } = asked(input, init)
-    const sent = body === undefined ? relayed(method, url.pathname, Object.fromEntries(url.searchParams), headers, undefined)
-      : body !== false && "text" in body ? relayed(method, url.pathname, Object.fromEntries(url.searchParams), headers, JSON.parse(body.text) as unknown)
-      : body !== false && "bytes" in body ? relayed(method, url.pathname, Object.fromEntries(url.searchParams), headers, JSON.parse(new TextDecoder().decode(body.bytes)) as unknown)
-      : undefined
+    if (body === false || (body !== undefined && "form" in body)) {
+      throw new TypeError("the phone relays only JSON to the cloud")
+    }
+    const query = singleValuedQuery(url.searchParams)
+    if (query === undefined) throw new TypeError("duplicate query parameters cannot be relayed")
+    let parsedBody: unknown
+    if (body !== undefined) {
+      const rawText = "text" in body ? body.text : new TextDecoder().decode(body.bytes)
+      if (rawText !== "") {
+        try {
+          parsedBody = JSON.parse(rawText) as unknown
+        } catch (cause) {
+          throw new TypeError("the phone relays only JSON to the cloud", { cause })
+        }
+      }
+    }
+    const sent = relayed(method, url.pathname, query, headers, parsedBody)
     if (sent === undefined) throw new TypeError("the phone relays only JSON to the cloud")
     if (await runPromise(offline(wifi))) throw new TypeError("the phone has no network")
+    const deadline = boundedSignal(signal, relayTimeoutMs)
     try {
-      const reply = await relay.request(signal === undefined ? sent : { ...sent, signal })
+      const reply = await relay.request(deadline.signal === undefined ? sent : { ...sent, signal: deadline.signal })
       const head = { etag: reply.etag, "content-type": reply.contentType, "retry-after": reply.retryAfter }
       return answer(reply.body as Uint8Array<ArrayBuffer>, reply.status, Object.fromEntries(Object.entries(head).filter((one): one is [string, string] => one[1] !== undefined)))
     } catch (cause) {
       if (heldForSignIn(cause)) return unauthorized(cloudStatusOf(true, 0))
       if (heldForLease(cause)) return answer(JSON.stringify({ error: leaseRefusalCode, reason: leaseRefusal.reason }), leaseRefusal.status, { "content-type": "application/json" })
       throw new TypeError("the cloud request failed", { cause })
+    } finally {
+      deadline.release()
     }
   }
 }

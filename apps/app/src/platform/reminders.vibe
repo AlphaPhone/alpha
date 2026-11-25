@@ -7,12 +7,13 @@ import { registered } from "./device.vibe"
 
 module held {
   import { remindersClient } from "@elizaos/os-bridges"
-  import type { RemindersClient } from "@elizaos/os-bridges"
+  import type { AndroidRemindersPlugin, RemindersClient } from "@elizaos/os-bridges"
+  import { plugin as capacitorPlugin } from "./capacitor.ts"
 
   let made: RemindersClient | undefined
   /** eliza's client of the reminders plugin, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
   export function client(): RemindersClient {
-    return (made ??= remindersClient())
+    return (made ??= remindersClient({ plugin: capacitorPlugin<AndroidRemindersPlugin>("ElizaReminders") }))
   }
 }
 import { client } from held
@@ -38,13 +39,14 @@ const plugin = "ElizaReminders"
 /** On the phone: eliza's `remindersClient()` of `@elizaos/os-bridges`, where the host registered the plugin. */
 export const phoneReminders = Layer.sync(PhoneReminders, () => {
   const present = registered(plugin)
+  const called = <A>(run: () => Promise<A>) => present ? tryPromise({ try: run, catch: (cause) => new RemindersUnread({ cause }) }) : fail(absent())
   return {
     present,
-    schedule: (input: AndroidReminderScheduleInput) => tryPromise({ try: () => client().schedule(input), catch: (cause) => new RemindersUnread({ cause }) }),
-    cancel: (input: AndroidReminderCancelInput) => tryPromise({ try: () => client().cancel(input), catch: (cause) => new RemindersUnread({ cause }) }),
-    list: () => tryPromise({ try: () => client().list(), catch: (cause) => new RemindersUnread({ cause }) }),
-    pendingTap: () => tryPromise({ try: () => client().pendingTap(), catch: (cause) => new RemindersUnread({ cause }) }),
-    consumeTap: (token: string) => tryPromise({ try: () => client().consumeTap(token), catch: (cause) => new RemindersUnread({ cause }) }),
+    schedule: (input: AndroidReminderScheduleInput) => called(() => client().schedule(input)),
+    cancel: (input: AndroidReminderCancelInput) => called(() => client().cancel(input)),
+    list: () => called(() => client().list()),
+    pendingTap: () => called(() => client().pendingTap()),
+    consumeTap: (token: string) => called(() => client().consumeTap(token)),
   }
 })
 

@@ -73,6 +73,9 @@ import org.json.JSONObject;
 @RequiresApi(Build.VERSION_CODES.Q)
 public final class AlphaBrowserDownloads {
   public static final int MAX_REDIRECTS = 10;
+  public static final long MAX_DOWNLOAD_BYTES = 2L << 30;
+  public static final long MIN_FREE_BYTES = 128L * 1024 * 1024;
+  public static final long MAX_TRANSFER_NANOS = java.util.concurrent.TimeUnit.MINUTES.toNanos(30);
 
   /** Host storage identity and loopback policy. */
   public static final class Config {
@@ -126,6 +129,8 @@ public final class AlphaBrowserDownloads {
   private final Map<Long, Long> received = new ConcurrentHashMap<>();
   private enum TransferState { FETCHING, CANCELLED, PUBLISHING }
   private final ConcurrentMap<Long, TransferState> transfers = new ConcurrentHashMap<>();
+  private volatile HttpURLConnection activeConnection;
+  private volatile long activeTransferId;
   private AlertDialog pending, listing, notice;
   private String pendingTab;
   /** Requests each tab had dropped or refused since its last main-frame navigation. */
@@ -381,27 +386,35 @@ public final class AlphaBrowserDownloads {
     });
   }
 
-  /** data: URLs carry their bytes inline; decode natively, never through page script. */
+  /** data: URLs carry their bytes inline; decode and stage off the main thread, never through page script. */
   private void requestData(Source source, String raw, String disposition, String mime, BooleanSupplier current) {
-    byte[] bytes;
-    try {
-      bytes = BrowserDownloadPolicy.decodeData(raw);
-    } catch (Exception invalid) {
-      refuse(source, "This file from the page is damaged or larger than " + (BrowserDownloadPolicy.MAX_CAPTURE / 1048576) + " MB.");
-      return;
-    }
-    String type = validMime(mime) ? mime : BrowserDownloadPolicy.dataMime(raw);
-    File file;
-    try {
-      file = captureFile();
-      try (OutputStream out = new FileOutputStream(file)) {
-        out.write(bytes);
+    work(io, () -> {
+      byte[] bytes;
+      try {
+        bytes = BrowserDownloadPolicy.decodeData(raw);
+      } catch (Exception invalid) {
+        handler.post(() -> refuse(source, "This file from the page is damaged or larger than " + (BrowserDownloadPolicy.MAX_CAPTURE / 1048576) + " MB."));
+        return;
       }
-    } catch (Exception unavailable) {
-      message("The file couldn’t be prepared. Check your phone’s storage and try again.");
-      return;
-    }
-    reviewCaptured(source, file, safeName("download", disposition, type), type, current);
+      String type = validMime(mime) ? mime : BrowserDownloadPolicy.dataMime(raw);
+      File file;
+      try {
+        file = captureFile();
+        try (OutputStream out = new FileOutputStream(file)) {
+          out.write(bytes);
+        }
+      } catch (Exception unavailable) {
+        handler.post(() -> message("The file couldn’t be prepared. Check your phone’s storage and try again."));
+        return;
+      }
+      handler.post(() -> {
+        if (closed || !current.getAsBoolean()) {
+          file.delete();
+          return;
+        }
+        reviewCaptured(source, file, safeName("download", disposition, type), type, current);
+      });
+    }, () -> {});
   }
 
   private File captureFile() throws Exception {
@@ -533,14 +546,37 @@ public final class AlphaBrowserDownloads {
     });
   }
 
+  private static boolean hasFreeSpace() {
+    try {
+      File storage = Environment.getExternalStorageDirectory();
+      return storage != null && storage.getUsableSpace() >= MIN_FREE_BYTES;
+    } catch (RuntimeException unavailable) {
+      return true;
+    }
+  }
+
+  private static void disconnectAsync(HttpURLConnection connection) {
+    if (connection == null) return;
+    Thread closer = new Thread(() -> {
+      try { connection.disconnect(); } catch (RuntimeException ignored) {}
+    }, "AlphaDownloadDisconnect");
+    closer.setDaemon(true);
+    closer.start();
+  }
+
   private Uri fetch(long id, String start, String pageOrigin, String cookie, String agent, String name, String mime) throws Exception {
+    long deadline = System.nanoTime() + MAX_TRANSFER_NANOS;
     URL url = new URL(start);
     for (int hop = 0;; hop++) {
       if (hop > MAX_REDIRECTS)
         throw new Refused("The site redirected the download too many times.");
-      if (transfers.get(id) == TransferState.CANCELLED)
+      if (closed || transfers.get(id) == TransferState.CANCELLED || Thread.currentThread().isInterrupted())
         throw new Cancelled();
+      if (System.nanoTime() >= deadline)
+        throw new Refused("The download took too long. Check your connection and try again.");
       HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+      activeTransferId = id;
+      activeConnection = connection;
       try {
         connection.setInstanceFollowRedirects(false);
         connection.setUseCaches(false);
@@ -564,13 +600,20 @@ public final class AlphaBrowserDownloads {
         }
         if (code < 200 || code >= 300)
           throw new Refused("The site didn’t send the file (HTTP " + code + ").");
+        long declared = connection.getContentLengthLong();
+        if (declared > MAX_DOWNLOAD_BYTES)
+          throw new Refused("This file is too large to download.");
         String type = connection.getContentType();
         if (type != null)
           type = type.split(";", 2)[0].trim();
         try (InputStream in = connection.getInputStream()) {
-          return publish(in, name, validMime(mime) ? mime : validMime(type) ? type : null, id);
+          return publish(in, name, validMime(mime) ? mime : validMime(type) ? type : null, id, deadline);
         }
       } finally {
+        if (activeConnection == connection) {
+          activeConnection = null;
+          activeTransferId = 0;
+        }
         connection.disconnect();
       }
     }
@@ -578,12 +621,14 @@ public final class AlphaBrowserDownloads {
 
   private Uri publish(File file, String name, String mime) throws Exception {
     try (InputStream in = new FileInputStream(file)) {
-      return publish(in, name, mime, 0);
+      return publish(in, name, mime, 0, System.nanoTime() + MAX_TRANSFER_NANOS);
     }
   }
 
   /** Stream into a pending MediaStore Downloads row; a failed or cancelled copy removes it. */
-  private Uri publish(InputStream in, String name, String mime, long id) throws Exception {
+  private Uri publish(InputStream in, String name, String mime, long id, long deadline) throws Exception {
+    if (!hasFreeSpace())
+      throw new Refused("Not enough free storage to save this download.");
     ContentResolver resolver = context.getContentResolver();
     ContentValues values = new ContentValues();
     values.put(MediaStore.MediaColumns.DISPLAY_NAME, UUID.randomUUID().toString().substring(0, 8) + "-" + name);
@@ -601,11 +646,21 @@ public final class AlphaBrowserDownloads {
         byte[] buffer = new byte[65536];
         int count;
         long total = 0;
+        long nextSpaceCheck = 16L * 1024 * 1024;
         while ((count = in.read(buffer)) != -1) {
-          if (id != 0 && transfers.get(id) == TransferState.CANCELLED)
+          if (closed || (id != 0 && transfers.get(id) == TransferState.CANCELLED) || Thread.currentThread().isInterrupted())
             throw new Cancelled();
-          out.write(buffer, 0, count);
+          if (System.nanoTime() >= deadline)
+            throw new Refused("The download took too long. Check your connection and try again.");
           total += count;
+          if (total > MAX_DOWNLOAD_BYTES)
+            throw new Refused("This file is too large to download.");
+          if (total >= nextSpaceCheck) {
+            nextSpaceCheck = total + 16L * 1024 * 1024;
+            if (!hasFreeSpace())
+              throw new Refused("Not enough free storage to finish this download.");
+          }
+          out.write(buffer, 0, count);
           if (id != 0)
             received.put(id, total);
         }
@@ -645,6 +700,10 @@ public final class AlphaBrowserDownloads {
 
   private void cancelTransfer(long id) {
     transfers.replace(id, TransferState.FETCHING, TransferState.CANCELLED);
+    if (activeTransferId == id) {
+      HttpURLConnection active = activeConnection;
+      if (active != null) disconnectAsync(active);
+    }
   }
 
   /**
@@ -956,7 +1015,7 @@ public final class AlphaBrowserDownloads {
       return;
     }
     Intent view = new Intent(Intent.ACTION_VIEW).setDataAndType(uri, type == null || type.isEmpty() ? "*/*" : type)
-        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
     try {
       context.startActivity(view);
     } catch (ActivityNotFoundException missing) {
@@ -976,10 +1035,16 @@ public final class AlphaBrowserDownloads {
       return;
     try {
       if (shownActive) {
-        if (id > 0 && osActive(entry))
-          manager.remove(id);
-        else if (id < 0 && entry.running)
+        if (id > 0) {
+          work(io, () -> {
+            try {
+              if (osActive(entry) && manager != null)
+                manager.remove(id);
+            } catch (RuntimeException ignored) {}
+          }, () -> {});
+        } else if (id < 0 && entry.running) {
           cancelTransfer(id);
+        }
       }
       history.remove(id);
       persist();
@@ -1013,9 +1078,12 @@ public final class AlphaBrowserDownloads {
     dismissDialogs();
     for (long id : transfers.keySet())
       cancelTransfer(id);
-    io.shutdown();
-    network.shutdown();
-    statusReader.shutdown();
+    HttpURLConnection active = activeConnection;
+    activeConnection = null;
+    disconnectAsync(active);
+    io.shutdownNow();
+    network.shutdownNow();
+    statusReader.shutdownNow();
   }
 
   /** Where blob: and data: captures are written before review. */
@@ -1025,9 +1093,11 @@ public final class AlphaBrowserDownloads {
 
   /** Startup: remove captures abandoned by a previous process. */
   public void purgeStaleCaptures() {
-    File[] stale = captureDirectory().listFiles();
-    if (stale != null)
-      for (File file : stale)
-        file.delete();
+    work(io, () -> {
+      File[] stale = captureDirectory().listFiles();
+      if (stale != null)
+        for (File file : stale)
+          file.delete();
+    }, () -> {});
   }
 }

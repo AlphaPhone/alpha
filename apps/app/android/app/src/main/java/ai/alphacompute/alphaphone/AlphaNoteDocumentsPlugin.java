@@ -35,8 +35,10 @@ public final class AlphaNoteDocumentsPlugin extends Plugin {
   }
 
   @PluginMethod public void pick(PluginCall call) {
-    getActivity().runOnUiThread(() -> {
-      if (closed || picking) { call.resolve(outcome("unavailable")); return; }
+    Activity activity = getActivity();
+    if (activity == null) { call.resolve(outcome("unavailable")); return; }
+    activity.runOnUiThread(() -> {
+      if (closed || picking || activity.isFinishing() || activity.isDestroyed()) { call.resolve(outcome("unavailable")); return; }
       boolean importing = call.getBoolean("importing", false);
       Intent choice = importing ? DocumentDestinations.open("text/plain")
           : DocumentDestinations.create("text/plain", DocumentExport.title(call.getString("title", "Note"), "Note") + ".txt");
@@ -74,7 +76,9 @@ public final class AlphaNoteDocumentsPlugin extends Plugin {
   }
 
   @PluginMethod public void write(PluginCall call) {
-    getActivity().runOnUiThread(() -> {
+    Activity activity = getActivity();
+    if (activity == null) { call.resolve(outcome("unavailable")); return; }
+    activity.runOnUiThread(() -> {
       Destination asked = destination;
       if (closed || asked == null || !asked.id().equals(call.getString("handle"))) {
         call.resolve(outcome("unavailable"));

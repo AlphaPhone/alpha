@@ -50,15 +50,20 @@ export interface Outcome {
 /** The statuses that say the other side understood the request and did not do it. Every other one leaves it unknown: a 5xx, a timeout or a throttle can follow a write that took effect. */
 const declined = [400, 401, 402, 403, 404, 405, 406, 409, 410, 411, 412, 413, 414, 415, 416, 417, 422, 426, 428, 431, 451]
 
+/** Whether `status` says the other side declined the request before acting on it. */
+export function isDeclinedStatus(status: number): boolean {
+  return declined.includes(status)
+}
+
 /**
  * How a write that failed ended. It is known not to have happened only where it never left, or the other side said
- * it declined; an answer that came back 2xx and unreadable is a write that happened.
+ * it declined; an answer that came back 2xx and unreadable cannot be trusted as confirmed, so it is unknown.
  */
 export function outcomeOf(failure: Failure): Outcome {
   return match (failure) {
     when Unsent: { confirmed: false, known: true };
-    when Refused: { confirmed: false, known: declined.includes(failure.status) };
-    when Garbled: { confirmed: true, known: true };
+    when Refused: { confirmed: false, known: isDeclinedStatus(failure.status) };
+    when Garbled: { confirmed: false, known: false };
     when Unreachable: { confirmed: false, known: false };
   }
 }

@@ -1,7 +1,21 @@
+// spec/cloud/index.md, "Story: Know which cloud the app talks to"
 import table from "../deployments.json" with { type: "json" }
 
-/** An origin a phone calls a deployed cloud at: always `https`. */
-const Https = Schema.String.check(Schema.isStartingWith("https://"))
+function isHttpsOrigin(value: string): boolean {
+  const parsed = URL.parse(value)
+  return parsed !== null
+    && parsed.protocol === "https:"
+    && parsed.hostname !== ""
+    && parsed.username === ""
+    && parsed.password === ""
+    && parsed.pathname === "/"
+    && parsed.search === ""
+    && parsed.hash === ""
+    && parsed.origin === value
+}
+
+/** An origin a phone calls a deployed cloud at: always an `https` origin with no credentials, path, or query. */
+const Https = Schema.String.check(Schema.makeFilter(isHttpsOrigin, { expected: "an https origin" }))
 
 /** Where a cloud answers and which host the phone's App Links name. */
 schema Hosts { cloud: Https; appLinkHost: string }

@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -51,12 +52,36 @@ interface ReadyStamp {
 
 function readStamp(at: Checkout): ReadyStamp {
   const file = stamp(at);
-  return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) as ReadyStamp : {};
+  if (!fs.existsSync(file)) return {};
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
 }
 
 function missingClients(at: Checkout, before: ReadyStamp) {
   return clientPackages.filter(({ name, entry }) =>
     before.commit !== at.commit || before.clients?.includes(name) !== true || !fs.existsSync(path.join(at.root, entry)));
+}
+
+function headCommit(root: string): string | undefined {
+  if (!fs.existsSync(path.join(root, ".git"))) return undefined;
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+function hasCommit(root: string, commit: string): boolean {
+  try {
+    execFileSync("git", ["cat-file", "-e", `${commit}^{commit}`], { cwd: root, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 const versionOf = (file: string, name: string) => (JSON.parse(fs.readFileSync(file, "utf8")) as { dependencies?: Record<string, string> }).dependencies?.[name];
@@ -70,14 +95,30 @@ function linked(at: Checkout) {
   const [theirs, ours] = [versionOf(path.join(at.root, "packages/agent/package.json"), "effect"), versionOf(path.join(repository, "package.json"), "effect")];
   if (theirs !== ours) throw new Error(`eliza ${at.commit.slice(0, 12)} is on effect ${theirs} and Alpha on ${ours}: move both together`);
   const link = path.join(repository, ".eliza");
-  if (fs.existsSync(link) && fs.realpathSync(link) === fs.realpathSync(at.root)) return;
-  fs.rmSync(link, { force: true });
-  fs.symlinkSync(at.root, link, "dir");
+  try {
+    if (fs.existsSync(link) && fs.realpathSync(link) === fs.realpathSync(at.root)) return;
+  } catch {
+    void 0;
+  }
+  const staged = `${link}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  try {
+    fs.symlinkSync(at.root, staged, "dir");
+    const existing = fs.lstatSync(link, { throwIfNoEntry: false });
+    if (existing !== undefined && !existing.isSymbolicLink()) fs.rmSync(link, { recursive: true, force: true });
+    fs.renameSync(staged, link);
+  } catch (cause) {
+    fs.rmSync(staged, { force: true });
+    throw cause;
+  }
 }
 
 export function ready(at: Checkout = checkout()): boolean {
   const before = readStamp(at);
-  return before.commit === at.commit && missingClients(at, before).length === 0;
+  return before.commit === at.commit
+    && missingClients(at, before).length === 0
+    && headCommit(at.root) === at.commit
+    && fs.existsSync(path.join(at.bundle, "agent.mjs"))
+    && fs.existsSync(path.join(at.cloud, "dist/src/main.js"));
 }
 
 /** The checkout, or the command that makes it. */
@@ -95,18 +136,62 @@ export function run(cwd: string, command: string, ...args: string[]) {
   process.stdout.write(`  ${Math.round((Date.now() - started) / 1000)} s\n`);
 }
 
+function pidAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (cause) {
+    return (cause as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
 /** Only one worktree builds the checkout all of them share: the others wait for it, and then find it ready. */
 export async function alone<A>(at: Pick<Checkout, "commit" | "root">, work: () => A | Promise<A>): Promise<A> {
   const lock = `${at.root}.building`;
+  const ownerFile = path.join(lock, "owner.json");
+  const token = randomBytes(12).toString("hex");
   fs.mkdirSync(path.dirname(at.root), { recursive: true });
   for (let waited = 0; ; waited += 1) {
-    try { fs.mkdirSync(lock); break; } catch { void 0; }
-    const held = fs.statSync(lock, { throwIfNoEntry: false })?.mtimeMs;
-    if (held !== undefined && Date.now() - held > 3_600_000) fs.rmSync(lock, { recursive: true, force: true });
+    try {
+      fs.mkdirSync(lock);
+      fs.writeFileSync(ownerFile, JSON.stringify({ pid: process.pid, token }), { mode: 0o600 });
+      break;
+    } catch {
+      void 0;
+    }
+    const stat = fs.statSync(lock, { throwIfNoEntry: false });
+    let stale = stat !== undefined && Date.now() - stat.mtimeMs > 3_600_000;
+    if (!stale && stat !== undefined && Date.now() - stat.mtimeMs > 5_000 && fs.existsSync(ownerFile)) {
+      try {
+        const holder = JSON.parse(fs.readFileSync(ownerFile, "utf8")) as { readonly pid?: number };
+        if (typeof holder.pid === "number" && !pidAlive(holder.pid)) stale = true;
+      } catch {
+        void 0;
+      }
+    }
+    if (stale) {
+      const evicted = `${lock}.evicted-${randomBytes(4).toString("hex")}`;
+      try {
+        fs.renameSync(lock, evicted);
+        fs.rmSync(evicted, { recursive: true, force: true });
+      } catch {
+        void 0;
+      }
+    }
     if (waited % 12 === 0) process.stdout.write(`another worktree is building eliza ${at.commit.slice(0, 12)}: waiting\n`);
     await Effect.runPromise(Effect.sleep(5_000));
   }
-  try { return await work(); } finally { fs.rmSync(lock, { recursive: true, force: true }); }
+  try {
+    return await work();
+  } finally {
+    try {
+      const current = JSON.parse(fs.readFileSync(ownerFile, "utf8")) as { readonly token?: string };
+      if (current.token === token) fs.rmSync(lock, { recursive: true, force: true });
+    } catch {
+      fs.rmSync(lock, { recursive: true, force: true });
+    }
+  }
 }
 
 /** Clone eliza at the pinned commit, install it, and build its packages and the agent bundle. Each step is skipped once it is done. */
@@ -131,6 +216,13 @@ async function buildBase(at: Checkout) {
   if (!fs.existsSync(path.join(at.root, ".git"))) {
     fs.mkdirSync(path.dirname(at.root), { recursive: true });
     run(path.dirname(at.root), "git", "clone", "-q", ...(fs.existsSync(source) ? ["--local"] : ["--branch", lock.branch]), source, at.root);
+  }
+  if (!hasCommit(at.root, at.commit)) {
+    try {
+      run(at.root, "git", "fetch", "-q", "--no-tags", source, at.commit);
+    } catch {
+      run(at.root, "git", "fetch", "-q", "--no-tags", source, lock.branch);
+    }
   }
   run(at.root, "git", "checkout", "-q", "--detach", at.commit);
   run(at.root, "pnpm", "install", "--frozen-lockfile", "--prefer-offline");

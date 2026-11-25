@@ -73,9 +73,6 @@ public class AlphaPhotosPlugin extends PermittedPhotosPlugin {
   }
   static final OwnedMediaConfig MEDIA_CONFIG = AlphaMediaConfig.MEDIA;
 
-  /** The shared album write gate; instrumentation tests hold it to stall real album writers. */
-  public static final Object ALBUMS_LOCK = OwnedAlbums.LOCK;
-
   private PermittedMediaCatalog permitted;
   private AlphaMediaReview mediaReview;
   private OwnedVideoPlayback playback;
@@ -262,24 +259,8 @@ public class AlphaPhotosPlugin extends PermittedPhotosPlugin {
         public VideoCopyEdits.Source recheck(String key, String expected) throws Exception {
           return videoSource(key, expected, false);
         }
-      }, () -> !destroyed() && getActivity() != null && getActivity().hasWindowFocus());
+      }, () -> !destroyed() && AlphaDevicePlugin.shareForeground(getActivity()));
     return videoCopies;
-  }
-
-  /**
-   * Native-only reviewed recovery of a closed failed video copy; deliberately absent from the
-   * Capacitor/JS API. Only Alpha's own native review path calls it.
-   */
-  void preserveClosedVideoCopy(String operationId, String expectedRecordHash, PluginCall call) {
-    if (destroyed() || getActivity() == null || !getActivity().hasWindowFocus()) {
-      call.reject("Video copy preservation refused");
-      return;
-    }
-    try {
-      videoCopies().preserveClosedFailure(operationId, expectedRecordHash, call);
-    } catch (Exception refused) {
-      call.reject("Video copy preservation refused");
-    }
   }
 
   /**
@@ -289,7 +270,8 @@ public class AlphaPhotosPlugin extends PermittedPhotosPlugin {
    * keeps the export.
    */
   private VideoCopyEdits.Source videoSource(String key, String expected, boolean opening) throws Exception {
-    if (destroyed() || getActivity() == null || opening && !getActivity().hasWindowFocus() || expected == null)
+    Activity activity = getActivity();
+    if (destroyed() || activity == null || opening && !AlphaDevicePlugin.shareForeground(activity) || expected == null)
       throw new IllegalStateException("Return to Photos and reopen the video");
     JSObject record;
     Uri source;
@@ -450,7 +432,7 @@ public class AlphaPhotosPlugin extends PermittedPhotosPlugin {
       PermittedMediaCatalog.Fence fence = permitted.fence();
       SelectedPhotoCopy.Guard current = () -> {
         Activity activity = getActivity();
-        if (activity == null || activity.isFinishing() || activity.isDestroyed() || !activity.hasWindowFocus())
+        if (!AlphaDevicePlugin.shareForeground(activity))
           throw new SecurityException();
         permitted.requireCurrent(fence);
       };
@@ -470,7 +452,13 @@ public class AlphaPhotosPlugin extends PermittedPhotosPlugin {
           InputStream bytes = resolver.openInputStream(uri);
           if (bytes == null) throw new IOException("Photo unavailable");
           Handler main = new Handler(Looper.getMainLooper());
-          Runnable timeout = () -> { try { bytes.close(); } catch (IOException ignored) {} };
+          Runnable timeout = () -> {
+            Thread closer = new Thread(() -> {
+              try { bytes.close(); } catch (IOException ignored) {}
+            }, "AlphaPhotoReadTimeout");
+            closer.setDaemon(true);
+            closer.start();
+          };
           main.postDelayed(timeout, 5000);
           return new FilterInputStream(bytes) {
             @Override public void close() throws IOException {
@@ -518,12 +506,21 @@ public class AlphaPhotosPlugin extends PermittedPhotosPlugin {
   public void share(PluginCall call) {
     submit(call, () -> {
       try {
-        String key = call.getString("id", "");
-        if (PhotoLibraryAccess.permitted(key)) {
-          call.resolve(AlphaShareSheet.shareUri(getActivity(), permittedShareUri(call)));
+        Activity activity = getActivity();
+        if (activity == null || !AlphaDevicePlugin.shareForeground(activity)) {
+          call.reject("Return to Photos and share the item again");
           return;
         }
-        call.resolve(AlphaShareSheet.shareUri(getActivity(), owned.verified(key, null)));
+        String key = call.getString("id", "");
+        Uri uri = PhotoLibraryAccess.permitted(key) ? permittedShareUri(call) : owned.verified(key, null);
+        AlphaShareSheet.Prepared prepared = AlphaShareSheet.prepareUri(getContext(), uri);
+        activity.runOnUiThread(() -> {
+          if (destroyed() || !AlphaDevicePlugin.shareForeground(activity)) {
+            call.reject("Return to Photos and share the item again");
+            return;
+          }
+          call.resolve(AlphaShareSheet.launchPrepared(activity, prepared));
+        });
       } catch (Exception failure) {
         call.reject("This saved media is no longer available");
       }
@@ -556,13 +553,18 @@ public class AlphaPhotosPlugin extends PermittedPhotosPlugin {
         ClipData clip = ClipData.newRawUri("Selected media", uris.get(0));
         for (int i = 1; i < uris.size(); i++) clip.addItem(new ClipData.Item(uris.get(i)));
         send.setClipData(clip);
-        getActivity().runOnUiThread(() -> {
-          if (destroyed() || getActivity().isFinishing() || !getActivity().hasWindowFocus()) {
+        Activity activity = getActivity();
+        if (activity == null) {
+          call.reject("Return to Photos and share the selection again");
+          return;
+        }
+        activity.runOnUiThread(() -> {
+          if (destroyed() || !AlphaDevicePlugin.shareForeground(activity)) {
             call.reject("Return to Photos and share the selection again");
             return;
           }
           try {
-            getActivity().startActivity(Intent.createChooser(send, AlphaMediaCopy.shareMany(uris.size())));
+            activity.startActivity(Intent.createChooser(send, AlphaMediaCopy.shareMany(uris.size())));
             JSObject result = new JSObject();
             result.put("status", "opened");
             result.put("count", uris.size());

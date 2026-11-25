@@ -23,6 +23,7 @@ public final class TabFrame extends FrameLayout {
   private final TabLayer layer;
   private List<HostRect> occlusions = Collections.emptyList();
   private final Path clipPath = new Path();
+  private final RectF clipRect = new RectF();
   /**
    * Set once Alpha has sent its chrome rects. Until then a below-host page takes no input, so chrome
    * Alpha draws first cannot pass a tap to the website.
@@ -62,7 +63,8 @@ public final class TabFrame extends FrameLayout {
     int saveCount = canvas.save();
     for (HostRect rect : occlusions) {
       clipPath.reset();
-      clipPath.addRoundRect(new RectF(rect.left, rect.top, rect.right, rect.bottom), rect.cornerRadius,
+      clipRect.set(rect.left, rect.top, rect.right, rect.bottom);
+      clipPath.addRoundRect(clipRect, rect.cornerRadius,
           rect.cornerRadius, Path.Direction.CW);
       canvas.clipOutPath(clipPath);
     }

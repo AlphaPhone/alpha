@@ -355,6 +355,7 @@ pure val pageQueries: List[RequestQuery] = List(
   { method: Get, path: "/api/scheduled-tasks", key: "ownerVisibleOnly", kind: FixedQuery, value: "1", example: "1" },
   { method: Get, path: "/api/workflow/hosted/results", key: "clientId", kind: PatternQuery, value: "[A-Za-z0-9][A-Za-z0-9_-]{0,127}", example: "build-probe" },
   { method: Delete, path: "/api/triggers/{id}", key: "expectedRevision", kind: PatternQuery, value: "[1-9][0-9]{0,15}", example: "1" },
+  { method: Delete, path: "/api/alpha/reminders/lists/{id}", key: "mode", kind: PatternQuery, value: "reassign|cascade", example: "reassign" },
 )
 pure val nativeDigestQueries = pageQueries.select(q => q.method == Get and q.path == "/api/workflow/hosted/results")
 ```

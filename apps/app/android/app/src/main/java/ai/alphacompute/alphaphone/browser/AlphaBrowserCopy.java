@@ -89,7 +89,13 @@ public final class AlphaBrowserCopy {
   public static final String CANCEL = "Cancel";
 
   public static String photoMessage(String host) {
-    return host + " wants a photo. Photos you take are also saved to Pictures.";
+    return photoMessage(host, false);
+  }
+
+  public static String photoMessage(String host, boolean privateTab) {
+    return privateTab
+        ? host + " wants a photo. Private tab: the photo stays private to this upload and is removed when this tab closes."
+        : host + " wants a photo. Photos you take are also saved to Pictures.";
   }
 
   public static String chooseFiles(String host) {

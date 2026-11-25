@@ -99,9 +99,9 @@
       "name": "alphaphone_app",
       "kind": "x509-pk8",
       "bits": 4096,
-      "consumer": "Alpha Phone launcher release and Sense listener APKs share this one certificate; android/release-signer.json signerSha256",
+      "consumer": "Alpha Phone launcher release and Sense listener APKs share this one certificate; apps/app/aosp/signing/release-signer.json signerSha256",
       "storage": "offline-encrypted",
-      "rotatable": "only through an APK signature scheme v3 rotation lineage"
+      "rotatable": false
     }
   ]
 }

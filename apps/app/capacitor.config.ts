@@ -1,8 +1,11 @@
 // spec/app/platform/index.md, "Story: Reach the phone's native capabilities"
+import { readFileSync } from "node:fs";
 import type { CapacitorConfig } from "@capacitor/cli";
-import table from "../../packages/deployment/deployments.json" with { type: "json" };
 
 interface Hosted { readonly kind: "hosted"; readonly cloud: string; readonly appLinkHost: string }
+interface DeploymentTable { readonly production: Omit<Hosted, "kind">; readonly staging: Omit<Hosted, "kind"> }
+
+const table = JSON.parse(readFileSync(new URL("../../packages/deployment/deployments.json", import.meta.url), "utf8")) as DeploymentTable;
 
 const deployments: Record<"production" | "staging", Hosted> = { production: { ...table.production, kind: "hosted" }, staging: { ...table.staging, kind: "hosted" } };
 
@@ -19,13 +22,12 @@ function environment(name: "production" | "staging") {
 }
 
 const any = { kind: "any" } as const;
+const queryKeys = (...keys: readonly string[]) => keys.map((key) => ({ key, accepts: any }));
 
 const cloudRoutes = [
-  { method: "GET", path: "/api/public/service" },
   { method: "GET", path: "/api/v1/user" },
   { method: "GET", path: "/api/v1/referrals" },
   { method: "POST", path: "/api/v1/referrals/apply" },
-  { method: "DELETE", path: "/api/v1/api-keys/current" },
   { method: "GET", path: "/api/v1/subscriptions/plans" },
   { method: "POST", path: "/api/v1/subscriptions/checkout" },
   { method: "POST", path: "/api/v1/subscriptions/checkout/confirm" },
@@ -41,13 +43,23 @@ const cloudRoutes = [
   { method: "POST", path: "/api/v1/maps/routes" },
   { method: "POST", path: "/api/v1/maps/tiles/viewport" },
   { method: "GET", path: "/api/v1/maps/tiles/{z}/{x}/{y}" },
-  { method: "GET", path: "/api/v1/eliza/google/status" },
-  { method: "GET", path: "/api/v1/eliza/google/accounts", query: [{ key: "side", accepts: any }] },
+  { method: "GET", path: "/api/v1/eliza/google/status", query: queryKeys("side", "grantId") },
+  { method: "GET", path: "/api/v1/eliza/google/accounts", query: queryKeys("side") },
   { method: "POST", path: "/api/v1/eliza/google/connect/initiate" },
   { method: "POST", path: "/api/v1/eliza/google/disconnect" },
-  { method: "GET", path: "/api/v1/eliza/google/calendar/calendars", query: [{ key: "grantId", accepts: any }, { key: "side", accepts: any }] },
-  { method: "GET", path: "/api/v1/eliza/google/calendar/feed", query: ["grantId", "side", "calendarId", "timeMin", "timeMax", "timeZone"].map((key) => ({ key, accepts: any })) },
-  { method: "GET", path: "/api/v1/eliza/google/calendar/events/{eventId}", query: [{ key: "grantId", accepts: any }, { key: "calendarId", accepts: any }] },
+  { method: "GET", path: "/api/v1/eliza/google/gmail/search", query: queryKeys("side", "grantId", "query", "maxResults", "pageToken") },
+  { method: "GET", path: "/api/v1/eliza/google/gmail/read", query: queryKeys("side", "grantId", "messageId") },
+  { method: "GET", path: "/api/v1/eliza/google/gmail/inbox-v1/capabilities", query: queryKeys("grantId") },
+  { method: "GET", path: "/api/v1/eliza/google/gmail/inbox-v1/thread", query: queryKeys("grantId", "threadId", "offset", "historyId") },
+  { method: "GET", path: "/api/v1/eliza/google/gmail/inbox-v1/attachment", query: queryKeys("grantId", "messageId", "partId", "historyId") },
+  { method: "GET", path: "/api/v1/eliza/google/gmail/inbox-v1/drafts", query: queryKeys("grantId", "pageToken") },
+  { method: "GET", path: "/api/v1/eliza/google/gmail/inbox-v1/draft", query: queryKeys("grantId", "draftId") },
+  { method: "POST", path: "/api/v1/eliza/google/gmail/inbox-v1/operations" },
+  { method: "POST", path: "/api/v1/eliza/google/gmail/inbox-v1/operations/{requestId}/dispatch" },
+  { method: "GET", path: "/api/v1/eliza/google/gmail/inbox-v1/operations/{requestId}", query: queryKeys("grantId") },
+  { method: "GET", path: "/api/v1/eliza/google/calendar/calendars", query: queryKeys("grantId", "side") },
+  { method: "GET", path: "/api/v1/eliza/google/calendar/feed", query: queryKeys("grantId", "side", "calendarId", "timeMin", "timeMax", "timeZone") },
+  { method: "GET", path: "/api/v1/eliza/google/calendar/events/{eventId}", query: queryKeys("grantId", "calendarId") },
 ];
 
 const config: CapacitorConfig = {
@@ -74,7 +86,7 @@ const config: CapacitorConfig = {
     },
   },
   server: { androidScheme: "https" },
-  android: { path: androidPaths.project, allowMixedContent: false },
+  android: { path: androidPaths.project, allowMixedContent: false, webContentsDebuggingEnabled: false },
 };
 
 export default config;

@@ -1,10 +1,10 @@
 from pathlib import Path
-import hashlib, json, os, re, shutil, subprocess, sys, tempfile, unittest, xml.etree.ElementTree as ET
+import hashlib, json, os, shutil, subprocess, sys, tempfile, unittest, xml.etree.ElementTree as ET
 
 ROOT=Path(__file__).resolve().parent
 sys.path.insert(0,str(ROOT.parent/'system-entry'))
-from portable_tools import java_binary, android_api_jar
-REPO=next(p for p in ROOT.parents if (p/'app.config.json').is_file())
+from portable_tools import java_binary, android_api_jar, find_repo_root, require
+REPO=find_repo_root(ROOT)
 DATA=Path(os.environ.get('ALPHA_HIDDEN_HANDLE_INPUTS',ROOT/'.cache')).resolve()
 MANIFEST=json.loads((ROOT/'manifest.json').read_text())
 ROW=MANIFEST['files'][0]
@@ -14,7 +14,7 @@ COMMON={
  'androidx/annotation/ColorInt.java':'package androidx.annotation; public @interface ColorInt {}',
  'android/annotation/Nullable.java':'package android.annotation; public @interface Nullable {}',
  'androidx/core/content/ContextCompat.java':'package androidx.core.content; public class ContextCompat { public static int getColor(android.content.Context c,int id){return id;} }',
- 'com/android/launcher3/R.java':'package com.android.launcher3; public final class R { public static final class id { public static final int stashed_handle=1,stashed_bubble_handle=2; } public static final class bool { public static final int config_alpha_home_back_only=3; } public static final class color { public static final int taskbar_stashed_handle_light_color=4,taskbar_stashed_handle_dark_color=5; }}',
+ 'com/android/launcher3/R.java':'package com.android.launcher3; public final class R { public static final class id { public static final int stashed_handle=1,stashed_bubble_handle=2; } public static final class bool { public static final int config_alpha_hide_navigation_handle=3; } public static final class color { public static final int taskbar_stashed_handle_light_color=4,taskbar_stashed_handle_dark_color=5; }}',
  'com/android/launcher3/LauncherAnimUtils.java':'''package com.android.launcher3;
 import android.util.Property;import android.view.View;
 public class LauncherAnimUtils {
@@ -103,7 +103,7 @@ public class DrawTest {
  def test_draw_guard_does_not_change_native_controls_or_gesture_geometry(self):
   text=SOURCE.read_text();start=text.index('    public void draw(Canvas canvas)');end=text.index('    /**\n     * Updates mSampledRegion',start);draw=text[start:end]
   self.assertIn('getId() == R.id.stashed_handle',draw)
-  self.assertIn('getBoolean(R.bool.config_alpha_home_back_only)',draw)
+  self.assertIn('getBoolean(R.bool.config_alpha_hide_navigation_handle)',draw)
   self.assertEqual(draw.count('super.draw(canvas)'),1)
   for forbidden in ['setVisibility','setAlpha','setLayoutParams','setEnabled','setId','setFocusable','setImportantForAccessibility','setOnTouchListener','onTouchEvent','WindowInsets','setBackgroundColor','startActivity','setDimensions']:
    self.assertNotIn(forbidden,draw)
@@ -112,8 +112,10 @@ public class DrawTest {
   branding=ROOT.parent
   flag=ET.parse(branding/'overlay/packages/apps/Launcher3/res/values/alpha-navigation.xml').getroot()
   self.assertEqual([n.text for n in flag.findall('bool')if n.attrib.get('name')=='config_alpha_home_back_only'],['false'],'three-button navigation keeps Recents')
+  self.assertEqual([n.text for n in flag.findall('bool')if n.attrib.get('name')=='config_alpha_hide_navigation_handle'],['true'],'taskbar navigation handle is hidden independently of Recents')
   home_patch=(branding/'home-back-keyboard.patch').read_text()
   self.assertIn('<bool name="config_alpha_home_back_only">false</bool>',home_patch)
+  self.assertIn('<bool name="config_alpha_hide_navigation_handle">false</bool>',home_patch)
   settings=ET.parse(branding/'overlay/packages/apps/Settings/res/values/alpha-navigation.xml').getroot()
   # Three-button mode is the default, so its Settings label and the gesture description stay AOSP's own,
   # which describe Back, Home and Recents; Alpha names only its gesture mode.
@@ -127,5 +129,10 @@ public class DrawTest {
   framework=ET.parse(branding/'overlay/frameworks/base/core/res/res/values/config.xml').getroot()
   self.assertEqual([n.text for n in framework.findall('integer')if n.attrib.get('name')=='config_navBarInteractionMode'],['0'])
   self.assertFalse([n for n in framework.findall('dimen')if n.attrib['name'].startswith('navigation_bar')],'Android navigation-mode dimensions apply')
+
+ def test_require_enforced_under_optimize_flag(self):
+  with self.assertRaisesRegex(RuntimeError, 'unconditional guard'):
+   require(False, 'unconditional guard')
+  self.assertTrue((REPO / 'pnpm-workspace.yaml').is_file())
 
 if __name__=='__main__':unittest.main(verbosity=2)

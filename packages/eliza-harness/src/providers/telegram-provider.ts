@@ -14,6 +14,7 @@ import {
   asString,
   bearerToken,
   createProviderServer,
+  ownGet,
   paginateSlice,
   randomToken,
   sendJson,
@@ -118,6 +119,7 @@ interface PendingCode {
   readonly expiresAt: number;
   expired: boolean;
   consumed: boolean;
+  attempts?: number;
 }
 
 interface PendingPassword {
@@ -125,6 +127,7 @@ interface PendingPassword {
   readonly phone_number: string;
   readonly password: string;
   readonly hint: string;
+  attempts?: number;
 }
 
 interface QrLoginToken {
@@ -132,6 +135,7 @@ interface QrLoginToken {
   readonly expires: number;
   readonly login_url: string;
   approved: boolean;
+  consumed?: boolean;
   session_token?: string;
   phone_number?: string;
 }
@@ -170,6 +174,17 @@ const E164_PATTERN = /^\+[1-9]\d{6,14}$/;
 const TEST_DC_PATTERN = /^\+99966(\d)\d{4}$/;
 const BOT_TOKEN_PATTERN = /^(?:bot\d+:|(?:\d{5,}:[A-Za-z0-9_-]{10,}))/;
 const TWO_FACTOR_TEST_PHONE = "+15550109999";
+const MAX_UPDATES = 1000;
+const MAX_TRANSIENT = 500;
+const MAX_AUTH_ATTEMPTS = 5;
+
+function pruneRecordCap(record: Record<string, unknown>, max: number): void {
+  const keys = Object.keys(record);
+  if (keys.length <= max) return;
+  for (const key of keys.slice(0, keys.length - max)) {
+    delete record[key];
+  }
+}
 
 function peerKey(peer: TelegramPeer): string {
   switch (peer._type) {
@@ -404,9 +419,13 @@ function recordUpdate(ctx: ProviderContext<TelegramState>, partial: Omit<Telegra
     date: Math.floor(Date.now() / 1000),
   };
   state.updates.push(update);
+  if (state.updates.length > MAX_UPDATES) {
+    state.updates.splice(0, state.updates.length - MAX_UPDATES);
+  }
   ctx.sse.broadcast({
     id: String(update.pts),
     event: update._type,
+    ...(partial.session_token !== undefined ? { channel: partial.session_token } : {}),
     data: update,
   });
   return update;
@@ -426,7 +445,7 @@ function resolveTelegramSession(
     tgError(res, 401, "BOT_TOKENS_NOT_SUPPORTED");
     return undefined;
   }
-  const session = state.sessions[token];
+  const session = ownGet(state.sessions, token);
   if (!session || session.revoked) {
     tgError(res, 401, "AUTH_KEY_UNREGISTERED");
     return undefined;
@@ -447,7 +466,7 @@ function issueSession(state: TelegramState, phone: string): { readonly session_t
 }
 
 function computeDialogSummary(state: TelegramState, dialog: TelegramDialog): Record<string, unknown> {
-  const list = state.messages[dialog.peer_key] ?? [];
+  const list = ownGet(state.messages, dialog.peer_key) ?? [];
   const top = list[list.length - 1];
   const unread = list.filter((msg) => !msg.out && msg.id > dialog.read_inbox_max_id);
   const mentions = unread.filter((msg) => msg.mentioned).length;
@@ -491,7 +510,9 @@ function handleAuthRpc(
       expiresAt: Date.now() + 60_000,
       expired: false,
       consumed: false,
+      attempts: 0,
     };
+    pruneRecordCap(state.pendingCodes, MAX_TRANSIENT);
     ctx.save();
     sendJson(res, 200, {
       ok: true,
@@ -507,8 +528,8 @@ function handleAuthRpc(
     const phone = (asString(req.params.phone_number) ?? "").trim();
     const hash = asString(req.params.phone_code_hash) ?? "";
     const code = (asString(req.params.phone_code) ?? "").trim();
-    const pending = state.pendingCodes[hash];
-    if (!pending || pending.consumed || pending.phone_number !== phone || pending.code !== code) {
+    const pending = ownGet(state.pendingCodes, hash);
+    if (!pending || pending.consumed || pending.phone_number !== phone) {
       tgError(res, 400, "PHONE_CODE_INVALID");
       return true;
     }
@@ -516,8 +537,15 @@ function handleAuthRpc(
       tgError(res, 400, "PHONE_CODE_EXPIRED");
       return true;
     }
+    if (pending.code !== code) {
+      pending.attempts = (pending.attempts ?? 0) + 1;
+      if (pending.attempts >= MAX_AUTH_ATTEMPTS) pending.consumed = true;
+      ctx.save();
+      tgError(res, 400, "PHONE_CODE_INVALID");
+      return true;
+    }
     pending.consumed = true;
-    const sec = state.securityByPhone[phone];
+    const sec = ownGet(state.securityByPhone, phone);
     if (sec?.password) {
       const pendingAuthId = randomToken("p2fa_", 14);
       state.pendingPasswords[pendingAuthId] = {
@@ -525,7 +553,9 @@ function handleAuthRpc(
         phone_number: phone,
         password: sec.password,
         hint: sec.hint ?? "",
+        attempts: 0,
       };
+      pruneRecordCap(state.pendingPasswords, MAX_TRANSIENT);
       ctx.save();
       tgError(res, 401, "SESSION_PASSWORD_NEEDED", {
         hint: sec.hint ?? "",
@@ -542,7 +572,7 @@ function handleAuthRpc(
   if (req.pathname === "/rpc/account.getPassword") {
     const pendingId = asString(req.params.pending_auth_id);
     if (pendingId) {
-      const pending = state.pendingPasswords[pendingId];
+      const pending = ownGet(state.pendingPasswords, pendingId);
       if (!pending) {
         tgError(res, 400, "PASSWORD_SESSION_INVALID");
         return true;
@@ -559,7 +589,7 @@ function handleAuthRpc(
     }
     const session = resolveTelegramSession(req, res, state);
     if (!session) return true;
-    const sec = state.securityByPhone[session.phone_number];
+    const sec = ownGet(state.securityByPhone, session.phone_number);
     sendJson(res, 200, {
       ok: true,
       _type: "account.password",
@@ -574,8 +604,15 @@ function handleAuthRpc(
   if (req.pathname === "/rpc/auth.checkPassword") {
     const pendingId = asString(req.params.pending_auth_id) ?? "";
     const provided = asString(req.params.password) ?? asString(req.params.password_hash) ?? "";
-    const pending = state.pendingPasswords[pendingId];
-    if (!pending || pending.password !== provided) {
+    const pending = ownGet(state.pendingPasswords, pendingId);
+    if (!pending) {
+      tgError(res, 400, "PASSWORD_HASH_INVALID");
+      return true;
+    }
+    if (pending.password !== provided) {
+      pending.attempts = (pending.attempts ?? 0) + 1;
+      if (pending.attempts >= MAX_AUTH_ATTEMPTS) delete state.pendingPasswords[pendingId];
+      ctx.save();
       tgError(res, 400, "PASSWORD_HASH_INVALID");
       return true;
     }
@@ -589,19 +626,23 @@ function handleAuthRpc(
   if (req.pathname === "/rpc/auth.exportLoginToken") {
     const existingToken = asString(req.params.token);
     if (existingToken) {
-      const record = state.qrTokens[existingToken];
-      if (!record || record.expires < Math.floor(Date.now() / 1000)) {
+      const record = ownGet(state.qrTokens, existingToken);
+      if (!record || record.consumed === true || record.expires < Math.floor(Date.now() / 1000)) {
         tgError(res, 400, "AUTH_TOKEN_EXPIRED");
         return true;
       }
       if (record.approved && record.session_token) {
+        const sessionToken = record.session_token;
+        record.consumed = true;
+        delete record.session_token;
+        ctx.save();
         const user: TelegramUser = { ...state.owner, phone: record.phone_number ?? state.owner.phone };
         sendJson(res, 200, {
           ok: true,
           _type: "auth.loginTokenSuccess",
           authorization: {
             _type: "auth.authorization",
-            session_token: record.session_token,
+            session_token: sessionToken,
             user,
           },
         });
@@ -619,7 +660,8 @@ function handleAuthRpc(
     const token = randomToken("tgqr_", 18);
     const expires = Math.floor(Date.now() / 1000) + 60;
     const loginUrl = `tg://login?token=${token}`;
-    state.qrTokens[token] = { token, expires, login_url: loginUrl, approved: false };
+    state.qrTokens[token] = { token, expires, login_url: loginUrl, approved: false, consumed: false };
+    pruneRecordCap(state.qrTokens, MAX_TRANSIENT);
     ctx.save();
     sendJson(res, 200, { ok: true, _type: "auth.loginToken", token, expires, login_url: loginUrl });
     return true;
@@ -629,9 +671,13 @@ function handleAuthRpc(
     const session = resolveTelegramSession(req, res, state);
     if (!session) return true;
     const qrToken = asString(req.params.token) ?? "";
-    const record = state.qrTokens[qrToken];
-    if (!record || record.expires < Math.floor(Date.now() / 1000)) {
+    const record = ownGet(state.qrTokens, qrToken);
+    if (!record || record.consumed === true || record.expires < Math.floor(Date.now() / 1000)) {
       tgError(res, 400, "AUTH_TOKEN_EXPIRED");
+      return true;
+    }
+    if (record.approved) {
+      tgError(res, 400, "AUTH_TOKEN_ALREADY_ACCEPTED");
       return true;
     }
     const issued = issueSession(state, session.phone_number);
@@ -673,7 +719,7 @@ function handleGetDialogs(req: ParsedRequest, res: ServerResponse, state: Telegr
   const dialogsOut = page.items.map((entry) => entry.summary);
   const topMessages = page.items
     .map((entry) => {
-      const list = state.messages[entry.dialog.peer_key] ?? [];
+      const list = ownGet(state.messages, entry.dialog.peer_key) ?? [];
       return list[list.length - 1];
     })
     .filter((item): item is TelegramMessage => item !== undefined);
@@ -702,7 +748,7 @@ function requireDialog(
     return undefined;
   }
   const key = peerKey(peer);
-  const dialog = state.dialogs[key];
+  const dialog = ownGet(state.dialogs, key);
   if (!dialog) {
     tgError(res, 404, "PEER_ID_INVALID");
     return undefined;
@@ -731,7 +777,7 @@ function applyTelegramDelete(
   ids: readonly number[],
 ): { readonly deleted: number[]; readonly update: TelegramUpdate } {
   const state = ctx.getState();
-  const list = state.messages[key] ?? [];
+  const list = ownGet(state.messages, key) ?? [];
   const idSet = new Set(ids);
   const deleted: number[] = [];
   state.messages[key] = list.filter((msg) => {
@@ -770,7 +816,7 @@ function handleGetHistory(req: ParsedRequest, res: ServerResponse, state: Telegr
   const resolved = requireDialog(req, res, state);
   if (!resolved) return;
   const offsetId = asNumber(req.params.offset_id);
-  const all = [...(state.messages[resolved.key] ?? [])]
+  const all = [...(ownGet(state.messages, resolved.key) ?? [])]
     .filter((msg) => (offsetId !== undefined && offsetId > 0 ? msg.id < offsetId : true))
     .sort((a, b) => b.id - a.id);
   const page = paginateSlice(all, asString(req.params.cursor), asNumber(req.params.limit) ?? 50);
@@ -810,8 +856,9 @@ function handleSendMessage(req: ParsedRequest, res: ServerResponse, ctx: Provide
     const randomId = asString(req.params.random_id) ?? (asNumber(req.params.random_id) !== undefined ? String(asNumber(req.params.random_id)) : undefined);
     const dedupeToken = req.headers["idempotency-key"] ?? randomId;
     const scopedKey = dedupeToken ? `${key}:${dedupeToken}` : undefined;
-    if (scopedKey && state.idempotency[scopedKey]) {
-      sendJson(res, 200, { ok: true, message: state.idempotency[scopedKey], pts: state.pts });
+    const cached = ownGet(state.idempotency, scopedKey);
+    if (cached) {
+      sendJson(res, 200, { ok: true, message: structuredClone(cached), pts: state.pts });
       return;
     }
     const replyTo = asNumber(req.params.reply_to_msg_id);
@@ -819,10 +866,13 @@ function handleSendMessage(req: ParsedRequest, res: ServerResponse, ctx: Provide
     const msg = seedMessage(id, peer, state.owner.id, Math.floor(Date.now() / 1000), text, true, {
       ...(replyTo !== undefined ? { reply_to_msg_id: replyTo } : {}),
     });
-    const list = state.messages[key] ?? (state.messages[key] = []);
+    const list = ownGet(state.messages, key) ?? (state.messages[key] = []);
     list.push(msg);
     dialog.read_outbox_max_id = id;
-    if (scopedKey) state.idempotency[scopedKey] = msg;
+    if (scopedKey) {
+      state.idempotency[scopedKey] = structuredClone(msg);
+      pruneRecordCap(state.idempotency, MAX_TRANSIENT);
+    }
     const update = recordUpdate(ctx, { _type: "updateNewMessage", peer, peer_key: key, message: msg });
     ctx.save();
     sendJson(res, 200, { ok: true, message: msg, pts: update.pts });
@@ -843,7 +893,7 @@ function handleEditMessage(
     return;
   }
   const key = peerKey(peer);
-  const target = (state.messages[key] ?? []).find((msg) => msg.id === id);
+  const target = (ownGet(state.messages, key) ?? []).find((msg) => msg.id === id);
   if (!target) {
     tgError(res, 404, "MESSAGE_ID_INVALID");
     return;
@@ -866,18 +916,28 @@ function handleDeleteMessages(
   ctx: ProviderContext<TelegramState>,
 ): void {
   const state = ctx.getState();
-  const peer = parsePeer(req.params.peer);
   const ids = asNumberArray(req.params.id);
-  if (!peer || !ids || ids.length === 0) {
+  if (!ids || ids.length === 0) {
     tgError(res, 400, "MESSAGE_ID_INVALID");
     return;
   }
-  const key = peerKey(peer);
-  if (!state.messages[key]) {
+  const resolved = requireDialog(req, res, state);
+  if (!resolved) return;
+  if (!resolved.dialog.can_post) {
+    tgError(res, 403, "CHAT_WRITE_FORBIDDEN");
+    return;
+  }
+  const list = ownGet(state.messages, resolved.key);
+  if (!list) {
     tgError(res, 404, "PEER_ID_INVALID");
     return;
   }
-  const { deleted, update } = applyTelegramDelete(ctx, peer, key, ids);
+  const idSet = new Set(ids);
+  if (list.some((msg) => idSet.has(msg.id) && !msg.out)) {
+    tgError(res, 403, "MESSAGE_DELETE_FORBIDDEN");
+    return;
+  }
+  const { deleted, update } = applyTelegramDelete(ctx, resolved.peer, resolved.key, ids);
   sendJson(res, 200, { ok: true, pts: update.pts, pts_count: deleted.length, deleted_ids: deleted });
 }
 
@@ -929,7 +989,7 @@ function handleSendReaction(
     return;
   }
   const key = peerKey(peer);
-  const target = (state.messages[key] ?? []).find((msg) => msg.id === msgId);
+  const target = (ownGet(state.messages, key) ?? []).find((msg) => msg.id === msgId);
   if (!target) {
     tgError(res, 404, "MESSAGE_ID_INVALID");
     return;
@@ -948,7 +1008,7 @@ function handleSendReaction(
 
 function handleReadHistory(req: ParsedRequest, res: ServerResponse, ctx: ProviderContext<TelegramState>): void {
   withDialog(req, res, ctx, ({ peer, key, dialog }, state) => {
-    const list = state.messages[key] ?? [];
+    const list = ownGet(state.messages, key) ?? [];
     const topId = list[list.length - 1]?.id ?? dialog.read_inbox_max_id;
     const requestedMax = asNumber(req.params.max_id) ?? topId;
     const maxId = requestedMax === 0 ? topId : requestedMax;
@@ -1043,9 +1103,17 @@ function handleTelegramControl(
 
   if (req.pathname === "/__control/approve-qr" && req.method === "POST") {
     const token = asString(req.params.token) ?? "";
-    const record = state.qrTokens[token];
+    const record = ownGet(state.qrTokens, token);
     if (!record) {
       sendJson(res, 404, { ok: false, error: "qr_token_not_found" });
+      return true;
+    }
+    if (record.approved || record.consumed === true) {
+      sendJson(res, 409, { ok: false, error: "qr_token_already_approved" });
+      return true;
+    }
+    if (record.expires < Math.floor(Date.now() / 1000)) {
+      sendJson(res, 400, { ok: false, error: "qr_token_expired" });
       return true;
     }
     const phone = asString(req.params.phone) ?? state.owner.phone ?? "+15550101234";
@@ -1061,14 +1129,17 @@ function handleTelegramControl(
   if (req.pathname === "/__control/revoke" && req.method === "POST") {
     const specific = asString(req.params.session_token);
     let revoked = 0;
+    const revokedTokens = new Set<string>();
     for (const item of Object.values(state.sessions)) {
       if (item.revoked) continue;
       if (specific && item.session_token !== specific) continue;
       item.revoked = true;
       revoked += 1;
+      revokedTokens.add(item.session_token);
       recordUpdate(ctx, { _type: "updateSessionRevoked", session_token: item.session_token });
     }
     ctx.save();
+    ctx.sse.closeWhere((meta) => meta?.session_token !== undefined && revokedTokens.has(meta.session_token));
     sendJson(res, 200, { ok: true, revoked });
     return true;
   }
@@ -1076,13 +1147,13 @@ function handleTelegramControl(
   if (req.pathname === "/__control/inject" && req.method === "POST") {
     const peer = parsePeer(req.params.peer) ?? { _type: "peerUser", user_id: 2001 };
     const key = peerKey(peer);
-    const dialog = state.dialogs[key];
+    const dialog = ownGet(state.dialogs, key);
     if (!dialog) {
       sendJson(res, 404, { ok: false, error: "peer_not_found" });
       return true;
     }
     const kind = asString(req.params.kind) ?? "message";
-    const list = state.messages[key] ?? (state.messages[key] = []);
+    const list = ownGet(state.messages, key) ?? (state.messages[key] = []);
 
     if (kind === "message") {
       const text = asString(req.params.message) ?? asString(req.params.text) ?? "Injected Telegram message";
@@ -1155,9 +1226,18 @@ function handleTelegramRpc(req: ParsedRequest, res: ServerResponse, ctx: Provide
   if (req.pathname === "/rpc/updates.stream" && req.method === "GET") {
     const sincePts = asNumber(req.query.pts) ?? state.pts;
     const replay: SseEnvelope[] = state.updates
-      .filter((item) => item.pts > sincePts)
-      .map((item) => ({ id: String(item.pts), event: item._type, data: item }));
-    ctx.sse.connect(res, { replay });
+      .filter((item) => item.pts > sincePts && (item.session_token === undefined || item.session_token === session.session_token))
+      .map((item) => ({
+        id: String(item.pts),
+        event: item._type,
+        ...(item.session_token !== undefined ? { channel: item.session_token } : {}),
+        data: item,
+      }));
+    ctx.sse.connect(res, {
+      replay,
+      filter: (envelope) => envelope.channel === undefined || envelope.channel === session.session_token,
+      meta: { session_token: session.session_token },
+    });
     return;
   }
 
@@ -1170,6 +1250,7 @@ function handleTelegramRpc(req: ParsedRequest, res: ServerResponse, ctx: Provide
     case "/rpc/auth.logOut":
       session.revoked = true;
       ctx.save();
+      ctx.sse.closeWhere((meta) => meta?.session_token === session.session_token);
       sendJson(res, 200, { ok: true, _type: "auth.loggedOut" });
       return;
     case "/rpc/users.getMe":
@@ -1207,7 +1288,7 @@ function handleTelegramRpc(req: ParsedRequest, res: ServerResponse, ctx: Provide
         return;
       }
       const key = peerKey(peer);
-      const dialog = state.dialogs[key];
+      const dialog = ownGet(state.dialogs, key);
       if (!dialog) {
         tgError(res, 404, "PEER_ID_INVALID");
         return;
@@ -1220,9 +1301,9 @@ function handleTelegramRpc(req: ParsedRequest, res: ServerResponse, ctx: Provide
     case "/rpc/updates.getDifference": {
       const sincePts = asNumber(req.params.pts) ?? 0;
       const newer = state.updates.filter((item) => item.pts > sincePts);
-      const newMessages = newer
-        .filter((item) => item._type === "updateNewMessage" && item.message !== undefined)
-        .map((item) => item.message!);
+      const newMessages = newer.flatMap((item) =>
+        item._type === "updateNewMessage" && item.message !== undefined ? [item.message] : [],
+      );
       const otherUpdates = newer.filter((item) => item._type !== "updateNewMessage");
       sendJson(res, 200, {
         ok: true,

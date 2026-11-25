@@ -1,7 +1,9 @@
 # Alpha product visuals and navigation policy; retain factory hardware overlays.
 alpha_branding_dir := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
-# Preserve secure-camera defaults in the base packages as well as the explicit Alpha overlays.
+# Preserve secure-camera defaults when the staged secure-camera overlay is present.
+ifneq ($(wildcard vendor/alphaphone/secure-camera/overlay),)
 PRODUCT_ENFORCE_RRO_EXCLUDED_OVERLAYS += vendor/alphaphone/secure-camera/overlay
+endif
 PRODUCT_PACKAGES += AlphaFrameworkOverlay AlphaSystemUIOverlay AlphaSettingsOverlay AlphaSettingsProviderOverlay AlphaNavigationOverlay
 # LatinIME private style attributes are compiled inside the keyboard APK.
 PRODUCT_PACKAGE_OVERLAYS += $(alpha_branding_dir)/keyboard-overlay

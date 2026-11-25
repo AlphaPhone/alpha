@@ -47,7 +47,7 @@
    <intent-filter><action android:name="android.intent.action.SENDTO" /><category android:name="android.intent.category.DEFAULT" /><data android:scheme="sms" /><data android:scheme="smsto" /></intent-filter>
   </activity>
   <provider android:name="ai.eliza.plugins.messages.MmsFileProvider" android:authorities="${applicationId}.mms" android:enabled="false" android:exported="false" android:grantUriPermissions="true" />
-  <activity android:name=".AlphaDialPadActivity" android:enabled="false" android:exported="true" android:theme="@android:style/Theme.DeviceDefault.DayNight" android:label="@string/alpha_phone_label">
+  <activity android:name=".AlphaDialPadActivity" android:enabled="false" android:exported="true" android:launchMode="singleTop" android:theme="@android:style/Theme.DeviceDefault.DayNight" android:label="@string/alpha_phone_label">
    <intent-filter><action android:name="android.intent.action.DIAL" /><category android:name="android.intent.category.DEFAULT" /></intent-filter>
    <intent-filter><action android:name="android.intent.action.DIAL" /><category android:name="android.intent.category.DEFAULT" /><data android:scheme="tel" /></intent-filter>
   </activity>

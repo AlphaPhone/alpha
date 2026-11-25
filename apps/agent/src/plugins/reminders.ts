@@ -1,9 +1,9 @@
 // spec/agent/index.md, "Story: Run Alpha's agent on the phone"
 import { randomUUID } from "node:crypto";
-import { type ScheduledTasksApi, readTurnContext, scheduledTasksServiceType, showsApp } from "@elizaos/agent-host";
+import { type ScheduledTasksApi, type VerbRequest, readTurnContext, scheduledTasksServiceType, showsApp } from "@elizaos/agent-host";
 import {
   type AlphaAppsStore, DEFAULT_LIST_ID, addCivilDays, civilToEpochMs, normalizeListColor,
-  normalizeListIcon, normalizePriority, normalizeRecurrence, parseCivilDate, todayCivilDate,
+  normalizeListIcon, normalizePriority, normalizeRecurrence, parseCivilDate, parseReminderRestoreFallback, todayCivilDate,
 } from "./store.ts";
 import {
   type AgentAction, type AgentProvider, type AgentRoute, type AgentRuntimeLike,
@@ -36,6 +36,17 @@ async function reconcileScheduledTasks(store: AlphaAppsStore, runtime: AgentRunt
   }
 }
 
+async function applyMirroredVerb(runtime: AgentRuntimeLike | undefined, taskId: string | null, request: VerbRequest): Promise<void> {
+  if (taskId === null) return;
+  const tasksApi = scheduledTasksOf(runtime);
+  if (tasksApi === undefined || typeof tasksApi.applyVerb !== "function") return;
+  try {
+    await tasksApi.applyVerb(taskId, request, { tag: "Unkeyed" });
+  } catch {
+    return;
+  }
+}
+
 async function mirrorDatedReminder(store: AlphaAppsStore, runtime: AgentRuntimeLike | undefined, item: ReminderItemRecord, timeZone: string): Promise<ReminderItemRecord> {
   if (item.dueDate === null || item.completed || item.agentTaskId !== null) return item;
   const tasksApi = scheduledTasksOf(runtime);
@@ -57,6 +68,31 @@ async function mirrorDatedReminder(store: AlphaAppsStore, runtime: AgentRuntimeL
     return item;
   }
   return item;
+}
+
+async function syncUpdatedMirroredReminder(
+  store: AlphaAppsStore,
+  runtime: AgentRuntimeLike | undefined,
+  before: ReminderItemRecord,
+  after: ReminderItemRecord,
+  timeZone: string,
+): Promise<ReminderItemRecord> {
+  const scheduleChanged = before.dueDate !== after.dueDate || before.dueMinute !== after.dueMinute || before.title !== after.title;
+  if (before.agentTaskId !== null && (after.dueDate === null || after.completed)) {
+    await applyMirroredVerb(runtime, before.agentTaskId, { kind: "verb", verb: { tag: after.completed ? "Complete" : "Dismiss" } });
+    return store.updateItem(after.id, { agentTaskId: null }) ?? after;
+  }
+  if (before.agentTaskId !== null && scheduleChanged && after.dueDate !== null && !after.completed) {
+    const fireAtMs = civilToEpochMs(after.dueDate, after.dueMinute, timeZone);
+    if (fireAtMs !== null) {
+      await applyMirroredVerb(runtime, before.agentTaskId, {
+        kind: "edit",
+        edit: { promptInstructions: after.title, trigger: { kind: "once", atIso: new Date(fireAtMs).toISOString() } },
+      });
+    }
+    return after;
+  }
+  return mirrorDatedReminder(store, runtime, after, timeZone);
 }
 
 async function notifyReminder(runtime: AgentRuntimeLike | undefined, title: string, body: string, itemId: string): Promise<void> {
@@ -189,7 +225,7 @@ function queryReminders(store: AlphaAppsStore, params: Record<string, unknown>, 
   });
 }
 
-function handleListOp(store: AlphaAppsStore, op: string, params: Record<string, unknown>) {
+async function handleListOp(store: AlphaAppsStore, runtime: AgentRuntimeLike | undefined, op: string, params: Record<string, unknown>) {
   if (op === "create_list") {
     const name = readString(params, "name") ?? readString(params, "listName") ?? readString(params, "title");
     if (name === undefined) return { success: false, text: "Please provide a name for the new reminder list." };
@@ -205,8 +241,12 @@ function handleListOp(store: AlphaAppsStore, op: string, params: Record<string, 
     return { success: true, text: `Renamed list to "${updated.name}".`, data: { op, list: updated } };
   }
   const mode = readString(params, "mode") === "cascade" ? "cascade" : "reassign";
+  const cascadedTaskIds = mode === "cascade"
+    ? store.getReminders().items.filter((item) => item.listId === targetId && item.agentTaskId !== null).map((item) => item.agentTaskId)
+    : [];
   const removed = store.deleteList(targetId, mode);
   if (removed === undefined) return { success: false, text: "Cannot delete that reminder list." };
+  for (const taskId of cascadedTaskIds) await applyMirroredVerb(runtime, taskId, { kind: "verb", verb: { tag: "Dismiss" } });
   return { success: true, text: `Deleted list "${removed.name}".`, data: { op, list: removed } };
 }
 
@@ -216,7 +256,7 @@ async function handleRemindersManage(
 ) {
   await reconcileScheduledTasks(store, runtime, timeZone);
   const op = (readString(params, "op") ?? readString(params, "action") ?? "list").toLowerCase();
-  if (op === "create_list" || op === "rename_list" || op === "delete_list") return handleListOp(store, op, params);
+  if (op === "create_list" || op === "rename_list" || op === "delete_list") return handleListOp(store, runtime, op, params);
   if (op === "list" || op === "query") {
     const items = queryReminders(store, params, timeZone);
     const lines = items.map((item) => `- ${item.title}${formatDueSummary(item)}${item.flagged ? " [flagged]" : ""}${item.priority !== "none" ? ` [${item.priority}]` : ""} (${item.id})`);
@@ -240,11 +280,15 @@ async function handleRemindersManage(
     const mirrored = await mirrorDatedReminder(store, runtime, created, timeZone);
     return { success: true, text: `Added reminder "${mirrored.title}"${formatDueSummary(mirrored)}.`, data: { op, item: mirrored } };
   }
+  if (op !== "complete" && op !== "reopen" && op !== "snooze" && op !== "flag" && op !== "move" && op !== "delete" && op !== "add_subtask" && op !== "toggle_subtask" && op !== "update") {
+    return { success: false, text: `Unknown reminders action "${op}".` };
+  }
   const target = findReminderTarget(store, params);
   if (target === undefined) return { success: false, text: "No matching reminder found." };
   if (op === "complete") {
     const completed = store.completeItem(target.id);
     if (completed === undefined) return { success: false, text: "Reminder not found." };
+    await applyMirroredVerb(runtime, completed.previousAgentTaskId, { kind: "verb", verb: { tag: "Complete" } });
     const nextItem = completed.nextItem === null ? null : await mirrorDatedReminder(store, runtime, completed.nextItem, timeZone);
     return {
       success: true,
@@ -254,11 +298,17 @@ async function handleRemindersManage(
   }
   if (op === "reopen") {
     const reopened = store.reopenItem(target.id);
+    if (reopened !== undefined) await applyMirroredVerb(runtime, reopened.agentTaskId, { kind: "verb", verb: { tag: "Reopen" } });
     return { success: true, text: `Reopened "${target.title}".`, data: { op, item: reopened } };
   }
   if (op === "snooze") {
     const snoozed = store.snoozeItem(target.id, { minutes: readNumber(params, "minutes") ?? 10, untilMs: readNumber(params, "untilMs") });
-    if (snoozed !== undefined) await notifyReminder(runtime, `Snoozed: ${snoozed.title}`, "Reminder snoozed.", snoozed.id);
+    if (snoozed !== undefined) {
+      if (snoozed.snoozedUntilMs !== null) {
+        await applyMirroredVerb(runtime, snoozed.agentTaskId, { kind: "verb", verb: { tag: "SnoozeUntil", until: snoozed.snoozedUntilMs } });
+      }
+      await notifyReminder(runtime, `Snoozed: ${snoozed.title}`, "Reminder snoozed.", snoozed.id);
+    }
     return { success: true, text: `Snoozed "${target.title}".`, data: { op, item: snoozed } };
   }
   if (op === "flag") {
@@ -273,6 +323,7 @@ async function handleRemindersManage(
   }
   if (op === "delete") {
     const removed = store.deleteItem(target.id);
+    if (removed !== undefined) await applyMirroredVerb(runtime, removed.agentTaskId, { kind: "verb", verb: { tag: "Dismiss" } });
     return { success: true, text: `Deleted reminder "${target.title}".`, data: { op, item: removed } };
   }
   if (op === "add_subtask") {
@@ -302,7 +353,7 @@ async function handleRemindersManage(
     listId: params.listId !== undefined || params.listName !== undefined ? resolveListId(store, params) : undefined,
     subtasks: parseSubtasksParam(params.subtasks),
   });
-  const mirrored = updated !== undefined ? await mirrorDatedReminder(store, runtime, updated, timeZone) : undefined;
+  const mirrored = updated !== undefined ? await syncUpdatedMirroredReminder(store, runtime, target, updated, timeZone) : undefined;
   return { success: true, text: `Updated reminder "${mirrored?.title ?? target.title}".`, data: { op, item: mirrored } };
 }
 
@@ -392,7 +443,12 @@ export function remindersProvider(store: AlphaAppsStore, timeZone: string): Agen
           flaggedCount: flagged.length,
           listCount: snapshot.lists.length,
         },
-        data: { snapshot, selectedId: selectedItem?.id ?? null },
+        data: {
+          version: snapshot.version,
+          overdueIds: overdue.slice(0, 8).map((item) => item.id),
+          dueTodayIds: dueToday.slice(0, 8).map((item) => item.id),
+          selectedId: selectedItem?.id ?? null,
+        },
       };
     },
   };
@@ -442,10 +498,15 @@ export function remindersRoutes(store: AlphaAppsStore, runtime: AgentRuntimeLike
     {
       method: "DELETE",
       path: "/api/alpha/reminders/lists/{id}",
-      handler: (input) => {
+      handler: async (input) => {
+        const listId = input.parameters.get("id") ?? "";
         const mode = input.query.get("mode") === "cascade" || readString(asRecord(input.body), "mode") === "cascade" ? "cascade" : "reassign";
-        const removed = store.deleteList(input.parameters.get("id") ?? "", mode);
+        const cascadedTaskIds = mode === "cascade"
+          ? store.getReminders().items.filter((item) => item.listId === listId && item.agentTaskId !== null).map((item) => item.agentTaskId)
+          : [];
+        const removed = store.deleteList(listId, mode);
         if (removed === undefined) return { status: 404, body: { error: "reminder_list_not_found" } };
+        for (const taskId of cascadedTaskIds) await applyMirroredVerb(runtime, taskId, { kind: "verb", verb: { tag: "Dismiss" } });
         return { status: 200, body: { list: removed, snapshot: store.getReminders() } };
       },
     },
@@ -478,8 +539,11 @@ export function remindersRoutes(store: AlphaAppsStore, runtime: AgentRuntimeLike
       method: "PATCH",
       path: "/api/alpha/reminders/items/{id}",
       handler: async (input) => {
+        const id = input.parameters.get("id") ?? "";
+        const before = store.getReminders().items.find((entry) => entry.id === id);
+        if (before === undefined) return { status: 404, body: { error: "reminder_not_found" } };
         const body = asRecord(input.body);
-        const updated = store.updateItem(input.parameters.get("id") ?? "", {
+        const updated = store.updateItem(id, {
           listId: readString(body, "listId"),
           title: readString(body, "title"),
           notes: readRawString(body, "notes"),
@@ -495,16 +559,17 @@ export function remindersRoutes(store: AlphaAppsStore, runtime: AgentRuntimeLike
           notifiedAtMs: body.notifiedAtMs === null ? null : readNumber(body, "notifiedAtMs"),
         });
         if (updated === undefined) return { status: 404, body: { error: "reminder_not_found" } };
-        const item = await mirrorDatedReminder(store, runtime, updated, timeZone);
+        const item = await syncUpdatedMirroredReminder(store, runtime, before, updated, timeZone);
         return { status: 200, body: { item, snapshot: store.getReminders() } };
       },
     },
     {
       method: "DELETE",
       path: "/api/alpha/reminders/items/{id}",
-      handler: (input) => {
+      handler: async (input) => {
         const removed = store.deleteItem(input.parameters.get("id") ?? "");
         if (removed === undefined) return { status: 404, body: { error: "reminder_not_found" } };
+        await applyMirroredVerb(runtime, removed.agentTaskId, { kind: "verb", verb: { tag: "Dismiss" } });
         return { status: 200, body: { item: removed, snapshot: store.getReminders() } };
       },
     },
@@ -514,6 +579,7 @@ export function remindersRoutes(store: AlphaAppsStore, runtime: AgentRuntimeLike
       handler: async (input) => {
         const result = store.completeItem(input.parameters.get("id") ?? "");
         if (result === undefined) return { status: 404, body: { error: "reminder_not_found" } };
+        await applyMirroredVerb(runtime, result.previousAgentTaskId, { kind: "verb", verb: { tag: "Complete" } });
         const nextItem = result.nextItem === null ? null : await mirrorDatedReminder(store, runtime, result.nextItem, timeZone);
         return { status: 200, body: { item: result.item, nextItem, snapshot: store.getReminders() } };
       },
@@ -521,9 +587,10 @@ export function remindersRoutes(store: AlphaAppsStore, runtime: AgentRuntimeLike
     {
       method: "POST",
       path: "/api/alpha/reminders/items/{id}/reopen",
-      handler: (input) => {
+      handler: async (input) => {
         const item = store.reopenItem(input.parameters.get("id") ?? "");
         if (item === undefined) return { status: 404, body: { error: "reminder_not_found" } };
+        await applyMirroredVerb(runtime, item.agentTaskId, { kind: "verb", verb: { tag: "Reopen" } });
         return { status: 200, body: { item, snapshot: store.getReminders() } };
       },
     },
@@ -537,6 +604,9 @@ export function remindersRoutes(store: AlphaAppsStore, runtime: AgentRuntimeLike
           untilMs: readNumber(body, "untilMs") ?? readNumber(body, "snoozedUntilMs"),
         });
         if (item === undefined) return { status: 404, body: { error: "reminder_not_found" } };
+        if (item.snoozedUntilMs !== null) {
+          await applyMirroredVerb(runtime, item.agentTaskId, { kind: "verb", verb: { tag: "SnoozeUntil", until: item.snoozedUntilMs } });
+        }
         await notifyReminder(runtime, `Snoozed: ${item.title}`, "Reminder snoozed.", item.id);
         return { status: 200, body: { item, snapshot: store.getReminders() } };
       },
@@ -544,11 +614,17 @@ export function remindersRoutes(store: AlphaAppsStore, runtime: AgentRuntimeLike
     {
       method: "POST",
       path: "/api/alpha/reminders/items/{id}/restore",
-      handler: (input) => {
+      handler: async (input) => {
+        const id = input.parameters.get("id") ?? "";
         const body = asRecord(input.body);
-        const fallback = typeof body.item === "object" && body.item !== null ? (body.item as ReminderItemRecord) : undefined;
-        const item = store.restoreItem(input.parameters.get("id") ?? "", fallback);
-        if (item === undefined) return { status: 404, body: { error: "reminder_not_found" } };
+        let fallback: ReminderItemRecord | undefined;
+        if (body.item !== undefined) {
+          fallback = parseReminderRestoreFallback(body.item, id);
+          if (fallback === undefined) return { status: 400, body: { error: "invalid_reminder_item" } };
+        }
+        const restored = store.restoreItem(id, fallback);
+        if (restored === undefined) return { status: 404, body: { error: "reminder_not_found" } };
+        const item = await mirrorDatedReminder(store, runtime, restored, timeZone);
         return { status: 200, body: { item, snapshot: store.getReminders() } };
       },
     },

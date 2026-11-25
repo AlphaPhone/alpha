@@ -16,9 +16,8 @@ emergency, clock, notification-privacy, permissions, or account behavior.
 The expanded shade gains a static, noninteractive Alpha wordmark in both Compose and
 legacy paths. The decoration yields to privacy indicators and actual transformed clock
 bounds, and disappears if it cannot fit the current text size. Compact, single-row
-large-screen and collapsed headers retain their existing controls and layout. The header
-is text-only in Android's serif family; the lockscreen affordance reuses the exact path
-from `apps/app/public/logo-mark.svg`, with the existing native product tint. No new font
+large-screen and collapsed headers retain their existing controls and layout. The header is text-only in Android's serif family; the lockscreen affordance reuses the exact emblem path
+from `packages/design-system/brand/mark.svg`, with the existing native product tint. No new font
 payload, activity indicator, microphone capture, Cloud request, or connection claim is added.
 
 ## Reproduce source preparation

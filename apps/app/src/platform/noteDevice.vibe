@@ -7,8 +7,9 @@ import { registered } from "./device.vibe"
 import { type SavedNoteWindow, readSavedNote } from "./voice.vibe"
 
 module native {
-  import { type PluginListenerHandle, registerPlugin } from "@capacitor/core"
+  import type { PluginListenerHandle } from "@capacitor/core"
   import type { Command } from "../../gen/app__notes__recording.effect.vibe"
+  import { plugin as capacitorPlugin } from "./capacitor.ts"
 
   export type Earlier = "records" | "trash" | "folders"
 
@@ -32,10 +33,9 @@ module native {
     addListener(event: "recordingChanged" | "openRequested", received: (value: unknown) => void): Promise<PluginListenerHandle>
   }
 
-  let made: NotesPlugin | undefined
   /** Alpha's registered device recorder. @throws {never} */
   export function client(): NotesPlugin {
-    return (made ??= registerPlugin<NotesPlugin>("AlphaNotes"))
+    return capacitorPlugin<NotesPlugin>("AlphaNotes")
   }
 
   /** The credential-free binding the device journal uses for this agent owner. */
@@ -111,17 +111,17 @@ export const noteDevice = Layer.sync(NoteDevice, () => {
     Effect.catch(read(Permission, call), () => succeed({ grant: "prompt" })),
     ({ grant }): Grant => grant === "granted" ? "Granted" : grant === "denied" ? "Denied" : "Unasked",
   )
-  const changed = api === undefined ? Stream.empty : Stream.callback<Tape>((queue) => acquireRelease(
-    promise(() => api.addListener("recordingChanged", (raw) => {
+  const changed = api === undefined ? Stream.empty : Stream.callback<Tape>((queue) => Effect.asVoid(acquireRelease(
+    Effect.orElseSucceed(tryPromise(() => api.addListener("recordingChanged", (raw) => {
       const report = Schema.decodeUnknownOption(TapeReply)(raw)
       if (Option.isSome(report)) Queue.offerUnsafe(queue, report.value)
-    })),
-    (listener) => promise(() => listener.remove()),
-  ))
-  const openAsked = api === undefined ? Stream.empty : Stream.callback<void>((queue) => acquireRelease(
-    promise(() => api.addListener("openRequested", () => { Queue.offerUnsafe(queue, undefined) })),
-    (listener) => promise(() => listener.remove()),
-  ))
+    })), () => undefined),
+    (listener) => listener === undefined ? Effect.void : ignore(tryPromise(() => listener.remove())),
+  )))
+  const openAsked = api === undefined ? Stream.empty : Stream.callback<void>((queue) => Effect.asVoid(acquireRelease(
+    Effect.orElseSucceed(tryPromise(() => api.addListener("openRequested", () => { Queue.offerUnsafe(queue, undefined) })), () => undefined),
+    (listener) => listener === undefined ? Effect.void : ignore(tryPromise(() => listener.remove())),
+  )))
   return {
     available, canTranscribe, changed, openAsked,
     permission: () => granted((native) => native.permission()),

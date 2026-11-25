@@ -12,8 +12,10 @@ import {
 } from "../gen/agent.effect.vibe"
 
 module node {
+  import path from "node:path"
   import { pathToFileURL } from "node:url"
   import { isDeepStrictEqual } from "node:util"
+  import type * as AgentHost from "@elizaos/agent-host"
 
   /** @throws {never} */
   export const sameRules = (left: unknown, right: unknown): boolean => isDeepStrictEqual(left, right)
@@ -23,14 +25,15 @@ module node {
     return process.argv.slice(2)
   }
 
-  /** `apps/agent`: the command runs as `node dist/src/main.js`. @throws {never} */
-  export function root(): string {
-    return (process.argv[1] ?? "").replace(/\/dist\/src\/main\.js$/, "")
+  /** `apps/agent`, whether run from `src/` or `dist/src/`. @throws {never} */
+  export function root(here: string): string {
+    const parent = path.resolve(here, "..")
+    return path.basename(parent) === "dist" ? path.dirname(parent) : parent
   }
 
   /** eliza's bundle builder of the clone at `dir`: the entry it ships imports that clone's agent, so the builder must be the same tree's. */
-  export function builderOf(dir: string): Promise<typeof import("@elizaos/agent-host")> {
-    return import(pathToFileURL(`${dir}/packages/agent-host/dist/src/bundle/build.js`).href) as Promise<typeof import("@elizaos/agent-host")>
+  export function builderOf(dir: string): Promise<typeof AgentHost> {
+    return import(pathToFileURL(`${dir}/packages/agent-host/dist/src/bundle/build.js`).href) as Promise<typeof AgentHost>
   }
 }
 import { builderOf, root, sameRules, words } from node
@@ -95,9 +98,14 @@ export function entrySource(bundled: readonly string[], hosted: readonly { name:
       `const nativeSpeechScope = (context) => ({ method: "GET", path: ${JSON.stringify(localScope)}, handler: async ({ signal }) => {`,
       '  const account = context.launch.account',
       '  const engine = speechEngine(context)',
-      '  const ready = engine === undefined ? undefined : await Effect.runPromise(engine.speechReady(), { signal })',
-      '  if (account === undefined || ready?.transcription !== true) return { status: 503, body: { error: "LOCAL_SPEECH_UNAVAILABLE" } }',
-      '  return { status: 200, body: { epoch: context.epoch, userId: account.userId, organizationId: account.organizationId } }',
+      '  if (account === undefined || engine === undefined) return { status: 503, body: { error: "LOCAL_SPEECH_UNAVAILABLE" } }',
+      '  try {',
+      '    const ready = await Effect.runPromise(engine.speechReady(), { signal })',
+      '    if (ready?.transcription !== true) return { status: 503, body: { error: "LOCAL_SPEECH_UNAVAILABLE" } }',
+      '    return { status: 200, body: { epoch: context.epoch, userId: account.userId, organizationId: account.organizationId } }',
+      '  } catch {',
+      '    return { status: 503, body: { error: "LOCAL_SPEECH_UNAVAILABLE" } }',
+      '  }',
       '} })',
     ] : []),
     `const nativeRuntimeScope = (context) => ({ method: "GET", path: ${JSON.stringify(nativeDigestScope)}, handler: () => {`,
@@ -135,7 +143,7 @@ export function entrySource(bundled: readonly string[], hosted: readonly { name:
 
 /** Where the pack is written: the bundle as `buildAgentBundle` publishes it, and the three files eliza's agent service reads beside it. */
 function places() {
-  const app = root()
+  const app = root(import.meta.dirname)
   return { app, data: `${app}/host`, bundle: `${app}/dist/bundle`, host: `${app}/dist/host` }
 }
 
@@ -232,6 +240,18 @@ effect function admittedHost(host: string, registered: readonly string[]) {
   try admitRoutes(written.nativeRoutes, true)
   if (!privacyAdmitted(written.privacy.secretSwap, written.privacy.piiSwap)) throw new Refused({ message: "the launch must ask eliza's privacy service to swap secrets and personal details" })
   if (!googleAdmitted(written.google.gmailChanges, written.google.calendarEdits)) throw new Refused({ message: "the launch consents to Gmail changes or calendar edits the spec does not" })
+  const hostedOrigins: string[] = []
+  for (const name of ["staging", "production"] as const) {
+    const row = deployment(name) catch effect () => { throw new Refused({ message: `${name} is not a row of packages/deployment/deployments.json` }) }
+    if (row.kind === "hosted") hostedOrigins.push(row.cloud)
+  }
+  if (written.model.backend !== "cloud" || written.model.smallModel !== cloudModel || written.model.largeModel !== cloudModel || !hostedOrigins.includes(written.model.cloudBaseUrl)) {
+    throw new Refused({ message: `the launch model must target a hosted deployment with ${cloudModel}` })
+  }
+  const expectedEmbeddings = localEmbeddings ? "local" : "none"
+  if (written.embeddings !== expectedEmbeddings) throw new Refused({ message: `the launch embeddings must be ${expectedEmbeddings}` })
+  if (written.persistMemory !== persistMemory) throw new Refused({ message: `the launch persistMemory must be ${String(persistMemory)}` })
+  if (written.callerRole !== "owner") throw new Refused({ message: "the launch callerRole must be owner" })
   const document = JSON.stringify({
     schema: 1, character, policy: { actions: { allowed: policy.actions.allowed }, plugins: policy.plugins },
     model: written.model, embeddings: written.embeddings, persistMemory: written.persistMemory, callerRole: written.callerRole, privacy: written.privacy, google: written.google,

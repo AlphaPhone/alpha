@@ -44,6 +44,16 @@ function realModel(): RealModel | undefined {
   return { baseUrl: baseUrl(), ...alphaModel, key };
 }
 
+function validatedProviderUrl(raw: string, envName: string): string {
+  const parsed = URL.parse(raw);
+  if (parsed === null) throw new Error(`${envName} must be a valid URL`);
+  const loopback = parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost" || parsed.hostname === "::1" || parsed.hostname === "[::1]";
+  if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && loopback)) {
+    throw new Error(`${envName} must use https: or loopback http:`);
+  }
+  return parsed.origin;
+}
+
 /**
  * eliza's agent, cloud, and external messaging providers at the dev server's `/agent`, `/cloud`, `/slack`, and `/telegram`:
  * the processes the journeys start (services.ts), over state of this run alone; the agent's is kept in the directory
@@ -61,33 +71,41 @@ export function eliza(): Plugin {
     apply: (_config, { command, isPreview }) => command === "serve" && !isPreview,
     async config() {
       const stateDir = process.env.ALPHA_ELIZA_STATE;
-      running = await startEliza(stateDir, realModel());
       const externalSlack = process.env.ALPHA_SLACK_URL?.trim();
       const externalTelegram = process.env.ALPHA_TELEGRAM_URL?.trim();
-      const slackTarget =
-        externalSlack && externalSlack.length > 0
-          ? externalSlack
-          : (slackProvider = await startSlackProvider({
-              ...(stateDir ? { stateFile: path.join(stateDir, "slack-state.json") } : {}),
-            })).origin;
-      const telegramTarget =
-        externalTelegram && externalTelegram.length > 0
-          ? externalTelegram
-          : (telegramProvider = await startTelegramProvider({
-              ...(stateDir ? { stateFile: path.join(stateDir, "telegram-state.json") } : {}),
-            })).origin;
-      const { agent, cloud, key } = running;
-      const under = (prefix: string) => (route: string) => route.slice(prefix.length) || "/";
-      return {
-        server: {
-          proxy: {
-            "/agent": { target: agent.origin, rewrite: under("/agent"), headers: { authorization: `Bearer ${agent.token}` } },
-            "/cloud": { target: cloud.local, rewrite: under("/cloud"), headers: { authorization: `Bearer ${key.token}` } },
-            "/slack": { target: slackTarget, rewrite: under("/slack"), changeOrigin: true },
-            "/telegram": { target: telegramTarget, rewrite: under("/telegram"), changeOrigin: true },
+      const validatedSlack = externalSlack && externalSlack.length > 0 ? validatedProviderUrl(externalSlack, "ALPHA_SLACK_URL") : undefined;
+      const validatedTelegram = externalTelegram && externalTelegram.length > 0 ? validatedProviderUrl(externalTelegram, "ALPHA_TELEGRAM_URL") : undefined;
+      try {
+        running = await startEliza(stateDir, realModel());
+        const slackTarget =
+          validatedSlack ??
+          (slackProvider = await startSlackProvider({
+            ...(stateDir ? { stateFile: path.join(stateDir, "slack-state.json") } : {}),
+          })).origin;
+        const telegramTarget =
+          validatedTelegram ??
+          (telegramProvider = await startTelegramProvider({
+            ...(stateDir ? { stateFile: path.join(stateDir, "telegram-state.json") } : {}),
+          })).origin;
+        const { agent, cloud, key } = running;
+        const under = (prefix: string) => (route: string) => route.slice(prefix.length) || "/";
+        return {
+          server: {
+            proxy: {
+              "/agent": { target: agent.origin, rewrite: under("/agent"), headers: { authorization: `Bearer ${agent.token}` } },
+              "/cloud": { target: cloud.local, rewrite: under("/cloud"), headers: { authorization: `Bearer ${key.token}` } },
+              "/slack": { target: slackTarget, rewrite: under("/slack"), changeOrigin: true },
+              "/telegram": { target: telegramTarget, rewrite: under("/telegram"), changeOrigin: true },
+            },
           },
-        },
-      };
+        };
+      } catch (cause) {
+        await Promise.allSettled([telegramProvider?.stop(), slackProvider?.stop(), running?.stop()]);
+        telegramProvider = undefined;
+        slackProvider = undefined;
+        running = undefined;
+        throw cause;
+      }
     },
     configureServer(server) {
       server.httpServer?.once("close", () => {

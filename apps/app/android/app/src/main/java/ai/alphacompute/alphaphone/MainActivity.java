@@ -34,6 +34,9 @@ public class MainActivity extends BridgeActivity {
  private boolean homeTask;
  private boolean handingOff;
  private boolean telephonyAdmitted;
+ private volatile boolean resumed;
+ private volatile boolean windowFocused;
+ private volatile boolean tornDown;
  private final AtomicLong composerVisit = new AtomicLong();
  private InsetsState insets;
 
@@ -103,17 +106,24 @@ public class MainActivity extends BridgeActivity {
   AlphaLauncher.register(this, image);
   super.onCreate(state);
   if (getBridge() == null) return;
+  WebView page = getBridge().getWebView();
+  if (page == null) return;
   livePage = new WeakReference<>(this);
   WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
-  getBridge().getWebView().getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-  android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(getBridge().getWebView(), false);
+  page.setFilterTouchesWhenObscured(true);
+  page.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+  android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(page, false);
+  AlphaDevicePlugin.applyTextScale(this);
   followWindowInsets();
   getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
    @Override public void handleOnBackPressed() {
+    var bridge = getBridge();
+    WebView view = bridge == null ? null : bridge.getWebView();
+    if (view == null) return;
     boolean staysHome = holdsHomeRole();
     String script = "(() => { if (document.documentElement?.dataset.alphaCanGoBack === 'true') { "
       + BACK + "; return true; } " + (staysHome ? HOME + "; return true;" : "return false;") + " })()";
-    getBridge().getWebView().evaluateJavascript(script, handled -> {
+    view.evaluateJavascript(script, handled -> {
      if (!staysHome && !"true".equals(handled) && !isFinishing() && !isDestroyed()) moveTaskToBack(true);
     });
    }
@@ -121,7 +131,9 @@ public class MainActivity extends BridgeActivity {
  }
 
  private void followWindowInsets() {
-  getBridge().addWebViewListener(new WebViewListener() {
+  var bridge = getBridge();
+  if (bridge == null) return;
+  bridge.addWebViewListener(new WebViewListener() {
    @Override public void onPageStarted(WebView page) { composerVisit.incrementAndGet(); }
 
    @Override public void onPageLoaded(WebView page) {
@@ -136,7 +148,9 @@ public class MainActivity extends BridgeActivity {
      incoming.isVisible(WindowInsetsCompat.Type.ime()));
    if (!measured.equals(insets)) {
     insets = measured;
-    measured.publish(getBridge().getWebView());
+    var currentBridge = getBridge();
+    WebView webView = currentBridge == null ? null : currentBridge.getWebView();
+    if (webView != null) measured.publish(webView);
    }
    return ViewCompat.onApplyWindowInsets(view, incoming);
   });
@@ -145,11 +159,11 @@ public class MainActivity extends BridgeActivity {
 
  @Override protected void load() {
   if (handingOff) return;
+  WebView page = findViewById(com.getcapacitor.android.R.id.webview);
+  if (page != null) page.setFilterTouchesWhenObscured(true);
   if (telephonyAdmitted && !isAssistantSurface()) {
    if (config == null) config = CapConfig.loadDefault(this);
-   WebView page = findViewById(com.getcapacitor.android.R.id.webview);
    if (page != null && config.getServerUrl() == null) {
-    page.setFilterTouchesWhenObscured(true);
     AlphaMessagesComposerPort.install(this, page);
    }
   }
@@ -164,27 +178,44 @@ public class MainActivity extends BridgeActivity {
  @Override public void onResume() {
   composerVisit.incrementAndGet();
   super.onResume();
+  resumed = true;
+  windowFocused = hasWindowFocus();
   HostedDigestDelivery.get().refreshNotices();
   if (livePage.get() == this) unansweredFrontStarts = 0;
  }
 
  @Override public void onPause() {
+  resumed = false;
   composerVisit.incrementAndGet();
   super.onPause();
  }
 
  @Override public void onDestroy() {
+  resumed = false;
+  windowFocused = false;
+  tornDown = true;
   composerVisit.incrementAndGet();
   if (livePage.get() == this) livePage.clear();
   super.onDestroy();
  }
 
  @Override public void onWindowFocusChanged(boolean focused) {
+  windowFocused = focused;
   composerVisit.incrementAndGet();
   super.onWindowFocusChanged(focused);
-  if (focused && getBridge() != null) {
-   getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('focus'))", null);
+  var bridge = getBridge();
+  WebView view = bridge == null ? null : bridge.getWebView();
+  if (focused && view != null) {
+   view.evaluateJavascript("window.dispatchEvent(new Event('focus'))", null);
   }
+ }
+
+ boolean isForegroundFocused() {
+  return resumed && windowFocused && !tornDown && !isFinishing() && !isDestroyed();
+ }
+
+ boolean isResumedActive() {
+  return resumed && !tornDown && !isFinishing() && !isDestroyed();
  }
 
  private boolean volumeShutter;
@@ -201,9 +232,11 @@ public class MainActivity extends BridgeActivity {
 
  @Override public boolean dispatchKeyEvent(android.view.KeyEvent event) {
   int key = event.getKeyCode();
-  if (volumeShutter && (key == android.view.KeyEvent.KEYCODE_VOLUME_UP || key == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) && getBridge() != null) {
+  var bridge = getBridge();
+  WebView view = bridge == null ? null : bridge.getWebView();
+  if (volumeShutter && (key == android.view.KeyEvent.KEYCODE_VOLUME_UP || key == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) && view != null) {
    if (event.getAction() == android.view.KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0)
-    getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('alpha:volume-shutter'))", null);
+    view.evaluateJavascript("window.dispatchEvent(new Event('alpha:volume-shutter'))", null);
    return true;
   }
   return super.dispatchKeyEvent(event);
@@ -221,7 +254,9 @@ public class MainActivity extends BridgeActivity {
    SmsNoticeOpenRequest.clear();
   }
   super.onNewIntent(intent);
-  if (getBridge() != null && home) getBridge().getWebView().evaluateJavascript(HOME, null);
+  var bridge = getBridge();
+  WebView view = bridge == null ? null : bridge.getWebView();
+  if (view != null && home) view.evaluateJavascript(HOME, null);
  }
 
  private static boolean isHome(Intent intent) {

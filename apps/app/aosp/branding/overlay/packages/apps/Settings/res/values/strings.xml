@@ -1,4 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="settings_label">Alpha Settings</string>
+    <string name="settings_label" translatable="false">Alpha Settings</string>
 </resources>

@@ -4,13 +4,17 @@ import { registered } from "./device.vibe"
 import { WebFrames, type FrameEvent } from "./browserWeb.vibe"
 
 module held {
-  import type { BrowserTabHostPlugin } from "@elizaos/os-bridges"
-  import { BrowserTabSession, tabHostPlugin } from "@elizaos/os-bridges"
+  import type { BrowserTabHostListener, BrowserTabHostPlugin } from "@elizaos/os-bridges"
+  import { BrowserTabSession } from "@elizaos/os-bridges"
+  import { plugin as capacitorPlugin } from "./capacitor.ts"
 
-  let made: BrowserTabHostPlugin | undefined
+  export type AlphaBrowserPlugin = BrowserTabHostPlugin & {
+    addListener(event: "showDownloads", listener: (raw: unknown) => void): Promise<BrowserTabHostListener>
+  }
+
   /** eliza's client of Alpha's tab host, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
-  export function client(name: string): BrowserTabHostPlugin {
-    return (made ??= tabHostPlugin(name))
+  export function client(name: string): AlphaBrowserPlugin {
+    return capacitorPlugin<AlphaBrowserPlugin>(name)
   }
   /** eliza's record of the tabs one launch of the Browser holds, which takes each event of the tab host only once and in order. @throws {never} */
   export function session(): BrowserTabSession {
@@ -65,31 +69,41 @@ const listenerTimeout = 3000
 export const phoneTabHost = Layer.effect(TabHost, effect {
   if (!registered(name)) return { plugin: Option.none(), session: session(), told: Stream.empty, observing: () => succeed(false) }
   const plugin = client(name)
+  const events = try PubSub.unbounded<Told>()
   const ready = try Deferred.make<boolean>()
   let listening = false
-  const heard = (event: "stateChanged" | "tabOpened" | "tabClosed" | "findResult" | "showDownloads", kind: Exclude<Told["kind"], FrameEvent["kind"]>) => Stream.callback<Told>((queue) => effect {
+  const emit = (kind: Exclude<Told["kind"], FrameEvent["kind"]>) => (raw: unknown) => {
+    PubSub.publishUnsafe(events, { kind, raw })
+  }
+  const attach = (subscribe: () => Promise<BrowserTabHostListener>, tracksState: boolean) => effect {
     const acquire = tryPromise(async (signal: AbortSignal): Promise<BrowserTabHostListener> => {
-      const handle = await plugin.addListener(event as "stateChanged", (raw: unknown) => { Queue.offerUnsafe(queue, { kind, raw }) })
-      if (signal.aborted) await handle.remove()
+      const handle = await subscribe()
+      if (signal.aborted) await Promise.resolve(handle.remove()).catch(() => undefined)
       return handle
     })
     const handle = acquireRelease(
       Effect.interruptible(Effect.timeout(acquire, listenerTimeout)),
       (one) => effect {
-        if (kind === "state") listening = false
+        if (tracksState) listening = false
         try ignore(Effect.interruptible(Effect.timeout(tryPromise(async () => { await one.remove() }), listenerTimeout)))
       },
     ) catch () => undefined
-    if (kind === "state") {
+    if (tracksState) {
       listening = handle !== undefined
       try Deferred.succeed(ready, listening)
     }
-    if (handle === undefined) try Queue.end(queue)
-  })
+  }
+  try Effect.all([
+    attach(() => plugin.addListener("stateChanged", emit("state")), true),
+    attach(() => plugin.addListener("tabOpened", emit("opened")), false),
+    attach(() => plugin.addListener("tabClosed", emit("closed")), false),
+    attach(() => plugin.addListener("findResult", emit("found")), false),
+    attach(() => plugin.addListener("showDownloads", emit("showDownloads")), false),
+  ], { concurrency: "unbounded" })
   return {
     plugin: Option.some(plugin),
     session: session(),
-    told: Stream.mergeAll([heard("stateChanged", "state"), heard("tabOpened", "opened"), heard("tabClosed", "closed"), heard("findResult", "found"), heard("showDownloads", "showDownloads")], { concurrency: "unbounded" }),
+    told: Stream.fromPubSub(events),
     observing: () => listening ? succeed(true) : Effect.map(Effect.orElseSucceed(Effect.timeout(Deferred.await(ready), listenerTimeout), () => false), (installed) => installed && listening),
   }
 })

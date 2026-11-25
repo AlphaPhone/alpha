@@ -123,6 +123,7 @@ export interface RemindersSnapshot {
   readonly updatedAtMs: number;
   readonly lists: readonly ReminderListRecord[];
   readonly items: readonly ReminderItemRecord[];
+  readonly deletedAgentTaskIds?: readonly string[];
 }
 
 /** Action definition derived from eliza's AgentPlugin contract. */

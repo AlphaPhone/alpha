@@ -11,10 +11,18 @@ export const EdgeRequest = globalThis.Request;
  * @throws {never}
  */
 export function forwardedHeaders(incoming: Headers, webHost: string): Headers {
+  const connectionListed = new Set<string>();
+  const connection = incoming.get("connection");
+  if (connection !== null) {
+    for (const token of connection.split(",")) {
+      const normalized = token.trim().toLowerCase();
+      if (normalized !== "") connectionListed.add(normalized);
+    }
+  }
   const headers = new EdgeHeaders();
   incoming.forEach((value, name) => {
     const lower = name.toLowerCase();
-    if (headerKept(lower, lower.startsWith("x-forwarded-"))) headers.set(lower, value);
+    if (!connectionListed.has(lower) && headerKept(lower, lower.startsWith("x-forwarded-"))) headers.set(lower, value);
   });
   headers.set("x-forwarded-host", webHost);
   headers.set("x-forwarded-proto", "https");

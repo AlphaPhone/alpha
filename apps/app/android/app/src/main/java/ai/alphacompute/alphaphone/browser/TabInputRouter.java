@@ -54,27 +54,56 @@ public final class TabInputRouter extends View {
         new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
   }
 
+  private static volatile boolean loggedDragLayoutMismatch;
+
   /**
    * A copy of {@code event} with {@code action} at (x, y), or null when the copy cannot be made.
-   * DragEvent has no public way to move its point; its parcel starts with the action and the point,
-   * and the copy is checked, so a different layout gives null, never a wrong point. The copy has no
-   * local state, which only a drag started in this app sets.
+   * DragEvent has no public way to move its point; verify its leading parcel fields match the
+   * source event before updating them so a changed platform layout returns null instead of
+   * corrupting the parcel. The copy has no local state, which only a drag started in this app sets.
    */
   static DragEvent movedDragEvent(DragEvent event, int action, float x, float y) {
     Parcel parcel = Parcel.obtain();
     try {
       event.writeToParcel(parcel, 0);
       parcel.setDataPosition(0);
+      if (parcel.dataAvail() < 12) {
+        logDragLayoutMismatch();
+        return null;
+      }
+      int origAction = parcel.readInt();
+      float origX = parcel.readFloat();
+      float origY = parcel.readFloat();
+      if (origAction != event.getAction()
+          || Float.compare(origX, event.getX()) != 0
+          || Float.compare(origY, event.getY()) != 0) {
+        logDragLayoutMismatch();
+        return null;
+      }
+      parcel.setDataPosition(0);
       parcel.writeInt(action);
       parcel.writeFloat(x);
       parcel.writeFloat(y);
       parcel.setDataPosition(0);
       DragEvent moved = DragEvent.CREATOR.createFromParcel(parcel);
-      return moved.getAction() == action && moved.getX() == x && moved.getY() == y ? moved : null;
+      if (moved == null || moved.getAction() != action
+          || Float.compare(moved.getX(), x) != 0 || Float.compare(moved.getY(), y) != 0) {
+        logDragLayoutMismatch();
+        return null;
+      }
+      return moved;
     } catch (RuntimeException unavailable) {
+      logDragLayoutMismatch();
       return null;
     } finally {
       parcel.recycle();
+    }
+  }
+
+  private static void logDragLayoutMismatch() {
+    if (!loggedDragLayoutMismatch) {
+      loggedDragLayoutMismatch = true;
+      android.util.Log.w("TabInputRouter", "DragEvent parcel layout unsupported; falling back without moved drag event");
     }
   }
 

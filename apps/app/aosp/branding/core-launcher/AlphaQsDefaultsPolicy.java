@@ -10,6 +10,11 @@ import java.util.List;
 /** Update known stock layouts once; owner layouts are kept. */
 public final class AlphaQsDefaultsPolicy {
     public static final String ALPHA = tile(AlphaCoreLauncherPolicy.PACKAGE);
+    /**
+     * Recorded once the owner's QS layout has been reviewed (either migrated from stock or kept
+     * as a custom layout). Version 2 migrated known stock layouts once; version 3 records the
+     * settled state so later owner edits that happen to match stock order are never overwritten.
+     */
     public static final int VERSION = 3;
     public static final String VERSION_SETTING = "alpha_qs_layout_migration_version";
     private static final int STOCK_LAYOUT_VERSION = 2;

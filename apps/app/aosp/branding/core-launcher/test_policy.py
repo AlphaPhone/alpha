@@ -1,14 +1,17 @@
 from pathlib import Path
 import hashlib
 import json
+import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
-import os
 
 ROOT = Path(__file__).resolve().parent
-JDK = Path(os.environ.get('JAVA_HOME', '/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home'))
+sys.path.insert(0, str(ROOT.parent / 'system-entry'))
+from portable_tools import java_binary, require
+
 
 def kotlin_compiler():
     """Use an installed compiler only; no Gradle build or dependency downloads."""
@@ -32,7 +35,7 @@ def kotlin_compiler():
             raise RuntimeError('Install kotlinc or populate the Gradle cache: missing ' + artifact)
         jars.append(str(candidates[-1]))
     classpath = os.pathsep.join(jars)
-    return [str(JDK/'bin/java'), '-cp', classpath, 'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler'], classpath
+    return [java_binary('java'), '-cp', classpath, 'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler'], classpath
 
 class CorePolicyTest(unittest.TestCase):
     def test_actual_fgs_cache_update_hides_and_restores_core_launcher(self):
@@ -114,7 +117,7 @@ fun main() { Probe().run() }
                 compiled = subprocess.run(compiler + ['-no-stdlib', '-no-reflect', '-classpath', libraries,
                     '-d', str(d/'classes'), str(probe)], capture_output=True, text=True)
                 self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
-                executed = subprocess.run([str(JDK/'bin/java'), '-cp', str(d/'classes')+os.pathsep+libraries,
+                executed = subprocess.run([java_binary('java'), '-cp', str(d/'classes')+os.pathsep+libraries,
                     'TransitionKt'], capture_output=True, text=True)
                 if should_pass:
                     self.assertEqual(executed.returncode, 0, executed.stdout + executed.stderr)
@@ -156,10 +159,10 @@ public class CoreProbe {
   System.out.println("PASS core and QS policy "+checks);
  }
 }''')
-            subprocess.run([str(JDK/'bin/javac'), '-d', str(d), str(ROOT/'AlphaCoreLauncherPolicy.java'),
+            subprocess.run([java_binary('javac'), '-d', str(d), str(ROOT/'AlphaCoreLauncherPolicy.java'),
                 str(ROOT/'AlphaQsDefaultsPolicy.java'), str(probe)], check=True, capture_output=True)
             self.assertIn('PASS core and QS policy 28', subprocess.check_output(
-                [str(JDK/'bin/java'), '-cp', str(d), 'CoreProbe'], text=True))
+                [java_binary('java'), '-cp', str(d), 'CoreProbe'], text=True))
 
     def test_storage_default_refuses_non_owner_sideloaded_and_existing_modes(self):
         with tempfile.TemporaryDirectory(prefix='alpha-files-policy-') as directory:
@@ -169,15 +172,16 @@ public class StorageProbe {
  public static void main(String[] args){int checks=0;
   for(int user:new int[]{0,10})for(String pkg:new String[]{AlphaSharedStoragePolicy.PACKAGE,"other.app"})
    for(boolean installed:new boolean[]{false,true})for(boolean system:new boolean[]{false,true})
-    for(boolean requested:new boolean[]{false,true})for(boolean unset:new boolean[]{false,true}){
-     boolean expected=user==0&&pkg.equals(AlphaSharedStoragePolicy.PACKAGE)&&installed&&system&&requested&&unset;
-     if(AlphaSharedStoragePolicy.shouldGrant(user,pkg,installed,system,requested,unset)!=expected)throw new AssertionError();checks++;
-    }
+    for(boolean requested:new boolean[]{false,true})for(boolean unset:new boolean[]{false,true})
+     for(boolean applied:new boolean[]{false,true}){
+      boolean expected=!applied&&user==0&&pkg.equals(AlphaSharedStoragePolicy.PACKAGE)&&installed&&system&&requested&&unset;
+      if(AlphaSharedStoragePolicy.shouldGrant(user,pkg,installed,system,requested,unset,applied)!=expected)throw new AssertionError();checks++;
+     }
   System.out.println("PASS storage policy "+checks);
  }
 }''')
-            subprocess.run([str(JDK/'bin/javac'), '-d', str(d), str(ROOT/'AlphaSharedStoragePolicy.java'), str(probe)], check=True, capture_output=True)
-            self.assertIn('PASS storage policy 64', subprocess.check_output([str(JDK/'bin/java'), '-cp', str(d), 'com.android.server.pm.permission.StorageProbe'], text=True))
+            subprocess.run([java_binary('javac'), '-d', str(d), str(ROOT/'AlphaSharedStoragePolicy.java'), str(probe)], check=True, capture_output=True)
+            self.assertIn('PASS storage policy 128', subprocess.check_output([java_binary('java'), '-cp', str(d), 'com.android.server.pm.permission.StorageProbe'], text=True))
 
     def test_patch_inventory_and_unrelated_caller_controls_are_preserved(self):
         manifest=json.loads((ROOT/'manifest.json').read_text());patch=ROOT/manifest['patch']
@@ -192,11 +196,19 @@ public class StorageProbe {
             self.assertIn('if (!coreLauncher && isStoppableApp(packageName))',fgs)
             self.assertIn('else when (backgroundRestrictionExemptionReason)',fgs)
             self.assertIn('ACTION_PREFERRED_ACTIVITY_CHANGED',fgs)
+            self.assertIn('user = UserHandle.ALL',fgs)
+            self.assertIn('ACTION_PACKAGES_SUSPENDED',fgs)
+            self.assertNotIn('|| packageName == AlphaCoreLauncherPolicy.PACKAGE',fgs)
             repo=(d/'packages/SystemUI/src/com/android/systemui/qs/pipeline/data/repository/UserTileSpecRepository.kt').read_text()
-            self.assertLess(repo.index('val written = secureSettings.putStringForUser'),repo.index('secureSettings.putIntForUser('))
+            self.assertNotIn('alphaDefaultsMigrationPending',repo)
+            self.assertLess(repo.index('secureSettings.putStringForUser(SETTING, toStore'),repo.index('secureSettings.putIntForUser('))
             permission=(d/'services/core/java/com/android/server/pm/permission/DefaultPermissionGrantPolicy.java').read_text()
             self.assertIn('policy.getDeviceOwnerComponentOnAnyUser() != null',permission)
-            self.assertIn('mode == android.app.AppOpsManager.MODE_DEFAULT',permission)
+            self.assertIn('policy.isOrganizationOwnedDeviceWithManagedProfile()',permission)
+            self.assertIn('pkg == null || pkg.applicationInfo == null',permission)
+            self.assertIn('pkg.applicationInfo.isUpdatedSystemApp()',permission)
+            self.assertIn('AlphaSharedStoragePolicy.GRANTED_SETTING',permission)
+            self.assertIn('mode != android.app.AppOpsManager.MODE_DEFAULT',permission)
             self.assertIn('Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())',permission)
             self.assertIn('UserHandle.SYSTEM, new android.content.IntentFilter',permission)
             constructor=permission.split('DefaultPermissionGrantPolicy(@NonNull Context context) {',1)[1].split('public void setLocationPackagesProvider',1)[0]
@@ -211,5 +223,9 @@ public class StorageProbe {
             self.assertNotIn('MANAGE_APP_OPS_MODES',permission)
             with self.assertRaises(subprocess.CalledProcessError):
                 subprocess.run(['git','apply','--check',str(patch)],cwd=d,check=True,capture_output=True)
+
+    def test_require_enforced_under_optimize_flag(self):
+        with self.assertRaisesRegex(RuntimeError, 'unconditional guard'):
+            require(False, 'unconditional guard')
 
 if __name__=='__main__':unittest.main()

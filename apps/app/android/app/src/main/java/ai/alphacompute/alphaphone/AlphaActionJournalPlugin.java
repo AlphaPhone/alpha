@@ -46,6 +46,9 @@ public final class AlphaActionJournalPlugin extends ActionJournalPlugin {
    }
    try {
     call.resolve(operation.call());
+   } catch (SecurityException | IllegalArgumentException error) {
+    String message = error.getMessage();
+    call.reject(message != null && !message.isBlank() ? message : refusal());
    } catch (Exception error) {
     refused.run();
    }

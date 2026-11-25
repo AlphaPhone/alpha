@@ -9,14 +9,7 @@ interface CliOptions {
   readonly stateDir?: string;
 }
 
-function readArgValue(argv: readonly string[], flag: string): string | undefined {
-  const index = argv.indexOf(flag);
-  if (index < 0) return undefined;
-  return argv[index + 1];
-}
-
-function parsePort(raw: string | undefined, fallback: number, label: string): number {
-  if (raw === undefined) return fallback;
+function parsePort(raw: string, label: string): number {
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed < 0 || parsed > 65535) {
     throw new Error(`Invalid ${label} port: ${raw}`);
@@ -25,13 +18,27 @@ function parsePort(raw: string | undefined, fallback: number, label: string): nu
 }
 
 function parseCliOptions(argv: readonly string[]): CliOptions {
-  const slackPort = parsePort(readArgValue(argv, "--slack-port"), 4101, "--slack-port");
-  const telegramPort = parsePort(readArgValue(argv, "--telegram-port"), 4102, "--telegram-port");
-  const stateDir = readArgValue(argv, "--state-dir");
+  let slackPort = 4101;
+  let telegramPort = 4102;
+  let stateDir: string | undefined;
+  for (let index = 0; index < argv.length; index += 1) {
+    const flag = argv[index] ?? "";
+    const value = argv[index + 1];
+    if (flag !== "--slack-port" && flag !== "--telegram-port" && flag !== "--state-dir") {
+      throw new Error(`Unknown CLI argument: ${flag}`);
+    }
+    if (value === undefined || value.trim() === "" || value.startsWith("--")) {
+      throw new Error(`Missing value for ${flag}`);
+    }
+    index += 1;
+    if (flag === "--slack-port") slackPort = parsePort(value, "--slack-port");
+    else if (flag === "--telegram-port") telegramPort = parsePort(value, "--telegram-port");
+    else stateDir = path.resolve(value);
+  }
   return {
     slackPort,
     telegramPort,
-    ...(stateDir !== undefined && stateDir.trim() !== "" ? { stateDir: path.resolve(stateDir) } : {}),
+    ...(stateDir !== undefined ? { stateDir } : {}),
   };
 }
 
@@ -40,10 +47,16 @@ const slack = await startSlackProvider({
   port: options.slackPort,
   ...(options.stateDir ? { stateFile: path.join(options.stateDir, "slack-state.json") } : {}),
 });
-const telegram = await startTelegramProvider({
-  port: options.telegramPort,
-  ...(options.stateDir ? { stateFile: path.join(options.stateDir, "telegram-state.json") } : {}),
-});
+let telegram: Awaited<ReturnType<typeof startTelegramProvider>>;
+try {
+  telegram = await startTelegramProvider({
+    port: options.telegramPort,
+    ...(options.stateDir ? { stateFile: path.join(options.stateDir, "telegram-state.json") } : {}),
+  });
+} catch (cause) {
+  await slack.stop().catch(() => undefined);
+  throw cause;
+}
 
 process.stdout.write(
   `${JSON.stringify({

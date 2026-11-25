@@ -36,13 +36,25 @@ final class AlphaCallState {
 
  /** Telecom can report false when phone-state access is denied. Only use a negative with known access. */
  static boolean canRead(Context context, TelecomManager calls) {
+  return checkRead(context, calls, true);
+ }
+
+ /** Re-checks phone-state access without recording a second AppOps attribution for the same read. */
+ static boolean stillCanRead(Context context, TelecomManager calls) {
+  return checkRead(context, calls, false);
+ }
+
+ private static boolean checkRead(Context context, TelecomManager calls, boolean noteOp) {
   String packageName = context.getPackageName();
   if (context.checkSelfPermission("android.permission.READ_PRIVILEGED_PHONE_STATE") == PackageManager.PERMISSION_GRANTED ||
     packageName.equals(calls.getDefaultDialerPackage())) return true;
   if (context.checkSelfPermission("android.permission.READ_PHONE_STATE") != PackageManager.PERMISSION_GRANTED) return false;
   android.app.AppOpsManager ops = context.getSystemService(android.app.AppOpsManager.class);
-  return ops != null && ops.noteOpNoThrow(android.app.AppOpsManager.OPSTR_READ_PHONE_STATE, context.getApplicationInfo().uid, packageName)
-    == android.app.AppOpsManager.MODE_ALLOWED;
+  if (ops == null) return false;
+  int mode = noteOp
+    ? ops.noteOpNoThrow(android.app.AppOpsManager.OPSTR_READ_PHONE_STATE, context.getApplicationInfo().uid, packageName)
+    : ops.unsafeCheckOpNoThrow(android.app.AppOpsManager.OPSTR_READ_PHONE_STATE, context.getApplicationInfo().uid, packageName);
+  return mode == android.app.AppOpsManager.MODE_ALLOWED;
  }
 
  /** The current reading. */
@@ -52,7 +64,7 @@ final class AlphaCallState {
    TelecomManager calls = context.getSystemService(TelecomManager.class);
    if (calls == null || !canRead(context, calls)) return new Reading(null, null);
    boolean inCall = calls.isInCall();
-   if (!canRead(context, calls)) return new Reading(null, null);
+   if (!stillCanRead(context, calls)) return new Reading(null, null);
    return new Reading(inCall, inCall ? emergencyCall(calls) : Boolean.FALSE);
   } catch (SecurityException denied) {
    return new Reading(null, null);

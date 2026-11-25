@@ -10,7 +10,7 @@
     <color name="primary_device_default_settings">#050505</color>
     <color name="primary_dark_device_default_settings">#050505</color>
     <color name="surface_header_dark">#16161E</color>
-    <color name="surface_variant_dark">#1C1C24</color>
+    <color name="surface_variant_dark">#24242E</color>
     <color name="surface_dark">#121218</color>
     <color name="system_primary_light">#0000FF</color>
     <color name="system_on_primary_light">#FFFFFF</color>

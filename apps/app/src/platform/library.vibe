@@ -62,7 +62,7 @@ const webLibrary = Layer.effectContext(effect {
     try Effect.forkIn(ensuring(sleep("1 minute"), sync(() => releasePreview(url))), lifetime)
     return { status: "opened", message: "" }
   }
-  const blobs = new Map<string, string>()
+  const blobs = new Map<string, { readonly uri: string; readonly blob: Blob; readonly size: number; readonly mimeType: string; readonly name: string }>()
   const pages = new Map<string, Map<number, PdfPage>>()
   try addFinalizer(() => sync(() => {
     for (const id of new Set([...blobs.keys(), ...pages.keys()])) forgetUrl(id)
@@ -71,8 +71,8 @@ const webLibrary = Layer.effectContext(effect {
   const notify = <A>(write: A!VolumeRefused): A!VolumeRefused => Effect.tap(write, () => PubSub.publish(changed, undefined))
   const announce = <A>(work: A!VolumeRefused, painted: (value: A) => object) => answer(notify(work), painted)
   function forgetUrl(id: string): void {
-    const url = blobs.get(id)
-    if (url !== undefined) releasePreview(url)
+    const entry = blobs.get(id)
+    if (entry !== undefined) releasePreview(entry.uri)
     blobs.delete(id)
     for (const page of pages.get(id)?.values() ?? []) if (page.imageUri !== undefined) releasePreview(page.imageUri)
     pages.delete(id)
@@ -142,7 +142,8 @@ const webLibrary = Layer.effectContext(effect {
     storageWatch: () => Promise.resolve({ status: "ready" }),
     storageUnwatch: () => Promise.resolve({ status: "ready" }),
     async addListener(event, listener) {
-      const fiber = Effect.runFork(Stream.runForEach(changes, () => sync(listener)))
+      if (event !== "storageChanged") return { remove: () => Promise.resolve() }
+      const fiber = Effect.runSync(Effect.forkIn(Stream.runForEach(changes, () => sync(listener)), lifetime))
       return { remove: async () => { await Effect.runPromise(Fiber.interrupt(fiber)) } }
     },
   }
@@ -151,8 +152,13 @@ const webLibrary = Layer.effectContext(effect {
     describe: (id) => Effect.runPromise(Effect.match(selections.bytes(id), {
       onFailure: unavailable,
       onSuccess: ({ name, mimeType, blob }) => {
-        const uri = blobs.get(id) ?? previewOf(blob)
-        blobs.set(id, uri)
+        const cached = blobs.get(id)
+        const same = cached !== undefined && cached.blob === blob && cached.size === blob.size && cached.mimeType === mimeType && cached.name === name
+        const uri = same ? cached.uri : previewOf(blob)
+        if (!same) {
+          if (cached !== undefined) releasePreview(cached.uri)
+          blobs.set(id, { uri, blob, size: blob.size, mimeType, name })
+        }
         return { status: "selected", action: "files", selectionId: id, name, mimeType, uri, size: blob.size, canRename: true } as const
       },
     })),

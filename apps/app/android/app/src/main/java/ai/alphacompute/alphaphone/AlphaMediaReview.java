@@ -41,6 +41,7 @@ public final class AlphaMediaReview implements AutoCloseable {
   private final LaunchGate gate;
   private final ActivityResultLauncher<IntentSenderRequest> launcher;
   private final AtomicReference<Request> pending = new AtomicReference<>();
+  private volatile AlertDialog activeDialog;
   private volatile boolean closed;
   private static final class Request {
     final PluginCall call;
@@ -92,7 +93,12 @@ public final class AlphaMediaReview implements AutoCloseable {
    * foreground check and report an approved change as unverified, so dispatch waits for RESUMED.
    */
   private void afterResume(Request request) {
-    androidx.lifecycle.Lifecycle lifecycle = bridge.getActivity().getLifecycle();
+    androidx.appcompat.app.AppCompatActivity activity = bridge.getActivity();
+    if (activity == null) {
+      request.call.reject("Photos closed before dispatch. Review the selection again.");
+      return;
+    }
+    androidx.lifecycle.Lifecycle lifecycle = activity.getLifecycle();
     if (lifecycle.getCurrentState().isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
       dispatch(request);
       return;
@@ -158,23 +164,28 @@ public final class AlphaMediaReview implements AutoCloseable {
       }
       android.app.PendingIntent grant =
           MediaStore.createWriteRequest(bridge.getContext().getContentResolver(), uris);
-      bridge.getActivity().runOnUiThread(() -> {
-        if (closed || pending.get() != request || !bridge.getActivity().hasWindowFocus()
-            || request.until < SystemClock.elapsedRealtime()) {
+      Activity activity = bridge.getActivity();
+      if (activity == null) {
+        cancel(request, "Return to Photos to review this change.", DECLINED);
+        return;
+      }
+      activity.runOnUiThread(() -> {
+        if (closed || pending.get() != request || activity.isFinishing() || activity.isDestroyed()
+            || !activity.hasWindowFocus() || request.until < SystemClock.elapsedRealtime()) {
           cancel(request, "Return to Photos to review this change.", DECLINED);
           return;
         }
-        new AlertDialog.Builder(bridge.getActivity())
+        AlertDialog dialog = new AlertDialog.Builder(activity)
             .setTitle(AlphaMediaCopy.reviewTitle(permanent, favorite, desired, ids.size()))
             .setMessage(names + "\n" + AlphaMediaCopy.reviewDetail(permanent))
             .setNegativeButton(AlphaMediaCopy.REVIEW_CANCEL,
-                (dialog, which)
+                (shown, which)
                     -> cancel(
                         request, "Photo change cancelled. No change was dispatched.", DECLINED))
-            .setOnCancelListener(dialog
+            .setOnCancelListener(shown
                 -> cancel(request, "Photo change cancelled. No change was dispatched.", DECLINED))
             .setPositiveButton(AlphaMediaCopy.reviewConfirm(permanent),
-                (dialog, which) -> {
+                (shown, which) -> {
                   if (closed || pending.get() != request
                       || request.until < SystemClock.elapsedRealtime()) {
                     cancel(request, "Photo review expired.", DECLINED);
@@ -187,7 +198,12 @@ public final class AlphaMediaReview implements AutoCloseable {
                                       .build())))
                     pending.compareAndSet(request, null);
                 })
-            .show();
+            .create();
+        dialog.setOnDismissListener(shown -> {
+          if (activeDialog == dialog) activeDialog = null;
+        });
+        activeDialog = dialog;
+        dialog.show();
       });
     } catch (Exception unavailable) {
       cancel(request, "Selected media changed or is unavailable. Refresh Photos.", STALE);
@@ -218,9 +234,14 @@ public final class AlphaMediaReview implements AutoCloseable {
         throw new IllegalStateException();
       android.app.PendingIntent grant = MediaStore.createWriteRequest(
           bridge.getContext().getContentResolver(), List.of(catalog.uri(key)));
-      bridge.getActivity().runOnUiThread(() -> {
-        if (closed || pending.get() != request || !bridge.getActivity().hasWindowFocus()
-            || request.until < SystemClock.elapsedRealtime()) {
+      Activity activity = bridge.getActivity();
+      if (activity == null) {
+        cancel(request, "Return to Photos to replace this photo.", DECLINED);
+        return;
+      }
+      activity.runOnUiThread(() -> {
+        if (closed || pending.get() != request || activity.isFinishing() || activity.isDestroyed()
+            || !activity.hasWindowFocus() || request.until < SystemClock.elapsedRealtime()) {
           cancel(request, "Return to Photos to replace this photo.", DECLINED);
           return;
         }
@@ -285,6 +306,17 @@ public final class AlphaMediaReview implements AutoCloseable {
   @Override
   public void close() {
     closed = true;
+    AlertDialog dialog = activeDialog;
+    activeDialog = null;
+    if (dialog != null) {
+      if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+        try { dialog.dismiss(); } catch (RuntimeException ignored) {}
+      } else {
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+          try { dialog.dismiss(); } catch (RuntimeException ignored) {}
+        });
+      }
+    }
     Request request = pending.getAndSet(null);
     if (request != null)
       request.call.reject("Photos closed. No reviewed change will be replayed.");
