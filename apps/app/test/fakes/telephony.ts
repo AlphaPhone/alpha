@@ -362,11 +362,18 @@ function contacts(world: TelephonyScene): Faked {
 
 /** `ElizaActionJournal`: only its deletion window is read here. */
 function journal(world: TelephonyScene): Faked {
-  return plugin<ActionJournalPlugin>(() => {
+  return plugin<ActionJournalPlugin & { telephonyDeletionReceipt(key: { kind: string; id: string }): Promise<unknown> }>(() => {
     const unused = () => Promise.reject(rejection("Not a deletion call", "unavailable"));
     return {
       reserve: unused, markApplying: unused, finish: unused, get: unused, list: unused, dismiss: unused,
-      pending: () => Promise.resolve({ pending: world.staged.map((row) => ({ ...row, window: "open" })) }),
+      pending: () => Promise.resolve({
+        pending: world.staged.filter((row) => ["queued", "paused", "unknown", "dispatching"].includes(row.phase)).map((row) => ({ ...row, window: "open" })),
+      }),
+      telephonyDeletionReceipt: ({ kind, id }) => {
+        const row = world.staged.find((one) => one.kind === kind && one.id === id);
+        const phase = row?.phase === "dispatching" ? "unknown" : row?.phase;
+        return Promise.resolve(phase !== undefined && ["deleted", "undone", "conflict", "unknown"].includes(phase) ? { kind, id, phase } : {});
+      },
       undo: ({ kind, id }) => {
         const row = world.staged.find((one) => one.kind === kind && one.id === id);
         if (row !== undefined && row.phase === "queued") row.phase = "undone";

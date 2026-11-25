@@ -1,5 +1,5 @@
 // spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/index.md, "Story: Give Photos access"; spec/app/photos/index.md, "Story: Change albums from what I am looking at"; spec/app/photos/index.md, "Story: Select photos"
-import type { AlbumChange, LibraryAccess, MediaPage, PhotosClient, Reviewed } from "@elizaos/os/bridges/definitions/media"
+import type { AlbumChange, LibraryAccess, MediaId, MediaPage, PhotosClient, Reviewed } from "@elizaos/os/bridges/definitions/media"
 import * as Library from "../../gen/app__photos.effect.vibe"
 import type { Actor } from "../../gen/app__photos__actor.effect.vibe"
 import * as Viewer from "../../gen/app__photos__viewer.effect.vibe"
@@ -16,6 +16,58 @@ import { answer, following, reacting, run, started, together, type Job } from ".
 import { Catalog, catalog, reviewed, taken, type ListedAlbum, type Row } from "./catalog.vibe"
 
 const pageLimit = 120
+export const thumbnailBatch = 24
+
+async function pictures(client: PhotosClient, ids: readonly MediaId[]): Promise<ReadonlyMap<MediaId, string>> {
+  const found = new Map<MediaId, string>()
+  for (let start = 0; start < ids.length; start += thumbnailBatch) {
+    const pack = await client.thumbnails(ids.slice(start, start + thumbnailBatch))
+    for (const item of pack) if (item.image) found.set(item.id, item.image)
+  }
+  return found
+}
+
+export interface ThumbnailWindow {
+  readonly revision: number
+  readonly trash: boolean
+}
+
+/** Read pixels only for the current listed rows, keeping their revisions as the grid scrolls. */
+export effect function viewportThumbnails(ids: readonly number[], shown: ThumbnailWindow): ReadonlyMap<number, string>!!(PhotosPort | Catalog | Library.Machine | Trash.Machine) {
+  const photos = try Library.Machine
+  const trash = try Trash.Machine
+  const cache = try Catalog
+  const library = try photos.get()
+  const bin = try trash.get()
+  const live = shown.trash ? bin : library
+  const result = new Map<number, string>()
+  if (!library.visible || shown.trash !== bin.open || live.revision !== shown.revision || ids.length > thumbnailBatch) return result
+  const { rows } = try cache.displayed()
+  const listed = new Set(live.rows)
+  const native = new Map<MediaId, number>()
+  for (const key of ids) {
+    const row = listed.has(key) ? rows.get(key) : undefined
+    if (row === undefined) continue
+    const image = row.kind === "browser" ? row.item.thumbnail : row.item.image
+    if (image) result.set(key, image)
+    else if (row.kind === "phone" && !shown.trash) native.set(row.item.id, key)
+  }
+  const { phone } = try PhotosPort
+  if (native.size > 0 && Option.isSome(phone)) {
+    const read = tryPromise(() => pictures(phone.value, [...native.keys()])) catch () => undefined
+    if (read !== undefined) for (const [id, image] of read) {
+      const key = native.get(id)
+      if (key !== undefined) result.set(key, image)
+    }
+  }
+  const current = try photos.get()
+  const deleted = try trash.get()
+  const after = shown.trash ? deleted : current
+  if (!current.visible || shown.trash !== deleted.open || after.revision !== shown.revision) return new Map()
+  const remains = new Set(after.rows)
+  for (const key of result.keys()) if (!remains.has(key)) result.delete(key)
+  return result
+}
 const standardAlbums = [
   { title: "Favorites", target: "favorites" },
   { title: "Videos", target: "videos" },
@@ -46,10 +98,10 @@ type Fetch = Extract<Library.Effect, { readonly tag: "Fetch" }>
 /** A native page as requested, with ownership independently enforced where Android did not grant library access. */
 async function phonePage(phone: PhotosClient, request: Fetch, cursor: MediaPage["next"], album?: ListedAlbum): Promise<MediaPage> {
   const before = cursor ?? undefined
-  if (album !== undefined) return phone.list({ before, album: album.target, limit: pageLimit, thumbnails: true })
-  if (request.own) return phone.list({ before, limit: pageLimit, thumbnails: true })
-  if (request.filter === "Favorites") return phone.list({ before, album: "favorites", limit: pageLimit, thumbnails: true })
-  return phone.listPermitted({ before, thumbnails: true, query: request.filter === "Matching" ? request.query : undefined, kind: request.filter === "Videos" ? "video" : undefined })
+  if (album !== undefined) return phone.list({ before, album: album.target, limit: pageLimit, thumbnails: false })
+  if (request.own) return phone.list({ before, limit: pageLimit, thumbnails: false })
+  if (request.filter === "Favorites") return phone.list({ before, album: "favorites", limit: pageLimit, thumbnails: false })
+  return phone.listPermitted({ before, thumbnails: false, query: request.filter === "Matching" ? request.query : undefined, kind: request.filter === "Videos" ? "video" : undefined })
 }
 
 function failedList(ticket: number): Extract<Library.Event, { type: "listed" }> {
@@ -72,19 +124,20 @@ effect function fetched(request: Fetch): Library.Event!!(PhotosPort | Catalog | 
       effect { return tryPromise(() => client.summary()) catch () => undefined },
     ]
     if (shelves === undefined || !Library.canListed(try machine.get(), request.ticket, "Phone")) return fail
-    const known = new Map([...((try cache.displayed()).rows.values())].flatMap((row) => row.kind === "phone" && row.item.image ? [[row.item.id, row.item.image] as const] : []))
+    const representatives = [...new Set(shelves.flatMap((album) => album.memberIds.slice(0, 1)))]
+    const covers = tryPromise(() => pictures(client, representatives)) catch () => undefined
     const tiles: ListedAlbum[] = []
     for (const album of standardAlbums) {
       const count = totals?.[album.target]
-      if (count === 0) continue
+      if (count === 0 && album.target !== "favorites") continue
       const sample = tryPromise(() => client.list({ album: album.target, limit: 1, thumbnails: true })) catch () => undefined
-      if (count === undefined && (sample?.items.length ?? 0) === 0) continue
+      if (count === undefined && (sample?.items.length ?? 0) === 0 && album.target !== "favorites") continue
       tiles.push({ ...album, count: count ?? sample?.items.length ?? 0, cover: sample?.items[0]?.image })
     }
     if (!Library.canListed(try machine.get(), request.ticket, "Phone")) return fail
     const custom = shelves.map((owned): ListedAlbum => ({
       title: owned.name, target: `custom:${owned.id}`, owned, count: owned.count,
-      cover: owned.memberIds.map((id) => known.get(id)).find((image) => image !== undefined),
+      cover: owned.memberIds[0] === undefined ? undefined : covers?.get(owned.memberIds[0]),
     }))
     const albums = try cache.shelves([...tiles, ...custom], totals?.trash ?? 0)
     return { ...fail, ok: true, rows: albums, revision }

@@ -1,9 +1,10 @@
 // spec/app/files/index.md, "Story: Browse my storage"
 import type { ElizaFilesPlugin, FileOutcomeRow, FilesCategory, StorageEntry } from "@elizaos/os/bridges/definitions/files"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Browser from "../../gen/app__files.effect.vibe"
 import type { Actor, Count, Effect as Out, Event, Tally, Volume } from "../../gen/app__files.effect.vibe"
-import type { Filter, Where } from "../../gen/app__files__search.effect.vibe"
-import type { Item, Kind } from "../../gen/app__files__shared.effect.vibe"
+import { type Filter, type Where, everything, inDates, ofKind } from "../../gen/app__files__search.effect.vibe"
+import { type Item, type Kind, fitsKind } from "../../gen/app__files__shared.effect.vibe"
 import * as Bin from "../../gen/app__files__trash.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Device } from "../platform/device.vibe"
@@ -24,6 +25,21 @@ module names {
   export function containsText(name: string, text: string): boolean {
     return name.toLocaleLowerCase().includes(text.toLocaleLowerCase())
   }
+  /** Add date bounds to the earlier stored filter shape, leaving every other kept field as it was. @throws {never} */
+  export function upgradedFilter(raw: string | undefined, bounds: { from: number; to: number }): unknown {
+    if (raw === undefined) return undefined
+    try {
+      const state: unknown = JSON.parse(raw)
+      if (typeof state !== "object" || state === null || !("search" in state)) return undefined
+      const search = state.search
+      if (typeof search !== "object" || search === null || !("filter" in search)) return undefined
+      const filter = search.filter
+      if (typeof filter !== "object" || filter === null || "from" in filter || "to" in filter) return undefined
+      return { ...state, search: { ...search, filter: { ...filter, from: bounds.from, to: bounds.to } } }
+    } catch {
+      return undefined
+    }
+  }
   /** @throws {never} */
   export function parentOf(path: string): string {
     return path.slice(0, Math.max(0, path.lastIndexOf("/")))
@@ -37,7 +53,7 @@ module names {
     await navigator.clipboard.writeText(text)
   }
 }
-import { containsText, copied, joined, parentOf } from names
+import { containsText, copied, joined, parentOf, upgradedFilter } from names
 export { parentOf }
 
 // spec/app/files/index.md, "A name matches a text when the phone's comparison says it contains it; every name contains the empty text and itself"
@@ -52,7 +68,8 @@ export function kindOf(entry: { readonly directory: boolean; readonly mimeType: 
   if (mimeType.startsWith("image/")) return "Image"
   if (mimeType.startsWith("video/")) return "Video"
   if (mimeType.startsWith("audio/")) return "Audio"
-  if (mimeType === "application/pdf" || mimeType.startsWith("text/") || mimeType.includes("document") || mimeType.includes("msword")) return "Document"
+  if (mimeType === "application/pdf") return "Pdf"
+  if (mimeType.startsWith("text/") || mimeType.includes("document") || mimeType.includes("msword")) return "Document"
   return "Other"
 }
 
@@ -153,19 +170,27 @@ function whole(reply: { readonly entries?: ReadonlyArray<unknown> }): boolean {
   return "truncated" in reply ? reply.truncated === false : (reply.entries ?? []).length < queryMost
 }
 
+type NativeQuery = Parameters<ElizaFilesPlugin["storageQuery"]>[0]
+
 /** What the phone's search takes for a filter in a place. */
-effect function query(where: Where, wanted: Filter): { volume: string; text?: string; mimePrefix?: string; documents?: boolean; folders?: boolean; folder?: string }!!Handles {
+effect function query(where: Where, wanted: Filter): (NativeQuery & { volume: string })!!Handles {
   const found = where.inCategory ? Option.none<Spot>() : try folderOf(where.trail)
-  const kind = where.inCategory ? where.category : wanted.anyKind ? undefined : wanted.kind
-  const prefix = kind === "Image" ? "image/" : kind === "Video" ? "video/" : kind === "Audio" ? "audio/" : undefined
+  const kind = wanted.anyKind ? where.inCategory ? where.category : undefined : wanted.kind
+  const prefix = kind === "Image" ? "image/" : kind === "Video" ? "video/" : kind === "Audio" ? "audio/" : kind === "Pdf" ? "application/pdf" : undefined
   return {
     volume: Option.isSome(found) ? found.value.volume : primary,
     ...(wanted.text === "" ? {} : { text: wanted.text }),
+    ...(wanted.from === everything.from ? {} : { from: wanted.from }),
+    ...(wanted.to === everything.to ? {} : { to: wanted.to }),
     ...(prefix === undefined ? {} : { mimePrefix: prefix }),
     ...(kind === "Document" ? { documents: true } : {}),
     ...(kind === "Folder" ? { folders: true } : {}),
     ...(where.inCategory && where.category === "Download" ? { folder: "Download" } : Option.isSome(found) && found.value.path !== "" ? { folder: found.value.path } : {}),
   }
+}
+
+function matches(wanted: Filter, item: Item): boolean {
+  return containsText(item.name, wanted.text) && ofKind(wanted, item) && inDates(wanted, item.revision)
 }
 
 // spec/app/files/index.md, "The owner sets a filter of a kind and a text for the place showing, as a chip the owner sees and clears; only what matches both is shown"
@@ -177,13 +202,14 @@ effect function searched(ticket: number, where: Where, wanted: Filter): Event!!(
       const path = asked.folder ?? ""
       const reply = try called("storageList", (plugin) => plugin.storageList({ volume, path }))
       if (reply.status !== "ready") return failed
-      const entries = (reply.entries ?? []).filter((entry) => containsText(entry.name, wanted.text) && (wanted.anyKind || kindOf(entry) === wanted.kind))
-      return { type: "searched", ticket, ok: true, complete: reply.truncated !== true && !(reply.entries ?? []).some((entry) => entry.directory), entries: try itemsOf(volume, entries) }
+      const entries = (try itemsOf(volume, reply.entries ?? [])).filter((item) => matches(wanted, item))
+      return { type: "searched", ticket, ok: true, complete: reply.truncated !== true && !(reply.entries ?? []).some((entry) => entry.directory), entries }
     }
     const reply = try called("storageQuery", (plugin) => plugin.storageQuery(asked))
     if (reply.status !== "ready") return { type: "searched", ticket, ok: false, complete: false, entries: [] }
-    const kind = where.inCategory && where.category === "Download" ? "Download" : undefined
-    return { type: "searched", ticket, ok: true, complete: whole(reply), entries: try itemsOf(volume, reply.entries ?? [], kind) }
+    const items = try itemsOf(volume, reply.entries ?? [])
+    const entries = where.inCategory && where.category !== "Download" ? items.filter((item) => fitsKind(where.category, item.kind)) : items
+    return { type: "searched", ticket, ok: true, complete: whole(reply), entries }
   } catch () => ({ type: "searched", ticket, ok: false, complete: false, entries: [] })
 }
 
@@ -207,8 +233,8 @@ effect function peeked(ticket: number, folder: number, wanted: Filter): Event!!(
     const { volume, path } = found.value
     const reply = try called("storageList", (plugin) => plugin.storageList({ volume, path }))
     if (reply.status !== "ready") return { type: "agentLooked", ticket, ok: false, entries: [] }
-    const matching = (reply.entries ?? []).filter((entry) => containsText(entry.name, wanted.text) && (wanted.anyKind || kindOf(entry) === wanted.kind))
-    return { type: "agentLooked", ticket, ok: true, entries: try itemsOf(volume, matching) }
+    const entries = (try itemsOf(volume, reply.entries ?? [])).filter((item) => matches(wanted, item))
+    return { type: "agentLooked", ticket, ok: true, entries }
   } catch () => ({ type: "agentLooked", ticket, ok: false, entries: [] })
 }
 
@@ -417,7 +443,20 @@ function carry(fx: Out): Job<Event, Files | Handles | Browser.Machine | Bin.Mach
 }
 
 // spec/app/files/index.md, "A restart closes Files, keeps the access, the place, the layout and the sort, reports a change cut off as unknown, and tells the agent its waiting requests failed"
-const browsing = reacting(Browser, { keep: 1, open: [{ type: "restart" }, "Phone"], carry })
+function stored(key: string, start?: Browser.Files) {
+  return Layer.unwrap(effect {
+    const store = try KeyValueStore.KeyValueStore
+    const raw = store.get(key) catch () => undefined
+    const upgraded = upgradedFilter(raw, everything)
+    if (upgraded !== undefined) {
+      const decoded = Browser.decodeState(upgraded) catch () => undefined
+      if (decoded !== undefined) try ignore(store.set(key, JSON.stringify(decoded)))
+    }
+    return Browser.stored(key, start)
+  })
+}
+
+const browsing = reacting({ ...Browser, stored }, { keep: 1, open: [{ type: "restart" }, "Phone"], carry })
 
 // spec/app/files/index.md, "Opening Files reads the storage and the place it left, and leaving Files drops every read, the selection, the confirmation and the sheets"
 const onScreen = following(Shell, (shell) => showing(shell, "Files"), Browser.Machine, (shown): Event => ({ type: shown ? "enter" : "leave" }), "Phone")

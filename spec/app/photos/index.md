@@ -14,6 +14,13 @@ the senders are [Who acts on photos](./actor.md). Photos are taken in the
 [Camera](../camera/). The shell decides when Photos is showing and from
 where; Notices shows Undo and says when it is gone.
 
+## Story: Scan text from a selected image
+
+> As the owner, I want to read text from one image I choose, with on-device
+> recognition and a review over Photos. Dismissing the review returns to the
+> same library. The image is only used in the [scan review](../files/scan.md)
+> unless I explicitly save something from it.
+
 ## Domain
 
 ### What Photos shows
@@ -312,6 +319,11 @@ pure def stepAPageKeepsWhatWasListed(before: Photos, via: str, after: Photos): b
   (via == "listed" and before.paging and after.library.status == R::Loaded)
     implies (before.rows.subseteq(after.rows) and allOlder(after.rows.exclude(before.rows), before.rows))
 ```
+
+The grid reads small previews separately for the rows near the viewport.
+Moving or resizing the viewport does not change which rows are listed,
+selected or focusable. A new library revision or a closed grid makes any
+outstanding preview answer obsolete.
 
 ### The phone can say its library is locked until the phone is unlocked
 

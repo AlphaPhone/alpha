@@ -1,6 +1,6 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"; spec/app/shell/index.md, "On Phone, Messages and Contacts the app's own bar stands in for Ask Alpha at rest, until Ask Alpha rises"; spec/app/shell/gestures.md, "A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back"; spec/app/shell/gestures.md, "On the launcher a pull down that Home allows opens Android's shade, and a swipe up from the bottom bar goes Home; nothing else is a swipe"; spec/app/shell/layers.md, "The page under a layer or a hold takes no touch, and a covering layer or a hold takes none for Ask Alpha either"; spec/app/update/page.md, "A page that was not mounted mounts its editors only once no update is pending"
 import { Alert, AppHeader, cn } from "@repo/ui";
-import { type PointerEvent, useCallback, useRef } from "react";
+import { type PointerEvent, useCallback, useRef, useSyncExternalStore } from "react";
 import { useMachine } from "../gen/app__shell.react.ts";
 import { askAlphaDrawn } from "../gen/app__shell.ts";
 import { useMachine as useCanvas } from "../gen/app__shell__keyboard.react.ts";
@@ -31,6 +31,16 @@ type StartedSwipe = {
   owner: string;
 };
 
+function primaryPointer() {
+  return typeof window === "undefined" ? undefined : window.matchMedia?.("(pointer: coarse)");
+}
+
+function watchPrimaryPointer(changed: () => void) {
+  const media = primaryPointer();
+  media?.addEventListener("change", changed);
+  return () => media?.removeEventListener("change", changed);
+}
+
 /**
  * Alpha: Home, or the app on top of the trail under its title, with Back offered exactly when the rules allow it, and
  * over them Ask Alpha, whatever covers the screen, and the notices. Each screen is its area's, drawn at its place.
@@ -42,6 +52,7 @@ export function App({ alpha }: AppProps) {
   const page = usePage(alpha.runtime).state;
   const canvas = useCanvas(alpha.runtime).state;
   const launcher = canvas?.launcher ?? false;
+  const coarsePointer = useSyncExternalStore(watchPrimaryPointer, () => primaryPointer()?.matches ?? false, () => false);
   const startedRef = useRef<StartedSwipe | undefined>(undefined);
   const frame = useCallback((node: HTMLElement | null) => {
     if (node) return watchChrome(node, (event) => { void alpha.runtime.runPromise(measureChrome(event)); });
@@ -90,8 +101,9 @@ export function App({ alpha }: AppProps) {
   };
   const inert = layers !== undefined && pageInert(layers);
   const comms = isCommsView(showing);
-  const side = showing === undefined && canvas?.landscape;
-  const strip = comms && state.assistant === "Full";
+  const side = showing === undefined && canvas?.landscape === true && coarsePointer;
+  const fullScreen = state.assistant === "Full" && !side;
+  const strip = comms && fullScreen;
   const back = can({ type: "goBack" });
   const canGoBack = String(back || (layers !== undefined && takesBack(layers)));
   return (
@@ -102,7 +114,7 @@ export function App({ alpha }: AppProps) {
       onPointerUp={swiped}
       onPointerCancel={(event) => { if (startedRef.current?.id === event.pointerId) startedRef.current = undefined; }}
       style={canvas?.covered ? { height: canvas.visible } : undefined}
-      className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground has-[[data-alpha-camera-native]]:bg-transparent sm:pointer-fine:max-w-103", side && "pointer-coarse:flex-row")}
+      className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground has-[[data-alpha-camera-native]]:bg-transparent sm:pointer-fine:max-w-103", side && "flex-row")}
     >
       <div
         data-alpha-shell-page=""
@@ -112,7 +124,7 @@ export function App({ alpha }: AppProps) {
           if (document && document.dataset.alphaCanGoBack !== canGoBack) document.dataset.alphaCanGoBack = canGoBack;
         }}
         className={cn("relative flex min-h-0 min-w-0 flex-1 flex-col", showing !== undefined && "overflow-auto overscroll-contain", strip && "overflow-hidden")}
-        inert={inert || strip}
+        inert={inert || fullScreen}
       >
         {comms && alpha.slot("phone/stage")}
         {page === undefined || !editorsMounted(page) ? null : showing === undefined
@@ -135,9 +147,9 @@ export function App({ alpha }: AppProps) {
           comms && "shrink-0",
           !comms && "[&>[data-alpha-detent]]:absolute [&>[data-alpha-detent]]:inset-x-0 [&>[data-alpha-detent]]:bottom-0 [&>[data-alpha-detent]]:max-w-none",
           side && [
-            "pointer-coarse:relative pointer-coarse:flex pointer-coarse:w-[min(400px,46%)] pointer-coarse:shrink-0 pointer-coarse:flex-col pointer-coarse:justify-end",
-            "pointer-coarse:[&>[data-alpha-detent=sheet]]:inset-0 pointer-coarse:[&>[data-alpha-detent=sheet]]:h-full pointer-coarse:[&>[data-alpha-detent=sheet]]:max-h-full",
-            "pointer-coarse:[&>[data-alpha-detent=full]]:inset-0",
+            "relative flex w-[min(400px,46%)] shrink-0 flex-col justify-end",
+            "[&>[data-alpha-detent=sheet]]:inset-0 [&>[data-alpha-detent=sheet]]:h-full [&>[data-alpha-detent=sheet]]:max-h-full",
+            "[&>[data-alpha-detent=full]]:inset-0",
           ],
         )}
         inert={layers !== undefined && assistantInert(layers)}
