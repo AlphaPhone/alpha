@@ -393,10 +393,11 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         const held = try session()
         const live = held !== undefined && (try current(held))
         board.change({ media: board.snapshot().media.filter((one) => one !== card) })
-        if (!live || held === undefined) { board.change({ mediaNote: "That review expired. Ask again from the current screen." }); return }
+        const report = (text: string) => board.change({ mediaNote: { conversation: card.conversation, text } })
+        if (!live || held === undefined) { report("That review expired. Ask again from the current screen."); return }
         if (!approve) {
           const declined = tryPromise(() => held.decide(card.id, { digest: card.digest, approved: false })) catch () => undefined
-          board.change({ mediaNote: declined === undefined ? "Alpha couldn’t confirm the decline." : "Declined" })
+          report(declined === undefined ? "Alpha couldn’t confirm the decline." : "Declined")
           return
         }
         scopes.set(card.id, { active: current(held), ...(card.target === undefined ? {} : { target: card.target }) })
@@ -404,7 +405,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
           |> ensuring(%, sync(() => { scopes.delete(card.id) }))) catch () => undefined
         const note = result?.kind !== "settled" ? notStarted : result.result.tag === "Applied" ? completion(card.operation, result.synced)
           : result.result.tag === "Unknown" ? "The result could not be confirmed. Check before trying again." : "Nothing changed."
-        board.change({ mediaNote: note })
+        report(note)
       })
     },
   }
