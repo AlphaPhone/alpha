@@ -14,7 +14,7 @@ import { useMachine as useMessages } from "../../gen/app__messages.react.ts";
 import { delivered, sentAll, uncertain } from "../../gen/app__messages__sending.ts";
 import { useMachine as useComposer } from "../../gen/app__messages__composer.react.ts";
 import { Time } from "../runtime/time.vibe";
-import { shortWhen } from "../phone/words.ts";
+import { callerInitials, displayNumber, shortWhen } from "../phone/words.ts";
 import { Drafts, attachAll, prepare, sameSubscription, supported } from "./composer.vibe";
 import { Conversations, Inbox, titleOf } from "./messages.vibe";
 import { CommsBar, useCommsDock } from "../phone/CommsBar.tsx";
@@ -42,9 +42,8 @@ function firstName(title: string) {
   return /^[+(\d]/.test(title) || title.includes(",") ? title : (title.split(/\s+/, 1)[0] ?? title);
 }
 
-function initials(title: string) {
-  const words = title.trim().split(/\s+/u);
-  return [words[0], words.length > 1 ? words.at(-1) : undefined].map((word) => Array.from(word ?? "")[0] ?? "").join("").toUpperCase();
+function avatarName(title: string) {
+  return callerInitials(title) === "#" ? "#" : title;
 }
 
 /** A message's time as develop's bubbles say it: the time today, and the date before it on another day. */
@@ -146,7 +145,7 @@ function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesPr
                   return (
                     <li key={row.id}>
                       <button type="button" aria-label={title} aria-description={complete?.unread ? "Unread" : undefined} onClick={() => open(row)} className={`${contactRow} min-h-17 items-start py-2.5`}>
-                        <Avatar name={title} aria-hidden className="size-12 text-base" />
+                        <Avatar name={avatarName(title)} aria-hidden className="size-12 text-base" />
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-1.5">
                             {complete?.unread && <span aria-hidden className="size-2 shrink-0 rounded-full bg-primary" />}
@@ -318,7 +317,7 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink }: M
     <>
       <header className={`${header} pb-2`} data-alpha-navigation-header data-alpha-stage-header>
         {can({ type: "back" }) && <Button variant="ghost" size="icon" aria-label="Back" onClick={() => { clearChoice(runtime); void send({ type: "back" }); }}><ChevronLeft /></Button>}
-        <Avatar name={title} aria-hidden size="sm" data-alpha-stage-avatar className="group-data-[sheet=closed]/messages:size-9" />
+        <Avatar name={avatarName(title)} aria-hidden size="sm" data-alpha-stage-avatar className="group-data-[sheet=closed]/messages:size-9" />
         <h1 data-alpha-messages-title className="min-w-0 flex-1 truncate pl-1.5 text-lg font-bold">{title}</h1>
         {addresses.length === 1 && can({ type: "call" }) && <Button variant="ghost" size="icon" aria-label={`Call ${title}`} onClick={() => void send({ type: "call" })}><Call /></Button>}
       </header>
@@ -360,7 +359,7 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
   const selectedSim = simChoice?.thread === thread ? simChoice.subscription : undefined;
   const { state, can, send } = composer;
   if (!state || !phone || state.thread !== thread || addresses.length === 0) return <CommsBar runtime={runtime} />;
-  const person = { label: title, initials: initials(title) };
+  const person = { label: title, initials: callerInitials(title) };
   const text = state.slot.author === "Nobody" ? "" : runtime.runSync(Drafts.use((drafts) => drafts.text(thread)));
   const pictures = runtime.runSync(Drafts.use((drafts) => drafts.pictures()));
   const subscriptions = runtime.runSync(Drafts.use((drafts) => drafts.subscriptions()));
@@ -390,7 +389,8 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
   };
   const sendLabel = checking ? "Check send status" : "Send";
   const alpha = state.slot.author === "AlphaWrote";
-  const addressed = title === addresses.join(", ") ? title : `${title} · ${addresses.join(", ")}`;
+  const recipients = addresses.join(", ");
+  const addressed = title === addresses.map(displayNumber).join(", ") ? recipients : `${title} · ${recipients}`;
   const draft = text && (alpha || dock.open);
   const editable = can({ type: "typeText", empty: text.length === 0 });
   const attachment = { type: "attach", fits: true } as const;

@@ -25,7 +25,7 @@ export function callerTitle(number: string, name: string | null): string {
   return name || displayNumber(number);
 }
 
-/** Show a North American number as it is read out on Phone and keep international numbers intact. */
+/** Show a North American number as it is read out on Phone and keep international numbers intact. @throws {never} */
 export function displayNumber(number: string): string {
   const digits = number.replace(/\D/g, "");
   const local = digits.length === 11 && digits[0] === "1" ? digits.slice(1) : digits;

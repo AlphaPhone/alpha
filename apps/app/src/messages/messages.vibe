@@ -16,7 +16,7 @@ import { Dialer, grantOf, prefilled } from "../phone/phone.vibe"
 import { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
 import { Callers } from "../phone/voicemail.vibe"
 import { on, visiting } from "../phone/visit.vibe"
-import { matches } from "../phone/words.ts"
+import { displayNumber, matches } from "../phone/words.ts"
 
 module nativeNotice {
   import { type PluginListenerHandle, registerPlugin } from "@capacitor/core"
@@ -118,9 +118,9 @@ export interface Texts {
 
 const empty: Texts = { threads: [], threadsNext: undefined, sought: "", messagesThread: 0, messages: [], messagesNext: undefined, chosen: "", deleteTarget: undefined, choices: [], choicesNext: undefined, typed: "", names: new Map() }
 
-/** A conversation's title: the contacts' names for its numbers, and a number no contact holds as it is. */
+/** A conversation's title: the contacts' names for its numbers, and readable numbers for the rest. */
 export function titleOf(addresses: ReadonlyArray<string>, names: ReadonlyMap<string, string>): string {
-  return addresses.map((address) => names.get(address) ?? address).join(", ")
+  return addresses.map((address) => names.get(address) || displayNumber(address)).join(", ")
 }
 
 /** The rows behind Messages' counts. */
