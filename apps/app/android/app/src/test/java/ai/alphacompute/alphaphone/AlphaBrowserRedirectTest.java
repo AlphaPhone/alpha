@@ -283,8 +283,17 @@ public final class AlphaBrowserRedirectTest {
   present();
   long page = tab.navigation;
   assertFalse("an app link never loads in the tab", requested("fb://page/?id=4", false, false));
-  assertFalse(requested("intent://profile/#Intent;scheme=fb;package=com.facebook.katana;end", false, false));
   assertTrue("no notice for a probe on a shown page", notices.isEmpty());
+  assertShown(REPLACED);
+  assertEquals(page, tab.navigation);
+ }
+
+ @Test public void anUntappedIntentLinkOnTheFacebookPageIsBlockedAndThePageStays() throws Exception {
+  facebookShown();
+  present();
+  long page = tab.navigation;
+  assertFalse("an intent link never loads in the tab", requested("intent://profile/#Intent;scheme=fb;package=com.facebook.katana;end", false, false));
+  assertEquals(List.of("Blocked a link to another app that opened without a tap."), notices);
   assertShown(REPLACED);
   assertEquals(page, tab.navigation);
  }
