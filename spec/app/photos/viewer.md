@@ -40,7 +40,7 @@ its editor is not available.
 
 ```quint
 type Kind = Still | Clip
-type Look = Original | Vivid | Mono | Warm
+type Look = Original | Vivid | Warm | Cool | Mono | Fade | Noir
 type Edit = { turns: int, cropped: bool, look: Look, start: int, end: int }
 type Refusal = NoRefusal | Animated | TooLarge | TooLong | NoRoom | NoEditor
 
@@ -434,8 +434,8 @@ pure def editRefused(s: Viewer, why: Refusal, by: Actor): Viewer =
 
 ### Every change to the edit asks for a new preview, and the old one no longer counts
 
-An item turns by quarter turns and crops; a still takes a look; a clip is
-trimmed to at least a tenth of a second within its length, which stops it
+An item turns by quarter turns and crops. A still keeps its original look or
+takes Vivid, Warm, Cool, Mono, Fade or Noir. A clip is trimmed to at least a tenth of a second within its length, which stops it
 playing and puts it at the start kept. The trim handles read on the clock.
 
 ```quint

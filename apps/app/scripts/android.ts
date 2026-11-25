@@ -8,7 +8,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { generateAndroidHost, stageRuntimePayload } from "@elizaos/os/build";
-import { prepared } from "@repo/eliza-harness/checkout";
+import { prepared } from "@repo/eliza-harness";
 import { Effect, Layer } from "effect";
 import { FetchHttpClient } from "effect/http";
 import { androidPaths, identity, production, signInCallbackPath } from "../capacitor.config.ts";
@@ -20,6 +20,7 @@ const artifacts = join(app, "artifacts");
 const agentPack = join(root, "apps/agent");
 const variant = "launcher";
 const abis = ["arm64-v8a", "x86_64"] as const;
+const voiceAssets = "assets/paradee-voice/v1/";
 const mockSwitches = ["ELIZA_DEV_ALLOW_TEST_MOCKS", "VITE_ELIZA_DEV_ALLOW_TEST_MOCKS", "ALPHA_FAKES"];
 const signingNames = ["ELIZAOS_KEYSTORE_PATH", "ELIZAOS_KEYSTORE_PASSWORD", "ELIZAOS_KEY_ALIAS", "ELIZAOS_KEY_PASSWORD"];
 const usage = "Usage: node scripts/android.ts <inputs|pack|stage|web|host|build [--release]|verify|audit DIR>";
@@ -85,6 +86,10 @@ export function inputProblems(env: NodeJS.ProcessEnv = environment()): Problem[]
   if (!existsSync(join(env.JAVA_HOME ?? "", "bin/java"))) problems.push({ input: "JDK 21", problem: `no java under JAVA_HOME ${env.JAVA_HOME}`, fix: "Set JAVA_HOME to a JDK 21" });
   for (const tool of ["build-tools/36.0.0/apksigner", "build-tools/36.0.0/aapt", "build-tools/36.0.0/zipalign", "platforms/android-36/android.jar"])
     if (!existsSync(join(sdk, tool))) problems.push({ input: "Android SDK", problem: `${tool} is missing under ${sdk}`, fix: "sdkmanager 'build-tools;36.0.0' 'platforms;android-36'" });
+  if (!existsSync(join(sdk, "ndk/28.2.13676358/source.properties")) || !existsSync(join(sdk, "cmake/3.22.1/bin/cmake")))
+    problems.push({ input: "Local speech toolchain", problem: "the pinned NDK or CMake is missing", fix: "sdkmanager 'ndk;28.2.13676358' 'cmake;3.22.1'" });
+  if (env.ELIZA_INFERENCE_ENGINE_DIR && !existsSync(join(env.ELIZA_INFERENCE_ENGINE_DIR, "tools/omnivoice/CMakeLists.txt")))
+    problems.push({ input: "Local speech engine", problem: "the supplied engine checkout does not exist", fix: "Unset ELIZA_INFERENCE_ENGINE_DIR or point it at the engine in .eliza/packages/os/android/local-inference/engine.lock.json" });
   const set = signingNames.filter((name) => (env[name] ?? "").trim() !== "");
   if (set.length > 0 && set.length < signingNames.length) problems.push({ input: "release signing", problem: `only ${set.join(", ")} are set`, fix: `Set all of ${signingNames.join(", ")} or none` });
   return problems;
@@ -95,6 +100,50 @@ function refuseOn(problems: readonly Problem[]) {
   for (const { input, problem, fix } of problems) console.error(`MISSING ${input}: ${problem}. Run: ${fix}`);
   process.exitCode = 2;
   throw new Error(`${problems.length} Android build input(s) missing`);
+}
+
+function voiceDirectory() {
+  return join(android, ".cache", "voice", prepared().commit);
+}
+
+function voiceRecord(directory: string) {
+  const at = prepared();
+  const module = join(at.root, "packages/os/android/local-inference");
+  const expectedEngine = record(record(readJson(join(module, "engine.lock.json"))).engine).commit;
+  const receipt = record(readJson(join(directory, "build-record.json")));
+  if (receipt.sourceCommit !== at.commit || receipt.nativeCommit !== expectedEngine || !Array.isArray(receipt.files)) {
+    throw new Error("The local speech build receipt differs from the pinned Eliza source and engine");
+  }
+  return receipt.files.map(record);
+}
+
+function stageVoice(env: NodeJS.ProcessEnv) {
+  const at = prepared();
+  const module = join(at.root, "packages/os/android/local-inference");
+  const engineLock = record(record(readJson(join(module, "engine.lock.json"))).engine);
+  const expectedEngine = String(engineLock.commit);
+  const engine = resolve(env.ELIZA_INFERENCE_ENGINE_DIR ?? join(android, ".cache", "voice-engine", expectedEngine));
+  if (!env.ELIZA_INFERENCE_ENGINE_DIR && !existsSync(join(engine, "tools/omnivoice/CMakeLists.txt"))) {
+    mkdirSync(engine, { recursive: true });
+    run("git", ["init", "--quiet", engine], { env });
+    run("git", ["fetch", "--no-tags", "--depth=1", String(engineLock.repository), expectedEngine], { cwd: engine, env });
+    run("git", ["checkout", "--detach", expectedEngine], { cwd: engine, env });
+  }
+  if (git(engine, "rev-parse", "HEAD") !== expectedEngine || git(engine, "status", "--porcelain", "--untracked-files=no") !== "") {
+    throw new Error("Local speech needs the clean engine revision recorded in Eliza's engine.lock.json");
+  }
+  const directory = voiceDirectory();
+  if (!existsSync(join(directory, "build-record.json"))) {
+    run(process.execPath, [
+      join(module, "scripts/build-native.ts"), "--workspace", join(android, ".cache", "voice-work", expectedEngine), "--out", directory,
+    ], { env: { ...env, ELIZA_INFERENCE_ENGINE_DIR: engine } });
+  }
+  voiceRecord(directory);
+  return [
+    "-PelizaSpeechBridgeCapacitor=true",
+    `-PelizaInferenceEngineDir=${engine}`,
+    `-PelizaParadeeNativeDir=${directory}`,
+  ];
 }
 
 /** Alpha's agent pack (apps/agent), built from the pinned eliza for the production cloud. */
@@ -204,6 +253,7 @@ const consumerModule: string = "@elizaos/os/android/build-consumer.mjs";
 export async function build(release: boolean) {
   const env = environment();
   refuseOn(inputProblems(env));
+  const voiceGradle = stageVoice(env);
   buildPack();
   const runtime = await stageRuntime();
   buildWeb();
@@ -225,7 +275,7 @@ export async function build(release: boolean) {
     androidTestOutput: "instrumentation",
     mappings: release,
     signing: { environment: signingNames },
-    gradleArguments: [],
+    gradleArguments: voiceGradle,
     prepare: [{ command: join(app, "node_modules/.bin/cap"), args: ["copy", "android"] }],
     record: {
       name: "build-config.json",
@@ -250,7 +300,7 @@ function buildTool(name: string, env: NodeJS.ProcessEnv): string {
 }
 
 const INFERENCE_ENTRY = /\.(gguf|onnx|ort|tflite|safetensors|pte|task)$|(^|\/)lib[^/]*(llama|ggml|mtmd|onnxruntime|sherpa|whisper|piper|executorch|elizainference|omnivoice)[^/]*\.so|(^|\/)llama(-omnivoice)?-server$|^assets\/([^/]+\/)*models?\//i;
-const REQUIRED_CLASSES = ["AlphaDevicePlugin", "AlphaCloudSpeechPlugin", "AlphaBrowserPlugin", "AlphaCarrierSetupPlugin", "AlphaCallStatePlugin", "AlphaOngoingCallPlugin", "AlphaAgentService", "AlphaCalendarPlugin", "AlphaTelephonyPlugin", "AlphaResetPlugin", "AlphaActionJournalPlugin"]
+const REQUIRED_CLASSES = ["AlphaDevicePlugin", "AlphaCloudSpeechPlugin", "AlphaLocalSpeechPlugin", "AlphaBrowserPlugin", "AlphaCarrierSetupPlugin", "AlphaCallStatePlugin", "AlphaOngoingCallPlugin", "AlphaAgentService", "AlphaCalendarPlugin", "AlphaTelephonyPlugin", "AlphaResetPlugin", "AlphaActionJournalPlugin"]
   .map((name) => `Lai/alphacompute/alphaphone/${name};`);
 
 interface Row {
@@ -288,12 +338,32 @@ export function checkApk(file: string, mode: "debug" | "release", env: NodeJS.Pr
   const debuggable = badging.includes("application-debuggable");
   if (debuggable !== (mode === "debug")) throw new Error(`${name} is ${debuggable ? "" : "not "}debuggable`);
   const entries = execFileSync(aapt, ["list", file], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 }).split("\n").filter((entry) => entry !== "");
-  const inference = entries.filter((entry) => INFERENCE_ENTRY.test(entry));
-  if (inference.length > 0) throw new Error(`${name} carries local inference or a model: ${inference.join(", ")}`);
+  const bunLibraries = entries.filter((entry) => /^lib\/[^/]+\/libeliza_bun\.so$/.test(entry));
+  if (bunLibraries.length > 0) throw new Error(`${name} carries the Bun runtime: ${bunLibraries.join(", ")}`);
   const abiList = entries.flatMap((entry) => /^lib\/([^/]+)\/libeliza_node\.so$/.exec(entry)?.slice(1) ?? []);
   const wantedAbis = mode === "release" ? ["arm64-v8a"] : [...abis];
   if (abiList.slice().sort().join() !== wantedAbis.slice().sort().join()) throw new Error(`${name} carries libeliza_node.so for ${abiList.join(", ") || "no ABI"}, not ${wantedAbis.join(", ")}`);
   const read = (entry: string, limit = 1024 * 1024 * 1024) => execFileSync("unzip", ["-p", file, entry], { maxBuffer: limit });
+  const voiceFiles = new Set<string>();
+  for (const row of voiceRecord(voiceDirectory())) {
+    const source = String(row.path);
+    const library = /^jniLibs\/([^/]+)\/libelizainference\.so$/.exec(source);
+    if (library && !wantedAbis.includes(library[1] ?? "")) continue;
+    if (!source.startsWith(voiceAssets) && library === null) continue;
+    const path = library ? source.replace(/^jniLibs\//, "lib/") : source;
+    if (path.split("/").some((part) => part === "" || part === "." || part === "..") || voiceFiles.has(path)) {
+      throw new Error(`The local speech build receipt lists an invalid or duplicate path: ${path}`);
+    }
+    voiceFiles.add(path);
+    if (!entries.includes(path) || sha256(read(path)) !== row.sha256) throw new Error(`${name}'s ${path} differs from its local speech receipt`);
+  }
+  if (!voiceFiles.has(`${voiceAssets}manifest.json`) || ![...voiceFiles].some((path) => path.startsWith(`${voiceAssets}asr/`) && path.endsWith(".gguf"))
+      || ![...voiceFiles].some((path) => path.startsWith(`${voiceAssets}tts/`) && path.endsWith(".gguf"))
+      || wantedAbis.some((abi) => !voiceFiles.has(`lib/${abi}/libelizainference.so`) || !entries.includes(`lib/${abi}/libparadeevoicejni.so`))) {
+    throw new Error(`${name} lacks the packaged local speech engine or models`);
+  }
+  const unexpected = entries.filter((entry) => INFERENCE_ENTRY.test(entry) && !voiceFiles.has(entry));
+  if (unexpected.length > 0) throw new Error(`${name} carries unrecorded inference files: ${unexpected.join(", ")}`);
   const inventory = record(JSON.parse(read("assets/agent/inventory.json").toString("utf8")));
   const listed = Array.isArray(inventory.files) ? inventory.files.map(record) : [];
   for (const required of ["assets/agent/agent.mjs", "assets/agent/manifest.json"]) if (!listed.some((row) => row.path === required)) throw new Error(`${name}'s inventory lists no ${required}`);

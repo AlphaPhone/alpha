@@ -4,8 +4,7 @@ import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import type { RuntimeJsonBridge, RuntimeStatus, RuntimeStreamFrame } from "@elizaos/agent/client";
-import { packPrepared } from "@repo/eliza-harness/pack";
-import { type Cloud, type DeviceKey, said, scratch, startCloud } from "@repo/eliza-harness/services";
+import { type Cloud, type DeviceKey, packPrepared, said, scratch, startCloud } from "@repo/eliza-harness";
 
 /** The owner every journey of the pack signs in. */
 const owner = "owner@alpha.test";
@@ -35,14 +34,14 @@ export interface Listed {
 }
 
 /** The policy the build wrote beside the bundle. */
-export const policy = () => read("policy.json") as { actions: { allowed: string[]; refused: Record<string, string> } };
+export const policy = () => read("policy.json") as { actions: { allowed: string[]; refused: Record<string, string> }; plugins: { load: string[]; product?: string } };
 
 /** The routes the host file admits for the page. */
 export const listed = () => read("host.json").routes as Listed[];
 
 /** The bundle's manifest as the build wrote it. */
 export const manifest = () => JSON.parse(fs.readFileSync(path.join(pack, "bundle/manifest.json"), "utf8")) as {
-  plugins: string[]; packages: { name: string }[]; localInference: boolean; workflowWorkerSha256?: string; actions: { name: string }[];
+  plugins: string[]; productPlugin?: string; packages: { name: string }[]; localInference: boolean; workflowWorkerSha256?: string; actions: { name: string }[];
 };
 
 /**

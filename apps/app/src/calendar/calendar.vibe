@@ -88,7 +88,7 @@ function googleRow(event: FeedEvent): Read {
   const recurring = (event.recurringEventId ?? "") !== ""
   const mode = cancellation(organizes, own !== undefined, false, false)
   const page = event.htmlLink ?? ""
-  const people: ReadonlyArray<Person> = event.attendees.map((person) => ({
+  const people: ReadonlyArray<Person> = event.attendees.filter((person) => !person.self).map((person) => ({
     name: person.displayName ?? person.email ?? "", organizer: person.organizer, status: person.responseStatus ?? "",
   }))
   return {

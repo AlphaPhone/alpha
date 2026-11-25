@@ -3,6 +3,8 @@ import * as Android from "../../gen/app__settings__android.effect.vibe"
 import * as Facts from "../../gen/app__settings__facts.effect.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import type { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
+import { openAccount } from "../account/profile.vibe"
 import { Device, native } from "../platform/device.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type Job, answer, due, following, hearing, reacting, run, stop, together, untimed } from "../runtime/reactor.vibe"
@@ -19,10 +21,11 @@ const admitting = effect {
 }
 
 // spec/app/settings/index.md, "Each page links to what another area owns there": what the shell can open is opened; the other neighbours draw on the places Settings offers them.
-function handed(fx: Pages.Effect): Job<Pages.Event, Shell | Device, []> {
+function handed(fx: Pages.Effect): Job<Pages.Event, Shell | Layers | Device, []> {
   return match (fx) {
     when { tag: "Handed", let neighbour }: run(`hand ${neighbour}`, effect {
       const shell = try Shell
+      if (neighbour === "AccountAndPlan") try openAccount()
       if (neighbour === "GoogleAndEmail") try ignore(shell.send({ type: "openView", view: "Inbox" }))
       if (neighbour === "CalendarAccount" || neighbour === "CalendarBackups") try ignore(shell.send({ type: "openView", view: "Calendar" }))
       if (neighbour === "Conversations") try ignore(shell.send({ type: "raise", detent: "Full" }))

@@ -8,7 +8,7 @@ const onErase = fn();
 const onAndroid = fn();
 
 export const meta: ComponentMeta<SettingsGeneralPageProps> = {
-  args: { wifi: reported("Home"), bluetooth: reported("On", "ok"), mobileData: reported("Off", "off"), onBack: fn(), onOpen, onAndroid },
+  args: { wifi: reported("Home"), bluetooth: reported("On", "ok"), mobileData: reported("Off", "off"), theme: "light", alerts: reported("On", "ok"), onBack: fn(), onOpen, onAndroid },
   decorator: fullHeight,
   examples: {
     Waiting: { wifi: waiting, bluetooth: waiting, mobileData: waiting },

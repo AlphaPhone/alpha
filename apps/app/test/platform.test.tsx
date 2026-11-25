@@ -1,13 +1,14 @@
 // @vitest-environment happy-dom
 import { CloudError, isCredentialInvalid } from "@elizaos/cloud/client";
-import { Effect, Exit, Layer, Option, Redacted, Stream } from "effect";
+import { Effect, Exit, Fiber, Layer, Option, Redacted, Stream } from "effect";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
-import { at, mounts } from "../src/areas.ts";
+import { at } from "../src/areas.ts";
 import { adopt, earlierSlot, keptAt, vaulted } from "../src/platform/adoption.vibe";
 import { Agent, type Reached } from "../src/platform/agent.vibe";
 import { Cloud } from "../src/platform/cloud.vibe";
+import { testMocks } from "../src/platform/device.vibe";
 import { type Slot, Vault } from "../src/platform/vault.vibe";
 import type { Platform } from "../src/platform/platform.vibe";
 import { area } from "../src/runtime/area.tsx";
@@ -19,15 +20,15 @@ import { scene } from "./fakes/scene.ts";
 underAct();
 afterEach(closeAll);
 
-/** How an effect that must fail did: the tag and the code of what it failed with. */
-const failed = (exit: Exit.Exit<unknown, unknown>) => (Exit.isFailure(exit) ? Option.getOrUndefined(Exit.findErrorOption(exit)) : undefined) as { _tag?: string; code?: string } | undefined;
+/** How an effect that must fail did: the tag, status, wait and code of what it failed with. */
+const failed = (exit: Exit.Exit<unknown, unknown>) => (Exit.isFailure(exit) ? Option.getOrUndefined(Exit.findErrorOption(exit)) : undefined) as { _tag?: string; code?: string; status?: number; wait?: number } | undefined;
 
 // spec/app/shell/index.md, "Story: Move between Home and the apps"
 it("Move between Home and the apps on an Alpha image, where a screen that throws or cannot be loaded stops alone (spec/app/shell/index.md, \"Story: Move between Home and the apps\")", async () => {
   const reported = vi.spyOn(console, "error").mockImplementation(() => {});
   const broken = area(Layer.empty, () => { throw new Error("this screen is broken"); });
   const { alpha } = await open({ ...scene(), phone: true, image: true }, [
-    ...mounts,
+    ...only("home"),
     at("overlay", () => Promise.resolve({ default: broken })),
     at("view:Files", () => Promise.resolve({ default: broken })),
     at("view:Maps", () => Promise.reject(new Error("the code of this screen cannot be loaded"))),
@@ -36,12 +37,12 @@ it("Move between Home and the apps on an Alpha image, where a screen that throws
   await until(alpha, alpha.runtime, Shell, (s) => s.image && s.contacts);
   expect(["Phone", "Messages", "Contacts"].map((name) => Boolean(button(name)))).toEqual([true, true, true]);
 
-  // spec/app/shell/index.md, "Opening an app shows it on top, closes the drawer and lowers Ask Alpha to its bar"
+  // spec/app/shell/index.md, "Opening an app shows it on top and lowers Ask Alpha to its bar"
   for (const view of ["Files", "Maps"]) {
     await press(view);
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === view);
     expect(document.querySelector("main [role=alert]")?.textContent).toBe("This part of Alpha stopped. Go back, and open it again.");
-    // spec/app/shell/index.md, "Back closes one layer: the drawer, then Ask Alpha by a step, then the app on top"
+    // spec/app/shell/index.md, "Back closes one layer: Ask Alpha by a step, then the app on top"
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
     expect(Boolean(button("Notes"))).toBe(true);
@@ -104,11 +105,19 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const first = alpha.runtime.runPromise(Effect.flatMap(Agent, (agent) => Stream.runCollect(Stream.take(agent.events(HttpClientRequest.post("/api/platform/drip")), 1))));
     expect(await first).toEqual(["first"]);
     await vi.waitFor(() => expect(world.platform.dripping.size).toBe(0));
-    // spec/app/account/index.md, "Story: Have the agent running": the phone's host reports and starts its agent; a page that is no phone reads the agent it reaches, and starts none.
+    const hanging = alpha.runtime.runFork(Effect.flatMap(Agent, (agent) => agent.call(HttpClientRequest.put("/api/platform/hang"))));
+    await vi.waitFor(() => expect(world.platform.hanging.size).toBe(1));
+    await alpha.runtime.runPromise(Fiber.interrupt(hanging));
+    await vi.waitFor(() => expect(world.platform.hanging.size).toBe(0));
+    // spec/app/account/index.md, "Story: Have the agent running": the phone's host reports, stops and starts its agent; a page that is no phone reads the agent it reaches, and starts or stops none.
     const life = <A,>(work: (agent: Reached) => Effect.Effect<A, unknown>) => alpha.runtime.runPromiseExit(Effect.flatMap(Agent, work));
     expect(await life((agent) => Effect.map(agent.life.status(), (status) => [status.available, status.state]))).toEqual(Exit.succeed([true, "running"]));
     expect(await life((agent) => agent.life.review())).toEqual(Exit.succeed({ kind: "unavailable" }));
+    expect(await life((agent) => agent.life.archive("token-1"))).toEqual(Exit.succeed({ kind: "unavailable" }));
+    const states = phone ? alpha.runtime.runPromise(Effect.flatMap(Agent, (agent) => Stream.runCollect(Stream.take(agent.life.changes, 2)))) : Promise.resolve([]);
+    expect(Exit.isSuccess(await life((agent) => agent.life.stop()))).toBe(phone);
     expect(Exit.isSuccess(await life((agent) => agent.life.start()))).toBe(phone);
+    expect((await states).map((status) => status.state)).toEqual(phone ? ["stopped", "running"] : []);
     if (!phone) return;
     // spec/app/platform/index.md, "A streamed answer the phone relays never grows past two mebibytes"
     const flooded = (size: number) => alpha.runtime.runPromiseExit(Effect.flatMap(Agent, (agent) => Stream.runDrain(agent.events(HttpClientRequest.post(`/api/platform/flood?size=${size}`)))));
@@ -121,14 +130,13 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const busy = (status: number) => HttpClientRequest.get(`/api/platform/busy?status=${status}`);
     const cloudBusy = (status: number) => HttpClientRequest.get(`/api/v1/platform/busy?status=${status}`);
     const refused = async (work: Effect.Effect<unknown, unknown, Agent | Cloud>) => {
-      const failure = failed(await alpha.runtime.runPromiseExit(work)) as { _tag?: string; status?: number; wait?: number } | undefined;
+      const failure = failed(await alpha.runtime.runPromiseExit(work));
       return [failure?._tag, failure?.status, failure?.wait];
     };
     const agent = (status: number) => refused(Effect.flatMap(Agent, (one) => one.call(busy(status))));
     const cloud = (status: number) => refused(Effect.flatMap(Cloud, (one) => one.call(cloudBusy(status))));
     // spec/app/platform/index.md, "A refusal carries a wait only when the other side answered 429 with a whole number of seconds, at most a day"
     expect([await agent(429), await agent(503)]).toEqual([["Refused", 429, 30], ["Refused", 503, undefined]]);
-    if (phone) return;
     expect([await cloud(429), await cloud(503)]).toEqual([["Refused", 429, 30], ["Refused", 503, undefined]]);
   });
 
@@ -156,7 +164,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     world.slots.add("alpha.test.open");
     const { alpha } = await open(world, only("home"));
     const [earlier, current] = ["alpha.maps.saved-places.v1", "alpha/app/maps@1"];
-    const run = <A, E, R extends Platform>(work: Effect.Effect<A, E, R>) => alpha.runtime.runPromise(work as Effect.Effect<A, E, Platform>);
+    const run = <A, E, R extends Platform>(work: Effect.Effect<A, E, R>) => alpha.runtime.runPromise(work);
     const places = (copy: (value: string) => Option.Option<string>) => run(Effect.flatMap(Effect.all([keptAt(earlier), keptAt(current)]), ([from, to]) => adopt(from, to, copy)));
     const read = (value: string) => Option.some(`[${value}]`);
     localStorage.setItem(earlier, "Home");
@@ -186,17 +194,35 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 it("Keep my phone's state across restarts: a kept value Alpha can no longer read is set aside, and no copy waiting is written over (spec/app/platform/index.md, \"Story: Keep my phone's state across restarts\")", async () => {
   const kept = "alpha/app/shell/index@1";
   let waiting: [string, string][] = [];
+  const storedAsides = (): [string, string][] => Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+    .filter((key): key is string => key !== null && key.startsWith(`${kept}.unreadable`))
+    .map((key): [string, string] => [key, localStorage.getItem(key) ?? ""]);
   const reopened = async (value: string) => {
     await closeAll();
     localStorage.setItem(kept, value);
     for (const [key, held] of waiting) localStorage.setItem(key, held);
     const { alpha } = await open(scene(), only("home"));
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
-    waiting = Object.entries(localStorage).filter(([key]) => key.startsWith(`${kept}.unreadable`));
+    waiting = storedAsides();
   };
   // spec/app/platform/index.md, "A kept value that is no longer a state is set aside where nothing is held, and its machine starts afresh"
   await reopened(JSON.stringify({ trail: "of another shape" }));
   await reopened(JSON.stringify({ trail: 7 }));
   expect(Object.fromEntries(waiting)).toEqual({ [`${kept}.unreadable`]: JSON.stringify({ trail: "of another shape" }), [`${kept}.unreadable.2`]: JSON.stringify({ trail: 7 }) });
   expect(Boolean(button("Notes"))).toBe(true);
+  // spec/app/platform/index.md, "A kept value that is no longer a state is set aside where nothing is held, and its machine starts afresh": when every place for copies is taken, the unreadable value stays untouched and the machine runs in memory.
+  waiting = [`${kept}.unreadable`, ...Array.from({ length: 8 }, (_, index) => `${kept}.unreadable.${index + 2}`)].map((key, index): [string, string] => [key, `held-${index}`]);
+  const tenth = JSON.stringify({ trail: "tenth" });
+  await reopened(tenth);
+  expect([localStorage.getItem(kept), waiting.length, Object.fromEntries(waiting)[`${kept}.unreadable`], Boolean(button("Notes"))]).toEqual([tenth, 9, "held-0", true]);
+});
+
+// spec/app/platform/index.md, "Story: Ship only what this build allows"
+it("Ship only what this build allows: test mocks are admitted only when ELIZA_DEV_ALLOW_TEST_MOCKS is 1 (spec/app/platform/index.md, \"Story: Ship only what this build allows\")", () => {
+  // spec/app/platform/index.md, "Mocks, fixtures and developer surfaces exist only when the build allows test mocks"
+  vi.stubEnv("ELIZA_DEV_ALLOW_TEST_MOCKS", "");
+  expect(testMocks()).toBe(false);
+  vi.stubEnv("ELIZA_DEV_ALLOW_TEST_MOCKS", "1");
+  expect(testMocks()).toBe(true);
+  vi.unstubAllEnvs();
 });
