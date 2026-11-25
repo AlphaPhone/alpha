@@ -613,7 +613,7 @@ const nameBefore: (str, str) => bool
 pure def lawNoNameComesBeforeItself(label: str): bool = not(nameBefore(label, label))
 
 pure def precedes(order: Order, first: F::Item, second: F::Item): bool =
-  if (order == ByName) nameBefore(first.name, second.name)
+  if (order == ByName) first.name != second.name and nameBefore(first.name, second.name)
   else if (order == ByDate) first.revision > second.revision
   else first.bytes > second.bytes
 

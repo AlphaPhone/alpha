@@ -1,7 +1,7 @@
 // spec/agent/index.md, "Story: Run Alpha's agent on the phone"
 import { showsApp } from "@elizaos/agent-host";
 import {
-  type AlphaAppsStore, isValidTimeZone, normalizeSound,
+  type AlphaAppsStore, DEFAULT_SNOOZE_MINUTES, isValidTimeZone, normalizeSound,
 } from "./store.ts";
 import {
   type AgentAction, type AgentProvider, type AgentRoute, type ClockAlarmRecord, type ClockTimerRecord,
@@ -215,7 +215,7 @@ function handleClockAlarm(store: AlphaAppsStore, timeZone: string, params: Recor
       sound: normalizeSound(params.sound),
       vibrate: readBoolean(params, "vibrate") ?? true,
       enabled: readBoolean(params, "enabled") ?? true,
-      snoozeMinutes: readNumber(params, "snoozeMinutes") ?? 9,
+      snoozeMinutes: readNumber(params, "snoozeMinutes") ?? DEFAULT_SNOOZE_MINUTES,
       timeZone,
     });
     return { success: true, text: `Alarm set for ${formatHourMinute(created.hour, created.minute)}${created.label ? ` (${created.label})` : ""}.`, data: { op: "set", alarm: created } };
@@ -486,7 +486,7 @@ export function clockRoutes(store: AlphaAppsStore, timeZone: string): AgentRoute
           sound: normalizeSound(body.sound),
           vibrate: readBoolean(body, "vibrate") ?? true,
           enabled: readBoolean(body, "enabled") ?? true,
-          snoozeMinutes: readNumber(body, "snoozeMinutes") ?? 9,
+          snoozeMinutes: readNumber(body, "snoozeMinutes") ?? DEFAULT_SNOOZE_MINUTES,
           timeZone,
         });
         return { status: 201, body: { alarm, snapshot: store.getClock() } };

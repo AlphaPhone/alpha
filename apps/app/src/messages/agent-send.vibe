@@ -47,7 +47,6 @@ export effect function reviewAgentSms(op: Sms, call: ExecutorCall, current: () =
     return undefined
   }
   if (receipt === null) return refused
-  // Only the carrier can advance a submission. Every follow-up reads the same native receipt.
   for (let read = 0; receipt?.status === "submitted" && read < 6; read += 1) {
     try sleep("500 millis")
     if (!(try device.showing())) break

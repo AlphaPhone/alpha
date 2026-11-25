@@ -163,6 +163,23 @@ pure def canLift(d: Dock, now: int): bool = d.gesture == Pressed and now >= d.at
 pure def lift(d: Dock, now: int): Moved = { state: { ...d, gesture: Idle, at: now, quiet: now + clickWindow }, out: List(Tap) }
 ```
 
+### An empty Browser composer can start a drag without taking focus
+
+At rest, the empty and editable Browser field can start the same drag as
+the mark. A drag leaves the field unfocused. A press and lift in the field
+leaves the tap to the field, so a touch can focus it and open the keyboard.
+An open composer or one that holds text uses normal field gestures.
+
+```quint
+pure def browserFieldPull(s: S::Shell, blank: bool, editable: bool): bool =
+  s.assistant == S::Bar and S::showing(s, S::Browser) and blank and editable
+
+pure def canFieldLift(d: Dock, now: int): bool = canLift(d, now) and d.start == S::Bar
+
+pure def fieldLift(d: Dock, now: int): Dock =
+  { ...d, gesture: Idle, at: now, quiet: now + clickWindow }
+```
+
 ### A click of a control taps it, unless it is the late click of a gesture just ended
 
 ```quint
