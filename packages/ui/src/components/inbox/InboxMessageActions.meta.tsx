@@ -30,7 +30,7 @@ export const meta: ComponentMeta<InboxMessageActionsProps> = {
     },
     Unread: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       await userEvent.click(within(canvasElement).getByRole("button", { name: "More actions" }));
-      await expect(await screen.findByRole("menuitem", { name: "Mark as read" })).toBeInTheDocument();
+      await expect(await screen.findByRole("menuitem", { name: "Mark read" })).toBeInTheDocument();
       await userEvent.keyboard("{Escape}");
       await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
     },

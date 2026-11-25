@@ -20,6 +20,7 @@ export const meta: ComponentMeta<InboxComposerProps> = {
   },
   examples: {
     "New message": { onFromChange: fn(), onAttach: fn(), to: { ...line(), onPickContact: fn() } },
+    "Suggested recipients": { to: line(), suggestions: [{ name: "Jordan Park", email: "jordan@northpoint.example" }, { name: "Maya Chen", email: "maya@lumen.example" }] },
     "Reply to everyone": { kind: "replyAll", to: line([ana]), cc: line([{ address: "bruno@costa.example", valid: true }]), subject: "Re: Lunch on Friday and the long list of things that we still need to settle before the offsite", text: "Friday at one works for me. ".repeat(30), onAttach: fn() },
     Forward: { kind: "forward", to: line(), subject: "Fwd: Invoice 2041", text: "Please see below.", attachments: [{ id: "1", name: "Invoice 2041.pdf" }], onRemoveAttachment: fn() },
     "Forward as text": { kind: "forward", subject: "Fwd: Invoice 2041", notice: "forwardTextOnly" },

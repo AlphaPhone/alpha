@@ -535,20 +535,27 @@ A phone signed in before mail leases existed cannot check the accounts
 until the owner signs in once more for mail
 ([platform](../platform/index.md)). That is not a sign-out: the owner stays
 signed in, and the accounts, the selection, the lists kept and the count
-stay as they were, while the list asks the owner to sign in. The next check
-that answers ends the wait.
+stay as they were, the count no longer fresh, as after any read that did
+not answer, while the list asks the owner to sign in. The next check that
+answers ends the wait.
+
+Discovered by the journey: a held check that kept the count fresh broke "A
+fresh count is of the account selected, from a list read afresh that has
+not failed since; a failed or saved list never reports one", so the phone
+refused its own kept Inbox state.
 
 ```quint
 pure def canAccountsHeld(s: Mailbox, ticket: int): bool = canAccountsAnswered(s, ticket)
 
 pure def accountsHeld(s: Mailbox, ticket: int): Moved =
-  { state: { ...s, accounts: R::answer(s.accounts, false), failure: LeaseNeeded }, out: List() }
+  { state: { ...s, accounts: R::answer(s.accounts, false), failure: LeaseNeeded, count: { ...s.count, fresh: false } }, out: List() }
 
 pure def stepAHeldCheckForgetsNothing(before: Mailbox, via: str, after: Mailbox): bool =
   via == "accountsHeld" implies (
     after.signedIn == before.signedIn and after.connected == before.connected and after.selected == before.selected
       and after.kept == before.kept and after.keptPages == before.keptPages and after.keptCredential == before.keptCredential
-      and after.count == before.count and after.pages == before.pages and after.revision == before.revision
+      and after.count.account == before.count.account and after.count.unread == before.count.unread and not(after.count.fresh)
+      and after.pages == before.pages and after.revision == before.revision
   )
 
 pure def sometimesTheMailLeaseIsNeeded(s: Mailbox): bool = s.signedIn and s.failure == LeaseNeeded
@@ -692,8 +699,9 @@ pure def sometimesTheSavedListIsShownOffline(s: Mailbox): bool =
 
 ### Attention says whether the owner is signed out, has no account, is being checked, or has a count of unread messages, fresh or no longer fresh, or could not be read
 
-Only counts, a time and whether there are more leave Inbox: no sender,
-subject or body.
+Attention itself is only counts, a time and whether there are more. Home's
+mail card also shows the senders and subjects of the first unread messages
+Inbox loaded, and which account it read when; no body ever leaves Inbox.
 
 ```quint
 type Standing = SignedOut | NotConnected | Checking | Ready | Stale | Unavailable

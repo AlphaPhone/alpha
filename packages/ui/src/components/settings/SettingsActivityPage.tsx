@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
 import { RotateCw, Wrench } from "lucide-react";
 import { Banner } from "../Banner.tsx";
-import { Button } from "../Button.tsx";
 import { EmptyState } from "../EmptyState.tsx";
 import { ListGroup } from "../ListGroup.tsx";
+import { ListRow } from "../ListRow.tsx";
 import { Skeleton } from "../Skeleton.tsx";
+import { Spinner } from "../Spinner.tsx";
 import { SettingsActionRow } from "./SettingsActionRow.tsx";
 import { SettingsAgentRecovery, type SettingsAgentRecoveryProps } from "./SettingsAgentRecovery.tsx";
 import { SettingsNavRow } from "./SettingsNavRow.tsx";
@@ -52,44 +53,49 @@ export type SettingsActivityPageProps = {
 
 /**
  * Agent activity: what to do when the agent needs a restart or another try, the conversations, and the actions the
- * agent took or proposed on the phone, each declined or settled by the owner.
+ * agent took or proposed on the phone, read again from their own row, each on its own card, declined or settled by the
+ * owner.
  * @model spec/app/settings/activity.md
  */
 export function SettingsActivityPage({ connection, actions, reading = false, failed = false, unconfirmed = false, children, development = false, onBack, onRecover, onRefresh, onDecline, onReconcile, onHandOver }: SettingsActivityPageProps) {
   const ready = connection === "ready";
   return (
-    <SettingsPage
-      title="Agent activity"
-      onBack={onBack} backLabel="Back to About"
-      actions={ready ? <Button variant="ghost" size="icon" aria-label="Refresh actions" loading={reading} disabled={!onRefresh} onClick={onRefresh}><RotateCw /></Button> : undefined}
-    >
+    <SettingsPage title="Agent activity" onBack={onBack} backLabel="Back to About">
       {ready ? null : <SettingsAgentRecovery connection={connection} onRecover={onRecover} />}
       {children}
       {unconfirmed ? <Banner variant="warn">Alpha could not confirm the action decision</Banner> : null}
       {failed ? <Banner variant="warn">The actions could not be read{actions.length ? ". Showing the last read" : ""}</Banner> : null}
-      {ready && actions.length ? (
-        <ListGroup heading="Phone actions">
-          {actions.map((action) => (
-            <SettingsActionRow
-              key={action.proposal}
-              title={action.title}
-              detail={[action.outcome, action.detail].filter(Boolean).join(" · ")}
-              declinable={action.declinable}
-              unsettled={action.unsettled}
-              onDecline={onDecline && (() => onDecline(action.proposal))}
-              onReconcile={onReconcile && ((happened) => onReconcile(action.proposal, happened))}
-            />
-          ))}
-        </ListGroup>
-      ) : null}
-      {ready && !actions.length && reading ? <Skeleton className="h-16 rounded-lg" /> : null}
-      {ready && !actions.length && !reading && !failed ? <EmptyState title="No phone actions" /> : null}
-      {!ready && connection !== "unpackaged" ? <EmptyState title="Actions load when the agent is ready" /> : null}
       {development ? (
         <ListGroup>
           <SettingsNavRow title="Restart details" icon={<Wrench />} onOpen={onHandOver && (() => onHandOver("restart-details"))} />
         </ListGroup>
       ) : null}
+      {ready ? (
+        <ListGroup>
+          <ListRow
+            title="Phone actions"
+            aria-label={reading ? "Loading phone actions" : "Refresh actions"}
+            leading={<RotateCw />}
+            trailing={reading ? <Spinner size="sm" label="Working" /> : undefined}
+            onClick={reading ? undefined : onRefresh}
+          />
+        </ListGroup>
+      ) : null}
+      {ready ? actions.map((action) => (
+        <ListGroup key={action.proposal}>
+          <SettingsActionRow
+            title={action.title}
+            detail={[action.outcome, action.detail].filter(Boolean).join(" · ")}
+            declinable={action.declinable}
+            unsettled={action.unsettled}
+            onDecline={onDecline && (() => onDecline(action.proposal))}
+            onReconcile={onReconcile && ((happened) => onReconcile(action.proposal, happened))}
+          />
+        </ListGroup>
+      )) : null}
+      {ready && !actions.length && reading ? <Skeleton className="h-16 rounded-lg" /> : null}
+      {ready && !actions.length && !reading && !failed ? <EmptyState title="No phone actions" /> : null}
+      {!ready && connection !== "unpackaged" ? <EmptyState title="Actions load when the agent is ready" /> : null}
     </SettingsPage>
   );
 }

@@ -203,7 +203,7 @@ describe("Settings", () => {
       await until(alpha, machines, Android.Machine, (s) => s.told === "SaidNearby");
       // spec/app/settings/android.md, "Alpha's alert, permission and photo pages open for Alpha itself, never for another app, and a channel's page names its channel"
       await tap("Notifications");
-      await tap("Alpha's alerts");
+      await tap("Notifications");
       await until(alpha, machines, Android.Machine, (s) => s.target === "AlphaAlerts" && s.start.read.status === "Loaded");
       await tap("Reminders");
       await until(alpha, machines, Android.Machine, (s) => s.target === "AlertChannel" && s.start.read.status === "Loaded");
@@ -398,7 +398,7 @@ describe("Settings", () => {
     const sharedFiles: File[] = [];
     Object.defineProperty(navigator, "canShare", { configurable: true, value: () => true });
     Object.defineProperty(navigator, "share", { configurable: true, value: (data: ShareData) => { sharedFiles.push(...(data.files ?? [])); return Promise.resolve(); } });
-    await press("Export diagnostics");
+    await press("Export");
     await until(alpha, machines, Developer.Machine, (s) => s.exporting.read.status === "Loaded");
     const text = await sharedFiles[0]?.text();
     const report = JSON.parse(text ?? "{}");
@@ -407,13 +407,13 @@ describe("Settings", () => {
       { format: "alpha-cloud-stream-timing-v1", sessions: [{ sttConnectedMs: 812, firstFrameSentMs: 815, consentRetry: true }, { sttConnectedMs: 390, firstFrameSentMs: null, consentRetry: false }] },
     ]);
     // spec/app/settings/developer.md, "Clear is offered only for a log with problems, one at a time; once the startup area answers, the log is read again": Clear asks first, and backing out clears nothing.
-    await press("Clear");
+    await press("Clear problem log");
     await press("Cancel");
     expect(world.settings.crashes.length).toBe(2);
-    await press("Clear");
+    await press("Clear problem log");
     await press("Clear log");
     await until(alpha, machines, Developer.Machine, (s) => s.log.read.status === "Loaded" && s.problems === 0);
-    expect([world.settings.crashes, Boolean(button("Clear"))]).toEqual([[], false]);
+    expect([world.settings.crashes, Boolean(button("Clear problem log"))]).toEqual([[], false]);
   });
 
   it("Erase all data (spec/app/settings/reset.md, \"Story: Erase all data\")", async () => {

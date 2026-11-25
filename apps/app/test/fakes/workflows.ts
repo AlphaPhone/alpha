@@ -65,8 +65,20 @@ export const alphaHostedDigests = (native: NativeDigestScene): Faked => (emit) =
   },
 });
 
+/** A scheduled item the agent keeps for the owner, as `/api/scheduled-tasks` serves it. */
+interface ScheduledTask {
+  taskId: string;
+  kind: string;
+  ownerVisible: boolean;
+  promptInstructions: string;
+  state: { status: string };
+  trigger: { kind: "once"; atIso: string } | { kind: "cron"; expression: string; tz: string };
+  metadata: { recordKey?: string };
+}
+
 export interface WorkflowsScene {
   readonly prompts: Map<string, Prompt>;
+  readonly tasks: ScheduledTask[];
   readonly promptEdits: Record<string, unknown>[];
   readonly admissions: Array<{ submission: string; version: string }>;
   readonly decisions: Array<{ version: string; digest: string; approved: boolean }>;
@@ -83,7 +95,18 @@ export const workflowsScene = (): WorkflowsScene => ({
   prompts: new Map([["desk-check", {
     id: "desk-check", displayName: "Desk check", instructions: "Check the desk", enabled: true, revision: 1,
     triggerType: "cron", cronExpression: "0 9 * * *", timezone: "UTC",
+  }], ["doc-review", {
+    id: "doc-review", displayName: "Document review", instructions: "Review the supplied text only.", enabled: false, revision: 1,
+    triggerType: "cron", cronExpression: "0 9 * * 1", timezone: "UTC",
   }]]),
+  // spec/app/workflows/list.md, "Story: Find a workflow"
+  tasks: [{
+    taskId: "check-the-draft", kind: "personal-assistant.reminder", ownerVisible: true, promptInstructions: "Check the draft",
+    state: { status: "scheduled" }, trigger: { kind: "once", atIso: "2026-12-01T10:00:00.000Z" }, metadata: {},
+  }, {
+    taskId: "weekly", kind: "recap", ownerVisible: true, promptInstructions: "Weekly review",
+    state: { status: "scheduled" }, trigger: { kind: "cron", expression: "0 8 * * *", tz: "UTC" }, metadata: { recordKey: "weekly-review" },
+  }],
   promptEdits: [],
   admissions: [], decisions: [], run: false, stage: "Done", receiptReads: 0, approvalTitle: "Review the statement preview", failingPrompts: false,
 });
@@ -123,6 +146,10 @@ export function workflowRoutes(world: WorkflowsScene): Route[] {
   return [
     (request, url) => {
       if (request.method !== "GET") return;
+      const runs = /^\/api\/triggers\/([^/]+)\/runs$/.exec(url.pathname);
+      if (runs && world.prompts.has(decodeURIComponent(runs[1] ?? ""))) return Response.json({ runs: [] });
+      const task = world.tasks.find((one) => url.pathname === `/api/scheduled-tasks/${one.taskId}`);
+      if (task !== undefined) return Response.json({ task });
       const prompt = world.prompts.get(url.pathname.slice("/api/triggers/".length));
       if (url.pathname.startsWith("/api/triggers/") && prompt !== undefined) return Response.json({ trigger: prompt });
       switch (url.pathname) {
@@ -139,7 +166,7 @@ export function workflowRoutes(world: WorkflowsScene): Route[] {
           return Response.json({ entries: world.hosted.entries.filter((row) => !world.hosted?.acknowledgements.includes(row.runId)) });
         }
         case "/api/triggers": return world.failingPrompts ? Response.json({}, { status: 503 }) : Response.json({ triggers: [...world.prompts.values()] });
-        case "/api/scheduled-tasks": return Response.json({ tasks: [] });
+        case "/api/scheduled-tasks": return Response.json({ tasks: world.tasks });
         case "/api/workflow/workflows": return Response.json({ workflows: [record] });
         case "/api/workflow/removed-workflows": return Response.json({ workflows: [removed] });
         case `/api/workflow/workflows/${record.id}`: return Response.json(record);
