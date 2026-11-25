@@ -11,7 +11,6 @@ import type { Scene } from "./scene.ts";
 import { alphaCarrierSetup, elizaNotices, elizaReset, elizaSystem, elizaWiFi, settingsHost } from "./settings.ts";
 import { telephonyPlugins } from "./telephony.ts";
 import { alphaDevice } from "./update.ts";
-import { alphaConnection } from "./platform.ts";
 import { alphaBrowser } from "./browser.ts";
 import { alphaVoiceCloud, elizaCloudSpeech, elizaSignIn } from "./voice.ts";
 

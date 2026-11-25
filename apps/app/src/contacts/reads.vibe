@@ -118,7 +118,7 @@ effect function shown(query: string): unknown!!(Telephony | Rows | ContactsMachi
   try contained(shell.send({ type: "openView", view: "Contacts" }), "the agent's search")
   if ((try shell.get()).trail.at(-1) !== "Contacts") return unavailable
   const machine = try ContactsMachine
-  const current = try Effect.timeoutOption(Stream.runHead(Stream.filter(machine.changes, (s) => s.front && s.list.status !== "Loading")), "8 seconds")
+  const current = try Effect.timeoutOption(Stream.runHead(Stream.filter(machine.changes, (s) => s.front && (s.list.status === "Loaded" || s.list.status === "Failed"))), "8 seconds")
   if (Option.isNone(current) || Option.isNone(current.value) || current.value.value.form !== "Shut") return unavailable
   if (current.value.value.opened) try ignore(machine.send({ type: "closeContact" }))
   if (current.value.value.chip !== "Everyone") try ignore(machine.send({ type: "pick", chip: "Everyone" }))

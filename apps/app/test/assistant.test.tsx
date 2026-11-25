@@ -131,6 +131,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await press("Send");
     await until(alpha, runtime, Conversation, (s) => s.turn.send.id === 2 && s.turn.reply === "Complete");
     await until(alpha, runtime, Reply, (s) => s.turn === 2 && s.status === "Settled");
+    await until(alpha, runtime, Composer, (s) => s.hold === 2 && !s.held.text && s.draft.sync === "Kept");
     const said = await runtime.runPromise(Effect.flatMap(Reply, (machine) => machine.get()));
     expect([said.acks, said.ackUnits, said.final]).toEqual([1, "Let me look".length, "You said: Again".length]);
     expect(lines()).toEqual(["Hello", "You said: Hello", "Again", "You said: Again"]);
