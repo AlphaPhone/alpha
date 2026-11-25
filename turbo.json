@@ -316,6 +316,7 @@
       "inputs": [
         "$TURBO_ROOT$/eliza.lock.json",
         "$TURBO_ROOT$/packages/deployment/deployments.json",
+        "$TURBO_ROOT$/packages/eliza-harness/src/**",
         "host/**",
         "src/**",
         "gen/**",

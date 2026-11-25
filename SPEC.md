@@ -546,7 +546,9 @@ package's own: an owner of `spec/app/cart.md` writes
 `test/traces/app__cart.jsonl` or names its script `driver:app__cart`, all in
 `apps/app`. `vibestack/examples/order/test/drivers/index.ts` is a worked
 driver; `effectDriver` from `vibestack/testing` builds one from a `Layer`.
-Run conformance standalone with `pnpm exec spec conformance [<module>] [--nightly]`.
+Run conformance standalone with `spec conformance [<module>] [--nightly]`
+(`node vibestack/spec.ts` in this repository, `pnpm exec spec` in a project
+that installed the tools).
 
 A `Driver` has `reset`, `dispatch` (sends an event through the
 application's own entry point and returns `"accepted"` or `"refused"`),
@@ -599,7 +601,7 @@ under `src/`.
   it as a test does. The types come from `@antithesishq/bombadil`, which
   `vibestack init` adds. Without the file, the defaults are checked.
   `apps/app/test/bombadil.ts` is a worked one. Run exploration
-  standalone with `pnpm exec spec explore [--nightly]`.
+  standalone with `spec explore [--nightly]`, run as conformance is.
 - **A broken property is saved.** The run is kept in
   `test/__traces__/bombadil`, which is not committed;
   `pnpm exec bombadil browser inspect test/__traces__/bombadil` shows each

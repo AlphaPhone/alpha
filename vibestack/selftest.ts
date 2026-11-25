@@ -4884,7 +4884,8 @@ test("the lint refuses, in a project's own code, a comment that is neither a cit
   assert.deepEqual(await Promise.all(hiding.map((lines) => found("apps/app/src/probe.vibe", lines))), hiding.map(() => ["1 inline config"]));
   assert.deepEqual(await found("packages/ui/src/components/probe.vibe", ["/** What a component takes, which the stories generator reads. */", "export function Probe() {", "  /** inside it */", "  return 1;", "}", "// a note"]), ["3 code/comments", "6 code/comments"]);
   const { default: config } = await import(path.join(project, "eslint.config.js"));
-  const [file, left] = Object.entries(config.find((block: { rules?: Record<string, unknown> }) => block.rules?.["code/comments"]).rules["code/comments"][1].left as Record<string, number>).find(([file]) => file.endsWith(".vibe"))!;
+  const listed = Object.entries(config.find((block: { rules?: Record<string, unknown> }) => block.rules?.["code/comments"]).rules["code/comments"][1].left as Record<string, number>);
+  const [file, left] = listed.find(([file]) => file.endsWith(".vibe")) ?? listed[0]!;
   const notes = (n: number) => Array.from({ length: n }, () => "// a note");
   assert.deepEqual([(await found(file, notes(left))).length, (await found(file, notes(left + 1))).length], [0, left + 1]);
 });

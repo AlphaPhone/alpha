@@ -17,7 +17,7 @@ import { abandonedProof, ensuresOf, LIB_FILE, libraryFor, proofPaths, prove, typ
 import { bin, exec, run } from "./run.ts";
 import { cacheDirectory, loadConfig, type VibestackMode } from "./config.ts";
 import { doctor, formatDoctorReport } from "./doctor.ts";
-import { launchCreate, launchStudio, runCiCommand, runConformanceCommand, runExploreCommand, startPhaseTimings } from "./commands.ts";
+import { launchStudio, runCiCommand, runConformanceCommand, runExploreCommand, startPhaseTimings } from "./commands.ts";
 import { formatUpgradeResult, initProject, linkAgents, upgradeProject, type InitOptions } from "./upgrade.ts";
 import { readSpecs, badSpecName, specFiles, specName, isStd, located, type Spec } from "./parse.ts";
 import { contracts, citationLookup, pending, pendingKey, pendingContracts, acceptAllReviews, pendingSpecs, moved, showPending, ledgerFile, readReviewLock, writeLedger, type Pending, type Accepted, type ReviewLock } from "./review.ts";
@@ -787,8 +787,7 @@ const COMMANDS = [
   ["doctor", "[<directory>] [--install-dafny]", "check Node, pnpm, Dafny 4.11, Quint, Chromium, skills, and manifest"],
   ["conformance", "[<module>] [--nightly]", "run conformance drivers and traces for one or all modules"],
   ["explore", "[<directory>] [--nightly]", "run Bombadil page exploration"],
-  ["studio", "[<directory>] [--port <n>]", "open standalone Vibestack Studio"],
-  ["create", "[<args>…]", "scaffold a new Vibestack project via create-vibestack"],
+  ["studio", "[<directory>] [--port <n>]", "open Studio"],
   ["ci", "precompute-simulations|chromium [options]", "run CI helper commands"],
   ["tests", "[<directory>]", "generate tests from a package's declared contracts"],
   ["stories", "gen [--watch] [--check]", "generate component stories"],
@@ -940,8 +939,6 @@ function readGenerationConfig(file: string) {
 function isWorkspacePipeline(root: string): boolean {
   return [
     path.join(root, "vibestack", "pipeline.ts"),
-    path.join(root, "packages", "vibestack", "src", "pipeline.ts"),
-    path.join(root, "packages", "vibestack", "dist", "pipeline.js"),
     path.join(root, "node_modules", "vibestack", "dist", "pipeline.js"),
   ].includes(import.meta.filename);
 }
@@ -961,7 +958,7 @@ function generationConfig(root: string, args: string[], env: NodeJS.ProcessEnv) 
   let selected: ReturnType<typeof readGenerationConfig>;
   try {
     const scripts = packageScripts(root);
-    const validGenScripts = new Set(["node vibestack/spec.ts gen", "node packages/vibestack/src/spec.ts gen", "spec gen", "vibestack gen"]);
+    const validGenScripts = new Set(["node vibestack/spec.ts gen", "spec gen", "vibestack gen"]);
     if (!validGenScripts.has(scripts.gen) || scripts.pregen || scripts.postgen ||
         fs.lstatSync(path.join(root, "turbo.jsonc"), { throwIfNoEntry: false })) return;
     const stock = readGenerationConfig(path.join(root, "turbo.json"));
@@ -1205,8 +1202,7 @@ export async function main(argv = process.argv.slice(2)) {
         && process.env.GITHUB_JOB === "vibestack-nightly-check" && process.env.GITHUB_WORKSPACE === root
         && process.env.GITHUB_WORKFLOW_REF?.startsWith(`${process.env.GITHUB_REPOSITORY}/.github/workflows/fuzz.yml@`);
       if (fixture || precomputeInstall || packingTools || nightlyCheck) return;
-      const genTarget = !fs.existsSync(path.join(root, "spec")) && fs.existsSync(path.join(root, "template", "spec")) ? ["template"] : [];
-      [command, ...args] = hosted ? ["tasks", "//#gen"] : ["gen", "--if-valid", ...genTarget];
+      [command, ...args] = hosted ? ["tasks", "//#gen"] : ["gen", "--if-valid"];
     }
     if (command === "gen" && args[0] === "--owner" && (args.length === 2 || args.length === 3)) {
       await generateOwner(args[2] === undefined ? root : projectRoot(args[2]), args[1]);
@@ -1289,8 +1285,6 @@ export async function main(argv = process.argv.slice(2)) {
       process.exitCode = ok ? 0 : 1;
     } else if (command === "ci") {
       process.exitCode = await runCiCommand(root, args, prepareSimulationReceipts);
-    } else if (command === "create") {
-      launchCreate(root, args);
     } else if (command === "watch" && takes([])) {
       await watch(root);
     } else if (command === "studio" && takes([], ["*"], ["--port", "*"], ["*", "--port", "*"])) {

@@ -1,36 +1,11 @@
 {
   "name": "vibestack-studio",
-  "version": "0.2.0",
-  "private": false,
+  "private": true,
   "description": "Standalone Vibestack Studio UI and server for Vibestack specs.",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/lalalune/vibestack.git",
-    "directory": "vibestack/studio"
-  },
-  "homepage": "https://github.com/lalalune/vibestack#readme",
-  "bugs": "https://github.com/lalalune/vibestack/issues",
-  "keywords": [
-    "vibestack",
-    "studio",
-    "formal-verification",
-    "quint",
-    "specification",
-    "state-machine"
-  ],
   "type": "module",
   "engines": {
     "node": ">=26"
   },
-  "bin": {
-    "vibestack-studio": "./dist/server.mjs"
-  },
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
-  ],
   "scripts": {
     "start": "node --import vibelang/register test/served.vibe",
     "check": "node ../spec.ts check",

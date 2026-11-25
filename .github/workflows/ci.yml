@@ -4,9 +4,9 @@ name: ci
 # Consumer verification can precompute root simulations on four runners.
 on:
   pull_request:
-    branches: [main]
+    branches: [main, vibestack-develop]
   push:
-    branches: [main]
+    branches: [main, vibestack-develop]
 
 concurrency:
   group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_attempt == '1' && github.ref || github.run_id }}
@@ -152,6 +152,9 @@ jobs:
             options+=(--only)
           fi
           node vibestack/spec.ts tasks "${tasks[@]}" --continue=dependencies-successful --summarize "${options[@]}"
+      - name: Check third-party licence notices
+        if: matrix.name == 'verify'
+        run: pnpm --filter @repo/app licences --check
       - id: publish-tool-selftest
         if: >-
           github.event_name == 'push' && steps.tool-selftest-cache.outputs.key != '' &&
@@ -491,55 +494,7 @@ jobs:
             trap 'kill "$receiver" 2>/dev/null || true; wait "$receiver" 2>/dev/null || true' EXIT
           fi
           unset GH_TOKEN
-          node --input-type=module <<'JS'
-          import { createHash } from "node:crypto";
-          import fs from "node:fs";
-          import path from "node:path";
-          import { prepareSimulationReceipts, readSpecs } from "./vibestack/formal.ts";
-          const aggregate = (name) => /^simulate-[a-f0-9]{24}\.json\.(?:zst|gz)$/.test(name);
-          const simulations = () => fs.globSync("simulate-*.json.*", { cwd: ".spec-cache" })
-            .filter((name) => aggregate(name) && fs.lstatSync(path.join(".spec-cache", name)).isFile());
-          const digest = (file) => createHash("sha256").update(fs.readFileSync(file)).digest("hex");
-          const restored = new Map();
-          for (const name of simulations()) {
-            try { restored.set(name, digest(path.join(".spec-cache", name))); } catch { }
-          }
-          const specs = readSpecs(process.cwd());
-          const inShard = ({ file }) => parseInt(createHash("sha256").update(file).digest("hex").slice(0, 8), 16) % Number(process.env.SHARDS) === Number(process.env.SHARD) - 1;
-          const names = specs.filter(inShard).map(({ name }) => name);
-          const { results, seedDirectory, partialDirectory } = await prepareSimulationReceipts(process.cwd(), specs, names, process.env.RUNNER_TEMP);
-          const checkpoint = seedDirectory ?? partialDirectory;
-          let transfer = checkpoint ?? fs.mkdtempSync(path.join(process.env.RUNNER_TEMP, "simulation-delta-"));
-          if (!checkpoint) {
-            for (const name of simulations()) if (!restored.has(name)) {
-              fs.copyFileSync(path.join(".spec-cache", name), path.join(transfer, name));
-            }
-          } else {
-            const contents = fs.readdirSync(checkpoint).sort().map((name) => [name, digest(path.join(checkpoint, name))]);
-            if (contents.some(([name, hash]) => aggregate(name) && restored.get(name) !== hash)) {
-              const fingerprint = createHash("sha256").update(JSON.stringify(contents)).digest("hex");
-              const prefix = `${process.env.CACHE_PREFIX}${fingerprint}-`;
-              if (!process.env.RESTORED_KEY.startsWith(prefix)) {
-                const key = `${prefix}${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}`;
-                const directory = path.join(process.env.RUNNER_TEMP, "cached-simulation-receipts");
-                try {
-                  fs.rmSync(directory, { recursive: true, force: true });
-                  fs.renameSync(checkpoint, directory);
-                  transfer = directory;
-                  fs.appendFileSync(process.env.GITHUB_OUTPUT, `cache-key=${key}\ncache-prefix=${prefix}\n`);
-                } catch (error) {
-                  console.log(`::warning::Could not stage the simulation cache: ${error.message}`);
-                }
-              }
-            }
-          }
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `directory=${transfer}\n`);
-          const failed = results.filter(({ ok }) => !ok);
-          for (const { stage, summary, detail, where } of failed) console.log(`✗ ${stage} ${where ?? ""}: ${summary}\n${detail}`);
-          const kind = seedDirectory ? "complete seed" : partialDirectory ? "partial seed" : "new aggregate";
-          console.log(`shard ${process.env.SHARD} of ${process.env.SHARDS}: ${names.length} specs, ${results.length} results, ${fs.readdirSync(transfer).length} ${kind} entries, ${failed.length} failed`);
-          process.exitCode = failed.length ? 1 : 0;
-          JS
+          node vibestack/spec.ts ci precompute-simulations --shard "$SHARD" --shards "$SHARDS" --out "$RUNNER_TEMP" --github-output "$GITHUB_OUTPUT"
       - id: published-simulation-cache
         if: ${{ !cancelled() && steps.precompute.outputs.cache-key != '' && steps.precompute.outputs.base-receipts == 'true' }}
         continue-on-error: true
@@ -581,3 +536,36 @@ jobs:
     environment: *cache-environment
     env: *cache-env
     steps: *verification-steps
+
+  android-jvm-tests:
+    if: github.repository != 'lalalune/vibestack'
+    name: android-jvm-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+        with:
+          job: android-jvm-tests
+          verification: "false"
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        with:
+          packages: platform-tools platforms;android-36 build-tools;36.0.0
+          log-accepted-android-sdk-licenses: false
+      - name: Prepare the pinned Eliza packages and Android host
+        run: |
+          pnpm eliza
+          pnpm --filter @repo/eliza-harness build
+          pnpm --filter @repo/app android pack
+          pnpm --filter @repo/app android host
+      - name: Prepare the pinned Robolectric Android framework
+        timeout-minutes: 10
+        run: bash scripts/ci/prepare-robolectric-android.sh "$HOME/.m2/repository"
+      - name: Run Android JVM unit tests
+        timeout-minutes: 15
+        working-directory: apps/app/android
+        run: ./gradlew --no-daemon testLauncherDebugUnitTest
