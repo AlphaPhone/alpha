@@ -48,6 +48,7 @@ import { attachmentAuthority, dropFiles, readFiles, rememberFiles, retireTranscr
 import { readMessage } from "./read-aloud.vibe"
 import { withoutTurnTags } from "./words.ts"
 import { type DraftAddress, exchangePhoneDraft, readPhoneDraft } from "./draft-device.vibe"
+import { offerRecordingSummary } from "./recording-summary.vibe"
 
 service Turns {
   readonly controller: TurnController
@@ -542,6 +543,10 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       }
       board.messageNumber(result.reply.messageId)
       board.append(pageTicket, chats.chosen, { id: result.reply.messageId, mine: false, text: result.reply.text })
+      const recordingSummary = transcript === undefined || seat === undefined || result.reply.failureKind !== undefined
+        ? undefined : try offerRecordingSummary({ source: transcript.offered, seat, conversation: chats.chosen,
+          conversationId: known.record.id, message: result.reply.messageId }, result.reply.text)
+      if (board.draftSeat === seat) board.change({ recordingSummary })
       try syncAlphaApps()
       if (enrolled !== undefined && result.reply.userMessageId !== undefined) {
         const replied = streamed(result.clientMessageId)
@@ -1315,6 +1320,10 @@ const steppingBack = started(effect {
 
 // spec/app/assistant/index.md, "Back closes a review, then search, then a quote or an edit, one at a time; with none of them open Back is the shell's"
 export const assistantBack = effect {
+  const summary = (try Talk).board.snapshot().recordingSummary
+  if (summary !== undefined && (try summary.machine.get()).reviewing) {
+    return try contained(summary.machine.send({ type: "dismissSummary" }), "closing the recording summary review")
+  }
   const attachments = try Attachments.Machine
   if (Attachments.canCancel(try attachments.get())) return try contained(attachments.send({ type: "cancel" }), "closing attachments")
   if (Attachments.canClosePreview(try attachments.get())) return try contained(attachments.send({ type: "closePreview" }), "closing the attachment preview")
