@@ -393,6 +393,11 @@ pure def sometimesAnAgendaOutlivesAFailedRead(c: Cards): bool = c.calendar.items
 
 ### The Messages and Phone cards show their waiting rows, only on an Alpha image, and are not drawn without a row
 
+As v121 drew them, each card leads with how many wait, lists the two newest
+rows (a number's new missed calls as one "Missed" or "Missed · 2" row, an
+unheard voicemail as "Voicemail · 0:42") and closes on when the newest came
+("now", "11m", "6:30 PM", "Fri"), measured against Alpha's latest time.
+
 ```quint
 pure def callsCard(image: bool, rows: List[Row]): Card = if (image and rows.length() > 0) Current else Hidden
 ```
@@ -400,6 +405,9 @@ pure def callsCard(image: bool, rows: List[Row]): Card = if (image and rows.leng
 ### The mail card shows the unread count, senders and subjects only, never a message body; marked not up to date when Inbox's page is not, and not drawn without an account or a row
 
 What Inbox loaded is what the card shows: Home reads no mail of its own.
+As v121 drew it, the card closes on "Recent email" when Inbox's page did not
+see every message, else the account it read, and when it was read
+("Updated 10:24 PM").
 
 ```quint
 pure def mailCard(m: Mail): Card =

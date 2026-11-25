@@ -53,8 +53,9 @@ export type AssistantBarDrag = {
 
 /**
  * Pointer handlers that let the whole resting bar be dragged like its handle, as v121's bar was. Nothing is taken until
- * the finger moves past a few pixels, so a tap on the bar, its buttons or its field stays a tap; a press on the handle
- * itself is left to the handle. A touch is held by the field it lands on until the bar takes it, and that hand-over is
+ * the finger moves past a few pixels, so a tap on the bar or its field stays a tap; a press on the handle is left to
+ * the handle, a press on any other control (Send, Talk, Stop, the chat actions) stays that control's, and a field with
+ * a draft in it scrolls instead. A touch is held by the field it lands on until the bar takes it, and that hand-over is
  * not a loss.
  */
 export function useAssistantBarDrag({ onStart, onDrag, onRelease, onCancel }: AssistantBarDrag) {
@@ -70,6 +71,9 @@ export function useAssistantBarDrag({ onStart, onDrag, onRelease, onCancel }: As
     onPointerDown: (event: PointerEvent<HTMLElement>) => {
       if (!event.isPrimary || event.button !== 0) return;
       if (event.target instanceof Element && event.target.closest("[data-alpha-grabber]")) return;
+      // As v121's bar: its controls take their own presses (only the Alpha mark drags), and a written field scrolls.
+      if (event.target instanceof Element && event.target.closest("button, a, [role=menuitem]") && !event.target.closest("[data-alpha-input-drag-alpha]")) return;
+      if (event.target instanceof HTMLTextAreaElement && event.target.value !== "") return;
       const sample = { y: event.clientY, at: event.timeStamp };
       trackRef.current = { start: event.clientY, prev: sample, last: sample, moved: false, pointer: event.pointerId };
     },

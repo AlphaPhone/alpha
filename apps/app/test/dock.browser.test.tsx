@@ -106,4 +106,39 @@ describe("Ask Alpha dock", () => {
     const still = await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()));
     expect(still.assistant).toBe("Bar");
   });
+  // spec/app/assistant/dock.md, "A press does one thing: a tap is never also a drag, and a late click never taps"
+  it("The resting bar's controls keep their presses and a written field scrolls (spec/app/assistant/dock.md, \"A press does one thing: a tap is never also a drag, and a late click never taps\")", async () => {
+    await page.viewport(390, 844);
+    const { runtime } = await mountDock({ view: "Browser" });
+    const section = document.querySelector<HTMLElement>("section[aria-label='Ask Alpha']");
+    const field = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
+    expect(section?.getAttribute("data-alpha-detent")).toBe("bar");
+    const finger = (type: string, target: Element | null | undefined, clientY: number) =>
+      target?.dispatchEvent(new PointerEvent(type, { bubbles: true, clientY, pointerId: 4, pointerType: "touch", isPrimary: true }));
+    const drag = (target: Element | null | undefined) => {
+      finger("pointerdown", target, 800);
+      for (const y of [790, 600, 300, 60]) finger("pointermove", target, y);
+      finger("pointerup", target, 60);
+    };
+    const detent = async () => (await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).assistant;
+
+    // A drag that starts on one of the bar's controls stays that control's, as on v121's bar
+    const control = [...(section?.querySelectorAll("button") ?? [])].find((button) => !button.closest("[data-alpha-grabber],[data-alpha-input-drag-alpha]"));
+    expect(control).toBeDefined();
+    drag(control);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(await detent()).toBe("Bar");
+
+    // An empty field takes no pan; a field with a draft in it scrolls by finger and does not drag Ask Alpha
+    expect(field?.hidden).toBe(false);
+    if (field) {
+      expect(getComputedStyle(field).touchAction).toBe("none");
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(field, "a long draft");
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+      await expect.poll(() => getComputedStyle(field).touchAction).toBe("pan-y");
+      drag(field);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(["Sheet", "Full"]).not.toContain(await detent());
+    }
+  });
 });

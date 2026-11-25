@@ -1,6 +1,6 @@
 // spec/app/home/cards.md, "Story: The agenda card"; spec/app/home/cards.md, "Story: The other cards"; spec/app/home/cards.md, "Story: Open my day from a card"
 import { HomeAgendaCard, type HomeAgendaItem, HomeBriefCard, HomeCallsCard, HomeMailCard, HomeWorkflowsCard } from "@repo/ui";
-import type { ManagedRuntime } from "effect";
+import { Effect, type ManagedRuntime } from "effect";
 import { type ReactNode, useSyncExternalStore } from "react";
 import * as Cards from "../../gen/app__home__cards.ts";
 import type { Machine } from "../../gen/app__home__cards.effect.vibe";
@@ -10,6 +10,7 @@ import { shortWhen } from "../phone/words.ts";
 import type { Resident } from "../runtime/area.tsx";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
+import { Time } from "../runtime/time.vibe";
 import { type MailRead, type Waiting, fromAreas, named, others } from "./cards.vibe";
 
 const where: Readonly<Record<Cards.Origin, string>> = { PhoneCalendar: "Calendar", AgentCalendar: "Alpha", Reminder: "Reminder" };
@@ -54,6 +55,8 @@ export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Res
   if (!state) return [];
   const told = others(given, image);
   const now = Math.max(state.calendar.since, state.agent.since, state.today * Cards.dayLength);
+  // "11m", "now" and "Updated ..." are measured against Alpha's latest time, as Messages and Phone measure theirs, not the last calendar ask.
+  const latest = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
   const open = (kind: Cards.Kind) => ({
     disabled: !can({ type: "openCard", kind, now }),
     onClick: () => void send({ type: "openCard", kind, now: untimed }),
@@ -82,9 +85,9 @@ export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Res
         />
       );
     },
-    MessagesCard: () => <HomeCallsCard key="messages" app="Messages" lines={told.messages} {...waitingOf("Messages", given.messagesWaiting, now)} {...open("MessagesCard")} onClick={() => void runtime.runPromise(openUnread())} />,
-    PhoneCard: () => <HomeCallsCard key="phone" app="Phone" lines={told.phone} {...waitingOf("Phone", given.phoneWaiting, now)} {...open("PhoneCard")} onClick={() => void runtime.runPromise(openCalls())} />,
-    MailCard: () => <HomeMailCard key="mail" aria-label={`Open Inbox, ${told.mail.unread}${given.mailMore ? "+" : ""} unread`} unread={told.mail.unread} more={given.mailMore} status={mailFoot(given.mailRead, given.mailMore, now)} lines={told.mail.rows} notCurrent={Cards.mailCard(told.mail) === "NotUpdated"} {...open("MailCard")} />,
+    MessagesCard: () => <HomeCallsCard key="messages" app="Messages" lines={told.messages} {...waitingOf("Messages", given.messagesWaiting, latest)} {...open("MessagesCard")} onClick={() => void runtime.runPromise(openUnread())} />,
+    PhoneCard: () => <HomeCallsCard key="phone" app="Phone" lines={told.phone} {...waitingOf("Phone", given.phoneWaiting, latest)} {...open("PhoneCard")} onClick={() => void runtime.runPromise(openCalls())} />,
+    MailCard: () => <HomeMailCard key="mail" aria-label={`Open Inbox, ${told.mail.unread}${given.mailMore ? "+" : ""} unread`} unread={told.mail.unread} more={given.mailMore} status={mailFoot(given.mailRead, given.mailMore, latest)} lines={told.mail.rows} notCurrent={Cards.mailCard(told.mail) === "NotUpdated"} {...open("MailCard")} />,
     BriefOfToday: () => given.brief && (
       <HomeBriefCard key="brief" outcome={given.brief.outcome} summary={given.brief.outcome === "Finished" ? given.brief.summary : undefined} when={clock(given.brief.at)} {...open("BriefOfToday")} />
     ),
