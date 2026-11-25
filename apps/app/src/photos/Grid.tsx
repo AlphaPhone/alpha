@@ -129,12 +129,14 @@ type TileProps = {
   readonly selected?: boolean;
   readonly trashed: boolean;
   readonly daysLeft?: number;
+  readonly captureTime?: string;
   readonly interactive: boolean;
   readonly focus: (button: HTMLButtonElement | null) => void;
 };
 
 /** Days within this many days of today have a heading of their own, as in v121; older items are grouped by month. */
 const dayHeadings = 30;
+const timeOfDay = new Intl.DateTimeFormat(undefined, { timeStyle: "short" });
 
 const startOfDay = (at: number) => new Date(at).setHours(0, 0, 0, 0);
 
@@ -164,9 +166,10 @@ export function trashDaysLabel(days: number): string {
   return `${days} ${days === 1 ? "day" : "days"} left`;
 }
 
-const Tile = memo(function Tile({ number, row, image, selected, trashed, daysLeft, interactive, focus }: TileProps) {
+const Tile = memo(function Tile({ number, row, image, selected, trashed, daysLeft, captureTime, interactive, focus }: TileProps) {
   const video = row.kind === "phone" ? row.item.kind === "video" : row.item.mimeType.startsWith("video/");
-  const name = row.item.name ?? (video ? "Video" : "Photo");
+  const kind = video ? "Video" : "Photo";
+  const name = row.item.name?.trim() || (captureTime === undefined ? kind : `${kind}, ${captureTime}`);
   const starred = !trashed && row.item.favorite === true;
   return (
     <button ref={focus} type="button" data-alpha-media-key={number} aria-label={name} aria-pressed={selected}
@@ -343,10 +346,12 @@ export function MediaGrid({ rows, selection, grouped, density, runtime, revision
             const first = line[0]?.number ?? 0;
             const present = (visibleLines === undefined ? index < thumbnailBatch : visibleLines === null || visibleLines.has(first))
               || line.some(({ number }) => number === focused || number === requested);
-            return <ThumbnailLine key={first} members={members} observe={observeLine} style={size.style}>{present ? line.map(({ number, row }) => (
-              <Tile key={number} number={number} row={row} image={images?.get(number)} selected={selection?.has(number)} trashed={trash}
-                daysLeft={trash && row.kind === "phone" ? trashDaysLeft(row.item.expiresAt, now) : undefined} interactive={open !== undefined} focus={focus} />
-            )) : undefined}</ThumbnailLine>;
+            return <ThumbnailLine key={first} members={members} observe={observeLine} style={size.style}>{present ? line.map(({ number, row }) => {
+              const timestamp = row.item.name?.trim() ? 0 : taken(row);
+              const captureTime = timestamp > 0 ? `${headingOf(timestamp, now, true)} ${timeOfDay.format(timestamp)}` : undefined;
+              return <Tile key={number} number={number} row={row} image={images?.get(number)} selected={selection?.has(number)} trashed={trash} captureTime={captureTime}
+                daysLeft={trash && row.kind === "phone" ? trashDaysLeft(row.item.expiresAt, now) : undefined} interactive={open !== undefined} focus={focus} />;
+            }) : undefined}</ThumbnailLine>;
           })}
         </section>
       ))}
