@@ -14,5 +14,5 @@ export function asksAboutOpenFile(text: string): boolean {
 }
 
 export function documentObservation(selection: FileSelection) {
-  return { kind: "document", id: `file:${selection.item}`, revision: `${selection.viewer}.${selection.revision}` }
+  return { kind: "document" as const, id: `file:${selection.item}`, revision: `${selection.viewer}.${selection.revision}` }
 }

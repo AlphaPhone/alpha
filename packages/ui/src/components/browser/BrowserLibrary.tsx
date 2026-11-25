@@ -61,7 +61,7 @@ function LibraryList({ title, entries, query, onQuery, loading, failed, onRetry,
   return (
     <>
       <SearchField value={query} onValueChange={onQuery} aria-label={label} placeholder={label}
-        className="mx-4 mb-1.5 shrink-0 [&>input]:h-11 [&>input]:rounded-full [&>input]:pl-10 [&>svg]:left-3.5 [&>svg]:size-4" />
+        className="mx-4 mb-1.5 shrink-0 [&>input]:h-11 [&>input]:rounded-full [&>input]:pr-3.5 [&>input]:pl-9.5 [&>svg]:left-3.5 [&>svg]:size-4" />
       <div className="min-h-0 flex-1 overflow-y-auto pt-2 pb-35">
         {title === "History" && visible.length > 0 && <h3 className="mx-5 mt-3.5 mb-1 text-fine font-semibold text-muted-foreground">Earlier</h3>}
         {visible.length > 0 && <ul>{visible.map((entry) => <li key={entry.url} className="flex items-center pr-2.5">

@@ -287,7 +287,7 @@ pure def routeListAdmitted(listed: List[Route]): bool =
 ### Only Android's native speech transport can call the resident recognizer
 
 The page's route table has neither the speech scope nor the live capture
-route. The phone admits exactly these two calls to its root-only native
+route. The phone admits these two speech calls to its root-only native
 channel. The scope answers the running resident's launch epoch and owner
 only when the pinned native engine can transcribe. Alpha checks the native
 sign-in account against that scope before capture and never sends frames
@@ -298,12 +298,35 @@ pure val nativeSpeechRoutes: List[Route] = List(
   { method: Get, path: "/api/alpha-speech/scope", stream: false },
   { method: Post, path: "/api/asr/local-inference/live", stream: false },
 )
-pure def nativeSpeechRoutesAdmitted(listed: List[Route]): bool =
-  listed.length() == nativeSpeechRoutes.length() and listed.every(route => nativeSpeechRoutes.includes(route))
-    and nativeSpeechRoutes.every(route => listed.includes(route))
 pure val routeValues: Set[Route] = nativeSpeechRoutes.foldl(Set(), (routes, route) => routes.union(Set(route)))
 pure def lawSpeechRoutesAreAbsentFromThePage(route: Route): bool =
   nativeSpeechRoutes.includes(route) implies not(pageRoutes.includes(route))
+```
+
+### Android's digest inbox verifies the launch before admitting results
+
+Android's native inbox uses the resident's private scope, which reports
+the launch epoch, agent and account even if speech is unavailable. An
+Android worker compares the proof to the serving epoch and active
+custody before accessing results. The worker and the panel share one
+Android writer. After the switch, the Android page never fetches or
+acknowledges the same results itself. The browser uses its own inbox.
+Only the native table admits the launch scope endpoint.
+
+```quint
+pure val nativeDigestScope = "/api/alpha-runtime/scope"
+pure val nativeDigestAck = "/api/workflow/hosted/results/ack"
+pure val nativeDigestAckLimit = 1024
+pure val nativeDigestRoutes: List[Route] = List(
+  { method: Get, path: nativeDigestScope, stream: false },
+  { method: Get, path: "/api/workflow/status", stream: false },
+  { method: Get, path: "/api/workflow/hosted/results", stream: false },
+  { method: Post, path: nativeDigestAck, stream: false },
+)
+pure val nativeRoutes = nativeSpeechRoutes.concat(nativeDigestRoutes)
+pure def nativeRoutesAdmitted(listed: List[Route]): bool =
+  listed.length() == nativeRoutes.length() and listed.every(route => nativeRoutes.includes(route))
+    and nativeRoutes.every(route => listed.includes(route))
 ```
 
 ### The page names the query values each gated route can receive
@@ -333,6 +356,7 @@ pure val pageQueries: List[RequestQuery] = List(
   { method: Get, path: "/api/workflow/hosted/results", key: "clientId", kind: PatternQuery, value: "[A-Za-z0-9][A-Za-z0-9_-]{0,127}", example: "build-probe" },
   { method: Delete, path: "/api/triggers/{id}", key: "expectedRevision", kind: PatternQuery, value: "[1-9][0-9]{0,15}", example: "1" },
 )
+pure val nativeDigestQueries = pageQueries.select(q => q.method == Get and q.path == "/api/workflow/hosted/results")
 ```
 
 ### The agent keeps its memory across restarts, without embeddings
