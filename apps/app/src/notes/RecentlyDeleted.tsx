@@ -65,7 +65,7 @@ export function RecentlyDeleted({ runtime, collection }: { readonly runtime: Alp
     <Sheet open={reviewing || selected !== undefined} onOpenChange={(open) => { if (!open && can(back)) send(back); }}>
       <SheetContent title={heading} description={details} data-alpha-notes-trash-sheet=""
         {...(!reviewing && { "data-alpha-notes-recovery": "", "aria-labelledby": undefined, "aria-label": `Recover “${title}”?` })}
-        className="bottom-27 max-h-[calc(100dvh-8.75rem)] gap-6 bg-muted px-6 pt-7 pb-[calc(0.75rem+max(1.75rem,calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))+0.75rem)))] before:absolute before:top-3 before:left-1/2 before:h-1 before:w-10 before:-translate-x-1/2 before:rounded-full before:bg-muted-foreground/45 [&>div:first-child]:gap-2 [&>div:last-child]:gap-2.5 [&_h2]:font-display [&_h2]:text-home-display [&_h2]:font-light"
+        className="bottom-27 max-h-[calc(100dvh-8.75rem)] gap-6 bg-card px-6 pt-7 shadow-none pb-[calc(0.75rem+max(1.75rem,calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))+0.75rem)))] before:absolute before:top-3 before:left-1/2 before:h-1 before:w-10 before:-translate-x-1/2 before:rounded-full before:bg-muted-foreground/45 [&>div:first-child]:gap-2 [&>div:last-child]:gap-2.5 [&_h2]:font-display [&_h2]:text-home-display [&_h2]:font-light"
         actions={reviewing ? <>
           <Button variant="secondary" size="lg" className="text-md" onClick={() => send({ type: "cancel" })}>Cancel</Button>
           {!full && <Button size="lg" className={`text-md ${contrast}`} disabled={!can(confirm)} onClick={() => send(confirm)}>
