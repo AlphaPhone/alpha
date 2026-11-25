@@ -1,9 +1,10 @@
-import { AppWindow, Battery, Bell, Bluetooth, Lock, Phone, Plane, RadioTower, Signal, Sun, Volume2, Wifi, WifiCog } from "lucide-react";
+import type { ReactNode } from "react";
+import { AppWindow, Battery, Bell, Bluetooth, Lock, Phone, Plane, Signal, Smartphone, Sun, Volume2, Wifi, WifiCog } from "lucide-react";
 import { ListGroup } from "../ListGroup.tsx";
 import { SettingsAndroidRow } from "./SettingsAndroidRow.tsx";
 import { SettingsNavRow } from "./SettingsNavRow.tsx";
 import { SettingsPage } from "./SettingsPage.tsx";
-import { type SettingsPageLink, SettingsPageLinks } from "./SettingsPageLinks.tsx";
+import { SettingsReading } from "./SettingsReading.tsx";
 import { SettingsResetNotice, type SettingsResetNoticeProps } from "./SettingsResetNotice.tsx";
 import { SettingsResetRow } from "./SettingsResetRow.tsx";
 import { SettingsSetAsHomeRow } from "./SettingsSetAsHomeRow.tsx";
@@ -17,6 +18,10 @@ export type SettingsGeneralPageProps = SettingsAndroidProps &
     bluetooth: Reading;
     /** Mobile data, as the phone last said. */
     mobileData: Reading;
+    /** The appearance chosen, beside Display. */
+    theme?: "system" | "light" | "dark";
+    /** Alpha's alerts, as the phone last said, under Notifications. */
+    alerts?: Reading;
     /** The phone runs an Alpha image, which has the Phone page. */
     image?: boolean;
     /** What Alpha tells about the last start of an Android page. */
@@ -37,31 +42,37 @@ export type SettingsGeneralPageProps = SettingsAndroidProps &
     onRequestHome?: () => void;
     /** What Alpha said about the last reset attempt. */
     said?: SettingsResetNoticeProps["said"];
+    /** Update rows owned by the update area. */
+    updates?: ReactNode;
+    /** Commands in the General header. */
+    actions?: ReactNode;
   };
 
-const links: SettingsPageLink[] = [
-  { page: "display", title: "Display", icon: <Sun /> },
-  { page: "sound", title: "Sound", icon: <Volume2 /> },
-  { page: "notifications", title: "Notifications", icon: <Bell /> },
-  { page: "battery", title: "Battery", icon: <Battery /> },
-];
+const themes = { system: "System", light: "Light", dark: "Dark" } as const;
 
 /**
  * General: its pages, the network as the phone reports it with the way into Android's settings for it, the screen lock
  * and default apps, and Erase all data at the foot. Rows are numbered by slot, as on the first page.
  * @model spec/app/settings/index.md
  */
-export function SettingsGeneralPage({ wifi, bluetooth, mobileData, image = false, told, onBack, onOpen, onPhone = false, reviewing, onErase, requestingHome, onRequestHome, said, starting, onAndroid, place, onPlace }: SettingsGeneralPageProps) {
+export function SettingsGeneralPage({ wifi, bluetooth, mobileData, theme, alerts, image = false, told, onBack, onOpen, onPhone = false, reviewing, onErase, requestingHome, onRequestHome, said, updates, starting, onAndroid, place, onPlace, actions }: SettingsGeneralPageProps) {
   const at = (row: number) => placed({ place, onPlace }, row);
   const android = { starting, onAndroid };
   return (
-    <SettingsPage title="General" told={told} onBack={onBack}>
+    <SettingsPage title="General" told={told} onBack={onBack} backLabel="Back to Settings" actions={actions}>
       {said ? <SettingsResetNotice said={said} /> : null}
+      {onPhone ? (
+        <ListGroup>
+          <SettingsNavRow title="Carrier & SIM setup" aria-label="Carrier & SIM setup" detail="IMEI, SIM status and activation" icon={<Smartphone />} onOpen={onOpen && (() => onOpen("carrier"))} {...at(13)} />
+          <SettingsNavRow title="Network" icon={<WifiCog />} onOpen={onOpen && (() => onOpen("network"))} {...at(12)} />
+        </ListGroup>
+      ) : null}
       <ListGroup>
-        <SettingsPageLinks links={links} onOpen={onOpen} place={place} onPlace={onPlace} />
+        <SettingsNavRow title="Display" aria-label="Display" icon={<Sun />} value={theme ? themes[theme] : undefined} onOpen={onOpen && (() => onOpen("display"))} {...at(0)} />
+        <SettingsNavRow title="Notifications" aria-label="Notifications" icon={<Bell />} detail={alerts ? <SettingsReading reading={alerts} /> : undefined} onOpen={onOpen && (() => onOpen("notifications"))} {...at(2)} />
+        <SettingsNavRow title="Sound" icon={<Volume2 />} onOpen={onOpen && (() => onOpen("sound"))} {...at(1)} />
+        <SettingsNavRow title="Battery" icon={<Battery />} onOpen={onOpen && (() => onOpen("battery"))} {...at(3)} />
         {image ? <SettingsNavRow title="Phone" icon={<Phone />} onOpen={onOpen && (() => onOpen("phone"))} {...at(4)} /> : null}
-        {onPhone ? <SettingsNavRow title="Network" icon={<WifiCog />} onOpen={onOpen && (() => onOpen("network"))} {...at(12)} /> : null}
-        {onPhone ? <SettingsNavRow title="Carrier & SIM setup" icon={<RadioTower />} onOpen={onOpen && (() => onOpen("carrier"))} {...at(13)} /> : null}
       </ListGroup>
       <ListGroup>
         <SettingsAndroidRow target="wifi-networks" title="Wi-Fi" icon={<Wifi />} reading={wifi} {...android} {...at(5)} />
@@ -74,6 +85,7 @@ export function SettingsGeneralPage({ wifi, bluetooth, mobileData, image = false
         <SettingsAndroidRow target="default-apps" title="Default apps" icon={<AppWindow />} {...android} {...at(10)} />
         {!image && (requestingHome || onRequestHome) ? <SettingsSetAsHomeRow requesting={requestingHome} onRequest={onRequestHome} {...at(14)} /> : null}
       </ListGroup>
+      {updates}
       {onPhone ? (
         <ListGroup>
           <SettingsResetRow reviewing={reviewing} onErase={onErase} {...at(11)} />

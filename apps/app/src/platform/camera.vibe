@@ -71,11 +71,15 @@ module web {
     return new MediaRecorder(new MediaStream([...video.getVideoTracks(), ...(audio?.getAudioTracks() ?? [])]))
   }
   /** @throws {never} */
+  export function recordingBlob(chunks: Blob[], mimeType: string): Blob | undefined {
+    return chunks.length > 0 ? new Blob(chunks, { type: mimeType }) : undefined
+  }
+  /** @throws {never} */
   export function permissionFailure(cause: unknown): boolean {
     return cause instanceof DOMException && ["NotAllowedError", "PermissionDeniedError", "SecurityError"].includes(cause.name)
   }
 }
-import { image, media, permission, permissionFailure, recorder, release, revoke, urlOf } from web
+import { image, media, permission, permissionFailure, recorder, recordingBlob, release, revoke, urlOf } from web
 
 export type Aspect = "4:3" | "16:9"
 export type Flash = "off" | "auto" | "on" | "torch"
@@ -155,6 +159,7 @@ effect function tried(task: () => Promise<unknown>): boolean!! {
 export const phoneCamera = Layer.effect(CameraPort, effect {
   const turn = try Semaphore.make(1)
   let owner = 0
+  let latest = 0
   let lenses: ReadonlyArray<CameraDevice> = []
   return {
     nativePreview: true,
@@ -187,7 +192,8 @@ export const phoneCamera = Layer.effect(CameraPort, effect {
       return grantOf(reply?.microphone ?? "")
     },
     start: (ticket: number, lens: Lens, aspect: Aspect) => Semaphore.withPermit(turn, effect {
-      if (owner > ticket) return undefined
+      if (latest > ticket) return undefined
+      latest = ticket
       if (lenses.length === 0) {
         const listed = tryPromise(() => camera().getDevices()) catch () => undefined
         lenses = listed?.devices ?? []
@@ -239,8 +245,8 @@ export const browserCamera = Layer.effect(CameraPort, effect {
   const turn = try Semaphore.make(1)
   const signals = try PubSub.sliding<CameraSignal>(4)
   let owner = 0
+  let latest = 0
   let opened: MediaStream | undefined
-  let preflight: MediaStream | undefined
   let view: HTMLVideoElement | null = null
   let film: BrowserFilm | undefined
 
@@ -261,7 +267,6 @@ export const browserCamera = Layer.effect(CameraPort, effect {
   try addFinalizer(() => sync(() => {
     if (film?.recording.state === "recording") film.recording.stop()
     release(film?.audio)
-    release(preflight)
     release(opened)
   }))
 
@@ -272,33 +277,30 @@ export const browserCamera = Layer.effect(CameraPort, effect {
     volumeKeys: Stream.empty,
     bind: (element: HTMLVideoElement | null) => sync(() => { view = element; bound() }),
     effect access() {
-      const camera = opened !== undefined || preflight !== undefined ? "Granted" : grantOf(try promise(() => permission("camera")))
+      const camera = opened !== undefined ? "Granted" : grantOf(try promise(() => permission("camera")))
       const mic = grantOf(try promise(() => permission("microphone")))
       return { camera: camera as Grant, microphone: mic as Grant }
     },
     effect ask(kind: "camera" | "microphone"): Grant!! {
       return effect {
         const stream = try tryPromise(() => get(kind === "camera" ? { video: videoFor("Back", "4:3") } : { audio: true }))
-        if (kind === "camera") { release(preflight); preflight = stream }
-        else { release(stream) }
+        release(stream)
         return "Granted" as Grant
-      } catch (cause) => permissionFailure(cause.error) ? "Denied" as Grant : "Unasked" as Grant
+      } catch (cause) => permissionFailure(cause.cause) ? "Denied" as Grant : "Unasked" as Grant
     },
     start: (ticket: number, lens: Lens, aspect: Aspect) => Semaphore.withPermit(turn, effect {
-      if (owner > ticket) return undefined
+      if (latest > ticket) return undefined
+      latest = ticket
       release(opened)
       opened = undefined
-      const prepared = preflight
-      preflight = undefined
-      if (lens !== "Back" || aspect !== "4:3") release(prepared)
-      const stream = lens === "Back" && aspect === "4:3" && prepared !== undefined ? prepared : (tryPromise(() => get({ video: videoFor(lens, aspect) })) catch () => undefined)
+      const stream = tryPromise(() => get({ video: videoFor(lens, aspect) })) catch () => undefined
       if (stream === undefined || view === null) { release(stream); bound(); return undefined }
       opened = stream
       owner = ticket
       bound()
       const played = try tried(() => view?.play() ?? Promise.reject(new Error("Camera view is closed")))
       if (!played) { release(stream); opened = undefined; owner = 0; bound(); return undefined }
-      const track = stream.getVideoTracks()[0]
+      const track = Effect.try(() => stream.getVideoTracks()[0]) catch () => undefined
       if (track !== undefined) {
         track.onended = () => { PubSub.publishUnsafe(signals, { ticket, kind: "preview-lost" }) }
       }
@@ -345,7 +347,7 @@ export const browserCamera = Layer.effect(CameraPort, effect {
         recording.onerror = () => { Deferred.doneUnsafe(answer, succeed(undefined)) }
         recording.onstop = () => {
           release(audio)
-          Deferred.doneUnsafe(answer, succeed(chunks.length > 0 ? new Blob(chunks, { type: recording.mimeType }) : undefined))
+          Deferred.doneUnsafe(answer, succeed(recordingBlob(chunks, recording.mimeType)))
         }
         try Effect.try(() => recording.start(1000))
         return recording

@@ -30,6 +30,11 @@ export async function executeMedia(alpha: Alpha, operation: DeviceOperation, cal
     const [{ default: files }, { fileAction }] = await Promise.all([import("../files/index.tsx"), import("../files/agent.vibe")]);
     return files.runtime(alpha).runPromise(fileAction(operation, call));
   }
+  if (operation.type.startsWith("notes_")) {
+    const { executeNotes, notesOperation } = await import("../notes/device-actions.vibe");
+    const notes = notesOperation(operation);
+    return notes === undefined ? refused : alpha.runtime.runPromise(executeNotes(notes));
+  }
   const [{ default: photos }, { photoAction }] = await Promise.all([import("../photos/index.tsx"), import("../photos/agent.vibe")]);
   const result = await photos.runtime(alpha).runPromise(photoAction(operation));
   return result === undefined ? refused : { kind: "applied", result };

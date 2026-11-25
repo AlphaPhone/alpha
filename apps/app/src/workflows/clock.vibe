@@ -1,0 +1,142 @@
+// spec/app/workflows/clock.md, "Story: Describe an alarm for Clock"; spec/app/workflows/clock.md, "Story: Review, then hand over to Clock"; spec/app/workflows/clock.md, "Story: Know what happened"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import type { ClockRequest, ClockStatus } from "@elizaos/os/bridges/definitions/system"
+import * as Model from "../../gen/app__workflows__clock.effect.vibe"
+import type { Effect as Out, Event, Handoff, Receipt } from "../../gen/app__workflows__clock.effect.vibe"
+import * as Shell from "../../gen/app__shell.effect.vibe"
+import { Device, registered } from "../platform/device.vibe"
+import { type Job, answer, applying, hearing, reacting, together } from "../runtime/reactor.vibe"
+
+module native {
+  import type { SystemClient } from "@elizaos/os/bridges/system"
+
+  /** Clock goes through the same ElizaSystem plugin as Android Settings. */
+  export function systemOf(): Promise<SystemClient> {
+    return import("@elizaos/os/bridges/system").then((module) => module.System)
+  }
+
+  /** @throws {never} */
+  export function timeZone(): string {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+  }
+}
+import { systemOf, timeZone } from native
+
+export const clockAvailable = () => registered("ElizaSystem")
+
+export service AlarmLabel {
+  read(): string!!
+  set(text: string): void!!
+  zone(): string!!
+  reviewed(zone: string): void!!
+}
+
+const label = Layer.sync(AlarmLabel, () => {
+  let value = ""
+  let selectedZone = ""
+  return {
+    read: () => succeed(value),
+    set: (text: string) => sync(() => { value = text }),
+    zone: () => succeed(selectedZone),
+    reviewed: (zone: string) => sync(() => { selectedZone = zone }),
+  }
+})
+
+const outcomes: Readonly<Record<ClockStatus, Receipt>> = { opened: "ClockOpened", failed: "ClockFailed", unavailable: "ClockUnavailable", denied: "ClockDenied", unknown: "Unclear" }
+
+const Kind = Schema.Literals(["SetAlarm", "ShowAlarms", "Snooze", "Dismiss"])
+const Stored = Schema.fromJsonString(Schema.Struct({
+  id: Schema.Int, kind: Kind, receipt: Schema.Literals(["Unclear", "ClockOpened", "ClockFailed", "ClockUnavailable", "ClockDenied"]),
+}))
+const key = "alpha/workflows/clock"
+
+function request(kind: Handoff, hour: number, minute: number, label: string, snooze: number, days: readonly number[]): ClockRequest {
+  switch (kind) {
+    case "SetAlarm": return { action: "set", hour, minute, label, ...(days.length === 0 ? {} : { days: [...days] }) }
+    case "ShowAlarms": return { action: "show" }
+    case "Dismiss": return { action: "dismiss" }
+    case "Snooze": return { action: "snooze", minutes: snooze }
+  }
+}
+
+effect function history(ticket: number): Event!!KeyValueStore.KeyValueStore {
+  const failed: Event = { type: "historyRead", ticket, ok: false, repeats: false, lastKind: "SetAlarm", lastReceipt: "NoReceipt" }
+  const store = try KeyValueStore.KeyValueStore
+  return effect {
+    const raw = try store.get(key)
+    const found = raw === undefined ? undefined : try Schema.decodeUnknownEffect(Stored)(raw)
+    return { ...failed, ok: true, repeats: true, lastKind: found?.kind ?? "SetAlarm", lastReceipt: found?.receipt ?? "NoReceipt" }
+  } catch () => failed
+}
+
+effect function record(id: number, kind: Handoff): Event!!KeyValueStore.KeyValueStore {
+  const store = try KeyValueStore.KeyValueStore
+  const kept = effect {
+    try store.set(key, JSON.stringify({ id, kind, receipt: "Unclear" }))
+    return true
+  } catch () => false
+  return { type: "handoffKept", id, ok: kept }
+}
+
+type Needs = AlarmLabel | Device | KeyValueStore.KeyValueStore
+
+effect function open(id: number, kind: Handoff, hour: number, minute: number, length: number, snooze: number, days: readonly number[]): Event!!Needs {
+  const label = try AlarmLabel
+  const text = try label.read()
+  const inZone = try label.zone()
+  const store = try KeyValueStore.KeyValueStore
+  const visible = try (try Device).showing()
+  const requestToSend = request(kind, hour, minute, text, snooze, days)
+  const receipt = effect {
+    if (!visible || (kind === "SetAlarm" && (text.length !== length || inZone === ""))) return "ClockFailed" satisfies Receipt
+    const system = try tryPromise(systemOf)
+    const reviewed = { ...requestToSend, reviewed: true, ...(kind === "SetAlarm" ? { timeZone: inZone } : {}) }
+    const answered = try tryPromise(() => system.openClock(reviewed))
+    return outcomes[answered.status]
+  } catch () => "Unclear" as const
+  try ignore(store.set(key, JSON.stringify({ id, kind, receipt })))
+  return { type: "clockAnswered", id, answer: receipt }
+}
+
+function carry(fx: Out): Job<Event, Needs, []> {
+  return match (fx) {
+    when { tag: "ReadHistory", let ticket }: answer("Clock history", history(ticket),
+      { type: "historyRead", ticket, ok: false, repeats: false, lastKind: "SetAlarm", lastReceipt: "NoReceipt" });
+    when { tag: "KeepHandoff", let id, let kind }: answer("Clock handoff receipt", record(id, kind), { type: "handoffKept", id, ok: false });
+    when { tag: "OpenClock", let id, let kind, let hour, let minute, let label, let snooze, let days }: answer("open Android Clock",
+      open(id, kind, hour, minute, label, snooze, days), { type: "clockAnswered", id, answer: "Unclear" });
+  }
+}
+
+export effect function setAlarmLabel(text: string): void!!(Model.Machine | AlarmLabel) {
+  const machine = try Model.Machine
+  if (!Model.canSetLabel(try machine.get(), text.length)) return
+  try (try AlarmLabel).set(text)
+  try ignore(machine.send({ type: "setLabel", chars: text.length }))
+}
+
+export effect function reviewAlarm(): void!!(Model.Machine | AlarmLabel) {
+  const machine = try Model.Machine
+  if (!Model.canPrepare(try machine.get())) return
+  try (try AlarmLabel).reviewed(timeZone())
+  try ignore(machine.send({ type: "prepare" }))
+}
+
+export effect function backClock(): boolean!!Model.Machine {
+  const machine = try Model.Machine
+  const state = try machine.get()
+  if (!state.open) return false
+  if (Model.canCancelReview(state)) try ignore(machine.send({ type: "cancelReview" }))
+  else try ignore(machine.send({ type: "closeClock" }))
+  return true
+}
+
+const hidden = hearing(Stream.unwrap(effect { return Stream.filter((try Device).visible, (shown) => !shown) }),
+  Model.Machine, () => ({ type: "suspend" } as const))
+const gone = applying(Shell.Machine, (state) => Shell.showing(state, "Workflows"), effect (shown: boolean) => {
+  if (shown) return
+  try (try AlarmLabel).set("")
+  try ignore((try Model.Machine).send({ type: "leave" }))
+})
+
+export const clock = together(reacting(Model, { carry }), label, hidden, gone)

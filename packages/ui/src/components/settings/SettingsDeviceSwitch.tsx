@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { CalendarCog, Hash, ImageDown, MailCheck, MapPin, PanelTop, Send } from "lucide-react";
+import { CalendarCog, Hash, MailCheck, MapPin, PanelTop, Send } from "lucide-react";
 import { SettingsRecoverRow } from "./SettingsRecoverRow.tsx";
 import { SettingsSwitchRow } from "./SettingsSwitchRow.tsx";
 import type { DeviceRead } from "./vocabulary.ts";
@@ -32,7 +32,7 @@ const tags = (words: string[]) => (
 
 const settings: Record<SettingsDeviceSwitchProps["setting"], { title: string; detail: ReactNode; icon?: ReactNode }> = {
   "ask-first": { title: "Ask before Alpha acts", detail: tags(["Web", "Camera", "Photos"]) },
-  images: { title: "Load images", detail: "From the web, in Inbox", icon: <ImageDown /> },
+  images: { title: "Load images", detail: undefined },
   "agent-location": { title: "Location", detail: "With each message to Alpha", icon: <MapPin /> },
   "browser-page": { title: "Browser page", detail: "The page open, with each message", icon: <PanelTop /> },
   "gmail-changes": { title: "Gmail changes", detail: "Drafts, labels and sending", icon: <MailCheck /> },

@@ -247,6 +247,70 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Search, (s) => !s.open);
   });
 
+  // spec/app/assistant/chats.md, "Story: Find my conversations"
+  it("Find the conversation I was in after a restart, or the agent's newest, or a new chat once it has none (spec/app/assistant/chats.md, \"Story: Find my conversations\")", async () => {
+    const world = { ...scene(), phone };
+    const first = await open(world, mounts);
+    let runtime = assistant.runtime(first.alpha);
+    await until(first.alpha, runtime, Composer, (s) => s.slot === "Open");
+    await until(first.alpha, runtime, Conversation, (s) => s.ready);
+    write("Hello before restart");
+    await press("Send");
+    await until(first.alpha, runtime, Chats, (s) => s.chosen === 1 && s.page.status === "Loaded");
+    await until(first.alpha, runtime, Conversation, (s) => s.turn.reply === "Complete");
+    await first.close();
+
+    // spec/app/assistant/chats.md, "The conversation showing, and the one a fork came from, are remembered through a restart and read again": a read that fails offers Try again.
+    world.ask.pagesDown = true;
+    const second = await open(world, mounts);
+    runtime = assistant.runtime(second.alpha);
+    await until(second.alpha, runtime, Chats, (s) => s.chosen === 1 && s.page.status === "Failed");
+    expect(document.body.textContent).toContain("Messages did not load");
+    world.ask.pagesDown = false;
+    await press("Try again");
+    await until(second.alpha, runtime, Chats, (s) => s.chosen === 1 && s.page.status === "Loaded");
+    expect(lines()).toEqual(["Hello before restart", "You said: Hello before restart"]);
+    await second.close();
+
+    // spec/app/assistant/chats.md, "A read of the latest messages answered 404 asks the agent's list whether the conversation is still there": a conversation the agent still lists is a read that failed, read once and never again by itself.
+    world.ask.pagesMissing = true;
+    world.ask.pageReads = 0;
+    world.ask.listReads = 0;
+    const listedYetMissing = await open(world, mounts);
+    runtime = assistant.runtime(listedYetMissing.alpha);
+    await until(listedYetMissing.alpha, runtime, Chats, (s) => s.chosen === 1 && s.page.status === "Failed");
+    await until(listedYetMissing.alpha, runtime, Conversation, (s) => s.ready);
+    expect([document.body.textContent?.includes("Messages did not load"), world.ask.pageReads, world.ask.listReads]).toEqual([true, 1, 1]);
+    world.ask.pagesMissing = false;
+    await press("Try again");
+    await until(listedYetMissing.alpha, runtime, Chats, (s) => s.chosen === 1 && s.page.status === "Loaded");
+    expect([lines(), world.ask.pageReads]).toEqual([["Hello before restart", "You said: Hello before restart"], 2]);
+    await listedYetMissing.close();
+
+    // spec/app/assistant/chats.md, "A conversation the list no longer has is forgotten, and the first it lists, the most recently used, shows in its place, or a new chat when there is none"
+    world.ask.kept.clear();
+    world.ask.kept.set("c8", { roomId: "r8", title: "Dinner", messages: [{ id: "m8", role: "user", text: "Dinner at eight?" }] });
+    world.ask.kept.set("c7", { roomId: "r7", title: "Lunch", messages: [{ id: "m7", role: "user", text: "Lunch on Friday?" }] });
+    const third = await open(world, mounts);
+    runtime = assistant.runtime(third.alpha);
+    await until(third.alpha, runtime, Chats, (s) => s.chosen > 1 && s.ids.length === 2 && s.page.status === "Loaded");
+    expect([document.body.textContent?.includes("Messages did not load"), button("Try again"), lines()]).toEqual([false, undefined, ["Dinner at eight?"]]);
+    await third.close();
+
+    world.ask.kept.clear();
+    const fourth = await open(world, mounts);
+    runtime = assistant.runtime(fourth.alpha);
+    await until(fourth.alpha, runtime, Chats, (s) => s.chosen === 0 && s.ids.length === 0 && s.page.status === "Idle");
+    await until(fourth.alpha, runtime, Composer, (s) => s.binding.conversation === 0 && s.slot === "Open");
+    await until(fourth.alpha, runtime, Conversation, (s) => s.ready);
+    expect([document.body.textContent?.includes("Messages did not load"), button("Try again"), lines()]).toEqual([false, undefined, []]);
+    write("Hello after restart");
+    await press("Send");
+    await until(fourth.alpha, runtime, Chats, (s) => s.chosen > 0 && s.page.status === "Loaded");
+    await until(fourth.alpha, runtime, Conversation, (s) => s.turn.reply === "Complete");
+    expect([lines(), world.ask.said.at(-1), world.ask.opened]).toEqual([["Hello after restart", "You said: Hello after restart"], "Hello after restart", 2]);
+  });
+
   // spec/app/assistant/index.md, "Story: Stop a reply"
   it("Stop a reply, and learn how it ended (spec/app/assistant/index.md, \"Story: Stop a reply\")", async () => {
     const world = { ...scene(), phone };
