@@ -49,7 +49,6 @@ const menu = (item: string, label = "More actions") => drawn(() => {
 }));
 const told = () => document.body.textContent ?? "";
 const title = () => document.querySelector("main[aria-label]:not([aria-label=Inbox]), main[aria-label=Inbox]")?.getAttribute("aria-label");
-const step = (name: string) => process.stderr.write(`STEP ${name}\n`);
 async function openInboxFromHome(alpha: Alpha) {
   await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0);
   await homeIsReady(alpha);
@@ -240,7 +239,6 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     // spec/app/inbox/index.md, "Opening Inbox, and every change to Google access, checks the accounts again, even while a check is out"
     await openInboxFromHome(alpha);
     await until(alpha, runtime, List, (s) => s.list.status === "Loaded" && s.pages === 1);
-    step("1");
     expect([rows().slice(0, 2), rows().length]).toEqual([["Revised term sheet", "Notes for the 3:00 review"], 25]);
     expect(opens().find((one) => subjectOf(one) === "Revised term sheet")?.textContent).toContain("Has attachments");
 
@@ -256,14 +254,12 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     // spec/app/inbox/index.md, "More messages are read with the page cursor, which is given up as its page is asked"
     await press("Load more");
     await until(alpha, runtime, List, (s) => s.pages === 2);
-    step("2");
     expect([rows().length, Boolean(button("Load more"))]).toEqual([28, false]);
 
     // spec/app/inbox/index.md, "Choosing a folder or a search reads its first page"
     await press("Search email");
     await search("tacos");
     await until(alpha, runtime, List, (s) => s.selected.query === "tacos" && s.list.status === "Loaded");
-    step("3");
     expect(rows()).toEqual(["Dinner Friday?"]);
 
     // spec/app/inbox/index.md, "Back from a search shows its folder without the search, before Back leaves Inbox"
@@ -272,19 +268,15 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect([rows().length, Boolean(button("Search email")), document.querySelector("input[aria-label='Search mail']")]).toEqual([25, true, null]);
     await menu("Spam", "More folders");
     await until(alpha, runtime, List, (s) => s.selected.folder === "Spam" && s.list.status === "Loaded");
-    step("4");
     expect(rows()).toEqual(["Win a prize"]);
     await press("Inbox");
     await until(alpha, runtime, List, (s) => s.selected.folder === "Incoming" && s.list.status === "Loaded");
-    step("5");
 
     // spec/app/inbox/message.md, "Opening a row reads the exact message chosen while its account may be read"; spec/app/inbox/marking.md, "Opening an unread message marks it read once in a session, silently, and never again, even when it is not known to have worked"
     await row("Revised term sheet");
     await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded");
-    step("6");
     await later(alpha, 1000);
     await until(alpha, runtime, Marks, (s) => s.attempt.outcome === "Confirmed");
-    step("7");
     expect([title(), world.inbox.changes]).toEqual(["Revised term sheet", ["mark-read g1"]]);
 
     // spec/app/inbox/message.md, "Previous and next move one place through the thread"
@@ -322,10 +314,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await press("https://northpoint.test/room");
     await until(alpha, runtime, Shown, (s) => s.link === 1);
     expect([world.browser.tabs.size, visited.mock.calls.length]).toEqual([0, 0]);
-    step("8");
     await confirm("Open link");
     await until(alpha, runtime, Shown, (s) => s.link === 0);
-    step("9");
     if (phone) {
       await until(alpha, alpha.runtime, Shell, (state) => showing(state, "Browser"));
       await vi.waitFor(() => {
@@ -361,11 +351,9 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     // spec/app/inbox/marking.md, "The owner marks a message read or unread; while another mark is in flight the owner is told it is still in progress, and a message whose last mark was unconfirmed is marked again only after the list was read afresh"
     await menu("Mark unread");
     await until(alpha, runtime, Marks, (s) => s.told === "Marked");
-    step("10");
     expect(world.inbox.changes).toEqual(["mark-read g1", "mark-unread g1"]);
     await press("Back to the list");
     await until(alpha, runtime, Shown, (s) => s.message === 0);
-    step("11");
     await press("Sent");
     await until(alpha, runtime, List, (s) => s.selected.folder === "Sent" && s.list.status === "Loaded");
     const threadReply = Promise.withResolvers<void>();
@@ -390,12 +378,10 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await menu("Archive", "Mail options");
     await confirm("Yes");
     await until(alpha, runtime, Changes, (s) => s.undo.holding === "Held");
-    step("12");
     expect([rows().includes("Standup notes"), (await alpha.runtime.runPromise(List.use((list) => list.get()))).chosen]).toEqual([false, []]);
     await later(alpha, 4_000);
     await press("Undo");
     await until(alpha, runtime, Changes, (s) => s.undo.holding === "Undone");
-    step("13");
     expect([rows().includes("Standup notes"), world.inbox.changes]).toEqual([true, ["mark-read g1", "mark-unread g1"]]);
 
     // spec/app/inbox/sending.md, "A recorded operation sends its one request, for its own account under that account's grant now, exactly as reviewed: a draft while it is at the revision shown and its hand-over is written to the phone, archive and Trash once the undo window has passed"
@@ -404,9 +390,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await confirm("Yes");
     await later(alpha, 10_000);
     await until(alpha, runtime, Changes, (s) => s.attempt.outcome === "Confirmed");
-    step("14");
     await until(alpha, runtime, List, (s) => s.list.status === "Loaded");
-    step("15");
     expect([rows().includes("Standup notes"), world.inbox.changes.at(-1)]).toEqual([false, "archive g4"]);
 
     // spec/app/inbox/sending.md, "A restore is reviewed for messages chosen in Archived or Trash, or right after the change went out, bound to the message's history revision; Gmail refuses it as out of date when the message changed since"
@@ -425,7 +409,6 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     world.inbox.offline = true;
     await press("Refresh");
     await until(alpha, runtime, List, (s) => s.list.status === "Failed");
-    step("16");
     expect([rows().length, told()]).toEqual([25, expect.stringContaining("You are offline")]);
     await first.close();
 
@@ -433,7 +416,6 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const second = await open(world, inboxMounts);
     const again = inbox.runtime(second.alpha);
     await until(second.alpha, again, List, (s) => s.saved && s.accounts.status === "Failed");
-    step("17");
     expect([rows().length, told()]).toEqual([25, expect.stringContaining("Saved list")]);
 
     // spec/app/inbox/index.md, "Only the newest read's answer is shown, and only while reading is allowed": a read Google refuses as withdrawn empties the screen and asks to reconnect.
@@ -441,7 +423,6 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     world.inbox.revoked = true;
     await press("Refresh");
     await until(second.alpha, again, List, (s) => s.failure === "Revoked");
-    step("18");
     expect([rows(), told()]).toEqual([[], expect.stringContaining("Gmail access was withdrawn")]);
   });
 });
