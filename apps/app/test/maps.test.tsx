@@ -332,6 +332,7 @@ describe("Maps in a browser", () => {
     await until(alpha, runtime, Screen, (s) => s.link.provider !== 0);
 
     // spec/app/maps/connection.md, "A wait Cloud names holds every Maps request back until it ends: a rate limit for at most a day, a spent allowance for at most 400 days, and any other wait one minute"; spec/app/maps/index.md, "Cloud's wait holds the screen's requests until it ends, and its end lets them go again"
+    await later(alpha, Math.max(0, Date.now() - world.now));
     world.maps.limited = 120;
     await focus("Search Maps");
     await fill("Search Maps", "harbour");

@@ -1,4 +1,5 @@
 // spec/app/camera/index.md, "Story: Open the camera"; spec/app/camera/index.md, "Story: Leave and come back"; spec/app/camera/index.md, "Story: Frame the shot"; spec/app/camera/index.md, "Story: Take photos and videos"; spec/app/camera/index.md, "Story: Let Alpha take a photo"
+import type { PhotosClient } from "@elizaos/os/bridges/definitions/media"
 import * as Camera from "../../gen/app__camera.effect.vibe"
 import * as Film from "../../gen/app__camera__recording.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
@@ -7,7 +8,7 @@ import { allows } from "../../gen/kit__permission.effect.vibe"
 import { ScanEntry } from "../files/scanEntry.vibe"
 import { Device } from "../platform/device.vibe"
 import { CameraPort, playable, type CameraMedia, type LensFacts, type Point } from "../platform/camera.vibe"
-import { PhotosPort, saveBrowserCapture } from "../platform/photos.vibe"
+import { PhotosPort, latestBrowserCapture, saveBrowserCapture } from "../platform/photos.vibe"
 import { attachToAlpha } from "../assistant/attachments.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { answer, applying, contained, due, reacting, run, started, together, untimed, type Due, type Job } from "../runtime/reactor.vibe"
@@ -29,9 +30,9 @@ export service CameraAssets {
   readonly mounted: Stream.Stream<boolean>
   newest(): number!!
   store(media: CameraMedia, secure: boolean): number!!
-  read(id: number): CameraMedia | undefined!!
+  read(id: number): (CameraMedia | undefined)!!
   setLens(ticket: number, lens: LensFacts): void!!
-  lens(ticket: number): LensFacts | undefined!!
+  lens(ticket: number): (LensFacts | undefined)!!
   setPoint(tap: number, point: Point): void!!
   point(tap: number): Point!!
 }
@@ -119,7 +120,7 @@ effect function permission(kind: "camera" | "microphone"): Camera.Event!!CameraP
   return kind === "camera" ? { type: "accessIs", grant, now: untimed } : { type: "microphoneIs", grant }
 }
 
-effect function saved(media: CameraMedia, elapsed: number): CameraMedia | undefined!! {
+effect function saved(media: CameraMedia, elapsed: number): (CameraMedia | undefined)!! {
   if (media.blob === undefined) return media
   const video = media.mime.startsWith("video/")
   const suffix = video ? (media.mime.startsWith("video/mp4") ? "mp4" : "webm") : "jpg"
@@ -141,8 +142,8 @@ effect function take(ticket: number): Camera.Event!!(CameraPort | CameraAssets |
 
 effect function observeSize(bytes: number): void!!Camera.Machine {
   const camera = try Camera.Machine
-  const size = Math.min(Film.maxBytes, Math.floor(bytes))
-  if (Camera.canRecordingSize(try camera.get(), size, "Phone")) try tell({ type: "recordingSize", size, now: untimed })
+  const total = Math.min(Film.maxBytes, Math.floor(bytes))
+  if (Camera.canRecordingSize(try camera.get(), total, "Phone")) try tell({ type: "recordingSize", total, now: untimed })
 }
 
 effect function finish(): Camera.Event!!(CameraPort | CameraAssets | Camera.Machine) {
@@ -269,30 +270,46 @@ const approval = started(effect {
   })
 }, "Camera capture review")
 
+effect function latestFromPhone(phone: PhotosClient): (CameraMedia | null | undefined)!! {
+  const page = tryPromise(() => phone.list({ album: "camera", limit: 1, thumbnails: true })) catch () => undefined
+  if (page === undefined) return undefined
+  const row = page.items[0]
+  return row === undefined ? null : {
+    libraryId: row.id, path: row.path ?? "", source: row.image || (row.path ? playable(row.path) : ""),
+    mime: row.kind === "video" ? "video/mp4" : "image/jpeg", width: row.width, height: row.height,
+    duration: row.duration, thumbnail: row.image,
+  }
+}
+
+effect function latestFromBrowser(photos: PhotosPort.Shape, known?: string): (CameraMedia | null | undefined)!! {
+  const row = tryPromise(latestBrowserCapture) catch () => null
+  if (row === null || row?.id === known) return undefined
+  if (row === undefined) return null
+  const blob = row.thumbnail === undefined && row.mimeType.startsWith("image/")
+    ? (photos.original(row.id) catch () => undefined)
+    : undefined
+  return {
+    libraryId: row.id, path: row.id, source: row.thumbnail ?? (blob === undefined ? "" : objectUrl(blob)),
+    mime: row.mimeType, width: row.width, height: row.height, duration: row.duration, thumbnail: row.thumbnail, blob,
+  }
+}
+
 const latest = applying(Camera.Machine, (s) => s.showing && !s.secure ? s.visit : 0, effect (visit: number) => {
   if (visit === 0) return
-  const { phone } = try PhotosPort
-  if (Option.isNone(phone)) return
+  const photos = try PhotosPort
   const held = try CameraAssets
-  const current = try (try Camera.Machine).get()
-  const previous = current.last
-  const page = tryPromise(() => phone.value.list({ album: "camera", limit: 1, thumbnails: true })) catch () => undefined
-  if (page === undefined) return
-  const row = page.items[0]
-  const observed = try (try Camera.Machine).get()
-  if (!Camera.canLastSeen(observed, visit, previous, "Phone")) return
+  const previous = (try (try Camera.Machine).get()).last
   const known = try held.read(previous)
-  if (row !== undefined && row.id === known?.libraryId) return
-  const newest = row === undefined ? 0 : try held.store({
-    libraryId: row.id,
-    path: row.path ?? "",
-    source: row.image || (row.path ? playable(row.path) : ""),
-    mime: row.kind === "video" ? "video/mp4" : "image/jpeg",
-    width: row.width,
-    height: row.height,
-    duration: row.duration,
-    thumbnail: row.image,
-  }, false)
+  const latest = Option.isSome(photos.phone)
+    ? try latestFromPhone(photos.phone.value)
+    : ((try CameraPort).nativePreview ? undefined : try latestFromBrowser(photos, known?.libraryId))
+  if (latest === undefined) return
+  const observed = try (try Camera.Machine).get()
+  if (!Camera.canLastSeen(observed, visit, previous, "Phone") || (latest !== null && latest.libraryId === known?.libraryId)) {
+    if (latest !== null) try (try CameraPort).release(latest)
+    return
+  }
+  const newest = latest === null ? 0 : try held.store(latest, false)
   try tell({ type: "lastSeen", visit, previous, newest })
 })
 
@@ -303,6 +320,9 @@ effect function openLast(photo: number): void!!(CameraAssets | PhotosPort | Shel
 }
 
 module bytes {
+  /** @throws {never} */
+  export const objectUrl = (blob: Blob): string => URL.createObjectURL(blob)
+
   /** @throws {never} */
   export async function imageData(source: string): Promise<string | undefined> {
     if (!source.startsWith("data:image/") && !source.startsWith("blob:")) return undefined
@@ -317,7 +337,7 @@ module bytes {
     })
   }
 }
-import { imageData } from bytes
+import { imageData, objectUrl } from bytes
 
 effect function askAbout(photo: number) {
   const camera = try Camera.Machine

@@ -1,11 +1,10 @@
 # Home
 
-Home is the phone's launcher: the tiles the owner keeps on it, the Apps
-drawer that lists what is installed, and the way out to Android for an
-installed app, its info page and the notification shade. The
-[shell](../shell/) says whether Home, the drawer or an app is showing, and
-Home asks it to open one of Alpha's own apps or to close the drawer;
-startup says how Alpha is presented. Alpha's agent does nothing on Home.
+Home is the phone's launcher: the tiles the owner keeps on it, and the way
+out to Android for an installed app and the notification shade. The
+[shell](../shell/) says whether Home or an app is showing, and Home asks it
+to open one of Alpha's own apps; startup says how Alpha is presented.
+Alpha's agent does nothing on Home.
 
 - [The phone's apps](./apps.md): what is installed, read again when it changes
 - [Tiles](./tiles.md): the tiles kept on Home, read when Alpha starts and saved after each change
@@ -32,11 +31,10 @@ import apps as P from "./apps"
 
 type Host = InBrowser | AsApp | AsLauncher | AssistantOnly
 type Actor = Owner | Agent
-type Menu = NoMenu | MenuOf({ app: str })
 type Why = Gone | TurnedOff | ProfileLocked | NotInFront | Unable
 type Home = {
   host: Host, installed: P::Installed,
-  tiles: T::Tiles, editing: bool, adding: bool, query: str, menu: Menu, handoff: N::Handoff,
+  tiles: T::Tiles, editing: bool, adding: bool, handoff: N::Handoff,
 }
 type Effect =
   | ReadSaved({ ticket: int })
@@ -44,7 +42,6 @@ type Effect =
   | ReadApps({ ticket: int })
   | AskAndroid({ ask: N::Ask, ticket: int })
   | Go({ view: S::View })
-  | CloseDrawer
   | TellNotOpened({ ask: N::Ask, why: Why })
   | TellNoAnswer({ ask: N::Ask })
   | TellUnlockFirst
@@ -59,7 +56,7 @@ type Moved = { state: Home, out: List[Effect] }
 ```quint
 pure val initial: Home = {
   host: InBrowser, installed: P::initial,
-  tiles: T::initial, editing: false, adding: false, query: "", menu: NoMenu, handoff: N::initial,
+  tiles: T::initial, editing: false, adding: false, handoff: N::initial,
 }
 
 pure def onPhone(h: Home): bool = h.host == AsApp or h.host == AsLauncher
@@ -78,21 +75,17 @@ pure val tilesValues = Set(
   List(T::Own({ view: S::Notes }), T::Installed({ app: "clock" }), T::Own({ view: S::Inbox })),
   List(T::Installed({ app: "mail" }), T::Installed({ app: "clock" })))
 pure val listedValues = Set(Set(), Set("clock"), Set("clock", "mail"), Set("mail", "maps"))
-pure val queryValues = Set("", "cl", "zz")
 pure val nowValues = Set(0, 2000, 6000, 12000)
 pure val ticketValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 pure val shellValues = Set(
   S::initial,
   { ...S::initial, image: true, contacts: true },
-  { ...S::initial, drawer: true },
-  { ...S::initial, image: true, drawer: true },
   { ...S::initial, trail: List(S::Notes) })
 pure val readHome: Home = {
   ...initial, host: AsLauncher, installed: { ...P::initial, read: { status: R::Loaded, ticket: 1 }, apps: Set("clock", "mail") },
   tiles: { ...T::initial, favourites: T::defaults, saved: T::defaults, load: { status: R::Loaded, ticket: 1 } },
 }
 pure val homeValues = Set(initial).union(Set(readHome)).union(Set({ ...readHome, editing: true, adding: true }))
-  .union(Set({ ...readHome, menu: MenuOf({ app: "clock" }), query: "cl" }))
 ```
 
 ### Startup says once per run how Alpha is presented, and Home then reads its saved tiles
@@ -156,7 +149,7 @@ pure def stepNumbersOnlyRise(before: Home, via: str, after: Home): bool =
 
 pure def stepARestartForgetsAllButItsNumbers(before: Home, via: str, after: Home): bool =
   via == "restart" implies (after.installed.read.status == R::Idle and after.installed.read.ticket == before.installed.read.ticket
-    and after.installed.apps.size() == 0 and not(after.editing) and not(menuIsOpen(after.menu))
+    and after.installed.apps.size() == 0 and not(after.editing)
     and after.handoff.attempt.outcome == A::Planned and after.handoff.attempt.id == before.handoff.attempt.id
     and after.tiles == T::restart(before.tiles))
 ```
@@ -169,15 +162,14 @@ pure def alwaysTheTilesKeepTheirRules(h: Home): bool =
     and T::alwaysHomeHoldsNoMoreThanItsLimit(h.tiles) and T::alwaysHomeShowsWhatIsSaved(h.tiles)
 ```
 
-### Off the phone Home reads no apps, opens nothing of the drawer, edits nothing and asks Android nothing
+### Off the phone Home reads no apps, edits nothing and asks Android nothing
 
-In a plain browser and on the assistant alone there is no Apps drawer and
-no Home editing.
+In a plain browser and on the assistant alone there is no Home editing.
 
 ```quint
 pure def alwaysOffThePhoneNothingIsAsked(h: Home): bool =
   not(onPhone(h)) implies (h.installed.read.status == R::Idle and h.installed.apps.size() == 0
-    and not(h.installed.pending) and not(h.installed.quiet) and not(h.editing) and not(h.adding) and h.query == "" and not(menuIsOpen(h.menu))
+    and not(h.installed.pending) and not(h.installed.quiet) and not(h.editing) and not(h.adding)
     and h.handoff.attempt.outcome == A::Planned and not(T::saving(h.tiles)))
 ```
 
@@ -202,8 +194,8 @@ pure def sometimesTheLauncherRoleIsLostDuringAPull(h: Home): bool =
 
 ## Story: See the apps on this phone
 
-> As the owner, I want the Apps drawer to list what is installed now, and to
-> say so when it cannot, so that I never tap an app that is not there.
+> As the owner, I want Home to know which installed apps kept on it are on
+> this phone now, so that I never tap an app that is not there.
 
 ### The phone's apps keep their own rules
 
@@ -231,7 +223,7 @@ pure def resumed(h: Home): Moved =
   { state: { ...h, installed: installed }, out: asked(installed, h) }
 ```
 
-### A reading's answer closes a menu whose app has gone, and a failed one that takes an installed tile off Home says so
+### A failed reading that takes an installed tile off Home says so
 
 ```quint
 pure def canAppsRead(h: Home, ticket: int): bool = P::canAppsRead(h.installed, ticket)
@@ -240,9 +232,8 @@ pure def onHome(apps: Set[str], tiles: List[T::Tile]): bool = tiles.some(t => T:
 
 pure def appsRead(h: Home, ticket: int, ok: bool, listed: Set[str], visible: bool): Moved =
   val installed = P::appsRead(h.installed, ticket, ok, listed, visible)
-  val kept = if (installed.apps.contains(menuApp(h.menu))) h.menu else NoMenu
   val told = if (not(ok) and not(h.installed.quiet) and onHome(h.installed.apps, h.tiles.favourites)) List(TellAppsUnread) else List()
-  { state: { ...h, installed: installed, menu: kept }, out: told.concat(asked(installed, h)) }
+  { state: { ...h, installed: installed }, out: told.concat(asked(installed, h)) }
 ```
 
 ### Alpha says the apps could not be read exactly when a failed reading takes an installed tile off Home, and not after a refused opening
@@ -281,61 +272,6 @@ pure def stepReadingsAreTicketed(before: Home, via: str, after: Home, out: List[
   })
 ```
 
-### Whether an app matches a search is told from its label and package, ignoring case and accents, and an empty search matches every app
-
-Labels never reach Home's state; the order of the rows, prefix matches
-first, and that no two rows read alike, belong to the drawer's component.
-
-```quint
-const matches: (str, str) => bool
-pure def lawAnEmptySearchMatchesEveryApp(app: str): bool = matches(app, "")
-```
-
-### The drawer lists the apps of the last reading that match the search, every one of them when nothing is searched
-
-```quint
-pure def listing(h: Home): Set[str] = h.installed.apps.filter(a => matches(a, h.query))
-
-pure def lawTheDrawerListsOnlyReadApps(home: Home): bool =
-  listing(home).subseteq(home.installed.apps) and (home.query == "" implies home.installed.apps.subseteq(listing(home)))
-```
-
-### Off the phone there is no drawer; on it the drawer shows a spinner, that the apps could not be read, that none are installed, that none match the search, or the apps
-
-While a newer reading is on its way the last list stays up. Home offers
-the drawer only on the phone, and never while Home is being edited.
-
-```quint
-type Drawer = NotOnPhone | Spinner | CannotRead | NoAppsInstalled | NoMatch | Grid
-
-pure def drawer(h: Home): Drawer =
-  val status = h.installed.read.status
-  if (not(onPhone(h))) NotOnPhone
-  else if (status == R::Failed) CannotRead
-  else if (status == R::Idle or (status == R::Loading and h.installed.apps.size() == 0)) Spinner
-  else if (h.installed.apps.size() == 0) NoAppsInstalled
-  else if (listing(h).size() == 0) NoMatch
-  else Grid
-
-pure def offersDrawer(h: Home): bool = onPhone(h) and not(h.editing)
-```
-
-### In the open drawer that could not read the apps, Try again reads them once more
-
-```quint
-pure def canTryAgain(h: Home, shell: S::Shell): bool = shell.drawer and drawer(h) == CannotRead
-
-pure def tryAgain(h: Home, shell: S::Shell): Moved =
-  val installed = P::askApps(h.installed, false)
-  { state: { ...h, installed: installed }, out: asked(installed, h) }
-```
-
-### The drawer says nothing matches only when something is searched
-
-```quint
-pure def lawNothingMatchesOnlyASearch(home: Home): bool = drawer(home) == NoMatch implies home.query != ""
-```
-
 ## Story: Open an app
 
 > As the owner, I want a tap to open the app once, and to be told why when
@@ -353,10 +289,9 @@ pure def canOpenTile(h: Home, view: S::View, shell: S::Shell, by: Actor): bool =
 pure def openTile(h: Home, view: S::View, shell: S::Shell, by: Actor): Moved = { state: h, out: List(Go({ view: view })) }
 ```
 
-### Only an app in the last reading is opened, never while Home is being edited, and never by the touch that opened its menu
+### Only an app in the last reading is opened, never while Home is being edited
 
-An app that has gone is never sent to Android. The release of the long
-press that opened an app's menu does not also open the app.
+An app that has gone is never sent to Android.
 
 ```quint
 pure def asking(ask: N::Ask, now: int, h: Home): Moved =
@@ -364,12 +299,9 @@ pure def asking(ask: N::Ask, now: int, h: Home): Moved =
   { state: { ...h, handoff: handoff }, out: List(AskAndroid({ ask: ask, ticket: handoff.attempt.id })) }
 
 pure def canOpenApp(h: Home, app: str, by: Actor): bool =
-  by == Owner and N::canSend(h.handoff) and not(h.editing) and h.installed.apps.contains(app) and not(menuIsFor(h.menu, app))
+  by == Owner and N::canSend(h.handoff) and not(h.editing) and h.installed.apps.contains(app)
 
 pure def openApp(h: Home, app: str, now: int, by: Actor): Moved = asking(N::OpenApp({ app: app }), now, h)
-
-pure def stepTheTouchThatOpensAMenuNeverOpensItsApp(before: Home, via: str, after: Home, out: List[Effect]): bool =
-  out.every(e => match e { | AskAndroid(a) => not(N::isOpening(a.ask) and menuIsFor(before.menu, N::appOf(a.ask))) | _ => true })
 ```
 
 ### Nothing is opened while Home is being edited
@@ -475,7 +407,7 @@ pure def sometimesATileWaitsForItsApp(h: Home): bool =
     and h.tiles.favourites.some(t => T::isInstalled(t) and not(T::there(h.installed.apps, S::initial, t)))
 ```
 
-### Add to Home adds one of Alpha's own apps it lists, and an app's menu in the drawer adds that app; adding from the menu closes the drawer
+### Add to Home adds one of Alpha's own apps it lists
 
 ```quint
 pure def holdsView(tiles: List[T::Tile], view: S::View): bool = tiles.some(t => T::shows(t, view))
@@ -484,8 +416,7 @@ pure def hiddenApps(h: Home, shell: S::Shell): List[S::View] =
   T::homeOrder.select(view => S::available(shell, view) and not(holdsView(h.tiles.favourites, view)))
 
 pure def offered(h: Home, tile: T::Tile, shell: S::Shell): bool =
-  (h.adding and hiddenApps(h, shell).some(v => T::shows(tile, v)))
-    or (shell.drawer and menuIsOpen(h.menu) and T::installs(tile, menuApp(h.menu)))
+  h.adding and hiddenApps(h, shell).some(v => T::shows(tile, v))
 
 pure def canAddToHome(h: Home, tile: T::Tile, shell: S::Shell, by: Actor): bool =
   by == Owner and onPhone(h) and T::canAddTile(h.tiles, tile) and offered(h, tile, shell)
@@ -495,15 +426,9 @@ pure def changed(kept: T::Tiles, h: Home): Moved =
 
 pure def addToHome(h: Home, tile: T::Tile, shell: S::Shell, by: Actor): Moved =
   val tiles = T::addTile(h.tiles, tile)
-  val added = { ...h, tiles: tiles, menu: NoMenu }
+  val added = { ...h, tiles: tiles }
   { state: { ...added, adding: h.adding and hiddenApps(added, shell).length() > 0 },
-    out: List(SaveHome({ tiles: tiles.favourites, ticket: tiles.save.id }))
-      .concat(if (menuIsOpen(h.menu)) List(CloseDrawer) else List()) }
-
-pure def isCloseDrawer(e: Effect): bool = match e { | CloseDrawer => true | _ => false }
-
-pure def stepAddingFromTheMenuClosesTheDrawer(before: Home, via: str, after: Home, out: List[Effect]): bool =
-  via == "addToHome" implies (out.some(e => isCloseDrawer(e)) iff menuIsOpen(before.menu))
+    out: List(SaveHome({ tiles: tiles.favourites, ticket: tiles.save.id })) }
 ```
 
 ### Add to Home closes once there is nothing left to add
@@ -592,7 +517,7 @@ The shell says that nothing is over Home.
 pure def canBeginEditing(h: Home, shell: S::Shell): bool =
   onPhone(h) and T::ready(h.tiles) and not(h.editing) and S::layers(shell) == 0
 
-pure def beginEditing(h: Home, shell: S::Shell): Home = { ...h, editing: true, adding: false, menu: NoMenu, query: "" }
+pure def beginEditing(h: Home, shell: S::Shell): Home = { ...h, editing: true, adding: false }
 ```
 
 ### While editing, Add to Home lists Alpha's own apps that this phone admits and Home does not hold, and opens only if there is one
@@ -603,20 +528,15 @@ pure def canShowHidden(h: Home, shell: S::Shell): bool = h.editing and not(h.add
 pure def showHidden(h: Home, shell: S::Shell): Home = { ...h, adding: true }
 ```
 
-### Back closes one layer of Home's own: an app's menu, then Add to Home, then editing; Done ends editing
+### Back closes one layer of Home's own: Add to Home, then editing; Done ends editing
 
 The shell's Back comes after these.
 
 ```quint
-pure def menuIsOpen(m: Menu): bool = match m { | MenuOf(o) => true | _ => false }
-
-pure def menuApp(m: Menu): str = match m { | MenuOf(o) => o.app | _ => "" }
-
-pure def canBackOut(h: Home): bool = menuIsOpen(h.menu) or h.adding or h.editing
+pure def canBackOut(h: Home): bool = h.adding or h.editing
 
 pure def backOut(h: Home): Home =
-  if (menuIsOpen(h.menu)) { ...h, menu: NoMenu }
-  else if (h.adding) { ...h, adding: false }
+  if (h.adding) { ...h, adding: false }
   else { ...h, editing: false }
 
 pure def canDone(h: Home): bool = h.editing
@@ -624,28 +544,17 @@ pure def canDone(h: Home): bool = h.editing
 pure def done(h: Home): Home = { ...h, editing: false, adding: false }
 ```
 
-### When the shell moves, what no longer fits closes: anything over Home ends editing, the drawer opening included, and a closed drawer drops its search and menu
+### When the shell moves, anything over Home ends editing
 
-The shell tells Home each time it moves. The drawer opening on the phone
-reads the apps if they were never read.
+The shell tells Home each time it moves.
 
 ```quint
-pure def canShellMoved(h: Home, shell: S::Shell): bool =
-  (h.editing and S::layers(shell) > 0)
-    or (not(shell.drawer) and (menuIsOpen(h.menu) or h.query != ""))
-    or (shell.drawer and onPhone(h) and h.installed.read.status == R::Idle)
+pure def canShellMoved(h: Home, shell: S::Shell): bool = h.editing and S::layers(shell) > 0
 
-pure def shellMoved(h: Home, shell: S::Shell): Moved =
-  val bare = S::layers(shell) == 0
-  val fitted = { ...h, editing: h.editing and bare, adding: h.adding and bare,
-    menu: if (shell.drawer) h.menu else NoMenu, query: if (shell.drawer) h.query else "" }
-  if (shell.drawer and onPhone(h) and h.installed.read.status == R::Idle) thenReadApps(List(), fitted, false)
-  else { state: fitted, out: List() }
+pure def shellMoved(h: Home, shell: S::Shell): Home = { ...h, editing: false, adding: false }
 
 pure def lawWhatTheShellLeavesBehindCloses(home: Home, shell: S::Shell): bool =
-  val fitted = shellMoved(home, shell)
-  canShellMoved(home, shell) implies ((S::layers(shell) > 0 implies not(fitted.state.editing))
-    and (not(shell.drawer) implies (not(menuIsOpen(fitted.state.menu)) and fitted.state.query == "")))
+  canShellMoved(home, shell) implies not(shellMoved(home, shell).editing)
 ```
 
 ### Nothing on Home starts under a layer of the shell
@@ -656,18 +565,18 @@ pure def lawNothingStartsUnderALayer(home: Home, shell: S::Shell, view: S::View)
     and not(canOpenTile(home, view, shell, Owner)))
 ```
 
-### Home is edited only once its tiles are read, with Add to Home inside editing, and never with a search or an app's menu open
+### Home is edited only once its tiles are read, with Add to Home inside editing
 
 ```quint
 pure def alwaysEditingIsAlone(h: Home): bool =
-  (h.editing implies (T::ready(h.tiles) and not(menuIsOpen(h.menu)) and h.query == "")) and (h.adding implies h.editing)
+  (h.editing implies T::ready(h.tiles)) and (h.adding implies h.editing)
 ```
 
 ### Back never closes more than one layer
 
 ```quint
 pure def ownLayers(h: Home): int =
-  (if (menuIsOpen(h.menu)) 1 else 0) + (if (h.adding) 1 else 0) + (if (h.editing) 1 else 0)
+  (if (h.adding) 1 else 0) + (if (h.editing) 1 else 0)
 
 pure def stepBackClosesOneLayer(before: Home, via: str, after: Home): bool =
   via == "backOut" implies ownLayers(after) == ownLayers(before) - 1
@@ -677,72 +586,6 @@ pure def stepBackClosesOneLayer(before: Home, via: str, after: Home): bool =
 
 ```quint
 pure def sometimesAddToHomeIsOpen(h: Home): bool = h.adding
-```
-
-## Story: Find an app and see its details
-
-> As the owner, I want to search the drawer, add an app to Home from its
-> menu, and open Android's info page for it.
-
-### A new search in the open drawer replaces the last and closes any open menu
-
-```quint
-pure def canSearch(h: Home, query: str, shell: S::Shell): bool =
-  onPhone(h) and shell.drawer and not(h.editing) and query != h.query
-
-pure def search(h: Home, query: str, shell: S::Shell): Home = { ...h, query: query, menu: NoMenu }
-```
-
-### An app's menu opens in the open drawer, for an app in the last reading, and says Add to Home or On Home
-
-```quint
-pure def menuIsFor(m: Menu, app: str): bool = match m { | MenuOf(o) => o.app == app | _ => false }
-
-pure def canOpenMenu(h: Home, app: str, shell: S::Shell): bool =
-  shell.drawer and not(h.editing) and h.installed.apps.contains(app) and not(menuIsFor(h.menu, app))
-
-pure def openMenu(h: Home, app: str, shell: S::Shell): Home = { ...h, menu: MenuOf({ app: app }) }
-
-pure def isOnHome(h: Home, app: str): bool = h.tiles.favourites.some(t => T::installs(t, app))
-```
-
-### App info hands the menu's app to Android and closes the menu; a refusal is told like any other
-
-```quint
-pure def canShowAppInfo(h: Home, app: str, shell: S::Shell, by: Actor): bool =
-  by == Owner and shell.drawer and N::canSend(h.handoff) and menuIsFor(h.menu, app)
-
-pure def showAppInfo(h: Home, app: str, shell: S::Shell, now: int, by: Actor): Moved =
-  asking(N::AppInfo({ app: app }), now, { ...h, menu: NoMenu })
-```
-
-### A search, an app's menu and its App info exist only in the open drawer
-
-```quint
-pure def lawTheDrawersControlsNeedTheDrawer(home: Home, shell: S::Shell, app: str, query: str): bool =
-  not(shell.drawer) implies (not(canSearch(home, query, shell)) and not(canOpenMenu(home, app, shell))
-    and not(canShowAppInfo(home, app, shell, Owner)))
-```
-
-### An open menu belongs to an app in the last reading
-
-```quint
-pure def alwaysTheMenuIsForAListedApp(h: Home): bool =
-  val menu = h.menu
-  match menu { | MenuOf(m) => h.installed.apps.contains(m.app) | _ => true }
-```
-
-### A menu can be open during a search, a menu can say On Home, and an app's info can be asked for
-
-```quint
-pure def sometimesAMenuIsOpenInASearch(h: Home): bool = menuIsOpen(h.menu) and h.query != ""
-
-pure def sometimesAMenuSaysOnHome(h: Home): bool =
-  val menu = h.menu
-  match menu { | MenuOf(m) => isOnHome(h, m.app) | _ => false }
-
-pure def sometimesAppInfoIsAsked(h: Home): bool =
-  N::waiting(h.handoff) and not(N::isShade(h.handoff.ask)) and not(N::isOpening(h.handoff.ask))
 ```
 
 ## Story: Pull down for notifications
@@ -794,20 +637,18 @@ pure def sometimesTheShadeGoesUnanswered(h: Home): bool = N::isShade(h.handoff.a
 > As the owner, I want a failure told where I am looking, and never over
 > another app.
 
-### A notice shows as a toast on bare Home, inline in the open drawer, and in the edit bar while editing; told while an app or Ask Alpha is up, it is not shown
+### A notice shows as a toast on bare Home and in the edit bar while editing; told while an app or Ask Alpha is up, it is not shown
 
 ```quint
-type Place = AsToast | InDrawer | InEditBar | Nowhere
+type Place = AsToast | InEditBar | Nowhere
 
 pure def noticeAt(h: Home, shell: S::Shell): Place =
   if (shell.trail.length() > 0 or shell.assistant != S::Bar) Nowhere
-  else if (shell.drawer) InDrawer
   else if (h.editing) InEditBar
   else AsToast
 
 pure def lawANoticeIsShownOnlyWhereTheOwnerIs(home: Home, shell: S::Shell): bool =
   ((noticeAt(home, shell) == Nowhere) iff (shell.trail.length() > 0 or shell.assistant != S::Bar))
-    and (noticeAt(home, shell) == InDrawer implies shell.drawer)
     and (noticeAt(home, shell) == InEditBar implies home.editing)
     and (noticeAt(home, shell) == AsToast implies S::layers(shell) == 0)
 ```
@@ -817,12 +658,12 @@ pure def lawANoticeIsShownOnlyWhereTheOwnerIs(home: Home, shell: S::Shell): bool
 > As the owner, I want Home to change only at my touch: the agent may not
 > open an installed app, ask Android for anything, or change my tiles.
 
-### The agent is refused every touch on Home: opening an app, App info, the shade, and adding, removing or moving a tile
+### The agent is refused every touch on Home: opening an app, the shade, and adding, removing or moving a tile
 
 ```quint
 pure def lawTheAgentChangesNothingOnHome(home: Home, shell: S::Shell, app: str, tile: T::Tile, onto: T::Tile, view: S::View): bool =
   not(canOpenTile(home, view, shell, Agent)) and not(canOpenApp(home, app, Agent))
-    and not(canShowAppInfo(home, app, shell, Agent)) and not(canPullDown(home, shell, false, Agent))
+    and not(canPullDown(home, shell, false, Agent))
     and not(canAddToHome(home, tile, shell, Agent)) and not(canRemoveFromHome(home, tile, shell, Agent))
     and not(canMoveTile(home, tile, onto, shell, Agent))
 ```

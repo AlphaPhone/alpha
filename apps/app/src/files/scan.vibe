@@ -19,7 +19,7 @@ import { say } from "../notices/toasts.vibe"
 import { answer, applying, contained, reacting, run, started, together, type Job } from "../runtime/reactor.vibe"
 import { Opened } from "./preview.vibe"
 import { ScanEntry } from "./scanEntry.vibe"
-import { changeDraft, copyText, drawPdf, loadDraft, openLink, photoData, release, rotateImage, scanImage, source, writePdf, type ScanImage, type ScanWords, type StoredPage } from "./scanStore.vibe"
+import { changeDraft, copyText, drawPdf, readDraft, openLink, photoData, release, rotateImage, scanImage, source, writePdf, type ScanImage, type ScanWords, type StoredPage } from "./scanStore.vibe"
 
 export interface ScanOutline {
   readonly corners: ScanCorners
@@ -33,8 +33,8 @@ export interface ScanPage extends ScanImage {
 /** The images and prepared document addressed by the Scan model. */
 export service ScanAssets {
   readonly turn: Semaphore.Semaphore
-  read(id: number): ScanPage | undefined!!
-  words(id: number, revision: number): ScanWords | undefined!!
+  read(id: number): (ScanPage | undefined)!!
+  words(id: number, revision: number): (ScanWords | undefined)!!
   holdWords(id: number, revision: number, value: ScanWords): void!!
   searchable(value?: boolean): boolean!!
   outline(image: number, draft?: ScanOutline): ScanOutline!!
@@ -42,7 +42,7 @@ export service ScanAssets {
   keep(ids: ReadonlySet<number>): void!!
   document(pdf?: Blob): void!!
   takeDocument(): (Blob | undefined)!!
-  receipt(ticket: number, id?: string): string | undefined!!
+  receipt(ticket: number, id?: string): (string | undefined)!!
 }
 
 const assets = Layer.effect(ScanAssets, effect {
@@ -150,8 +150,7 @@ function failedLoad(ticket: number): Scan.Event {
 }
 
 effect function load(ticket: number): Scan.Event!!(ScanAssets | Scan.Machine) {
-  const saved = tryPromise(loadDraft) catch () => null
-  if (saved === null) return failedLoad(ticket)
+  const saved = try readDraft()
   if (saved === "damaged") return { type: "loaded", ticket, ok: true, readable: false, base: 0, pages: [] }
   const model = try Scan.Machine
   const state = try model.get()

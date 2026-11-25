@@ -18,6 +18,7 @@ import { type PhotosScene, photosScene } from "./photos.ts";
 import { type TelephonyScene, telephonyRoutes, telephonyScene } from "./telephony.ts";
 import { type UpdateScene, updateScene } from "./update.ts";
 import { type VoiceScene, voiceScene } from "./voice.ts";
+import { type BrowserScene, browserScene } from "./browser.ts";
 
 export interface Scene {
   phone: boolean;
@@ -43,6 +44,7 @@ export interface Scene {
   readonly platform: PlatformScene;
   readonly update: UpdateScene;
   readonly voice: VoiceScene;
+  readonly browser: BrowserScene;
 }
 
 export function scene(): Scene {
@@ -65,6 +67,7 @@ export function scene(): Scene {
     platform: platformScene(),
     update: updateScene(),
     voice: voiceScene(),
+    browser: browserScene(),
   };
 }
 

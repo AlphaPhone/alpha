@@ -8,7 +8,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { generateAndroidHost, stageRuntimePayload } from "@elizaos/os/build";
-import { prepared } from "@repo/eliza-harness/checkout";
+import { prepared } from "@repo/eliza-harness";
 import { Effect, Layer } from "effect";
 import { FetchHttpClient } from "effect/http";
 import { androidPaths, identity, production, signInCallbackPath } from "../capacitor.config.ts";
