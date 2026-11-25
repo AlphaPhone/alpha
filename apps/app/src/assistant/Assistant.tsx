@@ -5,7 +5,7 @@ import {
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
 import { type ReactNode, type RefObject, useCallback, useMemo, useRef, useSyncExternalStore } from "react";
-import type { Conversation as Talking, Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe";
+import { type Conversation as Talking, Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe";
 import { askable, inFlight, pending } from "../../gen/app__assistant.ts";
 import { useMachine as useConversation } from "../../gen/app__assistant.react.ts";
 import type { Machine as AttachmentMachine } from "../../gen/app__assistant__attachments.effect.vibe";
@@ -13,7 +13,7 @@ import { useMachine as useAttachments } from "../../gen/app__assistant__attachme
 import type { Machine as ChatsMachine } from "../../gen/app__assistant__chats.effect.vibe";
 import { making } from "../../gen/app__assistant__chats.ts";
 import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
-import type { Composer as Writing, Machine as ComposerMachine } from "../../gen/app__assistant__composer.effect.vibe";
+import { type Composer as Writing, Machine as ComposerMachine } from "../../gen/app__assistant__composer.effect.vibe";
 import { attachments as attachmentCount, content, maxFiles, textLimit } from "../../gen/app__assistant__composer.ts";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
 import type { Machine as DockMachine } from "../../gen/app__assistant__dock.effect.vibe";
@@ -23,7 +23,7 @@ import type { Machine as ReplyMachine } from "../../gen/app__assistant__reply.ef
 import { useMachine as useReply } from "../../gen/app__assistant__reply.react.ts";
 import type { Machine as SearchMachine } from "../../gen/app__assistant__search.effect.vibe";
 import { useMachine as useSearch } from "../../gen/app__assistant__search.react.ts";
-import type { Machine as CommsMachine } from "../../gen/app__phone__comms.effect.vibe";
+import { Machine as CommsMachine } from "../../gen/app__phone__comms.effect.vibe";
 import { useMachine as useComms } from "../../gen/app__phone__comms.react.ts";
 import { Machine as ShellMachine, showing } from "../../gen/app__shell.effect.vibe";
 import type { Machine as LayersMachine } from "../../gen/app__shell__layers.effect.vibe";
@@ -45,13 +45,15 @@ import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx"
 import { CommsBriefing } from "../phone/comms.vibe";
 import { displayNumber } from "../phone/words.ts";
 import { wordsOf } from "./words.ts";
+import { type TalkStopReceipt, type VoiceKeyboard, useTalkKeyboard } from "../voice/useTalkKeyboard.ts";
 
 export interface AssistantProps {
   runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview | Documents | Agent, unknown>;
   messageActions?: MessageActions;
   speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & {
     voiceReview?: ReactNode;
-    voice?: (presentation: { compactDock: boolean; atBar: boolean }) => ReactNode;
+    keyboard?: TalkStopReceipt;
+    voice?: (presentation: { compactDock: boolean; atBar: boolean; onKeyboard: VoiceKeyboard }) => ReactNode;
   };
   canReadAloud?: boolean;
 }
@@ -231,9 +233,20 @@ function DockHandle({ dock, detent, compact, focusOnPointerOpen, field }: DockHa
   );
 }
 
+/** The route and draft that own the composer during a Talk-to-keyboard request. */
+function keyboardScope(runtime: AssistantProps["runtime"]): string | undefined {
+  const held = runtime.runSyncExit(Effect.gen(function* () {
+    const route = yield* ShellMachine.use((machine) => machine.get());
+    const draft = yield* ComposerMachine.use((machine) => machine.get());
+    const { context } = yield* ConversationMachine.use((machine) => machine.get());
+    const subject = isCommsView(route.trail.at(-1)) ? (yield* CommsMachine.use((machine) => machine.get())).key : undefined;
+    return JSON.stringify([route.trail, route.assistant, subject, context.revision, draft.binding.owner, draft.binding.conversation, draft.read.ticket]);
+  }));
+  return held._tag === "Success" ? held.value : undefined;
+}
+
 /** @model spec/app/assistant/index.md */
 export function Assistant({ runtime, messageActions, speech, canReadAloud = false }: AssistantProps) {
-  const { voiceReview, ...composerSpeech } = speech ?? {};
   const conversation = useConversation(runtime);
   const attachments = useAttachments(runtime);
   const chats = useChats(runtime);
@@ -251,6 +264,9 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const reviewed = useSyncExternalStore(mailStore.subscribe, mailStore.snapshot);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const focusOnRevealRef = useRef(false);
+  const { voice: renderVoice, voiceReview, keyboard, ...speechProps } = speech ?? {};
+  const keyboardOwner = useCallback(() => keyboardScope(runtime), [runtime]);
+  const { onKeyboard, takeFocus } = useTalkKeyboard(composerRef, keyboardOwner, keyboard);
   const currentView = shell.state?.trail.at(-1);
   const onComms = isCommsView(currentView);
   const assistantDetent = shell.state?.assistant ?? "Bar";
@@ -261,7 +277,9 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       focusOnRevealRef.current = false;
       if (assistantDetent === "Typing") element.focus();
     }
-  }, [assistantDetent, compact]);
+
+    takeFocus(element);
+  }, [assistantDetent, compact, takeFocus]);
   const fileTargetRef = useRef<FileTarget | undefined>(undefined);
   const [talking, shown, writing, finding] = [conversation.state, chats.state, composer.state, search.state];
   const free = talking && shown && writing ? freedom(talking, writing, shown.chosen) : { replying: true, holding: true };
@@ -416,8 +434,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           onReturnToOriginal: chats.can({ type: "returnToOriginal", ...free }) ? () => void chats.send({ type: "returnToOriginal", ...free }) : undefined,
         }}
         composer={{
-          ...composerSpeech,
-          voice: speech?.voice?.({ compactDock: compact, atBar: assistantDetent === "Bar" }),
+          ...speechProps,
+          voice: renderVoice?.({ compactDock: compact, atBar: assistantDetent === "Bar", onKeyboard }),
           onDictate: onComms || inFlight(talking.turn) || !speech?.onDictate ? undefined : () => {
             openWithFocus(false);
             speech.onDictate?.();

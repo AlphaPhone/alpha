@@ -20,9 +20,6 @@ export type Faked = (emit: (event: string, data: unknown) => void) => object;
 /** The fake of a plugin whose definition is `P` and whose events are `Events`: it does not compile once eliza changes either. */
 export const plugin = <P, Events = Record<never, never>>(make: (emit: Emit<Events>) => Native<P>): Faked => (emit) => make(emit);
 
-/** A plugin the host registers and no journey calls: its presence alone is what the page reads. */
-export const present: Faked = () => ({});
-
 /** What a plugin rejects a call with: Android's `call.reject(message, code)`. */
 export function rejection(message: string, code = message) {
   return Object.assign(new Error(message), { code });

@@ -6,7 +6,9 @@ downloads. One download, from offer to file. The page and its tab come
 from the [Browser](./index.md) and its [page](./address.md). The Browser's
 menu opens the phone's Downloads list. Choosing Show in Files there for
 the current Browser session opens [Files](../files/) at Downloads. Back
-from that place returns to the Browser.
+from that place returns to the Browser. In a web browser, Downloads from
+the menu opens Files as an app. Returning Home and reopening Browser keeps
+its tab.
 
 ## Story: Download a file
 

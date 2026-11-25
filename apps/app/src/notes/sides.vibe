@@ -14,6 +14,7 @@ import { NoteDevice, transcriptWindowMs } from "../platform/noteDevice.vibe"
 import { NoteStore } from "../platform/notes.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { type Job, answer, following, reacting, run, together } from "../runtime/reactor.vibe"
+import { type VoiceSharePorts, shareVoice } from "./actions.vibe"
 import { NoteContent, audioIdOf, formatChanged, numberOf, savedVoice, transcriptText } from "./content.vibe"
 import { type NotesSelection, type TranscriptSource, notesSelection, savedTranscriptRecord } from "./selection.vibe"
 
@@ -228,9 +229,10 @@ export effect function generateTranscript(note: number, revision: number, retry:
   }
 }
 
-function voiceOut(fx: Voice.Effect): Job<Voice.Event, NotesSelection | MediaHandoff | NoteDevice | NoteStore | VoiceReview, [Actor]> {
+function voiceOut(fx: Voice.Effect): Job<Voice.Event, NotesSelection | MediaHandoff | NoteDevice | NoteStore | VoiceReview | VoiceSharePorts, [Actor]> {
   if (fx.tag === "Plays") return answer("playback", played(fx), { type: "played", ticket: fx.ticket, ok: false }, phone)
   if (fx.tag === "Halts") return answer("playback", effect { return { type: "halted", ticket: fx.ticket, ok: try (try NoteDevice).halt() } satisfies Voice.Event }, { type: "halted", ticket: fx.ticket, ok: false }, phone)
+  if (fx.tag === "Shares") return answer("share voice note", shareVoice(fx), { type: "textShared", ticket: fx.ticket, notice: "ShareUnavailable" }, phone)
   if (fx.tag === "AsksAlpha") return run("ask about this transcript", askAbout(fx), phone)
   if (fx.tag === "Transcribes") return answer("transcribe", recognised(fx), { type: "transcribed", ticket: fx.ticket, ok: false }, phone)
   if (fx.tag === "Writes") return answer("save voice note", writtenVoice(fx), { type: "written", ticket: fx.ticket, ok: false, known: false, latest: 0 }, phone)
