@@ -95,7 +95,7 @@ export function services(world: Scene) {
       ...telephonyRoutes(world.telephony),
     ]),
     cloud: answering([
-      ...cloudRoutes(),
+      ...cloudRoutes(() => world.signedIn),
       ...inboxRoutes(world.inbox),
       ...mapsRoutes(world.maps, () => world.now),
     ]),
