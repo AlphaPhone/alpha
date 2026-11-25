@@ -396,6 +396,9 @@ describe("Messages on an Alpha image", () => {
       const confirmation = review.confirmations[0];
       expect(confirmation).toMatchObject({ operationId: review.proposal.id, recipients: sms.recipients, body: sms.body, subscriptionId: sms.subscriptionId });
       expect([review.decisions, review.claims, world.telephony.sent]).toEqual([[review.proposal.id], [review.proposal.id], []]);
+      expect(review.journal.get(review.proposal.id)).toMatchObject({
+        ownerId: world.notes.owner, agentId: world.notes.owner, installationId: world.notes.owner,
+      });
       await drawn(() => confirmation.confirm());
       await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: review.proposal.id })]));
       expect(world.telephony.sent).toEqual([{ operationId: review.proposal.id, recipients: sms.recipients, body: sms.body }]);

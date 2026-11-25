@@ -7,12 +7,16 @@ import { deployment } from "@repo/deployment"
 import { pinnedCheckout, pinnedPack } from "@repo/eliza-harness"
 import {
   type Environment, type Manifest, bundledPlugins, calendarEdits, characterAdmitted, cloudModel, corePlugins, entryCarried, gmailChanges, googleAdmitted,
-  hostedPlugins, inputAdmitted, localEmbeddings, notesTrashDays, packAdmitted, packEntry, packedFor, packedPlugins, persistMemory, personalDetailSwap,
+  hostedPlugins, inputAdmitted, localEmbeddings, nativeSpeechRoutes, nativeSpeechRoutesAdmitted, notesTrashDays, packAdmitted, packEntry, packedFor, packedPlugins, pageQueries, persistMemory, personalDetailSwap,
   policyAdmitted, privacyAdmitted, productPluginName, proposalsAdmitted, refusedActions, routeListAdmitted, secretSwap, viewPlugins,
 } from "../gen/agent.effect.vibe"
 
 module node {
   import { pathToFileURL } from "node:url"
+  import { isDeepStrictEqual } from "node:util"
+
+  /** @throws {never} */
+  export const sameRules = (left: unknown, right: unknown): boolean => isDeepStrictEqual(left, right)
 
   /** The words after the script on the command line. @throws {never} */
   export function words(): string[] {
@@ -29,27 +33,37 @@ module node {
     return import(pathToFileURL(`${dir}/packages/agent-host/dist/src/bundle/build.js`).href) as Promise<typeof import("@elizaos/agent-host")>
   }
 }
-import { builderOf, root, words } from node
+import { builderOf, root, sameRules, words } from node
 
 /** What makes the pack unfit to ship, in words a maker can act on. */
 export error Refused { message: string }
 
 const environments: Readonly<Record<string, Environment>> = { local: "Local", staging: "Staging", production: "Production" }
 
-schema RouteLine { method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; path: string; stream?: boolean }
+schema QueryRule {
+  key: string
+  accepts: { kind: "any" } | { kind: "pattern"; pattern: string } | { kind: "pinned"; value: string }
+}
+schema RouteLine {
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; path: string; stream?: boolean; query?: QueryRule[]
+}
 schema Character { name: string; system: string; bio: string[] }
 schema Policy { schema: 1; actions: { allowed: string[]; refused: Record<string, string> }; plugins: { load: string[]; product?: string } }
 schema Notice { channel: string; title: string; text: string }
 schema Service { service: string; notification: { channel: string; title: string; text: string; failure: Notice } }
 schema Model { backend: "cloud"; cloudBaseUrl: string; smallModel: string; largeModel: string; imageModel: string }
 schema Host {
-  schema: 1; service: string; notification: { channel: string; title: string; text: string; failure: Notice }; routes: RouteLine[]; model: Model
+  schema: 1; service: string; notification: { channel: string; title: string; text: string; failure: Notice }; routes: RouteLine[]; nativeRoutes: RouteLine[]; model: Model
   embeddings: "none" | "local"; persistMemory: boolean; callerRole: "owner" | "user"; privacy: { secretSwap: boolean; piiSwap: boolean }
   google: { gmailChanges: boolean; calendarEdits: boolean }
 }
 
 /** The export each hosted package builds its module with, as `runAgentCli`'s `hostModules` takes it. */
-const hostedExports: Readonly<Record<string, string>> = { "@elizaos/plugin-notes": "notesModule" }
+const localSpeechModule = "@elizaos/plugin-local-inference"
+const hostedExports: Readonly<Record<string, string>> = {
+  "@elizaos/plugin-notes": "notesModule",
+  [localSpeechModule]: "localInferenceModule",
+}
 
 /** Alpha's own packages: only the pack entry and the Alpha product plugin may be carried. */
 const alphaOwned = (name: string) => name.startsWith("@repo/") || name.startsWith("@alphacompute/") || name === productPluginName
@@ -57,15 +71,35 @@ const alphaOwned = (name: string) => name.startsWith("@repo/") || name.startsWit
 /**
  * The pack's entry: eliza's agent command started with each bundled plugin, each hosted package's module, and the Alpha product plugin.
  * The command is imported from agent-host's own CLI module, as eliza's bundle entry does: the package's root also exports the bundle
- * builder, which would carry Vite into the bundle. The entry sits at `.alpha/pack-entry-<worktree>/entry.js` inside the pack's clone.
+ * builder, which would carry Vite into the bundle. Take the Android inference export from its owning module for the
+ * same reason: the OS root includes build tooling. The entry sits at `.alpha/pack-entry-<worktree>/entry.js` inside the pack's clone.
  */
 export function entrySource(bundled: readonly string[], hosted: readonly { name: string; module: string }[], product: { name: string; module: string }): string {
   const allHosted = [...hosted, product]
+  const includesSpeech = hosted.some(({ name }) => name === localSpeechModule)
+  const localScope = nativeSpeechRoutes.find(({ method }) => method === "Get")?.path ?? ""
   return [
     `import { runAgentCli } from "../../packages/agent-host/dist/src/cli.js"`,
+    ...(includesSpeech ? [
+      'import { Effect } from "effect"',
+      'import { androidInferenceEngine } from "../../packages/os/dist/src/inference/index.js"',
+    ] : []),
     ...bundled.map((name, index) => `import * as plugin${index} from ${JSON.stringify(name)}`),
     ...allHosted.map(({ name, module }, index) => `import { ${module} as host${index} } from ${JSON.stringify(name)}`),
     "",
+    ...(includesSpeech ? [
+      'const speechEngine = (context) => {',
+      '  const socket = context.launch.environment?.ALPHA_LOCAL_SPEECH_SOCKET',
+      '  return socket === undefined ? undefined : androidInferenceEngine(socket)',
+      '}',
+      `const nativeSpeechScope = (context) => ({ method: "GET", path: ${JSON.stringify(localScope)}, handler: async ({ signal }) => {`,
+      '  const account = context.launch.account',
+      '  const engine = speechEngine(context)',
+      '  const ready = engine === undefined ? undefined : await Effect.runPromise(engine.speechReady(), { signal })',
+      '  if (account === undefined || ready?.transcription !== true) return { status: 503, body: { error: "LOCAL_SPEECH_UNAVAILABLE" } }',
+      '  return { status: 200, body: { epoch: context.epoch, userId: account.userId, organizationId: account.organizationId } }',
+      '} })',
+    ] : []),
     "runAgentCli({",
     "  bundled: [",
     ...bundled.map((name, index) => `    { packageName: ${JSON.stringify(name)}, plugin: plugin${index}.default ?? plugin${index}.plugin },`),
@@ -73,9 +107,17 @@ export function entrySource(bundled: readonly string[], hosted: readonly { name:
     "  ],",
     `  productPlugin: ${JSON.stringify(product.name)},`,
     `  hostModules: new Map([${allHosted.map(({ name }, index) => {
-      const factory = name === "@elizaos/plugin-notes"
-        ? `(context) => { context.runtime.setSetting("ELIZA_NOTES_TRASH_RETENTION_DAYS", ${JSON.stringify(notesTrashDays)}); return host${index}(context); }`
-        : `host${index}`
+      let factory = `host${index}`
+      if (name === "@elizaos/plugin-notes") factory = `(context) => { context.runtime.setSetting("ELIZA_NOTES_TRASH_RETENTION_DAYS", ${JSON.stringify(notesTrashDays)}); return host${index}(context); }`
+      if (name === localSpeechModule) {
+        const named = JSON.stringify(localSpeechModule)
+        factory = `(context) => { const engine = speechEngine(context); return engine === undefined
+          ? Effect.succeed({ name: ${named}, plugin: { name: ${named}, description: "On-device speech unavailable" } })
+          : host${index}(engine)(context) }`
+      }
+      if (includesSpeech && name === product.name) factory = `(context) => Effect.map(host${index}(context), (module) => ({
+        ...module, plugin: { ...module.plugin, routes: [...(module.plugin.routes ?? []), nativeSpeechScope(context)] }
+      }))`
       return `[${JSON.stringify(name)}, ${factory}]`
     }).join(", ")}]),`,
     "})",
@@ -112,15 +154,35 @@ effect function routeLines(file: string) {
 }
 
 const spelled = { GET: "Get", POST: "Post", PUT: "Put", PATCH: "Patch", DELETE: "Delete" } as const
+const onWire = { Get: "GET", Post: "POST", Put: "PUT", Patch: "PATCH", Delete: "DELETE" } as const
+
+function queries(route: RouteLine) {
+  return pageQueries.filter(({ method, path }) => method === spelled[route.method] && path === route.path)
+    .map(({ key, kind, value, example }): { rule: QueryRule; example: string } => ({
+      example,
+      rule: {
+        key,
+        accepts: kind === "AnyQuery" ? { kind: "any" }
+          : kind === "PatternQuery" ? { kind: "pattern", pattern: value } : { kind: "pinned", value },
+      },
+    }))
+}
 
 /** Refuse a route list unless it is the page's, and eliza's own gate admits each of its routes. */
-effect function admitRoutes(routes: readonly RouteLine[]) {
-  if (!routeListAdmitted(routes.map((route) => ({ method: spelled[route.method], path: route.path, stream: route.stream === true })))) {
-    throw new Refused({ message: "the route list is not exactly the routes the page's platform services call (spec/agent/index.md)" })
+effect function admitRoutes(routes: readonly RouteLine[], native = false) {
+  const described = routes.map((route) => ({ method: spelled[route.method], path: route.path, stream: route.stream === true }))
+  if (!(native ? nativeSpeechRoutesAdmitted(described) : routeListAdmitted(described))) {
+    throw new Refused({ message: native ? "the phone's private speech route list is not exact" : "the route list is not exactly the routes the page's platform services call (spec/agent/index.md)" })
   }
   const gate = defineRoutes(routes)
   for (const route of routes) {
-    const target = route.path.replace(/\{[a-zA-Z]+\}/g, "x")
+    const expected = native ? [] : queries(route)
+    if (!sameRules(route.query ?? [], expected.map(({ rule }) => rule))) {
+      throw new Refused({ message: `the query rules do not match ${route.method} ${route.path} (spec/agent/index.md)` })
+    }
+    const path = route.path.replace(/\{[a-zA-Z]+\}/g, "x")
+    const parameters = expected.map(({ rule, example }) => `${rule.key}=${encodeURIComponent(example)}`).join("&")
+    const target = parameters === "" ? path : `${path}?${parameters}`
     const admission = gate.admit({ method: route.method, target, streamed: route.stream === true, body: undefined })
     if (admission.tag !== "Admitted") throw new Refused({ message: `eliza's route gate does not admit ${route.method} ${route.path}` })
   }
@@ -134,7 +196,7 @@ effect function admittedManifest(bundle: string, pin: string) {
     plugins: [...manifest.plugins], productPlugin: manifest.productPlugin ?? "", workerPinned: manifest.workflowWorkerSha256 !== undefined, actions: manifest.actions.map(({ name }) => name),
   }
   if (!packAdmitted(facts, pin)) {
-    throw new Refused({ message: `the bundle is not the pinned eliza's (${pin}) for Node 26 with no local inference, the plugins ${packedPlugins.join(", ")}, product plugin ${productPluginName}, a pinned workflow worker and every allowed action: ${JSON.stringify(facts)}` })
+    throw new Refused({ message: `the bundle is not the pinned eliza's (${pin}) for Node 26 with local speech, the plugins ${packedPlugins.join(", ")}, product plugin ${productPluginName}, a pinned workflow worker and every allowed action: ${JSON.stringify(facts)}` })
   }
   const names = manifest.packages.map(({ name }) => name)
   const foreign = names.filter((name) => !inputAdmitted(name, alphaOwned(name)))
@@ -155,6 +217,7 @@ effect function admittedHost(host: string, registered: readonly string[]) {
   if (!proposalsAdmitted(policy.plugins.load, policy.actions.allowed)) throw new Refused({ message: "the policy must load eliza's device-action modules and allow a proposal" })
   const written = try decoded(`${host}/host.json`, Host)
   try admitRoutes(written.routes)
+  try admitRoutes(written.nativeRoutes, true)
   if (!privacyAdmitted(written.privacy.secretSwap, written.privacy.piiSwap)) throw new Refused({ message: "the launch must ask eliza's privacy service to swap secrets and personal details" })
   if (!googleAdmitted(written.google.gmailChanges, written.google.calendarEdits)) throw new Refused({ message: "the launch consents to Gmail changes or calendar edits the spec does not" })
   const document = JSON.stringify({
@@ -198,8 +261,13 @@ effect function build(name: string) {
   try fs.makeDirectory(at.host, { recursive: true })
   for (const file of ["character.json", "policy.json"]) try fs.copyFile(`${at.data}/${file}`, `${at.host}/${file}`)
   const service = try decoded(`${at.data}/service.json`, Service)
+  const routes = (try routeLines(`${at.data}/routes.jsonl`)).map((route) => {
+    const query = queries(route).map(({ rule }) => rule)
+    return query.length === 0 ? route : { ...route, query }
+  })
   const host: Host = {
-    schema: 1, service: service.service, notification: service.notification, routes: try routeLines(`${at.data}/routes.jsonl`),
+    schema: 1, service: service.service, notification: service.notification, routes,
+    nativeRoutes: nativeSpeechRoutes.map(({ method, path, stream }) => ({ method: onWire[method], path, stream })),
     model: { backend: "cloud", cloudBaseUrl: where.cloud, smallModel: cloudModel, largeModel: cloudModel, imageModel: "" },
     embeddings: localEmbeddings ? "local" : "none", persistMemory, callerRole: "owner", privacy: { secretSwap, piiSwap: personalDetailSwap },
     google: { gmailChanges, calendarEdits },

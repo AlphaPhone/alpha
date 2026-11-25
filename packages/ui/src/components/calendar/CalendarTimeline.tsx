@@ -46,15 +46,18 @@ export type CalendarEventBlockProps = Omit<ComponentProps<"button">, "children">
 export function CalendarEventBlock({ block, first, showTime = true, className, style, ...props }: CalendarEventBlockProps) {
   const { top, height, short } = placed(block, first);
   const invite = block.tone === "invite";
+  const detail = !short && block.length >= 1 ? block.sub : undefined;
+  const label = [block.title, detail, showTime ? block.time : undefined].filter(Boolean).join(", ");
+  const description = !showTime || block.label !== `${block.title}, ${block.time}` ? block.label : undefined;
   return (
-    <button type="button" aria-label={block.label} disabled={!block.onOpen} onClick={block.onOpen} style={{ top, height, ...style }}
+    <button type="button" aria-label={label} aria-description={description} disabled={!block.onOpen} onClick={block.onOpen} style={{ top, height, ...style }}
       className={cn(focusRing, "absolute box-border flex items-center gap-2 overflow-hidden rounded-md pr-3 pl-4 text-left disabled:cursor-default",
         short ? "py-0" : "py-2", invite ? "border-[1.5px] border-dashed border-muted-foreground bg-background" : "bg-secondary", className)} {...props}>
       <span aria-hidden className={cn("absolute top-1.5 bottom-1.5 left-1.5 w-0.75 rounded-full", invite || !block.stripe ? "bg-transparent" : block.stripe === "primary" ? "bg-primary" : "bg-foreground")} />
       <span className="flex min-h-0 min-w-0 grow flex-col flex-wrap justify-center self-stretch overflow-hidden">
         <span className="w-full shrink-0 truncate text-sm leading-plain font-semibold">{block.title}</span>
-        {!short && block.sub && block.length >= 1 ? <span className="mt-0.75 w-full shrink-0 truncate text-xs leading-plain opacity-85">{block.sub}</span> : null}
-      </span>
+        {detail ? <>{" "}<span className="mt-0.75 w-full shrink-0 truncate text-xs leading-plain opacity-85">{detail}</span></> : null}
+      </span>{" "}
       {showTime ? <span className="text-xs leading-plain whitespace-nowrap opacity-75">{block.time}</span> : null}
     </button>
   );

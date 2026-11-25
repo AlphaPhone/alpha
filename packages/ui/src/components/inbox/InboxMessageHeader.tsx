@@ -27,7 +27,7 @@ export function InboxMessageHeader({ sender, address, to, cc, replyTo, date }: I
     <div className="flex items-start gap-3">
       <Avatar name={sender} className="size-11 shrink-0" />
       <details className="group min-w-0 flex-1">
-        <summary aria-label="Show message details" className={`${focusRing} flex min-h-11 cursor-pointer list-none flex-col justify-center rounded-sm`}>
+        <summary aria-description="Show message details" className={`${focusRing} flex min-h-11 cursor-pointer list-none flex-col justify-center rounded-sm`}>
           <span className="flex min-w-0 items-center gap-2 text-body leading-tight font-semibold">
             <span className="truncate">{sender || "Unknown sender"}</span>
             <ChevronDown aria-hidden className="size-3.5 shrink-0 text-muted-foreground group-open:rotate-180" />

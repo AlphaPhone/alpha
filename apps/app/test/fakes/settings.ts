@@ -6,9 +6,17 @@ import { type Faked, plugin, rejection } from "./phone.ts";
 /** A field as Alpha's `AlphaCarrierSetup` plugin reports one. */
 export interface CarrierField { status: "available" | "permission-denied" | "unavailable" | "unsupported" | "not-read"; value?: string }
 
+export interface RecoveryScene {
+  retained: number;
+  archived: number;
+  starts: number;
+  readonly tokens: string[];
+}
+
 /** What the fake phone holds for Settings, and how it behaves; a journey changes it between steps. */
 export interface SettingsScene {
   facts: SystemFacts;
+  recovery?: RecoveryScene;
   roles: AndroidRoleStatus[];
   launcher: boolean;
   version: string;

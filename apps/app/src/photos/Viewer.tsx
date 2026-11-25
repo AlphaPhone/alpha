@@ -1,4 +1,4 @@
-import { Album, ChevronLeft, ChevronRight, Crop, Ellipsis, Heart, Info, Mail, MessageCircle, Pause, Pencil, Play, RotateCcw, Share2, Sparkles, Trash2, Undo2, Volume2, VolumeX, X } from "lucide-react";
+import { Album, ChevronLeft, ChevronRight, Crop, Ellipsis, Heart, Info, Mail, MessageCircle, Pause, Pencil, Play, RotateCw, Share2, Sparkles, Trash2, Undo2, Volume2, VolumeX, X } from "lucide-react";
 import { Effect, type ManagedRuntime } from "effect";
 import { useCallback, useRef, type PointerEvent, type RefCallback } from "react";
 import { Button, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, Slider, cn, dockClearance } from "@repo/ui";
@@ -8,7 +8,7 @@ import type { Machine } from "../../gen/app__photos__viewer.effect.vibe";
 import { taken, type Row } from "./catalog.vibe";
 import { OpenedPhoto, photoEmailAllowed, photoLook, photoMessageType, type MediaView } from "./viewer.vibe";
 import { photoLooks } from "../platform/photoCanvas.vibe";
-import { CropFrame } from "./CropFrame.tsx";
+import { CropFrame, CropHeader, editFrame, editHeader, editTool } from "./CropFrame.tsx";
 import { headingOf, trashDaysLabel, trashDaysLeft } from "./Grid.tsx";
 import { Time } from "../runtime/time.vibe";
 import { Device } from "../platform/device.vibe";
@@ -130,10 +130,10 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onBack, back
     onBack();
   };
   const backLabel = state.editing ? "Cancel edit" : backToCamera ? "Back to Camera" : "Back to photos";
-  const beginCrop = { type: "beginCrop" } satisfies Event;
+  const crop = { type: state.kind === "Still" ? "beginCrop" : "crop" } satisfies Event;
   function openCrop() {
-    returnCropFocusRef.current = state?.open ?? 0;
-    action(beginCrop);
+    if (state?.kind === "Still") returnCropFocusRef.current = state.open;
+    action(crop);
   }
   const useInMessages = !inTrash && showing && allows({ type: "useInMessages" }) && photoMessageType(current.item) !== undefined
     && runtime.runSync(Effect.flatMap(Device, (device) => device.capabilities())).image;
@@ -157,21 +157,20 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onBack, back
     <div aria-label="Crop photo" data-alpha-subview="photos-crop"
       // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the crop tools follow the photo editor's fixed dark theme
       className={cn("dark absolute inset-0 z-50 flex min-h-0 flex-col bg-background text-foreground", dockClearance)}>
-      <header data-host-chrome="" className="flex min-h-14 shrink-0 items-center gap-2 px-2">
-        <Button variant="ghost" size="icon" aria-label="Cancel crop" onClick={close}><X /></Button>
-        <h1 className="text-base font-semibold">Crop photo</h1>
-      </header>
       {edited && edited.width > 0 && edited.height > 0 ? <CropFrame key={state.revision} source={edited} bounds={state.edit.bounds}
-        onApply={(bounds) => action({ type: "applyCrop", bounds })} /> : <div className="m-auto text-center" role="status">
-        {state.unavailable ? <><p>Couldn’t prepare the photo.</p><Button variant="secondary" onClick={() => action({ type: "retryPreview" })}>Try again</Button></> : "Preparing photo…"}
-      </div>}
+        onCancel={close} onApply={(bounds) => action({ type: "applyCrop", bounds })} /> : <>
+        <CropHeader onCancel={close} />
+        <div className="m-auto text-center" role="status">
+          {state.unavailable ? <><p>Couldn’t prepare the photo.</p><Button variant="secondary" onClick={() => action({ type: "retryPreview" })}>Try again</Button></> : "Preparing photo…"}
+        </div>
+      </>}
     </div>
   );
   return (
     <div aria-label={name} data-alpha-subview={state.editing ? "photos-editor" : "photos-viewer"}
       // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the photo viewer and its controls keep their dark tokens in either app theme
       className={cn("dark absolute inset-0 z-50 flex min-h-0 flex-col bg-background text-foreground", dockClearance)}>
-      <header data-host-chrome="" className={cn("flex min-h-14 shrink-0 items-center gap-2 px-2", !chrome && hiddenChrome)}>
+      <header data-host-chrome="" className={cn(state.editing ? editHeader : "flex min-h-14 shrink-0 items-center gap-2 px-2", !chrome && hiddenChrome)}>
         <Button variant="ghost" size="icon" aria-label={backLabel} onClick={close}>{state.editing ? <X /> : <ChevronLeft />}</Button>
         {state.editing ? <div className="flex-1"><h1 className="sr-only">{state.kind === "Clip" ? "Edit video" : "Edit photo"}</h1></div> : <div className="min-w-0 flex-1">
           <h1 className="truncate text-base font-semibold">{day}</h1>
@@ -184,8 +183,8 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onBack, back
             // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the portalled photo menu follows the viewer's fixed dark theme
             className="dark">{photosMenu.map(({ label, icon, select }) => <MenuItem key={label} onSelect={select}>{icon}{label}</MenuItem>)}</MenuContent>
         </Menu>}
-        {state.editing && preview?.canReplace && allows({ type: "chooseReplace", replace: !state.replace }) && <Button variant="secondary" size="sm" aria-pressed={state.replace} onClick={() => action({ type: "chooseReplace", replace: !state.replace })}>Replace</Button>}
-        {state.editing && <Button size="sm" disabled={!allows({ type: "save" })} onClick={() => editAction({ type: "save" })}>{state.replace ? "Replace" : "Save copy"}</Button>}
+        {state.editing && preview?.canReplace && allows({ type: "chooseReplace", replace: !state.replace }) && <Button variant="secondary" size="sm" className={editTool} aria-pressed={state.replace} onClick={() => action({ type: "chooseReplace", replace: !state.replace })}>Replace</Button>}
+        {state.editing && <Button className="px-4.5" size="sm" disabled={!allows({ type: "save" })} onClick={() => editAction({ type: "save" })}>{state.replace ? "Replace" : "Save copy"}</Button>}
         {control("Check saved copy", { type: "checkCopy" }, <Info />)}
       </header>
       <MediaViewport state={state} current={current} name={name} showing={showing} editedImage={edited?.image}
@@ -204,17 +203,18 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onBack, back
       </div>}
       {state.refusal !== "NoRefusal" && <p role="status" className="px-4 py-2 text-center text-sm">{messages[state.refusal]}</p>}
       {state.save.outcome === "Unknown" && <p role="status" className="px-4 py-2 text-center text-sm">{state.lookup.status === "Loaded" ? state.found ? "Saved copy found" : "No saved copy found" : "Save unconfirmed"}</p>}
-      {state.editing && <div aria-label="Photo edit tools" className="flex flex-col gap-4 px-4 py-4">
-        <div className="flex items-center justify-center gap-3">
-          {control("Rotate", { type: "rotate" }, <RotateCcw />)}
-          {state.kind === "Still" ? <Button ref={cropButton} variant="ghost" size="icon" aria-label="Crop" disabled={!allows(beginCrop)} onClick={openCrop}><Crop /></Button>
-            : control("Crop", { type: "crop" }, <Crop />)}
+      {state.editing && <div aria-label="Photo edit tools" className="mt-6.5 flex shrink-0 flex-col gap-5 px-4 pb-4 landscape:mt-2 landscape:gap-2">
+        <div className="flex items-center justify-center gap-4">
+          <Button variant="secondary" size="icon" className={editTool} aria-label="Rotate" disabled={!allows({ type: "rotate" })} onClick={() => action({ type: "rotate" })}><RotateCw /></Button>
+          <Button ref={state.kind === "Still" ? cropButton : undefined} variant="secondary" size="icon" aria-label="Crop"
+            aria-pressed={state.edit.cropped} disabled={!allows(crop)} onClick={openCrop}
+            className={state.edit.cropped ? "bg-foreground text-background hover:bg-foreground/90 active:bg-foreground/80" : editTool}><Crop /></Button>
           {allows({ type: "retryPreview" }) && <Button variant="secondary" onClick={() => action({ type: "retryPreview" })}>Retry preview</Button>}
         </div>
         {state.kind === "Still" ? <div role="group" aria-label="Photo filters" className="flex gap-3 overflow-x-auto p-0.5">
           {filters.map((look) => <Button key={look} variant="ghost" aria-label={look} aria-pressed={state.edit.look === look}
-            className="group h-auto min-w-14 flex-col gap-1.5 rounded-xl p-0 text-caption hover:bg-transparent" disabled={state.edit.look !== look && !allows({ type: "restyle", look })} onClick={() => action({ type: "restyle", look })}>
-            <span className="relative size-14 overflow-hidden rounded-xl bg-secondary group-aria-pressed:outline-focus">
+            className="group h-auto min-w-14.5 flex-col gap-2 rounded-xl p-0 text-caption hover:bg-transparent" disabled={state.edit.look !== look && !allows({ type: "restyle", look })} onClick={() => action({ type: "restyle", look })}>
+            <span className="relative size-14.5 overflow-hidden rounded-xl bg-secondary group-aria-pressed:outline-focus">
               {swatchSource && <img src={swatchSource} alt="" className="absolute inset-0 size-full object-cover" style={{ filter: photoLooks[photoLook(look)] }} />}
             </span>
             <span className={state.edit.look === look ? "text-foreground" : "text-muted-foreground"}>{look}</span>
@@ -341,7 +341,7 @@ function MediaViewport({ state, current, name, showing, editedImage, before, aft
   }
   return (
     <>
-      <div className="relative flex min-h-0 flex-1 touch-none items-center justify-center overflow-hidden [container-type:size]"
+      <div className={cn("relative flex min-h-0 touch-none items-center justify-center overflow-hidden [container-type:size]", state.editing ? editFrame : "flex-1")}
         onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerEnd} onPointerCancel={pointerEnd} onLostPointerCapture={pointerEnd}
         role="group" aria-label="Photo viewer" aria-describedby="alpha-photo-viewer-keys" tabIndex={0}
         onKeyDown={(event) => {
