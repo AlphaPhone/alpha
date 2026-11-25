@@ -227,6 +227,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Connect Gmail and keep to its grant\")", async () => {
   const world = { ...scene(), phone: true };
   world.inbox.google = undefined;
+  world.inbox.offline = true;
   const { alpha } = await open(world);
   const runtime = inbox.runtime(alpha);
 
@@ -240,8 +241,14 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   world.signedIn = true;
   await hardware("home");
 
-  // spec/app/inbox/index.md, "The owner can be signed out, have no account connected, have several to choose from, lack read access, be asked to reconnect Gmail, and a check can be asked again before the last answers"
+  // spec/app/inbox/index.md, "The answer names the connected accounts, their credentials and grants; the account chosen stays selected while it is connected, else the one account that may be read, else none and the owner chooses": a failed check changes nothing, and with nothing listed the list says mail could not be read and offers to check again
   await press("Inbox");
+  await until(alpha, runtime, List, (s) => s.accounts.status === "Failed");
+  expect([rows(), told()]).toEqual([[], expect.stringContaining("Mail could not be read")]);
+  world.inbox.offline = false;
+
+  // spec/app/inbox/index.md, "The owner can be signed out, have no account connected, have several to choose from, lack read access, be asked to reconnect Gmail, and a check can be asked again before the last answers"
+  await press("Try again");
   await until(alpha, runtime, List, (s) => s.accounts.status === "Loaded" && s.connected.length === 0);
   expect(told()).toContain("Connect Gmail");
 
