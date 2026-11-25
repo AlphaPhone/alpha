@@ -28,7 +28,7 @@ import draft as D from "../../kit/draft"
 type Kind = Folder | Image | Video | Audio | Document | Pdf | Download | Other
 type Item = { id: int, name: str, revision: int, kind: Kind, volume: int, bytes: int }
 
-pure def fitsKind(kind: Kind, item: Kind): bool = item == kind or (kind == Document and item == Pdf)
+pure def fitsKind(kind: Kind, actual: Kind): bool = actual == kind or (kind == Document and actual == Pdf)
 ```
 
 ### A new name is not empty and not one already used beside it
