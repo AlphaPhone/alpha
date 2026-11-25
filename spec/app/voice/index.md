@@ -110,7 +110,7 @@ type Effect =
   | Record({ ticket: int })
   | Transcribe({ ticket: int, network: bool })
   | Abandon({ recording: int })
-  | Fill({ field: D::Field })
+  | Fill({ field: D::Field, filling: int })
 
 type Change = { state: Voice, out: List[Effect] }
 
@@ -898,16 +898,18 @@ pure def edit(v: Voice, words: bool): Voice = { ...v, recorder: D::edit(v.record
 
 ### Using the transcript fills the field dictation started in, and dictation never sends
 
-A messaging bar's dictation fills that bar, never Ask Alpha.
+A messaging bar's dictation fills that bar, never Ask Alpha. The fill names
+its own number, so a late delivery cannot fill the field of a newer recording.
 
 ```quint
 pure def canFill(v: Voice): bool = D::canFill(v.recorder)
 
 pure def fill(v: Voice): Change =
-  { state: { ...v, recorder: D::fill(v.recorder) }, out: List(Fill({ field: v.recorder.field })) }
+  val filled = D::fill(v.recorder)
+  { state: { ...v, recorder: filled }, out: List(Fill({ field: v.recorder.field, filling: filled.filled })) }
 
 pure def stepDictationFillsItsOwnField(before: Voice, after: Voice, out: List[Effect]): bool =
-  out.every(e => match e { | Fill(f) => f.field == before.recorder.field and before.recorder.stage == D::Review | _ => true })
+  out.every(e => match e { | Fill(f) => f.field == before.recorder.field and before.recorder.stage == D::Review and f.filling == after.recorder.filled and f.filling == before.recorder.filled + 1 | _ => true })
 ```
 
 ### Closing the recorder abandons any recording or transcription it was waiting for
