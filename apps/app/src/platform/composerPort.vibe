@@ -7,6 +7,11 @@ module web {
   }
 
   type Draft = Parameters<MessagesNativePlugin["sendSms"]>[0] | Parameters<MessagesNativePlugin["sendMms"]>[0]
+  export interface SmsApproval {
+    readonly attemptId: number
+    readonly digest: string
+    readonly expiresAt: number
+  }
 
   function notStarted(): Error {
     return Object.assign(new Error("Open Messages and review the draft again."), { code: "composer-not-started" })
@@ -23,10 +28,10 @@ module web {
     return document.visibilityState === "visible" && document.hasFocus()
   }
 
-  function post(port: ComposerPort, kind: "sms" | "mms", draft: Draft, signal: AbortSignal): Promise<unknown> {
+  function post(port: ComposerPort, kind: "sms" | "mms" | "approved-sms", draft: Draft, signal: AbortSignal, approval?: SmsApproval): Promise<unknown> {
     if (signal.aborted || !visible()) return Promise.reject(notStarted())
     const requestId = crypto.randomUUID()
-    const request = JSON.stringify({ requestId, kind, draft })
+    const request = JSON.stringify({ requestId, kind, draft, ...(approval === undefined ? {} : { approval }) })
     const deadline = AbortSignal.any([signal, AbortSignal.timeout(30_000)])
     return new Promise((resolve, reject) => {
       function cleanup() {
@@ -87,6 +92,20 @@ module web {
       },
     })
   }
+
+  /** Use the Android journal guard for a claimed text already reviewed on screen. @throws {never} */
+  export function approvedSmsPlugin<P extends Pick<MessagesNativePlugin, "sendSms">>(plugin: P, approval: SmsApproval, signal: AbortSignal, current: () => Promise<boolean>): P {
+    const port = packagedPort()
+    return new Proxy(plugin, {
+      get(native, method, receiver) {
+        if (method !== "sendSms") return Reflect.get(native, method, receiver)
+        return async (draft: Parameters<MessagesNativePlugin["sendSms"]>[0]) => {
+          if (signal.aborted || !(await current().catch(() => false)) || signal.aborted) throw notStarted()
+          return port === undefined ? native.sendSms(draft) : post(port, "approved-sms", draft, signal, approval)
+        }
+      },
+    })
+  }
 }
-import { composerPlugin } from web
-export { composerPlugin }
+import { approvedSmsPlugin, composerPlugin, type SmsApproval } from web
+export { approvedSmsPlugin, composerPlugin, type SmsApproval }

@@ -1,9 +1,10 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
 import {
-  Alert, AssistantCard, Button, AssistantConversation, AssistantGrabber, AssistantPhotoPreview, ConfirmDialog,
+  Alert, AssistantCard, AssistantCardFrame, Button, AssistantConversation, AssistantGrabber, AssistantPhotoPreview, ConfirmDialog,
   type AssistantAttachment, type AssistantComposerProps, type AssistantDraftNoticeProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
+import { ClipboardCheck } from "lucide-react";
 import { type ReactNode, type RefObject, useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { type Conversation as Talking, Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe";
 import { askable, inFlight, pending } from "../../gen/app__assistant.ts";
@@ -108,7 +109,7 @@ const maps = { type: "openView", view: "Maps" } as const;
 const back = { type: "goBack" } as const;
 
 function DeviceReview({ runtime, card }: { runtime: AssistantProps["runtime"]; card: MediaCard }) {
-  const decide = (approve: boolean) => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, approve)));
+  const decide = (approve: boolean, confirmation?: "Tap") => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, approve, confirmation)));
   return (
     <div className="grid gap-2">
       {card.phone?.tag === "Choices" ? (
@@ -126,6 +127,14 @@ function DeviceReview({ runtime, card }: { runtime: AssistantProps["runtime"]; c
         <Alert role="status">{card.phone.reason}</Alert>
       ) : card.notice !== undefined ? (
         <Alert role="status">{`${card.title}: ${card.detail}. ${card.notice}`}</Alert>
+      ) : card.operation.type === "sms_send" ? (
+        <AssistantCardFrame icon={<ClipboardCheck />} title={card.title} data-alpha-review={card.id}
+          detail={card.sms === undefined ? undefined : `SIM ${card.sms.subscription.slot + 1} · ${card.sms.subscription.displayName}`}
+          actions={<Button data-alpha-review-send="" onClick={(event) => decide(true, event.nativeEvent.isTrusted ? "Tap" : undefined)}>Approve</Button>}>
+          <p className="font-semibold wrap-anywhere">{card.operation.recipients.map(displayNumber).join(", ")}</p>
+          <p className="whitespace-pre-wrap wrap-anywhere">{card.operation.body}</p>
+          {card.spokenSms !== undefined && <p className="text-meta text-muted-foreground">Say “Send this text”</p>}
+        </AssistantCardFrame>
       ) : (
         <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, action: card.operation.type === "sms_compose" ? "Open draft" : "Approve" }}
           onHandOn={() => decide(true)} />

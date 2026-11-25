@@ -15,6 +15,7 @@ import { Views, delivery, preparedIn, resendWithoutMode } from "../assistant/vie
 import { filesOnlyHeaders, MediaReview, sameFiles } from "../assistant/media-review.vibe"
 import { Talk, type Attached } from "../assistant/talk.vibe"
 import type { MessageSmsRequest } from "../messages/agent-sim.vibe"
+import { sendShowing } from "../contacts/requests.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type VoiceEvent, VoiceBridge } from "../platform/voice.vibe"
 import { fresh } from "../runtime/attempts.vibe"
@@ -166,7 +167,7 @@ module pure {
     return number !== null && number.replace(/\D/g, "").length >= 7 ? number : undefined
   }
 
-  /** The approval instruction is local while the owner must approve on the phone. @throws {never} */
+  /** The explicit confirmation is a local instruction for a visible text review. @throws {never} */
   export function smsConfirmation(spoken: string): boolean {
     return /^(?:(?:yes|okay|ok|please)[,\s]+)*send\s+this\s+text[.!?]?$/iu.test(spoken)
   }
@@ -345,8 +346,22 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     }
     if (smsConfirmation(spoken)) {
       const card = chat?.snapshot().media.find((one) => one.spokenSms !== undefined)
-      const open = card?.spokenSms !== undefined && (try card.spokenSms.current)
-      finishLocally(open ? "Tap Approve on the text review." : "There’s no text open for review.")
+      const review = Option.getOrUndefined(try Effect.serviceOption(MediaReview))
+      if (review === undefined || card?.spokenSms === undefined || !(try card.spokenSms.current)
+        || !Voice.addressedTextConfirmation(try voice.get(), card.spokenSms.session, card.spokenSms.turn, sendShowing(card.id))) {
+        finishLocally(card === undefined ? "There’s no text open for review." : "Check the whole text review before sending.")
+        return
+      }
+      const conversation = Option.getOrUndefined(try Effect.serviceOption(Conversation))
+      const chats = Option.getOrUndefined(try Effect.serviceOption(Chats))
+      const talk = Option.getOrUndefined(try Effect.serviceOption(Talk))
+      if (conversation === undefined || chats === undefined || talk === undefined) { finishLocally(); return }
+      try (review.decide(card, true, "Speech")
+        |> Effect.provideService(%, Conversation, conversation)
+        |> Effect.provideService(%, Chats, chats)
+        |> Effect.provideService(%, Talk, talk))
+      const note = chat?.snapshot().mediaNote
+      finishLocally(note?.conversation === card.conversation ? note.text : "I couldn’t confirm the send. Check Messages before trying again.")
       return
     }
     const rendering = try Effect.serviceOption(Views)
@@ -536,7 +551,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       && result.reply.userMessageId !== undefined && result.reply.failureKind === undefined && (try smsCurrent)) {
       const card = try smsReview.spokenSms(sms.opened, result.reply.userMessageId, result.reply.actionResults, {
         recipient: sms.recipient, selection: sms.selection, conversation: sms.conversation, revision: sms.revision,
-        room: sms.room, current: smsCurrent,
+        room: sms.room, current: smsCurrent, session, turn,
       })
       if (card !== undefined && (try smsCurrent) && Voice.canSentence(try voice.get(), session, turn)) {
         chat.messageNumber(result.reply.userMessageId)

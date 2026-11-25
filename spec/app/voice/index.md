@@ -446,8 +446,10 @@ pure def sentencePlayed(v: Voice, session: int, turn: int): Change =
 
 ### A reply that needs the owner's review in chat keeps voice listening with the microphone open
 
-The owner reviews and approves in the chat. Voice never approves a proposal
-that requires the owner’s review. Any pre-review reply speech is hushed and a non-blocking review
+The owner can tap the review in chat. For an addressed text alone, the
+next utterance in the same Talk session can say “Send this text” while the
+entire review and its Send control are visible. The confirmation is handled
+on the phone without another agent turn. Any pre-review reply speech is hushed and a non-blocking review
 notice is shown, while the conversation returns straight to listening with
 the microphone open (when unmuted) for the next turn. Settling the review
 clears the notice and never stops voice.
@@ -466,6 +468,9 @@ pure def replyEnds(v: Voice, session: int, turn: int, asks: bool): Change =
 pure def canReviewSettled(v: Voice): bool = talking(v) and v.reviewPending
 
 pure def reviewSettled(v: Voice): Voice = { ...v, reviewPending: false }
+
+pure def addressedTextConfirmation(v: Voice, session: int, reviewTurn: int, visible: bool): bool =
+  v.phase == Thinking and v.reviewPending and v.session == session and reviewTurn + 1 == v.turn and visible
 
 pure def stepReviewKeepsVoiceAndMicrophoneOpen(before: Voice, via: str, after: Voice, out: List[Effect]): bool =
   ((via == "replyEnds" and after.reviewPending and not(after.replied)) implies
