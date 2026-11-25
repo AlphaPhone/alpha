@@ -104,6 +104,23 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Ledger, (s) => s.standing.status === "Loaded" && s.holdings.status === "Loaded");
   });
 
+  it('Shows an unread network after a whole holdings failure (spec/app/wallet/index.md, "A network that could not be read is shown as unread, never as empty, and nothing is shown as held on it")', async () => {
+    const world = holding(phone);
+    world.wallet.holdings = [];
+    world.wallet.holdingsUnreachable = true;
+    const { alpha, runtime } = await opened(world);
+    await until(alpha, runtime, Ledger, (s) => s.standing.status === "Loaded" && s.holdings.status === "Failed");
+    const holdings = () => document.querySelector('[aria-label="Holdings"]')?.textContent ?? "";
+    expect(holdings()).toMatch(/Ethereum\s*Could not be read/);
+    expect(holdings()).toMatch(/Solana\s*Could not be read/);
+    expect(holdings()).not.toMatch(/0\s*(ETH|SOL)/);
+
+    world.wallet.holdingsUnreachable = false;
+    await returned(alpha, runtime);
+    expect(holdings()).toMatch(/0\s*ETH/);
+    expect(holdings()).toMatch(/0\s*SOL/);
+  });
+
   it("Receive (spec/app/wallet/index.md, \"Story: Receive\")", async () => {
     const world = holding(phone);
     const { alpha, runtime, ledger } = await opened(world);
