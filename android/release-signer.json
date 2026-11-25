@@ -9,19 +9,19 @@
   },
   "privateProducerApproval": {
     "approval": "approved",
-    "alphaCommit": "6ed84c289615d83165a0c5821dac309e5f5d34f9",
-    "sdkCommit": "57588dc08a8d561a29fe754e3dadb50a6cd8f04e",
-    "versionCode": 121,
+    "alphaCommit": "aba3648d85d24e433ff2cfa8123f147f3e83c756",
+    "sdkCommit": "025e8e1319f4cefdfa8aa48eec810c20a18b259f",
+    "versionCode": 122,
     "updateChannel": {
       "kind": "public",
       "manifestUrlSha256": "b56b3eb2b60e62e105a66de55a15519ff0ac1c3162eb55d61f511b05c0b1e3ca"
     },
-    "archiveBytes": 1258219803,
-    "archiveSHA256": "5c908d762a338ee5233ecca4b0efc3cd0c21cb10d8f46bc6256915a791126791",
-    "producerManifestSHA256": "33de15e2c5efbd845ce823c34f7b8c9b29939fa7e65037c5652e9477777a21b8",
-    "privateProducerReceiptSHA256": "80c99ed972141e1857473587775dee49e02340b3ac4efb8bf9d5b1b7223162a8",
+    "archiveBytes": 1258235034,
+    "archiveSHA256": "f50579205846dd8082931cfa831e02794b980126fb58494b87265985e39a41ea",
+    "producerManifestSHA256": "4956fcf98e008fe9c3c2cf97ec1dc296dc93fb6e976326eeb47ba9d6864d09c3",
+    "privateProducerReceiptSHA256": "939872b50f56ed2b332e65b454cfbac0b936fa259e638aeff1f8989ff7d12252",
     "unsignedApkSHA256": {
-      "launcher": "8081a76854411dd4deaccfa15acee3270ce44c0e586ededbdfb18309fa6e959e"
+      "launcher": "c92121bc0e5655cd7c0264ccb2ab8264c11db8de71343581afc37bee77778fea"
     },
     "applicationId": "ai.alphacompute.alphaphone",
     "purpose": "retained-installation-update"
