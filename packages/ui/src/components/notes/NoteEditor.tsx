@@ -65,7 +65,7 @@ export function NoteEditor({ title, kind, body = "", items = [], next = "", stat
         <button type="button" onClick={onDone} className={cn(focusRing, "min-h-11 rounded-full px-3 font-semibold text-foreground active:bg-accent")}>Done</button>
       </div>
       {status && <div role="status" aria-live="polite" className="px-6 pb-1 text-xs text-muted-foreground">{status}</div>}
-      {feedback && <div className="mx-auto w-full max-w-3xl shrink-0 px-6">{feedback}</div>}
+      {feedback == null ? null : <div className="mx-auto w-full max-w-3xl shrink-0 px-6">{feedback}</div>}
       <div className="mx-auto w-full max-w-3xl shrink-0 px-6 pt-1">
         <input
           aria-label="Title"

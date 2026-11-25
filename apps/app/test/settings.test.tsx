@@ -159,6 +159,24 @@ describe("Settings", () => {
     });
   });
 
+  it("Look at access again (spec/app/startup/access.md, \"Story: Look at access again\")", async () => {
+    const { alpha, world, machines } = await settingsOpen();
+    await press("Privacy");
+    await press("Permissions");
+    await until(alpha, machines, Facts.Machine, (s) => Facts.accessWord(s, "MicrophoneAccess") === "Off");
+    await tap("Microphone");
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"] [aria-current="step"]')?.textContent).toContain("Microphone"));
+    await press("Settings");
+    await vi.waitFor(() => expect(world.settings.opened).toEqual(["privacy"]));
+    world.settings.hostFacts.permissions.Microphone = true;
+    await seen(false);
+    await seen(true);
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"] [aria-current="step"]')?.textContent).toContain("Allowed"));
+    await press("Done");
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
+    expect(await page(alpha)).toBe("Permissions");
+  });
+
   it("Choose how Alpha looks, at my size, and keep it (spec/app/settings/preferences.md, \"Story: Choose how Alpha looks\"; spec/app/settings/preferences.md, \"Story: Make the text larger or smaller\"; spec/app/settings/preferences.md, \"Story: Keep my preferences through a restart\")", async () => {
     // spec/app/settings/preferences.md, "Alpha starts with the appearance and legible text it kept, or Light and ordinary text when nothing readable was kept, and the phone's look; it reads the text size and the device preferences again, and drops what was in flight": the previous Alpha's dark theme is kept.
     localStorage.setItem("alpha.appearance.v1", "dark");
