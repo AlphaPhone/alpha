@@ -168,7 +168,8 @@ function httpBridge(direct: Wired): RuntimeJsonBridge {
 /**
  * The agent through eliza's own runtime client over `bridge`, which waits for an agent that is starting and tells a
  * refusal from a failure. Every request that client cannot carry (a method other than GET and POST, a header, a
- * stream that is not a POST) goes to `direct`.
+ * stream that is not a POST) goes to `direct`. A refusal carries the reason eliza's client read from its body, the
+ * `error` it names, as the wallet's sentence for the owner is.
  */
 function over(bridge: RuntimeJsonBridge, direct: Remote, feed: Reached["feed"], life: Life): Reached {
   const runtime = createRuntimeJsonClient({ bridge: () => bridge, ...waits })
@@ -181,7 +182,7 @@ function over(bridge: RuntimeJsonBridge, direct: Remote, feed: Reached["feed"], 
       if (Option.isNone(sent)) return try direct.call(request)
       return try tryPromise({
         try: () => runtime.request(sent.value.path, sent.value.body, sent.value.headers),
-        catch: (cause): Failure => cause instanceof RuntimeRequestError ? refusal(cause.status, cause.retryAfter)
+        catch: (cause): Failure => cause instanceof RuntimeRequestError ? refusal(cause.status, cause.retryAfter, cause.message)
           : cause instanceof Error && refusedByTheClient.includes(cause.message) ? new Unsent({ cause })
           : new Unreachable({ cause }),
       })

@@ -7,6 +7,7 @@ import { SettingsPage } from "./SettingsPage.tsx";
 import { SettingsReading } from "./SettingsReading.tsx";
 import { SettingsResetNotice, type SettingsResetNoticeProps } from "./SettingsResetNotice.tsx";
 import { SettingsResetRow } from "./SettingsResetRow.tsx";
+import { SettingsRoleRow, type SettingsRoleRowProps } from "./SettingsRoleRow.tsx";
 import { SettingsSetAsHomeRow } from "./SettingsSetAsHomeRow.tsx";
 import { type AndroidTold, placed, type Reading, type SettingsAndroidProps, type SettingsPageName, type SettingsPlaceProps } from "./vocabulary.ts";
 
@@ -36,9 +37,13 @@ export type SettingsGeneralPageProps = SettingsAndroidProps &
     reviewing?: boolean;
     /** Asks the phone to review a reset; offered while no reset is pending. */
     onErase?: () => void;
-    /** Android's dialog for the Home role is open, on a phone that is no Alpha image. */
+    /** Who holds the Home role, as the phone last said; shown on a phone. */
+    home?: SettingsRoleRowProps["word"];
+    /** Who holds the Assistant role, as the phone last said; shown on a phone. */
+    assistant?: SettingsRoleRowProps["word"];
+    /** Android's dialog for the Home role is open. */
     requestingHome?: boolean;
-    /** Asks Android to make Alpha the Home app, on a phone that is no Alpha image, where the Phone page does not exist. */
+    /** Asks Android to make Alpha the Home app; offered when the phone reported a role Alpha can take and does not hold. */
     onRequestHome?: () => void;
     /** What Alpha said about the last reset attempt. */
     said?: SettingsResetNoticeProps["said"];
@@ -52,11 +57,12 @@ const themes = { system: "System", light: "Light", dark: "Dark" } as const;
 
 /**
  * General: Carrier & SIM setup on its own, its pages, the network as the phone reports it with the way into Android's
- * settings for it, the screen lock and default apps, Erase all data, and the Phone page last, on an Alpha image.
+ * settings for it, who holds the Home and Assistant roles with Set as Home, default apps and the screen lock, Erase all
+ * data, and the Phone page last, on an Alpha image.
  * Rows are numbered by slot, as on the first page.
  * @model spec/app/settings/index.md
  */
-export function SettingsGeneralPage({ wifi, bluetooth, mobileData, theme, alerts, image = false, told, onBack, onOpen, onPhone = false, reviewing, onErase, requestingHome, onRequestHome, said, updates, starting, onAndroid, place, onPlace, actions }: SettingsGeneralPageProps) {
+export function SettingsGeneralPage({ wifi, bluetooth, mobileData, theme, alerts, image = false, told, onBack, onOpen, onPhone = false, reviewing, onErase, home, assistant, requestingHome, onRequestHome, said, updates, starting, onAndroid, place, onPlace, actions }: SettingsGeneralPageProps) {
   const at = (row: number) => placed({ place, onPlace }, row);
   const android = { starting, onAndroid };
   return (
@@ -81,9 +87,11 @@ export function SettingsGeneralPage({ wifi, bluetooth, mobileData, theme, alerts
         <SettingsAndroidRow target="airplane-mode" title="Airplane mode" icon={<Plane />} {...android} {...at(8)} />
       </ListGroup>
       <ListGroup>
-        <SettingsAndroidRow target="screen-lock" title="Screen lock" icon={<Lock />} {...android} {...at(9)} />
+        {onPhone && home ? <SettingsRoleRow role="home" word={home} /> : null}
+        {onPhone && assistant ? <SettingsRoleRow role="assistant" word={assistant} /> : null}
+        {requestingHome || onRequestHome ? <SettingsSetAsHomeRow requesting={requestingHome} onRequest={onRequestHome} {...at(14)} /> : null}
         <SettingsAndroidRow target="default-apps" title="Default apps" icon={<AppWindow />} {...android} {...at(10)} />
-        {!image && (requestingHome || onRequestHome) ? <SettingsSetAsHomeRow requesting={requestingHome} onRequest={onRequestHome} {...at(14)} /> : null}
+        <SettingsAndroidRow target="screen-lock" title="Screen lock" icon={<Lock />} {...android} {...at(9)} />
       </ListGroup>
       {updates}
       {onPhone ? (

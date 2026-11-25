@@ -34,7 +34,7 @@ export function VoiceEnd({ runtime }: { runtime: ManagedRuntime.ManagedRuntime<C
 /** The other target beside Ask Alpha, or its reduced view when Ask Alpha is full. */
 export function CommsTarget({ runtime, placement }: {
   runtime: ManagedRuntime.ManagedRuntime<CommsTargetServices, unknown>;
-  placement: "composer" | "strip";
+  placement: "composer" | "strip" | "context";
 }) {
   const shell = useShell(runtime);
   const calls = useCall(runtime);
@@ -52,10 +52,11 @@ export function CommsTarget({ runtime, placement }: {
     : view === "Contacts" && contacts?.opened ? runtime.runSync(Rows.use((held) => held.get())).card?.displayName ?? ""
     : "";
   const shouldShowCall = call !== undefined && (view === "Phone" || placement === "strip");
+  if (placement === "context") return <>{call !== undefined && view === "Phone" ? "Call" : person === "" ? view : `${person} · ${view}`}</>;
   if (placement === "composer") {
     if (!shouldShowCall && person === "") return null;
     return (
-      <Button size="icon" variant="ghost" className="size-11 shrink-0" aria-label={shouldShowCall ? "Back to the call" : `Back to ${view === "Messages" ? "texting " : ""}${person}`} onClick={dock.close}>
+      <Button size="icon" variant="ghost" className="size-11 shrink-0 bg-accent" aria-label={shouldShowCall ? "Back to the call" : `Back to ${view === "Messages" ? "texting " : ""}${person}`} onClick={dock.close}>
         {shouldShowCall ? <Phone /> : <CallAvatar name={person} />}
       </Button>
     );
