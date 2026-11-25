@@ -4,7 +4,7 @@ import { cn } from "../lib/cn.ts";
 import { markTarget, radioMark } from "../lib/styles.ts";
 
 export type RadioGroupProps = ComponentProps<typeof RadioGroupPrimitive.Root>;
-export type RadioGroupItemProps = Omit<ComponentProps<typeof RadioGroupPrimitive.Item>, "children">;
+export type RadioGroupItemProps = ComponentProps<typeof RadioGroupPrimitive.Item>;
 
 /**
  * One choice out of a few, all in view: holds a `RadioGroupItem` for each. Name it with `aria-label`. A disabled group
@@ -15,12 +15,12 @@ export function RadioGroup({ className, onClick, ...props }: RadioGroupProps) {
 }
 
 /** One choice of a `RadioGroup`. Name it with a `Label` or `aria-label`. */
-export function RadioGroupItem({ className, ...props }: RadioGroupItemProps) {
+export function RadioGroupItem({ children, className, ...props }: RadioGroupItemProps) {
   return (
     <RadioGroupPrimitive.Item className={cn(markTarget, className)} {...props}>
-      <span className={radioMark}>
+      {children ?? <span className={radioMark}>
         <RadioGroupPrimitive.Indicator className="size-3 rounded-full bg-alpha" />
-      </span>
+      </span>}
     </RadioGroupPrimitive.Item>
   );
 }

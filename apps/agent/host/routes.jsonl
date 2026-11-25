@@ -15,6 +15,7 @@
 { "method": "POST", "path": "/api/client-devices/proposals/{id}/decision" }
 { "method": "POST", "path": "/api/client-devices/proposals/{id}/claim" }
 { "method": "POST", "path": "/api/client-devices/proposals/{id}/receipt" }
+{ "method": "POST", "path": "/api/client-devices/proposals/{id}/read-completion" }
 { "method": "POST", "path": "/api/client-devices/proposals/{id}/reconciliation" }
 { "method": "GET", "path": "/api/approvals" }
 { "method": "POST", "path": "/api/approvals/{id}/resolve" }
