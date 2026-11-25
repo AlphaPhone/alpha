@@ -43,7 +43,7 @@ import { FileContext, documentObservation } from "./file-context.vibe"
 import { MediaReview, mediaReview } from "./media-review.vibe"
 import { agentWarmUp } from "./warm-up.vibe"
 import { type Attached, type Board, type Line, Talk, talk } from "./talk.vibe"
-import { Views, carried, carriedAloud, delivery, handoffs, preparedIn } from "./views.vibe"
+import { Views, carried, carriedAloud, delivery, handoffs, preparedIn, resendWithoutMode } from "./views.vibe"
 import { attachmentAuthority, dropFiles, readFiles, rememberFiles, retireTranscript, sameBinding, stageFiles } from "./attachments.vibe"
 import { readMessage } from "./read-aloud.vibe"
 import { type DraftAddress, exchangePhoneDraft, readPhoneDraft } from "./draft-device.vibe"
@@ -409,10 +409,15 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       filesShowing: context.showing.tag === "App" && context.showing.view === "Files", readable: openFile.mimeType === "text/plain",
       sensitive: context.sensitive, currentTurn: Conversation.canFinish(try conversation.get(), ticket),
     }) ? [openFile] : []
-    const directFiles = (requestedFiles !== undefined || outsideOrigin !== undefined) && openDocument.length === 0 && selected?.kind !== "document"
-    const metadata = { ...screen, ...(told ? delivery(views.clientId, directFiles) : {}), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
+    const asksDirect = (requestedFiles !== undefined || outsideOrigin !== undefined) && openDocument.length === 0 && selected?.kind !== "document"
     const images = [...files, ...openDocument].map(({ data, mimeType, name }) => ({ data, mimeType, name }))
-    const result = tryPromise(() => controller.send({ text: outgoing, ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks, ...(enrolled === undefined ? {} : { headers: enrolled.headers }) })) catch () => undefined
+    const sent = effect (direct: boolean) => {
+      const metadata = { ...screen, ...(told ? delivery(views.clientId, direct ? "direct-files-v1" : undefined) : {}), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
+      return tryPromise(() => controller.send({ text: outgoing, ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks, ...(enrolled === undefined ? {} : { headers: enrolled.headers }) })) catch () => undefined
+    }
+    const first = try sent(asksDirect)
+    const directFiles = asksDirect && !resendWithoutMode(first, asksDirect)
+    const result = directFiles || !asksDirect ? first : try sent(false)
     if (!(try ownsSeat(board, seat))) {
       Queue.offerUnsafe(queue, { type: "lose", ticket })
       Queue.endUnsafe(queue)

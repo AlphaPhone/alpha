@@ -696,12 +696,19 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
 
     await speak("no-files-request", "What time is it?", 1, false);
     expect([review.claims, world.files.calls.includes("storageQuery")]).toEqual([[], false]);
-    expect(world.ask.metadata.at(-1)).toMatchObject({ voiceUi: { agentActionMode: "direct-files-v1" } });
+    expect(world.ask.metadata.at(-1)).toMatchObject({ voiceUi: { agentActionMode: "direct-files-only-v1" } });
     expect(world.voice.spoken.some((said) => said.text.includes("quarter past two"))).toBe(true);
     await speak("asked-filter", "only the pdfs in my downloads", 2);
     expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "asked-filter" })]);
     expect(world.ask.spokenFiles.at(-1)).toEqual({ channel: "VOICE_DM", images: undefined });
     expect(world.voice.spoken.some((said) => said.text.includes("Showing 1 item in Files"))).toBe(true);
+
+    // spec/app/assistant/context.md, "A turn an agent refuses whole for a direct-request mode it does not know is sent once more without it"
+    world.ask.knowsNoActionMode = true;
+    const posted = world.ask.metadata.length;
+    await speak("older-agent", "What time is it now?", 3, false);
+    expect(world.ask.metadata.slice(posted).map((one) => (one as { voiceUi?: { agentActionMode?: string } } | undefined)?.voiceUi?.agentActionMode)).toEqual(["direct-files-only-v1", undefined]);
+    expect(world.voice.spoken.filter((said) => said.text.includes("quarter past two"))).toHaveLength(2);
     await press("Stop voice conversation");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
   });
@@ -736,7 +743,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await speak("ordinal", "Open result 1", 1);
     expect(review.claims).toEqual([]);
     expect(alpha.runtime.runSync(Shell.Machine.use((machine) => machine.get())).trail).toEqual([]);
-    expect(world.ask.metadata.at(-1)).toMatchObject({ voiceUi: { agentActionMode: "direct-files-v1" } });
+    expect(world.ask.metadata.at(-1)).toMatchObject({ voiceUi: { agentActionMode: "direct-files-only-v1" } });
 
     review.proposal.payload.operation = filter;
     await speak("named-filter", "Show PDFs in Download", 2);
@@ -781,7 +788,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 1 && state.phase === "Listening" && state.mic === "On");
     expect(world.ask.spokenFiles?.at(-1)).toEqual(attached);
     if (!secret) expect(world.ask.metadata.at(-1)).toMatchObject({ observation: { view: "files", selectedObject: { kind: "document" } } });
-    if (!secret) expect(world.ask.metadata.at(-1)).not.toMatchObject({ voiceUi: { agentActionMode: "direct-files-v1" } });
+    if (!secret) expect(world.ask.metadata.at(-1)).not.toMatchObject({ voiceUi: { agentActionMode: "direct-files-only-v1" } });
 
     speakUtterance(world, "Please summarize this file");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 2 && state.phase === "Listening");
