@@ -10,7 +10,8 @@ export const meta: ComponentMeta<SmsReviewCardProps> = {
   examples: {
     "To a contact": { to: "Maya Chen", number: "+14155550132", body: "Running ten minutes late, sorry." },
     "Long text": { body: "Running about twenty minutes late because the train is stuck outside the station. Start without me and I will catch up on the notes as soon as I sit down." },
-    "With a note": { note: "Confirm the text and SIM in Android to send it." },
+    "From a SIM, said in Talk": { note: "SIM 1 · Carrier", hint: "Say “Send this text”", review: "review-1" },
+    Deciding: { sendDisabled: true, declineDisabled: true },
     Settled: { onSend: undefined, onDecline: undefined },
   },
   play: {

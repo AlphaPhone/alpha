@@ -12,12 +12,10 @@ const motion: Readonly<Record<ShownPhase, Motion>> = {
   Transcribing: { scale: [0.38, 0.7, 0.38], opacity: [0.52, 0.92, 0.52], duration: 720 },
   Thinking: { scale: [0.24, 0.52, 0.24], opacity: [0.38, 0.92, 0.38], duration: 1600 },
   Speaking: { scale: [0.42, 1, 0.52, 0.84, 0.42], opacity: [0.68, 1, 0.8, 0.96, 0.68], duration: 640 },
-  Paused: { scale: [0.24], opacity: [0.36], duration: 0 },
   Stopping: { scale: [0.58, 0.22], opacity: [0.82, 0.36], duration: 200 },
   Muted: { scale: [0.24], opacity: [0.36], duration: 0 },
 };
 const tones: Partial<Record<ShownPhase, string>> = {
-  Paused: "text-voice-paused",
   Muted: "text-voice-paused",
   Transcribing: "text-voice-processing",
   Thinking: "text-voice-processing",

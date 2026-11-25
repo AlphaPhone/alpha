@@ -5,7 +5,7 @@ The split stage of [Phone](./), [Messages](../messages/) and
 bottom bar that addresses the person on screen or Alpha, a stage that lays
 the app's view out above the conversation sheet instead of covering it,
 sheet heights closed, open and full, End never covered, and at most one
-proposal at a time that acts only on the owner's tap. The sheet's own fitted
+proposal at a time that acts only on the owner's confirmation. The sheet's own fitted
 heights, drag and motion are the shell's (AC-07); this spec keeps what the
 telephony screens decide: who the bar addresses, which view the stage shows
 and what it returns to, where End is, what Alpha may propose and when it
@@ -269,6 +269,12 @@ After a call proposal is approved the stage switches to the call with a
 "‹ Messages" chip and the sheet keeps its height (AC-20); no dial happens
 before the tap. An approved proposal is done and can never be approved
 again.
+
+The addressed SMS review may also take the owner's next explicit spoken
+confirmation, for the same fully visible card in the same Talk session.
+The phone checks the exact approved text and SIM against the claimed
+operation before dispatching it. The voice rule for this exception is in
+[Talk](../voice/).
 
 ```quint
 pure def canProposalApproved(c: Comms, proposalId: str, by: Actor): bool =

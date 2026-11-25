@@ -1,13 +1,15 @@
 // spec/app/files/index.md, "Story: Find and open my files"; spec/app/files/recent.md, "Story: Pick a file with the system picker"; spec/app/files/change.md, "Story: Change the files I select"
 import {
   FilesVolume, type FilesFilter, LibraryStore, type RowOutcome, type SelectedFile, type VolumeRefused,
-  importLibraryFile, importLibraryFolder, indexedLibrary, librarySelections, libraryVolume, parentOf, validName,
+  decodeBase64, importLibraryFile, importLibraryFolder, indexedLibrary, librarySelections, libraryVolume, parentOf, validName,
 } from "@elizaos/plugin-files-client"
+import type { OpaqueMailAttachment } from "@elizaos/plugin-inbox-client"
 import type { ElizaFilesPlugin, FileOutcomeRow, FilesResult } from "@elizaos/os-bridges"
 import type { DocumentHandoff, PdfPage, SelectedDocument, SelectedDocumentsClient, SelectionId } from "@elizaos/os-bridges"
 import { bytesOf, downloadCopy, pdfPage, previewOf, releasePreview, selectedFile, shareCopy } from "./browser-library.ts"
 import { Documents, browserDocuments } from "./documents.vibe"
 import { Files, browserFiles } from "./files.vibe"
+import { InboxAttachmentFiles, type SaveResult, attachmentDownloads } from "./inboxAttachments.vibe"
 
 module web {
   /** The browser has an origin-private library when IndexedDB is available. @throws {never} */
@@ -70,6 +72,25 @@ const webLibrary = Layer.effectContext(effect {
   const selectionId = Schema.decodeUnknownSync(Schema.NonEmptyString.pipe(Schema.brand("SelectionId")))
   const notify = <A>(write: A!VolumeRefused): A!VolumeRefused => Effect.tap(write, () => PubSub.publish(changed, undefined))
   const announce = <A>(work: A!VolumeRefused, painted: (value: A) => object) => answer(notify(work), painted)
+  effect function saveMailCopy(_attempt: number, file: OpaqueMailAttachment): SaveResult!! {
+    const name = validName(file.name)
+    const bytes = decodeBase64(file.dataBase64)
+    if (name === undefined || name.startsWith(".") || bytes === undefined || bytes.byteLength !== file.size) return "refused"
+    const result = effect {
+      const path = try notify(provideService(importLibraryFile("", { name, mimeType: file.mimeType, bytes }), LibraryStore, store))
+      return { kind: "written", path } as const
+    } catch (failure) => ({ kind: "failed", status: failure.status } as const)
+    if (result.kind === "failed") return result.status === "exists" || result.status === "invalid" ? "refused" : "unknown"
+    const matched = effect {
+      const { selectionId } = try selections.select(result.path)
+      return try ensuring(effect {
+        const read = try selections.bytes(selectionId)
+        const kept = try tryPromise(() => bytesOf(read.blob))
+        return kept.byteLength === bytes.byteLength && kept.every((byte, index) => byte === bytes[index])
+      }, selections.forget(selectionId))
+    } catch () => false
+    return matched ? "saved" : "unknown"
+  }
   function forgetUrl(id: string): void {
     const url = blobs.get(id)
     if (url !== undefined) releasePreview(url)
@@ -201,12 +222,13 @@ const webLibrary = Layer.effectContext(effect {
     },
     attachment: (id) => Effect.match(selections.attachment(id, "mail"), { onFailure: () => Option.none(), onSuccess: Option.some }),
   }
-  return Context.add(Context.make(Files, { plugin: Option.some(library), changed: changes }), Documents, docs)
+  const files = Context.add(Context.make(Files, { plugin: Option.some(library), changed: changes }), Documents, docs)
+  return Context.add(files, InboxAttachmentFiles, { destination: "library", save: saveMailCopy, cancel: () => Effect.void })
 })
 
 const indexed = Layer.provideMerge(libraryVolume("Alpha files.zip"), indexedLibrary(database))
 
 /** Browser storage is local to this origin and never requests Android's broad storage permission. */
 export const browserLibrary = Layer.unwrap(sync(() =>
-  supported() ? Layer.provide(webLibrary, indexed) : Layer.merge(browserFiles, browserDocuments),
+  supported() ? Layer.provide(webLibrary, indexed) : Layer.mergeAll(browserFiles, browserDocuments, attachmentDownloads),
 ))

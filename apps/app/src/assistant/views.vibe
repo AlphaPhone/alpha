@@ -1,10 +1,12 @@
-// spec/app/assistant/index.md, "Story: Let Alpha open what it is talking about"; spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
+// spec/app/assistant/index.md, "Story: Let Alpha open what it is talking about"; spec/app/browser/index.md, "Story: Let the agent open a page"; spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
 import type { TurnResult } from "@elizaos/agent"
 import * as Conversation from "../../gen/app__assistant.effect.vibe"
 import { resent } from "../../gen/app__assistant__context.effect.vibe"
 import type { Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe"
 import { type Detent, type View, parseEvent } from "../../gen/app__shell.effect.vibe"
+import { readOperation } from "@elizaos/agent"
 import { Agent } from "../platform/agent.vibe"
+import { AgentPages, type AgentPage } from "../platform/browser.vibe"
 import { ask } from "../platform/remote.vibe"
 import { agentOpen, mayAgentOpen } from "../notes/agent.vibe"
 import { contained, started } from "../runtime/reactor.vibe"
@@ -33,6 +35,9 @@ schema Handoff {
 }
 
 schema Prepared { readonly values: Handoff }
+/** A page eliza's BROWSER_OPEN asked the screen `clientId` to show for the owner's Open. */
+schema PageAsked { readonly actionName: "BROWSER_OPEN"; readonly mode: "open"; readonly operation: Schema.Unknown; readonly clientId: string }
+const pageAskedOf = Schema.decodeUnknownOption(PageAsked)
 const Claimed = Schema.Struct({ claimId: Schema.String, target: Schema.optionalKey(Schema.Struct({ kind: Schema.Literal("saved-note"), noteId: Schema.String })) })
 schema Answered { readonly ok: boolean }
 const preparedOf = Schema.decodeUnknownOption(Prepared)
@@ -43,13 +48,19 @@ export interface Held {
   readonly handoff: Handoff
 }
 
-type TypedHeld = Held | { readonly asked: number; readonly continueFiles: Effect.Effect<void> }
+/** A page the agent asked to open for the owner's request numbered `asked`. */
+export interface PageHeld {
+  readonly asked: number
+  readonly page: AgentPage
+}
+
+type TypedHeld = Held | PageHeld | { readonly asked: number; readonly continueFiles: Effect.Effect<void> }
 
 /** Where an agent's view goes: Home, or one of Alpha's apps. */
 type Place = View | "Home"
 
 interface SpokenView {
-  readonly held: Held
+  readonly held: Held | PageHeld
   readonly current: Effect.Effect<boolean>
   readonly front: (place: Place) => Effect.Effect<boolean>
   readonly completed: Deferred.Deferred<void>
@@ -81,7 +92,7 @@ export service Views {
   current(): number!!
   hold(ticket: number, held: TypedHeld): void!!
   take(ticket: number): Option.Option<TypedHeld>!!
-  spoken(held: Held, current: Effect.Effect<boolean>, front: (place: Place) => Effect.Effect<boolean>): void!!
+  spoken(held: Held | PageHeld, current: Effect.Effect<boolean>, front: (place: Place) => Effect.Effect<boolean>): void!!
   readonly heard: Queue.Dequeue<SpokenView>
 }
 
@@ -106,7 +117,7 @@ export const handoffs = Layer.effect(Views, effect {
       typed = undefined
       return Option.some(found)
     }),
-    spoken: effect (held: Held, current: Effect.Effect<boolean>, front: (place: Place) => Effect.Effect<boolean>) => {
+    spoken: effect (held: Held | PageHeld, current: Effect.Effect<boolean>, front: (place: Place) => Effect.Effect<boolean>) => {
       const completed = try Deferred.make<void>()
       try Queue.offer(heard, { held, current, front, completed })
       try Deferred.await(completed)
@@ -138,6 +149,15 @@ export function delivery(clientId: string, directFiles?: DirectFilesMode) {
 export function preparedIn(results: ReadonlyArray<{ readonly action: string; readonly data: unknown }>, clientId: string): Handoff | undefined {
   const found = results.filter((result) => result.action === "VIEWS").map((result) => Option.getOrUndefined(preparedOf(result.data))?.values).at(-1)
   return found?.navigationBinding.clientId === clientId ? found : undefined
+}
+
+/** The page this screen was asked to open: eliza's typed open of the reply's last `BROWSER_OPEN` that opened one, if any. */
+export function pageIn(results: ReadonlyArray<{ readonly action: string; readonly data: unknown }>, clientId: string): AgentPage | undefined {
+  return results.flatMap((result): AgentPage[] => {
+    const asked = result.action === "BROWSER_OPEN" ? Option.getOrUndefined(pageAskedOf(result.data)) : undefined
+    const operation = asked?.clientId === clientId ? readOperation(asked.operation)?.operation : undefined
+    return asked !== undefined && operation?.type === "browser_navigate" ? [{ operation }] : []
+  }).at(-1)
 }
 
 /** Open `place` for the reply of `ticket`, once, as the conversation allows; whether it opened. */
@@ -202,6 +222,10 @@ effect function openPrepared(ticket: number) {
   const held = try views.take(ticket)
   if (Option.isNone(held) || held.value.asked !== (try views.current())) return
   if ("continueFiles" in held.value) return try held.value.continueFiles
+  if ("page" in held.value) {
+    if (try navigated(ticket, "Browser")) try (try AgentPages).open(held.value.page, Effect.map(views.current(), (now) => now === held.value.asked))
+    return
+  }
   const place = placeFor(held.value.handoff)
   if (place !== undefined) try carriedOut(held.value, navigated(ticket, place))
 }
@@ -215,12 +239,18 @@ export const carried = started(effect {
 }, "opening what a reply prepared")
 
 // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
-/** Carry out the completed reply's prepared view through the spoken turn's own navigation claim. */
+/** Carry out the completed reply's prepared view, or show the page it asked for on the Browser's card, through the spoken turn's own navigation claim. */
 export const carriedAloud = started(effect {
   const views = try Views
   try Stream.runForEach(Stream.fromQueue(views.heard), (work) => Effect.ensuring(effect {
-    const place = placeFor(work.held.handoff)
-    if (place === undefined || work.held.asked !== (try views.current()) || !(try work.current)) return
-    try contained(carriedOut(work.held, work.front(place)), "opening what a spoken reply prepared")
+    const held = work.held
+    if (held.asked !== (try views.current()) || !(try work.current)) return
+    if ("page" in held) {
+      if (try work.front("Browser")) try (try AgentPages).open(held.page, Effect.map(views.current(), (now) => now === held.asked))
+      return
+    }
+    const place = placeFor(held.handoff)
+    if (place === undefined) return
+    try contained(carriedOut(held, work.front(place)), "opening what a spoken reply prepared")
   }, asVoid(Deferred.succeed(work.completed, undefined))))
 }, "opening what a spoken reply prepared")
