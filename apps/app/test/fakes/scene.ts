@@ -99,7 +99,7 @@ export function services(world: Scene) {
       ...telephonyRoutes(world.telephony),
     ]),
     cloud: answering([
-      ...cloudRoutes(() => world.signedIn),
+      ...cloudRoutes(() => world.signedIn, () => world.now),
       ...inboxRoutes(world.inbox),
       ...mapsRoutes(world.maps, () => world.now),
     ]),

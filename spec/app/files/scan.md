@@ -78,6 +78,9 @@ pure def editable(s: Scan): bool = s.open and not(exporting(s)) and not(K::delet
 pure val imageValues = Set(1, 2, 3)
 pure val frameValues = Set(1)
 pure val replacingValues = Set(0, 1)
+pure val atValues = Set(-1, 0, 1, 2)
+pure val earlierValues = Set(1, 2, 3)
+pure val laterValues = Set(1, 2, 3)
 pure val ticketValues = Set(1, 2, 3)
 pure val heldValues = Set(1, 5)
 pure val baseValues = Set(0, 1)
@@ -210,17 +213,44 @@ pure def corrected(s: Scan, image: int, by: Actor): Scan =
     images: s.images + 1 }
 ```
 
-### The owner removes a page, or moves one to the end
+### The owner removes a page or moves it one place earlier or later
+
+Moving asks to swap the two named images at the places the owner saw. A
+pair that moved, was reversed or no longer shows there is refused. Both
+pages keep their image and reviewed text. The draft takes the new order.
 
 ```quint
 pure def canRemove(s: Scan, image: int, by: Actor): bool = by == Owner and editable(s) and has(s, image)
 
 pure def remove(s: Scan, image: int, by: Actor): Scan = edited(s.pages.select(p => p.image != image), s)
 
-pure def canMoveToEnd(s: Scan, image: int, by: Actor): bool = by == Owner and editable(s) and has(s, image) and s.pages.length() > 1
+pure def adjacentPages(pages: List[K::Page], at: int, earlier: int, later: int): bool =
+  at >= 0 and at < pages.length() - 1 and earlier > 0 and later > 0 and earlier != later
+    and pages.nthOr(at, K::noPage).image == earlier and pages.nthOr(at + 1, K::noPage).image == later
+    and pages.select(p => p.image == earlier or p.image == later).length() == 2
 
-pure def moveToEnd(s: Scan, image: int, by: Actor): Scan =
-  edited(s.pages.select(p => p.image != image).concat(s.pages.select(p => p.image == image)), s)
+pure def swappedPages(pages: List[K::Page], at: int): List[K::Page] =
+  val valid = at >= 0 and at < pages.length() - 1
+  val first = pages.nthOr(at, K::noPage)
+  val second = pages.nthOr(if (valid) at + 1 else -1, K::noPage)
+  if (valid) pages.listMap(p => if (p.image == first.image) second else if (p.image == second.image) first else p)
+  else pages
+
+pure def canSwapPages(s: Scan, at: int, earlier: int, later: int, by: Actor): bool =
+  by == Owner and editable(s) and adjacentPages(s.pages, at, earlier, later)
+
+pure def swapPages(s: Scan, at: int, earlier: int, later: int, by: Actor): Scan =
+  edited(swappedPages(s.pages, at), s)
+
+pure def lawAdjacentPagesSwapWhole(pages: List[K::Page], at: int, earlier: int, later: int): bool =
+  val swapped = swappedPages(pages, at)
+  adjacentPages(pages, at, earlier, later) implies
+    (swapped.length() == pages.length() and swapped.every(p => pages.includes(p))
+      and swapped.nthOr(at, K::noPage) == pages.nthOr(at + 1, K::noPage)
+      and swapped.nthOr(at + 1, K::noPage) == pages.nthOr(at, K::noPage))
+
+pure val eval_witness_canSwapPages = (("start", Owner), ("add", 1, 0, false, Phone),
+  ("add", 1, 0, true, Phone), ("swapPages", 0, 1, 2, Owner))
 ```
 
 ### Every page shows an image already made
