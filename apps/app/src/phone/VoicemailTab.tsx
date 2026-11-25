@@ -2,6 +2,7 @@
 import type { ListedVoicemail } from "@elizaos/os-bridges";
 import { Banner, Button, Slider, Spinner, cn, focusRing } from "@repo/ui";
 import { Effect } from "effect";
+import { Phone as Handset, Trash2 } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
 import { useMachine as useVoicemail } from "../../gen/app__phone__voicemail.react.ts";
@@ -9,7 +10,7 @@ import type { PhoneProps } from "./Phone.tsx";
 import { CallAvatar } from "./CallAvatar.tsx";
 import { Player, Voicemails, askVoicemailDeletion } from "./voicemail.vibe";
 import { callerTitle, clockLength, shortWhen } from "./words.ts";
-import { Bin, Bubble, Close, Handset, PauseGlyph, PlayGlyph, RetryGlyph } from "./icons.ts";
+import { Bubble, Close, PauseGlyph, PlayGlyph, RetryGlyph } from "./icons.ts";
 
 type Props = Pick<PhoneProps, "runtime"> & { now: number };
 
@@ -83,7 +84,7 @@ function OpenVoicemail({ runtime, row, label, title, date }: Pick<Props, "runtim
           {row.number !== "" && can(call) && <Button variant="ghost" size="icon" className={cn(action, "w-auto")} aria-label="Call back" disabled={!canCall} onClick={() => void send(call)}><Handset className="size-5" /></Button>}
           {row.number !== "" && can(message) && <Button variant="ghost" size="icon" className={cn(action, "w-auto")} aria-label="Message" onClick={() => void send(message)}><Bubble className="size-5" /></Button>}
           {can({ type: "askDelete" }) && <Button variant="ghost" size="icon" className={cn(action, "w-auto text-hangup")} aria-label="Delete"
-            data-alpha-phone-voicemail-delete="" onClick={() => void runtime.runPromise(askVoicemailDeletion(row.id))}><Bin className="size-5" /></Button>}
+            data-alpha-phone-voicemail-delete="" onClick={() => void runtime.runPromise(askVoicemailDeletion(row.id))}><Trash2 className="size-5" /></Button>}
         </div>
       )}
     </section>

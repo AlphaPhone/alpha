@@ -2,6 +2,7 @@
 import type { TelephonyCallLogEntry } from "@elizaos/os-bridges";
 import { Alert, Button, Chip, Input, Spinner, Tabs, TabsContent, cn, focusRing } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
+import { Phone as Handset } from "lucide-react";
 import { memo, useCallback, useRef } from "react";
 import { Machine as PhoneMachine, type Tab } from "../../gen/app__phone.effect.vibe";
 import { dialable, historyFailed, logNeeded, noCalls, noMatchingCalls } from "../../gen/app__phone.ts";
@@ -18,7 +19,7 @@ import { CommsBar, type CommsServices } from "./CommsBar.tsx";
 import { CallAvatar } from "./CallAvatar.tsx";
 import { PhoneTabs } from "./PhoneTabs.tsx";
 import { VoicemailTab } from "./VoicemailTab.tsx";
-import { CallIn, CallOut, EraseDigit, Handset } from "./icons.ts";
+import { CallIn, CallOut, EraseDigit } from "./icons.ts";
 
 export interface PhoneProps {
   runtime: ManagedRuntime.ManagedRuntime<PhoneMachine | VoicemailMachine | Dialer | Voicemails | Player | CommsServices | Time, unknown>;
