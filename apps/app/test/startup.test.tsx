@@ -100,6 +100,16 @@ it("Returns from Android Wi-Fi settings to the sign-in chooser (spec/app/account
     await drawn(() => window.dispatchEvent(new Event("focus")));
     await vi.waitFor(() => expect(notice()?.textContent).toContain("Android couldn’t verify internet access."));
     expect(button("Send code")?.disabled).toBe(false);
+
+    world.settings.facts.wifiActive = false;
+    await drawn(() => window.dispatchEvent(new Event("focus")));
+    await vi.waitFor(() => expect(notice()?.textContent).toContain("Sign-in isn’t using Wi-Fi. Android couldn’t verify internet access."));
+    world.settings.connectivity = { online: true, validated: true, captivePortal: false, ssid: null };
+    await drawn(() => window.dispatchEvent(new Event("focus")));
+    await vi.waitFor(() => expect(notice()?.textContent).toContain("You can use mobile data or connect to Wi-Fi."));
+    expect(button("Send code")?.disabled).toBe(false);
+
+    world.settings.facts.wifiActive = true;
     world.settings.connectivity = { online: true, validated: true, captivePortal: false, ssid: "home" };
     await drawn(() => window.dispatchEvent(new Event("focus")));
     await vi.waitFor(() => expect(notice()).toBeNull());

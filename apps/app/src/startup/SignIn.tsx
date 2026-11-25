@@ -22,6 +22,8 @@ const messages: Partial<Record<Trouble, string>> = {
 const networkMessages: Record<ConnectionWarning, string> = {
   Offline: "You’re offline. Connect to Wi-Fi to sign in.",
   Unvalidated: "Android couldn’t verify internet access. Sign-in needs an internet connection.",
+  WithoutWifi: "Sign-in isn’t using Wi-Fi. You can use mobile data or connect to Wi-Fi.",
+  UnvalidatedWithoutWifi: "Sign-in isn’t using Wi-Fi. Android couldn’t verify internet access.",
 };
 
 export function useFirstRun(alpha: Alpha, ready: boolean) {

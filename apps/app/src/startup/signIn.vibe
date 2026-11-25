@@ -17,7 +17,7 @@ import { Time } from "../runtime/time.vibe"
 import { Engagements } from "../update/activity.vibe"
 
 export type Stage = "Disabled" | "Checking" | "Required" | "Unavailable" | "Admitted"
-export type ConnectionWarning = "Offline" | "Unvalidated"
+export type ConnectionWarning = "Offline" | "Unvalidated" | "WithoutWifi" | "UnvalidatedWithoutWifi"
 
 export interface FirstRun {
   readonly stage: Stage
@@ -129,6 +129,10 @@ export function startupSignIn(enabled: boolean) {
         const network = try wifi.connectivity()
         if (Option.isNone(network)) return undefined
         if (!network.value.online) return "Offline" as const
+        const wifiActive = try wifi.usingWifi()
+        if (Option.isSome(wifiActive) && !wifiActive.value) {
+          return network.value.validated ? "WithoutWifi" as const : "UnvalidatedWithoutWifi" as const
+        }
         if (!network.value.validated) return "Unvalidated" as const
         return undefined
       }
@@ -210,8 +214,9 @@ export function startupSignIn(enabled: boolean) {
 
       const canAct = effect {
         const ready = try current()
-        return ready.stage === "Required" && ready.connection !== "Offline" && !(try Ref.get(checking)) && (try foreground)
-          && (try networkWarning) !== "Offline"
+        if (ready.stage !== "Required" || ready.connection === "Offline" || (try Ref.get(checking)) || !(try foreground)) return false
+        const network = try wifi.connectivity()
+        return Option.isNone(network) || network.value.online
       }
 
       effect function applyReceipt(
