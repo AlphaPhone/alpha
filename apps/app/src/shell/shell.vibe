@@ -74,7 +74,7 @@ export effect function back(): void!!(Shell.Machine | Layers.Machine | Backs) {
     if (!(try screens.take(`layer:${Layers.top(over).id}`))) try contained(layers.send({ type: "back" }), "back")
     return
   }
-  if (taker === "ByHold") return
+  if (taker === "ByHold" || (try screens.take("startup/sign-in"))) return
   const state = try shell.get()
   const view = state.trail.at(-1)
   if (try screens.take("assistant")) return

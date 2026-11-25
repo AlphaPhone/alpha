@@ -17,6 +17,7 @@ import { AppBack } from "./shell/AppBack.tsx";
 import { measureChrome, watchChrome } from "./shell/chrome.vibe";
 import { home } from "./shell/shell.vibe";
 import { isCommsView, viewHasHeader, views } from "./shell/views.tsx";
+import { canLeaveSignInStep, SignIn, useFirstRun } from "./startup/SignIn.tsx";
 import { reloadBeforeMount } from "./startup/recovery.vibe";
 
 export interface AppProps {
@@ -86,6 +87,8 @@ export function App({ alpha }: AppProps) {
     if (node) return watchChrome(node, (event) => { void alpha.runtime.runPromise(measureChrome(event)); });
   }, [alpha]);
   const updating = page !== undefined && dialogShown(page);
+  const { read: signedIn, flow: signInFlow } = useFirstRun(alpha, state !== undefined && cause === undefined && page !== undefined && editorsMounted(page) && !updating);
+  const signingIn = alpha.requiresSignIn && signedIn?.stage !== "Admitted";
   if (!state) {
     if (updating) return <>{alpha.slot("overlay")}</>;
     return cause
@@ -96,7 +99,7 @@ export function App({ alpha }: AppProps) {
   const showing = state.trail.at(-1);
   const owner = `${showing ?? "home"}:${state.assistant}:${launcher}`;
   const beginSwipe = (event: PointerEvent<HTMLElement>) => {
-    if (shellFailed || !event.isPrimary || event.button !== 0 || event.defaultPrevented) return;
+    if (shellFailed || signingIn || !event.isPrimary || event.button !== 0 || event.defaultPrevented) return;
     startedRef.current = undefined;
     const target = event.target;
     if (target instanceof Element && target.closest("input, textarea, select, [contenteditable]:not([contenteditable=false]), [data-alpha-own-gesture]")) return;
@@ -169,7 +172,8 @@ export function App({ alpha }: AppProps) {
   const fullScreen = state.assistant === "Full" && !side;
   const strip = comms && fullScreen;
   const back = !shellFailed && can({ type: "goBack" });
-  const canGoBack = String(!shellFailed && (back || (layers !== undefined && takesBack(layers))));
+  const canGoBack = String(!shellFailed && (signingIn ? canLeaveSignInStep(signedIn, signInFlow)
+    : back || (layers !== undefined && takesBack(layers))));
   const frameStyle = preview
     ? { left: preview.left, top: preview.top, width: preview.width, height: preview.height, transform: `scale(${preview.scale})`, transformOrigin: "top left" }
     : canvas?.covered ? { height: canvas.visible } : undefined;
@@ -196,10 +200,11 @@ export function App({ alpha }: AppProps) {
           if (document && document.dataset.alphaCanGoBack !== canGoBack) document.dataset.alphaCanGoBack = canGoBack;
         }}
         className={cn("relative flex min-h-0 min-w-0 flex-1 flex-col", showing !== undefined && "overflow-auto overscroll-contain", strip && "overflow-hidden")}
-        inert={inert || fullScreen}
+        inert={signingIn ? updating : inert || fullScreen}
       >
-        {comms && alpha.slot("phone/stage")}
-        {page === undefined || !editorsMounted(page) ? null : showing === undefined
+        {signingIn && !updating ? <SignIn alpha={alpha} read={signedIn} state={signInFlow} /> : null}
+        {!signingIn && comms && alpha.slot("phone/stage")}
+        {signingIn || page === undefined || !editorsMounted(page) ? null : showing === undefined
           ? alpha.slot("home")
           : (
             <div key={showing} className="flex min-h-0 flex-1 flex-col motion-safe:animate-rise">
@@ -215,7 +220,7 @@ export function App({ alpha }: AppProps) {
       </div>
       <div
         data-alpha-assistant-host=""
-        hidden={!askAlphaDrawn(state)}
+        hidden={signingIn || !askAlphaDrawn(state)}
         className={cn(
           "in-[body:has([data-alpha-notes-trash-sheet])]:invisible",
           "in-[body:has([data-alpha-subview=photos-clip-editor])]:invisible",
@@ -230,7 +235,7 @@ export function App({ alpha }: AppProps) {
         )}
         inert={shellFailed || (layers !== undefined && assistantInert(layers))}
       >
-        {alpha.slot("assistant")}
+        {!signingIn && alpha.slot("assistant")}
       </div>
       {alpha.slot("overlay")}
       {alpha.slot("notice")}

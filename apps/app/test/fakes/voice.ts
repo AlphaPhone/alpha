@@ -57,6 +57,7 @@ export interface VoiceScene {
   activeMicSession: string | undefined;
   emitLocal?: (event: string, data: unknown) => void;
   emitCloud?: (event: CloudStreamEvent) => void;
+  startupSignIn?: Partial<Pick<ElizaSignInPlugin, "startEmail" | "startPhone" | "startGoogle" | "verify" | "resend" | "cancel" | "sendFactorCode" | "status">>;
   /** The phone's sign-in settling on the account whose key is `credentialId` now, as `ElizaSignInPlugin.java` tells it. */
   signedInHere?: () => void;
 }
@@ -288,6 +289,7 @@ export function elizaSignIn(voice: VoiceScene, signedIn: () => boolean, lease: M
           ? { signedIn: true, userId: "user-1", organizationId: "org-1", credentialId: voice.credentialId, keyExpiresAt: 4_102_444_800_000 }
           : { signedIn: false },
       }),
+      ...voice.startupSignIn,
     };
   });
 }

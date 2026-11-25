@@ -50,8 +50,8 @@ export async function open(world: Scene, mounts: readonly Mount[] = every) {
 }
 
 /** Alpha over `platform`, which a journey with real services builds itself (test/eliza/world.vibe). */
-export async function openOver(platform: Layer.Layer<Platform>, mounts: readonly Mount[] = every) {
-  const alpha = boot(platform, mounts);
+export async function openOver(platform: Layer.Layer<Platform>, mounts: readonly Mount[] = every, requireNativeSignIn = false) {
+  const alpha = boot(platform, mounts, requireNativeSignIn);
   opened.set(alpha, { mounts });
   const root = createRoot(document.body.appendChild(document.createElement("div")));
   await drawn(async () => {
