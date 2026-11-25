@@ -14,7 +14,8 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import type { Mount } from "../src/areas.ts";
 import assistant from "../src/assistant/index.tsx";
 import { untimed } from "../src/runtime/reactor.vibe";
-import { button, closeAll, drawn, fill, hardware, later, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
+import { draftKey } from "./fakes/ask.ts";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -90,6 +91,82 @@ function locationIn(metadata: unknown): { latitude?: number; longitude?: number;
   return (metadata as { observation?: { location?: { latitude?: number; longitude?: number; accuracyMeters?: number; capturedAt?: number } } } | undefined)?.observation?.location;
 }
 
+function composerText() {
+  return document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']")?.value;
+}
+
+function webStorageContains(text: string) {
+  return [localStorage, sessionStorage].some((store) =>
+    Array.from({ length: store.length }, (_, index) => store.key(index))
+      .some((key) => key !== null && (key.includes(text) || store.getItem(key)?.includes(text))));
+}
+
+it("Keeps my phone draft through restart and leaves it with my account (spec/app/assistant/composer.md, \"Story: Keep what I am writing\")", async () => {
+  const world = { ...scene(), phone: true };
+  const firstOwner = world.notes.ownerIdentity;
+  world.ask.kept.set("c1", { roomId: "r1", title: "Shared fixture ID", messages: [] });
+
+  const selectConversation = async (alpha: Awaited<ReturnType<typeof open>>["alpha"], runtime: ReturnType<typeof assistant.runtime>) => {
+    chatsList();
+    await until(alpha, runtime, Chats, (state) => state.list.status === "Loaded");
+    row("Chats", "Shared fixture ID");
+    await until(alpha, runtime, Composer, (state) => state.binding.conversation > 0 && state.slot === "Open");
+  };
+
+  const first = await open(world, mounts);
+  const firstRuntime = assistant.runtime(first.alpha);
+  await until(first.alpha, firstRuntime, Conversation, (state) => state.ready);
+  await selectConversation(first.alpha, firstRuntime);
+  const original = "First owner's unsent phone draft";
+  const firstKey = draftKey(firstOwner, world.notes.owner, "c1", "r1");
+  write(original);
+  await until(first.alpha, firstRuntime, Composer, (state) => state.draft.sync === "Kept" && state.editor.text);
+  expect(JSON.parse(world.ask.drafts.get(firstKey) ?? "{}")).toMatchObject({ text: original, sending: false });
+  expect(webStorageContains(original)).toBe(false);
+  await first.close();
+
+  const second = await open(world, mounts);
+  const runtime = assistant.runtime(second.alpha);
+  await until(second.alpha, runtime, Conversation, (state) => state.ready);
+  await until(second.alpha, runtime, Composer, (state) => state.binding.conversation > 0 && state.slot === "Open" && state.editor.text);
+  expect(composerText()).toBe(original);
+
+  const initialSeat = await runtime.runPromise(Composer.use((machine) => Effect.map(machine.get(), (state) => state.binding.owner)));
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  world.ask.beforeDraftExchange = () => {
+    entered.resolve();
+    return release.promise;
+  };
+  const stale = "A late save from the first account";
+  try {
+    write(stale);
+    await entered.promise;
+    world.notes.ownerIdentity = "second-draft-owner";
+    await seen(false);
+    await seen(true);
+    await until(second.alpha, runtime, Composer, (state) => state.binding.owner > initialSeat && state.slot === "Open");
+    expect(composerText()).toBe("");
+  } finally {
+    delete world.ask.beforeDraftExchange;
+    await drawn(() => release.resolve());
+  }
+
+  await vi.waitFor(() => expect(world.ask.refusedDraftExchanges).toBe(1));
+  await selectConversation(second.alpha, runtime);
+  expect(composerText()).toBe("");
+  expect(JSON.parse(world.ask.drafts.get(firstKey) ?? "{}")).toMatchObject({ text: original, sending: false });
+  expect(webStorageContains(stale)).toBe(false);
+
+  const next = "Second owner's unsent phone draft";
+  const secondKey = draftKey(world.notes.ownerIdentity, world.notes.owner, "c1", "r1");
+  write(next);
+  await until(second.alpha, runtime, Composer, (state) => state.draft.sync === "Kept" && state.editor.text);
+  expect(JSON.parse(world.ask.drafts.get(secondKey) ?? "{}")).toMatchObject({ text: next, sending: false });
+  expect(webStorageContains(next)).toBe(false);
+  expect(world.ask.said).toEqual([]);
+});
+
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/chats.md, "Story: Start a conversation, or fork one"
   it("Ask Alpha something, in a conversation made for it (spec/app/assistant/index.md, \"Story: Ask Alpha something\")", async () => {
@@ -100,6 +177,10 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/assistant/composer.md, "A message written before its conversation existed moves into the new one, then its old slot is cleared on the exact revision read"
     world.ask.metadata = [];
+    const draftSlot = (conversation?: string, room?: string) => {
+      const key = draftKey(world.notes.ownerIdentity, world.notes.owner, conversation, room);
+      return phone ? world.ask.drafts.get(key) ?? null : localStorage.getItem(`alpha/assistant/slot-v2/${encodeURIComponent(key)}`);
+    };
     write("Hello ");
     await press("Send");
     // spec/app/assistant/index.md, "A reply completes, streamed or all at once, even after the owner asked to stop it"
@@ -113,13 +194,13 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     if (phone) await until(alpha, runtime, Locator, (s) => s.gpsAt >= 0);
     await until(alpha, runtime, Composer, (s) => s.away === "Free" && s.clear.outcome === "Confirmed" && s.draft.sync === "Kept");
     expect([lines(), world.ask.said, world.ask.opened]).toEqual([["Hello", "You said: Hello"], ["Hello"], 1]);
-    expect(localStorage.getItem("alpha/assistant/slot/0/0@1")).toBe(null);
-    expect(JSON.parse(localStorage.getItem("alpha/assistant/slot/0/1@1") ?? "{}")).toMatchObject({ text: "", sending: false });
+    expect(draftSlot()).toBe(null);
+    expect(JSON.parse(draftSlot("c1", "r1") ?? "{}")).toMatchObject({ text: "", sending: false });
 
     // spec/app/assistant/composer.md, "Story: Keep what I am writing": a draft is kept in its conversation's slot.
     write("Not yet");
     await until(alpha, runtime, Composer, (s) => s.draft.sync === "Kept" && s.editor.text);
-    expect(JSON.parse(localStorage.getItem("alpha/assistant/slot/0/1@1") ?? "{}")).toMatchObject({ text: "Not yet", sending: false });
+    expect(JSON.parse(draftSlot("c1", "r1") ?? "{}")).toMatchObject({ text: "Not yet", sending: false });
     // spec/app/assistant/composer.md, "A message longer than a message may hold is kept as a draft and never sent"
     write("x".repeat(64_001));
     await until(alpha, runtime, Composer, (s) => s.long);

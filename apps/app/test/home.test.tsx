@@ -3,6 +3,8 @@ import { digestInbox, type DigestResult, hostedDigestProtocol } from "@elizaos/p
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Home from "../gen/app__home.effect.vibe";
+import { Machine as DigestSchedules } from "../gen/app__digests__schedules.effect.vibe";
+import { Machine as WorkflowList } from "../gen/app__workflows__list.effect.vibe";
 import * as Cards from "../gen/app__home__cards.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Toasts } from "../gen/app__notices__toasts.effect.vibe";
@@ -14,6 +16,8 @@ import { savedKey, written } from "../src/home/saved.vibe";
 import { waiting } from "../src/home/waiting.vibe";
 import { fromAreas } from "../src/home/cards.vibe";
 import { digestScope } from "../src/workflows/brief.vibe";
+import workflows from "../src/workflows/index.tsx";
+import type { NativeDigestScene, WorkflowsScene } from "./fakes/workflows.ts";
 
 underAct();
 afterEach(closeAll);
@@ -308,6 +312,84 @@ describe("Home on a phone", () => {
     await vi.waitFor(() => expect(card("Latest brief")?.textContent).toContain("Didn't run"), { timeout: 5_000 });
     await pressCard("Latest brief");
     await showing("Workflows");
+  });
+
+  it('Shows Android’s retained brief and refreshes its digest results through the native inbox (spec/app/digests/index.md, "Android supplies one verified view of retained results and background checks")', async () => {
+    const world = { ...scene(), phone: true };
+    const initial = digestResult(1, "finished", "Owner’s retained Android brief");
+    const missed = digestResult(2, "missed", "A missed run cannot replace the brief");
+    const resultText = "The exact result from native refresh";
+    const refreshed = digestResult(3, "finished", resultText);
+    world.ask.spokenFiles = [];
+    const browser: NonNullable<WorkflowsScene["hosted"]> = {
+      entries: [digestResult(90, "finished", "Browser result for the same agent")], reads: 0, acknowledgements: [],
+    };
+    const native: NativeDigestScene = {
+      snapshot: { rows: [initial, missed], backgroundEnabled: false, noticesAllowed: false, lease: "native-digest-lease", support: "nativeScheduled" },
+      incoming: undefined,
+      manualLeases: [],
+    };
+    world.workflows.hosted = browser;
+    world.workflows.nativeDigests = native;
+    const { alpha } = await open(world);
+    const brief = () => [...document.querySelectorAll("section[aria-label='Your day'] > button")]
+      .find((candidate) => candidate.textContent?.startsWith("Latest brief"))?.textContent;
+    const results = () => [...document.querySelectorAll<HTMLButtonElement>("ul[aria-label='Digest results'] li > button")];
+    await vi.waitFor(() => expect(brief()).toContain(initial.output), { timeout: 5_000 });
+    expect(brief()).not.toContain(missed.output);
+    expect(native.manualLeases).toEqual([]);
+
+    await press("Workflows");
+    const area = workflows.runtime(alpha);
+    await until(alpha, area, WorkflowList, (state) => state.list.status === "Loaded");
+    await press("Add to Workflows");
+    await press("Scheduled digests");
+    await until(alpha, area, DigestSchedules, (state) => state.open && state.schedules.status === "Loaded");
+    await vi.waitFor(() => expect(results()).toHaveLength(2), { timeout: 5_000 });
+
+    const started = native.manualLeases.length;
+    native.incoming = [initial, missed, refreshed];
+    await press("Refresh digests");
+    await vi.waitFor(() => expect(results()).toHaveLength(3), { timeout: 5_000 });
+    expect(native.manualLeases.slice(started)).toEqual([native.snapshot.lease]);
+
+    await drawn(() => {
+      const row = results().find((item) => item.textContent?.includes(new Date(refreshed.scheduledAt).toLocaleString()));
+      if (row === undefined) throw new Error("Refreshed digest unavailable");
+      row.click();
+    });
+    await vi.waitFor(() => expect(document.querySelector("[aria-label='Digest result']")?.textContent).toContain(resultText));
+
+    // spec/app/digests/index.md, "Ask Alpha about a result hands that result to Ask Alpha"
+    const composer = () => document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']");
+    const attachment = "Remove Saved result.txt";
+    const recorded = () => document.querySelectorAll("section[aria-label='Ask Alpha'] [role=log] article").length;
+    const unsent = () => expect([recorded(), world.ask.kept.size, world.ask.said, world.ask.spokenFiles]).toEqual([0, 0, [], []]);
+    await vi.waitFor(() => expect(button("Ask Alpha")).toBeDefined());
+    await press("Ask Alpha");
+    await vi.waitFor(() => expect([composer()?.value, Boolean(button(attachment))]).toEqual(["Help me understand this saved result.", true]));
+    unsent();
+
+    await press(attachment);
+    await vi.waitFor(() => expect(button(attachment)).toBeUndefined());
+    const draft = "Tell me which part should come first.";
+    await fill("Message Alpha", draft);
+    await press("Minimize chat");
+    await vi.waitFor(() => expect(button("Ask Alpha")).toBeDefined());
+    await press("Ask Alpha");
+    await vi.waitFor(() => expect([composer()?.value, Boolean(button(attachment))]).toEqual([draft, true]));
+    unsent();
+
+    await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+    await press("Send");
+    await vi.waitFor(() => expect(world.ask.said).toEqual([draft]));
+    expect(world.ask.spokenFiles?.map(({ images }) => images)).toEqual([
+      [{ name: "Saved result.txt", mimeType: "text/plain", data: btoa(resultText) }],
+    ]);
+
+    await hardware("home");
+    await vi.waitFor(() => expect(brief()).toContain(refreshed.output), { timeout: 5_000 });
+    expect([browser.reads, browser.acknowledgements]).toEqual([0, []]);
   });
 
   // spec/app/home/index.md, "Story: See the apps on this phone"; spec/app/home/index.md, "Story: Open an app"

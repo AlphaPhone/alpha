@@ -709,12 +709,15 @@ pure def sometimesAFilterFollowedTheOwner(s: Files): bool = S::finding(s.search)
 ### An explicit request to open or filter Files may act directly on the same idle Files view
 
 The phone remembers the place and the list and search tickets when the
-owner sends a typed request from Files. When the resident proposes that
-message's exact read-only operation, the phone may carry it out once if
+owner sends a typed or spoken request from Files. Only an exact, authorized Files
+command asks for direct execution on its turn. When the resident returns
+that message's matching direct proposal, the phone may carry it out once if
 the owner allows direct action, the same place and tickets still show
 and the open viewer is empty. A different request, an unreadable
-preference, or a work item in progress keeps the usual review. The
-agent gets a result receipt without the opened file's contents. An open
+preference, or a work item in progress keeps the usual review. A spoken
+request uses its own current voice turn and conversation, and an attached
+document does not authorize a direct action. The agent gets a result
+receipt without the opened file's contents. An open
 counts only when that folder loaded or that file could be shown.
 
 ```quint
@@ -723,6 +726,21 @@ pure def freeForDirectRead(s: Files): bool =
     and not(s.deleting.showing) and not(C::busy(s.change)) and not(C::asking(s.change))
     and s.change.panel == 0 and not(s.sheet.open)
     and s.listing.status != R::Loading and s.search.query.status != R::Loading
+```
+
+### An exact Files request from another screen may open Files once after the typed reply finishes
+
+With direct Files actions allowed, a typed request naming a file or
+folder path, or an explicit filter, can open Files after the same turn
+finishes. Positions only name results that already show in Files.
+Closing Ask Alpha, leaving the source or Files, or asking another
+question cancels the continuation. Files first loads its storage and
+settles its listing. The exact item then has to open or the filter finish
+before its result is reported. No file contents go with that report.
+
+```quint
+pure def readyForFilesContinuation(s: Files): bool =
+  s.open and allowed(s) and s.storage.status == R::Loaded and s.listing.status != R::Loading
 ```
 
 ### The agent reads a folder for itself, and only its newest reading is told to it; it is told it failed without access or on a protected screen
@@ -762,10 +780,10 @@ pure def agentFilter(s: Files, request: int, wanted: S::Filter, guarded: bool, b
 
 ### An approved filter for a named folder goes to that folder before it searches
 
-The primary folder path is resolved on the phone. Its filter can replace
-a previous read, but cannot move an open preview, a selection, or a
-change in progress. The owner sees the named folder and the requested
-filter, with one answer for the agent.
+The primary folder path is resolved on the phone. A request with no folder
+starts at Browse and searches Internal storage. A filter can replace a
+previous read when the preview, selection and change sheets are closed.
+The owner sees the requested place and filter, with one answer for the agent.
 
 ```quint
 pure def canAgentFilterAt(s: Files, request: int, wanted: S::Filter, openedTrail: List[int], guarded: bool, by: Actor): bool =

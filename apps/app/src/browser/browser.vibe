@@ -91,7 +91,8 @@ export service Pages {
   visit(url: string): void!!
 }
 
-effect function pageOf(tab: number): Page!!Pages {
+/** Read the current address machine for the exact tab. */
+export effect function pageOf(tab: number): Page!!Pages {
   const runtime = try (try Pages).of(tab)
   return try promise(() => runtime.runPromise(Address.Machine.use((machine) => machine.get())))
 }
@@ -301,11 +302,12 @@ const tabs = reacting(Tabs, {
 const told = started(effect {
   const host = try TabHost
   try Stream.runForEach(host.told, effect (said) => {
-    if (said.kind === "framed") {
+    if (said.kind === "framed" || said.kind === "frameBlocked") {
       const { id, load } = said.request
       const tab = tabOf(id)
       if ((try (try Tabs.Machine).get()).open.includes(tab) && (try sync(() => host.web?.current(id, load))) === said.request) {
-        try tellPage(tab, { type: "framed", load })
+        if (said.kind === "framed") try tellPage(tab, { type: "framed", load })
+        else if (try tellPage(tab, { type: "frameBlocked", load })) try sync(() => host.web?.blocked(said.request))
       }
       return
     }
