@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
 import { Machine as Page } from "../gen/app__browser__address.effect.vibe";
 import { Machine as Library } from "../gen/app__browser__library.effect.vibe";
+import { Machine as Share } from "../gen/app__browser__share.effect.vibe";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
@@ -89,7 +90,7 @@ describe("The Browser on a phone", () => {
     expect(world.browser.bookmarks).toEqual([]);
   });
 
-  it("Open a page and watch it load (spec/app/browser/address.md, \"Story: Go where I typed\"; spec/app/browser/address.md, \"Story: Watch a page load\"; spec/app/browser/address.md, \"Story: Find in page\")", async () => {
+  it("Open a page and watch it load (spec/app/browser/address.md, \"Story: Go where I typed\"; spec/app/browser/address.md, \"Story: Watch a page load\"; spec/app/browser/address.md, \"Story: Find in page\"; spec/app/browser/share.md, \"Story: Share the page\")", async () => {
     const { alpha, runtime, world } = await onBrowser();
     // spec/app/browser/index.md, "A launch reads the saved session, and may ask again after a failed read"
     await until(alpha, runtime, Tabs, (s) => s.hydrated);
@@ -111,16 +112,19 @@ describe("The Browser on a phone", () => {
 
     // spec/app/browser/share.md, "Story: Share the page"
     const article = "https://news.example/on-device-agents";
-    await press("Menu");
-    await press("Copy link");
-    await expect.poll(() => world.settings.copied).toEqual([article]);
     const surface = document.querySelector<HTMLElement>("[data-alpha-browser-page]");
     if (surface === null) throw new Error("No native Browser page position");
     Object.defineProperty(surface, "getBoundingClientRect", { value: () => new DOMRect(0, 104, 390, 650) });
     await press("Menu");
     await press("Share");
-    await expect.poll(() => world.browser.shared.map(({ url }) => url)).toEqual([article]);
-    await until(alpha, runtime, Tabs, (s) => s.layer === "Uncovered");
+    await until(alpha, runtime, Share, (s) => s.sent === 1 && s.delivery.tag === "NoDelivery");
+    expect(world.browser.shared.map(({ id, url, navigation }) => [id, url, navigation])).toEqual([
+      [`tab${tab}`, article, "1"],
+    ]);
+    await press("Menu");
+    await press("Copy link");
+    await until(alpha, runtime, Share, (s) => s.notice === "Copied");
+    expect(world.settings.copied).toEqual([article]);
 
     // spec/app/browser/address.md, "Typing searches the page, and clearing the text clears the search"; spec/app/browser/address.md, "Only the answer to the latest search counts"
     await press("Menu");
@@ -149,7 +153,8 @@ describe("The Browser on a phone", () => {
     await press("Menu");
     world.browser.redirectOnPresent = "https://enclave.example/keys-in-hardware";
     await press("Share");
-    await until(alpha, page, Page, () => world.browser.redirectOnPresent === undefined);
+    await until(alpha, runtime, Share, (s) => s.panel === 3 && !s.review.showing && s.delivery.tag === "NoDelivery");
+    expect(world.browser.redirectOnPresent).toBeUndefined();
     expect(world.browser.shared.map(({ url }) => url)).toEqual([article]);
   });
 

@@ -407,24 +407,22 @@ export effect function currentPage(binding: PageBinding, layer: Browser["layer"]
   return "load" in binding ? (try sync(() => host.web?.current(binding.id, binding.load))) === binding : host.session.current(binding, binding.id)
 }
 
-type PageAction = { readonly kind: "Share"; readonly binding: BrowserPageBinding } | { readonly kind: "Copy"; readonly binding: PageBinding }
-
-/** Hands off only the page bound to the owner's menu action. Android's chooser owns the share destinations. */
-export effect function handoffPageLink(action: PageAction): void!!(TabHost | Tabs.Machine | Shell | Layers | Pages | Device | Toasts | Said) {
-  const { binding } = action
+// spec/app/browser/share.md, "Choosing where to send the page sends it once, if it is still the page the panel opened on, and closes the panel"
+/** Copy only the web frame bound to the owner's menu action. */
+export effect function copyWebLink(binding: FrameRequest): void!!(TabHost | Tabs.Machine | Shell | Layers | Pages | Device | Toasts | Said) {
   if (!(try currentPage(binding, "Menu")) || !(try tellTabs({ type: "uncover" }))) return
   if (!(try currentPage(binding, "Uncovered"))) return
-  if (action.kind === "Copy") {
-    const copied = try (try Device).copyText(binding.url)
-    if (try currentPage(binding, "Uncovered")) try say(copied ? "Link copied" : "Clipboard unavailable", !copied)
-    return
-  }
+  const copied = try (try Device).copyText(binding.url)
+  if (try currentPage(binding, "Uncovered")) try say(copied ? "Link copied" : "Clipboard unavailable", !copied)
+}
+
+/** Place the exact native page under the shell before Android presents an action from it. */
+export effect function prepareNativePage(binding: BrowserPageBinding): boolean!!(TabHost | Tabs.Machine | Shell | Layers | Pages | Device) {
+  if (!(try currentPage(binding, "Uncovered"))) return false
   const place = placeOfPage()
-  if (place === undefined) return
-  const shown = try contained(hosted("present", (plugin, session) => plugin.present({ session, id: binding.id, ...place })), "showing the page for sharing")
-  if (!shown || !(try currentPage(binding, "Uncovered"))) return
-  const sent = try contained(hosted("share", (plugin, session) => plugin.share({ session, id: action.binding.id, url: action.binding.url, navigation: action.binding.navigation })), "sharing the page")
-  if (!sent && (try currentPage(binding, "Uncovered"))) try say("The page couldn't be shared", true)
+  if (place === undefined) return false
+  const shown = try contained(hosted("present", (plugin, session) => plugin.present({ session, id: binding.id, ...place })), "showing the Browser page")
+  return shown && (try currentPage(binding, "Uncovered"))
 }
 
 /** Draw the page shown where the Browser marks its place, once that place is drawn. */

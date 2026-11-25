@@ -48,7 +48,7 @@ export function TalkControls({ runtime, trailing, compact = false }: TalkControl
   const label = compact ? undefined : connecting ? expandedStatus.Starting :
     state.phase === "Stopping" || state.phase === "Paused" ? undefined : state.muted ? "Muted" : expandedStatus[state.phase];
   const status = (
-    <p role="status" aria-label={compact ? undefined : "Voice conversation status"} className={label === undefined ? "sr-only" : "flex items-center gap-2.25 text-sm leading-[normal] font-semibold text-foreground"}>
+    <p role="status" aria-label={compact ? undefined : "Voice conversation status"} className={label === undefined ? "sr-only" : "flex items-center gap-2.25 text-sm leading-voice-status font-semibold text-foreground"}>
       {!compact && connecting && spinner}
       <span className={label === undefined ? undefined : "truncate"}>{label ?? (state.muted ? "Microphone muted" : compactStatus[state.phase])}</span>
     </p>

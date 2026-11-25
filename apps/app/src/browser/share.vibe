@@ -1,0 +1,95 @@
+// spec/app/browser/share.md, "Story: Share the page"; spec/app/browser/share.md, "The answer for the current choice says whether it was carried out"
+import type { BrowserPageBinding } from "@elizaos/os-bridges"
+import { Machine as Tabs } from "../../gen/app__browser.effect.vibe"
+import * as Share from "../../gen/app__browser__share.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { say } from "../notices/toasts.vibe"
+import { TabHost, hosted } from "../platform/browser.vibe"
+import { Device } from "../platform/device.vibe"
+import { answer, contained, following, reacting, started, together } from "../runtime/reactor.vibe"
+import { currentPage, idOf, prepareNativePage } from "./browser.vibe"
+
+module page {
+  /** Whether the Browser's document is in the foreground. @throws {never} */
+  export function foreground(): boolean {
+    return typeof document !== "undefined" && !document.hidden
+  }
+}
+import { foreground } from page
+
+/** The exact page each admitted choice can use, held until that choice is carried out. */
+export service SharePages {
+  readonly pages: Map<number, BrowserPageBinding>
+}
+
+const choices = Layer.sync(SharePages, () => ({ pages: new Map<number, BrowserPageBinding>() }))
+
+/** Share the shown native page or copy its address, as selected in the Browser's menu. */
+export effect function offerShare(dest: "System" | "Copy", link: BrowserPageBinding | undefined) {
+  const tabs = try Tabs
+  const selected = try tabs.get()
+  if (selected.layer !== "Menu" || !showing(try (try Shell).get(), "Browser") || !foreground()) return
+  const share = try Share.Machine
+  if (!(try contained(share.send({ type: "openPanel", ready: link !== undefined }), "reviewing the Browser page"))) return
+  if (link === undefined) {
+    try say("Load a page before sharing it.", true)
+    return
+  }
+  if (!(try currentPage(link, "Menu")) || !(try contained(tabs.send({ type: "uncover" }), "closing the Browser menu")) || !(try currentPage(link, "Uncovered"))) {
+    try contained(share.send({ type: "closePanel" }), "retiring a changed Browser page")
+    try say("The page changed before sharing. Try again.", true)
+    return
+  }
+  const pages = (try SharePages).pages
+  const { panel } = try share.get()
+  pages.clear()
+  pages.set(panel, link)
+  if (!(try contained(share.send({ type: "choose", dest }), "choosing where to send the Browser page"))) pages.delete(panel)
+}
+
+const absent = (panel: number): Share.Event => ({ type: "delivered", panel, ok: false, shown: false })
+const noBrowser: Share.Event = { type: "launched", ok: false, found: false }
+
+effect function delivered(panel: number, dest: "System" | "Copy") {
+  const pages = (try SharePages).pages
+  const link = pages.get(panel)
+  pages.delete(panel)
+  if (link === undefined) return absent(panel)
+  const machine = try Share.Machine
+  if (!Share.canDelivered(try machine.get(), panel, false, false)) return absent(panel)
+  if (!(try currentPage(link, "Uncovered"))) {
+    if (foreground() && showing(try (try Shell).get(), "Browser")) try say("The page changed before sharing. Try again.", true)
+    return absent(panel)
+  }
+  const guard = (try TabHost).session.guard(link)
+  const ok = dest === "Copy"
+    ? try (try Device).copyText(link.url)
+    : (try prepareNativePage(link)) && (try contained(hosted("share", (plugin) => plugin.share(guard)), "opening the Browser share sheet"))
+  const shown = try currentPage(link, "Uncovered")
+  if (shown && Share.canDelivered(try machine.get(), panel, ok, shown)) {
+    if (dest === "Copy") try say(ok ? "Link copied" : "Clipboard unavailable", !ok)
+    else if (!ok) try say("Could not open the share sheet.", true)
+  }
+  return { type: "delivered", panel, ok, shown } satisfies Share.Event
+}
+
+const sharingPage = reacting(Share, {
+  carry: (fx: Share.Effect) => match (fx) {
+    when { tag: "Sheet", let panel }: answer("share the page", delivered(panel, "System"), absent(panel));
+    when { tag: "CopyLink", let panel }: answer("copy the page link", delivered(panel, "Copy"), absent(panel));
+    when { tag: "Draft", let panel }: answer("retire the unavailable draft handoff", succeed(absent(panel)), absent(panel));
+    when { tag: "Elsewhere" }: answer("retire the unavailable browser handoff", succeed(noBrowser), noBrowser);
+  },
+})
+
+const leftBrowser = started(effect {
+  const share = try Share.Machine
+  const view = Stream.map((try Shell).changes, (shell) => showing(shell, "Browser"))
+  const visible = Stream.map(Stream.zipLatest(view, (try Device).visible), ([browser, shown]) => browser && shown)
+  try Stream.runForEach(Stream.filter(Stream.changes(visible), (shown) => !shown), () => contained(share.send({ type: "hidden" }), "retiring Browser sharing"))
+}, "Browser sharing visibility")
+
+const changedTab = following(Tabs, (tabs) => tabs.selected, Share.Machine, () => ({ type: "pageChanged" } as const))
+
+/** Delivery receipts arrive through the Share machine and each tap can dispatch its held page once. */
+export const sharing = Layer.provideMerge(together(sharingPage, leftBrowser, changedTab), choices)
