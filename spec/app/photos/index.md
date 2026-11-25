@@ -233,12 +233,12 @@ requests not yet sent; the grid is read again for Alpha's own captures.
 ```quint
 pure def fetching(page: bool, out: List[Effect], s: Photos): Done =
   val asked = R::ask(s.library)
-  val current = if (cameraVisit(s)) clearCameraAlbum(s) else clearCameraVisit(s)
+  val permittedView = if (cameraVisit(s)) clearCameraAlbum(s) else clearCameraVisit(s)
   if (s.visible)
     emit((if (cameraVisit(s)) out else out.concat(dropCamera(s))).append(Fetch({
       ticket: asked.ticket, tab: s.tab, filter: s.filter, query: s.query, person: s.person, album: s.album,
       page: page, own: not(P::allows(s.access)), only: s.only,
-    })), { ...current, library: asked, paging: page })
+    })), { ...permittedView, library: asked, paging: page })
   else emit(out, s)
 
 pure def listing(out: List[Effect], s: Photos): Done = fetching(false, out, s)
@@ -257,9 +257,9 @@ pure def accessIs(s: Photos, grant: P::Grant, videos: bool, by: Actor): Done =
   val kinds = videos and P::allows(access)
   val told = { ...s, access: access, videos: kinds, filter: if (s.filter == Videos and not(kinds)) Everything else s.filter }
   val sameScope = access.grant == s.access.grant and kinds == s.videos
-  val current = if (sameScope) told else clearCameraVisit(told)
-  if (P::allows(access)) listing(if (sameScope) List() else dropCamera(s), current)
-  else listing(List(Revoke), forgetting(true, current))
+  val permittedView = if (sameScope) told else clearCameraVisit(told)
+  if (P::allows(access)) listing(if (sameScope) List() else dropCamera(s), permittedView)
+  else listing(List(Revoke), forgetting(true, permittedView))
 ```
 
 ### Losing access to the library closes the Viewer and Recently deleted
