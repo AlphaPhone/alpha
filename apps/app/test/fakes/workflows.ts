@@ -27,7 +27,23 @@ const approvalNode = "preview";
 const approvalDigest = "a".repeat(64);
 const executionPath = `/api/workflow/executions/${receipt.id}`;
 
+type PromptTiming =
+  | { triggerType: "once"; scheduledAtIso: string }
+  | { triggerType: "cron"; cronExpression: string }
+  | { triggerType: "event"; eventKind: string };
+
+type Prompt = PromptTiming & {
+  id: string;
+  displayName: string;
+  instructions: string;
+  enabled: boolean;
+  revision: number;
+  timezone: string;
+};
+
 export interface WorkflowsScene {
+  readonly prompts: Map<string, Prompt>;
+  readonly promptEdits: Record<string, unknown>[];
   readonly admissions: Array<{ submission: string; version: string }>;
   readonly decisions: Array<{ version: string; digest: string; approved: boolean }>;
   run: boolean;
@@ -38,6 +54,11 @@ export interface WorkflowsScene {
 }
 
 export const workflowsScene = (): WorkflowsScene => ({
+  prompts: new Map([["desk-check", {
+    id: "desk-check", displayName: "Desk check", instructions: "Check the desk", enabled: true, revision: 1,
+    triggerType: "cron", cronExpression: "0 9 * * *", timezone: "UTC",
+  }]]),
+  promptEdits: [],
   admissions: [], decisions: [], run: false, stage: "Done", receiptReads: 0, approvalTitle: "Review the statement preview", failingPrompts: false,
 });
 
@@ -69,17 +90,14 @@ export function workflowRoutes(world: WorkflowsScene): Route[] {
   return [
     (request, url) => {
       if (request.method !== "GET") return;
+      const prompt = world.prompts.get(url.pathname.slice("/api/triggers/".length));
+      if (url.pathname.startsWith("/api/triggers/") && prompt !== undefined) return Response.json({ trigger: prompt });
       switch (url.pathname) {
         case "/api/workflow/status": return Response.json({
           engine: "eliza-typed", status: "ready", manualSubmissionProtocol: 1, lifecycleMutationProtocol: 1,
           typedAuthoringProtocol: 1, typedScheduleProtocol: 1, metadataMutationProtocol: 1, approvalReceiptProtocol: 1,
         });
-        case "/api/triggers": return world.failingPrompts ? Response.json({}, { status: 503 }) : Response.json({
-          triggers: [{
-            id: "desk-check", displayName: "Desk check", instructions: "", enabled: true, revision: 1,
-            triggerType: "cron", cronExpression: "0 9 * * *", timezone: "UTC",
-          }],
-        });
+        case "/api/triggers": return world.failingPrompts ? Response.json({}, { status: 503 }) : Response.json({ triggers: [...world.prompts.values()] });
         case "/api/scheduled-tasks": return Response.json({ tasks: [] });
         case "/api/workflow/workflows": return Response.json({ workflows: [record] });
         case "/api/workflow/removed-workflows": return Response.json({ workflows: [removed] });
@@ -92,6 +110,30 @@ export function workflowRoutes(world: WorkflowsScene): Route[] {
           return Response.json({ execution: execution(world) });
         case `${executionPath}/approvals`: return Response.json(review(world));
       }
+    },
+    (request, url) => {
+      if (request.method !== "PUT" || !url.pathname.startsWith("/api/triggers/")) return;
+      const id = url.pathname.slice("/api/triggers/".length);
+      const current = world.prompts.get(id);
+      if (!current) return Response.json({}, { status: 404 });
+      return readJsonBody(request).then((body) => {
+        world.promptEdits.push(body);
+        if (current.revision !== body.expectedRevision) return Response.json({}, { status: 409 });
+        const timing: PromptTiming | undefined =
+          body.triggerType === "once" && typeof body.scheduledAtIso === "string" ? { triggerType: "once", scheduledAtIso: body.scheduledAtIso }
+            : body.triggerType === "cron" && typeof body.cronExpression === "string" ? { triggerType: "cron", cronExpression: body.cronExpression }
+              : body.triggerType === "event" && typeof body.eventKind === "string" ? { triggerType: "event", eventKind: body.eventKind }
+                : undefined;
+        if (!timing || typeof body.displayName !== "string" || typeof body.instructions !== "string" || typeof body.timezone !== "string") {
+          return Response.json({}, { status: 400 });
+        }
+        const trigger = {
+          id, displayName: body.displayName, instructions: body.instructions, timezone: body.timezone,
+          enabled: current.enabled, revision: current.revision + 1, ...timing,
+        };
+        world.prompts.set(id, trigger);
+        return Response.json({ trigger });
+      });
     },
     (request, url) => {
       if (request.method !== "POST") return;
