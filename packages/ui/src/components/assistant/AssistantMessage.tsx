@@ -110,7 +110,6 @@ export function AssistantMessage({ author, text, quote, attachments = [], childr
   const actions = onQuote || onCopy || onUseInEmail || onEditAgain || onFork || onReadAloud;
   const [open, setOpen] = useState<false | "pointer" | "keys">(false);
   const rowId = useId();
-  const textId = useId();
   const close = () => setOpen(false);
   const pick = (event: MouseEvent<HTMLButtonElement>, act: () => void) => {
     refocus(event.currentTarget);
@@ -134,7 +133,7 @@ export function AssistantMessage({ author, text, quote, attachments = [], childr
               aria-haspopup="menu"
               aria-expanded={Boolean(open)}
               aria-controls={open ? rowId : undefined}
-              aria-labelledby={textId}
+              aria-label="Message actions"
               className={cn(focusRing, "absolute inset-0 min-h-11", owner && "rounded-tile rounded-br-box")}
               onClick={() => setOpen((was) => (was ? false : "pointer"))}
               onKeyDown={(event) => {
@@ -143,7 +142,7 @@ export function AssistantMessage({ author, text, quote, attachments = [], childr
                 setOpen("keys");
               }}
             />
-            <div id={textId} className={cn(bubble, "pointer-events-none relative")}>{shown}</div>
+            <div className={cn(bubble, "pointer-events-none relative")}>{shown}</div>
           </div>
         ) : (
           <div className={bubble}>{shown}</div>
