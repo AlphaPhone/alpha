@@ -1,6 +1,6 @@
 // spec/app/inbox/message.md, "Story: Ask Alpha about a message"
-import type { MailMessage } from "@elizaos/cloud/client"
-import { validateMailContext, type MailContextDestination, type MailContextSource, type ReviewedMailContext } from "@elizaos/plugin-inbox/mailbox"
+import type { MailMessage } from "@elizaos/cloud"
+import { validateMailContext, type MailContextDestination, type MailContextSource, type ReviewedMailContext } from "@elizaos/plugin-inbox-client"
 
 export interface MailQuestion {
   readonly review: ReviewedMailContext

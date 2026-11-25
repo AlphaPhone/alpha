@@ -1,6 +1,6 @@
 // spec/agent/index.md, "Story: Run Alpha's agent on the phone"
 import { randomUUID } from "node:crypto";
-import { type ScheduledTasksApi, readTurnContext, scheduledTasksServiceType, showsApp } from "@elizaos/agent";
+import { type ScheduledTasksApi, readTurnContext, scheduledTasksServiceType, showsApp } from "@elizaos/agent-host";
 import {
   type AlphaAppsStore, DEFAULT_LIST_ID, addCivilDays, civilToEpochMs, normalizeListColor,
   normalizeListIcon, normalizePriority, normalizeRecurrence, parseCivilDate, todayCivilDate,

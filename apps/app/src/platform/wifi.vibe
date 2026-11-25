@@ -1,9 +1,9 @@
 // spec/app/settings/network.md, "Story: Join a nearby network"; spec/app/settings/network.md, "Story: See whether I am online"
-import type { JoinableWiFiSecurity, WiFiSecurity } from "@elizaos/os/bridges/definitions/wifi"
+import type { JoinableWiFiSecurity, WiFiSecurity } from "@elizaos/os-bridges"
 import type { Joined, Scan, Security } from "../../gen/app__settings__network.ts"
 
 module held {
-  import { wifiClient } from "@elizaos/os/bridges/wifi"
+  import { wifiClient } from "@elizaos/os-bridges"
 
   let made: ReturnType<typeof wifiClient> | undefined
   /** eliza's client of the `ElizaWiFi` plugin, made once. @throws {never} */

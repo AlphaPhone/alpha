@@ -1,5 +1,5 @@
 // spec/app/digests/index.md, "Home shows the newest kept result of the owner that ran, finished or failed, through a restart; a result that did not run never replaces it, and a page of another owner never reaches it"
-import { digestInbox, latestRetainedBrief } from "@elizaos/plugin-workflow/digests"
+import { digestInbox, latestRetainedBrief } from "@elizaos/plugin-workflow-client"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { Machine as WorkflowList } from "../../gen/app__workflows__list.effect.vibe"
 import { fromAreas, type ToldBrief } from "../home/cards.vibe"

@@ -15,6 +15,7 @@
   "dependencies": {
     "@effect/platform-node": "4.1.1",
     "@elizaos/agent": "link:../../.eliza/packages/agent",
+    "@elizaos/agent-host": "link:../../.eliza/packages/agent-host",
     "@repo/deployment": "workspace:*",
     "@repo/eliza-harness": "workspace:*",
     "effect": "4.1.1",

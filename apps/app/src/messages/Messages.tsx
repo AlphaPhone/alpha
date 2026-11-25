@@ -1,7 +1,8 @@
 // spec/app/messages/index.md, "Story: See my conversations"; spec/app/messages/index.md, "Story: Read a conversation"; spec/app/messages/index.md, "Story: Act on a message"; spec/app/messages/index.md, "Story: Start a new message"; spec/app/messages/composer.md, "Story: Keep my draft"; spec/app/messages/composer.md, "Story: Send a message"
-import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY, MMS_MAX_RECIPIENTS } from "@elizaos/os/bridges/definitions/messages";
-import type { MessageRow, ThreadRow } from "@elizaos/os/bridges/messages";
-import type { TelephonySubscription } from "@elizaos/os/bridges/phone";
+import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY, MMS_MAX_RECIPIENTS } from "@elizaos/os-bridges";
+import type { MessageRow, ThreadRow } from "@elizaos/os-bridges";
+import { normalizePhoneNumber } from "@elizaos/os-bridges";
+import type { TelephonySubscription } from "@elizaos/os-bridges";
 import { Alert, Avatar, Banner, Button, Chip, ConfirmDialog, Input, Menu, MenuContent, MenuItem, MenuTrigger, SearchField, Spinner, Textarea } from "@repo/ui";
 import type { Layer, ManagedRuntime } from "effect";
 import { ArrowUp, Camera, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, ImagePlus, Mic, Pencil, Phone as Call, Plus, RefreshCw, Search, Send, Sparkles, Square, Trash2, X } from "lucide-react";
@@ -12,7 +13,6 @@ import { content, noMatches, noThreads, smsNeeded, threadsFailed } from "../../g
 import { useMachine as useMessages } from "../../gen/app__messages.react.ts";
 import { delivered, sentAll, uncertain } from "../../gen/app__messages__sending.ts";
 import { useMachine as useComposer } from "../../gen/app__messages__composer.react.ts";
-import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/phone";
 import { Time } from "../runtime/time.vibe";
 import { shortWhen } from "../phone/words.ts";
 import { Drafts, attachAll, prepare, sameSubscription, supported } from "./composer.vibe";

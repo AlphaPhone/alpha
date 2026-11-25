@@ -1,6 +1,6 @@
 // spec/app/inbox/index.md, "Story: See my mail"
-import { CloudError } from "@elizaos/cloud/client"
-import { protocolFailure } from "@elizaos/plugin-inbox/mailbox"
+import { CloudError } from "@elizaos/cloud"
+import { protocolFailure } from "@elizaos/plugin-inbox-client"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Inbox from "../../gen/app__inbox.effect.vibe"
 import * as Sending from "../../gen/app__inbox__sending.effect.vibe"

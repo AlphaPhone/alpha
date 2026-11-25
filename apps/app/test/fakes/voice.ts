@@ -1,6 +1,5 @@
 // spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"
-import type { ElizaSignInPlugin } from "@elizaos/os/bridges/definitions/sign-in";
-import type { CloudStreamEvent, ElizaCloudSpeechPlugin } from "@elizaos/os/bridges/definitions/voice";
+import type { ElizaSignInPlugin, CloudStreamEvent, ElizaCloudSpeechPlugin } from "@elizaos/os-bridges";
 import { type Faked, plugin, rejection } from "./phone.ts";
 
 export interface SpokenSentence {

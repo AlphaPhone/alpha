@@ -1,5 +1,5 @@
 // spec/app/workflows/approvals.md, "Story: Answer a run's approval on the phone"; spec/app/workflows/approvals.md, "A decision whose answer was lost is settled by reading the approval again"
-import { type WorkflowApproval, type WorkflowRun, WorkflowHttpError } from "@elizaos/plugin-workflow/client"
+import { type WorkflowApproval, type WorkflowRun, WorkflowHttpError } from "@elizaos/plugin-workflow-client"
 import * as Model from "../../gen/app__workflows__approvals.effect.vibe"
 import type { Answer, Effect as Out, Event } from "../../gen/app__workflows__approvals.effect.vibe"
 import * as Listing from "../../gen/app__workflows__list.effect.vibe"

@@ -1,5 +1,5 @@
 // spec/app/voice/index.md, "Using the transcript fills the field dictation started in, and dictation never sends"
-import { MMS_MAX_BODY } from "@elizaos/os/bridges/definitions/messages"
+import { MMS_MAX_BODY } from "@elizaos/os-bridges"
 import * as Composer from "../../gen/app__messages__composer.effect.vibe"
 import * as Messages from "../../gen/app__messages.effect.vibe"
 import { Machine as Phone } from "../../gen/app__phone.effect.vibe"

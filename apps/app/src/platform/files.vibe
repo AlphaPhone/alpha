@@ -1,9 +1,9 @@
 // spec/app/files/index.md, "Files is closed, unsupported, not yet allowed, denied, at the top, reading, unavailable or showing a place"
-import type { ElizaFilesPlugin } from "@elizaos/os/bridges/definitions/files"
+import type { ElizaFilesPlugin } from "@elizaos/os-bridges"
 import { registered } from "./device.vibe"
 
 module held {
-  import { filesClient } from "@elizaos/os/bridges/files"
+  import { filesClient } from "@elizaos/os-bridges"
 
   let made: ReturnType<typeof filesClient> | undefined
   /** eliza's client of the plugin, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */

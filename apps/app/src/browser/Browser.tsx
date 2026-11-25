@@ -1,6 +1,6 @@
 // spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"; spec/app/browser/address.md, "Story: Browse privately"
-import { Button, BrowserAddressBar, BrowserFindBar, BrowserBar, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserTabs, ConfirmDialog, PrivateMark } from "@repo/ui";
-import { ChevronLeft, Download, Plus, RotateCw, Search, Square, Trash2 } from "lucide-react";
+import { Button, BrowserAddressBar, BrowserFindBar, BrowserBar, BrowserLibrary, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserTabs, ConfirmDialog, PrivateMark } from "@repo/ui";
+import { ChevronLeft, Download, History, Plus, RotateCw, Search, Square, Trash2 } from "lucide-react";
 import { Effect, Option } from "effect";
 import { useState } from "react";
 import { canAskErase, canCancelErase, canConfirmErase, canOpenTab } from "../../gen/app__browser.ts";
@@ -9,18 +9,25 @@ import { useMachine } from "../../gen/app__browser.react.ts";
 import type { Machine } from "../../gen/app__browser.effect.vibe";
 import { verdict } from "../../gen/app__browser__address.ts";
 import { useMachine as usePage } from "../../gen/app__browser__address.react.ts";
+import { Machine as LibraryMachine } from "../../gen/app__browser__library.effect.vibe";
+import { useMachine as useLibrary } from "../../gen/app__browser__library.react.ts";
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
 import { TabHost } from "../platform/browser.vibe";
 import type { Alpha, Resident } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 import type { ManagedRuntime } from "effect";
 import { Pages, type PageRuntime, addressOf, idOf, inputOf, openDownloads, placed } from "./browser.vibe";
+import { LibraryRows } from "./library.vibe";
 
 export interface BrowserProps {
   /** Provides the Browser's tabs and each tab's page, `browser` of browser.vibe, over the resident machines and the phone's tab host. */
-  runtime: ManagedRuntime.ManagedRuntime<Machine | Pages | TabHost | Shell | Resident, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<Machine | Pages | LibraryMachine | LibraryRows | TabHost | Shell | Resident, unknown>;
   alpha: Alpha;
 }
+
+const loadLibrary = (runtime: BrowserProps["runtime"]) => runtime.runPromise(Effect.ignore(
+  Effect.flatMap(LibraryMachine, (machine) => machine.send({ type: "askRead" })),
+));
 
 /** A page's address as the bar shows it: its host, and the rest after it. */
 function addressParts(href: string | undefined): { host: string; path: string } {
@@ -50,29 +57,32 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const [finding, setFinding] = useState("");
   if (!state) return null;
   const tab = tabs.selected;
-  const shown = runtime.runSync(Effect.map(TabHost, (host) => host.session.info(idOf(tab))));
+  const tabHost = runtime.runSync(TabHost);
+  const shown = tabHost.session.info(idOf(tab));
   const { host, path } = addressParts(shown?.url);
   const editing = tabs.layer === "Address";
   const cover = (layer: State["layer"]) => (browser.can({ type: "cover", layer }) ? () => void browser.send({ type: "cover", layer }) : undefined);
   const leading = <AppBack alpha={alpha} />;
-  const submit = () => {
-    const input = inputOf(typed);
+  const submit = (text: string) => {
+    const input = inputOf(text);
     if (!can({ type: "submit", i: input })) return;
-    void runtime.runPromise(Effect.flatMap(Pages, (pages) => pages.aim(tab, addressOf(typed, verdict(input) === "Search"))))
+    void runtime.runPromise(Effect.flatMap(Pages, (pages) => pages.aim(tab, addressOf(text, verdict(input) === "Search"))))
       .then(() => send({ type: "submit", i: input }))
       .then(() => browser.send({ type: "uncover" }));
   };
   const tell = (event: Parameters<typeof browser.send>[0]) => (browser.can(event) ? () => void browser.send(event) : undefined);
+  const openLibrary = () => void browser.send({ type: "cover", layer: "Library" }).then(() => loadLibrary(runtime));
   const others = tabs.open.filter((one) => one !== tab);
   const opening = (kind: "Normal" | "Private") => (canOpenTab(tabs, kind) ? () => { setTyped(""); void browser.send({ type: "openTab", kind }); } : undefined);
-  const hasDownloads = runtime.runSync(Effect.map(TabHost, (host) => Option.isSome(host.plugin)));
+  const native = Option.isSome(tabHost.plugin);
   const offered: (BrowserMenuItem | false)[] = [
     can({ type: "reload" }) && { label: "Reload", name: "Reload page", icon: <RotateCw />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => send({ type: "reload" })); } },
     can({ type: "stop" }) && { label: "Stop", name: "Stop loading", icon: <Square />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => send({ type: "stop" })); } },
     canOpenTab(tabs, "Normal") && { label: "New tab", icon: <Plus />, onSelect: () => opening("Normal")?.() },
     canOpenTab(tabs, "Private") && { label: "Private tab", name: "New private tab", icon: <PrivateMark aria-hidden />, onSelect: () => opening("Private")?.() },
+    native && { label: "Library", name: "Library, bookmarks and history", icon: <History />, onSelect: openLibrary },
+    native && { label: "Downloads", icon: <Download />, onSelect: () => void runtime.runPromise(openDownloads) },
     can({ type: "openFind" }) && { label: "Find", name: "Find in page", icon: <Search />, onSelect: () => { setFinding(""); void browser.send({ type: "uncover" }).then(() => send({ type: "openFind" })); } },
-    hasDownloads && { label: "Downloads", icon: <Download />, onSelect: () => void runtime.runPromise(openDownloads) },
     canAskErase(tabs) && { label: "Clear all", name: "Clear all browsing data", icon: <Trash2 />, onSelect: () => void browser.send({ type: "askErase" }) },
   ];
   const stood = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.sought(tab)));
@@ -82,7 +92,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   };
   const findStatus = finding === "" ? "" : state.find.status === "Loading" ? "Searching…" : state.matches > 0 ? `${Math.max(1, stood.index)} of ${state.matches}` : "No matches";
   const cards = tabs.open.map((one) => {
-    const known = runtime.runSync(Effect.map(TabHost, (host) => host.session.info(idOf(one))));
+    const known = tabHost.session.info(idOf(one));
     const privateTab = tabs.privates.includes(one);
     const blank = privateTab ? "New private tab" : "New tab";
     return { id: one, title: known?.title || known?.url || blank, where: `${privateTab ? "Private · " : ""}${known?.url ?? ""}`, current: one === tab, private: privateTab };
@@ -90,7 +100,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       {editing
-        ? <BrowserAddressBar leading={leading} value={typed} onValueChange={setTyped} onSubmit={submit} onCancel={() => void browser.send({ type: "uncover" })} />
+        ? <BrowserAddressBar leading={leading} value={typed} onValueChange={setTyped} onSubmit={() => submit(typed)} onCancel={() => void browser.send({ type: "uncover" })} />
         : <BrowserBar
             leading={leading}
             host={host}
@@ -118,6 +128,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
           onClose={() => void send({ type: "closeFind" })} />
       )}
       {tabs.layer === "Menu" && <BrowserMenu items={offered.filter((item) => item !== false)} onClose={() => void browser.send({ type: "uncover" })} />}
+      {tabs.layer === "Library" && <Library runtime={runtime} onBack={() => void browser.send({ type: "uncover" })} onOpen={submit} />}
       {tabs.layer === "Switcher" && (
         <BrowserTabs
           leading={<Button variant="ghost" size="icon" aria-label="Back to page" onClick={() => void browser.send({ type: "uncover" })}><ChevronLeft /></Button>}
@@ -135,4 +146,15 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
       </ConfirmDialog>
     </div>
   );
+}
+
+function Library({ runtime, onBack, onOpen }: Pick<BrowserProps, "runtime"> & { onBack: () => void; onOpen: (url: string) => void }) {
+  const { state, can, send } = useLibrary(runtime);
+  const bookmarks = runtime.runSync(Effect.flatMap(LibraryRows, (rows) => rows.bookmarks()));
+  const history = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.visits()));
+  const titles = new Map(bookmarks.map((entry) => [entry.url, entry.title]));
+  return <BrowserLibrary bookmarks={bookmarks} history={history.map((url) => ({ url, title: titles.get(url) }))}
+    loading={state === undefined || state.read.status === "Loading" || state.read.status === "Idle"}
+    failed={state?.read.status === "Failed"} onBack={onBack} onOpen={onOpen}
+    onRetry={can({ type: "askRead" }) ? () => void send({ type: "askRead" }) : undefined} />;
 }

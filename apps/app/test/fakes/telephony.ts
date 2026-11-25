@@ -1,9 +1,9 @@
 // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
-import type { ActionJournalPlugin } from "@elizaos/os/bridges/definitions/action-journal";
-import type { AddressBookNativePlugin } from "@elizaos/os/bridges/definitions/contacts";
-import type { MessagesNativePlugin } from "@elizaos/os/bridges/definitions/messages";
-import type { PhoneNativePlugin, TelephonySubscription } from "@elizaos/os/bridges/definitions/phone";
-import { mmsBinding, smsBindingHash } from "@elizaos/os/bridges/messages";
+import type { ActionJournalPlugin } from "@elizaos/os-bridges";
+import type { AddressBookNativePlugin } from "@elizaos/os-bridges";
+import type { MessagesNativePlugin } from "@elizaos/os-bridges";
+import type { PhoneNativePlugin, TelephonySubscription } from "@elizaos/os-bridges";
+import { mmsBinding, smsBindingHash } from "@elizaos/os-bridges";
 import { type Faked, plugin, rejection } from "./phone.ts";
 import type { Route } from "./routes.ts";
 
