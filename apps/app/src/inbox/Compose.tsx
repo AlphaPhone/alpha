@@ -43,6 +43,10 @@ function outcomeOf(ops: Operations, letter: Letter): InboxSendOutcomeProps["outc
 }
 
 const refusals = { TooBig: "fileTooBig", NotReadable: "fileUnreadable", NoRoom: "noRoom" } as const satisfies Partial<Record<Refusal, InboxNoticeKind>>;
+const notices: Partial<Record<Composer["notice"], InboxNoticeKind>> = {
+  MineRestored: "mineRestored", SavedTaken: "savedTaken", SaveFound: "saveFound", SaveNotFound: "saveNotFound",
+  CopyDeleted: "copyDeleted", CopyNotDeleted: "copyNotDeleted",
+};
 
 const keepingOf = (s: Composer) => (s.unkept ? (s.full ? "full" : "notKept") : s.write.status === "Loading" || s.pending ? "writing" : "kept");
 
@@ -109,11 +113,11 @@ export function Compose({ runtime, list }: ComposeProps) {
   // spec/app/inbox/sending.md, "Story: Save my draft to Gmail, or delete it there, knowingly"
   const saving = { type: "prepare", kind: letter.gmail === 0 ? "SaveDraft" : "ReplaceDraft", access, letter, kept: kept && addressed, again: false } as const;
   const lookUp = { type: "lookUp", access } as const;
-  const checkCopy = !letter.unsure && kept && addressed && can(lookUp, "Owner") ? () => void send(lookUp, "Owner") : undefined;
+  const checkCopy = kept && addressed && can(lookUp, "Owner") ? () => void send(lookUp, "Owner") : undefined;
   const clash = letter.draft.sync === "Conflicted";
   const copy = clash ? runtime.runSync(Letters.use((all) => Effect.sync(() => all.copy(letter.gmail)))) : undefined;
   const latest = choiceOf(copy);
-  const gmail = clash ? "clash" : letter.unsure ? "unsure" : letter.draft.sync === "Saving" ? "saving" : letter.gmail === 0 ? "none" : letter.draft.sync === "Edited" ? "unsaved" : "saved";
+  const gmail = clash ? "clash" : letter.draft.sync === "Saving" ? "saving" : letter.gmail === 0 || letter.unsure ? "none" : letter.draft.sync === "Edited" ? "unsaved" : "saved";
   const deleting = { type: "prepare", kind: "DeleteDraft", access, letter, kept, again: false } as const;
   const confirm = { type: "confirm", revision: letter.revision, access, now: untimed } as const;
   const reviewed = ops.state.kind === "Send" || ops.state.kind === "SaveDraft" || ops.state.kind === "ReplaceDraft" || ops.state.kind === "DeleteDraft";
@@ -127,6 +131,10 @@ export function Compose({ runtime, list }: ComposeProps) {
     onCheckSent: checkingSent || can(checkSent, "Owner") ? () => { if (!checkingSent) void send(checkSent, "Owner"); } : undefined,
     onSendAgain: outcome === "unknown" && !checkingSent && ops.can(sendAgain, "Owner") ? () => void ops.send(sendAgain, "Owner") : undefined,
   };
+  const notice = state.lookup.status === "Loading" ? "checkingGmailCopy"
+    : letter.unsure ? "gmailCopyUnknown"
+    : state.lookup.status === "Failed" ? "unreachable"
+    : notices[state.notice] ?? (letter.textOnly ? "forwardTextOnly" : undefined);
   const aside = { type: "setAside" } as const;
   // spec/app/inbox/adding.md, "A file is attached to the draft open only once the picker gives one that fits within the room its account leaves; one too large, unreadable or without room is refused and said so"
   const attach = { type: "attach", draft } as const;
@@ -162,8 +170,8 @@ export function Compose({ runtime, list }: ComposeProps) {
         attachments={words.files.map((file, at) => ({ id: String(at), name: file.name }))}
         onRemoveAttachment={(id) => detach(id)?.()}
         onAttach={adding.can(attach) && canAttach(letter, policy, 1) ? () => void adding.send(attach) : undefined}
-        notice={refused ?? (state.lookup.status === "Failed" ? "unreachable" : state.notice === "MineRestored" ? "mineRestored" : state.notice === "SavedTaken" ? "savedTaken" : letter.textOnly ? "forwardTextOnly" : undefined)}
-        onNoticeAction={refused === undefined && state.lookup.status === "Failed" ? checkCopy : undefined}
+        notice={refused ?? notice}
+        onNoticeAction={refused === undefined ? checkCopy : undefined}
         outcome={sendOutcome}
         storage={ready(state) ? undefined : state.load.status === "Failed" ? "unavailable" : "checking"}
         onReloadStorage={can({ type: "reload" }, "World") ? () => void send({ type: "reload" }, "World") : undefined}

@@ -79,7 +79,7 @@ async function openInbox(world: Scene) {
 }
 
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
-  it("See my mail (spec/app/inbox/index.md, \"Story: See my mail\")", async () => {
+  it("See my mail (spec/app/inbox/index.md, \"Story: See my mail\"; spec/app/inbox/message.md, \"Story: Ask Alpha about a message\")", async () => {
     const world = { ...scene(), phone };
     const attachmentText = '<strong data-attachment-fixture>Review agenda</strong>';
     for (let at = 10; at <= 30; at += 1) world.inbox.mail.push(letter(at, `Newsletter ${at}`, ["INBOX"]));
@@ -144,6 +144,27 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await action("More messages");
     await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded" && s.position === 1);
     expect(title()).toBe("Revised term sheet");
+
+    if (!phone) {
+      // spec/app/inbox/message.md, "Ask Alpha is handed the message on screen, once it has loaded, named by its account, number and history revision"
+      await menu("Ask Alpha");
+      await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
+      await drawn(() => vi.waitFor(() => expect(document.querySelector("[role=dialog]")?.textContent).toContain("Share this email with Alpha?")));
+      expect([document.querySelector("[role=dialog]")?.textContent, world.ask.said]).toEqual([expect.stringContaining(termSheet.body), []]);
+      await confirm("Add to chat");
+      await drawn(() => vi.waitFor(() => expect(document.querySelector('textarea[aria-label="Message Alpha"]')).not.toBeNull()));
+      await fill("Message Alpha", "What changed in the term sheet?");
+      expect(world.ask.said).toEqual([]);
+      await press("Send");
+      await drawn(() => vi.waitFor(() => expect(world.ask.said).toHaveLength(1)));
+      const sent = world.ask.said[0] ?? "";
+      const lastBlock = sent.split("\n\n").at(-1) ?? "";
+      expect([sent.startsWith("What changed in the term sheet?\n\n"), JSON.parse(lastBlock)]).toEqual([true, {
+        from: termSheet.card.from, to: [...termSheet.card.to, ...termSheet.card.cc], subject: termSheet.card.subject, bodyText: termSheet.body,
+      }]);
+      await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" }))));
+      await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar" && showing(s, "Inbox"));
+    }
 
     // spec/app/inbox/message.md, "Only an https link without credentials in it can be reviewed and opened; any other link stays text"
     const visited = vi.spyOn(window, "open").mockReturnValue(null);
@@ -411,10 +432,14 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   // spec/app/inbox/sending.md, "Story: Save my draft to Gmail, or delete it there, knowingly"
   await menu("Save to Gmail", "Draft actions");
   await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "SaveDraft");
+  world.inbox.loseDraftReply = true;
   await confirm("Save");
+  await until(alpha, runtime, Writing, (s) => s.letter.unsure && s.letter.copyAttempt !== 0 && s.stored && !s.pending && s.write.status === "Loaded");
+  expect(told()).toContain("Alpha cannot confirm what happened to Gmail's copy");
+  await press("Check Gmail copy");
   await until(alpha, runtime, Changes, (s) => s.kind === "SaveDraft" && s.attempt.outcome === "Confirmed");
-  await until(alpha, runtime, Writing, (s) => s.letter.gmail !== 0);
-  expect(world.inbox.changes).toEqual(["draft-create Re: Standup notes"]);
+  await until(alpha, runtime, Writing, (s) => !s.letter.unsure && s.letter.gmail !== 0);
+  expect([world.inbox.changes, world.inbox.receiptReads.length, world.inbox.drafts.size]).toEqual([["draft-create Re: Standup notes"], 1, 1]);
 
   // spec/app/inbox/adding.md, "A file is attached to the draft open only once the picker gives one that fits within the room its account leaves; one too large, unreadable or without room is refused and said so"
   await press("Attach file");
@@ -467,7 +492,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   expect(told()).toContain("Alpha cannot tell whether it was sent");
   await press("Check Sent");
   await until(alpha, runtime, Writing, (s) => !s.open);
-  expect(world.inbox.receiptReads).toHaveLength(1);
+  expect(new Set(world.inbox.receiptReads).size).toBe(2);
   expect([world.inbox.changes.at(-1), world.inbox.attached]).toEqual(["send reader@example.test Fwd: Standup notes", ["receipt.txt", "actions.txt"]]);
 
   // spec/app/inbox/drafts.md, "A draft is set aside only once it is wholly kept on the phone, and comes back exactly as it was set aside"
@@ -487,6 +512,23 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await confirm("Discard");
   await until(alpha, runtime, Writing, (s) => !s.open);
   expect(world.inbox.drafts.has("plain-remote")).toBe(true);
+  await row("A remote draft");
+  await until(alpha, runtime, Writing, (s) => s.open && s.stored && s.write.status === "Loaded");
+  world.inbox.loseDraftReply = true;
+  await menu("Delete Gmail copy", "Draft actions");
+  await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "DeleteDraft");
+  await confirm("Delete");
+  await until(alpha, runtime, Writing, (s) => s.letter.unsure && s.letter.copyAttempt !== 0 && s.stored && !s.pending && s.write.status === "Loaded");
+  await press("Check Gmail copy");
+  await until(alpha, runtime, Writing, (s) => s.open && !s.letter.unsure && s.letter.gmail === 0 && s.write.status === "Loaded");
+  expect([
+    world.inbox.drafts.has("plain-remote"),
+    document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.value,
+    new Set(world.inbox.receiptReads).size,
+  ]).toEqual([false, "Already in Gmail.", 3]);
+  await menu("Discard", "Draft actions");
+  await confirm("Discard");
+  await until(alpha, runtime, Writing, (s) => !s.open);
   await press("Inbox");
   await until(alpha, runtime, List, (s) => s.selected.folder === "Incoming" && s.list.status === "Loaded");
 
@@ -508,7 +550,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
     document.querySelector<HTMLInputElement>('input[aria-label="To"]')?.value,
     document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.value,
     world.inbox.changes.length,
-  ]).toEqual(["unfinished@", "Keep these words.", 3]);
+  ]).toEqual(["unfinished@", "Keep these words.", 4]);
 });
 
 // spec/app/home/cards.md, "The mail card shows the unread count, senders and subjects only, never a message body; marked not up to date when Inbox's page is not, and not drawn without an account or a row"
