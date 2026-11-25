@@ -3392,6 +3392,7 @@ function eachCheck() {
     fs.mkdirSync(installed, { recursive: true });
     const unpacked = await exec("tar", ["-xzf", archive, "--strip-components", "1", "-C", installed], copy);
     assert.equal(unpacked.status, 0, unpacked.stdout + unpacked.stderr);
+    assert.equal(read("vibestack/LICENSE", installed), read("vibestack/LICENSE"));
     assert.deepEqual(pageFiles(path.join(installed, "dist/studio/dist/page")), currentPage);
     assert.deepEqual(fs.readdirSync(installed, { recursive: true, encoding: "utf8" }).filter((file) => file.split(path.sep).includes("examples")), [], "an application's toolchain carries no example to check");
     fs.mkdirSync(path.join(installed, "node_modules"));
