@@ -140,4 +140,12 @@ public final class BrowserNativeCopyTest {
   equal(TabLayer.parse(Map.of("layer", "below-host")), null, "an object is rejected");
   equal(TabLayer.parse(""), null, "an empty name is rejected");
  }
+
+ @Test public void desktopSiteUserAgent() {
+  String mobile = "Mozilla/5.0 (Linux; Android 15; Pixel 9; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/131.0.6778.200 Mobile Safari/537.36";
+  String desktop = BrowserDesktopSite.userAgent(mobile);
+  equal(desktop, "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/131.0.6778.200 Safari/537.36", "strips Android, wv and Mobile tokens while preserving engine version");
+  check(BrowserDesktopSite.userAgent(null).contains("X11; Linux x86_64") && !BrowserDesktopSite.userAgent(null).contains("Mobile"), "null falls back to desktop Chrome UA");
+  check(BrowserDesktopSite.userAgent("   ").contains("X11; Linux x86_64") && !BrowserDesktopSite.userAgent("   ").contains("Android"), "blank falls back to desktop Chrome UA");
+ }
 }
