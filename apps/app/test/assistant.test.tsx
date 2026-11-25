@@ -344,14 +344,18 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       await vi.waitFor(() => expect(world.settings.copied.at(-1)).toBe("You said: Limes tonight?\n\nAsk Ana (https://ana.example/) <b>now</b>\n\n• one"));
     }
 
-    // spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one": the owner's own words keep it.
-    for (const [said, drawn, plain] of [[["Sure.\n[answer] Paris"], "Sure.Paris", "Sure.\nParis"], [["Paris. [answer]"], "Paris.", "Paris."], [["<promise> One sec."], "One sec.", "One sec."], [["[ans", "wer] Paris"], "Paris", "Paris"]] as const) {
+    // spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one": the owner's own words keep it, and a link's words stay.
+    const tagged = [[["Sure.\n[answer] Paris"], "Sure.Paris", "Sure.\nParis"], [["Paris. [answer]"], "Paris.", "Paris."], [["<promise> One sec."], "One sec.", "One sec."], [["[ans", "wer] Paris"], "Paris", "Paris"], [["[answer", "](https://example.com)"], "answer", "answer (https://example.com/)"]] as const;
+    for (const [said, drawn, plain] of tagged) {
+      const { turn } = await runtime.runPromise(Effect.flatMap(Conversation, (machine) => machine.get()));
       world.ask.nextReplyChunks = said;
       write("Capital of France? [answer]");
       await press("Send");
+      await until(alpha, runtime, Conversation, (s) => s.turn.send.id === turn.send.id + 1 && s.turn.reply === "Complete");
+      await until(alpha, runtime, Reply, (s) => s.status === "Settled");
       await vi.waitFor(() => expect(lines().slice(-2)).toEqual(["Capital of France? [answer]", drawn]));
       if (phone) {
-        onMessage(drawn, "Copy");
+        await vi.waitFor(() => onMessage(drawn, "Copy"));
         await vi.waitFor(() => expect(world.settings.copied.at(-1)).toBe(plain));
       }
     }
@@ -416,6 +420,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       { id: "m3", role: "assistant", text: "", failureKind: "limit_reached" },
       { id: "m4", role: "assistant", text: "", failureKind: "insufficient_credits" },
       { id: "m5", role: "assistant", text: "", failureKind: "insufficient_credits", cloudCode: "allowance_exhausted" },
+      { id: "m6", role: "assistant", text: "<promise> Friday is free." },
+      { id: "m7", role: "user", text: "Friday [answer] again?" },
     ] });
     const { alpha, runtime } = await openAssistant(world, false);
 
@@ -423,7 +429,10 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await chatAction("Search chat");
     await fill("Search chats", "friday");
     await until(alpha, runtime, Search, (s) => s.hits.status === "Loaded" && s.words === "friday");
-    expect(rows("Results")).toBe(2);
+    expect(rows("Results")).toBe(4);
+    // spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one": a hit of the agent's loses the tag, the owner's keeps it.
+    const results = document.querySelector("section[aria-label='Results']")?.textContent ?? "";
+    expect([results.includes("Friday is free."), results.includes("<promise>"), results.includes("Friday [answer] again?")]).toEqual([true, false, true]);
     // spec/app/assistant/search.md, "Opening a hit closes search and opens its conversation around its message, and another conversation only while the turn and the composer are free"
     row("Results", "Friday at noon");
     await until(alpha, runtime, Chats, (s) => s.chosen > 0 && s.around > 0 && s.page.status === "Loaded");

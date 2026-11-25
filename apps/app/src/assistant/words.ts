@@ -17,9 +17,11 @@ const formClose = /\[\/FORM\]\s*$/;
 const cardOpen = /^\s*\[[ \t]*MAPSCARD[ \t]*\][ \t]*$/;
 const cardClose = /^\s*\[[ \t]*\/[ \t]*MAPSCARD[ \t]*\][ \t]*$/;
 const option = /^([^=\n]{1,500})=([^=\n]{1,80})$/;
-const turnTag = /[ \t]*(?:\[\/?(?:answer|promise)\]|<\/?(?:answer|promise)>)[ \t]*(?=\r?\n|$)|(?:\[\/?(?:answer|promise)\]|<\/?(?:answer|promise)>)[ \t]*/gi;
-const turnTagSoFar = /[[<]\/?(?:a(?:n(?:s(?:w(?:e(?:r)?)?)?)?)?|p(?:r(?:o(?:m(?:i(?:s(?:e)?)?)?)?)?)?)?$/i;
-const partialOpener =/^\s*\[(?:M(?:A(?:P(?:S(?:C(?:A(?:R(?:D)?)?)?)?)?)?)?|C(?:H(?:O(?:I(?:C(?:E(?::[^\]\n]*)?)?)?)?)?)?|F(?:O(?:R(?:M)?)?)?)?$/;
+const tag = String.raw`(?:\[(?:answer|promise)\](?!\()|<(?:answer|promise)>)`;
+const turnTag = new RegExp(String.raw`[ \t]*${tag}[ \t]*(?=\r?$)|${tag}[ \t]*`, "g");
+const turnTagSoFar = /(?:[[<](?:a(?:n(?:s(?:w(?:e(?:r)?)?)?)?)?|p(?:r(?:o(?:m(?:i(?:s(?:e)?)?)?)?)?)?)?|\[(?:answer|promise)\])$/;
+const inlineCode = /(`+[^`]*`+|`.*$)/;
+const partialOpener = /^\s*\[(?:M(?:A(?:P(?:S(?:C(?:A(?:R(?:D)?)?)?)?)?)?)?|C(?:H(?:O(?:I(?:C(?:E(?::[^\]\n]*)?)?)?)?)?)?|F(?:O(?:R(?:M)?)?)?)?$/;
 
 interface Blocks {
   readonly words: string;
@@ -27,13 +29,18 @@ interface Blocks {
 }
 
 /**
- * The model's text without eliza's turn tag, `[answer]` or `[promise]` in either bracket, wherever it stands; while the
- * reply is still `streaming`, an ending that may still become one is held back. Never for the owner's own words.
- * @throws {never}
+ * The model's text without eliza's turn tag, exactly `[answer]`, `[promise]`, `<answer>` or `<promise>`, wherever it
+ * stands in prose: never inside a code fence or inline code, and never a link's words. While the reply is still
+ * `streaming`, an ending that may still become one, or a tag that may still become a link's words, is held back. Never
+ * for the owner's own words. @throws {never}
  */
 export function withoutTurnTags(text: string, streaming = false): string {
-  const untagged = text.replace(turnTag, "");
-  return streaming ? untagged.replace(turnTagSoFar, "") : untagged;
+  let fenced = false;
+  return (streaming ? text.replace(turnTagSoFar, "") : text).split("\n").map((line) => {
+    const fenceMark = fence.test(line);
+    if (fenceMark) fenced = !fenced;
+    return fenceMark || fenced ? line : line.split(inlineCode).map((piece, at) => (at % 2 === 0 ? piece.replace(turnTag, "") : piece)).join("");
+  }).join("\n");
 }
 
 /**
