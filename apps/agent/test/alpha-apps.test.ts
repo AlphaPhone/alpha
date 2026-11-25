@@ -90,6 +90,19 @@ describe("Alpha product plugin: what the model may pass and what the owner sees"
   });
 });
 
+describe("Alpha product plugin: Clock reads the model's arguments, never the owner's words", () => {
+  it("names a timer or alarm only when the model does, and repeats an alarm only on the days the model gives", async () => {
+    const store = new AlphaAppsStore({ now: () => Date.UTC(2026, 10, 24, 18, 0) });
+    const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC" });
+    const timer = plugin.actions!.find((action) => action.name === "CLOCK_TIMER")!;
+    const alarm = plugin.actions!.find((action) => action.name === "CLOCK_ALARM")!;
+    await timer.handler(makeFakeRuntime().runtime, emptyMessage("Set a timer for 5 minutes"), emptyState, { parameters: { action: "start", durationSeconds: 300 } });
+    await alarm.handler(makeFakeRuntime().runtime, emptyMessage("Wake me at 7 on Monday"), emptyState, { parameters: { action: "set", hour: 7, minute: 0 } });
+    expect(store.getClock().timers.map(({ label }) => label)).toEqual([""]);
+    expect(store.getClock().alarms.map(({ label, daysMask }) => ({ label, daysMask }))).toEqual([{ label: "", daysMask: 0 }]);
+  });
+});
+
 describe("Alpha product plugin: Clock actions, provider, and routes", () => {
   // spec/agent/index.md, "The agent may run the actions the old phone's agent ran plus Alpha's Clock and Reminders actions, and every other action the bundle registers is listed as refused with its reason"
   it("runs CLOCK_ALARM, CLOCK_TIMER, CLOCK_WORLD actions and injects CLOCK_CONTEXT", async () => {
@@ -105,7 +118,9 @@ describe("Alpha product plugin: Clock actions, provider, and routes", () => {
     const worldAction = plugin.actions!.find((a) => a.name === "CLOCK_WORLD")!;
     const provider = plugin.providers!.find((p) => p.name === "CLOCK_CONTEXT")!;
 
-    const setRes = await alarmAction.handler(runtime, emptyMessage("Set an alarm for 7:30 am weekdays labeled Standup"), emptyState, { parameters: {} });
+    const setRes = await alarmAction.handler(runtime, emptyMessage("Set an alarm for 7:30 am weekdays labeled Standup"), emptyState, {
+      parameters: { action: "set", hour: 7, minute: 30, days: ["monday", "tuesday", "wednesday", "thursday", "friday"], label: "Standup" },
+    });
     expect(setRes?.success).toBe(true);
     const alarmId = ((setRes?.data as { alarm: { id: string } }).alarm).id;
     expect(store.getClock().alarms[0]?.daysMask).toBe(62);
@@ -126,7 +141,7 @@ describe("Alpha product plugin: Clock actions, provider, and routes", () => {
     expect(store.getClock().alarms[0]?.phase).toBe("idle");
     expect(store.getClock().alarms[0]?.enabled).toBe(true);
 
-    const timerStart = await timerAction.handler(runtime, emptyMessage("Start a 5 minute timer for pasta"), emptyState, { parameters: {} });
+    const timerStart = await timerAction.handler(runtime, emptyMessage("Start a 5 minute timer for pasta"), emptyState, { parameters: { action: "start", durationSeconds: 300, label: "pasta" } });
     expect(timerStart?.success).toBe(true);
     const timerId = ((timerStart?.data as { timer: { id: string } }).timer).id;
 
