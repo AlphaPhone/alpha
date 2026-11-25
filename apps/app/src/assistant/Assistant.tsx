@@ -145,7 +145,7 @@ function DeviceReview({ runtime, card }: { runtime: AssistantProps["runtime"]; c
           {spokenText(card) !== undefined && <p className="text-meta text-muted-foreground">Say “Send this text”</p>}
         </AssistantCardFrame>
       ) : (
-        <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, waiting: deciding, action: card.operation.type === "sms_compose" ? "Open draft" : "Approve" }}
+        <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, waiting: deciding, action: card.operation.type === "sms_compose" ? "Open draft" : card.operation.type === "browser_navigate" ? "Open" : "Approve" }}
           onHandOn={unavailable ? undefined : () => decide(true)} />
       )}
       {unavailable
