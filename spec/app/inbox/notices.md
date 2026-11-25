@@ -9,11 +9,11 @@ notifications, are the notices area's; a tap comes back here as
 `tapped`, naming the account and message, and opens that message in
 Inbox.
 
-The shell passes the grant of the account it names as the list holds it,
-whether notifications may be posted, the account selected in the list
-whenever it changes, and tells when the cloud credential changed. Inbox
-offers Settings the fact `status`: whether mail is watched, when it was
-last checked, and why it is not.
+The shell configures the phone's mail history worker with the grant of the
+account selected in the list and the current owner's cloud identity. The
+worker owns the durable checkpoint, notification permission and exact
+taps. Inbox shows the worker's reported status in Settings and opens the
+Android notification settings from the same row.
 
 ## Story: Hear about new mail
 
@@ -233,6 +233,10 @@ pure def sometimesACheckWaitsAfterARestart(s: Notices): bool =
 
 ### The status is off, watching since the last check, catching up on further pages, missing earlier mail after a reset, stopped by refusals, or no longer allowed
 
+The phone can also be waiting for its first check or retrying a temporary
+failure. Settings shows the watched address and the last successful
+check when available.
+
 ```quint
 type Phase = Off | Watching | CatchingUp | Expired | Stopped | NoLongerAllowed
 type Status = { phase: Phase, account: int, checkedAt: int }
@@ -276,3 +280,12 @@ pure def stepATapOpensOnlyTheNoticeUp(before: Notices, after: Notices, out: List
 
 pure def sometimesANoticeWasOpened(s: Notices): bool = s.posts >= 1 and s.up.size() < s.posts and s.account != 0
 ```
+
+### Ask Alpha from a notice checks the same email again before spending the tap
+
+The Ask Alpha action opens that message and offers to add its full plain
+text to the resident conversation. Confirming reads the message again,
+checks the account, message, latest reviewed content, resident
+conversation and pending tap, then spends that tap once. Cancel releases
+the pending Ask action and leaves the notification available. The owner
+sends the resulting question from the usual Ask Alpha composer.
