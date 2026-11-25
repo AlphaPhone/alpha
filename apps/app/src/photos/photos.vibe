@@ -11,7 +11,7 @@ import { Device, native } from "../platform/device.vibe"
 import { duration as noticeDuration } from "../../gen/app__notices__toasts.effect.vibe"
 import { offer, say, withdraw } from "../notices/toasts.vibe"
 import { Time } from "../runtime/time.vibe"
-import { PhotosPort, saveBrowserCapture } from "../platform/photos.vibe"
+import { PhotosPort, saveBrowserCapture, type BrowserCapture } from "../platform/photos.vibe"
 import type { BrowserEditFrame } from "../platform/photoCanvas.vibe"
 import { answer, following, reacting, run, started, together, type Job } from "../runtime/reactor.vibe"
 import { Catalog, catalog, reviewed, taken, type ListedAlbum, type Row } from "./catalog.vibe"
@@ -128,7 +128,8 @@ const denied: Access = { type: "accessIs", grant: "Denied", videos: false }
 
 /** The current permission, with a failed query left unconfirmed. */
 effect function permission(ask = false): (Access | undefined)!!PhotosPort {
-  const { phone } = try PhotosPort
+  const { phone, browser } = try PhotosPort
+  if (Option.isSome(browser)) return { type: "accessIs", grant: "Granted", videos: true }
   if (Option.isNone(phone)) return undefined
   const access = tryPromise(() => ask ? phone.value.requestLibraryAccess() : phone.value.libraryAccess()) catch () => undefined
   return access === undefined ? undefined : accessEvent(access)
@@ -151,12 +152,13 @@ function failedList(ticket: number): Extract<Library.Event, { type: "listed" }> 
 
 /** Read the requested page and keep its payload only when the matching ticket can still answer. */
 effect function fetched(request: Fetch): Library.Event!!(PhotosPort | Catalog | Library.Machine) {
-  const { phone, captures, reviewed: deviceLibrary } = try PhotosPort
+  const { phone, browser, reviewed: deviceLibrary } = try PhotosPort
   const cache = try Catalog
   const machine = try Library.Machine
   const revision = try cache.revision()
   const cursor = request.page ? try cache.cursor(false) : null
   const fail = failedList(request.ticket)
+  if (Option.isSome(browser)) return try fetchedBrowser(request)
   if (request.tab === "Albums" && request.album === 0) {
     if (Option.isNone(phone)) return fail
     const client = phone.value
@@ -190,12 +192,9 @@ effect function fetched(request: Fetch): Library.Event!!(PhotosPort | Catalog | 
     const scope = Option.isSome(deviceLibrary) ? (tryPromise(() => deviceLibrary.value.scope()) catch () => undefined) : undefined
     return scope?.locked ? { type: "lockedOut", ticket: request.ticket } : fail
   }
-  const browser = Option.isNone(phone) ? (captures() catch () => undefined) : []
-  if (browser === undefined || !Library.canListed(try machine.get(), request.ticket, "Phone")) return fail
-  const rows: Row[] = [
-    ...(listed?.items ?? []).filter((item) => !request.own || item.owned === true).map((item): Row => ({ kind: "phone", item })),
-    ...browser.map((item): Row => ({ kind: "browser", item })),
-  ].sort((a, b) => taken(b) - taken(a))
+  if (!Library.canListed(try machine.get(), request.ticket, "Phone")) return fail
+  const rows = (listed?.items ?? []).filter((item) => !request.own || item.owned === true)
+    .map((item): Row => ({ kind: "phone", item })).sort((a, b) => taken(b) - taken(a))
   const handles = try cache.index(rows)
   const accepted = request.only.length === 0 ? rows : rows.filter((_, index) => request.only.includes(handles[index] ?? 0))
   const acceptedHandles = request.only.length === 0 ? handles : handles.filter((id) => request.only.includes(id))
@@ -207,6 +206,70 @@ effect function fetched(request: Fetch): Library.Event!!(PhotosPort | Catalog | 
     type: "listed", ticket: request.ticket, ok: true, rows: handles, owned, starred,
     revision, more: listed?.next != null,
   }
+}
+
+function browserBelongs(row: BrowserCapture, album: ListedAlbum["target"] | undefined, members: ReadonlySet<string>): boolean {
+  if (album === "favorites") return row.favorite === true
+  if (album === "videos") return row.mimeType.startsWith("video/")
+  if (album === "screenshots") return false
+  return album?.startsWith("custom:") ? members.has(row.id) : true
+}
+
+/** The app's local library uses the same tab, section and action rules as the phone's library. */
+effect function fetchedBrowser(request: Fetch): Library.Event!!(PhotosPort | Catalog | Library.Machine) {
+  const { browser } = try PhotosPort
+  const fail = failedList(request.ticket)
+  if (Option.isNone(browser)) return fail
+  const local = browser.value
+  const all = tryPromise(() => local.rows()) catch () => undefined
+  if (all === undefined) return fail
+  const live = all.filter((item) => item.trashedAt === undefined).sort((a, b) => b.created - a.created)
+  const cache = try Catalog
+  const machine = try Library.Machine
+  if (!Library.canListed(try machine.get(), request.ticket, "Phone")) return fail
+  const revision = try cache.revision()
+  if (request.tab === "Albums" && request.album === 0) {
+    const owned = tryPromise(() => local.albums()) catch () => undefined
+    if (owned === undefined || !Library.canListed(try machine.get(), request.ticket, "Phone")) return fail
+    const defaults: ListedAlbum[] = standardAlbums.flatMap((album) => {
+      const rows = live.filter((row) => browserBelongs(row, album.target, new Set()))
+      return rows.length > 0 || album.target === "favorites" ? [{ ...album, count: rows.length, cover: rows[0]?.thumbnail }] : []
+    })
+    const personal = owned.map((album): ListedAlbum => {
+      const members = new Set(album.memberIds)
+      const rows = live.filter((item) => members.has(item.id))
+      return { title: album.name, target: `custom:${album.id}`, owned: album, count: rows.length, cover: rows[0]?.thumbnail }
+    })
+    const albums = try cache.shelves([...defaults, ...personal], all.length - live.length)
+    return { ...fail, ok: true, rows: albums, revision }
+  }
+  const { albums } = try cache.displayed()
+  const album = albums.get(request.album)
+  const members = new Set(album?.owned?.memberIds ?? [])
+  const query = request.query.toLocaleLowerCase()
+  const rows = live.filter((item) => browserBelongs(item, album?.target, members) && (request.filter === "Favorites" ? item.favorite === true
+    : request.filter === "Videos" ? item.mimeType.startsWith("video/") : request.filter === "Matching" ? item.name.toLocaleLowerCase().includes(query) : request.filter !== "People"))
+    .map((item): Row => ({ kind: "browser", item }))
+  const allIds = try cache.index(rows)
+  const state = try machine.get()
+  const older = request.page ? state.rows.reduce((first, number) => Math.min(first, number), Infinity) : Infinity
+  const slice = rows.flatMap((row, index) => {
+    const number = allIds[index]
+    return number !== undefined && number < older && (request.only.length === 0 || request.only.includes(number)) ? [{ row, number }] : []
+  })
+  const shown = slice.slice(0, pageLimit)
+  const ids = shown.map(({ number }) => number)
+  try cache.publish(shown.map(({ row }) => row), ids)
+  return { ...fail, ok: true, rows: ids, owned: ids, starred: shown.filter(({ row }) => row.item.favorite === true).map(({ number }) => number), revision, more: slice.length > shown.length }
+}
+
+/** Resolve the exact browser rows approved by the owner. */
+export effect function browserTargets(items: readonly number[]): BrowserCapture[]!!Catalog {
+  const { rows } = try (try Catalog).displayed()
+  return items.flatMap((number) => {
+    const row = rows.get(number)
+    return row?.kind === "browser" ? [row.item] : []
+  })
 }
 
 /** Resolve exactly the native rows a change intends; never replace a missing row with a different item. */
@@ -222,7 +285,39 @@ const operations = { Favorite: "favorite", Unfavorite: "unfavorite", Trash: "tra
 
 /** The native system-confirmed rows, with lost or unverified results never claimed as complete. */
 export effect function changedItems(change: Change, items: readonly number[]) {
-  const { phone } = try PhotosPort
+  const { phone, browser } = try PhotosPort
+  if (Option.isSome(browser)) {
+    const reviewed = try browserTargets(items)
+    const refusal = { done: [], stale: [...items], declined: false, known: true }
+    if (reviewed.length !== items.length) return refusal
+    const local = browser.value
+    if (change === "Share") {
+      const library = try Library.Machine
+      const before = try library.get()
+      const files = tryPromise(() => local.shareFiles(reviewed)) catch () => undefined
+      const after = try library.get()
+      if (files === undefined || !after.visible || after.secure || before.revision !== after.revision || before.library.ticket !== after.library.ticket
+        || !(try (try Device).showing()) || !showing(try (try Shell).get(), "Photos")) return refusal
+      const shared = tryPromise(() => local.share(files)) catch () => undefined
+      if (shared === "unavailable") try say("Sharing is unavailable in this browser.", true)
+      return { done: shared === "opened" ? [...items] : [], stale: [], declined: shared === "declined", known: shared !== undefined }
+    }
+    const changed = tryPromise(() => local.change(operations[change], reviewed)) catch () => undefined
+    const done: number[] = []
+    const stale: number[] = []
+    const updated: Row[] = []
+    const updatedIds: number[] = []
+    for (const [index, row] of reviewed.entries()) {
+      const number = items[index]
+      const reply = changed?.find((entry) => entry.id === row.id)
+      if (number === undefined || reply === undefined) continue
+      if (reply.status === "stale") stale.push(number)
+      else done.push(number)
+      if (reply.item !== undefined) { updated.push({ kind: "browser", item: reply.item }); updatedIds.push(number) }
+    }
+    try (try Catalog).publish(updated, updatedIds)
+    return { done, stale, declined: false, known: changed !== undefined }
+  }
   const rows = try targets(items)
   if (Option.isNone(phone) || rows.length !== items.length) return { done: [], stale: [...items], declined: false, known: true }
   const asked = rows.map((row) => row.item)
@@ -256,7 +351,7 @@ export effect function changedItems(change: Change, items: readonly number[]) {
   return { done, stale, declined: false, known: reply !== undefined && !reply.outcomes.some((row) => row.status === "unverified") }
 }
 
-effect function changed(attempt: number, change: Change, items: readonly number[]): Library.Event!!(PhotosPort | Catalog) {
+effect function changed(attempt: number, change: Change, items: readonly number[]): Library.Event!!(PhotosPort | Catalog | Library.Machine | Device | Shell | Effect.Services<ReturnType<typeof say>>) {
   const outcome = try changedItems(change, items)
   if (outcome.done.length > 0 && change !== "Share") try (try Catalog).changed()
   return { type: "changed", attempt, ...outcome }
@@ -265,11 +360,21 @@ effect function changed(attempt: number, change: Change, items: readonly number[
 type WriteAlbum = Extract<Library.Effect, { readonly tag: "WriteAlbum" }>
 
 effect function albumWritten(request: WriteAlbum): Library.Event!!(PhotosPort | Catalog) {
-  const { phone } = try PhotosPort
+  const { phone, browser } = try PhotosPort
   const { albums } = try (try Catalog).displayed()
-  const album = albums.get(request.album)?.owned
-  const rows = try targets(request.items)
+  const owned = albums.get(request.album)?.owned
   const refusal: Library.Event = { type: "albumWritten", attempt: request.attempt, known: true, confirmed: false }
+  if (Option.isSome(browser)) {
+    const local = browser.value
+    const items = try browserTargets(request.items)
+    if (items.length !== request.items.length) return refusal
+    const album = owned !== undefined && "kind" in owned ? owned : undefined
+    const written = tryPromise(() => local.writeAlbum({ change: request.change, album, name: request.name, items })) catch () => undefined
+    if (written) try (try Catalog).changed()
+    return { ...refusal, known: written !== undefined, confirmed: written === true }
+  }
+  const album = owned !== undefined && !("kind" in owned) ? owned : undefined
+  const rows = try targets(request.items)
   if (Option.isNone(phone) || rows.length !== request.items.length) return refusal
   let update: AlbumChange | undefined
   if (request.change === "Create") update = { operation: "create", name: request.name }
@@ -297,7 +402,7 @@ effect function revoke() {
   try ignore((try Trash.Machine).send({ type: "leave" }, "Phone"))
 }
 
-type LibraryNeeds = PhotosPort | Catalog | Library.Machine | Viewer.Machine | Trash.Machine
+type LibraryNeeds = PhotosPort | Catalog | Library.Machine | Viewer.Machine | Trash.Machine | Device | Shell | Effect.Services<ReturnType<typeof say>>
 function carry(fx: Library.Effect): Job<Library.Event, LibraryNeeds, [Actor]> {
   return match (fx) {
     when { tag: "Fetch" }: answer("library", fetched(fx), failedList(fx.ticket), "Phone");
