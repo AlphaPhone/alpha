@@ -286,3 +286,15 @@ pure def nearLimit(f: Film): bool = f.stage == Running and left(f) <= warnSecond
 
 pure def remaining(f: Film): Clock = clock(left(f) * 10)
 ```
+
+### A running recording always has time left, and only a running one warns
+
+The time left never exceeds what five minutes allow, stays above zero while
+the recording runs, and nothing is added to the timer once it stops.
+
+```quint
+pure def alwaysTimeLeftWhileRunning(f: Film): bool =
+  left(f) <= maxSeconds - f.elapsed
+    and (f.stage == Running implies left(f) > 0)
+    and (nearLimit(f) implies f.stage == Running)
+```
