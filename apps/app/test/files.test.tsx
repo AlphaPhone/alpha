@@ -396,8 +396,10 @@ describe("Files on a phone", () => {
     await choose("Details", "File actions");
     expect(document.querySelector("[aria-label='File details']")?.textContent).toContain("Internal storage › Documents");
     await press("Close details");
+    const [notesSelection] = [...world.files.selections].find(([, selection]) => selection.path === "Documents/notes.txt") ?? [];
+    if (!notesSelection) throw new Error("the phone did not authorize the notes preview");
     await choose("Share", "File actions");
-    await vi.waitFor(() => expect(world.files.shared).toEqual([["selection:Documents/notes.txt"]]));
+    await vi.waitFor(() => expect(world.files.shared).toEqual([[notesSelection]]));
 
     const updated = world.files.stored.find((file) => file.path === "Documents/notes.txt");
     if (updated) updated.modified = 11;
@@ -426,12 +428,14 @@ describe("Files on a phone", () => {
     await press("Next page");
     await until(alpha, runtime, Shown, (s) => s.drawing.status === "Loaded" && s.page === 2);
     // spec/app/files/preview.md, "Open elsewhere hands the file over to read only"
+    const [leaseSelection] = [...world.files.selections].find(([, selection]) => selection.path === "Download/lease.pdf") ?? [];
+    if (!leaseSelection) throw new Error("the phone did not authorize the PDF preview");
     await choose("Open elsewhere", "File actions");
-    await vi.waitFor(() => expect(world.files.opened).toContain("selection:Download/lease.pdf"));
+    await vi.waitFor(() => expect(world.files.opened).toContain(leaseSelection));
     // spec/app/files/preview.md, "Forget removes the file from Recent, with or without access, and closes the viewer"
     await choose("Forget", "File actions");
     await until(alpha, runtime, Recent, (s) => s.rows.length === 1 && s.shown.grant === 0);
-    expect(world.files.forgotten).toEqual(["selection:Download/lease.pdf"]);
+    await vi.waitFor(() => expect(world.files.forgotten).toEqual([leaseSelection]));
 
     // spec/app/files/preview.md, "A file that holds a verification code or another secret is never handed to Ask Alpha"
     world.files.stored.push({ volume: "primary", path: "Download/code.txt", directory: false, mimeType: "text/plain", size: 30, modified: 4 });
@@ -451,7 +455,7 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.kind === "Text");
     await press("Close");
     await until(alpha, runtime, Shown, (s) => s.viewer === 0);
-    world.files.forgotten.push("selection:Documents/notes.txt");
+    world.files.selections.delete(notesSelection);
     await press("notes.txt");
     await until(alpha, runtime, Recent, (s) => s.reaching.status === "Failed" && s.rows.filter((row) => row.grant === 0).length === 1);
     expect(button("notes.txt")).toBeUndefined();
@@ -690,8 +694,10 @@ describe("Files on a phone", () => {
   it("Come back after a restart (spec/app/files/index.md, \"Story: Come back after a restart\"; spec/app/files/change.md, \"Story: Come back to my changes after a restart\"; spec/app/files/trash.md, \"Story: Come back to the Trash after a restart\"; spec/app/files/preview.md, \"Story: Come back to a preview after a restart\")", async () => {
     const world = { ...scene(), phone: true };
     // spec/app/files/recent.md, "The earlier Alpha's Recent is carried over once, while this one is still empty: each document it held access to becomes a row of its own, the newest first; one it held without access, and the document it had open, are not carried"
+    const leaseSelection = crypto.randomUUID();
+    world.files.selections.set(leaseSelection, { volume: "primary", path: "Download/lease.pdf", canRename: true });
     localStorage.setItem("alpha.files.recent.v1", JSON.stringify([
-      { key: "selected:a", kind: "selected", name: "lease.pdf", mimeType: "application/pdf", openedAt: 2, status: "ready", selectionId: "selection:Download/lease.pdf" },
+      { key: "selected:a", kind: "selected", name: "lease.pdf", mimeType: "application/pdf", openedAt: 2, status: "ready", selectionId: leaseSelection },
       { key: "selected:b", kind: "selected", name: "gone.txt", mimeType: "text/plain", openedAt: 3, status: "revoked", selectionId: "b" },
     ]));
     const first = await onFiles(world);
