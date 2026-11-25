@@ -57,7 +57,8 @@ function savedBrowserRecords(records: readonly { id: string; url: string; title:
   });
 }
 
-it("Keeps a browser frame while leaving and reopening Browser (spec/app/browser/address.md, \"A browser frame can be shown for the latest request, with no secure mark\"; spec/app/browser/index.md, \"Story: Open, pick and close tabs\"; spec/app/browser/index.md, \"Story: Keep my tabs through a restart\"; spec/app/browser/library.md, \"Story: Keep bookmarks\"; spec/app/browser/downloads.md, \"Story: Download a file\")", async () => {
+// spec/app/browser/address.md, "A browser frame can be shown for the latest request, with no secure mark"; spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/index.md, "Story: Keep my tabs through a restart"; spec/app/browser/library.md, "Story: Keep bookmarks"; spec/app/browser/downloads.md, "Story: Download a file"
+it("Keeps a browser frame while leaving and reopening Browser", async () => {
   const fixture = new URL("/test/fakes/browser-page.html", location.origin);
   expect((await fetch(fixture)).ok).toBe(true);
   const first = { id: "old-tab-a", title: "Saved first", url: new URL("?tab=first", fixture).href };
