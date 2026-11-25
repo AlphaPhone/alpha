@@ -1,8 +1,10 @@
 // spec/app/assistant/attachments.md, "Each file is checked against its limits: an image is made to fit, audio and video never go, and the message's files fit together"; spec/app/assistant/composer.md, "Files chosen are added up to the upload limit of four"; spec/app/assistant/index.md, "Stored attachments are posted with their message, and a message whose attachments could not be stored never left"
 import * as Picker from "../../gen/app__assistant__attachments.effect.vibe"
 import type { SelectionId } from "@elizaos/os-bridges"
+import { Agent } from "../platform/agent.vibe"
 import { Documents } from "../platform/documents.vibe"
 import type { NoteStore } from "../platform/notes.vibe"
+import { launchOwnerAt } from "../platform/owner.vibe"
 import { batchFits, fileBase64Cap, fits, imageBase64Cap, nameLimit, reencoded } from "../../gen/app__assistant__attachments.effect.vibe"
 import * as Composer from "../../gen/app__assistant__composer.effect.vibe"
 import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
@@ -261,13 +263,26 @@ export effect function stageFiles(key: string, files: readonly Attached[]): bool
 
 export const dropFiles = (key: string) => ignore(tryPromise(() => store(key)))
 
+// spec/app/assistant/attachments.md, "A recorded attachment is read only for its verified owner, agent and exact message"
+export effect function attachmentAuthority(): (Picker.ArchiveAuthority | undefined)!!Agent {
+  const { life } = try Agent
+  const before = life.status() catch () => undefined
+  if (before?.available !== true || before.state !== "running") return undefined
+  const identity = launchOwnerAt() catch () => undefined
+  if (identity === undefined) return undefined
+  const after = life.status() catch () => undefined
+  if (after?.available !== true || after.state !== "running" || after.epoch !== before.epoch) return undefined
+  return { owner: identity.identityId, agent: identity.agentId, epoch: after.epoch }
+}
+
 export interface AttachmentHistory {
-  readonly owner: number
+  readonly authority: Picker.ArchiveAuthority
   readonly conversation: string
   readonly room: string
 }
 
-const sentKey = ({ owner, conversation, room }: AttachmentHistory, message: string) => JSON.stringify(["sent", owner, conversation, room, message])
+const sentKey = ({ authority, conversation, room }: AttachmentHistory, message: string) =>
+  JSON.stringify(["sent-v2", Picker.archiveAddress(authority, conversation, room, message)])
 
 export const rememberFiles = (history: AttachmentHistory, message: string, files: readonly Attached[]) =>
   stageFiles(sentKey(history, message), files)

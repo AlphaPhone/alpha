@@ -2,6 +2,7 @@
 import type { ConversationRecord } from "@elizaos/agent"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import type { Binding } from "../../gen/app__assistant__composer.effect.vibe"
+import { sameArchiveAuthority, type ArchiveAuthority } from "../../gen/app__assistant__attachments.effect.vibe"
 import type { MediaCard } from "./media-review.vibe"
 import type { Failure, Fix } from "../../gen/app__assistant__reply.ts"
 import type { MailQuestion } from "../inbox/mail-context.vibe"
@@ -115,6 +116,7 @@ export interface Board {
   staged: StagedFiles | undefined
   lastTranscriptOffer: number
   previewFile(file: Attached): number
+  bindArchiveAuthority(authority: ArchiveAuthority | undefined): boolean
   /** Keep `sighting` under the `ticket` the locator accepted. */
   rememberPosition(ticket: number, sighting: Sighting): void
   /** Forget any remembered position once the locator has none. */
@@ -168,6 +170,7 @@ import { unkept } from pure
 export const talk = Layer.effect(Talk, effect {
   const store = try KeyValueStore.KeyValueStore
   const remembered = unkept(store.get(key) catch () => undefined)
+  let archiveAuthority: ArchiveAuthority | undefined
   const records: Known[] = remembered.map((one) => ({ record: { id: one.id, roomId: one.roomId } as ConversationRecord, title: one.title }))
   const messages: string[] = []
   const numbers = new Map<string, number>()
@@ -233,6 +236,21 @@ export const talk = Layer.effect(Talk, effect {
     },
     numbered: (id) => numbers.get(id) ?? 0,
     messageId: (message) => messages[message - 1],
+    bindArchiveAuthority: (authority) => {
+      const previous = archiveAuthority
+      if (previous !== undefined && authority !== undefined && sameArchiveAuthority(previous, authority)) return false
+      archiveAuthority = authority
+      if (previous === undefined) return false
+      const pages = new Map(seen.pages)
+      let changed = false
+      for (const [ticket, page] of pages) {
+        if (!page.lines.some((line) => line.attachments !== undefined)) continue
+        pages.set(ticket, { ...page, lines: page.lines.map((line) => line.attachments === undefined ? line : { ...line, attachments: undefined }) })
+        changed = true
+      }
+      if (changed || seen.preview !== undefined) board.change({ pages, preview: undefined })
+      return true
+    },
     page: (ticket) => seen.pages.get(ticket)?.lines ?? [],
     line: (conversation, message) => {
       const id = board.messageId(message)
