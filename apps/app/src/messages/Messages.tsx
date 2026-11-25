@@ -35,7 +35,7 @@ type MessagesUI = ReturnType<typeof useMessages>;
 const header = "flex min-h-12 shrink-0 items-center gap-1 px-2";
 const accessPill = "min-h-13 rounded-group bg-foreground px-7 text-lg font-semibold text-background focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50";
 const draftAction = "min-h-11 rounded-tile text-base focus-visible:outline-2 focus-visible:outline-ring";
-const notice = "mx-2 basis-full text-caption leading-message text-muted-foreground";
+const notice = "mx-2 basis-full text-caption leading-detail text-muted-foreground";
 const textLink = "min-h-11 underline focus-visible:outline-2 focus-visible:outline-ring";
 const accessoryChip = "inline-flex min-h-11 items-center rounded-tile text-sm font-semibold focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50";
 const dialogAction = "min-h-11 px-3.5 text-base hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring active:bg-accent";
@@ -264,10 +264,10 @@ const Bubble = memo(function Bubble({ row, now, choose, actions, onOpenLink }: {
             choose(row.id);
           }
         }}>
-        {!complete ? <p data-alpha-message-body className="rounded-tile bg-secondary px-4 py-2.75 text-body leading-message text-muted-foreground">{label}</p> : (
+        {!complete ? <p data-alpha-message-body className="rounded-tile bg-secondary px-4 py-2.75 text-body leading-detail text-muted-foreground">{label}</p> : (
           <>
             {complete.attachments > 0 && <span className="flex items-center gap-1.5 text-caption text-muted-foreground"><PictureGlyph />{complete.attachments === 1 ? "Picture" : `${complete.attachments} pictures`}</span>}
-            {complete.body && <p data-alpha-message-body className={`rounded-tile px-4 py-2.75 text-body leading-message whitespace-pre-wrap wrap-anywhere ${outgoing ? "bg-foreground text-background" : "bg-secondary text-secondary-foreground"}`}><MessageText text={complete.body} onOpenLink={onOpenLink} /></p>}
+            {complete.body && <p data-alpha-message-body className={`rounded-tile px-4 py-2.75 text-body leading-detail whitespace-pre-wrap wrap-anywhere ${outgoing ? "bg-foreground text-background" : "bg-secondary text-secondary-foreground"}`}><MessageText text={complete.body} onOpenLink={onOpenLink} /></p>}
           </>
         )}
         <span data-alpha-message-meta title={new Date(row.date).toLocaleString()} className="px-1.5 text-2xs text-muted-foreground">{[stamp(row.date, now), status].filter(Boolean).join(" · ")}</span>
@@ -479,7 +479,7 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
             {alpha && <span className="inline-flex size-4.5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-alpha text-alpha-foreground"><Mark aria-hidden className="size-[118%]" /></span>}
             {alpha ? `To ${addressed}` : "Your draft"}
           </span>
-          <p className="text-body leading-message whitespace-pre-wrap">{text}</p>
+          <p className="text-body leading-detail whitespace-pre-wrap">{text}</p>
           <div className="sticky bottom-0 flex shrink-0 flex-wrap justify-end gap-2 bg-inherit">
             {can({ type: "undo" }) && <button type="button" className={`${draftAction} px-3`} onClick={() => void send({ type: "undo" })}>Don’t send</button>}
             {editable && <button type="button" className={`${draftAction} px-4 inset-ring-[1.5px] inset-ring-muted-foreground`} data-alpha-draft-edit onClick={edit}>Edit</button>}
