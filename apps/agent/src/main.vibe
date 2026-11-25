@@ -54,11 +54,15 @@ const hostedExports: Readonly<Record<string, string>> = { "@elizaos/plugin-notes
 /** Alpha's own packages: only the pack entry and the Alpha product plugin may be carried. */
 const alphaOwned = (name: string) => name.startsWith("@repo/") || name.startsWith("@alphacompute/") || name === productPluginName
 
-/** The pack's entry: eliza's agent command started with each bundled plugin, each hosted package's module, and the Alpha product plugin. */
+/**
+ * The pack's entry: eliza's agent command started with each bundled plugin, each hosted package's module, and the Alpha product plugin.
+ * The command is imported from agent-host's own CLI module, as eliza's bundle entry does: the package's root also exports the bundle
+ * builder, which would carry Vite into the bundle. The entry sits at `.alpha/pack-entry-<worktree>/entry.js` inside the pack's clone.
+ */
 export function entrySource(bundled: readonly string[], hosted: readonly { name: string; module: string }[], product: { name: string; module: string }): string {
   const allHosted = [...hosted, product]
   return [
-    `import { runAgentCli } from "@elizaos/agent-host"`,
+    `import { runAgentCli } from "../../packages/agent-host/dist/src/cli.js"`,
     ...bundled.map((name, index) => `import * as plugin${index} from ${JSON.stringify(name)}`),
     ...allHosted.map(({ name, module }, index) => `import { ${module} as host${index} } from ${JSON.stringify(name)}`),
     "",
