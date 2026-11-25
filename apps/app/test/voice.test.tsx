@@ -7,7 +7,7 @@ import * as Voice from "../gen/app__voice.effect.vibe";
 import { VoiceBridge } from "../src/platform/voice.vibe";
 import { together, untimed, whole } from "../src/runtime/reactor.vibe";
 import { shell } from "../src/shell/shell.vibe";
-import { placeOf, type VoiceWords, voicing } from "../src/voice/voice.vibe";
+import { placeOf, VoiceWords, voicing } from "../src/voice/voice.vibe";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Dock } from "../gen/app__assistant__dock.effect.vibe";
 import { Machine as Locator } from "../gen/app__assistant__context.effect.vibe";
@@ -200,6 +200,7 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     await until(runtime, Voice.Machine, (s) => s.recorder.stage === "Review");
     const reviewed = await getVoice(runtime);
     expect([reviewed.recorder.words, reviewed.sent]).toEqual([true, 0]);
+    expect(runtime.runSync(VoiceWords).memory.dictatedDurationMs).toBe(59_000);
   });
 
   // spec/app/voice/index.md, "A clip is transcribed on the route speech takes now"

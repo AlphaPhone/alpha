@@ -53,6 +53,7 @@ export interface VoiceMemory {
   readonly playLock: Semaphore.Semaphore
   reviewNotice: string
   dictatedText: string
+  dictatedDurationMs: number | undefined
   fillTarget: { readonly field: Field; readonly filling: number; readonly apply: (words: string) => void!! } | undefined
   filesNavigation: FilesNavigation | undefined
   /** The observation and any file the spoken request may attach from the screen now showing. */
@@ -87,6 +88,7 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
     playLock,
     reviewNotice: "",
     dictatedText: "",
+    dictatedDurationMs: undefined,
     fillTarget: undefined,
     filesNavigation: undefined,
     screen: undefined,
@@ -140,6 +142,7 @@ export effect function openDictation<R>(field: Field, apply: (words: string) => 
   const filling = (try voice.get()).recorder.filled + 1
   if (!(try contained(voice.send({ type: "openRecorder", target: field }), "opening dictation"))) return false
   memory.dictatedText = ""
+  memory.dictatedDurationMs = undefined
   memory.fillTarget = { field, filling, apply: (words) => Effect.provideContext(apply(words), context) }
   return true
 }
@@ -595,7 +598,9 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
       if (trimmed === "") return { type: "transcribed", ticket, failure: "NoSpeech" } as Voice.Event
       const current = try (try Voice.Machine).get()
       if (Voice.canTranscribed(current, ticket, "NoFailure")) {
-        (try VoiceWords).memory.dictatedText = trimmed
+        const { memory } = try VoiceWords
+        memory.dictatedText = trimmed
+        memory.dictatedDurationMs = result.durationMs
       }
       return { type: "transcribed", ticket, failure: "NoFailure" } as Voice.Event
     }, { type: "transcribed", ticket, failure: "Recognition" });
@@ -607,6 +612,7 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
       const words = memory.dictatedText.trim()
       memory.fillTarget = undefined
       memory.dictatedText = ""
+      memory.dictatedDurationMs = undefined
       if (words !== "") try target.apply(words)
     });
   }
@@ -686,6 +692,7 @@ const discardedDictation = applying(Voice.Machine, (voice) => voice.recorder, ef
   if (memory.fillTarget === undefined || memory.fillTarget.filling <= recorder.filled) return
   memory.fillTarget = undefined
   memory.dictatedText = ""
+  memory.dictatedDurationMs = undefined
 })
 
 const bridgeEvents = hearing(
