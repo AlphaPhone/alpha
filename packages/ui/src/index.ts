@@ -126,6 +126,8 @@ export * from "./components/maps/MapsRoundButton.tsx";
 export * from "./components/maps/MapsSearchBar.tsx";
 export * from "./components/maps/MapsSheet.tsx";
 export * from "./components/maps/MapsStatusCard.tsx";
+export * from "./components/files/FilesRow.tsx";
+export * from "./components/files/FilesSelectionBar.tsx";
 export * from "./components/messaging/AssistantMessageDraftCard.tsx";
 export * from "./components/messaging/AuthStepFrame.tsx";
 export * from "./components/messaging/ChatComposer.tsx";

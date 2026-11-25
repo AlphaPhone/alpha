@@ -116,7 +116,8 @@ module handoff {
   /** The identity of the reviewed run, ready to attach without putting its private output in chat. @throws {never} */
   export function runReference(run: WorkflowRun): string {
     const reference = { workflowId: run.workflowId, runId: run.id, versionId: run.versionId, status: run.status, startedAt: run.startedAt }
-    return new TextEncoder().encode(JSON.stringify(reference)).toBase64()
+    const bytes = new TextEncoder().encode(JSON.stringify(reference))
+    return btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(""))
   }
 }
 import { runReference } from handoff

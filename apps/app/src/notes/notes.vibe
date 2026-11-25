@@ -70,7 +70,7 @@ effect function written(owner: number, ticket: number, change: Notes.Change): No
   if (op === "Create" || op === "Rewrite") return failed
   const destination = current.folderByNumber.get(folder)
   if (op === "Move" && folder > 0 && destination === undefined) return failed
-  const fields = op === "Move" ? { folderId: destination?.id ?? null } : { pinned: op === "Pin" }
+  const fields: Readonly<Record<string, string | boolean | null>> = op === "Move" ? { folderId: destination?.id ?? null } : { pinned: op === "Pin" }
   return effect {
     try (try NoteStore).update({ id: row.id, expectedRevision: base - 1, format: formatChanged(row, fields) })
     return done

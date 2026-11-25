@@ -65,8 +65,9 @@ effect function read(ticket: number, owner: number): Event!!Needs {
   const plan = try Plan.Machine
   const fallback = { ...fail, missed: (try plan.get()).missed }
   if (!(try rows.sameOwner(ownerKey, owner))) return fallback
+  const agent = try Agent
   const checked: WorkflowRequest = effect (path: string, body: unknown) => {
-    const confirmed = ownerAt() catch () => ""
+    const confirmed = Effect.provideService(ownerAt(), Agent, agent) catch () => ""
     if (confirmed !== ownerKey) throw workflowHttpError(0, {})
     return try request(path, body)
   }

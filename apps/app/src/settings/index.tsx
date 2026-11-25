@@ -5,9 +5,11 @@ import type { Page } from "../../gen/app__settings.ts";
 import * as Licensing from "../../gen/app__settings__licences.effect.vibe";
 import * as Pages from "../../gen/app__settings.effect.vibe";
 import { assisting } from "../assistant/assistant.vibe";
+import { aloud } from "../assistant/read-aloud.vibe";
 import { type Resident, type Shown, area } from "../runtime/area.tsx";
 import { reviewBack } from "../startup/settingsAccess.vibe";
 import { together } from "../runtime/reactor.vibe";
+import { voicing } from "../voice/voice.vibe";
 import { about } from "./about.vibe";
 import { activity } from "./activity.vibe";
 import { Licences, Problems } from "./AboutPages.tsx";
@@ -17,7 +19,7 @@ import { Carrier, Network } from "./PhonePages.tsx";
 import { resetting } from "./reset.vibe";
 import { type Drawn, Settings } from "./Settings.tsx";
 
-const machines = together(facts, about, activity, phone, resetting, assisting);
+const machines = together(facts, about, activity, phone, resetting, assisting, voicing, aloud);
 
 /** Back inside Settings: an open licence closes to its search; otherwise the page showing closes and its parent shows, until the first page, where Back leaves the app. */
 const pageBack = Licensing.Machine.use((licences) =>

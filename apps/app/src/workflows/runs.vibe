@@ -98,10 +98,8 @@ effect function start(id: number, version: number, owner: number): Event!!Needs 
   const answer = effect {
     const run = kept !== undefined ? try workflow.resubmit(target.id, target.versionId, kept.submission) : try workflow.run(target.id, target.versionId, hold)
     return { kind: "accepted", run } as const
-  } catch (failure) => ({
-    kind: !dispatched || failure instanceof WorkflowAdmissionRejected || (failure instanceof WorkflowHttpError && [400, 401, 403, 404, 409, 422].includes(failure.status))
-      ? "refused" as const : "unknown" as const,
-  })
+  } catch (failure) => !dispatched || failure instanceof WorkflowAdmissionRejected || (failure instanceof WorkflowHttpError && [400, 401, 403, 404, 409, 422].includes(failure.status))
+    ? { kind: "refused" } as const : { kind: "unknown" } as const
   if ((ownerAt() catch () => "") !== scope || answer.kind === "unknown") return lost
   if (answer.kind === "refused") {
     if (!state.request.again) try ignore(store.remove(key))
