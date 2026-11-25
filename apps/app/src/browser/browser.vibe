@@ -459,18 +459,18 @@ export const placed: void!!(Tabs.Machine | Shell | TabHost) = effect {
 /** The Browser's tabs, kept across restarts, and each tab's page, carried out through the phone's tab host. */
 export const browser = Layer.provideMerge(together(tabs, told, shown), pages)
 
-// spec/app/messages/index.md, "Only the newest read of the open conversation is shown, and it marks the shown messages read only where Alpha is the phone's SMS app"; spec/app/browser/index.md, "Story: Open, pick and close tabs"
-/** A link the owner tapped in Messages, or in an Ask Alpha reply over any screen, opens in one selected normal Browser tab through the address machine. */
-export effect function openMessageLink(href: string, from: "Messages" | "Ask Alpha" = "Messages"): boolean!!(Tabs.Machine | Pages | Shell | TabHost) {
+// spec/app/messages/index.md, "Only the newest read of the open conversation is shown, and it marks the shown messages read only where Alpha is the phone's SMS app"; spec/app/inbox/message.md, "Only an https link without credentials in it can be reviewed and opened; any other link stays text"; spec/app/browser/index.md, "Story: Open, pick and close tabs"
+/** A link the owner chose from a message or Ask Alpha opens in one selected normal tab. */
+export effect function openMessageLink(href: string, from: "Messages" | "Inbox" | "Ask Alpha" = "Messages", current: Effect.Effect<boolean> = succeed(true)): boolean!!(Tabs.Machine | Pages | Shell | TabHost) {
   const address = messageHref(href)
   const shell = try Shell
-  if (address === undefined || Option.isNone((try TabHost).plugin) || (from === "Messages" && !showing(try shell.get(), "Messages"))) return false
+  if (address === undefined || Option.isNone((try TabHost).plugin) || (from !== "Ask Alpha" && !showing(try shell.get(), from)) || !(try current)) return false
   const input = inputOf(address)
   if (Address.verdict(input) !== "Open") return false
   if (!(try contained(shell.send({ type: "openView", view: "Browser" }), "opening a Message link"))) return false
   const tabs = try Tabs.Machine
   const steady = try race(Stream.runHead(Stream.filter(tabs.changes, Tabs.steady)), Effect.as(sleep(2500), Option.none()))
-  if (Option.isNone(steady) || !showing(try shell.get(), "Browser")) return false
+  if (Option.isNone(steady) || !showing(try shell.get(), "Browser") || !(try current)) return false
   const before = try tabs.get()
   if (!Tabs.canOpenTab(before, "Normal") || !(try tellTabs({ type: "openTab", kind: "Normal" }))) return false
   const tab = before.issued + 1

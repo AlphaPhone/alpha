@@ -74,6 +74,12 @@ export service BrowserDownloadsHandoff {
   open(): void!!
 }
 
+// spec/app/inbox/message.md, "Only an https link without credentials in it can be reviewed and opened; any other link stays text"
+/** Opens a link the owner confirmed in Inbox while the same message and grant are current. */
+export service InboxBrowserLinks {
+  open(href: string, current: Effect.Effect<boolean>): boolean!!
+}
+
 /** A page the agent's reply asked the Browser to open: eliza's typed open, which waits for the owner's Open on the Browser's card. */
 export interface AgentPage {
   readonly operation: Extract<DeviceOperation, { readonly type: "browser_navigate" }>
