@@ -4,6 +4,7 @@ import * as Address from "../../gen/app__browser__address.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import type { AgentPage } from "../platform/browser.vibe"
 import { TabHost } from "../platform/browser.vibe"
+import { contained } from "../runtime/reactor.vibe"
 import { Pages, inputOf, pageOf, tellPage, tellTabs } from "./browser.vibe"
 
 /** The page the agent asked for that waits for the owner's Open or Cancel on the Browser's card; only this area writes it. */
@@ -66,6 +67,14 @@ export const approve: boolean!!(Reviewing | Tabs.Machine | Pages | Shell | TabHo
   card.set(undefined)
   if (held === undefined) return false
   return try opened(held.operation.url, false, true)
+}
+
+/** The owner approved the phone's `browser_navigate` proposal on Ask Alpha's card while it was still current: the Browser comes to the front and the page opens as approved. */
+export effect function openApproved(url: string, current: () => Promise<boolean>): boolean!!(Tabs.Machine | Pages | Shell | TabHost) {
+  if (!(try promise(current))) return false
+  const shell = try Shell
+  if (!showing(try shell.get(), "Browser") && !(try contained(shell.send({ type: "agentOpenView", view: "Browser" }), "opening Browser for the approved page"))) return false
+  return try opened(url, false, true)
 }
 
 /** The owner chose Cancel: nothing opens. */

@@ -520,6 +520,12 @@ address, Open and Cancel, and opens only on Open; Cancel opens nothing. No
 reading of the owner's words here decides it, and an address that fails the
 agent's guard opens neither way.
 
+On a phone enrolled for the agent's device actions, eliza asks for the same
+open as its `browser_navigate` device proposal instead. That proposal is
+reviewed on Ask Alpha's card for the phone's proposals, as the phone's other
+proposals are. Approve there brings the Browser to the front and opens the
+page as an approved one, under the same guard. Decline opens nothing.
+
 ```quint
 type AgentRequest = { secure: bool, userInfo: bool, asked: bool, approved: bool }
 pure def agentPageOpens(request: AgentRequest): bool =

@@ -1,4 +1,4 @@
-// spec/app/approvals/index.md, "Story: One action at a time"; spec/app/approvals/proposal.md, "Story: Decide"; spec/app/photos/agent.md, "Story: Let Alpha read my library"; spec/app/phone/comms.md, "Story: Approve what Alpha proposes, one thing at a time"; spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"; spec/app/assistant/index.md, "Alpha asks the agent to warm up at launch, on return to the foreground and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it"
+// spec/app/browser/index.md, "A page the agent asks for opens at once only when my message asked for that address, and any other only once I choose Open on the Browser's card"; spec/app/approvals/index.md, "Story: One action at a time"; spec/app/approvals/proposal.md, "Story: Decide"; spec/app/photos/agent.md, "Story: Let Alpha read my library"; spec/app/phone/comms.md, "Story: Approve what Alpha proposes, one thing at a time"; spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"; spec/app/assistant/index.md, "Alpha asks the agent to warm up at launch, on return to the foreground and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it"
 import { DeviceExecution, NOT_DISPATCHED, type DeviceAgent, type ExecutorCall, type JournalIdentity, type RuntimeRequestHeaders } from "@elizaos/agent"
 import { mayRunDirectly, readOperation, readResult, type DeviceOperation } from "@elizaos/agent"
 import { filterLabel } from "@elizaos/plugin-files-client"
@@ -403,6 +403,7 @@ function operation(raw: unknown) {
     case "files_share":
     case "files_move":
     case "files_trash":
+    case "browser_navigate":
       return value
     default:
       return notesOperation(value)
@@ -412,6 +413,12 @@ function operation(raw: unknown) {
 function composeDetails(value: Extract<DeviceOperation, { type: "sms_compose" }>, recipient: string): string {
   const draftOnly = "draft" in value && value.draft === true
   return `${recipient}\n${value.body}${draftOnly ? "" : "\nTap Send in Messages when you’re ready."}`
+}
+
+/** The address a page card shows: its host and path, as the Browser's own card shows it. */
+function pageWords(url: string): string {
+  const parsed = URL.parse(url)
+  return parsed === null ? url : `${parsed.host}${parsed.pathname === "/" ? "" : parsed.pathname}${parsed.search}`
 }
 
 function words(value: NonNullable<ReturnType<typeof operation>>): { title: string; detail: string } {
@@ -449,6 +456,7 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
     case "files_share": return { title: "Share in Android", detail: "paths" in value ? value.paths.join(", ") : "Review the selected files" }
     case "files_move": return { title: "Move files", detail: "paths" in value ? `${value.paths.join(", ")} → ${value.dest || "Internal storage"}` : value.dest || "Internal storage" }
     case "files_trash": return { title: "Move to Trash", detail: "paths" in value ? value.paths.join(", ") : "Review the selected files" }
+    case "browser_navigate": return { title: "Open this page?", detail: pageWords(value.url) }
   }
 }
 
@@ -773,7 +781,7 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
         if (origin === undefined || (request !== undefined && request !== message) || !fromThisEnrollment(proposal, opened)
           || !(try reviewContext(revision, view)) || !(try enrollmentIsCurrent(opened)) || !isLatest(opened) || !(try reviewContext(revision, view))) return undefined
       } else if (request === undefined) {
-        if (!(commsReview(op) || filesOperation) || !currentReview || !reviewFromReply(proposal, opened, actions)) return undefined
+        if (!(commsReview(op) || filesOperation || op.type === "browser_navigate") || !currentReview || !reviewFromReply(proposal, opened, actions)) return undefined
       } else if (request !== message || (filesOperation && (!fromThisEnrollment(proposal, opened)
         || (actions.get(proposal.id) !== "Review" && actions.get(proposal.id) !== "Direct")))) return undefined
       const selected = needsMessage(op)

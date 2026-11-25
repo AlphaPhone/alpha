@@ -124,7 +124,7 @@ function DeviceReview({ runtime, card }: { runtime: AssistantProps["runtime"]; c
       ) : card.phone?.tag === "Unavailable" ? (
         <Alert role="status">{card.phone.reason}</Alert>
       ) : (
-        <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, action: card.operation.type === "sms_compose" ? "Open draft" : "Approve" }}
+        <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, action: card.operation.type === "sms_compose" ? "Open draft" : card.operation.type === "browser_navigate" ? "Open" : "Approve" }}
           onHandOn={() => decide(true)} />
       )}
       <Button className="justify-self-end" variant="ghost" onClick={() => decide(false)}>Decline</Button>
