@@ -221,7 +221,7 @@ function Phone({ demo }: { demo: Demo }) {
       role="img"
       aria-label="An Alpha phone. As you scroll it shows Alpha answering a question about today’s calendar, asking before it sends a text, finding coffee on a map, summing up an inbox and taking a spoken note."
       data-scene={demo.scene}
-      className="relative aspect-[372/792] w-[min(68vw,19rem)] max-w-full bg-foreground p-[1.55%] shadow-lg [border-radius:13.5%/6.4%] md:h-[min(calc(100svh-9.5rem),46rem)] md:w-auto"
+      className="relative aspect-[372/792] w-[min(68vw,19rem,calc((62svh_-_--spacing(14))*372/792))] max-w-full bg-foreground p-[1.55%] shadow-lg [border-radius:13.5%/6.4%] md:h-[min(calc(100svh-9.5rem),46rem)] md:w-auto"
     >
       <div className="@container relative size-full overflow-hidden bg-background select-none [border-radius:12.4%/5.8%]">
         <div aria-hidden className="absolute inset-0 leading-snug [--spacing:calc(100cqw/360)] [font-size:--spacing(15)]">
