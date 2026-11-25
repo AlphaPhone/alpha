@@ -346,16 +346,23 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       board.change({ reply: written, label: "" })
       show({ type: "token", turn: ticket, units: written.length, provisional })
     }
+    // spec/app/assistant/reply.md, "The planning label shows until the first text, and provisional text is shown but never spoken": once the acknowledgment is taken it stays the label until text or the reply arrives.
+    let acknowledged = false
+    let toolRan = false
+    const labelled = () => !acknowledged && board.snapshot().reply === ""
     const hooks = {
       onPreview: preview,
       onAcknowledgment: (said: string) => {
-        board.change({ label: said })
         show({ type: "acknowledge", turn: ticket, units: said.length })
+        if (acknowledged || toolRan || board.snapshot().reply !== "") return
+        acknowledged = true
+        board.change({ label: said })
       },
-      onStatus: (activity: string) => { if (board.snapshot().reply === "") board.change({ label: activity }) },
+      onStatus: (activity: string) => { if (labelled()) board.change({ label: activity }) },
       onTool: (name: string, label: string | undefined) => {
         show({ type: "toolStarts", turn: ticket })
-        if (board.snapshot().reply === "") board.change({ label: label ?? `Using ${name}` })
+        toolRan = true
+        if (labelled()) board.change({ label: label ?? `Using ${name}` })
       },
     }
     board.change({ media: [], mediaNote: undefined })

@@ -50,7 +50,11 @@ export interface VoiceMemory {
     readonly attachment: Attached | undefined
     readonly explicitlyRequested: boolean
   }!!) | undefined
+  /** Whether the turn's spoken acknowledgment is queued and not yet handed to speech. */
+  cueWaiting: boolean
   enqueueSentence(turn: number, text: string): void
+  /** Queue the turn's acknowledgment to speak at once, before any sentence of its reply. */
+  enqueueCue(turn: number, text: string): void
   dequeueSentence(turn: number): { readonly text: string; readonly append: boolean } | undefined
   clearQueued(): void
 }
@@ -74,18 +78,34 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
     dictatedText: "",
     fillTarget: undefined,
     screen: undefined,
+    cueWaiting: false,
     enqueueSentence(turn: number, text: string) {
       if (memory.playbackTurn !== turn) {
         memory.playbackTurn = turn
         memory.queuedSentences.length = 0
         memory.dispatchedSentences = 0
+        memory.cueWaiting = false
       }
+      // spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s"
+      if (memory.cueWaiting) memory.queuedSentences.shift()
+      memory.cueWaiting = false
+      memory.queuedSentences.push(text)
+    },
+    enqueueCue(turn: number, text: string) {
+      if (memory.playbackTurn !== turn) {
+        memory.playbackTurn = turn
+        memory.queuedSentences.length = 0
+        memory.dispatchedSentences = 0
+      }
+      if (memory.queuedSentences.length > 0 || memory.dispatchedSentences > 0) return
+      memory.cueWaiting = true
       memory.queuedSentences.push(text)
     },
     dequeueSentence(turn: number) {
       if (memory.playbackTurn !== turn) return undefined
       const text = memory.queuedSentences.shift()
       if (text === undefined) return undefined
+      memory.cueWaiting = false
       const append = memory.dispatchedSentences > 0
       memory.dispatchedSentences += 1
       return { text, append }
@@ -94,6 +114,7 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
       memory.playbackEpoch += 1
       memory.queuedSentences.length = 0
       memory.dispatchedSentences = 0
+      memory.cueWaiting = false
     },
   }
   return { memory }
@@ -334,9 +355,21 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     }
     const images = entailsAttachment && file !== undefined ? [{ data: file.data, mimeType: file.mimeType, name: file.name }] : []
     const metadata = sameScreen ? { ...observation?.metadata, ...(views === undefined ? {} : delivery(views.clientId)) } : {}
+    // spec/app/assistant/reply.md, "One brief acknowledgment at most, only from the agent's acknowledgment frame, before any tool runs": it is said at once, with no hold, as the turn's first line.
+    let cued = false
+    let toolRan = false
+    const cue = (text: string) => {
+      if (cued || toolRan || said > 0 || shown !== "") return
+      const line = spokenForm(speakableText(text)).trim()
+      if (line === "") return
+      cued = true
+      memory.enqueueCue(turn, line)
+      Queue.offerUnsafe(queue, { type: "sentence", session, turn })
+    }
+    const hooks = { onPreview: feed, onAcknowledgment: cue, onTool: () => { toolRan = true } }
     const result = tryPromise(() => controller.send({
       text: spoken, channelType: "VOICE_DM", ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }),
-    }, { stream: { onPreview: feed } })) catch () => undefined
+    }, { stream: hooks })) catch () => undefined
     if (isCloudFundsRefusal(result)) {
       memory.lastReply = ""
       Queue.offerUnsafe(queue, { type: "refusedForFunds", session, turn })
