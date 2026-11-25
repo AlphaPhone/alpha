@@ -30,6 +30,8 @@ export service DigestWords {
   view(owner: number): DigestView!!
   store(value: DigestView): void!!
   number(owner: number, key: string): number!!
+  zone(owner: number): string!!
+  reviewZone(owner: number, zone: string): void!!
 }
 
 const words = Layer.sync(DigestWords, () => {
@@ -37,9 +39,12 @@ const words = Layer.sync(DigestWords, () => {
   const numbers = new Map<string, number>()
   let known = 0
   let next = 0
+  let reviewed: { owner: number; zone: string } | undefined
   return {
     view: (owner: number) => succeed(shown.owner === owner ? shown : empty),
     store: (value: DigestView) => sync(() => { shown = value }),
+    zone: (owner: number) => succeed(reviewed?.owner === owner ? reviewed.zone : ""),
+    reviewZone: (owner: number, zone: string) => sync(() => { reviewed = { owner, zone } }),
     number: (owner: number, key: string) => sync(() => {
       if (owner !== known) { known = owner; numbers.clear() }
       const number = numbers.get(key) ?? ++next
@@ -129,10 +134,12 @@ effect function change(id: number, wanted: Change, template: Template, hour: num
   const { request, workflow } = try WorkflowsApi
   const failed: Event = { type: "changeAnswered", id, applied: false }
   if (!(try (try Rows).sameOwner(scope, current.owner))) return failed
-  const view = try (try DigestWords).view(current.owner)
+  const words = try DigestWords
+  const view = try words.view(current.owner)
   const selected = view.loops.find((item) => item.number === current.row)?.record
   const grant = view.sources.find((item) => item.number === source)?.record
   const now = try (try Time).now()
+  const zone = try words.zone(current.owner)
   const mutationId = try (try Attempts).key(id)
   const applied = effect {
     if (wanted === "Remove") {
@@ -140,11 +147,11 @@ effect function change(id: number, wanted: Change, template: Template, hour: num
       const removed = try workflow.lifecycle(selected.id, selected.versionId, "remove", () => succeed(undefined))
       return removed.workflowId === selected.id
     }
-    if (wanted === "Create" && (grant === undefined || digestSourceState(grant, now) !== "current")) return false
+    if (wanted === "Create" && (grant === undefined || zone === "" || digestSourceState(grant, now) !== "current")) return false
     if (wanted !== "Create" && selected === undefined) return false
     const spec: DigestSpec | undefined = wanted === "Create" && grant !== undefined
       ? { version: 1, template: template === "Morning" ? "morning" : "evening", sourceId: grant.id, sourceRevision: grant.revision,
-          timeZone: digestZone(), localTime: `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`, enabled: true }
+          timeZone: zone, localTime: `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`, enabled: true }
       : selected === undefined ? undefined : { ...selected.spec, enabled: wanted === "Resume" }
     if (spec === undefined) return false
     const protocol = hostedDigestProtocol(request)
@@ -183,6 +190,23 @@ const place = applying(List.Machine, (state) => ({ owner: state.owner, open: sta
 
 const saving = following(Plan.Machine, (state) => Plan.canSendChange(state), Plan.Machine,
   (ready): Event | undefined => ready ? { type: "sendChange" } : undefined)
+
+export effect function newDigest(): void!!(Plan.Machine | DigestWords) {
+  const plan = try Plan.Machine
+  const state = try plan.get()
+  if (!Plan.canOpenEditor(state, 0)) return
+  try (try DigestWords).reviewZone(state.owner, digestZone())
+  try ignore(plan.send({ type: "openEditor", zone: 0 }))
+}
+
+export effect function pickDigestSource(source: number): void!!(Plan.Machine | DigestWords | Time) {
+  const plan = try Plan.Machine
+  const state = try plan.get()
+  const words = try (try DigestWords).view(state.owner)
+  const selected = words.sources.find((item) => item.number === source)?.record
+  const fresh = selected !== undefined && digestSourceState(selected, try (try Time).now()) === "current"
+  try ignore(plan.send({ type: "pickSource", source, fresh }))
+}
 
 export effect function backDigests(): boolean!!Plan.Machine {
   const plan = try Plan.Machine

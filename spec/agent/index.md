@@ -148,7 +148,8 @@ approval, lifecycle and run decisions and reads back their outcomes.
 The builder reads the phone catalogue, generates and validates drafts,
 saves the reviewed spec and checks save receipts. Workflows also sends
 the owner's prompt and scheduled task changes. Scheduled Digests reads
-hosted sources, loops and retained results, and acknowledges an opened result.
+hosted sources, loops and retained results. It sends reviewed schedule
+changes and acknowledges an opened result.
 Notes reads the same owner identity and calls the Notes module to
 read and edit notes, erase Trash and finish recording cleanup. The approvals
 area lists the agent's proposals and resolves one
@@ -225,6 +226,7 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/notes/trash/recordings/complete", stream: false },
   { method: Get, path: "/api/workflow/status", stream: false },
   { method: Get, path: "/api/workflow/hosted/loops", stream: false },
+  { method: Post, path: "/api/workflow/hosted/loops", stream: false },
   { method: Get, path: "/api/workflow/hosted/sources", stream: false },
   { method: Get, path: "/api/workflow/hosted/results", stream: false },
   { method: Post, path: "/api/workflow/hosted/results/ack", stream: false },

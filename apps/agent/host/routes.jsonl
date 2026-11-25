@@ -62,6 +62,7 @@
 { "method": "POST", "path": "/api/notes/trash/recordings/complete" }
 { "method": "GET", "path": "/api/workflow/status" }
 { "method": "GET", "path": "/api/workflow/hosted/loops" }
+{ "method": "POST", "path": "/api/workflow/hosted/loops" }
 { "method": "GET", "path": "/api/workflow/hosted/sources" }
 { "method": "GET", "path": "/api/workflow/hosted/results" }
 { "method": "POST", "path": "/api/workflow/hosted/results/ack" }

@@ -156,9 +156,11 @@ export effect function backList(): boolean!!List.Machine {
   return true
 }
 
-const followPage = applying(Shell, (current) => showing(current, "Workflows"), effect (shown: boolean) => {
-  if (shown) try refresh()
-  else {
+const followPage = applying(Shell, (current) => ({ shown: showing(current, "Workflows"), bar: current.assistant === "Bar" }),
+  effect ({ shown, bar }: { shown: boolean; bar: boolean }) => {
+  if (shown) {
+    if (bar) try refresh()
+  } else {
     const list = try List.Machine
     try ignore(list.send({ type: "dismissFilters" }))
     while (List.canClosePlace(try list.get())) {
