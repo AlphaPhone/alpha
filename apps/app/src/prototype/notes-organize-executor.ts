@@ -109,7 +109,9 @@ export function notesOrganizeShellHost(shell:any,folders:{read():Promise<NotesFo
   showFolders:doc=>{if(shell.live)shell.vset('notes',{folders:doc.folders,foldersLoaded:true});},
   showFilter:filter=>{
    const patch={filter,folder:null,open:null,menu:null,folderSheet:null};
-   if(shell.S().view==='notes')shell.vset('notes',patch);else shell.openView('notes',patch);
+   if(shell.S().view==='notes')shell.vset('notes',patch);
+   else if(shell.voiceConversationActive?.()&&typeof shell.runOwnedVoiceViewNavigation==='function')void shell.runOwnedVoiceViewNavigation('notes',(detent?:string)=>shell.openView('notes',patch,detent));
+   else shell.openView('notes',patch);
   },
   restore:async noteId=>{
    const trash=shell.api('notes')?.notesTrash;

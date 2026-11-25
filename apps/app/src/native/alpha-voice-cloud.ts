@@ -29,8 +29,8 @@ export interface AlphaVoiceCloudMethods {
   synthesize(input: { text: string; requestId: string; environment: string; credentialId: string; replace?: boolean }): Promise<Playback>;
   transcribeOwnRecording(input: SpeechRecordingInput & { providerRevision: string }): Promise<Transcript>;
   synthesizeOwn(input: { text: string; requestId: string; providerRevision: string; replace?: boolean }): Promise<Playback>;
-  /** `ready` is full speech readiness; native reports no separate `playback` today. */
-  localSpeechStatus(input: { requestId: string }): Promise<{ ready: boolean; playback?: boolean; execution: string }>;
+  /** `ready` is full speech readiness; `ttsOnly` skips ASR preparation when live capture runs on the agent. */
+  localSpeechStatus(input: { requestId: string; ttsOnly?: boolean }): Promise<{ ready: boolean; playback?: boolean; execution: string; ttsOnly?: boolean }>;
   transcribeLocalRecording(input: { recordingId: string; requestId: string }): Promise<LocalTranscript>;
   /** One window of audio the app holds: a complete mono 16 kHz PCM16 WAV of at most sixty seconds, base64. */
   transcribeLocalAudio(input: { wav: string; requestId: string }): Promise<LocalTranscript>;

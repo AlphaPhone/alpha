@@ -133,6 +133,7 @@ export function usePullGesture(
   React.useEffect(() => () => touchCompatibilityCleanup.current?.(), []);
   // Which axis the gesture committed to, once it crossed AXIS_COMMIT_SLOP.
   const axis = React.useRef<GestureAxis | null>(null);
+  const capturePending = React.useRef(false);
   // Last observed pointer position/time while pressed. REAL touch can end a
   // gesture with `pointercancel` (Android's renderer-unresponsive touch
   // pipeline, OS takeover) whose event coordinates are not trustworthy, so the
@@ -180,12 +181,19 @@ export function usePullGesture(
         event.pointerType !== "mouse"
       )
         return;
+      const targetEditable = event.target instanceof HTMLTextAreaElement;
       // Pointer-driven controls resolve their tap in `finish`. When that tap
       // moves or replaces the control, a touch compatibility click can be
       // re-hit-tested onto the newly exposed element (for example, the chat
       // composer) and perform an unrelated default action such as focus.
+      // Never suppress pointerdown/touchstart on an editable textarea so
+      // Chromium/Android WebView keeps native GestureTap -> showSoftInput().
       touchCompatibilityCleanup.current?.();
-      if (preventTouchCompatibilityEvents && event.pointerType === "touch") {
+      if (
+        preventTouchCompatibilityEvents &&
+        event.pointerType === "touch" &&
+        !targetEditable
+      ) {
         event.preventDefault();
         // Cancelling pointerdown suppresses compatibility mouse events, but
         // Chromium can still dispatch click onto content exposed by the tap.
@@ -234,7 +242,9 @@ export function usePullGesture(
       // vertical scrolling still works. A vertical pull handle captures
       // immediately even when it also supports horizontal swipes; otherwise a
       // mouse/finger can leave the small handle before the first committed move.
-      if (!hasSwipe || hasVerticalPull) {
+      const deferCapture = hasSwipe && !hasVerticalPull;
+      capturePending.current = deferCapture;
+      if (!deferCapture) {
         try {
           event.currentTarget.setPointerCapture(event.pointerId);
         } catch {
@@ -273,9 +283,15 @@ export function usePullGesture(
         if (committed !== null) {
           axis.current = committed;
           // Take over the pointer now that intent is clear (deferred-capture path).
-          if (hasSwipe && !hasVerticalPull) {
+          // Guard with hasPointerCapture so we never re-capture a touch pointer
+          // that already has implicit capture (which fires lostpointercapture and
+          // cancels the drag in Chromium).
+          if (capturePending.current) {
+            capturePending.current = false;
             try {
-              event.currentTarget.setPointerCapture(event.pointerId);
+              if (!event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+                event.currentTarget.setPointerCapture(event.pointerId);
+              }
             } catch {
               // best-effort
             }
@@ -332,6 +348,7 @@ export function usePullGesture(
       const lastSample = last.current;
       start.current = null;
       axis.current = null;
+      capturePending.current = false;
       last.current = null;
       previous.current = null;
 
@@ -479,6 +496,7 @@ export function usePullGesture(
       drag.cancel();
       start.current = null;
       axis.current = null;
+      capturePending.current = false;
       last.current = null;
       previous.current = null;
       // Commit-on-cancel (REAL touch, #9943): Android's touch pipeline can

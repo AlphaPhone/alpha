@@ -68,7 +68,7 @@ function createDriver(code) {
   const box = {AbortController, DOMException, crypto, console,
     setTimeout(run, delay) { const timer = {run, delay, done: false}; timers.push(timer); return timer; },
     clearTimeout(timer) { if (timer) timer.done = true; },
-    Capacitor: {isNativePlatform: () => false}, registerPlugin: () => voice, planLocalSpeech: text => [text], nativeVoiceTurnId: () => undefined};
+    Capacitor: {isNativePlatform: () => false}, registerPlugin: () => voice, planLocalSpeech: text => [text], afterLocalSpeechWarm: async () => {}, nativeVoiceTurnId: () => undefined};
   vm.runInNewContext(code, box);
   const settle = (pending, error, value) => { pending.settled = true; if (error) pending.reject(error); else pending.resolve(value); };
   return {

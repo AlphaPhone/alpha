@@ -86,7 +86,7 @@ function onDevice({text = '', execution = 'device'} = {}) {
     play: async ({playbackId}) => { setTimeout(() => listeners.get('playbackEnded')?.({playbackId}), 0); }, cancel: async () => {}, stopPlayback: async () => {}, releaseLocalSpeech: async () => {},
     transcribeLocalRecording: async () => ({text, local: true, execution}),
   };
-  const box = {AbortController, DOMException, crypto, console, setTimeout, clearTimeout, planLocalSpeech, nativeVoiceTurnId: () => undefined,
+  const box = {AbortController, DOMException, crypto, console, setTimeout, clearTimeout, planLocalSpeech, afterLocalSpeechWarm: async () => {}, nativeVoiceTurnId: () => undefined,
     Capacitor: {isNativePlatform: () => true, isPluginAvailable: () => true}, registerPlugin: () => native,
     connectionController: {getSnapshot: () => ({}), getCloudClient: () => null, subscribe: () => () => {}},
     document: {hidden: false, documentElement: {dataset: {}}, addEventListener() {}, removeEventListener() {}}};

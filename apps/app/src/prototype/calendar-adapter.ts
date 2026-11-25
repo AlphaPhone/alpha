@@ -14,6 +14,7 @@ import {mapsEventOriginFor} from '../runtime/maps-event-return';
 import {rememberNoteOrigin,forgetNoteOrigin,noteOriginSupported,eventNoteOriginId} from './note-origin-adapter';
 import {reminderEvents,reminderWallTime} from '../runtime/reminder-creations';
 import {DAY_MS,civilDay,deviceTimeZone} from '../lib/civil-date';
+import {alphaClient} from '../runtime/alpha-client';
 type Bag = Record<string, any>;
 const calendar = registerPlugin<any>('AlphaCalendar');
 // Status strings stay parse-compatible with the overview state in ui/overview/daily-overview.ts; the calendar screen shows their short form.
@@ -179,6 +180,7 @@ export function installCalendarAdapter(Component: any, views: Bag, options:{acti
   // detail and its agent selection stay through the refresh.
   const calendarCommitted=(event:Event)=>{
     const currentOwner=owner;if(!currentOwner||!active(currentOwner))return;
+    alphaClient.admitOwnContextRefresh('calendar');
     const id=(event as CustomEvent).detail?.eventId,state=currentOwner.vget('calendar');
     const openRow=state.open?currentOwner.nativeCalendarRows?.find((row:Bag)=>row.id===state.open):undefined;
     if(typeof id!=='string'||openRow?.alphaCalendarId===id){currentOwner.vset('calendar',{open:null,openDay:null});void refresh(false,true);return;}

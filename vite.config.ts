@@ -85,6 +85,34 @@ function productionSurface(): Plugin[] {
       load(id) { return id.startsWith(disabledModulePrefix) ? Object.values(disabledModuleSource)[Number(id.slice(disabledModulePrefix.length))] ?? null : null; },
     },
     {
+      // Browser Cloud development bridge, statically imported by native-connection.ts and voice.ts behind
+      // DEV-only guards. Stubbed only during flag-off builds (not dev serve, where VITE_ALPHA_CLOUD_RESIDENT=1
+      // exercises the loopback bridge without ELIZA_DEV_ALLOW_TEST_MOCKS) so Rolldown cannot retain unused
+      // cross-chunk exports in the production bundle.
+      name: 'alpha-test-mock-build-modules',
+      apply: 'build',
+      enforce: 'pre',
+      resolveId(source, importer) {
+        if (flagOn || !importer) return null;
+        const owner = path.relative(srcDirectory, importer.split('?')[0]).split(path.sep).join('/');
+        if ((owner === 'runtime/native-connection.ts' && source === '../browser/cloud-connection') ||
+            (owner === 'browser/voice.ts' && source === './cloud-connection')) {
+          return `${disabledModulePrefix}build-0`;
+        }
+        return null;
+      },
+      load(id) {
+        if (id !== `${disabledModulePrefix}build-0`) return null;
+        return [
+          'export class BrowserCloudConnection {}',
+          'export class BrowserCloudSignIn {}',
+          'export const clearBrowserCloudCredentialIfCurrent = async () => { throw new Error("unavailable"); };',
+          'export const browserCloudVoice = async () => { throw new Error("unavailable"); };',
+          'export const browserCloudCredential = async () => { throw new Error("unavailable"); };',
+        ].join(' ');
+      },
+    },
+    {
       name: 'alpha-production-csp',
       apply: 'build',
       transformIndexHtml: {

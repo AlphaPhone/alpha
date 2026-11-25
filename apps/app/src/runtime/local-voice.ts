@@ -4,6 +4,7 @@ import { registerPlugin } from '../platform-plugins';
 import type { AlphaVoiceCloudPlugin } from '../native/alpha-voice-cloud';
 import { Capacitor } from '@capacitor/core';
 import { connectionController } from './connection-ui';
+import { afterLocalSpeechWarm } from './local-speech-warm';
 import { createNativeSpeechRequests } from '../../../../.eliza/client-features/packages/voice/src/native-speech-request.ts';
 const native = registerPlugin<Pick<AlphaVoiceCloudPlugin, 'localSpeechStatus' | 'transcribeLocalRecording' | 'transcribeLocalAudio' | 'releaseLocalSpeech' | 'cancel'>>('AlphaVoiceCloud');
 /**
@@ -35,7 +36,7 @@ export function createOnDeviceVoice() {
   };
   // One owned bridge request per operation (shared `@elizaos/voice/native-speech`): a changed
   // binding, mode or visibility cancels the native request and its result is never returned.
-  const operation = createNativeSpeechRequests({
+  const owned = createNativeSpeechRequests({
     check,
     watch(onChange) {
       const unsubscribe = connectionController.subscribe(onChange);
@@ -46,9 +47,11 @@ export function createOnDeviceVoice() {
     },
     cancel: requestId => native.cancel({ requestId }),
   });
+  // The bridge refuses a request while the background warm-up runs, so each one waits for it first.
+  const operation: typeof owned = async (signal, work) => { await afterLocalSpeechWarm(signal); return owned(signal, work); };
   return {
-    /** Transcription readiness. */
-    async ready(signal: AbortSignal) { return operation(signal, async (requestId, interrupted) => { const result = await Promise.race([native.localSpeechStatus({ requestId }), interrupted]); return result.ready === true && result.execution === execution; }); },
+    /** Transcription readiness (or TTS-only warmup when live ASR runs in the resident agent). */
+    async ready(signal: AbortSignal, { ttsOnly = false }: { ttsOnly?: boolean } = {}) { return operation(signal, async (requestId, interrupted) => { const result = await Promise.race([native.localSpeechStatus({ requestId, ...(ttsOnly ? { ttsOnly: true } : {}) }), interrupted]); return result.ready === true && result.execution === execution; }); },
     /** Read-aloud readiness: a browser without the local agent can still use its own local voices. */
     async playbackReady(signal: AbortSignal) { return operation(signal, async (requestId, interrupted) => { const result = await Promise.race([native.localSpeechStatus({ requestId }), interrupted]); return (result.ready === true || result.playback === true) && result.execution === execution; }); },
     async transcribe(recordingId: string, signal: AbortSignal) { return operation(signal, async (requestId, interrupted) => {

@@ -3,6 +3,7 @@ import { registerPlugin } from '../platform-plugins';
 import type { AlphaVoiceCloudPlugin } from '../native/alpha-voice-cloud';
 import { planLocalSpeech } from './local-speech-text';
 import { nativeVoiceTurnId } from './voice-timing';
+import { afterLocalSpeechWarm } from './local-speech-warm';
 
 /**
  * On-device playback of a spoken reply, one sentence per call, for the voice session's pipelined
@@ -49,6 +50,7 @@ export function createLocalReplySpeaker(bridge: Bridge = registerPlugin<Bridge>(
   async function sentence(text: string, signal: AbortSignal, onStarted: () => void) {
     signal.throwIfAborted();
     if (released) throw new DOMException('Speech session ended', 'AbortError');
+    await afterLocalSpeechWarm(signal);
     await listen();
     signal.throwIfAborted();
     if (released) throw new DOMException('Speech session ended', 'AbortError');

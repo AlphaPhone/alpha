@@ -2,12 +2,14 @@ import {Capacitor,type PluginListenerHandle} from '@capacitor/core';
 import {registerPlugin} from './platform-plugins';
 import {planLocalSpeech} from './runtime/local-speech-text';
 import {nativeVoiceTurnId} from './runtime/voice-timing';
+import {afterLocalSpeechWarm} from './runtime/local-speech-warm';
 import type {AlphaVoiceCloudPlugin,SpeechPlaybackEvent} from './native/alpha-voice-cloud';
 type PlaybackPort=Pick<AlphaVoiceCloudPlugin,'play'|'stopPlayback'|'cancel'>&{addListener(event:'playbackEnded'|'playbackFailed'|'playbackStopped',listener:(event:SpeechPlaybackEvent)=>void):Promise<PluginListenerHandle>};
 type SpeechPort=PlaybackPort&Pick<AlphaVoiceCloudPlugin,'synthesizeLocal'>;
 /** Preflight the complete native passage, then await every owned chunk. */
 export async function speakLocalText(text:string,signal:AbortSignal,onStarted?:()=>void,queue=false,requirements?:{execution?:'device'|'browser';assertCurrent:()=>void},strictDrain=false){
- signal.throwIfAborted();const native=Capacitor.isNativePlatform(),chunks=native?planLocalSpeech(text):[text],voice=registerPlugin<SpeechPort>('AlphaVoiceCloud');
+ signal.throwIfAborted();if(Capacitor.isNativePlatform())await afterLocalSpeechWarm(signal);
+ const native=Capacitor.isNativePlatform(),chunks=native?planLocalSpeech(text):[text],voice=registerPlugin<SpeechPort>('AlphaVoiceCloud');
  const controller=new AbortController(),cancel=()=>controller.abort(signal.reason);signal.addEventListener('abort',cancel,{once:true});if(signal.aborted)cancel();
  const timer=setTimeout(()=>controller.abort(Error('Speech did not finish.')),20*60*1000);let started=false;
  // A reply to a live conversation turn names its native latency turn (an id only).

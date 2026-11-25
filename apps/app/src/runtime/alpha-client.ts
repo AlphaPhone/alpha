@@ -241,6 +241,8 @@ export class AlphaClient {
   /** A view the request in flight brings forward itself (the agent's own Maps navigation request). */
   private ownViewOpen: { active: AbortController; view: string } | null = null;
   private ownViewChange: { active: AbortController; from: string; to: string } | null = null;
+  /** Short-lived window admitting agent-initiated in-place context refreshes (e.g. post-nav data load or Notes/Calendar/Photos commit). */
+  private ownContextRefresh: { view: string; expiresAt: number } | null = null;
   /** Each context an own page change published, keyed by its revision, with the context it replaced. */
   private ownMoves = new Map<number, ContextEnvelope>();
   private proposals = new Map<string, ActionProposal>();
@@ -373,6 +375,7 @@ export class AlphaClient {
     this.ownPageChange = null;
     this.ownViewOpen = null;
     this.ownViewChange = null;
+    this.ownContextRefresh = null;
     this.ownMoves.clear();
     this.transport = null;
     this.proposals.clear();
@@ -407,17 +410,24 @@ export class AlphaClient {
       this.context.selectedObject?.kind === "browser-tab" && this.context.selectedObject.id === openingBrowserTab &&
       next.selectedObject?.kind === "browser-tab" && next.selectedObject.id === openingBrowserTab &&
       this.context.timeZone === next.timeZone;
-    const ownChange = ownView || this.isOwnPageChange(next, selection) || this.isOwnViewOpen(next), previous = this.context;
+    const refresh = this.ownContextRefreshKind(next, selection);
+    const ownChange = ownView || this.isOwnPageChange(next, selection) || this.isOwnViewOpen(next) || refresh === "in-place", previous = this.context;
     this.localSelection = selection;
     this.context = copyContext(context, this.context.revision + 1);
     this.proposals.clear();
     // A view or page change committed by this request keeps its reply in flight.
     // Approvals stay bound to the earlier screen and are retired above.
-    if (ownChange || notesSourceLoaded || ownBrowserLoad) {
+    if (ownChange || notesSourceLoaded || ownBrowserLoad || refresh === "moved") {
       if (ownChange) this.activeRevision = this.context.revision;
-      if (this.ownMoves.size >= 32) this.ownMoves.clear();
+      if (this.ownMoves.size >= 64) {
+        const oldest = this.ownMoves.keys().next().value;
+        if (oldest !== undefined) this.ownMoves.delete(oldest);
+      }
       this.ownMoves.set(this.context.revision, previous);
-    } else this.ownMoves.clear();
+    } else {
+      this.ownMoves.clear();
+      this.ownContextRefresh = null;
+    }
     // Passive source updates preserve the conversation and still retire a turn
     // bound to the previous source. A page question must read the selected revision.
     if (!ownChange) {
@@ -467,6 +477,37 @@ export class AlphaClient {
   private isOwnViewOpen(next: ContextEnvelope): boolean {
     const own = this.ownViewOpen;
     return !!own && own.active === this.active && !!this.active && !this.activeWorkflow && !next.sensitive && !this.context.sensitive && next.view === own.view;
+  }
+  /**
+   * Admits same-view, non-sensitive context revisions for a brief window after an agent-initiated
+   * mutation or owned navigation (e.g. Notes/Calendar/Reminders/Photos refresh or post-mount view
+   * load) so active voice sessions continue without tripping `foreground-check-failed`.
+   * Leaving the view, entering a sensitive surface, or changing telephony selection still ends it.
+   */
+  admitOwnContextRefresh(view: string, ttlMs = 3000): () => void {
+    if (!view || this.context.sensitive) return () => {};
+    const admitted = { view, expiresAt: Date.now() + Math.max(0, ttlMs) };
+    this.ownContextRefresh = admitted;
+    return () => { if (this.ownContextRefresh === admitted) this.ownContextRefresh = null; };
+  }
+  /**
+   * A same-view change inside the window opened by `admitOwnContextRefresh`. "in-place" keeps the
+   * selected object (the same record refreshed, or still none) and keeps the request in flight.
+   * "moved" selects a different object, or is any Browser change (a tab keeps its id across
+   * documents): like `ownBrowserLoad`, the conversation continues there, but a turn or approval for
+   * the earlier object never acquires the new one's authority, so the request in flight is retired.
+   */
+  private ownContextRefreshKind(next: ContextEnvelope, selection: string | null): "in-place" | "moved" | null {
+    const own = this.ownContextRefresh;
+    if (!own || next.sensitive || this.context.sensitive || selection !== this.localSelection) return null;
+    if (Date.now() > own.expiresAt) {
+      this.ownContextRefresh = null;
+      return null;
+    }
+    if (next.view !== this.context.view || next.view !== own.view || next.timeZone !== this.context.timeZone) return null;
+    const before = this.context.selectedObject, after = next.selectedObject;
+    const sameObject = before?.kind === after?.kind && before?.id === after?.id;
+    return sameObject && next.view !== "browser" ? "in-place" : "moved";
   }
   /**
    * True when the published context is `expected`, or was reached from it only by own page

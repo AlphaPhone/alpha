@@ -96,8 +96,8 @@ export function validateReviewableDeviceOperation(value: unknown): ReviewableDev
 /** Owner-facing reason a pending proposal cannot be reviewed from this screen, or undefined. */
 export function proposalContextNotice(operation:ReviewableDeviceOperation,context:ContextEnvelope):string|undefined{return alphaProposalContextNotice(operation,context,alphaDeviceActionProfile);}
 /** Queue only delivered receipts; publish `alpha:<view>-committed` when the same owner session is idle. */
-export function publishCommittedDeviceChanges(receipt:OperationReceipt,client:Pick<AlphaClient,'getState'|'subscribe'>,session:VerifiedSession){
- sharedPublishCommittedDeviceChanges(receipt,client,session,view=>{if(typeof window!=='undefined')window.dispatchEvent(new CustomEvent('alpha:'+view+'-committed'));});
+export function publishCommittedDeviceChanges(receipt:OperationReceipt,client:Pick<AlphaClient,'getState'|'subscribe'>&Partial<Pick<AlphaClient,'admitOwnContextRefresh'>>,session:VerifiedSession){
+ sharedPublishCommittedDeviceChanges(receipt,client,session,view=>{client.admitOwnContextRefresh?.(view);if(typeof window!=='undefined')window.dispatchEvent(new CustomEvent('alpha:'+view+'-committed'));});
 }
 
 /** Authenticated structured actions only. Neither reply prose nor restored history

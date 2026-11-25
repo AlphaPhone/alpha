@@ -13,7 +13,7 @@ function fixture({ready=true,cloud=false,hold=false,cloudHold=false,canSpeak=()=
   synthesizeLocal:async({text})=>{f.spoken.push(text);return {playbackId:'p'+f.spoken.length,execution:'device'};},
   play:async({playbackId})=>{const end=()=>{for(const l of f.listeners.playbackEnded??[])l({playbackId});};if(hold)f.end=end;else setTimeout(end,0);},cancel:async()=>{},stopPlayback:async()=>{}};
  const document=Object.assign(new EventTarget(),{hidden:false,documentElement:{dataset:{}}});
- const box={AbortController,DOMException,EventTarget,crypto,console,setTimeout,clearTimeout,queueMicrotask,document,Capacitor:{isNativePlatform:()=>true,isPluginAvailable:()=>true},registerPlugin:()=>native,planLocalSpeech:text=>[text],nativeVoiceTurnId:()=>undefined,
+ const box={AbortController,DOMException,EventTarget,crypto,console,setTimeout,clearTimeout,queueMicrotask,document,Capacitor:{isNativePlatform:()=>true,isPluginAvailable:()=>true},registerPlugin:()=>native,planLocalSpeech:text=>[text],afterLocalSpeechWarm:async()=>{},nativeVoiceTurnId:()=>undefined,
   connectionController:{getSnapshot:()=>({}),getCloudClient:()=>({sessionId:f.account,credentialId:f.account}),getCloudEnvironment:()=>cloud?'production':undefined,subscribe:()=>()=>{}},speechRoute:()=>cloud?'cloud':'device',speakAppText:async(text,signal)=>{f.cloud.push(text);if(cloudHold)await new Promise((resolve,reject)=>f.pending.push({text,signal,resolve,reject}));}};
  load(box,'.eliza/client-features/packages/voice/src/native-speech-request.ts','createNativeSpeechRequests');
  load(box,'apps/app/src/local-speech-playback.ts','speakLocalText');

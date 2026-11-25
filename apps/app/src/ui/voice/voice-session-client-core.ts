@@ -366,6 +366,36 @@ export function createVoiceSessionClient(
   let recoveryPromise: Promise<void> | null = null;
   let captureSocket: VoiceWebSocketLike | null = null;
   let captureAbort: AbortController | null = null;
+  let captureStarting = false;
+  let captureTargetSocket: VoiceWebSocketLike | null = null;
+  // Bound pre-ready startup capture buffering (~3s at 16 kHz mono Int16 PCM).
+  const PRE_READY_AUDIO_MAX_BYTES = 16000 * 2 * 3;
+  let preReadyAudioQueue: Uint8Array[] = [];
+  let preReadyAudioBytes = 0;
+  const clearPreReadyAudio = (): void => {
+    preReadyAudioQueue = [];
+    preReadyAudioBytes = 0;
+  };
+  const enqueuePreReadyAudio = (bytes: Uint8Array): void => {
+    const copy = bytes.slice();
+    preReadyAudioQueue.push(copy);
+    preReadyAudioBytes += copy.byteLength;
+    while (
+      preReadyAudioBytes > PRE_READY_AUDIO_MAX_BYTES &&
+      preReadyAudioQueue.length > 0
+    ) {
+      const dropped = preReadyAudioQueue.shift()!;
+      preReadyAudioBytes -= dropped.byteLength;
+    }
+  };
+  const flushPreReadyAudio = (socket: VoiceWebSocketLike): void => {
+    if (!preReadyAudioQueue.length || ws !== socket || connPhase !== "open") {
+      return;
+    }
+    const queued = preReadyAudioQueue;
+    clearPreReadyAudio();
+    for (const frame of queued) sendUplinkAudio(frame);
+  };
   let microphoneMuted = false;
   let playbackCompletionSupported = false;
   let playbackEnd: Extract<
@@ -377,12 +407,17 @@ export function createVoiceSessionClient(
   // Whether the caller explicitly stopped us (clean bye) — suppresses reconnect.
   let intentionalClose = false;
   const syncMicrophoneMute = (): void => {
+    const preReadyCapture =
+      !everLiveThisLifecycle &&
+      micSocket === null &&
+      state.phase === "connecting" &&
+      connPhase !== "closing" &&
+      connPhase !== "closed";
     mic?.setMuted(
       microphoneMuted ||
         state.phase === "speaking" ||
         activePlaybackTraceId !== null ||
-        micSocket !== ws ||
-        connPhase !== "open",
+        (!preReadyCapture && (micSocket !== ws || connPhase !== "open")),
     );
   };
   const setState = (next: VoiceSessionMachineState): void => {
@@ -902,7 +937,7 @@ export function createVoiceSessionClient(
   }
   async function startCapture(
     generation: number,
-    socket: VoiceWebSocketLike,
+    socket: VoiceWebSocketLike | null,
   ): Promise<void> {
     if (retiringMic || unreleasedMics.size > 0) {
       await Promise.all([...unreleasedMics].map(retryMicRelease));
@@ -910,18 +945,27 @@ export function createVoiceSessionClient(
     }
     // A ready frame may race Stop/ownership change while the prior device releases.
     if (
-      captureSocket === socket ||
       !isLifecycleCurrent(generation) ||
-      ws !== socket
+      (socket !== null ? captureSocket === socket || ws !== socket : captureStarting)
     ) {
       return;
     }
     if (mic) {
+      if (socket === null) return;
       clearCaptureRetentionTimer();
       micSocket = socket;
+      flushPreReadyAudio(socket);
       setState(beginListening(state));
       return;
     }
+    // Pre-ready capture was started in parallel with mint/WS handshake; upgrade it in place.
+    if (captureStarting && captureSocket === null && socket !== null) {
+      captureTargetSocket = socket;
+      captureSocket = socket;
+      return;
+    }
+    captureStarting = true;
+    captureTargetSocket = socket;
     captureSocket = socket;
     captureAbort?.abort();
     const captureController = new AbortController();
@@ -931,13 +975,22 @@ export function createVoiceSessionClient(
       isLifecycleCurrent(generation) &&
       (capturedMic
         ? mic === capturedMic
-        : captureSocket === socket && ws === socket);
+        : captureStarting &&
+          (captureTargetSocket === null || ws === captureTargetSocket));
     try {
       for (const unreleased of unreleasedMics) throw unreleased;
       const createdMic = await startVoiceMicCapture({
         onFrame: (bytes) => {
-          if (currentCapture() && micSocket !== null && ws === micSocket) {
+          if (!currentCapture()) return;
+          if (micSocket !== null && ws === micSocket && connPhase === "open") {
             sendUplinkAudio(bytes);
+          } else if (
+            connPhase !== "closing" &&
+            connPhase !== "closed" &&
+            micSocket === null &&
+            (!everLiveThisLifecycle || ws === captureTargetSocket)
+          ) {
+            enqueuePreReadyAudio(bytes);
           }
         },
         onSuspend: () => {
@@ -964,28 +1017,47 @@ export function createVoiceSessionClient(
         signal: captureController.signal,
       });
       capturedMic = createdMic;
-      if (!isLifecycleCurrent(generation) || ws !== socket || mic) {
+      const target = captureTargetSocket;
+      if (
+        !isLifecycleCurrent(generation) ||
+        (target !== null && ws !== target) ||
+        mic
+      ) {
+        clearPreReadyAudio();
         await releaseMic(() => createdMic.stop());
         return;
       }
       mic = createdMic;
-      micSocket = socket;
-      // Keep the server's default half-duplex policy. Advertising continuous
-      // handoff would opt this client into acoustic interruption during speech.
-      // Now genuinely listening.
-      setState(beginListening(state));
+      if (target !== null && ws === target) {
+        micSocket = target;
+        flushPreReadyAudio(target);
+        // Keep the server's default half-duplex policy. Advertising continuous
+        // handoff would opt this client into acoustic interruption during speech.
+        // Now genuinely listening.
+        setState(beginListening(state));
+      } else {
+        micSocket = null;
+        syncMicrophoneMute();
+      }
     } catch (err) {
       if (err instanceof VoiceMicReleaseError) unreleasedMics.add(err);
-      if (!isLifecycleCurrent(generation) || ws !== socket) return;
+      const target = captureTargetSocket;
+      if (!isLifecycleCurrent(generation) || (target !== null && ws !== target))
+        return;
       const error =
         err instanceof VoiceMicCaptureError
           ? err
           : new VoiceMicCaptureError("mic capture failed", "start_failed", err);
+      clearPreReadyAudio();
       emitError(error);
       // Without a mic there's no session; tear down cleanly.
       void stop();
     } finally {
-      if (captureSocket === socket) captureSocket = null;
+      const finishedTarget = captureTargetSocket;
+      captureStarting = false;
+      captureTargetSocket = null;
+      if (captureSocket === socket || finishedTarget === null)
+        captureSocket = null;
       if (captureAbort === captureController) captureAbort = null;
     }
   }
@@ -1405,6 +1477,9 @@ export function createVoiceSessionClient(
   }
   async function teardownMic(): Promise<void> {
     clearCaptureRetentionTimer();
+    clearPreReadyAudio();
+    captureStarting = false;
+    captureTargetSocket = null;
     micSocket = null;
     const pendingCapture = captureAbort;
     captureAbort = null;
@@ -1591,6 +1666,8 @@ export function createVoiceSessionClient(
         return;
       }
       try {
+        clearPreReadyAudio();
+        void startCapture(generation, null);
         const minted = await mint(generation);
         assertLifecycleCurrent(generation);
         // `onMinted` runs inside mint(), so this mark is correlated with the
