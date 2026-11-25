@@ -1,6 +1,5 @@
 // spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Organise my notes"; spec/app/notes/editor.md, "Story: Write a note"; spec/app/notes/trash.md, "Story: Delete a note and get it back"
 import { Alert, AppHeader, Button, Chip, Input, LinkNoteView, Menu, MenuContent, MenuItem, MenuTrigger, NoteEditor as NoteForm, NoteRow, NotesList as NoteRows, VoiceNoteView } from "@repo/ui";
-import { Effect } from "effect";
 import { Ellipsis, FileDown, Folder, Mail, MessageSquare, Mic, Plus, Trash2 } from "lucide-react";
 import { useState, useSyncExternalStore, type FormEvent } from "react";
 import * as Notes from "../../gen/app__notes.ts";
@@ -20,7 +19,7 @@ import { NoteDevice } from "../platform/noteDevice.vibe";
 import { unfinished } from "../../gen/app__notes__recording.ts";
 import type { Alpha } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
-import { type Collection, type DraftWords, NoteContent, audioIdOf, hasContent } from "./content.vibe";
+import { type Collection, type DraftWords, NoteContent, audioIdOf, hasContent, savedVoice } from "./content.vibe";
 import { type Fields, NoteEditor } from "./editor.vibe";
 import { enter } from "./notes.vibe";
 import { record } from "./recording.vibe";
@@ -173,22 +172,18 @@ function speaker(value: unknown) {
 
 function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonly collection: Collection }) {
   const voice = useVoice(runtime);
-  const audio = runtime.runSync(NoteDevice.use((device) => Effect.succeed(device.available)));
+  const audio = runtime.runSync(NoteDevice).available;
   const state = voice.state;
   if (!state?.showing) return null;
   const note = collection.noteByNumber.get(state.note);
   const data = note?.format?.data;
-  const lines = Array.isArray(data?.lines) ? data.lines.flatMap((line) => typeof line === "object" && line !== null && "t" in line && typeof line.t === "string"
-    ? [{ ...speaker("s" in line ? line.s : undefined), at: clock("at" in line && typeof line.at === "number" ? line.at : 0), text: line.t }] : []) : [];
-  const summary = Array.isArray(data?.summary) ? data.summary.filter((line): line is string => typeof line === "string") : [];
-  const actions = Array.isArray(data?.actions) ? data.actions.flatMap((item) => typeof item === "object" && item !== null && "t" in item && typeof item.t === "string"
-    ? [{ text: item.t, done: "done" in item && item.done === true }] : []) : [];
-  const savedAudio = data?.audio;
-  const ms = typeof data?.durationMs === "number" ? data.durationMs : typeof savedAudio === "object" && savedAudio !== null
-    && "durationMs" in savedAudio && typeof savedAudio.durationMs === "number" ? savedAudio.durationMs : undefined;
+  const saved = note === undefined ? undefined : savedVoice(note);
+  const lines = saved?.lines.map((line) => ({ ...speaker(line.who), at: clock(line.at), text: line.text })) ?? [];
+  const ms = saved?.durationMs;
   const length = ms === undefined ? "" : clock(ms / 1000);
   const play = { type: "play", from: 0 } as const;
   const stop = { type: "stopPlaying" } as const;
+  const ask = { type: "askAlpha" } as const;
   const canPlay = audio && note !== undefined && audioIdOf(note) !== "" && voice.can(play, "Owner");
   const playback = voice.can(stop, "Owner") ? () => void voice.send(stop, "Owner") : canPlay ? () => void voice.send(play, "Owner") : undefined;
   return <VoiceNoteView
@@ -196,9 +191,10 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
     title={note === undefined ? "Voice note" : titleOf(note)}
     meta={note === undefined ? "" : [dated(note, collection.readAt), length].filter(Boolean).join(" · ")}
     time={length}
-    summary={summary}
-    actions={actions}
-    lines={lines.length === 0 && note?.body ? [{ ...speaker(undefined), at: "0:00", text: note.body }] : lines}
+    summary={saved?.summary}
+    actions={saved?.actions}
+    lines={lines}
+    onAskTranscript={state.revision === collection.version && lines.length > 0 && voice.can(ask, "Owner") ? () => void voice.send(ask, "Owner") : undefined}
     playing={state.play.status === "Loading"}
     onBack={() => void voice.send({ type: "back" }, "Owner")}
     onPlay={playback}

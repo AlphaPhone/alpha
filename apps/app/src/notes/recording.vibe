@@ -22,8 +22,8 @@ import { NoteContent, numberOf } from "./content.vibe"
 const phone: Actor = "Phone"
 
 export service RecordingDisplay {
-  snapshot(): { readonly seconds: number; readonly peak: number }
-  subscribe(listener: () => void): () => void
+  readonly snapshot: () => { readonly seconds: number; readonly peak: number }
+  readonly subscribe: (listener: () => void) => () => void
   tell(seconds: number, peak: number): void!!
 }
 
