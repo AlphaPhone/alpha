@@ -354,7 +354,9 @@ describe("Home on a phone", () => {
     const world = { ...scene(), phone: true };
     const initial = digestResult(1, "finished", "Owner’s retained Android brief");
     const missed = digestResult(2, "missed", "A missed run cannot replace the brief");
-    const refreshed = digestResult(3, "finished", "The exact result from native refresh");
+    const resultText = "The exact result from native refresh";
+    const refreshed = digestResult(3, "finished", resultText);
+    world.ask.spokenFiles = [];
     const browser: NonNullable<WorkflowsScene["hosted"]> = {
       entries: [digestResult(90, "finished", "Browser result for the same agent")], reads: 0, acknowledgements: [],
     };
@@ -392,7 +394,35 @@ describe("Home on a phone", () => {
       if (row === undefined) throw new Error("Refreshed digest unavailable");
       row.click();
     });
-    await vi.waitFor(() => expect(document.querySelector("[aria-label='Digest result']")?.textContent).toContain(refreshed.output));
+    await vi.waitFor(() => expect(document.querySelector("[aria-label='Digest result']")?.textContent).toContain(resultText));
+
+    // spec/app/digests/index.md, "Ask Alpha about a result hands that result to Ask Alpha"
+    const composer = () => document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']");
+    const attachment = "Remove Saved result.txt";
+    const recorded = () => document.querySelectorAll("section[aria-label='Ask Alpha'] [role=log] article").length;
+    const unsent = () => expect([recorded(), world.ask.kept.size, world.ask.said, world.ask.spokenFiles]).toEqual([0, 0, [], []]);
+    await vi.waitFor(() => expect(button("Ask Alpha")).toBeDefined());
+    await press("Ask Alpha");
+    await vi.waitFor(() => expect([composer()?.value, Boolean(button(attachment))]).toEqual(["Help me understand this saved result.", true]));
+    unsent();
+
+    await press(attachment);
+    await vi.waitFor(() => expect(button(attachment)).toBeUndefined());
+    const draft = "Tell me which part should come first.";
+    await fill("Message Alpha", draft);
+    await press("Minimize chat");
+    await vi.waitFor(() => expect(button("Ask Alpha")).toBeDefined());
+    await press("Ask Alpha");
+    await vi.waitFor(() => expect([composer()?.value, Boolean(button(attachment))]).toEqual([draft, true]));
+    unsent();
+
+    await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+    await press("Send");
+    await vi.waitFor(() => expect(world.ask.said).toEqual([draft]));
+    expect(world.ask.spokenFiles?.map(({ images }) => images)).toEqual([
+      [{ name: "Saved result.txt", mimeType: "text/plain", data: btoa(resultText) }],
+    ]);
+
     await hardware("home");
     await vi.waitFor(() => expect(brief()).toContain(refreshed.output), { timeout: 5_000 });
     expect([browser.reads, browser.acknowledgements]).toEqual([0, []]);
