@@ -20,7 +20,6 @@ import com.getcapacitor.annotation.Permission;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Base64;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 
 @CapacitorPlugin(name = "AlphaVoiceCloud",
@@ -29,7 +28,8 @@ public final class AlphaLocalSpeechPlugin extends LocalSpeechBridgePlugin {
  private static final String READ_VOICEMAIL = "com.android.voicemail.permission.READ_VOICEMAIL";
  private static final int WINDOW_SAMPLES = VoicemailPcm.SAMPLE_RATE * 60;
  private static final int TRANSCRIPT_LIMIT = 8_000;
- private final AtomicReference<VoicemailRead> voicemail = new AtomicReference<>();
+ private final Object voicemailLock = new Object();
+ private VoicemailRead activeVoicemail, nextVoicemail;
 
  public AlphaLocalSpeechPlugin() {
   super("alpha-cloud-voice-", "alpha-cloud-tts-");
@@ -47,19 +47,37 @@ public final class AlphaLocalSpeechPlugin extends LocalSpeechBridgePlugin {
    return;
   }
   VoicemailRead read = new VoicemailRead(call, id, requestId);
-  if (!voicemail.compareAndSet(null, read)) {
-   call.reject("Another voicemail is being transcribed.");
-   return;
+  synchronized (voicemailLock) {
+   if (activeVoicemail != null) {
+    // The SDK voice gate still owns the cancelled request until its worker settles.
+    if (activeVoicemail.retired && nextVoicemail == null && !activeVoicemail.requestId.equals(requestId)) {
+     nextVoicemail = read;
+    } else call.reject("Another voicemail is being transcribed.");
+    return;
+   }
+   activeVoicemail = read;
   }
   read.next();
  }
 
  @PluginMethod public void cancelVoicemailTranscription(PluginCall call) {
-  VoicemailRead read = voicemail.get();
-  if (read != null && read.requestId.equals(call.getString("requestId"))) {
-   read.cancel.cancel();
-   mainHandler().post(() -> cancelSpeech(read.requestId));
+  String id = call.getString("requestId");
+  VoicemailRead read = null, waiting = null;
+  synchronized (voicemailLock) {
+   if (activeVoicemail != null && activeVoicemail.requestId.equals(id)) {
+    read = activeVoicemail;
+    read.retired = true;
+   } else if (nextVoicemail != null && nextVoicemail.requestId.equals(id)) {
+    waiting = nextVoicemail;
+    nextVoicemail = null;
+    waiting.retired = true;
+   }
   }
+  if (read != null) {
+   read.cancel.cancel();
+   mainHandler().post(() -> cancelSpeech(id));
+  }
+  if (waiting != null) waiting.refuse();
   call.resolve();
  }
 
@@ -74,8 +92,16 @@ public final class AlphaLocalSpeechPlugin extends LocalSpeechBridgePlugin {
  }
 
  private void stopVoicemailRead() {
-  VoicemailRead read = voicemail.get();
+  VoicemailRead read, waiting;
+  synchronized (voicemailLock) {
+   read = activeVoicemail;
+   waiting = nextVoicemail;
+   nextVoicemail = null;
+   if (read != null) read.retired = true;
+   if (waiting != null) waiting.retired = true;
+  }
   if (read != null) read.cancel.cancel();
+  if (waiting != null) waiting.refuse();
  }
 
  private boolean mayReadVoicemail() {
@@ -99,6 +125,7 @@ public final class AlphaLocalSpeechPlugin extends LocalSpeechBridgePlugin {
   private byte[] pcm;
   private int offset = VoicemailPcm.WAV_HEADER_BYTES;
   private int windowBytes;
+  private volatile boolean retired;
 
   VoicemailRead(PluginCall owner, long id, String requestId) {
    this.owner = owner;
@@ -107,10 +134,19 @@ public final class AlphaLocalSpeechPlugin extends LocalSpeechBridgePlugin {
   }
 
   private boolean current() {
-   return !cancel.isCanceled() && voicemail.get() == this && mayReadVoicemail();
+   synchronized (voicemailLock) {
+    if (retired || activeVoicemail != this) return false;
+   }
+   return mayReadVoicemail();
   }
 
   private void next() {
+   try {
+    if (!current()) { finish(false); return; }
+   } catch (RuntimeException unavailable) {
+    finish(false);
+    return;
+   }
    JSObject input = new JSObject().put("requestId", requestId).put("replace", false);
    PluginCall window = new PluginCall(null, owner.getPluginId(), owner.getCallbackId(), owner.getMethodName(), input) {
     @Override public void resolve(JSObject result) { heard(result.getString("text", "")); }
@@ -159,9 +195,23 @@ public final class AlphaLocalSpeechPlugin extends LocalSpeechBridgePlugin {
 
   private void finish(boolean success) {
    if (pcm != null) Arrays.fill(pcm, (byte) 0);
-   if (!voicemail.compareAndSet(this, null)) return;
-   if (success) owner.resolve(new JSObject().put("text", text.toString()));
-   else owner.reject("Voicemail transcription unavailable.");
+   VoicemailRead waiting;
+   boolean publish;
+   synchronized (voicemailLock) {
+    if (activeVoicemail != this) return;
+    publish = success && !retired;
+    waiting = nextVoicemail;
+    activeVoicemail = waiting;
+    nextVoicemail = null;
+   }
+   try {
+    if (publish) owner.resolve(new JSObject().put("text", text.toString()));
+    else refuse();
+   } finally {
+    if (waiting != null) waiting.next();
+   }
   }
+
+  private void refuse() { owner.reject("Voicemail transcription unavailable."); }
  }
 }
