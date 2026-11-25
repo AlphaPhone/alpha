@@ -123,12 +123,15 @@ none has does Back close Notes ([Shell](../shell/index.md), "Back closes
 one layer: Ask Alpha by a step, then the app on top").
 
 The agent may open one saved note: the one the model named in answer to
-the owner's request now, once for that request. The request is bound to the
-owner's turn that is current, and to no earlier one. No note was opened for
-it yet. The screen it was asked from is not sensitive, and no draft of
-another note waits unsaved. A proposal that is stale, injected or taken from
-a tool's output names no current turn of the owner's, so it opens nothing.
-A dialog and a question stay the owner's alone to open.
+the owner's request now, once for that request, typed or spoken. The request
+is bound to the owner's request that is current, and to no earlier one. No
+note was opened for it yet. The screen it was asked from is not sensitive,
+and no draft waits unsaved: a draft left unsaved is offered first, and
+nothing else opens until it is saved or discarded. The phone opens only the
+note named in the agent's own reply to that request, never one an older
+reply, another screen or a page names; whether text the agent read steered
+the model is for the model and the agent's own rules to judge. A dialog and
+a question stay the owner's alone to open.
 
 ```quint
 type Request = { turn: int, current: int, opened: int, sensitive: bool, unsaved: bool }
@@ -150,7 +153,8 @@ pure def mayOpenNote(covered: bool, by: Actor, req: Request): bool =
 pure def lawNothingOpensOverAnother(by: Actor, req: Request): bool =
   not(mayOpen(true, by)) and not(mayOpen(false, Agent)) and not(mayOpenNote(true, by, req))
     and not(mayOpenNote(false, Phone, req))
-    and (mayOpenNote(false, Agent, req) implies (currentTurn(req) and not(req.sensitive) and not(req.unsaved)))
+    and not(mayOpenNote(false, Agent, { ...req, opened: req.turn }))
+    and not(mayOpenNote(false, Agent, { ...req, current: req.turn + 1 }))
 ```
 
 ## Story: Stay honest when cut off

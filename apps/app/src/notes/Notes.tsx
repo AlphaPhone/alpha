@@ -278,7 +278,7 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
   if (bin.state?.showing || bin.state?.question === "AskFull") return <TrashScreen runtime={runtime} collection={collection} />;
   if (links.state?.showing) return <LinkedNote runtime={runtime} collection={collection} />;
   if (voice.state?.showing) return <VoiceNote runtime={runtime} collection={collection} />;
-  if (writing.showing && draft !== undefined) return <EditorScreen runtime={runtime} saved={draft} />;
+  if (writing.showing && draft !== undefined) return <EditorScreen key={writing.note} runtime={runtime} saved={draft} />;
   if (recorder !== undefined && unfinished(recorder)) return <Recording alpha={alpha} runtime={runtime} />;
   const available = Notes.readyForNew(state);
   const newNote = { type: "newNote", kind: "Text", available, covered: false, folder: state.filter } as const;

@@ -78,7 +78,7 @@ effect function written(owner: number, ticket: number, change: Notes.Change): No
   } catch (error) => ({ ...failed, known: error.known })
 }
 
-// spec/app/notes/index.md, "The owner opens a note the list shows, when nothing else of Notes is open, and it opens as listed"; spec/app/notes/index.md, "The agent opens the one note the owner named, as the list shows it now, once for the owner's current turn, and is told whether it opened"
+// spec/app/notes/index.md, "The owner opens a note the list shows, when nothing else of Notes is open, and it opens as listed"; spec/app/notes/index.md, "The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened"
 /** Open `row` as its kind needs, in the name of `by` and for the owner's request `req` an agent's open carries. */
 effect function opened(row: Notes.Row, by: Actor, req: Request) {
   const content = try NoteContent
@@ -101,22 +101,28 @@ effect function opened(row: Notes.Row, by: Actor, req: Request) {
   }
 }
 
-/** Open what the list hands over, then tell whoever waits on an agent's open for that turn whether the editor or voice note holds it now. */
-effect function shown(row: Notes.Row, by: Actor, req: Request) {
-  try opened(row, by, req)
-  if (by !== "Agent") return
+/** Open what the agent named, then tell whoever waits on it whether the editor or voice note holds it now. */
+effect function openedForAgent(row: Notes.Row, req: Request) {
+  try opened(row, "Agent", req)
   const editor = try (try Editor.Machine).get()
   const voice = try (try Voice.Machine).get()
   try (try Opens).settle(req.turn, (editor.showing && editor.note === row.id) || (voice.showing && voice.note === row.id))
+}
+
+/** Open what the list hands over; an agent's open, however its job ends, is told once whether it opened. */
+effect function shown(row: Notes.Row, by: Actor, req: Request) {
+  if (by !== "Agent") return try opened(row, by, req)
+  const opens = try Opens
+  try Effect.ensuring(openedForAgent(row, req), opens.settle(req.turn, false))
 }
 
 function carry(fx: Notes.Effect): Job<Notes.Event, Agent | Notes.Machine | Editor.Machine | NoteStore | NoteContent | Shell | Link.Machine | Voice.Machine | Opens, [Actor]> {
   return match (fx) {
     when { tag: "Lists" }: answer("list", listed(fx.owner, fx.ticket), { type: "listed", ticket: fx.ticket, ok: false, version: 0, rows: [], folders: [], shelf: 0 }, phone);
     when { tag: "Writes" }: answer(`write ${fx.ticket}`, written(fx.owner, fx.ticket, fx.change), { type: "changeWritten", ticket: fx.ticket, ok: false, known: false }, phone);
-    when { tag: "Shows" }: run("open", shown(fx.row, fx.by, fx.req), phone);
+    when { tag: "Shows" }: run(fx.by === "Agent" ? `agent open ${fx.req.turn}` : "open", shown(fx.row, fx.by, fx.req), phone);
     when { tag: "OpensAccount" }: run("account", effect { try ignore((try Shell).send({ type: "openView", view: "Settings" })) }, phone);
-    when { tag: "Opened" }: run("opened", effect { if (!fx.ok) try (try Opens).settle(fx.turn, false) }, phone);
+    when { tag: "NotOpened" }: run("not opened", effect { try (try Opens).settle(fx.turn, false) }, phone);
   }
 }
 

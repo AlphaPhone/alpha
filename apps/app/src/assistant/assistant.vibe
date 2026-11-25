@@ -35,7 +35,7 @@ import { type Job, answer, contained, following, reacting, run, started, stream,
 import { Time } from "../runtime/time.vibe"
 import { MediaReview, mediaReview } from "./media-review.vibe"
 import { type Board, type Line, Talk, talk } from "./talk.vibe"
-import { Views, carried, delivery, handoffs, preparedIn } from "./views.vibe"
+import { Views, carried, carriedAloud, delivery, handoffs, preparedIn } from "./views.vibe"
 import { dropFiles, readFiles, rememberFiles, sameBinding, stageFiles } from "./attachments.vibe"
 import { readMessage } from "./read-aloud.vibe"
 
@@ -271,6 +271,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     }
     board.change({ media: [], mediaNote: "" })
     const views = try Views
+    const asked = try views.begin()
     const metadata = { ...observed(told, context, location, selection), ...(told ? delivery(views.clientId) : {}), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
     const images = files.map(({ data, mimeType, name }) => ({ data, mimeType, name }))
     const result = tryPromise(() => controller.send({ text: outgoing, ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks, ...(enrolled === undefined ? {} : { headers: enrolled.headers }) })) catch () => undefined
@@ -295,7 +296,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const finishing = Conversation.canFinish(try conversation.get(), ticket)
     if (result?.kind === "Replied" && finishing) {
       const prepared = told ? preparedIn(result.reply.actionResults, views.clientId) : undefined
-      if (prepared !== undefined) try views.hold(ticket, prepared)
+      if (prepared !== undefined) try views.hold(ticket, { asked, handoff: prepared })
       if (result.reply.userMessageId !== undefined) {
         board.messageNumber(result.reply.userMessageId)
         board.rename(pageTicket, mine, result.reply.userMessageId)
@@ -846,7 +847,7 @@ export const assisting = Layer.provideMerge(
     reacting(Dock, { carry: carryDock }),
     Attachments.machine(),
     reacting(Locator, { carry: carryLocator }),
-    reached, looked, left, opening, saving, bound, requested, submitted, allowing, forgetting, rested, steppingBack, carried,
+    reached, looked, left, opening, saving, bound, requested, submitted, allowing, forgetting, rested, steppingBack, carried, carriedAloud,
   ),
   Layer.mergeAll(Layer.fresh(turns), talk, handoffs),
 )

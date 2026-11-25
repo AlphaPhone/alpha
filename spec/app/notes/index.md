@@ -69,8 +69,8 @@ pure def writing(s: Notes): bool = inFlight(s.writing)
 
 To read the owner's notes, to write one change to the owner's store, to
 open a note the list shows, to send the owner to the account area to
-connect the agent's notes, and to tell the agent whether the note it named
-for a turn opened.
+connect the agent's notes, and to tell the agent that the note it named for
+a request did not open.
 
 ```quint
 type Effect =
@@ -78,7 +78,7 @@ type Effect =
   | Writes({ ticket: int, owner: int, change: Change })
   | Shows({ row: Row, by: Actor, req: Request })
   | OpensAccount
-  | Opened({ turn: int, ok: bool })
+  | NotOpened({ turn: int })
 type Moved = { state: Notes, out: List[Effect] }
 ```
 
@@ -349,7 +349,10 @@ pure def sometimesAFolderRemoved(s: Notes): bool = s.retired != List() and s.rea
 ### The owner opens a note the list shows, when nothing else of Notes is open, and it opens as listed
 
 The list hands the row it shows, at the revision and with the source it
-read, to the view that opens it, in the name of whoever opened it.
+read, to the view that opens it, in the name of whoever opened it. A note
+the agent opens from another folder than the one the list is narrowed to
+is handed over as read, and the list stops narrowing, so it lists that note
+when the owner comes back to it.
 
 ```quint
 pure def canOpenRow(s: Notes, id: int, covered: bool, by: Actor): bool =
@@ -361,42 +364,52 @@ pure def openRow(s: Notes, id: int, covered: bool, by: Actor): Moved =
   { state: s, out: List(Shows({ row: shownRow(s, id), by: by, req: noRequest })) }
 
 pure def stepANoteOpensAsListed(before: Notes, via: str, after: Notes, out: List[Effect]): bool =
-  out.every(e => match e { | Shows(x) => shown(before).includes(x.row) and x.row.id > 0 | _ => true })
+  out.every(e => match e {
+    | Shows(x) => x.row.id > 0
+        and (shown(before).includes(x.row) or (via == "agentOpen" and before.rows.includes(x.row) and shown(after).includes(x.row)))
+    | _ => true
+  })
 ```
 
-### The agent opens the one note the owner named, as the list shows it now, once for the owner's current turn, and is told whether it opened
+### The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened
 
 The model names the note in answer to the owner's request now, and the
-phone says which turn of the owner's that is, whether the screen it was
-asked from is sensitive, and whether a draft of another note waits unsaved
-(A note, "Only the owner opens a dialog or a question in Notes; a note is
-opened by the owner, or by the agent for the one the owner just named; and
-nothing opens while anything else of Notes is open"). The note opens as the
-list shows it, as the owner's tap would open it. A link note opens only in
-its dialog, which is the owner's alone, so the agent cannot open one. The
-agent is told once whether it opened; nothing else is said.
+phone says which request of the owner's that is, whether the screen it was
+asked from is sensitive, and whether a draft waits unsaved (A note, "Only
+the owner opens a dialog or a question in Notes; a note is opened by the
+owner, or by the agent for the one the owner just named; and nothing opens
+while anything else of Notes is open"). The note opens as the list last
+read it, in whichever folder it is, as the owner's tap would open it; a
+note in another folder than the one the list is narrowed to clears the
+filter, so the list shows it behind the note: a note the owner names
+opens whatever folder they chose. A link note opens only in its dialog, which is
+the owner's alone, so the agent cannot open one. A refusal is told at once;
+an open is told only once the editor or the voice note holds the note, and
+a note named that is already the one open is open, so nothing opens again.
+Nothing else is said.
 
 ```quint
 pure def canAgentOpen(s: Notes, id: int, covered: bool, req: Request, by: Actor): bool =
   by == Agent and isOwner(s.owner) and req.turn > 0 and req.opened == s.agentTurn
 
 pure def agentOpens(s: Notes, id: int, covered: bool, req: Request, by: Actor): bool =
-  mayOpenNote(covered, by, req) and s.read.status == R::Loaded and id > 0 and shown(s).some(x => x.id == id)
-    and viewFor(shownRow(s, id).kind) != Visiting
+  mayOpenNote(covered, by, req) and id > 0 and hasNote(s.rows, id) and viewFor(rowOf(s, id).kind) != Visiting
 
 pure def agentOpen(s: Notes, id: int, covered: bool, req: Request, by: Actor): Moved =
   if (agentOpens(s, id, covered, req, by))
-    { state: { ...s, agentTurn: req.turn }, out: List(Shows({ row: shownRow(s, id), by: by, req: req }), Opened({ turn: req.turn, ok: true })) }
-  else { state: s, out: List(Opened({ turn: req.turn, ok: false })) }
+    { state: { ...s, agentTurn: req.turn, filter: if (inView(s, rowOf(s, id))) s.filter else 0 },
+      out: List(Shows({ row: rowOf(s, id), by: by, req: req })) }
+  else { state: s, out: List(NotOpened({ turn: req.turn })) }
 ```
 
-### The agent opens at most one note for each turn of the owner's, only for the turn that is current, and never over anything of Notes
+### The agent opens at most one note for each request of the owner's, only for the request that is current, and never over anything of Notes
 
 ```quint
 pure def stepTheAgentOpensOnceForTheCurrentTurn(before: Notes, via: str, after: Notes, out: List[Effect]): bool =
   out.every(e => match e {
-    | Opened(o) => via == "agentOpen" and (o.ok implies (o.turn > before.agentTurn and after.agentTurn == o.turn))
-    | Shows(x) => (via == "openRow" and x.by == Owner) or (via == "agentOpen" and x.by == Agent and after.agentTurn > before.agentTurn)
+    | NotOpened(o) => via == "agentOpen" and after.agentTurn == before.agentTurn and after.filter == before.filter
+    | Shows(x) => (via == "openRow" and x.by == Owner)
+        or (via == "agentOpen" and x.by == Agent and x.req.turn > before.agentTurn and after.agentTurn == x.req.turn)
     | _ => true
   })
     and (after.agentTurn >= before.agentTurn or via == "ownerChanged" or via == "restart")
