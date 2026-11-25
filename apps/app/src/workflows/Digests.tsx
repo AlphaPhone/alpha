@@ -1,4 +1,5 @@
 // spec/app/digests/index.md, "Story: See my digests"; spec/app/digests/schedules.md, "Story: Keep my digest schedules"
+import { Effect } from "effect";
 import { digestSourceState, digestStatusLabel, digestSummaryText, digestTemplateName } from "@elizaos/plugin-workflow/digests";
 import { Alert, Button, ConfirmDialog, EmptyState, Input, ListRow, Spinner } from "@repo/ui";
 import { CalendarDays, ChevronRight, Plus, RefreshCw, Sun } from "lucide-react";
@@ -20,7 +21,7 @@ export function Digests({ runtime, owner, result, onResult }: DigestsProps) {
   const model = useMachine(runtime);
   const state = model.state;
   if (!state || state.owner !== owner) return <Spinner aria-label="Reading scheduled digests" />;
-  const home = runtime.runSync(DigestWords.use((words) => words.view(owner)));
+  const home = runtime.runSync(Effect.flatMap(DigestWords, (words) => words.view(owner)));
   if (result > 0) {
     const selected = home.results.find((entry) => entry.cursor === result);
     if (selected === undefined) return <EmptyState title="This result isn’t available" />;
@@ -31,8 +32,8 @@ export function Digests({ runtime, owner, result, onResult }: DigestsProps) {
   }
   const refresh = { type: "refresh" } as const;
   const unavailable = state.schedules.status === "Failed";
-  const zone = runtime.runSync(DigestWords.use((words) => words.zone(owner)));
-  const now = runtime.runSync(Time.use((time) => time.latest()));
+  const zone = runtime.runSync(Effect.flatMap(DigestWords, (words) => words.zone(owner)));
+  const now = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
   const sources = home.sources.filter(({ record }) => digestSourceState(record, now) === "current");
   const selection = home.loops.find((item) => item.number === state.row)?.record;
   const chosen = home.sources.find((item) => item.number === state.draft.source)?.record;

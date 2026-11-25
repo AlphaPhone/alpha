@@ -1,4 +1,5 @@
 // spec/app/workflows/automations.md, "Story: Act on an automation"; spec/app/workflows/automations.md, "Story: Create or edit an automation on a schedule"
+import { Effect } from "effect";
 import { Alert, Button, ConfirmDialog, Input, ListRow, Switch, Textarea } from "@repo/ui";
 import { ChevronRight, Clock } from "lucide-react";
 import { useState } from "react";
@@ -57,7 +58,7 @@ export function Automation({ runtime, row, owner }: AutomationProps) {
   if (!state || state.owner !== owner || state.row !== number) return null;
   const editor = () => void runtime.runPromiseExit(editAutomation(owner, number));
   const send = (event: Event) => { if (model.can(event)) void model.send(event); };
-  const draft = runtime.runSync(AutomationWords.use((content) => content.view()));
+  const draft = runtime.runSync(Effect.flatMap(AutomationWords, (content) => content.view()));
   const editing = state.editing && draft.owner === owner && draft.row === number;
   const toggle = state.on ? "Disable" : "Enable";
   const canEdit = row?.kind === "Prompt" && model.can({ type: "editRow", chars: row.summary.length, hour: 8, minute: 0, zone: 0, workflow: 0 });

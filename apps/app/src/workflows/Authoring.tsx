@@ -1,4 +1,5 @@
 // spec/app/workflows/builder.md, "Story: Write a workflow step by step"; spec/app/workflows/builder.md, "Story: Save a workflow on the agent once"; spec/app/workflows/generate.md, "Story: Have the agent draft a workflow"
+import { Effect } from "effect";
 import { Alert, Button, ConfirmDialog, Input, ListRow, Select, SelectContent, SelectItem, SelectTrigger, Sheet, SheetContent, Spinner, Textarea } from "@repo/ui";
 import { ChevronRight, Plus, Sparkles, Workflow } from "lucide-react";
 import { useState } from "react";
@@ -83,7 +84,7 @@ export function Authoring({ runtime, owner }: AuthoringProps) {
   const state = builder.state;
   const model = generate.state;
   if (!state || state.owner !== owner) return <Spinner aria-label="Opening Workflows" />;
-  const draft = runtime.runSync(DraftWords.use((words) => words.view()));
+  const draft = runtime.runSync(Effect.flatMap(DraftWords, (words) => words.view()));
   const open = { type: "openBuilder", workflow: 0, version: 0, unfinished: false } as const;
   const tell = (event: Event) => { if (builder.can(event)) void builder.send(event); };
   if (!state.open) return (

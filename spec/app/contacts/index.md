@@ -295,11 +295,11 @@ however often it is read again.
 ```quint
 pure def canOpenContact(s: Contacts, contact: str): bool = readable(s) and s.rows > 0 and not(s.opened) and s.form == Shut and contact != ""
 
-pure def readCard(s: Contacts, contact: str): Moved =
+pure def readCard(contact: str, s: Contacts): Moved =
   val card = R::ask(s.card)
   { state: { ...s, opened: true, contact: contact, card: card, held: blankSheet }, out: fetching(Card, card.ticket, false) }
 
-pure def openContact(s: Contacts, contact: str): Moved = readCard(s, contact)
+pure def openContact(s: Contacts, contact: str): Moved = readCard(contact, s)
 
 pure def alwaysAnOpenContactIsNamed(s: Contacts): bool = s.opened implies s.contact != ""
 ```
@@ -313,10 +313,10 @@ pure def canBookChanged(s: Contacts): bool = readable(s)
 
 pure def bookChanged(s: Contacts): Moved =
   val list = refresh(s)
-  if (s.opened and s.form == Shut and not(s.confirming)) {
-    val card = readCard(list.state, s.contact)
+  val card = readCard(s.contact, list.state)
+  if (s.opened and s.form == Shut and not(s.confirming))
     { state: card.state, out: list.out.concat(card.out) }
-  } else list
+  else list
 ```
 
 ### A sheet holds at most one name and one note, 32 numbers and 32 addresses, and no notes where they are unavailable

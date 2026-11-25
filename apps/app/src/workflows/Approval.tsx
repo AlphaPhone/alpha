@@ -1,4 +1,5 @@
 // spec/app/workflows/approvals.md, "Story: Answer a run's approval on the phone"
+import { Effect } from "effect";
 import { Alert, Button } from "@repo/ui";
 import { useMachine } from "../../gen/app__workflows__approvals.react.ts";
 import type { Machine } from "../../gen/app__workflows__approvals.effect.vibe";
@@ -17,7 +18,7 @@ export function Approval({ runtime, run, owner }: ApprovalProps) {
   const machine = useTimed(runtime, useMachine);
   const state = machine.state;
   if (!state || state.owner !== owner || state.runId !== run) return null;
-  const pending = runtime.runSync(ApprovalWords.use((words) => words.get()));
+  const pending = runtime.runSync(Effect.flatMap(ApprovalWords, (words) => words.get()));
   if (!pending || pending.number !== state.digest || pending.owner !== owner || pending.runId !== run) return null;
   const { approval } = pending;
   const yes = { type: "decide", approve: true, now: untimed } as const;

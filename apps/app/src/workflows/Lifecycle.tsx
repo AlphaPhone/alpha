@@ -1,4 +1,5 @@
 // spec/app/workflows/index.md, "Story: Change a workflow"
+import { Effect } from "effect";
 import { Alert, Button, ConfirmDialog, Input, Switch } from "@repo/ui";
 import { useState } from "react";
 import { useMachine } from "../../gen/app__workflows.react.ts";
@@ -41,7 +42,7 @@ export function Lifecycle({ runtime, row, owner, title, unfinished, interrupted 
   const power = state.scheduled && !state.active ? request("TurnOn") : flip;
   const confirmation: Event = { type: "confirmChange", unfinished };
   const reviewNameText = state.review.showing && state.proposed === "Rename"
-    ? runtime.runSync(DefinitionWords.use((definition) => definition.name(row)))
+    ? runtime.runSync(Effect.flatMap(DefinitionWords, (definition) => definition.name(row)))
     : "";
   return (
     <section aria-label="Workflow controls" className="flex flex-col gap-3">

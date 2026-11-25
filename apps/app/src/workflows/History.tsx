@@ -1,4 +1,5 @@
 // spec/app/workflows/sheet.md, "Story: See a workflow's history"; spec/app/workflows/sheet.md, "Story: Read a run's sheet"
+import { Effect } from "effect";
 import { Alert, Button, EmptyState, ListRow, Spinner } from "@repo/ui";
 import { Check, ChevronRight, CircleAlert, Clock, Minus, Play, Sparkles, Square, Volume2, VolumeX, X } from "lucide-react";
 import { type Event, newerVersion } from "../../gen/app__workflows__sheet.ts";
@@ -32,7 +33,7 @@ export function History({ runtime, row, owner }: HistoryProps) {
   const sheet = useMachine(runtime);
   const state = sheet.state;
   if (state === undefined || state.owner !== owner) return <Spinner aria-label="Reading runs" />;
-  const history = runtime.runSync(HistoryWordsPort.use((words) => words.view(owner, row.number)));
+  const history = runtime.runSync(Effect.flatMap(HistoryWordsPort, (words) => words.view(owner, row.number)));
   const opened = history.opened?.number === state.runId ? history.opened : undefined;
   const send = (event: Event) => { if (sheet.can(event)) void sheet.send(event); };
   if (state.runId > 0) {

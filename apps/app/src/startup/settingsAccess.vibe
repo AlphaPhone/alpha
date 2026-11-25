@@ -2,6 +2,7 @@
 import * as Access from "../../gen/app__startup__access.effect.vibe"
 import type { Actor } from "../../gen/app__startup__actor.ts"
 import * as Steps from "../../gen/app__startup__steps.effect.vibe"
+import { Machine as Settings } from "../../gen/app__settings.effect.vibe"
 import type { Access as Permission } from "../../gen/app__settings__facts.ts"
 import type { Target } from "../../gen/app__settings__android.ts"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
@@ -58,8 +59,15 @@ effect function refreshed(): void!!Access.Machine {
 
 /** Open a reviewed permission or the list, only once the phone has confirmed the Cloud account exists. */
 export const openReview = (permission: Permission | undefined) => effect {
+  const shell = try Shell
+  const device = try Device
+  const settings = try Settings
+  const expected = permission === undefined ? "Privacy" : "Permissions"
+  const here = effect { return showing(try shell.get(), "Settings") && (try settings.get()).page === expected && (try device.showing()) }
+  if (!(try here)) return
   const cloud = (try Cloud).client
   const signedIn = try Effect.option(tryPromise((signal) => cloud.account({ signal })))
+  if (!(try here)) return
   const access = try Access.Machine
   if (Option.isNone(signedIn)) {
     try ignore(access.send({ type: "signedOut" }, "Owner"))

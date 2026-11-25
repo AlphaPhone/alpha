@@ -1,4 +1,5 @@
 // spec/app/workflows/clock.md, "Story: Describe an alarm for Clock"; spec/app/workflows/clock.md, "Story: Review, then hand over to Clock"; spec/app/workflows/clock.md, "Story: Know what happened"
+import { Effect } from "effect";
 import { Alert, Button, ConfirmDialog, Input, Spinner } from "@repo/ui";
 import { ExternalLink } from "lucide-react";
 import { useMachine } from "../../gen/app__workflows__clock.react.ts";
@@ -38,7 +39,7 @@ export function ClockPage({ runtime }: ClockProps) {
   const state = machine.state;
   if (!state?.open) return null;
   const tell = (event: Event) => { if (machine.can(event)) void machine.send(event); };
-  const label = runtime.runSync(AlarmLabel.use((value) => value.read()));
+  const label = runtime.runSync(Effect.flatMap(AlarmLabel, (value) => value.read()));
   const time = `${String(state.hour).padStart(2, "0")}:${String(state.minute).padStart(2, "0")}`;
   const repeating = days.filter((_, index) => state.days.includes(index + 1)).join(", ");
   const receipt = state.receipt === "NoReceipt" ? state.lastReceipt : state.receipt;

@@ -24,7 +24,7 @@ const admitting = effect {
 }
 
 // spec/app/settings/index.md, "Each page links to what another area owns there": what the shell can open is opened; the other neighbours draw on the places Settings offers them.
-function handed(fx: Pages.Effect): Job<Pages.Event, Shell | Device | AccessReview | Cloud | Toasts | Said, []> {
+function handed(fx: Pages.Effect): Job<Pages.Event, Shell | Device | Pages.Machine | AccessReview | Cloud | Toasts | Said, []> {
   return match (fx) {
     when { tag: "Handed", let neighbour }: run(`hand ${neighbour}`, effect {
       const shell = try Shell

@@ -1,4 +1,5 @@
 // spec/app/workflows/list.md, "Story: Find a workflow"; spec/app/workflows/index.md, "Story: Open a workflow"
+import { Effect } from "effect";
 import { Button, EmptyState, ListRow, Screen, Spinner } from "@repo/ui";
 import { Bell, ChevronDown, ChevronRight, Clock, Info, Plus, RotateCw, Sparkles, Sun, Workflow } from "lucide-react";
 import { useMemo } from "react";
@@ -74,7 +75,7 @@ export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | 
     ? <ListRow className="min-h-18 px-1" title="Alarms" leading={<Clock />} trailing={<ChevronRight aria-hidden className="size-5" />} onClick={() => void clock.send(openClock)} />
     : null;
   const read = () => void runtime.runPromiseExit(refresh());
-  const snapshot = state === undefined ? undefined : runtime.runSync(Rows.use((rows) => rows.view(state.owner)));
+  const snapshot = state === undefined ? undefined : runtime.runSync(Effect.flatMap(Rows, (rows) => rows.view(state.owner)));
   const kind = state?.kind;
   const status = state?.status;
   const rows = useMemo(
