@@ -71,7 +71,7 @@ describe("Settings", () => {
     expect(await page(alpha)).toBe("Top");
 
     world.signedIn = false;
-    await act(async () => button("Account")?.focus());
+    await drawn(() => button("Account")?.focus());
     await press("Account");
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Unavailable"));
     await press("Back");
@@ -213,7 +213,7 @@ describe("Settings", () => {
     await settingsOpen(world);
     await press("Account");
     await vi.waitFor(() => expect(document.querySelector('[aria-label="Cloud plan"]')?.textContent).toContain("No plan"));
-    await act(async () => document.querySelector<HTMLElement>('[role="dialog"] summary')?.click());
+    await drawn(() => document.querySelector<HTMLElement>('[role="dialog"] summary')?.click());
     await vi.waitFor(() => expect(button("Review Plus subscription")).toBeTruthy());
     await press("Review Plus subscription");
     await vi.waitFor(() => expect(document.querySelector('[aria-label="Review subscription"]')?.textContent).toContain("$19.50"));
@@ -237,11 +237,11 @@ describe("Settings", () => {
     expect(checkout.confirmations).toEqual([]);
     checkout.paid = true;
     checkout.returned = checkoutSession;
-    await act(async () => window.dispatchEvent(new Event("alpha-billing-return")));
+    await drawn(() => window.dispatchEvent(new Event("alpha-billing-return")));
     await vi.waitFor(() => expect(checkout.confirmations).toEqual([checkoutSession]));
     await vi.waitFor(() => expect(document.querySelector('[aria-label="Cloud plan"]')?.textContent).toContain("Plus"));
     checkout.returned = checkoutSession;
-    await act(async () => window.dispatchEvent(new Event("alpha-billing-return")));
+    await drawn(() => window.dispatchEvent(new Event("alpha-billing-return")));
     expect(checkout.confirmations).toEqual([checkoutSession]);
   });
 
@@ -317,10 +317,10 @@ describe("Settings", () => {
     expect(world.settings.passwordEdits).toEqual([{ entryId: "entry-47", expectedRevision: 4 }, undefined]);
 
     const choosePasswordAction = async (label: string, choice: string) => {
-      await act(async () => button(`Options for ${label}`)?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+      await drawn(() => button(`Options for ${label}`)?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
       const item = () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((row) => row.textContent === choice);
       await vi.waitFor(() => expect(item()).toBeDefined());
-      await act(async () => item()?.click());
+      await drawn(() => item()?.click());
     };
     await choosePasswordAction("Updated account", "Reveal password");
     await vi.waitFor(() => expect(world.settings.passwordRowActions[0]).toEqual({ choice: "reveal", id: "entry-47", revision: 5 }));
@@ -409,7 +409,7 @@ describe("Settings", () => {
     await hardware("back");
     expect(await page(alpha)).toBe("Top");
     expect(button(/^Microphone may be on/)).toBeUndefined();
-    await act(async () => pause.resolve({ ...listener.status, state: "PAUSED_USER", listening: false, microphoneOpen: false, saved: false }));
+    await drawn(() => pause.resolve({ ...listener.status, state: "PAUSED_USER", listening: false, microphoneOpen: false, saved: false }));
     await vi.waitFor(() => expect(button(/^Microphone may be on/)).toBeDefined());
     await press(/^Microphone may be on/);
     await vi.waitFor(() => expect(world.settings.opened).toEqual(["home"]));

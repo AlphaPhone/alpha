@@ -2,8 +2,8 @@
 import type {
   AndroidReminderBoundOperation, AndroidReminderCancelInput, AndroidReminderRecord, AndroidReminderScheduleInput,
 } from "@elizaos/os-bridges";
+import type { ReminderCompletion } from "@repo/launcher-records";
 import { dueInstantMs } from "../../src/reminders/recurrence.ts";
-import type { ReminderCompletion } from "../../src/reminders/store.ts";
 import type { Faked } from "./phone.ts";
 import { type Route, readJsonBody } from "./routes.ts";
 
