@@ -49,6 +49,10 @@ export interface VoiceScene {
   speakerMuted: boolean;
   speakerGainGate?: (muted: boolean) => Promise<void>;
   synthesisGate?: () => Promise<void>;
+  /** While set, a local playback is reported ended only once this settles, as a long line plays out. */
+  playbackHold?: () => Promise<void>;
+  /** What the local speaker started playing, in order, and when. */
+  readonly played: { readonly text: string; readonly at: number }[];
   readonly speakerGainRequests: boolean[];
   readonly speakerMutedAtPlayback: boolean[];
   readonly spoken: SpokenSentence[];
@@ -95,6 +99,7 @@ export function voiceScene(): VoiceScene {
     speakerGainRequests: [],
     speakerMutedAtPlayback: [],
     spoken: [],
+    played: [],
     activeMicSession: undefined,
   };
 }
@@ -103,6 +108,7 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
   return (emit) => {
     voice.emitLocal = emit;
     let playbackSeq = 0;
+    const texts = new Map<string, string>();
     let recordingSeq = 0;
     let activeRecording: string | undefined;
     let finishedRecording: string | undefined;
@@ -157,12 +163,16 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
       synthesizeLocal: async ({ text, append, replace }: { requestId: string; text: string; append?: boolean; replace?: boolean }) => {
         voice.spoken.push({ text, append: append === true, replace: replace !== false, channel: "local" });
         const playbackId = `pb-${++playbackSeq}`;
+        texts.set(playbackId, text);
         await voice.synthesisGate?.();
         return { playbackId };
       },
       play: ({ playbackId }: { playbackId: string }) => {
         voice.speakerMutedAtPlayback.push(voice.speakerMuted);
-        emit("playbackEnded", { playbackId });
+        voice.played.push({ text: texts.get(playbackId) ?? "", at: Date.now() });
+        const hold = voice.playbackHold;
+        if (hold === undefined) emit("playbackEnded", { playbackId });
+        else void hold().then(() => emit("playbackEnded", { playbackId }));
         return Promise.resolve({});
       },
       setSpeechOutputMuted: async ({ muted }: { muted: boolean }) => {
