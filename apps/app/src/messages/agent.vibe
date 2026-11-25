@@ -1,14 +1,20 @@
-// spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"
-import { NOT_DISPATCHED } from "@elizaos/agent/client"
-import type { DeviceOperation } from "@elizaos/agent/operations"
+// spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"; spec/app/messages/sending.md, "Story: Send a message once"
+import { NOT_DISPATCHED, type ExecutorCall } from "@elizaos/agent/client"
+import { readResult, type DeviceOperation } from "@elizaos/agent/operations"
 import { MMS_MAX_BODY } from "@elizaos/os/bridges/definitions/messages"
 import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/phone"
+import type { DirectSmsReview, OperationId, SmsSendResult } from "@elizaos/os/bridges/messages"
+import type { PhoneNumber } from "@elizaos/os/bridges/phone"
 import { Machine as Composer, bound } from "../../gen/app__messages__composer.effect.vibe"
 import { Machine as Messages, removing } from "../../gen/app__messages.effect.vibe"
+import { Machine as Phone, clear } from "../../gen/app__phone.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { watched } from "../contacts/requests.vibe"
 import { Device } from "../platform/device.vibe"
+import { Telephony, TelephonyAbsent, TelephonyRefused, telephony } from "../platform/telephony.vibe"
 import { contained } from "../runtime/reactor.vibe"
-import { Drafts } from "./composer.vibe"
+import { Time } from "../runtime/time.vibe"
+import { Drafts, simOf } from "./composer.vibe"
 import { Conversations, Inbox } from "./messages.vibe"
 
 /** The exact thread and latest read the owner had open when the request started. */
@@ -66,8 +72,48 @@ effect function stage(body: string, thread: number, target: MessageDraftTarget |
   return false
 }
 
-/** One approved Messages draft executor. It cannot read messages for the agent, send a text or start a call. */
-export effect function messageAction(operation: DeviceOperation, target: MessageDraftTarget | undefined, current: () => Promise<boolean>): unknown!!(Device | Shell | Messages | Composer | Conversations | Inbox | Drafts) {
+type Composed = Extract<DeviceOperation, { type: "sms_compose" }>
+
+/** How the agent hears of a text it asked to send, by the phone's record: sent as far as Android said, nothing sent, or, for a failed or unknown send, unknown. */
+const told = {
+  submitted: "applied", sent: "applied", delivered: "applied", cancelled: "nothingSent", denied: "nothingSent", failed: "unknown", unknown: "unknown",
+} as const satisfies Record<SmsSendResult["status"], "applied" | "nothingSent" | "unknown">
+
+function textAnswer(operation: Composed, record: SmsSendResult): unknown {
+  const status = record.status === "denied" ? "unavailable" : record.status
+  const result = readResult(operation, { kind: "sms-compose", status })
+  if (result === undefined) return undefined
+  return match (told[record.status]) {
+    when "applied": { kind: "applied", result };
+    when "nothingSent": { ...refused, result };
+    when "unknown": undefined;
+  }
+}
+
+/** Whether the phone refused the send before Android journaled it; a lost answer is not one. */
+function deniedBeforeSend(failure: unknown): boolean {
+  return failure instanceof TelephonyAbsent || (failure instanceof TelephonyRefused && !(failure.code === undefined && failure.tag === ""))
+}
+
+// spec/app/messages/sending.md, "A send whose outcome is unknown is never sent again, only read back"
+/** The approved text, sent once to the one number on the phone's SIM for texts under the proposal's own operation ID, and watched for its record. */
+effect function sendApproved(operation: Composed, number: PhoneNumber, call: ExecutorCall): unknown!!(Phone | Telephony | Time) {
+  if (!clear(try (try Phone).get())) return refused
+  const sim = try simOf(null)
+  if (sim === undefined) return refused
+  const review: DirectSmsReview = { recipients: [number], body: operation.body, subscriptionId: sim }
+  const id = call.operationId as OperationId
+  const first = telephony("sendSms", (c) => c.messages.sendSms(review, id)) catch (failure) => (deniedBeforeSend(failure) ? null : undefined)
+  if (first === null) return refused
+  const record = first === undefined ? (telephony("smsSendResult", (c) => c.messages.smsSendResult(review, id)) catch () => undefined) : try watched(review, id, first)
+  return record === undefined ? undefined : textAnswer(operation, record)
+}
+
+/**
+ * One approved Messages executor: a reply or a draft placed for the owner, which never sends, or a text the owner
+ * approved on its card, sent once. It cannot read messages for the agent or start a call.
+ */
+export effect function messageAction(operation: DeviceOperation, call: ExecutorCall, target: MessageDraftTarget | undefined, current: () => Promise<boolean>): unknown!!(Device | Shell | Messages | Composer | Conversations | Inbox | Drafts | Phone | Telephony | Time) {
   if (operation.type !== "sms_reply_selected" && operation.type !== "sms_compose") return refused
   const body = operation.body
   if (!body.trim() || body.length > MMS_MAX_BODY || body.includes("\0")) return refused
@@ -77,9 +123,10 @@ export effect function messageAction(operation: DeviceOperation, target: Message
     if (target === undefined || !(try stage(body, target.thread, target, current))) return refused
     return { kind: "applied", result: { kind: "sms-reply", status: "drafted" } }
   }
-  if (!("target" in operation) || operation.draft !== true || operation.target.kind !== "number" || operation.replyThreadId !== undefined) return refused
+  if (!("target" in operation) || operation.target.kind !== "number" || operation.replyThreadId !== undefined) return refused
   const number = normalizePhoneNumber(operation.target.number)
   if (number === null) return refused
+  if (operation.draft !== true) return try sendApproved(operation, number as PhoneNumber, call)
   const thread = try addressed(number)
   if (thread === undefined || !(try stage(body, thread, undefined, undefined))) return refused
   return { kind: "applied", result: { kind: "sms-compose", status: "drafted" } }

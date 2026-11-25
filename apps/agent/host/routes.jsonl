@@ -9,8 +9,6 @@
 { "method": "POST", "path": "/api/conversations/{id}/fork" }
 { "method": "POST", "path": "/api/turns/{roomId}/abort" }
 { "method": "GET", "path": "/api/client-devices/capabilities" }
-{ "method": "GET", "path": "/api/agents" }
-{ "method": "POST", "path": "/api/client-devices/register" }
 { "method": "POST", "path": "/api/client-devices/register" }
 { "method": "GET", "path": "/api/client-devices/context" }
 { "method": "GET", "path": "/api/client-devices/proposals" }

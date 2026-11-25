@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Contacts } from "../gen/app__contacts.effect.vibe";
 import { Machine as Agent } from "../gen/app__contacts__agent.effect.vibe";
@@ -15,7 +15,7 @@ import { type Asking, propose, withdrawn } from "../src/contacts/requests.vibe";
 import { type Reading, answerReading } from "../src/contacts/reads.vibe";
 import { Machine as Messages } from "../gen/app__messages.effect.vibe";
 import { Machine as Composer } from "../gen/app__messages__composer.effect.vibe";
-import { closeAll, drawn, later, open, press, underAct, until } from "./alpha.tsx";
+import { closeAll, drawn, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -30,12 +30,6 @@ const confirm = (name: string) => act(async () => {
   if (!(found instanceof HTMLButtonElement)) throw new Error(`no ${name} in the confirmation`);
   found.click();
 });
-
-/** Say `text` to Alpha from its message box, as the owner types and sends it. */
-async function say(text: string) {
-  await write("Message Alpha", text);
-  await press("Send");
-}
 
 /** Type into the text box named `name`, as a person does. */
 const write = (name: string, text: string) => act(async () => {
@@ -205,47 +199,6 @@ describe("Contacts on an Alpha image", () => {
     await press("Ben Ortiz");
     await until(alpha, alpha.runtime, Contacts, (s) => s.opened && s.card.status === "Loaded");
     expect(await read({ type: "contact_read_selected" })).toEqual({ kind: "contact-read", status: "read", contact: { displayName: "Ben Ortiz", phoneNumbers: ["+14155550122"], emailAddresses: [] } });
-  });
-
-  it("A text the agent proposes on a turn is shown on its card, a draft too, sent once on the owner's tap, and never asked again (spec/app/contacts/agent.md, \"Story: Let the agent ask for a call or a contact change\"; spec/app/contacts/agent.md, \"Story: Approve what the agent asked\"; spec/app/contacts/agent.md, \"Story: Learn how the request ended\")", async () => {
-    const world = image();
-    world.slots.add("agent-device");
-    const { desk } = world.telephony;
-    const { alpha } = await open(world);
-    await until(alpha, alpha.runtime, Phone, (s) => s.telecom === "NoCall");
-    await vi.waitFor(() => expect(desk.key).toMatch(/^[a-f0-9]{64}$/));
-    expect([desk.capabilities, world.secrets.get("agent-device")]).toEqual(["sms.compose.v1,sms.compose.v2,sms.send.v1", JSON.stringify(desk.key)]);
-
-    // spec/app/contacts/agent.md, "Only the agent asks, and only when no other request is open": a text the agent marks as a draft is shown on the card all the same.
-    desk.offers.push({ type: "sms_compose", target: { kind: "number", number: "+14155550133" }, body: "On my way", draft: true });
-    await say("Text 415 555 0133 that I'm on my way");
-    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Shown" && s.ask === "Text" && s.number === "+14155550133" && s.addressed);
-    expect([world.telephony.sent, desk.proposals.map(({ state }) => state)]).toEqual([[], ["pending"]]);
-
-    // spec/app/contacts/agent.md, "Nothing is done but what the owner approved, as it was shown, once"
-    await press("Send this text");
-    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "Done");
-    await vi.waitFor(() => expect(desk.proposals[0]?.state).toBe("done"));
-    expect([world.telephony.sent, desk.proposals[0]?.receipt]).toEqual([
-      [{ operationId: "proposal-1", recipients: ["+14155550133"], body: "On my way" }],
-      { outcome: "applied", operationId: "proposal-1", result: { kind: "sms-compose", status: "sent" } },
-    ]);
-
-    // spec/app/contacts/agent.md, "Story: Learn how the request ended": a text the phone settled is never offered for approval again.
-    desk.proposals[0].state = "pending";
-    await say("Thanks");
-    await vi.waitFor(() => expect(world.ask.said).toEqual(["Text 415 555 0133 that I'm on my way", "Thanks"]));
-    await later(alpha, 50);
-    expect([(await alpha.runtime.runPromise(Agent.use((machine) => machine.get()))).stage, world.telephony.sent.length]).toEqual(["Ended", 1]);
-
-    // spec/app/contacts/agent.md, "The owner can decline, and a review Alpha stops showing is withdrawn": the agent hears that nothing ran.
-    desk.offers.push({ type: "sms_compose", target: { kind: "number", number: "+14155550133" }, body: "Running late" });
-    await say("Tell them I'm running late");
-    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Shown" && s.text === "Running late");
-    await press("Not now");
-    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "Declined");
-    await vi.waitFor(() => expect(desk.proposals[1]?.state).toBe("rejected"));
-    expect(world.telephony.sent.length).toBe(1);
   });
 });
 

@@ -4,6 +4,7 @@ import type { AddressBookNativePlugin } from "@elizaos/os/bridges/definitions/co
 import type { MessagesNativePlugin } from "@elizaos/os/bridges/definitions/messages";
 import type { PhoneNativePlugin } from "@elizaos/os/bridges/definitions/phone";
 import { mmsBinding, smsBindingHash } from "@elizaos/os/bridges/messages";
+import { readOperation, receiptOutcome } from "@elizaos/agent/operations";
 import { type Faked, plugin, rejection } from "./phone.ts";
 import type { Route } from "./routes.ts";
 
@@ -69,14 +70,17 @@ export interface TelephonyScene {
   readonly desk: Desk;
 }
 
-/** A proposal of the agent's for this phone, as its device API keeps it, with the receipt the phone sent for it. */
-export interface Proposed { id: string; digest: string; state: "pending" | "approved" | "executing" | "done" | "rejected"; operation: unknown; receipt?: unknown }
+/** A proposal of the agent's for this phone, as its device API keeps it: for the owner message it answers, with the receipt the phone sent for it. */
+export interface Proposed {
+  id: string; digest: string; state: "pending" | "approved" | "executing" | "done" | "rejected"; operation: unknown; requestMessageId: string; receipt?: unknown;
+}
 
 /**
- * eliza's device API, as the agent answers the phone that enrolled with it (`.eliza/packages/agent/src/device-actions`):
- * the key it enrolled under, the operations the next turn that names that enrollment proposes, and every proposal.
+ * eliza's device API, as the agent answers the phone that enrolled with it (`.eliza/packages/agent/src/device-actions`),
+ * open only once a journey names the owner the agent serves: the key the phone enrolled under, the capabilities it
+ * negotiated, every proposal, and the journal the phone keeps of each one it carried out.
  */
-export interface Desk { key: string | undefined; capabilities: string; offers: unknown[]; proposals: Proposed[] }
+export interface Desk { owner: string | undefined; key: string | undefined; capabilities: string; proposals: Proposed[]; readonly journal: Map<string, { revision: number }> }
 
 async function versionOf(id: string, revision: number): Promise<string> {
   const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${id}:${revision}`));
@@ -122,11 +126,12 @@ export function telephonyScene(): TelephonyScene {
     hold: undefined,
     replyDraft: "Five works, see you there",
     asked: [],
-    desk: { key: undefined, capabilities: "", offers: [], proposals: [] },
+    desk: { owner: undefined, key: undefined, capabilities: "", proposals: [], journal: new Map() },
   };
 }
 
 const agentId = "00000000-0000-4000-8000-00000000a1fa";
+const phoneCapabilities = ["phone.keypad.v1", "phone.dial.v1", "phone.call.v1", "views.telephony.v1", "sms.compose.v1", "sms.compose.v2"];
 
 /** Whether `request` names the enrollment the desk holds. */
 const enrolled = (desk: Desk, request: Request) =>
@@ -143,11 +148,24 @@ function step(desk: Desk, request: Request, url: URL, name: string, stage: Propo
   });
 }
 
-/** eliza's device API over `desk`: the agent's id, enrollment, the proposals a turn made, and the decision, claim and receipt of each. */
+/**
+ * eliza's device API over `desk`, once it names its owner: who the owner is, what the agent offers, enrollment and its
+ * context, the proposals, and the decision, claim and receipt of each, a receipt admitted only as eliza's own rules admit it.
+ */
 function deskRoutes(desk: Desk): Route[] {
+  const open = (route: Route): Route => (request, url) => (desk.owner === undefined ? undefined : route(request, url));
   return [
-    (request, url) => (request.method === "GET" && url.pathname === "/api/agents" ? Response.json({ agents: [{ id: agentId, name: "Alpha", status: "running" }] }) : undefined),
-    (request, url) => {
+    open((request, url) => (request.method === "GET" && url.pathname === "/api/auth/me"
+      ? Response.json({ identity: { kind: "owner", id: desk.owner }, access: { role: "OWNER", mode: "local" } }) : undefined)),
+    open((request, url) => (request.method === "GET" && url.pathname === "/api/client-devices/capabilities"
+      ? Response.json({ agentId, identityId: desk.owner, deviceActions: { protocol: 1, capabilities: phoneCapabilities } }) : undefined)),
+    open((request, url) => {
+      if (request.method !== "GET" || url.pathname !== "/api/client-devices/context") return undefined;
+      return enrolled(desk, request)
+        ? Response.json({ agentId, installationId: agentId, enrollmentId: "enrolled-1", subjectUserId: desk.owner })
+        : Response.json({ error: "device_unauthorized" }, { status: 401 });
+    }),
+    open((request, url) => {
       if (request.method !== "POST" || url.pathname !== "/api/client-devices/register") return undefined;
       const key = request.headers.get("x-eliza-device-key") ?? "";
       if (request.headers.get("x-eliza-device-id") !== agentId || !/^[a-f0-9]{64}$/.test(key)) return Response.json({ error: "device_unauthorized" }, { status: 401 });
@@ -155,31 +173,28 @@ function deskRoutes(desk: Desk): Route[] {
       desk.key = key;
       desk.capabilities = request.headers.get("x-eliza-device-capabilities") ?? "";
       return Response.json({ installationId: agentId, enrollmentId: "enrolled-1", capabilities: [], viewProfileVersion: 1 });
-    },
-    (request, url) => {
-      if (request.method !== "POST" || !/^\/api\/conversations\/[^/]+\/messages(\/stream)?$/.test(url.pathname) || !enrolled(desk, request)) return undefined;
-      for (const operation of desk.offers.splice(0)) desk.proposals.push({ id: `proposal-${desk.proposals.length + 1}`, digest: `${desk.proposals.length + 1}`.padStart(64, "d"), state: "pending", operation });
-      return undefined;
-    },
-    (request, url) => {
+    }),
+    open((request, url) => {
       if (request.method !== "GET" || url.pathname !== "/api/client-devices/proposals") return undefined;
       if (!enrolled(desk, request)) return Response.json({ error: "device_unauthorized" }, { status: 401 });
-      return Response.json({ proposals: desk.proposals.map(({ id, digest, state, operation }) => ({ id, digest, state, payload: { operation } })) });
-    },
-    (request, url) => step(desk, request, url, "decision", "pending", (one, body) => {
+      const expiresAt = new Date(Date.now() + 600_000).toISOString();
+      return Response.json({ proposals: desk.proposals.map(({ id, digest, state, operation, requestMessageId }) => ({ id, digest, state, expiresAt, payload: { operation, requestMessageId } })) });
+    }),
+    open((request, url) => step(desk, request, url, "decision", "pending", (one, body) => {
       one.state = body.decision === "approve" ? "approved" : "rejected";
       return Response.json({ proposal: { id: one.id, state: one.state } });
-    }),
-    (request, url) => step(desk, request, url, "claim", "approved", (one) => {
+    })),
+    open((request, url) => step(desk, request, url, "claim", "approved", (one) => {
       one.state = "executing";
-      return Response.json({ proposal: { id: one.id, state: one.state, execution: { attemptId: `attempt-${one.id}` } } });
-    }),
-    (request, url) => step(desk, request, url, "receipt", "executing", (one, body) => {
-      if (body.attemptId !== `attempt-${one.id}`) return Response.json({ error: "receipt_refused" }, { status: 409 });
+      return Response.json({ digest: one.digest, proposal: { id: one.id, state: one.state, execution: { attemptId: `attempt-${one.id}` } } });
+    })),
+    open((request, url) => step(desk, request, url, "receipt", "executing", (one, body) => {
+      const checked = readOperation(one.operation);
+      if (body.attemptId !== `attempt-${one.id}` || checked === undefined || receiptOutcome(checked, body.receipt, one.id).kind === "refused") return Response.json({ error: "receipt_refused" }, { status: 409 });
       one.state = "done";
       one.receipt = body.receipt;
       return Response.json({ proposal: { id: one.id, state: one.state } });
-    }),
+    })),
   ];
 }
 
@@ -424,12 +439,27 @@ function contacts(world: TelephonyScene): Faked {
   });
 }
 
-/** `ElizaActionJournal`: only its deletion window is read here. */
+/**
+ * `ElizaActionJournal`: its deletion window, and, once the desk is open, the entry Alpha keeps of each agent proposal it
+ * carried out, written only over the revision it last read.
+ */
 function journal(world: TelephonyScene): Faked {
+  const { desk } = world;
+  const unused = () => Promise.reject(rejection("Not a deletion call", "unavailable"));
+  const kept = {
+    get: (options: { proposalId?: string }) =>
+      desk.owner === undefined || options.proposalId === undefined ? unused() : Promise.resolve({ entry: desk.journal.get(options.proposalId) ?? null }),
+    edit: ({ proposalId, expectedRevision, next }: { proposalId: string; expectedRevision: number; next: { revision: number } }) => {
+      const kept = (desk.journal.get(proposalId)?.revision ?? 0) === expectedRevision;
+      if (kept) desk.journal.set(proposalId, next);
+      return Promise.resolve({ kept });
+    },
+    list: () => (desk.owner === undefined ? unused() : Promise.resolve({ entries: [...desk.journal.values()] })),
+  };
   return plugin<ActionJournalPlugin>(() => {
-    const unused = () => Promise.reject(rejection("Not a deletion call", "unavailable"));
     return {
-      reserve: unused, markApplying: unused, finish: unused, get: unused, list: unused, dismiss: unused,
+      reserve: unused, markApplying: unused, finish: unused, dismiss: unused,
+      ...(kept as unknown as Pick<ActionJournalPlugin, "get" | "list">),
       pending: () => Promise.resolve({ pending: world.staged.map((row) => ({ ...row, window: "open" })) }),
       undo: ({ kind, id }) => {
         const row = world.staged.find((one) => one.kind === kind && one.id === id);
@@ -438,6 +468,12 @@ function journal(world: TelephonyScene): Faked {
       },
     };
   });
+}
+
+/** `AlphaMediaEnrollment`: the one enrollment key the phone's secure store keeps for the agent, and that the owner's authority is live. */
+function enrollment(desk: Desk): Faked {
+  const key = "e".repeat(64);
+  return () => ({ enrollmentKey: () => Promise.resolve({ key }), authority: () => Promise.resolve({ active: desk.owner !== undefined }) });
 }
 
 /** The image's in-call service: `AlphaOngoingCall` with Return and End, and `AlphaCallState`. */
@@ -484,6 +520,7 @@ export function telephonyPlugins(world: TelephonyScene): Record<string, Faked> {
     ElizaTelephony: telephony(world),
     ElizaContacts: contacts(world),
     ElizaActionJournal: journal(world),
+    ...(world.desk.owner === undefined ? {} : { AlphaMediaEnrollment: enrollment(world.desk) }),
     AlphaOngoingCall: ongoing(world),
     AlphaCallState: callState(world),
   };

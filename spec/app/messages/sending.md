@@ -10,6 +10,14 @@ instead of sending a second copy. A send the phone denied used no radio and
 can be sent again under a new number. A finished record is retired by a
 tombstone, and its number is never used again.
 
+A text the agent asks to send to a number the owner wrote is shown on its
+card first, whatever the agent says about review, and only the owner's
+approval there sends it: once, to that one number, on the phone's SIM for
+texts, under the operation number of the agent's proposal. The agent is
+told what the phone's record says, and a text it was told about is never
+offered for approval again. A draft the agent asks for only fills the
+conversation's draft, as in the [composer](./composer.md).
+
 ## Domain
 
 ### What a send holds

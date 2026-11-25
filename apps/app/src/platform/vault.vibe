@@ -14,11 +14,10 @@ import { client } from held
 
 /**
  * The slots Alpha's page may keep a secret in. The phone's host decides what each slot admits (its consumer policy,
- * `.eliza/spec/os/android/secureStore.md`): an area that needs one lists it here, and never writes a secret anywhere
- * else. `agent-device` is the key this phone enrolled with the agent under, which the host's default policy opens to
- * the page.
+ * `.eliza/spec/os/android/secureStore.md`), and it opens none to the page until the `android` area lists one here and
+ * there: an area that needs one reports it, and never writes a secret anywhere else.
  */
-export type Slot = "agent-device"
+export type Slot = never
 
 /** The secure store refused, or there is none, as in a browser. `code` is the store's own word for why, such as `denied`. */
 export error VaultFailed { slot: string; code: ElizaSecureStoreError | ElizaSecureStoreReadError | "malformed" | "absent"; cause: unknown }

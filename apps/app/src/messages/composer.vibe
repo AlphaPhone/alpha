@@ -99,7 +99,7 @@ const drafts = Layer.effect(Drafts, effect {
 
 // spec/app/messages/composer.md, "The phone says how many SIMs it has, and with more than one the owner picks one, which needs SIM access"
 /** The SIM a send goes out on: the one the owner picked, counted from one, or else the phone's default for texts or its only SIM; with several and no default, none. */
-effect function simOf(chosen: number | null): (number | undefined)!!Telephony {
+export effect function simOf(chosen: number | null): (number | undefined)!!Telephony {
   const status = telephony("status", (c) => c.messages.status()) catch () => undefined
   const sims = status?.subscriptions ?? []
   if (chosen !== null) return sims[chosen - 1]?.id

@@ -1,18 +1,17 @@
 // spec/app/contacts/agent.md, "Story: Let the agent ask for a call or a contact change"; spec/app/contacts/agent.md, "Story: Approve what the agent asked"; spec/app/contacts/agent.md, "Story: Learn how the request ended"
-import { type DeviceOperation, type DeviceReceipt, notDispatchedCode, readOperation } from "@elizaos/agent/operations"
+import type { DeviceOperation } from "@elizaos/agent/operations"
 import type { AddressBookContact, ContactId } from "@elizaos/os/bridges/contacts"
 import type { DirectSmsReview, OperationId, SmsSendResult } from "@elizaos/os/bridges/messages"
 import type { PhoneNumber } from "@elizaos/os/bridges/phone"
 import * as Agent from "../../gen/app__contacts__agent.effect.vibe"
 import { Machine as PhoneMachine, clear } from "../../gen/app__phone.effect.vibe"
 import type { Ask, Effect as Out, Ending, Event } from "../../gen/app__contacts__agent.effect.vibe"
-import { Agent as Resident } from "../platform/agent.vibe"
-import { type Proposal, claim, decide, enroll, receipt, waiting } from "../platform/devices.vibe"
 import { Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
-import { type Job, answer, contained, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, reacting, run, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { judge } from "../phone/words.ts"
+import { simOf } from "../messages/composer.vibe"
 import { draftFrom } from "./contacts.vibe"
 
 /** The agent's operations the phone answers as a request: a call, a text, or a contact added, changed or deleted. */
@@ -25,28 +24,16 @@ export interface Lines {
   readonly emails: ReadonlyArray<string>
 }
 
-/**
- * What the phone found and keeps for the request it shows: the operation, the agent's proposal it came as and the
- * attempt the agent let this phone claim for it, the contacts the search found, the review a text went out under,
- * with its operation ID and the phone's last record of it, and every proposal this phone has already asked.
- */
+/** What the phone found and keeps for the request it shows: the operation, the contacts the search found, and the SIM and review a text went out under. */
 export interface Asked {
   readonly operation: Asking | undefined
-  readonly proposal: Proposal | undefined
-  readonly attempt: string | undefined
   readonly matches: ReadonlyArray<AddressBookContact>
   readonly saved: ReadonlyMap<string, string>
   readonly sent: DirectSmsReview | undefined
-  readonly sentAs: OperationId | undefined
-  readonly record: SmsSendResult | undefined
   readonly ending: Ending | undefined
-  readonly taken: ReadonlySet<string>
 }
 
-const quiet: Asked = {
-  operation: undefined, proposal: undefined, attempt: undefined, matches: [], saved: new Map(), sent: undefined, sentAs: undefined,
-  record: undefined, ending: undefined, taken: new Set(),
-}
+const quiet: Asked = { operation: undefined, matches: [], saved: new Map(), sent: undefined, ending: undefined }
 
 /** What the phone found for the request the agent's machine holds; only this shell writes it. */
 export service Requested {
@@ -82,33 +69,23 @@ function askOf(operation: Asking): { readonly ask: Ask; readonly number: string;
   }
 }
 
-/**
- * Whether the phone answers `operation` as a request. Every text the agent asks for is one, a draft and one the agent
- * marks as needing no review alike, so the owner always sees its card; a text to several numbers is not one request.
- */
+/** Whether the phone answers `operation` as a request: a draft is Alpha's suggestion in the composer, and a text to several numbers is not one request. */
 export function isAsking(operation: DeviceOperation): operation is Asking {
   switch (operation.type) {
-    case "phone_call": case "phone_dial": case "contact_create": case "contact_update": case "contact_delete": case "sms_compose": return true
+    case "phone_call": case "phone_dial": case "contact_create": case "contact_update": case "contact_delete": return true
     case "sms_send": case "mms_send": return operation.recipients.length === 1
+    case "sms_compose": return !("draft" in operation && operation.draft === true)
     default: return false
   }
 }
 
 // spec/app/contacts/agent.md, "Only the agent asks, and only when no other request is open"; spec/app/contacts/agent.md, "A call or a text to a number reaches only a number the owner wrote"
-/**
- * Hand the agent's operation to the phone as a request; `written` says the owner wrote the number it names, and
- * `proposal` is the agent's proposal it came as, which hears how it ended. Answers whether the request was taken.
- */
-export effect function propose(operation: Asking, written: boolean, proposal?: Proposal): boolean!!(Requested | Agent.Machine) {
+/** Hand the agent's operation to the phone as a request; `written` says the owner wrote the number it names. Answers whether the request was taken. */
+export effect function propose(operation: Asking, written: boolean): boolean!!(Requested | Agent.Machine) {
   const machine = try Agent.Machine
   if (Agent.open(try machine.get())) return false
   const { ask, number, search, text, pictures } = askOf(operation)
-  const store = try Requested
-  const { taken } = try store.get()
-  try store.set({
-    operation, proposal, attempt: undefined, matches: [], saved: new Map(), sent: undefined, sentAs: undefined, record: undefined, ending: undefined,
-    taken: proposal === undefined ? taken : new Set([...taken, proposal.id]),
-  })
+  try (try Requested).set({ operation, matches: [], saved: new Map(), sent: undefined, ending: undefined })
   const event: Event = { type: "asked", ask, byName: number === "" && search !== "", emergency: judge(number) === "Emergency", written, pictures, number, text }
   return try contained(machine.send(event, "Agent"), "the agent's request")
 }
@@ -213,14 +190,12 @@ function settled(record: SmsSendResult): { readonly done: boolean; readonly know
 /** The SIM a text goes out on: the one the agent named, the phone's default for texts, or its only SIM; with several and no default, none. */
 effect function simFor(operation: Asking | undefined): (number | undefined)!!Telephony {
   if (operation?.type === "sms_send") return operation.subscriptionId
-  const status = telephony("status", (c) => c.messages.status()) catch () => undefined
-  const sims = status?.subscriptions ?? []
-  return sims.find((one) => one.defaultSms)?.id ?? (sims.length === 1 ? sims[0].id : undefined)
+  return try simOf(null)
 }
 
 // spec/app/contacts/agent.md, "Only the phone answers the action, and the request ends as that answer says"
 /** A text Android only submitted, watched for its final record: up to six reads half a second apart, which never send again. */
-effect function watched(review: DirectSmsReview, operation: OperationId, first: SmsSendResult): SmsSendResult!!(Telephony | Time) {
+export effect function watched(review: DirectSmsReview, operation: OperationId, first: SmsSendResult): SmsSendResult!!(Telephony | Time) {
   const time = try Time
   let record = first
   for (let read = 0; record.status === "submitted" && read < 6; read++) {
@@ -233,7 +208,7 @@ effect function watched(review: DirectSmsReview, operation: OperationId, first: 
 }
 
 // spec/app/contacts/agent.md, "Nothing is done but what the owner approved, as it was shown, once"
-effect function acted(id: number, ask: Ask, number: string, text: string, contact: string): Event!!(Telephony | Requested | Attempts | Time | Resident) {
+effect function acted(id: number, ask: Ask, number: string, text: string, contact: string): Event!!(Telephony | Requested | Attempts | Time) {
   const store = try Requested
   const held = try store.get()
   return effect {
@@ -244,17 +219,11 @@ effect function acted(id: number, ask: Ask, number: string, text: string, contac
     if (ask === "Text") {
       const sim = try simFor(held.operation)
       if (sim === undefined) return { type: "acted", id, done: false, known: true } satisfies Event
-      if (held.proposal !== undefined) {
-        try decide(held.proposal, true)
-        try store.set({ attempt: try claim(held.proposal) })
-      }
-      const operation = (held.proposal?.id ?? (try (try Attempts).key(id))) as OperationId
+      const operation = (try (try Attempts).key(id)) as OperationId
       const review: DirectSmsReview = { recipients: [number as PhoneNumber], body: text, subscriptionId: sim }
-      try store.set({ sent: review, sentAs: operation })
+      try store.set({ sent: review })
       const first = try telephony("sendSms", (c) => c.messages.sendSms(review, operation))
-      const record = try watched(review, operation, first)
-      try store.set({ record })
-      return { type: "acted", id, ...settled(record) } satisfies Event
+      return { type: "acted", id, ...settled(try watched(review, operation, first)) } satisfies Event
     }
     if (ask === "AddContact") {
       const after = afterOf(held.operation, { name: "", phones: [], emails: [] })
@@ -281,83 +250,24 @@ function afterSame(shown: AddressBookContact, card: { readonly displayName: stri
 
 // spec/app/contacts/agent.md, "A text whose outcome is unknown is read back, never sent again"
 effect function readBack(id: number): Event!!(Telephony | Requested | Attempts) {
-  const store = try Requested
-  const { sent: review, sentAs } = try store.get()
+  const review = (try (try Requested).get()).sent
   if (review === undefined) return { type: "readBack", id, wasSent: false, known: true }
-  const operation = sentAs ?? (try (try Attempts).key(id)) as OperationId
+  const operation = (try (try Attempts).key(id)) as OperationId
   const record = telephony("smsSendResult", (c) => c.messages.smsSendResult(review, operation)) catch (failure) => (lost(failure) ? undefined : null)
   if (record === undefined) return { type: "readBack", id, wasSent: false, known: false }
   if (record === null) return { type: "readBack", id, wasSent: false, known: true }
-  try store.set({ record })
   const { done, known } = settled(record)
   return { type: "readBack", id, wasSent: done, known }
 }
 
-type Outcome = DeviceReceipt["outcome"]
-
-/** How a text sent under the agent's proposal went, by the phone's record: as an `sms_send` receipt, and as an `sms_compose` receipt with its status. */
-const outcomes = {
-  submitted: { send: "applied", compose: "applied", status: "submitted" },
-  sent: { send: "applied", compose: "applied", status: "sent" },
-  delivered: { send: "applied", compose: "applied", status: "delivered" },
-  cancelled: { send: "failed", compose: "failed", status: "cancelled" },
-  denied: { send: "failed", compose: "failed", status: "unavailable" },
-  failed: { send: "unknown", compose: "failed", status: "failed" },
-  unknown: { send: "unknown", compose: "unknown", status: "unknown" },
-} as const satisfies Record<SmsSendResult["status"], { readonly send: Outcome; readonly compose: Outcome; readonly status: string }>
-
-/** The receipt of a claimed text: the phone's own record of it, or, where none was read, unknown once it was handed to Android and never sent before that. */
-function receiptOf(held: Asked, proposal: Proposal): DeviceReceipt {
-  const { record, sent, operation } = held
-  if (record === undefined) return sent === undefined ? { outcome: "failed", code: notDispatchedCode } : { outcome: "unknown", operationId: proposal.id }
-  const went = outcomes[record.status]
-  return operation?.type === "sms_send"
-    ? { outcome: went.send, operationId: proposal.id, result: record }
-    : { outcome: went.compose, operationId: proposal.id, result: { kind: "sms-compose", status: went.status } }
-}
-
-// spec/app/contacts/agent.md, "Only the agent asks, and only when no other request is open"
-/** The agent's next text waiting for the owner, asked on the card while no request is open: never one this phone already asked. */
-effect function offered(): void!!(Resident | Requested | Agent.Machine) {
-  if (Agent.open(try (try Agent.Machine).get())) return
-  const { taken } = try (try Requested).get()
-  for (const one of try waiting()) {
-    const operation = readOperation(one.operation)?.operation
-    if (operation === undefined || taken.has(one.id) || !isAsking(operation) || askOf(operation).ask !== "Text") continue
-    if (try propose(operation, true, { id: one.id, digest: one.digest })) return
-  }
-}
-
-// spec/app/contacts/agent.md, "Story: Learn how the request ended"
-/** Tell the agent how its proposal ended: the receipt of a text this phone claimed, and otherwise that nothing ran; then ask the next one. */
-effect function told(ending: Ending): void!!(Resident | Requested | Agent.Machine) {
-  const store = try Requested
-  try store.set({ ending })
-  const held = try store.get()
-  const { proposal, attempt } = held
-  if (proposal !== undefined && attempt === undefined) decide(proposal, false) catch () => undefined
-  if (proposal !== undefined && attempt !== undefined) receipt(proposal, attempt, receiptOf(held, proposal)) catch () => undefined
-  try offered()
-}
-
-function carry(fx: Out): Job<Event, Telephony | Requested | Attempts | Time | Resident | Agent.Machine, [by: "Device"]> {
+function carry(fx: Out): Job<Event, Telephony | Requested | Attempts | Time | Agent.Machine, [by: "Device"]> {
   return match (fx) {
     when { tag: "Search", let ticket }: answer("search", searched(ticket), { type: "found", ticket, ok: false, matches: 0, more: false, unchanged: false, contact: "" }, "Device");
     when { tag: "Act", let id, let ask, let number, let text, let contact }: answer(`act ${id}`, acted(id, ask, number, text, contact), { type: "answerLost" }, "Device");
     when { tag: "ReadBack", let id }: answer(`read back ${id}`, readBack(id), { type: "readBackLost" }, "Device");
-    when { tag: "Answer", let ending }: run("answer", told(ending), "Device");
+    when { tag: "Answer", let ending }: run("answer", effect { try (try Requested).set({ ending }) }, "Device");
   }
 }
 
-/** The agent's proposals for this phone, read once it enrolled and after each turn ends, enrolling again after a turn where it could not. */
-const desk = started(effect {
-  let enrolled = try enroll()
-  try offered()
-  try Stream.runForEach((try Resident).device.turned, effect () => {
-    if (!enrolled) enrolled = try enroll()
-    try offered()
-  })
-}, "reading the agent's proposals")
-
-/** What the agent asked of the phone, held until it ends: resident, since the agent's proposals come whatever is showing. */
-export const requests = together(reacting(Agent, { carry }), requested, desk)
+/** What the agent asked of the phone, held until it ends: resident, since the approvals desk hands it requests whatever is showing. */
+export const requests = together(reacting(Agent, { carry }), requested)

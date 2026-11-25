@@ -1,6 +1,6 @@
 // spec/app/approvals/index.md, "Story: One action at a time"; spec/app/approvals/proposal.md, "Story: Decide"; spec/app/photos/agent.md, "Story: Let Alpha read my library"; spec/app/phone/comms.md, "Story: Approve what Alpha proposes, one thing at a time"; spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"
 import { DeviceExecution, NOT_DISPATCHED, type DeviceAgent, type ExecutorCall, type JournalIdentity, type RuntimeRequestHeaders } from "@elizaos/agent/client"
-import { operationOf, readOperation, type DeviceOperation } from "@elizaos/agent/operations"
+import { readOperation, type DeviceOperation } from "@elizaos/agent/operations"
 import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
 import { Machine as Chats } from "../../gen/app__assistant__chats.effect.vibe"
 import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
@@ -90,6 +90,7 @@ export interface MediaCard {
   readonly enrollmentId: string
   readonly title: string
   readonly detail: string
+  readonly action?: string
   readonly target?: MessageDraftTarget
 }
 
@@ -104,7 +105,7 @@ interface Session {
 function operation(raw: unknown) {
   const checked = readOperation(raw)
   if (checked === undefined) return undefined
-  const value = operationOf(checked)
+  const value = checked.operation
   switch (value.type) {
     case "phone_keypad":
     case "sms_reply_selected":
@@ -113,7 +114,7 @@ function operation(raw: unknown) {
     case "phone_call":
       return value.target.kind === "number" ? value : undefined
     case "sms_compose":
-      return "draft" in value && value.draft === true && value.target.kind === "number" && value.replyThreadId === undefined ? value : undefined
+      return "target" in value && value.target.kind === "number" && value.replyThreadId === undefined ? value : undefined
     case "camera_capture_photo":
     case "photos_filter":
     case "photos_open":
@@ -140,13 +141,16 @@ function operation(raw: unknown) {
   }
 }
 
-function words(value: NonNullable<ReturnType<typeof operation>>): { title: string; detail: string } {
+function words(value: NonNullable<ReturnType<typeof operation>>): { title: string; detail: string; action?: string } {
   switch (value.type) {
     case "phone_keypad": return { title: "Open the keypad", detail: value.number ?? "Phone" }
     case "phone_dial": return { title: "Open the phone dialer", detail: value.target.kind === "number" ? value.target.number : "Phone" }
     case "phone_call": return { title: "Call", detail: value.target.kind === "number" ? value.target.number : "Phone" }
     case "sms_reply_selected": return { title: "Draft a reply in Messages", detail: value.body }
-    case "sms_compose": return { title: `Draft a text to ${"target" in value && value.target.kind === "number" ? value.target.number : "the recipient"}`, detail: value.body }
+    case "sms_compose": {
+      const to = "target" in value && value.target.kind === "number" ? value.target.number : "the recipient"
+      return "draft" in value && value.draft === true ? { title: `Draft a text to ${to}`, detail: value.body } : { title: `Send a text to ${to}`, detail: value.body, action: "Send" }
+    }
     case "camera_capture_photo": return { title: "Take a photo", detail: value.lens === undefined ? "Open the viewfinder to review the shot" : `Open the ${value.lens === "front" ? "front" : "rear"} camera to review the shot` }
     case "photos_filter": return { title: "Filter Photos", detail: value.text ?? "Show the requested photos in your library" }
     case "photos_open": return { title: "Open a photo", detail: "Show the requested item in Photos" }
@@ -160,7 +164,7 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
     case "files_open": return { title: "Open a file", detail: "path" in value ? value.path : `Item ${value.shown} in the current list` }
     case "files_folder_create": return { title: "Create a folder", detail: value.name }
     case "files_share": return { title: "Share a file", detail: "paths" in value ? value.paths.join(", ") : "Open Android sharing" }
-    case "files_move": return { title: "Move a file", detail: "paths" in value ? `${value.paths.join(", ")} → ${value.dest}` : value.dest }
+    case "files_move": return { title: "Move a file", detail: `${value.paths.join(", ")} → ${value.dest}` }
     case "files_trash": return { title: "Move a file to Trash", detail: "paths" in value ? value.paths.join(", ") : "Review the file in the current list" }
   }
 }
@@ -231,7 +235,8 @@ const sameTarget = (one: MessageDraftTarget | undefined, other: MessageDraftTarg
   one !== undefined && other !== undefined && one.thread === other.thread && one.ticket === other.ticket
 
 export const mediaReview = Layer.effect(MediaReview, effect {
-  const { runtime, life } = try Agent
+  const agent = try Agent
+  const { runtime, life } = agent
   const executors = try MediaExecutors
   const device = try Device
   const messages = try Messages
@@ -254,7 +259,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
     const status = life.status() catch () => undefined
     if (status?.state !== "running") { latest = undefined; return undefined }
     if (latest?.epoch === status.epoch) return latest
-    latest = enrolled(status.epoch, runtime, guarded) catch () => undefined
+    latest = Effect.provideService(Effect.provideService(enrolled(status.epoch, runtime, guarded), Agent, agent), Device, device) catch () => undefined
     const fresh = latest
     if (fresh !== undefined) try ignore(tryPromise(() => fresh.execute.sync()))
     return latest

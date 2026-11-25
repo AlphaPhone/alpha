@@ -14,7 +14,7 @@ export async function executeMedia(alpha: Alpha, operation: DeviceOperation, cal
   }
   if (operation.type === "sms_reply_selected" || operation.type === "sms_compose") {
     const { messageAction } = await import("../messages/agent.vibe");
-    return alpha.runtime.runPromise(messageAction(operation, authority.target, authority.current));
+    return alpha.runtime.runPromise(messageAction(operation, call, authority.target, authority.current));
   }
   if (operation.type === "camera_capture_photo") {
     const [{ default: camera }, { requestCapture }] = await Promise.all([import("../camera/index.tsx"), import("../camera/camera.vibe")]);
