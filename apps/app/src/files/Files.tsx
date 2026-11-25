@@ -188,7 +188,7 @@ export function Files({ runtime, alpha }: FilesProps) {
   return (
     <section aria-label="Files" className="relative flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-0 flex-1 flex-col">
-        <AppHeader title={title} leading={selecting && owner({ type: "cancelSelection" }) ? <Button variant="ghost" size="icon" aria-label="Cancel" onClick={() => tell({ type: "cancelSelection" })}><X /></Button> : back}>
+        <AppHeader title={title} detail={selecting || !atTop} leading={selecting && owner({ type: "cancelSelection" }) ? <Button variant="ghost" size="icon" aria-label="Cancel" onClick={() => tell({ type: "cancelSelection" })}><X /></Button> : back}>
           {selecting && canDetails && <Button variant="ghost" size="icon" aria-label="Details" onClick={() => tell({ type: "showDetails", target: firstPicked.id })}><Info /></Button>}
           {selecting && owner({ type: "selectAll" }) && <Button variant="ghost" className="h-11 px-3" onClick={() => tell({ type: "selectAll" })}>Select all</Button>}
           {!selecting && showTools && (

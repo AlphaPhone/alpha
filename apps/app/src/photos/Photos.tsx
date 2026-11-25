@@ -252,7 +252,7 @@ export function Photos({ runtime, alpha }: PhotosProps) {
     : owner({ type: "openSettings" }) ? { label: "Open settings", event: { type: "openSettings" } as const } : undefined;
   const albumName = { type: "saveAlbum", name: name.trim(), letters: Array.from(name.trim()).length } satisfies Event;
   const cancelSelection = () => inTrash ? binTalk({ type: "endSelect" }) : talk({ type: "endSelect" });
-  const header = <AppHeader title={title} className="shrink-0"
+  const header = <AppHeader title={title} detail={Boolean(selection) || inTrash || album !== undefined} className="shrink-0"
     leading={<Button variant="ghost" size="icon" aria-label={selection ? "Cancel selection" : inTrash || album ? "Back to albums" : "Back to apps"}
       onClick={() => selection ? cancelSelection() : void alpha.back()}>{selection ? <X /> : <ChevronLeft />}</Button>}>
     {selection && (inTrash ? binOwner({ type: "selectAll" }) : owner({ type: "selectAll" })) && <Button variant="ghost" onClick={() => inTrash ? binTalk({ type: "selectAll" }) : talk({ type: "selectAll" })}>Select all</Button>}

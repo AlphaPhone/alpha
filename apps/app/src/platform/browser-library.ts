@@ -1,5 +1,5 @@
 // spec/app/files/recent.md, "Story: Pick a file with the system picker"; spec/app/files/preview.md, "Open elsewhere hands the file over to read only"
-import type { DocumentHandoff } from "@elizaos/os/bridges/definitions/media";
+import type { DocumentHandoff, PdfPage } from "@elizaos/os/bridges/definitions/media";
 
 /** The file the owner selected, or nothing when the browser chooser closed. */
 export function selectedFile(signal: AbortSignal): Promise<File | undefined> {
@@ -60,4 +60,15 @@ export function previewOf(blob: Blob): string {
 /** Release the address when the document is no longer selected. @throws {never} */
 export function releasePreview(url: string): void {
   URL.revokeObjectURL(url);
+}
+
+
+/** Render a selected page with the PDF worker, loaded only when Files previews a PDF. @throws {never} */
+export async function pdfPage(blob: Blob, page: number): Promise<PdfPage> {
+  try {
+    const { drawPdf } = await import("./browser-pdf.ts");
+    return await drawPdf(blob, page);
+  } catch {
+    return { status: "failed", message: "This PDF could not be read." };
+  }
 }
