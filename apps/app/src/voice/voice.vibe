@@ -10,7 +10,8 @@ import { isCloudFundsRefusal } from "../assistant/assistant.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type VoiceEvent, VoiceBridge } from "../platform/voice.vibe"
 import { fresh } from "../runtime/attempts.vibe"
-import { type Job, answer, contained, due, hearing, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, due, following, hearing, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
+import { signedIn } from "./account.vibe"
 
 const views: ReadonlyArray<Shell.View> = [
   "Phone", "Messages", "Inbox", "Calendar", "Clock", "Reminders", "Browser", "Camera", "Photos", "Maps", "Notes", "Contacts", "Files", "Workflows", "Settings",
@@ -443,6 +444,12 @@ export const voiceWithCalls = started(effect {
   })
 }, "voice observing calls")
 
+// spec/app/voice/index.md, "A failed conversation ends quietly: why it failed is kept only until voice returns to idle, and nothing is shown"
+const quietly = following(Voice.Machine, (voice) => voice.phase === "Failed", Voice.Machine, (failed): Voice.Event | undefined => (failed ? { type: "dismiss" } : undefined))
+
+// spec/app/voice/dictation.md, "A microphone failure ends dictation quietly and a failed transcription keeps its clip"
+const dictationQuietly = following(Voice.Machine, (voice) => voice.recorder.stage === "Ready" && voice.recorder.failure !== "NoFailure", Voice.Machine, (failed): Voice.Event | undefined => (failed ? { type: "closeRecorder" } : undefined))
+
 const bridgeEvents = hearing(
   Stream.unwrap(effect {
     const bridge = try VoiceBridge
@@ -477,6 +484,9 @@ export const voicing = Layer.provideMerge(
     visibility,
     navigation,
     bridgeEvents,
+    signedIn,
+    quietly,
+    dictationQuietly,
   ),
   voiceWords,
 )

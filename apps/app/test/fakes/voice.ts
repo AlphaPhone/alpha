@@ -40,6 +40,8 @@ export interface VoiceScene {
   activeMicSession: string | undefined;
   emitLocal?: (event: string, data: unknown) => void;
   emitCloud?: (event: CloudStreamEvent) => void;
+  /** The phone's sign-in settling on the account whose key is `credentialId` now, as `ElizaSignInPlugin.java` tells it. */
+  signedInHere?: () => void;
 }
 
 export function voiceScene(): VoiceScene {
@@ -209,14 +211,17 @@ export function elizaCloudSpeech(voice: VoiceScene): Faked {
   });
 }
 
-/** `ElizaSignInPlugin.java`'s `status`: the registered cloud's readiness and the account its key belongs to. */
+/** `ElizaSignInPlugin.java`'s `status`, the registered cloud's readiness and the account its key belongs to, and its `signInSettled` receipt, as the wire carries it. */
 export function elizaSignIn(voice: VoiceScene, signedIn: () => boolean): Faked {
-  return plugin<Pick<ElizaSignInPlugin, "status">>(() => ({
-    status: ({ environment }) => Promise.resolve({
-      environment, methodsKnown: true, email: true, sms: false, google: false, googleMode: "browser",
-      account: signedIn()
-        ? { signedIn: true, userId: "user-1", organizationId: "org-1", credentialId: voice.credentialId, keyExpiresAt: 4_102_444_800_000 }
-        : { signedIn: false },
-    }),
-  }));
+  return plugin<Pick<ElizaSignInPlugin, "status">, { signInSettled: unknown }>((emit) => {
+    voice.signedInHere = () => emit("signInSettled", { request: 1, attempt: 1, verdict: "signed-in-as", credentialId: voice.credentialId, google: "not-requested" });
+    return {
+      status: ({ environment }) => Promise.resolve({
+        environment, methodsKnown: true, email: true, sms: false, google: false, googleMode: "browser",
+        account: signedIn()
+          ? { signedIn: true, userId: "user-1", organizationId: "org-1", credentialId: voice.credentialId, keyExpiresAt: 4_102_444_800_000 }
+          : { signedIn: false },
+      }),
+    };
+  });
 }

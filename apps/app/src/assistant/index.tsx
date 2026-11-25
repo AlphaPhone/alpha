@@ -64,7 +64,6 @@ function LiveAssistant({ runtime }: Shown<Layer.Success<typeof screens> | Reside
       voice: recorder !== undefined && recorder.stage !== "Closed" && recorder.field === "ComposerField"
         ? <DictationControls runtime={runtime} />
         : voice.state !== undefined && !quiet(voice.state) ? <TalkControls runtime={runtime} /> : undefined,
-      voiceNotice: voice.state?.phase === "Failed" ? <TalkControls runtime={runtime} /> : undefined,
     }}
   />;
 }
