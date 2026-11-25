@@ -1,7 +1,6 @@
 // spec/app/phone/details.md, "Story: See my SIM, carrier and number on the image"; spec/app/phone/details.md, "Story: Keep Alpha as my phone and SMS app"
 import { Alert, Banner, Button, ListGroup, ListRow, Spinner } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { ChevronRight } from "lucide-react";
 import type { Line, Machine as DetailsMachine } from "../../gen/app__phone__details.effect.vibe";
 import { imeiElsewhere, simSummary } from "../../gen/app__phone__details.ts";
 import { useMachine } from "../../gen/app__phone__details.react.ts";
@@ -35,8 +34,7 @@ function LineRows({ line }: { line: Line }) {
 export function Details({ runtime }: DetailsProps) {
   const { state, cause, can, send } = useMachine(runtime);
   if (cause) return <Alert variant="destructive" className="m-4">Alpha could not read the phone's details</Alert>;
-  if (!state) return null;
-  if (!state.shown) return can({ type: "show", showing: true }) ? <ListRow title="Phone" trailing={<ChevronRight />} onClick={() => void send({ type: "show", showing: true })} /> : null;
+  if (!state?.shown) return null;
   const summary = simSummary(state);
   return (
     <section aria-label="Phone details" className="flex flex-col gap-3">

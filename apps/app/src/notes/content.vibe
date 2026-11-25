@@ -1,0 +1,261 @@
+// spec/app/notes/index.md, "The list holds the owner it shows, the notes and folders it last read with the store's revision, the folder it is narrowed to, and the folder numbers that are gone"; spec/app/notes/editor.md, "Story: Keep my draft through a restart"
+import { authoredNoteText, parseNoteFormat } from "@elizaos/plugin-notes/format"
+import { noteFolderId, notesFolderName, type NoteFolder } from "@elizaos/plugin-notes/organize"
+import type { NoteFormat, NotesSnapshot, StickyNote } from "@elizaos/plugin-notes/types"
+import type { Folder, Row } from "../../gen/app__notes.effect.vibe"
+import { type Kind, type Origin, type Source, unlinked } from "../../gen/app__notes__note.effect.vibe"
+import { Vault, type Slot } from "../platform/vault.vibe"
+import { Time } from "../runtime/time.vibe"
+
+module pure {
+  /** Stable numbers for canonical identifiers, with a separate namespace per kind of identifier. */
+  export function numberOf(kind: string, id: string): number {
+    let hash = 14695981039346656037n
+    for (const char of `${kind}:${id}`) hash = BigInt.asUintN(64, (hash ^ BigInt(char.codePointAt(0) ?? 0)) * 1099511628211n)
+    return Number(hash & 0xfffffffffffffn) + 1
+  }
+
+  /** A note's new creation identifier, kept with its content before its first write. */
+  export function creationId(): string {
+    return crypto.randomUUID()
+  }
+
+  /** The stored modification time or when the agent last updated the note. */
+  export function moment(note: StickyNote): number {
+    const saved = note.format?.data.modifiedAt
+    const modified = typeof saved === "string" ? Date.parse(saved) : typeof saved === "number" ? saved : NaN
+    return Number.isFinite(modified) ? modified : Date.parse(note.updatedAt)
+  }
+}
+import { creationId, moment, numberOf } from pure
+export { creationId, moment, numberOf }
+
+schema Item { readonly t: string; readonly done: boolean }
+const Items = Schema.Array(Item)
+const Draft = Schema.Struct({
+  owner: Schema.NonEmptyString,
+  id: Schema.String,
+  made: Schema.Int,
+  creation: Schema.NonEmptyString,
+  base: Schema.Int,
+  folder: Schema.Int,
+  kind: Schema.Literals(["Text", "Checklist"]),
+  title: Schema.String,
+  body: Schema.String,
+  items: Items,
+})
+export type DraftWords = typeof Draft.Type
+
+const FolderFile = Schema.Struct({
+  version: Schema.Literal(1),
+  revision: Schema.Int,
+  folders: Schema.Array(Schema.Struct({ id: Schema.NonEmptyString, name: Schema.NonEmptyString })),
+})
+
+/** What the phone has read for this owner, with the wire records indexed by the same numbers as the machines. */
+export interface Collection {
+  readonly owner: string
+  readonly version: number
+  readonly shelf: number
+  readonly readAt: number
+  readonly rows: Row[]
+  readonly folders: Folder[]
+  readonly noteByNumber: ReadonlyMap<number, StickyNote>
+  readonly folderByNumber: ReadonlyMap<number, NoteFolder>
+  readonly trash: NonNullable<NotesSnapshot["trash"]>
+}
+
+export const empty = (): Collection => ({
+  owner: "", version: 0, shelf: 0, readAt: 0, rows: [], folders: [], noteByNumber: new Map(), folderByNumber: new Map(), trash: [],
+})
+
+const kindFor: Record<NoteFormat["kind"], Kind> = { text: "Text", list: "Checklist", voice: "Voice", link: "Link" }
+
+/** The stored note's kind, including unformatted text from an earlier client. */
+export function kindOf(note: StickyNote): Kind {
+  return kindFor[note.format?.kind ?? "text"]
+}
+
+/** The audio handle canonical Notes currently writes and the installed first generation also used. */
+export function audioIdOf(note: StickyNote): string {
+  const data = note.format?.data
+  if (typeof data?.audioId === "string") return data.audioId
+  const audio = data?.audio
+  return typeof audio === "object" && audio !== null && "audioId" in audio && typeof audio.audioId === "string" ? audio.audioId : ""
+}
+
+/** The note's Source, named by the existing canonical metadata. */
+function sourced(note: StickyNote): { readonly origin: Origin; readonly source: Source } {
+  const data = note.format?.data
+  const audio = audioIdOf(note)
+  const url = data?.url
+  const document = data?.sourceDocument
+  if (kindOf(note) === "Voice" && typeof audio === "string" && audio.length > 0) {
+    return { origin: "Recorded", source: { tie: "AudioLink", id: numberOf("recording", audio), mark: 0 } }
+  }
+  if (typeof url === "string" && url.length > 0) {
+    const key = numberOf("web", url)
+    return { origin: "FromPage", source: { tie: "PageLink", id: key, mark: key } }
+  }
+  if (typeof document === "object" && document !== null && "blobId" in document && typeof document.blobId === "string") {
+    return { origin: "Written", source: { tie: "FileLink", id: numberOf("document", document.blobId), mark: numberOf("document-mark", JSON.stringify(document)) } }
+  }
+  return { origin: data?.origin === "imported" ? "Imported" : "Written", source: unlinked }
+}
+
+/** What the editor displays from an exact canonical note snapshot. */
+export function fromSaved(note: StickyNote, owner: string, base: number): DraftWords {
+  const list = Schema.decodeUnknownOption(Items)(note.format?.data.items)
+  return {
+    owner, id: note.id, made: 0, creation: note.id, base, folder: 0, kind: kindOf(note) === "Checklist" ? "Checklist" : "Text",
+    title: note.title, body: note.body.startsWith("\n") ? note.body.slice(1) : note.body, items: Option.getOrElse(list, () => []),
+  }
+}
+
+/** A new unsaved editor, separate from the notes last read. */
+export function newWords(owner: string, made: number, folder: number, kind: DraftWords["kind"]): DraftWords {
+  return { owner, id: "", made, creation: creationId(), base: 0, folder, kind, title: "", body: "", items: [] }
+}
+
+export function wordsOf(draft: DraftWords): string {
+  return draft.title.trim() === "" ? draft.body : draft.body === "" ? draft.title : `${draft.title}\n${draft.body}`
+}
+
+export function formatOf(draft: DraftWords, existing?: StickyNote, folder?: NoteFolder): NoteFormat {
+  const data = { ...existing?.format?.data, ...(folder === undefined ? {} : { folderId: folder.id }) }
+  if (draft.kind === "Checklist") return { kind: "list", data: { ...data, items: draft.items.map(({ t, done }) => ({ t, done })) } }
+  const { items: _items, ...remaining } = data
+  return { kind: "text", data: remaining }
+}
+
+export function hasContent(draft: DraftWords): boolean {
+  return wordsOf(draft).trim() !== "" || authoredNoteText(formatOf(draft)).trim() !== ""
+}
+
+export function formatChanged(note: StickyNote, fields: Readonly<Record<string, string | boolean | null>>): NoteFormat {
+  const format = parseNoteFormat(note.format) ?? { kind: "text", data: {} }
+  return { ...format, data: { ...format.data, ...fields } }
+}
+
+export error UnreadableNotes { kind: "draft" | "folders" | "collection" }
+export error FolderChanged
+
+/** The assessed collection and the separate editor words. Only the currently authenticated owner can publish either. */
+export service NoteContent {
+  snapshot(): { readonly collection: Collection; readonly draft: DraftWords | undefined }
+  subscribe(listener: () => void): () => void
+  collection(): Collection!!
+  publish(owner: string, state: NotesSnapshot): Collection!UnreadableNotes
+  clear(): void!!
+  draft(): (DraftWords | undefined)!!
+  showDraft(draft: DraftWords | undefined): void!!
+  keepDraft(draft: DraftWords): boolean!!
+  rawDraft(owner: string): (string | undefined)!!
+  readDraft(owner: string): (DraftWords | undefined)!UnreadableNotes
+  dropDraft(owner: string): boolean!!
+  capture(ticket: number, sent: DraftWords): void!!
+  take(ticket: number): (DraftWords | undefined)!!
+  changeFolders(owner: string, seen: number, op: "AddFolder" | "RenameFolder" | "RemoveFolder", folder: number, entered: string): void!(UnreadableNotes | FolderChanged)
+}
+
+const slotFor = (kind: "draft" | "folders", owner: string): Slot => `notes-${kind}:${numberOf("owner", owner)}`
+
+/** Publish presentation data once per accepted snapshot, with no React reducer between the phone and its rules. */
+export const noteContent = Layer.effect(NoteContent, effect {
+  const vault = try Vault
+  const time = try Time
+  let state = { collection: empty(), draft: undefined as DraftWords | undefined }
+  const browserFolders = new Map<string, typeof FolderFile.Type>()
+  const fallbackDraft = new Map<string, DraftWords>()
+  const saves = new Map<number, DraftWords>()
+  const subscribers = new Set<() => void>()
+  const gate = try Semaphore.make(1)
+  const emit = () => { for (const listener of subscribers) listener() }
+
+  effect function folders(owner: string): typeof FolderFile.Type!UnreadableNotes {
+    const kept = vault.read(slotFor("folders", owner)) catch (error) => error.code === "absent" ? Option.none() : undefined
+    if (kept === undefined) throw new UnreadableNotes({ kind: "folders" })
+    if (Option.isNone(kept)) return browserFolders.get(owner) ?? { version: 1, revision: 0, folders: [] }
+    const Owned = Schema.Struct({ owner: Schema.NonEmptyString, document: FolderFile })
+    const found = Schema.decodeUnknownOption(Schema.fromJsonString(Owned))(Redacted.value(kept.value))
+    if (Option.isNone(found)) throw new UnreadableNotes({ kind: "folders" })
+    return found.value.owner === owner ? found.value.document : { version: 1, revision: 0, folders: [] }
+  }
+
+  return {
+    snapshot: () => state,
+    subscribe(listener: () => void) {
+      subscribers.add(listener)
+      return () => { subscribers.delete(listener) }
+    },
+    collection: () => sync(() => state.collection),
+    effect publish(owner: string, reply: NotesSnapshot) {
+      const version = reply.revision + 1
+      const document = try folders(owner)
+      if (state.collection.owner === owner && state.collection.version > version) return state.collection
+      const ordered = reply.notes.toSorted((a, b) => moment(b) - moment(a))
+      const notes = new Map(ordered.map((note) => [numberOf("note", note.id), note]))
+      const folderMap = new Map(document.folders.map((folder) => [numberOf("folder", folder.id), folder]))
+      if (notes.size !== ordered.length || folderMap.size !== document.folders.length) throw new UnreadableNotes({ kind: "collection" })
+      const rows = Array.from(notes, ([id, note]): Row => {
+        const folder = noteFolderId(note.format)
+        return { id, revision: version, kind: kindOf(note), ...sourced(note), folder: folder === undefined ? 0 : numberOf("folder", folder), pinned: note.format?.data.pinned === true }
+      })
+      const collection: Collection = {
+        owner, version, shelf: document.revision, readAt: try time.now(), rows, folders: Array.from(folderMap, ([id, folder]) => ({ id, name: folder.name })),
+        noteByNumber: notes, folderByNumber: folderMap, trash: reply.trash ?? [],
+      }
+      state = { ...state, collection }
+      emit()
+      return collection
+    },
+    clear: () => sync(() => { state = { collection: empty(), draft: undefined }; saves.clear(); emit() }),
+    draft: () => sync(() => state.draft),
+    showDraft: (draft: DraftWords | undefined) => sync(() => { state = { ...state, draft }; emit() }),
+    keepDraft: (draft: DraftWords) => gate.withPermit(effect {
+      return effect {
+        try vault.write(slotFor("draft", draft.owner), Redacted.make(JSON.stringify(draft)))
+        return true
+      } catch (error) => {
+        if (error.code !== "absent") return false
+        fallbackDraft.set(draft.owner, draft)
+        return true
+      }
+    }),
+    effect rawDraft(owner: string) {
+      const stored = vault.read(slotFor("draft", owner)) catch () => Option.none()
+      return Option.isSome(stored) ? Redacted.value(stored.value) : undefined
+    },
+    effect readDraft(owner: string) {
+      const raw = vault.read(slotFor("draft", owner)) catch (error) => error.code === "absent" ? Option.none() : undefined
+      if (raw === undefined) throw new UnreadableNotes({ kind: "draft" })
+      if (Option.isNone(raw)) return fallbackDraft.get(owner)
+      const decoded = Schema.decodeUnknownOption(Schema.fromJsonString(Draft))(Redacted.value(raw.value))
+      if (Option.isNone(decoded)) throw new UnreadableNotes({ kind: "draft" })
+      return decoded.value
+    },
+    dropDraft: (owner: string) => gate.withPermit(effect {
+      fallbackDraft.delete(owner)
+      return effect { try vault.remove(slotFor("draft", owner)); return true } catch (error) => error.code === "absent" || error.code === "not_found"
+    }),
+    capture: (ticket: number, sent: DraftWords) => sync(() => { saves.set(ticket, sent) }),
+    take: (ticket: number) => sync(() => { const sent = saves.get(ticket); saves.delete(ticket); return sent }),
+    changeFolders: (owner: string, seen: number, op: "AddFolder" | "RenameFolder" | "RemoveFolder", key: number, entered: string) =>
+      gate.withPermit(effect {
+        const document = try folders(owner)
+        const name = notesFolderName(entered)
+        const names = document.folders
+        const target = names.find((folder) => numberOf("folder", folder.id) === key)
+        if (seen !== document.revision || (op !== "RemoveFolder" && (name === undefined || names.some((folder) => folder.name.normalize("NFKC").toLowerCase() === name.normalize("NFKC").toLowerCase())))) throw new FolderChanged()
+        if (op === "AddFolder" && names.length >= 100 || op !== "AddFolder" && target === undefined) throw new FolderChanged()
+        const updated = op === "AddFolder" && name !== undefined ? [...names, { id: `f-${creationId()}`, name }]
+          : op === "RenameFolder" && name !== undefined ? names.map((folder) => folder === target ? { ...folder, name } : folder)
+          : names.filter((folder) => folder !== target)
+        const next = { version: 1 as const, revision: seen + 1, folders: updated }
+        return effect { try vault.write(slotFor("folders", owner), Redacted.make(JSON.stringify({ owner, document: next }))) } catch effect (error) => {
+          if (error.code !== "absent") throw new UnreadableNotes({ kind: "folders" })
+          browserFolders.set(owner, next)
+        }
+      }),
+  }
+})

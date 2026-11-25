@@ -19,7 +19,7 @@ export type AndroidTarget =
   | "about-phone" | "developer-options" | "all-files-access" | "internet-panel" | "sim-cards" | "access-point-names";
 
 /** A page of Android's settings to open; a channel's page names its channel. */
-export type AndroidStart = { target: AndroidTarget; channel?: number };
+export type AndroidStart = { target: AndroidTarget; channel?: string };
 
 /** What Alpha tells about the last start: Android opened a nearby page, none, or did not answer. */
 export type AndroidTold = "nearby" | "unavailable" | "no-answer";

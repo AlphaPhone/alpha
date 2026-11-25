@@ -1,0 +1,134 @@
+// spec/app/notes/index.md, "Story: Let the agent suggest changes to my notes"; spec/app/notes/trash.md, "Story: Delete a note and get it back"
+import { NOT_DISPATCHED } from "@elizaos/agent/client"
+import type { DeviceOperation } from "@elizaos/agent/operations"
+import { recordNoteRevision } from "@elizaos/plugin-notes/client"
+import { findNoteFolder } from "@elizaos/plugin-notes/organize"
+import * as Notes from "../../gen/app__notes.effect.vibe"
+import * as Editor from "../../gen/app__notes__editor.effect.vibe"
+import * as Trash from "../../gen/app__notes__trash.effect.vibe"
+import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { Machine as Layers, pageInert } from "../../gen/app__shell__layers.effect.vibe"
+import { Device } from "../platform/device.vibe"
+import { NoteStore } from "../platform/notes.vibe"
+import { ownerAt } from "../platform/owner.vibe"
+import { untimed } from "../runtime/reactor.vibe"
+import { NoteContent, numberOf } from "./content.vibe"
+import { enter } from "./notes.vibe"
+import { notesSelection } from "./selection.vibe"
+
+export type NotesOperation = Extract<DeviceOperation, { readonly type: "notes_move" | "notes_folder_create" | "notes_restore" }>
+
+export function notesOperation(value: DeviceOperation): NotesOperation | undefined {
+  switch (value.type) {
+    case "notes_move":
+    case "notes_folder_create":
+    case "notes_restore":
+      return value
+    default:
+      return undefined
+  }
+}
+
+export function notesOperationWords(operation: NotesOperation): { readonly title: string; readonly detail: string } {
+  switch (operation.type) {
+    case "notes_move": return { title: "Move note", detail: operation.folder === null ? "Take the selected note out of its folder" : `Move the selected note to ${operation.folder}` }
+    case "notes_folder_create": return { title: "New Notes folder", detail: operation.name }
+    case "notes_restore": return { title: "Recover a note", detail: "Bring the requested note back from Recently deleted" }
+  }
+}
+
+const refused = { kind: "refused", code: NOT_DISPATCHED } as const
+const unknown = undefined
+const done = { kind: "applied" } as const
+
+effect function allowed(fromHome: boolean): boolean!!(Device | Shell | Layers) {
+  if (!(try (try Device).showing()) || pageInert(try (try Layers).get())) return false
+  const screen = (try (try Shell).get()).trail.at(-1)
+  return screen === "Notes" || fromHome && screen === undefined
+}
+
+effect function settled(prepared: Notes.Change) {
+  const listing = try Notes.Machine
+  const state = try listing.get()
+  const owner = state.owner
+  const next = state.writing.id + 1
+  const asked = listing.send({ type: "propose", c: prepared }, "Agent") catch () => undefined
+  if (asked === undefined) return refused
+  const review = listing.send({ type: "showProposal", covered: false }, "Owner") catch () => undefined
+  if (review === undefined) {
+    try ignore(listing.send({ type: "decline" }, "Owner"))
+    return refused
+  }
+  const accepted = listing.send({ type: "approve" }, "Owner") catch () => undefined
+  if (accepted === undefined) {
+    try ignore(listing.send({ type: "decline" }, "Owner"))
+    return refused
+  }
+  const ended = Stream.runHead(Stream.filter(listing.changes, (value) => value.owner !== owner || value.writing.id === next
+    && (value.writing.outcome === "Confirmed" || value.writing.outcome === "Refused" || value.writing.outcome === "Unknown")))
+    |> timeout(%, "12 seconds") catch () => Option.none()
+  if (Option.isNone(ended) || ended.value.owner !== owner) return unknown
+  return ended.value.writing.outcome === "Confirmed" ? done : ended.value.writing.outcome === "Refused" ? refused : unknown
+}
+
+effect function recovery(noteId: string, owner: number) {
+  const trash = try Trash.Machine
+  const opened = trash.send({ type: "show", covered: false }, "Owner") catch () => undefined
+  if (opened === undefined) return refused
+  const listened = Stream.runHead(Stream.filter(trash.changes, (state) => state.owner !== owner || state.read.status === "Loaded" || state.read.status === "Failed"))
+    |> timeout(%, "12 seconds") catch () => Option.none()
+  if (Option.isNone(listened) || listened.value.owner !== owner || !(try allowed(false))) return refused
+  const id = numberOf("note", noteId)
+  const written = trash.send({ type: "recover", id, now: untimed, storage: true }, "Owner") catch () => undefined
+  if (written === undefined) return refused
+  const ticket = written.state.attempt.id
+  const answered = Stream.runHead(Stream.filter(trash.changes, (state) => state.owner !== owner || state.attempt.id === ticket
+    && (state.attempt.outcome === "Confirmed" || state.attempt.outcome === "Refused" || state.attempt.outcome === "Unknown")))
+    |> timeout(%, "12 seconds") catch () => Option.none()
+  if (Option.isNone(answered) || answered.value.owner !== owner) return unknown
+  return answered.value.attempt.outcome === "Confirmed" ? done : answered.value.attempt.outcome === "Refused" ? refused : unknown
+}
+
+/** A Notes change already reviewed through the agent's authenticated device journal. Re-check what the screen and store hold before sending. */
+export effect function executeNotes(operation: NotesOperation) {
+  const home = operation.type === "notes_folder_create"
+  if (!(try allowed(home))) return refused
+  const identity = ownerAt() catch () => ""
+  if (identity === "") return refused
+  const listing = try Notes.Machine
+  const content = try NoteContent
+  const owner = numberOf("owner", identity)
+  const open = try (try Editor.Machine).get()
+  if (open.showing && operation.type !== "notes_move") return refused
+  if ((try listing.get()).owner !== owner || (try listing.get()).read.status !== "Loaded") {
+    try enter()
+    const fresh = Stream.runHead(Stream.filter(listing.changes, (state) => state.owner === owner && state.read.status === "Loaded"))
+      |> timeout(%, "12 seconds") catch () => Option.none()
+    if (Option.isNone(fresh)) return refused
+  }
+  const snapshot = try content.collection()
+  const list = try listing.get()
+  if (snapshot.owner !== identity || snapshot.version !== list.version || !(try allowed(home))) return refused
+  if (operation.type === "notes_folder_create") {
+    return try settled({ ...Notes.nothing, op: "AddFolder", name: operation.name, base: list.shelf })
+  }
+  if (operation.type === "notes_restore") return try recovery(operation.noteId, owner)
+  if (!open.showing || open.draft.sync !== "Kept" || open.deleting) return refused
+  const selection = try notesSelection()
+  if (selection?.kind !== "canonical-note" || selection.id !== operation.target.noteId) return refused
+  const noteNumber = numberOf("note", operation.target.noteId)
+  const row = snapshot.noteByNumber.get(noteNumber)
+  if (row === undefined) return refused
+  const current = (try NoteStore).read() catch () => undefined
+  if (current === undefined || current.revision + 1 !== snapshot.version) return refused
+  const mark = (tryPromise(() => recordNoteRevision(row)) catch () => "")
+  if (mark === "" || mark !== operation.target.revision || (ownerAt() catch () => "") !== identity) return refused
+  const destination = operation.folder === null ? undefined : findNoteFolder([...snapshot.folderByNumber.values()], operation.folder)
+  if (operation.folder !== null && destination === undefined || !(try allowed(false))) return refused
+  const writer = try Editor.Machine
+  const still = try writer.get()
+  if (!still.showing || still.note !== noteNumber || still.draft.sync !== "Kept" || still.draft.base !== snapshot.version) return refused
+  const pane = writer.send({ type: "close" }, "Owner") catch () => undefined
+  if (pane === undefined) return refused
+  return try settled({ ...Notes.nothing, op: "Move", note: noteNumber, folder: destination === undefined ? 0 : numberOf("folder", destination.id), base: snapshot.version })
+}
