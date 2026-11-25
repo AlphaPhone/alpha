@@ -17,6 +17,7 @@ const back = Effect.gen(function* () {
   const form = yield* Editor.Machine;
   const view = yield* View.Machine;
   const tried: ReadonlyArray<Effect.Effect<unknown, unknown>> = [
+    form.send({ type: "callOff" }),
     form.send({ type: "close" }),
     view.send({ type: "closeOverlay" }),
     view.send({ type: "closeReminder" }),

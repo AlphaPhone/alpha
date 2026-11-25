@@ -3,12 +3,12 @@ import {
   type CalendarBlock, CalendarAgendaRow, CalendarAnswer, CalendarAnswers, CalendarChip, CalendarDayChips, CalendarEventAction, CalendarEventBlock, CalendarEventMenu, CalendarEventPage,
   CalendarEventRow, CalendarEventRows, CalendarFieldRow, CalendarFormCard, CalendarFormDate, CalendarFormPage, CalendarFormRow, CalendarFormTitle, CalendarHeader, CalendarSwitch,
   CalendarHeaderAction, CalendarInvite, CalendarJoin, CalendarList, CalendarListHeading, CalendarMonthPanel, CalendarNotice, CalendarNoticeAction, CalendarNotesField,
-  CalendarPerson, CalendarPickerField, CalendarSearchBar, CalendarPill, CalendarTimeline, CalendarTimeRow, CalendarWeekStrip, Label, ListGroup, ListRow, Sheet, SheetContent, Spinner, Switch, Toast,
+  CalendarPerson, CalendarPickerField, CalendarSearchBar, CalendarPill, CalendarTimeline, CalendarTimeRow, CalendarWeekStrip, ConfirmDialog, Label, ListGroup, ListRow, Sheet, SheetContent, Spinner, Switch, Toast,
   calendarHourHeight,
 } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import {
-  Bell, Calendar as CalendarIcon, CalendarDays, ChevronRight, MapPin, Plus, Repeat, Search, Settings, TextAlignStart, Undo2, UserRound, Video, X,
+  Bell, Calendar as CalendarIcon, CalendarDays, ChevronRight, MapPin, Plus, Repeat, Search, Settings, TextAlignStart, Trash2, Undo2, UserRound, Video, X,
 } from "lucide-react";
 import { type ReactNode, useCallback, useState, useSyncExternalStore } from "react";
 import * as View from "../../gen/app__calendar.ts";
@@ -57,6 +57,7 @@ const shortDate = new Intl.DateTimeFormat(undefined, { weekday: "short", month: 
 const monthDay = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
 const monthDayYear = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
 const longDate = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" });
+const fullDate = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
 const monthOnly = new Intl.DateTimeFormat(undefined, { month: "long" });
 const monthYear = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" });
 const narrowDay = new Intl.DateTimeFormat(undefined, { weekday: "narrow" });
@@ -708,6 +709,7 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
   if (!e) return null;
   const reminder = fields.calendar === "Reminders";
   const saving = e.draft.sync === "Saving";
+  const discard = reminder && e.form === "NewEvent" && (e.confirming === "ConfirmDiscard" || editor.can({ type: "askDiscard" }));
   const save = reminder ? { type: "saveReminder" } as const : { type: "save" } as const;
   const blank = fields.title.trim() === "";
   const plain: Editor.Event = { type: "editTitle", blank };
@@ -766,7 +768,8 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
   const destination = fields.calendar ?? (connected ? "Agent" : "Phone");
   const close = () => (editor.can({ type: "close" }) ? void editor.send({ type: "close" }) : undefined);
   return (
-    <CalendarFormPage onBack={close} saving={saving} onSave={(reminder || !e.extras) && editor.can(save) ? () => void editor.send(save) : undefined}>
+    <CalendarFormPage className={reminder ? "[&>[data-host-chrome]]:pr-2" : undefined} onBack={close} saving={saving}
+      onSave={(reminder || !e.extras) && editor.can(save) ? () => void editor.send(save) : undefined}>
       {e.form === "EditEvent" && e.repeats ? (
         <div role="group" aria-label="Save changes to" className="mx-6 my-1 flex flex-wrap items-center gap-2">
           <span className="text-meta text-muted-foreground">Save changes to</span>
@@ -777,6 +780,14 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
         </div>
       ) : null}
       <p role="status" aria-label="Calendar form draft status" className="mx-6 my-1 text-meta text-muted-foreground">{off_}</p>
+      {discard ? (
+        <>
+          <CalendarHeaderAction className="mx-4 my-1 size-11 text-muted-foreground" aria-label="Discard calendar draft"
+            onClick={() => void editor.send({ type: "askDiscard" })}><Trash2 aria-hidden /></CalendarHeaderAction>
+          <ConfirmDialog open={e.confirming === "ConfirmDiscard"} title="Discard calendar draft?" confirmLabel="Discard" destructive
+            onConfirm={() => void editor.send({ type: "discard" })} onCancel={() => void editor.send({ type: "callOff" })} />
+        </>
+      ) : null}
       {e.banner === "Failed" ? <CalendarNotice tone="caution" className="mx-6" actions={<CalendarNoticeAction onClick={() => void editor.send({ type: "retryKeeping" })}><Undo2 aria-hidden />Retry</CalendarNoticeAction>}>Not saved on this phone</CalendarNotice> : null}
       {e.banner === "Conflict" ? (
         <CalendarNotice className="mx-6" actions={<>
@@ -806,7 +817,7 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
       ) : null}
       <CalendarFormTitle value={fields.title} disabled={!editor.can({ type: "editTitle", blank: false })}
         onChange={(input) => change({ ...fields, title: input.target.value }, { type: "editTitle", blank: input.target.value.trim() === "" })} />
-      {reminder ? <div aria-label="Selected event date" aria-live="polite" className="px-6 pt-2 text-sm text-muted-foreground">{longDate.format(dateOf(startDay))}</div> : null}
+      {reminder ? <div aria-label="Selected event date" aria-live="polite" className="px-6 pt-2 text-sm text-muted-foreground">{fullDate.format(dateOf(startDay))}</div> : null}
       <CalendarFormDate label="Date" aria-label="Calendar date" value={dateValue(fields.begin)} onChange={(input) => {
         const shift = (toDay(input.target.value) - startDay) * 86_400_000;
         retime(fields.begin + shift, fields.end + shift);

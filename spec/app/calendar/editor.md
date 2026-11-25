@@ -131,7 +131,8 @@ two drafts.
 
 ```quint
 pure def typable(s: Editor): bool =
-  s.shown and s.draft.sync != D::Saving and not(D::canChoose(s.draft)) and (s.banner == NoBanner or s.banner == Failed)
+  s.shown and s.draft.sync != D::Saving and not(D::canChoose(s.draft))
+    and (s.banner == NoBanner or s.banner == Failed) and s.confirming == NoConfirm
 
 pure def typed(d: D::Draft, edited: Editor): Editor = { ...edited, draft: D::edit(d), kept: edited.banner != Failed }
 
@@ -186,7 +187,8 @@ pure def sent(kind: Write, id: int, s: Editor): Composed =
   { state: { ...s, write: w, kind: kind, writing: id, filed: false }, out: List(Send({ attempt: w.id, kind: kind, id: id, scope: s.scope, base: s.draft.base })) }
 
 pure def canSave(s: Editor): bool =
-  s.shown and D::canSave(s.draft) and s.titled and s.banner == NoBanner and not(inFlight(s)) and not(s.extras)
+  s.shown and D::canSave(s.draft) and s.titled and s.banner == NoBanner and s.confirming == NoConfirm
+    and not(inFlight(s)) and not(s.extras)
     and (if (s.form == NewEvent) s.receipts.status == R::Loaded and (not(s.unknownCreate) or s.separate)
          else not(s.latched.contains(s.target)) and (not(s.repeats) or s.scope != Unchosen))
 
@@ -204,7 +206,7 @@ form looks for its own creation identity before it can add anything.
 ```quint
 pure def canSaveReminder(s: Editor): bool =
   s.form == NewEvent and s.shown and D::canSave(s.draft) and s.titled
-    and s.banner == NoBanner and not(inFlight(s))
+    and s.banner == NoBanner and s.confirming == NoConfirm and not(inFlight(s))
 
 pure def saveReminder(s: Editor): Composed =
   sent(CreateReminder, 0, { ...s, draft: D::save(s.draft) })
@@ -513,7 +515,8 @@ pure def sometimesTheOwnerChooses(s: Editor): bool = D::canChoose(s.draft) and s
 ### Closing a form with edits kept on the phone sets it aside, offered back by a banner; otherwise the form is gone
 
 ```quint
-pure def canClose(s: Editor): bool = s.shown and s.draft.sync != D::Saving and s.banner != Conflict
+pure def canClose(s: Editor): bool =
+  s.shown and s.draft.sync != D::Saving and s.banner != Conflict and s.confirming == NoConfirm
 
 pure def close(s: Editor): Editor =
   if (D::unsaved(s.draft) and s.kept) { ...s, shown: false, banner: Available } else withoutForm(s.write, s)
@@ -546,7 +549,11 @@ pure def restore(s: Editor, revision: int): Editor =
   if (s.form == EditEvent and revision != s.revision) { ...shown, revision: revision, draft: D::collide(s.draft, revision) }
   else shown
 
-pure def canDiscard(s: Editor): bool = s.banner == Available and s.confirming == ConfirmDiscard
+pure def discardable(s: Editor): bool =
+  s.banner == Available or (s.shown and s.form == NewEvent and s.banner == NoBanner
+    and s.kept and D::unsaved(s.draft) and s.draft.sync != D::Saving and not(inFlight(s)))
+
+pure def canDiscard(s: Editor): bool = discardable(s) and s.confirming == ConfirmDiscard
 
 pure def discard(s: Editor): Editor = withoutForm(s.write, s)
 ```
@@ -560,7 +567,7 @@ crash.
 ```quint
 pure def canKeepFailed(s: Editor): bool = s.shown and s.banner == NoBanner and s.draft.sync != D::Saving
 
-pure def keepFailed(s: Editor): Editor = { ...s, banner: Failed, kept: false }
+pure def keepFailed(s: Editor): Editor = { ...s, banner: Failed, kept: false, confirming: NoConfirm }
 
 pure def canRetryKeeping(s: Editor): bool = s.banner == Failed
 
@@ -576,7 +583,7 @@ pure def draftKept(s: Editor): Editor = { ...s, banner: NoBanner, kept: true }
 ```quint
 pure def canReplacedElsewhere(s: Editor): bool = s.shown and s.kept and s.banner == NoBanner and s.draft.sync != D::Saving
 
-pure def replacedElsewhere(s: Editor): Editor = { ...s, banner: Conflict }
+pure def replacedElsewhere(s: Editor): Editor = { ...s, banner: Conflict, confirming: NoConfirm }
 
 pure def canKeepMyDraft(s: Editor): bool = s.banner == Conflict
 
@@ -590,7 +597,7 @@ pure def takeOtherDraft(s: Editor): Editor = { ...s, banner: NoBanner, confirmin
 ### Discarding a draft and replacing it with the other copy each wait for the owner to confirm, and can be called off
 
 ```quint
-pure def canAskDiscard(s: Editor): bool = s.banner == Available and s.confirming == NoConfirm
+pure def canAskDiscard(s: Editor): bool = discardable(s) and s.confirming == NoConfirm
 
 pure def askDiscard(s: Editor): Editor = { ...s, confirming: ConfirmDiscard }
 
@@ -603,7 +610,7 @@ pure def canCallOff(s: Editor): bool = s.confirming != NoConfirm
 pure def callOff(s: Editor): Editor = { ...s, confirming: NoConfirm }
 
 pure def alwaysAConfirmationBelongsToItsBanner(s: Editor): bool =
-  (s.confirming == ConfirmDiscard implies s.banner == Available) and (s.confirming == ConfirmReplace implies s.banner == Conflict)
+  (s.confirming == ConfirmDiscard implies discardable(s)) and (s.confirming == ConfirmReplace implies s.banner == Conflict)
 
 pure def sometimesAskedToConfirm(s: Editor): bool = s.confirming == ConfirmReplace and D::unsaved(s.draft)
 ```

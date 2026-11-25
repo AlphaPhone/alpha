@@ -211,6 +211,31 @@ describe("Calendar without a connected account", () => {
     await press(/^Leave through the garden,/);
     expect(document.querySelector('[data-alpha-subview="calendar-detail"]')?.textContent).toContain("Due 10:15 AM");
   });
+
+  it("Reviews discarding a retained Calendar reminder draft (spec/app/calendar/editor.md, \"Story: Keep my draft through a restart\")", async () => {
+    const world = { ...morning(false), signedIn: false };
+    const { alpha } = await open(world, only("view:Calendar"));
+    const runtime = calendar.runtime(alpha);
+    await openCalendar(alpha);
+    await until(alpha, runtime, View, (state) => state.front && state.anchor === world.today);
+    await press("New event");
+    await until(alpha, runtime, Editor, (state) => state.form === "NewEvent" && state.shown);
+    await press("Reminders");
+    await fill("Title", "Keep this until I confirm");
+    await press("Discard calendar draft");
+    await until(alpha, runtime, Editor, (state) => state.confirming === "ConfirmDiscard");
+    await hardware("back");
+    await until(alpha, runtime, Editor, (state) => state.confirming === "NoConfirm" && state.shown);
+    expect(document.querySelector<HTMLInputElement>('input[aria-label="Title"]')?.value).toBe("Keep this until I confirm");
+    await press("Discard calendar draft");
+    await until(alpha, runtime, Editor, (state) => state.confirming === "ConfirmDiscard");
+    await press("Discard");
+    await until(alpha, runtime, Editor, (state) => state.form === "NoForm");
+    expect(remindersStore.snapshot().snapshot.items).toHaveLength(0);
+    await press("New event");
+    await until(alpha, runtime, Editor, (state) => state.form === "NewEvent" && state.shown);
+    expect(document.querySelector<HTMLInputElement>('input[aria-label="Title"]')?.value).toBe("");
+  });
 });
 
 it("Shows the newly verified Google grant when Calendar Settings reopens (spec/app/settings/index.md, \"Each page links to what another area owns there\")", async () => {
