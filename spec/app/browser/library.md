@@ -1,8 +1,10 @@
 # Library
 
-Bookmarks and history, shown together from the Browser's menu. The phone
-keeps both; the library reads them, changes them one write at a time, and
-offers to replace a saved bookmark list it cannot read. A page enters
+Bookmarks and history, shown together from the Browser's menu. Alpha
+keeps both on the phone or in the web app's local storage. The library reads
+them, changes them one write at a time, and offers to replace a saved bookmark
+list it cannot read. The web app keeps the saved addresses readable by earlier
+versions. It uses saved titles when their ordered addresses match the list. A page enters
 history when it commits in a normal tab ([Address](./address.md)), and
 clearing all browsing data ([Browser](./index.md)) empties history too.
 

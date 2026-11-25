@@ -274,6 +274,56 @@ pure def sometimesAFileIsRefused(a: Attachments): bool = a.open and a.refused > 
 > As the owner, I want to open a photo I attached, before or after sending
 > it, over the conversation, and close it where I was.
 
+### A recorded attachment is read only for its verified owner, agent and exact message
+
+A sent file kept on this installation belongs to the verified owner and
+agent that received it, under its conversation, room and client send key.
+A page can display it only on an unredacted user row that the agent
+returned with that key. A row the pinned agent returns as
+`[Private information removed]` can no longer open its local file, and
+retiring the loaded copy closes its preview. The agent's owner, identity
+and running epoch must agree across a lookup or send. The recorded key
+leaves out the epoch so the same owner
+can reopen the attachment after a restart. When the running epoch changes
+or the agent leaves, already displayed copies and their previews are
+dropped. An older local copy without verified identity is left in storage.
+
+```quint
+type ArchiveAuthority = { owner: str, agent: str, epoch: int }
+type ArchiveAddress = { owner: str, agent: str, conversation: str, room: str, sendKey: str }
+
+pure def archiveAddress(authority: ArchiveAuthority, conversationKey: str, roomKey: str, sendKey: str): ArchiveAddress =
+  { owner: authority.owner, agent: authority.agent, conversation: conversationKey, room: roomKey, sendKey: sendKey }
+
+pure def sameArchiveAuthority(captured: ArchiveAuthority, observed: ArchiveAuthority): bool =
+  captured.owner != "" and captured.agent != "" and captured.epoch >= 0 and captured == observed
+
+pure def archiveRowNamesFile(mine: bool, redacted: bool, sendKey: str): bool =
+  mine and not(redacted) and sendKey != ""
+
+pure def archiveReadAdmitted(captured: ArchiveAuthority, observed: ArchiveAuthority, mine: bool, redacted: bool, sendKey: str): bool =
+  sameArchiveAuthority(captured, observed) and archiveRowNamesFile(mine, redacted, sendKey)
+
+pure val capturedValues: Set[ArchiveAuthority] = Set(
+  { owner: "alice", agent: "one", epoch: 1 },
+  { owner: "alice", agent: "one", epoch: 2 },
+  { owner: "bruno", agent: "one", epoch: 1 },
+  { owner: "alice", agent: "two", epoch: 1 },
+  { owner: "", agent: "one", epoch: 1 },
+)
+
+pure val observedValues = capturedValues
+
+pure def lawAnArchiveReadNeedsTheSameOwnerAndAgent(captured: ArchiveAuthority, observed: ArchiveAuthority, mine: bool, redacted: bool, sendKey: str): bool =
+  archiveReadAdmitted(captured, observed, mine, redacted, sendKey) implies captured.owner == observed.owner and captured.agent == observed.agent
+
+pure def lawARestartInvalidatesAnInFlightArchiveRead(captured: ArchiveAuthority, observed: ArchiveAuthority, mine: bool, redacted: bool, sendKey: str): bool =
+  captured.epoch != observed.epoch implies not(archiveReadAdmitted(captured, observed, mine, redacted, sendKey))
+
+pure def lawARedactedRowNeverReopensItsFile(mine: bool, sendKey: str): bool =
+  not(archiveRowNamesFile(mine, true, sendKey))
+```
+
 ### An attachment opens in place over the conversation and closes back to it, never opening a view
 
 ```quint

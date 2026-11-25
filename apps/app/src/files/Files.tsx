@@ -62,8 +62,17 @@ function kindOf(item: Item): { name: string; icon: LucideIcon } {
 }
 /** Develop's empty folder: a large muted icon over one line, well below the header. */
 const filesEmpty = "gap-3 px-4 pt-24 pb-4 [&_svg]:size-11";
-/** When a file last changed, as a listed file says it: Today, or the day. */
-const changedOn = (revision: number, now: number) => (new Date(revision).toDateString() === new Date(now).toDateString() ? "Today" : new Date(revision).toLocaleDateString(undefined, { month: "short", day: "numeric" }));
+const changedTime = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+const changedDay = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+const changedDate = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" });
+
+/** A file's listing time today, its day this year, or its date with the year. */
+function changedOn(revision: number, today: Date): string {
+  const date = new Date(revision);
+  if (revision <= 0 || Number.isNaN(date.getTime())) return "";
+  if (date.toDateString() === today.toDateString()) return changedTime.format(date);
+  return (date.getFullYear() === today.getFullYear() ? changedDay : changedDate).format(date);
+}
 function dateRange(filter: Filter): string {
   const date = (value: number) => new Date(value).toLocaleDateString();
   if (filter.from === everything.from) return filter.to === everything.to ? "" : `Through ${date(filter.to)}`;
@@ -139,14 +148,27 @@ export function Files({ runtime, alpha }: FilesProps) {
   const place = state.inCategory ? category : state.trail.length === 1 && state.trail[0] === primary?.id ? "All files" : label(state.trail.at(-1) ?? 0);
   const title = selecting ? String(marks.size) : atTop ? "Files" : (place ?? "Files");
   const wanted: Filter = { ...everything, text: text.trim(), kind: kind ?? "Other", anyKind: kind === undefined };
-  const today = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
-  const described = (item: Item) => `${kindOf(item).name} · ${sized(item.bytes)} · ${changedOn(item.revision, today)}`;
+  const today = new Date(runtime.runSync(Effect.flatMap(Time, (time) => time.latest())));
+  const parentOf = (item: Item) => {
+    const spot = runtime.runSync(Effect.flatMap(Handles, (handles) => handles.spot(item.id)));
+    return Option.map(spot, ({ path }) => path.slice(0, Math.max(0, path.lastIndexOf("/"))));
+  };
+  const location = (item: Item) => {
+    const folder = Option.getOrElse(parentOf(item), () => "");
+    return [label(item.volume), ...folder.split("/").filter(Boolean)].join(" › ");
+  };
+  const summary = (item: Item, showFolder: boolean) => {
+    if (item.kind === "Folder") return "";
+    const folder = showFolder ? Option.map(parentOf(item), (path) => path || label(item.volume)) : Option.none();
+    return [sized(item.bytes), changedOn(item.revision, today), Option.getOrUndefined(folder)].filter(Boolean).join(" · ");
+  };
   const row = (item: Item) => {
     const toggle = { type: "toggle", target: item.id } as const;
     const open = item.kind === "Folder" ? ({ type: "openFolder", target: item.id } as const) : ({ type: "view", file: item } as const);
     const selectable = owner(toggle);
     const selected = marks.has(item.id);
-    const Icon = kindOf(item).icon;
+    const { icon: Icon, name: kind } = kindOf(item);
+    const detail = summary(item, state.inCategory && state.category !== "Download");
     const action = selecting ? toggle : open;
     const onClick = owner(action) ? () => tell(action) : undefined;
     const onContextMenu = selectable ? (event: MouseEvent) => {
@@ -158,8 +180,9 @@ export function Files({ runtime, alpha }: FilesProps) {
         <FilesRow
           layout={grid ? "tile" : "row"}
           aria-label={item.name}
+          aria-description={[kind, detail].filter(Boolean).join(" · ")}
           name={item.name}
-          detail={item.kind === "Folder" ? undefined : described(item)}
+          detail={detail}
           icon={<Icon />}
           chosen={selecting ? selected : undefined}
           disabled={!onClick}
@@ -183,12 +206,13 @@ export function Files({ runtime, alpha }: FilesProps) {
   };
   const pickFile = { type: "openPicker", replacing: 0 } as const;
   const canPick = atTop && recent.can(pickFile, "Owner");
-  const showTools = showFilter || refresh || makeFolder || owner(changeLayout) || canPick;
+  const showStorage = owner({ type: "openTop" });
+  const showTools = showFilter || refresh || makeFolder || owner(changeLayout) || canPick || showStorage;
   const canDetails = firstPicked !== undefined && picked.length === 1 && owner({ type: "showDetails", target: firstPicked.id });
   return (
     <section aria-label="Files" className="relative flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-0 flex-1 flex-col">
-        <AppHeader title={title} detail={selecting || !atTop} leading={selecting && owner({ type: "cancelSelection" }) ? <Button variant="ghost" size="icon" aria-label="Cancel" onClick={() => tell({ type: "cancelSelection" })}><X /></Button> : back}>
+        <AppHeader title={title} detail={selecting || !atTop} className={selecting || !atTop ? "[&>h1]:ms-1.5 in-data-[alpha-title-row]:[&>h1]:ms-0" : undefined} leading={selecting && owner({ type: "cancelSelection" }) ? <Button variant="ghost" size="icon" aria-label="Cancel" onClick={() => tell({ type: "cancelSelection" })}><X /></Button> : back}>
           {selecting && canDetails && <Button variant="ghost" size="icon" aria-label="Details" onClick={() => tell({ type: "showDetails", target: firstPicked.id })}><Info /></Button>}
           {selecting && owner({ type: "selectAll" }) && <Button variant="ghost" className="h-11 px-3" onClick={() => tell({ type: "selectAll" })}>Select all</Button>}
           {!selecting && showTools && (
@@ -206,21 +230,19 @@ export function Files({ runtime, alpha }: FilesProps) {
                 ))}
                 {showFilter && <MenuItem onSelect={() => setFiltering(true)}><Search />Filter files</MenuItem>}
                 {refresh && <MenuItem onSelect={() => tell({ type: "refresh" })}><RefreshCw />Refresh</MenuItem>}
+                {showStorage && <MenuItem onSelect={() => tell({ type: "openTop" })}><HardDrive />Browse storage</MenuItem>}
               </MenuContent>
             </Menu>
           )}
         </AppHeader>
-        {!atTop && (
+        {!atTop && !state.inCategory && (
           <nav aria-label="Folder path" className="flex shrink-0 items-center gap-0.5 overflow-x-auto px-4.5 pb-1.5 text-meta whitespace-nowrap text-muted-foreground">
-            {owner({ type: "openTop" }) && <><button type="button" className="min-h-8" onClick={() => tell({ type: "openTop" })}>Files</button><span aria-hidden className="px-0.5">›</span></>}
-            {state.inCategory
-              ? <span aria-current="location" className="text-foreground">{category}</span>
-              : state.trail.map((handle, at) => {
-                  const crumb = { type: "openCrumb", depth: at + 1 } as const;
-                  return at < state.trail.length - 1
-                    ? <Fragment key={handle}><button type="button" className="min-h-8" disabled={!owner(crumb)} onClick={() => tell(crumb)}>{label(handle)}</button><span aria-hidden className="px-0.5">›</span></Fragment>
-                    : <span key={handle} aria-current="location" className="text-foreground">{label(handle)}</span>;
-                })}
+            {state.trail.map((handle, at) => {
+              const crumb = { type: "openCrumb", depth: at + 1 } as const;
+              return at < state.trail.length - 1
+                ? <Fragment key={handle}><button type="button" className="min-h-8" disabled={!owner(crumb)} onClick={() => tell(crumb)}>{label(handle)}</button><span aria-hidden className="px-0.5">›</span></Fragment>
+                : <span key={handle} aria-current="location" className="text-foreground">{label(handle)}</span>;
+            })}
           </nav>
         )}
         {filtering && showFilter && (
@@ -254,8 +276,9 @@ export function Files({ runtime, alpha }: FilesProps) {
               {looked === "Found" && (
                 <div role="group" aria-label="Found">
                   {state.search.hits.map((hit) => {
-                    const Icon = kindOf(hit).icon;
-                    return <FilesRow key={hit.id} aria-label={hit.name} name={hit.name} icon={<Icon />} detail={described(hit)} disabled={!owner({ type: "view", file: hit })} onClick={() => tell({ type: "view", file: hit })} />;
+                    const { icon: Icon, name: kind } = kindOf(hit);
+                    const detail = summary(hit, true);
+                    return <FilesRow key={hit.id} aria-label={hit.name} aria-description={[kind, detail].filter(Boolean).join(" · ")} name={hit.name} icon={<Icon />} detail={detail} disabled={!owner({ type: "view", file: hit })} onClick={() => tell({ type: "view", file: hit })} />;
                   })}
                 </div>
               )}
@@ -263,37 +286,7 @@ export function Files({ runtime, alpha }: FilesProps) {
           )}
           {atTop ? (
             <>
-              {state.storage.status === "Loading" && <Spinner label="Reading your storage" />}
-              {state.storage.status === "Failed" && <Alert variant="destructive"><span>Your storage cannot be read now</span>{refresh && <Button variant="ghost" size="sm" onClick={() => tell({ type: "refresh" })}>Retry</Button>}</Alert>}
-              {(state.storage.status === "Loaded" || state.volumes.length > 0) && (
-                <>
-                  <div role="group" aria-label="Categories">
-                    {primary && owner({ type: "openVolume", target: primary.id }) && <FilesRow size="place" aria-label="All files" name="All files" icon={<Folder />} onClick={() => tell({ type: "openVolume", target: primary.id })} />}
-                    {categories.map(([kind, name]) => {
-                      const counted = state.tally.counts.find((count) => count.kind === kind);
-                      const Icon = icons[kind];
-                      return <FilesRow key={kind} size="place" aria-label={name} aria-description={counted && `${counted.items} · ${sized(counted.bytes)}`} name={name} icon={<Icon />} count={counted === undefined ? undefined : String(counted.items)} disabled={!owner({ type: "openCategory", kind })} onClick={() => tell({ type: "openCategory", kind })} />;
-                    })}
-                  </div>
-                  <h2 className="mx-2 mt-3.5 mb-1 text-meta font-semibold text-muted-foreground">Storage</h2>
-                  {state.volumes.map((volume) => {
-                    const name = label(volume.id);
-                    return (
-                      <FilesRow
-                        key={volume.id}
-                        size="place"
-                        aria-label={name}
-                        name={name}
-                        icon={<HardDrive />}
-                        detail={volume.total > 0 && <><span className="block">{`${sized(Math.max(0, volume.total - volume.used))} free of ${sized(volume.total)}`}</span><Progress className="mt-2 h-1.5" aria-label={`${name} used`} value={filled(volume.used, volume.total)} /></>}
-                        disabled={!owner({ type: "openVolume", target: volume.id })}
-                        onClick={() => tell({ type: "openVolume", target: volume.id })}
-                      />
-                    );
-                  })}
-                  {owner({ type: "openTrash" }) && <FilesRow size="place" aria-label="Trash" name="Trash" icon={<Trash2 />} count={state.tally.trashed || undefined} onClick={() => tell({ type: "openTrash" })} />}
-                </>
-              )}
+              <FilesHome state={state} label={label} owner={owner} tell={tell} refresh={refresh} />
               <RecentFiles runtime={runtime} />
             </>
           ) : looked === "NoFilter" && (
@@ -323,7 +316,7 @@ export function Files({ runtime, alpha }: FilesProps) {
           ]} />
         )}
       </div>
-      <FileLayers state={state} picked={picked} naming={naming} setNaming={setNaming} owner={owner} tell={tell} label={label} />
+      <FileLayers state={state} picked={picked} naming={naming} setNaming={setNaming} owner={owner} tell={tell} label={label} location={location} />
       <Preview runtime={runtime} />
       {scanner}
       <Sheet open={change.panel !== 0} onOpenChange={(open) => { if (!open && owner({ type: "closeShare" })) tell({ type: "closeShare" }); }}>
@@ -338,6 +331,43 @@ export function Files({ runtime, alpha }: FilesProps) {
 }
 
 
+function FilesHome({ state, label, owner, tell, refresh }: Pick<FileLayersProps, "state" | "label" | "owner" | "tell"> & { readonly refresh: boolean }) {
+  const primary = state.volumes[0];
+  return <>
+    {state.storage.status === "Loading" && <Spinner label="Reading your storage" />}
+    {state.storage.status === "Failed" && <Alert variant="destructive"><span>Your storage cannot be read now</span>{refresh && <Button variant="ghost" size="sm" onClick={() => tell({ type: "refresh" })}>Retry</Button>}</Alert>}
+    {(state.storage.status === "Loaded" || state.volumes.length > 0) && (
+      <>
+        <div role="group" aria-label="Categories">
+          {primary && owner({ type: "openVolume", target: primary.id }) && <FilesRow size="place" aria-label="All files" name="All files" icon={<Folder />} onClick={() => tell({ type: "openVolume", target: primary.id })} />}
+          {categories.map(([kind, name]) => {
+            const counted = state.tally.counts.find((count) => count.kind === kind);
+            const Icon = icons[kind];
+            return <FilesRow key={kind} size="place" aria-label={name} aria-description={counted && `${counted.items} · ${sized(counted.bytes)}`} name={name} icon={<Icon />} count={counted === undefined ? undefined : String(counted.items)} disabled={!owner({ type: "openCategory", kind })} onClick={() => tell({ type: "openCategory", kind })} />;
+          })}
+        </div>
+        <h2 className="mx-2 mt-3.5 mb-1 text-caption font-semibold text-muted-foreground">Storage</h2>
+        {state.volumes.map((volume) => {
+          const name = label(volume.id);
+          return (
+            <FilesRow
+              key={volume.id}
+              size="place"
+              aria-label={name}
+              name={name}
+              icon={<HardDrive />}
+              detail={volume.total > 0 && <><span className="block">{`${sized(Math.max(0, volume.total - volume.used))} free of ${sized(volume.total)}`}</span><Progress className="mt-2 h-1.5" aria-label={`${name} used`} value={filled(volume.used, volume.total)} /></>}
+              disabled={!owner({ type: "openVolume", target: volume.id })}
+              onClick={() => tell({ type: "openVolume", target: volume.id })}
+            />
+          );
+        })}
+        {owner({ type: "openTrash" }) && <FilesRow size="place" aria-label="Trash" name="Trash" icon={<Trash2 />} count={state.tally.trashed || undefined} onClick={() => tell({ type: "openTrash" })} />}
+      </>
+    )}
+  </>;
+}
+
 type FileLayersProps = {
   readonly state: FilesState;
   readonly picked: readonly Item[];
@@ -346,9 +376,10 @@ type FileLayersProps = {
   readonly owner: (event: FilesEvent) => boolean;
   readonly tell: (event: FilesEvent) => void;
   readonly label: (handle: number) => string;
+  readonly location: (item: Item) => string;
 };
 
-function FileLayers({ state, picked, naming, setNaming, owner, tell, label }: FileLayersProps) {
+function FileLayers({ state, picked, naming, setNaming, owner, tell, label, location }: FileLayersProps) {
   const [details] = detailed(state);
   const { change } = state;
   const namingEvent = naming === undefined ? undefined : naming.destinationRead === undefined
@@ -377,7 +408,7 @@ function FileLayers({ state, picked, naming, setNaming, owner, tell, label }: Fi
               <dt>Kind</dt><dd>{kindNames[details.kind]}</dd>
               {details.kind !== "Folder" && <><dt>Size</dt><dd>{sized(details.bytes)}</dd></>}
               <dt>Changed</dt><dd><time dateTime={new Date(details.revision).toISOString()}>{new Date(details.revision).toLocaleString()}</time></dd>
-              <dt>Where</dt><dd>{state.trail.map(label).join(" › ")}</dd>
+              <dt>Where</dt><dd>{location(details)}</dd>
             </dl>
           )}
         </DialogContent>

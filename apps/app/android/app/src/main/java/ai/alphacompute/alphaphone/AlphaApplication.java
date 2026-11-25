@@ -18,7 +18,12 @@ public final class AlphaApplication extends Application {
   super.onCreate();
   AlphaAgentCredentials credentials = new AlphaAgentCredentials(this);
   AgentService.useCredentials(credentials);
-  listening = credentials.reader().listen(notice -> AgentService.credentialChanged(this));
+  HostedDigestDelivery digests = getPackageName().equals(getProcessName())
+   ? HostedDigestDelivery.start(this, credentials.reader()) : null;
+  listening = credentials.reader().listen(notice -> {
+   if (digests != null) digests.custodyChanged(notice);
+   AgentService.credentialChanged(this);
+  });
   AlphaNotificationChannels.describe(this);
  }
 }

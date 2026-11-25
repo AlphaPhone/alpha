@@ -35,7 +35,7 @@ export function HomeCard({ title, icon, notCurrent, variant = "row", className, 
         className,
       )}
     >
-      <button type="button" {...props}>
+      <button type="button" {...props} data-home-card={variant}>
         <span className="flex w-full items-center gap-2">
           <span className={cn("min-w-0 flex-1 text-sm leading-snug font-semibold", agenda && "text-alpha-foreground/85")}>{title}</span>
           <span aria-hidden className={cn("text-primary [&_svg:not([class*='size-'])]:size-6", agenda && "text-alpha-foreground")}>{icon}</span>
@@ -52,7 +52,7 @@ export function HomeCardLines({ lines }: HomeCardLinesProps) {
   return lines.map((line) => (
     <span key={`${line.title}\n${line.detail}`} className="flex min-w-0 flex-col">
       <span className="truncate text-lg leading-snug font-semibold">{line.title}</span>
-      <span className="truncate text-xs leading-normal text-muted-foreground">{line.detail}</span>
+      <span className="truncate text-xs leading-normal text-muted-foreground in-data-[home-card=agenda]:text-alpha-foreground/85">{line.detail}</span>
     </span>
   ));
 }

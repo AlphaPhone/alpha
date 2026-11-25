@@ -92,11 +92,12 @@ export const handoffs = Layer.effect(Views, effect {
 
 // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
 /** What a turn told of the screen adds so the agent may hand back a view to open on it: views as completed actions, this screen, and its saved-note editor. */
-export function delivery(clientId: string) {
+export function delivery(clientId: string, directFiles: boolean = false) {
   return {
     viewDelivery: "completed-action" as const,
     viewClientId: clientId,
-    voiceUi: { viewDelivery: "completed-action" as const, uiClientId: clientId, uiNotesEditor: "saved-note-v1" as const },
+    voiceUi: { viewDelivery: "completed-action" as const, uiClientId: clientId, uiNotesEditor: "saved-note-v1" as const,
+      ...(directFiles ? { agentActionMode: "direct-request-v1" as const } : {}) },
   }
 }
 

@@ -10,7 +10,8 @@
     { "name": "launcher", "manifest": { "root": "consumer", "path": "android/app/manifests/launcher/AndroidManifest.xml" } }
   ],
   "buildConfigFields": [
-    { "name": "AOSP_BUILD", "type": "boolean", "value": false }
+    { "name": "AOSP_BUILD", "type": "boolean", "value": false },
+    { "name": "ALPHA_UPDATE_MANIFEST_URL", "type": "String", "value": "https://github.com/eliza-research/alpha/releases/download/app-stable-alphacompute/alpha-update-stable.json" }
   ],
   "buildTypes": {
     "release": {
@@ -46,7 +47,6 @@
     { "module": "wifi" },
     { "module": "voice-io" },
     { "module": "local-inference" },
-    { "module": "cloud-speech" },
     { "module": "browser-surface" }
   ],
   "modules": [
@@ -58,7 +58,10 @@
     { "configuration": "implementation", "module": "androidx.webkit:webkit", "toolchainVersion": "androidxWebkitVersion" },
     { "configuration": "testImplementation", "module": "junit:junit", "toolchainVersion": "junitVersion" }
   ],
-  "appScripts": [{ "root": "consumer", "path": "android/app/browser.gradle" }],
+  "appScripts": [
+    { "root": "consumer", "path": "android/app/browser.gradle" },
+    { "root": "consumer", "path": "android/app/hosted-digest.gradle" }
+  ],
   "agent": {
     "host": { "root": "consumer", "path": "android/agent/host.json" },
     "character": { "root": "consumer", "path": "android/agent/character.json" },
