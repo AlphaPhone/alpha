@@ -17,6 +17,21 @@ module checked {
 }
 import { type Android, client } from checked
 
+module browser {
+  import { downloadCopy, releasePreview } from "./browser-library.ts"
+
+  /** Ask the browser to save the exact text. It does not report the disk outcome. @throws {never} */
+  export function downloadText(name: string, text: string): boolean {
+    try {
+      const url = downloadCopy(name, new Blob([text], { type: "text/plain;charset=utf-8" }))
+      setTimeout(() => releasePreview(url), 60_000)
+      return true
+    } catch { return false }
+  }
+}
+import { downloadText } from browser
+export { downloadText }
+
 const Result = Schema.Struct({
   status: Schema.Literals(["picked", "cancelled", "unavailable", "unreadable", "exported", "unverified", "failed"]),
   text: Schema.optionalKey(Schema.String),
@@ -31,16 +46,17 @@ export service NoteDocuments {
 }
 
 const unavailable: DocumentResult = { status: "unavailable" }
+const unverified: DocumentResult = { status: "unverified" }
 
 export const noteDocuments = Layer.sync(NoteDocuments, () => {
   const api = registered("AlphaNoteDocuments") ? client() : undefined
-  const answered = (call: (api: Android) => Promise<unknown>) => api === undefined ? succeed(unavailable) : (effect {
-    const raw = try tryPromise(() => call(api))
-    return try Schema.decodeUnknownEffect(Result)(raw)
-  } |> Effect.orElseSucceed(%, (): DocumentResult => unavailable))
+  const answered = (call: (api: Android) => Promise<unknown>, onFailure: DocumentResult) => api === undefined ? succeed(unavailable) : Effect.catch(
+    flatMap(tryPromise(() => call(api)), Schema.decodeUnknownEffect(Result)),
+    () => succeed(onFailure),
+  )
   return {
     available: api !== undefined,
-    pick: (importing: boolean, title: string) => answered((native) => native.pick({ importing, title })),
-    write: (handle: string, text: string) => answered((native) => native.write({ handle, text })),
+    pick: (importing: boolean, title: string) => answered((native) => native.pick({ importing, title }), unavailable),
+    write: (handle: string, text: string) => answered((native) => native.write({ handle, text }), unverified),
   }
 })

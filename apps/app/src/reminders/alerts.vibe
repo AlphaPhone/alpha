@@ -6,8 +6,9 @@ import { PhoneReminders } from "../platform/reminders.vibe"
 import { attemptedWith } from "../platform/remote.vibe"
 import type { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, due, reacting, run, together, untimed } from "../runtime/reactor.vibe"
+import { externalStore } from "../runtime/store.ts"
 import { Time } from "../runtime/time.vibe"
-import { alertInstantMs } from "./recurrence.ts"
+import { advanceDueDate, alertInstantMs } from "./recurrence.ts"
 import { type ReminderItemRecord, type RemindersSnapshot, remindersStore } from "./store.ts"
 
 /** Optional native Android reminder alarm bridge wired by the integrator without coupling Reminders to platform internals. */
@@ -33,38 +34,29 @@ export interface RingingBannerState {
   readonly item: ReminderItemRecord
 }
 
-let bannerState: RingingBannerState | undefined
-const bannerListeners = new Set<() => void>()
-
-function emitBanner(next: RingingBannerState | undefined): void {
-  bannerState = next
-  for (const listener of [...bannerListeners]) listener()
-}
+const banner = externalStore<RingingBannerState | undefined>(undefined)
 
 /** External store for the currently ringing due-reminder notification banner. */
 export const alertBannerStore = {
-  snapshot: (): RingingBannerState | undefined => bannerState,
-  subscribe(listener: () => void): () => void {
-    bannerListeners.add(listener)
-    return () => { bannerListeners.delete(listener) }
-  },
+  snapshot: banner.snapshot,
+  subscribe: banner.subscribe,
   reset(): void {
-    emitBanner(undefined)
+    banner.set(undefined)
   },
 }
 
 effect function syncBannerFromMachine(): void!!Alerts.Machine {
   const state = try (try Alerts.Machine).get()
   if (state.bannerId === 0) {
-    emitBanner(undefined)
+    banner.set(undefined)
     return
   }
   const entry = Alerts.entryOf(state.entries, state.bannerId)
   const item = remindersStore.findItemBySpecId(state.bannerId)
   if (entry.phase === "Ringing" && item !== undefined && !item.completed) {
-    emitBanner({ specId: state.bannerId, revision: entry.revision, item })
+    banner.set({ specId: state.bannerId, revision: entry.revision, item })
   } else {
-    emitBanner(undefined)
+    banner.set(undefined)
   }
 }
 
@@ -116,7 +108,22 @@ effect function syncComplete(id: number, attemptId: number): Event!!(Agent | Tim
   return try syncBannerAction(
     id,
     attemptId,
-    (row, now) => ({ ...row, completed: true, completedAtMs: now, snoozedUntilMs: null, revision: row.revision + 1, updatedAtMs: now }),
+    (row, now) => {
+      if (row.recurrence !== "none" && row.dueDate !== null) {
+        return {
+          ...row,
+          dueDate: advanceDueDate(row.dueDate, row.recurrence),
+          subtasks: row.subtasks.map((sub) => ({ ...sub, done: false })),
+          completed: false,
+          completedAtMs: null,
+          snoozedUntilMs: null,
+          notifiedAtMs: null,
+          revision: row.revision + 1,
+          updatedAtMs: now,
+        }
+      }
+      return { ...row, completed: true, completedAtMs: now, snoozedUntilMs: null, revision: row.revision + 1, updatedAtMs: now }
+    },
     (item, _now, key) => HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(`/api/alpha/reminders/items/${encodeURIComponent(item.id)}/complete`), { idempotencyKey: key }),
   )
 }
@@ -126,7 +133,7 @@ effect function syncSnooze(id: number, until: number, attemptId: number): Event!
     id,
     attemptId,
     (row, now) => ({ ...row, snoozedUntilMs: until, revision: row.revision + 1, updatedAtMs: now }),
-    (item, _now, key) => HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(`/api/alpha/reminders/items/${encodeURIComponent(item.id)}/snooze`), { snoozedUntilMs: until, idempotencyKey: key }),
+    (item, _now, key) => HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(`/api/alpha/reminders/items/${encodeURIComponent(item.id)}/snooze`), { untilMs: until, idempotencyKey: key }),
   )
 }
 

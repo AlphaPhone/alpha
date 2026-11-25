@@ -1,5 +1,5 @@
 // spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/address.md, "Story: Watch a page load"
-import type { BrowserBookmarkList, BrowserSavedState, BrowserTabHostPlugin, BrowserTabState } from "@elizaos/os/bridges/definitions/tab-host";
+import type { BrowserBookmarkList, BrowserPageGuard, BrowserSavedState, BrowserTabHostPlugin, BrowserTabState } from "@elizaos/os-bridges";
 import { type Faked, plugin, rejection } from "./phone.ts";
 
 interface TabEvents {
@@ -7,6 +7,7 @@ interface TabEvents {
   tabOpened: { session: string; id: string; opener?: string; private?: boolean };
   tabClosed: { session: string; id: string };
   findResult: { session: string; id: string; navigation?: string; cleared?: boolean; index?: number; count?: number; done?: boolean };
+  showDownloads: { session: string };
 }
 
 /** One native tab of the fake tab host: its web view's history and what it shows. */
@@ -27,12 +28,15 @@ interface Held {
 /** What the fake phone's tab host keeps, as `AlphaBrowserPlugin` keeps it: its saved session, bookmarks and the tabs it holds. */
 export interface BrowserScene {
   saved: BrowserSavedState;
+  beforeSave?: (saved: BrowserSavedState) => Promise<void>;
   bookmarks: { url: string; title?: string }[];
   readonly tabs: Map<string, Held>;
   /** The tab drawn and where, as `present` last placed it. */
   shown: { id: string; x: number; y: number; width: number; height: number } | undefined;
   /** Every call the page made, by method. */
   readonly calls: string[];
+  readonly shared: BrowserPageGuard[];
+  showInFiles: (() => void) | undefined;
 }
 
 /** develop's fixture photographs, served beside the fakes. */
@@ -133,6 +137,8 @@ export function browserScene(): BrowserScene {
     tabs: new Map(),
     shown: undefined,
     calls: [],
+    shared: [],
+    showInFiles: undefined,
   };
 }
 
@@ -272,11 +278,12 @@ export function alphaBrowser(world: BrowserScene): Faked {
         session = asked;
         return Promise.resolve(world.saved);
       },
-      saveBrowsingState: ({ session: asked, ...saved }) => {
+      saveBrowsingState: async ({ session: asked, ...saved }) => {
         world.calls.push("saveBrowsingState");
         session = asked;
+        await world.beforeSave?.(saved);
         world.saved = saved;
-        return Promise.resolve(saved);
+        return saved;
       },
       clearBrowsingData: () => {
         const closed = [...world.tabs.values()].filter((tab) => !tab.private).map((tab) => tab.id);
@@ -290,9 +297,23 @@ export function alphaBrowser(world: BrowserScene): Faked {
       reviewQuestion: () => Promise.reject(rejection("Reading unavailable")),
       reviewReading: () => Promise.reject(rejection("Reading unavailable")),
       cancelReading: () => Promise.resolve(),
-      share: (options) => Promise.resolve(stateOf(held(options))),
+      share: (options) => {
+        const tab = stateOf(held(options));
+        if (!tab.committed || tab.loading || tab.url !== options.url || tab.navigation !== options.navigation) {
+          return Promise.reject(rejection("The Browser page changed"));
+        }
+        world.shared.push(options);
+        return Promise.resolve(tab);
+      },
       openExternalBrowser: () => Promise.resolve(),
-      downloads: () => Promise.resolve(),
+      downloads: ({ session: requested }) => {
+        world.calls.push("downloads");
+        world.showInFiles = () => {
+          world.showInFiles = undefined;
+          emit("showDownloads", { session: requested });
+        };
+        return Promise.resolve();
+      },
       loginFillStatus: () => Promise.resolve({ available: false }),
     };
   });

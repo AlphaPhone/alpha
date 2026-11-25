@@ -186,16 +186,19 @@ pure def sometimesTookTheSavedDraft(c: Composer): bool =
 
 ### A restart closes the conversation and keeps the saved drafts, the send, access and the SIMs the phone has
 
-A suggestion asked before the restart is not taken after it.
+A suggestion asked before the restart is not taken after it. A send that
+lacked a final answer becomes unknown. Checking it reads its saved receipt.
 
 ```quint
 pure def restart(c: Composer): Composer =
-  { ...initial, saved: c.saved, outgoing: c.outgoing, sending: c.sending, simInfo: c.simInfo, sims: c.sims,
+  { ...initial, saved: c.saved, outgoing: if (S::busy(c.outgoing)) S::lost(c.outgoing) else c.outgoing,
+    sending: c.sending, simInfo: c.simInfo, sims: c.sims,
     suggestion: { ...c.suggestion, status: R::Idle } }
 
 pure def stepSavedDraftsSurviveARestart(before: Composer, via: str, after: Composer): bool =
-  via == "restart" implies (after.saved == before.saved and after.outgoing == before.outgoing and after.thread == 0
-    and after.sending == before.sending and after.simInfo == before.simInfo
+  val held = if (S::busy(before.outgoing)) S::lost(before.outgoing) else before.outgoing
+  via == "restart" implies (after.saved == before.saved and after.outgoing == held and after.thread == 0
+    and after.sending == before.sending and after.simInfo == before.simInfo and after.sims == before.sims
     and after.suggestion.ticket == before.suggestion.ticket and after.suggestion.status == R::Idle)
 ```
 
@@ -258,8 +261,11 @@ pure def undo(c: Composer): Composer = { ...c, slot: { author: Nobody, draft: D:
 
 The agent may ask for a reply to the conversation open on screen, or for a
 draft to a number the owner wrote, whose conversation Messages opens first,
-as a number handed to it. Its text becomes Alpha's draft there, for the
-owner to edit and send. A draft already written, or one held by a send, is
+as a number handed to it. After the owner reviewed the latest sender’s full
+number and the agent's reply named its Android thread, a follow-up draft
+uses that exact thread only while Android still shows the same sole
+recipient there. Its text becomes Alpha's draft there, for the owner to
+edit and send. A draft already written, or one held by a send, is
 left as it is, and the agent is told the draft is occupied; with no
 conversation open it is told none is selected.
 
@@ -364,7 +370,8 @@ pure def handOff(c: Composer, supported: bool): Moved = { state: c, out: List(Op
 ### Only the owner's Send sends: a draft or a picture, with send access, a SIM where there is a choice, and never during a call that may be an emergency call
 
 `clear` is Phone's fact that no call which may be an emergency call is
-live. A send whose outcome is unknown is read back instead. Send goes to
+live. A send whose outcome is unknown is read back instead, including when
+reopening lost the attached pictures or the phone can no longer send. Send goes to
 the open conversation's own numbers, exactly as the phone listed them for
 that conversation, never to a number typed or named elsewhere.
 
@@ -374,7 +381,8 @@ pure def ready(c: Composer, supported: bool, clear: bool): bool =
     and (c.sims == 1 or c.sim > 0) and supported and clear
 
 pure def canSend(c: Composer, supported: bool, clear: bool): bool =
-  ready(c, supported, clear) and S::canSend(c.outgoing, c.thread, c.recipients)
+  (if (S::uncertain(c.outgoing)) clear else ready(c, supported, clear))
+    and S::canSend(c.outgoing, c.thread, c.recipients)
 
 pure def send(c: Composer, supported: bool, clear: bool): Moved = withSend(S::send(c.outgoing, c.thread, c.recipients), c)
 ```

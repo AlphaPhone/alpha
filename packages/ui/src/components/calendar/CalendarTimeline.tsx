@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from "react";
+import { type ComponentProps, type ReactNode, useState } from "react";
 import { cn, focusRing } from "../../lib/cn.ts";
 
 /** The height of one hour of the timeline, in pixels. */
@@ -46,15 +46,18 @@ export type CalendarEventBlockProps = Omit<ComponentProps<"button">, "children">
 export function CalendarEventBlock({ block, first, showTime = true, className, style, ...props }: CalendarEventBlockProps) {
   const { top, height, short } = placed(block, first);
   const invite = block.tone === "invite";
+  const detail = !short && block.length >= 1 ? block.sub : undefined;
+  const label = [block.title, detail, showTime ? block.time : undefined].filter(Boolean).join(", ");
+  const description = !showTime || block.label !== `${block.title}, ${block.time}` ? block.label : undefined;
   return (
-    <button type="button" aria-label={block.label} disabled={!block.onOpen} onClick={block.onOpen} style={{ top, height, ...style }}
+    <button type="button" aria-label={label} aria-description={description} disabled={!block.onOpen} onClick={block.onOpen} style={{ top, height, ...style }}
       className={cn(focusRing, "absolute box-border flex items-center gap-2 overflow-hidden rounded-md pr-3 pl-4 text-left disabled:cursor-default",
         short ? "py-0" : "py-2", invite ? "border-[1.5px] border-dashed border-muted-foreground bg-background" : "bg-secondary", className)} {...props}>
       <span aria-hidden className={cn("absolute top-1.5 bottom-1.5 left-1.5 w-0.75 rounded-full", invite || !block.stripe ? "bg-transparent" : block.stripe === "primary" ? "bg-primary" : "bg-foreground")} />
       <span className="flex min-h-0 min-w-0 grow flex-col flex-wrap justify-center self-stretch overflow-hidden">
         <span className="w-full shrink-0 truncate text-sm leading-plain font-semibold">{block.title}</span>
-        {!short && block.sub && block.length >= 1 ? <span className="mt-0.75 w-full shrink-0 truncate text-xs leading-plain opacity-85">{block.sub}</span> : null}
-      </span>
+        {detail ? <>{" "}<span className="mt-0.75 w-full shrink-0 truncate text-xs leading-plain opacity-85">{detail}</span></> : null}
+      </span>{" "}
       {showTime ? <span className="text-xs leading-plain whitespace-nowrap opacity-75">{block.time}</span> : null}
     </button>
   );
@@ -73,13 +76,30 @@ export type CalendarTimelineProps = Omit<ComponentProps<"div">, "children"> & {
   columns?: ReactNode;
 };
 
+/** The timeline's edge fade: 12px at the top over its first 24px of scroll, and 12px at the bottom until its last 24px, eased in and out. */
+function fadeOf(el: HTMLElement): { top: number; bottom: number } {
+  const room = el.scrollHeight - el.clientHeight;
+  if (room <= 0) return { top: 0, bottom: 0 };
+  const run = Math.min(24, room);
+  const eased = (x: number) => { const t = Math.min(1, Math.max(0, x)); return t * t * (3 - 2 * t); };
+  return { top: 12 * eased(el.scrollTop / run), bottom: 12 * (1 - eased((el.scrollTop - room + run) / run)) };
+}
+
 /** A day's hours, from the first to the last, with each timed event in its place and the time now. */
-export function CalendarTimeline({ hours, blocks = [], now, empty, columns, className, ...props }: CalendarTimelineProps) {
+export function CalendarTimeline({ hours, blocks = [], now, empty, columns, className, style, onScroll, ...props }: CalendarTimelineProps) {
+  const [fade, setFade] = useState({ top: 0, bottom: 0 });
+  const refade = (el: HTMLElement | null) => {
+    if (!el) return;
+    const next = fadeOf(el);
+    setFade((was) => (was.top === next.top && was.bottom === next.bottom ? was : next));
+  };
+  const mask = `linear-gradient(to bottom, transparent 0, black ${fade.top}px, black calc(100% - ${fade.bottom}px), transparent 100%)`;
   const first = hours[0]?.hour ?? 7;
   const last = hours.at(-1)?.hour ?? 23;
   const height = (last - first) * calendarHourHeight + 16;
   return (
-    <div role="region" aria-label="Calendar timeline" tabIndex={0}
+    <div ref={refade} role="region" aria-label="Calendar timeline" tabIndex={0} onScroll={(event) => { refade(event.currentTarget); onScroll?.(event); }}
+      style={{ maskImage: mask, WebkitMaskImage: mask, maskRepeat: "no-repeat", WebkitMaskRepeat: "no-repeat", ...style }}
       className={cn(focusRing, "grow touch-pan-y overflow-y-auto border-t border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", className)} {...props}>
       <div className="relative mb-27.5" style={{ height }}>
         {hours.map(({ hour, label }) => (

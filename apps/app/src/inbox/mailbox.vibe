@@ -1,15 +1,19 @@
 // spec/app/inbox/index.md, "Story: See my mail"
-import { CloudError } from "@elizaos/cloud/client"
-import { protocolFailure } from "@elizaos/plugin-inbox/mailbox"
+import { CloudError } from "@elizaos/cloud"
+import { protocolFailure } from "@elizaos/plugin-inbox-client"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Inbox from "../../gen/app__inbox.effect.vibe"
+import * as Sending from "../../gen/app__inbox__sending.effect.vibe"
 import type { Effect as Out, Event, Folder } from "../../gen/app__inbox.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Time } from "../runtime/time.vibe"
 import { waiting } from "../home/waiting.vibe"
+import { civilDay } from "../calendar/time.ts"
 import { fromAreas } from "../home/cards.vibe"
 import { Device } from "../platform/device.vibe"
-import { Cloud } from "../platform/cloud.vibe"
-import { type Job, answer, contained, reacting, started, stream, together, untimed } from "../runtime/reactor.vibe"
+import { afterMailSignIn, leaseRefusalReason } from "../../gen/app__platform.effect.vibe"
+import { Cloud, mailSignIn } from "../platform/cloud.vibe"
+import { type Job, Whole, answer, contained, reacting, started, stream, together, untimed } from "../runtime/reactor.vibe"
 import { Mail, asked, connections, failureOf, mail, page } from "./gmail.vibe"
 
 const owner = "alpha/inbox/owner"
@@ -22,14 +26,15 @@ export const ownerChanges = Stream.unwrap(effect {
   return Stream.drop(Stream.changes(owners), 1)
 })
 
-// spec/app/inbox/index.md, "The answer names the connected accounts, their credentials and grants; the account chosen stays selected while it is connected, else the one account that may be read, else none and the owner chooses"
+// spec/app/inbox/index.md, "The answer names the connected accounts, their credentials and grants; the account chosen stays selected while it is connected, else the one account that may be read, else none and the owner chooses"; spec/app/inbox/index.md, "A check the phone holds back for want of the mail lease keeps the session and everything kept, and asks for one more sign-in"
 effect function checked(ticket: number): Event!!(Cloud | Mail | Inbox.Machine | KeyValueStore.KeyValueStore) {
   const list = try Inbox.Machine
   const ledger = try Mail
   const reply = effect { return { accounts: try connections() } }
-    catch (cause) => ({ signedOut: protocolFailure(cause)?.status === 401 })
+    catch (cause) => ({ signedOut: protocolFailure(cause)?.status === 401, held: protocolFailure(cause)?.reason === leaseRefusalReason })
   if (!Inbox.canAccountsAnswered(try list.get(), ticket)) return { type: "accountsAnswered", ticket, ok: false, connected: [] }
   if ("signedOut" in reply) {
+    if (reply.held) return { type: "accountsHeld", ticket }
     if (reply.signedOut) {
       try ledger.forget()
       try ignore((try KeyValueStore.KeyValueStore).remove(owner))
@@ -95,6 +100,25 @@ effect function recheck(): void!!(Cloud | Mail | Inbox.Machine | KeyValueStore.K
   try contained(machine.send({ type: "sessionChanged", signedIn: who !== "" }), "the cloud session")
 }
 
+// spec/app/platform/index.md, "The owner's tap on a mail sign-in control starts the phone's one more sign-in for mail where the phone wants it, then reads again once"
+/** The owner's tap on Connect Eliza Cloud or Reconnect: the phone's sign-in for mail where it wants one, then one more check; `usual` where it wants none. */
+effect function signInForMail(usual: () => void): void!!(Cloud | Mail | Inbox.Machine | KeyValueStore.KeyValueStore) {
+  const next = afterMailSignIn(try mailSignIn())
+  if (next === "ReadAgain") try recheck()
+  else if (next === "AsAlways") usual()
+}
+
+/** Inbox's sign-in for mail, for the list's own controls to ask. */
+export service MailSignIn {
+  /** The owner tapped Connect Eliza Cloud or Reconnect, whose action is otherwise `usual`. */
+  signIn(usual: () => void): void!!
+}
+
+const signIns = Layer.effect(MailSignIn, effect {
+  const whole = try Whole
+  return { signIn: (usual: () => void) => flatMap(whole.context, (context) => Effect.provideContext(signInForMail(usual), context as Context.Context<Cloud | Mail | Inbox.Machine | KeyValueStore.KeyValueStore>)) }
+})
+
 // spec/app/inbox/index.md, "Opening Inbox, and every change to Google access, checks the accounts again, even while a check is out"
 const session = started(effect {
   const shell = try Shell
@@ -115,24 +139,27 @@ function waitingOf(said: Inbox.Attention): string | undefined {
 const home = started(effect {
   const list = try Inbox.Machine
   const ledger = try Mail
+  const sending = try Sending.Machine
+  const time = try Time
   let previous = ""
-  try Stream.runForEach(list.changes, effect (state) => {
+  try Stream.runForEach(Stream.zipLatest(list.changes, sending.changes), effect ([state, changing]) => {
     try ledger.accept(state)
     const unread = Inbox.attention(state)
     waiting.tell("Inbox", waitingOf(unread))
-    const connected = unread.standing === "Ready" || unread.standing === "Stale"
-    const rows = connected ? ledger.shown(state).filter(({ card }) => card.isUnread).slice(0, 2).map(({ card }) => ({
-      title: card.from.replace(/<[^>]*>/u, "").replace(/"/gu, "").trim() || card.from,
-      detail: card.subject || "No subject",
+    const connected = Inbox.readable(state) && (unread.standing === "Ready" || unread.standing === "Stale")
+    const held = new Set(Sending.aside(changing))
+    const rows = connected ? ledger.incoming(state).filter(({ message, card }) => card.isUnread && !held.has(message)).slice(0, 2).map(({ card }) => ({
+      title: card.subject || "No subject",
+      detail: card.from.replace(/<[^>]*>/u, "").replace(/"/gu, "").trim() || card.from,
     })) : []
-    const card = { connected, unread: unread.unread, rows, current: unread.standing === "Ready" }
-    const written = JSON.stringify(card)
+    const card = { connected, unread: unread.unread, rows, current: unread.standing === "Ready" && civilDay(unread.at) === civilDay(try time.now()) }
+    const written = JSON.stringify([card, unread.more])
     if (written !== previous) {
       previous = written
-      fromAreas.mail(card)
+      fromAreas.mail(card, unread.more)
     }
   })
 }, "telling Home")
 
 /** Gmail's list, from launch: kept across restarts, read through the owner's cloud, and checked again each time Inbox opens. */
-export const mailbox = together(Layer.provideMerge(kept, mail), session, home)
+export const mailbox = together(Layer.provideMerge(kept, mail), session, home, signIns)

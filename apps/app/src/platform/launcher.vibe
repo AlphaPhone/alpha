@@ -1,8 +1,8 @@
 // spec/app/home/index.md, "Story: Open an app"; spec/app/home/index.md, "Story: See the apps on this phone"
-import type { InstalledApp } from "@elizaos/os/bridges/definitions/system"
+import type { InstalledApp, SystemClient } from "@elizaos/os-bridges"
 
 module held {
-  import type * as SystemBridge from "@elizaos/os/bridges/system"
+  import type * as SystemBridge from "@elizaos/os-bridges"
   type Bridge = typeof SystemBridge
   let loaded: Promise<Bridge> | undefined
   /**
@@ -11,10 +11,15 @@ module held {
    * @throws {never}
    */
   export function bridge(): Promise<Bridge> {
-    return (loaded ??= import("@elizaos/os/bridges/system"))
+    return (loaded ??= import("@elizaos/os-bridges"))
   }
 }
 import { bridge } from held
+
+/** eliza's client of the phone's `ElizaSystem` plugin, from the one bridge the launcher loads. */
+export function phoneSystem(): Promise<SystemClient> {
+  return bridge().then((loaded) => loaded.System)
+}
 
 /** How Alpha is presented, as the phone says: as its launcher, as the assistant alone, or as an ordinary app. */
 export interface Presentation {
@@ -43,6 +48,7 @@ export service Launcher {
   presentation(): Presentation!!
   apps(): ReadonlyArray<Listed>!Unlisted
   open(app: InstalledApp): Asked!!
+  info(app: InstalledApp): Asked!!
   shade(): Asked!!
   /** Each time the phone's apps change. */
   readonly changes: Stream.Stream<void>
@@ -55,13 +61,19 @@ const refusals: Readonly<Record<string, Why>> = {
 
 const refused = (code: string | undefined): Asked => ({ done: false, why: refusals[code ?? ""] ?? "Unable" })
 
+const targetOf = (app: InstalledApp) => ({
+  packageName: app.packageName,
+  ...(app.activityName ? { activityName: app.activityName } : {}),
+  ...(app.user ? { user: app.user } : {}),
+})
+
 /** An installed app and its key: its package, its activity and its profile, as eliza's `appKey` names it. */
 export interface Listed {
   readonly key: string
   readonly app: InstalledApp
 }
 
-/** The phone's launcher, through eliza's client `System` of `@elizaos/os/bridges/system`. */
+/** The phone's launcher, through eliza's client `System` of `@elizaos/os-bridges`. */
 export const phoneLauncher = Layer.effect(Launcher, effect {
   const loaded = try promise(() => bridge())
   const system = loaded.System
@@ -78,12 +90,15 @@ export const phoneLauncher = Layer.effect(Launcher, effect {
       return listed.apps.map((app) => ({ key: loaded.appKey(app), app }))
     },
     effect open(app: InstalledApp) {
-      const target = { packageName: app.packageName, ...(app.activityName ? { activityName: app.activityName } : {}), ...(app.user ? { user: app.user } : {}) }
       return effect {
-        try tryPromise({ try: () => system.launchApp(target), catch: (cause) => new LaunchRefused({ cause }) })
+        try tryPromise({ try: () => system.launchApp(targetOf(app)), catch: (cause) => new LaunchRefused({ cause }) })
         const done: Asked = { done: true }
         return done
       } catch (error) => refused(refusalOf(error.cause))
+    },
+    effect info(app: InstalledApp) {
+      const handed = tryPromise(() => system.openAppInfo(targetOf(app))) catch () => undefined
+      return handed?.outcome === "Opened" ? { done: true } : refused(handed?.refusal)
     },
     effect shade() {
       const handed = tryPromise(() => system.openNotificationShade()) catch () => undefined
@@ -101,6 +116,7 @@ export const browserLauncher = Layer.succeed(Launcher, {
   presentation: () => succeed({ phone: false, launcher: false, assistant: false }),
   apps: () => Effect.fail(new Unlisted({ cause: "no launcher in a browser" })),
   open: () => succeed<Asked>({ done: false, why: "Unable" }),
+  info: () => succeed<Asked>({ done: false, why: "Unable" }),
   shade: () => succeed<Asked>({ done: false, why: "Unable" }),
   changes: Stream.empty,
 })

@@ -1,0 +1,26 @@
+// spec/app/notes/index.md, "The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened"
+
+/**
+ * The agent's opens of a note, each waiting by the owner's request it was asked for: what Notes tells of one is handed
+ * to the one waiting for it, once; anything told after, or of an open nobody waits for, is dropped.
+ */
+export service Opens {
+  expect(turn: number): Deferred.Deferred<boolean>!!
+  settle(turn: number, shown: boolean): void!!
+}
+
+export const opens = Layer.sync(Opens, () => {
+  const waiting = new Map<number, Deferred.Deferred<boolean>>()
+  return {
+    expect: (turn: number) => sync(() => {
+      const made = Deferred.makeUnsafe<boolean>()
+      waiting.set(turn, made)
+      return made
+    }),
+    settle: (turn: number, shown: boolean) => sync(() => {
+      const found = waiting.get(turn)
+      waiting.delete(turn)
+      if (found !== undefined) Deferred.doneUnsafe(found, Effect.succeed(shown))
+    }),
+  }
+})

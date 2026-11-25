@@ -1,7 +1,12 @@
 // spec/app/notes/index.md, "Pinned notes come first, then the rest, narrowed to the chosen folder"
-import { projectAuthoredNoteContent } from "@elizaos/plugin-notes/format";
-import type { StickyNote } from "@elizaos/plugin-notes/types";
-import { moment } from "./content.vibe";
+import { projectAuthoredNoteContent } from "@elizaos/plugin-notes-client";
+import type { StickyNote } from "@elizaos/plugin-notes-client";
+import { audioIdOf, moment } from "./content.vibe";
+
+/** The title shown when listing or opening a note. */
+export function titleOf(note: StickyNote): string {
+  return note.title.trim() || "Untitled";
+}
 
 /** Seconds as the owner reads a recording's length. */
 export function clock(seconds: number): string {
@@ -20,10 +25,14 @@ export function preview(note: StickyNote): string {
       ? typeof data?.domain === "string" ? data.domain : ""
       : note.body.trim() !== "" ? note.body : (authored?.lines ?? []).map((line) => line.text).join(" ");
   const said = text.replace(/[ \t]+/g, " ").trim().slice(0, 240);
-  const legacy = data?.audio;
+  const seconds = typeof data?.dur === "number" ? data.dur : undefined;
+  if (kind !== "voice" || (seconds === undefined && audioIdOf(note) === "")) return said;
+  const audio = data?.audio;
   const ms = typeof data?.durationMs === "number" ? data.durationMs
-    : typeof legacy === "object" && legacy !== null && "durationMs" in legacy && typeof legacy.durationMs === "number" ? legacy.durationMs : undefined;
-  return kind !== "voice" || ms === undefined ? said : `${clock(ms / 1000)}${said === "" ? "" : ` · ${said}`}`;
+    : typeof audio === "object" && audio !== null && "durationMs" in audio ? audio.durationMs : undefined;
+  const duration = seconds ?? (typeof ms === "number" ? ms / 1000 : undefined);
+  if (duration === undefined || !Number.isFinite(duration) || duration < 0) return said;
+  return `${clock(Math.floor(duration))}${said === "" ? "" : ` · ${said}`}`;
 }
 
 const sameDay = new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit" });

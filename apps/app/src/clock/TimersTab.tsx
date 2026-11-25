@@ -104,7 +104,8 @@ export function TimersTab({ runtime }: TimersTabProps) {
             const record = clockRecords.timer(item.id);
             const title = record.label || `Timer ${item.id}`;
             const remaining = liveRemainingMs(item, now > 0 ? now : item.startedAt);
-            const elapsed = Math.max(0, item.durationMs - Math.min(item.durationMs, remaining));
+            const effectiveMax = Math.max(item.durationMs, remaining);
+            const elapsed = Math.max(0, effectiveMax - remaining);
             const statusKind = item.status === "Ringing" ? "error" : item.status === "Running" ? "ok" : item.status === "Paused" ? "warn" : "off";
             return (
               <Card key={item.id} className="gap-3">
@@ -132,7 +133,7 @@ export function TimersTab({ runtime }: TimersTabProps) {
                   </span>
                 </div>
 
-                <Progress value={elapsed} max={item.durationMs} aria-label={`${title} progress`} />
+                <Progress value={elapsed} max={effectiveMax} aria-label={`${title} progress`} />
 
                 <div className="flex flex-wrap items-center gap-2 pt-1">
                   {item.status === "Ready" && (

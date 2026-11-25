@@ -1,26 +1,22 @@
 // spec/app/messages/index.md, "Story: See my conversations"; spec/app/messages/index.md, "Story: Read a conversation"; spec/app/messages/index.md, "Story: Act on a message"; spec/app/messages/index.md, "Story: Start a new message"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import type { StagedDeletion } from "@elizaos/os/bridges/action-journal"
-import type { AddressBookContact } from "@elizaos/os/bridges/contacts"
-import { threadIdOf } from "@elizaos/os/bridges/definitions/messages"
-import type { MessageCursor, MessageDeleteReference, MessageRow, ThreadCursor, ThreadId, ThreadRow } from "@elizaos/os/bridges/messages"
-import type { PhoneNumber } from "@elizaos/os/bridges/phone"
+import { type StagedDeletion, type AddressBookContact, threadIdOf, type MessageCursor, type MessageDeleteReference, type MessageRow, type ThreadCursor, type ThreadId, type ThreadRow, type PhoneNumber } from "@elizaos/os-bridges"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import * as Messages from "../../gen/app__messages.effect.vibe"
 import type { Effect as Out, Event, Need, Page } from "../../gen/app__messages.effect.vibe"
 import { CarrierSetup } from "../platform/carrier.vibe"
 import { registered } from "../platform/device.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
-import { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
-import { Said, offer, withdraw } from "../notices/toasts.vibe"
+import { Telephony, deletionRefused, namesOf, readAddressBook, telephony } from "../platform/telephony.vibe"
+import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
+import { type Said, offer, withdraw } from "../notices/toasts.vibe"
 import { type Job, Whole, answer, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import { Dialer, grantOf, prefilled } from "../phone/phone.vibe"
+import { Dialer, dialing, grantOf } from "../phone/phone.vibe"
 import { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
 import { Callers } from "../phone/voicemail.vibe"
 import { on, visiting } from "../phone/visit.vibe"
-import { matches } from "../phone/words.ts"
+import { displayNumber, matches } from "../phone/words.ts"
 
 module nativeNotice {
   import { type PluginListenerHandle, registerPlugin } from "@capacitor/core"
@@ -122,9 +118,9 @@ export interface Texts {
 
 const empty: Texts = { threads: [], threadsNext: undefined, sought: "", messagesThread: 0, messages: [], messagesNext: undefined, chosen: "", deleteTarget: undefined, choices: [], choicesNext: undefined, typed: "", names: new Map() }
 
-/** A conversation's title: the contacts' names for its numbers, and a number no contact holds as it is. */
+/** A conversation's title: the contacts' names for its numbers, and readable numbers for the rest. */
 export function titleOf(addresses: ReadonlyArray<string>, names: ReadonlyMap<string, string>): string {
-  return addresses.map((address) => names.get(address) ?? address).join(", ")
+  return addresses.map((address) => names.get(address) || displayNumber(address)).join(", ")
 }
 
 /** The rows behind Messages' counts. */
@@ -210,8 +206,8 @@ effect function choicesRead(ticket: number, further: boolean): Event!!(Telephony
   const grant = grantOf(status?.permissions.contacts)
   if (grant !== "Granted") return { type: "choicesRead", ticket, ok: true, grant, count: 0, further: false }
   const page = effect {
-    try telephony("open", (c) => c.contacts.open())
-    return try telephony("list", (c) => c.contacts.list({ query: held.typed, limit: 20, ...(further && held.choicesNext !== undefined ? { cursor: held.choicesNext as never } : {}) }))
+    try readAddressBook("open contacts", (c) => c.open())
+    return try readAddressBook("list contacts", (c) => c.list({ query: held.typed, limit: 20, ...(further && held.choicesNext !== undefined ? { cursor: held.choicesNext as never } : {}) }))
   } catch () => undefined
   if (page === undefined) return { type: "choicesRead", ticket, ok: false, grant, count: 0, further: false }
   const found = page.contacts.filter((row): row is AddressBookContact => !("incomplete" in row) && row.phones.length > 0)
@@ -240,11 +236,10 @@ effect function settledDeletion(id: number, staged: StagedDeletion): Event!!(Tel
       try time.until(staged.expiresAt + delay)
       if (delay === 250) try withdraw("messages", id)
     }
-    const pending = telephony("pending message deletion", (c) => c.deletions.pending()) catch () => undefined
-    const phase = pending?.deletions.find((record) => record.id === staged.id && record.kind === staged.kind)?.phase
-    if (phase === "Deleted") return { type: "removed", id, done: true, known: true }
-    if (phase === "Undone" || phase === "DeletionConflict") return { type: "removed", id, done: false, known: true }
-    if (phase === "UnknownOutcome") break
+    const phase = telephony("message deletion receipt", (c) => c.deletionReceipt(staged)) catch () => undefined
+    if (phase === "deleted") return { type: "removed", id, done: true, known: true }
+    if (phase === "undone" || phase === "conflict") return { type: "removed", id, done: false, known: true }
+    if (phase === "unknown") break
   }
   return { type: "removed", id, done: false, known: false }
 }
@@ -255,24 +250,25 @@ effect function removed(id: number): Event!!(Telephony | Inbox | Messages.Machin
   const one = (try inbox.get()).deleteTarget
   if (one === undefined) return { type: "removed", id, done: false, known: true }
   const machine = try Messages.Machine
-  return effect {
-    const answered = try telephony("deleteMessage", (c) => c.messages.deleteMessage(one))
-    if (answered.status !== "queued") return { type: "removed", id, done: answered.status === "not-found", known: true } satisfies Event
-    const staged = answered.deletion
-    const client = try (try Telephony).clients()
-    try offer("Message deletion queued", "messages", id, effect {
-      const outcome = tryPromise(() => client.deletions.undo(staged)) catch () => undefined
-      if (outcome?.kind === "Kept") {
-        try inbox.set({ deleteTarget: undefined })
-        try ignore(machine.send({ type: "removed", id, done: false, known: true }))
-        try ignore(machine.send({ type: "arrived" }))
-      }
-    })
-    try ignore(machine.send({ type: "arrived" }))
-    const outcome = try settledDeletion(id, staged)
-    try withdraw("messages", id)
-    return outcome
-  } catch (failure) => ({ type: "removed", id, done: false, known: !(failure instanceof TelephonyRefused && failure.code === undefined && failure.tag === "") } satisfies Event)
+  const answer = try Effect.result(telephony("deleteMessage", (c) => c.messages.deleteMessage(one)))
+  if (Result.isFailure(answer)) return { type: "removed", id, done: false, known: deletionRefused(answer.failure) }
+  const report = answer.success
+  if (report.status !== "queued") return { type: "removed", id, done: report.status === "not-found", known: true }
+  const staged = report.deletion
+  const phone = try Telephony
+  const undo = Effect.provideService(effect {
+    const outcome = telephony("undo message deletion", (c) => c.deletions.undo(staged)) catch () => undefined
+    if (outcome?.kind === "Kept") {
+      try inbox.set({ deleteTarget: undefined })
+      try ignore(machine.send({ type: "removed", id, done: false, known: true }))
+      try ignore(machine.send({ type: "arrived" }))
+    }
+  }, Telephony, phone)
+  try offer("Message deletion queued", "messages", id, undo)
+  try ignore(machine.send({ type: "arrived" }))
+  const outcome = try settledDeletion(id, staged)
+  try withdraw("messages", id)
+  return outcome
 }
 
 /** The open conversation's numbers. */
@@ -283,12 +279,7 @@ effect function numbers(thread: number): ReadonlyArray<string>!!Conversations {
 
 // spec/app/messages/index.md, "Copy puts a message's text on the clipboard, Call opens Phone with the number, and a message Alpha cannot show opens in the messaging app; none changes anything here"
 effect function called(thread: number): void!!(Conversations | Dialer | PhoneMachine | Shell) {
-  const number = (try numbers(thread))[0] ?? ""
-  const handed = prefilled(number)
-  if (handed === undefined) return
-  try (try Dialer).set({ digits: handed.digits })
-  try ignore((try PhoneMachine).send(handed.event))
-  try ignore((try Shell).send({ type: "openView", view: "Phone" }))
+  try ignore(dialing((try numbers(thread))[0] ?? ""))
 }
 
 /** The messaging app, opened on the conversation's numbers, for what Alpha cannot show or send. */

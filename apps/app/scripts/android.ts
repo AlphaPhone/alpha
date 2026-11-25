@@ -7,11 +7,12 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { generateAndroidHost, stageRuntimePayload } from "@elizaos/os/build";
+import { generateAndroidHost, stageRuntimePayload } from "@elizaos/os";
 import { packPrepared, prepared } from "@repo/eliza-harness";
 import { Effect, Layer } from "effect";
 import { FetchHttpClient } from "effect/http";
 import { androidPaths, identity, production, signInCallbackPath } from "../capacitor.config.ts";
+import { localOcrAssets } from "./ocr-assets.ts";
 
 export const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const root = resolve(app, "../..");
@@ -139,11 +140,7 @@ function stageVoice(env: NodeJS.ProcessEnv) {
     ], { env: { ...env, ELIZA_INFERENCE_ENGINE_DIR: engine } });
   }
   voiceRecord(directory);
-  return [
-    "-PelizaSpeechBridgeCapacitor=true",
-    `-PelizaInferenceEngineDir=${engine}`,
-    `-PelizaParadeeNativeDir=${directory}`,
-  ];
+  return { engine, directory };
 }
 
 /** Alpha's agent pack (apps/agent), built from the pinned eliza for the production cloud. */
@@ -221,6 +218,16 @@ export function auditBundle(directory: string): string[] {
     for (const directive of REQUIRED_POLICY) if (!policy.includes(directive)) findings.push(`the Content-Security-Policy lacks ${directive}`);
     if (policy.includes("'unsafe-eval'")) findings.push("the Content-Security-Policy allows 'unsafe-eval'");
   }
+  for (const [name, expected] of localOcrAssets()) {
+    const location = join(directory, "ocr", name);
+    if (!existsSync(location) || !statSync(location).isFile() || !readFileSync(location).equals(expected.bytes)) {
+      findings.push(`ocr/${name}: missing or differs from the locked OCR dependency`);
+    }
+  }
+  const terms = join(directory, "ocr/tessdata-LICENSE.txt");
+  if (!existsSync(terms) || !statSync(terms).isFile() || !readFileSync(terms).equals(readFileSync(join(app, "public/ocr/tessdata-LICENSE.txt")))) {
+    findings.push("ocr/tessdata-LICENSE.txt: missing or differs from the packaged training data license");
+  }
   for (const file of regularFiles(directory)) {
     if (file.endsWith(".map")) findings.push(`${file}: source map`);
     if (TEST_ONLY_PATH.test(file)) findings.push(`${file}: test-only module`);
@@ -251,7 +258,7 @@ export async function generateHost(runtime: string) {
   const marker = join(android, MARKER);
   if (!existsSync(marker)) writeJson(marker, { schema: 2, output: androidPaths.project, appId: identity.appId, files: [] });
   const version = String(record(readJson(join(app, "package.json"))).version);
-  return runEffect(generateAndroidHost({
+  const host = await runEffect(generateAndroidHost({
     consumerRoot: app,
     dependencyRoot: join(app, "node_modules"),
     output: android,
@@ -259,6 +266,8 @@ export async function generateHost(runtime: string) {
     profile: hostProfile(),
     runtime,
   }));
+  writeJson(join(android, "app/src/main/assets/capacitor.plugins.json"), []);
+  return host;
 }
 
 interface BuildConsumer {
@@ -271,7 +280,7 @@ const consumerModule: string = "@elizaos/os/android/build-consumer.mjs";
 export async function build(release: boolean) {
   const env = environment();
   refuseOn(inputProblems(env));
-  const voiceGradle = stageVoice(env);
+  const voice = stageVoice(env);
   buildPack();
   const runtime = await stageRuntime();
   buildWeb();
@@ -282,7 +291,11 @@ export async function build(release: boolean) {
   const { buildAndroidConsumer } = (await import(consumerModule)) as BuildConsumer;
   buildAndroidConsumer({
     root: app,
-    environment: env,
+    environment: {
+      ...env,
+      ORG_GRADLE_PROJECT_elizaInferenceEngineDir: voice.engine,
+      ORG_GRADLE_PROJECT_elizaParadeeNativeDir: voice.directory,
+    },
     variants: [variant],
     release,
     lint: false,
@@ -293,7 +306,7 @@ export async function build(release: boolean) {
     androidTestOutput: "instrumentation",
     mappings: release,
     signing: { environment: signingNames },
-    gradleArguments: voiceGradle,
+    gradleArguments: ["-PelizaSpeechBridgeCapacitor=true"],
     prepare: [{ command: join(app, "node_modules/.bin/cap"), args: ["copy", "android"] }],
     record: {
       name: "build-config.json",
@@ -318,8 +331,16 @@ function buildTool(name: string, env: NodeJS.ProcessEnv): string {
 }
 
 const INFERENCE_ENTRY = /\.(gguf|onnx|ort|tflite|safetensors|pte|task)$|(^|\/)lib[^/]*(llama|ggml|mtmd|onnxruntime|sherpa|whisper|piper|executorch|elizainference|omnivoice)[^/]*\.so|(^|\/)llama(-omnivoice)?-server$|^assets\/([^/]+\/)*models?\//i;
-const REQUIRED_CLASSES = ["AlphaDevicePlugin", "AlphaCloudSpeechPlugin", "AlphaLocalSpeechPlugin", "AlphaBrowserPlugin", "AlphaCarrierSetupPlugin", "AlphaCallStatePlugin", "AlphaOngoingCallPlugin", "AlphaAgentService", "AlphaCalendarPlugin", "AlphaTelephonyPlugin", "AlphaResetPlugin", "AlphaActionJournalPlugin"]
-  .map((name) => `Lai/alphacompute/alphaphone/${name};`);
+const REQUIRED_CLASSES = [
+  ...["AlphaDevicePlugin", "AlphaCloudSpeechPlugin", "AlphaLocalSpeechPlugin", "AlphaBrowserPlugin", "AlphaCarrierSetupPlugin", "AlphaCallStatePlugin",
+    "AlphaOngoingCallPlugin", "AlphaAgentService", "AlphaCalendarPlugin", "AlphaTelephonyPlugin", "AlphaContactsPlugin", "AlphaResetPlugin", "AlphaActionJournalPlugin",
+    "AlphaFilesPlugin", "AlphaSelectedDocumentsPlugin", "AlphaPhotoLibraryPlugin", "AlphaPhotosPlugin", "AlphaPhotosPermissionsPlugin",
+    "AlphaMediaEnrollmentPlugin", "AlphaScanPlugin"].map((name) => `Lai/alphacompute/alphaphone/${name};`),
+  "Lai/eliza/plugins/camera/CameraPlugin;",
+  "Lai/eliza/plugins/filesystem/FilesPlugin;",
+  ...["PermittedPhotosPlugin", "PermittedMediaCatalog", "OwnedPhotoEdits", "OwnedVideoPlayback", "OwnedCaptures",
+    "SelectedDocuments", "DocumentDestinations"].map((name) => `Lai/eliza/plugins/media/${name};`),
+];
 
 interface Row {
   readonly mode: "debug" | "release";
@@ -392,6 +413,10 @@ export function checkApk(file: string, mode: "debug" | "release", env: NodeJS.Pr
     if (sha256(read(path)) !== row.sha256) throw new Error(`${name}'s ${path} differs from its inventory`);
   }
   for (const data of ["host.json", "character.json", "policy.json"]) if (!entries.includes(`assets/agent/${data}`)) throw new Error(`${name} carries no agent ${data}`);
+  const pluginManifest = "assets/capacitor.plugins.json";
+  if (!entries.includes(pluginManifest)) throw new Error(`${name} lacks the Capacitor plugin discovery manifest`);
+  const discovered: unknown = JSON.parse(read(pluginManifest).toString("utf8"));
+  if (!Array.isArray(discovered) || discovered.length !== 0) throw new Error(`${name} carries discovered plugins outside the Android host registration`);
   const capacitor = record(JSON.parse(read("assets/capacitor.config.json").toString("utf8")));
   const signIn = record(record(capacitor.plugins).ElizaSignIn);
   if (signIn.testEnvironments !== false) throw new Error(`${name} registers test cloud environments`);

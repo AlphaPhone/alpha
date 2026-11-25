@@ -1,12 +1,15 @@
 // spec/app/files/scan.md, "Story: Arrange the pages"; spec/app/files/scan.md, "Story: Keep the scan as I work"; spec/app/files/scan.md, "Story: Make the PDF, and keep the photo"; spec/app/files/scan.md, "Story: Leave the scan and come back"
-import { correctScanPage, detectScanEdges, fullPageCorners, scanCornersAdmitted, type ScanCorners } from "@elizaos/plugin-files/documents/scan-correction"
-import { blobOf } from "@elizaos/plugin-files/documents/images"
-import { recognizeLocalText } from "@elizaos/plugin-files/documents/local-ocr"
-import { reviewScanAllDayEvent, reviewScanEvent, suggestScanEventDetails, type ScanEventProposal } from "@elizaos/plugin-files/documents/scan-event"
-import { scannedLinks } from "@elizaos/plugin-files/documents/scan-links"
-import { createScanPdf } from "@elizaos/plugin-files/documents/scan-pdf"
-import { admittedTextLayer, type ScanTextLine } from "@elizaos/plugin-files/documents/scan-text-layer"
-import type { SelectionId } from "@elizaos/os/bridges/definitions/media"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { correctScanPage, detectScanEdges, fullPageCorners, scanCornersAdmitted, type ScanCorners } from "@elizaos/plugin-files-client"
+import { blobOf } from "@elizaos/plugin-files-client"
+import { recognizeLocalText } from "@elizaos/plugin-files-client"
+import { reviewScanAllDayEvent, reviewScanEvent, suggestScanEventDetails, type ScanEventProposal } from "@elizaos/plugin-files-client"
+import { scannedLinks } from "@elizaos/plugin-files-client"
+import { createScanPdf } from "@elizaos/plugin-files-client"
+import { admittedTextLayer, type ScanTextLine } from "@elizaos/plugin-files-client"
+import type { SelectionId } from "@elizaos/os-bridges"
+import * as Camera from "../../gen/app__camera.effect.vibe"
+import * as PhotoLibrary from "../../gen/app__photos.effect.vibe"
 import * as Recent from "../../gen/app__files__recent.effect.vibe"
 import * as Correction from "../../gen/app__files__correction.effect.vibe"
 import * as Scan from "../../gen/app__files__scan.effect.vibe"
@@ -16,13 +19,14 @@ import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { Documents } from "../platform/documents.vibe"
-import { native } from "../platform/device.vibe"
+import { Device, native } from "../platform/device.vibe"
 import { PhotosPort, saveBrowserCapture } from "../platform/photos.vibe"
+import { PhotoChooser } from "../photos/photos.vibe"
 import { say } from "../notices/toasts.vibe"
 import { answer, applying, contained, reacting, run, started, together, type Job } from "../runtime/reactor.vibe"
 import { Opened } from "./preview.vibe"
 import { Time } from "../runtime/time.vibe"
-import { ScanEntry, type ScannedEvent } from "./scanEntry.vibe"
+import { ScanEntry, ScanExports, type ScannedEvent } from "./scanEntry.vibe"
 import { changeDraft, copyText, drawPdf, readDraft, openLink, photoData, release, rotateImage, scanImage, source, writePdf, type ScanImage, type ScanWords, type StoredPage } from "./scanStore.vibe"
 
 export interface ScanOutline {
@@ -40,12 +44,13 @@ export service ScanAssets {
   read(id: number): (ScanPage | undefined)!!
   words(id: number, revision: number): (ScanWords | undefined)!!
   holdWords(id: number, revision: number, value: ScanWords): void!!
-  searchable(value?: boolean): boolean!!
+  review(ticket: number, words?: ReadonlyMap<number, ScanWords>): (ReadonlyMap<number, ScanWords> | undefined)!!
+  retireReview(ticket: number, closed: boolean): void!!
   outline(image: number, draft?: ScanOutline): ScanOutline!!
   hold(id: number, image: ScanImage): void!!
   keep(ids: ReadonlySet<number>): void!!
-  document(pdf?: Blob): void!!
-  takeDocument(): (Blob | undefined)!!
+  document(ticket: number, pdf?: Blob): void!!
+  takeDocument(ticket: number): (Blob | undefined)!!
   receipt(ticket: number, id?: string): (string | undefined)!!
   event(ticket: number, draft?: ScannedEvent): (ScannedEvent | undefined)!!
 }
@@ -53,10 +58,11 @@ export service ScanAssets {
 const assets = Layer.effect(ScanAssets, effect {
   const images = new Map<number, ScanPage>()
   const text = new Map<number, Map<number, ScanWords>>()
-  let searchable = false
+  let review: { ticket: number; words: ReadonlyMap<number, ScanWords> } | undefined
+  let retiredThrough = 0
   let outline: { image: number; draft: ScanOutline } | undefined
   const turn = try Semaphore.make(1)
-  let prepared: Blob | undefined
+  let prepared: { ticket: number; pdf?: Blob } | undefined
   const receipts = new Map<number, string>()
   let event: { ticket: number; draft: ScannedEvent } | undefined
   function remove(id: number) {
@@ -76,9 +82,13 @@ const assets = Layer.effect(ScanAssets, effect {
       for (const prior of row.keys()) if (prior + 4 < revision) row.delete(prior)
       text.set(id, row)
     }),
-    searchable: (value?: boolean) => sync(() => {
-      if (value !== undefined) searchable = value
-      return searchable
+    review: (ticket: number, words?: ReadonlyMap<number, ScanWords>) => sync(() => {
+      if (words !== undefined && ticket > retiredThrough && (review === undefined || review.ticket <= ticket)) review = { ticket, words }
+      return review?.ticket === ticket ? review.words : undefined
+    }),
+    retireReview: (ticket: number, closed: boolean) => sync(() => {
+      retiredThrough = Math.max(retiredThrough, closed ? ticket : ticket - 1)
+      if (review !== undefined && review.ticket <= retiredThrough) review = undefined
     }),
     outline: (image: number, draft?: ScanOutline) => sync(() => {
       if (draft !== undefined) outline = { image, draft }
@@ -91,7 +101,9 @@ const assets = Layer.effect(ScanAssets, effect {
     keep: (ids: ReadonlySet<number>) => sync(() => {
       for (const id of images.keys()) if (!ids.has(id)) remove(id)
     }),
-    document: (pdf?: Blob) => sync(() => { prepared = pdf }),
+    document: (ticket: number, pdf?: Blob) => sync(() => {
+      if (prepared === undefined || ticket >= prepared.ticket) prepared = { ticket, pdf }
+    }),
     event: (ticket: number, draft?: ScannedEvent) => sync(() => {
       if (draft !== undefined) event = { ticket, draft }
       return event?.ticket === ticket ? event.draft : undefined
@@ -102,9 +114,10 @@ const assets = Layer.effect(ScanAssets, effect {
       if (id === undefined) receipts.delete(ticket)
       return found
     }),
-    takeDocument: () => sync(() => {
-      const pdf = prepared
-      prepared = undefined
+    takeDocument: (ticket: number) => sync(() => {
+      if (prepared?.ticket !== ticket) return undefined
+      const { pdf } = prepared
+      prepared = { ticket }
       return pdf
     }),
   }
@@ -155,6 +168,55 @@ export effect function addScanImage(blob: Blob, replacing: number, camera: boole
   })
 }
 
+// spec/app/photos/index.md, "Story: Scan text from a selected image"
+export effect function scanSelectedImage(blob: Blob) {
+  const shell = try Shell
+  const photos = try PhotoLibrary.Machine
+  const device = try Device
+  const origin = try photos.get()
+  if (!(try (try PhotoChooser).finish()) || !origin.visible || origin.secure || !showing(try shell.get(), "Photos")) return
+  const accepted = tryPromise(() => scanImage(blob)) catch () => undefined
+  if (accepted === undefined) {
+    try say("Choose a JPEG, PNG or WebP image under 16 MB.", true)
+    return
+  }
+  const held = try ScanAssets
+  const model = try Scan.Machine
+  try Semaphore.withPermit(held.turn, effect {
+    const current = try photos.get()
+    const state = try model.get()
+    const frame = state.images + 1
+    if (!current.visible || current.secure || current.library.ticket !== origin.library.ticket
+      || !showing(try shell.get(), "Photos") || !(try device.showing()) || !Scan.canStartImage(state, frame, "Phone")) return
+    try held.hold(frame, accepted)
+    if (!(try contained(model.send({ type: "startImage", frame }, "Phone"), "opening selected image text"))) {
+      try held.keep(new Set(state.pages.map((page) => page.image)))
+    }
+  })
+}
+
+// spec/app/camera/index.md, "Story: Scan a document"
+export effect function scanCameraImage(blob: Blob, ticket: number, visit: number, preview: number) {
+  const loaded = tryPromise(() => scanImage(blob)) catch () => undefined
+  if (loaded === undefined) return false
+  const held = try ScanAssets
+  const model = try Scan.Machine
+  const camera = try Camera.Machine
+  const shell = try Shell
+  const device = try Device
+  return try Semaphore.withPermit(held.turn, effect {
+    const current = try camera.get()
+    const state = try model.get()
+    const frame = state.images + 1
+    if (!Camera.ready(current) || current.secure || !current.readingFrame || current.shot !== ticket || current.visit !== visit || current.preview !== preview
+      || !showing(try shell.get(), "Camera") || !(try device.showing()) || !Scan.canStartCameraImage(state, frame, "Phone")) return false
+    try held.hold(frame, loaded)
+    if (try contained(model.send({ type: "startCameraImage", frame }, "Phone"), "opening the Camera frame for review")) return true
+    try held.keep(new Set(state.pages.map((page) => page.image)))
+    return false
+  })
+}
+
 function failedLoad(ticket: number): Scan.Event {
   return { type: "loaded", ticket, ok: false, readable: true, base: 0, pages: [] }
 }
@@ -196,38 +258,44 @@ effect function store(ticket: number, base: number, pages: ReadonlyArray<Page>):
   return wrote === undefined ? failed : { ...failed, ok: true, landed: wrote.landed, held: wrote.revision }
 }
 
-effect function prepare(ticket: number, pages: ReadonlyArray<Page>): Scan.Event!!ScanAssets {
+effect function prepare(ticket: number, pages: ReadonlyArray<Page>, review: number): Scan.Event!!ScanAssets {
   const assets = try ScanAssets
   const images: Blob[] = []
   const layers: ReadonlyArray<ScanTextLine>[] = []
-  const searchable = try assets.searchable()
+  const reviewed = review === 0 ? undefined : try assets.review(review)
   const failed = { type: "prepared", ticket, ok: false, problem: "NotDrawn" } as const
-  try assets.document()
+  try assets.document(ticket)
   for (const p of pages) {
     const item = try assets.read(p.image)
     if (item === undefined) return failed
 
     images.push(item.blob)
-    const words = p.text === 0 ? undefined : try assets.words(p.image, p.edits)
-    if (searchable && words === undefined) return failed
-    layers.push(words?.lines ?? [])
+    if (review !== 0) {
+      const words = reviewed?.get(p.image)
+      if (words === undefined) return failed
+      layers.push(words.lines)
+    }
   }
-  if (searchable) {
-    const made = createScanPdf({ title: "Scanned document", creator: "Alpha" }, images, layers) catch () => undefined
-    if (made === undefined) return { ...failed, problem: "TooMuchText" }
-    try assets.document(blobOf([made], "application/pdf"))
+  if (review !== 0) {
+    const made = map(createScanPdf({ title: "Scanned document", creator: "Alpha" }, images, layers), (bytes) => ({ bytes })) catch (error) => {
+      if (error._tag === "PdfRefused" && error.reason === "too-large") return { problem: "TooLarge" } as const
+      const rejectedText = error._tag === "TextLayerRefused" || (error._tag === "PdfRefused" && error.reason === "unsupported-text")
+      return { problem: rejectedText ? "TooMuchText" : "NotDrawn" } as const
+    }
+    if ("problem" in made) return { ...failed, problem: made.problem }
+    try assets.document(ticket, blobOf([made.bytes], "application/pdf"))
     return { ...failed, ok: true, problem: "NoProblem" }
   }
   const built = tryPromise((signal) => drawPdf(images, signal)) catch () => undefined
   if (built === undefined) return failed
   if ("problem" in built) return { ...failed, problem: built.problem }
-  try assets.document(built.pdf)
+  try assets.document(ticket, built.pdf)
   return { ...failed, ok: true, problem: "NoProblem" }
 }
 
 effect function write(ticket: number): Scan.Event!!ScanAssets {
   const assets = try ScanAssets
-  const pdf = try assets.takeDocument()
+  const pdf = try assets.takeDocument(ticket)
   const refused = { type: "exported", ticket, confirmed: false, known: true } as const
   if (pdf === undefined) return refused
   const wrote = try writePdf(pdf)
@@ -235,7 +303,7 @@ effect function write(ticket: number): Scan.Event!!ScanAssets {
   return { ...refused, confirmed: wrote.confirmed, known: wrote.known }
 }
 
-effect function keep(ticket: number, image: number): Scan.Event!!(ScanAssets | PhotosPort) {
+effect function keep(ticket: number, image: number): Scan.Event!!(ScanAssets | PhotosPort | Attempts) {
   const selected = try (try ScanAssets).read(image)
   const refused = { type: "kept", ticket, confirmed: false, known: true } as const
   if (selected === undefined) return refused
@@ -249,7 +317,7 @@ effect function keep(ticket: number, image: number): Scan.Event!!(ScanAssets | P
   const data = tryPromise(() => photoData(selected.blob)) catch () => undefined
   if (data === undefined) return refused
   const phone = photos.phone.value
-  const operationId = `scan-${ticket}-${image}`
+  const operationId = try (try Attempts).key(ticket)
   const result = tryPromise(() => phone.keepCapture({ operationId, dataBase64: data })) catch () => undefined
   return { ...refused, confirmed: result?.status === "saved", known: result !== undefined }
 }
@@ -260,17 +328,21 @@ function unread(ticket: number): Extract<Scan.Event, { type: "recognized" }> {
   return { type: "recognized", ticket, ok: false, blank: false, links: 0 }
 }
 
+effect function localWords(blob: Blob): (ScanWords | undefined)!! {
+  const words = timeout(recognizeLocalText(ocr, blob, () => {}, true), 45000) catch () => undefined
+  return words === undefined ? undefined : { text: words.text, lines: words.lines ?? [], links: scannedLinks(words.text) }
+}
+
 effect function recognize(ticket: number, image: number): Scan.Event!!(ScanAssets | Scan.Machine) {
   const held = try ScanAssets
   const model = try Scan.Machine
   const page = try held.read(image)
   if (page === undefined) return unread(ticket)
-  const words = timeout(recognizeLocalText(ocr, page.blob, () => {}, true), 45000) catch () => undefined
+  const words = try localWords(page.blob)
   const state = try model.get()
   if (words === undefined || !Scan.canRecognized(state, ticket, "Phone") || state.text.read !== image || !Scan.has(state, image)) return unread(ticket)
-  const links = scannedLinks(words.text)
-  try held.holdWords(image, 0, { text: words.text, lines: words.lines ?? [], links })
-  return { type: "recognized", ticket, ok: true, blank: words.text.trim() === "", links: links.length }
+  try held.holdWords(image, 0, words)
+  return { type: "recognized", ticket, ok: true, blank: words.text.trim() === "", links: words.links.length }
 }
 
 /** The reviewed words and their original page positions change together. */
@@ -292,16 +364,114 @@ export effect function editScanLine(image: number, index: number, value: string)
   })
 }
 
-/** A PDF includes the reviewed text only when the owner chooses that format. */
-export effect function exportScan(searchable: boolean) {
-  const held = try ScanAssets
+function unreadSearch(ticket: number, image: number): Extract<Scan.Event, { type: "searchRead" }> {
+  return { type: "searchRead", ticket, image, ok: false }
+}
+
+effect function readSearch(ticket: number, image: number): Scan.Event!!(ScanAssets | Scan.Machine) {
+  const assets = try ScanAssets
+  const machine = try Scan.Machine
+  const page = try assets.read(image)
+  if (page === undefined || !Scan.canSearchRead(try machine.get(), ticket, image, "Phone")) return unreadSearch(ticket, image)
+  const retired = Effect.as(Stream.runHead(Stream.filter(machine.changes, (state) => !Scan.canSearchRead(state, ticket, image, "Phone"))), undefined)
+  const words = try Effect.raceFirst(localWords(page.blob), retired)
+  if (words === undefined || !Scan.canSearchRead(try machine.get(), ticket, image, "Phone")) return unreadSearch(ticket, image)
+  const staged = new Map(try assets.review(ticket))
+  staged.set(image, words)
+  try assets.review(ticket, staged)
+  return { type: "searchRead", ticket, image, ok: true }
+}
+
+export interface SearchLine {
+  readonly image: number
+  readonly line: number
+  readonly text: string
+}
+
+/** The text shown during review belongs to the staged reading or the exact existing revision. */
+export effect function searchWords(ticket: number, page: Page): (ScanWords | undefined)!!ScanAssets {
+  const assets = try ScanAssets
+  const staged = (try assets.review(ticket))?.get(page.image)
+  return staged ?? (page.text === 0 ? undefined : try assets.words(page.image, page.edits))
+}
+
+effect function reviewedWords(ticket: number, pages: ReadonlyArray<Page>, edits: readonly SearchLine[]): (ReadonlyMap<number, ScanWords> | undefined)!!ScanAssets {
+  const staged = new Map<number, ScanWords>()
+  for (const page of pages) {
+    const present = try searchWords(ticket, page)
+    if (present === undefined) return undefined
+    const changed = edits.filter((line) => line.image === page.image)
+    if (changed.length === 0) { staged.set(page.image, present); continue }
+    const lines = admittedTextLayer(present.lines.map((line, index) => ({ ...line, text: changed.find((item) => item.line === index)?.text ?? line.text })))
+    if (lines === undefined) return undefined
+    const text = lines.map((line) => line.text).join("\n")
+    staged.set(page.image, { text, lines, links: scannedLinks(text) })
+  }
+  return staged
+}
+
+effect function revisedSearch(pages: ReadonlyArray<Page>, staged: ReadonlyMap<number, ScanWords>): (ReadonlyArray<Page> | undefined)!!ScanAssets {
+  const assets = try ScanAssets
+  const result: Page[] = []
+  for (const page of pages) {
+    const words = staged.get(page.image)
+    if (words === undefined) return undefined
+    const prior = page.text === 0 ? undefined : try assets.words(page.image, page.edits)
+    if (prior !== undefined && prior.text === words.text && prior.lines.length === words.lines.length
+      && prior.lines.every((line, index) => line.text === words.lines[index]?.text)) {
+      result.push(page)
+    } else {
+      const blank = words.text.trim() === ""
+      result.push({ ...page, text: page.image, blank, edits: page.text === 0 ? 0 : page.edits + 1, links: blank ? 0 : words.links.length })
+    }
+  }
+  return result
+}
+
+effect function keepReviewed(pages: ReadonlyArray<Page>, staged: ReadonlyMap<number, ScanWords>): void!!ScanAssets {
+  const assets = try ScanAssets
+  for (const page of pages) {
+    const words = staged.get(page.image)
+    if (words !== undefined) try assets.holdWords(page.image, page.edits, words)
+  }
+}
+
+/** Keeping text and starting the separate PDF save both use the exact review seen by the owner. */
+export effect function confirmSearch(ticket: number, edits: readonly SearchLine[], save: boolean) {
+  const assets = try ScanAssets
   const model = try Scan.Machine
-  try Semaphore.withPermit(held.turn, effect {
+  try Semaphore.withPermit(assets.turn, effect {
     const state = try model.get()
-    if (!Scan.canExportPdf(state, "Owner")) return
-    if (searchable && (state.pages.some((page) => page.text === 0) || !state.pages.some((page) => !page.blank))) return
-    try held.searchable(searchable)
-    try contained(model.send({ type: "exportPdf" }, "Owner"), "exporting the scan")
+    if (!Scan.currentSearch(state, ticket) || state.search.stage !== "SearchReview") return
+    const staged = try reviewedWords(ticket, state.pages, edits)
+    if (staged === undefined) { try say("This text could not be prepared."); return }
+    if (save) {
+      if (!Scan.canSaveSearch(state, ticket, "Owner")) return
+      try assets.review(ticket, staged)
+      try contained(model.send({ type: "saveSearch", ticket }, "Owner"), "saving the reviewed PDF")
+      return
+    }
+    const reviewed = try revisedSearch(state.pages, staged)
+    if (reviewed === undefined || !Scan.canKeepSearch(state, ticket, reviewed, "Owner")) return
+    try keepReviewed(reviewed, staged)
+    try contained(model.send({ type: "keepSearch", ticket, reviewed }, "Owner"), "keeping reviewed text")
+  })
+}
+
+effect function savedSearch(ticket: number): void!!(ScanAssets | Scan.Machine) {
+  const assets = try ScanAssets
+  const model = try Scan.Machine
+  try Semaphore.withPermit(assets.turn, effect {
+    const state = try model.get()
+    const staged = try assets.review(ticket)
+    if (!Scan.currentSearch(state, ticket)) return
+    const reviewed = staged === undefined ? undefined : try revisedSearch(state.pages, staged)
+    if (staged === undefined || reviewed === undefined || !Scan.canFinishSearch(state, ticket, reviewed, "Phone")) {
+      if (Scan.canCancelSearch(state, ticket, "Phone")) try ignore(model.send({ type: "cancelSearch", ticket }, "Phone"))
+      return
+    }
+    try keepReviewed(reviewed, staged)
+    try contained(model.send({ type: "finishSearch", ticket, reviewed }, "Phone"), "keeping the saved PDF text")
   })
 }
 
@@ -350,7 +520,7 @@ export effect function reviewCalendarEvent(ticket: number) {
 }
 
 module notes {
-  import { createNotesClient, type NotesClient, type NotesTransport } from "@elizaos/plugin-notes/client"
+  import { createNotesClient, type NotesClient, type NotesTransport } from "@elizaos/plugin-notes-client"
   import { Effect } from "effect"
   import { HttpClientRequest } from "effect/http"
   import type { Remote } from "../platform/remote.vibe"
@@ -395,26 +565,28 @@ effect function noted(ticket: number, pages: ReadonlyArray<Page>): Scan.Event!!(
   return { ...refused, confirmed: true }
 }
 
-type Needs = ScanAssets | Scan.Machine | PhotosPort | Recent.Machine | Documents | Opened | Time | Agent | Effect.Services<ReturnType<typeof say>>
+type Needs = ScanAssets | Scan.Machine | PhotosPort | ScanExports | Time | Agent | Effect.Services<ReturnType<typeof say>>
+
+/** Take a confirmed Android selection into Files Recent. */
+export effect function retainScanExport(id: SelectionId) {
+  const documents = (try Documents).client
+  if (Option.isNone(documents)) return
+  const client = documents.value
+  const description = tryPromise(() => client.describe(id)) catch () => undefined
+  if (description?.status === "selected" && description.name) {
+    const recent = try Recent.Machine
+    const key = (try recent.get()).issued + 1
+    const opened = try Opened
+    try opened.give(key, { selection: id, key, name: description.name, mimeType: "application/pdf", revision: Math.max(0, Math.trunc(description.modified ?? 0)) })
+    if (try contained(recent.send({ type: "exported", key }, "Phone"), "listing the exported file")) return
+    try opened.take(key)
+  }
+  try ignore(tryPromise(() => client.forget(id)))
+}
 
 effect function recordExport(ticket: number) {
   const selection = try (try ScanAssets).receipt(ticket)
-  const documents = (try Documents).client
-  if (selection !== undefined && Option.isSome(documents)) {
-    const client = documents.value
-    const id = selection as SelectionId
-    const description = tryPromise(() => client.describe(id)) catch () => undefined
-    if (description?.status === "selected" && description.name) {
-      const recent = try Recent.Machine
-      const key = (try recent.get()).issued + 1
-      const opened = try Opened
-      try opened.give(key, { selection: id, key, name: description.name, mimeType: "application/pdf", revision: Math.max(0, Math.trunc(description.modified ?? 0)) })
-      if (!(try contained(recent.send({ type: "exported", key }, "Phone"), "listing the exported file"))) {
-        try opened.take(key)
-        try ignore(tryPromise(() => client.forget(id)))
-      }
-    } else try ignore(tryPromise(() => client.forget(id)))
-  }
+  if (selection !== undefined) try (try ScanExports).record(selection as SelectionId)
   try say("PDF saved.")
 }
 
@@ -426,10 +598,12 @@ function carry(fx: Scan.Effect): Job<Scan.Event, Needs, [Scan.Actor]> {
       const wrote = tryPromise(() => changeDraft(fx.base, undefined)) catch () => undefined
       return { type: "discarded", ticket: fx.ticket, confirmed: wrote?.landed === true, known: wrote !== undefined } as const
     }, { type: "discarded", ticket: fx.ticket, confirmed: false, known: false }, "Phone")
-    case "Prepare": return answer("draw the scan", prepare(fx.ticket, fx.pages), { type: "prepared", ticket: fx.ticket, ok: false, problem: "NotDrawn" }, "Phone")
+    case "Prepare": return answer("draw the scan", prepare(fx.ticket, fx.pages, fx.review), { type: "prepared", ticket: fx.ticket, ok: false, problem: "NotDrawn" }, "Phone")
     case "Export": return answer("save the scan", write(fx.ticket), { type: "exported", ticket: fx.ticket, confirmed: false, known: false }, "Phone")
     case "Keep": return answer("keep the capture", keep(fx.ticket, fx.image), { type: "kept", ticket: fx.ticket, confirmed: false, known: false }, "Phone")
     case "Recognize": return answer("read text", recognize(fx.ticket, fx.image), unread(fx.ticket), "Phone")
+    case "SearchRead": return answer("read search text", readSearch(fx.ticket, fx.image), unreadSearch(fx.ticket, fx.image), "Phone")
+    case "SearchSaved": return run("keep the reviewed PDF text", savedSearch(fx.ticket), "Phone")
     case "OpenLink": return answer("open link", effect {
       const words = try (try ScanAssets).words(fx.image, fx.edits)
       const url = words?.links[fx.link - 1]
@@ -452,16 +626,28 @@ const edits = started(effect {
   try Stream.runForEach(model.changes, effect (state) => {
     const live = new Set([...state.pages, ...state.keeping.carrying, ...state.keeping.saved].map((page) => page.image))
     try held.keep(live)
+    const active = try model.get()
+    const ticket = active.search.ticket
+    if (Scan.canCancelSearch(active, ticket, "Phone") && !Scan.currentSearch(active, ticket)) {
+      try contained(model.send({ type: "cancelSearch", ticket }, "Phone"), "retiring stale searchable text")
+    }
+    const search = (try model.get()).search
+    try held.retireReview(search.ticket, search.stage === "SearchClosed")
     if (Scan.canSaveDraft(state, "Phone")) try contained(model.send({ type: "saveDraft" }, "Phone"), "keeping the scan draft")
   })
 }, "keeping scan pages")
 
 /** A dialog's Back goes to the scan first, keeping the current draft. */
 export const scanBack = effect {
+  const model = try Scan.Machine
+  const state = try model.get()
+  const ticket = state.search.ticket
+  if (Scan.canCancelSearch(state, ticket, "Owner")) return try contained(model.send({ type: "cancelSearch", ticket }, "Owner"), "closing searchable text")
+  if (state.search.stage === "SearchSaving") return true
   const editing = try Correction.Machine
   if (Correction.canCancel(try editing.get(), "Owner")) return try contained(editing.send({ type: "cancel" }, "Owner"), "closing the correction")
-  const model = try Scan.Machine
-  if (!Scan.canClose(try model.get(), "Owner")) return false
+  if (Scan.canCloseLinks(state, "Owner")) return try contained(model.send({ type: "closeLinks" }, "Owner"), "closing scanned links")
+  if (!Scan.canClose(state, "Owner")) return false
   return try contained(model.send({ type: "close" }, "Owner"), "closing the scan")
 }
 
@@ -538,4 +724,74 @@ const leavingCorrection = applying(Scan.Machine, (state) => state.open, effect (
   if (Correction.canCancel(try editing.get(), "Phone")) try contained(editing.send({ type: "cancel" }, "Phone"), "closing the page correction")
 })
 
-export const scan = together(reacting(Scan, { carry, keep: 1, open: [{ type: "restart" }, "Phone"] }), reacting(Correction, { carry: carryCorrection }), assets, visible, edits, leavingCorrection)
+const common = together(reacting(Correction, { carry: carryCorrection }), assets, edits, leavingCorrection)
+
+const photosVisible = started(effect {
+  const shell = try Shell
+  const photos = try PhotoLibrary.Machine
+  const model = try Scan.Machine
+  try Stream.runForEach(Stream.zipLatest(shell.changes, photos.changes), effect ([front, library]) => {
+    const state = try model.get()
+    if ((!showing(front, "Photos") || library.secure) && Scan.canHidden(state, false, "Phone")) {
+      try contained(model.send({ type: "hidden", picking: false }, "Phone"), "leaving selected image text")
+    }
+  })
+}, "Photos scan foreground")
+
+export const imageScan = together(reacting(Scan, { carry }), Layer.fresh(common), photosVisible)
+
+const cameraVisible = started(effect {
+  const shell = try Shell
+  const camera = try Camera.Machine
+  const model = try Scan.Machine
+  try Stream.runForEach(Stream.zipLatestAll(shell.changes, camera.changes, model.changes), effect ([front, current, state]) => {
+    if ((!showing(front, "Camera") || current.secure) && state.pdf.outcome !== "Sent" && Scan.canHidden(state, false, "Phone")) {
+      try contained(model.send({ type: "hidden", picking: false }, "Phone"), "leaving the Camera scan")
+    }
+  })
+}, "Camera scan foreground")
+
+export const cameraScan = together(reacting(Scan, { carry, attemptScope: "Camera" }), Layer.fresh(common), cameraVisible)
+module compatible {
+  import type { Scan } from "../../gen/app__files__scan.ts"
+
+  /** Restore earlier durable scans using this visit's review. @throws {never} */
+  export function keptScan(raw: string, search: Scan["search"]): unknown {
+    try {
+      const state: unknown = JSON.parse(raw)
+      return typeof state === "object" && state !== null && !Array.isArray(state)
+        ? { origin: "Document", ...state, search }
+        : state
+    } catch {
+      return raw
+    }
+  }
+
+  /** The searchable review is kept only in memory. @throws {never} */
+  export function durableScan(state: Scan): string {
+    const { search: _search, ...kept } = state
+    return JSON.stringify(kept)
+  }
+}
+import { durableScan, keptScan } from compatible
+
+function stored(key: string, start = Scan.initial) {
+  return Layer.effect(Scan.Machine, effect {
+    const store = try KeyValueStore.KeyValueStore
+    let search = Scan.initial.search
+    let durable: string | undefined
+    effect function load() {
+      const raw = try store.get(key)
+      const state = raw === undefined ? { ...start, search } : try Scan.decodeState(keptScan(raw, search))
+      durable = durableScan(state)
+      return state
+    }
+    return try Scan.machineOver(load, effect (next: Scan.Scan) => {
+      const value = durableScan(next)
+      if (value !== durable) try orDie(store.set(key, value))
+      search = next.search
+    })
+  })
+}
+
+export const scan = together(reacting({ ...Scan, stored }, { carry, keep: 1, open: [{ type: "restart" }, "Phone"] }), common, visible)

@@ -1,11 +1,11 @@
 // spec/app/files/preview.md, "Story: Look at a file"; spec/app/files/preview.md, "Story: Act on the file I am looking at"; spec/app/files/recent.md, "Story: Pick a file with the system picker"
-import type { SelectedDocumentsClient, SelectionId } from "@elizaos/os/bridges/definitions/media"
+import type { SelectedDocumentsClient, SelectionId } from "@elizaos/os-bridges"
 import { registered } from "./device.vibe"
 
 module held {
   import { Capacitor, registerPlugin } from "@capacitor/core"
-  import type { SelectedDocumentsClient, SelectedDocumentsPlugin } from "@elizaos/os/bridges/definitions/media"
-  import { selectedDocumentsClient } from "@elizaos/os/bridges/media"
+  import type { SelectedDocumentsClient, SelectedDocumentsPlugin } from "@elizaos/os-bridges"
+  import { selectedDocumentsClient } from "@elizaos/os-bridges"
 
   export interface SelectedDocumentHost extends SelectedDocumentsPlugin {
     pickSelected(): Promise<unknown>

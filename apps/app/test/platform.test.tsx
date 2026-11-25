@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { CloudError, isCredentialInvalid } from "@elizaos/cloud/client";
+import { CloudError, isCredentialInvalid } from "@elizaos/cloud";
 import { Effect, Exit, Fiber, Layer, Option, Redacted, Stream } from "effect";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,6 +9,7 @@ import { adopt, earlierSlot, keptAt, vaulted } from "../src/platform/adoption.vi
 import { Agent, type Reached } from "../src/platform/agent.vibe";
 import { Cloud } from "../src/platform/cloud.vibe";
 import { testMocks } from "../src/platform/device.vibe";
+import { Telegram } from "../src/platform/telegram.vibe";
 import { type Slot, Vault } from "../src/platform/vault.vibe";
 import type { Platform } from "../src/platform/platform.vibe";
 import { area } from "../src/runtime/area.tsx";
@@ -48,6 +49,18 @@ it("Move between Home and the apps on an Alpha image, where a screen that throws
     expect(Boolean(button("Notes"))).toBe(true);
   }
   reported.mockRestore();
+});
+
+it('keeps an unconfigured messaging route on the phone (spec/app/platform/index.md, "Story: Ship only what this build allows")', async () => {
+  const fetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("unexpected request"));
+  try {
+    const { alpha } = await open({ ...scene(), phone: true }, only("home"));
+    const account = await alpha.runtime.runPromiseExit(Effect.flatMap(Telegram, (telegram) => telegram.getMe("session-test")));
+    const updates = await alpha.runtime.runPromiseExit(Effect.flatMap(Telegram, (telegram) => Stream.runDrain(telegram.updatesStream("session-test"))));
+    expect([failed(account)?._tag, failed(updates)?._tag, fetch.mock.calls]).toEqual(["Unsent", "Unsent", []]);
+  } finally {
+    fetch.mockRestore();
+  }
 });
 
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
@@ -190,9 +203,21 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
   });
 });
 
+it('Keeps a trail from before the Apps drawer while reopening (spec/app/shell/index.md, "When Alpha opens again the trail is kept, and Ask Alpha is closed")', async () => {
+  const earlier = { trail: ["Notes"], assistant: "Sheet", image: false, contacts: false };
+  localStorage.setItem("alpha/app/shell/index@1", JSON.stringify(earlier));
+  const { alpha } = await open(scene(), only("home"));
+  await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Notes" && state.assistant === "Bar");
+  expect(JSON.parse(localStorage.getItem("alpha/app/shell/index@3") ?? "null")).toMatchObject({ trail: ["Notes"], drawer: false, assistant: "Bar" });
+  await closeAll();
+  localStorage.setItem("alpha/app/shell/index@2", JSON.stringify({ ...earlier, trail: ["Files"], drawer: false }));
+  const reopened = await open(scene(), only("home"));
+  await until(reopened.alpha, reopened.alpha.runtime, Shell, (state) => state.trail.at(-1) === "Files" && state.assistant === "Bar");
+});
+
 // spec/app/platform/index.md, "Story: Keep my phone's state across restarts"
 it("Keep my phone's state across restarts: a kept value Alpha can no longer read is set aside, and no copy waiting is written over (spec/app/platform/index.md, \"Story: Keep my phone's state across restarts\")", async () => {
-  const kept = "alpha/app/shell/index@1";
+  const kept = "alpha/app/shell/index@3";
   let waiting: [string, string][] = [];
   const storedAsides = (): [string, string][] => Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
     .filter((key): key is string => key !== null && key.startsWith(`${kept}.unreadable`))

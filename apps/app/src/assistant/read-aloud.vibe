@@ -7,13 +7,14 @@ import { Device } from "../platform/device.vibe"
 import { VoiceBridge } from "../platform/voice.vibe"
 import { type Job, answer, contained, hearing, reacting, started, stream, together } from "../runtime/reactor.vibe"
 import { Talk } from "./talk.vibe"
+import { wordsOf } from "./words.ts"
 
 export effect function readMessage(conversation: number, message: number): void!!(Talk | Chats.Machine | Voice.Machine | VoiceBridge | Speaker.Machine) {
   const { board } = try Talk
   const line = board.line(conversation, message)
   const chats = try (try Chats.Machine).get()
   const voice = try (try Voice.Machine).get()
-  if (chats.chosen !== conversation || line === undefined || line.mine || line.text.trim() === "" || !Voice.quiet(voice) || voice.recorder.stage !== "Closed") return
+  if (chats.chosen !== conversation || line === undefined || line.mine || wordsOf(line).trim() === "" || !Voice.quiet(voice) || voice.recorder.stage !== "Closed") return
   if (!(try (try VoiceBridge).canRead())) return
   try contained((try Speaker.Machine).send({ type: "read", text: "Message", which: message }), "reading the settled message")
 }
@@ -30,7 +31,7 @@ function prepare(ticket: number, item: number): Stream.Stream<Speaker.Event, nev
     const line = board.line(conversation, item)
     const bridge = try VoiceBridge
     const audio = line === undefined || line.mine ? Stream.succeed<Speaker.Event>({ type: "ready", ticket, ok: false })
-      : Stream.map(bridge.readAloud(ticket, line.text), (event): Speaker.Event => ({ type: event.kind, ticket, ok: event.ok }))
+      : Stream.map(bridge.readAloud(ticket, wordsOf(line)), (event): Speaker.Event => ({ type: event.kind, ticket, ok: event.ok }))
     return Stream.concat(audio, Stream.fromEffect(effect {
       const confirmed = try bridge.silenceReading(ticket)
       return { type: "cleaned", confirmed } as Speaker.Event

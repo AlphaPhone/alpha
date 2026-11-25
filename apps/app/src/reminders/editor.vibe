@@ -2,6 +2,7 @@
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Editor from "../../gen/app__reminders__editor.effect.vibe"
 import { contained, reacting, started, together } from "../runtime/reactor.vibe"
+import { externalStore } from "../runtime/store.ts"
 import type { ReminderRecurrence } from "./recurrence.ts"
 import { civilDayFromString } from "./recurrence.ts"
 import {
@@ -80,26 +81,15 @@ function fieldsFromItem(item: ReminderItemRecord): ReminderEditorFields {
   }
 }
 
-let draftFields: ReminderEditorFields = blankEditorFields()
-const draftListeners = new Set<() => void>()
-
-function emitDraft(next: ReminderEditorFields): void {
-  draftFields = next
-  for (const listener of [...draftListeners]) listener()
-}
+const draft = externalStore<ReminderEditorFields>(blankEditorFields())
 
 /** External store for the reminder editor's rich form values. */
 export const editorDraftStore = {
-  snapshot: (): ReminderEditorFields => draftFields,
-  subscribe(listener: () => void): () => void {
-    draftListeners.add(listener)
-    return () => { draftListeners.delete(listener) }
-  },
-  set(next: ReminderEditorFields): void {
-    emitDraft(next)
-  },
+  snapshot: draft.snapshot,
+  subscribe: draft.subscribe,
+  set: draft.set,
   reset(listId = DEFAULT_LIST_ID): void {
-    emitDraft(blankEditorFields(listId))
+    draft.set(blankEditorFields(listId))
   },
 }
 
@@ -165,9 +155,15 @@ export effect function updateEditorDraft(patch: Partial<ReminderEditorFields>): 
       try contained(editor.send({ type: "addSubtask" }), "adding reminder subtask")
     } else if (patch.subtasks.length < prev.subtasks.length && Editor.canRemoveSubtask(state)) {
       try contained(editor.send({ type: "removeSubtask" }), "removing reminder subtask")
+    } else if (Editor.canEditNotes(state)) {
+      try contained(editor.send({ type: "editNotes", ok: true }), "marking subtask edit dirty")
     }
   }
-  if ((patch.priority !== undefined && patch.priority !== prev.priority) || (patch.flagged !== undefined && patch.flagged !== prev.flagged)) {
+  if (
+    (patch.priority !== undefined && patch.priority !== prev.priority)
+    || (patch.flagged !== undefined && patch.flagged !== prev.flagged)
+    || (patch.alertMinutes !== undefined && patch.alertMinutes !== prev.alertMinutes)
+  ) {
     const state = try editor.get()
     if (Editor.canEditNotes(state)) try contained(editor.send({ type: "editNotes", ok: true }), "marking draft dirty")
   }

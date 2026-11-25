@@ -1,7 +1,7 @@
 # Alpha's agent pack
 
 The resident agent the phone runs is eliza's: `agent.mjs`, built by
-`buildAgentBundle` of `@elizaos/agent/bundle` from the commit `eliza.lock.json`
+`buildAgentBundle` of `@elizaos/agent-host` from the commit `eliza.lock.json`
 pins, and started by eliza's Android agent service from three data files
 (`spec/os/agentService/config.md` in eliza). What the bundle may hold, how its
 manifest is written and read, and what it refuses are eliza's
@@ -64,19 +64,22 @@ agent's fixed storage, which no launch lists. What the old phone loaded
 and the pack does not: vision, whose `sharp` eliza never ships on a device;
 the agent orchestrator's view and the mobile remote target, which the
 pinned eliza does not have; the OpenAI and Eliza Cloud provider plugins,
-because the model is the launch's own cloud model; local inference, which
-waits on the owner's choice of model and embeddings; and `basic-actions`,
-whose only action is the calculator the old agent never had.
+because the model is the launch's own cloud model; and `basic-actions`,
+whose only action is the calculator the old agent never had. The pack includes
+Eliza's hosted local inference module for speech. On Android it uses the
+bundled speech models through the app's peer-checked local socket. Browser
+and pack smoke launches with no socket load no speech model. Text replies
+still use the launch's Cloud text backend and embeddings remain off.
 
 ```quint
-pure val corePlugins: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-notes", "@elizaos/plugin-files", "@elizaos/plugin-workflow")
+pure val corePlugins: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-notes", "@elizaos/plugin-files", "@elizaos/plugin-workflow", "@elizaos/plugin-local-inference")
 pure val viewPlugins: List[str] = List("@elizaos/plugin-maps", "@elizaos/plugin-browser")
-pure val hostedPlugins: List[str] = List("@elizaos/plugin-notes")
+pure val hostedPlugins: List[str] = List("@elizaos/plugin-notes", "@elizaos/plugin-local-inference")
 pure val notesTrashDays = 3
-pure val packedPlugins: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-notes", "@elizaos/plugin-files", "@elizaos/plugin-workflow", "@elizaos/plugin-maps", "@elizaos/plugin-browser")
+pure val packedPlugins: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-notes", "@elizaos/plugin-files", "@elizaos/plugin-workflow", "@elizaos/plugin-maps", "@elizaos/plugin-browser", "@elizaos/plugin-local-inference")
 pure val bundledPlugins: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-files", "@elizaos/plugin-workflow", "@elizaos/plugin-maps", "@elizaos/plugin-browser")
 pure val agentModules: List[str] = List("@elizaos/agent/device-actions", "@elizaos/agent/reply-draft", "@elizaos/agent/approvals", "@elizaos/agent/notifications", "@elizaos/agent/views", "@elizaos/agent/scheduled-tasks", "@elizaos/agent/tasks", "@elizaos/agent/triggers", "@elizaos/agent/surface")
-pure val loadList: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-notes", "@elizaos/plugin-files", "@elizaos/plugin-workflow", "@elizaos/plugin-maps", "@elizaos/plugin-browser", "@elizaos/agent/device-actions", "@elizaos/agent/reply-draft", "@elizaos/agent/approvals", "@elizaos/agent/notifications", "@elizaos/agent/views", "@elizaos/agent/scheduled-tasks", "@elizaos/agent/tasks", "@elizaos/agent/triggers", "@elizaos/agent/surface")
+pure val loadList: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-notes", "@elizaos/plugin-files", "@elizaos/plugin-workflow", "@elizaos/plugin-maps", "@elizaos/plugin-browser", "@elizaos/plugin-local-inference", "@elizaos/agent/device-actions", "@elizaos/agent/reply-draft", "@elizaos/agent/approvals", "@elizaos/agent/notifications", "@elizaos/agent/views", "@elizaos/agent/scheduled-tasks", "@elizaos/agent/tasks", "@elizaos/agent/triggers", "@elizaos/agent/surface")
 pure def lawPackListsAreConsistent(p: str): bool =
   (packedPlugins.includes(p) iff (corePlugins.includes(p) or viewPlugins.includes(p)))
     and (bundledPlugins.includes(p) iff (packedPlugins.includes(p) and not(hostedPlugins.includes(p))))
@@ -158,12 +161,17 @@ approval, lifecycle and run decisions and reads back their outcomes.
 The builder reads the phone catalogue, generates and validates drafts,
 saves the reviewed spec and checks save receipts. Workflows also sends
 the owner's prompt and scheduled task changes. Scheduled Digests reads
-hosted sources, loops and retained results. It sends reviewed schedule
-changes and acknowledges an opened result.
+hosted sources, loops and retained results. The buffered results GET admits
+one query key, `clientId`, with the pinned provider's identifier pattern
+`[A-Za-z0-9][A-Za-z0-9_-]{0,127}`. The provider requires that key to read
+a page. Workflows sends reviewed schedule changes and acknowledges a
+retained page after storing it, using the final result's cursor and run ID.
 Notes reads the same owner identity and calls the Notes module to
 read and edit notes, erase Trash and finish recording cleanup. The scanner
 hands the owner’s reviewed scan text to Notes through that module. The approvals area lists the agent's proposals and resolves one
-through the approvals module. A route an area
+through the approvals module. Ask Alpha completes a reviewed Messages read only
+for the exact owner turn after the agent acknowledges its device receipt.
+A route an area
 fakes for want of an agent plugin is not listed: none does today. Each line
 of `apps/agent/host/routes.jsonl` is one route; the pack is refused unless
 that list is this one, and eliza's route gate admits each of its routes.
@@ -189,6 +197,7 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/client-devices/proposals/{id}/decision", stream: false },
   { method: Post, path: "/api/client-devices/proposals/{id}/claim", stream: false },
   { method: Post, path: "/api/client-devices/proposals/{id}/receipt", stream: false },
+  { method: Post, path: "/api/client-devices/proposals/{id}/read-completion", stream: false },
   { method: Post, path: "/api/client-devices/proposals/{id}/reconciliation", stream: false },
   { method: Get, path: "/api/approvals", stream: false },
   { method: Post, path: "/api/approvals/{id}/resolve", stream: false },
@@ -278,6 +287,81 @@ pure def routeListAdmitted(listed: List[Route]): bool =
   listed.length() == pageRoutes.length() and listed.every(r => pageRoutes.includes(r)) and pageRoutes.every(r => listed.includes(r))
 ```
 
+### Only Android's native speech transport can call the resident recognizer
+
+The page's route table has neither the speech scope nor the live capture
+route. The phone admits these two speech calls to its root-only native
+channel. The scope answers the running resident's launch epoch and owner
+only when the pinned native engine can transcribe. Alpha checks the native
+sign-in account against that scope before capture and never sends frames
+to another epoch.
+
+```quint
+pure val nativeSpeechRoutes: List[Route] = List(
+  { method: Get, path: "/api/alpha-speech/scope", stream: false },
+  { method: Post, path: "/api/asr/local-inference/live", stream: false },
+)
+pure val routeValues: Set[Route] = nativeSpeechRoutes.foldl(Set(), (routes, route) => routes.union(Set(route)))
+pure def lawSpeechRoutesAreAbsentFromThePage(route: Route): bool =
+  nativeSpeechRoutes.includes(route) implies not(pageRoutes.includes(route))
+```
+
+### Android's digest inbox verifies the launch before admitting results
+
+Android's native inbox uses the resident's private scope, which reports
+the launch epoch, agent and account even if speech is unavailable. An
+Android worker compares the proof to the serving epoch and active
+custody before accessing results. The worker and the panel share one
+Android writer. After the switch, the Android page never fetches or
+acknowledges the same results itself. The browser uses its own inbox.
+Only the native table admits the launch scope endpoint.
+
+```quint
+pure val nativeDigestScope = "/api/alpha-runtime/scope"
+pure val nativeDigestAck = "/api/workflow/hosted/results/ack"
+pure val nativeDigestAckLimit = 1024
+pure val nativeDigestRoutes: List[Route] = List(
+  { method: Get, path: nativeDigestScope, stream: false },
+  { method: Get, path: "/api/workflow/status", stream: false },
+  { method: Get, path: "/api/workflow/hosted/results", stream: false },
+  { method: Post, path: nativeDigestAck, stream: false },
+)
+pure val nativeRoutes = nativeSpeechRoutes.concat(nativeDigestRoutes)
+pure def nativeRoutesAdmitted(listed: List[Route]): bool =
+  listed.length() == nativeRoutes.length() and listed.every(route => nativeRoutes.includes(route))
+    and nativeRoutes.every(route => listed.includes(route))
+```
+
+### The page names the query values each gated route can receive
+
+Search sends its words, offset and twenty results per page. A conversation
+can request the window around a message. Home's agenda and Calendar send
+the start and end of their window, and Calendar may send a time zone.
+Calendar asks for up to fifty pending approvals. Workflows lists the owner's
+visible tasks, reads a result page for its
+client, and supplies the exact reviewed revision when removing a trigger.
+
+```quint
+type QueryKind = AnyQuery | PatternQuery | FixedQuery
+type RequestQuery = { method: Method, path: str, key: str, kind: QueryKind, value: str, example: str }
+
+pure val pageQueries: List[RequestQuery] = List(
+  { method: Get, path: "/api/conversations/messages/search", key: "q", kind: AnyQuery, value: "", example: "project notes + plan" },
+  { method: Get, path: "/api/conversations/messages/search", key: "offset", kind: PatternQuery, value: "0|[1-9][0-9]{0,15}", example: "0" },
+  { method: Get, path: "/api/conversations/messages/search", key: "limit", kind: FixedQuery, value: "20", example: "20" },
+  { method: Get, path: "/api/conversations/{id}/messages", key: "around", kind: PatternQuery, value: "[A-Za-z0-9_-]{1,128}", example: "test-message" },
+  { method: Get, path: "/api/lifeops/calendar/feed", key: "timeMin", kind: AnyQuery, value: "", example: "2026-11-24T00:00:00.000Z" },
+  { method: Get, path: "/api/lifeops/calendar/feed", key: "timeMax", kind: AnyQuery, value: "", example: "2026-11-25T00:00:00.000Z" },
+  { method: Get, path: "/api/lifeops/calendar/feed", key: "timeZone", kind: AnyQuery, value: "", example: "America/New_York" },
+  { method: Get, path: "/api/approvals", key: "state", kind: PatternQuery, value: "pending", example: "pending" },
+  { method: Get, path: "/api/approvals", key: "limit", kind: PatternQuery, value: "50", example: "50" },
+  { method: Get, path: "/api/scheduled-tasks", key: "ownerVisibleOnly", kind: FixedQuery, value: "1", example: "1" },
+  { method: Get, path: "/api/workflow/hosted/results", key: "clientId", kind: PatternQuery, value: "[A-Za-z0-9][A-Za-z0-9_-]{0,127}", example: "build-probe" },
+  { method: Delete, path: "/api/triggers/{id}", key: "expectedRevision", kind: PatternQuery, value: "[1-9][0-9]{0,15}", example: "1" },
+)
+pure val nativeDigestQueries = pageQueries.select(q => q.method == Get and q.path == "/api/workflow/hosted/results")
+```
+
 ### The agent keeps its memory across restarts, without embeddings
 
 The old agent kept its history when it restarted, so the launch asks the
@@ -342,11 +426,11 @@ pure def packedFor(e: Environment): bool = e != Local
 ## Story: Build the pack only from the pinned eliza
 
 > As the maker of Alpha, I want the pack on the phone to be exactly the
-> pinned eliza's agent with the plugins I chose, for Node 26, with no local
-> inference, carrying the workflow worker it pins and every action Alpha
+> pinned eliza's agent with the plugins I chose, for Node 26, with on-device
+> speech, carrying the workflow worker it pins and every action Alpha
 > allows, so that what ships is what was reviewed.
 
-### A pack is admitted only when its manifest names the pinned commit, Node 26, no local inference, the plugins it carries, the Alpha product plugin, a pinned workflow worker and every allowed action
+### A pack is admitted only when its manifest names the pinned commit, Node 26, the local speech module, the plugins it carries, the Alpha product plugin, a pinned workflow worker and every allowed action
 
 The manifest is the one `readBundleManifest` reads back for the bundle's own
 bytes (eliza's "A manifest is read only for its own bundle bytes and only when
@@ -357,7 +441,7 @@ bundle carries the workflow plugin.
 ```quint
 type Manifest = { sourceCommit: str, node: str, localInference: bool, plugins: List[str], productPlugin: str, workerPinned: bool, actions: List[str] }
 pure def packAdmitted(m: Manifest, pin: str): bool =
-  m.sourceCommit == pin and m.node == "26" and not(m.localInference) and sameNames(m.plugins, packedPlugins)
+  m.sourceCommit == pin and m.node == "26" and m.localInference and sameNames(m.plugins, packedPlugins)
     and m.productPlugin == productPluginName and m.workerPinned and allowedActions.every(a => m.actions.includes(a))
 ```
 

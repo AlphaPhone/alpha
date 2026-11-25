@@ -4,17 +4,19 @@ import { Effect, Option, type Layer, type ManagedRuntime } from "effect";
 import { ArrowDown, ArrowDownWideNarrow, ArrowUp, AudioLines, ScanLine, Download, Ellipsis, File, FileArchive, FileText, Folder, FolderInput, FolderOpen, HardDrive, Image, Info, LayoutGrid, List, Pencil, Plus, RefreshCw, Search, Share2, Trash2, Video, X, type LucideIcon } from "lucide-react";
 import { Fragment, useMemo, useState, type MouseEvent } from "react";
 import type { Event as FilesEvent, Files as FilesState, Machine, Order } from "../../gen/app__files.effect.vibe";
-import { ahead, browse, chosen, detailed, empty, filled } from "../../gen/app__files.ts";
+import { ahead, browse, chosen, detailed, grouped, empty, filled } from "../../gen/app__files.ts";
 import { useMachine } from "../../gen/app__files.react.ts";
 import type { Dest, Work } from "../../gen/app__files__change.ts";
 import { finding } from "../../gen/app__files__search.ts";
-import type { Filter } from "../../gen/app__files__search.ts";
+import { type Filter, everything } from "../../gen/app__files__search.ts";
 import type { Item, Kind } from "../../gen/app__files__shared.ts";
 import type { Machine as TrashMachine } from "../../gen/app__files__trash.effect.vibe";
 import type { Alpha, Resident } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 import { Time } from "../runtime/time.vibe";
 import { Handles } from "./handles.vibe";
+import { changedOn, folderLocation, parentPath, sized } from "./entries.vibe";
+import { CategoryGroups } from "./category.vibe";
 import type { Machine as PreviewMachine } from "../../gen/app__files__preview.effect.vibe";
 import type { Machine as RecentMachine } from "../../gen/app__files__recent.effect.vibe";
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
@@ -22,31 +24,24 @@ import { useMachine as useRecent } from "../../gen/app__files__recent.react.ts";
 import type { Opened } from "./preview.vibe";
 import { Preview, RecentFiles } from "./Preview.tsx";
 import { Trash, Undo } from "./Trash.tsx";
+import type { TrashFacts } from "./trashFacts.vibe";
 import { Scan } from "./Scan.tsx";
 import { type scan, startScan } from "./scan.vibe";
 
 export interface FilesProps {
   /** Provides Files and its Trash, `files` of files.vibe, the numbers of the phone's storage and Alpha's time. */
   alpha: Alpha;
-  runtime: ManagedRuntime.ManagedRuntime<Machine | TrashMachine | PreviewMachine | RecentMachine | Opened | Handles | Time | Shell | Layer.Success<typeof scan> | Resident, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<Machine | TrashMachine | TrashFacts | PreviewMachine | RecentMachine | Opened | Handles | CategoryGroups | Time | Shell | Layer.Success<typeof scan> | Resident, unknown>;
 }
 
 const categories: readonly [Kind, string][] = [["Download", "Downloads"], ["Image", "Images"], ["Video", "Videos"], ["Audio", "Audio"], ["Document", "Documents"]];
-const icons: Record<Kind, LucideIcon> = { Folder, Download, Image, Video, Audio: AudioLines, Document: FileText, Other: File };
+const icons: Record<Kind, LucideIcon> = { Folder, Download, Image, Video, Audio: AudioLines, Document: FileText, Pdf: FileText, Other: File };
 const orders: readonly [Order, string][] = [["ByName", "Name"], ["ByDate", "Date"], ["BySize", "Size"]];
 const shares: readonly [Dest, string][] = [["Chooser", "Share to an app"], ["Email", "Email"], ["Copy", "Copy"]];
-const kinds: readonly [Kind | undefined, string][] = [[undefined, "Any kind"], ["Image", "Images"], ["Video", "Videos"], ["Audio", "Audio"], ["Document", "Documents"]];
-const kindNames: Record<Kind, string> = { Folder: "Folder", Image: "Image", Video: "Video", Audio: "Audio", Document: "Document", Download: "Download", Other: "File" };
+const kinds: readonly [Kind | undefined, string][] = [[undefined, "Any kind"], ["Image", "Images"], ["Video", "Videos"], ["Audio", "Audio"], ["Document", "Documents"], ["Pdf", "PDFs"]];
+const kindNames: Record<Kind, string> = { Folder: "Folder", Image: "Image", Video: "Video", Audio: "Audio", Document: "Document", Pdf: "PDF", Download: "Download", Other: "File" };
 /** A name no folder holds, since it is a path's separator: what asks whether a new name would be taken at all. */
 const unnamed = "/";
-/** A size in the units the owner reads, to one decimal above a kilobyte. */
-function sized(bytes: number): string {
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let at = 0;
-  let value = bytes;
-  while (value >= 1024 && at < units.length - 1) { value /= 1024; at += 1; }
-  return `${at === 0 || value >= 100 ? Math.round(value) : Math.round(value * 10) / 10} ${units[at]}`;
-}
 /** The kind a downloaded or unknown file shows by its name's extension, as develop names and draws it. */
 const byExtension: readonly [RegExp, string, LucideIcon][] = [
   [/\.pdf$/i, "PDF", FileText], [/\.(jpe?g|png|gif|webp|heic)$/i, "Image", Image], [/\.(mp4|mov|webm|mkv)$/i, "Video", Video],
@@ -60,9 +55,14 @@ function kindOf(item: Item): { name: string; icon: LucideIcon } {
 }
 /** Develop's empty folder: a large muted icon over one line, well below the header. */
 const filesEmpty = "gap-3 px-4 pt-24 pb-4 [&_svg]:size-11";
-/** When a file last changed, as a listed file says it: Today, or the day. */
-const changedOn = (revision: number, now: number) => (new Date(revision).toDateString() === new Date(now).toDateString() ? "Today" : new Date(revision).toLocaleDateString(undefined, { month: "short", day: "numeric" }));
-type Naming = { work: Work; name: string };
+function dateRange(filter: Filter): string {
+  const date = (value: number) => new Date(value).toLocaleDateString();
+  if (filter.from === everything.from) return filter.to === everything.to ? "" : `Through ${date(filter.to)}`;
+  return filter.to === everything.to ? `Since ${date(filter.from)}` : `${date(filter.from)} – ${date(filter.to)}`;
+}
+type Naming =
+  | { readonly work: Work; readonly name: string; readonly destinationRead?: never }
+  | { readonly work: "NewFolder"; readonly name: string; readonly destinationRead: number };
 const changeWords: Record<Work, string> = { NewFolder: "make the folder", Rename: "rename it", MoveTo: "move them", CopyTo: "copy them" };
 
 /** The name the phone's storage gives a number: its volume's name at a volume's root, else the last step of its path. */
@@ -121,18 +121,36 @@ export function Files({ runtime, alpha }: FilesProps) {
   const selecting = marks.size > 0;
   const grid = state.layout === "Grid";
   const category = categories.find(([kind]) => kind === state.category)?.[1];
-  const place = state.inCategory ? category : label(state.trail.at(-1) ?? 0);
-  const title = selecting ? String(marks.size) : atTop ? "Files" : (place ?? "Files");
-  const wanted: Filter = { text: text.trim(), kind: kind ?? "Other", anyKind: kind === undefined };
+  const groupedCategory = grouped(state);
+  const folderGroups = groupedCategory
+    ? runtime.runSync(Effect.flatMap(CategoryGroups, (groups) => groups.read(state.listing.ticket)))
+    : [];
+  const CategoryIcon = icons[state.category];
   const primary = state.volumes[0];
-  const today = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
-  const described = (item: Item) => `${kindOf(item).name} · ${sized(item.bytes)} · ${changedOn(item.revision, today)}`;
+  const place = state.inCategory ? category : state.trail.length === 1 && state.trail[0] === primary?.id ? "All files" : label(state.trail.at(-1) ?? 0);
+  const title = selecting ? String(marks.size) : atTop ? "Files" : (place ?? "Files");
+  const wanted: Filter = { ...everything, text: text.trim(), kind: kind ?? "Other", anyKind: kind === undefined };
+  const today = new Date(runtime.runSync(Effect.flatMap(Time, (time) => time.latest())));
+  const parentOf = (item: Item) => {
+    const spot = runtime.runSync(Effect.flatMap(Handles, (handles) => handles.spot(item.id)));
+    return Option.map(spot, ({ path }) => parentPath(path));
+  };
+  const location = (item: Item) => {
+    const folder = Option.getOrElse(parentOf(item), () => "");
+    return folderLocation(label(item.volume), folder);
+  };
+  const summary = (item: Item, showFolder: boolean) => {
+    if (item.kind === "Folder") return "";
+    const folder = showFolder ? Option.map(parentOf(item), (path) => path || label(item.volume)) : Option.none();
+    return [sized(item.bytes), changedOn(item.revision, today), Option.getOrUndefined(folder)].filter(Boolean).join(" · ");
+  };
   const row = (item: Item) => {
     const toggle = { type: "toggle", target: item.id } as const;
     const open = item.kind === "Folder" ? ({ type: "openFolder", target: item.id } as const) : ({ type: "view", file: item } as const);
     const selectable = owner(toggle);
     const selected = marks.has(item.id);
-    const Icon = kindOf(item).icon;
+    const { icon: Icon, name: kind } = kindOf(item);
+    const detail = summary(item, state.inCategory && state.category !== "Download");
     const action = selecting ? toggle : open;
     const onClick = owner(action) ? () => tell(action) : undefined;
     const onContextMenu = selectable ? (event: MouseEvent) => {
@@ -144,8 +162,9 @@ export function Files({ runtime, alpha }: FilesProps) {
         <FilesRow
           layout={grid ? "tile" : "row"}
           aria-label={item.name}
+          aria-description={[kind, detail].filter(Boolean).join(" · ")}
           name={item.name}
-          detail={item.kind === "Folder" ? undefined : described(item)}
+          detail={detail}
           icon={<Icon />}
           chosen={selecting ? selected : undefined}
           disabled={!onClick}
@@ -161,15 +180,21 @@ export function Files({ runtime, alpha }: FilesProps) {
   const changeLayout = { type: "showAs", layout: grid ? "Rows" : "Grid" } as const;
   const showFilter = owner({ type: "searchFor", wanted });
   const refresh = owner({ type: "refresh" });
-  const makeFolder = owner({ type: "begin", work: "NewFolder", name: unnamed });
+  const rootFolder = atTop && primary ? { type: "openVolume", target: primary.id } as const : undefined;
+  const makeFolder = rootFolder ? owner(rootFolder) : owner({ type: "begin", work: "NewFolder", name: unnamed });
+  const newFolder = () => {
+    if (rootFolder) tell(rootFolder);
+    setNaming({ work: "NewFolder", name: "" });
+  };
   const pickFile = { type: "openPicker", replacing: 0 } as const;
   const canPick = atTop && recent.can(pickFile, "Owner");
-  const showTools = showFilter || refresh || makeFolder || owner(changeLayout) || canPick;
+  const showStorage = owner({ type: "openTop" });
+  const showTools = showFilter || refresh || makeFolder || owner(changeLayout) || canPick || showStorage;
   const canDetails = firstPicked !== undefined && picked.length === 1 && owner({ type: "showDetails", target: firstPicked.id });
   return (
     <section aria-label="Files" className="relative flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-0 flex-1 flex-col">
-        <AppHeader title={title} leading={selecting && owner({ type: "cancelSelection" }) ? <Button variant="ghost" size="icon" aria-label="Cancel" onClick={() => tell({ type: "cancelSelection" })}><X /></Button> : back}>
+        <AppHeader title={title} detail={selecting || !atTop} className={selecting || !atTop ? "[&>h1]:ms-1.5 in-data-[alpha-title-row]:[&>h1]:ms-0" : undefined} leading={selecting && owner({ type: "cancelSelection" }) ? <Button variant="ghost" size="icon" aria-label="Cancel" onClick={() => tell({ type: "cancelSelection" })}><X /></Button> : back}>
           {selecting && canDetails && <Button variant="ghost" size="icon" aria-label="Details" onClick={() => tell({ type: "showDetails", target: firstPicked.id })}><Info /></Button>}
           {selecting && owner({ type: "selectAll" }) && <Button variant="ghost" className="h-11 px-3" onClick={() => tell({ type: "selectAll" })}>Select all</Button>}
           {!selecting && showTools && (
@@ -178,7 +203,7 @@ export function Files({ runtime, alpha }: FilesProps) {
               <MenuContent>
                 {atTop && <MenuItem onSelect={() => void runtime.runPromise(startScan())}><ScanLine />Scan document</MenuItem>}
                 {canPick && <MenuItem onSelect={() => void recent.send(pickFile, "Owner")}><FolderOpen />Open and remember a file</MenuItem>}
-                {makeFolder && <MenuItem onSelect={() => setNaming({ work: "NewFolder", name: "" })}><Plus />New folder</MenuItem>}
+                {makeFolder && <MenuItem onSelect={newFolder}><Plus />New folder</MenuItem>}
                 {owner(changeLayout) && <MenuItem onSelect={() => tell(changeLayout)}>{grid ? <List /> : <LayoutGrid />}{grid ? "List" : "Grid"}</MenuItem>}
                 {orders.map(([order, name]) => owner({ type: "sortBy", order }) && (
                   <MenuItem key={order} onSelect={() => tell({ type: "sortBy", order })}>
@@ -187,21 +212,19 @@ export function Files({ runtime, alpha }: FilesProps) {
                 ))}
                 {showFilter && <MenuItem onSelect={() => setFiltering(true)}><Search />Filter files</MenuItem>}
                 {refresh && <MenuItem onSelect={() => tell({ type: "refresh" })}><RefreshCw />Refresh</MenuItem>}
+                {showStorage && <MenuItem onSelect={() => tell({ type: "openTop" })}><HardDrive />Browse storage</MenuItem>}
               </MenuContent>
             </Menu>
           )}
         </AppHeader>
-        {!atTop && (
+        {!atTop && !state.inCategory && (
           <nav aria-label="Folder path" className="flex shrink-0 items-center gap-0.5 overflow-x-auto px-4.5 pb-1.5 text-meta whitespace-nowrap text-muted-foreground">
-            {owner({ type: "openTop" }) && <><button type="button" className="min-h-8" onClick={() => tell({ type: "openTop" })}>Files</button><span aria-hidden className="px-0.5">›</span></>}
-            {state.inCategory
-              ? <span aria-current="location" className="text-foreground">{category}</span>
-              : state.trail.map((handle, at) => {
-                  const crumb = { type: "openCrumb", depth: at + 1 } as const;
-                  return at < state.trail.length - 1
-                    ? <Fragment key={handle}><button type="button" className="min-h-8" disabled={!owner(crumb)} onClick={() => tell(crumb)}>{label(handle)}</button><span aria-hidden className="px-0.5">›</span></Fragment>
-                    : <span key={handle} aria-current="location" className="text-foreground">{label(handle)}</span>;
-                })}
+            {state.trail.map((handle, at) => {
+              const crumb = { type: "openCrumb", depth: at + 1 } as const;
+              return at < state.trail.length - 1
+                ? <Fragment key={handle}><button type="button" className="min-h-8" disabled={!owner(crumb)} onClick={() => tell(crumb)}>{label(handle)}</button><span aria-hidden className="px-0.5">›</span></Fragment>
+                : <span key={handle} aria-current="location" className="text-foreground">{label(handle)}</span>;
+            })}
           </nav>
         )}
         {filtering && showFilter && (
@@ -225,7 +248,7 @@ export function Files({ runtime, alpha }: FilesProps) {
           {looked !== "NoFilter" && (
             <div className="flex flex-col gap-2">
               <div className="px-2"><Chip onClear={owner({ type: "clearFilter" }) ? () => tell({ type: "clearFilter" }) : undefined} clearLabel="Clear the filter">
-                {[state.search.filter.anyKind ? "" : kinds.find(([one]) => one === state.search.filter.kind)?.[1] ?? "", state.search.filter.text === "" ? "" : `“${state.search.filter.text}”`].filter(Boolean).join(" · ") || "Everything"}
+                {[state.search.filter.anyKind ? "" : kinds.find(([one]) => one === state.search.filter.kind)?.[1] ?? "", state.search.filter.text === "" ? "" : `“${state.search.filter.text}”`, dateRange(state.search.filter)].filter(Boolean).join(" · ") || "Everything"}
               </Chip></div>
               {looked === "Looking" && <Spinner label="Looking" />}
               {looked === "Nothing" && <EmptyState icon={<Search />} title="Nothing matches" className={filesEmpty} />}
@@ -235,8 +258,9 @@ export function Files({ runtime, alpha }: FilesProps) {
               {looked === "Found" && (
                 <div role="group" aria-label="Found">
                   {state.search.hits.map((hit) => {
-                    const Icon = kindOf(hit).icon;
-                    return <FilesRow key={hit.id} aria-label={hit.name} name={hit.name} icon={<Icon />} detail={described(hit)} disabled={!owner({ type: "view", file: hit })} onClick={() => tell({ type: "view", file: hit })} />;
+                    const { icon: Icon, name: kind } = kindOf(hit);
+                    const detail = summary(hit, true);
+                    return <FilesRow key={hit.id} aria-label={hit.name} aria-description={[kind, detail].filter(Boolean).join(" · ")} name={hit.name} icon={<Icon />} detail={detail} disabled={!owner({ type: "view", file: hit })} onClick={() => tell({ type: "view", file: hit })} />;
                   })}
                 </div>
               )}
@@ -244,46 +268,24 @@ export function Files({ runtime, alpha }: FilesProps) {
           )}
           {atTop ? (
             <>
-              {state.storage.status === "Loading" && <Spinner label="Reading your storage" />}
-              {state.storage.status === "Failed" && <Alert variant="destructive"><span>Your storage cannot be read now</span>{refresh && <Button variant="ghost" size="sm" onClick={() => tell({ type: "refresh" })}>Retry</Button>}</Alert>}
-              {(state.storage.status === "Loaded" || state.volumes.length > 0) && (
-                <>
-                  <div role="group" aria-label="Categories">
-                    {primary && owner({ type: "openVolume", target: primary.id }) && <FilesRow size="place" aria-label="All files" name="All files" icon={<Folder />} onClick={() => tell({ type: "openVolume", target: primary.id })} />}
-                    {categories.map(([kind, name]) => {
-                      const counted = state.tally.counts.find((count) => count.kind === kind);
-                      const Icon = icons[kind];
-                      return <FilesRow key={kind} size="place" aria-label={name} aria-description={counted && `${counted.items} · ${sized(counted.bytes)}`} name={name} icon={<Icon />} count={counted?.items || undefined} disabled={!owner({ type: "openCategory", kind })} onClick={() => tell({ type: "openCategory", kind })} />;
-                    })}
-                  </div>
-                  <h2 className="mx-2 mt-3.5 mb-1 text-meta font-semibold text-muted-foreground">Storage</h2>
-                  {state.volumes.map((volume) => {
-                    const name = label(volume.id);
-                    return (
-                      <FilesRow
-                        key={volume.id}
-                        size="place"
-                        aria-label={name}
-                        name={name}
-                        icon={<HardDrive />}
-                        detail={volume.total > 0 && <><span className="block">{`${sized(Math.max(0, volume.total - volume.used))} free of ${sized(volume.total)}`}</span><Progress className="mt-2 h-1.5" aria-label={`${name} used`} value={filled(volume.used, volume.total)} /></>}
-                        disabled={!owner({ type: "openVolume", target: volume.id })}
-                        onClick={() => tell({ type: "openVolume", target: volume.id })}
-                      />
-                    );
-                  })}
-                  {owner({ type: "openTrash" }) && <FilesRow size="place" aria-label="Trash" name="Trash" icon={<Trash2 />} count={state.tally.trashed || undefined} onClick={() => tell({ type: "openTrash" })} />}
-                </>
-              )}
+              <FilesHome state={state} label={label} owner={owner} tell={tell} refresh={refresh} />
               <RecentFiles runtime={runtime} />
             </>
           ) : looked === "NoFilter" && (
             <>
-              {shown === "Reading" && state.items.length === 0 && <Spinner label="Reading the folder" />}
+              {shown === "Reading" && (state.items.length === 0 || groupedCategory) && <Spinner label="Reading the folder" />}
               {shown === "Unreachable" && <Alert variant="destructive">This place cannot be read now</Alert>}
-              {empty(state) && <EmptyState icon={<Folder />} title="Nothing here" className={filesEmpty} />}
+              {empty(state) && folderGroups.length === 0 && <EmptyState icon={state.inCategory ? <CategoryIcon /> : <Folder />} title={state.inCategory ? `No ${category?.toLowerCase() ?? "files"}` : "Nothing here"} className={filesEmpty} />}
               {shown === "Showing" && state.partial && <Alert variant="info">Only part of this place could be read</Alert>}
-              {sorted.length > 0 && <div role="group" aria-label="Listed" className={grid ? "grid grid-cols-3 gap-2" : undefined}>{sorted.map(row)}</div>}
+              {groupedCategory && folderGroups.length > 0 && (
+                <div role="group" aria-label="Folders" className={grid ? "grid grid-cols-3 gap-2" : undefined}>
+                  {folderGroups.map((group) => {
+                    const open = { type: "openCategoryGroup", groupTrail: [...group.trail], ticket: state.listing.ticket } satisfies FilesEvent;
+                    return <FilesRow key={group.folder} layout={grid ? "tile" : "row"} name={group.name} detail={group.folder || "Internal storage"} count={String(group.count)} icon={<CategoryIcon />} aria-label={`Open ${group.name}`} disabled={!owner(open)} onClick={() => tell(open)} />;
+                  })}
+                </div>
+              )}
+              {!groupedCategory && sorted.length > 0 && <div role="group" aria-label="Listed" className={grid ? "grid grid-cols-3 gap-2" : undefined}>{sorted.map(row)}</div>}
             </>
           )}
         </div>
@@ -296,8 +298,8 @@ export function Files({ runtime, alpha }: FilesProps) {
           ]} />
         )}
       </div>
-      <FileLayers state={state} picked={picked} naming={naming} setNaming={setNaming} owner={owner} tell={tell} label={label} />
-      <Preview runtime={runtime} />
+      <FileLayers state={state} picked={picked} naming={naming} setNaming={setNaming} owner={owner} tell={tell} label={label} location={location} />
+      <Preview runtime={runtime} today={today} />
       {scanner}
       <Sheet open={change.panel !== 0} onOpenChange={(open) => { if (!open && owner({ type: "closeShare" })) tell({ type: "closeShare" }); }}>
         <SheetContent title="Share">
@@ -311,6 +313,43 @@ export function Files({ runtime, alpha }: FilesProps) {
 }
 
 
+function FilesHome({ state, label, owner, tell, refresh }: Pick<FileLayersProps, "state" | "label" | "owner" | "tell"> & { readonly refresh: boolean }) {
+  const primary = state.volumes[0];
+  return <>
+    {state.storage.status === "Loading" && <Spinner label="Reading your storage" />}
+    {state.storage.status === "Failed" && <Alert variant="destructive"><span>Your storage cannot be read now</span>{refresh && <Button variant="ghost" size="sm" onClick={() => tell({ type: "refresh" })}>Retry</Button>}</Alert>}
+    {(state.storage.status === "Loaded" || state.volumes.length > 0) && (
+      <>
+        <div role="group" aria-label="Categories">
+          {primary && owner({ type: "openVolume", target: primary.id }) && <FilesRow size="place" aria-label="All files" name="All files" icon={<Folder />} onClick={() => tell({ type: "openVolume", target: primary.id })} />}
+          {categories.map(([kind, name]) => {
+            const counted = state.tally.counts.find((count) => count.kind === kind);
+            const Icon = icons[kind];
+            return <FilesRow key={kind} size="place" aria-label={name} aria-description={counted && `${counted.items} · ${sized(counted.bytes)}`} name={name} icon={<Icon />} count={counted === undefined ? undefined : String(counted.items)} disabled={!owner({ type: "openCategory", kind })} onClick={() => tell({ type: "openCategory", kind })} />;
+          })}
+        </div>
+        <h2 className="mx-2 mt-3.5 mb-1 text-caption font-semibold text-muted-foreground">Storage</h2>
+        {state.volumes.map((volume) => {
+          const name = label(volume.id);
+          return (
+            <FilesRow
+              key={volume.id}
+              size="place"
+              aria-label={name}
+              name={name}
+              icon={<HardDrive />}
+              detail={volume.total > 0 && <><span className="block">{`${sized(Math.max(0, volume.total - volume.used))} free of ${sized(volume.total)}`}</span><Progress className="mt-2 h-1.5" aria-label={`${name} used`} value={filled(volume.used, volume.total)} /></>}
+              disabled={!owner({ type: "openVolume", target: volume.id })}
+              onClick={() => tell({ type: "openVolume", target: volume.id })}
+            />
+          );
+        })}
+        {owner({ type: "openTrash" }) && <FilesRow size="place" aria-label="Trash" name="Trash" icon={<Trash2 />} count={state.tally.trashed || undefined} onClick={() => tell({ type: "openTrash" })} />}
+      </>
+    )}
+  </>;
+}
+
 type FileLayersProps = {
   readonly state: FilesState;
   readonly picked: readonly Item[];
@@ -319,11 +358,18 @@ type FileLayersProps = {
   readonly owner: (event: FilesEvent) => boolean;
   readonly tell: (event: FilesEvent) => void;
   readonly label: (handle: number) => string;
+  readonly location: (item: Item) => string;
 };
 
-function FileLayers({ state, picked, naming, setNaming, owner, tell, label }: FileLayersProps) {
+function FileLayers({ state, picked, naming, setNaming, owner, tell, label, location }: FileLayersProps) {
   const [details] = detailed(state);
   const { change } = state;
+  const namingEvent = naming === undefined ? undefined : naming.destinationRead === undefined
+    ? { type: "begin", work: naming.work, name: naming.name.trim() } as const
+    : { type: "beginDestinationFolder", destinationTicket: naming.destinationRead, name: naming.name.trim() } as const;
+  const newDestination = { type: "beginDestinationFolder", destinationTicket: state.sheet.reading.ticket, name: unnamed } as const;
+  const destinationFolderFailed = change.work === "NewFolder" && change.folder === state.sheet.trail.at(-1)
+    && (change.attempt.outcome === "Refused" || change.attempt.outcome === "Unknown");
   return (
     <>
       <Dialog open={state.deleting.showing} onOpenChange={(open) => { if (!open && owner({ type: "keepFiles" })) tell({ type: "keepFiles" }); }}>
@@ -344,7 +390,7 @@ function FileLayers({ state, picked, naming, setNaming, owner, tell, label }: Fi
               <dt>Kind</dt><dd>{kindNames[details.kind]}</dd>
               {details.kind !== "Folder" && <><dt>Size</dt><dd>{sized(details.bytes)}</dd></>}
               <dt>Changed</dt><dd><time dateTime={new Date(details.revision).toISOString()}>{new Date(details.revision).toLocaleString()}</time></dd>
-              <dt>Where</dt><dd>{state.trail.map(label).join(" › ")}</dd>
+              <dt>Where</dt><dd>{location(details)}</dd>
             </dl>
           )}
         </DialogContent>
@@ -354,12 +400,10 @@ function FileLayers({ state, picked, naming, setNaming, owner, tell, label }: Fi
           <DialogTitle>{naming?.work === "Rename" ? "Rename" : "New folder"}</DialogTitle>
           <form className="flex flex-col gap-3" onSubmit={(event) => {
             event.preventDefault();
-            if (!naming) return;
-            const begin = { type: "begin", work: naming.work, name: naming.name.trim() } as const;
-            if (owner(begin)) { tell(begin); setNaming(undefined); }
+            if (namingEvent !== undefined && owner(namingEvent)) { tell(namingEvent); setNaming(undefined); }
           }}>
-            <Input aria-label="Name" value={naming?.name ?? ""} invalid={naming !== undefined && naming.name.trim() !== "" && !owner({ type: "begin", work: naming.work, name: naming.name.trim() })} onChange={(event) => setNaming(naming && { ...naming, name: event.target.value })} />
-            <Button type="submit" disabled={!naming || !owner({ type: "begin", work: naming.work, name: naming.name.trim() })}>{naming?.work === "Rename" ? "Rename" : "Make"}</Button>
+            <Input aria-label="Name" value={naming?.name ?? ""} invalid={namingEvent !== undefined && namingEvent.name !== "" && !owner(namingEvent)} onChange={(event) => setNaming(naming && { ...naming, name: event.target.value })} />
+            <Button type="submit" disabled={namingEvent === undefined || !owner(namingEvent)}>{naming?.work === "Rename" ? "Rename" : naming?.destinationRead === undefined ? "Make" : "Create"}</Button>
           </form>
         </DialogContent>
       </Dialog>
@@ -378,6 +422,7 @@ function FileLayers({ state, picked, naming, setNaming, owner, tell, label }: Fi
           title="Move or copy to"
           actions={(
             <>
+              {owner(newDestination) && <Button variant="ghost" onClick={() => setNaming({ work: "NewFolder", name: "", destinationRead: newDestination.destinationTicket })}><Plus />New folder</Button>}
               {owner({ type: "begin", work: "CopyTo", name: "" }) && <Button variant="outline" onClick={() => tell({ type: "begin", work: "CopyTo", name: "" })}>Copy here</Button>}
               {owner({ type: "begin", work: "MoveTo", name: "" }) && <Button onClick={() => tell({ type: "begin", work: "MoveTo", name: "" })}>Move here</Button>}
             </>
@@ -389,6 +434,7 @@ function FileLayers({ state, picked, naming, setNaming, owner, tell, label }: Fi
             ))}
             {state.sheet.trail.length > 0 && <span className="px-2 font-semibold">{label(state.sheet.trail[state.sheet.trail.length - 1] ?? 0)}</span>}
           </nav>
+          {destinationFolderFailed && <Alert variant="warn">{change.attempt.outcome === "Unknown" ? "Files could not confirm the new folder" : "The phone could not make the folder"}</Alert>}
           {state.sheet.reading.status === "Loading" && <Spinner label="Reading the folder" />}
           {state.sheet.reading.status === "Failed" && <Alert variant="warn">This folder cannot be read now</Alert>}
           <ListGroup surface="plain">

@@ -3,24 +3,29 @@ import {
   Banner,
   Button,
   ConfirmDialog,
+  ListGroup,
   type SettingsAccess,
   type SettingsAccessWord,
   SettingsAboutPage,
   SettingsActivityPage,
   type SettingsActivityPageProps,
+  SettingsAndroidRow,
   type SettingsAndroidStart,
   type SettingsAndroidTarget,
   type SettingsAndroidTold,
   SettingsAppPage,
+  type SettingsAppPageProps,
   SettingsAppsPage,
   SettingsBatteryPage,
   SettingsDeveloperPage,
   type SettingsDeviceRead,
   SettingsDisplayPage,
+  SettingsFactRow,
   type SettingsFactReading,
   SettingsGeneralPage,
   type SettingsNeighbour,
   SettingsNotificationsPage,
+  SettingsPage,
   type SettingsPageName,
   SettingsPermissionsPage,
   SettingsPhonePage,
@@ -34,7 +39,10 @@ import {
   type SettingsTextSizePickerProps,
 } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useState, useSyncExternalStore } from "react";
+import * as Records from "../../gen/app__account__records.ts";
+import { useMachine as useRecords } from "../../gen/app__account__records.react.ts";
+import type { Machine as RecordsMachine } from "../../gen/app__account__records.effect.vibe";
 import * as ActivityGen from "../../gen/app__settings__activity.ts";
 import { useMachine as useActivity } from "../../gen/app__settings__activity.react.ts";
 import type { Machine as ActivityMachine } from "../../gen/app__settings__activity.effect.vibe";
@@ -57,6 +65,9 @@ import { useMachine as useDeveloper } from "../../gen/app__settings__developer.r
 import type { Machine as DeveloperMachine } from "../../gen/app__settings__developer.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Machine as ShellMachine } from "../../gen/app__shell.effect.vibe";
+import { useMachine as useLayers } from "../../gen/app__shell__layers.react.ts";
+import type { Machine as LayersMachine } from "../../gen/app__shell__layers.effect.vibe";
+import { pageInert } from "../../gen/app__shell__layers.ts";
 import type { Alpha } from "../runtime/area.tsx";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
@@ -64,9 +75,11 @@ import type { Time } from "../runtime/time.vibe";
 import type { Machine as AccessReviewMachine } from "../../gen/app__startup__access.effect.vibe";
 import { AccessReview } from "../startup/SettingsAccess.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
+import { AccountStatus } from "../account/index.tsx";
+import { CalendarAccount, type CalendarConnection } from "./calendar.vibe";
 
 /** What every Settings page reads: where the owner is, the phone's facts, the hand-overs to Android, the preferences, the reset and the developer tools. */
-export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | FactsMachine | AccessReviewMachine | ActivityMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ShellMachine | Time, unknown>;
+export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | CalendarAccount | FactsMachine | AccessReviewMachine | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ShellMachine | LayersMachine | Time, unknown>;
 
 /** What the frame gives each page: the runtime, Alpha's places, and the props every page shares. */
 export interface PageProps {
@@ -91,13 +104,13 @@ export interface Common {
 const pageNames: Record<Page, SettingsPageName> = {
   Top: "top", General: "general", Display: "display", Sound: "sound", Notifications: "notifications", Battery: "battery",
   NetworkPage: "network", CarrierPage: "carrier", PhonePage: "phone", Privacy: "privacy", Permissions: "permissions", Apps: "apps",
-  InboxApp: "inbox", WorkflowsApp: "workflows", CalendarApp: "calendar", CameraApp: "camera", PhotosApp: "photos", MapsApp: "maps", NotesApp: "notes",
+  InboxApp: "inbox", WorkflowsApp: "workflows", CalendarApp: "calendar", CameraApp: "camera", PhotosApp: "photos", MapsApp: "maps", NotesApp: "notes", PasswordsPage: "passwords",
   About: "about", Activity: "activity", Licences: "licences", Developer: "developer", Problems: "problems",
 };
 const pagesNamed = Object.fromEntries(Object.entries(pageNames).map(([page, name]) => [name, page])) as Record<SettingsPageName, Page>;
 
 const neighbourNames: Record<Neighbour, SettingsNeighbour> = {
-  AccountAndPlan: "account-and-plan", GoogleAndEmail: "google-and-email", CalendarAccount: "calendar-account", PasswordManager: "password-manager",
+  AccountAndPlan: "account-and-plan", GoogleAndEmail: "google-and-email", CalendarAccount: "calendar-account",
   NotificationCollection: "notification-collection", Listener: "listener", Conversations: "conversations", RestartDetails: "restart-details", CalendarBackups: "calendar-backups",
 };
 const neighboursNamed = Object.fromEntries(Object.entries(neighbourNames).map(([neighbour, name]) => [name, neighbour])) as Record<SettingsNeighbour, Neighbour>;
@@ -105,7 +118,7 @@ const neighboursNamed = Object.fromEntries(Object.entries(neighbourNames).map(([
 const targetNames: Record<AndroidGen.Target, SettingsAndroidTarget> = {
   AndroidHome: "android-home", AccountsSync: "accounts-sync", WifiNetworks: "wifi-networks", BluetoothDevices: "bluetooth-devices",
   MobileNetworks: "mobile-networks", AirplaneMode: "airplane-mode", ScreenLock: "screen-lock", DefaultApps: "default-apps",
-  DisplaySettings: "display-settings", Brightness: "brightness", SoundSettings: "sound-settings", DoNotDisturb: "do-not-disturb",
+  PasswordAutofill: "password-autofill", DisplaySettings: "display-settings", Brightness: "brightness", SoundSettings: "sound-settings", DoNotDisturb: "do-not-disturb",
   BatterySaver: "battery-saver", AlphaAlerts: "alpha-alerts", AlertChannel: "alert-channel", NotificationAccess: "notification-access",
   WorkflowAlerts: "workflow-alerts", AppPermissions: "app-permissions", PhotoPermissions: "photo-permissions", AllFilesAccess: "all-files-access",
   LocationSettings: "location-settings", InternetPanel: "internet-panel", SimCards: "sim-cards", AccessPointNames: "access-point-names",
@@ -212,9 +225,8 @@ function useDevice(runtime: SettingsRuntime) {
 function Top({ runtime, alpha, common }: PageProps) {
   const pages = usePages(runtime).state;
   return (
-    <SettingsTopPage {...common} leading={<AppBack alpha={alpha} />} onPhone={pages?.phone ?? false} developer={pages?.development ?? false}>
-      {alpha.slot("settings/account")}
-    </SettingsTopPage>
+    <SettingsTopPage {...common} leading={<AppBack alpha={alpha} />} onPhone={pages?.phone ?? false}
+      developer={pages?.development ?? false} accountDetail={<AccountStatus alpha={alpha} />} />
   );
 }
 
@@ -322,14 +334,29 @@ function Phone({ runtime, alpha, common }: PageProps) {
   );
 }
 
+// spec/app/settings/android.md, "Each Android page is offered on the Settings page it belongs to"
+function Passwords({ runtime, common }: PageProps) {
+  const service = reading(useFacts(runtime).state, "AutofillService");
+  const canChoose = service.word === "reported" && (service.value === "None" || service.value === "Other");
+  return (
+    <SettingsPage title="Password manager" onBack={common.onBack} backLabel="Back to Apps" told={common.told} actions={common.actions}>
+      <ListGroup heading="Autofill">
+        <SettingsFactRow title="Autofill service" reading={service} />
+        {canChoose ? <SettingsAndroidRow title="Use for autofill" target="password-autofill" starting={common.starting} onAndroid={common.onAndroid} /> : null}
+      </ListGroup>
+    </SettingsPage>
+  );
+}
+
 function Apps({ runtime, common }: PageProps) {
   const shell = useShell(runtime);
-  const image = usePages(runtime).state?.image ?? false;
+  const pages = usePages(runtime).state;
   const appViews = { browser: "Browser", files: "Files", messages: "Messages" } as const;
   return (
     <SettingsAppsPage
       {...common}
-      image={image}
+      image={pages?.image ?? false}
+      onPhone={pages?.phone ?? false}
       onOpenApp={(app) => {
         const open = { type: "openView", view: appViews[app] } as const;
         if (shell.can(open)) void shell.send(open);
@@ -338,15 +365,24 @@ function Apps({ runtime, common }: PageProps) {
   );
 }
 
+const calendarStatuses: Record<CalendarConnection, NonNullable<SettingsAppPageProps["calendarStatus"]>> = {
+  Checking: "checking", NoGrant: "not-connected", ReadOnly: "read-only", Writable: "connected", Unchecked: "unchecked",
+};
+
 function App({ runtime, common, app }: PageProps & { app: "inbox" | "workflows" | "calendar" | "camera" | "photos" | "maps" | "notes" }) {
   const facts = useFacts(runtime).state;
+  const phone = usePages(runtime).state?.phone;
   const device = useDevice(runtime);
+  const calendar = runtime.runSync(CalendarAccount);
+  const status = useSyncExternalStore(calendar.subscribe, calendar.snapshot, calendar.snapshot);
   return (
     <>
     {device?.recovery}
     <SettingsAppPage
       {...common}
       app={app}
+      onPhone={phone}
+      calendarStatus={app === "calendar" ? calendarStatuses[status] : undefined}
       grants={grants(facts)}
       read={device?.read}
       images={device?.images}
@@ -394,8 +430,18 @@ const agentWords: Record<ActivityGen.AgentWord, NonNullable<Parameters<typeof Se
 /** Agent activity as reported by the resident host, with the conversation controls owned by Ask Alpha. */
 function Activity({ runtime, alpha, common }: PageProps) {
   const { state, can, send } = useTimed(runtime, useActivity);
-  if (!state) return null;
-  const retry = { type: "recover", how: "Retry", connection: state.connection } as const;
+  const records = useRecords(runtime);
+  const layers = useLayers(runtime).state;
+  if (!state || !records.state || !layers) return null;
+  const recovery = { type: "recover", how: state.connection === "NeedsRestart" ? "Restart" : "Retry", connection: state.connection } as const;
+  const review = records.state;
+  const archive = { type: "archive", review: review.review.ticket, reviewing: state.connection === "NeedsRestart", held: pageInert(layers) } as const;
+  const close = { type: "closeReview" } as const;
+  const canConfirm = records.can(archive);
+  const archiving = review.attempt.outcome === "Sent";
+  const needsPhoneRestart = Records.phoneMustRestart(review);
+  const canRecover = can(recovery) && Records.canOpened(review);
+  const dismiss = () => { if (records.can(close)) void records.send(close); };
   const refresh = { type: "refreshActions", connection: state.connection, at: untimed } as const;
   const decline = (proposal: string) => ({ type: "decline", proposal, connection: state.connection, at: untimed }) as const;
   const settle = (proposal: string, happened: boolean) => ({ type: "reconcileAction", proposal, happened, connection: state.connection, at: untimed }) as const;
@@ -410,9 +456,26 @@ function Activity({ runtime, alpha, common }: PageProps) {
       onRefresh={can(refresh) ? () => void send(refresh) : undefined}
       onDecline={(proposal) => { if (can(decline(proposal))) void send(decline(proposal)); }}
       onReconcile={(proposal, happened) => { if (can(settle(proposal, happened))) void send(settle(proposal, happened)); }}
-      onRecover={can(retry) ? () => void send(retry) : undefined}
+      onRecover={canRecover ? () => void send(recovery) : undefined}
       onHandOver={common.onHandOver}
     >
+      {needsPhoneRestart ? <Banner variant="warn">Alpha couldn’t confirm the archive. Restart your phone before trying again.</Banner> : null}
+      {review.showing && !canConfirm && !archiving ? (
+        <Banner variant={review.review.status === "Loading" ? "info" : "warn"}>
+          {review.review.status === "Loading" ? "Checking retained records…" : "Alpha couldn’t confirm the recovery. Close this review and try again."}
+          <Button variant="ghost" size="sm" onClick={dismiss}>Close review</Button>
+        </Banner>
+      ) : null}
+      <ConfirmDialog
+        open={review.showing && (canConfirm || archiving)}
+        title="Restart Alpha?"
+        confirmLabel="Archive and restart"
+        loading={archiving}
+        onConfirm={() => { if (canConfirm) void records.send(archive); }}
+        onCancel={dismiss}
+      >
+        Archive {review.kept} {review.kept === 1 ? "record" : "records"} held by the failed agent and restart it.
+      </ConfirmDialog>
       {alpha.slot("settings/activity")}
     </SettingsActivityPage>
   );
@@ -439,6 +502,7 @@ const drawn: Partial<Record<Page, Drawn>> = {
   Privacy,
   Permissions,
   Apps,
+  PasswordsPage: Passwords,
   InboxApp: (props) => <App {...props} app="inbox" />,
   WorkflowsApp: (props) => <App {...props} app="workflows" />,
   CalendarApp: (props) => <App {...props} app="calendar" />,
@@ -468,7 +532,7 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
   const start = android.state && loading(android.state.start) ? { target: targetNames[android.state.target], channel: android.state.channel || undefined } : undefined;
   const refresh = { type: "refresh", at: untimed } as const;
   const common: Common = {
-    actions: (page === "Top" || page === "General") && facts.can(refresh)
+    actions: state.phone && (page === "Top" || page === "General" || page === "PasswordsPage") && facts.can(refresh)
       ? <Button variant="ghost" size="sm" onClick={() => void facts.send(refresh)}>Refresh</Button>
       : undefined,
     onBack: can(goBack) ? () => void send(goBack) : undefined,

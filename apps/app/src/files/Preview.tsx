@@ -1,9 +1,14 @@
-// spec/app/files/preview.md, "Story: Look at a file"; spec/app/files/preview.md, "Story: Act on the file I am looking at"; spec/app/files/preview.md, "Story: Get a file back when access was lost"; spec/app/files/recent.md, "Story: Find what I opened lately"
-import { Alert, Button, Dialog, DialogContent, DialogTitle, FilesRow, Menu, MenuContent, MenuItem, MenuTrigger, Spinner } from "@repo/ui";
+// spec/app/files/preview.md, "Story: Look at a file"; spec/app/files/preview.md, "Story: Act on the file I am looking at"; spec/app/files/preview.md, "Story: Get a file back when access was lost"; spec/app/files/recent.md, "Story: Find what I opened lately"; spec/app/files/preview.md, "The caption and Details show facts for the exact document held"
+import { validName } from "@elizaos/plugin-files-client";
+import { Alert, Button, Dialog, DialogContent, DialogTitle, FilesRow, Input, Menu, MenuContent, MenuItem, MenuTrigger, Spinner } from "@repo/ui";
 import { Effect, Option, type ManagedRuntime } from "effect";
-import { ChevronLeft, ChevronRight, Ellipsis, ExternalLink, FileText, Mail, Pause, Play, Sparkles, X } from "lucide-react";
+import { useState } from "react";
+import { ChevronLeft, ChevronRight, Ellipsis, ExternalLink, FileText, FolderInput, Info, Mail, MessageCircle, Pause, Pencil, Play, Share2, Sparkles, Trash2, X } from "lucide-react";
+import type { Machine as Browser } from "../../gen/app__files.effect.vibe";
+import { previewActionReady } from "../../gen/app__files.ts";
+import { useMachine as useFiles } from "../../gen/app__files.react.ts";
 import type { Machine } from "../../gen/app__files__preview.effect.vibe";
-import { loaded, showing, usable } from "../../gen/app__files__preview.ts";
+import { loaded, showing, showsFileFacts, usable } from "../../gen/app__files__preview.ts";
 import { useMachine } from "../../gen/app__files__preview.react.ts";
 import type { Machine as RecentMachine } from "../../gen/app__files__recent.effect.vibe";
 import { useMachine as useRecent } from "../../gen/app__files__recent.react.ts";
@@ -13,12 +18,15 @@ import type { Machine as Inbox } from "../../gen/app__inbox.effect.vibe";
 import { useMachine as useInbox } from "../../gen/app__inbox.react.ts";
 import type { Machine as Drafts } from "../../gen/app__inbox__drafts.effect.vibe";
 import { useMachine as useDrafts } from "../../gen/app__inbox__drafts.react.ts";
+import { changedOn, folderLocation, parentPath, sized } from "./entries.vibe";
 import { Handles } from "./handles.vibe";
-import { Opened, emailAccount } from "./preview.vibe";
+import { Opened, emailAccount, pictureFits } from "./preview.vibe";
 
 export interface PreviewProps {
   /** Provides the preview and Recent machines, and what the viewer read, of preview.vibe. */
-  runtime: ManagedRuntime.ManagedRuntime<Machine | RecentMachine | Opened | Handles | Shell | Inbox | Drafts, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<Machine | Browser | RecentMachine | Opened | Handles | Shell | Inbox | Drafts, unknown>;
+  /** Files' current date, used to show the same short date as its list. */
+  today: Date;
 }
 
 /** What the owner calls the document a grant names. */
@@ -31,12 +39,15 @@ function nameOf(runtime: PreviewProps["runtime"], grant: number): string | undef
  * shown, and what the owner can do with it, each offered exactly when the rules take it.
  * @model spec/app/files/preview.md
  */
-export function Preview({ runtime }: PreviewProps) {
+export function Preview({ runtime, today }: PreviewProps) {
   const { state, can, send } = useMachine(runtime);
   const recent = useRecent(runtime);
   const shell = useShell(runtime);
   const inbox = useInbox(runtime);
   const drafts = useDrafts(runtime);
+  const files = useFiles(runtime);
+  const [details, setDetails] = useState<{ readonly viewer: number; readonly revision: number }>();
+  const [rename, setRename] = useState<{ readonly viewer: number; readonly revision: number; readonly name: string }>();
   if (!state || !recent.state || !showing(state) || shell.state?.assistant === "Sheet" || shell.state?.assistant === "Full") return null;
   const owner = <E extends Parameters<typeof can>[0]>(event: E) => can(event, "Owner");
   const tell = <E extends Parameters<typeof send>[0]>(event: E) => void send(event, "Owner");
@@ -44,7 +55,8 @@ export function Preview({ runtime }: PreviewProps) {
   const mine = content.viewer === state.viewer && loaded(state);
   const grant = recent.state.shown.key === state.item ? recent.state.shown.grant : 0;
   const file = Option.getOrUndefined(runtime.runSync(Effect.flatMap(Opened, (opened) => opened.grant(grant))));
-  const name = file?.name ?? Option.getOrUndefined(runtime.runSync(Effect.flatMap(Handles, (handles) => handles.label(state.item)))) ?? "File";
+  const lapsedName = !usable(state) ? runtime.runSync(Effect.flatMap(Opened, (opened) => opened.nameAt(state.item))) : undefined;
+  const name = file?.name ?? lapsedName ?? Option.getOrUndefined(runtime.runSync(Effect.flatMap(Handles, (handles) => handles.label(state.item)))) ?? "File";
   const mediaProps = {
     "aria-label": name,
     preload: "metadata",
@@ -59,6 +71,29 @@ export function Preview({ runtime }: PreviewProps) {
   const askAlpha = owner({ type: "askAlpha" });
   const openElsewhere = owner({ type: "openElsewhere" });
   const forget = owner({ type: "forget" });
+  const share = file !== undefined && owner({ type: "shareFile" });
+  const picture = { type: "useInMessages", fitsPicture: pictureFits(file) } as const;
+  const facts = file !== undefined && showsFileFacts(state, file.key, file.revision) ? file : undefined;
+  const showDetails = facts !== undefined;
+  const detailsOpen = showDetails && details?.viewer === state.viewer && details.revision === state.revision;
+  const ownFile = file !== undefined && recent.state.shown.origin === "InFolder" && files.state !== undefined && previewActionReady(files.state);
+  const move = { type: "actOnStoredFile", operation: "MoveFile", name: "", stored: ownFile } as const;
+  const trash = { type: "actOnStoredFile", operation: "TrashFile", name: "", stored: ownFile } as const;
+  const pickedRename = !ownFile && recent.state.shown.origin === "Picked" && file?.canRename === true;
+  const nextName = rename?.name.trim() ?? "";
+  const editName = pickedRename
+    ? { type: "renamePicked", name: nextName, renameable: true } as const
+    : { type: "actOnStoredFile", operation: "RenameFile", name: nextName, stored: ownFile } as const;
+  const renaming = (ownFile || pickedRename) && rename?.viewer === state.viewer && rename.revision === state.revision;
+  const showRename = owner({ ...editName, name: "/" });
+  const place = facts?.storage;
+  const location = place === undefined ? undefined : folderLocation(place.label, parentPath(place.path));
+  const revision = facts?.revision ?? 0;
+  const changed = changedOn(revision, today);
+  const modified = changed === "" ? undefined : new Date(revision);
+  const bytes = facts?.bytes;
+  const kind = { Media: "Media", Photo: "Image", Text: "Text", Archive: "Archive", Pdf: "PDF", Receipt: "Receipt" }[state.kind];
+  const caption = [kind, bytes === undefined ? "" : sized(bytes), changed, location].filter(Boolean).join(" · ");
   const destination = inbox.state && drafts.state ? emailAccount(inbox.state, drafts.state) : undefined;
   const offer = { type: "useInEmail", account: destination?.account ?? 0 } as const;
   const email = file !== undefined && destination !== undefined && owner(offer);
@@ -68,13 +103,19 @@ export function Preview({ runtime }: PreviewProps) {
         <div className="flex min-h-13 shrink-0 items-center gap-0.5 px-2 pt-[env(safe-area-inset-top)] [&_button]:size-13">
           {owner({ type: "close" }) && <Button variant="ghost" size="icon" aria-label="Close" onClick={() => tell({ type: "close" })}><ChevronLeft /></Button>}
           <div className="flex-1" />
-          {(askAlpha || openElsewhere || forget || email) && (
+          {(askAlpha || openElsewhere || forget || email || owner(picture) || share || showDetails || showRename || owner(move) || owner(trash)) && (
             <Menu>
               <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="File actions"><Ellipsis /></Button></MenuTrigger>
               <MenuContent>
                 {askAlpha && <MenuItem onSelect={() => tell({ type: "askAlpha" })}><Sparkles />Ask Alpha</MenuItem>}
                 {email && <MenuItem onSelect={() => tell(offer)}><Mail />Use in email</MenuItem>}
+                {owner(picture) && <MenuItem onSelect={() => tell(picture)}><MessageCircle />Use in Messages</MenuItem>}
+                {share && <MenuItem onSelect={() => tell({ type: "shareFile" })}><Share2 />Share</MenuItem>}
                 {openElsewhere && <MenuItem onSelect={() => tell({ type: "openElsewhere" })}><ExternalLink />Open elsewhere</MenuItem>}
+                {showDetails && <MenuItem onSelect={() => setDetails({ viewer: state.viewer, revision: state.revision })}><Info />Details</MenuItem>}
+                {showRename && <MenuItem onSelect={() => setRename({ viewer: state.viewer, revision: state.revision, name })}><Pencil />Rename</MenuItem>}
+                {owner(move) && <MenuItem onSelect={() => tell(move)}><FolderInput />Move to</MenuItem>}
+                {owner(trash) && <MenuItem onSelect={() => tell(trash)}><Trash2 />Move to Trash</MenuItem>}
                 {forget && <MenuItem onSelect={() => tell({ type: "forget" })}><X />Forget</MenuItem>}
               </MenuContent>
             </Menu>
@@ -82,7 +123,7 @@ export function Preview({ runtime }: PreviewProps) {
         </div>
         <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto px-6 pt-1 pb-42">
           <DialogTitle className="font-display text-title font-light break-words">{name}</DialogTitle>
-          {file !== undefined && <p className="mt-2.5 mb-5 flex items-center gap-2.5 text-sm text-muted-foreground"><FileText aria-hidden className="size-4.5" />{file.mimeType === "application/pdf" ? "PDF" : { Media: "Media", Photo: "Image", Text: "Text", Archive: "Archive", Pdf: "PDF", Receipt: "Receipt" }[state.kind]}</p>}
+          {facts !== undefined && <p className="mt-2.5 mb-5 flex items-start gap-2.5 text-sm text-muted-foreground"><FileText aria-hidden className="size-4.5 shrink-0" /><span className="min-w-0 break-words">{caption}</span></p>}
           {state.attempt.outcome === "Unknown" && state.offered.item === state.item && state.offered.revision === state.revision && <Alert variant="warn">Check Inbox before offering this file again</Alert>}
           {!usable(state) && <Alert variant="warn">Alpha can no longer read this file</Alert>}
           {state.content.status === "Loading" && <Spinner label="Opening the file" />}
@@ -102,6 +143,31 @@ export function Preview({ runtime }: PreviewProps) {
           )}
           {owner({ type: "selectAgain" }) && <Button size="sm" className="mt-3" onClick={() => tell({ type: "selectAgain" })}>Select again</Button>}
         </div>
+        <Dialog open={renaming} onOpenChange={(open) => { if (!open) setRename(undefined); }}>
+          <DialogContent closeLabel="Cancel rename">
+            <DialogTitle>Rename</DialogTitle>
+            <form className="flex flex-col gap-3" onSubmit={(event) => {
+              event.preventDefault();
+              if (!owner(editName) || !validName(editName.name) || editName.name === name) return;
+              tell(editName);
+              setRename(undefined);
+            }}>
+              <Input aria-label="Name" value={rename?.name ?? ""} onChange={(event) => setRename(rename && { ...rename, name: event.target.value })} />
+              <Button type="submit" disabled={!owner(editName) || !validName(editName.name) || editName.name === name}>Rename</Button>
+            </form>
+          </DialogContent>
+        </Dialog>
+        <Dialog open={detailsOpen} onOpenChange={(open) => { if (!open) setDetails(undefined); }}>
+          <DialogContent closeLabel="Close details">
+            <DialogTitle>{name}</DialogTitle>
+            <dl aria-label="File details" className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+              <dt>Type</dt><dd>{kind}</dd>
+              {bytes !== undefined && <><dt>Size</dt><dd>{new Intl.NumberFormat().format(bytes)} bytes</dd></>}
+              {modified !== undefined && <><dt>Modified</dt><dd><time dateTime={modified.toISOString()}>{modified.toLocaleString()}</time></dd></>}
+              {location !== undefined && <><dt>Location</dt><dd>{location}</dd></>}
+            </dl>
+          </DialogContent>
+        </Dialog>
       </DialogContent>
     </Dialog>
   );
@@ -112,7 +178,7 @@ export function Preview({ runtime }: PreviewProps) {
  * otherwise named as one to select again.
  * @model spec/app/files/recent.md
  */
-export function RecentFiles({ runtime }: PreviewProps) {
+export function RecentFiles({ runtime }: Pick<PreviewProps, "runtime">) {
   const { state, can, send } = useRecent(runtime);
   if (!state || state.rows.length === 0) return null;
   return (
@@ -120,7 +186,8 @@ export function RecentFiles({ runtime }: PreviewProps) {
       <h2 id="files-recent" className="mx-2 mt-3.5 mb-1 text-meta font-semibold text-muted-foreground">Recent</h2>
       {state.rows.map((row) => {
         const reopen = { type: "reopen", row } as const;
-        const name = nameOf(runtime, row.grant) ?? Option.getOrElse(runtime.runSync(Effect.flatMap(Handles, (handles) => handles.label(row.key))), () => "A file to select again");
+        const remembered = row.origin === "Picked" ? runtime.runSync(Effect.flatMap(Opened, (opened) => opened.nameAt(row.key))) : undefined;
+        const name = nameOf(runtime, row.grant) ?? remembered ?? Option.getOrElse(runtime.runSync(Effect.flatMap(Handles, (handles) => handles.label(row.key))), () => "A file to select again");
         const reselect = { type: "openPicker", replacing: row.key } as const;
         const action = row.grant === 0 ? reselect : reopen;
         return <FilesRow key={`${row.origin} ${row.key}`} size="place" name={name} aria-label={row.grant === 0 ? `Select again: ${name}` : name} icon={<FileText />} detail={row.grant === 0 ? "Select it again to open it" : undefined} disabled={!can(action, "Owner")} onClick={() => void send(action, "Owner")} />;

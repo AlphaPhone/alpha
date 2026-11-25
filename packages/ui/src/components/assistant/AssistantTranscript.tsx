@@ -61,13 +61,13 @@ const MessageRows = memo(function MessageRows({ messages }: { messages: readonly
  * @model spec/app/assistant/chats.md
  */
 export function AssistantTranscript({ messages, liveMessages, position, visible = true, status = "loaded", turn, onRetry, onEarlier, onLater, onReturnToOriginal, className, onScroll, ...props }: AssistantTranscriptProps) {
-  const scroll = useRef<TranscriptScroll>({ follows: true });
+  const scrollRef = useRef<TranscriptScroll>({ follows: true });
   const page = position?.page;
   const around = position?.around;
   const placed = useCallback((content: HTMLDivElement | null) => {
     const viewport = content?.parentElement;
     if (!content || !viewport || !visible || status !== "loaded") return;
-    const reading = scroll.current;
+    const reading = scrollRef.current;
     if (reading.page !== page) {
       const row = around === undefined ? undefined : messageRow(content, around);
       if (row && around !== undefined) {
@@ -90,7 +90,7 @@ export function AssistantTranscript({ messages, liveMessages, position, visible 
     const content = button.parentElement;
     const viewport = content?.parentElement;
     const row = content && id !== undefined ? messageRow(content, id) : undefined;
-    if (viewport && row && id !== undefined) scroll.current.paging = { id, offset: topIn(viewport, row) };
+    if (viewport && row && id !== undefined) scrollRef.current.paging = { id, offset: topIn(viewport, row) };
     load();
   };
   const body = () => {
@@ -114,7 +114,7 @@ export function AssistantTranscript({ messages, liveMessages, position, visible 
       className={cn(focusRing, "min-h-0 touch-pan-y overflow-y-auto px-5 pt-2 pb-3.5 select-text focus-visible:-outline-offset-focus", className)}
       onScroll={(event) => {
         const viewport = event.currentTarget;
-        if (visible && status === "loaded") scroll.current.follows = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 80;
+        if (visible && status === "loaded") scrollRef.current.follows = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 80;
         onScroll?.(event);
       }}
       {...props}

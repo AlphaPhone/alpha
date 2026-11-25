@@ -14,6 +14,7 @@ module web {
     setAgentGoogleConsent(options: { gmailChanges: boolean; calendarEdits: boolean }): Promise<void>
     diagnosticsFacts(): Promise<unknown>
     copyText(options: { text: string }): Promise<void>
+    shareText(options: { readonly title: string; readonly text: string }): Promise<{ readonly status: string }>
   }
   let alphaDevice: AlphaDevice | undefined
   /** @throws {never} */
@@ -31,9 +32,10 @@ module web {
   export function native(): boolean {
     return Capacitor.isNativePlatform()
   }
-  /** Text at `percent` of its size, and the percent the page then has. @throws {never} */
+  /** Text at `percent` of its size, published for CSS beside the measured scale, and the percent the page then has. @throws {never} */
   export function zoom(percent: number): number {
     document.documentElement.style.fontSize = `${percent}%`
+    document.documentElement.style.setProperty("--alpha-own-text-scale", String(percent / 100))
     return Number.parseFloat(document.documentElement.style.fontSize)
   }
   /** @throws {never} */
@@ -47,13 +49,26 @@ module web {
   export const pages = (): EventTarget => document
   /** @throws {never} */
   export const showing = (): boolean => document.visibilityState === "visible"
+  /** Open exactly one chooser for the selected words. Cancel does not choose another destination. */
+  export async function shareWords(title: string, text: string): Promise<boolean> {
+    if (!showing() || !text.trim() || title.length > 200 || new TextEncoder().encode(text).length > 65536 || text.includes("\0")) return false
+    if (native()) return registered("AlphaDevice") && (await alpha().shareText({ title, text })).status === "opened"
+    if (!navigator.share) return false
+    try { await navigator.share({ title, text }); return true }
+    catch (error) { if (error instanceof DOMException && error.name === "AbortError") return true; throw error }
+  }
   /** Copy the exact text after the owner's action. */
   export async function copyToBrowser(text: string): Promise<void> {
     await navigator.clipboard.writeText(text)
   }
 }
-import { alpha, copyToBrowser, marked, native, page, pages, registered, showing, zoom } from web
+import { alpha, copyToBrowser, marked, native, page, pages, registered, shareWords, showing, zoom } from web
 export { native, registered }
+
+/** Whether a text chooser opened or the owner cancelled it without a handoff. */
+export effect function shareSystemText(title: string, text: string): boolean!! {
+  return tryPromise(() => shareWords(title, text)) catch () => false
+}
 
 /** Whether this build may load fixtures, the fake world and developer surfaces: only one made with `ELIZA_DEV_ALLOW_TEST_MOCKS=1`. */
 export function testMocks(): boolean {
@@ -105,8 +120,8 @@ export service Device {
   bars(dark: boolean): void!!
   /** What Alpha's Android host says about its build for a support report, untrusted; none off the phone or where it could not say. */
   buildFacts(): Option.Option<unknown>!!
-  /** The Google consent the phone's host launches the agent with from now on, restarting a running agent when it changed; nothing where no agent is hosted. */
-  agentConsent(consent: GoogleConsent): void!!
+  /** Whether the phone's host took the Google consent it launches the agent with from now on, restarting a running agent when it changed; it keeps what it had when it refuses. True where no agent is hosted. */
+  agentConsent(consent: GoogleConsent): boolean!!
   /** Whether the owner's text was put on the system clipboard. */
   copyText(text: string): boolean!!
 }
@@ -168,7 +183,7 @@ export const phoneDevice = Layer.effect(Device, effect {
     feels: () => sync(() => registered(alphaDevice)),
     bars: (dark: boolean) => registered(alphaDevice) ? ignore(tryPromise(() => alpha().setSystemBarAppearance({ dark }))) : Effect.void,
     buildFacts: () => registered(alphaDevice) ? Effect.option(tryPromise(() => alpha().diagnosticsFacts())) : succeed(Option.none<unknown>()),
-    agentConsent: (consent: GoogleConsent) => registered(alphaDevice) ? ignore(tryPromise(() => alpha().setAgentGoogleConsent(consent))) : Effect.void,
+    agentConsent: (consent: GoogleConsent) => registered(alphaDevice) ? Effect.map(Effect.option(tryPromise(() => alpha().setAgentGoogleConsent(consent))), Option.isSome) : succeed(true),
     copyText: (text: string) => registered(alphaDevice) ? Effect.map(Effect.option(tryPromise(() => alpha().copyText({ text }))), Option.isSome) : succeed(false),
     effect capabilities() {
       const variant = variantOf(native(), registered(telephony))
@@ -187,7 +202,7 @@ export const browserDevice = Layer.effect(Device, effect {
     feels: () => succeed(false),
     bars: () => Effect.void,
     buildFacts: () => succeed(Option.none<unknown>()),
-    agentConsent: () => Effect.void,
+    agentConsent: () => succeed(true),
     copyText: (text: string) => Effect.map(Effect.option(tryPromise(() => copyToBrowser(text))), Option.isSome),
   }
 })

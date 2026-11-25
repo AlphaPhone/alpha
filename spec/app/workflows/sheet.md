@@ -2,7 +2,9 @@
 
 A workflow's history and the sheet of one run: the runs the agent kept,
 read page by page, and one run opened with its output, read aloud on
-request, and handed to Ask Alpha. A removed workflow keeps its history.
+request, and handed to Ask Alpha. A scheduled run names its scheduled time.
+The run's Details show the execution, version, status, reconciliation, stop
+time and activity recorded by the agent. A removed workflow keeps its history.
 
 The run's status as reported, the workflow's newest version and whether
 it was removed are facts of [Runs](./runs.md) and [Workflows](./index.md),
@@ -124,13 +126,26 @@ pure def openRun(s: Sheet, runId: int, status: U::Status, version: int, newest: 
 
 pure def canOutputRead(s: Sheet, ticket: int, text: Output): bool = R::canAnswer(s.output, ticket) and text != NoOutput
 
-pure def outputRead(s: Sheet, ticket: int, ok: bool, text: Output): Sheet =
-  { ...s, output: R::answer(s.output, ok), text: if (ok) text else NoOutput }
+pure def outputRead(s: Sheet, ticket: int, ok: bool, text: Output, status: U::Status): Sheet =
+  { ...s, output: R::answer(s.output, ok), text: if (ok) text else s.text,
+    status: if (ok and canRunChanged(s, s.runId, status)) status else s.status }
 ```
 
 ### The run's status and the workflow's version are followed while the run is open
 
+While Alpha is visible, reopening the reading of a running run can show
+its newly pending approval or final output. A failed read can be retried.
+The last output stays visible during a refresh.
+
 ```quint
+pure def canRefreshRun(s: Sheet): bool =
+  s.runId >= 1 and s.output.status != R::Loading
+    and (s.status == U::Running or (s.output.status == R::Failed and s.text == NoOutput))
+
+pure def refreshRun(s: Sheet): Moved =
+  val asked = R::ask(s.output)
+  { state: { ...s, output: asked }, out: List(ReadOutput({ ticket: asked.ticket, runId: s.runId })) }
+
 pure def canRunChanged(s: Sheet, runId: int, status: U::Status): bool =
   runId == s.runId and runId >= 1 and s.status == U::Running and U::ended(status)
 
