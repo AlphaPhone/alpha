@@ -154,6 +154,7 @@ lemma listed_ensures(s: Photos, ticket: int, ok: bool, rows: seq<int>, owned: se
   ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepAlbumChangesCarryTheSelection(s, "listed", listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state, listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).out))
 {
   if inv(s) && canListed(s, ticket, by_) && ok && !(s.paging && ((revision != s.revision) || !(allOlder(rows, s.rows)))) {
+    assert s.cameraAlbum == 0;
     var after := listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state;
     var sess := if s.secure then ProofLib.Filter((set_x: int) => (set_x in s.only), rows) else rows;
     var shown := if kit__permission_allows(s.access) then sess else ProofLib.Filter((set_x: int) => (set_x in owned), sess);

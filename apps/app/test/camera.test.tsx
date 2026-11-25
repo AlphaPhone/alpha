@@ -154,6 +154,17 @@ describe("Camera on a phone", () => {
     const selected = world.photos.rows.find((item) => item.owned);
     if (selected === undefined) throw new Error("The Camera album has no capture");
     selected.date = 1795399000000;
+    selected.mutationRevision = "last-capture";
+    const mutations: string[] = [];
+    world.photos.changeMany = async ({ operation, items }) => {
+      if (items.length !== 1 || items[0]?.id !== selected.id || items[0]?.revision !== selected.mutationRevision
+        || (operation !== "favorite" && operation !== "unfavorite")) throw new Error("Wrong photo or revision");
+      mutations.push(operation);
+      selected.mutationRevision = operation;
+      selected.favorite = operation === "favorite";
+      const status = selected.favorite ? "favorited" : "unfavorited";
+      return { status: "complete", outcomes: [{ id: selected.id, status, item: selected }] };
+    };
     world.photos.rows.splice(world.photos.rows.indexOf(selected), 1);
     world.photos.rows.push(selected);
 
@@ -166,6 +177,14 @@ describe("Camera on a phone", () => {
     await until(alpha, library, Viewer, (state) => state.read.status === "Loaded");
     expect(document.querySelector('img[alt="Camera.jpg"]')).not.toBeNull();
     expect(world.photos.readCount).toBe(1);
+
+    // spec/app/photos/index.md, "The Viewer's favourite, share or delete of the item open is a change of that one item, at the revision it showed"
+    await press("Favorite");
+    await until(alpha, library, Viewer, (state) => state.favourite);
+    await until(alpha, library, Library, (state) => state.library.status === "Loaded" && state.job.done.length === 1 && state.cameraItem > 0);
+    await press("Remove from favorites");
+    await until(alpha, library, Viewer, (state) => !state.favourite);
+    expect(mutations).toEqual(["favorite", "unfavorite"]);
 
     // spec/app/photos/viewer.md, "Back from a Camera capture returns to Camera"
     await press("Info");
@@ -192,6 +211,30 @@ describe("Camera on a phone", () => {
     await press("Back to photos");
     await until(alpha, library, Viewer, (state) => state.open === 0);
     expect(button("Camera.jpg")).toBeDefined();
+  });
+
+  it("Close the off-page Camera viewer when the exact content changes (spec/app/photos/index.md, \"The Viewer's favourite, share or delete of the item open is a change of that one item, at the revision it showed\")", async () => {
+    const world = { ...scene(), phone: true };
+    world.photos.access = { scope: "full", images: "full", videos: "full" };
+    const capture = world.photos.rows.find((item) => item.owned);
+    if (capture === undefined) throw new Error("The Camera album has no capture");
+    capture.date = 1795399000000;
+    world.photos.rows.splice(world.photos.rows.indexOf(capture), 1);
+    world.photos.rows.push(capture);
+    const { alpha } = await open(world, only("home", "view:Camera", "view:Photos", "notice"));
+    const library = photosArea.runtime(alpha);
+    await press("Camera");
+    await until(alpha, camera.runtime(alpha), Machine, (state) => state.phase === "Ready" && state.last > 0);
+    await press("Open last capture in Photos");
+    await until(alpha, library, Viewer, (state) => state.read.status === "Loaded");
+    await drawn(() => {
+      capture.size += 1;
+      capture.mutationRevision = "replaced-capture";
+      world.photos.changed();
+    });
+    await until(alpha, library, Library, (state) => state.visible && state.library.status === "Loaded" && state.cameraItem === 0);
+    await until(alpha, library, Viewer, (state) => state.open === 0);
+    expect(button("Camera.jpg")).toBeUndefined();
   });
 
   it("Let Alpha take a photo after owner approval (spec/app/camera/index.md, \"Story: Let Alpha take a photo\")", async () => {

@@ -1,5 +1,5 @@
 // spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/index.md, "Story: Give Photos access"; spec/app/photos/index.md, "Story: Change albums from what I am looking at"; spec/app/photos/index.md, "Story: Select photos"
-import type { AlbumChange, LibraryAccess, MediaId, MediaPage, PhotosClient, Reviewed } from "@elizaos/os-bridges"
+import type { AlbumChange, LibraryAccess, MediaId, MediaItem, MediaPage, PhotosClient, Reviewed } from "@elizaos/os-bridges"
 import * as Library from "../../gen/app__photos.effect.vibe"
 import type { Actor } from "../../gen/app__photos__actor.effect.vibe"
 import * as Viewer from "../../gen/app__photos__viewer.effect.vibe"
@@ -15,6 +15,7 @@ import { PhotosPort, saveBrowserCapture, type BrowserCapture, type PhotoHandoff 
 import type { BrowserEditFrame } from "../platform/photoCanvas.vibe"
 import { answer, following, reacting, run, started, together, type Job } from "../runtime/reactor.vibe"
 import { Catalog, catalog, reviewed, taken, type ListedAlbum, type Row } from "./catalog.vibe"
+import { OpenedPhoto } from "./viewer.vibe"
 
 /** One explicit image chooser belongs to the Photos entry that opened it. */
 export service PhotoChooser {
@@ -173,6 +174,21 @@ effect function verifiedCameraItem(phone: PhotosClient, lookup: CameraLookup): (
   return { kind: "phone", item: source === "owned" ? { ...item, owned: true } : item }
 }
 
+function cameraPageMatches(state: Library.Photos, page: MediaPage, own: boolean): boolean {
+  if (own) return page.access === undefined
+  if (page.access === undefined) return false
+  const access = accessEvent(page.access)
+  return access.grant === state.access.grant && access.videos === state.videos
+}
+
+function sameCameraContent(before: MediaItem, after: MediaItem): boolean {
+  return after.id === before.id && after.kind === before.kind && after.identity === before.identity
+    && after.width === before.width && after.height === before.height && after.size === before.size
+    && (before.contentRevision === undefined
+      ? (after.mutationRevision ?? after.revision) === (before.mutationRevision ?? before.revision)
+      : after.contentRevision === before.contentRevision)
+}
+
 /** Read the requested page and keep its payload only when the matching ticket can still answer. */
 effect function fetched(request: Fetch): Library.Event!!(PhotosPort | Catalog | Library.Machine) {
   const { phone, browser, reviewed: deviceLibrary, peekHandoff } = try PhotosPort
@@ -225,13 +241,18 @@ effect function fetched(request: Fetch): Library.Event!!(PhotosPort | Catalog | 
       ? [{ kind: "phone", item: { ...item, owned: true } }] : []
   }).sort((a, b) => taken(b) - taken(a))
   const capture = try peekHandoff()
+  const beforeCamera = state.cameraItem === 0 ? undefined : (try cache.displayed()).rows.get(state.cameraItem)
   let cameraRow: Extract<Row, { kind: "phone" }> | undefined
-  if (capture !== undefined && listed !== undefined && Option.isSome(phone) && request.only.length === 0 && Library.cameraScope(state)) {
-    const lookup = cameraLookup(capture, listed, request.own)
-    if (lookup !== undefined && !rows.some((row) => row.item.id === lookup.id)) {
+  if (listed !== undefined && Option.isSome(phone) && request.only.length === 0 && Library.cameraVisit(state)
+    && cameraPageMatches(state, listed, request.own)) {
+    const kept = beforeCamera?.kind === "phone" ? beforeCamera : undefined
+    const requested = kept === undefined && Library.cameraScope(state) ? capture : undefined
+    const identity = requested ?? (kept === undefined ? undefined : { libraryId: kept.item.id, ownedId: undefined })
+    const lookup = identity === undefined ? undefined : cameraLookup(identity, listed, request.own)
+    if (lookup !== undefined && (kept !== undefined || !rows.some((row) => row.item.id === lookup.id))) {
       const verified = try verifiedCameraItem(phone.value, lookup)
       if (!Library.canListed(try machine.get(), request.ticket, "Phone") || (try cache.revision()) !== revision) return fail
-      if ((try peekHandoff()) === capture) cameraRow = verified
+      if ((try peekHandoff()) === capture && verified !== undefined && (kept === undefined || sameCameraContent(kept.item, verified.item))) cameraRow = verified
     }
   }
   const handles = try cache.index(rows)
@@ -401,6 +422,43 @@ effect function changed(attempt: number, change: Change, items: readonly number[
   return { type: "changed", attempt, ...outcome }
 }
 
+// spec/app/photos/index.md, "The owner can add the Camera capture in the Viewer to an album"
+effect function cameraAlbums(photo: number, ticket: number): void!!(PhotosPort | Catalog | Library.Machine | Viewer.Machine) {
+  const { phone } = try PhotosPort
+  if (Option.isNone(phone)) return
+  const shelves = tryPromise(() => phone.value.albums()) catch () => undefined
+  const machine = try Library.Machine
+  const viewer = try (try Viewer.Machine).get()
+  if (shelves === undefined || viewer.open !== photo || !Viewer.shown(viewer)
+    || !Library.canCameraAlbumsLoaded(try machine.get(), photo, ticket, "Phone")) return
+  const cache = try Catalog
+  const choices = try cache.shelves(shelves.map((album): ListedAlbum => ({
+    title: album.name, target: `custom:${album.id}`, owned: album, count: album.count,
+  })), (try cache.displayed()).trashCount)
+  try ignore(machine.send({ type: "cameraAlbumsLoaded", photo, ticket, choices }, "Phone"))
+}
+
+// spec/app/photos/index.md, "The Viewer's favourite, share or delete of the item open is a change of that one item, at the revision it showed"
+effect function revokeCamera(photo: number): void!!(Library.Machine | Viewer.Machine) {
+  if ((try (try Library.Machine).get()).cameraItem === photo) return
+  const viewer = try Viewer.Machine
+  const showing = try viewer.get()
+  if (showing.open === photo && showing.origin === "CameraCapture") try ignore(viewer.send({ type: "revoked" }, "Phone"))
+}
+
+// spec/app/photos/index.md, "The owner can add the Camera capture in the Viewer to an album"
+export effect function openCameraAlbum(photo: number, revision: number, ticket: number): void!!(Library.Machine | Viewer.Machine) {
+  const viewer = try Viewer.Machine
+  const current = try viewer.get()
+  if (current.open !== photo || current.revision !== revision || current.read.ticket !== ticket
+    || current.origin !== "CameraCapture" || current.editing || !Viewer.shown(current)) return
+  if (current.info && Exit.isFailure(try exit(viewer.send({ type: "toggleInfo" }, "Owner")))) return
+  const after = try viewer.get()
+  if (after.open !== photo || after.revision !== revision || after.read.ticket !== ticket
+    || after.origin !== "CameraCapture" || after.info || after.editing || !Viewer.shown(after)) return
+  try ignore((try Library.Machine).send({ type: "chooseCameraAlbum", photo, revision }, "Owner"))
+}
+
 type WriteAlbum = Extract<Library.Effect, { readonly tag: "WriteAlbum" }>
 
 effect function albumWritten(request: WriteAlbum): Library.Event!!(PhotosPort | Catalog) {
@@ -450,6 +508,8 @@ type LibraryNeeds = PhotosPort | Catalog | Library.Machine | Viewer.Machine | Tr
 function carry(fx: Library.Effect): Job<Library.Event, LibraryNeeds, [Actor]> {
   return match (fx) {
     when { tag: "Fetch" }: answer("library", fetched(fx), failedList(fx.ticket), "Phone");
+    when { tag: "ReadCameraAlbums", let photo, let ticket }: run("camera albums", cameraAlbums(photo, ticket), "Phone");
+    when { tag: "DropCamera", let photo }: run("drop camera", revokeCamera(photo), "Phone");
     when { tag: "AskAccess" }: answer("access", Effect.map(permission(true), (event) => event ?? denied), denied, "Phone");
     when { tag: "PickItems" }: answer("access", Effect.map(permission(true), (event) => event ?? denied), denied, "Phone");
     when { tag: "OpenSettings" }: run("settings", effect {
@@ -536,6 +596,38 @@ const libraryChanges = started(effect {
   })
 }, "Photos library changes")
 
+// spec/app/photos/index.md, "The Viewer's favourite, share or delete of the item open is a change of that one item, at the revision it showed"
+const cameraUpdates = started(effect {
+  const library = try Library.Machine
+  const viewer = try Viewer.Machine
+  const cache = try Catalog
+  const open = try OpenedPhoto
+  try Stream.runForEach(library.changes, effect (state) => {
+    if (!state.visible || state.cameraItem === 0 || state.library.status !== "Loaded") return
+    if ((try library.get()).library.ticket !== state.library.ticket) return
+    const viewing = try viewer.get()
+    const media = try open.current()
+    const photo = state.cameraItem
+    const row = (try cache.displayed()).rows.get(photo)
+    if (viewing.open !== photo || viewing.origin !== "CameraCapture" || media.photo !== photo || media.item === undefined
+      || row?.kind !== "phone" || row.item.id !== media.item.id || !Viewer.canItemChanged(viewing, "Phone")) return
+    const confirmedFlag = state.job.basis === viewing.revision && state.job.done.includes(photo)
+      && (state.job.change === "Favorite" || state.job.change === "Unfavorite")
+    if (row.item.identity !== media.item.identity || row.item.kind !== media.item.kind
+      || row.item.width !== media.item.width || row.item.height !== media.item.height || row.item.size !== media.item.size
+      || (row.item.contentRevision !== media.item.contentRevision && !confirmedFlag)) {
+      try ignore(viewer.send({ type: "revoked" }, "Phone"))
+      return
+    }
+    if (row.item.trashed === true) { try ignore(viewer.send({ type: "deleted" }, "Phone")); return }
+    const favourite = row.item.favorite ?? viewing.favourite
+    const revised = (row.item.mutationRevision ?? row.item.revision) !== (media.item.mutationRevision ?? media.item.revision)
+    if (!revised && favourite === viewing.favourite && viewing.revision === state.revision) return
+    if (revised || favourite !== viewing.favourite) try open.hold({ ...media, item: { ...media.item, ...row.item } })
+    try ignore(viewer.send({ type: "itemChanged", revision: state.revision, favourite }, "Phone"))
+  })
+}, "refreshing the open Camera capture")
+
 const batchLimit = 20
 const batches = following(Library.Machine, (state) => ({ job: state.job, visible: state.visible }), Library.Machine,
   ({ job, visible }): Library.Event | undefined => visible && job.left.length > 0 && job.request.outcome !== "Sent"
@@ -566,4 +658,4 @@ const notices = started(effect {
   })))
 }, "Photos change notices")
 
-export const library = together(chooser, catalog, reacting(Library, { carry }), lifecycle, libraryChanges, batches, handoff, notices)
+export const library = together(chooser, catalog, reacting(Library, { carry }), lifecycle, libraryChanges, batches, handoff, cameraUpdates, notices)
