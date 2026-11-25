@@ -28,7 +28,7 @@ do next.
   a 4.4em word fit its own row above 150% text), `home-display` that title on a screen inside an app on the launcher, on
   one line and cut with an ellipsis until above 150% text, where every header title takes its own row and wraps, and
   `4xl` the Home date. Text up to `lg` is set at Public Sans's own line height (1.175), as develop sets it; copy that
-  is read at length takes `leading-normal`. `tracking-caps` with `text-xs` is a small uppercase label; `text-label` names an app tile on
+  is read at length takes `leading-normal`. `tracking-caps` with `text-xs` is a small uppercase label; `tracking-loose` with `text-xs` is the uppercase "Needs approval" over a request the owner approves; `text-label` names an app tile on
   Home and in the drawer. A list row reads `text-base`,
   `text-subject` and `text-snippet` line by line; `text-meta` is a status line under a header, and `text-body`
   the text of a message or of a field being typed; `text-2xs` is the time under a text message or a
@@ -260,6 +260,7 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `leading.detail` | 1.35 |
 | `tracking.tight` | -0.01em |
 | `tracking.caps` | 0.14em |
+| `tracking.loose` | 0.04em |
 | `z.10` | 10 |
 | `z.20` | 20 |
 | `z.50` | 50 |
