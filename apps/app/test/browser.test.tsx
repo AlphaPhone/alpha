@@ -213,7 +213,7 @@ describe("The Browser on a phone", () => {
     const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
     const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
     await until(alpha, page, Page, (p) => p.phase === "Shown" && p.secure);
-    const initial = page.runSync(Page.use((m) => m.get()));
+    const initial = page.runSync(Effect.flatMap(Page, (m) => m.get()));
     await press("Menu");
     await press("Clear site data");
     expect(document.querySelector("[role=alertdialog]")?.textContent).toContain("news.example");
@@ -221,7 +221,7 @@ describe("The Browser on a phone", () => {
     await until(alpha, page, Page, (p) => p.phase === "Shown" && p.load > initial.load);
     await press("Clear data");
     expect(world.browser.calls).not.toContain("clearSiteData");
-    expect(runtime.runSync(Site.use((m) => m.get())).clear).toBe(0);
+    expect(runtime.runSync(Effect.flatMap(Site, (m) => m.get())).clear).toBe(0);
   });
 
   it("Opens Passwords settings from the Browser menu (spec/app/settings/index.md, \"A notice or Ask Alpha may open a section directly, at its top, and Back from it goes to its parent\")", async () => {
@@ -243,7 +243,7 @@ describe("The Browser on a phone", () => {
       await fill("Address", "enclave.example/keys-in-hardware");
       document.querySelector<HTMLFormElement>("form[role=search]")?.requestSubmit();
     });
-    const selected = runtime.runSync(Tabs.use((m) => m.get())).selected;
+    const selected = runtime.runSync(Effect.flatMap(Tabs, (m) => m.get())).selected;
     const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(selected)));
     await until(alpha, page, Page, (p) => p.phase === "Shown" && p.secure);
     placeNative();

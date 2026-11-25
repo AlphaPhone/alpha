@@ -1,12 +1,11 @@
 // spec/app/voice/listener.md, "Story: See and control the listener"
 import { ListGroup, ListRow, SettingsNavRow, SettingsSwitchRow } from "@repo/ui";
 import { Ear, ExternalLink } from "lucide-react";
-import { useEffect } from "react";
 import { type Event, type Shown, shown } from "../../gen/app__voice__listener.ts";
 import type { Machine } from "../../gen/app__voice__listener.effect.vibe";
 import { useMachine } from "../../gen/app__voice__listener.react.ts";
 import { area, type Resident, type Shown as AreaShown } from "../runtime/area.tsx";
-import { listener, openListenerSettings, refreshListener } from "./listener.vibe";
+import { listener, openListenerSettings } from "./listener.vibe";
 
 const words: Record<Shown, string> = {
   Unavailable: "Unavailable",
@@ -21,11 +20,7 @@ const words: Record<Shown, string> = {
 
 function ListenerSettings({ runtime }: AreaShown<Machine | Resident>) {
   const { state, can, send } = useMachine(runtime);
-  const image = state?.image === true;
-  useEffect(() => {
-    if (image) void runtime.runPromiseExit(refreshListener());
-  }, [image, runtime]);
-  if (!state || !image) return null;
+  if (state?.image !== true) return null;
 
   const status = shown(state);
   const detail = state.reads.status === "Failed" && status !== "MayBeOn" && status !== "IndicatorLost"

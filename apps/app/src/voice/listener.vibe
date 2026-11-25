@@ -49,7 +49,7 @@ function carry(out: Model.Effect): Job<Model.Event, Device, []> {
   }
 }
 
-export effect function refreshListener(): void!!Model.Machine {
+effect function refreshListener(): void!!Model.Machine {
   const machine = try Model.Machine
   if (Model.canRefresh(try machine.get())) try ignore(machine.send({ type: "refresh" }))
 }
@@ -64,12 +64,11 @@ export effect function openListenerSettings() {
 const followingDevice = started(effect {
   const listener = try Model.Machine
   if (try haveListener()) try ignore(listener.send({ type: "admit", image: true }))
-  const device = try Device
-  const settings = try Settings
-  const shell = try Shell
-  try Stream.runForEach(Stream.filter(device.visible, (visible) => visible), effect () => {
-    if (showing(try shell.get(), "Settings") && (try settings.get()).page === "Privacy") try refreshListener()
-  })
+  const foreground = (try Device).visible
+  const views = Stream.zipLatest((try Shell).changes, (try Settings).changes)
+  const privacy = Stream.map(views, ([shell, settings]) => showing(shell, "Settings") && settings.page === "Privacy")
+  const showingPrivacy = Stream.map(Stream.zipLatest(privacy, foreground), ([shown, visible]) => shown && visible)
+  try Stream.runForEach(Stream.filter(Stream.changes(showingPrivacy), (shown) => shown), () => refreshListener())
 }, "admitting and refreshing the listener")
 
 export const listener = together(reacting(Model, { carry }), followingDevice)

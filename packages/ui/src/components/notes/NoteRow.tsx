@@ -24,7 +24,7 @@ export function NoteRow({ title, date, preview, voice = false, aside, className,
       className={cn(focusRing, "flex w-full items-start gap-3 border-b border-border px-2 py-3 text-left text-foreground focus-visible:-outline-offset-focus active:bg-accent", className)}
       {...props}
     >
-      {typeof chosen === "boolean" && <span aria-hidden className={cn("mt-0.5 grid size-6 shrink-0 place-items-center rounded-[7px]", chosen ? "bg-alpha text-alpha-foreground" : "inset-ring-[1.5px] inset-ring-muted-foreground")}>
+      {typeof chosen === "boolean" && <span aria-hidden className={cn("mt-0.5 grid size-6 shrink-0 place-items-center rounded-check", chosen ? "bg-alpha text-alpha-foreground" : "inset-ring-[1.5px] inset-ring-muted-foreground")}>
         {chosen && <Check className="size-3.75" />}
       </span>}
       {voice && <AudioLines aria-hidden className="mt-0.5 size-4.5 shrink-0 text-primary" />}

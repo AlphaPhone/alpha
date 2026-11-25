@@ -155,7 +155,7 @@ describe("Files on a phone", () => {
     await openRow("Download");
     await until(alpha, runtime, Browser, (state) => state.listing.status === "Loaded" && state.trail.length === 2);
 
-    const picked = () => runtime.runSync(Browser.use((machine) => machine.get())).picked;
+    const picked = () => runtime.runSync(Effect.flatMap(Browser, (machine) => machine.get())).picked;
     const touch = (type: string, clientX = 30) => drawn(() => {
       const row = button("lease.pdf");
       if (!row) throw new Error("The listed file is missing");
