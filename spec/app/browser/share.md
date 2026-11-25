@@ -1,7 +1,7 @@
 # Share
 
-How the page leaves the Browser at the owner's own request: the share
-panel (Android's share sheet, copying the link or an email draft), and
+How the page leaves the Browser at the owner's own request: sharing through
+Android's share sheet, copying the link or preparing an email draft, and
 opening the page in another browser where it needs what Alpha's tabs cannot
 do, such as a passkey, or where a tab could not load it at all. Whether the
 page has committed, is secure and is private comes from its
@@ -14,6 +14,8 @@ page has committed, is secure and is private comes from its
 
 ### Sharing holds the share panel's review and number, the last panel that sent, the review for opening the page elsewhere, and what it last told the owner
 
+On Android, selecting Share in the Browser menu opens the system sheet.
+Copy link uses the selected page's address and waits for the clipboard.
 Whether the page needs another browser is part of opening it elsewhere: it
 asked for a passkey, or its load failed where another browser may still
 reach it.
@@ -23,29 +25,31 @@ import review as V from "../../kit/review"
 
 type Kind = Normal | Private
 type Dest = System | Copy | Email
+type Delivery = NoDelivery | Sending({ panel: int, dest: Dest })
 type Notice = Quiet | NoPage | Changed | Copied | ClipboardRefused | Passkeys | NoBrowser | NotOpened
 type Failure = Unreachable | Untrusted | Refused
 type Effect = Sheet({ panel: int }) | CopyLink({ panel: int }) | Draft({ panel: int }) | Elsewhere({ confirmed: bool })
 type Share = {
-  panel: int, sent: int, review: V::Review,
+  panel: int, sent: int, delivery: Delivery, review: V::Review,
   passkey: bool, stranded: bool, handoff: V::Review, privately: bool, launching: bool, confirmed: bool,
   notice: Notice,
 }
 type Step = { state: Share, out: List[Effect] }
 
 pure val initial: Share = {
-  panel: 0, sent: 0, review: V::unreviewed,
+  panel: 0, sent: 0, delivery: NoDelivery, review: V::unreviewed,
   passkey: false, stranded: false, handoff: V::unreviewed, privately: false, launching: false, confirmed: false,
   notice: Quiet,
 }
 
-pure def busy(s: Share): bool = s.review.showing or s.handoff.showing or s.launching
+pure def busy(s: Share): bool = s.review.showing or s.handoff.showing or s.launching or s.delivery != NoDelivery
+pure val panelValues = Set(1, 2, 3)
 ```
 
 ### Every load of the page changes what is under review, and the page no longer needs another browser
 
 ```quint
-pure def pageChanged(s: Share): Share = { ...s, review: V::revise(s.review), handoff: V::revise(s.handoff), passkey: false, stranded: false }
+pure def pageChanged(s: Share): Share = { ...s, review: V::revise(s.review), handoff: V::revise(s.handoff), delivery: NoDelivery, passkey: false, stranded: false }
 ```
 
 ### The share panel opens over a committed page, one at a time; otherwise the owner is told to load the page first
@@ -60,19 +64,44 @@ pure def openPanel(s: Share, ready: bool): Share =
 
 ### Choosing where to send the page sends it once, if it is still the page the panel opened on, and closes the panel
 
-The clipboard answers at once whether it took the link. A page that changed
-meanwhile is not sent, and the owner is told.
+A page that changed meanwhile is not sent, and the owner is told.
 
 ```quint
-pure def canChoose(s: Share, dest: Dest, ok: bool): bool = s.review.showing
+pure def canChoose(s: Share, dest: Dest): bool = s.review.showing
 
-pure def choose(s: Share, dest: Dest, ok: bool): Step =
+pure def choose(s: Share, dest: Dest): Step =
   if (not(V::canConfirm(s.review))) { state: { ...s, review: V::dismiss(s.review), notice: Changed }, out: List() }
   else {
     state: { ...s, review: V::confirm(s.review), sent: s.panel,
-      notice: if (dest == Copy) (if (ok) Copied else ClipboardRefused) else Quiet },
+      delivery: Sending({ panel: s.panel, dest: dest }), notice: Quiet },
     out: List(if (dest == System) Sheet({ panel: s.panel }) else if (dest == Copy) CopyLink({ panel: s.panel }) else Draft({ panel: s.panel })),
   }
+```
+
+### The answer for the current choice says whether it was carried out
+
+Alpha waits for the clipboard before saying the link was copied. An answer
+for a previous choice has no effect. If the page changed or the Browser
+has gone to the background, the answer says nothing to the owner.
+
+```quint
+pure def canDelivered(s: Share, panel: int, ok: bool, shown: bool): bool = {
+  val delivery = s.delivery
+  match delivery { | Sending(x) => x.panel == panel | NoDelivery => false }
+}
+
+pure def delivered(s: Share, panel: int, ok: bool, shown: bool): Share =
+  val delivery = s.delivery
+  val notice = match delivery {
+    | NoDelivery => Quiet
+    | Sending(x) => if (not(shown)) Quiet else if (x.dest == Copy) (if (ok) Copied else ClipboardRefused) else if (ok) Quiet else NotOpened
+  }
+  { ...s, delivery: NoDelivery, notice: notice }
+
+pure def alwaysDeliveryBelongsToTheLastChoice(s: Share): bool = {
+  val delivery = s.delivery
+  match delivery { | Sending(x) => x.panel == s.sent and not(s.review.showing) | NoDelivery => true }
+}
 ```
 
 ### Closing the panel, or Alpha going to the background, sends nothing
@@ -82,7 +111,7 @@ pure def canClosePanel(s: Share): bool = s.review.showing
 
 pure def closePanel(s: Share): Share = { ...s, review: V::dismiss(s.review) }
 
-pure def hidden(s: Share): Share = { ...s, review: V::dismiss(s.review), handoff: V::dismiss(s.handoff) }
+pure def hidden(s: Share): Share = { ...s, review: V::dismiss(s.review), handoff: V::dismiss(s.handoff), delivery: NoDelivery }
 ```
 
 ### Each share panel sends at most once, and only the page it opened on

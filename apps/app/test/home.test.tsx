@@ -3,17 +3,21 @@ import { digestInbox, type DigestResult, hostedDigestProtocol } from "@elizaos/p
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Home from "../gen/app__home.effect.vibe";
+import { Machine as DigestSchedules } from "../gen/app__digests__schedules.effect.vibe";
+import { Machine as WorkflowList } from "../gen/app__workflows__list.effect.vibe";
 import * as Cards from "../gen/app__home__cards.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Toasts } from "../gen/app__notices__toasts.effect.vibe";
 import home from "../src/home/index.tsx";
 import type { Alpha } from "../src/runtime/area.tsx";
-import { button, closeAll, drawn, hardware, later, open, press, seen, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
 import { scene, type Scene } from "./fakes/scene.ts";
 import { savedKey, written } from "../src/home/saved.vibe";
 import { waiting } from "../src/home/waiting.vibe";
 import { fromAreas } from "../src/home/cards.vibe";
 import { digestScope } from "../src/workflows/brief.vibe";
+import workflows from "../src/workflows/index.tsx";
+import type { NativeDigestScene, WorkflowsScene } from "./fakes/workflows.ts";
 
 underAct();
 afterEach(closeAll);
@@ -28,7 +32,7 @@ const pulled = (startY = 68, dx = 0) => drawn(() => {
   zone?.dispatchEvent(pointer("pointerdown", 100, startY));
   zone?.dispatchEvent(pointer("pointerup", 100 + dx, startY + 80));
 });
-const alphaApps = ["view:Inbox", "view:Calendar", "view:Clock", "view:Reminders", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Files", "view:Workflows", "view:Settings"];
+const alphaApps = ["view:Inbox", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Files", "view:Workflows", "view:Settings"];
 const holdingHome = (world: Scene) => {
   world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true, holders: ["ai.alphacompute.alphaphone"] } : role);
   return world;
@@ -40,13 +44,13 @@ const digestResult = (cursor: number, status: string, output: string): DigestRes
     scheduledAt: at, startedAt: at, completedAt: at, source: {}, status, output, error: null };
 };
 
-function keepDigests(alpha: Alpha, owner: string, entries: readonly DigestResult[]) {
+function keepDigests(alpha: Alpha, scope: string, entries: readonly DigestResult[]) {
   let acknowledged = false;
   const agent = hostedDigestProtocol((path) => Effect.sync(() => {
     if (path.endsWith("/ack")) { acknowledged = true; return {}; }
     return { entries: acknowledged ? [] : entries };
   }));
-  return alpha.runtime.runPromise(Effect.flatMap(digestInbox(digestScope(owner)), (inbox) => inbox.sync(agent, 1)));
+  return alpha.runtime.runPromise(Effect.flatMap(digestInbox(scope), (inbox) => inbox.sync(agent, 1)));
 }
 
 describe("Home on a phone", () => {
@@ -57,9 +61,9 @@ describe("Home on a phone", () => {
     const { alpha } = first;
     const homes = home.runtime(alpha);
 
-    // spec/app/home/index.md, "Startup says once per run how Alpha is presented, and Home then reads its saved tiles": with nothing saved Home shows Alpha's own apps that this phone admits, and no Apps drawer tile.
+    // spec/app/home/index.md, "Startup says once per run how Alpha is presented, and Home then reads its saved tiles": with nothing saved Home shows Alpha's own apps that this phone admits, and the Apps drawer tile on the admitted phone.
     await until(alpha, homes, Home.Machine, (h) => h.host === "AsLauncher" && h.tiles.load.status === "Loaded");
-    expect([tiles(), Boolean(button("Apps"))]).toEqual([alphaApps, false]);
+    expect([tiles(), Boolean(button("Apps"))]).toEqual([alphaApps, true]);
 
     // spec/app/home/tiles.md, "Only Phone, Messages and Inbox carry a badge, only when something waits there, and no tile does while Home is being edited"
     await drawn(() => { waiting.tell("Inbox", "3 unread"); waiting.tell("Notes", "1 shared"); });
@@ -106,6 +110,116 @@ describe("Home on a phone", () => {
     const recovered = await open(world);
     await until(recovered.alpha, home.runtime(recovered.alpha), Home.Machine, (h) => h.tiles.load.status === "Failed");
     expect([tiles(), localStorage.getItem(savedKey)]).toEqual([alphaApps, "{invalid"]);
+  });
+
+  it('Keeps my existing Clock and Reminders pins on the phone (spec/app/home/tiles.md, "What was saved comes back as it was saved, an empty Home included; with no record Home shows its defaults")', async () => {
+    const chosen = written([{ tag: "Own", view: "Reminders" }, { tag: "Own", view: "Clock" }, { tag: "Own", view: "Notes" }]);
+    localStorage.setItem(savedKey, chosen);
+    const world = holdingHome({ ...scene(), phone: true });
+    const { alpha } = await open(world, only("home"));
+    await until(alpha, home.runtime(alpha), Home.Machine, (state) => state.host === "AsLauncher" && state.tiles.load.status === "Loaded");
+    expect([tiles(), localStorage.getItem(savedKey)]).toEqual([["view:Reminders", "view:Clock", "view:Notes"], chosen]);
+  });
+
+  it('Find an installed app in Apps (spec/app/home/index.md, "Story: Find an installed app in Apps"; spec/app/home/drawer.md, "Story: Find an installed app by name")', async () => {
+    const world = { ...scene(), phone: true };
+    const { alpha } = await open(world, only("home", "assistant"));
+    const homes = home.runtime(alpha);
+    const dialog = () => document.querySelector('[role="dialog"][aria-label="Apps"]');
+    const search = () => dialog()?.querySelector<HTMLInputElement>('input[aria-label="Search apps"]');
+    const focusedAfterFrames = async (target: HTMLElement | null | undefined) => {
+      expect(target).toBeInstanceOf(HTMLElement);
+      for (let frame = 0; frame < 13 && document.activeElement !== target; frame += 1) await later(alpha, 16);
+      expect(document.activeElement).toBe(target);
+    };
+    await until(alpha, homes, Home.Machine, (h) => h.host === "AsApp" && h.tiles.load.status === "Loaded");
+    expect((await homes.runPromise(Home.Machine.use((m) => m.get()))).installed.read.status).toBe("Idle");
+
+    const opener = button("Apps");
+    await press("Apps");
+    await until(alpha, homes, Home.Machine, (h) => h.installed.read.status === "Loaded");
+    await focusedAfterFrames(dialog()?.querySelector("h1"));
+    expect(opener?.closest("[inert]")).not.toBeNull();
+
+    await drawn(() => search()?.focus());
+    await fill("Search apps", "fíxture.clock");
+    expect([Boolean(button("Open Clock")), Boolean(button("Open Mail"))]).toEqual([true, false]);
+    await press("Open Clock");
+    await vi.waitFor(() => expect(world.launcher.opened).toEqual(["org.fixture.clock"]));
+
+    // spec/app/shell/focus.md, "A layer that closes gives focus back to the control that opened it, never over a control that took it".
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (state) => !state.drawer);
+    await focusedAfterFrames(opener);
+
+    await press("Apps");
+    await until(alpha, alpha.runtime, Shell, (state) => state.drawer);
+    await vi.waitFor(() => expect([search()?.value, Boolean(button("Open Mail"))]).toEqual(["", true]));
+
+    // spec/app/shell/index.md, "Back closes one layer: Ask Alpha by a step, then the app on top": Ask Alpha stays above the drawer and leaves first.
+    await press("Open conversation");
+    await until(alpha, alpha.runtime, Shell, (state) => state.drawer && state.assistant === "Sheet");
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (state) => state.drawer && state.assistant === "Bar");
+    expect(dialog()).not.toBeNull();
+    const composer = document.activeElement;
+    expect(composer?.getAttribute("aria-label")).toBe("Message Alpha");
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (state) => !state.drawer);
+    expect(document.activeElement).toBe(composer);
+
+    await press("Apps");
+    await until(alpha, alpha.runtime, Shell, (state) => state.drawer);
+    await hardware("home");
+    await until(alpha, alpha.runtime, Shell, (state) => !state.drawer && state.trail.length === 0);
+    expect(dialog()).toBeNull();
+  });
+
+  it('Holds a native app for App info and to pin it (spec/app/home/drawer.md, "Story: Act on an installed app from its menu")', async () => {
+    const world = { ...scene(), phone: true };
+    const { alpha } = await open(world, only("home"));
+    const homes = home.runtime(alpha);
+    const menu = () => document.querySelector('[role="menu"][aria-label="Clock"]');
+    const action = (label: string) => [...(menu()?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])]
+      .find((item) => item.textContent === label);
+    const selectAction = async (label: string) => {
+      const item = action(label);
+      expect(item).toBeInstanceOf(HTMLElement);
+      await drawn(() => item?.click());
+    };
+    const holdClock = async () => {
+      const clock = button("Open Clock");
+      expect(clock).toBeInstanceOf(HTMLButtonElement);
+      await drawn(() => clock?.dispatchEvent(pointer("pointerdown", 100, 235)));
+      await later(alpha, 450);
+      await vi.waitFor(() => expect(menu()).not.toBeNull());
+      await drawn(() => clock?.dispatchEvent(pointer("pointerup", 100, 235)));
+    };
+
+    await until(alpha, homes, Home.Machine, (state) => state.host === "AsApp" && state.tiles.load.status === "Loaded");
+    await press("Apps");
+    await until(alpha, homes, Home.Machine, (state) => state.installed.read.status === "Loaded");
+    await holdClock();
+    await hardware("back");
+    await vi.waitFor(() => expect(menu()).toBeNull());
+    expect((await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).drawer).toBe(true);
+    expect(world.launcher.opened).toEqual([]);
+
+    await holdClock();
+    await selectAction("App info");
+    await until(alpha, homes, Home.Machine, (state) => state.handoff.ask.tag === "AppInfo" && state.handoff.attempt.outcome === "Confirmed");
+    expect([world.launcher.infos, world.launcher.opened, menu()]).toEqual([["org.fixture.clock"], [], null]);
+
+    await holdClock();
+    await selectAction("Add to Home");
+    await until(alpha, homes, Home.Machine, (state) => state.tiles.save.outcome === "Confirmed");
+    await until(alpha, alpha.runtime, Shell, (state) => !state.drawer);
+    expect(tiles()).toContain("app:org.fixture.clock/org.fixture.clock.Main");
+
+    await press("Apps");
+    await until(alpha, alpha.runtime, Shell, (state) => state.drawer);
+    await holdClock();
+    expect(action("On Home")?.getAttribute("aria-disabled")).toBe("true");
   });
 
   // spec/app/home/cards.md, "Story: See my day at a glance"; spec/app/home/cards.md, "Story: The agenda card"; spec/app/home/cards.md, "Story: Open my day from a card"
@@ -192,12 +306,60 @@ describe("Home on a phone", () => {
     await showing("Inbox");
 
     // Returning to Home refreshes the brief from the current owner's retained inbox.
-    await keepDigests(alpha, world.notes.owner, [digestResult(1, "failed", "The morning brief could not run.")]);
+    await keepDigests(alpha, digestScope({ agentId: world.notes.owner, identityId: world.notes.ownerIdentity }), [digestResult(1, "failed", "The morning brief could not run.")]);
     await hardware("home");
     await showing();
     await vi.waitFor(() => expect(card("Latest brief")?.textContent).toContain("Didn't run"), { timeout: 5_000 });
     await pressCard("Latest brief");
     await showing("Workflows");
+  });
+
+  it('Shows Android’s retained brief and refreshes its digest results through the native inbox (spec/app/digests/index.md, "Android supplies one verified view of retained results and background checks")', async () => {
+    const world = { ...scene(), phone: true };
+    const initial = digestResult(1, "finished", "Owner’s retained Android brief");
+    const missed = digestResult(2, "missed", "A missed run cannot replace the brief");
+    const refreshed = digestResult(3, "finished", "The exact result from native refresh");
+    const browser: NonNullable<WorkflowsScene["hosted"]> = {
+      entries: [digestResult(90, "finished", "Browser result for the same agent")], reads: 0, acknowledgements: [],
+    };
+    const native: NativeDigestScene = {
+      snapshot: { rows: [initial, missed], backgroundEnabled: false, noticesAllowed: false, lease: "native-digest-lease", support: "nativeScheduled" },
+      incoming: undefined,
+      manualLeases: [],
+    };
+    world.workflows.hosted = browser;
+    world.workflows.nativeDigests = native;
+    const { alpha } = await open(world);
+    const brief = () => [...document.querySelectorAll("section[aria-label='Your day'] > button")]
+      .find((candidate) => candidate.textContent?.startsWith("Latest brief"))?.textContent;
+    const results = () => [...document.querySelectorAll<HTMLButtonElement>("ul[aria-label='Digest results'] li > button")];
+    await vi.waitFor(() => expect(brief()).toContain(initial.output), { timeout: 5_000 });
+    expect(brief()).not.toContain(missed.output);
+    expect(native.manualLeases).toEqual([]);
+
+    await press("Workflows");
+    const area = workflows.runtime(alpha);
+    await until(alpha, area, WorkflowList, (state) => state.list.status === "Loaded");
+    await press("Add to Workflows");
+    await press("Scheduled digests");
+    await until(alpha, area, DigestSchedules, (state) => state.open && state.schedules.status === "Loaded");
+    await vi.waitFor(() => expect(results()).toHaveLength(2), { timeout: 5_000 });
+
+    const started = native.manualLeases.length;
+    native.incoming = [initial, missed, refreshed];
+    await press("Refresh digests");
+    await vi.waitFor(() => expect(results()).toHaveLength(3), { timeout: 5_000 });
+    expect(native.manualLeases.slice(started)).toEqual([native.snapshot.lease]);
+
+    await drawn(() => {
+      const row = results().find((item) => item.textContent?.includes(new Date(refreshed.scheduledAt).toLocaleString()));
+      if (row === undefined) throw new Error("Refreshed digest unavailable");
+      row.click();
+    });
+    await vi.waitFor(() => expect(document.querySelector("[aria-label='Digest result']")?.textContent).toContain(refreshed.output));
+    await hardware("home");
+    await vi.waitFor(() => expect(brief()).toContain(refreshed.output), { timeout: 5_000 });
+    expect([browser.reads, browser.acknowledgements]).toEqual([0, []]);
   });
 
   // spec/app/home/index.md, "Story: See the apps on this phone"; spec/app/home/index.md, "Story: Open an app"
@@ -209,7 +371,7 @@ describe("Home on a phone", () => {
 
     // spec/app/home/index.md, "Once the saved tiles are read, the phone's apps are read if Home holds an installed app, and a record that could not be read is told"
     await until(alpha, homes, Home.Machine, (h) => h.installed.read.status === "Loaded");
-    expect([tiles(), Boolean(button("Apps"))]).toEqual([["view:Notes", "app:org.fixture.clock/org.fixture.clock.Main"], false]);
+    expect([tiles(), Boolean(button("Apps"))]).toEqual([["view:Notes", "app:org.fixture.clock/org.fixture.clock.Main"], true]);
 
     // spec/app/home/index.md, "Only an app in the last reading is opened, never while Home is being edited"
     await drawn(() => tileButton("app:org.fixture.clock/org.fixture.clock.Main")?.click());
@@ -276,8 +438,11 @@ describe("Home in a browser", () => {
   it("Shows the current owner's retained brief after restart (spec/app/digests/index.md, \"Story: Receive results without losing or repeating one\")", async () => {
     const world = scene();
     const setup = await open(world);
-    await keepDigests(setup.alpha, world.notes.owner, [digestResult(1, "finished", "Owner’s morning brief"), digestResult(2, "missed", "Must stay off Home")]);
-    await keepDigests(setup.alpha, "another-owner", [digestResult(1, "finished", "Another owner’s morning brief")]);
+    await keepDigests(setup.alpha, digestScope({ agentId: world.notes.owner, identityId: world.notes.ownerIdentity }), [digestResult(1, "finished", "Owner’s morning brief"), digestResult(2, "missed", "Must stay off Home")]);
+    await keepDigests(setup.alpha, digestScope({ agentId: world.notes.owner, identityId: "another-owner" }),
+      [digestResult(1, "finished", "Another owner’s morning brief")]);
+    await keepDigests(setup.alpha, `alpha/workflows/digests/${encodeURIComponent(world.notes.owner)}`,
+      [digestResult(100, "finished", "Unverified older brief")]);
     await setup.close();
 
     await open(world);
@@ -285,8 +450,9 @@ describe("Home in a browser", () => {
       .find((card) => card.textContent?.startsWith("Latest brief"))?.textContent;
     await vi.waitFor(() => expect(latest()).toContain("Owner’s morning brief"));
     expect(latest()).not.toContain("Must stay off Home");
+    expect(latest()).not.toContain("Unverified older brief");
 
-    world.notes.owner = "another-owner";
+    world.notes.ownerIdentity = "another-owner";
     await seen(false);
     await seen(true);
     await vi.waitFor(() => expect(latest()).toContain("Another owner’s morning brief"));

@@ -164,7 +164,8 @@ out of funds, and any other failure; a stop reads as any other. Out of funds
 is Cloud refusing the turn with its own code for an account with no plan
 allowance and no credits left, which the agent has no funds to explain: it
 reads as one fixed line in the transcript, the same one Talk posts, and is
-never spoken. Spent credits the agent reports without that code keep their
+never spoken; a conversation read again shows that line for the reply the
+agent kept with Cloud's code, as the live reply did. Spent credits the agent reports without that code keep their
 own words. Every kind but a timeout
 and any other is refused before output. A reply the agent chose not to give
 removes its bubble. Stop keeps what was shown, and the conversation's check

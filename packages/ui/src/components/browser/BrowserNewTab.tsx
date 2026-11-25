@@ -11,6 +11,7 @@ export type BrowserSite = {
 export type BrowserNewTabProps = {
   /** Whether the tab is private, which says what it keeps. */
   private?: boolean;
+  privateNotice?: string;
   /** Opens the address for typing. */
   onSearch?: () => void;
   /** The sites visited last, newest first. */
@@ -22,12 +23,12 @@ export type BrowserNewTabProps = {
 const tones = { ink: "bg-foreground text-background", blue: "bg-alpha text-alpha-foreground", green: "bg-call text-alpha-foreground" } as const;
 
 /** A tab with no page: where to search or type an address, and the sites visited last. */
-export function BrowserNewTab({ private: privateTab = false, onSearch, recent = [], onOpen }: BrowserNewTabProps) {
+export function BrowserNewTab({ private: privateTab = false, privateNotice, onSearch, recent = [], onOpen }: BrowserNewTabProps) {
   return (
     <div className="flex flex-col items-center gap-7.5 px-6 pt-27.5 pb-35">
       <span className="flex size-18 items-center justify-center rounded-full bg-secondary"><Globe aria-hidden className="size-7.5" /></span>
       <h2 className="font-display text-title">New tab</h2>
-      {privateTab && <PrivateNotice className="-mt-3.5 text-center" />}
+      {privateTab && <PrivateNotice className="-mt-3.5 text-center">{privateNotice}</PrivateNotice>}
       <button type="button" aria-label="Search or type address" onClick={onSearch} disabled={onSearch === undefined}
         className="flex min-h-14 w-full items-center gap-3 rounded-full bg-secondary px-5 text-body text-muted-foreground">
         <Search aria-hidden className="size-4.5" /><span>Search or type address</span>

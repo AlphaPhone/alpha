@@ -1,3 +1,6 @@
+import type { DigestResult } from "@elizaos/plugin-workflow-client";
+import type { NativeDigestSnapshot } from "../../src/platform/hosted-digests.vibe";
+import { type Faked, rejection } from "./phone.ts";
 import { type Route, readJsonBody } from "./routes.ts";
 
 const record = {
@@ -41,6 +44,27 @@ type Prompt = PromptTiming & {
   timezone: string;
 };
 
+export interface NativeDigestScene {
+  snapshot: NativeDigestSnapshot;
+  incoming: readonly DigestResult[] | undefined;
+  readonly manualLeases: string[];
+}
+
+// spec/app/digests/index.md, "Android supplies one verified view of retained results and background checks"
+export const alphaHostedDigests = (native: NativeDigestScene): Faked => (emit) => ({
+  read: () => Promise.resolve({ snapshot: native.snapshot }),
+  peekNotice: () => Promise.resolve({ notice: null }),
+  async syncManual({ lease }: { lease: string }) {
+    if (lease !== native.snapshot.lease) throw rejection("Digest lease changed");
+    native.manualLeases.push(lease);
+    if (native.incoming !== undefined) {
+      native.snapshot = { ...native.snapshot, rows: native.incoming };
+      native.incoming = undefined;
+      emit("changed", {});
+    }
+  },
+});
+
 export interface WorkflowsScene {
   readonly prompts: Map<string, Prompt>;
   readonly promptEdits: Record<string, unknown>[];
@@ -51,6 +75,8 @@ export interface WorkflowsScene {
   receiptReads: number;
   approvalTitle: string;
   failingPrompts: boolean;
+  hosted?: { entries: DigestResult[]; reads: number; acknowledgements: string[] };
+  nativeDigests?: NativeDigestScene;
 }
 
 export const workflowsScene = (): WorkflowsScene => ({
@@ -96,7 +122,15 @@ export function workflowRoutes(world: WorkflowsScene): Route[] {
         case "/api/workflow/status": return Response.json({
           engine: "eliza-typed", status: "ready", manualSubmissionProtocol: 1, lifecycleMutationProtocol: 1,
           typedAuthoringProtocol: 1, typedScheduleProtocol: 1, metadataMutationProtocol: 1, approvalReceiptProtocol: 1,
+          ...(world.hosted === undefined ? {} : { hostedDigestProtocol: 1 }),
         });
+        case "/api/workflow/hosted/loops": return world.hosted && Response.json({ loops: [] });
+        case "/api/workflow/hosted/sources": return world.hosted && Response.json({ sources: [] });
+        case "/api/workflow/hosted/results": {
+          if (world.hosted === undefined) return;
+          world.hosted.reads += 1;
+          return Response.json({ entries: world.hosted.entries.filter((row) => !world.hosted?.acknowledgements.includes(row.runId)) });
+        }
         case "/api/triggers": return world.failingPrompts ? Response.json({}, { status: 503 }) : Response.json({ triggers: [...world.prompts.values()] });
         case "/api/scheduled-tasks": return Response.json({ tasks: [] });
         case "/api/workflow/workflows": return Response.json({ workflows: [record] });
@@ -137,6 +171,15 @@ export function workflowRoutes(world: WorkflowsScene): Route[] {
     },
     (request, url) => {
       if (request.method !== "POST") return;
+      if (url.pathname === "/api/workflow/hosted/results/ack" && world.hosted !== undefined) {
+        const hosted = world.hosted;
+        return readJsonBody(request).then((body) => {
+          const result = hosted.entries.find((row) => row.runId === body.runId && row.cursor === body.cursor);
+          if (result === undefined || typeof body.clientId !== "string") return Response.json({}, { status: 404 });
+          hosted.acknowledgements.push(result.runId);
+          return Response.json({ acknowledged: result.cursor });
+        });
+      }
       if (url.pathname === `${executionPath}/approvals/${approvalNode}/0`) {
         return readJsonBody(request).then((body) => {
           if (world.stage !== "Waiting" || body.expectedVersionId !== record.versionId || body.requestDigest !== approvalDigest || body.approved !== true) {

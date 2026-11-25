@@ -9,6 +9,7 @@ import { assistantInert, pageInert, takesBack } from "../gen/app__shell__layers.
 import { barHeight, edge, swipe } from "../gen/app__shell__gestures.ts";
 import { useMachine as usePage } from "../gen/app__update__page.react.ts";
 import { dialogShown, editorsMounted } from "../gen/app__update__page.ts";
+import { BrowserFrames } from "./browser/BrowserFrames.tsx";
 import { native } from "./platform/device.vibe";
 import type { Alpha } from "./runtime/area.tsx";
 import { AppBack } from "./shell/AppBack.tsx";
@@ -202,12 +203,14 @@ export function App({ alpha }: AppProps) {
               {alpha.slot(`view:${showing}`)}
             </div>
           )}
+        {!native() && <BrowserFrames alpha={alpha} />}
       </div>
       <div
         data-alpha-assistant-host=""
         hidden={!askAlphaDrawn(state)}
         className={cn(
           "in-[body:has([data-alpha-notes-trash-sheet])]:invisible",
+          "in-[body:has([data-alpha-subview=photos-clip-editor])]:invisible",
           comms && "shrink-0",
           !comms && "[&>[data-alpha-detent]]:absolute [&>[data-alpha-detent]]:inset-x-0 [&>[data-alpha-detent]]:bottom-0 [&>[data-alpha-detent]]:max-w-none",
           side && [
