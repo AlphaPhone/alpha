@@ -107,6 +107,14 @@ function heard(page: Page, words: string) {
   }, words);
 }
 
+/** What Talk said through the fake phone's Cloud speech relay so far, and how often the relay was started, stopped and hushed. */
+function relay(page: Page) {
+  return page.evaluate(() => {
+    const { voice } = (globalThis as unknown as { alphaPhone: { voice: { spoken: { text: string }[]; hushCalls: number; startCloudSpeechCalls: number; stopCloudSpeechCalls: number; activeMicSession?: string } } }).alphaPhone;
+    return { said: voice.spoken.map((line) => line.text), hushes: voice.hushCalls, micStarts: voice.startCloudSpeechCalls, micStops: voice.stopCloudSpeechCalls, mic: voice.activeMicSession };
+  });
+}
+
 function calls(from: number, to: number): Call[] {
   if (!fs.existsSync(timings)) return [];
   return fs.readFileSync(timings, "utf8").split("\n").filter((line) => line !== "").map((line) => JSON.parse(line) as Call)
@@ -137,23 +145,18 @@ async function turn(browser: Browser, origin: string, one: Case, spoken: boolean
     await page.waitForFunction(() => (globalThis as unknown as { alphaPhone: { voice: { activeMicSession?: string } } }).alphaPhone.voice.activeMicSession !== undefined);
   } else await typed(page, one.words);
   const sent = Date.now();
-  if (spoken && process.env.ALPHA_NOTES_TRACE === "1") await page.evaluate(() => {
-    const { voice } = (globalThis as unknown as { alphaPhone: { voice: Record<string, unknown> & { spoken: unknown[] } } }).alphaPhone;
-    const log: string[] = [];
-    const t0 = Date.now();
-    let last = "";
-    const keys = ["hushCalls", "startCloudSpeechCalls", "stopCloudSpeechCalls", "activeMicSession", "speakerMuted"];
-    setInterval(() => {
-      const now = `${keys.map((key) => `${key}=${String(voice[key])}`).join(" ")} spoken=${voice.spoken.length}`;
-      if (now !== last) log.push(`${Date.now() - t0} ${now}`);
-      last = now;
-    }, 5);
-    Object.assign(globalThis, { voiceTrace: log });
-  });
+  const trace: string[] = [];
+  const traced = async () => {
+    if (!spoken || process.env.ALPHA_NOTES_TRACE !== "1") return;
+    const { said, hushes, micStarts, micStops, mic } = await relay(page);
+    const now = `said ${said.length}, relay started ${micStarts}, stopped ${micStops}, hushed ${hushes}, mic ${mic === undefined ? "closed" : mic.slice(0, 8)}`;
+    if (trace.at(-1)?.endsWith(now) !== true) trace.push(`${Date.now() - sent} ms: ${now}`);
+  };
   if (spoken) await heard(page, one.words);
   else await page.getByRole("button", { name: "Send", exact: true }).click();
   let shown: number | undefined;
   while (Date.now() - sent < 120_000 && (ended === undefined || Date.now() - ended < 15_000)) {
+    await traced();
     const fields = await editorShows(page);
     if (shownId !== undefined && fields?.some((field) => field.toLowerCase() === title.toLowerCase()) && (one.items ?? []).every((item) => fields.some((field) => field.toLowerCase() === item))) {
       shown = Date.now();
@@ -166,10 +169,7 @@ async function turn(browser: Browser, origin: string, one: Case, spoken: boolean
     : one.title === undefined ? newest : kept.find((note) => note.title === one.title);
   if (shots !== undefined) await page.screenshot({ path: path.join(shots, `${spoken ? "spoken" : "typed"}-${one.id}.png`) });
   const made = calls(sent, ended ?? Date.now());
-  const voiced = spoken ? await page.evaluate(() => {
-    const { voice } = (globalThis as unknown as { alphaPhone: { voice: { spoken: { text: string }[]; hushCalls: number; startCloudSpeechCalls: number; stopCloudSpeechCalls: number } } }).alphaPhone;
-    return { said: voice.spoken.map((line) => line.text), hushes: voice.hushCalls, micStarts: voice.startCloudSpeechCalls, micStops: voice.stopCloudSpeechCalls, trace: (globalThis as unknown as { voiceTrace?: string[] }).voiceTrace };
-  }) : undefined;
+  const voiced = spoken ? { ...await relay(page), ...(trace.length === 0 ? {} : { trace }) } : undefined;
   await page.context().close();
   return {
     how: spoken ? "spoken" : "typed", id: one.id, title, opened: shown !== undefined && shownId === meant?.id, created: one.items === undefined ? undefined : meant !== undefined,
