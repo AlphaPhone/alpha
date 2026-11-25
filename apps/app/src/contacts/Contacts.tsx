@@ -119,17 +119,13 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
       )}
       {state.opened ? <Card runtime={runtime} safe={safe} /> : (
         <>
-          {searching && <div className="flex gap-2 px-4" role="group" aria-label="Show">
-            <Button size="sm" variant={state.chip === "Everyone" ? "primary" : "outline"} aria-pressed={state.chip === "Everyone"} onClick={() => void (can({ type: "pick", chip: "Everyone" }) && send({ type: "pick", chip: "Everyone" }))}>All</Button>
-            <Button size="sm" variant={state.chip === "Favourites" ? "primary" : "outline"} aria-pressed={state.chip === "Favourites"} onClick={() => void (can({ type: "pick", chip: "Favourites" }) && send({ type: "pick", chip: "Favourites" }))}>Favourites</Button>
-          </div>}
           {can({ type: "loadMore" }) && <div className="flex shrink-0 justify-center"><Button variant="secondary" size="icon" aria-label="More contacts" onClick={() => void send({ type: "loadMore" })}><ChevronDown className="size-5" /></Button></div>}
           {state.list.status === "Loading" && state.rows === 0 && <p role="status" className="sr-only">Reading contacts</p>}
           {listFailed(state) && <Banner variant="destructive" action={can({ type: "refresh" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "refresh" })}>Retry</Button>}>Contacts could not be read</Banner>}
           {(listedEmpty(state) || noMatches(state)) && <p role="status" className="flex min-h-45 items-center justify-center p-6 text-center text-base leading-normal text-muted-foreground">{noMatches(state) ? "No contacts found" : "No contacts yet"}</p>}
           {state.rows > 0 && (
             <ListGroup aria-label="Contacts" surface="plain">
-              {!state.sought && favourites.length > 0 && <div className="flex touch-pan-x gap-1.5 overflow-x-auto px-3.5 pt-2 pb-2.5" role="group" aria-label="Favourites">
+              {!searching && !state.sought && favourites.length > 0 && <div className="flex touch-pan-x gap-1.5 overflow-x-auto px-3.5 pt-2 pb-2.5" role="group" aria-label="Favourites">
                 {favourites.map((row) => (
                   <Button key={row.id} variant="ghost" aria-label={`Open favourite ${row.name}`} className="h-auto w-18 flex-col gap-1.75 rounded-tile p-0" disabled={!can({ type: "openContact", contact: row.id })} onClick={() => open(row.id)}>
                     <Avatar name={row.name} className="size-15 text-lg font-bold" />
