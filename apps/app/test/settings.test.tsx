@@ -408,10 +408,12 @@ describe("Settings", () => {
     await until(alpha, machines, Developer.Machine, (s) => s.exporting.read.status === "Loaded");
     const text = await sharedFiles[0]?.text();
     const report: unknown = JSON.parse(text ?? "{}");
+    if (typeof report !== "object" || report === null || !("problems" in report) ||
+      typeof report.problems !== "object" || report.problems === null || !("count" in report.problems)) throw new Error("The diagnostics report has no problem count");
+    expect(report.problems.count).toBe(2);
     expect(report).toEqual(expect.objectContaining({
       format: "alpha-diagnostics/v1",
       roles: [{ role: "home", held: false, available: true }, { role: "assistant", held: false, available: true }],
-      problems: expect.objectContaining({ count: 2 }),
       permissions: { CalendarAccess: true, FilesAccess: true, LocationAccess: true, MicrophoneAccess: false, NotificationsAccess: true },
       talk: { format: "alpha-cloud-stream-timing-v1", sessions: [{ sttConnectedMs: 812, firstFrameSentMs: 815, consentRetry: true }, { sttConnectedMs: 390, firstFrameSentMs: null, consentRetry: false }] },
     }));
