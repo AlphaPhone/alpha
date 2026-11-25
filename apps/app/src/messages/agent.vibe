@@ -39,7 +39,7 @@ effect function addressed(number: string): (number | undefined)!!(Shell | Messag
 }
 
 /** Stage only the reviewed draft, in the admitted conversation's empty slot. */
-effect function stage(body: string, thread: number, ticket: number | undefined): boolean!!(Device | Shell | Messages | Composer | Inbox | Drafts) {
+effect function stage(body: string, thread: number, target: MessageDraftTarget | undefined, check: (() => Promise<boolean>) | undefined): boolean!!(Device | Shell | Messages | Composer | Inbox | Drafts) {
   const inbox = try Inbox
   const messages = try Messages
   const composer = try Composer
@@ -48,11 +48,13 @@ effect function stage(body: string, thread: number, ticket: number | undefined):
       where.front && where.thread === thread && where.sms.grant === "Granted" && where.page.status === "Loaded" && draft.thread === thread)),
     Effect.as(sleep(2500), Option.none()),
   )
-  if (Option.isNone(opened) || !(try (try Device).showing()) || !showing(try (try Shell).get(), "Messages")) return false
+  if (Option.isNone(opened)) return false
+  const approved = check === undefined ? true : (tryPromise(check) catch () => false)
+  if (!approved || !(try (try Device).showing()) || !showing(try (try Shell).get(), "Messages")) return false
   const where = try messages.get()
   const draft = try composer.get()
   if (!where.front || where.thread !== thread || where.sms.grant !== "Granted" || where.page.status !== "Loaded" ||
-      (ticket !== undefined && where.page.ticket !== ticket) || (try inbox.get()).messagesThread !== thread ||
+      (target !== undefined && where.page.ticket !== target.ticket) || (try inbox.get()).messagesThread !== thread ||
       draft.thread !== thread || draft.slot.author !== "Nobody" || bound(draft)) return false
   const drafts = try Drafts
   if ((try drafts.text(thread)).trim() !== "") return false
@@ -72,13 +74,13 @@ export effect function messageAction(operation: DeviceOperation, target: Message
   const live = tryPromise(current) catch () => false
   if (!live || !(try (try Device).capabilities()).image || !(try (try Device).showing())) return refused
   if (operation.type === "sms_reply_selected") {
-    if (target === undefined || !(try stage(body, target.thread, target.ticket))) return refused
+    if (target === undefined || !(try stage(body, target.thread, target, current))) return refused
     return { kind: "applied", result: { kind: "sms-reply", status: "drafted" } }
   }
   if (!("target" in operation) || operation.draft !== true || operation.target.kind !== "number" || operation.replyThreadId !== undefined) return refused
   const number = normalizePhoneNumber(operation.target.number)
   if (number === null) return refused
   const thread = try addressed(number)
-  if (thread === undefined || !(try stage(body, thread, undefined))) return refused
+  if (thread === undefined || !(try stage(body, thread, undefined, undefined))) return refused
   return { kind: "applied", result: { kind: "sms-compose", status: "drafted" } }
 }
