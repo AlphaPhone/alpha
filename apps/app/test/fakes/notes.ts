@@ -20,6 +20,7 @@ export interface NotesScene {
   /** Whether a write to the store fails while reads still answer, as an agent that cannot change its notes answers. */
   refusing: boolean;
   deleteAtRevision?: boolean;
+  refuseDiscardId?: string;
   deleteRequests?: Array<{ readonly id: string; readonly expectedRevision: number | undefined }>;
   /** The note a claim of a prepared saved-note editor names, as eliza's view host hands it to the renderer it is bound to. */
   target?: string;
@@ -184,6 +185,7 @@ function interact(scene: NotesScene, input: unknown): Response {
   if (present === undefined) return refused(404);
   if (capability === "delete-note") {
     scene.deleteRequests?.push({ id: present.id, expectedRevision: params.expectedRevision });
+    if (present.id === scene.refuseDiscardId) return refused(409);
     scene.notes = scene.notes.filter((item) => item !== present);
     scene.trash.push({ note: present, deletedAt: iso(at) });
     scene.revision += 1;
