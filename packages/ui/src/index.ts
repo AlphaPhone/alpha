@@ -217,3 +217,6 @@ export * from "./components/browser/BrowserReview.tsx";
 export * from "./components/workflows/WorkflowRow.tsx";
 export * from "./components/workflows/WorkflowChoice.tsx";
 export * from "./components/workflows/WorkflowActions.tsx";
+export * from "./components/wallet/WalletAddress.tsx";
+export * from "./components/wallet/WalletAmount.tsx";
+export * from "./components/wallet/WalletQr.tsx";
