@@ -13,6 +13,7 @@ import { notices as inboxNotices } from "./inbox/notices.vibe"
 import { mailQuestions } from "./inbox/mail-context.vibe"
 import { operations } from "./inbox/operations.vibe"
 import { composer as inboxComposer } from "./inbox/composer.vibe"
+import { adopting as inboxEarlier } from "./inbox/earlier.vibe"
 import { adding } from "./inbox/adding.vibe"
 import { suggestions } from "./inbox/suggestion.vibe"
 import { updating } from "./update/updates.vibe"
@@ -85,6 +86,7 @@ const machines = together(
   browserDigestDelivery,
   nativeDigestDelivery,
   nativeApprovalOwner,
+  inboxEarlier,
 )
 
 /** The resident machines, closed: each machine one of them follows or tells is among them. */

@@ -51,10 +51,13 @@ function correspondents(read: ReturnType<Mail.Shape["shown"]>): { name: string; 
 }
 
 /** How the last operation on `letter` stands, while it is worth telling. */
-function outcomeOf(ops: Operations, letter: Letter): InboxSendOutcomeProps["outcome"] | undefined {
+function outcomeOf(ops: Operations, letter: Letter, checked: readonly number[]): InboxSendOutcomeProps["outcome"] | undefined {
   if (ops.draft !== letter.id || ops.kind !== "Send" || ops.of !== ops.session) return letter.doubt.attempt !== 0 ? "unknown" : undefined;
   const outcome = ops.attempt.outcome;
   if (outcome === "Recorded" || outcome === "Sent") return "sending";
+  if ((outcome === "Unknown" || outcome === "Refused" || outcome === "Confirmed") && letter.doubt.attempt === 0 && checked.includes(ops.attempt.id)) {
+    return letter.sent === 0 ? "notSent" : "foundSent";
+  }
   if (outcome === "Confirmed") return "sent";
   if (outcome === "Refused") return ops.withdrawn ? "stopped" : "refused";
   if (outcome === "Unknown") return "unknown";
@@ -165,14 +168,15 @@ export function Compose({ runtime, list }: ComposeProps) {
   const confirm = { type: "confirm", revision: letter.revision, access, now: untimed } as const;
   const reviewed = ops.state.kind === "Send" || ops.state.kind === "SaveDraft" || ops.state.kind === "ReplaceDraft" || ops.state.kind === "DeleteDraft";
   const reviewing = ops.state.review.showing && ops.state.draft === draft && reviewed;
-  const outcome = outcomeOf(ops.state, letter);
+  const outcome = outcomeOf(ops.state, letter, state.checked);
   const checkingSent = state.checking === draft && state.check.status === "Loading";
   const checkSent = { type: "checkSent", draft, access } as const;
   const sendAgain = { ...sending, again: true } as const;
   const sendOutcome: InboxSendOutcomeProps | undefined = outcome === undefined ? undefined : {
     outcome, checking: checkingSent,
-    onCheckSent: checkingSent || can(checkSent, "Owner") ? () => { if (!checkingSent) void send(checkSent, "Owner"); } : undefined,
-    onSendAgain: outcome === "unknown" && !checkingSent && ops.can(sendAgain, "Owner") ? () => void ops.send(sendAgain, "Owner") : undefined,
+    onCheckSent: checkingSent || (outcome === "unknown" && can(checkSent, "Owner")) ? () => { if (!checkingSent) void send(checkSent, "Owner"); } : undefined,
+    onSendAgain: outcome !== "sending" && outcome !== "sent" && !checkingSent && ops.can(sendAgain, "Owner") && !ops.can(sending, "Owner") ? () => void ops.send(sendAgain, "Owner") : undefined,
+    onDismiss: ops.can({ type: "dismissOutcome" }, "Owner") ? () => void ops.send({ type: "dismissOutcome" }, "Owner") : undefined,
   };
   const notice = state.lookup.status === "Loading" ? "checkingGmailCopy"
     : letter.unsure ? "gmailCopyUnknown"
@@ -230,7 +234,7 @@ export function Compose({ runtime, list }: ComposeProps) {
         clash={clash}
         onRestoreMine={copy?.seen && can({ type: "restoreMine" }, "Owner") ? () => void runtime.runPromise(restoreMyEdits()) : undefined}
         onUseSaved={latest && can(latest, "Owner") ? () => void runtime.runPromise(chooseLatestSavedDraft()) : undefined}
-        sent={letter.sent === 0 ? "none" : letter.sent === letter.revision ? "already" : "earlier"}
+        sent={letter.sent !== 0 ? (letter.sent === letter.revision ? "already" : "earlier") : letter.doubt.attempt === 0 && letter.doubt.revision !== 0 ? "maybe" : "none"}
         onKeepAgain={can({ type: "keepAgain" }, "World") ? () => void send({ type: "keepAgain" }, "World") : undefined}
         onSend={ops.can(sending, "Owner") ? () => void ops.send(sending, "Owner") : undefined}
         onSaveToGmail={ops.can(saving, "Owner") ? () => void ops.send(saving, "Owner") : undefined}

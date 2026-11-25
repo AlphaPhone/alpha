@@ -3,6 +3,7 @@ import { DeviceExecution } from "@elizaos/agent";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { Machine } from "../gen/app__camera.effect.vibe";
+import { initial as initialFilm, maxBytes, nearLimit } from "../gen/app__camera__recording.ts";
 import { Machine as Library } from "../gen/app__photos.effect.vibe";
 import { Machine as Viewer } from "../gen/app__photos__viewer.effect.vibe";
 import assistant from "../src/assistant/index.tsx";
@@ -86,10 +87,15 @@ describe("Camera on a phone", () => {
     await until(alpha, runtime, Machine, (state) => state.film.elapsed === 1);
     expect(timerText()).toBe("0:01");
     await later(alpha, 240_000);
-    await until(alpha, runtime, Machine, (state) => state.film.elapsed === 241);
+    await until(alpha, runtime, Machine, (state) => state.film.elapsed === 241 && nearLimit(state.film));
     expect(timerText()).toBe("4:01 · 0:59 left");
+    expect([
+      nearLimit({ ...initialFilm, stage: "Running", elapsed: 1, bytes: Math.floor(maxBytes * 0.9) }),
+      nearLimit({ ...initialFilm, stage: "Running", elapsed: 10, bytes: Math.floor(maxBytes * 0.2) }),
+    ]).toEqual([false, true]);
     await hardware("back");
     await expectSavedVideo(cameraSession);
+    expect(button("Open last video")).toBeDefined();
 
     // spec/app/camera/index.md, "Story: Leave and come back"
     await seen(false);

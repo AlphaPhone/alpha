@@ -549,7 +549,7 @@ const onScreen = following(Shell, (shell) => showing(shell, "Files"), Browser.Ma
 const access = hearing(
   Stream.unwrap(effect {
     const device = try Device
-    return Stream.concat(Stream.make(true), device.visible) |> Stream.filter(%, (visible) => visible) |> Stream.mapEffect(%, () => reported(false))
+    return Stream.concat(Stream.fromEffect(device.showing()), device.visible) |> Stream.filter(%, (visible) => visible) |> Stream.mapEffect(%, () => reported(false))
   }),
   Browser.Machine,
   (event: Event) => event,

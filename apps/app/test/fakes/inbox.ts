@@ -52,8 +52,12 @@ export interface InboxScene {
   readonly attached: string[];
   readonly attachmentReads: string[];
   readonly savedAttachments: Map<string, string>;
-  loseSendReply?: boolean;
+  loseSendReply?: boolean | "rejected";
   loseDraftReply?: boolean;
+  /** Google's answer about the owner's access never comes, as on a network that hangs. */
+  stalled?: boolean;
+  /** How Gmail stands on a request the earlier Alpha sent, by its request id; one not here is unknown to the cloud. */
+  readonly receipts: Map<string, MailOperation["receipt"]["state"]>;
   readonly receiptReads: string[];
   notices?: InboxNoticeScene;
 }
@@ -151,7 +155,7 @@ export function inboxScene(): InboxScene {
       letter(8, "Win a prize", ["SPAM"], "About Win a prize", "Prize Desk <win@prize.example>", today(7, 0, 2)),
       letter(9, "Notes from me", ["SENT"], "About Notes from me", "You <you@gmail.example>", today(17, 0, 2)),
     ],
-    history: 500, offline: false, revoked: false, changes: [], attached: [], attachmentReads: [], savedAttachments: new Map(), drafts: new Map(), receiptReads: [],
+    history: 500, offline: false, revoked: false, changes: [], attached: [], attachmentReads: [], savedAttachments: new Map(), drafts: new Map(), receipts: new Map(), receiptReads: [],
   };
 }
 
@@ -227,6 +231,7 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       }
       return undefined;
     },
+    (request, url) => (scene.stalled && [`${google}/status`, `${google}/accounts`].includes(url.pathname) ? new Promise<Response>(() => undefined) : undefined),
     (request, url) => (request.method === "GET" && url.pathname === `${google}/status` ? Response.json(status(scene)) : undefined),
     (request, url) => (request.method === "GET" && url.pathname === `${google}/accounts` ? Response.json(scene.google === undefined ? [] : [status(scene)]) : undefined),
     (request, url) => {
@@ -314,6 +319,11 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       return request.json().then(({ proposal }: { proposal: Delivery }) => {
         const parts = forwarded(proposal.forwardAttachments);
         if (proposal.forwardAttachments && parts.length !== proposal.forwardAttachments.partIds.length) return refused(409, "stale_revision");
+        if (scene.loseSendReply === "rejected") {
+          receipts.set(requestId, operation(requestId, "send", "rejected"));
+          scene.loseSendReply = false;
+          return Response.json(operation(requestId, "send", "outcome-unknown"));
+        }
         const to = proposal.to ?? [];
         scene.changes.push(`send ${to.join(",")} ${proposal.subject}`);
         scene.attached.push(...(proposal.attachments ?? []).map((file) => file.name), ...parts.map(({ file }) => file.name));
@@ -329,7 +339,10 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       const requestId = new RegExp(`^${operations}/([^/]+)$`, "u").exec(url.pathname)?.[1];
       if (request.method !== "GET" || requestId === undefined) return;
       scene.receiptReads.push(requestId);
-      const found = url.searchParams.get("grantId") === scene.google?.connection ? receipts.get(requestId) : undefined;
+      const preset = scene.receipts.get(requestId);
+      const found = url.searchParams.get("grantId") === scene.google?.connection
+        ? receipts.get(requestId) ?? (preset === undefined ? undefined : operation(requestId, "send", preset))
+        : undefined;
       return found ? Response.json(found) : refused(404, "not_found");
     },
     (request, url) => {

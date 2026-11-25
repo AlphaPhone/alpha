@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { Effect } from "effect";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { Machine as Library } from "../gen/app__photos.effect.vibe";
 import { Machine as Viewer } from "../gen/app__photos__viewer.effect.vibe";
 import { Machine as Messages } from "../gen/app__messages.effect.vibe";
@@ -178,4 +178,22 @@ it("Resume an already-sent photo edit from an older viewer record (spec/app/phot
   expect(localStorage.getItem(kept + ".epoch")).toBe("earlier-viewer");
   expect(localStorage.getItem("alpha/photos/edit/4")).toBe(operationId);
   expect(localStorage.getItem(kept + ".unreadable")).toBeNull();
+});
+
+it("Check a saved copy the earlier Alpha left pending instead of forgetting it (spec/app/photos/index.md, \"A saved copy the earlier Alpha left pending is checked once instead of forgotten\")", async () => {
+  const previous = "alpha.photos.pending-copy.v1";
+  localStorage.setItem(previous, "not an operation id!");
+  const invalidWorld = { ...scene(), phone: true };
+  const invalid = await open(invalidWorld, only("home", "view:Photos", "notice"));
+  await press("Photos");
+  await until(invalid.alpha, photosArea.runtime(invalid.alpha), Library, (state) => state.library.status === "Loaded");
+  expect([invalidWorld.photos.editLookups, invalidWorld.photos.saves, localStorage.getItem(previous)]).toEqual([[], [], "not an operation id!"]);
+  await invalid.close();
+
+  localStorage.setItem(previous, "alpha-test-photo-edit");
+  const world = { ...scene(), phone: true };
+  const first = await open(world, only("home", "view:Photos", "notice"));
+  await press("Photos");
+  await until(first.alpha, photosArea.runtime(first.alpha), Library, (state) => state.library.status === "Loaded");
+  await vi.waitFor(() => expect([world.photos.editLookups, world.photos.saves, localStorage.getItem(previous)]).toEqual([["alpha-test-photo-edit"], [], null]));
 });

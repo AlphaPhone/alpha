@@ -2,7 +2,7 @@
 import {
   Alert, Button, InboxAccountList, type InboxAttachmentPreview, InboxAttachmentReview, InboxChangeReview, InboxChangeToast, InboxDiscardDialog, type InboxFolder,
   InboxLinkReview, type InboxListRow, InboxListScreen, type InboxListStateKind, InboxMessageScreen, type InboxMessageFaultKind, InboxNotice,
-  type InboxNoticeKind, ToastRegion,
+  type InboxNoticeKind, InboxSendOutcome, ToastRegion,
 } from "@repo/ui";
 import type { MailCard, MailMessage } from "@elizaos/cloud";
 import { Effect, type ManagedRuntime } from "effect";
@@ -27,6 +27,7 @@ import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Machine as Preferences } from "../../gen/app__settings__preferences.effect.vibe";
 import { useMachine as usePreferences } from "../../gen/app__settings__preferences.react.ts";
+import { loadsImages } from "../../gen/app__settings__preferences.ts";
 import type { Alpha } from "../runtime/area.tsx";
 import { useTimed } from "../runtime/react.ts";
 import type { Cloud } from "../platform/cloud.vibe";
@@ -161,6 +162,18 @@ function toastOf(state: Operations, operation: (typeof operationNames)[Change], 
   return null;
 }
 
+// spec/app/inbox/sending.md, "What the earlier Alpha sent, or never heard the answer to, is taken in as the operation in flight, is never sent again, and ends as Gmail's record of it says"
+/** How a send the earlier Alpha made, taken in here, stands: while Gmail's record is read, then as it said, with Dismiss for an unknown one. */
+function EarlierSend({ runtime }: { runtime: Runtime }) {
+  const { state, can, send } = useTimed(runtime, useChanges);
+  if (!state || state.kind !== "Send" || state.draft >= 0 || state.of !== state.session) return null;
+  const outcome = state.attempt.outcome;
+  const told = outcome === "Sent" ? "sending" : outcome === "Confirmed" ? "sent" : outcome === "Refused" ? "refused" : outcome === "Unknown" && !state.noticed ? "unknown" : undefined;
+  if (told === undefined) return null;
+  const dismiss = { type: "dismissOutcome" } as const;
+  return <InboxSendOutcome earlier outcome={told} onDismiss={can(dismiss, "Owner") ? () => void send(dismiss, "Owner") : undefined} />;
+}
+
 /** The body of a message with nothing able to run, its remote images only once they may load, and its links each reviewed. */
 function Body({ read, images, onReview }: { read: MailMessage; images: boolean; onReview: (link: number) => void }) {
   const { formatted, links, document } = useMemo(() => {
@@ -194,12 +207,19 @@ function Body({ read, images, onReview }: { read: MailMessage; images: boolean; 
   </>;
 }
 
+// spec/app/inbox/message.md, "Remote images load only after Show images, or when the owner turned on loading them in Settings"
+/** Whether the owner turned on loading images in Inbox, as Settings last read it. */
+function useRemote(runtime: Runtime): boolean {
+  const preferences = usePreferences(runtime).state;
+  return preferences !== undefined && loadsImages(preferences);
+}
+
 /** The message open: its body, links and attachments each reviewed before use, its marks, Archive and Trash, Retry and Ask Alpha. */
 function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list: Mailbox; onRefresh: (() => void) | undefined; onBegin: (beginning: Beginning) => (() => void) | undefined }) {
   const { state, can, send } = useMessage(runtime);
   const marking = useMarks(runtime);
   const changes = useTimed(runtime, useChanges);
-  const remote = usePreferences(runtime).state?.images ?? false;
+  const remote = useRemote(runtime);
   const today = new Date(runtime.runSync(Effect.flatMap(Time, (time) => time.latest()))).toDateString();
   const read = state ? mailOf(runtime, (mail) => mail.body(state.body.ticket)) : undefined;
   const reviewLink = useCallback((at: number) => {
@@ -336,7 +356,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const changes = useTimed(runtime, useChanges);
   const drafts = useDrafts(runtime);
   const shell = useShell(runtime);
-  const remote = usePreferences(runtime).state?.images ?? false;
+  const remote = useRemote(runtime);
   const [typed, setTyped] = useState<{ text: string; over: string; folder: string } | undefined>();
   const [selection, setSelection] = useState<string>();
   const [unopenedDraft, setUnopenedDraft] = useState<number>();
@@ -349,7 +369,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
       ? () => void runtime.runPromise(begin(beginning))
       : undefined;
   };
-  if (drafts.state.open) return <><Compose runtime={runtime} list={state} /><ChangeReview runtime={runtime} list={state} cards={(number) => mailOf(runtime, (mail) => mail.card(number))} /><FileOffer runtime={runtime} /><Suggested runtime={runtime} /></>;
+  if (drafts.state.open) return <><Compose runtime={runtime} list={state} /><ChangeReview runtime={runtime} list={state} cards={(number) => mailOf(runtime, (mail) => mail.card(number))} /><FileOffer runtime={runtime} /><Suggested runtime={runtime} /><EarlierSend runtime={runtime} /></>;
   const cards = (number: number) => mailOf(runtime, (mail) => mail.card(number));
   const refresh = can({ type: "refresh" }) ? () => void send({ type: "refresh" }) : undefined;
   const retryList = refresh ?? (can({ type: "checkAccess" }) ? () => void send({ type: "checkAccess" }) : undefined);
@@ -537,6 +557,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
       {mustChoose ? <InboxAccountList accounts={accounts} onChoose={chooseAccount} /> : null}
       <FileOffer runtime={runtime} />
       <Suggested runtime={runtime} />
+      <EarlierSend runtime={runtime} />
       {review}
     </>
   );
