@@ -1,7 +1,5 @@
 // spec/app/files/scan.md, "Story: Arrange the pages"; spec/app/files/scan.md, "Story: Keep the scan as I work"; spec/app/files/scan.md, "Story: Make the PDF, and keep the photo"
-import { createScanDraftStore } from "@elizaos/plugin-files-client"
-import { scannedLinks } from "@elizaos/plugin-files-client"
-import type { ScanTextLine } from "@elizaos/plugin-files-client"
+import { createScanDraftStore, scannedLinks, type ScanTextLine } from "@elizaos/plugin-files-client"
 import { registered } from "../platform/device.vibe"
 import type { Page } from "../../gen/app__files__scanDraft.ts"
 
@@ -28,6 +26,7 @@ export interface ScanSaved {
 
 module web {
   import type { PdfReceipt, ScanImage, ScanSaved, StoredPage } from "./scanStore.vibe"
+  // eslint-disable-next-line boundaries/no-unknown-dependencies -- Vite resolves the worker loader to this directory’s scan PDF worker.
   import Draw from "./scanPdf.worker.ts?worker"
   import { admittedTextLayer } from "@elizaos/plugin-files-client"
   import { scannedLinks } from "@elizaos/plugin-files-client"

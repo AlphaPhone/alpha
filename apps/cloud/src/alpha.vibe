@@ -41,7 +41,7 @@ export function loopbackOnly(settings: EnvironmentProfile): boolean {
   return settings.mail.kind === "loopback" && settings.sms.kind !== "https" && providers.every((url) => onThisComputer.test(url))
 }
 
-/** One registration in the shape eliza's seed and `client apply` file take (`.eliza/packages/cloud/src/operator/clients.vibe`, `ClientEntry`). */
+/** One registration in the shape eliza's seed and `client apply` file take (`.eliza/packages/cloud-worker/src/operator/clients.vibe`, `ClientEntry`). */
 export function entryOf(registration: Registration) {
   const line = (url: Registration["signInReturn"]) => `${url.origin}${url.path}`
   return {

@@ -35,7 +35,7 @@ export service PhoneReminders {
 
 const plugin = "ElizaReminders"
 
-/** On the phone: eliza's `remindersClient()` of `@elizaos/os/bridges/reminders`, where the host registered the plugin. */
+/** On the phone: eliza's `remindersClient()` of `@elizaos/os-bridges`, where the host registered the plugin. */
 export const phoneReminders = Layer.sync(PhoneReminders, () => {
   const present = registered(plugin)
   return {

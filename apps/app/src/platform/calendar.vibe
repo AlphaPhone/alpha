@@ -85,7 +85,7 @@ const staged = new Map<string, ReturnType<CalendarClient["review"]>>()
 const lost: Written = { confirmed: false, known: false }
 const refused: Written = { confirmed: false, known: true }
 
-/** On the phone: eliza's `calendarClient()` of `@elizaos/os/bridges/calendar`, where the host registered the plugin. */
+/** On the phone: eliza's `calendarClient()` of `@elizaos/os-bridges`, where the host registered the plugin. */
 export const phoneCalendar = Layer.sync(PhoneCalendar, () => {
   const present = registered(plugin)
   const native = (): Creations => creations()

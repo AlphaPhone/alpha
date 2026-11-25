@@ -20,7 +20,7 @@ const imports = {
   patterns: [
     // A package, its subpaths and its family: zustand/middleware, redux-saga, @angular/core.
     { regex: `^(?:@(?:${scopes.join("|")})/|(?:${banned.join("|")})(?:[/-]|$))`, message: `Not part of the stack: ${stack}.` },
-    { regex: "^@elizaos/os/(?:build|image)(?:/|$)", message: "Import from @elizaos/os root barrel instead of subpath." },
+    { regex: String.raw`^@elizaos/(?!os/(?:android|aosp|browser/(?:runtime|protection|chromium/component))/|core/(?:catalog/[\w-]+|restart-exit-code)\.json$)[^/]+/`, message: "Import an eliza package from its root barrel: only its declared asset exports take a subpath." },
   ],
 }
 const noNodeInBrowser = [

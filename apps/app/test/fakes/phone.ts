@@ -1,14 +1,12 @@
-import type { AgentEvents, AgentRequest, AgentStatus, AgentStreamRequest, ElizaAgentPlugin } from "@elizaos/os-bridges";
-import type { ElizaCloudPlugin, NativeCloudRequest } from "@elizaos/os-bridges";
-import type { ElizaSecureStorePlugin, ElizaSecureStoreResult } from "@elizaos/os-bridges";
+import type { AgentEvents, AgentRequest, AgentStatus, AgentStreamRequest, ElizaAgentPlugin, ElizaCloudPlugin, NativeCloudRequest, ElizaSecureStorePlugin, ElizaSecureStoreResult } from "@elizaos/os-bridges";
+import type { RecoveryScene } from "./settings.ts";
 import type { Answering } from "./routes.ts";
-import { clearPluginHeaders, pluginHeader } from "./capacitor.ts";
 
 /**
  * A plugin as its Java or Kotlin answers the page: each method of eliza's definition `P`. The phone is faked once, at
  * the boundary Capacitor's own runtime calls on a native platform (`plugIn`), with eliza's plugins behind it by their
  * names, arguments, answers, rejections and events (`.eliza/packages/os/android`, typed by
- * `.eliza/packages/os/src/bridges/definitions`): Alpha's phone layers, eliza's clients and Capacitor run on it unchanged.
+ * `.eliza/packages/os-bridges/src/bridges/definitions`): Alpha's phone layers, eliza's clients and Capacitor run on it unchanged.
  */
 export type Native<P> = { [Method in Exclude<keyof P, "addListener">]: P[Method] };
 
@@ -38,11 +36,12 @@ const base64 = (bytes: Uint8Array) => btoa(Array.from(bytes, (one) => String.fro
  * its channel admits; `subscribeEvents` answers `{ id }`, then emits each event the agent publishes on the topic as
  * `agentEvent`, until `unsubscribeEvents`.
  */
-export function elizaAgent(agent: Answering): Faked {
+export function elizaAgent(agent: Answering, recovery?: RecoveryScene): Faked {
   return plugin<ElizaAgentPlugin, AgentEvents>((emit) => {
     const calls = new Map<string, AbortController>();
-    let state: "running" | "stopped" = "running";
-    const status = (): AgentStatus => ({ available: true, state, epoch: 1, requestBodyLimit: 1_048_576 });
+    let state: "running" | "stopped" | "failed" = recovery === undefined ? "running" : "failed";
+    const base = { available: true, epoch: 1, requestBodyLimit: 1_048_576 } as const;
+    const status = (): AgentStatus => state === "failed" ? { ...base, state, failure: "storage" } : { ...base, state };
     const set = (next: "running" | "stopped"): Promise<AgentStatus> => {
       state = next;
       const now = status();
@@ -93,7 +92,7 @@ export function elizaAgent(agent: Answering): Faked {
     };
     return {
       getStatus: () => Promise.resolve(status()),
-      start: () => set("running"),
+      start: () => { if (recovery !== undefined) recovery.starts += 1; return set("running"); },
       stop: () => set("stopped"),
       restart: () => set("running"),
       async request(options: AgentRequest) {
@@ -128,8 +127,15 @@ export function elizaAgent(agent: Answering): Faked {
         }
       },
       unsubscribeEvents: aborted,
-      reviewRecovery: () => Promise.resolve({ kind: "unavailable" }),
-      archiveRecovery: () => Promise.resolve({ kind: "unavailable" }),
+      reviewRecovery: () => Promise.resolve(recovery !== undefined && state === "failed"
+        ? { kind: "reviewable", reviewToken: "1.check", retainedCount: recovery.retained }
+        : { kind: "unavailable" }),
+      archiveRecovery: async ({ reviewToken }) => {
+        if (recovery === undefined || state !== "failed" || reviewToken !== "1.check") return { kind: "unavailable" };
+        recovery.tokens.push(reviewToken);
+        await set("stopped");
+        return { kind: "archived", archivedCount: recovery.archived };
+      },
     };
   });
 }
@@ -156,24 +162,24 @@ export function elizaCloud(cloud: Answering, signedIn: () => boolean): Faked {
 
 /**
  * `SecureStorePlugin.kt`, the `ElizaSecureStore` plugin: every call resolves, and says in `ok`, `error` and `outcome`
- * how it went. The host's policy opens `open` to the page and denies every other slot.
+ * how it went. The fake grants the slots the host's policy opens to the page.
  */
-export function elizaSecureStore(secrets: Map<string, string>, open: ReadonlySet<string>): Faked {
+export function elizaSecureStore(secrets: Map<string, string>, permits: (key: string) => boolean): Faked {
   const denied: ElizaSecureStoreResult = { ok: false, error: "denied", outcome: "Refused" };
   return plugin<ElizaSecureStorePlugin>(() => ({
-    get: ({ key }) => Promise.resolve(!open.has(key) ? { ok: false, error: "denied" } : secrets.has(key) ? { ok: true, value: secrets.get(key)! } : { ok: false, error: "not_found" }),
+    get: ({ key }) => Promise.resolve(!permits(key) ? { ok: false, error: "denied" } : secrets.has(key) ? { ok: true, value: secrets.get(key)! } : { ok: false, error: "not_found" }),
     set({ key, value }) {
-      if (!open.has(key)) return Promise.resolve(denied);
+      if (!permits(key)) return Promise.resolve(denied);
       secrets.set(key, value);
       return Promise.resolve({ ok: true, outcome: "Written" });
     },
     remove({ key }) {
-      if (!open.has(key)) return Promise.resolve(denied);
+      if (!permits(key)) return Promise.resolve(denied);
       secrets.delete(key);
       return Promise.resolve({ ok: true, outcome: "Removed" });
     },
     compareAndExchange({ key, expected, value }) {
-      if (!open.has(key)) return Promise.resolve(denied);
+      if (!permits(key)) return Promise.resolve(denied);
       if ((secrets.get(key) ?? null) !== expected) return Promise.resolve({ ok: false, error: "conflict", outcome: "Conflict" });
       if (value === null) secrets.delete(key);
       else secrets.set(key, value);
@@ -204,12 +210,7 @@ export function plugIn(plugins: Readonly<Record<string, Faked>>): () => void {
   const made = Object.fromEntries(Object.entries(plugins).map(([name, make]) => [name, make((event, data) => { for (const hear of [...heard(name, event).values()]) hear(data); }) as Record<string, (options: unknown) => unknown>]));
   let listeners = 0;
   page.androidBridge = {};
-  clearPluginHeaders();
-  capacitor.PluginHeaders = Object.entries(made).map(([name, methods]) => {
-    const header = pluginHeader(name);
-    header.methods.splice(0, header.methods.length, ...Object.keys(methods).map((method) => ({ name: method, rtype: "promise" })), { name: "addListener" }, { name: "removeListener" });
-    return header;
-  });
+  capacitor.PluginHeaders = Object.entries(made).map(([name, methods]) => ({ name, methods: [...Object.keys(methods).map((method) => ({ name: method, rtype: "promise" })), { name: "addListener" }, { name: "removeListener" }] }));
   capacitor.nativePromise = (name, method, options) => Promise.resolve().then(() => {
     const call = made[name]?.[method];
     if (call === undefined) throw rejection(`${name}.${method} is not implemented`, "UNIMPLEMENTED");
@@ -223,7 +224,6 @@ export function plugIn(plugins: Readonly<Record<string, Faked>>): () => void {
   };
   return () => {
     hearing.clear();
-    clearPluginHeaders();
     delete page.androidBridge;
     delete capacitor.PluginHeaders;
     delete capacitor.nativePromise;

@@ -133,10 +133,10 @@ async function buildBase(at: Checkout) {
   }
   run(at.root, "git", "checkout", "-q", "--detach", at.commit);
   run(at.root, "pnpm", "install", "--frozen-lockfile", "--prefer-offline");
-  for (const name of ["core", "core-node", "os-bridges", "os", "cloud", "cloud-worker", "agent", "agent-host"]) run(at.root, "pnpm", "--filter", `@elizaos/${name}`, "build");
+  for (const name of ["core", "core-node", "cloud", "agent", "os-bridges", "os", "agent-host", "cloud-worker"]) run(at.root, "pnpm", "--filter", `@elizaos/${name}`, "build");
   fs.rmSync(at.bundle, { recursive: true, force: true });
   const started = Date.now();
-  const { buildAgentBundle } = await import(pathToFileURL(path.join(at.root, "packages/agent-host/dist/src/index.js")).href) as {
+  const { buildAgentBundle } = await import(pathToFileURL(path.join(at.root, "packages/agent-host/dist/src/bundle/build.js")).href) as {
     buildAgentBundle: (options: { plugins: string[]; outDir: string; sourceCommit: string; sourceRoot: string }) => Promise<unknown>;
   };
   await buildAgentBundle({ plugins: [], outDir: at.bundle, sourceCommit: at.commit, sourceRoot: at.root });

@@ -23,14 +23,14 @@ Carrier & SIM setup offers About phone, mobile networks, the SIMs, the
 access point names and default apps; the Calendar, Camera,
 Maps and Notes pages Alpha's permissions, and the Photos page Alpha's
 photo access. About offers Android's About phone, and Developer its
-developer options. The password provider is the passwords area's.
+developer options. The Passwords page opens Android's confirmation to use Alpha for autofill.
 
 ```quint
 import index as I from "./index"
 import read as R from "../../kit/read"
 import timed as T from "./timed"
 
-type Target = AndroidHome | AccountsSync | WifiNetworks | BluetoothDevices | MobileNetworks | AirplaneMode | ScreenLock | DefaultApps | DisplaySettings | Brightness | SoundSettings | DoNotDisturb | BatterySaver | AlphaAlerts | AlertChannel | NotificationAccess | WorkflowAlerts | AppPermissions | PhotoPermissions | AllFilesAccess | LocationSettings | InternetPanel | SimCards | AccessPointNames | AboutPhone | DeveloperOptions
+type Target = AndroidHome | AccountsSync | WifiNetworks | BluetoothDevices | MobileNetworks | AirplaneMode | ScreenLock | DefaultApps | PasswordAutofill | DisplaySettings | Brightness | SoundSettings | DoNotDisturb | BatterySaver | AlphaAlerts | AlertChannel | NotificationAccess | WorkflowAlerts | AppPermissions | PhotoPermissions | AllFilesAccess | LocationSettings | InternetPanel | SimCards | AccessPointNames | AboutPhone | DeveloperOptions
 
 pure def offers(page: I::Page, target: Target): bool =
   if (page == I::Top) target == AndroidHome or target == AccountsSync
@@ -49,6 +49,7 @@ pure def offers(page: I::Page, target: Target): bool =
     target == AboutPhone or target == MobileNetworks or target == SimCards or target == AccessPointNames or target == DefaultApps
   else if (page == I::CalendarApp or page == I::CameraApp or page == I::MapsApp or page == I::NotesApp) target == AppPermissions
   else if (page == I::PhotosApp) target == PhotoPermissions
+  else if (page == I::PasswordsPage) target == PasswordAutofill
   else if (page == I::About) target == AboutPhone
   else if (page == I::Developer) target == DeveloperOptions
   else false
@@ -61,7 +62,7 @@ type Scope = AlphasOwn | WholePhone
 
 pure def aboutAlpha(target: Target): bool =
   target == AlphaAlerts or target == AlertChannel or target == WorkflowAlerts or target == AppPermissions or target == PhotoPermissions
-    or target == AllFilesAccess
+    or target == AllFilesAccess or target == PasswordAutofill
 
 pure def scopeOf(target: Target): Scope = if (aboutAlpha(target)) AlphasOwn else WholePhone
 

@@ -1,5 +1,7 @@
 // spec/app/settings/index.md, "Each page links to what another area owns there"; spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"; spec/kit/read.md, "Story: Read from outside"
 import { CloudError, isCredentialInvalid, networkError } from "@elizaos/cloud"
+import * as Settings from "../../gen/app__settings.effect.vibe"
+import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import { type Account, Cloud } from "../platform/cloud.vibe"
 import { Device } from "../platform/device.vibe"
@@ -17,7 +19,7 @@ export type Profile =
 
 const reading: Profile = { tag: "Reading" }
 
-/** Display details from the current read, held only for this app's account sheet. */
+/** Display details from the current read, held for the Settings row and Account sheet. */
 export function profileShelf() {
   let current: Profile = reading
   const listeners = new Set<() => void>()
@@ -51,16 +53,20 @@ effect function readProfile(cloud: Account): Profile!! {
     ? { tag: "SignInRequired" } : { tag: "Unavailable" }
 }
 
-/** Reads the account only while its sheet is on top and Alpha is visible. Leaving interrupts the read and drops its answer. */
+/** Reads the account while Settings or its Account sheet is visible. Leaving interrupts the read and drops its answer. */
 export function profileLive(publish: (value: Profile) => void) {
   return started(effect {
     const { changes } = try Layers.Machine
     const cloud = try Cloud
     const device = try Device
-    const onTop = Stream.changes(Stream.map(changes, (state) => Layers.top(state).id === accountLayer))
-    const visible = Stream.changes(Stream.switchMap(onTop, (showing) => showing
-      ? Stream.concat(Stream.fromEffect(device.showing()), device.visible)
-      : Stream.succeed(false)))
+    const shell = try Shell.Machine
+    const settings = try Settings.Machine
+    const pages = Stream.zipLatest(shell.changes, settings.changes)
+    const active = Stream.changes(Stream.map(Stream.zipLatest(changes, pages), ([layers, [shell, settings]]) =>
+      Layers.top(layers).id === accountLayer ? "Account" : Shell.showing(shell, "Settings") && settings.page === "Top" ? "Settings" : "Away"))
+    const visible = Stream.switchMap(active, (place) => place === "Away"
+      ? Stream.succeed(false)
+      : Stream.changes(Stream.concat(Stream.fromEffect(device.showing()), device.visible)))
     const watched = Stream.switchMap(visible, (showing) => showing
       ? Stream.concat(Stream.succeed<Profile>(reading), Stream.fromEffect(readProfile(cloud)))
       : Stream.succeed<Profile>(reading))

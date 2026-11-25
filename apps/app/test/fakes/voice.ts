@@ -1,6 +1,5 @@
 // spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"
-import type { ElizaSignInPlugin } from "@elizaos/os-bridges";
-import type { CloudStreamEvent, ElizaCloudSpeechPlugin } from "@elizaos/os-bridges";
+import type { ElizaSignInPlugin, CloudStreamEvent, ElizaCloudSpeechPlugin } from "@elizaos/os-bridges";
 import { type Faked, plugin, rejection } from "./phone.ts";
 
 export interface SpokenSentence {
@@ -10,6 +9,8 @@ export interface SpokenSentence {
   readonly channel: "local" | "cloud";
 }
 
+type NoteWindow = { readonly requestId: string; readonly recordingId: string; readonly noteId: string; readonly offsetMs: number; readonly durationMs: number };
+
 export interface VoiceScene {
   permission: "granted" | "denied" | "prompt";
   grantOnRequest: boolean;
@@ -17,6 +18,14 @@ export interface VoiceScene {
   liveCaptureAvailable: boolean;
   nativeTransport: boolean;
   transcriptionFailures: number;
+  dictationInFront: boolean;
+  refuseRecordingStop: boolean;
+  recordingStartGate?: () => Promise<void>;
+  finishRecording?: () => void;
+  readonly dictationClips: string[];
+  voicemailTranscription: ((id: string, requestId: string) => Promise<string>) | undefined;
+  noteTranscription?: (window: NoteWindow) => Promise<string>;
+  readonly canceledVoicemailTranscriptions: string[];
   probeGate: (() => Promise<void>) | undefined;
   warmSpeechOutputCalls: number;
   localSpeechStatusCalls: number;
@@ -36,6 +45,10 @@ export interface VoiceScene {
   streamTiming: unknown;
   stopCloudSpeechCalls: number;
   hushCalls: number;
+  speakerMuted: boolean;
+  speakerGainGate?: (muted: boolean) => Promise<void>;
+  readonly speakerGainRequests: boolean[];
+  readonly speakerMutedAtPlayback: boolean[];
   readonly spoken: SpokenSentence[];
   activeMicSession: string | undefined;
   emitLocal?: (event: string, data: unknown) => void;
@@ -52,6 +65,11 @@ export function voiceScene(): VoiceScene {
     liveCaptureAvailable: true,
     nativeTransport: true,
     transcriptionFailures: 0,
+    dictationInFront: true,
+    refuseRecordingStop: false,
+    dictationClips: [],
+    voicemailTranscription: undefined,
+    canceledVoicemailTranscriptions: [],
     probeGate: undefined,
     warmSpeechOutputCalls: 0,
     localSpeechStatusCalls: 0,
@@ -71,6 +89,9 @@ export function voiceScene(): VoiceScene {
     streamTiming: { format: "alpha-cloud-stream-timing-v1", records: [] },
     stopCloudSpeechCalls: 0,
     hushCalls: 0,
+    speakerMuted: false,
+    speakerGainRequests: [],
+    speakerMutedAtPlayback: [],
     spoken: [],
     activeMicSession: undefined,
   };
@@ -83,6 +104,14 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
     let recordingSeq = 0;
     let activeRecording: string | undefined;
     let finishedRecording: string | undefined;
+    const finish = () => {
+      if (activeRecording === undefined) throw new Error("No recording is active");
+      const recordingId = activeRecording;
+      finishedRecording = recordingId;
+      activeRecording = undefined;
+      return { recordingId, status: "recorded", durationMs: 59_000 };
+    };
+    voice.finishRecording = () => emit("recordingStopped", finish());
     return {
       checkPermissions: () => Promise.resolve({ microphone: voice.permission }),
       requestPermissions: () => {
@@ -129,37 +158,60 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
         return Promise.resolve({ playbackId });
       },
       play: ({ playbackId }: { playbackId: string }) => {
+        voice.speakerMutedAtPlayback.push(voice.speakerMuted);
         emit("playbackEnded", { playbackId });
         return Promise.resolve({});
+      },
+      setSpeechOutputMuted: async ({ muted }: { muted: boolean }) => {
+        voice.speakerGainRequests.push(muted);
+        await voice.speakerGainGate?.(muted);
+        voice.speakerMuted = muted;
       },
       stopPlayback: () => {
         voice.hushCalls += 1;
         return Promise.resolve({});
       },
       cancel: () => Promise.resolve({}),
-      startRecording: () => {
-        activeRecording = `rec-${++recordingSeq}`;
+      transcribeSavedNote: async (window: NoteWindow) => {
+        if (voice.noteTranscription === undefined) throw rejection("No saved note transcription");
+        return { text: await voice.noteTranscription(window), local: true };
+      },
+      startRecording: async () => {
+        const recordingId = `rec-${++recordingSeq}`;
+        activeRecording = recordingId;
         finishedRecording = undefined;
-        return Promise.resolve({ recordingId: activeRecording });
+        await voice.recordingStartGate?.();
+        return { recordingId };
       },
-      stopRecording: () => {
-        if (activeRecording === undefined) return Promise.reject(new Error("No recording is active"));
-        finishedRecording = activeRecording;
-        activeRecording = undefined;
-        return Promise.resolve({ recordingId: finishedRecording });
+      stopRecording: async () => {
+        if (voice.refuseRecordingStop) {
+          activeRecording = undefined;
+          throw new Error("Recording could not be saved");
+        }
+        return finish();
       },
+      dictationForeground: () => Promise.resolve({ available: voice.dictationInFront }),
       cancelRecording: () => {
         activeRecording = undefined;
         finishedRecording = undefined;
         return Promise.resolve({});
       },
       transcribeLocalRecording: ({ recordingId }: { recordingId: string }) => {
+        voice.dictationClips.push(recordingId);
         if (finishedRecording !== recordingId) return Promise.reject(new Error("Recording unavailable"));
         if (voice.transcriptionFailures > 0) {
           voice.transcriptionFailures -= 1;
           return Promise.reject(new Error("Recognition failed"));
         }
         return Promise.resolve({ text: "Dictated note" });
+      },
+      transcribeVoicemail: async ({ id, requestId }: { id: string; requestId: string }) => {
+        if (!voice.voicemailTranscription) throw rejection("Voicemail recognizer unavailable", "unavailable");
+        return { text: await voice.voicemailTranscription(id, requestId) };
+      },
+      cancelVoicemailTranscription: ({ requestId }: { requestId: string }) => {
+        voice.canceledVoicemailTranscriptions.push(requestId);
+        return Promise.resolve({});
       },
     };
   };

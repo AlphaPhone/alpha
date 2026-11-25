@@ -1,6 +1,6 @@
 // spec/app/camera/index.md, "Story: Open the camera"; spec/app/camera/index.md, "Story: Frame the shot"; spec/app/camera/index.md, "Story: Take photos and videos"; spec/app/camera/index.md, "Story: Let Alpha take a photo"
 import { Button, cn, focusRing, Spinner } from "@repo/ui";
-import { CameraOff, ChevronLeft, Clock, FileScan, Flashlight, FlashlightOff, Grid3x3, MicOff, Sparkles, SwitchCamera, Video, Zap, ZapOff } from "lucide-react";
+import { CameraOff, ChevronLeft, Clock, FileScan, Flashlight, FlashlightOff, Grid3x3, MicOff, SwitchCamera, Video, Zap, ZapOff } from "lucide-react";
 import { useCallback, useRef, useState, type PointerEvent } from "react";
 import type { Camera as Visit, Event, Mode, Said } from "../../gen/app__camera.ts";
 import { chosenLens, ready, recording } from "../../gen/app__camera.ts";
@@ -8,13 +8,15 @@ import { useMachine } from "../../gen/app__camera.react.ts";
 import { allows } from "../../gen/kit__permission.ts";
 import { CameraPort, type LensFacts, type Point } from "../platform/camera.vibe";
 import type { Resident, Shown } from "../runtime/area.tsx";
+import { Scan } from "../files/Scan.tsx";
+import type { cameraScan } from "../files/scan.vibe";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { approveCapture, CameraAssets, focus, shutter, type camera } from "./camera.vibe";
 import { Effect, type Layer } from "effect";
 
-type Runtime = Layer.Success<typeof camera> | Resident;
+type Runtime = Layer.Success<typeof camera> | Layer.Success<typeof cameraScan> | Resident;
 type Can = (event: Event) => boolean;
 type Fire = (event: Event) => void;
 
@@ -240,7 +242,7 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
             {state.flashAuto && <span aria-hidden className="absolute bottom-1 right-1 text-xs leading-none">A</span>}
           </Button>
         )}
-        {can({ type: "scanDocument", now: untimed }) && <Button variant="ghost" size="icon" aria-label="Scan document" onClick={() => fire({ type: "scanDocument", now: untimed })}><FileScan /></Button>}
+        {can({ type: "scanDocument" }) && <Button variant="ghost" size="icon" aria-label="Scan document" onClick={() => fire({ type: "scanDocument" })}><FileScan /></Button>}
       </header>
 
       <div className="relative flex min-h-36 flex-col">
@@ -267,7 +269,12 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
         )}
       </div>
 
-      <footer className="z-10 flex flex-col justify-center gap-4 bg-background pb-4 landscape:row-start-2 landscape:gap-2 landscape:pb-0">
+      <footer className={cn(
+        "z-10 flex flex-col justify-center gap-4 bg-background landscape:row-start-2 landscape:gap-2 landscape:pb-0",
+        shell.state?.assistant === "Bar"
+          ? "pb-[calc(var(--alpha-dock-clearance,5.125rem)+--spacing(9))]"
+          : "pb-29.5",
+      )}>
         {!inProgress && (
           <div role="group" aria-label="Camera mode" className="flex min-h-11 justify-center gap-2 overflow-x-auto landscape:flex-wrap landscape:gap-0">
             {(["Video", "Photo"] satisfies Mode[]).map((mode) => (
@@ -303,6 +310,7 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
           <span />
         </div>
       </footer>
+      <Scan runtime={runtime} alpha={alpha} />
     </section>
   );
 }

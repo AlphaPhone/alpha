@@ -1,13 +1,15 @@
 // spec/app/digests/index.md, "Story: See my digests"; spec/app/digests/schedules.md, "Story: Keep my digest schedules"
 import { Effect } from "effect";
 import { digestSourceState, digestStatusLabel, digestSummaryText, digestTemplateName } from "@elizaos/plugin-workflow-client";
-import { Alert, Button, ConfirmDialog, EmptyState, Input, ListRow, Spinner } from "@repo/ui";
+import { Alert, Button, ConfirmDialog, EmptyState, Input, ListRow, Spinner, Switch } from "@repo/ui";
 import { CalendarDays, ChevronRight, Plus, RefreshCw, Sun } from "lucide-react";
+import { useMachine as useDigestDelivery } from "../../gen/app__digests.react.ts";
 import { useMachine } from "../../gen/app__digests__schedules.react.ts";
 import type { Machine } from "../../gen/app__digests__schedules.effect.vibe";
 import type { Change, Event } from "../../gen/app__digests__schedules.ts";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { Time } from "../runtime/time.vibe";
+import { setBrowserDigestChecks } from "./browser-digests.vibe";
 import { DigestWords, newDigest, pickDigestSource } from "./digests.vibe";
 
 interface DigestsProps extends Pick<Shown<Resident | Machine | DigestWords>, "runtime"> {
@@ -19,6 +21,7 @@ interface DigestsProps extends Pick<Shown<Resident | Machine | DigestWords>, "ru
 /** Scheduled digests and the exact results already kept from the owner's agent. */
 export function Digests({ runtime, owner, result, onResult }: DigestsProps) {
   const model = useMachine(runtime);
+  const delivery = useDigestDelivery(runtime);
   const state = model.state;
   if (!state || state.owner !== owner) return <Spinner aria-label="Reading scheduled digests" />;
   const home = runtime.runSync(Effect.flatMap(DigestWords, (words) => words.view(owner)));
@@ -32,6 +35,8 @@ export function Digests({ runtime, owner, result, onResult }: DigestsProps) {
   }
   const refresh = { type: "refresh" } as const;
   const unavailable = state.schedules.status === "Failed";
+  const browser = delivery.state?.owner === owner && delivery.state.checks === "ResultChecks" ? delivery.state : undefined;
+  const background = browser ? { type: "setBackground", on: !browser.background.on } as const : undefined;
   const zone = runtime.runSync(Effect.flatMap(DigestWords, (words) => words.zone(owner)));
   const now = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
   const sources = home.sources.filter(({ record }) => digestSourceState(record, now) === "current");
@@ -46,6 +51,16 @@ export function Digests({ runtime, owner, result, onResult }: DigestsProps) {
     {state.schedules.status === "Loading" && <Spinner aria-label="Reading scheduled digests" />}
     {unavailable && <Alert variant="warn" role="status">Scheduled digests couldn’t be read.</Alert>}
     {home.partial && <Alert variant="warn" role="status">Some digest information couldn’t be read.</Alert>}
+    {home.capable && browser && background && (
+      <>
+        <label className="flex items-center justify-between gap-3">
+          Check for digests while Alpha is visible
+          <Switch aria-label="Check for digests while Alpha is visible" checked={browser.background.on} disabled={!delivery.can(background)}
+            onCheckedChange={(on) => void runtime.runPromiseExit(setBrowserDigestChecks(owner, on))} />
+        </label>
+        {browser.background.attempt.outcome === "Refused" && <Alert role="status" variant="warn">The digest preference couldn’t be saved.</Alert>}
+      </>
+    )}
     {state.schedules.status === "Loaded" && !home.capable && <EmptyState title="Scheduled digests aren’t available on this agent" icon={<Sun />} />}
     {home.loops.length > 0 && <ul aria-label="Digest schedules" className="divide-y divide-border">
       {home.loops.map(({ number, record: loop }) => <li key={loop.id}>

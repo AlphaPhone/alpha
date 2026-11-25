@@ -35,7 +35,7 @@ export service Vault {
 
 /**
  * The phone's secure store, through the `ElizaSecureStore` plugin of eliza's Android package: eliza's
- * `secureStoreClient()` of `@elizaos/os/bridges/secure-store`, which decodes each answer. A value is one JSON text.
+ * `secureStoreClient()` of `@elizaos/os-bridges`, which decodes each answer. A value is one JSON text.
  */
 export const relayedVault = Layer.sync(Vault, () => {
   const store = client()

@@ -19,7 +19,7 @@ export interface Pack {
 /** The name of the one package the pack's entry is, inside the clone. */
 export const packEntryName = "@repo/agent-pack-entry";
 
-const always = ["@elizaos/core", "@elizaos/core-node", "@elizaos/os-bridges", "@elizaos/os", "@elizaos/cloud", "@elizaos/cloud-worker", "@elizaos/agent", "@elizaos/agent-host"];
+const always = ["@elizaos/core", "@elizaos/core-node", "@elizaos/cloud", "@elizaos/agent", "@elizaos/os-bridges", "@elizaos/os", "@elizaos/agent-host"];
 const worktreeKey = createHash("sha256").update(repository).digest("hex").slice(0, 12);
 
 /** Where the pack's clone for `commit` lives, shared across worktrees like `.eliza`, outside `node_modules` and outside the repo. @throws {never} */

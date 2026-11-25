@@ -61,7 +61,7 @@ export interface Listed {
   readonly app: InstalledApp
 }
 
-/** The phone's launcher, through eliza's client `System` of `@elizaos/os/bridges/system`. */
+/** The phone's launcher, through eliza's client `System` of `@elizaos/os-bridges`. */
 export const phoneLauncher = Layer.effect(Launcher, effect {
   const loaded = try promise(() => bridge())
   const system = loaded.System

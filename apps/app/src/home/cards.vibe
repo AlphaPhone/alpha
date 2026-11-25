@@ -63,13 +63,14 @@ export interface Told {
   readonly reminders: ReadonlyArray<Item>
   readonly hidden: ReadonlyArray<number>
   readonly mail: Mail
+  readonly mailMore: boolean
   readonly messages: ReadonlyArray<Row>
   readonly phone: ReadonlyArray<Row>
   readonly flows: Flows
   readonly brief: ToldBrief | undefined
 }
 
-let told: Told = { reminders: [], hidden: [], mail: Cards.quiet, messages: [], phone: [], flows: { rows: [], freshness: "UpToDate" }, brief: undefined }
+let told: Told = { reminders: [], hidden: [], mail: Cards.quiet, mailMore: false, messages: [], phone: [], flows: { rows: [], freshness: "UpToDate" }, brief: undefined }
 
 function tell(next: Partial<Told>): void {
   told = { ...told, ...next }
@@ -97,8 +98,8 @@ export const fromAreas = {
   },
   /** The phone's calendars Calendar hides now, by their numbers. */
   hidden(calendars: ReadonlyArray<number>): void { tell({ hidden: [...calendars] }) },
-  /** Inbox's summary of the unread mail it loaded: sender over subject, never a body. */
-  mail(mail: Mail): void { tell({ mail }) },
+  /** Inbox's summary of the unread mail it loaded: subject and sender, never a body. */
+  mail(mail: Mail, more = false): void { tell({ mail, mailMore: more }) },
   /** The rows waiting in Messages: who, over the message. */
   messages(rows: ReadonlyArray<Row>): void { tell({ messages: [...rows] }) },
   /** The rows waiting in Phone: who, over the missed call. */
