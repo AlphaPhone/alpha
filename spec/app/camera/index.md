@@ -521,6 +521,11 @@ pure def alwaysTorchBelongsToItsPreview(s: Camera): bool =
     and ((s.torch.lit or s.torch.write > 0) implies (s.phase == Ready and s.lens == Back))
 
 pure def sometimesTorchIsLit(s: Camera): bool = s.torch.lit
+
+pure val eval_witness_sometimesTorchIsLit = (
+  ("open", false, 0, Phone), ("accessIs", P::Granted, 0, Phone),
+  ("previewStarted", 1, true, Phone), ("toggleTorch", Owner),
+  ("torchWritten", 1, 1, true, Phone))
 ```
 
 ### Zoom moves within what the lens allows, by chip or by pinch, including while a recording runs
@@ -856,6 +861,13 @@ pure def openLast(s: Camera, by: Actor): Done =
 
 ```quint
 pure def sometimesTruncatedSaved(s: Camera): bool = s.film.stage == F::Saved and s.film.truncated and s.last == s.film.video
+
+pure val eval_witness_sometimesTruncatedSaved = (
+  ("open", false, 0, Phone), ("accessIs", P::Granted, 0, Phone),
+  ("previewStarted", 1, true, Phone), ("setMode", Video, Owner),
+  ("startRecording", false, Owner), ("recordingStarted", true, 0, Phone),
+  ("chunk", F::maxBytes - 1, 1, Phone), ("chunk", 2, 2, Phone),
+  ("recordingEnded", true, 1, 3, Phone), ("recordingVerified", true, 4, Phone))
 ```
 
 ### A recording can be finished after Camera was left

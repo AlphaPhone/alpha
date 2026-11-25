@@ -131,9 +131,10 @@ pure def canWantContacts(s: Adding, draft: int, admitted: bool, contacts: P::Per
   draft != 0 and not(admitted and P::allows(contacts))
 
 pure def wantContacts(s: Adding, draft: int, admitted: bool, contacts: P::Permission): Added =
-  if (not(admitted)) { state: { ...s, contacts: NotOnThisPhone }, out: List() }
-  else if (P::canAsk(contacts)) { state: { ...s, contacts: Asked, contactDraft: draft }, out: List(AskForContacts({ draft: draft })) }
-  else { state: { ...s, contacts: InSettings }, out: List(OpenContactsSettings) }
+  val gone = clearPeople(s)
+  if (not(admitted)) { state: { ...gone, contacts: NotOnThisPhone }, out: List() }
+  else if (P::canAsk(contacts)) { state: { ...gone, contacts: Asked, contactDraft: draft }, out: List(AskForContacts({ draft: draft })) }
+  else { state: { ...gone, contacts: InSettings, contactDraft: draft }, out: List(OpenContactsSettings) }
 
 pure def lawNoContactsWhereThePhoneHasNone(draft: int, contacts: P::Permission): bool =
   not(canPickContact(initial, draft, false, contacts)) and wantContacts(initial, draft, false, contacts).out.length() == 0
@@ -156,13 +157,13 @@ pure def canMorePeople(s: Adding, draft: int): bool =
 pure def morePeople(s: Adding, draft: int): Added = readPeople(s, draft, s.query, true)
 
 pure def canPeopleRead(s: Adding, draft: int, ticket: int, addresses: int): bool =
-  draft != 0 and draft == s.contactDraft and R::canAnswer(s.people, ticket) and addresses >= 0
+  draft != 0 and draft == s.contactDraft and s.contacts == Usable and R::canAnswer(s.people, ticket) and addresses >= 0
 
 pure def peopleRead(s: Adding, draft: int, ticket: int, ok: bool, addresses: int, more: bool): Adding =
   { ...s, people: R::answer(s.people, ok), addresses: if (ok) addresses else 0, morePeople: ok and more }
 
 pure def canChooseContact(s: Adding, draft: int, ticket: int, address: int): bool =
-  draft != 0 and draft == s.contactDraft and s.people.status == R::Loaded and ticket == s.people.ticket
+  draft != 0 and draft == s.contactDraft and s.contacts == Usable and s.people.status == R::Loaded and ticket == s.people.ticket
     and address >= 1 and address <= s.addresses
 
 pure def chooseContact(s: Adding, draft: int, ticket: int, address: int): Added =

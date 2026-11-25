@@ -64,7 +64,7 @@ type Change = keyof typeof operationNames;
 const isChange = (kind: Kind): kind is Change => kind in operationNames;
 
 /** What Mail holds, read at the state the screen shows. */
-const mailOf = <A,>(runtime: Runtime, read: (mail: Mail["Service"]) => A): A => runtime.runSync(Effect.map(Mail, read));
+const mailOf = <A,>(runtime: Runtime, read: (mail: Mail["Service"]) => A): A => read(runtime.runSync(Mail));
 
 const mailTime = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 const mailDate = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
@@ -158,8 +158,10 @@ function toastOf(state: Operations, operation: (typeof operationNames)[Change], 
 
 /** The body of a message with nothing able to run, its remote images only once they may load, and its links each reviewed. */
 function Body({ read, images, onReview }: { read: MailMessage; images: boolean; onReview: (link: number) => void }) {
-  const { formatted, links } = prepareMessage(read);
-  const document = useMemo(() => formatted ? frameDocument(formatted, images) : undefined, [formatted, images]);
+  const { formatted, links, document } = useMemo(() => {
+    const prepared = prepareMessage(read);
+    return { ...prepared, document: prepared.formatted ? frameDocument(prepared.formatted, images) : undefined };
+  }, [read, images]);
   const frame = useCallback((node: HTMLIFrameElement | null) => node ? connectMailFrame(node, onReview) : undefined, [onReview]);
   const additional = links.flatMap((link, at) => formatted?.inline.has(link.url) ? [] : [{ ...link, at: at + 1 }]);
   const list = (
@@ -222,7 +224,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const told = marking.state?.told;
   const notice = told !== undefined && told in markNotices ? markNotices[told as keyof typeof markNotices] : undefined;
   const files = loaded ? read.attachments : [];
-  const destination = runtime.runSync(Effect.map(InboxAttachmentFiles, (files) => files.destination));
+  const destination = runtime.runSync(InboxAttachmentFiles).destination;
   const unsure = (attachment: number) => state.unsure.some((held) => held.account === state.account && held.message === state.message && held.attachment === attachment);
   const reviewing = (attachment: number, handling: "Opening" | "Saving") => {
     const event = { type: "reviewAttachment", attachment, handling } as const;
@@ -231,7 +233,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const file = files.at(state.attachment - 1);
   const outcome = state.file.outcome;
   const attachment = file && state.handling === "Opening" && outcome === "Confirmed"
-    ? runtime.runSync(Effect.map(AttachmentPreviews, (previews) => previews.read(state.file.id)))
+    ? runtime.runSync(AttachmentPreviews).read(state.file.id)
     : undefined;
   const turn = (page: number) => {
     const event = { type: "pdfPage", access, page } as const;
@@ -420,7 +422,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   };
   // spec/app/inbox/shelf.md, "Story: Keep drafts set aside"
   const shelved: InboxListRow[] = drafts.state.shelf.shelved.map((id) => {
-    const words = runtime.runSync(Effect.map(Letters, (all) => all.words(id)));
+    const words = runtime.runSync(Letters).words(id);
     const resume = { type: "resume", draft: id } as const;
     return {
       id: `shelf:${id}`, sender: "Draft", initial: "D", subject: words.subject || "(No subject)", snippet: words.text.slice(0, 160), time: "Draft",

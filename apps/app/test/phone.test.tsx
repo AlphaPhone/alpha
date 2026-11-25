@@ -360,8 +360,11 @@ describe("Phone on an Alpha image", () => {
     // spec/app/phone/comms.md, "A subject is briefed once, only with the conversation open, and never from fixtures"
     await press("Open Alpha");
     await until(alpha, alpha.runtime, Comms, (state) => state.height === "SheetOpen" && state.briefed === state.key);
-    const briefing = [...document.querySelectorAll('[aria-label="Ask Alpha"] article')].filter((row) => row.textContent?.includes("You have 1 new voicemail."));
+    const briefing = [...document.querySelectorAll('[aria-label="Ask Alpha"] [role="note"]')].filter((card) => card.textContent?.includes("You have 1 new voicemail."));
     expect(briefing).toHaveLength(1);
+    expect(briefing[0]?.textContent).toContain("Phone");
+    const signed = [...document.querySelectorAll('[aria-label="Ask Alpha"] article')].filter((row) => row.textContent?.includes("You have 1 new voicemail."));
+    expect(signed).toHaveLength(0);
 
     // spec/app/phone/index.md, "The Voicemail tab is offered only while the carrier's visual voicemail is ready"
     world.telephony.carrier = "unconfigured";

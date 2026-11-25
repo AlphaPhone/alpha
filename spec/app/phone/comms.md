@@ -330,7 +330,8 @@ pure def sometimesARestoredProposalWaits(c: Comms): bool = openId(c.proposal) !=
 
 The briefing comes from what the view read: missed calls and new voicemail
 on Phone; Messages and Contacts give none, since their rows never enter the
-agent's context. With nothing known it is absent.
+agent's context. It appears as a facts card that Alpha does not sign. With
+nothing known it is absent.
 
 ```quint
 pure def canBriefingShown(c: Comms, key: str, by: Actor): bool = by == Device and c.height != SheetClosed and key == c.key and key != c.briefed
