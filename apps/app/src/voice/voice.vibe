@@ -60,8 +60,16 @@ export interface SpokenChatLease {
   settle(result: Extract<TurnResult, { kind: "Replied" }>, spoken: string): void!!
 }
 
+export type SpokenChatContext = Agent | VoiceWords | Voice.Machine | Shell.Machine | Conversation | Chats | Phone | Views | Talk | MediaReview
+
+interface SpokenChat {
+  readonly context: Context.Context<SpokenChatContext>
+  readonly writer: Semaphore.Semaphore
+  readonly begin: (session: number, turn: number, current: boolean!!) => (SpokenChatLease | undefined)!!
+}
+
 export interface VoiceMemory {
-  chat: { readonly writer: Semaphore.Semaphore; readonly begin: (session: number, turn: number, current: boolean!!) => (SpokenChatLease | undefined)!! } | undefined
+  chat: SpokenChat | undefined
   heardText: { readonly session: number; readonly turn: number; readonly text: string } | undefined
   lastReply: string
   readonly queuedSentences: string[]
@@ -597,7 +605,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false })
     Queue.endUnsafe(queue)
   }
-  return Stream.callback<Voice.Event, never, Agent | VoiceWords | Voice.Machine | Shell.Machine>((queue) => effect {
+  const send = (queue: Queue.Queue<Voice.Event, Cause.Done>, shared: SpokenChat) => effect {
     const { memory } = try VoiceWords
     const voice = try Voice.Machine
     const chat = Option.getOrUndefined(try Effect.serviceOption(Talk))?.board
@@ -636,19 +644,26 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       finishLocally(note?.conversation === card.conversation ? note.text : "I couldn’t confirm the send. Check Messages before trying again.")
       return
     }
+    const current = effect { return Voice.canSentence(try voice.get(), session, turn) }
+    const carried = try shared.writer.withPermitsIfAvailable(1)(effect {
+      const abandoned = Effect.as(Stream.runHead(Stream.filter(voice.changes, (state) => !Voice.canSentence(state, session, turn))), undefined)
+      const lease = try Effect.raceFirst(shared.begin(session, turn, current), abandoned)
+      if (lease === undefined) return false
+      try post(queue, lease, spoken, finishLocally)
+      return true
+    })
+    if (Option.isNone(carried) || !carried.value) finishLocally()
+  }
+  return Stream.callback<Voice.Event, never, VoiceWords>((queue) => effect {
+    const { memory } = try VoiceWords
     const shared = memory.chat
     if (shared !== undefined) {
-      const current = effect { return Voice.canSentence(try voice.get(), session, turn) }
-      const carried = try shared.writer.withPermitsIfAvailable(1)(effect {
-        const abandoned = Effect.as(Stream.runHead(Stream.filter(voice.changes, (state) => !Voice.canSentence(state, session, turn))), undefined)
-        const lease = try Effect.raceFirst(shared.begin(session, turn, current), abandoned)
-        if (lease === undefined) return false
-        try post(queue, lease, spoken, finishLocally)
-        return true
-      })
-      if (Option.isSome(carried) && carried.value) return
+      try Effect.provideContext(send(queue, shared), shared.context)
+      return
     }
-    finishLocally()
+    memory.heardText = undefined
+    Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false })
+    Queue.endUnsafe(queue)
   })
 }
 
