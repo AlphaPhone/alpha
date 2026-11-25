@@ -24,20 +24,21 @@ export interface PhotosScene {
   promptCount: number;
   readCount: number;
   readonly saves: string[];
+  readonly editLookups: string[];
 }
 
 export function photosScene(): PhotosScene {
   return {
     access: { scope: "denied", images: "denied", videos: "denied" },
     rows: [row(3, "Park.jpg", false), row(2, "Camera.jpg", true), row(1, "Original.jpg", false)],
-    watching: false, changed: () => {}, promptCount: 0, readCount: 0, saves: [],
+    watching: false, changed: () => {}, promptCount: 0, readCount: 0, saves: [], editLookups: [],
   };
 }
 
 /** The native Photos plugin fixture talks to the real Eliza media bridge. */
 export function alphaPhotos(scene: PhotosScene): Faked {
   type Used = "libraryAccess" | "requestLibraryAccess" | "watchLibrary" | "list" | "listPermitted" | "read" | "readPermitted"
-    | "thumbnails" | "beginEdit" | "previewEdit" | "saveEdit" | "cancelEdit" | "albums" | "openLibrarySettings";
+    | "thumbnails" | "beginEdit" | "previewEdit" | "saveEdit" | "editResult" | "cancelEdit" | "albums" | "openLibrarySettings";
   return plugin<Pick<PhotosPlugin, Used>, { libraryChanged: undefined }>((emit) => {
     scene.changed = () => { if (scene.watching) emit("libraryChanged", undefined); };
     const listed = (rows: readonly ListedRow[], thumbnails?: boolean) => rows.map(({ image, ...row }) => thumbnails ? { ...row, image } : row);
@@ -91,6 +92,13 @@ export function alphaPhotos(scene: PhotosScene): Faked {
         scene.rows.unshift(copy);
         scene.saves.push(filter);
         return Promise.resolve({ status: "saved", operationId: session, id: copy.id, revision: copy.revision, replaced: false });
+      },
+      editResult({ operationId }) {
+        scene.editLookups.push(operationId);
+        const saved = owned()[0];
+        return Promise.resolve(operationId === session && saved !== undefined
+          ? { status: "saved", operationId, id: saved.id, revision: saved.revision, replaced: false }
+          : { status: "not-started" });
       },
       cancelEdit: () => Promise.resolve(),
       albums: () => Promise.resolve({ items: [] }),

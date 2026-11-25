@@ -703,6 +703,10 @@ pure def copyFound(s: Viewer, ticket: int, ok: bool, found: bool, by: Actor): Vi
 
 ### A restart forgets the viewer but keeps the save; a save still on its way is no longer trusted, and is looked up
 
+Saved viewer records from before the current viewer controls restart from
+the same save, attempt count and lookup. Presentation starts at the
+current defaults. A lookup still asks for the original operation receipt.
+
 ```quint
 pure def canRestart(s: Viewer, by: Actor): bool = by == Phone
 

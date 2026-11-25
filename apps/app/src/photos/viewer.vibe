@@ -363,5 +363,28 @@ const browserUpdates = started(effect {
   })
 }, "refreshing an open browser photo")
 
+// spec/app/photos/viewer.md, "A restart forgets the viewer but keeps the save; a save still on its way is no longer trusted, and is looked up"
+effect function viewerRecord(raw: string | undefined): (string | undefined)!! {
+  if (raw === undefined) return undefined
+  const previous = Effect.try({ try: () => JSON.parse(raw) as unknown, catch: () => undefined }) catch () => undefined
+  if (typeof previous !== "object" || previous === null || "origin" in previous) return raw
+  if (!("save" in previous && "attempts" in previous && "lookup" in previous && "found" in previous)) return raw
+  const state = Viewer.parseState({
+    ...Viewer.initial, save: previous.save, attempts: previous.attempts, lookup: previous.lookup, found: previous.found,
+  })
+  return state === undefined ? raw : JSON.stringify(state)
+}
+
+function storedViewer(key: string, start = Viewer.initial) {
+  return Layer.unwrap(effect {
+    const store = try KeyValueStore.KeyValueStore
+    const compatible = KeyValueStore.make({
+      ...store,
+      get: (name: string) => name === key ? Effect.flatMap(store.get(name), viewerRecord) : store.get(name),
+    })
+    return Layer.provide(Viewer.stored(key, start), Layer.succeed(KeyValueStore.KeyValueStore, compatible))
+  })
+}
+
 /** The viewer's hands, over its rule-owned playback and edit state. */
-export const viewer = together(opened, reacting(Viewer, { keep: 1, open: [{ type: "restart" }, "Phone"], carry }), releasing, browserUpdates)
+export const viewer = together(opened, reacting({ ...Viewer, stored: storedViewer }, { keep: 1, open: [{ type: "restart" }, "Phone"], carry }), releasing, browserUpdates)
