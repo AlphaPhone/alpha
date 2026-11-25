@@ -52,8 +52,8 @@ do next.
 - **Elevation.** `shadow-sm` lifts a control, `shadow-menu` a menu, `shadow-md` a dialog or a notice, `shadow-lg` a raised card,
   `shadow-dock` the floating Ask Alpha bar, `shadow-dock-compact` its compact controls, and `shadow-sheet` a bottom sheet.
   Both dock shadows have a `-dark` variant for black surfaces.
-- **Layers.** `z-dock` is the Ask Alpha bar, `z-sheet` the conversation and bottom sheets, `z-dialog` a
-  dialog, `z-toast` a notice, `z-voice` the voice overlay. `z-10`, `z-20` and `z-50` order things inside one view.
+- **Layers.** `z-dock` is the Ask Alpha bar, `z-assistant-sheet` the expanded Ask Alpha sheet, `z-sheet` modal bottom sheets, `z-dialog` a
+  dialog, `z-alert` urgent system banners (ringing alarms, live calls, due reminders), `z-toast` a notice, `z-voice` the voice overlay. `z-10`, `z-20` and `z-50` order things inside one view.
 - **Motion.** `fast` for press, `base` for most changes, `slow` for entering and leaving, on
   `ease-standard`; `animate-rise` brings in a sheet, `animate-drop` a menu, `animate-fade` a screen,
   `animate-shimmer` work in progress, `animate-blink` the dots of a reply being written, `animate-wiggle` an app tile on Home while Home is being edited.
@@ -87,7 +87,7 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `foreground` | oklch(0 0 0) | oklch(1 0 0) |
 | `card` | oklch(0.98510365 0 0) | oklch(0.14957712 0 0) |
 | `card-foreground` | oklch(0 0 0) | oklch(1 0 0) |
-| `popover` | oklch(1 0 0) | oklch(0 0 0) |
+| `popover` | oklch(1 0 0) | oklch(0.14957712 0 0) |
 | `popover-foreground` | oklch(0 0 0) | oklch(1 0 0) |
 | `primary` | oklch(0.45201372 0.31321437 264.05202064) | oklch(0.70366126 0.15682550 277.95756294) |
 | `primary-foreground` | oklch(1 0 0) | oklch(0 0 0) |
@@ -242,8 +242,10 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `z.20` | 20 |
 | `z.50` | 50 |
 | `z.dock` | 100 |
+| `z.assistant-sheet` | 180 |
 | `z.sheet` | 200 |
 | `z.dialog` | 300 |
+| `z.alert` | 350 |
 | `z.toast` | 400 |
 | `z.voice` | 500 |
 | `focus.width` | 2px |
@@ -275,6 +277,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `breakpoint.md` | 47.5rem |
 | `breakpoint.lg` | 62.5rem |
 | `breakpoint.xl` | 80rem |
+| `custom.alpha-safe-top` | max(var(--alpha-native-inset-top, 0px), env(safe-area-inset-top, 0px)) |
+| `custom.alpha-safe-bottom` | max(var(--alpha-native-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)) |
 | `duration.fast` | 120ms |
 | `duration.base` | 250ms |
 | `duration.slow` | 460ms |

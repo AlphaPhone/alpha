@@ -18,7 +18,7 @@ interface PreviewServer {
   middlewares: {
     use(
       fn: (
-        req: { url?: string },
+        req: { url?: string; headers?: Record<string, string | string[] | undefined> },
         res: { statusCode: number; setHeader(name: string, value: string): void; end(body: string): void },
         next: (err?: unknown) => void,
       ) => void,
@@ -51,12 +51,30 @@ const VIRTUAL_SB_TEST = "\0virtual:studio-storybook-test";
 const servers = new Map<string, PreviewEntry>();
 let exitHooked = false;
 
+const LOOPBACK_HOST = /^(?:127\.0\.0\.1|localhost)(?::\d+)?$/i;
+const LOOPBACK_ORIGIN = /^http:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?$/i;
+
+function isSafeRelativeFile(relFile: string): boolean {
+  if (!relFile || relFile.includes("\0") || relFile.includes("\\") || relFile.includes(":")) return false;
+  const clean = relFile.replace(/^\/+/, "");
+  if (!clean || clean.startsWith("/") || clean.split("/").some((part) => part === "" || part === "." || part === "..")) return false;
+  return true;
+}
+
 function siblingMetaFile(root: string, relFile: string): string | null {
+  if (!isSafeRelativeFile(relFile)) return null;
+  const realRoot = fs.realpathSync(root);
   const clean = relFile.replace(/^\/+/, "");
   const stem = clean.replace(/\.[jt]sx?$/, "");
   for (const ext of [".meta.tsx", ".meta.ts"]) {
     const candidate = `${stem}${ext}`;
-    if (fs.existsSync(path.join(root, candidate))) return candidate;
+    const resolved = path.resolve(realRoot, candidate);
+    if (!resolved.startsWith(realRoot + path.sep)) continue;
+    try {
+      if (fs.existsSync(resolved) && fs.realpathSync(resolved).startsWith(realRoot + path.sep)) return candidate;
+    } catch {
+      continue;
+    }
   }
   return null;
 }
@@ -231,7 +249,8 @@ function previewHtml(root: string, reqUrl: string): string {
   const theme = new URL(reqUrl, "http://127.0.0.1").searchParams.get("theme");
   const htmlClass = theme === "dark" || theme === "light" ? ` class="${theme}"` : "";
   const tokens = readProjectTokens(root);
-  const inlineCss = tokens ? `${tokensCss(tokens)}html,body{background:var(--background);color:var(--foreground);}` : "";
+  const rawInlineCss = tokens ? `${tokensCss(tokens)}html,body{background:var(--background);color:var(--foreground);}` : "";
+  const inlineCss = rawInlineCss.replace(/<\/style/gi, "<\\/style");
   return [
     "<!doctype html>",
     `<html lang="en"${htmlClass}>`,
@@ -303,19 +322,39 @@ class PreviewBoundary extends Component {
   }
 }
 
+const LOOPBACK_ORIGIN_RE = /^http:\\/\\/(?:localhost|127\\.0\\.0\\.1)(?::\\d+)?$/i;
+let parentTargetOrigin = (() => {
+  try {
+    const ref = document.referrer ? new URL(document.referrer).origin : "";
+    return LOOPBACK_ORIGIN_RE.test(ref) ? ref : null;
+  } catch {
+    return null;
+  }
+})();
+function postToParent(payload) {
+  if (!window.parent || window.parent === window) return;
+  window.parent.postMessage(payload, parentTargetOrigin || "*");
+}
+function isSafeComponentPath(file) {
+  if (typeof file !== "string" || !file || file.includes("\\\\") || file.includes(":")) return false;
+  const clean = file.replace(/^\\/+/, "");
+  if (!clean || !/\\.[jt]sx?$/.test(clean)) return false;
+  return !clean.split("/").some((part) => !part || part === "." || part === "..");
+}
+
 function bindArgs(raw, propNames) {
   const out = {};
   const src = raw && typeof raw === "object" ? raw : {};
   for (const [k, v] of Object.entries(src)) {
     if (v === "__fn__" || (typeof k === "string" && /^on[A-Z]/.test(k) && typeof v !== "function")) {
-      out[k] = (...a) => window.parent.postMessage({ type: "studio:action", prop: k, args: a }, "*");
+      out[k] = (...a) => postToParent({ type: "studio:action", prop: k, args: a });
     } else {
       out[k] = v;
     }
   }
   for (const name of propNames || []) {
     if (/^on[A-Z]/.test(name) && typeof out[name] !== "function") {
-      out[name] = (...a) => window.parent.postMessage({ type: "studio:action", prop: name, args: a }, "*");
+      out[name] = (...a) => postToParent({ type: "studio:action", prop: name, args: a });
     }
   }
   return out;
@@ -343,6 +382,10 @@ function PreviewApp() {
 
   useEffect(() => {
     const onMsg = (ev) => {
+      if (ev.source !== window.parent) return;
+      if (!LOOPBACK_ORIGIN_RE.test(ev.origin)) return;
+      if (parentTargetOrigin && ev.origin !== parentTargetOrigin) return;
+      parentTargetOrigin = ev.origin;
       const data = ev.data;
       if (!data || typeof data !== "object" || data.type !== "studio:preview") return;
       setSpec((prev) => ({
@@ -356,7 +399,7 @@ function PreviewApp() {
       }));
     };
     window.addEventListener("message", onMsg);
-    window.parent.postMessage({ type: "studio:ready" }, "*");
+    postToParent({ type: "studio:ready" });
     return () => window.removeEventListener("message", onMsg);
   }, []);
 
@@ -364,12 +407,16 @@ function PreviewApp() {
     if (!spec.file || !spec.name) return;
     let cancelled = false;
     const key = spec.file + "#" + spec.name;
+    if (!isSafeComponentPath(spec.file)) {
+      setLoaded({ key, Comp: null, metaArgs: {}, error: "Refused unsafe component path: " + spec.file });
+      return;
+    }
     const clean = spec.file.replace(/^\\/+/, "");
     Promise.all([
       import(/* @vite-ignore */ "/" + clean),
       fetch("/@studio-preview/meta?file=" + encodeURIComponent(clean))
         .then((r) => (r.ok ? r.json() : { metaFile: null }))
-        .then((info) => (info && info.metaFile ? import(/* @vite-ignore */ "/" + info.metaFile).catch(() => null) : null))
+        .then((info) => (info && typeof info.metaFile === "string" && isSafeComponentPath(info.metaFile) ? import(/* @vite-ignore */ "/" + info.metaFile).catch(() => null) : null))
         .catch(() => null),
     ]).then(([mod, metaMod]) => {
       if (cancelled) return;
@@ -399,7 +446,7 @@ function PreviewApp() {
       const hit = fiberComponentName(ev.target, known);
       ev.preventDefault();
       ev.stopPropagation();
-      if (hit) window.parent.postMessage({ type: "studio:select", componentName: hit.name }, "*");
+      if (hit) postToParent({ type: "studio:select", componentName: hit.name });
     };
     window.addEventListener("pointermove", onMove, true);
     window.addEventListener("click", onClick, true);
@@ -444,6 +491,31 @@ function previewPlugin(root: string, dirs: string[], useTailwind: boolean): Prev
     enforce: "pre",
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
+        const header = (name: string) => {
+          const v = req.headers?.[name];
+          return Array.isArray(v) ? v[0] : v;
+        };
+        const host = header("host");
+        if (host && !LOOPBACK_HOST.test(host)) {
+          res.statusCode = 403;
+          res.setHeader("content-type", "text/plain; charset=utf-8");
+          res.end("Forbidden");
+          return;
+        }
+        const origin = header("origin");
+        if (origin && !LOOPBACK_ORIGIN.test(origin)) {
+          res.statusCode = 403;
+          res.setHeader("content-type", "text/plain; charset=utf-8");
+          res.end("Forbidden");
+          return;
+        }
+        if (header("sec-fetch-site") === "cross-site") {
+          res.statusCode = 403;
+          res.setHeader("content-type", "text/plain; charset=utf-8");
+          res.end("Forbidden");
+          return;
+        }
+        res.setHeader("x-content-type-options", "nosniff");
         const pathname = (req.url ?? "/").split("?")[0];
         if (pathname === "/@studio-preview/meta") {
           const file = new URL(req.url ?? "/", "http://127.0.0.1").searchParams.get("file") ?? "";
@@ -456,6 +528,7 @@ function previewPlugin(root: string, dirs: string[], useTailwind: boolean): Prev
           void server.transformIndexHtml(req.url ?? "/", previewHtml(root, req.url ?? "/")).then((html) => {
             res.statusCode = 200;
             res.setHeader("content-type", "text/html; charset=utf-8");
+            res.setHeader("content-security-policy", "frame-ancestors 'self' http://localhost:* http://127.0.0.1:*; base-uri 'none'; object-src 'none'");
             res.end(html);
           }, next);
           return;
@@ -522,7 +595,13 @@ async function startEmbeddedPreview(root: string, entry: PreviewEntry): Promise<
   if (tailwindPlugin) plugins.push(tailwindPlugin());
 
   const alias = reactAliases(root, dirs);
-  const allow = [...new Set(dirs.filter((dir) => fs.existsSync(dir)))];
+  const repoRoot = path.resolve(studioRoot, "..", "..");
+  const allow = [...new Set([
+    root,
+    ...dirs.filter((dir) => dir !== studioRoot && dir !== repoRoot),
+    path.join(studioRoot, "node_modules"),
+    path.join(repoRoot, "node_modules"),
+  ].filter((dir) => fs.existsSync(dir)))];
   try {
     const server = await createViteServer({
       root,

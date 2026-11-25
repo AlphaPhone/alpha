@@ -1,6 +1,19 @@
 {
   "fileExtensions": ["ts", "tsx"],
-  "tsConfig": { "compilerOptions": { "module": "nodenext", "allowImportingTsExtensions": true, "jsx": "react-jsx", "paths": { "@repo/ui": ["./packages/ui/src/index.ts"] } } },
-  "excludeRegExp": ["(^|/)(node_modules|dist|storybook-static|\\.vibe|\\.cache)/", "^(vibestack/)?(examples|fixtures)/", "/test/fixtures?/"],
+  "tsConfig": {
+    "compilerOptions": {
+      "module": "nodenext",
+      "allowImportingTsExtensions": true,
+      "jsx": "react-jsx",
+      "paths": {
+        "@repo/ui": ["./packages/ui/src/index.ts"],
+        "@repo/design-system/*": ["./packages/design-system/*"],
+        "@repo/eliza-harness": ["./packages/eliza-harness/src/index.ts"],
+        "@repo/deployment": ["./packages/deployment/src/deployment.vibe"],
+        "@repo/cloud": ["./apps/cloud/src/index.vibe"]
+      }
+    }
+  },
+  "excludeRegExp": ["(^|/)(node_modules|dist|storybook-static|\\.vibe|\\.cache|\\.eliza)/", "^(vibestack/)?(examples|fixtures)/", "/test/fixtures?/"],
   "detectiveOptions": { "ts": { "skipTypeImports": true }, "tsx": { "skipTypeImports": true } }
 }

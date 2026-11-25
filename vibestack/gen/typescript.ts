@@ -7,7 +7,7 @@ import type { Json, Types } from "./types.ts";
 /** The names a module defines beside the spec's, and the locals of what it defines (TAKEN in gen.ts). */
 export const EMITTED = ["Event", "opaque", "inv", "enabled", "step", "parseEvent", "parseState", "parseSender", "initialHolds", "current", "event", "raw"];
 /** Prefixes reserved for the helpers a module may carry for itself, each named `<helper>_<module>`, and for local bindings. */
-export const HELPERS = ["quotient", "remainder", "exact", "equal", "nth", "get", "lookup\\d+", "typed\\d+", "snapshot", "local"];
+export const HELPERS = ["quotient", "remainder", "exact", "equal", "nth", "get", "set", "lookup\\d+", "typed\\d+", "snapshot", "local"];
 
 export interface Source {
   /** The line that opens the file, and one import line per spec this one imports. */
@@ -208,7 +208,7 @@ export function typescript({ header, typedefs, vals, funs, sig, typeOf, doc, loc
     `/** An integer result, which must be exact: past 2^53 a number is rounded, where Quint's and the proof's integers are not. */`,
     `export function ${helper("exact")}(n: number): number {`,
     `  if (!Number.isSafeInteger(n)) throw new RangeError(\`an integer result is \${n}, beyond 2^53, where TypeScript cannot hold it exactly\`);`,
-    `  return n;`,
+    `  return n + 0;`,
     `}`,
   );
   if (print.helpers.has("equal")) out.push(
@@ -235,6 +235,14 @@ export function typescript({ header, typedefs, vals, funs, sig, typeOf, doc, loc
     `export function ${helper("get")}<K extends string | number, T>(m: Record<K, T>, key: K): T {`,
     `  if (!(key in m)) throw new RangeError(\`a map holds nothing for \${key}\`);`,
     `  return m[key];`,
+    `}`,
+  );
+  if (print.helpers.has("set")) out.push(
+    ``,
+    `/** Replace what a map already holds for a key, which it must hold. */`,
+    `export function ${helper("set")}<K extends string | number, T>(m: Record<K, T>, key: K, value: T): Record<K, T> {`,
+    `  if (!(key in m)) throw new RangeError(\`a map holds nothing for \${key}\`);`,
+    `  return { ...m, [key]: value } as Record<K, T>;`,
     `}`,
   );
   if (print.helpers.has("quotient")) out.push(

@@ -430,6 +430,17 @@ export function LivePreviewStage({
     theme,
   });
 
+  const onSelectRef = useRef(onSelectComponent);
+  const onActionRef = useRef(onAction);
+  useEffect(() => {
+    onSelectRef.current = onSelectComponent;
+    onActionRef.current = onAction;
+  }, [onSelectComponent, onAction]);
+  const previewOrigin = (() => {
+    if (!preview.url) return null;
+    try { return new URL(preview.url).origin; } catch { return null; }
+  })();
+
   useEffect(() => {
     payloadRef.current = {
       file: target.source.file,
@@ -440,24 +451,25 @@ export function LivePreviewStage({
       inspect,
       theme,
     };
-    if (readyRef.current) {
-      iframeRef.current?.contentWindow?.postMessage({ type: "studio:preview", ...payloadRef.current }, "*");
+    if (readyRef.current && previewOrigin) {
+      iframeRef.current?.contentWindow?.postMessage({ type: "studio:preview", ...payloadRef.current }, previewOrigin);
     }
-  }, [target.source.file, target.name, args, propNames, allChildren, inspect, theme]);
+  }, [target.source.file, target.name, args, propNames, allChildren, inspect, theme, previewOrigin]);
 
   useEffect(() => {
-    if (preview.mode !== "embedded" || !preview.url) return;
+    if (preview.mode !== "embedded" || !preview.url || !previewOrigin) return;
     const onMsg = (ev: MessageEvent) => {
-      if (iframeRef.current?.contentWindow && ev.source !== iframeRef.current.contentWindow) return;
+      const win = iframeRef.current?.contentWindow;
+      if (!win || ev.source !== win || ev.origin !== previewOrigin) return;
       const data = ev.data as { type?: string; componentName?: string; prop?: string; args?: unknown[] } | null;
       if (!data || typeof data !== "object") return;
       if (data.type === "studio:ready") {
         readyRef.current = true;
-        iframeRef.current?.contentWindow?.postMessage({ type: "studio:preview", ...payloadRef.current }, "*");
+        win.postMessage({ type: "studio:preview", ...payloadRef.current }, previewOrigin);
       } else if (data.type === "studio:select" && typeof data.componentName === "string") {
-        onSelectComponent?.(data.componentName);
+        onSelectRef.current?.(data.componentName);
       } else if (data.type === "studio:action" && typeof data.prop === "string") {
-        onAction?.(data.prop, Array.isArray(data.args) ? data.args : []);
+        onActionRef.current?.(data.prop, Array.isArray(data.args) ? data.args : []);
       }
     };
     window.addEventListener("message", onMsg);
@@ -465,7 +477,7 @@ export function LivePreviewStage({
       readyRef.current = false;
       window.removeEventListener("message", onMsg);
     };
-  }, [preview.mode, preview.url, onSelectComponent, onAction]);
+  }, [preview.mode, preview.url, previewOrigin]);
 
   const frameClass = cn(
     "w-full rounded-lg border border-border bg-card transition-all duration-fast",

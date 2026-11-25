@@ -303,10 +303,38 @@ export const SIMULATIONS = "gen/traces";
 
 /** A token of a script, and how many brackets it sits in. */
 interface Token { text: string; pos: number; start: number; depth: number; fresh: boolean }
-/** A script's tokens, or nothing if its brackets do not balance; TypeScript's scanner reads VibeLang's too. */
-export function tokenize(text: string): Token[] | undefined {
-  const K = tsApi().SyntaxKind;
-  const scanner = tsApi().createScanner(tsApi().ScriptTarget.Latest, true, tsApi().LanguageVariant.Standard, text);
+/** A script's tokens, or nothing if its brackets do not balance; TypeScript's scanner reads VibeLang's too, and TSX/JSX uses TypeScript's parser so JSX tags and text never confuse bracket balance. */
+export function tokenize(text: string, jsx = false): Token[] | undefined {
+  const ts = tsApi();
+  const K = ts.SyntaxKind;
+  if (jsx) {
+    const sf = ts.createSourceFile("file.tsx", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const out: Token[] = [];
+    const open: boolean[] = [];
+    let unbalanced = false;
+    const visit = (node: TS.Node) => {
+      if (unbalanced || node.kind === K.EndOfFileToken) return;
+      if (node.getChildCount(sf) === 0) {
+        const kind = node.kind;
+        if (kind === K.CloseParenToken || kind === K.CloseBracketToken || kind === K.CloseBraceToken || kind === K.TemplateTail) {
+          if (!open.length) { unbalanced = true; return; }
+          open.pop();
+        }
+        const pos = node.getFullStart();
+        const start = node.getStart(sf);
+        const tokenText = node.getText(sf);
+        if (tokenText.length) {
+          out.push({ text: tokenText, pos, start, depth: open.length, fresh: text.slice(pos, start).includes("\n") });
+        }
+        if (kind === K.OpenParenToken || kind === K.OpenBracketToken || kind === K.OpenBraceToken || kind === K.TemplateHead) open.push(kind === K.TemplateHead);
+        return;
+      }
+      for (const child of node.getChildren(sf)) visit(child);
+    };
+    visit(sf);
+    return unbalanced || open.length ? undefined : out;
+  }
+  const scanner = ts.createScanner(ts.ScriptTarget.Latest, true, ts.LanguageVariant.Standard, text);
   const out: Token[] = [];
   const open: boolean[] = []; // each bracket that is open: true for a template's `${`
   for (let kind = scanner.scan(); kind !== K.EndOfFileToken; kind = scanner.scan()) {
