@@ -59,7 +59,7 @@ type Effect =
   | Restore({ ticket: int, entries: List[Entry] })
   | Erase({ ticket: int, entries: List[Entry] })
   | Binned({ items: List[int] })
-  | Receipt({ ticket: int, ran: bool, outcome: A::Outcome })
+  | Receipt({ ticket: int, ran: bool, outcome: A::Outcome, done: int })
 type Moved = { state: Trash, out: List[Effect] }
 
 pure def busy(s: Trash): bool = s.attempt.outcome == A::Sent
@@ -111,7 +111,7 @@ pure def canMoveToTrash(s: Trash, items: List[int], approval: int, by: Actor): b
 
 pure def moveToTrash(s: Trash, items: List[int], approval: int, by: Actor): Moved =
   if (not(busy(s))) take({ kind: Binning, items: items, entries: List(), approval: approval }, s)
-  else if (approval != 0) { state: s, out: List(Receipt({ ticket: approval, ran: false, outcome: A::Refused })) }
+  else if (approval != 0) { state: s, out: List(Receipt({ ticket: approval, ran: false, outcome: A::Refused, done: 0 })) }
   else { state: { ...s, waiting: s.waiting.concat(items.select(i => not(s.waiting.includes(i)))) }, out: List() }
 ```
 
@@ -149,7 +149,7 @@ pure def finished(s: Trash, number: int, results: List[Entry], known: bool, now:
   val concluding = concluded(results, known, now, window, s)
   val ended = if (seen(s)) concluding else { ...concluding, entries: concluding.binned }
   val told = (if (s.job.kind == Binning and ended.done.length() > 0) List(Binned({ items: ended.done.listMap(e => e.item) })) else List())
-    .concat(if (s.job.approval != 0) List(Receipt({ ticket: s.job.approval, ran: true, outcome: ended.attempt.outcome })) else List())
+    .concat(if (s.job.approval != 0) List(Receipt({ ticket: s.job.approval, ran: true, outcome: ended.attempt.outcome, done: ended.done.length() })) else List())
   val listing = R::ask(s.listing)
   val following = take({ kind: Binning, items: s.waiting, entries: List(), approval: 0 }, ended)
   if (s.waiting.length() > 0) { state: following.state, out: told.concat(following.out) }

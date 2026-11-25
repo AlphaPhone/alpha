@@ -1,7 +1,7 @@
 // spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/index.md, "Story: Select photos"; spec/app/photos/index.md, "Story: Change albums from what I am looking at"
 import { Effect } from "effect";
-import { Album, ChevronLeft, ChevronRight, Ellipsis, Heart, Image, Images, ListChecks, Plus, Search, Share2, Trash2, Undo2, X } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { Album, ChevronLeft, ChevronRight, Ellipsis, Heart, Image, Images, ListChecks, Plus, ScanText, Search, Share2, Trash2, Undo2, X } from "lucide-react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { Alert, AppHeader, Button, Chip, ConfirmDialog, EmptyState, Input, ListRow, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, Spinner, cn } from "@repo/ui";
 import { useMachine as useLibrary } from "../../gen/app__photos.react.ts";
 import { useMachine as useTrash } from "../../gen/app__photos__trash.react.ts";
@@ -15,12 +15,15 @@ import { Catalog } from "./catalog.vibe";
 import { MediaGrid } from "./Grid.tsx";
 import { MediaViewer } from "./Viewer.tsx";
 import type { agentPhotos } from "./agent.vibe";
-import type { library } from "./photos.vibe";
+import { PhotoChooser, type library } from "./photos.vibe";
 import type { trash } from "./trash.vibe";
 import type { viewer } from "./viewer.vibe";
 import type { Layer } from "effect";
+import { Scan } from "../files/Scan.tsx";
+import { scanSelectedImage, type imageScan } from "../files/scan.vibe";
+import { useMachine as useScan } from "../../gen/app__files__scan.react.ts";
 
-type PhotosRuntime = Layer.Success<typeof agentPhotos> | Layer.Success<typeof library> | Layer.Success<typeof viewer> | Layer.Success<typeof trash> | Resident;
+type PhotosRuntime = Layer.Success<typeof agentPhotos> | Layer.Success<typeof library> | Layer.Success<typeof viewer> | Layer.Success<typeof trash> | Layer.Success<typeof imageScan> | Resident;
 
 interface Tool {
   readonly icon: ReactNode;
@@ -44,6 +47,15 @@ export function Photos({ runtime, alpha }: PhotosProps) {
   const trash = useTrash(runtime);
   const viewer = useViewer(runtime);
   const agent = useAgent(runtime);
+  const scan = useScan(runtime);
+  const scanInput = useRef<HTMLInputElement>(null);
+  const scanPicker = useCallback((node: HTMLInputElement | null) => {
+    scanInput.current = node;
+    if (!node) return;
+    const cancel = () => { runtime.runSync(Effect.flatMap(PhotoChooser, (picker) => picker.finish())); };
+    node.addEventListener("cancel", cancel);
+    return () => node.removeEventListener("cancel", cancel);
+  }, [runtime]);
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
   const [name, setName] = useState("");
@@ -68,7 +80,7 @@ export function Photos({ runtime, alpha }: PhotosProps) {
   const index = ids.indexOf(opened);
   const starred = new Set(state.starred);
   const favourites = selected.length > 0 && selected.every((number) => starred.has(number));
-  const title = selection ? `${selected.length} selected` : inTrash ? "Recently deleted" : album?.title ?? "Photos";
+  const title = selection ? `${selected.length} selected` : inTrash ? "Recently deleted" : album?.title ?? (albumList ? "Albums" : "Photos");
   const owner = (event: Event) => library.can(event, "Owner");
   const binOwner = (event: TrashEvent) => trash.can(event, "Owner");
   const talk = (event: Event) => { if (owner(event)) void library.send(event, "Owner"); };
@@ -128,6 +140,11 @@ export function Photos({ runtime, alpha }: PhotosProps) {
     if (album?.owned && owner({ type: "renameAlbum" })) menu.push({ label: "Rename album", icon: <Album />, run: () => { setName(album.title); talk({ type: "renameAlbum" }); } });
     if (album?.owned) add("Delete album", { type: "deleteAlbum" }, <Trash2 />, menu);
   }
+  if (!selection && !inTrash && opened === 0 && state.visible && !secure && scan.state && scan.can({ type: "startImage", frame: scan.state.images + 1 }, "Phone")) {
+    menu.push({ label: "Scan image text", icon: <ScanText />, run: () => {
+      if (scanInput.current && runtime.runSync(Effect.flatMap(PhotoChooser, (picker) => picker.begin()))) scanInput.current.click();
+    } });
+  }
   const status = inTrash ? bin.read.status : state.library.status;
   const dialog = state.shelf.dialog;
   const request = agent.state?.stage === "Shown" ? agent.state.request : undefined;
@@ -149,16 +166,23 @@ export function Photos({ runtime, alpha }: PhotosProps) {
   </AppHeader>;
   return (
     <section aria-label="Photos" className="relative flex min-h-0 flex-1 flex-col bg-background">
+      <input ref={scanPicker} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={(event) => {
+        const source = event.currentTarget.files?.[0];
+        event.currentTarget.value = "";
+        if (source) void runtime.runPromiseExit(scanSelectedImage(source));
+        else runtime.runSync(Effect.flatMap(PhotoChooser, (picker) => picker.finish()));
+      }} />
+      <Scan runtime={runtime} alpha={alpha} />
       <div inert={opened !== 0} aria-hidden={opened !== 0 || undefined} className="flex min-h-0 flex-1 flex-col" data-alpha-subview="photos-list">
         {header}
         {!selection && !inTrash && !album && (owner({ type: "showTab", tab: "Library" }) || owner({ type: "showTab", tab: "Albums" })) &&
-          <div role="group" aria-label="Photos sections" className="mx-4 mb-2 grid shrink-0 grid-cols-2 gap-1 rounded-full bg-secondary p-1">
+          <div role="group" aria-label="Photos sections" className="mx-4 mb-3 grid shrink-0 grid-cols-2 gap-1 rounded-xl bg-secondary p-1">
             {([{ tab: "Library", icon: <Images /> }, { tab: "Albums", icon: <Album /> }] as const).map(({ tab, icon }) => <Button key={tab}
-              variant="ghost" className={cn("rounded-full", state.tab === tab && "bg-background")} aria-pressed={state.tab === tab}
+              variant="ghost" className={cn("h-11 rounded-lg", state.tab === tab && "bg-foreground text-background hover:bg-foreground/90")} aria-pressed={state.tab === tab}
               onClick={() => { setSearching(false); talk({ type: "showTab", tab }); }}>{icon}{tab}</Button>)}
           </div>}
-        {!inTrash && !selection && !album && state.tab === "Library" && allow && <Button variant="secondary" className="mx-4 mb-2 justify-start rounded-xl" onClick={() => talk(allow.event)}>
-          <Image />{allow.label}<ChevronRight className="ml-auto" />
+        {!inTrash && !selection && !album && state.tab === "Library" && allow && <Button variant="secondary" aria-label={allow.label} className="mx-4 mb-2 justify-start rounded-xl px-4" onClick={() => talk(allow.event)}>
+          <Image className="text-alpha" />{allow.event.type === "openSettings" ? allow.label : "Allow all"}<ChevronRight className="ml-auto size-4.5 text-muted-foreground" />
         </Button>}
         {!inTrash && state.tab === "Library" && searching && <form className="mx-4 mb-2 flex shrink-0 gap-2" onSubmit={(event) => { event.preventDefault(); talk(narrow(query.trim() ? "Matching" : "Everything", query.trim())); setSearching(false); }}>
           <Input type="search" aria-label="Search photos" value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
@@ -166,21 +190,26 @@ export function Photos({ runtime, alpha }: PhotosProps) {
         </form>}
         {!inTrash && state.filter !== "Everything" && owner(narrow("Everything")) &&
           <div className="mx-4 mb-2 self-start"><Chip clearLabel="Clear filter" onClear={() => { setQuery(""); talk(narrow("Everything")); }}>{state.query || state.filter}</Chip></div>}
-        {albumList && <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto px-3 pb-28" data-alpha-app-scroll="photos">
-          <div className="grid grid-cols-2 gap-3">
+        {albumList && <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto px-4 pb-28" data-alpha-app-scroll="photos">
+          <div className="grid grid-cols-2 gap-3 pt-2">
             {state.albums.map((number) => {
               const card = content.albums.get(number);
               const event = { type: "openAlbum", album: number } satisfies Event;
               if (!card || !owner(event)) return null;
-              return <Button key={number} variant="secondary" className="aspect-[1.5] h-auto flex-col items-start justify-end rounded-xl p-4 text-left" onClick={() => talk(event)}>
-                <Images className="mb-auto size-7" /><span className="font-display text-2xl">{card.title}</span>{card.owned && <span className="text-xs text-muted-foreground">{card.owned.count}</span>}
+              const Symbol = card.target === "favorites" ? Heart : card.target === "videos" ? Images : card.target === "camera" ? Image : Album;
+              return <Button key={number} variant="ghost" aria-label={card.title} className="h-auto min-w-0 flex-col items-stretch gap-1 rounded-xl p-0 text-left hover:bg-transparent" onClick={() => talk(event)}>
+                <span className="relative grid aspect-square w-full place-items-center overflow-hidden rounded-xl bg-secondary">
+                  {card.cover ? <img src={card.cover} alt="" loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover" /> : <Symbol className="size-7 text-muted-foreground" />}
+                </span>
+                <span className="mt-1.5 flex min-w-0 items-center gap-1 text-base font-semibold"><Symbol className="size-4" /><span className="truncate">{card.title}</span></span>
+                <span className="text-caption font-normal text-muted-foreground">{card.count}</span>
               </Button>;
             })}
           </div>
-          {binOwner(openBin) && <ListRow title="Recently deleted" leading={<Trash2 />} trailing={<ChevronRight />} className="mt-5" onClick={() => binTalk(openBin)} />}
+          {binOwner(openBin) && <ListRow title="Recently deleted" leading={<Trash2 />} trailing={<span className="flex items-center gap-3 text-sm text-muted-foreground">{content.trashCount}<ChevronRight /></span>} className="mt-5" onClick={() => binTalk(openBin)} />}
         </div>}
         {!albumList && (rows.length > 0 || canMore) &&
-          <MediaGrid rows={rows} selection={selection ? new Set(selected) : undefined} grouped={!album && !inTrash} now={runtime.runSync(Time.use((time) => time.latest()))} open={open} start={!selection && canStart ? (number) => { void select(number); } : undefined}
+          <MediaGrid rows={rows} runtime={runtime} revision={inTrash ? bin.revision : state.revision} trash={inTrash} density={state.density} resize={(density) => { void library.send({ type: "setDensity", density }, "Owner"); }} selection={selection ? new Set(selected) : undefined} grouped={!album && !inTrash} now={runtime.runSync(Time.use((time) => time.latest()))} open={open} start={!selection && canStart ? (number) => { void select(number); } : undefined}
             more={canMore ? () => inTrash ? binTalk({ type: "loadMore" }) : talk({ type: "loadMore" }) : undefined} />}
         {status === "Loading" && <div role="status" aria-label="Loading photos" className="grid place-items-center p-5"><Spinner /></div>}
         {status === "Loaded" && !albumList && rows.length === 0 && <EmptyState className="m-4" icon={<Images />} title={inTrash ? "Recently deleted is empty" : state.filter !== "Everything" ? "No matches" : "No photos"} />}

@@ -1,6 +1,14 @@
 // spec/app/files/scan.md, "Story: Arrange the pages"; spec/app/files/scan.md, "Story: Keep the scan as I work"; spec/app/files/scan.md, "Story: Make the PDF, and keep the photo"; spec/app/files/scan.md, "Story: Leave the scan and come back"
-import { correctScanPage, detectScanEdges, fullPageCorners, scanCornersAdmitted, type ScanCorners, blobOf, recognizeLocalText, reviewScanAllDayEvent, reviewScanEvent, suggestScanEventDetails, type ScanEventProposal, scannedLinks, createScanPdf, admittedTextLayer, type ScanTextLine } from "@elizaos/plugin-files-client"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { correctScanPage, detectScanEdges, fullPageCorners, scanCornersAdmitted, type ScanCorners } from "@elizaos/plugin-files-client"
+import { blobOf } from "@elizaos/plugin-files-client"
+import { recognizeLocalText } from "@elizaos/plugin-files-client"
+import { reviewScanAllDayEvent, reviewScanEvent, suggestScanEventDetails, type ScanEventProposal } from "@elizaos/plugin-files-client"
+import { scannedLinks } from "@elizaos/plugin-files-client"
+import { createScanPdf } from "@elizaos/plugin-files-client"
+import { admittedTextLayer, type ScanTextLine } from "@elizaos/plugin-files-client"
 import type { SelectionId } from "@elizaos/os-bridges"
+import * as PhotoLibrary from "../../gen/app__photos.effect.vibe"
 import * as Recent from "../../gen/app__files__recent.effect.vibe"
 import * as Correction from "../../gen/app__files__correction.effect.vibe"
 import * as Scan from "../../gen/app__files__scan.effect.vibe"
@@ -10,13 +18,14 @@ import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { Documents } from "../platform/documents.vibe"
-import { native } from "../platform/device.vibe"
+import { Device, native } from "../platform/device.vibe"
 import { PhotosPort, saveBrowserCapture } from "../platform/photos.vibe"
+import { PhotoChooser } from "../photos/photos.vibe"
 import { say } from "../notices/toasts.vibe"
 import { answer, applying, contained, reacting, run, started, together, type Job } from "../runtime/reactor.vibe"
 import { Opened } from "./preview.vibe"
 import { Time } from "../runtime/time.vibe"
-import { ScanEntry, type ScannedEvent } from "./scanEntry.vibe"
+import { ScanEntry, ScanExports, type ScannedEvent } from "./scanEntry.vibe"
 import { changeDraft, copyText, drawPdf, readDraft, openLink, photoData, release, rotateImage, scanImage, source, writePdf, type ScanImage, type ScanWords, type StoredPage } from "./scanStore.vibe"
 
 export interface ScanOutline {
@@ -149,6 +158,33 @@ export effect function addScanImage(blob: Blob, replacing: number, camera: boole
   })
 }
 
+// spec/app/photos/index.md, "Story: Scan text from a selected image"
+export effect function scanSelectedImage(blob: Blob) {
+  const shell = try Shell
+  const photos = try PhotoLibrary.Machine
+  const device = try Device
+  const origin = try photos.get()
+  if (!(try (try PhotoChooser).finish()) || !origin.visible || origin.secure || !showing(try shell.get(), "Photos")) return
+  const accepted = tryPromise(() => scanImage(blob)) catch () => undefined
+  if (accepted === undefined) {
+    try say("Choose a JPEG, PNG or WebP image under 16 MB.", true)
+    return
+  }
+  const held = try ScanAssets
+  const model = try Scan.Machine
+  try Semaphore.withPermit(held.turn, effect {
+    const current = try photos.get()
+    const state = try model.get()
+    const frame = state.images + 1
+    if (!current.visible || current.secure || current.library.ticket !== origin.library.ticket
+      || !showing(try shell.get(), "Photos") || !(try device.showing()) || !Scan.canStartImage(state, frame, "Phone")) return
+    try held.hold(frame, accepted)
+    if (!(try contained(model.send({ type: "startImage", frame }, "Phone"), "opening selected image text"))) {
+      try held.keep(new Set(state.pages.map((page) => page.image)))
+    }
+  })
+}
+
 function failedLoad(ticket: number): Scan.Event {
   return { type: "loaded", ticket, ok: false, readable: true, base: 0, pages: [] }
 }
@@ -229,7 +265,7 @@ effect function write(ticket: number): Scan.Event!!ScanAssets {
   return { ...refused, confirmed: wrote.confirmed, known: wrote.known }
 }
 
-effect function keep(ticket: number, image: number): Scan.Event!!(ScanAssets | PhotosPort) {
+effect function keep(ticket: number, image: number): Scan.Event!!(ScanAssets | PhotosPort | Attempts) {
   const selected = try (try ScanAssets).read(image)
   const refused = { type: "kept", ticket, confirmed: false, known: true } as const
   if (selected === undefined) return refused
@@ -243,7 +279,7 @@ effect function keep(ticket: number, image: number): Scan.Event!!(ScanAssets | P
   const data = tryPromise(() => photoData(selected.blob)) catch () => undefined
   if (data === undefined) return refused
   const phone = photos.phone.value
-  const operationId = `scan-${ticket}-${image}`
+  const operationId = try (try Attempts).key(ticket)
   const result = tryPromise(() => phone.keepCapture({ operationId, dataBase64: data })) catch () => undefined
   return { ...refused, confirmed: result?.status === "saved", known: result !== undefined }
 }
@@ -389,26 +425,28 @@ effect function noted(ticket: number, pages: ReadonlyArray<Page>): Scan.Event!!(
   return { ...refused, confirmed: true }
 }
 
-type Needs = ScanAssets | Scan.Machine | PhotosPort | Recent.Machine | Documents | Opened | Time | Agent | Effect.Services<ReturnType<typeof say>>
+type Needs = ScanAssets | Scan.Machine | PhotosPort | ScanExports | Time | Agent | Effect.Services<ReturnType<typeof say>>
+
+/** Take a confirmed Android selection into Files Recent. */
+export effect function retainScanExport(id: SelectionId) {
+  const documents = (try Documents).client
+  if (Option.isNone(documents)) return
+  const client = documents.value
+  const description = tryPromise(() => client.describe(id)) catch () => undefined
+  if (description?.status === "selected" && description.name) {
+    const recent = try Recent.Machine
+    const key = (try recent.get()).issued + 1
+    const opened = try Opened
+    try opened.give(key, { selection: id, key, name: description.name, mimeType: "application/pdf", revision: Math.max(0, Math.trunc(description.modified ?? 0)) })
+    if (try contained(recent.send({ type: "exported", key }, "Phone"), "listing the exported file")) return
+    try opened.take(key)
+  }
+  try ignore(tryPromise(() => client.forget(id)))
+}
 
 effect function recordExport(ticket: number) {
   const selection = try (try ScanAssets).receipt(ticket)
-  const documents = (try Documents).client
-  if (selection !== undefined && Option.isSome(documents)) {
-    const client = documents.value
-    const id = selection as SelectionId
-    const description = tryPromise(() => client.describe(id)) catch () => undefined
-    if (description?.status === "selected" && description.name) {
-      const recent = try Recent.Machine
-      const key = (try recent.get()).issued + 1
-      const opened = try Opened
-      try opened.give(key, { selection: id, key, name: description.name, mimeType: "application/pdf", revision: Math.max(0, Math.trunc(description.modified ?? 0)) })
-      if (!(try contained(recent.send({ type: "exported", key }, "Phone"), "listing the exported file"))) {
-        try opened.take(key)
-        try ignore(tryPromise(() => client.forget(id)))
-      }
-    } else try ignore(tryPromise(() => client.forget(id)))
-  }
+  if (selection !== undefined) try (try ScanExports).record(selection as SelectionId)
   try say("PDF saved.")
 }
 
@@ -455,7 +493,9 @@ export const scanBack = effect {
   const editing = try Correction.Machine
   if (Correction.canCancel(try editing.get(), "Owner")) return try contained(editing.send({ type: "cancel" }, "Owner"), "closing the correction")
   const model = try Scan.Machine
-  if (!Scan.canClose(try model.get(), "Owner")) return false
+  const state = try model.get()
+  if (Scan.canCloseLinks(state, "Owner")) return try contained(model.send({ type: "closeLinks" }, "Owner"), "closing scanned links")
+  if (!Scan.canClose(state, "Owner")) return false
   return try contained(model.send({ type: "close" }, "Owner"), "closing the scan")
 }
 
@@ -532,4 +572,46 @@ const leavingCorrection = applying(Scan.Machine, (state) => state.open, effect (
   if (Correction.canCancel(try editing.get(), "Phone")) try contained(editing.send({ type: "cancel" }, "Phone"), "closing the page correction")
 })
 
-export const scan = together(reacting(Scan, { carry, keep: 1, open: [{ type: "restart" }, "Phone"] }), reacting(Correction, { carry: carryCorrection }), assets, visible, edits, leavingCorrection)
+const common = together(reacting(Correction, { carry: carryCorrection }), assets, edits, leavingCorrection)
+
+const photosVisible = started(effect {
+  const shell = try Shell
+  const photos = try PhotoLibrary.Machine
+  const model = try Scan.Machine
+  try Stream.runForEach(Stream.zipLatest(shell.changes, photos.changes), effect ([front, library]) => {
+    const state = try model.get()
+    if ((!showing(front, "Photos") || library.secure) && Scan.canHidden(state, false, "Phone")) {
+      try contained(model.send({ type: "hidden", picking: false }, "Phone"), "leaving selected image text")
+    }
+  })
+}, "Photos scan foreground")
+
+export const imageScan = together(reacting(Scan, { carry }), Layer.fresh(common), photosVisible)
+module compatible {
+  /** Add the default origin to an earlier kept Files scan. @throws {never} */
+  export function priorScan(raw: string): unknown {
+    try {
+      const state: unknown = JSON.parse(raw)
+      if (typeof state === "object" && state !== null && !("origin" in state)) return { ...state, origin: "Document" }
+      return undefined
+    } catch {
+      return undefined
+    }
+  }
+}
+import { priorScan } from compatible
+
+function stored(key: string, start?: Scan.Scan) {
+  return Layer.unwrap(effect {
+    const store = try KeyValueStore.KeyValueStore
+    const raw = store.get(key) catch () => undefined
+    const earlier = raw === undefined ? undefined : priorScan(raw)
+    if (earlier !== undefined) {
+      const decoded = Scan.decodeState(earlier) catch () => undefined
+      if (decoded !== undefined) try ignore(store.set(key, JSON.stringify(decoded)))
+    }
+    return Scan.stored(key, start)
+  })
+}
+
+export const scan = together(reacting({ ...Scan, stored }, { carry, keep: 1, open: [{ type: "restart" }, "Phone"] }), common, visible)

@@ -77,7 +77,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
   const header = searching ? (
     <form role="search" aria-label="Search contacts" data-host-chrome="" className="flex min-h-14 items-center px-2" onSubmit={(event) => event.preventDefault()}>
       {can({ type: "endSearch" }) && <Button variant="ghost" size="icon" aria-label="Back to contacts" onClick={() => void send({ type: "endSearch" })}><ArrowLeft className="size-5" /></Button>}
-      <SearchField autoFocus className="mr-2 flex-1" aria-label="Search contacts" clearLabel="Clear search" placeholder="Search contacts" value={query} onValueChange={search} />
+      <SearchField autoFocus className="mr-2 flex-1" aria-label="Search contacts" clearLabel="Clear search" placeholder="Search contacts" value={query} onValueChange={search} maxLength={128} />
     </form>
   ) : phoneTabs ? (
     <PhoneTabs title="Contacts" contacts voicemail={phone.voicemail} unheard={(voicemail?.unheard ?? 0) > 0} onBack={back}>{actions}</PhoneTabs>
@@ -128,7 +128,13 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
           {can({ type: "loadMore" }) && <Button variant="secondary" size="icon" aria-label="More contacts" className="self-center" onClick={() => void send({ type: "loadMore" })}><ChevronDown /></Button>}
         </>
       )}
-      <div className="px-4"><CommsBar runtime={runtime} /></div>
+      <CommsBar runtime={runtime}
+        person={state.opened && held.card !== undefined ? { label: held.card.displayName, initials: callerInitials(held.card.displayName) } : undefined}
+        closed={!state.opened && !searching && can({ type: "search", typed: true }) ? (ask) => (
+          <form className="min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); ask(query.trim()); }}>
+            <SearchField data-alpha-composer aria-label="Search or ask" placeholder="Search or ask" value={query} onValueChange={search} maxLength={128} />
+          </form>
+        ) : undefined} />
     </section>
   );
   if (!phoneTabs) return content;

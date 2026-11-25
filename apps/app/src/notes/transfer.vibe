@@ -64,10 +64,11 @@ effect function written(fx: Extract<Transfer.Effect, { readonly tag: "Imports" |
     const text = held.choice.text
     if (text === undefined) return failed
     const store = try NoteStore
-    const result = store.create({ content: text, format: { kind: "text", data: { origin: "imported" } }, creationId: try (try Attempts).key(fx.ticket) }) catch (error) => error
-    if ("known" in result) return { ...failed, known: result.known }
-    try ignore((try Notes).send({ type: "storeChanged" }, phone))
-    return { ...failed, ok: true }
+    return effect {
+      try store.create({ content: text, format: { kind: "text", data: { origin: "imported" } }, creationId: try (try Attempts).key(fx.ticket) })
+      try ignore((try Notes).send({ type: "storeChanged" }, phone))
+      return { ...failed, ok: true }
+    } catch (error) => ({ ...failed, known: error.known })
   }
   const handle = held.choice.handle
   if (handle === undefined) return failed

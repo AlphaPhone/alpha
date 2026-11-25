@@ -1,18 +1,45 @@
 // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
-import type { DeferredDeletionsClient, AddressBookClient, ContactNamesClient, NameSurface, MessagesClient, PhoneClient } from "@elizaos/os-bridges"
+import type { DeferredDeletionsClient, StagedDeletion } from "@elizaos/os-bridges"
+import type { AddressBookClient, ContactNamesClient, NameSurface } from "@elizaos/os-bridges"
+import type { MessagesClient, MmsBinding, MmsSendResult, OperationId } from "@elizaos/os-bridges"
+import type { PhoneClient } from "@elizaos/os-bridges"
 
 module held {
-  import { actionJournalPlugin, createDeferredDeletions } from "@elizaos/os-bridges"
+  import { registerPlugin } from "@capacitor/core"
+  import { createDeferredDeletions, type ActionJournalPlugin, type StagedDeletion } from "@elizaos/os-bridges"
   import { rejectionCode } from "@elizaos/os-bridges"
   import { addressBookPlugin, createAddressBookClient, createContactNames } from "@elizaos/os-bridges"
   import { messagesClient, messagesPlugin } from "@elizaos/os-bridges"
+  import { parseMmsSendResult, type MmsBinding, type OperationId } from "@elizaos/os-bridges"
   import { phoneClient, telephonyPlugin } from "@elizaos/os-bridges"
+
+  const receiptKinds = { MessageRecord: "message", VoicemailRecord: "voicemail", ContactRecord: "contact" } as const
+  type RecordReceiptKey = { readonly kind: typeof receiptKinds[keyof typeof receiptKinds]; readonly id: string }
+  type Journal = ActionJournalPlugin & { telephonyDeletionReceipt(key: RecordReceiptKey): Promise<unknown> }
+  export type TelephonyDeletionPhase = "deleted" | "undone" | "conflict" | "unknown"
+
+  async function deletionReceipt(journal: Journal, staged: StagedDeletion): Promise<TelephonyDeletionPhase | undefined> {
+    if (staged.kind !== "MessageRecord" && staged.kind !== "VoicemailRecord" && staged.kind !== "ContactRecord") return undefined
+    const kind = receiptKinds[staged.kind]
+    const received = await journal.telephonyDeletionReceipt({ kind, id: staged.id })
+    if (typeof received !== "object" || received === null || !("kind" in received) || received.kind !== kind
+      || !("id" in received) || received.id !== staged.id || !("phase" in received)) return undefined
+    const { phase } = received
+    return phase === "deleted" || phase === "undone" || phase === "conflict" || phase === "unknown" ? phase : undefined
+  }
+
   function make() {
-    const journal = actionJournalPlugin()
+    const journal = registerPlugin<Journal>("ElizaActionJournal")
+    const nativeMessages = messagesPlugin()
     return {
       deletions: createDeferredDeletions(journal),
+      deletionReceipt: (staged: StagedDeletion) => deletionReceipt(journal, staged),
       phone: phoneClient(telephonyPlugin(), journal),
-      messages: messagesClient(messagesPlugin(), journal),
+      messages: messagesClient(nativeMessages, journal),
+      async mmsReceipt(binding: MmsBinding, operation: OperationId, hash: string) {
+        const raw = await nativeMessages.mmsSendResult({ operationId: operation })
+        return parseMmsSendResult(raw, binding, operation, hash)
+      },
       contacts: createAddressBookClient({ install: "WritingInstall", plugin: addressBookPlugin(), journal }),
       names: createContactNames(addressBookPlugin()),
     }
@@ -31,16 +58,19 @@ module held {
     return typeof cause === "object" && cause !== null && "_tag" in cause && typeof cause._tag === "string" ? cause._tag : ""
   }
 }
-import { clients, codeOf, tagOf } from held
+import { clients, codeOf, tagOf, type TelephonyDeletionPhase } from held
 import { registered } from "./device.vibe"
 
 /** eliza's clients of an Alpha image's telephony: calls, the call log and voicemail; conversations and sends; the address book. */
 export interface TelephonyClients {
   readonly phone: PhoneClient
   readonly messages: MessagesClient
+  /** Reads the native record and checks it against the original review digest, without the picture bytes. */
+  mmsReceipt(binding: MmsBinding, operation: OperationId, hash: string): Promise<MmsSendResult | undefined>
   readonly contacts: AddressBookClient
   readonly names: ContactNamesClient
   readonly deletions: DeferredDeletionsClient
+  deletionReceipt(staged: StagedDeletion): Promise<TelephonyDeletionPhase | undefined>
 }
 
 /** Phone, Messages and Contacts are not on this phone: nothing reached its native side. */

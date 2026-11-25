@@ -10,7 +10,7 @@ import { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, reacting, run, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { judge } from "../phone/words.ts"
-import { draftFrom } from "./contacts.vibe"
+import { draftFrom, removeContact } from "./contacts.vibe"
 
 /** The agent's operations the phone answers as a request: a call, a text, or a contact added, changed or deleted. */
 export type Asking = Extract<DeviceOperation, { type: "phone_call" | "phone_dial" | "sms_send" | "mms_send" | "sms_compose" | "contact_create" | "contact_update" | "contact_delete" }>
@@ -251,9 +251,9 @@ effect function acted(id: number, ask: Ask, number: string, text: string, contac
     const card = held.reviewed.get(contact)
     if (shown === undefined || card === undefined) return refused
     if (ask === "DeleteContact") {
-      const done = try telephony("remove", (c) => c.contacts.remove({ id: card.id, version: card.version }))
-      if (done.status === "queued" || done.status === "stale") try contactsChanged()
-      return { type: "acted", id, done: done.status === "queued", known: true } satisfies Event
+      const outcome = try removeContact(card)
+      if (outcome !== "refused") try contactsChanged()
+      return { type: "acted", id, done: outcome === "deleted", known: outcome !== "unknown" } satisfies Event
     }
     const done = try telephony("updateContact", (c) => c.contacts.updateContact({ id: card.id, version: card.version }, draftFrom(card, afterOf(held.operation, linesOf(shown)))))
     if (done.status === "saved" || done.status === "stale" || done.status === "unknown") try contactsChanged()

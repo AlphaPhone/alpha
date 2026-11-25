@@ -16,6 +16,8 @@ export interface VoiceScene {
   liveCaptureAvailable: boolean;
   nativeTransport: boolean;
   transcriptionFailures: number;
+  voicemailTranscription: ((id: string, requestId: string) => Promise<string>) | undefined;
+  readonly canceledVoicemailTranscriptions: string[];
   probeGate: (() => Promise<void>) | undefined;
   warmSpeechOutputCalls: number;
   localSpeechStatusCalls: number;
@@ -51,6 +53,8 @@ export function voiceScene(): VoiceScene {
     liveCaptureAvailable: true,
     nativeTransport: true,
     transcriptionFailures: 0,
+    voicemailTranscription: undefined,
+    canceledVoicemailTranscriptions: [],
     probeGate: undefined,
     warmSpeechOutputCalls: 0,
     localSpeechStatusCalls: 0,
@@ -159,6 +163,14 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
           return Promise.reject(new Error("Recognition failed"));
         }
         return Promise.resolve({ text: "Dictated note" });
+      },
+      transcribeVoicemail: async ({ id, requestId }: { id: string; requestId: string }) => {
+        if (!voice.voicemailTranscription) throw rejection("Voicemail recognizer unavailable", "unavailable");
+        return { text: await voice.voicemailTranscription(id, requestId) };
+      },
+      cancelVoicemailTranscription: ({ requestId }: { requestId: string }) => {
+        voice.canceledVoicemailTranscriptions.push(requestId);
+        return Promise.resolve({});
       },
     };
   };

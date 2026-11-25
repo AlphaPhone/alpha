@@ -11,7 +11,7 @@ import { useMachine as useGenerate } from "../../gen/app__workflows__generate.re
 import { maxDescription } from "../../gen/app__workflows__generate.ts";
 import type { Preset } from "../../gen/app__workflows__schedule.ts";
 import type { Resident, Shown } from "../runtime/area.tsx";
-import { type DraftOperation, DraftWords, appendDraft, available, describeDraft, discardDraft, removeDraftStep, renameDraft, useDraft } from "./authoring.vibe";
+import { type DraftOperation, DraftWords, appendDraft, available, describeDraft, discardDraft, removeDraftStep, renameDraft, adoptGeneratedDraft } from "./authoring.vibe";
 
 interface AuthoringProps extends Pick<Shown<Resident | BuilderMachine | GenerateMachine | DraftWords>, "runtime"> {
   readonly owner: number;
@@ -156,7 +156,7 @@ export function Authoring({ runtime, owner }: AuthoringProps) {
         <SheetContent title="Describe a workflow" actions={model?.drafted.length ? (
           <>
             <Button variant="secondary" onClick={() => void generate.send({ type: "discardGenerated" })}>Discard</Button>
-            <Button disabled={!generate.can({ type: "useGenerated", edits: state.draft.edits })} onClick={() => void runtime.runPromiseExit(useDraft())}>Use draft</Button>
+            <Button disabled={!generate.can({ type: "useGenerated", edits: state.draft.edits })} onClick={() => void runtime.runPromiseExit(adoptGeneratedDraft())}>Use draft</Button>
           </>
         ) : (
           <Button disabled={prompt.trim() === "" || model?.generation.status === "Loading"} onClick={() => void runtime.runPromiseExit(describeDraft(prompt))}>Draft workflow</Button>

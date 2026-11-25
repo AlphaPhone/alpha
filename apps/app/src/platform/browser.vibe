@@ -27,6 +27,7 @@ export type Told =
   | { readonly kind: "opened"; readonly raw: unknown }
   | { readonly kind: "closed"; readonly raw: unknown }
   | { readonly kind: "found"; readonly raw: unknown }
+  | { readonly kind: "showDownloads"; readonly raw: unknown }
 
 /**
  * The phone's web pages in native tabs: eliza's client of Alpha's `AlphaBrowser` tab host and the session that holds
@@ -37,6 +38,12 @@ export service TabHost {
   readonly plugin: Option.Option<BrowserTabHostPlugin>
   readonly session: BrowserTabSession
   readonly told: Stream.Stream<Told>
+}
+
+// spec/app/files/index.md, "Another area opens Files at Downloads: the Download folder of the main volume where the phone has one, else the Downloads category; the owner's own move to the top, a volume or a category ends that walk"
+/** Open the retained Files area when the owner chooses Show in Files in the phone's Browser Downloads. */
+export service BrowserDownloadsHandoff {
+  open(): void!!
 }
 
 /** One call of the tab host, failing with `TabHostFailed` where it refused, broke, or there is none. */
@@ -52,11 +59,11 @@ const name = "AlphaBrowser"
 export const phoneTabHost = Layer.sync(TabHost, () => {
   if (!registered(name)) return { plugin: Option.none(), session: session(), told: Stream.empty }
   const plugin = client(name)
-  const heard = (event: "stateChanged" | "tabOpened" | "tabClosed" | "findResult", kind: Told["kind"]) => Stream.callback<Told>((queue) => acquireRelease(
+  const heard = (event: "stateChanged" | "tabOpened" | "tabClosed" | "findResult" | "showDownloads", kind: Told["kind"]) => Stream.callback<Told>((queue) => acquireRelease(
     promise((): Promise<BrowserTabHostListener> => plugin.addListener(event as "stateChanged", (raw: unknown) => { Queue.offerUnsafe(queue, { kind, raw }) })),
     (handle) => promise(async () => { await handle.remove() }),
   ))
-  return { plugin: Option.some(plugin), session: session(), told: Stream.mergeAll([heard("stateChanged", "state"), heard("tabOpened", "opened"), heard("tabClosed", "closed"), heard("findResult", "found")], { concurrency: "unbounded" }) }
+  return { plugin: Option.some(plugin), session: session(), told: Stream.mergeAll([heard("stateChanged", "state"), heard("tabOpened", "opened"), heard("tabClosed", "closed"), heard("findResult", "found"), heard("showDownloads", "showDownloads")], { concurrency: "unbounded" }) }
 })
 
 /** A browser: no native tabs, which the Browser says rather than drawing pages itself. */

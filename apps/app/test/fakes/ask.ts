@@ -95,8 +95,8 @@ export function askRoutes(scene: AskScene): Route[] {
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== "/api/conversations") return;
       scene.listReads += 1;
-      const listing = () => Response.json({ conversations: [...scene.kept].map(([id, one]) => ({ id, roomId: one.roomId, title: one.title, createdAt: 0, updatedAt: 0 })) });
-      return scene.holdLists ? new Promise<Response>((resolve) => void scene.heldLists.push(() => resolve(listing()))) : listing();
+      const listing = Response.json({ conversations: [...scene.kept].map(([id, one]) => ({ id, roomId: one.roomId, title: one.title, createdAt: 0, updatedAt: 0 })) });
+      return scene.holdLists ? new Promise<Response>((resolve) => void scene.heldLists.push(() => resolve(listing))) : listing;
     },
     (request, url) => {
       const id = /^\/api\/conversations\/([^/]+)\/messages$/.exec(url.pathname)?.[1];

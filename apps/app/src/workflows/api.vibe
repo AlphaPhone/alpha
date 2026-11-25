@@ -19,7 +19,7 @@ export const workflowsApi = Layer.effect(WorkflowsApi, effect {
     inFlight.set(path, fresh)
     return fresh
   }
-  const request: WorkflowRequest = effect (path: string, body: unknown) => tryPromise({
+  const request: WorkflowRequest = effect (path: string, body: unknown) => try tryPromise({
     try: () => body === undefined ? read(path) : runtime.request(path, body),
     catch: (error) => error instanceof RuntimeRequestError
       ? workflowHttpError(error.status, { code: error.code, error: error.message })

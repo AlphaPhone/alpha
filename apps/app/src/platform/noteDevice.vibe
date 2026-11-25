@@ -101,7 +101,7 @@ export const noteDevice = Layer.sync(NoteDevice, () => {
   const decoded = <A>(schema: Schema.Decoder<A>, raw: unknown) => mapError(Schema.decodeUnknownEffect(schema)(raw), absent)
   const read = <A>(schema: Schema.Decoder<A>, call: (native: NotesPlugin) => Promise<unknown>) => flatMap(asked(call), (raw) => decoded(schema, raw))
   const granted = (call: (native: NotesPlugin) => Promise<unknown>) => Effect.map(
-    read(Permission, call) |> Effect.orElseSucceed(%, () => ({ grant: "prompt" })),
+    Effect.catch(read(Permission, call), () => succeed({ grant: "prompt" })),
     ({ grant }): Grant => grant === "granted" ? "Granted" : grant === "denied" ? "Denied" : "Unasked",
   )
   const changed = api === undefined ? Stream.empty : Stream.callback<Tape>((queue) => acquireRelease(
@@ -125,16 +125,16 @@ export const noteDevice = Layer.sync(NoteDevice, () => {
     retain: (recordingId: string, noteId: string) => read(Recorded, (native) => native.retain({ recordingId, noteId })),
     discard: (recordingId: string) => asked((native) => native.discard({ recordingId })),
     describe: (audioId: string) => read(Recorded, (native) => native.describe({ audioId })),
-    play: (audioId: string, noteId: string, offsetMs: number) => Effect.map(read(Played, (native) => native.play({ audioId, noteId, offsetMs })) |> Effect.orElseSucceed(%, () => ({ ok: false })), ({ ok }) => ok),
-    halt: () => Effect.map(read(Played, (native) => native.halt()) |> Effect.orElseSucceed(%, () => ({ ok: false })), ({ ok }) => ok),
+    play: (audioId: string, noteId: string, offsetMs: number) => Effect.catch(Effect.map(read(Played, (native) => native.play({ audioId, noteId, offsetMs })), ({ ok }) => ok), () => succeed(false)),
+    halt: () => Effect.catch(Effect.map(read(Played, (native) => native.halt()), ({ ok }) => ok), () => succeed(false)),
     effect purge(receipt: NotesTrashRecordingCleanup) {
       const result = asked((native) => native.purge(receipt)) catch () => undefined
       return typeof result === "object" && result !== null && "status" in result && result.status === "purged"
     },
-    consumeOpen: () => Effect.map(read(Offered, (native) => native.consumeOpen()) |> Effect.orElseSucceed(%, () => ({ open: false })), ({ open }) => open),
+    consumeOpen: () => Effect.catch(Effect.map(read(Offered, (native) => native.consumeOpen()), ({ open }) => open), () => succeed(false)),
     share: (channel: "Email" | "Messages", title: string, text: string) => ignore(asked((native) => native.share({ channel, title, text }))),
     settings: () => ignore(asked((native) => native.settings())),
-    previousExists: () => Effect.map(read(EarlierPresence, (native) => native.previousExists()) |> Effect.orElseSucceed(%, () => ({ present: false })), ({ present }) => present),
+    previousExists: () => Effect.catch(Effect.map(read(EarlierPresence, (native) => native.previousExists()), ({ present }) => present), () => succeed(false)),
     earlier: (area: Earlier) => available ? Effect.map(read(EarlierText, (native) => native.readPrevious({ area })), (read) => read.text) : succeed(null),
   }
 })

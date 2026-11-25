@@ -73,7 +73,7 @@ export interface Seen {
   readonly attachmentNotice: string
   readonly preview: { readonly ticket: number; readonly file: Attached } | undefined
   readonly media: ReadonlyArray<MediaCard>
-  readonly mediaNote: string
+  readonly mediaNote: { readonly conversation: number; readonly text: string } | undefined
   /** The text of a message the slot marks as sending, under review; or the saved copy of a conflict. */
   readonly saved: string
   /** The hits of each search, by the ticket that asked from the first hit. */
@@ -164,7 +164,7 @@ export const talk = Layer.effect(Talk, effect {
   const listeners = new Set<() => void>()
   let position: { readonly ticket: number; readonly sighting: Sighting } | undefined
   let seen: Seen = {
-    pages: new Map(), reply: "", label: "", failure: undefined, typed: "", files: [], filesBinding: undefined, attachmentNotice: "", preview: undefined, media: [], mediaNote: "", saved: "", hits: [],
+    pages: new Map(), reply: "", label: "", failure: undefined, typed: "", files: [], filesBinding: undefined, attachmentNotice: "", preview: undefined, media: [], mediaNote: undefined, saved: "", hits: [],
     titles: new Map(records.map((one, at) => [at + 1, one.title])),
   }
   const keep = () => runFork(ignore(store.set(key, JSON.stringify({ conversations: records.map((one) => ({ id: one.record.id, roomId: one.record.roomId, title: one.title })) }))))

@@ -6,7 +6,7 @@ import type { Effect as Out, Event } from "../../gen/app__workflows__list.effect
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { fromAreas } from "../home/cards.vibe"
 import type { Shell as ShellState } from "../../gen/app__shell.effect.vibe"
-import { Agent } from "../platform/agent.vibe"
+import type { Agent } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { type Job, answer, applying, reacting, started, together } from "../runtime/reactor.vibe"

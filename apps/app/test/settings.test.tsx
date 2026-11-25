@@ -159,6 +159,24 @@ describe("Settings", () => {
     });
   });
 
+  it("Look at access again (spec/app/startup/access.md, \"Story: Look at access again\")", async () => {
+    const { alpha, world, machines } = await settingsOpen();
+    await press("Privacy");
+    await press("Permissions");
+    await until(alpha, machines, Facts.Machine, (s) => Facts.accessWord(s, "MicrophoneAccess") === "Off");
+    await tap("Microphone");
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"] [aria-current="step"]')?.textContent).toContain("Microphone"));
+    await press("Settings");
+    await vi.waitFor(() => expect(world.settings.opened).toEqual(["privacy"]));
+    world.settings.hostFacts.permissions.Microphone = true;
+    await seen(false);
+    await seen(true);
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"] [aria-current="step"]')?.textContent).toContain("Allowed"));
+    await press("Done");
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
+    expect(await page(alpha)).toBe("Permissions");
+  });
+
   it("Choose how Alpha looks, at my size, and keep it (spec/app/settings/preferences.md, \"Story: Choose how Alpha looks\"; spec/app/settings/preferences.md, \"Story: Make the text larger or smaller\"; spec/app/settings/preferences.md, \"Story: Keep my preferences through a restart\")", async () => {
     // spec/app/settings/preferences.md, "Alpha starts with the appearance and legible text it kept, or Light and ordinary text when nothing readable was kept, and the phone's look; it reads the text size and the device preferences again, and drops what was in flight": the previous Alpha's dark theme is kept.
     localStorage.setItem("alpha.appearance.v1", "dark");
@@ -263,7 +281,7 @@ describe("Settings", () => {
     const text = await sharedFiles[0]?.text();
     const report = JSON.parse(text ?? "{}");
     expect([report.format, report.roles, report.problems.count, report.permissions, text?.includes("launcher3"), text?.includes("ai.alphacompute"), text?.includes("\"session\""), report.talk]).toEqual([
-      "alpha-diagnostics/v1", [{ role: "home", held: false, available: true }, { role: "assistant", held: false, available: true }], 2, { FilesAccess: true, LocationAccess: true }, false, false, false,
+      "alpha-diagnostics/v1", [{ role: "home", held: false, available: true }, { role: "assistant", held: false, available: true }], 2, { CalendarAccess: true, FilesAccess: true, LocationAccess: true, MicrophoneAccess: false, NotificationsAccess: true }, false, false, false,
       { format: "alpha-cloud-stream-timing-v1", sessions: [{ sttConnectedMs: 812, firstFrameSentMs: 815, consentRetry: true }, { sttConnectedMs: 390, firstFrameSentMs: null, consentRetry: false }] },
     ]);
     // spec/app/settings/developer.md, "Clear is offered only for a log with problems, one at a time; once the startup area answers, the log is read again": Clear asks first, and backing out clears nothing.
@@ -327,7 +345,8 @@ describe("Settings", () => {
     await seen(false);
     await until(alpha, machines, Carrier.Machine, (s) => s.fields.length === 0 && !s.showing);
     await seen(true);
-    await until(alpha, machines, Carrier.Machine, (s) => s.showing && s.read.read.status === "Idle" && s.fields.length === 0);
+    // spec/app/settings/timed.md, "Leaving a screen retires its asking: nothing is waited for, and a late answer is refused": a finished read stays finished, its fields forgotten, and coming back asks nothing.
+    await until(alpha, machines, Carrier.Machine, (s) => s.showing && s.read.read.status !== "Loading" && s.read.read.ticket === 1 && s.fields.length === 0 && s.eid.status === "NotRead" && s.copied === "NotCopied");
     await press("Show identifiers");
     await until(alpha, machines, Carrier.Machine, (s) => s.read.read.status === "Loaded" && s.fields.length > 0);
   });
