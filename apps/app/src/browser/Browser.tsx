@@ -1,4 +1,4 @@
-// spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/share.md, "Story: Share the page"; spec/app/browser/share.md, "Story: Open the page in another browser"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"; spec/app/browser/address.md, "Story: Browse privately"
+// spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/index.md, "Story: Let the agent open a page"; spec/app/browser/share.md, "Story: Share the page"; spec/app/browser/share.md, "Story: Open the page in another browser"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"; spec/app/browser/address.md, "Story: Browse privately"
 import { Button, BrowserAddressBar, type BrowserAddressChoice, BrowserAddressChoices, BrowserFindBar, BrowserBar, BrowserLibrary, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserReview, BrowserTabs, ConfirmDialog, PrivateMark } from "@repo/ui";
 import { ChevronLeft, Clock, Download, ExternalLink, Link, ListFilter, Mail, Plus, RotateCw, Search, Share2, Square, Star, Trash2 } from "lucide-react";
 import { Effect, Option } from "effect";
@@ -22,6 +22,7 @@ import { Time } from "../runtime/time.vibe";
 import { AppBack } from "../shell/AppBack.tsx";
 import { desktopPreview } from "../shell/canvas.vibe";
 import type { ManagedRuntime } from "effect";
+import { Reviewing, approve, decline } from "./agent.vibe";
 import { Pages, type PageRuntime, addressOf, idOf, inputOf, openDownloads, placed } from "./browser.vibe";
 import { LibraryRows, editHistory, markPage, setMark } from "./library.vibe";
 import { type SharePages, cancelPrivateFrame, confirmPrivateFrame, mailTarget, offerShare } from "./share.vibe";
@@ -29,7 +30,7 @@ import { type SiteRows, clearSiteShown, siteShown } from "./site.vibe";
 
 export interface BrowserProps {
   /** Provides the Browser's tabs and each tab's page, `browser` of browser.vibe, over the resident machines and the phone's tab host. */
-  runtime: ManagedRuntime.ManagedRuntime<Machine | Pages | LibraryMachine | LibraryRows | ShareMachine | SharePages | SiteMachine | SiteRows | TabHost | Shell | Resident, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<Machine | Pages | LibraryMachine | LibraryRows | ShareMachine | SharePages | Reviewing | SiteMachine | SiteRows | TabHost | Shell | Resident, unknown>;
   alpha: Alpha;
 }
 
@@ -219,6 +220,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
         onCancel={() => void runtime.runPromise(cancelPrivateFrame())}>
         Your browser will receive this private page.
       </ConfirmDialog>
+      <AgentPageCard runtime={runtime} />
       <BrowserReview open={clearingSite !== undefined} title={`Clear data for ${clearingSite ?? ""}?`} confirmLabel="Clear data" destructive
         onConfirm={() => { setClearingSite(undefined); void runtime.runPromise(clearSiteShown()); }}
         onCancel={() => setClearingSite(undefined)}>
@@ -230,6 +232,19 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
         {native ? "Clears history, cookies and tabs." : "Clears Alpha's history and tabs. Your browser manages website cookies."}
       </BrowserReview>
     </div>
+  );
+}
+
+function AgentPageCard({ runtime }: Pick<BrowserProps, "runtime">) {
+  const held = runtime.runSync(Reviewing);
+  const page = useSyncExternalStore(held.subscribe, held.get, held.get);
+  const address = addressParts(page?.operation.url);
+  return (
+    <BrowserReview open={page !== undefined} title="Open this page?" confirmLabel="Open"
+      onConfirm={() => void runtime.runPromise(approve)}
+      onCancel={() => void runtime.runPromise(decline)}>
+      {address.host}{address.path}
+    </BrowserReview>
   );
 }
 

@@ -18,9 +18,11 @@ import { Machine as Settings } from "../../gen/app__settings.effect.vibe"
 import { PhoneCalendar } from "../platform/calendar.vibe"
 import { type Failure, ask } from "../platform/remote.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
+import { remindersStore } from "../reminders/store.ts"
 import { type Job, answer, contained, due, following, hearing, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import { type Person, type Read, repeatText, shown } from "./shown.ts"
+import { type Person, type Read, onDay, repeatText, shown } from "./shown.ts"
+import { datedReminders } from "./reminders.ts"
 import { civilDay, dayStart, feedParams, localDate, openLink, plainHttps, readWindow } from "./time.ts"
 
 /** An event of the phone's calendars as the screen shows it. */
@@ -242,8 +244,33 @@ const widened = following(Canvas.Machine, (canvas) => canvas.wide, View.Machine,
 // spec/app/calendar/index.md, "A read asked for during a write waits for it, and follows it once"
 const writing = following(Writes.Machine, (form) => inFlight(form), View.Machine, (busy): Event => ({ type: "writeChanged", writing: busy }))
 
+// spec/app/calendar/index.md, "Story: See reminders among my events"
+const localReminders = Stream.callback<void>((queue) => acquireRelease(sync(() => {
+  const publish = () => { Queue.offerUnsafe(queue, undefined) }
+  const unsubscribe = remindersStore.subscribe(publish)
+  publish()
+  return unsubscribe
+}), (unsubscribe) => sync(unsubscribe)))
+
+const reminders = started(effect {
+  const view = try View.Machine
+  const visiting = Stream.changesWith(view.changes, (before, after) => before.front === after.front && before.anchor === after.anchor && before.reminder === after.reminder)
+  try Stream.runForEach(Stream.zipLatest(visiting, localReminders), () => effect {
+    const state = try view.get()
+    if (!state.front) return
+    const rows = datedReminders(remindersStore.snapshot())
+    const count = rows.filter((row) => onDay(row, state.anchor)).length
+    if (View.canRemindersChanged(state, state.anchor, count)) {
+      try contained(view.send({ type: "remindersChanged", day: state.anchor, count }), "showing the day's reminders")
+    }
+    if (View.canCloseReminder(state) && !rows.some((row) => row.id === state.reminder)) {
+      try contained(view.send({ type: "closeReminder" }), "closing a reminder that went away")
+    }
+  })
+}, "reading reminders for Calendar")
+
 /** Calendar's view: in memory, told today by Alpha's time and the shell, and what it may read by Android and the agent. */
-export const calendar = together(kept, told, fronted, returned, widened, writing)
+export const calendar = together(kept, told, fronted, returned, widened, writing, reminders)
 
 /** Every machine of the Calendar area, which its screen reads, and Alpha's time. */
 export type Calendared = View.Machine | Writes.Machine | Changes.Machine | Linking.Machine | Held.Machine | Cloud | Time | KeyValueStore.KeyValueStore

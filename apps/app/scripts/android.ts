@@ -247,7 +247,7 @@ export function hostProfile() {
   return {
     ...profile,
     manifestPlaceholders: { ...placeholders, appLinkHost: production.appLinkHost, signInCallbackPath },
-    buildConfigFields: [...fields, { name: "CLOUD_API_ORIGIN", type: "String", value: production.cloud }],
+    buildConfigFields: [...fields, { name: "CLOUD_API_ORIGIN", type: "String", value: production.cloud }, { name: "CLOUD_APP_LINK_HOST", type: "String", value: production.appLinkHost }],
   };
 }
 

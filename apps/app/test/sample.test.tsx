@@ -27,7 +27,7 @@ const withSample = [...mounts.filter((m) => m.at !== "view:Notes" && m.at !== "v
 const kept = "alpha/app/sample/index@1";
 const shown = () => [...document.querySelectorAll("section[aria-label=Reminders] li span")].map((title) => title.textContent);
 const told = () => document.querySelector("section[aria-label=Reminders] [role=alert]")?.textContent;
-const shellKept = "alpha/app/shell/index@2";
+const shellKept = "alpha/app/shell/index@4";
 /** The key the store takes no write under, once: the phone's storage is full for a moment. */
 let refusing = "";
 vi.stubGlobal("localStorage", new Proxy(localStorage, {

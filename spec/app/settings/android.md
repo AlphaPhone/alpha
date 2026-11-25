@@ -11,8 +11,8 @@ it could not; Alpha says which.
 
 ### Each Android page is offered on the Settings page it belongs to
 
-Android's settings home is the first page's one Android row, as in
-Alpha's earlier build.
+Android's settings home is offered on the first page, and the warning
+that its microphone may still be on can open it from Privacy.
 General offers Wi-Fi, Bluetooth, mobile networks, airplane mode, the
 screen lock and default apps; Display offers Android's display and
 brightness; Sound its sound and Do Not Disturb; Battery the battery saver;
@@ -25,6 +25,10 @@ access point names and default apps; the Calendar, Camera,
 Maps and Notes pages Alpha's permissions, and the Photos page Alpha's
 photo access. Developer offers Android's developer options; About phone
 is on Carrier & SIM setup, not on About, as in Alpha's earlier build. The Passwords page opens Android's confirmation to use Alpha for autofill.
+The phone keeps Alpha's installed Autofill component and the native vault
+identity across an app update. The browser may fill only fields whose
+committed origin the native browser can attest. Typed or generated passwords
+stay in native password screens and never cross the page bridge.
 
 ```quint
 import index as I from "./index"
@@ -34,7 +38,7 @@ import timed as T from "./timed"
 type Target = AndroidHome | AccountsSync | WifiNetworks | BluetoothDevices | MobileNetworks | AirplaneMode | ScreenLock | DefaultApps | PasswordAutofill | DisplaySettings | Brightness | SoundSettings | DoNotDisturb | BatterySaver | AlphaAlerts | AlertChannel | NotificationAccess | WorkflowAlerts | AppPermissions | PhotoPermissions | AllFilesAccess | LocationSettings | InternetPanel | SimCards | AccessPointNames | AboutPhone | DeveloperOptions
 
 pure def offers(page: I::Page, target: Target): bool =
-  if (page == I::Top) target == AndroidHome
+  if (page == I::Top or page == I::Privacy) target == AndroidHome
   else if (page == I::General)
     target == WifiNetworks or target == BluetoothDevices or target == MobileNetworks or target == AirplaneMode
       or target == ScreenLock or target == DefaultApps

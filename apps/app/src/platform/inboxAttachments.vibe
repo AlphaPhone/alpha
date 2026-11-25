@@ -1,0 +1,72 @@
+// spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"; spec/app/inbox/message.md, "An attachment use ends as its own answer says, or unknown"
+import type { OpaqueMailAttachment } from "@elizaos/plugin-inbox-client"
+import { blobOf, decodeBase64 } from "@elizaos/plugin-files-client"
+import { downloadCopy, releasePreview } from "./browser-library.ts"
+import { registered } from "./device.vibe"
+
+module android {
+  import { registerPlugin } from "@capacitor/core"
+  import type { OpaqueMailAttachment } from "@elizaos/plugin-inbox-client"
+
+  interface Plugin {
+    saveReviewed(copy: OpaqueMailAttachment & { readonly attempt: string }): Promise<unknown>
+    cancelReviewed(review: { readonly attempt: string }): Promise<void>
+  }
+
+  let plugin: Plugin | undefined
+  /** @throws {never} */
+  export const client = () => (plugin ??= registerPlugin<Plugin>("AlphaInboxAttachments"))
+}
+import { client } from android
+
+const SavedCopy = Schema.Struct({ status: Schema.Literals(["saved", "refused", "unknown"]) })
+export type SaveResult = typeof SavedCopy.Type["status"]
+type Destination = "picker" | "library" | "download" | "unavailable"
+
+/** The destination of a checked file and the answer it can give about the copy. */
+export service InboxAttachmentFiles {
+  readonly destination: Destination
+  save(attempt: number, file: OpaqueMailAttachment): SaveResult!!
+  cancel(attempt: number): void!!
+}
+
+export const phoneInboxAttachments = Layer.sync(InboxAttachmentFiles, () => {
+  const host = registered("AlphaInboxAttachments") ? client() : undefined
+  return {
+    destination: host ? "picker" : "unavailable",
+    effect save(attempt: number, file: OpaqueMailAttachment): SaveResult!! {
+      if (!host) return "refused"
+      return effect {
+        const reply = try tryPromise(() => host.saveReviewed({ ...file, attempt: String(attempt) }))
+        return (try Schema.decodeUnknownEffect(SavedCopy)(reply)).status
+      } catch () => "unknown"
+    },
+    cancel: (attempt) => host === undefined ? Effect.void : ignore(tryPromise(() => host.cancelReviewed({ attempt: String(attempt) }))),
+  }
+})
+
+module browser {
+  /** @throws {never} */
+  export function downloads(): boolean {
+    return typeof document !== "undefined" && "download" in document.createElement("a") && typeof URL.createObjectURL === "function"
+  }
+}
+import { downloads } from browser
+
+/** A browser without Files can still hand the copy to its downloads, which report no disk outcome. */
+export const attachmentDownloads = Layer.effect(InboxAttachmentFiles, effect {
+  const lifetime = try Effect.scope
+  const available = downloads()
+  return {
+    destination: available ? "download" : "unavailable",
+    effect save(_attempt: number, file: OpaqueMailAttachment): SaveResult!! {
+      if (!available) return "refused"
+      const bytes = decodeBase64(file.dataBase64)
+      if (!bytes) return "refused"
+      const url = downloadCopy(file.name, blobOf([bytes], "application/octet-stream"))
+      try Effect.forkIn(ensuring(sleep("1 minute"), sync(() => releasePreview(url))), lifetime)
+      return "unknown"
+    },
+    cancel: () => Effect.void,
+  }
+})

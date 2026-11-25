@@ -1,4 +1,4 @@
-import { type ComponentProps, memo, useCallback, useRef } from "react";
+import { type ComponentProps, type ReactNode, memo, useCallback, useRef } from "react";
 import { ArrowLeft, ChevronDown, ChevronUp } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { Button } from "../Button.tsx";
@@ -6,14 +6,18 @@ import { EmptyState } from "../EmptyState.tsx";
 import { Skeleton } from "../Skeleton.tsx";
 import { AssistantMessage, type AssistantMessageProps } from "./AssistantMessage.tsx";
 import { AssistantTurnNote, type AssistantTurnNoteProps } from "./AssistantTurnNote.tsx";
+import type { MessageHold } from "./messagePress.ts";
 
 type TranscriptMessage = AssistantMessageProps & { id: string };
 
 export type AssistantTranscriptProps = Omit<ComponentProps<"div">, "children"> & {
   /** The messages of the conversation showing, oldest first, each with a key that stays its own. */
   messages: readonly TranscriptMessage[];
+  /** Arms a hold on recorded message text. */
+  holdMessage?: MessageHold;
   /** The reply being written or its failure, after recorded messages. */
   liveMessages?: readonly TranscriptMessage[];
+  interim?: ReactNode;
   /** The page being read, with the message that a history or search request opened it around. */
   position?: { page: string; around?: string };
   /** Whether the transcript is laid out in the open conversation. */
@@ -49,9 +53,9 @@ function followEnd(viewport: HTMLElement) {
   viewport.scrollTop = viewport.scrollHeight;
 }
 
-const MessageRows = memo(function MessageRows({ messages }: { messages: readonly TranscriptMessage[] }) {
+const MessageRows = memo(function MessageRows({ messages, hold }: { messages: readonly TranscriptMessage[]; hold?: MessageHold }) {
   return messages.map(({ id, ...message }) => (
-    <div key={id} data-alpha-message-id={id}><AssistantMessage {...message} /></div>
+    <div key={id} data-alpha-message-id={id}><AssistantMessage {...message} hold={hold} /></div>
   ));
 });
 
@@ -60,7 +64,7 @@ const MessageRows = memo(function MessageRows({ messages }: { messages: readonly
  * hit opens around the message requested.
  * @model spec/app/assistant/chats.md
  */
-export function AssistantTranscript({ messages, liveMessages, position, visible = true, status = "loaded", turn, onRetry, onEarlier, onLater, onReturnToOriginal, className, onScroll, ...props }: AssistantTranscriptProps) {
+export function AssistantTranscript({ messages, holdMessage, liveMessages, interim, position, visible = true, status = "loaded", turn, onRetry, onEarlier, onLater, onReturnToOriginal, className, onScroll, ...props }: AssistantTranscriptProps) {
   const scrollRef = useRef<TranscriptScroll>({ follows: true });
   const page = position?.page;
   const around = position?.around;
@@ -99,8 +103,9 @@ export function AssistantTranscript({ messages, liveMessages, position, visible 
     return (
       <>
         {onEarlier ? <Button variant="ghost" size="sm" className="self-center" onClick={(event) => pageFrom(event.currentTarget, messages[0]?.id, onEarlier)}><ChevronUp aria-hidden />Earlier</Button> : null}
-        <MessageRows messages={messages} />
+        <MessageRows messages={messages} hold={holdMessage} />
         {liveMessages?.length ? <MessageRows messages={liveMessages} /> : null}
+        {interim}
         {onLater ? <Button variant="ghost" size="sm" className="self-center" onClick={(event) => pageFrom(event.currentTarget, messages.at(-1)?.id, onLater)}><ChevronDown aria-hidden />Later</Button> : null}
         {turn ? <AssistantTurnNote {...turn} /> : null}
       </>
