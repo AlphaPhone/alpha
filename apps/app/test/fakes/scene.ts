@@ -53,7 +53,8 @@ export interface Scene {
 
 export function scene(): Scene {
   return {
-    phone: false, image: false, now: 0, signedIn: true, mailLease: true, secrets: new Map(), slots: new Set(),
+    phone: false, image: false, now: 0, signedIn: true, secrets: new Map(), slots: new Set(),
+    mailLease: true,
     sample: sampleScene(),
     ask: askScene(),
     launcher: launcherScene(),
