@@ -167,7 +167,7 @@ describe("Alpha product plugin: Clock actions, provider, and routes", () => {
     const { runtime } = makeFakeRuntime();
     const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime });
     const named = (name: string) => plugin.actions!.find((a) => a.name === name)!;
-    const call = (name: string, parameters: Record<string, unknown>) => named(name).handler(runtime, emptyMessage(""), emptyState, { parameters });
+    const call = (name: string, parameters: Record<string, string | number | boolean | string[]>) => named(name).handler(runtime, emptyMessage(""), emptyState, { parameters });
     const declared = (name: string) => [named(name).parameters?.map((p) => p.name), named(name).parameters?.[0]?.schema.enum];
     expect([declared("CLOCK_ALARM"), declared("CLOCK_TIMER"), declared("CLOCK_WORLD")])
       .toEqual([[alarmFields, alarmOperations], [timerFields, timerOperations], [worldFields, worldOperations]]);

@@ -3,7 +3,7 @@ import { cn } from "../../lib/cn.ts";
 import { Alert } from "../Alert.tsx";
 import { AssistantChatHeader, type AssistantChatHeaderProps } from "./AssistantChatHeader.tsx";
 import { AssistantComposer, type AssistantComposerProps } from "./AssistantComposer.tsx";
-import { type AssistantBarDrag, useAssistantBarDrag } from "./AssistantGrabber.tsx";
+import { type AssistantDrag, useAssistantDrag } from "./AssistantGrabber.tsx";
 import { AssistantTranscript, type AssistantTranscriptProps } from "./AssistantTranscript.tsx";
 
 export type AssistantConversationProps = Omit<ComponentProps<"section">, "children"> & {
@@ -18,7 +18,7 @@ export type AssistantConversationProps = Omit<ComponentProps<"section">, "childr
   /** How far Ask Alpha is raised: resting on its bar, open as a half-screen sheet, or filling the screen. */
   detent?: "bar" | "sheet" | "full";
   /** A drag anywhere on the resting bar moves Ask Alpha as a drag of its handle does; left out where it may not be dragged. */
-  barDrag?: AssistantBarDrag;
+  barDrag?: AssistantDrag;
 };
 
 /**
@@ -28,7 +28,7 @@ export type AssistantConversationProps = Omit<ComponentProps<"section">, "childr
  */
 export function AssistantConversation({ header, attachmentNotice, transcript, composer, detent = "sheet", barDrag, className, ...props }: AssistantConversationProps) {
   const resting = detent === "bar";
-  const dragging = useAssistantBarDrag(barDrag ?? {});
+  const dragging = useAssistantDrag(barDrag ?? {});
   const full = detent === "full";
   return (
     <section

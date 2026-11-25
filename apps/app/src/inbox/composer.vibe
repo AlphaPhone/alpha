@@ -158,7 +158,7 @@ export const letters = Layer.effect(Letters, effect {
     effect adopt(draft: number, words: Words) {
       const before = held
       held = { ...held, [String(draft)]: words }
-      const ok = try kept()
+      const { ok } = try kept()
       if (!ok) held = before
       return ok
     },

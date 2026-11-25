@@ -22,7 +22,7 @@ export type AssistantDrag = {
   onCancel?: (press: Omit<Press, "y">) => void;
 };
 
-export type AssistantGrabberProps = Omit<ComponentProps<"button">, "children" | "disabled" | "onClick" | "onPointerDown" | "onPointerMove" | "onPointerUp" | "onPointerCancel" | "onLostPointerCapture"> & AssistantDrag & {
+export type AssistantGrabberProps = Omit<ComponentProps<"button">, "children" | "disabled" | "onClick" | "onDrag" | "onPointerDown" | "onPointerMove" | "onPointerUp" | "onPointerCancel" | "onLostPointerCapture"> & AssistantDrag & {
   /** The resting dock opens by its mark. The sheet uses a resize handle. */
   variant?: "mark" | "handle";
   /** The click a button receives, which may be the late click of a gesture just ended. */

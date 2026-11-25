@@ -36,7 +36,7 @@ import { Documents } from "../platform/documents.vibe";
 import { AttachmentSources } from "./AttachmentSources.tsx";
 import { askComms, freedom } from "./assistant.vibe";
 import { acceptedFiles, acceptedPhotos, chooseDocument, type FileTarget, insertFiles, previewFile, readChosenDocument, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
-import { chip, type MessageActions, useHistorySheets, useMessageRows } from "./history.tsx";
+import { chip, type MessageActions, useMessageRows } from "./history.tsx";
 import { ReplyFailure } from "./ReplyFailure.tsx";
 import { shownReply } from "./shown.ts";
 import { type Attached, type Line, Talk } from "./talk.vibe";
@@ -47,7 +47,7 @@ import { displayNumber } from "../phone/words.ts";
 export interface AssistantProps {
   runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview | Documents, unknown>;
   messageActions?: MessageActions;
-  speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & { voice?: (compact: boolean) => ReactNode };
+  speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "voiceNotice"> & { voice?: ReactNode | ((compact: boolean) => ReactNode) };
   canReadAloud?: boolean;
 }
 
@@ -262,7 +262,6 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const fileTargetRef = useRef<FileTarget | undefined>(undefined);
   const [talking, shown, writing, finding] = [conversation.state, chats.state, composer.state, search.state];
   const free = talking && shown && writing ? freedom(talking, writing, shown.chosen) : { replying: true, holding: true };
-  const history = useHistorySheets(chats, search, seen, free);
   const lines = !shown || (shown.page.status === "Idle" && shown.chosen === 0) ? emptyLines : seen.pages.get(shown.page.ticket)?.lines ?? emptyLines;
   const canPreview = attachments.can({ type: "preview", attachment: 1 });
   const preview = useCallback((file: Attached) => void runtime.runPromise(previewFile(file)), [runtime]);
@@ -474,7 +473,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         }}
         composer={{
           ...speech,
-          voice: speech?.voice?.(compact),
+          voice: typeof speech?.voice === "function" ? speech.voice(compact) : speech?.voice,
           onDictate: onComms || inFlight(talking.turn) || !speech?.onDictate ? undefined : () => {
             openWithFocus(false);
             speech.onDictate?.();

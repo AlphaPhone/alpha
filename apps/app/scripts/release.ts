@@ -275,7 +275,7 @@ const anonymousRead = (url: string, bound: number) => Effect.tryPromise({
   catch: refused,
 });
 
-const gh = (...args: string[]) => attempt(() => execFileSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+const gh = (...args: string[]) => Effect.try({ try: () => execFileSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), catch: refused });
 const repository = `--repo=${channelRepository}`;
 
 /** The channel on GitHub: its stable release through `gh`, and what anyone downloads from it. */
@@ -396,8 +396,8 @@ const commands = {
     const event = { type: "build" as const, number: yield* attempt(() => whole(number, "number")), attempt: yield* attempt(() => whole(tried, "attempt")),
       blockers: { ...(yield* attempt(() => recordedBlockers(recorded, found.values["platform-certificate"], false))).blockers, upstream: upstreamBlocks(reached) } };
     const run = yield* attempt(() => runOf(file));
-    const recorded = (yield* attempt(() => signerRecord(port.recordFile))).lastRelease?.versionCode ?? 0;
-    for (const version of [recorded, retainedFloor(retainedVersions(yield* port.listed))])
+    const lastRecorded = (yield* attempt(() => signerRecord(port.recordFile))).lastRelease?.versionCode ?? 0;
+    for (const version of [lastRecorded, retainedFloor(retainedVersions(yield* port.listed))])
       if (run.can({ type: "retainElsewhere", version })) yield* attempt(() => run.take({ type: "retainElsewhere", version }));
     if (!distributable(event.blockers)) {
       const refusal = { type: "refuseBuild" as const, number: event.number, blockers: event.blockers };

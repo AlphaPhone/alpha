@@ -52,7 +52,7 @@ const results = () => [...document.querySelectorAll("section[aria-label=Maps] bu
 describe("Maps on a phone", () => {
   it("Search for a place, get directions and navigate (spec/app/maps/index.md, \"Story: Search for a place\"; spec/app/maps/index.md, \"Story: Get directions\"; spec/app/maps/index.md, \"Story: Navigate\")", async () => {
     const world = { ...scene(), phone: true };
-    world.settings.location = { location: "granted", accuracy: "precise" };
+    world.maps.allowed = "granted"; world.maps.precision = "precise";
     const start = { latitude: 43.7300, longitude: 7.4200 };
     world.maps.routes = [cloudRoute("fast", start, harbour.coordinate, 400, 3), cloudRoute("scenic", start, harbour.coordinate, 500, 4)];
     const { alpha } = await open(world, withMaps);
@@ -125,7 +125,7 @@ describe("Maps on a phone", () => {
   it("Keep guiding away from Maps (spec/app/maps/index.md, \"Story: Keep guiding away from Maps\"; spec/app/maps/navigation.md, \"Story: Keep guiding with the screen off\"; spec/app/maps/navigation.md, \"Story: Hear the next instruction\")", async () => {
     const heard = speech();
     const world = { ...scene(), phone: true };
-    world.settings.location = { location: "granted", accuracy: "precise" };
+    world.maps.allowed = "granted"; world.maps.precision = "precise";
     const start = { latitude: 43.7300, longitude: 7.4200 };
     world.maps.routes = [cloudRoute("fast", start, harbour.coordinate, 400, 3)];
     const { alpha } = await open(world, withMaps);
@@ -468,14 +468,14 @@ describe("Maps in a browser", () => {
 
   it("Be told why before Android asks for my location, and sent to Settings once I said no (spec/app/maps/index.md, \"Story: Use my location\"; spec/app/maps/connection.md, \"Story: Use my location\")", async () => {
     const world = { ...scene(), phone: true };
-    world.settings.location = { location: "prompt" };
+    world.maps.allowed = "prompt";
     const { alpha } = await open(world, withMaps);
     await showMaps(alpha);
     const runtime = maps.runtime(alpha);
     await until(alpha, runtime, Screen, (s) => s.link.provider !== 0);
     // spec/app/maps/index.md, "Continuing past the disclosure asks Android, once"
     expect([Boolean(button("Continue")), button("My location")]).toEqual([true, undefined]);
-    world.settings.location = { location: "denied" };
+    world.maps.allowed = "denied";
     await press("Continue");
     await until(alpha, runtime, Screen, (s) => s.link.disclosed && !s.link.prompting && s.link.location.grant === "Denied");
     expect(world.maps.watches.size).toBe(0);
@@ -487,7 +487,7 @@ describe("Maps in a browser", () => {
 
   it("\"Use my location\" gives up when no fix arrives, and the quiet fix on opening says nothing (spec/app/maps/index.md, \"Story: Use my location\"; spec/app/maps/connection.md, \"Story: Use my location\")", async () => {
     const world = { ...scene(), phone: true };
-    world.settings.location = { location: "granted", accuracy: "precise" };
+    world.maps.allowed = "granted"; world.maps.precision = "precise";
     world.maps.here = undefined;
     const { alpha } = await open(world, withMaps);
     await showMaps(alpha);

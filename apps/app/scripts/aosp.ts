@@ -315,7 +315,7 @@ function enrolledProfile(): Os.Profile {
   const channel = json(CHANNEL) as { readonly avbPublicKeySha256: string };
   return {
     manifest: pilot.manifestUrl, hosts: pilot.hosts.join(" "), product: pilot.product, device: pilot.device,
-    certificate: pilot.otaCertificateSha256, avb: channel.avbPublicKeySha256, rotate: pilot.rotatePlatformOrAVBKeys, wipe: pilot.wipeData,
+    certificate: pilot.otaCertificateSha256, avb: channel.avbPublicKeySha256, rotate: pilot.rotatePlatformOrAVBKeys, wipe: pilot.wipeData, downgrade: false,
   };
 }
 

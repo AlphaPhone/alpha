@@ -3,7 +3,7 @@ import * as Records from "../../gen/app__account__records.effect.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
-import type { AgentStatus } from "@elizaos/os-bridges"
+import type { AgentStatus, EnvironmentName } from "@elizaos/os-bridges"
 import { Agent } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
@@ -22,7 +22,7 @@ export const activityInFront = effect {
 }
 
 effect function owner(): (string | undefined)!! {
-  const signIn = timeout(tryPromise(() => signInAccounts().status({ environment: "production" })), "5 seconds") catch () => undefined
+  const signIn = timeout(tryPromise(() => signInAccounts().status({ environment: "production" as EnvironmentName })), "5 seconds") catch () => undefined
   if (signIn === undefined) return undefined
   const account = signIn.account
   return account.kind === "signedIn" ? JSON.stringify([account.organizationId, account.userId]) : "local"
