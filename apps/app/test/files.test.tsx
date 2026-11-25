@@ -95,7 +95,7 @@ describe("Files on a phone", () => {
     expect(listed().sort()).toEqual(["Old", "notes.txt"]);
     await press("Internal storage");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 1);
-    await press("Files");
+    await choose("Browse storage");
     await press("Images");
     await until(alpha, runtime, Browser, (s) => s.inCategory && s.listing.status === "Loaded");
     // spec/app/files/index.md, "Images and Videos show the phone's folder groups with their counts and open the folder chosen"
@@ -106,7 +106,7 @@ describe("Files on a phone", () => {
 
     // spec/app/files/index.md, "A place is called empty only after the phone read all of it; a reading cut short keeps what it read"
     world.files.listMost = 1;
-    await press("Files");
+    await choose("Browse storage");
     await press("Internal storage");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 1);
     expect([listed().length, document.body.textContent?.includes("Only part of this place could be read")]).toEqual([1, true]);
@@ -117,7 +117,7 @@ describe("Files on a phone", () => {
     world.files.listMost = 5_000;
 
     // spec/app/files/index.md, "The place showing is read again when asked, and only its newest answer is taken; a folder that no longer exists brings the owner back to the top and says so, never that the storage is unavailable"
-    await press("Files");
+    await choose("Browse storage");
     await press("Internal storage");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded");
     await openRow("Documents");
@@ -242,7 +242,7 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 3);
 
     world.files.stored.push({ volume: "primary", path: "song.txt", directory: false, mimeType: "text/plain", size: 3, modified: 10 });
-    await press("Files");
+    await choose("Browse storage");
     await press("SD card");
     await choose("Filter files");
     await fill("Filter", "song");
@@ -417,7 +417,7 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Recent, (s) => s.rows.length === 1 && s.shown.grant === 0);
 
     // spec/app/files/preview.md, "The owner turns the pages of a PDF, and only the newest page asked for is drawn"
-    await press("Files");
+    await choose("Browse storage");
     await press("Internal storage");
     await press("Download");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 2);
@@ -446,7 +446,7 @@ describe("Files on a phone", () => {
     await press("Close");
 
     // spec/app/files/recent.md, "Opening a row again asks the phone first: it opens, moves to the front and is the document open, or its access has ended and it must be selected again, or its provider cannot be reached and it stays"
-    await press("Files");
+    await choose("Browse storage");
     await press("notes.txt");
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.kind === "Text");
     await press("Close");
@@ -645,7 +645,7 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Browser, (state) => state.trail.length === 3 && state.listing.status === "Loaded");
     expect(document.querySelector("nav[aria-label='Folder path']")?.textContent).toContain("Old");
     await press("Clear the filter");
-    await press("Files");
+    await choose("Browse storage");
     await press("Internal storage");
     await press("Download");
     await until(alpha, runtime, Browser, (state) => state.trail.at(-1) === folder && state.listing.status === "Loaded");
@@ -768,7 +768,7 @@ describe("Files on a phone", () => {
     expect(paths(world).includes("primary:Download/lease.pdf")).toBe(true);
 
     // spec/app/files/trash.md, "Looking at the Trash reads its list when it is free and Alpha may read the storage; leaving it, or losing access, drops the list but what a job or the moment to undo still holds"
-    await press("Files");
+    await choose("Browse storage");
     await press("Trash");
     await until(alpha, runtime, Bin, (s) => s.open && s.listing.status === "Loaded");
     // spec/app/files/trash.md, "The owner restores a listed item before its time, from a list read since the last job"
