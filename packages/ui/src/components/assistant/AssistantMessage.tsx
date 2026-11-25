@@ -33,6 +33,8 @@ export type AssistantMessageProps = Omit<ComponentProps<"article">, "children"> 
   onReadAloud?: () => void;
   /** Opens an https link in Alpha's message. */
   onOpenLink?: (href: string) => void;
+  /** Alpha is still writing it: a mark its last line has not closed is held back. */
+  streaming?: boolean;
 };
 
 const actionItem = cn(focusRing, "flex min-h-11 shrink-0 items-center gap-2 rounded-option px-3.5 text-sm font-semibold whitespace-nowrap focus-visible:-outline-offset-2 active:bg-accent pointer-fine:hover:bg-accent [&_svg]:size-4 [&_svg]:shrink-0");
@@ -46,8 +48,7 @@ function ReplyRuns({ runs, onOpenLink }: { runs: readonly ReplyInline[]; onOpenL
       case "emphasis": return <em key={index}><ReplyRuns runs={run.children} onOpenLink={onOpenLink} /></em>;
       case "code": return <code key={index} className="rounded-sm bg-secondary px-1 font-mono text-sm">{run.text}</code>;
       case "link": return (
-        <a key={index} className="relative underline underline-offset-2" href={run.href} target="_blank" rel="noopener noreferrer" onClick={(event) => {
-          event.stopPropagation();
+        <a key={index} className="pointer-events-auto underline underline-offset-2" href={run.href} target="_blank" rel="noopener noreferrer" onClick={(event) => {
           if (!onOpenLink) return;
           event.preventDefault();
           onOpenLink(run.href);
@@ -98,17 +99,18 @@ function roam(event: KeyboardEvent<HTMLDivElement>, close: () => void) {
 /**
  * One message of the conversation: the owner's in a quiet bubble at the end, Alpha's as plain text under its mark
  * with the cards of its reply. Pressing the text opens a row of what can be done with it under the message, each
- * action only where it is offered. Alpha's words are drawn with the model's Markdown (spec/app/assistant/reply.md).
+ * action only where it is offered; a link in the text is its own control beside that press, never inside it. Alpha's words are drawn with the model's Markdown (spec/app/assistant/reply.md).
  * @model spec/app/assistant/chats.md
  */
-export function AssistantMessage({ author, text, quote, attachments = [], children, onPreview, onQuote, onCopy, onUseInEmail, onEditAgain, onFork, onReadAloud, onOpenLink, className, ...props }: AssistantMessageProps) {
+export function AssistantMessage({ author, text, quote, attachments = [], children, onPreview, onQuote, onCopy, onUseInEmail, onEditAgain, onFork, onReadAloud, onOpenLink, streaming = false, className, ...props }: AssistantMessageProps) {
   const owner = author === "owner";
   const body = <span className="break-words whitespace-pre-line">{text}</span>;
-  const shown = owner ? body : <span className="flex flex-col gap-3 break-words"><ReplyBlocks blocks={replyMarkdown(text)} onOpenLink={onOpenLink} /></span>;
+  const shown = owner ? body : <span className="flex flex-col gap-3 break-words"><ReplyBlocks blocks={replyMarkdown(text, streaming)} onOpenLink={onOpenLink} /></span>;
   const bubble = cn("max-w-full text-left text-base", owner ? "rounded-tile rounded-br-box bg-alpha px-4 py-2.75 leading-normal text-alpha-foreground" : "text-body leading-chat");
   const actions = onQuote || onCopy || onUseInEmail || onEditAgain || onFork || onReadAloud;
   const [open, setOpen] = useState<false | "pointer" | "keys">(false);
   const rowId = useId();
+  const textId = useId();
   const close = () => setOpen(false);
   const pick = (event: MouseEvent<HTMLButtonElement>, act: () => void) => {
     refocus(event.currentTarget);
@@ -126,19 +128,23 @@ export function AssistantMessage({ author, text, quote, attachments = [], childr
       <div className="flex max-w-full items-start gap-2.5">
         {owner ? null : <span aria-hidden className="mt-0.75 flex size-4.5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-alpha text-alpha-foreground"><Mark className="size-[118%] shrink-0" /></span>}
         {actions ? (
-          <button
-            type="button"
-            aria-haspopup="menu"
-            aria-expanded={Boolean(open)}
-            aria-controls={open ? rowId : undefined}
-            className={cn(focusRing, bubble, "relative before:absolute before:inset-0 before:min-h-11")}
-            onClick={() => setOpen((was) => (was ? false : "pointer"))}
-            onKeyDown={(event) => {
-              if (event.key !== "Enter" && event.key !== " " && event.key !== "ArrowDown") return;
-              event.preventDefault();
-              setOpen("keys");
-            }}
-          >{shown}</button>
+          <div className="relative max-w-full">
+            <button
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={Boolean(open)}
+              aria-controls={open ? rowId : undefined}
+              aria-labelledby={textId}
+              className={cn(focusRing, "absolute inset-0 min-h-11", owner && "rounded-tile rounded-br-box")}
+              onClick={() => setOpen((was) => (was ? false : "pointer"))}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " " && event.key !== "ArrowDown") return;
+                event.preventDefault();
+                setOpen("keys");
+              }}
+            />
+            <div id={textId} className={cn(bubble, "pointer-events-none relative")}>{shown}</div>
+          </div>
         ) : (
           <div className={bubble}>{shown}</div>
         )}
