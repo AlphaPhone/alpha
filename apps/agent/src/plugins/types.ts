@@ -1,6 +1,5 @@
 // spec/agent/index.md, "Story: Run Alpha's agent on the phone"
-import type { AgentPlugin } from "@elizaos/agent";
-import type { LocalRoute } from "@elizaos/agent/routes";
+import type { AgentPlugin, LocalRoute } from "@elizaos/agent-host";
 
 /** Alarm chime tone identifiers shared with the Clock app. */
 export type ClockSound = "radar" | "chime" | "pulse" | "gentle" | "classic";

@@ -1,5 +1,5 @@
 // spec/app/contacts/agent.md, "Story: Let the agent read what I have open"; spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"
-import { type DeviceOperation, readResult } from "@elizaos/agent/operations"
+import { type DeviceOperation, readResult } from "@elizaos/agent"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { Machine as ContactsMachine } from "../../gen/app__contacts.effect.vibe"
 import { type Opened, readOf, senderSaid } from "../../gen/app__contacts__agent.effect.vibe"
@@ -7,7 +7,7 @@ import { Machine as MessagesMachine } from "../../gen/app__messages.effect.vibe"
 import { Machine as ComposerMachine } from "../../gen/app__messages__composer.effect.vibe"
 import { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
 import { Machine as VoicemailMachine } from "../../gen/app__phone__voicemail.effect.vibe"
-import { Telephony, telephony } from "../platform/telephony.vibe"
+import { Telephony, readAddressBook, telephony } from "../platform/telephony.vibe"
 import { Device } from "../platform/device.vibe"
 import { contained } from "../runtime/reactor.vibe"
 import { Drafts } from "../messages/composer.vibe"
@@ -112,7 +112,7 @@ effect function keypad(number: string | undefined): unknown!!(Dialer | PhoneMach
 /** Contacts, opened on `query`: the agent learns only whether a contact matched. */
 effect function shown(query: string): unknown!!(Telephony | Rows | ContactsMachine | Shell) {
   const unavailable = { kind: "contact-show", status: "unavailable" }
-  const access = telephony("open", (c) => c.contacts.open()) catch () => undefined
+  const access = readAddressBook("open contacts", (c) => c.open()) catch () => undefined
   if (access === undefined || !access.readable) return unavailable
   const shell = try Shell
   try contained(shell.send({ type: "openView", view: "Contacts" }), "the agent's search")

@@ -85,12 +85,12 @@ type Effect =
   | LookInto({ ticket: int, trail: List[int] })
   | AgentLook({ ticket: int, folder: int, filter: S::Filter })
   | Tell({ request: int, ok: bool, items: List[F::Item] })
-  | Perform({ ticket: int, work: C::Work, items: List[F::Item], name: str, folder: int, dest: int, replace: bool })
+  | Perform({ ticket: int, work: C::Work, items: List[F::Item], name: str, folder: int, dest: int, replace: bool, downloads: bool })
   | ToTrash({ items: List[int], approval: int })
   | Show({ item: F::Item, siblings: List[str] })
-  | Share({ ticket: int, channel: C::Dest, items: List[F::Item] })
+  | Share({ ticket: int, channel: C::Dest, items: List[F::Item], approval: int })
   | Taken({ items: List[int] })
-  | Receipt({ ticket: int, ran: bool, outcome: A::Outcome })
+  | Receipt({ ticket: int, ran: bool, outcome: A::Outcome, done: int })
 type Moved = { state: Files, out: List[Effect] }
 ```
 
@@ -99,6 +99,7 @@ type Moved = { state: Files, out: List[Effect] }
 ```quint
 pure val ticketValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20)
 pure val requestValues = Set(7, 8)
+pure val openedTrailValues = Set(List(), List(1, 4), List(1, 2))
 pure val targetValues = Set(1, 4)
 pure val folderValues = Set(1)
 pure val depthValues = Set(0, 1)
@@ -127,11 +128,15 @@ pure val weight_openVolume = 40
 pure val weight_openFolder = 10
 pure val weight_listed = 100
 pure val weight_openCategory = 5
+pure val weight_openCategoryGroup = 2
+pure val groupTrailValues = Set(List(1), List(1, 4), List(1, 4, 5))
 pure val weight_toggle = 30
 pure val weight_selectAll = 15
 pure val weight_askToDelete = 20
 pure val weight_confirmDelete = 15
 pure val weight_openMoveTo = 40
+pure val weight_beginDestinationFolder = 3
+pure val destinationTicketValues = Set(1, 2, 3, 4, 5)
 pure val weight_moveInto = 40
 pure val weight_moveUp = 15
 pure val weight_destRead = 100
@@ -146,12 +151,22 @@ pure val weight_openShare = 30
 pure val weight_shareTo = 40
 pure val weight_shareEnded = 100
 pure val weight_approve = 2
+pure val weight_approveBatch = 1
+pure val weight_approveNewFolder = 1
+pure val parentPlaceValues = Set({ folder: 1, path: List(), names: List("b") }, { folder: 4, path: List(1), names: List() })
+pure val approvedItemsValues = Set(List(), List({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0 }),
+  List({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0 }, { id: 3, name: "c", revision: 1, kind: F::Document, volume: 1, bytes: 0 }))
+pure val reviewedFromValues = Set(S::top, { trail: List(1, 4), inCategory: false, category: F::Other })
 pure val weight_renameShown = 1
+pure val weight_openPreviewParent = 1
+pure val weight_stagePreviewFile = 1
+pure val parentTrailValues = Set(List(1), List(1, 4))
 pure val weight_refresh = 3
 pure val weight_agentLook = 1
 pure val weight_agentLooked = 100
 pure val weight_agentFilter = 1
 pure val weight_agentOpen = 1
+pure val weight_openReviewed = 1
 pure val weight_restart = 1
 pure val weight_cancelSelection = 8
 pure val weight_keepFiles = 8
@@ -358,9 +373,29 @@ pure def canOpenTop(s: Files, by: Actor): bool = by == Owner and allowed(s) and 
 pure def openTop(s: Files, by: Actor): Moved = entered(List(), false, F::Other, { ...s, handed: false })
 
 pure def stepMovingStartsAfresh(before: Files, via: str, after: Files): bool =
-  (via == "openFolder" or via == "openCrumb" or via == "openVolume" or via == "openCategory" or via == "openTop") implies
+  (via == "openFolder" or via == "openCrumb" or via == "openVolume" or via == "openCategory" or via == "openCategoryGroup" or via == "openTop") implies
     (after.items.length() == 0 and after.picked.length() == 0 and not(after.deleting.showing)
       and (atTop(after) or (after.listing.status == R::Loading and after.listing.ticket == before.listing.ticket + 1)))
+```
+
+### Images and Videos show the phone's folder groups with their counts and open the folder chosen
+
+The phone supplies the folder counts with its latest answer, or groups
+the entries that answer actually read. The owner opens a group from that
+answer's ticket. The group opens the full folder at its path, and the
+filter, when used, still shows individual results.
+
+```quint
+pure def grouped(s: Files): bool =
+  s.inCategory and (s.category == F::Image or s.category == F::Video) and not(s.search.searching)
+
+pure def canOpenCategoryGroup(s: Files, groupTrail: List[int], ticket: int, by: Actor): bool =
+  by == Owner and grouped(s) and browse(s) == Showing and s.listing.ticket == ticket
+    and groupTrail.length() > 0 and groupTrail.every(id => id > 0)
+    and s.volumes.some(v => v.id == groupTrail.nthOr(0, 0))
+
+pure def openCategoryGroup(s: Files, groupTrail: List[int], ticket: int, by: Actor): Moved =
+  entered(groupTrail, false, F::Other, { ...s, handed: false })
 ```
 
 ### The top offers the Trash, which shows until the owner goes back or anywhere else
@@ -698,6 +733,28 @@ pure def agentFilter(s: Files, request: int, wanted: S::Filter, guarded: bool, b
   else asking(wanted, request, s)
 ```
 
+### An approved filter for a named folder goes to that folder before it searches
+
+The primary folder path is resolved on the phone. Its filter can replace
+a previous read, but cannot move an open preview, a selection, or a
+change in progress. The owner sees the named folder and the requested
+filter, with one answer for the agent.
+
+```quint
+pure def canAgentFilterAt(s: Files, request: int, wanted: S::Filter, openedTrail: List[int], guarded: bool, by: Actor): bool =
+  by == Agent and request > 0
+
+pure def agentFilterAt(s: Files, request: int, wanted: S::Filter, openedTrail: List[int], guarded: bool, by: Actor): Moved =
+  val safe = s.open and allowed(s) and not(s.trash) and not(guarded) and s.picked.length() == 0 and s.details == 0
+    and not(s.deleting.showing) and not(C::busy(s.change)) and not(C::asking(s.change)) and s.change.panel == 0 and not(s.sheet.open)
+  val known = openedTrail.length() == 0 or (openedTrail.every(i => i > 0) and s.volumes.some(v => v.id == openedTrail.nthOr(0, 0)))
+  val there = entered(openedTrail, false, F::Other, { ...s, search: S::clearFilter(s.search), handed: false })
+  val filtered = asking(wanted, request, there.state)
+  if (safe and known)
+    { state: filtered.state, out: unanswered({ ...s.search, peeker: 0 }).concat(there.out).concat(filtered.out) }
+  else { state: s, out: List(Tell({ request: request, ok: false, items: List() })) }
+```
+
 ### The agent opens a file the owner is shown, as listed or found now, when no file is open over Files; otherwise it is told it failed
 
 Whether the preview shows a file is the preview's fact.
@@ -710,6 +767,40 @@ pure def agentOpen(s: Files, request: int, file: F::Item, previewing: bool, guar
   if (allowed(s) and s.open and not(s.trash) and not(guarded) and not(previewing) and file.kind != F::Folder and visible.includes(file))
     { state: s, out: List(Show({ item: file, siblings: if (s.items.includes(file)) names(s) else List() }), Tell({ request: request, ok: true, items: List(file) })) }
   else { state: s, out: List(Tell({ request: request, ok: false, items: List() })) }
+```
+
+### A reviewed exact path opens its file or folder; a shown position is bound to the same path at review
+
+The phone resolves a path, or a position among the results it shows, before
+the owner approves it. The displayed relative path and the phone's identity
+for that entry stay with the approval. The same file opens in the preview.
+The same folder opens at its full path, when it would disturb no selection
+or other work. A reviewed path can open outside the folder showing. If it
+has changed or the phone no longer admits Files, it does not open.
+
+```quint
+pure def canOpenReviewed(s: Files, request: int, file: F::Item, openedTrail: List[int], previewing: bool, guarded: bool, by: Actor): bool =
+  by == Phone and request > 0
+
+pure def openReviewed(s: Files, request: int, file: F::Item, openedTrail: List[int], previewing: bool, guarded: bool, by: Actor): Moved =
+  val folder = file.kind == F::Folder
+  val safe = s.open and allowed(s) and not(s.trash) and not(previewing) and not(guarded)
+  val resting = s.picked.length() == 0 and s.details == 0 and not(s.deleting.showing)
+    and not(C::busy(s.change)) and not(C::asking(s.change)) and s.change.panel == 0 and not(s.sheet.open)
+  val path = openedTrail.length() > 1 and openedTrail.every(i => i > 0)
+    and openedTrail.nthOr(0, 0) == file.volume and openedTrail.nthOr(openedTrail.length() - 1, 0) == file.id
+    and s.volumes.some(v => v.id == file.volume)
+  val opened = if (folder) entered(openedTrail, false, F::Other, { ...s, handed: false }) else
+    { state: s, out: List(Show({ item: file, siblings: if (s.items.includes(file)) names(s) else List() })) }
+  if (safe and file.id > 0 and (not(folder) or (resting and path)))
+    { state: opened.state, out: opened.out.append(Tell({ request: request, ok: true, items: List(file) })) }
+  else { state: s, out: List(Tell({ request: request, ok: false, items: List() })) }
+
+pure def stepReviewedOpenKeepsAFileInItsPreview(before: Files, via: str, after: Files, out: List[Effect]): bool =
+  via == "openReviewed" implies out.every(e => match e {
+    | Show(x) => before.open and allowed(before) and not(before.trash) and x.item.kind != F::Folder and after == before
+    | _ => true
+  })
 ```
 
 ### The phone offers Files to an agent that takes Files' operations, and naming files by their place among the results shown only beside them; a request the phone cannot take is never shown for approval
@@ -778,12 +869,12 @@ pure def selected(picked: List[int], s: Files): Files =
     sheet: if (picked != s.picked) M::close(s.sheet) else s.sheet,
     deleting: if (s.deleting.showing) V::revise(s.deleting) else s.deleting }
 
-pure def canToggle(s: Files, target: int, by: Actor): bool = by == Owner and browse(s) == Showing and has(s.items, target)
+pure def canToggle(s: Files, target: int, by: Actor): bool = by == Owner and browse(s) == Showing and not(grouped(s)) and has(s.items, target)
 
 pure def toggle(s: Files, target: int, by: Actor): Files =
   selected(if (s.picked.includes(target)) s.picked.select(id => id != target) else s.picked.append(target), s)
 
-pure def canSelectAll(s: Files, by: Actor): bool = by == Owner and browse(s) == Showing and s.items.length() > 0
+pure def canSelectAll(s: Files, by: Actor): bool = by == Owner and browse(s) == Showing and not(grouped(s)) and s.items.length() > 0
 
 pure def selectAll(s: Files, by: Actor): Files = selected(s.items.listMap(i => i.id), s)
 
@@ -826,8 +917,10 @@ pure def alwaysAConfirmationShowsASelection(s: Files): bool = V::canConfirm(s.de
 
 pure def stepOnlyWhatWasConfirmedIsTrashed(before: Files, via: str, after: Files, out: List[Effect]): bool =
   out.every(e => match e {
-    | ToTrash(t) => t.items.length() > 0 and t.items.every(id => has(before.items, id))
-        and (t.approval != 0 or (via == "confirmDelete" and V::canConfirm(before.deleting) and t.items == before.picked))
+    | ToTrash(t) => t.items.length() > 0 and
+        (if (via == "approveBatch") t.approval > 0
+         else t.items.every(id => has(before.items, id))
+           and (t.approval != 0 or (via == "confirmDelete" and V::canConfirm(before.deleting) and t.items == before.picked)))
     | _ => true
   })
 ```
@@ -843,18 +936,18 @@ pure def going(trail: List[int], s: Files): Moved =
   { state: { ...s, sheet: sheet }, out: if (trail.length() > 0) List(LookInto({ ticket: sheet.reading.ticket, trail: trail })) else List() }
 
 pure def canOpenMoveTo(s: Files, by: Actor): bool =
-  by == Owner and browse(s) == Showing and not(s.inCategory) and s.picked.length() > 0 and not(s.sheet.open)
+  by == Owner and browse(s) == Showing and not(s.inCategory) and s.picked.length() > 0 and not(s.sheet.open) and not(C::busy(s.change))
 
 pure def openMoveTo(s: Files, by: Actor): Moved = going(s.trail, s)
 
 pure def canMoveInto(s: Files, target: int, by: Actor): bool =
-  by == Owner and s.sheet.open and allowed(s)
+  by == Owner and s.sheet.open and allowed(s) and not(C::busy(s.change))
     and (if (s.sheet.trail.length() == 0) s.volumes.some(v => v.id == target) and chosen(s).every(i => i.volume == target)
       else s.sheet.reading.status == R::Loaded and s.sheet.folders.includes(target))
 
 pure def moveInto(s: Files, target: int, by: Actor): Moved = going(s.sheet.trail.append(target), s)
 
-pure def canMoveUp(s: Files, depth: int, by: Actor): bool = by == Owner and s.sheet.open and depth >= 0 and depth < s.sheet.trail.length()
+pure def canMoveUp(s: Files, depth: int, by: Actor): bool = by == Owner and s.sheet.open and not(C::busy(s.change)) and depth >= 0 and depth < s.sheet.trail.length()
 
 pure def moveUp(s: Files, depth: int, by: Actor): Moved =
   going(s.sheet.trail.foldl(List(), (kept, folder) => if (kept.length() < depth) kept.append(folder) else kept), s)
@@ -874,22 +967,40 @@ pure def alwaysTheSheetKeepsItsRules(s: Files): bool =
 
 ### A change starts from the selection, of the folder showing, into a destination only as the Move to sheet last read it, as Changes allows it
 
+New folder at the top opens the primary storage before showing the name
+form. In Downloads it uses the device's Download directory, creating
+that directory first only if it is missing.
+
 ```quint
-pure def performing(c: C::Change, s: Files): List[Effect] =
+pure def performAt(c: C::Change, s: Files, downloads: bool): List[Effect] =
   if (C::busy(c) and not(C::busy(s.change)))
-    List(Perform({ ticket: c.attempt.id, work: c.work, items: c.items, name: c.name, folder: c.folder, dest: c.dest.folder, replace: c.replace }))
+    List(Perform({ ticket: c.attempt.id, work: c.work, items: c.items, name: c.name, folder: c.folder, dest: c.dest.folder, replace: c.replace, downloads: downloads }))
   else List()
+
+pure def performing(c: C::Change, s: Files): List[Effect] = performAt(c, s, false)
 
 pure def moving(work: C::Work): bool = work == C::MoveTo or work == C::CopyTo
 
+pure def downloadsNewFolder(s: Files, work: C::Work): bool =
+  work == C::NewFolder and s.inCategory and s.category == F::Download and s.volumes.length() > 0
+
+pure def changeParent(s: Files, work: C::Work): int =
+  if (downloadsNewFolder(s, work)) s.volumes.nthOr(0, { id: 0, used: 0, total: 0 }).id else here(s)
+
 pure def canBegin(s: Files, work: C::Work, name: str, by: Actor): bool =
-  by == Owner and browse(s) == Showing and not(s.inCategory) and (not(moving(work)) or M::ready(s.sheet))
-    and C::canBegin(s.change, work, if (work == C::NewFolder) List() else chosen(s), names(s), here(s), name, M::place(s.sheet), 0)
+  by == Owner and browse(s) == Showing and (not(s.inCategory) or downloadsNewFolder(s, work)) and (not(moving(work)) or M::ready(s.sheet))
+    and C::canBegin(s.change, work, if (work == C::NewFolder) List() else chosen(s), names(s), changeParent(s, work), name, M::place(s.sheet), 0)
 
 pure def begin(s: Files, work: C::Work, name: str, by: Actor): Moved =
   val cleared = { ...selected(List(), s), sheet: M::close(s.sheet) }
-  val change = C::begin(cleared.change, work, if (work == C::NewFolder) List() else chosen(s), names(s), here(s), name, M::place(s.sheet), 0)
-  { state: { ...cleared, change: change }, out: performing(change, cleared) }
+  val change = C::begin(cleared.change, work, if (work == C::NewFolder) List() else chosen(s), names(s), changeParent(s, work), name, M::place(s.sheet), 0)
+  { state: { ...cleared, change: change }, out: performAt(change, cleared, downloadsNewFolder(s, work)) }
+
+pure def stepDownloadsFolderOnlyByOwner(before: Files, via: str, after: Files, out: List[Effect]): bool =
+  out.every(e => match e {
+    | Perform(p) => p.downloads implies (via == "begin" and downloadsNewFolder(before, p.work) and p.folder == changeParent(before, p.work))
+    | _ => true
+  })
 
 pure def stepADestinationIsAFolderAsRead(before: Files, via: str, after: Files): bool =
   (via == "begin" and moving(after.change.work) and after.change.attempt.id != before.change.attempt.id) implies
@@ -908,6 +1019,67 @@ pure def canGoBack(s: Files, by: Actor): bool = by == Owner and C::canGoBack(s.c
 pure def goBack(s: Files, by: Actor): Files = { ...s, change: C::goBack(s.change) }
 ```
 
+### A new folder in the destination picker uses the parent as shown and opens the new folder in that picker
+
+The selection stays as it was. A new folder is only asked for in a loaded
+destination, from the reading that was showing when the owner opened the
+name form. While it is being made, the owner can close the picker, and a
+late answer never brings it back. On success the picker reads the actual
+folder the phone created. If creation failed or cannot be confirmed, the
+picker reads the parent again.
+
+```quint
+pure def canBeginDestinationFolder(s: Files, destinationTicket: int, name: str, by: Actor): bool =
+  by == Owner and s.open and allowed(s) and M::ready(s.sheet) and s.sheet.reading.ticket == destinationTicket
+    and C::canBegin(s.change, C::NewFolder, List(), s.sheet.names, M::here(s.sheet), name, C::nowhere, 0)
+
+pure def beginDestinationFolder(s: Files, destinationTicket: int, name: str, by: Actor): Moved =
+  val change = C::begin(s.change, C::NewFolder, List(), s.sheet.names, M::here(s.sheet), name, C::nowhere, 0)
+  { state: { ...s, change: change }, out: performing(change, s) }
+
+pure def stepDestinationFolderKeepsItsSelection(before: Files, via: str, after: Files, out: List[Effect]): bool =
+  via == "beginDestinationFolder" implies
+    (before.picked == after.picked and before.sheet == after.sheet and out.length() == 1
+      and out.every(e => match e {
+        | Perform(p) => M::ready(before.sheet) and p.work == C::NewFolder and p.folder == M::here(before.sheet) and p.items.length() == 0
+        | _ => false
+      }))
+```
+
+### The storage-backed preview prepares Move to or Trash for the exact file in its loaded folder
+
+Files enters the storage parent the phone verified when it is somewhere
+else. The opening and the selection happen while there is no conflicting
+work. A file is selected only from that reading of its parent, as the phone
+found it. The operations then use Files' destination picker or delete
+confirmation, as if the owner had selected the same listed item.
+
+```quint
+pure def previewActionReady(s: Files): bool =
+  s.open and allowed(s) and not(s.trash) and s.picked.length() == 0 and s.details == 0
+    and not(s.deleting.showing) and not(s.sheet.open) and s.change.panel == 0
+    and not(C::busy(s.change)) and not(C::asking(s.change)) and s.change.sending.outcome != A::Sent
+
+pure def canOpenPreviewParent(s: Files, parentTrail: List[int], by: Actor): bool =
+  by == Phone and previewActionReady(s) and parentTrail.length() > 0 and parentTrail.every(i => i > 0)
+    and s.volumes.some(v => v.id == parentTrail.nthOr(0, 0))
+
+pure def openPreviewParent(s: Files, parentTrail: List[int], by: Actor): Moved =
+  entered(parentTrail, false, F::Other, { ...s, handed: false })
+
+pure def canStagePreviewFile(s: Files, file: F::Item, ticket: int, trashing: bool, by: Actor): bool =
+  by == Phone and browse(s) == Showing and not(s.inCategory) and previewActionReady(s)
+    and s.listing.ticket == ticket and s.items.includes(file) and file.kind != F::Folder
+
+pure def stagePreviewFile(s: Files, file: F::Item, ticket: int, trashing: bool, by: Actor): Moved =
+  val chosen = selected(List(file.id), s)
+  if (trashing) { state: { ...chosen, deleting: V::present(chosen.deleting) }, out: List() }
+  else going(s.trail, chosen)
+
+pure def stepStagingAPreviewSelectsOnlyItsFile(before: Files, via: str, after: Files): bool =
+  via == "stagePreviewFile" implies after.picked.length() == 1 and after.picked.every(id => has(before.items, id))
+```
+
 ### The owner renames the file open in the preview as a change of Files, to a name free among the names beside it
 
 A document another app holds has no names beside it, and that app refuses
@@ -915,7 +1087,7 @@ a name it already holds.
 
 ```quint
 pure def canRenameShown(s: Files, file: F::Item, name: str, siblings: List[str], by: Actor): bool =
-  by == Owner and C::canBegin(s.change, C::Rename, List(file), siblings, 0, name, C::nowhere, 0)
+  by == Owner and s.open and allowed(s) and not(s.trash) and C::canBegin(s.change, C::Rename, List(file), siblings, 0, name, C::nowhere, 0)
 
 pure def renameShown(s: Files, file: F::Item, name: str, siblings: List[str], by: Actor): Moved =
   val change = C::begin(s.change, C::Rename, List(file), siblings, 0, name, C::nowhere, 0)
@@ -930,9 +1102,13 @@ pure def canFinished(s: Files, ticket: int, by: Actor): bool = by == Phone and C
 pure def finished(s: Files, ticket: int, done: List[int], failed: List[int], by: Actor): Moved =
   val change = C::finished(s.change, ticket, done, failed)
   val told = (if (change.work == C::MoveTo and change.done.length() > 0) List(Taken({ items: change.done })) else List())
-    .concat(if (change.approval != 0) List(Receipt({ ticket: change.approval, ran: true, outcome: change.attempt.outcome })) else List())
+    .concat(if (change.approval != 0) List(Receipt({ ticket: change.approval, ran: true, outcome: change.attempt.outcome, done: change.done.length() })) else List())
   val again = if (s.open and allowed(s) and not(atTop(s))) refresh({ ...s, change: change }, by) else { state: { ...s, change: change }, out: List() }
-  { state: again.state, out: told.concat(again.out) }
+  val child = done.nthOr(0, 0)
+  val trail = if (change.attempt.outcome == A::Confirmed and child > 0) s.sheet.trail.append(child) else s.sheet.trail
+  val picker = if (s.sheet.open and M::ready(s.sheet) and change.work == C::NewFolder and change.folder == M::here(s.sheet))
+    going(trail, again.state) else { state: again.state, out: List() }
+  { state: picker.state, out: told.concat(again.out).concat(picker.out) }
 ```
 
 ### One request leaves for each change, for items listed as they are now or the file shown, and only when the owner starts, chooses or renames it, or approved it
@@ -940,9 +1116,10 @@ pure def finished(s: Files, ticket: int, done: List[int], failed: List[int], by:
 ```quint
 pure def stepOneRequestPerChange(before: Files, via: str, after: Files, out: List[Effect]): bool =
   out.every(e => match e {
-    | Perform(p) => (via == "begin" or via == "approve" or via == "keepBoth" or via == "replaceThem" or via == "renameShown")
+    | Perform(p) => (via == "begin" or via == "approve" or via == "approveBatch" or via == "approveNewFolder" or via == "beginDestinationFolder" or via == "keepBoth" or via == "replaceThem" or via == "renameShown")
         and not(C::busy(before.change)) and p.ticket == after.change.attempt.id
-        and (via == "keepBoth" or via == "replaceThem" or via == "renameShown" or p.items.every(i => before.items.includes(i)))
+        and (if (via == "approveBatch") after.change.approval > 0 and p.items == after.change.items and not(p.replace)
+             else via == "keepBoth" or via == "replaceThem" or via == "renameShown" or p.items.every(i => before.items.includes(i)))
     | _ => true
   })
 ```
@@ -958,7 +1135,7 @@ pure val shareMost = 100
 pure def shareable(items: List[F::Item]): bool = items.length() > 0 and items.length() <= shareMost and not(items.some(i => i.kind == F::Folder))
 
 pure def canOpenShare(s: Files, mail: bool, by: Actor): bool =
-  by == Owner and browse(s) == Showing and shareable(chosen(s)) and s.change.panel == 0
+  by == Owner and browse(s) == Showing and shareable(chosen(s)) and s.change.panel == 0 and s.change.sending.outcome != A::Sent
 
 pure def openShare(s: Files, mail: bool, by: Actor): Files = { ...s, change: C::openShare(s.change, chosen(s), mail, 0) }
 
@@ -966,12 +1143,15 @@ pure def canShareTo(s: Files, channel: C::Dest, by: Actor): bool = by == Owner a
 
 pure def shareTo(s: Files, channel: C::Dest, by: Actor): Moved =
   val change = C::shareTo(s.change, channel)
-  { state: { ...s, change: change }, out: List(Share({ ticket: change.sending.id, channel: channel, items: s.change.sharing })) }
+  { state: { ...s, change: { ...change, asker: 0 } }, out: List(Share({ ticket: change.sending.id, channel: channel, items: s.change.sharing, approval: 0 })) }
 
 pure def canShareEnded(s: Files, ticket: int, by: Actor): bool = by == Phone and C::canShareEnded(s.change, ticket)
 
-pure def shareEnded(s: Files, ticket: int, opened: bool, known: bool, by: Actor): Files =
-  { ...s, change: C::shareEnded(s.change, ticket, opened, known) }
+pure def shareEnded(s: Files, ticket: int, opened: bool, known: bool, by: Actor): Moved =
+  val change = C::shareEnded(s.change, ticket, opened, known)
+  val approval = s.change.asker
+  { state: { ...s, change: { ...change, asker: 0 } },
+    out: if (approval > 0) List(Receipt({ ticket: approval, ran: true, outcome: change.sending.outcome, done: 0 })) else List() }
 
 pure def canCloseShare(s: Files, by: Actor): bool = by == Owner and C::canRetire(s.change)
 
@@ -993,7 +1173,7 @@ pure def workOf(act: Action): C::Work =
 pure def runnable(s: Files, act: Action, file: F::Item, folder: int, name: str, dest: C::Place, guarded: bool): bool =
   browse(s) == Showing and not(guarded) and not(s.inCategory) and here(s) == folder
     and (act == Making or s.items.includes(file))
-    and (act != Sharing or shareable(List(file)))
+    and (act != Sharing or (shareable(List(file)) and s.change.panel == 0 and s.change.sending.outcome != A::Sent))
     and (act == Deleting or act == Sharing
       or C::canBegin(s.change, workOf(act), if (act == Making) List() else List(file), names(s), folder, name, dest, 7))
 
@@ -1002,9 +1182,9 @@ pure def canApprove(s: Files, ticket: int, act: Action, file: F::Item, folder: i
 
 pure def approve(s: Files, ticket: int, act: Action, file: F::Item, folder: int, name: str, dest: C::Place, guarded: bool, mail: bool, by: Actor): Moved =
   val change = C::begin(s.change, workOf(act), if (act == Making) List() else List(file), names(s), folder, name, dest, ticket)
-  if (not(runnable(s, act, file, folder, name, dest, guarded))) { state: s, out: List(Receipt({ ticket: ticket, ran: false, outcome: A::Refused })) }
+  if (not(runnable(s, act, file, folder, name, dest, guarded))) { state: s, out: List(Receipt({ ticket: ticket, ran: false, outcome: A::Refused, done: 0 })) }
   else if (act == Deleting) { state: selected(s.picked.select(id => id != file.id), s), out: List(ToTrash({ items: List(file.id), approval: ticket })) }
-  else if (act == Sharing) { state: { ...s, change: C::openShare(s.change, List(file), mail, ticket) }, out: List(Receipt({ ticket: ticket, ran: true, outcome: A::Confirmed })) }
+  else if (act == Sharing) { state: { ...s, change: C::openShare(s.change, List(file), mail, ticket) }, out: List(Receipt({ ticket: ticket, ran: true, outcome: A::Confirmed, done: 0 })) }
   else { state: { ...s, change: change }, out: performing(change, s) }
 ```
 
@@ -1017,6 +1197,86 @@ pure def stepAnApprovalActsOnItsItemAlone(before: Files, via: str, after: Files,
     | ToTrash(t) => t.items.length() == 1 and browse(before) == Showing
     | _ => true
   })
+```
+
+### A reviewed batch runs once for the paths shown in the review, as one move, Trash job or Android share
+
+The owner sees every path before approving. A refresh never changes which
+paths the approval names. Files still has to show the place from which the
+batch was reviewed, with no conflicting work, on an unprotected screen.
+The phone checks each reviewed identity against the path; a move keeps both
+names and the Trash can undo the files it received. Android opens one
+chooser for the entire share or leaves it closed. If any destination or
+result is unknown, the approval does not retry.
+
+```quint
+pure def canApproveBatch(s: Files, ticket: int, act: Action, approvedItems: List[F::Item], reviewedFrom: S::Where, dest: C::Place, guarded: bool, by: Actor): bool =
+  by == Phone and ticket > 0
+
+pure def reviewReady(s: Files, reviewedFrom: S::Where, guarded: bool): bool =
+  s.open and allowed(s) and not(s.trash) and not(guarded) and where(s) == reviewedFrom
+    and not(C::busy(s.change)) and not(C::asking(s.change)) and not(s.deleting.showing) and not(s.sheet.open)
+    and s.change.panel == 0 and s.change.sending.outcome != A::Sent
+
+pure def batchFits(s: Files, act: Action, approvedItems: List[F::Item], reviewedFrom: S::Where, dest: C::Place, guarded: bool): bool =
+  reviewReady(s, reviewedFrom, guarded)
+    and approvedItems.length() > 0 and approvedItems.length() <= 50
+    and approvedItems.every(i => i.id > 0 and approvedItems.select(j => j.id == i.id).length() == 1)
+    and (act == Deleting
+      or (act == Sharing and shareable(approvedItems))
+      or (act == Moving and C::canBegin(s.change, C::MoveTo, approvedItems, List(), 0, "", dest, 7)))
+
+pure def approveBatch(s: Files, ticket: int, act: Action, approvedItems: List[F::Item], reviewedFrom: S::Where, dest: C::Place, guarded: bool, by: Actor): Moved =
+  val sharing = C::shareTo(C::openShare(s.change, approvedItems, false, ticket), C::Chooser)
+  val moving = C::begin(s.change, C::MoveTo, approvedItems, List(), 0, "", dest, ticket)
+  if (not(batchFits(s, act, approvedItems, reviewedFrom, dest, guarded)))
+    { state: s, out: List(Receipt({ ticket: ticket, ran: false, outcome: A::Refused, done: 0 })) }
+  else if (act == Deleting)
+    { state: selected(s.picked.select(id => not(approvedItems.some(i => i.id == id))), s),
+      out: List(ToTrash({ items: approvedItems.listMap(i => i.id), approval: ticket })) }
+  else if (act == Sharing)
+    { state: { ...s, change: sharing }, out: List(Share({ ticket: sharing.sending.id, channel: C::Chooser, items: approvedItems, approval: ticket })) }
+  else
+    { state: { ...s, change: moving }, out: performing(moving, s) }
+
+pure def stepABatchDispatchesOneReviewedAction(before: Files, via: str, after: Files, out: List[Effect]): bool =
+  via == "approveBatch" implies
+    (out.length() == 1 and out.every(e => match e {
+      | Perform(p) => before.open and allowed(before) and p.items == after.change.items and not(p.replace)
+      | ToTrash(t) => before.open and allowed(before) and t.approval > 0 and t.items.length() > 0
+      | Share(x) => before.open and allowed(before) and x.approval > 0 and x.channel == C::Chooser and shareable(x.items)
+      | Receipt(r) => not(r.ran) and r.outcome == A::Refused
+      | _ => false
+    }))
+```
+
+### An approved new folder is created once in the exact parent shown on the approval
+
+The parent on the card might be a different folder from the one Files is
+showing. The phone reads the requested parent before offering approval and
+rechecks the approved parent before the one write. A parent that changed has
+to be reviewed again. The same name is only asked once and the folder on
+screen does not change.
+
+```quint
+pure def canApproveNewFolder(s: Files, ticket: int, name: str, parentPlace: C::Place, reviewedFrom: S::Where, guarded: bool, by: Actor): bool =
+  by == Phone and ticket > 0
+
+pure def approveNewFolder(s: Files, ticket: int, name: str, parentPlace: C::Place, reviewedFrom: S::Where, guarded: bool, by: Actor): Moved =
+  val change = C::begin(s.change, C::NewFolder, List(), parentPlace.names, parentPlace.folder, name, C::nowhere, ticket)
+  if (parentPlace.folder > 0 and reviewReady(s, reviewedFrom, guarded)
+      and C::canBegin(s.change, C::NewFolder, List(), parentPlace.names, parentPlace.folder, name, C::nowhere, ticket))
+    { state: { ...s, change: change }, out: performing(change, s) }
+  else { state: s, out: List(Receipt({ ticket: ticket, ran: false, outcome: A::Refused, done: 0 })) }
+
+pure def stepReviewedNewFolderKeepsThePlace(before: Files, via: str, after: Files, out: List[Effect]): bool =
+  via == "approveNewFolder" implies
+    (where(after) == where(before) and out.length() == 1 and out.every(e => match e {
+      | Perform(p) => before.open and allowed(before) and p.work == C::NewFolder and p.folder == after.change.folder
+          and p.folder > 0 and p.items.length() == 0 and not(p.replace) and after.change.approval > 0
+      | Receipt(r) => not(r.ran) and r.outcome == A::Refused
+      | _ => false
+    }))
 ```
 
 ### The change Files holds keeps the rules of Changes

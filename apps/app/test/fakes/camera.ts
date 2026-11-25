@@ -1,5 +1,5 @@
 // spec/app/camera/index.md, "Story: Open the camera"; spec/app/camera/index.md, "Story: Take photos and videos"
-import type { CameraGrant, CameraPlugin, CameraPreviewOptions, CameraPreviewResult, CameraSettings, PhotoCaptureOptions } from "@elizaos/os/bridges/definitions/camera";
+import type { CameraGrant, CameraPlugin, CameraPreviewOptions, CameraPreviewResult, CameraSettings, PhotoCaptureOptions } from "@elizaos/os-bridges";
 import { plugin, rejection, type Faked } from "./phone.ts";
 
 /** The camera reported by Android, with the native preview and camera output independently observable. */
@@ -25,7 +25,7 @@ export function elizaCamera(world: CameraScene): Faked {
   const permission = () => Promise.resolve({ camera: world.permission });
   const permissions = () => Promise.resolve({ camera: world.permission, microphone: world.microphone, photos: "granted" as const });
   const preview = (options: CameraPreviewOptions): CameraPreviewResult => ({
-    width: 1280, height: 720, deviceId: options.direction ?? "back", minZoom: 1,
+    width: 1280, height: 720, captureSize: { width: 3000, height: 4000 }, deviceId: options.direction ?? "back", minZoom: 1,
     maxZoom: options.direction === "front" ? 1 : 5, zoom: 1, hasFlash: options.direction !== "front", flash: "off",
   });
   return plugin<CameraPlugin>(() => ({
@@ -51,7 +51,11 @@ export function elizaCamera(world: CameraScene): Faked {
     async setCaptureMode({ mode }) { world.modes.push(mode); },
     async capturePhoto(options = {}) {
       if (world.preview === undefined) throw rejection("No live view", "PREVIEW_STOPPED");
+      if (options.thumbnailOnly && (!options.saveToGallery || options.quality !== undefined || options.width !== undefined || options.height !== undefined)) {
+        throw rejection("Incompatible thumbnail options", "INVALID_OPTIONS");
+      }
       world.photos.push(options);
+      if (!options.saveToGallery) return { base64: "YQ==", format: "jpeg", width: options.width ?? 3000, height: options.height ?? 4000 };
       const id = `image-${world.photos.length}`;
       return {
         thumbnail: "YQ==", format: "jpeg", width: 1280, height: 720,

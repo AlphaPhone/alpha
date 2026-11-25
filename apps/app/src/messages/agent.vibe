@@ -1,13 +1,15 @@
 // spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"
-import { NOT_DISPATCHED } from "@elizaos/agent/client"
-import type { DeviceOperation } from "@elizaos/agent/operations"
-import { MMS_MAX_BODY } from "@elizaos/os/bridges/definitions/messages"
-import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/phone"
+import { NOT_DISPATCHED } from "@elizaos/agent"
+import { type DeviceOperation, type OperationResultOf, readResult } from "@elizaos/agent"
+import { MMS_MAX_BODY, threadIdOf } from "@elizaos/os-bridges"
+import { normalizePhoneNumber, type PhoneNumber } from "@elizaos/os-bridges"
 import { Machine as Composer, bound } from "../../gen/app__messages__composer.effect.vibe"
 import { Machine as Messages, removing } from "../../gen/app__messages.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Device } from "../platform/device.vibe"
+import { type Telephony, telephony } from "../platform/telephony.vibe"
 import { contained } from "../runtime/reactor.vibe"
+import { currentPhoneContact, type ReviewedPhoneContact } from "../phone/named-review.vibe"
 import { Drafts } from "./composer.vibe"
 import { Conversations, Inbox } from "./messages.vibe"
 
@@ -17,7 +19,84 @@ export interface MessageDraftTarget {
   readonly ticket: number
 }
 
+type SmsCompose = Extract<DeviceOperation, { type: "sms_compose" }>
+
+/** A previous sender's exact native thread uses a separate owner-approved read and draft path. */
+export function reviewedCompose(operation: SmsCompose): boolean {
+  return !("target" in operation) || operation.replyThreadId === undefined
+}
+
+export function composeRecipient(operation: SmsCompose) {
+  return "target" in operation ? operation.target : { kind: "contact", query: operation.query } as const
+}
+
 const refused = { kind: "refused", code: NOT_DISPATCHED } as const
+
+type ReadSelected = Extract<DeviceOperation, { type: "messages_read_selected" }>
+const readSelected: ReadSelected = { type: "messages_read_selected" }
+
+module selection {
+  import type { MessageRow } from "@elizaos/os-bridges"
+
+  const maxRows = 20
+  const maxBody = 1600
+  /** Leave room for metadata in the native journal’s 64 KiB entry. */
+  const maxBodyWireBytes = 48 * 1024
+  const wire = new TextEncoder()
+
+  /** The visible tail, oldest first, measured the same way the native journal stores it. @throws {never} */
+  export function messageTail(rows: readonly MessageRow[], older: boolean) {
+    const listed = rows.flatMap((row) => "incomplete" in row ? [] : [row])
+      .sort((one, other) => other.date - one.date)
+    const tail = []
+    let truncated = older || listed.length !== rows.length || listed.length > maxRows
+    let remaining = maxBodyWireBytes
+    for (const row of listed.slice(0, maxRows)) {
+      const body = row.body.slice(0, maxBody).replace(/[\uD800-\uDBFF]$/u, "")
+      const message = { direction: row.direction === "incoming" ? "in" : "out", date: row.date, body } as const
+      const size = wire.encode(JSON.stringify(message)).byteLength + 1
+      if (size > remaining) { truncated = true; break }
+      remaining -= size
+      truncated ||= body !== row.body
+      tail.push(message)
+    }
+    return { messages: tail.reverse(), truncated }
+  }
+}
+import { messageTail } from selection
+
+// spec/app/contacts/agent.md, "The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it"
+/** One exact visible provider thread, when its current read can be shared. */
+effect function selectedMessage(target: MessageDraftTarget): (OperationResultOf<"messages_read_selected"> | undefined)!!(Device | Shell | Messages | Inbox | Conversations) {
+  if (!(try (try Device).showing()) || !showing(try (try Shell).get(), "Messages")) return undefined
+  const where = try (try Messages).get()
+  if (!where.front || where.pane !== "Conversation" || where.page.status !== "Loaded" || where.sms.grant !== "Granted") return undefined
+  if (where.thread !== target.thread || where.page.ticket !== target.ticket) return undefined
+  const held = try (try Inbox).get()
+  if (held.messagesThread !== where.thread) return undefined
+  const saved = try (try Conversations).get(where.thread)
+  if (Option.isNone(saved) || threadIdOf(saved.value.id) === null || held.messages.some((one) => one.threadId !== saved.value.id)) return undefined
+  const addresses = saved.value.addresses
+  const address = addresses.length === 1 ? addresses[0] : undefined
+  const displayName = address === undefined ? undefined : held.names.get(address)?.trim().slice(0, 128)
+  const number = normalizePhoneNumber(address)
+  const person = displayName && displayName !== address && (number === null || normalizePhoneNumber(displayName) !== number) ? displayName : null
+  const tail = messageTail(held.messages, held.messagesNext !== undefined)
+  return readResult<"messages_read_selected">(readSelected, { kind: "messages-read", status: "read", participant: person, ...tail })
+}
+
+/** Return a thread receipt only under the current explicit approval and the phone's current SMS permission. */
+export effect function shareSelectedMessage(target: MessageDraftTarget | undefined, current: () => Promise<boolean>): unknown!!(Device | Shell | Messages | Inbox | Conversations | Telephony) {
+  if (target === undefined || !(try (try Device).capabilities()).image) return refused
+  const allowed = tryPromise(current) catch () => false
+  if (!allowed) return refused
+  const native = telephony("Messages sharing permission", (client) => client.messages.status()) catch () => undefined
+  if (native?.permissions.sms !== "granted") return refused
+  const still = tryPromise(current) catch () => false
+  if (!still) return refused
+  const result = try selectedMessage(target)
+  return result?.status === "read" ? { kind: "applied", result } : refused
+}
 
 /** When the addressed draft navigates, the Ask Alpha sheet stays where it was. */
 effect function addressed(number: string): (number | undefined)!!(Shell | Messages | Conversations) {
@@ -39,7 +118,7 @@ effect function addressed(number: string): (number | undefined)!!(Shell | Messag
 }
 
 /** Stage only the reviewed draft, in the admitted conversation's empty slot. */
-effect function stage(body: string, thread: number, target: MessageDraftTarget | undefined, check: (() => Promise<boolean>) | undefined): boolean!!(Device | Shell | Messages | Composer | Inbox | Drafts) {
+effect function stage(body: string, thread: number, check: boolean!!Telephony, target?: MessageDraftTarget, recipient?: PhoneNumber): boolean!!(Device | Shell | Messages | Composer | Inbox | Drafts | Conversations | Telephony) {
   const inbox = try Inbox
   const messages = try Messages
   const composer = try Composer
@@ -49,38 +128,52 @@ effect function stage(body: string, thread: number, target: MessageDraftTarget |
     Effect.as(sleep(2500), Option.none()),
   )
   if (Option.isNone(opened)) return false
-  const approved = check === undefined ? true : (tryPromise(check) catch () => false)
-  if (!approved || !(try (try Device).showing()) || !showing(try (try Shell).get(), "Messages")) return false
+  const [read] = opened.value
+  if (!(try check) || !(try (try Device).showing()) || !showing(try (try Shell).get(), "Messages")) return false
   const where = try messages.get()
   const draft = try composer.get()
   if (!where.front || where.thread !== thread || where.sms.grant !== "Granted" || where.page.status !== "Loaded" ||
-      (target !== undefined && where.page.ticket !== target.ticket) || (try inbox.get()).messagesThread !== thread ||
-      draft.thread !== thread || draft.slot.author !== "Nobody" || bound(draft)) return false
+      where.page.ticket !== read.page.ticket || (target !== undefined && where.page.ticket !== target.ticket) || (try inbox.get()).messagesThread !== thread ||
+      draft.thread !== thread || draft.slot.author !== "Nobody" || draft.pictures > 0 || bound(draft)) return false
+  if (recipient !== undefined) {
+    const conversation = try (try Conversations).get(thread)
+    if (Option.isNone(conversation) || conversation.value.addresses.length !== 1 || normalizePhoneNumber(conversation.value.addresses[0]) !== recipient) return false
+  }
   const drafts = try Drafts
-  if ((try drafts.text(thread)).trim() !== "") return false
+  if ((try drafts.text(thread)) !== "") return false
   try drafts.write(thread, body)
   const kept = (try drafts.text(thread)) === body
   const taken = kept && (try contained(composer.send({ type: "agentDrafted", thread }), "staging the reviewed draft"))
-  if (taken && (try composer.get()).slot.author === "AlphaWrote") return true
+  const after = try composer.get()
+  if (taken && after.thread === thread && after.slot.author === "AlphaWrote" && (try drafts.text(thread)) === body) return true
   if ((try composer.get()).slot.author === "Nobody" && (try drafts.text(thread)) === body) try drafts.drop(thread)
   return false
 }
 
-/** One approved Messages draft executor. It cannot read messages for the agent, send a text or start a call. */
-export effect function messageAction(operation: DeviceOperation, target: MessageDraftTarget | undefined, current: () => Promise<boolean>): unknown!!(Device | Shell | Messages | Composer | Conversations | Inbox | Drafts) {
+/** After the proposal is approved, an addressed draft may open only its exact Messages destination. */
+export effect function messageAction(operation: DeviceOperation, target: MessageDraftTarget | undefined, current: () => Promise<boolean>, continueDraft?: () => Promise<boolean>, contact?: ReviewedPhoneContact): unknown!!(Device | Shell | Messages | Composer | Conversations | Inbox | Drafts | Telephony) {
   if (operation.type !== "sms_reply_selected" && operation.type !== "sms_compose") return refused
   const body = operation.body
   if (!body.trim() || body.length > MMS_MAX_BODY || body.includes("\0")) return refused
   const live = tryPromise(current) catch () => false
   if (!live || !(try (try Device).capabilities()).image || !(try (try Device).showing())) return refused
   if (operation.type === "sms_reply_selected") {
-    if (target === undefined || !(try stage(body, target.thread, target, current))) return refused
+    if (target === undefined || !(try stage(body, target.thread, tryPromise(current) catch () => false, target))) return refused
     return { kind: "applied", result: { kind: "sms-reply", status: "drafted" } }
   }
-  if (!("target" in operation) || operation.draft !== true || operation.target.kind !== "number" || operation.replyThreadId !== undefined) return refused
-  const number = normalizePhoneNumber(operation.target.number)
-  if (number === null) return refused
+  if (!reviewedCompose(operation)) return refused
+  const recheck = continueDraft ?? current
+  const recipient = composeRecipient(operation)
+  const chosen = recipient.kind === "contact" ? contact : undefined
+  if (recipient.kind === "contact" && (chosen === undefined || chosen.query !== recipient.query.trim() || !(try currentPhoneContact(chosen)))) return refused
+  const number = normalizePhoneNumber(recipient.kind === "number" ? recipient.number : chosen?.number)
+  if (number === null || !(tryPromise(current) catch () => false)) return refused
   const thread = try addressed(number)
-  if (thread === undefined || !(try stage(body, thread, undefined, undefined))) return refused
+  const canStage = effect {
+    if (!(tryPromise(recheck) catch () => false)) return false
+    if (chosen === undefined) return true
+    return (try currentPhoneContact(chosen)) && (tryPromise(recheck) catch () => false)
+  }
+  if (thread === undefined || !(try stage(body, thread, canStage, undefined, number))) return refused
   return { kind: "applied", result: { kind: "sms-compose", status: "drafted" } }
 }

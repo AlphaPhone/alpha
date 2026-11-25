@@ -29,7 +29,9 @@ The Library tab lists photos and videos, narrowed to favourites, videos, a
 person or a search; the Albums tab lists albums, and an album opened from it
 lists its items. Either list is read a page at a time from the phone's
 library, at a revision the phone numbers: each change to the library has a
-higher one.
+higher one. A browser's library consists of captures and images saved in
+that browser and needs no phone permission. It has the same Favorites,
+custom albums, selection and Recently deleted controls.
 
 ```quint
 import permission as P from "../../kit/permission"
@@ -79,8 +81,8 @@ type Photos = {
   access: P::Permission, videos: bool, visible: bool, secure: bool, only: Set[int],
   library: R::Read, locked: bool, paging: bool, more: bool, revision: int,
   tab: Tab, filter: Filter, query: str, person: int, album: int, density: Density,
-  rows: Set[int], mine: Set[int], starred: Set[int], albums: Set[int],
-  selecting: bool, selected: Set[int],
+  rows: Set[int], mine: Set[int], starred: Set[int], albums: Set[int], cameraItem: int,
+  selecting: bool, selected: Set[int], choosingImage: bool, imageChoice: int,
   shelf: AL::Shelf, job: C::Run,
 }
 
@@ -90,8 +92,8 @@ pure val initial: Photos = {
   access: P::unasked, videos: false, visible: true, secure: false, only: Set(),
   library: R::unread, locked: false, paging: false, more: false, revision: 0,
   tab: Library, filter: Everything, query: "", person: 0, album: 0, density: Regular,
-  rows: Set(), mine: Set(), starred: Set(), albums: Set(),
-  selecting: false, selected: Set(),
+  rows: Set(), mine: Set(), starred: Set(), albums: Set(), cameraItem: 0,
+  selecting: false, selected: Set(), choosingImage: false, imageChoice: 0,
   shelf: AL::initial, job: C::initial,
 }
 
@@ -111,7 +113,9 @@ pure def still(s: Photos): bool = s.shelf.dialog == AL::NoDialog and not(C::runn
 
 ```quint
 pure val photoValues = Set(1, 2, 3)
+pure val cameraItemValues = Set(0, 1, 2, 3)
 pure val albumValues = Set(1, 2)
+pure val choiceValues = Set(0, 1, 2, 3)
 pure val rowsValues = Set(Set(), Set(1), Set(1, 2), Set(2, 3))
 pure val ownedValues = Set(Set(), Set(1), Set(3))
 pure val starredValues = Set(Set(), Set(1), Set(1, 2))
@@ -134,6 +138,33 @@ pure val weight_startSelect = 2
 pure val weight_toggle = 2
 pure val weight_chooseAlbum = 4
 pure val weight_addTo = 4
+```
+
+## Story: Choose an image in the browser
+
+> As the owner, I want to choose and preview one JPEG, PNG or WebP up to
+> 16 MB, then save a photo copy or scan the original for text. Leaving or
+> dismissing the chooser drops the selection.
+
+### Only the owner can open the browser chooser and act on its current image
+
+The owner has to be looking at the library on an unlocked device. A new
+chooser supersedes the earlier choice. Saving prepares a JPEG copy up to
+2048 pixels on its longest side. Scanning hands the original to the scan
+review and saves no photo. Neither changes anything until an owner chooses.
+
+```quint
+pure def canOpenImageChoice(s: Photos, browser: bool, by: Actor): bool =
+  by == Owner and browser and s.visible and not(s.secure) and s.tab == Library
+    and not(s.selecting) and not(s.choosingImage) and s.shelf.dialog == AL::NoDialog
+
+pure def openImageChoice(s: Photos, browser: bool, by: Actor): Photos =
+  { ...s, choosingImage: true, imageChoice: s.imageChoice + 1 }
+
+pure def canCloseImageChoice(s: Photos, choice: int, by: Actor): bool =
+  by == Owner and s.visible and not(s.secure) and s.choosingImage and choice == s.imageChoice
+
+pure def closeImageChoice(s: Photos, choice: int, by: Actor): Photos = { ...s, choosingImage: false }
 ```
 
 ## Story: Give Photos access
@@ -187,14 +218,14 @@ pure def fetching(page: bool, out: List[Effect], s: Photos): Done =
     emit(out.append(Fetch({
       ticket: asked.ticket, tab: s.tab, filter: s.filter, query: s.query, person: s.person, album: s.album,
       page: page, own: not(P::allows(s.access)), only: s.only,
-    })), { ...s, library: asked, paging: page })
+    })), { ...s, library: asked, paging: page, cameraItem: 0 })
   else emit(out, s)
 
 pure def listing(out: List[Effect], s: Photos): Done = fetching(false, out, s)
 
 pure def forgetting(albums: bool, s: Photos): Photos =
   {
-    ...s, rows: Set(), mine: Set(), starred: Set(), more: false, selecting: false, selected: Set(),
+    ...s, rows: Set(), mine: Set(), starred: Set(), more: false, cameraItem: 0, selecting: false, selected: Set(), choosingImage: false,
     shelf: AL::closeDialog(s.shelf), job: C::cancel(s.job),
     albums: if (albums) Set() else s.albums, album: if (albums) 0 else s.album, tab: if (albums) Library else s.tab,
   }
@@ -293,12 +324,28 @@ first's, or one holding anything not older, means the library moved, and
 the first page is read again. A selection keeps only the items still
 listed, and "Add to album" closes when none of its selection is left.
 
+When Camera opens its last capture, Photos can admit that exact phone item
+on the first unfiltered Library read if it is independently readable. This
+item can open in the Viewer, but stays outside the grid and its pagination.
+Without library access it must be Alpha’s own capture. This open never adds
+to the lock-screen session.
+
 ```quint
+pure def cameraScope(s: Photos): bool =
+  s.visible and not(s.secure) and not(s.paging) and s.tab == Library and s.filter == Everything and s.album == 0
+
+pure def admittedCameraItem(s: Photos, cameraItem: int, owned: Set[int]): int =
+  if (cameraScope(s) and cameraItem > 0 and (P::allows(s.access) or owned.contains(cameraItem))) cameraItem else 0
+
+pure def lawCameraItemRequiresItsCurrentScope(s: Photos, cameraItem: int, owned: Set[int]): bool =
+  admittedCameraItem(s, cameraItem, owned) > 0 implies
+    (cameraScope(s) and (P::allows(s.access) or owned.contains(cameraItem)))
+
 pure def canListed(s: Photos, ticket: int, by: Actor): bool = by == Phone and s.visible and R::canAnswer(s.library, ticket)
 
 pure def allOlder(rows: Set[int], than: Set[int]): bool = rows.forall(r => than.forall(o => r < o))
 
-pure def listed(s: Photos, ticket: int, ok: bool, rows: Set[int], owned: Set[int], starred: Set[int], revision: int, more: bool, by: Actor): Done =
+pure def listed(s: Photos, ticket: int, ok: bool, rows: Set[int], owned: Set[int], starred: Set[int], cameraItem: int, revision: int, more: bool, by: Actor): Done =
   val answered = { ...s, library: R::answer(s.library, ok), locked: false }
   val session = if (s.secure) rows.intersect(s.only) else rows
   val shown = if (P::allows(s.access)) session else session.intersect(owned)
@@ -310,7 +357,7 @@ pure def listed(s: Photos, ticket: int, ok: bool, rows: Set[int], owned: Set[int
   if (not(ok)) emit(List(), answered)
   else if (s.paging and (revision != s.revision or not(allOlder(rows, s.rows)))) listing(List(), answered)
   else emit(List(), {
-    ...answered, rows: whole, mine: own, starred: stars, albums: if (items) s.albums else shown,
+    ...answered, rows: whole, mine: own, starred: stars, cameraItem: admittedCameraItem(s, cameraItem, owned), albums: if (items) s.albums else shown,
     more: more and items, revision: revision, selected: kept, selecting: s.selecting and items,
     shelf: if (s.shelf.dialog == AL::ChooseAlbum and kept.size() == 0) AL::closeDialog(s.shelf) else s.shelf,
   })

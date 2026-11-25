@@ -7,11 +7,12 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { generateAndroidHost, stageRuntimePayload } from "@elizaos/os/build";
+import { generateAndroidHost, stageRuntimePayload } from "@elizaos/os";
 import { packPrepared, prepared } from "@repo/eliza-harness";
 import { Effect, Layer } from "effect";
 import { FetchHttpClient } from "effect/http";
 import { androidPaths, identity, production, signInCallbackPath } from "../capacitor.config.ts";
+import { localOcrAssets } from "./ocr-assets.ts";
 
 export const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const root = resolve(app, "../..");
@@ -139,13 +140,7 @@ function stageVoice(env: NodeJS.ProcessEnv) {
     ], { env: { ...env, ELIZA_INFERENCE_ENGINE_DIR: engine } });
   }
   voiceRecord(directory);
-  return {
-    gradleArguments: ["-PelizaSpeechBridgeCapacitor=true"],
-    gradleEnv: {
-      ORG_GRADLE_PROJECT_elizaInferenceEngineDir: engine,
-      ORG_GRADLE_PROJECT_elizaParadeeNativeDir: directory,
-    },
-  };
+  return { engine, directory };
 }
 
 /** Alpha's agent pack (apps/agent), built from the pinned eliza for the production cloud. */
@@ -223,6 +218,16 @@ export function auditBundle(directory: string): string[] {
     for (const directive of REQUIRED_POLICY) if (!policy.includes(directive)) findings.push(`the Content-Security-Policy lacks ${directive}`);
     if (policy.includes("'unsafe-eval'")) findings.push("the Content-Security-Policy allows 'unsafe-eval'");
   }
+  for (const [name, expected] of localOcrAssets()) {
+    const location = join(directory, "ocr", name);
+    if (!existsSync(location) || !statSync(location).isFile() || !readFileSync(location).equals(expected.bytes)) {
+      findings.push(`ocr/${name}: missing or differs from the locked OCR dependency`);
+    }
+  }
+  const terms = join(directory, "ocr/tessdata-LICENSE.txt");
+  if (!existsSync(terms) || !statSync(terms).isFile() || !readFileSync(terms).equals(readFileSync(join(app, "public/ocr/tessdata-LICENSE.txt")))) {
+    findings.push("ocr/tessdata-LICENSE.txt: missing or differs from the packaged training data license");
+  }
   for (const file of regularFiles(directory)) {
     if (file.endsWith(".map")) findings.push(`${file}: source map`);
     if (TEST_ONLY_PATH.test(file)) findings.push(`${file}: test-only module`);
@@ -284,7 +289,11 @@ export async function build(release: boolean) {
   const { buildAndroidConsumer } = (await import(consumerModule)) as BuildConsumer;
   buildAndroidConsumer({
     root: app,
-    environment: { ...env, ...voice.gradleEnv },
+    environment: {
+      ...env,
+      ORG_GRADLE_PROJECT_elizaInferenceEngineDir: voice.engine,
+      ORG_GRADLE_PROJECT_elizaParadeeNativeDir: voice.directory,
+    },
     variants: [variant],
     release,
     lint: false,
@@ -295,7 +304,7 @@ export async function build(release: boolean) {
     androidTestOutput: "instrumentation",
     mappings: release,
     signing: { environment: signingNames },
-    gradleArguments: voice.gradleArguments,
+    gradleArguments: ["-PelizaSpeechBridgeCapacitor=true"],
     prepare: [{ command: join(app, "node_modules/.bin/cap"), args: ["copy", "android"] }],
     record: {
       name: "build-config.json",
@@ -320,8 +329,16 @@ function buildTool(name: string, env: NodeJS.ProcessEnv): string {
 }
 
 const INFERENCE_ENTRY = /\.(gguf|onnx|ort|tflite|safetensors|pte|task)$|(^|\/)lib[^/]*(llama|ggml|mtmd|onnxruntime|sherpa|whisper|piper|executorch|elizainference|omnivoice)[^/]*\.so|(^|\/)llama(-omnivoice)?-server$|^assets\/([^/]+\/)*models?\//i;
-const REQUIRED_CLASSES = ["AlphaDevicePlugin", "AlphaCloudSpeechPlugin", "AlphaLocalSpeechPlugin", "AlphaBrowserPlugin", "AlphaCarrierSetupPlugin", "AlphaCallStatePlugin", "AlphaOngoingCallPlugin", "AlphaAgentService", "AlphaCalendarPlugin", "AlphaTelephonyPlugin", "AlphaResetPlugin", "AlphaActionJournalPlugin"]
-  .map((name) => `Lai/alphacompute/alphaphone/${name};`);
+const REQUIRED_CLASSES = [
+  ...["AlphaDevicePlugin", "AlphaCloudSpeechPlugin", "AlphaLocalSpeechPlugin", "AlphaBrowserPlugin", "AlphaCarrierSetupPlugin", "AlphaCallStatePlugin",
+    "AlphaOngoingCallPlugin", "AlphaAgentService", "AlphaCalendarPlugin", "AlphaTelephonyPlugin", "AlphaContactsPlugin", "AlphaResetPlugin", "AlphaActionJournalPlugin",
+    "AlphaFilesPlugin", "AlphaSelectedDocumentsPlugin", "AlphaPhotoLibraryPlugin", "AlphaPhotosPlugin", "AlphaPhotosPermissionsPlugin",
+    "AlphaMediaEnrollmentPlugin", "AlphaScanPlugin"].map((name) => `Lai/alphacompute/alphaphone/${name};`),
+  "Lai/eliza/plugins/camera/CameraPlugin;",
+  "Lai/eliza/plugins/filesystem/FilesPlugin;",
+  ...["PermittedPhotosPlugin", "PermittedMediaCatalog", "OwnedPhotoEdits", "OwnedVideoPlayback", "OwnedCaptures",
+    "SelectedDocuments", "DocumentDestinations"].map((name) => `Lai/eliza/plugins/media/${name};`),
+];
 
 interface Row {
   readonly mode: "debug" | "release";

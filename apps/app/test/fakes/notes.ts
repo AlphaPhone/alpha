@@ -1,7 +1,8 @@
-// spec/app/notes/index.md, "Story: See my notes"
-import { parseNoteFormat } from "@elizaos/plugin-notes/format";
-import type { NotesSnapshot, StickyNote } from "@elizaos/plugin-notes/types";
+// spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened"
+import { parseNoteFormat } from "@elizaos/plugin-notes-client";
+import type { NotesSnapshot, StickyNote } from "@elizaos/plugin-notes-client";
 import { Schema } from "effect";
+import { type Faked, rejection } from "./phone.ts";
 import type { Route } from "./routes.ts";
 
 /** The agent's notes store as the fake agent holds it; a journey changes it between steps. */
@@ -11,8 +12,21 @@ export interface NotesScene {
   owner: string;
   trash: NonNullable<NotesSnapshot["trash"]>;
   creations: Map<string, string>;
+  readonly audio: Map<string, { readonly noteId: string; readonly durationMs: number }>;
   /** Whether a read of the store fails, as an agent without its notes answers. */
   failing: boolean;
+  /** Whether a write to the store fails while reads still answer, as an agent that cannot change its notes answers. */
+  refusing: boolean;
+  /** The note a claim of a prepared saved-note editor names, as eliza's view host hands it to the renderer it is bound to. */
+  target?: string;
+  /** Each claim and result a renderer sent eliza's views routes, in order. */
+  readonly views: { readonly path: "claim" | "result"; readonly body: Record<string, unknown> }[];
+}
+
+/** What a VIEWS action that prepared a navigation for `clientId` hands back in a reply (`.eliza/packages/agent/src/views/show-action.vibe`). */
+export function prepared(clientId: string, viewId: string, saved: boolean) {
+  const navigationBinding = { requestId: `request-${viewId}`, clientId, viewId, viewType: "gui", installationId: "alpha" };
+  return { action: "VIEWS", data: { actionName: "VIEWS", values: { mode: "show", viewId, ...(saved ? { subview: "saved-note-v1" } : {}), completedActionDelivered: false, completedActionHandoffId: navigationBinding.requestId, navigationPrepared: true, navigationBinding } } };
 }
 
 const hour = 3_600_000;
@@ -20,7 +34,7 @@ const day = 24 * hour;
 const iso = (at: number) => new Date(Math.floor(at / 1000) * 1000).toISOString();
 
 /** A note of the store, made and last changed at `at`. */
-function note(id: string, title: string, body: string, at: number, format?: StickyNote["format"]): StickyNote {
+export function note(id: string, title: string, body: string, at: number, format?: StickyNote["format"]): StickyNote {
   return { id, title, body, color: "yellow", ...(format === undefined ? {} : { format }), createdAt: iso(at), updatedAt: iso(at) };
 }
 
@@ -31,9 +45,12 @@ export function notesScene(now = Date.now()): NotesScene {
   return {
     revision: 6,
     failing: false,
+    refusing: false,
+    views: [],
     owner: "agent-owner",
     trash: [],
     creations: new Map(),
+    audio: new Map(),
     notes: [
       note("enclave", "Enclave launch", "Confirm attestation flow\nShip the keys-on-device doc\nDry run Friday", now - 20 * 60_000, { kind: "text", data: { pinned: true } }),
       note("sync", "Design sync", "", now - hour, {
@@ -72,6 +89,20 @@ export function notesScene(now = Date.now()): NotesScene {
   };
 }
 
+/** The retained Notes recordings as the Android host reports them. */
+export function alphaNotes(scene: NotesScene): Faked {
+  return () => ({
+    permission: () => Promise.resolve({ grant: "granted" }),
+    status: () => Promise.resolve({ state: "idle" }),
+    consumeOpen: () => Promise.resolve({ open: false }),
+    previousExists: () => Promise.resolve({ present: false }),
+    describe: ({ audioId }: { audioId: string }) => {
+      const recording = scene.audio.get(audioId);
+      return recording === undefined ? Promise.reject(rejection("No such recording")) : Promise.resolve({ ...recording, audioId });
+    },
+  });
+}
+
 const Interact = Schema.Struct({
   capability: Schema.Literals(["create-note", "update-note", "delete-note", "restore-note"]),
   params: Schema.Struct({
@@ -105,7 +136,7 @@ function interact(scene: NotesScene, input: unknown): Response {
   const found = decoded(input);
   if (found._tag === "None") return refused(400);
   const { capability, params } = found.value;
-  if (scene.failing) return refused(503);
+  if (scene.failing || scene.refusing) return refused(503);
   if (params.expectedRevision !== undefined && params.expectedRevision !== scene.revision) return refused(409);
   const at = Date.now();
   const format = parseNoteFormat(params.format);
@@ -158,6 +189,19 @@ export function notesRoutes(scene: NotesScene): Route[] {
         return scene.failing ? refused(503) : Response.json({ success: true, data: snapshot(scene) });
       }
       if (request.method === "POST" && url.pathname === "/api/notes/interact") return request.json().then((body: unknown) => interact(scene, body));
+      if (request.method === "POST" && url.pathname === "/api/views/interact-claim") {
+        return request.json().then((body: Record<string, unknown>) => {
+          scene.views.push({ path: "claim", body });
+          const saved = body.targetProtocol === "saved-note-v1" && scene.target !== undefined;
+          return Response.json({ claimId: `claim-${scene.views.length}`, ...(saved ? { target: { kind: "saved-note", noteId: scene.target } } : {}) });
+        });
+      }
+      if (request.method === "POST" && url.pathname === "/api/views/interact-result") {
+        return request.json().then((body: Record<string, unknown>) => {
+          scene.views.push({ path: "result", body });
+          return Response.json({ ok: true, accepted: true });
+        });
+      }
       return undefined;
     },
   ];

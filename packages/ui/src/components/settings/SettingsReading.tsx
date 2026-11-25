@@ -19,7 +19,7 @@ export function SettingsReading({ reading }: SettingsReadingProps) {
   if (reading.word === "waiting") {
     return (
       <span aria-busy>
-        <Skeleton className="inline-block h-4 w-16 align-middle" />
+        <Skeleton as="span" className="inline-block h-4 w-16 align-middle" />
         <span className="sr-only">Reading</span>
       </span>
     );

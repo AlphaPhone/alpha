@@ -1,0 +1,69 @@
+// spec/app/messages/composer.md, "The phone says how many SIMs it has, and with more than one the owner picks one, which needs SIM access"; spec/app/contacts/agent.md, "Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call"
+import type { TelephonySubscription } from "@elizaos/os-bridges"
+import { Machine as Composer } from "../../gen/app__messages__composer.effect.vibe"
+import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Device } from "../platform/device.vibe"
+import { type Telephony, telephony } from "../platform/telephony.vibe"
+import { fresh } from "../runtime/attempts.vibe"
+import { Drafts, type PickedSubscription, sameSubscription } from "./composer.vibe"
+
+export type SmsSelectionContext = Device | Shell | Messages | Composer | Drafts
+
+interface VisibleSim {
+  readonly thread: number
+  readonly ticket: number
+  readonly subscription: TelephonySubscription
+  readonly picked: PickedSubscription | undefined
+}
+
+/** One selection belongs to the exact visible Messages read. Only observation crosses to the agent. */
+export interface SmsSelection extends VisibleSim {
+  readonly observation: { readonly kind: "sms-subscription"; readonly id: string; readonly revision: string }
+}
+
+export interface MessageSmsRequest {
+  readonly selection: SmsSelection | undefined
+}
+
+effect function selectedSim(): (VisibleSim | undefined)!!SmsSelectionContext {
+  if (!(try (try Device).showing()) || !showing(try (try Shell).get(), "Messages")) return undefined
+  const current = try (try Messages).get()
+  const composer = try (try Composer).get()
+  if (!current.front || current.pane !== "Conversation" || current.page.status !== "Loaded" || current.sms.grant !== "Granted"
+    || current.confirming || composer.thread !== current.thread || composer.simInfo.grant !== "Granted") return undefined
+  const drafts = try Drafts
+  const stored = drafts.subscriptionChoice.get()
+  const picked = stored?.thread === current.thread ? stored : undefined
+  const active = try drafts.subscriptions()
+  const subscription = picked === undefined
+    ? (active.length === 1 ? active[0] : undefined)
+    : active.find((sim) => sameSubscription(sim, picked.subscription))
+  if (subscription === undefined) return undefined
+  return { thread: current.thread, ticket: current.page.ticket, subscription, picked }
+}
+
+function sameSelection(expected: VisibleSim, actual: VisibleSim | undefined): boolean {
+  return actual !== undefined && actual.thread === expected.thread && actual.ticket === expected.ticket && actual.picked === expected.picked
+    && sameSubscription(actual.subscription, expected.subscription)
+}
+
+/** A sole SIM cannot silently become a default choice if Android now has several. */
+export function activeSmsSelection(selection: SmsSelection, subscriptions: readonly TelephonySubscription[] | undefined): boolean {
+  return subscriptions !== undefined && (selection.picked !== undefined || subscriptions.length === 1)
+    && subscriptions.some((sim) => sameSubscription(sim, selection.subscription))
+}
+
+export effect function currentSmsSelection(selection: SmsSelection): boolean!!SmsSelectionContext {
+  return sameSelection(selection, try selectedSim())
+}
+
+export effect function captureSmsSelection(): (SmsSelection | undefined)!!(SmsSelectionContext | Telephony) {
+  const selected = try selectedSim()
+  if (selected === undefined) return undefined
+  const status = timeout(telephony("selected SMS SIM", (c) => c.messages.status()), "350 millis") catch () => undefined
+  if (status?.permissions.sms !== "granted" || status.permissions.phoneState !== "granted" || status.sendMode !== "direct"
+    || !sameSelection(selected, try selectedSim())) return undefined
+  const selection: SmsSelection = { ...selected, observation: { kind: "sms-subscription", id: String(selected.subscription.id), revision: fresh() } }
+  return activeSmsSelection(selection, status.subscriptions) ? selection : undefined
+}

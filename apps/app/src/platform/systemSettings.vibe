@@ -1,22 +1,14 @@
 // spec/app/settings/facts.md, "Story: See what the phone says"; spec/app/settings/android.md, "Story: Change what only Android can change"
-import type { AndroidRoleStatus, DeviceSettingsStatus, NativeCrashEntry, SettingsHandoff, SystemFacts, SystemSettingsPage } from "@elizaos/os/bridges/definitions/system"
-import type { LocationPermissionStatus } from "@elizaos/os/bridges/definitions/location"
-import type { FilesAccess, StorageVolume } from "@elizaos/os/bridges/definitions/files"
-import type { MirrorStatus } from "@elizaos/os/bridges/definitions/notices"
-import type { LibraryScopeKind } from "@elizaos/os/bridges/definitions/media"
+import type { AndroidRoleStatus, DeviceSettingsStatus, FilesAccess, LibraryScopeKind, LocationPermissionStatus, MirrorStatus, NativeCrashEntry, SettingsHandoff, StorageVolume, SystemFacts, SystemSettingsPage } from "@elizaos/os-bridges"
 import type { Opened, Target } from "../../gen/app__settings__android.ts"
 import type { Access, AccessGrant, Alert, Holder, Reading } from "../../gen/app__settings__facts.ts"
 import type { Grant } from "../../gen/kit__permission.ts"
 import { openCarrierSettings } from "./carrier.vibe"
+import { registered } from "./device.vibe"
 
 module held {
   import { registerPlugin } from "@capacitor/core"
-  import type { SystemClient } from "@elizaos/os/bridges/system"
-  import { locationClient } from "@elizaos/os/bridges/location"
-  import { wifiClient } from "@elizaos/os/bridges/wifi"
-  import { filesClient } from "@elizaos/os/bridges/files"
-  import { permittedPhotosClient } from "@elizaos/os/bridges/media"
-  import { noticesClient } from "@elizaos/os/bridges/notices"
+  import { type SystemClient, createPasswordsClient, filesClient, locationClient, noticesClient, permittedPhotosClient, wifiClient } from "@elizaos/os-bridges"
 
   interface SettingsHost {
     settingsFacts(): Promise<unknown>
@@ -29,13 +21,14 @@ module held {
   let files: ReturnType<typeof filesClient> | undefined
   let photos: ReturnType<typeof permittedPhotosClient> | undefined
   let notices: ReturnType<typeof noticesClient> | undefined
+  let passwords: ReturnType<typeof createPasswordsClient> | undefined
   let host: SettingsHost | undefined
   /**
    * eliza's client of `ElizaSystem`, which its bridge makes as it loads: loaded at first use, once the phone's host is
    * up, since Capacitor binds a plugin to the platform it finds when the plugin is first registered.
    */
   export function systemOf(): Promise<SystemClient> {
-    return (system ??= import("@elizaos/os/bridges/system").then((bridge) => bridge.System))
+    return (system ??= import("@elizaos/os-bridges").then((bridge) => bridge.System))
   }
   /** eliza's clients of the other plugins, each made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
   export function locationOf(): ReturnType<typeof locationClient> {
@@ -58,11 +51,15 @@ module held {
     return (notices ??= noticesClient())
   }
   /** @throws {never} */
+  export function passwordsOf(): ReturnType<typeof createPasswordsClient> {
+    return (passwords ??= createPasswordsClient())
+  }
+  /** @throws {never} */
   export function hostOf(): SettingsHost {
     return (host ??= registerPlugin<SettingsHost>("AlphaDevice"))
   }
 }
-import { filesOf, hostOf, locationOf, noticesOf, photosOf, systemOf, wifiOf } from held
+import { filesOf, hostOf, locationOf, noticesOf, passwordsOf, photosOf, systemOf, wifiOf } from held
 
 module web {
   /** The browser's own answer for `name`, or none where it has no such permission. */
@@ -90,7 +87,7 @@ export interface PhoneReport {
 /** The phone's own settings, as Android reports them: its facts, its roles, its settings pages and the problem log it keeps. */
 export service SystemSettings {
   /** What the phone reports now; what it could not read is left out, never guessed. */
-  report(): PhoneReport!!
+  report(include?: { readonly autofill: boolean }): PhoneReport!!
   /** Whether Android could check one permission under review. */
   access(access: Access): Option.Option<{ readonly grant: Grant; readonly on: boolean }>!!
   /** Android's dialog for the Home role; returns when it closes. Whether Alpha holds the role is read again, never taken from the dialog. */
@@ -187,8 +184,8 @@ function mirrorWord(mirror: MirrorStatus): string {
 }
 
 /** What the phone reports through its SDK plugins and Alpha's own build facts. */
-effect function phoneReport(): PhoneReport!! {
-  const [facts, status, build, located, stored, host, photo, delivery, deviceSettings, collection] = try.all [
+effect function phoneReport(include?: { readonly autofill: boolean }): PhoneReport!! {
+  const [facts, status, build, located, stored, host, photo, delivery, deviceSettings, collection, passwords] = try.all [
     settled(async () => (await systemOf()).getSystemFacts()),
     settled(async () => (await systemOf()).getStatus()),
     settled(async () => (await systemOf()).getBuildInfo()),
@@ -199,9 +196,13 @@ effect function phoneReport(): PhoneReport!! {
     settled(() => noticesOf().delivery()),
     settled(async () => (await systemOf()).getDeviceSettings()),
     settled(() => noticesOf().mirrorStatus()),
+    include?.autofill && registered("ElizaPasswords") ? settled(() => passwordsOf().status()) : succeed(Option.none()),
   ]
   const settings = Option.getOrUndefined(host)
   const notices = Option.getOrUndefined(delivery)
+  const autofill = Option.getOrUndefined(passwords)?.autofill
+  const autofillWords = { "this-app": "Alpha", other: "Other", none: "None", unknown: undefined } as const
+  const provider = autofill?.supported === false ? "Unavailable" : autofill?.supported === true ? autofillWords[autofill.selected] : undefined
   const alerts = notices?.channels.filter(({ id, name }) => id !== "" && name !== "").map(({ id, name, blocked, groupBlocked }) => ({ id, name, blocked: blocked || groupBlocked })) ?? []
   const allowedAlerts = notices !== undefined && notices.appEnabled && notices.permissionGranted
   const storage = Option.isSome(stored) ? storageOf(stored.value.volumes) : undefined
@@ -213,6 +214,7 @@ effect function phoneReport(): PhoneReport!! {
     ...(settings?.androidRelease === undefined ? [] : [{ fact: "AndroidVersion" as const, value: settings.androidRelease }]),
     ...(notices === undefined ? [] : [{ fact: "Alerts" as const, value: !allowedAlerts ? "off" : alerts.some(({ blocked }) => blocked) ? "some off" : "on" }]),
     ...(storage === undefined ? [] : [storage]),
+    ...(provider === undefined ? [] : [{ fact: "AutofillService" as const, value: provider }]),
   ]
   const location = Option.isSome(located) ? grantOf(located.value.location, located.value.accuracy === "approximate") : undefined
   const roles = Option.isSome(status) ? status.value.roles : []
@@ -294,6 +296,11 @@ effect function opening(target: Target, channel: string): Opened!! {
     if (target === "ScreenLock" || target === "AllFilesAccess") {
       const reply = try tryPromise(() => hostOf().openSettings({ page: target === "ScreenLock" ? "screen-lock" : "all-files" }))
       return reply.status === "opened" ? reply.specific ? "Exactly" : "Nearby" : "NotAtAll"
+    }
+    if (target === "PasswordAutofill") {
+      if (!registered("ElizaPasswords")) return "NotAtAll"
+      const result = try tryPromise(() => passwordsOf().openAutofillSettings())
+      return result.destination === "autofill-picker" ? "Exactly" : "Nearby"
     }
     if (target === "AlertChannel") {
       try tryPromise(() => noticesOf().openChannelSettings(channel))

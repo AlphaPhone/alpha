@@ -1,0 +1,111 @@
+// spec/app/notes/index.md, "The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened"; spec/app/notes/note.md, "Only the owner opens a dialog or a question in Notes; a note is opened by the owner, or by the agent for the one the owner just named; and nothing opens while anything else of Notes is open"
+import * as Actions from "../../gen/app__notes__actions.effect.vibe"
+import * as Notes from "../../gen/app__notes.effect.vibe"
+import * as Editor from "../../gen/app__notes__editor.effect.vibe"
+import * as Link from "../../gen/app__notes__linkNote.effect.vibe"
+import * as Mic from "../../gen/app__notes__microphone.effect.vibe"
+import { type Request, isOwner, mayOpenNote } from "../../gen/app__notes__note.effect.vibe"
+import * as Previous from "../../gen/app__notes__previous.effect.vibe"
+import * as Recorder from "../../gen/app__notes__recording.effect.vibe"
+import * as Transfer from "../../gen/app__notes__transfer.effect.vibe"
+import * as Trash from "../../gen/app__notes__trash.effect.vibe"
+import * as Voice from "../../gen/app__notes__voice.effect.vibe"
+import { contained } from "../runtime/reactor.vibe"
+import { numberOf } from "./content.vibe"
+import { Opens } from "./opens.vibe"
+
+/** The owner's request an open is for: its number, the number of the owner's request that is current, and whether the screen it was asked from is sensitive. */
+export interface Asked {
+  readonly turn: number
+  readonly current: number
+  readonly sensitive: boolean
+}
+
+/** The list as it settles for an owner: read, or failed to read, and no reading on its way. */
+function settled(s: Notes.Notes): boolean {
+  return isOwner(s.owner) && s.read.status !== "Loading" && s.read.status !== "Idle"
+}
+
+/** The list once it has settled for the owner, or as it is if it does not within a few seconds. */
+effect function settledList() {
+  const list = try Notes.Machine
+  const found = try Effect.timeoutOption(Stream.runHead(Stream.filter(list.changes, settled)), "8 seconds")
+  return Option.isSome(found) && Option.isSome(found.value) ? found.value.value : try list.get()
+}
+
+/**
+ * The list holding note `id` if a reading has it: as last read, else read once more, as for a note saved in the same
+ * request as it was named. Only the list is read; nothing else of Notes is entered or resumed.
+ */
+effect function listedWith(id: number) {
+  const list = try Notes.Machine
+  const first = try settledList()
+  if (Notes.hasNote(first.rows, id) || !Notes.canRefresh(first)) return first
+  try ignore(list.send({ type: "refresh" }, "Phone"))
+  return try settledList()
+}
+
+/** Whether the note numbered `id` is the one the editor or the voice note shows now. */
+effect function alreadyOpen(id: number) {
+  const editor = try (try Editor.Machine).get()
+  const voice = try (try Voice.Machine).get()
+  return (editor.showing && editor.note === id && !editor.deleting) || (voice.showing && voice.note === id)
+}
+
+/**
+ * Whether anything of Notes is open that an agent's note may not take the place of: the notes from before, a
+ * recording or its question, the microphone question, an import or export, a link note, Recently deleted or its
+ * question, a voice note, the proposal card or the actions menu; and the editor while it deletes, or at all for a voice
+ * note, which the editor does not give way to. A saved note open in the editor gives way to a text note.
+ */
+effect function covering(voice: boolean) {
+  const recorder = try (try Recorder.Machine).get()
+  const trash = try (try Trash.Machine).get()
+  const editor = try (try Editor.Machine).get()
+  return Previous.canBack(try (try Previous.Machine).get()) || Recorder.unfinished(recorder) || Recorder.canBack(recorder)
+    || (try (try Mic.Machine).get()).asking || (try (try Transfer.Machine).get()).job !== "NoJob"
+    || Link.canBack(try (try Link.Machine).get()) || (try (try Voice.Machine).get()).showing
+    || trash.showing || trash.question !== "NoQuestion" || Trash.canBack(trash)
+    || editor.deleting || editor.dropping || (voice && editor.showing)
+    || Notes.canBack(try (try Notes.Machine).get()) || (try (try Actions.Machine).get()).open
+}
+
+/** What the list is told of an agent's open of note `id` for `asked`, from Notes as it is now. */
+effect function requestOf(s: Notes.Notes, id: number, asked: Asked) {
+  const voice = Notes.hasNote(s.rows, id) && Notes.rowOf(s, id).kind === "Voice"
+  const req: Request = { turn: asked.turn, current: asked.current, opened: s.agentTurn, sensitive: asked.sensitive, unsaved: Editor.waiting(try (try Editor.Machine).get()) }
+  return { req, covered: try covering(voice) }
+}
+
+/**
+ * Whether the agent may open the note eliza named by `noteId` for `asked`, as Notes is now, before anything moves: it
+ * is open already, or nothing open, unsaved, stale or sensitive stands in the way and the list, where it has read the
+ * owner's notes, has it as a note the agent may open. Nothing is read, sent or shown.
+ */
+export effect function mayAgentOpen(noteId: string, asked: Asked) {
+  const id = numberOf("note", noteId)
+  if (try alreadyOpen(id)) return true
+  const s = try (try Notes.Machine).get()
+  const { req, covered } = try requestOf(s, id, asked)
+  const known = isOwner(s.owner) && Notes.hasNote(s.rows, id)
+  return known ? Notes.canAgentOpen(s, id, covered, req, "Agent") && Notes.agentOpens(s, id, covered, req, "Agent")
+    : mayOpenNote(covered, "Agent", req)
+}
+
+/**
+ * Open the saved note eliza's agent named by `noteId` for the owner's request `asked`, as Notes allows the agent: as
+ * the list last read it, never over anything of Notes open or an unsaved draft. Whether the editor or the voice note
+ * holds it now; a refusal leaves Notes as it was.
+ */
+export effect function agentOpen(noteId: string, asked: Asked) {
+  const id = numberOf("note", noteId)
+  if (try alreadyOpen(id)) return true
+  const list = try Notes.Machine
+  const s = try listedWith(id)
+  const { req, covered } = try requestOf(s, id, asked)
+  const opens = try Opens
+  const waiting = try opens.expect(asked.turn)
+  if (!(try contained(list.send({ type: "agentOpen", id, covered, req }, "Agent"), "the agent opening a note"))) try opens.settle(asked.turn, false)
+  const shown = try Effect.timeoutOption(Deferred.await(waiting), "10 seconds")
+  return Option.getOrElse(shown, () => false)
+}

@@ -8,7 +8,7 @@ import type { Effect as MarkOut, Event as MarkEvent } from "../../gen/app__inbox
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { Machine as Preferences } from "../../gen/app__settings__preferences.effect.vibe"
 import type { Actor } from "../../gen/app__inbox__access.ts"
-import { reviewMailContext, MailContextRefused } from "@elizaos/plugin-inbox/mailbox"
+import { reviewMailContext, MailContextRefused } from "@elizaos/plugin-inbox-client"
 import { Agent } from "../platform/agent.vibe"
 import { MailQuestions, sourceOf, type MailQuestion } from "./mail-context.vibe"
 import { Cloud } from "../platform/cloud.vibe"

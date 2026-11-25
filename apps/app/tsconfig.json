@@ -5,6 +5,7 @@
     "jsx": "react-jsx",
     "lib": [
       "es2024",
+      "esnext.typedarrays",
       "dom",
       "dom.iterable"
     ],

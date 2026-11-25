@@ -1,11 +1,11 @@
 // spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/editor.md, "Story: Write a note"; spec/app/notes/trash.md, "Story: Erase for good"
-import { RuntimeRequestError } from "@elizaos/agent/client"
-import { createNotesClient, type NotesInteractResult } from "@elizaos/plugin-notes/client"
-import type { NoteFormat, NotesSnapshot, NotesTrashErase, NotesTrashRecordingCleanup, StickyNote } from "@elizaos/plugin-notes/types"
+import { RuntimeRequestError } from "@elizaos/agent"
+import { createNotesClient, type NotesInteractResult } from "@elizaos/plugin-notes-client"
+import type { NoteFormat, NotesSnapshot, NotesTrashErase, NotesTrashRecordingCleanup, StickyNote } from "@elizaos/plugin-notes-client"
 import { Agent } from "./agent.vibe"
 
 module transport {
-  import type { NotesTransport } from "@elizaos/plugin-notes/client"
+  import type { NotesTransport } from "@elizaos/plugin-notes-client"
   import type { Runtime } from "./agent.vibe"
 
   /** The agent's own authenticated client carries Notes' protocol. Its client decodes each unknown reply. @throws {never} */

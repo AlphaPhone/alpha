@@ -202,6 +202,17 @@ pure def lawWiderTextFewerColumns(canvas: int): bool = daysFor(canvas, 200) <= d
 pure def sometimesTheAgendaAtLargeText(c: Canvas): bool = c.agenda and c.mounted
 ```
 
+### Above 150% text, larger than Alpha's own largest size, an app's header gives its title a row of its own under the way back and the screen's actions
+
+At 150% the title still fits beside them, as it did on Alpha's earlier
+build; above it a one-word title would be split.
+
+```quint
+pure def titleRow(c: Canvas): bool = c.textScale > 150
+
+pure def lawATitleRowIsOnePane(scale: int): bool = titleRow(withLayout(scale, initial)) implies withLayout(scale, initial).agenda
+```
+
 ## Story: Scroll past Ask Alpha
 
 > As the owner, I want the end of every list to scroll clear of Ask Alpha,

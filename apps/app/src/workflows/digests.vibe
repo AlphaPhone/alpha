@@ -1,7 +1,7 @@
 // spec/app/digests/index.md, "Story: See my digests"; spec/app/digests/index.md, "Story: Receive results without losing or repeating one"; spec/app/digests/schedules.md, "Story: Keep my digest schedules"
 import type * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { type WorkflowRequest, WorkflowHttpError, WorkflowLifecycleRejected, workflowHttpError } from "@elizaos/plugin-workflow/client"
-import { type DigestLoop, type DigestResult, type DigestSource, type DigestSpec, digestInbox, digestSourceState, hostedDigestProtocol } from "@elizaos/plugin-workflow/digests"
+import { type WorkflowRequest, WorkflowHttpError, WorkflowLifecycleRejected, workflowHttpError } from "@elizaos/plugin-workflow-client"
+import { type DigestLoop, type DigestResult, type DigestSource, type DigestSpec, digestInbox, digestSourceState, hostedDigestProtocol } from "@elizaos/plugin-workflow-client"
 import * as List from "../../gen/app__workflows__list.effect.vibe"
 import * as Plan from "../../gen/app__digests__schedules.effect.vibe"
 import type { Change, Effect as Out, Event, Template } from "../../gen/app__digests__schedules.effect.vibe"
@@ -11,6 +11,7 @@ import { type Job, answer, applying, following, reacting, together } from "../ru
 import { Attempts } from "../runtime/attempts.vibe"
 import { Time } from "../runtime/time.vibe"
 import { WorkflowsApi } from "./api.vibe"
+import { DigestHistory, digestScope } from "./brief.vibe"
 import { Rows } from "./list.vibe"
 
 interface Numbered<T> { readonly number: number; readonly record: T }
@@ -54,7 +55,7 @@ const words = Layer.sync(DigestWords, () => {
   }
 })
 
-type Needs = Agent | Rows | WorkflowsApi | DigestWords | List.Machine | Plan.Machine | KeyValueStore.KeyValueStore | Time
+type Needs = Agent | Rows | WorkflowsApi | DigestWords | DigestHistory | List.Machine | Plan.Machine | KeyValueStore.KeyValueStore | Time
 
 effect function read(ticket: number, owner: number): Event!!Needs {
   const fail: Event = { type: "schedulesRead", ticket, ok: false, count: 0, standing: "NoSchedule", template: "Morning",
@@ -76,13 +77,14 @@ effect function read(ticket: number, owner: number): Event!!Needs {
   if (supported === undefined) return fallback
   const payload = effect {
     if (!supported.digests) return { ...empty, owner }
-    const inbox = try digestInbox(`alpha/workflows/digests/${encodeURIComponent(ownerKey)}`)
+    const inbox = try digestInbox(digestScope(ownerKey))
     const found = try all({
       loops: Effect.orElseSucceed(protocol.loops(), () => undefined),
       sources: Effect.orElseSucceed(protocol.sources(), () => undefined),
       results: Effect.orElseSucceed(inbox.sync(protocol, ticket), () => undefined),
     }, { concurrency: 3 })
     const cached = found.results ?? (inbox.history() catch () => [])
+    try (try DigestHistory).changed()
     const view = try DigestWords
     const loops: Numbered<DigestLoop>[] = []
     for (const record of found.loops ?? []) {

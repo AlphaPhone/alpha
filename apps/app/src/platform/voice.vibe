@@ -1,5 +1,5 @@
 // spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "Starting asks for the microphone the first time, opens it once it is allowed, and holds the speech engine while talking"
-import { type CloudStreamingSpeech, createCloudStreamingSpeech, type CredentialId, type EnvironmentName } from "@elizaos/os/bridges/voice"
+import { type CloudStreamingSpeech, createCloudStreamingSpeech, type CredentialId, type EnvironmentName } from "@elizaos/os-bridges"
 import { fresh } from "../runtime/attempts.vibe"
 import { Agent } from "./agent.vibe"
 import { registered } from "./device.vibe"
@@ -13,6 +13,7 @@ export type VoiceEvent =
   | { readonly kind: "transcript"; readonly session: number; readonly text: string; readonly final: boolean }
   | { readonly kind: "bargeIn"; readonly session: number; readonly echo: boolean }
   | { readonly kind: "ended"; readonly session: number; readonly reason: string }
+  | { readonly kind: "recordingStopped"; readonly ticket: number; readonly recorded: boolean }
 
 export type ReadingEvent = { readonly kind: "ready" | "ended"; readonly ok: boolean }
 
@@ -41,15 +42,28 @@ interface LiveCapture {
 
 interface DictationClip extends RecordedClip {
   readonly started: number
-  stopped: boolean
+  state: "recording" | "recorded" | "failed"
 }
+
+const recordedClip = Schema.Struct({
+  recordingId: Schema.NonEmptyString, status: Schema.Literal("recorded"),
+  durationMs: Schema.Int.check(Schema.makeFilter((duration) => duration >= 0)),
+})
+const recordingStop = Schema.Union([
+  recordedClip,
+  Schema.Struct({ recordingId: Schema.NonEmptyString, status: Schema.Literal("failed") }),
+])
+type RecordingStop = typeof recordingStop.Type
 
 module capacitor {
   import { registerPlugin } from "@capacitor/core"
-  import type { ElizaCloudSpeechPlugin } from "@elizaos/os/bridges/definitions/voice"
-  import { type SignInClient, signInClient } from "@elizaos/os/bridges/sign-in"
+  import type { ElizaCloudSpeechPlugin } from "@elizaos/os-bridges"
+  import { type SignInClient, signInClient } from "@elizaos/os-bridges"
 
   export interface ListenerHandle { remove(): Promise<void> }
+
+  /** One time window of a retained Notes recording. */
+  export type SavedNoteWindow = { readonly recordingId: string; readonly noteId: string; readonly offsetMs: number; readonly durationMs: number }
 
   export interface LocalVoicePlugin {
     checkPermissions(): Promise<{ microphone?: string }>
@@ -66,9 +80,13 @@ module capacitor {
     stopPlayback(options: { requestId?: string }): Promise<unknown>
     cancel(options: { requestId: string }): Promise<unknown>
     startRecording(options: Record<string, never>): Promise<{ recordingId?: string }>
-    stopRecording(options: Record<string, never>): Promise<{ recordingId?: string }>
+    stopRecording(options: Record<string, never>): Promise<unknown>
+    dictationForeground(options: Record<string, never>): Promise<{ available?: boolean }>
     cancelRecording(options: Record<string, never>): Promise<unknown>
-    transcribeLocalRecording(options: { requestId: string; recordingId: string }): Promise<{ text?: string }>
+    transcribeLocalRecording(options: { requestId: string; recordingId: string; automatic: boolean }): Promise<{ text?: string }>
+    transcribeSavedNote(options: SavedNoteWindow & { readonly requestId: string }): Promise<unknown>
+    transcribeVoicemail(options: { requestId: string; id: string }): Promise<unknown>
+    cancelVoicemailTranscription(options: { requestId: string }): Promise<void>
     addListener(event: string, listener: (data: unknown) => void): Promise<ListenerHandle>
   }
 
@@ -76,6 +94,35 @@ module capacitor {
   /** @throws {never} */
   export function localPlugin(): LocalVoicePlugin {
     return (made ??= registerPlugin<LocalVoicePlugin>("AlphaVoiceCloud"))
+  }
+
+  /** Cancel and retire the same native request if its caller stops waiting. */
+  export async function readSavedNote(input: SavedNoteWindow, requestId: string, signal: AbortSignal): Promise<unknown> {
+    signal.throwIfAborted()
+    const plugin = localPlugin()
+    const cancel = () => { void plugin.cancel({ requestId }).catch(() => undefined) }
+    signal.addEventListener("abort", cancel, { once: true })
+    try {
+      const result = await plugin.transcribeSavedNote({ ...input, requestId })
+      signal.throwIfAborted()
+      return result
+    } finally {
+      signal.removeEventListener("abort", cancel)
+    }
+  }
+
+  export async function readVoicemail(id: string, requestId: string, signal: AbortSignal): Promise<string> {
+    if (signal.aborted) return ""
+    const plugin = localPlugin()
+    const cancel = () => { void plugin.cancelVoicemailTranscription({ requestId }).catch(() => {}) }
+    signal.addEventListener("abort", cancel, { once: true })
+    try {
+      const reply = await plugin.transcribeVoicemail({ id, requestId })
+      return !signal.aborted && typeof reply === "object" && reply !== null && "text" in reply
+        && typeof reply.text === "string" && reply.text.length <= 8_000 ? reply.text : ""
+    } finally {
+      signal.removeEventListener("abort", cancel)
+    }
   }
 
   /** eliza's Cloud speech relay with the methods its TypeScript definition does not list yet: the warm-up and the timing records. */
@@ -108,9 +155,14 @@ module capacitor {
     }
   }
 }
-import { localPlugin, makeAbort, makeSessionGuard, relayPlugin, signInAccounts } from capacitor
+import { type SavedNoteWindow, localPlugin, makeAbort, makeSessionGuard, readSavedNote, readVoicemail, relayPlugin, signInAccounts } from capacitor
+export { type SavedNoteWindow, readSavedNote }
 
 export error VoiceBridgeFailed { method: string; cause: unknown }
+/** Recognition ran on the confirmed clip, stayed in custody, or could not start. */
+export type DictationAnswer =
+  | { readonly kind: "recognized"; readonly text: string }
+  | { readonly kind: "lost" | "obscured" | "failed" }
 
 export service VoiceBridge {
   available(): boolean!!
@@ -137,11 +189,26 @@ export service VoiceBridge {
   /** Each sign-in on the phone that settles on an account. */
   readonly signIns: Stream.Stream<void>
   startRecording(ticket: number): RecordedClip!VoiceBridgeFailed
-  transcribe(ticket: number, network: boolean): string!VoiceBridgeFailed
+  dictationForeground(): boolean!!
+  transcribe(ticket: number, network: boolean, automatic: boolean): DictationAnswer!!
   abandon(ticket: number): void!!
 }
 
 const LOCAL_PLUGIN = "AlphaVoiceCloud"
+
+/** The installed phone has Alpha's on-device speech bridge. */
+export function recognizesVoicemail(): boolean {
+  return registered(LOCAL_PLUGIN)
+}
+
+/** The selected provider row is decoded and recognized on the phone, without sending it audio. */
+export effect function transcribeVoicemail(id: string): string!VoiceBridgeFailed {
+  const requestId = `voicemail-${fresh()}`
+  return try tryPromise({
+    try: (signal) => readVoicemail(id, requestId, signal),
+    catch: (cause) => new VoiceBridgeFailed({ method: "transcribeVoicemail", cause }),
+  })
+}
 const CLOUD_STREAM_PLUGIN = "ElizaCloudSpeech"
 const SIGN_IN_PLUGIN = "ElizaSignIn"
 /** The cloud the phone signs in to, whose account the relay speaks for. */
@@ -170,6 +237,7 @@ function captureEvent(raw: unknown, capture: LiveCapture | undefined): { data: R
 function makeNativeEvents(
   subscribers: Set<(event: VoiceEvent) => void>,
   currentCapture: () => LiveCapture | undefined,
+  stoppedRecording: (stopped: RecordingStop) => void,
 ): Stream.Stream<VoiceEvent> {
   return Stream.callback<VoiceEvent>((queue) => effect {
     const forward = (event: VoiceEvent) => { Queue.offerUnsafe(queue, event) }
@@ -186,6 +254,10 @@ function makeNativeEvents(
           () => undefined,
         )
       const attached = try Effect.all([
+        Effect.orElseSucceed(tryPromise(() => plugin.addListener("recordingStopped", (raw) => {
+          const stopped = Schema.decodeUnknownOption(recordingStop)(raw)
+          if (Option.isSome(stopped)) stoppedRecording(stopped.value)
+        })), () => undefined),
         register("liveCaptureTranscript", (data, { session }) => {
           const failure = asString(data.error)
           if (failure !== "") return [{ kind: "ended", session, reason: failure }]
@@ -253,6 +325,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   let activePlaybackRequest: string | undefined
   const recordingLock = try Semaphore.make(1)
   let recording: DictationClip | undefined
+  let openingRecording: Map<string, RecordingStop> | undefined
   let retiredRecording = 0
   const readings = new Map<number, { readonly id: string; readonly stopped: Deferred.Deferred<boolean> }>()
   let stoppedThrough = 0
@@ -260,6 +333,17 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
 
   const publish = (event: VoiceEvent) => {
     for (const emit of eventSubscribers) emit(event)
+  }
+
+  function stoppedRecording(stopped: RecordingStop): void {
+    const clip = recording
+    if (clip?.recordingId !== stopped.recordingId) {
+      if (openingRecording !== undefined && !openingRecording.has(stopped.recordingId)) openingRecording.set(stopped.recordingId, stopped)
+      return
+    }
+    if (clip.started <= retiredRecording || clip.state !== "recording") return
+    clip.state = stopped.status
+    publish({ kind: "recordingStopped", ticket: clip.started, recorded: stopped.status === "recorded" })
   }
 
   effect function probeStatus(ttsOnly: boolean): SpeechStatus!! {
@@ -556,50 +640,57 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     readAloud,
     silenceReading,
     shut,
-    events: makeNativeEvents(eventSubscribers, () => nativeCapture),
+    events: makeNativeEvents(eventSubscribers, () => nativeCapture, stoppedRecording),
     account: signedInAccount, signIns: settledSignIns(),
     effect startRecording(ticket: number): RecordedClip!VoiceBridgeFailed {
       if (!registered(LOCAL_PLUGIN)) throw new VoiceBridgeFailed({ method: "startRecording", cause: "no-voice-plugin" })
       return try recordingLock.withPermits(1)(Effect.uninterruptible(effect {
         if (ticket <= retiredRecording) throw new VoiceBridgeFailed({ method: "startRecording", cause: "recording-retired" })
-        const started = try tryPromise({
-          try: () => localPlugin().startRecording({}),
-          catch: (cause) => new VoiceBridgeFailed({ method: "startRecording", cause }),
-        })
-        if (ticket <= retiredRecording || typeof started.recordingId !== "string" || started.recordingId === "") {
-          try ignore(tryPromise(() => localPlugin().cancelRecording({})))
-          throw new VoiceBridgeFailed({ method: "startRecording", cause: "no-active-recording" })
-        }
-        const clip: DictationClip = { recordingId: started.recordingId, started: ticket, stopped: false }
-        recording = clip
-        return clip
+        const opening = new Map<string, RecordingStop>()
+        openingRecording = opening
+        return try ensuring(effect {
+          const started = try tryPromise({
+            try: () => localPlugin().startRecording({}),
+            catch: (cause) => new VoiceBridgeFailed({ method: "startRecording", cause }),
+          })
+          if (ticket <= retiredRecording || typeof started.recordingId !== "string" || started.recordingId === "") {
+            try ignore(tryPromise(() => localPlugin().cancelRecording({})))
+            throw new VoiceBridgeFailed({ method: "startRecording", cause: "no-active-recording" })
+          }
+          const clip: DictationClip = { recordingId: started.recordingId, started: ticket, state: "recording" }
+          recording = clip
+          const stopped = opening.get(clip.recordingId)
+          if (stopped !== undefined) stoppedRecording(stopped)
+          return clip
+        }, sync(() => { openingRecording = undefined }))
       }))
     },
-    effect transcribe(ticket: number, _network: boolean): string!VoiceBridgeFailed {
-      if (!registered(LOCAL_PLUGIN)) throw new VoiceBridgeFailed({ method: "transcribeLocalRecording", cause: "no-voice-plugin" })
+    dictationForeground: () => registered(LOCAL_PLUGIN)
+      ? Effect.orElseSucceed(Effect.map(tryPromise(() => localPlugin().dictationForeground({})), (result) => result.available === true), () => false)
+      : succeed(false),
+    effect transcribe(ticket: number, _network: boolean, automatic: boolean): DictationAnswer!! {
+      if (!registered(LOCAL_PLUGIN)) return { kind: "lost" }
       const clip = try recordingLock.withPermits(1)(Effect.uninterruptible(effect {
         const current = recording
-        if (current === undefined || current.started > ticket || ticket <= retiredRecording) {
-          throw new VoiceBridgeFailed({ method: "stopRecording", cause: "no-recording" })
+        if (current === undefined || current.started > ticket || ticket <= retiredRecording) return undefined
+        if (current.state === "recording") {
+          const raw = tryPromise(() => localPlugin().stopRecording({})) catch () => undefined
+          const stopped = Schema.decodeUnknownOption(recordedClip)(raw)
+          if (current.state === "recording" && Option.isSome(stopped) && stopped.value.recordingId === current.recordingId) current.state = "recorded"
         }
-        if (!current.stopped) {
-          const stopped = try tryPromise({
-            try: () => localPlugin().stopRecording({}),
-            catch: (cause) => new VoiceBridgeFailed({ method: "stopRecording", cause }),
-          })
-          if (stopped.recordingId !== current.recordingId) {
-            throw new VoiceBridgeFailed({ method: "stopRecording", cause: "recording-changed" })
-          }
-          current.stopped = true
+        if (current.state !== "recorded") {
+          recording = undefined
+          try ignore(tryPromise(() => localPlugin().cancelRecording({})))
+          return undefined
         }
         return current
       }))
-      if (ticket <= retiredRecording || recording !== clip) throw new VoiceBridgeFailed({ method: "transcribeLocalRecording", cause: "recording-retired" })
-      const result = try tryPromise({
-        try: () => localPlugin().transcribeLocalRecording({ requestId: fresh(), recordingId: clip.recordingId }),
-        catch: (cause) => new VoiceBridgeFailed({ method: "transcribeLocalRecording", cause }),
-      })
-      return result.text ?? ""
+      if (clip === undefined || ticket <= retiredRecording || recording !== clip) return { kind: "lost" }
+      const result = tryPromise({
+        try: () => localPlugin().transcribeLocalRecording({ requestId: fresh(), recordingId: clip.recordingId, automatic }),
+        catch: (cause): "obscured" | "failed" => asRecord(cause)?.code === "dictation-obscured" ? "obscured" : "failed",
+      }) catch (kind) => kind
+      return typeof result === "string" ? { kind: result } : { kind: "recognized", text: result.text ?? "" }
     },
     effect abandon(ticket: number): void!! {
       retiredRecording = Math.max(retiredRecording, ticket)
@@ -643,7 +734,8 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
     account: () => succeed<CloudSignIn>({ kind: "unknown" }),
     signIns: Stream.empty,
     startRecording: () => Effect.fail(new VoiceBridgeFailed({ method: "startRecording", cause: "browser-no-native-voice" })),
-    transcribe: () => Effect.fail(new VoiceBridgeFailed({ method: "transcribe", cause: "browser-no-native-voice" })),
+    dictationForeground: () => succeed(false),
+    transcribe: () => succeed<DictationAnswer>({ kind: "lost" }),
     abandon: () => Effect.void,
   }
 })

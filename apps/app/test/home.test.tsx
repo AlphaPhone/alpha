@@ -1,15 +1,19 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it } from "vitest";
+import { digestInbox, type DigestResult, hostedDigestProtocol } from "@elizaos/plugin-workflow-client";
+import { Effect } from "effect";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Home from "../gen/app__home.effect.vibe";
 import * as Cards from "../gen/app__home__cards.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Toasts } from "../gen/app__notices__toasts.effect.vibe";
 import home from "../src/home/index.tsx";
+import type { Alpha } from "../src/runtime/area.tsx";
 import { button, closeAll, drawn, hardware, later, open, press, seen, underAct, until } from "./alpha.tsx";
 import { scene, type Scene } from "./fakes/scene.ts";
 import { savedKey, written } from "../src/home/saved.vibe";
 import { waiting } from "../src/home/waiting.vibe";
 import { fromAreas } from "../src/home/cards.vibe";
+import { digestScope } from "../src/workflows/brief.vibe";
 
 underAct();
 afterEach(closeAll);
@@ -29,6 +33,21 @@ const holdingHome = (world: Scene) => {
   world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true, holders: ["ai.alphacompute.alphaphone"] } : role);
   return world;
 };
+
+const digestResult = (cursor: number, status: string, output: string): DigestResult => {
+  const at = new Date(cursor * 3_600_000).toISOString();
+  return { cursor, runId: `run-${cursor}`, workflowId: "workflow", workflowVersionId: "version", templateVersion: "template",
+    scheduledAt: at, startedAt: at, completedAt: at, source: {}, status, output, error: null };
+};
+
+function keepDigests(alpha: Alpha, owner: string, entries: readonly DigestResult[]) {
+  let acknowledged = false;
+  const agent = hostedDigestProtocol((path) => Effect.sync(() => {
+    if (path.endsWith("/ack")) { acknowledged = true; return {}; }
+    return { entries: acknowledged ? [] : entries };
+  }));
+  return alpha.runtime.runPromise(Effect.flatMap(digestInbox(digestScope(owner)), (inbox) => inbox.sync(agent, 1)));
+}
 
 describe("Home on a phone", () => {
   // spec/app/home/index.md, "Story: Start Home"; spec/app/home/index.md, "Story: Keep my apps on Home"; spec/app/home/index.md, "Story: Edit Home"
@@ -127,16 +146,29 @@ describe("Home on a phone", () => {
   // spec/app/home/cards.md, "Story: The other cards"; spec/app/home/cards.md, "Story: Open my day from a card"
   it("See what waits in my apps on Home's cards and open one (spec/app/home/cards.md, \"Story: The other cards\"; spec/app/home/cards.md, \"Story: Open my day from a card\")", async () => {
     const world = { ...scene(), phone: true, image: true };
+    world.telephony.calls = [];
+    world.telephony.texts = [];
+    world.telephony.voicemails = [];
     const { alpha } = await open(world);
     await until(alpha, home.runtime(alpha), Home.Machine, (h) => h.tiles.load.status === "Loaded");
     await until(alpha, alpha.runtime, Shell, (s) => s.image);
     const card = (title: string) => [...document.querySelectorAll<HTMLButtonElement>("section[aria-label='Your day'] > button")].find((found) => found.textContent?.startsWith(title));
+    const pressCard = (title: string) => drawn(() => {
+      const found = card(title);
+      if (!found || found.disabled) throw new Error(`Home card unavailable: ${title}`);
+      found.click();
+    });
+    const showing = (view?: "Inbox" | "Workflows") => vi.waitFor(async () => {
+      const state = await alpha.runtime.runPromise(Shell.use((shell) => shell.get()));
+      expect(state.trail.at(-1)).toBe(view);
+    }, { timeout: 5_000 });
+    const mail = { connected: true, unread: 4, rows: [{ title: "Bank", detail: "Statement ready" }], current: false };
 
     // spec/app/home/cards.md, "The Messages and Phone cards show their waiting rows, only on an Alpha image, and are not drawn without a row"; spec/app/home/cards.md, "The mail card shows the unread count, senders and subjects only, never a message body; marked not up to date when Inbox's page is not, and not drawn without an account or a row"
     await drawn(() => {
       fromAreas.messages([{ title: "Ana", detail: "Lunch at one?" }]);
       fromAreas.phone([]);
-      fromAreas.mail({ connected: true, unread: 4, rows: [{ title: "Bank", detail: "Statement ready" }], current: false });
+      fromAreas.mail(mail);
     });
     expect([card("Messages") !== undefined, card("Phone") !== undefined, card("4 unread")?.textContent]).toEqual([true, false, expect.stringMatching(/Not up to date/)]);
 
@@ -151,16 +183,21 @@ describe("Home on a phone", () => {
     // spec/app/home/cards.md, "The row holds the agenda, Messages, Phone, mail, brief and Workflows cards in that order, each only when drawn, and is not drawn when none is"
     expect([...document.querySelectorAll("section[aria-label='Your day'] > button")].map((found) => ["Messages", "4 unread", "Latest brief", "Morning brief"].find((title) => found.textContent?.startsWith(title)))).toEqual(["Messages", "4 unread", "Latest brief", "Morning brief"]);
 
-    // spec/app/home/cards.md, "A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed"
-    await drawn(() => card("4 unread")?.click());
-    await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Inbox");
-    await hardware("home");
-    await drawn(() => card("Latest brief")?.click());
-    await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Workflows");
-
     await drawn(() => { fromAreas.messages([]); fromAreas.mail({ connected: false, unread: 0, rows: [], current: false }); fromAreas.flows({ rows: [], freshness: "UpToDate" }); fromAreas.brief(undefined); });
-    await hardware("home");
     expect(document.querySelector("section[aria-label='Your day']")).toBeNull();
+
+    // spec/app/home/cards.md, "A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed"
+    await drawn(() => fromAreas.mail(mail));
+    await pressCard("4 unread");
+    await showing("Inbox");
+
+    // Returning to Home refreshes the brief from the current owner's retained inbox.
+    await keepDigests(alpha, world.notes.owner, [digestResult(1, "failed", "The morning brief could not run.")]);
+    await hardware("home");
+    await showing();
+    await vi.waitFor(() => expect(card("Latest brief")?.textContent).toContain("Didn't run"), { timeout: 5_000 });
+    await pressCard("Latest brief");
+    await showing("Workflows");
   });
 
   // spec/app/home/index.md, "Story: See the apps on this phone"; spec/app/home/index.md, "Story: Open an app"
@@ -235,6 +272,26 @@ describe("Home on a phone", () => {
 });
 
 describe("Home in a browser", () => {
+  // spec/app/digests/index.md, "Home shows the newest kept result of the owner that ran, finished or failed, through a restart; a result that did not run never replaces it, and a page of another owner never reaches it"
+  it("Shows the current owner's retained brief after restart (spec/app/digests/index.md, \"Story: Receive results without losing or repeating one\")", async () => {
+    const world = scene();
+    const setup = await open(world);
+    await keepDigests(setup.alpha, world.notes.owner, [digestResult(1, "finished", "Owner’s morning brief"), digestResult(2, "missed", "Must stay off Home")]);
+    await keepDigests(setup.alpha, "another-owner", [digestResult(1, "finished", "Another owner’s morning brief")]);
+    await setup.close();
+
+    await open(world);
+    const latest = () => [...document.querySelectorAll("section[aria-label='Your day'] > button")]
+      .find((card) => card.textContent?.startsWith("Latest brief"))?.textContent;
+    await vi.waitFor(() => expect(latest()).toContain("Owner’s morning brief"));
+    expect(latest()).not.toContain("Must stay off Home");
+
+    world.notes.owner = "another-owner";
+    await seen(false);
+    await seen(true);
+    await vi.waitFor(() => expect(latest()).toContain("Another owner’s morning brief"));
+  });
+
   // spec/app/home/index.md, "Story: Open an app"
   it("Open one of Alpha's apps from Home (spec/app/home/index.md, \"Story: Open an app\")", async () => {
     const world = scene();

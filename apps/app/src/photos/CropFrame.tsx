@@ -119,7 +119,7 @@ export function CropFrame({ source, bounds, onApply }: Props) {
       <div ref={imageRef} className="relative touch-none overflow-hidden" style={{ width: `min(100cqw, calc(100cqh * ${imageRatio}))`, aspectRatio: imageRatio }}>
         <img src={source.image} alt="" draggable={false} className="pointer-events-none absolute inset-0 size-full" />
         <div ref={frameFocus} tabIndex={0} role="group" aria-label="Crop area" aria-describedby="alpha-photos-crop-keys"
-          className="absolute cursor-move border-2 border-foreground shadow-[0_0_0_200vmax_color-mix(in_oklab,var(--background)_65%,transparent)] focus-visible:outline-focus"
+          className="absolute cursor-move border-2 border-foreground shadow-[0_0_0_200vmax] shadow-background/65 focus-visible:outline-focus"
           style={{ left: percent(rect.x), top: percent(rect.y), width: percent(rect.width), height: percent(rect.height) }}
           onPointerDown={(event) => begin(event)} onPointerMove={move} onPointerUp={end} onPointerCancel={end} onLostPointerCapture={end} onKeyDown={nudge}>
           <span aria-hidden className="pointer-events-none absolute inset-x-0 top-1/3 h-1/3 border-y border-foreground/40" />
@@ -134,7 +134,7 @@ export function CropFrame({ source, bounds, onApply }: Props) {
     <p className="sr-only" id="alpha-photos-crop-keys">Use the arrow keys to move the crop. Hold Shift to resize it.</p>
     <div className="flex shrink-0 flex-col gap-3 px-4 py-4">
       <div role="group" aria-label="Crop aspect" className="flex flex-wrap justify-center gap-2">
-        {aspects.map((aspect) => <Button key={aspect.key} size="sm" variant={draft.aspect === aspect ? "default" : "secondary"}
+        {aspects.map((aspect) => <Button key={aspect.key} size="sm" variant={draft.aspect === aspect ? "primary" : "secondary"}
           aria-label={`${aspect.key} crop`} aria-pressed={draft.aspect === aspect} onClick={() => choose(aspect)}>{aspect.key}</Button>)}
       </div>
       <div className="flex justify-center gap-3">

@@ -1,14 +1,15 @@
 // spec/app/contacts/agent.md, "Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call"; spec/app/phone/index.md, "A number handed to Phone opens the keypad with it filled in, and never dials"
-import { NOT_DISPATCHED } from "@elizaos/agent/client"
-import { readResult, type DeviceOperation } from "@elizaos/agent/operations"
+import { NOT_DISPATCHED, readResult, type DeviceOperation } from "@elizaos/agent"
 import { Machine as Phone, clear } from "../../gen/app__phone.effect.vibe"
 import { Machine as Shell, available, showing } from "../../gen/app__shell.effect.vibe"
 import { Device } from "../platform/device.vibe"
-import { Telephony, TelephonyAbsent, TelephonyRefused, telephony } from "../platform/telephony.vibe"
+import { type Telephony, TelephonyAbsent, TelephonyRefused, telephony } from "../platform/telephony.vibe"
 import { contained } from "../runtime/reactor.vibe"
-import { Dialer, prefilled } from "./phone.vibe"
+import { currentPhoneContact, phoneQuery, type ReviewedPhoneContact } from "./named-review.vibe"
+import { Dialer, classifyDialNumber, prefilled } from "./phone.vibe"
 
 type PhoneOperation = Extract<DeviceOperation, { type: "phone_keypad" | "phone_dial" | "phone_call" }>
+type NumberOperation = Extract<PhoneOperation, { type: "phone_dial" | "phone_call" }>
 
 const refused = { kind: "refused", code: NOT_DISPATCHED } as const
 
@@ -37,6 +38,12 @@ effect function canDispatch(current: () => Promise<boolean>): boolean!!(Device |
   return clear(state) && state.dial.status !== "Loading"
 }
 
+effect function destination(operation: NumberOperation, selected: ReviewedPhoneContact | undefined) {
+  if (operation.target.kind === "number") return { number: operation.target.number, contact: false }
+  if (selected === undefined || selected.query !== phoneQuery(operation) || !(try currentPhoneContact(selected))) return undefined
+  return { number: selected.number, contact: true }
+}
+
 effect function keypad(number: string | undefined, current: () => Promise<boolean>): boolean!!(Device | Dialer | Phone | Shell) {
   const handset = try Phone
   const shell = try Shell
@@ -62,23 +69,29 @@ effect function keypad(number: string | undefined, current: () => Promise<boolea
 }
 
 /** The already reviewed Phone operations. The SDK owns approval, claim and dispatch journaling. */
-export effect function phoneAction(operation: DeviceOperation, current: () => Promise<boolean>): unknown!!(Device | Dialer | Phone | Shell | Telephony) {
+export effect function phoneAction(operation: DeviceOperation, current: () => Promise<boolean>, selected?: ReviewedPhoneContact): unknown!!(Device | Dialer | Phone | Shell | Telephony) {
   switch (operation.type) {
     case "phone_keypad": {
       const opened = try keypad(operation.number, current)
       return answer(operation, { kind: "phone-keypad", status: opened ? "opened" : "unavailable" }, opened)
     }
     case "phone_dial": {
-      if (operation.target.kind !== "number" || !(try canDispatch(current))) return refused
-      const number = operation.target.number
+      if (!(try canDispatch(current))) return refused
+      const target = try destination(operation, selected)
+      if (target === undefined) return refused
+      const { number, contact } = target
+      if (contact && ((try classifyDialNumber(number)) !== "OrdinaryNumber" || !(try canDispatch(current)))) return refused
       const report = telephony("dial", (client) => client.phone.dial(number)) catch (failure) => refusedBeforeDispatch(failure) ? null : undefined
       if (report === undefined) return undefined
       const status = report?.dialStatus === "DialHandedOff" ? "handed-off" : report?.dialStatus === "DialFailed" ? "failed" : "unavailable"
-      return answer(operation, { kind: "phone-dial", status, handler: status === "handed-off" ? report?.handler ?? null : null, contact: false }, status === "handed-off")
+      return answer(operation, { kind: "phone-dial", status, handler: status === "handed-off" ? report?.handler ?? null : null, contact }, status === "handed-off")
     }
     case "phone_call": {
-      if (operation.target.kind !== "number" || !(try canDispatch(current))) return refused
-      const number = operation.target.number
+      if (!(try canDispatch(current))) return refused
+      const target = try destination(operation, selected)
+      if (target === undefined) return refused
+      const { number, contact } = target
+      if ((try classifyDialNumber(number)) !== "OrdinaryNumber" || !(try canDispatch(current))) return refused
       const report = telephony("placeCall", (client) => client.phone.placeCall(number)) catch (failure) => refusedBeforeDispatch(failure) ? null : undefined
       if (report === undefined) return undefined
       const status = match (report?.placeStatus) {
@@ -88,7 +101,7 @@ export effect function phoneAction(operation: DeviceOperation, current: () => Pr
         when "CallFailed": "failed";
         default: "unavailable";
       }
-      return answer(operation, { kind: "phone-call", status, contact: false }, status === "placed" || status === "emergency-handoff")
+      return answer(operation, { kind: "phone-call", status, contact }, status === "placed" || status === "emergency-handoff")
     }
     default: return refused
   }

@@ -1,6 +1,5 @@
 // spec/app/files/index.md, "Story: Browse my storage"
-import type { ElizaFilesPlugin, FileOutcomeRow, FilesAccess, StorageEntry, StorageVolume, TrashEntry } from "@elizaos/os/bridges/definitions/files";
-import type { SelectedDocumentsPlugin } from "@elizaos/os/bridges/definitions/media";
+import type { ElizaFilesPlugin, FileOutcomeRow, FilesAccess, StorageEntry, StorageVolume, TrashEntry, SelectedDocumentsPlugin } from "@elizaos/os-bridges";
 import { type Faked, plugin } from "./phone.ts";
 
 /** One file or folder the fake storage holds, by its volume and its path from that volume's root. */
@@ -18,6 +17,12 @@ interface Binned {
   readonly id: string;
   readonly was: Stored;
   readonly deletedAt: number;
+}
+
+interface DocumentSelection {
+  readonly volume: string;
+  readonly path: string;
+  readonly canRename: boolean;
 }
 
 /** What the fake phone's storage holds, and how it behaves; a journey changes it between steps. */
@@ -49,6 +54,8 @@ export interface FilesScene {
   /** What a text file says, by path, where it is not its default words. */
   readonly texts: Record<string, string>;
   selectedByPicker: string | undefined;
+  pickerRenameNeedsReselection: boolean;
+  readonly selections: Map<string, DocumentSelection>;
 }
 
 const file = (volume: string, path: string, mimeType: string, size = 100, modified = 1): Stored => ({ volume, path, directory: false, mimeType, size, modified });
@@ -67,7 +74,7 @@ export function filesScene(): FilesScene {
       folder("primary", "Documents/Old"),
       file("card", "song.mp3", "audio/mpeg", 4_000, 2),
     ],
-    trash: [], shared: [], opened: [], calls: [], gate: Promise.resolve(), now: 10, listMost: 5_000, queryMost: 500, changed: () => {}, watching: undefined, refusing: [], forgotten: [], texts: {}, selectedByPicker: undefined,
+    trash: [], shared: [], opened: [], calls: [], gate: Promise.resolve(), now: 10, listMost: 5_000, queryMost: 500, changed: () => {}, watching: undefined, refusing: [], forgotten: [], texts: {}, selectedByPicker: undefined, pickerRenameNeedsReselection: false, selections: new Map(),
   };
 }
 
@@ -75,6 +82,12 @@ const parent = (path: string) => path.slice(0, Math.max(0, path.lastIndexOf("/")
 const leaf = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 const join = (folder: string, name: string) => (folder === "" ? name : `${folder}/${name}`);
 const entry = (one: Stored): StorageEntry => ({ path: one.path, name: leaf(one.path), directory: one.directory, mimeType: one.mimeType, size: one.size, modified: one.modified });
+
+function authorize(scene: FilesScene, { volume, path }: Stored, canRename: boolean): string {
+  const id = crypto.randomUUID();
+  scene.selections.set(id, { volume, path, canRename });
+  return id;
+}
 
 /** `ElizaFiles`, the phone's storage plugin of eliza's Android package, over `scene`: it answers as `FilesPlugin.java` does. */
 export function elizaFiles(scene: FilesScene): Faked {
@@ -189,11 +202,12 @@ export function elizaFiles(scene: FilesScene): Faked {
           .map(({ id, was, deletedAt }) => ({ id, name: leaf(was.path), origin: parent(was.path), directory: was.directory, mimeType: was.mimeType, size: was.size, deletedAt }));
         return Promise.resolve({ status: "ready", items });
       },
-      storageRestore({ ids }) {
+      storageRestore({ volume, ids }) {
         called("restore");
         if (scene.refusing.includes("storageRestore")) return Promise.resolve({ status: "failed" });
+        if (scene.refusing.includes(`storageRestore:${on(volume)}`)) return Promise.reject(new Error("The phone did not return the restore receipt"));
         return Promise.resolve({ status: "ready", outcomes: ids.map((id): FileOutcomeRow => {
-          const found = scene.trash.find((one) => one.id === id);
+          const found = scene.trash.find((one) => one.id === id && one.was.volume === on(volume));
           if (!found) return { path: id, status: "missing" };
           scene.trash.splice(scene.trash.indexOf(found), 1);
           scene.stored.push(found.was);
@@ -216,9 +230,12 @@ export function elizaFiles(scene: FilesScene): Faked {
         scene.opened.push(path);
         return Promise.resolve({ status: "opened", count: 1 });
       },
-      storageSelect({ path }) {
-        const found = find("primary", path);
-        return Promise.resolve(found ? { status: "selected", action: "files", selectionId: `selection:${path}`, name: leaf(path), mimeType: found.mimeType, canRename: true } : { status: "missing" });
+      storageSelect({ volume, path }) {
+        if (denied()) return Promise.resolve(refused());
+        const found = find(on(volume), path);
+        return Promise.resolve(found && !found.directory ? {
+          status: "selected", action: "files", selectionId: authorize(scene, found, false), name: leaf(path), mimeType: found.mimeType, canRename: false,
+        } : { status: "missing" });
       },
       storageWatch(input) {
         called("storageWatch");
@@ -240,13 +257,22 @@ export function selectedDocuments(scene: FilesScene): Faked {
     pickSelected(): Promise<unknown>;
     attachmentSelected(options: { selectionId: string }): Promise<unknown>;
   }, Record<string, never>>(() => {
-    const held = (selectionId: string) => scene.stored.find((one) => `selection:${one.path}` === selectionId && !scene.forgotten.includes(selectionId));
+    const held = (selectionId: string) => {
+      const selection = scene.selections.get(selectionId);
+      return selection === undefined ? undefined : scene.stored.find((one) =>
+        !one.directory && one.volume === selection.volume && one.path === selection.path);
+    };
+    const described = (selectionId: string, found: Stored) => ({
+      status: "selected", selectionId, name: leaf(found.path), mimeType: found.mimeType, uri: `content://${found.path}`, size: found.size, modified: found.modified,
+      canRename: scene.selections.get(selectionId)?.canRename === true,
+    });
     return {
       restoreSelected: () => Promise.resolve({ status: "unavailable", message: "" }),
       pickSelected() {
         const path = scene.selectedByPicker;
         scene.selectedByPicker = undefined;
-        return Promise.resolve({ selectionId: path ? `selection:${path}` : "" });
+        const found = scene.stored.find((one) => !one.directory && one.path === path);
+        return Promise.resolve({ selectionId: found === undefined ? "" : authorize(scene, found, true) });
       },
       attachmentSelected({ selectionId }) {
         const found = held(selectionId);
@@ -255,9 +281,22 @@ export function selectedDocuments(scene: FilesScene): Faked {
       },
       describeSelected({ selectionId }) {
         const found = held(selectionId);
-        return Promise.resolve(found ? { status: "selected", selectionId, name: leaf(found.path), mimeType: found.mimeType, uri: `content://${found.path}`, size: found.size, modified: found.modified } : { status: "renamed-reselect", message: "" });
+        return Promise.resolve(found ? described(selectionId, found) : { status: "unavailable", message: "" });
       },
-      renameSelected: () => Promise.resolve({ status: "unsupported", message: "" }),
+      renameSelected({ selectionId, name }) {
+        const found = held(selectionId);
+        if (!found) return Promise.resolve({ status: "unavailable", message: "" });
+        const selection = scene.selections.get(selectionId);
+        if (!selection?.canRename) return Promise.resolve({ status: "unsupported", message: "" });
+        found.path = join(parent(found.path), name);
+        found.modified = scene.now;
+        if (scene.pickerRenameNeedsReselection) {
+          scene.selections.delete(selectionId);
+          return Promise.resolve({ status: "renamed-reselect", message: "" });
+        }
+        scene.selections.set(selectionId, { ...selection, path: found.path });
+        return Promise.resolve(described(selectionId, found));
+      },
       pdfSelected({ selectionId, page }) {
         const found = held(selectionId);
         return Promise.resolve(found?.mimeType === "application/pdf" ? { status: "rendered", message: "", page, pageCount: 3, imageUri: `page://${found.path}/${page}` } : { status: "unsupported", message: "" });
@@ -267,11 +306,17 @@ export function selectedDocuments(scene: FilesScene): Faked {
         return Promise.resolve(found ? { status: "read", message: "", text: scene.texts[found.path] ?? `The words of ${leaf(found.path)}`, mimeType: found.mimeType, bytes: found.size } : { status: "unavailable", message: "" });
       },
       openSelected({ selectionId }) {
+        if (!held(selectionId)) return Promise.resolve({ status: "unavailable", message: "" });
         scene.opened.push(selectionId);
         return Promise.resolve({ status: "opened", message: "" });
       },
-      shareSelected: () => Promise.resolve({ status: "opened", message: "" }),
+      shareSelected({ selectionId }) {
+        if (!held(selectionId)) return Promise.resolve({ status: "unavailable", message: "" });
+        scene.shared.push([selectionId]);
+        return Promise.resolve({ status: "opened", message: "" });
+      },
       forgetSelected({ selectionId }) {
+        scene.selections.delete(selectionId);
         scene.forgotten.push(selectionId);
         return Promise.resolve();
       },

@@ -1,7 +1,11 @@
 # Recently deleted
 
 What the owner moved out of [Photos](./index.md) waits here, in Android's
-trash, until it is recovered or Android removes it. Recovering is a
+trash, until it is recovered or Android removes it. In a browser this is
+the locally saved library’s Recently deleted, with the same review. For an
+item inherited from the earlier browser, successful permanent deletion
+requires both the local catalog receipt and removal of the reviewed earlier
+original. An interrupted deletion remains unconfirmed until read back. Recovering is a
 [run of changes](./changes.md) like any other change to photos. Deleting
 forever is prepared by the phone for exactly the items chosen, at most 500,
 Android's own limit, shown to the owner as "Delete photos forever", and done
@@ -96,7 +100,9 @@ pure val weight_recovered = 4
 ## Story: See what I deleted
 
 > As the owner, I want to see what I deleted recently, scroll on through
-> it, and be told when it is loading, empty, or could not be read.
+> it, and be told when it is loading, empty, or could not be read. When
+> Android supplies an expiry date, I can see how many days an item has left
+> in the grid and when I open it.
 
 ### Opening Recently deleted reads it, only while Photos has access and never from the lock screen; closing it keeps nothing on screen
 

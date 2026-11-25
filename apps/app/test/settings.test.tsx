@@ -70,7 +70,8 @@ describe("Settings", () => {
     await hardware("back");
     expect(await page(alpha)).toBe("General");
     await hardware("back");
-    // spec/app/settings/index.md, "Each page links to what another area owns there": the Account sheet reads the signed-in account and Back returns to Settings.
+    // spec/app/settings/index.md, "Each page links to what another area owns there": the Account row and sheet read the signed-in account and Back returns to Settings.
+    await vi.waitFor(() => expect(button("Account")?.textContent).toContain(account.email));
     await press("Account");
     await until(alpha, alpha.runtime, Layers.Machine, (state) => Layers.listed(state, "account"));
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain(account.email));
@@ -85,6 +86,7 @@ describe("Settings", () => {
     expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain(account.email);
     await press("Close Account");
     await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
+    await vi.waitFor(() => expect(button("Account")?.textContent).toContain("Signed out"));
     world.signedIn = true;
 
     // spec/app/settings/index.md, "Each page links to what another area owns there": Agent activity offers the conversations, which the shell opens over the app.
@@ -140,7 +142,10 @@ describe("Settings", () => {
   describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
     it("Change what only Android can change (spec/app/settings/android.md, \"Story: Change what only Android can change\")", async () => {
       const { alpha, machines, world } = await settingsOpen({ ...scene(), phone });
+      await until(alpha, machines, Facts.Machine, (state) => state.read.read.status === "Loaded");
+      expect(Boolean(button("Refresh"))).toBe(phone);
       await press("General");
+      expect(Boolean(button("Refresh"))).toBe(phone);
       // spec/app/settings/android.md, "Android says whether it opened that page, a nearby one, or none"
       await tap("Wi-Fi");
       await until(alpha, machines, Android.Machine, (s) => s.start.read.status !== "Loading");
@@ -159,13 +164,41 @@ describe("Settings", () => {
     });
   });
 
+  it("Choose Android autofill in Passwords (spec/app/settings/android.md, \"Story: Change what only Android can change\")", async () => {
+    const { alpha, machines, world } = await settingsOpen();
+    await press("Apps");
+    await press("Passwords");
+    await until(alpha, machines, Facts.Machine, (s) => s.reported.some(({ fact, value }) => fact === "AutofillService" && value === "None"));
+    world.settings.autofillDestination = "system-settings";
+    await tap("Use for autofill");
+    await until(alpha, machines, Android.Machine, (s) => s.target === "PasswordAutofill" && s.told === "SaidNearby");
+    world.settings.autofillDestination = "autofill-picker";
+    await tap("Use for autofill");
+    await until(alpha, machines, Android.Machine, (s) => s.start.read.status === "Loaded" && s.told === "Silent");
+    expect(world.settings.opened).toEqual(["system-settings", "autofill-picker"]);
+
+    world.settings.autofill = { supported: true, selected: "this-app" };
+    await seen(false);
+    await seen(true);
+    await until(alpha, machines, Facts.Machine, (s) => s.reported.some(({ fact, value }) => fact === "AutofillService" && value === "Alpha"));
+    expect(titled("Use for autofill")).toBeUndefined();
+    await hardware("back");
+    expect(await page(alpha)).toBe("Apps");
+  });
+
   it("Look at access again (spec/app/startup/access.md, \"Story: Look at access again\")", async () => {
     const { alpha, world, machines } = await settingsOpen();
     await press("Privacy");
     await press("Permissions");
     await until(alpha, machines, Facts.Machine, (s) => Facts.accessWord(s, "MicrophoneAccess") === "Off");
     await tap("Microphone");
-    await vi.waitFor(() => expect(document.querySelector('[role="dialog"] [aria-current="step"]')?.textContent).toContain("Microphone"));
+    // spec/app/startup/access.md, "Settings opens one access of this walkthrough in review, also from the list of all, and the agent may ask to show one"
+    await vi.waitFor(() => {
+      const review = document.querySelector('[role="dialog"]');
+      const current = review?.querySelector('[aria-current="step"]');
+      expect([review?.querySelectorAll("li").length, current?.textContent?.includes("Microphone"), [...(review?.querySelectorAll("li button") ?? [])].map((action) => action.closest("li") === current)])
+        .toEqual([7, true, [true]]);
+    });
     await press("Settings");
     await vi.waitFor(() => expect(world.settings.opened).toEqual(["privacy"]));
     world.settings.hostFacts.permissions.Microphone = true;
@@ -229,9 +262,51 @@ describe("Settings", () => {
     await vi.waitFor(() => expect(world.settings.consents).toEqual([
       { gmailChanges: false, calendarEdits: false }, { gmailChanges: true, calendarEdits: true }, { gmailChanges: false, calendarEdits: true },
     ]));
+    // spec/app/settings/preferences.md, "The agent is launched allowed to change Gmail and Calendar exactly as the phone last read or saved, allowed neither once it could not read them, and Alpha says nothing of it before the first answer": a change the host refuses is put back and not saved, and a save that changes neither still saves.
+    world.settings.refusesConsent = true;
+    await tap("Calendar changes");
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Failed" && s.notice === "NotSaved");
+    const refused = await alpha.runtime.runPromise(Prefs.Machine.use((prefs) => prefs.get()));
+    expect([Prefs.allows(refused, "CalendarEdits"), refused.agentGoogle]).toEqual([true, { tag: "Consents", gmailChanges: false, calendarEdits: true }]);
+    expect(JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}")).toEqual({ askFirst: true, images: true, shares: ["AgentLocation", "CalendarEdits"] });
+    await tap("Location");
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && !Prefs.allows(s, "AgentLocation"));
+    expect(world.settings.consents).toHaveLength(3);
+    // spec/app/settings/preferences.md, "A change takes effect when the phone saved it; when the phone refuses it, Alpha says it was not saved and nothing changes; when the phone does not answer in time, Alpha says it was not saved and reads the device preferences again": a change the host takes too late is what Settings shows once the phone has finished with it.
+    world.settings.refusesConsent = false;
+    let answer = () => undefined as void;
+    world.settings.consentGate = new Promise((resolve) => { answer = resolve; });
+    await tap("Gmail changes");
+    await later(alpha, 10_000);
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Failed" && s.document.read.status === "Loading" && !Prefs.allows(s, "GmailChanges"));
+    answer();
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded" && Prefs.allows(s, "GmailChanges") && Prefs.allows(s, "CalendarEdits"));
+    await vi.waitFor(() => expect(world.settings.consents.at(-1)).toEqual({ gmailChanges: true, calendarEdits: true }));
+    world.settings.consentGate = new Promise((resolve) => { answer = resolve; });
+    world.settings.refusesConsent = true;
+    await tap("Gmail changes");
+    await later(alpha, 10_000);
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Failed" && s.document.read.status === "Loading");
+    answer();
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded" && Prefs.allows(s, "GmailChanges"));
+    expect([JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}"), world.settings.consents.at(-1)])
+      .toEqual([{ askFirst: true, images: true, shares: ["CalendarEdits", "GmailChanges"] }, { gmailChanges: true, calendarEdits: true }]);
   });
 
-  it("A phone updated from the previous Alpha keeps its choices (spec/app/settings/preferences.md, \"The device preferences are read when Alpha starts, when Settings opens, and when Alpha comes back while Settings shows, with ten seconds to answer, never while a change or a recovery is in flight\")", async () => {
+  it("A consent the host refused after a read is told again at the next read (spec/app/settings/preferences.md, \"Story: Decide whether Alpha asks before it acts\")", async () => {
+    // spec/app/settings/preferences.md, "The agent is launched allowed to change Gmail and Calendar exactly as the phone last read or saved, allowed neither once it could not read them, and Alpha says nothing of it before the first answer"
+    localStorage.setItem("alpha.preferences", JSON.stringify({ askFirst: true, images: false, shares: ["CalendarEdits"] }));
+    const world = { ...scene(), phone: true };
+    world.settings.refusesConsent = true;
+    const first = await open(world);
+    await until(first.alpha, first.alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded" && Prefs.allows(s, "CalendarEdits"));
+    expect(world.settings.consents).toEqual([]);
+    world.settings.refusesConsent = false;
+    await press("Settings");
+    await vi.waitFor(() => expect(world.settings.consents).toEqual([{ gmailChanges: false, calendarEdits: true }]));
+  });
+
+  it("A phone updated from the previous Alpha keeps its choices (spec/app/settings/preferences.md, \"The device preferences are read when Alpha starts, when Settings opens, when Alpha comes back while Settings shows, and after a change the phone did not answer in time, with ten seconds to answer, never while a change or a recovery is in flight\")", async () => {
     localStorage.setItem("alpha.browser.device.v1", JSON.stringify({ askBeforeAgentActions: false, agentLocationEnabled: false, autoLoadMailImages: true }));
     const { alpha } = await open({ ...scene(), phone: true });
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded");

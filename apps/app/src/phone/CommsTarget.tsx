@@ -5,6 +5,9 @@ import { ChevronDown, Phone, PhoneOff } from "lucide-react";
 import type { Machine as CallMachine } from "../../gen/app__phone__call.effect.vibe";
 import { useMachine as useCall } from "../../gen/app__phone__call.react.ts";
 import { barDrawn, shownCall } from "../../gen/app__phone__call.ts";
+import type { Machine as CommsMachine } from "../../gen/app__phone__comms.effect.vibe";
+import { useMachine as useComms } from "../../gen/app__phone__comms.react.ts";
+import { endPlace } from "../../gen/app__phone__comms.ts";
 import type { Machine as MessagesMachine } from "../../gen/app__messages.effect.vibe";
 import { useMachine as useMessages } from "../../gen/app__messages.react.ts";
 import type { Machine as ContactsMachine } from "../../gen/app__contacts.effect.vibe";
@@ -17,7 +20,15 @@ import { useCommsDock } from "./CommsBar.tsx";
 import { CallAvatar } from "./CallAvatar.tsx";
 
 /** The current subject of the Phone, Contacts or Messages stage. */
-export type CommsTargetServices = CallMachine | MessagesMachine | ContactsMachine | ShellMachine | Rows | Conversations | Inbox;
+export type CommsTargetServices = CallMachine | CommsMachine | MessagesMachine | ContactsMachine | ShellMachine | Rows | Conversations | Inbox;
+
+export function VoiceEnd({ runtime }: { runtime: ManagedRuntime.ManagedRuntime<CallMachine | CommsMachine, unknown> }) {
+  const comms = useComms(runtime).state;
+  const calls = useCall(runtime);
+  const end = { type: "endAsked", callId: calls.state ? shownCall(calls.state.calls).id : "" } as const;
+  if (!comms || endPlace(comms) !== "EndOnVoicePanel" || !calls.can(end)) return null;
+  return <Button size="icon" variant="destructive" aria-label="End call" onClick={() => void calls.send(end)}><PhoneOff /></Button>;
+}
 
 /** The other target beside Ask Alpha, or its reduced view when Ask Alpha is full. */
 export function CommsTarget({ runtime, placement }: {
@@ -26,6 +37,7 @@ export function CommsTarget({ runtime, placement }: {
 }) {
   const shell = useShell(runtime);
   const calls = useCall(runtime);
+  const comms = useComms(runtime).state;
   const messages = useMessages(runtime).state;
   const contacts = useContacts(runtime).state;
   const dock = useCommsDock(runtime);
@@ -56,7 +68,7 @@ export function CommsTarget({ runtime, placement }: {
         <span className="min-w-0 flex-1 truncate text-left">{shouldShowCall ? "Ongoing call" : person === "" ? view : `${person} · ${view}`}</span>
         <ChevronDown aria-hidden />
       </Button>
-      {shouldShowCall && calls.can(end) && <Button size="icon" variant="destructive" aria-label="End call" onClick={() => void calls.send(end)}><PhoneOff /></Button>}
+      {shouldShowCall && calls.can(end) && (!comms || endPlace(comms) !== "EndOnVoicePanel") && <Button size="icon" variant="destructive" aria-label="End call" onClick={() => void calls.send(end)}><PhoneOff /></Button>}
     </div>
   );
 }

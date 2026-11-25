@@ -2,13 +2,14 @@ import { elizaCalendar } from "./calendar.ts";
 import { elizaCamera } from "./camera.ts";
 import { elizaFiles, selectedDocuments } from "./files.ts";
 import { alphaMapsTransport, elizaLocation } from "./maps.ts";
+import { alphaNotes } from "./notes.ts";
 import { type Faked, elizaAgent, elizaCloud, elizaSecureStore } from "./phone.ts";
 import { alphaPhotos } from "./photos.ts";
 import { alphaConnection } from "./platform.ts";
 import { elizaReminders } from "./reminders.ts";
 import type { Answering } from "./routes.ts";
 import type { Scene } from "./scene.ts";
-import { alphaAgentConsent, alphaCarrierSetup, elizaNotices, elizaReset, elizaSystem, elizaWiFi, settingsHost } from "./settings.ts";
+import { alphaAgentConsent, alphaCarrierSetup, elizaNotices, elizaPasswords, elizaReset, elizaSystem, elizaWiFi, settingsHost } from "./settings.ts";
 import { telephonyPlugins } from "./telephony.ts";
 import { alphaDevice } from "./update.ts";
 import { alphaBrowser } from "./browser.ts";
@@ -36,16 +37,15 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     ElizaWiFi: elizaWiFi(world.settings),
     AlphaCarrierSetup: alphaCarrierSetup(world.settings),
     AlphaMapsTransport: alphaMapsTransport(world.maps),
-    ...(world.image ? telephonyPlugins(world.telephony) : {}),
+    ...(world.image ? telephonyPlugins(world.telephony, () => world.now) : {}),
     AlphaDevice: (emit) => ({ ...alphaDevice(world.update, () => world.now)(emit), ...settingsHost(world.settings), ...alphaAgentConsent(world.settings) }),
     ElizaNotifications: elizaNotices(world.settings),
-    AlphaDevice: (emit) => ({ ...alphaDevice(world.update, () => world.now)(emit), ...settingsHost(world.settings), ...alphaAgentConsent(world.settings) }),
-    ElizaNotifications: elizaNotices(world.settings),
-    ...(world.image ? { ElizaTelephony: present, ElizaContacts: present, ...telephonyPlugins(world.telephony) } : {}),
+    ElizaPasswords: elizaPasswords(world.settings),
     AlphaConnection: alphaConnection(world.platform),
     ...(world.voice.onDevice ? { AlphaVoiceCloud: alphaVoiceCloud(world.voice) } : {}),
     ElizaCloudSpeech: elizaCloudSpeech(world.voice),
     ElizaSignIn: elizaSignIn(world.voice, () => world.signedIn),
     AlphaBrowser: alphaBrowser(world.browser),
+    ...(world.notes.audio.size > 0 ? { AlphaNotes: alphaNotes(world.notes) } : {}),
   };
 }

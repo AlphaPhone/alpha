@@ -1,20 +1,21 @@
 // spec/app/camera/index.md, "Story: Open the camera"; spec/app/camera/index.md, "Story: Leave and come back"; spec/app/camera/index.md, "Story: Frame the shot"; spec/app/camera/index.md, "Story: Take photos and videos"; spec/app/camera/index.md, "Story: Let Alpha take a photo"
-import type { PhotosClient } from "@elizaos/os/bridges/definitions/media"
+import type { PhotosClient } from "@elizaos/os-bridges"
 import * as Camera from "../../gen/app__camera.effect.vibe"
 import * as Film from "../../gen/app__camera__recording.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import { allows } from "../../gen/kit__permission.effect.vibe"
-import { ScanEntry } from "../files/scanEntry.vibe"
+import { Machine as Scan } from "../../gen/app__files__scan.effect.vibe"
+import { scanCameraImage } from "../files/scan.vibe"
 import { Device } from "../platform/device.vibe"
-import { CameraPort, playable, type CameraMedia, type LensFacts, type Point } from "../platform/camera.vibe"
+import { CameraPort, ownedCaptureId, playable, type CameraMedia, type LensFacts, type Point } from "../platform/camera.vibe"
 import { PhotosPort, latestBrowserCapture, saveBrowserCapture } from "../platform/photos.vibe"
 import { attachToAlpha } from "../assistant/attachments.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { answer, applying, contained, due, reacting, run, started, together, untimed, type Due, type Job } from "../runtime/reactor.vibe"
 
 type Phone = ["Phone"]
-type CameraJob = Job<Camera.Event, CameraPort | Camera.Machine | CameraAssets | Shell.Machine | SystemSettings | PhotosPort | ScanEntry | Effect.Services<ReturnType<typeof askAbout>>, Phone>
+type CameraJob = Job<Camera.Event, CameraPort | Camera.Machine | CameraAssets | Shell.Machine | SystemSettings | PhotosPort | Effect.Services<ReturnType<typeof scanFrame>> | Effect.Services<ReturnType<typeof askAbout>>, Phone>
 type Outcome = Camera.Camera["agent"]["result"]
 
 /** What an external request to the viewfinder returned, with its media only when it reached a known capture. */
@@ -28,6 +29,7 @@ export interface CaptureAnswer {
 export service CameraAssets {
   bind(element: HTMLVideoElement | null): void!!
   readonly mounted: Stream.Stream<boolean>
+  readonly shutter: Semaphore.Semaphore
   newest(): number!!
   store(media: CameraMedia, secure: boolean): number!!
   read(id: number): (CameraMedia | undefined)!!
@@ -40,6 +42,7 @@ export service CameraAssets {
 const assets = Layer.effect(CameraAssets, effect {
   const mounted = try SubscriptionRef.make(false)
   const port = try CameraPort
+  const shutter = try Semaphore.make(1)
   const captures = new Map<number, CameraMedia>()
   const points = new Map<number, Point>()
   let serial = 0
@@ -54,6 +57,7 @@ const assets = Layer.effect(CameraAssets, effect {
       try SubscriptionRef.set(mounted, element !== null)
     },
     mounted: SubscriptionRef.changes(mounted),
+    shutter,
     newest: () => sync(() => newest),
     effect store(media: CameraMedia, secure: boolean): number!! {
       const id = ++serial
@@ -84,7 +88,7 @@ effect function tell(event: Camera.Event): boolean!!Camera.Machine {
   return try contained((try Camera.Machine).send(event, "Phone"), event.type)
 }
 
-effect function openView(view: "Camera" | "Photos" | "Files"): boolean!!Shell.Machine {
+effect function openView(view: "Camera" | "Photos"): boolean!!Shell.Machine {
   const shell = try Shell.Machine
   if (Shell.showing(try shell.get(), view)) return true
   return try contained(shell.send({ type: "openView", view }), `opening ${view}`)
@@ -129,11 +133,19 @@ effect function saved(media: CameraMedia, elapsed: number): (CameraMedia | undef
   return libraryId === undefined ? undefined : { ...media, libraryId }
 }
 
+effect function captureFrame(save: boolean, still: (state: Camera.Camera) => boolean): (CameraMedia | undefined)!!(CameraPort | CameraAssets | Camera.Machine) {
+  const port = try CameraPort
+  const camera = try Camera.Machine
+  return try Semaphore.withPermit((try CameraAssets).shutter, effect {
+    return still(try camera.get()) ? try port.capture(save) : undefined
+  })
+}
+
 effect function take(ticket: number): Camera.Event!!(CameraPort | CameraAssets | Camera.Machine) {
   const port = try CameraPort
   const camera = try Camera.Machine
   const before = try camera.get()
-  const captured = before.shot === ticket && Camera.ready(before) ? try port.capture(true) : undefined
+  const captured = try captureFrame(true, (state) => state.shot === ticket && !state.readingFrame && Camera.ready(state))
   const media = captured === undefined ? undefined : try saved(captured, 0)
   if (captured !== undefined && media === undefined) try port.release(captured)
   const id = media === undefined ? 0 : try (try CameraAssets).store(media, before.secure)
@@ -183,10 +195,7 @@ function carry(fx: Camera.Effect): CameraJob {
       const asset = try (try CameraAssets).read(fx.video)
       return { type: "recordingVerified", ok: asset !== undefined, now: untimed } as const
     }, { type: "recordingVerified", ok: false, now: untimed }, "Phone")
-    case "OpenScan": return run("open scanner", effect {
-      try (try ScanEntry).ask()
-      try openView("Files")
-    }, "Phone")
+    case "OpenScan": return answer(`scan frame ${fx.ticket}`, scanFrame(fx.ticket), { type: "scannedFrame", ticket: fx.ticket, ok: false }, "Phone")
     case "OpenLast": return run("open last capture", fx.only.length === 0 ? openLast(fx.photo) : Effect.void, "Phone")
     case "Uncover": return run("uncover Camera", uncover(), "Phone")
     case "Answer": return run(`answered request ${fx.request}`, Effect.void, "Phone")
@@ -214,8 +223,10 @@ const visit = started(effect {
   const port = try CameraPort
   const photos = try CameraAssets
   const visibility = Stream.concat(Stream.succeed(try device.showing()), device.visible)
-  const states = Stream.zipLatestAll(shell.changes, layers.changes, visibility, photos.mounted)
-  try Stream.runForEach(states, effect ([where, above, shown, mounted]) => {
+  const scan = try Scan
+  const reviewing = Stream.changes(Stream.map(scan.changes, (state) => state.open))
+  const states = Stream.zipLatestAll(shell.changes, layers.changes, visibility, photos.mounted, reviewing)
+  try Stream.runForEach(states, effect ([where, above, shown, mounted, scanOpen]) => {
     const wanted = shown && mounted && Shell.showing(where, "Camera")
     const state = try camera.get()
     if (!wanted) {
@@ -228,7 +239,7 @@ const visit = started(effect {
       try tell({ type: "microphoneIs", grant: access.microphone })
       try tell({ type: "accessIs", grant: access.camera, now: untimed })
     }
-    const covered = where.assistant === "Full" || Layers.pageInert(above)
+    const covered = scanOpen || where.assistant === "Full" || Layers.pageInert(above)
     if (covered !== (try camera.get()).covered) try tell(covered ? { type: "covered", at: untimed } : { type: "uncovered" })
   })
 }, "Camera foreground")
@@ -315,7 +326,12 @@ const latest = applying(Camera.Machine, (s) => s.showing && !s.secure ? s.visit 
 
 effect function openLast(photo: number): void!!(CameraAssets | PhotosPort | Shell.Machine) {
   const media = try (try CameraAssets).read(photo)
-  if (media?.libraryId !== undefined) try (try PhotosPort).handoff(media.libraryId)
+  if (media !== undefined) {
+    const ownedId = ownedCaptureId(media.path, media.mime.startsWith("video/"))
+    if (media.libraryId !== undefined || ownedId !== undefined) {
+      try (try PhotosPort).handoff({ libraryId: media.libraryId, ownedId })
+    }
+  }
   try openView("Photos")
 }
 
@@ -324,11 +340,17 @@ module bytes {
   export const objectUrl = (blob: Blob): string => URL.createObjectURL(blob)
 
   /** @throws {never} */
-  export async function imageData(source: string): Promise<string | undefined> {
+  export async function imageBlob(source: string): Promise<Blob | undefined> {
     if (!source.startsWith("data:image/") && !source.startsWith("blob:")) return undefined
     const response = await fetch(source)
     const file = await response.blob()
-    if (!response.ok || !file.type.startsWith("image/") || file.size === 0 || file.size > 5_000_000) return undefined
+    return response.ok && file.type.startsWith("image/") && file.size > 0 && file.size <= 5_000_000 ? file : undefined
+  }
+
+  /** @throws {never} */
+  export async function imageData(source: string): Promise<string | undefined> {
+    const file = await imageBlob(source)
+    if (file === undefined) return undefined
     return new Promise((resolve) => {
       const reader = new FileReader()
       reader.onload = () => resolve(typeof reader.result === "string" ? reader.result.slice(reader.result.indexOf(",") + 1) : undefined)
@@ -337,13 +359,30 @@ module bytes {
     })
   }
 }
-import { imageData, objectUrl } from bytes
+import { imageBlob, imageData, objectUrl } from bytes
+
+effect function scanFrame(ticket: number) {
+  const camera = try Camera.Machine
+  const port = try CameraPort
+  const before = try camera.get()
+  const failed = { type: "scannedFrame", ticket, ok: false } as const
+  const taken = try captureFrame(false, (state) => Camera.ready(state) && !state.secure && state.readingFrame
+    && state.shot === ticket && state.visit === before.visit && state.preview === before.preview)
+  if (taken === undefined) return failed
+  const decode = taken.blob === undefined
+    ? Effect.orElseSucceed(Effect.tryPromise(() => imageBlob(taken.source)), () => undefined)
+    : succeed(taken.blob)
+  const blob = try ensuring(decode, port.release(taken))
+  if (blob === undefined) return failed
+  return { ...failed, ok: try scanCameraImage(blob, ticket, before.visit, before.preview) }
+}
 
 effect function askAbout(photo: number) {
   const camera = try Camera.Machine
   const before = try camera.get()
   const port = try CameraPort
-  const from = photo === 0 ? (try port.capture(false)) : (try (try CameraAssets).read(photo))
+  const from = photo === 0 ? (try captureFrame(false, (state) => Camera.ready(state) && Camera.free(state)
+    && !state.secure && state.visit === before.visit && state.preview === before.preview)) : (try (try CameraAssets).read(photo))
   if (from === undefined) return
   const result = tryPromise(() => imageData(from.source)) catch () => undefined
   if (photo === 0) try port.release(from)

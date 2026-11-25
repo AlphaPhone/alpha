@@ -1,7 +1,7 @@
 // spec/agent/index.md, "The page reaches exactly the routes its platform services call, and nothing else"
 import type {
   AndroidReminderCancelInput, AndroidReminderRecord, AndroidReminderScheduleInput,
-} from "@elizaos/os/bridges/reminders";
+} from "@elizaos/os-bridges";
 import type { Faked } from "./phone.ts";
 import { type Route, readJsonBody } from "./routes.ts";
 

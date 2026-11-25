@@ -1,11 +1,11 @@
 // spec/app/calendar/index.md, "Story: Let Calendar read my phone's calendar"; spec/app/calendar/editor.md, "Story: Write an event"; spec/app/calendar/editor.md, "Story: Never create an event twice"; spec/kit/permission.md, "Story: Ask for access"
-import type { AndroidCalendarDeletionScope, AndroidCalendarEditorFields, AndroidCalendarHandoffEvent, AndroidCalendarList, CalendarClient, CalendarPick, CalendarRange } from "@elizaos/os/bridges/calendar"
+import type { AndroidCalendarDeletionScope, AndroidCalendarEditorFields, AndroidCalendarHandoffEvent, AndroidCalendarList, CalendarClient, CalendarPick, CalendarRange } from "@elizaos/os-bridges"
 import { registered } from "./device.vibe"
 
 module held {
-  import { calendarClient, calendarPlugin } from "@elizaos/os/bridges/calendar"
-  import type { AndroidCalendarEditorFields, CalendarClient } from "@elizaos/os/bridges/calendar"
-  import { rendererDeletionClock } from "@elizaos/os/bridges/deletion-window"
+  import { calendarClient, calendarPlugin } from "@elizaos/os-bridges"
+  import type { AndroidCalendarEditorFields, CalendarClient } from "@elizaos/os-bridges"
+  import { rendererDeletionClock } from "@elizaos/os-bridges"
 
   /** How long, by the clock eliza's deletion window keeps, until `expiresElapsed`. @throws {never} */
   export function untilElapsed(expiresElapsed: number): number {
@@ -85,7 +85,7 @@ const staged = new Map<string, ReturnType<CalendarClient["review"]>>()
 const lost: Written = { confirmed: false, known: false }
 const refused: Written = { confirmed: false, known: true }
 
-/** On the phone: eliza's `calendarClient()` of `@elizaos/os/bridges/calendar`, where the host registered the plugin. */
+/** On the phone: eliza's `calendarClient()` of `@elizaos/os-bridges`, where the host registered the plugin. */
 export const phoneCalendar = Layer.sync(PhoneCalendar, () => {
   const present = registered(plugin)
   const native = (): Creations => creations()

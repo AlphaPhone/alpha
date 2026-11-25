@@ -1,13 +1,14 @@
 // spec/app/contacts/index.md, "Story: Browse my contacts"; spec/app/contacts/index.md, "Story: Look at one contact"; spec/app/contacts/index.md, "Story: Add or change a contact"; spec/app/contacts/index.md, "Story: Delete a contact"; spec/app/contacts/index.md, "Story: Know what happened to my change"
-import { type AddressBookContact, type ContactCursor, type ContactDetail, type ContactDraft, type ContactDraftProblem, contactDraftProblem, isContactId } from "@elizaos/os/bridges/contacts"
+import { type AddressBookContact, type ContactCursor, type ContactDetail, type ContactDraft, type ContactDraftProblem, contactDraftProblem, isContactId } from "@elizaos/os-bridges"
 import { Machine as Comms, type Event as CommsEvent } from "../../gen/app__phone__comms.effect.vibe"
 import * as Contacts from "../../gen/app__contacts.effect.vibe"
 import type { Change, Effect as Out, Event, Sheet } from "../../gen/app__contacts.effect.vibe"
 import { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { Telephony, TelephonyRefused, telephony } from "../platform/telephony.vibe"
+import { Telephony, TelephonyRefused, readAddressBook, telephony } from "../platform/telephony.vibe"
 import { type Job, answer, applying, following, reacting, run, together } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
 import { Dialer, grantOf, prefilled } from "../phone/phone.vibe"
 import { Callers } from "../phone/voicemail.vibe"
 import { on, visiting } from "../phone/visit.vibe"
@@ -109,7 +110,7 @@ effect function listed(ticket: number, further: boolean): Event!!(Telephony | Ro
   const grant = grantOf(status?.permissions.contacts)
   if (grant !== "Granted") return { type: "listed", ticket, ok: status !== undefined, grant, count: 0, further: false, editable: false }
   const read = effect {
-    const book = try telephony("open", (c) => c.contacts.open())
+    const book = try readAddressBook("open contacts", (c) => c.open())
     const found = new Map((further ? held.rows : []).map((one) => [one.id, one] as const))
     let cursor = further ? held.next : undefined
     const seen = new Set<ContactCursor>()
@@ -117,7 +118,7 @@ effect function listed(ticket: number, further: boolean): Event!!(Telephony | Ro
     const minimum = found.size
     while (more && found.size === minimum) {
       const position = cursor
-      const page = try telephony("list", (c) => c.contacts.list({ query, limit: 50, kind: "ExplicitRead", ...(position === undefined ? {} : { cursor: position }) }))
+      const page = try readAddressBook("list contacts", (c) => c.list({ query, limit: 50, kind: "ExplicitRead", ...(position === undefined ? {} : { cursor: position }) }))
       for (const row of page.contacts) if (!("incomplete" in row) && (chip === "Everyone" || row.starred)) found.set(row.id, row)
       const next = page.next ?? undefined
       more = next !== undefined && !seen.has(next)
@@ -138,7 +139,7 @@ effect function read(ticket: number): Event!!(Telephony | Rows | Contacts.Machin
   const machine = try Contacts.Machine
   const contact = (try machine.get()).contact
   const blank: Sheet = { names: 0, phones: 0, emails: 0, notes: 0, notable: true }
-  const found = !isContactId(contact) ? undefined : telephony("get", (c) => c.contacts.get(contact, "ExplicitRead")) catch () => undefined
+  const found = !isContactId(contact) ? undefined : readAddressBook("read contact", (c) => c.get(contact, "ExplicitRead")) catch () => undefined
   const seen = found === undefined ? blank : sheetOf(found)
   if (Contacts.canContactRead(try machine.get(), ticket, seen)) try store.set({ card: found, reach: "" })
   return { type: "contactRead", ticket, ok: found !== undefined, seen }
@@ -149,16 +150,36 @@ function answered(made: boolean, failure?: unknown): { readonly made: boolean; r
   return failure === undefined ? { made, known: true } : { made: false, known: !(failure instanceof TelephonyRefused && failure.code === undefined && failure.tag === "") }
 }
 
+// spec/app/contacts/index.md, "The phone's answer ends the change it names"; spec/app/contacts/agent.md, "Only the phone answers the action, and the request ends as that answer says"
+type ContactRemoval = "deleted" | "refused" | "stale" | "unknown"
+
+/** Delete the reviewed version once and report the outcome of that exact native deletion, if it settles. */
+export effect function removeContact(card: Pick<ContactDetail, "id" | "version">): ContactRemoval!!(Telephony | Time) {
+  return effect {
+    const reply = try telephony("remove contact", (c) => c.contacts.remove({ id: card.id, version: card.version }))
+    if (reply.status !== "queued") return reply.status === "stale" ? "stale" as const : "refused" as const
+    const time = try Time
+    for (const delay of [0, 250, 1000, 3000]) {
+      if (delay !== 0) try time.until(reply.deletion.expiresAt + delay)
+      const phase = telephony("contact deletion receipt", (c) => c.deletionReceipt(reply.deletion)) catch () => undefined
+      if (phase === "deleted") return "deleted" as const
+      if (phase === "undone" || phase === "conflict") return "refused" as const
+      if (phase === "unknown") break
+    }
+    return "unknown" as const
+  } catch (failure) => answered(false, failure).known ? "refused" as const : "unknown" as const
+}
+
 // spec/app/contacts/index.md, "One change is written at a time, never while the last one's outcome is unknown, and never during a call that may be an emergency call"
-effect function written(id: number, change: Change, contact: string): Event!!(Telephony | Rows) {
+effect function written(id: number, change: Change, contact: string): Event!!(Telephony | Rows | Time) {
   const store = try Rows
   const held = try store.get()
   const card = change === "Rewrite" ? held.editBase : change === "Remove" ? held.card : undefined
   const outcome = effect {
     if (change === "Remove") {
       if (card === undefined || card.id !== contact) return answered(false)
-      const done = try telephony("remove", (c) => c.contacts.remove({ id: card.id, version: card.version }))
-      return answered(done.status === "queued")
+      const outcome = try removeContact(card)
+      return { made: outcome === "deleted", known: outcome !== "unknown" }
     }
     if (change === "Rewrite" && (card === undefined || card.id !== contact)) return answered(false)
     const draft = draftFrom(card, linesOfForm(held.form, card))
@@ -206,13 +227,15 @@ effect function editor(fresh: boolean): void!!(Telephony | Rows | Contacts.Machi
   if (row !== undefined) try ignore(telephony("edit", (c) => c.contacts.edit(row)))
 }
 
-function carry(fx: Out): Job<Event, Telephony | Rows | Contacts.Machine | SystemSettings | Dialer | PhoneMachine | Shell | Callers, []> {
+function carry(fx: Out): Job<Event, Telephony | Rows | Contacts.Machine | SystemSettings | Dialer | PhoneMachine | Shell | Callers | Time, []> {
   return match (fx) {
     when { tag: "Fetch", let source, let ticket, let further }: source === "Listing"
       ? answer("list", listed(ticket, further), { type: "listed", ticket, ok: false, grant: "Unasked", count: 0, further: false, editable: false })
       : answer("card", read(ticket), { type: "contactRead", ticket, ok: false, seen: { names: 0, phones: 0, emails: 0, notes: 0, notable: true } });
     when { tag: "Prompt" }: answer("prompt", effect {
-      const status = telephony("requestAccess", (c) => c.phone.requestAccess("contacts")) catch () => undefined
+      const permission = telephony("request contact permissions", (c) => c.contacts.requestPermissions()) catch () => undefined
+      if (permission?.readable === true) return { type: "accessReported", grant: "Granted" } satisfies Event
+      const status = telephony("contact permission status", (c) => c.phone.status()) catch () => undefined
       return { type: "accessReported", grant: grantOf(status?.permissions.contacts) } satisfies Event
     }, { type: "accessReported", grant: "Unasked" });
     when { tag: "Settings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", "") });

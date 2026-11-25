@@ -1,6 +1,6 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"; spec/app/shell/index.md, "On Phone, Messages and Contacts the app's own bar stands in for Ask Alpha at rest, until Ask Alpha rises"; spec/app/shell/gestures.md, "A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back"; spec/app/shell/gestures.md, "On the launcher a pull down that Home allows opens Android's shade, and a swipe up from the bottom bar goes Home; nothing else is a swipe"; spec/app/shell/layers.md, "The page under a layer or a hold takes no touch, and a covering layer or a hold takes none for Ask Alpha either"; spec/app/update/page.md, "A page that was not mounted mounts its editors only once no update is pending"
 import { Alert, AppHeader, StartupFailureScreen, StartupMark, cn } from "@repo/ui";
-import { type PointerEvent, useCallback, useRef, useSyncExternalStore } from "react";
+import { type PointerEvent, type TouchEvent, useCallback, useRef, useSyncExternalStore } from "react";
 import { useMachine } from "../gen/app__shell.react.ts";
 import { askAlphaDrawn } from "../gen/app__shell.ts";
 import { useMachine as useCanvas } from "../gen/app__shell__keyboard.react.ts";
@@ -31,7 +31,28 @@ type StartedSwipe = {
   across: number;
   down: number;
   owner: string;
+  touch?: {
+    target: Element;
+    identifier?: number;
+    pointerCanceled?: true;
+    scrolled: () => boolean;
+  };
 };
+
+/** A swipe can belong to the shell only while the touched surface has not panned. */
+function touchScroll(target: Element, shell: HTMLElement) {
+  const vertical: { element: Element; top: number }[] = [];
+  for (let element: Element | null = target; element && element !== shell; element = element.parentElement) {
+    const style = getComputedStyle(element);
+    const touchAction = style.touchAction ?? "";
+    if (touchAction === "none" || /pan-(x|left|right)/.test(touchAction)
+      || ((style.overflowX === "auto" || style.overflowX === "scroll") && element.scrollWidth > element.clientWidth)) return;
+    if ((style.overflowY === "auto" || style.overflowY === "scroll") && element.scrollHeight > element.clientHeight) {
+      vertical.push({ element, top: element.scrollTop });
+    }
+  }
+  return () => vertical.some(({ element, top }) => element.scrollTop !== top);
+}
 
 function primaryPointer() {
   return typeof window === "undefined" ? undefined : window.matchMedia?.("(pointer: coarse)");
@@ -83,29 +104,59 @@ export function App({ alpha }: AppProps) {
     const down = height / box.height;
     const x = (event.clientX - box.left) * across;
     const y = (event.clientY - box.top) * down;
-    if (x < edge || x > width - edge || (launcher && y > height - barHeight)) {
-      startedRef.current = { id: event.pointerId, x, y, width, height, across, down, owner };
+    if (x >= edge && x <= width - edge && (!launcher || y <= height - barHeight)) return;
+    const from: StartedSwipe = { id: event.pointerId, x, y, width, height, across, down, owner };
+    if (event.pointerType === "touch" && target instanceof Element) {
+      const scrolled = touchScroll(target, element);
+      if (!scrolled) return;
+      from.touch = { target, scrolled };
+    }
+    startedRef.current = from;
+  };
+  const finishSwipe = (from: StartedSwipe, element: HTMLElement, clientX: number, clientY: number, claim?: () => void) => {
+    if (shellFailed || from.owner !== owner || from.touch?.scrolled()) return;
+    const box = element.getBoundingClientRect();
+    if (element.offsetWidth !== from.width || element.offsetHeight !== from.height) return;
+    const dx = (clientX - box.left) * from.across - from.x;
+    const dy = (clientY - box.top) * from.down - from.y;
+    const went = swipe(launcher, false, from.width, from.height, from.x, from.y, dx, dy);
+    if (went === "SwipeBack") {
+      claim?.();
+      void alpha.back();
+    } else if (went === "SwipeHome") {
+      claim?.();
+      void alpha.runtime.runPromise(home());
     }
   };
   const swiped = (event: PointerEvent<HTMLElement>) => {
-    if (shellFailed || !event.isPrimary) return;
+    const from = startedRef.current;
+    if (!event.isPrimary || from?.id !== event.pointerId) return;
+    startedRef.current = undefined;
+    if (!event.defaultPrevented) finishSwipe(from, event.currentTarget, event.clientX, event.clientY, () => event.preventDefault());
+  };
+  const touchStarted = (event: TouchEvent<HTMLElement>) => {
+    const touch = startedRef.current?.touch;
+    if (!touch) return;
+    if (event.defaultPrevented || event.touches.length !== 1 || touch.target !== event.target) {
+      startedRef.current = undefined;
+      return;
+    }
+    touch.identifier = event.touches[0]?.identifier;
+  };
+  const pointerCanceled = (event: PointerEvent<HTMLElement>) => {
     const from = startedRef.current;
     if (from?.id !== event.pointerId) return;
+    // Chromium can stop delivering Pointer Events while the same finger still sends Touch Events.
+    if (from.touch?.identifier !== undefined) from.touch.pointerCanceled = true;
+    else startedRef.current = undefined;
+  };
+  const touchEnded = (event: TouchEvent<HTMLElement>) => {
+    const from = startedRef.current;
+    if (!from?.touch?.pointerCanceled) return;
     startedRef.current = undefined;
-    if (event.defaultPrevented || from.owner !== owner) return;
-    const element = event.currentTarget;
-    const box = element.getBoundingClientRect();
-    if (element.offsetWidth !== from.width || element.offsetHeight !== from.height) return;
-    const dx = (event.clientX - box.left) * from.across - from.x;
-    const dy = (event.clientY - box.top) * from.down - from.y;
-    const went = swipe(launcher, false, from.width, from.height, from.x, from.y, dx, dy);
-    if (went === "SwipeBack") {
-      event.preventDefault();
-      void alpha.back();
-    } else if (went === "SwipeHome") {
-      event.preventDefault();
-      void alpha.runtime.runPromise(home());
-    }
+    if (event.defaultPrevented || event.touches.length !== 0) return;
+    const ended = Array.from(event.changedTouches).find((touch) => touch.identifier === from.touch?.identifier);
+    if (ended) finishSwipe(from, event.currentTarget, ended.clientX, ended.clientY);
   };
   const inert = shellFailed || (layers !== undefined && pageInert(layers));
   const comms = isCommsView(showing);
@@ -116,11 +167,15 @@ export function App({ alpha }: AppProps) {
   const canGoBack = String(!shellFailed && (back || (layers !== undefined && takesBack(layers))));
   return (
     <main
+      data-alpha-native={native() ? "" : undefined}
       data-alpha-launcher={launcher ? "" : undefined}
       ref={frame}
       onPointerDown={beginSwipe}
       onPointerUp={swiped}
-      onPointerCancel={(event) => { if (startedRef.current?.id === event.pointerId) startedRef.current = undefined; }}
+      onPointerCancel={pointerCanceled}
+      onTouchStart={touchStarted}
+      onTouchEnd={touchEnded}
+      onTouchCancel={() => { if (startedRef.current?.touch) startedRef.current = undefined; }}
       style={canvas?.covered ? { height: canvas.visible } : undefined}
       className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground has-[[data-alpha-camera-native]]:bg-transparent sm:pointer-fine:max-w-103", side && "flex-row")}
     >
@@ -152,6 +207,7 @@ export function App({ alpha }: AppProps) {
         data-alpha-assistant-host=""
         hidden={!askAlphaDrawn(state)}
         className={cn(
+          "in-[body:has([data-alpha-notes-trash-sheet])]:invisible",
           comms && "shrink-0",
           !comms && "[&>[data-alpha-detent]]:absolute [&>[data-alpha-detent]]:inset-x-0 [&>[data-alpha-detent]]:bottom-0 [&>[data-alpha-detent]]:max-w-none",
           side && [

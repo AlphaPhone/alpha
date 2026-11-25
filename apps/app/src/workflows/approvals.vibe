@@ -1,5 +1,5 @@
 // spec/app/workflows/approvals.md, "Story: Answer a run's approval on the phone"; spec/app/workflows/approvals.md, "A decision whose answer was lost is settled by reading the approval again"
-import { type WorkflowApproval, type WorkflowRun, WorkflowHttpError } from "@elizaos/plugin-workflow/client"
+import { type WorkflowApproval, type WorkflowRun, WorkflowHttpError } from "@elizaos/plugin-workflow-client"
 import * as Model from "../../gen/app__workflows__approvals.effect.vibe"
 import type { Answer, Effect as Out, Event } from "../../gen/app__workflows__approvals.effect.vibe"
 import * as Listing from "../../gen/app__workflows__list.effect.vibe"
@@ -7,9 +7,9 @@ import * as Sheet from "../../gen/app__workflows__sheet.effect.vibe"
 import type { Agent } from "../platform/agent.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { type Job, answer, applying, due, reacting, run, together, untimed } from "../runtime/reactor.vibe"
-import type { Time } from "../runtime/time.vibe"
+import { Time } from "../runtime/time.vibe"
 import { WorkflowsApi } from "./api.vibe"
-import { HistoryWordsPort } from "./history.vibe"
+import { HistoryWordsPort, type RunVisibility, workflowsVisible } from "./history.vibe"
 import { Rows } from "./list.vibe"
 
 interface Pending {
@@ -18,6 +18,15 @@ interface Pending {
   readonly runId: number
   readonly run: WorkflowRun
   readonly approval: WorkflowApproval
+}
+
+export function sameAsking(approval: WorkflowApproval, other: WorkflowApproval): boolean {
+  return approval.runId === other.runId && approval.workflowId === other.workflowId &&
+    approval.workflowVersionId === other.workflowVersionId && approval.nodeId === other.nodeId &&
+    approval.iteration === other.iteration && approval.requestDigest === other.requestDigest &&
+    approval.expiresAt === other.expiresAt && approval.supported === other.supported &&
+    approval.title === other.title && approval.summary === other.summary && approval.operation === other.operation &&
+    approval.target === other.target && approval.account === other.account
 }
 
 export service ApprovalWords {
@@ -32,8 +41,7 @@ const kept = Layer.sync(ApprovalWords, () => {
   return {
     get: () => succeed(pending),
     set: (owner: number, runId: number, run: WorkflowRun, approval: WorkflowApproval) => sync(() => {
-      if (pending?.owner === owner && pending.run.id === run.id && pending.approval.requestDigest === approval.requestDigest
-        && pending.approval.nodeId === approval.nodeId && pending.approval.iteration === approval.iteration) return pending
+      if (pending?.owner === owner && pending.runId === runId && sameAsking(pending.approval, approval)) return pending
       const found = { owner, runId, run, approval, number: ++next }
       pending = found
       return found
@@ -42,17 +50,29 @@ const kept = Layer.sync(ApprovalWords, () => {
   }
 })
 
-type Needs = Agent | WorkflowsApi | ApprovalWords | Rows | Time | Sheet.Machine
+type Needs = Agent | WorkflowsApi | ApprovalWords | Rows | Time | Sheet.Machine | RunVisibility
 
 effect function decided(id: number, runId: number, digest: number, approve: boolean): Event!!Needs {
   const attempted = try (try ApprovalWords).get()
   const failure: Event = { type: "decisionAnswered", id, applied: false }
   if (attempted?.number !== digest || attempted.runId !== runId || (approve && !attempted.approval.supported)) return failure
   const scope = ownerAt() catch () => ""
-  if (!(try (try Rows).sameOwner(scope, attempted.owner))) return failure
+  const rows = try Rows
+  const sheet = try Sheet.Machine
+  const time = try Time
+  if (!(try rows.sameOwner(scope, attempted.owner)) || !(try workflowsVisible())) return failure
   const { workflow } = try WorkflowsApi
+  const receipt = (workflow.approvals(attempted.run) catch () => undefined)
+  if (receipt === undefined) return { type: "restart" }
+  if (receipt === null || receipt.finished || receipt.cancellationRequested) return failure
+  const found = receipt.approvals.find((current) => current.status === "pending" && sameAsking(attempted.approval, current))
+  if (found === undefined || (approve && !found.supported) || (ownerAt() catch () => "") !== scope) return failure
+  const now = try time.now()
+  const live = try sheet.get()
+  if (live.runId !== runId || live.owner !== attempted.owner || found.expiresAt === undefined || now >= found.expiresAt ||
+    !(try rows.sameOwner(scope, attempted.owner)) || !(try workflowsVisible())) return failure
   const result = effect {
-    try workflow.decideApproval(attempted.run, attempted.approval, approve)
+    try workflow.decideApproval(attempted.run, found, approve)
     return "answered"
   } catch (error) => error instanceof WorkflowHttpError && [400, 401, 403, 404, 409, 422].includes(error.status) ? "refused" : "unknown"
   if ((ownerAt() catch () => "") !== scope || result === "unknown") return { type: "restart" }
@@ -68,10 +88,9 @@ effect function checked(ticket: number, runId: number, digest: number, owner: nu
   const { workflow } = try WorkflowsApi
   const receipt = (workflow.approvals(expected.run) catch () => undefined)
   if (receipt === undefined || (ownerAt() catch () => "") !== scope) return failed
-  const found = receipt?.approvals.find((approval) => approval.requestDigest === expected.approval.requestDigest
-    && approval.nodeId === expected.approval.nodeId && approval.iteration === expected.approval.iteration)
+  const found = receipt?.approvals.find((approval) => sameAsking(expected.approval, approval))
   const answered: Answer = found?.status === "approved" ? "WasApproved" : found?.status === "denied" ? "WasDenied" : "Unanswered"
-  return { type: "approvalRead", ticket, ok: true, owner, waiting: found?.status === "pending" && receipt?.finished === false,
+  return { type: "approvalRead", ticket, ok: true, owner, waiting: found?.status === "pending" && receipt?.finished === false && !receipt.cancellationRequested,
     answered, expires: found?.expiresAt ?? 0, now: untimed }
 }
 
@@ -94,11 +113,8 @@ const watching = applying(Sheet.Machine, (state) => ({ owner: state.owner, runId
       try words.clear()
       try ignore(approvals.send({ type: "ownerChanged", owner }))
     }
-    if (runId === 0) {
-      try ignore(approvals.send({ type: "closeApproval" }))
-      return
-    }
-    if (!loaded) return
+    if (runId !== state.runId) try ignore(approvals.send({ type: "closeApproval" }))
+    if (runId === 0 || !loaded) return
     const list = try (try Listing.Machine).get()
     if (list.owner !== owner || list.place.tag !== "ListingDetail") return
     const history = try (try HistoryWordsPort).view(owner, list.place.row)

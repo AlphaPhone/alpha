@@ -1,11 +1,10 @@
 // spec/app/browser/index.md, "The Browser holds its open tabs, which are private, the one shown, their native tabs, the saved session and its writer, and what covers the page"
-import type { BrowserTabHostPlugin, BrowserTabHostListener } from "@elizaos/os/bridges/definitions/tab-host"
-import type { BrowserTabSession } from "@elizaos/os/bridges/tab-host"
+import type { BrowserTabHostPlugin, BrowserTabHostListener, BrowserTabSession } from "@elizaos/os-bridges"
 import { registered } from "./device.vibe"
 
 module held {
-  import type { BrowserTabHostPlugin } from "@elizaos/os/bridges/definitions/tab-host"
-  import { BrowserTabSession, tabHostPlugin } from "@elizaos/os/bridges/tab-host"
+  import type { BrowserTabHostPlugin } from "@elizaos/os-bridges"
+  import { BrowserTabSession, tabHostPlugin } from "@elizaos/os-bridges"
 
   let made: BrowserTabHostPlugin | undefined
   /** eliza's client of Alpha's tab host, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
@@ -39,6 +38,8 @@ export service TabHost {
   readonly plugin: Option.Option<BrowserTabHostPlugin>
   readonly session: BrowserTabSession
   readonly told: Stream.Stream<Told>
+  /** Wait until the native state listener that will report the load is installed. */
+  observing(): boolean!!
 }
 
 // spec/app/files/index.md, "Another area opens Files at Downloads: the Download folder of the main volume where the phone has one, else the Downloads category; the owner's own move to the top, a volume or a category ends that walk"
@@ -55,17 +56,40 @@ export effect function hosted<A>(method: string, call: (plugin: BrowserTabHostPl
 }
 
 const name = "AlphaBrowser"
+const listenerTimeout = 3000
 
 /** The phone: eliza's client of `AlphaBrowser` where the host registered it, and its events. */
-export const phoneTabHost = Layer.sync(TabHost, () => {
-  if (!registered(name)) return { plugin: Option.none(), session: session(), told: Stream.empty }
+export const phoneTabHost = Layer.effect(TabHost, effect {
+  if (!registered(name)) return { plugin: Option.none(), session: session(), told: Stream.empty, observing: () => succeed(false) }
   const plugin = client(name)
-  const heard = (event: "stateChanged" | "tabOpened" | "tabClosed" | "findResult" | "showDownloads", kind: Told["kind"]) => Stream.callback<Told>((queue) => acquireRelease(
-    promise((): Promise<BrowserTabHostListener> => plugin.addListener(event as "stateChanged", (raw: unknown) => { Queue.offerUnsafe(queue, { kind, raw }) })),
-    (handle) => promise(async () => { await handle.remove() }),
-  ))
-  return { plugin: Option.some(plugin), session: session(), told: Stream.mergeAll([heard("stateChanged", "state"), heard("tabOpened", "opened"), heard("tabClosed", "closed"), heard("findResult", "found"), heard("showDownloads", "showDownloads")], { concurrency: "unbounded" }) }
+  const ready = try Deferred.make<boolean>()
+  let listening = false
+  const heard = (event: "stateChanged" | "tabOpened" | "tabClosed" | "findResult" | "showDownloads", kind: Told["kind"]) => Stream.callback<Told>((queue) => effect {
+    const acquire = tryPromise(async (signal: AbortSignal): Promise<BrowserTabHostListener> => {
+      const handle = await plugin.addListener(event as "stateChanged", (raw: unknown) => { Queue.offerUnsafe(queue, { kind, raw }) })
+      if (signal.aborted) await handle.remove()
+      return handle
+    })
+    const handle = acquireRelease(
+      Effect.interruptible(Effect.timeout(acquire, listenerTimeout)),
+      (one) => effect {
+        if (kind === "state") listening = false
+        try ignore(Effect.interruptible(Effect.timeout(tryPromise(async () => { await one.remove() }), listenerTimeout)))
+      },
+    ) catch () => undefined
+    if (kind === "state") {
+      listening = handle !== undefined
+      try Deferred.succeed(ready, listening)
+    }
+    if (handle === undefined) try Queue.end(queue)
+  })
+  return {
+    plugin: Option.some(plugin),
+    session: session(),
+    told: Stream.mergeAll([heard("stateChanged", "state"), heard("tabOpened", "opened"), heard("tabClosed", "closed"), heard("findResult", "found"), heard("showDownloads", "showDownloads")], { concurrency: "unbounded" }),
+    observing: () => listening ? succeed(true) : Effect.map(Effect.orElseSucceed(Effect.timeout(Deferred.await(ready), listenerTimeout), () => false), (installed) => installed && listening),
+  }
 })
 
 /** A browser: no native tabs, which the Browser says rather than drawing pages itself. */
-export const browserTabHost = Layer.sync(TabHost, () => ({ plugin: Option.none(), session: session(), told: Stream.empty }))
+export const browserTabHost = Layer.sync(TabHost, () => ({ plugin: Option.none(), session: session(), told: Stream.empty, observing: () => succeed(false) }))

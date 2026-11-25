@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
-import { act } from "react";
+import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
+import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Machine as Contacts } from "../gen/app__contacts.effect.vibe";
 import { Machine as Agent } from "../gen/app__contacts__agent.effect.vibe";
 import { Machine as Phone } from "../gen/app__phone.effect.vibe";
@@ -9,8 +10,10 @@ import { type Asking, propose, withdrawn } from "../src/contacts/requests.vibe";
 import { type Reading, answerReading } from "../src/contacts/reads.vibe";
 import { Machine as Messages } from "../gen/app__messages.effect.vibe";
 import { Machine as Composer } from "../gen/app__messages__composer.effect.vibe";
-import { closeAll, drawn, open, press, underAct, until } from "./alpha.tsx";
-import { scene } from "./fakes/scene.ts";
+import { at } from "../src/areas.ts";
+import home from "../src/home/index.tsx";
+import { button, closeAll, drawn, fill, later, only, open as openAlpha, press, pressOnTop, underAct, until } from "./alpha.tsx";
+import { type Scene, scene } from "./fakes/scene.ts";
 
 underAct();
 afterEach(closeAll);
@@ -18,35 +21,41 @@ afterEach(closeAll);
 /** An Alpha image whose host registers eliza's telephony and contacts plugins and Alpha's call plugins. */
 const image = () => ({ ...scene(), phone: true, image: true });
 
-/** Press `name` in the open confirmation. */
-const confirm = (name: string) => act(async () => {
-  const found = [...document.querySelectorAll("[role=alertdialog] button")].find((one) => one.textContent === name);
-  if (!(found instanceof HTMLButtonElement)) throw new Error(`no ${name} in the confirmation`);
-  found.click();
-});
+const mounts = [
+  ...only("home", "view:Contacts", "view:Phone", "view:Messages", "assistant", "phone/stage", "notice"),
+  at("overlay", () => import("../src/phone/strip.tsx")),
+  at("overlay", () => import("../src/contacts/requestCard.tsx")),
+];
 
-/** Type into the text box named `name`, as a person does. */
-const write = (name: string, text: string) => act(async () => {
-  const found = [...document.querySelectorAll("textarea, input")].find((one) => one.getAttribute("aria-label") === name);
-  if (!(found instanceof HTMLTextAreaElement || found instanceof HTMLInputElement)) throw new Error(`no field ${name}`);
-  Object.getOwnPropertyDescriptor(Object.getPrototypeOf(found) as object, "value")?.set?.call(found, text);
-  found.dispatchEvent(new Event("input", { bubbles: true }));
+const open = async (world: Scene) => {
+  const running = await openAlpha(world, mounts);
+  await until(running.alpha, home.runtime(running.alpha), Home, (state) => state.tiles.load.status === "Loaded");
+  return running;
+};
+
+const launch = (name: "Contacts" | "Messages") => drawn(() => {
+  const tile = document.querySelector<HTMLButtonElement>(`button[data-home-tile='view:${name}']`);
+  if (!tile) throw new Error(`no ${name} tile on Home`);
+  tile.click();
 });
 
 describe("Contacts on an Alpha image", () => {
-  it("Browse my contacts, look at one, change it and delete it (spec/app/contacts/index.md, \"Story: Browse my contacts\"; spec/app/contacts/index.md, \"Story: Know what happened to my change\"; spec/app/contacts/index.md, \"Story: Look at one contact\"; spec/app/contacts/index.md, \"Story: Add or change a contact\"; spec/app/contacts/index.md, \"Story: Delete a contact\")", async () => {
+  it("Browse my contacts, look at one, change it and delete it (spec/app/contacts/index.md, \"Story: Browse my contacts\"; spec/app/contacts/index.md, \"Story: Give Alpha access to my contacts\"; spec/app/contacts/index.md, \"Story: Know what happened to my change\"; spec/app/contacts/index.md, \"Story: Look at one contact\"; spec/app/contacts/index.md, \"Story: Add or change a contact\"; spec/app/contacts/index.md, \"Story: Delete a contact\")", async () => {
     const world = image();
+    world.telephony.contacts = false;
     const { alpha } = await open(world);
     await until(alpha, alpha.runtime, Shell, (s) => s.contacts);
 
     // spec/app/contacts/index.md, "Contacts reads the list each time it comes to the front"
-    await press("Contacts");
+    await launch("Contacts");
+    await until(alpha, alpha.runtime, Contacts, (s) => s.front && s.list.status === "Failed" && s.rows === 0);
+    await press("Allow");
     await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 2);
 
-    await write("Search or ask", "Maya");
+    await fill("Search or ask", "Maya");
     await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 1);
     expect(document.querySelector('[aria-label="Ben Ortiz"]')).toBeNull();
-    await write("Search or ask", "");
+    await fill("Search or ask", "");
     await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 2);
 
     // spec/app/contacts/index.md, "Opening a contact reads it from the phone afresh"
@@ -56,18 +65,27 @@ describe("Contacts on an Alpha image", () => {
     // spec/app/contacts/index.md, "Save writes a form that was changed and has a name, a number or an address"
     await press("Edit");
     await until(alpha, alpha.runtime, Contacts, (s) => s.form === "Changing");
-    await write("Last name", "Chen-Ortiz");
+    await fill("Last name", "Chen-Ortiz");
+    expect(button("Save")?.disabled, "Save is available after editing a contact").toBe(false);
     await press("Save");
     await until(alpha, alpha.runtime, Contacts, (s) => s.write.outcome === "Confirmed" && s.form === "Shut");
     expect(world.telephony.people.find((one) => one.id === "7")).toMatchObject({ familyName: "Chen-Ortiz", revision: 2 });
-    await until(alpha, alpha.runtime, Contacts, (s) => s.opened && s.card.status === "Loaded");
+    await until(alpha, alpha.runtime, Contacts, (s) => s.opened && (s.card.status === "Loaded" || s.card.status === "Failed"));
+    const displayed = await alpha.runtime.runPromise(Effect.flatMap(Contacts, (machine) => machine.get()));
+    expect(displayed.card, "The saved contact is readable").toMatchObject({ status: "Loaded" });
     const card = await alpha.runtime.runPromise(answerReading({ type: "contact_read_selected" }));
     expect(card).toMatchObject({ status: "read", contact: { displayName: "Maya Chen-Ortiz" } });
 
     // spec/app/contacts/index.md, "Confirming deletes the contact that was shown"
+    const deletion = Promise.withResolvers<void>();
+    world.telephony.holdContactDeletion = deletion.promise;
     await press("Delete");
     await until(alpha, alpha.runtime, Contacts, (s) => s.confirming);
-    await confirm("Delete");
+    await pressOnTop("Delete");
+    await until(alpha, alpha.runtime, Contacts, (s) => s.write.outcome === "Sent" && s.change === "Remove");
+    expect(world.telephony.people.map((one) => one.id)).toEqual(["7", "8"]);
+    deletion.resolve();
+    await later(alpha, 500);
     await until(alpha, alpha.runtime, Contacts, (s) => s.write.outcome === "Confirmed" && s.change === "Remove" && !s.opened);
     expect(world.telephony.people.map((one) => one.id)).toEqual(["8"]);
 
@@ -85,7 +103,7 @@ describe("Contacts on an Alpha image", () => {
     world.telephony.editable = false;
     const { alpha } = await open(world);
     await until(alpha, alpha.runtime, Shell, (s) => s.contacts);
-    await press("Contacts");
+    await launch("Contacts");
     await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 2 && !s.editable);
 
     // spec/app/contacts/index.md, "Where the phone does not let Alpha write contacts, New and Edit open the phone's own contact editor instead"
@@ -105,7 +123,7 @@ describe("Contacts on an Alpha image", () => {
       ({ ...first, id: String(index + 10), displayName: `Contact ${index + 1}` })));
     const { alpha } = await open(world);
     await until(alpha, alpha.runtime, Shell, (s) => s.contacts);
-    await press("Contacts");
+    await launch("Contacts");
     await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 50 && s.more);
     await press("More contacts");
     await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 53 && !s.more);
@@ -134,7 +152,7 @@ describe("Contacts on an Alpha image", () => {
     expect(world.telephony.sent).toEqual([]);
 
     // spec/app/contacts/agent.md, "The owner picks the exact number or the one contact, and that one is shown"
-    await act(async () => {
+    await drawn(() => {
       const found = [...document.querySelectorAll("[role=dialog] button")].find((one) => one.querySelector("span > span")?.textContent === "Maya Chen");
       if (!(found instanceof HTMLButtonElement)) throw new Error("no button Maya Chen");
       found.click();
@@ -184,6 +202,13 @@ describe("Contacts on an Alpha image", () => {
     await press("Approve");
     await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "NotDone");
     expect(world.telephony.people).toContain(ben);
+
+    // spec/app/contacts/agent.md, "Only the phone answers the action, and the request ends as that answer says"
+    await ask({ type: "contact_delete", query: "Ben" });
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Shown" && s.contact === "8");
+    await press("Approve");
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "Done");
+    expect(world.telephony.people).not.toContain(ben);
   });
 
   it("Let the agent read what I have open, and draft a reply that never sends (spec/app/contacts/agent.md, \"Story: Let the agent read what I have open\"; spec/app/messages/composer.md, \"Story: Let Alpha suggest a draft\")", async () => {
@@ -202,7 +227,7 @@ describe("Contacts on an Alpha image", () => {
       { kind: "sms-latest-sender", status: "found", numberEnding: "0100" }, { kind: "sms-latest-sender", status: "found", address: "+14155550100", threadId: "thread:1" },
     ]);
 
-    await press("Messages");
+    await launch("Messages");
     await until(alpha, alpha.runtime, Messages, (s) => s.list.status === "Loaded" && s.threads === 1);
     await press("Maya Chen");
     await until(alpha, alpha.runtime, Messages, (s) => s.pane === "Conversation" && s.page.status === "Loaded");
@@ -224,7 +249,6 @@ describe("Contacts on an Alpha image", () => {
     // spec/app/contacts/index.md, "Searching or changing the filter chip starts a new list"
     expect(await read({ type: "contact_show", query: "Ben" })).toEqual({ kind: "contact-show", status: "shown" });
     await until(alpha, alpha.runtime, Contacts, (s) => s.front && s.sought && s.list.status === "Loaded" && s.rows === 1);
-    await drawn(() => new Promise((resolve) => setTimeout(resolve, 0)));
     await press("Ben Ortiz");
     await until(alpha, alpha.runtime, Contacts, (s) => s.opened && s.card.status === "Loaded");
     expect(await read({ type: "contact_read_selected" })).toEqual({ kind: "contact-read", status: "read", contact: { displayName: "Ben Ortiz", phoneNumbers: ["+14155550122"], emailAddresses: [] } });
