@@ -5,8 +5,9 @@ import { Machine as Definition } from "../gen/app__workflows.effect.vibe";
 import { Machine as Runs } from "../gen/app__workflows__runs.effect.vibe";
 import { Machine as Sheet } from "../gen/app__workflows__sheet.effect.vibe";
 import { Machine as Clock } from "../gen/app__workflows__clock.effect.vibe";
+import { Machine as Approvals } from "../gen/app__workflows__approvals.effect.vibe";
 import workflows from "../src/workflows/index.tsx";
-import { button, closeAll, drawn, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, later, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -79,8 +80,9 @@ describe("Workflows", () => {
     });
   });
 
-  it('Runs the reviewed version and opens its output (spec/app/workflows/runs.md, "Story: Run a workflow now"; spec/app/workflows/sheet.md, "Story: Read a run\'s sheet")', async () => {
+  it('Runs the reviewed version, follows its approval and opens its output (spec/app/workflows/runs.md, "Story: Run a workflow now"; spec/app/workflows/sheet.md, "Story: Read a run\'s sheet"; spec/app/workflows/approvals.md, "Story: Answer a run\'s approval on the phone")', async () => {
     const world = scene();
+    world.workflows.stage = "Running";
     const { alpha } = await open(world);
     await press("Workflows");
     const area = workflows.runtime(alpha);
@@ -98,7 +100,31 @@ describe("Workflows", () => {
       if (!row) throw new Error("No run history");
       row.click();
     });
-    await until(alpha, area, Sheet, (state) => state.output.status === "Loaded");
+    await until(alpha, area, Sheet, (state) => state.output.status === "Loaded" && state.status === "Running");
+    await seen(false);
+    const reads = world.workflows.receiptReads;
+    world.workflows.stage = "Waiting";
+    await later(alpha, 8_000);
+    expect(world.workflows.receiptReads).toBe(reads);
+
+    await seen(true);
+    await later(alpha, 4_000);
+    await until(alpha, area, Approvals, (state) => state.approval === "Waiting" && state.sheet);
+    expect(document.querySelector('[aria-label="Workflow approval"]')?.textContent).toContain("Review the statement preview");
+    world.workflows.approvalTitle = "Review the revised statement preview";
+    await press("Approve");
+    await until(alpha, area, Approvals, (state) => state.approval === "NotApplied");
+    expect(world.workflows.decisions).toEqual([]);
+
+    await later(alpha, 4_000);
+    await until(alpha, area, Approvals, (state) => state.approval === "Waiting" && state.sheet);
+    expect(document.querySelector('[aria-label="Workflow approval"]')?.textContent).toContain("Review the revised statement preview");
+    await press("Approve");
+    await until(alpha, area, Approvals, (state) => state.approval === "Approved");
+    expect(world.workflows.decisions).toEqual([{ version: "monthly-statement-v3", digest: "a".repeat(64), approved: true }]);
+
+    await later(alpha, 4_000);
+    await until(alpha, area, Sheet, (state) => state.output.status === "Loaded" && state.status === "Done");
     expect(document.querySelector('[aria-label="Run details"]')?.textContent).toContain("Your statement is ready.");
   });
 });
