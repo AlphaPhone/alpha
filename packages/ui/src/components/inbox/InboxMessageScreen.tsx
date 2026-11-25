@@ -65,13 +65,17 @@ export function InboxMessageScreen({
   return (
     <Screen
       title={subject}
+      titleControl={<span className="flex-1" />}
       leading={<Button variant="ghost" size="icon" aria-label="Back to the list" onClick={onClose}><ChevronLeft /></Button>}
-      actions={<InboxThreadNav place={place} count={count} onOlder={onOlder} onNewer={onNewer} />}
+      actions={reading || fault ? null : <InboxMessageActions {...actions} compact />}
     >
-      <InboxMessageHeader sender={sender} address={address} to={to} cc={cc} replyTo={replyTo} date={date} />
-      {notice ? <InboxNotice kind={notice} onAction={onNoticeAction} /> : null}
-      {body}
-      {reading || fault ? null : <InboxMessageActions {...actions} />}
+      <div className="flex flex-col gap-4 px-2">
+        {count > 1 ? <InboxThreadNav place={place} count={count} onOlder={onOlder} onNewer={onNewer} /> : null}
+        <InboxMessageHeader sender={sender} address={address} to={to} cc={cc} replyTo={replyTo} date={date} />
+        <p aria-hidden="true" className="mt-1 font-display text-3xl font-light [overflow-wrap:anywhere]">{subject}</p>
+        {notice ? <InboxNotice kind={notice} onAction={onNoticeAction} /> : null}
+        {body}
+      </div>
     </Screen>
   );
 }

@@ -3,3 +3,5 @@ export * from "./bombadil/shell.ts";
 export * from "./bombadil/sample.ts";
 export * from "./bombadil/ask.ts";
 export * from "./bombadil/settings.ts";
+export * from "./bombadil/clock.ts";
+export * from "./bombadil/reminders.ts";

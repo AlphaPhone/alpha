@@ -13,15 +13,30 @@ final class AlphaTelephonyRoles {
   AlphaSmsComposeActivity.class, ai.eliza.plugins.messages.MmsFileProvider.class };
 
  static void sync(Context context) {
+  // The image can enable manifest defaults, so a failed admission must explicitly disable them.
   int wanted = AlphaImageCapability.verified(context) ? PackageManager.COMPONENT_ENABLED_STATE_ENABLED : PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
+  syncComponents(context, wanted);
+ }
+
+ static boolean prepare(Context context) {
+  return AlphaImageCapability.verified(context) && syncComponents(context, PackageManager.COMPONENT_ENABLED_STATE_ENABLED);
+ }
+
+ private static boolean syncComponents(Context context, int wanted) {
   PackageManager packages = context.getPackageManager();
+  boolean ready = true;
   for (Class<?> component : COMPONENTS) {
    ComponentName name = new ComponentName(context, component);
    try {
-    if (packages.getComponentEnabledSetting(name) != wanted) packages.setComponentEnabledSetting(name, wanted, PackageManager.DONT_KILL_APP);
+    if (packages.getComponentEnabledSetting(name) != wanted) {
+     packages.setComponentEnabledSetting(name, wanted, PackageManager.DONT_KILL_APP);
+     ready &= packages.getComponentEnabledSetting(name) == wanted;
+    }
    } catch (RuntimeException refused) {
+    ready = false;
     Log.w("AlphaTelephonyRoles", "Role component state unchanged for " + component.getSimpleName());
    }
   }
+  return ready;
  }
 }

@@ -1,8 +1,5 @@
-import { Alert } from "../Alert.tsx";
 import { Button } from "../Button.tsx";
-import { ListGroup } from "../ListGroup.tsx";
-import { Progress } from "../Progress.tsx";
-import { Sheet, SheetContent } from "../Sheet.tsx";
+import { Dialog, DialogContent, DialogTitle } from "../Dialog.tsx";
 import { StartupAccessRow, type StartupAccessRowProps } from "./StartupAccessRow.tsx";
 import type { StartupAccess, StartupAccessNotice } from "./vocabulary.ts";
 
@@ -29,12 +26,15 @@ export type StartupAccessPanelProps = {
   onDone?: () => void;
 };
 
-const notices: Record<StartupAccessNotice, { text: string; variant: "info" | "warn" }> = {
-  AllowFirst: { text: "Allow first", variant: "info" },
-  StillOff: { text: "Still off", variant: "warn" },
-  NotConfirmed: { text: "Couldn't confirm", variant: "warn" },
-  NotSaved: { text: "Not saved", variant: "warn" },
+const notices: Record<StartupAccessNotice, string> = {
+  AllowFirst: "Allow first",
+  StillOff: "Still off",
+  NotConfirmed: "Couldn't confirm",
+  NotSaved: "Not saved",
 };
+
+export const startupPanel = "inset-0 grid max-w-none translate-y-0 overflow-y-auto overscroll-contain rounded-none bg-background px-6 pt-[max(--spacing(8),env(safe-area-inset-top))] pb-[max(--spacing(8),env(safe-area-inset-bottom))] text-foreground shadow-none motion-safe:animate-none";
+export const startupMainAction = "h-13 w-full rounded-lg bg-alpha font-medium text-alpha-foreground hover:bg-alpha/90 active:bg-alpha/80";
 
 /**
  * The walkthrough that asks for each access in order, or a review of them from Settings: one list, the step being
@@ -44,36 +44,37 @@ const notices: Record<StartupAccessNotice, { text: string; variant: "info" | "wa
 export function StartupAccessPanel({ rows, current, review = false, place, notice, onAct, onContinue, onSkip, onDone }: StartupAccessPanelProps) {
   const said = notice ? notices[notice] : undefined;
   return (
-    <Sheet open>
-      <SheetContent
-        title="Access"
+    <Dialog open>
+      <DialogContent
+        className={startupPanel}
         aria-describedby={undefined}
         onInteractOutside={(event) => event.preventDefault()}
         onEscapeKeyDown={(event) => {
           event.preventDefault();
           if (review) onDone?.();
         }}
-        actions={
-          review ? (
-            <Button disabled={!onDone} onClick={onDone}>Done</Button>
-          ) : (
-            <>
-              {onSkip ? <Button variant="secondary" onClick={onSkip}>Skip</Button> : null}
-              <Button disabled={!onContinue} onClick={onContinue}>Continue</Button>
-            </>
-          )
-        }
       >
-        <div className="flex flex-col gap-4">
-          {place ? <Progress aria-label={`Step ${place.step} of ${place.count}`} value={place.step} max={place.count} /> : null}
-          <ListGroup surface="plain">
+        <div className="m-auto flex w-full max-w-90 flex-col">
+          <DialogTitle className="mb-5 text-center font-display text-4xl font-light text-balance">Access</DialogTitle>
+          {place ? <p role="status" className="mb-2 text-center text-sm text-muted-foreground">Step {place.step} of {place.count}</p> : null}
+          <ol>
             {rows.map((row) => (
               <StartupAccessRow key={row.access} {...row} current={row.access === current} onAct={onAct && row.action ? () => onAct(row.access) : undefined} />
             ))}
-          </ListGroup>
-          {said ? <Alert variant={said.variant}>{said.text}</Alert> : null}
+          </ol>
+          {said ? <p role={notice === "NotSaved" ? "alert" : "status"} className="mt-5 text-center text-sm">{said}</p> : null}
+          <div className="mt-9 flex min-h-27 flex-col items-center gap-2">
+            {review ? (
+              <Button className={startupMainAction} disabled={!onDone} onClick={onDone}>Done</Button>
+            ) : (
+              <>
+                <Button className={startupMainAction} disabled={!onContinue} onClick={onContinue}>Continue</Button>
+                {onSkip ? <Button variant="ghost" size="icon" className="w-auto px-4 text-sm font-normal text-muted-foreground" onClick={onSkip}>Skip</Button> : null}
+              </>
+            )}
+          </div>
         </div>
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   );
 }

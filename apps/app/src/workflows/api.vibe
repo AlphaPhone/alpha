@@ -1,0 +1,72 @@
+// spec/app/workflows/list.md, "The list is read from the agent for the owner signed in, one reading at a time"; spec/app/workflows/index.md, "Story: Open a workflow"
+import { RuntimeRequestError } from "@elizaos/agent/client"
+import { type WorkflowClient, type WorkflowRequest, workflowClient, workflowHttpError } from "@elizaos/plugin-workflow/client"
+import { Agent } from "../platform/agent.vibe"
+import { ask } from "../platform/remote.vibe"
+
+export service WorkflowsApi {
+  readonly workflow: WorkflowClient
+}
+
+export const workflowsApi = Layer.effect(WorkflowsApi, effect {
+  const { runtime } = try Agent
+  const request: WorkflowRequest = effect (path: string, body: unknown) => tryPromise({
+    try: () => runtime.request(path, body),
+    catch: (error) => error instanceof RuntimeRequestError
+      ? workflowHttpError(error.status, { code: error.code, error: error.message })
+      : workflowHttpError(0, {}),
+  })
+  return { workflow: workflowClient(request) }
+})
+
+const Identifier = Schema.NonEmptyString
+
+export schema Prompt {
+  readonly id: Identifier
+  readonly displayName: string
+  readonly instructions: string
+  readonly enabled: boolean
+  readonly revision: Schema.Int
+  readonly triggerType: "once" | "cron" | "event"
+  readonly scheduledAtIso?: string
+  readonly cronExpression?: string
+  readonly eventKind?: string
+  readonly timezone: string
+}
+
+export schema ScheduledTask {
+  readonly taskId: Identifier
+  readonly kind: string
+  readonly ownerVisible: boolean
+  readonly promptInstructions: string
+  readonly state: { readonly status: string; readonly firedAt?: string }
+  readonly trigger: { readonly kind: "once" | "cron" | "manual"; readonly atIso?: string; readonly expression?: string; readonly tz?: string }
+  readonly metadata: { readonly recordKey?: string }
+}
+
+const Triggers = Schema.Struct({ triggers: Schema.Array(Prompt) })
+const Tasks = Schema.Struct({ tasks: Schema.Array(ScheduledTask) })
+
+export effect function readPrompts() {
+  const { triggers } = try ask(Agent, HttpClientRequest.get("/api/triggers"), Triggers)
+  return triggers
+}
+
+export effect function readSchedules() {
+  const { tasks } = try ask(Agent, HttpClientRequest.get("/api/scheduled-tasks", { urlParams: { ownerVisibleOnly: "1" } }), Tasks)
+  return tasks.filter((task) => task.ownerVisible)
+}
+
+export schema PromptRun {
+  readonly startedAt: Schema.Int
+  readonly finishedAt: Schema.Int
+  readonly status: string
+  readonly error?: string
+}
+
+const TriggerRuns = Schema.Struct({ runs: Schema.Array(PromptRun) })
+
+export effect function readPromptRuns(id: string) {
+  const { runs } = try ask(Agent, HttpClientRequest.get(`/api/triggers/${encodeURIComponent(id)}/runs`), TriggerRuns)
+  return runs
+}

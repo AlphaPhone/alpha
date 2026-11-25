@@ -3,6 +3,11 @@ package ai.alphacompute.alphaphone;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.telecom.TelecomManager;
+import android.telephony.ServiceState;
+import android.telephony.SubscriptionInfo;
+import android.telephony.SubscriptionManager;
+import android.telephony.TelephonyManager;
+import java.util.List;
 
 /**
  * AP-16 AC-19: what the renderer needs to know about a live call, read from Telecom. The image's
@@ -53,6 +58,38 @@ final class AlphaCallState {
    return new Reading(null, null);
   } catch (RuntimeException unknown) {
    return new Reading(null, null);
+  }
+ }
+
+ /** Whether any active voice line is in service, or null when Android did not disclose it. */
+ @android.annotation.SuppressLint("MissingPermission")
+ static Boolean carrierReady(Context context) {
+  TelephonyManager phone = context.getSystemService(TelephonyManager.class);
+  if (phone == null) return false;
+  try {
+   if (!phone.isVoiceCapable()) return false;
+   SubscriptionManager manager = context.getSystemService(SubscriptionManager.class);
+   List<SubscriptionInfo> lines = manager == null ? null : manager.getActiveSubscriptionInfoList();
+   if (lines == null) return inService(phone);
+   boolean unknown = false;
+   for (SubscriptionInfo line : lines) {
+    Boolean state = inService(phone.createForSubscriptionId(line.getSubscriptionId()));
+    if (Boolean.TRUE.equals(state)) return true;
+    if (state == null) unknown = true;
+   }
+   return unknown ? null : Boolean.FALSE;
+  } catch (RuntimeException unavailable) {
+   return inService(phone);
+  }
+ }
+
+ @android.annotation.SuppressLint("MissingPermission")
+ private static Boolean inService(TelephonyManager phone) {
+  try {
+   ServiceState state = phone.getServiceState();
+   return state == null ? null : state.getState() == ServiceState.STATE_IN_SERVICE;
+  } catch (RuntimeException unavailable) {
+   return null;
   }
  }
 

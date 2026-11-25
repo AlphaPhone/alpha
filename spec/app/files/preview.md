@@ -18,7 +18,7 @@ with the names beside it that the preview was given.
 > told plainly while it loads or why it cannot be shown, and to close it
 > without anything of it staying behind.
 
-### The preview holds the viewer showing, the file it shows and the names beside it, what was read of it, the page drawn, the insert into an email under way and what it carried, and the email review
+### The preview holds the viewer showing, the file it shows and the names beside it, what was read of it, the page drawn, the handoff to Inbox under way and what it carries
 
 Viewers are numbered as they open; no viewer is showing when the number is
 zero. A file's revision changes whenever the file does.
@@ -26,7 +26,6 @@ zero. A file's revision changes whenever the file does.
 ```quint
 import read as R from "../../kit/read"
 import attempt as A from "../../kit/attempt"
-import review as V from "../../kit/review"
 import shared as F from "./shared"
 
 type Actor = Owner | Phone
@@ -37,14 +36,14 @@ type Preview = {
   viewer: int, viewers: int, item: int, kind: Kind, revision: int, reachable: bool, siblings: List[str],
   content: R::Read, playing: bool, secret: bool,
   page: int, pages: int, drawing: R::Read, drawnAt: int, why: Why,
-  attempt: A::Attempt, inserted: Seen, email: V::Review, account: int, draft: int,
+  attempt: A::Attempt, offered: Seen,
 }
 
 pure val initial: Preview = {
   viewer: 0, viewers: 0, item: 0, kind: Photo, revision: 0, reachable: false, siblings: List(),
   content: R::unread, playing: false, secret: false,
   page: 0, pages: 0, drawing: R::unread, drawnAt: 0, why: Fine,
-  attempt: A::plan(0), inserted: { item: 0, revision: 0 }, email: V::unreviewed, account: 0, draft: 0,
+  attempt: A::plan(0), offered: { item: 0, revision: 0 },
 }
 ```
 
@@ -52,8 +51,8 @@ pure val initial: Preview = {
 
 A viewer closing takes its listeners with it, and tells Recent which file
 it showed. The file is read for its viewer, and a PDF page is drawn by the
-worker, each for the revision shown. An insert into an email draft is sent
-once. Ask Alpha goes to
+worker, each for the revision shown. Email hands the selected file to
+[Inbox](../inbox/adding.md) for its one review before attachment. Ask Alpha goes to
 the [shell](../shell/), Transcribe to Notes, Open elsewhere to Android's
 chooser, and Lost, Select again and Forget to [Recent](./recent.md).
 
@@ -62,7 +61,7 @@ type Effect =
   | Closed({ viewer: int, item: int })
   | Read({ ticket: int, item: int, revision: int })
   | Draw({ ticket: int, item: int, revision: int, page: int })
-  | Insert({ ticket: int, item: int, revision: int, account: int, draft: int })
+  | OfferEmail({ ticket: int, viewer: int, item: int, revision: int, account: int })
   | AskAlpha({ item: int })
   | Transcribe({ item: int })
   | OpenElsewhere({ item: int, revision: int, writable: bool })
@@ -75,7 +74,7 @@ pure def showing(s: Preview): bool = s.viewer != 0
 pure def usable(s: Preview): bool = showing(s) and s.reachable
 pure def busy(s: Preview): bool = s.attempt.outcome == A::Sent
 pure def loaded(s: Preview): bool = usable(s) and s.content.status == R::Loaded
-pure def doubtful(s: Preview): bool = s.attempt.outcome == A::Unknown and s.inserted == { item: s.item, revision: s.revision }
+pure def doubtful(s: Preview): bool = s.attempt.outcome == A::Unknown and s.offered == { item: s.item, revision: s.revision }
 ```
 
 ### What the simulator tries
@@ -87,7 +86,6 @@ pure val pageValues = Set(1, 2, 3)
 pure val ticketValues = Set(1, 2, 3, 4)
 pure val revisionValues = Set(1, 2)
 pure val accountValues = Set(1, 2)
-pure val draftValues = Set(1, 2)
 pure val siblingsValues = Set(List(), List("a"))
 ```
 
@@ -101,7 +99,7 @@ pure def closing(s: Preview): List[Effect] = if (showing(s)) List(Closed({ viewe
 
 pure def emptied(viewer: int, s: Preview): Preview =
   { ...s, viewer: viewer, reachable: false, content: F::drop(s.content), playing: false, secret: false,
-    drawing: F::drop(s.drawing), email: V::dismiss(s.email) }
+    drawing: F::drop(s.drawing) }
 
 pure def canShow(s: Preview, file: int, kind: Kind, revision: int, siblings: List[str], by: Actor): bool = file > 0
 
@@ -238,14 +236,14 @@ pure def pageTimedOut(s: Preview, ticket: int, by: Actor): Preview = { ...s, dra
 pure def sometimesAPageTookTooLong(s: Preview): bool = s.drawing.status == R::Failed and s.why == TooSlow
 ```
 
-### The file can change while it is shown: it is read again, its page drawn again within its new length, and the email review stops counting
+### The file can change while it is shown: it is read again, its page drawn again within its new length, and an email handoff still reading the previous file is refused
 
 ```quint
 pure def canChanged(s: Preview, revision: int, by: Actor): bool = by == Phone and usable(s) and revision != s.revision
 
 pure def changed(s: Preview, revision: int, by: Actor): Moved =
   val content = R::ask(s.content)
-  { state: { ...s, revision: revision, content: content, playing: false, secret: false, drawing: F::drop(s.drawing), email: V::revise(s.email) },
+  { state: { ...s, revision: revision, content: content, playing: false, secret: false, drawing: F::drop(s.drawing) },
     out: List(Read({ ticket: content.ticket, item: s.item, revision: revision })) }
 ```
 
@@ -312,7 +310,36 @@ pure def canForget(s: Preview, by: Actor): bool = by == Owner and showing(s)
 pure def forget(s: Preview, by: Actor): Moved = { state: emptied(0, s), out: closing(s).append(Forget({ item: s.item })) }
 ```
 
-### An insert ends as its answer says
+### Use in email offers the exact file to the selected Inbox account for review before it joins a new draft
+
+The owner starts with a readable document, image or text file and an
+Inbox account that can send. An open draft stays as it was. A change to
+the view, file, account or open draft before handing it over refuses
+the request. Inbox owns the review, starts the draft only after the
+owner confirms, and never sends it from this action.
+
+```quint
+pure def canUseInEmail(s: Preview, account: int, by: Actor): bool =
+  by == Owner and loaded(s) and (s.kind == Pdf or s.kind == Photo or s.kind == Text) and
+    not(busy(s)) and not(doubtful(s)) and account > 0
+
+pure def useInEmail(s: Preview, account: int, by: Actor): Moved =
+  val attempt = A::dispatch(A::record(A::plan(s.attempt.id + 1)))
+  { state: { ...s, attempt: attempt, offered: { item: s.item, revision: s.revision } },
+    out: List(OfferEmail({ ticket: attempt.id, viewer: s.viewer, item: s.item, revision: s.revision, account: account })) }
+
+pure def stepAnEmailOfferNamesTheFileShown(before: Preview, after: Preview, out: List[Effect]): bool =
+  out.every(e => match e {
+    | OfferEmail(x) => loaded(before) and x.viewer == before.viewer and x.item == before.item
+        and x.revision == before.revision and x.account > 0
+    | _ => true
+  })
+```
+
+### The answer to an email handoff says whether Inbox received the attachment for review
+
+An acceptance does not mean the owner has added the attachment or sent the
+message. An answer from an earlier attempt is refused.
 
 ```quint
 pure def canAnswered(s: Preview, ticket: int, by: Actor): bool = by == Phone and A::canConclude(s.attempt, ticket)
@@ -321,74 +348,22 @@ pure def answered(s: Preview, ticket: int, confirmed: bool, known: bool, by: Act
   { ...s, attempt: A::conclude(s.attempt, confirmed, known) }
 ```
 
-### Use in email shows what will be put into which draft of which account; a change to the file, the account or the draft voids it, and a confirmed insert puts in exactly that
+### One handoff leaves at a time and one with an unknown result is not repeated for the same file revision
+
+The owner is told the handoff could not be confirmed and to look in Inbox
+before trying again.
 
 ```quint
-pure def canUseInEmail(s: Preview, account: int, draft: int, by: Actor): bool =
-  by == Owner and usable(s) and not(busy(s)) and not(doubtful(s)) and account > 0 and draft > 0
-
-pure def useInEmail(s: Preview, account: int, draft: int, by: Actor): Preview =
-  { ...s, account: account, draft: draft, email: V::present(s.email) }
-
-pure def canDraftChanged(s: Preview, by: Actor): bool = by == Phone and s.email.showing
-
-pure def draftChanged(s: Preview, by: Actor): Preview = { ...s, email: V::revise(s.email) }
-
-pure def canInsert(s: Preview, by: Actor): bool = by == Owner and usable(s) and not(busy(s)) and not(doubtful(s)) and V::canConfirm(s.email)
-
-pure def insert(s: Preview, by: Actor): Moved =
-  val attempt = A::dispatch(A::record(A::plan(s.attempt.id + 1)))
-  { state: { ...s, attempt: attempt, inserted: { item: s.item, revision: s.revision }, email: V::confirm(s.email) },
-    out: List(Insert({ ticket: attempt.id, item: s.item, revision: s.revision, account: s.account, draft: s.draft })) }
-
-pure def canCancelEmail(s: Preview, by: Actor): bool = by == Owner and s.email.showing
-
-pure def cancelEmail(s: Preview, by: Actor): Preview = { ...s, email: V::dismiss(s.email) }
-```
-
-### What is put into an email is the file, account and draft the owner confirmed as shown
-
-```quint
-pure def stepAnInsertIsWhatWasShown(before: Preview, after: Preview, out: List[Effect]): bool =
+pure def stepAnUncertainHandoffIsNotRepeated(before: Preview, after: Preview, out: List[Effect]): bool =
   out.every(e => match e {
-    | Insert(x) => V::canConfirm(before.email) and x.item == before.item and x.revision == before.revision
-        and x.account == before.account and x.draft == before.draft
+    | OfferEmail(x) => not(busy(before)) and after.attempt.id == before.attempt.id + 1
+        and not(before.attempt.outcome == A::Unknown and before.offered == { item: x.item, revision: x.revision })
     | _ => true
   })
-```
 
-### The email review is never shown ahead of the file it shows
-
-Discovered by the proof: were the review recorded as shown at a later
-revision than it has reached, a change to the file could bring a review
-that had stopped counting back to life.
-
-```quint
-pure def alwaysTheEmailReviewIsNotAhead(s: Preview): bool = s.email.shown <= s.email.revision
-```
-
-### One insert leaves at a time, and an insert left unknown is not sent again for the same revision of the file
-
-The owner is told the insert could not be confirmed, and to look at the
-draft before trying again.
-
-```quint
-pure def stepAnUncertainInsertIsNotRepeated(before: Preview, after: Preview, out: List[Effect]): bool =
-  out.every(e => match e {
-    | Insert(x) => not(busy(before)) and after.attempt.id == before.attempt.id + 1
-        and not(before.attempt.outcome == A::Unknown and before.inserted == { item: x.item, revision: x.revision })
-    | _ => true
-  })
-```
-
-### An insert can be confirmed, or left unknown and held back, and an email review can stop counting
-
-```quint
-pure def sometimesAnInsertIsConfirmed(s: Preview): bool = s.attempt.outcome == A::Confirmed
-pure def sometimesAnUncertainInsertIsHeldBack(s: Preview): bool = doubtful(s) and usable(s)
-pure def sometimesAnInsertCanBeTriedOnTheChangedFile(s: Preview): bool = s.attempt.outcome == A::Unknown and usable(s) and not(doubtful(s))
-pure def sometimesAnEmailReviewIsOpen(s: Preview): bool = V::canConfirm(s.email) and usable(s)
-pure def sometimesAnEmailReviewStoppedCounting(s: Preview): bool = s.email.showing and not(V::canConfirm(s.email))
+pure def sometimesInboxAcceptedAnOffer(s: Preview): bool = s.attempt.outcome == A::Confirmed
+pure def sometimesAnUncertainOfferIsHeldBack(s: Preview): bool = doubtful(s) and usable(s)
+pure def sometimesAnOfferCanBeTriedOnTheChangedFile(s: Preview): bool = s.attempt.outcome == A::Unknown and usable(s) and not(doubtful(s))
 ```
 
 ## Story: Get a file back when access was lost
@@ -434,11 +409,11 @@ pure def stepALostFileIsLeftAlone(before: Preview, after: Preview, out: List[Eff
   })
 ```
 
-### Nothing of a file is read, drawn or reviewed once its access is lost
+### Nothing of a file is read or drawn once its access is lost
 
 ```quint
 pure def alwaysALostFileShowsNothing(s: Preview): bool =
-  not(s.reachable) implies (s.drawing.status != R::Loaded and s.content.status != R::Loaded and not(s.email.showing))
+  not(s.reachable) implies (s.drawing.status != R::Loaded and s.content.status != R::Loaded)
 ```
 
 ### A file can need selecting again
@@ -450,7 +425,7 @@ pure def sometimesAFileMustBeSelectedAgain(s: Preview): bool = showing(s) and no
 ## Story: Come back to a preview after a restart
 
 > As the owner, I want a restart to close the preview cleanly and never
-> repeat an insert.
+> repeat an email handoff.
 
 ### A restart closes the viewer and reports an insert cut off as unknown, so no answer from before it is taken
 

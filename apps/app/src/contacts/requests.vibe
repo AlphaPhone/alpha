@@ -4,6 +4,7 @@ import type { AddressBookContact, ContactId } from "@elizaos/os/bridges/contacts
 import type { DirectSmsReview, OperationId, SmsSendResult } from "@elizaos/os/bridges/messages"
 import type { PhoneNumber } from "@elizaos/os/bridges/phone"
 import * as Agent from "../../gen/app__contacts__agent.effect.vibe"
+import { Machine as PhoneMachine, clear } from "../../gen/app__phone.effect.vibe"
 import type { Ask, Effect as Out, Ending, Event } from "../../gen/app__contacts__agent.effect.vibe"
 import { Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
@@ -86,6 +87,36 @@ export effect function propose(operation: Asking, written: boolean): boolean!!(R
   try (try Requested).set({ operation, matches: [], saved: new Map(), sent: undefined, ending: undefined })
   const event: Event = { type: "asked", ask, byName: number === "" && search !== "", emergency: judge(number) === "Emergency", written, pictures, number, text }
   return try contained(machine.send(event, "Agent"), "the agent's request")
+}
+
+// spec/app/contacts/agent.md, "The owner can decline, and a review Alpha stops showing is withdrawn"
+/** Withdraw the open request when Alpha stops showing it: the desk retired its proposal. Answers whether one was open. */
+export effect function withdrawn(): boolean!!Agent.Machine {
+  const machine = try Agent.Machine
+  return try contained(machine.send({ type: "withdraw" }, "Device"), "withdrawing the agent's request")
+}
+
+module page {
+  /** Whether the review is whole on screen and its enabled Send is what a finger there would hit, nothing covering it. @throws {never} */
+  export function sendShowing(): boolean {
+    if (typeof document === "undefined") return false
+    const review = document.querySelector<HTMLElement>("[data-alpha-review]")
+    const send = review?.querySelector<HTMLButtonElement>("button[data-alpha-review-send]")
+    if (!review || !send || send.disabled) return false
+    const whole = review.getBoundingClientRect()
+    if (whole.width <= 0 || whole.height <= 0 || whole.top < 0 || whole.left < 0 || whole.bottom > window.innerHeight || whole.right > window.innerWidth) return false
+    const at = send.getBoundingClientRect()
+    return send.contains(document.elementFromPoint(at.left + at.width / 2, at.top + at.height / 2))
+  }
+}
+import { sendShowing } from page
+
+// spec/app/contacts/agent.md, "Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call"
+/** The owner said "Send this text" as the next thing said in Talk: the shown text is approved only while its whole review and its enabled Send are on screen. Answers whether it was approved. */
+export effect function spokenSend(): boolean!!(Agent.Machine | PhoneMachine) {
+  if (!sendShowing()) return false
+  const approve: Event = { type: "approve", clear: clear(try (try PhoneMachine).get()), spoken: true }
+  return try contained((try Agent.Machine).send(approve, "Owner"), "the spoken Send")
 }
 
 /** The contact as the request would leave it: a new contact, or `before` with the change applied. */

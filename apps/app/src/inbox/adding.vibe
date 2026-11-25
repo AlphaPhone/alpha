@@ -7,6 +7,7 @@ import { canAttach } from "../../gen/app__inbox__letter.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { type Job, answer, contained, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import { type Attached, Letters, policy } from "./composer.vibe"
+import { ownerChanges } from "./mailbox.vibe"
 
 module web {
   /** Ask the owner for one file through the page's own picker: the file chosen, or none where the picker was put away. @throws {never} */
@@ -122,9 +123,10 @@ const closing = started(effect {
 }, "a draft closed")
 
 const sessions = started(effect {
-  const list = try Inbox.Machine
   const adding = try Adding.Machine
-  try Stream.runForEach(Stream.drop(Stream.changes(Stream.map(list.changes, (mailbox) => mailbox.signedIn)), 1), effect () => {
+  const incoming = try Incoming
+  try Stream.runForEach(ownerChanges, effect () => {
+    incoming.take()
     try contained(adding.send({ type: "sessionChanged" }), "a new cloud session")
   })
 }, "a new cloud session")

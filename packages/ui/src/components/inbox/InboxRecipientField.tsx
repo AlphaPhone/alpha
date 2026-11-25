@@ -45,7 +45,7 @@ export function InboxRecipientField({ label, recipients, value, onValueChange, o
       <span aria-hidden className="w-9 shrink-0 py-3 text-sm text-muted-foreground">{label}</span>
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0 py-0.5">
         {recipients.map(({ address, valid }) => <InboxPill key={address} label={address} invalid={!valid} onRemove={() => onRemove(address)} />)}
-        <form onSubmit={submit} className="min-w-32 flex-1">
+        <form noValidate onSubmit={submit} className="min-w-32 flex-1">
           <Input type="email" aria-label={`Add to ${label}`} enterKeyHint="done" autoComplete="off" value={value} onChange={(event) => onValueChange(event.target.value)} className="h-11 border-0 px-1" />
         </form>
       </div>

@@ -6,6 +6,9 @@ final class AlphaLauncher {
 
  static void register(MainActivity activity, boolean image) {
   AlphaTelephonyRoles.sync(activity);
-  if (image) activity.registerPlugin(AlphaOngoingCallPlugin.class);
+  if (image) {
+   activity.registerPlugin(AlphaOngoingCallPlugin.class);
+   AlphaTelephonyDeletions.get(activity).start();
+  }
  }
 }
