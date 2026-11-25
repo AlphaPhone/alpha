@@ -1,14 +1,18 @@
 // @vitest-environment happy-dom
+import { DeviceExecution } from "@elizaos/agent";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { Machine } from "../gen/app__camera.effect.vibe";
 import { Machine as Library } from "../gen/app__photos.effect.vibe";
 import { Machine as Viewer } from "../gen/app__photos__viewer.effect.vibe";
+import assistant from "../src/assistant/index.tsx";
+import { MediaReview } from "../src/assistant/media-review.vibe";
 import { requestCapture, type CaptureAnswer } from "../src/camera/camera.vibe";
 import camera from "../src/camera/index.tsx";
 import { photosArea } from "../src/photos/index.tsx";
 import { button, closeAll, drawn, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
+import { textReview } from "./fakes/text-review.ts";
 
 underAct();
 afterEach(closeAll);
@@ -339,5 +343,63 @@ describe("Camera on a phone", () => {
     expect(await outcome).toMatchObject({ result: "Taken", media: { libraryId: "image-1" } });
     expect(world.camera.photos).toHaveLength(1);
     expect(button("Open last capture in Photos")).toBeDefined();
+  });
+
+  it("Replays the saved camera receipt without an unnegotiated library ID (spec/app/camera/agent.md, \"A capture is taken only when the phone saved a photo it names; any other answer, or the camera released first, is uncertain\")", async () => {
+    const world = { ...scene(), phone: true, image: true };
+    const operation = { type: "camera_capture_photo" } as const;
+    const review = textReview(world.notes.owner, "camera-shot", operation);
+    const libraryId = "m:external_primary:i:17";
+    review.cameraLibraryId = true;
+    world.telephony.textReview = review;
+    const mounts = only("home", "assistant", "view:Camera", "notice");
+
+    const first = await open(world, mounts);
+    const session = await assistant.runtime(first.alpha).runPromise(Effect.flatMap(MediaReview, (media) => media.session()));
+    if (session === undefined) throw new Error("Camera review was not enrolled");
+    expect(session.headers["x-eliza-device-capabilities"]).toBe("camera.capture-photo.v1,camera.capture-library-id.v1");
+    const evidence = {
+      version: 1, kind: operation.type, operationId: review.proposal.id,
+      mediaId: "17", libraryId, width: 640, height: 480, mime: "image/jpeg",
+    };
+    const offline = new DeviceExecution({
+      identity: session.identity,
+      journal: {
+        get: (id) => Promise.resolve(review.journal.get(id)),
+        edit: (id, revision, next) => {
+          if ((review.journal.get(id)?.revision ?? 0) !== revision) return Promise.resolve(false);
+          review.journal.set(id, next);
+          return Promise.resolve(true);
+        },
+        list: () => Promise.resolve([...review.journal.values()]),
+      },
+      agent: {
+        decide: () => Promise.resolve(undefined),
+        claim: () => {
+          review.proposal.state = "executing";
+          return Promise.resolve({ attemptId: 1, agentAttemptId: review.attemptId });
+        },
+        receipt: () => Promise.reject(new Error("The receipt connection was lost")),
+        reconcile: () => Promise.resolve(undefined),
+      },
+      validate: () => operation,
+      execute: () => Promise.resolve({ kind: "applied", result: evidence }),
+      readBack: () => Promise.resolve(undefined),
+    });
+    const { id, digest, expiresAt } = review.proposal;
+    expect(await offline.approve({ id, digest, expiresAt: Date.parse(expiresAt), operation }, {
+      live: true, nonsensitive: true, exact: true, forceReview: true, requestEligible: true, reviewed: true,
+    })).toMatchObject({ kind: "settled", synced: false });
+    expect(review.journal.get(id)).toMatchObject({ acknowledged: false, evidence: { result: evidence } });
+    await first.close();
+
+    review.cameraLibraryId = false;
+    const second = await open(world, mounts);
+    const restarted = await assistant.runtime(second.alpha).runPromise(Effect.flatMap(MediaReview, (media) => media.session()));
+    expect(restarted?.headers["x-eliza-device-capabilities"]).toBe("camera.capture-photo.v1");
+    const { libraryId: _retainedLocally, ...wireEvidence } = evidence;
+    await expect.poll(() => review.receipts).toStrictEqual([{ outcome: "applied", operationId: id, result: wireEvidence }]);
+    await expect.poll(() => review.journal.get(id)).toMatchObject({ acknowledged: true, evidence: { result: evidence } });
+    expect(world.camera.photos).toHaveLength(0);
   });
 });

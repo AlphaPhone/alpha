@@ -9,13 +9,15 @@ const attemptId = "device-attempt-1";
 type Sms = Extract<DeviceOperation, { type: "sms_send" }>;
 type Confirmation = Pick<Sms, "recipients" | "body" | "subscriptionId"> & { operationId: string; confirm(): void };
 
-export function textReview(agentId: string, id: string, operation: Extract<DeviceOperation, { type: "sms_send" | "sms_compose" | "files_filter" | "files_open" }>, requestMessageId?: string) {
+export function textReview(agentId: string, id: string, operation: Extract<DeviceOperation, { type: "sms_send" | "sms_compose" | "files_filter" | "files_open" | "camera_capture_photo" }>, requestMessageId?: string) {
   return {
     agentId,
     proposal: {
       id, digest: "b".repeat(64), state: "pending", expiresAt: new Date(Date.now() + 60_000).toISOString(),
       payload: { installationId: agentId, enrollmentId, operation, requestMessageId },
     },
+    cameraLibraryId: false,
+    attemptId,
     pendingReads: 0,
     journal: new Map<string, JournalEntry>(),
     confirmations: [] as Confirmation[],
@@ -37,7 +39,9 @@ export function textReviewRoute(review: TextReviewScene, subjectUserId: string):
   const { agentId, proposal } = review;
   const type = proposal.payload.operation.type;
   const capabilities = type === "sms_send" ? ["sms.send.v1"]
-    : type === "sms_compose" ? ["sms.compose.v1", "sms.compose.v2"] : ["files.browser.v1", "files.shown-target.v1"];
+    : type === "sms_compose" ? ["sms.compose.v1", "sms.compose.v2"]
+    : type === "camera_capture_photo" ? ["camera.capture-photo.v1", ...(review.cameraLibraryId ? ["camera.capture-library-id.v1"] : [])]
+    : ["files.browser.v1", "files.shown-target.v1"];
   const prefix = "/api/client-devices/";
   const reject = (status: number) => Response.json({ error: "review refused" }, { status });
   return (request, url) => {
