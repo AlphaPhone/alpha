@@ -5,7 +5,7 @@ import {
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
 import { type ReactNode, type RefObject, useCallback, useMemo, useRef, useSyncExternalStore } from "react";
-import type { Conversation as Talking, Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe";
+import { type Conversation as Talking, Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe";
 import { askable, inFlight, pending } from "../../gen/app__assistant.ts";
 import { useMachine as useConversation } from "../../gen/app__assistant.react.ts";
 import type { Machine as AttachmentMachine } from "../../gen/app__assistant__attachments.effect.vibe";
@@ -13,7 +13,7 @@ import { useMachine as useAttachments } from "../../gen/app__assistant__attachme
 import type { Machine as ChatsMachine } from "../../gen/app__assistant__chats.effect.vibe";
 import { making } from "../../gen/app__assistant__chats.ts";
 import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
-import type { Composer as Writing, Machine as ComposerMachine } from "../../gen/app__assistant__composer.effect.vibe";
+import { type Composer as Writing, Machine as ComposerMachine } from "../../gen/app__assistant__composer.effect.vibe";
 import { attachments as attachmentCount, content, maxFiles, textLimit } from "../../gen/app__assistant__composer.ts";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
 import type { Machine as DockMachine } from "../../gen/app__assistant__dock.effect.vibe";
@@ -23,7 +23,7 @@ import type { Machine as ReplyMachine } from "../../gen/app__assistant__reply.ef
 import { useMachine as useReply } from "../../gen/app__assistant__reply.react.ts";
 import type { Machine as SearchMachine } from "../../gen/app__assistant__search.effect.vibe";
 import { useMachine as useSearch } from "../../gen/app__assistant__search.react.ts";
-import type { Machine as CommsMachine } from "../../gen/app__phone__comms.effect.vibe";
+import { Machine as CommsMachine } from "../../gen/app__phone__comms.effect.vibe";
 import { useMachine as useComms } from "../../gen/app__phone__comms.react.ts";
 import { Machine as ShellMachine, showing } from "../../gen/app__shell.effect.vibe";
 import type { Machine as LayersMachine } from "../../gen/app__shell__layers.effect.vibe";
@@ -33,21 +33,28 @@ import { MailQuestions } from "../inbox/mail-context.vibe";
 import { home } from "../shell/shell.vibe";
 import { isCommsView } from "../shell/views.tsx";
 import { type MediaCard, MediaReview, namedReviewQuery } from "./media-review.vibe";
+import type { Agent } from "../platform/agent.vibe";
 import { Documents } from "../platform/documents.vibe";
 import { AttachmentSources } from "./AttachmentSources.tsx";
 import { askComms, freedom } from "./assistant.vibe";
-import { acceptedFiles, acceptedPhotos, chooseDocument, type FileTarget, insertFiles, previewFile, readChosenDocument, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
+import { acceptedFiles, acceptedPhotos, attachmentAuthority, chooseDocument, type FileTarget, insertFiles, previewFile, readChosenDocument, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
 import { chip, type MessageActions, useHistorySheets, useMessageRows } from "./history.tsx";
 import { ReplyFailure } from "./ReplyFailure.tsx";
 import { type Attached, type Line, Talk } from "./talk.vibe";
 import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx";
 import { CommsBriefing } from "../phone/comms.vibe";
 import { displayNumber } from "../phone/words.ts";
+import { wordsOf } from "./words.ts";
+import { type TalkStopReceipt, type VoiceKeyboard, useTalkKeyboard } from "../voice/useTalkKeyboard.ts";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview | Documents, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview | Documents | Agent, unknown>;
   messageActions?: MessageActions;
-  speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & { voice?: (compact: boolean) => ReactNode };
+  speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & {
+    voiceReview?: ReactNode;
+    keyboard?: TalkStopReceipt;
+    voice?: (presentation: { compactDock: boolean; atBar: boolean; onKeyboard: VoiceKeyboard }) => ReactNode;
+  };
   canReadAloud?: boolean;
 }
 
@@ -94,6 +101,7 @@ const detached = { mail: "Mail", shown: "Shown" } as const;
 const barHeight = 102;
 const emptyLines: readonly Line[] = [];
 const settings = { type: "openView", view: "Settings" } as const;
+const maps = { type: "openView", view: "Maps" } as const;
 const back = { type: "goBack" } as const;
 
 function DeviceReview({ runtime, card }: { runtime: AssistantProps["runtime"]; card: MediaCard }) {
@@ -197,10 +205,11 @@ interface DockHandleProps {
   dock: ReturnType<typeof useDock>;
   detent: Parameters<typeof dockOpen>[0];
   compact: boolean;
+  focusOnPointerOpen: boolean;
   field: RefObject<HTMLTextAreaElement | null>;
 }
 
-function DockHandle({ dock, detent, compact, field }: DockHandleProps) {
+function DockHandle({ dock, detent, compact, focusOnPointerOpen, field }: DockHandleProps) {
   const open = dockOpen(detent);
   return (
     <AssistantGrabber
@@ -213,7 +222,7 @@ function DockHandle({ dock, detent, compact, field }: DockHandleProps) {
       }}
       onLift={() => {
         void dock.send({ type: "lift", now: untimed });
-        if (!open && !compact) field.current?.focus();
+        if (!open && focusOnPointerOpen) field.current?.focus();
       }}
       onCancel={() => { void dock.send({ type: "shift", now: untimed }); }}
       onTap={({ keyboard }) => {
@@ -222,6 +231,18 @@ function DockHandle({ dock, detent, compact, field }: DockHandleProps) {
       }}
     />
   );
+}
+
+/** The route and draft that own the composer during a Talk-to-keyboard request. */
+function keyboardScope(runtime: AssistantProps["runtime"]): string | undefined {
+  const held = runtime.runSyncExit(Effect.gen(function* () {
+    const route = yield* ShellMachine.use((machine) => machine.get());
+    const draft = yield* ComposerMachine.use((machine) => machine.get());
+    const { context } = yield* ConversationMachine.use((machine) => machine.get());
+    const subject = isCommsView(route.trail.at(-1)) ? (yield* CommsMachine.use((machine) => machine.get())).key : undefined;
+    return JSON.stringify([route.trail, route.assistant, subject, context.revision, draft.binding.owner, draft.binding.conversation, draft.read.ticket]);
+  }));
+  return held._tag === "Success" ? held.value : undefined;
 }
 
 /** @model spec/app/assistant/index.md */
@@ -243,6 +264,9 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const reviewed = useSyncExternalStore(mailStore.subscribe, mailStore.snapshot);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const focusOnRevealRef = useRef(false);
+  const { voice: renderVoice, voiceReview, keyboard, ...speechProps } = speech ?? {};
+  const keyboardOwner = useCallback(() => keyboardScope(runtime), [runtime]);
+  const { onKeyboard, takeFocus } = useTalkKeyboard(composerRef, keyboardOwner, keyboard);
   const currentView = shell.state?.trail.at(-1);
   const onComms = isCommsView(currentView);
   const assistantDetent = shell.state?.assistant ?? "Bar";
@@ -253,7 +277,9 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       focusOnRevealRef.current = false;
       if (assistantDetent === "Typing") element.focus();
     }
-  }, [assistantDetent, compact]);
+
+    takeFocus(element);
+  }, [assistantDetent, compact, takeFocus]);
   const fileTargetRef = useRef<FileTarget | undefined>(undefined);
   const [talking, shown, writing, finding] = [conversation.state, chats.state, composer.state, search.state];
   const free = talking && shown && writing ? freedom(talking, writing, shown.chosen) : { replying: true, holding: true };
@@ -266,11 +292,13 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const onSettings = useCallback(() => {
     if (settingsAction) void runtime.runPromiseExit(Effect.flatMap(ShellMachine, (machine) => machine.send(settingsAction)));
   }, [runtime, settingsAction]);
+  const onOpenMaps = useCallback(() => void runtime.runPromiseExit(Effect.flatMap(ShellMachine, (machine) => machine.send(maps))), [runtime]);
   const messages = useMessageRows({
     runtime, board, lines, chats: shown, writing, ...free, actions: messageActions, canReadAloud,
     settled: Boolean(talking && !inFlight(talking.turn) && !pending(talking)),
     onSettings: settingsAction ? onSettings : undefined,
     onPreview: canPreview ? preview : undefined,
+    onOpenMaps: shell.can(maps) ? onOpenMaps : undefined,
   });
   if (conversation.cause || chats.cause || composer.cause || reply.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Ask Alpha</Alert>;
   if (!talking || !shown || !writing || !finding) return null;
@@ -336,7 +364,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const mediaNote = talking.context.sensitive || seen.mediaNote?.conversation !== shown.chosen
     ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote.text }];
   const failed = seen.failure === undefined ? [] : [{ id: "failure", author: "alpha", text: "", children: <ReplyFailure {...seen.failure} fix={seen.failure.kind === "OutOfFunds" ? "FundingFix" : seen.failure.fix} live onRetry={() => type(board.lastSent)} onSettings={settingsAction ? onSettings : undefined} /> } as const];
-  const quoted = board.line(shown.chosen, writing.editor.quote)?.text;
+  const quotedLine = board.line(shown.chosen, writing.editor.quote);
+  const quoted = quotedLine === undefined ? undefined : wordsOf(quotedLine);
   const view = talking.context.showing.tag === "App" ? talking.context.showing.view : "Home";
   const open = dockOpen(assistantDetent);
   const full = assistantDetent === "Full";
@@ -355,13 +384,15 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       if (sent._tag === "Failure") focusOnRevealRef.current = false;
     });
   };
-  const grabber = shell.state ? <DockHandle dock={dock} detent={assistantDetent} compact={compact} field={composerRef} /> : undefined;
+  const grabber = shell.state ? <DockHandle dock={dock} detent={assistantDetent} compact={compact}
+    focusOnPointerOpen={currentView !== undefined && !compact} field={composerRef} /> : undefined;
 
   return (
     <>
       <AssistantAttachments runtime={runtime} attachments={attachments} preview={previewed} targetRef={fileTargetRef} composerRef={composerRef} />
       {onComms && full && <CommsTarget runtime={runtime} placement="strip" />}
       {(!onComms || open) && <AssistantConversation
+        voiceReview={voiceReview}
         detent={assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
         className={onComms ? "relative w-full motion-safe:transition-[height] motion-safe:duration-[420ms]" : open ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
         style={onComms
@@ -392,8 +423,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           onReturnToOriginal: chats.can({ type: "returnToOriginal", ...free }) ? () => void chats.send({ type: "returnToOriginal", ...free }) : undefined,
         }}
         composer={{
-          ...speech,
-          voice: speech?.voice?.(compact),
+          ...speechProps,
+          voice: renderVoice?.({ compactDock: compact, atBar: assistantDetent === "Bar", onKeyboard }),
           onDictate: onComms || inFlight(talking.turn) || !speech?.onDictate ? undefined : () => {
             openWithFocus(false);
             speech.onDictate?.();
@@ -437,9 +468,15 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           onAttach: !onComms && composer.can({ type: "attach", count: 1 }) ? () => {
             const request = { type: "openPicker", room: maxFiles - attachmentCount(writing.editor) } as const;
             if (!attachments.can(request)) return;
-            fileTargetRef.current = { binding: writing.binding, slot: writing.read.ticket, revision: talking.context.revision };
-            openWithFocus(false);
-            void attachments.send(request);
+            void runtime.runPromise(attachmentAuthority()).then((authority) => {
+              if (authority === undefined) {
+                board.change({ attachmentNotice: "Could not verify the owner for these attachments. Try again." });
+                return;
+              }
+              fileTargetRef.current = { binding: writing.binding, slot: writing.read.ticket, revision: talking.context.revision, authority };
+              openWithFocus(false);
+              void attachments.send(request);
+            });
           } : undefined,
           onFocusField: assistantDetent === "Typing" ? undefined : () => openWithFocus(false),
           onHistory: history.browse,

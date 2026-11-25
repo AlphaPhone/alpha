@@ -1,10 +1,11 @@
 // spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Organise my notes"; spec/app/notes/editor.md, "Story: Write a note"; spec/app/notes/trash.md, "Story: Delete a note and get it back"
-import { Alert, AppHeader, Button, Chip, Dialog, DialogContent, DialogDescription, DialogTitle, Input, LinkNoteView, Menu, MenuContent, MenuItem, MenuTrigger, NoteEditor as NoteForm, NoteRow, NotesList as NoteRows, Spinner, VoiceNoteView } from "@repo/ui";
-import { Ellipsis, FileDown, Folder, Mail, MessageSquare, Mic, Plus, Trash2 } from "lucide-react";
-import { useState, useSyncExternalStore, type FormEvent } from "react";
+import { Alert, AppHeader, Button, Chip, Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, Input, LinkNoteView, Menu, MenuContent, MenuItem, MenuTrigger, NoteEditor as NoteForm, NoteMenu, NoteRow, NotesList as NoteRows, Spinner, VoiceNoteView } from "@repo/ui";
+import { Copy, Download, Ellipsis, FileDown, Folder, Mail, MessageSquare, Mic, Plus, Share2, Trash2, X } from "lucide-react";
+import { useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import * as Notes from "../../gen/app__notes.ts";
 import * as Editor from "../../gen/app__notes__editor.ts";
 import * as Trash from "../../gen/app__notes__trash.ts";
+import type { Destination } from "../../gen/app__notes__voice.ts";
 import { useMachine as useActions } from "../../gen/app__notes__actions.react.ts";
 import { useMachine as useNotes } from "../../gen/app__notes.react.ts";
 import { useMachine as useEditor } from "../../gen/app__notes__editor.react.ts";
@@ -15,6 +16,7 @@ import { useMachine as usePrevious } from "../../gen/app__notes__previous.react.
 import { useMachine as useTransfer } from "../../gen/app__notes__transfer.react.ts";
 import { useMachine as useVoice } from "../../gen/app__notes__voice.react.ts";
 import { NoteDocuments } from "../platform/noteDocuments.vibe";
+import { native } from "../platform/device.vibe";
 import { NoteDevice } from "../platform/noteDevice.vibe";
 import { unfinished } from "../../gen/app__notes__recording.ts";
 import type { Alpha } from "../runtime/area.tsx";
@@ -27,7 +29,7 @@ import { Previous } from "./Previous.tsx";
 import { clock, dated, preview, titleOf } from "./present.ts";
 import { Recording } from "./Recording.tsx";
 import { RecentlyDeleted } from "./RecentlyDeleted.tsx";
-import { VoiceReview, generateTranscript, pageOf } from "./sides.vibe";
+import { VoiceReview, copyTranscript, generateTranscript, pageOf } from "./sides.vibe";
 
 type Runtime = Alpha["runtime"];
 type Form = { readonly op: "AddFolder" } | { readonly op: "RenameFolder"; readonly folder: Notes.Folder };
@@ -170,10 +172,43 @@ function speaker(value: unknown) {
   return { initials: words.map((word) => word[0]).join("").slice(0, 2).toUpperCase(), who: words[0] ?? "", own: false };
 }
 
+const destinations = [
+  { destination: "EmailText", label: "Email", Icon: Mail },
+  { destination: "SystemShare", label: "Share", Icon: Share2 },
+  { destination: "CopyText", label: "Copy text", Icon: Copy },
+  { destination: "SaveText", label: "Save file", Icon: Download },
+] as const;
+
+function VoiceSharePanel({ open, close, choose, canSave, restore }: {
+  readonly open: boolean;
+  readonly close: () => void;
+  readonly choose: (destination: Destination) => void;
+  readonly canSave: boolean;
+  readonly restore: () => void;
+}) {
+  return <Dialog open={open} onOpenChange={(shown) => { if (!shown) close(); }}>
+    <DialogContent aria-describedby={undefined} overlayClassName="bg-foreground/35 dark:bg-background/35"
+      className="inset-x-3 top-auto bottom-[calc(max(6.75rem,var(--alpha-dock-overlap,0px),env(safe-area-inset-bottom))+--spacing(2))] mx-auto max-h-[80dvh] max-w-lg translate-y-0 gap-0 overflow-y-auto rounded-panel bg-background shadow-none"
+      onCloseAutoFocus={(event) => { event.preventDefault(); restore(); }}>
+      <div className="mb-5 flex items-center justify-between gap-4">
+        <DialogTitle className="text-2xl font-bold">Share</DialogTitle>
+        <DialogClose asChild><Button size="icon" variant="secondary" className="size-11 rounded-full" aria-label="Close share"><X className="size-5.5" /></Button></DialogClose>
+      </div>
+      <div className="flex flex-col gap-2">
+        {destinations.filter(({ destination }) => destination !== "SaveText" || canSave).map(({ destination, label, Icon }) =>
+          <Button key={destination} variant="secondary" className="h-13 justify-start gap-3 rounded-lg px-4 text-base font-normal" onClick={() => choose(destination)}>
+            <Icon aria-hidden className="size-5.25" />{label}
+          </Button>)}
+      </div>
+    </DialogContent>
+  </Dialog>;
+}
+
 function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonly collection: Collection }) {
   const voice = useVoice(runtime);
   const device = runtime.runSync(NoteDevice);
   const review = runtime.runSync(VoiceReview);
+  const moreRef = useRef<HTMLButtonElement>(null);
   const state = voice.state;
   if (!state?.showing) return null;
   const note = collection.noteByNumber.get(state.note);
@@ -194,28 +229,53 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
   const audio = note !== undefined && audioIdOf(note) !== "";
   const current = state.revision === collection.version;
   const pending = current && state.heard > state.added ? runtime.runSync(review.get(state)) : undefined;
+  const pinned = note?.format?.data.pinned === true;
+  const pin = { type: "setPinned", pinned: !pinned } as const;
+  const share = { type: "openShare" } as const;
+  const closeShare = { type: "closeShare" } as const;
+  const chooseDestination = (destination: Destination) => {
+    const event = { type: "shareText", destination } as const;
+    if (current && voice.can(event, "Owner")) void voice.send(event, "Owner");
+  };
+  const canPin = current && note !== undefined && voice.can(pin, "Owner");
+  const pinWrite = state.part === "Pin" || state.part === "Unpin";
   const canTranscribe = device.canTranscribe && audio && current && state.added === 0 && voice.can(transcribe, "Phone");
   const canRetry = device.canTranscribe && audio && current && voice.can(retry, "Owner");
   const generate = (again = false) => void runtime.runPromise(generateTranscript(state.note, state.revision, again));
-  const canPlay = device.available && audio && voice.can(play, "Owner");
-  const playback = voice.can(stop, "Owner") ? () => void voice.send(stop, "Owner") : canPlay ? () => void voice.send(play, "Owner") : undefined;
+  const canUseTranscript = current && note !== undefined && lines.length > 0 && voice.can(ask, "Owner");
+  const copy = canUseTranscript ? () => void runtime.runPromise(copyTranscript({
+    owner: state.owner, number: state.note, opened: state.opened,
+    record: { kind: "canonical-note", id: note.id, revision: String(state.revision - 1) },
+  })) : undefined;
+  const player = device.available && audio;
+  const canPlay = player && current && voice.can(play, "Owner");
+  const toggle = voice.can(stop, "Owner") ? () => void voice.send(stop, "Owner") : canPlay ? () => void voice.send(play, "Owner") : undefined;
+  const seek = canPlay && Array.isArray(data?.segments) && data.segments.length > 0 ? (from: number) => {
+    const event = { type: "play", from } as const;
+    if (voice.can(event, "Owner")) void voice.send(event, "Owner");
+  } : undefined;
   return <VoiceNoteView
     className="relative inset-auto flex-1"
     title={note === undefined ? "Voice note" : titleOf(note)}
     meta={note === undefined ? "" : [dated(note, collection.readAt), length].filter(Boolean).join(" · ")}
-    time={length}
+    playback={player ? { time: length, playing: state.play.status === "Loading", toggle, seek } : undefined}
     summary={saved?.summary}
     actions={saved?.actions}
     lines={lines}
-    onAskTranscript={current && lines.length > 0 && voice.can(ask, "Owner") ? () => void voice.send(ask, "Owner") : undefined}
-    playing={state.play.status === "Loading"}
+    menu={note !== undefined && <NoteMenu pinned={pinned} triggerRef={moreRef}
+      onPin={canPin ? () => void voice.send(pin, "Owner") : undefined}
+      onShare={current && voice.can(share, "Owner") ? () => void voice.send(share, "Owner") : undefined} />}
+    onAskTranscript={canUseTranscript ? () => void voice.send(ask, "Owner") : undefined}
+    onCopyTranscript={copy}
     onBack={() => void voice.send(back, "Owner")}
-    onPlay={playback}
-    onSeek={canPlay && Array.isArray(data?.segments) && data.segments.length > 0 ? (from) => {
-      const event = { type: "play", from } as const;
-      if (voice.can(event, "Owner")) void voice.send(event, "Owner");
-    } : undefined}
     feedback={<>
+      <TransferNotice runtime={runtime} />
+      {state.shareNotice === "Copied" && <Alert variant="info" className="mt-4">Note text copied.</Alert>}
+      {state.shareNotice === "ShareUnavailable" && <Alert variant="warn" className="mt-4">Sharing is unavailable.</Alert>}
+      <VoiceSharePanel open={state.sharing && current}
+        close={() => { if (voice.can(closeShare, "Owner")) void voice.send(closeShare, "Owner"); }}
+        choose={chooseDestination} canSave={!native() || runtime.runSync(NoteDocuments).available}
+        restore={() => moreRef.current?.focus({ preventScroll: true })} />
       {canTranscribe && <Button className="mt-4" variant="secondary" onClick={() => generate()}>Generate transcript</Button>}
       {state.listen.status === "Loading" && <div className="mt-4 flex items-center gap-2">
         <Spinner label="Transcribing on this phone" />
@@ -225,8 +285,8 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
       {state.deaf && <Alert variant="warn" className="mt-4">This recording couldn't be transcribed</Alert>}
       {canRetry && <Button className="mt-4" variant="secondary" onClick={() => generate(true)}>Try again</Button>}
       {pending !== undefined && voice.can(showTranscript, "Owner") && <Button className="mt-4" variant="secondary" onClick={() => void voice.send(showTranscript, "Owner")}>Review transcript</Button>}
-      {state.writing.outcome === "Refused" && <Alert variant="warn" className="mt-4">The transcript couldn't be added. Reopen the note to review its saved version.</Alert>}
-      {state.writing.outcome === "Unknown" && <Alert variant="warn" className="mt-4">Alpha couldn't confirm the transcript was added. Reopen the note to check.</Alert>}
+      {state.writing.outcome === "Refused" && <Alert variant="warn" className="mt-4">{pinWrite ? "The pin couldn’t be changed." : "The transcript couldn’t be added. Reopen the note to review its saved version."}</Alert>}
+      {state.writing.outcome === "Unknown" && <Alert variant="warn" className="mt-4">{pinWrite ? "Alpha couldn’t confirm the pin change. Reopen the note to check." : "Alpha couldn’t confirm the transcript was added. Reopen the note to check."}</Alert>}
       {state.play.status === "Failed" && <Alert variant="warn" className="mt-4">This recording couldn't be played</Alert>}
       <Dialog open={pending !== undefined && state.review.showing} onOpenChange={(open) => { if (!open && state.review.showing) void voice.send(back, "Owner"); }}>
         <DialogContent>

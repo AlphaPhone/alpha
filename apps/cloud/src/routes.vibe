@@ -1,4 +1,4 @@
-// spec/cloud/index.md, "Story: Reach my account's services from the app"; spec/cloud/index.md, "Each route of Alpha's cloud table is one of eliza's device routes by method and path, buffered, outside sign-in, and needs no account session"; spec/cloud/index.md, "The table lists every route Alpha's screens and eliza's managed mail client send, each with the query keys they send"
+// spec/cloud/index.md, "Story: Reach my account's services from the app"; spec/cloud/index.md, "Each route of Alpha's cloud table is one of eliza's device routes by method and path, buffered, outside sign-in, and needs no fresh or stepped-up session"; spec/cloud/index.md, "The table lists every route Alpha's screens and eliza's managed mail client send, each with the query keys they send"
 import { deviceRoutes, type DeviceRoute } from "@elizaos/cloud"
 import { cloudTable, pageRoute, signInPrefixes, type Auth, type TableRoute } from "../gen/cloud.effect.vibe"
 
@@ -21,8 +21,14 @@ function samePath(route: TableRoute, device: DeviceRoute): boolean {
   })
 }
 
+/** Each of eliza's auth classes as Alpha's table reads it: what the phone attaches for it, or a session Alpha never asks for. */
+const authOfClass = {
+  Public: "Public", KeyOrSession: "KeyOrSession", Mail: "Mail", Session: "Session",
+  SessionFamily: "FreshOnly", FreshSession: "FreshOnly", StepUp: "FreshOnly",
+} as const satisfies Record<DeviceRoute["auth"], Auth>
+
 function authOf(device: DeviceRoute | undefined): Auth {
-  return device === undefined || device.auth === "Public" ? "Public" : device.auth === "KeyOrSession" ? "KeyOrSession" : "SessionOnly"
+  return device === undefined ? "Public" : authOfClass[device.auth]
 }
 
 /** Why eliza would refuse the table, one line per route it would refuse: empty when every route is one it loads. */
@@ -31,6 +37,6 @@ export function tableProblems(table: ReadonlyArray<TableRoute> = cloudTable): Re
     const found = deviceRoutes.filter((device) => device.method === route.verb && samePath(route, device))
     const underSignIn = signInPrefixes.some((prefix) => route.path.startsWith(prefix))
     const listing = { matches: found.length, buffered: true, auth: authOf(found[0]) }
-    return pageRoute(listing, underSignIn) ? [] : [`${wireVerb[route.verb]} ${route.path}: ${found.length === 1 ? (underSignIn ? "belongs to sign-in" : "needs an account session") : `matches ${found.length} of eliza's device routes`}`]
+    return pageRoute(listing, underSignIn) ? [] : [`${wireVerb[route.verb]} ${route.path}: ${found.length === 1 ? (underSignIn ? "belongs to sign-in" : "needs a fresh or stepped-up session") : `matches ${found.length} of eliza's device routes`}`]
   })
 }

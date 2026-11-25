@@ -3,6 +3,7 @@ import type { Source } from "../../gen/app__calendar.ts";
 import { rowShown } from "../../gen/app__calendar__presentation.ts";
 import type { Cancellation, OwnAnswer } from "../../gen/app__calendar__writing.ts";
 import { civilDay } from "./time.ts";
+import { externalStore } from "../runtime/store.ts";
 
 /** One of an event's people: the organizer, or a guest with the reply the calendar gave. */
 export interface Person {
@@ -56,8 +57,7 @@ const seen = new Map<string, { readonly content: string; readonly revision: numb
 const windows = new Map<Source, ReadonlyArray<Row>>();
 const last = new Map<number, Row>();
 const cut = new Set<Source>();
-const listeners = new Set<() => void>();
-let version = 0;
+const version = externalStore(0);
 let present = false;
 
 /** The number an event keeps for the life of the page, so the open event stays the same one across reads. @throws {never} */
@@ -101,19 +101,13 @@ export function onDay(row: Pick<Row, "begin" | "end">, day: number): boolean {
 }
 
 function told(): void {
-  version += 1;
-  for (const listener of [...listeners]) listener();
+  version.set(version.snapshot() + 1);
 }
 
 /** The rows each source last gave, as an external store a screen reads without an effect. */
 export const shown = {
-  snapshot: (): number => version,
-  subscribe(listener: () => void): () => void {
-    listeners.add(listener);
-    return () => {
-      listeners.delete(listener);
-    };
-  },
+  snapshot: version.snapshot,
+  subscribe: version.subscribe,
   /** Keep what `source` answered for the window around `day`, numbered; the rows that fall on `day`. @throws {never} */
   keep(source: Source, day: number, read: ReadonlyArray<Read>, partial = false): ReadonlyArray<Row> {
     if (partial) cut.add(source);

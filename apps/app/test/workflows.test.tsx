@@ -8,8 +8,10 @@ import { Machine as Sheet } from "../gen/app__workflows__sheet.effect.vibe";
 import { Machine as Clock } from "../gen/app__workflows__clock.effect.vibe";
 import { Machine as Approvals } from "../gen/app__workflows__approvals.effect.vibe";
 import workflows from "../src/workflows/index.tsx";
-import { button, closeAll, drawn, fill, later, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
-import { scene } from "./fakes/scene.ts";
+import home from "../src/home/index.tsx";
+import { Machine as Home } from "../gen/app__home.effect.vibe";
+import { button, closeAll, drawn, fill, later, only, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
+import { type Scene, scene } from "./fakes/scene.ts";
 
 underAct();
 afterEach(closeAll);
@@ -22,11 +24,24 @@ const choose = (name: string) => drawn(() => {
   row.click();
 });
 
+
+async function openWorkflows(world: Scene) {
+  const { alpha } = await open(world, only("home", "view:Workflows", "notice"));
+  const runtime = home.runtime(alpha);
+  await vi.waitFor(async () => {
+    await drawn(() => undefined);
+    const state = await runtime.runPromise(Home.use((machine) => machine.get()));
+    expect(state.tiles.load.status).toBe("Loaded");
+    expect(button("Workflows")).toBeDefined();
+  }, { timeout: 15_000 });
+  await press("Workflows");
+  return alpha;
+}
+
 describe("Workflows", () => {
   it('Filters the owner’s work and keeps removed history (spec/app/workflows/list.md, "Story: Find a workflow")', async () => {
     const world = scene();
-    const { alpha } = await open(world);
-    await press("Workflows");
+    const alpha = await openWorkflows(world);
     const area = workflows.runtime(alpha);
     await until(alpha, area, Listing, (state) => state.list.status === "Loaded" && state.complete);
     expect(visible("Monthly statement", "Desk check", "Retired brief")).toEqual(["Monthly statement", "Desk check"]);
@@ -51,8 +66,7 @@ describe("Workflows", () => {
   it('Reviews a Clock request within its Alarms page and restores focus to the list (spec/app/workflows/clock.md, "Story: Review, then hand over to Clock")', async () => {
     const world = scene();
     world.phone = true;
-    const { alpha } = await open(world);
-    await press("Workflows");
+    const alpha = await openWorkflows(world);
     const area = workflows.runtime(alpha);
     await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
 
@@ -92,8 +106,7 @@ describe("Workflows", () => {
     for (const prompt of existing) world.workflows.prompts.set(prompt.id, {
       ...prompt, instructions: "Review the details.", enabled: false, revision: 1, timezone: "America/Los_Angeles",
     });
-    const { alpha } = await open(world);
-    await press("Workflows");
+    const alpha = await openWorkflows(world);
     const area = workflows.runtime(alpha);
     await until(alpha, area, Listing, (state) => state.list.status === "Loaded" && state.complete);
 
@@ -139,8 +152,7 @@ describe("Workflows", () => {
   it('Runs the reviewed version, follows its approval and opens its output (spec/app/workflows/runs.md, "Story: Run a workflow now"; spec/app/workflows/sheet.md, "Story: Read a run\'s sheet"; spec/app/workflows/approvals.md, "Story: Answer a run\'s approval on the phone")', async () => {
     const world = scene();
     world.workflows.stage = "Running";
-    const { alpha } = await open(world);
-    await press("Workflows");
+    const alpha = await openWorkflows(world);
     const area = workflows.runtime(alpha);
     await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
     await choose("Monthly statement");
@@ -182,6 +194,21 @@ describe("Workflows", () => {
     await later(alpha, 4_000);
     await until(alpha, area, Sheet, (state) => state.output.status === "Loaded" && state.status === "Done");
     expect(document.querySelector('[aria-label="Run details"]')?.textContent).toContain("Your statement is ready.");
+    await drawn(() => {
+      const details = document.querySelector<HTMLDetailsElement>('details[aria-label="Workflow execution details"]');
+      const reveal = details?.querySelector("summary");
+      if (!details || !reveal) throw new Error("No execution details");
+      reveal.click();
+      expect({
+        open: details.open,
+        activity: [...details.querySelectorAll("time")].map((time) => ({
+          at: time.dateTime, node: time.parentElement?.querySelector("span")?.textContent,
+        })),
+      }).toEqual({
+        open: true,
+        activity: [{ at: "2026-11-24T07:02:00.000Z", node: undefined }, { at: "2026-11-24T07:01:00.000Z", node: "preview" }],
+      });
+    });
   });
 
   it('Removes a workflow only after its review, keeps its history, and restores it (spec/app/workflows/index.md, "Story: Change a workflow")', async () => {

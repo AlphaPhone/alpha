@@ -112,6 +112,7 @@ type Effect =
   | Hush({ turn: int })
   | Shut({ session: int, keyboard: bool })
   | Navigate({ place: int })
+  | NavigateFiles({ session: int, turn: int, place: int })
   | Record({ ticket: int })
   | Transcribe({ ticket: int, network: bool, automatic: bool })
   | Abandon({ recording: int })
@@ -138,6 +139,20 @@ pure def releaseOut(v: Voice): List[Effect] =
 
 pure def onNetwork(r: R::Route, now: int): bool = R::way(r, now) != R::OnPhone
 ```
+
+### On-device Talk audio stays in the current owner's native capture and resident recognizer
+
+When Talk asks to open the microphone on the phone's speech route, Android
+checks that its native speech engine and resident route are available.
+An unavailable route ends the start quietly without opening the microphone.
+The native worker binds the capture to the calling phone's signed-in owner
+and to the resident's current launch epoch. The resident reports its
+actual owner and engine readiness before the worker sends any audio. Every batch and receipt must
+still belong to that account and launch. Only the transcript returns to
+the conversation. Stop discards or drains the worker's outstanding audio
+under the same authority, and a stopped or replaced owner gets no late
+transcript. The on-device speech route needs no network. The transcript
+is still sent to the agent as a text turn using its configured backend.
 
 ### The speech pipeline warms on startup, foreground return and account readiness without opening the microphone
 
@@ -426,8 +441,8 @@ pure def sentencePlayed(v: Voice, session: int, turn: int): Change =
 
 ### A reply that needs the owner's review in chat keeps voice listening with the microphone open
 
-The owner reviews and approves in the chat; voice never approves anything
-itself. Any pre-review reply speech is hushed and a non-blocking review
+The owner reviews and approves in the chat. Voice never approves a proposal
+that requires the owner’s review. Any pre-review reply speech is hushed and a non-blocking review
 notice is shown, while the conversation returns straight to listening with
 the microphone open (when unmuted) for the next turn. Settling the review
 clears the notice and never stops voice.
@@ -776,6 +791,33 @@ pure def canAgentNavigates(v: Voice, session: int, place: int): bool =
 pure def agentNavigates(v: Voice, session: int, place: int): Change =
   { state: { ...v, claim: place }, out: List(Navigate({ place: place })) }
 
+```
+
+### An exact spoken Files request may follow its own leased navigation once
+
+After its reply finishes, an explicit path or filter can open Files from
+another screen when the same voice turn, source and direct-action permission
+still hold. A result position only refers to an existing Files listing.
+Talk follows this move only when its guarded route write is accepted. Stop
+and the owner's navigation can retire the request before the file action.
+
+```quint
+pure def canAgentNavigatesFiles(v: Voice, session: int, turn: int, place: int): bool =
+  canSentence(v, session, turn) and canAgentNavigates(v, session, place)
+
+pure def agentNavigatesFiles(v: Voice, session: int, turn: int, place: int): Change =
+  { state: { ...v, claim: place }, out: List(NavigateFiles({ session: session, turn: turn, place: place })) }
+
+pure def stepFilesNavigationBelongsToItsTurn(before: Voice, after: Voice, out: List[Effect]): bool =
+  out.every(e => match e {
+    | NavigateFiles(n) => before.claim == 0 and after.claim == n.place and canSentence(before, n.session, n.turn)
+    | _ => true
+  })
+```
+
+### A navigation claim is released when the shell does not open its destination
+
+```quint
 pure def canClaimReleased(v: Voice, session: int): bool =
   talking(v) and session == v.session and v.claim != 0
 

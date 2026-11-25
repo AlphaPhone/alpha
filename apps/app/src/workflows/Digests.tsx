@@ -1,37 +1,80 @@
 // spec/app/digests/index.md, "Story: See my digests"; spec/app/digests/schedules.md, "Story: Keep my digest schedules"
-import { Effect } from "effect";
+import { Effect, Exit } from "effect";
+import { useState, useSyncExternalStore } from "react";
 import { digestSourceState, digestStatusLabel, digestSummaryText, digestTemplateName } from "@elizaos/plugin-workflow-client";
-import { Alert, Button, ConfirmDialog, EmptyState, Input, ListRow, Spinner } from "@repo/ui";
-import { CalendarDays, ChevronRight, Plus, RefreshCw, Sun } from "lucide-react";
+import { Alert, Button, ConfirmDialog, EmptyState, Input, ListRow, Spinner, Switch } from "@repo/ui";
+import { CalendarDays, ChevronRight, Plus, RefreshCw, Sparkles, Sun } from "lucide-react";
+import { useMachine as useDigestDelivery } from "../../gen/app__digests.react.ts";
 import { useMachine } from "../../gen/app__digests__schedules.react.ts";
 import type { Machine } from "../../gen/app__digests__schedules.effect.vibe";
 import type { Change, Event } from "../../gen/app__digests__schedules.ts";
 import type { Resident, Shown } from "../runtime/area.tsx";
+import { type DigestNoticeIdentity, sameDigestNoticeResult } from "../platform/hosted-digests.vibe";
 import { Time } from "../runtime/time.vibe";
+import { setBrowserDigestChecks } from "./browser-digests.vibe";
+import { askAboutNativeDigest, digestQuestionExcerpt, enableDigestNotifications, NativeDigestPanel, setNativeDigestChecks } from "./native-digests.vibe";
 import { DigestWords, newDigest, pickDigestSource } from "./digests.vibe";
 
 interface DigestsProps extends Pick<Shown<Resident | Machine | DigestWords>, "runtime"> {
   readonly owner: number;
   readonly result: number;
+  readonly notice: DigestNoticeIdentity | undefined;
   readonly onResult: (number: number) => void;
 }
 
+interface NotificationRequest {
+  readonly owner: number;
+  readonly lease: string;
+  readonly status: "requesting" | "refused";
+}
+
 /** Scheduled digests and the exact results already kept from the owner's agent. */
-export function Digests({ runtime, owner, result, onResult }: DigestsProps) {
+export function Digests({ runtime, owner, result, notice, onResult }: DigestsProps) {
   const model = useMachine(runtime);
+  const delivery = useDigestDelivery(runtime);
+  const native = runtime.runSync(NativeDigestPanel);
+  const panel = useSyncExternalStore(native.subscribe, native.snapshot, native.snapshot);
+  const [notificationRequest, setNotificationRequest] = useState<NotificationRequest>();
+  const nativeState = panel.owner === owner ? panel.delivery : undefined;
+  const request = notificationRequest?.owner === owner && notificationRequest.lease === nativeState?.lease ? notificationRequest : undefined;
   const state = model.state;
   if (!state || state.owner !== owner) return <Spinner aria-label="Reading scheduled digests" />;
   const home = runtime.runSync(Effect.flatMap(DigestWords, (words) => words.view(owner)));
+  const results = native.available ? nativeState?.rows ?? [] : home.results;
   if (result > 0) {
-    const selected = home.results.find((entry) => entry.cursor === result);
+    const selected = results.find((entry) => entry.cursor === result && (notice === undefined || sameDigestNoticeResult(entry, notice)));
     if (selected === undefined) return <EmptyState title="This result isn’t available" />;
+    const lease = nativeState?.lease;
+    const canAsk = lease !== undefined && digestQuestionExcerpt(selected) !== undefined
+      && delivery.can({ type: "askAbout", owner, result, retained: true });
     return <section aria-label="Digest result" className="flex flex-col gap-4">
       <p className="text-sm text-muted-foreground">{digestStatusLabel(selected.status)} · {new Date(selected.scheduledAt).toLocaleString()}</p>
       <div className="rounded-tile bg-secondary p-4 whitespace-pre-wrap break-words">{digestSummaryText(selected)}</div>
+      {canAsk && <Button variant="secondary" className="self-start" onClick={() => void runtime.runPromiseExit(askAboutNativeDigest(owner, lease, selected))}>
+        <Sparkles aria-hidden />Ask Alpha
+      </Button>}
     </section>;
   }
   const refresh = { type: "refresh" } as const;
   const unavailable = state.schedules.status === "Failed";
+  const mode = delivery.state?.owner === owner &&
+    (delivery.state.checks === "ResultChecks" ||
+      (delivery.state.checks === "BackgroundChecks" && nativeState?.support === "nativeScheduled")) ? delivery.state : undefined;
+  const background = mode ? { type: "setBackground", on: !mode.background.on } as const : undefined;
+  const android = mode?.checks === "BackgroundChecks";
+  const backgroundLabel = android ? "Check for digests in the background" : "Check for digests while Alpha is visible";
+  const changeBackground = (on: boolean) => {
+    if (android && nativeState !== undefined) void runtime.runPromiseExit(setNativeDigestChecks(owner, on, nativeState.lease));
+    else if (!android) void runtime.runPromiseExit(setBrowserDigestChecks(owner, on));
+  };
+  const enableNotifications = (lease: string) => {
+    const attempt: NotificationRequest = { owner, lease, status: "requesting" };
+    setNotificationRequest(attempt);
+    void runtime.runPromiseExit(enableDigestNotifications(owner, lease)).then((answer) => {
+      const requested = Exit.isSuccess(answer) && answer.value;
+      setNotificationRequest((current) => current !== attempt ? current : requested ? undefined : { ...attempt, status: "refused" });
+    });
+  };
   const zone = runtime.runSync(Effect.flatMap(DigestWords, (words) => words.zone(owner)));
   const now = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
   const sources = home.sources.filter(({ record }) => digestSourceState(record, now) === "current");
@@ -46,6 +89,21 @@ export function Digests({ runtime, owner, result, onResult }: DigestsProps) {
     {state.schedules.status === "Loading" && <Spinner aria-label="Reading scheduled digests" />}
     {unavailable && <Alert variant="warn" role="status">Scheduled digests couldn’t be read.</Alert>}
     {home.partial && <Alert variant="warn" role="status">Some digest information couldn’t be read.</Alert>}
+    {home.capable && mode && background && (
+      <>
+        <label className="flex items-center justify-between gap-3">
+          {backgroundLabel}
+          <Switch aria-label={backgroundLabel} checked={mode.background.on} disabled={!delivery.can(background)}
+            onCheckedChange={changeBackground} />
+        </label>
+        {mode.background.attempt.outcome === "Refused" && <Alert role="status" variant="warn">The digest preference couldn’t be saved.</Alert>}
+      </>
+    )}
+    {nativeState !== undefined && !nativeState.noticesAllowed && <>
+      <Button variant="secondary" className="self-start" disabled={request?.status === "requesting"}
+        onClick={() => enableNotifications(nativeState.lease)}>Enable digest notifications</Button>
+      {request?.status === "refused" && <Alert role="status" variant="warn">Digest notifications couldn’t be enabled.</Alert>}
+    </>}
     {state.schedules.status === "Loaded" && !home.capable && <EmptyState title="Scheduled digests aren’t available on this agent" icon={<Sun />} />}
     {home.loops.length > 0 && <ul aria-label="Digest schedules" className="divide-y divide-border">
       {home.loops.map(({ number, record: loop }) => <li key={loop.id}>
@@ -106,12 +164,12 @@ export function Digests({ runtime, owner, result, onResult }: DigestsProps) {
         ? `At ${time} in ${zone}, the agent reads “${chosen?.label ?? "your selected source"}” for the ${state.draft.template.toLowerCase()} digest. Android can delay it, and a run more than 30 minutes late is marked missed.`
         : undefined}
     </ConfirmDialog>
-    {home.results.length > 0 && <ul aria-label="Digest results" className="divide-y divide-border">
-      {home.results.map((entry) => <li key={entry.runId}>
+    {results.length > 0 && <ul aria-label="Digest results" className="divide-y divide-border">
+      {results.map((entry) => <li key={entry.runId}>
         <ListRow leading={<Sun />} title={new Date(entry.scheduledAt).toLocaleString()} detail={digestStatusLabel(entry.status)}
           trailing={<ChevronRight aria-hidden />} onClick={() => onResult(entry.cursor)} />
       </li>)}
     </ul>}
-    {home.capable && !home.partial && home.results.length === 0 && <EmptyState title="No digest results yet" icon={<Sun />} />}
+    {home.capable && !home.partial && results.length === 0 && <EmptyState title="No digest results yet" icon={<Sun />} />}
   </section>;
 }

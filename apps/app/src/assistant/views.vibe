@@ -1,6 +1,7 @@
 // spec/app/assistant/index.md, "Story: Let Alpha open what it is talking about"; spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
 import * as Conversation from "../../gen/app__assistant.effect.vibe"
-import { Machine as Shell, type View, parseEvent, showing } from "../../gen/app__shell.effect.vibe"
+import type { Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe"
+import { Machine as Shell, type Detent, type View, parseEvent, showing } from "../../gen/app__shell.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { ask } from "../platform/remote.vibe"
 import { agentOpen, mayAgentOpen } from "../notes/agent.vibe"
@@ -40,6 +41,8 @@ export interface Held {
   readonly handoff: Handoff
 }
 
+type TypedHeld = Held | { readonly asked: number; readonly continueFiles: Effect.Effect<void> }
+
 /** The Alpha view an agent's view id names: the same name, compared without its case, as the shell's own events name views. */
 function viewOf(viewId: string): View | undefined {
   const opened = parseEvent({ type: "openView", view: `${viewId.charAt(0).toUpperCase()}${viewId.slice(1).toLowerCase()}` })
@@ -61,8 +64,8 @@ export service Views {
   readonly clientId: string
   begin(): number!!
   current(): number!!
-  hold(ticket: number, held: Held): void!!
-  take(ticket: number): Option.Option<Held>!!
+  hold(ticket: number, held: TypedHeld): void!!
+  take(ticket: number): Option.Option<TypedHeld>!!
   spoken(held: Held): void!!
   readonly heard: Queue.Dequeue<Held>
 }
@@ -71,20 +74,22 @@ export const handoffs = Layer.effect(Views, effect {
   const clientId = renderer()
   const heard = try Queue.unbounded<Held>()
   let latest = 0
-  let typed: { readonly ticket: number; readonly held: Held } | undefined
+  let typed: { readonly ticket: number; readonly held: TypedHeld } | undefined
   return {
     clientId,
     heard,
     begin: () => sync(() => {
       latest += 1
+      typed = undefined
       return latest
     }),
     current: () => sync(() => latest),
-    hold: (ticket: number, held: Held) => sync(() => { typed = { ticket, held } }),
+    hold: (ticket: number, held: TypedHeld) => sync(() => { if (held.asked === latest) typed = { ticket, held } }),
     take: (ticket: number) => sync(() => {
-      const found = typed?.ticket === ticket ? typed.held : undefined
+      if (typed?.ticket !== ticket) return Option.none()
+      const found = typed.held
       typed = undefined
-      return Option.fromNullishOr(found)
+      return Option.some(found)
     }),
     spoken: (held: Held) => sync(() => { Queue.offerUnsafe(heard, held) }),
   }
@@ -92,11 +97,12 @@ export const handoffs = Layer.effect(Views, effect {
 
 // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
 /** What a turn told of the screen adds so the agent may hand back a view to open on it: views as completed actions, this screen, and its saved-note editor. */
-export function delivery(clientId: string) {
+export function delivery(clientId: string, directFiles: boolean = false) {
   return {
     viewDelivery: "completed-action" as const,
     viewClientId: clientId,
-    voiceUi: { viewDelivery: "completed-action" as const, uiClientId: clientId, uiNotesEditor: "saved-note-v1" as const },
+    voiceUi: { viewDelivery: "completed-action" as const, uiClientId: clientId, uiNotesEditor: "saved-note-v1" as const,
+      ...(directFiles ? { agentActionMode: "direct-request-v1" as const } : {}) },
   }
 }
 
@@ -111,6 +117,17 @@ effect function navigated(ticket: number, view: View): boolean!!Conversation.Mac
   const conversation = try Conversation.Machine
   if (!Conversation.canNavigate(try conversation.get(), ticket, view)) return false
   try ignore(conversation.send({ type: "navigate", ticket, view }))
+  return try navigationEnded(conversation, ticket)
+}
+
+// spec/app/assistant/index.md, "An explicit Files continuation opens only from the same app trail and Ask Alpha panel"
+export effect function navigateFilesForReply(conversation: ConversationMachine.Shape, ticket: number, source: View[], panel: Detent, route: number): boolean!! {
+  if (!Conversation.canNavigateFiles(try conversation.get(), ticket, source, panel, route)) return false
+  try ignore(conversation.send({ type: "navigateFiles", ticket, source, panel, route }))
+  return try navigationEnded(conversation, ticket)
+}
+
+effect function navigationEnded(conversation: ConversationMachine.Shape, ticket: number): boolean!! {
   const ended = try Stream.runHead(Stream.filter(conversation.changes, (c) => c.opening.id !== ticket || c.opening.outcome !== "Sent"))
   return Option.isSome(ended) && ended.value.opening.id === ticket && ended.value.opening.outcome === "Confirmed"
 }
@@ -155,8 +172,10 @@ effect function carriedOut<R>(held: Held, view: View, front: boolean!!R) {
 // spec/app/assistant/index.md, "A complete reply may open one view, once, while the screen it was asked from still shows"; spec/app/notes/index.md, "The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened"
 /** Carry out the view the complete reply of `ticket` prepared for this screen, if Alpha has that view. */
 effect function openPrepared(ticket: number) {
-  const held = try (try Views).take(ticket)
-  if (Option.isNone(held)) return
+  const views = try Views
+  const held = try views.take(ticket)
+  if (Option.isNone(held) || held.value.asked !== (try views.current())) return
+  if ("continueFiles" in held.value) return try held.value.continueFiles
   const view = viewFor(held.value.handoff)
   if (view !== undefined) try carriedOut(held.value, view, navigated(ticket, view))
 }
