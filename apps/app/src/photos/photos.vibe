@@ -312,11 +312,11 @@ export effect function changedItems(change: Change, items: readonly number[]) {
       const reply = changed?.find((entry) => entry.id === row.id)
       if (number === undefined || reply === undefined) continue
       if (reply.status === "stale") stale.push(number)
-      else done.push(number)
+      else if (reply.status === "done") done.push(number)
       if (reply.item !== undefined) { updated.push({ kind: "browser", item: reply.item }); updatedIds.push(number) }
     }
     try (try Catalog).publish(updated, updatedIds)
-    return { done, stale, declined: false, known: changed !== undefined }
+    return { done, stale, declined: false, known: changed !== undefined && !changed.some((row) => row.status === "unverified") }
   }
   const rows = try targets(items)
   if (Option.isNone(phone) || rows.length !== items.length) return { done: [], stale: [...items], declined: false, known: true }

@@ -120,7 +120,7 @@ module browser {
   }
 
   export type BrowserChange = "favorite" | "unfavorite" | "trash" | "restore" | "delete"
-  export type BrowserChangeRow = { readonly id: string; readonly status: "done" | "stale"; readonly item?: BrowserCapture }
+  export type BrowserChangeRow = { readonly id: string; readonly status: "done" | "stale" | "unverified"; readonly item?: BrowserCapture }
   export type BrowserAlbum = {
     readonly kind: "browser"
     readonly id: string
@@ -150,11 +150,14 @@ module browser {
     return typeof row === "object" && row !== null && "kind" in row && row.kind === "browser"
       && "id" in row && typeof row.id === "string" && "revision" in row && typeof row.revision === "string"
       && "name" in row && typeof row.name === "string" && "memberIds" in row && Array.isArray(row.memberIds)
-      && row.memberIds.length <= memberLimit && row.memberIds.every((id: unknown) => typeof id === "string")
+      && row.memberIds.every((id: unknown) => typeof id === "string")
   }
 
-  function erased(row: unknown): row is { readonly id: string; readonly erased: true } {
+  type ErasedSource = { readonly id: string; readonly erased: true; readonly pending?: BrowserCapture }
+
+  function erased(row: unknown): row is ErasedSource {
     return typeof row === "object" && row !== null && "id" in row && typeof row.id === "string" && "erased" in row && row.erased === true
+      && (!("pending" in row) || row.pending === undefined || valid(row.pending) && row.pending.id === row.id)
   }
 
   function matching(first: BrowserCapture | undefined, expected: BrowserCapture): first is BrowserCapture {
@@ -162,17 +165,21 @@ module browser {
       && first.trashedAt === expected.trashedAt
   }
 
+  function photoTransaction<T>(database: IDBDatabase, tables: readonly string[], mode: IDBTransactionMode, use: (tx: IDBTransaction, hold: (result: T) => void) => void): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const tx = database.transaction([...tables], mode)
+      let result: T
+      tx.oncomplete = () => resolve(result)
+      tx.onabort = () => reject(tx.error ?? new Error("The photo library transaction was interrupted."))
+      try { use(tx, (value) => { result = value }) }
+      catch (cause) { tx.abort(); reject(cause) }
+    })
+  }
+
   async function libraryTransaction<T>(tables: readonly string[], mode: IDBTransactionMode, use: (tx: IDBTransaction, hold: (result: T) => void) => void): Promise<T> {
     const database = await storage()
-    try {
-      return await new Promise((resolve, reject) => {
-        const tx = database.transaction([...tables], mode)
-        let result: T
-        tx.oncomplete = () => resolve(result)
-        tx.onabort = () => reject(tx.error ?? new Error("The photo library transaction was interrupted."))
-        use(tx, (value) => { result = value })
-      })
-    } finally { database.close() }
+    try { return await photoTransaction(database, tables, mode, use) }
+    finally { database.close() }
   }
 
   async function earlierCaptures(): Promise<readonly BrowserCapture[]> {
@@ -194,24 +201,102 @@ module browser {
     return raw === undefined ? earlier.get(expected.id) : undefined
   }
 
+  type EarlierErasures = { readonly expected: BrowserCapture; readonly status: "erased" | "stale" | "unverified"; readonly current?: BrowserCapture }
+
+  async function eraseEarlierOriginals(wanted: readonly BrowserCapture[]): Promise<readonly EarlierErasures[]> {
+    const previousPhotos = await previous()
+    if (previousPhotos === undefined) return wanted.map((expected) => ({ expected, status: "erased" }))
+    try {
+      const split = previousPhotos.objectStoreNames.contains("video-data")
+      if (!previousPhotos.objectStoreNames.contains(earlierRows)) return wanted.map((expected) => ({ expected, status: split ? "unverified" : "erased" }))
+      return await photoTransaction<EarlierErasures[]>(previousPhotos, split ? [earlierRows, "video-data"] : [earlierRows], "readwrite", (tx, hold) => {
+        const media = tx.objectStore(earlierRows)
+        const data = split ? tx.objectStore("video-data") : undefined
+        const result: EarlierErasures[] = []
+        hold(result)
+        for (const expected of wanted) {
+          const id = expected.id.slice(earlierPrefix.length)
+          const read = media.get(id)
+          read.onsuccess = () => {
+            if (read.result === undefined) {
+              if (data === undefined) result.push({ expected, status: "erased" })
+              else {
+                const orphan = data.get(id)
+                orphan.onsuccess = () => result.push({ expected, status: orphan.result === undefined ? "erased" : "unverified" })
+              }
+              return
+            }
+            const current = knownLegacy(read.result)[0]
+            if (current?.revision === undefined || (expected.sourceRevision ?? expected.revision) === undefined) { result.push({ expected, status: "unverified" }); return }
+            if (current.revision !== (expected.sourceRevision ?? expected.revision)) {
+              result.push({ expected, status: "stale", current })
+              return
+            }
+            media.delete(id)
+            data?.delete(id)
+            result.push({ expected, status: "erased" })
+          }
+        }
+      })
+    } finally { previousPhotos.close() }
+  }
+
+  function pruneAlbumMembers(tx: IDBTransaction, removed: ReadonlySet<string>) {
+    if (removed.size === 0) return
+    const all = tx.objectStore(albums).openCursor()
+    all.onsuccess = () => {
+      const cursor = all.result
+      if (cursor === null) return
+      const album: unknown = cursor.value
+      if (savedAlbum(album) && album.memberIds.some((id) => removed.has(id))) {
+        cursor.update({ ...album, revision: crypto.randomUUID(), memberIds: album.memberIds.filter((id) => !removed.has(id)) })
+      }
+      cursor.continue()
+    }
+  }
+
+  /** The local row hides as soon as its reviewed erasure is durable, and success waits for both databases. */
+  async function finishEarlierErasures(wanted: readonly BrowserCapture[]): Promise<readonly BrowserChangeRow[]> {
+    if (wanted.length === 0) return []
+    const failed = () => wanted.map(({ id }): BrowserChangeRow => ({ id, status: "unverified" }))
+    try {
+      const confirmed = await eraseEarlierOriginals(wanted)
+      return await libraryTransaction<BrowserChangeRow[]>([store, albums], "readwrite", (tx, hold) => {
+        const media = tx.objectStore(store)
+        const result: BrowserChangeRow[] = []
+        const removed = new Set<string>()
+        let pending = confirmed.length
+        hold(result)
+        for (const proof of confirmed) {
+          const id = proof.expected.id
+          const read = media.get(id)
+          read.onsuccess = () => {
+            const current: unknown = read.result
+            const approved = erased(current) && current.pending !== undefined && matching(current.pending, proof.expected)
+            if (proof.status === "erased" && erased(current) && (approved || current.pending === undefined)) {
+              if (approved) media.put({ id, erased: true })
+              removed.add(id)
+              result.push({ id, status: "done" })
+            } else if (proof.status === "stale" && proof.current !== undefined && (approved || valid(current))) {
+              if (approved) media.put({ ...proof.current, favorite: proof.expected.favorite, trashedAt: proof.expected.trashedAt,
+                sourceRevision: proof.current.revision, revision: crypto.randomUUID() } satisfies BrowserCapture)
+              result.push({ id, status: "stale" })
+            } else result.push({ id, status: "unverified" })
+            if (--pending === 0) pruneAlbumMembers(tx, removed)
+          }
+        }
+      })
+    } catch { return failed() }
+  }
+
   async function changeBrowserRows(operation: BrowserChange, items: readonly BrowserCapture[]): Promise<readonly BrowserChangeRow[]> {
     const earlier = await inherited(items)
+    const earlierErases: BrowserCapture[] = []
     const result = await libraryTransaction<BrowserChangeRow[]>([store, originals, albums], "readwrite", (tx, hold) => {
       const media = tx.objectStore(store)
       const changed: BrowserChangeRow[] = []
       const removed = new Set<string>()
       let pending = items.length
-      const trimAlbums = () => {
-        if (removed.size === 0) return
-        const all = tx.objectStore(albums).openCursor()
-        all.onsuccess = () => {
-          const cursor = all.result
-          if (cursor === null) return
-          const album: unknown = cursor.value
-          if (savedAlbum(album) && album.memberIds.some((id) => removed.has(id))) cursor.update({ ...album, revision: crypto.randomUUID(), memberIds: album.memberIds.filter((id) => !removed.has(id)) })
-          cursor.continue()
-        }
-      }
       hold(changed)
       for (const expected of items) {
         const read = media.get(expected.id)
@@ -220,11 +305,16 @@ module browser {
           const needsTrash = operation === "restore" || operation === "delete"
           if (!matching(item, expected) || (item.trashedAt !== undefined) !== needsTrash) changed.push({ id: expected.id, status: "stale" })
           else if (operation === "delete") {
-            if (item.id.startsWith(earlierPrefix)) media.put({ id: item.id, erased: true })
-            else media.delete(item.id)
-            tx.objectStore(originals).delete(item.id)
-            removed.add(item.id)
-            changed.push({ id: item.id, status: "done" })
+            if (item.id.startsWith(earlierPrefix)) {
+              media.put({ id: item.id, erased: true, pending: item } satisfies ErasedSource)
+              earlierErases.push(item)
+              changed.push({ id: item.id, status: "unverified" })
+            } else {
+              media.delete(item.id)
+              tx.objectStore(originals).delete(item.id)
+              removed.add(item.id)
+              changed.push({ id: item.id, status: "done" })
+            }
           } else {
             const sourceRevision = item.id.startsWith(earlierPrefix) ? item.sourceRevision ?? item.revision : undefined
             const next = operation === "favorite" || operation === "unfavorite"
@@ -233,15 +323,65 @@ module browser {
             media.put(next)
             changed.push({ id: item.id, status: "done", item: next })
           }
-          if (--pending === 0) trimAlbums()
+          if (--pending === 0) pruneAlbumMembers(tx, removed)
         }
       }
     })
-    if (result.some((row) => row.status === "done")) window.dispatchEvent(new Event(event))
-    return result
+    const completed = await finishEarlierErasures(earlierErases)
+    const settled = result.map((row) => completed.find((answer) => answer.id === row.id) ?? row)
+    if (settled.some((row) => row.status === "done" || row.status === "unverified") || earlierErases.length > 0) window.dispatchEvent(new Event(event))
+    return settled
+  }
+
+  const albumMigration = "develop-albums-adopted"
+
+  async function developAlbums(): Promise<readonly BrowserAlbum[]> {
+    const documents = await existingDatabase("alpha.browser.documents.v1")
+    if (documents === undefined) return []
+    try {
+      if (!documents.objectStoreNames.contains("documents")) return []
+      const row = await stored(documents, "documents", "alpha.browser.albums.v1", (value) => value)
+      if (typeof row !== "object" || row === null || !("raw" in row) || typeof row.raw !== "string") return []
+      const envelope: unknown = JSON.parse(row.raw)
+      if (typeof envelope !== "object" || envelope === null || !("version" in envelope) || envelope.version !== 1
+        || !("value" in envelope) || typeof envelope.value !== "string") return []
+      const all: unknown = JSON.parse(envelope.value)
+      if (!Array.isArray(all)) return []
+      const adopted = new Map<string, BrowserAlbum>()
+      for (const raw of all as unknown[]) {
+        if (typeof raw !== "object" || raw === null || !("id" in raw) || typeof raw.id !== "string"
+          || !("revision" in raw) || typeof raw.revision !== "string" || !("name" in raw) || typeof raw.name !== "string"
+          || !("memberIds" in raw) || !Array.isArray(raw.memberIds) || raw.name.trim() === "") continue
+        const id = earlierPrefix + raw.id
+        const memberIds = [...new Set(raw.memberIds.flatMap((id: unknown) => typeof id === "string" ? [earlierPrefix + id] : []))]
+        adopted.set(id, { kind: "browser", id, name: raw.name, revision: raw.revision, memberIds })
+      }
+      return [...adopted.values()]
+    } finally { documents.close() }
+  }
+
+  async function adoptDevelopAlbums() {
+    const done = await libraryTransaction<boolean>([albums], "readonly", (tx, hold) => {
+      const read = tx.objectStore(albums).get(albumMigration)
+      read.onsuccess = () => hold(read.result !== undefined)
+    })
+    if (done) return
+    const inherited = await developAlbums().catch(() => undefined)
+    if (inherited === undefined) return
+    await libraryTransaction<void>([albums], "readwrite", (tx, hold) => {
+      const shelves = tx.objectStore(albums)
+      const read = shelves.get(albumMigration)
+      hold(undefined)
+      read.onsuccess = () => {
+        if (read.result !== undefined) return
+        for (const shelf of inherited) shelves.add(shelf)
+        shelves.add({ id: albumMigration, adopted: true })
+      }
+    })
   }
 
   async function browserAlbums(): Promise<readonly BrowserAlbum[]> {
+    await adoptDevelopAlbums()
     const database = await storage()
     try { return await stored(database, albums, undefined, (rows) => Array.isArray(rows) ? rows.filter(savedAlbum) : []) }
     finally { database.close() }
@@ -250,6 +390,7 @@ module browser {
   async function writeBrowserAlbum(request: BrowserAlbumWrite): Promise<boolean> {
     const name = request.name.trim()
     if ((request.change === "Create" || request.change === "Rename") && (name === "" || Array.from(name).length > 80 || /[\u0000-\u001f\u007f]/.test(name))) return false
+    await adoptDevelopAlbums()
     const earlier = await inherited(request.items)
     const written = await libraryTransaction<boolean>([store, albums], "readwrite", (tx, hold) => {
       const shelves = tx.objectStore(albums)
@@ -276,7 +417,7 @@ module browser {
           else {
             const members = request.change === "Rename" ? album.memberIds : request.change === "Add"
               ? [...new Set([...album.memberIds, ...selected])] : album.memberIds.filter((id) => !selected.includes(id))
-            if (members.length > memberLimit) return
+            if (request.change === "Add" && members.length > memberLimit) return
             shelves.put({ ...album, name: request.change === "Rename" ? name : album.name, memberIds: members, revision: crypto.randomUUID() })
           }
         }
@@ -414,13 +555,15 @@ module browser {
     } finally { database.close() }
   }
 
-  async function previous(): Promise<IDBDatabase | undefined> {
+  const previous = (): Promise<IDBDatabase | undefined> => existingDatabase(earlierLibrary)
+
+  async function existingDatabase(name: string): Promise<IDBDatabase | undefined> {
     if (typeof indexedDB.databases === "function") {
       const databases = await indexedDB.databases().catch(() => undefined)
-      if (databases !== undefined && !databases.some((database) => database.name === earlierLibrary)) return undefined
+      if (databases !== undefined && !databases.some((database) => database.name === name)) return undefined
     }
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(earlierLibrary)
+      const request = indexedDB.open(name)
       let absent = false
       request.onupgradeneeded = (event) => {
         if (event.oldVersion !== 0) return
@@ -444,7 +587,7 @@ module browser {
       trashedAt: "trashed" in row && row.trashed === true ? ("trashedAt" in row && typeof row.trashedAt === "number" ? row.trashedAt : row.date) : undefined,
       width: row.width, height: row.height, size: "size" in row && typeof row.size === "number" ? row.size : 0,
       ...("duration" in row && typeof row.duration === "number" ? { duration: row.duration } : {}),
-      ...("mutationRevision" in row && typeof row.mutationRevision === "string" ? { revision: row.mutationRevision } : {}),
+      ...("mutationRevision" in row && typeof row.mutationRevision === "string" ? { revision: row.mutationRevision } : "revision" in row && typeof row.revision === "string" ? { revision: row.revision } : {}),
       ...("image" in row && typeof row.image === "string" && row.image.startsWith("data:image/") ? { thumbnail: row.image } : {}),
     }]
   }
@@ -462,7 +605,10 @@ module browser {
   export async function browserCaptures(): Promise<readonly BrowserCapture[]> {
     const database = await storage()
     try {
-      const raw = await stored(database, store, undefined, (rows) => Array.isArray(rows) ? rows as unknown[] : [])
+      const readRows = () => stored(database, store, undefined, (rows) => Array.isArray(rows) ? rows as unknown[] : [])
+      let raw = await readRows()
+      const interrupted = raw.filter(erased).flatMap((row) => row.pending === undefined ? [] : [row.pending])
+      if (interrupted.length > 0 && (await finishEarlierErasures(interrupted)).some((row) => row.status !== "unverified")) raw = await readRows()
       const local = raw.filter(valid)
       const present = new Set([...local, ...raw.filter(erased)].map((row) => row.id))
       const earlier = await earlierCaptures()

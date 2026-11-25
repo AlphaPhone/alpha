@@ -2,7 +2,10 @@
 
 What the owner moved out of [Photos](./index.md) waits here, in Android's
 trash, until it is recovered or Android removes it. In a browser this is
-the locally saved library’s Recently deleted, with the same review. Recovering is a
+the locally saved library’s Recently deleted, with the same review. For an
+item inherited from the earlier browser, successful permanent deletion
+requires both the local catalog receipt and removal of the reviewed earlier
+original. An interrupted deletion remains unconfirmed until read back. Recovering is a
 [run of changes](./changes.md) like any other change to photos. Deleting
 forever is prepared by the phone for exactly the items chosen, at most 500,
 Android's own limit, shown to the owner as "Delete photos forever", and done

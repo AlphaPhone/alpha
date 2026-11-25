@@ -97,7 +97,7 @@ effect function deleted(attempt: number, items: readonly number[]): Trash.Event!
     const local = browser.value
     const receipt = tryPromise(() => local.change("delete", prepared.captures)) catch () => undefined
     if (receipt?.some((row) => row.status === "done")) try (try Catalog).changed()
-    return { ...refused, known: receipt !== undefined, confirmed: receipt?.length === items.length && receipt.every((row) => row.status === "done") }
+    return { ...refused, known: receipt !== undefined && !receipt.some((row) => row.status === "unverified"), confirmed: receipt?.length === items.length && receipt.every((row) => row.status === "done") }
   }
   if (prepared.kind !== "phone" || Option.isNone(phone)) return refused
   const receipt = tryPromise(() => phone.value.deletePreparedTrash(prepared.confirmation)) catch () => undefined
