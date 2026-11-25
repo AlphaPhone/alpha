@@ -1,5 +1,6 @@
 // spec/app/camera/index.md, "Story: Open the camera"; spec/app/camera/index.md, "Story: Take photos and videos"
 import type { CameraGrant, CameraPlugin, CameraPreviewOptions, CameraPreviewResult, CameraSettings, PhotoCaptureOptions } from "@elizaos/os-bridges";
+import { boardingPass } from "./img/boarding-pass.ts";
 import { plugin, rejection, type Faked } from "./phone.ts";
 
 /** The camera reported by Android, with the native preview and camera output independently observable. */
@@ -30,6 +31,23 @@ export function cameraKeys(world: CameraScene) {
   };
 }
 
+/**
+ * Android draws CameraX's preview in a layer behind the transparent WebView. A page has no such layer, so the fake
+ * stands one in behind the page while a preview runs: black, as the preview is before its first frame.
+ */
+function nativeLayer(shown: boolean) {
+  if (typeof document === "undefined") return;
+  const id = "alpha-fake-native-preview";
+  const layer = document.getElementById(id);
+  if (!shown) { layer?.remove(); return; }
+  if (layer) return;
+  const behind = document.createElement("div");
+  behind.id = id;
+  behind.setAttribute("aria-hidden", "true");
+  behind.style.cssText = "position:fixed;inset:0;z-index:-1;pointer-events:none;background:#000";
+  document.body.prepend(behind);
+}
+
 export function elizaCamera(world: CameraScene): Faked {
   const settings: CameraSettings = {
     flash: "off", zoom: 1, focusMode: "auto", exposureMode: "auto", exposureCompensation: 0, whiteBalance: "auto",
@@ -56,9 +74,10 @@ export function elizaCamera(world: CameraScene): Faked {
       if (world.permission !== "granted") throw rejection("Camera off", "CAMERA_PERMISSION_DENIED");
       await world.startGate;
       world.preview = options;
+      nativeLayer(true);
       return preview(options);
     },
-    async stopPreview() { world.preview = undefined; },
+    async stopPreview() { world.preview = undefined; nativeLayer(false); },
     async switchCamera(options) { world.preview = options; return preview(options); },
     async setCaptureMode({ mode }) { world.modes.push(mode); },
     async capturePhoto(options = {}) {
@@ -67,10 +86,10 @@ export function elizaCamera(world: CameraScene): Faked {
         throw rejection("Incompatible thumbnail options", "INVALID_OPTIONS");
       }
       world.photos.push(options);
-      if (!options.saveToGallery) return { base64: "YQ==", format: "jpeg", width: options.width ?? 3000, height: options.height ?? 4000 };
+      if (!options.saveToGallery) return { base64: boardingPass, format: "jpeg", width: options.width ?? 3000, height: options.height ?? 4000 };
       const id = `image-${world.photos.length}`;
       return {
-        thumbnail: "YQ==", format: "jpeg", width: 1280, height: 720,
+        thumbnail: boardingPass, format: "jpeg", width: 1280, height: 720,
         path: `content://media/external/images/media/${world.photos.length}`, libraryId: id,
       };
     },

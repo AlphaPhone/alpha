@@ -5,11 +5,12 @@ import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
 import { Machine as Page } from "../gen/app__browser__address.effect.vibe";
 import { Machine as Library } from "../gen/app__browser__library.effect.vibe";
 import { Machine as Share } from "../gen/app__browser__share.effect.vibe";
+import { Machine as Site } from "../gen/app__browser__site.effect.vibe";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
 import home from "../src/home/index.tsx";
-import { button, closeAll, drawn, fill, hardware, only, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -88,6 +89,42 @@ describe("The Browser on a phone", () => {
     await drawn(() => remove.click());
     await until(alpha, runtime, Library, (s) => s.job === "Idle" && s.marks === 0);
     expect(world.browser.bookmarks).toEqual([]);
+
+    await libraryTab("History");
+    const kept = "https://enclave.example/keys-in-hardware";
+    const other = "https://tables.example/nopa";
+    await press("Remove from history The case for on-device agents");
+    await later(alpha, 2000);
+    await until(alpha, runtime, Library, (s) => s.job === "Idle" && s.history === 2);
+    expect(world.browser.saved.history).toEqual([kept, other]);
+
+    await press("Clear history");
+    await until(alpha, runtime, Library, (s) => s.confirming);
+    await hardware("back");
+    await until(alpha, runtime, Library, (s) => !s.confirming);
+    expect(world.browser.saved.history).toEqual([kept, other]);
+
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    world.browser.beforeSave = async (snapshot) => {
+      if (snapshot.history.length > 0) return;
+      entered.resolve();
+      await release.promise;
+    };
+    try {
+      await press("Clear history");
+      await pressOnTop("Clear");
+      await later(alpha, 2000);
+      await entered.promise;
+      await press("Back to page");
+      const load = page.runSync(Page.use((machine) => machine.get())).load;
+      await go(kept);
+      await until(alpha, page, Page, (s) => s.phase === "Shown" && s.load > load);
+    } finally { release.resolve(); }
+    await until(alpha, runtime, Library, (s) => s.job === "Idle" && s.history === 1);
+    await later(alpha, 2000);
+    await until(alpha, runtime, Tabs, (s) => !s.stale && !s.writing);
+    expect(world.browser.saved.history).toEqual([kept]);
   });
 
   it("Open a page and watch it load (spec/app/browser/address.md, \"Story: Go where I typed\"; spec/app/browser/address.md, \"Story: Watch a page load\"; spec/app/browser/address.md, \"Story: Find in page\"; spec/app/browser/share.md, \"Story: Share the page\")", async () => {
@@ -120,6 +157,14 @@ describe("The Browser on a phone", () => {
     await press("Copy link");
     await until(alpha, runtime, Share, (s) => s.notice === "Copied");
     expect(world.settings.copied).toEqual(["https://news.example/on-device-agents"]);
+
+    // spec/app/browser/site.md, "Clearing a site's data needs a loaded site, and runs one at a time"; spec/app/browser/site.md, "Cleared data forgets the answers given to that site; a clearing that fails forgets nothing"
+    await press("Menu");
+    await press("Clear site data");
+    expect(world.browser.calls.includes("clearSiteData")).toBe(false);
+    await press("Clear data");
+    await until(alpha, runtime, Site, (s) => s.clear === 1 && !s.clearing);
+    expect(world.browser.calls.includes("clearSiteData")).toBe(true);
 
     // spec/app/browser/address.md, "Typing searches the page, and clearing the text clears the search"; spec/app/browser/address.md, "Only the answer to the latest search counts"
     await press("Menu");
@@ -183,7 +228,7 @@ describe("The Browser on a phone", () => {
     await press("Menu");
     await press("Clear all browsing data");
     await until(alpha, runtime, Tabs, (s) => s.erasing === "Asked");
-    await press("Clear");
+    await press("Clear data");
     await until(alpha, runtime, Tabs, (s) => s.erasing === "Kept" && s.privates.length === 1 && s.kept.length === 0);
   });
 });

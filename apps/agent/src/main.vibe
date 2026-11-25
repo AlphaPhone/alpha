@@ -8,7 +8,7 @@ import { pinnedCheckout, pinnedPack } from "@repo/eliza-harness"
 import {
   type Environment, type Manifest, bundledPlugins, calendarEdits, characterAdmitted, cloudModel, corePlugins, entryCarried, gmailChanges, googleAdmitted,
   hostedPlugins, inputAdmitted, localEmbeddings, nativeDigestAck, nativeDigestAckLimit, nativeDigestQueries, nativeDigestScope, nativeRoutes, nativeRoutesAdmitted, nativeSpeechRoutes, notesTrashDays, packAdmitted, packEntry, packedFor, packedPlugins, pageQueries, persistMemory, personalDetailSwap,
-  policyAdmitted, privacyAdmitted, productPluginName, proposalsAdmitted, refusedActions, routeListAdmitted, secretSwap, viewPlugins,
+  policyAdmitted, privacyAdmitted, productPluginName, proposalsAdmitted, refusedActions, routeListAdmitted, secretSwap, viewPlugins, walletSettings,
 } from "../gen/agent.effect.vibe"
 
 module node {
@@ -50,18 +50,20 @@ schema RouteLine {
 schema Character { name: string; system: string; bio: string[] }
 schema Policy { schema: 1; actions: { allowed: string[]; refused: Record<string, string> }; plugins: { load: string[]; product?: string } }
 schema Notice { channel: string; title: string; text: string }
-schema Service { service: string; notification: { channel: string; title: string; text: string; failure: Notice } }
+schema Service { service: string; hostContextRevision: 1; notification: { channel: string; title: string; text: string; failure: Notice } }
 schema Model { backend: "cloud"; cloudBaseUrl: string; smallModel: string; largeModel: string; imageModel: string }
 schema Host {
-  schema: 1; service: string; notification: { channel: string; title: string; text: string; failure: Notice }; routes: RouteLine[]; nativeRoutes: RouteLine[]; model: Model
+  schema: 1; service: string; hostContextRevision: 1; notification: { channel: string; title: string; text: string; failure: Notice }; routes: RouteLine[]; nativeRoutes: RouteLine[]; model: Model
   embeddings: "none" | "local"; persistMemory: boolean; callerRole: "owner" | "user"; privacy: { secretSwap: boolean; piiSwap: boolean }
   google: { gmailChanges: boolean; calendarEdits: boolean }
 }
 
 /** The export each hosted package builds its module with, as `runAgentCli`'s `hostModules` takes it. */
 const localSpeechModule = "@elizaos/plugin-local-inference"
+const walletModuleName = "@elizaos/plugin-wallet"
 const hostedExports: Readonly<Record<string, string>> = {
   "@elizaos/plugin-notes": "notesModule",
+  [walletModuleName]: "walletModule",
   [localSpeechModule]: "localInferenceModule",
 }
 
@@ -114,6 +116,10 @@ export function entrySource(bundled: readonly string[], hosted: readonly { name:
     `  hostModules: new Map([${allHosted.map(({ name }, index) => {
       let factory = `host${index}`
       if (name === "@elizaos/plugin-notes") factory = `(context) => { context.runtime.setSetting("ELIZA_NOTES_TRASH_RETENTION_DAYS", ${JSON.stringify(notesTrashDays)}); return host${index}(context); }`
+      if (name === walletModuleName) {
+        const settings = JSON.stringify(walletSettings.map(({ setting, held }) => [setting, held]))
+        factory = `(context) => { for (const [setting, held] of ${settings}) context.runtime.setSetting(setting, held); return host${index}(context); }`
+      }
       if (name === localSpeechModule) {
         const named = JSON.stringify(localSpeechModule)
         factory = `(context) => { const engine = speechEngine(context); return engine === undefined
@@ -234,7 +240,8 @@ effect function admittedHost(host: string, registered: readonly string[]) {
   if (!googleAdmitted(written.google.gmailChanges, written.google.calendarEdits)) throw new Refused({ message: "the launch consents to Gmail changes or calendar edits the spec does not" })
   const document = JSON.stringify({
     schema: 1, character, policy: { actions: { allowed: policy.actions.allowed }, plugins: policy.plugins },
-    model: written.model, embeddings: written.embeddings, persistMemory: written.persistMemory, callerRole: written.callerRole, privacy: written.privacy, google: written.google,
+    model: written.model, embeddings: written.embeddings, persistMemory: written.persistMemory, callerRole: written.callerRole,
+    hostContextRevision: written.hostContextRevision, privacy: written.privacy, google: written.google,
     account: { userId: "the owner signed in on the phone", organizationId: "their organization" },
   })
   decodeLaunchDocument(document) catch effect () => { throw new Refused({ message: "eliza's agent would refuse the launch the phone writes from these files" }) }
@@ -288,7 +295,7 @@ effect function build(name: string) {
     }
   })
   const host: Host = {
-    schema: 1, service: service.service, notification: service.notification, routes, nativeRoutes: native,
+    schema: 1, service: service.service, hostContextRevision: service.hostContextRevision, notification: service.notification, routes, nativeRoutes: native,
     model: { backend: "cloud", cloudBaseUrl: where.cloud, smallModel: cloudModel, largeModel: cloudModel, imageModel: "" },
     embeddings: localEmbeddings ? "local" : "none", persistMemory, callerRole: "owner", privacy: { secretSwap, piiSwap: personalDetailSwap },
     google: { gmailChanges, calendarEdits },

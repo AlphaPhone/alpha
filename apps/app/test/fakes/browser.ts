@@ -28,6 +28,7 @@ interface Held {
 /** What the fake phone's tab host keeps, as `AlphaBrowserPlugin` keeps it: its saved session, bookmarks and the tabs it holds. */
 export interface BrowserScene {
   saved: BrowserSavedState;
+  beforeSave?: (saved: BrowserSavedState) => Promise<void>;
   bookmarks: { url: string; title?: string }[];
   readonly tabs: Map<string, Held>;
   /** The tab drawn and where, as `present` last placed it. */
@@ -48,21 +49,21 @@ const enclave = "https://enclave.example/keys-in-hardware";
 const book = "https://tables.example/nopa";
 
 /** The reference pages of develop's fixtures: what a site there draws, by its address. */
-const sites: Record<string, { title: string; draw: () => string }> = {
-  [news]: { title: "The case for on-device agents", draw: () => article(newsImage, "The case for on-device agents", "news.example · 6 min", [
+const sites: Record<string, { title: string; snip: string; draw: () => string }> = {
+  [news]: { title: "The case for on-device agents", snip: "An assistant that lives on your phone sees everything you do. The question is who else gets to see it.", draw: () => article(newsImage, "The case for on-device agents", "news.example · 6 min", [
     "An assistant that lives on your phone sees everything you do. The question is who else gets to see it. Keeping the model and its memory on the device changes the answer.",
     "When the agent runs next to your data, it can act without sending your inbox or calendar anywhere. It also stays useful with no signal.",
     `${link(enclave, "Hardware-held keys")} make the agent accountable to one person: its owner. Every action it takes can be signed and checked later.`,
     "The interface should get quieter, not louder. Fewer screens, one conversation, and the right card at the right moment.",
     `Try it: ask an agent to ${link(book, "book dinner at Nopa")} and watch it stop before it pays.`,
   ]) },
-  [enclave]: { title: "Keys in the chip", draw: () => article(enclaveImage, "Keys that never leave the chip", "enclave.example · 4 min", [
+  [enclave]: { title: "Keys in the chip", snip: "A secure enclave is a small, sealed part of the processor. Keys are created inside it and never read out.", draw: () => article(enclaveImage, "Keys that never leave the chip", "enclave.example · 4 min", [
     "A secure enclave is a small, sealed part of the processor. Keys are created inside it and can be used there, but never read out.",
     "When an agent signs an action with one of those keys, anyone can check that it came from your device, and only your device.",
     "That makes the phone the root of trust, not a server you have to believe.",
     `More on why this matters: ${link(news, "the case for on-device agents")}.`,
   ]) },
-  [book]: { title: "Nopa · Book a table", draw: () => booking() },
+  [book]: { title: "Nopa · Book a table", snip: "Californian, wood-fired. 560 Divisadero St. Tables tonight from 6:00.", draw: () => booking() },
 };
 
 const style = (rules: Record<string, string>) => Object.entries(rules).map(([name, value]) => `${name}:${value}`).join(";");
@@ -81,15 +82,26 @@ ${paragraphs.map((text, at) => `<p style="${paragraph}${at === 0 ? ";margin-top:
 </div>`;
 }
 
+/** A 24-unit stroke icon, drawn as develop draws its glyphs. */
+const icon = (size: number, paths: string) => `<svg viewBox="0 0 24 24" aria-hidden="true" style="${style({ width: `${size}px`, height: `${size}px`, fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round", "flex-shrink": "0" })}">${paths}</svg>`;
+
 function booking(): string {
   const chip = (words: string, on = false) => `<button style="${style({ flex: "1", height: "46px", "border-radius": "23px", "font-size": "14.5px", "font-weight": "600", border: "0", background: on ? "var(--primary)" : "var(--secondary)", color: on ? "var(--primary-foreground)" : "var(--foreground)" })}">${words}</button>`;
-  const field = (words: string) => `<input placeholder="${words}" aria-label="${words}" style="${style({ display: "block", width: "100%", "box-sizing": "border-box", height: "50px", "margin-top": "8px", "border-radius": "16px", border: "0", background: "var(--secondary)", color: "var(--foreground)", padding: "0 16px", "font-size": "16px" })}">`;
-  return `<div style="${style({ position: "relative", height: "128px", background: `url(${nopaImage}) center / cover no-repeat` })}"></div>
+  const time = (words: string) => `<button aria-label="${words} PM" style="${style({ height: "44px", "border-radius": "22px", "font-size": "14.5px", "font-weight": "600", border: "0", background: "var(--secondary)", color: "var(--foreground)" })}">${words}</button>`;
+  const field = (words: string, top: string) => `<input placeholder="${words}" aria-label="${words}" style="${style({ display: "block", width: "100%", "box-sizing": "border-box", height: "50px", "margin-top": top, "border-radius": "16px", border: "0", background: "var(--secondary)", color: "var(--foreground)", padding: "0 16px", "font-size": "16px" })}">`;
+  const step = (label: string, paths: string) => `<button aria-label="${label}" style="${style({ width: "44px", height: "44px", display: "flex", "align-items": "center", "justify-content": "center", border: "0", background: "transparent", color: "var(--foreground)" })}">${icon(18, paths)}</button>`;
+  return `<div style="${style({ position: "relative", height: "128px", background: `url(${nopaImage}) center / cover no-repeat`, overflow: "hidden" })}">
+<div style="${style({ position: "absolute", inset: "0", background: "linear-gradient(to top, rgba(0,0,0,.45), transparent 60%)" })}"></div>
+<div style="${style({ position: "absolute", right: "30px", bottom: "22px", "font-family": "var(--font-display)", "font-size": "34px", color: "#fff" })}">nopa</div></div>
 <div style="${style({ padding: "18px 22px 140px" })}">
 <h2 style="${style({ margin: "0", "font-family": "var(--font-display)", "font-size": "34px", "line-height": "1.05", "font-weight": "300" })}">Nopa</h2>
 <div style="${style({ color: "var(--muted-foreground)", "margin-top": "6px", "font-size": "13.5px" })}">Californian · 560 Divisadero St</div>
-<div style="${style({ display: "flex", gap: "8px", "margin-top": "18px" })}">${chip("Tonight", true)}${chip("Tomorrow")}${chip("Fri")}</div>
-${field("Name")}${field("Phone")}
+<div style="${style({ display: "flex", "align-items": "center", "margin-top": "18px" })}"><span style="${style({ "flex-grow": "1", "font-size": "16px", "font-weight": "600" })}">Guests</span>
+<div style="${style({ display: "flex", "align-items": "center", gap: "4px", "border-radius": "24px", background: "var(--secondary)", padding: "2px" })}">${step("Fewer guests", `<path d="M5 12h14"/>`)}<span style="${style({ "min-width": "22px", "text-align": "center", "font-size": "17px", "font-weight": "700" })}">2</span>${step("More guests", `<path d="M5 12h14"/><path d="M12 5v14"/>`)}</div></div>
+<div style="${style({ display: "flex", gap: "8px", "margin-top": "12px" })}">${chip("Tonight", true)}${chip("Tomorrow")}${chip("Fri")}</div>
+<div style="${style({ display: "grid", "grid-template-columns": "repeat(3, minmax(0, 1fr))", gap: "8px", "margin-top": "10px" })}">${["6:00", "6:30", "7:00", "7:30", "8:00", "8:30"].map(time).join("")}</div>
+${field("Name", "14px")}${field("Phone", "8px")}
+<button disabled aria-label="Book table" style="${style({ width: "100%", height: "52px", "margin-top": "14px", "border-radius": "26px", "font-size": "16px", "font-weight": "600", border: "0", background: "var(--accent)", color: "var(--muted-foreground)" })}">Book table</button>
 </div>`;
 }
 
@@ -98,7 +110,8 @@ function searched(query: string): string {
     const url = new URL(href);
     return `<a href="${href}" style="${style({ display: "block", padding: "16px 4px", "border-bottom": "1px solid var(--border)", color: "inherit", "text-decoration": "none" })}">
 <div style="${style({ "font-size": "12.5px", color: "var(--muted-foreground)" })}">${url.host}${url.pathname}</div>
-<div style="${style({ "font-size": "18px", "font-weight": "600", color: "var(--primary)", "margin-top": "4px" })}">${site.title}</div></a>`;
+<div style="${style({ "font-size": "18px", "font-weight": "600", color: "var(--primary)", "margin-top": "4px" })}">${site.title}</div>
+<div style="${style({ "font-size": "14px", color: "var(--muted-foreground)", "line-height": "1.45", "margin-top": "4px" })}">${site.snip}</div></a>`;
   });
   return `<div style="${style({ padding: "10px 20px 140px" })}"><div style="${style({ "font-family": "var(--font-display)", "font-size": "30px", "line-height": "1.15", padding: "0 4px 8px" })}">${query}</div>${rows.join("")}</div>`;
 }
@@ -106,9 +119,11 @@ function searched(query: string): string {
 function generic(url: URL): string {
   const name = (url.hostname.split(".")[0] ?? "").replace(/-/g, " ");
   const named = name.charAt(0).toUpperCase() + name.slice(1);
-  return `<div style="${style({ position: "relative", height: "170px", background: "var(--secondary)", overflow: "hidden" })}"><div style="${style({ position: "absolute", right: "28px", top: "34px", "font-family": "var(--font-display)", "font-size": "76px", "line-height": "1", color: "var(--muted-foreground)" })}">${named.charAt(0)}</div></div>
+  const links = [["about", "About"], ["hours", "Hours & location"], ["contact", "Contact"]].map(([path, label]) => `<a href="https://${url.host}/${path}" aria-label="${label}" style="${style({ display: "flex", "align-items": "center", gap: "12px", "min-height": "56px", "border-bottom": "1px solid var(--border)", "text-decoration": "none" })}"><span style="${style({ "flex-grow": "1", "font-size": "16px", "font-weight": "600", color: "var(--primary)" })}">${label}</span><span style="${style({ display: "flex", color: "var(--muted-foreground)" })}">${icon(16, `<path d="m9 18 6-6-6-6"/>`)}</span></a>`);
+  return `<div style="${style({ position: "relative", height: "170px", background: "var(--secondary)", overflow: "hidden" })}"><div style="${style({ position: "absolute", left: "24px", bottom: "-40px", width: "150px", height: "150px", "border-radius": "75px", background: "var(--accent)" })}"></div><div style="${style({ position: "absolute", right: "28px", top: "34px", "font-family": "var(--font-display)", "font-size": "76px", "line-height": "1", color: "var(--muted-foreground)" })}">${named.charAt(0)}</div></div>
 <div style="${style({ padding: "22px 24px 140px" })}"><h2 style="${style({ margin: "0", "font-family": "var(--font-display)", "font-size": "34px", "line-height": "1.05", "font-weight": "300" })}">${named}</h2>
-<div style="${style({ color: "var(--muted-foreground)", "margin-top": "8px", "font-size": "13px" })}">${url.host}</div></div>`;
+<div style="${style({ color: "var(--muted-foreground)", "margin-top": "8px", "font-size": "13px" })}">${url.host}</div>
+<div style="${style({ "margin-top": "20px", "border-top": "1px solid var(--border)" })}">${links.join("")}</div></div>`;
 }
 
 /** What a page is called, as its document's title says. */
@@ -277,11 +292,12 @@ export function alphaBrowser(world: BrowserScene): Faked {
         session = asked;
         return Promise.resolve(world.saved);
       },
-      saveBrowsingState: ({ session: asked, ...saved }) => {
+      saveBrowsingState: async ({ session: asked, ...saved }) => {
         world.calls.push("saveBrowsingState");
         session = asked;
+        await world.beforeSave?.(saved);
         world.saved = saved;
-        return Promise.resolve(saved);
+        return saved;
       },
       clearBrowsingData: () => {
         const closed = [...world.tabs.values()].filter((tab) => !tab.private).map((tab) => tab.id);
@@ -290,7 +306,10 @@ export function alphaBrowser(world: BrowserScene): Faked {
         draw();
         return Promise.resolve({ closed });
       },
-      clearSiteData: ({ url }) => Promise.resolve({ site: new URL(url).host }),
+      clearSiteData: ({ url }) => {
+        world.calls.push("clearSiteData");
+        return Promise.resolve({ site: new URL(url).host });
+      },
       readingSupport: () => Promise.resolve({ available: false }),
       reviewQuestion: () => Promise.reject(rejection("Reading unavailable")),
       reviewReading: () => Promise.reject(rejection("Reading unavailable")),

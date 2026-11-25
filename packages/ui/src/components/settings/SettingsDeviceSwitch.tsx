@@ -26,7 +26,7 @@ export type SettingsDeviceSwitchProps = {
 
 const tags = (words: string[]) => (
   <span className="mt-1 flex flex-wrap gap-1.5 whitespace-normal">
-    {words.map((word) => <span key={word} className="rounded-sm bg-background px-2.5 py-0.75 text-fine text-muted-foreground">{word}</span>)}
+    {words.map((word) => <span key={word} className="rounded-sm bg-background px-2.5 py-0.75 text-fine leading-normal text-muted-foreground">{word}</span>)}
   </span>
 );
 

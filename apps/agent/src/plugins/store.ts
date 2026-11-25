@@ -459,7 +459,11 @@ export class AlphaAppsStore {
     return existing;
   }
 
-  createTimer(input: { readonly id?: string; readonly label?: string; readonly durationMs: number; readonly startImmediately?: boolean }): ClockTimerRecord {
+  /**
+   * Store a new timer, making room by forgetting the oldest finished (ready, not started) timers when Clock is full.
+   * Returns undefined, storing nothing, when every place holds a running, paused or ringing timer.
+   */
+  createTimer(input: { readonly id?: string; readonly label?: string; readonly durationMs: number; readonly startImmediately?: boolean }): ClockTimerRecord | undefined {
     const nowMs = this.now();
     const durationMs = clampInt(input.durationMs, 1000, 86_400_000);
     const startNow = input.startImmediately ?? true;
@@ -475,8 +479,13 @@ export class AlphaAppsStore {
       revision: 1,
       updatedAtMs: nowMs,
     };
-    const timers = [...this.clock.timers.filter((entry) => entry.id !== timer.id), timer].slice(0, MAX_TIMERS);
-    const deletedTimerIds = this.clock.deletedTimerIds.filter((id) => id !== timer.id);
+    const others = this.clock.timers.filter((entry) => entry.id !== timer.id);
+    const finished = others.filter((entry) => entry.status === "ready").sort((a, b) => a.updatedAtMs - b.updatedAtMs);
+    const pruned = new Set(finished.slice(0, Math.max(0, others.length + 1 - MAX_TIMERS)).map((entry) => entry.id));
+    const kept = others.filter((entry) => !pruned.has(entry.id));
+    if (kept.length + 1 > MAX_TIMERS) return undefined;
+    const timers = [...kept, timer];
+    const deletedTimerIds = [...pruned].reduce((ids, id) => appendTombstone(ids, id), this.clock.deletedTimerIds.filter((id) => id !== timer.id));
     this.saveClock({ ...this.clock, version: this.clock.version + 1, updatedAtMs: nowMs, timers, deletedTimerIds });
     return timer;
   }

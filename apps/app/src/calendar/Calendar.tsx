@@ -49,6 +49,7 @@ const hourMinute = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute:
 const hourOnly = new Intl.DateTimeFormat(undefined, { hour: "numeric" });
 const shortDate = new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric" });
 const monthDay = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+const monthDayYear = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
 const longDate = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" });
 const monthOnly = new Intl.DateTimeFormat(undefined, { month: "long" });
 const monthYear = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" });
@@ -218,6 +219,8 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
   const view = useView(runtime);
   const editor = useEditor(runtime);
   const deleting = useHeld(runtime).state;
+  const [query, setQuery] = useState("");
+  const [searchRound, setSearchRound] = useState(0);
   useSyncExternalStore((listener) => shown.subscribe(listener), () => shown.snapshot(), () => shown.snapshot());
   const s = view.state;
   if (!s) return <Spinner />;
@@ -231,6 +234,7 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
     if (view.can({ type: "pickDay", day })) return () => void view.send({ type: "pickDay", day }).then(() => view.send(opening(row)));
     return undefined;
   };
+  const openFound = (row: Row) => (view.can({ type: "closeOverlay" }) ? () => void view.send({ type: "closeOverlay" }).then(() => view.send(opening(row))) : undefined);
   const newEvent: Editor.Event = { type: "newEvent", day: s.anchor };
   const open = s.open === 0 ? undefined : shown.find(s.open);
   const cut = s.connected && shown.partial("Google");
@@ -279,13 +283,15 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
       <CalendarHeader inert={pageCovered} title={title} expanded={month} onTitle={month ? send({ type: "closeOverlay" }) : view.can({ type: "openMonth" }) ? send({ type: "openMonth" }) : undefined}
         className="pr-2 pl-2" leading={alpha ? <AppBack alpha={alpha} className="size-13 [&_svg]:size-5.5" /> : null}>
         {month ? null : view.can({ type: "goToday" }) ? <CalendarHeaderAction aria-label="Today" onClick={send({ type: "goToday" })}><CalendarDays aria-hidden /></CalendarHeaderAction> : null}
-        {!month && view.can({ type: "openSearch" }) ? <CalendarHeaderAction aria-label="Search events" onClick={send({ type: "openSearch" })}><Search aria-hidden /></CalendarHeaderAction> : null}
+        {!month && (searching || view.can({ type: "openSearch" })) ? (
+          <CalendarHeaderAction aria-label="Search events" onClick={() => { setQuery(""); setSearchRound(searchRound + 1); if (!searching) void view.send({ type: "openSearch" }); }}><Search aria-hidden /></CalendarHeaderAction>
+        ) : null}
         {!month && editor.can(newEvent) ? <CalendarHeaderAction aria-label="New event" onClick={() => void runtime.runPromise(startForm(newEvent, s.anchor))}><Plus aria-hidden /></CalendarHeaderAction> : null}
       </CalendarHeader>
       <Undo runtime={runtime} />
       </div>
       <div data-alpha-subview="calendar-list" inert={pageCovered} className="relative flex min-h-0 flex-1 flex-col">
-        {searching ? <Searching runtime={runtime} /> : null}
+        {searching ? <Searching key={searchRound} runtime={runtime} query={query} onQuery={setQuery} open={openFound} /> : null}
         <Access runtime={runtime} />
         {s.phoneLimited ? <CalendarNotice tone="caution">Android gave only part of this day. Some events may be missing.</CalendarNotice> : null}
         {cut ? <CalendarNotice tone="caution">Google gave only part of your agent's calendar. Some events may be missing.</CalendarNotice> : null}
@@ -343,7 +349,7 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
           </>
         )}
         {s.layout === "Agenda" && !searching ? (
-          <CalendarList aria-label="Schedule" range={`Through ${monthDay.format(readWindow(s.anchor).end - 1)}`}>
+          <CalendarList aria-label="Schedule" range={`Through ${monthDayYear.format(readWindow(s.anchor).end - 1)}`}>
             <Days rows={visible.filter((row) => row.end > dayStart(s.today))} today={s.today} from={dayStart(s.today)} open={openRow} empty="No upcoming events" />
           </CalendarList>
         ) : null}
@@ -526,7 +532,7 @@ function EventPage({ runtime, row, today }: CalendarProps & { row: Row; today: n
   ].filter((text) => text !== null).map((text) => <div key={text} className="mt-3 text-sm leading-plain text-muted-foreground">{text}</div>);
   return (
     <CalendarEventPage title={row.title || "Untitled event"} onBack={close} when={interval(row)} day={dayName(civilDay(row.begin), today)}
-      source={row.source === "Phone" ? "Phone calendar" : "Your agent's calendar"} dot={stripe(row)} notes={row.notes}
+      source={row.source === "Phone" ? "Phone calendar" : "Your agent's calendar"} repeat={row.repeat} dot={stripe(row)} notes={row.notes}
       actions={menu ? (
         <CalendarEventMenu items={[
           ...(editing ? [{ label: "Edit", name: "Edit event", onSelect: () => void runtime.runPromise(startForm(edit, civilDay(row.begin), row)) }] : []),
@@ -587,9 +593,8 @@ function Undo({ runtime }: CalendarProps) {
 
 // spec/app/calendar/index.md, "Search and the Calendars sheet open over the days, never over an open event"
 /** Search over the days: a field under the header, and the events read whose title, place or notes hold every word typed. */
-function Searching({ runtime }: CalendarProps) {
+function Searching({ runtime, query, onQuery, open }: CalendarProps & { query: string; onQuery: (query: string) => void; open: (row: Row) => (() => void) | undefined }) {
   const view = useView(runtime);
-  const [query, setQuery] = useState("");
   const s = view.state;
   if (!s) return null;
   const typed = query.toLocaleLowerCase().split(/\s+/).filter((word) => word !== "");
@@ -597,12 +602,11 @@ function Searching({ runtime }: CalendarProps) {
     .filter((row) => typed.every((word) => `${row.title} ${row.place} ${row.notes}`.toLocaleLowerCase().includes(word)));
   const range = readWindow(s.anchor);
   const read = s.phone.status === "Loaded" || s.google.status === "Loaded";
-  const open = (row: Row) => (view.can({ type: "pickDay", day: civilDay(row.begin) }) ? () => void view.send({ type: "pickDay", day: civilDay(row.begin) }) : undefined);
   return (
     <>
-      <CalendarSearchBar aria-label="Search events" placeholder="Search events" autoFocus value={query} onChange={(event) => setQuery(event.target.value)}
+      <CalendarSearchBar aria-label="Search events" placeholder="Search events" autoFocus value={query} onChange={(event) => onQuery(event.target.value)}
         onClose={() => void view.send({ type: "closeOverlay" })} />
-      <CalendarList aria-label="Search results" range={read ? `Searching ${monthDay.format(range.begin)} – ${monthDay.format(range.end - 1)}` : undefined}>
+      <CalendarList aria-label="Search results" range={read ? `Searching ${monthDayYear.format(range.begin)} – ${monthDayYear.format(range.end - 1)}` : undefined}>
         <Days rows={found} today={s.today} from={range.begin} open={open} empty={typed.length > 0 ? "No matching events" : "No events"} />
       </CalendarList>
     </>
@@ -669,10 +673,11 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
     const extras = next !== "" || (fields.repeat ?? "NoRepeat") !== "NoRepeat";
     change({ ...fields, people: next }, extras === e.extras ? plain : { type: "setExtras", extras });
   };
+  const typedEmail = (picking ?? "").trim();
+  const addable = /^[^\s@]+@[^\s@]+$/.test(typedEmail) && !people.some((one) => one.toLowerCase() === typedEmail.toLowerCase());
   const addTyped = () => {
-    const email = (picking ?? "").trim();
-    if (/^[^\s@]+@[^\s@]+$/.test(email) && !people.includes(email)) setPeople([...people, email]);
-    setPicking("");
+    setPeople([...people, typedEmail]);
+    setPicking(undefined);
   };
   const scopes: ReadonlyArray<{ scope: Editor.Scope; label: string }> = [
     { scope: "ThisOne", label: "This event" }, { scope: "ThisAndFollowing", label: "This and following" }, { scope: "WholeSeries", label: "All events" },
@@ -751,13 +756,13 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
             onCheckedChange={(allDay) => change({ ...fields, allDay }, { type: "setAllDay", allDay })} />
         </CalendarFormCard>
         <CalendarFormCard className="gap-1 py-2.5 pr-3 pl-4">
-          <div className="flex min-h-13 flex-wrap items-center gap-3.5">
+          <div className="flex min-h-9 flex-wrap items-center gap-3.5">
             <UserRound aria-hidden className="size-5.5 shrink-0 text-muted-foreground" />
             {people.map((person) => (
               <button key={person} type="button" aria-label={`Remove ${person}`} onClick={() => setPeople(people.filter((one) => one !== person))}
-                className="flex min-h-9 max-w-full min-w-0 items-center gap-1.5 rounded-full bg-background py-0 pr-2.5 pl-1 text-sm font-semibold wrap-anywhere">
-                <span aria-hidden className="flex size-7 items-center justify-center rounded-full bg-accent text-2xs font-bold whitespace-nowrap">{initials(person)}</span>
-                {person.replace(/@.*/, "")}
+                className="flex min-h-13 max-w-full min-w-0 items-center gap-1.5 rounded-action bg-background py-0 pr-2.5 pl-1 text-sm font-semibold wrap-anywhere">
+                <span aria-hidden className="flex size-7 items-center justify-center rounded-full bg-accent text-2xs font-bold whitespace-nowrap">{person.slice(0, 2).toUpperCase()}</span>
+                {person}
                 <X aria-hidden className="size-3.5 text-muted-foreground" />
               </button>
             ))}
@@ -769,9 +774,11 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
           </div>
           {picking === undefined ? null : (
             <CalendarPickerField aria-label="Name or email" placeholder="Name or email" autoFocus value={picking} onChange={(input) => setPicking(input.target.value)}
-              onKeyDown={(key) => { if (key.key === "Enter") { key.preventDefault(); addTyped(); } if (key.key === "Escape") setPicking(undefined); }}
-              doneLabel="Done adding people" onDone={() => { addTyped(); setPicking(undefined); }} />
+              onKeyDown={(key) => { if (key.key === "Enter" && addable) { key.preventDefault(); addTyped(); } if (key.key === "Escape") setPicking(undefined); }}
+              doneLabel="Done adding people" onDone={() => setPicking(undefined)} />
           )}
+          {picking !== undefined && addable ? <button type="button" onClick={addTyped} className="min-h-13 px-1 py-2.5 text-left wrap-anywhere">{`Add ${typedEmail}`}</button> : null}
+          {picking !== undefined && typedEmail !== "" && !addable ? <div className="pt-3 pr-0 pb-1 pl-0.5 text-sm text-muted-foreground">No match</div> : null}
         </CalendarFormCard>
         {choosesCalendar || choosesRepeat ? (
           <CalendarFormCard className="gap-1 py-2 pr-3 pl-4">

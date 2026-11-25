@@ -9,6 +9,8 @@ export type BrowserBarProps = {
   leading?: ReactNode;
   /** The page's host; empty for a tab with no page, which shows the address bar's hint instead. */
   host: string;
+  /** What the bar says while there is no host: "New tab" or "New private tab" by default. */
+  hint?: string;
   /** The rest of the page's address after its host. */
   path?: string;
   /** Whether the page came over a secure connection. */
@@ -34,7 +36,7 @@ export type BrowserBarProps = {
 const pageControl = "h-13 w-11 rounded-full disabled:opacity-30 in-data-[alpha-launcher]:w-10";
 
 /** The Browser's bar: the way out, the page's address, its back and forward, the open tabs and the menu. */
-export function BrowserBar({ leading, host, path = "", secure = false, private: privateTab = false, tabs, onEdit, onStop, onBack, onForward, onTabs, onMenu }: BrowserBarProps) {
+export function BrowserBar({ leading, host, hint, path = "", secure = false, private: privateTab = false, tabs, onEdit, onStop, onBack, onForward, onTabs, onMenu }: BrowserBarProps) {
   return (
     <header data-host-chrome="" className="relative z-10 flex h-13 shrink-0 items-center bg-background pr-2 in-data-[alpha-launcher]:mt-11 in-data-[alpha-launcher]:h-14 in-data-[alpha-launcher]:gap-0.5 in-data-[alpha-launcher]:pr-1.5 in-data-[alpha-launcher]:pl-1.5">
       <div className="flex shrink-0 in-data-[alpha-launcher]:hidden [&>button]:size-13 [&>button]:rounded-lg">{leading}</div>
@@ -43,7 +45,7 @@ export function BrowserBar({ leading, host, path = "", secure = false, private: 
         <span className="sr-only">Edit address</span>
         {privateTab && <PrivateMark className="mr-2 size-4.5 shrink-0" />}
         {secure && <Lock role="img" aria-label="Secure connection" className="mr-1.5 size-3.25 shrink-0 text-muted-foreground" />}
-        <span className={cn("min-w-0 truncate", host === "" && "text-muted-foreground")}>{host || (privateTab ? "New private tab" : "New tab")}</span>
+        <span className={cn("min-w-0 truncate", host === "" && "text-muted-foreground")}>{host || hint || (privateTab ? "New private tab" : "New tab")}</span>
         <span className="truncate text-muted-foreground">{path}</span>
       </button>
       <div role="group" aria-label="Page navigation" className="flex shrink-0">

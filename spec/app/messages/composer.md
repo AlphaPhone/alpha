@@ -261,8 +261,11 @@ pure def undo(c: Composer): Composer = { ...c, slot: { author: Nobody, draft: D:
 
 The agent may ask for a reply to the conversation open on screen, or for a
 draft to a number the owner wrote, whose conversation Messages opens first,
-as a number handed to it. Its text becomes Alpha's draft there, for the
-owner to edit and send. A draft already written, or one held by a send, is
+as a number handed to it. After the owner reviewed the latest sender’s full
+number and the agent's reply named its Android thread, a follow-up draft
+uses that exact thread only while Android still shows the same sole
+recipient there. Its text becomes Alpha's draft there, for the owner to
+edit and send. A draft already written, or one held by a send, is
 left as it is, and the agent is told the draft is occupied; with no
 conversation open it is told none is selected.
 

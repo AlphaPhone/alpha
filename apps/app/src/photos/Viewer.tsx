@@ -10,7 +10,8 @@ import { OpenedPhoto, photoEmailAllowed, photoLook, photoMessageType, type Media
 import { photoLooks } from "../platform/photoCanvas.vibe";
 import { ClipEditor } from "./ClipEditor.tsx";
 import { CropFrame, CropHeader, editFrame, editHeader, editTool } from "./CropFrame.tsx";
-import { headingOf, trashDaysLabel, trashDaysLeft } from "./Grid.tsx";
+import { trashDaysLabel, trashDaysLeft } from "./Grid.tsx";
+import { headingOf } from "../runtime/dateHeading.ts";
 import { Time } from "../runtime/time.vibe";
 import { Device } from "../platform/device.vibe";
 
@@ -193,8 +194,8 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onBack, back
       data-alpha-subview={clipEditor ? "photos-clip-editor" : state.editing ? "photos-editor" : "photos-viewer"}
       // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the photo viewer and its controls keep their dark tokens in either app theme
       className={cn("dark absolute inset-0 z-50 flex min-h-0 flex-col text-foreground", "bg-background", !clipEditor && dockClearance)}>
-      <header data-host-chrome="" className={cn(clipEditor ? "flex shrink-0 items-center gap-2 bg-foreground/[0.066667] px-3 pt-3 pb-2" : state.editing ? editHeader : "flex min-h-14 shrink-0 items-center gap-2 px-2", !chrome && hiddenChrome)}>
-        <Button variant="ghost" size="icon" className={clipEditor ? "size-11" : undefined} aria-label={backLabel} onClick={close}>{state.editing && !clipEditor ? <X /> : <ChevronLeft />}</Button>
+      <header data-host-chrome="" className={cn(clipEditor ? "flex shrink-0 items-center gap-2 bg-foreground/[0.066667] px-3 pt-3 pb-2" : state.editing ? editHeader : "flex min-h-13 shrink-0 items-center gap-0.5 px-2", !chrome && hiddenChrome)}>
+        <Button variant="ghost" size="icon" className={clipEditor ? "size-11" : state.editing ? undefined : "size-13 rounded-tile"} aria-label={backLabel} onClick={close}>{state.editing && !clipEditor ? <X /> : <ChevronLeft />}</Button>
         {clipEditor ? <h1 className="flex-1 text-base font-normal">Edit video</h1> : state.editing ? <div className="flex-1"><h1 className="sr-only">Edit photo</h1></div> : <div className="min-w-0 flex-1">
           <h1 className="truncate text-base font-semibold">{day}</h1>
           {expiry !== undefined ? <span className="block truncate text-caption text-muted-foreground">{trashDaysLabel(expiry)}</span>
@@ -202,9 +203,7 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onBack, back
         </div>}
         {!state.editing && showing && photosMenu.length > 0 && <Menu>
           <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Photo actions"><Ellipsis /></Button></MenuTrigger>
-          <MenuContent
-            // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the portalled photo menu follows the viewer's fixed dark theme
-            className="dark">{photosMenu.map(({ label, icon, select }) => <MenuItem key={label} onSelect={select}>{icon}{label}</MenuItem>)}</MenuContent>
+          <MenuContent>{photosMenu.map(({ label, icon, select }) => <MenuItem key={label} onSelect={select}>{icon}{label}</MenuItem>)}</MenuContent>
         </Menu>}
         {state.editing && preview?.canReplace && allows({ type: "chooseReplace", replace: !state.replace }) && <Button variant="secondary" size="sm" className={editTool} aria-pressed={state.replace} onClick={() => action({ type: "chooseReplace", replace: !state.replace })}>Replace</Button>}
         {state.editing && <Button className={clipEditor ? "h-11 px-4 text-base font-normal disabled:opacity-100" : "px-4.5"} size="sm"

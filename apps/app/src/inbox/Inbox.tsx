@@ -1,6 +1,6 @@
 // spec/app/inbox/index.md, "Story: See my mail"; spec/app/inbox/message.md, "Story: Read a message"; spec/app/inbox/marking.md, "Story: Mark mail read or unread"; spec/app/inbox/sending.md, "Story: Archive or trash mail, with Undo"
 import {
-  Alert, Button, InboxAccountList, InboxAccountSheet, InboxAttachmentReview, InboxChangeReview, InboxChangeToast, type InboxFolder,
+  Alert, Button, InboxAccountList, InboxAttachmentReview, InboxChangeReview, InboxChangeToast, type InboxFolder,
   InboxLinkReview, type InboxListRow, InboxListScreen, type InboxListStateKind, InboxMessageScreen, type InboxMessageFaultKind, InboxNotice,
   type InboxNoticeKind, ToastRegion,
 } from "@repo/ui";
@@ -30,7 +30,7 @@ import { useTimed } from "../runtime/react.ts";
 import type { Cloud } from "../platform/cloud.vibe";
 import { untimed } from "../runtime/reactor.vibe";
 import { Time } from "../runtime/time.vibe";
-import { Compose, FileOffer, Shelf, Suggested } from "./Compose.tsx";
+import { Compose, FileOffer, Suggested } from "./Compose.tsx";
 import type { Offers } from "./suggestion.vibe";
 import type { Machine as Offering } from "../../gen/app__inbox__suggestion.effect.vibe";
 import type { Incoming } from "./adding.vibe";
@@ -72,11 +72,18 @@ function arrived(receivedAt: string, today: number): string {
   return sameDay ? at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : at.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
+/** When a message arrived in full, as its details word it: weekday, date, time with seconds, and time zone. */
+function arrivedFully(receivedAt: string): string {
+  const at = new Date(receivedAt);
+  if (Number.isNaN(at.getTime())) return "Date unavailable";
+  return at.toLocaleString([], { weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit", timeZoneName: "short" }).replace(/[\u202f\u00a0]/gu, " ");
+}
+
 /** The name a sender wrote, else the address. */
 const senderName = (from: string) => from.replace(/<[^>]*>/u, "").replace(/"/gu, "").trim() || from;
 const senderAddress = (from: string) => /<([^>]+)>/u.exec(from)?.[1] ?? from;
 
-/** Why the list has nothing to show, as the list's state says it; none where it has rows to show or is reading. */
+/** Why the list has nothing to show, as the list's state says it, else that the accounts are being checked or could not be; none where it has rows to show or is reading. */
 function emptyOf(s: Mailbox): InboxListStateKind | undefined {
   if (!s.signedIn || s.failure === "LeaseNeeded") return "signedOut";
   if (s.accounts.status === "Loaded" && s.selected.account === 0 && s.connected.length === 0) return "notConnected";
@@ -84,12 +91,14 @@ function emptyOf(s: Mailbox): InboxListStateKind | undefined {
   if (readable(s) && !searchableIn(s.selected.folder, s)) return "unavailable";
   if (s.list.status === "Failed") return s.failure === "Offline" ? "offline" : "failed";
   if (s.list.status === "Loaded" && s.pages > 0 && s.total === 0) return s.selected.query === "" ? "empty" : "noResults";
+  if (s.accounts.status === "Idle" || s.accounts.status === "Loading") return "checking";
+  if (s.accounts.status === "Failed") return "failed";
   return undefined;
 }
 
 /** What the list tells the owner above its messages, most pressing first. */
 function noticeOf(s: Mailbox): InboxNoticeKind | undefined {
-  if (s.failure === "Revoked") return "reconnect";
+  if (s.failure === "Revoked" || s.failure === "LeaseNeeded") return "reconnect";
   if (s.list.status === "Failed" && s.pages > 0) return s.failure === "Offline" ? "offline" : "unreachable";
   if (s.saved) return "savedList";
   if (s.doubtful) return "listOutOfDate";
@@ -174,6 +183,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const marking = useMarks(runtime);
   const changes = useTimed(runtime, useChanges);
   const remote = usePreferences(runtime).state?.images ?? false;
+  const today = runtime.runSync(Time.use((time) => time.latest()));
   const read = state ? mailOf(runtime, (mail) => mail.body(state.body.ticket)) : undefined;
   const reviewLink = useCallback((at: number) => {
     const link = read === undefined ? undefined : prepareMessage(read).links.at(at - 1);
@@ -223,7 +233,8 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
         address={senderAddress(card?.from ?? "")}
         to={card?.to.join(", ") ?? ""}
         cc={card?.cc.join(", ") || undefined}
-        date={card ? new Date(card.receivedAt).toLocaleString() : ""}
+        date={card ? arrived(card.receivedAt, today) : ""}
+        fullDate={card ? arrivedFully(card.receivedAt) : undefined}
         place={state.position + 1}
         count={Math.max(state.thread, 1)}
         onOlder={can(earlier) ? () => void send(earlier) : undefined}
@@ -250,7 +261,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
         onTrash={changing("Trash")}
         onAskAlpha={can({ type: "askAlpha" }) ? () => void send({ type: "askAlpha" }) : undefined}
         onReply={loaded ? onBegin({ kind: "Reply", account: state.account, message: answered }) : undefined}
-        onReplyAll={loaded ? onBegin({ kind: "ReplyAll", account: state.account, message: answered }) : undefined}
+        onReplyAll={loaded && new Set([...(card?.to ?? []), ...(card?.cc ?? [])].map((one) => one.toLowerCase())).size > 1 ? onBegin({ kind: "ReplyAll", account: state.account, message: answered }) : undefined}
         onForward={loaded ? onBegin({ kind: "Forward", account: state.account, message: answered }) : undefined}
       >
         {state.fromPhone && card ? <p className="whitespace-pre-wrap break-words">{card.snippet}</p> : null}
@@ -291,8 +302,6 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const remote = usePreferences(runtime).state?.images ?? false;
   const [typed, setTyped] = useState<{ text: string; over: string; folder: string } | undefined>();
   const [selection, setSelection] = useState<string>();
-  const [choosing, setChoosing] = useState(false);
-  const [shelf, setShelf] = useState(false);
   const [unopenedDraft, setUnopenedDraft] = useState<number>();
   if (cause) return <Alert variant="destructive" className="m-4">Alpha could not open Inbox</Alert>;
   if (!state || !message.state || !drafts.state) return null;
@@ -338,7 +347,10 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
     const swipe = { type: "swipe", message: number } as const;
     const canArchive = !selecting && !draftsFolder && folder !== "Archived" && folder !== "Trashed" && can(swipe) && changes.can(changeOf(state, "Archive", [number], revisionOf(card)), "Owner");
     return {
-      id: String(number), sender: folder === "Sent" || draftsFolder ? `To: ${card.to.length ? card.to.join(", ") : "(no recipients)"}` : senderName(card.from),
+      id: String(number),
+      sender: draftsFolder ? (card.to.length ? `Draft to ${card.to.join(", ")}` : "Draft (no recipients)")
+        : folder === "Sent" ? `To: ${card.to.length ? card.to.join(", ") : "(no recipients)"}` : senderName(card.from),
+      initial: draftsFolder ? "D" : folder === "Sent" ? (card.to[0] ?? "?").slice(0, 1).toUpperCase() : undefined,
       subject: card.subject || "(no subject)", snippet: card.snippet,
       time: arrived(card.receivedAt, today), unread: card.isUnread, chosen, selecting,
       onOpen: editing ?? (opening ? () => void message.send(opening) : undefined),
@@ -355,6 +367,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
     return changes.can(event, "Owner") ? () => void changes.send(event, "Owner") : undefined;
   };
   const kind = letters.length === 0 ? emptyOf(state) : undefined;
+  const notice = kind === "signedOut" ? undefined : noticeOf(state);
   // spec/app/inbox/index.md, "Select all chooses every message the list shows, in one change"
   const chooseAll = { type: "chooseAll", shown: letters.map((letter) => letter.message) } as const;
   const canSearch = !draftsFolder && readable(state) && searchableIn(folder, state);
@@ -375,6 +388,15 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
       void send(event);
     }
   };
+  // spec/app/inbox/shelf.md, "Story: Keep drafts set aside"
+  const shelved: InboxListRow[] = drafts.state.shelf.shelved.map((id) => {
+    const words = runtime.runSync(Letters.use((all) => Effect.sync(() => all.words(id))));
+    const resume = { type: "resume", draft: id } as const;
+    return {
+      id: `shelf:${id}`, sender: "Draft", initial: "D", subject: words.subject || "(No subject)", snippet: words.text.slice(0, 160), time: "Draft",
+      onOpen: drafts.can(resume, "Owner") ? () => void drafts.send(resume, "Owner") : undefined,
+    };
+  });
   const mustChoose = state.accounts.status === "Loaded" && account === 0 && state.connected.length > 0;
   return (
     <>
@@ -414,8 +436,8 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
             void send(event);
           }
         } : undefined}
-        notice={noticeOf(state)}
-        onNoticeAction={noticeOf(state) === "reconnect" ? signIn : retryList}
+        notice={notice}
+        onNoticeAction={notice === "reconnect" ? signIn : retryList}
         state={mustChoose ? undefined : kind}
         onStateAction={kind === "offline" || kind === "failed" ? retryList : kind === "signedOut" ? signIn : settings}
         chosen={state.chosen.length}
@@ -428,10 +450,10 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
         onRestore={state.selected.folder === "Archived" ? chosenChange("Unarchive") : state.selected.folder === "Trashed" ? chosenChange("Untrash") : undefined}
         onRefresh={refresh}
         onCompose={onBegin({ kind: "Fresh", account })}
-        aside={drafts.state.shelf.shelved.length}
-        onShelf={() => setShelf(true)}
-        onAccount={state.connected.length > 0 ? () => setChoosing(true) : undefined}
-        rows={letters.map(row)}
+        accounts={accounts}
+        onChooseAccount={chooseAccount}
+        aside={shelved.map(({ id, onOpen }) => ({ id, onOpen }))}
+        rows={draftsFolder ? [...shelved, ...letters.map(row)] : letters.map(row)}
         loading={state.list.status === "Loading" && !state.further}
         onLoadMore={can({ type: "loadMore" }) ? () => void send({ type: "loadMore" }) : undefined}
         loadingMore={state.list.status === "Loading" && state.further}
@@ -443,8 +465,6 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
         }} />
       ) : null}
       {mustChoose ? <InboxAccountList accounts={accounts} onChoose={chooseAccount} /> : null}
-      <InboxAccountSheet open={choosing} onOpenChange={setChoosing} accounts={accounts} selected={String(account)} onChoose={chooseAccount} />
-      <Shelf runtime={runtime} open={shelf} onOpenChange={setShelf} />
       <FileOffer runtime={runtime} />
       <Suggested runtime={runtime} />
       {review}

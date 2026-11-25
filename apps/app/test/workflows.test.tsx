@@ -63,6 +63,24 @@ describe("Workflows", () => {
     expect(visible("Monthly statement", "Desk check", "Retired brief")).toEqual(["Retired brief"]);
   });
 
+  it('Explores Add to Workflows while signed out (spec/app/workflows/list.md, "From the list the owner can open a row, Add to Workflows, or the digests; Back returns to the same filters")', async () => {
+    const world = scene();
+    world.signedIn = false;
+    world.residentAvailable = false;
+    const alpha = await openWorkflows(world);
+    const area = workflows.runtime(alpha);
+    await until(alpha, area, Listing, (state) => state.owner === 0 && state.place.tag === "ListingRows");
+    expect(visible("Monthly statement", "Desk check", "Retired brief")).toEqual([]);
+    await press("Add to Workflows");
+    await until(alpha, area, Listing, (state) => state.place.tag === "ListingAdd");
+    const choices = [...document.querySelectorAll<HTMLButtonElement>("main button")];
+    expect(["Automation", "Reminder", "Scheduled digest"].map((name) => choices.find((item) => item.textContent?.startsWith(name))?.disabled)).toEqual([true, true, true]);
+    await drawn(() => alpha.back());
+    await until(alpha, area, Listing, (state) => state.place.tag === "ListingRows");
+    expect(button("Add to Workflows")).toBeDefined();
+    expect(visible("Monthly statement", "Desk check", "Retired brief")).toEqual([]);
+  });
+
   it('Reviews a Clock request within its Alarms page and restores focus to the list (spec/app/workflows/clock.md, "Story: Review, then hand over to Clock")', async () => {
     const world = scene();
     world.phone = true;
@@ -70,8 +88,9 @@ describe("Workflows", () => {
     const area = workflows.runtime(alpha);
     await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
 
+    await press("Add to Workflows");
     const opener = button("Clock alarms");
-    expect(opener?.textContent).toBe("Alarms");
+    expect(opener?.textContent).toBe("Alarm");
     await press("Clock alarms");
     await until(alpha, area, Clock, (state) => state.open && state.history.status === "Loaded");
 
@@ -113,7 +132,7 @@ describe("Workflows", () => {
     for (const { id, displayName, ...timing } of existing) {
       await choose(displayName);
       await until(alpha, area, Automations, (state) => state.present && state.list.status === "Loaded");
-      await press("Edit");
+      await press("Edit prompt");
       await fill("Instructions", "Review the updated details.");
       await press("Review");
       await pressOnTop("Save changes");
@@ -129,7 +148,7 @@ describe("Workflows", () => {
 
     await choose("Delivery review");
     await until(alpha, area, Automations, (state) => state.present && state.list.status === "Loaded");
-    await press("Edit");
+    await press("Edit prompt");
     await press("Weekends");
     await press("Review");
     await pressOnTop("Save changes");
@@ -137,7 +156,7 @@ describe("Workflows", () => {
     expect(world.workflows.prompts.get("weekly-prompt")).toMatchObject({ cronExpression: "13 8 * * 0,6", revision: 3 });
 
     await until(alpha, area, Automations, (state) => state.present && state.list.status === "Loaded");
-    await press("Edit");
+    await press("Edit prompt");
     await fill("Instructions", "One more update.");
     await press("Review");
     const current = world.workflows.prompts.get("weekly-prompt");
@@ -159,7 +178,7 @@ describe("Workflows", () => {
     await until(alpha, area, Definition, (state) => state.detail.status === "Loaded");
     await until(alpha, area, Runs, (state) => state.reading.status === "Loaded");
     await press("Run now");
-    await pressOnTop("Run now");
+    await press("Confirm run");
     await until(alpha, area, Sheet, (state) => state.history.status === "Loaded" && state.shown === 1);
     expect(world.workflows.admissions).toHaveLength(1);
     expect(world.workflows.admissions[0]?.version).toBe("monthly-statement-v3");

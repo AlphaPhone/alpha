@@ -16,17 +16,17 @@ export type HomeWorkflowsCardProps = Omit<ComponentProps<"button">, "children" |
 
 const marks: Record<HomeWorkflowsFreshness, string | undefined> = {
   UpToDate: undefined,
-  NotCurrent: "Not up to date",
-  Stale: "Out of date",
+  NotCurrent: "Not current",
+  Stale: "Stale",
   SomeUnavailable: "Some unavailable",
 };
 
-/** The Workflows card: the first two enabled workflows and how many more; a press opens Workflows. */
+/** The Workflows card: the first two enabled workflows, and at its foot how many more or how current they are; a press opens Workflows. */
 export function HomeWorkflowsCard({ lines, more, freshness, ...props }: HomeWorkflowsCardProps) {
+  const foot = marks[freshness] ?? (more > 0 ? `+${more} more` : "View workflows");
   return (
-    <HomeCard icon={<Workflow />} notCurrent={marks[freshness]} {...props}>
+    <HomeCard icon={<Workflow />} status={foot} {...props}>
       <HomeCardLines lines={lines} />
-      {more > 0 ? <span className="text-sm text-muted-foreground">+{more} more</span> : null}
     </HomeCard>
   );
 }
