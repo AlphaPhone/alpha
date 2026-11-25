@@ -375,7 +375,7 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   expect([world.mailLease.held, world.mailLease.asked, Boolean(button("Reconnect Gmail")), rows()]).toEqual([true, 3, false, shown]);
 });
 
-it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I reviewed\"; spec/app/inbox/drafts.md, \"Story: Write a message\"; spec/app/inbox/drafts.md, \"Story: Set a draft aside or discard it\"; spec/app/inbox/adding.md, \"Story: Add files and people to my draft\"; spec/app/inbox/suggestion.md, \"Story: Review what is offered into my email\"; spec/app/inbox/sending.md, \"Story: Save my draft to Gmail, or delete it there, knowingly\")", async () => {
+it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I reviewed\"; spec/app/inbox/drafts.md, \"Story: Write a message\"; spec/app/inbox/drafts.md, \"Story: Set a draft aside or discard it\"; spec/app/inbox/adding.md, \"Story: Add files and people to my draft\"; spec/app/inbox/suggestion.md, \"Story: Review what is offered into my email\"; spec/app/inbox/sending.md, \"Story: Save my draft to Gmail, or delete it there, knowingly\"; spec/app/inbox/drafts.md, \"Story: Find out whether a send went\")", async () => {
   const world = { ...scene(), phone: false };
   const original = world.inbox.mail.find(({ card }) => card.id === "g4");
   if (!original) throw new Error("Missing original mail fixture");
@@ -461,8 +461,13 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "Send");
   expect(document.querySelector("[role=dialog]")?.textContent).toContain("actions.txt");
   expect(world.inbox.changes).toHaveLength(2);
+  world.inbox.loseSendReply = true;
   await confirm("Send");
+  await until(alpha, runtime, Writing, (s) => s.open && s.letter.doubt.attempt !== 0);
+  expect(told()).toContain("Alpha cannot tell whether it was sent");
+  await press("Check Sent");
   await until(alpha, runtime, Writing, (s) => !s.open);
+  expect(world.inbox.receiptReads).toHaveLength(1);
   expect([world.inbox.changes.at(-1), world.inbox.attached]).toEqual(["send reader@example.test Fwd: Standup notes", ["receipt.txt", "actions.txt"]]);
 
   // spec/app/inbox/drafts.md, "A draft is set aside only once it is wholly kept on the phone, and comes back exactly as it was set aside"
