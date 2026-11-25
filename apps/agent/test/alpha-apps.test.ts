@@ -90,6 +90,76 @@ describe("Alpha product plugin: what the model may pass and what the owner sees"
   });
 });
 
+describe("Alpha product plugin: Clock reads the model's arguments, never the owner's words", () => {
+  it("names a timer or alarm only when the model does, and repeats an alarm only on the days the model gives", async () => {
+    const store = new AlphaAppsStore({ now: () => Date.UTC(2026, 10, 24, 18, 0) });
+    const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC" });
+    const timer = plugin.actions!.find((action) => action.name === "CLOCK_TIMER")!;
+    const alarm = plugin.actions!.find((action) => action.name === "CLOCK_ALARM")!;
+    await timer.handler(makeFakeRuntime().runtime, emptyMessage("Set a timer for 5 minutes"), emptyState, { parameters: { action: "start", durationSeconds: 300 } });
+    await alarm.handler(makeFakeRuntime().runtime, emptyMessage("Wake me at 7 on Monday"), emptyState, { parameters: { action: "set", hour: 7, minute: 0 } });
+    expect(store.getClock().timers.map(({ label }) => label)).toEqual([""]);
+    expect(store.getClock().alarms.map(({ label, daysMask }) => ({ label, daysMask }))).toEqual([{ label: "", daysMask: 0 }]);
+  });
+
+  it("acts on an alarm only when the model names which one, once there are several", async () => {
+    const store = new AlphaAppsStore({ now: () => Date.UTC(2026, 10, 24, 18, 0) });
+    const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC" });
+    const alarm = plugin.actions!.find((action) => action.name === "CLOCK_ALARM")!;
+    const run = (parameters: Record<string, string | number>) => alarm.handler(makeFakeRuntime().runtime, emptyMessage(""), emptyState, { parameters });
+    await run({ action: "set", hour: 6, minute: 0 });
+    await run({ action: "set", hour: 7, minute: 0 });
+    const guessed = await run({ action: "delete" });
+    const named = await run({ action: "delete", hour: 7, minute: 0 });
+    expect([guessed?.success, named?.success, store.getClock().alarms.map(({ hour }) => hour)]).toEqual([false, true, [6]]);
+    const context = await plugin.providers!.find((provider) => provider.name === "CLOCK_CONTEXT")!.get(makeFakeRuntime().runtime, emptyMessage(""), emptyState);
+    expect(context.text).toContain(`[${store.getClock().alarms[0]?.id}] 6:00 AM`);
+  });
+});
+
+describe("Alpha product plugin: Clock acts only on what the model named", () => {
+  const clockOf = () => {
+    let nowMs = Date.UTC(2026, 10, 24, 5, 59);
+    const store = new AlphaAppsStore({ now: () => nowMs });
+    const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC" });
+    const run = (name: string, parameters: Record<string, string | number | boolean | readonly string[]>) =>
+      plugin.actions!.find((action) => action.name === name)!.handler(makeFakeRuntime().runtime, emptyMessage(""), emptyState, { parameters: parameters as never });
+    return { store, run, at: (ms: number) => { nowMs = ms; } };
+  };
+
+  it("reads repeat days in any case or short form, and refuses a day it cannot read without setting or changing anything", async () => {
+    const { store, run } = clockOf();
+    const capital = await run("CLOCK_ALARM", { action: "set", hour: 6, minute: 0, days: ["Monday", "wed"] });
+    const unknown = await run("CLOCK_ALARM", { action: "set", hour: 7, minute: 0, days: ["weekdays"] });
+    const id = store.getClock().alarms[0]?.id ?? "";
+    const badUpdate = await run("CLOCK_ALARM", { action: "update", id, days: ["someday"] });
+    expect([capital?.success, unknown?.success, badUpdate?.success]).toEqual([true, false, false]);
+    expect(store.getClock().alarms.map(({ hour, daysMask }) => ({ hour, daysMask }))).toEqual([{ hour: 6, daysMask: 10 }]);
+    await run("CLOCK_ALARM", { action: "delete", id });
+  });
+
+  it("acts on the alarm the model named even while another rings, and on a timer only when it is named or the only one", async () => {
+    const { store, run, at } = clockOf();
+    await run("CLOCK_ALARM", { action: "set", hour: 6, minute: 0 });
+    await run("CLOCK_ALARM", { action: "set", hour: 7, minute: 0 });
+    at(Date.UTC(2026, 10, 24, 6, 0, 30));
+    const six = store.getClock().alarms.find(({ hour }) => hour === 6);
+    store.updateAlarm(six?.id ?? "", { phase: "ringing", timeZone: "UTC" });
+    expect(store.getClock().alarms.map(({ hour, phase }) => ({ hour, phase }))).toEqual([{ hour: 6, phase: "ringing" }, { hour: 7, phase: "idle" }]);
+    await run("CLOCK_ALARM", { action: "delete", hour: 7, minute: 0 });
+    expect(store.getClock().alarms.map(({ hour }) => hour)).toEqual([6]);
+    await run("CLOCK_ALARM", { action: "delete", hour: 6, minute: 0 });
+    await run("CLOCK_TIMER", { action: "start", durationSeconds: 300, label: "pasta" });
+    await run("CLOCK_TIMER", { action: "start", durationSeconds: 600, label: "tea" });
+    const unnamed = await run("CLOCK_TIMER", { action: "cancel" });
+    const noLength = await run("CLOCK_TIMER", { action: "start", label: "pasta" });
+    const named = await run("CLOCK_TIMER", { action: "cancel", label: "tea" });
+    expect([unnamed?.success, noLength?.success, named?.success, store.getClock().timers.map(({ label }) => label)]).toEqual([false, false, true, ["pasta"]]);
+    await run("CLOCK_TIMER", { action: "cancel", label: "pasta" });
+    expect([store.getClock().alarms, store.getClock().timers]).toEqual([[], []]);
+  });
+});
+
 describe("Alpha product plugin: Clock actions, provider, and routes", () => {
   // spec/agent/index.md, "The agent may run the actions the old phone's agent ran plus Alpha's Clock and Reminders actions, and every other action the bundle registers is listed as refused with its reason"
   it("runs CLOCK_ALARM, CLOCK_TIMER, CLOCK_WORLD actions and injects CLOCK_CONTEXT", async () => {
@@ -105,7 +175,9 @@ describe("Alpha product plugin: Clock actions, provider, and routes", () => {
     const worldAction = plugin.actions!.find((a) => a.name === "CLOCK_WORLD")!;
     const provider = plugin.providers!.find((p) => p.name === "CLOCK_CONTEXT")!;
 
-    const setRes = await alarmAction.handler(runtime, emptyMessage("Set an alarm for 7:30 am weekdays labeled Standup"), emptyState, { parameters: {} });
+    const setRes = await alarmAction.handler(runtime, emptyMessage("Set an alarm for 7:30 am weekdays labeled Standup"), emptyState, {
+      parameters: { action: "set", hour: 7, minute: 30, days: ["monday", "tuesday", "wednesday", "thursday", "friday"], label: "Standup" },
+    });
     expect(setRes?.success).toBe(true);
     const alarmId = ((setRes?.data as { alarm: { id: string } }).alarm).id;
     expect(store.getClock().alarms[0]?.daysMask).toBe(62);
@@ -117,7 +189,7 @@ describe("Alpha product plugin: Clock actions, provider, and routes", () => {
     await alarmAction.handler(runtime, emptyMessage("Update alarm"), emptyState, { parameters: { action: "update", id: alarmId, hour: 8, minute: 15, enabled: true } });
     expect(store.getClock().alarms[0]?.hour).toBe(8);
 
-    const snoozeRes = await alarmAction.handler(runtime, emptyMessage("Snooze"), emptyState, { parameters: { action: "snooze", id: alarmId, minutes: 10 } });
+    const snoozeRes = await alarmAction.handler(runtime, emptyMessage("Snooze"), emptyState, { parameters: { action: "snooze", id: alarmId, snoozeMinutes: 10 } });
     expect(snoozeRes?.success).toBe(true);
     expect(store.getClock().alarms[0]?.phase).toBe("snoozed");
 
@@ -126,7 +198,7 @@ describe("Alpha product plugin: Clock actions, provider, and routes", () => {
     expect(store.getClock().alarms[0]?.phase).toBe("idle");
     expect(store.getClock().alarms[0]?.enabled).toBe(true);
 
-    const timerStart = await timerAction.handler(runtime, emptyMessage("Start a 5 minute timer for pasta"), emptyState, { parameters: {} });
+    const timerStart = await timerAction.handler(runtime, emptyMessage("Start a 5 minute timer for pasta"), emptyState, { parameters: { action: "start", durationSeconds: 300, label: "pasta" } });
     expect(timerStart?.success).toBe(true);
     const timerId = ((timerStart?.data as { timer: { id: string } }).timer).id;
 
@@ -136,7 +208,7 @@ describe("Alpha product plugin: Clock actions, provider, and routes", () => {
     expect(store.getClock().timers[0]?.remainingMs).toBe(240_000);
 
     await timerAction.handler(runtime, emptyMessage("Resume timer"), emptyState, { parameters: { action: "resume", id: timerId } });
-    await timerAction.handler(runtime, emptyMessage("Add 1 minute"), emptyState, { parameters: { action: "add_time", id: timerId, addMs: 60_000 } });
+    await timerAction.handler(runtime, emptyMessage("Add 1 minute"), emptyState, { parameters: { action: "add_time", id: timerId, durationSeconds: 60 } });
     expect(store.getClock().timers[0]?.remainingMs).toBe(300_000);
 
     const worldAdd = await worldAction.handler(runtime, emptyMessage("Add Tokyo"), emptyState, { parameters: { action: "add_city", city: "Tokyo" } });

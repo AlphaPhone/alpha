@@ -23,12 +23,12 @@ const base64 = /^[A-Za-z0-9+/]+={0,2}$/
 
 /** The owner sends a file reviewed in another app to the existing Ask Alpha draft. */
 export service MediaHandoff {
-  attach(file: Attached): boolean!!
+  attach(file: Attached, current?: Effect.Effect<boolean>): boolean!!
   offerTranscript(transcript: NoteTranscript): boolean!!
 }
 
-export effect function attachToAlpha(file: Attached): boolean!!MediaHandoff {
-  return try (try MediaHandoff).attach(file)
+export effect function attachToAlpha(file: Attached, current?: Effect.Effect<boolean>): boolean!!MediaHandoff {
+  return try (try MediaHandoff).attach(file, current)
 }
 
 module web {
@@ -201,7 +201,7 @@ export effect function insertFiles(target: FileTarget, files: readonly File[], a
   return try added(target, files.map((file, index) => ({ name: file.name, file: picked[index] })), admitted)
 }
 
-export effect function stageAttachment(file: Attached): boolean!!(Talk | Composer.Machine | Conversation | Shell | Agent) {
+export effect function stageAttachment(file: Attached, active: Effect.Effect<boolean> = succeed(true)): boolean!!(Talk | Composer.Machine | Conversation | Shell | Agent) {
   const authority = try attachmentAuthority()
   if (authority === undefined) return false
   const composer = try (try Composer.Machine).get()
@@ -209,7 +209,7 @@ export effect function stageAttachment(file: Attached): boolean!!(Talk | Compose
   if (context.sensitive || file.id === "" || file.data.length % 4 !== 0 || file.data.length > Picker.base64Of(Picker.imageIntakeBytes) || !base64.test(file.data)) return false
   const given = Effect.try(() => selected(file.data, file.name, file.mimeType)) catch () => undefined
   if (given === undefined) return false
-  const accepted = try added({ binding: composer.binding, slot: composer.read.ticket, revision: context.revision, authority }, [{ name: file.name, file: try encoded(given, file.id) }])
+  const accepted = try added({ binding: composer.binding, slot: composer.read.ticket, revision: context.revision, authority }, [{ name: file.name, file: try encoded(given, file.id) }], active)
   if (!accepted) return false
   const shell = try Shell
   if ((try shell.get()).assistant === "Bar") try contained(shell.send({ type: "raise", detent: "Sheet" }), "opening Ask Alpha")
