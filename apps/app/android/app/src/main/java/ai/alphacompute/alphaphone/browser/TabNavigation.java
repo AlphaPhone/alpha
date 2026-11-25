@@ -1,5 +1,6 @@
 package ai.alphacompute.alphaphone.browser;
 
+import android.webkit.WebViewClient;
 import java.net.URI;
 import java.util.Locale;
 
@@ -32,6 +33,15 @@ public final class TabNavigation {
         || parsed.getRawUserInfo() != null || parsed.getPort() != -1) return null;
     if (allowLoopback && loopback(host)) return null;
     return "https" + url.substring(url.indexOf(':'));
+  }
+
+  /** WebView network failures a different browser could reach. TLS and policy refusals stay local. */
+  public static boolean isUnreachableError(int code) {
+    return switch (code) {
+      case WebViewClient.ERROR_HOST_LOOKUP, WebViewClient.ERROR_CONNECT, WebViewClient.ERROR_IO,
+          WebViewClient.ERROR_TIMEOUT -> true;
+      default -> false;
+    };
   }
 
   /** The host of a plain-HTTP address, lower case, or null. */
