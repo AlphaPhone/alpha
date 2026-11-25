@@ -128,7 +128,10 @@ run. The pack's plugins register those same actions under the pinned
 eliza's names, and Alpha's `alpha-apps` product plugin registers
 `CLOCK_ALARM`, `CLOCK_TIMER`, `CLOCK_WORLD` and `REMINDERS_MANAGE`. Eliza's
 wallet module registers `WALLET`, which reads the wallet and asks for a
-transfer and can approve none. The
+transfer and can approve none.
+`BROWSER_OPEN` hands a web page the owner asks for to the screen they asked
+from, where no enrolled phone takes the open as a proposed step; the screen
+shows it for the owner to open, as the old phone did. The
 policy names `alpha-apps` as its product plugin and allows each action by
 name, so an action a later pin adds is refused until it is reviewed here.
 Core's `REPLY`, `IGNORE` and `NONE` are always allowed. Every other
@@ -148,7 +151,7 @@ pure val allowedActions: List[str] = List(
   "WORKFLOW",
   "MAPS_PLACE", "MAPS_WHERE_AM_I", "MAPS_ROUTE", "MAPS_NAVIGATION_START", "MAPS_NAVIGATION_REROUTE", "MAPS_NAVIGATION_STOP",
   "MAPS_SELECT", "MAPS_SAVE", "MAPS_SHARE", "MAPS_COVERAGE", "MAPS_SAVED",
-  "BROWSER", "BROWSER_BACK", "BROWSER_FORWARD", "BROWSER_RELOAD",
+  "BROWSER", "BROWSER_BACK", "BROWSER_FORWARD", "BROWSER_RELOAD", "BROWSER_OPEN",
   "NOTES_LIST", "NOTES_GET", "NOTES_CREATE", "NOTES_UPDATE", "NOTES_DELETE", "NOTES_RESTORE", "NOTES_MOVE",
   "PROPOSE_DEVICE_ACTION", "VIEWS",
   "CLOCK_ALARM", "CLOCK_TIMER", "CLOCK_WORLD", "REMINDERS_MANAGE",
@@ -192,7 +195,9 @@ phone lists them (`apps/app/src/shell/order.ts`), and eliza's agent service
 writes them into the launch (`spec/os/agentService/config.md`). Each id is
 the app's name in lower case, which the phone's renderer opens as that app.
 Clock and Reminders keep the other names the product plugin gave them, at
-most four each, as a launch allows. The model chooses which view a request means, by one of
+most four each, as a launch allows. Home is also named the home screen and
+the launcher, the phone's own names for it, so that next to Maps' directions
+home it reads as a screen and not a place. The model chooses which view a request means, by one of
 these names; nothing matches the owner's words. Whether a prepared view
 opens is the phone's: an app the phone does not admit, or any app over a
 sensitive screen, stays closed (`spec/app/assistant/index.md`, "Story: Let
@@ -201,7 +206,7 @@ Alpha open what it is talking about").
 ```quint
 type LaunchView = { id: str, label: str, path: str, aliases: List[str] }
 pure val launchViews: List[LaunchView] = List(
-  { id: "home", label: "Home", path: "/home", aliases: List() },
+  { id: "home", label: "Home", path: "/home", aliases: List("home screen", "launcher") },
   { id: "phone", label: "Phone", path: "/phone", aliases: List() },
   { id: "messages", label: "Messages", path: "/messages", aliases: List() },
   { id: "inbox", label: "Inbox", path: "/inbox", aliases: List() },

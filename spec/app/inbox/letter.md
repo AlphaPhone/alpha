@@ -73,6 +73,9 @@ pure def lawAttachingStaysWithinTheLimit(attachments: int, mib: int, policy: Pol
 
 A new message starts empty. `others` counts the addresses on To and Cc
 other than the owner and the one replied to.
+A forwarded file stays tied to its original message, revision and part.
+Gmail must confirm the names, types and sizes of those same parts before
+Alpha dispatches a send or a save.
 
 ```quint
 pure def begin(id: int, session: int, kind: Kind, account: int, others: int, replyTo: bool, files: int, mib: int, forwardable: bool, policy: Policy): Letter =

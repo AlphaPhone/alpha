@@ -38,16 +38,17 @@ import { CommsPrompts, type CommsPrompt, commsViewOf } from "../phone/comms.vibe
 import { MailQuestions, withMail } from "../inbox/mail-context.vibe"
 import { type Job, answer, applying, contained, following, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import { type SpokenChatLease, VoiceWords } from "../voice/voice.vibe"
+import { type SpokenChatContext, type SpokenChatLease, VoiceWords } from "../voice/voice.vibe"
 import { FileContext, documentObservation } from "./file-context.vibe"
 import { MediaReview, mediaReview } from "./media-review.vibe"
 import { agentWarmUp } from "./warm-up.vibe"
 import { type Attached, type Board, type DraftSeat, type Line, Talk, talk } from "./talk.vibe"
-import { Views, carried, carriedAloud, delivery, handoffs, preparedIn, resendWithoutMode } from "./views.vibe"
+import { Views, carried, carriedAloud, delivery, handoffs, pageIn, preparedIn, resendWithoutMode } from "./views.vibe"
 import { attachmentAuthority, dropFiles, readFiles, rememberFiles, retireTranscript, sameBinding, stageFiles } from "./attachments.vibe"
 import { readMessage } from "./read-aloud.vibe"
 import { withoutTurnTags } from "./words.ts"
 import { type DraftAddress, exchangePhoneDraft, readPhoneDraft } from "./draft-device.vibe"
+import { offerRecordingSummary } from "./recording-summary.vibe"
 
 service Turns {
   readonly controller: TurnController
@@ -245,9 +246,9 @@ effect function screenTold(told: boolean, context: Conversation.Context, transcr
 export const spokenScreen = started(effect {
   const { memory } = try VoiceWords
   const context = try Effect.context<ScreenContext>()
-  const chatContext = try Effect.context<Agent | Chats.Machine | Composer.Machine | Conversation.Machine | Talk>()
+  const chatContext = try Effect.context<SpokenChatContext | Composer.Machine>()
   const { writer } = try Talk
-  memory.chat = { writer, begin: (session, turn, current) => Effect.provideContext(spokenChat(session, turn, current), chatContext) }
+  memory.chat = { context: chatContext, writer, begin: (session, turn, current) => Effect.provideContext(spokenChat(session, turn, current), chatContext) }
   memory.screen = (shown) => Effect.provideContext(Effect.map(screenTold(true, shown), ({ metadata, sms, attachment }) => ({ metadata, sms, attachment })), context)
 }, "telling voice the screen")
 
@@ -483,7 +484,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
         if (labelled()) board.change({ label: label ?? `Using ${name}` })
       },
     }
-    board.change({ media: [], mediaNote: undefined })
+    board.change({ media: board.snapshot().media.filter((card) => card.decision === "Deciding"), mediaNote: undefined })
     const views = try Views
     const asked = try views.begin()
     // spec/app/assistant/context.md, "A turn asked while Files shows a readable document attaches it for that turn"
@@ -534,6 +535,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const finishing = Conversation.canFinish(try conversation.get(), ticket)
     if (result?.kind === "Replied" && finishing) {
       const prepared = told ? preparedIn(result.reply.actionResults, views.clientId) : undefined
+      const page = told ? pageIn(result.reply.actionResults, views.clientId) : undefined
       let continueFiles: Effect.Effect<void> | undefined
       if (result.reply.userMessageId !== undefined) {
         board.messageNumber(result.reply.userMessageId)
@@ -541,6 +543,10 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       }
       board.messageNumber(result.reply.messageId)
       board.append(pageTicket, chats.chosen, { id: result.reply.messageId, mine: false, text: result.reply.text })
+      const recordingSummary = transcript === undefined || seat === undefined || result.reply.failureKind !== undefined
+        ? undefined : try offerRecordingSummary({ source: transcript.offered, seat, conversation: chats.chosen,
+          conversationId: known.record.id, message: result.reply.messageId }, result.reply.text)
+      if (board.draftSeat === seat) board.change({ recordingSummary })
       try syncAlphaApps()
       if (enrolled !== undefined && result.reply.userMessageId !== undefined) {
         const replied = streamed(result.clientMessageId)
@@ -572,9 +578,13 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
             ...(voicemail === undefined ? {} : { voicemail }), ...(inFiles === undefined ? {} : { directFiles: inFiles }),
             ...(outsideFiles === undefined ? {} : { outsideFiles }) })
         if (board.lastSentId === result.clientMessageId && (try conversation.get()).context.revision === context.revision
-          && (try history.get()).chosen === chats.chosen) board.change({ media })
+          && (try history.get()).chosen === chats.chosen) {
+          const deciding = board.snapshot().media.filter((card) => card.decision === "Deciding")
+          board.change({ media: [...deciding, ...media.filter((card) => !deciding.some((held) => held.id === card.id && held.digest === card.digest))] })
+        }
       }
       if (continueFiles !== undefined) try views.hold(ticket, { asked, continueFiles })
+      else if (page !== undefined) try views.hold(ticket, { asked, page })
       else if (prepared !== undefined) try views.hold(ticket, { asked, handoff: prepared })
     }
     if (event.type === "refuse") board.drop(pageTicket, mine)
@@ -1308,8 +1318,26 @@ const steppingBack = started(effect {
   })
 }, "offering Back")
 
+// spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/shell/index.md, "Ask Alpha rises to typing, a sheet or the full screen"
+export effect function openChatSearch(route: number): void!!(Shell | Search.Machine | Chats.Machine) {
+  const shell = try Shell
+  const search = try Search.Machine
+  const current = try shell.get()
+  if (current.route !== route || !Search.canOpenSearch(try search.get())) return
+  const raised = current.assistant === "Full" ? current
+    : (shell.send({ type: "raise", detent: "Full" }, (showing) => showing.route === route) catch () => undefined)
+  if (raised === undefined || (try shell.get()).route !== raised.route) return
+  if (try contained(search.send({ type: "openSearch" }), "opening chat search")) {
+    try ignore((try Chats.Machine).send({ type: "browse" }))
+  }
+}
+
 // spec/app/assistant/index.md, "Back closes a review, then search, then a quote or an edit, one at a time; with none of them open Back is the shell's"
 export const assistantBack = effect {
+  const summary = (try Talk).board.snapshot().recordingSummary
+  if (summary !== undefined && (try summary.machine.get()).reviewing) {
+    return try contained(summary.machine.send({ type: "dismissSummary" }), "closing the recording summary review")
+  }
   const attachments = try Attachments.Machine
   if (Attachments.canCancel(try attachments.get())) return try contained(attachments.send({ type: "cancel" }), "closing attachments")
   if (Attachments.canClosePreview(try attachments.get())) return try contained(attachments.send({ type: "closePreview" }), "closing the attachment preview")

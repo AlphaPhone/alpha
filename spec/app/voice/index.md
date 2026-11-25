@@ -31,7 +31,8 @@ import dictation as D from "./dictation"
 import route as R from "./route"
 import permission as P from "../../kit/permission"
 
-type Phase = Idle | Starting | Listening | Transcribing | Thinking | Speaking | Paused | Stopping | Failed
+type Phase = Idle | Starting | Listening | Transcribing | Thinking | Speaking | Stopping | Failed
+type CallNotice = NoCallNotice | AwaitingCallCause | CallNoticeOnReturn
 type Mic = Off | Asking | Opening | On | Closing
 type Output = SpeakerUnknown | SpeakerChecking | SpeakerUnavailable | SpeakerOn | SpeakerMuting | SpeakerOff | SpeakerUnmuting
 
@@ -41,7 +42,7 @@ type Voice = {
   network: bool, disclosing: bool, retries: int, retryAt: int,
   queued: int, played: int, replied: bool, playing: int,
   failure: D::Failure, latched: bool, claim: int, claimRoute: int, followed: int,
-  warmed: bool, engineHeld: bool, reviewPending: bool,
+  warmed: bool, engineHeld: bool, reviewPending: bool, callNotice: CallNotice,
   prompting: bool, recorder: D::Recorder, permission: P::Permission, route: R::Route,
 }
 
@@ -51,7 +52,7 @@ pure val initial: Voice = {
   network: false, disclosing: false, retries: 0, retryAt: 0,
   queued: 0, played: 0, replied: false, playing: 0,
   failure: D::NoFailure, latched: false, claim: 0, claimRoute: 0, followed: 0,
-  warmed: false, engineHeld: false, reviewPending: false,
+  warmed: false, engineHeld: false, reviewPending: false, callNotice: NoCallNotice,
   prompting: false, recorder: D::initial, permission: P::unasked, route: R::signedOut,
 }
 
@@ -113,6 +114,7 @@ type Effect =
   | SetSpeakerOutput({ session: int, speakerTicket: int, muted: bool })
   | Hush({ turn: int })
   | Shut({ session: int, keyboard: bool })
+  | SayCallEnded
   | Navigate({ session: int, turn: int, place: int, sourceRoute: int })
   | Record({ ticket: int })
   | Transcribe({ ticket: int, network: bool, automatic: bool })
@@ -163,7 +165,12 @@ microphone. On a phone with the Cloud speech relay, warming the network
 route also has the relay open its connection to Cloud speech, so the first
 conversation starts on a warm connection; like the rest of the warm-up it
 shows nothing and its failure is ignored. Once warm, redundant prewarm requests are refused until Alpha
-returns to the foreground or the account changes.
+returns to the foreground or the account changes. A local reply waits up
+to ten seconds for any speech readiness probe already in flight, so
+warming cannot win the speaker request slot from its first sentence.
+Microphone capture and Cloud playback do not wait for the local probe.
+After the wait only the current session and turn may play, at the
+speaker's current gain.
 
 ```quint
 pure def canPrewarm(v: Voice, now: int): bool = not(v.warmed) and not(v.latched) and not(v.prompting)
@@ -171,9 +178,11 @@ pure def canPrewarm(v: Voice, now: int): bool = not(v.warmed) and not(v.latched)
 pure def prewarm(v: Voice, now: int): Change =
   { state: { ...v, warmed: true }, out: List(Prewarm({ network: onNetwork(v.route, now) })) }
 
-pure def canReturned(v: Voice): bool = quiet(v) and v.warmed
+pure def canReturned(v: Voice): bool = (quiet(v) and v.warmed) or v.callNotice != NoCallNotice
 
-pure def returned(v: Voice): Voice = { ...v, warmed: false }
+pure def returned(v: Voice): Change =
+  { state: { ...v, warmed: if (quiet(v)) false else v.warmed, callNotice: NoCallNotice },
+    out: if (v.callNotice == CallNoticeOnReturn) List(SayCallEnded) else List() }
 
 pure def stepPrewarmNeverOpensTheMicrophone(before: Voice, via: str, after: Voice, out: List[Effect]): bool =
   via == "prewarm" implies (after.mic == before.mic and after.prompting == before.prompting and after.phase == before.phase)
@@ -204,7 +213,7 @@ pure def begin(network: bool, v: Voice): Change =
       out: releaseOut(v) }
 
 pure def canStartTalking(v: Voice, now: int): bool =
-  quiet(v) and v.recorder.stage == D::Closed and not(v.latched) and not(v.prompting)
+  quiet(v) and v.recorder.stage == D::Closed and not(v.latched) and not(v.prompting) and v.callNotice == NoCallNotice
 
 pure def startTalking(v: Voice, now: int): Change =
   val fresh = { ...v, phase: Starting, session: v.session + 1, turn: v.turn + 1, heard: false, muted: false,
@@ -278,7 +287,8 @@ Alpha otherwise ends the conversation.
 pure def canPageHidden(v: Voice): bool = talking(v)
 
 pure def pageHidden(v: Voice): Change =
-  if (v.mic == Asking) { state: v, out: List() } else shutDown(D::NoFailure, false, v)
+  if (v.mic == Asking) { state: v, out: List() }
+  else shutDown(D::NoFailure, false, { ...v, callNotice: AwaitingCallCause })
 
 pure def stepThePromptSurvivesHiding(before: Voice, via: str, after: Voice): bool =
   (via == "pageHidden" and before.mic == Asking) implies after == before
@@ -310,6 +320,15 @@ pure def micFailed(v: Voice, session: int): Change =
 ```
 
 ### What the owner says is shown as it is heard
+
+In the open conversation, the listening microphone can show the current
+capture's interim words as “Heard so far, not sent”. The words come from
+that capture's admitted relay or resident stream. On-device previews are
+displayed only for the current utterance and follow its event sequence.
+The final reported by the microphone still controls sending. The preview
+stays out of drafts and history. It clears when the capture, owner, chat
+or screen context changes, the microphone is muted, or Talk leaves
+Listening.
 
 ```quint
 pure def canSpeechHeard(v: Voice, session: int): bool = v.phase == Listening and v.mic == On and session == v.session
@@ -446,11 +465,19 @@ pure def sentencePlayed(v: Voice, session: int, turn: int): Change =
 
 ### A reply that needs the owner's review in chat keeps voice listening with the microphone open
 
-The owner reviews and approves in the chat. Voice never approves a proposal
-that requires the owner’s review. Any pre-review reply speech is hushed and a non-blocking review
-notice is shown, while the conversation returns straight to listening with
-the microphone open (when unmuted) for the next turn. Settling the review
-clears the notice and never stops voice.
+Talk takes a proposal from the agent's completed action result and the
+phone's matching current enrollment, request and review target. An
+admitted review shows in Ask Alpha. If Talk is on the bar, it brings up
+the sheet for the review. The reply's prose creates no review. The owner
+reviews and decides in chat. Any pre-review reply speech is hushed, and
+Talk returns to listening with the microphone open when unmuted. Its
+notice follows the last matching review still shown, including while the
+decision is being confirmed. When that review settles or leaves this
+chat, the notice clears without stopping Talk.
+
+For an addressed text alone, saying “Send this text” immediately after the
+proposal in the same Talk session confirms it while the entire review and
+its Send control are visible. The phone handles that confirmation locally.
 
 ```quint
 pure def canReplyEnds(v: Voice, session: int, turn: int, asks: bool): bool =
@@ -466,6 +493,9 @@ pure def replyEnds(v: Voice, session: int, turn: int, asks: bool): Change =
 pure def canReviewSettled(v: Voice): bool = talking(v) and v.reviewPending
 
 pure def reviewSettled(v: Voice): Voice = { ...v, reviewPending: false }
+
+pure def addressedTextConfirmation(v: Voice, session: int, reviewTurn: int, visible: bool): bool =
+  v.phase == Thinking and v.reviewPending and v.session == session and reviewTurn + 1 == v.turn and visible
 
 pure def stepReviewKeepsVoiceAndMicrophoneOpen(before: Voice, via: str, after: Voice, out: List[Effect]): bool =
   ((via == "replyEnds" and after.reviewPending and not(after.replied)) implies
@@ -504,11 +534,11 @@ pure def sometimesListeningWithReviewPending(v: Voice): bool = v.phase == Listen
 pure def sometimesListeningAgain(v: Voice): bool = v.phase == Listening and v.sent >= 1
 ```
 
-### The microphone is off while Alpha transcribes, thinks, is paused or is stopping
+### The microphone is off while Alpha transcribes, thinks or is stopping
 
 ```quint
 pure def alwaysTheMicrophoneIsClosedWhileAlphaWorks(v: Voice): bool =
-  (v.phase == Transcribing or v.phase == Thinking or v.phase == Paused or v.phase == Stopping)
+  (v.phase == Transcribing or v.phase == Thinking or v.phase == Stopping)
     implies not(opened(v.mic) or v.mic == Asking)
 ```
 
@@ -546,12 +576,12 @@ of that conversation. Opening older history keeps its place.
 ### What was heard but not sent is never counted as sent
 
 The owner sees it as "Heard so far, not sent". A turn still being heard,
-transcribed or paused has not been sent.
+transcribed has not been sent.
 
 ```quint
 pure def alwaysHeardSpeechIsNotSent(v: Voice): bool =
   v.sent <= v.turn and (v.heard implies v.sent < v.turn) and v.session >= 0 and v.turn >= 0
-    and ((v.phase == Starting or v.phase == Listening or v.phase == Transcribing or v.phase == Paused) implies v.sent < v.turn)
+    and ((v.phase == Starting or v.phase == Listening or v.phase == Transcribing) implies v.sent < v.turn)
 
 pure def sometimesHeardButNotSent(v: Voice): bool = v.phase == Idle and v.heard
 ```
@@ -602,7 +632,7 @@ its Talk gain before another conversation or reading can use local playback.
 
 ```quint
 pure def canSetSpeakerMuted(v: Voice, muted: bool): bool =
-  talking(v) and v.phase != Paused
+  talking(v)
     and (if (muted) v.speaker == SpeakerOn else v.speaker == SpeakerOff)
 
 pure def setSpeakerMuted(v: Voice, muted: bool): Change =
@@ -717,24 +747,32 @@ pure def sometimesDenied(v: Voice): bool = v.phase == Failed and v.failure == D:
 
 ## Story: Pause for a phone call
 
-> As the owner, I want a call to pause the conversation and the
-> conversation to come back when the call ends.
+> As the owner, I want a call to end Talk and release the microphone and
+> speaker. After the call, I can choose to start Talk again.
 
-### A call pauses the conversation: the microphone closes, speech stops, and the turn in flight is dropped
+### A phone call ends Talk and Alpha tells the owner once
+
+Talk releases its audio and retires its in-flight turn under the normal
+confirmed stop. A call reported by the phone or a matching native speech
+request can identify this stop. If the activity hid during Talk, remember
+whether a call was observed before Alpha showed again and show the notice
+then. A plain app switch clears the pending cause without a notice.
+Only an explicit Talk request starts a new conversation after the call.
 
 ```quint
-pure def canPauseForCall(v: Voice): bool = talking(v) and v.mic != Asking and not(v.disclosing) and v.phase != Paused
+pure def canCallInterrupted(v: Voice, session: int, foreground: bool): bool =
+  session == v.session and (talking(v) or v.callNotice == AwaitingCallCause)
 
-pure def pauseForCall(v: Voice): Change =
-  { state: { ...v, phase: Paused, turn: v.turn + 1, mic: closedMic(v.mic), queued: 0, played: 0, replied: false,
-      playing: 0, retryAt: 0, claim: 0, claimRoute: 0 },
-    out: List(Hush({ turn: v.turn })).concat(closeOut(v)) }
+pure def callInterrupted(v: Voice, session: int, foreground: bool): Change =
+  val ended = if (talking(v)) shutDown(D::NoFailure, false, v) else { state: v, out: List() }
+  { state: { ...ended.state, callNotice: if (foreground) NoCallNotice else CallNoticeOnReturn },
+    out: ended.out.concat(if (foreground) List(SayCallEnded) else List()) }
 
-pure def canCallEnded(v: Voice): bool = v.phase == Paused
+pure def stepACallStopsTalk(before: Voice, via: str, after: Voice, out: List[Effect]): bool =
+  (via == "callInterrupted") implies (not(talking(after)) and
+    out.every(e => match e { | Listen(_) => false | _ => true }))
 
-pure def callEnded(v: Voice): Change = nextTurn(false, v)
-
-pure def sometimesPausedForACall(v: Voice): bool = v.phase == Paused and v.mic == Closing
+pure def sometimesCallNoticeOnReturn(v: Voice): bool = v.callNotice == CallNoticeOnReturn
 ```
 
 ## Story: Keep talking when speech fails
@@ -751,7 +789,7 @@ failure with the phone's speech unavailable holds nothing.
 ```quint
 pure def canSpeechFailed(v: Voice, session: int, fault: R::Fault, wait: int, deviceReady: bool, now: int): bool =
   talking(v) and session == v.session and v.mic != Asking and not(v.disclosing) and v.retryAt == 0
-    and v.phase != Paused and now >= 0
+    and now >= 0
 
 pure def speechFailed(v: Voice, session: int, fault: R::Fault, wait: int, deviceReady: bool, now: int): Change =
   val route = if (deviceReady) R::noteFailure(v.route, fault, wait, now) else R::clearHold(v.route)
@@ -1052,6 +1090,9 @@ pure def stepDictationFillsItsOwnField(before: Voice, after: Voice, out: List[Ef
 ### Closing the recorder abandons any recording or transcription it was waiting for
 
 A clip kept for a recognition retry or review is also discarded when the recorder closes.
+Switch to keyboard does the same for Ask Alpha dictation. While the recorder
+has starting, live or kept audio, the keyboard waits for their cancellation
+to settle. Focus returns to the same draft only if it still owns that field.
 
 ```quint
 pure def canCloseRecorder(v: Voice): bool = D::canCloseRecorder(v.recorder)
