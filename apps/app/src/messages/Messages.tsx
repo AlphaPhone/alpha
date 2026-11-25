@@ -119,7 +119,8 @@ function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesPr
       ) : (
         <header className="flex h-13 shrink-0 items-center gap-0.5 px-2 [&>button]:size-13" data-alpha-messages-header data-alpha-stage-header>
           {onBack && <Button variant="ghost" size="icon" className="rounded-lg" aria-label="Back to apps" onClick={onBack}><ChevronLeft /></Button>}
-          <h1 className="min-w-0 flex-1 truncate text-xl font-semibold">Messages</h1>
+          <h1 className="sr-only">Messages</h1>
+          <div aria-hidden className="min-w-0 flex-1" />
           {!smsNeeded(state) && <Button variant="ghost" size="icon" className="rounded-tile" aria-label="Search messages" data-alpha-messages-search onClick={() => setSearching(true)}><Search className="size-5" /></Button>}
           {can({ type: "newMessage" }) && <Button variant="ghost" size="icon" className="rounded-tile" aria-label="New message" data-alpha-messages-new onClick={() => {
             runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ typed: "" })));
