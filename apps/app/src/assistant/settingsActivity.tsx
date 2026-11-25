@@ -1,5 +1,5 @@
 // spec/app/settings/activity.md, "Story: Help the agent recover"; spec/app/assistant/chats.md, "Story: Start a conversation, or fork one"; spec/app/assistant/chats.md, "Story: Find my conversations"
-import { ListGroup, SettingsNavRow } from "@repo/ui";
+import { ListGroup, ListRow, SettingsNavRow } from "@repo/ui";
 import { Effect } from "effect";
 import { Clock, Plus, RotateCw, Undo2 } from "lucide-react";
 import { useMemo, useSyncExternalStore } from "react";
@@ -37,25 +37,21 @@ function ConversationActions({ runtime }: AssistantProps) {
   const listed = list === "Loaded" ? chats.state.ids : [];
   if (!chats.can(start) && !chats.can(browse) && listed.length === 0) return null;
   return (
-    <>
-      <ListGroup>
-        {chats.can(start) ? <SettingsNavRow title="New" value="New conversation" icon={<Plus />} onOpen={() => {
-          void chats.send(start).then((result) => { if (result._tag === "Success") openAskAlpha(); });
-        }} /> : null}
-        {chats.can(browse) ? <SettingsNavRow title={list === "Failed" ? "Retry" : "History"} value={list === "Idle" ? "Load conversations" : undefined} icon={list === "Failed" ? <RotateCw /> : <Clock />} onOpen={() => void chats.send(browse)} /> : null}
-      </ListGroup>
-      {listed.length > 0 ? (
-        <ListGroup aria-label="Chat history">
-          {listed.map((id) => {
-            const choose = { type: "choose", conversation: id, ...free } as const;
-            const title = seen.titles.get(id) ?? "Ask Alpha";
-            return <SettingsNavRow key={id} title={title} aria-label={`Restore conversation: ${title}`} selected={id === chosen} icon={<Undo2 />} onOpen={id === chosen ? openAskAlpha : chats.can(choose) ? () => {
-              void chats.send(choose).then((result) => { if (result._tag === "Success") openAskAlpha(); });
-            } : undefined} />;
-          })}
-        </ListGroup>
-      ) : null}
-    </>
+    <ListGroup aria-label="Chat history">
+      {chats.can(start) ? <ListRow title="New" aria-label="New conversation" leading={<Plus />} onClick={() => {
+        void chats.send(start).then((result) => { if (result._tag === "Success") openAskAlpha(); });
+      }} /> : null}
+      {chats.can(browse) ? <SettingsNavRow title="History" aria-label="Load conversations" icon={<Clock />} onOpen={() => void chats.send(browse)} /> : null}
+      {listed.map((id) => {
+        const choose = { type: "choose", conversation: id, ...free } as const;
+        const title = seen.titles.get(id) ?? "Ask Alpha";
+        return <ListRow key={id} title={title} aria-label={`Restore conversation: ${title}`} selected={id === chosen} leading={<Undo2 />} onClick={id === chosen ? openAskAlpha : chats.can(choose) ? () => {
+          void chats.send(choose).then((result) => { if (result._tag === "Success") openAskAlpha(); });
+        } : undefined} />;
+      })}
+      {list === "Failed" ? <ListRow title="History" trailing="Chats did not load" /> : null}
+      {list === "Failed" && chats.can(browse) ? <ListRow title="Retry" aria-label="Retry saved conversation" leading={<RotateCw />} onClick={() => void chats.send(browse)} /> : null}
+    </ListGroup>
   );
 }
 

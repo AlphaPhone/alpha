@@ -173,6 +173,34 @@ describe("Ask Alpha dock and shell navigation", () => {
     expect(section()?.getAttribute("data-alpha-detent")).toBe("bar");
   });
 
+  // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": as v121's chat scrim did, a tap or a drag on the page outside the open sheet lowers it when it ends
+  it("a tap or a drag outside the open sheet lowers it to the bar (spec/app/assistant/dock.md, \"Story: Drag Ask Alpha where I want it\")", async () => {
+    const { runtime } = await mountDock({ view: "Home", flush: underAct });
+    const shell = () => runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()));
+    const raise = () => act(async () => {
+      await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "raise", detent: "Sheet" })));
+    });
+    const lowered = () => act(async () => { await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Bar")))); });
+    const on = (target: Element | null, type: string, y: number) =>
+      act(() => { target?.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: 40, clientY: y, pointerId: 9, pointerType: "touch", isPrimary: true })); });
+    const scrim = () => document.querySelector("[data-alpha-chat-scrim]");
+
+    await raise();
+    expect((await shell()).assistant).toBe("Sheet");
+    await on(scrim(), "pointerdown", 120);
+    await on(scrim(), "pointerup", 120);
+    await lowered();
+
+    await raise();
+    expect(scrim()).not.toBeNull();
+    await on(scrim(), "pointerdown", 120);
+    await on(scrim(), "pointermove", 160);
+    await on(scrim(), "pointermove", 260);
+    expect((await shell()).assistant).toBe("Sheet");
+    await on(scrim(), "pointerup", 260);
+    await lowered();
+  });
+
   // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"
   it("agent navigation moves between admitted apps and Home while keeping Ask Alpha raised (spec/app/shell/index.md, \"Agent navigation shows an admitted app or Home without lowering Ask Alpha\")", async () => {
     const { runtime } = await mountDock({ view: "Home", withToast: true, flush: underAct });

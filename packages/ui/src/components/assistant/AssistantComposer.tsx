@@ -108,6 +108,13 @@ export function AssistantComposer({
   const acting = Boolean(onAttach || onSearch || onNew || making || onHistory) && !closed;
   const dragging = useAssistantDrag(drag ?? {});
   const moves = bar && drag !== undefined;
+  // The pill drags from anywhere on it, except the mark, which is a handle that follows its own press.
+  const pill = compact && moves ? {
+    onPointerDown: (event: PointerEvent<HTMLElement>) => {
+      if (event.target instanceof Element && event.target.closest("[data-alpha-grabber]")) return;
+      dragging.onPointerDown(event);
+    },
+  } : {};
   return (
     <div role={compact ? "group" : undefined} aria-label={compact ? "Assistant controls" : undefined} data-alpha-compact-dock={compact ? "" : undefined} data-host-chrome={bar ? "" : undefined} className={cn("flex shrink-0 flex-col gap-2", bar ? "mx-4 mb-[max(1.75rem,calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))_+_0.75rem))]" : "mx-3 mb-[max(1.875rem,calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))_+_0.75rem))]", className)} style={lift ? { marginBottom: lift, ...style } : style} {...props}>
       {notice ? <AssistantDraftNotice {...notice} /> : null}
@@ -117,7 +124,7 @@ export function AssistantComposer({
       {!compact && editing ? <AssistantQuoteBar kind="editing" /> : null}
       {voiceNotice}
       {voice}
-      <div hidden={Boolean(voice)} {...(compact && moves ? dragging : {})} className={cn("items-center bg-secondary", voice ? "hidden" : "flex", compact ? "touch-none gap-0.5 self-center rounded-dock-compact p-1.25 shadow-dock-compact dark:shadow-dock-compact-dark" : bar ? cn("min-h-18.5 touch-pan-y gap-1 rounded-dock py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark", moves && "relative isolate") : "min-h-17 touch-pan-y gap-1.5 rounded-sheet py-1.5 pr-1.5 pl-5")}>
+      <div hidden={Boolean(voice)} {...pill} className={cn("items-center bg-secondary", voice ? "hidden" : "flex", compact ? "touch-none gap-0.5 self-center rounded-dock-compact p-1.25 shadow-dock-compact dark:shadow-dock-compact-dark" : bar ? cn("min-h-18.5 touch-pan-y gap-1 rounded-dock py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark", moves && "relative isolate") : "min-h-17 touch-pan-y gap-1.5 rounded-sheet py-1.5 pr-1.5 pl-5")}>
         {!compact && moves ? <span aria-hidden data-alpha-bar-drag="" className="absolute inset-0 z-[-1] touch-none rounded-[inherit]" {...dragging} /> : null}
         {leading}
         {bar ? opener ?? (onOpen ? (

@@ -16,7 +16,8 @@ which a stray click is ignored, and the height a sheet was left at.
 As in Alpha before VibeStack, the sheet follows the finger while it is
 dragged, and the handle, the background of the bar and the whole pill can
 be dragged; a press on the bar or the pill that does not move is the tap of
-the control under it.
+the control under it. A tap or a drag on the page outside an open sheet, or
+outside the bar being typed in, lowers Ask Alpha when it ends.
 
 ### A released drag lands on the bar, a sheet at a height, or the full screen
 

@@ -4,13 +4,14 @@ import {
   type AssistantAttachment, type AssistantDrag, type AssistantRelease, type AssistantComposerProps, type AssistantDraftNoticeProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
-import { type ReactNode, type RefObject, useCallback, useMemo, useRef, useSyncExternalStore } from "react";
+import { type ReactNode, type RefObject, useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { Conversation as Talking, Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe";
 import { askable, inFlight, pending } from "../../gen/app__assistant.ts";
 import { useMachine as useConversation } from "../../gen/app__assistant.react.ts";
 import type { Machine as AttachmentMachine } from "../../gen/app__assistant__attachments.effect.vibe";
 import { useMachine as useAttachments } from "../../gen/app__assistant__attachments.react.ts";
 import type { Machine as ChatsMachine } from "../../gen/app__assistant__chats.effect.vibe";
+import { making } from "../../gen/app__assistant__chats.ts";
 import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import type { Composer as Writing, Machine as ComposerMachine } from "../../gen/app__assistant__composer.effect.vibe";
 import { attachments as attachmentCount, content, maxFiles, textLimit } from "../../gen/app__assistant__composer.ts";
@@ -24,6 +25,7 @@ import type { Machine as SearchMachine } from "../../gen/app__assistant__search.
 import { useMachine as useSearch } from "../../gen/app__assistant__search.react.ts";
 import type { Machine as CommsMachine } from "../../gen/app__phone__comms.effect.vibe";
 import { useMachine as useComms } from "../../gen/app__phone__comms.react.ts";
+import { Machine as SettingsPages } from "../../gen/app__settings.effect.vibe";
 import { Machine as ShellMachine, showing } from "../../gen/app__shell.effect.vibe";
 import type { Machine as LayersMachine } from "../../gen/app__shell__layers.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
@@ -45,7 +47,7 @@ import { CommsBriefing } from "../phone/comms.vibe";
 import { displayNumber } from "../phone/words.ts";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview | Documents, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | SettingsPages | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview | Documents, unknown>;
   messageActions?: MessageActions;
   speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & {
     voice?: (presentation: { compactDock: boolean; atBar: boolean }) => ReactNode;
@@ -97,6 +99,13 @@ const barHeight = 102;
 const emptyLines: readonly Line[] = [];
 const settings = { type: "openView", view: "Settings" } as const;
 const back = { type: "goBack" } as const;
+// spec/app/assistant/chats.md, "Story: Find my conversations": as v121's chat-tools-adapter.ts did, Chat history opens Settings > About > Agent activity, where the conversations are listed.
+const chatHistory = Effect.ignore(Effect.flatMap(ShellMachine, (shell) => shell.send(settings))).pipe(
+  Effect.andThen(Effect.flatMap(SettingsPages, (pages) => pages.send({ type: "openSection", page: "About" }))),
+  Effect.andThen(Effect.flatMap(SettingsPages, (pages) => pages.send({ type: "open", page: "Activity" }))),
+);
+/** A press on v121's chat scrim that moves this far is a drag: it lowers Ask Alpha on release, wherever it ends. */
+const scrimSlop = 6;
 
 function DeviceReview({ runtime, card }: { runtime: AssistantProps["runtime"]; card: MediaCard }) {
   const decide = (approve: boolean) => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, approve)));
@@ -246,7 +255,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const [following, setFollowing] = useState<number | undefined>(undefined);
   const gestureRef = useRef<{ y: number; height: number; moved: boolean } | undefined>(undefined);
   const sectionRef = useRef<HTMLElement>(null);
-  const scrimRef = useRef<number | undefined>(undefined);
+  const scrimRef = useRef<{ pointer: number; x: number; y: number; moved: boolean } | undefined>(undefined);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const focusOnRevealRef = useRef(false);
   const currentView = shell.state?.trail.at(-1);
@@ -378,8 +387,9 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   };
   const follow = (y: number) => {
     const g = gestureRef.current;
-    if (!g || !dock.can({ type: "drag" }) && dock.state?.gesture !== "Dragging") return;
+    if (!g) return;
     if (!g.moved) {
+      if (!dock.can({ type: "drag" })) return;
       g.moved = true;
       void dock.send({ type: "drag" });
     }
@@ -415,10 +425,18 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           className="fixed inset-0 z-dock touch-none"
           onPointerDown={(event) => {
             event.preventDefault();
-            scrimRef.current = event.pointerId;
+            if (event.isPrimary === false) return;
+            scrimRef.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, moved: false };
+          }}
+          onPointerMove={(event) => {
+            // v121's scrimSw: once a press moves it is a drag, captured so its release lowers Ask Alpha even over the sheet.
+            const press = scrimRef.current;
+            if (!press || press.pointer !== event.pointerId || press.moved || Math.hypot(event.clientX - press.x, event.clientY - press.y) < scrimSlop) return;
+            press.moved = true;
+            try { event.currentTarget.setPointerCapture(event.pointerId); } catch { return; }
           }}
           onPointerUp={(event) => {
-            if (scrimRef.current !== event.pointerId) return;
+            if (scrimRef.current?.pointer !== event.pointerId) return;
             scrimRef.current = undefined;
             if (assistantDetent === "Typing") composerRef.current?.blur();
             if (shell.can(back)) void shell.send(back);
@@ -515,7 +533,10 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
             });
           } : undefined,
           onFocusField: () => carry(dockFocused(assistantDetent)),
+          onHistory: () => void runtime.runPromiseExit(chatHistory),
           onSearch: history.search,
+          onNew: chats.can(start) ? () => void chats.send(start) : undefined,
+          making: making(shown),
           onClick: assistantDetent === "Bar" && !compact ? (event) => {
             if (event.target instanceof Element && event.target.closest("button, textarea")) return;
             typeWithFocus();

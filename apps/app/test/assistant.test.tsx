@@ -69,10 +69,13 @@ function chatAction(item: string) {
   });
 }
 
+/** The conversations listed on Agent activity, one row each. */
+const restorable = () => document.querySelectorAll("section[aria-label='Chat history'] button[aria-label^='Restore conversation: ']").length;
+
 /** Settings > About > Agent activity, where New chat and Chat history live as they did in v121. */
 async function activity(alpha: Alpha) {
   const page = await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.get()));
-  if (page.page === "Activity" && button("History")) return;
+  if (page.page === "Activity" && button("Load conversations")) return;
   await alpha.runtime.runPromise(Effect.exit(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Settings" }))));
   await alpha.runtime.runPromise(Effect.exit(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "open", page: "About" }))));
   await alpha.runtime.runPromise(Effect.exit(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "open", page: "Activity" }))));
@@ -82,13 +85,13 @@ async function activity(alpha: Alpha) {
 /** Open the list of conversations, from History on Agent activity. */
 async function chatsList(alpha: Alpha) {
   await activity(alpha);
-  await press("History");
+  await press("Load conversations");
 }
 
 /** Start a new conversation, from New on Agent activity. */
 async function newChat(alpha: Alpha) {
   await activity(alpha);
-  await press("New");
+  await press("New conversation");
 }
 
 /** Click the row of the list named `list` whose text starts with `text`. */
@@ -170,9 +173,12 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect(lines()).toEqual(["Hello", "You said: Hello", "Again", "You said: Again"]);
 
     // spec/app/assistant/chats.md, "The newest list says which conversations there are, and a conversation no longer listed stops showing"
-    await chatsList(alpha);
+    // spec/app/assistant/chats.md, "Story: Find my conversations": Chat history in the chat actions opens Agent activity, as in v121.
+    chatAction("Chat history");
+    await until(alpha, alpha.runtime, Pages.Machine, (s) => s.page === "Activity");
+    await press("Load conversations");
     await until(alpha, runtime, Chats, (s) => s.list.status === "Loaded");
-    expect(rows("Chat history")).toBe(2);
+    expect(restorable()).toBe(2);
 
     // spec/app/assistant/index.md, "A sensitive screen is never sent, and no reply is awaited over one": Settings showing carrier identifiers is a sensitive screen (on a phone).
     if (phone) {
