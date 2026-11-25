@@ -709,8 +709,9 @@ pure def sometimesAFilterFollowedTheOwner(s: Files): bool = S::finding(s.search)
 ### An explicit request to open or filter Files may act directly on the same idle Files view
 
 The phone remembers the place and the list and search tickets when the
-owner sends a typed request from Files. When the resident proposes that
-message's exact read-only operation, the phone may carry it out once if
+owner sends a typed request from Files. Only an exact, authorized Files
+command asks for direct execution on its turn. When the resident returns
+that message's matching direct proposal, the phone may carry it out once if
 the owner allows direct action, the same place and tickets still show
 and the open viewer is empty. A different request, an unreadable
 preference, or a work item in progress keeps the usual review. The

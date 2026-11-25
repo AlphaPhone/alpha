@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { Effect } from "effect";
-import type { DeviceOperation } from "@elizaos/agent";
+import { readTurnContext, type DeviceOperation } from "@elizaos/agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
 import { Machine as Browser } from "../gen/app__files.effect.vibe";
@@ -729,31 +729,36 @@ describe("Files on a phone", () => {
     await press("Open conversation");
     await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
 
-    const send = async (id: string, text: string) => {
+    const send = async (id: string, text: string, direct: boolean) => {
       review.proposal.id = id;
       review.proposal.state = "pending";
-      review.proposal.payload.requestMessageId = `m${world.ask.said.length + 1}u`;
       const reads = review.pendingReads;
       world.ask.nextReplyChunks = ["I found a Files action."];
-      world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
+      world.ask.nextActions = (metadata) => {
+        const mode = readTurnContext({ content: { metadata } }).voiceUi?.agentActionMode;
+        expect(mode).toBe(direct ? "direct-request-v1" : undefined);
+        review.proposal.payload.requestMessageId = mode === "direct-request-v1" ? `m${world.ask.said.length}u` : undefined;
+        return [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: id, state: "pending", executed: false, approvalRequired: mode === undefined,
+          ...(mode === "direct-request-v1" ? { awaitingDeviceExecution: true, directRequest: true } : { awaitingUserInput: true }) } }];
+      };
       await fill("Message Alpha", text);
       await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
       await press("Send");
       await until(alpha, chat, Conversation, (s) => review.pendingReads > reads && s.turn.reply === "Complete");
     };
 
-    await send("unasked-filter", "What is in my Downloads?");
+    await send("unasked-filter", "What is in my Downloads?", false);
     await vi.waitFor(() => expect(button("Approve")).toBeDefined());
     expect(review.decisions).toEqual([]);
 
-    await send("asked-filter", "Show PDFs in Download");
+    await send("asked-filter", "Show PDFs in Download", true);
     await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "asked-filter" })]));
     expect(document.body.textContent).toContain("Showing 1 item in Files.");
     expect(button("Approve")).toBeUndefined();
 
     review.proposal.payload.operation = { type: "files_open", path: "Documents/notes.txt" };
     world.files.refusing.push("readSelected");
-    await send("refused-open", "Open Documents/notes.txt");
+    await send("refused-open", "Open Documents/notes.txt", true);
     await vi.waitFor(() => expect(review.receipts.at(-1)).toMatchObject({ outcome: "failed", operationId: "refused-open" }));
     expect(document.body.textContent).not.toContain("Opened the requested item in Files.");
   });

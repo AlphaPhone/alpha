@@ -125,8 +125,10 @@ const phoneCapabilities = ["phone.keypad.v1", "phone.dial.v1", "phone.call.v1", 
 
 const needsMessage = (operation: DeviceOperation): boolean => operation.type === "sms_reply_selected" || operation.type === "messages_read_selected"
 
+export type DirectFilesOperation = Extract<DeviceOperation, { type: "files_filter" | "files_open" }>
+
 interface DirectFiles {
-  readonly text: string
+  readonly operation: DirectFilesOperation
   readonly files: FilesReadContext
   readonly current: Effect.Effect<boolean>
   readonly report: (note: string) => void
@@ -145,30 +147,41 @@ function literal(value: string): string {
 
 const fileFilterWords = { image: ["images", "photos"], video: ["videos"], audio: ["audio", "audio files"], document: ["documents"], pdf: ["pdfs"], folder: ["folders"] }
 
-function requestedFile(op: DeviceOperation, authored: string): boolean {
+/** The owner's typed Files navigation or filter, parsed before the turn may ask the agent to act directly. */
+export function requestedFilesOperation(authored: string): DirectFilesOperation | undefined {
   const command = authored.trim().replace(/^(?:(?:hey )?alpha[,\s]+)?(?:(?:could|can|would) you\s+)?(?:please\s+)?/i, "")
-  if (op.type === "files_open") {
-    const open = /^open (?:the )?(.+?)(?: in Files)?[!?]?$/i.exec(command)
-    if (open === null || open[1] === undefined) return false
-    if ("path" in op) {
-      const named = open[1].replace(/^file (?=["“])/i, "")
-      return literal(named) === op.path || literal(named.replace(/\.$/, "")) === op.path
-    }
-    const place = /^(?:item|result|file) (\d+)\.?$/i.exec(open[1])
-    return place !== null && Number(place[1]) === op.shown
+  const open = /^open (?:the )?(.+?)(?: in Files)?[!?]?$/i.exec(command)
+  if (open?.[1] !== undefined) {
+    const name = open[1].replace(/^file (?=["“])/i, "").replace(/\.$/, "")
+    const position = /^(?:item|result|file) (\d+)$/i.exec(name)
+    const path = literal(name)
+    const namedFile = path !== name || path.includes("/") || /\.[A-Za-z0-9]{1,12}$/.test(path) || / in Files[.!?]?$/i.test(command)
+    if (position === null && !namedFile) return undefined
+    const decoded = readOperation(position === null
+      ? { type: "files_open", path } : { type: "files_open", shown: Number(position[1]) })?.operation
+    return decoded?.type === "files_open" ? decoded : undefined
   }
-  if (op.type !== "files_filter") return false
   const filter = /^(?:show|find|filter)(?: me)? (.+?)\s*[!?]?$/i.exec(command)
-  if (filter === null || filter[1] === undefined) return false
-  const words = filter[1].replace(/\.$/, "")
-  const terms = /^(.*?)(?: (?:matching|named|containing) ("[^"]+"|“[^”]+”|.+?))?(?: in ("[^"]+"|“[^”]+”|.+?))?(?: from (\S+))?(?: to (\S+))?$/i.exec(words)
-  if (terms === null) return false
+  if (filter?.[1] === undefined) return undefined
+  const terms = /^(.*?)(?: (?:matching|named|containing) ("[^"]+"|“[^”]+”|.+?))?(?: in ("[^"]+"|“[^”]+”|.+?))?(?: from (\S+))?(?: to (\S+))?$/i.exec(filter[1].replace(/\.$/, ""))
+  if (terms === null) return undefined
   const [, kind, search, folder, from, to] = terms
-  const names = op.kind === undefined ? ["files"] : fileFilterWords[op.kind]
-  return names.some((name) => name === kind?.toLowerCase())
-    && (search === undefined ? undefined : literal(search)) === op.text
-    && (folder === undefined ? undefined : literal(folder)) === (op.folder === "" ? "Internal storage" : op.folder)
-    && from === op.from && to === op.to
+  const item = kind?.toLowerCase()
+  const category = Object.entries(fileFilterWords).find(([, names]) => names.some((name) => name === item))?.[0]
+  if (category === undefined && item !== "files") return undefined
+  const place = folder === undefined ? undefined : literal(folder)
+  const decoded = readOperation({ type: "files_filter", ...(category === undefined ? {} : { kind: category }),
+    ...(search === undefined ? {} : { text: literal(search) }), ...(place === undefined ? {} : { folder: place === "Internal storage" ? "" : place }),
+    ...(from === undefined ? {} : { from }), ...(to === undefined ? {} : { to }) })?.operation
+  return decoded?.type === "files_filter" ? decoded : undefined
+}
+
+function sameFileOperation(expected: DirectFilesOperation, actual: DeviceOperation): boolean {
+  if (expected.type === "files_open" && actual.type === "files_open") {
+    return "path" in expected ? "path" in actual && expected.path === actual.path : "shown" in actual && expected.shown === actual.shown
+  }
+  return expected.type === "files_filter" && actual.type === "files_filter" && expected.kind === actual.kind
+    && expected.text === actual.text && expected.folder === actual.folder && expected.from === actual.from && expected.to === actual.to
 }
 
 function sameFiles(before: FilesReadContext, after: FilesReadContext | undefined): boolean {
@@ -179,23 +192,33 @@ function sameFiles(before: FilesReadContext, after: FilesReadContext | undefined
     && where.trail.every((one, index) => one === now.trail[index])
 }
 
-/** The resident can repeat a still-pending proposal for this chat. It still needs fresh owner review. */
-function reviewedDeviceActions(actions: DeviceActionReply["actionResults"]): ReadonlySet<string> {
-  const kept = new Set<string>()
+type ReplyAction = "Review" | "Direct" | "Conflicted"
+
+/** The resident's review and direct-execution terminals bind distinct authorities to a fresh reply. */
+function repliedDeviceActions(actions: DeviceActionReply["actionResults"]): ReadonlyMap<string, ReplyAction> {
+  const kept = new Map<string, ReplyAction>()
   for (const { action, data } of actions) {
-    if (action !== "PROPOSE_DEVICE_ACTION" || typeof data !== "object" || data === null) continue
-    if ("proposalId" in data && typeof data.proposalId === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(data.proposalId)
-      && "state" in data && data.state === "pending" && "executed" in data && data.executed === false
-      && "approvalRequired" in data && data.approvalRequired === true && "awaitingUserInput" in data && data.awaitingUserInput === true) {
-      kept.add(data.proposalId)
-    }
+    if (action !== "PROPOSE_DEVICE_ACTION" || typeof data !== "object" || data === null
+      || !("proposalId" in data) || typeof data.proposalId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(data.proposalId)
+      || !("state" in data) || data.state !== "pending" || !("executed" in data) || data.executed !== false
+      || !("approvalRequired" in data)) continue
+    const direct = "directRequest" in data && data.directRequest === true
+    const awaiting = "awaitingDeviceExecution" in data && data.awaitingDeviceExecution === true
+    const input = "awaitingUserInput" in data && data.awaitingUserInput === true
+    const kind = data.approvalRequired === true && input && !direct && !awaiting ? "Review"
+      : data.approvalRequired === false && direct && awaiting && !input ? "Direct" : "Conflicted"
+    const previous = kept.get(data.proposalId)
+    kept.set(data.proposalId, previous === undefined || previous === kind ? kind : "Conflicted")
   }
   return kept
 }
 
-function commsFromReply(proposal: Proposal, opened: Session, actions: ReadonlySet<string>): boolean {
-  return proposal.payload.requestMessageId === undefined && actions.has(proposal.id)
-    && proposal.payload.installationId === opened.identity.installationId && proposal.payload.enrollmentId === opened.identity.enrollmentId
+function fromThisEnrollment(proposal: Proposal, opened: Session): boolean {
+  return proposal.payload.installationId === opened.identity.installationId && proposal.payload.enrollmentId === opened.identity.enrollmentId
+}
+
+function reviewFromReply(proposal: Proposal, opened: Session, actions: ReadonlyMap<string, ReplyAction>): boolean {
+  return proposal.payload.requestMessageId === undefined && actions.get(proposal.id) === "Review" && fromThisEnrollment(proposal, opened)
 }
 
 export function namedReviewQuery(operation: DeviceOperation): string | undefined {
@@ -591,8 +614,8 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       const answer = try proposals(opened)
       if (answer === undefined) return []
       const bound = sameTarget(target, try messageTarget()) ? target : undefined
-      const actions = reviewedDeviceActions(reply.actionResults)
-      const currentReview = answer.some((proposal) => commsFromReply(proposal, opened, actions)) && (try reviewContext(revision, view))
+      const actions = repliedDeviceActions(reply.actionResults)
+      const currentReview = answer.some((proposal) => reviewFromReply(proposal, opened, actions)) && (try reviewContext(revision, view))
         && (try enrollmentIsCurrent(opened)) && opened === latest && (try reviewContext(revision, view))
       const at = try Clock.currentTimeMillis
       for (const [id, pin] of pinnedFiles) if (pin.expiresAt <= at) pinnedFiles.delete(id)
@@ -601,9 +624,12 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         const op = operation(proposal.payload.operation)
         const expiresAt = Date.parse(proposal.expiresAt)
         if (op === undefined || !Number.isFinite(expiresAt) || expiresAt <= at) return undefined
-        const comms = commsReview(op)
+        const filesOperation = op.type.startsWith("files_")
         const request = proposal.payload.requestMessageId
-        if (request === undefined ? !(comms && currentReview && commsFromReply(proposal, opened, actions)) : request !== message) return undefined
+        if (request === undefined) {
+          if (!(commsReview(op) || filesOperation) || !currentReview || !reviewFromReply(proposal, opened, actions)) return undefined
+        } else if (request !== message || (filesOperation && (!fromThisEnrollment(proposal, opened)
+          || (actions.get(proposal.id) !== "Review" && actions.get(proposal.id) !== "Direct")))) return undefined
         const selected = needsMessage(op)
         if (selected && bound === undefined) return undefined
         const sms = op.type === "sms_send" ? reply.sms?.selection : undefined
@@ -632,7 +658,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         const card: MediaCard = { id: proposal.id, digest: proposal.digest, operation: op, expiresAt, message, conversation, revision, enrollmentId: opened.identity.enrollmentId, ...labelled,
           ...(selected && bound !== undefined ? { target: bound } : {}),
           ...(sms === undefined ? {} : { sms }),
-          ...(request === undefined || phone !== undefined || op.type === "sms_compose" ? { reviewRequest: reply.clientMessageId } : {}),
+          ...(request === undefined || filesOperation || phone !== undefined || op.type === "sms_compose" ? { reviewRequest: reply.clientMessageId } : {}),
           ...(phone === undefined ? {} : { phone }),
           ...(files === undefined ? {} : { files, detail: op.type === "files_folder_create" ? labelled.detail : files.targets.map((target) => target.path).join(", ")
             + (op.type === "files_move" ? ` → ${op.dest || "Internal storage"}` : "") }) }
@@ -643,9 +669,8 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       if (owner === undefined || !(try owner.current)) return visible
       const direct = visible.find((card) => {
         const proposal = answer.find((one) => one.id === card.id)
-        if (proposal?.payload.requestMessageId !== message || !actions.has(card.id)
-          || proposal.payload.installationId !== opened.identity.installationId || proposal.payload.enrollmentId !== opened.identity.enrollmentId
-          || !requestedFile(card.operation, owner.text)) return false
+        if (proposal?.payload.requestMessageId !== message || actions.get(card.id) !== "Direct"
+          || !fromThisEnrollment(proposal, opened) || !sameFileOperation(owner.operation, card.operation)) return false
         const exact = readOperation(proposal.payload.operation)
         return exact !== undefined && mayRunDirectly(exact, "NoBinding", true)
       })
