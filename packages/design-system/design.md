@@ -32,6 +32,7 @@ do next.
   `font-display`, are a contact's name and initials at the top of their card. `text-lead` is the street of the next turn,
   `text-title` a document's name over its preview, and `text-figure` and `text-figure-sm` a route's time.
   `leading-row` sets `text-body` as a note's or a routine's title in a list.
+  `text-headline` is an open voice or link note's title and `text-quote` a clip kept from a page.
 - **Shape.** `radius` is a card; `rounded-group` a group of rows; `rounded-panel` a notice or a search bar; `rounded-home-card` is a Home overview card;
   `rounded-drawer-icon` rounds an installed app icon; `rounded-option` is a row of a floating menu and
   `rounded-box` the box of a list row's selection check. `rounded-tile` is an app tile, a menu and a dialog;
@@ -154,6 +155,11 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.4xl.tracking` | -0.01em |
 | `text.figure.size` | 2.75rem |
 | `text.figure.leading` | 1 |
+| `text.headline.size` | 2.125rem |
+| `text.headline.leading` | 1.08 |
+| `text.headline.tracking` | -0.01em |
+| `text.quote.size` | 1.3125rem |
+| `text.quote.leading` | 1.35 |
 | `text.home-display.size` | 1.625rem |
 | `text.home-display.leading` | 1.1 |
 | `text.title.size` | 1.75rem |
