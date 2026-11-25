@@ -838,16 +838,15 @@ pure def canAgentLens(s: Camera, requested: RequestedLens, by: Actor): bool =
   G::canAsk(s.agent, by) and s.showing and not(s.secure) and P::allows(s.permission)
     and s.phase != Failed and free(s) and s.countdown == 0
 
-pure def agentLens(s: Camera, requested: RequestedLens, by: Actor): Done =
+pure def agentLens(s: Camera, requested: RequestedLens, by: Actor): Done = {
   val choice = { ...s, requestedLens: requested }
   val lens = chosenLens(choice)
+  val framed = { ...choice, lens: lens, zoom: oneTime, flash: false, flashAuto: false }
   if (lens == s.lens) emit(List(), choice)
-  else {
-    val framed = { ...choice, lens: lens, zoom: oneTime, flash: false, flashAuto: false }
-    if (s.phase == Ready) starting(List(StopPreview({ ticket: s.preview })), framed)
-    else if (s.phase == Starting or mayStart(framed)) starting(List(), framed)
-    else emit(List(), framed)
-  }
+  else if (s.phase == Ready) starting(List(StopPreview({ ticket: s.preview })), framed)
+  else if (s.phase == Starting or mayStart(framed)) starting(List(), framed)
+  else emit(List(), framed)
+}
 ```
 
 ### The agent asks only over a Camera that is showing, unlocked and allowed; an idle preview is started for it, and Ask Alpha over it is lowered
