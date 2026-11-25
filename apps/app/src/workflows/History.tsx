@@ -1,7 +1,7 @@
 // spec/app/workflows/sheet.md, "Story: See a workflow's history"; spec/app/workflows/sheet.md, "Story: Read a run's sheet"
 import type { WorkflowRun } from "@elizaos/plugin-workflow-client";
 import { Effect } from "effect";
-import { Alert, Button, EmptyState, ListRow, Spinner } from "@repo/ui";
+import { Alert, Button, ListRow, Spinner } from "@repo/ui";
 import { Check, ChevronRight, CircleAlert, Clock, Minus, Play, Sparkles, Square, Volume2, VolumeX, X } from "lucide-react";
 import { type Event, newerVersion } from "../../gen/app__workflows__sheet.ts";
 import { useMachine } from "../../gen/app__workflows__sheet.react.ts";
@@ -132,7 +132,7 @@ export function History({ runtime, row, owner }: HistoryProps) {
       </section>
     );
   }
-  const description = history.workflow?.description ?? row.summary;
+  const description = row.kind === "Routine" ? history.workflow?.description ?? row.summary : "";
   const occurrences = new Map<string, number>();
   const steps = (history.workflow?.steps ?? (row.kind === "Routine" ? row.record.steps : [])).map((step) => {
     const key = JSON.stringify([step.label, step.description]);
@@ -158,13 +158,12 @@ export function History({ runtime, row, owner }: HistoryProps) {
         unfinished={state.history.status !== "Loaded" || history.all.some((run) => run.status === "Running")}
         interrupted={history.all[0]?.status === "Interrupted"} />}
       {row.kind === "Routine" && <RunControls runtime={runtime} row={row.number} owner={owner} title={row.title} />}
-      <section aria-label="Run history" className="flex flex-col gap-3 border-t border-border pt-3">
+      {(state.history.status === "Loading" || state.history.status === "Failed" || state.shown > 0) && <section aria-label="Run history" className="flex flex-col gap-3 border-t border-border pt-3">
       {state.history.status === "Loading" && <Spinner aria-label="Reading runs" />}
       {state.history.status === "Failed" && <div className="flex flex-wrap items-center gap-2">
         <Alert variant="warn" role="status">Run history couldn’t be read.</Alert>
         {sheet.can({ type: "readHistory", removed: row.removed }) && <Button variant="secondary" onClick={() => send({ type: "readHistory", removed: row.removed })}>Retry</Button>}
       </div>}
-      {state.history.status === "Loaded" && state.shown === 0 && <EmptyState title="No runs yet" />}
       <ul>
         {history.all.slice(0, state.shown).map((run) => {
           const Icon = icons[run.status];
@@ -186,7 +185,7 @@ export function History({ runtime, row, owner }: HistoryProps) {
       {sheet.can({ type: "readMore" }) && (
         <Button variant="ghost" onClick={() => send({ type: "readMore" })}>More history</Button>
       )}
-      </section>
+      </section>}
     </>
   );
 }
