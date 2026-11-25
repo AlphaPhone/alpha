@@ -174,13 +174,19 @@ task. Whatever the owner does to the reminder, in the Reminders app or in
 chat, its task follows: deleting it, or taking its due time away, dismisses
 the task, so it never comes back; completing it completes the task, and
 completing a repeating one moves the task to its next due time; reopening
-it reopens the task; and a new due time moves the task, so it
+it reopens the task at the reminder's due time, since completing a
+one-off reminder leaves its task no next occurrence; and a new due time moves the task, so it
 fires only at the new time. A dated, open reminder with no task gets one, and a reminder whose task the
 owner dismisses in chat is deleted.
 A task that cannot follow, such as one completed too long ago to reopen,
 is dismissed and the reminder gets a new one. A change whose task stays
 where it was is reported as not done, so neither the owner nor the model
-is told it worked, and a reminder whose task stays is not deleted.
+is told it worked, and a reminder whose task stays is not deleted. Each
+change that is made carries an applied receipt for the reminder or list it
+changed, so a later save answers an earlier call that did not start; a list
+or a search carries none. What the model reads of a reminder gives its due
+day and time in the owner's time zone, named, and whether it is pending,
+overdue or completed.
 
 ```quint
 type TaskStep = MakeTask | DismissTask | CompleteTask | ReopenTask | MoveTask
@@ -188,7 +194,7 @@ pure def taskSteps(kept: bool, dated: bool, completed: bool, wasCompleted: bool,
   if (not(hasTask)) (if (kept and dated and not(completed)) List(MakeTask) else List())
   else if (not(kept) or not(dated)) List(DismissTask)
   else if (completed) (if (wasCompleted) List() else List(CompleteTask))
-  else if (wasCompleted) (if (retimed) List(ReopenTask, MoveTask) else List(ReopenTask))
+  else if (wasCompleted) List(ReopenTask, MoveTask)
   else if (retimed) List(MoveTask)
   else List()
 pure def lawADeletedReminderLeavesNoTask(dated: bool, completed: bool, wasCompleted: bool, retimed: bool): bool =

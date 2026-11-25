@@ -21,16 +21,17 @@ function makeFakeRuntime(initialTasks: readonly {
   readonly status: string;
   readonly trigger: { readonly kind: string; readonly atIso?: string };
   readonly metadata: Readonly<Record<string, unknown>>;
+  readonly nextAt?: string | null;
 }[] = []) {
-  const tasks = [...initialTasks];
+  const tasks = initialTasks.map((task) => ({ ...task, nextAt: task.nextAt === undefined ? task.trigger.atIso ?? null : task.nextAt }));
   const notifications: unknown[] = [];
   const refusing = new Set<string>();
   const open = (status: string) => status === "Scheduled" || status === "Fired" || status === "Acknowledged";
   const answers: Record<string, (task: (typeof tasks)[number], request: { kind: string; verb?: { tag: string }; edit?: { trigger?: { kind: string; atIso?: string } } }) => (typeof tasks)[number] | undefined> = {
     Dismiss: (task) => task.status === "Dismissed" ? undefined : { ...task, status: "Dismissed" },
-    Complete: (task) => open(task.status) ? { ...task, status: "Completed" } : undefined,
+    Complete: (task) => open(task.status) ? { ...task, status: "Completed", nextAt: null } : undefined,
     Reopen: (task) => task.status === "Completed" ? { ...task, status: "Scheduled" } : undefined,
-    edit: (task, request) => task.status === "Dismissed" || request.edit?.trigger === undefined ? undefined : { ...task, trigger: request.edit.trigger },
+    edit: (task, request) => task.status === "Dismissed" || request.edit?.trigger === undefined ? undefined : { ...task, trigger: request.edit.trigger, nextAt: request.edit.trigger.atIso ?? null },
   };
   const runtime = {
     getService: (name: string) => {
@@ -48,7 +49,7 @@ function makeFakeRuntime(initialTasks: readonly {
             return Promise.resolve({ kind: "applied", task: next });
           },
           create: (task: { kind: string; ownerVisible: boolean; promptInstructions: string; trigger: { kind: string; atIso?: string }; metadata: Record<string, unknown> }) => {
-            const created = { taskId: `task-${tasks.length + 1}`, ...task, status: "Scheduled" };
+            const created = { taskId: `task-${tasks.length + 1}`, ...task, status: "Scheduled", nextAt: task.trigger.atIso ?? null };
             tasks.push(created);
             return Promise.resolve({ kind: "created", task: created });
           },
@@ -453,6 +454,12 @@ describe("Alpha product plugin: Reminders actions, provider, recurrence, and rou
     const named = async (title: string) => (await read()).items.find((item) => item.title === title);
     const statusOf = (taskId: string) => tasks.find((task) => task.taskId === taskId)?.status;
 
+    const walk = await action.handler(runtime, emptyMessage("remind me to walk the dog at 8pm"), emptyState, { parameters: { op: "create", title: "Walk the dog", dueDate: "2026-11-24", dueMinute: 1200 } });
+    const listed = await action.handler(runtime, emptyMessage("what reminders do I have"), emptyState, { parameters: { op: "list" } });
+    expect({ receipt: walk?.effectReceipts?.[0]?.outcome, listed: listed?.text?.includes("Walk the dog due 2026-11-24 8:00 PM (UTC; pending)"), listReceipts: listed?.effectReceipts }).toEqual({ receipt: "applied", listed: true, listReceipts: undefined });
+    const walkGone = await action.handler(runtime, emptyMessage("delete it"), emptyState, { parameters: { op: "delete", title: "Walk the dog" } });
+    expect({ success: walkGone?.success, receipt: walkGone?.effectReceipts?.[0]?.operation, left: await named("Walk the dog") }).toEqual({ success: true, receipt: "alpha.reminder.delete", left: undefined });
+
     const untitled = await action.handler(runtime, emptyMessage("remind me to water the plants"), emptyState, { parameters: { op: "create", dueDate: "2026-11-24" } });
     expect({ success: untitled?.success, made: (await read()).items.length }).toEqual({ success: false, made: 2 });
 
@@ -467,6 +474,9 @@ describe("Alpha product plugin: Reminders actions, provider, recurrence, and rou
     const dentist = (await named("Call the dentist"))!;
     expect((await callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/complete", { params: { id: dentist.id } })).status).toBe(200);
     expect({ completed: (await named("Call the dentist"))?.completed, task: statusOf("dentist-task") }).toEqual({ completed: true, task: "Completed" });
+    expect((await callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/reopen", { params: { id: dentist.id } })).status).toBe(200);
+    expect({ completed: (await named("Call the dentist"))?.completed, task: statusOf("dentist-task"), fires: tasks.find((task) => task.taskId === "dentist-task")?.nextAt })
+      .toEqual({ completed: false, task: "Scheduled", fires: "2026-11-24T19:00:00.000Z" });
     expect((await callRoute(routes, "DELETE", "/api/alpha/reminders/items/{id}", { params: { id: dentist.id } })).status).toBe(200);
     expect({ kept: await named("Call the dentist"), task: statusOf("dentist-task") }).toEqual({ kept: undefined, task: "Dismissed" });
 

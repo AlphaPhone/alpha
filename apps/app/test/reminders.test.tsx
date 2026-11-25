@@ -341,6 +341,20 @@ describe("Reminders full journeys", () => {
     expect({ query: deleted?.query, keyed: (deleted?.key ?? "") !== "" }).toEqual({ query: "", keyed: true });
     expect(recorder.snapshot.items.some((item) => item.id === plumber.id)).toBe(false);
     expect(Boolean(button("Undo"))).toBe(false);
+
+    // spec/app/reminders/index.md, "A reminder the agent holds is one the owner can complete, delete and undo, wherever it was made": two quick deletes both happen
+    const first = await runtime.runPromise(createReminderItem({ listId: DEFAULT_LIST_ID, title: "Water plants" }));
+    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.write.outcome === "Confirmed");
+    const second = await runtime.runPromise(createReminderItem({ listId: DEFAULT_LIST_ID, title: "Take out trash" }));
+    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.write.outcome === "Confirmed");
+    await drawn(() => runtime.runPromise(deleteReminderItem(first!.id)));
+    const queued = runtime.runPromise(deleteReminderItem(second!.id));
+    await later(alpha, 5_100);
+    await drawn(() => queued);
+    expect({ hidden: [...remindersStore.snapshot().hiddenIds], undo: Boolean(button("Undo")) }).toEqual({ hidden: [second!.id], undo: true });
+    await later(alpha, 5_100);
+    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.undo.holding === "Released" && s.write.outcome === "Confirmed");
+    expect(recorder.snapshot.items.filter((item) => item.id === first!.id || item.id === second!.id)).toEqual([]);
   });
 
   // spec/app/reminders/alerts.md, "Story: Alert on due reminders and act from the banner"

@@ -392,6 +392,10 @@ export const remindersStore = {
     }
     return undefined;
   },
+  /** Take back the numbers reminders and lists had when Alpha last ran, so a held change keeps meaning the same one. @throws {never} */
+  keepNumbers(items: readonly (readonly [string, number])[], lists: readonly (readonly [string, number])[]): void {
+    publish({ ...current(), itemSpecIds: new Map(items), listSpecIds: new Map([[DEFAULT_LIST_ID, 1], ...lists]) });
+  },
   /** Keep under the reminder `id` the number the Reminders machine gave it. @throws {never} */
   numberItem(id: string, specId: number): void {
     publish({ ...current(), itemSpecIds: new Map([...current().itemSpecIds, [id, specId]]) });
