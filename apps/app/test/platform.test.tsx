@@ -9,6 +9,7 @@ import { adopt, earlierSlot, keptAt, vaulted } from "../src/platform/adoption.vi
 import { Agent, type Reached } from "../src/platform/agent.vibe";
 import { Cloud } from "../src/platform/cloud.vibe";
 import { testMocks } from "../src/platform/device.vibe";
+import { Telegram } from "../src/platform/telegram.vibe";
 import { type Slot, Vault } from "../src/platform/vault.vibe";
 import type { Platform } from "../src/platform/platform.vibe";
 import { area } from "../src/runtime/area.tsx";
@@ -48,6 +49,18 @@ it("Move between Home and the apps on an Alpha image, where a screen that throws
     expect(Boolean(button("Notes"))).toBe(true);
   }
   reported.mockRestore();
+});
+
+it('keeps an unconfigured messaging route on the phone (spec/app/platform/index.md, "Story: Ship only what this build allows")', async () => {
+  const fetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("unexpected request"));
+  try {
+    const { alpha } = await open({ ...scene(), phone: true }, only("home"));
+    const account = await alpha.runtime.runPromiseExit(Effect.flatMap(Telegram, (telegram) => telegram.getMe("session-test")));
+    const updates = await alpha.runtime.runPromiseExit(Effect.flatMap(Telegram, (telegram) => Stream.runDrain(telegram.updatesStream("session-test"))));
+    expect([failed(account)?._tag, failed(updates)?._tag, fetch.mock.calls]).toEqual(["Unsent", "Unsent", []]);
+  } finally {
+    fetch.mockRestore();
+  }
 });
 
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
