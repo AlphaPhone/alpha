@@ -25,8 +25,14 @@ export type SettingsPageProps = {
   children?: ReactNode;
 };
 
+/** Gives the Back control focus when the page appears with nothing focused, as a page opened from a row does. */
+const focusOnEntry = (back: HTMLButtonElement | null) => {
+  if (back && (document.activeElement === null || document.activeElement === document.body)) back.focus();
+};
+
 /**
- * The frame of every Settings page: its title, the way back and the notice about Android, over a scrolling body.
+ * The frame of every Settings page: its title, the way back and the notice about Android, over a scrolling body. A page
+ * opened from a row gives focus to its Back control.
  * @model spec/app/settings/index.md
  */
 export function SettingsPage({ title, top = false, leading, onBack, backLabel = "Back", told, actions, children }: SettingsPageProps) {
@@ -35,7 +41,7 @@ export function SettingsPage({ title, top = false, leading, onBack, backLabel = 
       data-settings-page={title}
       title={title}
       detail={!top}
-      leading={leading ?? (onBack ? <Button variant="ghost" size="icon" aria-label={backLabel} onClick={onBack}><ChevronLeft /></Button> : undefined)}
+      leading={leading ?? (onBack ? <Button ref={focusOnEntry} variant="ghost" size="icon" aria-label={backLabel} className="rounded-tile" onClick={onBack}><ChevronLeft /></Button> : undefined)}
       actions={actions}
       className={cn(
         "[&>main]:touch-pan-y [&>main]:pb-[calc(--spacing(32.5)+env(safe-area-inset-bottom))] not-in-data-[alpha-title-row]:not-in-data-[alpha-launcher]:[&>header>h1]:truncate",

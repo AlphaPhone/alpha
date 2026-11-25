@@ -2,7 +2,6 @@
 import type { MailCard, MailMessage } from "@elizaos/cloud"
 import { type GmailReadResult, type GmailThreadPage, type MailFailure, protocolFailure } from "@elizaos/plugin-inbox-client"
 import type { Fault } from "../../gen/app__inbox__message.ts"
-import { leaseRefusalReason } from "../../gen/app__platform.effect.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { Mail } from "./gmail.vibe"
 import { provider } from "./provider.vibe"
@@ -44,7 +43,6 @@ type ThreadFault = MailFailure | RejectedThread
 export function threadFault(cause: ThreadFault): Fault {
   if (cause instanceof RejectedThread) return cause.fault
   const status = protocolFailure(cause)?.status
-  if (protocolFailure(cause)?.reason === leaseRefusalReason) return "Unreachable"
   if (status === 401 || status === 403) return "Revoked"
   if (status === 404) return "Gone"
   if (status === 409 || status === 412) return "Moved"

@@ -10,6 +10,7 @@ import { useMachine } from "../../gen/app__voice.react.ts";
 import type { Phase } from "../../gen/app__voice.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import type { VoiceKeyboard } from "./useTalkKeyboard.ts";
+import { VoiceStopIcon } from "./VoiceStopIcon.tsx";
 import { VoiceWaveform } from "./VoiceWaveform.tsx";
 
 export interface TalkControlsProps {
@@ -83,11 +84,7 @@ export function TalkControls({ runtime, trailing, compact = false, onKeyboard }:
           {state.muted ? <MicOff /> : <Mic />}
         </Button>}
         {(compact || can(stop)) && <Button size="icon" className="bg-alpha text-alpha-foreground hover:bg-alpha/90" disabled={!can(stop)} aria-label="Stop voice conversation" onClick={() => void send(stop)}>
-          {compact ? <Square className="size-2.5" fill="currentColor" /> : (
-            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round">
-              <path d="M7 7h10v10H7z" />
-            </svg>
-          )}
+          {compact ? <Square className="size-2.5" fill="currentColor" /> : <VoiceStopIcon />}
         </Button>}
         {trailing}
       </section>

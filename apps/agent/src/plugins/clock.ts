@@ -174,7 +174,7 @@ function findTimerTarget(timers: readonly ClockTimerRecord[], params: Record<str
   const id = readString(params, "id");
   if (id !== undefined) return timers.find((entry) => entry.id === id);
   const label = readString(params, "label")?.toLowerCase();
-  const byLabel = label === undefined ? [] : timers.filter((entry) => entry.label.toLowerCase() === label);
+  const byLabel = label === undefined ? [] : timers.filter((entry) => liveTimer(entry) && entry.label.toLowerCase() === label);
   if (byLabel.length === 1) return byLabel[0];
   const ringing = timers.filter((entry) => entry.status === "ringing");
   if (op === "dismiss" && ringing.length === 1) return ringing[0];
@@ -222,6 +222,8 @@ function handleClockAlarm(store: AlphaAppsStore, timeZone: string, params: Recor
   }
   const target = findAlarmTarget(snapshot.alarms, params, op);
   if (target === undefined) return { success: false, text: "No single alarm matches: name it by its id from the Clock context." };
+  if (op === "snooze" && target.phase !== "ringing") return { success: false, text: `The ${formatHourMinute(target.hour, target.minute)} alarm is not ringing, so there is nothing to snooze.` };
+  if (op === "dismiss" && target.phase !== "ringing" && target.phase !== "snoozed") return { success: false, text: `The ${formatHourMinute(target.hour, target.minute)} alarm is not ringing or snoozed, so there is nothing to dismiss.` };
   if (op === "snooze") {
     const updated = store.snoozeAlarm(target.id, readNumber(params, "snoozeMinutes") ?? readNumber(params, "minutes"));
     return { success: true, text: `Snoozed ${formatHourMinute(target.hour, target.minute)} alarm.`, data: { op, alarm: updated } };
@@ -268,6 +270,7 @@ function handleClockTimer(store: AlphaAppsStore, params: Record<string, unknown>
     const durationMs = parseTimerDurationMs(params);
     if (durationMs === undefined) return { success: false, text: "A new timer needs its durationSeconds; to run a paused timer again, resume it." };
     const created = store.createTimer({ durationMs, label: readString(params, "label") ?? "", startImmediately: true });
+    if (created === undefined) return { success: false, text: "Clock already holds as many timers as it can: cancel one first." };
     return { success: true, text: `Started ${formatDuration(created.durationMs)} timer${created.label ? ` for ${created.label}` : ""}.`, data: { op: "start", timer: created } };
   }
   const target = findTimerTarget(snapshot.timers, params, op);
@@ -541,6 +544,7 @@ export function clockRoutes(store: AlphaAppsStore, timeZone: string): AgentRoute
           durationMs,
           startImmediately: readBoolean(body, "startImmediately") ?? true,
         });
+        if (timer === undefined) return { status: 409, body: { error: "timer_limit_reached" } };
         return { status: 201, body: { timer, snapshot: store.getClock() } };
       },
     },
