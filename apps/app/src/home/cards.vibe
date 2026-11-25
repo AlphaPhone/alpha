@@ -62,13 +62,14 @@ export type ToldBrief = { readonly outcome: "Finished"; readonly summary: string
 /** What a Messages or Phone card says beside its rows, as v121's did: how many wait, what they are, and when the newest came in. */
 export interface Waiting { readonly count: number; readonly what: string; readonly at: number }
 
-/** What the mail card says under its rows, as v121's did: whether Inbox's page saw every message, which account was read and when. */
-export interface MailRead { readonly more: boolean; readonly account: string; readonly at: number }
+/** What the mail card says under its rows, as v121's did: which account was read and when. */
+export interface MailRead { readonly account: string; readonly at: number }
 
 export interface Told {
   readonly reminders: ReadonlyArray<Item>
   readonly hidden: ReadonlyArray<number>
   readonly mail: Mail
+  readonly mailMore: boolean
   readonly messages: ReadonlyArray<Row>
   readonly phone: ReadonlyArray<Row>
   readonly flows: Flows
@@ -79,7 +80,7 @@ export interface Told {
 }
 
 let told: Told = {
-  reminders: [], hidden: [], mail: Cards.quiet, messages: [], phone: [], flows: { rows: [], freshness: "UpToDate" }, brief: undefined,
+  reminders: [], hidden: [], mail: Cards.quiet, mailMore: false, messages: [], phone: [], flows: { rows: [], freshness: "UpToDate" }, brief: undefined,
   mailRead: undefined, messagesWaiting: undefined, phoneWaiting: undefined,
 }
 
@@ -109,8 +110,8 @@ export const fromAreas = {
   },
   /** The phone's calendars Calendar hides now, by their numbers. */
   hidden(calendars: ReadonlyArray<number>): void { tell({ hidden: [...calendars] }) },
-  /** Inbox's summary of the unread mail it loaded: subject over sender, never a body; and which account was read and when. */
-  mail(mail: Mail, read?: MailRead): void { tell({ mail, mailRead: read }) },
+  /** Inbox's summary of the unread mail it loaded: subject over sender, never a body; whether there can be more; and which account was read and when. */
+  mail(mail: Mail, more = false, read?: MailRead): void { tell({ mail, mailMore: more, mailRead: read }) },
   /** The rows waiting in Messages: who, over the message; and how many wait and when the newest came in. */
   messages(rows: ReadonlyArray<Row>, waiting?: Waiting): void { tell({ messages: [...rows], messagesWaiting: waiting }) },
   /** The rows waiting in Phone: who, over the missed call or voicemail; and how many wait and when the newest came in. */

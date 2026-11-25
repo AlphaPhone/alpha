@@ -6,7 +6,7 @@ import { Machine as Shell, available, showing } from "../../gen/app__shell.effec
 import { Device } from "../platform/device.vibe"
 import { Telephony, TelephonyAbsent, TelephonyRefused, telephony } from "../platform/telephony.vibe"
 import { contained } from "../runtime/reactor.vibe"
-import { Dialer, prefilled } from "./phone.vibe"
+import { Dialer, classifyDialNumber, prefilled } from "./phone.vibe"
 
 type PhoneOperation = Extract<DeviceOperation, { type: "phone_keypad" | "phone_dial" | "phone_call" }>
 
@@ -79,6 +79,7 @@ export effect function phoneAction(operation: DeviceOperation, current: () => Pr
     case "phone_call": {
       if (operation.target.kind !== "number" || !(try canDispatch(current))) return refused
       const number = operation.target.number
+      if ((try classifyDialNumber(number)) !== "OrdinaryNumber" || !(try canDispatch(current))) return refused
       const report = telephony("placeCall", (client) => client.phone.placeCall(number)) catch (failure) => refusedBeforeDispatch(failure) ? null : undefined
       if (report === undefined) return undefined
       const status = match (report?.placeStatus) {

@@ -1,7 +1,7 @@
 // spec/kit/read.md, "Story: Read from outside"; spec/kit/attempt.md, "Story: Do something outside, once"
 import { replied } from "../../gen/app__platform.effect.vibe"
 import * as Msg from "./messaging.vibe"
-import { type Listening, type Wired, remoteAt } from "./remote.vibe"
+import { type Listening, type Wired, Unsent, remoteAt } from "./remote.vibe"
 
 /** User peer identifier. */
 export schema TelegramPeerUser {
@@ -385,6 +385,34 @@ export interface TelegramClient {
 
 /** Effect service tag for the Telegram user-account client. */
 export service Telegram: TelegramClient {}
+
+/** Without a native transport or an injected client, no Telegram request can leave Alpha. */
+export const unavailableTelegram = Layer.succeed(Telegram, (() => {
+  const cause = new Unsent({ cause: "Telegram transport is unavailable on this device" })
+  const unsent = () => Effect.fail(cause)
+  return {
+    baseUrl: "",
+    sendCode: unsent,
+    signIn: unsent,
+    getPassword: unsent,
+    checkPassword: unsent,
+    exportLoginToken: unsent,
+    acceptLoginToken: unsent,
+    getMe: unsent,
+    logOut: unsent,
+    getDialogs: unsent,
+    getHistory: unsent,
+    sendMessage: unsent,
+    editMessage: unsent,
+    deleteMessages: unsent,
+    sendReaction: unsent,
+    readHistory: unsent,
+    searchGlobal: unsent,
+    updateNotifySettings: unsent,
+    getDifference: unsent,
+    updatesStream: () => Stream.fail(cause),
+  } satisfies TelegramClient
+})())
 
 const TELEGRAM_BOT_TOKEN_PATTERN = /^(?:bot\d+:|(?:\d{5,}:[A-Za-z0-9_-]{10,}))/
 const FLOOD_WAIT_PATTERN = /^FLOOD_WAIT_(\d+)$/

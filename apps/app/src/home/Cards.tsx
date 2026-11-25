@@ -15,6 +15,8 @@ import { type MailRead, type Waiting, fromAreas, named, others } from "./cards.v
 const where: Readonly<Record<Cards.Origin, string>> = { PhoneCalendar: "Calendar", AgentCalendar: "Alpha", Reminder: "Reminder" };
 
 const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+const day = (at: number) => new Date(at).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Date(b).toDateString();
 
 /** When the mail was read, as v121's overviewWhenLabel: the time today, else the date and the time. */
 const readWhen = (at: number, now: number) =>
@@ -23,17 +25,20 @@ const readWhen = (at: number, now: number) =>
     : `${new Date(at).toLocaleDateString([], { month: "short", day: "numeric" })} ${clock(at)}`;
 
 /** The mail card's foot, as v121's: "Recent email" for a page that did not see every message, else the account, and when it was read. */
-const mailFoot = (read: MailRead | undefined, now: number) =>
-  read && [read.more ? "Recent email" : read.account, read.at > 0 ? `Updated ${readWhen(read.at, now)}` : ""].filter(Boolean).join(" · ");
+const mailFoot = (read: MailRead | undefined, more: boolean, now: number) =>
+  read && [more ? "Recent email" : read.account, read.at > 0 ? `Updated ${readWhen(read.at, now)}` : ""].filter(Boolean).join(" · ");
 
 /** A Messages or Phone card's count and the time of its newest row, as v121's, and its name with what waits. */
 const waitingOf = (app: "Messages" | "Phone", waiting: Waiting | undefined, now: number) =>
   waiting && { summary: String(waiting.count), status: shortWhen(waiting.at, now), "aria-label": `${app}, ${waiting.what}` };
 
-function shown(item: Cards.Item): HomeAgendaItem {
+function shown(item: Cards.Item, now: number): HomeAgendaItem {
+  const start = clock(item.begin);
+  const due = sameDay(item.begin, now) ? start : `${day(item.begin)} ${start}`;
+  const end = sameDay(item.begin, item.end) ? clock(item.end) : `${day(item.end)}, ${clock(item.end)}`;
   return {
     title: named.title(item.origin, item.id) || "Event",
-    when: item.allDay ? "All day" : item.overdue ? `Due ${clock(item.begin)}` : clock(item.begin),
+    when: item.overdue ? `Due ${due}` : item.allDay ? "All day" : item.end > item.begin ? `${start} – ${end}` : start,
     source: where[item.origin],
   };
 }
@@ -58,13 +63,28 @@ export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Res
       const items = Cards.candidates(state, told);
       const first = Cards.lead(items, now)[0];
       if (first === undefined) return null;
-      const lead = shown(first);
+      const lead = shown(first, now);
       const next = first.overdue ? Cards.following(items, now)[0] : undefined;
-      return <HomeAgendaCard key="agenda" aria-label={first.overdue ? `Open overdue reminder: ${lead.title}` : `Open calendar event: ${lead.title}`} item={lead} overdue={first.overdue} next={next && shown(next)} notCurrent={Cards.agendaCard(state, now, told) === "NotUpdated"} {...open("AgendaCard")} />;
+      const overdueCount = items.filter((item) => item.overdue).length;
+      const heading = first.overdue ? (overdueCount > 1 ? `${overdueCount} overdue reminders` : "Overdue reminder") : day(first.begin);
+      const notCurrent = Cards.agendaCard(state, now, told) === "NotUpdated";
+      return (
+        <HomeAgendaCard
+          key="agenda"
+          heading={heading}
+          aria-label={first.overdue ? `Open overdue reminder: ${lead.title}, ${lead.when}` : `Open calendar event: ${lead.title}, ${heading}, ${lead.when}`}
+          aria-description={notCurrent ? "Not up to date" : undefined}
+          item={lead}
+          overdue={first.overdue}
+          next={next && shown(next, now)}
+          notCurrent={notCurrent}
+          {...open("AgendaCard")}
+        />
+      );
     },
     MessagesCard: () => <HomeCallsCard key="messages" app="Messages" lines={told.messages} {...waitingOf("Messages", given.messagesWaiting, now)} {...open("MessagesCard")} onClick={() => void runtime.runPromise(openUnread())} />,
     PhoneCard: () => <HomeCallsCard key="phone" app="Phone" lines={told.phone} {...waitingOf("Phone", given.phoneWaiting, now)} {...open("PhoneCard")} onClick={() => void runtime.runPromise(openCalls())} />,
-    MailCard: () => <HomeMailCard key="mail" unread={told.mail.unread} more={given.mailRead?.more} status={mailFoot(given.mailRead, now)} lines={told.mail.rows} notCurrent={Cards.mailCard(told.mail) === "NotUpdated"} {...open("MailCard")} />,
+    MailCard: () => <HomeMailCard key="mail" aria-label={`Open Inbox, ${told.mail.unread}${given.mailMore ? "+" : ""} unread`} unread={told.mail.unread} more={given.mailMore} status={mailFoot(given.mailRead, given.mailMore, now)} lines={told.mail.rows} notCurrent={Cards.mailCard(told.mail) === "NotUpdated"} {...open("MailCard")} />,
     BriefOfToday: () => given.brief && (
       <HomeBriefCard key="brief" outcome={given.brief.outcome} summary={given.brief.outcome === "Finished" ? given.brief.summary : undefined} when={clock(given.brief.at)} {...open("BriefOfToday")} />
     ),

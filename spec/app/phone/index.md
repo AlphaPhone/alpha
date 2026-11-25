@@ -32,22 +32,25 @@ import permission as P from "../../kit/permission"
 
 type Tab = Recents | Keypad | Voicemail
 type Filter = AllCalls | MissedCalls
-type Typed = Blank | Partial | Dialable | Emergency
+type Typed = Blank | Partial | Dialable
+type DialNumberKind = NumberPending | NumberUnknown | OrdinaryNumber | EmergencyNumber
+type DialMode = DialBlocked | SystemDial | DirectDial
+type Carrier = CarrierReady | CarrierUnavailable | CarrierUnknown
 type Telecom = NoCall | OrdinaryCall | MaybeEmergencyCall | CallUnknown
 type Phone = {
   front: bool, tab: Tab,
   log: P::Permission, recents: R::Read, rows: int, chip: Filter, sought: bool,
-  digits: int, typed: Typed, lookup: R::Read, matched: bool,
+  digits: int, typed: Typed, numberKind: DialNumberKind, lookup: R::Read, matched: bool,
   dial: R::Read, dialled: bool, failedDial: bool, unsureDial: bool,
-  telecom: Telecom, carrier: bool, missed: int, voicemail: bool,
+  telecom: Telecom, carrier: Carrier, missed: int, voicemail: bool,
 }
 
 pure val initial: Phone = {
   front: false, tab: Recents,
   log: P::unasked, recents: R::unread, rows: 0, chip: AllCalls, sought: false,
-  digits: 0, typed: Blank, lookup: R::unread, matched: false,
+  digits: 0, typed: Blank, numberKind: NumberUnknown, lookup: R::unread, matched: false,
   dial: R::unread, dialled: false, failedDial: false, unsureDial: false,
-  telecom: CallUnknown, carrier: false, missed: 0, voicemail: false,
+  telecom: CallUnknown, carrier: CarrierUnknown, missed: 0, voicemail: false,
 }
 ```
 
@@ -63,6 +66,7 @@ type Source = TypedNumber | PickedNumber
 type Effect =
   | ReadLog({ ticket: int, device: bool })
   | MatchNumber({ ticket: int })
+  | ClassifyNumber({ ticket: int })
   | AskLog
   | OpenSettings
   | MarkSeen
@@ -258,15 +262,18 @@ pure def stepThePromptNeedsTheControl(before: Phone, via: str, after: Phone, out
 
 ### Each digit, or each digit taken back, is judged by the phone and looked up among the contacts on the phone
 
-The phone says whether what is now typed is blank, a partial number, a
-number it can dial or an emergency number. The lookup happens on the phone.
+The keypad distinguishes a blank, a partial number and a number Android can
+accept. Android classifies a complete number independently of the contact lookup.
 The owner can also edit or paste the number directly.
 
 ```quint
 pure def judged(digits: int, typed: Typed, s: Phone): Moved =
   val lookup = R::ask(s.lookup)
-  { state: { ...s, digits: digits, typed: typed, lookup: lookup, matched: false, failedDial: false, unsureDial: false },
-    out: List(MatchNumber({ ticket: lookup.ticket })) }
+  val matchNumber = MatchNumber({ ticket: lookup.ticket })
+  val numberKind = if (typed == Dialable) NumberPending else NumberUnknown
+  val out = if (typed == Dialable) List(matchNumber, ClassifyNumber({ ticket: lookup.ticket })) else List(matchNumber)
+  { state: { ...s, digits: digits, typed: typed, numberKind: numberKind, lookup: lookup, matched: false, failedDial: false, unsureDial: false },
+    out: out }
 
 pure def canPress(s: Phone, typed: Typed): bool =
   s.front and s.tab == Keypad and s.digits < maxDigits and typed != Blank
@@ -283,6 +290,19 @@ pure def canEditNumber(s: Phone, digits: int, typed: Typed): bool =
     and 0 <= digits and digits <= maxDigits and ((digits == 0) == (typed == Blank))
 
 pure def editNumber(s: Phone, digits: int, typed: Typed): Moved = judged(digits, typed, s)
+```
+
+### Only the current number's Android emergency classification is used
+
+Android reports whether the number is an emergency number for the phone's
+current network and subscriptions. If it cannot classify the number, Alpha
+can only offer a manual handoff.
+
+```quint
+pure def canNumberClassified(s: Phone, ticket: int, kind: DialNumberKind): bool =
+  s.numberKind == NumberPending and s.lookup.ticket == ticket and kind != NumberPending
+
+pure def numberClassified(s: Phone, ticket: int, kind: DialNumberKind): Phone = { ...s, numberKind: kind }
 ```
 
 ### A number handed to Phone opens the keypad with it filled in, and never dials
@@ -340,12 +360,23 @@ pure def sometimesContactMatched(s: Phone): bool = s.matched and s.typed == Dial
 
 ### Call hands the typed number to the dialer, only if the phone says it is a number it can dial
 
-A partial number is never handed over. Without a carrier only an emergency
-number is.
+A partial number is never handed over. With no carrier only a number Android
+classifies as an emergency number can open the dial screen. Unknown call state
+or carrier availability allows the owner to open the dial screen. During a live
+call that may be an emergency, the handoff waits.
 
 ```quint
-pure def dialable(s: Phone): bool =
-  s.typed == Emergency or (s.typed == Dialable and s.carrier and clear(s))
+pure def ownerDialMode(s: Phone, kind: DialNumberKind): DialMode =
+  if (s.telecom == MaybeEmergencyCall) DialBlocked
+  else if (kind == EmergencyNumber) SystemDial
+  else if (s.carrier == CarrierUnavailable) DialBlocked
+  else if (s.carrier == CarrierUnknown or s.telecom == CallUnknown or kind == NumberUnknown or kind == NumberPending) SystemDial
+  else if (s.telecom == NoCall) DirectDial
+  else DialBlocked
+
+pure def dialable(s: Phone): bool = s.typed == Dialable and ownerDialMode(s, s.numberKind) != DialBlocked
+
+pure def pickedDialable(s: Phone): bool = ownerDialMode(s, OrdinaryNumber) != DialBlocked
 
 pure def handOff(source: Source, number: str, s: Phone): Moved =
   val dial = R::ask(s.dial)
@@ -361,7 +392,7 @@ pure def dialTyped(s: Phone): Moved = handOff(TypedNumber, "", s)
 The handoff names the number of the call tapped.
 
 ```quint
-pure def canDialRecent(s: Phone, number: str): bool = s.rows > 0 and s.carrier and clear(s) and not(s.dialled) and number != ""
+pure def canDialRecent(s: Phone, number: str): bool = s.rows > 0 and pickedDialable(s) and not(s.dialled) and number != ""
 
 pure def dialRecent(s: Phone, number: str): Moved = handOff(PickedNumber, number, s)
 ```
@@ -373,7 +404,7 @@ matched contact without having to type the rest of the number.
 
 ```quint
 pure def canDialMatched(s: Phone, number: str): bool =
-  s.front and s.tab == Keypad and s.matched and s.carrier and clear(s) and not(s.dialled) and number != ""
+  s.front and s.tab == Keypad and s.matched and pickedDialable(s) and not(s.dialled) and number != ""
 
 pure def dialMatched(s: Phone, number: str): Moved = handOff(PickedNumber, number, s)
 ```
@@ -381,11 +412,11 @@ pure def dialMatched(s: Phone, number: str): Moved = handOff(PickedNumber, numbe
 ### A voicemail callback hands the caller's number to the phone
 
 The owner's Call back button uses the caller's full number while the
-carrier is available and Voicemail is showing.
+handoff is available and Voicemail is showing.
 
 ```quint
 pure def canDialVoicemail(s: Phone, number: str): bool =
-  s.front and s.tab == Voicemail and s.carrier and clear(s) and not(s.dialled) and number != ""
+  s.front and s.tab == Voicemail and pickedDialable(s) and not(s.dialled) and number != ""
 
 pure def dialVoicemail(s: Phone, number: str): Moved = handOff(PickedNumber, number, s)
 ```
@@ -404,7 +435,7 @@ pure def stepOneHandoffPerShowing(before: Phone, via: str, after: Phone, out: Li
 
 ```quint
 pure def stepOnlyANumberIsHandedOver(before: Phone, via: str, after: Phone, out: List[Effect]): bool =
-  handoffIn(out) implies ((via == "dialTyped" and dialable(before)) or (via == "dialRecent" and before.rows > 0 and before.carrier) or (via == "dialMatched" and before.matched and before.carrier) or (via == "dialVoicemail" and before.tab == Voicemail and before.carrier))
+  handoffIn(out) implies ((via == "dialTyped" and dialable(before)) or (pickedDialable(before) and ((via == "dialRecent" and before.rows > 0) or (via == "dialMatched" and before.matched) or (via == "dialVoicemail" and before.tab == Voicemail))))
 ```
 
 ### The dialer's answer counts only while the same showing lasts
@@ -418,13 +449,15 @@ pure def canDialAnswered(s: Phone, ticket: int, opened: bool, placed: bool): boo
 
 pure def dialAnswered(s: Phone, ticket: int, opened: bool, placed: bool): Phone =
   val result = { ...s, dial: R::answer(s.dial, opened), dialled: opened, failedDial: not(opened), unsureDial: false }
-  if (placed) { ...result, digits: 0, typed: Blank, matched: false, lookup: { ...s.lookup, status: R::Idle } } else result
+  if (placed) { ...result, digits: 0, typed: Blank, numberKind: NumberUnknown, matched: false, lookup: { ...s.lookup, status: R::Idle } } else result
 ```
 
 ### With the dialer role a call is placed through Telecom, and counts as started only when Telecom accepted it
 
-Without the role or Android's call grant the dial screen opens with the
-number instead, and an emergency number only ever opens the dial screen.
+Direct placement also needs a known ready carrier, no live call and a number
+Android classifies as ordinary. Without the role or Android's call grant the
+dial screen opens with the number instead. An emergency number only ever
+opens the dial screen.
 When Telecom's answer never comes, Phone says Alpha cannot tell whether
 the call started, and the number is not handed over again in this
 showing.
@@ -438,6 +471,13 @@ pure def alwaysAnUnsureCallIsThisShowings(s: Phone): bool =
   s.unsureDial implies (s.front and s.dialled and not(s.failedDial) and s.dial.status == R::Failed)
 
 pure def sometimesUnsureCall(s: Phone): bool = s.unsureDial
+
+pure def lawDirectDialRequiresKnownLineAndNumber(telecom: Telecom, carrier: Carrier, kind: DialNumberKind): bool =
+  ownerDialMode({ ...initial, telecom: telecom, carrier: carrier }, kind) == DirectDial implies
+    (telecom == NoCall and carrier == CarrierReady and kind == OrdinaryNumber)
+
+pure def lawOwnerHandoffWaitsForPossibleEmergency(carrier: Carrier, kind: DialNumberKind): bool =
+  ownerDialMode({ ...initial, telecom: MaybeEmergencyCall, carrier: carrier }, kind) == DialBlocked
 ```
 
 ### "Couldn't open the dialer" is shown only for this showing's handoff
@@ -451,7 +491,7 @@ pure def alwaysAFailedHandoffIsThisShowings(s: Phone): bool =
 
 ```quint
 pure def sometimesHandoffFailed(s: Phone): bool = s.failedDial
-pure def sometimesEmergencyWithoutCarrier(s: Phone): bool = s.dialled and s.typed == Emergency and not(s.carrier)
+pure def sometimesEmergencyWithoutCarrier(s: Phone): bool = s.dialled and s.numberKind == EmergencyNumber and s.carrier == CarrierUnavailable
 ```
 
 ## Story: Know when a call is live
@@ -464,9 +504,10 @@ pure def sometimesEmergencyWithoutCarrier(s: Phone): bool = s.dialled and s.type
 A call whose kind the phone cannot rule out as an emergency call may be
 one; without phone-state access Alpha does not know whether a call is live.
 The carrier is ready only when Android reports an active voice line in service.
+If Android cannot provide a reading, carrier availability is unknown.
 
 ```quint
-pure def telecomReported(s: Phone, telecom: Telecom, carrier: bool): Phone = { ...s, telecom: telecom, carrier: carrier }
+pure def telecomReported(s: Phone, telecom: Telecom, carrier: Carrier): Phone = { ...s, telecom: telecom, carrier: carrier }
 ```
 
 ### A live call shows the strip and pauses Alpha's voice
@@ -479,14 +520,14 @@ pure def liveCall(s: Phone): bool = s.telecom == OrdinaryCall or s.telecom == Ma
 
 ### Alpha acts outside only when the phone has ruled out an emergency call
 
-A call, a send or a contact change waits while a call that may be an
-emergency call is live, and while Alpha cannot tell. Other areas read this
-fact.
+A direct call, a send or a contact change waits while a call that may be
+an emergency call is live and while Alpha cannot tell. Other areas read this
+fact. Reviewed agent handoffs use the same restriction.
 
 ```quint
 pure def clear(s: Phone): bool = s.telecom == NoCall or s.telecom == OrdinaryCall
 
-pure def lawNothingActsDuringAPossibleEmergencyCall(telecom: Telecom, carrier: bool): bool =
+pure def lawNothingActsDuringAPossibleEmergencyCall(telecom: Telecom, carrier: Carrier): bool =
   clear(telecomReported(initial, telecom, carrier)) implies (telecom != MaybeEmergencyCall and telecom != CallUnknown)
 ```
 

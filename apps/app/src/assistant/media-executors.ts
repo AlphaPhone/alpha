@@ -16,6 +16,14 @@ export async function executeMedia(alpha: Alpha, operation: DeviceOperation, cal
     const { messageAction } = await import("../messages/agent.vibe");
     return alpha.runtime.runPromise(messageAction(operation, authority.target, authority.current));
   }
+  if (operation.type === "sms_send") {
+    const { reviewAgentSms } = await import("../messages/agent-send.vibe");
+    return alpha.runtime.runPromise(reviewAgentSms(operation, call, authority.current));
+  }
+  if (operation.type === "messages_read_selected") {
+    const { shareSelectedMessage } = await import("../messages/agent.vibe");
+    return alpha.runtime.runPromise(shareSelectedMessage(authority.target, authority.current));
+  }
   if (operation.type === "camera_capture_photo") {
     const [{ default: camera }, { requestCapture }] = await Promise.all([import("../camera/index.tsx"), import("../camera/camera.vibe")]);
     const answer = await camera.runtime(alpha).runPromise(requestCapture(operation.lens));
@@ -28,7 +36,7 @@ export async function executeMedia(alpha: Alpha, operation: DeviceOperation, cal
   }
   if (operation.type.startsWith("files_")) {
     const [{ default: files }, { fileAction }] = await Promise.all([import("../files/index.tsx"), import("../files/agent.vibe")]);
-    return files.runtime(alpha).runPromise(fileAction(operation, call));
+    return files.runtime(alpha).runPromise(fileAction(operation, call, authority.files, authority.current));
   }
   if (operation.type.startsWith("notes_")) {
     const { executeNotes, notesOperation } = await import("../notes/device-actions.vibe");
