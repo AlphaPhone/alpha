@@ -9,7 +9,7 @@ module editor {
   } as const
 
   export type PhotoLook = keyof typeof photoLooks
-  export type PhotoTransform = { readonly turns: number; readonly look: PhotoLook; readonly crop?: CropRect }
+  export type PhotoTransform = { readonly turns: number; readonly look: PhotoLook; readonly crop?: CropRect; readonly whiteBackground?: boolean }
   export interface BrowserEditFrame {
     readonly file: Blob
     readonly width: number
@@ -126,6 +126,10 @@ module editor {
       const wide = rotated ? height : width, high = rotated ? width : height
       const kept = extract(edit.crop, wide, high)
       const { canvas, drawer } = canvasAt(kept.width, kept.height, photoEdge)
+      if (edit.whiteBackground) {
+        drawer.fillStyle = "white"
+        drawer.fillRect(0, 0, canvas.width, canvas.height)
+      }
       const filtered = typeof drawer.filter === "string"
       if (filtered) drawer.filter = photoLooks[edit.look]
       drawer.scale(canvas.width / kept.width, canvas.height / kept.height)
