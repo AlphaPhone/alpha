@@ -16,7 +16,7 @@ import { views } from "../shell/views.tsx";
 import { useDayCards } from "./Cards.tsx";
 import { catalog, labelOf } from "./catalog.vibe";
 import { chooseApp, told } from "./home.vibe";
-import { launcherHeld, openNotifications, watchHomePull } from "./pull.vibe";
+import { launcherHeld, openNotifications, phoneLocked, watchHomePull } from "./pull.vibe";
 import { waiting } from "./waiting.vibe";
 import type { HomeMachines } from "./index.tsx";
 
@@ -59,7 +59,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   const day = useDayCards(runtime, shell.state?.image ?? false);
   const h = home.state;
   const s = shell.state;
-  const canPull = s !== undefined && home.can({ type: "pullDown", shell: s, locked: false, now: untimed }, owner);
+  const canPull = s !== undefined && home.can({ type: "pullDown", shell: s, locked: phoneLocked(), now: untimed }, owner);
   const homeScroller = useCallback((node: HTMLDivElement | null) => {
     if (node && canPull) return watchHomePull(node, () => { void runtime.runPromise(openNotifications()); });
   }, [canPull, runtime]);
@@ -129,7 +129,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   );
   return (
     <>
-      <div inert={showingApps || undefined} className="contents">
+      <div inert={showingApps || undefined} className="flex min-h-0 flex-1 flex-col">
         {deck}
         {Home.showsCards(h) && alpha.slot("home/cards")}
       </div>

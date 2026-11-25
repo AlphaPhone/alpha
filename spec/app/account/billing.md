@@ -48,7 +48,7 @@ pure val visitValues = Set(1, 2)
 pure val ticketValues = Set(1, 2, 3)
 pure val attemptValues = Set(1, 2)
 pure val amountValues = Set(1, 10)
-pure val nowValues = Set(10, 200, 5000, 100000)
+pure val nowValues = Set(10000, 200000, 5000000, 100000000)
 pure val standingValues = Set(P::Unfunded, P::Declined, P::Member, P::Unavailable)
 pure val weight_returned = 5
 pure val weight_checkoutConfirmed = 10
@@ -94,7 +94,7 @@ it is unknown nothing that could buy twice is offered. A card in the
 conversation only opens the funding sheet ([Plan](./plan.md)).
 
 ```quint
-pure val checkoutLife = 86400
+pure val checkoutLife = 86400000
 
 pure def canChoosePlan(b: Billing, tier: P::Tier, signIn: int, standing: P::Standing, origin: O::Origin, elsewhere: bool, now: int): bool =
   signIn > 0 and O::acts(origin) and (standing == P::Unfunded or standing == P::Declined) and b.offers.status == R::Loaded
@@ -136,7 +136,7 @@ confirmed is confirmed once for each return, until Cloud says it was paid
 or a day has passed.
 
 ```quint
-pure val visitLimit = 1800
+pure val visitLimit = 1800000
 
 pure def confirming(now: int, b: Billing): Moved =
   if (not(b.pending) or b.unsettled or b.confirm.outcome == A::Sent) { state: b, out: List(CheckPlan) }

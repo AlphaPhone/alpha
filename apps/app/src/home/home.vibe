@@ -11,12 +11,14 @@ import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import { Launcher, type Presentation, type Why } from "../platform/launcher.vibe"
 import { type Job, answer, contained, due, following, hearing, reacting, run, started, untimed, together } from "../runtime/reactor.vibe"
+import { createShelf } from "../runtime/shelf.vibe"
 import type { HomeAsk, HomeNoticeMessage } from "@repo/ui"
 import { type Said, say } from "../notices/toasts.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { stepping } from "../shell/shell.vibe"
 import { catalog, labelOf } from "./catalog.vibe"
 import { parsedTiles, savedKey, written } from "./saved.vibe"
+import { waiting as homeWaiting } from "./waiting.vibe"
 
 module words {
   import { type HomeNoticeMessage, homeNoticeWords } from "@repo/ui"
@@ -95,17 +97,11 @@ export interface Told {
   readonly place: "InEditBar" | "InDrawer"
 }
 
-let last: Told | undefined
-const listeners = new Set<() => void>()
-
-function subscribeTold(this: void, listener: () => void): () => void {
-  listeners.add(listener)
-  return () => { listeners.delete(listener) }
-}
+const toldShelf = createShelf<Told | undefined>(undefined)
 
 export const told = {
-  snapshot: (): Told | undefined => last,
-  subscribe: subscribeTold,
+  snapshot: toldShelf.snapshot,
+  subscribe: toldShelf.subscribe,
 }
 
 // spec/app/home/index.md, "The app in the menu can be added to Home or handed to Android as App info"
@@ -149,8 +145,7 @@ effect function tell(fx: Out) {
     try say(wordsOf(notice), true)
     return
   }
-  last = { notice, place }
-  for (const listener of [...listeners]) listener()
+  toldShelf.set({ notice, place })
 }
 
 // spec/app/home/index.md, "A tap on one of Alpha's own tiles on bare Home asks the shell to open that app, never while Home is being edited"
@@ -182,6 +177,19 @@ const presented = started(effect {
   })
 }, "presenting Home")
 
+const shelfReset = Layer.effectDiscard(Effect.addFinalizer(() => sync(() => { toldShelf.reset(); catalog.reset(); homeWaiting.reset() })))
+
+/** Clear inline Home failure notices whenever the surface they belonged to closes. */
+const shelfLifecycle = started(effect {
+  const home = try Home.Machine
+  const shell = try Shell.Machine
+  const places = Stream.changes(Stream.map(Stream.zipLatest(home.changes, shell.changes), ([h, s]) => Home.noticeAt(h, s)))
+  try Stream.runForEach(places, (place) => sync(() => {
+    const current = toldShelf.get()
+    if (current !== undefined && current.place !== place) toldShelf.reset()
+  }))
+}, "clearing retired Home notices")
+
 /** Home's machine, kept across restarts for its numbers, and what tells it of the phone and the shell. */
 export const home = together(
   reacting(Home, {
@@ -191,6 +199,8 @@ export const home = together(
     timers: (h) => (waiting(h.handoff) ? [due("android", h.handoff.until, { type: "stopWaiting", now: untimed }, owner)] : []),
   }),
   presented,
+  shelfReset,
+  shelfLifecycle,
   reacting(Drawer, {}),
   following(Shell.Machine, (shell) => shell.drawer, Drawer.Machine, (open) => open ? undefined : { type: "clear" } as const),
   following(Home.Machine, (state) => state.installed.apps, Drawer.Machine, (listed) => ({ type: "appsChanged", listed } as const)),

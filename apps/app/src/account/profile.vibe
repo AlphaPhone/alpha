@@ -6,7 +6,9 @@ import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import { type Account, Cloud } from "../platform/cloud.vibe"
 import { Device, native } from "../platform/device.vibe"
 import { CLOUD_ENVIRONMENT, signInAccounts } from "../platform/voice.vibe"
-import { contained, started } from "../runtime/reactor.vibe"
+import { contained, started, together } from "../runtime/reactor.vibe"
+import { type Shelf, createShelf } from "../runtime/shelf.vibe"
+import { Time } from "../runtime/time.vibe"
 
 /** The account sheet's entry in the shell's stack. */
 export const accountLayer = "account"
@@ -39,22 +41,21 @@ export type Profile =
 
 const reading: Profile = { tag: "Reading" }
 
-/** Display details from the current read, held for the Settings row and Account sheet. */
-export function profileShelf() {
-  let current: Profile = reading
-  const listeners = new Set<() => void>()
-  return {
-    snapshot: (): Profile => current,
-    subscribe: (listener: () => void): (() => void) => {
-      listeners.add(listener)
-      return (): void => { listeners.delete(listener) }
-    },
-    publish: (value: Profile): void => {
-      current = value
-      for (const listener of listeners) listener()
-    },
-  }
+/** Resident reactive shelf holding the verified account profile for Settings and the Account sheet. */
+export service AccountProfile {
+  readonly shelf: Shelf<Profile>
 }
+
+/** Read the runtime-scoped account profile shelf. */
+export const profileShelf = effect {
+  return (try AccountProfile).shelf
+}
+
+const profileService = Layer.effect(AccountProfile, effect {
+  const shelf = createShelf<Profile>(reading, { reset: () => reading })
+  try Effect.addFinalizer(() => sync(() => { shelf.reset() }))
+  return { shelf }
+})
 
 /** Opens the owner's account from Settings. The shell retires the layer on Back and Home. */
 export effect function openAccount(): void!!Layers.Machine {
@@ -83,7 +84,7 @@ effect function credentialOf(owner: CloudProfile) {
 
 const planUnavailable: Plan = { tag: "PlanUnavailable" }
 
-effect function readPlan(cloud: Account, owner: CloudProfile, profile: ReadProfile): Profile!! {
+effect function readPlan(cloud: Account, owner: CloudProfile, profile: ReadProfile): Profile!!Time {
   const phone = native()
   const unavailable = { ...profile, plan: planUnavailable }
   if (!owner.id || !owner.organization_id) return unavailable
@@ -99,7 +100,7 @@ effect function readPlan(cloud: Account, owner: CloudProfile, profile: ReadProfi
   if (after.id !== owner.id || after.organization_id !== owner.organization_id) return { ...profileOf(after), plan: planUnavailable }
   if (phone && (try credentialOf(after)) !== before) return unavailable
   if (!snapshot || snapshot.account.status !== "active") return unavailable
-  const now = try Clock.currentTimeMillis
+  const now = try (try Time).now()
   const view = subscriptionView(snapshot, now)
   if (view.credit.kind === "unavailable" || (view.planEffectiveUntil !== null && view.planEffectiveUntil <= now)) return unavailable
   const shown = view.plan
@@ -122,58 +123,97 @@ effect function readPlan(cloud: Account, owner: CloudProfile, profile: ReadProfi
   }
 }
 
-function untilExpiry(profile: Profile): Stream.Stream<Profile> {
+function untilExpiry(profile: Profile): Stream.Stream<Profile, never, Time> {
   if (profile.tag !== "Read" || profile.plan?.tag !== "PlanRead") return Stream.succeed(profile)
   const plan = profile.plan
   return Stream.unwrap(effect {
-    const now = try Clock.currentTimeMillis
+    const time = try Time
     const expiresAt = plan.expiresAt ?? Number.POSITIVE_INFINITY
     const resetsAt = plan.allowance?.resetsAt ?? Number.POSITIVE_INFINITY
     const retirement = { ...profile, plan: planUnavailable }
     const expires = Number.isFinite(expiresAt)
-      ? Stream.fromEffect(Effect.as(sleep(Math.max(0, expiresAt - now)), retirement))
+      ? Stream.fromEffect(Effect.as(time.until(expiresAt), retirement))
       : Stream.empty
     if (resetsAt >= expiresAt) return Stream.concat(Stream.succeed<Profile>(profile), expires)
     const withoutAllowance = { ...profile, plan: { ...plan, allowance: null } }
     return Stream.concat(
       Stream.succeed<Profile>(profile),
-      Stream.concat(Stream.fromEffect(Effect.as(sleep(Math.max(0, resetsAt - now)), withoutAllowance)),
-        Number.isFinite(expiresAt) ? Stream.fromEffect(Effect.as(sleep(expiresAt - resetsAt), retirement)) : Stream.empty),
+      Stream.concat(Stream.fromEffect(Effect.as(time.until(resetsAt), withoutAllowance)),
+        Number.isFinite(expiresAt) ? Stream.fromEffect(Effect.as(time.until(expiresAt), retirement)) : Stream.empty),
     )
   })
 }
 
-function visit(cloud: Account, place: "Account" | "Settings"): Stream.Stream<Profile> {
+function visit(
+  cloud: Account,
+  place: "Account" | "Settings",
+  cached: { last: Profile | undefined },
+): Stream.Stream<Profile, never, Time> {
   return Stream.unwrap(effect {
-    const opened = try exit(readAccount(cloud))
-    if (Exit.isFailure(opened)) return Stream.succeed(profileFailure(Cause.squash(opened.cause)))
-    const owner = opened.value
-    const profile = profileOf(owner)
-    return place === "Account"
-      ? Stream.concat(Stream.succeed<Profile>({ ...profile, plan: { tag: "CheckingPlan" } }), Stream.flatMap(Stream.fromEffect(readPlan(cloud, owner, profile)), untilExpiry))
-      : Stream.succeed<Profile>(profile)
+    if (place === "Settings" && cached.last !== undefined && cached.last.tag !== "Reading") {
+      return Stream.succeed(cached.last)
+    }
+    const prior = cached.last
+    const readFresh = effect {
+      const opened = try exit(readAccount(cloud))
+      if (Exit.isFailure(opened)) {
+        const failed = profileFailure(Cause.squash(opened.cause))
+        cached.last = failed
+        return Stream.succeed<Profile>(failed)
+      }
+      const owner = opened.value
+      const profile = profileOf(owner)
+      if (place !== "Account") {
+        cached.last = profile
+        return Stream.succeed<Profile>(profile)
+      }
+      const planEffect = effect {
+        const withPlan = try readPlan(cloud, owner, profile)
+        cached.last = withPlan
+        return withPlan
+      }
+      return Stream.concat(
+        Stream.succeed<Profile>({ ...profile, plan: { tag: "CheckingPlan" } }),
+        Stream.flatMap(Stream.fromEffect(planEffect), untilExpiry),
+      )
+    }
+    if (place === "Account" && prior?.tag === "Read") {
+      return Stream.concat(
+        Stream.succeed<Profile>({ ...prior, plan: { tag: "CheckingPlan" } }),
+        Stream.unwrap(readFresh),
+      )
+    }
+    return try readFresh
   })
 }
 
-/** Reads the account while Settings or its Account sheet is visible. Leaving interrupts the read and drops its answer. */
-export function profileLive(publish: (value: Profile) => void) {
-  return started(effect {
-    const { changes } = try Layers.Machine
-    const cloud = try Cloud
-    const device = try Device
-    const shell = try Shell.Machine
-    const settings = try Settings.Machine
-    const pages = Stream.zipLatest(shell.changes, settings.changes)
-    const active = Stream.changes(Stream.map(Stream.zipLatest(changes, pages), ([layers, [shell, settings]]) => {
-      if (!Shell.showing(shell, "Settings") || shell.assistant === "Full" || settings.page !== "Top") return "Away"
-      return Layers.top(layers).id === accountLayer ? "Account" : "Settings"
-    }))
-    const visible = Stream.switchMap(active, (place) => place === "Away"
-      ? Stream.succeed("Away" as const)
-      : Stream.map(Stream.changes(Stream.concat(Stream.fromEffect(device.showing()), device.visible)), (showing) => showing ? place : "Away" as const))
-    const watched = Stream.switchMap(visible, (place) => place === "Away"
-      ? Stream.succeed<Profile>(reading)
-      : Stream.concat(Stream.succeed<Profile>(reading), visit(cloud, place)))
-    try Stream.runForEach(watched, (value) => sync(() => publish(value)))
-  }, "reading Account")
-}
+const profileLive = started(effect {
+  const { changes } = try Layers.Machine
+  const cloud = try Cloud
+  const device = try Device
+  const shell = try Shell.Machine
+  const settings = try Settings.Machine
+  const { shelf } = try AccountProfile
+  const cached: { last: Profile | undefined } = { last: undefined }
+  const pages = Stream.zipLatest(shell.changes, settings.changes)
+  const active = Stream.changes(Stream.map(Stream.zipLatest(changes, pages), ([layers, [shell, settings]]) => {
+    if (!Shell.showing(shell, "Settings") || shell.assistant === "Full" || settings.page !== "Top") return "Away"
+    return Layers.top(layers).id === accountLayer ? "Account" : "Settings"
+  }))
+  const visible = Stream.switchMap(active, (place) => place === "Away"
+    ? Stream.succeed("Away" as const)
+    : Stream.map(Stream.changes(Stream.concat(Stream.fromEffect(device.showing()), device.visible)), (showing) => showing ? place : "Away" as const))
+  const watched = Stream.switchMap(visible, (place) => {
+    if (place === "Away") {
+      cached.last = undefined
+      return Stream.succeed<Profile>(reading)
+    }
+    return cached.last !== undefined && cached.last.tag !== "Reading"
+      ? visit(cloud, place, cached)
+      : Stream.concat(Stream.succeed<Profile>(reading), visit(cloud, place, cached))
+  })
+  try Stream.runForEach(watched, (value) => sync(() => shelf.set(value)))
+}, "reading Account")
+
+/** Resident Account profile service and live Cloud reader. */
+export const accountProfile = Layer.provideMerge(together(profileLive), profileService)

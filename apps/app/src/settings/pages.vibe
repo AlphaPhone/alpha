@@ -72,8 +72,8 @@ effect function requestedHome(request: number): Facts.Event!!(SystemSettings | S
 
 function readFacts(fx: Facts.Effect): Job<Facts.Event, SystemSettings | Shell | Pages.Machine | Facts.Machine | Time, []> {
   return match (fx) {
-    when { tag: "ReadPhone", let ticket }: answer("read", readPhone(ticket), { type: "abandon", now: untimed });
-    when { tag: "RequestHome", let request }: answer("home", requestedHome(request), { type: "giveUpOnHome", now: untimed, at: untimed, showing: false });
+    when { tag: "ReadPhone", let ticket }: answer("read", readPhone(ticket), { type: "answered", ticket, reported: [], grants: [], alerts: [], home: "NoSuchRole", assistant: "NoSuchRole", launcher: false });
+    when { tag: "RequestHome", let request }: answer("home", requestedHome(request), { type: "homeRequestEnded", request, at: untimed, showing: false });
   }
 }
 
@@ -109,7 +109,7 @@ effect function opened(start: number, target: Android.Target, channel: string): 
 }
 
 function startAndroid(fx: Android.Effect): Job<Android.Event, SystemSettings, []> {
-  return answer("android", opened(fx.start, fx.target, fx.channel), { type: "giveUpOnAndroid", now: untimed })
+  return answer("android", opened(fx.start, fx.target, fx.channel), { type: "androidAnswered", start: fx.start, opened: "NotAtAll" })
 }
 
 // spec/app/settings/android.md, "A start not answered within ten seconds is given up, Alpha says Android did not answer, and the owner may try again"

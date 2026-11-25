@@ -6,11 +6,13 @@ import { Machine as Settings } from "../../gen/app__settings.effect.vibe"
 import type { Access as Permission } from "../../gen/app__settings__facts.ts"
 import type { Target } from "../../gen/app__settings__android.ts"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import { say } from "../notices/toasts.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { Device, native } from "../platform/device.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { type Job, answer, contained, due, reacting, started, stop, together, untimed } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, due, following, reacting, started, stop, together, untimed } from "../runtime/reactor.vibe"
+import { Backs } from "../shell/shell.vibe"
 
 export const reviewKeys: Record<Permission, Steps.Key> = {
   CameraAccess: "Camera", MicrophoneAccess: "Microphone", LocationAccess: "Location", CalendarAccess: "Calendar",
@@ -66,7 +68,7 @@ export const openReview = (permission: Permission | undefined) => effect {
   const here = effect { return showing(try shell.get(), "Settings") && (try settings.get()).page === expected && (try device.showing()) }
   if (!(try here)) return
   const cloud = (try Cloud).client
-  const signedIn = try Effect.option(tryPromise((signal) => cloud.account({ signal })))
+  const signedIn = try Effect.option(timeout(tryPromise((signal) => cloud.account({ signal })), "10 seconds"))
   if (!(try here)) return
   const access = try Access.Machine
   if (Option.isNone(signedIn)) {
@@ -101,6 +103,24 @@ export const reviewBack = effect {
   return try contained(access.send({ type: "leave", now: untimed }, "Owner"), "closing the access review")
 }
 
+const accessReviewLayer = "startup-access-review"
+
+const reviewLayered = together(
+  following(
+    Access.Machine,
+    (state) => state.look !== "NotLooking",
+    Layers.Machine,
+    (open): Layers.Event => open
+      ? { type: "openLayer", id: accessReviewLayer, kind: "DialogLayer", covers: true }
+      : { type: "closeLayer", id: accessReviewLayer },
+  ),
+  started(effect {
+    const access = try Access.Machine
+    const backs = try Backs
+    try backs.register(`layer:${accessReviewLayer}`, Effect.provideService(reviewBack, Access.Machine, access))
+  }, "registering access review layer back"),
+)
+
 /** The existing Access rules, used by Settings for an explicit review. */
 export const startupReview = together(
   reacting(Access, {
@@ -112,4 +132,5 @@ export const startupReview = together(
     },
   }),
   revisiting,
+  reviewLayered,
 )

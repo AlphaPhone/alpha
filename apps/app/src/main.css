@@ -6,9 +6,9 @@ body:has([data-alpha-desktop-preview]) {
   min-height: 100dvh;
   overflow: hidden;
   overscroll-behavior: none;
-  background: #fff;
+  background: var(--background);
 }
 
 [data-alpha-desktop-preview] {
-  box-shadow: 0 12px 60px #0002;
+  box-shadow: 0 12px 60px oklch(0% 0 0deg / 13%);
 }

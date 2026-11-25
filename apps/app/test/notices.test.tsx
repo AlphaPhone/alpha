@@ -10,8 +10,8 @@ import { scene } from "./fakes/scene.ts";
 underAct();
 afterEach(closeAll);
 
-const toast = () => document.querySelector("[role=status]")?.textContent;
-const live = () => document.querySelector("[role=status]")?.getAttribute("aria-live");
+const toast = () => document.querySelector("[data-alpha-toast-region][role=status]")?.textContent;
+const live = () => document.querySelector("[data-alpha-toast-region][role=status]")?.getAttribute("aria-live");
 
 describe("the toasts", () => {
   // spec/app/notices/toasts.md, "Story: Read a toast before it goes"; spec/app/notices/toasts.md, "Story: Keep an Undo in reach"; spec/app/notices/toasts.md, "Story: Keep what I must not miss"

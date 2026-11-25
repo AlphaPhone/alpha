@@ -74,6 +74,7 @@ import type { Time } from "../runtime/time.vibe";
 import type { Machine as AccessReviewMachine } from "../../gen/app__startup__access.effect.vibe";
 import { AccessReview } from "../startup/SettingsAccess.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
+import { closeLayer, openLayer } from "../shell/shell.vibe";
 import { AccountStatus } from "../account/index.tsx";
 
 /** What every Settings page reads: where the owner is, the phone's facts, the hand-overs to Android, the preferences, the reset and the developer tools. */
@@ -183,7 +184,7 @@ function deviceRead(prefs: PrefsGen.Preferences): SettingsDeviceRead {
 }
 
 /** The device preferences as the Privacy and Inbox pages show and change them, each change offered exactly when the rules allow it. */
-function useDevice(runtime: SettingsRuntime) {
+function useDevice(runtime: SettingsRuntime, alpha: Alpha) {
   const { state, can, send } = useTimed(runtime, usePrefs);
   const [asking, setAsking] = useState(false);
   if (!state) return undefined;
@@ -192,6 +193,20 @@ function useDevice(runtime: SettingsRuntime) {
     if (can(event(value), "Owner")) void send(event(value), "Owner");
   };
   const recover = { type: "recover", at: untimed } as const;
+  const layerId = "settings-recover-confirm";
+  const closeDialog = () => {
+    setAsking(false);
+    alpha.taking(`layer:${layerId}`, () => Promise.resolve(false));
+    void alpha.runtime.runPromiseExit(closeLayer(layerId));
+  };
+  const openDialog = () => {
+    setAsking(true);
+    alpha.taking(`layer:${layerId}`, () => {
+      closeDialog();
+      return Promise.resolve(true);
+    });
+    void alpha.runtime.runPromiseExit(openLayer(layerId, "DialogLayer", true));
+  };
   return {
     read,
     askFirst: read !== "loaded" || state.askFirst,
@@ -202,17 +217,18 @@ function useDevice(runtime: SettingsRuntime) {
     onAskFirstChange: offer((askFirst) => ({ type: "setAskFirst", askFirst, at: untimed })),
     onImagesChange: offer((images) => ({ type: "setImages", images, at: untimed })),
     onShareChange: (share: SettingsShare, on: boolean) => offer((value) => ({ type: "setShare", share: sharesNamed[share], on: value, at: untimed }))(on),
-    onRecover: can(recover, "Owner") ? () => setAsking(true) : undefined,
+    onRecover: can(recover, "Owner") ? openDialog : undefined,
     recovery: (
       <ConfirmDialog
         open={asking && can(recover, "Owner")}
         title="Recover device settings?"
         confirmLabel="Recover"
+        destructive
         onConfirm={() => {
-          setAsking(false);
+          closeDialog();
           if (can(recover, "Owner")) void send(recover, "Owner");
         }}
-        onCancel={() => setAsking(false)}
+        onCancel={closeDialog}
       >
         Ask before Alpha acts, Inbox images and what Alpha may share go back to how a new phone has them.
       </ConfirmDialog>
@@ -283,7 +299,7 @@ function Display({ runtime, common }: PageProps) {
 
 // spec/app/settings/preferences.md, "Story: Decide whether Alpha asks before it acts"; spec/app/settings/preferences.md, "When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again"; spec/app/settings/index.md, "Set up Alpha access opens all permissions in review, and each row on Permissions opens that one access"
 function Privacy({ runtime, alpha, common }: PageProps) {
-  const device = useDevice(runtime);
+  const device = useDevice(runtime, alpha);
   const { can, send } = usePages(runtime);
   if (!device) return null;
   const { recovery, ...shown } = device;
@@ -363,9 +379,9 @@ function Apps({ runtime, common }: PageProps) {
   );
 }
 
-function App({ runtime, common, app }: PageProps & { app: "inbox" | "workflows" | "calendar" | "camera" | "photos" | "maps" | "notes" }) {
+function App({ runtime, alpha, common, app }: PageProps & { app: "inbox" | "workflows" | "calendar" | "camera" | "photos" | "maps" | "notes" }) {
   const facts = useFacts(runtime).state;
-  const device = useDevice(runtime);
+  const device = useDevice(runtime, alpha);
   return (
     <>
     {device?.recovery}
@@ -459,6 +475,7 @@ function Activity({ runtime, alpha, common }: PageProps) {
         open={review.showing && (canConfirm || archiving)}
         title="Restart Alpha?"
         confirmLabel="Archive and restart"
+        destructive
         loading={archiving}
         onConfirm={() => { if (canConfirm) void records.send(archive); }}
         onCancel={dismiss}
@@ -514,15 +531,25 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
   const { state, cause, can, send } = usePages(runtime);
   const android = useTimed(runtime, useAndroid);
   const facts = useTimed(runtime, useFacts);
-  if (cause) return <Banner variant="destructive" className="m-4">Alpha could not open Settings</Banner>;
+  if (cause) return (
+    <div className="flex h-full flex-col gap-3 bg-background p-4 pt-[max(--spacing(4),var(--alpha-safe-top))] text-foreground">
+      <div className="flex items-center">
+        <AppBack alpha={alpha} />
+      </div>
+      <Banner variant="destructive">Alpha could not open Settings</Banner>
+    </div>
+  );
   if (!state) return null;
   const page = state.page;
   const goBack = { type: "goBack" } as const;
   const start = android.state && loading(android.state.start) ? { target: targetNames[android.state.target], channel: android.state.channel || undefined } : undefined;
   const refresh = { type: "refresh", at: untimed } as const;
+  const showsFacts = page === "Top" || page === "General" || page === "Sound" || page === "Notifications"
+    || page === "Battery" || page === "PhonePage" || page === "Permissions" || page === "PasswordsPage" || page === "About";
+  const micMayBeOn = facts.state?.grants.some((grant) => grant.access === "MicrophoneAccess" && (grant.grant === "Granted" || grant.grant === "Limited")) ?? false;
   const common: Common = {
-    actions: state.phone && (page === "Top" || page === "General" || page === "PasswordsPage") && facts.can(refresh)
-      ? <Button variant="ghost" size="sm" onClick={() => void facts.send(refresh)}>Refresh</Button>
+    actions: state.phone && showsFacts && facts.can(refresh)
+      ? <Button variant="ghost" size="sm" className="min-h-11" onClick={() => void facts.send(refresh)}>Refresh</Button>
       : undefined,
     onBack: can(goBack) ? () => void send(goBack) : undefined,
     onOpen: (name) => {
@@ -530,7 +557,7 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
       if (can(open)) void send(open);
     },
     onHandOver: (name) => {
-      const hand = { type: "handOver", neighbour: neighboursNamed[name], micMayBeOn: false } as const;
+      const hand = { type: "handOver", neighbour: neighboursNamed[name], micMayBeOn } as const;
       if (can(hand)) void send(hand);
     },
     starting: start,
@@ -547,7 +574,7 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
   const Shown = further[page] ?? drawn[page];
   return (
     <section aria-label="Settings" className="relative flex h-full min-h-0 flex-col">
-      {state.phone && facts.state?.read.read.status === "Failed" && (page === "Top" || page === "General") ? <Banner variant="warn">The phone did not answer</Banner> : null}
+      {state.phone && facts.state?.read.read.status === "Failed" && (page === "Top" || page === "General") ? <Banner variant="warn" className="mx-4 mt-[max(--spacing(3),var(--alpha-safe-top))]">The phone did not answer</Banner> : null}
       {Shown ? <Shown runtime={runtime} alpha={alpha} common={common} /> : null}
       <AccessReview runtime={runtime} />
     </section>

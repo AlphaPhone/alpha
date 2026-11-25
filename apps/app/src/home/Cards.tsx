@@ -9,7 +9,7 @@ import { openCalls, openUnread } from "../phone/reports.vibe";
 import type { Resident } from "../runtime/area.tsx";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
-import { fromAreas, named, others } from "./cards.vibe";
+import { fromAreas, latestTime, named, others } from "./cards.vibe";
 
 const where: Readonly<Record<Cards.Origin, string>> = { PhoneCalendar: "Calendar", AgentCalendar: "Alpha", Reminder: "Reminder" };
 
@@ -38,7 +38,8 @@ export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Res
   const given = useSyncExternalStore(fromAreas.subscribe, fromAreas.snapshot, fromAreas.snapshot);
   if (!state) return [];
   const told = others(given, image);
-  const now = Math.max(state.calendar.since, state.agent.since, state.today * Cards.dayLength);
+  const latest = runtime.runSync(latestTime);
+  const now = Math.max(latest, state.calendar.since, state.agent.since, state.today * Cards.dayLength);
   const open = (kind: Cards.Kind) => ({
     disabled: !can({ type: "openCard", kind, now }),
     onClick: () => void send({ type: "openCard", kind, now: untimed }),
@@ -67,8 +68,14 @@ export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Res
         />
       );
     },
-    MessagesCard: () => <HomeCallsCard key="messages" app="Messages" lines={told.messages} {...open("MessagesCard")} onClick={() => void runtime.runPromise(openUnread())} />,
-    PhoneCard: () => <HomeCallsCard key="phone" app="Phone" lines={told.phone} {...open("PhoneCard")} onClick={() => void runtime.runPromise(openCalls())} />,
+    MessagesCard: () => <HomeCallsCard key="messages" app="Messages" lines={told.messages} disabled={open("MessagesCard").disabled} onClick={() => {
+      if (!can({ type: "openCard", kind: "MessagesCard", now })) return;
+      void send({ type: "openCard", kind: "MessagesCard", now: untimed }).then(() => runtime.runPromise(openUnread()));
+    }} />,
+    PhoneCard: () => <HomeCallsCard key="phone" app="Phone" lines={told.phone} disabled={open("PhoneCard").disabled} onClick={() => {
+      if (!can({ type: "openCard", kind: "PhoneCard", now })) return;
+      void send({ type: "openCard", kind: "PhoneCard", now: untimed }).then(() => runtime.runPromise(openCalls()));
+    }} />,
     MailCard: () => <HomeMailCard key="mail" aria-label={`Open Inbox, ${told.mail.unread}${given.mailMore ? "+" : ""} unread`} unread={told.mail.unread} more={given.mailMore} lines={told.mail.rows} notCurrent={Cards.mailCard(told.mail) === "NotUpdated"} {...open("MailCard")} />,
     BriefOfToday: () => given.brief && (
       <HomeBriefCard key="brief" outcome={given.brief.outcome} summary={given.brief.outcome === "Finished" ? given.brief.summary : undefined} when={clock(given.brief.at)} {...open("BriefOfToday")} />

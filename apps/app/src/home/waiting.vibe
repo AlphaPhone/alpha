@@ -1,8 +1,8 @@
 // spec/app/home/tiles.md, "Only Phone, Messages and Inbox carry a badge, only when something waits there, and no tile does while Home is being edited"
 import type { View } from "../../gen/app__shell.effect.vibe"
-import { externalStore } from "../runtime/store.ts"
+import { createShelf } from "../runtime/store.ts"
 
-const held = externalStore<ReadonlyMap<View, string>>(new Map())
+const held = createShelf<ReadonlyMap<View, string>>(new Map(), { reset: () => new Map() })
 
 /**
  * What waits in each of Alpha's own apps, in the owner's words, such as "2 missed calls": told by the app's own area,
@@ -11,6 +11,7 @@ const held = externalStore<ReadonlyMap<View, string>>(new Map())
 export const waiting = {
   snapshot: held.snapshot,
   subscribe: held.subscribe,
+  reset: held.reset,
   /** `view` has `said` waiting in it, or nothing where `said` is undefined. */
   tell(view: View, said: string | undefined): void {
     const next = new Map(held.snapshot())

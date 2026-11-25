@@ -21,8 +21,10 @@ import { type Scene, scene } from "./fakes/scene.ts";
 underAct();
 afterEach(closeAll);
 
+const originalFetch = globalThis.fetch;
 const shipped = vi.fn(() => Promise.resolve(Response.json(notices)));
-vi.stubGlobal("fetch", ((input: RequestInfo | URL, init?: RequestInit) => (String(input).endsWith("licenses/third-party-notices.json") ? shipped() : fetch(input, init))) as typeof fetch);
+const requestUrl = (input: RequestInfo | URL) => typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => (requestUrl(input).endsWith("licenses/third-party-notices.json") ? shipped() : originalFetch(input, init)));
 
 const open = (world: Scene) => openAlpha(world, only("home", "view:Settings", "settings/phone", "settings/activity", "overlay"));
 
@@ -30,11 +32,12 @@ const open = (world: Scene) => openAlpha(world, only("home", "view:Settings", "s
 const titled = (title: string) => [...document.querySelectorAll<HTMLElement>("button, label")].find((found) => found.querySelector("span > span")?.textContent === title);
 
 /** Press the row titled `title`; a switch's or a choice's row presses its control, as a tap on the row does. */
-const tap = (title: string) => act(async () => {
+const tap = (title: string) => act(() => {
   const found = titled(title);
   if (!found) throw new Error(`no row ${title}`);
   const control = found instanceof HTMLLabelElement ? document.getElementById(found.htmlFor) : found;
   (control ?? found).click();
+  return Promise.resolve();
 });
 
 const page = (alpha: Awaited<ReturnType<typeof open>>["alpha"]) => alpha.runtime.runPromise(Pages.Machine.use((pages) => pages.get())).then((state) => state.page);
@@ -391,8 +394,14 @@ describe("Settings", () => {
     await press("Export diagnostics");
     await until(alpha, machines, Developer.Machine, (s) => s.exporting.read.status === "Loaded");
     const text = await sharedFiles[0]?.text();
-    const report = JSON.parse(text ?? "{}");
-    expect([report.format, report.roles, report.problems.count, report.permissions, text?.includes("launcher3"), text?.includes("ai.alphacompute"), text?.includes("\"session\""), report.talk]).toEqual([
+    const report = JSON.parse(text ?? "{}") as {
+      format?: string;
+      roles?: ReadonlyArray<{ role: string; held: boolean; available: boolean }>;
+      problems?: { count?: number };
+      permissions?: Record<string, boolean>;
+      talk?: unknown;
+    };
+    expect([report.format, report.roles, report.problems?.count, report.permissions, text?.includes("launcher3"), text?.includes("ai.alphacompute"), text?.includes("\"session\""), report.talk]).toEqual([
       "alpha-diagnostics/v1", [{ role: "home", held: false, available: true }, { role: "assistant", held: false, available: true }], 2, { CalendarAccess: true, FilesAccess: true, LocationAccess: true, MicrophoneAccess: false, NotificationsAccess: true }, false, false, false,
       { format: "alpha-cloud-stream-timing-v1", sessions: [{ sttConnectedMs: 812, firstFrameSentMs: 815, consentRetry: true }, { sttConnectedMs: 390, firstFrameSentMs: null, consentRetry: false }] },
     ]);

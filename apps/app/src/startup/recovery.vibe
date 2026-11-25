@@ -1,8 +1,72 @@
-// spec/app/startup/recovery.md, "Story: See that something went wrong, and get out of it"; spec/app/startup/recovery.md, "Story: Keep my drafts through a rebuild"
+// spec/app/startup/recovery.md, "Story: See that something went wrong, and get out of it"
+import type { Target } from "../../gen/app__settings__android.ts"
+import type { Actor } from "../../gen/app__startup__actor.ts"
+import * as Recovery from "../../gen/app__startup__recovery.effect.vibe"
+import { SystemSettings } from "../platform/systemSettings.vibe"
+import { type Job, answer, contained, reacting, run, stop, untimed } from "../runtime/reactor.vibe"
+
 module page {
-  /** Reloads after the owner's press before a shell or any editor opened. The failed shell's runtime is never needed for this. @throws {never} */
+  /** Reload the page before the shell has mounted. @throws {never} */
   export function reloadBeforeMount(): void {
     window.location.reload()
   }
+
+  /** Whether the document marks Alpha as the Android launcher before startup completes. @throws {never} */
+  export function launcherBeforeMount(): boolean {
+    return typeof document !== "undefined" && document.documentElement.hasAttribute("data-alpha-launcher")
+  }
 }
-export { reloadBeforeMount } from page
+
+import { launcherBeforeMount, reloadBeforeMount } from page
+export { launcherBeforeMount, reloadBeforeMount }
+
+const routeTargets: Readonly<Record<Recovery.Route, Target>> = {
+  Chooser: "DefaultApps",
+  DefaultApps: "DefaultApps",
+  AndroidSettings: "AndroidHome",
+}
+
+effect function switchHomeRoute(route: Recovery.Route): boolean!!SystemSettings {
+  const settings = try SystemSettings
+  const opened = try settings.open(routeTargets[route], "")
+  return opened !== "NotAtAll"
+}
+
+/** Open Android's Home / default apps settings when Alpha fails while acting as Home. */
+export effect function openHomeSettings(): boolean!!SystemSettings {
+  for (const route of ["Chooser", "AndroidSettings"] as const) {
+    if (try switchHomeRoute(route)) return true
+  }
+  return false
+}
+
+function carry(fx: Recovery.Effect): Job<Recovery.Event, SystemSettings, [Actor]> {
+  return match (fx) {
+    when { tag: "Flush", let side, let ticket }:
+      answer(`flush:${side}`, succeed<Recovery.Event>({ type: "flushed", side, ticket, ok: true, now: untimed }), { type: "flushed", side, ticket, ok: false, now: untimed }, "Owner");
+    when { tag: "Rebuild" }:
+      run("rebuild", sync(() => reloadBeforeMount()), "Owner");
+    when { tag: "SwitchHome", let route, let ticket }:
+      answer("switch-home", effect {
+        const ok = try switchHomeRoute(route)
+        return (ok ? { type: "opened", ticket } : { type: "notOpened", ticket }) satisfies Recovery.Event
+      }, { type: "notOpened", ticket }, "Owner");
+    when { tag: "Record" }:
+      stop("record");
+    when { tag: "CancelDialogs" }:
+      stop("cancel-dialogs");
+  }
+}
+
+/** Resident startup failure recovery machine wired to Android Home settings and page reload. */
+export const startupRecovery = reacting(Recovery, {
+  carry,
+})
+
+/** Ask the recovery machine to show a failure kind when a surface breaks. */
+export effect function reportStartupFailure(kind: Recovery.Surface["failure"], side: Recovery.Side = "HomeSide"): void!!Recovery.Machine {
+  const machine = try Recovery.Machine
+  if (Recovery.canBreaks(try machine.get(), side, kind)) {
+    try contained(machine.send({ type: "breaks", side, kind }, "Owner"), "reporting startup failure")
+  }
+}

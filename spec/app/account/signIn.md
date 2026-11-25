@@ -57,7 +57,7 @@ pure val initial: SignIn = {
 pure val ticketValues = Set(1, 2, 3, 4)
 pure val tabValues = Set(1, 2)
 pure val accountValues = Set(-1, 1, 2)
-pure val nowValues = Set(0, 30, 100, 1000)
+pure val nowValues = Set(0, 30000, 100000, 1000000)
 pure val addressValues = Set("", "owner@example.com", "+14155550100", "415-555-0100", "+442079460958", " ()- . ")
 pure val codeValues = Set("123456")
 pure val weight_sent = 10
@@ -313,8 +313,8 @@ A code that did not go out returns to the choice with the address filled
 in. A resend that did not go out leaves the code step as it was.
 
 ```quint
-pure val codeLife = 600
-pure val cooldown = 60
+pure val codeLife = 600000
+pure val cooldown = 60000
 
 pure def canSent(s: SignIn, ticket: int): bool = (s.work == Sending or s.work == Resending) and ticket == s.ticket
 
@@ -586,7 +586,7 @@ pure def stepABrowserReturnIsUsedOnce(before: SignIn, via: str, after: SignIn, o
 ### A browser visit that does not come back within ten minutes ends, and its return is then refused
 
 ```quint
-pure val browserGrace = 600
+pure val browserGrace = 600000
 
 pure def canBrowserTimedOut(s: SignIn, now: int): bool = s.step == Browser and s.work == Resting and O::overdue(s.tab, now, browserGrace)
 
@@ -614,7 +614,7 @@ pure def sometimesTheBrowserTimedOut(s: SignIn): bool = s.trouble == TabExpired 
 ### A second check has its own ten minutes, however much the code before it had left
 
 ```quint
-pure val secondLife = 600
+pure val secondLife = 600000
 
 pure def lawASecondCheckHasItsOwnTenMinutes(now: int): bool =
   val checking = { ...initial, step: Code, work: Verifying, ticket: 1, attempt: 1, address: "owner@example.com", expiresAt: now + 1 }
