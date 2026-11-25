@@ -356,35 +356,35 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
       for (let turn = 0; turn < 400 && !check(); turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
       expect(check()).toBe(true);
     };
-    await drawnUntil(alpha, alpha.runtime, Voice.Machine, (s) => s.route.account === "CloudAccount" && s.route.consent && s.warmed);
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.route.account === "CloudAccount" && s.route.consent && s.warmed);
     await settled(() => world.voice.relayWarmups.length === 1);
 
     await press("Talk");
-    await drawnUntil(alpha, alpha.runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
     await drawnUntil(alpha, area, Dock, (s) => s.voice);
     expect([world.voice.cloudStarts, world.voice.activeMicSession !== undefined, button("Talk")]).toEqual([
       [{ environment: "production", credentialId: "cred-owner-9" }], true, undefined,
     ]);
 
     await press("Stop voice conversation");
-    await drawnUntil(alpha, alpha.runtime, Voice.Machine, (s) => s.phase === "Idle" && s.mic === "Off");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle" && s.mic === "Off");
     await drawnUntil(alpha, area, Dock, (s) => !s.voice);
     expect([world.voice.activeMicSession, world.voice.stopCloudSpeechCalls > 0, button("Talk") !== undefined]).toEqual([undefined, true, true]);
 
     world.voice.credentialId = "cred-owner-10";
-    const before = (await alpha.runtime.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()))).route.key;
+    const before = (await area.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()))).route.key;
     await drawn(() => world.voice.signedInHere?.());
-    await drawnUntil(alpha, alpha.runtime, Voice.Machine, (s) => s.route.key !== before && s.route.consent && s.warmed);
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.route.key !== before && s.route.consent && s.warmed);
     await press("Talk");
-    await drawnUntil(alpha, alpha.runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
     expect(world.voice.cloudStarts.map((one) => one.credentialId)).toEqual(["cred-owner-9", "cred-owner-10"]);
     await press("Stop voice conversation");
-    await drawnUntil(alpha, alpha.runtime, Voice.Machine, (s) => s.phase === "Idle");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
 
     world.signedIn = false;
     await seen(false);
     await seen(true);
-    await drawnUntil(alpha, alpha.runtime, Voice.Machine, (s) => s.route.account === "SignedOut" && !s.route.consent);
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.route.account === "SignedOut" && !s.route.consent);
   });
 
   // spec/app/voice/index.md, "Starting asks for the microphone the first time, opens it once it is allowed, and holds the speech engine while talking"; spec/app/voice/index.md, "Audio leaves the phone only on a route the owner agreed to"
@@ -392,11 +392,12 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     const world = { ...scene(), phone: true, signedIn: false };
     world.voice.onDevice = false;
     const { alpha } = await open(world, talkMounts);
-    await drawnUntil(alpha, alpha.runtime, Voice.Machine, (s) => s.warmed);
+    const area = assistant.runtime(alpha);
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
 
     await press("Talk");
-    await drawnUntil(alpha, alpha.runtime, Voice.Machine, (s) => s.phase === "Failed" || s.phase === "Idle");
-    const after = await alpha.runtime.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()));
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.session > 0 && (s.phase === "Failed" || s.phase === "Idle"));
+    const after = await area.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()));
     expect([after.mic, after.network, world.voice.cloudStarts, world.voice.relayWarmups, document.querySelector("[role=alertdialog], [role=alert], [role=note]"), button("Talk") !== undefined]).toEqual([
       "Off", false, [], [], null, true,
     ]);

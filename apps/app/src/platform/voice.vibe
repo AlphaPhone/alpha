@@ -235,6 +235,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   let activeSession = 0
   let cloudStream: CloudStreamingSpeech | undefined
   let cloudKey: CredentialId | undefined
+  let accountEpoch = 0
   let cloudCapture: { close(): Promise<void>; cancel(): Promise<void> } | undefined
   let cloudSpeechAbort: AbortController | undefined
   let activePlaybackRequest: string | undefined
@@ -295,8 +296,9 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
       if (network && registered(CLOUD_STREAM_PLUGIN)) {
         const relay = relayPlugin()
         const accounts = signInAccounts()
+        const epoch = accountEpoch
         fork.detached ignore(timeout(Effect.all([
-          effect { cloudKey = signedInKey(accounts) catch () => undefined },
+          effect { const read = signedInKey(accounts) catch () => undefined; if (epoch === accountEpoch) cloudKey = read },
           ignore(tryPromise(() => relay.prewarmCloudSpeech({ environment: CLOUD_ENVIRONMENT }))),
         ], { concurrency: "unbounded" }), RELAY_WARMUP_BOUND))
       }
@@ -500,7 +502,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
       cachedStatus = undefined
       cloudKey = undefined
     }),
-    forgetAccount: () => sync(() => { cloudKey = undefined; if (activeSession === 0) cloudStream = undefined }),
+    forgetAccount: () => sync(() => { accountEpoch += 1; cloudKey = undefined; if (activeSession === 0) cloudStream = undefined }),
     holdEngine: () => registered(LOCAL_PLUGIN)
       ? Effect.orElseSucceed(Effect.map(tryPromise(() => localPlugin().holdSpeechEngine({})), (res) => res.held === true), () => false)
       : succeed(false),
