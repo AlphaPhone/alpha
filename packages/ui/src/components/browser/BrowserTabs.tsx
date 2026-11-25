@@ -38,7 +38,7 @@ export function BrowserTabs({ leading, tabs, onPick, onClose, onNew, onNewPrivat
       <header data-host-chrome="" className="flex h-13 shrink-0 items-center gap-0.5 px-2 in-data-[alpha-launcher]:mt-11 in-data-[alpha-launcher]:h-14 [&>div:first-child>button]:size-13 [&>div:first-child>button]:rounded-lg">
         <div className="flex shrink-0">{leading}</div>
         <h1 className="min-w-0 flex-1 truncate text-xl font-semibold in-data-[alpha-launcher]:font-display in-data-[alpha-launcher]:text-home-display in-data-[alpha-launcher]:font-light">{tabs.length === 1 ? "1 tab" : `${tabs.length} tabs`}</h1>
-        {onNewPrivate && <button type="button" aria-label="New private tab" onClick={onNewPrivate} className={cn(focusRing, "min-h-9 rounded-full bg-secondary px-3 text-snippet font-semibold")}>Private</button>}
+        {onNewPrivate && <button type="button" aria-label="New private tab" onClick={onNewPrivate} className={cn(focusRing, "min-h-9 rounded-full bg-secondary px-3 py-1 text-snippet font-semibold")}>Private</button>}
         <Button variant="ghost" size="icon" aria-label="New tab" className="size-13 rounded-lg" onClick={onNew} disabled={onNew === undefined}><Plus /></Button>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-1.5 pb-35">

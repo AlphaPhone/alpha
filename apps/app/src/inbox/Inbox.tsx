@@ -76,7 +76,7 @@ function arrived(receivedAt: string, today: number): string {
 const senderName = (from: string) => from.replace(/<[^>]*>/u, "").replace(/"/gu, "").trim() || from;
 const senderAddress = (from: string) => /<([^>]+)>/u.exec(from)?.[1] ?? from;
 
-/** Why the list has nothing to show, as the list's state says it; none where it has rows to show or is reading. */
+/** Why the list has nothing to show, as the list's state says it, else that the accounts are being checked or could not be; none where it has rows to show or is reading. */
 function emptyOf(s: Mailbox): InboxListStateKind | undefined {
   if (!s.signedIn || s.failure === "LeaseNeeded") return "signedOut";
   if (s.accounts.status === "Loaded" && s.selected.account === 0 && s.connected.length === 0) return "notConnected";
@@ -84,6 +84,8 @@ function emptyOf(s: Mailbox): InboxListStateKind | undefined {
   if (readable(s) && !searchableIn(s.selected.folder, s)) return "unavailable";
   if (s.list.status === "Failed") return s.failure === "Offline" ? "offline" : "failed";
   if (s.list.status === "Loaded" && s.pages > 0 && s.total === 0) return s.selected.query === "" ? "empty" : "noResults";
+  if (s.accounts.status === "Idle" || s.accounts.status === "Loading") return "checking";
+  if (s.accounts.status === "Failed") return "failed";
   return undefined;
 }
 
