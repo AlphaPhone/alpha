@@ -13,6 +13,7 @@ module held {
   import { messagesClient, type MessagesNativePlugin } from "@elizaos/os-bridges"
   import { parseMmsSendResult, type MmsBinding, type OperationId } from "@elizaos/os-bridges"
   import { phoneClient, type PhoneNativePlugin, type PhoneNumber } from "@elizaos/os-bridges"
+  import { composerPlugin } from "./composerPort.vibe"
 
   type OwnerDialPlugin = PhoneNativePlugin & {
     classifyDialNumber(input: { number: PhoneNumber }): Promise<unknown>
@@ -63,6 +64,8 @@ module held {
       classifyDialNumber: (number: PhoneNumber) => classifyDialNumber(nativePhone, number),
       ownerDialScreen: (number: PhoneNumber) => ownerDialScreen(nativePhone, number),
       messages: messagesClient(nativePhone, journal),
+      composer: (trustedTap: boolean, signal: AbortSignal, current: () => Promise<boolean>) =>
+        messagesClient(composerPlugin(nativePhone, trustedTap, signal, current), journal),
       async mmsReceipt(binding: MmsBinding, operation: OperationId, hash: string) {
         const raw = await nativePhone.mmsSendResult({ operationId: operation })
         return parseMmsSendResult(raw, binding, operation, hash)
@@ -95,6 +98,7 @@ export interface TelephonyClients {
   classifyDialNumber(number: PhoneNumber): Promise<AndroidDialKind>
   ownerDialScreen(number: PhoneNumber): Promise<boolean>
   readonly messages: MessagesClient
+  composer(trustedTap: boolean, signal: AbortSignal, current: () => Promise<boolean>): MessagesClient
   /** Reads the native record and checks it against the original review digest, without the picture bytes. */
   mmsReceipt(binding: MmsBinding, operation: OperationId, hash: string): Promise<MmsSendResult | undefined>
   readonly contacts: AddressBookClient
@@ -132,11 +136,17 @@ export effect function telephony<A>(method: string, run: (clients: TelephonyClie
   return try nativeCall(method, () => run(found))
 }
 
-effect function nativeCall<A>(method: string, call: () => Promise<A>): A!TelephonyRefused {
+effect function nativeCall<A>(method: string, call: (signal: AbortSignal) => Promise<A>): A!TelephonyRefused {
   return try tryPromise({
     try: call,
     catch: (cause) => new TelephonyRefused({ method, code: codeOf(cause), tag: tagOf(cause), cause }),
   })
+}
+
+/** Only the manual composer's Send uses its own transport, with cancellation tied to this exact attempt. */
+export effect function sendFromComposer<A>(trustedTap: boolean, current: () => Promise<boolean>, send: (client: MessagesClient) => Promise<A>): A!(TelephonyAbsent | TelephonyRefused)!Telephony {
+  const clients = try (try Telephony).clients()
+  return try nativeCall("composerSend", (signal) => send(clients.composer(trustedTap, signal, current)))
 }
 
 /** The address book keeps one read ticket, shared by list, card and number searches. A new read waits until the outstanding native answer settles. */
