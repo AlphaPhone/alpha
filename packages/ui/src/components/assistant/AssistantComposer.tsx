@@ -51,6 +51,8 @@ export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "o
   onHistory?: () => void;
   /** Starts a spoken turn; the voice area owns it. */
   onTalk?: () => void;
+  /** Shows the Talk control at rest when the current host has no speech bridge. */
+  showUnavailableTalk?: boolean;
   /** Records a transcript the owner can edit before it enters the draft; its mic stands where Talk does, only where Talk is not offered. */
   onDictate?: () => void;
   /** Takes the field's place while a voice conversation owns the composer. */
@@ -94,7 +96,7 @@ function keepComposerFocus(event: PointerEvent<HTMLButtonElement>) {
  */
 export function AssistantComposer({
   variant = "sheet", value, onValueChange, closed = false, notice, unavailable, attachments = [], limit = 4, quote, editing = false, lift,
-  onSend, onStop, stopping = false, onAttach, onSearch, onNew, making = false, onHistory, onTalk, onDictate, voice, voiceNotice, onOpen, onType, leading, opener, placeholder, onFocusField, fieldRef, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
+  onSend, onStop, stopping = false, onAttach, onSearch, onNew, making = false, onHistory, onTalk, onDictate, showUnavailableTalk = false, voice, voiceNotice, onOpen, onType, leading, opener, placeholder, onFocusField, fieldRef, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
 }: AssistantComposerProps) {
   const written = value.trim() !== "" || attachments.length > 0;
   const bar = variant === "bar";
@@ -161,7 +163,7 @@ export function AssistantComposer({
           <Button variant="ghost" size="icon" aria-label="Talk" className={bar ? undefined : "bg-foreground text-background hover:bg-foreground/90"} onPointerDown={keepComposerFocus} onClick={onTalk}><Mic /></Button>
         ) : !compact && onDictate ? (
           <Button variant="ghost" size="icon" aria-label="Dictate" onPointerDown={keepComposerFocus} onClick={onDictate}><Mic /></Button>
-        ) : compact ? (
+        ) : compact || (bar && showUnavailableTalk) ? (
           <Button variant="ghost" size="icon" aria-label="Talk" className="disabled:opacity-100" disabled><Mic /></Button>
         ) : null}
       </div>

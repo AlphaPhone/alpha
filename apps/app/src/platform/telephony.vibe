@@ -10,7 +10,7 @@ module held {
   import { createDeferredDeletions, type ActionJournalPlugin, type StagedDeletion } from "@elizaos/os/bridges/action-journal"
   import { rejectionCode } from "@elizaos/os/bridges/bridge"
   import { addressBookPlugin, createAddressBookClient, createContactNames } from "@elizaos/os/bridges/contacts"
-  import { messagesClient, messagesPlugin } from "@elizaos/os/bridges/messages"
+  import { messagesClient, type MessagesNativePlugin } from "@elizaos/os/bridges/messages"
   import { parseMmsSendResult, type MmsBinding, type OperationId } from "@elizaos/os/bridges/definitions/messages"
   import { phoneClient, type PhoneNativePlugin, type PhoneNumber } from "@elizaos/os/bridges/phone"
 
@@ -54,21 +54,21 @@ module held {
 
   function make() {
     const journal = registerPlugin<Journal>("ElizaActionJournal")
-    const nativeMessages = messagesPlugin()
-    const nativePhone = registerPlugin<OwnerDialPlugin>("ElizaTelephony")
+    const nativePhone = registerPlugin<OwnerDialPlugin & MessagesNativePlugin>("ElizaTelephony")
+    const addressBook = addressBookPlugin()
     return {
       deletions: createDeferredDeletions(journal),
       deletionReceipt: (staged: StagedDeletion) => deletionReceipt(journal, staged),
       phone: phoneClient(nativePhone, journal),
       classifyDialNumber: (number: PhoneNumber) => classifyDialNumber(nativePhone, number),
       ownerDialScreen: (number: PhoneNumber) => ownerDialScreen(nativePhone, number),
-      messages: messagesClient(nativeMessages, journal),
+      messages: messagesClient(nativePhone, journal),
       async mmsReceipt(binding: MmsBinding, operation: OperationId, hash: string) {
-        const raw = await nativeMessages.mmsSendResult({ operationId: operation })
+        const raw = await nativePhone.mmsSendResult({ operationId: operation })
         return parseMmsSendResult(raw, binding, operation, hash)
       },
-      contacts: createAddressBookClient({ install: "WritingInstall", plugin: addressBookPlugin(), journal }),
-      names: createContactNames(addressBookPlugin()),
+      contacts: createAddressBookClient({ install: "WritingInstall", plugin: addressBook, journal }),
+      names: createContactNames(addressBook),
     }
   }
   let made: ReturnType<typeof make> | undefined
