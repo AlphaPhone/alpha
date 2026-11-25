@@ -22,7 +22,7 @@ Export diagnostics is the [Developer](./developer.md) export.
 ### Restart Alpha is offered only when the account area says the agent needs a restart, and Try again only when it needs another try
 
 The account area carries it out and decides whether one more start is
-allowed.
+allowed. Restart opens a review of the failed agent's [kept records](../account/records.md); the owner confirms the displayed count before archiving and the phone starts the agent only after confirming the exact archive.
 
 ```quint
 import read as R from "../../kit/read"

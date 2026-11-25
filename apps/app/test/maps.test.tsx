@@ -104,7 +104,7 @@ describe("Maps on a phone", () => {
     await until(alpha, runtime, Screen, (s) => s.place === 0 && s.searching && s.trip.route === 0);
     await hardware("back");
     await until(alpha, runtime, Screen, (s) => !s.searching && s.query === "" && s.recent[0] === "harbour");
-    await hardware("back");
+    await press("Back");
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
   });
 

@@ -1,6 +1,6 @@
 // spec/cloud/index.md, "Story: Know which cloud the app talks to"; spec/cloud/index.md, "Story: Register Alpha's app with the cloud"; spec/cloud/local.md, "The local cloud starts only for a profile whose database, mail, text messages and providers are all on this computer, and stops with every part together"
-import { parseProfile, type CloudProfile, type EnvironmentProfile } from "@elizaos/cloud/profile"
-import { nativeAssetLinks } from "@elizaos/cloud/worker"
+import { parseProfile, type CloudProfile, type EnvironmentProfile } from "@elizaos/cloud"
+import { nativeAssetLinks } from "@elizaos/cloud-worker"
 import { registrationOf, type Environment, type Registration, type Statement } from "../gen/cloud.effect.vibe"
 import candidate from "../profile/candidate.example.json" with { type: "json" }
 import production from "../profile/production.example.json" with { type: "json" }
@@ -41,7 +41,7 @@ export function loopbackOnly(settings: EnvironmentProfile): boolean {
   return settings.mail.kind === "loopback" && settings.sms.kind !== "https" && providers.every((url) => onThisComputer.test(url))
 }
 
-/** One registration in the shape eliza's seed and `client apply` file take (`.eliza/packages/cloud/src/operator/clients.vibe`, `ClientEntry`). */
+/** One registration in the shape eliza's seed and `client apply` file take (`.eliza/packages/cloud-worker/src/operator/clients.vibe`, `ClientEntry`). */
 export function entryOf(registration: Registration) {
   const line = (url: Registration["signInReturn"]) => `${url.origin}${url.path}`
   return {

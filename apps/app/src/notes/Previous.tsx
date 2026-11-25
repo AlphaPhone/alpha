@@ -8,11 +8,12 @@ import { EarlierNotes } from "./previous.vibe";
 
 export function Previous({ runtime }: { readonly runtime: Alpha["runtime"] }) {
   const machine = useMachine(runtime);
+  const notes = runtime.runSync(EarlierNotes);
   const state = machine.state;
   if (!state?.showing) return null;
   const send = (event: Event) => void machine.send(event, "Owner");
   const can = (event: Event) => machine.can(event, "Owner");
-  const get = (id: number) => runtime.runSync(EarlierNotes.use((notes) => notes.get(id)));
+  const get = (id: number) => runtime.runSync(notes.get(id));
   const opened = state.old > 0 ? get(state.old) : undefined;
   const back = opened === undefined ? { type: "backToNotes" } as const : { type: "closeOld" } as const;
   const rows = (values: typeof state.olds) => values.map(({ id, kind }) => {
@@ -24,7 +25,7 @@ export function Previous({ runtime }: { readonly runtime: Alpha["runtime"] }) {
   });
   return (
     <section aria-label="Notes on this phone" className="flex min-h-0 flex-1 flex-col">
-      <AppHeader title={opened === undefined ? "On this phone" : opened.title || "Untitled"} leading={can(back) && <Button size="icon" variant="ghost"
+      <AppHeader title={opened === undefined ? "On this phone" : opened.title || "Untitled"} detail={opened !== undefined} leading={can(back) && <Button size="icon" variant="ghost"
         aria-label={opened === undefined ? "Return to Notes" : "Back to previous notes"} onClick={() => send(back)}><ArrowLeft /></Button>} />
       <div className="flex flex-col gap-3 px-4 pb-12">
         {state.read.status === "Loading" && <Spinner className="self-center" label="Reading previous notes" />}
@@ -33,7 +34,7 @@ export function Previous({ runtime }: { readonly runtime: Alpha["runtime"] }) {
         </Alert>}
         {opened ? <article className="mx-auto w-full max-w-180 whitespace-pre-wrap px-2 py-4">
           <p>{opened.body}</p>
-          {opened.details.map((part, index) => <p key={index}>{part}</p>)}
+          {opened.details.length > 0 && <p>{opened.details.join("\n\n")}</p>}
         </article> : <>
           {state.read.status === "Loaded" && state.olds.length === 0 && state.binned.length === 0 && <EmptyState title="No previous notes" />}
           {rows(state.olds)}

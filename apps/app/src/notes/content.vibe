@@ -1,39 +1,31 @@
 // spec/app/notes/index.md, "The list holds the owner it shows, the notes and folders it last read with the store's revision, the folder it is narrowed to, and the folder numbers that are gone"; spec/app/notes/editor.md, "Story: Keep my draft through a restart"
-import { authoredNoteText, parseNoteFormat } from "@elizaos/plugin-notes/format"
-import { noteFolderId, notesFolderName, type NoteFolder } from "@elizaos/plugin-notes/organize"
-import type { NoteFormat, NoteJson, NotesSnapshot, StickyNote } from "@elizaos/plugin-notes/types"
+import { authoredNoteText, parseNoteFormat, projectAuthoredNoteContent } from "@elizaos/plugin-notes-client"
+import { noteFolderId, notesFolderName, type NoteFolder } from "@elizaos/plugin-notes-client"
+import type { NoteFormat, NotesSnapshot, StickyNote } from "@elizaos/plugin-notes-client"
 import type { Folder, Row } from "../../gen/app__notes.effect.vibe"
 import { type Kind, type Origin, type Source, unlinked } from "../../gen/app__notes__note.effect.vibe"
 import { Vault, type Slot } from "../platform/vault.vibe"
+import { fresh } from "../runtime/attempts.vibe"
 import { Time } from "../runtime/time.vibe"
 
 module pure {
-  import type { StickyNote } from "@elizaos/plugin-notes/types"
-
-  /** Stable numbers for canonical identifiers, with a separate namespace per kind of identifier.
-   * @throws {never} */
+  /** Stable numbers for canonical identifiers, with a separate namespace per kind of identifier. @throws {never} */
   export function numberOf(kind: string, id: string): number {
     let hash = 14695981039346656037n
     for (const char of `${kind}:${id}`) hash = BigInt.asUintN(64, (hash ^ BigInt(char.codePointAt(0) ?? 0)) * 1099511628211n)
     return Number(hash & 0xfffffffffffffn) + 1
   }
 
-  /** A note's new creation identifier, kept with its content before its first write.
-   * @throws {never} */
-  export function creationId(): string {
-    return crypto.randomUUID()
-  }
-
-  /** The stored modification time or when the agent last updated the note.
-   * @throws {never} */
-  export function moment(note: StickyNote): number {
-    const saved = note.format?.data.modifiedAt
-    const modified = typeof saved === "string" ? Date.parse(saved) : typeof saved === "number" ? saved : NaN
-    return Number.isFinite(modified) ? modified : Date.parse(note.updatedAt)
-  }
 }
-import { creationId, moment, numberOf } from pure
-export { creationId, moment, numberOf }
+import { numberOf } from pure
+export { numberOf }
+
+/** The stored modification time or when the agent last updated the note. */
+export function moment(note: StickyNote): number {
+  const saved = note.format?.data.modifiedAt
+  const modified = typeof saved === "string" ? Date.parse(saved) : typeof saved === "number" ? saved : NaN
+  return Number.isFinite(modified) ? modified : Date.parse(note.updatedAt)
+}
 
 schema Item { readonly t: string; readonly done: boolean }
 const Items = Schema.Array(Item)
@@ -89,6 +81,34 @@ export function audioIdOf(note: StickyNote): string {
   return typeof audio === "object" && audio !== null && "audioId" in audio && typeof audio.audioId === "string" ? audio.audioId : ""
 }
 
+/** What the saved voice note offers for reading. The audio stays with the phone. */
+export function savedVoice(note: StickyNote) {
+  const format = note.format
+  if (format?.kind !== "voice") return undefined
+  const data = format.data
+  const projected = projectAuthoredNoteContent(format)
+  const stored = Array.isArray(data.lines) ? data.lines : []
+  const lines = (projected?.lines ?? []).filter((line) => line.text.trim() !== "").map((line) => {
+    const row = stored[line.index]
+    const fields = typeof row === "object" && row !== null && !Array.isArray(row) ? row : {}
+    return {
+      who: typeof fields.s === "string" ? fields.s : "",
+      at: typeof fields.at === "number" && Number.isFinite(fields.at) && fields.at >= 0 ? fields.at : 0,
+      text: line.text,
+    }
+  })
+  const audio = typeof data.audio === "object" && data.audio !== null && !Array.isArray(data.audio) ? data.audio : {}
+  const fallback = note.body.trim() || (typeof audio.transcript === "string" ? audio.transcript.trim() : "")
+  const duration = data.durationMs ?? audio.durationMs ?? (typeof data.dur === "number" ? data.dur * 1000 : undefined)
+  return {
+    durationMs: typeof duration === "number" && Number.isFinite(duration) && duration >= 0 ? duration : undefined,
+    segments: Array.isArray(data.segments) ? Math.max(1, data.segments.length) : 1,
+    lines: lines.length > 0 || fallback === "" ? lines : [{ who: "", at: 0, text: fallback }],
+    summary: (projected?.summary ?? []).filter((point) => point.trim() !== ""),
+    actions: (projected?.actions ?? []).map((item) => ({ text: item.text, done: item.done ?? false })),
+  }
+}
+
 /** The note's Source, named by the existing canonical metadata. */
 function sourced(note: StickyNote): { readonly origin: Origin; readonly source: Source } {
   const data = note.format?.data
@@ -119,7 +139,7 @@ export function fromSaved(note: StickyNote, owner: string, base: number): DraftW
 
 /** A new unsaved editor, separate from the notes last read. */
 export function newWords(owner: string, made: number, folder: number, kind: DraftWords["kind"]): DraftWords {
-  return { owner, id: "", made, creation: creationId(), base: 0, folder, kind, title: "", body: "", items: [] }
+  return { owner, id: "", made, creation: fresh(), base: 0, folder, kind, title: "", body: "", items: [] }
 }
 
 export function wordsOf(draft: DraftWords): string {
@@ -127,7 +147,7 @@ export function wordsOf(draft: DraftWords): string {
 }
 
 export function formatOf(draft: DraftWords, existing?: StickyNote, folder?: NoteFolder): NoteFormat {
-  const data: { [key: string]: NoteJson } = { ...existing?.format?.data, ...(folder === undefined ? {} : { folderId: folder.id }) }
+  const data: NoteFormat["data"] = { ...existing?.format?.data, ...(folder === undefined ? {} : { folderId: folder.id }) }
   if (draft.kind === "Checklist") return { kind: "list", data: { ...data, items: draft.items.map(({ t, done }) => ({ t, done })) } }
   const { items: _items, ...remaining } = data
   return { kind: "text", data: remaining }
@@ -147,8 +167,8 @@ export error FolderChanged
 
 /** The assessed collection and the separate editor words. Only the currently authenticated owner can publish either. */
 export service NoteContent {
-  snapshot(): { readonly collection: Collection; readonly draft: DraftWords | undefined }
-  subscribe(listener: () => void): () => void
+  readonly snapshot: () => { readonly collection: Collection; readonly draft: DraftWords | undefined }
+  readonly subscribe: (listener: () => void) => () => void
   collection(): Collection!!
   publish(owner: string, state: NotesSnapshot): Collection!UnreadableNotes
   clear(): void!!
@@ -253,7 +273,7 @@ export const noteContent = Layer.effect(NoteContent, effect {
         const target = names.find((folder) => numberOf("folder", folder.id) === key)
         if (seen !== document.revision || (op !== "RemoveFolder" && (name === undefined || names.some((folder) => folder.name.normalize("NFKC").toLowerCase() === name.normalize("NFKC").toLowerCase())))) throw new FolderChanged()
         if (op === "AddFolder" && names.length >= 100 || op !== "AddFolder" && target === undefined) throw new FolderChanged()
-        const updated = op === "AddFolder" && name !== undefined ? [...names, { id: `f-${creationId()}`, name }]
+        const updated = op === "AddFolder" && name !== undefined ? [...names, { id: `f-${fresh()}`, name }]
           : op === "RenameFolder" && name !== undefined ? names.map((folder) => folder === target ? { ...folder, name } : folder)
           : names.filter((folder) => folder !== target)
         const next = { version: 1 as const, revision: seen + 1, folders: updated }

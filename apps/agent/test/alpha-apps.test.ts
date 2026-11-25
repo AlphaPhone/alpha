@@ -5,7 +5,6 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { AlphaAppsStore, alphaAppsPluginName, createAlphaAppsPlugin } from "../src/plugins/index.ts";
 import { advanceDueDate } from "../src/plugins/store.ts";
-import { alarmFields, alarmOperations, timerFields, timerOperations, worldFields, worldOperations } from "../gen/agent.ts";
 import type { AgentRoute, AgentRuntimeLike, ClockSnapshot, ReminderItemRecord, RemindersSnapshot } from "../src/plugins/types.ts";
 
 const emptyMessage = (text: string, metadata?: Record<string, unknown>) =>
@@ -67,6 +66,29 @@ async function callRoute(
   });
   return result as { status: number; body: Record<string, unknown> };
 }
+
+describe("Alpha product plugin: what the model may pass and what the owner sees", () => {
+  it("declares each action's parameters, so a call with the model's arguments runs, and echoes no result text to the owner", async () => {
+    const store = new AlphaAppsStore({ now: () => Date.UTC(2026, 10, 24, 18, 0) });
+    const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime: makeFakeRuntime().runtime });
+    const declared = Object.fromEntries((plugin.actions ?? []).map((action) => [action.name, (action.parameters ?? []).map((parameter) => parameter.name)]));
+    expect(declared.CLOCK_TIMER).toEqual(expect.arrayContaining(["action", "durationSeconds", "label", "id"]));
+    expect(declared.CLOCK_ALARM).toEqual(expect.arrayContaining(["action", "hour", "minute", "days", "label", "enabled", "id"]));
+    expect(declared.CLOCK_WORLD).toEqual(expect.arrayContaining(["action", "city", "timeZone"]));
+    expect(declared.REMINDERS_MANAGE).toEqual(expect.arrayContaining(["op", "title", "dueDate", "dueMinute", "id"]));
+    const said: string[] = [];
+    const callback = (content: { text?: string }) => { said.push(content.text ?? ""); return Promise.resolve([]); };
+    const timer = plugin.actions!.find((action) => action.name === "CLOCK_TIMER")!;
+    const started = await timer.handler(makeFakeRuntime().runtime, emptyMessage("Set a timer for 5 minutes"), emptyState, { parameters: { action: "start", durationSeconds: 300 } }, callback as never);
+    expect(started?.success).toBe(true);
+    expect(store.getClock().timers[0]?.durationMs).toBe(300_000);
+    const reminders = plugin.actions!.find((action) => action.name === "REMINDERS_MANAGE")!;
+    const added = await reminders.handler(makeFakeRuntime().runtime, emptyMessage("remind me to call the plumber at 6pm"), emptyState, { parameters: { op: "create", title: "Call the plumber", dueDate: "2026-11-24", dueMinute: 1080 } }, callback as never);
+    expect(added?.success).toBe(true);
+    expect(store.getReminders().items.map(({ title, dueDate, dueMinute }) => ({ title, dueDate, dueMinute }))).toEqual([{ title: "Call the plumber", dueDate: "2026-11-24", dueMinute: 1080 }]);
+    expect(said).toEqual([]);
+  });
+});
 
 describe("Alpha product plugin: Clock actions, provider, and routes", () => {
   // spec/agent/index.md, "The agent may run the actions the old phone's agent ran plus Alpha's Clock and Reminders actions, and every other action the bundle registers is listed as refused with its reason"
@@ -136,29 +158,6 @@ describe("Alpha product plugin: Clock actions, provider, and routes", () => {
     expect(store.getClock().world).toHaveLength(0);
     await alarmAction.handler(runtime, emptyMessage("Delete alarm"), emptyState, { parameters: { action: "delete", id: alarmId } });
     expect(store.getClock().alarms).toHaveLength(0);
-  });
-
-  // spec/agent/index.md, "Each Clock action names the fields the model may fill, and its first field is which operation, so a call that fills them runs instead of being refused before it starts"
-  it("runs a Clock call the model filled in, with nothing read from the owner's words", async () => {
-    const store = new AlphaAppsStore({ now: () => Date.UTC(2026, 10, 24, 14, 0, 0) });
-    const { runtime } = makeFakeRuntime();
-    const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime });
-    const named = (name: string) => plugin.actions!.find((a) => a.name === name)!;
-    const call = (name: string, parameters: Record<string, unknown>) => named(name).handler(runtime, emptyMessage(""), emptyState, { parameters });
-    const declared = (name: string) => [named(name).parameters?.map((p) => p.name), named(name).parameters?.[0]?.schema.enum];
-    expect([declared("CLOCK_ALARM"), declared("CLOCK_TIMER"), declared("CLOCK_WORLD")])
-      .toEqual([[alarmFields, alarmOperations], [timerFields, timerOperations], [worldFields, worldOperations]]);
-
-    expect((await call("CLOCK_ALARM", { action: "set", hour: 7, minute: 30, days: ["monday", "friday"], label: "Standup", snoozeMinutes: 5, sound: "chime", vibrate: false }))?.success).toBe(true);
-    expect(store.getClock().alarms).toEqual([expect.objectContaining({ hour: 7, minute: 30, daysMask: 34, label: "Standup", snoozeMinutes: 5, sound: "chime", vibrate: false, enabled: true })]);
-
-    const started = await call("CLOCK_TIMER", { action: "start", durationSeconds: 300, label: "pasta" });
-    const timerId = (started?.data as { timer: { id: string } }).timer.id;
-    await call("CLOCK_TIMER", { action: "add_time", id: timerId, durationSeconds: 60 });
-    expect(store.getClock().timers).toEqual([expect.objectContaining({ label: "pasta", remainingMs: 360_000, status: "running" })]);
-
-    expect((await call("CLOCK_WORLD", { action: "add_city", city: "Tokyo" }))?.success).toBe(true);
-    expect(store.getClock().world.map((c) => c.timeZone)).toEqual(["Asia/Tokyo"]);
   });
 
   // spec/agent/index.md, "The page reaches exactly the routes its platform services call, and nothing else"

@@ -327,16 +327,33 @@ pure def fork(c: Chats, message: int, replying: bool, holding: bool): Moved =
 
 ### What was made shows under the agent's number for it, a fork with the way back to its original; when nobody knows, the list is read again
 
+A list still being read when a conversation is made is read again, as
+the next rule says.
+
 ```quint
 pure def canMade(c: Chats, ticket: int, conversation: int): bool =
   A::canConclude(c.make, ticket) and conversation > 0 and conversation != c.chosen
 
 pure def made(c: Chats, ticket: int, confirmed: bool, known: bool, conversation: int): Moved =
   val ended = { ...c, make: A::conclude(c.make, confirmed, known) }
+  val added = shown(conversation, 0, if (c.forkAt > 0) c.chosen else 0, { ...ended, ids: c.ids.append(conversation) })
+  val again = browse(added.state)
   if (confirmed and known)
-    shown(conversation, 0, if (c.forkAt > 0) c.chosen else 0, { ...ended, ids: c.ids.append(conversation) })
+    if (c.list.status == R::Loading) { state: again.state, out: added.out.concat(again.out) } else added
   else if (not(known)) browse(ended)
   else { state: ended, out: List() }
+```
+
+### A list asked before a conversation was made is left behind, so its answer never takes that conversation away
+
+The agent's answer to a list read asked before the conversation existed
+cannot have it, so that read is left behind and the list is read again
+from what the agent now has.
+
+```quint
+pure def stepAListAskedBeforeAConversationWasMadeIsLeftBehind(before: Chats, via: str, after: Chats): bool =
+  (via == "made" and after.chosen != before.chosen and before.list.status == R::Loading)
+    implies after.list.ticket > before.list.ticket
 ```
 
 ### Back to the original leaves the fork for the conversation it came from

@@ -1,5 +1,5 @@
 // spec/cloud/rollout.md, "Story: Render a deployment only when it is provisioned"; spec/cloud/rollout.md, "The API Worker's bindings repeat its profile's origins and database, and its registry is Alpha's registration of that environment"
-import type { CloudEnvironment, CloudProfile } from "@elizaos/cloud/profile"
+import type { CloudEnvironment, CloudProfile } from "@elizaos/cloud"
 import type { Registration } from "../gen/cloud.effect.vibe"
 import { renderAccepted, renderProblems, type ResourceId } from "../gen/cloud__rollout.effect.vibe"
 import { entryOf } from "./alpha.vibe"
