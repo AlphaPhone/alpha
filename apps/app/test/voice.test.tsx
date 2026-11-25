@@ -69,10 +69,11 @@ async function startListening(world: Scene): Promise<VoiceRuntime> {
   return runtime;
 }
 
-async function speakUtterance(runtime: VoiceRuntime, world: Scene, text: string): Promise<void> {
-  world.voice.emitLocal?.("liveCaptureTranscript", { text, final: false });
-  await until(runtime, Voice.Machine, (s) => s.heard);
-  world.voice.emitLocal?.("liveCaptureTranscript", { text, final: true });
+function speakUtterance(world: Scene, text: string): void {
+  world.voice.emitLocal?.("liveCaptureTranscript", {
+    captureId: world.voice.activeMicSession,
+    final: { turnId: "test-turn", text, mode: "device" },
+  });
 }
 
 afterEach(async () => {
@@ -155,6 +156,36 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     expect([[...new Set(world.voice.relayWarmups)], warm.mic, world.voice.startCloudSpeechCalls, world.voice.startLiveCaptureCalls]).toEqual([["production"], "Off", 0, 0]);
   });
 
+  it('reports unavailable local Talk before opening the microphone (spec/app/voice/index.md, "The microphone opens for the current session only, and a microphone that cannot open fails the conversation")', async () => {
+    const world = { ...scene(), phone: true };
+    world.voice.nativeTransport = false;
+    const runtime = bootVoice(world);
+    await until(runtime, Voice.Machine, (s) => s.warmed);
+    await sendVoice(runtime, { type: "permissionChanged", grant: "Granted" });
+    await sendVoice(runtime, { type: "startTalking", now: untimed });
+    await until(runtime, Voice.Machine, (s) => s.phase === "Failed");
+    const failed = await getVoice(runtime);
+    expect([failed.mic, failed.failure, failed.engineHeld, world.voice.activeMicSession]).toEqual(["Off", "NoMicrophone", false, undefined]);
+  });
+
+  it('recognizes the same recorded clip after a failed attempt (spec/app/voice/index.md, "Story: Dictate into a field")', async () => {
+    const world = { ...scene(), phone: true };
+    world.voice.transcriptionFailures = 1;
+    const runtime = bootVoice(world);
+    await until(runtime, Voice.Machine, (s) => s.warmed);
+    await sendVoice(runtime, { type: "permissionChanged", grant: "Granted" });
+    await sendVoice(runtime, { type: "openRecorder", target: "ComposerField" });
+    await sendVoice(runtime, { type: "startRecording" });
+    await until(runtime, Voice.Machine, (s) => s.recorder.stage === "Recording");
+    await sendVoice(runtime, { type: "stopRecording", now: untimed });
+    await until(runtime, Voice.Machine, (s) => s.recorder.stage === "Recorded");
+    expect((await getVoice(runtime)).recorder.failure).toBe("Recognition");
+    await sendVoice(runtime, { type: "transcribeAgain", now: untimed });
+    await until(runtime, Voice.Machine, (s) => s.recorder.stage === "Review");
+    const reviewed = await getVoice(runtime);
+    expect([reviewed.recorder.words, reviewed.sent]).toEqual([true, 0]);
+  });
+
   // spec/app/voice/index.md, "Alpha's reply is spoken a sentence at a time, sentences streamed before the reply is complete included, and only for the current turn"; spec/app/voice/index.md, "A spoken reply says a written date, clock time, range and percentage in words"
   it("streams multi-sentence replies incrementally with append chaining, says dates and times in words, and returns to listening", async () => {
     const world = { ...scene(), phone: true };
@@ -165,7 +196,7 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     ];
     const runtime = await startListening(world);
 
-    await speakUtterance(runtime, world, "Give me an update");
+    speakUtterance(world, "Give me an update");
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 1 && s.turn === 2);
 
     expect(world.voice.spoken.map((one) => ({ text: one.text, append: one.append }))).toEqual([
@@ -180,7 +211,7 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
       "Dentist Mon, Nov 23 at 3:30 pm, about 5–10 minutes. ",
       "Then 9:05 to 10:00, and lunch at 12 pm. Battery is at 80%.",
     ];
-    await speakUtterance(runtime, world, "What is on my calendar");
+    speakUtterance(world, "What is on my calendar");
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 2 && s.turn === 3);
     expect(world.voice.spoken.slice(3).map((one) => one.text)).toEqual([
       "Sunday, November twenty-second.",
@@ -196,7 +227,7 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
       const from = world.voice.spoken.length;
       world.ask.nextReplyChunks = withAbbreviations;
       world.ask.nextReplyProvisional = provisional;
-      await speakUtterance(runtime, world, "Read me another day");
+      speakUtterance(world, "Read me another day");
       await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.sent === 3 + index && s.turn === 4 + index);
       expect(world.voice.spoken.slice(from).map((one) => one.text)).toEqual(spokenAbbreviations);
       expect(world.ask.kept.get("c1")?.messages.at(-1)?.text).toBe(withAbbreviations.join(""));
@@ -210,7 +241,7 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     ];
     const from = world.voice.spoken.length;
     world.ask.nextReplyChunks = written;
-    await speakUtterance(runtime, world, "Anything else");
+    speakUtterance(world, "Anything else");
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.sent === 5 && s.turn === 6);
     expect(world.voice.spoken.slice(from).map((one) => one.text)).toEqual([
       "Ages 8 to 12 welcome.",
@@ -228,15 +259,15 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     const runtime = await startListening(world);
 
     world.ask.refusal = { failureKind: "provider_issue" };
-    await speakUtterance(runtime, world, "What's the weather");
+    speakUtterance(world, "What's the weather");
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 1 && s.turn === 2);
 
     world.ask.refusal = { failureKind: "insufficient_credits", planAction: "funding" };
-    await speakUtterance(runtime, world, "And tomorrow");
+    speakUtterance(world, "And tomorrow");
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 2 && s.turn === 3);
 
     world.ask.refusal = { failureKind: "insufficient_credits", cloudCode: "allowance_exhausted", planAction: "funding" };
-    await speakUtterance(runtime, world, "And Friday");
+    speakUtterance(world, "And Friday");
     await until(runtime, Voice.Machine, (s) => s.phase === "Idle");
     const ended = await getVoice(runtime);
     expect([ended.phase, ended.mic, ended.failure, ended.engineHeld, ended.sent, world.voice.engineHeld, world.voice.activeMicSession, world.voice.startLiveCaptureCalls, world.voice.spoken]).toEqual([
@@ -250,7 +281,7 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     world.ask.nextReplyChunks = ["[APPROVAL:send_email] Draft ready for your review in chat."];
     const runtime = await startListening(world);
 
-    await speakUtterance(runtime, world, "Send the draft email");
+    speakUtterance(world, "Send the draft email");
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.reviewPending && s.sent === 1);
 
     const duringReview = await getVoice(runtime);
@@ -274,17 +305,17 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     await sendShell(runtime, { type: "raise", detent: "Sheet" });
 
     world.ask.nextReplyChunks = ["[NAVIGATE:Calendar] Opening Calendar."];
-    await speakUtterance(runtime, world, "Open my calendar");
+    speakUtterance(world, "Open my calendar");
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.followed === placeOf("Calendar") && s.claim === 0);
     expect(await getShell(runtime)).toMatchObject({ trail: ["Calendar"], assistant: "Sheet" });
 
     world.ask.nextReplyChunks = ["[NAVIGATE:Home] Back on Home."];
-    await speakUtterance(runtime, world, "Go home");
+    speakUtterance(world, "Go home");
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.followed === placeOf(undefined) && s.claim === 0);
     expect(await getShell(runtime)).toMatchObject({ trail: [], assistant: "Sheet" });
 
     world.ask.nextReplyChunks = ["[NAVIGATE:Home] Refreshed Home."];
-    await speakUtterance(runtime, world, "Refresh home");
+    speakUtterance(world, "Refresh home");
     await until(runtime, Voice.Machine, (s) => s.sent === 3 && s.phase === "Listening" && s.mic === "On" && s.claim === 0);
     expect(await getShell(runtime)).toMatchObject({ trail: [], assistant: "Sheet" });
 
