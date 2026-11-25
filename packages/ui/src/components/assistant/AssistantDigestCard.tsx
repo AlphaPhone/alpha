@@ -25,7 +25,7 @@ export function AssistantDigestCard({ title, rows, ...frame }: AssistantDigestCa
       <ul className="flex flex-col gap-3">
         {rows.map((row) => (
           <li key={row.id} className="flex items-center gap-3">
-            <Avatar name={row.who} size="sm" />
+            <Avatar name={row.who} size="sm" aria-hidden />
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="text-sm font-semibold">{row.who}</span>
               <span className="truncate text-sm text-muted-foreground">{row.text}</span>

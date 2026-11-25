@@ -1,6 +1,7 @@
 import type { ComponentProps, ReactNode } from "react";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
+import { useLayerRef } from "../../lib/layers.tsx";
 
 /** One day of the month grid. */
 export interface CalendarMonthDay {
@@ -43,19 +44,20 @@ export type CalendarMonthPanelProps = Omit<ComponentProps<"div">, "children"> & 
 
 /** The month dialog under Calendar's title: choose a month and a year, step through months, and pick a day. */
 export function CalendarMonthPanel({ month, year, months, years, onMonth, onYear, onPrevious, onNext, onClose, days, wide, className, children, ...props }: CalendarMonthPanelProps) {
-  const select = cn(focusRing, "min-h-11 min-w-0 border-0 bg-background text-lead leading-plain text-foreground");
+  const layerRef = useLayerRef("DialogLayer");
+  const select = cn(focusRing, "min-h-11 min-w-0 border-0 bg-transparent text-lead leading-plain text-foreground");
   const icon = cn(focusRing, "inline-flex size-11 shrink-0 items-center justify-center rounded-full active:bg-accent [&_svg]:size-5.5");
   return (
-    <div data-alpha-calendar-month="" data-alpha-covers-assistant="" className={cn("absolute inset-0 z-20", className)}
-      onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); onClose(); } }} {...props}>
+    <div data-alpha-calendar-month="" data-alpha-covers-assistant="" className={cn("absolute inset-0 z-dialog", className)}
+      onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); } }} {...props}>
       <button type="button" aria-hidden tabIndex={-1} onClick={onClose} className="absolute inset-0 size-full bg-foreground/18 dark:bg-background/55" />
-      <div role="dialog" aria-modal="true" aria-label="Choose calendar date"
-        className={cn("absolute inset-x-0 top-11 box-border", wide && "mx-auto max-w-140", "max-h-[calc(100%-64px)] overflow-auto rounded-sheet bg-background px-4 pt-3 pb-5")}>
+      <div ref={layerRef} role="dialog" aria-modal="true" aria-label="Choose calendar date"
+        className={cn("absolute inset-x-0 top-11 box-border", wide && "mx-auto max-w-140", "max-h-[calc(100%-64px)] overflow-auto rounded-sheet border border-border/60 bg-popover px-4 pt-3 pb-5 text-popover-foreground shadow-md dark:border-border")}>
         <div className="mb-3 flex items-center gap-1">
           <select aria-label="Calendar month" autoFocus value={month} onChange={(event) => onMonth(Number(event.target.value))} className={cn(select, "flex-1")}>
             {months.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
           </select>
-          <select aria-label="Calendar year" value={year} onChange={(event) => onYear(Number(event.target.value))} className={cn(select, "w-18.5")}>
+          <select aria-label="Calendar year" value={year} onChange={(event) => onYear(Number(event.target.value))} className={cn(select, "w-auto min-w-18.5")}>
             {years.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
           </select>
           <button type="button" aria-label="Previous month" onClick={onPrevious} className={icon}><ChevronLeft aria-hidden /></button>

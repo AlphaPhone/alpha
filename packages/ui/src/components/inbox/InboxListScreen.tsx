@@ -1,5 +1,5 @@
 import { CheckCheck, ChevronLeft, Ellipsis, ListChecks, PenLine, Plus, RotateCw, Search, UserRound } from "lucide-react";
-import { useRef } from "react";
+import { useCallback, useRef } from "react";
 import { Button } from "../Button.tsx";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
 import { Screen } from "../Screen.tsx";
@@ -70,6 +70,12 @@ export function InboxListScreen({
   onArchive, onTrash, onRestore, onChooseAll, aside = 0, onShelf, onRefresh, onCompose, onAccount, rows, loading, onLoadMore, loadingMore,
 }: InboxListScreenProps) {
   const focusSearchAfterCloseRef = useRef(false);
+  const attachSearchButton = useCallback((button: HTMLButtonElement | null) => {
+    if (button && focusSearchAfterCloseRef.current) {
+      focusSearchAfterCloseRef.current = false;
+      button.focus();
+    }
+  }, []);
   const closeSearch = () => {
     focusSearchAfterCloseRef.current = true;
     onCloseSearch?.();
@@ -77,24 +83,19 @@ export function InboxListScreen({
   const compose = onCompose ?? (state === "signedOut" ? onStateAction : undefined);
   const actions = (
     <>
-      {onRefresh || loading ? <Button variant="ghost" size="icon" aria-label="Refresh" loading={loading} disabled={!onRefresh} onClick={onRefresh}><RotateCw /></Button> : null}
-      {state !== "signedOut" && <Button variant="ghost" size="icon" aria-label="Search email" disabled={!onOpenSearch} onClick={onOpenSearch} ref={(button) => {
-        if (button && focusSearchAfterCloseRef.current) {
-          focusSearchAfterCloseRef.current = false;
-          button.focus();
-        }
-      }}><Search /></Button>}
-      <Button variant="ghost" size="icon" aria-label="Compose" disabled={!compose} onClick={compose}><Plus /></Button>
+      {onRefresh || loading ? <Button variant="ghost" size="icon" aria-label="Refresh" loading={loading} disabled={!onRefresh} onClick={onRefresh}><RotateCw aria-hidden /></Button> : null}
+      {state !== "signedOut" && <Button variant="ghost" size="icon" aria-label="Search email" disabled={!onOpenSearch} onClick={onOpenSearch} ref={attachSearchButton}><Search aria-hidden /></Button>}
+      <Button variant="ghost" size="icon" aria-label="Compose" disabled={!compose} onClick={compose}><Plus aria-hidden /></Button>
       {onStartSelection || onFinishSelection || onAccount || (aside > 0 && onShelf) ? (
         <Menu>
-          <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Mail options"><Ellipsis /></Button></MenuTrigger>
+          <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Mail options"><Ellipsis aria-hidden /></Button></MenuTrigger>
           <MenuContent>
-            {onStartSelection || onFinishSelection ? <MenuItem onSelect={onFinishSelection ?? onStartSelection}><ListChecks />{onFinishSelection ? "Finish selection" : "Select emails"}</MenuItem> : null}
+            {onStartSelection || onFinishSelection ? <MenuItem onSelect={onFinishSelection ?? onStartSelection}><ListChecks aria-hidden />{onFinishSelection ? "Finish selection" : "Select emails"}</MenuItem> : null}
             {onFinishSelection && (onChooseAll || onClearSelection) ? (
-              <MenuItem onSelect={onChooseAll ?? onClearSelection}><CheckCheck />{onChooseAll ? "Select all shown" : "Deselect all"}</MenuItem>
+              <MenuItem onSelect={onChooseAll ?? onClearSelection}><CheckCheck aria-hidden />{onChooseAll ? "Select all shown" : "Deselect all"}</MenuItem>
             ) : null}
-            {onAccount ? <MenuItem onSelect={onAccount}><UserRound />{account ?? "Gmail accounts"}</MenuItem> : null}
-            {aside > 0 && onShelf ? <MenuItem onSelect={onShelf}><PenLine />Drafts set aside ({aside})</MenuItem> : null}
+            {onAccount ? <MenuItem onSelect={onAccount}><UserRound aria-hidden />{account ?? "Gmail accounts"}</MenuItem> : null}
+            {aside > 0 && onShelf ? <MenuItem onSelect={onShelf}><PenLine aria-hidden />Drafts set aside ({aside})</MenuItem> : null}
           </MenuContent>
         </Menu>
       ) : null}
@@ -103,7 +104,7 @@ export function InboxListScreen({
   return (
     <Screen
       title={chosen > 0 ? `${chosen} selected` : inboxFolders[folder]}
-      leading={searching || onBack ? <Button variant="ghost" size="icon" aria-label={searching ? "Back to inbox" : "Back to apps"} className="ml-1" onClick={searching ? closeSearch : onBack}><ChevronLeft className="size-5" /></Button> : undefined}
+      leading={searching || onBack ? <Button variant="ghost" size="icon" aria-label={searching ? "Back to inbox" : "Back to apps"} className="ml-1" onClick={searching ? closeSearch : onBack}><ChevronLeft aria-hidden className="size-5" /></Button> : undefined}
       titleControl={searching ? <InboxSearchBar value={search} onValueChange={onSearchChange} onSearch={onSearch} onClose={closeSearch} focusOnOpen /> : undefined}
       actions={searching ? undefined : actions}
       className="[&_header>h1]:pl-0.5 [&_main>div]:gap-2 [&_main>div]:pt-1"

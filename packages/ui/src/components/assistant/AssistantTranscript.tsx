@@ -32,7 +32,7 @@ export type AssistantTranscriptProps = Omit<ComponentProps<"div">, "children"> &
   onReturnToOriginal?: () => void;
 };
 
-type TranscriptScroll = { page?: string; follows: boolean; paging?: { id: string; offset: number } };
+type TranscriptScroll = { page?: string; follows: boolean; height?: number; paging?: { id: string; offset: number } };
 
 function messageRow(content: HTMLElement, id: string) {
   return Array.from(content.querySelectorAll<HTMLElement>("[data-alpha-message-id]"))
@@ -62,9 +62,11 @@ const MessageRows = memo(function MessageRows({ messages }: { messages: readonly
  */
 export function AssistantTranscript({ messages, liveMessages, position, visible = true, status = "loaded", turn, onRetry, onEarlier, onLater, onReturnToOriginal, className, onScroll, ...props }: AssistantTranscriptProps) {
   const scrollRef = useRef<TranscriptScroll>({ follows: true });
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const page = position?.page;
   const around = position?.around;
   const placed = useCallback((content: HTMLDivElement | null) => {
+    contentRef.current = content;
     const viewport = content?.parentElement;
     if (!content || !viewport || !visible || status !== "loaded") return;
     const reading = scrollRef.current;
@@ -78,7 +80,10 @@ export function AssistantTranscript({ messages, liveMessages, position, visible 
       reading.follows = !row;
       reading.paging = undefined;
     }
-    const follow = () => { if (reading.follows) followEnd(viewport); };
+    const follow = () => {
+      reading.height = viewport.clientHeight;
+      if (reading.follows) followEnd(viewport);
+    };
     follow();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(follow);
@@ -86,22 +91,22 @@ export function AssistantTranscript({ messages, liveMessages, position, visible 
     observer.observe(content);
     return () => observer.disconnect();
   }, [around, page, status, visible]);
-  const pageFrom = (button: HTMLElement, id: string | undefined, load: () => void) => {
-    const content = button.parentElement;
+  const pageFrom = (id: string | undefined, load: () => void) => {
+    const content = contentRef.current;
     const viewport = content?.parentElement;
     const row = content && id !== undefined ? messageRow(content, id) : undefined;
     if (viewport && row && id !== undefined) scrollRef.current.paging = { id, offset: topIn(viewport, row) };
     load();
   };
   const body = () => {
-    if (status === "loading") return <div aria-busy className="flex flex-col gap-4"><Skeleton className="h-10 w-2/3 self-end" /><Skeleton className="h-16 w-4/5" /><Skeleton className="h-10 w-1/2 self-end" /></div>;
+    if (status === "loading") return <div role="status" aria-label="Loading messages" aria-busy className="flex flex-col gap-4"><Skeleton className="h-10 w-2/3 self-end" /><Skeleton className="h-16 w-4/5" /><Skeleton className="h-10 w-1/2 self-end" /></div>;
     if (status === "failed") return <EmptyState title="Messages did not load">{onRetry ? <Button variant="secondary" onClick={onRetry}>Try again</Button> : null}</EmptyState>;
     return (
       <>
-        {onEarlier ? <Button variant="ghost" size="sm" className="self-center" onClick={(event) => pageFrom(event.currentTarget, messages[0]?.id, onEarlier)}><ChevronUp aria-hidden />Earlier</Button> : null}
+        {onEarlier ? <Button variant="ghost" size="sm" className="min-h-11 self-center" onClick={() => pageFrom(messages[0]?.id, onEarlier)}><ChevronUp aria-hidden />Earlier</Button> : null}
         <MessageRows messages={messages} />
         {liveMessages?.length ? <MessageRows messages={liveMessages} /> : null}
-        {onLater ? <Button variant="ghost" size="sm" className="self-center" onClick={(event) => pageFrom(event.currentTarget, messages.at(-1)?.id, onLater)}><ChevronDown aria-hidden />Later</Button> : null}
+        {onLater ? <Button variant="ghost" size="sm" className="min-h-11 self-center" onClick={() => pageFrom(messages.at(-1)?.id, onLater)}><ChevronDown aria-hidden />Later</Button> : null}
         {turn ? <AssistantTurnNote {...turn} /> : null}
       </>
     );
@@ -114,7 +119,10 @@ export function AssistantTranscript({ messages, liveMessages, position, visible 
       className={cn(focusRing, "min-h-0 touch-pan-y overflow-y-auto px-5 pt-2 pb-3.5 select-text focus-visible:-outline-offset-focus", className)}
       onScroll={(event) => {
         const viewport = event.currentTarget;
-        if (visible && status === "loaded") scrollRef.current.follows = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 80;
+        const reading = scrollRef.current;
+        if (visible && status === "loaded" && (reading.height === undefined || viewport.clientHeight === reading.height)) {
+          reading.follows = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 80;
+        }
         onScroll?.(event);
       }}
       {...props}

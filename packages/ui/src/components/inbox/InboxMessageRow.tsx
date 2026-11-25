@@ -55,15 +55,19 @@ export function InboxMessageRow({ sender, subject, snippet, time, unread = false
     }
   };
   const activate = (event: MouseEvent<HTMLButtonElement>) => {
-    if (suppressClickRef.current && event.detail !== 0) return;
+    if (suppressClickRef.current && event.detail !== 0) {
+      suppressClickRef.current = false;
+      return;
+    }
+    suppressClickRef.current = false;
     if (selecting) onChosenChange?.(!chosen);
     else onOpen?.();
   };
   return (
     <button type="button" role={selecting ? "checkbox" : undefined} aria-checked={selecting ? chosen : undefined}
       disabled={selecting ? !onChosenChange : !onOpen} onClick={activate}
-      onPointerDown={start} onPointerUp={end} onPointerCancel={() => { swipeFromRef.current = undefined; }}
-      className={cn(focusRing, "flex w-full touch-pan-y items-start gap-3.5 bg-background px-5 py-3.25 text-left focus-visible:-outline-offset-focus")}
+      onPointerDown={start} onPointerUp={end} onPointerCancel={() => { swipeFromRef.current = undefined; }} onLostPointerCapture={() => { swipeFromRef.current = undefined; }}
+      className={cn(focusRing, "flex w-full touch-pan-y items-start gap-3.5 bg-background px-5 py-3.25 text-left focus-visible:-outline-offset-focus disabled:opacity-50")}
     >
       {selecting ? (
         <span aria-hidden className={cn("mt-2 grid size-5.5 flex-none place-items-center rounded-box border text-background", chosen ? "border-foreground bg-foreground" : "border-muted-foreground")}>
@@ -73,17 +77,17 @@ export function InboxMessageRow({ sender, subject, snippet, time, unread = false
       <Avatar name={sender} aria-hidden className="size-11 text-sm font-bold" />
       {unread || attachment ? <span className="sr-only">{unread && "Unread. "}{attachment && "Has attachments."}</span> : null}
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="flex h-4.25 items-center gap-1.5 leading-tight">
+        <span className="flex min-h-4.25 items-center gap-1.5 leading-tight">
           <span className={cn("min-w-0 truncate text-base leading-tight", unread ? "font-bold" : "font-medium")}>{sender}</span>
           <span className="flex-1" />
           {attachment ? <Paperclip aria-hidden className="size-3.5 shrink-0 text-muted-foreground" /> : null}
           <span className="shrink-0 text-xs leading-tight whitespace-nowrap text-muted-foreground">{time}</span>
         </span>
-        <span className="mt-0.5 flex h-4.25 items-center gap-2 leading-tight">
+        <span className="mt-0.5 flex min-h-4.25 items-center gap-2 leading-tight">
           <span data-inbox-subject="" className={cn("min-w-0 flex-1 truncate text-subject leading-tight", unread && "font-semibold")}>{subject}</span>
           <span aria-hidden className={cn("size-2 shrink-0 rounded-full", unread && "bg-primary")} />
         </span>
-        <span className="mt-0.5 block h-4 truncate text-snippet leading-tight text-muted-foreground">{snippet}</span>
+        <span className="mt-0.5 block min-h-4 truncate text-snippet leading-tight text-muted-foreground">{snippet}</span>
       </span>
     </button>
   );

@@ -41,7 +41,7 @@ export function HomeTile({ label, icon, badge, editing = false, onRemove, hold, 
             aria-label={`Remove ${label}`}
             disabled={!onRemove}
             onClick={onRemove}
-            className={cn(focusRing, "absolute -top-4 -left-4 flex size-11 items-center justify-center rounded-full disabled:opacity-50")}
+            className={cn(focusRing, "absolute -top-4 -left-4 flex size-11 items-center justify-center rounded-full focus-visible:-outline-offset-focus disabled:opacity-50")}
           >
             <span aria-hidden className="flex size-6 items-center justify-center rounded-full bg-foreground text-background">
               <Minus className="size-3.5" />

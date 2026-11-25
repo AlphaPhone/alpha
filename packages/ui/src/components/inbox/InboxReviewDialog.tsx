@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
 import { cn, focusRing } from "../../lib/cn.ts";
+import { useLayerRef, usePortalContainer } from "../../lib/layers.tsx";
+import { Spinner } from "../Spinner.tsx";
 
 export type InboxReviewDialogProps = {
   /** Whether the question is being asked; the parent keeps it. */
@@ -29,19 +31,22 @@ const choice = cn(focusRing, "min-h-11 rounded-lg px-4 py-2.5 disabled:opacity-5
  * @model spec/app/inbox/sending.md
  */
 export function InboxReviewDialog({ open, title, children, noLabel = "No", yesLabel = "Yes", onYes, busy = false, onNo }: InboxReviewDialogProps) {
+  const defaultContainer = usePortalContainer();
+  const layerRef = useLayerRef("DialogLayer");
   return (
     <AlertDialogPrimitive.Root open={open} onOpenChange={(next) => { if (!next && !busy) onNo(); }}>
-      <AlertDialogPrimitive.Portal>
-        <AlertDialogPrimitive.Overlay className="fixed inset-0 z-dialog bg-foreground/45 motion-safe:animate-fade dark:bg-background/70" />
+      <AlertDialogPrimitive.Portal container={defaultContainer}>
+        <AlertDialogPrimitive.Overlay className="fixed inset-0 z-alert bg-foreground/45 motion-safe:animate-fade dark:bg-background/70" />
         <AlertDialogPrimitive.Content
+          ref={layerRef}
           {...(children ? {} : { "aria-describedby": undefined })}
-          className="fixed inset-x-4 bottom-18 z-dialog mx-auto max-h-[calc(100dvh-5.5rem)] max-w-md overflow-auto rounded-tile bg-background p-5 text-foreground outline-none motion-safe:animate-rise"
+          className="fixed inset-x-4 bottom-[max(--spacing(18),calc(var(--alpha-safe-bottom)+--spacing(4)))] z-alert mx-auto max-h-[calc(var(--alpha-viewport-height,100dvh)-5.5rem)] max-w-md overflow-auto rounded-tile border border-border/60 bg-popover p-5 text-popover-foreground shadow-md outline-none motion-safe:animate-rise dark:border-border"
         >
           <AlertDialogPrimitive.Title className="text-xl leading-tight font-bold">{title}</AlertDialogPrimitive.Title>
           {children ? <AlertDialogPrimitive.Description asChild><div className="mt-3 text-base">{children}</div></AlertDialogPrimitive.Description> : null}
           <div className="mt-4 flex gap-2">
             <AlertDialogPrimitive.Cancel disabled={busy} className={cn(choice, "bg-secondary text-secondary-foreground")}>{noLabel}</AlertDialogPrimitive.Cancel>
-            {onYes ? <button type="button" disabled={busy} aria-busy={busy || undefined} onClick={onYes} className={cn(choice, "bg-foreground text-background")}>{yesLabel}</button> : null}
+            {onYes ? <button type="button" disabled={busy} aria-busy={busy || undefined} onClick={onYes} className={cn(choice, "inline-flex items-center justify-center gap-2 bg-foreground text-background")}>{busy ? <Spinner size="sm" aria-hidden /> : null}{yesLabel}</button> : null}
           </div>
         </AlertDialogPrimitive.Content>
       </AlertDialogPrimitive.Portal>

@@ -56,7 +56,7 @@ export function SettingsTopPage({ developer = false, onPhone = true, actions, ac
         </ListGroup>
       ) : null}
       <ListGroup>
-        <SettingsNavRow title="Account" aria-label="Account" detail={accountDetail} icon={<UserRound />} onOpen={onHandOver && (() => onHandOver("account-and-plan"))} {...at(1)} />
+        <SettingsNavRow title="Account" detail={accountDetail} icon={<UserRound />} onOpen={onHandOver && (() => onHandOver("account-and-plan"))} {...at(1)} />
       </ListGroup>
       {links.map((link, index) => (
         <ListGroup key={link.page}>

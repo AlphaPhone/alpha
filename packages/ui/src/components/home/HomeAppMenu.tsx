@@ -24,7 +24,7 @@ export function HomeAppMenu({ label, children, actions }: HomeAppMenuProps) {
       {children}
       <Menu open={actions !== undefined} onOpenChange={(open) => { if (!open) actions?.close(); }}>
         <MenuTrigger aria-hidden tabIndex={-1} className="pointer-events-none invisible absolute inset-x-0 top-18 h-0" />
-        {actions && <MenuContent align="center" aria-label={label} aria-labelledby={undefined} className="min-w-42.5 rounded-lg border-0 bg-background p-1.5 text-foreground"
+        {actions && <MenuContent align="center" aria-label={label} aria-labelledby={undefined} className="min-w-42.5 rounded-lg p-1.5"
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             const trigger = tileRef.current?.querySelector<HTMLButtonElement>("button:not([aria-hidden])");
@@ -32,11 +32,11 @@ export function HomeAppMenu({ label, children, actions }: HomeAppMenuProps) {
           }}>
           <MenuItem disabled={actions.onHome || !actions.add}
             className="min-h-11 gap-2.5 px-2.5 text-sm" onSelect={(event) => { event.preventDefault(); actions.add?.(); }}>
-            <Plus className="size-4.5" />{actions.onHome ? "On Home" : "Add to Home"}
+            <Plus aria-hidden className="size-4.5" />{actions.onHome ? "On Home" : "Add to Home"}
           </MenuItem>
           <MenuItem disabled={!actions.info} className="min-h-11 gap-2.5 px-2.5 text-sm"
             onSelect={(event) => { event.preventDefault(); actions.info?.(); }}>
-            <Info className="size-4.5" />App info
+            <Info aria-hidden className="size-4.5" />App info
           </MenuItem>
         </MenuContent>}
       </Menu>

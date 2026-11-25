@@ -55,7 +55,7 @@ export function SettingsPrivacyPage({ read, askFirst, saving, recovering, onAskF
       </ListGroup>
       <ListGroup heading="Share with Alpha">
         {shared.map((share) => (
-          <SettingsDeviceSwitch key={share} setting={share} read={read} checked={read === "loaded" && shares[share] === true} saving={saving} recovering={recovering} onChange={onShareChange && ((on) => onShareChange(share, on))} />
+          <SettingsDeviceSwitch key={share} setting={share} read={read} checked={read === "loaded" && shares[share] === true} saving={saving} onChange={onShareChange && ((on) => onShareChange(share, on))} />
         ))}
       </ListGroup>
       <ListGroup>

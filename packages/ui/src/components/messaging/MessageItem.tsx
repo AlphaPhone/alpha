@@ -87,7 +87,7 @@ function ReplyQuote({ replyTo }: { replyTo: MessageReplyQuote }) {
   const base = "flex max-w-full flex-col gap-0.5 rounded-sm border-l-2 border-primary bg-muted/60 px-2.5 py-1.5 text-left";
   if (replyTo.onJump) {
     return (
-      <button type="button" onClick={replyTo.onJump} className={cn(focusRing, base, "transition-colors duration-fast ease-standard hover:bg-accent")}>
+      <button type="button" onClick={replyTo.onJump} className={cn(focusRing, base, "transition-colors duration-fast ease-standard motion-reduce:transition-none hover:bg-accent")}>
         {inner}
       </button>
     );
@@ -113,7 +113,7 @@ function MessageActions({ onReply, onReact, onEdit, onDelete }: Pick<MessageItem
           onClick={item.onClick}
           className={cn(
             focusRing,
-            "relative inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors duration-fast ease-standard hover:bg-accent hover:text-foreground before:absolute before:-inset-1",
+            "inline-flex size-11 items-center justify-center rounded-full text-muted-foreground transition-colors duration-fast ease-standard motion-reduce:transition-none hover:bg-accent hover:text-foreground",
           )}
         >
           {item.icon}
@@ -141,7 +141,7 @@ function ThreadFooter({ thread }: { thread: MessageThreadSummary }) {
       onClick={thread.onOpen}
       className={cn(
         focusRing,
-        "inline-flex min-h-9 w-fit items-center gap-2 rounded-lg px-2 py-1 text-xs font-medium text-primary transition-colors duration-fast ease-standard hover:bg-accent",
+        "inline-flex min-h-11 w-fit items-center gap-2 rounded-lg px-2 py-1 text-xs font-medium text-primary transition-colors duration-fast ease-standard motion-reduce:transition-none hover:bg-accent",
       )}
     >
       <MessageSquare aria-hidden className="size-3.5 shrink-0" />
@@ -190,7 +190,7 @@ export function MessageItem({
   if (layout === "compact") {
     return (
       <article aria-label={`${sender} at ${time}`} className={cn("flex items-start gap-3 px-4 py-1.5 text-foreground", className)} {...props}>
-        {grouped ? <span aria-hidden className="w-8 shrink-0" /> : <Avatar size="sm" name={sender} src={avatarSrc} className="mt-0.5" />}
+        {grouped ? <span aria-hidden className="w-8 shrink-0" /> : <Avatar size="sm" name={sender} src={avatarSrc} aria-hidden className="mt-0.5" />}
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           {!grouped ? (
             <div className="flex items-center justify-between gap-2">
@@ -221,7 +221,7 @@ export function MessageItem({
   return (
     <article aria-label={`${own ? "You" : sender} at ${time}`} className={cn("flex flex-col gap-1.5 px-3 py-1", own ? "items-end pl-10" : "items-start pr-10", className)} {...props}>
       <div className={cn("flex max-w-full items-end gap-2", own && "flex-row-reverse")}>
-        {!own && !grouped ? <Avatar size="sm" name={sender} src={avatarSrc} /> : !own ? <span aria-hidden className="w-8 shrink-0" /> : null}
+        {!own && !grouped ? <Avatar size="sm" name={sender} src={avatarSrc} aria-hidden /> : !own ? <span aria-hidden className="w-8 shrink-0" /> : null}
         <div className={cn("flex min-w-0 flex-col gap-1.5 rounded-tile px-3.5 py-2.5", own ? "bg-secondary text-secondary-foreground" : "border border-border bg-card text-card-foreground", failed && "border border-destructive")}>
           {!own && !grouped ? <span className="text-xs font-semibold text-primary">{sender}</span> : null}
           {replyTo ? <ReplyQuote replyTo={replyTo} /> : null}

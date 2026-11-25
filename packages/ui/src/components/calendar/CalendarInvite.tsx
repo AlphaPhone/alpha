@@ -21,7 +21,7 @@ export type CalendarInviteProps = Omit<ComponentProps<"div">, "title"> & {
 export function CalendarInvite({ initials, title, when, onOpen, onDecline, onAccept, className, ...props }: CalendarInviteProps) {
   return (
     <div className={cn("flex items-center gap-1 rounded-chip border border-dashed border-border py-1.5 pr-1.5 pl-2", className)} {...props}>
-      <button type="button" aria-label={`Invite: ${initials}, ${title}, ${when}`} disabled={!onOpen} onClick={onOpen} className={cn(focusRing, "flex min-w-0 grow items-center gap-3 rounded-lg text-left")}>
+      <button type="button" aria-label={`Invite: ${initials}, ${title}, ${when}`} disabled={!onOpen} onClick={onOpen} className={cn(focusRing, "flex min-h-11 min-w-0 grow items-center gap-3 rounded-lg text-left")}>
         <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-xs leading-plain font-bold whitespace-nowrap">{initials}</span>{" "}
         <span className="min-w-0">
           <span className="block truncate text-subject leading-plain font-semibold">{title}</span>{" "}

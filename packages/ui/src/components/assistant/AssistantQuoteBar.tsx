@@ -18,11 +18,11 @@ export type AssistantQuoteBarProps = Omit<ComponentProps<"div">, "children"> & {
 export function AssistantQuoteBar({ kind, text, onRemove, className, ...props }: AssistantQuoteBarProps) {
   const Icon = kind === "quote" ? CornerUpLeft : Pencil;
   return (
-    <div className={cn("flex min-h-11 items-center gap-2 rounded-lg bg-secondary pl-3 text-sm text-secondary-foreground", className)} {...props}>
+    <div className={cn("flex min-h-11 items-center gap-2 rounded-lg bg-secondary pl-3 text-sm text-secondary-foreground", !onRemove && "pr-3", className)} {...props}>
       <Icon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
       <span className="line-clamp-2 min-w-0 flex-1 break-words">{kind === "quote" ? text : "Editing to send again"}</span>
       {onRemove ? (
-        <button type="button" aria-label="Remove quote" onClick={onRemove} className={cn(focusRing, "flex size-11 shrink-0 items-center justify-center rounded-full transition-colors duration-fast ease-standard hover:bg-accent")}>
+        <button type="button" aria-label="Remove quote" onClick={onRemove} className={cn(focusRing, "flex size-11 shrink-0 items-center justify-center rounded-full transition-colors duration-fast ease-standard motion-reduce:transition-none hover:bg-accent")}>
           <X aria-hidden className="size-4" />
         </button>
       ) : null}

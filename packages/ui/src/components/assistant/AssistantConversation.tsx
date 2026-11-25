@@ -35,19 +35,19 @@ export function AssistantConversation({ header, attachmentNotice, transcript, vo
       data-alpha-detent={detent}
       className={cn(
         "flex flex-col text-foreground",
-        resting ? "z-dock" : "z-sheet overflow-hidden bg-card",
+        resting ? "z-dock" : "z-assistant-sheet overflow-hidden bg-popover text-popover-foreground",
         full
-          ? "h-full rounded-none pt-[calc(env(safe-area-inset-top)+--spacing(1))] in-data-[alpha-native]:pt-[calc(max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))+--spacing(4))]"
-          : resting ? null : cn("rounded-t-sheet pt-1", props.style?.height ? "max-h-dvh" : "min-h-[38dvh] max-h-[60dvh]"),
+          ? "h-full rounded-none pt-[calc(var(--alpha-safe-top)+--spacing(1))] in-data-[alpha-native]:pt-[calc(var(--alpha-safe-top)+--spacing(4))]"
+          : resting ? null : cn("rounded-t-chat border-t border-border/60 pt-2 shadow-sheet dark:border-border", props.style?.height ? "max-h-dvh" : "min-h-[38dvh] max-h-[60dvh]"),
         className,
       )}
       {...props}
     >
       <div hidden={resting} className={cn("min-h-0 flex-1 basis-auto flex-col", resting ? "hidden" : "flex", voiceReview && "overflow-y-auto")}>
-        <AssistantChatHeader {...header} grabber={full ? undefined : header.grabber} />
+        <AssistantChatHeader {...header} expanded={header.expanded ?? full} grabber={full ? undefined : header.grabber} />
         {attachmentNotice && <Alert variant="warn" className="mx-3 shrink-0">{attachmentNotice}</Alert>}
         {voiceReview}
-        <AssistantTranscript {...transcript} className={cn("flex-1", transcript.className)} />
+        <AssistantTranscript {...transcript} visible={transcript.visible ?? !resting} className={cn("flex-1", transcript.className)} />
       </div>
       <AssistantComposer {...composer} hidden={Boolean(voiceReview) || composer.hidden} variant={resting ? "bar" : "sheet"} />
     </section>

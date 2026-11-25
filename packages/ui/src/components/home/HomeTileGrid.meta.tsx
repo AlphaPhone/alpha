@@ -30,7 +30,7 @@ const onRemove = fn();
 const onMove = fn();
 
 export const meta: ComponentMeta<HomeTileGridProps> = {
-  args: { tiles: homeTiles, onOpen, onBeginEditing, onRemove, onMove },
+  args: { tiles: homeTiles, onOpen, onOpenDrawer: undefined, onBeginEditing, onRemove, onMove },
   examples: {
     Editing: { tiles: unbadged, editing: true },
     "Editing while saving": { tiles: unbadged, editing: true, onRemove: undefined, onMove: undefined },

@@ -15,8 +15,9 @@ export type SpinnerProps = Omit<ComponentProps<"svg">, "children"> &
 
 /** A turning ring for work whose length is unknown. */
 export function Spinner({ size, label = "Loading", className, ...props }: SpinnerProps) {
+  const hidden = props["aria-hidden"] === true || props["aria-hidden"] === "true";
   return (
-    <svg role="status" aria-label={label} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" className={cn(spinnerVariants({ size }), className)} {...props}>
+    <svg role={hidden ? undefined : "status"} aria-label={hidden ? undefined : label} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" className={cn(spinnerVariants({ size }), className)} {...props}>
       <circle cx="12" cy="12" r="9" className="opacity-25" />
       <path d="M21 12a9 9 0 0 0-9-9" />
     </svg>

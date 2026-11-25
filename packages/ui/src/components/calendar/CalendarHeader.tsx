@@ -21,11 +21,17 @@ export function CalendarHeader({ title, expanded = false, onTitle, leading, clas
   return (
     <header data-host-chrome="" className={cn("flex h-13 shrink-0 items-center gap-0.5 px-2", className)} {...props}>
       {leading}
-      <button type="button" aria-label={`Choose date: ${title}`} aria-expanded={expanded} disabled={!onTitle} onClick={onTitle}
-        className={cn(focusRing, "flex min-h-12 min-w-0 grow items-center gap-1.5 rounded-lg text-left disabled:cursor-default")}>
-        <h1 className="m-0 min-w-0 truncate text-xl leading-plain font-semibold">{title}</h1>
-        <Chevron aria-hidden className="mt-1 size-4.5 text-muted-foreground" />
-      </button>
+      <h1 className="m-0 flex min-w-0 grow items-center text-xl leading-plain font-semibold">
+        {onTitle ? (
+          <button type="button" aria-label={`Choose date: ${title}`} aria-expanded={expanded} onClick={onTitle}
+            className={cn(focusRing, "flex min-h-12 min-w-0 grow items-center gap-1.5 rounded-lg text-left")}>
+            <span className="min-w-0 truncate">{title}</span>
+            <Chevron aria-hidden className="mt-1 size-4.5 shrink-0 text-muted-foreground" />
+          </button>
+        ) : (
+          <span className="min-w-0 truncate">{title}</span>
+        )}
+      </h1>
       {children}
     </header>
   );

@@ -4,6 +4,9 @@ import tokens from "@repo/design-system/tokens.json" with { type: "json" };
 
 export const cnFor = (groups: Record<string, unknown>) => {
   const names = (group: string) => Object.keys(groups[group] ?? {});
+  const motion = (groups.motion ?? {}) as Record<string, object | undefined>;
+  const durations = Object.keys(motion.duration ?? {});
+  const eases = Object.keys(motion.ease ?? {});
   const focus = "focus" in groups ? ["focus"] : [];
   const twMerge = extendTailwindMerge({
     extend: {
@@ -11,7 +14,13 @@ export const cnFor = (groups: Record<string, unknown>) => {
         text: names("text"), radius: names("rounded"), shadow: names("shadow"), blur: names("blur"), animate: names("animate"),
         "font-weight": names("weight"), leading: names("leading"), tracking: names("tracking"),
       },
-      classGroups: { z: [{ z: names("z") }], "outline-w": [{ outline: focus }], "outline-offset": [{ "outline-offset": focus }] },
+      classGroups: {
+        z: [{ z: names("z") }],
+        "outline-w": [{ outline: focus }],
+        "outline-offset": [{ "outline-offset": focus }],
+        duration: [{ duration: durations }],
+        ease: [{ ease: eases }],
+      },
     },
   });
   return (...inputs: ClassValue[]) => twMerge(clsx(inputs));
@@ -21,7 +30,7 @@ export const cnFor = (groups: Record<string, unknown>) => {
 export const cn = cnFor(tokens);
 
 /** The outline every control shows under keyboard focus: the focus tokens' width and offset, in `ring`. */
-export const focusRing = "focus-visible:outline-focus focus-visible:outline-offset-focus focus-visible:outline-ring";
+export const focusRing = "focus-visible:outline-solid focus-visible:outline-focus focus-visible:outline-offset-focus focus-visible:outline-ring";
 
 /** The ring of Home's tiles: shown only while the page is marked as moved by keyboard. */
 export const launcherRing = "in-data-[alpha-keyboard]:focus-visible:outline-solid in-data-[alpha-keyboard]:focus-visible:outline-focus in-data-[alpha-keyboard]:focus-visible:outline-offset-focus in-data-[alpha-keyboard]:focus-visible:outline-ring";

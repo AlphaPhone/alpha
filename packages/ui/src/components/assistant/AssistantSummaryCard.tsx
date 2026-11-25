@@ -36,12 +36,12 @@ export function AssistantSummaryCard({ title, bullets, save = "idle", onSave, on
       icon={<ListChecks />}
       title={title}
       settled={settled}
-      actions={
+      actions={onSave || onUseInEmail ? (
         <>
           {onSave ? <Button variant="outline" size="sm" loading={save === "saving"} onClick={onSave}><NotebookPen aria-hidden />Save to Notes</Button> : null}
           {onUseInEmail ? <Button variant="outline" size="sm" onClick={onUseInEmail}><Mail aria-hidden />Use in email</Button> : null}
         </>
-      }
+      ) : undefined}
     >
       <ul className="flex flex-col gap-2">
         {bullets.map((bullet) => (

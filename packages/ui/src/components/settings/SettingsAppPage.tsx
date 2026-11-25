@@ -44,10 +44,7 @@ const accesses: Record<App, Access[]> = { inbox: [], workflows: [], calendar: ["
  */
 export function SettingsAppPage({ app, grants = {}, read = "loaded", images = false, saving, recovering, onImagesChange, onRecover, told, onBack, onHandOver, starting, onAndroid }: SettingsAppPageProps) {
   const android = { starting, onAndroid };
-  const used = accesses[app].flatMap((access) => {
-    const grant = grants[access];
-    return grant ? [{ access, grant }] : [];
-  });
+  const used = accesses[app].map((access) => ({ access, grant: grants[access] ?? ("unavailable" as const) }));
   return (
     <SettingsPage title={titles[app]} told={told} onBack={onBack} backLabel="Back to Apps">
       {app === "inbox" ? (

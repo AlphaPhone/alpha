@@ -34,12 +34,12 @@ export function AssistantAttachmentChip({ attachment, onRemove, onPreview }: Ass
   return (
     <span className="inline-flex max-w-full items-center rounded-full bg-secondary text-secondary-foreground">
       {onPreview && attachment.kind === "image" ? (
-        <button type="button" aria-label={`Preview ${attachment.name}`} onClick={onPreview} className={cn(press, "transition-colors duration-fast ease-standard hover:bg-accent")}>{face}{label}</button>
+        <button type="button" aria-label={`Preview ${attachment.name}`} onClick={onPreview} className={cn(press, "transition-colors duration-fast ease-standard motion-reduce:transition-none hover:bg-accent")}>{face}{label}</button>
       ) : (
         <span className={cn("flex min-h-11 min-w-0 items-center gap-2 pl-1.5", onRemove ? "pr-1" : "pr-3")}>{face}{label}</span>
       )}
       {onRemove ? (
-        <button type="button" aria-label={`Remove ${attachment.name}`} onClick={onRemove} className={cn(focusRing, "relative flex size-11 shrink-0 items-center justify-center rounded-full transition-colors duration-fast ease-standard hover:bg-accent")}>
+        <button type="button" aria-label={`Remove ${attachment.name}`} onClick={onRemove} className={cn(focusRing, "relative flex size-11 shrink-0 items-center justify-center rounded-full transition-colors duration-fast ease-standard motion-reduce:transition-none hover:bg-accent")}>
           <X aria-hidden className="size-4" />
         </button>
       ) : null}
