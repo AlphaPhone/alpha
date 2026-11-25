@@ -3,7 +3,6 @@ import type { SelectedDocument, SelectedDocumentsClient, SelectionId } from "@el
 import { MMS_MAX_TOTAL_BYTES, sensitiveReadingText } from "@elizaos/os-bridges"
 import { fileBase64Cap, imageBase64Cap, imageIntakeBytes, nameLimit } from "../../gen/app__assistant__attachments.effect.vibe"
 import type { Attached } from "../assistant/talk.vibe"
-import { recognizeLocalText } from "@elizaos/plugin-files-client"
 import { type Machine as TextMessages } from "../../gen/app__messages.effect.vibe"
 import { type Machine as MessageComposer } from "../../gen/app__messages__composer.effect.vibe"
 import { type Drafts as MessageDrafts, handOverPicture, pictureBytes, pictureMessagingReady } from "../messages/composer.vibe"
@@ -13,7 +12,7 @@ import * as Browser from "../../gen/app__files.effect.vibe"
 import * as Shown from "../../gen/app__files__preview.effect.vibe"
 import * as Recent from "../../gen/app__files__recent.effect.vibe"
 import type { Item } from "../../gen/app__files__shared.effect.vibe"
-import { kindOf as storageKind, parentPath } from "./entries.vibe"
+import { kindOf as storageKind, loadFilesClient, parentPath } from "./entries.vibe"
 import { type MediaHandoff, attachToAlpha } from "../assistant/attachments.vibe"
 import * as Inbox from "../../gen/app__inbox.effect.vibe"
 import type { Machine as Adding } from "../../gen/app__inbox__adding.effect.vibe"
@@ -26,6 +25,7 @@ import { adopt, keptAt } from "../platform/adoption.vibe"
 import { Documents, previewUrl } from "../platform/documents.vibe"
 import { type Files, called } from "../platform/files.vibe"
 import { type Job, answer, following, reacting, run, started, stop, together } from "../runtime/reactor.vibe"
+import { createShelf, type Shelf } from "../runtime/shelf.vibe"
 import { Handles, type Spot } from "./handles.vibe"
 
 /** What a grant of Recent names: the selection the phone gave for the document, its number in Files, its name, type and revision. */
@@ -52,7 +52,7 @@ export interface Content {
   readonly text?: string
   readonly uri?: string
   readonly page?: string
-  readonly firstPage?: { readonly uri: string; readonly revision: number }
+  readonly firstPage?: { readonly uri: string; readonly revision: number; readonly isolated: boolean; readonly readOnly: boolean }
 }
 
 module kept {
@@ -98,8 +98,10 @@ module kept {
 
   /** @throws {never} */
   export function textFromBase64(data: string): string | undefined {
+    const clean = data.replace(/\s+/g, "")
+    if (clean.length > 2_000_000) return undefined
     try {
-      return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(atob(data), (byte) => byte.charCodeAt(0)))
+      return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(atob(clean), (byte) => byte.charCodeAt(0)))
     } catch {
       return undefined
     }
@@ -175,6 +177,7 @@ export service Opened {
   nameAt(key: number): (string | undefined)!!
   rememberName(key: number, name: string): void!!
   content(): Content!!
+  contentShelf(): Shelf<Content>!!
   hold(content: Content): void!!
 }
 
@@ -185,7 +188,7 @@ export const opened = Layer.effect(Opened, effect {
   const store = try KeyValueStore.KeyValueStore
   const grants = grantsOf(store.get(grantsKey) catch () => undefined)
   const names = namesOf(store.get(namesKey) catch () => undefined)
-  let shown: Content = { viewer: 0 }
+  const shown = createShelf<Content>({ viewer: 0 }, { reset: () => ({ viewer: 0 }) })
   const save = () => ignore(store.set(grantsKey, JSON.stringify([...grants])))
   return {
     grant: (grant: number) => sync(() => Option.fromNullishOr(grants.get(grant))),
@@ -207,8 +210,9 @@ export const opened = Layer.effect(Opened, effect {
       if (names.size > Recent.limit && !at.done) names.delete(at.value)
       try ignore(store.set(namesKey, JSON.stringify([...names])))
     },
-    content: () => sync(() => shown),
-    hold: (content: Content) => sync(() => { shown = content }),
+    content: () => sync(() => shown.get()),
+    contentShelf: () => sync(() => shown),
+    hold: (content: Content) => sync(() => { shown.set(content) }),
   }
 })
 
@@ -246,7 +250,7 @@ function previews(mimeType: string): boolean {
     || mimeType.startsWith("text/") || mimeType.startsWith("image/") || mimeType.startsWith("audio/") || mimeType.startsWith("video/")
 }
 
-effect function openStored(spot: Spot, current: Effect.Effect<boolean>): void!!(Files | Toasts | Said) {
+effect function openStored(spot: Spot, current: boolean!!): void!!(Files | Toasts | Said) {
   if (!(try current)) return
   const result = called("storageOpen", (plugin) => plugin.storageOpen(spot)) catch () => undefined
   if (result?.status !== "opened" && (try current)) try say("Android could not open this file", true)
@@ -289,8 +293,8 @@ export effect function view(item: Item, siblings: ReadonlyArray<string>, owner: 
       if (owner && !previews(selected.mimeType)) return true
       const recent = try Recent.Machine
       uninterruptible {
-        try recent.send({ type: "remember", key: item.id }, "Phone")
-        const grant = (try recent.get()).shown.grant
+        const moved = try recent.send({ type: "remember", key: item.id }, "Phone")
+        const grant = moved.state.shown.grant
         const label = Option.getOrElse(try handles.label(item.volume), () => spot.volume === "primary" ? "Internal storage" : "Storage")
         try (try Opened).give(grant, { selection: selected.selectionId, key: item.id, name: selected.name, mimeType: selected.mimeType,
           revision: item.revision, bytes: item.bytes, storage: { volume: spot.volume, path: spot.path, label } })
@@ -328,10 +332,17 @@ effect function read(ticket: number, item: number, revision: number): Shown.Even
     if (viewer.kind === "Pdf") {
       const first = try Effect.timeoutOption(tryPromise(() => client.pdf(selection.value, 1)), "20 seconds")
       if (Option.isNone(first)) return { ...failed, why: "TooSlow" }
-      if (first.value.status !== "rendered") return { ...failed, why: /encrypt|password/i.test(first.value.message) ? "Locked" : "Fine" }
-      const pages = Math.max(1, Math.trunc(first.value.pageCount ?? 1))
-      if (!first.value.imageUri || !(try current)) return failed
-      try holder.hold({ viewer: viewer.viewer, firstPage: { uri: previewUrl(first.value.imageUri), revision } })
+      const rendered = first.value
+      if (rendered.status === "unavailable") {
+        try ignore(machine.send({ type: "lost" }, "Phone"))
+        return failed
+      }
+      if (rendered.status !== "rendered") return { ...failed, why: /encrypt|password/i.test(rendered.message) ? "Locked" : "Fine" }
+      const pages = Math.max(1, Math.trunc(rendered.pageCount ?? 1))
+      if (!rendered.imageUri || !(try current)) return failed
+      const isolated = !("isolated" in rendered) || rendered.isolated !== false
+      const readOnly = !("readOnly" in rendered) || rendered.readOnly !== false
+      try holder.hold({ viewer: viewer.viewer, firstPage: { uri: previewUrl(rendered.imageUri), revision, isolated, readOnly } })
       return { type: "contentRead", ticket, ok: true, pages, why: "Fine", secret: false }
     }
     if (viewer.kind === "Text") {
@@ -364,8 +375,9 @@ effect function drew(ticket: number, item: number, revision: number, page: numbe
     const holder = try Opened
     const content = try holder.content()
     if (page === 1 && content.viewer === viewer.viewer && content.firstPage?.revision === revision) {
-      try holder.hold({ viewer: viewer.viewer, page: content.firstPage.uri })
-      return { type: "drawn", ticket, ok: true, isolated: true, readOnly: true }
+      const { uri, isolated, readOnly } = content.firstPage
+      if (isolated && readOnly) try holder.hold({ viewer: viewer.viewer, page: uri })
+      return { type: "drawn", ticket, ok: true, isolated, readOnly }
     }
     const selection = try selectionOf(try grantOf(item))
     if (Option.isNone(selection)) return failed
@@ -375,9 +387,15 @@ effect function drew(ticket: number, item: number, revision: number, page: numbe
     const drawn = timed.value
     const current = try machine.get()
     if (current.viewer !== viewer.viewer || current.revision !== revision || !Shown.canDrawn(current, ticket, "Phone")) return failed
+    if (drawn.status === "unavailable") {
+      try ignore(machine.send({ type: "lost" }, "Phone"))
+      return failed
+    }
     if (drawn.status !== "rendered" || !drawn.imageUri) return failed
-    try holder.hold({ ...(try holder.content()), viewer: viewer.viewer, page: previewUrl(drawn.imageUri) })
-    return { type: "drawn", ticket, ok: true, isolated: true, readOnly: true }
+    const isolated = !("isolated" in drawn) || drawn.isolated !== false
+    const readOnly = !("readOnly" in drawn) || drawn.readOnly !== false
+    if (isolated && readOnly) try holder.hold({ ...(try holder.content()), viewer: viewer.viewer, page: previewUrl(drawn.imageUri) })
+    return { type: "drawn", ticket, ok: true, isolated, readOnly }
   } catch () => failed
 }
 
@@ -423,7 +441,9 @@ effect function excerpt(content: Content, page: number, id: string, name: string
   const address = content.page
   const image = tryPromise(() => pageImage(address, previewLimit)) catch () => undefined
   if (image === undefined) return undefined
-  const words = timeout(recognizeLocalText(localText, image, () => {}, true), 20000) catch () => undefined
+  const loadedClient = tryPromise(() => loadFilesClient()) catch () => undefined
+  if (loadedClient === undefined) return undefined
+  const words = timeout(loadedClient.recognizeLocalText(localText, image, () => {}, true), 20000) catch () => undefined
   if (words === undefined || sensitiveReadingText(words.text)) return undefined
   const bytes = tryPromise(() => image.arrayBuffer()) catch () => undefined
   if (bytes === undefined) return undefined
@@ -465,7 +485,7 @@ effect function readAttachment(prior: FileSelection, allowExcerpt: boolean): (At
   } else {
     const bytes = try (try Documents).attachment(source)
     if (Option.isNone(bytes)) return undefined
-    const data = bytes.value.dataBase64
+    const data = bytes.value.dataBase64.replace(/\s+/g, "")
     const size = data.length / 4 * 3 - (data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0)
     if (bytes.value.name !== expected.name || bytes.value.mimeType.toLowerCase() !== mimeType || data.length % 4 !== 0 || size < 1
       || size > limit || (before.size !== undefined && before.size !== size)) return undefined
@@ -542,7 +562,8 @@ effect function offerEmail(ticket: number, viewer: number, item: number, revisio
     try say("Alpha could not offer this file to Inbox", true)
     return refused
   }
-  const { name, mimeType, dataBase64: data } = bytes.value
+  const { name, mimeType, dataBase64 } = bytes.value
+  const data = dataBase64.replace(/\s+/g, "")
   const size = data.length / 4 * 3 - (data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0)
   if (name !== file.value.name || mimeType.toLowerCase() !== file.value.mimeType.toLowerCase() || data.length % 4 !== 0 || size <= 0
     || (verified.size !== undefined && verified.size !== size)) {
@@ -788,11 +809,17 @@ effect function reached(ticket: number, key: number): Recent.Event!!(Documents |
 }
 
 // spec/app/files/recent.md, "A file opened from a folder is given access, listed first in place of its older row, and is the document open; the oldest row leaves a full list"
-effect function reopened(key: number, grant: number): void!!(Opened | Shown.Machine) {
+effect function reopened(key: number, grant: number): void!!(Files | Opened | Shown.Machine) {
   try ignore(effect {
     const given = try (try Opened).grant(grant)
     if (Option.isNone(given)) return
-    try (try Shown.Machine).send({ type: "show", file: key, kind: kindOf(given.value.mimeType), revision: given.value.revision, siblings: [] }, "Phone")
+    let siblings: string[] = []
+    if (given.value.storage !== undefined) {
+      const { volume, path } = given.value.storage
+      const reply = called("storageList", (plugin) => plugin.storageList({ volume, path: parentPath(path) })) catch () => undefined
+      if (reply?.status === "ready") siblings = (reply.entries ?? []).map((one) => one.name)
+    }
+    try (try Shown.Machine).send({ type: "show", file: key, kind: kindOf(given.value.mimeType), revision: given.value.revision, siblings }, "Phone")
   })
 }
 
@@ -817,7 +844,7 @@ effect function picked(ticket: number): Recent.Event!!(Documents | Opened | Rece
   } catch () => canceled
 }
 
-function carryRecent(fx: Recent.Effect): Job<Recent.Event, Documents | Opened | Recent.Machine | Shown.Machine, [by: Recent.Actor]> {
+function carryRecent(fx: Recent.Effect): Job<Recent.Event, Files | Documents | Opened | Recent.Machine | Shown.Machine, [by: Recent.Actor]> {
   return match (fx) {
     // spec/app/files/recent.md, "Access is held by a row or by the document open, and what a step leaves unheld is given up in that step"
     when { tag: "Release", let grant }: run(`release ${grant}`, ignore(effect {

@@ -58,7 +58,7 @@ effect function alreadyOpen(id: number) {
  * question, a voice note, the proposal card or the actions menu; and the editor while it deletes, or at all for a voice
  * note, which the editor does not give way to. A saved note open in the editor gives way to a text note.
  */
-effect function covering(voice: boolean) {
+export effect function covering(voice: boolean) {
   const recorder = try (try Recorder.Machine).get()
   const trash = try (try Trash.Machine).get()
   const editor = try (try Editor.Machine).get()
@@ -105,7 +105,12 @@ export effect function agentOpen(noteId: string, asked: Asked) {
   const { req, covered } = try requestOf(s, id, asked)
   const opens = try Opens
   const waiting = try opens.expect(asked.turn)
-  if (!(try contained(list.send({ type: "agentOpen", id, covered, req }, "Agent"), "the agent opening a note"))) try opens.settle(asked.turn, false)
-  const shown = try Effect.timeoutOption(Deferred.await(waiting), "10 seconds")
-  return Option.getOrElse(shown, () => false)
+  return try Effect.ensuring(effect {
+    if (!(try contained(list.send({ type: "agentOpen", id, covered, req }, "Agent"), "the agent opening a note"))) {
+      try opens.settle(asked.turn, false)
+      return false
+    }
+    const shown = try Effect.timeoutOption(Deferred.await(waiting), "10 seconds")
+    return Option.getOrElse(shown, () => false)
+  }, opens.drop(asked.turn))
 }

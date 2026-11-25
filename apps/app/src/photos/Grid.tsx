@@ -2,7 +2,7 @@
 import type { Effect, ManagedRuntime } from "effect";
 import { Check, Heart, Image, Play } from "lucide-react";
 import { memo, useCallback, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type MouseEvent, type ReactNode, type TouchEvent, type UIEvent } from "react";
-import { cn } from "@repo/ui";
+import { Button, cn, dockClearance, focusRing } from "@repo/ui";
 import type { Density } from "../../gen/app__photos.ts";
 import { taken, type Row } from "./catalog.vibe";
 import { thumbnailBatch, viewportThumbnails } from "./photos.vibe";
@@ -21,49 +21,63 @@ type GridObserver = {
 function useThumbnails(runtime: ManagedRuntime.ManagedRuntime<ThumbnailContext, unknown>, revision: number, trash: boolean) {
   const view = `${revision}:${trash}`;
   const [rendered, setRendered] = useState<{ scope: string; images: Thumbnails }>();
-  const [visibleLines, setVisibleLines] = useState<ReadonlySet<number> | null>();
+  const [visibleWindow, setVisibleWindow] = useState<{ scope: string; lines: ReadonlySet<number> | null }>();
   const observingRef = useRef<GridObserver | undefined>(undefined);
   const connect = useCallback((root: HTMLDivElement | null) => {
     if (!root) return;
     if (typeof IntersectionObserver === "undefined") {
-      setVisibleLines(null);
+      setVisibleWindow({ scope: view, lines: null });
       return;
     }
     const pane = root;
-    if (pane.clientHeight === 0 || pane.clientWidth === 0) setVisibleLines(null);
+    if (pane.clientHeight === 0 || pane.clientWidth === 0) setVisibleWindow({ scope: view, lines: null });
     const active = new Map<Element, readonly number[]>();
     const membership = new WeakMap<Element, readonly number[]>();
-    const pixels = new Map<number, string | undefined>();
+    const pixels = new Map<number, string>();
+    const attempts = new Map<number, number>();
     let closed = false;
     let reading = false;
 
     function publishWindow() {
       if (closed || pane.clientHeight === 0 || pane.clientWidth === 0) return;
       const next = new Set([...active.values()].flatMap(([first]) => first === undefined ? [] : [first]));
-      setVisibleLines((previous) => previous && previous.size === next.size && [...next].every((line) => previous.has(line)) ? previous : next);
+      setVisibleWindow((previous) => {
+        if (previous?.scope === view && previous.lines && previous.lines.size === next.size
+          && [...next].every((line) => previous.lines?.has(line))) return previous;
+        return { scope: view, lines: next };
+      });
     }
     function wanted(): Set<number> {
       return new Set([...active.values()].flat().slice(0, thumbnailRoom));
     }
     function publish() {
-      const images = new Map([...pixels].flatMap(([id, image]) => image ? [[id, image] as const] : []));
-      setRendered({ scope: view, images });
+      setRendered({ scope: view, images: new Map(pixels) });
     }
     async function settle() {
       if (closed) return;
       const current = wanted();
       let removed = false;
       for (const id of pixels.keys()) if (!current.has(id)) { pixels.delete(id); removed = true; }
+      for (const id of attempts.keys()) if (!current.has(id)) attempts.delete(id);
       if (removed) publish();
       if (reading) return;
-      const missing = [...current].filter((id) => !pixels.has(id)).slice(0, thumbnailBatch);
+      const missing = [...current].filter((id) => !pixels.has(id) && (attempts.get(id) ?? 0) < 2).slice(0, thumbnailBatch);
       if (missing.length === 0) return;
       reading = true;
       const read = await runtime.runPromiseExit(viewportThumbnails(missing, { revision, trash }));
       reading = false;
       if (closed) return;
       const latest = wanted();
-      for (const id of missing) if (latest.has(id)) pixels.set(id, read._tag === "Success" ? read.value.get(id) : undefined);
+      for (const id of missing) {
+        if (!latest.has(id)) continue;
+        const image = read._tag === "Success" ? read.value.get(id) : undefined;
+        if (image) {
+          pixels.set(id, image);
+          attempts.delete(id);
+        } else {
+          attempts.set(id, (attempts.get(id) ?? 0) + 1);
+        }
+      }
       publish();
       void settle();
     }
@@ -81,6 +95,11 @@ function useThumbnails(runtime: ManagedRuntime.ManagedRuntime<ThumbnailContext, 
       publishWindow();
       void settle();
     }, { root, rootMargin: viewportInset });
+    const resizer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(() => {
+      if (closed || pane.clientHeight === 0 || pane.clientWidth === 0) return;
+      if (active.size > 0) publishWindow();
+    });
+    resizer?.observe(pane);
     observingRef.current = {
       observe(line, ids) {
         membership.set(line, ids.split(",").map(Number).filter((id) => id > 0 && Number.isSafeInteger(id)));
@@ -97,8 +116,10 @@ function useThumbnails(runtime: ManagedRuntime.ManagedRuntime<ThumbnailContext, 
       closed = true;
       observingRef.current = undefined;
       observer.disconnect();
+      resizer?.disconnect();
       active.clear();
       pixels.clear();
+      attempts.clear();
     };
   }, [runtime, revision, trash, view]);
   const observeLine = useCallback((line: HTMLDivElement | null, ids: string) => {
@@ -106,6 +127,7 @@ function useThumbnails(runtime: ManagedRuntime.ManagedRuntime<ThumbnailContext, 
     observingRef.current?.observe(line, ids);
     return () => observingRef.current?.forget(line);
   }, []);
+  const visibleLines = visibleWindow?.scope === view ? visibleWindow.lines : undefined;
   return { connect, observeLine, visibleLines, images: rendered?.scope === view ? rendered.images : undefined };
 }
 
@@ -144,10 +166,10 @@ const startOfDay = (at: number) => new Date(at).setHours(0, 0, 0, 0);
 export function headingOf(at: number, now: number, exactDay = false): string {
   const ago = Math.round((startOfDay(now) - startOfDay(at)) / 86_400_000);
   const shot = new Date(at);
-  if (ago <= 0) return "Today";
+  if (ago === 0) return "Today";
   if (ago === 1) return "Yesterday";
-  if (ago < dayHeadings || exactDay) {
-    const includeYear = ago >= dayHeadings || shot.getFullYear() !== new Date(now).getFullYear();
+  if (ago < 0 || ago < dayHeadings || exactDay) {
+    const includeYear = ago < 0 || ago >= dayHeadings || shot.getFullYear() !== new Date(now).getFullYear();
     return shot.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", ...(includeYear ? { year: "numeric" } : {}) });
   }
   return shot.toLocaleDateString("en-US", { month: "long", year: "numeric" });
@@ -175,15 +197,17 @@ const Tile = memo(function Tile({ number, row, image, selected, trashed, daysLef
     <button ref={focus} type="button" data-alpha-media-key={number} aria-label={name} aria-pressed={selected}
       aria-description={daysLeft === undefined ? undefined : trashDaysLabel(daysLeft)}
       disabled={!interactive}
-      className="relative grid aspect-square min-h-0 min-w-0 touch-pan-y place-items-center overflow-hidden bg-secondary focus-visible:outline-focus focus-visible:outline-offset-focus">
+      className={cn(focusRing, "relative grid aspect-square min-h-0 min-w-0 touch-pan-y place-items-center overflow-hidden bg-secondary focus-visible:z-10 focus-visible:-outline-offset-2")}>
       {image ? <img src={image} loading="lazy" decoding="async" alt="" className="absolute inset-0 size-full object-cover" /> : <Image aria-hidden className="size-6 text-muted-foreground" />}
       {starred && <span aria-label="Favorite"
         // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": favorites on an image keep the dark contrast surface in either theme
-        className="dark absolute bottom-1.5 left-1.5 grid size-4.5 place-items-center rounded-full bg-background/75 text-foreground"><Heart aria-hidden className="size-3 fill-current" /></span>}
+        className="dark absolute top-1.5 left-1.5 grid size-4.5 place-items-center rounded-full bg-background/75 text-foreground"><Heart aria-hidden className="size-3 fill-current" /></span>}
       {daysLeft !== undefined && <span aria-hidden
         // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the expiry badge stays readable on a photo in either theme
         className="dark absolute bottom-1 left-1.5 rounded-sm bg-background/60 px-0.5 text-caption font-bold text-foreground">{daysLeft}d</span>}
-      {video && <span className="absolute right-1 bottom-1 flex items-center gap-1 rounded-full bg-background/80 px-1.5 py-0.5 text-xs"><Play aria-hidden className="size-3 fill-current" />{timing(row.item.duration ?? 0)}</span>}
+      {video && <span
+        // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the duration pill stays readable on a video thumbnail in either theme
+        className="dark absolute right-1 bottom-1 flex items-center gap-1 rounded-full bg-background/80 px-1.5 py-0.5 text-xs text-foreground"><Play aria-hidden className="size-3 fill-current" />{timing(row.item.duration ?? 0)}</span>}
       {selected !== undefined && <span aria-hidden className={cn("absolute top-1.5 right-1.5 grid size-6 place-items-center rounded-full border border-background", selected ? "bg-primary text-primary-foreground" : "bg-background/65")}>{selected && <Check className="size-4" />}</span>}
     </button>
   );
@@ -335,7 +359,7 @@ export function MediaGrid({ rows, selection, grouped, density, runtime, revision
     if (pane.scrollHeight - pane.scrollTop - pane.clientHeight < pane.clientHeight / 2) more?.();
   }
   return (
-    <div ref={connect} data-alpha-app-scroll="photos" className="min-h-0 flex-1 touch-pan-y overflow-y-auto px-3 pb-28 [container-type:inline-size]" onScroll={scrolled}
+    <div ref={connect} data-alpha-app-scroll="photos" className={cn("min-h-0 flex-1 touch-pan-y overflow-y-auto px-3 [container-type:inline-size]", dockClearance)} onScroll={scrolled}
       onClick={(event) => choose(event, open)} onContextMenu={(event) => choose(event, start)}
       onFocus={(event) => setFocused(mediaNumber(event.target))} onBlur={focusLeft} onKeyDown={tab}
       onTouchStart={startPinch} onTouchMove={movePinch} onTouchEnd={clearPinch} onTouchCancel={clearPinch}>
@@ -355,7 +379,7 @@ export function MediaGrid({ rows, selection, grouped, density, runtime, revision
           })}
         </section>
       ))}
-      {more && <button type="button" data-alpha-grid-more="" className="mx-auto mt-4 block min-h-11 rounded-full bg-muted px-4 text-sm" onClick={more}>Show more</button>}
+      {more && <Button variant="secondary" data-alpha-grid-more="" className="mx-auto mt-4 block rounded-full" onClick={more}>Show more</Button>}
     </div>
   );
 }

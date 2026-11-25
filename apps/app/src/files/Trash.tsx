@@ -1,6 +1,7 @@
 // spec/app/files/trash.md, "Story: See what is in the Trash"; spec/app/files/trash.md, "Story: Bring something back"; spec/app/files/trash.md, "Story: Erase for good"; spec/app/files/trash.md, "The owner restores everything listed that is still kept, together, from a list read since the last job"; spec/app/files/trash.md, "The owner marks listed entries, one by one or every one, and a mark lasts while its entry is listed and no job has started"; spec/app/files/trash.md, "The phone keeps an item thirty days from when it went in; its days left count down from thirty and never go below zero"
-import { Alert, AppHeader, Button, Checkbox, Dialog, DialogContent, DialogTitle, EmptyState, ListGroup, ListRow, Spinner } from "@repo/ui";
+import { Alert, AppHeader, Button, Checkbox, Dialog, DialogContent, DialogTitle, EmptyState, ListGroup, ListRow, Spinner, cn, dockClearance } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
+import { useSyncExternalStore } from "react";
 import { AudioLines, ChevronLeft, FileText, Folder, Image, Trash2, Video } from "lucide-react";
 import type { Machine } from "../../gen/app__files__trash.effect.vibe";
 import { daysLeft, view } from "../../gen/app__files__trash.ts";
@@ -24,6 +25,8 @@ export interface TrashProps {
  */
 export function Trash({ runtime, onBack }: TrashProps) {
   const { state, can, send } = useTimed(runtime, useMachine);
+  const factsShelf = runtime.runSync(Effect.flatMap(TrashFacts, (trash) => trash.view()));
+  const facts = useSyncExternalStore(factsShelf.subscribe, factsShelf.snapshot, factsShelf.snapshot);
   if (!state) return null;
   const owner = <E extends Parameters<typeof can>[0]>(event: E) => can(event, "Owner");
   const tell = <E extends Parameters<typeof send>[0]>(event: E) => void send(event, "Owner");
@@ -32,7 +35,6 @@ export function Trash({ runtime, onBack }: TrashProps) {
   const now = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
   const left = (days: number) => (days === 1 ? "1 day left" : `${days} days left`);
   const detail = state.entries.find((entry) => entry.mark === state.details);
-  const facts = runtime.runSync(Effect.flatMap(TrashFacts, (trash) => trash.rows()));
   const details = detail === undefined ? undefined : facts.get(detail.mark);
   const restore = detail === undefined ? undefined : { type: "restore", entry: detail, now: untimed } as const;
   const erase = detail === undefined ? undefined : { type: "askToErase", entry: detail } as const;
@@ -43,7 +45,7 @@ export function Trash({ runtime, onBack }: TrashProps) {
         {owner({ type: "restoreAll", now: untimed }) && <Button variant="ghost" className="h-11 px-3.5" onClick={() => tell({ type: "restoreAll", now: untimed })}>Restore all</Button>}
         {owner({ type: "askToEmpty" }) && <Button variant="ghost" aria-label="Empty the Trash" className="h-11 px-3.5 text-warn" onClick={() => tell({ type: "askToEmpty" })}>Empty</Button>}
       </AppHeader>
-      <div className="min-h-0 flex-1 touch-pan-y space-y-3 overflow-y-auto px-2 pb-28">
+      <div className={cn("min-h-0 flex-1 touch-pan-y space-y-3 overflow-y-auto px-2", dockClearance)}>
       {state.marked.length > 0 && (
         <div role="toolbar" aria-label="Marked" className="flex flex-wrap gap-2">
           {owner({ type: "markAll" }) && state.marked.length < state.entries.length && <Button variant="ghost" size="sm" onClick={() => tell({ type: "markAll" })}>Mark all</Button>}
@@ -57,7 +59,7 @@ export function Trash({ runtime, onBack }: TrashProps) {
       {shown === "Reading" && <Spinner label="Reading the Trash" />}
       {shown === "Unreadable" && <Alert variant="destructive">The Trash cannot be read now</Alert>}
       {shown === "Empty" && <EmptyState icon={<Trash2 />} title="The Trash is empty" className="gap-3 px-4 pt-24 pb-4 [&_svg]:size-11" />}
-      {state.entries.length > 0 && (
+      {shown === "Listing" && (
         <ListGroup aria-label="In the Trash" surface="plain">
           {state.entries.map((entry) => {
             const open = { type: "openItemDetails", entry } as const;
@@ -65,16 +67,17 @@ export function Trash({ runtime, onBack }: TrashProps) {
             const listed = facts.get(entry.mark);
             const mime = listed?.mimeType ?? "";
             const Icon = listed?.directory ? Folder : mime.startsWith("image/") ? Image : mime.startsWith("video/") ? Video : mime.startsWith("audio/") ? AudioLines : FileText;
+            const label = left(daysLeft(entry, now));
             return (
               <div key={entry.mark} className="relative">
               <ListRow
                 title={entry.name}
                 aria-label={entry.name}
-                className="min-h-15 w-full gap-3.5 rounded-drawer-icon px-2 pr-10"
+                className="min-h-15 w-full gap-3.5 rounded-drawer-icon px-2 pr-14"
                 leading={<span className="grid size-11 shrink-0 place-items-center rounded-md bg-secondary text-foreground"><Icon className="size-5" /></span>}
                 selected={state.marked.includes(entry.mark)}
                 onClick={owner(open) ? () => tell(open) : undefined}
-                trailing={<time dateTime={new Date(entry.until).toISOString()}>{left(daysLeft(entry, now))}</time>}
+                trailing={entry.until > 0 && Number.isFinite(entry.until) ? <time dateTime={new Date(entry.until).toISOString()}>{label}</time> : <span>{label}</span>}
                 detail={listed === undefined ? undefined : listed.directory ? listed.location : `${new Intl.NumberFormat().format(listed.bytes)} bytes · ${listed.location}`}
               />
               {owner(mark) && <Checkbox aria-label={`Mark ${entry.name}`} checked={state.marked.includes(entry.mark)} className="absolute right-2 top-1/2 -translate-y-1/2" onCheckedChange={() => tell(mark)} />}
@@ -84,7 +87,7 @@ export function Trash({ runtime, onBack }: TrashProps) {
         </ListGroup>
       )}
       </div>
-      <Dialog open={detail !== undefined} onOpenChange={(open) => { if (!open && owner({ type: "closeItemDetails" })) tell({ type: "closeItemDetails" }); }}>
+      <Dialog open={detail !== undefined && !state.erasing.showing} onOpenChange={(open) => { if (!open && owner({ type: "closeItemDetails" })) tell({ type: "closeItemDetails" }); }}>
         <DialogContent closeLabel="Close details">
           <DialogTitle>{detail?.name}</DialogTitle>
           {detail !== undefined && (
@@ -120,9 +123,9 @@ export function Undo({ runtime }: Pick<TrashProps, "runtime">) {
   const undo = { type: "undoDelete", now: untimed } as const;
   if (!state || !can(undo, "Owner")) return null;
   return (
-    <div role="status" className="flex items-center justify-between gap-2">
+    <div role="status" className="flex items-center justify-between gap-2 rounded-tile bg-secondary px-3 py-2 text-sm">
       <span>{state.binned.length === 1 ? `“${state.binned[0]?.name}” is in the Trash` : `${state.binned.length} items are in the Trash`}</span>
-      <Button key={state.undo.until} variant="outline" size="sm" autoFocus onClick={() => void send(undo, "Owner")}>Undo</Button>
+      <Button key={state.undo.until} variant="outline" size="sm" onClick={() => void send(undo, "Owner")}>Undo</Button>
     </div>
   );
 }

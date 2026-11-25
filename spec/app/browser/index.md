@@ -174,7 +174,7 @@ pure def canUncover(s: Browser): bool = s.layer != Uncovered
 
 pure def uncover(s: Browser): Browser = { ...s, layer: Uncovered }
 
-pure def pageShown(s: Browser): bool = s.layer == Uncovered and s.native.contains(s.selected) and steady(s)
+pure def pageShown(s: Browser): bool = s.layer == Uncovered and s.erasing == Kept and s.native.contains(s.selected) and steady(s)
 ```
 
 ### Between one and eight tabs are open, and the one shown is among them

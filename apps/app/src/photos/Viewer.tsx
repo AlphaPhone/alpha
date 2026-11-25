@@ -1,9 +1,9 @@
 import { Album, ChevronLeft, ChevronRight, Crop, Ellipsis, Heart, Info, Mail, MessageCircle, Pause, Pencil, Play, RotateCw, Share2, Sparkles, Trash2, Undo2, X } from "lucide-react";
 import { Effect, Exit, type ManagedRuntime } from "effect";
-import { useCallback, useId, useRef, useState, type PointerEvent, type RefCallback } from "react";
-import { Button, Input, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, cn, dockClearance } from "@repo/ui";
+import { useCallback, useId, useRef, useState, useSyncExternalStore, type PointerEvent, type ReactNode, type RefCallback } from "react";
+import { Button, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, Slider, cn, dockClearance, focusRing } from "@repo/ui";
 import { useMachine } from "../../gen/app__photos__viewer.react.ts";
-import { canPlay, maxZoom, panUnits, type Event, type Look, type Pan, type Viewer as ViewerState } from "../../gen/app__photos__viewer.ts";
+import { canPlay, cropUnits, maxZoom, panUnits, type Event, type Look, type Pan, type Viewer as ViewerState } from "../../gen/app__photos__viewer.ts";
 import type { Machine } from "../../gen/app__photos__viewer.effect.vibe";
 import { taken, type Row } from "./catalog.vibe";
 import { OpenedPhoto, photoEmailAllowed, photoLook, photoMessageType, type MediaView } from "./viewer.vibe";
@@ -68,28 +68,37 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onBack, back
   const positionId = useId();
   const [startedClip, setStartedClip] = useState<{ readonly readTicket: number; readonly uri: string }>();
   const [decodedClip, setDecodedClip] = useState<{ readonly readTicket: number; readonly uri: string; readonly loaded: boolean }>();
+  const [dismissedRefusal, setDismissedRefusal] = useState<string>();
   const videoRef = useRef<HTMLVideoElement>(null);
   const attachVideo = useCallback((element: HTMLVideoElement | null) => {
     if (element === null) return;
     videoRef.current = element;
     return () => { element.pause(); videoRef.current = null; };
   }, []);
+  const isPlaying = state?.playing === true;
+  const syncVideoPlaying = useCallback((node: HTMLDivElement | null) => {
+    if (node && !isPlaying && videoRef.current && !videoRef.current.paused) videoRef.current.pause();
+  }, [isPlaying]);
   const returnCropFocusRef = useRef(0);
   const openPhoto = state?.open;
-  const previewShowing = state?.preview.showing;
+  const previewShowing = Boolean(state?.editing && !state.unavailable && state.preview.showing);
   const cropButton = useCallback((button: HTMLButtonElement | null) => {
     if (button && previewShowing && returnCropFocusRef.current === openPhoto) {
       returnCropFocusRef.current = 0;
       button.focus({ preventScroll: true });
+    } else if (!previewShowing && returnCropFocusRef.current !== 0) {
+      returnCropFocusRef.current = 0;
     }
   }, [openPhoto, previewShowing]);
+  const mediaShelf = runtime.runSync(Effect.flatMap(OpenedPhoto, (opened) => opened.mediaShelf()));
+  const previewShelf = runtime.runSync(Effect.flatMap(OpenedPhoto, (opened) => opened.previewShelf()));
+  const current = useSyncExternalStore(mediaShelf.subscribe, mediaShelf.snapshot, mediaShelf.snapshot);
+  const preview = useSyncExternalStore(previewShelf.subscribe, previewShelf.snapshot, previewShelf.snapshot);
   if (!state || state.open === 0) return null;
-  const current = runtime.runSync(Effect.flatMap(OpenedPhoto, (opened) => opened.current()));
   const clipReady = startedClip?.readTicket === state.read.ticket && startedClip.uri === current.uri;
   const decoding = decodedClip?.readTicket === state.read.ticket && decodedClip.uri === current.uri ? decodedClip : undefined;
   const clipEditor = state.kind === "Clip" && state.editing;
-  const preview = runtime.runSync(Effect.flatMap(OpenedPhoto, (opened) => opened.preview()));
-  const showing = state.read.status === "Loaded" && current.photo === state.open && !state.gone;
+  const showing = state.visible && state.read.status === "Loaded" && current.photo === state.open && !state.gone;
   const showingRow: Row | undefined = showing && current.item !== undefined ? { kind: "phone", item: current.item }
     : showing && current.browser !== undefined ? { kind: "browser", item: current.browser.item } : row;
   const item = showingRow?.item;
@@ -114,7 +123,7 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onBack, back
     action(event);
   }
   const rewind = { type: "seek", position: clipEditor ? state.edit.start : 0 } satisfies Event;
-  const replay = state.kind === "Clip" && (clipEditor ? decoding?.loaded === true : clipReady) &&
+  const replay = state.kind === "Clip" && (clipEditor ? decoding?.loaded === true : (clipReady || decoding?.loaded === true || state.position >= state.duration)) &&
     state.position >= (clipEditor ? state.edit.end : state.duration) && allows(rewind);
   function playClip(clip: HTMLVideoElement, position: number) {
     clip.currentTime = position / 10;
@@ -136,13 +145,14 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onBack, back
       });
     }
   }
-  function played() {
+  function played(ended = false) {
     const clip = videoRef.current;
     if (clip === null || !state?.playing) return;
     const end = state.editing ? state.edit.end : state.duration;
-    const position = Math.min(end, Math.max(0, Math.round(clip.currentTime * 10)));
+    const position = ended ? end : Math.min(end, Math.max(0, Math.round(clip.currentTime * 10)));
     if (position >= end) clip.pause();
-    if (position !== state.position && can({ type: "played", position }, "Phone")) void send({ type: "played", position }, "Phone");
+    if ((position !== state.position || ended) && can({ type: "played", position }, "Phone")) void send({ type: "played", position }, "Phone");
+    else if (ended && can({ type: "pause" }, "Owner")) void send({ type: "pause" }, "Owner");
   }
   const close = () => {
     videoRef.current?.pause();
@@ -150,6 +160,8 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onBack, back
   };
   const backLabel = clipEditor ? "Close video editor" : state.editing ? "Cancel edit" : backToCamera ? "Back to Camera" : "Back to photos";
   const crop = { type: state.kind === "Still" ? "beginCrop" : "crop" } satisfies Event;
+  const stillCropped = state.kind === "Still" && (state.edit.bounds.width < cropUnits || state.edit.bounds.height < cropUnits);
+  const cropActive = state.kind === "Still" ? stillCropped : state.edit.cropped;
   function openCrop() {
     if (state?.kind === "Still") returnCropFocusRef.current = state.open;
     action(crop);
@@ -175,10 +187,12 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onBack, back
   const editStatus = state.save.outcome === "Sent" ? "Saving video copy…" : decoding?.loaded === false ? "Couldn’t load"
     : decoding === undefined ? "Loading video…" : state.unavailable ? "Couldn’t prepare the preview" : state.save.outcome === "Refused" ? "Not saved" : undefined;
   const edited = preview !== undefined && preview.revision === state.preview.revision && state.editing && !state.unavailable ? preview : undefined;
+  const refusalKey = `${state.open}:${state.preview.revision}:${state.refusal}`;
+  const showRefusal = state.refusal !== "NoRefusal" && dismissedRefusal !== refusalKey;
   if (state.cropping) return (
     <div aria-label="Crop photo" data-alpha-subview="photos-crop"
       // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the crop tools follow the photo editor's fixed dark theme
-      className={cn("dark absolute inset-0 z-50 flex min-h-0 flex-col bg-background text-foreground", dockClearance)}>
+      className={cn("dark absolute inset-0 z-50 flex min-h-0 flex-col bg-background pt-[var(--alpha-safe-top)] text-foreground", dockClearance)}>
       {edited && edited.width > 0 && edited.height > 0 ? <CropFrame key={state.revision} source={edited} bounds={state.edit.bounds}
         onCancel={close} onApply={(bounds) => action({ type: "applyCrop", bounds })} /> : <>
         <CropHeader onCancel={close} />
@@ -188,12 +202,21 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onBack, back
       </>}
     </div>
   );
+  const playOverlay = showing && state.kind === "Clip" && !state.editing ? (
+    <Button
+      variant="ghost" size="icon" className={cn("absolute top-1/2 left-1/2 z-20 size-18 -translate-1/2 rounded-full bg-background/70 font-normal text-foreground hover:bg-background/80 motion-safe:transition-opacity", state.playing && !chrome && hiddenChrome)}
+      disabled={!allows({ type: "pause" }) && !allows({ type: "play" }) && !replay}
+      aria-label={state.playing ? "Pause video" : replay ? "Replay video" : "Play video"} onClick={toggle}>
+      {state.playing ? <Pause className="size-7" /> : <Play className="size-7 fill-current" />}
+    </Button>
+  ) : undefined;
+  const canSeekClip = state.duration > 0 && allows({ type: "seek", position: 0 });
   return (
-    <div role={clipEditor ? "dialog" : undefined} aria-modal={clipEditor || undefined} aria-label={clipEditor ? "Edit video" : name}
+    <div ref={syncVideoPlaying} role={clipEditor ? "dialog" : undefined} aria-modal={clipEditor || undefined} aria-label={clipEditor ? "Edit video" : name}
       data-alpha-subview={clipEditor ? "photos-clip-editor" : state.editing ? "photos-editor" : "photos-viewer"}
       // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the photo viewer and its controls keep their dark tokens in either app theme
-      className={cn("dark absolute inset-0 z-50 flex min-h-0 flex-col text-foreground", "bg-background", !clipEditor && dockClearance)}>
-      <header data-host-chrome="" className={cn(clipEditor ? "flex shrink-0 items-center gap-2 bg-foreground/[0.066667] px-3 pt-3 pb-2" : state.editing ? editHeader : "flex min-h-14 shrink-0 items-center gap-2 px-2", !chrome && hiddenChrome)}>
+      className={cn("dark absolute inset-0 z-50 flex min-h-0 flex-col bg-background pt-[var(--alpha-safe-top)] text-foreground", !clipEditor && dockClearance)}>
+      <header data-host-chrome="" className={cn("motion-safe:transition-opacity", clipEditor ? "flex shrink-0 items-center gap-2 bg-foreground/[0.066667] px-3 pt-3 pb-2" : state.editing ? editHeader : "flex min-h-14 shrink-0 items-center gap-2 px-2", !chrome && hiddenChrome)}>
         <Button variant="ghost" size="icon" className={clipEditor ? "size-11" : undefined} aria-label={backLabel} onClick={close}>{state.editing && !clipEditor ? <X /> : <ChevronLeft />}</Button>
         {clipEditor ? <h1 className="flex-1 text-base font-normal">Edit video</h1> : state.editing ? <div className="flex-1"><h1 className="sr-only">Edit photo</h1></div> : <div className="min-w-0 flex-1">
           <h1 className="truncate text-base font-semibold">{day}</h1>
@@ -206,7 +229,7 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onBack, back
             // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the portalled photo menu follows the viewer's fixed dark theme
             className="dark">{photosMenu.map(({ label, icon, select }) => <MenuItem key={label} onSelect={select}>{icon}{label}</MenuItem>)}</MenuContent>
         </Menu>}
-        {state.editing && preview?.canReplace && allows({ type: "chooseReplace", replace: !state.replace }) && <Button variant="secondary" size="sm" className={editTool} aria-pressed={state.replace} onClick={() => action({ type: "chooseReplace", replace: !state.replace })}>Replace</Button>}
+        {state.editing && preview?.canReplace && <Button variant="secondary" size="sm" className={editTool} aria-pressed={state.replace} disabled={!allows({ type: "chooseReplace", replace: !state.replace })} onClick={() => action({ type: "chooseReplace", replace: !state.replace })}>Replace</Button>}
         {state.editing && <Button className={clipEditor ? "h-11 px-4 text-base font-normal disabled:opacity-100" : "px-4.5"} size="sm"
           aria-label={clipEditor ? "Save video copy" : undefined} disabled={(!canEditClip && clipEditor) || !allows({ type: "save" })}
           onClick={() => editAction({ type: "save" })}>{state.replace ? "Replace" : "Save copy"}</Button>}
@@ -214,14 +237,9 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onBack, back
       </header>
       <MediaViewport state={state} current={current} name={name} showing={showing} editedImage={edited?.image}
         before={before} after={after} action={action} allows={allows} attachVideo={attachVideo} played={played}
+        playOverlay={playOverlay}
         onPlaybackStarted={() => setStartedClip({ readTicket: state.read.ticket, uri: current.uri })}
         onDecode={(loaded) => setDecodedClip({ readTicket: state.read.ticket, uri: current.uri, loaded })} />
-      {showing && state.kind === "Clip" && !state.editing && <Button
-        variant="ghost" size="icon" className={cn("absolute top-1/2 left-1/2 z-20 size-18 -translate-1/2 rounded-full bg-background/70 font-normal text-foreground hover:bg-background/80", state.playing && !chrome && hiddenChrome)}
-        disabled={!allows({ type: "pause" }) && !allows({ type: "play" }) && !replay}
-        aria-label={state.playing ? "Pause video" : replay ? "Replay video" : "Play video"} onClick={toggle}>
-        {state.playing ? <Pause className="size-7" /> : <Play className="size-7 fill-current" />}
-      </Button>}
       {clipEditor && <ClipEditor duration={state.duration} edit={state.edit} position={state.position} playing={state.playing} status={editStatus}
         onPreview={canEditClip && (allows({ type: "play" }) || allows({ type: "pause" }) || replay) ? toggle : undefined}
         onTrim={canEditClip ? (start, end) => {
@@ -235,42 +253,46 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onBack, back
         onRotate={canEditClip && allows({ type: "rotate" }) ? () => action({ type: "rotate" }) : undefined}
         onCrop={canEditClip && allows({ type: "crop" }) ? () => action({ type: "crop" }) : undefined}
         onRetry={allows({ type: "retryPreview" }) ? () => action({ type: "retryPreview" }) : undefined} />}
-      {state.refusal !== "NoRefusal" && <p role="status" className="px-4 py-2 text-center text-sm">{messages[state.refusal]}</p>}
+      {showRefusal && <div role="status" className="flex shrink-0 items-center justify-center gap-2 px-4 py-2 text-center text-sm">
+        <span>{messages[state.refusal]}</span>
+        <Button variant="ghost" size="sm" onClick={() => setDismissedRefusal(refusalKey)}>Dismiss</Button>
+      </div>}
       {state.save.outcome === "Unknown" && <p role="status" className="px-4 py-2 text-center text-sm">{state.lookup.status === "Loaded" ? state.found ? "Saved copy found" : "No saved copy found" : "Save unconfirmed"}</p>}
       {state.editing && state.kind === "Still" && <div aria-label="Photo edit tools" className="mt-6.5 flex shrink-0 flex-col gap-5 px-4 pb-4 landscape:mt-2 landscape:gap-2">
         <div className="flex items-center justify-center gap-4">
           <Button variant="secondary" size="icon" className={editTool} aria-label="Rotate" disabled={!allows({ type: "rotate" })} onClick={() => action({ type: "rotate" })}><RotateCw /></Button>
           <Button ref={state.kind === "Still" ? cropButton : undefined} variant="secondary" size="icon" aria-label="Crop"
-            aria-pressed={state.edit.cropped} disabled={!allows(crop)} onClick={openCrop}
-            className={state.edit.cropped ? "bg-foreground text-background hover:bg-foreground/90 active:bg-foreground/80" : editTool}><Crop /></Button>
+            aria-pressed={cropActive} disabled={!allows(crop)} onClick={openCrop}
+            className={cropActive ? "bg-foreground text-background hover:bg-foreground/90 active:bg-foreground/80" : editTool}><Crop /></Button>
           {allows({ type: "retryPreview" }) && <Button variant="secondary" onClick={() => action({ type: "retryPreview" })}>Retry preview</Button>}
         </div>
-        <div role="group" aria-label="Photo filters" className="flex gap-3 overflow-x-auto p-0.5">
+        <div role="group" aria-label="Photo filters" className="flex gap-3 overflow-x-auto p-1">
           {filters.map((look) => <Button key={look} variant="ghost" aria-label={look} aria-pressed={state.edit.look === look}
             className="group h-auto min-w-14.5 flex-col gap-2 rounded-xl p-0 text-caption hover:bg-transparent" disabled={state.edit.look !== look && !allows({ type: "restyle", look })} onClick={() => action({ type: "restyle", look })}>
-            <span className="relative size-14.5 overflow-hidden rounded-xl bg-secondary group-aria-pressed:outline-focus">
-              {swatchSource && <img src={swatchSource} alt="" className="absolute inset-0 size-full object-cover" style={{ filter: photoLooks[photoLook(look)] }} />}
+            <span className="relative size-14.5 overflow-hidden rounded-xl bg-secondary group-aria-pressed:outline-solid group-aria-pressed:outline-focus group-aria-pressed:outline-foreground">
+              {swatchSource && <img src={swatchSource} alt="" className="absolute inset-0 size-full object-cover" style={{ filter: photoLooks[photoLook(look)], transform: `rotate(${state.edit.turns * 90}deg)` }} />}
             </span>
             <span className={state.edit.look === look ? "text-foreground" : "text-muted-foreground"}>{look}</span>
           </Button>)}
         </div>
       </div>}
-      {!state.editing && showing && <div role="toolbar" aria-label="Photo controls" className={cn("relative flex shrink-0 justify-around gap-0.5 px-4 pt-2 pb-5", !chrome && hiddenChrome)}>
-        {state.kind === "Clip" && <div className="absolute inset-x-4 bottom-27.5 z-10 rounded-xl bg-background/80 p-3 text-sm">
-          <label htmlFor={positionId}>Video position</label>
-          <Input id={positionId} type="range" className="block rounded-none border-0 bg-transparent px-0 text-sm accent-foreground disabled:opacity-100" min={0} max={state.duration} value={state.position}
-            aria-valuetext={`${clipTime(state.position)} of ${clipTime(state.duration)}`} disabled={!clipReady} onChange={(event) => seek(event.currentTarget.valueAsNumber)} />
-          <div className="flex items-center gap-3">
-            <span aria-live="off" className="flex-1 tabular-nums">{clipTime(state.position)} / {clipTime(state.duration)}</span>
-            {allows({ type: "toggleMute" }) && <Button variant="ghost" className="h-12 rounded-full bg-foreground/15 px-4 font-normal disabled:opacity-100" aria-pressed={state.muted} disabled={!clipReady}
-              onClick={() => action({ type: "toggleMute" })}>{state.muted ? "Unmute video" : "Mute video"}</Button>}
-          </div>
-        </div>}
-        {before !== undefined && <Button className="sr-only focus:not-sr-only" variant="ghost" size="icon" aria-label="Previous photo" onClick={() => action({ type: "swipe", neighbour: before })}><ChevronLeft /></Button>}
+      {!state.editing && showing && state.kind === "Clip" && <div className={cn("mx-4 mb-2 shrink-0 rounded-xl bg-background/80 p-3 text-sm motion-safe:transition-opacity", !chrome && hiddenChrome)}>
+        <label htmlFor={positionId} className="sr-only">Video position</label>
+        <Slider id={positionId} aria-label="Video position" min={0} max={Math.max(1, state.duration)} step={1} value={state.position}
+          aria-valuetext={`${clipTime(state.position)} of ${clipTime(state.duration)}`} disabled={!canSeekClip}
+          onValueChange={(value) => seek(value)} />
+        <div className="flex items-center gap-3">
+          <span aria-live="off" className="flex-1 tabular-nums">{clipTime(state.position)} / {clipTime(state.duration)}</span>
+          {allows({ type: "toggleMute" }) && <Button variant="ghost" className="h-11 rounded-full bg-foreground/15 px-4 font-normal" aria-pressed={state.muted}
+            onClick={() => action({ type: "toggleMute" })}>{state.muted ? "Unmute video" : "Mute video"}</Button>}
+        </div>
+      </div>}
+      {!state.editing && showing && <div role="toolbar" aria-label="Photo controls" className={cn("relative flex shrink-0 justify-around gap-0.5 px-4 pt-2 pb-5 motion-safe:transition-opacity", !chrome && hiddenChrome)}>
+        {before !== undefined && allows({ type: "swipe", neighbour: before }) && <Button className="sr-only focus:not-sr-only" variant="ghost" size="icon" aria-label="Previous photo" onClick={() => action({ type: "swipe", neighbour: before })}><ChevronLeft /></Button>}
         {!inTrash && control(state.favourite ? "Remove from favorites" : "Favorite", { type: "toggleFavourite" }, <Heart className={state.favourite ? "fill-current" : undefined} />)}
         {!inTrash && allows({ type: "startEdit" }) && <Button variant="ghost" size="icon" aria-label={state.kind === "Clip" ? "Edit video" : "Edit"} onClick={() => editAction({ type: "startEdit" })}><Pencil /></Button>}
         {control("Info", { type: "toggleInfo" }, <Info />)}
-        {after !== undefined && <Button className="sr-only focus:not-sr-only" variant="ghost" size="icon" aria-label="Next photo" onClick={() => action({ type: "swipe", neighbour: after })}><ChevronRight /></Button>}
+        {after !== undefined && allows({ type: "swipe", neighbour: after }) && <Button className="sr-only focus:not-sr-only" variant="ghost" size="icon" aria-label="Next photo" onClick={() => action({ type: "swipe", neighbour: after })}><ChevronRight /></Button>}
       </div>}
       <Sheet open={state.info} onOpenChange={(open) => { if (!open) action({ type: "toggleInfo" }); }}>
         <SheetContent title={name} actions={onAddToAlbum && <Button variant="secondary" onClick={onAddToAlbum}><Album />Add to album</Button>}>
@@ -296,18 +318,20 @@ interface ViewportProps {
   readonly action: (event: Event) => void;
   readonly allows: (event: Event) => boolean;
   readonly attachVideo: RefCallback<HTMLVideoElement>;
-  readonly played: () => void;
+  readonly played: (ended?: boolean) => void;
+  readonly playOverlay?: ReactNode;
   readonly onPlaybackStarted: () => void;
   readonly onDecode: (loaded: boolean) => void;
 }
 
 /** The media area that turns pointer and keyboard input into viewer events. */
-function MediaViewport({ state, current, name, showing, editedImage, before, after, action, allows, attachVideo, played, onPlaybackStarted, onDecode }: ViewportProps) {
+function MediaViewport({ state, current, name, showing, editedImage, before, after, action, allows, attachVideo, played, playOverlay, onPlaybackStarted, onDecode }: ViewportProps) {
   const imageRef = useRef<HTMLImageElement>(null);
   const dragRef = useRef<PanGesture | undefined>(undefined);
   const pointRef = useRef<{ readonly x: number; readonly y: number } | undefined>(undefined);
   const pointersRef = useRef(new Map<number, { readonly x: number; readonly y: number }>());
   const pinchRef = useRef<{ readonly level: number; readonly distance: number } | undefined>(undefined);
+  const lastTapRef = useRef<{ readonly time: number; readonly x: number; readonly y: number } | undefined>(undefined);
 
   const source = current.item ?? current.browser?.item;
   const photoRatio = source && source.width > 0 && source.height > 0 ? source.width / source.height : undefined;
@@ -326,6 +350,12 @@ function MediaViewport({ state, current, name, showing, editedImage, before, aft
   }
   function pointerDown(event: PointerEvent<HTMLElement>) {
     if (event.button !== 0) return;
+    if (event.target instanceof Element && event.target.closest("button, a, input, [role='button'], [role='slider']")) return;
+    try {
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    } catch {
+      return;
+    }
     const point = { x: event.clientX, y: event.clientY };
     pointersRef.current.set(event.pointerId, point);
     if (pointersRef.current.size === 1) {
@@ -344,7 +374,6 @@ function MediaViewport({ state, current, name, showing, editedImage, before, aft
       if (a && b) pinchRef.current = { level: state.zoom, distance: Math.hypot(a.x - b.x, a.y - b.y) };
       pointRef.current = undefined;
     }
-    event.currentTarget.setPointerCapture(event.pointerId);
   }
   function pointerMove(event: PointerEvent<HTMLElement>) {
     if (!pointersRef.current.has(event.pointerId)) return;
@@ -366,6 +395,7 @@ function MediaViewport({ state, current, name, showing, editedImage, before, aft
     if (state.zoom !== level) action({ type: "zoomTo", level });
   }
   function pointerEnd(event: PointerEvent<HTMLElement>) {
+    if (!pointersRef.current.has(event.pointerId)) return;
     pointersRef.current.delete(event.pointerId);
     if (pointersRef.current.size === 0) pinchRef.current = undefined;
     const from = pointRef.current;
@@ -375,14 +405,27 @@ function MediaViewport({ state, current, name, showing, editedImage, before, aft
     const tap = from !== undefined && Math.hypot(x, y) <= 8;
     finishPan(!cancelled && !tap);
     if (!from || cancelled) return;
-    if (tap) { action({ type: "toggleChrome" }); return; }
+    if (tap) {
+      if (event.pointerType === "touch") {
+        const previous = lastTapRef.current;
+        if (previous !== undefined && event.timeStamp - previous.time <= 320 && Math.hypot(event.clientX - previous.x, event.clientY - previous.y) <= 32) {
+          lastTapRef.current = undefined;
+          action({ type: "zoomTo", level: state.zoom > 1 ? 1 : 2 });
+          return;
+        }
+        lastTapRef.current = { time: event.timeStamp, x: event.clientX, y: event.clientY };
+      }
+      action({ type: "toggleChrome" });
+      return;
+    }
+    lastTapRef.current = undefined;
     if (state.zoom !== 1 || Math.abs(x) <= Math.abs(y) || Math.abs(x) < 48) return;
     const neighbour = x < 0 ? after : before;
     if (neighbour !== undefined) action({ type: "swipe", neighbour });
   }
   return (
     <>
-      <div className={cn("relative flex min-h-0 touch-none items-center justify-center overflow-hidden [container-type:size]", state.editing && state.kind === "Still" ? editFrame : "flex-1", state.editing && state.kind === "Clip" && "min-h-25 bg-background")}
+      <div className={cn(focusRing, "relative flex min-h-0 touch-none items-center justify-center overflow-hidden [container-type:size] focus-visible:-outline-offset-2", state.editing && state.kind === "Still" ? editFrame : "flex-1", state.editing && state.kind === "Clip" && "min-h-25 bg-background")}
         onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerEnd} onPointerCancel={pointerEnd} onLostPointerCapture={pointerEnd}
         role="group" aria-label="Photo viewer" aria-describedby="alpha-photo-viewer-keys" tabIndex={0}
         onKeyDown={(event) => {
@@ -412,7 +455,7 @@ function MediaViewport({ state, current, name, showing, editedImage, before, aft
                 state.editing && videoRatio === undefined && "size-full")}
                 style={videoRatio === undefined ? undefined : { width: `min(100cqw, calc(100cqh * ${videoRatio}))`, aspectRatio: videoRatio }}>
                 <video ref={attachVideo} key={state.open} src={current.uri} poster={current.item?.image ?? current.browser?.item.thumbnail}
-                  muted={state.muted} playsInline preload={state.editing ? "metadata" : "none"} onPlaying={onPlaybackStarted} onLoadedData={() => onDecode(true)} onError={() => onDecode(false)} onTimeUpdate={played} onEnded={played}
+                  muted={state.muted} playsInline preload="metadata" onPlaying={onPlaybackStarted} onLoadedData={() => onDecode(true)} onError={() => onDecode(false)} onTimeUpdate={() => played(false)} onEnded={() => played(true)}
                   className={videoRatio === undefined ? "size-full object-contain" : "absolute top-1/2 left-1/2 max-w-none object-fill"}
                   style={videoRatio === undefined ? undefined : { width: `${sideways ? videoScale / videoRatio : videoScale}%`, height: `${sideways ? videoScale * videoRatio : videoScale}%`, transform: `translate(-50%, -50%) rotate(${state.edit.turns * 90}deg)` }} />
                 {!state.editing && state.playing && state.duration > 0 && <span aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-0.75 bg-foreground/25">
@@ -421,10 +464,15 @@ function MediaViewport({ state, current, name, showing, editedImage, before, aft
               </div>
             </div>
           : !state.editing && photoRatio !== undefined
-            ? <img ref={imageRef} src={current.uri} alt={name} draggable={false} decoding="async"
+            ? <img key={state.open} ref={imageRef} src={current.uri} alt={name} draggable={false} decoding="async"
               className="pointer-events-none absolute top-1/2 left-1/2 max-w-none object-contain"
               style={{ width: `min(100cqw, calc(100cqh * ${photoRatio}))`, aspectRatio: photoRatio, transform: imageTransform(state.zoom, state.pan) }} />
-            : <img src={editedImage ?? current.uri} alt={name} draggable={false} decoding="async" className="size-full object-contain" style={{ transform: `scale(${state.zoom})` }} />)}
+            : !state.editing
+              ? <img key={state.open} ref={imageRef} src={current.uri} alt={name} draggable={false} decoding="async"
+                className="pointer-events-none absolute top-1/2 left-1/2 size-full max-w-none object-contain"
+                style={{ transform: imageTransform(state.zoom, state.pan) }} />
+              : <img key={state.open} src={editedImage ?? current.uri} alt={name} draggable={false} decoding="async" className="size-full object-contain" style={{ transform: `scale(${state.zoom})` }} />)}
+        {playOverlay}
         {state.gone && <p role="status">This item is no longer available.</p>}
         {state.read.status === "Loading" && <span role="status" aria-label="Loading photo">…</span>}
         {allows({ type: "reload" }) && <Button variant="secondary" onClick={() => action({ type: "reload" })}>Try again</Button>}

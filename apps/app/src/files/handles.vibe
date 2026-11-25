@@ -82,7 +82,8 @@ export const handles = Layer.effect(Handles, effect {
       const named = names.get(handle)
       if (named !== undefined) return Option.some(named)
       const spot = spots[handle - 1]
-      return spot === undefined ? Option.none<string>() : Option.some(spot.path.slice(spot.path.lastIndexOf("/") + 1))
+      if (spot === undefined || spot.path === "") return Option.none<string>()
+      return Option.some(spot.path.slice(spot.path.lastIndexOf("/") + 1))
     }),
   }
 })

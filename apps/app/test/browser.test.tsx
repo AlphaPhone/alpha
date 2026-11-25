@@ -186,4 +186,38 @@ describe("The Browser on a phone", () => {
     await press("Clear");
     await until(alpha, runtime, Tabs, (s) => s.erasing === "Kept" && s.privates.length === 1 && s.kept.length === 0);
   });
+
+  it("Hides the native page while Clear browsing data is open and updates Find match index reactively (spec/app/browser/index.md, \"Story: Clear all browsing data\"; spec/app/browser/address.md, \"Story: Find in page\")", async () => {
+    const { alpha, runtime, world } = await onBrowser();
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    await go("news.example/on-device-agents");
+    const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
+    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
+    await until(alpha, page, Page, (p) => p.phase === "Shown");
+
+    const place = document.querySelector<HTMLElement>("[data-alpha-browser-page]");
+    if (!place) throw new Error("browser page place is missing");
+    place.getBoundingClientRect = () => new DOMRect(0, 52, 390, 680);
+
+    await press("Menu");
+    await press("Find in page");
+    await until(alpha, page, Page, (p) => p.finding);
+    await fill("Find in page", "agent");
+    await until(alpha, page, Page, (p) => p.find.status === "Loaded" && p.matches > 1);
+    const findStatus = () => document.querySelector("[role='search'][aria-label='Find in page'] [role='status']")?.textContent;
+    await expect.poll(findStatus).toMatch(/^1 of \d+$/);
+    await press("Next match");
+    await expect.poll(findStatus).toMatch(/^2 of \d+$/);
+    await press("Close find in page");
+    await until(alpha, page, Page, (p) => !p.finding);
+
+    await expect.poll(() => world.browser.shown?.id).toBe(`tab${tab}`);
+    await press("Menu");
+    await press("Clear all browsing data");
+    await until(alpha, runtime, Tabs, (s) => s.erasing === "Asked");
+    await expect.poll(() => world.browser.shown).toBeUndefined();
+    await press("Cancel");
+    await until(alpha, runtime, Tabs, (s) => s.erasing === "Kept");
+    await expect.poll(() => world.browser.shown?.id).toBe(`tab${tab}`);
+  });
 });

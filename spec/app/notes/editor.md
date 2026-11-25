@@ -548,11 +548,11 @@ phone could not read comes back unreadable.
 ```quint
 pure def canDraftFound(e: Editor, note: int, made: int, kind: Kind, base: int, edits: int, folder: int, link: Source, readable: bool, by: Actor): bool =
   by == Phone and not(held(e)) and not(e.showing) and isOwner(e.owner) and writable(kind) and edits > 0
-    and note >= 0 and ((note == 0) iff (base == 0)) and ((note == 0) iff (made > 0)) and made <= e.issued
+    and note >= 0 and made >= 0 and ((note == 0) iff (base == 0)) and ((note == 0) iff (made > 0))
     and base >= 0 and folder >= 0 and (folder > 0 implies note == 0) and sound(link) and link.tie != AudioLink
 
 pure def draftFound(e: Editor, note: int, made: int, kind: Kind, base: int, edits: int, folder: int, link: Source, readable: bool, by: Actor): Editor =
-  { ...letGo(e.owner, e), note: note, fresh: note == 0, made: made, folder: folder, kind: kind, link: link,
+  { ...letGo(e.owner, e), note: note, fresh: note == 0, made: made, issued: if (made > e.issued) made else e.issued, folder: folder, kind: kind, link: link,
     unreadable: not(readable), draft: { sync: D::Edited, edits: edits, carried: 0, base: base } }
 ```
 

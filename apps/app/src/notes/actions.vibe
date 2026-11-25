@@ -16,7 +16,7 @@ import { downloadText } from "../platform/noteDocuments.vibe"
 import type { Agent } from "../platform/agent.vibe"
 import { NoteStore } from "../platform/notes.vibe"
 import { ownerAt } from "../platform/owner.vibe"
-import { type Job, reacting, run, untimed } from "../runtime/reactor.vibe"
+import { type Job, following, reacting, run, together, untimed } from "../runtime/reactor.vibe"
 import { type NotesSelection, savedVoiceRecord } from "./selection.vibe"
 import { NoteContent, numberOf } from "./content.vibe"
 
@@ -43,7 +43,7 @@ effect function share(fx: Extract<Actions.Effect, { readonly tag: "Hands" }>): v
   const editor = try (try Editor).get()
   const current = try (try NoteContent).collection()
   const shell = try (try Shell).get()
-  if (!showing(shell, "Notes") || !editor.showing || editor.deleting || editor.draft.sync !== "Kept" || editor.note !== fx.note || editor.link.tie !== "NoLink") return
+  if (!showing(shell, "Notes") || !editor.showing || editor.deleting || editor.draft.sync !== "Kept" || editor.note !== fx.note) return
   const identity = ownerAt() catch () => ""
   if (identity === "" || identity !== current.owner || editor.owner !== numberOf("owner", identity)) return
   const snapshot = (try NoteStore).read() catch () => undefined
@@ -91,4 +91,6 @@ function carry(fx: Actions.Effect): Job<Actions.Event, Scope, [Actor]> {
   }
 }
 
-export const actions = reacting(Actions, { carry })
+const closeWithEditor = following(Editor, (editor) => editor.showing, Actions.Machine, (shown): Actions.Event | undefined => shown ? undefined : { type: "closeMenu" }, "Owner")
+
+export const actions = together(reacting(Actions, { carry }), closeWithEditor)

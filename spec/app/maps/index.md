@@ -260,7 +260,9 @@ pure def goBack(m: Maps): Stepped =
         copyNotice: Uncopied, copying: false, fromEvent: 0, startPlace: 0, origins: cleared(m.origins), originsFound: 0 },
       out: List(OpenEvent({ meeting: m.fromEvent })) }
   else if (m.directions)
-    { state: { ...dropped, directions: false, link: withoutFinder(m.link), origins: cleared(m.origins), originsFound: 0, guideNotice: Quiet, quiet: false },
+    { state: { ...dropped, directions: false, link: withoutFinder(m.link),
+        trip: { ...m.trip, plan: N::withdrawn(m.trip.plan) },
+        origins: cleared(m.origins), originsFound: 0, guideNotice: Quiet, quiet: false },
       out: finderStops(m.link) }
   else if (m.place != 0)
     { state: { ...dropped, place: 0, details: cleared(m.details), trip: N::forgetRoute(m.trip), sheet: if (m.searching) Full else Peek,
@@ -570,7 +572,7 @@ pure def canForgetPlace(m: Maps): bool = S::isSaved(m.saved, m.place) and m.keep
 
 pure def forgetPlace(m: Maps): Stepped =
   val saved = S::forgotten(m.saved, m.place)
-  { state: { ...m, saved: saved, notice: NoNotice }, out: List(KeepSaved({ saved: saved, change: Removed })) }
+  { state: { ...m, saved: saved, notice: NoNotice, copying: false, renaming: false }, out: List(KeepSaved({ saved: saved, change: Removed })) }
 ```
 
 ### A saved place is renamed in a name field the owner opens on its card
@@ -717,7 +719,7 @@ only while Maps shows it: leaving Maps or another account forgets them.
 
 ```quint
 pure def canReadDetails(m: Maps, place: int): bool =
-  place > 0 and place == m.place and C::working(m.link) and not(C::holding(m.link)) and m.details.status == R::Idle
+  place > 0 and place == m.place and onScreen(m) and C::working(m.link) and not(C::holding(m.link)) and m.details.status == R::Idle
 
 pure def readDetails(m: Maps, place: int): Stepped =
   val asked = R::ask(m.details)
@@ -832,7 +834,10 @@ pure def answerRoute(m: Maps, ticket: int, ok: bool, turns: int, routes: int): M
   val trip = N::answerRoute(m.trip, ticket, ok, turns)
   val review = if (trip.route != m.trip.route) V::revise(m.review) else m.review
   val answered = if (ok) { ...m, alternatives: routes, chosen: 0 } else m
-  { ...answered, trip: trip, review: if (m.question == StartTrip and ok) V::present(review) else review }
+  val clearQuestion = not(ok) and m.question == StartTrip
+  { ...answered, trip: trip,
+    question: if (clearQuestion) NoQuestion else m.question,
+    review: if (m.question == StartTrip and ok) V::present(review) else if (clearQuestion) V::dismiss(review) else review }
 ```
 
 ### The provider's routes are listed in order, and choosing one shows it and sends no new request
@@ -922,7 +927,7 @@ pure def canSwapEnds(m: Maps, lat: int, lng: int): bool =
 
 pure def swapEnds(m: Maps, lat: int, lng: int): Stepped =
   val turned = { ...m, place: m.startPlace, details: cleared(m.details), question: NoQuestion, review: voided(m.review),
-    copyNotice: Uncopied, trip: N::forgetRoute(m.trip) }
+    copyNotice: Uncopied, copying: false, trip: N::forgetRoute(m.trip) }
   val planned = planFrom(turned, N::SomePlace, lat, lng)
   { ...planned, state: { ...planned.state, startPlace: m.place } }
 
@@ -951,7 +956,7 @@ pure def startGuidance(m: Maps): Stepped =
   val trip = N::startGuidance(m.trip)
   { state: { ...m, link: link, trip: trip, sheet: Peek, question: NoQuestion, review: V::dismiss(m.review),
       following: true, guideNotice: Quiet, origins: cleared(m.origins), originsFound: 0, imprecise: false, quiet: false },
-    out: List(StartLocation({ session: link.session, once: false }), GuideWithScreenOff({ journey: trip.journey })) }
+    out: finderStops(m.link).concat(List(StartLocation({ session: link.session, once: false }), GuideWithScreenOff({ journey: trip.journey }))) }
 
 pure def stepGuidanceStartsOnTheRouteShown(before: Maps, via: str, after: Maps): bool =
   (before.trip.guidance == N::Stopped and after.trip.guidance == N::Going) implies
@@ -1065,7 +1070,10 @@ failure says nothing.
 pure def canFindTimedOut(m: Maps, session: int): bool = C::canGiveUp(m.link, session)
 
 pure def findTimedOut(m: Maps, session: int): Stepped =
-  { state: { ...m, link: C::giveUp(m.link, session), quiet: false, missedFix: not(m.quiet) }, out: List(StopLocation) }
+  val clearQuestion = m.question == StartTrip
+  { state: { ...m, link: C::giveUp(m.link, session), quiet: false, missedFix: not(m.quiet),
+      question: if (clearQuestion) NoQuestion else m.question,
+      review: if (clearQuestion) V::dismiss(m.review) else m.review }, out: List(StopLocation) }
 
 pure def stepTheQuietFixFailsSilently(before: Maps, via: str, after: Maps): bool =
   (via == "findTimedOut" and before.quiet) implies not(after.missedFix)
@@ -1083,8 +1091,11 @@ pure def canLocationLost(m: Maps, session: int): bool = C::canTakeFix(m.link, se
 
 pure def locationLost(m: Maps, session: int): Stepped =
   val guided = m.link.locator == C::Guide
+  val clearQuestion = m.question == StartTrip
   { state: { ...m, link: C::stopLocating(m.link), trip: if (guided) N::endGuidance(m.trip) else m.trip,
-      sheet: if (guided) Half else m.sheet, quiet: false, imprecise: false },
+      sheet: if (guided) Half else m.sheet, quiet: false, imprecise: false,
+      question: if (clearQuestion) NoQuestion else m.question,
+      review: if (clearQuestion) V::dismiss(m.review) else m.review },
     out: if (guided) List(StopGuidance) else List() }
 
 pure def stepLosingTheLocationEndsWhatHeldIt(before: Maps, via: str, after: Maps): bool =
@@ -1166,7 +1177,7 @@ pure def leaveMaps(m: Maps): Stepped =
   val link = C::releaseMap(if (ended) C::stopLocating(m.link) else withoutFinder(m.link))
   { state: { ...m, trip: kept, link: link,
       fromEvent: 0, sheet: if (ended) Half else m.sheet, guideNotice: if (ended) PausedAway else m.guideNotice,
-      search: N::withdrawn(m.search), details: N::withdrawn(m.details), origins: N::withdrawn(m.origins),
+      search: N::withdrawn(m.search), details: cleared(m.details), origins: N::withdrawn(m.origins),
       pausing: false, quiet: false, quietDone: false, imprecise: false },
     out: (if (ended) List(StopGuidance) else finderStops(m.link)).concat(drawn(m.link, link)) }
 
@@ -1295,14 +1306,15 @@ pure def canChangeAccount(m: Maps, account: int): bool = C::canChangeAccount(m.l
 
 pure def changeAccount(m: Maps, account: int): Stepped =
   val guided = m.link.locator == C::Guide
-  val link = C::changeAccount(if (guided) C::stopLocating(m.link) else m.link, account)
+  val finder = m.link.locator == C::Finder
+  val link = C::changeAccount(if (guided or finder) C::stopLocating(m.link) else m.link, account)
   { state: { ...m, link: link, trip: N::retireTrip(m.trip), searching: false, query: "",
       search: cleared(m.search), results: 0, recent: List(), place: 0, details: cleared(m.details), directions: false, sheet: Peek,
       copyNotice: Uncopied, startPlace: 0, origins: cleared(m.origins), originsFound: 0, typing: "", pausing: false,
       following: false, guideNotice: if (guided) AccountChanged else Quiet, waitingProvider: false, copying: false,
       renaming: false, imprecise: false, quiet: false,
       question: NoQuestion, review: voided(m.review), pinning: false, pressing: false },
-    out: (if (guided) List(StopGuidance) else List())
+    out: (if (guided) List(StopGuidance) else if (finder) List(StopLocation) else List())
       .concat(if (link.account != 0) List(ReadCoverage({ ticket: link.coverage.ticket })) else List())
       .concat(drawn(m.link, link)) }
 ```
@@ -1482,13 +1494,14 @@ pure def stepSettingsOnlyAfterNo(before: Maps, after: Maps, out: List[Effect]): 
 pure def observeLocation(m: Maps, grant: P::Grant): Stepped =
   val link = C::observeLocation(m.link, grant)
   val lost = m.link.locator == C::Guide and link.locator == C::Nobody
+  val finderLost = m.link.locator == C::Finder and link.locator == C::Nobody
   val allowed = m.owedLocate and P::allows(link.location)
   val now = allowed and onScreen(m) and not(lost) and C::canLocate(link, C::Finder)
   val found = C::locate(link, C::Finder)
   { state: { ...m, link: if (now) found else link, trip: if (lost) N::endGuidance(m.trip) else m.trip,
       sheet: if (lost) Half else m.sheet, owedLocate: allowed and not(now), quiet: if (now) false else m.quiet and link.locator == C::Finder,
       imprecise: if (lost) false else m.imprecise },
-    out: (if (lost) List(StopGuidance) else List())
+    out: (if (lost) List(StopGuidance) else if (finderLost) List(StopLocation) else List())
       .concat(if (now) List(StartLocation({ session: found.session, once: true })) else List()) }
 
 pure def alwaysALocateOwedWasAsked(m: Maps): bool = m.owedLocate implies m.link.disclosed

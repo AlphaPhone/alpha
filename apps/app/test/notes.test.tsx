@@ -15,8 +15,9 @@ import { Views } from "../src/assistant/views.vibe";
 import home from "../src/home/index.tsx";
 import { agentOpen } from "../src/notes/agent.vibe";
 import notes from "../src/notes/index.tsx";
+import { clock, dated, preview } from "../src/notes/present.ts";
 import { untimed } from "../src/runtime/reactor.vibe";
-import { button, closeAll, drawn, fill, hardware, only, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { note, prepared } from "./fakes/notes.ts";
 import { type Scene, scene } from "./fakes/scene.ts";
 
@@ -271,9 +272,10 @@ describe("Notes", () => {
     await until(alpha, runtime, Shell, (state) => state.assistant === "Sheet");
     expect(button("Remove Design sync")).toBeDefined();
     expect(document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']")?.value).toBe(question);
-    await until(alpha, runtime, Conversation, (state) => state.ready && state.context.selected);
+    await until(alpha, runtime, Conversation, (state) => state.ready && state.observing && state.context.selected);
+    await rendered(() => expect(button("Send")?.disabled).toBe(false));
     await press("Send");
-    await drawn(() => vi.waitFor(() => expect(world.ask.said).toEqual([`Use the transcript of the selected voice note to answer this question.\n\n${question}`])));
+    await rendered(() => expect(world.ask.said).toEqual([`Use the transcript of the selected voice note to answer this question.\n\n${question}`]));
     expect(world.ask.metadata[0]).toMatchObject({
       observation: { view: "notes", selectedObject: { kind: "canonical-note", id: "sync", revision: String(world.notes.revision) } },
     });
@@ -471,5 +473,48 @@ describe("Notes", () => {
       const editor = await alpha.runtime.runPromise(Editor.use((machine) => machine.get()));
       expect([showing(shell, "Notes"), editor.showing, editorTitle()]).toEqual([true, true, "shopping list"]);
     });
+  });
+
+  it("Keeps editor input mounted across first autosave, deletes a voice note from More, and closes open views when leaving Notes (spec/app/notes/editor.md, \"Story: Write a note\"; spec/app/notes/voice.md, \"Story: Leave a voice note\")", async () => {
+    const world = scene();
+    const { alpha, runtime } = await openNotesFromHome(world);
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+
+    await control("New note");
+    await press("New note");
+    await until(alpha, runtime, Editor, (state) => state.showing && state.note === 0);
+    const titleInput = document.querySelector<HTMLInputElement>("input[aria-label='Title']");
+    expect(titleInput).not.toBeNull();
+    titleInput?.focus();
+    await fill("Title", "Stable draft");
+    await later(alpha, 700);
+    await until(alpha, runtime, Editor, (state) => state.note > 0 && state.draft.sync === "Kept");
+    expect(document.querySelector<HTMLInputElement>("input[aria-label='Title']")).toBe(titleInput);
+    expect(editorTitle()).toBe("Stable draft");
+
+    await hardware("home");
+    await until(alpha, runtime, Editor, (state) => !state.showing);
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Notes" }))));
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+
+    await control("Open Design sync");
+    await press("Open Design sync");
+    await until(alpha, runtime, Voice, (state) => state.showing);
+    await control("More");
+    await drawn(() => button("More")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+    const deleteItem = () => [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((item) => item.textContent?.trim() === "Delete");
+    await rendered(() => expect(deleteItem()?.getAttribute("aria-disabled")).toBeNull());
+    await drawn(() => deleteItem()?.click());
+    await rendered(() => expect(world.notes.trash.some((entry) => entry.note.id === "sync")).toBe(true));
+    await until(alpha, runtime, Voice, (state) => !state.showing);
+  });
+
+  it("Guards non-finite durations and invalid timestamps when presenting notes (spec/app/notes/index.md, \"Story: See my notes\")", () => {
+    expect(clock(Number.NaN)).toBe("0:00");
+    expect(clock(-5)).toBe("0:00");
+    expect(clock(65)).toBe("1:05");
+    const bad = { ...note("bad", "", "", 0), updatedAt: "not-a-date" };
+    expect(dated(bad, Date.now())).toBe("");
+    expect(preview(bad)).toBe("");
   });
 });

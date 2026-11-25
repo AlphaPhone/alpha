@@ -7,6 +7,7 @@ import * as Assistant from "../../gen/app__photos__agent.effect.vibe"
 import * as Viewer from "../../gen/app__photos__viewer.effect.vibe"
 import * as Changes from "../../gen/app__photos__changes.effect.vibe"
 import { PhotosPort } from "../platform/photos.vibe"
+import { say } from "../notices/toasts.vibe"
 import { reacting, run, started, together, type Job } from "../runtime/reactor.vibe"
 import { Catalog, type Row } from "./catalog.vibe"
 
@@ -52,7 +53,7 @@ effect function read(op: Extract<Operation, { type: "photo_library_search" | "ph
   const narrowing: Assistant.Narrowing = inspect ? "AllItems" : op.favorites === true ? "FavouritesOnly"
     : op.favorites === false ? "NotFavourites" : op.kind === "image" ? "StillsOnly" : op.kind === "video" ? "VideosOnly" : "AllItems"
   const { rows: indexed } = try (try Catalog).displayed()
-  const requestedPhoto = id === undefined ? undefined : handle(id, current.rows, indexed)
+  const requestedPhoto = id === undefined ? undefined : (handle(id, current.rows, indexed) ?? indexedHandle(id, indexed))
   if (inspect && requestedPhoto === undefined) return undefined
   const fields = { columns: [...Assistant.sharedFields], allowed: true, secure: false }
   const wanted: Assistant.Event = inspect
@@ -85,6 +86,11 @@ function handle(id: string, rows: readonly number[], indexed: ReadonlyMap<number
   return rows.find((number) => indexed.get(number)?.item.id === id)
 }
 
+function indexedHandle(id: string, indexed: ReadonlyMap<number, Row>): number | undefined {
+  for (const [number, row] of indexed) if (row.item.id === id) return number
+  return undefined
+}
+
 /** Execute a phone proposal the shared coordinator has authorized; destructive/share proposals only show a Photos review. */
 export effect function photoAction(input: DeviceOperation): (Receipt | undefined)!!(PhotosPort | Catalog | Library.Machine | Viewer.Machine | Assistant.Machine) {
   const library = try Library.Machine
@@ -99,21 +105,27 @@ export effect function photoAction(input: DeviceOperation): (Receipt | undefined
     case "photos_open": {
       const number = handle(input.id, now.rows, rows)
       if (number === undefined) return undefined
-      const sent = try exit(viewer.send({ type: "openItem", photo: number, listed: true, secure: false, only: [], reviewing: false, origin: "LibraryItem" }, "Agent"))
+      const reviewing = (try (try Assistant.Machine).get()).stage === "Shown"
+      const sent = try exit(viewer.send({ type: "openItem", photo: number, listed: true, secure: false, only: [], reviewing, origin: "LibraryItem" }, "Agent"))
       if (!Exit.isSuccess(sent)) return undefined
       const ticket = sent.value.state.read.ticket
-      const response = try Stream.runHead(Stream.filter(viewer.changes, (state) => state.read.ticket !== ticket || state.read.status !== "Loading" || state.open !== number))
+      const waited = try Effect.timeoutOption(
+        Stream.runHead(Stream.filter(viewer.changes, (state) => state.read.ticket !== ticket || state.read.status !== "Loading" || state.open !== number)),
+        "10 seconds",
+      )
+      const response = Option.flatten(waited)
       return Option.isSome(response) && response.value.read.ticket === ticket && response.value.read.status === "Loaded" && response.value.open === number
         ? { kind: "photos_open", opened: true } : undefined
     }
     case "photo_library_select": {
-      const selected = input.ids.flatMap((id) => {
+      const uniqueIds = [...new Set(input.ids)]
+      const selected = [...new Set(uniqueIds.flatMap((id) => {
         const number = handle(id, now.rows, rows)
         return number === undefined ? [] : [number]
-      })
-      if (selected.length === 0) return { kind: "photo_library_select", selected: 0, missing: input.ids.length }
+      }))]
+      if (selected.length === 0) return { kind: "photo_library_select", selected: 0, missing: uniqueIds.length }
       const result = try exit(library.send({ type: "agentSelect", items: selected }, "Agent"))
-      return Exit.isSuccess(result) ? { kind: "photo_library_select", selected: selected.length, missing: input.ids.length - selected.length } : undefined
+      return Exit.isSuccess(result) ? { kind: "photo_library_select", selected: selected.length, missing: uniqueIds.length - selected.length } : undefined
     }
     case "photos_filter": {
       if (input.favorite === false || input.kind === "image" || input.from !== undefined || input.to !== undefined) return undefined
@@ -121,28 +133,57 @@ export effect function photoAction(input: DeviceOperation): (Receipt | undefined
       if (requested > 1) return undefined
       if (input.album !== undefined) return undefined
       const narrowing = input.favorite === true ? "Favorites" : input.kind === "video" ? "Videos" : input.text ? "Matching" : "Everything"
-      const selected = try exit(library.send({ type: "narrow", narrowing, query: input.text ?? "", person: 0 }, "Agent"))
+      const query = input.text ?? ""
+      if (now.tab === "Library" && now.filter === narrowing && now.query === query && now.person === 0) {
+        return { kind: "photos_filter", shown: now.rows.length, more: now.more }
+      }
+      const selected = try exit(library.send({ type: "narrow", narrowing, query, person: 0 }, "Agent"))
       if (!Exit.isSuccess(selected)) return undefined
       const ticket = selected.value.state.library.ticket
-      const response = try Stream.runHead(Stream.filter(library.changes, (state) => state.library.ticket !== ticket || state.library.status !== "Loading" || !state.visible))
+      const waited = try Effect.timeoutOption(
+        Stream.runHead(Stream.filter(library.changes, (state) => state.library.ticket !== ticket || state.library.status !== "Loading" || !state.visible)),
+        "10 seconds",
+      )
+      const response = Option.flatten(waited)
       return Option.isSome(response) && response.value.visible && response.value.library.ticket === ticket && response.value.library.status === "Loaded"
         ? { kind: "photos_filter", shown: response.value.rows.length, more: response.value.more } : undefined
     }
     case "photo_library_review":
     case "photos_album_create":
     case "photos_share": {
+      if (!Library.still(now)) return undefined
       const view = try viewer.get()
-      const ids = input.type === "photo_library_review" ? input.items.map((item) => item.id) : (input.ids ?? [])
-      const selected = "selected" in input && input.selected === true
-      const picked = selected ? [view.open].filter((id) => id > 0 && now.rows.includes(id))
-        : ids.flatMap((id) => {
-          const number = handle(id, now.rows, rows)
-          return number === undefined ? [] : [number]
-        })
-      if (picked.length === 0 || input.type === "photo_library_review" && input.items.some((item, index) => {
-        const row = rows.get(picked[index] ?? 0)
-        return row?.kind !== "phone" || (row.item.mutationRevision ?? row.item.revision) !== item.revision
-      })) return undefined
+      let picked: number[]
+      let missing = 0
+      if (input.type === "photo_library_review") {
+        const seen = new Set<string>()
+        const resolved: number[] = []
+        for (const item of input.items) {
+          if (seen.has(item.id)) return undefined
+          seen.add(item.id)
+          const number = handle(item.id, now.rows, rows)
+          if (number === undefined) return undefined
+          const row = rows.get(number)
+          if (row?.kind !== "phone" || (row.item.mutationRevision ?? row.item.revision) !== item.revision) return undefined
+          resolved.push(number)
+        }
+        picked = [...new Set(resolved)]
+        if (picked.length !== input.items.length || picked.length === 0) return undefined
+      } else {
+        const ids = [...new Set(input.ids ?? [])]
+        const selected = "selected" in input && input.selected === true
+        picked = selected ? [view.open].filter((id) => id > 0 && now.rows.includes(id))
+          : [...new Set(ids.flatMap((id) => {
+            const number = handle(id, now.rows, rows)
+            return number === undefined ? [] : [number]
+          }))]
+        missing = selected ? 0 : ids.length - picked.length
+        if (picked.length === 0) return undefined
+      }
+      if (input.type === "photos_album_create") {
+        const letters = Array.from(input.name).length
+        if (letters < 1 || letters > 80 || now.albums.length >= 24) return undefined
+      }
       const facts = { items: picked, basis: now.revision, revision: now.revision, listed: true, running: Changes.running(now.job), allowed: true, secure: false }
       const event: Assistant.Event = input.type === "photos_album_create"
         ? { type: "proposeAlbum", name: input.name, letters: Array.from(input.name).length, ...facts }
@@ -151,20 +192,24 @@ export effect function photoAction(input: DeviceOperation): (Receipt | undefined
       if (!Exit.isSuccess(sent) || sent.value.state.stage !== "Shown") return undefined
       return input.type === "photo_library_review"
         ? { kind: input.type, status: "review_opened", action: input.action, count: picked.length }
-        : { kind: input.type, status: "review_opened", count: picked.length, missing: selected ? 0 : ids.length - picked.length }
+        : { kind: input.type, status: "review_opened", count: picked.length, missing }
     }
     default:
       return undefined
   }
 }
 
-function carry(fx: Assistant.Effect): Job<Assistant.Event, Library.Machine, [Actor]> {
+type AgentCarryNeeds = Library.Machine | Effect.Services<ReturnType<typeof say>>
+
+function carry(fx: Assistant.Effect): Job<Assistant.Event, AgentCarryNeeds, [Actor]> {
   return match (fx) {
     when { tag: "Hand", let change, let items, let basis }: run("apply", effect {
-      try ignore((try Library.Machine).send({ type: "confirmProposal", change, items, basis }, "Owner"))
+      const sent = try exit((try Library.Machine).send({ type: "confirmProposal", change, items, basis }, "Owner"))
+      if (Exit.isFailure(sent)) try say("Couldn’t apply the confirmed photo change.", true)
     }, "Phone");
     when { tag: "HandAlbum", let name, let letters, let items, let basis }: run("album", effect {
-      try ignore((try Library.Machine).send({ type: "confirmAlbum", name, letters, items, basis }, "Owner"))
+      const sent = try exit((try Library.Machine).send({ type: "confirmAlbum", name, letters, items, basis }, "Owner"))
+      if (Exit.isFailure(sent)) try say("Couldn’t create the confirmed album.", true)
     }, "Phone");
     when { tag: "SearchLibrary" }: run("search", Effect.void, "Phone");
     when { tag: "InspectItem" }: run("inspect", Effect.void, "Phone");
