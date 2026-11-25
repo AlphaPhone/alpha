@@ -195,6 +195,10 @@ pure def sometimesAnApprovalExpires(a: Approvals): bool = a.approval == Expired 
 
 ### A tap reads the approval it names again from the agent, whatever the phone believed
 
+The phone’s route ledger uses a stable digest of its workflow notice
+namespace and the current owner binding. The same owner can open a notice
+after a restart.
+
 The notices area takes each tap once; a tap after a restart, or while
 another workflow is open, is read again all the same. Android names the
 notice and its owner. Alpha checks the current signed-in account and
