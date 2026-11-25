@@ -209,6 +209,7 @@ describe("Notes", () => {
     const transcript = world.notes.notes.find((note) => note.id === "sync")?.format?.data.lines;
     if (!Array.isArray(transcript)) throw new Error("The fixture needs a saved transcript");
     const words = transcript.map((line) => typeof line === "object" && line !== null && "t" in line && typeof line.t === "string" ? line.t : "").join("\n");
+    await control("Copy text");
     await press("Copy text");
     await rendered(async () => expect(await navigator.clipboard.readText()).toBe(words));
 
