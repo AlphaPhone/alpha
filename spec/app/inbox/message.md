@@ -356,6 +356,10 @@ pure def stepAnAttachmentIsUsedOnlyFromItsReview(before: MessageView, after: Mes
 
 ### An attachment use ends as its own answer says, or unknown
 
+Android saves to a destination the owner picks and confirms success only
+after reading back the same bytes. A browser download cannot confirm
+what was saved.
+
 ```quint
 pure def canAttachmentHandled(s: MessageView, attempt: int): bool = A::canConclude(s.file, attempt)
 
