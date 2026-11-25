@@ -376,11 +376,17 @@ effect function present(tab: number, host: TabHost.Shape): void!! {
 }
 
 // spec/app/browser/downloads.md, "Story: Download a file"
-/** Open the current native Browser's Downloads list after its menu closes. */
+/** Open the phone's Browser downloads, or enter Files from the enclosing browser. */
 export const openDownloads: void!!(Tabs.Machine | Shell | TabHost) = effect {
-  if (!showing(try (try Shell).get(), "Browser") || (try (try Tabs.Machine).get()).layer !== "Menu") return
+  const shell = try Shell
+  if (!showing(try shell.get(), "Browser") || (try (try Tabs.Machine).get()).layer !== "Menu") return
   if (!(try tellTabs({ type: "uncover" }))) return
-  try contained(hosted("downloads", (plugin, session) => plugin.downloads({ session })), "opening Browser downloads")
+  if ((try TabHost).web !== undefined) {
+    if (!(try contained(shell.send({ type: "goHome" }), "opening Files as an app"))) return
+    if ((try shell.get()).trail.length === 0) try contained(shell.send({ type: "openView", view: "Files" }), "opening Files from Browser")
+  } else {
+    try contained(hosted("downloads", (plugin, session) => plugin.downloads({ session })), "opening Browser downloads")
+  }
 }
 
 /** Draw the page shown where the Browser marks its place, once that place is drawn. */
