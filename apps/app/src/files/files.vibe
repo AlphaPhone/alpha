@@ -387,6 +387,17 @@ effect function performed(ticket: number, work: string, items: ReadonlyArray<Ite
       const item = items[0]
       const at = item === undefined ? Option.none<Spot>() : try spotOf(item.id)
       if (item === undefined || Option.isNone(at)) return { type: "finished", ticket, done, failed: items.map((one) => one.id) }
+      if (folder === 0) {
+        const { volume, path } = at.value
+        const parent = parentOf(path)
+        const read = try called("storageList", (plugin) => plugin.storageList({ volume, path: parent }))
+        const entry = read.status === "ready" ? read.entries?.find((one) => one.path === path) : undefined
+        const active = try (try Browser.Machine).get()
+        if (entry === undefined || entry.directory || entry.name !== item.name || Math.trunc(entry.modified) !== item.revision
+          || Math.trunc(entry.size) !== item.bytes || !active.open || !Browser.allowed(active) || active.change.attempt.id !== ticket
+          || !showing(try (try Shell).get(), "Files") || !(try (try Device).showing()))
+          return { type: "finished", ticket, done, failed: [item.id] }
+      }
       const reply = try called("storageRename", (plugin) => plugin.storageRename({ volume: at.value.volume, path: at.value.path, name }))
       return { type: "finished", ticket, done: reply.status === "ready" ? [item.id] : [], failed: reply.status === "ready" ? [] : [item.id] }
     }
@@ -746,12 +757,12 @@ export const back: boolean!!(Browser.Machine | Shown.Machine | Recent.Machine | 
   if ((try recent.get()).live !== 0) {
     return effect { try recent.send({ type: "cancelPicker" }, "Owner"); return true } catch () => false
   }
-  const preview = try Shown.Machine
-  if (Shown.showing(try preview.get())) {
-    return effect { try preview.send({ type: "close" }, "Owner"); return true } catch () => false
-  }
   const machine = try Browser.Machine
   const s = try machine.get()
+  const preview = try Shown.Machine
+  if (Shown.showing(try preview.get()) && !s.sheet.open && !s.deleting.showing && !s.change.clash.showing) {
+    return effect { try preview.send({ type: "close" }, "Owner"); return true } catch () => false
+  }
   const step: Event | undefined = match (Browser.backLayer(s)) {
     when "SheetLayer": { type: "closeMoveTo" };
     when "ShareLayer": { type: "closeShare" };

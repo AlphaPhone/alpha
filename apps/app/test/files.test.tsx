@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { Effect } from "effect";
 import type { DeviceOperation } from "@elizaos/agent/operations";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
 import { Machine as Browser } from "../gen/app__files.effect.vibe";
 import { Machine as Shown } from "../gen/app__files__preview.effect.vibe";
@@ -360,6 +360,14 @@ describe("Files on a phone", () => {
     await press("notes.txt");
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.kind === "Text");
     expect(document.querySelector("pre")?.textContent).toBe("The words of notes.txt");
+
+    // spec/app/files/preview.md, "The owner can share the readable file shown through Android using its own selected-document grant"
+    await choose("Details", "File actions");
+    expect(document.querySelector("[aria-label='File details']")?.textContent).toContain("Internal storage › Documents");
+    await press("Close details");
+    await choose("Share", "File actions");
+    await vi.waitFor(() => expect(world.files.shared).toEqual([["selection:Documents/notes.txt"]]));
+
     const updated = world.files.stored.find((file) => file.path === "Documents/notes.txt");
     if (updated) updated.modified = 11;
     world.files.texts["Documents/notes.txt"] = "These are the revised notes";
@@ -426,6 +434,32 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Shown, (s) => s.viewer === 0);
     // spec/app/files/recent.md, "A file selected again takes the place of its lapsed row": restored.txt stands where notes.txt was, ahead of code.txt, which still holds its access
     expect(runtime.runSync(Recent.use((m) => m.get())).rows.map((row) => [row.origin, row.grant > 0])).toEqual([["Picked", true], ["InFolder", true]]);
+
+    // spec/app/files/preview.md, "Rename, Move to and Move to Trash act on the storage-backed preview still showing"
+    await press("code.txt");
+    await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.secret);
+    const previousViewer = runtime.runSync(Shown.use((m) => m.get())).viewer;
+    await choose("Rename", "File actions");
+    await fill("Name", "codes.txt");
+    await pressOnTop("Rename");
+    await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.viewer > previousViewer);
+    expect([paths(world).includes("primary:Download/codes.txt"), document.querySelector("[aria-label='Preview']")?.textContent?.includes("codes.txt")]).toEqual([true, true]);
+
+    await choose("Move to", "File actions");
+    await until(alpha, runtime, Browser, (s) => s.sheet.open && s.sheet.reading.status === "Loaded");
+    expect(runtime.runSync(Browser.use((m) => m.get())).picked).toHaveLength(1);
+    await hardware("back");
+    await until(alpha, runtime, Browser, (s) => !s.sheet.open);
+    await press("Close");
+    await until(alpha, runtime, Shown, (s) => s.viewer === 0);
+    await press("Cancel");
+    await press("codes.txt");
+    await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded");
+    await choose("Move to Trash", "File actions");
+    await until(alpha, runtime, Browser, (s) => s.deleting.showing);
+    await pressOnTop("Delete");
+    await until(alpha, runtime, Shown, (s) => s.viewer === 0);
+    expect(world.files.trash.map((row) => row.was.path)).toEqual(["Download/codes.txt"]);
 
   });
 

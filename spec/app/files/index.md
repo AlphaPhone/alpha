@@ -156,6 +156,9 @@ pure val approvedItemsValues = Set(List(), List({ id: 2, name: "b", revision: 1,
   List({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0 }, { id: 3, name: "c", revision: 1, kind: F::Document, volume: 1, bytes: 0 }))
 pure val reviewedFromValues = Set(S::top, { trail: List(1, 4), inCategory: false, category: F::Other })
 pure val weight_renameShown = 1
+pure val weight_openPreviewParent = 1
+pure val weight_stagePreviewFile = 1
+pure val parentTrailValues = Set(List(1), List(1, 4))
 pure val weight_refresh = 3
 pure val weight_agentLook = 1
 pure val weight_agentLooked = 100
@@ -1021,6 +1024,40 @@ pure def stepDestinationFolderKeepsItsSelection(before: Files, via: str, after: 
       }))
 ```
 
+### The storage-backed preview prepares Move to or Trash for the exact file in its loaded folder
+
+Files enters the storage parent the phone verified when it is somewhere
+else. The opening and the selection happen while there is no conflicting
+work. A file is selected only from that reading of its parent, as the phone
+found it. The operations then use Files' destination picker or delete
+confirmation, as if the owner had selected the same listed item.
+
+```quint
+pure def previewActionReady(s: Files): bool =
+  s.open and allowed(s) and not(s.trash) and s.picked.length() == 0 and s.details == 0
+    and not(s.deleting.showing) and not(s.sheet.open) and s.change.panel == 0
+    and not(C::busy(s.change)) and not(C::asking(s.change)) and s.change.sending.outcome != A::Sent
+
+pure def canOpenPreviewParent(s: Files, parentTrail: List[int], by: Actor): bool =
+  by == Phone and previewActionReady(s) and parentTrail.length() > 0 and parentTrail.every(i => i > 0)
+    and s.volumes.some(v => v.id == parentTrail.nthOr(0, 0))
+
+pure def openPreviewParent(s: Files, parentTrail: List[int], by: Actor): Moved =
+  entered(parentTrail, false, F::Other, { ...s, handed: false })
+
+pure def canStagePreviewFile(s: Files, file: F::Item, ticket: int, trashing: bool, by: Actor): bool =
+  by == Phone and browse(s) == Showing and not(s.inCategory) and previewActionReady(s)
+    and s.listing.ticket == ticket and s.items.includes(file) and file.kind != F::Folder
+
+pure def stagePreviewFile(s: Files, file: F::Item, ticket: int, trashing: bool, by: Actor): Moved =
+  val chosen = selected(List(file.id), s)
+  if (trashing) { state: { ...chosen, deleting: V::present(chosen.deleting) }, out: List() }
+  else going(s.trail, chosen)
+
+pure def stepStagingAPreviewSelectsOnlyItsFile(before: Files, via: str, after: Files): bool =
+  via == "stagePreviewFile" implies after.picked.length() == 1 and after.picked.every(id => has(before.items, id))
+```
+
 ### The owner renames the file open in the preview as a change of Files, to a name free among the names beside it
 
 A document another app holds has no names beside it, and that app refuses
@@ -1028,7 +1065,7 @@ a name it already holds.
 
 ```quint
 pure def canRenameShown(s: Files, file: F::Item, name: str, siblings: List[str], by: Actor): bool =
-  by == Owner and C::canBegin(s.change, C::Rename, List(file), siblings, 0, name, C::nowhere, 0)
+  by == Owner and s.open and allowed(s) and not(s.trash) and C::canBegin(s.change, C::Rename, List(file), siblings, 0, name, C::nowhere, 0)
 
 pure def renameShown(s: Files, file: F::Item, name: str, siblings: List[str], by: Actor): Moved =
   val change = C::begin(s.change, C::Rename, List(file), siblings, 0, name, C::nowhere, 0)

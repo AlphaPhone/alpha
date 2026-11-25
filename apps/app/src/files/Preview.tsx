@@ -1,7 +1,11 @@
 // spec/app/files/preview.md, "Story: Look at a file"; spec/app/files/preview.md, "Story: Act on the file I am looking at"; spec/app/files/preview.md, "Story: Get a file back when access was lost"; spec/app/files/recent.md, "Story: Find what I opened lately"
-import { Alert, Button, Dialog, DialogContent, DialogTitle, FilesRow, Menu, MenuContent, MenuItem, MenuTrigger, Spinner } from "@repo/ui";
+import { Alert, Button, Dialog, DialogContent, DialogTitle, FilesRow, Input, Menu, MenuContent, MenuItem, MenuTrigger, Spinner } from "@repo/ui";
 import { Effect, Option, type ManagedRuntime } from "effect";
-import { ChevronLeft, ChevronRight, Ellipsis, ExternalLink, FileText, Mail, Pause, Play, Sparkles, X } from "lucide-react";
+import { useState } from "react";
+import { ChevronLeft, ChevronRight, Ellipsis, ExternalLink, FileText, FolderInput, Info, Mail, Pause, Pencil, Play, Share2, Sparkles, Trash2, X } from "lucide-react";
+import type { Machine as Browser } from "../../gen/app__files.effect.vibe";
+import { previewActionReady } from "../../gen/app__files.ts";
+import { useMachine as useFiles } from "../../gen/app__files.react.ts";
 import type { Machine } from "../../gen/app__files__preview.effect.vibe";
 import { loaded, showing, usable } from "../../gen/app__files__preview.ts";
 import { useMachine } from "../../gen/app__files__preview.react.ts";
@@ -18,7 +22,7 @@ import { Opened, emailAccount } from "./preview.vibe";
 
 export interface PreviewProps {
   /** Provides the preview and Recent machines, and what the viewer read, of preview.vibe. */
-  runtime: ManagedRuntime.ManagedRuntime<Machine | RecentMachine | Opened | Handles | Shell | Inbox | Drafts, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<Machine | Browser | RecentMachine | Opened | Handles | Shell | Inbox | Drafts, unknown>;
 }
 
 /** What the owner calls the document a grant names. */
@@ -37,6 +41,9 @@ export function Preview({ runtime }: PreviewProps) {
   const shell = useShell(runtime);
   const inbox = useInbox(runtime);
   const drafts = useDrafts(runtime);
+  const files = useFiles(runtime);
+  const [details, setDetails] = useState<{ readonly viewer: number; readonly revision: number }>();
+  const [rename, setRename] = useState<{ readonly viewer: number; readonly revision: number; readonly name: string }>();
   if (!state || !recent.state || !showing(state) || shell.state?.assistant === "Sheet" || shell.state?.assistant === "Full") return null;
   const owner = <E extends Parameters<typeof can>[0]>(event: E) => can(event, "Owner");
   const tell = <E extends Parameters<typeof send>[0]>(event: E) => void send(event, "Owner");
@@ -59,6 +66,19 @@ export function Preview({ runtime }: PreviewProps) {
   const askAlpha = owner({ type: "askAlpha" });
   const openElsewhere = owner({ type: "openElsewhere" });
   const forget = owner({ type: "forget" });
+  const share = file !== undefined && owner({ type: "shareFile" });
+  const showDetails = file !== undefined && usable(state);
+  const detailsOpen = showDetails && details?.viewer === state.viewer && details.revision === state.revision;
+  const ownFile = file !== undefined && recent.state.shown.origin === "InFolder" && files.state !== undefined && previewActionReady(files.state);
+  const move = { type: "actOnStoredFile", action: "MoveFile", name: "", stored: ownFile } as const;
+  const trash = { type: "actOnStoredFile", action: "TrashFile", name: "", stored: ownFile } as const;
+  const editName = { type: "actOnStoredFile", action: "RenameFile", name: rename?.name.trim() ?? "", stored: ownFile } as const;
+  const renaming = ownFile && rename?.viewer === state.viewer && rename.revision === state.revision;
+  const showRename = owner({ ...editName, name: "/" });
+  const place = file?.storage;
+  const location = place === undefined ? undefined : [place.label, ...place.path.split("/").slice(0, -1)].join(" › ");
+  const modified = state.revision > 0 ? new Date(state.revision) : undefined;
+  const kind = { Media: "Media", Photo: "Image", Text: "Text", Archive: "Archive", Pdf: "PDF", Receipt: "Receipt" }[state.kind];
   const destination = inbox.state && drafts.state ? emailAccount(inbox.state, drafts.state) : undefined;
   const offer = { type: "useInEmail", account: destination?.account ?? 0 } as const;
   const email = file !== undefined && destination !== undefined && owner(offer);
@@ -68,13 +88,18 @@ export function Preview({ runtime }: PreviewProps) {
         <div className="flex min-h-13 shrink-0 items-center gap-0.5 px-2 pt-[env(safe-area-inset-top)] [&_button]:size-13">
           {owner({ type: "close" }) && <Button variant="ghost" size="icon" aria-label="Close" onClick={() => tell({ type: "close" })}><ChevronLeft /></Button>}
           <div className="flex-1" />
-          {(askAlpha || openElsewhere || forget || email) && (
+          {(askAlpha || openElsewhere || forget || email || share || showDetails || showRename || owner(move) || owner(trash)) && (
             <Menu>
               <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="File actions"><Ellipsis /></Button></MenuTrigger>
               <MenuContent>
                 {askAlpha && <MenuItem onSelect={() => tell({ type: "askAlpha" })}><Sparkles />Ask Alpha</MenuItem>}
                 {email && <MenuItem onSelect={() => tell(offer)}><Mail />Use in email</MenuItem>}
+                {share && <MenuItem onSelect={() => tell({ type: "shareFile" })}><Share2 />Share</MenuItem>}
                 {openElsewhere && <MenuItem onSelect={() => tell({ type: "openElsewhere" })}><ExternalLink />Open elsewhere</MenuItem>}
+                {showDetails && <MenuItem onSelect={() => setDetails({ viewer: state.viewer, revision: state.revision })}><Info />Details</MenuItem>}
+                {showRename && <MenuItem onSelect={() => setRename({ viewer: state.viewer, revision: state.revision, name })}><Pencil />Rename</MenuItem>}
+                {owner(move) && <MenuItem onSelect={() => tell(move)}><FolderInput />Move to</MenuItem>}
+                {owner(trash) && <MenuItem onSelect={() => tell(trash)}><Trash2 />Move to Trash</MenuItem>}
                 {forget && <MenuItem onSelect={() => tell({ type: "forget" })}><X />Forget</MenuItem>}
               </MenuContent>
             </Menu>
@@ -82,7 +107,7 @@ export function Preview({ runtime }: PreviewProps) {
         </div>
         <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto px-6 pt-1 pb-42">
           <DialogTitle className="font-display text-title font-light break-words">{name}</DialogTitle>
-          {file !== undefined && <p className="mt-2.5 mb-5 flex items-center gap-2.5 text-sm text-muted-foreground"><FileText aria-hidden className="size-4.5" />{file.mimeType === "application/pdf" ? "PDF" : { Media: "Media", Photo: "Image", Text: "Text", Archive: "Archive", Pdf: "PDF", Receipt: "Receipt" }[state.kind]}</p>}
+          {file !== undefined && <p className="mt-2.5 mb-5 flex items-center gap-2.5 text-sm text-muted-foreground"><FileText aria-hidden className="size-4.5" />{kind}{file.bytes === undefined ? "" : ` · ${new Intl.NumberFormat().format(file.bytes)} bytes`}</p>}
           {state.attempt.outcome === "Unknown" && state.offered.item === state.item && state.offered.revision === state.revision && <Alert variant="warn">Check Inbox before offering this file again</Alert>}
           {!usable(state) && <Alert variant="warn">Alpha can no longer read this file</Alert>}
           {state.content.status === "Loading" && <Spinner label="Opening the file" />}
@@ -102,6 +127,31 @@ export function Preview({ runtime }: PreviewProps) {
           )}
           {owner({ type: "selectAgain" }) && <Button size="sm" className="mt-3" onClick={() => tell({ type: "selectAgain" })}>Select again</Button>}
         </div>
+        <Dialog open={renaming} onOpenChange={(open) => { if (!open) setRename(undefined); }}>
+          <DialogContent closeLabel="Cancel rename">
+            <DialogTitle>Rename</DialogTitle>
+            <form className="flex flex-col gap-3" onSubmit={(event) => {
+              event.preventDefault();
+              if (!owner(editName) || editName.name === name) return;
+              tell(editName);
+              setRename(undefined);
+            }}>
+              <Input aria-label="Name" value={rename?.name ?? ""} onChange={(event) => setRename(rename && { ...rename, name: event.target.value })} />
+              <Button type="submit" disabled={!owner(editName) || editName.name === name}>Rename</Button>
+            </form>
+          </DialogContent>
+        </Dialog>
+        <Dialog open={detailsOpen} onOpenChange={(open) => { if (!open) setDetails(undefined); }}>
+          <DialogContent closeLabel="Close details">
+            <DialogTitle>{name}</DialogTitle>
+            <dl aria-label="File details" className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+              <dt>Type</dt><dd>{kind}</dd>
+              {file?.bytes !== undefined && <><dt>Size</dt><dd>{new Intl.NumberFormat().format(file.bytes)} bytes</dd></>}
+              {modified !== undefined && <><dt>Modified</dt><dd><time dateTime={modified.toISOString()}>{modified.toLocaleString()}</time></dd></>}
+              {location !== undefined && <><dt>Location</dt><dd>{location}</dd></>}
+            </dl>
+          </DialogContent>
+        </Dialog>
       </DialogContent>
     </Dialog>
   );
