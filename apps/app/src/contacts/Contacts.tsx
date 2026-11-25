@@ -1,18 +1,19 @@
 // spec/app/contacts/index.md, "Story: Browse my contacts"; spec/app/contacts/index.md, "Story: Give Alpha access to my contacts"; spec/app/contacts/index.md, "Story: Look at one contact"; spec/app/contacts/index.md, "Story: Add or change a contact"; spec/app/contacts/index.md, "Story: Delete a contact"; spec/app/contacts/index.md, "Story: Know what happened to my change"
 import { Alert, AppHeader, Avatar, Banner, Button, Chip, ConfirmDialog, Input, ListGroup, ListRow, SearchField, Spinner, Tabs, TabsContent, Textarea } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
-import { CONTACT_MAX_ADDRESS, CONTACT_MAX_NAME, CONTACT_MAX_NOTES, CONTACT_MAX_NUMBER } from "@elizaos/os/bridges/contacts";
+import { CONTACT_MAX_ADDRESS, CONTACT_MAX_NAME, CONTACT_MAX_NOTES, CONTACT_MAX_NUMBER } from "@elizaos/os-bridges";
 import { ArrowLeft, Check, ChevronDown, ChevronLeft, Mail, MessageSquare, Minus, NotebookText, Pencil, Phone as Call, Plus, Search, Trash2, X } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import type { Machine as ContactsMachine } from "../../gen/app__contacts.effect.vibe";
 import { accessNeeded, listFailed, listedEmpty, maxEach, noMatches, pending, refused, shown, uncertain } from "../../gen/app__contacts.ts";
 import { useMachine as useContacts } from "../../gen/app__contacts.react.ts";
-import type { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe";
+import type { Machine as PhoneMachine, Tab } from "../../gen/app__phone.effect.vibe";
 import { clear } from "../../gen/app__phone.ts";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
 import type { Machine as VoicemailMachine } from "../../gen/app__phone__voicemail.effect.vibe";
 import { useMachine as useVoicemail } from "../../gen/app__phone__voicemail.react.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
+import { returnPhoneTab } from "../phone/back.vibe";
 import { PhoneTabs } from "../phone/PhoneTabs.tsx";
 import { callerInitials, displayNumber } from "../phone/words.ts";
 import { type Book, type Form, Rows, blankForm, sheetOf } from "./contacts.vibe";
@@ -32,8 +33,8 @@ export interface ContactsProps {
  */
 export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
   const contacts = useContacts(runtime);
-  const dialer = usePhone(runtime);
-  const phone = dialer.state;
+  const phone = usePhone(runtime).state;
+  const returningRef = useRef<{ tab: Tab } | undefined>(undefined);
   const voicemail = useVoicemail(runtime).state;
   const shell = useShell(runtime);
   const held = runtime.runSync(Effect.flatMap(Rows, (rows) => rows.get()));
@@ -61,11 +62,15 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
   const canBack = shell.can({ type: "goBack" });
   const phoneTabs = !searching && !state.opened && shell.state?.trail.at(-2) === "Phone";
   const back = canBack ? () => void alpha.back() : undefined;
-  const select = async (tab: string) => {
-    if ((tab !== "Recents" && tab !== "Keypad" && tab !== "Voicemail") || !canBack) return;
-    const event = { type: "pickTab", tab } as const;
-    if (dialer.can(event)) await dialer.send(event);
-    await shell.send({ type: "goBack" });
+  const select = (tab: string) => {
+    if (tab !== "Recents" && tab !== "Keypad" && tab !== "Voicemail") return;
+    if (returningRef.current) {
+      returningRef.current.tab = tab;
+      return;
+    }
+    const request: { tab: Tab } = { tab };
+    returningRef.current = request;
+    void runtime.runPromiseExit(returnPhoneTab(() => request.tab)).then(() => { returningRef.current = undefined; });
   };
   const actions = (
     <>
@@ -130,11 +135,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
       )}
       <CommsBar runtime={runtime}
         person={state.opened && held.card !== undefined ? { label: held.card.displayName, initials: callerInitials(held.card.displayName) } : undefined}
-        closed={!state.opened && !searching && can({ type: "search", typed: true }) ? (ask) => (
-          <form className="min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); ask(query.trim()); }}>
-            <SearchField data-alpha-composer aria-label="Search or ask" placeholder="Search or ask" value={query} onValueChange={search} maxLength={128} />
-          </form>
-        ) : undefined} />
+        filter={!state.opened && !searching && can({ type: "search", typed: true }) ? { value: query, onChange: search, maxLength: 128 } : undefined} />
     </section>
   );
   if (!phoneTabs) return content;

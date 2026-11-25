@@ -1,17 +1,16 @@
 // spec/app/digests/index.md, "Story: See my digests"; spec/app/digests/index.md, "Story: Receive results without losing or repeating one"; spec/app/digests/schedules.md, "Story: Keep my digest schedules"
 import type * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { type WorkflowRequest, WorkflowHttpError, WorkflowLifecycleRejected, workflowHttpError } from "@elizaos/plugin-workflow/client"
-import { type DigestLoop, type DigestResult, type DigestSource, type DigestSpec, digestInbox, digestSourceState, hostedDigestProtocol } from "@elizaos/plugin-workflow/digests"
+import { type WorkflowRequest, WorkflowHttpError, WorkflowLifecycleRejected, workflowHttpError, type DigestLoop, type DigestResult, type DigestSource, type DigestSpec, digestSourceState, hostedDigestProtocol } from "@elizaos/plugin-workflow-client"
 import * as List from "../../gen/app__workflows__list.effect.vibe"
 import * as Plan from "../../gen/app__digests__schedules.effect.vibe"
 import type { Change, Effect as Out, Event, Template } from "../../gen/app__digests__schedules.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
-import { ownerAt } from "../platform/owner.vibe"
+import { launchOwnerAt, sameResidentOwner } from "../platform/owner.vibe"
 import { type Job, answer, applying, following, reacting, together } from "../runtime/reactor.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { Time } from "../runtime/time.vibe"
 import { WorkflowsApi } from "./api.vibe"
-import { DigestHistory, digestScope } from "./brief.vibe"
+import { DigestHistory } from "./brief.vibe"
 import { Rows } from "./list.vibe"
 
 interface Numbered<T> { readonly number: number; readonly record: T }
@@ -61,30 +60,34 @@ effect function read(ticket: number, owner: number): Event!!Needs {
   const fail: Event = { type: "schedulesRead", ticket, ok: false, count: 0, standing: "NoSchedule", template: "Morning",
     hour: 8, minute: 0, zone: 0, source: 0, missed: 0, evening: false }
   const rows = try Rows
-  const ownerKey = ownerAt() catch () => ""
+  const identity = launchOwnerAt() catch () => undefined
   const { request } = try WorkflowsApi
   const plan = try Plan.Machine
   const fallback = { ...fail, missed: (try plan.get()).missed }
-  if (!(try rows.sameOwner(ownerKey, owner))) return fallback
+  if (identity === undefined || !(try rows.sameDigestOwner(identity, owner))) return fallback
   const agent = try Agent
+  const ownsRequest = effect {
+    const confirmed = Effect.provideService(launchOwnerAt(), Agent, agent) catch () => undefined
+    return sameResidentOwner(identity, confirmed) && (try rows.sameDigestOwner(identity, owner))
+  }
   const checked: WorkflowRequest = effect (path: string, body: unknown) => {
-    const confirmed = Effect.provideService(ownerAt(), Agent, agent) catch () => ""
-    if (confirmed !== ownerKey) throw workflowHttpError(0, {})
-    return try request(path, body)
+    if (!(try ownsRequest)) throw workflowHttpError(0, {})
+    const received = try request(path, body)
+    if (!(try ownsRequest)) throw workflowHttpError(0, {})
+    return received
   }
   const protocol = hostedDigestProtocol(checked)
   const supported = (protocol.capabilities() catch () => undefined)
   if (supported === undefined) return fallback
   const payload = effect {
     if (!supported.digests) return { ...empty, owner }
-    const inbox = try digestInbox(digestScope(ownerKey))
+    const history = try DigestHistory
     const found = try all({
       loops: Effect.orElseSucceed(protocol.loops(), () => undefined),
       sources: Effect.orElseSucceed(protocol.sources(), () => undefined),
-      results: Effect.orElseSucceed(inbox.sync(protocol, ticket), () => undefined),
+      results: history.sync(identity, protocol),
     }, { concurrency: 3 })
-    const cached = found.results ?? (inbox.history() catch () => [])
-    try (try DigestHistory).changed()
+    const cached = found.results.rows ?? []
     const view = try DigestWords
     const loops: Numbered<DigestLoop>[] = []
     for (const record of found.loops ?? []) {
@@ -95,14 +98,15 @@ effect function read(ticket: number, owner: number): Event!!Needs {
     return {
       owner, loops, sources,
       results: [...cached].sort((a, b) => b.cursor - a.cursor),
-      partial: found.loops === undefined || found.sources === undefined || found.results === undefined, capable: true,
+      partial: found.loops === undefined || found.sources === undefined || !found.results.current, capable: true,
     } satisfies DigestView
   }
   const current = try payload
+  if (!(try ownsRequest)) return fallback
   const state = try plan.get()
   const listing = try (try List.Machine).get()
   if (state.owner !== owner || listing.owner !== owner || listing.place.tag !== "ListingDigests" ||
-    (ownerAt() catch () => "") !== ownerKey || !Plan.canSchedulesRead(state, ticket, current.loops.length, state.missed, 8, 0, 0)) return fallback
+    !Plan.canSchedulesRead(state, ticket, current.loops.length, state.missed, 8, 0, 0)) return fallback
   try (try DigestWords).store(current)
   const selected = current.loops.find((item) => item.number === state.row)?.record
   const source = current.sources.find((item) => item.record.id === selected?.spec.sourceId)
@@ -133,10 +137,10 @@ const Saved = Schema.Struct({ receipt: Schema.Struct({
 effect function change(id: number, wanted: Change, template: Template, hour: number, minute: number, source: number): Event!!(Needs | Attempts) {
   const machine = try Plan.Machine
   const current = try machine.get()
-  const scope = ownerAt() catch () => ""
+  const identity = launchOwnerAt() catch () => undefined
   const { request, workflow } = try WorkflowsApi
   const failed: Event = { type: "changeAnswered", id, applied: false }
-  if (!(try (try Rows).sameOwner(scope, current.owner))) return failed
+  if (identity === undefined || !(try (try Rows).sameDigestOwner(identity, current.owner))) return failed
   const words = try DigestWords
   const view = try words.view(current.owner)
   const selected = view.loops.find((item) => item.number === current.row)?.record
@@ -144,6 +148,8 @@ effect function change(id: number, wanted: Change, template: Template, hour: num
   const now = try (try Time).now()
   const zone = try words.zone(current.owner)
   const mutationId = try (try Attempts).key(id)
+  const reaffirmed = launchOwnerAt() catch () => undefined
+  if (!sameResidentOwner(identity, reaffirmed) || !(try (try Rows).sameDigestOwner(identity, current.owner))) return failed
   const applied = effect {
     if (wanted === "Remove") {
       if (selected === undefined) return false
@@ -164,7 +170,9 @@ effect function change(id: number, wanted: Change, template: Template, hour: num
     return reply.receipt.mutationId === mutationId && (wanted === "Create" || reply.receipt.workflowId === selected?.id)
   } catch (failure) => failure instanceof WorkflowLifecycleRejected ||
     (failure instanceof WorkflowHttpError && [400, 401, 403, 404, 409, 422].includes(failure.status)) ? false : undefined
-  if (applied === undefined || (ownerAt() catch () => "") !== scope) return { type: "changeUnanswered" }
+  const confirmed = launchOwnerAt() catch () => undefined
+  if (applied === undefined || !sameResidentOwner(identity, confirmed) ||
+    !(try (try Rows).sameDigestOwner(identity, current.owner))) return { type: "changeUnanswered" }
   return { ...failed, applied }
 }
 

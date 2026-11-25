@@ -1,7 +1,7 @@
 # Rollout
 
 Alpha's own cloud, the candidate `@repo/deployment` names for each hosted
-environment, runs on Cloudflare: eliza's Worker (`@elizaos/cloud/worker`)
+environment, runs on Cloudflare: eliza's Worker (`@elizaos/cloud-worker`)
 on the candidate's cloud, serving the profile the operator completed, and a
 web host Worker on the candidate's App Link host. This is the serve step of
 its provisioning (`./provisioning.md`); migrate, register and prices run

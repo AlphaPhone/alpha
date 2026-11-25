@@ -107,6 +107,9 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `info` | oklch(0.354 0.245 264.1) | oklch(0.704 0.157 278) |
 | `alpha` | oklch(0.45201372 0.31321437 264.05202064) | — |
 | `alpha-foreground` | oklch(1 0 0) | — |
+| `voice-paused` | oklch(0.42871365 0.17763819 275.87797693) | oklch(0.49371435 0.17497524 277.85975720) |
+| `voice-processing` | oklch(0.35317586 0.24472654 264.05202064) | oklch(0.53252567 0.26097330 273.09464102) |
+| `voice-speaking` | oklch(0.46315925 0.30554663 264.59166337) | — |
 | `call` | oklch(0.509 0.134 149.4) | oklch(0.614 0.162 149.3) |
 | `record` | oklch(0.578 0.206 29) | oklch(0.663 0.224 28.3) |
 | `dial` | oklch(0.614 0.162 149.3) | — |

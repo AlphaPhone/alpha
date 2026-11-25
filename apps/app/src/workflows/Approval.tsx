@@ -1,4 +1,5 @@
 // spec/app/workflows/approvals.md, "Story: Answer a run's approval on the phone"
+import type { WorkflowApproval } from "@elizaos/plugin-workflow-client";
 import { Effect } from "effect";
 import { Alert, Button } from "@repo/ui";
 import { useMachine } from "../../gen/app__workflows__approvals.react.ts";
@@ -6,21 +7,23 @@ import type { Machine } from "../../gen/app__workflows__approvals.effect.vibe";
 import { type Resident, type Shown } from "../runtime/area.tsx";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
-import { ApprovalWords } from "./approvals.vibe";
+import { ApprovalWords, sameAsking } from "./approvals.vibe";
 
 interface ApprovalProps extends Pick<Shown<Resident | Machine | ApprovalWords>, "runtime"> {
   readonly run: number;
   readonly owner: number;
+  readonly approvals?: readonly WorkflowApproval[];
 }
 
 /** An exact, versioned approval the agent says is still waiting on this run. */
-export function Approval({ runtime, run, owner }: ApprovalProps) {
+export function Approval({ runtime, run, owner, approvals }: ApprovalProps) {
   const machine = useTimed(runtime, useMachine);
   const state = machine.state;
-  if (!state || state.owner !== owner || state.runId !== run) return null;
+  if (!state || state.owner !== owner || state.runId !== run || state.approval === "NoApproval") return null;
   const pending = runtime.runSync(Effect.flatMap(ApprovalWords, (words) => words.get()));
   if (!pending || pending.number !== state.digest || pending.owner !== owner || pending.runId !== run) return null;
   const { approval } = pending;
+  if (state.approval === "Waiting" && !approvals?.some((current) => current.status === "pending" && sameAsking(approval, current))) return null;
   const yes = { type: "decide", approve: true, now: untimed } as const;
   const no = { type: "decide", approve: false, now: untimed } as const;
   return (

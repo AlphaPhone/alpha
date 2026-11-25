@@ -1,5 +1,5 @@
 // spec/app/maps/index.md, "Story: Search for a place"; spec/app/maps/index.md, "Story: Get directions"; spec/app/maps/index.md, "Story: Navigate"; spec/app/maps/index.md, "Story: Connect through my cloud account"
-import { CloudError } from "@elizaos/cloud/client"
+import { CloudError } from "@elizaos/cloud"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Screen from "../../gen/app__maps.effect.vibe"
 import { mode, pressMs, readable, shown, typingMs } from "../../gen/app__maps.effect.vibe"

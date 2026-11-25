@@ -1,8 +1,8 @@
 // spec/app/workflows/list.md, "Story: Find a workflow"; spec/app/workflows/index.md, "Story: Open a workflow"
 import { Effect } from "effect";
 import { Button, EmptyState, ListRow, Screen, Spinner, Switch } from "@repo/ui";
-import { Bell, ChevronRight, Info, ListFilter, Plus, RotateCw, Sun, Workflow } from "lucide-react";
-import { useMemo } from "react";
+import { Bell, ChevronRight, Clock as ClockIcon, Info, ListFilter, Plus, RotateCw, Sun, Workflow } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
 import { useMachine } from "../../gen/app__workflows__list.react.ts";
 import { type Event, badge, passes } from "../../gen/app__workflows__list.ts";
 import type { Machine } from "../../gen/app__workflows__list.effect.vibe";
@@ -64,14 +64,22 @@ function WorkflowListRow({ row, open }: { row: WorkflowRow; open: () => void }) 
 /** The owner's workflows, prompts, reminders and schedules, with the last filter choices kept while looking at a row. */
 export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | RunSheet | HistoryWordsPort | WorkflowMachine | DefinitionWords | RunsMachine | ApprovalsMachine | ApprovalWords | BuilderMachine | GenerateMachine | DraftWords | AutomationsMachine | AutomationWords | ClockMachine | AlarmLabel | DigestMachine | DigestWords>) {
   const { state, can, send } = useMachine(runtime);
+  const [clockSurface, setClockSurface] = useState<HTMLDivElement | null>(null);
+  const clockOpenerRef = useRef<HTMLButtonElement>(null);
   const editingAutomation = useAutomations(runtime).state?.editing;
   const editingWorkflow = useBuilder(runtime).state?.open;
   const clock = useClock(runtime);
   const hasClock = clockAvailable();
   const openClock = { type: "openClock", available: hasClock } as const;
-  const alarms = hasClock && clock.can(openClock)
-    ? <ListRow className="min-h-17.5 px-1" title="Alarms" trailing={<ChevronRight aria-hidden className="size-5" />} onClick={() => void clock.send(openClock)} />
-    : null;
+  const alarms = (newItem = false) => hasClock && <ListRow className="min-h-17.5 px-1"
+    title={newItem ? "Alarm" : "Alarms"} leading={newItem ? <ClockIcon /> : undefined}
+    aria-label="Clock alarms" aria-haspopup="dialog" trailing={<ChevronRight aria-hidden className="size-5" />}
+    onClick={(event) => {
+      if (clock.can(openClock)) {
+        clockOpenerRef.current = event.currentTarget;
+        void clock.send(openClock);
+      }
+    }} />;
   const read = () => void runtime.runPromiseExit(refresh());
   const snapshot = state === undefined ? undefined : runtime.runSync(Effect.flatMap(Rows, (rows) => rows.view(state.owner)));
   const kind = state?.kind;
@@ -93,14 +101,13 @@ export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | 
     : null;
   const filter = { type: "openFilters" } as const;
   const add = { type: "openAdd" } as const;
-  return (
-    <Screen title={clock.state?.open ? "Alarms" : title} leading={<AppBack alpha={alpha} />} actions={!clock.state?.open && <>
+  const screen = (
+    <Screen title={title} leading={<AppBack alpha={alpha} />} actions={<>
       {can(filter) && <Button variant="ghost" size="icon" aria-label="Filter workflows" aria-haspopup="dialog" onClick={() => dispatch(filter)}>
         <ListFilter aria-hidden />
       </Button>}
       {can(add) && <Button variant="ghost" size="icon" aria-label="Add to Workflows" onClick={() => dispatch(add)}><Plus aria-hidden /></Button>}
     </>}>
-      {clock.state?.open ? <ClockPage runtime={runtime} /> : <>
       {state === undefined && <Spinner aria-label="Refreshing workflows" />}
       {state !== undefined && place?.tag === "ListingRows" && <>
         {(state.kind !== "AllKinds" || state.status !== "AnyStatus") && (
@@ -121,7 +128,7 @@ export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | 
         )}
         <ul aria-label="Workflows" className="mx-1.5 divide-y divide-border border-b border-border">
           {rows.map((row) => <WorkflowListRow key={row.number} row={row} open={() => dispatch({ type: "openRow", row: row.number })} />)}
-          {alarms && <li>{alarms}</li>}
+          {hasClock && <li>{alarms()}</li>}
         </ul>
         <Filters listing={state} can={can} send={dispatch} refresh={read} />
       </>}
@@ -132,7 +139,7 @@ export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | 
           <ListRow className="min-h-18 px-1" title="Phone reminder" leading={<Bell />} trailing={<ChevronRight aria-hidden className="size-5" />}
             onClick={() => void runtime.runPromiseExit(newPhoneReminder())} />
           {digestLink}
-          {alarms}
+          {alarms(true)}
         </>}
       </>}
       {state && place?.tag === "ListingDigests" && <Digests runtime={runtime} owner={state.owner} result={place.result}
@@ -149,7 +156,12 @@ export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | 
             {selected.summary !== "" && <p className="whitespace-pre-wrap break-words">{selected.summary}</p>}
             <Automation runtime={runtime} row={selected} owner={state.owner} />
           </div>)}
-      </>}
     </Screen>
+  );
+  return (
+    <div ref={setClockSurface} className="relative flex min-h-0 flex-1 flex-col">
+      {screen}
+      {clockSurface && clock.state?.open && <ClockPage runtime={runtime} container={clockSurface} restoreFocus={() => clockOpenerRef.current?.focus()} />}
+    </div>
   );
 }

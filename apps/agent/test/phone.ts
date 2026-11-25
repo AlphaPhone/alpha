@@ -3,7 +3,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
-import type { RuntimeJsonBridge, RuntimeStatus, RuntimeStreamFrame } from "@elizaos/agent/client";
+import type { RuntimeJsonBridge, RuntimeStatus, RuntimeStreamFrame } from "@elizaos/agent";
 import { type Cloud, type DeviceKey, packPrepared, said, scratch, startCloud } from "@repo/eliza-harness";
 
 /** The owner every journey of the pack signs in. */
@@ -37,7 +37,7 @@ export interface Listed {
 export const policy = () => read("policy.json") as { actions: { allowed: string[]; refused: Record<string, string> }; plugins: { load: string[]; product?: string } };
 
 /** The routes the host file admits for the page. */
-export const listed = () => read("host.json").routes as Listed[];
+export const listed = (channel: "routes" | "nativeRoutes" = "routes") => read("host.json")[channel] as Listed[];
 
 /** The bundle's manifest as the build wrote it. */
 export const manifest = () => JSON.parse(fs.readFileSync(path.join(pack, "bundle/manifest.json"), "utf8")) as {

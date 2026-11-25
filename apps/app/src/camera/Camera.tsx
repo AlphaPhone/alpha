@@ -1,6 +1,6 @@
 // spec/app/camera/index.md, "Story: Open the camera"; spec/app/camera/index.md, "Story: Frame the shot"; spec/app/camera/index.md, "Story: Take photos and videos"; spec/app/camera/index.md, "Story: Let Alpha take a photo"
 import { Button, cn, focusRing, Spinner } from "@repo/ui";
-import { CameraOff, ChevronLeft, Clock as ClockIcon, FileScan, Flashlight, FlashlightOff, Grid3x3, MicOff, Sparkles, SwitchCamera, Video, Zap, ZapOff } from "lucide-react";
+import { CameraOff, ChevronLeft, Clock as ClockIcon, FileScan, Flashlight, FlashlightOff, Grid3x3, MicOff, SwitchCamera, Video, Zap, ZapOff } from "lucide-react";
 import { useCallback, useRef, useState, type PointerEvent } from "react";
 import type { Camera as Visit, Event, Mode, Said } from "../../gen/app__camera.ts";
 import { chosenLens, ready, recording } from "../../gen/app__camera.ts";
@@ -274,7 +274,12 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
         )}
       </div>
 
-      <footer className="z-10 flex flex-col justify-center gap-4 bg-background pb-4 landscape:row-start-2 landscape:gap-2 landscape:pb-0">
+      <footer className={cn(
+        "z-10 flex flex-col justify-center gap-4 bg-background landscape:row-start-2 landscape:gap-2 landscape:pb-0",
+        shell.state?.assistant === "Bar"
+          ? "pb-[calc(var(--alpha-dock-clearance,5.125rem)+--spacing(9))]"
+          : "pb-29.5",
+      )}>
         {!inProgress && (
           <div role="group" aria-label="Camera mode" className="flex min-h-11 justify-center gap-2 overflow-x-auto landscape:flex-wrap landscape:gap-0">
             {(["Video", "Photo"] satisfies Mode[]).map((mode) => (

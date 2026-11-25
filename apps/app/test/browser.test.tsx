@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
 import { Machine as Page } from "../gen/app__browser__address.effect.vibe";
+import { Machine as Library } from "../gen/app__browser__library.effect.vibe";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
@@ -30,7 +31,64 @@ const go = (text: string) => drawn(async () => {
   form.requestSubmit();
 });
 
+const libraryTab = (name: "History" | "Bookmarks") => drawn(() => {
+  const tab = button(name);
+  if (!tab) throw new Error(`no Library tab ${name}`);
+  tab.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+});
+
 describe("The Browser on a phone", () => {
+  it("Opens the saved Library (spec/app/browser/library.md, \"Story: Keep bookmarks\"; spec/app/browser/library.md, \"Story: Look back through history\"; spec/app/browser/address.md, \"Story: Go where I typed\")", async () => {
+    const world = { ...scene(), phone: true, image: true };
+    const { alpha, runtime } = await onBrowser(world);
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    await press("Search or type address");
+    await until(alpha, runtime, Library, (s) => s.read.status === "Loaded");
+    const suggestions = () => document.querySelector("[aria-label='Address suggestions']");
+    expect(suggestions()?.textContent).toContain("/on-device-agents");
+    await drawn(() => fill("Address", "keys"));
+    expect(suggestions()?.textContent).toContain("/keys-in-hardware");
+    expect(suggestions()?.textContent).not.toContain("/on-device-agents");
+    await press("Cancel editing");
+    await press("Menu");
+    await until(alpha, runtime, Library, (s) => s.read.status === "Loaded");
+    await press("Bookmark");
+    await until(alpha, runtime, Library, (s) => s.notice === "NotSecure");
+    expect(world.browser.bookmarks.map((one) => one.url)).toEqual(["https://enclave.example/keys-in-hardware"]);
+    await press("Library, bookmarks and history");
+    await until(alpha, runtime, Library, (s) => s.read.status === "Loaded");
+    await libraryTab("History");
+    expect([...document.querySelectorAll("button")].some((row) => row.textContent?.includes("news.example/on-device-agents"))).toBe(true);
+    await libraryTab("Bookmarks");
+    const bookmark = [...document.querySelectorAll("button")].find((row) => row.textContent?.includes("Keys in the chip"));
+    if (!bookmark) throw new Error("saved bookmark is missing");
+    await drawn(() => bookmark.click());
+    const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
+    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
+    await until(alpha, page, Page, (s) => s.phase === "Shown");
+    expect([...world.browser.tabs.values()].map((one) => one.history[one.at])).toEqual(["https://enclave.example/keys-in-hardware"]);
+
+    await press("Menu");
+    await press("Bookmarked");
+    await until(alpha, runtime, Library, (s) => s.job === "Idle" && s.marks === 0);
+    await until(alpha, runtime, Tabs, (s) => s.layer === "Uncovered");
+    expect(world.browser.bookmarks).toEqual([]);
+    await press("Menu");
+    await press("Bookmark");
+    await until(alpha, runtime, Library, (s) => s.job === "Idle" && s.marks === 1);
+    await until(alpha, runtime, Tabs, (s) => s.layer === "Uncovered");
+    expect(world.browser.bookmarks.map((one) => one.url)).toEqual(["https://enclave.example/keys-in-hardware"]);
+
+    await press("Menu");
+    await press("Library, bookmarks and history");
+    await until(alpha, runtime, Library, (s) => s.read.status === "Loaded");
+    const remove = [...document.querySelectorAll("button")].find((row) => row.getAttribute("aria-label")?.startsWith("Remove bookmark "));
+    if (!remove) throw new Error("bookmark removal control is missing");
+    await drawn(() => remove.click());
+    await until(alpha, runtime, Library, (s) => s.job === "Idle" && s.marks === 0);
+    expect(world.browser.bookmarks).toEqual([]);
+  });
+
   it("Open a page and watch it load (spec/app/browser/address.md, \"Story: Go where I typed\"; spec/app/browser/address.md, \"Story: Watch a page load\"; spec/app/browser/address.md, \"Story: Find in page\")", async () => {
     const { alpha, runtime, world } = await onBrowser();
     // spec/app/browser/index.md, "A launch reads the saved session, and may ask again after a failed read"
@@ -38,6 +96,11 @@ describe("The Browser on a phone", () => {
     expect([world.browser.calls.includes("browsingState"), Boolean(button("Search or type address"))]).toEqual([true, true]);
 
     // spec/app/browser/address.md, "Submitting text opens it, searches for it or says why not, and blank text is not submitted"
+    const history = [...world.browser.tabs.values()].map((one) => [...one.history]);
+    await go("https://owner:example@private.example");
+    expect(document.querySelector("[role='alert']")?.textContent).toContain("Remove the username or password from this address.");
+    expect([...world.browser.tabs.values()].map((one) => one.history)).toEqual(history);
+    await press("Cancel editing");
     await go("news.example/on-device-agents");
     const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
     const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
@@ -78,6 +141,7 @@ describe("The Browser on a phone", () => {
     await press("Menu");
     await press("New private tab");
     await until(alpha, runtime, Tabs, (s) => s.open.length === 2 && s.privates.length === 1 && s.layer === "Address");
+    expect(document.querySelector("[aria-label='Address suggestions']")?.textContent).not.toContain("/on-device-agents");
     await drawn(async () => {
       await fill("Address", "enclave.example/keys-in-hardware");
       document.querySelector<HTMLFormElement>("form[role=search]")?.requestSubmit();

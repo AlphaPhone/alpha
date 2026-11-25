@@ -1,5 +1,6 @@
 // spec/app/workflows/sheet.md, "Story: See a workflow's history"; spec/app/workflows/sheet.md, "Story: Read a run's sheet"; spec/app/workflows/sheet.md, "Story: Keep the sheet to its owner"
-import type { RemoteWorkflow, WorkflowApproval, WorkflowRun } from "@elizaos/plugin-workflow/client"
+import type { RemoteWorkflow, WorkflowApproval, WorkflowRun } from "@elizaos/plugin-workflow-client"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import * as Listing from "../../gen/app__workflows__list.effect.vibe"
 import * as Sheet from "../../gen/app__workflows__sheet.effect.vibe"
 import type { Effect as Out, Event, Output } from "../../gen/app__workflows__sheet.effect.vibe"
@@ -8,8 +9,9 @@ import { type MediaHandoff, attachToAlpha } from "../assistant/attachments.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { type Said, say } from "../notices/toasts.vibe"
 import type { Agent } from "../platform/agent.vibe"
+import { Device } from "../platform/device.vibe"
 import { ownerAt } from "../platform/owner.vibe"
-import { type Job, answer, applying, reacting, run, together } from "../runtime/reactor.vibe"
+import { type Job, answer, applying, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { WorkflowsApi, type PromptRun, readPromptRuns } from "./api.vibe"
 import { Rows } from "./list.vibe"
 
@@ -112,7 +114,7 @@ export { canSpeak } from speech
 
 module handoff {
   import { Base64 } from "effect/encoding"
-  import type { WorkflowRun } from "@elizaos/plugin-workflow/client"
+  import type { WorkflowRun } from "@elizaos/plugin-workflow-client"
 
   /** The identity of the reviewed run, ready to attach without putting its private output in chat. @throws {never} */
   export function runReference(run: WorkflowRun): string {
@@ -154,32 +156,44 @@ effect function reading(ticket: number, owner: number, after: number): Event!!(A
   return { type: "runsRead", ticket, ok: true, count: Math.min(Sheet.maxPage, remaining), more: remaining > Sheet.maxPage }
 }
 
-effect function output(ticket: number, number: number): Event!!(Agent | WorkflowsApi | Rows | HistoryWordsPort | Listing.Machine | Sheet.Machine) {
-  const failed: Event = { type: "outputRead", ticket, ok: false, text: "Empty" }
+export type RunVisibility = Shell | Device
+
+export effect function workflowsVisible(): boolean!!RunVisibility {
+  const shell = try Shell
+  return showing(try shell.get(), "Workflows") && (try (try Device).showing())
+}
+
+effect function output(ticket: number, number: number): Event!!(Agent | WorkflowsApi | Rows | HistoryWordsPort | Listing.Machine | Sheet.Machine | RunVisibility) {
+  const failed: Event = { type: "outputRead", ticket, ok: false, text: "Empty", status: "NoRun" }
   const listing = try Listing.Machine
   const sheet = try Sheet.Machine
   const held = try Rows
   const history = try HistoryWordsPort
   const { workflow } = try WorkflowsApi
-  const owner = (try sheet.get()).owner
+  const reading = try sheet.get()
+  const owner = reading.owner
   const current = try listing.get()
   const row = selectedRow(current.place)
-  const selected = (try history.view(owner, row)).all.find((item) => item.number === number)
-  if (current.owner !== owner || selected?.raw === undefined) return failed
+  const shown = try history.view(owner, row)
+  const selected = shown.opened?.number === number ? shown.opened.raw : shown.all.find((item) => item.number === number)?.raw
+  if (current.owner !== owner || reading.runId !== number || selected === undefined) return failed
   const before = ownerAt() catch () => ""
-  if (!(try held.sameOwner(before, owner))) return failed
-  const receipt = (workflow.receipt(selected.id, selected.raw.workflowId) catch () => undefined)
-  if (receipt === undefined) return failed
-  const approvalRead = receipt.status === "waiting-approval" ? (workflow.approvals(receipt) catch () => null) : null
+  if (!(try held.sameOwner(before, owner)) || !(try workflowsVisible())) return failed
+  const receipt = (workflow.receipt(selected.id, selected.workflowId) catch () => undefined)
+  if (receipt === undefined || receipt.versionId !== selected.versionId) return failed
+  const approvalRead = !receipt.finished && receipt.status === "waiting-approval" ? (workflow.approvals(receipt) catch () => undefined) : null
+  if (approvalRead === undefined) return failed
   const after = ownerAt() catch () => ""
   const final = try listing.get()
   const text: Output = receipt.output === undefined || receipt.output.trim() === "" ? "Empty" : receipt.output.length === 4000 ? "Truncated" : "Text"
-  if (after !== before || final.owner !== owner || selectedRow(final.place) !== row || !Sheet.canOutputRead(try sheet.get(), ticket, text)) return failed
-  try history.output(owner, row, { number, raw: receipt, approvals: approvalRead?.approvals ?? [] })
-  return { type: "outputRead", ticket, ok: true, text }
+  const live = try sheet.get()
+  if (after !== before || final.owner !== owner || selectedRow(final.place) !== row ||
+    live.owner !== owner || live.runId !== number || !Sheet.canOutputRead(live, ticket, text) || !(try workflowsVisible())) return failed
+  try history.output(owner, row, { number, raw: receipt, approvals: approvalRead?.finished === false && !approvalRead.cancellationRequested ? approvalRead.approvals : [] })
+  return { type: "outputRead", ticket, ok: true, text, status: statusOf(receipt) }
 }
 
-type Needs = Agent | WorkflowsApi | Rows | HistoryWordsPort | Listing.Machine | Sheet.Machine | MediaHandoff | Toasts | Said
+type Needs = Agent | WorkflowsApi | Rows | HistoryWordsPort | Listing.Machine | Sheet.Machine | RunVisibility | MediaHandoff | Toasts | Said
 
 effect function speak(id: number, runId: number): Event!!(Listing.Machine | HistoryWordsPort) {
   const listing = try (try Listing.Machine).get()
@@ -215,7 +229,7 @@ effect function askAboutRun(runId: number): void!!(Agent | Rows | HistoryWordsPo
 function carry(fx: Out): Job<Event, Needs, []> {
   return match (fx) {
     when { tag: "ReadRuns", let ticket, let owner, let after }: answer("workflow history", reading(ticket, owner, after), { type: "runsRead", ticket, ok: false, count: 0, more: false });
-    when { tag: "ReadOutput", let ticket, let runId }: answer("workflow output", output(ticket, runId), { type: "outputRead", ticket, ok: false, text: "Empty" });
+    when { tag: "ReadOutput", let ticket, let runId }: answer("workflow output", output(ticket, runId), { type: "outputRead", ticket, ok: false, text: "Empty", status: "NoRun" });
     when { tag: "Speak", let id, let runId }: answer("workflow speech", speak(id, runId), { type: "speechEnded", id });
     when { tag: "Silence" }: run("workflow speech", succeed(undefined));
     when { tag: "AskAlpha", let runId }: run("workflow question", askAboutRun(runId));
@@ -238,4 +252,22 @@ const followRow = applying(
   },
 )
 
-export const history = together(reacting(Sheet, { carry }), remembered, followRow)
+const followRun = started(effect {
+  const sheet = try Sheet.Machine
+  const device = try Device
+  const shell = try Shell
+  const open = Stream.map(sheet.changes, (state) => state.status === "Running" ? state.runId : 0)
+  const visible = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
+  const view = Stream.map(shell.changes, (state) => showing(state, "Workflows"))
+  const foreground = Stream.map(Stream.zipLatest(visible, view), ([seen, active]) => seen && active)
+  const target = Stream.changes(Stream.map(Stream.zipLatest(open, foreground), ([number, active]) => active ? number : 0))
+  try Stream.runDrain(Stream.switchMap(target, (number) => number === 0 ? Stream.empty : Stream.fromEffectRepeat(effect {
+    try sleep("4 seconds")
+    const state = try sheet.get()
+    if (state.runId === number && Sheet.canRefreshRun(state) && (try workflowsVisible())) {
+      try ignore(sheet.send({ type: "refreshRun" }))
+    }
+  })))
+}, "following an open workflow run")
+
+export const history = together(reacting(Sheet, { carry }), remembered, followRow, followRun)
