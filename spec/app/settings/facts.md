@@ -18,7 +18,7 @@ own is the [Home role](./roles.md).
 ### Facts hold the newest asking, which facts and accesses its answer reported, the roles, and Set as Home in flight
 
 One asking reads every fact. The phone reports the facts it could read,
-each with the value it read, the grant of each access it could read, and its alert channels by their Android identity. Alpha's version and Android's version are independent facts. Media, ring and alarm volume are read separately from Do Not Disturb. Notification collection reports the device’s current access state without collecting a notification. Who holds the Home and Assistant roles, and whether this build can be the Home app, come with the roles.
+each with the value it read, the grant of each access it could read, and its alert channels by their Android identity. Alpha's version and Android's version are independent facts. Media, ring and alarm volume are read separately from Do Not Disturb. Opening Passwords reads autofill support and Android’s chosen provider alongside the phone’s other facts. Notification collection reports the device’s current access state without collecting a notification. Who holds the Home and Assistant roles, and whether this build can be the Home app, come with the roles.
 Nothing here is kept: after a restart every row waits for a fresh answer.
 
 ```quint
@@ -26,7 +26,7 @@ import read as R from "../../kit/read"
 import permission as P from "../../kit/permission"
 import timed as T from "./timed"
 
-type Fact = Wifi | Bluetooth | MobileData | Battery | Sound | Alerts | DeviceLocation | Storage | Roles | Versions | AndroidVersion | MediaVolume | RingVolume | AlarmVolume | CollectionStatus
+type Fact = Wifi | Bluetooth | MobileData | Battery | Sound | Alerts | DeviceLocation | Storage | Roles | Versions | AndroidVersion | MediaVolume | RingVolume | AlarmVolume | CollectionStatus | AutofillService
 type Reading = { fact: Fact, value: str }
 type Alert = { id: str, name: str, blocked: bool }
 type Access = CameraAccess | MicrophoneAccess | LocationAccess | CalendarAccess | PhotosAccess | FilesAccess | NotificationsAccess

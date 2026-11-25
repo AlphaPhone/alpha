@@ -48,8 +48,9 @@ export const pages = together(
 )
 
 // spec/app/settings/facts.md, "Only the newest asking's answer is taken, and it replaces everything shown"
-effect function readPhone(ticket: number): Facts.Event!!SystemSettings {
-  const report = try (try SystemSettings).report()
+effect function readPhone(ticket: number): Facts.Event!!(SystemSettings | Pages.Machine) {
+  const { page } = try (try Pages.Machine).get()
+  const report = try (try SystemSettings).report({ autofill: page === "PasswordsPage" })
   return { type: "answered", ticket, reported: [...report.readings], grants: [...report.grants], alerts: [...report.alerts], home: report.home, assistant: report.assistant, launcher: report.launcher }
 }
 
@@ -69,7 +70,7 @@ effect function requestedHome(request: number): Facts.Event!!(SystemSettings | S
   return how === "ended" ? { type: "homeRequestEnded", request, at: untimed, showing: shown } : { type: "giveUpOnHome", now: untimed, at: untimed, showing: shown }
 }
 
-function readFacts(fx: Facts.Effect): Job<Facts.Event, SystemSettings | Shell | Facts.Machine | Time, []> {
+function readFacts(fx: Facts.Effect): Job<Facts.Event, SystemSettings | Shell | Pages.Machine | Facts.Machine | Time, []> {
   return match (fx) {
     when { tag: "ReadPhone", let ticket }: answer("read", readPhone(ticket), { type: "abandon", now: untimed });
     when { tag: "RequestHome", let request }: answer("home", requestedHome(request), { type: "giveUpOnHome", now: untimed, at: untimed, showing: false });
@@ -118,5 +119,12 @@ function androidTimers(state: Android.Android) {
 
 const androidMachine = reacting(Android, { carry: startAndroid, timers: androidTimers })
 
+const autofillShown = following(
+  Pages.Machine,
+  (state) => state.page === "PasswordsPage",
+  Facts.Machine,
+  (showing): Facts.Event | undefined => showing ? { type: "refresh", at: untimed } : undefined,
+)
+
 /** What the Settings screen reads beside where the owner is: the phone's facts and the hand-overs to Android's own pages. */
-export const facts = together(factsMachine, factsShown, factsResumed, androidMachine)
+export const facts = together(factsMachine, factsShown, factsResumed, autofillShown, androidMachine)
