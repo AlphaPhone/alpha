@@ -1,5 +1,6 @@
 export * from "./lib/cn.ts";
 export { dockClearance } from "./lib/styles.ts";
+export { PortalContainerProvider, usePortalContainer, LayerObserverProvider, type LayerKind, type LayerEntry, type LayerObserver, type PortalContainerProviderProps, type LayerObserverProviderProps } from "./lib/layers.tsx";
 export * from "./components/Alert.tsx";
 export * from "./components/AppHeader.tsx";
 export * from "./components/AppTile.tsx";

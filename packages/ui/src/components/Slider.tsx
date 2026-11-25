@@ -36,7 +36,7 @@ export function Slider({ value, defaultValue, onValueChange, onValueCommit, id, 
       <SliderPrimitive.Track className="relative h-1.5 grow overflow-hidden rounded-full bg-input">
         <SliderPrimitive.Range className="absolute h-full bg-alpha" />
       </SliderPrimitive.Track>
-      <SliderPrimitive.Thumb id={id} aria-label={label} aria-labelledby={labelledBy} aria-valuetext={valueText} className={cn(focusRing, "block size-6 rounded-full border-2 border-alpha bg-background shadow-sm")} />
+      <SliderPrimitive.Thumb id={id} aria-label={label} aria-labelledby={labelledBy} aria-valuetext={valueText} className={cn(focusRing, "block size-6 rounded-full border-2 border-primary bg-background shadow-sm")} />
     </SliderPrimitive.Root>
   );
 }

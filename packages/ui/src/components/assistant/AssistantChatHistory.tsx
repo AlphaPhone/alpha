@@ -50,7 +50,7 @@ export function AssistantChatHistory({ chats, status = "loaded", blocked = false
       {unsure ? <Banner variant="warn">Checking whether your last chat was made</Banner> : null}
       {status === "failed" ? <Banner variant="warn" action={onRetry ? <Button variant="outline" size="sm" onClick={onRetry}>Retry</Button> : null}>Chats did not load</Banner> : null}
       {status === "loading" && !chats.length ? (
-        <div aria-busy className="flex flex-col gap-2"><Skeleton className="h-13" /><Skeleton className="h-13" /><Skeleton className="h-13" /></div>
+        <div role="status" aria-label="Loading chats" aria-busy className="flex flex-col gap-2"><Skeleton className="h-13" /><Skeleton className="h-13" /><Skeleton className="h-13" /></div>
       ) : !chats.length && status === "loaded" ? (
         <EmptyState icon={<MessageSquare />} title="No chats yet">{start}</EmptyState>
       ) : chats.length ? (
@@ -62,7 +62,7 @@ export function AssistantChatHistory({ chats, status = "loaded", blocked = false
           </ListGroup>
           {start}
         </>
-      ) : null}
+      ) : start}
     </div>
   );
 }

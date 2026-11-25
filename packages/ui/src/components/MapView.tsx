@@ -109,17 +109,62 @@ const lineOf = (points: readonly MapPoint[] | undefined) => ({
   geometry: { type: "LineString" as const, coordinates: (points ?? []).map((p) => [p.lng, p.lat]) },
 });
 
-function dot(className: string, label: string, onClick?: () => void): HTMLElement {
-  const element = document.createElement(onClick ? "button" : "span");
-  if (element instanceof HTMLButtonElement) element.type = "button";
+const reducedMotion = () =>
+  typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+
+const hexByte = (value: number) => value.toString(16).padStart(2, "0");
+
+function resolveCssColor(node: HTMLElement, token: string): string {
+  const raw = getComputedStyle(node).getPropertyValue(token).trim();
+  if (!raw || typeof document === "undefined") return raw || "currentColor";
+  const canvas = document.createElement("canvas");
+  canvas.width = 1;
+  canvas.height = 1;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return raw;
+  ctx.clearRect(0, 0, 1, 1);
+  ctx.fillStyle = raw;
+  ctx.fillRect(0, 0, 1, 1);
+  const data = ctx.getImageData(0, 0, 1, 1).data;
+  if (!data[3]) return raw;
+  return `#${hexByte(data[0] ?? 0)}${hexByte(data[1] ?? 0)}${hexByte(data[2] ?? 0)}`;
+}
+
+const pinDotClass = (chosen: boolean) =>
+  `block rounded-full border-2 border-background shadow-sm ${chosen ? "size-5 bg-destructive" : "size-4 bg-primary"}`;
+
+function pinElement(pin: MapPin, onClick: () => void): { button: HTMLButtonElement; dot: HTMLSpanElement } {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.setAttribute("aria-label", pin.label);
+  button.className = "flex size-11 items-center justify-center rounded-full focus-visible:outline-solid focus-visible:outline-focus focus-visible:outline-offset-focus focus-visible:outline-ring";
+  const dot = document.createElement("span");
+  dot.setAttribute("aria-hidden", "true");
+  dot.className = pinDotClass(pin.chosen === true);
+  button.append(dot);
+  button.addEventListener("click", onClick);
+  return { button, dot };
+}
+
+function dot(className: string, label: string): HTMLElement {
+  const element = document.createElement("span");
   element.setAttribute("aria-label", label);
   element.className = className;
-  if (onClick) element.addEventListener("click", onClick);
   return element;
 }
 
+interface PinEntry {
+  marker: maplibregl.Marker;
+  button: HTMLButtonElement;
+  dot: HTMLSpanElement;
+  chosen: boolean;
+  lat: number;
+  lng: number;
+  label: string;
+}
+
 interface Painted {
-  readonly markers: maplibregl.Marker[];
+  readonly markers: Map<string, PinEntry>;
   here: maplibregl.Marker | undefined;
   pins: string;
   spot: string;
@@ -129,13 +174,37 @@ interface Painted {
 
 /** Bring `map` to what `props` shows: only the pins, position, route or camera that changed. */
 function paint(map: MapLibre, painted: Painted, props: MapViewProps, onPin: (key: string) => void): void {
-  const pins = JSON.stringify(props.pins.map((pin) => [pin.key, pin.at, pin.chosen === true]));
+  const pins = JSON.stringify(props.pins.map((pin) => [pin.key, pin.at, pin.label, pin.chosen === true]));
   if (pins !== painted.pins) {
-    for (const marker of painted.markers.splice(0)) marker.remove();
+    const keep = new Set(props.pins.map((pin) => pin.key));
+    for (const [key, entry] of painted.markers) {
+      if (!keep.has(key)) {
+        entry.marker.remove();
+        painted.markers.delete(key);
+      }
+    }
     for (const pin of props.pins) {
-      const look = pin.chosen ? "size-5 bg-destructive" : "size-4 bg-primary";
-      const element = dot(`rounded-full border-2 border-background shadow ${look}`, pin.label, () => onPin(pin.key));
-      painted.markers.push(new maplibregl.Marker({ element }).setLngLat([pin.at.lng, pin.at.lat]).addTo(map));
+      const chosen = pin.chosen === true;
+      const existing = painted.markers.get(pin.key);
+      if (existing) {
+        if (existing.lat !== pin.at.lat || existing.lng !== pin.at.lng) {
+          existing.marker.setLngLat([pin.at.lng, pin.at.lat]);
+          existing.lat = pin.at.lat;
+          existing.lng = pin.at.lng;
+        }
+        if (existing.label !== pin.label) {
+          existing.button.setAttribute("aria-label", pin.label);
+          existing.label = pin.label;
+        }
+        if (existing.chosen !== chosen) {
+          existing.dot.className = pinDotClass(chosen);
+          existing.chosen = chosen;
+        }
+      } else {
+        const { button, dot: dotEl } = pinElement(pin, () => onPin(pin.key));
+        const marker = new maplibregl.Marker({ element: button }).setLngLat([pin.at.lng, pin.at.lat]).addTo(map);
+        painted.markers.set(pin.key, { marker, button, dot: dotEl, chosen, lat: pin.at.lat, lng: pin.at.lng, label: pin.label });
+      }
     }
     painted.pins = pins;
   }
@@ -155,12 +224,13 @@ function paint(map: MapLibre, painted: Painted, props: MapViewProps, onPin: (key
   const camera = props.camera;
   if (camera.kind === "keep" || camera.key === painted.camera) return;
   painted.camera = camera.key;
-  if (camera.kind === "follow") map.easeTo({ center: [camera.at.lng, camera.at.lat], zoom: Math.max(map.getZoom(), 16.5), duration: 500 });
+  const motion = (ms: number) => (reducedMotion() ? 0 : ms);
+  if (camera.kind === "follow") map.easeTo({ center: [camera.at.lng, camera.at.lat], zoom: Math.max(map.getZoom(), 16.5), duration: motion(500) });
   else if (camera.kind === "centre") map.easeTo({ center: [camera.at.lng, camera.at.lat], zoom: camera.zoom, duration: 0 });
-  else if (camera.kind === "northUp") map.easeTo({ bearing: 0, pitch: 0, duration: 350 });
+  else if (camera.kind === "northUp") map.easeTo({ bearing: 0, pitch: 0, duration: motion(350) });
   else if (camera.points.length > 0) {
     const bounds = camera.points.reduce((b, p) => b.extend([p.lng, p.lat]), new maplibregl.LngLatBounds());
-    map.fitBounds(bounds, { padding: 48, maxZoom: camera.maxZoom, duration: 350 });
+    map.fitBounds(bounds, { padding: 48, maxZoom: camera.maxZoom, duration: motion(350) });
   }
 }
 
@@ -178,7 +248,7 @@ export function MapView(props: MapViewProps) {
   const latestRef = useRef(props);
   const [map, setMap] = useState<MapLibre>();
   const [turn, setTurn] = useState({ bearing: 0, pitch: 0 });
-  const paintedRef = useRef<Painted>({ markers: [], here: undefined, pins: "", spot: "", route: "", camera: "" });
+  const paintedRef = useRef<Painted>({ markers: new Map(), here: undefined, pins: "", spot: "", route: "", camera: "" });
   const styleKey = style.kind === "raster" ? `${style.tileSize}/${style.minZoom}/${style.maxZoom}` : style.url;
 
   const mount = useCallback((node: HTMLDivElement | null) => {
@@ -189,7 +259,9 @@ export function MapView(props: MapViewProps) {
       maplibregl.addProtocol(protocol, async (params, abort) => {
         const address = /:\/\/tiles\/(\d{1,2})\/(\d{1,7})\/(\d{1,7})$/.exec(params.url);
         if (!address) throw new Error("This is not a map tile.");
-        const bytes = await chosen.tile(Number(address[1]), Number(address[2]), Number(address[3]), abort.signal);
+        const current = latestRef.current.style;
+        if (current.kind !== "raster") throw new Error("Map style changed.");
+        const bytes = await current.tile(Number(address[1]), Number(address[2]), Number(address[3]), abort.signal);
         if (abort.signal.aborted) throw new DOMException("The map tile is no longer needed.", "AbortError");
         return { data: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer };
       });
@@ -208,11 +280,18 @@ export function MapView(props: MapViewProps) {
       return;
     }
     const pin = (key: string) => latestRef.current.onPin(key);
+    let themeObserver: MutationObserver | undefined;
     instance.once("style.load", () => { styleLoaded = true; });
     instance.on("load", () => {
       instance.addSource("route", { type: "geojson", data: lineOf([]) });
-      instance.addLayer({ id: "route-line", type: "line", source: "route", paint: { "line-width": 6, "line-color": getComputedStyle(node).getPropertyValue("--primary") || "currentColor" } });
-      paintedRef.current = { markers: [], here: undefined, pins: "", spot: "", route: "", camera: "" };
+      instance.addLayer({ id: "route-line", type: "line", source: "route", paint: { "line-width": 6, "line-color": resolveCssColor(node, "--primary") } });
+      if (typeof MutationObserver !== "undefined") {
+        themeObserver = new MutationObserver(() => {
+          if (instance.getLayer("route-line")) instance.setPaintProperty("route-line", "line-color", resolveCssColor(node, "--primary"));
+        });
+        themeObserver.observe(node.ownerDocument.documentElement, { attributes: true, attributeFilter: ["class", "style", "data-theme"] });
+      }
+      paintedRef.current = { markers: new Map(), here: undefined, pins: "", spot: "", route: "", camera: "" };
       paint(instance, paintedRef.current, latestRef.current, pin);
       setMap(instance);
       latestRef.current.onReady(surface);
@@ -246,16 +325,24 @@ export function MapView(props: MapViewProps) {
     instance.on("mousemove", (event) => moved(event.point));
     instance.on("mouseup", end);
     instance.on("contextmenu", end);
+    window.addEventListener("mouseup", end);
     instance.on("dragstart", () => latestRef.current.onDragged?.());
     instance.on("moveend", () => {
       const bounds = instance.getBounds();
       latestRef.current.onSettled({ north: bounds.getNorth(), south: bounds.getSouth(), east: bounds.getEast(), west: bounds.getWest(), zoom: Math.round(instance.getZoom()) });
     });
-    const turned = () => setTurn({ bearing: Math.trunc(instance.getBearing()), pitch: Math.trunc(instance.getPitch()) });
+    const turned = () => {
+      const bearing = Math.trunc(instance.getBearing());
+      const pitch = Math.trunc(instance.getPitch());
+      setTurn((prev) => (prev.bearing === bearing && prev.pitch === pitch ? prev : { bearing, pitch }));
+    };
     instance.on("rotate", turned);
     instance.on("pitch", turned);
     return () => {
-      for (const marker of paintedRef.current.markers.splice(0)) marker.remove();
+      window.removeEventListener("mouseup", end);
+      themeObserver?.disconnect();
+      for (const entry of paintedRef.current.markers.values()) entry.marker.remove();
+      paintedRef.current.markers.clear();
       paintedRef.current.here?.remove();
       instance.remove();
       if (chosen.kind === "raster") maplibregl.removeProtocol(protocol);
@@ -269,7 +356,7 @@ export function MapView(props: MapViewProps) {
   };
 
   const northUp = () => {
-    map?.easeTo({ bearing: 0, pitch: 0, duration: 300 });
+    map?.easeTo({ bearing: 0, pitch: 0, duration: reducedMotion() ? 0 : 300 });
     map?.getCanvas().focus({ preventScroll: true });
   };
 
@@ -278,9 +365,9 @@ export function MapView(props: MapViewProps) {
       <span ref={repaint} hidden />
       <div key={styleKey} ref={mount} role="application" aria-label={label} data-alpha-own-gesture="" className="size-full" />
       {map && (
-        <div className="absolute top-2 right-2 flex flex-col gap-1">
-          {zoomControls && <Button size="icon" variant="outline" aria-label="Zoom in" onClick={() => map.zoomIn()}><Plus /></Button>}
-          {zoomControls && <Button size="icon" variant="outline" aria-label="Zoom out" onClick={() => map.zoomOut()}><Minus /></Button>}
+        <div className="absolute top-2 right-2 z-10 flex flex-col gap-1">
+          {zoomControls && <Button size="icon" variant="outline" aria-label="Zoom in" onClick={() => map.zoomIn(reducedMotion() ? { duration: 0 } : undefined)}><Plus aria-hidden /></Button>}
+          {zoomControls && <Button size="icon" variant="outline" aria-label="Zoom out" onClick={() => map.zoomOut(reducedMotion() ? { duration: 0 } : undefined)}><Minus aria-hidden /></Button>}
           {props.compass(turn.bearing, turn.pitch) && (
             <Button size="icon" variant="outline" aria-label="Turn map north up" onClick={northUp}>
               <Compass aria-hidden style={{ transform: `rotate(${-turn.bearing}deg)` }} />

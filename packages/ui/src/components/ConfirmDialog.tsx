@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
 import { cn } from "../lib/cn.ts";
+import { useLayerRef, usePortalContainer } from "../lib/layers.tsx";
 import { dialogPanel, overlay, surfaceDescription, surfaceTitle } from "../lib/styles.ts";
 import { Button } from "./Button.tsx";
 
@@ -23,15 +24,19 @@ export type ConfirmDialogProps = {
   onConfirm: () => void;
   /** Called by the cancel button and Escape; a press outside does not back out. */
   onCancel: () => void;
+  /** An enclosing container for the dialog's portal. */
+  container?: HTMLElement;
 };
 
 /** A question asked before something that matters is done, as an alert dialog: one button goes ahead, the other, focused first, backs out. */
-export function ConfirmDialog({ open, title, children, confirmLabel, cancelLabel = "Cancel", destructive = false, loading = false, onConfirm, onCancel }: ConfirmDialogProps) {
+export function ConfirmDialog({ open, title, children, confirmLabel, cancelLabel = "Cancel", destructive = false, loading = false, onConfirm, onCancel, container }: ConfirmDialogProps) {
+  const defaultContainer = usePortalContainer();
+  const layerRef = useLayerRef("DialogLayer");
   return (
     <AlertDialogPrimitive.Root open={open} onOpenChange={(next) => { if (!next && !loading) onCancel(); }}>
-      <AlertDialogPrimitive.Portal>
-        <AlertDialogPrimitive.Overlay className={cn(overlay, "z-dialog")} />
-        <AlertDialogPrimitive.Content className={dialogPanel} {...(children ? {} : { "aria-describedby": undefined })}>
+      <AlertDialogPrimitive.Portal container={container ?? defaultContainer}>
+        <AlertDialogPrimitive.Overlay className={cn(overlay, "z-alert")} />
+        <AlertDialogPrimitive.Content ref={layerRef} className={cn(dialogPanel, "z-alert")} {...(children ? {} : { "aria-describedby": undefined })}>
           <AlertDialogPrimitive.Title className={surfaceTitle}>{title}</AlertDialogPrimitive.Title>
           {children ? <AlertDialogPrimitive.Description className={cn(surfaceDescription, "-mt-2")}>{children}</AlertDialogPrimitive.Description> : null}
           <div className="grid grid-cols-2 gap-2 pt-2">

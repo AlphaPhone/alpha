@@ -30,7 +30,7 @@ export function HomeCard({ title, icon, notCurrent, variant = "row", className, 
       asChild
       className={cn(
         focusRing,
-        "min-h-49 w-max min-w-43 max-w-full shrink-0 snap-start justify-between rounded-home-card border-0 bg-secondary p-5.5 text-left text-foreground transition-colors duration-fast ease-standard active:bg-accent",
+        "min-h-49 w-max min-w-43 max-w-full shrink-0 snap-start justify-between rounded-home-card border-0 bg-secondary p-5.5 text-left text-foreground transition-colors duration-fast ease-standard motion-reduce:transition-none active:bg-accent",
         agenda && "w-[min(100%,calc(280px_*_clamp(1,var(--alpha-text-scale,1),1.3)))] bg-alpha text-alpha-foreground active:bg-alpha/90",
         className,
       )}

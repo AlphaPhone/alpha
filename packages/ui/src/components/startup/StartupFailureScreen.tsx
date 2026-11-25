@@ -1,4 +1,6 @@
-import { TriangleAlert } from "lucide-react";
+import { useId } from "react";
+import { ChevronDown, TriangleAlert } from "lucide-react";
+import { useLayerRef } from "../../lib/layers.tsx";
 import { Alert } from "../Alert.tsx";
 import { Button } from "../Button.tsx";
 import type { StartupFailure } from "./vocabulary.ts";
@@ -43,11 +45,13 @@ const kinds: Record<StartupFailure, string> = {
  * @model spec/app/startup/recovery.md
  */
 export function StartupFailureScreen({ kind, version, platform, withoutWebView = false, saving = false, unsaved = false, asHome = false, switching = false, switchFailed = false, onReload, onReloadAnyway, onSwitchHome }: StartupFailureScreenProps) {
+  const titleId = useId();
+  const layerRef = useLayerRef("DialogLayer");
   return (
-    <div role="alertdialog" aria-modal="true" aria-labelledby="startup-failure-title" className="fixed inset-0 z-dialog flex overflow-auto bg-background p-6 text-foreground">
+    <div ref={layerRef} role="alertdialog" aria-modal="true" aria-labelledby={titleId} className="fixed inset-0 z-alert flex overflow-auto bg-background p-6 text-foreground">
       <div className="m-auto flex w-full max-w-sm flex-col gap-4">
         <TriangleAlert aria-hidden className="size-10 text-warn" />
-        <h1 id="startup-failure-title" className="font-display text-3xl font-light">Something went wrong</h1>
+        <h1 id={titleId} className="font-display text-3xl font-light">Something went wrong</h1>
         {withoutWebView ? <Alert variant="warn">This phone has no WebView</Alert> : null}
         {unsaved ? <Alert variant="warn">Unsaved edits would be lost</Alert> : null}
         {switchFailed ? <Alert variant="warn">Couldn't open Android's Home settings</Alert> : null}
@@ -56,8 +60,11 @@ export function StartupFailureScreen({ kind, version, platform, withoutWebView =
           {unsaved && onReloadAnyway ? <Button variant="destructive" onClick={onReloadAnyway}>Reload anyway</Button> : null}
           {asHome ? <Button variant="secondary" loading={switching} disabled={!onSwitchHome && !switching} onClick={onSwitchHome}>Switch Home</Button> : null}
         </div>
-        <details className="text-sm text-muted-foreground">
-          <summary className="flex min-h-11 cursor-pointer items-center">Diagnostics</summary>
+        <details className="group text-sm text-muted-foreground">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2">
+            <span>Diagnostics</span>
+            <ChevronDown aria-hidden className="size-4 transition-transform duration-fast ease-standard motion-reduce:transition-none group-open:rotate-180" />
+          </summary>
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-lg bg-secondary p-3 font-mono text-xs text-secondary-foreground">
             <dt>failure</dt>
             <dd>{kinds[kind]}</dd>

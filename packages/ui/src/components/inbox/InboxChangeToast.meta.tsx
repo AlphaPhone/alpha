@@ -11,6 +11,7 @@ export const meta: ComponentMeta<InboxChangeToastProps> = {
     "Archived, can restore": { phase: "done" },
     "Moved back": { operation: "unarchive", phase: "done", onUndo: undefined },
     Refused: { phase: "refused", onUndo: undefined },
+    "Trash refused": { operation: "trash", count: 3, phase: "refused", onUndo: undefined },
     "Not confirmed": { phase: "unknown", onUndo: undefined },
     "Out of date": { operation: "untrash", phase: "outOfDate", onUndo: undefined },
   },
@@ -23,5 +24,6 @@ export const meta: ComponentMeta<InboxChangeToastProps> = {
     },
     "Archived, can restore": ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).getByRole("button", { name: "Restore" })).toBeInTheDocument(),
     Refused: ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).queryByRole("button")).toBeNull(),
+    "Trash refused": ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).getByText("Could not move 3 emails to Trash")).toBeInTheDocument(),
   },
 };

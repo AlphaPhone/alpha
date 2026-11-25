@@ -41,7 +41,7 @@ export function AssistantChatHeader({ title, context, grabber, onHome, onClose, 
           className={cn(focusRing, "flex min-h-11 min-w-0 items-center gap-3 rounded-sm text-left")}
         >
           <ChevronLeft aria-hidden className="-mr-2 size-4.5 shrink-0" />
-          <span aria-hidden className="flex size-8.5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-alpha text-alpha-foreground"><Mark className="size-[118%] shrink-0" /></span>
+          <span aria-hidden className="flex size-8.5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-alpha text-alpha-foreground"><Mark aria-hidden className="size-full shrink-0 scale-[1.18]" /></span>
         </button>
         {told ? <AssistantContextChip {...told} className="ml-2.5" /> : null}
       </div>
@@ -49,10 +49,10 @@ export function AssistantChatHeader({ title, context, grabber, onHome, onClose, 
       <div className="col-start-3 flex min-w-0 items-center justify-end gap-0.5">
         {onResize ? (
           <Button variant="ghost" size="icon" aria-label={expanded ? "Shrink chat" : "Expand chat"} className="hover:bg-transparent" onClick={onResize}>
-            {expanded ? <Minimize2 className="size-4.5" /> : <Maximize2 className="size-4.5" />}
+            {expanded ? <Minimize2 aria-hidden className="size-4.5" /> : <Maximize2 aria-hidden className="size-4.5" />}
           </Button>
         ) : null}
-        {onClose ? <Button variant="ghost" size="icon" aria-label="Minimize chat" className="hover:bg-transparent" onClick={onClose}><ChevronDown className="size-5" /></Button> : null}
+        {onClose ? <Button variant="ghost" size="icon" aria-label="Minimize chat" className="hover:bg-transparent" onClick={onClose}><ChevronDown aria-hidden className="size-5" /></Button> : null}
       </div>
     </header>
   );

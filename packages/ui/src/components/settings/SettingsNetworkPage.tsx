@@ -66,7 +66,10 @@ export function SettingsNetworkPage({ online, reading = false, scan, scanning = 
   const [passphrase, setPassphrase] = useState("");
   const said = scans[scan];
   const android = { starting, onAndroid };
-  const ready = chosen !== undefined && onJoin !== undefined && !joining && (fits?.(chosen, passphrase) ?? false);
+  const selected = chosen
+    ? networks.find((network) => network.name === chosen.name && network.security === chosen.security) ?? (joining ? chosen : undefined)
+    : undefined;
+  const ready = selected !== undefined && onJoin !== undefined && !joining && (fits?.(selected, passphrase) ?? false);
   return (
     <SettingsPage title="Network" told={told} onBack={onBack} backLabel="Back to General" actions={onRescan ? <Button variant="ghost" size="sm" onClick={onRescan}>Scan again</Button> : undefined}>
       {said ? <Banner variant="warn">{said}</Banner> : null}
@@ -74,37 +77,41 @@ export function SettingsNetworkPage({ online, reading = false, scan, scanning = 
       <ListGroup>
         <ListRow leading={<Globe />} title="Internet" trailing={reading ? <Spinner size="sm" label="Reading" /> : onlines[online]} />
       </ListGroup>
-      <ListGroup heading="Nearby">
-        {scanning ? <ListRow title="Scanning" trailing={<Spinner size="sm" label="Scanning" />} /> : null}
-        {networks.map((network) => (
-          <ListRow
-            key={network.name}
-            leading={unsecured(network.security) ? <LockOpen /> : <Lock />}
-            title={network.name}
-            detail={securities[network.security]}
-            selected={chosen?.name === network.name}
-            onClick={() => {
-              setChosen(network);
-              setPassphrase("");
-            }}
-          />
-        ))}
-      </ListGroup>
-      {chosen ? (
+      {scanning || networks.length > 0 ? (
+        <ListGroup heading="Nearby">
+          {scanning ? <ListRow title="Scanning" trailing={<Spinner size="sm" label="Scanning" />} /> : null}
+          {networks.map((network) => (
+            <ListRow
+              key={`${network.name}\0${network.security}`}
+              leading={unsecured(network.security) ? <LockOpen /> : <Lock />}
+              title={network.name}
+              detail={securities[network.security]}
+              selected={selected?.name === network.name && selected.security === network.security}
+              onClick={() => {
+                setChosen(network);
+                setPassphrase("");
+              }}
+            />
+          ))}
+        </ListGroup>
+      ) : null}
+      {selected ? (
         <form
           className="flex flex-col gap-2 px-4"
           onSubmit={(event) => {
             event.preventDefault();
             if (!ready) return;
-            onJoin(chosen, passphrase);
+            onJoin(selected, passphrase);
             setPassphrase("");
-            setChosen(undefined);
           }}
         >
-          {unsecured(chosen.security) ? null : (
-            <Input type="password" autoComplete="off" aria-label={`Password for ${chosen.name}`} value={passphrase} onChange={(event) => setPassphrase(event.target.value)} />
+          {unsecured(selected.security) ? null : (
+            <Input type="password" autoComplete="off" placeholder="Password" aria-label={`Password for ${selected.name}`} value={passphrase} onChange={(event) => setPassphrase(event.target.value)} />
           )}
-          <Button type="submit" disabled={!ready} loading={joining}>{`Join ${chosen.name}`}</Button>
+          <div className="flex gap-2">
+            {!joining ? <Button variant="secondary" onClick={() => { setChosen(undefined); setPassphrase(""); }}>Cancel</Button> : null}
+            <Button type="submit" className="flex-1" disabled={!ready} loading={joining}>{`Join ${selected.name}`}</Button>
+          </div>
         </form>
       ) : null}
       <ListGroup>

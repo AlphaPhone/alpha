@@ -1,6 +1,7 @@
-import { ChevronLeft, Star, X } from "lucide-react";
+import { ChevronLeft, Clock, Star, X } from "lucide-react";
 import { useState } from "react";
 import { cn, focusRing } from "../../lib/cn.ts";
+import { dockClearance } from "../../lib/styles.ts";
 import { Button } from "../Button.tsx";
 import { SearchField } from "../SearchField.tsx";
 import { Spinner } from "../Spinner.tsx";
@@ -30,9 +31,10 @@ export function BrowserLibrary({ bookmarks, history, loading, failed, onBack, on
   return (
     <Tabs defaultValue="Bookmarks" onValueChange={() => setQuery("")} className="absolute inset-0 z-50 min-h-0 gap-0 bg-background motion-safe:animate-rise">
       <header data-host-chrome="" className="flex min-h-13 shrink-0 items-center gap-0.5 px-2 in-data-[alpha-launcher]:mt-11 in-data-[alpha-launcher]:min-h-14 in-data-[alpha-launcher]:gap-2 in-data-[alpha-launcher]:pr-3">
-        <Button variant="ghost" size="icon" aria-label="Back to page" className="size-13 rounded-lg in-data-[alpha-launcher]:size-11" onClick={onBack}><ChevronLeft /></Button>
+        <h1 className="sr-only">Browser library</h1>
+        <Button variant="ghost" size="icon" aria-label="Back to page" className="size-13 rounded-lg in-data-[alpha-launcher]:size-11" onClick={onBack}><ChevronLeft aria-hidden /></Button>
         <TabsList aria-label="Browser library" className="gap-0.5 p-0.75">
-          {sections.map((section) => <TabsTrigger key={section} value={section} className="min-h-9.5 flex-none data-[state=active]:bg-alpha data-[state=active]:text-alpha-foreground">{section}</TabsTrigger>)}
+          {sections.map((section) => <TabsTrigger key={section} value={section} className="min-h-11 flex-none data-[state=active]:bg-alpha data-[state=active]:text-alpha-foreground">{section}</TabsTrigger>)}
         </TabsList>
       </header>
       {sections.map((section) => (
@@ -62,16 +64,16 @@ function LibraryList({ title, entries, query, onQuery, loading, failed, onRetry,
     <>
       <SearchField value={query} onValueChange={onQuery} aria-label={label} placeholder={label}
         className="mx-4 mb-1.5 shrink-0 [&>input]:h-11 [&>input]:rounded-full [&>input]:pr-3.5 [&>input]:pl-9.5 [&>svg]:left-3.5 [&>svg]:size-4" />
-      <div className="min-h-0 flex-1 overflow-y-auto pt-2 pb-35">
-        {title === "History" && visible.length > 0 && <h3 className="mx-5 mt-3.5 mb-1 text-fine font-semibold text-muted-foreground">Earlier</h3>}
+      <div className={cn(dockClearance, "min-h-0 flex-1 overflow-y-auto pt-2")}>
+        {title === "History" && visible.length > 0 && <h2 className="mx-5 mt-3.5 mb-1 text-fine font-semibold text-muted-foreground">Earlier</h2>}
         {visible.length > 0 && <ul>{visible.map((entry) => <li key={entry.url} className="flex items-center pr-2.5">
           <LibraryRow entry={entry} onOpen={onOpen} />
           {onRemoveBookmark && <Button variant="ghost" size="icon" aria-label={`Remove bookmark ${entry.title || entry.url}`}
-            className="size-11 shrink-0 rounded-full text-muted-foreground" onClick={() => onRemoveBookmark(entry)}><X className="size-4.5" /></Button>}
+            className="size-11 shrink-0 rounded-full text-muted-foreground" onClick={() => onRemoveBookmark(entry)}><X aria-hidden className="size-4.5" /></Button>}
         </li>)}</ul>}
         {visible.length === 0 && (seeking
           ? <p role="status" className="px-6 py-10 text-center text-base leading-plain text-muted-foreground">No matches</p>
-          : <div role="status" aria-label={`No ${title.toLowerCase()}`} className="flex flex-col items-center gap-2.5 px-6 py-15 text-base leading-plain text-muted-foreground"><Star aria-hidden className="size-7" />Empty</div>)}
+          : <div role="status" aria-label={`No ${title.toLowerCase()}`} className="flex flex-col items-center gap-2.5 px-6 py-15 text-base leading-plain text-muted-foreground">{title === "History" ? <Clock aria-hidden className="size-7" /> : <Star aria-hidden className="size-7" />}Empty</div>)}
       </div>
     </>
   );

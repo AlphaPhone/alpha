@@ -12,7 +12,7 @@ export function MapsSheet({ height, className, style, ...props }: MapsSheetProps
     <section
       style={{ ...style, height }}
       className={cn(
-        "absolute inset-x-0 bottom-0 z-20 flex flex-col rounded-t-sheet border-t border-border bg-background text-foreground shadow-sheet transition-[height] duration-slow ease-standard motion-safe:animate-rise",
+        "absolute inset-x-0 bottom-0 z-20 flex flex-col rounded-t-sheet border-t border-border/60 bg-popover text-popover-foreground shadow-sheet transition-[height] duration-slow ease-standard motion-safe:animate-rise motion-reduce:transition-none dark:border-border",
         className,
       )}
       {...props}

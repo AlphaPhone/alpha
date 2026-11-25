@@ -23,7 +23,7 @@ export function TabsTrigger({ className, ...props }: TabsTriggerProps) {
     <TabsPrimitive.Trigger
       className={cn(
         focusRing,
-        "min-h-11 min-w-11 flex-1 rounded-full px-4 text-sm font-semibold text-muted-foreground transition-colors duration-fast ease-standard disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-foreground data-[state=active]:text-background",
+        "min-h-11 min-w-11 flex-1 rounded-full px-4 text-sm font-semibold text-muted-foreground transition-colors duration-fast ease-standard motion-reduce:transition-none disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-foreground data-[state=active]:text-background",
         className,
       )}
       {...props}

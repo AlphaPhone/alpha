@@ -59,12 +59,28 @@ export function AssistantAttachmentPickerBody({
       {access === "denied" && onOpenSettings ? <Button variant="secondary" onClick={onOpenSettings}>Open Settings</Button> : null}
     </EmptyState>
   ) : status === "loading" && !files.length ? (
-    <div aria-busy className="flex flex-col gap-3"><Skeleton className="h-13" /><Skeleton className="h-13" /><Skeleton className="h-13" /></div>
+    <div role="status" aria-label="Loading files" aria-busy className="flex flex-col gap-3"><Skeleton className="h-13" /><Skeleton className="h-13" /><Skeleton className="h-13" /></div>
   ) : status === "failed" && !files.length ? (
     <EmptyState icon={<FileX />} title="Could not open the folder">{onRetry ? <Button variant="secondary" onClick={onRetry}>Try again</Button> : null}</EmptyState>
   ) : !files.length ? (
     <EmptyState icon={photos ? <ImageOff /> : <FileX />} title={photos ? "No photos" : "No documents"} />
   ) : undefined;
+  const panel = (
+    <>
+      {access === "limited" && onOpenSettings ? <Banner variant="info" action={<Button variant="outline" size="sm" onClick={onOpenSettings}>Settings</Button>}>Some files are hidden</Banner> : null}
+      {refused.length ? <Banner variant="warn">{`Not attached: ${refused.join(", ")}`}</Banner> : null}
+      {empty ?? (
+        <ListGroup surface="plain" aria-label={photos ? "Photos" : "Documents"}>
+          {files.map((file) => {
+            const chosen = selected.includes(file.id);
+            return <AssistantFileRow key={file.id} file={file} selected={chosen} onSelect={reading || (!chosen && selected.length >= room) ? undefined : (value) => onSelect(file.id, value)} />;
+          })}
+        </ListGroup>
+      )}
+      {status === "failed" && files.length && onRetry ? <Button variant="secondary" onClick={onRetry}>Try again</Button> : null}
+      {more && onMore ? <Button variant="ghost" onClick={onMore}>More</Button> : null}
+    </>
+  );
   return (
     <div className="flex flex-col gap-3" {...props}>
       <Tabs value={tab} onValueChange={(value) => onTabChange(value === "documents" ? "documents" : "photos")} className="gap-3">
@@ -72,20 +88,8 @@ export function AssistantAttachmentPickerBody({
           <TabsTrigger value="photos">Photos</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
         </TabsList>
-        <TabsContent value={tab} className="flex flex-col gap-3">
-          {access === "limited" && onOpenSettings ? <Banner variant="info" action={<Button variant="outline" size="sm" onClick={onOpenSettings}>Settings</Button>}>Some files are hidden</Banner> : null}
-          {refused.length ? <Banner variant="warn">{`Not attached: ${refused.join(", ")}`}</Banner> : null}
-          {empty ?? (
-            <ListGroup surface="plain" aria-label={photos ? "Photos" : "Documents"}>
-              {files.map((file) => {
-                const chosen = selected.includes(file.id);
-                return <AssistantFileRow key={file.id} file={file} selected={chosen} onSelect={reading || (!chosen && selected.length >= room) ? undefined : (value) => onSelect(file.id, value)} />;
-              })}
-            </ListGroup>
-          )}
-          {status === "failed" && files.length && onRetry ? <Button variant="secondary" onClick={onRetry}>Try again</Button> : null}
-          {more && onMore ? <Button variant="ghost" onClick={onMore}>More</Button> : null}
-        </TabsContent>
+        <TabsContent value="photos" className="flex flex-col gap-3">{photos ? panel : null}</TabsContent>
+        <TabsContent value="documents" className="flex flex-col gap-3">{photos ? null : panel}</TabsContent>
       </Tabs>
       <div className="flex items-center gap-3">
         <span className="flex-1 text-sm text-muted-foreground tabular-nums">{`${selected.length} of ${room}`}</span>

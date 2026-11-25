@@ -31,11 +31,11 @@ export function NoteMenu({ pinned = false, onShare, onPin, onDelete, size = "md"
         <Ellipsis aria-hidden className="size-5.5" />
       </MenuTrigger>
       <MenuContent aria-label="Note actions" aria-labelledby={undefined} sideOffset={size === "sm" ? 6 : 2} alignOffset={size === "sm" ? -58 : 2}
-        className="min-w-52 rounded-lg border-0 bg-card p-1.5 shadow-lg">
+        className="min-w-52 rounded-lg p-1.5 shadow-lg">
         <MenuItem disabled={!onShare} onSelect={onShare} className={item}><Share2 aria-hidden className="size-4.5" />Share</MenuItem>
         <MenuItem disabled={!onPin} onSelect={onPin} className={item}><Pin aria-hidden className="size-4.5" />{pinned ? "Unpin" : "Pin"}</MenuItem>
         <div role="separator" className="my-1 border-t border-border" />
-        <MenuItem disabled={!onDelete} onSelect={onDelete} className={item}><Trash2 aria-hidden className="size-4.5" />Delete</MenuItem>
+        <MenuItem destructive disabled={!onDelete} onSelect={onDelete} className={item}><Trash2 aria-hidden className="size-4.5" />Delete</MenuItem>
       </MenuContent>
     </Menu>
   );

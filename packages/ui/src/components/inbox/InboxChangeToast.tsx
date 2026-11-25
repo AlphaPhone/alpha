@@ -1,7 +1,12 @@
 import { Toast } from "../Toast.tsx";
 
 const verbs = { archive: "Archived", trash: "Moved to Trash", unarchive: "Moved back to the Inbox", untrash: "Taken out of Trash" } as const;
-const nouns = { archive: "archive", trash: "move it to Trash", unarchive: "move it back", untrash: "take it out" } as const;
+const refused = {
+  archive: (many: string) => `Could not archive ${many}`,
+  trash: (many: string) => `Could not move ${many} to Trash`,
+  unarchive: (many: string) => `Could not move ${many} back to the Inbox`,
+  untrash: (many: string) => `Could not take ${many} out of Trash`,
+} as const;
 
 export type InboxChangeToastProps = {
   /** What was done to the messages. */
@@ -23,7 +28,7 @@ export type InboxChangeToastProps = {
 export function InboxChangeToast({ operation, count, phase, onUndo }: InboxChangeToastProps) {
   const many = `${count} ${count === 1 ? "email" : "emails"}`;
   const text =
-    phase === "refused" ? `Could not ${nouns[operation]} ${many}`
+    phase === "refused" ? refused[operation](many)
     : phase === "outOfDate" ? "Changed since. Cannot restore."
     : phase === "unknown" ? `Not sure ${many} ${count === 1 ? "was" : "were"} changed. Refresh the list.`
     : `${verbs[operation]} ${many}`;

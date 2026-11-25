@@ -56,6 +56,10 @@ export type AssistantCardProps = {
   onHandOn?: () => void;
 };
 
+function withoutKind<T extends { kind: string }>(card: T): Omit<T, "kind"> {
+  return Object.fromEntries(Object.entries(card).filter(([key]) => key !== "kind")) as Omit<T, "kind">;
+}
+
 /**
  * One card of a reply, of any kind, given the controls its kind offers. It holds no rule: the card's machine says which handlers exist and whether it is settled.
  * @model spec/app/assistant/cards.md
@@ -63,22 +67,22 @@ export type AssistantCardProps = {
 export function AssistantCard({ card, settled, onOpen, onChoose, onAct, onSave, onUseInEmail, onHandOn }: AssistantCardProps) {
   const open = { settled, onOpen };
   switch (card.kind) {
-    case "agenda": return <AssistantAgendaCard {...card} {...open} />;
-    case "call": return <AssistantCallCard {...card} {...open} />;
-    case "digest": return <AssistantDigestCard {...card} {...open} />;
-    case "draft": return <AssistantDraftCard {...card} {...open} />;
-    case "event": return <AssistantEventCard {...card} {...open} />;
-    case "workflow": return <AssistantWorkflowCard {...card} {...open} />;
-    case "note": return <AssistantNoteCard {...card} {...open} />;
-    case "place": return <AssistantPlaceCard {...card} {...open} />;
-    case "receipt": return <AssistantReceiptCard {...card} {...open} />;
-    case "runs": return <AssistantRunsCard {...card} {...open} />;
-    case "notice": return <AssistantNoticeCard {...card} />;
-    case "generic": return <AssistantGenericCard {...card} />;
-    case "decision": return <AssistantDecisionCard {...card} settled={settled} onHandOn={onHandOn} />;
-    case "summary": return <AssistantSummaryCard {...card} settled={settled} onSave={onSave} onUseInEmail={onUseInEmail} />;
-    case "choices": return <AssistantChoicesCard {...card} settled={settled} onChoose={onChoose} />;
-    case "action": return <AssistantActionCard {...card} settled={settled} onAct={onAct} />;
+    case "agenda": return <AssistantAgendaCard {...withoutKind(card)} {...open} />;
+    case "call": return <AssistantCallCard {...withoutKind(card)} {...open} />;
+    case "digest": return <AssistantDigestCard {...withoutKind(card)} {...open} />;
+    case "draft": return <AssistantDraftCard {...withoutKind(card)} {...open} />;
+    case "event": return <AssistantEventCard {...withoutKind(card)} {...open} />;
+    case "workflow": return <AssistantWorkflowCard {...withoutKind(card)} {...open} />;
+    case "note": return <AssistantNoteCard {...withoutKind(card)} {...open} />;
+    case "place": return <AssistantPlaceCard {...withoutKind(card)} {...open} />;
+    case "receipt": return <AssistantReceiptCard {...withoutKind(card)} {...open} />;
+    case "runs": return <AssistantRunsCard {...withoutKind(card)} {...open} />;
+    case "notice": return <AssistantNoticeCard {...withoutKind(card)} />;
+    case "generic": return <AssistantGenericCard {...withoutKind(card)} />;
+    case "decision": return <AssistantDecisionCard {...withoutKind(card)} settled={settled} onHandOn={onHandOn} />;
+    case "summary": return <AssistantSummaryCard {...withoutKind(card)} settled={settled} onSave={onSave} onUseInEmail={onUseInEmail} />;
+    case "choices": return <AssistantChoicesCard {...withoutKind(card)} settled={settled} onChoose={onChoose} />;
+    case "action": return <AssistantActionCard {...withoutKind(card)} settled={settled} onAct={onAct} />;
     case "plain": return <p className="text-base break-words whitespace-pre-line">{card.text}</p>;
     default: {
       const _exhaustive: never = card;

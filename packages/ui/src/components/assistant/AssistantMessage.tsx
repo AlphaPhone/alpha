@@ -50,26 +50,28 @@ export function AssistantMessage({ author, text, quote, attachments = [], childr
         </div>
       ) : null}
       {quote ? <p className="line-clamp-2 border-l-2 border-border pl-3 text-sm break-words text-muted-foreground">{quote}</p> : null}
-      <div className="flex max-w-full items-start gap-2.5">
-        {owner ? null : <span aria-hidden className="mt-0.75 flex size-4.5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-alpha text-alpha-foreground"><Mark className="size-[118%] shrink-0" /></span>}
-        {actions ? (
-          <Menu>
-            <MenuTrigger asChild>
-              <button type="button" className={cn(focusRing, bubble, "relative before:absolute before:inset-0 before:min-h-11")}>{body}</button>
-            </MenuTrigger>
-            <MenuContent align={owner ? "end" : "start"}>
-              {onQuote ? <MenuItem onSelect={onQuote}><CornerUpLeft aria-hidden />Reply</MenuItem> : null}
-              {onCopy ? <MenuItem onSelect={onCopy}><Copy aria-hidden />Copy</MenuItem> : null}
-              {onUseInEmail ? <MenuItem onSelect={onUseInEmail}><Mail aria-hidden />Use in email</MenuItem> : null}
-              {onEditAgain ? <MenuItem onSelect={onEditAgain}><Pencil aria-hidden />Edit and resend</MenuItem> : null}
-              {onFork ? <MenuItem onSelect={onFork}><GitBranch aria-hidden />New chat from here</MenuItem> : null}
-              {onReadAloud ? <MenuItem onSelect={onReadAloud}><Volume2 aria-hidden />Read aloud</MenuItem> : null}
-            </MenuContent>
-          </Menu>
-        ) : (
-          <p className={bubble}>{body}</p>
-        )}
-      </div>
+      {text ? (
+        <div className="flex max-w-full items-start gap-2.5">
+          {owner ? null : <span aria-hidden className="mt-0.75 flex size-4.5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-alpha text-alpha-foreground"><Mark aria-hidden className="size-full shrink-0 scale-[1.18]" /></span>}
+          {actions ? (
+            <Menu>
+              <MenuTrigger asChild>
+                <button type="button" className={cn(focusRing, bubble, "relative min-w-11 before:absolute before:inset-x-0 before:top-1/2 before:min-h-11 before:-translate-y-1/2")}>{body}</button>
+              </MenuTrigger>
+              <MenuContent align={owner ? "end" : "start"}>
+                {onQuote ? <MenuItem onSelect={onQuote}><CornerUpLeft aria-hidden />Reply</MenuItem> : null}
+                {onCopy ? <MenuItem onSelect={onCopy}><Copy aria-hidden />Copy</MenuItem> : null}
+                {onUseInEmail ? <MenuItem onSelect={onUseInEmail}><Mail aria-hidden />Use in email</MenuItem> : null}
+                {onEditAgain ? <MenuItem onSelect={onEditAgain}><Pencil aria-hidden />Edit and resend</MenuItem> : null}
+                {onFork ? <MenuItem onSelect={onFork}><GitBranch aria-hidden />New chat from here</MenuItem> : null}
+                {onReadAloud ? <MenuItem onSelect={onReadAloud}><Volume2 aria-hidden />Read aloud</MenuItem> : null}
+              </MenuContent>
+            </Menu>
+          ) : (
+            <p className={bubble}>{body}</p>
+          )}
+        </div>
+      ) : null}
       {children ? <div className="flex w-full flex-col gap-3">{children}</div> : null}
     </article>
   );

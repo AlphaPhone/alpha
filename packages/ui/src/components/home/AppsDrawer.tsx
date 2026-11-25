@@ -1,8 +1,10 @@
+import { useCallback, useMemo } from "react";
 import { Search, X } from "lucide-react";
 import { Button } from "../Button.tsx";
 import { AppTile } from "../AppTile.tsx";
 import { Input } from "../Input.tsx";
 import { cn } from "../../lib/cn.ts";
+import { useLayerRef } from "../../lib/layers.tsx";
 import { dockClearance } from "../../lib/styles.ts";
 import { HomeAppMenu, type HomeAppMenuProps } from "./HomeAppMenu.tsx";
 import { type HomeNoticeMessage, HomeNotice } from "./HomeNotice.tsx";
@@ -124,21 +126,29 @@ function DrawerTile({ app, detail, opening, hold, menu, onOpen, onOpenMenu }: {
 
 /** The native launcher catalog in a drawer over Home. @model spec/app/home/drawer.md */
 export function AppsDrawer({ apps, query, catalog, opening, notice, hold, menu, onSearch, onClose, onBack = onClose, onOpen, onOpenMenu, onRetry }: AppsDrawerProps) {
-  const entries = matches(apps, query);
+  const entries = useMemo(() => matches(apps, query), [apps, query]);
   const reading = catalog === "reading";
   const failed = catalog === "unavailable";
+  const layerRef = useLayerRef("SheetLayer");
+  const drawerRef = useCallback((node: HTMLElement | null) => {
+    const cleanup = layerRef(node);
+    if (node && !node.contains(node.ownerDocument.activeElement)) {
+      node.querySelector<HTMLElement>("h1")?.focus();
+    }
+    return cleanup;
+  }, [layerRef]);
   return (
-    <section data-alpha-apps-drawer="" role="dialog" aria-modal="true" aria-label="Apps"
-      className="absolute inset-x-0 top-[max(--spacing(11),var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] bottom-0 z-10 flex min-h-0 flex-col bg-background pt-3 text-foreground"
+    <section ref={drawerRef} data-alpha-apps-drawer="" role="dialog" aria-modal="true" aria-label="Apps"
+      className="absolute inset-0 z-sheet flex min-h-0 flex-col bg-background pt-[max(--spacing(11),var(--alpha-safe-top))] text-foreground"
       onKeyDown={(event) => {
         if (event.key !== "Escape" || event.defaultPrevented) return;
         event.preventDefault();
         event.stopPropagation();
         onBack();
       }}>
-      <header className="flex h-11 shrink-0 items-center gap-2 pr-3 pl-5">
-        <h1 className="grow font-display text-3xl font-light outline-none">Apps</h1>
-        <Button variant="ghost" size="icon" aria-label="Close apps" onClick={onClose}><X className="size-5" /></Button>
+      <header className="flex h-11 shrink-0 items-center gap-2 pr-3 pl-5 pt-3">
+        <h1 tabIndex={-1} className="grow font-display text-3xl font-light outline-none">Apps</h1>
+        <Button variant="ghost" size="icon" aria-label="Close apps" onClick={onClose}><X aria-hidden className="size-5" /></Button>
       </header>
       <div className="relative mx-4 mt-3 mb-2 shrink-0">
         <Search aria-hidden className="pointer-events-none absolute top-1/2 left-4 size-4.5 -translate-y-1/2 text-muted-foreground" />
