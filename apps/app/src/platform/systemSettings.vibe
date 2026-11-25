@@ -11,7 +11,7 @@ import { microphoneAccess } from "./voice.vibe"
 
 module held {
   import { registerPlugin } from "@capacitor/core"
-  import { type SystemClient, createPasswordsClient, filesClient, locationClient, noticesClient, permittedPhotosClient, wifiClient } from "@elizaos/os-bridges"
+  import { type NotificationsNativePlugin, type SystemClient, createPasswordsClient, filesClient, locationClient, noticesClient, permittedPhotosClient, wifiClient } from "@elizaos/os-bridges"
 
   export type PasswordProviderAction = "settings" | "install" | "open"
   export type AppPermission = "camera" | "notifications"
@@ -30,6 +30,8 @@ module held {
   let wifi: ReturnType<typeof wifiClient> | undefined
   let files: ReturnType<typeof filesClient> | undefined
   let photos: ReturnType<typeof permittedPhotosClient> | undefined
+  interface ApprovalNoticeHost extends NotificationsNativePlugin { workflowApprovalScope(): Promise<unknown> }
+  let noticeHost: ApprovalNoticeHost | undefined
   let notices: ReturnType<typeof noticesClient> | undefined
   let passwords: ReturnType<typeof createPasswordsClient> | undefined
   let host: SettingsHost | undefined
@@ -57,8 +59,12 @@ module held {
     return (photos ??= permittedPhotosClient())
   }
   /** @throws {never} */
+  export function noticeHostOf(): ApprovalNoticeHost {
+    return (noticeHost ??= registerPlugin<ApprovalNoticeHost>("ElizaNotifications"))
+  }
+  /** @throws {never} */
   export function noticesOf(): ReturnType<typeof noticesClient> {
-    return (notices ??= noticesClient())
+    return (notices ??= noticesClient({ plugin: noticeHostOf() }))
   }
   /** @throws {never} */
   export function passwordsOf(): ReturnType<typeof createPasswordsClient> {
@@ -69,8 +75,8 @@ module held {
     return (host ??= registerPlugin<SettingsHost>("AlphaDevice"))
   }
 }
-import { type AppPermission, type PasswordProviderAction, filesOf, hostOf, locationOf, noticesOf, passwordsOf, photosOf, systemOf, wifiOf } from held
-export type { PasswordProviderAction }
+import { type AppPermission, type PasswordProviderAction, filesOf, hostOf, locationOf, noticeHostOf, noticesOf, passwordsOf, photosOf, systemOf, wifiOf } from held
+export { type PasswordProviderAction, noticeHostOf, noticesOf }
 
 module web {
   /** The browser's own answer for `name`, or none where it has no such permission. */

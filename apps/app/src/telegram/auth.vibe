@@ -1,0 +1,285 @@
+// spec/app/telegram/auth.md, "Story: Sign in to my Telegram user account"
+import * as Auth from "../../gen/app__telegram__auth.effect.vibe"
+import type { AuthOutcome, Effect as Out, Event, SendOutcome, Trouble } from "../../gen/app__telegram__auth.effect.vibe"
+import {
+  AuthRevoked,
+  BotTokenRejected,
+  type MessagingFailure,
+  MessagingSessions,
+  ProviderError,
+  RateLimited,
+  secretOf,
+} from "../platform/messaging.vibe"
+import { Unreachable, Unsent } from "../platform/remote.vibe"
+import { Telegram, type TelegramClient, type TelegramUser, assertTelegramUserToken } from "../platform/telegram.vibe"
+import type { Outcome } from "../platform/remote.vibe"
+import { type Job, answer, contained, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
+import {
+  TELEGRAM_SESSION_KEY,
+  TelegramStore,
+  currentSessionToken,
+  isBotTokenInput,
+  isRevokedFailure,
+  messagingOutcomeOf,
+} from "./store.vibe"
+
+function sendTroubleOf(failure: MessagingFailure): SendOutcome {
+  return match (failure) {
+    when RateLimited: { tag: "SendFailed", trouble: "FloodWait", wait: Math.max(1, failure.retryAfter) * 1000 };
+    when BotTokenRejected: { tag: "SendFailed", trouble: "BotTokenRejected", wait: 0 };
+    when ProviderError: {
+      tag: "SendFailed",
+      trouble: failure.code === "PHONE_NUMBER_INVALID" ? "InvalidPhone" : "Unreachable",
+      wait: 0,
+    };
+    when Unreachable: { tag: "SendFailed", trouble: "Offline", wait: 0 };
+    when Unsent: { tag: "SendFailed", trouble: "Offline", wait: 0 };
+    default: { tag: "SendFailed", trouble: "Unreachable", wait: 0 };
+  }
+}
+
+function authFailureOutcomeOf(failure: MessagingFailure, fallback: Trouble): AuthOutcome {
+  return match (failure) {
+    when RateLimited: { tag: "AuthFailed", trouble: "FloodWait", wait: Math.max(1, failure.retryAfter) * 1000 };
+    when BotTokenRejected: { tag: "AuthBot" };
+    when ProviderError: {
+      tag: "AuthFailed",
+      trouble: failure.code === "PHONE_CODE_EXPIRED"
+        ? "ExpiredCode"
+        : failure.code === "PHONE_CODE_INVALID"
+          ? "WrongCode"
+          : failure.code === "PASSWORD_HASH_INVALID"
+            ? "WrongPassword"
+            : fallback,
+      wait: 0,
+    };
+    when AuthRevoked: { tag: "AuthFailed", trouble: "SessionRevoked", wait: 0 };
+    when Unreachable: { tag: "AuthFailed", trouble: "Offline", wait: 0 };
+    when Unsent: { tag: "AuthFailed", trouble: "Offline", wait: 0 };
+    default: { tag: "AuthFailed", trouble: fallback, wait: 0 };
+  }
+}
+
+effect function persistUserSession(
+  sessionToken: string,
+  user: TelegramUser,
+): AuthOutcome!!(MessagingSessions | TelegramStore) {
+  const valid = assertTelegramUserToken(sessionToken) catch () => undefined
+  if (valid === undefined) return { tag: "AuthBot" }
+  try (try MessagingSessions).set(TELEGRAM_SESSION_KEY, secretOf(valid))
+  try (try TelegramStore).update((snap) => ({
+    ...snap,
+    auth: {
+      ...snap.auth,
+      user,
+      phoneCodeHash: "",
+      pendingAuthId: "",
+      passwordHint: "",
+      qrToken: "",
+      qrLoginUrl: "",
+    },
+  }))
+  return { tag: "AuthUser", account: user.id }
+}
+
+// spec/app/telegram/auth.md, "Opening sign-in moves to phone entry or QR login; phone submission respects FloodWait and takes the next ticket"
+effect function sendPhoneCode(ticket: number, phone: string): Event!!(Telegram | TelegramStore) {
+  if (isBotTokenInput(phone)) {
+    return { type: "codeSent", ticket, sendOutcome: { tag: "SendFailed", trouble: "BotTokenRejected", wait: 0 }, now: untimed }
+  }
+  const sent = (try Telegram).sendCode(phone.trim()) catch (failure) => failure
+  if ("_type" in sent) {
+    try (try TelegramStore).update((snap) => ({
+      ...snap,
+      auth: { ...snap.auth, phone: phone.trim(), phoneCodeHash: sent.phone_code_hash, pendingAuthId: "", passwordHint: "" },
+    }))
+    return { type: "codeSent", ticket, sendOutcome: { tag: "CodeDelivered" }, now: untimed }
+  }
+  return { type: "codeSent", ticket, sendOutcome: sendTroubleOf(sent), now: untimed }
+}
+
+// spec/app/telegram/auth.md, "A verification code is checked with a secret code, and may authenticate a user account, request two-factor password, expire or trigger FloodWait"
+effect function verifyPhoneCode(ticket: number, code: string): Event!!(Telegram | MessagingSessions | TelegramStore) {
+  if (isBotTokenInput(code)) {
+    return { type: "codeVerified", ticket, authOutcome: { tag: "AuthBot" }, session: "", now: untimed }
+  }
+  const store = try TelegramStore
+  const { phone, phoneCodeHash } = (try store.get()).auth
+  const result = (try Telegram).signIn(phone, phoneCodeHash, code.trim()) catch (failure) => failure
+  if ("kind" in result) {
+    if (result.kind === "PasswordRequired") {
+      try store.update((snap) => ({
+        ...snap,
+        auth: { ...snap.auth, pendingAuthId: result.pendingAuthId, passwordHint: result.hint },
+      }))
+      return { type: "codeVerified", ticket, authOutcome: { tag: "AuthNeeds2fa" }, session: "", now: untimed }
+    }
+    const outcome = try persistUserSession(result.sessionToken, result.user)
+    return { type: "codeVerified", ticket, authOutcome: outcome, session: outcome.tag === "AuthUser" ? result.sessionToken : "", now: untimed }
+  }
+  return { type: "codeVerified", ticket, authOutcome: authFailureOutcomeOf(result, "WrongCode"), session: "", now: untimed }
+}
+
+// spec/app/telegram/auth.md, "Two-factor cloud password is checked as a secret and authenticates only a user account"
+effect function checkCloudPassword(ticket: number, password: string): Event!!(Telegram | MessagingSessions | TelegramStore) {
+  const { pendingAuthId } = (try (try TelegramStore).get()).auth
+  const result = (try Telegram).checkPassword(pendingAuthId, password) catch (failure) => failure
+  if ("_type" in result) {
+    const outcome = try persistUserSession(result.session_token, result.user)
+    return { type: "passwordChecked", ticket, authOutcome: outcome, session: outcome.tag === "AuthUser" ? result.session_token : "", now: untimed }
+  }
+  return { type: "passwordChecked", ticket, authOutcome: authFailureOutcomeOf(result, "WrongPassword"), session: "", now: untimed }
+}
+
+// spec/app/telegram/auth.md, "QR login offers an alternate user-account path with expiry, optional two-factor check and secret token"
+effect function pollQrLogin(ticket: number, initialToken?: string): Event!!(Telegram | MessagingSessions | TelegramStore | Auth.Machine) {
+  const client = try Telegram
+  const store = try TelegramStore
+  const authMachine = try Auth.Machine
+  const first = client.exportLoginToken(initialToken) catch (failure) => failure
+  if (!("kind" in first)) {
+    return { type: "qrAnswered", ticket, authOutcome: authFailureOutcomeOf(first, "Unreachable"), session: "", now: untimed }
+  }
+  if (first.kind === "Success") {
+    const outcome = try persistUserSession(first.sessionToken, first.user)
+    return { type: "qrAnswered", ticket, authOutcome: outcome, session: outcome.tag === "AuthUser" ? first.sessionToken : "", now: untimed }
+  }
+  try store.update((snap) => ({
+    ...snap,
+    auth: { ...snap.auth, qrToken: first.token, qrLoginUrl: first.loginUrl },
+  }))
+  if (initialToken !== undefined) {
+    return { type: "qrAnswered", ticket, authOutcome: { tag: "AuthFailed", trouble: "Unreachable", wait: 0 }, session: "", now: untimed }
+  }
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    try sleep("50 millis")
+    const state = try authMachine.get()
+    if (state.work !== "PollingQr" || state.ticket !== ticket) {
+      return { type: "qrAnswered", ticket, authOutcome: { tag: "AuthFailed", trouble: "Unreachable", wait: 0 }, session: "", now: untimed }
+    }
+    const polled = client.exportLoginToken(first.token) catch (failure) => failure
+    if (!("kind" in polled)) {
+      return { type: "qrAnswered", ticket, authOutcome: authFailureOutcomeOf(polled, "Unreachable"), session: "", now: untimed }
+    }
+    if (polled.kind === "Success") {
+      const outcome = try persistUserSession(polled.sessionToken, polled.user)
+      return { type: "qrAnswered", ticket, authOutcome: outcome, session: outcome.tag === "AuthUser" ? polled.sessionToken : "", now: untimed }
+    }
+  }
+  return { type: "qrAnswered", ticket, authOutcome: { tag: "AuthFailed", trouble: "Unreachable", wait: 0 }, session: "", now: untimed }
+}
+
+// spec/app/telegram/auth.md, "Remote revocation and explicit sign-out wipe local data, advance the credential revision and stop sync"
+effect function logOutRemote(ticket: number): Event!!(Telegram | MessagingSessions | TelegramStore) {
+  const token = try currentSessionToken()
+  try (try MessagingSessions).delete(TELEGRAM_SESSION_KEY)
+  try (try TelegramStore).wipe()
+  if (Option.isSome(token)) {
+    try ignore((try Telegram).logOut(token.value))
+  }
+  return { type: "loggedOut", ticket }
+}
+
+effect function wipeLocal(): void!!(MessagingSessions | TelegramStore | Auth.Machine) {
+  try (try TelegramStore).wipe()
+  const state = try (try Auth.Machine).get()
+  if (state.work !== "LoggingOut") {
+    try (try MessagingSessions).delete(TELEGRAM_SESSION_KEY)
+  }
+}
+
+function carry(fx: Out): Job<Event, Telegram | MessagingSessions | TelegramStore | Auth.Machine, []> {
+  return match (fx) {
+    when { tag: "SendPhoneCode", let ticket, let phone }: answer(
+      "auth",
+      sendPhoneCode(ticket, phone),
+      { type: "codeSent", ticket, sendOutcome: { tag: "SendFailed", trouble: "Unreachable", wait: 0 }, now: untimed },
+    );
+    when { tag: "VerifyPhoneCode", let ticket, let code }: answer(
+      "auth",
+      verifyPhoneCode(ticket, code),
+      { type: "codeVerified", ticket, authOutcome: { tag: "AuthFailed", trouble: "Unreachable", wait: 0 }, session: "", now: untimed },
+    );
+    when { tag: "CheckCloudPassword", let ticket, let password }: answer(
+      "auth",
+      checkCloudPassword(ticket, password),
+      { type: "passwordChecked", ticket, authOutcome: { tag: "AuthFailed", trouble: "Unreachable", wait: 0 }, session: "", now: untimed },
+    );
+    when { tag: "StartQrLogin", let ticket }: answer(
+      "auth",
+      pollQrLogin(ticket),
+      { type: "qrAnswered", ticket, authOutcome: { tag: "AuthFailed", trouble: "Unreachable", wait: 0 }, session: "", now: untimed },
+    );
+    when { tag: "SubmitQrToken", let ticket, let token }: answer(
+      "auth",
+      pollQrLogin(ticket, token),
+      { type: "qrAnswered", ticket, authOutcome: { tag: "AuthFailed", trouble: "Unreachable", wait: 0 }, session: "", now: untimed },
+    );
+    when { tag: "StoreSession", let session }: run("store-session", effect {
+      const valid = assertTelegramUserToken(session) catch () => undefined
+      if (valid !== undefined) try (try MessagingSessions).set(TELEGRAM_SESSION_KEY, secretOf(valid))
+    });
+    when { tag: "LogOutRemote", let ticket }: answer("logout", logOutRemote(ticket), { type: "loggedOut", ticket });
+    when { tag: "WipeLocal" }: run("wipe-local", wipeLocal());
+    when { tag: "StopSync" }: run("stop-sync", Effect.void);
+  }
+}
+
+/** Notify the Telegram auth machine that the user session was revoked remotely. */
+export effect function reportSessionRevoked(): void!!(Auth.Machine | MessagingSessions | TelegramStore) {
+  const auth = try Auth.Machine
+  try (try MessagingSessions).delete(TELEGRAM_SESSION_KEY)
+  try (try TelegramStore).wipe()
+  if (Auth.canRevoked(try auth.get())) {
+    try contained(auth.send({ type: "revoked" }), "telegram session revoked")
+  }
+}
+
+/** Resolve the active user session token and `peerKey` for `chat`, triggering revocation when unauthenticated. */
+export effect function resolveAuthedPeer(
+  chat: number,
+): Option.Option<{ readonly token: string; readonly peerKey: string }>!!(MessagingSessions | TelegramStore | Auth.Machine) {
+  const token = try currentSessionToken()
+  if (Option.isNone(token)) {
+    try reportSessionRevoked()
+    return Option.none()
+  }
+  const peerKey = try (try TelegramStore).peerKeyOf(chat)
+  if (peerKey === undefined) return Option.none()
+  return Option.some({ token: token.value, peerKey })
+}
+
+/** Execute an authenticated per-chat Telegram mutation, propagating revocation and mapping honest `kit/attempt` outcomes. */
+export effect function runPeerMutation<A>(
+  chat: number,
+  invoke: (client: TelegramClient, token: string, peerKey: string) => A!MessagingFailure,
+  onSuccess: (result: A, peerKey: string) => void!!TelegramStore,
+): Outcome!!(Telegram | MessagingSessions | TelegramStore | Auth.Machine) {
+  const target = try resolveAuthedPeer(chat)
+  if (Option.isNone(target)) return { confirmed: false, known: true }
+  const { token, peerKey } = target.value
+  const res = invoke(try Telegram, token, peerKey) catch (failure) => ({ failed: failure })
+  if (typeof res === "object" && res !== null && "failed" in res) {
+    if (isRevokedFailure(res.failed)) try reportSessionRevoked()
+    return messagingOutcomeOf(res.failed)
+  }
+  try onSuccess(res, peerKey)
+  return { confirmed: true, known: true }
+}
+
+const machine = reacting(Auth, { keep: 1, open: [{ type: "restart" }], carry })
+
+const floodWake = started(effect {
+  const auth = try Auth.Machine
+  const time = try Time
+  const store = try TelegramStore
+  const deadlines = Stream.changes(Stream.map(auth.changes, (state) => state.floodUntil))
+  try Stream.runDrain(Stream.switchMap(deadlines, (untilAt) => untilAt <= 0 ? Stream.empty : Stream.fromEffect(effect {
+    try time.until(untilAt)
+    try store.update((snap) => snap)
+  })))
+}, "telegram flood wait wake")
+
+/** Telegram user-account authentication shell over `Telegram` and isolated `MessagingSessions`. */
+export const telegramAuth = together(machine, floodWake)

@@ -1,0 +1,188 @@
+// spec/app/slack/auth.md, "Story: Connect and manage my Slack workspaces with user tokens only"
+import * as Workspaces from "../../gen/app__slack.effect.vibe"
+import * as Agent from "../../gen/app__slack__agent.effect.vibe"
+import * as Auth from "../../gen/app__slack__auth.effect.vibe"
+import type { Effect as Out, Event } from "../../gen/app__slack__auth.effect.vibe"
+import * as Composer from "../../gen/app__slack__composer.effect.vibe"
+import * as Conversation from "../../gen/app__slack__conversation.effect.vibe"
+import * as Notices from "../../gen/app__slack__notices.effect.vibe"
+import {
+  BotTokenRejected,
+  MessagingSessions,
+  createPkcePair,
+  randomState,
+  secretOf,
+  tokenValue,
+} from "../platform/messaging.vibe"
+import { SLACK_DEFAULT_USER_SCOPES, Slack, assertSlackUserToken } from "../platform/slack.vibe"
+import { type Job, answer, contained, reacting, run } from "../runtime/reactor.vibe"
+import { SlackLedger, slackSessionKey } from "./ledger.vibe"
+
+const OAUTH_CLIENT_ID = "alpha-slack-user"
+const OAUTH_REDIRECT_URI = "alpha://slack/oauth/callback"
+
+effect function openOAuthBrowser(nonce: number): void!!(Slack | SlackLedger) {
+  const slack = try Slack
+  const ledger = try SlackLedger
+  const pkce = try createPkcePair()
+  const state = randomState()
+  const team = ledger.pendingTeam()
+  const authorizeUrl = slack.authorizeUrl({
+    clientId: OAUTH_CLIENT_ID,
+    redirectUri: OAUTH_REDIRECT_URI,
+    state,
+    codeChallenge: pkce.challenge,
+    userScope: SLACK_DEFAULT_USER_SCOPES,
+    team,
+  })
+  ledger.setPendingOAuth({ nonce, state, verifier: pkce.verifier, authorizeUrl, team })
+}
+
+effect function exchangeCode(ticket: number, code: string, verifier: string): Event!!(Slack | SlackLedger) {
+  const slack = try Slack
+  const ledger = try SlackLedger
+  const response = slack.exchangeCode({
+    code,
+    codeVerifier: verifier,
+    redirectUri: OAUTH_REDIRECT_URI,
+    clientId: OAUTH_CLIENT_ID,
+  }) catch (failure) => failure
+  ledger.setPendingOAuth(undefined)
+  ledger.setPendingTeam(undefined)
+  if (!("ok" in response)) {
+    const reply: Auth.ExchangeOutcome = response instanceof BotTokenRejected ? { tag: "ExchangeBot" } : { tag: "ExchangeErr" }
+    return { type: "exchanged", ticket, reply, token: "", refresh: "" }
+  }
+  const tokenCheck = assertSlackUserToken(response.authed_user.access_token) catch (failure) => failure
+  if (typeof tokenCheck !== "string" || !tokenCheck.startsWith("xoxp-") || response.authed_user.token_type !== "user") {
+    return { type: "exchanged", ticket, reply: { tag: "ExchangeBot" }, token: "", refresh: "" }
+  }
+  const meta = ledger.registerWorkspace(response.team.id, response.team.name, response.authed_user.id)
+  return {
+    type: "exchanged",
+    ticket,
+    reply: { tag: "ExchangeUser", workspace: meta.num, userId: meta.ownerUserNum },
+    token: response.authed_user.access_token,
+    refresh: response.authed_user.refresh_token ?? "",
+  }
+}
+
+effect function storeWorkspaceToken(
+  workspace: number,
+  credentialRev: number,
+  token: string,
+  refresh: string,
+): void!!(
+  SlackLedger | MessagingSessions | Workspaces.Machine | Conversation.Machine | Composer.Machine | Agent.Machine | Notices.Machine
+) {
+  const ledger = try SlackLedger
+  const sessions = try MessagingSessions
+  const meta = ledger.workspaceMeta(workspace)
+  if (!meta) return
+  try sessions.set(slackSessionKey(meta.teamId), secretOf(token, refresh === "" ? undefined : refresh))
+  ledger.setWorkspaceCredentialRev(workspace, credentialRev)
+  ledger.setRateLimitNotice(undefined)
+  try contained((try Workspaces.Machine).send({ type: "workspaceConnected", workspace, credentialRev }), "Slack workspace connected")
+  try contained((try Conversation.Machine).send({ type: "workspaceAdded", workspace }), "Slack conversation workspace added")
+  try contained((try Composer.Machine).send({ type: "workspaceAdded", workspace }, "Device"), "Slack composer workspace added")
+  try contained((try Agent.Machine).send({ type: "workspaceAdded", workspace }, "Device"), "Slack agent workspace added")
+  try contained((try Notices.Machine).send({ type: "workspaceAdded", workspace }), "Slack notices workspace added")
+}
+
+effect function wipeWorkspace(
+  workspace: number,
+  revokeRemote: boolean,
+): void!!(
+  Slack | SlackLedger | MessagingSessions | Workspaces.Machine | Conversation.Machine | Composer.Machine | Agent.Machine | Notices.Machine
+) {
+  const ledger = try SlackLedger
+  const sessions = try MessagingSessions
+  const slack = try Slack
+  const meta = ledger.workspaceMeta(workspace)
+  if (meta) {
+    if (revokeRemote) {
+      const secret = try sessions.get(slackSessionKey(meta.teamId))
+      if (Option.isSome(secret)) try ignore(slack.revoke(tokenValue(secret.value)))
+    }
+    try sessions.delete(slackSessionKey(meta.teamId))
+  }
+  ledger.wipeWorkspace(workspace)
+  try contained((try Workspaces.Machine).send({ type: "workspaceRemoved", workspace }), "Slack workspace removed")
+  try contained((try Conversation.Machine).send({ type: "workspaceRevoked", workspace }), "Slack conversation workspace revoked")
+  try contained((try Composer.Machine).send({ type: "workspaceRevoked", workspace }, "Device"), "Slack composer workspace revoked")
+  try contained((try Agent.Machine).send({ type: "workspaceRevoked", workspace }, "Device"), "Slack agent workspace revoked")
+  try contained((try Notices.Machine).send({ type: "workspaceRemoved", workspace }), "Slack notices workspace removed")
+}
+
+effect function wipeWorkspaceFromState(
+  workspace: number,
+): void!!(
+  Auth.Machine | Slack | SlackLedger | MessagingSessions | Workspaces.Machine | Conversation.Machine | Composer.Machine | Agent.Machine | Notices.Machine
+) {
+  const state = try (try Auth.Machine).get()
+  const revokeRemote = !(state.trouble === "WorkspaceRevoked" && state.revokedWorkspace === workspace)
+  try wipeWorkspace(workspace, revokeRemote)
+}
+
+function carry(
+  fx: Out,
+): Job<
+  Event,
+  Auth.Machine | Slack | SlackLedger | MessagingSessions | Workspaces.Machine | Conversation.Machine | Composer.Machine | Agent.Machine | Notices.Machine,
+  []
+> {
+  return match (fx) {
+    when { tag: "OpenOAuthBrowser", let nonce }: run("oauth-open", openOAuthBrowser(nonce));
+    when { tag: "ExchangeOAuthCode", let ticket, let code, let verifier }:
+      answer("oauth-exchange", exchangeCode(ticket, code, verifier), { type: "exchanged", ticket, reply: { tag: "ExchangeErr" }, token: "", refresh: "" });
+    when { tag: "StoreWorkspaceToken", let workspace, let credentialRev, let token, let refresh }:
+      run(`store-${workspace}`, storeWorkspaceToken(workspace, credentialRev, token, refresh));
+    when { tag: "RevokeRemoteToken", let workspace }: run(`revoke-${workspace}`, Effect.void);
+    when { tag: "WipeWorkspace", let workspace }: run(`wipe-${workspace}`, wipeWorkspaceFromState(workspace));
+    when { tag: "StopWorkspaceSync", let workspace }:
+      run(`stop-sync-${workspace}`, effect {
+        try contained((try Notices.Machine).send({ type: "workspaceRemoved", workspace }), "Slack stop workspace sync")
+      });
+  }
+}
+
+/** Complete an in-flight OAuth2 PKCE browser callback after verifying CSRF `state` against the pending nonce. */
+export effect function completeSlackOAuthCallback(state: string, code: string): void!!(Auth.Machine | SlackLedger) {
+  const auth = try Auth.Machine
+  const ledger = try SlackLedger
+  const pending = ledger.pendingOAuth()
+  if (!pending || pending.state !== state) {
+    ledger.setPendingOAuth(undefined)
+    try contained(auth.send({ type: "callbackReceived", nonce: 0, code: "", verifier: "" }), "Slack OAuth state mismatch")
+    return
+  }
+  try contained(auth.send({ type: "callbackReceived", nonce: pending.nonce, code, verifier: pending.verifier }), "Slack OAuth callback")
+}
+
+/** Reject an attempted bot or app token (`xoxb-` / `xapp-`) directly through the auth state machine. */
+export effect function submitSlackTokenAttempt(token: string): boolean!!(Auth.Machine | SlackLedger) {
+  const auth = try Auth.Machine
+  const state = try auth.get()
+  const checked = assertSlackUserToken(token) catch (failure) => failure
+  if (typeof checked !== "string" || !checked.startsWith("xoxp-")) {
+    if (Auth.canExchanged(state, state.ticket)) {
+      try contained(auth.send({ type: "exchanged", ticket: state.ticket, reply: { tag: "ExchangeBot" }, token: "", refresh: "" }), "Slack bot token rejected")
+      return false
+    }
+    if (Auth.canStartConnect(state)) try contained(auth.send({ type: "startConnect" }), "Slack start connect")
+    if (Auth.canApproveConsent(try auth.get(), true)) try contained(auth.send({ type: "approveConsent", online: true }), "Slack approve consent")
+    const afterApprove = try auth.get()
+    if (Auth.canCallbackReceived(afterApprove, afterApprove.nonce)) {
+      try contained(auth.send({ type: "callbackReceived", nonce: afterApprove.nonce, code: "bot-token-attempt", verifier: "invalid" }), "Slack bot callback")
+    }
+    const afterCallback = try auth.get()
+    if (Auth.canExchanged(afterCallback, afterCallback.ticket)) {
+      try contained(auth.send({ type: "exchanged", ticket: afterCallback.ticket, reply: { tag: "ExchangeBot" }, token: "", refresh: "" }), "Slack bot token rejected")
+    }
+    return false
+  }
+  return true
+}
+
+/** Slack OAuth2 PKCE user-account authentication machine layer. */
+export const slackAuth = reacting(Auth, { carry })

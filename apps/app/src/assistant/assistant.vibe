@@ -20,7 +20,7 @@ import * as Reminders from "../../gen/app__reminders.effect.vibe"
 import * as Comms from "../../gen/app__phone__comms.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
 import type { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe"
-import { Machine as Shell, canAgentGoHome, canReturnCommsView, showing } from "../../gen/app__shell.effect.vibe"
+import { Machine as Shell, type View, canAgentGoHome, canReturnCommsView, showing } from "../../gen/app__shell.effect.vibe"
 import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
 import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
 import { syncClockNow } from "../clock/sync.vibe"
@@ -38,6 +38,7 @@ import { Refused, ask, outcomeOf } from "../platform/remote.vibe"
 import { Attempts, fresh } from "../runtime/attempts.vibe"
 import { CommsPrompts, type CommsPrompt, commsViewOf } from "../phone/comms.vibe"
 import { MailQuestions, withMail } from "../inbox/mail-context.vibe"
+import { MessagingBridge, type MessagingBridgeApi, type MessagingPlatform, boundedMessagingContext } from "../messaging/bridge.vibe"
 import { type Job, answer, applying, contained, following, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { type SpokenChatContext, type SpokenChatLease, VoiceWords } from "../voice/voice.vibe"
@@ -187,20 +188,55 @@ function viewOf(showing: Conversation.Showing): string {
   }
 }
 
-// spec/app/assistant/index.md, "The agent is told the view, the time zone, the day only from Calendar, and whether something is selected"; spec/app/assistant/context.md, "The day and the location go only to a peer that takes them, and a sensitive screen sends no optional field"; spec/app/assistant/context.md, "The time zone told is the one the phone's interface shows, else the one the screen reported, else the one the agent was launched with, else the host's"
-// spec/app/assistant/context.md, "A turn carries the page Browser hands it for the tab in front, beside the observation, only to a peer that declares it"
-function observed(told: boolean, context: Conversation.Context, location: LocationObservation | undefined, selected?: RendererNote | SmsSelection["observation"] | ReturnType<typeof documentObservation>, front?: PageInFront) {
+function messagingPlatformOf(view: View | undefined): MessagingPlatform | undefined {
+  return view === "Telegram" ? "Telegram" : view === "Slack" ? "Slack" : undefined
+}
+
+function showingPlatform(shown: Conversation.Showing): MessagingPlatform | undefined {
+  return match (shown) {
+    when { tag: "App", let view }: messagingPlatformOf(view);
+    default: undefined;
+  }
+}
+
+function messagingAppOf(platform: MessagingPlatform | undefined): Locator.MessagingApp {
+  return platform === "Telegram" ? "OnTelegram" : platform === "Slack" ? "OnSlack" : "NoMessaging"
+}
+
+function shareOf(platform: MessagingPlatform): Prefs.Share {
+  return platform === "Telegram" ? "TelegramContext" : "SlackContext"
+}
+
+// spec/app/assistant/index.md, "The agent is told the view, the time zone, the day only from Calendar, and whether something is selected"; spec/app/assistant/context.md, "The day and the location go only to a peer that takes them, and a sensitive screen sends no optional field"; spec/app/assistant/context.md, "A turn carries bounded Telegram or Slack context only while that app is in front, authenticated, non-sensitive, allowed by Settings' privacy share, and taken by the peer"; spec/app/assistant/context.md, "A turn carries the page Browser hands it for the tab in front, beside the observation, only to a peer that declares it"; spec/app/assistant/context.md, "The time zone told is the one the phone's interface shows, else the one the screen reported, else the one the agent was launched with, else the host's"
+function observed(
+  told: boolean,
+  context: Conversation.Context,
+  location: LocationObservation | undefined,
+  bridge: MessagingBridgeApi,
+  prefs: Prefs.Preferences,
+  selected?: RendererNote | SmsSelection["observation"] | ReturnType<typeof documentObservation>,
+  front?: PageInFront,
+) {
   if (!told) return undefined
+  const platform = showingPlatform(context.showing)
+  const shareAllowed = platform === undefined ? true : Prefs.allows(prefs, shareOf(platform))
+  const raw = platform === undefined ? undefined : bridge.contextOf(platform)
+  const bounded = boundedMessagingContext(raw)
+  const peer = { takes: told, declaresLocation: location !== undefined, declaresPage: front !== undefined }
+  const sendMessaging = platform !== undefined
+    && Locator.sendsMessagingContext(!context.sensitive, messagingAppOf(platform), raw?.authenticated === true, shareAllowed, bounded !== undefined, peer)
   const section = Pages.selectionOf(context.section)
-  const selectedObject = context.sensitive ? undefined : front?.selection ?? (section === "" ? selected : { kind: "settings", id: section })
-  return encodeTurnContext({
+  const sensitive = context.sensitive || !shareAllowed
+  const selectedObject = sensitive ? undefined : front?.selection ?? (section === "" ? selected : { kind: "settings", id: section })
+  const encoded = encodeTurnContext({
     observation: {
-      view: viewOf(context.showing), revision: context.revision, sensitive: context.sensitive, timeZone: Locator.zoneOf(context.zone, "", "", zone()),
+      view: viewOf(context.showing), revision: context.revision, sensitive, timeZone: Locator.zoneOf(context.zone, "", "", zone()),
       ...(selectedObject === undefined ? {} : { selectedObject }),
       ...(location === undefined ? {} : { location }),
     },
-    ...(front === undefined || context.sensitive ? {} : { browserPage: front.page }),
+    ...(front === undefined || sensitive ? {} : { browserPage: front.page }),
   }, { optionalFields: true })
+  return sendMessaging && bounded !== undefined ? { ...encoded, messagingContext: bounded } : encoded
 }
 
 // spec/app/assistant/context.md, "A turn carries the location only while the owner allows it, from a screen that is not sensitive, to a peer that declares it, and only a GPS fix at most thirty minutes old or a network answer that still stands"; spec/app/assistant/context.md, "The day and the location go only to a peer that takes them, and a sensitive screen sends no optional field"; spec/app/settings/preferences.md, "Alpha shares the phone's location or the Browser page open with a chat turn, and changes Gmail or Calendar, only when the phone read that the owner allowed it"
@@ -223,7 +259,7 @@ effect function whereabouts(sensitive: boolean, told: boolean): (LocationObserva
 }
 
 // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
-type ScreenContext = Locator.Machine | Prefs.Machine | Location | Time | Talk | NotesSelection | NoteStore | SmsSelectionContext | Telephony | TabHost
+type ScreenContext = Locator.Machine | Prefs.Machine | MessagingBridge | Location | Time | Talk | NotesSelection | NoteStore | SmsSelectionContext | Telephony | TabHost
 
 interface ScreenTold {
   readonly metadata: TurnContext | undefined
@@ -235,6 +271,8 @@ interface ScreenTold {
 /** What a turn sent now tells the agent of the screen, read as it is sent: a review from Messages uses the same selected SIM its observation names, the open Files document goes as the turn's attachment, and the Browser page in front beside the observation. */
 effect function screenTold(told: boolean, context: Conversation.Context, transcript?: NoteTranscript): ScreenTold!!ScreenContext {
   const location = try whereabouts(context.sensitive, told)
+  const bridge = try MessagingBridge
+  const prefState = try (try Prefs.Machine).get()
   const view = viewOf(context.showing)
   const seeSelection = told && !context.sensitive
   const seen = seeSelection && view === "notes" ?
@@ -243,8 +281,8 @@ effect function screenTold(told: boolean, context: Conversation.Context, transcr
   const selection = seeSelection && view === "messages" ? try captureSmsSelection() : undefined
   const file = seeSelection && view === "files" ? try (try FileContext).selected() : undefined
   const attachment = file === undefined ? undefined : try (try FileContext).read(file)
-  const front = seeSelection && view === "browser" ? try pageInFront(true, Prefs.allows(try (try Prefs.Machine).get(), "BrowserPage"), try (try Time).now()) : undefined
-  const metadata = observed(told, context, location, note ?? selection?.observation ?? (file === undefined ? undefined : documentObservation(file)), front)
+  const front = seeSelection && view === "browser" ? try pageInFront(true, Prefs.allows(prefState, "BrowserPage"), try (try Time).now()) : undefined
+  const metadata = observed(told, context, location, bridge, prefState, note ?? selection?.observation ?? (file === undefined ? undefined : documentObservation(file)), front)
   const sms = view === "messages" ? { selection: metadata?.observation?.selectedObject?.kind === "sms-subscription" ? selection : undefined } : undefined
   return { metadata, sms, attachment }
 }
@@ -340,22 +378,33 @@ effect function settleSpoken(board: Board, seat: DraftSeat, selected: number, re
     && now.chosen === selected && now.around === 0 && now.page.ticket === page))
 }
 
-effect function syncAlphaApps(): void!!(Agent | KeyValueStore.KeyValueStore | Time) {
+effect function syncAlphaApps(actionResults: ReadonlyArray<{ readonly action: string }>): void!!(Agent | KeyValueStore.KeyValueStore | Time) {
+  const ranClock = actionResults.some((result) => result.action.startsWith("CLOCK_"))
+  const ranReminders = actionResults.some((result) => result.action === "REMINDERS_MANAGE" || result.action === "OWNER_REMINDERS")
+  if (!ranClock && !ranReminders) return
   const ctx = try Effect.context<never>()
-  const alarms = Context.getOption(ctx, Alarms.Machine)
-  const timers = Context.getOption(ctx, Timers.Machine)
-  const world = Context.getOption(ctx, World.Machine)
-  if (Option.isSome(alarms) && Option.isSome(timers) && Option.isSome(world)) {
-    try ignore(Effect.provide(syncClockNow(), Layer.mergeAll(
-      Layer.succeed(Alarms.Machine, alarms.value),
-      Layer.succeed(Timers.Machine, timers.value),
-      Layer.succeed(World.Machine, world.value),
-    )))
+  if (ranClock) {
+    const alarms = Context.getOption(ctx, Alarms.Machine)
+    const timers = Context.getOption(ctx, Timers.Machine)
+    const world = Context.getOption(ctx, World.Machine)
+    if (Option.isSome(alarms) && Option.isSome(timers) && Option.isSome(world)) {
+      try ignore(Effect.provide(syncClockNow(), Layer.mergeAll(
+        Layer.succeed(Alarms.Machine, alarms.value),
+        Layer.succeed(Timers.Machine, timers.value),
+        Layer.succeed(World.Machine, world.value),
+      )))
+    }
   }
-  const reminders = Context.getOption(ctx, Reminders.Machine)
-  if (Option.isSome(reminders)) {
-    try ignore(Effect.provide(syncRemindersNow(), Layer.succeed(Reminders.Machine, reminders.value)))
+  if (ranReminders) {
+    const reminders = Context.getOption(ctx, Reminders.Machine)
+    if (Option.isSome(reminders)) {
+      try ignore(Effect.provide(syncRemindersNow(), Layer.succeed(Reminders.Machine, reminders.value)))
+    }
   }
+}
+
+effect function warmPlanner(): void!!Agent {
+  try ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/turns/warm"), {}), Schema.Unknown))
 }
 
 // spec/app/assistant/index.md, "Every message asked is posted exactly once, under a new ticket, whoever gave the text, with the screen showing and never a sensitive one"; spec/app/assistant/index.md, "The first word of a reply shows that the agent has the message, and a withdrawal that came too late stops it there"
@@ -555,7 +604,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
         ? undefined : try offerRecordingSummary({ source: transcript.offered, seat, conversation: chats.chosen,
           conversationId: known.record.id, message: result.reply.messageId }, result.reply.text)
       if (board.draftSeat === seat) board.change({ recordingSummary })
-      try syncAlphaApps()
+      fork.detached syncAlphaApps(result.reply.actionResults)
       if (enrolled !== undefined && result.reply.userMessageId !== undefined) {
         const replied = streamed(result.clientMessageId)
         const stillAuthored = effect {
@@ -1198,22 +1247,30 @@ const reached = started(effect {
 const looked = started(effect {
   const shell = try Shell
   const settings = try Pages.Machine
+  const bridge = try MessagingBridge
+  const prefs = try Prefs.Machine
   const conversation = try Conversation.Machine
   const { board } = try Talk
   let taken: string | undefined
   const page = Stream.zipLatest(shell.changes, settings.changes)
+  const messaging = Stream.zipLatest(bridge.changes, prefs.changes)
   const selection = Stream.zipLatest(noteSubjects, conversation.changes)
-  try Stream.runForEach(Stream.zipLatest(page, selection), effect ([[shown, pages], [subject]]) => {
+  try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(page, messaging), selection), effect ([[[shown, pages], [msgSnap, prefState]], [subject]]) => {
     const view = shown.trail.at(-1)
     const offer = board.snapshot().transcript
     const transcript = offer?.offered
     if (transcript !== undefined && (view !== "Notes" || transcript.owner !== subject.owner ||
       transcript.number !== subject.note || transcript.opened !== subject.opened || transcript.record.revision !== String(subject.revision - 1))) try retireTranscript(offer)
     const section: Pages.Page = view === "Settings" ? pages.page : "Top"
-    const sensitive = view === "Settings" && Pages.sensitive(pages)
+    const platform = messagingPlatformOf(view)
+    const msgCtx = platform === undefined ? undefined : msgSnap.contexts[platform]
+    const shareAllowed = platform !== undefined && Prefs.allows(prefState, shareOf(platform))
+    const msgSensitive = platform !== undefined && (msgCtx?.sensitive === true || msgCtx?.pane === "auth")
+    const sensitive = (view === "Settings" && Pages.sensitive(pages)) || msgSensitive
     const { note } = subject
-    const selected = view === "Notes" && !sensitive && note > 0
-    const seen = `${view ?? ""} ${section} ${sensitive} ${selected ? note : ""}`
+    const msgSelected = !sensitive && platform !== undefined && shareAllowed && msgCtx !== undefined && msgCtx.authenticated && msgCtx.conversation !== undefined
+    const selected = (view === "Notes" && !sensitive && note > 0) || msgSelected
+    const seen = `${view ?? ""} ${section} ${sensitive} ${selected ? (view === "Notes" ? note : msgCtx?.conversation?.id ?? "msg") : ""}`
     if (seen === taken) return
     const event: Conversation.Event = { type: "look", showing: view === undefined ? { tag: "Home" } : { tag: "App", view }, zone: zone(), day: 0, selected, sensitive, section }
     if (!Conversation.enabled(try conversation.get(), event) || (try contained(conversation.send(event), "telling the screen"))) taken = seen
@@ -1226,7 +1283,7 @@ const opening = following(Composer.Machine, (composer) => (composer.slot === "Cl
 // spec/app/assistant/composer.md, "Edits are saved while no send is in hand and storage has not failed"
 const saving = following(Composer.Machine, (composer) => (Composer.canSave(composer) ? composer.draft.edits : undefined), Composer.Machine, (edits): Composer.Event | undefined => (edits === undefined ? undefined : { type: "save" }))
 
-// spec/app/assistant/composer.md, "Another conversation showing closes the slot and opens that conversation's, once nothing waits in this one"; spec/app/assistant/composer.md, "A message written before its conversation existed moves into the new one, then its old slot is cleared on the exact revision read"
+// spec/app/assistant/composer.md, "Another conversation showing closes the slot and opens that conversation's, once nothing waits in this one"; spec/app/assistant/composer.md, "A message written before its conversation existed moves into the new one, then its old slot is cleared on the exact revision read"; spec/app/assistant/composer.md, "A typed draft in a conversation that vanished moves into the new chat"
 const bound = started(effect {
   const chats = try Chats.Machine
   const composer = try Composer.Machine
@@ -1245,7 +1302,11 @@ const bound = started(effect {
     if (shown.chosen !== here) {
       board.change({ reply: "", label: "", failure: undefined })
       const moving = here === 0 && shown.chosen > 0 && (Composer.content(writing.editor) || Composer.attached(writing.editor) || writing.draft.sync !== "Kept")
-      const bound = try contained(composer.send(moving ? { type: "adopt", conversation: shown.chosen } : { type: "bind", conversation: shown.chosen }), "binding the composer")
+      const carrying = here > 0 && shown.chosen === 0 && !shown.ids.includes(here) && Composer.canCarry(writing)
+      const event: Composer.Event = moving ? { type: "adopt", conversation: shown.chosen }
+        : carrying ? { type: "carry" }
+        : { type: "bind", conversation: shown.chosen }
+      const bound = try contained(composer.send(event), "binding the composer")
       if (bound && sameBinding(board.snapshot().filesBinding, writing.binding)) {
         board.change(moving ? { filesBinding: { owner: writing.binding.owner, conversation: shown.chosen } } : { files: [], filesBinding: undefined, filesAuthority: undefined, attachmentNotice: "" })
       }
@@ -1332,9 +1393,12 @@ const submitted = started(effect {
 }, "asking what was typed on the communications dock")
 
 // spec/app/assistant/dock.md, "A drag released asks the shell once for where it landed, and keeps a sheet's height"; spec/app/assistant/dock.md, "A gesture asks the shell to raise Ask Alpha, to go back a step or two, or nothing; a press that did not move is a tap on its control"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"
-function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell, []> {
+function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell | Agent, []> {
   return match (fx) {
-    when { tag: "Raise", let detent }: run("raise", effect { try contained((try Shell).send({ type: "raise", detent }), "raising Ask Alpha") });
+    when { tag: "Raise", let detent }: run("raise", effect {
+      fork.detached warmPlanner()
+      try contained((try Shell).send({ type: "raise", detent }), "raising Ask Alpha")
+    });
     when { tag: "Lower", let steps }: run("lower", effect {
       const shell = try Shell
       for (const _ of Array.from({ length: steps })) try contained(shell.send({ type: "goBack" }), "lowering Ask Alpha")
@@ -1343,7 +1407,10 @@ function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell, []> {
       const shell = try Shell
       const current = try shell.get()
       for (const ask of Dock.focused(current.assistant)) {
-        if (ask.tag === "Raise") try contained(shell.send({ type: "raise", detent: ask.detent }), "raising Ask Alpha")
+        if (ask.tag === "Raise") {
+          fork.detached warmPlanner()
+          try contained(shell.send({ type: "raise", detent: ask.detent }), "raising Ask Alpha")
+        }
       }
     });
   }

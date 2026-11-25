@@ -124,6 +124,23 @@ export function civilToEpochMs(dueDate: string, dueMinute: number | null, timeZo
   }
 }
 
+/** The next repeat whose alert or unalerted due time has not elapsed in the device zone. */
+function nextFutureOccurrence(item: ReminderItemRecord, now: number, timeZone: string): { readonly dueDate: string; readonly skippedDates: number } | undefined {
+  if (item.dueDate === null) return undefined;
+  const elapsedAt = now + (item.alertMinutes ?? 0) * 60_000;
+  const elapsedDay = todayCivilDate(elapsedAt, timeZone);
+  let date = item.dueDate;
+  for (let skippedDates = 0; skippedDates < 40_000; skippedDates++) {
+    const next = advanceDueDate(date, item.recurrence);
+    if (next === null || next <= date) return undefined;
+    if (next > elapsedDay || (next === elapsedDay && (civilToEpochMs(next, item.dueMinute, timeZone) ?? 0) > elapsedAt)) {
+      return { dueDate: next, skippedDates };
+    }
+    date = next;
+  }
+  return undefined;
+}
+
 /** Compute the next epoch ms an alarm at `hour:minute` with `daysMask` (bit 0 = Sun .. bit 6 = Sat) will fire after `nowMs`. */
 export function computeNextAlarmFireAtMs(hour: number, minute: number, daysMask: number, nowMs: number, timeZone: string): number {
   const today = todayCivilDate(nowMs, timeZone);
@@ -719,19 +736,22 @@ export class AlphaAppsStore {
   }
 
   completeItem(id: string, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone): { readonly item: ReminderItemRecord; readonly nextItem: ReminderItemRecord | null } | undefined {
-    const held = this.reminders.items.find((item) => item.id === id);
-    if (held?.completed) return { item: held, nextItem: null };
-    const stashed = this.stashReminder(id);
-    if (stashed === undefined) return undefined;
-    const { existing, nowMs } = stashed;
+    const existing = this.reminders.items.find((item) => item.id === id);
+    if (existing === undefined) return undefined;
+    if (existing.completed) return { item: existing, nextItem: null };
+    const nowMs = this.now();
+    const recurring = existing.recurrence !== "none" && existing.dueDate !== null;
+    const next = recurring ? nextFutureOccurrence(existing, nowMs, timeZone) : undefined;
+    if (recurring && next === undefined) return undefined;
+    this.deletedItems.set(id, existing);
     const dueAtMs = existing.dueDate === null ? null : civilToEpochMs(existing.dueDate, existing.dueMinute, timeZone);
+    const elapsed = next !== undefined && next.skippedDates > 0 ? { skippedDates: next.skippedDates } : {};
     const history = dueAtMs === null ? {} : { history: [...(existing.history ?? []),
-      { revision: existing.revision, dueAtMs, completedAtMs: nowMs }].slice(-32) };
-    const nextDate = existing.dueDate !== null ? advanceDueDate(existing.dueDate, existing.recurrence) : null;
-    if (nextDate !== null) {
+      { revision: existing.revision, dueAtMs, completedAtMs: nowMs, ...elapsed }].slice(-32) };
+    if (next !== undefined) {
       const advanced: ReminderItemRecord = {
         ...existing,
-        dueDate: nextDate,
+        dueDate: next.dueDate,
         subtasks: existing.subtasks.map((sub) => ({ ...sub, done: false })),
         completed: false,
         completedAtMs: null,

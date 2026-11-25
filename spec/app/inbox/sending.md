@@ -37,7 +37,7 @@ import draft as D from "../../kit/draft"
 import letter as L from "./letter"
 import access.* from "./access"
 
-type Kind = Send | SaveDraft | ReplaceDraft | DeleteDraft | Archive | Trash | Unarchive | Untrash
+type Kind = Send | SaveDraft | ReplaceDraft | DeleteDraft | Archive | Trash | Unarchive | Untrash | Star | Unstar | MarkRead | MarkUnread
 type Operations = {
   session: int, of: int, kind: Kind, account: int, draft: int, messages: Set[int], gmail: int, history: int,
   review: V::Review, warned: bool, addressed: bool, repeat: bool, again: bool, changed: bool,
@@ -505,6 +505,30 @@ pure def alwaysARestoreIsBoundToItsHistory(s: Operations): bool =
 pure def sometimesAMessageIsRestored(s: Operations): bool = s.kind == Unarchive and s.attempt.outcome == A::Confirmed
 
 pure def sometimesARestoreIsOutOfDate(s: Operations): bool = s.kind == Untrash and s.attempt.outcome == A::Refused
+```
+
+## Story: Change the stars or read state of selected mail
+
+> As the owner, I want to add or remove stars and mark selected email as
+> read or unread after checking which messages will change.
+
+### Stars and read state change only for the selected messages reviewed by the owner
+
+These operations start after confirmation without an undo window. A
+selection that changed before dispatch must be reviewed again.
+
+```quint
+pure def checksSelection(kind: Kind): bool = kind == Star or kind == Unstar or kind == MarkRead or kind == MarkUnread
+
+pure def stepLabelChangesUseTheReview(before: Operations, after: Operations, out: List[Effect]): bool =
+  out.every(e => match e {
+    | Request(r) => checksSelection(r.kind) implies (
+        r.messages.subseteq(before.messages) and before.messages.subseteq(r.messages)
+          and r.messages.size() > 0 and r.revision == before.review.shown
+          and before.approvedBy == Owner and after.attempt.outcome == A::Sent
+      )
+    | _ => true
+  })
 ```
 
 ## Story: Start over

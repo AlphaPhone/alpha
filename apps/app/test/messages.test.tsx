@@ -20,7 +20,7 @@ import browser from "../src/browser/index.tsx";
 import home from "../src/home/index.tsx";
 import messages from "../src/messages/index.tsx";
 import { displayNumber } from "../src/phone/words.ts";
-import { button, closeAll, drawn, fill, hardware, later, only, open, press, underAct } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, only, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import { textReview } from "./fakes/text-review.ts";
 
@@ -157,6 +157,8 @@ describe("Messages on an Alpha image", () => {
     // spec/app/messages/index.md, "Messages reads the conversation list each time it comes to the front"
     await openMessages(alpha);
     await ready(alpha.runtime, Messages, "Messages state", (s) => s.list.status === "Loaded" && s.threads === 1);
+    const listHeading = document.querySelector("[data-alpha-messages-header] h1");
+    expect([listHeading?.textContent, listHeading?.classList.contains("sr-only")]).toEqual(["Messages", true]);
 
     // spec/app/messages/index.md, "Only the newest read of the open conversation is shown, and it marks the shown messages read only where Alpha is the phone's SMS app"
     await press("Maya Chen");
@@ -663,15 +665,19 @@ describe("Messages on an Alpha image", () => {
         if (lostAnswer) {
           await vi.waitFor(() => expect(review.proposal.state).toBe("reconciliation_required"), { timeout: 12_000 });
           await drawn(() => alpha.runtime.runPromise(Shell.use((machine) => machine.send({ type: "openView", view: "Settings" }))));
-          await vi.waitFor(() => expect(button("About")).toBeDefined(), { timeout: 12_000 });
+          await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Settings");
           await press("About");
-          const activity = await vi.waitFor(() => {
+          const activity = await vi.waitFor(async () => {
+            await drawn(() => undefined);
             const row = [...document.querySelectorAll<HTMLButtonElement>("button")].find((one) => one.textContent?.includes("Agent activity"));
             if (row === undefined) throw new Error("Agent activity was not drawn");
             return row;
           }, { timeout: 12_000 });
           await drawn(() => activity.click());
-          await vi.waitFor(() => expect(document.body.textContent).toContain("Phone could not confirm the send"), { timeout: 12_000 });
+          await vi.waitFor(async () => {
+            await drawn(() => undefined);
+            expect(document.body.textContent).toContain("Phone could not confirm the send");
+          }, { timeout: 12_000 });
           expect([button("Happened"), button("Didn’t")]).toEqual([undefined, undefined]);
         } else {
           await vi.waitFor(() => expect(review.receipts.at(-1)).toMatchObject({ outcome: "applied", operationId: review.proposal.id,

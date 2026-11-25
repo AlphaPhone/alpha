@@ -23,6 +23,7 @@ import {
   SettingsFactRow,
   type SettingsFactReading,
   SettingsGeneralPage,
+  SettingsCarrierPage,
   type SettingsNeighbour,
   SettingsNotificationsPage,
   SettingsPage,
@@ -110,7 +111,7 @@ export interface Common {
   readonly onPlace: (row: number) => void;
 }
 
-const pageNames: Record<Exclude<Page, "BrowserPasswordsPage">, SettingsPageName> = {
+const pageNames: Record<Exclude<Page, "BrowserPasswordsPage" | "CarrierInfoPage">, SettingsPageName> = {
   Top: "top", General: "general", Display: "display", Sound: "sound", Notifications: "notifications", Battery: "battery",
   NetworkPage: "network", CarrierPage: "carrier", PhonePage: "phone", Privacy: "privacy", Permissions: "permissions", Apps: "apps",
   InboxApp: "inbox", WorkflowsApp: "workflows", CalendarApp: "calendar", CameraApp: "camera", PhotosApp: "photos", MapsApp: "maps", NotesApp: "notes", PasswordsPage: "passwords",
@@ -150,7 +151,14 @@ const themesNamed = { system: "System", light: "Light", dark: "Dark" } as const 
 const noticeNames: Record<PrefsGen.Notice, SettingsPreferencesNoticeProps["notice"] | undefined> = {
   Quiet: undefined, NotSaved: "not-saved", SizeNotConfirmed: "size-not-confirmed", SizeUnavailable: "size-unavailable", NotRecovered: "not-recovered",
 };
-const shareNames: Record<PrefsGen.Share, SettingsShare> = { AgentLocation: "agent-location", BrowserPage: "browser-page", GmailChanges: "gmail-changes", CalendarEdits: "calendar-edits" };
+const shareNames: Record<PrefsGen.Share, SettingsShare> = {
+  AgentLocation: "agent-location",
+  BrowserPage: "browser-page",
+  GmailChanges: "gmail-changes",
+  CalendarEdits: "calendar-edits",
+  TelegramContext: "telegram-context",
+  SlackContext: "slack-context",
+};
 const sharesNamed = Object.fromEntries(Object.entries(shareNames).map(([share, name]) => [name, share])) as Record<SettingsShare, PrefsGen.Share>;
 
 const saidNames: Record<ResetGen.Said, SettingsResetNoticeProps["said"] | undefined> = {
@@ -521,15 +529,16 @@ export type Drawn = (props: PageProps) => ReactNode;
 const drawn: Partial<Record<Page, Drawn>> = {
   Top,
   General,
+  CarrierInfoPage: ({ common }) => <SettingsCarrierPage fields={[]} onPhone={false} onBack={common.onBack} />,
   Display,
   Sound: ({ runtime, common }) => {
     const facts = useFacts(runtime).state;
     return <SettingsSoundPage {...common} sound={reading(facts, "Sound")} media={reading(facts, "MediaVolume")} ring={reading(facts, "RingVolume")} alarm={reading(facts, "AlarmVolume")} />;
   },
-  Notifications: ({ runtime, common }) => {
+  Notifications: ({ runtime, alpha, common }) => {
     const facts = useFacts(runtime).state;
     const pages = usePages(runtime).state;
-    return <SettingsNotificationsPage {...common} onPhone={pages?.phone} alerts={reading(facts, "Alerts")} doNotDisturb={reading(facts, "Sound")} collection={reading(facts, "CollectionStatus")} channels={facts?.alerts ?? []} />;
+    return <SettingsNotificationsPage {...common} onPhone={pages?.phone} alerts={reading(facts, "Alerts")} doNotDisturb={reading(facts, "Sound")} collectionPolicy={alpha.slot("settings/notification-collection")} channels={facts?.alerts ?? []} />;
   },
   Battery: ({ runtime, common }) => <SettingsBatteryPage {...common} battery={reading(useFacts(runtime).state, "Battery")} />,
   PhonePage: Phone,
@@ -574,7 +583,8 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
       : undefined,
     onBack: can(goBack) ? () => void send(goBack) : undefined,
     onOpen: (name) => {
-      const open = { type: "open", page: pagesNamed[name] } as const;
+      const target = name === "carrier" && !state.phone ? "CarrierInfoPage" : pagesNamed[name];
+      const open = { type: "open", page: target } as const;
       if (can(open)) void send(open);
     },
     onHandOver: (name) => {

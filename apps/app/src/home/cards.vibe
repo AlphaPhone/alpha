@@ -85,9 +85,15 @@ function tell(next: Partial<Told>): void {
 }
 
 /** What Home's cards are given, for a phone that is or is not an Alpha image. */
-export function others(given: Told, image: boolean): Cards.Others {
+export function others(
+  given: Told,
+  image: boolean,
+  telegram: Cards.Messaging = Cards.quietMessaging,
+  slack: Cards.Messaging = Cards.quietMessaging,
+): Cards.Others {
   return {
     image, reminders: [...given.reminders], hidden: [...given.hidden], mail: given.mail,
+    telegram, slack,
     messages: [...given.messages], phone: [...given.phone], flows: given.flows, brief: given.brief?.outcome ?? "NoBrief",
   }
 }
@@ -167,7 +173,7 @@ effect function readAgent(ticket: number, day: number): Event!!Agent {
   }
 }
 
-// spec/app/home/cards.md, "A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed"
+// spec/app/home/cards.md, "A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, Telegram and Slack their own, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed"
 effect function go(view: View) {
   try contained((try Shell.Machine).send({ type: "openView", view }), "opening an app from a card")
 }

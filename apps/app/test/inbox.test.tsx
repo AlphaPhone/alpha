@@ -26,6 +26,11 @@ afterEach(closeAll);
 const opens = () => [...document.querySelectorAll<HTMLButtonElement>("ul[aria-label='Email messages'] button")];
 const subjectOf = (button: HTMLButtonElement) => button.querySelector("[data-inbox-subject]")?.textContent;
 const rows = () => opens().map(subjectOf);
+const tile = (view: string) => drawn(() => {
+  const found = document.querySelector<HTMLButtonElement>(`[data-home-tile='view:${view}']`);
+  if (!found) throw new Error(`no tile ${view}`);
+  found.click();
+});
 const row = (subject: string) => drawn(() => {
   const found = opens().find((open) => subjectOf(open) === subject);
   if (!found) throw new Error(`no message ${subject}`);
@@ -152,6 +157,68 @@ it("Choose a phone contact for the email I’m writing (spec/app/inbox/adding.md
     Effect.map(Letters, (letters) => letters.words(state.letter.id).to))));
   expect([world.telephony.contacts, added, world.inbox.changes]).toEqual([true, [email], []]);
 });
+
+it("Star and mark the mail I reviewed (spec/app/inbox/sending.md, \"Story: Change the stars or read state of selected mail\")", async () => {
+  const world = scene();
+  const { alpha } = await openInbox(world);
+  const runtime = inbox.runtime(alpha);
+  const subjects: readonly [string, string] = ["Notes for the 3:00 review", "Dinner Friday?"];
+  await tile("Inbox");
+  await until(alpha, runtime, List, (state) => state.list.status === "Loaded");
+  await select(subjects[0]);
+  await row(subjects[1]);
+  await until(alpha, runtime, List, (state) => state.chosen.length === subjects.length);
+  await menu("Star", "Mail options");
+  await until(alpha, runtime, Changes, (state) => state.review.showing && state.kind === "Star");
+  expect([...(document.querySelector("[role=alertdialog] ul")?.querySelectorAll("li") ?? [])].map((one) => one.textContent)).toEqual(expect.arrayContaining([...subjects]));
+  expect(world.inbox.changes).toEqual([]);
+  await confirm("Yes");
+  await until(alpha, runtime, Changes, (state) => state.attempt.outcome === "Confirmed");
+  await menu("Starred", "More folders");
+  await until(alpha, runtime, List, (state) => state.selected.folder === "Starred" && state.list.status === "Loaded");
+  expect(rows()).toEqual(subjects);
+
+  await select(subjects[0]);
+  await row(subjects[1]);
+  await until(alpha, runtime, List, (state) => state.chosen.length === subjects.length);
+  await menu("Mark as read", "Mail options");
+  await until(alpha, runtime, Changes, (state) => state.review.showing && state.kind === "MarkRead");
+  await confirm("Yes");
+  await until(alpha, runtime, Changes, (state) => state.attempt.outcome === "Confirmed");
+  expect(world.inbox.mail.filter(({ card }) => subjects.includes(card.subject)).map(({ card }) => [card.labels.includes("STARRED"), card.isUnread])).toEqual([[true, false], [true, false]]);
+  expect(world.inbox.changes).toHaveLength(4);
+});
+
+it("Delete the reviewed phone drafts (spec/app/inbox/drafts.md, \"The owner can review and delete selected local drafts on the shelf, at the revisions shown\")", async () => {
+  const world = scene();
+  const first = await openInbox(world);
+  const { alpha } = first;
+  const runtime = inbox.runtime(alpha);
+  await tile("Inbox");
+  await until(alpha, runtime, List, (state) => state.list.status === "Loaded");
+  for (const [at, subject] of ["Notes for Monday", "Dinner arrangements"].entries()) {
+    await press("Compose");
+    await until(alpha, runtime, Writing, (state) => state.open);
+    await fill("Subject", subject);
+    await later(alpha, 10);
+    await until(alpha, runtime, Writing, (state) => state.stored && state.letter.revision >= 1 && !state.pending);
+    await press("Back from draft");
+    await until(alpha, runtime, Writing, (state) => !state.open && state.shelf.shelved.length === at + 1);
+  }
+  await menu("Drafts", "More folders");
+  await until(alpha, runtime, List, (state) => state.selected.folder === "DraftsFolder" && state.list.status === "Loaded");
+  await menu("Select drafts", "Mail options");
+  await menu("Select all shown", "Mail options");
+  await menu("Delete drafts", "Mail options");
+  await until(alpha, runtime, Writing, (state) => state.shelfSelection.reviewing && state.shelfSelection.picks.length === 2);
+  expect(document.querySelector("[role=alertdialog]")?.textContent).toEqual(expect.stringContaining("Dinner arrangements"));
+  await confirm("Delete");
+  await until(alpha, runtime, Writing, (state) => state.shelf.shelved.length === 0 && state.shelfSelection.account === 0);
+  expect(world.inbox.changes).toEqual([]);
+  await first.close();
+  const restored = await openInbox(world);
+  await until(restored.alpha, inbox.runtime(restored.alpha), Writing, (state) => state.load.status === "Loaded" && state.shelf.shelved.length === 0);
+}, 90_000);
 
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   it("See my mail (spec/app/inbox/index.md, \"Story: See my mail\"; spec/app/inbox/message.md, \"Story: Ask Alpha about a message\")", async () => {

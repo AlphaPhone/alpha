@@ -33,7 +33,7 @@ export service InboxAttachmentFiles {
 export const phoneInboxAttachments = Layer.sync(InboxAttachmentFiles, () => {
   const host = registered("AlphaInboxAttachments") ? client() : undefined
   return {
-    destination: host ? "picker" : "unavailable",
+    destination: host ? ("picker" as const) : ("unavailable" as const),
     effect save(attempt: number, file: OpaqueMailAttachment): SaveResult!! {
       if (!host) return "refused"
       return effect {
@@ -65,7 +65,7 @@ export effect function saveBrowserCopy(name: string, blob: Blob): boolean!! {
 export const attachmentDownloads = Layer.sync(InboxAttachmentFiles, () => {
   const available = downloads()
   return {
-    destination: available ? "download" : "unavailable",
+    destination: available ? ("download" as const) : ("unavailable" as const),
     effect save(_attempt: number, file: OpaqueMailAttachment): SaveResult!! {
       if (!available) return "refused"
       const bytes = decodeBase64(file.dataBase64)

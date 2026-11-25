@@ -24,6 +24,8 @@ export type SettingsCarrierField = {
 };
 
 export type SettingsCarrierPageProps = SettingsAndroidProps & {
+  /** Android can supply identifiers and open device settings on this host. */
+  onPhone?: boolean;
   /** The identifiers from the last read that answered, the EID with them once read; none until the owner asks. */
   fields: SettingsCarrierField[];
   /** The identifiers are being read. */
@@ -53,26 +55,27 @@ const missing: Record<NonNullable<SettingsCarrierField["missing"]>, string> = {
 };
 
 /**
- * Carrier & SIM setup, on a phone: the identifiers a carrier asks for to activate a SIM, read only when the owner asks
- * and forgotten when the page goes, each copied on its own, and Android's SIM, network and default-app pages.
+ * Carrier & SIM setup: public setup guidance and, on a phone, the identifiers the owner asks Android to read.
+ * On a phone, its current identifiers are forgotten on leaving the page and each can be copied on its own.
  * @model spec/app/settings/carrier.md
  */
-export function SettingsCarrierPage({ fields, reading = false, failed = false, smsChoice = false, copied, onShow, onReadEid, onCopy, copyable, told, onBack, starting, onAndroid }: SettingsCarrierPageProps) {
+export function SettingsCarrierPage({ onPhone = true, fields, reading = false, failed = false, smsChoice = false, copied, onShow, onReadEid, onCopy, copyable, told, onBack, starting, onAndroid }: SettingsCarrierPageProps) {
   const android = { starting, onAndroid };
   const groups = new Map<string | undefined, SettingsCarrierField[]>();
-  for (const field of fields) {
+  for (const field of onPhone ? fields : []) {
     const group = groups.get(field.group);
     if (group === undefined) groups.set(field.group, [field]);
     else group.push(field);
   }
   return (
     <SettingsPage title="Carrier & SIM setup" told={told} onBack={onBack} backLabel="Back to General">
-      <div role="status" aria-live="polite" className="empty:-mt-3">{copied ? <Banner variant={copied === "copied" ? "info" : "warn"}>{copied === "copied" ? "Copied" : "Could not copy"}</Banner> : null}</div>
+      <div role="status" aria-live="polite" className="empty:-mt-3">{onPhone && copied ? <Banner variant={copied === "copied" ? "info" : "warn"}>{copied === "copied" ? "Copied" : "Could not copy"}</Banner> : null}</div>
       <ListGroup>
-        {reading ? <ListRow title="Reading identifiers…" leading={<SlidersHorizontal />} trailing={<Spinner size="sm" label="Reading" />} /> : null}
-        {!reading && onShow ? <SettingsNavRow title={fields.length ? "Refresh identifiers" : "Show identifiers"} icon={<SlidersHorizontal />} onOpen={onShow} /> : null}
+        {!onPhone ? <SettingsFactRow title="Device identifiers" reading={{ word: "reported", value: "Available only on an Android phone" }} /> : null}
+        {onPhone && reading ? <ListRow title="Reading identifiers…" leading={<SlidersHorizontal />} trailing={<Spinner size="sm" label="Reading" />} /> : null}
+        {onPhone && !reading && onShow ? <SettingsNavRow title={fields.length ? "Refresh identifiers" : "Show identifiers"} icon={<SlidersHorizontal />} onOpen={onShow} /> : null}
         <SettingsFactRow title="Private device information" description="Read only when you tap above. Values clear when you leave this page. Copy uses the Android clipboard." />
-        {failed ? <SettingsFactRow title="Read unavailable" description="Keep Alpha in front and the phone unlocked, then try again. You can also use Android device identifiers below." /> : null}
+        {onPhone && failed ? <SettingsFactRow title="Read unavailable" description="Keep Alpha in front and the phone unlocked, then try again. You can also use Android device identifiers below." /> : null}
       </ListGroup>
       {[...groups].map(([heading, rows]) => (
         <ListGroup key={heading ?? "identifiers"} heading={heading}>
@@ -83,7 +86,7 @@ export function SettingsCarrierPage({ fields, reading = false, failed = false, s
           ))}
         </ListGroup>
       ))}
-      {onReadEid ? (
+      {onPhone && onReadEid ? (
         <ListGroup>
           <SettingsNavRow title="Read EID" icon={<SlidersHorizontal />} onOpen={onReadEid} />
         </ListGroup>
@@ -92,7 +95,7 @@ export function SettingsCarrierPage({ fields, reading = false, failed = false, s
         <SettingsFactRow title="Activate a physical SIM" description="For T-Mobile Connect with a new number, choose Bring your own phone, a physical SIM and a new number with the carrier. Check compatibility using the actual IMEI before ordering." />
         <SettingsFactRow title="Before inserting a SIM" description="IMEI identifies the phone and can be read before a SIM is installed. ICCID identifies the SIM and may be printed on its card. EID is for eSIM and is optional for a physical SIM." />
       </ListGroup>
-      <ListGroup>
+      {onPhone ? <ListGroup>
         <SettingsAndroidRow target="about-phone" title="Android device identifiers / About phone" icon={<SlidersHorizontal />} {...android} />
         <SettingsFactRow title="If IMEI access is denied" description="In Android About phone, open IMEI or device identifiers. You can also check the original phone box. On a supported system Phone dial pad, *#06# may show identifiers; Alpha does not simulate this code." />
         <SettingsAndroidRow target="sim-cards" title="Android SIM settings" icon={<SlidersHorizontal />} {...android} />
@@ -100,7 +103,7 @@ export function SettingsCarrierPage({ fields, reading = false, failed = false, s
         <SettingsAndroidRow target="access-point-names" title="Android access point names (APN)" icon={<SlidersHorizontal />} {...android} />
         {smsChoice ? <SettingsAndroidRow target="default-apps" title="Choose default SMS app in Android" icon={<SlidersHorizontal />} {...android} /> : null}
         <SettingsFactRow title="After activation" description="Refresh identifiers and confirm the SIM and network state. Test calls, SMS and mobile data with Wi-Fi off. Use APN values supplied by T-Mobile; this page does not change your plan, SIM, network or APN." />
-      </ListGroup>
+      </ListGroup> : null}
     </SettingsPage>
   );
 }

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Bell, Radio, SlidersHorizontal } from "lucide-react";
 import { ListGroup } from "../ListGroup.tsx";
 import { SettingsFactRow } from "./SettingsFactRow.tsx";
@@ -13,6 +14,8 @@ export type SettingsNotificationsPageProps = SettingsAndroidProps & {
   doNotDisturb?: Reading;
   /** Status of the phone's listener for other apps. */
   collection?: Reading;
+  /** Settings controls over the native notification collection policy. */
+  collectionPolicy?: ReactNode;
   /** The page can hand over to Android on an actual phone. */
   onPhone?: boolean;
   /** Alpha's alert channels, each with its own page in Android's settings. */
@@ -30,7 +33,7 @@ export type SettingsNotificationsPageProps = SettingsAndroidProps & {
  * card, notification access, and the collection of other apps' notifications, which the notices area owns. Alerts are Android's: this page reads them and opens its pages.
  * @model spec/app/settings/facts.md
  */
-export function SettingsNotificationsPage({ alerts, doNotDisturb, collection, onPhone = true, channels, told, onBack, onHandOver, starting, onAndroid }: SettingsNotificationsPageProps) {
+export function SettingsNotificationsPage({ alerts, doNotDisturb, collection, collectionPolicy, onPhone = true, channels, told, onBack, onHandOver, starting, onAndroid }: SettingsNotificationsPageProps) {
   const android = { starting, onAndroid };
   return (
     <SettingsPage title="Notifications" told={told} onBack={onBack} backLabel="Back to General">
@@ -44,9 +47,10 @@ export function SettingsNotificationsPage({ alerts, doNotDisturb, collection, on
           <SettingsAndroidRow target="alert-channel" channel={id} title={name} icon={<SlidersHorizontal />} {...android} />
         </ListGroup>
       ))}
+      {onPhone ? collectionPolicy : null}
       {onPhone ? (
         <ListGroup>
-          {collection ? <SettingsFactRow title="Other apps' notifications" icon={<Radio />} reading={collection} />
+          {collectionPolicy ? null : collection ? <SettingsFactRow title="Other apps' notifications" icon={<Radio />} reading={collection} />
             : <SettingsNavRow title="Other apps' notifications" icon={<Radio />} onOpen={onHandOver && (() => onHandOver("notification-collection"))} />}
           <SettingsAndroidRow target="notification-access" title="Notification access" icon={<Bell />} {...android} />
         </ListGroup>

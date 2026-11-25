@@ -7,12 +7,14 @@ import type { Machine } from "../../gen/app__home__cards.effect.vibe";
 import { useMachine } from "../../gen/app__home__cards.react.ts";
 import { dayStart } from "../calendar/time.ts";
 import { openCalls, openUnread } from "../phone/reports.vibe";
+import { MessagingBridge } from "../messaging/bridge.vibe";
 import { shortWhen } from "../phone/words.ts";
 import type { Resident } from "../runtime/area.tsx";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { Time } from "../runtime/time.vibe";
 import { fromAreas, named, others } from "./cards.vibe";
+import { messagingStateOf, renderMessagingCard } from "./MessagingCards.tsx";
 
 const where: Readonly<Record<Cards.Origin, string>> = { PhoneCalendar: "Calendar", AgentCalendar: "Alpha", Reminder: "Reminder" };
 
@@ -57,8 +59,10 @@ export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Res
   const { state, can, send } = useTimed(runtime, useMachine);
   useSyncExternalStore(named.subscribe, named.snapshot, named.snapshot);
   const given = useSyncExternalStore(fromAreas.subscribe, fromAreas.snapshot, fromAreas.snapshot);
+  const bridge = runtime.runSync(MessagingBridge);
+  const messaging = useSyncExternalStore((listener) => bridge.subscribe(listener), () => bridge.snapshot(), () => bridge.snapshot());
   if (!state) return [];
-  const told = others(given, image);
+  const told = others(given, image, messagingStateOf(messaging.cards.Telegram), messagingStateOf(messaging.cards.Slack));
   const now = Math.max(state.calendar.since, state.agent.since, dayStart(state.today));
   const latest = Math.max(now, runtime.runSync(Effect.flatMap(Time, (time) => time.latest())));
   const open = (kind: Cards.Kind) => ({
@@ -100,6 +104,8 @@ export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Res
         lines={told.phone} {...open("PhoneCard")} onClick={() => void runtime.runPromise(openCalls())} />
     ),
     MailCard: () => <HomeMailCard key="mail" aria-label={`Open Inbox, ${told.mail.unread}${given.mailMore ? "+" : ""} unread`} unread={told.mail.unread} more={given.mailMore} lines={told.mail.rows} status={given.mailStatus || (Cards.mailCard(told.mail) === "NotUpdated" ? "Not up to date" : "")} {...open("MailCard")} />,
+    TelegramCard: () => renderMessagingCard("Telegram", "TelegramCard", messaging.cards.Telegram, open("TelegramCard")),
+    SlackCard: () => renderMessagingCard("Slack", "SlackCard", messaging.cards.Slack, open("SlackCard")),
     BriefOfToday: () => given.brief && (
       <HomeBriefCard key="brief" outcome={given.brief.outcome} summary={given.brief.summary}
         status={`Your agent · ${given.brief.outcome === "Finished" ? "Ran" : "Failed"} ${whenLabel(given.brief.at, latest)}`} {...open("BriefOfToday")} />

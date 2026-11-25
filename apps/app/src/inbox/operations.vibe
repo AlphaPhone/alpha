@@ -13,10 +13,13 @@ import { type Job, answer, contained, hearing, reacting, run, started, together,
 import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import type { Event as DraftEvent } from "../../gen/app__inbox__drafts.effect.vibe"
 import { type Attached, Letters } from "./composer.vibe"
-import { type Mail, type Proposal, operate, operationStoreVersion, relabel } from "./gmail.vibe"
+import { Mail, type Proposal, operate, operationStoreVersion, relabel } from "./gmail.vibe"
 import { ownerChanges } from "./mailbox.vibe"
 
-const labels = { Archive: "archive", Trash: "trash", Unarchive: "unarchive", Untrash: "untrash" } as const
+const labels = {
+  Archive: "archive", Trash: "trash", Unarchive: "unarchive", Untrash: "untrash",
+  Star: "star", Unstar: "unstar", MarkRead: "mark-read", MarkUnread: "mark-unread",
+} as const
 
 type Files = Pick<Extract<Proposal, { mode: string }>, "attachments" | "forwardAttachments">
 
@@ -38,16 +41,24 @@ function filesOf(files: readonly Attached[]): { readonly fields: Files; readonly
   }
 }
 
-// spec/app/inbox/sending.md, "The answer to the request in flight ends it; a reply that does not match it, or none, leaves it unknown"
+// spec/app/inbox/sending.md, "The answer to the request in flight ends it; a reply that does not match it, or none, leaves it unknown"; spec/app/inbox/sending.md, "Stars and read state change only for the selected messages reviewed by the owner"
 /** Each message of a change, once, under its own key within the attempt: done only where every one was, known only where every one is. */
-effect function changed(attempt: number, kind: Kind, account: number, messages: ReadonlyArray<number>): Event!!(Attempts | Cloud | Mail) {
+effect function changed(attempt: number, kind: Kind, account: number, messages: ReadonlyArray<number>, revision: number): Event!!(Attempts | Cloud | Mail | Inbox.Machine) {
   if (!(kind in labels)) return { type: "answered", attempt, done: false, matches: true, gmail: 0 }
+  const confirmed = try (try Inbox.Machine).get()
+  if (Sending.checksSelection(kind) && (confirmed.selected.account !== account || confirmed.revision !== revision)) {
+    return { type: "answered", attempt, done: false, matches: true, gmail: 0 }
+  }
+  const ledger = try Mail
+  const generation = ledger.generation(account)
+  const reviewed = messages.map((message) => ({ message, history: ledger.card(message)?.metadata.historyId ?? "" }))
   let done = true
   let known = true
-  for (const [at, message] of messages.entries()) {
-    const ended = try relabel(attempt, account, message, labels[kind as keyof typeof labels], at)
+  for (const [at, target] of reviewed.entries()) {
+    if (ledger.generation(account) !== generation) return { type: "answered", attempt, done: false, matches: at === 0, gmail: 0 }
+    const ended = try relabel(attempt, account, target.message, labels[kind as keyof typeof labels], at, target.history)
     done = done && ended.done
-    known = known && ended.known
+    known = known && ended.known && (ended.done || at === 0)
     if (!ended.done) break
   }
   return { type: "answered", attempt, done, matches: known, gmail: 0 }
@@ -104,8 +115,8 @@ function carry(fx: Out): Job<Event, Cloud | Mail | Letters | Inbox.Machine | Dra
       answer(`request ${attempt}`, drafted(attempt, "ReplaceDraft", access.account, draft, gmail), { type: "replyLost", attempt }, "World");
     when { tag: "Request", kind: "DeleteDraft", let attempt, let access, let draft, let gmail }:
       answer(`request ${attempt}`, drafted(attempt, "DeleteDraft", access.account, draft, gmail), { type: "replyLost", attempt }, "World");
-    when { tag: "Request", let attempt, let kind, let access, let messages }:
-      answer(`request ${attempt}`, changed(attempt, kind, access.account, messages), { type: "replyLost", attempt }, "World");
+    when { tag: "Request", let attempt, let kind, let access, let messages, let revision }:
+      answer(`request ${attempt}`, changed(attempt, kind, access.account, messages, revision), { type: "replyLost", attempt }, "World");
     // spec/app/inbox/index.md, "Messages handed to an operation are no longer chosen; once a change to the account's mail ends the first page is read again, and when its outcome is unknown the list says it may be out of date until Refresh"
     when { tag: "Changed", let account, let known }: run("changed", effect { try ignore((try Inbox.Machine).send({ type: "changed", account, known })) }, "World");
     // spec/app/inbox/sending.md, "While the account's grant lacks consent to send, nothing is sent, and Turn on hands over to Google access in Settings"

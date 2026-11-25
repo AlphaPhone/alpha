@@ -27,6 +27,8 @@ interface Held {
   /** The matches of what is being found, and the one stood on. */
   matches: number;
   match: number;
+  /** Whether the tab currently requests the desktop site. */
+  desktop: boolean;
 }
 
 /** What the fake phone's tab host keeps, as `AlphaBrowserPlugin` keeps it: its saved session, bookmarks and the tabs it holds. */
@@ -182,7 +184,11 @@ const surface = "data-fake-browser-page";
  * over the place the Browser marks, as Android lays the web view there; here it draws develop's reference pages.
  */
 export function alphaBrowser(world: BrowserScene): Faked {
-  return plugin<BrowserTabHostPlugin & { openFailedPage(options: BrowserPageGuard): Promise<void>; pageContext(options: BrowserPageGuard): Promise<Record<string, unknown>> }, TabEvents>((emit) => {
+  return plugin<BrowserTabHostPlugin & {
+    openFailedPage(options: BrowserPageGuard): Promise<void>;
+    pageContext(options: BrowserPageGuard): Promise<Record<string, unknown>>;
+    setDesktopSite(options: { readonly session: string; readonly id: string; readonly enabled: boolean }): Promise<BrowserTabState>;
+  }, TabEvents>((emit) => {
     let session = "";
     const stateOf = (tab: Held): BrowserTabState => {
       const url = tab.history[tab.at];
@@ -259,7 +265,7 @@ export function alphaBrowser(world: BrowserScene): Faked {
       create: ({ session: asked, id, private: privateTab }) => {
         world.calls.push("create");
         session = asked;
-        const tab: Held = { id, private: privateTab === true, history: [], at: -1, sequence: 0, navigation: 0, loading: false, committed: false, matches: 0, match: 0, error: "", elsewhere: "" };
+        const tab: Held = { id, private: privateTab === true, history: [], at: -1, sequence: 0, navigation: 0, loading: false, committed: false, matches: 0, match: 0, desktop: false, error: "", elsewhere: "" };
         world.tabs.set(id, tab);
         return Promise.resolve(stateOf(tab));
       },
@@ -398,6 +404,21 @@ export function alphaBrowser(world: BrowserScene): Faked {
         if (tab.elsewhere === "" || tab.elsewhere !== options.url || String(tab.navigation) !== options.navigation) return Promise.reject(rejection("The page changed. Try again from the page."));
         world.elsewhere.push(options.url);
         return Promise.resolve();
+      },
+      setDesktopSite: (options) => {
+        const tab = held(options);
+        world.calls.push("setDesktopSite");
+        tab.desktop = options.enabled;
+        if (tab.committed && tab.history[tab.at] !== undefined) {
+          tab.navigation += 1;
+          tab.loading = true;
+          tab.committed = false;
+          told(tab);
+          commit(tab, tab.navigation);
+        } else {
+          told(tab);
+        }
+        return Promise.resolve(stateOf(tab));
       },
       downloads: ({ session: requested }) => {
         world.calls.push("downloads");

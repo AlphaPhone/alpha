@@ -4,6 +4,7 @@ import { TurnController, type ConversationRecord, type TurnContext, type TurnRes
 import { Machine as Conversation, type Context as Screen } from "../../gen/app__assistant.effect.vibe"
 import { Machine as Chats } from "../../gen/app__assistant__chats.effect.vibe"
 import { sendsOpenDocument } from "../../gen/app__assistant__context.effect.vibe"
+import { cueBoundMs, replyWaitMs, type Cue } from "../../gen/app__assistant__reply.effect.vibe"
 import { Machine as Phone, clear, type Telecom } from "../../gen/app__phone.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
@@ -28,7 +29,7 @@ import { replyWords } from "@repo/ui"
 import { dictationClock } from "./dictation-clock.vibe"
 
 const views: ReadonlyArray<Shell.View> = [
-  "Phone", "Messages", "Inbox", "Calendar", "Clock", "Reminders", "Browser", "Camera", "Photos", "Maps", "Notes", "Contacts", "Files", "Workflows", "Wallet", "Settings",
+  "Phone", "Messages", "Inbox", "Telegram", "Slack", "Calendar", "Clock", "Reminders", "Browser", "Camera", "Photos", "Maps", "Notes", "Contacts", "Files", "Workflows", "Wallet", "Settings",
 ]
 
 export function placeOf(view: Shell.View | undefined): number {
@@ -118,11 +119,25 @@ export interface VoiceMemory {
   }!!) | undefined
   /** Whether the turn's spoken acknowledgment is queued and not yet handed to speech. */
   cueWaiting: boolean
+  /** The turn's spoken acknowledgment, from queued to audible to ended or dropped; `ended` settles when it is no longer heard, and `followed` once a sentence of the reply came after it. */
+  cue: SpokenCue | undefined
   enqueueSentence(turn: number, text: string): void
-  /** Queue the turn's acknowledgment to speak at once, before any sentence of its reply. */
-  enqueueCue(turn: number, text: string): void
-  dequeueSentence(turn: number): { readonly text: string; readonly append: boolean } | undefined
+  /** Queue the turn's acknowledgment to speak at once, before any sentence of its reply; false when the turn already has speech. */
+  enqueueCue(turn: number, text: string): boolean
+  dequeueSentence(turn: number): { readonly text: string; readonly append: boolean; readonly cue: boolean } | undefined
+  /** The turn's acknowledgment is heard now, unless it already ended or was dropped. */
+  cueAudible(turn: number): void
+  /** The turn's acknowledgment is no longer heard: it played out, or it was dropped or cut. */
+  endCue(turn: number, how: "Ended" | "Dropped"): void
   clearQueued(): void
+}
+
+interface SpokenCue {
+  readonly turn: number
+  phase: Cue
+  followed: boolean
+  readonly ended: Promise<void>
+  readonly end: () => void
 }
 
 export service VoiceWords {
@@ -162,6 +177,7 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
     spokenNavigation: undefined,
     screen: undefined,
     cueWaiting: false,
+    cue: undefined,
     enqueueSentence(turn: number, text: string) {
       if (memory.playbackTurn !== turn) {
         memory.playbackTurn = turn
@@ -169,8 +185,11 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
         memory.dispatchedSentences = 0
         memory.cueWaiting = false
       }
-      // spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s"
-      if (memory.cueWaiting) memory.queuedSentences.shift()
+      // spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s": a cue still queued is dropped here; one already handed to speech is dropped or bounded when this sentence plays.
+      if (memory.cueWaiting) {
+        memory.queuedSentences.shift()
+        memory.endCue(turn, "Dropped")
+      }
       memory.cueWaiting = false
       memory.queuedSentences.push(text)
     },
@@ -180,24 +199,41 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
         memory.queuedSentences.length = 0
         memory.dispatchedSentences = 0
       }
-      if (memory.queuedSentences.length > 0 || memory.dispatchedSentences > 0) return
+      // spec/app/assistant/reply.md, "One brief acknowledgment at most, only from the agent's acknowledgment frame, before any tool runs": sentences streamed before it and not yet spoken are the cue's own words, which the acknowledgment replaces; once one is spoken, it is the cue.
+      if (memory.dispatchedSentences > 0) return false
+      memory.queuedSentences.length = 0
+      memory.endCue(memory.cue?.turn ?? turn, "Dropped")
+      const { promise, resolve } = Promise.withResolvers<void>()
+      memory.cue = { turn, phase: "Preparing", followed: false, ended: promise, end: resolve }
       memory.cueWaiting = true
       memory.queuedSentences.push(text)
+      return true
     },
     dequeueSentence(turn: number) {
       if (memory.playbackTurn !== turn) return undefined
       const text = memory.queuedSentences.shift()
       if (text === undefined) return undefined
+      const cue = memory.cueWaiting
       memory.cueWaiting = false
       const append = memory.dispatchedSentences > 0
       memory.dispatchedSentences += 1
-      return { text, append }
+      return { text, append, cue }
+    },
+    cueAudible(turn: number) {
+      if (memory.cue?.turn === turn && memory.cue.phase === "Preparing") memory.cue.phase = "Audible"
+    },
+    endCue(turn: number, how: "Ended" | "Dropped") {
+      const cue = memory.cue
+      if (cue?.turn !== turn || cue.phase === "Ended" || cue.phase === "Dropped") return
+      cue.phase = how === "Ended" && cue.phase === "Audible" ? "Ended" : "Dropped"
+      cue.end()
     },
     clearQueued() {
       memory.playbackEpoch += 1
       memory.queuedSentences.length = 0
       memory.dispatchedSentences = 0
       memory.cueWaiting = false
+      if (memory.cue !== undefined) memory.endCue(memory.cue.turn, "Dropped")
     },
   }
   return { memory }
@@ -501,19 +537,26 @@ function voiceTurnOutput({ session, turn, queue, memory, holdForText }: VoiceOut
     sayFrom(clean, false)
   }
 
-  // spec/app/assistant/reply.md, "One brief acknowledgment at most, only from the agent's acknowledgment frame, before any tool runs": it is said at once, with no hold, as the turn's first line.
+  // spec/app/assistant/reply.md, "One brief acknowledgment at most, only from the agent's acknowledgment frame, before any tool runs": it is said at once, with no hold, as the turn's first line. Text streamed before it is the cue's own words, which the agent starts again after the acknowledgment, so the reply's text is read from its start.
   let cued = false
   let toolRan = false
   const cue = (text: string) => {
-    if (holdForText || cued || toolRan || said > 0 || shown !== "") return
+    if (holdForText || cued || toolRan) return
     const line = spokenForm(speakableText(text)).trim()
     if (line === "") return
     cued = true
-    memory.enqueueCue(turn, line)
-    Queue.offerUnsafe(queue, { type: "sentence", session, turn })
+    shown = ""
+    said = 0
+    if (memory.enqueueCue(turn, line)) Queue.offerUnsafe(queue, { type: "sentence", session, turn })
+  }
+  const ready = (fullText: string) => {
+    if (holdForText || proposing) return
+    const full = speakableText(replyBlocks(fullText).words)
+    if (full.length > shown.length) shown = full
+    sayFrom(full.length >= shown.length ? full : shown, true)
   }
   const hooks = {
-    onPreview: feed, onAcknowledgment: cue,
+    onPreview: feed, onAcknowledgment: cue, onReady: ready,
     onTool: (name: string) => {
       toolRan = true
       if (name === "PROPOSE_DEVICE_ACTION") {
@@ -931,13 +974,41 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
       const current = effect {
         return memory.playbackEpoch === epoch && Voice.canSentencePlayed(try voice.get(), session, turn)
       }
+      let heard: SpokenCue | undefined
       try Semaphore.withPermit(memory.playLock, effect {
         if (!(try current)) return
         try bridge.awaitSpeechOutputWarmup(session)
         if (!(try current)) return
         const piece = memory.dequeueSentence(turn)
-        if (piece !== undefined) try ignore(bridge.playSentence(session, turn, piece.text, piece.append))
+        if (piece === undefined) return
+        const cue = memory.cue
+        // spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s": the cue plays on its own fiber so the reply's first sentence can drop or bound it.
+        if (piece.cue && cue?.turn === turn) {
+          heard = cue
+          try Effect.forkDetach(Effect.ensuring(ignore(bridge.playCue(session, turn, piece.text, () => memory.cueAudible(turn))),
+            sync(() => memory.endCue(turn, "Ended"))))
+          return
+        }
+        let append = piece.append
+        if (cue?.turn === turn && !cue.followed) {
+          cue.followed = true
+          append = false
+          if (cue.phase === "Preparing") {
+            memory.endCue(turn, "Dropped")
+            try bridge.hush(turn)
+          } else if (cue.phase === "Audible") {
+            const finished = try Effect.timeoutOption(Effect.promise(() => cue.ended), replyWaitMs("Audible", cueBoundMs))
+            if (Option.isNone(finished)) {
+              memory.endCue(turn, "Dropped")
+              try bridge.hush(turn)
+            }
+          }
+          if (!(try current)) return
+        }
+        try ignore(bridge.playSentence(session, turn, piece.text, append))
       })
+      const playing = heard
+      if (playing !== undefined) try Effect.promise(() => playing.ended)
       return { type: "sentencePlayed", session, turn }
     }, { type: "sentencePlayed", session, turn });
     when { tag: "Hush", let turn }: run("hush", effect {

@@ -237,6 +237,7 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
   const deleting = useHeld(runtime).state;
   const canvas = useCanvas(runtime).state;
   const [width, setWidth] = useState(0);
+  const dateButtonRef = useRef<HTMLButtonElement>(null);
   const surface = useCallback((element: HTMLDivElement | null) => {
     if (!element) return;
     setWidth(element.clientWidth);
@@ -328,7 +329,7 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
   return (
     <div ref={surface} className="absolute inset-0 flex flex-col overflow-hidden leading-plain">
       <div className="relative shrink-0">
-      <CalendarHeader inert={pageCovered} title={title} expanded={month} onTitle={month ? send({ type: "closeOverlay" }) : view.can({ type: "openMonth" }) ? send({ type: "openMonth" }) : undefined}
+      <CalendarHeader inert={pageCovered} title={title} titleRef={dateButtonRef} expanded={month} onTitle={month ? send({ type: "closeOverlay" }) : view.can({ type: "openMonth" }) ? send({ type: "openMonth" }) : undefined}
         className="pr-2 pl-2" leading={alpha ? <AppBack alpha={alpha} className="size-13 [&_svg]:size-5.5" /> : null}>
         {month ? null : view.can({ type: "goToday" }) ? <CalendarHeaderAction aria-label="Today" onClick={send({ type: "goToday" })}><CalendarDays aria-hidden /></CalendarHeaderAction> : null}
         {!month && (searching || view.can({ type: "openSearch" })) ? (
@@ -419,8 +420,8 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
             <Days rows={schedule.filter((row) => row.end > dayStart(s.today) && (!("record" in row) || row.begin < readWindow(s.anchor).end))} today={s.today} from={dayStart(s.today)} open={openRow} empty="No upcoming events" />
           </CalendarList>
         ) : null}
-        {month ? <Month runtime={runtime} reminders={reminders} /> : null}
       </div>
+      {month ? <Month runtime={runtime} reminders={reminders} restoreFocus={() => dateButtonRef.current?.focus({ preventScroll: true })} /> : null}
       <Calendars runtime={runtime} />
       {open === undefined ? null : <EventPage runtime={runtime} row={open} today={s.today} />}
       {openedReminder && alpha ? <ReminderPage alpha={alpha} runtime={runtime} row={openedReminder} onBack={send({ type: "closeReminder" })} /> : null}
@@ -472,13 +473,16 @@ function Invite({ runtime, row, today, onOpen }: CalendarProps & { row: Row; tod
 
 // spec/app/calendar/index.md, "The layout menu and the month dialog open over the days, never over an open event"; spec/app/calendar/index.md, "Picking a day in the week strip or the month dialog shows that day's timeline"
 /** The month dialog: a month's days to pick from, the layouts, and the calendars shown. */
-function Month({ runtime, reminders }: CalendarProps & { reminders: ReadonlyArray<DatedReminder> }) {
+function Month({ runtime, reminders, restoreFocus }: CalendarProps & { reminders: ReadonlyArray<DatedReminder>; restoreFocus: () => void }) {
   const view = useView(runtime);
   const [shift, setShift] = useState(0);
   const s = view.state;
   if (!s) return null;
   const first = monthStart(s.anchor, shift);
   const firstDate = dateOf(first);
+  const year = firstDate.getFullYear();
+  const firstYear = Math.max(1, year - 50);
+  const lastYear = Math.min(9999, year + 50);
   const lead = (firstDate.getDay() + 6) % 7;
   const cells = monthCells(monthStart(s.anchor, shift + 1) - first, lead);
   const visible = [...shown.visible(s.hidden, allows(s.access), s.connected), ...reminders];
@@ -498,11 +502,11 @@ function Month({ runtime, reminders }: CalendarProps & { reminders: ReadonlyArra
   };
   const selected = s.layout === "Columns" ? "Timeline" : s.layout;
   return (
-    <CalendarMonthPanel wide={s.wide} month={firstDate.getMonth()} year={firstDate.getFullYear()}
+    <CalendarMonthPanel wide={s.wide} month={firstDate.getMonth()} year={year}
       months={Array.from({ length: 12 }, (_, at) => ({ value: at, label: monthOnly.format(new Date(2000, at, 1)) }))}
-      years={Array.from({ length: 11 }, (_, at) => firstDate.getFullYear() - 5 + at).map((year) => ({ value: year, label: String(year) }))}
-      onMonth={(month) => toMonth(firstDate.getFullYear(), month)} onYear={(year) => toMonth(year, firstDate.getMonth())}
-      onPrevious={() => setShift(shift - 1)} onNext={() => setShift(shift + 1)} onClose={close}
+      years={Array.from({ length: lastYear - firstYear + 1 }, (_, at) => firstYear + at).map((option) => ({ value: option, label: String(option) }))}
+      onMonth={(month) => toMonth(year, month)} onYear={(nextYear) => toMonth(nextYear, firstDate.getMonth())}
+      onPrevious={() => setShift(shift - 1)} onNext={() => setShift(shift + 1)} onClose={close} onRestoreFocus={restoreFocus}
       days={Array.from({ length: cells }, (_, at) => first - lead + at).map((day) => ({
         key: day, date: dateOf(day).getDate(), label: cellLabel.format(dateOf(day)).replace(",", ""), outside: dateOf(day).getMonth() !== firstDate.getMonth(),
         today: day === s.today, selected: day === s.anchor, busy: visible.some((row) => onDay(row, day)),
@@ -513,7 +517,7 @@ function Month({ runtime, reminders }: CalendarProps & { reminders: ReadonlyArra
           <CalendarPill key={layout} pressed={selected === layout} disabled={selected !== layout && !(s.overlay === "LayoutMenu" ? view.can({ type: "chooseLayout", layout }) : view.can({ type: "closeOverlay" }))}
             onClick={selected === layout ? undefined : () => void choose(layout)()}>{label}</CalendarPill>
         ))}
-        <CalendarPill onClick={() => void calendars()}>Calendars</CalendarPill>
+        {s.owner > 0 || allows(s.access) ? <CalendarPill onClick={() => void calendars()}>Calendars</CalendarPill> : null}
       </div>
     </CalendarMonthPanel>
   );

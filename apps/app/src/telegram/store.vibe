@@ -1,0 +1,419 @@
+// spec/app/telegram/index.md, "Story: Browse and search my Telegram chats"; spec/app/telegram/auth.md, "Story: Sign in to my Telegram user account"
+import type { Failure as ListFailure } from "../../gen/app__telegram.effect.vibe"
+import type { MutationTool, Told } from "../../gen/app__telegram__agent.effect.vibe"
+import type { ChatKind } from "../../gen/app__telegram__conversation.effect.vibe"
+import {
+  AuthRevoked,
+  BotTokenRejected,
+  Forbidden,
+  type MessagingFailure,
+  MessagingSessions,
+  ProviderError,
+  RateLimited,
+  tokenValue,
+} from "../platform/messaging.vibe"
+import { Garbled, type Outcome, Refused, Unreachable, Unsent, outcomeOf } from "../platform/remote.vibe"
+import type {
+  TelegramChat,
+  TelegramDialogSummary,
+  TelegramFolder,
+  TelegramMessage,
+  TelegramNotifySettings,
+  TelegramUpdate,
+  TelegramUser,
+} from "../platform/telegram.vibe"
+
+/** Isolated key under `MessagingSessions` for the signed-in Telegram user-account session. */
+export const TELEGRAM_SESSION_KEY = "telegram:user"
+
+const BOT_TOKEN_INPUT = /^(?:bot\d+:|(?:\d{5,}:[A-Za-z0-9_-]{10,}))/
+
+/** Ephemeral sign-in fields kept only in memory during authentication; never persisted to KeyValueStore. */
+export interface TelegramAuthCache {
+  readonly phone: string
+  readonly phoneCodeHash: string
+  readonly pendingAuthId: string
+  readonly passwordHint: string
+  readonly qrToken: string
+  readonly qrLoginUrl: string
+  readonly user: TelegramUser | undefined
+}
+
+/** Pending inline message edit text for one message in the open chat. */
+export interface TelegramEditDraft {
+  readonly chat: number
+  readonly messageId: number
+  readonly text: string
+}
+
+/** Outgoing send payload captured at `RecordSend` and dispatched once under `idempotencyKey`. */
+export interface TelegramPendingSend {
+  readonly id: number
+  readonly chat: number
+  readonly peerKey: string
+  readonly text: string
+  readonly replyToMsgId: number | undefined
+  readonly idempotencyKey: string
+}
+
+/** Staged Ask Alpha draft details held until the owner edits, sends, or undoes. */
+export interface TelegramStagedDraft {
+  readonly turn: number
+  readonly chat: number
+  readonly peerKey: string
+  readonly replyToMsgId: number
+  readonly text: string
+}
+
+/** Parameters attached to a proposed Ask Alpha mutation until approved or declined. */
+export interface TelegramAgentMutationPayload {
+  readonly turn: number
+  readonly chat: number
+  readonly message: number
+  readonly tool: MutationTool
+  readonly text?: string
+  readonly emoji?: string
+  readonly add?: boolean
+  readonly forEveryone?: boolean
+  readonly muted?: boolean
+}
+
+/** Recorded outcome of an Ask Alpha Telegram action turn. */
+export interface TelegramAgentOutcome {
+  readonly turn: number
+  readonly told: Told
+  readonly data?: unknown
+}
+
+/** Posted Telegram notification entry shown until read, tapped, or withdrawn. */
+export interface TelegramNoticeEntry {
+  readonly chat: number
+  readonly peerKey: string
+  readonly message: number
+  readonly title: string
+  readonly excerpt: string
+  readonly date: number
+}
+
+/** In-memory runtime projection of Telegram wire records beside the formal spec machines. */
+export interface TelegramSnapshot {
+  readonly version: number
+  readonly auth: TelegramAuthCache
+  readonly dialogs: ReadonlyArray<TelegramDialogSummary>
+  readonly savedDialogs: ReadonlyArray<TelegramDialogSummary>
+  readonly savedCredentialRev: number
+  readonly users: ReadonlyMap<number, TelegramUser>
+  readonly chats: ReadonlyMap<string, TelegramChat>
+  readonly folders: ReadonlyArray<TelegramFolder>
+  readonly searchMessages: ReadonlyArray<TelegramMessage>
+  readonly historyByPeer: ReadonlyMap<string, ReadonlyArray<TelegramMessage>>
+  readonly drafts: ReadonlyMap<number, string>
+  readonly pendingSend: TelegramPendingSend | undefined
+  readonly editDraft: TelegramEditDraft | undefined
+  readonly agentStagedDraft: TelegramStagedDraft | undefined
+  readonly agentMutationPayloads: ReadonlyMap<number, TelegramAgentMutationPayload>
+  readonly agentOutcomes: ReadonlyMap<number, TelegramAgentOutcome>
+  readonly lastReadResult: unknown
+  readonly notices: ReadonlyArray<TelegramNoticeEntry>
+  readonly pendingUpdates: ReadonlyArray<TelegramUpdate>
+  readonly pts: number
+}
+
+const emptyAuth: TelegramAuthCache = {
+  phone: "",
+  phoneCodeHash: "",
+  pendingAuthId: "",
+  passwordHint: "",
+  qrToken: "",
+  qrLoginUrl: "",
+  user: undefined,
+}
+
+function blankSnapshot(version: number): TelegramSnapshot {
+  return {
+    version,
+    auth: emptyAuth,
+    dialogs: [],
+    savedDialogs: [],
+    savedCredentialRev: 0,
+    users: new Map(),
+    chats: new Map(),
+    folders: [],
+    searchMessages: [],
+    historyByPeer: new Map(),
+    drafts: new Map(),
+    pendingSend: undefined,
+    editDraft: undefined,
+    agentStagedDraft: undefined,
+    agentMutationPayloads: new Map(),
+    agentOutcomes: new Map(),
+    lastReadResult: undefined,
+    notices: [],
+    pendingUpdates: [],
+    pts: 0,
+  }
+}
+
+/** Runtime service holding Telegram wire objects, peer numbering, cursor tables, and store subscriptions. */
+export service TelegramStore {
+  get(): TelegramSnapshot!!
+  snapshot(): TelegramSnapshot
+  subscribe(listener: () => void): () => void
+  update(fn: (current: TelegramSnapshot) => TelegramSnapshot): TelegramSnapshot!!
+  chatIdOf(peerKey: string): number!!
+  peerKeyOf(chatId: number): (string | undefined)!!
+  nextCursorId(opaque: string): number!!
+  cursorValue(id: number): (string | undefined)!!
+  wipe(): void!!
+}
+
+/** Layer providing the in-memory Telegram runtime store. */
+export const telegramStore = Layer.sync(TelegramStore, () => {
+  let current = blankSnapshot(1)
+  let nextChat = 1
+  let nextCursor = 1
+  const peerToId = new Map<string, number>()
+  const idToPeer = new Map<number, string>()
+  const cursors = new Map<number, string>()
+  const listeners = new Set<() => void>()
+
+  function notify(): void {
+    for (const listener of [...listeners]) listener()
+  }
+
+  return {
+    get: () => sync(() => current),
+    snapshot: () => current,
+    subscribe(listener: () => void): () => void {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+    update: (fn: (state: TelegramSnapshot) => TelegramSnapshot) => sync(() => {
+      const updated = fn(current)
+      current = { ...updated, version: current.version + 1 }
+      notify()
+      return current
+    }),
+    chatIdOf: (peerKey: string) => sync(() => {
+      const known = peerToId.get(peerKey)
+      if (known !== undefined) return known
+      const allocated = nextChat
+      nextChat += 1
+      peerToId.set(peerKey, allocated)
+      idToPeer.set(allocated, peerKey)
+      return allocated
+    }),
+    peerKeyOf: (chatId: number) => sync(() => idToPeer.get(chatId)),
+    nextCursorId: (opaque: string) => sync(() => {
+      if (opaque === "") return 0
+      const allocated = nextCursor
+      nextCursor += 1
+      cursors.set(allocated, opaque)
+      return allocated
+    }),
+    cursorValue: (id: number) => sync(() => (id === 0 ? undefined : cursors.get(id))),
+    wipe: () => sync(() => {
+      cursors.clear()
+      current = blankSnapshot(current.version + 1)
+      notify()
+    }),
+  }
+})
+
+/** Detect bot-token syntax in user-supplied fields so bot tokens are always rejected. */
+export function isBotTokenInput(value: string): boolean {
+  return BOT_TOKEN_INPUT.test(value.trim())
+}
+
+/** Read the raw Telegram user-session token from `MessagingSessions` at the outbound HTTP boundary only. */
+export effect function currentSessionToken(): Option.Option<string>!!MessagingSessions {
+  const secret = try (try MessagingSessions).get(TELEGRAM_SESSION_KEY)
+  return Option.map(secret, tokenValue)
+}
+
+/** Classify a dialog into the spec's `ChatKind` union. */
+export function chatKindOf(dialog: TelegramDialogSummary, chats: ReadonlyMap<string, TelegramChat>): ChatKind {
+  if (dialog.peer._type === "peerUser") return "DirectMessage"
+  if (dialog.peer._type === "peerChat") return "GroupChat"
+  const meta = chats.get(dialog.peer_key)
+  if (meta?.broadcast || !dialog.can_post) return "BroadcastChannel"
+  return "Supergroup"
+}
+
+/** Display title for a Telegram dialog from cached users or chats. */
+export function dialogTitle(
+  dialog: TelegramDialogSummary,
+  users: ReadonlyMap<number, TelegramUser>,
+  chats: ReadonlyMap<string, TelegramChat>,
+): string {
+  if (dialog.peer._type === "peerUser") {
+    const user = users.get(dialog.peer.user_id)
+    if (user !== undefined) return [user.first_name, user.last_name].filter(Boolean).join(" ").trim() || user.username || dialog.peer_key
+  }
+  return chats.get(dialog.peer_key)?.title ?? dialog.peer_key
+}
+
+/** Display name for a Telegram message sender. */
+export function senderNameOf(
+  fromId: number,
+  users: ReadonlyMap<number, TelegramUser>,
+  chats: ReadonlyMap<string, TelegramChat>,
+  peerKey: string,
+): string {
+  const user = users.get(fromId)
+  if (user !== undefined) return [user.first_name, user.last_name].filter(Boolean).join(" ").trim() || user.username || `User ${fromId}`
+  return chats.get(peerKey)?.title ?? `User ${fromId}`
+}
+
+/** Merge `incoming` messages into an existing chronological ascending timeline by unique message ID. */
+export function mergeTimeline(
+  existing: ReadonlyArray<TelegramMessage>,
+  incoming: ReadonlyArray<TelegramMessage>,
+): ReadonlyArray<TelegramMessage> {
+  const byId = new Map<number, TelegramMessage>()
+  for (const msg of existing) byId.set(msg.id, msg)
+  for (const msg of incoming) byId.set(msg.id, msg)
+  return [...byId.values()].sort((a, b) => a.id - b.id)
+}
+
+/** Merge user and chat lookup maps with new entries from a Telegram RPC response. */
+export function mergeEntities(
+  snap: TelegramSnapshot,
+  users: ReadonlyArray<TelegramUser>,
+  chats: ReadonlyArray<TelegramChat>,
+): { readonly users: ReadonlyMap<number, TelegramUser>; readonly chats: ReadonlyMap<string, TelegramChat> } {
+  const nextUsers = new Map(snap.users)
+  for (const user of users) nextUsers.set(user.id, user)
+  const nextChats = new Map(snap.chats)
+  for (const chat of chats) {
+    const key = chat._type === "chat" ? `chat:${chat.id}` : `channel:${chat.id}`
+    nextChats.set(key, chat)
+  }
+  return { users: nextUsers, chats: nextChats }
+}
+
+/** Map a `MessagingFailure` onto the chat list spec's `Failure` union. */
+export function listFailureOf(failure: MessagingFailure): ListFailure {
+  return match (failure) {
+    when AuthRevoked: "Revoked";
+    when BotTokenRejected: "Revoked";
+    when Unreachable: "Offline";
+    when Unsent: "Offline";
+    default: "Unreachable";
+  }
+}
+
+/** Map a `MessagingFailure` onto `kit/attempt`'s honest `{ confirmed, known }` conclusion. */
+export function messagingOutcomeOf(failure: MessagingFailure): Outcome {
+  return match (failure) {
+    when AuthRevoked: { confirmed: false, known: true };
+    when BotTokenRejected: { confirmed: false, known: true };
+    when Forbidden: { confirmed: false, known: true };
+    when ProviderError: { confirmed: false, known: failure.status < 500 };
+    when RateLimited: { confirmed: false, known: true };
+    when Unsent: outcomeOf(failure);
+    when Refused: outcomeOf(failure);
+    when Garbled: outcomeOf(failure);
+    when Unreachable: outcomeOf(failure);
+  }
+}
+
+/** Whether `failure` indicates the Telegram user session was revoked or invalidated. */
+export function isRevokedFailure(failure: MessagingFailure): boolean {
+  return match (failure) {
+    when AuthRevoked: true;
+    when BotTokenRejected: true;
+    default: false;
+  }
+}
+
+/** Whether a Telegram dialog is muted according to its notification settings. */
+export function isDialogMuted(dialog: TelegramDialogSummary): boolean {
+  return dialog.notify_settings.mute_until > 0
+}
+
+/** Merge one message into `historyByPeer` for `peerKey` and advance `pts`. */
+export effect function upsertHistoryMessage(
+  peerKey: string,
+  msg: TelegramMessage,
+  pts: number,
+  clearEdit = false,
+): TelegramSnapshot!!TelegramStore {
+  return try (try TelegramStore).update((snap) => {
+    const nextHistory = new Map(snap.historyByPeer)
+    nextHistory.set(peerKey, mergeTimeline(snap.historyByPeer.get(peerKey) ?? [], [msg]))
+    return {
+      ...snap,
+      historyByPeer: nextHistory,
+      ...(clearEdit ? { editDraft: undefined } : {}),
+      pts: Math.max(snap.pts, pts),
+    }
+  })
+}
+
+/** Remove deleted message IDs from `historyByPeer` for `peerKey` and advance `pts`. */
+export effect function removeHistoryMessages(
+  peerKey: string,
+  ids: ReadonlyArray<number>,
+  pts: number,
+): TelegramSnapshot!!TelegramStore {
+  const deleted = new Set(ids)
+  return try (try TelegramStore).update((snap) => {
+    const nextHistory = new Map(snap.historyByPeer)
+    nextHistory.set(peerKey, (snap.historyByPeer.get(peerKey) ?? []).filter((item) => !deleted.has(item.id)))
+    return { ...snap, historyByPeer: nextHistory, pts: Math.max(snap.pts, pts) }
+  })
+}
+
+function patchDialog(
+  dialogs: ReadonlyArray<TelegramDialogSummary>,
+  peerKey: string,
+  patch: (dialog: TelegramDialogSummary) => TelegramDialogSummary,
+): ReadonlyArray<TelegramDialogSummary> {
+  return dialogs.map((dialog) => dialog.peer_key === peerKey ? patch(dialog) : dialog)
+}
+
+/** Update dialog unread and read-inbox watermark in `TelegramStore`. */
+export effect function updateDialogReadState(
+  peerKey: string,
+  unreadCount: number,
+  maxId: number,
+  pts: number,
+): TelegramSnapshot!!TelegramStore {
+  return try (try TelegramStore).update((snap) => ({
+    ...snap,
+    dialogs: patchDialog(snap.dialogs, peerKey, (dialog) => ({
+      ...dialog,
+      unread_count: unreadCount,
+      unread_mentions_count: 0,
+      read_inbox_max_id: Math.max(dialog.read_inbox_max_id, maxId),
+    })),
+    pts: Math.max(snap.pts, pts),
+  }))
+}
+
+/** Update dialog notification settings in live and saved dialog lists. */
+export effect function updateDialogNotify(
+  peerKey: string,
+  notifySettings: TelegramNotifySettings,
+): TelegramSnapshot!!TelegramStore {
+  const apply = (dialog: TelegramDialogSummary): TelegramDialogSummary => ({ ...dialog, notify_settings: notifySettings })
+  return try (try TelegramStore).update((snap) => ({
+    ...snap,
+    dialogs: patchDialog(snap.dialogs, peerKey, apply),
+    savedDialogs: patchDialog(snap.savedDialogs, peerKey, apply),
+  }))
+}
+
+/** Remove any stored draft and staged Alpha draft for `chat`. */
+export effect function deleteChatDraft(chat: number): TelegramSnapshot!!TelegramStore {
+  return try (try TelegramStore).update((snap) => {
+    const nextDrafts = new Map(snap.drafts)
+    nextDrafts.delete(chat)
+    return {
+      ...snap,
+      drafts: nextDrafts,
+      agentStagedDraft: snap.agentStagedDraft?.chat === chat ? undefined : snap.agentStagedDraft,
+    }
+  })
+}

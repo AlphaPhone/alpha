@@ -34,6 +34,7 @@ export interface ReminderCompletion {
   readonly revision: number;
   readonly dueAtMs: number;
   readonly completedAtMs: number;
+  readonly skippedDates?: number;
 }
 
 /** One persisted reminder item exchanged between the Reminders app and the resident agent. */

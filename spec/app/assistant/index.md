@@ -743,7 +743,9 @@ pure def told(showing: Showing, zone: str, day: int, selected: bool, sensitive: 
 
 A sensitive screen is the passwords view, a password surface in Settings,
 Settings' Carrier & SIM setup and Phone pages, a locked or secure screen, a
-screen that is off, a hidden page, and the agent connection dialog.
+screen that is off, a hidden page, the agent connection dialog, and any
+Telegram or Slack sign-in, verification code, two-factor password, QR
+login, or OAuth consent screen.
 
 ```quint
 pure def lawASensitiveScreenTellsNothingOfItself(showing: Showing, zone: str, day: int, selected: bool, sensitive: bool, section: P::Page, revision: int): bool =

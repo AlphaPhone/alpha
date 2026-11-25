@@ -12,7 +12,8 @@ in front: never kept, logged, put in a diagnostics report or given to the
 agent. Android may deny the IMEI and the ICCID to Alpha; the page then
 offers Android's own About phone, SIMs, mobile networks, access point names
 and default apps pages ([Android](./android.md)), where Alpha changes
-nothing.
+nothing. A browser can read the public guidance about activating a SIM,
+with neither identifiers nor an Android handoff.
 
 ## Story: Read what my carrier needs to activate a SIM
 

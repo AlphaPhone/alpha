@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 // spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "Story: Go where the conversation takes me"; spec/app/voice/index.md, "A spoken reply says a written date, clock time, range and percentage in words"; spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"
 import { type Context, Effect, Layer, ManagedRuntime, Stream } from "effect";
+import { TestClock } from "effect/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Shell from "../gen/app__shell.effect.vibe";
 import * as Voice from "../gen/app__voice.effect.vibe";
@@ -60,6 +61,12 @@ async function until<I, S>(
     Effect.flatMap(key as unknown as Context.Key<Voice.Machine, { readonly changes: Stream.Stream<S> }>, (machine) =>
       Stream.runHead(Stream.filter(machine.changes, ok))),
   );
+}
+
+/** Let `ms` pass on the voice runtime's clock, then let what it woke settle. */
+async function advance(runtime: VoiceRuntime, ms: number): Promise<void> {
+  await (runtime as unknown as ManagedRuntime.ManagedRuntime<TestClock.TestClock, unknown>).runPromise(TestClock.adjust(ms));
+  for (let i = 0; i < 50; i += 1) await runtime.runPromise(Effect.yieldNow);
 }
 
 async function untilCondition(runtime: VoiceRuntime, check: () => boolean, detail?: () => unknown): Promise<void> {
@@ -377,7 +384,7 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 1 && s.turn === 2);
     expect(world.voice.spoken.map((one) => ({ text: one.text, append: one.append }))).toEqual([
       { text: "Let me check your calendar.", append: false },
-      { text: "You're clear tomorrow.", append: true },
+      { text: "You're clear tomorrow.", append: false },
       { text: "Nothing is booked.", append: true },
     ]);
     expect(world.ask.kept.get("c1")?.messages.at(-1)?.text).toBe("You're clear tomorrow. Nothing is booked.");
@@ -406,6 +413,96 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     expect([world.voice.spoken.map((one) => one.text), world.ask.kept.get("c1")?.messages.at(-1)?.text, world.voice.activeMicSession !== undefined]).toEqual([
       ["Let me check your calendar.", "You're clear tomorrow.", "Nothing is booked."], "You're clear tomorrow. Nothing is booked.", true,
     ]);
+  });
+
+  // spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s"
+  it("drops an acknowledgment the reply overtakes before it is heard, and never says it after", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    world.ask.acknowledgment = "Let me check your calendar.";
+    world.ask.holdAfterTools = true;
+    world.ask.nextReplyChunks = ["You're clear tomorrow."];
+    const runtime = await startListening(world);
+    const synthesis = Promise.withResolvers<void>();
+    let first = true;
+    world.voice.synthesisGate = () => {
+      if (!first) return Promise.resolve();
+      first = false;
+      return synthesis.promise;
+    };
+    const hushed = world.voice.hushCalls;
+
+    speakUtterance(world, "What's on tomorrow");
+    await untilCondition(runtime, () => world.voice.spoken.length === 1, () => world.voice.spoken);
+    for (const release of [...world.ask.turns.values()]) release();
+    await untilCondition(runtime, () => world.voice.played.length === 1, () => world.voice.played);
+    synthesis.resolve();
+    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.sent === 1 && s.turn === 2);
+    for (let i = 0; i < 50; i += 1) await runtime.runPromise(Effect.yieldNow);
+    expect([world.voice.played.map((one) => one.text), world.voice.hushCalls > hushed, world.voice.spoken.map((one) => one.append)]).toEqual([
+      ["You're clear tomorrow."], true, [false, false],
+    ]);
+  });
+
+  // spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s"
+  it("lets a heard acknowledgment finish before the reply, and cuts it when the reply has waited 2.5 s", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    world.ask.acknowledgment = "Let me check your calendar.";
+    const runtime = await startListening(world);
+    const turn = async (asked: string, answer: string, sent: number, waits: (finish: () => void) => Promise<number>) => {
+      const from = world.voice.played.length;
+      const hushed = world.voice.hushCalls;
+      world.ask.holdAfterTools = true;
+      world.ask.nextReplyChunks = [answer];
+      let finish = () => {};
+      world.voice.playbackHold = () => new Promise<void>((resolve) => { finish = resolve; });
+      speakUtterance(world, asked);
+      await untilCondition(runtime, () => world.voice.played.length === from + 1, () => world.voice.played);
+      world.voice.playbackHold = undefined;
+      for (const release of [...world.ask.turns.values()]) release();
+      await until(runtime, Voice.Machine, (s) => s.queued === 2 && s.replied);
+      for (let i = 0; i < 50; i += 1) await runtime.runPromise(Effect.yieldNow);
+      const held = await waits(finish);
+      await untilCondition(runtime, () => world.voice.played.length === from + 2, () => world.voice.played);
+      finish();
+      await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.sent === sent && s.turn === sent + 1);
+      return { said: world.voice.played.slice(from).map((one) => one.text), cut: world.voice.hushCalls > hushed, held };
+    };
+
+    const longCue = await turn("What's on tomorrow", "You're clear tomorrow.", 1, async () => {
+      await advance(runtime, 2_400);
+      const heldAtBound = world.voice.played.length;
+      await advance(runtime, 100);
+      return heldAtBound;
+    });
+    const shortCue = await turn("Am I free Sunday", "Sunday is open.", 2, async (finish) => {
+      await advance(runtime, 300);
+      const heldWhileAudible = world.voice.played.length;
+      finish();
+      return heldWhileAudible;
+    });
+    expect(longCue).toEqual({ said: ["Let me check your calendar.", "You're clear tomorrow."], cut: true, held: 1 });
+    expect(shortCue).toEqual({ said: ["Let me check your calendar.", "Sunday is open."], cut: false, held: 3 });
+  });
+
+  // spec/app/assistant/reply.md, "One brief acknowledgment at most, only from the agent's acknowledgment frame, before any tool runs"
+  it("says an acknowledgment that follows the agent's own streamed words, once, and then the reply from its start", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    world.ask.acknowledgment = "Let me check your calendar.";
+    const runtime = await startListening(world);
+    const turn = async (asked: string, streamed: string, sent: number) => {
+      const from = world.voice.played.length;
+      world.ask.streamedBeforeAcknowledgment = streamed;
+      world.ask.holdAfterTools = true;
+      world.ask.nextReplyChunks = ["You're clear tomorrow. ", "Nothing is booked."];
+      speakUtterance(world, asked);
+      await untilCondition(runtime, () => world.voice.played.length === from + 1, () => world.voice.played);
+      for (const release of [...world.ask.turns.values()]) release();
+      await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.sent === sent && s.turn === sent + 1);
+      return world.voice.played.slice(from).map((one) => one.text);
+    };
+
+    expect(await turn("What's on tomorrow", "Checking", 1)).toEqual(["Let me check your calendar.", "You're clear tomorrow.", "Nothing is booked."]);
+    expect(await turn("And Friday", "Let me check your calendar.", 2)).toEqual(["Let me check your calendar.", "You're clear tomorrow.", "Nothing is booked."]);
   });
 
   // spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"
@@ -1197,6 +1294,35 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     const after = await area.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()));
     expect([after.recorder.stage, after.permission.asked]).toEqual(["Closed", true]);
     expect([document.querySelector("[role=alertdialog], [role=alert], [role=note], [role=status], section[aria-label='Voice transcription']"), world.voice.permission]).toEqual([null, "denied"]);
+  });
+
+  // spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s"
+  it("speaks acknowledgment cues at once and begins speaking the reply on reply_ready before done without duplicating on done", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const runtime = await startListening(world);
+
+    let releaseDone: (() => void) | undefined;
+    world.ask.acknowledgment = "Let me check.";
+    world.ask.nextReplyChunks = ["You have no alarms set."];
+    world.ask.nextReplyProvisional = true;
+    world.ask.holdDoneAfterReady = new Promise<void>((resolve) => { releaseDone = resolve; });
+
+    speakUtterance(world, "Check my alarms");
+    // Spoken acknowledgment starts at once and reply begins speaking from `reply_ready` BEFORE `done` is released.
+    await untilCondition(
+      runtime,
+      () => world.voice.spoken.some((entry) => entry.text.includes("You have no alarms set.")),
+      () => world.voice.spoken,
+    );
+    expect(world.voice.spoken.map((entry) => ({ text: entry.text, append: entry.append }))).toEqual([
+      { text: "Let me check.", append: false },
+      { text: "You have no alarms set.", append: true },
+    ]);
+
+    releaseDone?.();
+    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 1 && s.turn === 2);
+    expect(world.voice.spoken.filter((entry) => entry.text.includes("You have no alarms set.")).length).toBe(1);
+    world.ask.acknowledgment = undefined;
   });
 
   // spec/app/voice/index.md, "Closing the recorder abandons any recording or transcription it was waiting for"
