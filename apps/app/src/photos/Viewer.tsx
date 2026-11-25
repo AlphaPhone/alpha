@@ -1,25 +1,17 @@
 import { Album, ChevronLeft, ChevronRight, Crop, Ellipsis, Heart, Info, Mail, Pause, Pencil, Play, RotateCcw, Share2, Sparkles, Trash2, Undo2, X } from "lucide-react";
 import { Effect, type ManagedRuntime } from "effect";
 import { useCallback, useRef, type PointerEvent } from "react";
-import { Button, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, Slider } from "@repo/ui";
+import { Button, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, Slider, cn } from "@repo/ui";
 import { useMachine } from "../../gen/app__photos__viewer.react.ts";
 import type { Event, Look } from "../../gen/app__photos__viewer.ts";
 import type { Machine } from "../../gen/app__photos__viewer.effect.vibe";
 import type { Row } from "./catalog.vibe";
-import { OpenedPhoto } from "./viewer.vibe";
+import { OpenedPhoto, photoLook } from "./viewer.vibe";
+import { photoLooks } from "../platform/photoCanvas.vibe";
 import { CropFrame } from "./CropFrame.tsx";
 import { Time } from "../runtime/time.vibe";
 
 const filters: readonly Look[] = ["Original", "Vivid", "Warm", "Cool", "Mono", "Fade", "Noir"];
-const filterPaint: Record<Look, string> = {
-  Original: "none",
-  Vivid: "saturate(1.55) contrast(1.08)",
-  Warm: "sepia(.3) saturate(1.35) hue-rotate(-8deg)",
-  Cool: "saturate(1.1) hue-rotate(14deg) brightness(1.03)",
-  Mono: "grayscale(1) contrast(1.05)",
-  Fade: "contrast(.78) brightness(1.12) saturate(.75)",
-  Noir: "grayscale(1) contrast(1.55) brightness(.88)",
-};
 const messages = {
   NoRefusal: "", Animated: "This photo is animated.", TooLarge: "This item is too large to edit.", TooLong: "This video is too long to edit.",
   NoRoom: "There is not enough storage to edit this video.", NoEditor: "This item cannot be edited here.",
@@ -147,7 +139,12 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum
   const control = (label: string, event: Event, icon: React.ReactNode) => allows(event) && (
     <Button variant="ghost" size="icon" aria-label={label} onClick={() => action(event)}>{icon}</Button>
   );
-  const swatchSource = current.item?.image || current.uri;
+  const swatchSource = current.item?.image || current.browser?.item.thumbnail || current.uri;
+  const source = current.item ?? current.browser?.item;
+  const sideways = state.edit.turns % 2 !== 0;
+  const videoRatio = state.editing && state.kind === "Clip" && source && source.width > 0 && source.height > 0
+    ? (sideways ? source.height / source.width : source.width / source.height) : undefined;
+  const videoScale = state.edit.cropped ? 130 : 100;
   const edited = preview !== undefined && preview.revision === state.preview.revision && state.editing && !state.unavailable ? preview : undefined;
   if (state.cropping) return (
     <div aria-label="Crop photo" data-alpha-subview="photos-crop"
@@ -192,8 +189,15 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum
         }}
         onDoubleClick={() => action({ type: "zoomTo", level: state.zoom > 1 ? 1 : 2 })}>
         {showing && (state.kind === "Clip"
-          ? <video ref={attachVideo} key={state.open} src={current.uri} poster={current.item?.image} playsInline preload="metadata" onTimeUpdate={played} onEnded={played}
-              className="size-full object-contain" style={state.editing ? { transform: `rotate(${state.edit.turns * 90}deg) scale(${state.edit.cropped ? 1.25 : 1})` } : undefined} />
+          ? <div className="grid size-full place-items-center [container-type:size]">
+              <div className={cn("relative overflow-hidden", videoRatio === undefined && "size-full")}
+                style={videoRatio === undefined ? undefined : { width: `min(100cqw, calc(100cqh * ${videoRatio}))`, aspectRatio: videoRatio }}>
+                <video ref={attachVideo} key={state.open} src={current.uri} poster={current.item?.image ?? current.browser?.item.thumbnail}
+                  playsInline preload="metadata" onTimeUpdate={played} onEnded={played}
+                  className={videoRatio === undefined ? "size-full object-contain" : "absolute top-1/2 left-1/2 max-w-none object-fill"}
+                  style={videoRatio === undefined ? undefined : { width: `${sideways ? videoScale / videoRatio : videoScale}%`, height: `${sideways ? videoScale * videoRatio : videoScale}%`, transform: `translate(-50%, -50%) rotate(${state.edit.turns * 90}deg)` }} />
+              </div>
+            </div>
           : <img src={edited?.image ?? current.uri} alt={name} decoding="async" className="size-full object-contain" style={{ transform: `scale(${state.zoom})` }} />)}
         {state.gone && <p role="status">This item is no longer available.</p>}
         {state.read.status === "Loading" && <span role="status" aria-label="Loading photo">…</span>}
@@ -216,7 +220,7 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum
           {filters.map((look) => <Button key={look} variant="ghost" aria-label={look} aria-pressed={state.edit.look === look}
             className="group h-auto min-w-14 flex-col gap-1.5 rounded-xl p-0 text-caption hover:bg-transparent" disabled={state.edit.look !== look && !allows({ type: "restyle", look })} onClick={() => action({ type: "restyle", look })}>
             <span className="relative size-14 overflow-hidden rounded-xl bg-secondary group-aria-pressed:outline-focus">
-              {swatchSource && <img src={swatchSource} alt="" className="absolute inset-0 size-full object-cover" style={{ filter: filterPaint[look] }} />}
+              {swatchSource && <img src={swatchSource} alt="" className="absolute inset-0 size-full object-cover" style={{ filter: photoLooks[photoLook(look)] }} />}
             </span>
             <span className={state.edit.look === look ? "text-foreground" : "text-muted-foreground"}>{look}</span>
           </Button>)}

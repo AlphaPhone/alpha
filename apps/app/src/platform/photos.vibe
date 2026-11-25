@@ -22,6 +22,8 @@ module native {
 import { phoneLibrary, reviewedLibrary } from native
 
 module browser {
+  import { browserPhotoThumbnail, type BrowserEditFrame } from "./photoCanvas.vibe"
+
   /** A browser capture, stored in the origin with its original pixels and optional camera thumbnail. */
   export interface BrowserCapture {
     readonly id: string
@@ -33,11 +35,13 @@ module browser {
     readonly created: number
     readonly duration?: number
     readonly thumbnail?: string
+    readonly revision?: string
   }
 
   const event = "alpha:photos-captured"
   const store = "captures"
   const originals = "originals"
+  const edits = "edit-receipts"
   const earlierLibrary = "alpha.browser.photos.v1"
   const earlierPrefix = "earlier:"
   const earlierRows = "photos"
@@ -50,13 +54,15 @@ module browser {
 
   async function storage(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("alpha-photo-library", 2)
+      const request = indexedDB.open("alpha-photo-library", 3)
       request.onupgradeneeded = (event) => {
         const database = request.result
         const upgrade = request.transaction
         if (!database.objectStoreNames.contains(store)) database.createObjectStore(store, { keyPath: "id" })
-        const data = database.createObjectStore(originals)
-        if (event.oldVersion !== 1 || upgrade === null) return
+        if (!database.objectStoreNames.contains(edits)) database.createObjectStore(edits)
+        if (!database.objectStoreNames.contains(originals)) database.createObjectStore(originals)
+        const data = upgrade?.objectStore(originals)
+        if (event.oldVersion !== 1 || upgrade === null || data === undefined) return
         const walk = upgrade.objectStore(store).openCursor()
         walk.onsuccess = () => {
           const cursor = walk.result
@@ -77,13 +83,14 @@ module browser {
 
   /** Keep the original before the capture is reported as saved. */
   export async function saveBrowserCapture(file: Blob, name: string, width: number, height: number, duration?: number, thumbnail?: string): Promise<string> {
+    const preview = thumbnail ?? await browserPhotoThumbnail(file).catch(() => undefined)
     const database = await storage()
     const created = Date.now()
     const id = `browser:${created}:${crypto.randomUUID()}`
     try {
       await new Promise<void>((resolve, reject) => {
         const tx = database.transaction([store, originals], "readwrite")
-        tx.objectStore(store).add({ id, mimeType: file.type, size: file.size, name, width, height, created, duration, thumbnail } satisfies BrowserCapture)
+        tx.objectStore(store).add({ id, mimeType: file.type, size: file.size, name, width, height, created, duration, thumbnail: preview } satisfies BrowserCapture)
         tx.objectStore(originals).add(file, id)
         tx.oncomplete = () => resolve()
         tx.onabort = () => reject(tx.error)
@@ -93,6 +100,103 @@ module browser {
     }
     window.dispatchEvent(new Event(event))
     return id
+  }
+
+  export type BrowserEditReceipt =
+    | { readonly status: "saved"; readonly id: string; readonly replaced: boolean }
+    | { readonly status: "not-started" | "stale" }
+
+  export type BrowserEditSave = {
+    readonly operation: string
+    readonly source: BrowserCapture
+    readonly frame: BrowserEditFrame
+    readonly replace: boolean
+  }
+
+  /** @throws {never} */
+  export const isBrowserEdit = (id: string): boolean => /^browser-edit:[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(id)
+
+  /** @throws {never} */
+  export const canReplaceBrowserEdit = (id: string): boolean => !id.startsWith(earlierPrefix)
+
+  function readReceipt(raw: unknown): BrowserEditReceipt | undefined {
+    if (typeof raw !== "object" || raw === null || !("status" in raw)) return undefined
+    if (raw.status === "not-started" || raw.status === "stale") return { status: raw.status }
+    if (raw.status === "saved" && "id" in raw && typeof raw.id === "string" && raw.id !== "" && "replaced" in raw && typeof raw.replaced === "boolean") {
+      return { status: "saved", id: raw.id, replaced: raw.replaced }
+    }
+    return undefined
+  }
+
+  /** A receipt and its copy or replacement are committed by the same IndexedDB transaction. */
+  export async function saveBrowserEdit(request: BrowserEditSave): Promise<BrowserEditReceipt> {
+    if (!isBrowserEdit(request.operation)) throw new Error("Invalid photo edit identity.")
+    const database = await storage()
+    const { source, frame, replace, operation } = request
+    try {
+      const receipt = await new Promise<BrowserEditReceipt>((resolve, reject) => {
+        const tx = database.transaction([store, originals, edits], "readwrite")
+        const captures = tx.objectStore(store)
+        const results = tx.objectStore(edits)
+        let result: BrowserEditReceipt = { status: "not-started" }
+        tx.oncomplete = () => resolve(result)
+        tx.onabort = () => reject(tx.error)
+        const prior = results.get(operation)
+        prior.onsuccess = () => {
+          if (prior.result !== undefined) { result = readReceipt(prior.result) ?? result; return }
+          const current = captures.get(source.id)
+          current.onsuccess = () => {
+            const original: unknown = current.result
+            const isCurrent = canReplaceBrowserEdit(source.id)
+              ? valid(original) && original.revision === source.revision
+              : !replace
+            if (!isCurrent) {
+              result = { status: "stale" }
+              results.add(result, operation)
+              return
+            }
+            const created = replace ? source.created : Date.now()
+            const id = replace ? source.id : `browser:${created}:${crypto.randomUUID()}`
+            const extension = frame.file.type === "video/mp4" ? "mp4" : frame.file.type.startsWith("video/") ? "webm" : "jpg"
+            const name = replace ? source.name : `Edited ${source.name.replace(/\.[^.]+$/, "")}.${extension}`
+            const item: BrowserCapture = { id, name, created, mimeType: frame.file.type, size: frame.file.size,
+              width: frame.width, height: frame.height, duration: frame.duration, thumbnail: frame.thumbnail, revision: operation }
+            if (replace) {
+              captures.put(item)
+              tx.objectStore(originals).put(frame.file, id)
+            } else {
+              captures.add(item)
+              tx.objectStore(originals).add(frame.file, id)
+            }
+            result = { status: "saved", id, replaced: replace }
+            results.add(result, operation)
+          }
+        }
+      })
+      if (receipt.status === "saved") window.dispatchEvent(new Event(event))
+      return receipt
+    } finally { database.close() }
+  }
+
+  /** Settling a missing result prevents any still-running caller from publishing it later. */
+  export async function browserEditResult(operation: string): Promise<BrowserEditReceipt> {
+    if (!isBrowserEdit(operation)) throw new Error("Invalid photo edit identity.")
+    const database = await storage()
+    try {
+      return await new Promise((resolve, reject) => {
+        const tx = database.transaction(edits, "readwrite")
+        const results = tx.objectStore(edits)
+        let result: BrowserEditReceipt = { status: "not-started" }
+        tx.oncomplete = () => resolve(result)
+        tx.onabort = () => reject(tx.error)
+        const request = results.get(operation)
+        request.onsuccess = () => {
+          const receipt = readReceipt(request.result)
+          if (receipt !== undefined) result = receipt
+          else results.put(result, operation)
+        }
+      })
+    } finally { database.close() }
   }
 
   async function previous(): Promise<IDBDatabase | undefined> {
@@ -199,12 +303,13 @@ module browser {
       && "size" in row && Number.isSafeInteger(row.size)
       && "created" in row && Number.isSafeInteger(row.created)
       && "width" in row && Number.isSafeInteger(row.width) && "height" in row && Number.isSafeInteger(row.height)
+      && (!("revision" in row) || row.revision === undefined || typeof row.revision === "string")
       && (!("duration" in row) || row.duration === undefined || typeof row.duration === "number" && Number.isFinite(row.duration))
       && (!("thumbnail" in row) || row.thumbnail === undefined || typeof row.thumbnail === "string")
   }
 }
-import { type BrowserCapture, browserCaptures, browserOriginal, captureEvent, latestBrowserCapture, page, saveBrowserCapture } from browser
-export { latestBrowserCapture, saveBrowserCapture }
+import { type BrowserCapture, type BrowserEditReceipt, type BrowserEditSave, browserCaptures, browserEditResult, browserOriginal, canReplaceBrowserEdit, captureEvent, isBrowserEdit, latestBrowserCapture, page, saveBrowserCapture, saveBrowserEdit } from browser
+export { latestBrowserCapture, saveBrowserCapture, isBrowserEdit, canReplaceBrowserEdit }
 export type { BrowserCapture }
 
 /** The phone's permitted library and its reviewed read surface, or the captures saved in this browser. */
@@ -214,6 +319,8 @@ export service PhotosPort {
   readonly changes: Stream.Stream<void>
   captures(): readonly BrowserCapture[]!PhotosFailed
   original(id: string): (Blob | undefined)!PhotosFailed
+  saveEdit(request: BrowserEditSave): BrowserEditReceipt!PhotosFailed
+  editResult(operation: string): BrowserEditReceipt!PhotosFailed
   handoff(id: string): void!!
   hasHandoff(): boolean!!
   takeHandoff(): (string | undefined)!!
@@ -240,7 +347,8 @@ export const phonePhotos = Layer.sync(PhotosPort, () => {
     Effect.orElseSucceed(tryPromise(() => phone.value.onLibraryChanged((): void => { Queue.offerUnsafe(queue, undefined) })), () => undefined),
     (handle) => handle === undefined ? Effect.void : ignore(tryPromise(() => handle.remove())),
   )))
-  return { phone, reviewed, changes, captures: () => succeed([]), original: () => succeed(undefined), ...entry() }
+  return { phone, reviewed, changes, captures: () => succeed([]), original: () => succeed(undefined),
+    saveEdit: () => succeed({ status: "not-started" } as const), editResult: () => succeed({ status: "not-started" } as const), ...entry() }
 })
 
 export const browserPhotos = Layer.sync(PhotosPort, () => ({
@@ -250,4 +358,6 @@ export const browserPhotos = Layer.sync(PhotosPort, () => ({
   changes: Stream.suspend(() => Stream.as(Stream.fromEventListener(page(), captureEvent()), undefined)),
   captures: () => tryPromise({ try: browserCaptures, catch: (cause) => new PhotosFailed({ cause }) }),
   original: (id: string) => tryPromise({ try: () => browserOriginal(id), catch: (cause) => new PhotosFailed({ cause }) }),
+  saveEdit: (request: BrowserEditSave) => tryPromise({ try: () => saveBrowserEdit(request), catch: (cause) => new PhotosFailed({ cause }) }),
+  editResult: (operation: string) => tryPromise({ try: () => browserEditResult(operation), catch: (cause) => new PhotosFailed({ cause }) }),
 }))
