@@ -1,0 +1,108 @@
+// spec/app/photos/trash.md, "Story: See what I deleted"; spec/app/photos/trash.md, "Story: Recover photos"; spec/app/photos/trash.md, "Story: Delete photos forever"
+import type { TrashConfirmation } from "@elizaos/os/bridges/definitions/media"
+import * as Trash from "../../gen/app__photos__trash.effect.vibe"
+import * as Library from "../../gen/app__photos.effect.vibe"
+import type { Actor } from "../../gen/app__photos__actor.effect.vibe"
+import { PhotosPort } from "../platform/photos.vibe"
+import { answer, applying, following, reacting, started, together, type Job } from "../runtime/reactor.vibe"
+import { Catalog, type Row } from "./catalog.vibe"
+import { changedItems, targets } from "./photos.vibe"
+
+interface Review {
+  readonly confirmation: TrashConfirmation
+  readonly rows: readonly number[]
+}
+
+service Prepared {
+  get(): (Review | undefined)!!
+  hold(value: Review | undefined): void!!
+}
+
+const prepared = Layer.sync(Prepared, () => {
+  let current: Review | undefined
+  return { get: () => sync(() => current), hold: (value: Review | undefined) => sync(() => { current = value }) }
+})
+
+const fail = (ticket: number): Trash.Event => ({ type: "listed", ticket, ok: false, rows: [], revision: 0, more: false })
+
+effect function fetched(ticket: number, more: boolean): Trash.Event!!(PhotosPort | Catalog | Trash.Machine) {
+  const { phone } = try PhotosPort
+  if (Option.isNone(phone)) return fail(ticket)
+  const cache = try Catalog
+  const cursor = more ? try cache.cursor(true) : null
+  const revision = try cache.revision()
+  const page = tryPromise(() => phone.value.list({ before: cursor ?? undefined, trashed: true, thumbnails: true })) catch () => undefined
+  const bin = try Trash.Machine
+  if (page === undefined || !Trash.canListed(try bin.get(), ticket, "Phone")) return fail(ticket)
+  const rows = page.items.map((item): Row => ({ kind: "phone", item }))
+  const ids = try cache.index(rows)
+  try cache.publish(rows, ids)
+  try cache.next(true, page.next)
+  return { type: "listed", ticket, ok: true, rows: ids, revision, more: page.next !== null }
+}
+
+effect function ready(ticket: number, items: readonly number[]): Trash.Event!!(PhotosPort | Catalog | Prepared | Trash.Machine) {
+  const { phone } = try PhotosPort
+  const rows = try targets(items)
+  if (Option.isNone(phone) || rows.length !== items.length) return { type: "readied", ticket, ok: false }
+  const reply = tryPromise(() => phone.value.prepareDeleteTrash({ items: rows.map((row) => row.item) })) catch () => undefined
+  if (reply === undefined) return { type: "readied", ticket, ok: false }
+  if (reply.count !== items.length || !Trash.canReadied(try (try Trash.Machine).get(), ticket, "Phone")) {
+    try ignore(tryPromise(() => phone.value.cancelDeleteTrash(reply.confirmation)))
+    return { type: "readied", ticket, ok: false }
+  }
+  try (try Prepared).hold({ rows: items, confirmation: reply.confirmation })
+  return { type: "readied", ticket, ok: true }
+}
+
+effect function deleted(attempt: number, items: readonly number[]): Trash.Event!!(PhotosPort | Prepared | Catalog) {
+  const { phone } = try PhotosPort
+  const stored = try Prepared
+  const prepared = try stored.get()
+  if (Option.isNone(phone) || prepared === undefined || prepared.rows.length !== items.length || items.some((id) => !prepared.rows.includes(id))) return { type: "deletedForever", attempt, known: true, confirmed: false }
+  try stored.hold(undefined)
+  const receipt = tryPromise(() => phone.value.deletePreparedTrash(prepared.confirmation)) catch () => undefined
+  if ((receipt?.deletedIds.length ?? 0) > 0) try (try Catalog).changed()
+  return { type: "deletedForever", attempt, known: receipt !== undefined, confirmed: receipt?.status === "deleted" && receipt.deletedIds.length === items.length }
+}
+
+type Needs = PhotosPort | Catalog | Trash.Machine | Prepared
+
+function carry(fx: Trash.Effect): Job<Trash.Event, Needs, [Actor]> {
+  return match (fx) {
+    when { tag: "Fetch", let ticket, let page }: answer("trash", fetched(ticket, page), fail(ticket), "Phone");
+    when { tag: "Recover", let attempt, let items }: answer(`recovery ${attempt}`, effect {
+      const result = try changedItems("Restore", items)
+      if (result.done.length > 0) try (try Catalog).changed()
+      return { type: "recovered", attempt, ...result } satisfies Trash.Event
+    }, { type: "recovered", attempt, known: false, declined: false, done: [], stale: [] }, "Phone");
+    when { tag: "Prepare", let ticket, let items }: answer("prepare", ready(ticket, items), { type: "readied", ticket, ok: false }, "Phone");
+    when { tag: "DeletePrepared", let attempt, let items }: answer(`delete ${attempt}`, deleted(attempt, items), { type: "deletedForever", attempt, known: false, confirmed: false }, "Phone");
+  }
+}
+
+const batches = following(Trash.Machine, (state) => state.job, Trash.Machine,
+  (job): Trash.Event | undefined => job.left.length > 0 && job.request.outcome !== "Sent" ? { type: "sendNext", items: job.left.slice(0, 20) } : undefined, "Phone")
+
+const release = applying(Trash.Machine, (state) => state.prepared.length === 0 && state.forever.outcome !== "Sent", (clear) => effect {
+  if (!clear) return
+  const { phone } = try PhotosPort
+  const stored = try Prepared
+  const review = try stored.get()
+  if (review !== undefined) {
+    try stored.hold(undefined)
+    if (Option.isSome(phone)) try ignore(tryPromise(() => phone.value.cancelDeleteTrash(review.confirmation)))
+  }
+})
+
+const refreshing = started(effect {
+  const { changes } = try PhotosPort
+  const bin = try Trash.Machine
+  try Stream.runForEach(changes, effect () => {
+    if ((try bin.get()).open) try ignore(bin.send({ type: "trashChanged" }, "Phone"))
+  })
+}, "Photos recently deleted")
+
+const refreshed = following(Trash.Machine, (state) => state.job.done.length + state.attempts, Library.Machine, (count): Library.Event | undefined => count > 0 ? { type: "libraryChanged" } : undefined, "Phone")
+
+export const trash = together(prepared, reacting(Trash, { carry }), batches, release, refreshing, refreshed)

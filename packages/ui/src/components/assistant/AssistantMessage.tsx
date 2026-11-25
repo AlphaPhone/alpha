@@ -40,7 +40,7 @@ export type AssistantMessageProps = Omit<ComponentProps<"article">, "children"> 
 export function AssistantMessage({ author, text, quote, attachments = [], children, onPreview, onQuote, onCopy, onUseInEmail, onEditAgain, onFork, onReadAloud, className, ...props }: AssistantMessageProps) {
   const owner = author === "owner";
   const body = <span className="break-words whitespace-pre-line">{text}</span>;
-  const bubble = cn("max-w-full text-left text-base", owner ? "rounded-tile rounded-br-sm bg-alpha px-4 py-2.75 text-alpha-foreground" : "leading-relaxed");
+  const bubble = cn("max-w-full text-left text-base", owner ? "rounded-tile rounded-br-box bg-alpha px-4 py-2.75 text-alpha-foreground" : "text-body leading-chat");
   const actions = onQuote || onCopy || onUseInEmail || onEditAgain || onFork || onReadAloud;
   return (
     <article aria-label={owner ? "You" : "Alpha"} className={cn("flex flex-col gap-2", owner ? "ml-auto max-w-4/5 items-end" : "items-start", className)} {...props}>
@@ -51,7 +51,7 @@ export function AssistantMessage({ author, text, quote, attachments = [], childr
       ) : null}
       {quote ? <p className="line-clamp-2 border-l-2 border-border pl-3 text-sm break-words text-muted-foreground">{quote}</p> : null}
       <div className="flex max-w-full items-start gap-2.5">
-        {owner ? null : <Mark aria-hidden className="mt-1 size-4.5 shrink-0 text-alpha" />}
+        {owner ? null : <span aria-hidden className="mt-0.75 flex size-4.5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-alpha text-alpha-foreground"><Mark className="size-[118%] shrink-0" /></span>}
         {actions ? (
           <Menu>
             <MenuTrigger asChild>

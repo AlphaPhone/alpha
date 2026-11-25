@@ -73,13 +73,26 @@ const conversationsKey = "alpha/messages/conversations@1"
 const conversations = Layer.effect(Conversations, effect {
   const store = try KeyValueStore.KeyValueStore
   const known: Conversation[] = kept(store.get(conversationsKey) catch () => undefined)
-  const keyOf = (one: Conversation) => (one.id !== "" ? `id:${one.id}` : `to:${[...one.addresses].sort().join(",")}`)
+  const recipientKey = (one: Conversation) => [...one.addresses].sort().join(",")
+  const keyOf = (one: Conversation) => (one.id !== "" ? `id:${one.id}` : `to:${recipientKey(one)}`)
   const numbers = new Map(known.map((one, at) => [keyOf(one), at + 1]))
   return {
     effect of(conversation: Conversation): number!! {
-      const found = numbers.get(keyOf(conversation))
-      if (found !== undefined) {
-        known[found - 1] = conversation
+      const key = keyOf(conversation)
+      const recipients = recipientKey(conversation)
+      const alias = recipients === "" ? 0 : known.findIndex((one) =>
+        (one.id === "" || conversation.id === "") && recipientKey(one) === recipients) + 1
+      const found = numbers.get(key) ?? alias
+      const previous = known.at(found - 1)
+      if (found > 0 && previous !== undefined) {
+        const id = conversation.id || previous.id
+        const addresses = conversation.addresses.length > 0 ? conversation.addresses : previous.addresses
+        const current = { id, addresses }
+        numbers.set(key, found)
+        if (id !== previous.id || recipientKey(current) !== recipientKey(previous)) {
+          known[found - 1] = current
+          try ignore(store.set(conversationsKey, JSON.stringify(known)))
+        }
         return found
       }
       known.push({ id: conversation.id, addresses: [...conversation.addresses] })
@@ -96,6 +109,7 @@ export interface Texts {
   readonly threads: ReadonlyArray<ThreadRow>
   readonly threadsNext: ThreadCursor | undefined
   readonly sought: string
+  readonly messagesThread: number
   readonly messages: ReadonlyArray<MessageRow>
   readonly messagesNext: MessageCursor | undefined
   readonly chosen: string
@@ -106,7 +120,7 @@ export interface Texts {
   readonly names: ReadonlyMap<string, string>
 }
 
-const empty: Texts = { threads: [], threadsNext: undefined, sought: "", messages: [], messagesNext: undefined, chosen: "", deleteTarget: undefined, choices: [], choicesNext: undefined, typed: "", names: new Map() }
+const empty: Texts = { threads: [], threadsNext: undefined, sought: "", messagesThread: 0, messages: [], messagesNext: undefined, chosen: "", deleteTarget: undefined, choices: [], choicesNext: undefined, typed: "", names: new Map() }
 
 /** A conversation's title: the contacts' names for its numbers, and a number no contact holds as it is. */
 export function titleOf(addresses: ReadonlyArray<string>, names: ReadonlyMap<string, string>): string {
@@ -129,8 +143,9 @@ const smsGrant = Effect.map(telephony("status", (c) => c.messages.status()), (st
 // spec/app/messages/index.md, "Only the newest read of the list is shown, with what Android says about SMS access"
 effect function threadsRead(ticket: number, further: boolean): Event!!(Telephony | Inbox | Conversations | Messages.Machine) {
   const store = try Inbox
+  const machine = try Messages.Machine
   const held = try store.get()
-  const chip = (try (try Messages.Machine).get()).chip
+  const chip = (try machine.get()).chip
   const grant = smsGrant catch () => "Unasked" as const
   if (grant !== "Granted") return { type: "threadsRead", ticket, ok: true, grant, count: 0, further: false }
   const page = telephony("threadPage", (c) => c.messages.threadPage(further ? held.threadsNext : undefined)) catch () => undefined
@@ -139,7 +154,9 @@ effect function threadsRead(ticket: number, further: boolean): Event!!(Telephony
   const titled = (row: ThreadRow) => ("incomplete" in row ? "" : row.addresses.map((address) => names.get(address) ?? address).join(", "))
   const fitting = page.rows.filter((row) => "incomplete" in row || ((chip === "AllThreads" || row.unread) && matches(held.sought, `${titled(row)} ${row.snippet}`, row.addresses.join(" "))))
   const rows = further ? [...held.threads, ...fitting] : fitting
-  try store.set({ threads: rows, threadsNext: page.next ?? undefined, names: new Map([...held.names, ...names]) })
+  if (Messages.canThreadsRead(try machine.get(), ticket, rows.length)) {
+    try store.set({ threads: rows, threadsNext: page.next ?? undefined, names: new Map([...(try store.get()).names, ...names]) })
+  }
   return { type: "threadsRead", ticket, ok: true, grant, count: rows.length, further: page.next !== null }
 }
 
@@ -152,8 +169,9 @@ effect function threadOf(conversation: Conversation): Option.Option<ThreadId>!!T
 }
 
 // spec/app/messages/index.md, "Only the newest read of the open conversation is shown, and it marks the shown messages read only where Alpha is the phone's SMS app"
-effect function pageRead(ticket: number, thread: number, further: boolean): Event!!(Telephony | Inbox | Conversations) {
+effect function pageRead(ticket: number, thread: number, further: boolean): Event!!(Telephony | Inbox | Conversations | Messages.Machine) {
   const store = try Inbox
+  const machine = try Messages.Machine
   const held = try store.get()
   const blank: Page = { rows: 0, failed: 0, partial: 0 }
   const grant = smsGrant catch () => "Unasked" as const
@@ -163,24 +181,29 @@ effect function pageRead(ticket: number, thread: number, further: boolean): Even
   if (grant !== "Granted" || Option.isNone(conversation)) return { type: "pageRead", ticket, ok: grant === "Granted" || grant === "Unasked", grant, seen: blank, further: false, unreadShown: false, role }
   const id = try threadOf(conversation.value)
   if (Option.isNone(id)) {
-    try store.set({ messages: [], messagesNext: undefined })
+    const current = try machine.get()
+    if (current.thread === thread && Messages.canPageRead(current, ticket, blank)) try store.set({ messagesThread: thread, messages: [], messagesNext: undefined })
     return { type: "pageRead", ticket, ok: true, grant, seen: blank, further: false, unreadShown: false, role }
   }
   const page = telephony("messagePage", (c) => c.messages.messagePage(id.value, further ? held.messagesNext : undefined)) catch () => undefined
   if (page === undefined) return { type: "pageRead", ticket, ok: false, grant, seen: blank, further: false, unreadShown: false, role }
   const rows = further ? [...held.messages, ...page.rows] : page.rows
-  try store.set({ messages: rows, messagesNext: page.next ?? undefined })
   const seen: Page = {
     rows: rows.length,
     failed: rows.filter((row) => !("incomplete" in row) && row.status === "failed").length,
     partial: rows.filter((row) => "incomplete" in row).length,
+  }
+  const current = try machine.get()
+  if (current.thread === thread && Messages.canPageRead(current, ticket, seen)) {
+    try store.set({ messagesThread: thread, messages: rows, messagesNext: page.next ?? undefined })
+    if (conversation.value.id === "") try (try Conversations).of({ id: id.value, addresses: conversation.value.addresses })
   }
   const unreadShown = rows.some((row) => !("incomplete" in row) && row.direction === "incoming" && !row.read)
   return { type: "pageRead", ticket, ok: true, grant, seen, further: page.next !== null, unreadShown, role }
 }
 
 // spec/app/messages/index.md, "Only the newest read of the choices is shown, with what Android says about address-book access"
-effect function choicesRead(ticket: number, further: boolean): Event!!(Telephony | Inbox) {
+effect function choicesRead(ticket: number, further: boolean): Event!!(Telephony | Inbox | Messages.Machine) {
   const store = try Inbox
   const held = try store.get()
   const status = telephony("status", (c) => c.phone.status()) catch () => undefined
@@ -193,7 +216,7 @@ effect function choicesRead(ticket: number, further: boolean): Event!!(Telephony
   if (page === undefined) return { type: "choicesRead", ticket, ok: false, grant, count: 0, further: false }
   const found = page.contacts.filter((row): row is AddressBookContact => !("incomplete" in row) && row.phones.length > 0)
   const rows = further ? [...held.choices, ...found] : found
-  try store.set({ choices: rows, choicesNext: page.next ?? undefined })
+  if (Messages.canChoicesRead(try (try Messages.Machine).get(), ticket, rows.length)) try store.set({ choices: rows, choicesNext: page.next ?? undefined })
   return { type: "choicesRead", ticket, ok: true, grant, count: rows.length, further: page.next !== null }
 }
 

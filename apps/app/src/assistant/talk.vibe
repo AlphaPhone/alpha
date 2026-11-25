@@ -2,6 +2,7 @@
 import { ConversationRecord } from "@elizaos/agent/client"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import type { Binding } from "../../gen/app__assistant__composer.effect.vibe"
+import type { MediaCard } from "./media-review.vibe"
 import type { Failure, Fix } from "../../gen/app__assistant__reply.ts"
 import type { MailQuestion } from "../inbox/mail-context.vibe"
 import type { CommsPrompt } from "../phone/comms.vibe"
@@ -70,6 +71,8 @@ export interface Seen {
   readonly filesBinding: Binding | undefined
   readonly attachmentNotice: string
   readonly preview: { readonly ticket: number; readonly file: Attached } | undefined
+  readonly media: ReadonlyArray<MediaCard>
+  readonly mediaNote: string
   /** The text of a message the slot marks as sending, under review; or the saved copy of a conflict. */
   readonly saved: string
   /** The hits of each search, by the ticket that asked from the first hit. */
@@ -90,6 +93,8 @@ export interface Board {
   /** The text a send in hand carries, the last text sent, and a send that waits for its conversation to be made. */
   outgoing: string
   lastSent: string
+  /** The exact wire text, used only to reconcile a turn without a message ID. */
+  lastSentWire: string
   /** The id the last message was posted under, as the agent keeps it, or "" where its post never said. */
   lastSentId: string
   sendWhenMade: boolean
@@ -117,6 +122,7 @@ export interface Board {
 
 export service Talk {
   readonly board: Board
+  readonly attachmentLock: Semaphore.Semaphore
 }
 
 /** Where the agent's conversations are kept by number, so that the conversation showing is found again after a restart. */
@@ -146,7 +152,7 @@ export const talk = Layer.effect(Talk, effect {
   const numbers = new Map<string, number>()
   const listeners = new Set<() => void>()
   let seen: Seen = {
-    pages: new Map(), reply: "", label: "", failure: undefined, typed: "", files: [], filesBinding: undefined, attachmentNotice: "", preview: undefined, saved: "", hits: [],
+    pages: new Map(), reply: "", label: "", failure: undefined, typed: "", files: [], filesBinding: undefined, attachmentNotice: "", preview: undefined, media: [], mediaNote: "", saved: "", hits: [],
     titles: new Map(records.map((one, at) => [at + 1, one.title])),
   }
   const keep = () => runFork(ignore(store.set(key, JSON.stringify({ conversations: records.map((one) => ({ id: one.record.id, roomId: one.record.roomId, title: one.title })) }))))
@@ -159,6 +165,7 @@ export const talk = Layer.effect(Talk, effect {
     type: (text) => board.change({ typed: text }),
     outgoing: "",
     lastSent: "",
+    lastSentWire: "",
     lastSentId: "",
     sendWhenMade: false,
     staged: undefined,
@@ -227,5 +234,5 @@ export const talk = Layer.effect(Talk, effect {
       if (page !== undefined) board.putPage(ticket, page.conversation, page.lines.filter((one) => one !== line))
     },
   }
-  return { board }
+  return { board, attachmentLock: try Semaphore.make(1) }
 })

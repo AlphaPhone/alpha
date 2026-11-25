@@ -1,6 +1,6 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
 import {
-  Alert, AssistantChatHistorySheet, AssistantConversation, AssistantGrabber, AssistantPhotoPreview, AssistantSearchSheet, ConfirmDialog,
+  Alert, AssistantCard, Button, AssistantChatHistorySheet, AssistantConversation, AssistantGrabber, AssistantPhotoPreview, AssistantSearchSheet, ConfirmDialog,
   type AssistantAttachment, type AssistantComposerProps, type AssistantDraftNoticeProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
@@ -26,10 +26,13 @@ import { useMachine as useSearch } from "../../gen/app__assistant__search.react.
 import type { Machine as CommsMachine } from "../../gen/app__phone__comms.effect.vibe";
 import { useMachine as useComms } from "../../gen/app__phone__comms.react.ts";
 import { Machine as ShellMachine, showing } from "../../gen/app__shell.effect.vibe";
+import type { Machine as LayersMachine } from "../../gen/app__shell__layers.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { MailQuestions } from "../inbox/mail-context.vibe";
+import { home } from "../shell/shell.vibe";
 import { isCommsView } from "../shell/views.tsx";
+import { MediaReview } from "./media-review.vibe";
 import { askComms, freedom } from "./assistant.vibe";
 import { acceptedFiles, insertFiles, previewFile, removeFile, sameBinding } from "./attachments.vibe";
 import { chip, type MessageActions, useMessageRows } from "./history.tsx";
@@ -38,7 +41,7 @@ import { type Attached, type Line, Talk } from "./talk.vibe";
 import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | Talk | MailQuestions, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | Talk | MailQuestions | LayersMachine | MediaReview, unknown>;
   messageActions?: MessageActions;
   speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "voice" | "voiceNotice">;
   canReadAloud?: boolean;
@@ -84,7 +87,7 @@ function waiting(writing: Writing, files: readonly Attached[]): AssistantAttachm
 
 const detached = { mail: "Mail", transcript: "Transcript", shown: "Shown" } as const;
 
-const barHeight = 80;
+const barHeight = 102;
 const emptyLines: readonly Line[] = [];
 const settings = { type: "openView", view: "Settings" } as const;
 const back = { type: "goBack" } as const;
@@ -182,6 +185,16 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const later = { type: "scroll", around: board.numbered(lines.at(-1)?.id ?? "") } as const;
   const writingReply = seen.reply !== "" ? [{ id: "reply", author: "alpha", text: seen.reply } as const] : [];
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
+  const mediaCards = seen.media.filter((card) => !talking.context.sensitive && card.conversation === shown.chosen && card.revision === talking.context.revision).map((card) => ({
+    id: `media ${card.id}`, author: "alpha" as const, text: "", children: (
+      <div className="grid gap-2">
+        <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, action: "Approve" }}
+          onHandOn={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, true)))} />
+        <Button className="justify-self-end" variant="ghost" onClick={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, false)))}>Decline</Button>
+      </div>
+    ),
+  }));
+  const mediaNote = seen.mediaNote === "" ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote }];
   const failed = seen.failure === undefined ? [] : [{ id: "failure", author: "alpha", text: "", children: <ReplyFailure {...seen.failure} live onRetry={() => type(board.lastSent)} onSettings={settingsAction ? onSettings : undefined} /> } as const];
   const quoted = board.line(shown.chosen, writing.editor.quote)?.text;
   const view = talking.context.showing.tag === "App" ? talking.context.showing.view : "Home";
@@ -241,23 +254,17 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         header={{
           title: seen.titles.get(shown.chosen) ?? "Ask Alpha",
           context: { view, selected: talking.context.selected, sensitive: talking.context.sensitive },
-          onHistory: () => {
-            void chats.send({ type: "browse" });
-            setListing(true);
-          },
-          onSearch: search.can({ type: "openSearch" }) ? () => { void chats.send({ type: "browse" }); void search.send({ type: "openSearch" }); } : undefined,
-          onNew: chats.can(start) ? () => void chats.send(start) : undefined,
+          onHome: () => void runtime.runPromise(home()),
           onClose: open && shell.can({ type: "goBack" }) ? () => void shell.send({ type: "goBack" }) : undefined,
           expanded: assistantDetent === "Full",
           onResize: assistantDetent === "Full"
             ? () => void shell.send({ type: "goBack" })
             : shell.can({ type: "raise", detent: "Full" }) ? () => void shell.send({ type: "raise", detent: "Full" }) : undefined,
-          making: making(shown),
           grabber: open ? grabber : undefined,
         }}
         transcript={{
           messages,
-          liveMessages: [...writingReply, ...failed],
+          liveMessages: [...writingReply, ...failed, ...mediaCards, ...mediaNote],
           position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around) },
           visible: open,
           status: shown.page.status === "Loading" ? "loading" : shown.page.status === "Failed" ? "failed" : "loaded",
@@ -312,6 +319,13 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
             fileInput.current?.click();
           } : undefined,
           onFocusField: () => openWithFocus(false),
+          onHistory: () => {
+            void chats.send({ type: "browse" });
+            setListing(true);
+          },
+          onSearch: search.can({ type: "openSearch" }) ? () => { void chats.send({ type: "browse" }); void search.send({ type: "openSearch" }); } : undefined,
+          onNew: chats.can(start) ? () => void chats.send(start) : undefined,
+          making: making(shown),
           onClick: !open ? (event) => {
             if (event.target instanceof Element && event.target.closest("button, textarea")) return;
             openWithFocus(true);

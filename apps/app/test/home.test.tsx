@@ -16,6 +16,8 @@ underAct();
 afterEach(closeAll);
 
 const tiles = () => [...document.querySelectorAll("nav[aria-label='Apps on Home'] [data-home-tile]")].map((tile) => tile.getAttribute("data-home-tile"));
+const tileButton = (id: string) => document.querySelector<HTMLButtonElement>(`[data-home-tile="${id}"]`);
+const drawerButton = (name: string) => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"][aria-label="Apps"] button')].find((found) => (found.getAttribute("aria-label") ?? found.textContent) === name);
 const toast = () => document.querySelector("[role=status]")?.textContent;
 const held = (name: string) => button(name)?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
 const pointer = (type: string, clientX: number, clientY: number) => new PointerEvent(type, { bubbles: true, isPrimary: true, pointerId: 1, button: 0, clientX, clientY });
@@ -24,7 +26,7 @@ const pulled = (startY = 68, dx = 0) => drawn(() => {
   zone?.dispatchEvent(pointer("pointerdown", 100, startY));
   zone?.dispatchEvent(pointer("pointerup", 100 + dx, startY + 80));
 });
-const alphaApps = ["view:Inbox", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Files", "view:Workflows", "view:Settings"];
+const alphaApps = ["view:Inbox", "view:Calendar", "view:Clock", "view:Reminders", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Files", "view:Workflows", "view:Settings"];
 const holdingHome = (world: Scene) => {
   world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true, holders: ["ai.alphacompute.alphaphone"] } : role);
   return world;
@@ -138,15 +140,15 @@ describe("Home on a phone", () => {
     world.launcher.unlisted = false;
     await press("Try again");
     await until(alpha, homes, Home.Machine, (h) => h.installed.read.status === "Loaded");
-    expect([Boolean(button("Clock")), Boolean(button("Mail"))]).toEqual([true, true]);
+    expect([Boolean(drawerButton("Clock")), Boolean(drawerButton("Mail"))]).toEqual([true, true]);
 
     // spec/app/home/index.md, "A new search in the open drawer replaces the last and closes any open menu"
     await fill("Search apps", "cl");
     await until(alpha, homes, Home.Machine, (h) => h.query === "cl");
-    expect([Boolean(button("Clock")), Boolean(button("Mail"))]).toEqual([true, false]);
+    expect([Boolean(drawerButton("Clock")), Boolean(drawerButton("Mail"))]).toEqual([true, false]);
 
     // spec/app/home/index.md, "An app's menu opens in the open drawer, for an app in the last reading, and says Add to Home or On Home"
-    held("Clock");
+    await drawn(() => drawerButton("Clock")?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })));
     await until(alpha, homes, Home.Machine, (h) => Home.menuIsOpen(h.menu));
     // spec/app/home/index.md, "Add to Home adds one of Alpha's own apps it lists, and an app's menu in the drawer adds that app; adding from the menu closes the drawer"
     await drawn(() => {
@@ -159,13 +161,13 @@ describe("Home on a phone", () => {
     expect(tiles().at(-1)).toBe("app:org.fixture.clock/org.fixture.clock.Main");
 
     // spec/app/home/index.md, "Only an app in the last reading is opened, never while Home is being edited, and never by the touch that opened its menu"
-    await press("Clock");
+    await drawn(() => tileButton("app:org.fixture.clock/org.fixture.clock.Main")?.click());
     await until(alpha, homes, Home.Machine, (h) => h.handoff.attempt.outcome === "Confirmed");
     expect(world.launcher.opened).toEqual(["org.fixture.clock"]);
 
     // spec/app/home/index.md, "Android's answer ends the wait; a refusal is told with its reason, and the apps are read again"
     world.launcher.refusing.set("org.fixture.clock", "disabled");
-    await press("Clock");
+    await drawn(() => tileButton("app:org.fixture.clock/org.fixture.clock.Main")?.click());
     await until(alpha, homes, Home.Machine, (h) => h.handoff.attempt.outcome === "Refused" && h.installed.read.status === "Loaded");
     await until(alpha, alpha.runtime, Toasts, (t) => t.showing);
     expect([toast(), world.launcher.opened.length]).toEqual(["Couldn't open Clock. It's turned off.", 2]);

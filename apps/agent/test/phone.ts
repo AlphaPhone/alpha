@@ -35,14 +35,14 @@ export interface Listed {
 }
 
 /** The policy the build wrote beside the bundle. */
-export const policy = () => read("policy.json") as { actions: { allowed: string[]; refused: Record<string, string> } };
+export const policy = () => read("policy.json") as { actions: { allowed: string[]; refused: Record<string, string> }; plugins: { load: string[]; product?: string } };
 
 /** The routes the host file admits for the page. */
 export const listed = () => read("host.json").routes as Listed[];
 
 /** The bundle's manifest as the build wrote it. */
 export const manifest = () => JSON.parse(fs.readFileSync(path.join(pack, "bundle/manifest.json"), "utf8")) as {
-  plugins: string[]; packages: { name: string }[]; localInference: boolean; workflowWorkerSha256?: string; actions: { name: string }[];
+  plugins: string[]; productPlugin?: string; packages: { name: string }[]; localInference: boolean; workflowWorkerSha256?: string; actions: { name: string }[];
 };
 
 /**

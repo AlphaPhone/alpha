@@ -106,7 +106,7 @@ export function AppsDrawer({
       }}
       className={cn("flex min-h-0 flex-col bg-background pt-[max(--spacing(14),calc(max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))+--spacing(3)))] text-foreground motion-safe:animate-fade", className)}
     >
-      <AppHeader title="Apps" className="min-h-11 shrink-0 px-3 [&_h1]:py-0 [&_h1]:pl-2">
+      <AppHeader title="Apps" className="min-h-11 shrink-0 px-3 [&_button[aria-label]]:size-11 [&_button[aria-label]]:min-w-11 [&_h1]:pl-2 [&_h1]:font-display [&_h1]:text-3xl [&_h1]:font-light">
         <Button variant="ghost" size="icon" aria-label="Close apps" onClick={onClose}><X className="size-5" /></Button>
       </AppHeader>
       <SearchField aria-label="Search apps" placeholder="Search apps" autoComplete="off" value={query} onValueChange={onSearch} className="mx-4 mt-3 mb-2 shrink-0 [&_input]:rounded-full [&_input]:border-0 [&_input]:bg-secondary [&_input]:pl-11 [&>svg]:size-4.5" />

@@ -25,19 +25,26 @@ export type HomeTileProps = Omit<ComponentProps<"button">, "children"> & {
 export function HomeTile({ label, icon, badge, editing = false, onRemove, hold, onHold, onClick, className, ...props }: HomeTileProps) {
   const activation = useLauncherPress(hold, onHold, onClick);
   return (
-    <div data-home-cell="" className={cn("relative flex justify-center data-[home-dragging]:z-10", className)}>
+    <div data-home-cell="" className={cn("group/home-cell relative flex justify-center data-[home-dragging]:z-10", className)}>
       <div className="relative">
-        <AppTile label={label} icon={icon} badge={editing ? undefined : badge} className={cn(editing && "touch-none")} {...activation} {...props} />
+        <AppTile
+          label={label}
+          icon={icon}
+          badge={editing ? undefined : badge}
+          className={cn(editing && "touch-none *:first:animate-wiggle *:first:motion-reduce:animate-none *:first:group-data-[home-dragging]/home-cell:animate-none")}
+          {...activation}
+          {...props}
+        />
         {editing ? (
           <button
             type="button"
             aria-label={`Remove ${label}`}
             disabled={!onRemove}
             onClick={onRemove}
-            className={cn(focusRing, "absolute -top-3.5 -left-3.5 flex size-11 items-center justify-center rounded-full disabled:opacity-50")}
+            className={cn(focusRing, "absolute -top-4 -left-4 flex size-11 items-center justify-center rounded-full disabled:opacity-50")}
           >
-            <span aria-hidden className="flex size-6 items-center justify-center rounded-full bg-foreground text-background shadow-sm">
-              <Minus className="size-4" />
+            <span aria-hidden className="flex size-6 items-center justify-center rounded-full bg-foreground text-background">
+              <Minus className="size-3.5" />
             </span>
           </button>
         ) : null}

@@ -100,7 +100,7 @@ export function App({ alpha }: AppProps) {
       onPointerUp={swiped}
       onPointerCancel={(event) => { if (startedRef.current?.id === event.pointerId) startedRef.current = undefined; }}
       style={canvas?.covered ? { height: canvas.visible } : undefined}
-      className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground sm:pointer-fine:max-w-103", side && "pointer-coarse:flex-row")}
+      className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground has-[[data-alpha-camera-native]]:bg-transparent sm:pointer-fine:max-w-103", side && "pointer-coarse:flex-row")}
     >
       <div
         data-alpha-shell-page=""
@@ -116,14 +116,14 @@ export function App({ alpha }: AppProps) {
         {page === undefined || !editorsMounted(page) ? null : showing === undefined
           ? alpha.slot("home")
           : (
-            <>
+            <div key={showing} className="flex min-h-0 flex-1 flex-col motion-safe:animate-rise">
               {!viewHasHeader(showing) && <AppHeader
                 title={views[showing].label}
                 leading={back && <AppBack alpha={alpha} />}
                 className="shrink-0"
               />}
               {alpha.slot(`view:${showing}`)}
-            </>
+            </div>
           )}
       </div>
       <div

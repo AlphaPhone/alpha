@@ -113,7 +113,7 @@ function mmsReview(send: Outgoing, sim: number): MmsReview {
   return { recipients: [...send.to] as PhoneNumber[], body: send.body, subscriptionId: sim, attachments: send.pictures.map((one) => ({ name: one.name, contentType: one.contentType, bytes: one.bytes })) }
 }
 
-effect function receiptOf(send: Outgoing, sim: number, operation: OperationId): SmsSendStatus | undefined!!Telephony {
+effect function receiptOf(send: Outgoing, sim: number, operation: OperationId): (SmsSendStatus | undefined)!!Telephony {
   if (usingMms(send.to.length, send.pictured)) {
     // Picture bytes are visit-only. A process restart may keep the operation without enough data to bind its result.
     if (send.pictured && send.pictures.length === 0) return undefined
@@ -185,9 +185,13 @@ const tailLength = 20
 
 // spec/app/messages/composer.md, "Alpha's suggestion is asked for only when the draft is empty, and lands only if it still is"
 /** Alpha's draft for `thread`, asked of the agent from the messages last read: it lands in the conversation's draft only while the owner has written nothing there. */
-effect function suggestion(ticket: number, thread: number): Event!!(Agent | Inbox | Drafts | Conversations | Composer.Machine) {
+effect function suggestion(ticket: number, thread: number): Event!!(Agent | Inbox | Drafts | Conversations | Messages | Composer.Machine) {
   const refused: Event = { type: "suggested", ticket, ok: false }
-  const rows = (try (try Inbox).get()).messages.flatMap((row) => ("incomplete" in row ? [] : [{ direction: row.direction === "incoming" ? "in" : "out", date: row.date, body: row.body }]))
+  const current = try (try Messages).get()
+  if (!current.front || current.thread !== thread || current.sms.grant !== "Granted" || current.shown.rows === 0) return refused
+  const visible = try (try Inbox).get()
+  if (visible.messagesThread !== thread) return refused
+  const rows = visible.messages.flatMap((row) => ("incomplete" in row ? [] : [{ direction: row.direction === "incoming" ? "in" : "out", date: row.date, body: row.body }]))
   const tail = [...rows].sort((a, b) => a.date - b.date).slice(-tailLength)
   const conversation = try (try Conversations).get(thread)
   const participant = Option.isSome(conversation) && conversation.value.addresses.length === 1 ? conversation.value.addresses[0] : null
@@ -200,7 +204,7 @@ effect function suggestion(ticket: number, thread: number): Event!!(Agent | Inbo
   return { type: "suggested", ticket, ok: true }
 }
 
-function carry(fx: Out): Job<Event, Telephony | Drafts | Attempts | Conversations | Inbox | Agent | SystemSettings | Composer.Machine, []> {
+function carry(fx: Out): Job<Event, Telephony | Drafts | Attempts | Conversations | Inbox | Agent | SystemSettings | Messages | Composer.Machine, []> {
   return match (fx) {
     when { tag: "SaveDraft" }: answer("save", succeed<Event>({ type: "draftSaved" }), { type: "draftSaved" });
     when { tag: "DropDraft", let thread }: run(`drop ${thread}`, effect { try (try Drafts).drop(thread) });
