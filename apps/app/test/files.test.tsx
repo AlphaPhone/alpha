@@ -357,7 +357,7 @@ describe("Files on a phone", () => {
   });
 
   it('Use a picture from Files in Messages (spec/app/files/preview.md, "Use in Messages offers the exact readable PNG or JPEG to the owner’s recipient picker"; spec/app/messages/index.md, "A picture from Files is offered in a new recipient picker and can join only its chosen empty draft")', async () => {
-    const { alpha, runtime, world } = await onFiles(undefined, "view:Messages");
+    const { alpha, runtime, world } = await onFiles({ ...scene(), phone: true, image: true }, "view:Messages");
     const png = atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jP1sAAAAASUVORK5CYII=");
     world.files.stored.push({ volume: "primary", path: "Download/handed.png", directory: false, mimeType: "image/png", size: png.length, modified: 7 });
     world.files.texts["Download/handed.png"] = png;
@@ -427,7 +427,7 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Shown, (s) => s.drawing.status === "Loaded" && s.page === 2);
     // spec/app/files/preview.md, "Open elsewhere hands the file over to read only"
     await choose("Open elsewhere", "File actions");
-    await until(alpha, runtime, Shown, () => world.files.opened.includes("selection:Download/lease.pdf"));
+    await vi.waitFor(() => expect(world.files.opened).toContain("selection:Download/lease.pdf"));
     // spec/app/files/preview.md, "Forget removes the file from Recent, with or without access, and closes the viewer"
     await choose("Forget", "File actions");
     await until(alpha, runtime, Recent, (s) => s.rows.length === 1 && s.shown.grant === 0);
