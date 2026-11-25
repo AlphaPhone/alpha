@@ -1,8 +1,9 @@
-// spec/kit/read.md, "Story: Read from outside"; spec/app/platform/index.md, "A cloud request the phone holds back for want of a sign-in reads as the cloud's own 401"; spec/app/platform/index.md, "A request is refused for want of a network only when Android confirms the app's network is down"
+// spec/kit/read.md, "Story: Read from outside"; spec/app/platform/index.md, "A cloud request the phone holds back for want of a sign-in reads as the cloud's own 401"; spec/app/platform/index.md, "A mail or calendar request the phone holds back for want of its mail lease reads as the cloud's own refusal of the device key there, never as a sign-out"; spec/app/platform/index.md, "A request is refused for want of a network only when Android confirms the app's network is down"
 import { createCloudClient } from "@elizaos/cloud"
-import { BridgeUnavailable, CloudRefused, type CloudClient as Relay, type CloudFailure, type CloudMethod, type CloudPath, type CloudRequest } from "@elizaos/os-bridges"
-import { cloudStatusOf, refusedOffline, replied } from "../../gen/app__platform.effect.vibe"
+import { BridgeUnavailable, CloudRefused, type CloudClient as Relay, type CloudFailure, type CloudMethod, type CloudPath, type CloudRequest, SignInRefused } from "@elizaos/os-bridges"
+import { type MailSignIn, cloudStatusOf, heldAnswer, leaseRefusalCode, refusedOffline, replied } from "../../gen/app__platform.effect.vibe"
 import { type Failure, type Remote, type Wired, Refused, Unreachable, Unsent, parsed, patience, refusal, remoteAt } from "./remote.vibe"
+import { CLOUD_ENVIRONMENT, signInAccounts } from "./voice.vibe"
 import { WiFi, phoneWiFi } from "./wifi.vibe"
 
 module held {
@@ -102,8 +103,15 @@ const forSignIn: ReadonlyArray<CloudFailure> = ["sign-in-required", "reauth-requ
 
 const heldForSignIn = (cause: unknown): boolean => cause instanceof CloudRefused && forSignIn.includes(cause.failure)
 
+/** The plugin held a mail or calendar request back for want of the phone's mail lease: the owner is still signed in. */
+const heldForLease = (cause: unknown): boolean => cause instanceof CloudRefused && cause.failure === "mail-lease-upgrade-required"
+
+/** The cloud's own refusal of the device key on a mail route, as Alpha reads a request held back for the lease. */
+const leaseRefusal = heldAnswer("HeldForMailLease")
+
 function undelivered(cause: unknown): Failure {
   if (heldForSignIn(cause)) return refusal(cloudStatusOf(true, 0), undefined)
+  if (heldForLease(cause)) return new Refused({ status: leaseRefusal.status, reason: leaseRefusal.reason })
   return cause instanceof BridgeUnavailable || (cause instanceof CloudRefused && kept.includes(cause.failure)) ? new Unsent({ cause }) : new Unreachable({ cause })
 }
 
@@ -166,6 +174,7 @@ function relaying(relay: Relay, wifi: WiFi.Shape): typeof globalThis.fetch {
       return answer(reply.body as Uint8Array<ArrayBuffer>, reply.status, Object.fromEntries(Object.entries(head).filter((one): one is [string, string] => one[1] !== undefined)))
     } catch (cause) {
       if (heldForSignIn(cause)) return unauthorized(cloudStatusOf(true, 0))
+      if (heldForLease(cause)) return answer(JSON.stringify({ error: leaseRefusalCode, reason: leaseRefusal.reason }), leaseRefusal.status, { "content-type": "application/json" })
       throw new TypeError("the cloud request failed", { cause })
     }
   }
@@ -180,3 +189,19 @@ export const relayedCloud = Layer.provide(Layer.effect(Cloud, effect {
   const relay = client()
   return { ...plugged(relay, wifi), client: typed(relaying(relay, wifi)) }
 }), phoneWiFi)
+
+// spec/app/platform/index.md, "The owner's tap on a mail sign-in control starts the phone's one more sign-in for mail where the phone wants it, then reads again once"
+/**
+ * What the phone answers the owner's tap on a mail sign-in control: eliza's `upgradeMailLease`, which the phone starts
+ * only where it holds mail back for the lease, and refuses as `Rejected` anywhere else. A page with no sign-in plugin,
+ * or any other failure to ask, is a phone that wants no such sign-in.
+ */
+export effect function mailSignIn(): MailSignIn!! {
+  return effect {
+    const receipt = try tryPromise({ try: () => signInAccounts().upgradeMailLease({ environment: CLOUD_ENVIRONMENT }), catch: (cause) => new MailSignInUnasked({ cause }) })
+    return receipt.verdict.kind === "SignedInAs" ? "SignedInForMail" : "MailSignInEnded"
+  } catch (failed) => (failed.cause instanceof SignInRefused && failed.cause.code !== "Rejected" ? "MailSignInEnded" : "MailSignInNotWanted")
+}
+
+/** The phone's sign-in did not take the tap: it refused, or there is no sign-in to ask. */
+error MailSignInUnasked { cause: unknown }

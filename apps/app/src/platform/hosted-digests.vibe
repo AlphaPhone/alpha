@@ -1,0 +1,128 @@
+// spec/app/digests/index.md, "Android supplies one verified view of retained results and background checks"
+import { DIGEST_RETAINED_RESULTS, digestId, type DigestResult, parseDigestResult } from "@elizaos/plugin-workflow-client"
+import { registered } from "./device.vibe"
+
+const pluginName = "AlphaHostedDigestDelivery"
+
+module held {
+  import { registerPlugin, type PluginListenerHandle } from "@capacitor/core"
+
+  interface NativeDigestPlugin {
+    read(): Promise<unknown>
+    syncManual(input: { lease: string }): Promise<void>
+    setBackground(input: { enabled: boolean; lease: string }): Promise<void>
+    enableNotifications(input: { lease: string }): Promise<void>
+    peekNotice(): Promise<unknown>
+    settleNotice(input: { token: string }): Promise<void>
+    addListener(name: "changed", listener: () => void): Promise<PluginListenerHandle>
+  }
+
+  let client: NativeDigestPlugin | undefined
+  /** @throws {never} */
+  export function bridge(name: string): NativeDigestPlugin {
+    return (client ??= registerPlugin<NativeDigestPlugin>(name))
+  }
+}
+import { bridge } from held
+
+const Snapshot = Schema.Struct({
+  snapshot: Schema.NullOr(Schema.Struct({
+    rows: Schema.Array(Schema.Unknown).check(Schema.isMaxLength(DIGEST_RETAINED_RESULTS)),
+    backgroundEnabled: Schema.Boolean,
+    noticesAllowed: Schema.Boolean,
+    lease: Schema.NonEmptyString.check(Schema.isMaxLength(128)),
+    support: Schema.Literals(["manual", "foreground", "nativeScheduled"]),
+  })),
+})
+
+export interface NativeDigestSnapshot {
+  readonly rows: readonly DigestResult[]
+  readonly backgroundEnabled: boolean
+  readonly noticesAllowed: boolean
+  readonly lease: string
+  readonly support: "manual" | "foreground" | "nativeScheduled"
+}
+
+const PendingNotice = Schema.Struct({
+  notice: Schema.NullOr(Schema.Struct({
+    token: Schema.NonEmptyString.check(Schema.isMaxLength(128)),
+    runId: Schema.String,
+    workflowId: Schema.String,
+    workflowVersionId: Schema.String,
+    cursor: Schema.Int.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER)),
+  })),
+})
+
+export interface NativeDigestNotice {
+  readonly token: string
+  readonly runId: string
+  readonly workflowId: string
+  readonly workflowVersionId: string
+  readonly cursor: number
+}
+
+export type DigestNoticeIdentity = Pick<NativeDigestNotice, "runId" | "workflowId" | "workflowVersionId">
+
+export function sameDigestNoticeResult(first: DigestNoticeIdentity, second: DigestNoticeIdentity): boolean {
+  return first.runId === second.runId && first.workflowId === second.workflowId && first.workflowVersionId === second.workflowVersionId
+}
+
+export const nativeDigestsAvailable = (): boolean => registered(pluginName)
+
+export effect function readNativeDigests(): (NativeDigestSnapshot | undefined)!! {
+  return effect {
+    const raw = try tryPromise(() => bridge(pluginName).read())
+    const { snapshot } = try Schema.decodeUnknownEffect(Snapshot)(raw)
+    if (snapshot === null) return undefined
+    const rows = try Effect.forEach(snapshot.rows, parseDigestResult)
+    if (new Set(rows.map((row) => row.runId)).size !== rows.length ||
+      new Set(rows.map((row) => row.cursor)).size !== rows.length) return undefined
+    return { ...snapshot, rows: rows.sort((a, b) => b.cursor - a.cursor) }
+  } catch () => undefined
+}
+
+export effect function syncNativeDigests(lease: string): boolean!! {
+  return effect {
+    try tryPromise(() => bridge(pluginName).syncManual({ lease }))
+    return true
+  } catch () => false
+}
+
+export effect function writeNativeDigestPreference(enabled: boolean, lease: string): boolean!! {
+  return effect {
+    try tryPromise(() => bridge(pluginName).setBackground({ enabled, lease }))
+    return true
+  } catch () => false
+}
+
+export effect function enableNativeDigestNotices(lease: string): boolean!! {
+  return effect {
+    try tryPromise(() => bridge(pluginName).enableNotifications({ lease }))
+    return true
+  } catch () => false
+}
+
+export effect function peekNativeDigestNotice(): (NativeDigestNotice | null | undefined)!! {
+  return effect {
+    const raw = try tryPromise(() => bridge(pluginName).peekNotice())
+    const { notice } = try Schema.decodeUnknownEffect(PendingNotice)(raw)
+    if (notice === null) return null
+    return {
+      ...notice,
+      runId: try digestId(notice.runId),
+      workflowId: try digestId(notice.workflowId),
+      workflowVersionId: try digestId(notice.workflowVersionId),
+    }
+  } catch () => undefined
+}
+
+export effect function settleNativeDigestNotice(token: string): void!! {
+  try ignore(tryPromise(() => bridge(pluginName).settleNotice({ token })))
+}
+
+export const nativeDigestChanges = () => Stream.callback<void>((queue) => effect {
+  const listener = tryPromise(() => bridge(pluginName).addListener("changed", () => {
+    Queue.offerUnsafe(queue, undefined)
+  })) catch () => undefined
+  if (listener !== undefined) try addFinalizer(() => ignore(tryPromise(() => listener.remove())))
+})

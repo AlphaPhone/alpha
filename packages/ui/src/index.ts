@@ -84,6 +84,7 @@ export * from "./components/home/HomeNotice.tsx";
 export * from "./components/home/HomeScreen.tsx";
 export * from "./components/home/HomeTile.tsx";
 export * from "./components/home/HomeTileGrid.tsx";
+export * from "./components/home/AppsDrawer.tsx";
 export * from "./components/home/HomeWorkflowsCard.tsx";
 export * from "./components/home/InstalledAppIcon.tsx";
 export * from "./components/inbox/InboxAccountList.tsx";

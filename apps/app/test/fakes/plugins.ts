@@ -1,5 +1,6 @@
+import { alphaAssistantDraft } from "./ask.ts";
 import { elizaCalendar } from "./calendar.ts";
-import { elizaCamera } from "./camera.ts";
+import { cameraKeys, elizaCamera } from "./camera.ts";
 import { elizaFiles, selectedDocuments } from "./files.ts";
 import { alphaMapsTransport, elizaLocation } from "./maps.ts";
 import { alphaNotes } from "./notes.ts";
@@ -14,6 +15,7 @@ import { telephonyPlugins } from "./telephony.ts";
 import { alphaDevice } from "./update.ts";
 import { alphaBrowser } from "./browser.ts";
 import { alphaVoiceCloud, elizaCloudSpeech, elizaSignIn } from "./voice.ts";
+import { alphaHostedDigests } from "./workflows.ts";
 
 /**
  * The plugins the fake phone's host registers, by the names their `@CapacitorPlugin` gives: one line per plugin, and
@@ -23,8 +25,9 @@ import { alphaVoiceCloud, elizaCloudSpeech, elizaSignIn } from "./voice.ts";
 export function plugins(world: Scene, services: { readonly agent: Answering; readonly cloud: Answering }): Record<string, Faked> {
   return {
     ElizaAgent: elizaAgent(services.agent, world.settings.recovery),
-    ElizaCloud: elizaCloud(services.cloud, () => world.signedIn),
-    ElizaSecureStore: elizaSecureStore(world.secrets, world.slots),
+    ElizaCloud: elizaCloud(services.cloud, () => world.signedIn, world.mailLease),
+    AlphaAssistantDraft: alphaAssistantDraft(world.ask, () => ({ owner: world.notes.ownerIdentity, agent: world.notes.owner, epoch: 1 })),
+    ElizaSecureStore: elizaSecureStore(world.secrets, (key) => world.slots.has(key) || /^notes-(?:draft|folders):[1-9][0-9]*$/.test(key)),
     ElizaCalendar: elizaCalendar(world.calendar),
     ElizaReminders: elizaReminders(world.reminders, () => world.now),
     ElizaCamera: elizaCamera(world.camera),
@@ -38,14 +41,15 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     AlphaCarrierSetup: alphaCarrierSetup(world.settings),
     AlphaMapsTransport: alphaMapsTransport(world.maps),
     ...(world.image ? telephonyPlugins(world.telephony, () => world.now) : {}),
-    AlphaDevice: (emit) => ({ ...alphaDevice(world.update, () => world.now)(emit), ...settingsHost(world.settings), ...alphaAgentConsent(world.settings) }),
+    AlphaDevice: (emit) => ({ ...alphaDevice(world.update, () => world.now)(emit), ...settingsHost(world.settings), ...alphaAgentConsent(world.settings), ...cameraKeys(world.camera) }),
     ElizaNotifications: elizaNotices(world.settings),
     ElizaPasswords: elizaPasswords(world.settings),
     AlphaConnection: alphaConnection(world.platform),
     ...(world.voice.onDevice ? { AlphaVoiceCloud: alphaVoiceCloud(world.voice) } : {}),
     ElizaCloudSpeech: elizaCloudSpeech(world.voice),
-    ElizaSignIn: elizaSignIn(world.voice, () => world.signedIn),
+    ElizaSignIn: elizaSignIn(world.voice, () => world.signedIn, world.mailLease),
     AlphaBrowser: alphaBrowser(world.browser),
-    ...(world.notes.audio.size > 0 ? { AlphaNotes: alphaNotes(world.notes) } : {}),
+    AlphaNotes: alphaNotes(world.notes),
+    ...(world.workflows.nativeDigests === undefined ? {} : { AlphaHostedDigestDelivery: alphaHostedDigests(world.workflows.nativeDigests) }),
   };
 }
