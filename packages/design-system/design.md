@@ -57,7 +57,8 @@ do next.
   Everything pressed is at least 44px in both directions.
 - **Elevation.** `shadow-sm` lifts a control, `shadow-menu` a menu, `shadow-md` a dialog or a notice, `shadow-lg` a raised card,
   `shadow-dock` the floating Ask Alpha bar, `shadow-dock-compact` its compact controls, `shadow-bar` the ongoing-call bar over a view,
-  `shadow-sheet` a map's resting sheet and `shadow-lift` a modal sheet or card rising over the page. The menu, dialog, sheet, lift,
+  `shadow-sheet` a map's resting sheet, `shadow-lift` a modal sheet or card rising over the page and `shadow-popup` a panel
+  ringed by a 1px line, such as Files options. The menu, dialog, sheet, lift, popup,
   dock and bar shadows have a `-dark` variant for black surfaces, as develop deepens its shadow color in dark. Over the map,
   `shadow-float` lifts the search bar, a round control and the directions card, `shadow-chip` a saved-place chip and
   `shadow-credit` the credit links, each with a `-dark` variant; `shadow-banner` is Maps guidance's turn banner.
@@ -305,6 +306,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `shadow.bar` | 0 2px 8px oklch(0 0 0 / 0.12) |
 | `shadow.bar-dark` | 0 2px 8px oklch(0 0 0 / 0.45) |
 | `shadow.focus-target` | 0 0 2px oklch(0 0 0) |
+| `shadow.popup` | 0 16px 40px oklch(0 0 0 / 0.12) |
+| `shadow.popup-dark` | 0 16px 40px oklch(0 0 0 / 0.45) |
 | `keyframes.rise` | from{opacity:0;transform:translateY(1.75rem)}to{opacity:1;transform:none} |
 | `keyframes.drop` | from{opacity:0;transform:translateY(-2.25rem)}to{opacity:1;transform:none} |
 | `keyframes.fade` | from{opacity:0}to{opacity:1} |
