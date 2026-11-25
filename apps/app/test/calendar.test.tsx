@@ -102,6 +102,14 @@ describe("Calendar without a connected account", () => {
     const timeline = document.querySelector('[aria-label="Calendar timeline"]');
     expect(timeline?.textContent).toContain("Not connected");
     expect(button("Open Calendar settings")).toBeDefined();
+    await chooseDate();
+    await until(alpha, runtime, View, (state) => state.overlay === "MonthDialog");
+    expect(document.querySelector<HTMLSelectElement>('select[aria-label="Calendar year"]')?.options).toHaveLength(101);
+    expect(button("Day")).toBeDefined();
+    expect(button("Schedule")).toBeDefined();
+    expect(button("Calendars")).toBeUndefined();
+    await hardware("back");
+    await until(alpha, runtime, View, (state) => state.overlay === "NoOverlay");
     await press("Open Calendar settings");
     await until(alpha, alpha.runtime, Settings, (state) => state.page === "CalendarApp");
     expect((await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).trail).toEqual(["Calendar", "Settings"]);
