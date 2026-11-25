@@ -896,7 +896,8 @@ pure def transcribeAgain(v: Voice, now: int): Change =
 
 pure def canRecordAgain(v: Voice): bool = D::canRecordAgain(v.recorder)
 
-pure def recordAgain(v: Voice): Voice = { ...v, recorder: D::recordAgain(v.recorder) }
+pure def recordAgain(v: Voice): Change =
+  { state: { ...v, recorder: D::recordAgain(v.recorder) }, out: List(Abandon({ recording: v.recorder.ticket })) }
 
 pure def canEdit(v: Voice, words: bool): bool = D::canEdit(v.recorder, words)
 
@@ -913,7 +914,7 @@ pure def canFill(v: Voice): bool = D::canFill(v.recorder)
 
 pure def fill(v: Voice): Change =
   val filled = D::fill(v.recorder)
-  { state: { ...v, recorder: filled }, out: List(Fill({ field: v.recorder.field, filling: filled.filled })) }
+  { state: { ...v, recorder: filled }, out: List(Fill({ field: v.recorder.field, filling: filled.filled }), Abandon({ recording: v.recorder.ticket })) }
 
 pure def stepDictationFillsItsOwnField(before: Voice, after: Voice, out: List[Effect]): bool =
   out.every(e => match e { | Fill(f) => f.field == before.recorder.field and before.recorder.stage == D::Review and f.filling == after.recorder.filled and f.filling == before.recorder.filled + 1 | _ => true })
@@ -921,11 +922,13 @@ pure def stepDictationFillsItsOwnField(before: Voice, after: Voice, out: List[Ef
 
 ### Closing the recorder abandons any recording or transcription it was waiting for
 
+A clip kept for a recognition retry or review is also discarded when the recorder closes.
+
 ```quint
 pure def canCloseRecorder(v: Voice): bool = D::canCloseRecorder(v.recorder)
 
 pure def closeRecorder(v: Voice): Change =
-  val busy = v.recorder.stage == D::Starting or v.recorder.stage == D::Recording or v.recorder.stage == D::Transcribing
+  val busy = v.recorder.stage == D::Starting or v.recorder.stage == D::Recording or v.recorder.clip
   { state: { ...v, recorder: D::closeRecorder(v.recorder) },
     out: if (busy) List(Abandon({ recording: v.recorder.ticket })) else List() }
 ```

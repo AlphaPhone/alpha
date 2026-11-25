@@ -308,12 +308,16 @@ export effect function prepare(thread: number, sim: number | null): void!!(Draft
 export effect function attachAll(files: ReadonlyArray<File>): void!!(Drafts | Composer.Machine) {
   const store = try Drafts
   const machine = try Composer.Machine
+  const thread = (try machine.get()).thread
   for (const file of files) {
-    const held = try store.pictures()
-    const fits = (MMS_ATTACHMENT_TYPES as ReadonlyArray<string>).includes(file.type) && file.size > 0 && held.reduce((sum, one) => sum + one.bytes.length, 0) + file.size <= MMS_MAX_TOTAL_BYTES
-    if (!Composer.canAttach(try machine.get(), fits)) return
-    const bytes = promise(() => file.arrayBuffer()) catch () => undefined
+    if (!(MMS_ATTACHMENT_TYPES as ReadonlyArray<string>).includes(file.type) || file.size <= 0 || file.size > MMS_MAX_TOTAL_BYTES) continue
+    const bytes = tryPromise(() => file.arrayBuffer()) catch () => undefined
     if (bytes === undefined) continue
+    const current = try machine.get()
+    if (current.thread !== thread) return
+    const held = try store.pictures()
+    const fits = !held.some((one) => one.name === file.name) && held.reduce((sum, one) => sum + one.bytes.length, 0) + bytes.byteLength <= MMS_MAX_TOTAL_BYTES
+    if (!Composer.canAttach(current, fits)) continue
     try store.setPictures([...held, { name: file.name, contentType: file.type as MmsAttachmentType, bytes: new Uint8Array(bytes) }])
     try ignore(machine.send({ type: "attach", fits }))
   }

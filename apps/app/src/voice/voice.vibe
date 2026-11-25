@@ -144,12 +144,12 @@ module pure {
   )
   const clock = String.raw`(?:0?[1-9]|1[0-2])(?::[0-5]\d)?`
   const bareClock = String.raw`(?:[01]?\d|2[0-3]):[0-5]\d`
-  const meridiem = String.raw`[ \t]*[ap]\.?[ \t]*m(?:\.(?=[ \t]*[,;–—−-]|[ \t]+to[ \t]))?`
-  const rangeSeparator = String.raw`(?:[ \t]*[-–—−][ \t]*|[ \t]+to[ \t]+)`
+  const meridiem = String.raw`[ \t]*[aApP]\.?[ \t]*[mM](?:\.(?=[ \t]*[,;!?–—−-]|[ \t]+(?:\p{Ll}|[tT][oO][ \t])))?`
+  const rangeSeparator = String.raw`(?:[ \t]*[-–—−][ \t]*|[ \t]+[tT][oO][ \t]+)`
   const clockEnd = String.raw`(?![\p{L}\d:/-]|\.\d)`
   const clockStart = String.raw`(?<![\p{L}\d:+./−-])`
-  const clockRange = new RegExp(String.raw`${clockStart}(?:(${clock}(?:${meridiem})?)${rangeSeparator}(${clock}${meridiem})|(${bareClock})${rangeSeparator}(${bareClock}))${clockEnd}`, "giu")
-  const clockWithMeridiem = new RegExp(String.raw`${clockStart}(${clock}${meridiem})${clockEnd}`, "giu")
+  const clockRange = new RegExp(String.raw`${clockStart}(?:(${clock}(?:${meridiem})?)${rangeSeparator}(${clock}${meridiem})|(${bareClock})${rangeSeparator}(${bareClock}))${clockEnd}`, "gu")
+  const clockWithMeridiem = new RegExp(String.raw`${clockStart}(${clock}${meridiem})${clockEnd}`, "gu")
   const bareClockTime = new RegExp(String.raw`${clockStart}${bareClock}${clockEnd}`, "gu")
   const unfinishedWeekday = new RegExp(String.raw`\b(?:${weekdayNames})\.,?(?:[ \t]+([A-Z][A-Za-z]*)\.?(?:[ \t]+0)?)?[ \t]*$`, "u")
   const unfinishedMonth = new RegExp(String.raw`\b(?:${monthNames})\.(?:[ \t]+0)?[ \t]*$`, "u")
@@ -371,15 +371,17 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | VoiceBridge | Vo
       return started ? { type: "recordingStarted", ticket } : { type: "recordingFailed", ticket, failure: "NoMicrophone" }
     }, { type: "recordingFailed", ticket, failure: "NoMicrophone" });
     when { tag: "Transcribe", let ticket, let network }: answer("transcribe", effect {
-      const text = (try VoiceBridge).transcribe(ticket, network) catch () => ""
+      const text = (try VoiceBridge).transcribe(ticket, network) catch () => undefined
+      if (text === undefined) return { type: "transcribed", ticket, failure: "Recognition" } as Voice.Event
       const trimmed = text.trim()
-      if (trimmed !== "") {
+      if (trimmed === "") return { type: "transcribed", ticket, failure: "NoSpeech" } as Voice.Event
+      const current = try (try Voice.Machine).get()
+      if (Voice.canTranscribed(current, ticket, "NoFailure")) {
         (try VoiceWords).memory.dictatedText = trimmed
-        return { type: "transcribed", ticket, failure: "NoFailure" } as Voice.Event
       }
-      return { type: "transcribed", ticket, failure: "NoSpeech" } as Voice.Event
+      return { type: "transcribed", ticket, failure: "NoFailure" } as Voice.Event
     }, { type: "transcribed", ticket, failure: "Recognition" });
-    when { tag: "Abandon", let recording }: run("abandon", effect { try (try VoiceBridge).abandon(recording) });
+    when { tag: "Abandon", let recording }: run(`abandon ${recording}`, effect { try (try VoiceBridge).abandon(recording) });
     when { tag: "Fill", let field, let filling }: run(`fill ${filling}`, effect {
       const { memory } = try VoiceWords
       const target = memory.fillComposer
@@ -464,7 +466,9 @@ const bridgeEvents = hearing(
     when { kind: "transcript", let session, let final }: final ? { type: "turnEnded", session } : { type: "speechHeard", session };
     when { kind: "speechEnd", let session }: { type: "turnEnded", session };
     when { kind: "bargeIn", let session, let echo }: { type: "bargeIn", session, echo };
-    when { kind: "ended" }: undefined;
+    when { kind: "ended", let session, let reason }: reason === "ended"
+      ? undefined
+      : { type: "speechFailed", session, fault: "NotTheNetwork", wait: 0, deviceReady: false, now: untimed };
   },
 )
 

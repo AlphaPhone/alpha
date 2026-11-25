@@ -29,7 +29,7 @@ jobs:
       matrix:
         include:
           - name: verify
-            tasks: build typecheck test test:browser check //#lint:js //#lint:css //#analyze //#selftest:docs //#selftest:examples
+            tasks: //#no-bun build typecheck test test:browser check //#lint:js //#lint:css //#analyze //#selftest:docs //#selftest:examples
     environment: &cache-environment ${{ github.event_name == 'push' && 'turbo-cache-publish' || 'turbo-cache-read' }}
     env: &cache-env
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
