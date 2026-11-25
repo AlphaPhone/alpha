@@ -794,9 +794,6 @@ const looked = started(effect {
   })
 }, "telling the screen")
 
-// spec/app/assistant/index.md, "When another conversation is shown, the last turn stays behind with its own"
-const left = following(Chats.Machine, (chats) => chats.chosen, Conversation.Machine, (): Conversation.Event => ({ type: "leave" }))
-
 // spec/app/assistant/composer.md, "The slot is opened when the composer is shown, and opened again after it could not be read"
 const opening = following(Composer.Machine, (composer) => (composer.slot === "Closed" && composer.read.status !== "Loading" ? composer.binding : undefined), Composer.Machine, (binding): Composer.Event | undefined => (binding === undefined ? undefined : { type: "open" }))
 
@@ -870,16 +867,25 @@ export effect function askComms(request: CommsPrompt): void!!(Chats.Machine | Co
   if (!(try contained(chats.send({ type: "start", ...free }), "opening a conversation for the request"))) board.waitingRequest = undefined
 }
 
+// spec/app/assistant/index.md, "When another conversation is shown, the last turn stays behind with its own"
 const requested = started(effect {
   const chats = try Chats.Machine
+  const conversation = try Conversation.Machine
   const { board } = try Talk
-  try Stream.runForEach(chats.changes, effect (shown) => {
+  let leftFor: number | undefined
+  try Stream.runForEach(Stream.zipLatest(chats.changes, conversation.changes), effect () => {
+    const shown = try chats.get()
+    if (leftFor !== shown.chosen) {
+      if (!(try contained(conversation.send({ type: "leave" }), "leaving the previous conversation"))) return
+      leftFor = shown.chosen
+      if ((try chats.get()).chosen !== shown.chosen) return
+    }
     const request = board.waitingRequest
     if (request === undefined || Chats.making(shown)) return
     board.waitingRequest = undefined
     if (shown.chosen !== 0) try postRequest(request)
   })
-}, "sending a request after opening its conversation")
+}, "leaving the previous conversation before sending its replacement's request")
 
 const submitted = started(effect {
   try Stream.runForEach((try CommsPrompts).submissions, askComms)
@@ -972,7 +978,7 @@ export const assisting = Layer.provideMerge(
     reacting(Dock, { carry: carryDock }),
     Attachments.machine(),
     reacting(Locator, { carry: carryLocator }),
-    reached, looked, left, opening, saving, bound, requested, submitted, allowing, forgetting, rested, keyboardRest, steppingBack, carried, carriedAloud,
+    reached, looked, opening, saving, bound, requested, submitted, allowing, forgetting, rested, keyboardRest, steppingBack, carried, carriedAloud,
   ),
   Layer.mergeAll(Layer.fresh(turns), talk, handoffs),
 )
