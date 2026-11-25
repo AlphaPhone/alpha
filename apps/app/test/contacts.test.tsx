@@ -9,7 +9,7 @@ import { type Asking, propose, withdrawn } from "../src/contacts/requests.vibe";
 import { type Reading, answerReading } from "../src/contacts/reads.vibe";
 import { Machine as Messages } from "../gen/app__messages.effect.vibe";
 import { Machine as Composer } from "../gen/app__messages__composer.effect.vibe";
-import { closeAll, open, press, underAct, until } from "./alpha.tsx";
+import { closeAll, drawn, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -54,6 +54,9 @@ describe("Contacts on an Alpha image", () => {
     await press("Save");
     await until(alpha, alpha.runtime, Contacts, (s) => s.write.outcome === "Confirmed" && s.form === "Shut");
     expect(world.telephony.people.find((one) => one.id === "7")).toMatchObject({ familyName: "Chen-Ortiz", revision: 2 });
+    await until(alpha, alpha.runtime, Contacts, (s) => s.opened && s.card.status === "Loaded");
+    const card = await alpha.runtime.runPromise(answerReading({ type: "contact_read_selected" }));
+    expect(card).toMatchObject({ status: "read", contact: { displayName: "Maya Chen-Ortiz" } });
 
     // spec/app/contacts/index.md, "Confirming deletes the contact that was shown"
     await press("Delete");
@@ -86,6 +89,22 @@ describe("Contacts on an Alpha image", () => {
     await press("Edit");
     await until(alpha, alpha.runtime, Contacts, () => world.telephony.editors.length === 2);
     expect([world.telephony.editors, (await alpha.runtime.runPromise(Contacts.use((machine) => machine.get()))).form, world.telephony.people.map((one) => one.revision)]).toEqual([["new", "7"], "Shut", [1, 1]]);
+  });
+
+  it("Append the next page to my contacts (spec/app/contacts/index.md, \"Story: Browse my contacts\")", async () => {
+    const world = image();
+    const first = world.telephony.people[0];
+    if (!first) throw new Error("the phone has no starting contact");
+    world.telephony.people.push(...Array.from({ length: 51 }, (_, index) =>
+      ({ ...first, id: String(index + 10), displayName: `Contact ${index + 1}` })));
+    const { alpha } = await open(world);
+    await until(alpha, alpha.runtime, Shell, (s) => s.contacts);
+    await press("Contacts");
+    await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 50 && s.more);
+    await press("More contacts");
+    await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 53 && !s.more);
+    await press("Contact 51");
+    await until(alpha, alpha.runtime, Contacts, (s) => s.opened && s.card.status === "Loaded" && s.contact === "60");
   });
 
   it("Approve what the agent asked: a text, a change, a new contact (spec/app/contacts/agent.md, \"Story: Let the agent ask for a call or a contact change\"; spec/app/contacts/agent.md, \"Story: Approve what the agent asked\"; spec/app/contacts/agent.md, \"Story: Learn how the request ended\")", async () => {
@@ -149,6 +168,16 @@ describe("Contacts on an Alpha image", () => {
     await press("Approve");
     await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "Done");
     expect(world.telephony.people.filter((one) => one.displayName === "Maya Chen").length).toBe(2);
+
+    // spec/app/contacts/agent.md, "Nothing is done but what the owner approved, as it was shown, once": a changed native version invalidates the identified review.
+    await ask({ type: "contact_delete", query: "Ben" });
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Shown" && s.contact === "8");
+    const ben = world.telephony.people.find((one) => one.id === "8");
+    if (!ben) throw new Error("the phone has no reviewed contact");
+    ben.revision += 1;
+    await press("Approve");
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "NotDone");
+    expect(world.telephony.people).toContain(ben);
   });
 
   it("Let the agent read what I have open, and draft a reply that never sends (spec/app/contacts/agent.md, \"Story: Let the agent read what I have open\"; spec/app/messages/composer.md, \"Story: Let Alpha suggest a draft\")", async () => {
@@ -189,6 +218,7 @@ describe("Contacts on an Alpha image", () => {
     // spec/app/contacts/index.md, "Searching or changing the filter chip starts a new list"
     expect(await read({ type: "contact_show", query: "Ben" })).toEqual({ kind: "contact-show", status: "shown" });
     await until(alpha, alpha.runtime, Contacts, (s) => s.front && s.sought && s.list.status === "Loaded" && s.rows === 1);
+    await drawn(() => new Promise((resolve) => setTimeout(resolve, 0)));
     await press("Ben Ortiz");
     await until(alpha, alpha.runtime, Contacts, (s) => s.opened && s.card.status === "Loaded");
     expect(await read({ type: "contact_read_selected" })).toEqual({ kind: "contact-read", status: "read", contact: { displayName: "Ben Ortiz", phoneNumbers: ["+14155550122"], emailAddresses: [] } });

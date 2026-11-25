@@ -55,7 +55,7 @@ pure val initial: Voice = {
 pure val sessionValues = Set(1, 2, 3, 4, 5)
 pure val turnValues = Set(1, 2, 3, 4, 5)
 pure val placeValues = Set(1, 2)
-pure val keyValues = Set(1, 2)
+pure val keyValues = Set(0, 1, 2)
 pure val nowValues = Set(0, 30, 90, 700)
 pure val waitValues = Set(0, 20, 120)
 pure val weight_micOpened = 15
@@ -110,7 +110,7 @@ type Effect =
   | Record({ ticket: int })
   | Transcribe({ ticket: int, network: bool })
   | Abandon({ recording: int })
-  | Fill({ field: D::Field })
+  | Fill({ field: D::Field, filling: int })
 
 type Change = { state: Voice, out: List[Effect] }
 
@@ -209,7 +209,8 @@ pure def sometimesEngineHeldWhileListening(v: Voice): bool = v.phase == Listenin
 ### Before audio first leaves the phone, the owner is shown what is sent and where, and decides
 
 Agreeing uses the network service; declining keeps this conversation, and
-later ones on that account, on the phone.
+later ones on that account, on the phone. An Alpha Cloud account has
+answered when it signed in, so only an account that has not is asked here.
 
 ```quint
 pure def canAnswerDisclosure(v: Voice, agree: bool, now: int): bool = v.disclosing and v.phase == Starting
@@ -219,7 +220,7 @@ pure def answerDisclosure(v: Voice, agree: bool, now: int): Change =
   begin(onNetwork(route, now), { ...v, disclosing: false, route: route })
 ```
 
-### Android's answer to the prompt opens the microphone, or shows that it was denied
+### Android's answer to the prompt opens the microphone, or ends the start quietly when it was denied
 
 The prompt is answered for whichever is waiting on it: the conversation or
 the recorder.
@@ -623,12 +624,14 @@ pure def alwaysAnUnconfirmedStopKeepsVoiceClosed(v: Voice): bool =
 pure def sometimesStopUnconfirmed(v: Voice): bool = v.latched
 ```
 
-### A failure is shown once the conversation has stopped, and is one the owner can act on
+### A failed conversation ends quietly: why it failed is kept only until voice returns to idle, and nothing is shown
 
-A denied microphone offers "Open app settings".
+As in the existing app, a conversation that could not start or went on
+failing shows no words: voice returns to idle at once, and Talk is offered
+again.
 
 ```quint
-pure def alwaysAFailureIsShownWhenStopped(v: Voice): bool =
+pure def alwaysAFailureIsKeptOnlyOnceStopped(v: Voice): bool =
   (v.phase == Failed implies v.failure != D::NoFailure)
     and (v.failure != D::NoFailure implies (v.phase == Failed or v.phase == Stopping))
     and (v.failure == D::NoFailure or v.failure == D::Denied or v.failure == D::NoMicrophone or v.failure == D::Recognition)
@@ -646,8 +649,6 @@ pure def sometimesDenied(v: Voice): bool = v.phase == Failed and v.failure == D:
 > conversation to come back when the call ends.
 
 ### A call pauses the conversation: the microphone closes, speech stops, and the turn in flight is dropped
-
-The owner sees "Voice paused for a phone call".
 
 ```quint
 pure def canPauseForCall(v: Voice): bool = talking(v) and v.mic != Asking and not(v.disclosing) and v.phase != Paused
@@ -769,11 +770,17 @@ pure def sometimesFollowedAgentNavigationWhileListening(v: Voice): bool = v.phas
 
 ### Signing in, out or to another account changes the route, invalidates warmup, and ends a running conversation
 
+An account or provider key is told with its key, and signing out with none.
+Signing in to Alpha Cloud is the owner's agreement to have speech processed
+there, as it was in the existing app: Talk asks nothing more.
+
 ```quint
-pure def canAccountChanged(v: Voice, account: R::Account, key: int): bool = key > 0
+pure def canAccountChanged(v: Voice, account: R::Account, key: int): bool =
+  if (account == R::SignedOut) key == 0 else key > 0
 
 pure def accountChanged(v: Voice, account: R::Account, key: int): Change =
-  val signedIn = { ...v, warmed: false, route: R::changeAccount(v.route, account, key) }
+  val changed = R::changeAccount(v.route, account, key)
+  val signedIn = { ...v, warmed: false, route: if (account == R::CloudAccount) R::decide(changed, true) else changed }
   if (talking(v)) shutDown(D::NoFailure, false, signedIn) else { state: signedIn, out: List() }
 ```
 
@@ -889,7 +896,8 @@ pure def transcribeAgain(v: Voice, now: int): Change =
 
 pure def canRecordAgain(v: Voice): bool = D::canRecordAgain(v.recorder)
 
-pure def recordAgain(v: Voice): Voice = { ...v, recorder: D::recordAgain(v.recorder) }
+pure def recordAgain(v: Voice): Change =
+  { state: { ...v, recorder: D::recordAgain(v.recorder) }, out: List(Abandon({ recording: v.recorder.ticket })) }
 
 pure def canEdit(v: Voice, words: bool): bool = D::canEdit(v.recorder, words)
 
@@ -898,25 +906,29 @@ pure def edit(v: Voice, words: bool): Voice = { ...v, recorder: D::edit(v.record
 
 ### Using the transcript fills the field dictation started in, and dictation never sends
 
-A messaging bar's dictation fills that bar, never Ask Alpha.
+A messaging bar's dictation fills that bar, never Ask Alpha. The fill names
+its own number, so a late delivery cannot fill the field of a newer recording.
 
 ```quint
 pure def canFill(v: Voice): bool = D::canFill(v.recorder)
 
 pure def fill(v: Voice): Change =
-  { state: { ...v, recorder: D::fill(v.recorder) }, out: List(Fill({ field: v.recorder.field })) }
+  val filled = D::fill(v.recorder)
+  { state: { ...v, recorder: filled }, out: List(Fill({ field: v.recorder.field, filling: filled.filled }), Abandon({ recording: v.recorder.ticket })) }
 
 pure def stepDictationFillsItsOwnField(before: Voice, after: Voice, out: List[Effect]): bool =
-  out.every(e => match e { | Fill(f) => f.field == before.recorder.field and before.recorder.stage == D::Review | _ => true })
+  out.every(e => match e { | Fill(f) => f.field == before.recorder.field and before.recorder.stage == D::Review and f.filling == after.recorder.filled and f.filling == before.recorder.filled + 1 | _ => true })
 ```
 
 ### Closing the recorder abandons any recording or transcription it was waiting for
+
+A clip kept for a recognition retry or review is also discarded when the recorder closes.
 
 ```quint
 pure def canCloseRecorder(v: Voice): bool = D::canCloseRecorder(v.recorder)
 
 pure def closeRecorder(v: Voice): Change =
-  val busy = v.recorder.stage == D::Starting or v.recorder.stage == D::Recording or v.recorder.stage == D::Transcribing
+  val busy = v.recorder.stage == D::Starting or v.recorder.stage == D::Recording or v.recorder.clip
   { state: { ...v, recorder: D::closeRecorder(v.recorder) },
     out: if (busy) List(Abandon({ recording: v.recorder.ticket })) else List() }
 ```
@@ -926,7 +938,7 @@ pure def closeRecorder(v: Voice): Change =
 ```quint
 pure def alwaysTheRecorderKeepsItsRules(v: Voice): bool =
   D::alwaysAClipIsKeptOnlyAfterRecording(v.recorder) and D::alwaysWordsOnlyInReview(v.recorder)
-    and D::alwaysAFailureWaitsForTheOwner(v.recorder) and D::alwaysTicketsAreCounted(v.recorder)
+    and D::alwaysAFailureWaitsInItsStage(v.recorder) and D::alwaysTicketsAreCounted(v.recorder)
 
 pure def sometimesDictationUnderReview(v: Voice): bool = v.recorder.stage == D::Review and v.recorder.field == D::PhoneBar
 

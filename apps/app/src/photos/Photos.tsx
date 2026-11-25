@@ -10,6 +10,7 @@ import { useMachine as useViewer } from "../../gen/app__photos__viewer.react.ts"
 import type { Event, Filter } from "../../gen/app__photos.ts";
 import type { Event as TrashEvent } from "../../gen/app__photos__trash.ts";
 import type { Shown, Resident } from "../runtime/area.tsx";
+import { Time } from "../runtime/time.vibe";
 import { Catalog } from "./catalog.vibe";
 import { MediaGrid } from "./Grid.tsx";
 import { MediaViewer } from "./Viewer.tsx";
@@ -35,7 +36,7 @@ function ToolBar({ tools }: { tools: readonly Tool[] }) {
   );
 }
 
-export interface PhotosProps extends Shown<PhotosRuntime> {}
+type PhotosProps = Shown<PhotosRuntime>;
 
 /** The Library, Albums and Recently deleted, with the viewer and edit surfaces over the grid. */
 export function Photos({ runtime, alpha }: PhotosProps) {
@@ -179,7 +180,7 @@ export function Photos({ runtime, alpha }: PhotosProps) {
           {binOwner(openBin) && <ListRow title="Recently deleted" leading={<Trash2 />} trailing={<ChevronRight />} className="mt-5" onClick={() => binTalk(openBin)} />}
         </div>}
         {!albumList && (rows.length > 0 || canMore) &&
-          <MediaGrid rows={rows} selection={selection ? new Set(selected) : undefined} grouped={!album && !inTrash} open={open} start={!selection && canStart ? (number) => { void select(number); } : undefined}
+          <MediaGrid rows={rows} selection={selection ? new Set(selected) : undefined} grouped={!album && !inTrash} now={runtime.runSync(Time.use((time) => time.latest()))} open={open} start={!selection && canStart ? (number) => { void select(number); } : undefined}
             more={canMore ? () => inTrash ? binTalk({ type: "loadMore" }) : talk({ type: "loadMore" }) : undefined} />}
         {status === "Loading" && <div role="status" aria-label="Loading photos" className="grid place-items-center p-5"><Spinner /></div>}
         {status === "Loaded" && !albumList && rows.length === 0 && <EmptyState className="m-4" icon={<Images />} title={inTrash ? "Recently deleted is empty" : state.filter !== "Everything" ? "No matches" : "No photos"} />}

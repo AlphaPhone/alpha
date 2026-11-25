@@ -1,14 +1,13 @@
 import type { Effect, Layer, ManagedRuntime } from "effect";
 import type { ComponentType, ReactNode } from "react";
 import type { Place } from "../areas.ts";
-import type { MediaExecutors } from "../assistant/media-review.vibe";
 import type { MediaHandoff } from "../assistant/attachments.vibe";
 import type { Platform } from "../platform/platform.vibe";
 import type { resident } from "../resident.vibe";
 import type { Whole } from "./reactor.vibe";
 
 /** What the root runtime gives every area: the platform and the resident machines. */
-export type Resident = Platform | MediaHandoff | MediaExecutors | Layer.Success<typeof resident>;
+export type Resident = Platform | MediaHandoff | Layer.Success<typeof resident>;
 
 /** Alpha as boot.tsx opened it. */
 export interface Alpha {

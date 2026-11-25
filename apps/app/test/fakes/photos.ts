@@ -15,21 +15,26 @@ export interface PhotosScene {
   changed(): void;
   promptCount: number;
   readCount: number;
+  readonly saves: string[];
 }
 
 export function photosScene(): PhotosScene {
   return {
     access: { scope: "denied", images: "denied", videos: "denied" },
     rows: [row(3, "Park.jpg", false), row(2, "Camera.jpg", true), row(1, "Original.jpg", false)],
-    watching: false, changed: () => {}, promptCount: 0, readCount: 0,
+    watching: false, changed: () => {}, promptCount: 0, readCount: 0, saves: [],
   };
 }
 
 /** The native Photos plugin fixture talks to the real Eliza media bridge. */
 export function alphaPhotos(scene: PhotosScene): Faked {
-  return plugin<Partial<PhotosPlugin>, { libraryChanged: undefined }>((emit) => {
+  type Used = "libraryAccess" | "requestLibraryAccess" | "watchLibrary" | "list" | "listPermitted" | "read"
+    | "beginEdit" | "previewEdit" | "saveEdit" | "cancelEdit" | "albums" | "openLibrarySettings";
+  return plugin<Pick<PhotosPlugin, Used>, { libraryChanged: undefined }>((emit) => {
     scene.changed = () => { if (scene.watching) emit("libraryChanged", undefined); };
     const owned = () => scene.rows.filter((item) => item.owned);
+    const session = "alpha-test-photo-edit";
+    const preview = { sessionId: session, operationId: session, image: photo, width: 1, height: 1, reduced: false, maxEdge: 1024, filter: "none", canReplace: true };
     return {
       libraryAccess: () => Promise.resolve(scene.access),
       requestLibraryAccess() {
@@ -42,7 +47,7 @@ export function alphaPhotos(scene: PhotosScene): Faked {
         return Promise.resolve({ active });
       },
       list: () => Promise.resolve({ items: owned(), next: "", access: scene.access }),
-      listPermitted({ before, query } = {}) {
+      listPermitted({ before, query }: Parameters<PhotosPlugin["listPermitted"]>[0] = {}) {
         const rows = scene.rows.filter((item) => query === undefined || item.name.toLowerCase().includes(query.toLowerCase()));
         return Promise.resolve({ items: before === undefined ? rows.slice(0, 2) : rows.slice(2), next: before === undefined && rows.length > 2 ? "next" : "", access: scene.access });
       },
@@ -50,6 +55,18 @@ export function alphaPhotos(scene: PhotosScene): Faked {
         scene.readCount++;
         return Promise.resolve(scene.rows.find((item) => item.id === id));
       },
+      beginEdit: ({ id, revision }) => scene.rows.some((item) => item.id === id && item.revision === revision)
+        ? Promise.resolve(preview) : Promise.reject(new Error("This item changed")),
+      previewEdit: ({ sessionId, filter }) => sessionId === session
+        ? Promise.resolve({ ...preview, filter }) : Promise.reject(new Error("The session closed")),
+      saveEdit({ sessionId, filter }) {
+        if (sessionId !== session) return Promise.reject(new Error("The session closed"));
+        const copy = row(scene.rows.length + 1, "Edited copy.jpg", true);
+        scene.rows.unshift(copy);
+        scene.saves.push(filter);
+        return Promise.resolve({ status: "saved", operationId: session, id: copy.id, revision: copy.revision, replaced: false });
+      },
+      cancelEdit: () => Promise.resolve(),
       albums: () => Promise.resolve({ items: [] }),
       openLibrarySettings: () => Promise.resolve(undefined),
     };

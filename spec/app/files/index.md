@@ -468,14 +468,12 @@ whose items changed stops counting.
 pure def canRefresh(s: Files, by: Actor): bool = by != Agent and allowed(s) and s.open
 
 pure def refresh(s: Files, by: Actor): Moved =
+  val listing = R::ask(s.listing)
   val search = S::follow(s.search, where(s))
   val asked = if (search.searching) List(Search({ ticket: search.query.ticket, where: where(s), filter: search.filter })) else List()
   if (atTop(s)) arrived({ state: { ...s, search: search }, out: asked })
-  else {
-    val listing = R::ask(s.listing)
-    { state: { ...s, listing: listing, search: search },
-      out: List(Look({ ticket: listing.ticket, trail: s.trail, category: s.category, inCategory: s.inCategory })).concat(asked) }
-  }
+  else { state: { ...s, listing: listing, search: search },
+    out: List(Look({ ticket: listing.ticket, trail: s.trail, category: s.category, inCategory: s.inCategory })).concat(asked) }
 
 pure def canListed(s: Files, ticket: int, by: Actor): bool = by == Phone and R::canAnswer(s.listing, ticket)
 

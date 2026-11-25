@@ -15,6 +15,8 @@ export interface VoiceScene {
   grantOnRequest: boolean;
   localReady: boolean;
   liveCaptureAvailable: boolean;
+  nativeTransport: boolean;
+  transcriptionFailures: number;
   probeGate: (() => Promise<void>) | undefined;
   warmSpeechOutputCalls: number;
   localSpeechStatusCalls: number;
@@ -38,6 +40,8 @@ export interface VoiceScene {
   activeMicSession: string | undefined;
   emitLocal?: (event: string, data: unknown) => void;
   emitCloud?: (event: CloudStreamEvent) => void;
+  /** The phone's sign-in settling on the account whose key is `credentialId` now, as `ElizaSignInPlugin.java` tells it. */
+  signedInHere?: () => void;
 }
 
 export function voiceScene(): VoiceScene {
@@ -46,6 +50,8 @@ export function voiceScene(): VoiceScene {
     grantOnRequest: true,
     localReady: true,
     liveCaptureAvailable: true,
+    nativeTransport: true,
+    transcriptionFailures: 0,
     probeGate: undefined,
     warmSpeechOutputCalls: 0,
     localSpeechStatusCalls: 0,
@@ -75,6 +81,8 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
     voice.emitLocal = emit;
     let playbackSeq = 0;
     let recordingSeq = 0;
+    let activeRecording: string | undefined;
+    let finishedRecording: string | undefined;
     return {
       checkPermissions: () => Promise.resolve({ microphone: voice.permission }),
       requestPermissions: () => {
@@ -103,17 +111,17 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
       liveCaptureStatus: async () => {
         voice.liveCaptureStatusCalls += 1;
         if (voice.probeGate !== undefined) await voice.probeGate();
-        return { available: voice.liveCaptureAvailable };
+        return { available: voice.liveCaptureAvailable, nativeTransport: voice.nativeTransport };
       },
-      startLiveCapture: ({ sessionId }: { sessionId: string }) => {
+      startLiveCapture: ({ captureId, nativeAsr }: { captureId: string; nativeAsr: boolean }) => {
         voice.startLiveCaptureCalls += 1;
-        voice.activeMicSession = sessionId;
-        return Promise.resolve({ started: true, echoCancelled: true });
+        voice.activeMicSession = captureId;
+        return Promise.resolve({ captureId, nativeAsr, echoCancelled: true });
       },
-      stopLiveCapture: ({ sessionId }: { sessionId: string }) => {
+      stopLiveCapture: ({ captureId }: { captureId: string }) => {
         voice.stopLiveCaptureCalls += 1;
-        if (voice.activeMicSession === sessionId) voice.activeMicSession = undefined;
-        return Promise.resolve({});
+        if (voice.activeMicSession === captureId) voice.activeMicSession = undefined;
+        return Promise.resolve({ captureId, serverClosed: true });
       },
       synthesizeLocal: ({ text, append, replace }: { requestId: string; text: string; append?: boolean; replace?: boolean }) => {
         voice.spoken.push({ text, append: append === true, replace: replace !== false, channel: "local" });
@@ -128,10 +136,31 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
         voice.hushCalls += 1;
         return Promise.resolve({});
       },
-      startRecording: () => Promise.resolve({ recordingId: `rec-${++recordingSeq}` }),
-      stopRecording: ({ recordingId }: { recordingId: string }) => Promise.resolve({ recordingId }),
-      cancelRecording: () => Promise.resolve({}),
-      transcribeLocalRecording: () => Promise.resolve({ text: "Dictated note" }),
+      cancel: () => Promise.resolve({}),
+      startRecording: () => {
+        activeRecording = `rec-${++recordingSeq}`;
+        finishedRecording = undefined;
+        return Promise.resolve({ recordingId: activeRecording });
+      },
+      stopRecording: () => {
+        if (activeRecording === undefined) return Promise.reject(new Error("No recording is active"));
+        finishedRecording = activeRecording;
+        activeRecording = undefined;
+        return Promise.resolve({ recordingId: finishedRecording });
+      },
+      cancelRecording: () => {
+        activeRecording = undefined;
+        finishedRecording = undefined;
+        return Promise.resolve({});
+      },
+      transcribeLocalRecording: ({ recordingId }: { recordingId: string }) => {
+        if (finishedRecording !== recordingId) return Promise.reject(new Error("Recording unavailable"));
+        if (voice.transcriptionFailures > 0) {
+          voice.transcriptionFailures -= 1;
+          return Promise.reject(new Error("Recognition failed"));
+        }
+        return Promise.resolve({ text: "Dictated note" });
+      },
     };
   };
 }
@@ -182,14 +211,17 @@ export function elizaCloudSpeech(voice: VoiceScene): Faked {
   });
 }
 
-/** `ElizaSignInPlugin.java`'s `status`: the registered cloud's readiness and the account its key belongs to. */
+/** `ElizaSignInPlugin.java`'s `status`, the registered cloud's readiness and the account its key belongs to, and its `signInSettled` receipt, as the wire carries it. */
 export function elizaSignIn(voice: VoiceScene, signedIn: () => boolean): Faked {
-  return plugin<Pick<ElizaSignInPlugin, "status">>(() => ({
-    status: ({ environment }) => Promise.resolve({
-      environment, methodsKnown: true, email: true, sms: false, google: false, googleMode: "browser",
-      account: signedIn()
-        ? { signedIn: true, userId: "user-1", organizationId: "org-1", credentialId: voice.credentialId, keyExpiresAt: 4_102_444_800_000 }
-        : { signedIn: false },
-    }),
-  }));
+  return plugin<Pick<ElizaSignInPlugin, "status">, { signInSettled: unknown }>((emit) => {
+    voice.signedInHere = () => emit("signInSettled", { request: 1, attempt: 1, verdict: "signed-in-as", credentialId: voice.credentialId, google: "not-requested" });
+    return {
+      status: ({ environment }) => Promise.resolve({
+        environment, methodsKnown: true, email: true, sms: false, google: false, googleMode: "browser",
+        account: signedIn()
+          ? { signedIn: true, userId: "user-1", organizationId: "org-1", credentialId: voice.credentialId, keyExpiresAt: 4_102_444_800_000 }
+          : { signedIn: false },
+      }),
+    };
+  });
 }

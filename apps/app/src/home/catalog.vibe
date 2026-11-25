@@ -1,36 +1,33 @@
-// spec/app/home/index.md, "Whether an app matches a search is told from its label and package, ignoring case and accents, and an empty search matches every app"
+// spec/app/home/index.md, "Story: See the apps on this phone"
 import type { InstalledApp } from "@elizaos/os/bridges/definitions/system"
-import { opaque } from "../../gen/app__home.effect.vibe"
-import { type Listed, details, found } from "../platform/launcher.vibe"
-import { externalStore } from "../runtime/store.ts"
-
+import type { Listed } from "../platform/launcher.vibe"
 
 /** What Home last read of each installed app beyond its key, which the spec never holds: its label, icon and profile. */
 export interface Catalog {
   readonly apps: ReadonlyMap<string, InstalledApp>
-  readonly details: ReadonlyMap<string, readonly string[]>
 }
 
-const held = externalStore<Catalog>({ apps: new Map(), details: new Map() })
+let current: Catalog = { apps: new Map() }
+const listeners = new Set<() => void>()
+
+function subscribeCatalog(this: void, listener: () => void): () => void {
+  listeners.add(listener)
+  return () => { listeners.delete(listener) }
+}
 
 /** The phone's apps as last read, for the screens to draw: an external store, which React reads without an effect. */
 export const catalog = {
-  snapshot: held.snapshot,
-  subscribe: held.subscribe,
+  snapshot: (): Catalog => current,
+  subscribe: subscribeCatalog,
   /** Each app of a reading, which comes before the reading is told to Home. */
   listed(apps: readonly Listed[]): void {
-    held.set({ apps: new Map(apps.map(({ key, app }) => [key, app])), details: details(apps.map(({ app }) => app)) })
+    current = { apps: new Map(apps.map(({ key, app }) => [key, app])) }
+    for (const listener of [...listeners]) listener()
   },
-  app: (key: string): InstalledApp | undefined => held.snapshot().apps.get(key),
+  app: (key: string): InstalledApp | undefined => current.apps.get(key),
 }
 
 /** The app's label, or its key where it was never read. */
 export function labelOf(key: string): string {
-  return held.snapshot().apps.get(key)?.label ?? key
-}
-
-opaque.matches = (key: string, query: string) => {
-  if (query.trim() === "") return true
-  const app = held.snapshot().apps.get(key)
-  return app === undefined ? key.toLowerCase().includes(query.trim().toLowerCase()) : found([app], query).length > 0
+  return current.apps.get(key)?.label ?? key
 }

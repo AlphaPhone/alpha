@@ -1,22 +1,21 @@
 // spec/app/home/index.md, "Story: Start Home"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import type { InstalledApp } from "@elizaos/os/bridges/definitions/system"
 import * as Home from "../../gen/app__home.effect.vibe"
 import type { Actor, Effect as Out, Event, Host } from "../../gen/app__home.effect.vibe"
 import { type Ask, waiting } from "../../gen/app__home__android.effect.vibe"
 import type { Tile } from "../../gen/app__home__tiles.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import type { View } from "../../gen/app__shell.effect.vibe"
+import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import { Launcher, type Presentation, type Why } from "../platform/launcher.vibe"
 import { type Job, answer, contained, due, following, hearing, reacting, run, started, untimed, together } from "../runtime/reactor.vibe"
 import type { HomeAsk, HomeNoticeMessage } from "@repo/ui"
-import { Said, say } from "../notices/toasts.vibe"
+import { type Said, say } from "../notices/toasts.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { stepping } from "../shell/shell.vibe"
 import { catalog, labelOf } from "./catalog.vibe"
 import { parsedTiles, savedKey, written } from "./saved.vibe"
-import { externalStore } from "../runtime/store.ts"
 
 module words {
   import { type HomeNoticeMessage, homeNoticeWords } from "@repo/ui"
@@ -67,7 +66,7 @@ effect function asked(ask: Ask, ticket: number): Event!!Launcher {
     ? (try launcher.shade())
     : app === undefined
       ? { done: false as const, why: "Gone" as Why }
-      : ask.tag === "OpenApp" ? (try launcher.open(app)) : (try launcher.info(app))
+      : (try launcher.open(app))
   return { type: "answered", ticket, opened: said.done, why: said.done ? "Unable" : said.why }
 }
 
@@ -89,17 +88,26 @@ function noticeOf(fx: Out): HomeNoticeMessage | undefined {
   }
 }
 
-/** The notice Home last told inside the drawer or the edit bar, and where: an external store the screen reads without an effect. */
+/** The notice Home last told inside the edit bar or drawer, and where: an external store the screen reads without an effect. */
 export interface Told {
   readonly notice: HomeNoticeMessage
-  readonly place: "InDrawer" | "InEditBar"
+  readonly place: "InEditBar" | "InDrawer"
 }
 
-const last = externalStore<Told | undefined>(undefined)
+let last: Told | undefined
+const listeners = new Set<() => void>()
 
-export const told = { snapshot: last.snapshot, subscribe: last.subscribe }
+function subscribeTold(this: void, listener: () => void): () => void {
+  listeners.add(listener)
+  return () => { listeners.delete(listener) }
+}
 
-// spec/app/home/index.md, "A notice shows as a toast on bare Home, inline in the open drawer, and in the edit bar while editing; told while an app or Ask Alpha is up, it is not shown"
+export const told = {
+  snapshot: (): Told | undefined => last,
+  subscribe: subscribeTold,
+}
+
+// spec/app/home/index.md, "A notice shows as a toast on bare Home and in the edit bar while editing; told while an app or Ask Alpha is up, it is not shown"
 effect function tell(fx: Out) {
   const notice = noticeOf(fx)
   if (notice === undefined) return
@@ -111,18 +119,13 @@ effect function tell(fx: Out) {
     try say(wordsOf(notice), true)
     return
   }
-  last.set({ notice, place })
+  last = { notice, place }
+  for (const listener of [...listeners]) listener()
 }
 
 // spec/app/home/index.md, "A tap on one of Alpha's own tiles on bare Home asks the shell to open that app, never while Home is being edited"
 effect function go(view: View) {
   try contained((try Shell.Machine).send({ type: "openView", view }), "opening an app from Home")
-}
-
-// spec/app/home/index.md, "Add to Home adds one of Alpha's own apps it lists, and an app's menu in the drawer adds that app; adding from the menu closes the drawer"
-effect function closeDrawer() {
-  const shell = try Shell.Machine
-  if ((try shell.get()).drawer) try contained(shell.send({ type: "goBack" }), "closing the drawer")
 }
 
 function carry(fx: Out): Job<Event, KeyValueStore.KeyValueStore | Launcher | Device | Shell.Machine | Home.Machine | Toasts | Said, [Actor]> {
@@ -132,7 +135,6 @@ function carry(fx: Out): Job<Event, KeyValueStore.KeyValueStore | Launcher | Dev
     when { tag: "ReadApps", let ticket }: answer("apps", readApps(ticket), { type: "appsRead", ticket, ok: false, listed: [], visible: false }, owner);
     when { tag: "AskAndroid", let ask, let ticket }: answer("android", asked(ask, ticket), { type: "answered", ticket, opened: false, why: "Unable" }, owner);
     when { tag: "Go", let view }: run("go", go(view), owner);
-    when { tag: "CloseDrawer" }: run("drawer", closeDrawer(), owner);
     default: run(`tell ${fx.tag}`, tell(fx), owner);
   }
 }
@@ -141,12 +143,12 @@ function carry(fx: Out): Job<Event, KeyValueStore.KeyValueStore | Launcher | Dev
 const presented = started(effect {
   const home = try Home.Machine
   const launcher = try Launcher
-  const device = try Device
   const host = hostOf(try launcher.presentation())
   try contained(home.send({ type: "presented", host }, owner), "presenting Home")
-  try Stream.runForEach(Stream.filter(device.visible, (shown) => shown), effect () => {
-    const now = hostOf(try launcher.presentation())
-    if (now === "AsLauncher" || now === "AsApp") try contained(home.send({ type: "launcherChanged", launcher: now === "AsLauncher" }, owner), "the launcher role")
+  const canvas = try Canvas
+  const role = Stream.changes(Stream.map(Stream.filter(canvas.changes, (frame) => frame.mounted), (frame) => frame.launcher))
+  try Stream.runForEach(role, effect (held) => {
+    if (Home.canLauncherChanged(try home.get(), held)) try contained(home.send({ type: "launcherChanged", launcher: held }, owner), "the launcher role")
   })
 }, "presenting Home")
 

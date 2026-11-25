@@ -3,8 +3,10 @@ import type { PhoneLine, TelephonyStatus } from "@elizaos/os/bridges/phone"
 import * as Info from "../../gen/app__phone__details.effect.vibe"
 import type { Effect as Out, Event, Holders, Line, Network, VoicemailSetup } from "../../gen/app__phone__details.effect.vibe"
 import { Telephony, telephony } from "../platform/telephony.vibe"
-import { type Job, answer, reacting, together } from "../runtime/reactor.vibe"
-import { on, visiting } from "./visit.vibe"
+import { Machine as Pages } from "../../gen/app__settings.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Device } from "../platform/device.vibe"
+import { type Job, answer, hearing, reacting, together } from "../runtime/reactor.vibe"
 
 const networks = {
   none: "NoService", "2g": "Network2g", "3g": "Network3g", "4g": "Network4g", "5g": "Network5g", "wifi-calling": "WifiCalling", unknown: "NetworkUnknown",
@@ -48,8 +50,17 @@ function carry(fx: Out): Job<Event, Telephony, []> {
 
 const machine = reacting(Info, { carry })
 
-/** Leaving Settings, or the page hiding, closes the page; only the owner's tap on its row opens it. */
-const left = visiting(on("Settings"), Info.Machine, (shown): Event | undefined => (shown ? undefined : { type: "show", showing: false }))
+const visits = hearing(
+  Stream.unwrap(effect {
+    const settings = Stream.map((try Pages).changes, (pages) => pages.page === "PhonePage")
+    const shell = Stream.map((try Shell).changes, (state) => showing(state, "Settings"))
+    const device = try Device
+    const visible = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
+    return Stream.changes(Stream.map(Stream.zipLatest(Stream.zipLatest(settings, shell), visible), ([[page, front], seen]) => page && front && seen))
+  }),
+  Info.Machine,
+  (showing): Event => ({ type: "show", showing }),
+)
 
 /** Settings → Phone: in memory, read while the page is open. */
-export const details = together(machine, left)
+export const details = together(machine, visits)

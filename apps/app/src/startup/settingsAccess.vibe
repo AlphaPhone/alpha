@@ -1,0 +1,115 @@
+// spec/app/startup/access.md, "Story: Look at access again"; spec/app/settings/index.md, "Story: Reach what another area owns"
+import * as Access from "../../gen/app__startup__access.effect.vibe"
+import type { Actor } from "../../gen/app__startup__actor.ts"
+import * as Steps from "../../gen/app__startup__steps.effect.vibe"
+import { Machine as Settings } from "../../gen/app__settings.effect.vibe"
+import type { Access as Permission } from "../../gen/app__settings__facts.ts"
+import type { Target } from "../../gen/app__settings__android.ts"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { say } from "../notices/toasts.vibe"
+import { Cloud } from "../platform/cloud.vibe"
+import { Device, native } from "../platform/device.vibe"
+import { SystemSettings } from "../platform/systemSettings.vibe"
+import { type Job, answer, contained, due, reacting, started, stop, together, untimed } from "../runtime/reactor.vibe"
+
+export const reviewKeys: Record<Permission, Steps.Key> = {
+  CameraAccess: "Camera", MicrophoneAccess: "Microphone", LocationAccess: "Location", CalendarAccess: "Calendar",
+  PhotosAccess: "Photos", FilesAccess: "Files", NotificationsAccess: "Notifications",
+}
+
+const reviewed: Record<Steps.Key, { access: Permission; target: Target }> = {
+  Camera: { access: "CameraAccess", target: "AppPermissions" },
+  Microphone: { access: "MicrophoneAccess", target: "AppPermissions" },
+  Location: { access: "LocationAccess", target: "LocationSettings" },
+  Calendar: { access: "CalendarAccess", target: "AppPermissions" },
+  Photos: { access: "PhotosAccess", target: "PhotoPermissions" },
+  Files: { access: "FilesAccess", target: "AllFilesAccess" },
+  Notifications: { access: "NotificationsAccess", target: "AlphaAlerts" },
+}
+
+const opening = (): Access.Event => ({ type: "begin", phone: native(), pregrants: false, now: untimed })
+
+effect function check(key: Steps.Key, ticket: number, open: boolean): Access.Event!!SystemSettings {
+  const system = try SystemSettings
+  const { access, target } = reviewed[key]
+  if (open && native()) try system.open(target, "")
+  const grant = try system.access(access)
+  return Option.isNone(grant)
+    ? { type: "failed", ticket, key }
+    : { type: "answered", ticket, key, grant: grant.value.grant, on: grant.value.on, requestable: false }
+}
+
+function carry(result: Access.Effect): Job<Access.Event, SystemSettings, [Actor]> {
+  return match (result) {
+    when { tag: "Check", let key, let ticket }: answer(`access ${key}`, check(key, ticket, false), { type: "failed", ticket, key } as const, "Owner" as Actor);
+    when { tag: "OpenSettings", let key, let ticket }: answer(`access ${key}`, check(key, ticket, true), { type: "failed", ticket, key } as const, "Owner" as Actor);
+    when { tag: "Ask", let key, let ticket }: answer(`access ${key}`, check(key, ticket, true), { type: "failed", ticket, key } as const, "Owner" as Actor);
+    when { tag: "Save", let ticket }: answer("save access", succeed<Access.Event>({ type: "saved", ticket, ok: false, now: untimed }), { type: "saved", ticket, ok: false, now: untimed }, "Owner" as Actor);
+    when { tag: "GoHome" }: stop("home");
+  }
+}
+
+effect function refreshed(): void!!Access.Machine {
+  const access = try Access.Machine
+  try ignore(access.send({ type: "resumed" }, "Owner"))
+  for (const key of Steps.everyKey) if ((try access.get()).stale.includes(key)) {
+    try ignore(access.send({ type: "check", key }, "Owner"))
+  }
+}
+
+/** Open a reviewed permission or the list, only once the phone has confirmed the Cloud account exists. */
+export const openReview = (permission: Permission | undefined) => effect {
+  const shell = try Shell
+  const device = try Device
+  const settings = try Settings
+  const expected = permission === undefined ? "Privacy" : "Permissions"
+  const here = effect { return showing(try shell.get(), "Settings") && (try settings.get()).page === expected && (try device.showing()) }
+  if (!(try here)) return
+  const cloud = (try Cloud).client
+  const signedIn = try Effect.option(tryPromise((signal) => cloud.account({ signal })))
+  if (!(try here)) return
+  const access = try Access.Machine
+  if (Option.isNone(signedIn)) {
+    try ignore(access.send({ type: "signedOut" }, "Owner"))
+    try say("Alpha could not confirm your sign-in", true)
+    return
+  }
+  if (!(try access.get()).begun) try ignore(access.send(opening(), "Owner"))
+  if (!Access.setUp(try access.get())) try ignore(access.send({ type: "welcome", created: false, now: untimed }, "Owner"))
+  const event: Access.Event = permission === undefined ? { type: "reopen", now: untimed } : { type: "review", key: reviewKeys[permission], now: untimed }
+  if (try contained(access.send(event, "Owner"), "opening the access review")) try refreshed()
+}
+
+const revisiting = started(effect {
+  const device = try Device
+  const shell = try Shell
+  const access = try Access.Machine
+  const shown = Stream.map(shell.changes, (state) => showing(state, "Settings"))
+  const foreground = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
+  const visits = Stream.changes(Stream.zipLatest(shown, foreground))
+  try Stream.runForEach(visits, effect ([settings, visible]) => {
+    if ((try access.get()).look === "NotLooking") return
+    if (!settings) {
+      try ignore(access.send({ type: "leave", now: untimed }, "Owner"))
+    } else if (visible) try refreshed()
+  })
+}, "settings access review lifecycle")
+
+export const reviewBack = effect {
+  const access = try Access.Machine
+  if ((try access.get()).look === "NotLooking") return false
+  return try contained(access.send({ type: "leave", now: untimed }, "Owner"), "closing the access review")
+}
+
+/** The existing Access rules, used by Settings for an explicit review. */
+export const startupReview = together(
+  reacting(Access, {
+    open: effect { return [opening(), "Owner"] as const },
+    carry,
+    timers: (state) => {
+      const clock = state.since + 20000
+      return Access.canTick(state, clock) && state.look !== "NotLooking" ? [due<Access.Event, [Actor]>("access-timeout", clock, { type: "tick", clock }, "Owner")] : []
+    },
+  }),
+  revisiting,
+)

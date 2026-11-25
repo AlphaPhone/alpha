@@ -106,7 +106,6 @@ function mmsReview(send: Outgoing, sim: number): MmsReview {
 
 effect function receiptOf(send: Outgoing, sim: number, operation: OperationId): (SmsSendStatus | undefined)!!Telephony {
   if (usingMms(send.to.length, send.pictured)) {
-    // Picture bytes are visit-only. A process restart may keep the operation without enough data to bind its result.
     if (send.pictured && send.pictures.length === 0) return undefined
     const receipt = telephony("mmsSendResult", (c) => c.messages.mmsSendResult(mmsReview(send, sim), operation)) catch () => undefined
     return receipt?.status
@@ -205,7 +204,7 @@ function carry(fx: Out): Job<Event, Telephony | Drafts | Attempts | Conversation
       const status = telephony("requestAccess", (c) => c.phone.requestAccess(need === "SendAccess" ? "sendSms" : "phoneState")) catch () => undefined
       return { type: "accessReported", need, grant: grantOf(need === "SendAccess" ? status?.permissions.sendSms : status?.permissions.phoneState) } satisfies Event
     }, { type: "accessReported", need, grant: "Unasked" });
-    when { tag: "OpenSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", 0) });
+    when { tag: "OpenSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", "") });
     when { tag: "OpenMessagingApp" }: run("elsewhere", effect {
       const thread = (try (try Composer.Machine).get()).thread
       try elsewhere(thread, try (try Drafts).text(thread))
@@ -301,12 +300,16 @@ export effect function prepare(thread: number, sim: number | null): void!!(Draft
 export effect function attachAll(files: ReadonlyArray<File>): void!!(Drafts | Composer.Machine) {
   const store = try Drafts
   const machine = try Composer.Machine
+  const thread = (try machine.get()).thread
   for (const file of files) {
-    const held = try store.pictures()
-    const fits = (MMS_ATTACHMENT_TYPES as ReadonlyArray<string>).includes(file.type) && file.size > 0 && held.reduce((sum, one) => sum + one.bytes.length, 0) + file.size <= MMS_MAX_TOTAL_BYTES
-    if (!Composer.canAttach(try machine.get(), fits)) return
-    const bytes = promise(() => file.arrayBuffer()) catch () => undefined
+    if (!(MMS_ATTACHMENT_TYPES as ReadonlyArray<string>).includes(file.type) || file.size <= 0 || file.size > MMS_MAX_TOTAL_BYTES) continue
+    const bytes = tryPromise(() => file.arrayBuffer()) catch () => undefined
     if (bytes === undefined) continue
+    const current = try machine.get()
+    if (current.thread !== thread) return
+    const held = try store.pictures()
+    const fits = !held.some((one) => one.name === file.name) && held.reduce((sum, one) => sum + one.bytes.length, 0) + bytes.byteLength <= MMS_MAX_TOTAL_BYTES
+    if (!Composer.canAttach(current, fits)) continue
     try store.setPictures([...held, { name: file.name, contentType: file.type as MmsAttachmentType, bytes: new Uint8Array(bytes) }])
     try ignore(machine.send({ type: "attach", fits }))
   }

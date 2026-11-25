@@ -5,10 +5,10 @@ import { readBundleManifest } from "@elizaos/agent/bundle"
 import { decodeLaunchDocument } from "@elizaos/agent/launch"
 import { defineRoutes } from "@elizaos/agent/routes"
 import { deployment } from "@repo/deployment"
-import { pinnedCheckout, pinnedPack } from "@repo/eliza-harness/pinned"
+import { pinnedCheckout, pinnedPack } from "@repo/eliza-harness"
 import {
   type Environment, type Manifest, bundledPlugins, calendarEdits, characterAdmitted, cloudModel, corePlugins, entryCarried, gmailChanges, googleAdmitted,
-  hostedPlugins, inputAdmitted, localEmbeddings, packAdmitted, packEntry, packedFor, packedPlugins, persistMemory, personalDetailSwap,
+  hostedPlugins, inputAdmitted, localEmbeddings, notesTrashDays, packAdmitted, packEntry, packedFor, packedPlugins, persistMemory, personalDetailSwap,
   policyAdmitted, privacyAdmitted, productPluginName, proposalsAdmitted, refusedActions, routeListAdmitted, secretSwap, viewPlugins,
 } from "../gen/agent.effect.vibe"
 
@@ -68,7 +68,12 @@ export function entrySource(bundled: readonly string[], hosted: readonly { name:
     ...allHosted.map(({ name }) => `    { packageName: ${JSON.stringify(name)}, plugin: undefined },`),
     "  ],",
     `  productPlugin: ${JSON.stringify(product.name)},`,
-    `  hostModules: new Map([${allHosted.map(({ name }, index) => `[${JSON.stringify(name)}, host${index}]`).join(", ")}]),`,
+    `  hostModules: new Map([${allHosted.map(({ name }, index) => {
+      const factory = name === "@elizaos/plugin-notes"
+        ? `(context) => { context.runtime.setSetting("ELIZA_NOTES_TRASH_RETENTION_DAYS", ${JSON.stringify(String(notesTrashDays))}); return host${index}(context); }`
+        : `host${index}`
+      return `[${JSON.stringify(name)}, ${factory}]`
+    }).join(", ")}]),`,
     "})",
     "",
   ].join("\n")

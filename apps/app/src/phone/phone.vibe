@@ -151,7 +151,7 @@ function carry(fx: Out): Job<Event, Telephony | Dialer | Phone.Machine | SystemS
     when { tag: "ReadLog", let ticket, let device }: answer("log", readLog(ticket, device), { type: "recentsRead", ticket, ok: false, grant: "Unasked", count: 0 });
     when { tag: "MatchNumber", let ticket }: answer("match", matchNumber(ticket), { type: "numberMatched", ticket, found: false });
     when { tag: "AskLog" }: answer("ask", askLog(), { type: "logReported", grant: "Unasked" });
-    when { tag: "OpenSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", 0) });
+    when { tag: "OpenSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", "") });
     when { tag: "MarkSeen" }: run("seen", effect {});
     when { tag: "Handoff", let ticket, let source, let number }: answer(`dial ${ticket}`, handoff(ticket, source === "TypedNumber", number), { type: "dialLost", ticket });
   }

@@ -20,7 +20,7 @@ export type SettingsBatteryPageProps = SettingsAndroidProps & {
  */
 export function SettingsBatteryPage({ battery, told, onBack, starting, onAndroid }: SettingsBatteryPageProps) {
   return (
-    <SettingsPage title="Battery" told={told} onBack={onBack}>
+    <SettingsPage title="Battery" told={told} onBack={onBack} backLabel="Back to General">
       <ListGroup>
         <SettingsFactRow title="Battery" icon={<Battery />} reading={battery} />
         <SettingsAndroidRow target="battery-saver" title="Battery saver" icon={<BatteryLow />} starting={starting} onAndroid={onAndroid} />

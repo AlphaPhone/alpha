@@ -10,7 +10,23 @@ type TileProps = {
   readonly interactive: boolean;
 };
 
-const day = new Intl.DateTimeFormat(undefined, { dateStyle: "long" });
+/** Days within this many days of today have a heading of their own, as in v121; older items are grouped by month. */
+const dayHeadings = 30;
+
+const startOfDay = (at: number) => new Date(at).setHours(0, 0, 0, 0);
+
+/** The heading an item taken `at` falls under, as of `now`: "Today", "Yesterday", "Sat, Oct 31", then "October 2026". */
+export function headingOf(at: number, now: number): string {
+  const ago = Math.round((startOfDay(now) - startOfDay(at)) / 86_400_000);
+  const shot = new Date(at);
+  if (ago <= 0) return "Today";
+  if (ago === 1) return "Yesterday";
+  if (ago < dayHeadings) {
+    const otherYear = shot.getFullYear() !== new Date(now).getFullYear();
+    return shot.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", ...(otherYear ? { year: "numeric" } : {}) });
+  }
+  return shot.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
 
 function timing(seconds: number): string {
   const whole = Math.max(0, Math.floor(seconds));
@@ -38,24 +54,26 @@ interface MediaGridProps {
   readonly rows: readonly { readonly number: number; readonly row: Row }[];
   readonly selection?: ReadonlySet<number>;
   readonly grouped?: boolean;
+  /** Alpha's latest time, which the day headings count back from. */
+  readonly now: number;
   readonly open?: (number: number) => void;
   readonly start?: (number: number) => void;
   readonly more?: () => void;
 }
 
 /** The most recent photos come first in a grid, with day headings in the Library. */
-export function MediaGrid({ rows, selection, grouped, open, start, more }: MediaGridProps) {
+export function MediaGrid({ rows, selection, grouped, now, open, start, more }: MediaGridProps) {
   const groups = useMemo(() => {
     const byDay = new Map<string, Array<(typeof rows)[number]>>();
     for (const item of rows) {
       const date = taken(item.row);
-      const label = grouped && Number.isFinite(date) && date > 0 ? day.format(date) : "";
+      const label = grouped && Number.isFinite(date) && date > 0 ? headingOf(date, now) : "";
       const group = byDay.get(label) ?? [];
       if (!byDay.has(label)) byDay.set(label, group);
       group.push(item);
     }
     return [...byDay];
-  }, [rows, grouped]);
+  }, [rows, grouped, now]);
   function choose(event: MouseEvent<HTMLDivElement>, action: ((number: number) => void) | undefined) {
     if (action === undefined || !(event.target instanceof Element)) return;
     const tile = event.target.closest("button[data-alpha-media-key]");
@@ -70,11 +88,11 @@ export function MediaGrid({ rows, selection, grouped, open, start, more }: Media
     if (pane.scrollHeight - pane.scrollTop - pane.clientHeight < pane.clientHeight / 2) more?.();
   }
   return (
-    <div data-alpha-app-scroll="photos" className="min-h-0 flex-1 touch-pan-y overflow-y-auto pb-28 [container-type:inline-size]" onScroll={scrolled}
+    <div data-alpha-app-scroll="photos" className="min-h-0 flex-1 touch-pan-y overflow-y-auto px-3 pb-28 [container-type:inline-size]" onScroll={scrolled}
       onClick={(event) => choose(event, open)} onContextMenu={(event) => choose(event, start)}>
       {groups.map(([label, items]) => (
         <section key={label} aria-label={label || "Photos"}>
-          {label && <header className="sticky top-0 z-10 flex items-baseline justify-between bg-background px-4 py-2 text-sm font-semibold"><h2>{label}</h2><span className="text-xs font-normal text-muted-foreground">{items.length}</span></header>}
+          {label && <header className="sticky top-0 z-10 flex items-baseline justify-between bg-background px-1 py-2 text-sm font-semibold"><h2>{label}</h2><span className="text-xs font-normal text-muted-foreground">{items.length}</span></header>}
           {Array.from({ length: Math.ceil(items.length / 4) }, (_, index) => {
             const line = items.slice(index * 4, index * 4 + 4);
             return <div key={line[0]?.number ?? index} className="mb-0.5 grid grid-cols-4 gap-0.5 [content-visibility:auto] [contain-intrinsic-block-size:auto_24cqw]">{line.map(({ number, row }) => (

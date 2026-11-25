@@ -69,8 +69,9 @@ effect function fetched(ticket: number): Event!!(Telephony | Voicemails | Voicem
       const ready = try telephony("fetchVoicemailAudio", (c) => c.phone.fetchVoicemailAudio(id))
       if (ready !== "ready") return ""
     }
-    const found = try telephony("voicemailAudio", (c) => c.phone.voicemailAudio(id))
-    return `data:${found.mimeType};base64,${found.data}`
+    const pcm = telephony("voicemailPcm", (c) => c.phone.voicemailPcm(id)) catch () => undefined
+    const playable = pcm ?? try telephony("voicemailAudio", (c) => c.phone.voicemailAudio(id))
+    return `data:${playable.mimeType};base64,${playable.data}`
   } catch () => ""
   const state = try (try Voicemail.Machine).get()
   const current = (try store.get()).open
@@ -234,6 +235,7 @@ module audio {
   }
 }
 import { type PlaybackPosition, makeAudio, pauseAudio, positionOf, sourceOf } from audio
+export type { PlaybackPosition }
 
 /** The one audio element the open voicemail plays in, outside any screen. */
 export service Player {
@@ -248,7 +250,7 @@ const player = Layer.sync(Player, () => {
 })
 
 // spec/app/phone/voicemail.md, "Play needs the audio, and never plays during a call"
-const played = applying(Voicemail.Machine, (state) => ({ front: state.front, open: state.open, ticket: state.audio.ticket, ready: state.open && state.audio.status === "Loaded", playback: state.playback }), effect ({ open, ready, playback }) => {
+const played = applying(Voicemail.Machine, (state) => ({ front: state.front, open: state.open, ticket: state.audio.ticket, ready: state.open && state.audio.status === "Loaded", playback: state.playback }), effect ({ open, ready, playback, ticket }) => {
   const element = try (try Player).element()
   const store = try Voicemails
   const audio = ready ? (try store.get()).audio : ""
@@ -260,8 +262,9 @@ const played = applying(Voicemail.Machine, (state) => ({ front: state.front, ope
     return
   }
   sourceOf(element, audio)
-  promise(() => element.play()) catch effect () => {
-    try ignore((try Voicemail.Machine).send({ type: "pause" }))
+  tryPromise(() => element.play()) catch effect () => {
+    const machine = try Voicemail.Machine
+    if ((try machine.get()).audio.ticket === ticket) try ignore(machine.send({ type: "pause" }))
   }
 })
 

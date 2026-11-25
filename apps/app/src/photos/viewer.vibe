@@ -1,12 +1,13 @@
 // spec/app/photos/viewer.md, "Story: Look at a photo or video"; spec/app/photos/viewer.md, "Story: Edit a photo or trim a video"; spec/app/photos/viewer.md, "Story: Keep a copy through a restart"; spec/app/photos/viewer.md, "Story: Share what I am looking at"
-import type { EditOperationId, EditPreview, MediaItem, VideoEditSession } from "@elizaos/os/bridges/definitions/media"
+import type { EditPreview, MediaItem, VideoEditSession } from "@elizaos/os/bridges/definitions/media"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Library from "../../gen/app__photos.effect.vibe"
+import type { Actor } from "../../gen/app__photos__actor.effect.vibe"
 import * as Viewer from "../../gen/app__photos__viewer.effect.vibe"
 import { PhotosPort } from "../platform/photos.vibe"
 import { Catalog } from "./catalog.vibe"
 import { answer, applying, reacting, run, together, type Job } from "../runtime/reactor.vibe"
-import { say, Said } from "../notices/toasts.vibe"
+import { say, type Said } from "../notices/toasts.vibe"
 import { handOver } from "../inbox/adding.vibe"
 import { attachToAlpha } from "../assistant/attachments.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
@@ -16,7 +17,7 @@ module sources {
   import { EditReceipt } from "@elizaos/os/bridges/media.schema"
 
   /** @throws {never} */
-  export function editOperation(raw: string | undefined): EditOperationId | undefined {
+  export function editOperation(raw: string | undefined) {
     const got = Schema.decodeUnknownOption(EditReceipt)({ status: "unknown", operationId: raw })
     return got._tag === "Some" ? got.value.operationId : undefined
   }
@@ -229,7 +230,7 @@ effect function shared(photo: number, revision: number, channel: "alpha" | "emai
 
 type Needs = PhotosPort | Catalog | OpenedPhoto | Viewer.Machine | Library.Machine | KeyValueStore.KeyValueStore | Toasts | Said | Effect.Services<ReturnType<typeof shared>>
 
-function carry(fx: Viewer.Effect): Job<Viewer.Event, Needs, [Viewer.Actor]> {
+function carry(fx: Viewer.Effect): Job<Viewer.Event, Needs, [Actor]> {
   return match (fx) {
     when { tag: "Load", let ticket, let photo }: answer("view", loaded(ticket, photo), failed(ticket), "Phone");
     when { tag: "Render", let revision, let edit }: answer("preview", rendered(revision, edit), { type: "previewed", revision, ok: false }, "Phone");

@@ -2,6 +2,7 @@
 import { correctScanPage, detectScanEdges, fullPageCorners, scanCornersAdmitted, type ScanCorners } from "@elizaos/plugin-files/documents/scan-correction"
 import { blobOf } from "@elizaos/plugin-files/documents/images"
 import { recognizeLocalText } from "@elizaos/plugin-files/documents/local-ocr"
+import { reviewScanAllDayEvent, reviewScanEvent, suggestScanEventDetails, type ScanEventProposal } from "@elizaos/plugin-files/documents/scan-event"
 import { scannedLinks } from "@elizaos/plugin-files/documents/scan-links"
 import { createScanPdf } from "@elizaos/plugin-files/documents/scan-pdf"
 import { admittedTextLayer, type ScanTextLine } from "@elizaos/plugin-files/documents/scan-text-layer"
@@ -10,16 +11,19 @@ import * as Recent from "../../gen/app__files__recent.effect.vibe"
 import * as Correction from "../../gen/app__files__correction.effect.vibe"
 import * as Scan from "../../gen/app__files__scan.effect.vibe"
 import type { Page } from "../../gen/app__files__scanDraft.ts"
-import { pageLimit } from "../../gen/app__files__scanDraft.effect.vibe"
+import { civilDay, dayStart, zone } from "../calendar/time.ts"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { Attempts } from "../runtime/attempts.vibe"
 import { Documents } from "../platform/documents.vibe"
 import { native } from "../platform/device.vibe"
 import { PhotosPort, saveBrowserCapture } from "../platform/photos.vibe"
 import { say } from "../notices/toasts.vibe"
 import { answer, applying, contained, reacting, run, started, together, type Job } from "../runtime/reactor.vibe"
 import { Opened } from "./preview.vibe"
-import { ScanEntry } from "./scanEntry.vibe"
-import { changeDraft, copyText, drawPdf, loadDraft, openLink, photoData, release, rotateImage, scanImage, source, writePdf, type ScanImage, type ScanWords, type StoredPage } from "./scanStore.vibe"
+import { Time } from "../runtime/time.vibe"
+import { ScanEntry, type ScannedEvent } from "./scanEntry.vibe"
+import { changeDraft, copyText, drawPdf, readDraft, openLink, photoData, release, rotateImage, scanImage, source, writePdf, type ScanImage, type ScanWords, type StoredPage } from "./scanStore.vibe"
 
 export interface ScanOutline {
   readonly corners: ScanCorners
@@ -33,8 +37,8 @@ export interface ScanPage extends ScanImage {
 /** The images and prepared document addressed by the Scan model. */
 export service ScanAssets {
   readonly turn: Semaphore.Semaphore
-  read(id: number): ScanPage | undefined!!
-  words(id: number, revision: number): ScanWords | undefined!!
+  read(id: number): (ScanPage | undefined)!!
+  words(id: number, revision: number): (ScanWords | undefined)!!
   holdWords(id: number, revision: number, value: ScanWords): void!!
   searchable(value?: boolean): boolean!!
   outline(image: number, draft?: ScanOutline): ScanOutline!!
@@ -42,7 +46,8 @@ export service ScanAssets {
   keep(ids: ReadonlySet<number>): void!!
   document(pdf?: Blob): void!!
   takeDocument(): (Blob | undefined)!!
-  receipt(ticket: number, id?: string): string | undefined!!
+  receipt(ticket: number, id?: string): (string | undefined)!!
+  event(ticket: number, draft?: ScannedEvent): (ScannedEvent | undefined)!!
 }
 
 const assets = Layer.effect(ScanAssets, effect {
@@ -53,6 +58,7 @@ const assets = Layer.effect(ScanAssets, effect {
   const turn = try Semaphore.make(1)
   let prepared: Blob | undefined
   const receipts = new Map<number, string>()
+  let event: { ticket: number; draft: ScannedEvent } | undefined
   function remove(id: number) {
     const image = images.get(id)
     if (image !== undefined) release(image.uri)
@@ -86,6 +92,10 @@ const assets = Layer.effect(ScanAssets, effect {
       for (const id of images.keys()) if (!ids.has(id)) remove(id)
     }),
     document: (pdf?: Blob) => sync(() => { prepared = pdf }),
+    event: (ticket: number, draft?: ScannedEvent) => sync(() => {
+      if (draft !== undefined) event = { ticket, draft }
+      return event?.ticket === ticket ? event.draft : undefined
+    }),
     receipt: (ticket: number, id?: string) => sync(() => {
       if (id !== undefined) receipts.set(ticket, id)
       const found = receipts.get(ticket)
@@ -150,8 +160,7 @@ function failedLoad(ticket: number): Scan.Event {
 }
 
 effect function load(ticket: number): Scan.Event!!(ScanAssets | Scan.Machine) {
-  const saved = tryPromise(loadDraft) catch () => null
-  if (saved === null) return failedLoad(ticket)
+  const saved = try readDraft()
   if (saved === "damaged") return { type: "loaded", ticket, ok: true, readable: false, base: 0, pages: [] }
   const model = try Scan.Machine
   const state = try model.get()
@@ -296,7 +305,97 @@ export effect function exportScan(searchable: boolean) {
   })
 }
 
-type Needs = ScanAssets | Scan.Machine | PhotosPort | Recent.Machine | Documents | Opened | Effect.Services<ReturnType<typeof say>>
+function calendarDraft(value: ScanEventProposal, disclosures: ReadonlyArray<string>): ScannedEvent {
+  const [year = 1970, month = 1, date = 1] = value.date.split("-").map(Number)
+  const [hour = 0, minute = 0] = (value.time ?? "").split(":").map(Number)
+  const begin = new Date(year, month - 1, date, hour, minute).getTime()
+  const day = civilDay(begin)
+  return {
+    day, disclosures,
+    fields: {
+      title: value.title, place: value.location, notes: value.notes, people: "", allDay: value.allDay,
+      begin, end: value.allDay ? dayStart(day + 1) : begin + (value.minutes ?? 60) * 60_000,
+    },
+  }
+}
+
+effect function suggested(ticket: number, image: number, edits: number): Scan.Event!!(ScanAssets | Scan.Machine | Time) {
+  const held = try ScanAssets
+  const words = try held.words(image, edits)
+  const absent = { type: "eventSuggested", ticket, ok: true, found: false } as const
+  if (words === undefined) return absent
+  const now = new Date(try (try Time).now())
+  const suggestion = suggestScanEventDetails(words.text, { now, timeZone: zone() })
+  const fields = suggestion.fields
+  const reviewed = (suggestion.allDay ? reviewScanAllDayEvent(fields, words.text, now) : reviewScanEvent(fields, words.text, now)) catch () => undefined
+  const state = try (try Scan.Machine).get()
+  if (reviewed === undefined || !Scan.canEventSuggested(state, ticket, "Phone") || Scan.pageOf(state, image).edits !== edits) return absent
+  try held.event(ticket, calendarDraft(reviewed, suggestion.disclosures))
+  return { ...absent, found: true }
+}
+
+/** Open only the event suggestion still shown for this page; Calendar owns the draft and the final save. */
+export effect function reviewCalendarEvent(ticket: number) {
+  const current = try (try Scan.Machine).get()
+  const read = current.text.event
+  const page = current.text.eventOf
+  const latest = Scan.pageOf(current, page.image)
+  if (!current.open || !current.text.found || read.ticket !== ticket || latest.text !== page.text || latest.edits !== page.edits) return
+  const draft = try (try ScanAssets).event(ticket)
+  if (draft === undefined) return
+  const entry = try ScanEntry
+  const shell = try Shell
+  try entry.calendar(draft)
+  if (!(try contained(shell.send({ type: "openView", view: "Calendar" }), "opening Calendar for review"))) try entry.takeEvent()
+}
+
+module notes {
+  import { createNotesClient, type NotesClient, type NotesTransport } from "@elizaos/plugin-notes/client"
+  import { Effect } from "effect"
+  import { HttpClientRequest } from "effect/http"
+  import type { Remote } from "../platform/remote.vibe"
+
+  /** Run the SDK client on the same authenticated agent transport as Notes. @throws {never} */
+  export function noteClient(agent: Remote): NotesClient {
+    const transport: NotesTransport = {
+      async fetch<T>(path: string, init: Parameters<NotesTransport["fetch"]>[1]): Promise<T> {
+        const request = init.method === "GET" ? HttpClientRequest.get(path) : HttpClientRequest.post(path)
+        const body = init.body === undefined ? request : HttpClientRequest.bodyText(request, init.body, "application/json")
+        const reply = await Effect.runPromise(agent.call(HttpClientRequest.setHeaders(body, init.headers)), init.signal === undefined ? undefined : { signal: init.signal })
+        return reply as T
+      },
+    }
+    return createNotesClient(transport)
+  }
+}
+import { noteClient } from notes
+
+/** The same content the owner sees in the note review, in the document's page order. */
+export effect function noteContent(pages: ReadonlyArray<Page>): (string | undefined)!!ScanAssets {
+  const held = try ScanAssets
+  const words: string[] = []
+  for (const page of pages) {
+    if (page.text === 0 || page.blank) continue
+    const found = try held.words(page.image, page.edits)
+    if (found === undefined) return undefined
+    words.push(found.text)
+  }
+  return words.join("\n\n")
+}
+
+effect function noted(ticket: number, pages: ReadonlyArray<Page>): Scan.Event!!(Agent | Attempts | ScanAssets | Effect.Services<ReturnType<typeof say>>) {
+  const refused = { type: "noted", ticket, confirmed: false, known: true } as const
+  const content = try noteContent(pages)
+  if (content === undefined || content.trim() === "" || content.length > 20_241) return refused
+  const client = noteClient(try Agent)
+  const creationId = try (try Attempts).key(ticket)
+  const written = tryPromise((signal) => client.interact("create-note", { content, creationId, forceNew: true }, signal)) catch () => undefined
+  if (written?.note === undefined) return { ...refused, known: false }
+  try say("Note saved.")
+  return { ...refused, confirmed: true }
+}
+
+type Needs = ScanAssets | Scan.Machine | PhotosPort | Recent.Machine | Documents | Opened | Time | Agent | Effect.Services<ReturnType<typeof say>>
 
 effect function recordExport(ticket: number) {
   const selection = try (try ScanAssets).receipt(ticket)
@@ -337,8 +436,8 @@ function carry(fx: Scan.Effect): Job<Scan.Event, Needs, [Scan.Actor]> {
       const opened = url === undefined ? false : (Effect.try(() => openLink(url)) catch () => false)
       return { type: "linkOpened", ticket: fx.ticket, opened } as const
     }, { type: "linkOpened", ticket: fx.ticket, opened: false }, "Phone")
-    case "Suggest": return answer("suggest event", succeed({ type: "eventSuggested", ticket: fx.ticket, ok: false, found: false } as const), { type: "eventSuggested", ticket: fx.ticket, ok: false, found: false }, "Phone")
-    case "Note": return answer("make note", succeed({ type: "noted", ticket: fx.ticket, confirmed: false, known: true } as const), { type: "noted", ticket: fx.ticket, confirmed: false, known: true }, "Phone")
+    case "Suggest": return answer("suggest event", suggested(fx.ticket, fx.image, fx.edits), { type: "eventSuggested", ticket: fx.ticket, ok: false, found: false }, "Phone")
+    case "Note": return answer("make note", noted(fx.ticket, fx.pages), { type: "noted", ticket: fx.ticket, confirmed: false, known: false }, "Phone")
     case "ToRecent": return run("confirm scan export", recordExport(fx.ticket), "Phone")
     case "CopyText": return run("copy scan text", effect {
       const words = try (try ScanAssets).words(fx.image, fx.edits)

@@ -67,7 +67,7 @@ function arrived(receivedAt: string, today: number): string {
   const at = new Date(receivedAt);
   if (Number.isNaN(at.getTime())) return "";
   const sameDay = new Date(today).toDateString() === at.toDateString();
-  return sameDay ? at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : at.toLocaleDateString([], { month: "short", day: "numeric" });
+  return sameDay ? at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : at.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
 /** The name a sender wrote, else the address. */
@@ -376,6 +376,7 @@ export function Inbox({ runtime }: InboxProps) {
   return (
     <>
       <InboxListScreen
+        onBack={shell.can({ type: "goBack" }) ? () => void shell.send({ type: "goBack" }) : undefined}
         account={account === 0 ? undefined : mailOf(runtime, (mail) => mail.email(account))}
         folder={folderNames[folder]}
         unavailable={!state.searchable}

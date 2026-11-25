@@ -1,0 +1,202 @@
+// spec/app/workflows/index.md, "Story: Open a workflow"; spec/app/workflows/index.md, "Story: Change a workflow"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { type RemoteWorkflow, WorkflowActivationRejected, WorkflowHttpError, WorkflowLifecycleRejected, WorkflowMetadataRejected, WorkflowPauseRejected, WorkflowResponseInvalid } from "@elizaos/plugin-workflow/client"
+import * as Listing from "../../gen/app__workflows__list.effect.vibe"
+import * as Model from "../../gen/app__workflows.effect.vibe"
+import type { Change, Effect as Out, Event } from "../../gen/app__workflows.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { ownerAt } from "../platform/owner.vibe"
+import { type Job, answer, applying, following, reacting, together } from "../runtime/reactor.vibe"
+import { WorkflowsApi } from "./api.vibe"
+import { Rows, refresh } from "./list.vibe"
+
+interface Definition {
+  readonly row: number
+  readonly version: number
+  readonly workflow: RemoteWorkflow
+}
+
+export service DefinitionWords {
+  read(row: number): (Definition | undefined)!!
+  store(row: number, workflow: RemoteWorkflow): number!!
+  rename(row: number, name: string): void!!
+  name(row: number): string!!
+}
+
+const words = Layer.sync(DefinitionWords, () => {
+  let seen: Definition | undefined
+  let edit: { row: number; name: string } | undefined
+  return {
+    read: (row: number) => succeed(seen?.row === row ? seen : undefined),
+    store: (row: number, workflow: RemoteWorkflow) => sync(() => {
+      const version = seen?.row !== row ? 1 : seen.workflow.versionId === workflow.versionId ? seen.version : seen.version + 1
+      seen = { row, workflow, version }
+      return version
+    }),
+    rename: (row: number, name: string) => sync(() => { edit = { row, name } }),
+    name: (row: number) => succeed(edit?.row === row ? edit.name : ""),
+  }
+})
+
+function scheduled(workflow: RemoteWorkflow): boolean {
+  const spec = workflow.phoneSpec
+  if (workflow.hostedDigest === true) return true
+  if (typeof spec !== "object" || spec === null || !("trigger" in spec)) return false
+  const trigger = spec.trigger
+  return typeof trigger === "object" && trigger !== null && "kind" in trigger && trigger.kind === "time"
+}
+
+type Needs = Agent | WorkflowsApi | Rows | Model.Machine | DefinitionWords | Listing.Machine | KeyValueStore.KeyValueStore
+
+const selectedRow = (place: Listing.Place): number => place.tag === "ListingDetail" ? place.row : 0
+
+effect function read(ticket: number, owner: number): Event!!Needs {
+  const machine = try Model.Machine
+  const list = try Listing.Machine
+  const state = try machine.get()
+  const failed: Event = { type: "workflowRead", ticket, ok: false, version: Math.max(1, state.version), name: 1, active: false, removed: false, scheduled: false }
+  const rows = try Rows
+  const target = state.target
+  const selected = try rows.row(owner, target)
+  const scope = ownerAt() catch () => ""
+  if (state.owner !== owner || selected?.kind !== "Routine" || !(try rows.sameOwner(scope, owner))) return failed
+  const { workflow } = try WorkflowsApi
+  const result = (workflow.detail(selected.id) catch () => undefined)
+  const reaffirmed = ownerAt() catch () => ""
+  const live = try machine.get()
+  if (result === undefined || scope !== reaffirmed || live.target !== target || live.owner !== owner
+    || !Model.canWorkflowRead(live, ticket, Math.max(1, live.version), 1) || selectedRow((try list.get()).place) !== target) return failed
+  const version = try (try DefinitionWords).store(target, result)
+  const name = Math.max(1, Math.min(Model.maxName, result.name.length))
+  return { type: "workflowRead", ticket, ok: true, version, name, active: result.active, removed: result.removed, scheduled: scheduled(result) }
+}
+
+const HeldChange = Schema.fromJsonString(Schema.Struct({
+  id: Schema.Int, mutation: Schema.NonEmptyString, workflowId: Schema.NonEmptyString,
+  version: Schema.NonEmptyString, change: Schema.Literals(["Rename", "Remove", "Restore"]),
+}))
+
+const changeKey = (owner: string, id: string) => `alpha/workflows/change/${encodeURIComponent(owner)}/${encodeURIComponent(id)}`
+
+const declined = (failure: unknown) =>
+  failure instanceof WorkflowActivationRejected || failure instanceof WorkflowPauseRejected || failure instanceof WorkflowLifecycleRejected
+  || failure instanceof WorkflowMetadataRejected || (failure instanceof WorkflowHttpError && [400, 401, 403, 404, 409, 422].includes(failure.status))
+
+effect function changed(id: number, change: Change, version: number, name: number): Event!!Needs {
+  const machine = try Model.Machine
+  const definition = try DefinitionWords
+  const rows = try Rows
+  const store = try KeyValueStore.KeyValueStore
+  const { workflow } = try WorkflowsApi
+  const state = try machine.get()
+  const scope = ownerAt() catch () => ""
+  const exact = try definition.read(state.target)
+  if (exact?.version !== version || !(try rows.sameOwner(scope, state.owner))) return { type: "changeAnswered", id, applied: false }
+  const current = exact.workflow
+  const key = changeKey(scope, current.id)
+  if ((store.get(key) catch () => "unreachable") !== undefined) return { type: "changeUnanswered" }
+  const outcome = effect {
+    if (change === "TurnOn") try workflow.activate(current.id, current.versionId)
+    else if (change === "TurnOff") try workflow.pause(current.id, current.versionId)
+    else {
+      const keep = effect (mutation: string) => {
+        store.set(key, JSON.stringify({ id, mutation, workflowId: current.id, version: current.versionId, change }))
+          catch effect () => { throw new WorkflowResponseInvalid({ message: "Could not retain the change" }) }
+      }
+      if (change === "Rename") {
+        const text = try definition.name(state.target)
+        if (text.length !== name) return "refused"
+        try workflow.changeMetadata(current.id, current.versionId, text, current.description, keep)
+      } else {
+        try workflow.lifecycle(current.id, current.versionId, change === "Remove" ? "remove" : "restore", keep)
+      }
+      try ignore(store.remove(key))
+    }
+    return "applied"
+  } catch (failure) => declined(failure) ? "refused" : "unknown"
+  if ((ownerAt() catch () => "") !== scope || outcome === "unknown") return { type: "changeUnanswered" }
+  if (outcome === "refused") try ignore(store.remove(key))
+  try refresh()
+  return { type: "changeAnswered", id, applied: outcome === "applied" }
+}
+
+effect function checked(ticket: number, id: number): Event!!Needs {
+  const machine = try Model.Machine
+  const definition = try DefinitionWords
+  const rows = try Rows
+  const store = try KeyValueStore.KeyValueStore
+  const { workflow } = try WorkflowsApi
+  const state = try machine.get()
+  const failed: Event = { type: "changeChecked", ticket, ok: false, found: false, version: Math.max(1, state.version) }
+  const exact = try definition.read(state.target)
+  const scope = ownerAt() catch () => ""
+  if (exact === undefined || !(try rows.sameOwner(scope, state.owner))) return failed
+  const key = changeKey(scope, exact.workflow.id)
+  const raw = (store.get(key) catch () => undefined)
+  const kept = raw === undefined ? undefined : (Schema.decodeUnknownEffect(HeldChange)(raw) catch () => undefined)
+  if (kept === undefined || kept.id !== id || kept.workflowId !== exact.workflow.id) return failed
+  const answer = effect {
+    const expected = kept.change === "Rename" ? try workflow.reconcileMetadata(kept.workflowId, kept.version, kept.mutation)
+      : try workflow.reconcileLifecycle(kept.workflowId, kept.version, kept.mutation, kept.change === "Remove" ? "remove" : "restore")
+    const current = try workflow.detail(kept.workflowId)
+    return { found: expected !== null, current }
+  } catch () => undefined
+  const confirmed = ownerAt() catch () => ""
+  const live = try machine.get()
+  if (answer === undefined || scope !== confirmed || live.owner !== state.owner || live.target !== state.target
+    || !Model.canChangeChecked(live, ticket, Math.max(1, live.version))) return failed
+  const version = try definition.store(state.target, answer.current)
+  if (answer.found) try ignore(store.remove(key))
+  return { type: "changeChecked", ticket, ok: true, found: answer.found, version }
+}
+
+function carry(fx: Out): Job<Event, Needs, []> {
+  return match (fx) {
+    when { tag: "ReadWorkflow", let ticket, let owner }: answer("workflow detail", read(ticket, owner),
+      { type: "workflowRead", ticket, ok: false, version: 1, name: 1, active: false, removed: false, scheduled: false });
+    when { tag: "AskAgent", let id, let change, let version, let name }: answer("workflow change", changed(id, change, version, name),
+      { type: "changeUnanswered" });
+    when { tag: "ReadRecord", let ticket, let id }: answer("workflow change receipt", checked(ticket, id),
+      { type: "changeChecked", ticket, ok: false, found: false, version: 1 });
+  }
+}
+
+const focus = applying(
+  Listing.Machine,
+  (state) => ({ owner: state.owner, row: selectedRow(state.place) }),
+  effect ({ owner, row }: { owner: number; row: number }) => {
+    const machine = try Model.Machine
+    const rows = try Rows
+    const held = try machine.get()
+    if (held.owner !== owner) try ignore(machine.send({ type: "ownerChanged", owner }))
+    const selected = try rows.row(owner, row)
+    if (selected?.kind !== "Routine") {
+      try ignore(machine.send({ type: "closeWorkflow" }))
+      return
+    }
+    if (row !== held.target) try ignore(machine.send({ type: "selectWorkflow", row }))
+    if ((try machine.get()).target === row) try ignore(machine.send({ type: "readWorkflow" }))
+  },
+)
+
+const sending = following(Model.Machine, (state) => Model.canSendChange(state), Model.Machine,
+  (ready): Event | undefined => ready ? { type: "sendChange" } : undefined)
+
+export effect function reviewName(row: number, proposed: string, unfinished: boolean, interrupted: boolean): void!!(Model.Machine | DefinitionWords) {
+  const machine = try Model.Machine
+  const state = try machine.get()
+  const name = proposed.trim()
+  if (state.target !== row || state.review.showing || name === "" || name.length > Model.maxName) return
+  try (try DefinitionWords).rename(row, name)
+  if (name.length !== state.renaming) try ignore(machine.send({ type: "editName", chars: name.length }))
+  try ignore(machine.send({ type: "reviewChange", wanted: "Rename", unfinished, interrupted }))
+}
+
+export effect function backLifecycle(): boolean!!Model.Machine {
+  const machine = try Model.Machine
+  if (!Model.canCancelReview(try machine.get())) return false
+  try ignore(machine.send({ type: "cancelReview" }))
+  return true
+}
+
+export const lifecycle = together(reacting(Model, { carry }), words, focus, sending)

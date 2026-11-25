@@ -10,6 +10,7 @@ import { type InboxScene, inboxRoutes, inboxScene } from "./inbox.ts";
 import { type PlatformScene, platformRoutes, platformScene } from "./platform.ts";
 import { type RemindersScene, remindersRoutes, remindersScene } from "./reminders.ts";
 import { type Route, answering } from "./routes.ts";
+import { type WorkflowsScene, workflowRoutes, workflowsScene } from "./workflows.ts";
 import { type SampleScene, sampleRoutes, sampleScene } from "./sample.ts";
 import { type LauncherScene, launcherScene } from "./launcher.ts";
 import { type SettingsScene, settingsScene } from "./settings.ts";
@@ -18,6 +19,7 @@ import { type PhotosScene, photosScene } from "./photos.ts";
 import { type TelephonyScene, telephonyRoutes, telephonyScene } from "./telephony.ts";
 import { type UpdateScene, updateScene } from "./update.ts";
 import { type VoiceScene, voiceScene } from "./voice.ts";
+import { type BrowserScene, browserScene } from "./browser.ts";
 
 export interface Scene {
   phone: boolean;
@@ -39,10 +41,12 @@ export interface Scene {
   readonly photos: PhotosScene;
   readonly maps: MapsScene;
   readonly notes: NotesScene;
+  readonly workflows: WorkflowsScene;
   readonly telephony: TelephonyScene;
   readonly platform: PlatformScene;
   readonly update: UpdateScene;
   readonly voice: VoiceScene;
+  readonly browser: BrowserScene;
 }
 
 export function scene(): Scene {
@@ -61,10 +65,12 @@ export function scene(): Scene {
     photos: photosScene(),
     maps: mapsScene(),
     notes: notesScene(),
+    workflows: workflowsScene(),
     telephony: telephonyScene(),
     platform: platformScene(),
     update: updateScene(),
     voice: voiceScene(),
+    browser: browserScene(),
   };
 }
 
@@ -81,6 +87,7 @@ export function services(world: Scene) {
       ...clockRoutes(world.clock, () => world.now),
       ...remindersRoutes(world.reminders, () => world.now),
       ...notesRoutes(world.notes),
+      ...workflowRoutes(world.workflows),
       ...platformRoutes(world.platform),
       ...telephonyRoutes(world.telephony),
     ]),

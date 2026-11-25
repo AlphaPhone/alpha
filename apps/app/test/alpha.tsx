@@ -108,7 +108,7 @@ export const pressOnTop = (name: string) => drawn(() => {
 
 /** Type `text` into the field whose accessible name is `name`, as a person does: React hears the input event. */
 export const fill = (name: string, text: string) => drawn(() => {
-  const found = [...document.querySelectorAll("input")].find((field) => field.getAttribute("aria-label") === name);
+  const found = [...document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea")].find((field) => field.getAttribute("aria-label") === name);
   if (!found) throw new Error(`no field ${name}`);
   Object.getOwnPropertyDescriptor(Object.getPrototypeOf(found) as object, "value")?.set?.call(found, text);
   found.dispatchEvent(new Event("input", { bubbles: true }));

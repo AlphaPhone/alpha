@@ -44,6 +44,8 @@ export service Location {
   clear(): boolean!!
   /** Android's location settings, where the owner can allow what they refused: whether they opened. */
   openSettings(): boolean!!
+  /** One rough position, never prompting: a fix at most five minutes old, or none where Android gave none. */
+  fix(): Option.Option<Sighting>!!
 }
 
 export function grantOf(status: LocationPermissionStatus): Grant {
@@ -52,7 +54,7 @@ export function grantOf(status: LocationPermissionStatus): Grant {
   return status.accuracy === "approximate" ? "approximate" : "precise"
 }
 
-export function sightingOf(result: LocationResult): Sighting {
+export function sightingOf(result: Pick<LocationResult, "coords">): Sighting {
   const { latitude, longitude, accuracy, timestamp } = result.coords
   return { lat: Math.round(latitude * 1e6), lng: Math.round(longitude * 1e6), accuracy: Math.round(accuracy), precise: accuracy <= 100, taken: timestamp }
 }
@@ -86,6 +88,9 @@ export const phoneLocation = Layer.sync(Location, () => {
         : Option.none<Sighting>()))
       |> Effect.orElseSucceed(%, () => Option.none<Sighting>()),
     openSettings: () => tryPromise(() => phoneSystem().then((sys) => sys.openSettingsPage({ page: "location" }))) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false),
+    fix: () => tryPromise(() => native.getCurrentPosition({ accuracy: "medium", maxAge: 300000 }))
+      |> Effect.map(%, (reading) => (reading.kind === "fix" ? Option.some(sightingOf(reading)) : Option.none<Sighting>()))
+      |> Effect.orElseSucceed(%, () => Option.none<Sighting>()),
   }
 })
 
@@ -97,4 +102,5 @@ export const browserLocation = Layer.succeed(Location, {
   rough: () => succeed(Option.none<Sighting>()),
   clear: () => succeed(true),
   openSettings: () => succeed(false),
+  fix: () => succeed(Option.none<Sighting>()),
 })

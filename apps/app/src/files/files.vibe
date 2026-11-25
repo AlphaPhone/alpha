@@ -15,8 +15,8 @@ import type { Machine as CorrectionMachine } from "../../gen/app__files__correct
 import { Handles, type Spot, handles } from "./handles.vibe"
 import * as Shown from "../../gen/app__files__preview.effect.vibe"
 import * as Recent from "../../gen/app__files__recent.effect.vibe"
-import { Documents } from "../platform/documents.vibe"
-import { Opened, preview, taken, view } from "./preview.vibe"
+import type { Documents } from "../platform/documents.vibe"
+import { type Opened, preview, taken, view } from "./preview.vibe"
 import { Answers, type ReviewedItem, answers } from "./agent.vibe"
 
 module names {
@@ -636,7 +636,7 @@ export const showDownloads: void!!(Files | Handles | Browser.Machine | Shell) = 
   try ignore((try Shell).send({ type: "openView", view: "Files" }))
 }
 
-// spec/app/shell/index.md, "Back closes one layer: the drawer, then Ask Alpha by a step, then the app on top"; spec/app/files/index.md, "Back closes one layer inside Files: the Move to sheet, the share sheet, the name clash, the delete confirmation, the details, the Trash, the selection and the filter, then goes up the path a step; at the top, or back where another area's walk began, it leaves Files"
+// spec/app/shell/index.md, "Back closes one layer: Ask Alpha by a step, then the app on top"; spec/app/files/index.md, "Back closes one layer inside Files: the Move to sheet, the share sheet, the name clash, the delete confirmation, the details, the Trash, the selection and the filter, then goes up the path a step; at the top, or back where another area's walk began, it leaves Files"
 /** Back inside Files: the layer the rules name, closed by its own event. Whether it took one. */
 export const back: boolean!!(Browser.Machine | Shown.Machine | Recent.Machine | ScanMachine | CorrectionMachine) = effect {
   if (try scanBack) return true

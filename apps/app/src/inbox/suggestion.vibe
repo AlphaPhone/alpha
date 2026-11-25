@@ -4,7 +4,7 @@ import type { Effect as Out, Event, Target } from "../../gen/app__inbox__suggest
 import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import type { Actor } from "../../gen/app__inbox__access.ts"
 import { held } from "../../gen/app__inbox__shelf.effect.vibe"
-import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Machine as Shell, showing as showingView } from "../../gen/app__shell.effect.vibe"
 import { type Job, contained, hearing, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import { Letters, policy } from "./composer.vibe"
 import { Mail } from "./gmail.vibe"
@@ -100,22 +100,25 @@ export interface Aim {
   readonly target: Target
   readonly account: number
   readonly message: number
+  /** The exact draft the owner saw, or 0 when the review is for a new message. */
+  readonly draft?: number
 }
 
 // spec/app/inbox/suggestion.md, "Alpha suggests text only for a draft; the owner hands text over from elsewhere in Alpha into a draft, a new reply or a new email; either replaces an offer not yet used"
 /** The owner hands `text` from elsewhere in Alpha, such as a note, to Inbox with "Use in email": shown before it goes in. Whether Inbox took it. */
-export effect function useInEmail(text: string, source: string, aim: Aim): boolean!!(Offers | Suggestion.Machine | Drafts.Machine | Shell) {
+export effect function useInEmail(text: string, source: string, aim: Aim, showing = false): boolean!!(Offers | Suggestion.Machine | Drafts.Machine | Shell) {
   const composer = try (try Drafts.Machine).get()
-  const number = (try Offers).add(text, source)
   const draft = composer.open ? composer.letter.id : 0
+  if (aim.draft !== undefined && (aim.draft !== draft || (draft !== 0 && composer.letter.account !== aim.account))) return false
+  const number = (try Offers).add(text, source)
   const event: Event = {
     type: "useInEmail", text: number, target: draft !== 0 ? "ToDraft" : aim.target, draft, account: aim.account, message: aim.message,
-    revision: draft !== 0 ? composer.letter.revision : 0,
+    revision: draft !== 0 ? composer.letter.revision : 0, showing,
   }
   const sent = try exit((try Suggestion.Machine).send(event, "Owner"))
   if (!Exit.isSuccess(sent)) return false
   const shell = try Shell
-  if (!(showing(try shell.get(), "Inbox"))) try ignore(shell.send({ type: "openView", view: "Inbox" }))
+  if (!showingView(try shell.get(), "Inbox")) try ignore(shell.send({ type: "openView", view: "Inbox" }))
   try ignore(shell.send({ type: "raise", detent: "Bar" }))
   return true
 }

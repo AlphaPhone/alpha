@@ -6,6 +6,7 @@ import * as Inbox from "../../gen/app__inbox.effect.vibe"
 import type { Effect as Out, Event, Folder } from "../../gen/app__inbox.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { waiting } from "../home/waiting.vibe"
+import { fromAreas } from "../home/cards.vibe"
 import { Device } from "../platform/device.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { type Job, answer, contained, reacting, started, stream, together, untimed } from "../runtime/reactor.vibe"
@@ -25,17 +26,18 @@ export const ownerChanges = Stream.unwrap(effect {
 effect function checked(ticket: number): Event!!(Cloud | Mail | Inbox.Machine | KeyValueStore.KeyValueStore) {
   const list = try Inbox.Machine
   const ledger = try Mail
-  const reply = connections() catch (cause) => cause
+  const reply = effect { return { accounts: try connections() } }
+    catch (cause) => ({ signedOut: protocolFailure(cause)?.status === 401 })
   if (!Inbox.canAccountsAnswered(try list.get(), ticket)) return { type: "accountsAnswered", ticket, ok: false, connected: [] }
-  if (!Array.isArray(reply)) {
-    if (protocolFailure(reply)?.status === 401) {
+  if ("signedOut" in reply) {
+    if (reply.signedOut) {
       try ledger.forget()
       try ignore((try KeyValueStore.KeyValueStore).remove(owner))
       return { type: "sessionChanged", signedIn: false }
     }
     return { type: "accountsAnswered", ticket, ok: false, connected: [] }
   }
-  return { type: "accountsAnswered", ticket, ok: true, connected: [...(try ledger.connected(reply))] }
+  return { type: "accountsAnswered", ticket, ok: true, connected: [...(try ledger.connected(reply.accounts))] }
 }
 
 const failed = (ticket: number, failure: Inbox.Failure): Event => ({
@@ -113,9 +115,22 @@ function waitingOf(said: Inbox.Attention): string | undefined {
 const home = started(effect {
   const list = try Inbox.Machine
   const ledger = try Mail
+  let previous = ""
   try Stream.runForEach(list.changes, effect (state) => {
     try ledger.accept(state)
-    waiting.tell("Inbox", waitingOf(Inbox.attention(state)))
+    const unread = Inbox.attention(state)
+    waiting.tell("Inbox", waitingOf(unread))
+    const connected = unread.standing === "Ready" || unread.standing === "Stale"
+    const rows = connected ? ledger.shown(state).filter(({ card }) => card.isUnread).slice(0, 2).map(({ card }) => ({
+      title: card.from.replace(/<[^>]*>/u, "").replace(/"/gu, "").trim() || card.from,
+      detail: card.subject || "No subject",
+    })) : []
+    const card = { connected, unread: unread.unread, rows, current: unread.standing === "Ready" }
+    const written = JSON.stringify(card)
+    if (written !== previous) {
+      previous = written
+      fromAreas.mail(card)
+    }
   })
 }, "telling Home")
 
