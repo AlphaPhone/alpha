@@ -34,10 +34,10 @@ const unavailable: DocumentResult = { status: "unavailable" }
 
 export const noteDocuments = Layer.sync(NoteDocuments, () => {
   const api = registered("AlphaNoteDocuments") ? client() : undefined
-  const answered = (call: (api: Android) => Promise<unknown>) => api === undefined ? succeed(unavailable) : effect {
+  const answered = (call: (api: Android) => Promise<unknown>) => api === undefined ? succeed(unavailable) : (effect {
     const raw = try tryPromise(() => call(api))
     return try Schema.decodeUnknownEffect(Result)(raw)
-  } catch () => unavailable
+  } |> Effect.orElseSucceed(%, (): DocumentResult => unavailable))
   return {
     available: api !== undefined,
     pick: (importing: boolean, title: string) => answered((native) => native.pick({ importing, title })),

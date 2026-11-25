@@ -150,14 +150,14 @@ function interact(scene: NotesScene, input: unknown): Response {
 /** The resident agent's Notes and owner routes. */
 export function notesRoutes(scene: NotesScene): Route[] {
   return [
-    async (request, url) => {
+    (request, url) => {
       if (request.method === "GET" && url.pathname === "/api/auth/me") {
         return Response.json({ identity: { kind: "owner", id: scene.owner }, access: { role: "OWNER", mode: "local" } });
       }
       if (request.method === "GET" && url.pathname === "/api/notes/state") {
         return scene.failing ? refused(503) : Response.json({ success: true, data: snapshot(scene) });
       }
-      if (request.method === "POST" && url.pathname === "/api/notes/interact") return interact(scene, await request.json());
+      if (request.method === "POST" && url.pathname === "/api/notes/interact") return request.json().then((body: unknown) => interact(scene, body));
       return undefined;
     },
   ];
