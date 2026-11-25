@@ -31,7 +31,7 @@ import type { ApprovalWords } from "./approvals.vibe";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 import { Filters, kinds, statuses } from "./Filters.tsx";
-import { History } from "./History.tsx";
+import { History, WorkflowPower } from "./History.tsx";
 import type { HistoryWordsPort } from "./history.vibe";
 import type { DefinitionWords } from "./lifecycle.vibe";
 import { Rows, type WorkflowRow, refresh, shownUnder } from "./list.vibe";
@@ -122,7 +122,8 @@ export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | 
     <Screen title={title} leading={<AppBack alpha={alpha} />} actions={<>
       {place?.tag === "ListingRows" && <Button variant="ghost" size="icon" aria-label="Add to Workflows" onClick={() => dispatch(add)}><Plus aria-hidden /></Button>}
       {selected?.kind === "Prompt" && state && <AutomationPower runtime={runtime} row={selected} owner={state.owner} />}
-    </>}>
+      {selected?.kind === "Routine" && state && <WorkflowPower runtime={runtime} row={selected} owner={state.owner} />}
+    </>} {...(selected?.kind === "Routine" ? { titleControl: <span className="grow" /> } : {})}>
       {state === undefined && <Spinner aria-label="Refreshing workflows" />}
       {state !== undefined && place?.tag === "ListingRows" && <>
         <div className="mx-2 flex min-h-12 items-center justify-between gap-3">

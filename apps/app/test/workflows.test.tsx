@@ -178,7 +178,7 @@ describe("Workflows", () => {
     await until(alpha, area, Definition, (state) => state.detail.status === "Loaded");
     await until(alpha, area, Runs, (state) => state.reading.status === "Loaded");
     await press("Run now");
-    await pressOnTop("Run now");
+    await press("Confirm run");
     await until(alpha, area, Sheet, (state) => state.history.status === "Loaded" && state.shown === 1);
     expect(world.workflows.admissions).toHaveLength(1);
     expect(world.workflows.admissions[0]?.version).toBe("monthly-statement-v3");

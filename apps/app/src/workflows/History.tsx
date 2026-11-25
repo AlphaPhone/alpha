@@ -1,7 +1,7 @@
 // spec/app/workflows/sheet.md, "Story: See a workflow's history"; spec/app/workflows/sheet.md, "Story: Read a run's sheet"
 import type { WorkflowRun } from "@elizaos/plugin-workflow-client";
 import { Effect } from "effect";
-import { Alert, Button, ListRow, Spinner } from "@repo/ui";
+import { Alert, Button, Spinner, cn, focusRing } from "@repo/ui";
 import { Check, ChevronRight, CircleAlert, Clock, Minus, Play, Sparkles, Square, Volume2, VolumeX, X } from "lucide-react";
 import { type Event, newerVersion } from "../../gen/app__workflows__sheet.ts";
 import { useMachine } from "../../gen/app__workflows__sheet.react.ts";
@@ -15,11 +15,17 @@ import type { Resident, Shown } from "../runtime/area.tsx";
 import { HistoryWordsPort, canSpeak } from "./history.vibe";
 import type { WorkflowRow } from "./list.vibe";
 import type { DefinitionWords } from "./lifecycle.vibe";
-import { Lifecycle } from "./Lifecycle.tsx";
-import { RunControls } from "./RunControls.tsx";
+import { Lifecycle, LifecyclePower, LifecycleReview } from "./Lifecycle.tsx";
+import { RunButton, RunControls } from "./RunControls.tsx";
 import { Approval } from "./Approval.tsx";
 
-const labels = { NoRun: "", Running: "Running", Done: "Done", Failed: "Failed", Stopped: "Stopped", Missed: "Missed", Skipped: "Skipped", Interrupted: "Outcome unknown" } satisfies Record<Status, string>;
+const labels = { NoRun: "", Running: "Running", Done: "Finished", Failed: "Failed", Stopped: "Stopped", Missed: "Missed", Skipped: "Skipped", Interrupted: "Outcome unknown" } satisfies Record<Status, string>;
+const waiting = "Waiting for approval";
+/** A run's status glyph in its small round badge. */
+function StatusBadge({ status, waits, className }: { readonly status: Status; readonly waits: boolean; readonly className: string }) {
+  const Icon = waits ? Clock : icons[status];
+  return <span aria-hidden className={cn("grid shrink-0 place-items-center rounded-full bg-secondary", className)}><Icon /></span>;
+}
 const icons = { NoRun: Minus, Running: Play, Done: Check, Failed: X, Stopped: Square, Missed: Clock, Skipped: Minus, Interrupted: CircleAlert };
 const dates = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 const shownDate = (value: number) => Number.isFinite(value) ? dates.format(value) : "";
@@ -73,13 +79,13 @@ function RunActivity({ run, status }: { readonly run: WorkflowRun; readonly stat
     })),
   ];
   return (
-    <details aria-label="Workflow execution details" className="rounded-tile border border-border px-4">
-      <summary className="min-h-11 cursor-pointer content-center font-medium">Details</summary>
-      <dl className="grid gap-3 pb-4 text-sm">
+    <details aria-label="Workflow execution details" className="my-6 text-sm leading-chat wrap-anywhere">
+      <summary className={cn(focusRing, "min-h-11 cursor-pointer py-3 font-semibold")}>Details</summary>
+      <dl className="mt-2">
         {items.map(({ key, label, value }) => (
-          <div key={key} className="flex flex-wrap items-baseline justify-between gap-x-3">
-            <dt className="font-medium">{label}</dt>
-            <dd className="flex min-w-0 flex-wrap gap-x-2 break-all text-muted-foreground select-text">{value}</dd>
+          <div key={key} className="border-t border-border py-2.5">
+            <dt className="text-caption leading-chat text-muted-foreground">{label}</dt>
+            <dd className="mt-1 flex min-w-0 flex-wrap gap-x-2 whitespace-pre-wrap select-text">{value}</dd>
           </div>
         ))}
       </dl>
@@ -92,6 +98,17 @@ interface HistoryProps extends Pick<Shown<Resident | HistoryWordsPort | Machine 
   readonly owner: number;
 }
 
+/** The header switch of the workflow shown, reviewed against the runs the agent last listed. */
+export function WorkflowPower({ runtime, row, owner }: HistoryProps) {
+  const sheet = useMachine(runtime);
+  const state = sheet.state;
+  if (state === undefined || state.owner !== owner || state.runId > 0) return null;
+  const history = runtime.runSync(Effect.flatMap(HistoryWordsPort, (words) => words.view(owner, row.number)));
+  return <LifecyclePower runtime={runtime} row={row.number} owner={owner} title={row.title}
+    unfinished={state.history.status !== "Loaded" || history.all.some((run) => run.status === "Running")}
+    interrupted={history.all[0]?.status === "Interrupted"} />;
+}
+
 /** The run history and the sheet of an exact run, as the agent last read them. */
 export function History({ runtime, row, owner }: HistoryProps) {
   const sheet = useMachine(runtime);
@@ -101,34 +118,45 @@ export function History({ runtime, row, owner }: HistoryProps) {
   const opened = history.opened?.number === state.runId ? history.opened : undefined;
   const send = (event: Event) => { if (sheet.can(event)) void sheet.send(event); };
   if (state.runId > 0) {
-    const status = opened?.raw.status === "waiting-approval" ? "Waiting for you" : labels[state.status];
-    const Icon = icons[state.status];
+    const waits = opened?.raw.status === "waiting-approval";
+    const status = waits ? waiting : labels[state.status];
     return (
-      <section aria-label="Run details" className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-center gap-2"><Icon aria-hidden className="size-5" /><strong>{status}</strong>
-          {opened && <span className="text-sm text-muted-foreground">
+      <section aria-label="Run details" className="-mx-4 px-6">
+        <h2 className="font-display text-headline font-light wrap-anywhere">{row.title}</h2>
+        <div className="mt-3 flex flex-wrap items-center gap-2.5 text-base">
+          <StatusBadge status={state.status} waits={waits} className="size-6 [&_svg]:size-3.25" />
+          <strong className="font-semibold">{status}</strong>
+          {opened && <span className="text-muted-foreground">
             {opened.raw.occurrence && "Scheduled "}
             <RunTime at={opened.raw.occurrence?.scheduledAt ?? opened.raw.startedAt} />
           </span>}
         </div>
-        {newerVersion(state) && <Alert role="status">This workflow has changed since this run.</Alert>}
+        {newerVersion(state) && <p className="mt-4 flex items-center gap-1.5 text-sm leading-chat text-muted-foreground"><Clock aria-hidden className="size-3.5" />This workflow has changed since this run.</p>}
         {state.output.status === "Loading" && !opened && <Spinner aria-label="Reading the run" />}
-        {state.output.status === "Failed" && <Alert variant="warn" role="status">
+        {state.output.status === "Failed" && <Alert variant="warn" role="status" className="mt-4">
           {opened ? "The run could not be refreshed." : "The run could not be read."}
           {sheet.can({ type: "refreshRun" }) && <Button variant="secondary" onClick={() => send({ type: "refreshRun" })}>Retry</Button>}
         </Alert>}
         {opened?.raw.reconciliation?.state === "outcome-unknown"
-          ? <Alert variant="warn" role="status">Your agent couldn’t tell how this run ended. Check before running it again.</Alert>
-          : opened?.raw.error && <Alert variant="destructive" role="status">{errorText(opened.raw)}</Alert>}
-        {state.text === "Empty" && <p className="text-sm text-muted-foreground">No output</p>}
-        {opened?.raw.output && (state.text === "Text" || state.text === "Truncated") &&
-          <div className="rounded-tile bg-secondary p-4 whitespace-pre-wrap break-words">{opened.raw.output}</div>}
-        {state.text === "Truncated" && <p className="text-sm text-muted-foreground">Only the start of the output is shown.</p>}
+          ? <p role="status" className="mt-4 text-sm leading-chat">Your agent couldn’t tell how this run ended. Check before running it again.</p>
+          : opened?.raw.error && <p role="status" className="mt-4 text-sm leading-chat">{errorText(opened.raw)}</p>}
         <Approval runtime={runtime} run={state.runId} owner={owner} {...(opened ? { approvals: opened.approvals } : {})} />
+        {state.text === "Empty" && <p className="mt-4 text-sm text-muted-foreground">No output</p>}
+        {opened?.raw.output && (state.text === "Text" || state.text === "Truncated") &&
+          <div className="mt-5.5 rounded-panel bg-secondary px-5 py-4.5 font-display text-xl leading-detail font-light whitespace-pre-wrap break-words">{opened.raw.output}</div>}
+        {state.text === "Truncated" && <p className="mt-4 text-sm text-muted-foreground">Only the start of the output is shown.</p>}
         {opened && <RunActivity key={opened.raw.id} run={opened.raw} status={status} />}
-        {opened && sheet.can({ type: "askAbout" }) && <Button variant="secondary" onClick={() => send({ type: "askAbout" })}><Sparkles aria-hidden />Ask Alpha</Button>}
-        {canSpeak() && sheet.can({ type: "readAloud" }) && <Button variant="secondary" onClick={() => send({ type: "readAloud" })}><Volume2 aria-hidden />Read aloud</Button>}
-        {sheet.can({ type: "stopSpeech" }) && <Button variant="secondary" onClick={() => send({ type: "stopSpeech" })}><VolumeX aria-hidden />Stop reading</Button>}
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          {opened && sheet.can({ type: "askAbout" }) && <button type="button" onClick={() => send({ type: "askAbout" })}
+            className={cn(focusRing, "flex min-h-12 items-center gap-2 rounded-chip bg-secondary pr-4.5 pl-3.5 text-sm font-semibold")}><Sparkles aria-hidden className="size-4.5" />Ask Alpha</button>}
+          {canSpeak() && sheet.can({ type: "readAloud" }) && <button type="button" onClick={() => send({ type: "readAloud" })}
+            className={cn(focusRing, "flex min-h-12 items-center gap-2 rounded-chip bg-secondary pr-4.5 pl-3.5 text-sm font-semibold")}><Volume2 aria-hidden className="size-4.5" />Read aloud</button>}
+          {sheet.can({ type: "stopSpeech" }) && <button type="button" onClick={() => send({ type: "stopSpeech" })}
+            className={cn(focusRing, "flex min-h-12 items-center gap-2 rounded-chip bg-secondary pr-4.5 pl-3.5 text-sm font-semibold")}><VolumeX aria-hidden className="size-4.5" />Stop reading</button>}
+          <span className="grow" />
+          {sheet.can({ type: "closeRun" }) && <button type="button" onClick={() => send({ type: "closeRun" })}
+            className={cn(focusRing, "flex min-h-11 items-center gap-2 rounded-full bg-primary px-4.5 text-sm font-semibold text-primary-foreground")}>Done</button>}
+        </div>
       </section>
     );
   }
@@ -140,52 +168,70 @@ export function History({ runtime, row, owner }: HistoryProps) {
     occurrences.set(key, occurrence);
     return { ...step, key: `${key}/${String(occurrence)}` };
   });
+  const unfinished = state.history.status !== "Loaded" || history.all.some((run) => run.status === "Running");
+  const interrupted = history.all[0]?.status === "Interrupted";
+  const routine = row.kind === "Routine";
+  const status = row.removed ? "Removed" : row.on ? "On" : "Paused";
+  const runList = (state.history.status === "Loading" || state.history.status === "Failed" || state.shown > 0) && <section aria-label="Run history" className={cn("flex flex-col", routine && "mt-6.5 border-t border-border pt-2")}>
+    {state.history.status === "Loading" && <Spinner aria-label="Reading runs" />}
+    {state.history.status === "Failed" && <div className="flex flex-wrap items-center gap-2">
+      <Alert variant="warn" role="status">Run history couldn’t be read.</Alert>
+      {sheet.can({ type: "readHistory", removed: row.removed }) && <Button variant="secondary" onClick={() => send({ type: "readHistory", removed: row.removed })}>Retry</Button>}
+    </div>}
+    <ul>
+      {history.all.slice(0, state.shown).map((run) => {
+        const version = run.raw?.versionId === history.workflow?.versionId ? 1 : 2;
+        const open: Event = {
+          type: "openRun", runId: run.number, status: run.status, version: 1, newest: version,
+        };
+        const details = run.raw !== undefined && sheet.can(open);
+        const scheduledAt = run.raw?.occurrence?.scheduledAt;
+        const title = scheduledAt ? `Scheduled ${shownDate(Date.parse(scheduledAt))}` : shownDate(run.startedAt) || "Run";
+        const waits = run.raw?.status === "waiting-approval";
+        const detail = waits ? waiting : run.raw ? labels[run.status] : run.error ?? labels[run.status];
+        const content = <>
+          <StatusBadge status={run.status} waits={waits} className="size-7 [&_svg]:size-3.75" />
+          <span className="min-w-0 grow">
+            <span className="block text-base">{title}</span>
+            <span className="mt-0.5 block truncate text-caption text-muted-foreground">{detail}</span>
+          </span>
+          {details && <ChevronRight aria-hidden className="size-4.5 shrink-0 text-muted-foreground" />}
+        </>;
+        return <li key={run.number}>
+          {details
+            ? <button type="button" aria-label={`${detail} execution`} onClick={() => send(open)} className={cn(focusRing, "flex min-h-15 w-full items-center gap-3.5 text-left")}>{content}</button>
+            : <div className="flex min-h-15 items-center gap-3.5">{content}</div>}
+        </li>;
+      })}
+    </ul>
+    {sheet.can({ type: "readMore" }) && (
+      <Button variant="ghost" onClick={() => send({ type: "readMore" })}>More history</Button>
+    )}
+  </section>;
+  if (!routine) return runList || null;
   return (
-    <>
-      {description !== "" && <p className="whitespace-pre-wrap break-words">{description}</p>}
+    <div className="-mx-4 px-6">
+      <h2 className="font-display text-display font-light wrap-anywhere">{row.title}</h2>
+      {description !== "" && <p className="mt-3.5 text-lg leading-message text-pretty whitespace-pre-wrap break-words">{description}</p>}
+      <LifecycleReview runtime={runtime} row={row.number} owner={owner} unfinished={unfinished} />
       {steps.length > 0 && (
-        <ol aria-label="Steps" className="flex flex-col gap-3">
-          {steps.map((step, index) => <li key={step.key} className="flex items-start gap-3">
-            <span className="grid size-7 shrink-0 place-items-center rounded-full bg-secondary text-sm">{index + 1}</span>
-            <span className="min-w-0 break-words">
+        <ol aria-label="Steps" className="mt-6.5 flex flex-col">
+          {steps.map((step, index) => <li key={step.key} className="flex gap-3.5">
+            <span className="flex w-8 shrink-0 flex-col items-center">
+              <span role="img" aria-label={step.label} className="mt-2.75 grid size-8 shrink-0 place-items-center rounded-full bg-secondary"><Check aria-hidden className="size-4" /></span>
+              <span aria-hidden className={cn("w-0.5 grow", index < steps.length - 1 && "bg-border")} />
+            </span>
+            <span className="mb-2.5 min-w-0 grow rounded-action bg-secondary p-4 text-prose leading-normal wrap-anywhere">
               <span>{step.label}</span>
               {step.description && <span className="block text-sm text-muted-foreground">{step.description}</span>}
             </span>
           </li>)}
         </ol>
       )}
-      {row.kind === "Routine" && <Lifecycle runtime={runtime} row={row.number} owner={owner} title={row.title}
-        unfinished={state.history.status !== "Loaded" || history.all.some((run) => run.status === "Running")}
-        interrupted={history.all[0]?.status === "Interrupted"} />}
-      {row.kind === "Routine" && <RunControls runtime={runtime} row={row.number} owner={owner} title={row.title} />}
-      {(state.history.status === "Loading" || state.history.status === "Failed" || state.shown > 0) && <section aria-label="Run history" className="flex flex-col gap-3 border-t border-border pt-3">
-      {state.history.status === "Loading" && <Spinner aria-label="Reading runs" />}
-      {state.history.status === "Failed" && <div className="flex flex-wrap items-center gap-2">
-        <Alert variant="warn" role="status">Run history couldn’t be read.</Alert>
-        {sheet.can({ type: "readHistory", removed: row.removed }) && <Button variant="secondary" onClick={() => send({ type: "readHistory", removed: row.removed })}>Retry</Button>}
-      </div>}
-      <ul>
-        {history.all.slice(0, state.shown).map((run) => {
-          const Icon = icons[run.status];
-          const version = run.raw?.versionId === history.workflow?.versionId ? 1 : 2;
-          const open: Event = {
-            type: "openRun", runId: run.number, status: run.status, version: 1, newest: version,
-          };
-          const details = run.raw !== undefined && sheet.can(open);
-          const scheduledAt = run.raw?.occurrence?.scheduledAt;
-          const title = scheduledAt ? `Scheduled ${shownDate(Date.parse(scheduledAt))}` : shownDate(run.startedAt) || "Run";
-          const detail = run.raw?.status === "waiting-approval" ? "Waiting for you" : run.raw ? labels[run.status] : run.error ?? labels[run.status];
-          return <li className="border-b border-border last:border-b-0" key={run.number}>
-            <ListRow className="min-h-15 px-1" leading={<Icon />} title={title} detail={detail}
-              trailing={details && <ChevronRight aria-hidden className="size-5" />}
-              {...(details ? { onClick: () => send(open) } : {})} />
-          </li>;
-        })}
-      </ul>
-      {sheet.can({ type: "readMore" }) && (
-        <Button variant="ghost" onClick={() => send({ type: "readMore" })}>More history</Button>
-      )}
-      </section>}
-    </>
+      <Lifecycle runtime={runtime} row={row.number} owner={owner} title={row.title} unfinished={unfinished} interrupted={interrupted}
+        status={status} run={!row.removed && <RunButton runtime={runtime} row={row.number} owner={owner} />} />
+      <RunControls runtime={runtime} row={row.number} owner={owner} title={row.title} />
+      {runList}
+    </div>
   );
 }

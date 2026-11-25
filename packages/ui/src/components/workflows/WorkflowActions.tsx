@@ -37,7 +37,7 @@ export function WorkflowAction({ icon, className, children, onClick, ...props }:
     onClick?.(event);
   };
   return (
-    <button type="button" className={cn(focusRing, "flex min-h-11 w-full items-center gap-2.5 px-3 py-2 text-start text-base disabled:opacity-50 aria-disabled:opacity-45 [&_svg]:size-4.5 [&_svg]:shrink-0", className)} onClick={choose} {...props}>
+    <button type="button" className={cn(focusRing, "flex min-h-11 w-full items-center gap-2.5 px-3 py-2 text-start text-base disabled:opacity-50 aria-disabled:opacity-45 [&_svg]:size-5.5 [&_svg]:shrink-0", className)} onClick={choose} {...props}>
       {icon}<span className="min-w-0 wrap-anywhere">{children}</span>
     </button>
   );
