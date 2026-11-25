@@ -83,7 +83,7 @@ function ReplyBlocks({ blocks, onOpenLink }: { blocks: readonly ReplyBlock[]; on
 
 /** Gives focus back to the message whose row of actions `from` is in. */
 function refocus(from: HTMLElement) {
-  from.closest("article")?.querySelector<HTMLButtonElement>("button[aria-haspopup=menu]")?.focus();
+  from.closest("article")?.querySelector<HTMLButtonElement>("button[aria-haspopup=menu]")?.focus({ preventScroll: true });
 }
 
 /** Moves between the actions of the row with the arrow keys, Home and End, as a menu does; Escape closes it. */
