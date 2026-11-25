@@ -22,7 +22,8 @@ import { Machine as Shell, canReturnCommsView, showing } from "../../gen/app__sh
 import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
 import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
 import { syncClockNow } from "../clock/sync.vibe"
-import { type NotesSelection, type RendererNote, noteSubjects, notesSelection } from "../notes/selection.vibe"
+import { type NoteTranscript, type NotesSelection, type RendererNote, noteSubjects, notesSelection, transcriptCurrent } from "../notes/selection.vibe"
+import type { NoteStore } from "../platform/notes.vibe"
 import { captureSmsSelection, type MessageSmsRequest, type SmsSelection, type SmsSelectionContext } from "../messages/agent-sim.vibe"
 import type { Telephony } from "../platform/telephony.vibe"
 import { syncRemindersNow } from "../reminders/reminders.vibe"
@@ -40,7 +41,7 @@ import { VoiceWords } from "../voice/voice.vibe"
 import { MediaReview, mediaReview } from "./media-review.vibe"
 import { type Board, type Line, Talk, talk } from "./talk.vibe"
 import { Views, carried, carriedAloud, delivery, handoffs, preparedIn } from "./views.vibe"
-import { dropFiles, readFiles, rememberFiles, sameBinding, stageFiles } from "./attachments.vibe"
+import { dropFiles, readFiles, rememberFiles, retireTranscript, sameBinding, stageFiles } from "./attachments.vibe"
 import { readMessage } from "./read-aloud.vibe"
 
 service Turns {
@@ -184,7 +185,7 @@ effect function whereabouts(sensitive: boolean, told: boolean): (LocationObserva
 }
 
 // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
-type ScreenContext = Locator.Machine | Prefs.Machine | Location | Time | Talk | NotesSelection | SmsSelectionContext | Telephony
+type ScreenContext = Locator.Machine | Prefs.Machine | Location | Time | Talk | NotesSelection | NoteStore | SmsSelectionContext | Telephony
 
 interface ScreenTold {
   readonly metadata: TurnContext | undefined
@@ -192,11 +193,12 @@ interface ScreenTold {
 }
 
 /** A review from Messages must use the same selected SIM that its outgoing observation names. */
-effect function screenTold(told: boolean, context: Conversation.Context): ScreenTold!!ScreenContext {
+effect function screenTold(told: boolean, context: Conversation.Context, transcript?: NoteTranscript): ScreenTold!!ScreenContext {
   const location = try whereabouts(context.sensitive, told)
   const view = viewOf(context.showing)
   const seeSelection = told && !context.sensitive
-  const seen = seeSelection && view === "notes" ? try notesSelection() : undefined
+  const seen = seeSelection && view === "notes" ?
+    (transcript === undefined ? try notesSelection() : (try transcriptCurrent(transcript)) ? transcript.record : undefined) : undefined
   const note = seen?.kind === "canonical-note" && !context.selected ? undefined : seen
   const selection = seeSelection && view === "messages" ? try captureSmsSelection() : undefined
   const metadata = observed(told, context, location, note ?? selection?.observation)
@@ -232,8 +234,8 @@ effect function syncAlphaApps(): void!!(Agent | KeyValueStore.KeyValueStore | Ti
 
 // spec/app/assistant/index.md, "Every message asked is posted exactly once, under a new ticket, whoever gave the text, with the screen showing and never a sensitive one"; spec/app/assistant/index.md, "The first word of a reply shows that the agent has the message, and a withdrawal that came too late stops it there"
 // spec/app/assistant/composer.md, "A quoted message goes with the next send, until the owner removes the quote"
-function posted(ticket: number, told: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Views | Agent | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Comms.Machine | MailQuestions | MediaReview | ScreenContext> {
-  return Stream.callback<Conversation.Event, never, Views | Agent | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Comms.Machine | MailQuestions | MediaReview | ScreenContext>((queue) => effect {
+function posted(ticket: number, told: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Views | Agent | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Comms.Machine | MailQuestions | MediaReview | ScreenContext | NoteStore> {
+  return Stream.callback<Conversation.Event, never, Views | Agent | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Comms.Machine | MailQuestions | MediaReview | ScreenContext | NoteStore>((queue) => effect {
     const { controller, streamed } = try Turns
     const { board } = try Talk
     const reply = try Reply.Machine
@@ -255,7 +257,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const staged = request === undefined && stage?.ticket === ticket && stage.hold === composer.hold && sameBinding(stage.binding, composer.binding) ? stage : undefined
     const files = staged?.files ?? []
     const quoted = board.line(chats.chosen, held.quote)
-    if (known === undefined || (text.trim() === "" && files.length === 0 && !held.mail) || (held.quote > 0 && quoted === undefined) || held.files !== files.length) {
+    if (known === undefined || (text.trim() === "" && files.length === 0 && !held.mail && !held.transcript) || (held.quote > 0 && quoted === undefined) || held.files !== files.length) {
       Queue.offerUnsafe(queue, { type: "refuse", ticket })
       Queue.endUnsafe(queue)
       return
@@ -267,17 +269,29 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const messageTarget = enrolled === undefined ? undefined : try review.messageTarget()
     try ignore(reply.send({ type: "begin", turn: ticket }))
     const attachment = staged?.mail
-    const outgoing = held.mail ? (attachment !== undefined && attachment === mail.attached() ? (withMail(text, attachment) catch () => undefined) : undefined) : text
-    if (outgoing === undefined) {
+    const transcript = staged?.transcript
+    const words = held.mail ? (attachment !== undefined && attachment === mail.attached() ? (withMail(text, attachment) catch () => undefined) : undefined) : text
+    if (words === undefined) {
       mail.show({ failure: "changed" })
       try ignore(reply.send({ type: "decline", turn: ticket }))
       Queue.offerUnsafe(queue, { type: "refuse", ticket })
       Queue.endUnsafe(queue)
       return
     }
-    const { metadata: screen, sms } = try screenTold(told, context)
+    const outgoing = transcript === undefined ? words : `Use the transcript of the selected voice note to answer this question.\n\n${words}`
+    const { metadata: screen, sms } = try screenTold(told, context, transcript?.offered)
+    const selected = screen?.observation?.selectedObject
     const current = try conversation.get()
-    if (!Conversation.canFinish(current, ticket) || current.turn.stopping || current.context.revision !== context.revision || (try history.get()).chosen !== chats.chosen) {
+    const currentComposer = try (try Composer.Machine).get()
+    const exact = !held.transcript || (transcript !== undefined && transcript === board.snapshot().transcript &&
+      staged === board.staged && currentComposer.away === "Asked" && currentComposer.held.transcript &&
+      currentComposer.hold === composer.hold && sameBinding(currentComposer.binding, composer.binding) &&
+      !current.context.sensitive && current.context.selected && selected?.kind === "canonical-note" &&
+      selected.id === transcript.offered.record.id && selected.revision === transcript.offered.record.revision)
+    if (!exact || !Conversation.canFinish(current, ticket) || current.turn.stopping ||
+      current.context.revision !== context.revision || (try history.get()).chosen !== chats.chosen) {
+      if (!exact && transcript !== undefined) try retireTranscript(transcript)
+      try ignore(reply.send({ type: "decline", turn: ticket }))
       if (Conversation.canRefuse(current, ticket)) Queue.offerUnsafe(queue, { type: "refuse", ticket })
       Queue.endUnsafe(queue)
       return
@@ -392,10 +406,15 @@ effect function staged(ticket: number, attachments: number): Conversation.Event!
   const files = sameBinding(snapshot.filesBinding, before.binding) ? snapshot.files : []
   const mail = try MailQuestions
   const item = before.held.mail ? mail.attached() : undefined
+  const transcript = before.held.transcript ? snapshot.transcript : undefined
   const rejected: Conversation.Event = { type: "uploaded", ticket, ok: false }
   if (turn.send.id !== ticket || turn.send.outcome !== "Recorded" || turn.hold !== before.hold || before.away !== "Asked") return rejected
   if (before.held.mail && item === undefined) return rejected
-  if (files.length + Number(item !== undefined) !== attachments || files.length !== before.held.files) return rejected
+  if (before.held.transcript && (transcript === undefined || !sameBinding(transcript.binding, before.binding))) {
+    try retireTranscript(transcript)
+    return rejected
+  }
+  if (files.length + Number(item !== undefined) + Number(transcript !== undefined) !== attachments || files.length !== before.held.files) return rejected
   const key = files.length === 0 ? undefined : fresh()
   if (key !== undefined && !(try stageFiles(key, files))) {
     board.change({ attachmentNotice: "Could not save the attachments. Try again." })
@@ -403,11 +422,15 @@ effect function staged(ticket: number, attachments: number): Conversation.Event!
   }
   const current = try composer.get()
   const pending = try conversation.get()
-  if (!sameBinding(before.binding, current.binding) || current.hold !== before.hold || !Conversation.canUploaded(pending, ticket)) {
+  if (!sameBinding(before.binding, current.binding) || current.hold !== before.hold || !Conversation.canUploaded(pending, ticket) ||
+    (transcript !== undefined && transcript !== board.snapshot().transcript)) {
     if (key !== undefined) try dropFiles(key)
     return rejected
   }
-  board.staged = { ticket, hold: before.hold, binding: before.binding, files, ...(key === undefined ? {} : { key }), ...(item === undefined ? {} : { mail: item }) }
+  board.staged = {
+    ticket, hold: before.hold, binding: before.binding, files,
+    ...(key === undefined ? {} : { key }), ...(item === undefined ? {} : { mail: item }), ...(transcript === undefined ? {} : { transcript }),
+  }
   return { type: "uploaded", ticket, ok: true }
 }
 
@@ -417,9 +440,10 @@ effect function settled(hold: number, sent: boolean): void!!(Talk | Composer.Mac
   const event: Composer.Event = sent ? { type: "commit", hold } : { type: "release", hold }
   if (!Composer.enabled(try composer.get(), event)) return
   const staged = board.staged
-  if (sent) board.change({ files: [], filesBinding: undefined, attachmentNotice: "" })
+  if (sent) board.change({ files: [], filesBinding: undefined, transcript: undefined, attachmentNotice: "" })
   else giveBack(board)
   try contained(composer.send(event), "settling the composer")
+  if (!sent && board.snapshot().transcript === undefined && (try composer.get()).editor.transcript) try retireTranscript()
   if (staged?.hold === hold) {
     if (board.staged === staged) board.staged = undefined
     if (sent && staged.mail !== undefined) {
@@ -436,7 +460,7 @@ function giveBack(board: Board) {
   board.outgoing = ""
 }
 
-function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Views | Agent | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Composer.Machine | Conversation.Machine | Reply.Machine | Comms.Machine | MailQuestions | MediaReview | ScreenContext, []> {
+function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Views | Agent | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Composer.Machine | Conversation.Machine | Reply.Machine | Comms.Machine | MailQuestions | MediaReview | ScreenContext | NoteStore, []> {
   return match (fx) {
     when { tag: "CheckSupport", let support }: answer("support", supported(support), { type: "supported", ticket: support, ok: false, takes: false });
     when { tag: "Upload", let ticket, let attachments }: answer("upload", staged(ticket, attachments), { type: "uploaded", ticket, ok: false });
@@ -718,13 +742,19 @@ const looked = started(effect {
   const shell = try Shell
   const settings = try Pages.Machine
   const conversation = try Conversation.Machine
+  const { board } = try Talk
   let taken: string | undefined
   const page = Stream.zipLatest(shell.changes, settings.changes)
   const selection = Stream.zipLatest(noteSubjects, conversation.changes)
-  try Stream.runForEach(Stream.zipLatest(page, selection), effect ([[shown, pages], [note]]) => {
+  try Stream.runForEach(Stream.zipLatest(page, selection), effect ([[shown, pages], [subject]]) => {
     const view = shown.trail.at(-1)
+    const offer = board.snapshot().transcript
+    const transcript = offer?.offered
+    if (transcript !== undefined && (view !== "Notes" || transcript.owner !== subject.owner ||
+      transcript.number !== subject.note || transcript.opened !== subject.opened || transcript.record.revision !== String(subject.revision - 1))) try retireTranscript(offer)
     const section: Pages.Page = view === "Settings" ? pages.page : "Top"
     const sensitive = view === "Settings" && Pages.sensitive(pages)
+    const { note } = subject
     const selected = view === "Notes" && !sensitive && note > 0
     const seen = `${view ?? ""} ${section} ${sensitive} ${selected ? note : ""}`
     if (seen === taken) return
@@ -749,6 +779,13 @@ const bound = started(effect {
   const conversation = try Conversation.Machine
   const { board } = try Talk
   try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(chats.changes, composer.changes), conversation.changes), effect ([[shown, writing], talking]) => {
+    const offered = board.snapshot().transcript
+    if (offered !== undefined && offered.binding.owner !== writing.binding.owner) board.change({ transcript: undefined })
+    const staged = board.staged
+    if (staged !== undefined && staged.binding.owner !== writing.binding.owner) {
+      board.staged = undefined
+      if (staged.key !== undefined) try dropFiles(staged.key)
+    }
     const here = writing.binding.conversation
     if (shown.chosen !== here) {
       board.change({ reply: "", label: "", failure: undefined })
@@ -756,6 +793,10 @@ const bound = started(effect {
       const bound = try contained(composer.send(moving ? { type: "adopt", conversation: shown.chosen } : { type: "bind", conversation: shown.chosen }), "binding the composer")
       if (bound && sameBinding(board.snapshot().filesBinding, writing.binding)) {
         board.change(moving ? { filesBinding: { owner: writing.binding.owner, conversation: shown.chosen } } : { files: [], filesBinding: undefined, attachmentNotice: "" })
+      }
+      const transcript = board.snapshot().transcript
+      if (bound && transcript !== undefined && sameBinding(transcript.binding, writing.binding)) {
+        board.change({ transcript: moving ? { ...transcript, binding: { owner: writing.binding.owner, conversation: shown.chosen } } : undefined })
       }
       return
     }

@@ -36,7 +36,7 @@ import { type MediaCard, MediaReview, namedReviewQuery } from "./media-review.vi
 import { Documents } from "../platform/documents.vibe";
 import { AttachmentSources } from "./AttachmentSources.tsx";
 import { askComms, freedom } from "./assistant.vibe";
-import { acceptedFiles, acceptedPhotos, chooseDocument, type FileTarget, insertFiles, previewFile, readChosenDocument, removeFile, sameBinding } from "./attachments.vibe";
+import { acceptedFiles, acceptedPhotos, chooseDocument, type FileTarget, insertFiles, previewFile, readChosenDocument, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
 import { chip, type MessageActions, useHistorySheets, useMessageRows } from "./history.tsx";
 import { ReplyFailure } from "./ReplyFailure.tsx";
 import { type Attached, type Line, Talk } from "./talk.vibe";
@@ -78,18 +78,18 @@ function noticeOf(writing: Writing): AssistantDraftNoticeProps["status"] | undef
   return undefined;
 }
 
-function waiting(writing: Writing, files: readonly Attached[]): AssistantAttachment[] {
+function waiting(writing: Writing, files: readonly Attached[], transcriptTitle: string | undefined): AssistantAttachment[] {
   const { editor } = writing;
   return [
     ...files.slice(0, editor.files).map(chip),
     ...(editor.mail ? [{ id: "mail", kind: "mail", name: "Mail" } as const] : []),
-    ...(editor.transcript ? [{ id: "transcript", kind: "transcript", name: "Transcript" } as const] : []),
+    ...(editor.transcript && transcriptTitle !== undefined ? [{ id: "transcript", kind: "transcript", name: transcriptTitle } as const] : []),
     ...(editor.shown ? [{ id: "shown", kind: "image", name: "Photo" } as const] : []),
     ...(editor.question ? [{ id: "question", kind: "transcript", name: "Question" } as const] : []),
   ];
 }
 
-const detached = { mail: "Mail", transcript: "Transcript", shown: "Shown" } as const;
+const detached = { mail: "Mail", shown: "Shown" } as const;
 
 const barHeight = 102;
 const emptyLines: readonly Line[] = [];
@@ -289,6 +289,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const check = { type: "checkForReply" } as const;
   const checkable = conversation.can(check) && (talking.turn.send.outcome === "Unknown" || talking.turn.reply === "Stopped" || talking.check === "LookLater" || writing.unsettled);
   const draftFiles = sameBinding(seen.filesBinding, writing.binding) ? seen.files : [];
+  const transcriptTitle = sameBinding(seen.transcript?.binding, writing.binding) ? seen.transcript?.offered.title : undefined;
   const previewed = seen.preview?.ticket === attachments.state?.preview ? seen.preview?.file : undefined;
 
   const type = (text: string) => {
@@ -417,7 +418,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
             onCheck: writing.unsettled && conversation.can(check) ? () => void conversation.send(check) : undefined,
           },
           unavailable: !talking.ready ? "away" : talking.context.sensitive ? "sensitive" : undefined,
-          attachments: onComms ? undefined : waiting(writing, draftFiles),
+          attachments: onComms ? undefined : waiting(writing, draftFiles, transcriptTitle),
           onPreviewAttachment: !onComms && canPreview ? (id) => {
             const file = draftFiles.find((one) => one.id === id);
             if (file) preview(file);
@@ -451,7 +452,9 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           } : undefined,
           onRemoveAttachment: (id) => {
             if (id === "question") void composer.send({ type: "removeQuestion" });
-            else if (id === "mail" || id === "transcript" || id === "shown") {
+            else if (id === "transcript") {
+              if (composer.can({ type: "detach", kind: "Transcript" })) void runtime.runPromise(retireTranscript());
+            } else if (id === "mail" || id === "shown") {
               if (id === "mail") mail.clear();
               void composer.send({ type: "detach", kind: detached[id] });
             } else void runtime.runPromise(removeFile(id));

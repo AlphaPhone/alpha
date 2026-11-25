@@ -16,7 +16,7 @@ import { agentOpen } from "../src/notes/agent.vibe";
 import { numberOf } from "../src/notes/content.vibe";
 import notes from "../src/notes/index.tsx";
 import { untimed } from "../src/runtime/reactor.vibe";
-import { button, closeAll, drawn, fill, only, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, only, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { note, prepared } from "./fakes/notes.ts";
 import { scene } from "./fakes/scene.ts";
 
@@ -155,18 +155,37 @@ describe("Notes", () => {
     expect(document.body.textContent).toContain("Notifications stay as icons until unlock");
 
     // spec/app/notes/voice.md, "Ask Alpha about this transcript hands Ask Alpha the transcript the note holds"
+    await until(alpha, runtime, Composer, (state) => state.slot === "Open");
     await press("Ask Alpha about this transcript");
     await until(alpha, runtime, Shell, (state) => state.assistant === "Sheet");
     expect(world.ask.said).toEqual([]);
-    await until(alpha, runtime, Composer, (state) => state.slot === "Open");
-    await until(alpha, runtime, Conversation, (state) => state.ready && state.context.selected);
+    expect(document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']")?.value).toBe("Summarize this for me");
+    expect(button("Remove Design sync")).toBeDefined();
     const question = "What did we decide about notifications in this transcript?";
     await fill("Message Alpha", question);
+    await press("Remove Design sync");
+    await until(alpha, runtime, Composer, (state) => !state.editor.transcript);
+
+    // spec/app/assistant/composer.md, "Story: Attach, quote and edit again"
+    await drawn(() => runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" }))));
+    await press("Ask Alpha about this transcript");
+    await drawn(async () => { expect((await runtime.runPromise(Shell.use((shell) => shell.get()))).assistant).toBe("Bar"); });
+    await press("Back to notes");
+    await until(alpha, runtime, Voice, (state) => !state.showing);
+    await press("Open Design sync");
+    await until(alpha, runtime, Voice, (state) => state.showing && state.added > 0);
+    await press("Ask Alpha about this transcript");
+    await until(alpha, runtime, Shell, (state) => state.assistant === "Sheet");
+    expect(button("Remove Design sync")).toBeDefined();
+    expect(document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']")?.value).toBe(question);
+    await until(alpha, runtime, Conversation, (state) => state.ready && state.context.selected);
     await press("Send");
-    await drawn(() => vi.waitFor(() => expect(world.ask.said).toEqual([question])));
+    await drawn(() => vi.waitFor(() => expect(world.ask.said).toEqual([`Use the transcript of the selected voice note to answer this question.\n\n${question}`])));
     expect(world.ask.metadata[0]).toMatchObject({
       observation: { view: "notes", selectedObject: { kind: "canonical-note", id: "sync", revision: String(world.notes.revision) } },
     });
+    await until(alpha, runtime, Composer, (state) => state.away === "Free" && !state.editor.transcript);
+    expect(button("Remove Design sync")).toBeUndefined();
   });
 
   it("Reviews a generated transcript before saving it (spec/app/notes/voice.md, \"Story: Read and use the transcript\")", async () => {
@@ -206,6 +225,15 @@ describe("Notes", () => {
       { s: "me", t: "The door closes at dusk.", at: 0 },
       { s: "me", t: "Send a reminder on Thursday.", at: 25 },
     ]);
+
+    // spec/app/notes/voice.md, "Story: Leave a voice note"
+    await press("Play");
+    await drawn(() => vi.waitFor(() => expect(world.notes.playing).toEqual({ audioId: recordingId, noteId, offsetMs: 0 })));
+    await hardware("home");
+    await until(alpha, runtime, Voice, (state) => !state.showing && state.play.status === "Idle");
+    expect(world.notes.playing).toBeUndefined();
+    await drawn(() => runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Notes" }))));
+    await drawn(() => vi.waitFor(() => expect(button("Open Field recording")).toBeDefined()));
   });
 
   it("The agent opens the note I named, and only that, only for my request now (spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened\"; spec/app/notes/note.md, \"Only the owner opens a dialog or a question in Notes; a note is opened by the owner, or by the agent for the one the owner just named; and nothing opens while anything else of Notes is open\"; spec/app/assistant/index.md, \"Story: Let Alpha open what it is talking about\")", async () => {
