@@ -3,8 +3,8 @@
 let pending: string | undefined;
 const listeners = new Set<() => void>();
 
-/** Leave a search for Maps to open: the newest one replaces an earlier one Maps has not taken. */
-export function handToMaps(query: string): void {
+/** Leave a search for Maps to open, or none: the newest card's replaces an earlier one Maps has not taken. */
+export function handToMaps(query: string | undefined): void {
   pending = query;
   for (const wake of listeners) wake();
 }

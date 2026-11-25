@@ -16,7 +16,10 @@ describe("a reply's words as the owner reads and hears them", () => {
   });
 
   it("holds back a block still being written, keeps a code fence and a malformed card as written", () => {
-    expect(replyBlocks('Looking now.\n[MAPSCARD]\n{"kind":"loc').words).toBe("Looking now.");
+    expect(replyBlocks('Looking now.\n[MAPSCARD]\n{"kind":"loc', true).words).toBe("Looking now.");
+    expect(replyBlocks("A.\n[MAPS", true).words).toBe("A.");
+    expect(replyBlocks("Done.\n[CHOICE:maps-share id=x]\nYes=Share", false).words).toBe("Done.\n[CHOICE:maps-share id=x]\nYes=Share");
+    expect(replyBlocks("[CHOICE:task id=t]\nok=OK\n[/CHOICE]").words).toBe("[CHOICE:task id=t]\nok=OK\n[/CHOICE]");
     expect(replyBlocks("```\n[FORM]x[/FORM]\n```").words).toBe("```\n[FORM]x[/FORM]\n```");
     expect(replyBlocks("[MAPSCARD]\nnot json\n[/MAPSCARD]").words).toBe("[MAPSCARD]\nnot json\n[/MAPSCARD]");
   });

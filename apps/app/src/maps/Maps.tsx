@@ -109,6 +109,8 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   const { state, can, send } = screen;
   const handed = useSyncExternalStore(watchHandoff, handedQuery, handedQuery);
   const handOver = handed === undefined ? undefined : { type: "handOver", query: handed, chars: handed.length } as const;
+  // spec/app/maps/index.md, "A query another app hands to Maps opens as a search, never over navigation": a search not taken is dropped when Maps leaves
+  useEffect(() => () => { takeHandedQuery(); }, []);
   useEffect(() => {
     if (handOver === undefined || !can(handOver) || can({ type: "continueDisclosure" })) return;
     takeHandedQuery();

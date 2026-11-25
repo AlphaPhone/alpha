@@ -4,7 +4,7 @@ import {
   type AssistantAttachment, type AssistantComposerProps, type AssistantDraftNoticeProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
-import { type ReactNode, type RefObject, useCallback, useMemo, useRef, useSyncExternalStore } from "react";
+import { type ReactNode, type RefObject, useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { type Conversation as Talking, Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe";
 import { askable, inFlight, pending } from "../../gen/app__assistant.ts";
 import { useMachine as useConversation } from "../../gen/app__assistant.react.ts";
@@ -295,31 +295,39 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
     if (settingsAction) void runtime.runPromiseExit(Effect.flatMap(ShellMachine, (machine) => machine.send(settingsAction)));
   }, [runtime, settingsAction]);
   // spec/app/maps/cards.md, "A card's Map button runs one flow, chosen from what the card carries": a search card hands Maps its search
-  const openedRef = useRef(new Set<number>());
+  const [opened, setOpened] = useState<ReadonlySet<number>>(() => new Set());
   const onOpenMaps = useCallback((card: MapsCard, message: number) => {
-    openedRef.current.add(message);
+    setOpened((before) => new Set([...before, message]));
     const query = card.kind === "places" || card.kind === "locate" ? card.query : undefined;
-    if (query !== undefined && query.trim() !== "") handToMaps(query);
+    handToMaps(query !== undefined && query.trim() !== "" ? query : undefined);
     void runtime.runPromiseExit(Effect.flatMap(ShellMachine, (machine) => machine.send(maps)));
   }, [runtime]);
   const mapsShowing = Boolean(shell.state && showing(shell.state, "Maps"));
   // spec/app/maps/cards.md, "A tap sends one answer while the composer is quiet; a draft or an edit says why it waits; a failed send asks again"
   const answeredRef = useRef(new Set<string>());
+  const onChoose = useCallback((choice: string, value: string) => {
+    if (!talking || answeredRef.current.has(choice) || board.snapshot().typed.trim() !== "") return;
+    const edit = { type: "edit", blank: false, long: value.length > textLimit } as const;
+    if (!composer.can(edit)) return;
+    answeredRef.current.add(choice);
+    board.type(value);
+    const answer = { type: "hold", askable: askable(talking) } as const;
+    void composer.send(edit)
+      .then(() => {
+        board.hold(value);
+        board.type("");
+        return composer.send(answer);
+      })
+      .then((outcome) => { if (outcome._tag !== "Success") answeredRef.current.delete(choice); });
+  }, [board, composer, talking]);
   const messages = useMessageRows({
     runtime, board, lines, chats: shown, writing, ...free, actions: messageActions, canReadAloud,
     settled: Boolean(talking && !inFlight(talking.turn) && !pending(talking)),
     onSettings: settingsAction ? onSettings : undefined,
     onPreview: canPreview ? preview : undefined,
     onOpenMaps: shell.can(maps) || mapsShowing ? onOpenMaps : undefined,
-    opened: openedRef.current,
-    onChoose: (choice: string, value: string) => {
-      if (!talking) return;
-      const answer = { type: "hold", askable: askable(talking) } as const;
-      if (answeredRef.current.has(choice) || board.snapshot().typed.trim() !== "" || !composer.can(answer)) return;
-      answeredRef.current.add(choice);
-      board.hold(value);
-      void composer.send(answer);
-    },
+    opened,
+    onChoose,
   });
   if (conversation.cause || chats.cause || composer.cause || reply.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Ask Alpha</Alert>;
   if (!talking || !shown || !writing || !finding) return null;
@@ -377,7 +385,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
   const earlier = { type: "scroll", around: board.numbered(lines[0]?.id ?? "") } as const;
   const later = { type: "scroll", around: board.numbered(lines.at(-1)?.id ?? "") } as const;
-  const replyWords = replyBlocks(seen.reply).words;
+  const replyWords = replyBlocks(seen.reply, true).words;
   const writingReply = replyWords !== "" ? [{ id: "reply", author: "alpha", text: replyWords } as const] : [];
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
   const mediaCards = seen.media.filter((card) => !talking.context.sensitive && card.conversation === shown.chosen && card.revision === talking.context.revision).map((card) => ({

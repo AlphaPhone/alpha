@@ -363,7 +363,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       if (provisional || awaitingFiles) return
       emitNavigation(written)
       if (replyNeedsReview(written)) return
-      const clean = speakableText(replyBlocks(written).words)
+      const clean = speakableText(replyBlocks(written, true).words)
       if (clean.length <= shown.length) return
       shown = clean
       sayFrom(clean, false)

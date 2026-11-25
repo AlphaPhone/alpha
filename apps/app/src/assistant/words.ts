@@ -8,13 +8,14 @@ export interface ShareChoice {
 }
 
 const fence = /^[ \t]{0,3}(`{3,}|~{3,})/;
-const choiceOpen = /^\s*\[CHOICE:maps-share id=([A-Za-z0-9_-]{1,128})\]\s*$/;
-const anyChoiceOpen = /^\s*\[CHOICE:[A-Za-z0-9_-]+ id=[^\]]+\]\s*$/;
+const shareOpen = /^\s*\[CHOICE:maps-share id=([A-Za-z0-9_-]{1,128})\]\s*$/;
 const choiceClose = /^\s*\[\/CHOICE\]\s*$/;
 const formOpen = /^\s*\[FORM\]/;
 const formClose = /\[\/FORM\]\s*$/;
 const cardOpen = /^\s*\[[ \t]*MAPSCARD[ \t]*\][ \t]*$/;
+const cardClose = /^\s*\[[ \t]*\/[ \t]*MAPSCARD[ \t]*\][ \t]*$/;
 const option = /^([^=\n]{1,500})=([^=\n]{1,80})$/;
+const partialOpener = /^\s*\[(?:M(?:A(?:P(?:S(?:C(?:A(?:R(?:D)?)?)?)?)?)?)?|C(?:H(?:O(?:I(?:C(?:E(?::[^\]\n]*)?)?)?)?)?)?|F(?:O(?:R(?:M)?)?)?)?$/;
 
 interface Blocks {
   readonly words: string;
@@ -22,11 +23,12 @@ interface Blocks {
 }
 
 /**
- * A reply read for the owner: its Maps cards (eliza's recognizer), its share questions and its forms taken out of the words,
- * outside a code fence only, with each share question's answers kept. A block still being written, with no closing line
- * yet, is held back from the words until it closes. @throws {never}
+ * A reply read for the owner: its Maps cards (eliza's recognizer), its Maps share questions and its forms taken out of the
+ * words, outside a code fence only, with each share question's answers kept. Any other block reads as text. While the reply
+ * is still `streaming`, a block that has not closed, and a last line that may still become one, are held back; in a finished
+ * reply an unclosed block stays as text. @throws {never}
  */
-export function replyBlocks(text: string): Blocks {
+export function replyBlocks(text: string, streaming = false): Blocks {
   const lines = withoutMapsCards(text).split(/\r?\n/);
   const kept: string[] = [];
   const choices: ShareChoice[] = [];
@@ -42,30 +44,35 @@ export function replyBlocks(text: string): Blocks {
       kept.push(line);
       continue;
     }
-    if (anyChoiceOpen.test(line) || formOpen.test(line) || cardOpen.test(line)) {
-      const closes = anyChoiceOpen.test(line) ? choiceClose : formOpen.test(line) ? formClose : /^\s*\[[ \t]*\/[ \t]*MAPSCARD[ \t]*\][ \t]*$/;
-      let end = at;
-      while (end < lines.length && !closes.test(lines[end] ?? "")) end++;
-      if (end >= lines.length) break;
-      if (cardOpen.test(line)) {
-        kept.push(...lines.slice(at, end + 1));
-        at = end;
-        continue;
-      }
-      const share = choiceOpen.exec(line);
-      const body = lines.slice(at + 1, end).map((entry) => option.exec(entry.trim()));
-      if (share !== null && body.length === 2 && body.every((found) => found !== null)) {
-        choices.push({ id: share[1] ?? "", options: body.map((found) => ({ value: (found?.[1] ?? "").trim(), label: (found?.[2] ?? "").trim() })) });
-      }
+    if (streaming && at === lines.length - 1 && partialOpener.test(line)) break;
+    const share = shareOpen.exec(line);
+    if (share === null && !formOpen.test(line) && !cardOpen.test(line)) {
+      kept.push(line);
+      continue;
+    }
+    const closes = share !== null ? choiceClose : formOpen.test(line) ? formClose : cardClose;
+    let end = at;
+    while (end < lines.length && !closes.test(lines[end] ?? "")) end++;
+    if (end >= lines.length) {
+      if (streaming) break;
+      kept.push(line);
+      continue;
+    }
+    if (cardOpen.test(line)) {
+      kept.push(...lines.slice(at, end + 1));
       at = end;
       continue;
     }
-    kept.push(line);
+    const body = lines.slice(at + 1, end).map((entry) => option.exec(entry.trim()));
+    if (share !== null && body.length === 2 && body.every((found) => found !== null)) {
+      choices.push({ id: share[1] ?? "", options: body.map((found) => ({ value: (found?.[1] ?? "").trim(), label: (found?.[2] ?? "").trim() })) });
+    }
+    at = end;
   }
   return { words: kept.join("\n").replace(/\n{3,}/g, "\n\n").trim(), choices };
 }
 
-/** A message's words as the owner reads them: an agent reply without its cards, questions and forms; the owner's own words as written. @throws {never} */
+/** A message's words as the owner reads them: an agent reply without its cards, share questions and forms; the owner's own words as written. @throws {never} */
 export function wordsOf(line: { readonly mine: boolean; readonly text: string }): string {
   return line.mine ? line.text : replyBlocks(line.text).words;
 }
