@@ -1,5 +1,5 @@
 import type { ComponentProps } from "react";
-import { Calendar } from "lucide-react";
+import { CalendarGlyph } from "../../lib/icons.ts";
 import { HomeCard } from "./HomeCard.tsx";
 
 /** An event or a reminder as the agenda card shows it. */
@@ -36,7 +36,7 @@ export type HomeAgendaCardProps = Omit<ComponentProps<"button">, "children" | "t
  */
 export function HomeAgendaCard({ item, heading, origin, next, readLine, ...props }: HomeAgendaCardProps) {
   return (
-    <HomeCard variant="agenda" title={heading} origin={origin} icon={<Calendar />} {...props}>
+    <HomeCard variant="agenda" title={heading} origin={origin} icon={<CalendarGlyph />} {...props}>
       <span className="flex min-h-0 flex-1 items-center">
         <span className="line-clamp-3 font-display text-home-display font-light tracking-tight wrap-anywhere [font-variation-settings:'opsz'_144]">{item.title}</span>
       </span>

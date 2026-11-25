@@ -718,9 +718,11 @@ phone may carry it out once if the owner allows direct action, the same
 place and tickets still show and the open viewer is empty. A turn whose
 reply proposes nothing leaves Files as it is; any other Files proposal, an
 unreadable preference, or a work item in progress keeps the usual review. A
-spoken request uses its own current voice turn and conversation and
-declares only the Files capabilities, and an attached document does not
-authorize a direct action. The agent gets a result receipt without the
+spoken request uses its own current voice turn and conversation,
+declares only the Files capabilities and, since voice shows no review card,
+asks for a filter or an open only (`direct-files-only-v1`): the agent
+refuses a change by voice and has the owner ask for it in the chat, where
+its card shows. An attached document does not authorize a direct action. The agent gets a result receipt without the
 opened file's contents. An open counts only when that folder loaded or
 that file could be shown.
 
@@ -739,7 +741,7 @@ may bring Files forward asks for direct Files execution, as a turn from
 Files does, and the agent's one direct filter, or open by path, can open
 Files after the same turn finishes. Positions only name results that
 already show in Files, so an open by position never starts from another
-screen.
+screen. Every other proposal of the turn keeps its card.
 Closing Ask Alpha, leaving the source or Files, or asking another
 question cancels the continuation. Files first loads its storage and
 settles its listing. The exact item then has to open or the filter finish

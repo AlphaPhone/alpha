@@ -8,7 +8,7 @@ import { pinnedCheckout, pinnedPack } from "@repo/eliza-harness"
 import {
   type Environment, type Manifest, bundledPlugins, calendarEdits, characterAdmitted, cloudModel, corePlugins, entryCarried, gmailChanges, googleAdmitted,
   hostedPlugins, inputAdmitted, localEmbeddings, nativeDigestAck, nativeDigestAckLimit, nativeDigestQueries, nativeDigestScope, nativeRoutes, nativeRoutesAdmitted, nativeSpeechRoutes, notesTrashDays, packAdmitted, packEntry, packedFor, packedPlugins, pageQueries, persistMemory, personalDetailSwap,
-  policyAdmitted, privacyAdmitted, productPluginName, proposalsAdmitted, refusedActions, routeListAdmitted, secretSwap, viewPlugins, walletSettings,
+  launchViews, policyAdmitted, privacyAdmitted, productPluginName, proposalsAdmitted, refusedActions, routeListAdmitted, secretSwap, viewPlugins, viewsAdmitted, walletSettings,
 } from "../gen/agent.effect.vibe"
 
 module node {
@@ -51,10 +51,11 @@ schema Character { name: string; system: string; bio: string[] }
 schema Policy { schema: 1; actions: { allowed: string[]; refused: Record<string, string> }; plugins: { load: string[]; product?: string } }
 schema Notice { channel: string; title: string; text: string }
 schema Service { service: string; hostContextRevision: 1; notification: { channel: string; title: string; text: string; failure: Notice } }
+schema View { id: string; label: string; path: string; aliases?: string[] }
 schema Model { backend: "cloud"; cloudBaseUrl: string; smallModel: string; largeModel: string; imageModel: string }
 schema Host {
   schema: 1; service: string; hostContextRevision: 1; notification: { channel: string; title: string; text: string; failure: Notice }; routes: RouteLine[]; nativeRoutes: RouteLine[]; model: Model
-  embeddings: "none" | "local"; persistMemory: boolean; callerRole: "owner" | "user"; privacy: { secretSwap: boolean; piiSwap: boolean }
+  embeddings: "none" | "local"; persistMemory: boolean; callerRole: "owner" | "user"; views: View[]; privacy: { secretSwap: boolean; piiSwap: boolean }
   google: { gmailChanges: boolean; calendarEdits: boolean }
 }
 
@@ -238,10 +239,13 @@ effect function admittedHost(host: string, registered: readonly string[]) {
   try admitRoutes(written.nativeRoutes, true)
   if (!privacyAdmitted(written.privacy.secretSwap, written.privacy.piiSwap)) throw new Refused({ message: "the launch must ask eliza's privacy service to swap secrets and personal details" })
   if (!googleAdmitted(written.google.gmailChanges, written.google.calendarEdits)) throw new Refused({ message: "the launch consents to Gmail changes or calendar edits the spec does not" })
+  if (!viewsAdmitted(written.views.map(({ id, label, path, aliases }) => ({ id, label, path, aliases: aliases ?? [] })))) {
+    throw new Refused({ message: "the launch must name Home and every Alpha app but Notes as a view, in the phone's order (spec/agent/index.md)" })
+  }
   const document = JSON.stringify({
     schema: 1, character, policy: { actions: { allowed: policy.actions.allowed }, plugins: policy.plugins },
     model: written.model, embeddings: written.embeddings, persistMemory: written.persistMemory, callerRole: written.callerRole,
-    hostContextRevision: written.hostContextRevision, privacy: written.privacy, google: written.google,
+    hostContextRevision: written.hostContextRevision, views: written.views, privacy: written.privacy, google: written.google,
     account: { userId: "the owner signed in on the phone", organizationId: "their organization" },
   })
   decodeLaunchDocument(document) catch effect () => { throw new Refused({ message: "eliza's agent would refuse the launch the phone writes from these files" }) }
@@ -297,7 +301,9 @@ effect function build(name: string) {
   const host: Host = {
     schema: 1, service: service.service, hostContextRevision: service.hostContextRevision, notification: service.notification, routes, nativeRoutes: native,
     model: { backend: "cloud", cloudBaseUrl: where.cloud, smallModel: cloudModel, largeModel: cloudModel, imageModel: "" },
-    embeddings: localEmbeddings ? "local" : "none", persistMemory, callerRole: "owner", privacy: { secretSwap, piiSwap: personalDetailSwap },
+    embeddings: localEmbeddings ? "local" : "none", persistMemory, callerRole: "owner",
+    views: launchViews.map(({ id, label, path, aliases }) => aliases.length === 0 ? { id, label, path } : { id, label, path, aliases: [...aliases] }),
+    privacy: { secretSwap, piiSwap: personalDetailSwap },
     google: { gmailChanges, calendarEdits },
   }
   try fs.writeFileString(`${at.host}/host.json`, `${JSON.stringify(host, null, 2)}\n`)

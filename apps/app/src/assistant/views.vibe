@@ -1,7 +1,9 @@
 // spec/app/assistant/index.md, "Story: Let Alpha open what it is talking about"; spec/app/browser/index.md, "A page the agent asks for opens at once only when my message asked for that address, and any other only once I choose Open on the Browser's card"; spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
+import type { TurnResult } from "@elizaos/agent"
 import * as Conversation from "../../gen/app__assistant.effect.vibe"
+import { resent } from "../../gen/app__assistant__context.effect.vibe"
 import type { Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe"
-import { Machine as Shell, type Detent, type View, parseEvent, showing } from "../../gen/app__shell.effect.vibe"
+import { Machine as Shell, type Detent, type View, canAgentGoHome, parseEvent, showing } from "../../gen/app__shell.effect.vibe"
 import { readOperation } from "@elizaos/agent"
 import { Agent } from "../platform/agent.vibe"
 import { AgentPages, type AgentPage } from "../platform/browser.vibe"
@@ -54,16 +56,23 @@ export interface PageHeld {
 
 type TypedHeld = Held | PageHeld | { readonly asked: number; readonly continueFiles: Effect.Effect<void> }
 
-/** The Alpha view an agent's view id names: the same name, compared without its case, as the shell's own events name views. */
-function viewOf(viewId: string): View | undefined {
+/** Where an agent's view goes: Home, or one of Alpha's apps. */
+type Place = View | "Home"
+
+/** The id the launch declares Home by (spec/agent/index.md, "The launch names Home and every Alpha app but Notes as a view the agent may show, by the id the phone opens it by"). */
+const homeViewId = "home"
+
+/** The place an agent's view id names: Home by its id, else the app of the same name, compared without its case, as the shell's own events name views. */
+function placeOf(viewId: string): Place | undefined {
+  if (viewId.toLowerCase() === homeViewId) return "Home"
   const opened = parseEvent({ type: "openView", view: `${viewId.charAt(0).toUpperCase()}${viewId.slice(1).toLowerCase()}` })
   return opened?.type === "openView" ? opened.view : undefined
 }
 
-/** The view a handoff names, if Alpha has it: a saved note only in Notes. */
-function viewFor(handoff: Handoff): View | undefined {
-  const view = viewOf(handoff.navigationBinding.viewId)
-  return handoff.subview === "saved-note-v1" && view !== "Notes" ? undefined : view
+/** The place a handoff names, if Alpha has it: a saved note only in Notes. */
+function placeFor(handoff: Handoff): Place | undefined {
+  const place = placeOf(handoff.navigationBinding.viewId)
+  return handoff.subview === "saved-note-v1" && place !== "Notes" ? undefined : place
 }
 
 /**
@@ -106,14 +115,23 @@ export const handoffs = Layer.effect(Views, effect {
   }
 })
 
+// spec/app/assistant/context.md, "A turn an agent refuses whole for a direct-request mode it does not know is sent once more without it"
+/** Whether the agent refused a turn that asked `direct` whole for its voice view context, as one older than the mode does, so it goes once more without it. */
+export function resendWithoutMode(result: TurnResult | undefined, direct: boolean): boolean {
+  return resent(result?.kind !== "NotAccepted" ? "TurnAccepted" : result.refusal?.code === "VOICE_UI_CONTEXT_INVALID" ? "ContextRefused" : "OtherRefusal", direct)
+}
+
+/** The direct Files requests a turn asks for: with the review cards a typed turn shows, or with none, as a spoken turn has. */
+export type DirectFilesMode = "direct-files-v1" | "direct-files-only-v1"
+
 // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
 /** What a turn told of the screen adds so the agent may hand back a view to open on it: views as completed actions, this screen, and its saved-note editor. */
-export function delivery(clientId: string, directFiles: boolean = false) {
+export function delivery(clientId: string, directFiles?: DirectFilesMode) {
   return {
     viewDelivery: "completed-action" as const,
     viewClientId: clientId,
     voiceUi: { viewDelivery: "completed-action" as const, uiClientId: clientId, uiNotesEditor: "saved-note-v1" as const,
-      ...(directFiles ? { agentActionMode: "direct-files-v1" as const } : {}) },
+      ...(directFiles === undefined ? {} : { agentActionMode: directFiles }) },
   }
 }
 
@@ -132,11 +150,16 @@ export function pageIn(results: ReadonlyArray<{ readonly action: string; readonl
   }).at(-1)
 }
 
-/** Open `view` for the reply of `ticket`, once, as the conversation allows; whether it opened. */
-effect function navigated(ticket: number, view: View): boolean!!Conversation.Machine {
+/** Open `place` for the reply of `ticket`, once, as the conversation allows; whether it opened. */
+effect function navigated(ticket: number, place: Place): boolean!!Conversation.Machine {
   const conversation = try Conversation.Machine
-  if (!Conversation.canNavigate(try conversation.get(), ticket, view)) return false
-  try ignore(conversation.send({ type: "navigate", ticket, view }))
+  if (place === "Home") {
+    if (!Conversation.canNavigateHome(try conversation.get(), ticket)) return false
+    try ignore(conversation.send({ type: "navigateHome", ticket }))
+  } else {
+    if (!Conversation.canNavigate(try conversation.get(), ticket, place)) return false
+    try ignore(conversation.send({ type: "navigate", ticket, view: place }))
+  }
   return try navigationEnded(conversation, ticket)
 }
 
@@ -153,10 +176,12 @@ effect function navigationEnded(conversation: ConversationMachine.Shape, ticket:
 }
 
 // spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"
-/** Open `view` as voice opens any screen it is asked for; whether it is in front. */
-effect function voiced(view: View) {
+/** Open `place` as voice opens any screen it is asked for; whether it is in front. */
+effect function voiced(place: Place) {
   const shell = try Shell
-  return showing(try shell.get(), view) || (try contained(shell.send({ type: "agentOpenView", view }), "opening the view a spoken reply prepared"))
+  const now = try shell.get()
+  if (place === "Home") return !canAgentGoHome(now) || (try contained(shell.send({ type: "agentGoHome" }), "going Home as a spoken reply prepared"))
+  return showing(now, place) || (try contained(shell.send({ type: "agentOpenView", view: place }), "opening the view a spoken reply prepared"))
 }
 
 /**
@@ -173,10 +198,10 @@ effect function openNamed<R>(noteId: string, asked: number, front: boolean!!R) {
 }
 
 /**
- * Carry out `held` on `view`: claim it once, open it as `front` brings a view to the front, a saved note in Notes'
+ * Carry out `held`: claim it once, bring its place to the front as `front` does, open a saved note in Notes'
  * editor, and tell the agent whether the view switched and, for a note, that it is shown. Nothing is said on screen.
  */
-effect function carriedOut<R>(held: Held, view: View, front: boolean!!R) {
+effect function carriedOut<R>(held: Held, front: boolean!!R) {
   const binding = held.handoff.navigationBinding
   const saved = held.handoff.subview === "saved-note-v1"
   const claim = ask(Agent, HttpClientRequest.post("/api/views/interact-claim") |> HttpClientRequest.bodyJsonUnsafe(%, { ...binding, ...(saved ? { targetProtocol: "saved-note-v1" } : {}) }), Claimed) catch () => undefined
@@ -189,8 +214,8 @@ effect function carriedOut<R>(held: Held, view: View, front: boolean!!R) {
   try ignore(ask(Agent, HttpClientRequest.post("/api/views/interact-result") |> HttpClientRequest.bodyJsonUnsafe(%, { ...binding, claimId: claim.claimId, success: done.switched, result }), Answered))
 }
 
-// spec/app/assistant/index.md, "A complete reply may open one view, once, while the screen it was asked from still shows"; spec/app/notes/index.md, "The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened"
-/** Carry out the view the complete reply of `ticket` prepared for this screen, if Alpha has that view. */
+// spec/app/assistant/index.md, "A complete reply may open one view, once, while the screen it was asked from still shows"; spec/app/assistant/index.md, "A complete reply may take the owner Home, once, as it may open a view"; spec/app/notes/index.md, "The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened"
+/** Carry out the view the complete reply of `ticket` prepared for this screen, if Alpha has that view or it is Home. */
 effect function openPrepared(ticket: number) {
   const views = try Views
   const held = try views.take(ticket)
@@ -200,8 +225,8 @@ effect function openPrepared(ticket: number) {
     if (try navigated(ticket, "Browser")) try (try AgentPages).open(held.value.page, Effect.map(views.current(), (now) => now === held.value.asked))
     return
   }
-  const view = viewFor(held.value.handoff)
-  if (view !== undefined) try carriedOut(held.value, view, navigated(ticket, view))
+  const place = placeFor(held.value.handoff)
+  if (place !== undefined) try carriedOut(held.value, navigated(ticket, place))
 }
 
 // spec/app/assistant/index.md, "A complete reply may open one view, once, while the screen it was asked from still shows"
@@ -222,8 +247,8 @@ export const carriedAloud = started(effect {
       if (try voiced("Browser")) try (try AgentPages).open(held.page, Effect.map(views.current(), (now) => now === held.asked))
       return
     }
-    const view = viewFor(held.handoff)
-    if (view === undefined) return
-    try contained(carriedOut(held, view, voiced(view)), "opening what a spoken reply prepared")
+    const place = placeFor(held.handoff)
+    if (place === undefined) return
+    try contained(carriedOut(held, voiced(place)), "opening what a spoken reply prepared")
   })
 }, "opening what a spoken reply prepared")

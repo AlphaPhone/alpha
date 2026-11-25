@@ -7,7 +7,7 @@ const key = "a".repeat(64);
 const attemptId = "device-attempt-1";
 
 type Sms = Extract<DeviceOperation, { type: "sms_send" }>;
-type ReviewOperation = Extract<DeviceOperation, { type: "sms_send" | "sms_compose" | "sms_latest_sender" | "messages_read_selected" | "voicemail_read_selected" | "files_filter" | "files_open" | "browser_navigate" }>;
+type ReviewOperation = Extract<DeviceOperation, { type: "sms_send" | "sms_compose" | "sms_latest_sender" | "messages_read_selected" | "voicemail_read_selected" | "files_filter" | "files_open" | "files_move" | "files_share" | "files_trash" | "files_folder_create" | "browser_navigate" }>;
 interface ReadOrigin { readonly version: 1; readonly requestId: string; readonly conversationId: string; readonly inReplyTo: string }
 
 type Confirmation = Pick<Sms, "recipients" | "body" | "subscriptionId"> & { operationId: string; confirm(): void };
@@ -51,6 +51,10 @@ export function textReviewRoute(review: TextReviewScene, subjectUserId: string):
     voicemail_read_selected: ["voicemail.read.v1"],
     files_filter: files,
     files_open: files,
+    files_move: files,
+    files_share: files,
+    files_trash: files,
+    files_folder_create: files,
     browser_navigate: files,
   }[operation.type];
   const prefix = "/api/client-devices/";
