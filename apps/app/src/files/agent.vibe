@@ -176,10 +176,6 @@ const kinds: Readonly<Partial<Record<string, Kind>>> = {
   image: "Image", video: "Video", audio: "Audio", document: "Document", pdf: "Pdf", folder: "Folder",
 }
 
-effect function primaryAt(id: number, path: string): boolean!!Handles {
-  const spot = try (try Handles).spot(id)
-  return Option.isSome(spot) && spot.value.volume === "primary" && spot.value.path === path
-}
 
 effect function destination(path: string): (Place | undefined)!!(Files | Handles) {
   const volume = "primary"
@@ -315,6 +311,38 @@ effect function openReviewedFile(review: FileReview, request: number, current: (
   return Option.isSome(opened.value) && opened.value.value.item === target.item.id ? applied : undefined
 }
 
+// spec/app/files/index.md, "An approved filter for a named folder goes to that folder before it searches"
+effect function filterFiles(operation: Extract<DeviceOperation, { type: "files_filter" }>, current: () => Promise<boolean>): (FileActionResult | undefined)!!(Answers | Browser.Machine | Shown.Machine | Files | Handles | Device | Shell) {
+  const { kind, text, from, to, folder } = operation
+  const kindWanted = kind === undefined ? undefined : kinds[kind]
+  if (kind !== undefined && kindWanted === undefined) return unsupported
+  const first = from === undefined ? everything.from : Math.max(everything.from, filterTime(from))
+  const last = to === undefined ? everything.to : filterTime(to, true)
+  if (!Number.isSafeInteger(first) || !Number.isSafeInteger(last) || last < first) return unsupported
+  const shell = try Shell
+  const machine = try Browser.Machine
+  if (!(try promise(current))) return notShown
+  if (!showing(try shell.get(), "Files") && Exit.isFailure(try exit(shell.send({ type: "openView", view: "Files" })))) return notShown
+  const ready = try Effect.timeoutOption(Stream.runHead(Stream.filter(machine.changes, (s) =>
+    s.open && Browser.allowed(s) && s.storage.status === "Loaded")), "10 seconds")
+  if (Option.isNone(ready) || Option.isNone(ready.value)) return notShown
+  if (!showing(try shell.get(), "Files") || !(try (try Device).showing()) || Shown.showing(try (try Shown.Machine).get())) return notShown
+  const request = try (try Answers).next()
+  const wanted: Filter = { text: text ?? "", kind: kindWanted ?? "Other", anyKind: kindWanted === undefined, from: first, to: last }
+  if (folder === undefined) {
+    const shown = try machine.get()
+    if (shown.trash) return notShown
+    const filtered = try agentFilter(request, wanted, false)
+    return filtered.ok ? applied : notShown
+  }
+  const available = called("storageList", (plugin) => plugin.storageList({ volume: primary, path: folder })) catch () => undefined
+  if (available?.status !== "ready" || !showing(try shell.get(), "Files") || !(try (try Device).showing())
+    || Shown.showing(try (try Shown.Machine).get())) return notShown
+  const openedTrail = folder === "" ? [] : [...(try trailOf(folder))]
+  const filtered = try asked(request, { type: "agentFilterAt", request, wanted, openedTrail, guarded: false }, "Agent")
+  return filtered.ok ? applied : notShown
+}
+
 function result(receipt: Receipt): FileActionResult | undefined {
   return receipt.outcome === "Confirmed" || receipt.partial === true ? applied : receipt.outcome === "Unknown" ? undefined : unchanged
 }
@@ -326,23 +354,12 @@ export effect function fileAction(operation: DeviceOperation, call: ExecutorCall
     if (review === undefined) return notShown
     return try openReviewedFile(review, try (try Answers).next(), current)
   }
+  if (operation.type === "files_filter") return try filterFiles(operation, current)
   const shown = try (try Browser.Machine).get()
   if (!shown.open || shown.trash || !Browser.allowed(shown)) return notShown
-  const folder = Browser.here(shown)
   const answers = try Answers
   const request = try answers.next()
   switch (operation.type) {
-    case "files_filter": {
-      const { kind, text, from, to, folder: path } = operation
-      const wanted = kind === undefined ? undefined : kinds[kind]
-      if (kind !== undefined && wanted === undefined) return unsupported
-      if (path !== undefined && !(folder === 0 && path === "" && !shown.inCategory) && !(try primaryAt(folder, path))) return notShown
-      const first = from === undefined ? everything.from : Math.max(everything.from, filterTime(from))
-      const last = to === undefined ? everything.to : filterTime(to, true)
-      if (!Number.isSafeInteger(first) || !Number.isSafeInteger(last)) return unsupported
-      const filtered = try agentFilter(request, { text: text ?? "", kind: wanted ?? "Other", anyKind: wanted === undefined, from: first, to: last }, false)
-      return filtered.ok ? applied : notShown
-    }
     case "files_folder_create": {
       const parent = review?.parent
       if (parent === undefined || parent.path !== operation.parent || review?.where === undefined || !(try promise(current))) return unchanged

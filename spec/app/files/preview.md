@@ -32,6 +32,7 @@ type Actor = Owner | Phone
 type Kind = Pdf | Photo | Media | Archive | Receipt | Text
 type Why = Fine | Locked | TooLarge | TooSlow | Unsealed
 type Seen = { item: int, revision: int }
+type StorageAction = MoveFile | TrashFile | RenameFile
 type Preview = {
   viewer: int, viewers: int, item: int, kind: Kind, revision: int, reachable: bool, siblings: List[str],
   content: R::Read, playing: bool, secret: bool,
@@ -65,6 +66,8 @@ type Effect =
   | AskAlpha({ item: int })
   | Transcribe({ item: int })
   | OpenElsewhere({ item: int, revision: int, writable: bool })
+  | ShareFile({ viewer: int, item: int, revision: int })
+  | ActOnStoredFile({ viewer: int, item: int, revision: int, action: StorageAction, name: str })
   | Lost({ item: int })
   | SelectAgain({ item: int })
   | Forget({ item: int })
@@ -87,6 +90,7 @@ pure val ticketValues = Set(1, 2, 3, 4)
 pure val revisionValues = Set(1, 2)
 pure val accountValues = Set(1, 2)
 pure val siblingsValues = Set(List(), List("a"))
+pure val nameValues = Set("", "b", "c")
 ```
 
 ### Showing a file opens a new viewer, closing the one before, and reads it for that viewer
@@ -261,8 +265,9 @@ pure def sometimesAPhotoCouldNotBeRead(s: Preview): bool = s.content.status == R
 
 ## Story: Act on the file I am looking at
 
-> As the owner, I want to ask Alpha about it, rename it in Files, put it in an email,
-> transcribe a recording into Notes, open it in another app, or forget it.
+> As the owner, I want to see a file's details, share it in Android, ask
+> Alpha about it, rename it in Files, put it in an email, transcribe a
+> recording into Notes, open it in another app, or forget it.
 
 ### Ask Alpha, Transcribe and Open elsewhere hand the file on and change nothing here
 
@@ -281,6 +286,49 @@ pure def canOpenElsewhere(s: Preview, by: Actor): bool = by == Owner and usable(
 
 pure def openElsewhere(s: Preview, by: Actor): Moved =
   { state: s, out: List(OpenElsewhere({ item: s.item, revision: s.revision, writable: false })) }
+```
+
+### The owner can share the readable file shown through Android using its own selected-document grant
+
+Android asks where it goes. A late request cannot share from a later viewer
+or a different revision. The viewer keeps the file and the chooser cannot
+write to it.
+
+```quint
+pure def canShareFile(s: Preview, by: Actor): bool = by == Owner and usable(s)
+
+pure def shareFile(s: Preview, by: Actor): Moved =
+  { state: s, out: List(ShareFile({ viewer: s.viewer, item: s.item, revision: s.revision })) }
+
+pure def stepSharingNamesTheExactPreview(before: Preview, via: str, after: Preview, out: List[Effect]): bool =
+  out.every(e => match e {
+    | ShareFile(x) => via == "shareFile" and usable(before) and x.viewer == before.viewer
+        and x.item == before.item and x.revision == before.revision and after == before
+    | _ => true
+  })
+```
+
+### Rename, Move to and Move to Trash act on the storage-backed preview still showing
+
+A document another provider holds may be shared through its selected grant.
+Only Files can rename, move or bin one of its own entries here. The phone
+opens the exact folder and selection before showing the usual Move to or
+Trash confirmation. A successful rename reopens the same document with
+its new name when that preview is still showing.
+
+```quint
+pure def canActOnStoredFile(s: Preview, action: StorageAction, name: str, stored: bool, by: Actor): bool =
+  by == Owner and usable(s) and stored and (action != RenameFile or F::freeName(name, s.siblings))
+
+pure def actOnStoredFile(s: Preview, action: StorageAction, name: str, stored: bool, by: Actor): Moved =
+  { state: s, out: List(ActOnStoredFile({ viewer: s.viewer, item: s.item, revision: s.revision, action: action, name: name })) }
+
+pure def stepAStoredActionNamesTheExactPreview(before: Preview, via: str, after: Preview, out: List[Effect]): bool =
+  out.every(e => match e {
+    | ActOnStoredFile(x) => via == "actOnStoredFile" and usable(before) and x.viewer == before.viewer
+        and x.item == before.item and x.revision == before.revision and after == before
+    | _ => true
+  })
 ```
 
 ### A file that holds a verification code or another secret is never handed to Ask Alpha

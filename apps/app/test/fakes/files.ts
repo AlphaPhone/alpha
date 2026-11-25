@@ -270,7 +270,11 @@ export function selectedDocuments(scene: FilesScene): Faked {
         scene.opened.push(selectionId);
         return Promise.resolve({ status: "opened", message: "" });
       },
-      shareSelected: () => Promise.resolve({ status: "opened", message: "" }),
+      shareSelected({ selectionId }) {
+        if (!held(selectionId)) return Promise.resolve({ status: "unavailable", message: "" });
+        scene.shared.push([selectionId]);
+        return Promise.resolve({ status: "opened", message: "" });
+      },
       forgetSelected({ selectionId }) {
         scene.forgotten.push(selectionId);
         return Promise.resolve();

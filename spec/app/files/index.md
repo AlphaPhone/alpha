@@ -85,7 +85,7 @@ type Effect =
   | LookInto({ ticket: int, trail: List[int] })
   | AgentLook({ ticket: int, folder: int, filter: S::Filter })
   | Tell({ request: int, ok: bool, items: List[F::Item] })
-  | Perform({ ticket: int, work: C::Work, items: List[F::Item], name: str, folder: int, dest: int, replace: bool })
+  | Perform({ ticket: int, work: C::Work, items: List[F::Item], name: str, folder: int, dest: int, replace: bool, downloads: bool })
   | ToTrash({ items: List[int], approval: int })
   | Show({ item: F::Item, siblings: List[str] })
   | Share({ ticket: int, channel: C::Dest, items: List[F::Item], approval: int })
@@ -128,6 +128,8 @@ pure val weight_openVolume = 40
 pure val weight_openFolder = 10
 pure val weight_listed = 100
 pure val weight_openCategory = 5
+pure val weight_openCategoryGroup = 2
+pure val groupTrailValues = Set(List(1), List(1, 4), List(1, 4, 5))
 pure val weight_toggle = 30
 pure val weight_selectAll = 15
 pure val weight_askToDelete = 20
@@ -156,6 +158,9 @@ pure val approvedItemsValues = Set(List(), List({ id: 2, name: "b", revision: 1,
   List({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0 }, { id: 3, name: "c", revision: 1, kind: F::Document, volume: 1, bytes: 0 }))
 pure val reviewedFromValues = Set(S::top, { trail: List(1, 4), inCategory: false, category: F::Other })
 pure val weight_renameShown = 1
+pure val weight_openPreviewParent = 1
+pure val weight_stagePreviewFile = 1
+pure val parentTrailValues = Set(List(1), List(1, 4))
 pure val weight_refresh = 3
 pure val weight_agentLook = 1
 pure val weight_agentLooked = 100
@@ -368,9 +373,29 @@ pure def canOpenTop(s: Files, by: Actor): bool = by == Owner and allowed(s) and 
 pure def openTop(s: Files, by: Actor): Moved = entered(List(), false, F::Other, { ...s, handed: false })
 
 pure def stepMovingStartsAfresh(before: Files, via: str, after: Files): bool =
-  (via == "openFolder" or via == "openCrumb" or via == "openVolume" or via == "openCategory" or via == "openTop") implies
+  (via == "openFolder" or via == "openCrumb" or via == "openVolume" or via == "openCategory" or via == "openCategoryGroup" or via == "openTop") implies
     (after.items.length() == 0 and after.picked.length() == 0 and not(after.deleting.showing)
       and (atTop(after) or (after.listing.status == R::Loading and after.listing.ticket == before.listing.ticket + 1)))
+```
+
+### Images and Videos show the phone's folder groups with their counts and open the folder chosen
+
+The phone supplies the folder counts with its latest answer, or groups
+the entries that answer actually read. The owner opens a group from that
+answer's ticket. The group opens the full folder at its path, and the
+filter, when used, still shows individual results.
+
+```quint
+pure def grouped(s: Files): bool =
+  s.inCategory and (s.category == F::Image or s.category == F::Video) and not(s.search.searching)
+
+pure def canOpenCategoryGroup(s: Files, groupTrail: List[int], ticket: int, by: Actor): bool =
+  by == Owner and grouped(s) and browse(s) == Showing and s.listing.ticket == ticket
+    and groupTrail.length() > 0 and groupTrail.every(id => id > 0)
+    and s.volumes.some(v => v.id == groupTrail.nthOr(0, 0))
+
+pure def openCategoryGroup(s: Files, groupTrail: List[int], ticket: int, by: Actor): Moved =
+  entered(groupTrail, false, F::Other, { ...s, handed: false })
 ```
 
 ### The top offers the Trash, which shows until the owner goes back or anywhere else
@@ -708,6 +733,28 @@ pure def agentFilter(s: Files, request: int, wanted: S::Filter, guarded: bool, b
   else asking(wanted, request, s)
 ```
 
+### An approved filter for a named folder goes to that folder before it searches
+
+The primary folder path is resolved on the phone. Its filter can replace
+a previous read, but cannot move an open preview, a selection, or a
+change in progress. The owner sees the named folder and the requested
+filter, with one answer for the agent.
+
+```quint
+pure def canAgentFilterAt(s: Files, request: int, wanted: S::Filter, openedTrail: List[int], guarded: bool, by: Actor): bool =
+  by == Agent and request > 0
+
+pure def agentFilterAt(s: Files, request: int, wanted: S::Filter, openedTrail: List[int], guarded: bool, by: Actor): Moved =
+  val safe = s.open and allowed(s) and not(s.trash) and not(guarded) and s.picked.length() == 0 and s.details == 0
+    and not(s.deleting.showing) and not(C::busy(s.change)) and not(C::asking(s.change)) and s.change.panel == 0 and not(s.sheet.open)
+  val known = openedTrail.length() == 0 or (openedTrail.every(i => i > 0) and s.volumes.some(v => v.id == openedTrail.nthOr(0, 0)))
+  if (safe and known) {
+    val there = entered(openedTrail, false, F::Other, { ...s, search: S::clearFilter(s.search), handed: false })
+    val filtered = asking(wanted, request, there.state)
+    { state: filtered.state, out: unanswered({ ...s.search, peeker: 0 }).concat(there.out).concat(filtered.out) }
+  } else { state: s, out: List(Tell({ request: request, ok: false, items: List() })) }
+```
+
 ### The agent opens a file the owner is shown, as listed or found now, when no file is open over Files; otherwise it is told it failed
 
 Whether the preview shows a file is the preview's fact.
@@ -822,12 +869,12 @@ pure def selected(picked: List[int], s: Files): Files =
     sheet: if (picked != s.picked) M::close(s.sheet) else s.sheet,
     deleting: if (s.deleting.showing) V::revise(s.deleting) else s.deleting }
 
-pure def canToggle(s: Files, target: int, by: Actor): bool = by == Owner and browse(s) == Showing and has(s.items, target)
+pure def canToggle(s: Files, target: int, by: Actor): bool = by == Owner and browse(s) == Showing and not(grouped(s)) and has(s.items, target)
 
 pure def toggle(s: Files, target: int, by: Actor): Files =
   selected(if (s.picked.includes(target)) s.picked.select(id => id != target) else s.picked.append(target), s)
 
-pure def canSelectAll(s: Files, by: Actor): bool = by == Owner and browse(s) == Showing and s.items.length() > 0
+pure def canSelectAll(s: Files, by: Actor): bool = by == Owner and browse(s) == Showing and not(grouped(s)) and s.items.length() > 0
 
 pure def selectAll(s: Files, by: Actor): Files = selected(s.items.listMap(i => i.id), s)
 
@@ -920,22 +967,40 @@ pure def alwaysTheSheetKeepsItsRules(s: Files): bool =
 
 ### A change starts from the selection, of the folder showing, into a destination only as the Move to sheet last read it, as Changes allows it
 
+New folder at the top opens the primary storage before showing the name
+form. In Downloads it uses the device's Download directory, creating
+that directory first only if it is missing.
+
 ```quint
-pure def performing(c: C::Change, s: Files): List[Effect] =
+pure def performAt(c: C::Change, s: Files, downloads: bool): List[Effect] =
   if (C::busy(c) and not(C::busy(s.change)))
-    List(Perform({ ticket: c.attempt.id, work: c.work, items: c.items, name: c.name, folder: c.folder, dest: c.dest.folder, replace: c.replace }))
+    List(Perform({ ticket: c.attempt.id, work: c.work, items: c.items, name: c.name, folder: c.folder, dest: c.dest.folder, replace: c.replace, downloads: downloads }))
   else List()
+
+pure def performing(c: C::Change, s: Files): List[Effect] = performAt(c, s, false)
 
 pure def moving(work: C::Work): bool = work == C::MoveTo or work == C::CopyTo
 
+pure def downloadsNewFolder(s: Files, work: C::Work): bool =
+  work == C::NewFolder and s.inCategory and s.category == F::Download and s.volumes.length() > 0
+
+pure def changeParent(s: Files, work: C::Work): int =
+  if (downloadsNewFolder(s, work)) s.volumes.nthOr(0, { id: 0, used: 0, total: 0 }).id else here(s)
+
 pure def canBegin(s: Files, work: C::Work, name: str, by: Actor): bool =
-  by == Owner and browse(s) == Showing and not(s.inCategory) and (not(moving(work)) or M::ready(s.sheet))
-    and C::canBegin(s.change, work, if (work == C::NewFolder) List() else chosen(s), names(s), here(s), name, M::place(s.sheet), 0)
+  by == Owner and browse(s) == Showing and (not(s.inCategory) or downloadsNewFolder(s, work)) and (not(moving(work)) or M::ready(s.sheet))
+    and C::canBegin(s.change, work, if (work == C::NewFolder) List() else chosen(s), names(s), changeParent(s, work), name, M::place(s.sheet), 0)
 
 pure def begin(s: Files, work: C::Work, name: str, by: Actor): Moved =
   val cleared = { ...selected(List(), s), sheet: M::close(s.sheet) }
-  val change = C::begin(cleared.change, work, if (work == C::NewFolder) List() else chosen(s), names(s), here(s), name, M::place(s.sheet), 0)
-  { state: { ...cleared, change: change }, out: performing(change, cleared) }
+  val change = C::begin(cleared.change, work, if (work == C::NewFolder) List() else chosen(s), names(s), changeParent(s, work), name, M::place(s.sheet), 0)
+  { state: { ...cleared, change: change }, out: performAt(change, cleared, downloadsNewFolder(s, work)) }
+
+pure def stepDownloadsFolderOnlyByOwner(before: Files, via: str, after: Files, out: List[Effect]): bool =
+  out.every(e => match e {
+    | Perform(p) => p.downloads implies (via == "begin" and downloadsNewFolder(before, p.work) and p.folder == changeParent(before, p.work))
+    | _ => true
+  })
 
 pure def stepADestinationIsAFolderAsRead(before: Files, via: str, after: Files): bool =
   (via == "begin" and moving(after.change.work) and after.change.attempt.id != before.change.attempt.id) implies
@@ -981,6 +1046,40 @@ pure def stepDestinationFolderKeepsItsSelection(before: Files, via: str, after: 
       }))
 ```
 
+### The storage-backed preview prepares Move to or Trash for the exact file in its loaded folder
+
+Files enters the storage parent the phone verified when it is somewhere
+else. The opening and the selection happen while there is no conflicting
+work. A file is selected only from that reading of its parent, as the phone
+found it. The operations then use Files' destination picker or delete
+confirmation, as if the owner had selected the same listed item.
+
+```quint
+pure def previewActionReady(s: Files): bool =
+  s.open and allowed(s) and not(s.trash) and s.picked.length() == 0 and s.details == 0
+    and not(s.deleting.showing) and not(s.sheet.open) and s.change.panel == 0
+    and not(C::busy(s.change)) and not(C::asking(s.change)) and s.change.sending.outcome != A::Sent
+
+pure def canOpenPreviewParent(s: Files, parentTrail: List[int], by: Actor): bool =
+  by == Phone and previewActionReady(s) and parentTrail.length() > 0 and parentTrail.every(i => i > 0)
+    and s.volumes.some(v => v.id == parentTrail.nthOr(0, 0))
+
+pure def openPreviewParent(s: Files, parentTrail: List[int], by: Actor): Moved =
+  entered(parentTrail, false, F::Other, { ...s, handed: false })
+
+pure def canStagePreviewFile(s: Files, file: F::Item, ticket: int, trashing: bool, by: Actor): bool =
+  by == Phone and browse(s) == Showing and not(s.inCategory) and previewActionReady(s)
+    and s.listing.ticket == ticket and s.items.includes(file) and file.kind != F::Folder
+
+pure def stagePreviewFile(s: Files, file: F::Item, ticket: int, trashing: bool, by: Actor): Moved =
+  val chosen = selected(List(file.id), s)
+  if (trashing) { state: { ...chosen, deleting: V::present(chosen.deleting) }, out: List() }
+  else going(s.trail, chosen)
+
+pure def stepStagingAPreviewSelectsOnlyItsFile(before: Files, via: str, after: Files): bool =
+  via == "stagePreviewFile" implies after.picked.length() == 1 and after.picked.every(id => has(before.items, id))
+```
+
 ### The owner renames the file open in the preview as a change of Files, to a name free among the names beside it
 
 A document another app holds has no names beside it, and that app refuses
@@ -988,7 +1087,7 @@ a name it already holds.
 
 ```quint
 pure def canRenameShown(s: Files, file: F::Item, name: str, siblings: List[str], by: Actor): bool =
-  by == Owner and C::canBegin(s.change, C::Rename, List(file), siblings, 0, name, C::nowhere, 0)
+  by == Owner and s.open and allowed(s) and not(s.trash) and C::canBegin(s.change, C::Rename, List(file), siblings, 0, name, C::nowhere, 0)
 
 pure def renameShown(s: Files, file: F::Item, name: str, siblings: List[str], by: Actor): Moved =
   val change = C::begin(s.change, C::Rename, List(file), siblings, 0, name, C::nowhere, 0)
