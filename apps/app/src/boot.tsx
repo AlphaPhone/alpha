@@ -20,9 +20,9 @@ import { back, taking } from "./shell/shell.vibe";
 /** Alpha over `platform`: one root runtime of the resident machines, and each screen of `mounts` at its place, loaded when it is first drawn, and contained: one that throws or cannot be loaded stops alone. */
 export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] = every): Alpha {
   const media = Layer.succeed(MediaHandoff, {
-    attach: (file, current) => Effect.promise(async () => {
+    attach: (file, current, suggestion) => Effect.promise(async () => {
       const { default: assistant } = await import("./assistant/index.tsx");
-      return assistant.runtime(alpha).runPromise(stageAttachment(file, current));
+      return assistant.runtime(alpha).runPromise(stageAttachment(file, current, suggestion));
     }).pipe(Effect.catchCause(() => Effect.succeed(false))),
     offerTranscript: (transcript) => Effect.promise(async () => {
       const { default: assistant } = await import("./assistant/index.tsx");

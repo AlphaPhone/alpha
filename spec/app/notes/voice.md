@@ -27,10 +27,13 @@ import review as V from "../../kit/review"
 import note.* from "./note"
 
 type Part = Transcript | Summary | Pin | Unpin
+type Destination = EmailText | SystemShare | CopyText | SaveText
+type ShareNotice = NoShareNotice | Copied | ShareUnavailable
 type VoiceNote = {
   owner: int, note: int, revision: int, opened: int, segments: int, showing: bool,
   listen: R::Read, asked: int, heard: int, deaf: bool, quiet: bool, added: int, review: V::Review,
   summarising: R::Read, upTo: int, summary: int,
+  sharing: bool, handoff: R::Read, shareNotice: ShareNotice,
   writing: A::Attempt, part: Part, writeUpTo: int, play: R::Read, from: int, halting: bool, unconfirmed: bool,
 }
 
@@ -38,6 +41,7 @@ pure val initial: VoiceNote = {
   owner: 0, note: 0, revision: 0, opened: 0, segments: 0, showing: false,
   listen: R::unread, asked: 0, heard: 0, deaf: false, quiet: false, added: 0, review: V::unreviewed,
   summarising: R::unread, upTo: 0, summary: 0,
+  sharing: false, handoff: R::unread, shareNotice: NoShareNotice,
   writing: A::plan(0), part: Transcript, writeUpTo: 0, play: R::unread, from: 0, halting: false, unconfirmed: false,
 }
 
@@ -57,6 +61,7 @@ type Effect =
   | Summarises({ ticket: int, owner: int, note: int, upTo: int })
   | Writes({ ticket: int, owner: int, note: int, base: int, part: Part, upTo: int })
   | AsksAlpha({ owner: int, note: int, revision: int, opened: int, upTo: int })
+  | Shares({ ticket: int, owner: int, note: int, revision: int, opened: int, destination: Destination })
   | Plays({ ticket: int, note: int, from: int, segments: int })
   | Halts({ ticket: int })
 type Moved = { state: VoiceNote, out: List[Effect] }
@@ -73,6 +78,7 @@ pure val heardValues = Set(0, 1)
 pure val summaryValues = Set(0, 1)
 pure val ownerValues = Set(0, 1, 2)
 pure val pinnedValues = Set(false, true)
+pure val destinations = Set(EmailText, SystemShare, CopyText, SaveText)
 pure val fromValues = Set(0, 1)
 pure val ticketValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 pure val weight_transcribed = 3
@@ -97,6 +103,7 @@ pure def openVoice(v: VoiceNote, note: int, revision: int, segments: int, heard:
   { ...v, note: note, revision: revision, opened: v.opened + 1, segments: segments, showing: true,
     listen: dropped(v.listen), asked: heard, heard: heard, deaf: false, quiet: false, added: heard,
     review: V::dismiss(v.review), summarising: dropped(v.summarising), upTo: 0, summary: summary, writeUpTo: 0,
+    sharing: false, handoff: dropped(v.handoff), shareNotice: NoShareNotice,
     play: dropped(v.play), from: 0, unconfirmed: false }
 ```
 
@@ -166,7 +173,7 @@ pure def alwaysTheTranscriptIsAPrefixOfTheAudio(v: VoiceNote): bool =
 ```quint
 pure def canShowTranscript(v: VoiceNote, by: Actor): bool =
   by == Owner and v.showing and v.heard > v.added and not(v.review.showing) and not(busy(v))
-    and v.summarising.status != R::Loading
+    and not(v.sharing) and v.summarising.status != R::Loading
 
 pure def showTranscript(v: VoiceNote, by: Actor): VoiceNote = { ...v, review: V::present(v.review) }
 
@@ -211,6 +218,7 @@ revision when confirmed and leaves its words and audio alone.
 ```quint
 pure def canSetPinned(v: VoiceNote, pinned: bool, by: Actor): bool =
   by == Owner and v.showing and isOwner(v.owner) and not(busy(v)) and not(v.review.showing)
+    and not(v.sharing) and v.handoff.status != R::Loading
     and v.listen.status != R::Loading and v.summarising.status != R::Loading
 
 pure def setPinned(v: VoiceNote, pinned: bool, by: Actor): Moved = write(if (pinned) Pin else Unpin, 0, v)
@@ -321,6 +329,56 @@ pure def sometimesAWriteRefused(v: VoiceNote): bool = v.writing.outcome == A::Re
 pure def sometimesAWriteUnknown(v: VoiceNote): bool = v.writing.outcome == A::Unknown
 ```
 
+## Story: Share the text of a saved voice note
+
+> As the owner, I want to choose where the text of the open voice note goes.
+> The recording remains with its note. Email opens a draft for review.
+
+### Only the owner opens the share panel, chooses one destination, or closes it without handing any text over
+
+The effect carries the opening and revision of the note as it was shown.
+The phone reads that saved revision again before it offers the text to the
+system, clipboard, file chooser or email composer. A closed chooser gives
+no consent to a second destination.
+
+```quint
+pure def canOpenShare(v: VoiceNote, by: Actor): bool =
+  by == Owner and v.showing and isOwner(v.owner) and not(v.sharing) and not(busy(v))
+    and not(v.review.showing) and v.handoff.status != R::Loading
+
+pure def openShare(v: VoiceNote, by: Actor): VoiceNote = { ...v, sharing: true, shareNotice: NoShareNotice }
+
+pure def canCloseShare(v: VoiceNote, by: Actor): bool = by == Owner and v.sharing
+
+pure def closeShare(v: VoiceNote, by: Actor): VoiceNote = { ...v, sharing: false }
+
+pure def canShareText(v: VoiceNote, destination: Destination, by: Actor): bool =
+  by == Owner and v.showing and v.sharing and not(busy(v)) and v.handoff.status != R::Loading
+
+pure def shareText(v: VoiceNote, destination: Destination, by: Actor): Moved =
+  val handoff = R::ask(v.handoff)
+  { state: { ...v, handoff: handoff, sharing: false },
+    out: List(Shares({ ticket: handoff.ticket, owner: v.owner, note: v.note, revision: v.revision,
+      opened: v.opened, destination: destination })) }
+
+pure def canTextShared(v: VoiceNote, ticket: int, notice: ShareNotice, by: Actor): bool =
+  by == Phone and R::canAnswer(v.handoff, ticket)
+
+pure def textShared(v: VoiceNote, ticket: int, notice: ShareNotice, by: Actor): VoiceNote =
+  { ...v, handoff: R::answer(v.handoff, notice != ShareUnavailable), shareNotice: notice }
+
+pure def alwaysShareIsOverTheOwnerNote(v: VoiceNote): bool =
+  v.sharing implies (v.showing and isOwner(v.owner) and not(v.review.showing) and v.handoff.status != R::Loading)
+
+pure def stepOnlyTheShownNoteCanBeShared(before: VoiceNote, via: str, after: VoiceNote, out: List[Effect]): bool =
+  out.every(e => match e {
+    | Shares(s) => via == "shareText" and before.sharing and before.showing and not(after.sharing)
+      and s.owner == before.owner and s.note == before.note and s.revision == before.revision and s.opened == before.opened
+      and s.ticket == after.handoff.ticket
+    | _ => true
+  })
+```
+
 ## Story: Listen to a voice note
 
 > As the owner, I want to play a voice note from the start or from a line of
@@ -412,10 +470,11 @@ A write on its way still lands, and transcription goes on behind.
 pure def canBack(v: VoiceNote): bool = v.showing
 
 pure def back(v: VoiceNote): Moved =
-  if (v.review.showing) { state: { ...v, review: V::dismiss(v.review) }, out: List() }
+  if (v.sharing) { state: { ...v, sharing: false }, out: List() }
+  else if (v.review.showing) { state: { ...v, review: V::dismiss(v.review) }, out: List() }
   else halt(v.play, { ...v, showing: false })
 
-pure def left(v: VoiceNote): Moved = halt(v.play, { ...v, showing: false, review: V::dismiss(v.review) })
+pure def left(v: VoiceNote): Moved = halt(v.play, { ...v, showing: false, sharing: false, handoff: dropped(v.handoff), shareNotice: NoShareNotice, review: V::dismiss(v.review) })
 
 pure def stepLeavingKeepsTheWrite(before: VoiceNote, via: str, after: VoiceNote): bool =
   (via == "back" or via == "left") implies (after.writing == before.writing and after.listen == before.listen)
@@ -433,7 +492,7 @@ pure def canOwnerChanged(v: VoiceNote, owner: int, by: Actor): bool = by == Phon
 
 pure def ownerChanged(v: VoiceNote, owner: int, by: Actor): Moved =
   halt(v.play, { ...initial, owner: owner, opened: v.opened, listen: dropped(v.listen), summarising: dropped(v.summarising),
-    play: v.play, halting: v.halting, unconfirmed: v.unconfirmed, writing: cutOff(v.writing) })
+    handoff: dropped(v.handoff), play: v.play, halting: v.halting, unconfirmed: v.unconfirmed, writing: cutOff(v.writing) })
 
 pure def stepNoAnswerForAFormerOwner(before: VoiceNote, via: str, after: VoiceNote): bool =
   via == "ownerChanged" implies and {
@@ -463,7 +522,7 @@ pure def alwaysTheVoiceNoteIsTheOwners(v: VoiceNote): bool =
 pure def canRestart(v: VoiceNote, by: Actor): bool = by == Phone
 
 pure def restart(v: VoiceNote, by: Actor): VoiceNote =
-  { ...v, showing: false, listen: dropped(v.listen), summarising: dropped(v.summarising), play: dropped(v.play),
+  { ...v, showing: false, sharing: false, handoff: dropped(v.handoff), shareNotice: NoShareNotice, listen: dropped(v.listen), summarising: dropped(v.summarising), play: dropped(v.play),
     halting: false, unconfirmed: false, review: V::dismiss(v.review), writing: cutOff(v.writing) }
 
 pure def stepNoLateAnswerAfterRestart(before: VoiceNote, via: str, after: VoiceNote): bool =
