@@ -102,6 +102,7 @@ export interface DraftSeat { readonly number: number; readonly authority: Archiv
 
 export interface Board {
   draftSeat: DraftSeat | undefined
+  phoneDrafts: { kind: "encrypted" } | { kind: "temporary"; values: Map<string, string> } | undefined
   snapshot(this: void): Seen
   subscribe(this: void, listener: () => void): () => void
   /** The owner typed `text` in the composer's box. */
@@ -201,6 +202,7 @@ export const talk = Layer.effect(Talk, effect {
   }
   const board: Board = {
     draftSeat: undefined,
+    phoneDrafts: undefined,
     snapshot: () => seen,
     subscribe: (listener) => {
       listeners.add(listener)
@@ -335,6 +337,7 @@ export const talk = Layer.effect(Talk, effect {
     numbers.clear()
     position = undefined
     board.draftSeat = next
+    board.phoneDrafts = undefined
     board.outgoing = ""
     board.lastSent = ""
     board.lastSentWire = ""
