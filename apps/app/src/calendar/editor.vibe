@@ -72,6 +72,20 @@ export effect function typed(fields: Fields, edit: Event) {
   try contained(editor.send(edit), "counting an edit of the event")
 }
 
+// spec/app/calendar/editor.md, "Story: Write an event"; spec/app/calendar/editor.md, "The form's edits always build on the revision of the event as last read"
+/** Open the form: a new event blank on `day`, or `row` as last read; a draft set aside is offered back as it was, never replaced unseen. */
+export effect function startForm(edit: Event, day: number, row?: Row) {
+  const editor = try Editor.Machine
+  const state = try editor.get()
+  if (state.banner !== "Available") {
+    const fields: Fields = row === undefined
+      ? blank(day, try (try Time).latest())
+      : { title: row.title, place: row.place, notes: row.notes, begin: row.begin, end: row.end, allDay: row.allDay, people: "" }
+    try ignore(keep(fields, state.owner))
+  }
+  try contained(editor.send(edit), "opening the form")
+}
+
 // spec/app/calendar/editor.md, "A note or a scan opens a new event already filled in, as edits to review, only when no other draft is kept"
 /** Notes or Scan hand Calendar what they read as an event for `day`: kept as the form's draft, for the owner to review and save. */
 export effect function fromNote(fields: Fields, day: number) {
