@@ -34,6 +34,7 @@ export interface SettingsScene {
   grantsHome: boolean;
   readonly opened: string[];
   readonly copied: string[];
+  refusesCopy: boolean;
   passwordsUnlocked: boolean;
   readonly passwords: PasswordEntrySummary[];
   readonly passwordEdits: Array<PasswordEditorInput | undefined>;
@@ -66,7 +67,7 @@ export function settingsScene(): SettingsScene {
     hostFacts: { androidRelease: "16", permissions: { Microphone: false, Calendar: true } },
     passwordsUnlocked: false, passwords: [], passwordEdits: [],
     autofill: { supported: true, selected: "none" }, autofillDestination: "autofill-picker",
-    gate: Promise.resolve(), grantsHome: true, opened: [], copied: [], crashes: [], reset: { status: "cancelled", message: "Nothing was reset." }, reviews: [],
+    gate: Promise.resolve(), grantsHome: true, opened: [], copied: [], refusesCopy: false, crashes: [], reset: { status: "cancelled", message: "Nothing was reset." }, reviews: [],
     networks: [{ ssid: "home", bssid: "00:11:22:33:44:55", rssi: -50, frequency: 2412, capabilities: "[WPA2-PSK-CCMP]", secured: true, security: "wpa2" }],
     joinAnswer: "connected", joins: [], connectivity: { online: true, validated: true, captivePortal: false, ssid: "home" }, consents: [], refusesConsent: false, consentGate: Promise.resolve(),
     carrier: {
@@ -267,6 +268,7 @@ export function settingsHost(scene: SettingsScene) {
   return {
     settingsFacts: () => Promise.resolve(scene.hostFacts),
     copyText: ({ text }: { text: string }) => {
+      if (scene.refusesCopy) return Promise.reject(new Error("Clipboard unavailable"));
       scene.copied.push(text);
       return Promise.resolve();
     },

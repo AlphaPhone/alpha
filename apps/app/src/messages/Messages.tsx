@@ -15,8 +15,9 @@ import { useMachine as useComposer } from "../../gen/app__messages__composer.rea
 import { Time } from "../runtime/time.vibe";
 import { callerInitials, displayNumber, shortWhen } from "../phone/words.ts";
 import { Drafts, attachAll, prepare, sameSubscription, supported } from "./composer.vibe";
-import { Conversations, Inbox, titleOf } from "./messages.vibe";
+import { Conversations, type CopyReport, Inbox, titleOf } from "./messages.vibe";
 import { CommsBar, useCommsDock } from "../phone/CommsBar.tsx";
+import { commsHeld } from "../phone/comms.vibe";
 import type { Resident } from "../runtime/area.tsx";
 import { untimed } from "../runtime/reactor.vibe";
 import { useMachine as useVoice } from "../../gen/app__voice.react.ts";
@@ -62,7 +63,7 @@ function stamp(at: number, now: number): string {
 }
 
 function clearChoice(runtime: MessagesProps["runtime"]) {
-  runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ chosen: "" })));
+  runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ chosen: "", copyRequest: undefined })));
 }
 
 /**
@@ -218,50 +219,100 @@ function PictureGlyph() {
 }
 
 interface BubbleActions {
-  copy?: (() => void) | undefined;
+  copy?: ((report: CopyReport) => void) | undefined;
   remove?: (() => void) | undefined;
 }
 
-const Bubble = memo(function Bubble({ row, now, choose, actions, onOpenLink }: { row: MessageRow; now: number; choose: (id: string) => void; actions?: BubbleActions | undefined; onOpenLink?: MessagesProps["onOpenLink"] }) {
+// spec/app/messages/index.md, "Keep clipboard feedback on the selected message's menu"
+function BubbleMenu({ actions, close }: { actions: BubbleActions; close: () => void }) {
+  const [copy, setCopy] = useState<Parameters<CopyReport>[0] | "pending">();
+  const newest = useRef(0);
+  return (
+    <div data-alpha-sms-actions role="menu" aria-label="Message actions" className={`mt-2 flex max-w-full overflow-x-auto rounded-md bg-secondary p-1${copy === "failed" ? " flex-wrap" : ""}`} onKeyDown={(event) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      close();
+    }}>
+      {actions.copy && <button type="button" role="menuitem" autoFocus className={`${actionItem} min-w-25`} disabled={copy === "pending"} onClick={() => {
+        const attempt = ++newest.current;
+        setCopy("pending");
+        actions.copy?.((outcome) => { if (attempt === newest.current) setCopy(outcome); });
+      }}>{copy === "copied" ? "Copied!" : <><Copy aria-hidden className="size-4" />Copy</>}</button>}
+      {actions.remove && <button type="button" role="menuitem" autoFocus={!actions.copy} className={`${actionItem} text-destructive`} onClick={actions.remove}><Trash2 aria-hidden className="size-4" />Delete</button>}
+      <span role="status" className={copy === "failed" ? "basis-full px-2 pb-1 text-caption text-destructive" : "sr-only"}>{copy === "copied" ? "Copied." : copy === "failed" ? "Copy failed" : ""}</span>
+    </div>
+  );
+}
+
+// spec/app/messages/index.md, "A tap toggles message actions and a stationary hold opens them"
+const Bubble = memo(function Bubble({ row, now, choose, actions, hold, onOpenLink }: { row: MessageRow; now: number; choose: (id: string, toggle?: boolean) => void; actions?: BubbleActions | undefined; hold: (held: () => void) => () => void; onOpenLink?: MessagesProps["onOpenLink"] }) {
   const triggerRef = useRef<HTMLDivElement>(null);
-  const pointerRef = useRef<{ x: number; y: number; at: number } | null>(null);
+  const pointerRef = useRef<{ id: number; x: number; y: number; cancel: () => void } | undefined>(undefined);
+  const skipTap = useRef(false);
+  const release = useCallback(() => {
+    pointerRef.current?.cancel();
+    pointerRef.current = undefined;
+  }, []);
+  const trigger = useCallback((node: HTMLDivElement | null) => {
+    triggerRef.current = node;
+    if (!node) return;
+    return () => { release(); triggerRef.current = null; };
+  }, [release]);
   const complete = "incomplete" in row ? undefined : row;
   const outgoing = complete?.direction === "outgoing";
   const failed = complete?.status === "failed";
   const status = !complete || !outgoing ? "" : failed ? "Not sent" : complete.status === "pending" ? "Sending…" : complete.kind === "sms" && complete.deliveryReport === "complete" ? "Delivered" : complete.status === "sent" ? "Sent" : "";
-  const select = (event: MouseEvent) => {
-    if (event.target instanceof Element && event.target.closest("a")) return;
-    if (document.getSelection()?.isCollapsed === false) return;
-    choose(row.id);
+  const selectable = (event: MouseEvent) => !(event.target instanceof Element && event.target.closest("a")) && document.getSelection()?.isCollapsed !== false;
+  const begin = (event: PointerEvent) => {
+    if (!event.isPrimary || event.button !== 0) return;
+    release();
+    skipTap.current = false;
+    if (!selectable(event)) return;
+    const { pointerId: id, clientX: x, clientY: y } = event;
+    const cancel = hold(() => {
+      if (pointerRef.current?.id !== id || document.getSelection()?.isCollapsed === false) return;
+      skipTap.current = true;
+      choose(row.id);
+    });
+    pointerRef.current = { id, x, y, cancel };
+  };
+  const cancel = (event: PointerEvent) => {
+    if (pointerRef.current?.id !== event.pointerId) return;
+    skipTap.current = true;
+    release();
   };
   const moved = (event: PointerEvent) => {
     const started = pointerRef.current;
-    if (started && Math.hypot(event.clientX - started.x, event.clientY - started.y) > 12) pointerRef.current = null;
+    if (started && Math.hypot(event.clientX - started.x, event.clientY - started.y) > 12) cancel(event);
   };
   const label = complete ? complete.body || "Picture message" : "Use the system messaging app to view this message.";
   return (
     <div className={`flex max-w-[min(17.5rem,100%)] flex-col ${outgoing ? "items-end self-end" : "items-start self-start"}`}>
-      <div ref={triggerRef} data-alpha-message-id={row.id} data-alpha-sms-outgoing={outgoing} role="button" tabIndex={0} aria-label={`Message actions: ${label}`} aria-haspopup="menu" aria-expanded={Boolean(actions)}
+      <div ref={trigger} data-alpha-message-id={row.id} data-alpha-sms-outgoing={outgoing} role="button" tabIndex={0} aria-label={`Message actions: ${label}`} aria-haspopup="menu" aria-expanded={Boolean(actions)}
         className={`flex max-w-full flex-col gap-0.5 rounded-tile focus-visible:outline-2 focus-visible:outline-ring ${outgoing ? "items-end" : "items-start"}`}
-        onClick={select}
+        onClick={(event) => {
+          const suppressed = event.detail !== 0 && skipTap.current;
+          skipTap.current = false;
+          if (!suppressed && selectable(event)) choose(row.id, true);
+        }}
         onContextMenu={(event) => {
-          if (event.target instanceof Element && event.target.closest("a")) return;
+          if (!selectable(event)) return;
           event.preventDefault();
-          select(event);
+          release();
+          skipTap.current = true;
+          choose(row.id);
         }}
-        onPointerDown={(event) => { if (event.pointerType === "touch") pointerRef.current = { x: event.clientX, y: event.clientY, at: event.timeStamp }; }}
+        onPointerDown={begin}
         onPointerMove={moved}
-        onPointerCancel={() => { pointerRef.current = null; }}
-        onPointerUp={(event) => {
-          const started = pointerRef.current;
-          pointerRef.current = null;
-          if (started && event.timeStamp - started.at >= 500) choose(row.id);
-        }}
+        onPointerLeave={cancel}
+        onPointerCancel={cancel}
+        onLostPointerCapture={cancel}
+        onPointerUp={(event) => { if (pointerRef.current?.id === event.pointerId) release(); }}
         onKeyDown={(event) => {
           if (event.target !== event.currentTarget) return;
           if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10") || event.key === "Enter" || event.key === " ") {
             event.preventDefault();
-            choose(row.id);
+            choose(row.id, event.key === "Enter" || event.key === " ");
           }
         }}>
         {!complete ? <p data-alpha-message-body className="rounded-tile bg-secondary px-4 py-2.75 text-body leading-detail text-muted-foreground">{label}</p> : (
@@ -273,17 +324,7 @@ const Bubble = memo(function Bubble({ row, now, choose, actions, onOpenLink }: {
         <span data-alpha-message-meta title={new Date(row.date).toLocaleString()} className="px-1.5 text-2xs text-muted-foreground">{[stamp(row.date, now), status].filter(Boolean).join(" · ")}</span>
         {failed && <CircleAlert className="size-4 text-destructive" role="img" aria-label="Message failed" />}
       </div>
-      {actions && (
-        <div data-alpha-sms-actions role="menu" aria-label="Message actions" className="mt-2 flex max-w-full overflow-x-auto rounded-md bg-secondary p-1" onKeyDown={(event) => {
-          if (event.key !== "Escape") return;
-          event.stopPropagation();
-          choose("");
-          triggerRef.current?.focus();
-        }}>
-          {actions.copy && <button type="button" role="menuitem" autoFocus className={`${actionItem} min-w-25`} onClick={actions.copy}><Copy aria-hidden className="size-4" />Copy</button>}
-          {actions.remove && <button type="button" role="menuitem" autoFocus={!actions.copy} className={`${actionItem} text-destructive`} onClick={actions.remove}><Trash2 aria-hidden className="size-4" />Delete</button>}
-        </div>
-      )}
+      {actions && <BubbleMenu actions={actions} close={() => { choose(""); triggerRef.current?.focus(); }} />}
     </div>
   );
 });
@@ -311,9 +352,16 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink, vie
     resize.observe(element);
     return () => { resize.disconnect(); scrollRef.current = null; };
   }, []);
-  const choose = useCallback((id: string) => {
-    runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ chosen: id })));
-    setSelected(id);
+  const choose = useCallback((id: string, toggle = false) => {
+    const next = runtime.runSync(Effect.flatMap(Inbox, (inbox) => Effect.flatMap(inbox.get(), ({ chosen }) => {
+      const picked = toggle && chosen === id ? "" : id;
+      return picked === chosen ? Effect.succeed(picked) : Effect.as(inbox.set({ chosen: picked, copyRequest: undefined }), picked);
+    })));
+    setSelected(next);
+  }, [runtime]);
+  const hold = useCallback((held: () => void) => {
+    const fiber = runtime.runFork(commsHeld(held));
+    return () => fiber.interruptUnsafe();
   }, [runtime]);
   if (!state || !phone) return null;
   const conversation = runtime.runSync(Effect.flatMap(Conversations, (numbering) => numbering.get(state.thread)));
@@ -322,10 +370,13 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink, vie
   const selectedRow = rows.find((row) => row.id === selected);
   const confirm = { type: "confirmDelete", clear: clear(phone) } as const;
   const actions = selectedRow && !("incomplete" in selectedRow) && content(state) ? state.confirming ? {
-    copy: selectedRow.body ? () => undefined : undefined,
+    copy: selectedRow.body ? (report: CopyReport) => report(undefined) : undefined,
     remove: () => undefined,
   } : {
-    copy: selectedRow.body && can({ type: "copy" }) ? () => { void send({ type: "copy" }); } : undefined,
+    copy: selectedRow.body && can({ type: "copy" }) ? (report: CopyReport) => {
+      runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ copyRequest: { row: selectedRow, report } })));
+      void send({ type: "copy" }).then((result) => { if (result._tag !== "Success") report("failed"); });
+    } : undefined,
     remove: state.smsApp && state.removal.outcome !== "Unknown" && can({ type: "askDelete" }) ? () => {
       const { id, kind, threadId, date } = selectedRow;
       runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ deleteTarget: { id, kind, threadId, date } })));
@@ -349,7 +400,7 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink, vie
           {state.page.status === "Failed" && <p role="status" className="my-2">The conversation could not be read</p>}
           {can({ type: "earlierMessages" }) && <Button className="self-center" size="icon" variant="secondary" aria-label="Older messages" onClick={() => void send({ type: "earlierMessages" })}><ChevronUp className="size-5" /></Button>}
           <div role="log" aria-label="Messages" className="mt-auto flex flex-col gap-1.5">
-            {chronological.map((row) => <Bubble key={row.id} row={row} now={now} choose={choose} actions={row.id === selected && (actions?.copy || actions?.remove) ? actions : undefined} onOpenLink={onOpenLink} />)}
+            {chronological.map((row) => <Bubble key={row.id} row={row} now={now} choose={choose} hold={hold} actions={row.id === selected && (actions?.copy || actions?.remove) ? actions : undefined} onOpenLink={onOpenLink} />)}
           </div>
           {selectedRow && "incomplete" in selectedRow && can({ type: "openElsewhere" }) && <Button size="sm" variant="outline" className="self-start" onClick={() => void send({ type: "openElsewhere" })}>Open in messaging app</Button>}
           <div key={latest} ref={latest ? anchor : undefined} aria-hidden />

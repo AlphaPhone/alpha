@@ -1,4 +1,5 @@
 // spec/app/browser/site.md, "Clearing a site's data needs a loaded site, and runs one at a time"; spec/app/browser/site.md, "Cleared data forgets the answers given to that site; a clearing that fails forgets nothing"
+import type { BrowserPageBinding } from "@elizaos/os-bridges"
 import { Machine as Tabs } from "../../gen/app__browser.effect.vibe"
 import * as Site from "../../gen/app__browser__site.effect.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
@@ -8,7 +9,8 @@ import { TabHost, hosted } from "../platform/browser.vibe"
 import { answer, contained, reacting, run } from "../runtime/reactor.vibe"
 import { idOf } from "./browser.vibe"
 
-type Clearing = { readonly ticket: number; readonly id: string; readonly url: string; readonly host: string }
+export type SitePage = BrowserPageBinding & { readonly host: string }
+type Clearing = SitePage & { readonly ticket: number }
 
 /** The number the site state knows each site by, and the page a clearing was asked for. */
 export service SiteRows {
@@ -39,7 +41,7 @@ const rows = Layer.effect(SiteRows, effect {
 })
 
 /** The site of the page shown, while it is a page that loaded: its host and its page, or none. */
-export effect function siteShown(): ({ host: string; id: string; url: string } | undefined)!!(Tabs | TabHost) {
+export effect function siteShown(): (SitePage | undefined)!!(Tabs | TabHost) {
   const tabs = try (try Tabs).get()
   const host = try TabHost
   if (Option.isNone(host.plugin)) return undefined
@@ -47,33 +49,38 @@ export effect function siteShown(): ({ host: string; id: string; url: string } |
   const binding = host.session.pageBinding(id)
   const info = host.session.info(id)
   const url = binding === undefined ? undefined : URL.parse(binding.url)
-  if (url === null || url === undefined || url.hostname === "" || (info?.error ?? "") !== "") return undefined
-  return { host: url.hostname, id, url: url.href }
+  if (binding === undefined || url === null || url === undefined || url.hostname === "" || (info?.error ?? "") !== "") return undefined
+  return { ...binding, host: url.hostname }
+}
+
+effect function stillShown(reviewed: SitePage): boolean!!(Tabs | TabHost | Shell) {
+  if (!showing(try (try Shell).get(), "Browser")) return false
+  const shown = try siteShown()
+  return shown?.id === reviewed.id && shown.url === reviewed.url && shown.navigation === reviewed.navigation && shown.revision === reviewed.revision
 }
 
 /** Clear what the site shown keeps, once the owner reviewed it: its cookies, stored data and the answers given to it. */
-export effect function clearSiteShown(): boolean!!(Site.Machine | SiteRows | Tabs | TabHost | Shell | Toasts | Said) {
-  if (!showing(try (try Shell).get(), "Browser")) return false
-  const shown = try siteShown()
-  if (shown === undefined) {
-    try say("Load a website before clearing its data.", true)
+export effect function clearSiteShown(reviewed: SitePage): boolean!!(Site.Machine | SiteRows | Tabs | TabHost | Shell | Toasts | Said) {
+  if (!(try stillShown(reviewed))) {
+    try say("The page changed. Review the site again before clearing its data.", true)
     return false
   }
   const machine = try Site.Machine
   const site = try SiteRows
-  const origin = try site.origin(shown.host)
+  const origin = try site.origin(reviewed.host)
   const s = try machine.get()
   if (!Site.canClearSite(s, origin, true)) return false
-  try site.prepare({ ticket: s.clear + 1, ...shown })
+  try site.prepare({ ticket: s.clear + 1, ...reviewed })
   return try contained(machine.send({ type: "clearSite", origin, loaded: true }), "clearing a site's data")
 }
 
-effect function clearing(ticket: number): Site.Event!!(SiteRows | TabHost | Toasts | Said) {
+effect function clearing(ticket: number): Site.Event!!(SiteRows | TabHost | Tabs | Shell | Toasts | Said) {
   const failed: Site.Event = { type: "cleared", ticket, ok: false }
   const asked = try (try SiteRows).take(ticket)
-  if (asked === undefined) return failed
+  if (asked === undefined || !(try stillShown(asked))) return failed
+  const guard = (try TabHost).session.guard(asked)
   const cleared = effect {
-    const result = try hosted("clearSiteData", (plugin, session) => plugin.clearSiteData({ session, id: asked.id, url: asked.url }))
+    const result = try hosted("clearSiteData", (plugin) => plugin.clearSiteData(guard))
     return result.site || asked.host
   } catch () => undefined
   try say(cleared === undefined ? `Could not clear data for ${asked.host}.` : `Cleared ${cleared}`, cleared === undefined)

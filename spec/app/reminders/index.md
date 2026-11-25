@@ -28,7 +28,7 @@ import undo as U from "../../kit/undo"
 import recurrence.* from "./recurrence"
 
 type SmartView = TodayView | ScheduledView | AllView | FlaggedView | OverdueView | CompletedView
-type ActiveView = Smart({ view: SmartView }) | CustomList({ listId: int })
+type ActiveView = Overview | Smart({ view: SmartView }) | CustomList({ listId: int })
 type SortKey = SortDue | SortPriority | SortTitle | SortCreated
 type Priority = NoPriority | LowPriority | MediumPriority | HighPriority
 type DeleteMode = ReassignToDefault | CascadeItems
@@ -123,7 +123,7 @@ pure val initial: Reminders = {
   items: List(),
   nextItemId: 1,
   hiddenId: 0,
-  view: Smart({ view: TodayView }),
+  view: Overview,
   sort: SortDue,
   filter: defaultFilter,
   searchOpen: false,
@@ -196,6 +196,10 @@ pure def canSelectCustomList(s: Reminders, listId: int): bool =
 pure def selectCustomList(s: Reminders, listId: int): Reminders =
   { ...s, view: CustomList({ listId: listId }), selectedId: 0 }
 
+pure def canShowLists(s: Reminders): bool = s.view != Overview
+
+pure def showLists(s: Reminders): Reminders = { ...s, view: Overview, selectedId: 0 }
+
 pure def canSetSort(s: Reminders, sort: SortKey): bool = sort != s.sort
 
 pure def setSort(s: Reminders, sort: SortKey): Reminders = { ...s, sort: sort }
@@ -223,7 +227,18 @@ pure def setToday(s: Reminders, day: int): Reminders = { ...s, today: day }
 
 pure def canFrontChanged(s: Reminders, front: bool): bool = front != s.front
 
-pure def frontChanged(s: Reminders, front: bool): Reminders = { ...s, front: front }
+pure def frontChanged(s: Reminders, front: bool): Reminders =
+  if (front) { ...s, front: true } else { ...s, front: false, view: Overview, searchOpen: false, selectedId: 0 }
+```
+
+### Back from an open list returns to the overview before leaving Reminders, and leaving the app resets the overview
+
+```quint
+pure def stepBackShowsLists(before: Reminders, via: str, after: Reminders): bool =
+  via == "showLists" implies (before.view != Overview and after.view == Overview and after.selectedId == 0)
+
+pure def stepLeavesOverview(before: Reminders, via: str, after: Reminders): bool =
+  (via == "frontChanged" and not(after.front)) implies (after.view == Overview and not(after.searchOpen) and after.selectedId == 0)
 ```
 
 ### Creating, renaming and deleting custom lists protects the default Reminders list and keeps every item in a valid list
@@ -264,7 +279,7 @@ pure def deleteList(s: Reminders, listId: int, mode: DeleteMode): Moved =
   }
   val curView = s.view
   val nextView = match curView {
-    | CustomList(c) => if (c.listId == listId) Smart({ view: AllView }) else curView
+    | CustomList(c) => if (c.listId == listId) Overview else curView
     | _ => curView
   }
   val nextSelected = if (s.selectedId != 0 and hasItem(nextItems, s.selectedId)) s.selectedId else 0
@@ -531,7 +546,7 @@ pure def reopen(s: Reminders): Moved =
   val settledWrite = if (writing(s)) A::conclude(s.write, false, false) else s.write
   val fetchOut = if (s.sync.status == R::Loading) List(SyncFetch({ ticket: s.sync.ticket })) else List()
   val wakeOut = if (undoHeld(s)) List(WakeUndo({ at: s.undo.until })) else List()
-  { state: { ...s, front: false, write: settledWrite }, out: fetchOut.concat(wakeOut) }
+  { state: { ...s, front: false, view: Overview, searchOpen: false, selectedId: 0, write: settledWrite }, out: fetchOut.concat(wakeOut) }
 ```
 
 ### The default list always exists, every item belongs to a valid list, timing rules hold, and ids remain unique and below the next id

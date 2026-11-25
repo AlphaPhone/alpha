@@ -114,6 +114,39 @@ describe("Workflows", () => {
     });
   });
 
+  it('Reviews the exact prompt before changing whether its schedule runs (spec/app/workflows/automations.md, "Turning a prompt on or off, removing an automation, and running it now require confirmation of the row and action shown")', async () => {
+    const world = scene();
+    const alpha = await openWorkflows(world);
+    const area = workflows.runtime(alpha);
+    await until(alpha, area, Listing, (state) => state.list.status === "Loaded" && state.complete);
+    await choose("Desk check");
+    await until(alpha, area, Automations, (state) => state.present && state.list.status === "Loaded");
+    const toggle = "Turn Desk check on or off";
+
+    await press(toggle);
+    expect(document.querySelector('[aria-label="Review workflow action"]')?.textContent).toContain('Pause “Desk check”?');
+    expect(world.workflows.promptEdits).toEqual([]);
+    await press("Cancel");
+    expect(document.querySelector('[aria-label="Review workflow action"]')).toBeNull();
+    expect(button(toggle)?.getAttribute("aria-checked")).toBe("true");
+    expect(world.workflows.promptEdits).toEqual([]);
+
+    await press(toggle);
+    await press("Confirm Pause");
+    await until(alpha, area, Automations, (state) => state.change.attempt.outcome === "Confirmed" && state.list.status === "Loaded" && !state.on);
+    expect(world.workflows.promptEdits).toEqual([{ enabled: false, expectedRevision: 1 }]);
+    expect(world.workflows.prompts.get("desk-check")).toMatchObject({ enabled: false, revision: 2 });
+
+    await press(toggle);
+    const changed = world.workflows.prompts.get("desk-check");
+    if (changed === undefined) throw new Error("No Desk check prompt");
+    world.workflows.prompts.set("desk-check", { ...changed, instructions: "Edited elsewhere", revision: 3 });
+    await press("Confirm Enable");
+    await until(alpha, area, Automations, (state) => state.change.attempt.outcome === "Refused");
+    expect(world.workflows.promptEdits).toEqual([{ enabled: false, expectedRevision: 1 }, { enabled: true, expectedRevision: 2 }]);
+    expect(world.workflows.prompts.get("desk-check")).toMatchObject({ enabled: false, instructions: "Edited elsewhere", revision: 3 });
+  });
+
   it('Keeps the saved schedule while editing prompt instructions (spec/app/workflows/automations.md, "Story: Create or edit an automation on a schedule")', async () => {
     const world = scene();
     const existing = [

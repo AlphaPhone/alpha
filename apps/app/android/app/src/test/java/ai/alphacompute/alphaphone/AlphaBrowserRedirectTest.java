@@ -17,6 +17,8 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.webkit.WebViewRenderProcess;
+import android.widget.Button;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import com.getcapacitor.JSObject;
 import java.lang.reflect.Field;
@@ -101,7 +103,12 @@ public final class AlphaBrowserRedirectTest {
   tab.id = "tab-1";
   tab.web = engine;
   tab.frame = new TabFrame(context, TabLayer.ABOVE_HOST);
+  tab.status = new LinearLayout(context);
   tab.message = new TextView(context);
+  tab.browserRetry = new Button(context);
+  tab.status.addView(tab.message);
+  tab.status.addView(tab.browserRetry);
+  tab.frame.addView(tab.status);
   tabs().put(tab.id, tab);
   client = plugin.tabClient(tab);
  }

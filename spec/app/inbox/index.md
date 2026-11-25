@@ -27,6 +27,13 @@ holds, never more than was read.
 > As the owner, I want the mail of the account, folder and search I chose,
 > and never a list that was read for another.
 
+### Only a card with a positive attachment hint shows a paperclip
+
+A mail row shows and announces that it has attachments when Cloud gave
+the card a positive attachment hint. An older card without a hint and a
+card with a false hint show no paperclip. The row uses the list response.
+Opening the message reads the available attachments.
+
 ### The list is for one account, folder and search, and remembers the last list it showed and the credential it was read under
 
 Account 0 is no account, and credential 0 none. What is kept through a

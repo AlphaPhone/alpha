@@ -4,7 +4,7 @@ import { registered } from "./device.vibe"
 
 module held {
   import { calendarClient, calendarPlugin } from "@elizaos/os-bridges"
-  import type { AndroidCalendarEditorFields, CalendarClient } from "@elizaos/os-bridges"
+  import type { AndroidCalendarEditorFields, AndroidCalendarHandoffEvent, CalendarClient } from "@elizaos/os-bridges"
   import { rendererDeletionClock } from "@elizaos/os-bridges"
 
   /** How long, by the clock eliza's deletion window keeps, until `expiresElapsed`. @throws {never} */
@@ -21,8 +21,10 @@ module held {
     checkPermissions(): Promise<{ calendar: string }>
     open(input: { id: string; begin?: number; end?: number }): Promise<{ status: string }>
     save(input: AndroidCalendarEditorFields & { calendarId: string; creationId: string; separateCreation: boolean }): Promise<{ status: string; id?: string }>
+    saveOptions(input: { event: OptionEvent; calendarId: string; creationId: string; separateCreation: boolean }): Promise<{ status: string; id?: string }>
     pendingCreations(): Promise<{ status: string; creations?: ReadonlyArray<{ creationId: string; status: string }> }>
   }
+  export type OptionEvent = Omit<AndroidCalendarHandoffEvent, "attendees" | "alerts"> & { timeZone: string }
 
   let made: CalendarClient | undefined
   /** eliza's client of the calendar plugin, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
@@ -35,7 +37,7 @@ module held {
     return (plugin ??= calendarPlugin() as unknown as Creations)
   }
 }
-import { type Creations, client, creations, untilElapsed } from held
+import { type Creations, type OptionEvent, client, creations, untilElapsed } from held
 
 /** The phone's calendar could not be read or written: the plugin refused, or did not answer. */
 export error CalendarUnread { cause: unknown }
@@ -48,6 +50,9 @@ export interface Written {
   readonly confirmed: boolean
   readonly known: boolean
 }
+
+/** A timed occurrence uses the basic native save; all-day and repeating events use Android's option fields. */
+export type CalendarCreation = { kind: "Timed"; event: AndroidCalendarEditorFields } | { kind: "Options"; event: OptionEvent }
 
 /** What the phone's review of a deletion found: staged, with how many milliseconds its Undo window has left; for Android Calendar to review; changed since it was read; or refused. */
 export type Staged = { readonly kind: "ready"; readonly window: number } | { readonly kind: "editor" } | { readonly kind: "conflict" } | { readonly kind: "refused" }
@@ -69,7 +74,7 @@ export service PhoneCalendar {
   requestAccess(): boolean!CalendarUnread
   open(id: string, begin: number, end: number): void!CalendarUnread
   handOff(event: AndroidCalendarHandoffEvent): boolean!CalendarUnread
-  create(fields: AndroidCalendarEditorFields, creationId: string, separate: boolean): Written!!
+  create(creation: CalendarCreation, creationId: string, separate: boolean): Written!!
   created(creationId: string): boolean!CalendarUnread
   update(pick: CalendarPick, fields: AndroidCalendarEditorFields): Written!!
   /** Stage the deletion through the phone's review, which inspects the event as it is now. */
@@ -100,8 +105,9 @@ export const phoneCalendar = Layer.sync(PhoneCalendar, () => {
     requestAccess: () => tryPromise({ try: async () => (await client().requestAccess()).status === "granted", catch: (cause) => new CalendarUnread({ cause }) }),
     open: (id: string, begin: number, end: number) => tryPromise({ try: async () => { await native().open({ id, begin, end }) }, catch: (cause) => new CalendarUnread({ cause }) }),
     handOff: (event: AndroidCalendarHandoffEvent) => tryPromise({ try: async () => (await client().insertHandoff(event)).outcome === "Opened", catch: (cause) => new CalendarUnread({ cause }) }),
-    create: (fields: AndroidCalendarEditorFields, creationId: string, separate: boolean) => Effect.orElseSucceed(tryPromise(async (): Promise<Written> => {
-      const { status } = await native().save({ ...fields, calendarId: "local", creationId, separateCreation: separate })
+    create: (creation: CalendarCreation, creationId: string, separate: boolean) => Effect.orElseSucceed(tryPromise(async (): Promise<Written> => {
+      const destination = { calendarId: "local", creationId, separateCreation: separate }
+      const { status } = await (creation.kind === "Options" ? native().saveOptions({ ...destination, event: creation.event }) : native().save({ ...destination, ...creation.event }))
       return status === "saved" ? { confirmed: true, known: true } : status === "unknown" ? lost : refused
     }), () => lost),
     created: (creationId: string) => tryPromise({

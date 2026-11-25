@@ -4,13 +4,14 @@ import * as Reminders from "../../gen/app__reminders.effect.vibe"
 import type { DeleteMode, Effect as Out, Event } from "../../gen/app__reminders.effect.vibe"
 import * as Alerts from "../../gen/app__reminders__alerts.effect.vibe"
 import * as Editor from "../../gen/app__reminders__editor.effect.vibe"
+import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
 import { Said, offer, say, withdraw } from "../notices/toasts.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { PhoneReminders } from "../platform/reminders.vibe"
 import { ask, attempted, attemptedWith } from "../platform/remote.vibe"
 import { type Attempts, fresh } from "../runtime/attempts.vibe"
-import { type Job, answer, applying, contained, due, reacting, started, stop, together, untimed } from "../runtime/reactor.vibe"
+import { type Job, answer, applying, contained, due, hearing, reacting, started, stop, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { alertBannerStore, reminderAlerts, syncAlertsWithSnapshot } from "./alerts.vibe"
 import {
@@ -704,8 +705,15 @@ const desk = reacting(Reminders, {
   timers,
 })
 
+// spec/app/reminders/index.md, "Back from an open list returns to the overview before leaving Reminders, and leaving the app resets the overview"
+const showing = Stream.unwrap(effect {
+  return Stream.changes(Stream.map((try Shell.Machine).changes, (shell) => Shell.showing(shell, "Reminders")))
+})
+
+const fronted = hearing(showing, Reminders.Machine, (front): Event => ({ type: "frontChanged", front }))
+
 /** Resident Reminders layer (desk, due-time alerting, draft editor, and local/agent hydration), ready for `resident.vibe`. */
-export const remindersResident = together(desk, reminderAlerts, reminderEditor, hydrated, undoToastsEndWithTheirHold)
+export const remindersResident = together(desk, reminderAlerts, reminderEditor, hydrated, undoToastsEndWithTheirHold, fronted)
 
 /** Machines required by the Reminders area screen. */
 export type RemindersMachines = Reminders.Machine | Alerts.Machine | Editor.Machine

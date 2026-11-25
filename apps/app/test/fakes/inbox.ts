@@ -89,14 +89,15 @@ function today(hour: number, minute: number, days = 0): number {
 
 /** A file a message carries, as Gmail reads it. */
 const file = (partId: string, name: string, size: number): Stored["files"][number] => ({ partId, name, mimeType: "application/pdf", size, supported: true });
+const withFiles = (message: Stored, files: Stored["files"]): Stored => ({ ...message, card: { ...message.card, hasAttachments: true }, files });
 
 /** Develop's fixture mailbox: seven messages in Inbox, newest unread first, one in Spam and one sent. */
 export function inboxScene(): InboxScene {
   return {
     google: { email: "you@gmail.example", connection: "grant-1", capabilities: everything },
     mail: [
-      { ...letter(1, "Revised term sheet", ["INBOX", "UNREAD"], "Hi,\n\nAttached is the revised term sheet. We moved on the pro-rata and tightened the board language as discussed.\n\nNeed your eyes by Friday so we can get it to counsel. Happy to walk through it on our 4:30.\n\nJordan", "Jordan Park <jordan@northpoint.example>", today(13, 12)), files: [file("1", "Term sheet v3.pdf", 212_000)] },
-      { ...letter(2, "Notes for the 3:00 review", ["INBOX", "UNREAD"], "Notes for this afternoon attached. Pages 6 to 9 are the new onboarding flow, that's where I'd love your call.\n\nMaya", "Maya Chen <maya@lumen.example>", today(12, 48)), files: [file("1", "Design review notes.pdf", 1_100_000)] },
+      withFiles(letter(1, "Revised term sheet", ["INBOX", "UNREAD"], "Hi,\n\nAttached is the revised term sheet. We moved on the pro-rata and tightened the board language as discussed.\n\nNeed your eyes by Friday so we can get it to counsel. Happy to walk through it on our 4:30.\n\nJordan", "Jordan Park <jordan@northpoint.example>", today(13, 12)), [file("1", "Term sheet v3.pdf", 212_000)]),
+      withFiles(letter(2, "Notes for the 3:00 review", ["INBOX", "UNREAD"], "Notes for this afternoon attached. Pages 6 to 9 are the new onboarding flow, that's where I'd love your call.\n\nMaya", "Maya Chen <maya@lumen.example>", today(12, 48)), [file("1", "Design review notes.pdf", 1_100_000)]),
       letter(3, "Dinner Friday?", ["INBOX", "UNREAD"], "We're doing tacos at ours on Friday around 7. Bring nothing but yourself. Sam's coming too.\n\nL", "Lena Ruiz <lena@ruiz.example>", today(9, 30)),
       letter(4, "Standup notes", ["INBOX"], "Quick notes from standup:\n\n- Build 0.9 goes to beta testers Thursday\n- Redaction eval is green on all devices\n- Maya owns the onboarding copy\n\nSam", "Sam Okafor <sam@okafor.example>", today(9, 48)),
       letter(5, "Reservation confirmed · Oct 2", ["INBOX"], "Your reservation for 8 × H200 on October 2, 09:00 to 21:00 PT is confirmed.\n\nReference GR-20417.", "GPU Reserve <no-reply@gpureserve.example>", today(9, 5)),

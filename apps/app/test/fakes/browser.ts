@@ -36,7 +36,9 @@ export interface BrowserScene {
   /** Every call the page made, by method. */
   readonly calls: string[];
   readonly shared: BrowserPageGuard[];
+  readonly handedOff: (BrowserPageGuard & { readonly privateConfirmed?: boolean })[];
   showInFiles: (() => void) | undefined;
+  navigateFromPage?: (id: string, url: string) => void;
 }
 
 /** develop's fixture photographs, served beside the fakes. */
@@ -152,6 +154,7 @@ export function browserScene(): BrowserScene {
     shown: undefined,
     calls: [],
     shared: [],
+    handedOff: [],
     showInFiles: undefined,
   };
 }
@@ -214,6 +217,10 @@ export function alphaBrowser(world: BrowserScene): Faked {
       tab.committed = false;
       told(tab);
       commit(tab, tab.navigation);
+    };
+    world.navigateFromPage = (id, url) => {
+      const tab = world.tabs.get(id);
+      if (tab) go(tab, url);
     };
     const held = (options: { session: string; id: string }) => {
       world.calls.push("tab");
@@ -306,9 +313,14 @@ export function alphaBrowser(world: BrowserScene): Faked {
         draw();
         return Promise.resolve({ closed });
       },
-      clearSiteData: ({ url }) => {
+      clearSiteData: (options) => {
+        const tab = held(options);
+        if (!("navigation" in options) || options.navigation !== String(tab.navigation) ||
+            !tab.committed || tab.loading || options.url !== tab.history[tab.at]) {
+          return Promise.reject(rejection("The reviewed page changed"));
+        }
         world.calls.push("clearSiteData");
-        return Promise.resolve({ site: new URL(url).host });
+        return Promise.resolve({ site: new URL(options.url).host });
       },
       readingSupport: () => Promise.resolve({ available: false }),
       reviewQuestion: () => Promise.reject(rejection("Reading unavailable")),
@@ -332,7 +344,15 @@ export function alphaBrowser(world: BrowserScene): Faked {
         const text = textOf(drawn(options.url)).replace(/\s+/g, " ").trim().slice(0, 6000);
         return Promise.resolve({ url: options.url, title: titleOf(options.url), text, truncated: false });
       },
-      openExternalBrowser: () => Promise.resolve(),
+      openExternalBrowser: (request) => {
+        const tab = held(request);
+        if (world.shown?.id !== tab.id || !tab.committed || tab.loading || request.navigation !== String(tab.navigation) ||
+            request.url !== tab.history[tab.at] || (tab.private && !request.privateConfirmed)) {
+          return Promise.reject(rejection("The page changed"));
+        }
+        world.handedOff.push(request);
+        return Promise.resolve();
+      },
       downloads: ({ session: requested }) => {
         world.calls.push("downloads");
         world.showInFiles = () => {
