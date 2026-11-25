@@ -28,6 +28,10 @@ export interface AttachmentPickerRowView {
   readonly available?: boolean
 }
 
+/**
+ * What the attachment picker shows, as its store's snapshot returns it.
+ * @public
+ */
 export interface AttachmentPickerView {
   readonly visit: number
   readonly ticket: number

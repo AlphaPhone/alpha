@@ -41,7 +41,7 @@ function filesOf(files: readonly Attached[]): { readonly fields: Files; readonly
   }
 }
 
-// spec/app/inbox/sending.md, "The answer to the request in flight ends it; a reply that does not match it, or none, leaves it unknown"
+// spec/app/inbox/sending.md, "The answer to the request in flight ends it; a reply that does not match it, or none, leaves it unknown"; spec/app/inbox/sending.md, "Stars and read state change only for the selected messages reviewed by the owner"
 /** Each message of a change, once, under its own key within the attempt: done only where every one was, known only where every one is. */
 effect function changed(attempt: number, kind: Kind, account: number, messages: ReadonlyArray<number>, revision: number): Event!!(Attempts | Cloud | Mail | Inbox.Machine) {
   if (!(kind in labels)) return { type: "answered", attempt, done: false, matches: true, gmail: 0 }

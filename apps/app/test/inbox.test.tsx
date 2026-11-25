@@ -184,6 +184,37 @@ it("Star and mark the mail I reviewed (spec/app/inbox/sending.md, \"Story: Chang
   expect(world.inbox.changes).toHaveLength(4);
 });
 
+it("Delete the reviewed phone drafts (spec/app/inbox/drafts.md, \"The owner can review and delete selected local drafts on the shelf, at the revisions shown\")", async () => {
+  const world = scene();
+  const first = await openInbox(world);
+  const { alpha } = first;
+  const runtime = inbox.runtime(alpha);
+  await tile("Inbox");
+  await until(alpha, runtime, List, (state) => state.list.status === "Loaded");
+  for (const [at, subject] of ["Notes for Monday", "Dinner arrangements"].entries()) {
+    await press("Compose");
+    await until(alpha, runtime, Writing, (state) => state.open);
+    await write("Subject", subject);
+    await later(alpha, 10);
+    await until(alpha, runtime, Writing, (state) => state.stored && state.letter.revision >= 1 && !state.pending);
+    await press("Back from draft");
+    await until(alpha, runtime, Writing, (state) => !state.open && state.shelf.shelved.length === at + 1);
+  }
+  await menu("Drafts", "More folders");
+  await until(alpha, runtime, List, (state) => state.selected.folder === "DraftsFolder" && state.list.status === "Loaded");
+  await menu("Select drafts", "Mail options");
+  await menu("Select all shown", "Mail options");
+  await menu("Delete drafts", "Mail options");
+  await until(alpha, runtime, Writing, (state) => state.shelfSelection.reviewing && state.shelfSelection.picks.length === 2);
+  expect(document.querySelector("[role=alertdialog]")?.textContent).toEqual(expect.stringContaining("Dinner arrangements"));
+  await confirm("Delete");
+  await until(alpha, runtime, Writing, (state) => state.shelf.shelved.length === 0 && state.shelfSelection.account === 0);
+  expect(world.inbox.changes).toEqual([]);
+  await first.close();
+  const restored = await openInbox(world);
+  await until(restored.alpha, inbox.runtime(restored.alpha), Writing, (state) => state.load.status === "Loaded" && state.shelf.shelved.length === 0);
+}, 90_000);
+
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   it("See my mail (spec/app/inbox/index.md, \"Story: See my mail\"; spec/app/inbox/message.md, \"Story: Ask Alpha about a message\")", async () => {
     const world = { ...scene(), phone };

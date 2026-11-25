@@ -520,10 +520,12 @@ selection that changed before dispatch must be reviewed again.
 ```quint
 pure def checksSelection(kind: Kind): bool = kind == Star or kind == Unstar or kind == MarkRead or kind == MarkUnread
 
-pure def stepLabelChangesUseTheReview(before: Operations, _after: Operations, out: List[Effect]): bool =
+pure def stepLabelChangesUseTheReview(before: Operations, after: Operations, out: List[Effect]): bool =
   out.every(e => match e {
     | Request(r) => checksSelection(r.kind) implies (
-        r.messages.subseteq(before.messages) and before.messages.subseteq(r.messages) and r.messages.size() > 0 and r.revision == before.review.shown and before.approvedBy == Owner
+        r.messages.subseteq(before.messages) and before.messages.subseteq(r.messages)
+          and r.messages.size() > 0 and r.revision == before.review.shown
+          and before.approvedBy == Owner and after.attempt.outcome == A::Sent
       )
     | _ => true
   })

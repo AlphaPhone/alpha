@@ -13,9 +13,9 @@ import { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, due, reacting, run, together, untimed } from "../runtime/reactor.vibe"
 import { externalStore } from "../runtime/store.ts"
 import { Time } from "../runtime/time.vibe"
-import { advanceDueDate, alertInstantMs, dueInstantMs, snoozeTargetMs } from "./recurrence.ts"
+import { alertInstantMs, dueInstantMs, snoozeTargetMs } from "./recurrence.ts"
 import { persistReminderSnapshot } from "./snapshot.vibe"
-import { remindersStore, withReminderCompletion } from "./store.ts"
+import { completeReminderOccurrence, remindersStore } from "./store.ts"
 
 /** Optional native Android reminder alarm bridge wired by the integrator without coupling Reminders to platform internals. */
 export interface NativeRemindersPort {
@@ -125,14 +125,16 @@ effect function cancelNative(item: ReminderItemRecord): void!!PhoneReminders {
 effect function syncBannerAction(
   id: number,
   attemptId: number,
-  mutate: (row: ReminderItemRecord, now: number) => ReminderItemRecord,
+  mutate: (row: ReminderItemRecord, now: number) => ReminderItemRecord | undefined,
   build: (item: ReminderItemRecord, now: number, key: string) => HttpClientRequest.HttpClientRequest,
 ): Event!!(Agent | Time | Attempts) {
   const item = remindersStore.findItemBySpecId(id)
   if (item === undefined) return { type: "syncAnswered", id, attemptId, confirmed: false, known: true }
   const now = try (try Time).now()
+  const changed = mutate(item, now)
+  if (changed === undefined) return { type: "syncAnswered", id, attemptId, confirmed: false, known: true }
   const snap = remindersStore.snapshot().snapshot
-  const updated = snap.items.map((row) => (row.id === item.id ? mutate(row, now) : row))
+  const updated = snap.items.map((row) => (row.id === item.id ? changed : row))
   remindersStore.replace({ ...snap, updatedAtMs: now, items: updated })
   const outcome = try attemptedWith(Agent, (key) => build(item, now, key), attemptId)
   return { type: "syncAnswered", id, attemptId, confirmed: outcome.confirmed, known: outcome.known }
@@ -142,23 +144,7 @@ effect function syncComplete(id: number, attemptId: number): Event!!(Agent | Tim
   return try syncBannerAction(
     id,
     attemptId,
-    (row, now) => {
-      const retained = withReminderCompletion(row, now)
-      if (row.recurrence !== "none" && row.dueDate !== null) {
-        return {
-          ...retained,
-          dueDate: advanceDueDate(row.dueDate, row.recurrence),
-          subtasks: row.subtasks.map((sub) => ({ ...sub, done: false })),
-          completed: false,
-          completedAtMs: null,
-          snoozedUntilMs: null,
-          notifiedAtMs: null,
-          revision: row.revision + 1,
-          updatedAtMs: now,
-        }
-      }
-      return { ...retained, completed: true, completedAtMs: now, snoozedUntilMs: null, revision: row.revision + 1, updatedAtMs: now }
-    },
+    completeReminderOccurrence,
     (item, _now, key) => HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(`/api/alpha/reminders/items/${encodeURIComponent(item.id)}/complete`), { idempotencyKey: key }),
   )
 }
