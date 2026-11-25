@@ -119,8 +119,6 @@ const failures: Readonly<Record<string, Reply.Failure>> = {
   no_provider: "NoProvider",
 }
 
-const fundsCodes = new Map<string, Reply.FundsCode>([["insufficient_credits", "CreditsSpent"], ["allowance_exhausted", "AllowanceSpent"]])
-
 // spec/app/assistant/reply.md, "The settled reply is the whole final answer, shown and spoken, never the acknowledgment"; spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"
 function replied(turn: number, result: TurnResult | undefined): Reply.Event {
   const failed = (said: TurnReply | undefined, code: string): Reply.Event => ({ type: "failed", turn, kind: failures[said?.failureKind ?? code] ?? "OtherFailure" })
@@ -623,7 +621,7 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
       const attachments = key !== undefined && authority !== undefined && currentOwner !== undefined &&
         Attachments.archiveReadAdmitted(authority, currentOwner, one.role === "user", redacted.has(one.id), key) ? saved?.get(key) : undefined
       const failure = one.role !== "assistant" || one.failureKind === undefined ? undefined
-        : Reply.readAgain(failures[one.failureKind] ?? "OtherFailure", fundsCodes.get(one.cloudCode ?? "") ?? "NoFundsCode")
+        : Reply.readAgain(failures[one.failureKind] ?? "OtherFailure", one.cloudCode !== undefined)
       return {
         id: one.id, mine: one.role === "user", text: one.text,
         ...(failure === undefined ? {} : { failure }),

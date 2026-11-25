@@ -240,19 +240,14 @@ pure def lawAWaitIsAtLeastASecond(waitMs: int): bool = waitMs >= 0 implies waitS
 ### Out of funds is refused before any output, is never spoken, and offers only Manage plan
 
 A reply read again from history is out of funds exactly when the agent
-stored Cloud's code with its failure, as a live reply is.
+stored Cloud's code with its failure, whichever code it is, as a live reply is.
 
 ```quint
-type FundsCode = NoFundsCode | CreditsSpent | AllowanceSpent
+pure def readAgain(stored: Failure, coded: bool): Failure = if (coded) OutOfFunds else stored
 
-pure def readAgain(stored: Failure, code: FundsCode): Failure = if (code == NoFundsCode) stored else OutOfFunds
+pure def lawHistoryReadsCloudsCodeAsOutOfFunds(stored: Failure): bool = readAgain(stored, true) == OutOfFunds
 
-pure val codeValues = Set(NoFundsCode, CreditsSpent, AllowanceSpent)
-
-pure def lawHistoryReadsCloudsCodeAsOutOfFunds(stored: Failure, code: FundsCode): bool =
-  code != NoFundsCode implies readAgain(stored, code) == OutOfFunds
-
-pure def lawHistoryWithoutTheCodeKeepsItsKind(stored: Failure): bool = readAgain(stored, NoFundsCode) == stored
+pure def lawHistoryWithoutTheCodeKeepsItsKind(stored: Failure): bool = readAgain(stored, false) == stored
 
 pure def lawOutOfFundsIsNeverSpokenAndManagesThePlan(r: Reply, turn: int): bool =
   canFailed(r, turn, OutOfFunds) implies (failed(r, turn, OutOfFunds).spoken == 0 and failed(r, turn, OutOfFunds).shown == 0 and fixShown(NoFix, OutOfFunds))

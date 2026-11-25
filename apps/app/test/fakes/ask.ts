@@ -46,7 +46,7 @@ const frame = (data: unknown) => encoder.encode(`data: ${JSON.stringify(data)}\n
 /** What ends a turn, as eliza's agent names its messages (`.eliza/packages/agent/src/client/reply-frame.schema.vibe`, `DoneFrame`). */
 const named = (turn: number) => ({ messageId: `m${turn}a`, userMessageId: `m${turn}u`, agentName: "Alpha", actionResults: [] });
 
-function reply(scene: AskScene, room: string, text: string, keep: (said: string, failed?: { failureKind: string; cloudCode?: string }) => void, metadata: unknown): Response {
+function reply(scene: AskScene, room: string, text: string, keep: (said: string) => void, metadata: unknown): Response {
   const custom = scene.nextReplyChunks;
   const provisional = scene.nextReplyProvisional;
   const actions = scene.nextActions?.(metadata) ?? [];
@@ -57,7 +57,6 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string,
     start(controller) {
       controller.enqueue(frame({ type: "status", activity: "thinking" }));
       if (scene.refusal !== undefined) {
-        keep("", { failureKind: scene.refusal.failureKind, ...(scene.refusal.cloudCode === undefined ? {} : { cloudCode: scene.refusal.cloudCode }) });
         controller.enqueue(frame({ type: "done", fullText: "", ...named(scene.said.length), ...scene.refusal }));
         controller.close();
         return;
@@ -139,8 +138,7 @@ export function askRoutes(scene: AskScene): Route[] {
       const found = /^\/api\/conversations\/c(\d+)\/messages(\/stream)?$/.exec(url.pathname);
       if (request.method !== "POST" || !found) return;
       const messages = scene.kept.get(`c${found[1]}`)?.messages ?? [];
-      const keep = (role: "user" | "assistant", text: string, failed?: { failureKind: string; cloudCode?: string }) =>
-        void messages.push({ id: `m${scene.said.length}${role === "user" ? "u" : "a"}`, role, text, ...failed });
+      const keep = (role: "user" | "assistant", text: string) => void messages.push({ id: `m${scene.said.length}${role === "user" ? "u" : "a"}`, role, text });
       return request.json().then((body: { text: string; metadata?: unknown }) => {
         scene.metadata?.push(body.metadata);
         if (body.text !== body.text.trim()) return Response.json({ error: "invalid_message" }, { status: 400 });
@@ -148,7 +146,8 @@ export function askRoutes(scene: AskScene): Route[] {
         scene.said.push(body.text);
         keep("user", body.text);
         Object.assign(messages.at(-1) ?? {}, { clientMessageId: (body as { clientMessageId?: string }).clientMessageId });
-        return reply(scene, `r${found[1]}`, body.text, (said, failed) => keep("assistant", said, failed), body.metadata);
+        if (scene.refusal !== undefined) messages.push({ id: `m${scene.said.length}a`, role: "assistant", text: "", failureKind: scene.refusal.failureKind, ...(scene.refusal.cloudCode === undefined ? {} : { cloudCode: scene.refusal.cloudCode }) });
+        return reply(scene, `r${found[1]}`, body.text, (said) => keep("assistant", said), body.metadata);
       });
     },
     (request, url) => {
