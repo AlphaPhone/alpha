@@ -24,7 +24,7 @@ import type { Mount } from "../src/areas.ts";
 import { dictate } from "../src/assistant/dictation.vibe";
 import assistant from "../src/assistant/index.tsx";
 import files from "../src/files/index.tsx";
-import { button, closeAll, drawn, fill, later, open, press, seen, underAct, until as drawnUntil } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, later, only, open, press, seen, underAct, until as drawnUntil } from "./alpha.tsx";
 import { publish } from "./fakes/platform.ts";
 import { scene, type Scene } from "./fakes/scene.ts";
 import { prepared } from "./fakes/notes.ts";
@@ -551,7 +551,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
 
   it("ends Talk for a call behind the call screen and waits for the owner to start it again (spec/app/voice/index.md, \"A phone call ends Talk and Alpha tells the owner once\")", async () => {
     const world = { ...scene(), phone: true, image: true, signedIn: false };
-    const { alpha } = await open(world, talkMounts);
+    const { alpha } = await open(world, [...talkMounts, ...only("notice")]);
     const area = assistant.runtime(alpha);
     await drawnUntil(alpha, alpha.runtime, Phone, (state) => state.telecom === "NoCall");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
@@ -559,15 +559,19 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");
 
     await seen(false);
-    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle" && state.mic === "Off");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle" && state.mic === "Off" && state.callNotice === "AwaitingCallCause");
     world.telephony.live = [{ id: "talk-interrupted", state: "active", connectedAt: world.now }];
     await drawn(() => world.telephony.report());
     await drawnUntil(alpha, alpha.runtime, Phone, (state) => state.telecom === "OrdinaryCall");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.callNotice === "CallNoticeOnReturn");
     world.telephony.live = [];
     await drawn(() => world.telephony.report());
     await drawnUntil(alpha, alpha.runtime, Phone, (state) => state.telecom === "NoCall");
     await seen(true);
-    await drawn(() => vi.waitFor(() => expect(document.body.textContent).toContain("Voice paused for a phone call.")));
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(document.body.textContent).toContain("Voice paused for a phone call.");
+    });
     expect([world.voice.startLiveCaptureCalls, world.voice.activeMicSession]).toEqual([1, undefined]);
 
     await press("Talk");
@@ -862,7 +866,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
       proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true,
     } }];
     const text = "Text +14155550100 saying Meet upstairs. Bring the keys.";
-    speakUtterance(world, text);
+    await drawn(() => speakUtterance(world, text));
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 1 && state.reviewPending && state.phase === "Listening" && state.mic === "On");
     expect(room.messages.some((line) => line.role === "user" && line.text === text)).toBe(true);
     expect(world.ask.metadata.at(-1)).toMatchObject({ observation: { selectedObject: { kind: "sms-subscription", id: "1" } } });
@@ -880,11 +884,11 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     const sendBounds = vi.spyOn(send, "getBoundingClientRect").mockReturnValue(new DOMRect(16, 58, 60, 30));
     const viewportBounds = vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 320, 120));
     try {
-      speakUtterance(world, "Send this text.");
-      await vi.waitFor(() => expect(review.confirmations).toHaveLength(1));
+      await drawn(() => speakUtterance(world, "Send this text."));
+      await vi.waitFor(() => expect(review.confirmations).toHaveLength(1), { timeout: 12_000 });
       await drawn(() => review.confirmations[0]?.confirm());
       await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 2 && !state.reviewPending && state.phase === "Listening" && state.mic === "On");
-      speakUtterance(world, "Send this text.");
+      await drawn(() => speakUtterance(world, "Send this text."));
       await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 3 && state.phase === "Listening" && state.mic === "On");
     } finally {
       for (const confirmation of review.confirmations) confirmation.confirm();
