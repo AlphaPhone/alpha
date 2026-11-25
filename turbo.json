@@ -3,6 +3,7 @@
   "globalPassThroughEnv": ["QUINT_HOME"],
   "globalDependencies": [
     ".nvmrc",
+    "eliza.lock.json",
     "pnpm-workspace.yaml",
     "tsconfig.base.json",
     "vibestack/*.ts",
