@@ -42,7 +42,10 @@ export const meta: ComponentMeta<AssistantMessageProps> = {
       await userEvent.click(trigger);
       await expect(screen.queryByRole("menuitem", { name: "Edit and resend" })).toBeNull();
       await userEvent.click(await screen.findByRole("menuitem", { name: "Read aloud" }));
-      await waitFor(() => expect([onReadAloud.mock.calls.length, screen.queryByRole("menu"), document.activeElement]).toEqual([1, null, trigger]));
+      await waitFor(() => expect(onReadAloud.mock.calls.length).toBe(1));
+      await expect(screen.getByRole("menuitem", { name: "Read aloud" })).toHaveFocus();
+      await userEvent.keyboard("{Escape}");
+      await waitFor(() => expect([screen.queryByRole("menu"), document.activeElement]).toEqual([null, trigger]));
       await expect(onFork.mock.calls.length).toBe(0);
     },
     "Owner actions": async ({ canvasElement }: { canvasElement: HTMLElement }) => {

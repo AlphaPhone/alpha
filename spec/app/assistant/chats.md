@@ -423,6 +423,10 @@ pure def sometimesAConversationShowsAroundAMessage(c: Chats): bool = c.around > 
 
 ### Read aloud hands a message of Alpha's in the conversation showing to the voice area
 
+The message's actions stay open when choosing Read aloud. While the voice
+area is reading that message, its reading control shows a stop icon and
+is named “Stop reading”. It stops only that reading.
+
 ```quint
 pure def canReadAloud(c: Chats, message: int, mine: bool): bool =
   not(mine) and c.chosen > 0 and 1 <= message and message <= c.messages

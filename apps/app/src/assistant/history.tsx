@@ -17,6 +17,7 @@ export interface MessageActions {
   copy: (selection: MessageSelection) => void;
   useInEmail?: (selection: MessageSelection) => void;
   openLink?: (href: string) => void;
+  reading?: { readonly message: number; readonly stop: () => void };
 }
 
 export function chip(file: Attached): AssistantAttachment {
@@ -69,6 +70,8 @@ export function useMessageRows({ runtime, board, lines, chats, writing, replying
       const quote = { type: "quote", message, recorded } as const;
       const editAgain = { type: "editAgain", message, mine: line.mine, recorded } as const;
       const readAloud = { type: "readAloud", message, mine: line.mine } as const;
+      const reading = actions?.reading;
+      const stopReading = reading !== undefined && reading.message === message && Chats.enabled(chats, readAloud) ? reading.stop : undefined;
       return {
         id: line.id,
         author: line.mine ? "owner" : "alpha",
@@ -90,7 +93,8 @@ export function useMessageRows({ runtime, board, lines, chats, writing, replying
         onUseInEmail: addToEmail && Chats.textForEmail(recorded, blank, line.mine) ? () => addToEmail(selection) : undefined,
         onEditAgain: Composer.enabled(writing, editAgain) ? () => { board.type(line.text); compose(editAgain); } : undefined,
         onOpenLink: actions?.openLink,
-        onReadAloud: canReadAloud && recorded && !blank && Chats.enabled(chats, readAloud) ? () => chat(readAloud) : undefined,
+        onReadAloud: stopReading ?? (canReadAloud && recorded && !blank && Chats.enabled(chats, readAloud) ? () => chat(readAloud) : undefined),
+        readAloudActive: stopReading !== undefined,
         onPreview: onPreview && line.attachments?.length ? (id) => {
           const file = line.attachments?.find((one) => one.id === id);
           if (file) onPreview(file);

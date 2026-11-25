@@ -1,6 +1,6 @@
 /* eslint-disable @eslint-react/no-array-index-key -- A reply's blocks and runs are read from its text in order and never move. */
 import { type ComponentProps, Fragment, type KeyboardEvent, type MouseEvent, type ReactNode, useId, useState } from "react";
-import { AudioLines, Copy, CornerUpLeft, GitBranch, Mail, Pencil } from "lucide-react";
+import { AudioLines, Copy, CornerUpLeft, GitBranch, Mail, Pencil, Square } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { Mark } from "../Mark.tsx";
 import { AssistantAttachmentChip, type AssistantAttachment } from "./AssistantAttachmentChip.tsx";
@@ -29,8 +29,10 @@ export type AssistantMessageProps = Omit<ComponentProps<"article">, "children"> 
   onEditAgain?: () => void;
   /** Takes another conversation from here, with the way back. */
   onFork?: () => void;
-  /** Has Alpha's message read aloud; the voice area reads it. */
+  /** Starts or stops reading Alpha's message aloud. */
   onReadAloud?: () => void;
+  /** The speaker is reading this message. */
+  readAloudActive?: boolean;
   /** Opens an https link in Alpha's message. */
   onOpenLink?: (href: string) => void;
   /** Alpha is still writing it: a mark its last line has not closed is held back. */
@@ -102,7 +104,7 @@ function roam(event: KeyboardEvent<HTMLDivElement>, close: () => void) {
  * action only where it is offered; a link in the text is its own control beside that press, never inside it. Alpha's words are drawn with the model's Markdown (spec/app/assistant/reply.md).
  * @model spec/app/assistant/chats.md
  */
-export function AssistantMessage({ author, text, quote, attachments = [], children, onPreview, onQuote, onCopy, onUseInEmail, onEditAgain, onFork, onReadAloud, onOpenLink, streaming = false, className, ...props }: AssistantMessageProps) {
+export function AssistantMessage({ author, text, quote, attachments = [], children, onPreview, onQuote, onCopy, onUseInEmail, onEditAgain, onFork, onReadAloud, readAloudActive = false, onOpenLink, streaming = false, className, ...props }: AssistantMessageProps) {
   const owner = author === "owner";
   const body = <span className="break-words whitespace-pre-line">{text}</span>;
   const shown = owner ? body : <span className="flex flex-col gap-3 break-words"><ReplyBlocks blocks={replyMarkdown(text, streaming)} onOpenLink={onOpenLink} /></span>;
@@ -154,11 +156,11 @@ export function AssistantMessage({ author, text, quote, attachments = [], childr
             onQuote && { key: "reply", act: onQuote, icon: <CornerUpLeft aria-hidden />, text: "Reply" },
             onCopy && { key: "copy", act: onCopy, icon: <Copy aria-hidden />, text: "Copy", className: "w-25" },
             onUseInEmail && { key: "email", act: onUseInEmail, icon: <Mail aria-hidden />, text: "Email", label: "Use in email" },
-            onReadAloud && { key: "read", act: onReadAloud, icon: <AudioLines aria-hidden />, text: "Read aloud", className: "text-primary" },
+            onReadAloud && { key: "read", act: onReadAloud, icon: readAloudActive ? <Square aria-hidden /> : <AudioLines aria-hidden />, text: "Read aloud", label: readAloudActive ? "Stop reading" : undefined, className: "text-primary" },
             onEditAgain && { key: "edit", act: onEditAgain, icon: <Pencil aria-hidden />, text: "Edit", label: "Edit and resend" },
             onFork && { key: "fork", act: onFork, icon: <GitBranch aria-hidden />, text: "New chat from here" },
           ].filter((item) => item !== undefined).map((item, index) => (
-            <button key={item.key} type="button" role="menuitem" autoFocus={open === "keys" && index === 0} aria-label={item.label} className={cn(actionItem, item.className)} onClick={(event) => pick(event, item.act)}>{item.icon}{item.text}</button>
+            <button key={item.key} type="button" role="menuitem" autoFocus={open === "keys" && index === 0} aria-label={item.label} className={cn(actionItem, item.className)} onClick={item.key === "read" ? item.act : (event) => pick(event, item.act)}>{item.icon}{item.text}</button>
           ))}
         </div>
       ) : null}
