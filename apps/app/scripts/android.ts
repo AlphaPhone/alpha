@@ -243,15 +243,19 @@ export function auditBundle(directory: string): string[] {
   return findings;
 }
 
-/** android/host.json with this checkout's identity, cloud and App Link host. */
-export function hostProfile() {
+/** android/host.json with this checkout's cloud, App Link host and update channel. */
+export function hostProfile(updateManifestUrl: string) {
   const profile = record(readJson(join(android, "host.json")));
   const placeholders = record(profile.manifestPlaceholders);
   const fields = Array.isArray(profile.buildConfigFields) ? profile.buildConfigFields : [];
   return {
     ...profile,
     manifestPlaceholders: { ...placeholders, appLinkHost: production.appLinkHost, signInCallbackPath },
-    buildConfigFields: [...fields, { name: "CLOUD_API_ORIGIN", type: "String", value: production.cloud }],
+    buildConfigFields: [
+      ...fields,
+      { name: "CLOUD_API_ORIGIN", type: "String", value: production.cloud },
+      { name: "ALPHA_UPDATE_MANIFEST_URL", type: "String", value: updateManifestUrl },
+    ],
   };
 }
 
@@ -259,6 +263,7 @@ const MARKER = ".eliza-consumer-host.json";
 
 /** Writes the Gradle host eliza's generator owns beside Alpha's authored sources in android/. */
 export async function generateHost(runtime: string) {
+  const { manifestUrl } = await import("./release.ts");
   const marker = join(android, MARKER);
   if (!existsSync(marker)) writeJson(marker, { schema: 2, output: androidPaths.project, appId: identity.appId, files: [] });
   const version = String(record(readJson(join(app, "package.json"))).version);
@@ -267,7 +272,7 @@ export async function generateHost(runtime: string) {
     dependencyRoot: join(app, "node_modules"),
     output: android,
     identity: { appId: identity.appId, appName: identity.appName, version, versionCode: 1 },
-    profile: hostProfile(),
+    profile: hostProfile(manifestUrl()),
     runtime,
   }));
 }
