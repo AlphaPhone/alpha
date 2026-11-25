@@ -15,7 +15,7 @@ export function CalendarAgendaRow({ time, title, where, className, ...props }: C
     <button type="button" aria-label={[time, title, where].filter(Boolean).join(", ")}
       className={cn(focusRing, "mb-2 box-border flex min-h-12 w-full flex-col gap-1 rounded-md bg-secondary px-4 py-3 text-left wrap-anywhere text-foreground disabled:cursor-default", className)} {...props}>
       <span className="text-meta leading-plain text-muted-foreground">{time}</span>{" "}
-      <strong className="text-body leading-snug">{title}</strong>
+      <strong className="text-body leading-field">{title}</strong>
       {where ? <>{" "}<span className="text-meta leading-plain text-muted-foreground">{where}</span></> : null}
     </button>
   );

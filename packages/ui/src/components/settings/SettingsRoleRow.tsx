@@ -1,6 +1,4 @@
-import { House, Sparkles } from "lucide-react";
-import { ListRow } from "../ListRow.tsx";
-import { SettingsReading } from "./SettingsReading.tsx";
+import { SettingsFactRow } from "./SettingsFactRow.tsx";
 import type { Reading } from "./vocabulary.ts";
 
 export type SettingsRoleRowProps = {
@@ -10,7 +8,7 @@ export type SettingsRoleRowProps = {
   word: "waiting" | "unavailable" | "not-on-this-phone" | "alpha" | "another" | "not-alpha";
 };
 
-const titles = { home: { title: "Home app", icon: <House /> }, assistant: { title: "Assistant", icon: <Sparkles /> } };
+const titles = { home: "Home app", assistant: "Assistant app" };
 
 const readings: Record<SettingsRoleRowProps["word"], Reading> = {
   waiting: { word: "waiting" },
@@ -26,6 +24,5 @@ const readings: Record<SettingsRoleRowProps["word"], Reading> = {
  * @model spec/app/settings/facts.md
  */
 export function SettingsRoleRow({ role, word }: SettingsRoleRowProps) {
-  const { title, icon } = titles[role];
-  return <ListRow title={title} leading={icon} detail={<SettingsReading reading={readings[word]} />} />;
+  return <SettingsFactRow title={titles[role]} reading={readings[word]} />;
 }
