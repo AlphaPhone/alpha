@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { Effect } from "effect";
 import { act } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Chats } from "../gen/app__assistant__chats.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
@@ -309,6 +309,20 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(fourth.alpha, runtime, Chats, (s) => s.chosen > 0 && s.page.status === "Loaded");
     await until(fourth.alpha, runtime, Conversation, (s) => s.turn.reply === "Complete");
     expect([lines(), world.ask.said.at(-1), world.ask.opened]).toEqual([["Hello after restart", "You said: Hello after restart"], "Hello after restart", 2]);
+    await fourth.close();
+
+    // spec/app/assistant/chats.md, "The newest list says which conversations there are, and a conversation no longer listed stops showing"; spec/app/assistant/chats.md, "A new chat holds no conversation's page": a list without the conversation that lands while its 404 is being checked leaves its page behind, and the new chat settles.
+    world.ask.kept.clear();
+    world.ask.kept.set("c7", { roomId: "r7", title: "Lunch", messages: [{ id: "m7", role: "user", text: "Lunch on Friday?" }] });
+    world.ask.holdLists = true;
+    const fifth = await open(world, mounts);
+    runtime = assistant.runtime(fifth.alpha);
+    await vi.waitFor(() => expect(world.ask.heldLists.length).toBe(1));
+    world.ask.holdLists = false;
+    chatsList();
+    await until(fifth.alpha, runtime, Chats, (s) => s.chosen === 0 && s.list.status === "Loaded" && s.page.status === "Idle");
+    expect([document.querySelector("[role=log] [aria-busy]"), document.body.textContent?.includes("Messages did not load")]).toEqual([null, false]);
+    for (const release of world.ask.heldLists.splice(0)) release();
   });
 
   // spec/app/assistant/index.md, "Story: Stop a reply"
