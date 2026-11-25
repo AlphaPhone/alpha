@@ -36,7 +36,7 @@ import { type MediaCard, MediaReview, namedReviewQuery } from "./media-review.vi
 import { Documents } from "../platform/documents.vibe";
 import { AttachmentSources } from "./AttachmentSources.tsx";
 import { askComms, freedom } from "./assistant.vibe";
-import { acceptedFiles, acceptedPhotos, chooseDocument, type FileTarget, insertFiles, previewFile, readChosenDocument, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
+import { acceptedFiles, acceptedPhotos, attachmentAuthority, chooseDocument, type FileTarget, insertFiles, previewFile, readChosenDocument, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
 import { chip, type MessageActions, useHistorySheets, useMessageRows } from "./history.tsx";
 import { ReplyFailure } from "./ReplyFailure.tsx";
 import { type Attached, type Line, Talk } from "./talk.vibe";
@@ -441,9 +441,15 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           onAttach: !onComms && composer.can({ type: "attach", count: 1 }) ? () => {
             const request = { type: "openPicker", room: maxFiles - attachmentCount(writing.editor) } as const;
             if (!attachments.can(request)) return;
-            fileTargetRef.current = { binding: writing.binding, slot: writing.read.ticket, revision: talking.context.revision };
-            openWithFocus(false);
-            void attachments.send(request);
+            void runtime.runPromise(attachmentAuthority()).then((authority) => {
+              if (authority === undefined) {
+                board.change({ attachmentNotice: "Could not verify the owner for these attachments. Try again." });
+                return;
+              }
+              fileTargetRef.current = { binding: writing.binding, slot: writing.read.ticket, revision: talking.context.revision, authority };
+              openWithFocus(false);
+              void attachments.send(request);
+            });
           } : undefined,
           onFocusField: assistantDetent === "Typing" ? undefined : () => openWithFocus(false),
           onHistory: history.browse,

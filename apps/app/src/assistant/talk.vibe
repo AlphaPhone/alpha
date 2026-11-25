@@ -25,6 +25,7 @@ export interface StagedFiles {
   readonly binding: Binding
   readonly key?: string
   readonly files: readonly Attached[]
+  readonly authority?: ArchiveAuthority
   readonly mail?: MailQuestion
   readonly transcript?: TranscriptAttachment
 }
@@ -79,6 +80,7 @@ export interface Seen {
   readonly typed: string
   readonly files: readonly Attached[]
   readonly filesBinding: Binding | undefined
+  readonly filesAuthority: ArchiveAuthority | undefined
   readonly transcript: TranscriptAttachment | undefined
   readonly attachmentNotice: string
   readonly preview: { readonly ticket: number; readonly file: Attached } | undefined
@@ -177,7 +179,7 @@ export const talk = Layer.effect(Talk, effect {
   const listeners = new Set<() => void>()
   let position: { readonly ticket: number; readonly sighting: Sighting } | undefined
   let seen: Seen = {
-    pages: new Map(), reply: "", label: "", failure: undefined, typed: "", files: [], filesBinding: undefined, transcript: undefined, attachmentNotice: "", preview: undefined, media: [], mediaNote: undefined, saved: "", hits: [],
+    pages: new Map(), reply: "", label: "", failure: undefined, typed: "", files: [], filesBinding: undefined, filesAuthority: undefined, transcript: undefined, attachmentNotice: "", preview: undefined, media: [], mediaNote: undefined, saved: "", hits: [],
     titles: new Map(records.map((one, at) => [at + 1, one.title])),
   }
   const keep = () => runFork(ignore(store.set(key, JSON.stringify({ conversations: records.map((one) => ({ id: one.record.id, roomId: one.record.roomId, title: one.title })) }))))
