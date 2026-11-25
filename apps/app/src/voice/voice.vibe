@@ -11,7 +11,7 @@ import { fresh } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, due, hearing, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
 
 const views: ReadonlyArray<Shell.View> = [
-  "Phone", "Messages", "Inbox", "Calendar", "Browser", "Camera", "Photos", "Maps", "Notes", "Contacts", "Files", "Workflows", "Settings",
+  "Phone", "Messages", "Inbox", "Telegram", "Slack", "Calendar", "Browser", "Camera", "Photos", "Maps", "Notes", "Contacts", "Files", "Workflows", "Settings",
 ]
 
 export function placeOf(view: Shell.View | undefined): number {

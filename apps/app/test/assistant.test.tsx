@@ -7,10 +7,12 @@ import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe
 import { Machine as Reply } from "../gen/app__assistant__reply.effect.vibe";
 import { Machine as Search } from "../gen/app__assistant__search.effect.vibe";
 import * as Pages from "../gen/app__settings.effect.vibe";
+import * as Prefs from "../gen/app__settings__preferences.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import type { Mount } from "../src/areas.ts";
 import assistant from "../src/assistant/index.tsx";
-import { button, closeAll, fill, hardware, open, press, underAct, until } from "./alpha.tsx";
+import { MessagingBridge } from "../src/messaging/bridge.vibe";
+import { button, closeAll, drawn, fill, hardware, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -25,7 +27,7 @@ const rows = (list: string) => document.querySelector(`section[aria-label='${lis
 /** Write `text` in the composer, as the owner types it. */
 async function write(text: string) {
   const { act } = await import("react");
-  await act(async () => {
+  act(() => {
     const box = document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']");
     if (!box) throw new Error("no composer");
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(box, text);
@@ -36,12 +38,12 @@ async function write(text: string) {
 /** Open the menu of the message that says `text` and choose `item`, as the owner does with the keyboard. */
 async function onMessage(text: string, item: string) {
   const { act } = await import("react");
-  await act(async () => {
+  act(() => {
     const found = [...document.querySelectorAll("[role=log] article button")].find((one) => one.textContent === text);
     if (!(found instanceof HTMLButtonElement)) throw new Error(`no message ${text}`);
     found.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   });
-  await act(async () => {
+  act(() => {
     const chosen = [...document.querySelectorAll("[role=menuitem]")].find((one) => one.textContent === item);
     if (!(chosen instanceof HTMLElement)) throw new Error(`no ${item} for ${text}`);
     chosen.click();
@@ -51,7 +53,7 @@ async function onMessage(text: string, item: string) {
 /** Open the list of conversations, from the conversation's name. */
 async function chatsList() {
   const { act } = await import("react");
-  await act(async () => {
+  act(() => {
     const found = [...document.querySelectorAll("button")].find((one) => one.getAttribute("aria-label")?.startsWith("Chats, "));
     if (!(found instanceof HTMLButtonElement)) throw new Error("no chats control");
     found.click();
@@ -61,7 +63,7 @@ async function chatsList() {
 /** Click the row of the list named `list` whose text starts with `text`. */
 async function row(list: string, text: string) {
   const { act } = await import("react");
-  await act(async () => {
+  act(() => {
     const found = [...document.querySelectorAll(`section[aria-label='${list}'] button`)].find((one) => one.textContent?.startsWith(text));
     if (!(found instanceof HTMLButtonElement)) throw new Error(`no row ${text} in ${list}`);
     found.click();
@@ -108,6 +110,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await press("Send");
     await until(alpha, runtime, Conversation, (s) => s.turn.send.id === 2 && s.turn.reply === "Complete");
     await until(alpha, runtime, Reply, (s) => s.turn === 2 && s.status === "Settled");
+    await until(alpha, runtime, Composer, (s) => s.away === "Free" && s.draft.sync === "Kept");
     const said = await runtime.runPromise(Effect.flatMap(Reply, (machine) => machine.get()));
     expect([said.acks, said.ackUnits, said.final]).toEqual([1, "Let me look".length, "You said: Again".length]);
     expect(lines()).toEqual(["Hello", "You said: Hello", "Again", "You said: Again"]);
@@ -218,5 +221,87 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Stopped" && s.check !== "Aborting" && s.recheck.status !== "Loading");
     const { check } = await runtime.runPromise(Effect.flatMap(Conversation, (machine) => machine.get()));
     expect([world.ask.turns.size, lines()[0], check === "StoppedForSure" || check === "LookLater"]).toEqual([0, "Take your time", true]);
+  });
+
+  // spec/app/assistant/context.md, "Story: Let my agent see the Telegram or Slack chat I have open"; spec/app/assistant/context.md, "A turn carries bounded Telegram or Slack context only while that app is in front, authenticated, non-sensitive, allowed by Settings' privacy share, and taken by the peer"
+  it("Carries bounded Telegram or Slack context only when authenticated, non-sensitive and allowed, and stages drafts for explicit Send (spec/app/assistant/context.md, \"Story: Let my agent see the Telegram or Slack chat I have open\")", async () => {
+    const world = { ...scene(), phone };
+    const { alpha } = await open(world, mounts);
+    const runtime = assistant.runtime(alpha);
+    const bridge = alpha.runtime.runSync(MessagingBridge);
+    await until(alpha, runtime, Composer, (s) => s.slot === "Open");
+    await until(alpha, runtime, Conversation, (s) => s.ready);
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded");
+
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Telegram" }))));
+    await drawn(() => {
+      bridge.publishContext("Telegram", {
+        platform: "telegram",
+        authenticated: false,
+        sensitive: true,
+        pane: "auth",
+        accountLabel: "",
+        recentMessages: [],
+      });
+    });
+    await until(alpha, runtime, Conversation, (s) => s.context.sensitive && s.context.showing.tag === "App");
+    await write("read my code");
+    expect(button("Send")?.disabled).toBe(true);
+
+    await drawn(() => {
+      bridge.publishContext("Telegram", {
+        platform: "telegram",
+        authenticated: true,
+        sensitive: false,
+        pane: "conversation",
+        accountLabel: "@owner",
+        conversation: { id: "chat-1", title: "Alex", kind: "direct", muted: false, unreadCount: 1 },
+        recentMessages: [{ id: "m1", sender: "Alex", at: 1000, text: "See you at 5", isOwn: false }],
+      });
+    });
+    await until(alpha, runtime, Conversation, (s) => !s.context.sensitive && s.context.selected);
+    world.ask.metadata = [];
+    await write("Summarize this chat");
+    await press("Send");
+    await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Complete");
+    expect(world.ask.metadata?.at(-1)).toMatchObject({
+      observation: { view: "telegram", sensitive: false },
+      messagingContext: { platform: "telegram", accountLabel: "@owner", conversation: { id: "chat-1", title: "Alex" } },
+    });
+
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Prefs.Machine, (prefs) => prefs.send({ type: "setShare", share: "TelegramContext", on: false, at: 0 }, "Owner"))));
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => !Prefs.allows(s, "TelegramContext"));
+    await write("Any update?");
+    await press("Send");
+    await until(alpha, runtime, Conversation, (s) => s.turn.send.id === 2 && s.turn.reply === "Complete");
+    expect(world.ask.metadata?.at(-1)).toMatchObject({ observation: { view: "telegram", sensitive: true } });
+    expect((world.ask.metadata?.at(-1) as Record<string, unknown> | undefined)?.messagingContext).toBeUndefined();
+
+    const sentBodies: string[] = [];
+    bridge.registerHandler("Slack", {
+      sendDraft: (draft) => Effect.sync(() => {
+        sentBodies.push(draft.body);
+        return { status: "sent" as const };
+      }),
+      openTarget: () => Effect.void,
+    });
+    await drawn(() => {
+      bridge.stageDraft({
+        id: "d1",
+        platform: "Slack",
+        target: "Acme · #design",
+        targetId: "C1",
+        workspaceId: "T1",
+        body: "Joining in 5",
+        revision: 1,
+        status: "draft",
+      });
+    });
+    expect(sentBodies).toEqual([]);
+    const cardSend = [...document.querySelectorAll<HTMLButtonElement>("section[aria-label='Ask Alpha'] [role=log] button")]
+      .find((btn) => btn.textContent === "Send");
+    expect(cardSend).toBeDefined();
+    await drawn(() => { cardSend?.click(); });
+    expect(sentBodies).toEqual(["Joining in 5"]);
   });
 });

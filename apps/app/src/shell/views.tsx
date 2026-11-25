@@ -1,10 +1,12 @@
-import { Calendar, Camera, Folder, Globe, Image, type LucideIcon, Mail, MapPin, MessageSquare, Phone, Settings, StickyNote, UserRound, Workflow } from "lucide-react";
+import { Calendar, Camera, Folder, Globe, Hash, Image, type LucideIcon, Mail, MapPin, MessageSquare, Phone, Send, Settings, StickyNote, UserRound, Workflow } from "lucide-react";
 import type { View } from "../../gen/app__shell.ts";
 
 export const views = {
   Phone: { label: "Phone", icon: Phone },
   Messages: { label: "Messages", icon: MessageSquare },
   Inbox: { label: "Inbox", icon: Mail },
+  Telegram: { label: "Telegram", icon: Send },
+  Slack: { label: "Slack", icon: Hash },
   Calendar: { label: "Calendar", icon: Calendar },
   Browser: { label: "Browser", icon: Globe },
   Camera: { label: "Camera", icon: Camera },
@@ -20,7 +22,7 @@ export const views = {
 export const viewOrder = Object.keys(views) as View[];
 
 const commsViews = new Set<View>(["Phone", "Messages", "Contacts"]);
-const ownHeader = new Set<View>(["Files", "Maps", "Notes", "Settings", "Workflows", ...commsViews]);
+const ownHeader = new Set<View>(["Files", "Maps", "Notes", "Settings", "Workflows", "Telegram", "Slack", ...commsViews]);
 
 /** Whether the app shares the conversation stage with Ask Alpha. */
 export const isCommsView = (view: View | undefined) => view !== undefined && commsViews.has(view);

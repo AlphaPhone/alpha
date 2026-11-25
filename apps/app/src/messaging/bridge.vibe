@@ -1,0 +1,283 @@
+// spec/app/assistant/context.md, "A turn carries bounded Telegram or Slack context only while that app is in front, authenticated, non-sensitive, allowed by Settings' privacy share, and taken by the peer"; spec/app/home/cards.md, "The Telegram and Slack cards show unread and mention counts with up to two preview rows, marked not up to date when stale, and are not drawn when disconnected or with nothing unread"
+
+/** Messaging platform supported by Alpha's user-account clients. */
+export type MessagingPlatform = "Telegram" | "Slack"
+
+/** Active pane inside a messaging app; `"auth"` is always sensitive. */
+export type MessagingPane = "auth" | "list" | "conversation" | "thread"
+
+/** Single bounded non-secret message excerpt for Ask Alpha ambient context. */
+export interface MessagingContextMessage {
+  readonly id: string
+  readonly sender: string
+  readonly at: number
+  readonly text: string
+  readonly isOwn: boolean
+  readonly replyToId?: string
+}
+
+/** Bounded, secret-free ambient screen context handed by Telegram or Slack to Ask Alpha. */
+export interface MessagingContextSnapshot {
+  readonly platform: "telegram" | "slack"
+  readonly authenticated: boolean
+  readonly sensitive: boolean
+  readonly pane: MessagingPane
+  readonly accountLabel: string
+  readonly conversation?: {
+    readonly id: string
+    readonly title: string
+    readonly kind: string
+    readonly muted: boolean
+    readonly unreadCount: number
+    readonly participants?: ReadonlyArray<string>
+  }
+  readonly thread?: {
+    readonly parentTs: string
+    readonly parentText: string
+    readonly replyCount: number
+  }
+  readonly recentMessages: ReadonlyArray<MessagingContextMessage>
+  readonly draft?: {
+    readonly author: "none" | "owner" | "alpha"
+    readonly text: string
+  }
+}
+
+/** One preview row on a Home messaging card. */
+export interface MessagingCardRow {
+  readonly title: string
+  readonly detail: string
+}
+
+/** Home card summary matching `Messaging` in `spec/app/home/cards.md`. */
+export interface MessagingHomeCardSnapshot {
+  readonly connected: boolean
+  readonly unread: number
+  readonly mentions: number
+  readonly rows: ReadonlyArray<MessagingCardRow>
+  readonly current: boolean
+}
+
+/** Honest delivery outcome of a staged Ask Alpha message draft. */
+export type MessagingDraftStatus = "draft" | "sending" | "sent" | "failed" | "unknown"
+
+/** Staged Telegram or Slack draft proposal rendered by `AssistantMessageDraftCard`. */
+export interface MessagingDraftProposal {
+  readonly id: string
+  readonly platform: MessagingPlatform
+  readonly target: string
+  readonly targetId: string
+  readonly workspaceId?: string
+  readonly threadTs?: string
+  readonly replyToMessageId?: string
+  readonly replyContext?: string
+  readonly body: string
+  readonly revision: number
+  readonly status: MessagingDraftStatus
+  readonly error?: string
+  readonly settled?: boolean
+}
+
+/** Honest result returned by a platform handler after attempting to send a staged draft. */
+export interface MessagingSendOutcome {
+  readonly status: "sent" | "failed" | "unknown"
+  readonly error?: string
+}
+
+/** Platform-owned send and navigation callbacks registered by Telegram and Slack resident layers. */
+export interface MessagingPlatformHandler {
+  readonly sendDraft: (draft: MessagingDraftProposal) => MessagingSendOutcome!unknown
+  readonly openTarget: (draft: MessagingDraftProposal) => void!unknown
+}
+
+/** Combined external-store state exposed by `MessagingBridge`. */
+export interface MessagingBridgeSnapshot {
+  readonly cards: Readonly<Record<MessagingPlatform, MessagingHomeCardSnapshot>>
+  readonly contexts: Readonly<Record<MessagingPlatform, MessagingContextSnapshot | undefined>>
+  readonly drafts: ReadonlyArray<MessagingDraftProposal>
+}
+
+/** Empty disconnected Home card snapshot matching `quietMessaging` in `spec/app/home/cards.md`. */
+export const quietMessagingCard: MessagingHomeCardSnapshot = {
+  connected: false,
+  unread: 0,
+  mentions: 0,
+  rows: [],
+  current: false,
+}
+
+const maxMessages = 15
+const maxChars = 6000
+const maxParticipants = 12
+const maxParentChars = 400
+const maxDraftChars = 1600
+
+function clip(text: string, limit: number): string {
+  return text.length <= limit ? text : text.slice(0, limit)
+}
+
+/** Whitelists and bounds an ambient messaging snapshot, returning `undefined` when unauthenticated or sensitive. */
+export function boundedMessagingContext(snapshot: MessagingContextSnapshot | undefined): MessagingContextSnapshot | undefined {
+  if (snapshot === undefined || !snapshot.authenticated || snapshot.sensitive || snapshot.pane === "auth") return undefined
+  const tail = snapshot.recentMessages.slice(-maxMessages)
+  const boundedMessages: MessagingContextMessage[] = []
+  let remaining = maxChars
+  for (const msg of tail) {
+    if (remaining <= 0) break
+    const text = clip(msg.text, remaining)
+    remaining -= text.length
+    boundedMessages.push({
+      id: msg.id,
+      sender: msg.sender,
+      at: msg.at,
+      text,
+      isOwn: msg.isOwn,
+      ...(msg.replyToId === undefined ? {} : { replyToId: msg.replyToId }),
+    })
+  }
+  return {
+    platform: snapshot.platform,
+    authenticated: true,
+    sensitive: false,
+    pane: snapshot.pane,
+    accountLabel: clip(snapshot.accountLabel, 120),
+    ...(snapshot.conversation === undefined ? {} : {
+      conversation: {
+        id: snapshot.conversation.id,
+        title: clip(snapshot.conversation.title, 120),
+        kind: snapshot.conversation.kind,
+        muted: snapshot.conversation.muted,
+        unreadCount: Math.max(0, snapshot.conversation.unreadCount),
+        ...(snapshot.conversation.participants === undefined ? {} : { participants: snapshot.conversation.participants.slice(0, maxParticipants) }),
+      },
+    }),
+    ...(snapshot.thread === undefined ? {} : {
+      thread: {
+        parentTs: snapshot.thread.parentTs,
+        parentText: clip(snapshot.thread.parentText, maxParentChars),
+        replyCount: Math.max(0, snapshot.thread.replyCount),
+      },
+    }),
+    recentMessages: boundedMessages,
+    ...(snapshot.draft === undefined ? {} : {
+      draft: { author: snapshot.draft.author, text: clip(snapshot.draft.text, maxDraftChars) },
+    }),
+  }
+}
+
+/** Runtime bridge decoupling `home/`, `assistant/`, and `notices/` from `telegram/` and `slack/`. */
+export service MessagingBridge {
+  snapshot(): MessagingBridgeSnapshot
+  subscribe(listener: () => void): () => void
+  readonly changes: Stream.Stream<MessagingBridgeSnapshot>
+  publishHomeCard(platform: MessagingPlatform, card: MessagingHomeCardSnapshot): void
+  publishContext(platform: MessagingPlatform, context: MessagingContextSnapshot | undefined): void
+  contextOf(platform: MessagingPlatform): MessagingContextSnapshot | undefined
+  stageDraft(draft: MessagingDraftProposal): void
+  editDraft(id: string, body: string): void
+  declineDraft(id: string): void
+  sendDraft(id: string): void!!
+  openDraftInApp(id: string): void!!
+  registerHandler(platform: MessagingPlatform, handler: MessagingPlatformHandler): () => void
+}
+
+/** Creates an isolated in-memory `MessagingBridge` instance for resident runtimes and tests. */
+export function createMessagingBridge() {
+  const listeners = new Set<() => void>()
+  const handlers = new Map<MessagingPlatform, MessagingPlatformHandler>()
+  let state: MessagingBridgeSnapshot = {
+    cards: { Telegram: quietMessagingCard, Slack: quietMessagingCard },
+    contexts: { Telegram: undefined, Slack: undefined },
+    drafts: [],
+  }
+  const emit = (next: MessagingBridgeSnapshot) => {
+    state = next
+    for (const listener of [...listeners]) listener()
+  }
+  const subscribe = (listener: () => void) => {
+    listeners.add(listener)
+    return () => { listeners.delete(listener) }
+  }
+  const updateDraft = (id: string, patch: (draft: MessagingDraftProposal) => MessagingDraftProposal) => {
+    const next = state.drafts.map((draft) => (draft.id === id ? patch(draft) : draft))
+    emit({ ...state, drafts: next })
+  }
+  const changes = Stream.callback<MessagingBridgeSnapshot>((queue) => effect {
+    Queue.offerUnsafe(queue, state)
+    const stop = subscribe(() => { Queue.offerUnsafe(queue, state) })
+    try Effect.addFinalizer(() => Effect.sync(stop))
+  })
+  return {
+    snapshot: () => state,
+    subscribe,
+    changes,
+    publishHomeCard: (platform: MessagingPlatform, card: MessagingHomeCardSnapshot) => {
+      const normalized: MessagingHomeCardSnapshot = {
+        connected: card.connected,
+        unread: Math.max(0, card.unread),
+        mentions: Math.max(0, card.mentions),
+        rows: card.rows.slice(0, 2),
+        current: card.current,
+      }
+      emit({ ...state, cards: { ...state.cards, [platform]: normalized } })
+    },
+    publishContext: (platform: MessagingPlatform, context: MessagingContextSnapshot | undefined) => {
+      emit({ ...state, contexts: { ...state.contexts, [platform]: context } })
+    },
+    contextOf: (platform: MessagingPlatform) => state.contexts[platform],
+    stageDraft: (draft: MessagingDraftProposal) => {
+      const exists = state.drafts.some((one) => one.id === draft.id)
+      const drafts = exists
+        ? state.drafts.map((one) => (one.id === draft.id ? draft : one))
+        : [...state.drafts, draft]
+      emit({ ...state, drafts })
+    },
+    editDraft: (id: string, body: string) => {
+      updateDraft(id, (draft) => {
+        if (draft.settled || (draft.status !== "draft" && draft.status !== "failed")) return draft
+        return { ...draft, body, revision: draft.revision + 1, status: "draft", error: undefined }
+      })
+    },
+    declineDraft: (id: string) => {
+      const target = state.drafts.find((one) => one.id === id)
+      if (target === undefined || target.status === "sent") return
+      emit({ ...state, drafts: state.drafts.filter((one) => one.id !== id) })
+    },
+    sendDraft: (id: string) => effect {
+      const found = state.drafts.find((one) => one.id === id)
+      if (found === undefined || found.settled || (found.status !== "draft" && found.status !== "failed") || found.body.trim() === "") return
+      const sending: MessagingDraftProposal = { ...found, status: "sending", error: undefined }
+      updateDraft(id, () => sending)
+      const handler = handlers.get(sending.platform)
+      if (handler === undefined) {
+        updateDraft(id, (draft) => ({ ...draft, status: "failed", error: `${sending.platform} is not connected` }))
+        return
+      }
+      const outcome = handler.sendDraft(sending) catch () => ({ status: "unknown" as const, error: `Delivery unconfirmed — check ${sending.platform} before sending again` })
+      updateDraft(id, (draft) => ({
+        ...draft,
+        status: outcome.status,
+        error: outcome.error,
+        settled: outcome.status === "sent",
+      }))
+    },
+    openDraftInApp: (id: string) => effect {
+      const found = state.drafts.find((one) => one.id === id)
+      if (found === undefined) return
+      const handler = handlers.get(found.platform)
+      if (handler !== undefined) handler.openTarget(found) catch () => undefined
+    },
+    registerHandler: (platform: MessagingPlatform, handler: MessagingPlatformHandler) => {
+      handlers.set(platform, handler)
+      return () => {
+        if (handlers.get(platform) === handler) handlers.delete(platform)
+      }
+    },
+  }
+}
+
+/** Shape of the `MessagingBridge` service for helper parameters. */
+export type MessagingBridgeApi = ReturnType<typeof createMessagingBridge>
+
+/** Default in-memory `MessagingBridge` layer for resident runtimes and tests. */
+export const defaultMessagingBridge: Layer.Layer<MessagingBridge> = Layer.sync(MessagingBridge, createMessagingBridge)

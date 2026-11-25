@@ -9,6 +9,7 @@ import { button, closeAll, drawn, fill, hardware, later, open, press, underAct, 
 import { scene } from "./fakes/scene.ts";
 import { waiting } from "../src/home/waiting.vibe";
 import { agendaFrom } from "../src/home/cards.vibe";
+import { MessagingBridge } from "../src/messaging/bridge.vibe";
 
 underAct();
 afterEach(closeAll);
@@ -21,7 +22,7 @@ const pulled = () => drawn(() => {
   zone?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, isPrimary: true, clientX: 100, clientY: 10 }));
   zone?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, isPrimary: true, clientX: 100, clientY: 120 }));
 });
-const alphaApps = ["view:Inbox", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Files", "view:Workflows", "view:Settings"];
+const alphaApps = ["view:Inbox", "view:Telegram", "view:Slack", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Files", "view:Workflows", "view:Settings"];
 
 describe("Home on a phone", () => {
   // spec/app/home/index.md, "Story: Start Home"; spec/app/home/index.md, "Story: Keep my apps on Home"; spec/app/home/index.md, "Story: Edit Home"
@@ -35,9 +36,14 @@ describe("Home on a phone", () => {
     await until(alpha, homes, Home.Machine, (h) => h.host === "AsLauncher" && h.tiles.load.status === "Loaded");
     expect(tiles()).toEqual(alphaApps);
 
-    // spec/app/home/tiles.md, "Only Phone, Messages and Inbox carry a badge, only when something waits there, and no tile does while Home is being edited"
-    await drawn(() => { waiting.tell("Inbox", "3 unread"); waiting.tell("Notes", "1 shared"); });
-    expect([button("Inbox3 unread") !== undefined, button("Notes") !== undefined]).toEqual([true, true]);
+    // spec/app/home/tiles.md, "Only Phone, Messages, Inbox, Telegram and Slack carry a badge, only when something waits there, and no tile does while Home is being edited"
+    await drawn(() => {
+      waiting.tell("Inbox", "3 unread");
+      waiting.tell("Telegram", "2 unread");
+      waiting.tell("Slack", "1 mention");
+      waiting.tell("Notes", "1 shared");
+    });
+    expect([button("Inbox3 unread") !== undefined, button("Telegram2 unread") !== undefined, button("Slack1 mention") !== undefined, button("Notes") !== undefined]).toEqual([true, true, true, true]);
 
     // spec/app/home/index.md, "A long press on bare Home starts editing, only on the phone and once the tiles are read"
     held("Notes");
@@ -96,7 +102,16 @@ describe("Home on a phone", () => {
     expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open overdue reminder: Call the bank/);
     expect(agenda()?.textContent).toContain("Standup");
 
-    // spec/app/home/cards.md, "A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed"
+    // spec/app/home/cards.md, "The Telegram and Slack cards show unread and mention counts with up to two preview rows, marked not up to date when stale, and are not drawn when disconnected or with nothing unread"
+    const bridge = alpha.runtime.runSync(MessagingBridge);
+    await drawn(() => {
+      bridge.publishHomeCard("Telegram", { connected: true, unread: 2, mentions: 1, rows: [{ title: "Alex", detail: "See you at 5" }], current: true });
+      bridge.publishHomeCard("Slack", { connected: true, unread: 0, mentions: 0, rows: [{ title: "#design", detail: "Quiet" }], current: true });
+    });
+    expect(Boolean(button("Open Telegram: Telegram · 2 unread · 1 @"))).toBe(true);
+    expect(Boolean(button("Open Slack: Slack · 0 unread"))).toBe(false);
+
+    // spec/app/home/cards.md, "A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, Telegram and Slack their own, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed"
     await drawn(() => agenda()?.click());
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Calendar");
     await drawn(() => { agendaFrom.reminders([]); agendaFrom.hidden([]); });
@@ -151,7 +166,8 @@ describe("Home on a phone", () => {
     expect([toast(), world.launcher.opened.length]).toEqual(["Couldn't open Clock. It's turned off.", 2]);
 
     // spec/app/home/index.md, "A reading's answer closes a menu whose app has gone, and a failed one that takes an installed tile off Home says so"; spec/app/home/index.md, "Home shows a tile only while its app is on this phone; a tile whose app has gone keeps its place and comes back with the app"
-    const clock = world.launcher.apps[0]!;
+    const [clock] = world.launcher.apps;
+    if (clock === undefined) throw new Error("no clock app");
     world.launcher.apps = world.launcher.apps.slice(1);
     world.launcher.changed();
     await until(alpha, homes, Home.Machine, (h) => !h.installed.apps.includes("org.fixture.clock/org.fixture.clock.Main") && h.installed.read.status === "Loaded");

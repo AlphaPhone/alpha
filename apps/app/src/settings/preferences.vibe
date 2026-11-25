@@ -28,7 +28,7 @@ import { darkPhone, drawn, phoneLooks } from web
 const keys = { appearance: "alpha.appearance", choices: "alpha.preferences", previousAppearance: "alpha.appearance.v1", previousChoices: "alpha.browser.device.v1" }
 
 schema Appearance { theme: "System" | "Light" | "Dark"; legible: boolean }
-schema Choices { askFirst: boolean; images: boolean; shares: ReadonlyArray<"AgentLocation" | "BrowserPage" | "GmailChanges" | "CalendarEdits"> }
+schema Choices { askFirst: boolean; images: boolean; shares: ReadonlyArray<"AgentLocation" | "BrowserPage" | "GmailChanges" | "CalendarEdits" | "TelegramContext" | "SlackContext"> }
 schema PreviousChoices {
   askBeforeAgentActions?: boolean
   agentLocationEnabled?: boolean
@@ -38,7 +38,7 @@ schema PreviousChoices {
   autoLoadMailImages?: boolean
 }
 
-// spec/app/settings/preferences.md, "A new phone lets Alpha act without asking first, load images in Inbox, use its location and the Browser page open, and change Gmail and Calendar"
+// spec/app/settings/preferences.md, "A new phone lets Alpha act without asking first, load images in Inbox, use its location, the Browser page open, and Telegram or Slack screen context, and change Gmail and Calendar"
 const fresh: Choices = Prefs.newPhone
 
 const look = (): Look => (darkPhone() ? "DarkLook" : "LightLook")
@@ -83,6 +83,7 @@ effect function readChoices(): (Choices | undefined)!KeyValueStore.KeyValueStore
     shares: [
       ...on(was.value.agentLocationEnabled, "AgentLocation"), ...on(was.value.agentBrowserPageEnabled, "BrowserPage"),
       ...on(was.value.agentGmailChanges, "GmailChanges"), ...on(was.value.agentCalendarEdits, "CalendarEdits"),
+      ...on(undefined, "TelegramContext"), ...on(undefined, "SlackContext"),
     ],
   }
 }

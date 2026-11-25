@@ -4,7 +4,7 @@ import type { ListedVoicemail, VoicemailId, VoicemailListing } from "@elizaos/os
 import { Machine as PhoneMachine, liveCall } from "../../gen/app__phone.effect.vibe"
 import * as Voicemail from "../../gen/app__phone__voicemail.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__phone__voicemail.effect.vibe"
-import { Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
+import { type Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
 import { type Job, answer, applying, contained, following, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 
@@ -167,8 +167,8 @@ const carrierChanged = started(effect {
   const phone = try PhoneMachine
   const voicemail = try Voicemail.Machine
   const front = Stream.changesWith(Stream.map(phone.changes, (state) => state.front), (a, b) => a === b)
-  const first = Stream.fromEffect(telephony("refreshVoicemail", (c) => c.phone.refreshVoicemail("AutomaticRead")) catch () => undefined)
-  const changed = Stream.mapEffect(observations, (listing) => tryPromise(() => listing) catch () => undefined)
+  const first = Stream.fromEffect(effect { return telephony("refreshVoicemail", (c) => c.phone.refreshVoicemail("AutomaticRead")) catch () => undefined })
+  const changed = Stream.mapEffect(observations, effect (listing) => tryPromise(() => listing) catch () => undefined)
   const watched = Stream.switchMap(front, (showing) => showing ? Stream.concat(first, changed) : Stream.empty)
   try Stream.runForEach(watched, effect (listing) => {
     if (listing === undefined || !(try phone.get()).front) return
@@ -187,14 +187,13 @@ const shown = following(PhoneMachine, (phone) => phone.front && phone.tab === "V
 // spec/app/phone/voicemail.md, "A call that starts pauses playback"
 const calls = following(PhoneMachine, liveCall, Voicemail.Machine, (live): Event | undefined => (live ? { type: "callStarted" } : undefined))
 
-/** The current clip's local playback position and changes. */
-export interface PlaybackPosition {
-  subscribe(wake: () => void): () => void
-  position(): number
-  seek(seconds: number): void
-}
-
 module audio {
+  /** The current clip's local playback position and changes. */
+  export interface PlaybackPosition {
+    subscribe(wake: () => void): () => void
+    position(): number
+    seek(seconds: number): void
+  }
   /** Create the one audio element for voicemail playback. @throws {never} */
   export function makeAudio(): HTMLAudioElement {
     return new Audio()
@@ -233,7 +232,8 @@ module audio {
     if (reset) element.currentTime = 0
   }
 }
-import { makeAudio, pauseAudio, positionOf, sourceOf } from audio
+import { makeAudio, pauseAudio, positionOf, sourceOf, type PlaybackPosition } from audio
+export type { PlaybackPosition }
 
 /** The one audio element the open voicemail plays in, outside any screen. */
 export service Player {
