@@ -2,7 +2,7 @@
 import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY, MMS_MAX_RECIPIENTS } from "@elizaos/os-bridges";
 import type { MessageRow, ThreadRow } from "@elizaos/os-bridges";
 import { normalizePhoneNumber } from "@elizaos/os-bridges";
-import { Alert, Avatar, Banner, Button, Chip, ConfirmDialog, Input, Menu, MenuContent, MenuItem, MenuTrigger, SearchField, Spinner, Textarea } from "@repo/ui";
+import { Alert, AppHeader, Avatar, Banner, Button, Chip, ConfirmDialog, Input, Menu, MenuContent, MenuItem, MenuTrigger, SearchField, Spinner, Textarea } from "@repo/ui";
 import { Effect, type Layer, type ManagedRuntime } from "effect";
 import { ArrowUp, Camera, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, ImagePlus, Mic, Pencil, Phone as Call, Plus, RefreshCw, Search, Send, Sparkles, Square, Trash2, X } from "lucide-react";
 import { memo, useCallback, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type PointerEvent } from "react";
@@ -108,15 +108,14 @@ function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesPr
           </div>
         </header>
       ) : (
-        <header className="flex h-13 shrink-0 items-center gap-0.5 px-2 [&>button]:size-13" data-alpha-messages-header data-alpha-stage-header>
-          {onBack && <Button variant="ghost" size="icon" aria-label="Back to apps" onClick={onBack}><ChevronLeft /></Button>}
-          <h1 className="min-w-0 flex-1 truncate text-xl leading-tight font-semibold">Messages</h1>
+        <AppHeader title="Messages" className="shrink-0" data-alpha-messages-header="" data-alpha-stage-header=""
+          leading={onBack && <Button variant="ghost" size="icon" aria-label="Back to apps" onClick={onBack}><ChevronLeft /></Button>}>
           {!smsNeeded(state) && <Button variant="ghost" size="icon" aria-label="Search messages" data-alpha-messages-search onClick={() => setSearching(true)}><Search /></Button>}
           {can({ type: "newMessage" }) && <Button variant="ghost" size="icon" aria-label="New message" data-alpha-messages-new onClick={() => {
             runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ typed: "" })));
             void send({ type: "newMessage" });
           }}><Pencil /></Button>}
-        </header>
+        </AppHeader>
       )}
       {smsNeeded(state) && (can(allow) || can(settings)) && (
         <div className="grid flex-1 place-items-center px-4">
