@@ -65,6 +65,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   return (
     <>
       <HomeScreen
+        launcher={h.host === "AsLauncher"}
         cards={Home.showsCards(h) ? day : []}
         tiles={ready(h.tiles) ? Home.tilesShown(h, s).map((tile) => tileItem(tile, known.apps, tile.tag === "Own" ? waits.get(tile.view) : undefined, h.editing)) : undefined}
         editing={h.editing}

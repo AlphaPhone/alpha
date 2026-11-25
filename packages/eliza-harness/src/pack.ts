@@ -170,7 +170,7 @@ export function stagePackEntry(pack: Pack, source: string, product?: ProductPack
 export const packDist = path.join(repository, "apps/agent/dist");
 
 /**
- * What a launch of the built pack names: the bundle, the policy's allowed actions and load list, and the workflow
+ * What a launch of the built pack names: the bundle, the phone's character, the policy's allowed actions and plugins (load list and product), and the workflow
  * worker the bundle pinned, where the pack's clone built it, as the phone stages it beside the bundle. A pack restored
  * from a build cache comes without its clone, so the clone is prepared here where it is not.
  * @throws {Error} where the pack is not built
@@ -184,7 +184,7 @@ export async function builtPack() {
     }
   };
   const manifest = read("bundle/manifest.json") as { workflowWorkerSha256?: string };
-  const policy = read("host/policy.json") as { actions: { allowed: string[] }; plugins: { load: string[] } };
+  const policy = read("host/policy.json") as { actions: { allowed: string[] }; plugins: { load: string[]; product?: string } };
   const clone = await packCheckout(policy.plugins.load.filter((name) => name.startsWith("@elizaos/plugin-")));
   const workflow = clone.packages.get("@elizaos/plugin-workflow");
   if (workflow === undefined || manifest.workflowWorkerSha256 === undefined) throw new Error("the agent pack pins no workflow worker");
@@ -192,7 +192,8 @@ export async function builtPack() {
   const { executable } = JSON.parse(fs.readFileSync(path.join(runtimeDir, "workflow-worker.json"), "utf8")) as { executable: string };
   return {
     bundle: path.join(packDist, "bundle/agent.mjs"),
-    policy: { actions: { allowed: policy.actions.allowed }, plugins: { load: policy.plugins.load } },
+    character: read("host/character.json") as { name: string; system: string },
+    policy: { actions: { allowed: policy.actions.allowed }, plugins: policy.plugins },
     workflowWorker: { runtimeDir, executable, sha256: manifest.workflowWorkerSha256 },
   };
 }

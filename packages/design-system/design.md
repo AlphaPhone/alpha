@@ -52,7 +52,7 @@ do next.
   dialog, `z-toast` a notice, `z-voice` the voice overlay. `z-10`, `z-20` and `z-50` order things inside one view.
 - **Motion.** `fast` for press, `base` for most changes, `slow` for entering and leaving, on
   `ease-standard`; `animate-rise` brings in a sheet, `animate-drop` a menu, `animate-fade` a screen,
-  `animate-shimmer` work in progress, `animate-wiggle` an app tile on Home while Home is being edited.
+  `animate-shimmer` work in progress, `animate-blink` the dots of a reply being written, `animate-wiggle` an app tile on Home while Home is being edited.
   Reduced motion stops them all.
 - **Width.** Layout follows the measured width, not the orientation: from `md` a centered reading
   column, from `lg` a list beside its detail.
@@ -248,11 +248,13 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `keyframes.fade` | from{opacity:0}to{opacity:1} |
 | `keyframes.shimmer` | from{background-position:200% 0}to{background-position:-200% 0} |
 | `keyframes.wiggle` | from{transform:rotate(-1.5deg)}to{transform:rotate(1.5deg)} |
+| `keyframes.blink` | 0%,100%{opacity:0.2}50%{opacity:1} |
 | `animate.rise` | rise 460ms cubic-bezier(0.19, 1, 0.22, 1) both |
 | `animate.drop` | drop 500ms cubic-bezier(0.19, 1, 0.22, 1) both |
 | `animate.fade` | fade 700ms ease both |
 | `animate.shimmer` | shimmer 2s linear infinite |
 | `animate.wiggle` | wiggle 300ms ease-in-out infinite alternate |
+| `animate.blink` | blink 1.2s ease-in-out infinite |
 | `breakpoint.sm` | 40rem |
 | `breakpoint.md` | 47.5rem |
 | `breakpoint.lg` | 62.5rem |
