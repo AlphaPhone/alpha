@@ -22,10 +22,8 @@ import { alphaVoiceCloud, elizaCloudSpeech, elizaSignIn } from "./voice.ts";
  */
 export function plugins(world: Scene, services: { readonly agent: Answering; readonly cloud: Answering }): Record<string, Faked> {
   return {
-    ElizaAgent: elizaAgent(services.agent),
-    ElizaCloud: elizaCloud(services.cloud, () => world.signedIn, () => world.mailLease),
     ElizaAgent: elizaAgent(services.agent, world.settings.recovery),
-    ElizaCloud: elizaCloud(services.cloud, () => world.signedIn),
+    ElizaCloud: elizaCloud(services.cloud, () => world.signedIn, () => world.mailLease),
     ElizaSecureStore: elizaSecureStore(world.secrets, world.slots),
     ElizaCalendar: elizaCalendar(world.calendar),
     ElizaReminders: elizaReminders(world.reminders, () => world.now),
