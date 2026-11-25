@@ -9,6 +9,7 @@ import { together, untimed, whole } from "../src/runtime/reactor.vibe";
 import { shell } from "../src/shell/shell.vibe";
 import { placeOf, VoiceWords, voicing } from "../src/voice/voice.vibe";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
+import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Dock } from "../gen/app__assistant__dock.effect.vibe";
 import { Machine as Locator } from "../gen/app__assistant__context.effect.vibe";
 import { Machine as Files } from "../gen/app__files.effect.vibe";
@@ -526,6 +527,47 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
 
     await area.runPromise(Effect.flatMap(VoiceBridge, (bridge) => Stream.runCollect(bridge.readAloud(1, "Another reading."))));
     expect(world.voice.speakerMutedAtPlayback).toEqual([false]);
+  });
+
+  // spec/app/voice/index.md, "Stop and switch to keyboard shut the conversation down; the keyboard then takes over"
+  it.each(["confirmed", "view changed", "unconfirmed"] as const)("returns focus after Switch to keyboard only for the current confirmed Talk (%s)", async (outcome) => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const { alpha } = await open(world, talkMounts);
+    const area = assistant.runtime(alpha);
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
+    await drawnUntil(alpha, area, Composer, (state) => state.slot === "Open");
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.speaker === "SpeakerOn");
+    await press("Open conversation");
+    const editor = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
+    expect(editor).not.toBeNull();
+    await press("Mute speaker");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.speaker === "SpeakerOff");
+
+    const restoring = Promise.withResolvers<void>();
+    const settled = Promise.withResolvers<void>();
+    world.voice.speakerGainGate = async (muted) => {
+      if (muted) return;
+      restoring.resolve();
+      await settled.promise;
+      if (outcome === "unconfirmed") throw new Error("Speaker gain did not restore");
+    };
+    try {
+      await drawn(() => button("Switch to keyboard")?.focus());
+      await press("Switch to keyboard");
+      await restoring.promise;
+      await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Stopping");
+      expect(document.activeElement).not.toBe(editor);
+      if (outcome === "view changed") {
+        await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "openView", view: "Notes" }))));
+      }
+    } finally {
+      settled.resolve();
+    }
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle");
+    expect(world.voice.activeMicSession).toBeUndefined();
+    if (outcome === "confirmed") expect(document.activeElement).toBe(editor);
+    else expect(document.activeElement).not.toBe(editor);
   });
 
   it("keeps the speaker control hidden when the live bridge refuses gain (spec/app/voice/index.md, \"Speaker mute is offered after the current speech bridge confirms gain control\")", async () => {

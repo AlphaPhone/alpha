@@ -191,6 +191,61 @@ describe("Notes", () => {
     expect(saved()).toEqual(previouslyShown);
   });
 
+  it("Pins the open note from its own menu, as v121's note menu held Pin (spec/app/notes/index.md, \"Story: Organise my notes\")", async () => {
+    const world = scene();
+    const { alpha, runtime } = await openNotesFromHome(world);
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+    // Rows carry no menu of their own, as v121's had none.
+    expect(button("Gift ideas · Priya options")).toBeUndefined();
+    await press("Open Gift ideas · Priya");
+    await until(alpha, runtime, Editor, (state) => state.showing && state.draft.sync === "Kept");
+    const pinned = () => (world.notes.notes.find((row) => row.id === "gifts")?.format?.data as { readonly pinned?: boolean } | undefined)?.pinned;
+    const choose = async (name: string) => {
+      await control("Note actions");
+      await drawn(() => button("Note actions")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+      const choice = () => [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((item) => item.textContent?.trim() === name);
+      await rendered(() => expect(choice()?.getAttribute("aria-disabled")).toBeNull());
+      await drawn(() => choice()?.click());
+    };
+    await choose("Pin");
+    await rendered(() => expect(pinned()).toBe(true));
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded" && state.version === world.notes.revision + 1);
+    await choose("Unpin");
+    await rendered(() => expect(pinned()).toBe(false));
+  });
+
+  it("Copies only the exact saved voice note after choosing Copy text (spec/app/notes/voice.md, \"Story: Share the text of a saved voice note\")", async () => {
+    const world = scene();
+    const { alpha, runtime } = await openNotesFromHome(world);
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+    await press("Open Design sync");
+    await until(alpha, runtime, Voice, (state) => state.showing);
+    const copy = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    try {
+      const reopenShare = async () => {
+        await drawn(() => button("More")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+        const share = () => [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((item) => item.textContent?.trim() === "Share");
+        await rendered(() => expect(share()?.getAttribute("aria-disabled")).toBeNull());
+        await drawn(() => share()?.click());
+        await control("Close share");
+      };
+      await reopenShare();
+      await press("Close share");
+      expect(copy).not.toHaveBeenCalled();
+      await reopenShare();
+      await pressOnTop("Copy text");
+      await rendered(() => expect(copy).toHaveBeenCalledTimes(1));
+      expect(copy.mock.calls[0]?.[0]).toContain("Voice note text (audio not included)");
+      expect(copy.mock.calls[0]?.[0]).toContain("Notifications stay as icons until unlock");
+      expect(copy.mock.calls[0]?.[0]).not.toContain("Enclave launch");
+      await reopenShare();
+      world.notes.revision++;
+      await pressOnTop("Copy text");
+      await rendered(() => expect(document.body.textContent).toContain("Sharing is unavailable."));
+      expect(copy).toHaveBeenCalledTimes(1);
+    } finally { copy.mockRestore(); }
+  });
+
   it("Read and use the transcript (spec/app/notes/voice.md, \"Story: Read and use the transcript\")", async () => {
     const world = scene();
     world.ask.metadata = [];
@@ -209,6 +264,7 @@ describe("Notes", () => {
     const transcript = world.notes.notes.find((note) => note.id === "sync")?.format?.data.lines;
     if (!Array.isArray(transcript)) throw new Error("The fixture needs a saved transcript");
     const words = transcript.map((line) => typeof line === "object" && line !== null && "t" in line && typeof line.t === "string" ? line.t : "").join("\n");
+    await control("Copy text");
     await press("Copy text");
     await rendered(async () => expect(await navigator.clipboard.readText()).toBe(words));
 
