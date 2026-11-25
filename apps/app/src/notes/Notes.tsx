@@ -52,10 +52,27 @@ function TransferNotice({ runtime }: { readonly runtime: Runtime }) {
   </Alert>;
 }
 
+/** Pin or Unpin, and Move to each other folder, for the open note, as v121's note menus held them; none the list does not allow. */
+function useOrganise(runtime: Runtime, note: number) {
+  const list = useNotes(runtime);
+  const entry = list.state === undefined ? undefined : Notes.shown(list.state).find((row) => row.id === note);
+  const organise = (event: Notes.Event) => list.can(event, "Owner") ? () => void list.send(event, "Owner") : undefined;
+  const pin = entry && organise({ type: "change", c: { ...Notes.nothing, note: entry.id, base: entry.revision, op: entry.pinned ? "Unpin" : "Pin" }, covered: false });
+  const moves = entry === undefined || list.state === undefined ? [] : [{ id: 0, name: "No folder" }, ...list.state.folders].flatMap((folder) => {
+    const move = folder.id === entry.folder ? undefined : organise({ type: "change", c: { ...Notes.nothing, op: "Move", note: entry.id, base: entry.revision, folder: folder.id }, covered: false });
+    return move ? [{ folder, move }] : [];
+  });
+  const items = <>
+    {pin && <MenuItem onSelect={pin}><Pin /> {entry?.pinned ? "Unpin" : "Pin"}</MenuItem>}
+    {moves.map(({ folder, move }) => <MenuItem key={folder.id} onSelect={move}><FolderInput /> {folder.id === 0 ? "Move out of folder" : `Move to ${folder.name}`}</MenuItem>)}
+  </>;
+  return { any: pin !== undefined || moves.length > 0, items };
+}
+
 function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly saved: DraftWords }) {
   const writing = useEditor(runtime);
   const actions = useActions(runtime);
-  const list = useNotes(runtime);
+  const organised = useOrganise(runtime, writing.state?.note ?? 0);
   const bin = useTrash(runtime).state;
   const transfer = useTransfer(runtime);
   const hasDocuments = runtime.runSync(NoteDocuments).available;
@@ -80,14 +97,7 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
   const status = current.draft.sync === "Saving" ? "Saving…" : current.failed ? "Couldn't save the note"
     : current.full ? "There isn't room to keep your draft" : current.told === "WasUnknown" ? "Alpha couldn't confirm the deletion"
       : current.told === "WasRefused" ? "Couldn't delete the note" : current.told === "WasFull" ? "Recently deleted is full" : undefined;
-  const entry = list.state === undefined ? undefined : Notes.shown(list.state).find((row) => row.id === current.note);
-  const organise = (event: Notes.Event) => list.can(event, "Owner") ? () => void list.send(event, "Owner") : undefined;
-  const pin = entry && organise({ type: "change", c: { ...Notes.nothing, note: entry.id, base: entry.revision, op: entry.pinned ? "Unpin" : "Pin" }, covered: false });
-  const moves = entry === undefined || list.state === undefined ? [] : [{ id: 0, name: "No folder" }, ...list.state.folders].flatMap((folder) => {
-    const move = folder.id === entry.folder ? undefined : organise({ type: "change", c: { ...Notes.nothing, op: "Move", note: entry.id, base: entry.revision, folder: folder.id }, covered: false });
-    return move ? [{ folder, move }] : [];
-  });
-  const menu = (deletable || exportable || shared || pin || moves.length > 0) && <Menu onOpenChange={(open) => {
+  const menu = (deletable || exportable || shared || organised.any) && <Menu onOpenChange={(open) => {
     if (open && actions.can(sharing, "Owner")) void actions.send(sharing, "Owner");
     if (!open && actions.can({ type: "closeMenu" }, "Owner")) void actions.send({ type: "closeMenu" }, "Owner");
   }}>
@@ -97,8 +107,7 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
         <MenuItem onSelect={() => void actions.send({ type: "share", channel: "Email", mark: 0 }, "Owner")}><Mail /> Share by email</MenuItem>
         <MenuItem onSelect={() => void actions.send({ type: "share", channel: "Messages", mark: 0 }, "Owner")}><MessageSquare /> Share in Messages</MenuItem>
       </>}
-      {pin && <MenuItem onSelect={pin}><Pin /> {entry?.pinned ? "Unpin" : "Pin"}</MenuItem>}
-      {moves.map(({ folder, move }) => <MenuItem key={folder.id} onSelect={move}><FolderInput /> {folder.id === 0 ? "Move out of folder" : `Move to ${folder.name}`}</MenuItem>)}
+      {organised.items}
       {exportable && <MenuItem onSelect={() => void transfer.send(exporting, "Owner")}><Download /> Save as text</MenuItem>}
       {deletable && <><div role="separator" className="my-1 border-t border-border" /><MenuItem destructive onSelect={() => send(deletion)}><Trash2 /> Delete</MenuItem></>}
     </MenuContent>
@@ -145,6 +154,7 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
 function LinkedNote({ runtime, collection }: { readonly runtime: Runtime; readonly collection: Collection }) {
   const link = useLink(runtime);
   const state = link.state;
+  const organised = useOrganise(runtime, state?.note ?? 0);
   if (!state?.showing) return null;
   const note = collection.noteByNumber.get(state.note);
   const data = note?.format?.data;
@@ -162,9 +172,12 @@ function LinkedNote({ runtime, collection }: { readonly runtime: Runtime; readon
     clips={clips}
     onBack={close}
     onVisit={page !== "" && link.can(event, "Owner") ? () => void link.send(event, "Owner") : undefined}
-    menu={link.can(askRemove, "Owner") && <Menu>
+    menu={(link.can(askRemove, "Owner") || organised.any) && <Menu>
       <MenuTrigger asChild><Button aria-label="Link actions" size="icon" variant="ghost"><Ellipsis /></Button></MenuTrigger>
-      <MenuContent><MenuItem destructive onSelect={() => void link.send(askRemove, "Owner")}>Remove source</MenuItem></MenuContent>
+      <MenuContent align="end">
+        {organised.items}
+        {link.can(askRemove, "Owner") && <MenuItem destructive onSelect={() => void link.send(askRemove, "Owner")}>Remove source</MenuItem>}
+      </MenuContent>
     </Menu>}
     feedback={state.review.showing && <Alert variant="warn" className="mt-4">Remove the web source from this note?
       <div className="mt-2 flex gap-2">
@@ -185,6 +198,7 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
   const voice = useVoice(runtime);
   const audio = runtime.runSync(NoteDevice.use((device) => Effect.succeed(device.available)));
   const state = voice.state;
+  const organised = useOrganise(runtime, state?.note ?? 0);
   if (!state?.showing) return null;
   const note = collection.noteByNumber.get(state.note);
   const data = note?.format?.data;
@@ -203,6 +217,10 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
   const playback = voice.can(stop, "Owner") ? () => void voice.send(stop, "Owner") : canPlay ? () => void voice.send(play, "Owner") : undefined;
   return <VoiceNoteView
     className="relative inset-auto flex-1"
+    menu={organised.any && <Menu>
+      <MenuTrigger asChild><Button aria-label="More" size="icon" variant="ghost"><Ellipsis /></Button></MenuTrigger>
+      <MenuContent align="end">{organised.items}</MenuContent>
+    </Menu>}
     title={note === undefined ? "Voice note" : titleOf(note)}
     meta={note === undefined ? "" : [dated(note, collection.readAt), length].filter(Boolean).join(" · ")}
     time={length}
