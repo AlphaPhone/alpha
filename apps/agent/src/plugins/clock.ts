@@ -120,7 +120,7 @@ const dayBits: Readonly<Record<string, number>> = {
 /** The repeat days the model named, as a mask; any day it named that is not a weekday is returned for it to correct. */
 function parseDaysMask(input: unknown): { readonly mask: number } | { readonly unknown: readonly string[] } {
   if (typeof input === "number" && Number.isFinite(input)) return { mask: Math.max(0, Math.min(127, Math.trunc(input))) };
-  const days = Array.isArray(input) ? input.map(String) : input === undefined ? [] : [String(input)];
+  const days = Array.isArray(input) ? input.map(String) : input === undefined || input === null ? [] : [String(input)];
   const unknown = days.filter((day) => dayBits[day.trim().toLowerCase()] === undefined);
   return unknown.length > 0 ? { unknown } : { mask: days.reduce((mask, day) => mask | (dayBits[day.trim().toLowerCase()] ?? 0), 0) };
 }
@@ -144,19 +144,20 @@ function parseTimerDurationMs(params: Record<string, unknown>): number | undefin
 }
 
 /**
- * The one alarm the model named: by id, by label, or (except for an update, whose time is the new one) by its time.
+ * The one alarm the model named: by id, by label, or by its time; an update names it by id, since its label and time are the new ones.
  * When it named none, only an alarm that is the sole candidate: the only alarm, or for snooze and dismiss the only one
  * ringing. Nothing is guessed: a ringing alarm never wins over the one named.
  */
 function findAlarmTarget(alarms: readonly ClockAlarmRecord[], params: Record<string, unknown>, op: string): ClockAlarmRecord | undefined {
   const id = readString(params, "id");
   if (id !== undefined) return alarms.find((entry) => entry.id === id);
+  if (op === "update") return alarms.length === 1 ? alarms[0] : undefined;
   const label = readString(params, "label")?.toLowerCase();
   if (label !== undefined) {
     const byLabel = alarms.filter((entry) => entry.label.toLowerCase() === label);
     return byLabel.length === 1 ? byLabel[0] : undefined;
   }
-  const time = op === "update" ? undefined : parseAlarmTime(params);
+  const time = parseAlarmTime(params);
   if (time !== undefined) {
     const byTime = alarms.filter((entry) => entry.hour === time.hour && entry.minute === time.minute);
     return byTime.length === 1 ? byTime[0] : undefined;
@@ -238,7 +239,8 @@ function handleClockAlarm(store: AlphaAppsStore, timeZone: string, params: Recor
     return { success: true, text: `Alarm ${formatHourMinute(target.hour, target.minute)} ${enabled ? "enabled" : "disabled"}.`, data: { op, alarm: updated } };
   }
   const parsedTime = parseAlarmTime(params);
-  const days = params.daysMask !== undefined || params.days !== undefined ? parseDaysMask(params.daysMask ?? params.days) : undefined;
+  const named = params.daysMask ?? params.days;
+  const days = named === undefined || named === null ? undefined : parseDaysMask(named);
   if (days !== undefined && "unknown" in days) return unknownDays(days.unknown);
   const updated = store.updateAlarm(target.id, {
     hour: parsedTime?.hour,
