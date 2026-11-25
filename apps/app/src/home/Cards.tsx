@@ -14,11 +14,16 @@ import { fromAreas, named, others } from "./cards.vibe";
 const where: Readonly<Record<Cards.Origin, string>> = { PhoneCalendar: "Calendar", AgentCalendar: "Alpha", Reminder: "Reminder" };
 
 const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+const day = (at: number) => new Date(at).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Date(b).toDateString();
 
-function shown(item: Cards.Item): HomeAgendaItem {
+function shown(item: Cards.Item, now: number): HomeAgendaItem {
+  const start = clock(item.begin);
+  const due = sameDay(item.begin, now) ? start : `${day(item.begin)} ${start}`;
+  const end = sameDay(item.begin, item.end) ? clock(item.end) : `${day(item.end)}, ${clock(item.end)}`;
   return {
     title: named.title(item.origin, item.id) || "Event",
-    when: item.allDay ? "All day" : item.overdue ? `Due ${clock(item.begin)}` : clock(item.begin),
+    when: item.overdue ? `Due ${due}` : item.allDay ? "All day" : item.end > item.begin ? `${start} – ${end}` : start,
     source: where[item.origin],
   };
 }
@@ -43,9 +48,24 @@ export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Res
       const items = Cards.candidates(state, told);
       const first = Cards.lead(items, now)[0];
       if (first === undefined) return null;
-      const lead = shown(first);
+      const lead = shown(first, now);
       const next = first.overdue ? Cards.following(items, now)[0] : undefined;
-      return <HomeAgendaCard key="agenda" aria-label={first.overdue ? `Open overdue reminder: ${lead.title}` : `Open calendar event: ${lead.title}`} item={lead} overdue={first.overdue} next={next && shown(next)} notCurrent={Cards.agendaCard(state, now, told) === "NotUpdated"} {...open("AgendaCard")} />;
+      const overdueCount = items.filter((item) => item.overdue).length;
+      const heading = first.overdue ? (overdueCount > 1 ? `${overdueCount} overdue reminders` : "Overdue reminder") : day(first.begin);
+      const notCurrent = Cards.agendaCard(state, now, told) === "NotUpdated";
+      return (
+        <HomeAgendaCard
+          key="agenda"
+          heading={heading}
+          aria-label={first.overdue ? `Open overdue reminder: ${lead.title}, ${lead.when}` : `Open calendar event: ${lead.title}, ${heading}, ${lead.when}`}
+          aria-description={notCurrent ? "Not up to date" : undefined}
+          item={lead}
+          overdue={first.overdue}
+          next={next && shown(next, now)}
+          notCurrent={notCurrent}
+          {...open("AgendaCard")}
+        />
+      );
     },
     MessagesCard: () => <HomeCallsCard key="messages" app="Messages" lines={told.messages} {...open("MessagesCard")} onClick={() => void runtime.runPromise(openUnread())} />,
     PhoneCard: () => <HomeCallsCard key="phone" app="Phone" lines={told.phone} {...open("PhoneCard")} onClick={() => void runtime.runPromise(openCalls())} />,

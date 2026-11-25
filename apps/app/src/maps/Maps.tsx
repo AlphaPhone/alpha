@@ -500,7 +500,7 @@ function Guidance({ screen, state, seen, spot, kept, way }: { screen: Screen; st
         </div>
       )}
       {/* eslint-disable-next-line better-tailwindcss/no-unknown-classes -- Guidance stays dark in both themes, as on develop; `dark` is the design system's theme class. */}
-      <div data-host-chrome="" className="dark absolute inset-x-3 bottom-6.5 z-50 grid grid-cols-[56px_minmax(0,1fr)_56px] items-center gap-3 rounded-home-card bg-secondary p-2.5 text-secondary-foreground motion-safe:animate-rise">
+      <div data-host-chrome="bottom" className="dark absolute inset-x-3 bottom-6.5 z-50 grid grid-cols-[56px_minmax(0,1fr)_56px] items-center gap-3 rounded-home-card bg-secondary p-2.5 text-secondary-foreground motion-safe:animate-rise">
         <MapsRoundButton tone="nightFill" size="2xl" aria-label="End navigation" disabled={!can({ type: "endGuidance" })} onClick={() => void send({ type: "endGuidance" })}><X /></MapsRoundButton>
         <div className="min-w-0 text-center">
           <div className="font-display text-figure-sm font-light">{arrived ? "Arrived" : way === undefined ? "" : minutes(way.seconds)}</div>
