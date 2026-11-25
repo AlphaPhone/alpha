@@ -194,7 +194,9 @@ pure def lawA2xxIsTheReply(status: int): bool = replied(status) iff (status >= 2
 ### A cloud request the phone holds back for want of a sign-in reads as the cloud's own 401
 
 The phone's cloud plugin holds the account's key and sends nothing for an
-account that is signed out or must sign in again. Alpha reads that as the
+account that is signed out or must sign in again, nor a mail or calendar
+request from a phone signed in before mail leases existed, which gets its
+lease only by signing in once more. Alpha reads that as the
 cloud's 401, through eliza's cloud client as through a plain read, so an
 area tells a signed-out owner from an unreachable cloud. Such a request
 never left the phone, so what it asked is known not to have been done. Every

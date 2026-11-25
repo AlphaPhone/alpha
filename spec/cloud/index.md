@@ -217,21 +217,30 @@ only when every route is a device route the page may use"). The service
 document and a device's own sign-out belong to sign-in and go through
 eliza's sign-in plugin.
 
-### Each route of Alpha's cloud table is one of eliza's device routes by method and path, buffered, outside sign-in, and needs no account session
+### Each route of Alpha's cloud table is one of eliza's device routes by method and path, buffered, outside sign-in, and needs no fresh or stepped-up session
 
-The app holds no account session, so a route that needs one could never be
-sent. Sign-in owns the routes under `/api/v1/auth/`, `/api/v1/app-auth/`,
-`/api/v1/api-keys/`, `/api/public/` and `/api/v1/voice/speech/`.
+The phone attaches what each route's class asks for, and the page never
+holds it (`spec/os/signIn/cloudRequests.md`): the device key; for Google
+status and accounts and the Gmail and calendar reads (`Mail`), the device
+lease, never the key; and for connecting or disconnecting Google and the
+managed Gmail client's operations (`Session`), the account session the
+phone holds after the owner signs in again. A request the phone holds back
+for want of the lease or that session reads as a sign-in
+(`spec/app/platform/index.md`). Alpha never asks for a fresh or stepped-up
+session, so a route that needs one, or the sign-in's own session family,
+could never be sent. Sign-in owns the routes under `/api/v1/auth/`,
+`/api/v1/app-auth/`, `/api/v1/api-keys/`, `/api/public/` and
+`/api/v1/voice/speech/`.
 
 ```quint
 type Verb = Get | Post | Patch | Delete
-type Auth = Public | KeyOrSession | SessionOnly
+type Auth = Public | KeyOrSession | Mail | Session | FreshOnly
 type Listing = { matches: int, buffered: bool, auth: Auth }
 
 pure val signInPrefixes: List[str] = List("/api/v1/auth/", "/api/v1/app-auth/", "/api/v1/api-keys/", "/api/public/", "/api/v1/voice/speech/")
 
 pure def pageRoute(listing: Listing, underSignIn: bool): bool =
-  listing.matches == 1 and listing.buffered and not(underSignIn) and listing.auth != SessionOnly
+  listing.matches == 1 and listing.buffered and not(underSignIn) and listing.auth != FreshOnly
 ```
 
 ### The table lists every route Alpha's screens and eliza's managed mail client send, each with the query keys they send

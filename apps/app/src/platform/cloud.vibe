@@ -97,8 +97,8 @@ const kept: ReadonlyArray<CloudFailure> = [
   "unknown-environment", "invalid-request", "name-in-use", "link-refused", "no-browser",
 ]
 
-/** The plugin's refusals that hold a request back for an account that is signed out or must sign in again. */
-const forSignIn: ReadonlyArray<CloudFailure> = ["sign-in-required", "reauth-required"]
+/** The plugin's refusals that hold a request back for an account that is signed out or must sign in again, for mail and calendar too. */
+const forSignIn: ReadonlyArray<CloudFailure> = ["sign-in-required", "reauth-required", "mail-lease-upgrade-required"]
 
 const heldForSignIn = (cause: unknown): boolean => cause instanceof CloudRefused && forSignIn.includes(cause.failure)
 
