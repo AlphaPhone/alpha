@@ -1,7 +1,7 @@
 // spec/app/files/correction.md, "Story: Correct a page's edges"
 import { Alert, Button, Dialog, DialogContent, DialogTitle, cn, focusRing } from "@repo/ui";
 import type { ScanCorner, ScanCorners } from "@elizaos/plugin-files/documents/scan-correction";
-import type { Layer } from "effect";
+import { Effect, type Layer } from "effect";
 import { RotateCw } from "lucide-react";
 import { useState, type PointerEvent } from "react";
 import { useMachine } from "../../gen/app__files__correction.react.ts";
@@ -21,9 +21,9 @@ export function ScanCorrection({ runtime }: Pick<Shown<Runtime>, "runtime">) {
   const [drag, setDrag] = useState<{ image: number; point: number; corner: ScanCorner } | undefined>();
   if (!state?.image) return null;
   const image = state.image;
-  const page = runtime.runSync(ScanAssets.use((assets) => assets.read(image)));
+  const page = runtime.runSync(Effect.flatMap(ScanAssets, (assets) => assets.read(image)));
   if (!page) return null;
-  const draft = runtime.runSync(ScanAssets.use((assets) => assets.outline(image)));
+  const draft = runtime.runSync(Effect.flatMap(ScanAssets, (assets) => assets.outline(image)));
   const corners = drag?.image === image ? moved(draft.corners, drag.point, drag.corner) : draft.corners;
   const apply = (next: typeof draft) => void runtime.runPromiseExit(setScanOutline(image, next));
   const place = (event: PointerEvent<HTMLButtonElement>): ScanCorner | undefined => {

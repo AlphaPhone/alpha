@@ -25,6 +25,8 @@ import { composer as messagesComposer } from "./messages/composer.vibe"
 import { messages } from "./messages/messages.vibe"
 import { contacts } from "./contacts/contacts.vibe"
 import { requests } from "./contacts/requests.vibe"
+import { notes } from "./notes/notes.vibe"
+import { startupReview } from "./startup/settingsAccess.vibe"
 import { clockResident } from "./clock/sync.vibe"
 import { remindersResident } from "./reminders/reminders.vibe"
 import { listing as workflowList } from "./workflows/list.vibe"
@@ -60,6 +62,8 @@ const machines = together(
   paging,
   focus,
   reports,
+  notes,
+  startupReview,
   clockResident,
   remindersResident,
   workflowList,

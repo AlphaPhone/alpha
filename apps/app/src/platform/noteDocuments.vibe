@@ -1,0 +1,46 @@
+// spec/app/notes/transfer.md, "Story: Import and export a text file"
+import { registered } from "./device.vibe"
+
+module checked {
+  import { registerPlugin } from "@capacitor/core"
+
+  export interface Android {
+    pick(input: { readonly importing: boolean; readonly title: string }): Promise<unknown>
+    write(input: { readonly handle: string; readonly text: string }): Promise<unknown>
+  }
+
+  let made: Android | undefined
+  /** @throws {never} */
+  export function client(): Android {
+    return (made ??= registerPlugin<Android>("AlphaNoteDocuments"))
+  }
+}
+import { type Android, client } from checked
+
+const Result = Schema.Struct({
+  status: Schema.Literals(["picked", "cancelled", "unavailable", "unreadable", "exported", "unverified", "failed"]),
+  text: Schema.optionalKey(Schema.String),
+  handle: Schema.optionalKey(Schema.NonEmptyString),
+})
+export type DocumentResult = typeof Result.Type
+
+export service NoteDocuments {
+  readonly available: boolean
+  pick(importing: boolean, title: string): DocumentResult!!
+  write(handle: string, text: string): DocumentResult!!
+}
+
+const unavailable: DocumentResult = { status: "unavailable" }
+
+export const noteDocuments = Layer.sync(NoteDocuments, () => {
+  const api = registered("AlphaNoteDocuments") ? client() : undefined
+  const answered = (call: (api: Android) => Promise<unknown>) => api === undefined ? succeed(unavailable) : (effect {
+    const raw = try tryPromise(() => call(api))
+    return try Schema.decodeUnknownEffect(Result)(raw)
+  } |> Effect.orElseSucceed(%, (): DocumentResult => unavailable))
+  return {
+    available: api !== undefined,
+    pick: (importing: boolean, title: string) => answered((native) => native.pick({ importing, title })),
+    write: (handle: string, text: string) => answered((native) => native.write({ handle, text })),
+  }
+})

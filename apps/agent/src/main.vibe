@@ -8,7 +8,7 @@ import { deployment } from "@repo/deployment"
 import { pinnedCheckout, pinnedPack } from "@repo/eliza-harness"
 import {
   type Environment, type Manifest, bundledPlugins, calendarEdits, characterAdmitted, cloudModel, corePlugins, entryCarried, gmailChanges, googleAdmitted,
-  hostedPlugins, inputAdmitted, localEmbeddings, packAdmitted, packEntry, packedFor, packedPlugins, persistMemory, personalDetailSwap,
+  hostedPlugins, inputAdmitted, localEmbeddings, notesTrashDays, packAdmitted, packEntry, packedFor, packedPlugins, persistMemory, personalDetailSwap,
   policyAdmitted, privacyAdmitted, productPluginName, proposalsAdmitted, refusedActions, routeListAdmitted, secretSwap, viewPlugins,
 } from "../gen/agent.effect.vibe"
 
@@ -33,7 +33,7 @@ module node {
 import { builderOf, root, words } from node
 
 /** What makes the pack unfit to ship, in words a maker can act on. */
-export error Refused { reason: string }
+export error Refused { message: string }
 
 const environments: Readonly<Record<string, Environment>> = { local: "Local", staging: "Staging", production: "Production" }
 
@@ -68,7 +68,12 @@ export function entrySource(bundled: readonly string[], hosted: readonly { name:
     ...allHosted.map(({ name }) => `    { packageName: ${JSON.stringify(name)}, plugin: undefined },`),
     "  ],",
     `  productPlugin: ${JSON.stringify(product.name)},`,
-    `  hostModules: new Map([${allHosted.map(({ name }, index) => `[${JSON.stringify(name)}, host${index}]`).join(", ")}]),`,
+    `  hostModules: new Map([${allHosted.map(({ name }, index) => {
+      const factory = name === "@elizaos/plugin-notes"
+        ? `(context) => { context.runtime.setSetting("ELIZA_NOTES_TRASH_RETENTION_DAYS", ${JSON.stringify(notesTrashDays)}); return host${index}(context); }`
+        : `host${index}`
+      return `[${JSON.stringify(name)}, ${factory}]`
+    }).join(", ")}]),`,
     "})",
     "",
   ].join("\n")
@@ -82,13 +87,13 @@ function places() {
 
 effect function text(file: string) {
   const fs = try FileSystem.FileSystem
-  return fs.readFileString(file) catch effect () => { throw new Refused({ reason: `${file} cannot be read` }) }
+  return fs.readFileString(file) catch effect () => { throw new Refused({ message: `${file} cannot be read` }) }
 }
 
 effect function decoded<A>(file: string, schema: Schema.Decoder<A>) {
   const read = try text(file)
   return Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(read) catch effect (cause) => {
-    throw new Refused({ reason: `${file} is not what it should be: ${String(cause)}` })
+    throw new Refused({ message: `${file} is not what it should be: ${String(cause)}` })
   }
 }
 
@@ -97,7 +102,7 @@ effect function routeLines(file: string) {
   const read = try text(file)
   const routes: RouteLine[] = []
   for (const line of read.split("\n").filter((each) => each.trim() !== "")) {
-    routes.push(Schema.decodeUnknownEffect(Schema.fromJsonString(RouteLine))(line) catch effect () => { throw new Refused({ reason: `${file}: ${line} is not a route` }) })
+    routes.push(Schema.decodeUnknownEffect(Schema.fromJsonString(RouteLine))(line) catch effect () => { throw new Refused({ message: `${file}: ${line} is not a route` }) })
   }
   return routes
 }
@@ -107,30 +112,30 @@ const spelled = { GET: "Get", POST: "Post", PUT: "Put", PATCH: "Patch", DELETE: 
 /** Refuse a route list unless it is the page's, and eliza's own gate admits each of its routes. */
 effect function admitRoutes(routes: readonly RouteLine[]) {
   if (!routeListAdmitted(routes.map((route) => ({ method: spelled[route.method], path: route.path, stream: route.stream === true })))) {
-    throw new Refused({ reason: "the route list is not exactly the routes the page's platform services call (spec/agent/index.md)" })
+    throw new Refused({ message: "the route list is not exactly the routes the page's platform services call (spec/agent/index.md)" })
   }
   const gate = defineRoutes(routes)
   for (const route of routes) {
     const target = route.path.replace(/\{[a-zA-Z]+\}/g, "x")
     const admission = gate.admit({ method: route.method, target, streamed: route.stream === true, body: undefined })
-    if (admission.tag !== "Admitted") throw new Refused({ reason: `eliza's route gate does not admit ${route.method} ${route.path}` })
+    if (admission.tag !== "Admitted") throw new Refused({ message: `eliza's route gate does not admit ${route.method} ${route.path}` })
   }
 }
 
 /** The manifest of the bundle written at `bundle`, read back by eliza for the bundle's own bytes, if the pinned eliza and Alpha's rules admit it. */
 effect function admittedManifest(bundle: string, pin: string) {
-  const manifest = try tryPromise({ try: () => readBundleManifest(bundle), catch: () => new Refused({ reason: `${bundle} holds no manifest readable for its own bytes` }) })
+  const manifest = try tryPromise({ try: () => readBundleManifest(bundle), catch: () => new Refused({ message: `${bundle} holds no manifest readable for its own bytes` }) })
   const facts: Manifest = {
     sourceCommit: manifest.sourceCommit, node: manifest.node, localInference: manifest.localInference,
     plugins: [...manifest.plugins], productPlugin: manifest.productPlugin ?? "", workerPinned: manifest.workflowWorkerSha256 !== undefined, actions: manifest.actions.map(({ name }) => name),
   }
   if (!packAdmitted(facts, pin)) {
-    throw new Refused({ reason: `the bundle is not the pinned eliza's (${pin}) for Node 26 with no local inference, the plugins ${packedPlugins.join(", ")}, product plugin ${productPluginName}, a pinned workflow worker and every allowed action: ${JSON.stringify(facts)}` })
+    throw new Refused({ message: `the bundle is not the pinned eliza's (${pin}) for Node 26 with no local inference, the plugins ${packedPlugins.join(", ")}, product plugin ${productPluginName}, a pinned workflow worker and every allowed action: ${JSON.stringify(facts)}` })
   }
   const names = manifest.packages.map(({ name }) => name)
   const foreign = names.filter((name) => !inputAdmitted(name, alphaOwned(name)))
   if (foreign.length > 0 || !entryCarried(names)) {
-    throw new Refused({ reason: `the bundle must carry the pinned eliza's packages plus ${packEntry} and ${productPluginName} alone of Alpha's: it carries ${foreign.join(", ") || `missing ${packEntry}/${productPluginName}`}` })
+    throw new Refused({ message: `the bundle must carry the pinned eliza's packages plus ${packEntry} and ${productPluginName} alone of Alpha's: it carries ${foreign.join(", ") || `missing ${packEntry}/${productPluginName}`}` })
   }
   return manifest
 }
@@ -138,52 +143,52 @@ effect function admittedManifest(bundle: string, pin: string) {
 /** The host files at `host`, if they say what the spec decides and eliza's agent reads the launch the phone writes from them. */
 effect function admittedHost(host: string, registered: readonly string[]) {
   const character = try decoded(`${host}/character.json`, Character)
-  if (!characterAdmitted(character.name, character.system.trim())) throw new Refused({ reason: "the character is not Alpha with a system prompt" })
+  if (!characterAdmitted(character.name, character.system.trim())) throw new Refused({ message: "the character is not Alpha with a system prompt" })
   const policy = try decoded(`${host}/policy.json`, Policy)
   if (!policyAdmitted(policy.actions.allowed, Object.keys(policy.actions.refused), policy.plugins.load, policy.plugins.product ?? "", [...registered])) {
-    throw new Refused({ reason: `the policy must allow the spec's actions, refuse ${refusedActions([...registered]).join(", ")}, load the pack's plugins and modules in order, and name product ${productPluginName}` })
+    throw new Refused({ message: `the policy must allow the spec's actions, refuse ${refusedActions([...registered]).join(", ")}, load the pack's plugins and modules in order, and name product ${productPluginName}` })
   }
-  if (!proposalsAdmitted(policy.plugins.load, policy.actions.allowed)) throw new Refused({ reason: "the policy must load eliza's device-action modules and allow a proposal" })
+  if (!proposalsAdmitted(policy.plugins.load, policy.actions.allowed)) throw new Refused({ message: "the policy must load eliza's device-action modules and allow a proposal" })
   const written = try decoded(`${host}/host.json`, Host)
   try admitRoutes(written.routes)
-  if (!privacyAdmitted(written.privacy.secretSwap, written.privacy.piiSwap)) throw new Refused({ reason: "the launch must ask eliza's privacy service to swap secrets and personal details" })
-  if (!googleAdmitted(written.google.gmailChanges, written.google.calendarEdits)) throw new Refused({ reason: "the launch consents to Gmail changes or calendar edits the spec does not" })
+  if (!privacyAdmitted(written.privacy.secretSwap, written.privacy.piiSwap)) throw new Refused({ message: "the launch must ask eliza's privacy service to swap secrets and personal details" })
+  if (!googleAdmitted(written.google.gmailChanges, written.google.calendarEdits)) throw new Refused({ message: "the launch consents to Gmail changes or calendar edits the spec does not" })
   const document = JSON.stringify({
     schema: 1, character, policy: { actions: { allowed: policy.actions.allowed }, plugins: policy.plugins },
     model: written.model, embeddings: written.embeddings, persistMemory: written.persistMemory, callerRole: written.callerRole, privacy: written.privacy, google: written.google,
     account: { userId: "the owner signed in on the phone", organizationId: "their organization" },
   })
-  decodeLaunchDocument(document) catch effect () => { throw new Refused({ reason: "eliza's agent would refuse the launch the phone writes from these files" }) }
+  decodeLaunchDocument(document) catch effect () => { throw new Refused({ message: "eliza's agent would refuse the launch the phone writes from these files" }) }
   return written
 }
 
 /** The pinned eliza checkout, built. */
 effect function pinned() {
-  return pinnedCheckout() catch effect () => { throw new Refused({ reason: "the pinned eliza is not built: run pnpm eliza" }) }
+  return pinnedCheckout() catch effect () => { throw new Refused({ message: "the pinned eliza is not built: run pnpm eliza" }) }
 }
 
 /** Build eliza's agent bundle at the pin for `name`'s cloud, and write the host files beside it. */
 effect function build(name: string) {
   const environment = environments[name]
-  if (environment === undefined) throw new Refused({ reason: `no environment ${name}: local, staging or production` })
-  if (!packedFor(environment)) throw new Refused({ reason: "the local cloud has no fixed origin: a journey launches the pack against its own" })
-  const where = deployment(name) catch effect () => { throw new Refused({ reason: `${name} is not a row of packages/deployment/deployments.json` }) }
-  if (where.kind !== "hosted") throw new Refused({ reason: `${name} has no deployed cloud` })
+  if (environment === undefined) throw new Refused({ message: `no environment ${name}: local, staging or production` })
+  if (!packedFor(environment)) throw new Refused({ message: "the local cloud has no fixed origin: a journey launches the pack against its own" })
+  const where = deployment(name) catch effect () => { throw new Refused({ message: `${name} is not a row of packages/deployment/deployments.json` }) }
+  if (where.kind !== "hosted") throw new Refused({ message: `${name} has no deployed cloud` })
   const at = places()
   const hosted = hostedPlugins.map((name) => ({ name, module: hostedExports[name] ?? "" }))
   const unbuilt = hosted.filter(({ module }) => module === "")
-  if (unbuilt.length > 0) throw new Refused({ reason: `no module export is known for ${unbuilt.map(({ name }) => name).join(", ")}` })
+  if (unbuilt.length > 0) throw new Refused({ message: `no module export is known for ${unbuilt.map(({ name }) => name).join(", ")}` })
   const product = { name: productPluginName, module: "alphaAppsModule" }
   const pack = pinnedPack(packedPlugins, entrySource(bundledPlugins, hosted, product), { name: productPluginName, dir: `${at.app}/dist/src/plugins` }) catch effect (cause) => {
-    throw new Refused({ reason: `the pack's clone of the pinned eliza could not be prepared: ${cause.reason}` })
+    throw new Refused({ message: `the pack's clone of the pinned eliza could not be prepared: ${cause.reason}` })
   }
-  const builder = try tryPromise({ try: () => builderOf(pack.dir), catch: () => new Refused({ reason: `${pack.dir} holds no built bundle builder` }) })
+  const builder = try tryPromise({ try: () => builderOf(pack.dir), catch: () => new Refused({ message: `${pack.dir} holds no built bundle builder` }) })
   try tryPromise({
     try: () => builder.buildAgentBundle({
       plugins: packedPlugins, productPlugin: productPluginName, profiles: { core: corePlugins, views: viewPlugins, aospOnly: [], optional: [] },
       entry: pack.entry, outDir: at.bundle, sourceCommit: pack.commit, sourceRoot: pack.dir,
     }),
-    catch: (cause) => new Refused({ reason: `eliza refused to build the bundle: ${String(cause)} ${cause instanceof Error && "detail" in cause ? String(cause.detail) : ""}` }),
+    catch: (cause) => new Refused({ message: `eliza refused to build the bundle: ${String(cause)} ${cause instanceof Error && "detail" in cause ? String(cause.detail) : ""}` }),
   })
   const fs = try FileSystem.FileSystem
   try fs.makeDirectory(at.host, { recursive: true })
@@ -224,7 +229,7 @@ effect function main() {
   const [command, flag, value, ...rest] = words()
   if (command === "build" && flag === "--env" && value !== undefined && rest.length === 0) return try build(value)
   if (command === "check" && flag === undefined) return try check()
-  throw new Refused({ reason: "usage: main.js build --env <staging|production> | main.js check" })
+  throw new Refused({ message: "usage: main.js build --env <staging|production> | main.js check" })
 }
 
 NodeRuntime.runMain(Effect.provide(main(), NodeServices.layer))

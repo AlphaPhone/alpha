@@ -186,7 +186,7 @@ function carry(fx: Out): Job<Event, PhoneCalendar | Agent | SystemSettings | She
         const granted = (try PhoneCalendar).requestAccess() catch () => false
         return { type: "accessAnswered", grant: granted ? "Granted" : "Denied" } as Event
       }, { type: "accessAnswered", grant: "Denied" });
-    when { tag: "OpenCalendarSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", 0) });
+    when { tag: "OpenCalendarSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", "") });
     when { tag: "OpenAccountSettings" }: run("account", effect { try contained((try Shell.Machine).send({ type: "openView", view: "Settings" }), "opening Settings") });
   }
 }
