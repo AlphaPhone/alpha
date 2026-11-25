@@ -160,15 +160,19 @@ const Tile = memo(function Tile({ number, row, image, selected, trashed, daysLef
       aria-description={daysLeft === undefined ? undefined : trashDaysLabel(daysLeft)}
       disabled={!interactive}
       className="relative grid aspect-square min-h-0 min-w-0 touch-pan-y place-items-center overflow-hidden bg-secondary focus-visible:outline-focus focus-visible:outline-offset-focus">
-      {image ? <img src={image} loading="lazy" decoding="async" alt="" className="absolute inset-0 size-full object-cover" /> : <Image aria-hidden className="size-6 text-muted-foreground" />}
+      {image ? <img src={image} loading="lazy" decoding="async" alt="" className={cn("absolute inset-0 size-full object-cover transition-transform duration-fast", selected && "scale-88 rounded-box")} /> : <Image aria-hidden className="size-6 text-muted-foreground" />}
       {starred && <span aria-label="Favorite"
         // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": favorites on an image keep the dark contrast surface in either theme
         className="dark absolute bottom-1.5 left-1.5 grid size-4.5 place-items-center rounded-full bg-background/75 text-foreground"><Heart aria-hidden className="size-3 fill-current" /></span>}
       {daysLeft !== undefined && <span aria-hidden
         // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the expiry badge stays readable on a photo in either theme
         className="dark absolute bottom-1 left-1.5 rounded-sm bg-background/60 px-0.5 text-caption font-bold text-foreground">{daysLeft}d</span>}
-      {video && <span className="absolute right-1 bottom-1 flex items-center gap-1 rounded-full bg-background/80 px-1.5 py-0.5 text-xs"><Play aria-hidden className="size-3 fill-current" />{timing(row.item.duration ?? 0)}</span>}
-      {selected !== undefined && <span aria-hidden className={cn("absolute top-1.5 right-1.5 grid size-6 place-items-center rounded-full border border-background", selected ? "bg-primary text-primary-foreground" : "bg-background/65")}>{selected && <Check className="size-4" />}</span>}
+      {video && <span
+        // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": v121's video length is white on a dark plate over any frame
+        className="dark absolute right-1.5 bottom-1.25 flex items-center gap-0.75 rounded-lg bg-background/70 px-1 py-0.5 text-badge font-semibold text-foreground"><Play aria-hidden className="size-2.75 fill-current" />{timing(row.item.duration ?? 0)}</span>}
+      {selected !== undefined && <span aria-hidden
+        // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": v121's selection mark has a white ring over any frame
+        className={cn("dark absolute top-1.5 right-1.5 grid size-5.5 place-items-center rounded-full text-foreground", selected ? "bg-alpha ring-2 ring-foreground" : "bg-background/35 inset-ring-2 inset-ring-foreground")}>{selected && <Check className="size-3.5" />}</span>}
     </button>
   );
 });
@@ -325,7 +329,7 @@ export function MediaGrid({ rows, selection, grouped, density, runtime, revision
       onTouchStart={startPinch} onTouchMove={movePinch} onTouchEnd={clearPinch} onTouchCancel={clearPinch}>
       {groups.map(({ label, items, lines }, index) => (
         <section key={label} ref={index === 0 ? placeAnchor : undefined} aria-label={label || "Photos"}>
-          {label && <header className="sticky top-0 z-10 flex items-baseline justify-between bg-background px-1 py-2 text-sm font-semibold"><h2>{label}</h2><span className="text-xs font-normal text-muted-foreground">{items.length}</span></header>}
+          {label && <header className="sticky top-0 z-10 -mx-3 flex items-baseline justify-between gap-2 bg-background px-4 pt-2.5 pb-2"><h2 className="text-base font-semibold">{label}</h2><span className="text-xs text-muted-foreground">{items.length}</span></header>}
           {lines.map(({ line, members, index }) => {
             const first = line[0]?.number ?? 0;
             const present = (visibleLines === undefined ? index < thumbnailBatch : visibleLines === null || visibleLines.has(first))

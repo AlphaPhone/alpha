@@ -38,7 +38,7 @@ export const meta: ComponentMeta<AssistantMessageProps> = {
     "Alpha actions": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onReadAloud.mockClear();
       onFork.mockClear();
-      const trigger = within(canvasElement).getByRole("button", { name: /Friday works/ });
+      const trigger = within(canvasElement).getByRole("button", { name: "Message actions" });
       await userEvent.click(trigger);
       await expect(screen.queryByRole("menuitem", { name: "Edit and resend" })).toBeNull();
       await userEvent.click(await screen.findByRole("menuitem", { name: "Read aloud" }));
@@ -47,7 +47,7 @@ export const meta: ComponentMeta<AssistantMessageProps> = {
     },
     "Owner actions": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onEditAgain.mockClear();
-      const trigger = within(canvasElement).getByRole("button", { name: /What is on Friday/ });
+      const trigger = within(canvasElement).getByRole("button", { name: "Message actions" });
       await userEvent.click(trigger);
       await expect(screen.queryByRole("menuitem", { name: "Read aloud" })).toBeNull();
       await userEvent.click(await screen.findByRole("menuitem", { name: "Edit and resend" }));
