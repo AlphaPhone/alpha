@@ -4,16 +4,7 @@ import * as Limits from "../../gen/app__assistant__attachments.effect.vibe"
 import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { contained } from "../runtime/reactor.vibe"
-import { reencodeImage } from "./image-encode.ts"
 import { Talk } from "./talk.vibe"
-
-/** The owner's explicitly selected file. `data` contains raw base64. */
-export interface Attachment {
-  readonly id: string
-  readonly name: string
-  readonly mimeType: string
-  readonly data: string
-}
 
 /** The owner's handoff to the existing Ask Alpha composer from one of the apps. */
 export service MediaHandoff {
@@ -25,6 +16,16 @@ export effect function attachToAlpha(file: Attachment): boolean!!MediaHandoff {
 }
 
 module web {
+  import { reencodeImage } from "./image-encode.ts"
+
+  /** The owner's explicitly selected file. `data` contains raw base64. */
+  export interface Attachment {
+    readonly id: string
+    readonly name: string
+    readonly mimeType: string
+    readonly data: string
+  }
+
   /** Convert already selected bytes to a JPEG accepted by the agent. */
   export async function jpeg(file: Attachment, cap: number): Promise<string | undefined> {
     const binary = atob(file.data)
@@ -54,7 +55,8 @@ module web {
     }
   }
 }
-import { jpeg, keepFiles } from web
+import { type Attachment, jpeg, keepFiles } from web
+export type { Attachment }
 
 const images = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"])
 const documents = new Set(["application/pdf", "text/plain", "text/csv", "text/markdown", "application/json"])
