@@ -49,8 +49,8 @@ function sameSelection(expected: VisibleSim, actual: VisibleSim | undefined): bo
 }
 
 /** A sole SIM cannot silently become a default choice if Android now has several. */
-export function activeSmsSelection(selection: SmsSelection, subscriptions: readonly TelephonySubscription[] | undefined): boolean {
-  return subscriptions !== undefined && (selection.picked !== undefined || subscriptions.length === 1)
+export function activeSmsSelection(selection: SmsSelection, subscriptions: readonly TelephonySubscription[] | null | undefined): boolean {
+  return subscriptions !== undefined && subscriptions !== null && (selection.picked !== undefined || subscriptions.length === 1)
     && subscriptions.some((sim) => sameSubscription(sim, selection.subscription))
 }
 
