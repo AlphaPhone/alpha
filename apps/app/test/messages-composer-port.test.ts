@@ -1,6 +1,6 @@
 // spec/app/messages/composer.md, "Only the owner's Send sends: a draft or a picture, with send access, a SIM where there is a choice, and never during a call that may be an emergency call"; spec/app/messages/sending.md, "Send journals a new operation, or reads the journal back when the last outcome is unknown"
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { composerPlugin } from "../src/platform/composerPort.vibe";
+import { approvedSmsPlugin, composerPlugin } from "../src/platform/composerPort.vibe";
 
 class Port extends EventTarget {
   readonly posted: { requestId: string }[] = [];
@@ -80,6 +80,23 @@ describe("Manual Messages transport", () => {
       { kind: "sms", requestId: port.posted[0]?.requestId, draft: sms },
       { kind: "cancel", requestId: port.posted[0]?.requestId },
     ]);
+    expect(fallback.sendSms).not.toHaveBeenCalled();
+  });
+
+  it("admits an approved text through the packaged port with its exact claim (spec/app/phone/comms.md, \"Only the owner's tap approves the open proposal, and never one that acts over an emergency call\")", async () => {
+    const port = new Port();
+    packagedPage(port);
+    const fallback = native();
+    const signal = new AbortController().signal;
+    const approval = { digest: "approved-sms-digest", attemptId: 2, expiresAt: 1_800_000_000_000 };
+    await expect(approvedSmsPlugin(fallback, approval, signal, () => Promise.resolve(false)).sendSms(sms)).rejects.toMatchObject({ code: "composer-not-started" });
+    expect(port.posted).toEqual([]);
+    const send = approvedSmsPlugin(fallback, approval, signal, approved).sendSms(sms);
+    await vi.waitFor(() => expect(port.posted).toHaveLength(1));
+    expect(port.posted[0]).toMatchObject({ kind: "approved-sms", draft: sms, approval });
+    const receipt = { kind: "sms-send", operationId: sms.operationId, subscriptionId: sms.subscriptionId, status: "submitted" };
+    port.answer({ requestId: port.posted[0]?.requestId, result: receipt });
+    await expect(send).resolves.toEqual(receipt);
     expect(fallback.sendSms).not.toHaveBeenCalled();
   });
 });

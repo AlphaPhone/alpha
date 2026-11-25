@@ -2,6 +2,11 @@ import { CircleAlert, CircleCheck, TriangleAlert } from "lucide-react";
 import { Button } from "../Button.tsx";
 import { Sheet, SheetClose, SheetContent } from "../Sheet.tsx";
 
+export type InboxAttachmentPreview = { readonly digest: string } & (
+  | { readonly kind: "text"; readonly text: string }
+  | { readonly kind: "image"; readonly url: string }
+);
+
 export type InboxAttachmentReviewProps = {
   /** Whether the review is up; the parent keeps it. */
   open: boolean;
@@ -13,8 +18,8 @@ export type InboxAttachmentReviewProps = {
   handling: "open" | "save";
   /** Where the use stands: waiting for the owner, under way, done, refused, or ended with no way to know whether it happened. */
   outcome?: "review" | "working" | "done" | "refused" | "unknown";
-  /** The verified plain text and digest after a successful Open. */
-  preview?: { readonly text: string; readonly digest: string };
+  /** The verified text or a raster derived from the reviewed attachment. */
+  preview?: InboxAttachmentPreview;
   /** The save uses the browser's downloads, which do not report whether the file landed. */
   browserDownload?: boolean;
   /** Goes ahead with the use, once; offered only while the review waits and the account may still be read. */
@@ -52,7 +57,10 @@ export function InboxAttachmentReview({ open, name, size, handling, outcome = "r
         {opened ? (
           <>
             <details className="mt-3 break-all text-sm text-muted-foreground"><summary className="min-h-11 cursor-pointer content-center">Details</summary>SHA-256 {opened.digest}</details>
-            <section aria-label="Attachment contents" className="mt-3"><pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-sm">{opened.text}</pre></section>
+            <section aria-label="Attachment contents" className="mt-3">
+              {opened.kind === "text" ? <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-sm">{opened.text}</pre>
+                : <img src={opened.url} alt={name} className="max-h-[60dvh] max-w-full object-contain" />}
+            </section>
           </>
         ) : outcome === "done" ? <p role="status" className="mt-4 flex items-center gap-2 text-sm"><CircleCheck aria-hidden className="size-5 text-ok" />{words.done}</p> : null}
         {outcome === "refused" ? <p role="alert" className="mt-4 flex items-center gap-2 text-sm"><CircleAlert aria-hidden className="size-5 text-destructive" />{words.refused}</p> : null}

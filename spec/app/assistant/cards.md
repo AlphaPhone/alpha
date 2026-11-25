@@ -30,10 +30,10 @@ import attempt as A from "../../kit/attempt"
 type Kind =
   | Agenda | Call | Digest | Draft | Appointment | Workflow | Note | Notice | Proposal | Review | Summary
   | Place | Choices | Receipt | Runs | Generic | Plan | SignIn | Retry | Provider | Funding | Plain
-type Card = { kind: Kind, shown: bool, latest: bool, settled: bool, prompt: A::Attempt, save: A::Attempt, handed: A::Attempt }
+type Card = { kind: Kind, shown: bool, latest: bool, settled: bool, reviewing: bool, prompt: A::Attempt, save: A::Attempt, handed: A::Attempt }
 
 pure val initial: Card = {
-  kind: Notice, shown: false, latest: false, settled: false, prompt: A::plan(0), save: A::plan(0), handed: A::plan(0),
+  kind: Notice, shown: false, latest: false, settled: false, reviewing: false, prompt: A::plan(0), save: A::plan(0), handed: A::plan(0),
 }
 
 pure def nextTry(a: A::Attempt): A::Attempt = A::dispatch(A::record(if (a.outcome == A::Planned) A::plan(a.id + 1) else a))
@@ -108,6 +108,7 @@ pure def alwaysACardAsksOnlyWhatItsKindOffers(c: Card): bool =
     and (c.prompt.id > 0 implies (c.kind == Choices or c.kind == Retry))
     and (c.save.id > 0 implies c.kind == Summary)
     and (c.handed.id > 0 implies handsOn(c.kind))
+    and (c.reviewing implies (live(c) and c.kind == Summary and A::canRecord(c.save)))
     and c.prompt.id >= 0 and c.save.id >= 0 and c.handed.id >= 0
     and (c.prompt.outcome != A::Planned implies c.prompt.id > 0) and (c.handed.outcome != A::Planned implies c.handed.id > 0)
 ```
@@ -180,12 +181,14 @@ pure def stepAPromptIsAskedOnce(before: Card, via: str, after: Card, out: List[E
 
 ### A card settles by its own answer only once that answer was taken
 
-A newer reply, history, or plain text settles it too.
+A newer reply, history, or plain text settles it too. A recording summary
+whose verified source is unavailable is withdrawn without a save.
 
 ```quint
 pure def stepACardSettlesOnlyOnceItsAnswerWasTaken(before: Card, via: str, after: Card): bool =
   (after.settled and not(before.settled)) implies
     (via == "supersede" or via == "restored" or via == "arrive"
+      or (via == "withdrawSummary" and before.kind == Summary and after.save == before.save)
       or (via == "prompted" and after.prompt.outcome == A::Confirmed)
       or (via == "decided" and after.handed.outcome == A::Confirmed))
 ```
@@ -195,7 +198,7 @@ pure def stepACardSettlesOnlyOnceItsAnswerWasTaken(before: Card, via: str, after
 ```quint
 pure def canSupersede(c: Card): bool = c.shown and c.latest
 
-pure def supersede(c: Card): Card = { ...c, latest: false, settled: c.settled or answersTheLatest(c.kind) }
+pure def supersede(c: Card): Card = { ...c, latest: false, settled: c.settled or answersTheLatest(c.kind), reviewing: false }
 ```
 
 ### Only a card of the latest reply offers an answer to it
@@ -238,14 +241,37 @@ pure def sometimesACardIsPlainText(c: Card): bool = c.kind == Plain
 > As the owner, I want to save a summary to Notes once, to know whether it
 > was saved, and to use it in an email.
 
+### The owner reviews the summary before it can be saved
+
+A final reply to an attached, saved recording transcript can offer a
+review for the exact recording it answered. The summary starts with the
+reply's words. Action items are separate words the owner can enter. The
+owner can dismiss the review without writing anything, or save the
+reviewed fields to the same recording if its source, revision and
+conversation still match. A recording summary does not schedule a reminder.
+
+```quint
+pure def canReviewSummary(c: Card): bool = live(c) and c.kind == Summary and not(c.reviewing) and A::canRecord(c.save)
+
+pure def reviewSummary(c: Card): Card = { ...c, reviewing: true }
+
+pure def canDismissSummary(c: Card): bool = c.reviewing
+
+pure def dismissSummary(c: Card): Card = { ...c, reviewing: false }
+
+pure def canWithdrawSummary(c: Card): bool = canReviewSummary(c)
+
+pure def withdrawSummary(c: Card): Card = { ...c, settled: true }
+```
+
 ### Save to Notes saves the summary once, and tries again under its own number only when nothing was saved
 
 ```quint
-pure def canSaveToNotes(c: Card): bool = live(c) and c.kind == Summary and A::canRecord(c.save)
+pure def canSaveToNotes(c: Card): bool = c.reviewing and live(c) and c.kind == Summary and A::canRecord(c.save)
 
 pure def saveToNotes(c: Card): Moved =
   val save = nextTry(c.save)
-  { state: { ...c, save: save }, out: List(SaveNote({ ticket: save.id })) }
+  { state: { ...c, save: save, reviewing: false }, out: List(SaveNote({ ticket: save.id })) }
 ```
 
 ### Notes says whether the summary was saved, or nobody can tell
@@ -263,7 +289,7 @@ pure def noteSaved(c: Card, ticket: int, confirmed: bool, known: bool): Card =
 pure def stepASummaryIsSavedOnce(before: Card, via: str, after: Card, out: List[Effect]): bool =
   ((before.save.outcome == A::Confirmed or before.save.outcome == A::Unknown) implies after.save == before.save)
     and out.every(e => match e {
-      | SaveNote(n) => via == "saveToNotes" and after.save.outcome == A::Sent and n.ticket == after.save.id
+      | SaveNote(n) => via == "saveToNotes" and before.reviewing and not(after.reviewing) and after.save.outcome == A::Sent and n.ticket == after.save.id
       | _ => true
     })
 ```

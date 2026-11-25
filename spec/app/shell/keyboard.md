@@ -206,6 +206,8 @@ pure def sometimesTheAgendaAtLargeText(c: Canvas): bool = c.agenda and c.mounted
 
 At 150% the title still fits beside them, as it did on Alpha's earlier
 build; above it a one-word title would be split.
+Browser's address bar is a layout of its own that already fits, so it
+keeps its row, as it did on that build.
 
 ```quint
 pure def titleRow(c: Canvas): bool = c.textScale > 150

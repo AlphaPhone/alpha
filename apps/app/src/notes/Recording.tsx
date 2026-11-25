@@ -1,6 +1,6 @@
 // spec/app/notes/recording.md, "Story: Record a voice note"; spec/app/notes/recording.md, "Story: Discard a recording"
 import { Alert, AppHeader, Button, Dialog, DialogContent, DialogTitle, Spinner } from "@repo/ui";
-import { ArrowLeft, AudioLines, Pause, Play } from "lucide-react";
+import { AudioLines, ChevronLeft, Pause, Play } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import { useMachine } from "../../gen/app__notes__recording.react.ts";
 import type { Event } from "../../gen/app__notes__recording.ts";
@@ -23,7 +23,7 @@ export function Recording({ alpha, runtime }: { readonly alpha: Alpha; readonly 
   const resume = { type: "resume", take: state.take, room: { allowed: true, free: true, front: true, silent: true } } as const;
   return (
     <section aria-label="Voice recording" className="flex min-h-0 flex-1 flex-col" data-alpha-subview="notes-recording">
-      <AppHeader title="" leading={<Button variant="ghost" size="icon" aria-label="Back to apps" onClick={() => void alpha.back()}><ArrowLeft /></Button>}>
+      <AppHeader title="" leading={<Button variant="ghost" size="icon" aria-label="Back to apps" onClick={() => void alpha.back()}><ChevronLeft /></Button>}>
         {can({ type: "stop", take: state.take }) && <Button variant="ghost" onClick={() => run("stop")}>Done</Button>}
       </AppHeader>
       <div className="flex flex-1 flex-col items-center justify-center gap-6 px-6 pb-24 pt-10">

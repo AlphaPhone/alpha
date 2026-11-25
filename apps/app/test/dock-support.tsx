@@ -10,6 +10,7 @@ import { MediaHandoff } from "../src/assistant/attachments.vibe";
 import { MediaExecutors } from "../src/assistant/media-review.vibe";
 import { aloud } from "../src/assistant/read-aloud.vibe";
 import { agentAt } from "../src/platform/agent.vibe";
+import { AgentPages } from "../src/platform/browser.vibe";
 import { cloudAt } from "../src/platform/cloud.vibe";
 import { voiceArea } from "../src/messages/dictation.vibe";
 import { pagePlatform } from "../src/platform/platform.vibe";
@@ -41,6 +42,7 @@ export async function mountDock({ view = "Browser", withToast = false, flush }: 
   const platform = Layer.mergeAll(
     pagePlatform(Layer.provide(agentAt("http://agent.test"), client), Layer.provide(cloudAt("http://cloud.test"), client)),
     Layer.succeed(MediaHandoff, { attach: () => Effect.succeed(false), offerTranscript: () => Effect.succeed(false) }),
+    Layer.succeed(AgentPages, { open: () => Effect.succeed(false) }),
     Layer.succeed(MediaExecutors, { reviewFiles: () => Effect.succeed(undefined), filesContext: () => Effect.succeed(undefined), readyFiles: () => Effect.succeed(undefined), execute: () => Effect.succeed(undefined) }),
   );
   const runtime = ManagedRuntime.make(Layer.provideMerge(whole(together(assisting, voiceArea, aloud)), Layer.provideMerge(resident, platform)));

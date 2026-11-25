@@ -36,7 +36,18 @@ Compute" (line 10); eliza's launch needs one, so that line, with the name, is
 its start. eliza's tools, notes and results name the person in the
 conversation "the owner", which the model repeated back to them, so the
 prompt also tells the agent to speak to that person as "you", never as "the
-owner" or "the user". The words are in `apps/agent/host/character.json`.
+owner" or "the user". The model also described example.com from memory when
+asked to summarize "this page" on Home, where no page goes with the turn, so
+the prompt tells the agent that it sees a web page only in the latest
+message's Browser page, and with none to say that no page is open rather
+than describe one. Asked "Go home." from Notes, with Home declared as a
+view, the model most often planned directions to a saved Home place or asked
+which was meant, where the old phone went to its home screen. So the prompt
+tells the agent that the phone's screens are its views and Home is the home
+screen, and that a request to go to one of these screens by its name, with no
+directions, route or travel asked for, means that screen, shown with VIEWS
+without asking. The model still decides what a request means; nothing matches the
+owner's words. The words are in `apps/agent/host/character.json`.
 
 ```quint
 pure val characterName: str = "Alpha"
@@ -117,7 +128,10 @@ run. The pack's plugins register those same actions under the pinned
 eliza's names, and Alpha's `alpha-apps` product plugin registers
 `CLOCK_ALARM`, `CLOCK_TIMER`, `CLOCK_WORLD` and `REMINDERS_MANAGE`. Eliza's
 wallet module registers `WALLET`, which reads the wallet and asks for a
-transfer and can approve none. The
+transfer and can approve none.
+`BROWSER_OPEN` hands a web page the owner asks for to the screen they asked
+from, where no enrolled phone takes the open as a proposed step; the screen
+shows it for the owner to open, as the old phone did. The
 policy names `alpha-apps` as its product plugin and allows each action by
 name, so an action a later pin adds is refused until it is reviewed here.
 Core's `REPLY`, `IGNORE` and `NONE` are always allowed. Every other
@@ -137,7 +151,7 @@ pure val allowedActions: List[str] = List(
   "WORKFLOW",
   "MAPS_PLACE", "MAPS_WHERE_AM_I", "MAPS_ROUTE", "MAPS_NAVIGATION_START", "MAPS_NAVIGATION_REROUTE", "MAPS_NAVIGATION_STOP",
   "MAPS_SELECT", "MAPS_SAVE", "MAPS_SHARE", "MAPS_COVERAGE", "MAPS_SAVED",
-  "BROWSER", "BROWSER_BACK", "BROWSER_FORWARD", "BROWSER_RELOAD",
+  "BROWSER", "BROWSER_BACK", "BROWSER_FORWARD", "BROWSER_RELOAD", "BROWSER_OPEN",
   "NOTES_LIST", "NOTES_GET", "NOTES_CREATE", "NOTES_UPDATE", "NOTES_DELETE", "NOTES_RESTORE", "NOTES_MOVE",
   "PROPOSE_DEVICE_ACTION", "VIEWS",
   "CLOCK_ALARM", "CLOCK_TIMER", "CLOCK_WORLD", "REMINDERS_MANAGE",
@@ -166,6 +180,50 @@ pure val deviceActionModules: List[str] = List("@elizaos/agent/device-actions", 
 pure val proposalAction: str = "PROPOSE_DEVICE_ACTION"
 pure def proposalsAdmitted(loaded: List[str], allowed: List[str]): bool =
   deviceActionModules.every(m => loaded.includes(m)) and allowed.includes(proposalAction)
+```
+
+### The launch names Home and every Alpha app but Notes as a view the agent may show, by the id the phone opens it by
+
+The old phone opened any of its apps, and Home, when the owner asked.
+eliza's views module declares, once at boot, the views of the plugins
+loaded before it and the launch's own `views` (`spec/agent/views.md` in
+eliza); its VIEWS action prepares a view only by a name declared there.
+Alpha's product plugin loads after every listed module, so a view it
+declared would never be seen, and Notes is `@elizaos/plugin-notes`'s own
+view. So the host file names Home and Alpha's other apps, in the order the
+phone lists them (`apps/app/src/shell/order.ts`), and eliza's agent service
+writes them into the launch (`spec/os/agentService/config.md`). Each id is
+the app's name in lower case, which the phone's renderer opens as that app.
+Clock and Reminders keep the other names the product plugin gave them, at
+most four each, as a launch allows. Home is also named the home screen and
+the launcher, the phone's own names for it, so that next to Maps' directions
+home it reads as a screen and not a place. The model chooses which view a request means, by one of
+these names; nothing matches the owner's words. Whether a prepared view
+opens is the phone's: an app the phone does not admit, or any app over a
+sensitive screen, stays closed (`spec/app/assistant/index.md`, "Story: Let
+Alpha open what it is talking about").
+
+```quint
+type LaunchView = { id: str, label: str, path: str, aliases: List[str] }
+pure val launchViews: List[LaunchView] = List(
+  { id: "home", label: "Home", path: "/home", aliases: List("home screen", "launcher") },
+  { id: "phone", label: "Phone", path: "/phone", aliases: List() },
+  { id: "messages", label: "Messages", path: "/messages", aliases: List() },
+  { id: "inbox", label: "Inbox", path: "/inbox", aliases: List() },
+  { id: "calendar", label: "Calendar", path: "/calendar", aliases: List() },
+  { id: "clock", label: "Clock", path: "/clock", aliases: List("alarms", "timers", "stopwatch", "world clock") },
+  { id: "reminders", label: "Reminders", path: "/reminders", aliases: List("reminder", "to-do", "todo", "tasks") },
+  { id: "browser", label: "Browser", path: "/browser", aliases: List() },
+  { id: "camera", label: "Camera", path: "/camera", aliases: List() },
+  { id: "photos", label: "Photos", path: "/photos", aliases: List() },
+  { id: "maps", label: "Maps", path: "/maps", aliases: List() },
+  { id: "contacts", label: "Contacts", path: "/contacts", aliases: List() },
+  { id: "files", label: "Files", path: "/files", aliases: List() },
+  { id: "workflows", label: "Workflows", path: "/workflows", aliases: List() },
+  { id: "wallet", label: "Wallet", path: "/wallet", aliases: List() },
+  { id: "settings", label: "Settings", path: "/settings", aliases: List() },
+)
+pure def viewsAdmitted(views: List[LaunchView]): bool = views == launchViews
 ```
 
 ### The page reaches exactly the routes its platform services call, and nothing else

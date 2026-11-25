@@ -1,0 +1,115 @@
+// spec/app/assistant/cards.md, "The owner reviews the summary before it can be saved"; spec/app/assistant/cards.md, "A summary saved, or perhaps saved, is never saved again"
+import { noteLimits, parseNoteFormat, sameJson, type StickyNote } from "@elizaos/plugin-notes-client"
+import * as Cards from "../../gen/app__assistant__cards.effect.vibe"
+import { Machine as Chats } from "../../gen/app__assistant__chats.effect.vibe"
+import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
+import { sameArchiveAuthority } from "../../gen/app__assistant__attachments.effect.vibe"
+import { Machine as Notes } from "../../gen/app__notes.effect.vibe"
+import { audioIdOf, numberOf } from "../notes/content.vibe"
+import type { NoteTranscript } from "../notes/selection.vibe"
+import type { Agent } from "../platform/agent.vibe"
+import { Device } from "../platform/device.vibe"
+import { NoteStore } from "../platform/notes.vibe"
+import { attachmentAuthority } from "./attachments.vibe"
+import { type DraftSeat, Talk } from "./talk.vibe"
+import { replyBlocks } from "./words.ts"
+
+export interface RecordingSummary {
+  readonly source: NoteTranscript
+  readonly seat: DraftSeat
+  readonly conversation: number
+  readonly conversationId: string
+  readonly message: string
+  readonly words: string
+  readonly audio: string
+  readonly machine: Cards.Machine.Shape
+  readonly runtime: ManagedRuntime.ManagedRuntime<Cards.Machine, never>
+}
+
+type ReplySource = Omit<RecordingSummary, "words" | "audio" | "machine" | "runtime">
+type Needs = Talk | Chats | Conversation | Agent | NoteStore | Device
+
+export const summaryUnits = noteLimits.body
+export const summaryActions = 20
+export const actionUnits = 500
+
+export function actionsOf(text: string): string[] {
+  return text.split(/\r?\n/).map((one) => one.trim()).filter((one) => one !== "")
+}
+
+/** The active owner, agent, exact conversation and reply must agree at the point the write is admitted. */
+effect function current(source: ReplySource): boolean!!(Talk | Chats | Conversation | Device | Agent) {
+  const board = (try Talk).board
+  const device = try Device
+  const identity = try attachmentAuthority()
+  if (identity === undefined || !sameArchiveAuthority(source.seat.authority, identity)
+    || numberOf("owner", identity.agent) !== source.source.owner || !(try device.showing())) return false
+  const chat = try (try Chats).get()
+  const conversation = try (try Conversation).get()
+  return board.draftSeat === source.seat && !conversation.context.sensitive && chat.chosen === source.conversation
+    && board.known(chat.chosen)?.record.id === source.conversationId
+    && board.page(chat.page.ticket).some((one) => !one.mine && one.id === source.message)
+}
+
+/** The SDK returns the exact active note and its CAS revision from one read. */
+effect function readSource(source: NoteTranscript): (StickyNote | undefined)!!NoteStore {
+  const stored = (try NoteStore).read() catch () => undefined
+  if (stored === undefined || String(stored.revision) !== source.record.revision) return undefined
+  const note = stored.notes.find((one) => one.id === source.record.id)
+  return note?.format?.kind === "voice" ? note : undefined
+}
+
+/** Only the finalized reply that used the transcript is eligible to create a recording review. */
+export effect function offerRecordingSummary(source: ReplySource, text: string): (RecordingSummary | undefined)!!Needs {
+  const words = replyBlocks(text).words.trim()
+  if (words === "" || words.length > summaryUnits || words.includes("\0")) return undefined
+  const note = try readSource(source.source)
+  const audio = note === undefined ? "" : audioIdOf(note)
+  if (audio === "" || !(try current(source))) return undefined
+  let state = Cards.initial
+  const machine = try Cards.machineOver(() => succeed(state), (next) => sync(() => { state = next }))
+  const arrived = machine.send({ type: "arrive", kind: "Summary", valid: true }) catch () => undefined
+  if (arrived === undefined) return undefined
+  return { ...source, words, audio, machine, runtime: ManagedRuntime.make(Layer.succeed(Cards.Machine, machine)) }
+}
+
+/** Open only a review whose source and conversation still agree with the reply. */
+export effect function reviewRecordingSummary(offer: RecordingSummary): void!!Needs {
+  const board = (try Talk).board
+  if (board.snapshot().recordingSummary !== offer) return
+  const note = try readSource(offer.source)
+  const exact = note !== undefined && audioIdOf(note) === offer.audio && (try current(offer))
+  if (board.snapshot().recordingSummary === offer) {
+    try ignore(offer.machine.send(exact ? { type: "reviewSummary" } : { type: "withdrawSummary" }))
+  }
+}
+
+/** Recheck the reviewed source, write through the SDK CAS, and confirm its own committed snapshot. */
+export effect function saveRecordingSummary(offer: RecordingSummary, text: string, items: string): void!!(Needs | Notes) {
+  const summary = text.trim()
+  const actions = actionsOf(items)
+  if (summary === "" || summary.length > summaryUnits || summary.includes("\0") || actions.length > summaryActions
+    || actions.some((one) => one.length > actionUnits || one.includes("\0"))) return
+  const board = (try Talk).board
+  if (board.snapshot().recordingSummary !== offer) return
+  const started = offer.machine.send({ type: "saveToNotes" }) catch () => undefined
+  const save = started?.out.find((one) => one.tag === "SaveNote")
+  if (save?.tag !== "SaveNote") return
+  const result = effect {
+    const refused = { confirmed: false, known: true }
+    const note = try readSource(offer.source)
+    if (note?.format?.kind !== "voice" || audioIdOf(note) !== offer.audio) return refused
+    const format = parseNoteFormat({ kind: "voice", data: { ...note.format.data, summary: [summary], actions: actions.map((t) => ({ t, done: false })) } })
+    if (format === undefined || !(try current(offer)) || board.snapshot().recordingSummary !== offer) return refused
+    const update = (try NoteStore).update({ id: note.id, expectedRevision: Number(offer.source.record.revision), format })
+    const saved = try update
+    if (!(try current(offer)) || board.snapshot().recordingSummary !== offer) return { confirmed: false, known: false }
+    const kept = saved.note
+    const confirmed = kept !== undefined && kept.id === note.id && kept.title === note.title && kept.body === note.body
+      && saved.state.revision > Number(offer.source.record.revision) && saved.state.notes.some((one) => one.id === note.id)
+      && sameJson(kept.format, format)
+    if (confirmed) try ignore((try Notes).send({ type: "storeChanged" }, "Phone"))
+    return { confirmed, known: confirmed }
+  } catch (error) => ({ confirmed: false, known: error.known })
+  try ignore(offer.machine.send({ type: "noteSaved", ticket: save.ticket, ...result }))
+}
