@@ -5,7 +5,7 @@ import * as Agent from "../../gen/app__contacts__agent.effect.vibe"
 import { Machine as ContactsMachine, canBookChanged } from "../../gen/app__contacts.effect.vibe"
 import { Machine as PhoneMachine, clear } from "../../gen/app__phone.effect.vibe"
 import type { Ask, Effect as Out, Ending, Event, Request } from "../../gen/app__contacts__agent.effect.vibe"
-import { Telephony, TelephonyRefused, namesOf, readAddressBook, telephony } from "../platform/telephony.vibe"
+import { Telephony, TelephonyRefused, namesOf, readAddressBook, telephony, textingDefault } from "../platform/telephony.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, reacting, run, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
@@ -225,8 +225,7 @@ function settled(record: SmsSendResult): { readonly done: boolean; readonly know
 effect function simFor(operation: Asking | undefined): (number | undefined)!!Telephony {
   if (operation?.type === "sms_send") return operation.subscriptionId
   const status = telephony("status", (c) => c.messages.status()) catch () => undefined
-  const sims = status?.subscriptions ?? []
-  return sims.find((one) => one.defaultSms)?.id ?? (sims.length === 1 ? sims[0].id : undefined)
+  return textingDefault(status?.subscriptions ?? [])
 }
 
 // spec/app/contacts/agent.md, "Only the phone answers the action, and the request ends as that answer says"

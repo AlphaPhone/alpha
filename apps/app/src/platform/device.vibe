@@ -14,6 +14,7 @@ module web {
     setAgentGoogleConsent(options: { gmailChanges: boolean; calendarEdits: boolean }): Promise<void>
     diagnosticsFacts(): Promise<unknown>
     copyText(options: { text: string }): Promise<void>
+    shareText(options: { readonly title: string; readonly text: string }): Promise<{ readonly status: string }>
   }
   let alphaDevice: AlphaDevice | undefined
   /** @throws {never} */
@@ -48,13 +49,26 @@ module web {
   export const pages = (): EventTarget => document
   /** @throws {never} */
   export const showing = (): boolean => document.visibilityState === "visible"
+  /** Open exactly one chooser for the selected words. Cancel does not choose another destination. */
+  export async function shareWords(title: string, text: string): Promise<boolean> {
+    if (!showing() || !text.trim() || title.length > 200 || new TextEncoder().encode(text).length > 65536 || text.includes("\0")) return false
+    if (native()) return registered("AlphaDevice") && (await alpha().shareText({ title, text })).status === "opened"
+    if (!navigator.share) return false
+    try { await navigator.share({ title, text }); return true }
+    catch (error) { if (error instanceof DOMException && error.name === "AbortError") return true; throw error }
+  }
   /** Copy the exact text after the owner's action. */
   export async function copyToBrowser(text: string): Promise<void> {
     await navigator.clipboard.writeText(text)
   }
 }
-import { alpha, copyToBrowser, marked, native, page, pages, registered, showing, zoom } from web
+import { alpha, copyToBrowser, marked, native, page, pages, registered, shareWords, showing, zoom } from web
 export { native, registered }
+
+/** Whether a text chooser opened or the owner cancelled it without a handoff. */
+export effect function shareSystemText(title: string, text: string): boolean!! {
+  return tryPromise(() => shareWords(title, text)) catch () => false
+}
 
 /** Whether this build may load fixtures, the fake world and developer surfaces: only one made with `ELIZA_DEV_ALLOW_TEST_MOCKS=1`. */
 export function testMocks(): boolean {

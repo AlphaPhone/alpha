@@ -46,6 +46,10 @@ final class ResidentDigestChannel {
 
   Scope scope() { return scope; }
 
+  long epoch() { return lease.epoch(); }
+
+  String organizationId() { return lease.account().organizationId(); }
+
   void check() throws IOException {
    synchronized (policy) { checkLease(lease); }
   }
@@ -75,6 +79,14 @@ final class ResidentDigestChannel {
  }
 
  Session open() throws Exception {
+  Session session = openAccount();
+  JSONObject status = request(session.lease, "GET", "/api/workflow/status", null, SMALL_REPLY);
+  if (status.optInt("hostedDigestProtocol") != 1) throw new IOException("Hosted digests unavailable");
+  return session;
+ }
+
+ /** Native account attestation is available independently of Workflows. */
+ Session openAccount() throws Exception {
   Lease lease;
   synchronized (policy) {
    lease = new Lease(policy.servingEpoch(), ownerGeneration.current(), activeAccount());
@@ -89,9 +101,6 @@ final class ResidentDigestChannel {
 
   String ownerId = id(runtime.getString("userId"));
   String agentId = id(runtime.getString("agentId"));
-  JSONObject status = request(lease, "GET", "/api/workflow/status", null, SMALL_REPLY);
-  if (status.optInt("hostedDigestProtocol") != 1) throw new IOException("Hosted digests unavailable");
-
   String digest = scopeDigest(ownerId, agentId);
   return new Session(lease, new Scope(ownerId, agentId, digest));
  }

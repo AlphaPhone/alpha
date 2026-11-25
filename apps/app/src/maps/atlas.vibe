@@ -1,17 +1,10 @@
 // spec/app/maps/index.md, "The screen holds its connection, its trip, the search, the place on the card, the directions sheet, the saved places, the Calendar event it came from, the agent's question and the agent's last read"
 import type { CloudClient } from "../platform/cloud.vibe"
+import { fresh } from "../runtime/attempts.vibe"
 import type { Point } from "./geometry.ts"
 
 /** What Cloud answered about the account's Maps: its provider, coverage, tiles and credits. */
 export type Coverage = Awaited<ReturnType<CloudClient["mapsCapabilities"]>>
-
-module web {
-  /** A random id for a handle that names a place on this phone only. @throws {never} */
-  export function fresh(): string {
-    return globalThis.crypto.randomUUID()
-  }
-}
-import { fresh } from web
 
 /** A place of the map beyond its number, which the spec never holds: what the provider said of it, or a dropped pin. */
 export interface Spot {

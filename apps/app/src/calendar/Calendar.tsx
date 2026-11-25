@@ -422,7 +422,7 @@ function Month({ runtime }: CalendarProps) {
   };
   const offered = views.filter(({ layout }) => layout !== "Columns" || s.wide);
   return (
-    <CalendarMonthPanel month={firstDate.getMonth()} year={firstDate.getFullYear()}
+    <CalendarMonthPanel wide={s.wide} month={firstDate.getMonth()} year={firstDate.getFullYear()}
       months={Array.from({ length: 12 }, (_, at) => ({ value: at, label: monthOnly.format(new Date(2000, at, 1)) }))}
       years={Array.from({ length: 11 }, (_, at) => firstDate.getFullYear() - 5 + at).map((year) => ({ value: year, label: String(year) }))}
       onMonth={(month) => toMonth(firstDate.getFullYear(), month)} onYear={(year) => toMonth(year, firstDate.getMonth())}
