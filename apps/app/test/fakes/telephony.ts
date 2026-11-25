@@ -84,6 +84,11 @@ export interface TelephonyScene {
   replyDraft: string | null;
   readonly asked: unknown[];
   textReview?: TextReviewScene;
+  /**
+   * The image's own enrollment with the resident agent the page reaches, as an Alpha image's host registers it: the
+   * journal its approved device actions are kept in. The dev server's phone has one; journeys enroll through `textReview`.
+   */
+  enrollment?: { readonly journal: Map<string, JournalEntry> };
 }
 
 async function versionOf(id: string, revision: number): Promise<string> {
@@ -441,15 +446,22 @@ function journal(world: TelephonyScene): Faked {
     list(): Promise<unknown>;
   }>(() => {
     const unused = () => Promise.reject(rejection("Not a deletion call", "unavailable"));
+    const entries = () => world.textReview?.journal ?? world.enrollment?.journal;
     return {
       reserve: unused, markApplying: unused, finish: unused, dismiss: unused,
-      get: ({ proposalId }) => world.textReview === undefined ? unused() : Promise.resolve({ entry: world.textReview.journal.get(proposalId) ?? null }),
-      list: () => world.textReview === undefined ? unused() : Promise.resolve({ entries: [...world.textReview.journal.values()] }),
+      get: ({ proposalId }) => {
+        const kept = entries();
+        return kept === undefined ? unused() : Promise.resolve({ entry: kept.get(proposalId) ?? null });
+      },
+      list: () => {
+        const kept = entries();
+        return kept === undefined ? unused() : Promise.resolve({ entries: [...kept.values()] });
+      },
       edit: ({ proposalId, expectedRevision, next }) => {
-        const review = world.textReview;
-        const kept = review !== undefined && (review.journal.get(proposalId)?.revision ?? 0) === expectedRevision
+        const journal = entries();
+        const kept = journal !== undefined && (journal.get(proposalId)?.revision ?? 0) === expectedRevision
           && next.proposalId === proposalId && next.revision === expectedRevision + 1;
-        if (kept) review.journal.set(proposalId, next);
+        if (kept) journal.set(proposalId, next);
         return Promise.resolve({ kept });
       },
       pending: () => Promise.resolve({
@@ -521,13 +533,15 @@ export function telephonyPlugins(world: TelephonyScene, now: () => number): Reco
     ElizaActionJournal: journal(world),
     AlphaOngoingCall: ongoing(world),
     AlphaCallState: callState(world),
-    ...(world.textReview === undefined ? {} : { AlphaMediaEnrollment: textReviewEnrollment }),
+    ...(world.textReview === undefined && world.enrollment === undefined ? {} : { AlphaMediaEnrollment: textReviewEnrollment }),
   };
 }
 
 /**
  * The image the dev server shows with `ALPHA_FAKES=phone`: the people, calls, voicemail and conversations of develop's
- * fixtures, dated from `now`, so Phone, Messages and Contacts can be laid beside develop's. Journeys use `telephonyScene`.
+ * fixtures, dated from `now`, so Phone, Messages and Contacts can be laid beside develop's. It is enrolled as an Alpha
+ * image's host enrolls it, so the agent `ALPHA_AGENT` names is offered this phone's device actions and the page shows
+ * their review cards. Journeys use `telephonyScene`.
  */
 export function developTelephony(now: number): TelephonyScene {
   const minute = 60_000;
@@ -562,6 +576,7 @@ export function developTelephony(now: number): TelephonyScene {
     }));
   return {
     ...telephonyScene(),
+    enrollment: { journal: new Map() },
     people,
     calls: [
       call(1, "Maya Chen", 12, "missed", 0),

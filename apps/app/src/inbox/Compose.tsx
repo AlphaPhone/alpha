@@ -1,5 +1,5 @@
 // spec/app/inbox/drafts.md, "Story: Write a message"; spec/app/inbox/drafts.md, "Story: Set a draft aside or discard it"; spec/app/inbox/sending.md, "Story: Send a draft I reviewed"
-import { Button, InboxComposer, InboxDiscardDialog, InboxDraftReview, InboxFileOfferSheet, InboxSuggestionSheet, type InboxNoticeKind, type InboxSendOutcomeProps, InboxShelfSheet } from "@repo/ui";
+import { Button, InboxComposer, InboxDiscardDialog, InboxDraftReview, InboxFileOfferSheet, InboxSuggestionSheet, type InboxNoticeKind, type InboxSendOutcomeProps } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
 import { type Mailbox, accessOf } from "../../gen/app__inbox.ts";
 import type { Machine as Writing } from "../../gen/app__inbox__drafts.effect.vibe";
@@ -47,8 +47,8 @@ const refusals = { TooBig: "fileTooBig", NotReadable: "fileUnreadable", NoRoom: 
 const keepingOf = (s: Composer) => (s.unkept ? (s.full ? "full" : "notKept") : s.write.status === "Loading" || s.pending ? "writing" : "kept");
 
 /**
- * The draft open: its recipients, subject, text and files, kept on the phone as it is typed, the review of its send,
- * and the shelf of drafts set aside. Each control is offered exactly when its machine takes its event.
+ * The draft open: its recipients, subject, text and files, kept on the phone as it is typed, and the review of its send.
+ * Each control is offered exactly when its machine takes its event.
  * @model spec/app/inbox/drafts.md
  */
 export function Compose({ runtime, list }: ComposeProps) {
@@ -187,27 +187,6 @@ export function Compose({ runtime, list }: ComposeProps) {
         onKeep={() => void send({ type: "keepDraft" }, "Owner")}
       />
     </>
-  );
-}
-
-/** The drafts set aside in this session, each brought back exactly as it was left. */
-export function Shelf({ runtime, open, onOpenChange }: { runtime: ComposeProps["runtime"]; open: boolean; onOpenChange: (open: boolean) => void }) {
-  const { state, can, send } = useDrafts(runtime);
-  if (!state) return null;
-  const drafts = state.shelf.shelved.map((id) => {
-    const words = runtime.runSync(Letters.use((all) => Effect.sync(() => all.words(id))));
-    return { id: String(id), to: words.to.join(", ") || "No recipient", subject: words.subject || words.text.slice(0, 60) };
-  });
-  return (
-    <InboxShelfSheet
-      open={open}
-      onOpenChange={onOpenChange}
-      drafts={drafts}
-      onResume={(id) => {
-        const event = { type: "resume", draft: Number(id) } as const;
-        if (can(event, "Owner")) void send(event, "Owner");
-      }}
-    />
   );
 }
 

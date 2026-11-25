@@ -53,6 +53,9 @@ function TransferNotice({ runtime }: { readonly runtime: Runtime }) {
   </Alert>;
 }
 
+/** A row of a note's actions menu, as develop's: 48px, 18px icons, a 10px corner. */
+const noteAction = "min-h-12 rounded-option px-3 [&_svg:not([class*='size-'])]:size-4.5";
+
 function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly saved: DraftWords }) {
   const writing = useEditor(runtime);
   const actions = useActions(runtime);
@@ -85,13 +88,14 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
     if (!open && actions.can({ type: "closeMenu" }, "Owner")) void actions.send({ type: "closeMenu" }, "Owner");
   }}>
     <MenuTrigger asChild><Button aria-label="Note actions" size="icon" variant="ghost"><Ellipsis /></Button></MenuTrigger>
-    <MenuContent align="end">
+    <MenuContent align="end" alignOffset={-60} sideOffset={6} className="rounded-lg bg-card p-1.5 shadow-lg">
       {shared && actions.state?.open && <>
-        <MenuItem onSelect={() => void actions.send({ type: "share", channel: "Email", mark: 0 }, "Owner")}><Mail /> Share by email</MenuItem>
-        <MenuItem onSelect={() => void actions.send({ type: "share", channel: "Messages", mark: 0 }, "Owner")}><MessageSquare /> Share in Messages</MenuItem>
+        <MenuItem className={noteAction} onSelect={() => void actions.send({ type: "share", channel: "Email", mark: 0 }, "Owner")}><Mail /> Share by email</MenuItem>
+        <MenuItem className={noteAction} onSelect={() => void actions.send({ type: "share", channel: "Messages", mark: 0 }, "Owner")}><MessageSquare /> Share in Messages</MenuItem>
       </>}
-      {exportable && <MenuItem onSelect={() => void transfer.send(exporting, "Owner")}><FileDown /> Save as text</MenuItem>}
-      {deletable && <MenuItem destructive onSelect={() => send(deletion)}><Trash2 /> Delete</MenuItem>}
+      {exportable && <MenuItem className={noteAction} onSelect={() => void transfer.send(exporting, "Owner")}><FileDown /> Save as text</MenuItem>}
+      {deletable && (shared && actions.state?.open || exportable) && <div role="separator" className="my-1 border-t border-border" />}
+      {deletable && <MenuItem className={noteAction} onSelect={() => send(deletion)}><Trash2 /> Delete</MenuItem>}
     </MenuContent>
   </Menu>;
   return (
@@ -188,10 +192,10 @@ function VoiceSharePanel({ open, close, choose, canSave, restore }: {
 }) {
   return <Dialog open={open} onOpenChange={(shown) => { if (!shown) close(); }}>
     <DialogContent aria-describedby={undefined} overlayClassName="bg-foreground/35 dark:bg-background/35"
-      className="inset-x-3 top-auto bottom-[calc(max(6.75rem,var(--alpha-dock-overlap,0px),env(safe-area-inset-bottom))+--spacing(2))] mx-auto max-h-[80dvh] max-w-lg translate-y-0 gap-0 overflow-y-auto rounded-panel bg-background shadow-none"
+      className="inset-x-3 top-auto bottom-[calc(max(6.75rem,var(--alpha-dock-overlap,0px),env(safe-area-inset-bottom))+--spacing(2))] mx-auto max-h-[80dvh] max-w-lg translate-y-0 gap-0 overflow-y-auto rounded-panel bg-background p-5 shadow-none"
       onCloseAutoFocus={(event) => { event.preventDefault(); restore(); }}>
       <div className="mb-5 flex items-center justify-between gap-4">
-        <DialogTitle className="text-2xl font-bold">Share</DialogTitle>
+        <DialogTitle className="font-sans text-2xl font-bold">Share</DialogTitle>
         <DialogClose asChild><Button size="icon" variant="secondary" className="size-11 rounded-full" aria-label="Close share"><X className="size-5.5" /></Button></DialogClose>
       </div>
       <div className="flex flex-col gap-2">

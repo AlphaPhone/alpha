@@ -425,6 +425,6 @@ describe("The Browser on a phone", () => {
     await closeAll();
     const again = await onBrowser(first.world);
     await until(again.alpha, again.runtime, Tabs, (s) => s.hydrated);
-    expect(again.runtime.runSync(Effect.flatMap(Pages, (pages) => pages.visits()))).toEqual(kept);
+    expect(again.runtime.runSync(Effect.flatMap(Pages, (pages) => pages.history())).map((row) => row.url)).toEqual(kept);
   });
 });

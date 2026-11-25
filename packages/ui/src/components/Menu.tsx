@@ -1,4 +1,4 @@
-import type { ComponentProps } from "react";
+import { type ComponentProps, useRef } from "react";
 import * as MenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { cn } from "../lib/cn.ts";
 import { floatingPanel, floatingRow } from "../lib/styles.ts";
@@ -23,12 +23,32 @@ export const MenuTrigger = MenuPrimitive.Trigger;
 export function MenuContent({ align = "end", sideOffset = 0, collisionPadding = 8, className, ...props }: MenuContentProps) {
   return (
     <MenuPrimitive.Portal>
-      <MenuPrimitive.Content align={align} sideOffset={sideOffset} collisionPadding={collisionPadding} className={cn(floatingPanel, "flex min-w-50 flex-col", className)} {...props} />
+      <MenuPrimitive.Content align={align} sideOffset={sideOffset} collisionPadding={collisionPadding} className={cn(floatingPanel, "flex min-w-54 flex-col", className)} {...props} />
     </MenuPrimitive.Portal>
   );
 }
 
-/** One action of a menu; an icon before its words is decorative. */
-export function MenuItem({ destructive = false, className, ...props }: MenuItemProps) {
-  return <MenuPrimitive.Item className={cn(floatingRow, "[&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-5.5", destructive && "text-destructive", className)} {...props} />;
+/**
+ * One action of a menu; an icon before its words is decorative. A touch chooses it only when the touch began on it:
+ * the tap that opened the menu lands its click on whichever item opened under the finger, and is not a choice.
+ */
+export function MenuItem({ destructive = false, className, onPointerDown, onClick, ...props }: MenuItemProps) {
+  const pressedRef = useRef(false);
+  return (
+    <MenuPrimitive.Item
+      className={cn(floatingRow, "rounded-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-5", destructive && "text-destructive", className)}
+      onPointerDown={(event) => {
+        pressedRef.current = true;
+        onPointerDown?.(event);
+      }}
+      onClick={(event) => {
+        const touched = "pointerType" in event.nativeEvent && (event.nativeEvent.pointerType === "touch" || event.nativeEvent.pointerType === "pen");
+        const began = pressedRef.current;
+        pressedRef.current = false;
+        if (touched && !began) event.preventDefault();
+        else onClick?.(event);
+      }}
+      {...props}
+    />
+  );
 }

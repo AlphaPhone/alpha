@@ -8,7 +8,7 @@ import type { Effect as PageOut, Event as PageEvent, Page } from "../../gen/app_
 import * as Share from "../../gen/app__browser__share.effect.vibe"
 import type { Event as ShareEvent } from "../../gen/app__browser__share.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
-import type { BrowserPageGuard, BrowserTabHostPlugin } from "@elizaos/os-bridges"
+import type { BrowserPageGuard } from "@elizaos/os-bridges"
 import { BrowserDownloadsHandoff, TabHost, hosted } from "../platform/browser.vibe"
 import { readWebBrowsing, saveWebBrowsing } from "../platform/browserWeb.vibe"
 import type { Install } from "../runtime/attempts.vibe"
@@ -73,9 +73,6 @@ const failedRestore = (ticket: number): TabsEvent => ({ type: "restored", ticket
 
 /** A tab's page: its own machine, made when the tab is first asked for and ended with the tab. */
 export type PageRuntime = ManagedRuntime.ManagedRuntime<Address.Machine | Time, unknown>
-
-/** Alpha's own tab host beyond eliza's: a page that failed at an HTTPS address opens in another browser, as the host named it. */
-type AlphaTabHost = BrowserTabHostPlugin & { openFailedPage(options: BrowserPageGuard): Promise<void> }
 
 /** What Alpha's tab host says of a failed tab beyond eliza's state: the HTTPS address another browser may still reach. */
 schema Stranded { readonly id: string; readonly elsewhereUrl?: string }
@@ -301,7 +298,7 @@ export effect function leaving(confirmed: boolean): ShareEvent!!(TabHost | Tabs.
   const failedAt = elsewhere.get(idOf(tab))
   if (Option.isNone(guard) || (share.stranded && failedAt === undefined)) return { type: "launched", ok: false, found: true }
   const sent = share.stranded && failedAt !== undefined
-    ? hosted("openFailedPage", (plugin) => (plugin as AlphaTabHost).openFailedPage({ ...guard.value, url: failedAt }))
+    ? hosted("openFailedPage", (plugin) => plugin.openFailedPage({ ...guard.value, url: failedAt }))
     : hosted("openExternalBrowser", (plugin) => plugin.openExternalBrowser({ ...guard.value, privateConfirmed: confirmed }))
   const launched = effect { try sent; return { type: "launched", ok: true, found: true } as ShareEvent }
     catch (failed) => ({ type: "launched", ok: false, found: !String((failed.cause as { message?: unknown } | undefined)?.message ?? failed.cause).includes("No other installed browser") }) as ShareEvent

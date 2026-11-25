@@ -122,8 +122,8 @@ export function AssistantComposer({
             <MenuTrigger asChild>
               <Button variant="ghost" size="icon" aria-label="Chat actions" disabled={!acting} className="hover:bg-transparent disabled:opacity-40"><Plus /></Button>
             </MenuTrigger>
-            <MenuContent side="top" align="start" alignOffset={bar ? 0 : -16} sideOffset={bar ? 12 : 20}
-              className="min-w-55 rounded-tile border-0 bg-background p-2 shadow-dock dark:shadow-dock-dark [&>[role=menuitem]]:min-h-12 [&>[role=menuitem]]:px-3">
+            <MenuContent side="top" align="start" alignOffset={bar ? -57 : -16} sideOffset={bar ? 4 : 20}
+              className="min-w-55 rounded-tile border-0 bg-background p-2 shadow-dock-compact dark:shadow-dock-compact-dark [&>[role=menuitem]]:min-h-12 [&>[role=menuitem]]:rounded-md [&>[role=menuitem]]:px-3">
               {onAttach ? <MenuItem onSelect={onAttach}><Paperclip aria-hidden />Attach media</MenuItem> : null}
               {onSearch ? <MenuItem onSelect={onSearch}><Search aria-hidden />Search chat</MenuItem> : null}
               {onNew || making ? <MenuItem disabled={making} onSelect={onNew}><Plus aria-hidden />New chat</MenuItem> : null}
@@ -147,7 +147,7 @@ export function AssistantComposer({
             event.preventDefault();
             if (!event.repeat && !closed && !onStop && !stopping) onSend?.();
           }}
-          className={cn("max-h-[min(10.5rem,28dvh)] min-h-11 min-w-0 flex-1 touch-auto rounded-full bg-transparent py-2.75 text-body leading-field", targeting ? "border border-alpha px-3" : cn("border-0 pr-0.5", bar ? "pl-2" : "pl-0.5"), compact && "hidden")}
+          className={cn("max-h-[min(10.5rem,28dvh)] min-h-11 min-w-0 flex-1 touch-auto rounded-full bg-transparent py-2.75 text-body leading-field", targeting ? "border border-alpha px-3" : cn("border-0 pr-0.5 focus-visible:outline-none", bar ? "pl-2" : "pl-0.5"), compact && "hidden")}
         />
         {onStop || stopping ? (
           <Button variant={compact ? "ghost" : undefined} size="icon" aria-label="Stop reply" loading={stopping} className={compact ? undefined : "bg-foreground text-background hover:bg-foreground/90"} onClick={onStop}><svg aria-hidden viewBox="0 0 24 24" className="size-5.5"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" /></svg></Button>
@@ -164,8 +164,8 @@ export function AssistantComposer({
           <Button variant="ghost" size="icon" aria-label="Talk" className={bar ? undefined : "bg-foreground text-background hover:bg-foreground/90"} onPointerDown={keepComposerFocus} onClick={onTalk}><Mic /></Button>
         ) : !compact && onDictate ? (
           <Button variant="ghost" size="icon" aria-label="Dictate" onPointerDown={keepComposerFocus} onClick={onDictate}><Mic /></Button>
-        ) : compact || (bar && showUnavailableTalk) ? (
-          <Button variant="ghost" size="icon" aria-label="Talk" className="disabled:opacity-100" disabled><Mic /></Button>
+        ) : compact || showUnavailableTalk ? (
+          <Button variant="ghost" size="icon" aria-label="Talk" className={cn("disabled:opacity-100", !bar && "bg-foreground text-background")} disabled><Mic /></Button>
         ) : null}
       </div>
     </div>

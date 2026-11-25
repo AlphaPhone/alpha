@@ -9,9 +9,13 @@ module held {
   import type { BrowserPageGuard, BrowserTabHostPlugin } from "@elizaos/os-bridges"
   import { BrowserTabSession, tabHostPlugin } from "@elizaos/os-bridges"
 
-  /** Alpha's `AlphaBrowser`: eliza's tab host, and the read of the page it presents for one chat turn (`AlphaBrowserPlugin.pageContext`). */
+  /**
+   * Alpha's `AlphaBrowser`: eliza's tab host, the read of the page it presents for one chat turn (`AlphaBrowserPlugin.pageContext`),
+   * and a failed page opened in another browser at the HTTPS address the host named (`AlphaBrowserPlugin.openFailedPage`).
+   */
   export interface AlphaTabHost extends BrowserTabHostPlugin {
     pageContext(options: BrowserPageGuard): Promise<unknown>
+    openFailedPage(options: BrowserPageGuard): Promise<void>
   }
 
   let made: AlphaTabHost | undefined

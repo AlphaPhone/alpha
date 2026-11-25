@@ -20,6 +20,7 @@ export function DictationControls({ runtime }: { runtime: ManagedRuntime.Managed
   const elapsed = useSyncExternalStore(clock.subscribe, clock.snapshot, clock.snapshot);
   if (!state || state.recorder.field !== "ComposerField" || state.recorder.stage === "Closed") return null;
   const { recorder } = state;
+  if (recorder.stage === "Closed") return null;
   const { dictatedText, dictatedDurationMs } = runtime.runSync(VoiceWords).memory;
   const start = { type: "startRecording" } as const;
   const stop = { type: "stopRecording", now: untimed } as const;
