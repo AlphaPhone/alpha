@@ -1,8 +1,8 @@
 name: Cloud deploy
 run-name: Alpha Cloud ${{ inputs.action }} (${{ inputs.environment }}) on ${{ github.sha }}
 # Deploys Alpha's own cloud (spec/cloud/rollout.md), the cut-over candidate: the API Worker (apps/cloud/src/worker.vibe)
-# and the web host Worker (apps/cloud/src/edge.vibe), through `pnpm cloud`. Manual and main-only. Deploying the Cloud
-# never moves a phone: each environment's phones address the cloud packages/deployment names until the cutover.
+# and the web host Worker (apps/cloud/src/edge.vibe), through `pnpm cloud`. Dispatch on vibestack-develop.
+# Until cutover, each environment's phones address the cloud that packages/deployment names.
 #
 # Each GitHub environment (alpha-cloud-staging, alpha-cloud-production) holds:
 #   secret CLOUDFLARE_API_TOKEN   Workers Scripts and Routes, Hyperdrive edit, and Zone DNS edit
@@ -35,7 +35,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   cloud:
-    if: github.ref == 'refs/heads/main'
+    if: github.repository_id == '1396333361' && github.ref == 'refs/heads/vibestack-develop'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     environment: alpha-cloud-${{ inputs.environment }}

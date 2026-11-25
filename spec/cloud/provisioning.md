@@ -57,7 +57,7 @@ pure def commandOf(task: Step): str =
 ### Each environment records how many steps were read back, whether one is running, whether the last read-back failed, and the pin it is at
 
 ```quint
-type Trigger = ByHandOnMain | ByHandElsewhere | Scheduled
+type Trigger = ByHandOnVibestackDevelop | ByHandElsewhere | Scheduled
 type Progress = { done: int, running: bool, failed: bool, pin: int }
 type Provisioning = { pin: int, staging: Progress, production: Progress }
 type Effect = Run({ environment: Environment, task: Step, trigger: Trigger })
@@ -89,14 +89,14 @@ pure def canAdvance(s: Provisioning, pin: int): bool =
 pure def advance(s: Provisioning, pin: int): Provisioning = { pin: pin, staging: fresh(pin), production: fresh(pin) }
 ```
 
-### A step runs only once the step before it was read back, one at a time per environment; production runs only after staging is up at the same pin; and a serve runs only by hand from the main branch
+### Steps follow confirmed read-backs one at a time per environment, production follows staging at the same pin, and serve runs only by hand from vibestack-develop
 
 ```quint
 pure def canLaunch(s: Provisioning, environment: Environment, trigger: Trigger): bool =
   val p = progress(s, environment)
   not(p.running) and p.done < total and p.pin == s.pin
     and (environment == Production implies live(s.staging, s.pin))
-    and (taskAt(p.done) == Serve implies trigger == ByHandOnMain)
+    and (taskAt(p.done) == Serve implies trigger == ByHandOnVibestackDevelop)
 
 pure def launch(s: Provisioning, environment: Environment, trigger: Trigger): Moved =
   val p = progress(s, environment)
@@ -157,14 +157,14 @@ pure def stepStepsCountOneAtATime(before: Provisioning, via: str, after: Provisi
     or (after.production.done == before.production.done + 1 and via == "readBack"))
 ```
 
-### What runs is the next step of its environment, and a serve is always by hand from the main branch
+### What runs is the next step of its environment, and a serve is always by hand from the vibestack-develop branch
 
 ```quint
 pure def stepRunsAreInOrder(before: Provisioning, after: Provisioning, out: List[Effect]): bool =
   out.every(e => match e {
     | Run(r) => taskAt(progress(before, r.environment).done) == r.task
         and not(progress(before, r.environment).running)
-        and (r.task == Serve implies r.trigger == ByHandOnMain)
+        and (r.task == Serve implies r.trigger == ByHandOnVibestackDevelop)
   })
 ```
 
