@@ -4,7 +4,7 @@ import { busy } from "./platform.ts";
 import type { Route } from "./routes.ts";
 
 /** The owner's account as eliza's cloud answers `GET /api/v1/user`: typed by eliza's own client, so a change of its shape stops this compiling. */
-export const account: Account = { id: "user-1", email: "owner@alpha.test", phone: null, name: "owner", organization_id: "org-1", organization: { id: "org-1", name: "owner" } };
+export const account: Account = { id: "user-1", email: "owner@alpha.test", name: "owner", organization_id: "org-1", organization: { id: "org-1", name: "owner" } };
 
 const limits = (observedAt: number): BillingSnapshot => ({
   schemaVersion: 3,

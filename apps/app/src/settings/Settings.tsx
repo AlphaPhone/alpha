@@ -285,18 +285,19 @@ function Display({ runtime, common }: PageProps) {
   );
 }
 
-// spec/app/settings/preferences.md, "Story: Decide whether Alpha asks before it acts"; spec/app/settings/preferences.md, "When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again"; spec/app/settings/index.md, "Set up Alpha access opens all permissions in review, and each row on Permissions opens that one access"
+// spec/app/settings/preferences.md, "Story: Decide whether Alpha asks before it acts"; spec/app/settings/preferences.md, "When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again"; spec/app/settings/index.md, "Set up Alpha access opens all permissions in review, and each row on Permissions opens that one access"; spec/app/settings/index.md, "Each page links to what another area owns there"
 function Privacy({ runtime, alpha, common }: PageProps) {
   const device = useDevice(runtime);
   const { can, send } = usePages(runtime);
   if (!device) return null;
   const { recovery, ...shown } = device;
   const review = { type: "reviewAllAccess" } as const;
+  const listener = { type: "handOver", neighbour: "Listener", micMayBeOn: false } as const;
   return (
     <>
       {recovery}
-      <SettingsPrivacyPage {...common} {...shown} onSetUpAccess={can(review) ? () => void send(review) : undefined}>
-        {alpha.slot("settings/listening")}
+      <SettingsPrivacyPage {...common} {...shown} onSetUpAccess={can(review) ? () => void send(review) : undefined} onListener={can(listener) ? () => void send(listener) : undefined}>
+        {alpha.slot("settings/voice")}
       </SettingsPrivacyPage>
     </>
   );
@@ -393,7 +394,7 @@ function About({ runtime, alpha, common }: PageProps) {
   const activity = useActivity(runtime).state;
   const agent = activity === undefined ? undefined : agentWords[ActivityGen.agentWord(activity.connection)];
   return (
-    <SettingsAboutPage {...common} onPhone={pages?.phone} agent={agent} alphaVersion={reading(facts, "Versions")} androidVersion={reading(facts, "AndroidVersion")} storage={reading(facts, "Storage")}>
+    <SettingsAboutPage {...common} onPhone={pages?.phone} agent={agent} alphaVersion={reading(facts, "Versions")} androidVersion={reading(facts, "AndroidVersion")}>
       {alpha.slot("settings/about")}
     </SettingsAboutPage>
   );
@@ -528,7 +529,7 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
   const start = android.state && loading(android.state.start) ? { target: targetNames[android.state.target], channel: android.state.channel || undefined } : undefined;
   const refresh = { type: "refresh", at: untimed } as const;
   const common: Common = {
-    actions: state.phone && (page === "Top" || page === "General" || page === "PasswordsPage") && facts.can(refresh)
+    actions: state.development && state.phone && (page === "Top" || page === "General" || page === "PasswordsPage") && facts.can(refresh)
       ? <Button variant="ghost" size="sm" onClick={() => void facts.send(refresh)}>Refresh</Button>
       : undefined,
     onBack: can(goBack) ? () => void send(goBack) : undefined,

@@ -16,6 +16,7 @@ import type { Attached, Board, Line } from "./talk.vibe";
 export interface MessageActions {
   copy: (selection: MessageSelection) => void;
   useInEmail?: (selection: MessageSelection) => void;
+  openLink?: (href: string) => void;
 }
 
 export function chip(file: Attached): AssistantAttachment {
@@ -89,6 +90,7 @@ export function useMessageRows({ runtime, board, lines, chats, writing, replying
         onCopy: copy && Chats.copyableText(recorded, blank) ? () => copy(selection) : undefined,
         onUseInEmail: addToEmail && Chats.textForEmail(recorded, blank, line.mine) ? () => addToEmail(selection) : undefined,
         onEditAgain: Composer.enabled(writing, editAgain) ? () => { board.type(line.text); compose(editAgain); } : undefined,
+        onOpenLink: actions?.openLink,
         onReadAloud: canReadAloud && recorded && !blank && Chats.enabled(chats, readAloud) ? () => chat(readAloud) : undefined,
         onPreview: onPreview && line.attachments?.length ? (id) => {
           const file = line.attachments?.find((one) => one.id === id);

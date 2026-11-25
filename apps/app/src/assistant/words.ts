@@ -1,5 +1,6 @@
 // spec/app/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence every line stays code"
 import { withoutMapsCards } from "@elizaos/plugin-maps-client";
+import { replyWords } from "@repo/ui";
 
 /** A share question a Maps reply asks: the answers it offers, each sent as the owner's words. */
 export interface ShareChoice {
@@ -111,7 +112,10 @@ export function replyBlocks(text: string, streaming = false): Blocks {
   return { words: kept.join("\n").replace(/\n{3,}/g, "\n\n").trim(), choices };
 }
 
-/** A message's words as the owner reads them: an agent reply without its cards, share questions and forms; the owner's own words as written. @throws {never} */
-export function wordsOf(line: { readonly mine: boolean; readonly text: string }): string {
-  return line.mine ? line.text : replyBlocks(line.text).words;
+/**
+ * A message's words as they are copied, quoted, emailed or, `spoken`, read aloud: an agent reply's plain words, without
+ * its cards, share questions, forms and Markdown marks; the owner's own words as written. @throws {never}
+ */
+export function wordsOf(line: { readonly mine: boolean; readonly text: string }, spoken = false): string {
+  return line.mine ? line.text : replyWords(replyBlocks(line.text).words, spoken);
 }

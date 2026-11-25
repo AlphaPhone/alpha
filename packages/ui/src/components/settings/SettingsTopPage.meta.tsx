@@ -2,6 +2,7 @@ import { Download } from "lucide-react";
 import { expect, fn, userEvent, within } from "storybook/test";
 import type { ComponentMeta } from "vibestack/stories";
 import { ListGroup } from "../ListGroup.tsx";
+import { SettingsReading } from "./SettingsReading.tsx";
 import { fullHeight } from "./samples.ts";
 import { SettingsNavRow } from "./SettingsNavRow.tsx";
 import type { SettingsTopPageProps } from "./SettingsTopPage.tsx";
@@ -23,6 +24,8 @@ export const meta: ComponentMeta<SettingsTopPageProps> = {
   examples: {
     Developer: { developer: true },
     "Mic may be on": { micMayBeOn: true },
+    "Signed out": { accountDetail: <SettingsReading reading={{ word: "reported", value: "Signed out", status: "off" }} /> },
+    "Signed in": { accountDetail: <SettingsReading reading={{ word: "reported", value: "owner@alpha.test", status: "ok" }} /> },
     "Android starting": { starting: { target: "android-home" } },
     "Android did not answer": { told: "no-answer" },
     "Returning to a row": { place: 3 },
@@ -44,7 +47,7 @@ export const meta: ComponentMeta<SettingsTopPageProps> = {
     "Returning to a row": ({ canvasElement }: { canvasElement: HTMLElement }) => expect(document.activeElement).toBe(within(canvasElement).getByRole("button", { name: "Privacy" })),
     "Android starting": ({ canvasElement }: { canvasElement: HTMLElement }) => {
       const canvas = within(canvasElement);
-      return expect([canvas.getAllByRole("status", { name: "Opening" }).length, canvas.getByRole("button", { name: /Accounts and sync/ }).hasAttribute("disabled")]).toEqual([1, true]);
+      return expect([canvas.getAllByRole("status", { name: "Opening" }).length, canvas.getByRole("button", { name: /Android settings/ }).hasAttribute("disabled")]).toEqual([1, true]);
     },
   },
 };
