@@ -542,12 +542,12 @@ pure def sometimesADraftAsideIsHandedOn(s: Composer): bool = s.shelf.shelved.exi
 > As the owner, I want to check once whether a send Alpha could not
 > confirm reached Gmail, rather than send it twice or never know.
 
-### An unknown send is checked once, by reading Gmail's Sent for it, while its account may be read and no new send of the draft is handed over
+### An unknown send is checked once by reading its own Gmail operation receipt, while its account may be read and no new send of the draft is handed over
 
-Found, it counts as sent, and a send of it again that waits no longer
-matches what was reviewed. Not found, it is known not to have gone. If
-the check fails, it stays unknown, and only the owner's choice sends it
-again.
+A receipt that confirms the send counts as sent, and a resend already
+under review must be reviewed again. A receipt that explicitly rejects
+the send counts as unsent. An unavailable receipt or one that is still
+unsettled leaves the send unknown. Only the owner can choose to send again.
 
 ```quint
 pure def canCheckSent(s: Composer, draft: int, access: Access): bool =

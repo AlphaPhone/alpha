@@ -95,7 +95,7 @@ const SnapshotJsonSchema = Schema.fromJsonString(SnapshotSchema)
 const ItemReplySchema = Schema.Struct({ item: ItemSchema })
 
 type PendingRequest =
-  | { readonly kind: "createItem"; readonly item: ReminderItemRecord }
+  | { readonly kind: "createItem"; readonly item: ReminderItemRecord; readonly createOnly: boolean }
   | { readonly kind: "updateItem"; readonly item: ReminderItemRecord }
   | { readonly kind: "completeItem"; readonly id: string; readonly item: ReminderItemRecord }
   | { readonly kind: "reopenItem"; readonly id: string }
@@ -146,7 +146,7 @@ effect function fetchSnapshot(ticket: number): Event!!(Agent | KeyValueStore.Key
 function buildWriteRequest(req: PendingRequest, key: string): HttpClientRequest.HttpClientRequest {
   switch (req.kind) {
     case "createItem":
-      return HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/alpha/reminders/items"), { ...req.item, idempotencyKey: key })
+      return HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/alpha/reminders/items"), { ...req.item, ...(req.createOnly ? { createOnly: true } : {}), idempotencyKey: key })
     case "updateItem":
       return HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.patch(`/api/alpha/reminders/items/${encodeURIComponent(req.item.id)}`), { ...req.item, idempotencyKey: key })
     case "completeItem":
@@ -296,6 +296,7 @@ export effect function refreshRemindersList(): void!!Reminders.Machine {
 
 /** Input for creating a reminder item from Quick Add or the Editor sheet. */
 export interface CreateReminderInput {
+  readonly id?: string
   readonly listId: string
   readonly title: string
   readonly notes?: string
@@ -316,6 +317,7 @@ export effect function createReminderItem(input: CreateReminderInput): (Reminder
   const now = try (try Time).now()
   const machine = try Reminders.Machine
   const current = remindersStore.snapshot().snapshot
+  if (input.id !== undefined && current.items.some(({ id }) => id === input.id)) return undefined
   const targetList = current.lists.find((list) => list.id === input.listId) ?? current.lists[0]
   const listId = targetList?.id ?? DEFAULT_LIST_ID
   const dueDate = input.dueDate ?? null
@@ -325,7 +327,7 @@ export effect function createReminderItem(input: CreateReminderInput): (Reminder
   const flagged = input.flagged ?? false
   const alertMinutes = dueDate !== null ? (input.alertMinutes === undefined ? 0 : input.alertMinutes) : null
   const item: ReminderItemRecord = {
-    id: `rem_${fresh()}`,
+    id: input.id ?? `rem_${fresh()}`,
     listId,
     title,
     notes: (input.notes ?? "").trim(),
@@ -347,6 +349,18 @@ export effect function createReminderItem(input: CreateReminderInput): (Reminder
   }
   const state = try machine.get()
   const listSpecId = Math.max(1, remindersStore.specIdForList(listId))
+  const dueDay = civilDayFromString(dueDate) ?? civilDayNumber(now)
+  const spec = {
+    listId: listSpecId,
+    hasDue: dueDate !== null,
+    dueDay,
+    hasDueTime: dueMinute !== null,
+    dueMinute: dueMinute ?? 0,
+    repeat: recurrenceToSpec(recurrence),
+    priority: priorityToSpec(priority),
+    flagged,
+  }
+  if (input.id !== undefined && !Reminders.canCreateItem(state, spec)) return undefined
   const nextAttempt = state.write.id + 1
   const nextSnapshot: RemindersSnapshot = {
     ...current,
@@ -354,22 +368,9 @@ export effect function createReminderItem(input: CreateReminderInput): (Reminder
     updatedAtMs: now,
     items: [...current.items, item],
   }
-  pendingWrites.set(nextAttempt, { kind: "createItem", item })
+  pendingWrites.set(nextAttempt, { kind: "createItem", item, createOnly: input.id !== undefined })
   try persistAndBroadcast(nextSnapshot, now)
-  const dueDay = civilDayFromString(dueDate) ?? civilDayNumber(now)
-  try contained(machine.send({
-    type: "createItem",
-    spec: {
-      listId: listSpecId,
-      hasDue: dueDate !== null,
-      dueDay,
-      hasDueTime: dueMinute !== null,
-      dueMinute: dueMinute ?? 0,
-      repeat: recurrenceToSpec(recurrence),
-      priority: priorityToSpec(priority),
-      flagged,
-    },
-  }), "creating reminder")
+  try contained(machine.send({ type: "createItem", spec }), "creating reminder")
   return item
 }
 

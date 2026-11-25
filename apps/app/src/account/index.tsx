@@ -1,5 +1,5 @@
 // spec/app/account/billing.md, "The plans and their prices are read from Cloud, and only the newest reading is taken"; spec/app/account/plan.md, "Story: Know my plan"; spec/app/settings/index.md, "Each page links to what another area owns there"; spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"; spec/kit/read.md, "Story: Read from outside"
-import { Button, cn, Dialog, DialogContent, DialogTitle, Mark, Sheet, SheetContent, Spinner, StatusDot } from "@repo/ui";
+import { AuthMark, Button, cn, Dialog, DialogContent, DialogTitle, Sheet, SheetContent, Spinner, StatusDot } from "@repo/ui";
 import { ChevronDown, RotateCw, X } from "lucide-react";
 import { Layer } from "effect";
 import { useCallback, useRef, useState, useSyncExternalStore } from "react";
@@ -154,7 +154,7 @@ export function AccountStatus({ alpha }: { alpha: Alpha }) {
   const label = current.tag === "Read" ? current.contact || "Signed in"
     : current.tag === "SignInRequired" ? "Signed out" : "Account unavailable";
   return <StatusDot status={current.tag === "Read" ? "ok" : "off"} label={label} showLabel
-    className={cn("flex gap-1.5 text-caption leading-normal text-muted-foreground [&_circle]:fill-current [&_svg]:size-2.5", current.tag === "Read" && "[&_svg]:text-status-ok")} />;
+    className={cn("flex gap-3 text-caption leading-normal text-[#6b6b6b] dark:text-[#8f8f8f] [&_circle]:r-[6px] [&_circle]:fill-current [&_circle]:stroke-none [&_svg]:size-2 [&_svg]:text-current", current.tag === "Read" && "[&_svg]:text-status-ok")} />;
 }
 
 /** The browser's account recovery page is contained in Alpha's phone canvas. */
@@ -180,11 +180,11 @@ function BrowserAccount({ open, reading, retry, close }: { open: boolean; readin
             }
           }}
           className="absolute inset-x-0 top-auto bottom-0 max-h-full max-w-120 translate-y-0 gap-0 overflow-auto rounded-t-sheet rounded-b-none bg-background px-5.5 pt-5 pb-7 text-foreground">
-          <Mark aria-hidden className="mb-6 size-11 shrink-0 text-primary" />
-          <DialogTitle className="mb-7 text-[1.375rem]/[1.2] font-semibold">Alpha</DialogTitle>
+          <AuthMark className="mb-6" />
+          <DialogTitle className="mb-7 font-sans text-[1.375rem]/[1.2] font-semibold">Alpha</DialogTitle>
           {reading
             ? <Spinner label="Reading account" className="mb-3 text-muted-foreground" />
-            : <p role="alert" className="mb-3 rounded-xl bg-[color-mix(in_srgb,#e03131_12%,var(--color-background))] p-3 text-sm leading-[1.45] text-[color-mix(in_srgb,#e03131_72%,var(--color-foreground))]">Unavailable</p>}
+            : <p role="alert" className="mb-3 rounded-[12px] bg-[color-mix(in_srgb,#e03131_12%,var(--color-background))] p-3 text-sm leading-[1.45] text-[color-mix(in_srgb,#e03131_72%,var(--color-foreground))]">Unavailable</p>}
           <Button variant="ghost" className="h-11.5 w-full gap-3 rounded-lg px-3 py-2.5 text-base leading-[1.25] font-medium text-primary hover:bg-transparent"
             onClick={retry} disabled={reading}><RotateCw aria-hidden className="size-5.5" />Try again</Button>
           <Button variant="ghost" className="mt-5 h-11 w-full rounded-full text-base leading-[1.25] font-medium text-muted-foreground hover:bg-transparent" onClick={close}>Back</Button>

@@ -40,7 +40,11 @@ owner" or "the user". The model also described example.com from memory when
 asked to summarize "this page" on Home, where no page goes with the turn, so
 the prompt tells the agent that it sees a web page only in the latest
 message's Browser page, and with none to say that no page is open rather
-than describe one. Asked "Go home." from Notes, with Home declared as a
+than describe one. With a page that had little text, the model filled in
+what it knew of the site, calling example.com a reserved placeholder domain
+when the page said nothing of it, so the prompt also tells the agent to answer
+from the page's title, address and text alone and to say when a page has
+little on it. Asked "Go home." from Notes, with Home declared as a
 view, the model most often planned directions to a saved Home place or asked
 which was meant, where the old phone went to its home screen. So the prompt
 tells the agent that the phone's screens are its views and Home is the home
