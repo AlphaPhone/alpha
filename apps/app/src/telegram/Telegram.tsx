@@ -304,7 +304,7 @@ function AccountMenu({ canSignOut, onRequestSignOut }: { canSignOut: boolean; on
           <MoreVertical />
         </Button>
       </MenuTrigger>
-      <MenuContent>
+      <MenuContent sideOffset={8}>
         <MenuItem destructive disabled={!canSignOut} onSelect={onRequestSignOut}>
           <LogOut aria-hidden />
           Sign out
@@ -700,6 +700,7 @@ function ConversationView({
 
       {canPostHere ? (
         <ChatComposer
+          className="pb-24"
           target={isAlphaBar ? "alpha" : "chat"}
           targetAvatar={{ name: title }}
           onSwapTarget={swapTarget}

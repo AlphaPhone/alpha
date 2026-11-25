@@ -17,7 +17,7 @@ import { slackAt } from "../src/platform/slack.vibe";
 import { telegramAt } from "../src/platform/telegram.vibe";
 import { completeSlackOAuthCallback } from "../src/slack/auth.vibe";
 import { SlackLedger } from "../src/slack/ledger.vibe";
-import { closeAll, only, openOver, until } from "./alpha.tsx";
+import { closeAll, later, only, openOver, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import { fakeWorld } from "./fakes/world.vibe";
 import "../src/main.css";
@@ -214,6 +214,8 @@ describe("Messaging E2E", () => {
       message: "Live SSE ping from browser test",
     });
     await until(alpha, alpha.runtime, TelegramNotices.Machine, (s) => s.posts > 0);
+    await expect.element(page.getByText(/Live SSE ping from browser test/)).toBeVisible();
+    await later(alpha, 10_000);
 
     await page.getByRole("button", { name: /^Telegram/ }).first().click();
     await page.getByRole("button", { name: "Back to chats" }).click();

@@ -32,7 +32,7 @@ export function renderMessagingCard(
       icon={platform === "Slack" ? <Hash /> : <Send />}
       aria-label={`Open ${platform}: ${title}`}
       aria-description={status === "NotUpdated" ? "Not up to date" : undefined}
-      notCurrent={status === "NotUpdated" ? "Not up to date" : undefined}
+      status={status === "NotUpdated" ? "Not up to date" : undefined}
       disabled={open.disabled}
       onClick={open.onClick}
     >

@@ -9,6 +9,7 @@ import { Machine as Voice, type Voice as VoiceState } from "../../gen/app__voice
 import { useMachine as useVoice } from "../../gen/app__voice.react.ts";
 import { quiet } from "../../gen/app__voice.ts";
 import { useMachine as useSpeaker } from "../../gen/app__voice__output.react.ts";
+import { reading } from "../../gen/app__voice__output.ts";
 import { voiceArea } from "../messages/dictation.vibe";
 import { registered } from "../platform/device.vibe";
 import { VoiceBridge } from "../platform/voice.vibe";
@@ -24,7 +25,7 @@ import { Assistant } from "./Assistant.tsx";
 import { assistantBack, assisting, spokenScreen } from "./assistant.vibe";
 import { copyMessage, emailDestination, emailMessage } from "./message-actions.vibe";
 import { dictate } from "./dictation.vibe";
-import { aloud, readTranscript } from "./read-aloud.vibe";
+import { aloud, readTranscript, stopMessage } from "./read-aloud.vibe";
 import { beginTalk, commsVoicePanel, spokenReviewNotice, talkFromComms } from "./voice-entry.vibe";
 
 const voiceOwnsComposer = (state: VoiceState) => !quiet(state) || state.recorder.stage !== "Closed";
@@ -66,6 +67,8 @@ function LiveAssistant({ runtime, alpha }: Shown<Layer.Success<typeof screens> |
     messageActions={{
       copy: (selection) => void runtime.runPromise(copyMessage(selection)),
       useInEmail: destination ? (selection) => void runtime.runPromise(emailMessage(selection, destination)) : undefined,
+      reading: speaker?.text === "Message" && reading(speaker)
+        ? { message: speaker.item, stop: () => void runtime.runPromise(stopMessage(speaker.ticket)) } : undefined,
       openLink: registered("AlphaBrowser") ? (href) => void Promise.all([import("../browser/index.tsx"), import("../browser/browser.vibe")])
         .then(([{ default: browser }, { openMessageLink }]) => browser.runtime(alpha).runPromise(openMessageLink(href, "Ask Alpha")))
         .catch(() => false) : undefined,

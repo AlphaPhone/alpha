@@ -406,6 +406,7 @@ function SlackChannelView({
       </main>
 
       <ChatComposer
+        className="pb-24"
         target={isAlphaBar ? "alpha" : "chat"}
         targetAvatar={{ name: channelLabel }}
         onSwapTarget={() => { swapComposerTarget(composer, isAlphaBar); }}

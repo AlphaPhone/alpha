@@ -13,6 +13,7 @@ import { reviewMailContext, MailContextRefused } from "@elizaos/plugin-inbox-cli
 import { Agent } from "../platform/agent.vibe"
 import { InboxBrowserLinks } from "../platform/browser.vibe"
 import { native, registered } from "../platform/device.vibe"
+import type { InboxAttachmentFiles } from "../platform/inboxAttachments.vibe"
 import { say, type Said } from "../notices/toasts.vibe"
 import { MailQuestions, sourceOf, type MailQuestion } from "./mail-context.vibe"
 import { Cloud } from "../platform/cloud.vibe"
@@ -22,7 +23,7 @@ import { Mail, asked, body, faultOf, relabel, revisionOf } from "./gmail.vibe"
 import { backFromDraft } from "./composer.vibe"
 import { ownerChanges } from "./mailbox.vibe"
 import { prepareMessage } from "./mail-html.ts"
-import { type ThreadPages, threadFault, threadMessage, threadPages } from "./thread.vibe"
+import { type ThreadPages, locateThread, threadFault, threadMessage, threadPages } from "./thread.vibe"
 import { type AttachmentPreviews, attachmentPreviews, forgetPreview, handleAttachment } from "./attachment.vibe"
 
 module web {
@@ -37,7 +38,7 @@ const failedRead = (ticket: number, access: ReturnType<typeof accessOf>, fault: 
   ({ type: "loaded", ticket, access, ok: false, fault, revision: 0, message: 0, position: 0, thread: 0 })
 
 // spec/app/inbox/message.md, "Only the newest read's answer is shown, while its account may still be read; a read that fails says why"
-effect function read(ticket: number, account: number, message: number, position: number, newest: boolean): (Event | undefined)!!(Cloud | Mail | Inbox.Machine | Message.Machine | ThreadPages) {
+effect function read(ticket: number, account: number, message: number, position: number, place: Message.ReadPlace): (Event | undefined)!!(Cloud | Mail | Inbox.Machine | Message.Machine | ThreadPages) {
   const ledger = try Mail
   const list = try Inbox.Machine
   const view = try Message.Machine
@@ -46,9 +47,9 @@ effect function read(ticket: number, account: number, message: number, position:
     state.account === account && state.message === message && state.body.ticket === ticket && state.body.status === "Loading"
   if (!current(try view.get()) || (try list.get()).selected.account !== account) return undefined
   const anchor = ledger.card(message)
-  const found = anchor === undefined
+  const found = place === "SelectedMessage" || anchor === undefined
     ? (Effect.map(body(account, message), (loaded) => ({ body: loaded, position: 0, thread: 1 })) catch (cause) => faultOf(cause))
-    : (threadMessage(account, anchor, position, newest) catch (cause) => threadFault(cause))
+    : (threadMessage(account, anchor, position, place === "NewestMessage") catch (cause) => threadFault(cause))
   const mailbox = try list.get()
   if (!current(try view.get()) || mailbox.selected.account !== account || ledger.generation(account) !== generation) return undefined
   const access = accessOf(mailbox, account)
@@ -141,10 +142,10 @@ const questionAbout = (account: number, message: number, revision: number) => ef
   try ignore(shell.send({ type: "raise", detent: "Sheet" }))
 }
 
-function carry(fx: Out): Job<Event, Cloud | Agent | MailQuestions | Mail | Inbox.Machine | Marking.Machine | Message.Machine | Shell | ThreadPages | AttachmentPreviews | InboxBrowserLinks | Toasts | Said, []> {
+function carry(fx: Out): Job<Event, Cloud | Agent | MailQuestions | Mail | Inbox.Machine | Marking.Machine | Message.Machine | Shell | ThreadPages | AttachmentPreviews | InboxAttachmentFiles | InboxBrowserLinks | Toasts | Said, []> {
   return match (fx) {
-    when { tag: "ReadMessage", let ticket, let account, let message, let position, let newest }:
-      stream("read", Stream.filter(Stream.fromEffect(read(ticket, account, message, position, newest)), (event): event is Event => event !== undefined),
+    when { tag: "ReadMessage", let ticket, let account, let message, let position, let place }:
+      stream("read", Stream.filter(Stream.fromEffect(read(ticket, account, message, position, place)), (event): event is Event => event !== undefined),
         failedRead(ticket, { account, grant: { read: true, send: false, modify: false } }, "Unreachable"));
     when { tag: "CheckAccounts" }: run("check", effect { try ignore((try Inbox.Machine).send({ type: "checkAccess" })) });
     when { tag: "RefreshList", let account }: run("refresh", refreshed(account));
@@ -217,11 +218,32 @@ const openedUnread = started(effect {
   })
 }, "marking the message on screen")
 
+// spec/app/inbox/message.md, "Opening a row reads the exact message chosen while its account may be read"
+const threadPosition = started(effect {
+  const reader = try Message.Machine
+  const list = try Inbox.Machine
+  const mail = try Mail
+  const selected = Stream.map(reader.changes, (view) => view.body.status === "Loaded" && view.thread === 1 ? view.body.ticket : 0)
+  try Stream.runDrain(Stream.switchMap(Stream.changes(selected), (ticket) => Stream.fromEffectDrain(effect {
+    if (ticket === 0) return
+    const state = try reader.get()
+    if (state.body.ticket !== ticket) return
+    const { account, message } = state
+    const generation = mail.generation(account)
+    const card = mail.body(ticket)?.message
+    if (!card) return
+    const found = locateThread(account, card) catch () => undefined
+    const mailbox = try list.get()
+    if (!found || mail.generation(account) !== generation || mailbox.selected.account !== account) return
+    try contained(reader.send({ type: "threadLocated", ticket, message, access: accessOf(mailbox, account), ...found }), "finding the message in its thread")
+  })))
+}, "finding the message in its thread")
+
 const viewing = reacting(Message, { keep: 1, open: [{ type: "restart" }], carry })
 const marking = reacting(Marking, { keep: 1, open: [{ type: "restart" }, "World"], carry: carryMark })
 
 /** A message opened from the list, and its marks: kept across restarts, read through the owner's cloud, and told what the list knows of access. */
-export const reading = together(viewing, marking, access, sessions, afresh, openedUnread, threadPages, attachmentPreviews, forgetPreview)
+export const reading = together(viewing, marking, access, sessions, afresh, openedUnread, threadPosition, threadPages, attachmentPreviews, forgetPreview)
 
 // spec/app/inbox/message.md, "Closing the message, losing read access to its account, a new cloud session, or a restart leaves nothing open and no read that could still answer"
 /** Back from a message: a review open closes first, then the message, and the list is Inbox's own last step. */

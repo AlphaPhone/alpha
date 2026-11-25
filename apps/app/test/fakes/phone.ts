@@ -154,7 +154,7 @@ function mailRoute(method: string, target: string): boolean {
  * headers a page may read and the body in base64; what it will not send it rejects with one of eliza's `CloudFailure`
  * codes, `mail-lease-upgrade-required` for a mail or calendar route on a phone signed in without a lease.
  */
-export function elizaCloud(cloud: Answering, signedIn: () => boolean, lease: MailLeaseScene): Faked {
+export function elizaCloud(cloud: Answering, signedIn: () => boolean, lease: MailLeaseScene, opened?: (url: string) => void): Faked {
   return plugin<ElizaCloudPlugin>(() => ({
     async request({ method, target, headers, body }: NativeCloudRequest) {
       if (!target.startsWith("/api/")) throw rejection("not-listed");
@@ -170,7 +170,7 @@ export function elizaCloud(cloud: Answering, signedIn: () => boolean, lease: Mai
     },
     readGrant: () => Promise.reject(rejection("grant-unknown")),
     cancel: () => Promise.resolve({ cancelled: false }),
-    openExternal: () => Promise.resolve({ opened: true }),
+    openExternal: ({ url }) => { opened?.(url); return Promise.resolve({ opened: true }); },
   }));
 }
 
