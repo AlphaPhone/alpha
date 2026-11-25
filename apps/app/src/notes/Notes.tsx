@@ -142,7 +142,7 @@ function TrashScreen({ runtime, collection }: { readonly runtime: Runtime; reado
   const opened = collection.trash.find((item) => numberOf("note", item.note.id) === state.opened);
   return (
     <section aria-label="Recently deleted" className="flex min-h-0 flex-1 flex-col">
-      <AppHeader title="Recently deleted" leading={<Button size="icon" variant="ghost" aria-label="Back to notes" onClick={() => send({ type: "back" })}><ArrowLeft /></Button>}>
+      <AppHeader title="Recently deleted" detail leading={<Button size="icon" variant="ghost" aria-label="Back to notes" onClick={() => send({ type: "back" })}><ArrowLeft /></Button>}>
         {owner({ type: "askEmpty" }) && <Button variant="ghost" onClick={() => send({ type: "askEmpty" })}>Delete all</Button>}
       </AppHeader>
       <div className="flex flex-col gap-3 px-6">

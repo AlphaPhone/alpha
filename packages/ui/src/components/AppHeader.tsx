@@ -2,38 +2,46 @@ import type { ComponentProps, ReactNode } from "react";
 import { cn } from "../lib/cn.ts";
 
 export type AppHeaderProps = Omit<ComponentProps<"header">, "title"> & {
-  /** The screen's one title; under large text it wraps rather than being cut, but for a `detail` title on the launcher. */
+  /** The screen's one title; under large text it wraps rather than being cut. */
   title: string;
   /** The control that leaves the screen, usually a back `Button`; shown before the title. */
   leading?: ReactNode;
   /** An inline control that takes the place of the visible title, such as a search field. */
   titleControl?: ReactNode;
-  /** The screen's own actions, at the end. */
-  children?: ReactNode;
   /**
-   * A screen under an app's first one, such as a folder, an album or a selection. On the launcher its title is the
-   * smaller display title on one line, cut with an ellipsis, as Alpha's earlier build drew it on the phone.
+   * A screen inside an app, such as a folder, an album, a selection or Recently deleted. On the launcher its title is
+   * the smaller display size, on one line and cut with an ellipsis, until large text gives it a row of its own.
    */
   detail?: boolean;
+  /** The screen's own actions, at the end. */
+  children?: ReactNode;
 };
 
 /**
  * The top of a screen: where the owner is, the way back and what can be done here. Its icon buttons are 52px. On the
  * launcher (`data-alpha-launcher`, the phone's Home) the title is the serif display title, as Alpha's earlier build drew
- * it on the phone: `3xl` on an app's first screen and `home-display` under it (`detail`).
+ * it on the phone: `3xl` on an app's first page and `home-display` on a screen inside it. Above 150% text
+ * (`data-alpha-title-row`) the title takes a row of its own under the buttons, and a first page's title is drawn no
+ * larger than lets a 4.4em word fit that row, so one word is never split. Android's text zoom multiplies that size, so
+ * the room is divided by the measured scale (`--alpha-text-scale`) and multiplied back by Alpha's own text size
+ * (`--alpha-own-text-scale`), which root-relative sizes already carry.
  */
 export function AppHeader({ title, leading, titleControl, detail = false, className, children, ...props }: AppHeaderProps) {
   return (
-    <header data-host-chrome="" className={cn("flex min-h-13 items-center gap-0.5 px-2 [&_button[aria-label]]:size-13 [&_button[aria-label]]:min-w-13", className)} {...props}>
+    <header data-host-chrome="" className={cn(
+      "flex min-h-13 items-center gap-0.5 px-2 [&_button[aria-label]]:size-13 [&_button[aria-label]]:min-w-13",
+      !titleControl && "in-data-[alpha-title-row]:in-data-[alpha-launcher]:flex-wrap in-data-[alpha-title-row]:in-data-[alpha-launcher]:content-start in-data-[alpha-title-row]:in-data-[alpha-launcher]:gap-y-1 in-data-[alpha-title-row]:in-data-[alpha-launcher]:[&>h1+*]:ms-auto",
+      !titleControl && !detail && "in-data-[alpha-title-row]:in-data-[alpha-launcher]:@container",
+      className,
+    )} {...props}>
       {leading}
-      <h1
-        className={titleControl ? "sr-only" : cn(
-          "min-w-0 flex-1 text-xl font-semibold break-words focus-visible:outline-none in-data-[alpha-launcher]:font-display in-data-[alpha-launcher]:font-light",
-          detail ? "in-data-[alpha-launcher]:truncate in-data-[alpha-launcher]:text-home-display in-data-[alpha-launcher]:tracking-tight" : "in-data-[alpha-launcher]:text-3xl",
-        )}
-      >
-        {title}
-      </h1>
+      <h1 className={titleControl ? "sr-only" : cn(
+        "min-w-0 flex-1 text-xl font-semibold break-words focus-visible:outline-none in-data-[alpha-launcher]:font-display in-data-[alpha-launcher]:font-light",
+        "in-data-[alpha-title-row]:in-data-[alpha-launcher]:order-1 in-data-[alpha-title-row]:in-data-[alpha-launcher]:basis-full",
+        detail
+          ? "in-data-[alpha-launcher]:truncate in-data-[alpha-launcher]:text-home-display in-data-[alpha-launcher]:tracking-tight in-data-[alpha-title-row]:in-data-[alpha-launcher]:overflow-visible in-data-[alpha-title-row]:in-data-[alpha-launcher]:whitespace-normal in-data-[alpha-title-row]:in-data-[alpha-launcher]:wrap-anywhere"
+          : "in-data-[alpha-launcher]:text-3xl in-data-[alpha-title-row]:in-data-[alpha-launcher]:[font-size:min(var(--text-3xl),calc((100cqi_-_30px)/4.4*var(--alpha-own-text-scale,1)/var(--alpha-text-scale,1)))]",
+      )}>{title}</h1>
       {titleControl}
       {children}
     </header>

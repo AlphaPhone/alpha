@@ -24,7 +24,7 @@ export function Previous({ runtime }: { readonly runtime: Alpha["runtime"] }) {
   });
   return (
     <section aria-label="Notes on this phone" className="flex min-h-0 flex-1 flex-col">
-      <AppHeader title={opened === undefined ? "On this phone" : opened.title || "Untitled"} leading={can(back) && <Button size="icon" variant="ghost"
+      <AppHeader title={opened === undefined ? "On this phone" : opened.title || "Untitled"} detail leading={can(back) && <Button size="icon" variant="ghost"
         aria-label={opened === undefined ? "Return to Notes" : "Back to previous notes"} onClick={() => send(back)}><ArrowLeft /></Button>} />
       <div className="flex flex-col gap-3 px-4 pb-12">
         {state.read.status === "Loading" && <Spinner className="self-center" label="Reading previous notes" />}
