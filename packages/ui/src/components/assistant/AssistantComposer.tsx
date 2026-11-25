@@ -99,7 +99,7 @@ export function AssistantComposer({
   onSend, onStop, stopping = false, onAttach, onSearch, onNew, making = false, onHistory, onTalk, onDictate, showUnavailableTalk = false, voice, voiceNotice, onOpen, onType, leading, opener, placeholder, onFocusField, fieldRef, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
 }: AssistantComposerProps) {
   const written = value.trim() !== "" || attachments.length > 0;
-  // As v121's bar: an empty field is part of the drag, a written one scrolls by finger.
+  // spec/app/assistant/dock.md, "A press does one thing: a tap is never also a drag, and a late click never taps"
   const draggable = value.length === 0;
   const bar = variant === "bar";
   const compact = bar && onType !== undefined;

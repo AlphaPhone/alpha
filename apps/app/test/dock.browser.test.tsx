@@ -122,14 +122,14 @@ describe("Ask Alpha dock", () => {
     };
     const detent = async () => (await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).assistant;
 
-    // A drag that starts on one of the bar's controls stays that control's, as on v121's bar
+    // spec/app/assistant/dock.md, "A press does one thing: a tap is never also a drag, and a late click never taps"
     const control = [...(section?.querySelectorAll("button") ?? [])].find((button) => !button.closest("[data-alpha-grabber],[data-alpha-input-drag-alpha]"));
     expect(control).toBeDefined();
     drag(control);
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(await detent()).toBe("Bar");
 
-    // An empty field takes no pan; a field with a draft in it scrolls by finger and does not drag Ask Alpha
+    // spec/app/assistant/dock.md, "A press does one thing: a tap is never also a drag, and a late click never taps"
     expect(field?.hidden).toBe(false);
     if (field) {
       expect(getComputedStyle(field).touchAction).toBe("none");

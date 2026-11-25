@@ -59,7 +59,6 @@ export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Res
   if (!state) return [];
   const told = others(given, image);
   const now = Math.max(state.calendar.since, state.agent.since, state.today * Cards.dayLength);
-  // "11m", "now" and "Ran ..." are measured against Alpha's latest time, as Messages and Phone measure theirs, not the last calendar ask.
   const latest = Math.max(now, runtime.runSync(Effect.flatMap(Time, (time) => time.latest())));
   const open = (kind: Cards.Kind) => ({
     disabled: !can({ type: "openCard", kind, now }),

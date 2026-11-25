@@ -32,7 +32,6 @@ export function HomeCard({ title, origin, icon, status, variant = "row", classNa
       className={cn(
         "focus-visible:outline-none",
         launcherRing,
-        // Inset, so the card row's horizontal scroll does not clip the keyboard ring at its top and bottom.
         "in-data-[alpha-keyboard]:focus-visible:-outline-offset-focus",
         "min-h-49 shrink-0 snap-start justify-between rounded-home-card border-0 p-5.5 text-left",
         agenda

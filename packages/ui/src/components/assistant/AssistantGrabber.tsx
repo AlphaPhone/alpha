@@ -71,7 +71,7 @@ export function useAssistantBarDrag({ onStart, onDrag, onRelease, onCancel }: As
     onPointerDown: (event: PointerEvent<HTMLElement>) => {
       if (!event.isPrimary || event.button !== 0) return;
       if (event.target instanceof Element && event.target.closest("[data-alpha-grabber]")) return;
-      // As v121's bar: its controls take their own presses (only the Alpha mark drags), and a written field scrolls.
+      // spec/app/assistant/dock.md, "A press does one thing: a tap is never also a drag, and a late click never taps"
       if (event.target instanceof Element && event.target.closest("button, a, [role=menuitem]") && !event.target.closest("[data-alpha-input-drag-alpha]")) return;
       if (event.target instanceof HTMLTextAreaElement && event.target.value !== "") return;
       const sample = { y: event.clientY, at: event.timeStamp };
