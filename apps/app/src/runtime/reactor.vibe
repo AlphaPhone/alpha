@@ -1,8 +1,7 @@
-// spec/kit/read.md, "Only the newest ticket's answer is taken, once"; spec/kit/undo.md, "A held change takes effect only once its time has come"; spec/kit/attempt.md, "Only a recorded attempt is sent"; spec/app/platform/index.md, "A kept value that is no longer a state is set aside where nothing is held, and its machine starts afresh"
+// spec/kit/read.md, "Only the newest ticket's answer is taken, once"; spec/kit/undo.md, "A held change takes effect only once its time has come"; spec/kit/attempt.md, "Only a recorded attempt is sent"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { Attempts, Install, attemptsOf, fresh } from "./attempts.vibe"
 import { Time } from "./time.vibe"
-import { setAside } from "../../gen/app__platform.effect.vibe"
 
 module pure {
   /** `value` as text, to tell whether two facts are the same. @throws {never} */
@@ -34,7 +33,7 @@ export interface Moved<S, Fx> {
 export interface Steps<S, Ev, M, Refused, Undecoded, By extends ReadonlyArray<unknown>> {
   readonly changes: Stream.Stream<S>
   get(): S!!
-  send(event: Ev, ...by: NoInfer<By>): M!Refused
+  send(event: Ev, ...by: By): M!Refused
   receive(input: unknown, ...by: By): M!Undecoded
 }
 
@@ -161,30 +160,17 @@ function storeKey(machine: string, version: number): string {
   return `alpha/${machine.replace(/^.*\/spec\//, "").replace(/\.md#Machine$/, "")}@${version}`
 }
 
-/** The places a value kept under `key` that is no longer a state may be copied to, in order. */
-const asides = (key: string): ReadonlyArray<string> => [`${key}.unreadable`, ...Array.from({ length: 8 }, (_, index) => `${key}.unreadable.${index + 2}`)]
-
 /**
  * The machine kept under `key`. What is stored there and is not a state, after a change of its shape or of an
- * `always` rule, is copied to the first of its `asides` that holds nothing and the machine starts afresh: one area's
- * state never keeps Alpha from opening, and no copy is written over. Where every place is taken, or the store cannot
- * be read at all, the value stays and the machine runs in memory.
+ * `always` rule, is set aside under `<key>.unreadable` and the machine starts afresh: one area's state never keeps
+ * Alpha from opening. A store that cannot be read at all leaves the machine in memory.
  */
 function kept<I, S, SE, SR>(key: string, stored: (key: string, start?: S) => Layer.Layer<I, SE, SR>, memory: Layer.Layer<I>) {
   const aside = Layer.unwrap(effect {
     const store = try KeyValueStore.KeyValueStore
     const found = store.get(key) catch () => undefined
-    if (found === undefined) return memory
-    let place: string | undefined
-    for (const one of asides(key)) {
-      const held = (store.get(one) catch () => "") !== undefined
-      if (place === undefined && setAside("KeptUnreadable", held)) place = one
-    }
-    if (place === undefined) return memory
-    const at = place
-    try logError(`what is kept under ${key} is not a state: set aside under ${at}`)
-    const copied = effect { try store.set(at, found); return true } catch () => false
-    if (!copied) return memory
+    try logError(`what is kept under ${key} is not a state: set aside under ${key}.unreadable`)
+    if (found !== undefined) try ignore(store.set(`${key}.unreadable`, found))
     try ignore(store.remove(key))
     try ignore(store.remove(`${key}.epoch`))
     return Layer.catch(Layer.fresh(stored(key)), () => memory)
@@ -204,6 +190,11 @@ interface Parts<S, Ev, M, Fx, R, By extends ReadonlyArray<unknown>> {
   readonly open: Opening<Ev, R, By> | undefined
 }
 
+/**
+ * The machine behind `tag`, run under `scope`: its attempts are told apart from an earlier run's under the same key by
+ * an epoch kept beside the state and new with each state that starts afresh (in memory, the launch), and each deadline
+ * a job waits on or has told the machine of is armed once, so that none is told twice.
+ */
 function reactor<I, S, Ev, M, Fx, Refused, Undecoded, By extends ReadonlyArray<unknown>, R>(
   tag: Context.Key<I, Steps<S, Ev, M, Refused, Undecoded, By>>,
   { scope, durable, stateOf, outOf, carry, timers, open }: Parts<S, Ev, M, Fx, R, By>,
@@ -296,29 +287,19 @@ function reactor<I, S, Ev, M, Fx, Refused, Undecoded, By extends ReadonlyArray<u
       }
     }
     if (open !== undefined) {
-      if (Effect.isEffect(open)) try launch("open", effect {
-        const opened = (try open) as unknown as readonly [Ev, ...By]
-        try contained(send(...opened), `opening ${scope}`)
-      })
-      else try contained(send(...(open as unknown as readonly [Ev, ...By])), `opening ${scope}`)
+      if (Effect.isEffect(open)) try launch("open", effect { try contained(send(...(try open)), `opening ${scope}`) })
+      else try contained(send(...open), `opening ${scope}`)
     }
     try contained(Semaphore.withPermit(turn, effect { try arm(try inner.get()) }), `arming ${scope}`)
     return { changes: inner.changes, get: () => inner.get(), send, receive }
   })
 }
 
-/** One call to a machine's `send`, with its sender held at the type `spec` declared so literals in `open` never widen `By`. */
-type OpeningArgs<Ev, By extends ReadonlyArray<unknown>> = NoInfer<By> extends readonly []
-  ? readonly [event: Ev]
-  : NoInfer<By> extends readonly [infer A]
-    ? readonly [event: Ev, by: A]
-    : never
-
 /**
  * The event a machine is sent once when it is built, with its sender: the event itself, or, where the event carries
  * what only the world knows (what the phone kept, today's date), an effect that asks and returns it.
  */
-export type Opening<Ev, R, By extends ReadonlyArray<unknown>> = OpeningArgs<Ev, By> | (OpeningArgs<Ev, By>!never!R)
+export type Opening<Ev, R, By extends ReadonlyArray<unknown>> = readonly [event: Ev, ...by: By] | ((readonly [event: Ev, ...by: By])!never!R)
 
 /** A machine is kept only with the event that takes up what was under way when Alpha stopped: the spec's `reopen`, `restart` or `start`. */
 type Kept<Ev, R, By extends ReadonlyArray<unknown>> =
@@ -327,8 +308,6 @@ type Kept<Ev, R, By extends ReadonlyArray<unknown>> =
 
 /** What `reacting` takes beside the spec. */
 export type Options<S, Ev, R, By extends ReadonlyArray<unknown>> = Kept<Ev, R, By> & {
-  /** Name separate in-memory instances of the same model in their effect attempt identities. */
-  readonly attemptScope?: string
   /** The deadlines `state` waits on. Each is told to the machine once its time has come, also after a restart. */
   readonly timers?: (state: S) => ReadonlyArray<Due<Ev, By>>
 }
@@ -339,7 +318,7 @@ type Carrying<M, Ev, R, By extends ReadonlyArray<unknown>> = M extends { readonl
   : { readonly carry?: undefined }
 
 /** What a reacting machine needs to be built: the platform's part, and, in name only, what its jobs need when they run. */
-type Needs<SR, R> = SR | KeyValueStore.KeyValueStore | Whole | Time | Install | Exclude<R, Attempts>
+type Needs<SR, R> = SR | KeyValueStore.KeyValueStore | Whole | Time | Install | R
 
 /**
  * The machine of the generated module `spec`, in memory or, with `keep`, in the store under the spec's own name.
@@ -347,14 +326,14 @@ type Needs<SR, R> = SR | KeyValueStore.KeyValueStore | Whole | Time | Install | 
  * the state that asked for it is kept, and each deadline of `timers` is told when its time has come. `open` is sent
  * once when the layer is built.
  */
-export function reacting<I, S, Ev, M, Refused, Undecoded, By extends ReadonlyArray<unknown>, SE, SR, R = never, RO = never>(
+export function reacting<I, S, Ev, M, Refused, Undecoded, By extends ReadonlyArray<unknown>, SE, SR, R = never>(
   spec: Spec<I, S, Ev, M, Refused, Undecoded, By, SE, SR>,
-  options: Options<S, Ev, RO, By> & Carrying<M, Ev, R, By>,
-): Layer.Layer<I, never, Needs<SR, R | RO>> {
-  const carry = options.carry as ((fx: unknown) => Job<Ev, R | RO, By>) | undefined
+  options: Options<S, Ev, R, By> & Carrying<M, Ev, R, By>,
+): Layer.Layer<I, never, Needs<SR, R>> {
+  const carry = options.carry as ((fx: unknown) => Job<Ev, R, By>) | undefined
   const key = options.keep === undefined ? undefined : storeKey(spec.Machine.key, options.keep)
-  const parts: Parts<S, Ev, M, unknown, R | RO, By> = {
-    scope: key ?? (options.attemptScope === undefined ? spec.Machine.key : `${spec.Machine.key}/${options.attemptScope}`),
+  const parts: Parts<S, Ev, M, unknown, R, By> = {
+    scope: key ?? spec.Machine.key,
     durable: key !== undefined,
     stateOf: (moved) => (carry === undefined ? moved as unknown as S : (moved as unknown as Moved<S, unknown>).state),
     outOf: (moved) => (carry === undefined ? [] : (moved as unknown as Moved<S, unknown>).out),
@@ -363,7 +342,7 @@ export function reacting<I, S, Ev, M, Refused, Undecoded, By extends ReadonlyArr
     open: options.open,
   }
   const inner = key === undefined ? spec.machine() : kept(key, spec.stored, spec.machine())
-  return Layer.provide(reactor(spec.Machine, parts), inner) as unknown as Layer.Layer<I, never, Needs<SR, R | RO>>
+  return Layer.provide(reactor(spec.Machine, parts), inner) as unknown as Layer.Layer<I, never, Needs<SR, R>>
 }
 
 /**

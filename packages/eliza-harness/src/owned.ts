@@ -1,3 +1,4 @@
+import { inject } from "vitest";
 import { type Reply, said } from "./services.ts";
 import type { Owned } from "./setup.ts";
 
@@ -5,9 +6,11 @@ import type { Owned } from "./setup.ts";
  * The owner of the journey file `test/<name>.eliza.test.tsx` on the run's one local cloud: signed in by the code the
  * cloud mailed, given a device key, funded, with an agent of their own started under that key, which keeps nothing
  * between runs. No two journeys share an agent, an account or a ledger. The model is the cloud's scripted provider.
+ * Beside what the journey is told of them (`Owned`): `script(reply)` sets what the model says to this owner's agent
+ * next, in place of repeating the owner; `asked()` reads the messages of every call their agent has made to the model;
+ * and `agentSays(route, body)` asks their agent directly, as the phone's plugin would, for what a journey sets up or checks.
  */
 export async function owned(name: string) {
-  const { inject } = await import("vitest");
   const mine = await said<Owned>(`${inject("eliza")}/?owner=${name}`);
   const operator = <A>(route: string, body?: unknown) => said<A>(`${mine.cloud.provider}/operator/${route}`, { body });
   return {
