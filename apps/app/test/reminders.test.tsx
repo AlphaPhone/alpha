@@ -5,6 +5,7 @@ import { Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import * as RemindersMachine from "../gen/app__reminders.effect.vibe";
+import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import * as AlertsMachine from "../gen/app__reminders__alerts.effect.vibe";
 import { at } from "../src/areas.ts";
 import { agentAt } from "../src/platform/agent.vibe";
@@ -41,12 +42,12 @@ underAct();
 
 interface AgentRecorder {
   snapshot: RemindersSnapshot;
-  readonly calls: { readonly method: string; readonly path: string }[];
+  readonly calls: { readonly method: string; readonly path: string; readonly query: string; readonly key: string | undefined }[];
 }
 
-function makeFakeAgentReminders(initialNowMs: number): { readonly recorder: AgentRecorder; readonly layer: Layer.Layer<HttpClient.HttpClient> } {
+function makeFakeAgentReminders(initialNowMs: number, held: readonly ReminderItemRecord[] = []): { readonly recorder: AgentRecorder; readonly layer: Layer.Layer<HttpClient.HttpClient> } {
   const recorder: AgentRecorder = {
-    snapshot: defaultSnapshot(initialNowMs),
+    snapshot: { ...defaultSnapshot(initialNowMs), items: [...held] },
     calls: [],
   };
   const layer = Layer.succeed(
@@ -54,7 +55,7 @@ function makeFakeAgentReminders(initialNowMs: number): { readonly recorder: Agen
     HttpClient.make((request, url) => Effect.sync(() => {
       const path = url.pathname;
       const method = request.method;
-      recorder.calls.push({ method, path });
+      recorder.calls.push({ method, path, query: url.search, key: request.headers["idempotency-key"] });
       const rawBody = request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : "";
       const parsed = rawBody ? JSON.parse(rawBody) as Record<string, unknown> : {};
 
@@ -187,13 +188,13 @@ describe("Reminders recurrence laws", () => {
 describe("Reminders full journeys", () => {
   const baseNow = Date.UTC(2026, 4, 15, 13, 0, 0);
 
-  async function launchReminders(nowMs: number) {
+  async function launchReminders(nowMs: number, held: readonly ReminderItemRecord[] = []) {
     const world = { ...scene(), now: nowMs };
-    const { recorder, layer: agentHttp } = makeFakeAgentReminders(world.now);
+    const { recorder, layer: agentHttp } = makeFakeAgentReminders(world.now, held);
     const platform = makePlatform(world.now, agentHttp);
     const opened = await openOver(platform, withReminders);
     const runtime = remindersArea.runtime(opened.alpha);
-    await press("Reminders");
+    await drawn(() => opened.alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Reminders" }))));
     await until(opened.alpha, runtime, RemindersMachine.Machine, (s) => s.sync.status === "Loaded");
     return { world, recorder, platform, ...opened, runtime };
   }
@@ -310,6 +311,36 @@ describe("Reminders full journeys", () => {
     await until(alpha, runtime, RemindersMachine.Machine, (s) => s.undo.holding === "Released" && s.write.outcome === "Confirmed");
     expect(remindersStore.snapshot().snapshot.items.length).toBe(0);
     expect(recorder.calls.some((c) => c.method === "DELETE" && c.path.includes(`/items/${recurring!.id}`))).toBe(true);
+  });
+
+  // spec/app/reminders/index.md, "A reminder the agent holds is one the owner can complete, delete and undo, wherever it was made"; spec/app/reminders/index.md, "Once the five-second window expires, a held deletion is committed and a held completion settles"
+  it("completes and deletes a reminder made in chat, and its Undo goes when the five seconds do", async () => {
+    const today = formatCivilDate(civilDateAt(baseNow));
+    const plumber: ReminderItemRecord = {
+      id: "rem-task-plumber", listId: DEFAULT_LIST_ID, title: "Call the plumber", notes: "", dueDate: today, dueMinute: 18 * 60, alertMinutes: 0,
+      recurrence: "none", priority: "none", flagged: false, subtasks: [], completed: false, completedAtMs: null, snoozedUntilMs: null,
+      notifiedAtMs: null, agentTaskId: "plumber-task", revision: 1, createdAtMs: baseNow, updatedAtMs: baseNow,
+    };
+    const { recorder, alpha, runtime } = await launchReminders(baseNow, [plumber]);
+
+    await drawn(() => runtime.runPromise(toggleReminderComplete(plumber.id)));
+    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.undo.holding === "Held" && s.write.outcome === "Confirmed");
+    expect(recorder.calls.some((c) => c.method === "POST" && c.path === `/api/alpha/reminders/items/${plumber.id}/complete`)).toBe(true);
+    expect(Boolean(button("Undo"))).toBe(true);
+    await later(alpha, 5_100);
+    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.undo.holding === "Released");
+    expect(Boolean(button("Undo"))).toBe(false);
+
+    await drawn(() => runtime.runPromise(toggleReminderComplete(plumber.id)));
+    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.write.outcome === "Confirmed");
+    await drawn(() => runtime.runPromise(deleteReminderItem(plumber.id)));
+    expect(remindersStore.snapshot().hiddenIds.has(plumber.id)).toBe(true);
+    await later(alpha, 5_100);
+    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.undo.holding === "Released" && s.write.outcome === "Confirmed");
+    const deleted = recorder.calls.find((c) => c.method === "DELETE" && c.path === `/api/alpha/reminders/items/${plumber.id}`);
+    expect({ query: deleted?.query, keyed: (deleted?.key ?? "") !== "" }).toEqual({ query: "", keyed: true });
+    expect(recorder.snapshot.items.some((item) => item.id === plumber.id)).toBe(false);
+    expect(Boolean(button("Undo"))).toBe(false);
   });
 
   // spec/app/reminders/alerts.md, "Story: Alert on due reminders and act from the banner"

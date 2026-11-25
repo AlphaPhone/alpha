@@ -475,6 +475,45 @@ pure def agentChanged(s: Reminders): Moved =
     refresh(s)
 ```
 
+### A reminder the agent holds is one the owner can complete, delete and undo, wherever it was made
+
+A reminder made in chat, or before Alpha last opened, is held like one made
+here: what the agent holds is taken under its number, with its list, and a
+reminder the agent no longer holds is forgotten. The reminder an Undo holds
+is left as it is until the hold ends.
+
+```quint
+pure def canTakeList(s: Reminders, listId: int): bool =
+  listId > defaultListId and not(hasList(s.lists, listId)) and s.lists.length() < 32
+
+pure def takeList(s: Reminders, listId: int): Reminders =
+  { ...s, lists: s.lists.append({ id: listId, isDefault: false, revision: 1 }),
+          nextListId: if (listId >= s.nextListId) listId + 1 else s.nextListId }
+
+pure def heldBack(s: Reminders, itemId: int): bool =
+  itemId == s.hiddenId or (undoHeld(s) and s.undoData.itemId == itemId)
+
+pure def canTakeItem(s: Reminders, itemId: int, spec: ItemSpec, completed: bool): bool =
+  itemId >= 1 and not(heldBack(s, itemId)) and (hasItem(s.items, itemId) or s.items.length() < 200)
+    and hasList(s.lists, spec.listId) and validTiming(spec.hasDue, spec.hasDueTime, spec.dueMinute, spec.repeat)
+
+pure def takeItem(s: Reminders, itemId: int, spec: ItemSpec, completed: bool): Reminders =
+  val prior = itemOf(s.items, itemId)
+  val taken: ItemEntry = {
+    id: itemId, listId: spec.listId, hasDue: spec.hasDue, dueDay: if (spec.hasDue) spec.dueDay else 0,
+    hasDueTime: spec.hasDueTime, dueMinute: if (spec.hasDueTime) spec.dueMinute else 0,
+    repeat: spec.repeat, priority: spec.priority, flagged: spec.flagged, completed: completed,
+    snoozedUntil: prior.snoozedUntil, revision: prior.revision + 1,
+  }
+  if (hasItem(s.items, itemId)) { ...s, items: putItem(s.items, taken) }
+  else { ...s, items: s.items.append(taken), nextItemId: if (itemId >= s.nextItemId) itemId + 1 else s.nextItemId }
+
+pure def canForgetItem(s: Reminders, itemId: int): bool = hasItem(s.items, itemId) and not(heldBack(s, itemId))
+
+pure def forgetItem(s: Reminders, itemId: int): Reminders =
+  { ...s, items: s.items.select(it => it.id != itemId), selectedId: if (s.selectedId == itemId) 0 else s.selectedId }
+```
+
 ### Switching owners resets custom lists, items, selection and holds; reopening resumes pending reads and holds while settling any sent write as unknown
 
 ```quint

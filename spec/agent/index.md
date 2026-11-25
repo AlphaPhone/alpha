@@ -169,6 +169,41 @@ pure def policyAdmitted(allowed: List[str], refused: List[str], loaded: List[str
   sameNames(allowed, allowedActions) and sameNames(refused, refusedActions(registered)) and loaded == loadList and product == productPluginName
 ```
 
+### A reminder with a due time keeps one scheduled task, and the task follows what the owner does to the reminder
+
+The old phone fired a reminder through the agent's own scheduler, so a
+dated, open reminder in Alpha's Reminders keeps one owner-visible
+personal-assistant task, and a reminder the owner asks for in chat is that
+task. Whatever the owner does to the reminder, in the Reminders app or in
+chat, its task follows: deleting it, or taking its due time away, dismisses
+the task, so it never comes back; completing it completes the task, and
+completing a repeating one moves the task to its next due time; reopening
+it reopens the task; and a new due time moves the task, so it
+fires only at the new time. A dated, open reminder with no task gets one, and a reminder whose task the
+owner dismisses in chat is deleted.
+A task that cannot follow, such as one completed too long ago to reopen,
+is dismissed and the reminder gets a new one. A change whose task stays
+where it was is reported as not done, so neither the owner nor the model
+is told it worked, and a reminder whose task stays is not deleted.
+
+```quint
+type TaskStep = MakeTask | DismissTask | CompleteTask | ReopenTask | MoveTask
+pure def taskSteps(kept: bool, dated: bool, completed: bool, wasCompleted: bool, retimed: bool, hasTask: bool): List[TaskStep] =
+  if (not(hasTask)) (if (kept and dated and not(completed)) List(MakeTask) else List())
+  else if (not(kept) or not(dated)) List(DismissTask)
+  else if (completed) (if (wasCompleted) List() else List(CompleteTask))
+  else if (wasCompleted) (if (retimed) List(ReopenTask, MoveTask) else List(ReopenTask))
+  else if (retimed) List(MoveTask)
+  else List()
+pure def lawADeletedReminderLeavesNoTask(dated: bool, completed: bool, wasCompleted: bool, retimed: bool): bool =
+  taskSteps(false, dated, completed, wasCompleted, retimed, true) == List(DismissTask)
+pure def lawAMovedOpenReminderFiresOnlyAtItsNewTime(wasCompleted: bool): bool =
+  taskSteps(true, true, false, wasCompleted, true, true).includes(MoveTask)
+    and not(taskSteps(true, true, false, wasCompleted, true, true).includes(MakeTask))
+pure def lawCompletingCompletesTheTask(retimed: bool): bool =
+  taskSteps(true, true, true, false, retimed, true) == List(CompleteTask)
+```
+
 ### A proposed device step goes through eliza's device-action module, and the phone says which steps it takes
 
 The old agent asked the phone to do things on the device (create an event,
@@ -442,6 +477,8 @@ the start and end of their window, and Calendar may send a time zone.
 Calendar asks for up to fifty pending approvals. Workflows lists the owner's
 visible tasks, reads a result page for its
 client, and supplies the exact reviewed revision when removing a trigger.
+Reminders says, when it deletes a custom list, whether the list's reminders
+move to the default list or go with it.
 
 ```quint
 type QueryKind = AnyQuery | PatternQuery | FixedQuery
@@ -460,6 +497,7 @@ pure val pageQueries: List[RequestQuery] = List(
   { method: Get, path: "/api/scheduled-tasks", key: "ownerVisibleOnly", kind: FixedQuery, value: "1", example: "1" },
   { method: Get, path: "/api/workflow/hosted/results", key: "clientId", kind: PatternQuery, value: "[A-Za-z0-9][A-Za-z0-9_-]{0,127}", example: "build-probe" },
   { method: Delete, path: "/api/triggers/{id}", key: "expectedRevision", kind: PatternQuery, value: "[1-9][0-9]{0,15}", example: "1" },
+  { method: Delete, path: "/api/alpha/reminders/lists/{id}", key: "mode", kind: PatternQuery, value: "reassign|cascade", example: "reassign" },
 )
 pure val nativeDigestQueries = pageQueries.select(q => q.method == Get and q.path == "/api/workflow/hosted/results")
 ```
