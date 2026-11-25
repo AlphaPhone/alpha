@@ -230,7 +230,8 @@ const sameTarget = (one: MessageDraftTarget | undefined, other: MessageDraftTarg
   one !== undefined && other !== undefined && one.thread === other.thread && one.ticket === other.ticket
 
 export const mediaReview = Layer.effect(MediaReview, effect {
-  const { runtime, life } = try Agent
+  const agent = try Agent
+  const { runtime, life } = agent
   const executors = try MediaExecutors
   const device = try Device
   const messages = try Messages
@@ -253,7 +254,9 @@ export const mediaReview = Layer.effect(MediaReview, effect {
     const status = life.status() catch () => undefined
     if (status?.state !== "running") { latest = undefined; return undefined }
     if (latest?.epoch === status.epoch) return latest
-    latest = enrolled(status.epoch, runtime, guarded) catch () => undefined
+    provide Agent = agent, Device = device {
+      latest = enrolled(status.epoch, runtime, guarded) catch () => undefined
+    }
     const fresh = latest
     if (fresh !== undefined) try ignore(tryPromise(() => fresh.execute.sync()))
     return latest

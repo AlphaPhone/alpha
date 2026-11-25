@@ -124,7 +124,7 @@ export function Scan({ runtime }: Shown<Runtime>) {
         )}
         {state.problem !== "NoProblem" && <Alert variant="destructive">{state.problem === "TooLarge" ? "This document is too large to save." : "The PDF could not be prepared."}</Alert>}
         {state.pdf.outcome === "Refused" && <Alert variant="destructive">The PDF was not saved.</Alert>}
-        {state.pdf.outcome === "Uncertain" && <Alert variant="destructive">Saving the PDF could not be confirmed.</Alert>}
+        {state.pdf.outcome === "Unknown" && <Alert variant="destructive">Saving the PDF could not be confirmed.</Alert>}
         <div className="flex flex-wrap justify-end gap-2">
           {allowed({ type: "discardDraft" }) && (
             <Dialog>
