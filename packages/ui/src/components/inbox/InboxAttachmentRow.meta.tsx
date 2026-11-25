@@ -18,13 +18,13 @@ export const meta: ComponentMeta<InboxAttachmentRowProps> = {
       onOpen.mockClear();
       onSave.mockClear();
       const canvas = within(canvasElement);
-      await userEvent.click(canvas.getByRole("button", { name: "Open Invoice 2041.pdf" }));
+      await userEvent.click(canvas.getByRole("button", { name: "Open Invoice 2041.pdf 184 KB · Review attachment" }));
       await userEvent.click(canvas.getByRole("button", { name: "Save Invoice 2041.pdf" }));
       await expect([onOpen.mock.calls.length, onSave.mock.calls.length]).toEqual([1, 1]);
     },
     "No preview": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onSave.mockClear();
-      await userEvent.click(within(canvasElement).getByRole("button", { name: "Open Invoice 2041.pdf" }));
+      await userEvent.click(within(canvasElement).getByRole("button", { name: "Save Invoice 2041.pdf 184 KB · No preview · Save to Files" }));
       await expect(onSave.mock.calls.length).toBe(1);
     },
     "Save not confirmed": ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).queryByRole("button", { name: /^Save/ })).toBeNull(),

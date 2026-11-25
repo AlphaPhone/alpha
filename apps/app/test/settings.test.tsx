@@ -73,8 +73,8 @@ describe("Settings", () => {
     expect(await page(alpha)).toBe("General");
     await hardware("back");
     // spec/app/settings/index.md, "Each page links to what another area owns there": the Account row and sheet read the signed-in account and Back returns to Settings.
-    await vi.waitFor(() => expect(button("Account")?.textContent).toContain(account.email));
-    await press("Account");
+    await vi.waitFor(() => expect(titled("Account")?.textContent).toContain(account.email));
+    await tap("Account");
     await until(alpha, alpha.runtime, Layers.Machine, (state) => Layers.listed(state, "account"));
     const shownBalance = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(12.5);
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain(account.email));
@@ -93,14 +93,14 @@ describe("Settings", () => {
     expect(await page(alpha)).toBe("Top");
 
     world.signedIn = false;
-    await press("Account");
+    await tap("Account");
     await until(alpha, alpha.runtime, Layers.Machine, (state) => Layers.listed(state, "account"));
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Sign-in required"));
     expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain(account.email);
     expect(document.querySelector('[aria-label="Cloud plan"]')).toBeNull();
     await press("Close Account");
     await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
-    await vi.waitFor(() => expect(button("Account")?.textContent).toContain("Signed out"));
+    await vi.waitFor(() => expect(titled("Account")?.textContent).toContain("Signed out"));
     world.signedIn = true;
 
     // spec/app/settings/index.md, "Each page links to what another area owns there": Agent activity offers the conversations as Alpha's earlier build did, New and History; New starts one, which the shell opens over the app.
@@ -462,8 +462,8 @@ describe("Settings", () => {
     await press("Read EID");
     await until(alpha, machines, Carrier.Machine, (s) => s.eid.status === "Returned");
     // spec/app/settings/carrier.md, "Copy puts one identifier Android returned on the clipboard, one copy at a time, and the page says whether it was copied"
-    expect([Boolean(button("Copy IMEI 1")), Boolean(button("Copy IMEI 2")), Boolean(button("Copy ICCID"))]).toEqual([true, false, false]);
-    await press("Copy IMEI 1");
+    expect([Boolean(titled("IMEI 1")), Boolean(titled("IMEI 2")), Boolean(titled("ICCID"))]).toEqual([true, false, false]);
+    await tap("IMEI 1");
     await until(alpha, machines, Carrier.Machine, (s) => s.copied === "CopiedIt");
     expect(world.settings.copied).toEqual(["356938035643809"]);
     await seen(false);

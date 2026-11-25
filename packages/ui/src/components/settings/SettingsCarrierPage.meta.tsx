@@ -30,8 +30,8 @@ export const meta: ComponentMeta<SettingsCarrierPageProps> = {
     Shown: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onCopy.mockClear();
       const canvas = within(canvasElement);
-      await expect(canvas.queryByRole("button", { name: "Copy ICCID" })).toBeNull();
-      await userEvent.click(canvas.getByRole("button", { name: "Copy IMEI 1" }));
+      await expect(canvas.queryByRole("button", { name: /^ICCID.* Copy$/ })).toBeNull();
+      await userEvent.click(canvas.getByRole("button", { name: "IMEI 1 356938035643809 Copy" }));
       await expect(onCopy.mock.calls).toEqual([["356938035643809"]]);
     },
   },

@@ -78,7 +78,7 @@ export function SettingsCarrierPage({ fields, reading = false, failed = false, s
         <ListGroup key={heading ?? "identifiers"} heading={heading}>
           {rows.map(({ name, value, identifier, missing: why }) => (
             identifier && value !== undefined && onCopy && (copyable?.(value) ?? true)
-              ? <SettingsNavRow key={name} title={name} aria-label={`Copy ${name}`} icon={<SlidersHorizontal />} detail={value} value="Copy" onOpen={() => onCopy(value)} />
+              ? <SettingsNavRow key={name} title={name} icon={<SlidersHorizontal />} detail={value} value="Copy" onOpen={() => onCopy(value)} />
               : <SettingsFactRow key={name} title={name} reading={value !== undefined ? { word: "reported", value } : why ? { word: "reported", value: missing[why] } : undefined} />
           ))}
         </ListGroup>
