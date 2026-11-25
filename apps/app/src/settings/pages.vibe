@@ -14,14 +14,14 @@ import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type Job, answer, due, following, hearing, reacting, run, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { openReview } from "../startup/settingsAccess.vibe"
-import { development } from "./build.ts"
+import { developerTools } from "./build.ts"
 
 const settingsShowing = (shell: Parameters<typeof showing>[0]) => showing(shell, "Settings")
 
 // spec/app/settings/index.md, "The build says once whether it is a development build, and the phone whether Alpha runs on a phone and on an Alpha image"
 const admitting = effect {
   const { image } = try (try Device).capabilities()
-  const admit: Pages.Event = { type: "admit", development: development(), phone: native(), image }
+  const admit: Pages.Event = { type: "admit", development: developerTools(), phone: native(), image }
   return [admit] as const
 }
 
