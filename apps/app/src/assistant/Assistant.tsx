@@ -56,6 +56,7 @@ export interface AssistantProps {
   messageActions?: MessageActions;
   speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & {
     voicePanel?: ReactNode;
+    interim?: ReactNode;
     keyboard?: TalkStopReceipt;
     voice?: (presentation: { compactDock: boolean; atBar: boolean; onKeyboard: VoiceKeyboard }) => ReactNode;
   };
@@ -288,7 +289,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const reviewed = useSyncExternalStore(mailStore.subscribe, mailStore.snapshot);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const focusOnRevealRef = useRef(false);
-  const { voice: renderVoice, voicePanel, keyboard, ...speechProps } = speech ?? {};
+  const { voice: renderVoice, voicePanel, interim, keyboard, ...speechProps } = speech ?? {};
   const keyboardOwner = useCallback(() => keyboardScope(runtime), [runtime]);
   const { onKeyboard, takeFocus } = useTalkKeyboard(composerRef, keyboardOwner, keyboard);
   const currentView = shell.state?.trail.at(-1);
@@ -472,6 +473,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         transcript={{
           messages,
           liveMessages: [...(brief === "" ? [] : [{ id: `briefing:${subject}`, author: "alpha" as const, text: brief, onOpenLink }]), ...writingReply, ...failed, ...mediaCards, ...mediaNote],
+          interim: open && shown.around === 0 && !talking.context.sensitive ? interim : undefined,
           position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around) },
           visible: open,
           status: shown.page.status === "Loading" ? "loading" : shown.page.status === "Failed" ? "failed" : "loaded",

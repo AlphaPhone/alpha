@@ -17,7 +17,7 @@ import { Talk, type Attached, type DraftSeat } from "../assistant/talk.vibe"
 import type { MessageSmsRequest } from "../messages/agent-sim.vibe"
 import { sendShowing } from "../contacts/requests.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { interruptedByCall, type VoiceEvent, VoiceBridge } from "../platform/voice.vibe"
+import { interruptedByCall, type VoiceEvent, type VoicePreview, VoiceBridge } from "../platform/voice.vibe"
 import { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { type Said, say } from "../notices/toasts.vibe"
 import { fresh } from "../runtime/attempts.vibe"
@@ -71,7 +71,24 @@ interface SpokenChat {
   readonly begin: (session: number, turn: number, current: boolean!!) => (SpokenChatLease | undefined)!!
 }
 
+export interface InterimWords {
+  readonly session: number
+  readonly turn: number
+  readonly text: string
+}
+
+interface InterimCapture extends VoicePreview {
+  readonly current: (state: Voice.Voice) => boolean
+}
+
+type InterimContext = Device | Layers.Machine | Shell.Machine | Voice.Machine | VoiceWords | Talk | Chats | Conversation
+
 export interface VoiceMemory {
+  prepareInterim: ((session: number) => (InterimCapture | undefined)!!) | undefined
+  interimCapture: InterimCapture | undefined
+  interimSnapshot(): InterimWords | undefined
+  subscribeInterim(listener: () => void): () => void
+  publishInterim(value: InterimWords | undefined): void
   chat: SpokenChat | undefined
   heardText: { readonly session: number; readonly turn: number; readonly text: string } | undefined
   lastReply: string
@@ -105,7 +122,21 @@ export service VoiceWords {
 
 export const voiceWords = Layer.effect(VoiceWords, effect {
   const playLock = try Semaphore.make(1)
+  let interim: InterimWords | undefined
+  const interimListeners = new Set<() => void>()
   const memory: VoiceMemory = {
+    prepareInterim: undefined,
+    interimCapture: undefined,
+    interimSnapshot: () => interim,
+    subscribeInterim: (listener) => {
+      interimListeners.add(listener)
+      return () => { interimListeners.delete(listener) }
+    },
+    publishInterim(value) {
+      if (interim?.session === value?.session && interim?.turn === value?.turn && interim?.text === value?.text) return
+      interim = value
+      for (const listener of interimListeners) listener()
+    },
     chat: undefined,
     heardText: undefined,
     lastReply: "",
@@ -160,6 +191,91 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
   }
   return { memory }
 })
+
+// spec/app/voice/index.md, "What the owner says is shown as it is heard"
+effect function prepareInterim(session: number): (InterimCapture | undefined)!!InterimContext {
+  const { memory } = try VoiceWords
+  memory.interimCapture?.retire()
+  const { board } = try Talk
+  const chats = try Chats
+  const conversation = try Conversation
+  const seat = board.draftSeat
+  if (seat === undefined) return undefined
+  const voice = try Voice.Machine
+  const shell = try Shell.Machine
+  const layers = try Layers.Machine
+  const device = try Device
+  const page = try chats.get()
+  const record = board.known(page.chosen)?.record
+  const context = (try conversation.get()).context
+  const route = (try shell.get()).route
+  if (context.sensitive || (page.chosen !== 0 && record === undefined)) return undefined
+  const scopeIsCurrent = effect {
+    if (board.draftSeat !== seat || !(try device.showing()) || Layers.assistantInert(try layers.get())) return false
+    const chat = try chats.get()
+    if ((try shell.get()).route !== route || chat.chosen !== page.chosen || chat.page.ticket !== page.page.ticket) return false
+    const showing = (try conversation.get()).context
+    const now = board.known(chat.chosen)?.record
+    return !showing.sensitive && showing.revision === context.revision && now?.id === record?.id && now?.roomId === record?.roomId
+  }
+  const voiceRoute = (try voice.get()).route
+  const capture: InterimCapture = {
+    current: (state) => memory.interimCapture === capture && state.session === session
+      && state.route.account === voiceRoute.account && state.route.key === voiceRoute.key && state.network && !state.muted
+      && Voice.talking(state) && (state.mic === "Opening" || state.mic === "On") && Effect.runSync(scopeIsCurrent),
+    show(text) {
+      const state = Effect.runSync(voice.get())
+      if (state.phase !== "Listening" || state.mic !== "On" || !capture.current(state)) return
+      const words = text.trim()
+      memory.publishInterim(words === "" ? undefined : { session, turn: state.turn, text: words })
+    },
+    clear() {
+      if (memory.interimCapture === capture) memory.publishInterim(undefined)
+    },
+    retire() {
+      if (memory.interimCapture !== capture) return
+      memory.interimCapture = undefined
+      memory.publishInterim(undefined)
+    },
+  }
+  memory.interimCapture = capture
+  return capture
+}
+
+/** Ask Alpha supplies the preview scope when its own machines have finished starting. */
+export const interimLiveness = started(effect {
+  const { memory } = try VoiceWords
+  const context = try Effect.context<InterimContext>()
+  memory.prepareInterim = (session) => Effect.provideContext(prepareInterim(session), context)
+  const { board } = try Talk
+  const chats = try Chats
+  const conversation = try Conversation
+  const voice = try Voice.Machine
+  const shell = try Shell.Machine
+  const layers = try Layers.Machine
+  const device = try Device
+  const boardChanges = Stream.callback<void>((queue) => acquireRelease(
+    sync(() => board.subscribe(() => { Queue.offerUnsafe(queue, undefined) })),
+    (off) => sync(off),
+  ))
+  const changes = Stream.mergeAll([
+    boardChanges,
+    Stream.as(chats.changes, undefined),
+    Stream.as(conversation.changes, undefined),
+    Stream.as(voice.changes, undefined),
+    Stream.as(shell.changes, undefined),
+    Stream.as(layers.changes, undefined),
+    Stream.filter(device.visible, (shown) => !shown),
+  ], { concurrency: "unbounded" })
+  try Stream.runForEach(changes, effect (visible) => {
+    const capture = memory.interimCapture
+    if (capture === undefined) return
+    if (visible === false) { capture.retire(); return }
+    const state = try voice.get()
+    if (!capture.current(state)) capture.retire()
+    else if (state.phase !== "Listening" || state.mic !== "On" || memory.interimSnapshot()?.turn !== state.turn) capture.clear()
+  })
+}, "retiring the Talk preview with its capture")
 
 // spec/app/voice/index.md, "Using the transcript fills the field dictation started in, and dictation never sends"
 export effect function openDictation<R>(field: Field, apply: (words: string) => void!!R): boolean!!(Voice.Machine | VoiceWords | R) {
@@ -739,10 +855,13 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
     }, { type: "answerPrompt", granted: false });
     when { tag: "OpenSettings" }: run("openSettings", effect { try (try SystemSettings).open("AppPermissions", "") });
     when { tag: "Listen", let session, let network }: answer("mic", effect {
+      const prepare = (try VoiceWords).memory.prepareInterim
+      const preview = network && prepare !== undefined ? try prepare(session) : undefined
       return effect {
-        try (try VoiceBridge).openMic(session, network)
+        try (try VoiceBridge).openMic(session, network, preview)
         return { type: "micOpened", session } as const
       } catch effect (failure) => {
+        preview?.retire()
         return interruptedByCall(failure.cause)
           ? { type: "callInterrupted", session, foreground: try (try Device).showing() } as const
           : { type: "micFailed", session } as const
@@ -918,7 +1037,7 @@ const bridgeEvents = hearing(
     const { memory } = try VoiceWords
     const voice = try Voice.Machine
     return Stream.mapEffect(bridge.events, effect (event: VoiceEvent): (Voice.Event | undefined)!!(Device | Layers.Machine | VoiceBridge) => {
-      if (event.kind === "speechEnd" || (event.kind === "transcript" && event.final)) {
+      if (event.kind === "speechEnd") {
         const state = try voice.get()
         if (event.text !== "" && state.session === event.session && state.phase === "Listening") {
           memory.heardText = { session: state.session, turn: state.turn, text: event.text }
@@ -926,7 +1045,6 @@ const bridgeEvents = hearing(
       }
       return match (event) {
         when { kind: "speechStart", let session }: { type: "speechHeard", session };
-        when { kind: "transcript", let session, let final }: final ? { type: "turnEnded", session } : { type: "speechHeard", session };
         when { kind: "speechEnd", let session }: { type: "turnEnded", session };
         when { kind: "bargeIn", let session, let echo }: { type: "bargeIn", session, echo };
         when { kind: "ended", let session, let reason }: reason === "ended"
