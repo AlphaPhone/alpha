@@ -83,6 +83,10 @@ public final class AlphaDevicePlugin extends Plugin {
  @PluginMethod public void settingsFacts(PluginCall call) {
   JSObject out=new JSObject();
   out.put("androidRelease",Build.VERSION.RELEASE);
+  try {
+   int boot=Settings.Global.getInt(getContext().getContentResolver(),Settings.Global.BOOT_COUNT,-1);
+   if(boot>=0)out.put("bootCount",boot);
+  } catch(RuntimeException unavailable) { out.remove("bootCount"); }
   putSettingsGrants(getContext(),out);
   call.resolve(out);
  }

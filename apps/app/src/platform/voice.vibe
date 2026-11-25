@@ -157,7 +157,7 @@ module capacitor {
   }
 }
 import { type SavedNoteWindow, localPlugin, makeAbort, makeSessionGuard, readSavedNote, readVoicemail, relayPlugin, signInAccounts } from capacitor
-export { type SavedNoteWindow, readSavedNote }
+export { type SavedNoteWindow, readSavedNote, signInAccounts }
 
 export error VoiceBridgeFailed { method: string; cause: unknown }
 /** Recognition ran on the confirmed clip, stayed in custody, or could not start. */
