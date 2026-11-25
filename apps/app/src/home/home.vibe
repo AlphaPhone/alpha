@@ -67,7 +67,7 @@ effect function asked(ask: Ask, ticket: number): Event!!Launcher {
     ? (try launcher.shade())
     : app === undefined
       ? { done: false as const, why: "Gone" as Why }
-      : (try launcher.open(app))
+      : ask.tag === "AppInfo" ? (try launcher.info(app)) : (try launcher.open(app))
   return { type: "answered", ticket, opened: said.done, why: said.done ? "Unable" : said.why }
 }
 
@@ -106,6 +106,35 @@ function subscribeTold(this: void, listener: () => void): () => void {
 export const told = {
   snapshot: (): Told | undefined => last,
   subscribe: subscribeTold,
+}
+
+// spec/app/home/index.md, "The app in the menu can be added to Home or handed to Android as App info"
+/** Choose an action for the installed app the owner is still looking at. */
+export effect function chooseApp(app: string, action: "Pin" | "Info"): void!!(Home.Machine | Drawer.Machine | Shell.Machine) {
+  const home = try Home.Machine
+  const drawer = try Drawer.Machine
+  const shell = try Shell.Machine
+  const showing = try shell.get()
+  const menu = try drawer.get()
+  const state = try home.get()
+  const allowed = action === "Pin" ? Home.canPinInstalled(state, app, showing, menu, owner) : Home.canShowAppInfo(state, app, showing, menu, owner)
+  if (!allowed) return
+  const event: Event = action === "Pin"
+    ? { type: "pinInstalled", app, shell: showing, drawer: menu }
+    : { type: "showAppInfo", app, shell: showing, drawer: menu, now: untimed }
+  if (!(try contained(home.send(event, owner), "choosing an installed app's action"))) return
+  if (action === "Pin") try contained(shell.send({ type: "closeDrawer" }), "closing Apps after adding a tile")
+  else try contained(drawer.send({ type: "closeMenu" }), "closing the Apps menu")
+}
+
+// spec/app/home/drawer.md, "The menu names a current app and closes before Apps"; spec/app/home/index.md, "Back closes one layer of Home's own: Add to Home, then editing; Done ends editing"
+/** Back first closes the current installed app's menu, or ends the latest Home editing step. */
+export effect function backHome(): boolean!!(Home.Machine | Drawer.Machine) {
+  const drawer = try Drawer.Machine
+  if (Drawer.canCloseMenu(try drawer.get())) return try contained(drawer.send({ type: "closeMenu" }), "closing the Apps menu")
+  const home = try Home.Machine
+  if (!Home.canBackOut(try home.get())) return false
+  return try contained(home.send({ type: "backOut" }, owner), "back on Home")
 }
 
 // spec/app/home/index.md, "A notice shows as a toast on bare Home and in the edit bar while editing; told while an app or Ask Alpha is up, it is not shown"
@@ -164,6 +193,7 @@ export const home = together(
   presented,
   reacting(Drawer, {}),
   following(Shell.Machine, (shell) => shell.drawer, Drawer.Machine, (open) => open ? undefined : { type: "clear" } as const),
+  following(Home.Machine, (state) => state.installed.apps, Drawer.Machine, (listed) => ({ type: "appsChanged", listed } as const)),
   hearing(Stream.unwrap(effect {
     const device = try Device
     return Stream.mapEffect((try Launcher).changes, () => device.showing())

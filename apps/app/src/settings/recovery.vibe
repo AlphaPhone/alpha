@@ -82,6 +82,7 @@ effect function archive(attempt: number): Records.Event!!Ports {
   const host = (try Agent).life
   const custody = try RecoveryAuthority
   const held = try custody.review()
+  try custody.hold(undefined)
   const model = try Records.Machine
   const account = try owner()
   const before = host.status() catch () => undefined
@@ -89,7 +90,6 @@ effect function archive(attempt: number): Records.Event!!Ports {
   const ended = (result: Records.Archived): Records.Event => ({ type: "archived", ticket: attempt, result })
   if (held === undefined || !now.showing || !Records.canArchived(now, attempt) || held.check !== now.review.ticket
     || held.count !== now.kept || held.owner !== account || before?.epoch !== held.epoch || !needsRecords(before) || !(try activityInFront)) return ended("NoneArchived")
-  try custody.hold(undefined)
   const receipt = timeout(host.archive(held.token), "30 seconds") catch () => undefined
   if (receipt?.kind !== "archived" || receipt.archivedCount !== held.count) return ended("ArchiveUnknown")
   try custody.clear({ owner: held.owner, epoch: held.epoch })
