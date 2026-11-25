@@ -54,8 +54,8 @@ type Effect =
   | Forget({ session: int, draft: int })
 type Written = { state: Composer, out: List[Effect] }
 
-pure val pause = 2
-pure val longest = 5
+pure val pause = 2000
+pure val longest = 5000
 
 pure val initial: Composer = {
   session: 0, open: false, letter: L::blank, made: 0,
@@ -69,7 +69,7 @@ pure val accountValues = Set(0, 1, 2)
 pure val othersValues = Set(0, 2)
 pure val filesValues = Set(0, 2)
 pure val mibValues = Set(1, 3)
-pure val nowValues = Set(0, 1, 3, 7)
+pure val nowValues = Set(0, 1000, 3000, 7000)
 pure val ticketValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
 pure val attemptValues = Set(1, 2, 3)
 pure val draftValues = Set(1, 2, 3, 4)

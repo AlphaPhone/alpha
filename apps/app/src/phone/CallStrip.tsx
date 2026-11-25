@@ -58,7 +58,7 @@ export function CallStrip({ runtime, stage = false }: CallStripProps) {
   return (
     <div role="region" aria-label="Ongoing call" className={cn(
       "mx-auto flex h-13 max-w-[26.5rem] shrink-0 items-center gap-1 rounded-full px-0.5 shadow-md",
-      stage ? "w-[calc(100%_-_1.5rem)]" : "fixed inset-x-3 top-[max(3rem,calc(env(safe-area-inset-top)_+_0.75rem))] z-50",
+      stage ? "w-[calc(100%_-_1.5rem)]" : "fixed inset-x-3 top-[calc(var(--alpha-safe-top)_+_0.75rem)] z-alert",
       ended ? "bg-muted-foreground" : "bg-call", foreground,
     )}>
       <Button variant="ghost" className={cn("min-w-0 flex-1 justify-start px-3 text-left hover:bg-transparent disabled:opacity-100", foreground)}

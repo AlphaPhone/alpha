@@ -8,16 +8,13 @@ export function judge(digits: string): Typed {
   return normalizePhoneNumber(digits) === null ? "Partial" : "Dialable";
 }
 
-/** Whether every word of `query` matches: a word with digits the digits of `number`, any other the start of a word of one of `names`. */
+/** Whether every word of `query` matches: a word with digits the digits of `number`, any other the start of a word of one of `names`. @throws {never} */
 export function matches(query: string, names: string, number = ""): boolean {
   const digits = number.replace(/\D/g, "");
   const words = names.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((word) => word !== "");
   return query.toLowerCase().split(/\s+/).filter((word) => word !== "").every((word) =>
     /\d/.test(word) ? digits.includes(word.replace(/\D/g, "")) : words.some((name) => name.startsWith(word)));
 }
-
-/** When a call, message or voicemail was, short. */
-export const when = (date: number) => new Date(date).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
 
 /** Caller name as held by the address book or provider, with a readable fallback for a number. */
 export function callerTitle(number: string, name: string | null): string {

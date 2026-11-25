@@ -1,6 +1,7 @@
 // spec/app/phone/voicemail.md, "Story: See my voicemail"; spec/app/phone/voicemail.md, "Story: Listen to a voicemail"; spec/app/phone/voicemail.md, "Story: Read what was said"; spec/app/phone/voicemail.md, "Story: Answer a voicemail"; spec/app/phone/voicemail.md, "Story: Delete a voicemail"
 import type { ListedVoicemail } from "@elizaos/os-bridges";
-import { Banner, Button, Spinner, cn, focusRing } from "@repo/ui";
+import { Banner, Button, Slider, Spinner, cn, focusRing } from "@repo/ui";
+import { Effect, Exit } from "effect";
 import { MessageCircle, Pause, Phone, Play, RotateCw, Trash2, X } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
@@ -16,12 +17,12 @@ const playbackPlaceholder = "size-11 shrink-0 rounded-full bg-accent motion-safe
 const action = "flex-1 bg-background hover:bg-accent";
 
 function Position({ runtime, length, enabled }: Pick<Props, "runtime"> & { length: number; enabled: boolean }) {
-  const player = runtime.runSync(Player.use((service) => service.controls()));
-  const position = useSyncExternalStore(player.subscribe, player.position, () => 0);
+  const player = runtime.runSync(Effect.flatMap(Player, (service) => service.controls()));
+  const position = useSyncExternalStore((wake) => player.subscribe(wake), () => player.position(), () => 0);
   return (
     <>
-      <input type="range" aria-label="Position" className="h-11 min-w-0 flex-1 accent-foreground" min={0} max={length}
-        value={Math.min(position, length)} disabled={!enabled} onChange={(event) => player.seek(event.currentTarget.valueAsNumber)} />
+      <Slider aria-label="Position" className="min-w-0 flex-1" min={0} max={Math.max(1, length)}
+        value={Math.min(position, length)} disabled={!enabled} onValueChange={(value) => player.seek(value)} />
       <span className="shrink-0 text-sm text-muted-foreground tabular-nums">{clockLength(position)} / {clockLength(length)}</span>
     </>
   );
@@ -36,7 +37,7 @@ function OpenVoicemail({ runtime, row, label, title, date }: Pick<Props, "runtim
   const { state, can, send } = useVoicemail(runtime);
   const phone = usePhone(runtime);
   if (!state || !phone.state) return null;
-  const held = runtime.runSync(Voicemails.use((store) => store.get()));
+  const held = runtime.runSync(Effect.flatMap(Voicemails, (store) => store.get()));
   const busy = state.removal.outcome === "Sent";
   const live = phone.state.telecom === "OrdinaryCall" || phone.state.telecom === "MaybeEmergencyCall";
   const play = { type: "play", live } as const;
@@ -52,8 +53,8 @@ function OpenVoicemail({ runtime, row, label, title, date }: Pick<Props, "runtim
         <span className="min-w-0 flex-1 truncate font-bold">{title}</span>
         <span className="shrink-0 text-sm text-muted-foreground">{date}</span>
       </button>
-      {state.carrierText && row.carrierTranscript !== null && <p className="break-words text-lg" data-alpha-phone-transcript="">{row.carrierTranscript}</p>}
-      {state.transcript.status === "Loaded" && held.transcript !== "" && <p className="break-words text-lg" data-alpha-phone-transcript="">{held.transcript}</p>}
+      {state.carrierText && row.carrierTranscript !== null && <p className="wrap-anywhere text-lg" data-alpha-phone-transcript="">{row.carrierTranscript}</p>}
+      {state.transcript.status === "Loaded" && held.transcript !== "" && <p className="wrap-anywhere text-lg" data-alpha-phone-transcript="">{held.transcript}</p>}
       {state.transcript.status === "Loading" && <div role="status" aria-label="Transcribing" className="h-4 w-3/5 rounded-full bg-accent motion-safe:animate-pulse" />}
       {state.transcript.status === "Failed" && <p className="text-sm text-muted-foreground">No words were heard</p>}
       {state.noRecognizer && <p className="text-sm text-muted-foreground">No transcript is available on this phone</p>}
@@ -93,13 +94,15 @@ function OpenVoicemail({ runtime, row, label, title, date }: Pick<Props, "runtim
 export function VoicemailTab({ runtime, now }: Props) {
   const { state, can, send } = useVoicemail(runtime);
   if (!state) return null;
-  const held = runtime.runSync(Voicemails.use((store) => store.get()));
+  const held = runtime.runSync(Effect.flatMap(Voicemails, (store) => store.get()));
   const rows = state.items > 0 ? held.rows : [];
   const open = async (row: ListedVoicemail) => {
     const opening = { type: "open", carrierText: row.carrierTranscript !== null } as const;
     if (!can(opening)) return;
-    runtime.runSync(Voicemails.use((store) => store.set({ open: row.id, audio: "", transcript: "" })));
-    await send(opening);
+    const previous = { open: held.open, audio: held.audio, transcript: held.transcript };
+    runtime.runSync(Effect.flatMap(Voicemails, (store) => store.set({ open: row.id, audio: "", transcript: "" })));
+    const result = await send(opening);
+    if (Exit.isFailure(result)) runtime.runSync(Effect.flatMap(Voicemails, (store) => store.set(previous)));
   };
   return (
     <div>
@@ -123,8 +126,8 @@ export function VoicemailTab({ runtime, now }: Props) {
         if (current) return <OpenVoicemail key={row.id} runtime={runtime} row={row} label={label} title={title} date={date} />;
         return (
           <button type="button" key={row.id} aria-label={label} aria-expanded="false" onClick={() => void open(row)}
-            disabled={state.confirming || state.removal.outcome === "Sent"}
-            className={cn(focusRing, "flex min-h-16 w-full items-start gap-3 px-5 py-2.5 text-left")}>
+            disabled={!can({ type: "open", carrierText: row.carrierTranscript !== null })}
+            className={cn(focusRing, "flex min-h-16 w-full items-start gap-3 px-5 py-2.5 text-left focus-visible:-outline-offset-focus")}>
             <CallAvatar name={title} />
             <span className="flex min-w-0 flex-1 flex-col gap-0.5">
               <span className="flex items-center gap-1.5">

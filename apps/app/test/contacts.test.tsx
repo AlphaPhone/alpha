@@ -7,6 +7,7 @@ import { Machine as Contacts } from "../gen/app__contacts.effect.vibe";
 import { Machine as Agent } from "../gen/app__contacts__agent.effect.vibe";
 import { Machine as Phone } from "../gen/app__phone.effect.vibe";
 import { type Asking, propose, withdrawn } from "../src/contacts/requests.vibe";
+import { sheetOf } from "../src/contacts/contacts.vibe";
 import { type Reading, answerReading } from "../src/contacts/reads.vibe";
 import { Machine as Messages } from "../gen/app__messages.effect.vibe";
 import { Machine as Composer } from "../gen/app__messages__composer.effect.vibe";
@@ -253,8 +254,34 @@ describe("Contacts on an Alpha image", () => {
     // spec/app/contacts/index.md, "Searching or changing the filter chip starts a new list"
     expect(await read({ type: "contact_show", query: "Ben" })).toEqual({ kind: "contact-show", status: "shown" });
     await until(alpha, alpha.runtime, Contacts, (s) => s.front && s.sought && s.list.status === "Loaded" && s.rows === 1);
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(button("Ben Ortiz")).toBeDefined();
+    });
     await press("Ben Ortiz");
     await until(alpha, alpha.runtime, Contacts, (s) => s.opened && s.card.status === "Loaded");
     expect(await read({ type: "contact_read_selected" })).toEqual({ kind: "contact-read", status: "read", contact: { displayName: "Ben Ortiz", phoneNumbers: ["+14155550122"], emailAddresses: [] } });
+  });
+
+  it("Clamps >32 phone numbers in sheetOf and renders agent reviews inside a dialog (spec/app/contacts/index.md, \"Opening a contact reads it from the phone afresh\"; spec/app/contacts/agent.md, \"Every action is reviewed before anything is written\")", async () => {
+    const oversized = sheetOf({
+      givenName: "Maya",
+      familyName: "Chen",
+      phones: Array.from({ length: 35 }, (_, index) => `+14155550${String(index).padStart(3, "0")}`),
+      emails: [],
+      notes: "",
+    });
+    expect(oversized.phones).toBe(32);
+
+    const world = image();
+    const { alpha } = await open(world);
+    await until(alpha, alpha.runtime, Shell, (s) => s.contacts);
+    await until(alpha, alpha.runtime, Phone, (s) => s.telecom === "NoCall");
+
+    await alpha.runtime.runPromise(propose({ type: "contact_delete", query: "Ben" }, true));
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Shown" && s.contact === "8");
+    const reviewDialog = document.querySelector("[role=dialog][data-alpha-review]");
+    expect(reviewDialog).not.toBeNull();
+    expect(reviewDialog?.textContent).toContain("Ben Ortiz");
   });
 });

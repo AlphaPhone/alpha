@@ -25,7 +25,7 @@ function binding(op: Sms, call: ExecutorCall) {
 function resultOf(receipt: SmsSendResult | undefined) {
   if (receipt === undefined) return undefined
   if (receipt.status === "submitted" || receipt.status === "sent" || receipt.status === "delivered") return { kind: "applied", result: receipt } as const
-  if (receipt.status === "denied" || receipt.status === "cancelled") return { ...refused, result: receipt }
+  if (receipt.status === "denied" || receipt.status === "cancelled" || receipt.status === "failed") return { ...refused, result: receipt }
   return undefined
 }
 
@@ -43,7 +43,7 @@ export effect function reviewAgentSms(op: Sms, call: ExecutorCall, current: () =
   if (!(tryPromise(current) catch () => false) || !(try device.showing()) || !clear(try phone.get())) return refused
   const receipt = telephony("sendSms", (client) => client.messages.sendSms(wanted.review, wanted.id)) catch (failure) => {
     if (failure instanceof TelephonyAbsent || (failure instanceof TelephonyRefused &&
-      (failure.tag === "BridgeUnavailable" || failure.tag === "InvalidMessageRequest" || failure.tag === "SmsSendNotAttempted"))) return null
+      (failure.tag === "BridgeUnavailable" || failure.tag === "InvalidMessageRequest" || failure.tag === "SmsSendRefused" || failure.tag === "SmsSendNotAttempted"))) return null
     return undefined
   }
   return receipt === null ? refused : resultOf(receipt)

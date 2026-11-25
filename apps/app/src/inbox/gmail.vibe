@@ -35,6 +35,7 @@ module pure {
     readonly cards: Record<string, MailCard>
     readonly next: number
     readonly kept: Kept | undefined
+    readonly incomingKept?: Kept | undefined
   }
 
   function record(value: unknown): value is Record<string, unknown> {
@@ -50,6 +51,7 @@ module pure {
       if (![found["accounts"], found["credentials"], found["messages"], found["cards"]].every(record)) return undefined
       if (found["labels"] !== undefined && !record(found["labels"])) return undefined
       if (found["kept"] !== undefined && (!record(found["kept"]) || !record(found["kept"]["selection"]) || !Array.isArray(found["kept"]["letters"]))) return undefined
+      if (found["incomingKept"] !== undefined && (!record(found["incomingKept"]) || !record(found["incomingKept"]["selection"]) || !Array.isArray(found["incomingKept"]["letters"]))) return undefined
       return found as unknown as Ledger
     } catch { return undefined }
   }
@@ -57,7 +59,8 @@ module pure {
 import { type Kept, type Ledger, type Letter, readLedger } from pure
 export type { Letter }
 
-const blank = (): Ledger => ({ accounts: {}, credentials: {}, labels: {}, messages: {}, cards: {}, next: 1, kept: undefined })
+const blank = (): Ledger => ({ accounts: {}, credentials: {}, labels: {}, messages: {}, cards: {}, next: 1, kept: undefined, incomingKept: undefined })
+const maxCards = 250
 const key = "alpha/inbox/mail"
 
 /** The Gmail search each folder is, before the owner's own words. */
@@ -116,7 +119,7 @@ export const mail = Layer.effect(Mail, effect {
   const store = try KeyValueStore.KeyValueStore
   const restored = readLedger(store.get(key) catch () => undefined) ?? blank()
   const storedLabels = restored.labels ?? Object.fromEntries(Object.entries(restored.accounts).map(([label, id]) => [id, label]))
-  let ledger: Ledger = { accounts: restored.accounts, credentials: restored.credentials, labels: storedLabels, messages: restored.messages, cards: restored.cards, next: restored.next, kept: restored.kept }
+  let ledger: Ledger = { accounts: restored.accounts, credentials: restored.credentials, labels: storedLabels, messages: restored.messages, cards: restored.cards, next: restored.next, kept: restored.kept, incomingKept: restored.incomingKept }
   let sequence = 0
   let ownerGeneration = 0
   let nextId = ledger.next
@@ -128,7 +131,21 @@ export const mail = Layer.effect(Mail, effect {
   const cursors = new Map<string, number>()
   const tokens = new Map<number, string>()
   const bodies = new Map<number, MailMessage>()
+  function pruneCards() {
+    const keys = Object.keys(ledger.cards)
+    if (keys.length <= maxCards) return
+    const pinned = new Set<string>([
+      ...(current?.letters ?? []).map((one) => String(one.message)),
+      ...(ledger.kept?.letters ?? []).map((one) => String(one.message)),
+      ...(ledger.incomingKept?.letters ?? []).map((one) => String(one.message)),
+    ])
+    for (const id of keys) {
+      if (Object.keys(ledger.cards).length <= maxCards) break
+      if (!pinned.has(id)) delete ledger.cards[id]
+    }
+  }
   effect function keep(): void!! {
+    pruneCards()
     try ignore(store.set(key, JSON.stringify({ ...ledger, next: nextId })))
   }
   function numbered(table: "accounts" | "credentials", name: string): number {
@@ -258,7 +275,9 @@ export const mail = Layer.effect(Mail, effect {
             delete ledger.cards[String(message)]
             ledger.cards[String(message)] = card
           }
-          ledger = { ...ledger, kept: { selection: page.selection, letters: page.letters, credential: page.credential } }
+          const keptPage: Kept = { selection: page.selection, letters: page.letters, credential: page.credential }
+          const incomingKept = page.selection.folder === "Incoming" && page.selection.query === "" ? keptPage : ledger.incomingKept
+          ledger = { ...ledger, kept: keptPage, incomingKept }
           try keep()
           return
         }
@@ -269,6 +288,7 @@ export const mail = Layer.effect(Mail, effect {
       if (state.failure === "Revoked" && grants.delete(state.selected.account)) {
         accountGenerations.set(state.selected.account, ++sequence)
         drop(state.selected.account)
+        if (ledger.incomingKept?.selection.account === state.selected.account) ledger = { ...ledger, incomingKept: undefined }
         try keep()
         return
       }
@@ -276,8 +296,10 @@ export const mail = Layer.effect(Mail, effect {
       if (saved !== undefined && (state.keptPages === 0 || !sameSelection(saved.selection, state.kept))) {
         const account = state.connected.find((linked) => linked.account === saved.selection.account)
         if (state.failure === "Revoked" || (state.accounts.status === "Loaded" &&
-          (account === undefined || !account.grant.read || (saved.credential !== undefined && saved.credential !== account.credential)))) drop(saved.selection.account)
-        else ledger = { ...ledger, kept: undefined }
+          (account === undefined || !account.grant.read || (saved.credential !== undefined && saved.credential !== account.credential)))) {
+          drop(saved.selection.account)
+          if (ledger.incomingKept?.selection.account === saved.selection.account) ledger = { ...ledger, incomingKept: undefined }
+        } else ledger = { ...ledger, kept: undefined }
         try keep()
       }
     },
@@ -288,8 +310,13 @@ export const mail = Layer.effect(Mail, effect {
       const relabel = (letters: ReadonlyArray<Letter>) => letters.map((letter) => (letter.message === message ? { ...letter, card: changed } : letter))
       if (current !== undefined) current = { ...current, letters: relabel(current.letters) }
       const saved = ledger.kept
+      const incomingSaved = ledger.incomingKept
       ledger.cards[String(message)] = changed
-      if (saved !== undefined) ledger = { ...ledger, kept: { ...saved, letters: relabel(saved.letters) } }
+      ledger = {
+        ...ledger,
+        ...(saved !== undefined ? { kept: { ...saved, letters: relabel(saved.letters) } } : {}),
+        ...(incomingSaved !== undefined ? { incomingKept: { ...incomingSaved, letters: relabel(incomingSaved.letters) } } : {}),
+      }
       try keep()
     },
     shown(state: Mailbox) {
@@ -304,11 +331,12 @@ export const mail = Layer.effect(Mail, effect {
     },
     incoming(state: Mailbox) {
       const credential = credentialOf(state)
-      const kept = currentPage(state) ?? ledger.kept
-      if (kept === undefined || credential === undefined || credential !== state.keptCredential ||
-        kept.credential !== credential || kept.selection.account !== state.selected.account ||
-        kept.selection.folder !== "Incoming" || kept.selection.query !== "") return []
-      return kept.letters.slice(0, pageSize)
+      if (credential === undefined) return []
+      const candidates = [currentPage(state), ledger.kept, ledger.incomingKept]
+      const found = candidates.find((page) =>
+        page !== undefined && page.credential === credential && page.selection.account === state.selected.account &&
+        page.selection.folder === "Incoming" && page.selection.query === "")
+      return found === undefined ? [] : found.letters.slice(0, pageSize)
     },
     read(ticket: number, body: MailMessage) {
       bodies.set(ticket, body)
@@ -395,7 +423,7 @@ export effect function page(account: number, folder: Folder, query: string, curs
   const grantId = ledger.grant(account)
   if (grantId === undefined) throw missingGrant()
   const token = cursor === 0 ? undefined : ledger.token(cursor)
-  if (cursor !== 0 && token === undefined) throw missingGrant()
+  if (cursor !== 0 && token === undefined) throw new CloudError({ failure: { tag: "CloudRefused", code: "StaleRevision", reason: "NoReason" }, cause: "missing page token" })
   if (folder === "DraftsFolder" && query.trim() === "") {
     const result = try provider(cloud).gmailDrafts(grantId, token)
     const from = ledger.email(account)
@@ -459,7 +487,8 @@ export effect function operate(id: number, account: number, proposal: Proposal, 
   const { client } = try Cloud
   const ledger = try Mail
   const key = try (try Attempts).key(id)
-  const requestId = at === 0 ? key : `${key.slice(0, -4)}${at.toString(16).padStart(4, "0")}`
+  const tail = Number.parseInt(key.slice(-4), 16)
+  const requestId = at === 0 ? key : `${key.slice(0, -4)}${(((Number.isNaN(tail) ? 0 : tail) + at) & 0xffff).toString(16).padStart(4, "0")}`
   const grantId = ledger.grant(account)
   if (grantId === undefined || !ledger.canOperate(account, proposal.kind)) return refusedBefore
   const generation = ledger.generation(account)
