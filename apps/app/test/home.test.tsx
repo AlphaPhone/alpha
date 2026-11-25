@@ -125,15 +125,19 @@ describe("Home on a phone", () => {
     await drawn(() => agenda()?.click());
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Calendar");
     await drawn(() => { fromAreas.reminders([]); fromAreas.hidden([]); });
-    await closeAll();
+  });
 
-    // spec/app/home/cards.md, "Story: See my day at a glance": Home tells the day as it is where the owner is, west of UTC after its midnight as well as east of it. Home carries no date heading, as on the earlier Alpha, so the UTC day ("23 Monday" on a Tuesday in Los Angeles) is never drawn; the agenda card tells its event's time in the owner's zone.
+  // spec/app/home/cards.md, "Story: See my day at a glance"
+  it("See my day as it is where I am, west of UTC and east of it (spec/app/home/cards.md, \"Story: See my day at a glance\")", async () => {
+    const hour = 3_600_000;
+    const agenda = () => [...document.querySelectorAll("button")].find((found) => /^(Next|Overdue reminder)/.test(found.textContent ?? ""));
+    // spec/app/home/cards.md, "Story: See my day at a glance": Home tells the day as it is where the owner is, west of UTC after its midnight as well as east of it. Home carries no date heading, as on the earlier Alpha, so the UTC day ("23 Monday" on Tuesday the 24th in Los Angeles) is never drawn; the agenda card tells its event's time in the owner's zone. Each place is opened later than the last, as a restart keeps the day it last read.
     const zone = process.env.TZ;
-    const tuesday = Date.UTC(2026, 10, 24);
+    const day = 10 * 86_400_000;
     const seenThere: Array<{ readonly card: string | undefined; readonly utcDay: boolean }> = [];
     const wanted: string[] = [];
     try {
-      for (const [where, at] of [["America/Los_Angeles", tuesday + 8 * hour], ["America/Los_Angeles", tuesday + 27 * hour], ["UTC", tuesday + 8 * hour], ["Asia/Tokyo", tuesday + 8 * hour], ["Asia/Tokyo", tuesday - 3 * hour]] as const) {
+      for (const [where, at] of [["Asia/Tokyo", day - 3 * hour], ["UTC", day + 8 * hour], ["America/Los_Angeles", day + 18 * hour]] as const) {
         process.env.TZ = where;
         const there = { ...scene(), phone: true, now: at };
         there.calendar.granted = true;
