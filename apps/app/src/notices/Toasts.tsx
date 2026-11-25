@@ -11,7 +11,7 @@ import { Said, nameOf } from "./toasts.vibe";
 function Toasts({ runtime }: Shown<Resident>) {
   const { state, can, send } = useMachine(runtime);
   if (!state) return null;
-  const said = runtime.runSync(Said.use((found) => Effect.succeed(found)));
+  const said = runtime.runSync(Effect.flatMap(Said, (found) => Effect.succeed(found)));
   const words = state.showing ? said.toasts.get(state.current.number) : undefined;
   const dialog = state.shownIn > 0 ? [...document.querySelectorAll("[role=dialog], [role=alertdialog]")].at(-1) : undefined;
   const region = (

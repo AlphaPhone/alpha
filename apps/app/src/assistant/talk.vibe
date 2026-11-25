@@ -1,10 +1,11 @@
 // spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Keep what I am writing"
-import { ConversationRecord } from "@elizaos/agent/client"
+import type { ConversationRecord } from "@elizaos/agent/client"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import type { Binding } from "../../gen/app__assistant__composer.effect.vibe"
 import type { MediaCard } from "./media-review.vibe"
 import type { Failure, Fix } from "../../gen/app__assistant__reply.ts"
 import type { MailQuestion } from "../inbox/mail-context.vibe"
+import type { Sighting } from "../platform/location.vibe"
 import type { CommsPrompt } from "../phone/comms.vibe"
 
 /** One file selected by the owner, with the bytes admitted by the Ask Alpha attachment policy. */
@@ -86,10 +87,14 @@ export interface Seen {
  * with `useSyncExternalStore`, and the shell writes. It holds no rule; each machine decides what counts.
  */
 export interface Board {
-  snapshot(): Seen
-  subscribe(listener: () => void): () => void
+  snapshot(this: void): Seen
+  subscribe(this: void, listener: () => void): () => void
   /** The owner typed `text` in the composer's box. */
   type(text: string): void
+  /** Hold `text` as the outgoing message for the send in hand. */
+  hold(text: string): void
+  /** Mark a send waiting for the new conversation to be made. */
+  queueSend(): void
   /** The text a send in hand carries, the last text sent, and a send that waits for its conversation to be made. */
   outgoing: string
   lastSent: string
@@ -100,6 +105,12 @@ export interface Board {
   sendWhenMade: boolean
   staged: StagedFiles | undefined
   previewFile(file: Attached): number
+  /** Keep `sighting` under the `ticket` the locator accepted. */
+  rememberPosition(ticket: number, sighting: Sighting): void
+  /** Forget any remembered position once the locator has none. */
+  forgetPosition(): void
+  /** The remembered position for `ticket`, if the locator still holds that ticket. */
+  positionFor(ticket: number): Sighting | undefined
   waitingRequest: CommsPrompt | undefined
   postingRequest: CommsPrompt | undefined
   change(patch: Partial<Seen>): void
@@ -151,6 +162,7 @@ export const talk = Layer.effect(Talk, effect {
   const messages: string[] = []
   const numbers = new Map<string, number>()
   const listeners = new Set<() => void>()
+  let position: { readonly ticket: number; readonly sighting: Sighting } | undefined
   let seen: Seen = {
     pages: new Map(), reply: "", label: "", failure: undefined, typed: "", files: [], filesBinding: undefined, attachmentNotice: "", preview: undefined, media: [], mediaNote: "", saved: "", hits: [],
     titles: new Map(records.map((one, at) => [at + 1, one.title])),
@@ -163,6 +175,8 @@ export const talk = Layer.effect(Talk, effect {
       return () => { listeners.delete(listener) }
     },
     type: (text) => board.change({ typed: text }),
+    hold: (text) => { board.outgoing = text },
+    queueSend: () => { board.sendWhenMade = true },
     outgoing: "",
     lastSent: "",
     lastSentWire: "",
@@ -174,6 +188,9 @@ export const talk = Layer.effect(Talk, effect {
       board.change({ preview: { ticket, file } })
       return ticket
     },
+    rememberPosition: (ticket, sighting) => { position = { ticket, sighting } },
+    forgetPosition: () => { position = undefined },
+    positionFor: (ticket) => (position?.ticket === ticket ? position.sighting : undefined),
     waitingRequest: undefined,
     postingRequest: undefined,
     change: (patch) => {

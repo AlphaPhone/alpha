@@ -1,7 +1,8 @@
-// spec/app/shell/index.md, "Story: Move between Home and the apps"; spec/app/shell/gestures.md, "A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back"; spec/app/shell/gestures.md, "On the launcher a pull down that Home allows opens Android's shade, and a swipe up from the bottom bar goes Home; nothing else is a swipe"; spec/app/shell/layers.md, "The page under a layer or a hold takes no touch, and a covering layer or a hold takes none for Ask Alpha either"; spec/app/update/page.md, "A page that was not mounted mounts its editors only once no update is pending"
+// spec/app/shell/index.md, "Story: Move between Home and the apps"; spec/app/shell/index.md, "On Phone, Messages and Contacts the app's own bar stands in for Ask Alpha at rest, until Ask Alpha rises"; spec/app/shell/gestures.md, "A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back"; spec/app/shell/gestures.md, "On the launcher a pull down that Home allows opens Android's shade, and a swipe up from the bottom bar goes Home; nothing else is a swipe"; spec/app/shell/layers.md, "The page under a layer or a hold takes no touch, and a covering layer or a hold takes none for Ask Alpha either"; spec/app/update/page.md, "A page that was not mounted mounts its editors only once no update is pending"
 import { Alert, AppHeader, cn } from "@repo/ui";
 import { type PointerEvent, useCallback, useRef } from "react";
 import { useMachine } from "../gen/app__shell.react.ts";
+import { askAlphaDrawn } from "../gen/app__shell.ts";
 import { useMachine as useCanvas } from "../gen/app__shell__keyboard.react.ts";
 import { useMachine as useLayers } from "../gen/app__shell__layers.react.ts";
 import { assistantInert, pageInert, takesBack } from "../gen/app__shell__layers.ts";
@@ -48,7 +49,7 @@ export function App({ alpha }: AppProps) {
   if (cause) return <Alert variant="destructive" className="m-6">Alpha could not read where you were</Alert>;
   if (!state) return null;
   const showing = state.trail.at(-1);
-  const owner = `${showing ?? "home"}:${state.assistant}:${state.drawer}:${launcher}`;
+  const owner = `${showing ?? "home"}:${state.assistant}:${launcher}`;
   const beginSwipe = (event: PointerEvent<HTMLElement>) => {
     if (!event.isPrimary || event.button !== 0 || event.defaultPrevented) return;
     startedRef.current = undefined;
@@ -68,6 +69,7 @@ export function App({ alpha }: AppProps) {
     }
   };
   const swiped = (event: PointerEvent<HTMLElement>) => {
+    if (!event.isPrimary) return;
     const from = startedRef.current;
     if (from?.id !== event.pointerId) return;
     startedRef.current = undefined;
@@ -128,6 +130,7 @@ export function App({ alpha }: AppProps) {
       </div>
       <div
         data-alpha-assistant-host=""
+        hidden={!askAlphaDrawn(state)}
         className={cn(
           comms && "shrink-0",
           !comms && "[&>[data-alpha-detent]]:absolute [&>[data-alpha-detent]]:inset-x-0 [&>[data-alpha-detent]]:bottom-0 [&>[data-alpha-detent]]:max-w-none",
@@ -137,7 +140,7 @@ export function App({ alpha }: AppProps) {
             "pointer-coarse:[&>[data-alpha-detent=full]]:inset-0",
           ],
         )}
-        inert={state.drawer || (layers !== undefined && assistantInert(layers))}
+        inert={layers !== undefined && assistantInert(layers)}
       >
         {alpha.slot("assistant")}
       </div>

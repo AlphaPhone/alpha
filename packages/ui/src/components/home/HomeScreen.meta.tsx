@@ -6,7 +6,7 @@ import { hiddenApps, homeTiles } from "./HomeTileGrid.meta.tsx";
 
 const unbadged = homeTiles.map(({ badge: _badge, ...tile }) => tile);
 const onOpenTile = fn();
-const editing: Partial<HomeScreenProps> = { editing: true, tiles: unbadged, onOpenTile: undefined, onBeginEditing: undefined, onOpenDrawer: undefined };
+const editing: Partial<HomeScreenProps> = { editing: true, tiles: unbadged, onOpenTile: undefined, onBeginEditing: undefined };
 
 export const meta: ComponentMeta<HomeScreenProps> = {
   args: { cards: homeCards, tiles: homeTiles, hidden: hiddenApps, onOpenTile },
@@ -18,8 +18,8 @@ export const meta: ComponentMeta<HomeScreenProps> = {
     "Saving a change": { ...editing, onRemoveTile: undefined, onMoveTile: undefined, onShowHidden: undefined },
     "Not saved": { ...editing, notice: { tag: "TellNotSaved" } },
     "Empty Home": { tiles: [], cards: [] },
-    "In a browser": { onOpenDrawer: undefined, onBeginEditing: undefined },
-    "Assistant only": { tiles: [], cards: [], onOpenDrawer: undefined, onBeginEditing: undefined },
+    "In a browser": { onBeginEditing: undefined },
+    "Assistant only": { tiles: [], cards: [], onBeginEditing: undefined },
   },
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {

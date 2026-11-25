@@ -44,9 +44,15 @@ module page {
     probe.style.cssText = "position:absolute;inset:0 auto auto 0;width:0;overflow:hidden;visibility:hidden;pointer-events:none;font-size:6.25rem;line-height:1;white-space:nowrap;contain:layout"
     probe.textContent = "M"
     document.body.append(probe)
-    const text = () => { if (probe.offsetHeight > 0) heard(probe.offsetHeight) }
+    const text = () => {
+      const size = Number.parseFloat(getComputedStyle(document.documentElement).fontSize)
+      const scale = probe.offsetHeight || (Number.isFinite(size) && size > 0 ? Math.round(size / 16 * 100) : 100)
+      heard(scale)
+    }
     const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(text)
     observer?.observe(probe)
+    const changed = new MutationObserver(text)
+    changed.observe(document.documentElement, { attributes: true, attributeFilter: ["style"] })
     text()
     window.addEventListener("resize", resize)
     window.addEventListener("focus", front)
@@ -64,6 +70,7 @@ module page {
       document.removeEventListener("focusin", focus)
       document.removeEventListener("focusout", focus)
       observer?.disconnect()
+      changed.disconnect()
       probe.remove()
     }
   }

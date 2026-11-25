@@ -172,11 +172,11 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       return;
     }
     if (newChat) {
-      board.sendWhenMade = true;
+      board.queueSend();
       void chats.send(start);
       return;
     }
-    board.outgoing = seen.typed;
+    board.hold(seen.typed);
     board.type("");
     void composer.send(hold);
   };
@@ -195,7 +195,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
     ),
   }));
   const mediaNote = seen.mediaNote === "" ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote }];
-  const failed = seen.failure === undefined ? [] : [{ id: "failure", author: "alpha", text: "", children: <ReplyFailure {...seen.failure} live onRetry={() => type(board.lastSent)} onSettings={settingsAction ? onSettings : undefined} /> } as const];
+  const failed = seen.failure === undefined ? [] : [{ id: "failure", author: "alpha", text: "", children: <ReplyFailure {...seen.failure} fix={seen.failure.kind === "OutOfFunds" ? "FundingFix" : seen.failure.fix} live onRetry={() => type(board.lastSent)} onSettings={settingsAction ? onSettings : undefined} /> } as const];
   const quoted = board.line(shown.chosen, writing.editor.quote)?.text;
   const view = talking.context.showing.tag === "App" ? talking.context.showing.view : "Home";
   const assistantDetent = shell.state?.assistant ?? "Bar";

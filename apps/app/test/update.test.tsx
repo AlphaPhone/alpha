@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Layers } from "../gen/app__shell__layers.effect.vibe";
@@ -32,7 +33,7 @@ function phoneWith(offered: readonly ReturnType<typeof release>[], digest: strin
 
 /** What another area reports to updates, as that area does. */
 const report = (alpha: Awaited<ReturnType<typeof open>>["alpha"], area: string, engagement: Partial<Engagement>) =>
-  alpha.runtime.runPromise(Engagements.use((reports) => reports.report(area, engagement)));
+  alpha.runtime.runPromise(Effect.flatMap(Engagements, (reports) => reports.report(area, engagement)));
 
 /** Settings → About, where the update rows are drawn. */
 async function about(alpha: Awaited<ReturnType<typeof open>>["alpha"]) {
@@ -202,7 +203,7 @@ describe("An open page during an update (spec/app/update/page.md, \"Story: Save 
     await hardware("back");
     await hardware("home");
     expect((await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).trail).toEqual(["Settings"]);
-    // spec/app/update/page.md, "\"Updating Alpha…\" shows while a page holds or an update is pending, and \"Continue update\" only while it is paused and Android allows"
+    // spec/app/update/page.md, "Updating Alpha… shows while a page holds or an update is pending, and Continue update only while it is paused and Android allows"
     world.update.state = { ...world.update.state, phase: "paused", canContinue: true };
     await later(alpha, 1_000);
     await until(alpha, alpha.runtime, Page.Machine, (s) => s.canContinue);

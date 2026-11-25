@@ -841,13 +841,11 @@ pure def canAgentLens(s: Camera, requested: RequestedLens, by: Actor): bool =
 pure def agentLens(s: Camera, requested: RequestedLens, by: Actor): Done =
   val choice = { ...s, requestedLens: requested }
   val lens = chosenLens(choice)
+  val switched = { ...choice, lens: lens, zoom: oneTime, flash: false, flashAuto: false }
   if (lens == s.lens) emit(List(), choice)
-  else {
-    val framed = { ...choice, lens: lens, zoom: oneTime, flash: false, flashAuto: false }
-    if (s.phase == Ready) starting(List(StopPreview({ ticket: s.preview })), framed)
-    else if (s.phase == Starting or mayStart(framed)) starting(List(), framed)
-    else emit(List(), framed)
-  }
+  else if (s.phase == Ready) starting(List(StopPreview({ ticket: s.preview })), switched)
+  else if (s.phase == Starting or mayStart(switched)) starting(List(), switched)
+  else emit(List(), switched)
 ```
 
 ### The agent asks only over a Camera that is showing, unlocked and allowed; an idle preview is started for it, and Ask Alpha over it is lowered
