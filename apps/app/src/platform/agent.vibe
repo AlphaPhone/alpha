@@ -5,7 +5,7 @@ import type { AgentEvent, AgentMethod, AgentRecoveryArchive, AgentRecoveryReview
 import { chunkTaken, deliveryOf, replied } from "../../gen/app__platform.effect.vibe"
 import { Machine as Feed, type FrameKind, machine as feedMachine } from "../../gen/app__platform__feed.effect.vibe"
 import { fresh } from "../runtime/attempts.vibe"
-import { type Failure, type Listening, type Opened, type Remote, type Wired, Refused, Unreachable, Unsent, parsed, patience, refusal, remoteAt, sse } from "./remote.vibe"
+import { type Failure, type Listening, type Opened, type Remote, type Wired, Unreachable, Unsent, parsed, patience, refusal, remoteAt, sse } from "./remote.vibe"
 
 module held {
   import { agentClient } from "@elizaos/os/bridges/agent"
@@ -377,11 +377,11 @@ function plugged(plugin: ElizaAgentPlugin): Remote {
     },
     events(request: HttpClientRequest.HttpClientRequest, listening?: Listening) {
       return Stream.unwrap(effect {
-        const { status, body } = timeout(opened(plugin, try relayed(request)), patience) catch effect (cause) => match (cause) {
+        const { status, headers, body } = timeout(opened(plugin, try relayed(request)), patience) catch effect (cause) => match (cause) {
           when Unsent: throw cause;
           default: throw new Unreachable({ cause });
         }
-        if (!replied(status)) throw new Refused({ status })
+        if (!replied(status)) throw refusal(status, headers["retry-after"])
         return sse(body, listening)
       })
     },

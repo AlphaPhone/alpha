@@ -15,7 +15,7 @@ import { type Asking, propose, withdrawn } from "../src/contacts/requests.vibe";
 import { type Reading, answerReading } from "../src/contacts/reads.vibe";
 import { Machine as Messages } from "../gen/app__messages.effect.vibe";
 import { Machine as Composer } from "../gen/app__messages__composer.effect.vibe";
-import { closeAll, later, open, press, underAct, until } from "./alpha.tsx";
+import { closeAll, drawn, later, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -201,6 +201,7 @@ describe("Contacts on an Alpha image", () => {
     // spec/app/contacts/index.md, "Searching or changing the filter chip starts a new list"
     expect(await read({ type: "contact_show", query: "Ben" })).toEqual({ kind: "contact-show", status: "shown" });
     await until(alpha, alpha.runtime, Contacts, (s) => s.front && s.sought && s.list.status === "Loaded" && s.rows === 1);
+    await drawn(() => new Promise((resolve) => setTimeout(resolve, 0)));
     await press("Ben Ortiz");
     await until(alpha, alpha.runtime, Contacts, (s) => s.opened && s.card.status === "Loaded");
     expect(await read({ type: "contact_read_selected" })).toEqual({ kind: "contact-read", status: "read", contact: { displayName: "Ben Ortiz", phoneNumbers: ["+14155550122"], emailAddresses: [] } });

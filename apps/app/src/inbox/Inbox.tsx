@@ -376,6 +376,7 @@ export function Inbox({ runtime }: InboxProps) {
   return (
     <>
       <InboxListScreen
+        onBack={shell.can({ type: "goBack" }) ? () => void shell.send({ type: "goBack" }) : undefined}
         account={account === 0 ? undefined : mailOf(runtime, (mail) => mail.email(account))}
         folder={folderNames[folder]}
         unavailable={!state.searchable}

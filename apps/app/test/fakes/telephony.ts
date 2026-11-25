@@ -8,13 +8,13 @@ import { type Faked, plugin, rejection } from "./phone.ts";
 import type { Route } from "./routes.ts";
 
 /** A call in the phone's log. */
-export interface LoggedCall { id: number; number: string; name: string | null; date: number; type: "incoming" | "outgoing" | "missed" }
+export interface LoggedCall { id: number; number: string; name: string | null; date: number; type: "incoming" | "outgoing" | "missed"; seconds?: number }
 /** A voicemail the carrier delivered. */
-export interface HeldVoicemail { id: number; number: string; date: number; heard: boolean; deleted: boolean }
+export interface HeldVoicemail { id: number; number: string; date: number; heard: boolean; deleted: boolean; seconds?: number; name?: string; transcript?: string }
 /** A text in the phone's SMS provider: received into the inbox, or sent from it. */
-export interface Text { id: number; thread: number; address: string; box: "inbox" | "sent"; date: number; body: string; read: boolean }
+export interface Text { id: number; thread: number; address: string; box: "inbox" | "sent"; date: number; body: string; read: boolean; pictures?: number }
 /** A contact in the address book. */
-export interface Person { id: string; displayName: string; givenName: string; familyName: string; phoneNumbers: { number: string; type: string }[]; emailAddresses: { address: string; type: string }[]; notes?: string; revision: number }
+export interface Person { id: string; displayName: string; givenName: string; familyName: string; phoneNumbers: { number: string; type: string }[]; emailAddresses: { address: string; type: string }[]; notes?: string; starred?: boolean; revision: number }
 /** A call Telecom holds. */
 export interface Live { id: string; state: "dialing" | "ringing" | "active" | "held"; connectedAt: number | null }
 
@@ -220,12 +220,12 @@ function telephony(world: TelephonyScene): Faked {
     };
     const thread = (number: number) => {
       const rows = world.texts.filter((one) => one.thread === number).sort((x, y) => y.date - x.date);
-      return { id: `thread:${number}`, date: rows[0]!.date, messageCount: rows.length, snippet: rows[0]!.body, unread: rows.some((one) => !one.read), addresses: [rows[0]!.address] };
+      return { id: `thread:${number}`, date: rows[0].date, messageCount: rows.length, snippet: rows[0].body, unread: rows.some((one) => !one.read), addresses: [rows[0].address] };
     };
     const message = (one: Text) => ({
       id: `sms:${one.id}`, kind: "sms", threadId: `thread:${one.thread}`, direction: one.box === "inbox" ? "incoming" : "outgoing",
       status: one.box === "inbox" ? (one.read ? "read" : "received") : "sent", date: one.date, read: one.read, subscriptionId: 1,
-      addresses: [one.address], body: one.body, deliveryReport: one.box === "inbox" ? null : "pending", attachments: 0,
+      addresses: [one.address], body: one.body, deliveryReport: one.box === "inbox" ? null : "pending", attachments: one.pictures ?? 0,
     });
     const voicemail = (id: string) => world.voicemails.find((one) => String(one.id) === id && !one.deleted);
     return {
@@ -243,7 +243,7 @@ function telephony(world: TelephonyScene): Faked {
       listRecentCalls: ({ limit }) => {
         if (world.callLog !== "granted") return Promise.reject(rejection("Call-log access is not granted", "permission-required"));
         const rows = [...world.calls].sort((x, y) => y.date - x.date).slice(0, limit + 1);
-        return Promise.resolve({ calls: rows.map((one) => ({ id: String(one.id), number: one.number, cachedName: one.name, date: one.date, durationSeconds: 30, type: one.type, isNew: one.type === "missed" })) });
+        return Promise.resolve({ calls: rows.map((one) => ({ id: String(one.id), number: one.number, cachedName: one.name, date: one.date, durationSeconds: one.seconds ?? 30, type: one.type, isNew: one.type === "missed" })) });
       },
       dial: ({ number }) => {
         world.dialed.push(number);
@@ -262,7 +262,7 @@ function telephony(world: TelephonyScene): Faked {
       listVoicemail: ({ limit }) => Promise.resolve({
         state: world.carrier,
         voicemails: world.carrier === "unsupported" ? [] : world.voicemails.filter((one) => !one.deleted).slice(0, limit).map((one) => ({
-          id: String(one.id), number: one.number, cachedName: null, date: one.date, durationSeconds: 24, isNew: !one.heard, hasAudio: true, carrierTranscript: null,
+          id: String(one.id), number: one.number, cachedName: one.name ?? null, date: one.date, durationSeconds: one.seconds ?? 24, isNew: !one.heard, hasAudio: true, carrierTranscript: one.transcript ?? null,
         })),
       }),
       fetchVoicemailAudio: () => Promise.resolve({ status: "ready" }),
@@ -326,7 +326,7 @@ function telephony(world: TelephonyScene): Faked {
         const bindingHash = await smsBindingHash({ recipients: recipients as never, body, subscriptionId });
         world.sent.push({ operationId, recipients, body });
         const thread = world.texts.find((one) => one.address === recipients[0])?.thread ?? Math.max(0, ...world.texts.map((one) => one.thread)) + 1;
-        world.texts.push({ id: Math.max(0, ...world.texts.map((one) => one.id)) + 1, thread, address: recipients[0]!, box: "sent", date: 1_700_000_400_000 + world.sent.length, body, read: true });
+        world.texts.push({ id: Math.max(0, ...world.texts.map((one) => one.id)) + 1, thread, address: recipients[0], box: "sent", date: 1_700_000_400_000 + world.sent.length, body, read: true });
         const record = { kind: "sms-send", operationId, subscriptionId, bindingHash, status: "sent", parts: recipients.map((_number, recipientIndex) => ({ index: recipientIndex, recipientIndex, partIndex: 0, sent: "success", delivery: "unknown" })), createdAt: 1_700_000_400_000 };
         world.journal.set(operationId, record);
         world.changed();
@@ -370,7 +370,7 @@ function contacts(world: TelephonyScene): Faked {
         const found = world.people.filter((one) => one.displayName.toLowerCase().includes(q) || (digits !== "" && one.phoneNumbers.some((phone) => phone.number.replace(/[^\d+]/g, "").includes(digits)))).sort((x, y) => Number(x.id) - Number(y.id));
         const page = found.slice(0, limit);
         return Promise.resolve({
-          contacts: page.map((one) => ({ id: one.id, lookup: `lookup-${one.id}`, name: one.displayName, revision: String(one.revision), starred: false, phones: one.phoneNumbers.map(({ number }) => number), emails: one.emailAddresses.map(({ address }) => address) })),
+          contacts: page.map((one) => ({ id: one.id, lookup: `lookup-${one.id}`, name: one.displayName, revision: String(one.revision), starred: one.starred ?? false, phones: one.phoneNumbers.map(({ number }) => number), emails: one.emailAddresses.map(({ address }) => address) })),
           more: found.length > limit,
         });
       },
@@ -387,7 +387,7 @@ function contacts(world: TelephonyScene): Faked {
         if (one === undefined) throw new Error("Contact not found");
         return {
           id: one.id, lookup: `lookup-${one.id}`, displayName: one.displayName, givenName: one.givenName, familyName: one.familyName,
-          ...(one.notes === undefined ? {} : { notes: one.notes }), starred: false, phoneNumbers: one.phoneNumbers, emailAddresses: one.emailAddresses, version: await versionOf(one.id, one.revision),
+          ...(one.notes === undefined ? {} : { notes: one.notes }), starred: one.starred ?? false, phoneNumbers: one.phoneNumbers, emailAddresses: one.emailAddresses, version: await versionOf(one.id, one.revision),
         };
       },
       save: async ({ id, version, ...draft }) => {
@@ -486,5 +486,67 @@ export function telephonyPlugins(world: TelephonyScene): Record<string, Faked> {
     ElizaActionJournal: journal(world),
     AlphaOngoingCall: ongoing(world),
     AlphaCallState: callState(world),
+  };
+}
+
+/**
+ * The image the dev server shows with `ALPHA_FAKES=phone`: the people, calls, voicemail and conversations of develop's
+ * fixtures, dated from `now`, so Phone, Messages and Contacts can be laid beside develop's. Journeys use `telephonyScene`.
+ */
+export function developTelephony(now: number): TelephonyScene {
+  const minute = 60_000;
+  const midnight = new Date(now);
+  midnight.setHours(0, 0, 0, 0);
+  const today = (minutes: number) => midnight.getTime() + minutes * minute;
+  const ago = (minutes: number) => now - minutes * minute;
+  const person = (id: number, givenName: string, familyName: string, number: string, email: string, notes: string, starred = false): Person => ({
+    id: String(id), displayName: `${givenName} ${familyName}`.trim(), givenName, familyName, phoneNumbers: [{ number, type: "mobile" }],
+    emailAddresses: email === "" ? [] : [{ address: email, type: "home" }], notes, starred, revision: 1,
+  });
+  const people = [
+    person(1, "Ana", "Torres", "+14155550171", "ana@torres.example", "Climbing partner"),
+    person(2, "Ben", "Adler", "+14155550163", "ben@adler.example", "Accountant"),
+    person(3, "Dad", "", "+15035550110", "", "", true),
+    person(4, "Jordan", "Park", "+12125550187", "jordan@northpoint.example", "Partner, Northpoint", true),
+    person(5, "Kenji", "Sato", "+12065550148", "kenji@sato.example", ""),
+    person(6, "Lena", "Ruiz", "+17185550121", "lena@ruiz.example", ""),
+    person(7, "Maya", "Chen", "+14155550132", "maya@lumen.example", "Design lead at Lumen", true),
+    person(8, "Olivia", "Brooks", "+14155550126", "olivia@brooks.example", "Landlord"),
+    person(9, "Priya", "Nair", "+16505550144", "priya@nair.example", "", true),
+    person(10, "Sam", "Okafor", "+15105550199", "sam@okafor.example", ""),
+  ];
+  const number = (name: string) => people.find((one) => one.displayName === name)!.phoneNumbers[0].number;
+  const call = (id: number, name: string | null, at: number, type: LoggedCall["type"], seconds: number, raw = ""): LoggedCall =>
+    ({ id, number: name === null ? raw : number(name), name, date: ago(at), type, seconds });
+  let text = 0;
+  const thread = (id: number, name: string, unread: number, rows: ReadonlyArray<readonly [boolean, string | number, number]>): Text[] =>
+    rows.map(([mine, body, at], index) => ({
+      id: ++text, thread: id, address: number(name), box: mine ? "sent" : "inbox", date: today(at) + index,
+      body: typeof body === "string" ? body : "", read: mine || index < rows.length - unread, ...(typeof body === "number" ? { pictures: 1 } : {}),
+    }));
+  return {
+    ...telephonyScene(),
+    people,
+    calls: [
+      call(1, "Maya Chen", 12, "missed", 0),
+      call(2, null, 52, "incoming", 24, "+16285550199"),
+      call(3, "Jordan Park", 190, "outgoing", 740),
+      call(4, "Dad", 1300, "incoming", 1260),
+      call(5, "Priya Nair", 1570, "outgoing", 95),
+      call(6, "Sam Okafor", 3000, "missed", 0),
+      call(7, "Lena Ruiz", 4500, "incoming", 300),
+    ],
+    voicemails: [
+      { id: 11, number: number("Maya Chen"), date: ago(11), heard: false, deleted: false, seconds: 18, transcript: "Hey, it's Maya. Quick one: can we push the review to 3:30? I want to get the prototype on the device first. Call me back." },
+      { id: 12, number: number("Dad"), date: ago(1320), heard: true, deleted: false, seconds: 34, transcript: "Hi kiddo, just checking in. Mom wants to know if you're coming up for the weekend. No rush, call when you can." },
+      { id: 13, number: "+12125550100", name: "Dr. Patel's office", date: ago(2900), heard: true, deleted: false, seconds: 22, transcript: "This is Dr. Patel's office confirming your appointment Thursday at 10 AM. Please call back to confirm." },
+    ],
+    texts: [
+      ...thread(1, "Maya Chen", 1, [[false, "Pushed the new flows to Figma", -330], [true, "Looks great. Review tomorrow?", -322], [false, "Yes! Put it on the calendar", -321], [true, "Design review is at 3", 750], [false, "Still on for 3? I can bring the prototype.", 844]]),
+      ...thread(2, "Priya Nair", 3, [[true, "Saturday was so fun", -600], [false, "Right?? Lunch Tuesday?", -590], [true, "Yes. Tartine at 1", -588], [false, "Sent you the photos from Saturday", 700], [false, 0, 700], [false, 1, 700]]),
+      ...thread(3, "Jordan Park", 0, [[false, "Can we do 4:30 instead of 4?", 615], [true, "Works.", 618]]),
+      ...thread(4, "Sam Okafor", 0, [[false, "Running 10 min late to standup", 562], [true, "No worries", 563]]),
+      ...thread(5, "Dad", 0, [[false, "Did you see the game last night?", -700], [true, "Missed it! Call you Sunday", -650], [false, "Ok. Love you", -640]]),
+    ],
   };
 }

@@ -36,7 +36,7 @@ export const meta: ComponentMeta<StartupAccessPanelProps> = {
       onAct.mockClear();
       onContinue.mockClear();
       const sheet = await screen.findByRole("dialog", { name: "Access" });
-      await waitFor(() => expect(within(sheet).getByRole("progressbar", { name: "Step 3 of 7" })).toBeVisible());
+      await waitFor(() => expect(within(sheet).getByText("Step 3 of 7")).toBeVisible());
       await userEvent.click(within(sheet).getByRole("button", { name: "Allow" }));
       await userEvent.click(within(sheet).getByRole("button", { name: "Continue" }));
       await expect([onAct.mock.calls, onContinue.mock.calls.length]).toEqual([[["Camera"]], 1]);
@@ -56,7 +56,7 @@ export const meta: ComponentMeta<StartupAccessPanelProps> = {
     "Review of one": async () => {
       onDone.mockClear();
       const sheet = await screen.findByRole("dialog", { name: "Access" });
-      await expect(within(sheet).queryByRole("progressbar")).toBeNull();
+      await expect(within(sheet).queryByText(/^Step /)).toBeNull();
       await userEvent.keyboard("{Escape}");
       await userEvent.click(within(sheet).getByRole("button", { name: "Done" }));
       await expect(onDone.mock.calls.length).toBe(2);

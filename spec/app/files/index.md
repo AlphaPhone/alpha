@@ -459,19 +459,21 @@ pure def sometimesBackReturnsWhereTheWalkBegan(s: Files): bool = s.handed and ba
 
 ### The place showing is read again when asked, and only its newest answer is taken; a folder that no longer exists brings the owner back to the top and says so, never that the storage is unavailable
 
-The owner pulls to refresh, or the phone says the storage changed. The
+The owner asks to refresh, or the phone says the storage changed. At the top
+this measures the volumes and categories again. In a folder or category the
 answer keeps the selection that is still listed, and a delete confirmation
 whose items changed stops counting.
 
 ```quint
-pure def canRefresh(s: Files, by: Actor): bool = by != Agent and allowed(s) and s.open and not(atTop(s))
+pure def canRefresh(s: Files, by: Actor): bool = by != Agent and allowed(s) and s.open
 
 pure def refresh(s: Files, by: Actor): Moved =
-  val listing = R::ask(s.listing)
   val search = S::follow(s.search, where(s))
-  { state: { ...s, listing: listing, search: search },
-    out: List(Look({ ticket: listing.ticket, trail: s.trail, category: s.category, inCategory: s.inCategory }))
-      .concat(if (search.searching) List(Search({ ticket: search.query.ticket, where: where(s), filter: search.filter })) else List()) }
+  val asked = if (search.searching) List(Search({ ticket: search.query.ticket, where: where(s), filter: search.filter })) else List()
+  val listing = R::ask(s.listing)
+  if (atTop(s)) arrived({ state: { ...s, search: search }, out: asked })
+  else { state: { ...s, listing: listing, search: search },
+    out: List(Look({ ticket: listing.ticket, trail: s.trail, category: s.category, inCategory: s.inCategory })).concat(asked) }
 
 pure def canListed(s: Files, ticket: int, by: Actor): bool = by == Phone and R::canAnswer(s.listing, ticket)
 
@@ -694,7 +696,7 @@ pure def agentFilter(s: Files, request: int, wanted: S::Filter, guarded: bool, b
   else asking(wanted, request, s)
 ```
 
-### The agent opens a file the owner is shown, as listed now, when no file is open over Files; otherwise it is told it failed
+### The agent opens a file the owner is shown, as listed or found now, when no file is open over Files; otherwise it is told it failed
 
 Whether the preview shows a file is the preview's fact.
 
@@ -702,8 +704,9 @@ Whether the preview shows a file is the preview's fact.
 pure def canAgentOpen(s: Files, request: int, file: F::Item, previewing: bool, guarded: bool, by: Actor): bool = by == Agent and request > 0
 
 pure def agentOpen(s: Files, request: int, file: F::Item, previewing: bool, guarded: bool, by: Actor): Moved =
-  if (browse(s) == Showing and not(guarded) and not(previewing) and file.kind != F::Folder and s.items.includes(file))
-    { state: s, out: List(Show({ item: file, siblings: names(s) }), Tell({ request: request, ok: true, items: List(file) })) }
+  val visible = if (s.search.searching) s.search.hits else s.items
+  if (allowed(s) and s.open and not(s.trash) and not(guarded) and not(previewing) and file.kind != F::Folder and visible.includes(file))
+    { state: s, out: List(Show({ item: file, siblings: if (s.items.includes(file)) names(s) else List() }), Tell({ request: request, ok: true, items: List(file) })) }
   else { state: s, out: List(Tell({ request: request, ok: false, items: List() })) }
 ```
 
@@ -749,7 +752,7 @@ pure def stepTheAgentLeavesTheOwnerAlone(before: Files, via: str, after: Files, 
     (after.trail == before.trail and after.items == before.items and after.picked == before.picked
       and after.search.hits == before.search.hits and after.search.filter == before.search.filter
       and after.deleting == before.deleting and after.change == before.change
-      and out.every(e => match e { | Show(x) => before.items.includes(x.item) and browse(before) == Showing | _ => true }))
+      and out.every(e => match e { | Show(x) => before.open and allowed(before) and (if (before.search.searching) before.search.hits.includes(x.item) else before.items.includes(x.item)) | _ => true }))
 ```
 
 ### The agent can be refused, be told what it found, and set a filter
