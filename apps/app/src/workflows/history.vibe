@@ -4,6 +4,9 @@ import * as Listing from "../../gen/app__workflows__list.effect.vibe"
 import * as Sheet from "../../gen/app__workflows__sheet.effect.vibe"
 import type { Effect as Out, Event, Output } from "../../gen/app__workflows__sheet.effect.vibe"
 import type { Status } from "../../gen/app__workflows__runs.effect.vibe"
+import { MediaHandoff, attachToAlpha } from "../assistant/attachments.vibe"
+import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
+import { type Said, say } from "../notices/toasts.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { type Job, answer, applying, reacting, run, together } from "../runtime/reactor.vibe"
@@ -107,6 +110,17 @@ module speech {
 import { said } from speech
 export { canSpeak } from speech
 
+module handoff {
+  import type { WorkflowRun } from "@elizaos/plugin-workflow/client"
+
+  /** The identity of the reviewed run, ready to attach without putting its private output in chat. @throws {never} */
+  export function runReference(run: WorkflowRun): string {
+    const reference = { workflowId: run.workflowId, runId: run.id, versionId: run.versionId, status: run.status, startedAt: run.startedAt }
+    return new TextEncoder().encode(JSON.stringify(reference)).toBase64()
+  }
+}
+import { runReference } from handoff
+
 const selectedRow = (place: Listing.Place): number => place.tag === "ListingDetail" ? place.row : 0
 
 effect function reading(ticket: number, owner: number, after: number): Event!!(Agent | WorkflowsApi | Rows | HistoryWordsPort | Listing.Machine | Sheet.Machine) {
@@ -164,7 +178,7 @@ effect function output(ticket: number, number: number): Event!!(Agent | Workflow
   return { type: "outputRead", ticket, ok: true, text }
 }
 
-type Needs = Agent | WorkflowsApi | Rows | HistoryWordsPort | Listing.Machine | Sheet.Machine
+type Needs = Agent | WorkflowsApi | Rows | HistoryWordsPort | Listing.Machine | Sheet.Machine | MediaHandoff | Toasts | Said
 
 effect function speak(id: number, runId: number): Event!!(Listing.Machine | HistoryWordsPort) {
   const listing = try (try Listing.Machine).get()
@@ -183,13 +197,27 @@ export effect function backHistory(): boolean!!Sheet.Machine {
   return true
 }
 
+effect function askAboutRun(runId: number): void!!(Agent | Rows | HistoryWordsPort | Listing.Machine | MediaHandoff | Toasts | Said) {
+  const listing = try (try Listing.Machine).get()
+  const current = try (try HistoryWordsPort).view(listing.owner, selectedRow(listing.place))
+  const run = current.opened
+  const scope = ownerAt() catch () => ""
+  if (run?.number !== runId || !(try (try Rows).sameOwner(scope, listing.owner))) return
+  const live = try (try Listing.Machine).get()
+  if (live.owner !== listing.owner || selectedRow(live.place) !== current.row) return
+  const added = try attachToAlpha({
+    id: `workflow-run:${run.raw.id}:${run.raw.versionId}`, name: "Workflow run.json", mimeType: "application/json", data: runReference(run.raw),
+  })
+  if (!added) try say("Alpha couldn’t add this run to the chat.", true)
+}
+
 function carry(fx: Out): Job<Event, Needs, []> {
   return match (fx) {
     when { tag: "ReadRuns", let ticket, let owner, let after }: answer("workflow history", reading(ticket, owner, after), { type: "runsRead", ticket, ok: false, count: 0, more: false });
     when { tag: "ReadOutput", let ticket, let runId }: answer("workflow output", output(ticket, runId), { type: "outputRead", ticket, ok: false, text: "Empty" });
     when { tag: "Speak", let id, let runId }: answer("workflow speech", speak(id, runId), { type: "speechEnded", id });
     when { tag: "Silence" }: run("workflow speech", succeed(undefined));
-    when { tag: "AskAlpha" }: run("workflow question", succeed(undefined));
+    when { tag: "AskAlpha", let runId }: run("workflow question", askAboutRun(runId));
   }
 }
 

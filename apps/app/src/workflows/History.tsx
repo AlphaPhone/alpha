@@ -1,6 +1,6 @@
 // spec/app/workflows/sheet.md, "Story: See a workflow's history"; spec/app/workflows/sheet.md, "Story: Read a run's sheet"
 import { Alert, Button, EmptyState, ListRow, Spinner } from "@repo/ui";
-import { Check, ChevronRight, CircleAlert, Clock, Minus, Play, Square, Volume2, VolumeX, X } from "lucide-react";
+import { Check, ChevronRight, CircleAlert, Clock, Minus, Play, Sparkles, Square, Volume2, VolumeX, X } from "lucide-react";
 import { type Event, newerVersion } from "../../gen/app__workflows__sheet.ts";
 import { useMachine } from "../../gen/app__workflows__sheet.react.ts";
 import type { Machine } from "../../gen/app__workflows__sheet.effect.vibe";
@@ -53,6 +53,7 @@ export function History({ runtime, row, owner }: HistoryProps) {
           <div className="rounded-tile bg-secondary p-4 whitespace-pre-wrap break-words">{opened.raw.output}</div>}
         {state.text === "Truncated" && <p className="text-sm text-muted-foreground">Only the start of the output is shown.</p>}
         <Approval runtime={runtime} run={state.runId} owner={owner} />
+        {opened && sheet.can({ type: "askAbout" }) && <Button variant="secondary" onClick={() => send({ type: "askAbout" })}><Sparkles aria-hidden />Ask Alpha</Button>}
         {canSpeak() && sheet.can({ type: "readAloud" }) && <Button variant="secondary" onClick={() => send({ type: "readAloud" })}><Volume2 aria-hidden />Read aloud</Button>}
         {sheet.can({ type: "stopSpeech" }) && <Button variant="secondary" onClick={() => send({ type: "stopSpeech" })}><VolumeX aria-hidden />Stop reading</Button>}
       </section>

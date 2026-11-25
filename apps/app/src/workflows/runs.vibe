@@ -173,12 +173,11 @@ const sending = following(Model.Machine, (state) => Model.canSendRun(state), Mod
 const polling = started(effect {
   const machine = try Model.Machine
   const listing = try Listing.Machine
-  const active = Stream.changes(Stream.map(machine.changes, (state) => Model.running(state)))
+  const active = Stream.changes(Stream.map(Stream.zipLatest(machine.changes, listing.changes), ([state, page]) =>
+    Model.running(state) && page.owner === state.owner && page.place.tag === "ListingDetail" && page.place.row === state.workflow))
   try Stream.runDrain(Stream.switchMap(active, (running) => running ? Stream.fromEffectRepeat(effect {
     try sleep("4 seconds")
-    const page = try listing.get()
-    const state = try machine.get()
-    if (page.owner === state.owner && page.place.tag === "ListingDetail" && page.place.row === state.workflow) try ignore(machine.send({ type: "readLatest" }))
+    try ignore(machine.send({ type: "readLatest" }))
   }) : Stream.empty))
 }, "following the running workflow")
 
@@ -189,4 +188,8 @@ export effect function backRuns(): boolean!!Model.Machine {
   return true
 }
 
-export const runs = together(reacting(Model, { carry }), references, opened, sending, polling)
+const ended = applying(Model.Machine, (state) => Model.ended(state.latest.status) ? state.latest.id : 0, effect (id: number) => {
+  if (id > 0) try refreshHistory(false)
+})
+
+export const runs = together(reacting(Model, { carry }), references, opened, sending, polling, ended)

@@ -60,6 +60,10 @@
 { "method": "GET", "path": "/api/notes/trash/recordings" }
 { "method": "POST", "path": "/api/notes/trash/recordings/complete" }
 { "method": "GET", "path": "/api/workflow/status" }
+{ "method": "GET", "path": "/api/workflow/hosted/loops" }
+{ "method": "GET", "path": "/api/workflow/hosted/sources" }
+{ "method": "GET", "path": "/api/workflow/hosted/results" }
+{ "method": "POST", "path": "/api/workflow/hosted/results/ack" }
 { "method": "GET", "path": "/api/workflow/workflows/{id}" }
 { "method": "GET", "path": "/api/workflow/workflows/{id}/executions" }
 { "method": "GET", "path": "/api/workflow/executions/{id}" }

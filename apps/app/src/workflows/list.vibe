@@ -161,7 +161,10 @@ const followPage = applying(Shell, (current) => showing(current, "Workflows"), e
   else {
     const list = try List.Machine
     try ignore(list.send({ type: "dismissFilters" }))
-    try ignore(list.send({ type: "closePlace" }))
+    while (List.canClosePlace(try list.get())) {
+      const closed = (map(list.send({ type: "closePlace" }), () => true) catch () => false)
+      if (!closed) break
+    }
   }
 })
 

@@ -15,6 +15,7 @@ import { Rows, refresh } from "./list.vibe"
 interface Draft {
   readonly owner: number
   readonly name: string
+  readonly description: string
   readonly steps: readonly PhoneStep[]
   readonly catalog?: PhoneWorkflowCatalog
   readonly prompt: string
@@ -22,7 +23,7 @@ interface Draft {
   readonly zone: string
 }
 
-const blank: Draft = { owner: 0, name: "", steps: [], prompt: "", zone: "" }
+const blank: Draft = { owner: 0, name: "", description: "", steps: [], prompt: "", zone: "" }
 
 export service DraftWords {
   view(): Draft!!
@@ -96,7 +97,7 @@ function specification(state: Build.Builder, draft: Draft): PhoneWorkflowSpec {
   const trigger: PhoneWorkflowTrigger = preset === "Manual" ? { kind: "manual" } : {
     kind: "time", localTime: clockTime(hour, minute), timeZone: draft.zone, days: preset === "Daily" ? [0, 1, 2, 3, 4, 5, 6] : [...days].sort(),
   }
-  return { version: 1, name: draft.name.trim(), description: draft.generated?.description ?? "", trigger, steps: draft.steps }
+  return { version: 1, name: draft.name.trim(), description: draft.description, trigger, steps: draft.steps }
 }
 
 const draftKey = (scope: string) => `alpha/workflows/draft/${encodeURIComponent(scope)}`
@@ -152,7 +153,7 @@ effect function offer(ticket: number): Build.Event!!Needs {
   const draft = try box.view()
   const restored = prior === undefined || live.name !== 0 || live.steps.length > 0 ? undefined : prior
   try box.set({ ...draft, owner: live.owner, catalog,
-    name: restored?.name ?? draft.name, steps: restored?.steps ?? draft.steps,
+    name: restored?.name ?? draft.name, description: restored?.description ?? draft.description, steps: restored?.steps ?? draft.steps,
     zone: restored?.trigger.kind === "time" ? restored.trigger.timeZone : draft.zone || localZone() })
 
   return {
@@ -302,7 +303,7 @@ export effect function discardDraft(): void!!(DraftWords | Build.Machine) {
   if (state.discarding) {
     const box = try DraftWords
     const draft = try box.view()
-    try box.set({ ...draft, name: "", steps: [] })
+    try box.set({ ...draft, name: "", description: "", steps: [] })
   }
   try ignore(machine.send({ type: "discard" }))
 }
@@ -348,7 +349,7 @@ export effect function useDraft(): void!!(Generate.Machine | Build.Machine | Dra
   const generated = draft.generated
   if (generated === undefined || !Generate.canUseGenerated(source, writing.draft.edits) ||
     !Build.canUseGenerated(writing, source.drafted, source.baseline)) return
-  try box.set({ ...draft, steps: generated.steps })
+  try box.set({ ...draft, description: generated.description, steps: generated.steps })
   try ignore(build.send({ type: "useGenerated", steps: source.drafted, baseline: source.baseline }))
   if (draft.name === "") try renameDraft(generated.name)
   try ignore(generate.send({ type: "useGenerated", edits: writing.draft.edits }))

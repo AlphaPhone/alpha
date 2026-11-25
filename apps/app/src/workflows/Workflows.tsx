@@ -1,6 +1,6 @@
 // spec/app/workflows/list.md, "Story: Find a workflow"; spec/app/workflows/index.md, "Story: Open a workflow"
 import { Button, EmptyState, ListRow, Screen, Spinner } from "@repo/ui";
-import { Bell, ChevronDown, ChevronRight, Clock, Info, Plus, RotateCw, Sparkles, Workflow } from "lucide-react";
+import { Bell, ChevronDown, ChevronRight, Clock, Info, Plus, RotateCw, Sparkles, Sun, Workflow } from "lucide-react";
 import { useMemo } from "react";
 import { useMachine } from "../../gen/app__workflows__list.react.ts";
 import { type Event, badge, passes } from "../../gen/app__workflows__list.ts";
@@ -17,6 +17,15 @@ import type { Machine as AutomationsMachine } from "../../gen/app__workflows__au
 import { useMachine as useAutomations } from "../../gen/app__workflows__automations.react.ts";
 import { Automation } from "./Automation.tsx";
 import type { AutomationWords } from "./automations.vibe";
+import type { Machine as ClockMachine } from "../../gen/app__workflows__clock.effect.vibe";
+import { useMachine as useClock } from "../../gen/app__workflows__clock.react.ts";
+import { useMachine as useBuilder } from "../../gen/app__workflows__builder.react.ts";
+import { AlarmLabel, clockAvailable } from "./clock.vibe";
+import { ClockPage } from "./Clock.tsx";
+import { newPhoneReminder } from "./handoffs.vibe";
+import type { Machine as DigestMachine } from "../../gen/app__digests__schedules.effect.vibe";
+import { Digests } from "./Digests.tsx";
+import type { DigestWords } from "./digests.vibe";
 import type { ApprovalWords } from "./approvals.vibe";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
@@ -54,9 +63,16 @@ function WorkflowListRow({ row, event, open }: { row: WorkflowRow; event: Event;
 }
 
 /** The owner's workflows, prompts, reminders and schedules, with the last filter choices kept while looking at a row. */
-export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | RunSheet | HistoryWordsPort | WorkflowMachine | DefinitionWords | RunsMachine | ApprovalsMachine | ApprovalWords | BuilderMachine | GenerateMachine | DraftWords | AutomationsMachine | AutomationWords>) {
+export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | RunSheet | HistoryWordsPort | WorkflowMachine | DefinitionWords | RunsMachine | ApprovalsMachine | ApprovalWords | BuilderMachine | GenerateMachine | DraftWords | AutomationsMachine | AutomationWords | ClockMachine | AlarmLabel | DigestMachine | DigestWords>) {
   const { state, can, send } = useMachine(runtime);
   const editingAutomation = useAutomations(runtime).state?.editing;
+  const editingWorkflow = useBuilder(runtime).state?.open;
+  const clock = useClock(runtime);
+  const hasClock = clockAvailable();
+  const openClock = { type: "openClock", available: hasClock } as const;
+  const alarms = hasClock && clock.can(openClock)
+    ? <ListRow className="min-h-18 px-1" title="Alarms" leading={<Clock />} trailing={<ChevronRight aria-hidden className="size-5" />} onClick={() => void clock.send(openClock)} />
+    : null;
   const read = () => void runtime.runPromiseExit(refresh());
   const snapshot = state === undefined ? undefined : runtime.runSync(Rows.use((rows) => rows.view(state.owner)));
   const kind = state?.kind;
@@ -70,11 +86,17 @@ export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | 
   const dispatch = (event: Event) => { if (can(event)) void send(event); };
   const place = state?.place;
   const selected = place?.tag === "ListingDetail" ? snapshot?.rows.find((row) => row.number === place.row) : undefined;
-  const title = selected?.title ?? (place?.tag === "ListingAdd" ? "Add to Workflows" : "Workflows");
+  const title = selected?.title ?? (place?.tag === "ListingAdd" ? "Add to Workflows" : place?.tag === "ListingDigests"
+    ? place.result === 0 ? "Scheduled digests" : "Digest" : "Workflows");
+  const openDigests: Event = { type: "openDigests" };
+  const digestLink = can(openDigests)
+    ? <ListRow className="min-h-18 px-1" title="Scheduled digests" leading={<Sun />} trailing={<ChevronRight aria-hidden className="size-5" />} onClick={() => dispatch(openDigests)} />
+    : null;
   return (
-    <Screen title={title} leading={<AppBack alpha={alpha} />} actions={can({ type: "openAdd" }) && (
+    <Screen title={clock.state?.open ? "Alarms" : title} leading={<AppBack alpha={alpha} />} actions={!clock.state?.open && can({ type: "openAdd" }) && (
       <Button variant="ghost" size="icon" aria-label="Add to Workflows" onClick={() => dispatch({ type: "openAdd" })}><Plus aria-hidden /></Button>
     )}>
+      {clock.state?.open ? <ClockPage runtime={runtime} /> : <>
       {state === undefined && <Spinner aria-label="Refreshing workflows" />}
       {state !== undefined && place?.tag === "ListingRows" && <>
         <div className="flex items-center justify-between gap-3">
@@ -100,12 +122,22 @@ export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | 
         <ul aria-label="Workflows" className="-mt-2">
           {rows.map((row) => <WorkflowListRow key={row.number} row={row} event={{ type: "openRow", row: row.number }} open={dispatch} />)}
         </ul>
+        {alarms}
+        {digestLink}
         <Filters listing={state} can={can} send={dispatch} refresh={read} />
       </>}
       {state && place?.tag === "ListingAdd" && <>
-        <Automation runtime={runtime} owner={state.owner} />
+        {!editingWorkflow && <Automation runtime={runtime} owner={state.owner} />}
         {!editingAutomation && <Authoring runtime={runtime} owner={state.owner} />}
+        {!editingAutomation && !editingWorkflow && <>
+          <ListRow className="min-h-18 px-1" title="Phone reminder" leading={<Bell />} trailing={<ChevronRight aria-hidden className="size-5" />}
+            onClick={() => void runtime.runPromiseExit(newPhoneReminder())} />
+          {digestLink}
+          {alarms}
+        </>}
       </>}
+      {state && place?.tag === "ListingDigests" && <Digests runtime={runtime} owner={state.owner} result={place.result}
+        onResult={(result) => dispatch({ type: "openDigestResult", result })} />}
       {place?.tag === "ListingDetail" && (selected === undefined || state === undefined
         ? <EmptyState title="This item is no longer listed" />
         : selected.kind === "Routine" || selected.kind === "Prompt"
@@ -118,6 +150,7 @@ export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | 
             {selected.summary !== "" && <p className="whitespace-pre-wrap break-words">{selected.summary}</p>}
             <Automation runtime={runtime} row={selected} owner={state.owner} />
           </div>)}
+      </>}
     </Screen>
   );
 }
