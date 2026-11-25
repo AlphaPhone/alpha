@@ -7,6 +7,8 @@ import type { useMachine as useChats } from "../../gen/app__assistant__chats.rea
 import * as Composer from "../../gen/app__assistant__composer.effect.vibe";
 import type { useMachine as useSearch } from "../../gen/app__assistant__search.react.ts";
 import type { MessageSelection } from "./message-actions.vibe";
+import { MapsCardView, mapsCardsOf } from "./maps-cards.tsx";
+import { wordsOf } from "./words.ts";
 import { ReplyFailure } from "./ReplyFailure.tsx";
 import { shownReply } from "./shown.ts";
 import type { Attached, Board, Line } from "./talk.vibe";
@@ -37,18 +39,21 @@ interface HistoryProps {
   actions?: MessageActions;
   onSettings?: () => void;
   onPreview?: (file: Attached) => void;
+  /** Opens Maps from the newest agent message's Maps card. */
+  onOpenMaps?: () => void;
 }
 
 /** Recorded rows and their controls are rebuilt only when their data or available actions change. */
-export function useMessageRows({ runtime, board, lines, chats, writing, replying, holding, settled, canReadAloud, actions, onSettings, onPreview }: HistoryProps): readonly HistoryRow[] {
+export function useMessageRows({ runtime, board, lines, chats, writing, replying, holding, settled, canReadAloud, actions, onSettings, onPreview, onOpenMaps }: HistoryProps): readonly HistoryRow[] {
   return useMemo(() => {
     if (!chats || !writing || lines.length === 0) return empty;
     const chat = (event: Chats.Event) => void runtime.runPromiseExit(Effect.flatMap(Chats.Machine, (machine) => machine.send(event)));
     const compose = (event: Composer.Event) => void runtime.runPromiseExit(Effect.flatMap(Composer.Machine, (machine) => machine.send(event)));
     return lines.flatMap((line): HistoryRow[] => {
-      const text = line.mine ? line.text : shownReply(line.text);
-      if (!line.mine && text === "" && line.failure === undefined && !line.attachments?.length) return [];
+      const { text, cards } = line.mine ? { text: line.text, cards: [] } : mapsCardsOf(shownReply(line.text));
+      if (!line.mine && text === "" && cards.length === 0 && line.failure === undefined && !line.attachments?.length) return [];
       const message = board.numbered(line.id);
+      const live = !line.mine && message > 0 && message === chats.messages && !replying;
       const recorded = message > 0 && settled;
       const selection = { conversation: chats.chosen, page: chats.page.ticket, message };
       const blank = text.trim() === "";
@@ -63,8 +68,11 @@ export function useMessageRows({ runtime, board, lines, chats, writing, replying
         author: line.mine ? "owner" : "alpha",
         text,
         attachments: line.attachments?.map(chip),
-        quote: line.quote,
-        children: line.failure === undefined ? undefined : <ReplyFailure kind={line.failure} onSettings={onSettings} />,
+        quote: line.quote === undefined ? undefined : wordsOf({ mine: false, text: line.quote }),
+        children: cards.length === 0 && line.failure === undefined ? undefined : <>
+          {cards.map((card, index) => <MapsCardView key={index} card={card} settled={!live} onOpen={live ? onOpenMaps : undefined} />)}
+          {line.failure === undefined ? null : <ReplyFailure kind={line.failure} onSettings={onSettings} />}
+        </>,
         onFork: recorded && Chats.enabled(chats, fork) ? () => chat(fork) : undefined,
         onQuote: Composer.enabled(writing, quote) ? () => compose(quote) : undefined,
         onCopy: copy && Chats.copyableText(recorded, blank) ? () => copy(selection) : undefined,
@@ -77,7 +85,7 @@ export function useMessageRows({ runtime, board, lines, chats, writing, replying
         } : undefined,
       }];
     });
-  }, [actions, board, canReadAloud, chats, holding, lines, onPreview, onSettings, replying, runtime, settled, writing]);
+  }, [actions, board, canReadAloud, chats, holding, lines, onOpenMaps, onPreview, onSettings, replying, runtime, settled, writing]);
 }
 
 // spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/search.md, "Story: Search my conversations"

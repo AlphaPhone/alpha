@@ -514,7 +514,11 @@ function carry(fx: Out): Job<Event, Files | Handles | Browser.Machine | Bin.Mach
     when { tag: "Show", let item, let siblings, let owner }: run("show", view(item, siblings, owner), "Phone");
     when { tag: "Share", let ticket, let channel, let items, let approval }: answer(`share ${ticket}`, shared(ticket, channel, items, approval), { type: "shareEnded", ticket, opened: false, known: false }, "Phone");
     when { tag: "Taken", let items }: run("taken", taken(items), "Phone");
-    when { tag: "Receipt", let ticket, let ran, let outcome, let done }: run(`receipt ${ticket}`, effect { try (try Answers).receipt(ticket, { ran, outcome, done }) }, "Phone");
+    when { tag: "Receipt", let ticket, let ran, let outcome, let done }: run(`receipt ${ticket}`, effect {
+      const answers = try Answers
+      const bound = try answers.reviewed(ticket)
+      try answers.receipt(ticket, { ran, outcome, ...(bound === undefined ? {} : { done }) })
+    }, "Phone");
   }
 }
 
@@ -717,7 +721,11 @@ function carryBin(fx: Bin.Effect): Job<Bin.Event, Files | Handles | Bin.Machine 
       try taken(items)
       try (try Browser.Machine).send({ type: "refresh" }, "Phone")
     }), "Phone");
-    when { tag: "Receipt", let ticket, let ran, let outcome, let done }: run(`receipt ${ticket}`, effect { try (try Answers).receipt(ticket, { ran, outcome, done }) }, "Phone");
+    when { tag: "Receipt", let ticket, let ran, let outcome, let done }: run(`receipt ${ticket}`, effect {
+      const answers = try Answers
+      const bound = try answers.reviewed(ticket)
+      try answers.receipt(ticket, { ran, outcome, ...(bound === undefined ? {} : { done }) })
+    }, "Phone");
   }
 }
 

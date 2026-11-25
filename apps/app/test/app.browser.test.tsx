@@ -6,6 +6,7 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Workflows } from "../gen/app__workflows__list.effect.vibe";
 import { at, mounts } from "../src/areas.ts";
 import { single } from "../src/runtime/single.ts";
+import { home } from "../src/shell/shell.vibe";
 import { button, closeAll, later, only, open, seen, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import sample from "./sample/index.tsx";
@@ -34,7 +35,7 @@ it("Move between Home and the apps, and find the same place after the page is op
   expect([await single(), await single()]).toEqual([true, false]);
 });
 
-function savedBrowserTabs(records: readonly { id: string; url: string; title: string }[]): Promise<void> {
+function savedBrowserRecords(records: readonly { id: string; url: string; title: string }[], marks: readonly { url: string; title: string }[] = []): Promise<void> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open("alpha.browser.documents.v1", 1);
     request.onupgradeneeded = () => { request.result.createObjectStore("documents"); };
@@ -43,29 +44,45 @@ function savedBrowserTabs(records: readonly { id: string; url: string; title: st
       const db = request.result;
       const write = db.transaction("documents", "readwrite");
       const store = write.objectStore("documents");
-      const key = "alpha.browser.session.v1";
-      if (records.length === 0) store.delete(key);
-      else {
-        const value = JSON.stringify({ tabs: records, cur: records.at(-1)?.id, history: records.map(({ url }) => url) });
-        store.put({ revision: "develop-session", raw: JSON.stringify({ version: 1, legacy: null, value }) }, key);
-      }
+      const set = (key: string, value: unknown) => {
+        if (value === undefined) store.delete(key);
+        else store.put({ revision: "develop-fixture", raw: JSON.stringify({ version: 1, legacy: null, value: JSON.stringify(value) }) }, key);
+      };
+      set("alpha.browser.session.v1", records.length === 0 ? undefined : { tabs: records, cur: records.at(-1)?.id, history: records.map(({ url }) => url) });
+      const addresses = marks.map(({ url }) => url);
+      set("alpha.browser.bookmarks.v1", marks.length === 0 ? undefined : addresses);
+      set("alpha.browser.bookmark-titles.v1", marks.length === 0 ? undefined : { addresses, titles: marks.map(({ title }) => title) });
       write.oncomplete = () => { db.close(); resolve(); };
       write.onabort = () => { db.close(); reject(new Error("Could not write the Browser fixture storage", { cause: write.error })); };
     };
   });
 }
 
-it("Keeps a browser frame while leaving and reopening Browser (spec/app/browser/address.md, \"A browser frame can be shown for the latest request, with no secure mark\"; spec/app/browser/index.md, \"Story: Open, pick and close tabs\"; spec/app/browser/index.md, \"Story: Keep my tabs through a restart\")", async () => {
+// spec/app/browser/address.md, "A browser frame can be shown for the latest request, with no secure mark"; spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/index.md, "Story: Keep my tabs through a restart"; spec/app/browser/library.md, "Story: Keep bookmarks"; spec/app/browser/downloads.md, "Story: Download a file"
+it("Keeps a browser frame while leaving and reopening Browser", async () => {
   const fixture = new URL("/test/fakes/browser-page.html", location.origin);
   expect((await fetch(fixture)).ok).toBe(true);
   const first = { id: "old-tab-a", title: "Saved first", url: new URL("?tab=first", fixture).href };
   const second = { id: "old-tab-b", title: "Saved second", url: new URL("?tab=second", fixture).href };
-  await savedBrowserTabs([first, second]);
+  const bookmark = { url: "https://archive.example/reference", title: "Saved reference" };
+  await savedBrowserRecords([first, second], [bookmark]);
   try {
-    await open(scene(), only("home", "view:Browser", "assistant"));
+    const { alpha } = await open(scene(), only("home", "view:Browser", "view:Files", "assistant"));
     await page.getByRole("button", { name: "Browser", exact: true }).click();
     const link = page.getByRole("link", { name: "Open in browser" });
     await expect.element(link).toHaveAttribute("href", second.url);
+    const library = async () => {
+      await page.getByRole("button", { name: "Menu", exact: true }).click();
+      await page.getByRole("button", { name: "Library, bookmarks and history" }).click();
+    };
+    await library();
+    await expect.element(page.getByRole("button", { name: /^Saved reference/ })).toBeVisible();
+    await page.getByRole("button", { name: "Remove bookmark Saved reference" }).click();
+    await expect.element(page.getByRole("status", { name: "No bookmarks" })).toBeVisible();
+    await page.getByRole("button", { name: "Back to page" }).click();
+    await library();
+    await expect.element(page.getByRole("status", { name: "No bookmarks" })).toBeVisible();
+    await page.getByRole("button", { name: "Back to page" }).click();
     await page.getByRole("button", { name: /^Tabs\b/ }).click();
     const savedFirst = page.getByRole("button", { name: /^Saved first/ });
     await expect.element(savedFirst).toBeVisible();
@@ -80,7 +97,7 @@ it("Keeps a browser frame while leaving and reopening Browser (spec/app/browser/
     if (!iframe) throw new Error("the browser frame is missing");
     await expect.poll(() => iframe.contentDocument).toBeNull();
 
-    await page.getByRole("button", { name: "Back", exact: true }).click();
+    await alpha.runtime.runPromise(home());
     await expect.element(page.getByRole("button", { name: "Browser", exact: true })).toBeVisible();
     await expect.element(link).not.toBeInTheDocument();
     await page.getByRole("button", { name: "Browser", exact: true }).click();
@@ -88,12 +105,20 @@ it("Keeps a browser frame while leaving and reopening Browser (spec/app/browser/
     expect(Array.from(document.querySelectorAll("iframe[title=Website]"))).toContain(iframe);
     await expect.element(page.getByRole("img", { name: "Secure connection" })).not.toBeInTheDocument();
 
+    await page.getByRole("button", { name: "Menu", exact: true }).click();
+    await page.getByRole("button", { name: "Downloads", exact: true }).click();
+    await expect.element(page.getByRole("heading", { name: "Files", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Back", exact: true }).click();
+    await page.getByRole("button", { name: "Browser", exact: true }).click();
+    await expect.element(link).toBeVisible();
+    expect(Array.from(document.querySelectorAll("iframe[title=Website]"))).toContain(iframe);
+
     await page.getByRole("button", { name: /^Tabs\b/ }).click();
     await page.getByRole("button", { name: `Close ${fixture.href}`, exact: true }).click();
     await expect.poll(() => iframe.isConnected).toBe(false);
   } finally {
     await closeAll();
-    await savedBrowserTabs([]);
+    await savedBrowserRecords([]);
   }
 });
 

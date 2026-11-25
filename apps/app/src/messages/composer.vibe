@@ -13,7 +13,7 @@ import { say } from "../notices/toasts.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { ask } from "../platform/remote.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { type Telephony, TelephonyAbsent, type TelephonyRefused, sendFromComposer, telephony } from "../platform/telephony.vibe"
+import { type Telephony, TelephonyAbsent, type TelephonyRefused, sendFromComposer, telephony, textingDefault } from "../platform/telephony.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, applying, contained, following, hearing, reacting, run, started, stream, together } from "../runtime/reactor.vibe"
 import { grantOf } from "../phone/phone.vibe"
@@ -231,7 +231,7 @@ effect function simOf(chosen: TelephonySubscription | undefined): (number | unde
   const sims = status.subscriptions ?? []
   try rememberSims(sims)
   if (chosen !== undefined) return sims.find((sim) => sameSubscription(sim, chosen))?.id
-  return sims.find((one) => one.defaultSms)?.id ?? (sims.length === 1 ? sims[0].id : undefined)
+  return textingDefault(sims)
 }
 
 const sentStatuses = new Set<SmsSendStatus>(["sent", "delivered"])

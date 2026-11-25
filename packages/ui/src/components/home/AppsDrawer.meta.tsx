@@ -9,6 +9,9 @@ const apps: DrawerApp[] = [
   { id: "camera", label: "Câmera", packageName: "com.example.camera" },
 ];
 const onClose = fn();
+const onAdd = fn();
+const onInfo = fn();
+const menu = { app: "clock", actions: { onHome: false, add: onAdd, info: onInfo, close: fn() } };
 
 export const meta: ComponentMeta<AppsDrawerProps> = {
   args: { apps, query: "", catalog: "ready", onSearch: fn(), onOpen: fn(), onClose },
@@ -19,6 +22,8 @@ export const meta: ComponentMeta<AppsDrawerProps> = {
     "Reading apps": { apps: [], catalog: "reading" },
     "Cannot read": { apps: [], catalog: "unavailable", onRetry: fn() },
     "No apps": { apps: [] },
+    "App menu": { menu },
+    "Already on Home": { menu: { ...menu, actions: { ...menu.actions, onHome: true } } },
   },
   play: {
     "Reading apps": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
@@ -26,5 +31,13 @@ export const meta: ComponentMeta<AppsDrawerProps> = {
       await userEvent.click(within(canvasElement).getByRole("button", { name: "Close apps" }));
       await expect(onClose).toHaveBeenCalledTimes(1);
     },
+    "App menu": async () => {
+      onAdd.mockClear();
+      onInfo.mockClear();
+      const clockMenu = within(document.body).getByRole("menu", { name: "Clock" });
+      await userEvent.click(within(clockMenu).getByRole("menuitem", { name: "App info" }));
+      await expect([onInfo.mock.calls.length, onAdd.mock.calls.length]).toEqual([1, 0]);
+    },
+    "Already on Home": () => expect(within(document.body).getByRole("menuitem", { name: "On Home" })).toHaveAttribute("aria-disabled", "true"),
   },
 };
