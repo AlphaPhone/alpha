@@ -39,9 +39,10 @@ import { chip, type MessageActions, useMessageRows } from "./history.tsx";
 import { ReplyFailure } from "./ReplyFailure.tsx";
 import { type Attached, type Line, Talk } from "./talk.vibe";
 import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx";
+import { CommsBriefing } from "../phone/comms.vibe";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | Talk | MailQuestions | LayersMachine | MediaReview, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview, unknown>;
   messageActions?: MessageActions;
   speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voice" | "voiceNotice">;
   canReadAloud?: boolean;
@@ -147,6 +148,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const start = { type: "start", ...free } as const;
   const newChat = shown.chosen === 0;
   const subject = onComms ? comms.state?.key : undefined;
+  const brief = subject !== undefined && comms.state?.briefed === subject && shell.state?.trail.at(-1) === "Phone"
+    ? runtime.runSync(CommsBriefing.use((reading) => reading.forSubject(subject))) : "";
   const request = subject === undefined ? "" : (comms.state?.requests.find((draft) => draft.about === subject)?.request ?? "");
   const sendable = subject !== undefined
     ? request.trim() !== "" && request.length <= textLimit && askable(talking) && (!newChat || chats.can(start))
@@ -284,7 +287,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         attachmentNotice={onComms ? undefined : seen.attachmentNotice}
         transcript={{
           messages,
-          liveMessages: [...writingReply, ...failed, ...mediaCards, ...mediaNote],
+          liveMessages: [...(brief === "" ? [] : [{ id: `briefing:${subject}`, author: "alpha" as const, text: brief }]), ...writingReply, ...failed, ...mediaCards, ...mediaNote],
           position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around) },
           visible: open,
           status: shown.page.status === "Loading" ? "loading" : shown.page.status === "Failed" ? "failed" : "loaded",
