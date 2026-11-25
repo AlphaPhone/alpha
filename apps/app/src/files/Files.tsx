@@ -121,10 +121,10 @@ export function Files({ runtime, alpha }: FilesProps) {
   const selecting = marks.size > 0;
   const grid = state.layout === "Grid";
   const category = categories.find(([kind]) => kind === state.category)?.[1];
-  const place = state.inCategory ? category : label(state.trail.at(-1) ?? 0);
+  const primary = state.volumes[0];
+  const place = state.inCategory ? category : state.trail.length === 1 && state.trail[0] === primary?.id ? "All files" : label(state.trail.at(-1) ?? 0);
   const title = selecting ? String(marks.size) : atTop ? "Files" : (place ?? "Files");
   const wanted: Filter = { text: text.trim(), kind: kind ?? "Other", anyKind: kind === undefined };
-  const primary = state.volumes[0];
   const today = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
   const described = (item: Item) => `${kindOf(item).name} · ${sized(item.bytes)} · ${changedOn(item.revision, today)}`;
   const row = (item: Item) => {
@@ -253,7 +253,7 @@ export function Files({ runtime, alpha }: FilesProps) {
                     {categories.map(([kind, name]) => {
                       const counted = state.tally.counts.find((count) => count.kind === kind);
                       const Icon = icons[kind];
-                      return <FilesRow key={kind} size="place" aria-label={name} aria-description={counted && `${counted.items} · ${sized(counted.bytes)}`} name={name} icon={<Icon />} count={counted?.items || undefined} disabled={!owner({ type: "openCategory", kind })} onClick={() => tell({ type: "openCategory", kind })} />;
+                      return <FilesRow key={kind} size="place" aria-label={name} aria-description={counted && `${counted.items} · ${sized(counted.bytes)}`} name={name} icon={<Icon />} count={counted === undefined ? undefined : String(counted.items)} disabled={!owner({ type: "openCategory", kind })} onClick={() => tell({ type: "openCategory", kind })} />;
                     })}
                   </div>
                   <h2 className="mx-2 mt-3.5 mb-1 text-meta font-semibold text-muted-foreground">Storage</h2>

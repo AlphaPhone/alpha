@@ -6,7 +6,7 @@ import * as Generate from "../../gen/app__workflows__generate.effect.vibe"
 import * as List from "../../gen/app__workflows__list.effect.vibe"
 import type { When } from "../../gen/app__workflows__schedule.effect.vibe"
 import type { Operation, Step } from "../../gen/app__workflows__steps.effect.vibe"
-import { Agent } from "../platform/agent.vibe"
+import type { Agent } from "../platform/agent.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { type Job, answer, applying, following, reacting, run, together } from "../runtime/reactor.vibe"
 import { WorkflowsApi } from "./api.vibe"
@@ -339,7 +339,7 @@ export effect function describeDraft(prompt: string): void!!(Generate.Machine | 
   try ignore(machine.send({ type: "generate", chars: text.length, supported: true, edits: built.draft.edits }))
 }
 
-export effect function useDraft(): void!!(Generate.Machine | Build.Machine | DraftWords) {
+export effect function adoptGeneratedDraft(): void!!(Generate.Machine | Build.Machine | DraftWords) {
   const build = try Build.Machine
   const generate = try Generate.Machine
   const writing = try build.get()
