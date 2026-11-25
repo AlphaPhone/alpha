@@ -131,9 +131,6 @@ export type AgentAction = NonNullable<AgentPlugin["actions"]>[number];
 /** Provider definition derived from eliza's AgentPlugin contract. */
 export type AgentProvider = NonNullable<AgentPlugin["providers"]>[number];
 
-/** View declaration derived from eliza's AgentPlugin contract. */
-export type AgentView = NonNullable<AgentPlugin["views"]>[number];
-
 /** Runtime parameter of an action handler. */
 export type AgentRuntimeLike = Parameters<AgentAction["handler"]>[0];
 

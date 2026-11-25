@@ -889,6 +889,65 @@ describe("Files on a phone", () => {
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.join("/") === "Files");
   });
 
+  it('Shows a change asked away from Files as a notice, and its card once Files is open (spec/app/files/index.md, "A change the agent proposes while Files is not on screen shows a notice to open Files, and its card is built in Files, for Files as it then shows")', async () => {
+    const world = { ...scene(), phone: true, image: true };
+    const move = { type: "files_move", paths: ["Download/lease.pdf"], dest: "Documents" } as const;
+    const review = textReview(world.notes.owner, "move-lease", move);
+    world.telephony.textReview = review;
+    const { alpha } = await open(world, only("home", "view:Files", "assistant", "notice"));
+    const chat = assistant.runtime(alpha);
+    const storage = files.runtime(alpha);
+    await until(alpha, alpha.runtime, Preferences, (s) => s.document.read.status === "Loaded" && !s.askFirst);
+    await until(alpha, chat, Conversation, (s) => s.ready);
+    const askFromHome = async (id: string, text: string) => {
+      await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
+      if (alpha.runtime.runSync(Shell.use((m) => m.get())).assistant !== "Sheet") await press("Open conversation");
+      await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
+      review.proposal.id = id;
+      review.proposal.state = "pending";
+      const reads = review.pendingReads;
+      world.ask.nextReplyChunks = ["Review this request on your phone before it can run."];
+      world.ask.nextActions = (metadata) => {
+        expect(readTurnContext({ content: { metadata } }).voiceUi?.agentActionMode).toBe("direct-files-v1");
+        review.proposal.payload.requestMessageId = `m${world.ask.said.length}u`;
+        return [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
+      };
+      await fill("Message Alpha", text);
+      await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+      await press("Send");
+      await until(alpha, chat, Conversation, (s) => review.pendingReads > reads && s.turn.reply === "Complete");
+    };
+    const openFiles = async () => {
+      await press("Minimize chat");
+      await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar");
+      await openFromHome("Files");
+      await until(alpha, storage, Browser, (s) => s.open && s.storage.status === "Loaded");
+      await press("Open conversation");
+      await until(alpha, alpha.runtime, Shell, (s) => s.trail.join("/") === "Files" && s.assistant === "Sheet");
+    };
+
+    await askFromHome("move-lease", "put the lease in my documents");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Open Files to review this action."));
+    expect([button("Approve"), review.decisions, review.claims, paths(world).includes("primary:Download/lease.pdf")]).toEqual([undefined, [], [], true]);
+
+    await openFiles();
+    await vi.waitFor(() => expect(button("Approve")).toBeDefined());
+    expect(document.body.textContent).not.toContain("Open Files to review this action.");
+    expect([review.decisions, review.claims, paths(world).includes("primary:Download/lease.pdf")]).toEqual([[], [], true]);
+    await press("Approve");
+    await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied" })]));
+    expect([review.decisions, paths(world).includes("primary:Documents/lease.pdf")]).toEqual([["move-lease"], true]);
+
+    await hardware("home");
+    review.proposal.payload.operation = { type: "files_trash", paths: ["Documents/lease.pdf"] };
+    await askFromHome("trash-lease", "get rid of the lease");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Open Files to review this action."));
+    review.proposal.state = "expired";
+    await openFiles();
+    await later(alpha, 300);
+    expect([button("Approve"), document.body.textContent?.includes("Open Files to review this action."), review.decisions]).toEqual([undefined, false, ["move-lease"]]);
+  });
+
   it("Come back after a restart (spec/app/files/index.md, \"Story: Come back after a restart\"; spec/app/files/change.md, \"Story: Come back to my changes after a restart\"; spec/app/files/trash.md, \"Story: Come back to the Trash after a restart\"; spec/app/files/preview.md, \"Story: Come back to a preview after a restart\")", async () => {
     const world = { ...scene(), phone: true };
     // spec/app/files/recent.md, "The earlier Alpha's Recent is carried over once, while this one is still empty: each document it held access to becomes a row of its own, the newest first; one it held without access, and the document it had open, are not carried"

@@ -124,6 +124,8 @@ function DeviceReview({ runtime, card }: { runtime: AssistantProps["runtime"]; c
         </div>
       ) : card.phone?.tag === "Unavailable" ? (
         <Alert role="status">{card.phone.reason}</Alert>
+      ) : card.notice !== undefined ? (
+        <Alert role="status">{`${card.title}: ${card.detail}. ${card.notice}`}</Alert>
       ) : (
         <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, action: card.operation.type === "sms_compose" ? "Open draft" : "Approve" }}
           onHandOn={() => decide(true)} />
