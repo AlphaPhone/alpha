@@ -122,7 +122,7 @@ function span(day: number) {
 }
 
 // spec/app/home/cards.md, "An item stays on the card until it ends: a timed item through its last minute, an all-day item until its day is over, an overdue reminder until it is handled"
-/** An all-day bound the phone's calendar keeps at a UTC midnight, as the same date's midnight on this phone. @throws {never} */
+/** An all-day bound the phone's calendar keeps at a UTC midnight, as the same date's midnight on this phone. */
 function ownersMidnight(at: number): number {
   const utc = new Date(at)
   return new Date(utc.getUTCFullYear(), utc.getUTCMonth(), utc.getUTCDate()).getTime()
