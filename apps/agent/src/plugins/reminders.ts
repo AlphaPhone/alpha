@@ -8,7 +8,7 @@ import {
 } from "./store.ts";
 import {
   type AgentAction, type AgentProvider, type AgentRoute, type AgentRuntimeLike,
-  type NotificationServiceLike, type ReminderItemRecord, type ReminderSubtaskRecord,
+  type NotificationServiceLike,
   asRecord, readBoolean, readNumber, readRawString, readString,
 } from "./types.ts";
 

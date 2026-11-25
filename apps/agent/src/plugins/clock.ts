@@ -5,8 +5,7 @@ import {
   type AlphaAppsStore, DEFAULT_SNOOZE_MINUTES, isValidTimeZone, normalizeSound,
 } from "./store.ts";
 import {
-  type AgentAction, type AgentProvider, type AgentRoute, type ClockAlarmRecord, type ClockTimerRecord,
-  type WorldCityRecord, asRecord, readBoolean, readNumber, readRawString, readString,
+  type AgentAction, type AgentProvider, type AgentRoute, asRecord, readBoolean, readNumber, readRawString, readString,
 } from "./types.ts";
 
 interface CityEntry {

@@ -310,7 +310,7 @@ function commsReview(operation: DeviceOperation): boolean {
 }
 
 function spokenOperation(proposal: Proposal, opened: Session, message: string, reply: DeviceActionReply,
-  actions: ReadonlyMap<string, ReplyAction>, at: number): DeviceOperation | undefined {
+  actions: ReadonlyMap<string, ReplyAction>, at: number): ReturnType<typeof operation> {
   if (proposal.state !== "pending" || proposal.payload.workflow !== undefined ||
     actions.get(proposal.id) !== "Review" || !fromThisEnrollment(proposal, opened)) return undefined
   const expires = Date.parse(proposal.expiresAt)
