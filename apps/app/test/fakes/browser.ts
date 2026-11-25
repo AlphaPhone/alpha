@@ -67,6 +67,7 @@ const sites: Record<string, { title: string; draw: () => string }> = {
 
 const style = (rules: Record<string, string>) => Object.entries(rules).map(([name, value]) => `${name}:${value}`).join(";");
 const paragraph = style({ "font-size": "16px", "line-height": "1.6", margin: "16px 0 0" });
+const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[ch] ?? ch));
 
 function link(href: string, words: string): string {
   return `<a href="${href}" style="${style({ color: "var(--primary)", "text-decoration": "underline", "text-underline-offset": "3px" })}">${words}</a>`;
@@ -100,15 +101,15 @@ function searched(query: string): string {
 <div style="${style({ "font-size": "12.5px", color: "var(--muted-foreground)" })}">${url.host}${url.pathname}</div>
 <div style="${style({ "font-size": "18px", "font-weight": "600", color: "var(--primary)", "margin-top": "4px" })}">${site.title}</div></a>`;
   });
-  return `<div style="${style({ padding: "10px 20px 140px" })}"><div style="${style({ "font-family": "var(--font-display)", "font-size": "30px", "line-height": "1.15", padding: "0 4px 8px" })}">${query}</div>${rows.join("")}</div>`;
+  return `<div style="${style({ padding: "10px 20px 140px" })}"><div style="${style({ "font-family": "var(--font-display)", "font-size": "30px", "line-height": "1.15", padding: "0 4px 8px" })}">${escapeHtml(query)}</div>${rows.join("")}</div>`;
 }
 
 function generic(url: URL): string {
   const name = (url.hostname.split(".")[0] ?? "").replace(/-/g, " ");
   const named = name.charAt(0).toUpperCase() + name.slice(1);
-  return `<div style="${style({ position: "relative", height: "170px", background: "var(--secondary)", overflow: "hidden" })}"><div style="${style({ position: "absolute", right: "28px", top: "34px", "font-family": "var(--font-display)", "font-size": "76px", "line-height": "1", color: "var(--muted-foreground)" })}">${named.charAt(0)}</div></div>
-<div style="${style({ padding: "22px 24px 140px" })}"><h2 style="${style({ margin: "0", "font-family": "var(--font-display)", "font-size": "34px", "line-height": "1.05", "font-weight": "300" })}">${named}</h2>
-<div style="${style({ color: "var(--muted-foreground)", "margin-top": "8px", "font-size": "13px" })}">${url.host}</div></div>`;
+  return `<div style="${style({ position: "relative", height: "170px", background: "var(--secondary)", overflow: "hidden" })}"><div style="${style({ position: "absolute", right: "28px", top: "34px", "font-family": "var(--font-display)", "font-size": "76px", "line-height": "1", color: "var(--muted-foreground)" })}">${escapeHtml(named.charAt(0))}</div></div>
+<div style="${style({ padding: "22px 24px 140px" })}"><h2 style="${style({ margin: "0", "font-family": "var(--font-display)", "font-size": "34px", "line-height": "1.05", "font-weight": "300" })}">${escapeHtml(named)}</h2>
+<div style="${style({ color: "var(--muted-foreground)", "margin-top": "8px", "font-size": "13px" })}">${escapeHtml(url.host)}</div></div>`;
 }
 
 /** What a page is called, as its document's title says. */
@@ -149,8 +150,9 @@ const surface = "data-fake-browser-page";
  * over the place the Browser marks, as Android lays the web view there; here it draws develop's reference pages.
  */
 export function alphaBrowser(world: BrowserScene): Faked {
-  return plugin<BrowserTabHostPlugin, TabEvents>((emit) => {
+  return plugin<BrowserTabHostPlugin, TabEvents>((emit, onUnplug) => {
     let session = "";
+    let active = true;
     const stateOf = (tab: Held): BrowserTabState => {
       const url = tab.history[tab.at];
       return {
@@ -160,14 +162,19 @@ export function alphaBrowser(world: BrowserScene): Faked {
         canBack: tab.at > 0, canForward: tab.at < tab.history.length - 1, private: tab.private,
       };
     };
-    const found = (tab: Held) => void Promise.resolve().then(() => emit("findResult", { session, id: tab.id, navigation: String(tab.navigation), index: tab.match, count: tab.matches, done: true }));
+    const found = (tab: Held) => void Promise.resolve().then(() => {
+      if (!active) return;
+      emit("findResult", { session, id: tab.id, navigation: String(tab.navigation), index: tab.match, count: tab.matches, done: true });
+    });
     const told = (tab: Held) => {
+      if (!active) return;
       tab.sequence += 1;
       emit("stateChanged", stateOf(tab));
     };
     const draw = () => {
       if (typeof document === "undefined") return;
       document.querySelector(`[${surface}]`)?.remove();
+      if (!active) return;
       const shown = world.shown;
       const tab = shown === undefined ? undefined : world.tabs.get(shown.id);
       const url = tab?.history[tab.at];
@@ -184,8 +191,13 @@ export function alphaBrowser(world: BrowserScene): Faked {
       });
       document.body.append(page);
     };
+    onUnplug?.(() => {
+      active = false;
+      world.shown = undefined;
+      if (typeof document !== "undefined") document.querySelector(`[${surface}]`)?.remove();
+    });
     const commit = (tab: Held, navigation: number) => void Promise.resolve().then(() => {
-      if (tab.navigation !== navigation || !world.tabs.has(tab.id)) return;
+      if (!active || tab.navigation !== navigation || !world.tabs.has(tab.id)) return;
       tab.loading = false;
       tab.committed = true;
       told(tab);
@@ -223,6 +235,7 @@ export function alphaBrowser(world: BrowserScene): Faked {
       command: (options) => {
         const tab = held(options);
         if (options.command === "stop") { tab.loading = false; told(tab); return Promise.resolve(stateOf(tab)); }
+        if (tab.history.length === 0) return Promise.resolve(stateOf(tab));
         const step = options.command === "back" ? -1 : options.command === "forward" ? 1 : 0;
         tab.at = Math.max(0, Math.min(tab.history.length - 1, tab.at + step));
         tab.navigation += 1;
@@ -286,11 +299,15 @@ export function alphaBrowser(world: BrowserScene): Faked {
       clearBrowsingData: () => {
         const closed = [...world.tabs.values()].filter((tab) => !tab.private).map((tab) => tab.id);
         for (const id of closed) world.tabs.delete(id);
+        if (world.shown !== undefined && closed.includes(world.shown.id)) world.shown = undefined;
         world.saved = { history: [], tabs: [], cur: "" };
         draw();
         return Promise.resolve({ closed });
       },
-      clearSiteData: ({ url }) => Promise.resolve({ site: new URL(url).host }),
+      clearSiteData: ({ url }) => {
+        const parsed = URL.parse(url);
+        return parsed === null ? Promise.reject(rejection("Invalid site address")) : Promise.resolve({ site: parsed.host });
+      },
       readingSupport: () => Promise.resolve({ available: false }),
       reviewQuestion: () => Promise.reject(rejection("Reading unavailable")),
       reviewReading: () => Promise.reject(rejection("Reading unavailable")),

@@ -370,7 +370,7 @@ function contacts(world: TelephonyScene, now: () => number): Faked {
           if (draft.notes !== undefined) one.notes = draft.notes;
         };
         if (id === undefined) {
-          const made: Person = { id: String(Math.max(...world.people.map((one) => Number(one.id))) + 1), displayName: "", givenName: "", familyName: "", phoneNumbers: [], emailAddresses: [], revision: 1 };
+          const made: Person = { id: String(Math.max(0, ...world.people.map((one) => Number(one.id) || 0)) + 1), displayName: "", givenName: "", familyName: "", phoneNumbers: [], emailAddresses: [], revision: 1 };
           fill(made);
           world.people.push(made);
           return { status: "saved", id: made.id, version: await versionOf(made.id, made.revision) };
@@ -445,15 +445,28 @@ function journal(world: TelephonyScene): Faked {
   });
 }
 
+const reportListeners = new WeakMap<TelephonyScene, Set<() => void>>();
+
+function subscribeReport(world: TelephonyScene, listener: () => void, onUnplug?: (cleanup: () => void) => void) {
+  let set = reportListeners.get(world);
+  if (set === undefined) {
+    set = new Set();
+    reportListeners.set(world, set);
+    const base = world.report;
+    world.report = () => {
+      base();
+      for (const one of [...set!]) one();
+    };
+  }
+  set.add(listener);
+  onUnplug?.(() => { set.delete(listener); });
+}
+
 /** The image's in-call service: `AlphaOngoingCall` with Return and End, and `AlphaCallState`. */
 function ongoing(world: TelephonyScene): Faked {
-  return (emit) => {
+  return (emit, onUnplug) => {
     const snapshot = () => ({ calls: world.live.map((one) => ({ ...one })) });
-    const told = world.report;
-    world.report = () => {
-      told();
-      emit("ongoingCall", snapshot());
-    };
+    subscribeReport(world, () => emit("ongoingCall", snapshot()), onUnplug);
     return {
       ongoingCall: () => Promise.resolve(snapshot()),
       showCall: ({ id }: { id: string }) => {
@@ -472,7 +485,7 @@ function ongoing(world: TelephonyScene): Faked {
 
 /** `AlphaCallState`: whether a call is live and whether it may be an emergency call, read and pushed with each report. */
 function callState(world: TelephonyScene): Faked {
-  return (emit) => {
+  return (emit, onUnplug) => {
     const reading = () => {
       const inCall = world.callStateKnown ? world.live.length > 0 : null;
       return {
@@ -480,11 +493,7 @@ function callState(world: TelephonyScene): Faked {
         emergencyLive: inCall === true && world.emergency !== false, watching: true, carrier: world.mobileService,
       };
     };
-    const told = world.report;
-    world.report = () => {
-      told();
-      emit("callState", reading());
-    };
+    subscribeReport(world, () => emit("callState", reading()), onUnplug);
     return { callState: () => Promise.resolve(reading()) };
   };
 }

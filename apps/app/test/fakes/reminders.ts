@@ -147,9 +147,6 @@ export function remindersRoutes(scene: RemindersScene, now: () => number): Route
         row.read = true;
         return Response.json({ notification: row });
       }
-      if (url.pathname === "/api/scheduled-tasks" && request.method === "GET") {
-        return Response.json({ tasks: [] });
-      }
       return undefined;
     },
     (request, url) => {

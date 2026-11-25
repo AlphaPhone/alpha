@@ -2,7 +2,7 @@
 import type { LocationErrorEvent, LocationPlugin, LocationResult } from "@elizaos/os-bridges";
 import type { CloudClient } from "../../src/platform/cloud.vibe";
 import { type Faked, plugin, rejection } from "./phone.ts";
-import type { Route } from "./routes.ts";
+import { type Route, readJsonBody } from "./routes.ts";
 
 type Capabilities = Awaited<ReturnType<CloudClient["mapsCapabilities"]>>;
 type CloudPlace = Awaited<ReturnType<CloudClient["mapsPlacesSearch"]>>["places"][number];
@@ -86,7 +86,7 @@ export function move(scene: MapsScene, latitude: number, longitude: number, accu
 }
 
 async function asked(scene: MapsScene, request: Request, url: URL): Promise<unknown> {
-  const body: unknown = request.method === "POST" ? await request.json() : undefined;
+  const body: unknown = request.method === "POST" ? await readJsonBody(request) : undefined;
   scene.asked.push({ path: url.pathname, key: request.headers.get("idempotency-key"), body });
   return body;
 }
@@ -133,19 +133,27 @@ export function mapsRoutes(scene: MapsScene, now: () => number): Route[] {
 
 /** `ElizaLocation` of eliza's Android package: its permission, which Maps and Settings read, one watch per call, and the positions the scene moves to. */
 export function elizaLocation(scene: MapsScene, now: () => number): Faked {
-  return plugin<LocationPlugin, { locationChange: LocationResult; error: LocationErrorEvent }>((emit) => {
+  return plugin<LocationPlugin, { locationChange: LocationResult; error: LocationErrorEvent }>((emit, onUnplug) => {
     const told = (result: LocationResult) => emit("locationChange", result);
     let next = 0;
+    onUnplug?.(() => {
+      scene.watches.clear();
+      scene.listeners.delete(told);
+    });
     return {
       checkPermissions: () => Promise.resolve({ location: scene.allowed, accuracy: scene.precision }),
-      requestPermissions: () => Promise.resolve({ location: scene.allowed === "prompt" ? "granted" : scene.allowed, accuracy: scene.precision }),
+      requestPermissions: () => {
+        if (scene.allowed === "prompt") scene.allowed = "granted";
+        return Promise.resolve({ location: scene.allowed, accuracy: scene.precision });
+      },
       getCurrentPosition: () => (scene.here && scene.allowed === "granted" ? Promise.resolve({ coords: { ...scene.here, timestamp: now() }, cached: false }) : Promise.reject(rejection("TIMEOUT"))),
       watchPosition: () => {
+        if (scene.allowed !== "granted") return Promise.reject(rejection("PERMISSION_DENIED"));
         const watchId = `w${++next}`;
         scene.watches.add(watchId);
         scene.listeners.add(told);
         const here = scene.here;
-        if (here) queueMicrotask(() => told({ coords: { ...here, timestamp: now() }, cached: false }));
+        if (here) void Promise.resolve().then(() => { if (scene.watches.has(watchId)) told({ coords: { ...here, timestamp: now() }, cached: false }); });
         return Promise.resolve({ watchId });
       },
       clearWatch: ({ watchId }) => {
@@ -153,7 +161,11 @@ export function elizaLocation(scene: MapsScene, now: () => number): Faked {
         if (scene.watches.size === 0) scene.listeners.delete(told);
         return Promise.resolve();
       },
-      removeAllListeners: () => Promise.resolve(),
+      removeAllListeners: () => {
+        scene.watches.clear();
+        scene.listeners.delete(told);
+        return Promise.resolve();
+      },
     };
   });
 }

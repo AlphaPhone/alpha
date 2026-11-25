@@ -3,12 +3,13 @@ import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
 
 const snapshot = extract(({ document }) => {
-  const main = document.querySelector("main[aria-label=Reminders]");
-  const listsText = [...document.querySelectorAll("main[aria-label=Reminders] button")].map((btn) => btn.textContent ?? "");
+  const main = document.querySelector("main[aria-label=Reminders], [aria-label=Reminders]");
+  const listsContainer = main?.querySelector("section[aria-label='Lists'], section[aria-label='My lists'], ul") ?? main;
+  const listsText = [...(listsContainer?.querySelectorAll("button") ?? [])].map((btn) => (btn.getAttribute("aria-label") ?? btn.textContent ?? "").trim());
   const alertBanners = document.querySelectorAll("[role=alertdialog][aria-label^='Due reminder:']").length;
   return {
     onOverview: Boolean(main && document.querySelector("section[aria-label='Smart lists']")),
-    hasDefaultList: listsText.some((text) => text.includes("Reminders")),
+    hasDefaultList: listsText.some((text) => text === "Reminders" || text.startsWith("Reminders")),
     alertBanners,
   };
 });

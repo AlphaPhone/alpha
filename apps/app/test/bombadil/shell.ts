@@ -2,7 +2,12 @@
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
 
-const imageApps = extract(({ document }) => [...document.querySelectorAll("button")].filter((button) => ["Phone", "Messages", "Contacts"].includes(button.textContent ?? "")).length);
+const imageOnly = ["Phone", "Messages", "Contacts"];
+
+const imageApps = extract(({ document }) => [...document.querySelectorAll<HTMLButtonElement>("button")].filter((button) => {
+  const label = (button.getAttribute("aria-label") ?? button.textContent ?? "").trim();
+  return imageOnly.some((name) => label === name || label.startsWith(`${name} `) || label.startsWith(`${name}\n`));
+}).length);
 
 /** A browser is no Alpha image, so its Home never offers the apps only an image admits. */
 export const shellImageAppsAreNotOffered = always(() => imageApps.current === 0);

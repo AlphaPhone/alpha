@@ -54,14 +54,15 @@ export interface NativeDigestScene {
 export const alphaHostedDigests = (native: NativeDigestScene): Faked => (emit) => ({
   read: () => Promise.resolve({ snapshot: native.snapshot }),
   peekNotice: () => Promise.resolve({ notice: null }),
-  async syncManual({ lease }: { lease: string }) {
-    if (lease !== native.snapshot.lease) throw rejection("Digest lease changed");
+  syncManual({ lease }: { lease: string }) {
+    if (lease !== native.snapshot.lease) return Promise.reject(rejection("Digest lease changed"));
     native.manualLeases.push(lease);
     if (native.incoming !== undefined) {
       native.snapshot = { ...native.snapshot, rows: native.incoming };
       native.incoming = undefined;
       emit("changed", {});
     }
+    return Promise.resolve();
   },
 });
 
@@ -123,8 +124,8 @@ export function workflowRoutes(world: WorkflowsScene): Route[] {
   return [
     (request, url) => {
       if (request.method !== "GET") return;
-      const prompt = world.prompts.get(url.pathname.slice("/api/triggers/".length));
-      if (url.pathname.startsWith("/api/triggers/") && prompt !== undefined) return Response.json({ trigger: prompt });
+      const prompt = url.pathname.startsWith("/api/triggers/") ? world.prompts.get(decodeURIComponent(url.pathname.slice("/api/triggers/".length))) : undefined;
+      if (prompt !== undefined) return Response.json({ trigger: prompt });
       switch (url.pathname) {
         case "/api/workflow/status": return Response.json({
           engine: "eliza-typed", status: "ready", manualSubmissionProtocol: 1, lifecycleMutationProtocol: 1,
@@ -154,7 +155,7 @@ export function workflowRoutes(world: WorkflowsScene): Route[] {
     },
     (request, url) => {
       if (request.method !== "PUT" || !url.pathname.startsWith("/api/triggers/")) return;
-      const id = url.pathname.slice("/api/triggers/".length);
+      const id = decodeURIComponent(url.pathname.slice("/api/triggers/".length));
       const current = world.prompts.get(id);
       if (!current) return Response.json({}, { status: 404 });
       return readJsonBody(request).then((body) => {
@@ -189,12 +190,15 @@ export function workflowRoutes(world: WorkflowsScene): Route[] {
       }
       if (url.pathname === `${executionPath}/approvals/${approvalNode}/0`) {
         return readJsonBody(request).then((body) => {
-          if (world.stage !== "Waiting" || body.expectedVersionId !== record.versionId || body.requestDigest !== approvalDigest || body.approved !== true) {
+          if (world.stage !== "Waiting" || body.expectedVersionId !== record.versionId || body.requestDigest !== approvalDigest || typeof body.approved !== "boolean") {
             return Response.json({}, { status: 409 });
           }
           world.decisions.push({ version: body.expectedVersionId, digest: body.requestDigest, approved: body.approved });
           world.stage = "Done";
-          return Response.json(review(world), { status: 202 });
+          const out = review(world);
+          const first = out.approvals[0];
+          if (!body.approved && first !== undefined) first.status = "rejected";
+          return Response.json(out, { status: 202 });
         });
       }
       if (url.pathname !== `/api/workflow/workflows/${record.id}/run`) return;

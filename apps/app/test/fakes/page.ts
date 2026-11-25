@@ -7,8 +7,10 @@ import { developTelephony } from "./telephony.ts";
 /** The fake service the dev server answers under `prefix`, asked as a plugin's native code would ask the real one. */
 const served = (prefix: string): Answering => async (request) => {
   const { pathname, search } = new URL(request.url);
-  const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.text();
+  const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.arrayBuffer();
   return fetch(`${prefix}${pathname}${search}`, { method: request.method, headers: request.headers, body, signal: request.signal });
 };
 
-plugIn(plugins({ ...scene(), phone: true, image: true, telephony: developTelephony(Date.now()) }, { agent: served("/agent"), cloud: served("/cloud") }));
+const world = { ...scene(), phone: true, image: true, telephony: developTelephony(Date.now()) };
+Object.defineProperty(world, "now", { get: () => Date.now(), set: () => {}, enumerable: true, configurable: true });
+plugIn(plugins(world, { agent: served("/agent"), cloud: served("/cloud") }));

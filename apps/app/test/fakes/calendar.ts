@@ -130,7 +130,7 @@ export function agentEvent(title: string, begin: number, end: number, more: Part
   };
 }
 
-const etag = (event: FakeEvent) => String(event.metadata["etag"] ?? "");
+const etag = (event: FakeEvent) => typeof event.metadata["etag"] === "string" ? event.metadata["etag"] : "";
 const bump = (event: FakeEvent) => { event.metadata = { ...event.metadata, etag: String(Number(etag(event)) + 1) }; };
 const never = () => new Promise<Response>(() => {});
 const base = "/api/lifeops/calendar";
@@ -200,11 +200,15 @@ export function calendarRoutes(scene: CalendarScene): Route[] {
       return request.json().then((body: { title: string; description?: string; location?: string; startAt: string; endAt: string; isAllDay?: boolean; idempotencyKey: string }) => {
         const again = scene.keys.get(body.idempotencyKey);
         if (again) return Response.json({ event: again, receipt: {} });
-        const event = agentEvent(body.title, Date.parse(body.startAt), Date.parse(body.endAt), { description: body.description ?? "", location: body.location ?? "", isAllDay: body.isAllDay ?? false });
+        const draft = agentEvent(body.title, Date.parse(body.startAt), Date.parse(body.endAt), { description: body.description ?? "", location: body.location ?? "", isAllDay: body.isAllDay ?? false });
+        let id = draft.id;
+        let suffix = 2;
+        while (scene.events.some((existing) => existing.id === id)) id = `${draft.id}-${suffix++}`;
+        const event = { ...draft, id, externalId: id };
         if (scene.queued) {
-          const id = `approval-${scene.approvals.length + 1}`;
-          scene.approvals.push(agentRequest(id, { action: "schedule_event", account: "owner", source: { calendarId: "eliza-calendar/primary" }, fields: { title: body.title, description: body.description ?? "", location: body.location ?? "", startAt: body.startAt, endAt: body.endAt, isAllDay: body.isAllDay ?? false, timeZone: "UTC" }, recurrence: null }));
-          return Response.json({ approvalRequestId: id }, { status: 202 });
+          const approvalId = `approval-${scene.approvals.length + 1}`;
+          scene.approvals.push(agentRequest(approvalId, { action: "schedule_event", account: "owner", source: { calendarId: "eliza-calendar/primary" }, fields: { title: body.title, description: body.description ?? "", location: body.location ?? "", startAt: body.startAt, endAt: body.endAt, isAllDay: body.isAllDay ?? false, timeZone: "UTC" }, recurrence: null }));
+          return Response.json({ approvalRequestId: approvalId }, { status: 202 });
         }
         scene.writes.push(`create ${event.id}`);
         scene.events.push(event);
@@ -214,25 +218,32 @@ export function calendarRoutes(scene: CalendarScene): Route[] {
     (request, url) => {
       const found = new RegExp(`^${base}/events/([^/]+)(/response)?$`).exec(url.pathname);
       if (!found || (request.method !== "PATCH" && request.method !== "DELETE" && request.method !== "POST")) return;
-      const event = scene.events.find((one) => one.id === decodeURIComponent(found[1] ?? ""));
-      if (!event) return Response.json({ code: "CALENDAR_EVENT_NOT_FOUND" }, { status: 404 });
       if (request.method === "DELETE") {
+        const key = url.searchParams.get("idempotencyKey") ?? "";
+        const again = key === "" ? undefined : scene.keys.get(key);
+        if (again) return Response.json({ deleted: true, event: again, receipt: {} });
+        const event = scene.events.find((one) => one.id === decodeURIComponent(found[1] ?? ""));
+        if (!event) return Response.json({ code: "CALENDAR_EVENT_NOT_FOUND" }, { status: 404 });
         if (url.searchParams.get("expectedProviderVersion") !== etag(event)) return Response.json({ code: "CALENDAR_TARGET_CHANGED" }, { status: 409 });
         scene.writes.push(`delete ${event.id}`);
         if (url.searchParams.get("cancellationMode") === "decline_invitation") {
           event.attendees = event.attendees.map((attendee) => (attendee.self ? { ...attendee, responseStatus: "declined" } : attendee));
           bump(event);
         } else scene.events = scene.events.filter((one) => one !== event);
-        return changed(scene, url.searchParams.get("idempotencyKey") ?? "", event, { deleted: true, event, receipt: {} });
+        return changed(scene, key, event, { deleted: true, event, receipt: {} });
       }
-      return request.json().then((body: { title?: string; notes?: string; location?: string; startAt?: string; endAt?: string; responseStatus?: string; expectedProviderVersion: string; idempotencyKey: string }) => {
+      return request.json().then((body: { title?: string; description?: string; notes?: string; location?: string; startAt?: string; endAt?: string; responseStatus?: string; expectedProviderVersion: string; idempotencyKey: string }) => {
+        const again = body.idempotencyKey ? scene.keys.get(body.idempotencyKey) : undefined;
+        if (again) return Response.json({ event: again, receipt: {} });
+        const event = scene.events.find((one) => one.id === decodeURIComponent(found[1] ?? ""));
+        if (!event) return Response.json({ code: "CALENDAR_EVENT_NOT_FOUND" }, { status: 404 });
         if (body.expectedProviderVersion !== etag(event)) return Response.json({ code: "CALENDAR_TARGET_CHANGED" }, { status: 409 });
         if (found[2] !== undefined) {
           scene.writes.push(`answer ${event.id} ${body.responseStatus ?? ""}`);
           event.attendees = event.attendees.map((attendee) => (attendee.self ? { ...attendee, responseStatus: body.responseStatus ?? null } : attendee));
         } else {
           scene.writes.push(`update ${event.id}`);
-          Object.assign(event, { title: body.title ?? event.title, description: body.notes ?? event.description, location: body.location ?? event.location, startAt: body.startAt ?? event.startAt, endAt: body.endAt ?? event.endAt });
+          Object.assign(event, { title: body.title ?? event.title, description: body.description ?? body.notes ?? event.description, location: body.location ?? event.location, startAt: body.startAt ?? event.startAt, endAt: body.endAt ?? event.endAt });
         }
         bump(event);
         return changed(scene, body.idempotencyKey, event, { event, receipt: {} });
@@ -258,6 +269,7 @@ const revisionOf = (event: AndroidCalendarEvent) => JSON.stringify([event.title,
  */
 export function elizaCalendar(scene: CalendarScene): Faked {
   const find = (id: string) => scene.phoneEvents.find((event) => event.id === id);
+  let nextPhoneId = Math.max(0, ...scene.phoneEvents.map((event) => Number(event.id.replace(/^p/, "")) || 0));
   return plugin<Omit<AndroidCalendarPlugin, "save"> & Creations>(() => ({
     checkPermissions: () => Promise.resolve({ calendar: scene.granted ? "granted" : "prompt" }),
     requestAccess() {
@@ -280,7 +292,8 @@ export function elizaCalendar(scene: CalendarScene): Faked {
     },
     save(input) {
       if (input.id === undefined || input.id === "") {
-        const id = `p${scene.phoneEvents.length + 1}`;
+        nextPhoneId = Math.max(nextPhoneId, ...scene.phoneEvents.map((event) => Number(event.id.replace(/^p/, "")) || 0)) + 1;
+        const id = `p${nextPhoneId}`;
         scene.phoneEvents.push({ id, calendarId: "local", title: input.title, body: input.body ?? "", location: input.location ?? "", begin: input.begin, end: input.end, allDay: false, recurring: false, creationId: input.creationId ?? "" });
         scene.creations.set(input.creationId ?? "", "saved");
         if (scene.lost) return Promise.reject(rejection("Calendar write could not be confirmed. Check creation receipts before retrying."));
