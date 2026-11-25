@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import vibelang from "vibelang-vite";
@@ -13,6 +14,9 @@ import { localOcrAssets } from "./scripts/ocr-assets.ts";
  */
 const faked = process.env.SPEC_TESTS !== undefined || (process.env.ALPHA_FAKES ?? "") !== "";
 const phoned = process.env.ALPHA_PHONE === "1";
+
+/** The version this build of Alpha is made as: the release's `ELIZAOS_VERSION_NAME`, as the Android package takes it, or the app's own. */
+const version = process.env.ELIZAOS_VERSION_NAME || (JSON.parse(readFileSync(new URL("package.json", import.meta.url), "utf8")) as { readonly version: string }).version;
 
 /**
  * The built page's Content-Security-Policy, the first element of its head (spec/app/platform/index.md, "A built page
@@ -70,4 +74,6 @@ export default defineConfig({
   resolve: { dedupe: ["effect", "vibelang-runtime", "@capacitor/core"] },
   // spec/app/platform/index.md, "Mocks, fixtures and developer surfaces exist only when the build allows test mocks": the page reads the build's allowance as `import.meta.env.ELIZA_DEV_ALLOW_TEST_MOCKS`.
   envPrefix: ["VITE_", "ELIZA_DEV_ALLOW_TEST_MOCKS"],
+  // spec/app/settings/facts.md, "Facts hold the newest asking, which facts and accesses its answer reported, the roles, and Set as Home in flight": About names the version this build was made as where the phone names none.
+  define: { "import.meta.env.VITE_ALPHA_VERSION": JSON.stringify(version) },
 });

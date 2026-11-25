@@ -113,6 +113,7 @@ type Effect =
   | Reread({ turn: int, recheck: int })
   | Arrived({ recorded: bool })
   | Navigate({ turn: int, view: S::View })
+  | NavigateHome({ turn: int })
   | NavigateFiles({ turn: int, source: List[S::View], panel: S::Detent, route: int })
   | Navigated({ turn: int, opened: bool })
 type Moved = { state: Conversation, out: List[Effect] }
@@ -812,6 +813,22 @@ pure def navigate(c: Conversation, ticket: int, view: S::View): Moved =
   { state: { ...c, opening: A::dispatch(A::record(A::plan(ticket))) }, out: List(Navigate({ turn: ticket, view: view })) }
 ```
 
+### A complete reply may take the owner Home, once, as it may open a view
+
+The agent names Home as it names any view (`spec/agent/index.md`, "The
+launch names Home and every Alpha app but Notes as a view the agent may
+show, by the id the phone opens it by"). The phone claims it once for the
+turn, on the same terms, and asks the shell to go Home.
+
+```quint
+pure def canNavigateHome(c: Conversation, ticket: int): bool =
+  ticket == c.turn.send.id and c.turn.reply == Complete and c.turn.revision == c.context.revision
+    and not(c.context.sensitive) and c.opening.id < ticket
+
+pure def navigateHome(c: Conversation, ticket: int): Moved =
+  { state: { ...c, opening: A::dispatch(A::record(A::plan(ticket))) }, out: List(NavigateHome({ turn: ticket })) }
+```
+
 ### An explicit Files continuation opens only from the same app trail and Ask Alpha panel
 
 The completed turn names its source trail and panel in the shell request.
@@ -851,6 +868,8 @@ pure def navigated(c: Conversation, ticket: int, opened: bool): Moved =
 pure def stepAViewIsOpenedOncePerTurn(before: Conversation, via: str, after: Conversation, out: List[Effect]): bool =
   out.every(e => match e {
     | Navigate(n) => before.opening.id < n.turn and n.turn == after.turn.send.id and after.opening.outcome == A::Sent
+        and not(after.context.sensitive) and after.turn.revision == after.context.revision
+    | NavigateHome(n) => before.opening.id < n.turn and n.turn == after.turn.send.id and after.opening.outcome == A::Sent
         and not(after.context.sensitive) and after.turn.revision == after.context.revision
     | NavigateFiles(n) => before.opening.id < n.turn and n.turn == after.turn.send.id and after.opening.outcome == A::Sent
         and not(after.turn.stopping) and not(after.context.sensitive) and after.turn.revision == after.context.revision
