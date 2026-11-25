@@ -19,8 +19,6 @@ export const views = {
   Settings: { label: "Settings", icon: Settings },
 } satisfies Record<View, { label: string; icon: LucideIcon }>;
 
-export const viewOrder = Object.keys(views) as View[];
-
 const commsViews = new Set<View>(["Phone", "Messages", "Contacts"]);
 const ownHeader = new Set<View>(["Browser", "Calendar", "Camera", "Inbox", "Photos", "Files", "Maps", "Notes", "Settings", "Workflows", ...commsViews]);
 

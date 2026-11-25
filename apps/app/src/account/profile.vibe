@@ -1,21 +1,41 @@
-// spec/app/settings/index.md, "Each page links to what another area owns there"; spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"; spec/kit/read.md, "Story: Read from outside"
-import { CloudError, isCredentialInvalid, networkError } from "@elizaos/cloud"
+// spec/app/account/plan.md, "Story: Know my plan"; spec/app/settings/index.md, "Each page links to what another area owns there"; spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"; spec/kit/read.md, "Story: Read from outside"
+import { type Account as CloudProfile, CloudError, isCredentialInvalid, networkError, subscriptionView } from "@elizaos/cloud"
 import * as Settings from "../../gen/app__settings.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import { type Account, Cloud } from "../platform/cloud.vibe"
-import { Device } from "../platform/device.vibe"
+import { Device, native } from "../platform/device.vibe"
+import { CLOUD_ENVIRONMENT, signInAccounts } from "../platform/voice.vibe"
 import { contained, started } from "../runtime/reactor.vibe"
 
 /** The account sheet's entry in the shell's stack. */
 export const accountLayer = "account"
+
+type Plan =
+  | { readonly tag: "CheckingPlan" }
+  | { readonly tag: "PlanUnavailable" }
+  | {
+    readonly tag: "PlanRead"
+    readonly name: "Plus" | "Pro" | "Credits" | "No plan"
+    readonly paymentDue: boolean
+    readonly balanceMicros: number
+    readonly allowance: { readonly availableMicros: number; readonly resetsAt: number } | null
+    readonly expiresAt: number | null
+  }
+
+type ReadProfile = {
+  readonly tag: "Read"
+  readonly contact: string
+  readonly name: string
+  readonly plan?: Plan
+}
 
 /** What Cloud says about the account for this request. The page never holds a credential. */
 export type Profile =
   | { readonly tag: "Reading" }
   | { readonly tag: "SignInRequired" }
   | { readonly tag: "Unavailable" }
-  | { readonly tag: "Read"; readonly contact: string; readonly name: string }
+  | ReadProfile
 
 const reading: Profile = { tag: "Reading" }
 
@@ -42,15 +62,97 @@ export effect function openAccount(): void!!Layers.Machine {
   try contained(layers.send({ type: "openLayer", id: accountLayer, kind: "SheetLayer", covers: true }), "opening Account")
 }
 
-effect function readProfile(cloud: Account): Profile!! {
-  return effect {
-    const data = try timeout(tryPromise({
-      try: (signal) => cloud.client.account({ signal }),
-      catch: (cause) => cause instanceof CloudError ? cause : networkError(cause),
-    }), "10 seconds")
-    return { tag: "Read", name: data.name?.trim() ?? "", contact: data.email?.trim() || data.phone?.trim() || "" } satisfies Profile
-  } catch (error): Profile => error instanceof CloudError && isCredentialInvalid(error)
-    ? { tag: "SignInRequired" } : { tag: "Unavailable" }
+const cloudFailure = (cause: unknown) => cause instanceof CloudError ? cause : networkError(cause)
+
+const readAccount = (cloud: Account) => timeout(tryPromise({
+  try: (signal) => cloud.client.account({ signal }),
+  catch: cloudFailure,
+}), "10 seconds")
+
+const profileOf = (data: CloudProfile): ReadProfile =>
+  ({ tag: "Read", name: data.name?.trim() ?? "", contact: data.email?.trim() || data.phone?.trim() || "" })
+
+const profileFailure = (error: unknown): Profile => error instanceof CloudError && isCredentialInvalid(error)
+  ? { tag: "SignInRequired" } : { tag: "Unavailable" }
+
+effect function credentialOf(owner: CloudProfile) {
+  const status = timeout(tryPromise(() => signInAccounts().status({ environment: CLOUD_ENVIRONMENT })), "5 seconds") catch () => undefined
+  const account = status?.account
+  return account?.kind === "signedIn" && account.userId === owner.id && account.organizationId === owner.organization_id ? account.credentialId : undefined
+}
+
+const planUnavailable: Plan = { tag: "PlanUnavailable" }
+
+effect function readPlan(cloud: Account, owner: CloudProfile, profile: ReadProfile): Profile!! {
+  const phone = native()
+  const unavailable = { ...profile, plan: planUnavailable }
+  if (!owner.id || !owner.organization_id) return unavailable
+  const before = phone ? try credentialOf(owner) : undefined
+  if (phone && before === undefined) return unavailable
+  const snapshot = timeout(tryPromise({ try: (signal) => cloud.client.snapshot({ signal }), catch: cloudFailure }), "10 seconds") catch () => undefined
+  const checked = try exit(readAccount(cloud))
+  if (Exit.isFailure(checked)) {
+    const issue = profileFailure(Cause.squash(checked.cause))
+    return issue.tag === "SignInRequired" ? issue : unavailable
+  }
+  const after = checked.value
+  if (after.id !== owner.id || after.organization_id !== owner.organization_id) return { ...profileOf(after), plan: planUnavailable }
+  if (phone && (try credentialOf(after)) !== before) return unavailable
+  if (!snapshot || snapshot.account.status !== "active") return unavailable
+  const now = try Clock.currentTimeMillis
+  const view = subscriptionView(snapshot, now)
+  if (view.credit.kind === "unavailable" || (view.planEffectiveUntil !== null && view.planEffectiveUntil <= now)) return unavailable
+  const shown = view.plan
+  if (shown.tag === "PlanChecking" || shown.tag === "PlanUnavailable") return unavailable
+  const name = shown.tag === "PlanPaid" ? (view.planKey === "pro_monthly" ? "Pro" : "Plus")
+    : shown.tag === "PlanOnCredits" ? "Credits" : "No plan"
+  const allowance = view.allowance
+  return {
+    ...profile,
+    plan: {
+      tag: "PlanRead",
+      name,
+      paymentDue: shown.tag === "PlanPaid" && shown.warning,
+      balanceMicros: view.credit.kind === "funded" ? view.credit.usdMicros : 0,
+      allowance: allowance?.state === "open" && allowance.resetsAt > now
+        ? { availableMicros: allowance.available, resetsAt: allowance.resetsAt }
+        : null,
+      expiresAt: view.planEffectiveUntil,
+    },
+  }
+}
+
+function untilExpiry(profile: Profile): Stream.Stream<Profile> {
+  if (profile.tag !== "Read" || profile.plan?.tag !== "PlanRead") return Stream.succeed(profile)
+  const plan = profile.plan
+  return Stream.unwrap(effect {
+    const now = try Clock.currentTimeMillis
+    const expiresAt = plan.expiresAt ?? Number.POSITIVE_INFINITY
+    const resetsAt = plan.allowance?.resetsAt ?? Number.POSITIVE_INFINITY
+    const retirement = { ...profile, plan: planUnavailable }
+    const expires = Number.isFinite(expiresAt)
+      ? Stream.fromEffect(Effect.as(sleep(Math.max(0, expiresAt - now)), retirement))
+      : Stream.empty
+    if (resetsAt >= expiresAt) return Stream.concat(Stream.succeed<Profile>(profile), expires)
+    const withoutAllowance = { ...profile, plan: { ...plan, allowance: null } }
+    return Stream.concat(
+      Stream.succeed<Profile>(profile),
+      Stream.concat(Stream.fromEffect(Effect.as(sleep(Math.max(0, resetsAt - now)), withoutAllowance)),
+        Number.isFinite(expiresAt) ? Stream.fromEffect(Effect.as(sleep(expiresAt - resetsAt), retirement)) : Stream.empty),
+    )
+  })
+}
+
+function visit(cloud: Account, place: "Account" | "Settings"): Stream.Stream<Profile> {
+  return Stream.unwrap(effect {
+    const opened = try exit(readAccount(cloud))
+    if (Exit.isFailure(opened)) return Stream.succeed(profileFailure(Cause.squash(opened.cause)))
+    const owner = opened.value
+    const profile = profileOf(owner)
+    return place === "Account"
+      ? Stream.concat(Stream.succeed<Profile>({ ...profile, plan: { tag: "CheckingPlan" } }), Stream.flatMap(Stream.fromEffect(readPlan(cloud, owner, profile)), untilExpiry))
+      : Stream.succeed<Profile>(profile)
+  })
 }
 
 /** Reads the account while Settings or its Account sheet is visible. Leaving interrupts the read and drops its answer. */
@@ -62,14 +164,16 @@ export function profileLive(publish: (value: Profile) => void) {
     const shell = try Shell.Machine
     const settings = try Settings.Machine
     const pages = Stream.zipLatest(shell.changes, settings.changes)
-    const active = Stream.changes(Stream.map(Stream.zipLatest(changes, pages), ([layers, [shell, settings]]) =>
-      Layers.top(layers).id === accountLayer ? "Account" : Shell.showing(shell, "Settings") && settings.page === "Top" ? "Settings" : "Away"))
+    const active = Stream.changes(Stream.map(Stream.zipLatest(changes, pages), ([layers, [shell, settings]]) => {
+      if (!Shell.showing(shell, "Settings") || shell.assistant === "Full" || settings.page !== "Top") return "Away"
+      return Layers.top(layers).id === accountLayer ? "Account" : "Settings"
+    }))
     const visible = Stream.switchMap(active, (place) => place === "Away"
-      ? Stream.succeed(false)
-      : Stream.changes(Stream.concat(Stream.fromEffect(device.showing()), device.visible)))
-    const watched = Stream.switchMap(visible, (showing) => showing
-      ? Stream.concat(Stream.succeed<Profile>(reading), Stream.fromEffect(readProfile(cloud)))
-      : Stream.succeed<Profile>(reading))
+      ? Stream.succeed("Away" as const)
+      : Stream.map(Stream.changes(Stream.concat(Stream.fromEffect(device.showing()), device.visible)), (showing) => showing ? place : "Away" as const))
+    const watched = Stream.switchMap(visible, (place) => place === "Away"
+      ? Stream.succeed<Profile>(reading)
+      : Stream.concat(Stream.succeed<Profile>(reading), visit(cloud, place)))
     try Stream.runForEach(watched, (value) => sync(() => publish(value)))
   }, "reading Account")
 }

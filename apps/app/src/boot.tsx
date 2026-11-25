@@ -20,9 +20,9 @@ import { back, taking } from "./shell/shell.vibe";
 /** Alpha over `platform`: one root runtime of the resident machines, and each screen of `mounts` at its place, loaded when it is first drawn, and contained: one that throws or cannot be loaded stops alone. */
 export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] = every): Alpha {
   const media = Layer.succeed(MediaHandoff, {
-    attach: (file, current) => Effect.promise(async () => {
+    attach: (file, current, suggestion) => Effect.promise(async () => {
       const { default: assistant } = await import("./assistant/index.tsx");
-      return assistant.runtime(alpha).runPromise(stageAttachment(file, current));
+      return assistant.runtime(alpha).runPromise(stageAttachment(file, current, suggestion));
     }).pipe(Effect.catchCause(() => Effect.succeed(false))),
     offerTranscript: (transcript) => Effect.promise(async () => {
       const { default: assistant } = await import("./assistant/index.tsx");
@@ -33,6 +33,10 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
     filesContext: () => Effect.tryPromise(async () => {
       const [{ default: files }, { filesReadContext }] = await Promise.all([import("./files/index.tsx"), import("./files/agent.vibe")]);
       return files.runtime(alpha).runPromise(filesReadContext);
+    }).pipe(Effect.orElseSucceed(() => undefined)),
+    readyFiles: () => Effect.tryPromise(async (signal) => {
+      const [{ default: files }, { readyFilesReadContext }] = await Promise.all([import("./files/index.tsx"), import("./files/agent.vibe")]);
+      return files.runtime(alpha).runPromise(readyFilesReadContext, { signal });
     }).pipe(Effect.orElseSucceed(() => undefined)),
     reviewFiles: (operation) => Effect.tryPromise(async () => {
       const [{ default: files }, { reviewFileAction }] = await Promise.all([import("./files/index.tsx"), import("./files/agent.vibe")]);

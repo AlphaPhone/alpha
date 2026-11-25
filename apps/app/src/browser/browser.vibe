@@ -6,16 +6,10 @@ import type { Browser, Effect as TabsOut, Event as TabsEvent } from "../../gen/a
 import * as Address from "../../gen/app__browser__address.effect.vibe"
 import type { Effect as PageOut, Event as PageEvent, Page } from "../../gen/app__browser__address.effect.vibe"
 import * as Share from "../../gen/app__browser__share.effect.vibe"
-import type { Effect as ShareOut, Event as ShareEvent } from "../../gen/app__browser__share.effect.vibe"
+import type { Event as ShareEvent } from "../../gen/app__browser__share.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
-import * as Inbox from "../../gen/app__inbox.effect.vibe"
-import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
-import type { Machine as Suggestions } from "../../gen/app__inbox__suggestion.effect.vibe"
 import type { BrowserPageGuard, BrowserTabHostPlugin } from "@elizaos/os-bridges"
-import { type EmailDestination, emailDestination } from "../assistant/message-actions.vibe"
-import { type Offers, useInEmail } from "../inbox/suggestion.vibe"
 import { BrowserDownloadsHandoff, TabHost, hosted } from "../platform/browser.vibe"
-import { Device } from "../platform/device.vibe"
 import { readWebBrowsing, saveWebBrowsing } from "../platform/browserWeb.vibe"
 import type { Install } from "../runtime/attempts.vibe"
 import { type Job, Whole, answer, contained, due, reacting, run, started, stream, together, untimed, whole } from "../runtime/reactor.vibe"
@@ -77,8 +71,8 @@ export const idOf = (tab: number): string => `tab${tab}`
 const tabOf = (id: string): number => (/^tab(\d+)$/.test(id) ? Number(id.slice(3)) : 0)
 const failedRestore = (ticket: number): TabsEvent => ({ type: "restored", ticket, ok: false, shown: 0, incoming: [] })
 
-/** A tab's page: its own machines, the page and what may leave the Browser of it, made when the tab is first asked for and ended with the tab. */
-export type PageRuntime = ManagedRuntime.ManagedRuntime<Address.Machine | Share.Machine | Time, unknown>
+/** A tab's page: its own machine, made when the tab is first asked for and ended with the tab. */
+export type PageRuntime = ManagedRuntime.ManagedRuntime<Address.Machine | Time, unknown>
 
 /** Alpha's own tab host beyond eliza's: a page that failed at an HTTPS address opens in another browser, as the host named it, and the shown page is read for a turn. */
 type AlphaTabHost = BrowserTabHostPlugin & { openFailedPage(options: BrowserPageGuard): Promise<void>; pageContext(options: BrowserPageGuard): Promise<Readonly<Record<string, unknown>>> }
@@ -107,9 +101,12 @@ export service Pages {
   visits(): readonly string[]!!
   keepVisits(history: readonly string[]): void!!
   visit(url: string): void!!
+  /** Tell the Browser's Share machine, which speaks for the tab in front, of `tab`'s page: nothing for a tab behind. Whether it took it. */
+  share(tab: number, event: ShareEvent): boolean!!
 }
 
-effect function pageOf(tab: number): Page!!Pages {
+/** Read the current address machine for the exact tab. */
+export effect function pageOf(tab: number): Page!!Pages {
   const runtime = try (try Pages).of(tab)
   return try promise(() => runtime.runPromise(Address.Machine.use((machine) => machine.get())))
 }
@@ -120,8 +117,7 @@ effect function tellPage(tab: number, event: PageEvent): boolean!!Pages {
 }
 
 effect function tellShare(tab: number, event: ShareEvent): boolean!!Pages {
-  const runtime = try (try Pages).of(tab)
-  return try promise(() => runtime.runPromiseExit(Share.Machine.use((machine) => machine.send(event))).then((ended) => Exit.isSuccess(ended)))
+  return try (try Pages).share(tab, event)
 }
 
 effect function tellTabs(event: TabsEvent): boolean!!Tabs.Machine {
@@ -265,19 +261,12 @@ effect function guardOf(tab: number): Option.Option<BrowserPageGuard>!!TabHost {
   return info?.url === undefined || info.navigation === undefined ? Option.none() : Option.some({ session: host.session.session, id, url: info.url, navigation: info.navigation })
 }
 
-// spec/app/browser/share.md, "Choosing where to send the page sends it once, if it is still the page the panel opened on, and closes the panel"
-/** Hand the shown page to Android's share sheet. */
-effect function shared(tab: number): void!!TabHost {
-  const guard = try guardOf(tab)
-  if (Option.isSome(guard)) try ignore(hosted("share", (plugin) => plugin.share(guard.value)))
-}
-
 // spec/app/browser/share.md, "The other browser opens, or the owner is told that none could and the page is still here"; spec/app/browser/share.md, "Only an unreachable HTTPS address makes a failed page leave, and only from a normal tab"
-/** Open `tab`'s page in another browser: a failed page at the HTTPS address the host named, or a page that asked for a passkey. */
-effect function leaving(tab: number, confirmed: boolean): ShareEvent!!(TabHost | Pages) {
+/** Open the page in front in another browser: a failed page at the HTTPS address the host named, or a page that asked for a passkey. */
+export effect function leaving(confirmed: boolean): ShareEvent!!(TabHost | Tabs.Machine | Share.Machine) {
+  const tab = (try (try Tabs.Machine).get()).selected
   const guard = try guardOf(tab)
-  const runtime = try (try Pages).of(tab)
-  const share = try promise(() => runtime.runPromise(Share.Machine.use((machine) => machine.get())))
+  const share = try (try Share.Machine).get()
   const failedAt = elsewhere.get(idOf(tab))
   if (Option.isNone(guard) || (share.stranded && failedAt === undefined)) return { type: "launched", ok: false, found: true }
   const sent = share.stranded && failedAt !== undefined
@@ -286,31 +275,6 @@ effect function leaving(tab: number, confirmed: boolean): ShareEvent!!(TabHost |
   const launched = effect { try sent; return { type: "launched", ok: true, found: true } as ShareEvent }
     catch (failed) => ({ type: "launched", ok: false, found: !String((failed.cause as { message?: unknown } | undefined)?.message ?? failed.cause).includes("No other installed browser") }) as ShareEvent
   return launched
-}
-
-// spec/app/browser/share.md, "Choosing where to send the page sends it once, if it is still the page the panel opened on, and closes the panel"
-/** The Inbox account a shared link starts an email in, or none while Inbox could not take one now. */
-export const mailTarget: (EmailDestination | undefined)!!(Inbox.Machine | Drafts.Machine) = effect {
-  return emailDestination(try (try Inbox.Machine).get(), try (try Drafts.Machine).get())
-}
-
-type Mail = Inbox.Machine | Drafts.Machine | Suggestions | Offers | Shell
-
-/** Hand the shown page's address to Inbox, which shows it for review before it goes into an email, as v121 did. */
-effect function drafted(tab: number): void!!(TabHost | Mail) {
-  const url = (try TabHost).session.info(idOf(tab))?.url
-  const target = try mailTarget
-  if (url === undefined || target === undefined) return
-  try ignore(useInEmail(url, "Browser", { target: "NewEmail", account: target.account, message: 0, draft: target.draft }, true))
-}
-
-function carryShare(tab: number) {
-  return (fx: ShareOut): Job<ShareEvent, TabHost | Pages | Mail, []> => match (fx) {
-    when { tag: "Sheet" }: run(`share ${tab}`, shared(tab));
-    when { tag: "CopyLink" }: run(`share ${tab}`, Effect.void);
-    when { tag: "Draft" }: run(`share ${tab}`, drafted(tab));
-    when { tag: "Elsewhere", let confirmed }: answer(`elsewhere ${tab}`, leaving(tab, confirmed), { type: "launched", ok: false, found: true });
-  }
 }
 
 function carryPage(tab: number) {
@@ -345,9 +309,8 @@ const pages = Layer.effect(Pages, effect {
       const context = try area.context
       const found = Context.getOption(context as Context.Context<Tabs.Machine>, Tabs.Machine)
       const privateTab = Option.isSome(found) && (try found.value.get()).privates.includes(tab)
-      const page = reacting(Address, { carry: carryPage(tab), ...(privateTab ? { open: [{ type: "bePrivate" }] as const } : {}) })
-      const machine = whole(Layer.provideMerge(reacting(Share, { carry: carryShare(tab) }), page))
-      const runtime: PageRuntime = ManagedRuntime.make(Layer.provideMerge(machine, Layer.succeedContext(context as Context.Context<KeyValueStore.KeyValueStore | Time | Install | TabHost | Pages | Tabs.Machine | Mail>)))
+      const machine = whole(reacting(Address, { carry: carryPage(tab), ...(privateTab ? { open: [{ type: "bePrivate" }] as const } : {}) }))
+      const runtime: PageRuntime = ManagedRuntime.make(Layer.provideMerge(machine, Layer.succeedContext(context as Context.Context<KeyValueStore.KeyValueStore | Time | Install | TabHost | Pages | Tabs.Machine>)))
       made.set(tab, runtime)
       return runtime
     },
@@ -361,6 +324,13 @@ const pages = Layer.effect(Pages, effect {
     visit: (url: string) => sync(() => {
       history = [url, ...history.filter((visit) => visit !== url)].slice(0, DEFAULT_BROWSING_LIMITS.history)
     }),
+    effect share(tab: number, event: ShareEvent): boolean!! {
+      const context = try area.context
+      const tabs = Context.getOption(context as Context.Context<Tabs.Machine>, Tabs.Machine)
+      const machine = Context.getOption(context as Context.Context<Share.Machine>, Share.Machine)
+      if (Option.isNone(tabs) || Option.isNone(machine) || (try tabs.value.get()).selected !== tab) return false
+      return try (machine.value.send(event) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))
+    },
     effect end(tab: number): void!! {
       const runtime = made.get(tab)
       made.delete(tab)
@@ -471,11 +441,17 @@ effect function present(tab: number, host: TabHost.Shape): void!! {
 }
 
 // spec/app/browser/downloads.md, "Story: Download a file"
-/** Open the current native Browser's Downloads list after its menu closes. */
+/** Open the phone's Browser downloads, or enter Files from the enclosing browser. */
 export const openDownloads: void!!(Tabs.Machine | Shell | TabHost) = effect {
-  if (!showing(try (try Shell).get(), "Browser") || (try (try Tabs.Machine).get()).layer !== "Menu") return
+  const shell = try Shell
+  if (!showing(try shell.get(), "Browser") || (try (try Tabs.Machine).get()).layer !== "Menu") return
   if (!(try tellTabs({ type: "uncover" }))) return
-  try contained(hosted("downloads", (plugin, session) => plugin.downloads({ session })), "opening Browser downloads")
+  if ((try TabHost).web !== undefined) {
+    if (!(try contained(shell.send({ type: "goHome" }), "opening Files as an app"))) return
+    if ((try shell.get()).trail.length === 0) try contained(shell.send({ type: "openView", view: "Files" }), "opening Files from Browser")
+  } else {
+    try contained(hosted("downloads", (plugin, session) => plugin.downloads({ session })), "opening Browser downloads")
+  }
 }
 
 /** Draw the page shown where the Browser marks its place, once that place is drawn. */
@@ -484,20 +460,6 @@ export const placed: void!!(Tabs.Machine | Shell | TabHost) = effect {
   const open = showing(try (try Shell).get(), "Browser")
   try present(open && Tabs.pageShown(s) ? s.selected : 0, try TabHost)
 }
-
-// spec/app/browser/share.md, "Closing the panel, or Alpha going to the background, sends nothing"
-/** The shown page's share panel and handoff review close, sending nothing, when the Browser leaves the screen or Alpha goes to the background. */
-const away = started(effect {
-  const shell = try Shell
-  const machine = try Tabs.Machine
-  const device = try Device
-  let seen = false
-  try Stream.runForEach(Stream.zipLatest(Stream.map(shell.changes, (s) => showing(s, "Browser")), Stream.concat(Stream.fromEffect(device.showing()), device.visible)), effect ([open, visible]) => {
-    const now = open && visible
-    if (seen && !now) try tellShare((try machine.get()).selected, { type: "hidden" })
-    seen = now
-  })
-}, "the Browser leaving the screen")
 
 // spec/app/assistant/context.md, "A turn carries the page Browser hands it for the tab in front, beside the observation, only to a peer that declares it"
 /**
@@ -515,7 +477,7 @@ export effect function pageFor(): unknown!!(Tabs.Machine | TabHost | Time) {
 }
 
 /** The Browser's tabs, kept across restarts, and each tab's page, carried out through the phone's tab host. */
-export const browser = Layer.provideMerge(together(tabs, told, shown, away), pages)
+export const browser = Layer.provideMerge(together(tabs, told, shown), pages)
 
 // spec/app/messages/index.md, "Only the newest read of the open conversation is shown, and it marks the shown messages read only where Alpha is the phone's SMS app"; spec/app/browser/index.md, "Story: Open, pick and close tabs"
 /** A link the owner tapped in Messages opens in one selected normal Browser tab through the address machine. */

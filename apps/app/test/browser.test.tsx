@@ -7,12 +7,17 @@ import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
 import { Machine as Page } from "../gen/app__browser__address.effect.vibe";
 import { Machine as Library } from "../gen/app__browser__library.effect.vibe";
+import { Machine as Share } from "../gen/app__browser__share.effect.vibe";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
+import { Machine as Inbox } from "../gen/app__inbox.effect.vibe";
+import { Machine as Offering } from "../gen/app__inbox__suggestion.effect.vibe";
 import assistant from "../src/assistant/index.tsx";
 import { executeMedia } from "../src/assistant/media-executors.ts";
 import { Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
 import home from "../src/home/index.tsx";
+import inbox from "../src/inbox/index.tsx";
+import { Offers } from "../src/inbox/suggestion.vibe";
 import { button, closeAll, drawn, fill, hardware, only, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import { textReview } from "./fakes/text-review.ts";
@@ -123,7 +128,7 @@ describe("The Browser on a phone", () => {
     expect(world.browser.bookmarks).toEqual([]);
   });
 
-  it("Open a page and watch it load (spec/app/browser/address.md, \"Story: Go where I typed\"; spec/app/browser/address.md, \"Story: Watch a page load\"; spec/app/browser/address.md, \"Story: Find in page\")", async () => {
+  it("Open a page and watch it load (spec/app/browser/address.md, \"Story: Go where I typed\"; spec/app/browser/address.md, \"Story: Watch a page load\"; spec/app/browser/address.md, \"Story: Find in page\"; spec/app/browser/share.md, \"Story: Share the page\")", async () => {
     const { alpha, runtime, world } = await onBrowser();
     // spec/app/browser/index.md, "A launch reads the saved session, and may ask again after a failed read"
     await until(alpha, runtime, Tabs, (s) => s.hydrated);
@@ -142,6 +147,17 @@ describe("The Browser on a phone", () => {
     await until(alpha, page, Page, (p) => p.phase === "Shown" && p.secure);
     expect([...world.browser.tabs.values()].map((one) => one.history)).toEqual([["https://news.example/on-device-agents"]]);
     expect(Boolean(document.querySelector("[aria-label='Secure connection']"))).toBe(true);
+
+    await press("Menu");
+    await press("Share");
+    await until(alpha, runtime, Share, (s) => s.sent === 1 && s.delivery.tag === "NoDelivery");
+    expect(world.browser.shared.map(({ id, url, navigation }) => [id, url, navigation])).toEqual([
+      [`tab${tab}`, "https://news.example/on-device-agents", "1"],
+    ]);
+    await press("Menu");
+    await press("Copy link");
+    await until(alpha, runtime, Share, (s) => s.notice === "Copied");
+    expect(world.settings.copied).toEqual(["https://news.example/on-device-agents"]);
 
     // spec/app/browser/address.md, "Typing searches the page, and clearing the text clears the search"; spec/app/browser/address.md, "Only the answer to the latest search counts"
     await press("Menu");
@@ -238,26 +254,31 @@ describe("The Browser on a phone", () => {
     expect(button("Open in browser")).toBeUndefined();
   });
 
-  it("Share the page (spec/app/browser/share.md, \"Story: Share the page\")", async () => {
-    const { alpha, runtime, world } = await onBrowser();
+  it("Email the page, as v121 did (spec/app/browser/share.md, \"Choosing where to send the page sends it once, if it is still the page the panel opened on, and closes the panel\"; spec/app/inbox/suggestion.md, \"Alpha suggests text only for a draft; the owner hands text over from elsewhere in Alpha into a draft, a new reply or a new email; either replaces an offer not yet used\")", async () => {
+    const world = { ...scene(), phone: true, image: true };
+    const { alpha } = await open(world, only("home", "notice", "view:Browser", "view:Inbox"));
+    await until(alpha, home.runtime(alpha), Home, (h) => h.tiles.load.status === "Loaded");
+    await drawn(() => {
+      const tile = document.querySelector<HTMLButtonElement>("[data-home-tile='view:Inbox']");
+      if (!tile) throw new Error("No Inbox home tile");
+      tile.click();
+    });
+    const letters = inbox.runtime(alpha);
+    await until(alpha, letters, Inbox, (state) => state.list.status === "Loaded" && state.selected.account !== 0);
+    await hardware("back");
+    await press("Browser");
+    const runtime = browser.runtime(alpha);
     await until(alpha, runtime, Tabs, (s) => s.hydrated);
     await go("news.example/on-device-agents");
     const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
-    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
-    await until(alpha, page, Page, (p) => p.phase === "Shown");
-
-    // spec/app/browser/share.md, "Choosing where to send the page sends it once, if it is still the page the panel opened on, and closes the panel": Copy link, as v121.
+    await until(alpha, runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab))), Page, (p) => p.phase === "Shown");
     await press("Menu");
-    await press("Share");
-    await press("Copy link");
-    await until(alpha, page, Page, () => document.body.textContent?.includes("Link copied") === true);
-    expect(world.settings.copied).toEqual(["https://news.example/on-device-agents"]);
-
-    await press("Menu");
-    await press("Share");
-    await press("Share to an app");
-    await until(alpha, page, Page, () => world.browser.shared.length === 1);
-    expect(world.browser.shared).toEqual(["https://news.example/on-device-agents"]);
+    await press("Email this page");
+    // spec/app/inbox/suggestion.md, "Only the owner is shown it, against the draft as it is now; showing it again after the draft changed shows it against the change": the link waits in Inbox for the owner's review.
+    await until(alpha, letters, Offering, (s) => s.text !== 0);
+    const offered = letters.runSync(Effect.flatMap(Offering, (machine) => machine.get()));
+    expect(letters.runSync(Effect.map(Offers, (offers) => offers.text(offered.text)))).toBe("https://news.example/on-device-agents");
+    expect(world.inbox.drafts.size).toBe(0);
   });
 
   it("Let the agent open a page from Ask Alpha's card (spec/app/browser/index.md, \"Story: Let the agent open a page\"; spec/app/approvals/proposal.md, \"Story: Decide\")", async () => {

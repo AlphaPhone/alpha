@@ -38,13 +38,12 @@ export interface BrowserScene {
   shown: { id: string; x: number; y: number; width: number; height: number } | undefined;
   /** Every call the page made, by method. */
   readonly calls: string[];
+  readonly shared: BrowserPageGuard[];
   showInFiles: (() => void) | undefined;
   /** Hosts whose pages fail: `unreachable` as the network fails, `insecure` as a site with no HTTPS connection. */
   readonly failing: Map<string, "unreachable" | "insecure">;
   /** The addresses `openFailedPage` opened in another browser. */
   readonly elsewhere: string[];
-  /** The pages handed to Android's share sheet. */
-  readonly shared: string[];
 }
 
 /** develop's fixture photographs, served beside the fakes. */
@@ -319,7 +318,14 @@ export function alphaBrowser(world: BrowserScene): Faked {
       reviewQuestion: () => Promise.reject(rejection("Reading unavailable")),
       reviewReading: () => Promise.reject(rejection("Reading unavailable")),
       cancelReading: () => Promise.resolve(),
-      share: (options) => { world.shared.push(options.url); return Promise.resolve(stateOf(held(options))); },
+      share: (options) => {
+        const tab = stateOf(held(options));
+        if (!tab.committed || tab.loading || tab.url !== options.url || tab.navigation !== options.navigation) {
+          return Promise.reject(rejection("The Browser page changed"));
+        }
+        world.shared.push(options);
+        return Promise.resolve(tab);
+      },
       openExternalBrowser: () => Promise.resolve(),
       // `pageContext`: the shown normal tab's committed page as its web view reads it, never a private tab's.
       pageContext: (options) => {

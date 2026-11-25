@@ -7,7 +7,7 @@ import { Machine as Shown } from "../gen/app__inbox__message.effect.vibe";
 import { Machine as Changes } from "../gen/app__inbox__sending.effect.vibe";
 import { Machine as Writing } from "../gen/app__inbox__drafts.effect.vibe";
 import { Machine as Offering } from "../gen/app__inbox__suggestion.effect.vibe";
-import { Machine as Shell } from "../gen/app__shell.effect.vibe";
+import { Machine as Shell, showing } from "../gen/app__shell.effect.vibe";
 import home from "../src/home/index.tsx";
 import type { Alpha } from "../src/runtime/area.tsx";
 import { useInEmail } from "../src/inbox/suggestion.vibe";
@@ -230,6 +230,16 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   const { alpha } = await open(world);
   const runtime = inbox.runtime(alpha);
 
+  // spec/app/platform/index.md, "The owner's tap on a mail sign-in control starts the phone's one more sign-in for mail where the phone wants it, then reads again once": signed out, the phone wants no mail sign-in and Connect Eliza Cloud opens Settings as it always did.
+  world.signedIn = false;
+  await press("Inbox");
+  await until(alpha, runtime, List, (s) => !s.signedIn);
+  await press("Connect Eliza Cloud");
+  await until(alpha, alpha.runtime, Shell, (s) => showing(s, "Settings"));
+  expect(world.mailLease.asked).toBe(0);
+  world.signedIn = true;
+  await hardware("home");
+
   // spec/app/inbox/index.md, "The owner can be signed out, have no account connected, have several to choose from, lack read access, be asked to reconnect Gmail, and a check can be asked again before the last answers"
   await press("Inbox");
   await until(alpha, runtime, List, (s) => s.accounts.status === "Loaded" && s.connected.length === 0);
@@ -250,7 +260,7 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   const generation = () => alpha.runtime.runPromise(Mail.use((mail) => Effect.sync(() => mail.generation())));
   const kept = await generation();
   const before = await runtime.runPromise(List.use((list) => list.get()));
-  world.mailLease = false;
+  world.mailLease.held = false;
   for (const opening of [1, 2]) {
     await alpha.back();
     await press("Inbox");
@@ -261,11 +271,23 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   expect([after.signedIn, after.connected, after.selected, after.revision, await generation(), words, told().includes("Connect Eliza Cloud")])
     .toEqual([true, before.connected, before.selected, before.revision, kept, draft, true]);
 
-  // spec/app/inbox/index.md, "The answer names the connected accounts, their credentials and grants; the account chosen stays selected while it is connected, else the one account that may be read, else none and the owner chooses": once the phone holds the lease, the next check answers and ends the wait.
-  world.mailLease = true;
-  await alpha.back();
-  await press("Inbox");
+  // spec/app/platform/index.md, "The owner's tap on a mail sign-in control starts the phone's one more sign-in for mail where the phone wants it, then reads again once": the owner cancels that sign-in, and Inbox stays as it was, reading nothing and opening nothing.
+  world.mailLease.answer = "Cancels";
+  const heldBack = world.mailLease.heldBack;
+  await press("Connect Eliza Cloud");
+  await vi.waitFor(() => expect(world.mailLease.asked).toBe(1));
+  await drawn(() => {});
+  const cancelled = await runtime.runPromise(List.use((list) => list.get()));
+  expect([world.mailLease.held, world.mailLease.heldBack, cancelled.accounts.ticket, showing(await alpha.runtime.runPromise(Shell.use((shell) => shell.get())), "Settings"), told().includes("Connect Eliza Cloud")])
+    .toEqual([false, heldBack, after.accounts.ticket, false, true]);
+
+  // spec/app/platform/index.md, "The owner's tap on a mail sign-in control starts the phone's one more sign-in for mail where the phone wants it, then reads again once"; spec/app/inbox/index.md, "The answer names the connected accounts, their credentials and grants; the account chosen stays selected while it is connected, else the one account that may be read, else none and the owner chooses": the owner signs in for mail, and Inbox checks the accounts again, once, with the lease, which ends the wait.
+  world.mailLease.answer = "SignsIn";
+  await press("Connect Eliza Cloud");
   await until(alpha, runtime, List, (s) => s.failure === "Fine" && s.accounts.status === "Loaded" && s.connected.length === 1);
+  const signedIn = await runtime.runPromise(List.use((list) => list.get()));
+  expect([world.mailLease.held, world.mailLease.asked, world.mailLease.heldBack, signedIn.accounts.ticket, signedIn.signedIn, await generation()])
+    .toEqual([true, 2, heldBack, after.accounts.ticket + 1, true, kept]);
 });
 
 it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I reviewed\"; spec/app/inbox/drafts.md, \"Story: Write a message\"; spec/app/inbox/drafts.md, \"Story: Set a draft aside or discard it\"; spec/app/inbox/adding.md, \"Story: Add files and people to my draft\"; spec/app/inbox/suggestion.md, \"Story: Review what is offered into my email\"; spec/app/inbox/sending.md, \"Story: Save my draft to Gmail, or delete it there, knowingly\")", async () => {
