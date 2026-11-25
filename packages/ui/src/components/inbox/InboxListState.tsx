@@ -1,14 +1,17 @@
-import { Ban, Lock, Mail, Search, Send, TriangleAlert, WifiOff } from "lucide-react";
+import { Ban, Lock, Mail, TriangleAlert, WifiOff } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
 
 const states = {
-  empty: { icon: <Mail />, title: "No mail" },
-  emptySent: { icon: <Send />, title: "Nothing sent" },
-  noResults: { icon: <Search />, title: "No results" },
-  loading: { icon: <Mail />, title: "Loading Gmail…" },
+  empty: { icon: <Mail />, title: "Your Inbox is empty" },
+  emptySent: { icon: <Mail />, title: "No sent messages" },
+  emptyArchive: { icon: <Mail />, title: "No archived messages" },
+  emptyTrash: { icon: <Mail />, title: "Trash is empty" },
+  emptyDrafts: { icon: <Mail />, title: "No drafts" },
+  noResults: { icon: <Mail />, title: "No messages match this search" },
+  loading: { icon: <Mail />, title: "Loading Inbox…" },
   checking: { icon: <Mail />, title: "Checking…" },
   signedOut: { icon: <Mail />, title: "Connect Eliza Cloud" },
-  notConnected: { icon: <Mail />, title: "Connect Gmail", action: "Add account" },
+  notConnected: { icon: <Mail />, title: "Connect Gmail", action: "Connect Gmail" },
   needsAccess: { icon: <Lock />, title: "Alpha cannot read this mail", action: "Give access" },
   unavailable: { icon: <Ban />, title: "Not available here" },
   offline: { icon: <WifiOff />, title: "Cannot reach Gmail", action: "Try again" },

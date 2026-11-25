@@ -40,7 +40,9 @@ do next.
   `text-tab-count` in a `rounded-tab-count` outline is the Browser's count of open tabs.
   In Calendar, `text-fine` is an invitation's time, `text-prose` an event's notes and `text-date` a day
   chip's date; an event's page is titled `text-display` and its form `text-display-sm`. `leading-plain` is
-  the browser's own line height for Public Sans, for a line whose box the design measures.
+  the browser's own line height for Public Sans, for a line whose box the design measures. `leading-details`
+  spaces the From, To and Date lines of a message's details in Inbox, and `leading-message` the text of an email
+  being written.
 - **Shape.** `radius` is a card; `rounded-group` a group of rows; `rounded-panel` a notice or a search bar; `rounded-home-card` is a Home overview card;
   `rounded-drawer-icon` rounds an installed app icon; `rounded-option` is a row of a floating menu and
   `rounded-box` the box of a list row's selection check; `rounded-chip` is a choice chip and an invitation
@@ -236,6 +238,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `leading.field` | 1.375 |
 | `leading.chat` | 1.5 |
 | `leading.plain` | 1.18 |
+| `leading.details` | 1.45 |
+| `leading.message` | 1.55 |
 | `tracking.tight` | -0.01em |
 | `tracking.caps` | 0.14em |
 | `z.10` | 10 |
