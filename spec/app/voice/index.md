@@ -440,8 +440,8 @@ pure def sentencePlayed(v: Voice, session: int, turn: int): Change =
 
 ### A reply that needs the owner's review in chat keeps voice listening with the microphone open
 
-The owner reviews and approves in the chat; voice never approves anything
-itself. Any pre-review reply speech is hushed and a non-blocking review
+The owner reviews and approves in the chat. Voice never approves a proposal
+that requires the owner’s review. Any pre-review reply speech is hushed and a non-blocking review
 notice is shown, while the conversation returns straight to listening with
 the microphone open (when unmuted) for the next turn. Settling the review
 clears the notice and never stops voice.

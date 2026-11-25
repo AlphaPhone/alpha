@@ -100,6 +100,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/assistant/composer.md, "A message written before its conversation existed moves into the new one, then its old slot is cleared on the exact revision read"
     world.ask.metadata = [];
+    const draftSlot = (conversation: string | null, room: string | null) =>
+      `alpha/assistant/slot-v2/${encodeURIComponent(JSON.stringify([world.notes.ownerIdentity, world.notes.owner, conversation, room]))}`;
     write("Hello ");
     await press("Send");
     // spec/app/assistant/index.md, "A reply completes, streamed or all at once, even after the owner asked to stop it"
@@ -113,13 +115,13 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     if (phone) await until(alpha, runtime, Locator, (s) => s.gpsAt >= 0);
     await until(alpha, runtime, Composer, (s) => s.away === "Free" && s.clear.outcome === "Confirmed" && s.draft.sync === "Kept");
     expect([lines(), world.ask.said, world.ask.opened]).toEqual([["Hello", "You said: Hello"], ["Hello"], 1]);
-    expect(localStorage.getItem("alpha/assistant/slot/0/0@1")).toBe(null);
-    expect(JSON.parse(localStorage.getItem("alpha/assistant/slot/0/1@1") ?? "{}")).toMatchObject({ text: "", sending: false });
+    expect(localStorage.getItem(draftSlot(null, null))).toBe(null);
+    expect(JSON.parse(localStorage.getItem(draftSlot("c1", "r1")) ?? "{}")).toMatchObject({ text: "", sending: false });
 
     // spec/app/assistant/composer.md, "Story: Keep what I am writing": a draft is kept in its conversation's slot.
     write("Not yet");
     await until(alpha, runtime, Composer, (s) => s.draft.sync === "Kept" && s.editor.text);
-    expect(JSON.parse(localStorage.getItem("alpha/assistant/slot/0/1@1") ?? "{}")).toMatchObject({ text: "Not yet", sending: false });
+    expect(JSON.parse(localStorage.getItem(draftSlot("c1", "r1")) ?? "{}")).toMatchObject({ text: "Not yet", sending: false });
     // spec/app/assistant/composer.md, "A message longer than a message may hold is kept as a draft and never sent"
     write("x".repeat(64_001));
     await until(alpha, runtime, Composer, (s) => s.long);
