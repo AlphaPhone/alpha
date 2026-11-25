@@ -25,6 +25,7 @@ export const back = effect {
   }
   const controller = try Library.Machine
   const state = try controller.get()
+  if (state.choosingImage) return Exit.isSuccess(try exit(controller.send({ type: "closeImageChoice", choice: state.imageChoice }, "Owner")))
   const event: Library.Event = state.shelf.dialog !== "NoDialog" ? { type: "closeDialog" }
     : state.selecting ? { type: "endSelect" }
     : state.album !== 0 ? { type: "closeAlbum" }

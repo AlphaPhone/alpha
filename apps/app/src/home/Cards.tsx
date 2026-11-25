@@ -69,7 +69,7 @@ export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Res
     },
     MessagesCard: () => <HomeCallsCard key="messages" app="Messages" lines={told.messages} {...open("MessagesCard")} onClick={() => void runtime.runPromise(openUnread())} />,
     PhoneCard: () => <HomeCallsCard key="phone" app="Phone" lines={told.phone} {...open("PhoneCard")} onClick={() => void runtime.runPromise(openCalls())} />,
-    MailCard: () => <HomeMailCard key="mail" unread={told.mail.unread} lines={told.mail.rows} notCurrent={Cards.mailCard(told.mail) === "NotUpdated"} {...open("MailCard")} />,
+    MailCard: () => <HomeMailCard key="mail" aria-label={`Open Inbox, ${told.mail.unread}${given.mailMore ? "+" : ""} unread`} unread={told.mail.unread} more={given.mailMore} lines={told.mail.rows} notCurrent={Cards.mailCard(told.mail) === "NotUpdated"} {...open("MailCard")} />,
     BriefOfToday: () => given.brief && (
       <HomeBriefCard key="brief" outcome={given.brief.outcome} summary={given.brief.outcome === "Finished" ? given.brief.summary : undefined} when={clock(given.brief.at)} {...open("BriefOfToday")} />
     ),

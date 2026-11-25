@@ -1,24 +1,50 @@
 // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
 import type { DeferredDeletionsClient, StagedDeletion } from "@elizaos/os/bridges/action-journal"
 import type { AddressBookClient, ContactNamesClient, NameSurface } from "@elizaos/os/bridges/contacts"
-import type { MessagesClient } from "@elizaos/os/bridges/messages"
-import type { PhoneClient } from "@elizaos/os/bridges/phone"
+import type { MessagesClient, MmsBinding, MmsSendResult, OperationId } from "@elizaos/os/bridges/messages"
+import type { PhoneClient, PhoneNumber } from "@elizaos/os/bridges/phone"
 
 module held {
   import { registerPlugin } from "@capacitor/core"
+  import { Schema } from "effect"
   import { createDeferredDeletions, type ActionJournalPlugin, type StagedDeletion } from "@elizaos/os/bridges/action-journal"
   import { rejectionCode } from "@elizaos/os/bridges/bridge"
   import { addressBookPlugin, createAddressBookClient, createContactNames } from "@elizaos/os/bridges/contacts"
   import { messagesClient, messagesPlugin } from "@elizaos/os/bridges/messages"
-  import { phoneClient, telephonyPlugin } from "@elizaos/os/bridges/phone"
+  import { parseMmsSendResult, type MmsBinding, type OperationId } from "@elizaos/os/bridges/definitions/messages"
+  import { phoneClient, type PhoneNativePlugin, type PhoneNumber } from "@elizaos/os/bridges/phone"
 
-  type RecordReceiptKey = { readonly kind: "message" | "voicemail"; readonly id: string }
+  type OwnerDialPlugin = PhoneNativePlugin & {
+    classifyDialNumber(input: { number: PhoneNumber }): Promise<unknown>
+    ownerDialScreen(input: { number: PhoneNumber }): Promise<unknown>
+  }
+  const DialKind = Schema.Literals(["emergency", "ordinary", "unknown"])
+  export type AndroidDialKind = typeof DialKind.Type
+
+  const dialKind = Schema.decodeUnknownSync(Schema.Struct({ kind: DialKind }))
+  const dialResult = Schema.decodeUnknownSync(Schema.Struct({
+    status: Schema.Literals(["handed-off", "unavailable", "cancelled", "failed"]),
+    target: Schema.Literal("dialer"),
+    handler: Schema.NullOr(Schema.String),
+    message: Schema.String,
+  }))
+
+  async function classifyDialNumber(phone: OwnerDialPlugin, number: PhoneNumber): Promise<AndroidDialKind> {
+    return dialKind(await phone.classifyDialNumber({ number })).kind
+  }
+
+  async function ownerDialScreen(phone: OwnerDialPlugin, number: PhoneNumber): Promise<boolean> {
+    return dialResult(await phone.ownerDialScreen({ number })).status === "handed-off"
+  }
+
+  const receiptKinds = { MessageRecord: "message", VoicemailRecord: "voicemail", ContactRecord: "contact" } as const
+  type RecordReceiptKey = { readonly kind: typeof receiptKinds[keyof typeof receiptKinds]; readonly id: string }
   type Journal = ActionJournalPlugin & { telephonyDeletionReceipt(key: RecordReceiptKey): Promise<unknown> }
   export type TelephonyDeletionPhase = "deleted" | "undone" | "conflict" | "unknown"
 
   async function deletionReceipt(journal: Journal, staged: StagedDeletion): Promise<TelephonyDeletionPhase | undefined> {
-    const kind = staged.kind === "MessageRecord" ? "message" : staged.kind === "VoicemailRecord" ? "voicemail" : undefined
-    if (kind === undefined) return undefined
+    if (staged.kind !== "MessageRecord" && staged.kind !== "VoicemailRecord" && staged.kind !== "ContactRecord") return undefined
+    const kind = receiptKinds[staged.kind]
     const received = await journal.telephonyDeletionReceipt({ kind, id: staged.id })
     if (typeof received !== "object" || received === null || !("kind" in received) || received.kind !== kind
       || !("id" in received) || received.id !== staged.id || !("phase" in received)) return undefined
@@ -28,11 +54,19 @@ module held {
 
   function make() {
     const journal = registerPlugin<Journal>("ElizaActionJournal")
+    const nativeMessages = messagesPlugin()
+    const nativePhone = registerPlugin<OwnerDialPlugin>("ElizaTelephony")
     return {
       deletions: createDeferredDeletions(journal),
       deletionReceipt: (staged: StagedDeletion) => deletionReceipt(journal, staged),
-      phone: phoneClient(telephonyPlugin(), journal),
-      messages: messagesClient(messagesPlugin(), journal),
+      phone: phoneClient(nativePhone, journal),
+      classifyDialNumber: (number: PhoneNumber) => classifyDialNumber(nativePhone, number),
+      ownerDialScreen: (number: PhoneNumber) => ownerDialScreen(nativePhone, number),
+      messages: messagesClient(nativeMessages, journal),
+      async mmsReceipt(binding: MmsBinding, operation: OperationId, hash: string) {
+        const raw = await nativeMessages.mmsSendResult({ operationId: operation })
+        return parseMmsSendResult(raw, binding, operation, hash)
+      },
       contacts: createAddressBookClient({ install: "WritingInstall", plugin: addressBookPlugin(), journal }),
       names: createContactNames(addressBookPlugin()),
     }
@@ -51,13 +85,17 @@ module held {
     return typeof cause === "object" && cause !== null && "_tag" in cause && typeof cause._tag === "string" ? cause._tag : ""
   }
 }
-import { clients, codeOf, tagOf, type TelephonyDeletionPhase } from held
+import { clients, codeOf, tagOf, type AndroidDialKind, type TelephonyDeletionPhase } from held
 import { registered } from "./device.vibe"
 
 /** eliza's clients of an Alpha image's telephony: calls, the call log and voicemail; conversations and sends; the address book. */
 export interface TelephonyClients {
   readonly phone: PhoneClient
+  classifyDialNumber(number: PhoneNumber): Promise<AndroidDialKind>
+  ownerDialScreen(number: PhoneNumber): Promise<boolean>
   readonly messages: MessagesClient
+  /** Reads the native record and checks it against the original review digest, without the picture bytes. */
+  mmsReceipt(binding: MmsBinding, operation: OperationId, hash: string): Promise<MmsSendResult | undefined>
   readonly contacts: AddressBookClient
   readonly names: ContactNamesClient
   readonly deletions: DeferredDeletionsClient

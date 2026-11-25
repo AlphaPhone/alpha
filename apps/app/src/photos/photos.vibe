@@ -7,13 +7,54 @@ import * as Trash from "../../gen/app__photos__trash.effect.vibe"
 import type { Change } from "../../gen/app__photos__changes.effect.vibe"
 import type { Grant } from "../../gen/kit__permission.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
-import { Device } from "../platform/device.vibe"
+import { Device, native } from "../platform/device.vibe"
 import { duration as noticeDuration } from "../../gen/app__notices__toasts.effect.vibe"
 import { offer, say, withdraw } from "../notices/toasts.vibe"
 import { Time } from "../runtime/time.vibe"
-import { PhotosPort } from "../platform/photos.vibe"
+import { PhotosPort, saveBrowserCapture } from "../platform/photos.vibe"
+import type { BrowserEditFrame } from "../platform/photoCanvas.vibe"
 import { answer, following, reacting, run, started, together, type Job } from "../runtime/reactor.vibe"
 import { Catalog, catalog, reviewed, taken, type ListedAlbum, type Row } from "./catalog.vibe"
+
+/** One explicit image chooser belongs to the Photos entry that opened it. */
+export service PhotoChooser {
+  pending(): boolean!!
+  begin(): boolean!!
+  finish(): boolean!!
+}
+
+const chooser = Layer.sync(PhotoChooser, () => {
+  let waiting = false
+  return {
+    pending: () => sync(() => waiting),
+    begin: () => sync(() => {
+      if (waiting) return false
+      waiting = true
+      return true
+    }),
+    finish: () => sync(() => {
+      const accepted = waiting
+      waiting = false
+      return accepted
+    }),
+  }
+})
+
+/** Consume the exact owner-visible chooser once before using its selected image. */
+export effect function consumeImageChoice(choice: number): boolean!!(Library.Machine | Shell | Device) {
+  const photos = try Library.Machine
+  const device = try Device
+  const shell = try Shell
+  if (native() || !(try device.showing()) || !showing(try shell.get(), "Photos")) return false
+  return Exit.isSuccess(try exit(photos.send({ type: "closeImageChoice", choice }, "Owner")))
+}
+
+/** Save the previewed browser copy to the same capture library the grid reads. */
+export effect function importImageChoice(choice: number, frame: BrowserEditFrame, name: string) {
+  if (!(try consumeImageChoice(choice))) return
+  const saved = tryPromise(() => saveBrowserCapture(frame.file, name, frame.width, frame.height, undefined, frame.thumbnail)) catch () => undefined
+  if (saved === undefined && showing(try (try Shell).get(), "Photos")) try say("Couldn’t save the photo.", true)
+}
 
 const pageLimit = 120
 export const thumbnailBatch = 24
@@ -277,10 +318,13 @@ const lifecycle = started(effect {
   const device = try Device
   const photos = try Library.Machine
   const { phone, hasHandoff } = try PhotosPort
+  const picker = try PhotoChooser
   const visibility = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
-  try Stream.runForEach(Stream.changes(Stream.zipLatestWith(Stream.map(shell.changes, (state) => showing(state, "Photos")), visibility, (open, visible) => open && visible)), effect (open) => {
+  try Stream.runForEach(Stream.changesWith(Stream.zipLatestWith(Stream.map(shell.changes, (state) => showing(state, "Photos")), visibility, (front, visible) => ({ front, visible })), (a, b) => a.front === b.front && a.visible === b.visible), effect ({ front, visible }) => {
     const state = try photos.get()
-    if (!open) {
+    if (front && (try picker.pending())) return
+    if (!front || !visible) {
+      if (!front) try picker.finish()
       if (state.visible) try ignore(photos.send({ type: "hideView" }, "Phone"))
       try revoke()
       if (Option.isSome(phone)) try ignore(tryPromise(() => phone.value.watchLibrary(false)))
@@ -363,4 +407,4 @@ const notices = started(effect {
   })))
 }, "Photos change notices")
 
-export const library = together(catalog, reacting(Library, { carry }), lifecycle, libraryChanges, batches, handoff, notices)
+export const library = together(chooser, catalog, reacting(Library, { carry }), lifecycle, libraryChanges, batches, handoff, notices)

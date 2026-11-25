@@ -35,13 +35,13 @@ type Entry = { mark: int, item: int, name: str, volume: int, until: int }
 type Job = { kind: Kind, items: List[int], entries: List[Entry], approval: int }
 type Trash = {
   open: bool, allowed: bool, listing: R::Read, entries: List[Entry], attempt: A::Attempt, job: Job, done: List[Entry],
-  waiting: List[int], erasing: V::Review, doomed: List[Entry], binned: List[Entry], undo: U::Undo, marked: List[int],
+  waiting: List[int], erasing: V::Review, doomed: List[Entry], binned: List[Entry], undo: U::Undo, marked: List[int], details: int,
 }
 
 pure val idle: Job = { kind: Binning, items: List(), entries: List(), approval: 0 }
 pure val initial: Trash = {
   open: false, allowed: false, listing: R::unread, entries: List(), attempt: A::plan(0), job: idle, done: List(),
-  waiting: List(), erasing: V::unreviewed, doomed: List(), binned: List(), undo: U::free, marked: List(),
+  waiting: List(), erasing: V::unreviewed, doomed: List(), binned: List(), undo: U::free, marked: List(), details: 0,
 }
 ```
 
@@ -59,7 +59,7 @@ type Effect =
   | Restore({ ticket: int, entries: List[Entry] })
   | Erase({ ticket: int, entries: List[Entry] })
   | Binned({ items: List[int] })
-  | Receipt({ ticket: int, ran: bool, outcome: A::Outcome })
+  | Receipt({ ticket: int, ran: bool, outcome: A::Outcome, done: int })
 type Moved = { state: Trash, out: List[Effect] }
 
 pure def busy(s: Trash): bool = s.attempt.outcome == A::Sent
@@ -98,7 +98,7 @@ pure def take(job: Job, s: Trash): Moved =
   val effect = if (job.kind == Binning) Bin({ ticket: attempt.id, items: job.items })
     else if (job.kind == Restoring) Restore({ ticket: attempt.id, entries: job.entries })
     else Erase({ ticket: attempt.id, entries: job.entries })
-  { state: { ...s, attempt: attempt, job: job, done: List(), listing: F::drop(s.listing), marked: List() }, out: List(effect) }
+  { state: { ...s, attempt: attempt, job: job, done: List(), listing: F::drop(s.listing), marked: List(), details: 0 }, out: List(effect) }
 ```
 
 ### Deleted items go in at once when the Trash is free, and otherwise wait their turn; an approved request is not kept waiting but refused
@@ -111,7 +111,7 @@ pure def canMoveToTrash(s: Trash, items: List[int], approval: int, by: Actor): b
 
 pure def moveToTrash(s: Trash, items: List[int], approval: int, by: Actor): Moved =
   if (not(busy(s))) take({ kind: Binning, items: items, entries: List(), approval: approval }, s)
-  else if (approval != 0) { state: s, out: List(Receipt({ ticket: approval, ran: false, outcome: A::Refused })) }
+  else if (approval != 0) { state: s, out: List(Receipt({ ticket: approval, ran: false, outcome: A::Refused, done: 0 })) }
   else { state: { ...s, waiting: s.waiting.concat(items.select(i => not(s.waiting.includes(i)))) }, out: List() }
 ```
 
@@ -149,7 +149,7 @@ pure def finished(s: Trash, number: int, results: List[Entry], known: bool, now:
   val concluding = concluded(results, known, now, window, s)
   val ended = if (seen(s)) concluding else { ...concluding, entries: concluding.binned }
   val told = (if (s.job.kind == Binning and ended.done.length() > 0) List(Binned({ items: ended.done.listMap(e => e.item) })) else List())
-    .concat(if (s.job.approval != 0) List(Receipt({ ticket: s.job.approval, ran: true, outcome: ended.attempt.outcome })) else List())
+    .concat(if (s.job.approval != 0) List(Receipt({ ticket: s.job.approval, ran: true, outcome: ended.attempt.outcome, done: ended.done.length() })) else List())
   val listing = R::ask(s.listing)
   val following = take({ kind: Binning, items: s.waiting, entries: List(), approval: 0 }, ended)
   if (s.waiting.length() > 0) { state: following.state, out: told.concat(following.out) }
@@ -261,7 +261,7 @@ Files is told whether Alpha may read the storage, and so is the Trash.
 
 ```quint
 pure def unseen(open: bool, allowed: bool, s: Trash): Trash =
-  { ...s, open: open, allowed: allowed, listing: F::drop(s.listing), erasing: V::dismiss(s.erasing), marked: List(),
+  { ...s, open: open, allowed: allowed, listing: F::drop(s.listing), erasing: V::dismiss(s.erasing), marked: List(), details: 0,
     entries: s.entries.select(e => s.job.entries.includes(e) or s.binned.includes(e)) }
 
 pure def looking(open: bool, allowed: bool, s: Trash): Moved =
@@ -309,7 +309,29 @@ pure def listed(s: Trash, ticket: int, ok: bool, rows: List[Entry], now: int, by
   val entries = if (ok) rows.select(e => e.until > now) else List()
   { ...s, listing: R::answer(s.listing, ok), entries: entries,
     erasing: if (entries == s.entries) s.erasing else V::revise(s.erasing),
+    details: if (entries.some(e => e.mark == s.details)) s.details else 0,
     marked: s.marked.select(m => entries.some(e => e.mark == m)) }
+```
+
+### The owner opens a listed Trash item's details and can restore or ask to erase that same item
+
+Trash names the item as it was deleted and shows its original storage
+location, size for a file and time remaining, as the phone last read them.
+Back closes the erase confirmation first, then these details, then the
+Trash. A job or loss of the item closes its details.
+
+```quint
+pure def canOpenItemDetails(s: Trash, entry: Entry, by: Actor): bool =
+  by == Owner and seen(s) and fresh(s) and entry.mark > 0 and s.entries.includes(entry) and not(s.erasing.showing)
+
+pure def openItemDetails(s: Trash, entry: Entry, by: Actor): Trash = { ...s, details: entry.mark }
+
+pure def canCloseItemDetails(s: Trash, by: Actor): bool = by == Owner and s.details != 0
+
+pure def closeItemDetails(s: Trash, by: Actor): Trash = { ...s, details: 0 }
+
+pure def alwaysDetailsAreListed(s: Trash): bool =
+  s.details != 0 implies seen(s) and s.entries.some(e => e.mark == s.details)
 ```
 
 ### A job and a read of the list never run together
@@ -535,7 +557,7 @@ pure def canRestart(s: Trash, by: Actor): bool = by == Phone
 
 pure def restart(s: Trash, by: Actor): Trash =
   { ...s, open: false, attempt: F::cut(s.attempt), job: idle, waiting: List(), listing: F::drop(s.listing), entries: List(),
-    erasing: V::dismiss(s.erasing), binned: List(), undo: U::free, marked: List() }
+    erasing: V::dismiss(s.erasing), binned: List(), undo: U::free, marked: List(), details: 0 }
 
 pure def stepARestartLeavesNothingToAnswer(before: Trash, via: str, after: Trash): bool =
   via == "restart" implies (not(busy(after)) and after.listing.status != R::Loading and after.waiting.length() == 0)

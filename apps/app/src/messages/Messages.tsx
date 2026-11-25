@@ -2,16 +2,13 @@
 import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY, MMS_MAX_RECIPIENTS } from "@elizaos/os/bridges/definitions/messages";
 import type { MessageRow, ThreadRow } from "@elizaos/os/bridges/messages";
 import { Alert, Avatar, Banner, Button, Chip, ConfirmDialog, SearchField, Spinner, Textarea } from "@repo/ui";
-import type { ManagedRuntime } from "effect";
-import { Camera, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, ImagePlus, Phone as Call, Plus, RefreshCw, Search, Send, Sparkles, SquarePen, Trash2 } from "lucide-react";
+import type { Layer, ManagedRuntime } from "effect";
+import { Camera, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, ImagePlus, Mic, Phone as Call, Plus, RefreshCw, Search, Send, Sparkles, Square, SquarePen, Trash2, X } from "lucide-react";
 import { memo, useCallback, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from "react";
-import type { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe";
 import { clear } from "../../gen/app__phone.ts";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
-import type { Machine as MessagesMachine } from "../../gen/app__messages.effect.vibe";
 import { content, noMatches, noThreads, smsNeeded, threadsFailed } from "../../gen/app__messages.ts";
 import { useMachine as useMessages } from "../../gen/app__messages.react.ts";
-import type { Machine as ComposerMachine } from "../../gen/app__messages__composer.effect.vibe";
 import { delivered, sentAll, uncertain } from "../../gen/app__messages__sending.ts";
 import { useMachine as useComposer } from "../../gen/app__messages__composer.react.ts";
 import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/phone";
@@ -19,11 +16,15 @@ import { Time } from "../runtime/time.vibe";
 import { shortWhen } from "../phone/words.ts";
 import { Drafts, attachAll, prepare, supported } from "./composer.vibe";
 import { Conversations, Inbox, titleOf } from "./messages.vibe";
-import { CommsBar, useCommsDock, type CommsServices } from "../phone/CommsBar.tsx";
+import { CommsBar, useCommsDock } from "../phone/CommsBar.tsx";
+import type { Resident } from "../runtime/area.tsx";
+import { untimed } from "../runtime/reactor.vibe";
+import { useMachine as useVoice } from "../../gen/app__voice.react.ts";
+import { dictateMessage, type voiceArea } from "./dictation.vibe";
 
 export interface MessagesProps {
   /** Provides Messages' and the composer's machines, both resident, Phone's, for whether a call may be an emergency call, and what they count. */
-  runtime: ManagedRuntime.ManagedRuntime<MessagesMachine | ComposerMachine | PhoneMachine | Inbox | Conversations | Drafts | CommsServices | Time, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<Resident | Layer.Success<typeof voiceArea>, unknown>;
   onBack?: (() => void) | undefined;
   onOpenLink?: ((href: string) => void) | undefined;
 }
@@ -346,6 +347,7 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
   const composer = useComposer(runtime);
   const phone = usePhone(runtime).state;
   const dock = useCommsDock(runtime);
+  const voice = useVoice(runtime);
   const field = useRef<HTMLTextAreaElement>(null);
   const focus = useRef(false);
   const { state, can, send } = composer;
@@ -359,8 +361,11 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
     runtime.runSync(Drafts.use((drafts) => drafts.write(thread, next)));
     void send(event);
   };
+  const outgoing = state.outgoing;
+  const here = outgoing.thread === thread;
+  const checking = here && uncertain(outgoing);
   const sendNow = { type: "send", supported: runtime.runSync(supported(state.recipients, pictures.length)), clear: clear(phone) } as const;
-  const sendable = (Boolean(text.trim()) || pictures.length > 0) && can(sendNow);
+  const sendable = (checking || Boolean(text.trim()) || pictures.length > 0) && can(sendNow);
   const submit = () => {
     if (!sendable) return;
     runtime.runSync(prepare(thread, state.sims > 1 ? state.sim : null));
@@ -373,9 +378,6 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
     focus.current = true;
     dock.close();
   };
-  const outgoing = state.outgoing;
-  const here = outgoing.thread === thread;
-  const checking = here && uncertain(outgoing);
   const sendLabel = checking ? "Check send status" : "Send";
   const alpha = state.slot.author === "AlphaWrote";
   const addressed = title === addresses.join(", ") ? title : `${title} · ${addresses.join(", ")}`;
@@ -383,7 +385,19 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
   const editable = can({ type: "typeText", empty: text.length === 0 });
   const attachment = { type: "attach", fits: true } as const;
   const handoff = { type: "handOff", supported: sendNow.supported } as const;
-  const messageForm = (
+  const recorder = voice.state?.recorder;
+  const recording = recorder?.field === "MessagesBar" && recorder.stage !== "Closed";
+  const stop = { type: "stopRecording", now: untimed } as const;
+  const discard = { type: "closeRecorder" } as const;
+  const retry = { type: "transcribeAgain", now: untimed } as const;
+  const messageForm = recording ? (
+    <div data-alpha-composer data-alpha-bar-recorder="" aria-label="Message dictation" role="group" className="flex min-w-0 flex-1 items-center gap-2">
+      <span role="status" className="min-w-0 flex-1 text-sm">{recorder.stage === "Recording" ? "Recording" : recorder.stage === "Recorded" ? "Couldn’t transcribe" : recorder.stage === "Transcribing" ? "Transcribing" : "Starting microphone"}</span>
+      {voice.can(retry) && <Button variant="ghost" size="icon" aria-label="Try transcription again" onClick={() => void voice.send(retry)}><RefreshCw /></Button>}
+      {voice.can(discard) && <Button variant="ghost" size="icon" aria-label="Discard transcription" onClick={() => void voice.send(discard)}><X /></Button>}
+      {voice.can(stop) && <Button size="icon" aria-label="Stop recording" onClick={() => void voice.send(stop)}><Square fill="currentColor" /></Button>}
+    </div>
+  ) : (
     <div data-alpha-composer data-alpha-messages-composer className="flex min-w-0 flex-1 items-end gap-1">
       {([["Attach a picture", ImagePlus, false], ["Take a picture", Camera, true]] as const).map(([label, Icon, camera]) => (
         <label key={label} className="relative flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground focus-within:outline-2 focus-within:outline-ring has-disabled:opacity-50" aria-label={label}>
@@ -403,6 +417,7 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
         }}
         onChange={(event) => write(event.target.value)} />
       {can({ type: "suggest" }) && <Button variant="ghost" size="icon" aria-label="Let Alpha suggest a reply" onClick={() => void send({ type: "suggest" })}><Sparkles /></Button>}
+      {editable && phone.telecom === "NoCall" && voice.can({ type: "openRecorder", target: "MessagesBar" }) && <Button variant="ghost" size="icon" aria-label={`Dictate a text to ${firstName(title)}`} onClick={() => void runtime.runPromise(dictateMessage(thread))}><Mic /></Button>}
       {sendable && <Button size="icon" aria-label={sendLabel} data-alpha-bar-send onClick={submit}>{checking ? <RefreshCw /> : <Send />}</Button>}
     </div>
   );

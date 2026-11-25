@@ -1,14 +1,17 @@
-// spec/kit/undo.md, "Story: Take it back"; spec/app/messages/index.md, "Story: Act on a message"; spec/app/phone/voicemail.md, "Story: Delete a voicemail"
+// spec/kit/undo.md, "Story: Take it back"; spec/app/messages/index.md, "Story: Act on a message"; spec/app/phone/voicemail.md, "Story: Delete a voicemail"; spec/app/contacts/index.md, "Story: Delete a contact"
 package ai.alphacompute.alphaphone;
 
 import ai.eliza.plugins.actionjournal.deletion.DeferredDeletionCoordinator;
+import ai.eliza.plugins.contacts.ContactsEditor;
 import ai.eliza.plugins.messages.MessageDeletion;
 import ai.eliza.plugins.messages.TelephonyPlugin;
 import ai.eliza.plugins.messages.ThreadDeletion;
 import ai.eliza.plugins.messages.VoicemailStore;
 import ai.eliza.plugins.securestore.nativeonly.NativeSecureStore;
 import ai.eliza.plugins.securestore.nativeonly.SecureSlotPolicy;
+import android.Manifest;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.SystemClock;
 import android.os.UserManager;
@@ -87,6 +90,7 @@ final class AlphaTelephonyDeletions {
       case "message" -> MessageDeletion.dispatch(context, target, allowed);
       case "thread" -> ThreadDeletion.dispatch(context, target, allowed);
       case "voicemail" -> VoicemailStore.dispatchDeletion(context, target, allowed);
+      case "contact" -> allowed.getAsBoolean() ? ContactsEditor.dispatchRemoval(context, target) : new JSONObject(Map.of("status", "conflict"));
       default -> throw unsupported();
      };
     }
@@ -105,6 +109,8 @@ final class AlphaTelephonyDeletions {
   return switch (kind) {
    case "message", "thread" -> MessageDeletion.roleGuard(context).getAsBoolean() ? null : "access-changed";
    case "voicemail" -> TelephonyPlugin.voicemailDeletable(context) ? null : "access-changed";
+   case "contact" -> context.checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
+    && context.checkSelfPermission(Manifest.permission.WRITE_CONTACTS) == PackageManager.PERMISSION_GRANTED ? null : "permission-required";
    default -> "access-changed";
   };
  }

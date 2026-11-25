@@ -1,8 +1,8 @@
 // spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/index.md, "Story: Select photos"; spec/app/photos/index.md, "Story: Change albums from what I am looking at"
 import { Effect } from "effect";
 import { Album, ChevronLeft, ChevronRight, Ellipsis, Heart, Image, Images, ListChecks, Plus, ScanText, Search, Share2, Trash2, Undo2, X } from "lucide-react";
-import { useRef, useState, type ReactNode } from "react";
-import { Alert, AppHeader, Button, Chip, ConfirmDialog, EmptyState, Input, ListRow, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, Spinner, cn } from "@repo/ui";
+import { useCallback, useRef, useState, type ReactNode } from "react";
+import { Alert, AppHeader, Button, Chip, ConfirmDialog, Dialog, DialogContent, DialogTitle, EmptyState, Input, ListRow, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, Spinner, cn } from "@repo/ui";
 import { useMachine as useLibrary } from "../../gen/app__photos.react.ts";
 import { useMachine as useTrash } from "../../gen/app__photos__trash.react.ts";
 import { useMachine as useAgent } from "../../gen/app__photos__agent.react.ts";
@@ -15,7 +15,9 @@ import { Catalog } from "./catalog.vibe";
 import { MediaGrid } from "./Grid.tsx";
 import { MediaViewer } from "./Viewer.tsx";
 import type { agentPhotos } from "./agent.vibe";
-import type { library } from "./photos.vibe";
+import { consumeImageChoice, importImageChoice, PhotoChooser, type library } from "./photos.vibe";
+import { native } from "../platform/device.vibe";
+import { renderBrowserPhoto, type BrowserEditFrame } from "../platform/photoCanvas.vibe";
 import type { trash } from "./trash.vibe";
 import type { viewer } from "./viewer.vibe";
 import type { Layer } from "effect";
@@ -41,6 +43,89 @@ function ToolBar({ tools }: { tools: readonly Tool[] }) {
 
 type PhotosProps = Shown<PhotosRuntime>;
 
+const imageTypes = "image/jpeg,image/png,image/webp";
+
+type ImagePreview = { readonly source: File; readonly frame: BrowserEditFrame };
+
+interface ImageChoiceProps {
+  readonly runtime: PhotosProps["runtime"];
+  readonly choice: number;
+  readonly canScan: boolean;
+  readonly close: () => void;
+  readonly focusTools: () => void;
+}
+
+/** Choose one source, then use either its prepared copy or the original in scan review. */
+function ImageChoice({ runtime, choice, canScan, close, focusTools }: ImageChoiceProps) {
+  const readingRef = useRef<AbortController | undefined>(undefined);
+  const ownsPickerRef = useRef(false);
+  const [picture, show] = useState<ImagePreview>();
+  const [status, describe] = useState("");
+  const finishPick = useCallback(() => {
+    if (!ownsPickerRef.current) return false;
+    ownsPickerRef.current = false;
+    return runtime.runSync(Effect.flatMap(PhotoChooser, (picker) => picker.finish()));
+  }, [runtime]);
+  const connect = useCallback((node: HTMLDivElement | null) => {
+    if (!node) return;
+    return () => { readingRef.current?.abort(); finishPick(); };
+  }, [finishPick]);
+  const pickerInput = useCallback((node: HTMLInputElement | null) => {
+    if (!node) return;
+    const cancel = () => { finishPick(); };
+    node.addEventListener("cancel", cancel);
+    return () => node.removeEventListener("cancel", cancel);
+  }, [finishPick]);
+  function beginPick(event: React.MouseEvent<HTMLInputElement>) {
+    if (runtime.runSync(Effect.flatMap(PhotoChooser, (picker) => picker.begin()))) ownsPickerRef.current = true;
+    else event.preventDefault();
+  }
+  async function prepare(source: File | undefined) {
+    if (!finishPick() || source === undefined) return;
+    readingRef.current?.abort();
+    const reading = new AbortController();
+    readingRef.current = reading;
+    show(undefined);
+    if (!imageTypes.split(",").includes(source.type) || source.size === 0 || source.size > 16 * 1024 * 1024) {
+      describe("Choose a JPEG, PNG or WebP image up to 16 MB.");
+      return;
+    }
+    describe("Checking image…");
+    const prepared = await runtime.runPromiseExit(Effect.tryPromise(() => renderBrowserPhoto(source, { turns: 0, look: "none", whiteBackground: true })), { signal: reading.signal });
+    if (reading.signal.aborted) return;
+    if (prepared._tag !== "Success") { describe("Unsupported image."); return; }
+    show({ source, frame: prepared.value });
+    describe(`${source.name} · ${prepared.value.width} × ${prepared.value.height} copy`);
+  }
+  async function scan() {
+    if (!picture) return;
+    const chosen = await runtime.runPromiseExit(consumeImageChoice(choice));
+    if (chosen._tag !== "Success" || !chosen.value) return;
+    await runtime.runPromiseExit(Effect.flatMap(PhotoChooser, (picker) => picker.begin()).pipe(Effect.flatMap((began) =>
+      began ? scanSelectedImage(picture.source) : Effect.void)));
+  }
+  function save() {
+    if (picture) void runtime.runPromiseExit(importImageChoice(choice, picture.frame, `${picture.source.name.replace(/\.[^.]+$/, "") || "Photo"}.jpg`));
+  }
+  return <Dialog open onOpenChange={(open) => { if (!open) close(); }}>
+    <DialogContent ref={connect} aria-describedby={undefined} onCloseAutoFocus={(event) => { event.preventDefault(); focusTools(); }}>
+      <DialogTitle>Choose an image</DialogTitle>
+      <Input ref={pickerInput} type="file" aria-label="Image file" accept={imageTypes} onClick={beginPick} onChange={(event) => {
+        const selected = event.currentTarget.files?.[0];
+        event.currentTarget.value = "";
+        void prepare(selected);
+      }} />
+      {picture && <img src={picture.frame.thumbnail} alt="Selected image preview" className="max-h-56 w-full object-contain" />}
+      {status && <p role="status" aria-label="Image import status" className="text-sm text-muted-foreground">{status}</p>}
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button disabled={!picture} onClick={save}>Save to Photos</Button>
+        <Button variant="secondary" disabled={!picture || !canScan} onClick={() => { void scan(); }}>Scan text</Button>
+        <Button variant="ghost" onClick={close}>Cancel</Button>
+      </div>
+    </DialogContent>
+  </Dialog>;
+}
+
 /** The Library, Albums and Recently deleted, with the viewer and edit surfaces over the grid. */
 export function Photos({ runtime, alpha }: PhotosProps) {
   const library = useLibrary(runtime);
@@ -49,6 +134,14 @@ export function Photos({ runtime, alpha }: PhotosProps) {
   const agent = useAgent(runtime);
   const scan = useScan(runtime);
   const scanInput = useRef<HTMLInputElement>(null);
+  const scanPicker = useCallback((node: HTMLInputElement | null) => {
+    scanInput.current = node;
+    if (!node) return;
+    const cancel = () => { runtime.runSync(Effect.flatMap(PhotoChooser, (picker) => picker.finish())); };
+    node.addEventListener("cancel", cancel);
+    return () => node.removeEventListener("cancel", cancel);
+  }, [runtime]);
+  const toolsRef = useRef<HTMLButtonElement>(null);
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
   const [name, setName] = useState("");
@@ -133,8 +226,15 @@ export function Photos({ runtime, alpha }: PhotosProps) {
     if (album?.owned && owner({ type: "renameAlbum" })) menu.push({ label: "Rename album", icon: <Album />, run: () => { setName(album.title); talk({ type: "renameAlbum" }); } });
     if (album?.owned) add("Delete album", { type: "deleteAlbum" }, <Trash2 />, menu);
   }
-  if (!selection && !inTrash && opened === 0 && state.visible && !secure && scan.state && scan.can({ type: "startImage", frame: scan.state.images + 1 }, "Phone")) {
-    menu.push({ label: "Scan image text", icon: <ScanText />, run: () => scanInput.current?.click() });
+  const canScan = scan.state !== undefined && scan.can({ type: "startImage", frame: scan.state.images + 1 }, "Phone");
+  const browser = !native();
+  const chooseImage = { type: "openImageChoice", browser } satisfies Event;
+  if (!inTrash && opened === 0 && browser && (state.choosingImage || owner(chooseImage))) {
+    menu.push({ label: "Choose image", icon: <Image />, run: () => talk(chooseImage) });
+  } else if (!browser && !selection && !inTrash && opened === 0 && state.visible && !secure && canScan) {
+    menu.push({ label: "Scan image text", icon: <ScanText />, run: () => {
+      if (scanInput.current && runtime.runSync(Effect.flatMap(PhotoChooser, (picker) => picker.begin()))) scanInput.current.click();
+    } });
   }
   const status = inTrash ? bin.read.status : state.library.status;
   const dialog = state.shelf.dialog;
@@ -152,16 +252,19 @@ export function Photos({ runtime, alpha }: PhotosProps) {
     leading={<Button variant="ghost" size="icon" aria-label={selection ? "Cancel selection" : inTrash || album ? "Back to albums" : "Back to apps"}
       onClick={() => selection ? cancelSelection() : void alpha.back()}>{selection ? <X /> : <ChevronLeft />}</Button>}>
     {selection && (inTrash ? binOwner({ type: "selectAll" }) : owner({ type: "selectAll" })) && <Button variant="ghost" onClick={() => inTrash ? binTalk({ type: "selectAll" }) : talk({ type: "selectAll" })}>Select all</Button>}
-    {!selection && menu.length > 0 && <Menu><MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Photos tools"><Ellipsis /></Button></MenuTrigger>
+    {!selection && menu.length > 0 && <Menu><MenuTrigger asChild><Button variant="ghost" size="icon" ref={toolsRef} aria-label="Photos tools"><Ellipsis /></Button></MenuTrigger>
       <MenuContent>{menu.map(({ icon, label, run }) => <MenuItem key={label} onSelect={run}>{icon}{label}</MenuItem>)}</MenuContent></Menu>}
   </AppHeader>;
   return (
     <section aria-label="Photos" className="relative flex min-h-0 flex-1 flex-col bg-background">
-      <input ref={scanInput} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={(event) => {
+      <input ref={scanPicker} type="file" accept={imageTypes} hidden onChange={(event) => {
         const source = event.currentTarget.files?.[0];
         event.currentTarget.value = "";
         if (source) void runtime.runPromiseExit(scanSelectedImage(source));
+        else runtime.runSync(Effect.flatMap(PhotoChooser, (picker) => picker.finish()));
       }} />
+      {browser && state.choosingImage && <ImageChoice key={state.imageChoice} runtime={runtime} choice={state.imageChoice} canScan={canScan}
+        close={() => talk({ type: "closeImageChoice", choice: state.imageChoice })} focusTools={() => toolsRef.current?.focus({ preventScroll: true })} />}
       <Scan runtime={runtime} alpha={alpha} />
       <div inert={opened !== 0} aria-hidden={opened !== 0 || undefined} className="flex min-h-0 flex-1 flex-col" data-alpha-subview="photos-list">
         {header}
