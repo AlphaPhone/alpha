@@ -161,6 +161,11 @@ function storeKey(machine: string, version: number): string {
   return `alpha/${machine.replace(/^.*\/spec\//, "").replace(/\.md#Machine$/, "")}@${version}`
 }
 
+/** Look up a durable attempt under the same scope the reactor gave its sender. */
+export function keptAttempts(machine: { readonly key: string }, version: number): Attempts.Shape!!Install {
+  return Effect.map(Install, (install) => attemptsOf(install, storeKey(machine.key, version)))
+}
+
 /** The places a value kept under `key` that is no longer a state may be copied to, in order. */
 const asides = (key: string): ReadonlyArray<string> => [`${key}.unreadable`, ...Array.from({ length: 8 }, (_, index) => `${key}.unreadable.${index + 2}`)]
 

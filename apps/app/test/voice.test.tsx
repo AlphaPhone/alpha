@@ -1064,7 +1064,9 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await press("Stop recording");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Recorded");
     expect([clock(), marks()]).toEqual(["0:59", 0]);
-    await press("Record again");
+    await press("Discard transcription");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Closed");
+    await drawn(() => area.runPromise(dictate()));
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Ready");
     expect([clock(), marks()]).toEqual(["0:00", 0]);
     await press("Start recording");
@@ -1195,6 +1197,36 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
       { text: "Dictated note", channel: "local" }, { text: "My revised words", channel: "local" },
     ]);
     expect(world.voice.speakerMutedAtPlayback).toEqual([false]);
+    expect(world.ask.said).toEqual([]);
+  });
+
+  // spec/app/voice/dictation.md, "After an unsuccessful recognition, the owner may type the transcript in Ask Alpha"
+  it("types a kept clip's transcript after recognition fails and adds only the reviewed words to the draft", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const { alpha } = await open(world, talkMounts);
+    const area = assistant.runtime(alpha);
+    await drawnUntil(alpha, area, Composer, (state) => state.slot === "Open");
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "raise", detent: "Sheet" }))));
+    await fill("Message Alpha", "Original draft");
+    await drawn(() => area.runPromise(dictate()));
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Ready");
+    await press("Start recording");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Recording");
+    world.voice.transcriptionFailures = 1;
+    await press("Stop recording");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Recorded");
+    expect(button("Transcribe on this phone")).toBeDefined();
+    expect(button("Record again")).toBeUndefined();
+    await press("Type transcript instead");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Review");
+    const review = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Review transcript"]');
+    expect(review?.value).toBe("");
+    expect(button("Use in draft")?.disabled).toBe(true);
+    await fill("Review transcript", "Typed transcript");
+    await press("Use in draft");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Closed");
+    expect(document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]")?.value).toBe("Original draft\nTyped transcript");
+    expect(world.voice.dictationClips).toHaveLength(1);
     expect(world.ask.said).toEqual([]);
   });
 });

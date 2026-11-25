@@ -66,6 +66,12 @@ const node = process.execPath;
 const base64url = (bytes: Buffer) => bytes.toString("base64url");
 /** The scripted model's id, which no provider serves: the one model the local cloud offers where it is given no real one. */
 const scriptedModel = "alpha-chat";
+/**
+ * The scripted model's reply to `said` as eliza's agent asks a model to answer: tagged `[answer]` as a complete reply,
+ * and repeating only the person's own words, since the agent appends its notes, each starting "Note from the agent
+ * host", and delivers no reply that repeats one.
+ */
+const repeated = (said: string) => `[answer] You said: ${said.split(/(?:^|\n+)Note from the agent host\b/u, 1)[0].trimEnd()}`;
 /** Alpha as the cloud's staging registry knows it: the client a device signs in as. */
 const client = { clientId: "ai.alphacompute.alphaphone", displayName: "Alpha", androidPackage: "ai.alphacompute.alphaphone", certFingerprints: [Array.from({ length: 32 }, () => "AA").join(":")] };
 
@@ -207,7 +213,7 @@ async function startProvider(key: string, real: RealModel | undefined) {
     listed(asked, system).push(messages);
     if (real !== undefined) return forwarded(real, input, outgoing);
     const last = messages.findLast((message) => message.role === "user")?.content;
-    const reply = listed(replies, scripted(system)).shift() ?? { kind: "text", parts: ["You said: ", typeof last === "string" ? last : JSON.stringify(last)] };
+    const reply = listed(replies, scripted(system)).shift() ?? { kind: "text", parts: [typeof last === "string" ? repeated(last) : `You said: ${JSON.stringify(last)}`] };
     const text = reply.kind === "text" ? reply.parts.join("") : reply.first;
     const named = { id: "chatcmpl-local", created: 1_790_000_000, model: input.model };
     if (input.stream !== true) {

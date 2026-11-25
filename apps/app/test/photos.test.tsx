@@ -10,6 +10,7 @@ import inbox from "../src/inbox/index.tsx";
 import { Incoming } from "../src/inbox/adding.vibe";
 import { Machine as MessageComposer } from "../gen/app__messages__composer.effect.vibe";
 import { Drafts as MessageDrafts } from "../src/messages/composer.vibe";
+import { headingOf } from "../src/runtime/dateHeading.ts";
 import { photosArea } from "../src/photos/index.tsx";
 import { button, closeAll, drawn, fill, hardware, only, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
@@ -45,6 +46,12 @@ it("Allow Photos and browse the library (spec/app/photos/index.md, \"Story: Give
   await until(alpha, runtime, Library, (state) => state.library.status === "Loaded" && state.rows.length === 3);
   // spec/app/photos/index.md, "Story: Browse the library": the Library is headed by day as v121 headed it, counted back from Alpha's time
   expect([...document.querySelectorAll("[data-alpha-app-scroll=photos] section h2")].map((heading) => heading.textContent)).toEqual(["Yesterday"]);
+  const localNoon = new Date(2026, 10, 24, 12).getTime();
+  const captureDaysBack = (days: number) => new Date(2026, 10, 24 - days, 9).getTime();
+  expect([0, 1, 3, 29, 30].map((days) => headingOf(captureDaysBack(days), localNoon))).toEqual(["Today", "Yesterday", "Sat, Nov 21", "Mon, Oct 26", "October 2026"]);
+  expect(headingOf(new Date(2026, 11, 28, 9).getTime(), new Date(2027, 0, 10, 12).getTime())).toBe("Mon, Dec 28, 2026");
+  expect(headingOf(new Date(2025, 9, 20, 9).getTime(), localNoon)).toBe("October 2025");
+  expect(headingOf(new Date(2026, 9, 15, 9).getTime(), localNoon, true)).toBe("Thu, Oct 15, 2026");
 
   await press("Park.jpg");
   await until(alpha, runtime, Viewer, (state) => state.read.status === "Loaded");

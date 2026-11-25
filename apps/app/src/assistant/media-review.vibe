@@ -151,6 +151,8 @@ const filesCapabilities = ["files.browser.v1", "files.shown-target.v1"]
 const phoneCapabilities = ["phone.keypad.v1", "phone.dial.v1", "phone.call.v1", "views.telephony.v1", "sms.compose.v1", "sms.compose.v2", "sms.send.v1", "messages.read.v1", "sms.latest-sender.v1", "sms.latest-sender.v2", "voicemail.read.v1", "voicemail.delete.v1"]
 
 const needsMessage = (operation: DeviceOperation): boolean => operation.type === "sms_reply_selected" || operation.type === "messages_read_selected"
+const sendsText = (operation: DeviceOperation | undefined): boolean =>
+  operation?.type === "sms_send" || (operation?.type === "sms_compose" && !composeDraftOnly(operation))
 
 export type DirectFilesOperation = Extract<DeviceOperation, { type: "files_filter" | "files_open" }>
 
@@ -1076,9 +1078,10 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         const visible = operation(proposal.payload.operation)
         const labelled = visible === undefined ? { title: "Phone action", detail: "" } : words(visible)
         const unsettled = toSettle(proposal) && (try hasReceipt(opened, proposal))
-        const text = visible?.type === "sms_send"
+        const text = sendsText(visible)
         const recovered = text && unsettled ? try recoverText(opened, proposal) : undefined
-        return { proposal: proposal.id, ...labelled, outcome: recovered ?? outcome, declinable: readyToDecline(proposal, at), unsettled: unsettled && !text }
+        const reported = text && proposal.state === "reconciliation_required" ? "Phone could not confirm the send" : outcome
+        return { proposal: proposal.id, ...labelled, outcome: recovered ?? reported, declinable: readyToDecline(proposal, at), unsettled: unsettled && !text }
       }, { concurrency: 4 })
       if (!(try enrollmentIsCurrent(opened))) return undefined
       return rows.filter((row) => row !== undefined)
@@ -1095,7 +1098,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
           return result !== undefined
         }
         if (!toSettle(found) || !(try hasReceipt(opened, found))) return false
-        if (operation(found.payload.operation)?.type === "sms_send") return (try recoverText(opened, found)) !== undefined
+        if (sendsText(operation(found.payload.operation))) return (try recoverText(opened, found)) !== undefined
         const result = tryPromise(() => opened.execute.confirmReview(found.id, action === "happened" ? "ReviewedApplied" : "ReviewedNotApplied")) catch () => "refused"
         return result === "sent"
       })

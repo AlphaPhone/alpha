@@ -7,7 +7,7 @@ import {
 } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import {
-  Calendar as CalendarIcon, CalendarDays, ChevronRight, MapPin, Plus, Repeat, Search, Settings, TextAlignStart, Undo2, UserRound, Video, X,
+  Bell, Calendar as CalendarIcon, CalendarDays, ChevronRight, MapPin, Plus, Repeat, Search, Settings, TextAlignStart, Undo2, UserRound, Video, X,
 } from "lucide-react";
 import { type ReactNode, useState, useSyncExternalStore } from "react";
 import * as View from "../../gen/app__calendar.ts";
@@ -96,6 +96,10 @@ const repeats: ReadonlyArray<{ repeat: NonNullable<Fields["repeat"]>; label: str
   { repeat: "NoRepeat", label: "Once" }, { repeat: "Daily", label: "Daily" }, { repeat: "Weekly", label: "Weekly" },
   { repeat: "Monthly", label: "Monthly" }, { repeat: "Yearly", label: "Yearly" },
 ];
+const reminderRepeats: ReadonlyArray<{ repeat: NonNullable<Fields["reminderRepeat"]>; label: string }> = [
+  { repeat: "none", label: "Once" }, { repeat: "daily", label: "Daily" }, { repeat: "weekdays", label: "Weekdays" }, { repeat: "weekly", label: "Weekly" },
+];
+const reminderAlerts = [{ minutes: null, label: "None" }, { minutes: 0, label: "At start" }, { minutes: 10, label: "10 min" }, { minutes: 60, label: "1 hour" }];
 
 const saveOff: Readonly<Record<SaveBlock, string>> = {
   SaveAllowed: "", WaitLoading: "Loading…", WaitSaving: "Saving…", OtherAccount: "This draft belongs to another account.",
@@ -659,6 +663,9 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
   const [picking, setPicking] = useState<string | undefined>(undefined);
   const e = editor.state;
   if (!e) return null;
+  const reminder = fields.calendar === "Reminders";
+  const saving = e.draft.sync === "Saving";
+  const save = reminder ? { type: "saveReminder" } as const : { type: "save" } as const;
   const blank = fields.title.trim() === "";
   const plain: Editor.Event = { type: "editTitle", blank };
   const change = (next: Fields, edit: Editor.Event) => {
@@ -703,12 +710,16 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
   const scopes: ReadonlyArray<{ scope: Editor.Scope; label: string }> = [
     { scope: "ThisOne", label: "This event" }, { scope: "ThisAndFollowing", label: "This and following" }, { scope: "WholeSeries", label: "All events" },
   ];
-  const off_ = !e.extras && !editor.can({ type: "save" }) ? saveOff[saveBlock(e.form === "NewEvent" && e.receipts.status === "Loading", e.draft.sync === "Saving", false, Editor.canKeepMyChanges(e), !e.titled)] : "";
-  const choosesCalendar = e.form === "NewEvent" && connected && shown.present();
-  const choosesRepeat = e.form === "NewEvent" && (!connected || fields.calendar === "Phone");
+  const off_ = !reminder && !e.extras && !editor.can(save) ? saveOff[saveBlock(e.form === "NewEvent" && e.receipts.status === "Loading", saving, false, Editor.canKeepMyChanges(e), !e.titled)] : "";
+  const choosesCalendar = e.form === "NewEvent";
+  const choosesRepeat = e.form === "NewEvent" && (reminder || !connected || fields.calendar === "Phone");
+  const destinations: { name: string; value: NonNullable<Fields["calendar"]> }[] = [{ name: "Reminders", value: "Reminders" }];
+  if (connected) destinations.push({ name: "Your agent's calendar", value: "Agent" });
+  if (shown.present()) destinations.push({ name: "This phone's calendar", value: "Phone" });
+  const destination = fields.calendar ?? (connected ? "Agent" : "Phone");
   const close = () => (editor.can({ type: "close" }) ? void editor.send({ type: "close" }) : undefined);
   return (
-    <CalendarFormPage onBack={close} saving={e.draft.sync === "Saving"} onSave={!e.extras && editor.can({ type: "save" }) ? () => void editor.send({ type: "save" }) : undefined}>
+    <CalendarFormPage onBack={close} saving={saving} onSave={(reminder || !e.extras) && editor.can(save) ? () => void editor.send(save) : undefined}>
       {e.form === "EditEvent" && e.repeats ? (
         <div role="group" aria-label="Save changes to" className="mx-6 my-1 flex flex-wrap items-center gap-2">
           <span className="text-meta text-muted-foreground">Save changes to</span>
@@ -734,12 +745,12 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
           <CalendarNoticeAction onClick={() => void editor.send({ type: "takeSavedChanges" })}>Use the saved event</CalendarNoticeAction>
         </>}>This event changed since you started editing it.</CalendarNotice>
       ) : null}
-      {e.form === "NewEvent" && e.receipts.status === "Failed" ? (
+      {!reminder && e.form === "NewEvent" && e.receipts.status === "Failed" ? (
         <CalendarNotice tone="caution" className="mx-6" actions={editor.can({ type: "checkReceipts" }) ? <CalendarNoticeAction onClick={() => void editor.send({ type: "checkReceipts" })}><Undo2 aria-hidden />Check</CalendarNoticeAction> : null}>
           Alpha couldn't check for events it may already have made, so it won't create this one yet.
         </CalendarNotice>
       ) : null}
-      {e.unknownCreate && e.form === "NewEvent" ? (
+      {!reminder && e.unknownCreate && e.form === "NewEvent" ? (
         <CalendarNotice tone="caution" className="mx-6" actions={<>
           {editor.can({ type: "checkReceipts" }) ? <CalendarNoticeAction aria-label="Check if events were saved" onClick={() => void editor.send({ type: "checkReceipts" })}><Undo2 aria-hidden />Check</CalendarNoticeAction> : null}
           {editor.can({ type: "createSeparately" }) ? <CalendarNoticeAction aria-label="Create a separate event" onClick={() => void editor.send({ type: "createSeparately" })}>Create new</CalendarNoticeAction> : null}
@@ -748,26 +759,28 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
       ) : null}
       <CalendarFormTitle value={fields.title} disabled={!editor.can({ type: "editTitle", blank: false })}
         onChange={(input) => change({ ...fields, title: input.target.value }, { type: "editTitle", blank: input.target.value.trim() === "" })} />
+      {reminder ? <div aria-label="Selected event date" aria-live="polite" className="px-6 pt-2 text-sm text-muted-foreground">{longDate.format(dateOf(startDay))}</div> : null}
       <CalendarFormDate label="Date" aria-label="Calendar date" value={dateValue(fields.begin)} onChange={(input) => {
         const shift = (toDay(input.target.value) - startDay) * 86_400_000;
         retime(fields.begin + shift, fields.end + shift);
       }} />
       <CalendarDayChips days={chips} />
       <div className="flex flex-col gap-2.5 px-5 pt-3">
-        {fields.allDay ? null : (
+        {fields.allDay && !reminder ? null : (
           <CalendarFormCard className="py-1 pr-2 pl-4">
-            <CalendarTimeRow caption={hourMinute.format(fields.begin)} label="Start time" value={timeValue(fields.begin)}
+            <CalendarTimeRow caption={hourMinute.format(fields.begin)} label={reminder ? "Reminder time" : "Start time"} value={timeValue(fields.begin)}
               onChange={(value) => { const begin = onTime(startDay, value); retime(begin, begin + length); }}
               earlierLabel="Start earlier" laterLabel="Start later" onEarlier={retimer(fields.begin - quarter, fields.end - quarter)} onLater={retimer(fields.begin + quarter, fields.end + quarter)} />
-            <CalendarTimeRow icon={null} caption={`${hourMinute.format(fields.end)} · ${duration(length)}`} label="End time" value={timeValue(fields.end)}
+            {reminder ? null : <><CalendarTimeRow icon={null} caption={`${hourMinute.format(fields.end)} · ${duration(length)}`} label="End time" value={timeValue(fields.end)}
               onChange={(value) => retime(fields.begin, onTime(endDay, value))}
               earlierLabel="End earlier" laterLabel="End later" onEarlier={retimer(fields.begin, Math.max(fields.begin + 60_000, fields.end - quarter))} onLater={retimer(fields.begin, fields.end + quarter)} />
             <CalendarFormDate inset label="Ends on" aria-label="End date" value={dateValue(fields.end)} onChange={(input) => {
               const shift = (toDay(input.target.value) - endDay) * 86_400_000;
               retime(fields.begin, fields.end + shift);
-            }} />
+            }} /></>}
           </CalendarFormCard>
         )}
+        {!reminder ? <>
         <CalendarFieldRow icon={<MapPin />} aria-label="Location" placeholder="Location" value={fields.place} disabled={!editor.can(plain)}
           onChange={(input) => change({ ...fields, place: input.target.value }, plain)} />
         <CalendarFormCard className="h-14 flex-row items-center gap-3.5 pr-3 pl-4">
@@ -801,15 +814,15 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
           {picking !== undefined && addable ? <button type="button" onClick={addTyped} className="min-h-13 px-1 py-2.5 text-left wrap-anywhere">{`Add ${typedEmail}`}</button> : null}
           {picking !== undefined && typedEmail !== "" && !addable ? <div className="pt-3 pr-0 pb-1 pl-0.5 text-sm text-muted-foreground">No match</div> : null}
         </CalendarFormCard>
+        </> : null}
         {choosesCalendar || choosesRepeat ? (
           <CalendarFormCard className="gap-1 py-2 pr-3 pl-4">
             {choosesCalendar ? (
               <CalendarFormRow icon={<CalendarIcon />}>
                 <div className="flex min-w-0 flex-[1_1_0] flex-wrap gap-2">
-                  {(["Agent", "Phone"] as const).map((target) => (
-                    <CalendarChip key={target} label={target === "Agent" ? "Your agent's calendar" : "This phone's calendar"}
-                      chosen={(fields.calendar ?? "Agent") === target} dot={target === "Agent" ? "primary" : "foreground"}
-                      onClick={() => change({ ...fields, calendar: target }, plain)} />
+                  {destinations.map(({ name, value }) => (
+                    <CalendarChip key={value} label={name} chosen={destination === value} dot={value === "Phone" ? "foreground" : "primary"}
+                      onClick={() => change({ ...fields, calendar: value }, plain)} />
                   ))}
                 </div>
               </CalendarFormRow>
@@ -817,7 +830,10 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
             {choosesRepeat ? (
               <CalendarFormRow icon={<Repeat />}>
                 <div className="flex min-w-0 flex-[1_1_0] flex-wrap gap-1.5">
-                  {repeats.map(({ repeat, label }) => (
+                  {reminder ? reminderRepeats.map(({ repeat, label }) => (
+                    <CalendarChip key={repeat} label={label} chosen={(fields.reminderRepeat ?? "none") === repeat}
+                      onClick={() => change({ ...fields, reminderRepeat: repeat }, plain)} />
+                  )) : repeats.map(({ repeat, label }) => (
                     <CalendarChip key={repeat} label={label} chosen={(fields.repeat ?? "NoRepeat") === repeat} onClick={() => {
                       const extras = repeat !== "NoRepeat" || fields.people.trim() !== "";
                       change({ ...fields, repeat }, extras === e.extras ? plain : { type: "setExtras", extras });
@@ -826,9 +842,16 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
                 </div>
               </CalendarFormRow>
             ) : null}
+            {reminder ? <CalendarFormRow icon={<Bell />}>
+              <div className="flex min-w-0 flex-[1_1_0] flex-wrap gap-1.5">
+                {reminderAlerts.map(({ minutes, label }) => <CalendarChip key={label} label={label}
+                  chosen={(fields.reminderAlert === undefined ? 0 : fields.reminderAlert) === minutes}
+                  onClick={() => change({ ...fields, reminderAlert: minutes }, plain)} />)}
+              </div>
+            </CalendarFormRow> : null}
           </CalendarFormCard>
         ) : null}
-        {e.extras ? (
+        {!reminder && e.extras ? (
           <button type="button" aria-label="Open in Android Calendar" disabled={!editor.can({ type: "handOff" })} onClick={() => void editor.send({ type: "handOff" })}
             className="flex min-h-13 items-center gap-2 rounded-lg bg-secondary px-4 py-3 text-left disabled:opacity-50">
             <CalendarIcon aria-hidden className="size-4.5" />Calendar<ChevronRight aria-hidden className="size-4 text-muted-foreground" />
