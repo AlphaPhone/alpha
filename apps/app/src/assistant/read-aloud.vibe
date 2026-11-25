@@ -31,7 +31,7 @@ function prepare(ticket: number, item: number): Stream.Stream<Speaker.Event, nev
     const line = board.line(conversation, item)
     const bridge = try VoiceBridge
     const audio = line === undefined || line.mine ? Stream.succeed<Speaker.Event>({ type: "ready", ticket, ok: false })
-      : Stream.map(bridge.readAloud(ticket, wordsOf(line)), (event): Speaker.Event => ({ type: event.kind, ticket, ok: event.ok }))
+      : Stream.map(bridge.readAloud(ticket, wordsOf(line, true)), (event): Speaker.Event => ({ type: event.kind, ticket, ok: event.ok }))
     return Stream.concat(audio, Stream.fromEffect(effect {
       const confirmed = try bridge.silenceReading(ticket)
       return { type: "cleaned", confirmed } as Speaker.Event

@@ -102,7 +102,7 @@ export function delivery(clientId: string, directFiles: boolean = false) {
     viewDelivery: "completed-action" as const,
     viewClientId: clientId,
     voiceUi: { viewDelivery: "completed-action" as const, uiClientId: clientId, uiNotesEditor: "saved-note-v1" as const,
-      ...(directFiles ? { agentActionMode: "direct-request-v1" as const } : {}) },
+      ...(directFiles ? { agentActionMode: "direct-files-v1" as const } : {}) },
   }
 }
 
