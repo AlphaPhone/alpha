@@ -31,7 +31,7 @@ export function Send({ ledger, sending }: { ledger: Ledger; sending: Transferrin
         actions={<Button loading={state.stage === "Asking"} disabled={state.stage !== "Asking" && !can(ask)} onClick={() => void send(ask)}>Review</Button>}
       >
         <div className="flex flex-col gap-3 pb-2">
-          {state.said === "TurnedDown" && <Alert variant="warn">The wallet turned this down</Alert>}
+          {state.said === "TurnedDown" && <Alert variant="warn">{state.why === "" ? "The wallet turned this down" : state.why}</Alert>}
           <ListGroup surface="plain" aria-label="Send from">
             {sendable.map((holding, index) => {
               const held = shownUnits(holding.units, holding.decimals);

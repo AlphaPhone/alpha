@@ -51,7 +51,7 @@ function Outcome({ sending }: { sending: Transferring }) {
   return (
     <Alert variant={told[said].variant}>
       <div className="flex items-center gap-2">
-        <span className="min-w-0 flex-1">{told[said].words}</span>
+        <span className="min-w-0 flex-1">{sending.state.why === "" ? told[said].words : sending.state.why}</span>
         <Button size="sm" variant="ghost" onClick={() => void sending.send(acknowledge)}>OK</Button>
       </div>
     </Alert>

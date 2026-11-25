@@ -35,7 +35,7 @@ export function Review({ sending }: { sending: Transferring }) {
       >
         <div className="flex flex-col gap-3 pb-2">
           {state.stage === "Opening" && <Spinner label="Opening the review" className="self-center" />}
-          {state.stage === "Stale" && <Alert variant="warn">{state.said === "Lapsed" ? "This review lapsed" : "The wallet turned this down"}</Alert>}
+          {state.stage === "Stale" && <Alert variant="warn">{state.said === "Lapsed" ? "This review lapsed" : state.why === "" ? "The wallet turned this down" : state.why}</Alert>}
           {shown && (
             <>
               <WalletAmount size="lg" amount={shownUnits(terms.units, terms.decimals)} symbol={terms.symbol} />
