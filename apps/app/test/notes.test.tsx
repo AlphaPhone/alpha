@@ -382,7 +382,7 @@ describe("Notes", () => {
       world.ask.nextReplyChunks = ["Here it is."];
       world.ask.nextActions = actions ? (metadata) => [prepared(String((metadata as { viewClientId?: unknown }).viewClientId), viewId, viewId === "notes")] : undefined;
       const turn = (await runtime.runPromise(Effect.flatMap(Conversation, (c) => c.get()))).turn.send.id + 1;
-      // spec/app/shell/index.md, "Ask Alpha rises to typing, a sheet or the full screen, never over the drawer": over an app the dock is compact, and Type opens the field.
+      // spec/app/shell/index.md, "Ask Alpha rises to typing, a sheet or the full screen": over an app the dock is compact, and Type opens the field.
       await rendered(() => expect(composerField()).not.toBeNull());
       if (composerField()?.hidden) {
         await press("Type");

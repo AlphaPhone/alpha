@@ -1,4 +1,4 @@
-// spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"; spec/app/reminders/editor.md, "Story: Create or edit a reminder with safe validation and draft recovery"
+// spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"; spec/app/reminders/editor.md, "Story: Create and edit a reminder safely"
 import { Effect, Layer } from "effect";
 import * as RemindersMachine from "../../gen/app__reminders.effect.vibe";
 import * as EditorMachine from "../../gen/app__reminders__editor.effect.vibe";

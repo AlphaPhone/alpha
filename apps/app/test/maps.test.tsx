@@ -91,7 +91,7 @@ describe("Maps on a phone", () => {
     await press("Start");
     await until(alpha, runtime, Screen, (s) => s.trip.guidance === "Going" && s.link.locator === "Guide");
 
-    // spec/app/maps/navigation.md, "A fix moves guidance only when it is precise, fresh and close: arrival within 25 meters, a turn passed within 40 meters or beyond 60, the route left beyond 75"
+    // spec/app/maps/navigation.md, "A fix moves guidance only when it is precise, fresh and close: arrival within 25 meters, a turn passed within 40 meters or after two fixes beyond 60, the route left beyond 75"
     move(world.maps, harbour.coordinate.latitude, harbour.coordinate.longitude, 8, world.now);
     await until(alpha, runtime, Screen, (s) => s.trip.guidance === "Arrived" && s.link.locator === "Nobody");
     await until(alpha, runtime, Screen, () => world.maps.watches.size === 0);

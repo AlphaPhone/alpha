@@ -1,4 +1,4 @@
-// spec/app/files/index.md, "Story: Find and open my files"; spec/app/files/recent.md, "Story: Pick a file with the system picker"; spec/app/files/change.md, "Story: Change the files I select"
+// spec/app/files/index.md, "Story: Browse my storage"; spec/app/files/recent.md, "Story: Pick a file with the system picker"; spec/app/files/change.md, "Story: Change my files"
 import {
   FilesVolume, type FilesFilter, LibraryStore, type RowOutcome, type SelectedFile, type VolumeRefused,
   importLibraryFile, importLibraryFolder, indexedLibrary, librarySelections, libraryVolume, parentOf, validName,

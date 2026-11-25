@@ -30,6 +30,12 @@ async function onBrowser(world = { ...scene(), phone: true, image: true }) {
   return { ...running, world, runtime };
 }
 
+async function committedAddress(runtime: ReturnType<typeof browser.runtime>, tabs: ReturnType<typeof scene>["browser"]["tabs"]) {
+  const state = await runtime.runPromise(Effect.flatMap(Tabs, (model) => model.get()));
+  const tab = tabs.get(`tab${state.selected}`);
+  return state.agent === 0 && tab?.committed ? tab.history[tab.at] : undefined;
+}
+
 const go = (text: string) => drawn(async () => {
   await press(button("Search or type address") ? "Search or type address" : /^Edit address/);
   await fill("Address", text);
@@ -259,11 +265,7 @@ describe("The Browser on a phone", () => {
       await press("Send");
       await until(alpha, ask, Conversation, (c) => c.turn.send.id === turn && c.turn.reply === "Complete");
     };
-    const front = async () => {
-      const s = await runtime.runPromise(Effect.flatMap(Tabs, (t) => t.get()));
-      const tab = world.browser.tabs.get(`tab${s.selected}`);
-      return s.agent === 0 && tab?.committed ? tab.history[tab.at] : undefined;
-    };
+    const front = () => committedAddress(runtime, world.browser.tabs);
 
     const shown = async () => (await runtime.runPromise(Effect.flatMap(Tabs, (t) => t.get())));
     await asked("open example.com and open http://example.com:8080", "https://example.com/", true);
@@ -328,11 +330,7 @@ describe("The Browser on a phone", () => {
     await until(alpha, ask, Conversation, (s) => s.ready);
     await press("Open conversation");
     await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
-    const front = async () => {
-      const s = await runtime.runPromise(Effect.flatMap(Tabs, (t) => t.get()));
-      const tab = world.browser.tabs.get(`tab${s.selected}`);
-      return s.agent === 0 && tab?.committed ? tab.history[tab.at] : undefined;
-    };
+    const front = () => committedAddress(runtime, world.browser.tabs);
     const reads = review.pendingReads;
     world.ask.nextReplyChunks = ["Review this request on your phone before it can run."];
     world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: "page-open", state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];

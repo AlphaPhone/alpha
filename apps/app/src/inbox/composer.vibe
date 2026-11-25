@@ -265,7 +265,7 @@ export effect function openGmailDraft(account: number, id: string): boolean!!(Cl
   return Exit.isSuccess(try exit(composer.send(event, "Owner"))) && content !== undefined
 }
 
-// spec/app/inbox/drafts.md, "A send found in Gmail's Sent counts as sent and is a change to what the draft shows; one not found is known not to have gone"
+// spec/app/inbox/drafts.md, "An unknown send is checked once, by reading Gmail's Sent for it, while its account may be read and no new send of the draft is handed over"
 /** Whether Gmail's Sent holds the draft: a message to its first recipient with its subject. */
 effect function inSent(ticket: number, draft: number, account: number): Event!!(Cloud | Mail | Letters) {
   const { client } = try Cloud

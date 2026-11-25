@@ -37,9 +37,7 @@ export service MediaExecutors {
   static readonly defaultValue = () => ({ readyFiles: () => succeed(undefined), execute: () => succeed({ kind: "refused", code: NOT_DISPATCHED }), reviewFiles: () => succeed(undefined), filesContext: () => succeed(undefined) })
 }
 
-export interface ReviewAuthority {
-  readonly current: () => Promise<boolean>
-  readonly continueDraft?: () => Promise<boolean>
+interface ReviewDetails {
   readonly target?: MessageDraftTarget
   readonly voicemail?: VoicemailTarget
   readonly voicemailDeletion?: ReviewedVoicemailDeletion
@@ -51,19 +49,15 @@ export interface ReviewAuthority {
   readonly phone?: ReviewedPhoneContact
 }
 
-interface ApprovalScope {
+export interface ReviewAuthority extends ReviewDetails {
+  readonly current: () => Promise<boolean>
+  readonly continueDraft?: () => Promise<boolean>
+}
+
+interface ApprovalScope extends ReviewDetails {
   readonly active: boolean!!
   readonly foregroundFiles?: Effect.Effect<ForegroundFiles | undefined>
   readonly continueDraft?: boolean!!
-  readonly target?: MessageDraftTarget
-  readonly voicemail?: VoicemailTarget
-  readonly voicemailDeletion?: ReviewedVoicemailDeletion
-  readonly sms?: SmsSelection
-  readonly approvedText?: Omit<SmsApproval, "attemptId">
-  readonly composeLine?: ComposeLine
-  readonly files?: FileReview
-  readonly reportFiles?: (outcome: FileActionReport) => void
-  readonly phone?: ReviewedPhoneContact
 }
 
 module native {

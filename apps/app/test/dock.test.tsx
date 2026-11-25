@@ -80,7 +80,7 @@ describe("Ask Alpha dock and shell navigation", () => {
     expect(section?.getAttribute("data-alpha-detent")).toBe("sheet");
   });
 
-  // spec/app/shell/index.md, "Ask Alpha rises to typing, a sheet or the full screen, never over the drawer"
+  // spec/app/shell/index.md, "Ask Alpha rises to typing, a sheet or the full screen"
   it.each(["Calendar", "Settings"] as const)("opens the wide composer from %s's compact dock without opening the sheet", async (view) => {
     const { runtime } = await mountDock({ view, flush: underAct });
     const dock = document.querySelector("[data-alpha-compact-dock]");

@@ -1,4 +1,4 @@
-// spec/app/reminders/editor.md, "Story: Create or edit a reminder with safe validation and draft recovery"
+// spec/app/reminders/editor.md, "Story: Create and edit a reminder safely"
 import type { ReminderListRecord, ReminderPriority, ReminderRecurrence, ReminderSubtaskRecord } from "@repo/launcher-records";
 import { Button, Checkbox, Chip, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, Sheet, SheetContent, Switch, Textarea } from "@repo/ui";
 import type { ManagedRuntime } from "effect";

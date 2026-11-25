@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"; spec/app/reminders/index.md, "Story: Create, update, flag, move, complete and delete reminders with Undo"; spec/app/reminders/alerts.md, "Story: Alert on due reminders and act from the banner"; spec/app/reminders/recurrence.md, "Story: Advance recurring reminder dates cleanly across months and leap years"
+// spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"; spec/app/reminders/index.md, "Story: Create, update, flag, move, complete and delete reminders with Undo"; spec/app/reminders/alerts.md, "Story: Alert on due reminders and act from the banner"; spec/app/reminders/recurrence.md, "Story: Repeat reminders cleanly across months and leap years"
 import type { ReminderItemRecord, ReminderListRecord, RemindersSnapshot } from "@repo/launcher-records";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { Effect, Layer } from "effect";
@@ -169,7 +169,7 @@ afterEach(async () => {
 });
 
 describe("Reminders recurrence laws", () => {
-  // spec/app/reminders/recurrence.md, "Story: Advance recurring reminder dates cleanly across months and leap years"
+  // spec/app/reminders/recurrence.md, "Story: Repeat reminders cleanly across months and leap years"
   it("advances daily, weekday, weekly, monthly (clamped) and yearly (leap-clamped) dates strictly later", () => {
     expect(advanceDueDate("2026-05-01", "daily")).toBe("2026-05-02");
     expect(advanceDueDate("2026-05-01", "weekdays")).toBe("2026-05-04");
@@ -389,7 +389,7 @@ describe("Reminders full journeys", () => {
     await until(alpha, runtime, RemindersMachine.Machine, (s) => s.sync.status === "Loaded" && !s.again);
     expect(remindersStore.snapshot().snapshot.items.some((i) => i.id === "rem_chat_1")).toBe(true);
 
-    // spec/app/reminders/editor.md, "Story: Create or edit a reminder with safe validation and draft recovery"
+    // spec/app/reminders/editor.md, "Story: Create and edit a reminder safely"
     await press("New reminder");
     await fill("Title", "Pack passport");
     await pressOnTop("Save");

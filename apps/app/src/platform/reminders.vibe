@@ -1,4 +1,4 @@
-// spec/app/notices/reminders.md, "Story: Get my reminder at its time, even after a reboot"; spec/app/platform/index.md, "Story: Reach the phone's native capabilities"
+// spec/app/notices/reminders.md, "Story: Pick up reminders after a restart"; spec/app/platform/index.md, "Story: Reach the phone's native capabilities"
 import type {
   AndroidReminderCancelInput, AndroidReminderCancelResult, AndroidReminderList,
   AndroidReminderPendingTap, AndroidReminderScheduleInput, AndroidReminderScheduleResult,
