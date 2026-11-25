@@ -165,7 +165,8 @@ refusing the turn with its own code for an account with no plan allowance
 and no credits left, which the agent has no funds to explain: it reads as
 the one fixed line Alpha keeps for it, "You’re out of plan allowance and
 credits, so I couldn’t reply.", the same line live, in a conversation read
-again from history (the agent keeps Cloud's code on the reply it stored) and
+again from history (the agent's history route, eliza's agent-host
+conversation/history.vibe, keeps Cloud's code on the reply it stored) and
 for a Talk turn, and it is never spoken. Spent credits the agent reports
 without that code keep their own words. Every kind but a timeout
 and any other is refused before output. A reply the agent chose not to give
