@@ -6,7 +6,8 @@ import {STORAGE_SPECS} from '../scripts/storage-specs.ts';
 
 // Loads the real Playwright config and routes every spec on disk through its projects.
 const specs = readdirSync('test/browser').filter(name => name.endsWith('.spec.ts')).map(name => `test/browser/${name}`);
-const production = file => /(production-surface|\.production)\.spec\.ts$/.test(file);
+const production = file => /(?:^|[\\/])vibestack-production\.spec\.ts$/.test(file);
+const legacyProduction = file => /(production-surface|\.production)\.spec\.ts$/.test(file);
 const live = file => /\.local\.spec\.ts$/.test(file);
 const patterns = value => value === undefined ? undefined : [value].flat();
 function runs(project, file) {
@@ -23,7 +24,7 @@ test('production specs run only in the production project and live specs in no d
   const projectsFor = routing(config);
   assert.ok(specs.some(production) && specs.some(live));
   for (const file of specs) {
-    const expected = production(file) ? ['production'] : live(file) ? [] : ['chromium', ...(STORAGE_SPECS.includes(file) ? ['firefox', 'webkit'] : [])];
+    const expected = production(file) ? ['production'] : (legacyProduction(file) || live(file)) ? [] : ['chromium', ...(STORAGE_SPECS.includes(file) ? ['firefox', 'webkit'] : [])];
     assert.deepEqual(projectsFor(file), expected, file);
   }
 });
@@ -31,7 +32,7 @@ test('production specs run only in the production project and live specs in no d
 test('the storage inventory names existing development specs only', () => {
   for (const file of STORAGE_SPECS) {
     assert.ok(specs.includes(file), `${file} does not exist`);
-    assert.ok(!production(file) && !live(file), file);
+    assert.ok(!production(file) && !legacyProduction(file) && !live(file), file);
   }
 });
 

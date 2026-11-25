@@ -219,14 +219,16 @@ export type ReplyAction =
 /** The resident's names of the actions that hand an email to the phone's composer. */
 export const EMAIL_DRAFT_ACTIONS: ReadonlySet<string> = new Set(["INBOX_COMPOSE_EMAIL"]);
 
+export type VoiceReplyActionInput = VoiceReplyAction & { readonly verbatimAsked?: boolean };
+
 /**
  * The kind of reply a voice turn's action label makes: none without a label, an email draft for an action that hands an email to the composer, another action otherwise.
  * @throws {never}
  */
-export function replyActionOf(label: VoiceReplyAction | undefined): ReplyAction {
+export function replyActionOf(label: VoiceReplyActionInput | undefined): ReplyAction {
   if (label === undefined) return { kind: "none" };
   if (EMAIL_DRAFT_ACTIONS.has(label.kind)) return { kind: "email-draft", validatedCard: label.validatedCard };
-  return { kind: "other", verbatimAsked: label.verbatimAsked };
+  return { kind: "other", verbatimAsked: label.verbatimAsked === true };
 }
 
 /** Said for an email draft with a validated card. */

@@ -126,6 +126,11 @@ public final class TabInputRouter extends View {
       TabFrame page = pageAt(event.getX(), event.getY());
       if (page == null) {
         hostDownTime = event.getDownTime();
+        for (TabFrame candidate : pages.get()) {
+          if (candidate.hasFocus()) candidate.clearFocus();
+        }
+        View host = hostBelow();
+        if (host != null && !host.hasFocus()) host.requestFocus();
         return false;
       }
       touchTarget = page;

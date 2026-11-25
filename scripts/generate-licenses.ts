@@ -658,7 +658,7 @@ export function refreshAndroidClasspath(root: string, env: NodeJS.ProcessEnv) {
   generateAlphaAndroidHost(root);
   const coords = new Set();
   for (const configuration of configurations) {
-    const output = execFileSync('./gradlew', ['-q', ':app:dependencies', '--configuration', configuration], {cwd: path.join(root, 'android'), env, encoding: 'utf8', maxBuffer: 64 << 20});
+    const output = execFileSync('./gradlew', ['-q', '-PelizaParadeeApiOnly=true', ':app:dependencies', '--configuration', configuration], {cwd: path.join(root, 'android'), env, encoding: 'utf8', maxBuffer: 64 << 20});
     const parsed = parseGradleTree(output);
     if (!parsed.length) throw new Error(`Gradle returned no dependencies for ${configuration}`);
     for (const coord of parsed) coords.add(coord);

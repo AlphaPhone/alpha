@@ -3,7 +3,7 @@
     "launcherReleaseRuntimeClasspath",
     "launcherDebugRuntimeClasspath"
   ],
-  "inputFingerprint": "3bd14a491c740159594e64137018602efbe28055c49bdadee9ca592781199cb9",
+  "inputFingerprint": "6d7c6bf655c52be43270a91122642861db6258b0c2b3af40fc6946adcd5e9934",
   "coordinates": [
     "androidx.activity:activity:1.10.1",
     "androidx.annotation:annotation-experimental:1.4.1",

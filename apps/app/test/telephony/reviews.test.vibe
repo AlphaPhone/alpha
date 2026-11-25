@@ -1,6 +1,6 @@
 // spec/telephony/actions.md, "A name is looked up on the phone and the owner picks the exact number, even for one match"
 import { assert, it } from "@effect/vitest"
-import type { ContactDetail, ContactId, ContactVersion } from "@elizaos/os/bridges/contacts"
+import type { ContactDetail, ContactId, ContactVersion } from "@elizaos/os-bridges"
 import { Machine as ActionsMachine } from "../../gen/telephony__actions.effect.vibe"
 import { changeLines, TelephonyActions } from "../../src/telephony/actions.vibe"
 import { fakePhone, until } from "./fakes.vibe"

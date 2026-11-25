@@ -1,5 +1,7 @@
 // spec/camera/libraryReview.md, "Photos operations reach a phone only when the assistant and the phone both offer their capability"; spec/camera/agentLibrary.md, "The selected form names the open viewer item, and only for an assistant that offered it"; spec/camera/agentCapture.md, "A saved photo with its library identity succeeds; a write without one, or a lost answer, is unknown and never repeated"
-import { negotiation, shownPhoto, type ShownPhoto } from "@elizaos/agent"
+import { readOperation } from "@elizaos/agent"
+
+export type ShownPhoto = { readonly ids: readonly []; readonly selected: true } | { readonly ids: readonly [string] }
 
 /** The camera and Photos capabilities this phone advertises in `x-eliza-device-capabilities`. */
 export const cameraCapabilities: readonly string[] = [
@@ -28,8 +30,11 @@ export function photosObservation(shown: ShownItem | undefined, revision: number
 }
 
 /** How "this photo" targets the open viewer item under the capabilities the assistant named, or undefined when it may not. */
-export function shownPhotoFor(shown: ShownItem | undefined, revision: number, sensitive: boolean, header: string | undefined): ShownPhoto | undefined {
-  return shownPhoto(photosObservation(shown, revision, sensitive), negotiation(true, header))
+export function shownPhotoFor(shown: ShownItem | undefined, _revision: number, sensitive: boolean, header: string | undefined): ShownPhoto | undefined {
+  if (sensitive || !offers(header, "photos.library.v1") || !offers(header, "photos.view.v1")) return undefined
+  if (offers(header, "photos.view-selected.v1")) return { ids: [], selected: true }
+  const id = shown?.id
+  return id !== undefined && readOperation({ type: "photos_open", id }) !== undefined ? { ids: [id] } : undefined
 }
 
 /** Whether a header names a capability, so a receipt field or an operation form it gates may be used. */

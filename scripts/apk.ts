@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { Effect } from "effect";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { listAndroidArtifactEntries, manifestFacts, parseApkSignerDigest, parseXmlTree, readAndroidArtifactEntryBuffers } from "@elizaos/os/image";
+import { listAndroidArtifactEntries, manifestFacts, parseApkSignerDigest, parseXmlTree, readAndroidArtifactEntryBuffers } from "@elizaos/os";
 // The image entry point does not re-export the build type; it is the same module's rule.
 import { buildTypeOf } from "../vendor/eliza/packages/os/src/image/apk.vibe";
 import { sha256 } from "./sha256.ts";

@@ -60,10 +60,10 @@ export const {aaptManifestTree, apkReleaseBlockers, apkUpdateAdmission, cloudVoi
   readApkBuildFlags, readbackInventory, provisioningComponents, releaseDescriptorProblems, releaseRecordProblems, loadProfile,
   verifyDeviceSource, verifySource, assertStockVendorApi, readNativeLibraries, NATIVE_TARGETS, NATIVE_INSTALLS} = osImage;
 
-type AgentBundle = typeof import('@elizaos/agent/bundle');
-/** Build the resident agent's mobile bundle from the pinned upstream source (@elizaos/agent/bundle). The agent package loads only
+type AgentBundle = typeof import('@elizaos/agent-host');
+/** Build the resident agent's mobile bundle from the pinned upstream source (@elizaos/agent-host). The agent host package loads only
  * here, so a tool that stages or verifies without bundling compiles no agent source. */
 export async function buildAgentBundle(options: Parameters<AgentBundle['buildAgentBundle']>[0]) {
-  const {buildAgentBundle: build}: AgentBundle = await import('@elizaos/agent/bundle');
+  const {buildAgentBundle: build}: AgentBundle = await import('@elizaos/agent-host');
   return build(options);
 }

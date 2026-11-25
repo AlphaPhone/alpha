@@ -7,7 +7,7 @@ import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
 
-import { parseXmlTree } from "@elizaos/os/image";
+import { parseXmlTree } from "@elizaos/os";
 
 const executeFile = promisify(execFile);
 

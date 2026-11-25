@@ -54,7 +54,7 @@ export const browserLibrary = Layer.provide(Layer.mergeAll(
       rename: (path, name) => answered(volume.rename(path, name), (placed): N.PlacedAnswer => ({ status: "ready", path: placed })),
       createFolder: (parent, name) => answered(volume.createFolder(parent, name), (placed): N.PlacedAnswer => ({ status: "ready", path: placed })),
       trash: (paths, _volume, reviewed) => answered(volume.trash({ paths, ...(reviewed ? { reviewed } : {}) }), outcomes),
-      trashList: () => answered(volume.trashList(), (items): N.TrashAnswer => ({ status: "ready", items: [...items] })),
+      trashList: () => answered(volume.trashList(), (items): N.TrashAnswer => ({ status: "ready", items: items.flatMap((item) => item.unreadable ? [] : [item]) })),
       restore: (ids) => answered(volume.restore(ids), outcomes),
       erase: (ids) => answered(volume.emptyTrash(ids, true), (count): N.ErasedAnswer => ({ status: "ready", count })),
       share: (paths) => answered(volume.share(paths), (count): N.HandoffAnswer => ({ status: "opened", count })),

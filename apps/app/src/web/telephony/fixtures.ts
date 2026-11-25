@@ -1,5 +1,5 @@
 // States the telephony components reach, for their stories (`*.meta.tsx`) only; production never loads them.
-import type { ContactId, ContactVersion } from "@elizaos/os/bridges/contacts";
+import type { ContactId, ContactVersion } from "@elizaos/os-bridges";
 import type { Actions } from "../../../gen/telephony__actions.ts";
 import type { Attention } from "../../../gen/telephony__attention.ts";
 import type { CallBar } from "../../../gen/telephony__callBar.ts";

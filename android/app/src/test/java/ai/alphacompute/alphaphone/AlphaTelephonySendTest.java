@@ -119,6 +119,8 @@ public final class AlphaTelephonySendTest {
     final ActionJournal approvals;
     final Map<String, String> deviceClaims = new HashMap<>();
     final java.util.Set<String> contactNumbers = new java.util.HashSet<>();
+    int staged;
+    Runnable onStage;
     Host(AppCompatActivity activity) {
       this.activity = activity;
       Map<String, String> slots = new HashMap<>();
@@ -129,6 +131,15 @@ public final class AlphaTelephonySendTest {
     }
     @Override protected synchronized boolean reserveSmsClaim(String id, String binding) { return deviceClaims.putIfAbsent(id, binding) == null; }
     @Override protected ActionJournal approvals() { return approvals; }
+    @Override protected DeletionWindow deletionWindow() {
+      return (kind, target) -> {
+        staged++;
+        Runnable action = onStage;
+        onStage = null;
+        if (action != null) action.run();
+        return new org.json.JSONObject().put("id", "deletion-" + staged).put("kind", kind);
+      };
+    }
     @Override protected boolean contactNumber(String number) { return contactNumbers.contains(number); }
     @Override public Context getContext() { return activity; }
     @Override public AppCompatActivity getActivity() { return activity; }
@@ -599,9 +610,9 @@ public final class AlphaTelephonySendTest {
   @Test public void deleteRechecksLifecycleBeforeEffectAndKeepsKnownContentFreeOutcomeAfterwards()throws Exception{
     deleteProvider();Host before=host("delete-race");Shadows.shadowOf(before.getContext().getSystemService(RoleManager.class)).addHeldRole(RoleManager.ROLE_SMS);
     DeleteProvider.onRead=before::pause;Call denied=deleteCall();before.deleteMessage(denied);settleDeletion(before);
-    assertEquals("unavailable",denied.error);assertEquals(0,DeleteProvider.writes);
-    Host after=host("delete-known");DeleteProvider.onDelete=()->{after.smsAllowed=false;after.pause();};Call known=deleteCall();after.deleteMessage(known);settleDeletion(after);
-    assertNull(known.error);assertEquals("deleted",known.result.getString("status"));assertEquals(1,DeleteProvider.writes);
+    assertEquals("unavailable",denied.error);assertEquals(0,before.staged);assertEquals(0,DeleteProvider.writes);
+    Host after=host("delete-known");after.onStage=()->{after.smsAllowed=false;after.pause();};Call known=deleteCall();after.deleteMessage(known);settleDeletion(after);
+    assertNull(known.error);assertEquals("queued",known.result.getString("status"));assertEquals(1,after.staged);assertEquals(0,DeleteProvider.writes);
   }
 
   @Test @Config(sdk=36) public void deleteRefusesANonForegroundAndroidUserProfile()throws Exception{

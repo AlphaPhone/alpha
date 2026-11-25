@@ -4,7 +4,12 @@
  "notification": {
   "channel": "Alpha",
   "title": "Alpha",
-  "text": "Your agent is running on this phone"
+  "text": "Your agent is running on this phone",
+  "failure": {
+   "channel": "Alpha alerts",
+   "title": "Alpha stopped",
+   "text": "Open Alpha to check your agent"
+  }
  },
  "model": {
   "backend": "cloud",

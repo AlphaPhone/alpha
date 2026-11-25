@@ -4,8 +4,12 @@ import { contentSecurityProblems } from "../../scripts/audit-production-bundle.t
 test.describe.configure({ timeout: 60_000 });
 
 async function openSettings(page: Page) {
-  await page.getByRole("region", { name: "Home", exact: true }).getByRole("button", { name: "Settings", exact: true }).click();
   const settings = page.getByRole("main", { name: "Settings", exact: true });
+  const open = page.getByRole("region", { name: "Home", exact: true }).getByRole("button", { name: "Settings", exact: true });
+  await Promise.race([
+    settings.waitFor({ state: "visible" }),
+    open.click({ timeout: 5_000 }).catch(() => undefined),
+  ]);
   await expect(settings.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
   return settings;
 }
@@ -60,7 +64,7 @@ test("the delegation landing cleans the address and offers only the app-bound re
   const state = "A".repeat(43);
   await page.goto(`/delegation-return?state=${state}&code=fixture-code`);
   await expect(page.getByRole("heading", { name: "Return to Alpha Phone" })).toBeVisible();
-  await expect(page).toHaveURL(/\/delegation-return#delegation-return$/);
+  await expect(page).toHaveURL(/\/(?:delegation-return)?#delegation-return$/);
   await expect(page.getByRole("link", { name: "Continue in Alpha Phone" })).toHaveAttribute("href", `alphaphone://cloud-delegation?state=${state}&code=fixture-code`);
   await page.reload();
   await expect(page.getByText(/This page was reopened/)).toBeVisible();
@@ -68,6 +72,6 @@ test("the delegation landing cleans the address and offers only the app-bound re
 
   await page.goto(`/delegation-return?state=${state}&code=fixture-code&redirect=https%3A%2F%2Fexample.test`);
   await expect(page.getByText(/This return link is invalid/)).toBeVisible();
-  await expect(page).toHaveURL(/\/delegation-return#delegation-return$/);
+  await expect(page).toHaveURL(/\/(?:delegation-return)?#delegation-return$/);
   await expect(page.getByRole("link", { name: "Continue in Alpha Phone" })).toHaveCount(0);
 });

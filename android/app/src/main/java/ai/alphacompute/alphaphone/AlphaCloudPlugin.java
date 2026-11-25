@@ -7,6 +7,7 @@ import ai.eliza.plugins.signin.CredentialPolicy;
 import ai.eliza.plugins.signin.CredentialReader;
 import ai.eliza.plugins.signin.DeviceCredentialStore;
 import ai.eliza.plugins.signin.DeviceKeyClient;
+import ai.eliza.plugins.signin.DeviceLease;
 import ai.eliza.plugins.signin.ElizaCloudPlugin;
 import ai.eliza.plugins.signin.SignInRegistration;
 import android.content.Context;
@@ -27,14 +28,14 @@ public final class AlphaCloudPlugin extends ElizaCloudPlugin {
   private static final CredentialPolicy.Account ALPHA_ACCOUNT = new CredentialPolicy.Account("alpha-cloud", "alpha-cloud");
   private static final long FALLBACK_TTL_MS = 30L * 86_400_000L;
 
-  private record Mirror(DeviceCredentialStore store, AccountSession session) {}
+  private record Mirror(DeviceCredentialStore store, AccountSession session, DeviceLease lease) {}
 
   private static final Map<String, Mirror> MIRRORS = new HashMap<>();
 
   @Override protected CloudRequests.Custody custody(Context context, SignInRegistration.Environment environment) {
     Mirror mirror = mirrorFor(environment.apiOrigin);
     sync(context.getApplicationContext(), environment.name, mirror.store());
-    return new CloudRequests.Custody(mirror.store(), mirror.session());
+    return new CloudRequests.Custody(mirror.store(), mirror.session(), mirror.lease());
   }
 
   private static synchronized Mirror mirrorFor(String apiOrigin) {
@@ -48,7 +49,7 @@ public final class AlphaCloudPlugin extends ElizaCloudPlugin {
     };
     DeviceCredentialStore store = new DeviceCredentialStore(slots, DeviceCredentialStore.authorityDigest(apiOrigin), System::currentTimeMillis);
     DeviceKeyClient client = new DeviceKeyClient(URI.create(apiOrigin), store, Thread::sleep);
-    Mirror created = new Mirror(store, new AccountSession(store, client));
+    Mirror created = new Mirror(store, new AccountSession(store, client), new DeviceLease(store, client, () -> {}));
     MIRRORS.put(apiOrigin, created);
     return created;
   }

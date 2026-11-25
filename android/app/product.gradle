@@ -60,6 +60,8 @@ android {
   unitTests.all {
    // Robolectric resolves its framework JARs outside Gradle's Maven Central configuration.
    systemProperty 'robolectric.dependency.repo.url', 'https://maven-central.storage-download.googleapis.com/maven2'
+   // Alpha requires API 26+; keep Robolectric's OLDEST_SDK aligned with the reminders/local-inference minSdk.
+   systemProperty 'robolectric.enabledSdks', '26,27,28,29,30,31,32,33,34,35,36'
   }
  }
  buildTypes {
