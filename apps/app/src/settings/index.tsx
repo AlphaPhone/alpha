@@ -31,13 +31,19 @@ const pageBack = Licensing.Machine.use((licences) =>
 const back = Effect.flatMap(reviewBack, (closed) => closed ? Effect.succeed(true)
   : Effect.flatMap(recoveryBack, (closedRecovery) => closedRecovery ? Effect.succeed(true) : pageBack));
 
-function Screen({ runtime, alpha }: Shown<Layer.Success<typeof machines> | Resident>) {
-  const further = useMemo((): Partial<Record<Page, Drawn>> => ({
+type ScreenProps = Shown<Layer.Success<typeof machines> | Resident>;
+
+function buildFurther(runtime: ScreenProps["runtime"], alpha: ScreenProps["alpha"]): Partial<Record<Page, Drawn>> {
+  return {
     NetworkPage: ({ common }) => <Network runtime={runtime} common={common} />,
     CarrierPage: ({ common }) => <Carrier runtime={runtime} common={common} />,
-    Licences: ({ common }) => <Licences runtime={runtime} common={common} />,
-    Problems: ({ common }) => <Problems runtime={runtime} common={common} />,
-  }), [runtime]);
+    Licences: ({ common }) => <Licences runtime={runtime} alpha={alpha} common={common} />,
+    Problems: ({ common }) => <Problems runtime={runtime} alpha={alpha} common={common} />,
+  };
+}
+
+function Screen({ runtime, alpha }: ScreenProps) {
+  const further = useMemo(() => buildFurther(runtime, alpha), [runtime, alpha]);
   return <Settings runtime={runtime} alpha={alpha} further={further} />;
 }
 

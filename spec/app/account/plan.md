@@ -66,7 +66,7 @@ pure val initial: Plan = {
 pure val signInValues = Set(0, 1, 2)
 pure val forSignInValues = Set(1, 2)
 pure val ticketValues = Set(1, 2, 3, 4)
-pure val nowValues = Set(10, 70, 650)
+pure val nowValues = Set(10000, 70000, 650000)
 pure val weight_checked = 30
 pure val weight_recheck = 10
 ```
@@ -162,12 +162,12 @@ after an outcome they could not confirm.
 type Kind = Signed | Credits | NoPlan | SignInRefused
 type Verified = { kind: Kind, tier: Tier, until: int, paidTo: int, ending: bool, revision: int, usage: int }
 
-pure val graceWindow = 604800
+pure val graceWindow = 604800000
 
 pure val answerValues = Set(
-  { kind: Signed, tier: Pro, until: 600, paidTo: 5000000, ending: true, revision: 2, usage: 40 },
-  { kind: Signed, tier: Plus, until: 50, paidTo: 100, ending: false, revision: 1, usage: -1 },
-  { kind: Credits, tier: Plus, until: 600, paidTo: 0, ending: false, revision: 1, usage: 40 },
+  { kind: Signed, tier: Pro, until: 600000, paidTo: 5000000000, ending: true, revision: 2, usage: 40 },
+  { kind: Signed, tier: Plus, until: 50000, paidTo: 100000, ending: false, revision: 1, usage: -1 },
+  { kind: Credits, tier: Plus, until: 600000, paidTo: 0, ending: false, revision: 1, usage: 40 },
   { kind: NoPlan, tier: Plus, until: 0, paidTo: 0, ending: false, revision: 1, usage: -1 },
   { kind: SignInRefused, tier: Plus, until: 0, paidTo: 0, ending: false, revision: 1, usage: -1 },
 )
@@ -409,7 +409,7 @@ One check runs at a time. The shell says whether Alpha is visible and
 whether the account screen shows.
 
 ```quint
-pure val recheckGap = 60
+pure val recheckGap = 60000
 
 pure def matters(p: Plan, signIn: int, visible: bool, open: bool): bool = signIn > 0 and visible and (open or not(aiOn(p)))
 
@@ -434,7 +434,7 @@ The agent works in the background, so its plan must not lapse while the
 screen is off.
 
 ```quint
-pure val renewMargin = 60
+pure val renewMargin = 60000
 
 pure def renewable(p: Plan): bool =
   (p.standing == Member or p.standing == Funded) and p.seen >= p.until - renewMargin and p.check.status != R::Loading

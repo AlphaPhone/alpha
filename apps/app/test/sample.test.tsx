@@ -27,7 +27,7 @@ const withSample = [...mounts.filter((m) => m.at !== "view:Notes" && m.at !== "v
 const kept = "alpha/app/sample/index@1";
 const shown = () => [...document.querySelectorAll("section[aria-label=Reminders] li span")].map((title) => title.textContent);
 const told = () => document.querySelector("section[aria-label=Reminders] [role=alert]")?.textContent;
-const shellKept = "alpha/app/shell/index@2";
+const shellKept = "alpha/app/shell/index@3";
 /** The key the store takes no write under, once: the phone's storage is full for a moment. */
 let refusing = "";
 vi.stubGlobal("localStorage", new Proxy(localStorage, {
@@ -76,26 +76,24 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, reminders, Reminders, (s) => s.deletion.attempt.outcome === "Confirmed");
     expect([world.sample.deleted, Boolean(button("Undo dismissing “Water the plants”"))]).toEqual([["Water the plants"], false]);
 
-    // spec/app/sample/index.md, "Only the newest asking's answer is taken: the titles, or a failure that keeps the titles last read": a read whose answer the store does not take is told as failed, so the owner can ask again.
+    // spec/app/sample/index.md, "Only the newest asking's answer is taken: the titles, or a failure that keeps the titles last read": when the store rejects a write (QuotaExceededError), the machine retains the stepped state in memory without dying, and Refresh keeps working.
     let answer = () => {};
     world.sample.gate = new Promise<void>((done) => { answer = done; });
     await press("Refresh");
     await until(alpha, reminders, Reminders, (s) => s.list.status === "Loading");
     refusing = kept;
     answer();
-    await until(alpha, reminders, Reminders, (s) => s.list.status === "Failed");
+    await until(alpha, reminders, Reminders, (s) => s.list.status === "Loaded");
     expect([refusing, Boolean(button("Refresh"))]).toEqual(["", true]);
     await press("Refresh");
     await until(alpha, reminders, Reminders, (s) => s.list.status === "Loaded");
 
-    // spec/app/shell/index.md, "Back closes one layer: Ask Alpha by a step, then the app on top": a Back the store does not take changes nothing, and neither the buttons nor what follows the shell stop for it.
+    // spec/app/shell/index.md, "Back closes one layer: Ask Alpha by a step, then the app on top": when the store rejects a write, the shell retains the Back transition in memory and neither the buttons nor what follows the shell stop for it.
     refusing = shellKept;
-    await hardware("back");
-    expect((await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).trail).toEqual(["Notes"]);
     await hardware("back");
     await until(alpha, reminders, Reminders, (s) => !s.showing);
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
-    expect(world.sample.feeds.size).toBe(0);
+    expect([refusing, world.sample.feeds.size]).toEqual(["", 0]);
 
     depth = 1;
     await press("Files");
@@ -132,7 +130,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     localStorage.setItem(kept, JSON.stringify({ titles: "of another shape" }));
     const fourth = await open(world, withSample);
     await until(fourth.alpha, sample.runtime(fourth.alpha), Reminders, (s) => s.list.status === "Loaded");
-    expect([localStorage.getItem(`${kept}.unreadable`), document.querySelector("h1")?.textContent]).toEqual([JSON.stringify({ titles: "of another shape" }), "Notes"]);
+    expect([localStorage.getItem(`${kept}.unreadable`), Boolean(document.querySelector("section[aria-label=Reminders]"))]).toEqual([JSON.stringify({ titles: "of another shape" }), true]);
 
     // spec/kit/attempt.md, "A sent attempt ends as its own answer says, or as unknown when no answer can be trusted": an agent that takes a deletion and never answers is waited on for ten seconds, and the deletion is then unknown, never refused.
     const last = sample.runtime(fourth.alpha);

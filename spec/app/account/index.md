@@ -88,7 +88,7 @@ pure val initial: Resident = {
 }
 
 pure val ticketValues = Set(1, 2, 3, 4, 5)
-pure val nowValues = Set(0, 5, 70)
+pure val nowValues = Set(0, 5000, 70000)
 pure val weight_started = 40
 pure val weight_retry = 20
 pure val weight_halted = 20
@@ -325,7 +325,7 @@ pure def sometimesARefusedStartAsksTheOwner(s: Resident): bool = s.why == Cannot
 A clock that went back never puts a start off.
 
 ```quint
-pure def wait(tries: int): int = if (tries <= 0) 3 else if (tries == 1) 10 else if (tries == 2) 30 else 60
+pure def wait(tries: int): int = if (tries <= 0) 3000 else if (tries == 1) 10000 else if (tries == 2) 30000 else 60000
 
 pure def due(since: int, tries: int, now: int): bool = now < since or now - since >= wait(tries)
 
@@ -350,10 +350,10 @@ pure def stepOnlyAnAutomaticStartIsCounted(before: Resident, via: str, after: Re
 
 ```quint
 pure def lawTheWaitGrowsWithinBounds(tries: int): bool =
-  wait(tries) <= wait(tries + 1) and wait(tries) >= 3 and wait(tries) <= 60
+  wait(tries) <= wait(tries + 1) and wait(tries) >= 3000 and wait(tries) <= 60000
 
 pure def lawAStartComesDue(since: int, tries: int): bool =
-  due(since, tries, since + 60) and due(since, tries, since - 1) and not(due(since, tries, since))
+  due(since, tries, since + 60000) and due(since, tries, since - 1) and not(due(since, tries, since))
 ```
 
 ### A down agent with automatic starts left is started again
@@ -370,7 +370,7 @@ pure val fair_retry = "weak"
 A clock that went back waits until ten seconds after the last check.
 
 ```quint
-pure val livenessGap = 10
+pure val livenessGap = 10000
 
 pure def canDoubt(s: Resident, now: int): bool =
   s.phase == Up and s.liveness.status != R::Loading and (s.liveness.ticket == 0 or now - s.checkedAt >= livenessGap)

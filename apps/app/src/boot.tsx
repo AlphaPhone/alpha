@@ -1,9 +1,11 @@
+import { AppHeader, Skeleton } from "@repo/ui";
 import { Effect, Layer } from "effect";
 import { type ReactElement, Suspense, lazy } from "react";
 import { MediaHandoff, stageAttachment, stageTranscript } from "./assistant/attachments.vibe";
 import { executeMedia } from "./assistant/media-executors.ts";
 import { FileContext } from "./assistant/file-context.vibe";
 import { Machine as Shell, showing } from "../gen/app__shell.effect.vibe";
+import type { View } from "../gen/app__shell.ts";
 import { Machine as Layers, pageInert } from "../gen/app__shell__layers.effect.vibe";
 import { MediaExecutors } from "./assistant/media-review.vibe";
 import { type Mount, type Place, mounts as every } from "./areas.ts";
@@ -15,7 +17,24 @@ import { resident } from "./resident.vibe";
 import type { Alpha } from "./runtime/area.tsx";
 import { Contained } from "./runtime/contained.tsx";
 import { rooted } from "./runtime/root.vibe";
+import { AppBack } from "./shell/AppBack.tsx";
 import { back, taking } from "./shell/shell.vibe";
+import { viewHasHeader, views } from "./shell/views.tsx";
+
+function ViewLoading({ alpha, place }: { alpha: Alpha; place: `view:${View}` }) {
+  const view = place.slice("view:".length) as View;
+  const label = views[view]?.label ?? view;
+  return (
+    <div role="status" aria-label={`Loading ${label}`} className="flex min-h-0 flex-1 flex-col bg-background pt-[var(--alpha-safe-top)] text-foreground">
+      {viewHasHeader(view) && <AppHeader title={label} leading={<AppBack alpha={alpha} />} className="shrink-0" />}
+      <div className="mx-auto flex w-full max-w-(--breakpoint-md) flex-col gap-3 px-4 py-4">
+        <Skeleton className="h-12 w-full rounded-xl" />
+        <Skeleton className="h-12 w-4/5 rounded-xl" />
+        <Skeleton className="h-12 w-3/5 rounded-xl" />
+      </div>
+    </div>
+  );
+}
 
 /** Alpha over `platform`: one root runtime of the resident machines, and each screen of `mounts` at its place, loaded when it is first drawn, and contained: one that throws or cannot be loaded stops alone. */
 export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] = every): Alpha {
@@ -90,9 +109,11 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
   const stopped = (place: string, cause: unknown) => void root.runtime.runPromiseExit(Effect.logError(`the screen at ${place} stopped`, cause));
   for (const mount of mounts) {
     const Screen = mount.first?.open(alpha, mount.at) ?? lazy(async () => ({ default: (await mount.load()).default.open(alpha, mount.at) }));
+    const isView = mount.at.startsWith("view:");
+    const fallback = isView ? <ViewLoading alpha={alpha} place={mount.at as `view:${View}`} /> : null;
     const drawn = (
-      <Contained key={`${mount.at} ${placed.get(mount.at)?.length ?? 0}`} place={mount.at} told={mount.at.startsWith("view:")} onStopped={stopped}>
-        <Suspense fallback={null}><Screen /></Suspense>
+      <Contained key={`${mount.at} ${placed.get(mount.at)?.length ?? 0}`} place={mount.at} told={isView} onStopped={stopped}>
+        <Suspense fallback={fallback}><Screen /></Suspense>
       </Contained>
     );
     placed.set(mount.at, [...(placed.get(mount.at) ?? []), drawn]);

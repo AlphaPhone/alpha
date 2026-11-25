@@ -86,12 +86,13 @@ describe("the shell", () => {
 
   // spec/app/shell/gestures.md, "Story: Swipe the way the phone expects"
   it("Swipe the way the phone expects (spec/app/shell/gestures.md, \"Story: Swipe the way the phone expects\")", async () => {
-    const { alpha } = await open({ ...scene(), phone: true });
+    const world = { ...scene(), phone: true };
+    world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true, holders: ["ai.alphacompute.alphaphone"] } : role);
+    const { alpha } = await open(world);
     await press("Notes");
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Notes");
     const page = document.querySelector("main");
     if (!page) throw new Error("no Alpha shell");
-    // Happy DOM does not lay out the shell. Give the gesture the phone's canvas.
     const width = 390;
     const height = 844;
     Object.defineProperties(page, {
@@ -146,7 +147,7 @@ describe("the shell", () => {
 
   // spec/app/shell/keyboard.md, "Story: Type without the page turning sideways"; spec/app/shell/keyboard.md, "Story: Read everything at the text size I chose"
   it("Keep layout consistent across resizes, large text, and backgrounding the composer (spec/app/shell/keyboard.md, \"Story: Type without the page turning sideways\"; spec/app/shell/keyboard.md, \"Story: Read everything at the text size I chose\")", async () => {
-    const { alpha } = await open(scene());
+    const { alpha } = await open({ ...scene(), phone: true });
     await until(alpha, alpha.runtime, Canvas, (c) => c.mounted);
 
     // spec/app/shell/keyboard.md, "From 150% text a list and its item take one pane each and Calendar shows its day as an agenda; below it, a list splits from a 1000-point canvas, and Calendar shows as many 240-point day columns as fit beside its 76-point times, widened with the text, at most seven"

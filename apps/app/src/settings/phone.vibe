@@ -6,23 +6,32 @@ import { CarrierSetup } from "../platform/carrier.vibe"
 import { Device } from "../platform/device.vibe"
 import { type Nearby, WiFi } from "../platform/wifi.vibe"
 import { type Due, type Job, answer, due, following, hearing, reacting, together, untimed } from "../runtime/reactor.vibe"
+import { type Shelf, createShelf } from "../runtime/shelf.vibe"
 
 /** The networks the last scan found, kept beside the machine that counts them: the rows of the Network page. */
 export service Found {
+  readonly shelf: Shelf<ReadonlyArray<Nearby>>
   get(): ReadonlyArray<Nearby>!!
   set(networks: ReadonlyArray<Nearby>): void!!
 }
 
-const found = Layer.sync(Found, () => {
-  let held: ReadonlyArray<Nearby> = []
-  return { get: () => sync(() => held), set: (next: ReadonlyArray<Nearby>) => sync(() => { held = next }) }
+/** Read the runtime-scoped nearby Wi-Fi networks shelf. */
+export const foundShelf = effect {
+  return (try Found).shelf
+}
+
+const found = Layer.effect(Found, effect {
+  const shelf = createShelf<ReadonlyArray<Nearby>>([], { reset: () => [] })
+  try Effect.addFinalizer(() => sync(() => { shelf.reset() }))
+  return { shelf, get: () => sync(() => shelf.get()), set: (next: ReadonlyArray<Nearby>) => sync(() => { shelf.set(next) }) }
 })
 
 // spec/app/settings/network.md, "Only the newest scan's answer is taken: the networks it found, or why it could not scan"
-effect function scanned(scan: number): Network.Event!!(WiFi | Found) {
+effect function scanned(scan: number): Network.Event!!(WiFi | Found | Network.Machine) {
   const { scan: result, networks } = try (try WiFi).scan()
-  try (try Found).set(networks)
-  return { type: "scanned", scan, result, found: result === "Found" ? networks.length : 0 }
+  const event: Network.Event = { type: "scanned", scan, result, found: result === "Found" ? networks.length : 0 }
+  if (Network.enabled(try (try Network.Machine).get(), event)) try (try Found).set(networks)
+  return event
 }
 
 // spec/app/settings/network.md, "Only Android's answer to the newest join settles it, and the phone is then read again; a wrong password is said only of a join that had one"
@@ -38,11 +47,11 @@ effect function connectivity(reading: number): Network.Event!!WiFi {
     : { type: "connectivityRead", reading, answered: false, online: false, validated: false, portal: false }
 }
 
-function carryNetwork(fx: Network.Effect): Job<Network.Event, WiFi | Found, []> {
+function carryNetwork(fx: Network.Effect): Job<Network.Event, WiFi | Found | Network.Machine, []> {
   return match (fx) {
-    when { tag: "ScanNearby", let scan }: answer("scan", scanned(scan), { type: "giveUpOnScan", now: untimed });
-    when { tag: "JoinNetwork", let join, let name, let security, let passphrase }: answer("join", joined(join, name, security, passphrase), { type: "giveUpOnJoin", now: untimed, at: untimed });
-    when { tag: "ReadConnectivity", let reading }: answer("connectivity", connectivity(reading), { type: "giveUpOnReading", now: untimed });
+    when { tag: "ScanNearby", let scan }: answer("scan", scanned(scan), { type: "scanned", scan, result: "ScanUnavailable", found: 0 });
+    when { tag: "JoinNetwork", let join, let name, let security, let passphrase }: answer("join", joined(join, name, security, passphrase), { type: "joinAnswered", join, joined: "NotConnected", at: untimed });
+    when { tag: "ReadConnectivity", let reading }: answer("connectivity", connectivity(reading), { type: "connectivityRead", reading, answered: false, online: false, validated: false, portal: false });
   }
 }
 
@@ -78,11 +87,13 @@ effect function copied(copy: number, value: string): Carrier.Event!!CarrierSetup
   return { type: "copyAnswered", copy, ok: try (try CarrierSetup).copy(value) }
 }
 
+const missingEid: Carrier.Field = { kind: "Imei", index: -1, status: "Missing", value: "" }
+
 function carryCarrier(fx: Carrier.Effect): Job<Carrier.Event, CarrierSetup, []> {
   return match (fx) {
-    when { tag: "ReadIdentifiers", let reading }: answer("read", identifiers(reading), { type: "giveUpOnRead", now: untimed });
-    when { tag: "ReadEid", let eidReading }: answer("eid", eidOf(eidReading), { type: "giveUpOnEid", now: untimed });
-    when { tag: "CopyIdentifier", let copy, let value }: answer("copy", copied(copy, value), { type: "giveUpOnCopy", now: untimed });
+    when { tag: "ReadIdentifiers", let reading }: answer("read", identifiers(reading), { type: "identifiersRead", reading, ok: false, identifiers: [], esim: false, smsChoice: false });
+    when { tag: "ReadEid", let eidReading }: answer("eid", eidOf(eidReading), { type: "eidRead", eidReading, eid: missingEid });
+    when { tag: "CopyIdentifier", let copy, let value }: answer("copy", copied(copy, value), { type: "copyAnswered", copy, ok: false });
   }
 }
 

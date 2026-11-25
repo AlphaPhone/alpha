@@ -24,9 +24,11 @@ export function AccessReview({ runtime }: { runtime: ManagedRuntime.ManagedRunti
       access: key,
       word: word(key, showing, grantOf(state, key)),
       busy: current === key && busy(state),
-      action: current === undefined ? "Settings" : current === key && mayAct
-        ? state.stalled ? "Check" : showing === "Unavailable" ? "Try again" : "Settings"
-        : undefined,
+      action: current === undefined
+        ? (showing === "Checking" ? undefined : "Settings")
+        : current === key && mayAct
+          ? state.stalled ? "Check" : showing === "Unavailable" ? "Try again" : "Settings"
+          : undefined,
     };
   });
   return (

@@ -2,9 +2,9 @@
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 
 /**
- * The numbers that stand for digests and Android's activations in the update machines: each name Alpha has met, by
- * the number it was given, 1 for the first. Kept, so that the number a kept machine holds names the same thing after
- * a restart; a new name gets the next number, so numbers rise in the order names were met.
+ * The numbers that stand for digests and Android's activations in the update machines: each durable signer or digest
+ * Alpha has met, by the number it was given, 1 for the first. Ephemeral activation ids stay in memory above
+ * `ephemeralBase` so they never grow `localStorage` unboundedly or alias durable ids on write failure.
  */
 export service Names {
   /** The number that stands for `name`, given and kept the first time it is met. */
@@ -14,22 +14,39 @@ export service Names {
 }
 
 const key = "alpha/update/names@1"
+const ephemeralPrefix = "activation:"
+const ephemeralBase = 1_000_000
 const Kept = Schema.fromJsonString(Schema.Array(Schema.String))
 
-/** The names, read once from the store and kept there with each new one; one list for the whole page. */
+/** The names, read once from the store and kept there with each new durable one; ephemeral activations stay in memory. */
 export const names = Layer.effect(Names, effect {
   const store = try KeyValueStore.KeyValueStore
   const text = store.get(key) catch () => undefined
   const list = [...(text === undefined ? [] : Option.getOrElse(Schema.decodeUnknownOption(Kept)(text), () => []))]
+  const ephemeralToId = new Map<string, number>()
+  const idToEphemeral = new Map<number, string>()
+  let nextEphemeral = ephemeralBase
+  const assignEphemeral = (name: string): number => {
+    const existing = ephemeralToId.get(name)
+    if (existing !== undefined) return existing
+    nextEphemeral += 1
+    ephemeralToId.set(name, nextEphemeral)
+    idToEphemeral.set(nextEphemeral, name)
+    return nextEphemeral
+  }
   return {
     effect number(name: string): number!! {
+      if (name.startsWith(ephemeralPrefix)) return assignEphemeral(name)
       const found = list.indexOf(name)
       if (found >= 0) return found + 1
+      const candidate = [...list, name]
+      const saved = effect { try store.set(key, JSON.stringify(candidate)); return true } catch () => false
+      if (!saved) return assignEphemeral(name)
       list.push(name)
-      try ignore(store.set(key, JSON.stringify(list)))
       return list.length
     },
     effect name(number: number): Option.Option<string>!! {
+      if (number > ephemeralBase) return Option.fromNullishOr(idToEphemeral.get(number))
       return number >= 1 ? Option.fromNullishOr(list[number - 1]) : Option.none()
     },
   }

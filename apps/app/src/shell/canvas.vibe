@@ -16,22 +16,18 @@ module page {
     readonly scale: number
   }
 
-  const reference = { width: 412, height: 915, top: 24 }
-  let preview: DesktopPreview | undefined
-  const previewListeners = new Set<() => void>()
+  import { createShelf } from "../runtime/store.ts"
 
-  function subscribePreview(this: void, listener: () => void): () => void {
-    previewListeners.add(listener)
-    return () => { previewListeners.delete(listener) }
-  }
+  const reference = { width: 412, height: 915, top: 24 }
+  const previewShelf = createShelf<DesktopPreview | undefined>(undefined)
 
   /** The desktop preview's logical canvas and its position in the measured browser window. @throws {never} */
-  export const desktopPreview = { snapshot: () => preview, subscribe: subscribePreview }
+  export const desktopPreview = { snapshot: previewShelf.snapshot, subscribe: previewShelf.subscribe, reset: previewShelf.reset }
 
   function publishPreview(next: DesktopPreview | undefined): void {
-    if (preview?.left === next?.left && preview?.scale === next?.scale) return
-    preview = next
-    for (const listener of previewListeners) listener()
+    const current = previewShelf.get()
+    if (current?.left === next?.left && current?.scale === next?.scale) return
+    previewShelf.set(next)
   }
 
   /** The window as measured: its width, its height, and the height left to the page above the keyboard. @throws {never} */
@@ -122,7 +118,19 @@ module page {
 
   /** Publish measured text scale for CSS alongside the canvas state. @throws {never} */
   export function sized(scale: number): void {
-    if (typeof document !== "undefined") document.documentElement.style.setProperty("--alpha-text-scale", String(scale / 100))
+    if (typeof document === "undefined") return
+    const next = String(scale / 100)
+    if (document.documentElement.style.getPropertyValue("--alpha-text-scale") !== next) {
+      document.documentElement.style.setProperty("--alpha-text-scale", next)
+    }
+  }
+
+  /** Publish the available viewport height for CSS modals and sheets (Contract C1). @throws {never} */
+  export function viewportHeight(value: string): void {
+    if (typeof document === "undefined") return
+    if (document.documentElement.style.getPropertyValue("--alpha-viewport-height") !== value) {
+      document.documentElement.style.setProperty("--alpha-viewport-height", value)
+    }
   }
 
   /** Put away the composer if it still owns the field. @throws {never} */
@@ -131,7 +139,7 @@ module page {
     if (editable(active) && active.closest("[data-alpha-composer]")) active.blur()
   }
 }
-import { type DesktopPreview, type Heard, desktopPreview, focused, measured, nativeKeyboard, paged, releaseComposer, sized, watched } from page
+import { type DesktopPreview, type Heard, desktopPreview, focused, measured, nativeKeyboard, paged, releaseComposer, sized, viewportHeight, watched } from page
 export { type DesktopPreview, desktopPreview }
 
 // spec/app/shell/keyboard.md, "Where Android reports the keyboard, the keyboard hiding puts the composer away, unless it hid to hand the composer to voice"
@@ -197,8 +205,13 @@ const marked = applying(Canvas.Machine, (c) => ({ landscape: c.landscape, wide: 
 // spec/app/shell/keyboard.md, "From 150% text a list and its item take one pane each and Calendar shows its day as an agenda; below it, a list splits from a 1000-point canvas, and Calendar shows as many 240-point day columns as fit beside its 76-point times, widened with the text, at most seven"
 const text = applying(Canvas.Machine, (c) => c.textScale, (scale) => sync(() => sized(scale)))
 
+// spec/app/shell/keyboard.md, "Story: Type without the page turning sideways"
+const height = applying(Canvas.Machine, (c) => (c.covered && c.visible > 0 ? `${c.visible}px` : "100dvh"), (value) => sync(() => viewportHeight(value)))
+
+const previewCleanup = Layer.effectDiscard(Effect.addFinalizer(() => sync(() => { desktopPreview.reset() })))
+
 // spec/app/shell/keyboard.md, "Only the composer is put away, and only when it had focus"
 const release = applying(Canvas.Machine, (c) => c.released, (count) => sync(() => { if (count > 0) releaseComposer() }))
 
 /** The canvas, in memory: measured when the shell mounts and at every change of the window, and marked on the page. */
-export const canvas = together(reacting(Canvas, {}), followed, backgrounded, marked, text, release)
+export const canvas = together(reacting(Canvas, {}), followed, backgrounded, marked, text, height, previewCleanup, release)

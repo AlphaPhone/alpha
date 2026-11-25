@@ -1,4 +1,5 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"
+import { accountProfile } from "./account/profile.vibe"
 import { scanEntry } from "./files/scanEntry.vibe"
 import { together, whole } from "./runtime/reactor.vibe"
 import { pages } from "./settings/pages.vibe"
@@ -27,6 +28,7 @@ import { contacts } from "./contacts/contacts.vibe"
 import { requests } from "./contacts/requests.vibe"
 import { notes } from "./notes/notes.vibe"
 import { startupReview } from "./startup/settingsAccess.vibe"
+import { startupRecovery } from "./startup/recovery.vibe"
 import { clockResident } from "./clock/sync.vibe"
 import { remindersResident } from "./reminders/reminders.vibe"
 import { listing as workflowList } from "./workflows/list.vibe"
@@ -40,6 +42,7 @@ import { nativeDigestDelivery } from "./workflows/native-digests.vibe"
  * any order: they find each other once all are built. Lines are only ever added.
  */
 const machines = together(
+  accountProfile,
   scanEntry,
   shell,
   toasts,
@@ -67,6 +70,7 @@ const machines = together(
   reports,
   notes,
   startupReview,
+  startupRecovery,
   clockResident,
   remindersResident,
   workflowList,

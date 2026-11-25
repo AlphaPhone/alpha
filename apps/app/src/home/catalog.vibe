@@ -1,19 +1,20 @@
 // spec/app/home/index.md, "Story: See the apps on this phone"
 import type { InstalledApp } from "@elizaos/os-bridges"
 import type { Listed } from "../platform/launcher.vibe"
-import { externalStore } from "../runtime/store.ts"
+import { createShelf } from "../runtime/store.ts"
 
 /** What Home last read of each installed app beyond its key, which the spec never holds: its label, icon and profile. */
 export interface Catalog {
   readonly apps: ReadonlyMap<string, InstalledApp>
 }
 
-const held = externalStore<Catalog>({ apps: new Map() })
+const held = createShelf<Catalog>({ apps: new Map() }, { reset: () => ({ apps: new Map() }) })
 
 /** The phone's apps as last read, for the screens to draw: an external store, which React reads without an effect. */
 export const catalog = {
   snapshot: held.snapshot,
   subscribe: held.subscribe,
+  reset: held.reset,
   /** Each app of a reading, which comes before the reading is told to Home. */
   listed(apps: readonly Listed[]): void {
     held.set({ apps: new Map(apps.map(({ key, app }) => [key, app])) })
