@@ -58,11 +58,10 @@ export interface VoiceMemory {
   dictatedDurationMs: number | undefined
   fillTarget: { readonly field: Field; readonly filling: number; readonly apply: (words: string) => void!! } | undefined
   filesNavigation: FilesNavigation | undefined
-  /** The observation and any file the spoken request may attach from the screen now showing. */
-  screen: ((shown: Screen, spoken: string) => {
+  /** The observation and the open Files document a turn sent now from `shown` takes with it, read as Ask Alpha reads them. */
+  screen: ((shown: Screen) => {
     readonly metadata: TurnContext | undefined
     readonly attachment: Attached | undefined
-    readonly explicitlyRequested: boolean
   }!!) | undefined
   /** Whether the turn's spoken acknowledgment is queued and not yet handed to speech. */
   cueWaiting: boolean
@@ -369,7 +368,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       shown = clean
       sayFrom(clean, false)
     }
-    const observation = told && screen !== undefined && memory.screen !== undefined ? try memory.screen(screen.context, spoken) : undefined
+    const observation = told && screen !== undefined && memory.screen !== undefined ? try memory.screen(screen.context) : undefined
     const current = conversation === undefined ? undefined : try conversation.get()
     const currentTurn = Voice.canSentence(try voice.get(), session, turn)
     const sameScreen = told && current !== undefined && current.observing && !current.context.sensitive && current.context.revision === screen?.context.revision
@@ -378,7 +377,6 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     const entailsAttachment = sendsOpenDocument("Spoken", {
       filesShowing: sameScreen && showing?.tag === "App" && showing.view === "Files",
       readable: file?.mimeType === "text/plain",
-      explicitlyRequested: observation?.explicitlyRequested === true,
       sensitive: current?.context.sensitive ?? true,
       currentTurn,
     })
@@ -390,7 +388,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view"
     const alreadyInFiles = showing?.tag === "App" && showing.view === "Files"
     const selected = observation?.metadata?.observation?.selectedObject
-    const operation = sameScreen && images.length === 0 && observation?.explicitlyRequested !== true
+    const operation = sameScreen && images.length === 0
       && selected?.kind !== "document" ? requestedFilesOperation(spoken) : undefined
     const outside = !alreadyInFiles && operation !== undefined && !("shown" in operation) ? operation : undefined
     const review = operation === undefined || !alreadyInFiles && outside === undefined ? undefined : Option.getOrUndefined(try Effect.serviceOption(MediaReview))

@@ -746,11 +746,11 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
   });
 
-  // spec/app/assistant/context.md, "A spoken request about the open document attaches it for that turn"
+  // spec/app/assistant/context.md, "A turn asked while Files shows a readable document attaches it for that turn"
   it.each([
     { text: "The shipment arrives on Wednesday", secret: false },
     { text: "Your verification code is 482913", secret: true },
-  ])("keeps ordinary voice turns opaque and attaches only the requested safe text ($secret)", async ({ text, secret }) => {
+  ])("attaches the open document's safe text to every spoken turn, whatever the words, and never its secret text ($secret)", async ({ text, secret }) => {
     const world = { ...scene(), phone: true, signedIn: false };
     world.ask.metadata = [];
     world.ask.spokenFiles = [];
@@ -775,16 +775,15 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
 
     await press("Talk");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");
+    const attached = { channel: "VOICE_DM", images: secret ? undefined : [{ data: btoa(text), mimeType: "text/plain", name: "notes.txt" }] };
     speakUtterance(world, "What should I do now?");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 1 && state.phase === "Listening" && state.mic === "On");
-    expect(world.ask.spokenFiles?.at(-1)).toEqual({ channel: "VOICE_DM", images: undefined });
+    expect(world.ask.spokenFiles?.at(-1)).toEqual(attached);
     if (!secret) expect(world.ask.metadata.at(-1)).toMatchObject({ observation: { view: "files", selectedObject: { kind: "document" } } });
 
     speakUtterance(world, "Please summarize this file");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 2 && state.phase === "Listening");
-    expect(world.ask.spokenFiles?.at(-1)).toEqual({ channel: "VOICE_DM", images: secret ? undefined : [
-      { data: btoa(text), mimeType: "text/plain", name: "notes.txt" },
-    ] });
+    expect(world.ask.spokenFiles?.at(-1)).toEqual(attached);
     expect(JSON.stringify(world.ask.metadata)).not.toContain(text);
     await press("Stop voice conversation");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle");

@@ -195,6 +195,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Reply, (s) => s.status === "Settled" && s.final === "You said: Hello".length);
     // spec/app/assistant/index.md, "The agent is told the view, the time zone, the day only from Calendar, and whether something is selected"
     expect(world.ask.metadata).toMatchObject([{ observation: { view: "home", sensitive: false } }]);
+    // spec/app/browser/reading.md, "Only the committed page of a normal tab in front, while Browser is the open screen and Browser page for Alpha is on, is ever handed over": a turn asked on Home takes no page.
+    expect(world.ask.metadata[0]).not.toHaveProperty("browserPage");
     // spec/app/assistant/context.md, "The locator holds whether the owner allows it, the time last told, the last GPS fix and the last network answer, each read once under its ticket, and when each may be read again": a cold turn never waits for a fix, and starts one read behind it.
     expect(locationIn(world.ask.metadata[0])).toBe(undefined);
     if (phone) await until(alpha, runtime, Locator, (s) => s.gpsAt >= 0);
