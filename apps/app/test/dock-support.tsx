@@ -8,6 +8,7 @@ import { Assistant } from "../src/assistant/Assistant.tsx";
 import { assisting } from "../src/assistant/assistant.vibe";
 import { MediaHandoff } from "../src/assistant/attachments.vibe";
 import { MediaExecutors } from "../src/assistant/media-review.vibe";
+import { aloud } from "../src/assistant/read-aloud.vibe";
 import { agentAt } from "../src/platform/agent.vibe";
 import { cloudAt } from "../src/platform/cloud.vibe";
 import { pagePlatform } from "../src/platform/platform.vibe";
@@ -42,7 +43,7 @@ export async function mountDock({ view = "Browser", withToast = false, flush }: 
     Layer.succeed(MediaHandoff, { attach: () => Effect.succeed(false) }),
     Layer.succeed(MediaExecutors, { execute: () => Effect.succeed(undefined) }),
   );
-  const runtime = ManagedRuntime.make(Layer.provideMerge(whole(together(resident, assisting, voicing)), platform));
+  const runtime = ManagedRuntime.make(Layer.provideMerge(whole(together(resident, assisting, voicing, aloud)), platform));
   const host = document.body.appendChild(document.createElement("div"));
   const reactRoot = createRoot(host);
   await run(async () => {
