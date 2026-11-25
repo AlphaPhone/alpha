@@ -79,11 +79,11 @@ describe("Alpha product plugin: what the model may pass and what the owner sees"
     const said: string[] = [];
     const callback = (content: { text?: string }) => { said.push(content.text ?? ""); return Promise.resolve([]); };
     const timer = plugin.actions!.find((action) => action.name === "CLOCK_TIMER")!;
-    const started = await timer.handler(makeFakeRuntime().runtime, emptyMessage("Set a timer for 5 minutes"), emptyState, { parameters: { action: "start", durationSeconds: 300 } }, callback as never);
+    const started = await timer.handler(makeFakeRuntime().runtime, emptyMessage("Set a timer for 5 minutes"), emptyState, { parameters: { action: "start", durationSeconds: 300 } }, callback);
     expect(started?.success).toBe(true);
     expect(store.getClock().timers[0]?.durationMs).toBe(300_000);
     const reminders = plugin.actions!.find((action) => action.name === "REMINDERS_MANAGE")!;
-    const added = await reminders.handler(makeFakeRuntime().runtime, emptyMessage("remind me to call the plumber at 6pm"), emptyState, { parameters: { op: "create", title: "Call the plumber", dueDate: "2026-11-24", dueMinute: 1080 } }, callback as never);
+    const added = await reminders.handler(makeFakeRuntime().runtime, emptyMessage("remind me to call the plumber at 6pm"), emptyState, { parameters: { op: "create", title: "Call the plumber", dueDate: "2026-11-24", dueMinute: 1080 } }, callback);
     expect(added?.success).toBe(true);
     expect(store.getReminders().items.map(({ title, dueDate, dueMinute }) => ({ title, dueDate, dueMinute }))).toEqual([{ title: "Call the plumber", dueDate: "2026-11-24", dueMinute: 1080 }]);
     expect(said).toEqual([]);
