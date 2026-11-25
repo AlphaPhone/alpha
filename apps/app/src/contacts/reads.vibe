@@ -20,17 +20,6 @@ import { Rows } from "./contacts.vibe"
 /** What the agent reads, opens or drafts on the phone, answered at once from what is open, and never a call, a send or a write. */
 export type Reading = Extract<DeviceOperation, { type: "sms_latest_sender" | "messages_read_selected" | "voicemail_read_selected" | "contact_read_selected" | "phone_keypad" | "contact_show" | "sms_reply_selected" | "sms_compose" }>
 
-/** Whether the phone answers `operation` as a read, an opening or a draft: an `sms_compose` only when it asks for a draft to a number. */
-export function isReading(operation: DeviceOperation): operation is Reading {
-  switch (operation.type) {
-    case "sms_latest_sender": case "messages_read_selected": case "voicemail_read_selected": case "contact_read_selected":
-    case "phone_keypad": case "contact_show": case "sms_reply_selected":
-      return true
-    case "sms_compose": return "draft" in operation && operation.draft === true && operation.target.kind === "number"
-    default: return false
-  }
-}
-
 /** How far what the agent reads is open: nothing, open and not yet read, or open as the phone last read it. */
 const openedAs = (open: boolean, read: boolean): Opened => (!open ? "NothingOpen" : read ? "OpenRead" : "OpenUnread")
 

@@ -12,7 +12,7 @@ import { Device, native } from "../platform/device.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type Job, answer, contained, due, reacting, started, stop, together, untimed } from "../runtime/reactor.vibe"
 
-export const reviewKeys: Record<Permission, Steps.Key> = {
+const reviewKeys: Record<Permission, Steps.Key> = {
   CameraAccess: "Camera", MicrophoneAccess: "Microphone", LocationAccess: "Location", CalendarAccess: "Calendar",
   PhotosAccess: "Photos", FilesAccess: "Files", NotificationsAccess: "Notifications",
 }
