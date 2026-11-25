@@ -272,6 +272,26 @@ describe("Messages on an Alpha image", () => {
     ]);
   });
 
+  it("Shows an unknown outcome when Android loses the message deletion acknowledgment (spec/app/messages/index.md, \"The phone's answer ends the removal it names, and the conversation is read again unless it was refused\")", async () => {
+    const world = image();
+    world.telephony.deletionReply = "lost";
+    world.telephony.holdMessageDeletion = true;
+    const { alpha } = await openImage(world);
+    await openMessages(alpha);
+    await ready(alpha.runtime, Messages, "Conversation list loaded", (state) => state.list.status === "Loaded" && state.threads === 1);
+    await press("Maya Chen");
+    await ready(alpha.runtime, Messages, "Conversation loaded", (state) => state.pane === "Conversation" && state.page.status === "Loaded");
+    await bubble("See you at five");
+    await press("Delete");
+    await ready(alpha.runtime, Messages, "Message deletion confirmation", (state) => state.confirming);
+    await confirm("Delete");
+    await ready(alpha.runtime, Messages, "Message deletion unknown", (state) => state.removal.outcome === "Unknown");
+    expect(document.body.textContent).toContain("Alpha cannot tell whether the message was deleted");
+    expect(button("Undo")).toBeUndefined();
+    expect(world.telephony.staged).toMatchObject([{ kind: "message", phase: "queued", target: { id: "sms:1" } }]);
+    expect(world.telephony.deletionAttempts).toEqual(["sms:1"]);
+  });
+
   it("Checks the original picture message after a restart (spec/app/messages/composer.md, \"The owner attaches up to five pictures, and removes them one by one\"; spec/app/messages/composer.md, \"A restart closes the conversation and keeps the saved drafts, the send, access and the SIMs the phone has\"; spec/app/messages/sending.md, \"The journal read back settles an unknown outcome: sent, or never sent\")", async () => {
     const world = image();
     world.telephony.holdMmsSubmission = true;

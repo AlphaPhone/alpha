@@ -44,6 +44,9 @@ export interface TelephonyScene {
   texts: Text[];
   /** Leaves the staged SMS deletion open so the owner can Undo. */
   holdMessageDeletion: boolean;
+  /** Whether the bridge carries Android's acknowledgment after staging a deletion. */
+  deletionReply: "complete" | "lost" | "malformed";
+  readonly deletionAttempts: string[];
   smsNotice: { threadId: string; token: string } | undefined;
   /** Every text the radio was handed: the operation it was reviewed under, and to whom. */
   sent: { operationId: string; recipients: string[]; body: string }[];
@@ -106,6 +109,8 @@ export function telephonyScene(): TelephonyScene {
     sms: "granted",
     texts: [{ id: 1, thread: 1, address: "+14155550100", box: "inbox", date: 1_700_000_050_000, body: "See you at five", read: false }],
     holdMessageDeletion: false,
+    deletionReply: "complete",
+    deletionAttempts: [],
     holdContactDeletion: undefined,
     smsNotice: undefined,
     sent: [],
@@ -156,6 +161,10 @@ function telephony(world: TelephonyScene): Faked {
     acknowledgeSmsNotice(input: { token: string }): Promise<void>;
   }, Record<string, unknown>>((emit) => {
     world.changed = () => emit("messagesChanged", {});
+    const deletionResponse = (response: Record<string, unknown>) => {
+      if (world.deletionReply === "lost") return Promise.reject(new Error("Deletion acknowledgment lost"));
+      return Promise.resolve(world.deletionReply === "malformed" ? { ...response, deletion: {} } : response);
+    };
     world.deliver = (operationId) => {
       const record = world.journal.get(operationId);
       if (record === undefined) return;
@@ -236,12 +245,13 @@ function telephony(world: TelephonyScene): Faked {
         return Promise.resolve({ status: "marked" });
       },
       deleteVoicemail: ({ id }) => {
+        world.deletionAttempts.push(`voicemail:${id}`);
         const one = voicemail(id);
         if (one === undefined) return Promise.resolve({ status: "not-found" });
         one.deleted = !world.holdVoicemailDeletion;
         const staged = { id: `staged-${world.staged.length + 1}`, kind: "voicemail", target: { id }, phase: world.holdVoicemailDeletion ? "queued" : "deleted", deadline: { expiresAt: 1_800_000_000_000 } };
         world.staged.push(staged);
-        return Promise.resolve({ status: "queued", deletion: staged });
+        return deletionResponse({ status: "queued", deletion: staged });
       },
       observeVoicemail: () => Promise.resolve(undefined),
       smsNoticePending: () => Promise.resolve(world.smsNotice ?? {}),
@@ -273,12 +283,13 @@ function telephony(world: TelephonyScene): Faked {
         return Promise.resolve({ defaultSmsApp: true, updated: unread.length });
       },
       deleteMessage: (reference) => {
+        world.deletionAttempts.push(reference.id);
         const found = world.texts.find((one) => `sms:${one.id}` === reference.id);
         if (found === undefined) return Promise.resolve({ status: "not-found", message: { ...reference } });
         if (!world.holdMessageDeletion) world.texts = world.texts.filter((one) => one !== found);
         const staged = { id: `staged-${world.staged.length + 1}`, kind: "message", target: { ...reference }, phase: world.holdMessageDeletion ? "queued" : "deleted", deadline: { expiresAt: 1_800_000_000_000 } };
         world.staged.push(staged);
-        return Promise.resolve({ status: "queued", message: { ...reference }, deletion: staged });
+        return deletionResponse({ status: "queued", message: { ...reference }, deletion: staged });
       },
       deleteThread: (reference) => Promise.resolve({ status: "not-found", thread: { ...reference } }),
       observeMessages: () => Promise.resolve(undefined),

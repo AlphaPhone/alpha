@@ -475,6 +475,28 @@ describe("Phone on an Alpha image", () => {
     expect(document.querySelector("[data-alpha-phone-transcript]")?.textContent).toBe("The current transcript");
   });
 
+  it(`Shows an unknown outcome when Android returns a malformed voicemail deletion acknowledgment (spec/app/phone/voicemail.md, "The phone's answer ends the removal it names")`, async () => {
+    const world = image();
+    world.telephony.deletionReply = "malformed";
+    world.telephony.holdVoicemailDeletion = true;
+    const { alpha } = await openPhoneWorld(world);
+    await until(alpha, alpha.runtime, Shell, (state) => state.image);
+    await openPhone(alpha);
+    await until(alpha, alpha.runtime, Phone, (state) => state.front && state.voicemail);
+    await tab("Voicemail");
+    await until(alpha, alpha.runtime, Voicemail, (state) => state.list.status === "Loaded" && state.items === 1);
+    await pressVoicemailRow();
+    await until(alpha, alpha.runtime, Voicemail, (state) => state.open);
+    await press("Delete");
+    await until(alpha, alpha.runtime, Voicemail, (state) => state.confirming);
+    await confirm("Delete");
+    await until(alpha, alpha.runtime, Voicemail, (state) => state.removal.outcome === "Unknown");
+    expect(document.body.textContent).toContain("Alpha cannot tell whether the voicemail was deleted");
+    expect(button("Undo")).toBeUndefined();
+    expect(world.telephony.staged).toMatchObject([{ kind: "voicemail", phase: "queued", target: { id: "11" } }]);
+    expect(world.telephony.deletionAttempts).toEqual(["voicemail:11"]);
+  });
+
   it(`Keeps a voicemail only when Android confirms Undo (spec/app/phone/voicemail.md, "Undo can keep a voicemail while Android's deletion window is open")`, async () => {
     const world = image();
     world.telephony.holdVoicemailDeletion = true;
