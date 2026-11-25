@@ -21,8 +21,13 @@ module frames {
     readonly height: number
   }
 
+  export type FrameEvent = { readonly kind: "framed" | "frameBlocked"; readonly request: FrameRequest }
+
+  type FrameStatus = "Blocked" | "Stopped"
+  type FrameSurface = { readonly request: FrameRequest; readonly status?: FrameStatus }
+
   export type FrameView = {
-    readonly frames: readonly FrameRequest[]
+    readonly frames: readonly FrameSurface[]
     readonly placement: FramePlacement | null
   }
 
@@ -31,7 +36,7 @@ module frames {
     readonly restoredTitle?: { readonly url: string; readonly title: string }
     addresses: string[]
     position: number
-    frame: FrameRequest | null
+    frame: FrameSurface | null
   }
 
   export type WebMove = Exclude<Way, "Address" | "Query">
@@ -44,9 +49,9 @@ module frames {
     private readonly delivered = new WeakSet<FrameRequest>()
     private placement: FramePlacement | null = null
     private view: FrameView = emptyFrames
-    private readonly ready: (request: FrameRequest) => void
+    private readonly ready: (receipt: FrameEvent) => void
 
-    constructor(ready: (request: FrameRequest) => void) {
+    constructor(ready: (receipt: FrameEvent) => void) {
       this.ready = ready
     }
 
@@ -76,7 +81,7 @@ module frames {
       const url = tab.addresses[position]
       if (url === undefined) return false
       tab.position = position
-      tab.frame = { id, load, url, privateTab: tab.privateTab }
+      tab.frame = { request: { id, load, url, privateTab: tab.privateTab } }
       this.publish()
       return true
     }
@@ -112,20 +117,28 @@ module frames {
 
     current(id: string, load: number): FrameRequest | undefined {
       const frame = this.tabs.get(id)?.frame
-      return frame?.load === load ? frame : undefined
+      return frame?.request.load === load && frame.status !== "Stopped" ? frame.request : undefined
     }
 
     loaded(id: string, load: number): void {
       const request = this.current(id, load)
-      if (request === undefined || this.delivered.has(request)) return
+      if (request === undefined || this.tabs.get(id)?.frame?.status === "Blocked") return
+      const kind = this.delivered.has(request) ? "frameBlocked" : "framed"
       this.delivered.add(request)
-      this.ready(request)
+      this.ready({ kind, request })
+    }
+
+    blocked(request: FrameRequest): void {
+      const tab = this.tabs.get(request.id)
+      if (tab?.frame?.request !== request || tab.frame.status !== undefined) return
+      tab.frame = { request, status: "Blocked" }
+      this.publish()
     }
 
     stop(id: string, load: number): void {
       const tab = this.tabs.get(id)
-      if (tab?.frame?.load !== load) return
-      tab.frame = null
+      if (tab?.frame?.request.load !== load) return
+      tab.frame = { request: tab.frame.request, status: "Stopped" }
       this.publish()
     }
 
@@ -152,8 +165,8 @@ module frames {
   }
 }
 
-import { WebFrames, emptyFrames, type FramePlacement, type FrameRequest, type WebMove } from frames
-export { WebFrames, emptyFrames, type FramePlacement, type FrameRequest, type WebMove }
+import { WebFrames, emptyFrames, type FrameEvent, type FramePlacement, type FrameRequest, type WebMove } from frames
+export { WebFrames, emptyFrames, type FrameEvent, type FramePlacement, type FrameRequest, type WebMove }
 
 module documents {
   import { normalizeBrowsing, type BrowserSavedState } from "@elizaos/os-bridges"
