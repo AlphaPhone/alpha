@@ -16,7 +16,7 @@ import { agentOpen } from "../src/notes/agent.vibe";
 import { numberOf } from "../src/notes/content.vibe";
 import notes from "../src/notes/index.tsx";
 import { untimed } from "../src/runtime/reactor.vibe";
-import { button, closeAll, drawn, fill, only, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, only, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { note, prepared } from "./fakes/notes.ts";
 import { scene } from "./fakes/scene.ts";
 
@@ -167,6 +167,45 @@ describe("Notes", () => {
     expect(world.ask.metadata[0]).toMatchObject({
       observation: { view: "notes", selectedObject: { kind: "canonical-note", id: "sync", revision: String(world.notes.revision) } },
     });
+  });
+
+  it("Reviews a generated transcript before saving it (spec/app/notes/voice.md, \"Story: Read and use the transcript\")", async () => {
+    const world = scene();
+    world.phone = true;
+    const recordingId = "retained-recording";
+    const noteId = "voice-review";
+    const durationMs = 32_000;
+    const revision = world.notes.revision;
+    world.notes.notes.push(note(noteId, "Field recording", "", Date.now(), {
+      kind: "voice", data: { audioId: recordingId, durationMs, segments: [{ durationMs: 25_000 }, { durationMs: 7_000 }] },
+    }));
+    world.notes.audio.set(recordingId, { noteId, durationMs });
+    const windows: number[] = [];
+    world.voice.noteTranscription = (request) => {
+      expect(request).toMatchObject({ noteId, recordingId, durationMs });
+      windows.push(request.offsetMs);
+      return Promise.resolve(request.offsetMs === 0 ? "The door closes at dusk." : "Send a reminder on Thursday.");
+    };
+    const { alpha } = await open(world, only("view:Notes"));
+    const runtime = notes.runtime(alpha);
+    await drawn(() => runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Notes" }))));
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+    await press("Open Field recording");
+    await until(alpha, runtime, Voice, (state) => state.showing);
+    expect(windows).toEqual([]);
+    await press("Generate transcript");
+    await until(alpha, runtime, Voice, (state) => state.listen.status === "Loaded");
+    expect(windows).toEqual([0, 25_000]);
+    await press("Review transcript");
+    expect(document.querySelector("[role=dialog]")?.textContent).toContain("Send a reminder on Thursday.");
+    expect(world.notes.revision).toBe(revision);
+    await pressOnTop("Add to note");
+    await until(alpha, runtime, Voice, (state) => state.writing.outcome === "Confirmed" && state.added === 2);
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded" && state.version === revision + 2);
+    expect(world.notes.notes.find((item) => item.id === noteId)?.format?.data.lines).toEqual([
+      { s: "me", t: "The door closes at dusk.", at: 0 },
+      { s: "me", t: "Send a reminder on Thursday.", at: 25 },
+    ]);
   });
 
   it("The agent opens the note I named, and only that, only for my request now (spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened\"; spec/app/notes/note.md, \"Only the owner opens a dialog or a question in Notes; a note is opened by the owner, or by the agent for the one the owner just named; and nothing opens while anything else of Notes is open\"; spec/app/assistant/index.md, \"Story: Let Alpha open what it is talking about\")", async () => {

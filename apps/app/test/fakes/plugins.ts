@@ -2,6 +2,7 @@ import { elizaCalendar } from "./calendar.ts";
 import { elizaCamera } from "./camera.ts";
 import { elizaFiles, selectedDocuments } from "./files.ts";
 import { alphaMapsTransport, elizaLocation } from "./maps.ts";
+import { alphaNotes } from "./notes.ts";
 import { type Faked, elizaAgent, elizaCloud, elizaSecureStore } from "./phone.ts";
 import { alphaPhotos } from "./photos.ts";
 import { alphaConnection } from "./platform.ts";
@@ -45,5 +46,6 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     ElizaCloudSpeech: elizaCloudSpeech(world.voice),
     ElizaSignIn: elizaSignIn(world.voice, () => world.signedIn),
     AlphaBrowser: alphaBrowser(world.browser),
+    ...(world.notes.audio.size > 0 ? { AlphaNotes: alphaNotes(world.notes) } : {}),
   };
 }
