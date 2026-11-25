@@ -5,7 +5,7 @@ What a turn tells the agent about the phone besides the screen the
 page open in Browser, what Maps shows, the time zone, the phone actions this
 phone can carry out, and whether the owner's words go to a hosted model.
 Eliza encodes the turn context (`encodeTurnContext` of
-`@elizaos/agent/client`) and drops what a peer does not declare; no wire
+`@elizaos/agent`) and drops what a peer does not declare; no wire
 shape is restated here. The location is read through eliza's location
 bridge, and the network answer through Alpha's network-location plugin,
 only on a phone and only while "Location for Alpha" is on in Settings'
@@ -233,28 +233,30 @@ pure def lawAPeerThatDoesNotTakeTheScreenGetsNoDay(observed: bool, onCalendar: b
   not(sendsDay(observed, onCalendar, { takes: false, declaresLocation: true, declaresPage: true }))
 ```
 
-### A spoken turn carries what a typed turn sent at that moment would, but the view claim
+### A spoken turn carries what a typed turn sent at that moment would, the view claim included
 
 Each turn of a voice conversation reads the screen again when it is sent:
 the observation with its day, location and selected record, the Browser
-page beside it, and the direct-request mode of approvals. The view a typed
-turn claims stays with typed turns; voice follows the agent's screen
-through its own claim.
+page beside it, the direct-request mode of approvals, and, from a screen
+that is not sensitive, the claim of a view the agent prepares for it. Voice
+opens that view as it opens any screen it is asked for, and a saved note
+the owner names aloud opens as one named in writing would ([Notes](../notes/index.md),
+"The agent opens the one note the owner named, as the list last read it,
+once for the owner's current request, and is told whether it opened").
 
 ```quint
 type Source = Typed | Spoken
 type Part = Observation | Page | DirectMode | ViewClaim
 
 pure def carries(source: Source, part: Part, observed: bool, direct: bool): bool =
-  if (part == ViewClaim) source == Typed else if (part == DirectMode) direct else observed
+  if (part == DirectMode) direct else observed
 
 pure def lawASpokenTurnCarriesWhatATypedTurnDoes(part: Part, observed: bool, direct: bool): bool =
-  part != ViewClaim implies carries(Spoken, part, observed, direct) == carries(Typed, part, observed, direct)
-
-pure def lawASpokenTurnClaimsNoView(observed: bool, direct: bool): bool = not(carries(Spoken, ViewClaim, observed, direct))
+  carries(Spoken, part, observed, direct) == carries(Typed, part, observed, direct)
 
 pure def lawASensitiveScreenSendsNoScreen(source: Source, direct: bool): bool =
   not(carries(source, Observation, false, direct)) and not(carries(source, Page, false, direct))
+    and not(carries(source, ViewClaim, false, direct))
 ```
 
 ## Story: Let my agent read the page I have open in Browser

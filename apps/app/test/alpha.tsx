@@ -90,9 +90,12 @@ export function asleep(world: Scene, ms: number) {
 }
 
 /** The button whose accessible name is `name`, if one is shown. */
-export const button = (name: string) => [...document.querySelectorAll("button")].find((found) => (found.getAttribute("aria-label") ?? found.textContent) === name);
+export const button = (name: string | RegExp) => [...document.querySelectorAll("button")].find((found) => {
+  const label = found.getAttribute("aria-label") ?? found.textContent ?? "";
+  return typeof name === "string" ? label === name : label.trim().search(name) !== -1;
+});
 
-export const press = (name: string) => drawn(() => {
+export const press = (name: string | RegExp) => drawn(() => {
   const found = button(name);
   if (!found) throw new Error(`no button ${name}`);
   found.click();
@@ -100,7 +103,7 @@ export const press = (name: string) => drawn(() => {
 
 /** Press the button named `name` on the sheet or dialog on top, where the page behind it may hold one of the same name. */
 export const pressOnTop = (name: string) => drawn(() => {
-  const top = [...document.querySelectorAll("[role=dialog]")].at(-1);
+  const top = [...document.querySelectorAll("[role=dialog], [role=alertdialog]")].at(-1);
   const found = top && [...top.querySelectorAll("button")].find((one) => (one.getAttribute("aria-label") ?? one.textContent) === name);
   if (!found) throw new Error(`no button ${name} on top`);
   found.click();

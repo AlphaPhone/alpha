@@ -1,5 +1,5 @@
 // spec/app/ask/index.md, "Story: Talk to my agent"
-import { ConversationRecord, TurnController, type TurnResult } from "@elizaos/agent/client"
+import { ConversationRecord, TurnController, type TurnResult } from "@elizaos/agent"
 import * as Ask from "../../gen/app__ask.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__ask.effect.vibe"
 import { Agent } from "../platform/agent.vibe"

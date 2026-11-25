@@ -1,6 +1,6 @@
 // spec/app/workflows/list.md, "The list is read from the agent for the owner signed in, one reading at a time"; spec/app/workflows/index.md, "Story: Open a workflow"
-import { RuntimeRequestError } from "@elizaos/agent/client"
-import { type WorkflowClient, type WorkflowRequest, workflowClient, workflowHttpError } from "@elizaos/plugin-workflow/client"
+import { RuntimeRequestError } from "@elizaos/agent"
+import { type WorkflowClient, type WorkflowRequest, workflowClient, workflowHttpError } from "@elizaos/plugin-workflow-client"
 import { Agent } from "../platform/agent.vibe"
 import { ask } from "../platform/remote.vibe"
 
@@ -19,7 +19,7 @@ export const workflowsApi = Layer.effect(WorkflowsApi, effect {
     inFlight.set(path, fresh)
     return fresh
   }
-  const request: WorkflowRequest = effect (path: string, body: unknown) => tryPromise({
+  const request: WorkflowRequest = effect (path: string, body: unknown) => try tryPromise({
     try: () => body === undefined ? read(path) : runtime.request(path, body),
     catch: (error) => error instanceof RuntimeRequestError
       ? workflowHttpError(error.status, { code: error.code, error: error.message })
@@ -30,18 +30,25 @@ export const workflowsApi = Layer.effect(WorkflowsApi, effect {
 
 const Identifier = Schema.NonEmptyString
 
-export schema Prompt {
-  readonly id: Identifier
-  readonly displayName: string
-  readonly instructions: string
-  readonly enabled: boolean
-  readonly revision: Schema.Int
-  readonly triggerType: "once" | "cron" | "event"
-  readonly scheduledAtIso?: string
-  readonly cronExpression?: string
-  readonly eventKind?: string
-  readonly timezone: string
+const Once = { triggerType: Schema.Literal("once"), scheduledAtIso: Schema.NonEmptyString }
+const Recurring = { triggerType: Schema.Literal("cron"), cronExpression: Schema.NonEmptyString }
+const OnEvent = { triggerType: Schema.Literal("event"), eventKind: Schema.NonEmptyString }
+const Timing = Schema.Union([Schema.Struct(Once), Schema.Struct(Recurring), Schema.Struct(OnEvent)])
+const PromptFields = {
+  id: Identifier,
+  displayName: Schema.String,
+  instructions: Schema.String,
+  enabled: Schema.Boolean,
+  revision: Schema.Int,
+  timezone: Schema.NonEmptyString,
 }
+export const Prompt = Schema.Union([
+  Schema.Struct({ ...PromptFields, ...Once }),
+  Schema.Struct({ ...PromptFields, ...Recurring }),
+  Schema.Struct({ ...PromptFields, ...OnEvent }),
+])
+export type Prompt = typeof Prompt.Type
+export type PromptTiming = typeof Timing.Type
 
 export schema ScheduledTask {
   readonly taskId: Identifier

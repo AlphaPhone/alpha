@@ -1,5 +1,5 @@
 // spec/app/calendar/index.md, "Story: See my days"; spec/app/calendar/index.md, "Story: See only my own account's calendar"
-import type { AndroidCalendarEvent, AndroidCalendarList, AndroidCalendarPlugin, AndroidCalendarRow } from "@elizaos/os/bridges/definitions/calendar";
+import type { AndroidCalendarEvent, AndroidCalendarList, AndroidCalendarPlugin, AndroidCalendarRow } from "@elizaos/os-bridges";
 import { type Faked, plugin, rejection } from "./phone.ts";
 import type { Route } from "./routes.ts";
 
@@ -13,7 +13,7 @@ export interface FakeAttendee {
   optional: boolean;
 }
 
-/** One event of the agent's Calendar as eliza's calendar routes answer it (`.eliza/packages/plugin-calendar/src/model.vibe`, `CalendarEvent`). */
+/** One event of the agent's Calendar as eliza's calendar routes answer it (`.eliza/packages/plugin-calendar-client/src/model.vibe`, `CalendarEvent`). */
 export interface FakeEvent {
   id: string;
   externalId: string;
@@ -61,7 +61,7 @@ export interface CalendarScene {
   readonly creations: Map<string, string>;
   lost: boolean;
   handedOff: number;
-  /** The agent's approvals list: each Calendar request it filed (`.eliza/packages/agent/src/approvals/routes.vibe`), and how it was resolved. */
+  /** The agent's approvals list: each Calendar request it filed (`.eliza/packages/agent-host/src/approvals/routes.vibe`), and how it was resolved. */
   readonly approvals: FakeApproval[];
   /** The agent's linked sync control: its revision, whether it is paused, the Google calendar it writes to, and the state of each linked event. */
   readonly control: { revision: number; paused: boolean; destination: { connectorAccountId: string; providerCalendarId: string } | null; links: string[] };

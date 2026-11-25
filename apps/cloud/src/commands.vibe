@@ -1,5 +1,5 @@
 // spec/cloud/rollout.md, "Story: Deploy an environment without reading a secret into the repository"; spec/cloud/provisioning.md, "The steps run in one order, the same for staging and production, each one command"
-import type { CloudEnvironment } from "@elizaos/cloud/profile"
+import type { CloudEnvironment } from "@elizaos/cloud"
 import type { PlatformError } from "effect/PlatformError"
 import type { ChildProcessSpawner } from "effect/process/ChildProcessSpawner"
 import { Machine, machine, type Rejected } from "../gen/cloud__rollout.effect.vibe"

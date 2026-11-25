@@ -1,0 +1,14 @@
+// spec/app/files/shared.md, "A file has a number, a name, a revision that changes whenever the file does, a kind, its size, and the storage volume it is on"
+import type { Kind } from "../../gen/app__files__shared.effect.vibe"
+
+/** What a file is, from what the phone says of it. */
+export function kindOf(entry: { readonly directory: boolean; readonly mimeType: string }): Kind {
+  if (entry.directory) return "Folder"
+  const { mimeType } = entry
+  if (mimeType.startsWith("image/")) return "Image"
+  if (mimeType.startsWith("video/")) return "Video"
+  if (mimeType.startsWith("audio/")) return "Audio"
+  if (mimeType === "application/pdf") return "Pdf"
+  if (mimeType.startsWith("text/") || mimeType.includes("document") || mimeType.includes("msword")) return "Document"
+  return "Other"
+}

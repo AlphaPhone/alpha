@@ -11,9 +11,9 @@ export const LIST_ICONS: readonly ReminderListIcon[] = ["list", "home", "work", 
 
 const COLOR_BADGE: Readonly<Record<ReminderListColor, string>> = {
   accent: "bg-accent text-accent-foreground",
-  blue: "bg-info text-info-foreground",
-  green: "bg-ok text-ok-foreground",
-  amber: "bg-warn text-warn-foreground",
+  blue: "bg-info text-primary-foreground",
+  green: "bg-ok text-primary-foreground",
+  amber: "bg-warn text-primary-foreground",
   rose: "bg-destructive text-destructive-foreground",
   violet: "bg-alpha text-alpha-foreground",
 };

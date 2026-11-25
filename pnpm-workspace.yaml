@@ -63,6 +63,8 @@ catalog:
 
 overrides:
   "@effect/platform-node-shared": 4.1.1
+  # The packaged PDF renderer uses a browser's Worker and Canvas.
+  "pdfjs-dist>@napi-rs/canvas": "-"
 
 # madge 8 declares TypeScript 5 as an optional peer; it reads TypeScript 6
 # projects through --ts-config all the same.

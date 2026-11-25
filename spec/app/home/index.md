@@ -80,6 +80,7 @@ pure val ticketValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 pure val shellValues = Set(
   S::initial,
   { ...S::initial, image: true, contacts: true },
+  { ...S::initial, drawer: true },
   { ...S::initial, trail: List(S::Notes) })
 pure val readHome: Home = {
   ...initial, host: AsLauncher, installed: { ...P::initial, read: { status: R::Loaded, ticket: 1 }, apps: Set("clock", "mail") },
@@ -270,6 +271,25 @@ pure def stepReadingsAreTicketed(before: Home, via: str, after: Home, out: List[
         and r.ticket == after.tiles.load.ticket and r.ticket == before.tiles.load.ticket + 1
     | _ => true
   })
+```
+
+## Story: Find an installed app in Apps
+
+> As the owner, I want to open Apps on my phone, see the current launcher
+> catalog, and try again if it could not be read.
+
+### The Apps tile belongs to phone Home and leaves while Home is being edited
+
+The drawer uses the last accepted catalog, including while a new reading is
+on its way. The page displays reading, unreadable, empty and matching states.
+
+```quint
+pure def offersDrawer(h: Home): bool = onPhone(h) and not(h.editing)
+
+pure def canTryAgain(h: Home, shell: S::Shell): bool =
+  onPhone(h) and shell.drawer and h.installed.read.status == R::Failed
+
+pure def tryAgain(h: Home, shell: S::Shell): Moved = thenReadApps(List(), h, false)
 ```
 
 ## Story: Open an app
@@ -546,15 +566,23 @@ pure def done(h: Home): Home = { ...h, editing: false, adding: false }
 
 ### When the shell moves, anything over Home ends editing
 
-The shell tells Home each time it moves.
+The shell tells Home each time it moves. Opening Apps also starts the first
+catalog read if the phone's apps have not yet been read.
 
 ```quint
-pure def canShellMoved(h: Home, shell: S::Shell): bool = h.editing and S::layers(shell) > 0
+pure def needsAppsForDrawer(h: Home, shell: S::Shell): bool =
+  onPhone(h) and shell.drawer and h.installed.read.status == R::Idle
 
-pure def shellMoved(h: Home, shell: S::Shell): Home = { ...h, editing: false, adding: false }
+pure def canShellMoved(h: Home, shell: S::Shell): bool =
+  (h.editing and S::layers(shell) > 0) or needsAppsForDrawer(h, shell)
+
+pure def shellMoved(h: Home, shell: S::Shell): Moved =
+  val fitted = if (S::layers(shell) > 0) { ...h, editing: false, adding: false } else h
+  if (needsAppsForDrawer(h, shell)) thenReadApps(List(), fitted, false)
+  else { state: fitted, out: List() }
 
 pure def lawWhatTheShellLeavesBehindCloses(home: Home, shell: S::Shell): bool =
-  canShellMoved(home, shell) implies not(shellMoved(home, shell).editing)
+  canShellMoved(home, shell) implies (S::layers(shell) > 0 implies not(shellMoved(home, shell).state.editing))
 ```
 
 ### Nothing on Home starts under a layer of the shell
@@ -639,16 +667,20 @@ pure def sometimesTheShadeGoesUnanswered(h: Home): bool = N::isShade(h.handoff.a
 
 ### A notice shows as a toast on bare Home and in the edit bar while editing; told while an app or Ask Alpha is up, it is not shown
 
+When Apps is open, a notice is told in that drawer.
+
 ```quint
-type Place = AsToast | InEditBar | Nowhere
+type Place = AsToast | InDrawer | InEditBar | Nowhere
 
 pure def noticeAt(h: Home, shell: S::Shell): Place =
   if (shell.trail.length() > 0 or shell.assistant != S::Bar) Nowhere
+  else if (shell.drawer) InDrawer
   else if (h.editing) InEditBar
   else AsToast
 
 pure def lawANoticeIsShownOnlyWhereTheOwnerIs(home: Home, shell: S::Shell): bool =
   ((noticeAt(home, shell) == Nowhere) iff (shell.trail.length() > 0 or shell.assistant != S::Bar))
+    and (noticeAt(home, shell) == InDrawer implies shell.drawer)
     and (noticeAt(home, shell) == InEditBar implies home.editing)
     and (noticeAt(home, shell) == AsToast implies S::layers(shell) == 0)
 ```

@@ -32,18 +32,19 @@ type Actor = Owner | Phone
 type Kind = Pdf | Photo | Media | Archive | Receipt | Text
 type Why = Fine | Locked | TooLarge | TooSlow | Unsealed
 type Seen = { item: int, revision: int }
+type StorageAction = MoveFile | TrashFile | RenameFile
 type Preview = {
   viewer: int, viewers: int, item: int, kind: Kind, revision: int, reachable: bool, siblings: List[str],
   content: R::Read, playing: bool, secret: bool,
   page: int, pages: int, drawing: R::Read, drawnAt: int, why: Why,
-  attempt: A::Attempt, offered: Seen,
+  attempt: A::Attempt, offered: Seen, renaming: int,
 }
 
 pure val initial: Preview = {
   viewer: 0, viewers: 0, item: 0, kind: Photo, revision: 0, reachable: false, siblings: List(),
   content: R::unread, playing: false, secret: false,
   page: 0, pages: 0, drawing: R::unread, drawnAt: 0, why: Fine,
-  attempt: A::plan(0), offered: { item: 0, revision: 0 },
+  attempt: A::plan(0), offered: { item: 0, revision: 0 }, renaming: 0,
 }
 ```
 
@@ -65,6 +66,10 @@ type Effect =
   | AskAlpha({ item: int })
   | Transcribe({ item: int })
   | OpenElsewhere({ item: int, revision: int, writable: bool })
+  | ShareFile({ viewer: int, item: int, revision: int })
+  | ActOnStoredFile({ viewer: int, item: int, revision: int, operation: StorageAction, name: str })
+  | RenamePicked({ viewer: int, item: int, revision: int, name: str })
+  | OfferPicture({ viewer: int, item: int, revision: int })
   | Lost({ item: int })
   | SelectAgain({ item: int })
   | Forget({ item: int })
@@ -87,6 +92,7 @@ pure val ticketValues = Set(1, 2, 3, 4)
 pure val revisionValues = Set(1, 2)
 pure val accountValues = Set(1, 2)
 pure val siblingsValues = Set(List(), List("a"))
+pure val nameValues = Set("", "b", "c")
 ```
 
 ### Showing a file opens a new viewer, closing the one before, and reads it for that viewer
@@ -261,8 +267,9 @@ pure def sometimesAPhotoCouldNotBeRead(s: Preview): bool = s.content.status == R
 
 ## Story: Act on the file I am looking at
 
-> As the owner, I want to ask Alpha about it, rename it in Files, put it in an email,
-> transcribe a recording into Notes, open it in another app, or forget it.
+> As the owner, I want to see a file's details, share it in Android, ask
+> Alpha about it, rename it in Files, put it in an email, transcribe a
+> recording into Notes, open it in another app, or forget it.
 
 ### Ask Alpha, Transcribe and Open elsewhere hand the file on and change nothing here
 
@@ -281,6 +288,80 @@ pure def canOpenElsewhere(s: Preview, by: Actor): bool = by == Owner and usable(
 
 pure def openElsewhere(s: Preview, by: Actor): Moved =
   { state: s, out: List(OpenElsewhere({ item: s.item, revision: s.revision, writable: false })) }
+```
+
+### The owner can share the readable file shown through Android using its own selected-document grant
+
+Android asks where it goes. A late request cannot share from a later viewer
+or a different revision. The viewer keeps the file and the chooser cannot
+write to it.
+
+```quint
+pure def canShareFile(s: Preview, by: Actor): bool = by == Owner and usable(s)
+
+pure def shareFile(s: Preview, by: Actor): Moved =
+  { state: s, out: List(ShareFile({ viewer: s.viewer, item: s.item, revision: s.revision })) }
+
+pure def stepSharingNamesTheExactPreview(before: Preview, via: str, after: Preview, out: List[Effect]): bool =
+  out.every(e => match e {
+    | ShareFile(x) => via == "shareFile" and usable(before) and x.viewer == before.viewer
+        and x.item == before.item and x.revision == before.revision and after == before
+    | _ => true
+  })
+```
+
+### Rename, Move to and Move to Trash act on the storage-backed preview still showing
+
+A document another provider holds may be shared through its selected grant.
+Only Files can rename, move or bin one of its own entries here. The phone
+opens the exact folder and selection before showing the usual Move to or
+Trash confirmation. A successful rename reopens the same document with
+its new name when that preview is still showing.
+
+```quint
+pure def canActOnStoredFile(s: Preview, operation: StorageAction, name: str, stored: bool, by: Actor): bool =
+  by == Owner and usable(s) and stored and (operation != RenameFile or F::freeName(name, s.siblings))
+
+pure def actOnStoredFile(s: Preview, operation: StorageAction, name: str, stored: bool, by: Actor): Moved =
+  { state: s, out: List(ActOnStoredFile({ viewer: s.viewer, item: s.item, revision: s.revision, operation: operation, name: name })) }
+
+pure def stepAStoredActionNamesTheExactPreview(before: Preview, via: str, after: Preview, out: List[Effect]): bool =
+  out.every(e => match e {
+    | ActOnStoredFile(x) => via == "actOnStoredFile" and usable(before) and x.viewer == before.viewer
+        and x.item == before.item and x.revision == before.revision and after == before
+    | _ => true
+  })
+```
+
+### A picked document is renamed through its provider using the access held for the viewer
+
+A provider that can rename it may keep access, in which case the renamed
+document is read again. If the provider completed the rename and access
+ended, the owner sees the requested name and must select the file again.
+The result of naming a picked document cannot change the document that a
+later viewer shows. While the provider is working, one rename is enough.
+
+```quint
+pure def canRenamePicked(s: Preview, name: str, renameable: bool, by: Actor): bool =
+  by == Owner and usable(s) and renameable and s.renaming == 0 and name != ""
+
+pure def renamePicked(s: Preview, name: str, renameable: bool, by: Actor): Moved =
+  { state: { ...s, renaming: s.viewer },
+    out: List(RenamePicked({ viewer: s.viewer, item: s.item, revision: s.revision, name: name })) }
+
+pure def canPickedRenameFinished(s: Preview, viewer: int, by: Actor): bool =
+  by == Phone and s.renaming != 0 and viewer == s.renaming
+
+pure def pickedRenameFinished(s: Preview, viewer: int, by: Actor): Preview =
+  { ...s, renaming: 0 }
+
+pure def stepAPickedRenameNamesTheExactPreview(before: Preview, via: str, after: Preview, out: List[Effect]): bool =
+  out.every(e => match e {
+    | RenamePicked(x) => via == "renamePicked" and usable(before) and before.renaming == 0
+        and x.viewer == before.viewer and x.item == before.item and x.revision == before.revision
+        and after.renaming == before.viewer
+    | _ => true
+  })
 ```
 
 ### A file that holds a verification code or another secret is never handed to Ask Alpha
@@ -332,6 +413,27 @@ pure def stepAnEmailOfferNamesTheFileShown(before: Preview, via: str, after: Pre
   out.every(e => match e {
     | OfferEmail(x) => via == "useInEmail" and x.ticket == after.attempt.id and loaded(before)
         and x.viewer == before.viewer and x.item == before.item and x.revision == before.revision and x.account > 0
+    | _ => true
+  })
+```
+
+### Use in Messages offers the exact readable PNG or JPEG to the owner’s recipient picker
+
+The photo must fit the phone’s message limit. The source grant and its
+revision are checked again after reading, and the file cannot be sent
+from this viewer.
+
+```quint
+pure def canUseInMessages(s: Preview, fitsPicture: bool, by: Actor): bool =
+  by == Owner and loaded(s) and s.kind == Photo and fitsPicture
+
+pure def useInMessages(s: Preview, fitsPicture: bool, by: Actor): Moved =
+  { state: s, out: List(OfferPicture({ viewer: s.viewer, item: s.item, revision: s.revision })) }
+
+pure def stepAPictureOfferNamesTheFileShown(before: Preview, via: str, after: Preview, out: List[Effect]): bool =
+  out.every(e => match e {
+    | OfferPicture(x) => via == "useInMessages" and loaded(before) and before.kind == Photo
+        and x.viewer == before.viewer and x.item == before.item and x.revision == before.revision and after == before
     | _ => true
   })
 ```
@@ -433,7 +535,7 @@ pure def sometimesAFileMustBeSelectedAgain(s: Preview): bool = showing(s) and no
 pure def canRestart(s: Preview, by: Actor): bool = by == Phone
 
 pure def restart(s: Preview, by: Actor): Moved =
-  { state: { ...emptied(0, s), attempt: F::cut(s.attempt) }, out: closing(s) }
+  { state: { ...emptied(0, s), attempt: F::cut(s.attempt), renaming: 0 }, out: closing(s) }
 
 pure def stepARestartLeavesNothingToAnswer(before: Preview, via: str, after: Preview): bool =
   via == "restart" implies

@@ -1,6 +1,5 @@
 // spec/app/notes/recording.md, "Story: Record a voice note"; spec/app/notes/recording.md, "Story: Discard a recording"
 import { Alert, AppHeader, Button, Dialog, DialogContent, DialogTitle, Spinner } from "@repo/ui";
-import { Effect } from "effect";
 import { ArrowLeft, AudioLines, Pause, Play } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import { useMachine } from "../../gen/app__notes__recording.react.ts";
@@ -14,8 +13,8 @@ function elapsed(seconds: number) {
 
 export function Recording({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime: Alpha["runtime"] }) {
   const recording = useMachine(runtime);
-  const display = runtime.runSync(RecordingDisplay.use((shown) => Effect.succeed(shown)));
-  const { seconds, peak } = useSyncExternalStore((listener) => display.subscribe(listener), () => display.snapshot(), () => display.snapshot());
+  const display = runtime.runSync(RecordingDisplay);
+  const { seconds, peak } = useSyncExternalStore(display.subscribe, display.snapshot, display.snapshot);
   const state = recording.state;
   if (state === undefined) return null;
   const send = (event: Event) => void recording.send(event, "Owner");
@@ -29,7 +28,7 @@ export function Recording({ alpha, runtime }: { readonly alpha: Alpha; readonly 
       </AppHeader>
       <div className="flex flex-1 flex-col items-center justify-center gap-6 px-6 pb-24 pt-10">
         <AudioLines className="size-12 text-primary" aria-hidden />
-        <p className="font-display text-5xl tabular-nums" aria-label="Recording duration">{elapsed(seconds)}</p>
+        <p className="font-display text-figure tabular-nums" aria-label="Recording duration">{elapsed(seconds)}</p>
         {state.kept > 0 && <p className="text-sm text-muted-foreground">{state.kept} {state.kept === 1 ? "segment" : "segments"} saved</p>}
         {state.phase === "Recording" && <div className="flex flex-col items-center gap-2">
           <p className="text-sm text-muted-foreground">Recording</p>

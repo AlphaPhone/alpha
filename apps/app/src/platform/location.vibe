@@ -1,9 +1,9 @@
 // spec/app/maps/connection.md, "Story: Use my location"; spec/app/maps/index.md, "Continuing past the disclosure asks Android, once"
-import type { LocationResult, LocationPermissionStatus } from "@elizaos/os/bridges/location"
+import type { LocationResult, LocationPermissionStatus } from "@elizaos/os-bridges"
 import { phoneSystem } from "./launcher.vibe"
 
 module held {
-  import { type LocationClient, locationClient } from "@elizaos/os/bridges/location"
+  import { type LocationClient, locationClient } from "@elizaos/os-bridges"
 
   let made: LocationClient | undefined
   /** eliza's client of the phone's `ElizaLocation` plugin, made once: Capacitor registers a plugin a single time. @throws {never} */

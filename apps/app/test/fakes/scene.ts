@@ -17,6 +17,7 @@ import { type SettingsScene, settingsScene } from "./settings.ts";
 import { type FilesScene, filesScene } from "./files.ts";
 import { type PhotosScene, photosScene } from "./photos.ts";
 import { type TelephonyScene, telephonyRoutes, telephonyScene } from "./telephony.ts";
+import { textReviewRoute } from "./text-review.ts";
 import { type UpdateScene, updateScene } from "./update.ts";
 import { type VoiceScene, voiceScene } from "./voice.ts";
 import { type BrowserScene, browserScene } from "./browser.ts";
@@ -26,6 +27,8 @@ export interface Scene {
   image: boolean;
   now: number;
   signedIn: boolean;
+  /** Whether the phone holds a device lease for mail and calendar: a phone signed in before mail leases existed holds none. */
+  mailLease: boolean;
   readonly secrets: Map<string, string>;
   readonly slots: Set<string>;
   readonly sample: SampleScene;
@@ -52,6 +55,7 @@ export interface Scene {
 export function scene(): Scene {
   return {
     phone: false, image: false, now: 0, signedIn: true, secrets: new Map(), slots: new Set(),
+    mailLease: true,
     sample: sampleScene(),
     ask: askScene(),
     launcher: launcherScene(),
@@ -78,6 +82,7 @@ const health: Route = (request, url) => (request.method === "GET" && url.pathnam
 
 /** @throws {never} */
 export function services(world: Scene) {
+  const review = world.telephony.textReview;
   return {
     agent: answering([
       health,
@@ -86,13 +91,14 @@ export function services(world: Scene) {
       ...calendarRoutes(world.calendar),
       ...clockRoutes(world.clock, () => world.now),
       ...remindersRoutes(world.reminders, () => world.now),
+      ...(review === undefined ? [] : [textReviewRoute(review, world.notes.ownerIdentity)]),
       ...notesRoutes(world.notes),
       ...workflowRoutes(world.workflows),
       ...platformRoutes(world.platform),
       ...telephonyRoutes(world.telephony),
     ]),
     cloud: answering([
-      ...cloudRoutes(),
+      ...cloudRoutes(() => world.signedIn),
       ...inboxRoutes(world.inbox),
       ...mapsRoutes(world.maps, () => world.now),
     ]),
