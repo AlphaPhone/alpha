@@ -197,26 +197,24 @@ describe("Updates", () => {
     world.update.installAnswer = undefined;
     await later(alpha, 30_000);
     expect(world.update.installs.length).toBe(1);
-    // spec/app/update/index.md, "Any one activity keeps an automatic update from starting": an open app keeps it waiting past its retry time.
-    await press("Settings");
-    await later(alpha, 60_000);
-    expect(world.update.installs.length).toBe(1);
-    // spec/app/update/index.md, "The owner is idle only on Home with nothing open, not typing, no voice, no dialog and the connection not busy, and the phone is quiet only with Alpha in front, no call and normal audio"; spec/app/update/index.md, "Alpha holds what the phone reports, the owner's activity, the check, the saved offer and whether an install is under way": a voice conversation, as voice reports it, keeps it waiting too.
-    await alpha.back();
+    // spec/app/update/index.md, "The owner is idle only on Home with nothing open, not typing, no voice, no dialog and the connection not busy, and the phone is quiet only with Alpha in front, no call and normal audio"; spec/app/update/index.md, "Alpha holds what the phone reports, the owner's activity, the check, the saved offer and whether an install is under way": a voice conversation, as voice reports it, keeps it waiting past its retry time.
     await until(alpha, assistant.runtime(alpha), Voice.Machine, (s) => s.route.account === "CloudAccount" && s.route.consent && s.warmed);
     await press("Talk");
     await until(alpha, alpha.runtime, Updates.Machine, (s) => s.activity.voice);
-    await later(alpha, 1_000);
+    await later(alpha, 60_000);
     expect(world.update.installs.length).toBe(1);
-    await press("Stop voice conversation");
-    await until(alpha, alpha.runtime, Updates.Machine, (s) => !s.activity.voice);
-    await alpha.back();
-    await until(alpha, alpha.runtime, Updates.Machine, (s) => !s.activity.voice && !s.activity.open);
     // spec/app/update/index.md, "A signed-out phone resting on its untouched sign-in card is idle; a card touched in any way is an open screen"
     await report(alpha, "account", { card: "Touched" });
-    await until(alpha, alpha.runtime, Updates.Machine, (s) => s.activity.open);
+    await press("Stop voice conversation");
+    await until(alpha, alpha.runtime, Updates.Machine, (s) => !s.activity.voice && s.activity.open);
+    await alpha.back();
     await later(alpha, 120_000);
     expect(world.update.installs.length).toBe(1);
+    // spec/app/update/index.md, "Any one activity keeps an automatic update from starting": an open app keeps it waiting too.
+    await press("Settings");
+    await later(alpha, 60_000);
+    expect(world.update.installs.length).toBe(1);
+    await alpha.back();
     const field = document.body.appendChild(document.createElement("input"));
     await drawn(() => field.focus());
     await report(alpha, "account", { card: "Resting" });
