@@ -366,6 +366,11 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
 
 it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I reviewed\"; spec/app/inbox/drafts.md, \"Story: Write a message\"; spec/app/inbox/drafts.md, \"Story: Set a draft aside or discard it\"; spec/app/inbox/adding.md, \"Story: Add files and people to my draft\"; spec/app/inbox/suggestion.md, \"Story: Review what is offered into my email\"; spec/app/inbox/sending.md, \"Story: Save my draft to Gmail, or delete it there, knowingly\")", async () => {
   const world = { ...scene(), phone: false };
+  const original = world.inbox.mail.find(({ card }) => card.id === "g4");
+  if (!original) throw new Error("Missing original mail fixture");
+  const bytes = new TextEncoder().encode("Meeting actions");
+  original.files = [{ partId: "1", name: "actions.txt", mimeType: "text/plain", size: bytes.length, supported: true }];
+  original.attachmentData = { "1": bytes };
   const { alpha, close } = await open(world);
   const runtime = inbox.runtime(alpha);
   await tile("Inbox");
@@ -433,6 +438,22 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   // spec/app/inbox/drafts.md, "Once its send is confirmed, a draft unchanged since the revision sent is forgotten; one edited after it, or whose write is in flight, is kept and marked as sent"
   await until(alpha, runtime, Writing, (s) => !s.open && s.shelf.shelved.length === 0);
 
+  // spec/app/inbox/letter.md, "A reply goes to the Reply-To address when the message has one, else to its sender; a reply to all adds everyone else on its To and Cc; a forward carries the original's attachments only where the account may forward them and they fit, and is otherwise text only and says so"
+  await menu("Forward");
+  await until(alpha, runtime, Writing, (s) => s.open && s.letter.kind === "Forward");
+  expect(told()).toContain("actions.txt");
+  await fill("To", "reader@example.test");
+  await drawn(() => document.querySelector<HTMLInputElement>('input[aria-label="To"]')?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+  await later(alpha, 10);
+  await until(alpha, runtime, Writing, (s) => s.letter.recipients === 1 && s.stored && !s.pending && s.write.status === "Loaded");
+  await press("Send email");
+  await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "Send");
+  expect(document.querySelector("[role=dialog]")?.textContent).toContain("actions.txt");
+  expect(world.inbox.changes).toHaveLength(2);
+  await confirm("Send");
+  await until(alpha, runtime, Writing, (s) => !s.open);
+  expect([world.inbox.changes.at(-1), world.inbox.attached]).toEqual(["send reader@example.test Fwd: Standup notes", ["receipt.txt", "actions.txt"]]);
+
   // spec/app/inbox/drafts.md, "A draft is set aside only once it is wholly kept on the phone, and comes back exactly as it was set aside"
   await press("Back to the list");
   await until(alpha, runtime, Shown, (s) => s.message === 0);
@@ -471,7 +492,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
     document.querySelector<HTMLInputElement>('input[aria-label="To"]')?.value,
     document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.value,
     world.inbox.changes.length,
-  ]).toEqual(["unfinished@", "Keep these words.", 2]);
+  ]).toEqual(["unfinished@", "Keep these words.", 3]);
 });
 
 // spec/app/home/cards.md, "The mail card shows the unread count, senders and subjects only, never a message body; marked not up to date when Inbox's page is not, and not drawn without an account or a row"
