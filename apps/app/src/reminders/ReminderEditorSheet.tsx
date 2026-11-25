@@ -126,7 +126,7 @@ export function ReminderEditorSheet({
                   if (target !== null) onDelete(target);
                 }}
               >
-                <Trash2 aria-hidden className="size-4" />
+                <Trash2 aria-hidden className="size-4.5" />
                 Delete
               </Button>
             ) : (
@@ -297,7 +297,7 @@ export function ReminderEditorSheet({
                 onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addSubtask(); } }}
               />
               <Button type="button" variant="secondary" size="sm" aria-label="Add subtask" disabled={newSubtask.trim() === ""} onClick={addSubtask}>
-                <Plus aria-hidden className="size-4" />
+                <Plus aria-hidden className="size-4.5" />
               </Button>
             </div>
           </div>
