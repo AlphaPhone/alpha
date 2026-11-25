@@ -103,7 +103,7 @@ export function InboxComposer({
           </Menu>
         ) : null}
         {onAttach ? <button type="button" aria-label="Attach file" onClick={onAttach} className={cn(inboxHeaderButton, "[&_svg]:size-5.5")}><Paperclip /></button> : null}
-        <button type="button" aria-label="Send email" disabled={!onSend} onClick={onSend} className={cn(focusRing, "flex size-11 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground [&_svg]:size-5.5")}><Send /></button>
+        <button type="button" aria-label="Send email" disabled={!onSend} onClick={onSend} className={cn(focusRing, "flex size-11 shrink-0 items-center justify-center rounded-full bg-alpha text-alpha-foreground [&_svg]:size-5.5")}><Send /></button>
       </InboxHeader>
       <main aria-label={titles[kind]} tabIndex={0} className={cn(focusRing, "flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain px-5 pb-28 [scrollbar-width:none] focus-visible:-outline-offset-2 *:shrink-0")}>
         {storage ? (
@@ -135,7 +135,7 @@ export function InboxComposer({
               placeholder="Subject"
               value={subject}
               onChange={(event) => onSubjectChange(event.target.value)}
-              className="h-13 border-b border-border bg-transparent p-0 text-lg leading-tight font-semibold text-foreground outline-0 placeholder:text-muted-foreground"
+              className="h-13 border-b border-border bg-transparent p-0 text-lg font-semibold text-foreground outline-0 placeholder:text-muted-foreground"
             />
             {attachments.length > 0 ? (
               <ul aria-label="Attachments" className="flex flex-col gap-1.5 pt-2.5">
@@ -154,7 +154,7 @@ export function InboxComposer({
                 placeholder="Message"
                 value={text}
                 onChange={(event) => onTextChange(event.target.value)}
-                className="min-h-30 flex-1 resize-none bg-transparent p-0 pt-3.5 text-body text-foreground outline-0 placeholder:text-muted-foreground"
+                className="min-h-30 flex-1 resize-none bg-transparent p-0 pt-3.5 text-body leading-message text-foreground outline-0 placeholder:text-muted-foreground"
               />
             </div>
           </>

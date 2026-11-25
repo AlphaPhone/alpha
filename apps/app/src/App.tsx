@@ -186,7 +186,7 @@ export function App({ alpha }: AppProps) {
       onTouchEnd={touchEnded}
       onTouchCancel={() => { if (startedRef.current?.touch) startedRef.current = undefined; }}
       style={frameStyle}
-      className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground has-[[data-alpha-camera-native]]:bg-transparent sm:pointer-fine:max-w-103", side && "flex-row", preview && "absolute m-0 rounded-panel")}
+      className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground has-[[data-alpha-camera-native]]:bg-transparent has-[[data-alpha-call-strip=over]]:pt-[calc(env(safe-area-inset-top)_+_4rem)] sm:pointer-fine:max-w-103", side && "flex-row", preview && "absolute m-0 rounded-panel")}
     >
       <div
         data-alpha-shell-page=""
@@ -219,6 +219,7 @@ export function App({ alpha }: AppProps) {
         className={cn(
           "in-[body:has([data-alpha-notes-trash-sheet])]:invisible",
           "in-[body:has([data-alpha-subview=photos-clip-editor])]:invisible",
+          "in-[body:has([data-alpha-covers-assistant])]:invisible",
           comms && "shrink-0",
           !comms && "[&>[data-alpha-detent]]:absolute [&>[data-alpha-detent]]:inset-x-0 [&>[data-alpha-detent]]:bottom-0 [&>[data-alpha-detent]]:max-w-none",
           side && [

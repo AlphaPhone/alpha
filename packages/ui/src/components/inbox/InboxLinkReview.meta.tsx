@@ -12,13 +12,13 @@ export const meta: ComponentMeta<InboxLinkReviewProps> = {
     Default: async () => {
       onOpen.mockClear();
       onClose.mockClear();
-      const dialog = await screen.findByRole("alertdialog", { name: "Open this link?" });
+      const dialog = await screen.findByRole("alertdialog", { name: "Open this link in Browser?" });
       await expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
       await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
       await waitFor(() => expect([onOpen.mock.calls.length, onClose.mock.calls.length]).toEqual([0, 1]));
     },
     "Text names another address": async () => {
-      const dialog = await screen.findByRole("alertdialog", { name: "Open this link?" });
+      const dialog = await screen.findByRole("alertdialog", { name: "Open this link in Browser?" });
       await expect(within(dialog).getByText(/mybank\.example/)).toBeInTheDocument();
     },
   },

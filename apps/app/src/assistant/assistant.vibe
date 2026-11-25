@@ -30,6 +30,7 @@ import { syncRemindersNow } from "../reminders/reminders.vibe"
 import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
 import { Device, native } from "../platform/device.vibe"
 import { Location } from "../platform/location.vibe"
+import { type PageInFront, TabHost, pageInFront } from "../platform/browser.vibe"
 import type { VoiceBridge } from "../platform/voice.vibe"
 import { Refused, ask, outcomeOf } from "../platform/remote.vibe"
 import { Attempts, fresh } from "../runtime/attempts.vibe"
@@ -38,10 +39,10 @@ import { MailQuestions, withMail } from "../inbox/mail-context.vibe"
 import { type Job, answer, applying, contained, following, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { VoiceWords } from "../voice/voice.vibe"
-import type { FileSelection } from "../files/preview.vibe"
-import { FileContext, asksAboutOpenFile, documentObservation } from "./file-context.vibe"
+import { FileContext, documentObservation } from "./file-context.vibe"
 import { MediaReview, mediaReview, requestedFilesOperation } from "./media-review.vibe"
-import { type Board, type Line, Talk, talk } from "./talk.vibe"
+import { agentWarmUp } from "./warm-up.vibe"
+import { type Attached, type Board, type Line, Talk, talk } from "./talk.vibe"
 import { Views, carried, carriedAloud, delivery, handoffs, preparedIn } from "./views.vibe"
 import { attachmentAuthority, dropFiles, readFiles, rememberFiles, retireTranscript, sameBinding, stageFiles } from "./attachments.vibe"
 import { readMessage } from "./read-aloud.vibe"
@@ -177,16 +178,18 @@ function viewOf(showing: Conversation.Showing): string {
 }
 
 // spec/app/assistant/index.md, "The agent is told the view, the time zone, the day only from Calendar, and whether something is selected"; spec/app/assistant/context.md, "The day and the location go only to a peer that takes them, and a sensitive screen sends no optional field"; spec/app/assistant/context.md, "The time zone told is the one the phone's interface shows, else the one the screen reported, else the one the agent was launched with, else the host's"
-function observed(told: boolean, context: Conversation.Context, location: LocationObservation | undefined, selected?: RendererNote | SmsSelection["observation"] | ReturnType<typeof documentObservation>) {
+// spec/app/assistant/context.md, "A turn carries the page Browser hands it for the tab in front, beside the observation, only to a peer that declares it"
+function observed(told: boolean, context: Conversation.Context, location: LocationObservation | undefined, selected?: RendererNote | SmsSelection["observation"] | ReturnType<typeof documentObservation>, front?: PageInFront) {
   if (!told) return undefined
   const section = Pages.selectionOf(context.section)
-  const selectedObject = context.sensitive ? undefined : section === "" ? selected : { kind: "settings", id: section }
+  const selectedObject = context.sensitive ? undefined : front?.selection ?? (section === "" ? selected : { kind: "settings", id: section })
   return encodeTurnContext({
     observation: {
       view: viewOf(context.showing), revision: context.revision, sensitive: context.sensitive, timeZone: Locator.zoneOf(context.zone, "", "", zone()),
       ...(selectedObject === undefined ? {} : { selectedObject }),
       ...(location === undefined ? {} : { location }),
     },
+    ...(front === undefined || context.sensitive ? {} : { browserPage: front.page }),
   }, { optionalFields: true })
 }
 
@@ -210,15 +213,16 @@ effect function whereabouts(sensitive: boolean, told: boolean): (LocationObserva
 }
 
 // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
-type ScreenContext = Locator.Machine | Prefs.Machine | Location | Time | Talk | NotesSelection | NoteStore | SmsSelectionContext | Telephony
+type ScreenContext = Locator.Machine | Prefs.Machine | Location | Time | Talk | NotesSelection | NoteStore | SmsSelectionContext | Telephony | TabHost
 
 interface ScreenTold {
   readonly metadata: TurnContext | undefined
   readonly sms: MessageSmsRequest | undefined
-  readonly file: FileSelection | undefined
+  readonly attachment: Attached | undefined
 }
 
-/** A review from Messages must use the same selected SIM that its outgoing observation names. */
+// spec/app/assistant/context.md, "A turn asked while Files shows a readable document attaches it for that turn"; spec/app/assistant/context.md, "A turn carries the page Browser hands it for the tab in front, beside the observation, only to a peer that declares it"; spec/app/settings/preferences.md, "Alpha shares the phone's location or the Browser page open with a chat turn, and changes Gmail or Calendar, only when the phone read that the owner allowed it"
+/** What a turn sent now tells the agent of the screen, read as it is sent: a review from Messages uses the same selected SIM its observation names, the open Files document goes as the turn's attachment, and the Browser page in front beside the observation. */
 effect function screenTold(told: boolean, context: Conversation.Context, transcript?: NoteTranscript): ScreenTold!!ScreenContext {
   const location = try whereabouts(context.sensitive, told)
   const view = viewOf(context.showing)
@@ -228,9 +232,11 @@ effect function screenTold(told: boolean, context: Conversation.Context, transcr
   const note = seen?.kind === "canonical-note" && !context.selected ? undefined : seen
   const selection = seeSelection && view === "messages" ? try captureSmsSelection() : undefined
   const file = seeSelection && view === "files" ? try (try FileContext).selected() : undefined
-  const metadata = observed(told, context, location, note ?? selection?.observation ?? (file === undefined ? undefined : documentObservation(file)))
+  const attachment = file === undefined ? undefined : try (try FileContext).read(file)
+  const front = seeSelection && view === "browser" ? try pageInFront(true, Prefs.allows(try (try Prefs.Machine).get(), "BrowserPage"), try (try Time).now()) : undefined
+  const metadata = observed(told, context, location, note ?? selection?.observation ?? (file === undefined ? undefined : documentObservation(file)), front)
   const sms = view === "messages" ? { selection: metadata?.observation?.selectedObject?.kind === "sms-subscription" ? selection : undefined } : undefined
-  return { metadata, sms, file }
+  return { metadata, sms, attachment }
 }
 
 // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
@@ -238,12 +244,7 @@ effect function screenTold(told: boolean, context: Conversation.Context, transcr
 export const spokenScreen = started(effect {
   const { memory } = try VoiceWords
   const context = try Effect.context<ScreenContext>()
-  memory.screen = (shown, spoken) => Effect.provideContext(effect {
-    const { metadata, file } = try screenTold(true, shown)
-    const explicitlyRequested = asksAboutOpenFile(spoken)
-    const attachment = file !== undefined && explicitlyRequested ? try (try FileContext).read(file) : undefined
-    return { metadata, attachment, explicitlyRequested }
-  }, context)
+  memory.screen = (shown) => Effect.provideContext(Effect.map(screenTold(true, shown), ({ metadata, attachment }) => ({ metadata, attachment })), context)
 }, "telling voice the screen")
 
 effect function syncAlphaApps(): void!!(Agent | KeyValueStore.KeyValueStore | Time) {
@@ -318,6 +319,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const requestedFiles = fileIntent === undefined || !lookingAtFiles ? undefined : try review.filesContext()
     const outsideIntent = fileIntent === undefined || "shown" in fileIntent || lookingAtFiles ? undefined : fileIntent
     const outsideOrigin = outsideIntent === undefined ? undefined : try review.filesOrigin()
+    const voicemail = enrolled === undefined ? undefined : try review.voicemailTarget()
     try ignore(reply.send({ type: "begin", turn: ticket }))
     const attachment = staged?.mail
     const transcript = staged?.transcript
@@ -339,7 +341,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       return
     }
     const outgoing = transcript === undefined ? words : `Use the transcript of the selected voice note to answer this question.\n\n${words}`
-    const { metadata: screen, sms } = try screenTold(told, context, transcript?.offered)
+    const { metadata: screen, sms, attachment: openFile } = try screenTold(told, context, transcript?.offered)
     const selected = screen?.observation?.selectedObject
     const owns = try ownsSeat(board, seat)
     const checkedOwner = owns ? seat?.authority : undefined
@@ -403,7 +405,12 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const views = try Views
     const asked = try views.begin()
     const metadata = { ...screen, ...(told ? delivery(views.clientId, requestedFiles !== undefined || outsideOrigin !== undefined) : {}), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
-    const images = files.map(({ data, mimeType, name }) => ({ data, mimeType, name }))
+    // spec/app/assistant/context.md, "A turn asked while Files shows a readable document attaches it for that turn"
+    const openDocument = openFile !== undefined && !files.some((one) => one.id === openFile.id) && Locator.sendsOpenDocument("Typed", {
+      filesShowing: context.showing.tag === "App" && context.showing.view === "Files", readable: openFile.mimeType === "text/plain",
+      sensitive: context.sensitive, currentTurn: Conversation.canFinish(try conversation.get(), ticket),
+    }) ? [openFile] : []
+    const images = [...files, ...openDocument].map(({ data, mimeType, name }) => ({ data, mimeType, name }))
     const result = tryPromise(() => controller.send({ text: outgoing, ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks, ...(enrolled === undefined ? {} : { headers: enrolled.headers }) })) catch () => undefined
     if (!(try ownsSeat(board, seat))) {
       Queue.offerUnsafe(queue, { type: "lose", ticket })
@@ -472,8 +479,10 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
           ? undefined : { operation: outsideIntent, origin: outsideOrigin, ticket, current: continued, report,
             hold: (work: Effect.Effect<void>) => { continueFiles = work } }
         const media = try review.pending(enrolled, result.reply.userMessageId, chats.chosen, context.revision, messageTarget,
-          { clientMessageId: result.clientMessageId, actionResults: replied ? result.reply.actionResults : [], ...(sms === undefined ? {} : { sms }),
-            ...(directFiles === undefined ? {} : { directFiles }), ...(outsideFiles === undefined ? {} : { outsideFiles }) })
+          { clientMessageId: result.clientMessageId, conversationId: known.record.id, pageTicket,
+            actionResults: replied ? result.reply.actionResults : [], ...(sms === undefined ? {} : { sms }),
+            ...(voicemail === undefined ? {} : { voicemail }), ...(directFiles === undefined ? {} : { directFiles }),
+            ...(outsideFiles === undefined ? {} : { outsideFiles }) })
         if (board.lastSentId === result.clientMessageId && (try conversation.get()).context.revision === context.revision
           && (try history.get()).chosen === chats.chosen) board.change({ media })
       }
@@ -1036,9 +1045,6 @@ const looked = started(effect {
   })
 }, "telling the screen")
 
-// spec/app/assistant/index.md, "When another conversation is shown, the last turn stays behind with its own"
-const left = following(Chats.Machine, (chats) => chats.chosen, Conversation.Machine, (): Conversation.Event => ({ type: "leave" }))
-
 // spec/app/assistant/composer.md, "The slot is opened when the composer is shown, and opened again after it could not be read"
 const opening = following(Composer.Machine, (composer) => (composer.slot === "Closed" && composer.read.status !== "Loading" ? composer.binding : undefined), Composer.Machine, (binding): Composer.Event | undefined => (binding === undefined ? undefined : { type: "open" }))
 
@@ -1113,16 +1119,25 @@ export effect function askComms(request: CommsPrompt): void!!(Chats.Machine | Co
   if (!(try contained(chats.send({ type: "start", ...free }), "opening a conversation for the request"))) board.waitingRequest = undefined
 }
 
+// spec/app/assistant/index.md, "When another conversation is shown, the last turn stays behind with its own"
 const requested = started(effect {
   const chats = try Chats.Machine
+  const conversation = try Conversation.Machine
   const { board } = try Talk
-  try Stream.runForEach(chats.changes, effect (shown) => {
+  let leftFor: number | undefined
+  try Stream.runForEach(Stream.zipLatest(chats.changes, conversation.changes), effect () => {
+    const shown = try chats.get()
+    if (leftFor !== shown.chosen) {
+      if (!(try contained(conversation.send({ type: "leave" }), "leaving the previous conversation"))) return
+      leftFor = shown.chosen
+      if ((try chats.get()).chosen !== shown.chosen) return
+    }
     const request = board.waitingRequest
     if (request === undefined || Chats.making(shown)) return
     board.waitingRequest = undefined
     if (shown.chosen !== 0) try postRequest(request)
   })
-}, "sending a request after opening its conversation")
+}, "leaving the previous conversation before sending its replacement's request")
 
 const submitted = started(effect {
   try Stream.runForEach((try CommsPrompts).submissions, askComms)
@@ -1215,7 +1230,7 @@ export const assisting = Layer.provideMerge(
     reacting(Dock, { carry: carryDock }),
     Attachments.machine(),
     reacting(Locator, { carry: carryLocator }),
-    reached, looked, left, opening, saving, bound, requested, submitted, allowing, forgetting, rested, keyboardRest, steppingBack, carried, carriedAloud,
+    reached, looked, opening, saving, bound, requested, submitted, allowing, forgetting, rested, keyboardRest, steppingBack, carried, carriedAloud, agentWarmUp,
   ),
   Layer.mergeAll(Layer.fresh(turns), talk, handoffs),
 )

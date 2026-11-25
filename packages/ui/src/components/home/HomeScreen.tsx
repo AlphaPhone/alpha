@@ -11,6 +11,8 @@ import type { LauncherHold } from "./launcherPress.ts";
 export type HomeScreenProps = {
   /** The cards drawn above the tiles, in order, each with its key; the row is not drawn without one. */
   cards?: readonly ReactNode[];
+  /** Cards an app draws itself, such as Clock's running timer, in a row of their own under the day's cards; the row is hidden while none draws. */
+  appCards?: ReactNode;
   /** The tiles shown, in Home's order; left out until what was saved has been read. */
   tiles?: readonly HomeTileItem[];
   /** Home is being edited. */
@@ -59,7 +61,7 @@ const homeSpacing = "[--alpha-home-spacing:clamp(3px,calc(100cqi/103),var(--spac
  * @model spec/app/home/index.md
  */
 export function HomeScreen({
-  cards = [], tiles, editing = false, covered = false, launcher = false, onOpenTile, onOpenDrawer, onBeginEditing, hold, onRemoveTile, onMoveTile, scrollRef,
+  cards = [], appCards, tiles, editing = false, covered = false, launcher = false, onOpenTile, onOpenDrawer, onBeginEditing, hold, onRemoveTile, onMoveTile, scrollRef,
   onShowHidden, onDone, notice, adding = false, hidden = [], onAddToHome, onCloseAdding = () => undefined, className,
 }: HomeScreenProps) {
   return (
@@ -70,6 +72,7 @@ export function HomeScreen({
         </div>
         {editing ? <HomeEditBar onShowHidden={onShowHidden} onDone={onDone} notice={notice} className="pb-3" /> : null}
         {cards.length > 0 ? <HomeCardRow>{cards}</HomeCardRow> : null}
+        {appCards ? <HomeCardRow aria-label={undefined} className={cn(cards.length > 0 && "pt-[calc(var(--alpha-home-spacing)*3)]")}>{appCards}</HomeCardRow> : null}
         <div aria-hidden className="h-[calc(var(--alpha-home-spacing)*6)] shrink-0" />
         {tiles ? (
           <HomeTileGrid
