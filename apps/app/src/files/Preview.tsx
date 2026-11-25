@@ -2,7 +2,7 @@
 import { Alert, Button, Dialog, DialogContent, DialogTitle, FilesRow, Input, Menu, MenuContent, MenuItem, MenuTrigger, Spinner } from "@repo/ui";
 import { Effect, Option, type ManagedRuntime } from "effect";
 import { useState } from "react";
-import { ChevronLeft, ChevronRight, Ellipsis, ExternalLink, FileText, FolderInput, Info, Mail, Pause, Pencil, Play, Share2, Sparkles, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Ellipsis, ExternalLink, FileText, FolderInput, Info, Mail, MessageCircle, Pause, Pencil, Play, Share2, Sparkles, Trash2, X } from "lucide-react";
 import type { Machine as Browser } from "../../gen/app__files.effect.vibe";
 import { previewActionReady } from "../../gen/app__files.ts";
 import { useMachine as useFiles } from "../../gen/app__files.react.ts";
@@ -18,7 +18,7 @@ import { useMachine as useInbox } from "../../gen/app__inbox.react.ts";
 import type { Machine as Drafts } from "../../gen/app__inbox__drafts.effect.vibe";
 import { useMachine as useDrafts } from "../../gen/app__inbox__drafts.react.ts";
 import { Handles } from "./handles.vibe";
-import { Opened, emailAccount } from "./preview.vibe";
+import { Opened, emailAccount, pictureFits } from "./preview.vibe";
 
 export interface PreviewProps {
   /** Provides the preview and Recent machines, and what the viewer read, of preview.vibe. */
@@ -68,6 +68,7 @@ export function Preview({ runtime }: PreviewProps) {
   const openElsewhere = owner({ type: "openElsewhere" });
   const forget = owner({ type: "forget" });
   const share = file !== undefined && owner({ type: "shareFile" });
+  const picture = { type: "useInMessages", fitsPicture: pictureFits(file) } as const;
   const showDetails = file !== undefined && usable(state);
   const detailsOpen = showDetails && details?.viewer === state.viewer && details.revision === state.revision;
   const ownFile = file !== undefined && recent.state.shown.origin === "InFolder" && files.state !== undefined && previewActionReady(files.state);
@@ -94,12 +95,13 @@ export function Preview({ runtime }: PreviewProps) {
         <div className="flex min-h-13 shrink-0 items-center gap-0.5 px-2 pt-[env(safe-area-inset-top)] [&_button]:size-13">
           {owner({ type: "close" }) && <Button variant="ghost" size="icon" aria-label="Close" onClick={() => tell({ type: "close" })}><ChevronLeft /></Button>}
           <div className="flex-1" />
-          {(askAlpha || openElsewhere || forget || email || share || showDetails || showRename || owner(move) || owner(trash)) && (
+          {(askAlpha || openElsewhere || forget || email || owner(picture) || share || showDetails || showRename || owner(move) || owner(trash)) && (
             <Menu>
               <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="File actions"><Ellipsis /></Button></MenuTrigger>
               <MenuContent>
                 {askAlpha && <MenuItem onSelect={() => tell({ type: "askAlpha" })}><Sparkles />Ask Alpha</MenuItem>}
                 {email && <MenuItem onSelect={() => tell(offer)}><Mail />Use in email</MenuItem>}
+                {owner(picture) && <MenuItem onSelect={() => tell(picture)}><MessageCircle />Use in Messages</MenuItem>}
                 {share && <MenuItem onSelect={() => tell({ type: "shareFile" })}><Share2 />Share</MenuItem>}
                 {openElsewhere && <MenuItem onSelect={() => tell({ type: "openElsewhere" })}><ExternalLink />Open elsewhere</MenuItem>}
                 {showDetails && <MenuItem onSelect={() => setDetails({ viewer: state.viewer, revision: state.revision })}><Info />Details</MenuItem>}

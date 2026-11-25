@@ -31,9 +31,10 @@ module web {
   export function native(): boolean {
     return Capacitor.isNativePlatform()
   }
-  /** Text at `percent` of its size, and the percent the page then has. @throws {never} */
+  /** Text at `percent` of its size, published for CSS beside the measured scale, and the percent the page then has. @throws {never} */
   export function zoom(percent: number): number {
     document.documentElement.style.fontSize = `${percent}%`
+    document.documentElement.style.setProperty("--alpha-own-text-scale", String(percent / 100))
     return Number.parseFloat(document.documentElement.style.fontSize)
   }
   /** @throws {never} */

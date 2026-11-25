@@ -165,7 +165,13 @@ describe("Settings", () => {
     await press("Permissions");
     await until(alpha, machines, Facts.Machine, (s) => Facts.accessWord(s, "MicrophoneAccess") === "Off");
     await tap("Microphone");
-    await vi.waitFor(() => expect(document.querySelector('[role="dialog"] [aria-current="step"]')?.textContent).toContain("Microphone"));
+    // spec/app/startup/access.md, "Settings opens one access of this walkthrough in review, also from the list of all, and the agent may ask to show one"
+    await vi.waitFor(() => {
+      const review = document.querySelector('[role="dialog"]');
+      const current = review?.querySelector('[aria-current="step"]');
+      expect([review?.querySelectorAll("li").length, current?.textContent?.includes("Microphone"), [...(review?.querySelectorAll("li button") ?? [])].map((action) => action.closest("li") === current)])
+        .toEqual([7, true, [true]]);
+    });
     await press("Settings");
     await vi.waitFor(() => expect(world.settings.opened).toEqual(["privacy"]));
     world.settings.hostFacts.permissions.Microphone = true;

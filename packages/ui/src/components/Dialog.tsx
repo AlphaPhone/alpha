@@ -12,6 +12,10 @@ export type DialogOverlayProps = ComponentProps<typeof DialogPrimitive.Overlay>;
 export type DialogContentProps = ComponentProps<typeof DialogPrimitive.Content> & {
   /** Names a close button in the corner; leave out where the dialog's own actions close it. */
   closeLabel?: string;
+  /** An enclosing screen when the dialog covers that screen instead of the viewport. */
+  container?: HTMLElement;
+  /** Places the overlay inside the same screen when the dialog is local. */
+  overlayClassName?: string;
 };
 export type DialogTitleProps = ComponentProps<typeof DialogPrimitive.Title>;
 export type DialogDescriptionProps = ComponentProps<typeof DialogPrimitive.Description>;
@@ -33,10 +37,10 @@ export function DialogOverlay({ className, ...props }: DialogOverlayProps) {
 }
 
 /** The panel in the middle of a dimmed page. Needs a `DialogTitle`; without a `DialogDescription`, pass `aria-describedby={undefined}`. Escape and a press outside dismiss it. */
-export function DialogContent({ closeLabel, className, children, ...props }: DialogContentProps) {
+export function DialogContent({ closeLabel, container, overlayClassName, className, children, ...props }: DialogContentProps) {
   return (
-    <DialogPrimitive.Portal>
-      <DialogOverlay />
+    <DialogPrimitive.Portal container={container}>
+      <DialogOverlay className={overlayClassName} />
       <DialogPrimitive.Content
         className={cn(dialogPanel, closeLabel && "[&>h2]:pr-8", className)}
         {...props}

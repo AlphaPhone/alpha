@@ -9,6 +9,9 @@ import { Machine as Recent } from "../gen/app__files__recent.effect.vibe";
 import { everything } from "../gen/app__files__search.effect.vibe";
 import { Machine as Bin } from "../gen/app__files__trash.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
+import { Machine as Messages } from "../gen/app__messages.effect.vibe";
+import { Machine as MessageComposer } from "../gen/app__messages__composer.effect.vibe";
+import { Drafts as MessageDrafts } from "../src/messages/composer.vibe";
 import { Machine as Inbox } from "../gen/app__inbox.effect.vibe";
 import { Machine as Drafts } from "../gen/app__inbox__drafts.effect.vibe";
 import { Letters } from "../src/inbox/composer.vibe";
@@ -351,6 +354,30 @@ describe("Files on a phone", () => {
     await pressOnTop("Move here");
     await until(alpha, runtime, Browser, (s) => s.change.work === "MoveTo" && s.change.attempt.outcome === "Refused" && s.listing.status === "Loaded");
     expect(paths(world).includes("primary:Download/dunes.jpg")).toBe(true);
+  });
+
+  it('Use a picture from Files in Messages (spec/app/files/preview.md, "Use in Messages offers the exact readable PNG or JPEG to the owner’s recipient picker"; spec/app/messages/index.md, "A picture from Files is offered in a new recipient picker and can join only its chosen empty draft")', async () => {
+    const { alpha, runtime, world } = await onFiles(undefined, "view:Messages");
+    const png = atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jP1sAAAAASUVORK5CYII=");
+    world.files.stored.push({ volume: "primary", path: "Download/handed.png", directory: false, mimeType: "image/png", size: png.length, modified: 7 });
+    world.files.texts["Download/handed.png"] = png;
+    await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
+    await press("Internal storage");
+    await openRow("Download");
+    await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 2);
+    await press("handed.png");
+    await until(alpha, runtime, Shown, (s) => s.kind === "Photo" && s.content.status === "Loaded");
+
+    await choose("Use in Messages", "File actions");
+    await until(alpha, alpha.runtime, Messages, (s) => s.pane === "Picker" && s.offeredPicture > 0);
+    expect(document.querySelector("[aria-label='Picture for this message']")?.textContent).toContain("handed.png");
+    expect(world.telephony.sent).toEqual([]);
+    await fill("To", "+15550123456");
+    await press("Text +15550123456");
+    await until(alpha, alpha.runtime, MessageComposer, (s) => s.pictures === 1);
+    const pictures = alpha.runtime.runSync(MessageDrafts.use((drafts) => drafts.pictures()));
+    expect(pictures).toEqual([{ name: "handed.png", wireName: "picture-1.png", contentType: "image/png", bytes: Uint8Array.from(png, (byte) => byte.charCodeAt(0)) }]);
+    expect(world.telephony.sent).toEqual([]);
   });
 
   it("Look at a file, and find what I opened lately (spec/app/files/preview.md, \"Story: Look at a file\"; spec/app/files/recent.md, \"Story: Find what I opened lately\"; spec/app/files/recent.md, \"Story: Pick a file with the system picker\"; spec/app/files/preview.md, \"Story: Act on the file I am looking at\")", async () => {
@@ -797,6 +824,24 @@ describe("Files on a phone", () => {
     await press("Restore all");
     await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Confirmed" && s.entries.length === 0 && s.listing.status === "Loaded");
     expect([world.files.trash, paths(world).filter((path) => path.endsWith("a.txt") || path.endsWith("b.txt"))]).toEqual([[], ["card:b.txt", "primary:Download/a.txt"]]);
+
+    // spec/app/files/trash.md, "A job ends as its answer says for each item: only what the phone confirmed is done, and the rest was refused or is unknown"
+    world.files.trash.push(
+      { id: "20", was: { volume: "primary", path: "Download/returned.txt", directory: false, mimeType: "text/plain", size: 1, modified: 1 }, deletedAt: world.files.now },
+      { id: "20", was: { volume: "card", path: "waiting.txt", directory: false, mimeType: "text/plain", size: 1, modified: 1 }, deletedAt: world.files.now },
+    );
+    world.files.refusing.push("storageRestore:card");
+    await press("Refresh");
+    await until(alpha, runtime, Bin, (s) => s.listing.status === "Loaded" && s.entries.length === 2);
+    await press("Restore all");
+    await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Unknown" && s.listing.status === "Loaded");
+    const partial = runtime.runSync(Bin.use((machine) => machine.get()));
+    expect([partial.done.map((entry) => entry.name), partial.entries.map((entry) => entry.name), paths(world).includes("primary:Download/returned.txt")]).toEqual([["returned.txt"], ["waiting.txt"], true]);
+    world.files.refusing.splice(0);
+    await press("waiting.txt");
+    await pressOnTop("Restore");
+    await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Confirmed" && s.entries.length === 0 && s.listing.status === "Loaded");
+    expect(paths(world)).toContain("card:waiting.txt");
 
     // spec/app/files/trash.md, "The owner is shown what will be erased, one item, the marked items or everything listed, and a change to the list voids the confirmation"
     world.files.trash.push(
