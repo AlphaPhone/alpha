@@ -7,6 +7,7 @@ import { useState, type PointerEvent } from "react";
 import { useMachine } from "../../gen/app__files__correction.react.ts";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { ScanAssets, setScanOutline, type scan } from "./scan.vibe";
+import { scanButton, scanPanel, scanPrimary, scanTitle } from "./scan-dialog.ts";
 
 type Runtime = Layer.Success<typeof scan> | Resident;
 const names = ["Top left", "Top right", "Bottom right", "Bottom left"];
@@ -33,8 +34,8 @@ export function ScanCorrection({ runtime }: Pick<Shown<Runtime>, "runtime">) {
   };
   return (
     <Dialog open onOpenChange={(open) => { if (!open) void send({ type: "cancel" }, "Owner"); }}>
-      <DialogContent aria-describedby={undefined} closeLabel="Cancel correction" className="max-h-[90dvh] overflow-y-auto">
-        <DialogTitle>Correct page</DialogTitle>
+      <DialogContent aria-describedby={undefined} closeLabel="Cancel correction" className={cn(scanPanel, "overflow-y-auto")}>
+        <DialogTitle className={scanTitle}>Correct page edges</DialogTitle>
         <div className="relative mx-auto w-full max-w-md" style={{ width: `min(100%, ${55 * page.width / page.height}dvh)` }}>
           <img src={page.uri} alt="Page to correct" className="max-h-[55dvh] w-full object-contain" draggable={false} />
           <div className="absolute inset-0">
@@ -75,8 +76,8 @@ export function ScanCorrection({ runtime }: Pick<Shown<Runtime>, "runtime">) {
         </div>
         {state.failed && <Alert variant="destructive">Keep the corners in order and select a larger area.</Alert>}
         <div className="flex flex-wrap justify-between gap-2">
-          <Button variant="secondary" size="sm" onClick={() => apply({ ...draft, turns: (draft.turns + 1) % 4 })}><RotateCw />Rotate {draft.turns * 90}°</Button>
-          <Button size="sm" disabled={!can({ type: "useCorrection" }, "Owner") || drag !== undefined} onClick={() => void send({ type: "useCorrection" }, "Owner")}>Apply</Button>
+          <Button variant="secondary" className={scanButton} onClick={() => apply({ ...draft, turns: (draft.turns + 1) % 4 })}><RotateCw />Rotate {draft.turns * 90}°</Button>
+          <Button className={scanPrimary} disabled={!can({ type: "useCorrection" }, "Owner") || drag !== undefined} onClick={() => void send({ type: "useCorrection" }, "Owner")}>Apply</Button>
         </div>
       </DialogContent>
     </Dialog>

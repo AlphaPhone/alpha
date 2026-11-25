@@ -5,3 +5,4 @@ export * from "./bombadil/ask.ts";
 export * from "./bombadil/settings.ts";
 export * from "./bombadil/clock.ts";
 export * from "./bombadil/reminders.ts";
+export * from "./bombadil/wallet.ts";

@@ -16,7 +16,7 @@ export type SettingsResetRowProps = Pick<SettingsNavRowProps, "autoFocus" | "onF
 export function SettingsResetRow({ reviewing = false, onErase, ...props }: SettingsResetRowProps) {
   return (
     <SettingsNavRow
-      title={<span className="text-destructive">Erase all data</span>}
+      title={<span className="text-status-error">Erase all data</span>}
       icon={<Trash2 />}
       value={reviewing ? <Spinner size="sm" label="Waiting for the phone" /> : undefined}
       onOpen={reviewing ? undefined : onErase}

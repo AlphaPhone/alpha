@@ -1,7 +1,7 @@
 // spec/app/files/scan.md, "Story: Arrange the pages"; spec/app/files/scan.md, "Story: Keep the scan as I work"; spec/app/files/scan.md, "Story: Make the PDF, and keep the photo"; spec/app/files/scan.md, "The owner removes a page or moves it one place earlier or later"
 import { Alert, Button, Input, Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger, DialogClose, cn, focusRing } from "@repo/ui";
 import { Effect, type Layer } from "effect";
-import { ArrowDown, ArrowUp, Camera, Crop, ImagePlus, Save, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Camera, Crop, ImagePlus, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useMachine as useCorrection } from "../../gen/app__files__correction.react.ts";
 import { useMachine } from "../../gen/app__files__scan.react.ts";
@@ -12,9 +12,10 @@ import type { Resident, Shown } from "../runtime/area.tsx";
 import { ScanCorrection } from "./ScanCorrection.tsx";
 import { ScanSearchable } from "./ScanSearchable.tsx";
 import { ScanAssets, addScanImage, editScanLine, noteContent, reviewCalendarEvent, type scan } from "./scan.vibe";
+import { scanActions, scanButton, scanPanel, scanPrimary, scanQuiet, scanText, scanTitle } from "./scan-dialog.ts";
 
 type Runtime = Layer.Success<typeof scan> | Resident;
-const pageAction = "rounded-option [&_svg]:size-5";
+const pageAction = "rounded-sm [&_svg]:size-5";
 
 function PickPage({ capture, children, replacing, selected, label, iconOnly = false }: {
   capture: boolean;
@@ -27,7 +28,7 @@ function PickPage({ capture, children, replacing, selected, label, iconOnly = fa
   return (
     <label title={iconOnly ? label : undefined} className={cn(
       "relative inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 bg-secondary hover:bg-accent text-secondary-foreground focus-within:outline-ring",
-      iconOnly ? cn("size-11", pageAction) : "flex-1 basis-36 rounded-full px-4 text-base font-semibold",
+      iconOnly ? cn("size-11", pageAction) : "min-w-0 flex-1 basis-36 rounded-panel px-4 py-3 text-md leading-row font-medium",
       focusRing,
     )}>
       {children}
@@ -85,13 +86,14 @@ export function Scan({ runtime }: Shown<Runtime>) {
   return (
     <>
     <Dialog open onOpenChange={(open) => { if (!open) fire({ type: "close" }); }}>
-      <DialogContent aria-describedby={undefined} closeLabel={selectedImage ? "Cancel scan" : "Close document"} className="max-h-[min(90dvh,46rem)] shrink-0 overflow-hidden rounded-panel bg-background text-foreground">
-        <DialogTitle className="shrink-0 font-display text-title font-light">{selectedImage ? "Scan text" : "Scan document"}</DialogTitle>
+      <DialogContent aria-describedby={undefined} closeLabel={selectedImage ? "Cancel scan" : "Close document"} className={cn(scanPanel, "shrink-0 overflow-hidden bg-background text-foreground")}>
+        <DialogTitle className={cn("shrink-0", scanTitle)}>{selectedImage ? "Scan text" : "Scan document"}</DialogTitle>
         <div role="region" aria-label="Review details" className="min-h-0 space-y-4 overflow-y-auto overscroll-contain">
-          <p className="text-sm text-muted-foreground">
-            {selectedImage ? "On device" : state.pages.length === 0 ? "No pages" : `${state.pages.length}/${pageLimit} pages`}
+          <p className="text-sm leading-details text-muted-foreground">
+            {selectedImage
+              ? <span className="rounded-full bg-secondary px-2.5 py-0.5 text-meta font-semibold">On device</span>
+              : state.pages.length === 0 ? "No pages" : `${state.pages.length}/${pageLimit} pages`}
           </p>
-          {allowed({ type: "showPages" }) && <Button variant="secondary" size="sm" onClick={() => fire({ type: "showPages" })}>Multi-page</Button>}
           {state.keeping.broken && <Alert variant="destructive">The saved draft could not be read.</Alert>}
           {allowed({ type: "resume" }) && (
             <div className="flex items-center justify-between rounded-tile bg-secondary p-3">
@@ -103,8 +105,8 @@ export function Scan({ runtime }: Shown<Runtime>) {
           {allowed({ type: "keepMine" }) && <Button variant="secondary" size="sm" onClick={() => fire({ type: "keepMine" })}>Keep my pages</Button>}
           {ready && (
             <div className="flex flex-wrap gap-2">
-              <PickPage capture replacing={0} selected={selected} label="Capture new page"><Camera className="size-4" aria-hidden />Capture page</PickPage>
-              <PickPage capture={false} replacing={0} selected={selected} label="Add page"><ImagePlus className="size-4" aria-hidden />Add image</PickPage>
+              <PickPage capture replacing={0} selected={selected} label="Capture new page">Capture page</PickPage>
+              <PickPage capture={false} replacing={0} selected={selected} label="Add page">Add image</PickPage>
             </div>
           )}
           {state.pages.length > 0 && (
@@ -121,10 +123,22 @@ export function Scan({ runtime }: Shown<Runtime>) {
                 const number = at + 1;
                 const earlier = { type: "swapPages", at: at - 1, earlier: state.pages[at - 1]?.image ?? 0, later: image } as const;
                 const later = { type: "swapPages", at, earlier: image, later: state.pages[at + 1]?.image ?? 0 } as const;
+                const reviewed = !blank && words !== undefined && (
+                  <details open={selectedImage || undefined}>
+                    <summary className="font-semibold">{selectedImage ? "Scanned text" : "Review page text"}</summary>
+                    {words.lines.length === 0 ? <p className="whitespace-pre-wrap">{words.text}</p> : words.lines.map((line, index) => (
+                      <label key={`${line.x}:${line.y}:${line.width}:${line.height}`} className="mb-1 block">
+                        <span className="sr-only">Line {index + 1}</span>
+                        <Input defaultValue={line.text} className={scanText} maxLength={2_000}
+                          onBlur={(event) => void runtime.runPromiseExit(editScanLine(image, index, event.currentTarget.value))} />
+                      </label>
+                    ))}
+                  </details>
+                );
                 return (
-                  <li key={image} className="grid gap-3 rounded-segment border border-border bg-background p-3">
-                    {!selectedImage && <p className="font-semibold">Page {number}</p>}
-                    {page !== undefined && <img src={page.uri} alt={selectedImage ? "Selected image" : `Document page ${number}`} className="h-32 w-full object-contain" loading="lazy" />}
+                  <li key={image} className={selectedImage ? "grid gap-4" : "grid gap-3 rounded-lg border border-border p-3"}>
+                    {!selectedImage && <h3 className="font-bold">Page {number}</h3>}
+                    {page !== undefined && <img src={page.uri} alt={selectedImage ? "Selected image" : `Document page ${number}`} className={selectedImage ? "h-40 w-full rounded-frame bg-secondary object-contain" : "h-32.5 w-full object-contain"} loading="lazy" />}
                     <div className="flex flex-wrap gap-1 empty:hidden">
                       {!selectedImage && <>
                         <Button variant="secondary" size="icon" className={pageAction} aria-label={`Move page ${number} earlier`} disabled={!allowed(earlier)} onClick={() => fire(earlier)}><ArrowUp /></Button>
@@ -135,12 +149,14 @@ export function Scan({ runtime }: Shown<Runtime>) {
                       {replace && <PickPage iconOnly capture replacing={image} selected={selected} label={`Retake page ${number}`}><Camera aria-hidden /></PickPage>}
                       {!selectedImage && allowed({ type: "remove", image }) && <Button variant="secondary" size="icon" className={pageAction} aria-label={`Remove page ${number}`} onClick={() => fire({ type: "remove", image })}><Trash2 /></Button>}
                     </div>
+                    {selectedImage && reviewed}
                     <div className="flex flex-wrap items-center gap-2 empty:hidden">
-                      {allowed({ type: "keepPhoto", image }) && <Button variant="secondary" size="sm" onClick={() => fire({ type: "keepPhoto", image })}><Save />Keep photo</Button>}
-                      {reading && selectedImage ? <p role="status" className="text-sm text-muted-foreground">Reading text…</p> : allowed(read) && <Button variant="secondary" size="sm" loading={reading} onClick={() => fire(read)}>Read text</Button>}
-                      {allowed({ type: "copyText", image }) && <Button variant="secondary" size="sm" onClick={() => fire({ type: "copyText", image })}>Copy text</Button>}
-                      {allowed({ type: "reviewLinks", image }) && <Button variant="secondary" size="sm" onClick={() => fire({ type: "reviewLinks", image })}>Review links</Button>}
-                      {allowed({ type: "suggestEvent", image }) && <Button variant="secondary" size="sm" loading={event?.status === "Loading"} onClick={() => fire({ type: "suggestEvent", image })}>Suggest event</Button>}
+                      {allowed({ type: "showPages" }) && <Button variant="secondary" className={scanButton} onClick={() => fire({ type: "showPages" })}>Multi-page</Button>}
+                      {allowed({ type: "keepPhoto", image }) && <Button variant="secondary" className={scanButton} onClick={() => fire({ type: "keepPhoto", image })}>Keep photo</Button>}
+                      {reading && selectedImage ? <p role="status" className="text-sm text-muted-foreground">Reading text…</p> : allowed(read) && <Button variant="secondary" className={scanButton} loading={reading} onClick={() => fire(read)}>Read text</Button>}
+                      {allowed({ type: "copyText", image }) && <Button variant="secondary" className={scanButton} onClick={() => fire({ type: "copyText", image })}>Copy text</Button>}
+                      {allowed({ type: "reviewLinks", image }) && <Button variant="secondary" className={scanButton} onClick={() => fire({ type: "reviewLinks", image })}>Review links</Button>}
+                      {allowed({ type: "suggestEvent", image }) && <Button variant="secondary" className={scanButton} loading={event?.status === "Loading"} onClick={() => fire({ type: "suggestEvent", image })}>Suggest event</Button>}
                     </div>
                     {suggestion !== undefined && event !== undefined && (
                       <div className="grid gap-2 rounded-tile bg-secondary p-3">
@@ -151,18 +167,7 @@ export function Scan({ runtime }: Shown<Runtime>) {
                     )}
                     {event?.status === "Loaded" && !suggestion && <p className="text-sm text-muted-foreground">No date and time found</p>}
                     {blank && <p className="text-sm text-muted-foreground">No text found</p>}
-                    {!blank && words !== undefined && (
-                      <details open={selectedImage || undefined}>
-                        <summary className="font-semibold">{selectedImage ? "Scanned text" : "Review page text"}</summary>
-                        {words.lines.length === 0 ? <p className="whitespace-pre-wrap">{words.text}</p> : words.lines.map((line, index) => (
-                          <label key={`${line.x}:${line.y}:${line.width}:${line.height}`} className="mb-1 block">
-                            <span className="sr-only">Line {index + 1}</span>
-                            <Input defaultValue={line.text} className="w-full rounded-sm border border-input bg-background p-2 text-sm" maxLength={2_000}
-                              onBlur={(event) => void runtime.runPromiseExit(editScanLine(image, index, event.currentTarget.value))} />
-                          </label>
-                        ))}
-                      </details>
-                    )}
+                    {!selectedImage && reviewed}
                     {state.text.reading.status === "Failed" && state.text.read === image && <Alert variant="destructive">Text could not be read.</Alert>}
                   </li>
                 );
@@ -175,7 +180,7 @@ export function Scan({ runtime }: Shown<Runtime>) {
           {state.text.note.outcome === "Unknown" && <Alert variant="destructive">Saving the note could not be confirmed.</Alert>}
           {allowed({ type: "makeNote" }) && (
             <Dialog>
-              <DialogTrigger asChild><Button variant="secondary" size="sm">Make note</Button></DialogTrigger>
+              <DialogTrigger asChild><Button variant="secondary" className={cn(scanButton, "w-full")}>Make note</Button></DialogTrigger>
               <NoteReview runtime={runtime} pages={state.pages} save={() => fire({ type: "makeNote" })} />
             </Dialog>
           )}
@@ -203,15 +208,15 @@ export function Scan({ runtime }: Shown<Runtime>) {
           )}
         </div>
         {(canExport || busy) && (
-          <div className="flex shrink-0 flex-wrap gap-2 border-t border-border pt-3">
-            <Button className="min-h-11 flex-1 basis-36 justify-start" loading={busy} onClick={() => fire({ type: "exportPdf" })}>{selectedImage ? "Save photo PDF" : "Save PDF"}</Button>
-            {searchable && <Button variant="ghost" className="min-h-11 flex-1 basis-36 justify-start" onClick={() => fire({ type: "startSearch" })}>Searchable PDF</Button>}
+          <div className={scanActions}>
+            <Button className={scanPrimary} loading={busy} onClick={() => fire({ type: "exportPdf" })}>{selectedImage ? "Save photo PDF" : "Save PDF"}</Button>
+            {searchable && <Button variant="ghost" className={scanQuiet} onClick={() => fire({ type: "startSearch" })}>Searchable PDF</Button>}
           </div>
         )}
       </DialogContent>
     </Dialog>
     <ScanCorrection runtime={runtime} />
-    {state.search.stage !== "SearchClosed" && <ScanSearchable key={state.search.ticket} runtime={runtime} state={state} close={() => fire({ type: "cancelSearch" })} />}
+    {state.search.stage !== "SearchClosed" && <ScanSearchable key={state.search.ticket} runtime={runtime} state={state} close={() => fire({ type: "cancelSearch", ticket: state.search.ticket })} />}
     <Dialog open={state.text.links.showing} onOpenChange={(open) => { if (!open) fire({ type: "closeLinks" }); }}>
       <DialogContent aria-describedby={undefined} closeLabel="Close links">
         <DialogTitle>Scanned links</DialogTitle>
