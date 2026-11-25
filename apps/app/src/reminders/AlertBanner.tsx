@@ -6,6 +6,9 @@ import { useSyncExternalStore } from "react";
 import type * as Alerts from "../../gen/app__reminders__alerts.effect.vibe";
 import { useMachine as useAlertsMachine } from "../../gen/app__reminders__alerts.react.ts";
 import { useTimed } from "../runtime/react.ts";
+import type * as BrowserAlerts from "../../gen/app__notices__browserAlerts.effect.vibe";
+import { useMachine as useBrowserAlerts } from "../../gen/app__notices__browserAlerts.react.ts";
+import { native } from "../platform/device.vibe";
 import { untimed } from "../runtime/reactor.vibe";
 import { Time } from "../runtime/time.vibe";
 import { alertBannerStore } from "./alerts.vibe";
@@ -16,13 +19,14 @@ export function AlertBanner({
   runtime,
   onOpenItem,
 }: {
-  readonly runtime: ManagedRuntime.ManagedRuntime<Alerts.Machine | Time, unknown>;
+  readonly runtime: ManagedRuntime.ManagedRuntime<Alerts.Machine | BrowserAlerts.Machine | Time, unknown>;
   readonly onOpenItem?: (itemId: string) => void;
 }) {
   const { state, can, send } = useTimed(runtime, useAlertsMachine);
   const banner = useSyncExternalStore((listener) => alertBannerStore.subscribe(listener), alertBannerStore.snapshot);
   const nowMs = runtime.runSync(Time.use((time) => time.latest()));
-  if (!state || state.bannerId === 0 || banner === undefined) return null;
+  const browserAlerts = useBrowserAlerts(runtime).state;
+  if (!state || state.bannerId === 0 || banner === undefined || (!native() && browserAlerts?.status !== "Enabled")) return null;
   const { item, specId, revision } = banner;
   const dueText = formatRelativeDue(item.dueDate, item.dueMinute, nowMs, false);
   const snooze10 = snoozeTargetMs(nowMs, "10m");

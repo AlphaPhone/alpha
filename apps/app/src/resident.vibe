@@ -5,6 +5,7 @@ import { pages } from "./settings/pages.vibe"
 import { preferences } from "./settings/preferences.vibe"
 import { shell } from "./shell/shell.vibe"
 import { toasts } from "./notices/toasts.vibe"
+import { browserAlerts } from "./notices/browserAlerts.vibe"
 import { haptics } from "./shell/haptics.vibe"
 import { canvas } from "./shell/canvas.vibe"
 import { focus } from "./shell/focus.vibe"
@@ -49,6 +50,7 @@ const machines = together(
   scanEntry,
   shell,
   toasts,
+  browserAlerts,
   haptics,
   canvas,
   pages,
