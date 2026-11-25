@@ -117,6 +117,7 @@ export function useHistorySheets(
   layers: ReturnType<typeof useLayers>,
   seen: ReturnType<Board["snapshot"]>,
   free: { replying: boolean; holding: boolean },
+  beginSearch: (() => void) | undefined,
   returnFocus: () => void,
 ) {
   const [words, setWords] = useState("");
@@ -128,9 +129,9 @@ export function useHistorySheets(
   const browse = layers.can(showHistory) ? () => {
     void layers.send(showHistory).then(({ _tag }) => { if (_tag === "Success") void chats.send({ type: "browse" }); });
   } : undefined;
-  const searchHistory = search.can({ type: "openSearch" }) ? () => {
-    void chats.send({ type: "browse" });
-    void search.send({ type: "openSearch" });
+  const searchHistory = beginSearch !== undefined && search.can({ type: "openSearch" }) ? () => {
+    setWords("");
+    beginSearch();
   } : undefined;
   const sheets = shown && finding ? (
     <>
