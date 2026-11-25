@@ -1,0 +1,69 @@
+// spec/app/settings/index.md, "Each page links to what another area owns there"; spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"; spec/kit/read.md, "Story: Read from outside"
+import { CloudError, isCredentialInvalid, networkError } from "@elizaos/cloud"
+import * as Layers from "../../gen/app__shell__layers.effect.vibe"
+import { type Account, Cloud } from "../platform/cloud.vibe"
+import { Device } from "../platform/device.vibe"
+import { contained, started } from "../runtime/reactor.vibe"
+
+/** The account sheet's entry in the shell's stack. */
+export const accountLayer = "account"
+
+/** What Cloud says about the account for this request. The page never holds a credential. */
+export type Profile =
+  | { readonly tag: "Reading" }
+  | { readonly tag: "SignInRequired" }
+  | { readonly tag: "Unavailable" }
+  | { readonly tag: "Read"; readonly contact: string; readonly name: string }
+
+const reading: Profile = { tag: "Reading" }
+
+/** Display details from the current read, held only for this app's account sheet. */
+export function profileShelf() {
+  let current: Profile = reading
+  const listeners = new Set<() => void>()
+  return {
+    snapshot: (): Profile => current,
+    subscribe: (listener: () => void): (() => void) => {
+      listeners.add(listener)
+      return (): void => { listeners.delete(listener) }
+    },
+    publish: (value: Profile): void => {
+      current = value
+      for (const listener of listeners) listener()
+    },
+  }
+}
+
+/** Opens the owner's account from Settings. The shell retires the layer on Back and Home. */
+export effect function openAccount(): void!!Layers.Machine {
+  const layers = try Layers.Machine
+  try contained(layers.send({ type: "openLayer", id: accountLayer, kind: "SheetLayer", covers: true }), "opening Account")
+}
+
+effect function readProfile(cloud: Account): Profile!! {
+  return effect {
+    const data = try timeout(tryPromise({
+      try: (signal) => cloud.client.account({ signal }),
+      catch: (cause) => cause instanceof CloudError ? cause : networkError(cause),
+    }), "10 seconds")
+    return { tag: "Read", name: data.name?.trim() ?? "", contact: data.email?.trim() || data.phone?.trim() || "" } satisfies Profile
+  } catch (error): Profile => error instanceof CloudError && isCredentialInvalid(error)
+    ? { tag: "SignInRequired" } : { tag: "Unavailable" }
+}
+
+/** Reads the account only while its sheet is on top and Alpha is visible. Leaving interrupts the read and drops its answer. */
+export function profileLive(publish: (value: Profile) => void) {
+  return started(effect {
+    const { changes } = try Layers.Machine
+    const cloud = try Cloud
+    const device = try Device
+    const onTop = Stream.changes(Stream.map(changes, (state) => Layers.top(state).id === accountLayer))
+    const visible = Stream.changes(Stream.switchMap(onTop, (showing) => showing
+      ? Stream.concat(Stream.fromEffect(device.showing()), device.visible)
+      : Stream.succeed(false)))
+    const watched = Stream.switchMap(visible, (showing) => showing
+      ? Stream.concat(Stream.succeed<Profile>(reading), Stream.fromEffect(readProfile(cloud)))
+      : Stream.succeed<Profile>(reading))
+    try Stream.runForEach(watched, (value) => sync(() => publish(value)))
+  }, "reading Account")
+}

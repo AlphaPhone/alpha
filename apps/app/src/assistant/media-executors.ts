@@ -1,10 +1,19 @@
 import { type ExecutorCall, NOT_DISPATCHED, type DeviceOperation } from "@elizaos/agent";
 import type { Alpha } from "../runtime/area.tsx";
+import type { ReviewAuthority } from "./media-review.vibe";
 
 const refused = { kind: "refused", code: NOT_DISPATCHED } as const;
 
 /** Route an admitted operation to the owning area's normal, retained runtime. */
-export async function executeMedia(alpha: Alpha, operation: DeviceOperation, call: ExecutorCall): Promise<unknown> {
+export async function executeMedia(alpha: Alpha, operation: DeviceOperation, call: ExecutorCall, authority: ReviewAuthority): Promise<unknown> {
+  if (operation.type === "phone_keypad" || operation.type === "phone_dial" || operation.type === "phone_call") {
+    const { phoneAction } = await import("../phone/agent.vibe");
+    return alpha.runtime.runPromise(phoneAction(operation, authority.current));
+  }
+  if (operation.type === "sms_reply_selected" || operation.type === "sms_compose") {
+    const { messageAction } = await import("../messages/agent.vibe");
+    return alpha.runtime.runPromise(messageAction(operation, authority.target, authority.current));
+  }
   if (operation.type === "camera_capture_photo") {
     const [{ default: camera }, { requestCapture }] = await Promise.all([import("../camera/index.tsx"), import("../camera/camera.vibe")]);
     const answer = await camera.runtime(alpha).runPromise(requestCapture(operation.lens));

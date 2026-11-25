@@ -1,5 +1,5 @@
 // spec/app/files/scan.md, "Story: Arrange the pages"; spec/app/files/scan.md, "Story: Keep the scan as I work"; spec/app/files/scan.md, "Story: Make the PDF, and keep the photo"
-import type { ScanTextLine } from "@elizaos/plugin-files-client"
+import { createScanDraftStore, scannedLinks, type ScanTextLine } from "@elizaos/plugin-files-client"
 import { registered } from "../platform/device.vibe"
 import type { Page } from "../../gen/app__files__scanDraft.ts"
 
@@ -160,16 +160,31 @@ module web {
     } finally { worker.terminate() }
   }
 
+  function download(pdf: Blob): PdfReceipt {
+    const uri = source(pdf)
+    const link = document.createElement("a")
+    link.href = uri
+    link.download = "Scanned document.pdf"
+    document.body.append(link)
+    try {
+      link.click()
+      return { confirmed: false, known: false }
+    } finally {
+      link.remove()
+      requestAnimationFrame(() => release(uri))
+    }
+  }
+
   export async function savePdf(pdf: Blob): Promise<PdfReceipt> {
     const page = window as Window & {
       showSaveFilePicker?: (input: { suggestedName: string; types: { description: string; accept: Record<string, string[]> }[] }) => Promise<FileSystemFileHandle>
     }
-    if (page.showSaveFilePicker === undefined) return { confirmed: false, known: true }
+    if (page.showSaveFilePicker === undefined) return download(pdf)
     let selected: FileSystemFileHandle
     try {
       selected = await page.showSaveFilePicker({ suggestedName: "Scanned document.pdf", types: [{ description: "PDF", accept: { "application/pdf": [".pdf"] } }] })
-    } catch {
-      return { confirmed: false, known: true }
+    } catch (cause) {
+      return cause instanceof DOMException && cause.name === "AbortError" ? { confirmed: false, known: true } : download(pdf)
     }
     try {
       const writer = await selected.createWritable()
@@ -214,7 +229,33 @@ module web {
   }
 }
 import { changeDraft, copyText, drawPdf, loadDraft, openLink, photoData, release, rotateImage, saveAndroid, savePdf, scanImage, source } from web
-export { changeDraft, copyText, drawPdf, loadDraft, openLink, photoData, release, rotateImage, scanImage, source }
+export { changeDraft, copyText, drawPdf, openLink, photoData, release, rotateImage, scanImage, source }
+
+const previous = createScanDraftStore("alpha.browser.scan-draft.v1")
+
+/** Adopt an older scan once, retaining its page order, original bytes and reviewed text. */
+export effect function readDraft(): (ScanSaved | "damaged" | undefined)!! {
+  const current = tryPromise(loadDraft) catch () => "damaged" as const
+  if (current !== undefined) return current
+  const legacy = previous.readScanDraft() catch () => "damaged" as const
+  if (legacy === undefined || legacy === "damaged") return legacy
+  const pages: StoredPage[] = []
+  for (const [index, file] of legacy.pages.entries()) {
+    const image = tryPromise(() => scanImage(file)) catch () => undefined
+    if (image === undefined) return "damaged"
+    const lines = legacy.textLayers?.[index]
+    const text = lines?.map((line) => line.text).join("\n").trim()
+    const words = lines === undefined || lines === null || text === undefined ? undefined : { text, lines, links: scannedLinks(text) }
+    const id = index + 1
+    pages.push({
+      ...image, words,
+      page: { image: id, camera: false, text: words === undefined ? 0 : id, blank: words?.text === "", edits: 0, links: words?.links.length ?? 0 },
+    })
+  }
+  const copied = tryPromise(() => changeDraft(0, pages)) catch () => undefined
+  if (copied?.landed === true) return { revision: copied.revision, pages }
+  return tryPromise(loadDraft) catch () => "damaged" as const
+}
 
 export effect function writePdf(pdf: Blob): PdfReceipt!! {
   return tryPromise(() => registered("AlphaScan") ? saveAndroid(pdf) : savePdf(pdf)) catch () => ({ confirmed: false, known: false })

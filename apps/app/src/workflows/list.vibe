@@ -1,8 +1,11 @@
 // spec/app/workflows/list.md, "Story: Find a workflow"; spec/app/workflows/list.md, "Story: Keep the list to its owner"
 import type { RemoteWorkflow } from "@elizaos/plugin-workflow-client"
+import type { Freshness } from "../../gen/app__home__cards.effect.vibe"
 import * as List from "../../gen/app__workflows__list.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__workflows__list.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { fromAreas } from "../home/cards.vibe"
+import type { Shell as ShellState } from "../../gen/app__shell.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { ownerAt } from "../platform/owner.vibe"
@@ -156,21 +159,34 @@ export effect function backList(): boolean!!List.Machine {
   return true
 }
 
-const followPage = applying(Shell, (current) => showing(current, "Workflows"), effect (shown: boolean) => {
-  if (shown) try refresh()
-  else {
+// spec/app/home/cards.md, "The Workflows card shows the first two enabled rows and how many more, marked when they are not current, stale or partly unavailable, and is not drawn without a row"
+const place = (current: ShellState) => showing(current, "Workflows") ? "Workflows" : current.trail.length === 0 ? "Home" : "Away"
+
+const followPage = applying(Shell, place, effect (at) => {
+  if (at !== "Workflows") {
     const list = try List.Machine
     try ignore(list.send({ type: "dismissFilters" }))
     try ignore(list.send({ type: "closePlace" }))
   }
+  if (at !== "Away") try refresh()
 })
 
 const followForeground = started(effect {
   const device = try Device
   const shell = try Shell
   try Stream.runForEach(device.visible, effect (visible) => {
-    if (visible && showing(try shell.get(), "Workflows")) try refresh()
+    if (visible && place(try shell.get()) !== "Away") try refresh()
   })
 }, "refreshing Workflows on foreground")
 
-export const listing = together(reacting(List, { carry }), workflowsApi, rows, followPage, followForeground)
+const home = applying(List.Machine, (state) => ({ owner: state.owner, read: state.list }), effect ({ owner, read }) => {
+  const source = try (try Rows).view(owner)
+  const displayed = source.rows.filter((row) => (row.kind === "Routine" || row.kind === "Prompt") && row.on && !row.removed)
+    .map((row) => ({ title: row.title, detail: "On" }))
+  const freshness: Freshness = read.status === "Failed" ? "Stale"
+    : source.problems.some((problem) => problem === "Workflows" || problem === "Prompts") ? "SomeUnavailable"
+      : read.status === "Loaded" ? "UpToDate" : "NotCurrent"
+  fromAreas.flows({ rows: displayed, freshness })
+})
+
+export const listing = together(reacting(List, { carry }), workflowsApi, rows, followPage, followForeground, home)

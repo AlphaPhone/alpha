@@ -1,11 +1,13 @@
 // spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"; spec/app/voice/index.md, "A spoken reply says a written date, clock time, range and percentage in words"; spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"
 import { ConversationRecord, TurnController } from "@elizaos/agent"
+import { Machine as Phone } from "../../gen/app__phone.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { ask } from "../platform/remote.vibe"
 import { isCloudFundsRefusal } from "../assistant/assistant.vibe"
+import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type VoiceEvent, VoiceBridge } from "../platform/voice.vibe"
 import { fresh } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, due, hearing, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
@@ -35,6 +37,7 @@ export interface VoiceMemory {
   readonly playLock: Semaphore.Semaphore
   reviewNotice: string
   dictatedText: string
+  fillComposer: { readonly filling: number; readonly apply: (words: string) => void!! } | undefined
   enqueueSentence(turn: number, text: string): void
   dequeueSentence(turn: number): { readonly text: string; readonly append: boolean } | undefined
   clearQueued(): void
@@ -57,6 +60,7 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
     playLock,
     reviewNotice: "",
     dictatedText: "",
+    fillComposer: undefined,
     enqueueSentence(turn: number, text: string) {
       if (memory.playbackTurn !== turn) {
         memory.playbackTurn = turn
@@ -317,7 +321,7 @@ effect function navigateForVoice(place: number): (Voice.Event | undefined)!!(She
   return { type: "claimReleased", session: voice.session }
 }
 
-function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | VoiceBridge | VoiceWords | Shell.Machine | Voice.Machine, []> {
+function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | VoiceBridge | VoiceWords | SystemSettings | Shell.Machine | Voice.Machine, []> {
   return match (fx) {
     when { tag: "Prewarm", let network }: run("prewarm", effect { try (try VoiceBridge).prewarm(network) });
     when { tag: "HoldEngine" }: run("holdEngine", effect { try (try VoiceBridge).holdEngine() });
@@ -326,7 +330,7 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | VoiceBridge | Vo
       const grant = try (try VoiceBridge).requestPermission()
       return { type: "answerPrompt", granted: grant === "granted" }
     }, { type: "answerPrompt", granted: false });
-    when { tag: "OpenSettings" }: run("openSettings", Effect.void);
+    when { tag: "OpenSettings" }: run("openSettings", effect { try (try SystemSettings).open("AppPermissions", 0) });
     when { tag: "Listen", let session, let network }: answer("mic", effect {
       const opened = effect { try (try VoiceBridge).openMic(session, network); return true } catch () => false
       return opened ? { type: "micOpened", session } : { type: "micFailed", session }
@@ -375,7 +379,15 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | VoiceBridge | Vo
       return { type: "transcribed", ticket, failure: "NoSpeech" } as Voice.Event
     }, { type: "transcribed", ticket, failure: "Recognition" });
     when { tag: "Abandon", let recording }: run("abandon", effect { try (try VoiceBridge).abandon(recording) });
-    when { tag: "Fill" }: run("fill", Effect.void);
+    when { tag: "Fill", let field, let filling }: run(`fill ${filling}`, effect {
+      const { memory } = try VoiceWords
+      const target = memory.fillComposer
+      if (field !== "ComposerField" || target?.filling !== filling) return
+      const words = memory.dictatedText.trim()
+      memory.fillComposer = undefined
+      memory.dictatedText = ""
+      if (words !== "") try target.apply(words)
+    });
   }
 }
 
@@ -417,6 +429,17 @@ const navigation = started(effect {
     try contained(voice.send({ type: "navigated", place }), "voice observing navigation")
   })
 }, "voice observing shell navigation")
+
+// spec/app/voice/index.md, "A call pauses the conversation: the microphone closes, speech stops, and the turn in flight is dropped"
+export const voiceWithCalls = started(effect {
+  const phone = try Phone
+  const voice = try Voice.Machine
+  const calls = Stream.changes(Stream.map(phone.changes, (state) => state.telecom === "OrdinaryCall" || state.telecom === "MaybeEmergencyCall"))
+  try Stream.runForEach(Stream.zipLatest(calls, voice.changes), effect ([live, speech]) => {
+    if (live && Voice.canPauseForCall(speech)) try contained(voice.send({ type: "pauseForCall" }), "pausing voice during a call")
+    else if (!live && Voice.canCallEnded(speech)) try contained(voice.send({ type: "callEnded" }), "resuming voice after a call")
+  })
+}, "voice observing calls")
 
 const bridgeEvents = hearing(
   Stream.unwrap(effect {

@@ -2,6 +2,7 @@
 import type { DeviceOperation, OperationResultOf } from "@elizaos/agent"
 import type { MediaItem } from "@elizaos/os-bridges"
 import * as Library from "../../gen/app__photos.effect.vibe"
+import type { Actor } from "../../gen/app__photos__actor.effect.vibe"
 import * as Assistant from "../../gen/app__photos__agent.effect.vibe"
 import * as Viewer from "../../gen/app__photos__viewer.effect.vibe"
 import * as Changes from "../../gen/app__photos__changes.effect.vibe"
@@ -38,7 +39,7 @@ function summary(item: MediaItem) {
   }
 }
 
-effect function accepted(event: Assistant.Event, by: Assistant.Actor) {
+effect function accepted(event: Assistant.Event, by: Actor) {
   return try exit((try Assistant.Machine).send(event, by))
 }
 
@@ -157,7 +158,7 @@ export effect function photoAction(input: DeviceOperation): (Receipt | undefined
   }
 }
 
-function carry(fx: Assistant.Effect): Job<Assistant.Event, Library.Machine, [Assistant.Actor]> {
+function carry(fx: Assistant.Effect): Job<Assistant.Event, Library.Machine, [Actor]> {
   return match (fx) {
     when { tag: "Hand", let change, let items, let basis }: run("apply", effect {
       try ignore((try Library.Machine).send({ type: "confirmProposal", change, items, basis }, "Owner"))

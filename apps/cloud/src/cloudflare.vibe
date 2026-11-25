@@ -25,7 +25,7 @@ const record = (value: unknown): Json => value !== null && typeof value === "obj
 interface Postgres { readonly host: string; readonly port: number; readonly database: string; readonly user: string; readonly password: string; readonly scheme: string }
 
 /** The PostgreSQL origin of DATABASE_URL, never echoing it: a refusal names no part of it. */
-export effect function postgresOrigin(value: string): Postgres!ResourcesRefused {
+effect function postgresOrigin(value: string): Postgres!ResourcesRefused {
   const refused = () => new ResourcesRefused({ problem: "DATABASE_URL must include a PostgreSQL origin, database and credentials" })
   const url = URL.parse(value)
   const port = url?.port ? Number(url.port) : 5432

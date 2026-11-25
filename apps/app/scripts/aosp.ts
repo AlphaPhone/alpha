@@ -5,7 +5,6 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   aaptManifestTree, composeProduct, createDevelopmentLauncherDescriptor, decrypt, enrollUpdater, generate, otaMain, parseArgs, provisioningComponents,
   requireClockProduct, signRelease, signReleaseRequest, stageLauncher, stageListener, validateDescriptor, verifyDeviceSource, verifyImage, verifySecureCameraSource,
@@ -17,7 +16,7 @@ import {
   readsSourceLock, signerRecordAdmitted, stageProblems, type OtaCommand, type Patch, type Stage, type Target,
 } from "../gen/app__image.ts";
 import * as Os from "../gen/release__os.ts";
-import { ReleaseRefused, ledger } from "./release.ts";
+import { ReleaseRefused, dispatch, ledger, runCli } from "./release.ts";
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -381,21 +380,6 @@ const os = (argv: readonly string[]) => Effect.gen(function* () {
 const commands = { stage, ota, verify, sign, record, keys, enroll, os } as const;
 
 /** One `pnpm aosp` command, as an effect over Node's services. */
-export const aosp = (argv: readonly string[]) => Effect.suspend(() => {
-  const [command = "", ...rest] = argv;
-  if (!Object.hasOwn(commands, command)) return Effect.fail(new UsageError({ message: command === "" ? "a command is required" : `unknown command ${command}` }));
-  return (commands[command as keyof typeof commands] as (argv: readonly string[]) => Effect.Effect<unknown, unknown, never>)(rest);
-}).pipe(Effect.provide(NodeServices.layer));
+export const aosp = (argv: readonly string[]) => dispatch(commands, argv, (message) => new UsageError({ message }));
 
-if (import.meta.main) {
-  const outcome = await Effect.runPromiseExit(aosp(process.argv.slice(2)));
-  if (outcome._tag === "Success") console.log(JSON.stringify(outcome.value, null, 2));
-  else {
-    const reason = outcome.cause.reasons[0];
-    const failure: unknown = reason?._tag === "Fail" ? reason.error : outcome.cause;
-    const detail = typeof failure === "object" && failure !== null && "reason" in failure && typeof failure.reason === "string" ? failure.reason
-      : failure instanceof Error ? failure.message : String(failure);
-    console.error(failure instanceof UsageError ? `${detail}\n\n${USAGE}` : detail);
-    process.exitCode = failure instanceof UsageError ? 2 : 1;
-  }
-}
+if (import.meta.main) await runCli(aosp(process.argv.slice(2)), USAGE, (failure) => failure instanceof UsageError);

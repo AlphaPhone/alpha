@@ -6,6 +6,7 @@ import * as Inbox from "../../gen/app__inbox.effect.vibe"
 import type { Effect as Out, Event, Folder } from "../../gen/app__inbox.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { waiting } from "../home/waiting.vibe"
+import { fromAreas } from "../home/cards.vibe"
 import { Device } from "../platform/device.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { type Job, answer, contained, reacting, started, stream, together, untimed } from "../runtime/reactor.vibe"
@@ -114,9 +115,22 @@ function waitingOf(said: Inbox.Attention): string | undefined {
 const home = started(effect {
   const list = try Inbox.Machine
   const ledger = try Mail
+  let previous = ""
   try Stream.runForEach(list.changes, effect (state) => {
     try ledger.accept(state)
-    waiting.tell("Inbox", waitingOf(Inbox.attention(state)))
+    const unread = Inbox.attention(state)
+    waiting.tell("Inbox", waitingOf(unread))
+    const connected = unread.standing === "Ready" || unread.standing === "Stale"
+    const rows = connected ? ledger.shown(state).filter(({ card }) => card.isUnread).slice(0, 2).map(({ card }) => ({
+      title: card.from.replace(/<[^>]*>/u, "").replace(/"/gu, "").trim() || card.from,
+      detail: card.subject || "No subject",
+    })) : []
+    const card = { connected, unread: unread.unread, rows, current: unread.standing === "Ready" }
+    const written = JSON.stringify(card)
+    if (written !== previous) {
+      previous = written
+      fromAreas.mail(card)
+    }
   })
 }, "telling Home")
 

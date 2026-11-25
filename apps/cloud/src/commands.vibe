@@ -1,10 +1,14 @@
 // spec/cloud/rollout.md, "Story: Deploy an environment without reading a secret into the repository"; spec/cloud/provisioning.md, "The steps run in one order, the same for staging and production, each one command"
 import type { CloudEnvironment } from "@elizaos/cloud"
-import { Machine, machine } from "../gen/cloud__rollout.effect.vibe"
+import type { PlatformError } from "effect/PlatformError"
+import type { ChildProcessSpawner } from "effect/process/ChildProcessSpawner"
+import { Machine, machine, type Rejected } from "../gen/cloud__rollout.effect.vibe"
 import { ownCloudName } from "../gen/cloud.effect.vibe"
-import { deploy, elizaosCloud, packageDirectory, privateDirectory, profiled, readSecrets, reconciled, recordResources, registrationInto, renderInto, resourcesOf, settledSecrets, workerSecrets, wrangler, type Component } from "./operator.vibe"
-import { candidates } from "./candidate.vibe"
+import type { ResourcesRefused } from "./cloudflare.vibe"
+import { deploy, elizaosCloud, packageDirectory, privateDirectory, profiled, readSecrets, reconciled, recordResources, registrationInto, renderInto, resourcesOf, settledSecrets, workerSecrets, wrangler, type CandidateRefused, type Component, type OperatorFailed } from "./operator.vibe"
+import { candidates, type CandidateUnknown } from "./candidate.vibe"
 import { smoke } from "./smoke.vibe"
+import type { RenderRefused } from "./wrangler.vibe"
 
 /** The command line names an unknown command or misses a flag. */
 export error UsageInvalid { message: string }
@@ -12,7 +16,7 @@ export error UsageInvalid { message: string }
 export error NotReady { report: string }
 
 /** Every command of Alpha's own cloud on Cloudflare; `check` and `registration` are main's. */
-export const usage = [
+const usage = [
   "usage: node dist/src/main.js check | registration",
   "     | render|bundle --profile <file> --environment production|staging [--resources <file>] [--out <dir>]",
   "     | secrets --environment <e> --env-file <file> [--apply] [--frozen] [--resources <file>]",
@@ -131,7 +135,7 @@ effect function smokeOf(found: Flags) {
 }
 
 /** One command of Alpha's own cloud on Cloudflare, by its name and flags; what it did, as JSON for the operator. */
-export effect function operate(command: string | undefined, rest: ReadonlyArray<string>) {
+export effect function operate(command: string | undefined, rest: ReadonlyArray<string>): unknown!(UsageInvalid | NotReady | OperatorFailed | CandidateRefused | CandidateUnknown | ResourcesRefused | RenderRefused | Rejected | PlatformError)!(FileSystem.FileSystem | Path.Path | ChildProcessSpawner) {
   switch (command) {
     case "render": return try render(try flags(rest, ["profile", "environment", "resources", "out"]), false)
     case "bundle": return try render(try flags(rest, ["profile", "environment", "resources", "out"]), true)

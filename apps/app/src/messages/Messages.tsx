@@ -22,6 +22,7 @@ export interface MessagesProps {
   /** Provides Messages' and the composer's machines, both resident, Phone's, for whether a call may be an emergency call, and what they count. */
   runtime: ManagedRuntime.ManagedRuntime<MessagesMachine | ComposerMachine | PhoneMachine | Inbox | Conversations | Drafts | CommsServices, unknown>;
   onBack?: (() => void) | undefined;
+  onOpenLink?: ((href: string) => void) | undefined;
 }
 
 
@@ -50,7 +51,7 @@ function clearChoice(runtime: MessagesProps["runtime"]) {
  * Only the owner's Send sends. Alpha's draft is marked as Alpha's and never sends itself.
  * @model spec/app/messages/index.md
  */
-export function Messages({ runtime, onBack }: MessagesProps) {
+export function Messages({ runtime, onBack, onOpenLink }: MessagesProps) {
   const messages = useMessages(runtime);
   if (messages.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Messages</Alert>;
   const { state } = messages;
@@ -58,7 +59,7 @@ export function Messages({ runtime, onBack }: MessagesProps) {
   return (
     <section data-alpha-messages aria-label="Messages" className="flex h-full min-h-0 flex-col overflow-hidden">
       {state.pane === "Threads" && <Threads runtime={runtime} messages={messages} onBack={onBack} />}
-      {state.pane === "Conversation" && <Conversation key={state.thread} runtime={runtime} messages={messages} />}
+      {state.pane === "Conversation" && <Conversation key={state.thread} runtime={runtime} messages={messages} onOpenLink={onOpenLink} />}
       {state.pane === "Picker" && <Picker runtime={runtime} messages={messages} />}
     </section>
   );
@@ -158,7 +159,7 @@ function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesPr
 }
 
 /** Inline URL text, escaped by React. Whitespace and punctuation outside each URL are preserved. */
-function MessageText({ text }: { text: string }) {
+function MessageText({ text, onOpenLink }: { text: string; onOpenLink?: MessagesProps["onOpenLink"] }) {
   const parts = [];
   let consumed = 0;
   for (const matched of text.matchAll(messageURL)) {
@@ -171,7 +172,13 @@ function MessageText({ text }: { text: string }) {
     });
     const parsed = URL.parse(raw);
     if (!parsed?.hostname || parsed.username || parsed.password) continue;
-    parts.push(text.slice(consumed, offset), <a className="underline underline-offset-2" href={parsed.href} target="_blank" rel="noopener noreferrer" key={offset}>{raw}</a>);
+    parts.push(text.slice(consumed, offset), (
+      <a className="underline underline-offset-2" href={parsed.href} target="_blank" rel="noopener noreferrer" key={offset} onClick={onOpenLink ? (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpenLink(parsed.href);
+      } : undefined}>{raw}</a>
+    ));
     consumed = offset + raw.length;
   }
   return <>{parts}{text.slice(consumed)}</>;
@@ -182,7 +189,7 @@ interface BubbleActions {
   remove?: (() => void) | undefined;
 }
 
-const Bubble = memo(function Bubble({ row, choose, actions }: { row: MessageRow; choose: (id: string) => void; actions?: BubbleActions | undefined }) {
+const Bubble = memo(function Bubble({ row, choose, actions, onOpenLink }: { row: MessageRow; choose: (id: string) => void; actions?: BubbleActions | undefined; onOpenLink?: MessagesProps["onOpenLink"] }) {
   const trigger = useRef<HTMLDivElement>(null);
   const pointer = useRef<{ x: number; y: number; at: number } | null>(null);
   const complete = "incomplete" in row ? undefined : row;
@@ -227,7 +234,7 @@ const Bubble = memo(function Bubble({ row, choose, actions }: { row: MessageRow;
         {!complete ? <p className="rounded-tile bg-muted px-4 py-2.5 text-base">{label}</p> : (
           <>
             {complete.attachments > 0 && <span className="flex items-center gap-1.5 text-sm text-muted-foreground"><PictureIcon className="size-4" aria-hidden />{complete.attachments === 1 ? "1 picture" : `${complete.attachments} pictures`}</span>}
-            {complete.body && <p data-alpha-message-body className={`rounded-tile px-4 py-2.5 text-md whitespace-pre-wrap wrap-anywhere ${outgoing ? "bg-foreground text-background" : "bg-secondary text-secondary-foreground"}`}><MessageText text={complete.body} /></p>}
+            {complete.body && <p data-alpha-message-body className={`rounded-tile px-4 py-2.5 text-md whitespace-pre-wrap wrap-anywhere ${outgoing ? "bg-foreground text-background" : "bg-secondary text-secondary-foreground"}`}><MessageText text={complete.body} onOpenLink={onOpenLink} /></p>}
           </>
         )}
         <span data-alpha-message-meta className="px-1.5 text-xs text-muted-foreground">{[when(row.date), status].filter(Boolean).join(" · ")}</span>
@@ -249,7 +256,7 @@ const Bubble = memo(function Bubble({ row, choose, actions }: { row: MessageRow;
 });
 
 /** One conversation: provider rows, their actions, and the draft belonging to this exact thread. */
-function Conversation({ runtime, messages: { state, can, send } }: MessagesProps & { messages: MessagesUI }) {
+function Conversation({ runtime, messages: { state, can, send }, onOpenLink }: MessagesProps & { messages: MessagesUI }) {
   const phone = usePhone(runtime).state;
   const [selected, setSelected] = useState("");
   const scroll = useRef<HTMLDivElement>(null);
@@ -305,7 +312,7 @@ function Conversation({ runtime, messages: { state, can, send } }: MessagesProps
           {state.page.status === "Failed" && <Banner variant="destructive">The conversation could not be read</Banner>}
           {can({ type: "earlierMessages" }) && <Button className="self-center" size="icon" variant="secondary" aria-label="Earlier messages" onClick={() => void send({ type: "earlierMessages" })}><ChevronUp /></Button>}
           <div role="log" aria-label="Messages" className="mt-auto flex flex-col gap-1.5">
-            {chronological.map((row) => <Bubble key={row.id} row={row} choose={choose} actions={row.id === selected && (actions?.copy || actions?.remove) ? actions : undefined} />)}
+            {chronological.map((row) => <Bubble key={row.id} row={row} choose={choose} actions={row.id === selected && (actions?.copy || actions?.remove) ? actions : undefined} onOpenLink={onOpenLink} />)}
           </div>
           {selectedRow && "incomplete" in selectedRow && can({ type: "openElsewhere" }) && <Button size="sm" variant="outline" className="self-start" onClick={() => void send({ type: "openElsewhere" })}>Open in messaging app</Button>}
           <div ref={anchor} aria-hidden />

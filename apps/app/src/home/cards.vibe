@@ -1,7 +1,7 @@
 // spec/app/home/cards.md, "Story: See my day at a glance"
 import type { AndroidCalendarList } from "@elizaos/os-bridges"
 import * as Cards from "../../gen/app__home__cards.effect.vibe"
-import type { Effect as Out, Event, Item, Origin } from "../../gen/app__home__cards.effect.vibe"
+import type { Effect as Out, Event, Flows, Item, Mail, Origin, Row } from "../../gen/app__home__cards.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import type { View } from "../../gen/app__shell.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
@@ -30,13 +30,15 @@ const titles = new Map<string, string>()
 const listeners = new Set<() => void>()
 let version = 0
 
+function subscribeNamed(this: void, listener: () => void): () => void {
+  listeners.add(listener)
+  return () => { listeners.delete(listener) }
+}
+
 /** The titles of the items read, as an external store the card reads without an effect. */
 export const named = {
   snapshot: (): number => version,
-  subscribe(listener: () => void): () => void {
-    listeners.add(listener)
-    return () => { listeners.delete(listener) }
-  },
+  subscribe: subscribeNamed,
   title: (origin: Origin, id: number): string => titles.get(`${origin}:${id}`) ?? "",
 }
 
@@ -49,27 +51,62 @@ function titled(origin: Origin, rows: ReadonlyArray<{ readonly title: string }>)
 /** A reminder saved on the phone, as the area that keeps it tells the agenda: when it is due, whether it is overdue or done, and its title. */
 export interface ToldReminder { readonly due: number; readonly overdue: boolean; readonly done: boolean; readonly title: string }
 
-/** What the agenda takes from the areas that keep it: the reminders saved on the phone and the calendars Calendar hides. */
-export interface Told { readonly reminders: ReadonlyArray<Item>; readonly hidden: ReadonlyArray<number> }
+/** The brief the digests area kept for Home: what it says and when it ran, or that its run failed and when. */
+export type ToldBrief = { readonly outcome: "Finished"; readonly summary: string; readonly at: number } | { readonly outcome: "RunFailed"; readonly at: number }
 
-let told: Told = { reminders: [], hidden: [] }
+/**
+ * What the cards take from the areas that keep it, as they hold it: the reminders saved on the phone, the calendars
+ * Calendar hides, Inbox's summary of unread mail, the rows waiting in Messages and Phone, Workflows' enabled rows and
+ * the brief kept for Home. Whether this phone is an Alpha image is the shell's.
+ */
+export interface Told {
+  readonly reminders: ReadonlyArray<Item>
+  readonly hidden: ReadonlyArray<number>
+  readonly mail: Mail
+  readonly messages: ReadonlyArray<Row>
+  readonly phone: ReadonlyArray<Row>
+  readonly flows: Flows
+  readonly brief: ToldBrief | undefined
+}
 
-// spec/app/home/cards.md, "The agenda draws on both calendars and the reminders saved on the phone, leaving out a calendar Calendar hides and a reminder already done"
-/** What other areas tell the agenda card, as an external store the card reads without an effect. */
-export const agendaFrom = {
+let told: Told = { reminders: [], hidden: [], mail: Cards.quiet, messages: [], phone: [], flows: { rows: [], freshness: "UpToDate" }, brief: undefined }
+
+function tell(next: Partial<Told>): void {
+  told = { ...told, ...next }
+  version += 1
+  for (const listener of [...listeners]) listener()
+}
+
+/** What Home's cards are given, for a phone that is or is not an Alpha image. */
+export function others(given: Told, image: boolean): Cards.Others {
+  return {
+    image, reminders: [...given.reminders], hidden: [...given.hidden], mail: given.mail,
+    messages: [...given.messages], phone: [...given.phone], flows: given.flows, brief: given.brief?.outcome ?? "NoBrief",
+  }
+}
+
+// spec/app/home/cards.md, "The agenda draws on both calendars and the reminders saved on the phone, leaving out a calendar Calendar hides and a reminder already done"; spec/app/home/cards.md, "Story: The other cards"
+/** What other areas tell Home's cards, each as its area holds it now, as an external store the cards read without an effect. */
+export const fromAreas = {
   snapshot: (): Told => told,
   subscribe: named.subscribe,
   /** The reminders saved on the phone now, every one of them. */
   reminders(rows: ReadonlyArray<ToldReminder>): void {
-    told = { ...told, reminders: rows.map((row, at) => ({ id: at + 1, origin: "Reminder", calendar: 0, begin: row.due, end: row.due, allDay: false, overdue: row.overdue, done: row.done })) }
     titled("Reminder", rows)
+    tell({ reminders: rows.map((row, at) => ({ id: at + 1, origin: "Reminder", calendar: 0, begin: row.due, end: row.due, allDay: false, overdue: row.overdue, done: row.done })) })
   },
   /** The phone's calendars Calendar hides now, by their numbers. */
-  hidden(calendars: ReadonlyArray<number>): void {
-    told = { ...told, hidden: [...calendars] }
-    version += 1
-    for (const listener of [...listeners]) listener()
-  },
+  hidden(calendars: ReadonlyArray<number>): void { tell({ hidden: [...calendars] }) },
+  /** Inbox's summary of the unread mail it loaded: sender over subject, never a body. */
+  mail(mail: Mail): void { tell({ mail }) },
+  /** The rows waiting in Messages: who, over the message. */
+  messages(rows: ReadonlyArray<Row>): void { tell({ messages: [...rows] }) },
+  /** The rows waiting in Phone: who, over the missed call. */
+  phone(rows: ReadonlyArray<Row>): void { tell({ phone: [...rows] }) },
+  /** Workflows' enabled rows, name over status, and how current they are. */
+  flows(flows: Flows): void { tell({ flows }) },
+  /** The brief kept for Home, or none. */
+  brief(brief: ToldBrief | undefined): void { tell({ brief }) },
 }
 
 /** The span a card reads: from the day before the day asked to two days after it. */

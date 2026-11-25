@@ -6,6 +6,11 @@ import * as Shown from "../../gen/app__files__preview.effect.vibe"
 import * as Recent from "../../gen/app__files__recent.effect.vibe"
 import type { Item } from "../../gen/app__files__shared.effect.vibe"
 import { type MediaHandoff, attachToAlpha } from "../assistant/attachments.vibe"
+import * as Inbox from "../../gen/app__inbox.effect.vibe"
+import type { Machine as Adding } from "../../gen/app__inbox__adding.effect.vibe"
+import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
+import type { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { type Incoming, handOver } from "../inbox/adding.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { type Said, say } from "../notices/toasts.vibe"
 import { adopt, keptAt } from "../platform/adoption.vibe"
@@ -274,12 +279,61 @@ effect function askAbout(item: number): void!!(Documents | Opened | Recent.Machi
   }
 }
 
+// spec/app/files/preview.md, "Use in email offers the exact file to the selected Inbox account for review before it joins a new draft"
+export function emailAccount(mail: Inbox.Mailbox, composer: Drafts.Composer): Inbox.Linked | undefined {
+  const linked = Inbox.linkOf(mail.connected, mail.selected.account)
+  return mail.signedIn && Drafts.free(composer) && linked.account > 0 && linked.credential > 0 && linked.grant.send ? linked : undefined
+}
+
+type MailTarget = Incoming | Adding | Drafts.Machine | Inbox.Machine | Shell
+
+effect function emailTarget(): (Inbox.Linked | undefined)!!(Inbox.Machine | Drafts.Machine) {
+  return emailAccount(try (try Inbox.Machine).get(), try (try Drafts.Machine).get())
+}
+
+// spec/app/files/preview.md, "The answer to an email handoff says whether Inbox received the attachment for review"
+effect function offerEmail(ticket: number, viewer: number, item: number, revision: number, account: number): Shown.Event!!(Documents | Opened | Recent.Machine | Shown.Machine | MailTarget | Toasts | Said) {
+  const refused: Shown.Event = { type: "answered", ticket, confirmed: false, known: true }
+  const machine = try Shown.Machine
+  const current = effect {
+    const state = try machine.get()
+    return state.viewer === viewer && state.item === item && state.revision === revision && Shown.loaded(state) && Shown.canAnswered(state, ticket, "Phone")
+  }
+  const target = try emailTarget()
+  if (target?.account !== account || !(try current)) return refused
+  const grantId = try grantOf(item)
+  const file = try (try Opened).grant(grantId)
+  const selection = try selectionOf(grantId)
+  if (Option.isNone(file) || Option.isNone(selection)) return refused
+  const docs = documents() catch () => undefined
+  if (docs === undefined) return refused
+  const verified = tryPromise(() => docs.describe(selection.value)) catch () => undefined
+  if (verified?.status !== "selected" || (verified.modified !== undefined && Math.trunc(verified.modified) !== revision) || !(try current)) return refused
+  const bytes = try (try Documents).attachment(selection.value)
+  if (!(try current) || (try grantOf(item)) !== grantId) return refused
+  const fresh = try emailTarget()
+  if (fresh?.account !== account || fresh?.credential !== target.credential || Option.isNone(bytes)) {
+    try say("Alpha could not offer this file to Inbox", true)
+    return refused
+  }
+  const { name, mimeType, dataBase64: data } = bytes.value
+  const size = data.length / 4 * 3 - (data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0)
+  if (name !== file.value.name || mimeType.toLowerCase() !== file.value.mimeType.toLowerCase() || data.length % 4 !== 0 || size <= 0
+    || (verified.size !== undefined && verified.size !== size)) {
+    try say("The selected file changed", true)
+    return refused
+  }
+  const confirmed = try handOver({ name, mimeType, data, size }, "Files")
+  if (!confirmed) try say("Alpha could not offer this file to Inbox", true)
+  return { type: "answered", ticket, confirmed, known: true }
+}
+
 /** Tell Recent what happened to the document it holds, where the rules still take it. */
 effect function toRecent(event: Recent.Event): void!!Recent.Machine {
   try ignore((try Recent.Machine).send(event, "Phone"))
 }
 
-function carryShown(fx: Shown.Effect): Job<Shown.Event, Documents | Opened | Recent.Machine | Shown.Machine | Files | MediaHandoff | Toasts | Said, [by: Shown.Actor]> {
+function carryShown(fx: Shown.Effect): Job<Shown.Event, Documents | Opened | Recent.Machine | Shown.Machine | Files | MediaHandoff | MailTarget | Toasts | Said, [by: Shown.Actor]> {
   return match (fx) {
     when { tag: "Read", let ticket, let item, let revision }: answer("read", read(ticket, item, revision), { type: "contentRead", ticket, ok: false, pages: 0, why: "Fine", secret: false }, "Phone");
     when { tag: "Draw", let ticket, let item, let revision, let page }: answer("draw", drew(ticket, item, revision, page), { type: "drawn", ticket, ok: false, isolated: true, readOnly: true }, "Phone");
@@ -303,7 +357,7 @@ function carryShown(fx: Shown.Effect): Job<Shown.Event, Documents | Opened | Rec
     when { tag: "SelectAgain", let item }: run("again", effect { try ignore((try Recent.Machine).send({ type: "openPicker", replacing: item }, "Owner")) }, "Phone");
     when { tag: "AskAlpha", let item }: run("ask", askAbout(item), "Phone");
     when { tag: "Transcribe" }: stop("transcribe");
-    when { tag: "Insert" }: stop("insert");
+    when { tag: "OfferEmail", let ticket, let viewer, let item, let revision, let account }: answer("email", offerEmail(ticket, viewer, item, revision, account), { type: "answered", ticket, confirmed: false, known: false }, "Phone");
   }
 }
 
@@ -377,7 +431,7 @@ const hiding = following(Browser.Machine, (s) => s.open && Browser.allowed(s), S
 // spec/app/files/recent.md, "Back, or the phone locking, withdraws the picker, and its late choice is dropped"
 const hidePicker = following(Browser.Machine, (s) => s.open, Recent.Machine, (open): Recent.Event | undefined => (open ? undefined : { type: "cancelPicker" }), "Phone")
 
-// spec/app/files/preview.md, "The file can change while it is shown: it is read again, its page drawn again within its new length, and the email review stops counting"
+// spec/app/files/preview.md, "The file can change while it is shown: it is read again, its page drawn again within its new length, and an email handoff still reading the previous file is refused"
 const revisions = started(effect {
   const browser = try Browser.Machine
   const machine = try Shown.Machine

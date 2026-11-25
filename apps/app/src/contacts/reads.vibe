@@ -116,7 +116,7 @@ effect function shown(query: string): unknown!!(Telephony | Rows | ContactsMachi
   try (try Rows).set({ sought: query })
   try contained((try Shell).send({ type: "openView", view: "Contacts" }), "the agent's search")
   const machine = try ContactsMachine
-  try Stream.runHead(Stream.filter(machine.changes, (s) => s.front))
+  try Stream.runHead(Stream.filter(machine.changes, (s) => s.front && (s.list.status === "Loaded" || s.list.status === "Failed")))
   try ignore(machine.send({ type: "search", typed: true }))
   return { kind: "contact-show", status: page.contacts.length > 0 ? "shown" : "not-found" }
 }

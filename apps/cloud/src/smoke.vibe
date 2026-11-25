@@ -82,7 +82,7 @@ function addressOf(gate: Gate, origins: Origins, environment: CloudEnvironment, 
 }
 
 /** Each public gate of a deployed environment, in the spec's order, read without a credential. */
-export effect function smoke(environment: CloudEnvironment, origins: Origins, name: string) {
+export effect function smoke(environment: CloudEnvironment, origins: Origins, name: string): ReadonlyArray<GateResult>!!HttpClient.HttpClient {
   const which: Environment = environment === "production" ? "Production" : "Staging"
   const signInReturn = entryOf(registrationAt(which, new URL(origins.web).host)).signInReturn
   const results: GateResult[] = []

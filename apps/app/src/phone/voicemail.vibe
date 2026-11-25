@@ -68,8 +68,9 @@ effect function fetched(ticket: number): Event!!(Telephony | Voicemails | Voicem
       const ready = try telephony("fetchVoicemailAudio", (c) => c.phone.fetchVoicemailAudio(id))
       if (ready !== "ready") return ""
     }
-    const found = try telephony("voicemailAudio", (c) => c.phone.voicemailAudio(id))
-    return `data:${found.mimeType};base64,${found.data}`
+    const pcm = telephony("voicemailPcm", (c) => c.phone.voicemailPcm(id)) catch () => undefined
+    const playable = pcm ?? try telephony("voicemailAudio", (c) => c.phone.voicemailAudio(id))
+    return `data:${playable.mimeType};base64,${playable.data}`
   } catch () => ""
   const state = try (try Voicemail.Machine).get()
   const current = (try store.get()).open
@@ -233,6 +234,7 @@ module audio {
   }
 }
 import { type PlaybackPosition, makeAudio, pauseAudio, positionOf, sourceOf } from audio
+export type { PlaybackPosition }
 
 /** The one audio element the open voicemail plays in, outside any screen. */
 export service Player {

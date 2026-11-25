@@ -67,7 +67,7 @@ export function mapsScene(): MapsScene {
       },
     },
     places: [harbour, gallery],
-    routes: [],
+    routes: [cloudRoute("default", { latitude: 43.7300, longitude: 7.4200 }, harbour.coordinate, 1900, 4)],
     limited: undefined,
     asked: [],
     here: { latitude: 43.7300, longitude: 7.4200, accuracy: 8 },
@@ -139,7 +139,7 @@ export function elizaLocation(scene: MapsScene, now: () => number): Faked {
     return {
       checkPermissions: () => Promise.resolve({ location: scene.allowed, accuracy: scene.precision }),
       requestPermissions: () => Promise.resolve({ location: scene.allowed === "prompt" ? "granted" : scene.allowed, accuracy: scene.precision }),
-      getCurrentPosition: () => Promise.reject(rejection("TIMEOUT")),
+      getCurrentPosition: () => (scene.here && scene.allowed === "granted" ? Promise.resolve({ coords: { ...scene.here, timestamp: now() }, cached: false }) : Promise.reject(rejection("TIMEOUT"))),
       watchPosition: () => {
         const watchId = `w${++next}`;
         scene.watches.add(watchId);

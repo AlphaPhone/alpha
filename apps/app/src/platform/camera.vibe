@@ -111,16 +111,16 @@ export service CameraPort {
   bind(element: HTMLVideoElement | null): void!!
   access(): { readonly camera: Grant; readonly microphone: Grant }!!
   ask(kind: "camera" | "microphone"): Grant!!
-  start(ticket: number, lens: Lens, aspect: Aspect): LensFacts | undefined!!
+  start(ticket: number, lens: Lens, aspect: Aspect): (LensFacts | undefined)!!
   stop(ticket: number): void!!
   mode(mode: Mode): boolean!!
   flash(mode: Flash): boolean!!
   volume(enabled: boolean): void!!
   zoom(level: number): boolean!!
   focus(point: Point): boolean!!
-  capture(save: boolean): CameraMedia | undefined!!
+  capture(save: boolean): (CameraMedia | undefined)!!
   record(sound: boolean): boolean!!
-  finish(): CameraMedia | undefined!!
+  finish(): (CameraMedia | undefined)!!
   release(media: CameraMedia): void!!
 }
 
@@ -211,7 +211,7 @@ export const phoneCamera = Layer.effect(CameraPort, effect {
     volume: (enabled: boolean) => registered("AlphaDevice") ? ignore(tryPromise(() => volume(enabled))) : Effect.void,
     zoom: (level: number) => tried(() => camera().setZoom({ zoom: level / 10 })),
     focus: ({ x, y, viewportX, viewportY }: Point) => tried(() => camera().setFocusPoint({ x: viewportX ?? x, y: viewportY ?? y })),
-    effect capture(save: boolean): CameraMedia | undefined!! {
+    effect capture(save: boolean): (CameraMedia | undefined)!! {
       const reply = tryPromise(() => camera().capturePhoto({ format: "jpeg", quality: .92, saveToGallery: save, thumbnailOnly: save, ...(save ? {} : { width: 1280 }) })) catch () => undefined
       if (reply === undefined || (save && !reply.path)) return undefined
       const path = reply.path ?? ""
@@ -219,7 +219,7 @@ export const phoneCamera = Layer.effect(CameraPort, effect {
       return source ? { path, source, libraryId: reply.libraryId ?? libraryId(path, "i"), mime: "image/jpeg", width: reply.width, height: reply.height } : undefined
     },
     record: (sound: boolean) => tried(() => camera().startRecording({ ...recordingOptions, saveToGallery: true, audio: sound })),
-    effect finish(): CameraMedia | undefined!! {
+    effect finish(): (CameraMedia | undefined)!! {
       const reply = tryPromise(() => camera().stopRecording()) catch () => undefined
       if (!reply?.path || reply.fileSize <= 0 || reply.duration <= 0) return undefined
       return { path: reply.path, libraryId: libraryId(reply.path, "v"), source: playable(reply.path), mime: reply.mimeType, width: reply.width, height: reply.height, duration: reply.duration, size: reply.fileSize }
@@ -316,7 +316,7 @@ export const browserCamera = Layer.effect(CameraPort, effect {
     volume: () => Effect.void,
     zoom: () => succeed(false),
     focus: () => succeed(false),
-    effect capture(): CameraMedia | undefined!! {
+    effect capture(): (CameraMedia | undefined)!! {
       const video = view
       if (video === null || opened === undefined) return undefined
       const blob = tryPromise(() => image(video)) catch () => undefined
@@ -354,7 +354,7 @@ export const browserCamera = Layer.effect(CameraPort, effect {
       film = { recording: session, answer, audio }
       return true
     },
-    effect finish(): CameraMedia | undefined!! {
+    effect finish(): (CameraMedia | undefined)!! {
       const running = film
       if (running === undefined) return undefined
       if (running.recording.state !== "inactive") try ignore(Effect.try(() => running.recording.stop()))

@@ -143,6 +143,24 @@ module browser {
     }
   }
 
+  /** The newest saved capture's metadata, without reading every original. */
+  export async function latestBrowserCapture(): Promise<BrowserCapture | undefined> {
+    const database = await storage()
+    try {
+      return await new Promise((resolve, reject) => {
+        const query = database.transaction(store).objectStore(store).openCursor(null, "prev")
+        query.onsuccess = () => {
+          const cursor = query.result
+          if (cursor === null) { resolve(undefined); return }
+          const row: unknown = cursor.value
+          if (valid(row) && row.name.startsWith("Camera.")) resolve(row)
+          else cursor.continue()
+        }
+        query.onerror = () => reject(query.error)
+      })
+    } finally { database.close() }
+  }
+
   /** Read one selected original without materializing every stored recording. */
   export async function browserOriginal(id: string): Promise<Blob | undefined> {
     if (id.startsWith(earlierPrefix)) return legacyOriginal(id.slice(earlierPrefix.length))
@@ -181,8 +199,8 @@ module browser {
       && (!("thumbnail" in row) || row.thumbnail === undefined || typeof row.thumbnail === "string")
   }
 }
-import { browserCaptures, browserOriginal, captureEvent, page, saveBrowserCapture } from browser
-export { saveBrowserCapture }
+import { browserCaptures, browserOriginal, captureEvent, latestBrowserCapture, page, saveBrowserCapture } from browser
+export { latestBrowserCapture, saveBrowserCapture }
 
 /** The phone's permitted library and its reviewed read surface, or the captures saved in this browser. */
 export service PhotosPort {
@@ -192,15 +210,17 @@ export service PhotosPort {
   captures(): readonly BrowserCapture[]!PhotosFailed
   original(id: string): (Blob | undefined)!PhotosFailed
   handoff(id: string): void!!
+  hasHandoff(): boolean!!
   takeHandoff(): (string | undefined)!!
 }
 
-export error PhotosFailed { readonly cause: unknown }
+export error PhotosFailed { cause: unknown }
 
 function entry() {
   let next: string | undefined
   return {
     handoff: (id: string) => sync(() => { next = id }),
+    hasHandoff: () => sync(() => next !== undefined),
     takeHandoff: () => sync(() => { const known = next; next = undefined; return known }),
   }
 }

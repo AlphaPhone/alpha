@@ -14,6 +14,8 @@ export type VoiceEvent =
   | { readonly kind: "bargeIn"; readonly session: number; readonly echo: boolean }
   | { readonly kind: "ended"; readonly session: number; readonly reason: string }
 
+export type ReadingEvent = { readonly kind: "ready" | "ended"; readonly ok: boolean }
+
 export interface SpeechStatus {
   readonly ready: boolean
   readonly ttsReady: boolean
@@ -44,6 +46,7 @@ module capacitor {
     synthesizeLocal(options: { requestId: string; text: string; append?: boolean; replace?: boolean }): Promise<{ playbackId?: string }>
     play(options: { playbackId: string; replace?: boolean }): Promise<unknown>
     stopPlayback(options: { requestId?: string }): Promise<unknown>
+    cancel(options: { requestId: string }): Promise<unknown>
     startRecording(options: Record<string, never>): Promise<{ recordingId?: string }>
     stopRecording(options: { recordingId: string }): Promise<{ recordingId?: string }>
     cancelRecording(options: { recordingId: string }): Promise<unknown>
@@ -105,6 +108,9 @@ export service VoiceBridge {
   closeMic(session: number): void!VoiceBridgeFailed
   playSentence(session: number, turn: number, text: string, append: boolean): void!VoiceBridgeFailed
   hush(turn: number): void!!
+  canRead(): boolean!!
+  readAloud(ticket: number, text: string): Stream.Stream<ReadingEvent>
+  silenceReading(ticket: number): boolean!!
   shut(session: number): boolean!!
   readonly events: Stream.Stream<VoiceEvent>
   startRecording(ticket: number): RecordedClip!VoiceBridgeFailed
@@ -200,6 +206,8 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   let cloudSpeechAbort: AbortController | undefined
   let activePlaybackRequest: string | undefined
   const recordings = new Map<number, string>()
+  const readings = new Map<number, { readonly id: string; readonly stopped: Deferred.Deferred<boolean> }>()
+  let stoppedThrough = 0
   const eventSubscribers = new Set<(event: VoiceEvent) => void>()
 
   const publish = (event: VoiceEvent) => {
@@ -359,6 +367,64 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     try ignore(tryPromise(() => localPlugin().stopPlayback(requestId === undefined ? {} : { requestId })))
   }
 
+  // spec/app/voice/output.md, "A reading waiting behind earlier audio is prepared once that audio is confirmed stopped; if it cannot be confirmed, reading aloud closes until Alpha restarts"
+  effect function silenceReading(ticket: number): boolean!! {
+    stoppedThrough = Math.max(stoppedThrough, ticket)
+    const current = readings.get(ticket)
+    if (current === undefined) return true
+    const plugin = localPlugin()
+    const confirmed = effect {
+      try tryPromise(() => plugin.cancel({ requestId: current.id }))
+      try tryPromise(() => plugin.stopPlayback({ requestId: current.id }))
+      return true
+    } catch () => false
+    if (confirmed) {
+      readings.delete(ticket)
+      try Deferred.succeed(current.stopped, false)
+    }
+    return confirmed
+  }
+
+  // spec/app/voice/output.md, "Only the current reading's audio plays, and it ends once, as its own answer says"
+  function readAloud(ticket: number, text: string): Stream.Stream<ReadingEvent> {
+    return Stream.callback<ReadingEvent>((queue) => effect {
+      if (!registered(LOCAL_PLUGIN) || ticket <= stoppedThrough) {
+        Queue.offerUnsafe(queue, { kind: "ready", ok: false })
+        Queue.endUnsafe(queue)
+        return
+      }
+      const plugin = localPlugin()
+      const id = fresh()
+      const stopped = try Deferred.make<boolean>()
+      readings.set(ticket, { id, stopped })
+      try addFinalizer(() => ignore(silenceReading(ticket)))
+      let playbackId: string | undefined
+      for (const [event, ok] of [["playbackEnded", true], ["playbackFailed", false], ["playbackStopped", false]] as const) {
+        const listener = tryPromise(() => plugin.addListener(event, (data) => {
+          if (playbackId === undefined || typeof data !== "object" || data === null || !("playbackId" in data) || data.playbackId !== playbackId) return
+          runFork(Deferred.succeed(stopped, ok))
+        })) catch () => undefined
+        if (listener === undefined) {
+          Queue.offerUnsafe(queue, { kind: "ready", ok: false })
+          Queue.endUnsafe(queue)
+          return
+        }
+        try addFinalizer(() => ignore(tryPromise(() => listener.remove())))
+      }
+      const playing = effect {
+        const prepared = try tryPromise(() => plugin.synthesizeLocal({ requestId: id, text, replace: false }))
+        const playback = prepared.playbackId
+        if (!playback || readings.get(ticket)?.id !== id) return false
+        playbackId = playback
+        try tryPromise(() => plugin.play({ playbackId: playback, replace: false }))
+        return true
+      } catch () => false
+      Queue.offerUnsafe(queue, { kind: "ready", ok: playing })
+      if (playing) Queue.offerUnsafe(queue, { kind: "ended", ok: try Deferred.await(stopped) })
+      Queue.endUnsafe(queue)
+    })
+  }
+
   effect function shut(session: number): boolean!! {
     if (activeSession === session) activeSession = 0
     cloudSpeechAbort?.abort()
@@ -411,6 +477,9 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     closeMic,
     playSentence,
     hush,
+    canRead: () => sync(() => registered(LOCAL_PLUGIN)),
+    readAloud,
+    silenceReading,
     shut,
     events: makeNativeEvents(eventSubscribers, () => activeSession),
     effect startRecording(ticket: number): RecordedClip!VoiceBridgeFailed {
@@ -467,6 +536,9 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
     closeMic: () => Effect.void,
     playSentence: () => Effect.void,
     hush: () => Effect.void,
+    canRead: () => succeed(false),
+    readAloud: () => Stream.succeed<ReadingEvent>({ kind: "ready", ok: false }),
+    silenceReading: () => succeed(true),
     shut: () => succeed(true),
     events: Stream.empty,
     startRecording: () => Effect.fail(new VoiceBridgeFailed({ method: "startRecording", cause: "browser-no-native-voice" })),

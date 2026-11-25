@@ -5,7 +5,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import vibelang from "vibelang-vite";
 import { type Plugin, defineConfig } from "vite";
-import { eliza } from "@repo/eliza-harness/serve";
+import { eliza } from "@repo/eliza-harness";
 import { fakes } from "./test/fakes/serve.ts";
 
 /**

@@ -2,39 +2,15 @@
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { CloudError } from "@elizaos/cloud"
 import * as List from "../../gen/app__notes.effect.vibe"
-import type { Effect as Out, Event } from "../../gen/app__notes.effect.vibe"
+import type { Change, Effect as Out, Event } from "../../gen/app__notes.effect.vibe"
 import type { Actor } from "../../gen/app__notes__note.ts"
 import * as Shell from "../../gen/app__shell.effect.vibe"
-import { Agent } from "../platform/agent.vibe"
+import type { Agent } from "../platform/agent.vibe"
 import { Cloud } from "../platform/cloud.vibe"
-import { ask } from "../platform/remote.vibe"
 import { type Job, answer, contained, reacting, run, started, together } from "../runtime/reactor.vibe"
-import { keep } from "./shown.ts"
-
-/** The agent's notes store as `@elizaos/plugin-notes` answers `/api/notes/state`. */
-schema Item { readonly t: string; readonly done?: boolean }
-schema Said { readonly s?: string; readonly t: string }
-schema Data {
-  readonly pinned?: boolean
-  readonly folderId?: string
-  readonly items?: Item[]
-  readonly lines?: Said[]
-  readonly summary?: string[]
-  readonly actions?: Item[]
-  readonly audio?: { readonly durationMs?: number }
-  readonly url?: string
-  readonly domain?: string
-  readonly clips?: string[]
-}
-schema Stored {
-  readonly id: string
-  readonly title: string
-  readonly body: string
-  readonly format?: { readonly kind: "text" | "list" | "voice" | "link"; readonly data: Data }
-  readonly createdAt: string
-  readonly updatedAt: string
-}
-schema State { readonly success: true; readonly data: { readonly notes: Stored[]; readonly revision: number } }
+import { keep, noteOf, storedId } from "./shown.ts"
+import { interact, readState } from "./store.vibe"
+import { type Opened, shows, tellOwner } from "./views.vibe"
 
 /** The folders the phone keeps for one owner's notes, and their own revision. */
 schema Shelf { readonly revision: number; readonly folders: { readonly id: string; readonly name: string }[] }
@@ -57,18 +33,32 @@ effect function shelfOf(owner: number): Shelf!!KeyValueStore.KeyValueStore {
 effect function list(ticket: number, owner: number): Event!!(Agent | KeyValueStore.KeyValueStore) {
   const failed: Event = { type: "listed", ticket, ok: false, version: 0, rows: [], folders: [], shelf: 0 }
   return effect {
-    const read = try ask(Agent, HttpClientRequest.get("/api/notes/state"), State)
+    const read = try readState()
     const shelf = try shelfOf(owner)
-    const { rows, folders } = keep(read.data.notes, shelf.folders)
-    return { type: "listed", ticket, ok: true, version: Math.max(1, read.data.revision), rows, folders, shelf: shelf.revision } as Event
+    const { rows, folders } = keep(read.notes, shelf.folders, read.revision)
+    return { type: "listed", ticket, ok: true, version: Math.max(1, read.revision), rows, folders, shelf: shelf.revision } as Event
   } catch () => failed
 }
 
-function carry(fx: Out): Job<Event, Agent | KeyValueStore.KeyValueStore | Shell.Machine, [by: Actor]> {
+// spec/app/notes/index.md, "A change ends as the store says, and the list is read again whatever the answer"
+/** Write `change` to the owner's store over the revision it names: a pin is kept in the note's own format. */
+effect function write(ticket: number, change: Change): Event!!Agent {
+  const refused: Event = { type: "changeWritten", ticket, ok: false, known: true }
+  const id = storedId(change.note)
+  const note = noteOf(change.note)
+  if ((change.op !== "Pin" && change.op !== "Unpin") || id === undefined || note === undefined) return refused
+  const format = { kind: note.format?.kind ?? "text", data: { ...note.format?.data, pinned: change.op === "Pin" } }
+  return effect {
+    try interact("update-note", { id, format, expectedRevision: change.base })
+    return { type: "changeWritten", ticket, ok: true, known: true } as Event
+  } catch effect (failure) => (failure._tag === "Refused" ? refused : { type: "changeWritten", ticket, ok: false, known: false } as Event)
+}
+
+function carry(fx: Out): Job<Event, Agent | KeyValueStore.KeyValueStore | Shell.Machine | Opened, [by: Actor]> {
   return match (fx) {
     when { tag: "Lists", let ticket, let owner }: answer("list", list(ticket, owner), { type: "listed", ticket, ok: false, version: 0, rows: [], folders: [], shelf: 0 }, "Phone");
-    when { tag: "Writes", let ticket }: answer("write", sync((): Event => ({ type: "changeWritten", ticket, ok: false, known: true })), { type: "changeWritten", ticket, ok: false, known: false }, "Phone");
-    when { tag: "Shows" }: run("show", sync(() => undefined), "Phone");
+    when { tag: "Writes", let ticket, let change }: answer("write", write(ticket, change), { type: "changeWritten", ticket, ok: false, known: false }, "Phone");
+    when { tag: "Shows", let row }: run("show", shows(row), "Phone");
     when { tag: "OpensAccount" }: run("account", effect { try contained((try Shell.Machine).send({ type: "openView", view: "Settings" }), "opening Settings") }, "Phone");
   }
 }
@@ -106,7 +96,10 @@ effect function opened() {
   const notes = try List.Machine
   if (who !== undefined) {
     const owner = try numberOf(who)
-    if ((try notes.get()).owner !== owner) try contained(notes.send({ type: "ownerChanged", owner }, "Phone"), "telling Notes who is signed in")
+    if ((try notes.get()).owner !== owner) {
+      try contained(notes.send({ type: "ownerChanged", owner }, "Phone"), "telling Notes who is signed in")
+      try tellOwner(owner)
+    }
   }
   try contained(notes.send({ type: "refresh" }, "Owner"), "reading the notes")
 }

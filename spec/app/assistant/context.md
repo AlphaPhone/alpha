@@ -70,7 +70,7 @@ type Moved = { state: Locator, out: List[Effect] }
 
 ```quint
 pure val nowValues = Set(0, 100000, 400000, 2000000, 4000000)
-pure val takenValues = Set(0, 100000, 350000)
+pure val takenValues = Set(-1, 0, 100000, 350000)
 pure val ticketValues = Set(1, 2, 3)
 pure val lValues = Set(initial)
   .union(Set({ ...initial, granted: true, clock: 2000000, gpsAt: 0 }))
@@ -105,7 +105,7 @@ pure def read(l: Locator, now: int): Moved =
   { state: { ...l, clock: now, gps: gps, gpsNext: now + retryMs }, out: List(ReadFix({ ticket: gps.ticket })) }
 
 pure def canFixed(l: Locator, ticket: int, ok: bool, taken: int, now: int): bool =
-  R::canAnswer(l.gps, ticket) and now >= l.clock and taken <= now and now - taken <= reuseMs
+  R::canAnswer(l.gps, ticket) and now >= l.clock and (ok implies (taken >= 0 and taken <= now and now - taken <= reuseMs))
 
 pure def fixed(l: Locator, ticket: int, ok: bool, taken: int, now: int): Locator =
   if (ok) { ...l, clock: now, gps: R::answer(l.gps, true), gpsAt: taken, gpsNext: now + reuseMs }
@@ -133,7 +133,7 @@ pure def lookUp(l: Locator, now: int, warm: bool): Moved =
   { state: { ...l, clock: now, network: network, networkNext: now + networkRetryMs }, out: List(LookUp({ ticket: network.ticket })) }
 
 pure def canLooked(l: Locator, ticket: int, ok: bool, taken: int, now: int): bool =
-  R::canAnswer(l.network, ticket) and now >= l.clock and taken <= now and now - taken <= networkUnchangedMs
+  R::canAnswer(l.network, ticket) and now >= l.clock and (ok implies (taken >= 0 and taken <= now and now - taken <= networkUnchangedMs))
 
 pure def looked(l: Locator, ticket: int, ok: bool, taken: int, now: int): Locator =
   if (ok) { ...l, clock: now, network: R::answer(l.network, true), networkAt: taken, networkNext: now + networkReuseMs }

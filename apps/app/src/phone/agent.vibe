@@ -1,0 +1,94 @@
+// spec/app/contacts/agent.md, "Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call"; spec/app/phone/index.md, "A number handed to Phone opens the keypad with it filled in, and never dials"
+import { NOT_DISPATCHED, readResult, type DeviceOperation } from "@elizaos/agent"
+import { Machine as Phone, clear } from "../../gen/app__phone.effect.vibe"
+import { Machine as Shell, available, showing } from "../../gen/app__shell.effect.vibe"
+import { Device } from "../platform/device.vibe"
+import { Telephony, TelephonyAbsent, TelephonyRefused, telephony } from "../platform/telephony.vibe"
+import { contained } from "../runtime/reactor.vibe"
+import { Dialer, prefilled } from "./phone.vibe"
+
+type PhoneOperation = Extract<DeviceOperation, { type: "phone_keypad" | "phone_dial" | "phone_call" }>
+
+const refused = { kind: "refused", code: NOT_DISPATCHED } as const
+
+function answer(operation: PhoneOperation, raw: unknown, applied: boolean): unknown {
+  const result = readResult(operation, raw)
+  if (result === undefined) return undefined
+  return applied ? { kind: "applied", result } : { ...refused, result }
+}
+
+function refusedBeforeDispatch(failure: unknown): boolean {
+  return failure instanceof TelephonyAbsent || (failure instanceof TelephonyRefused &&
+    (failure.tag === "BridgeUnavailable" || failure.tag === "PhoneRequestRefused"))
+}
+
+effect function showingPhone(): boolean!!(Device | Shell) {
+  return (try (try Device).showing()) && available(try (try Shell).get(), "Phone")
+}
+
+effect function stillApproved(current: () => Promise<boolean>): boolean!! {
+  return tryPromise(current) catch () => false
+}
+
+effect function canDispatch(current: () => Promise<boolean>): boolean!!(Device | Phone | Shell) {
+  if (!(try stillApproved(current)) || !(try showingPhone())) return false
+  const state = try (try Phone).get()
+  return clear(state) && state.dial.status !== "Loading"
+}
+
+effect function keypad(number: string | undefined, current: () => Promise<boolean>): boolean!!(Device | Dialer | Phone | Shell) {
+  const handset = try Phone
+  const shell = try Shell
+  const store = try Dialer
+  const handed = number === undefined ? undefined : prefilled(number)
+  if (number !== undefined && handed === undefined) return false
+  if (!(try stillApproved(current)) || !(try showingPhone()) || (try handset.get()).dial.status === "Loading") return false
+  if (!showing(try shell.get(), "Phone") && !(try contained(shell.send({ type: "agentOpenView", view: "Phone" }), "opening the reviewed keypad"))) return false
+  if ((try shell.get()).assistant === "Full" && !(try contained(shell.send({ type: "goBack" }), "showing the keypad beside Ask Alpha"))) return false
+  const front = timeout(Stream.runHead(Stream.filter(handset.changes, (state) => state.front)), "2 seconds") catch () => Option.none()
+  if (Option.isNone(front) || !(try showingPhone()) || !showing(try shell.get(), "Phone")) return false
+  if ((try handset.get()).tab !== "Keypad" && !(try contained(handset.send({ type: "pickTab", tab: "Keypad" }), "selecting the keypad"))) return false
+  const digits = handed?.digits ?? ""
+  const previous = (try store.get()).digits
+  const event = handed?.event ?? { type: "editNumber", digits: 0, typed: "Blank" } as const
+  try store.set({ digits })
+  if (!(try contained(handset.send(event), "filling the reviewed keypad"))) {
+    if ((try store.get()).digits === digits) try store.set({ digits: previous })
+    return false
+  }
+  const state = try handset.get()
+  return state.front && state.tab === "Keypad" && state.digits === digits.length && (try store.get()).digits === digits
+}
+
+/** The already reviewed Phone operations. The SDK owns approval, claim and dispatch journaling. */
+export effect function phoneAction(operation: DeviceOperation, current: () => Promise<boolean>): unknown!!(Device | Dialer | Phone | Shell | Telephony) {
+  switch (operation.type) {
+    case "phone_keypad": {
+      const opened = try keypad(operation.number, current)
+      return answer(operation, { kind: "phone-keypad", status: opened ? "opened" : "unavailable" }, opened)
+    }
+    case "phone_dial": {
+      if (operation.target.kind !== "number" || !(try canDispatch(current))) return refused
+      const number = operation.target.number
+      const report = telephony("dial", (client) => client.phone.dial(number)) catch (failure) => refusedBeforeDispatch(failure) ? null : undefined
+      if (report === undefined) return undefined
+      const status = report?.dialStatus === "DialHandedOff" ? "handed-off" : report?.dialStatus === "DialFailed" ? "failed" : "unavailable"
+      return answer(operation, { kind: "phone-dial", status, handler: status === "handed-off" ? report?.handler ?? null : null, contact: false }, status === "handed-off")
+    }
+    case "phone_call": {
+      if (operation.target.kind !== "number" || !(try canDispatch(current))) return refused
+      const number = operation.target.number
+      const report = telephony("placeCall", (client) => client.phone.placeCall(number)) catch (failure) => refusedBeforeDispatch(failure) ? null : undefined
+      if (report === undefined) return undefined
+      const status = match (report?.placeStatus) {
+        when "CallPlaced": "placed";
+        when "CallEmergencyHandoff": "emergency-handoff";
+        when "CallBusy": "busy";
+        when "CallFailed": "failed";
+        default: "unavailable";
+      }
+      return answer(operation, { kind: "phone-call", status, contact: false }, status === "placed" || status === "emergency-handoff")
+    }
+    default: return refused
+  }
+}

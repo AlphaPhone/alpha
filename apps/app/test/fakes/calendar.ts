@@ -306,3 +306,57 @@ export function elizaCalendar(scene: CalendarScene): Faked {
     },
   }));
 }
+
+/** Someone on the reference week's events, as `PEOPLE` of develop's fixtures names them. */
+const reference: Readonly<Record<string, string>> = {
+  maya: "Maya Chen", jordan: "Jordan Park", priya: "Priya Nair", sam: "Sam Okafor", lena: "Lena Ruiz", dad: "Dad",
+};
+
+/** One event of the reference week: its day from today, start hour, length in hours, and who comes with their reply. */
+interface Seed { id: string; off: number; t: number; d: number; title: string; work: boolean; where?: string; video?: string; who?: Record<string, string>; notes?: string; invite?: string; weekdays?: boolean }
+
+const week: ReadonlyArray<Seed> = [
+  { id: "c1", off: -14, t: 9.5, d: 0.5, title: "Standup", work: true, video: "meet.lumen.example/standup", who: { maya: "accepted", sam: "accepted" }, weekdays: true },
+  { id: "c2", off: 0, t: 11, d: 1.5, title: "Deep work", work: true, notes: "Enclave copy, then the onboarding flow." },
+  { id: "c3", off: 0, t: 13, d: 1, title: "Lunch · Priya", work: false, where: "Tartine, Guerrero St", who: { priya: "accepted" } },
+  { id: "c4", off: 0, t: 15, d: 1, title: "Design review", work: true, video: "meet.lumen.example/design-review", who: { maya: "accepted", jordan: "tentative", sam: "accepted", lena: "accepted" }, notes: "Walk through the onboarding prototype. Decide on the enclave copy before Friday." },
+  { id: "c5", off: 0, t: 16.5, d: 0.5, title: "Jordan · term sheet", work: true, where: "Phone", who: { jordan: "accepted" }, notes: "Revised term sheet is in your inbox." },
+  { id: "c6", off: 0, t: 19.5, d: 1, title: "Gym", work: false, where: "Equinox SoMa" },
+  { id: "c11", off: -1, t: 8.5, d: 0.5, title: "Coffee · Lena", work: false, where: "Sightglass, 7th St", who: { lena: "needsAction" } },
+  { id: "c12", off: -1, t: 14, d: 1, title: "Roadmap review", work: true, video: "meet.lumen.example/roadmap", who: { maya: "needsAction", sam: "needsAction" } },
+  { id: "c8", off: 1, t: 10, d: 0.5, title: "1:1 · Maya", work: true, video: "meet.lumen.example/maya", who: { maya: "needsAction" } },
+  { id: "c9", off: 1, t: 14, d: 1, title: "Dentist", work: false, where: "Mission Dental, Valencia St" },
+  { id: "c13", off: 2, t: 9, d: 2, title: "Board prep", work: true, where: "Lumen HQ, 3rd floor", who: { jordan: "needsAction", maya: "needsAction" } },
+  { id: "c14", off: 2, t: 19, d: 1.5, title: "Dinner · Dad", work: false, where: "Zuni Café", who: { dad: "needsAction" } },
+  { id: "c10", off: 3, t: 19, d: 2, title: "Northpoint partner dinner", work: true, where: "Nopa, Divisadero St", who: { jordan: "accepted", priya: "needsAction" }, invite: "jordan", notes: "Partners and founders, informal. Jordan would like you to say a few words about the enclave." },
+  { id: "c15", off: 4, t: 13, d: 1, title: "Offsite planning", work: true, video: "meet.lumen.example/offsite", who: { maya: "needsAction", lena: "needsAction" } },
+  { id: "c16", off: 5, t: 10, d: 2, title: "Farmers market", work: false, where: "Ferry Building", who: { priya: "needsAction" } },
+];
+
+/** One occurrence of `seed` on the day `off` days from `today`'s midnight. */
+function occurrence(seed: Seed, today: Date, off: number, series: boolean): FakeEvent {
+  const begin = new Date(today.getFullYear(), today.getMonth(), today.getDate() + off).getTime() + seed.t * 3_600_000;
+  const attendees: FakeAttendee[] = Object.entries(seed.who ?? {}).map(([id, status]) => ({
+    email: `${id}@lumen.example`, displayName: reference[id] ?? id, responseStatus: status, self: false, organizer: seed.invite === id, optional: false,
+  }));
+  if (seed.invite) attendees.push({ email: "owner@alpha.test", displayName: "You", responseStatus: "needsAction", self: true, organizer: false, optional: false });
+  const id = series ? `${seed.id}-${off}` : seed.id;
+  return agentEvent(seed.title, begin, begin + seed.d * 3_600_000, {
+    id, externalId: id, calendarId: seed.work ? "eliza-calendar/primary" : "eliza-calendar/personal", description: seed.notes ?? "", location: seed.where ?? "",
+    conferenceLink: seed.video ? `https://${seed.video}` : null, attendees, recurringEventId: series ? seed.id : null, provider: seed.invite ? "google" : "eliza",
+    organizer: seed.invite ? { self: false, displayName: reference[seed.invite] } : { self: true },
+  });
+}
+
+// spec/app/calendar/index.md, "Story: See my days"
+/** Develop's reference week (`CAL_SEED` of its fixtures) in the agent's Calendar, for the explore server only: a journey starts from an empty calendar. */
+export function seedReferenceWeek(scene: CalendarScene, now: number): void {
+  const today = new Date(now);
+  scene.events = week.flatMap((seed) => {
+    if (!seed.weekdays) return [occurrence(seed, today, seed.off, false)];
+    return Array.from({ length: 150 }, (_, at) => seed.off + at).filter((off) => {
+      const day = new Date(today.getFullYear(), today.getMonth(), today.getDate() + off).getDay();
+      return day !== 0 && day !== 6;
+    }).map((off) => occurrence(seed, today, off, true));
+  });
+}
