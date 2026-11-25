@@ -1,6 +1,6 @@
 // spec/app/inbox/index.md, "Story: See my mail"; "Only a card with a positive attachment hint shows a paperclip"; spec/app/inbox/message.md, "Story: Read a message"; spec/app/inbox/marking.md, "Story: Mark mail read or unread"; spec/app/inbox/sending.md, "Story: Archive or trash mail, with Undo"
 import {
-  Alert, Button, InboxAccountList, InboxAttachmentReview, InboxChangeReview, InboxChangeToast, type InboxFolder,
+  Alert, Button, InboxAccountList, type InboxAttachmentPreview, InboxAttachmentReview, InboxChangeReview, InboxChangeToast, type InboxFolder,
   InboxLinkReview, type InboxListRow, InboxListScreen, type InboxListStateKind, InboxMessageScreen, type InboxMessageFaultKind, InboxNotice,
   type InboxNoticeKind, ToastRegion,
 } from "@repo/ui";
@@ -40,11 +40,11 @@ import { type Letter, Mail, revisionOf } from "./gmail.vibe";
 import { MailSignIn } from "./mailbox.vibe";
 import { connectMailFrame, frameDocument, prepareMessage } from "./mail-html.ts";
 import { AttachmentPreviews, canPreviewAttachment, canSaveAttachment } from "./attachment.vibe";
-import { native } from "../platform/device.vibe";
+import { InboxAttachmentFiles } from "../platform/inboxAttachments.vibe";
 
 export interface InboxProps {
   /** Provides the list, the message open and its marks, the changes, the shell, Mail, which holds what Gmail said, and the phone's sign-in for mail. */
-  runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Changes | Writing | Adding | Incoming | Offering | Offers | Letters | Shell | Mail | Time | Preferences | Cloud | AttachmentPreviews | MailSignIn, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Changes | Writing | Adding | Incoming | Offering | Offers | Letters | Shell | Mail | Time | Preferences | Cloud | AttachmentPreviews | InboxAttachmentFiles | MailSignIn, unknown>;
 }
 
 type Runtime = InboxProps["runtime"];
@@ -213,6 +213,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const told = marking.state?.told;
   const notice = told !== undefined && told in markNotices ? markNotices[told as keyof typeof markNotices] : undefined;
   const files = loaded ? read.attachments : [];
+  const destination = runtime.runSync(InboxAttachmentFiles.use(({ destination }) => Effect.succeed(destination)));
   const unsure = (attachment: number) => state.unsure.some((held) => held.account === state.account && held.message === state.message && held.attachment === attachment);
   const reviewing = (attachment: number, handling: "Opening" | "Saving") => {
     const event = { type: "reviewAttachment", attachment, handling } as const;
@@ -220,12 +221,28 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   };
   const file = files.at(state.attachment - 1);
   const outcome = state.file.outcome;
-  const preview = file && state.handling === "Opening" && outcome === "Confirmed"
+  const attachment = file && state.handling === "Opening" && outcome === "Confirmed"
     ? runtime.runSync(AttachmentPreviews.use((previews) => Effect.sync(() => previews.read(state.file.id))))
     : undefined;
+  const turn = (page: number) => {
+    const event = { type: "pdfPage", access, page } as const;
+    return can(event) ? () => void send(event) : undefined;
+  };
+  const pdf = state.pdf;
+  const preview: InboxAttachmentPreview | undefined = attachment?.kind !== "pdf" ? attachment : {
+    kind: "pdf", digest: attachment.digest, page: pdf.page, pages: pdf.pages,
+    drawing: pdf.drawing.status === "Loading" ? { kind: "loading" }
+      : pdf.drawing.status === "Loaded" && attachment.page === pdf.page ? { kind: "rendered", url: attachment.url }
+        : { kind: "failed", onRetry: turn(pdf.page) },
+    onPrevious: turn(pdf.page - 1), onNext: turn(pdf.page + 1),
+  };
   const contents = loaded ? prepareMessage(read) : undefined;
   const link = state.link > 0 ? contents?.links.at(state.link - 1) : undefined;
-  const answered = card === undefined ? undefined : { id: card.id, from: card.from, others: [...card.to, ...card.cc], subject: card.subject, body: read?.bodyText, files: files.length };
+  const original = read?.message;
+  const answered = original === undefined || read === undefined ? undefined : {
+    id: original.id, from: original.from, others: [...original.to, ...original.cc], subject: original.subject,
+    body: read.bodyText, historyId: original.metadata.historyId, files,
+  };
   return (
     <>
       <InboxMessageScreen
@@ -252,9 +269,9 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
         attachments={files.map((one, at) => ({
           id: `${one.partId}:${at}`, name: one.name, size: sizeOf(one.size),
           onOpen: state.revision > 0 && canPreviewAttachment(one) ? reviewing(at + 1, "Opening") : undefined,
-          onSave: state.revision > 0 && canSaveAttachment(one) ? reviewing(at + 1, "Saving") : undefined,
+          onSave: state.revision > 0 && destination !== "unavailable" && canSaveAttachment(one) ? reviewing(at + 1, "Saving") : undefined,
           saveUnconfirmed: unsure(at + 1),
-          browserDownload: !native(),
+          browserDownload: destination === "download",
         }))}
         unread={unread}
         onToggleRead={loaded && marking.can(mark, "Owner") ? () => void marking.send(mark, "Owner") : undefined}
@@ -278,7 +295,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
         handling={state.handling === "Saving" ? "save" : "open"}
         outcome={outcome === "Planned" ? "review" : outcome === "Recorded" || outcome === "Sent" ? "working" : outcome === "Confirmed" ? "done" : outcome === "Refused" ? "refused" : "unknown"}
         preview={preview}
-        browserDownload={!native()}
+        browserDownload={destination === "download"}
         onConfirm={can({ type: "confirmAttachment", access }) ? () => void send({ type: "confirmAttachment", access }) : undefined}
         onClose={() => void send({ type: "closeAttachment" })}
       />

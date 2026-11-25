@@ -94,6 +94,9 @@ pure val weight_listed = 3
 
 ### The list of conversations is read whenever it is shown
 
+Chat history opens as a sheet over Ask Alpha. Back closes that sheet before
+it lowers Ask Alpha.
+
 ```quint
 pure def browse(c: Chats): Moved =
   val list = R::ask(c.list)
@@ -145,6 +148,11 @@ pure def paged(c: Chats, ticket: int, ok: bool, messages: int): Chats =
 ```
 
 ### Older or newer messages are read around a message of the conversation showing
+
+Earlier and Later are offered when the resident confirms there are messages
+past the current page in that direction. The page is centered on the loaded
+server row at that edge. The number Alpha gives a message identifies it and
+carries no information about its position in history.
 
 ```quint
 pure def canScroll(c: Chats, around: int): bool =
@@ -423,6 +431,10 @@ pure def sometimesAConversationShowsAroundAMessage(c: Chats): bool = c.around > 
 
 ### Read aloud hands a message of Alpha's in the conversation showing to the voice area
 
+The message's actions stay open when choosing Read aloud. While the voice
+area is reading that message, its reading control shows a stop icon and
+is named “Stop reading”. It stops only that reading.
+
 ```quint
 pure def canReadAloud(c: Chats, message: int, mine: bool): bool =
   not(mine) and c.chosen > 0 and 1 <= message and message <= c.messages
@@ -442,6 +454,18 @@ pure def stepOnlyAMessageOfTheConversationShowingIsReadAloud(before: Chats, via:
 
 > As the owner, I want to copy a recorded message and review Alpha's
 > answer before using it in an email draft.
+
+### A message's words can be selected without opening its actions
+
+Dragging the text can select words across consecutive messages. A tap or a
+half-second hold opens the actions on the current message. Moving a finger
+before the hold scrolls normally. Moving after the hold closes the actions
+and extends the selection from the held word. The keyboard can open and
+close the same actions. Links keep their own action.
+
+```quint
+pure val messageActionHoldMillis = 500
+```
 
 ### Only text in the recorded message showing can be copied; only an answer from Alpha can be offered to Inbox
 

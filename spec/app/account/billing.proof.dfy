@@ -56,6 +56,19 @@ lemma resumed_ensures(b: Billing, now: int)
   }
 }
 
+lemma checkPayment_ensures(b: Billing, now: int)
+  ensures (inv(b) ==> canCheckPayment(b, now) ==> alwaysTheVisitIsWellFormed(checkPayment(b, now).state))
+  ensures (inv(b) ==> canCheckPayment(b, now) ==> stepAReturnIsCheckedNotTrusted(b, "checkPayment", checkPayment(b, now).state, checkPayment(b, now).out))
+  ensures (inv(b) ==> canCheckPayment(b, now) ==> stepACheckoutIsConfirmedOnceForEachReturn(b, "checkPayment", checkPayment(b, now).state, checkPayment(b, now).out))
+  ensures (inv(b) ==> canCheckPayment(b, now) ==> stepNothingIsBoughtWhileAnOutcomeIsUnknown(b, checkPayment(b, now).state, checkPayment(b, now).out))
+  ensures (inv(b) ==> canCheckPayment(b, now) ==> stepOnlyCloudSaysACheckoutWasPaid(b, "checkPayment", checkPayment(b, now).state))
+  ensures (inv(b) ==> canCheckPayment(b, now) ==> stepANewSignInLeavesNothingUnderWay(b, "checkPayment", checkPayment(b, now).state))
+{
+  if inv(b) && canCheckPayment(b, now) {
+    CheckedNotTrusted(now, b);
+  }
+}
+
 lemma returnedCold_ensures(b: Billing, visit: int)
   ensures (inv(b) ==> canReturnedCold(b, visit) ==> alwaysTheVisitIsWellFormed(returnedCold(b, visit).state))
   ensures (inv(b) ==> canReturnedCold(b, visit) ==> stepAReturnIsCheckedNotTrusted(b, "returnedCold", returnedCold(b, visit).state, returnedCold(b, visit).out))

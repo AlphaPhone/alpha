@@ -334,6 +334,16 @@ export function alphaBrowser(world: BrowserScene): Faked {
         world.shared.push(options);
         return Promise.resolve(tab);
       },
+      // AlphaBrowserPlugin.pageContext: the text the owner can see of the guarded page, for one chat turn (spec/app/browser/reading.md).
+      pageContext: (options: BrowserPageGuard) => {
+        const tab = stateOf(held(options));
+        if (!tab.committed || tab.loading || tab.url !== options.url || tab.navigation !== options.navigation) {
+          return Promise.reject(rejection("The Browser page changed"));
+        }
+        world.calls.push("pageContext");
+        const text = textOf(drawn(options.url)).replace(/\s+/g, " ").trim().slice(0, 6000);
+        return Promise.resolve({ url: options.url, title: titleOf(options.url), text, truncated: false });
+      },
       openExternalBrowser: (request) => {
         const tab = held(request);
         if (world.shown?.id !== tab.id || !tab.committed || tab.loading || request.navigation !== String(tab.navigation) ||

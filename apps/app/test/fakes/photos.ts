@@ -32,6 +32,7 @@ export interface PhotosScene {
   promptCount: number;
   readCount: number;
   readGate?: Promise<void>;
+  listPermittedGate?: (query: string | undefined) => Promise<void> | undefined;
   readonly saves: string[];
   readonly editLookups: string[];
   selectedPicture?: (picture: Reviewed) => Promise<FixturePicture>;
@@ -84,13 +85,16 @@ export function alphaPhotos(scene: PhotosScene): Faked {
           ? { items: listed(availableOwned, thumbnails), next: "" }
           : { items: listed(permittable.slice(0, limit), thumbnails), next: "", access: scene.access });
       },
-      listPermitted({ before, query, thumbnails }: Parameters<PhotosPlugin["listPermitted"]>[0] = {}) {
+      async listPermitted({ before, query, thumbnails }: Parameters<PhotosPlugin["listPermitted"]>[0] = {}) {
         const rows = scene.rows.filter((item) => query === undefined || item.name.toLowerCase().includes(query.toLowerCase()));
-        return Promise.resolve({ items: listed(before === undefined ? rows.slice(0, 2) : rows.slice(2), thumbnails), next: before === undefined && rows.length > 2 ? "next" : "", access: scene.access });
+        const page = { items: listed(before === undefined ? rows.slice(0, 2) : rows.slice(2), thumbnails), next: before === undefined && rows.length > 2 ? "next" : "", access: scene.access };
+        await scene.listPermittedGate?.(query);
+        return page;
       },
       thumbnails: ({ ids }) => Promise.resolve({ items: ids.flatMap((id) => available().filter((row) => row.id === id).map((row) => ({ id, image: row.image }))) }),
-      readPermitted({ id, pixels }) {
-        const item = scene.access.scope === "denied" ? undefined : scene.rows.find((row) => row.id === id);
+      readPermitted({ id, revision, pixels }) {
+        const item = scene.access.scope === "denied" ? undefined : scene.rows.find((row) =>
+          row.id === id && (revision === undefined || row.revision === revision));
         if (item === undefined) return Promise.reject(new Error("This item is unavailable"));
         return Promise.resolve(listed([item], pixels)[0]);
       },

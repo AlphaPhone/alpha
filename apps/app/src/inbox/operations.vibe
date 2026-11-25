@@ -4,6 +4,7 @@ import { accessOf } from "../../gen/app__inbox.effect.vibe"
 import * as Sending from "../../gen/app__inbox__sending.effect.vibe"
 import type { Effect as Out, Event, Kind } from "../../gen/app__inbox__sending.effect.vibe"
 import type { Actor } from "../../gen/app__inbox__access.ts"
+import type { MailOperation } from "@elizaos/cloud"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
@@ -11,11 +12,31 @@ import { Time } from "../runtime/time.vibe"
 import { type Job, answer, contained, hearing, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import type { Event as DraftEvent } from "../../gen/app__inbox__drafts.effect.vibe"
-import { Letters } from "./composer.vibe"
-import { Mail, operate, relabel } from "./gmail.vibe"
+import { type Attached, Letters } from "./composer.vibe"
+import { type Proposal, Mail, operate, operationStoreVersion, relabel } from "./gmail.vibe"
 import { ownerChanges } from "./mailbox.vibe"
 
 const labels = { Archive: "archive", Trash: "trash", Unarchive: "unarchive", Untrash: "untrash" } as const
+
+type Files = Pick<Extract<Proposal, { mode: string }>, "attachments" | "forwardAttachments">
+
+function filesOf(files: readonly Attached[]): { readonly fields: Files; readonly matches: (review: MailOperation["review"]) => boolean } | undefined {
+  const picked = files.flatMap((file) => file.data === undefined ? [] : [{ name: file.name, mimeType: file.mimeType, dataBase64: file.data }])
+  const carried = files.flatMap((file) => file.original === undefined ? [] : [{ file, source: file.original }])
+  const source = carried[0]?.source
+  if (source !== undefined && carried.some((part) => part.source.messageId !== source.messageId || part.source.historyId !== source.historyId)) return undefined
+  return {
+    fields: {
+      ...(picked.length === 0 ? {} : { attachments: picked }),
+      ...(source === undefined ? {} : { forwardAttachments: { messageId: source.messageId, historyId: source.historyId, partIds: carried.map((part) => part.source.partId) } }),
+    },
+    matches: (review) => carried.length === 0 || (review !== undefined && "forwardedAttachments" in review
+      && carried.length === review.forwardedAttachments.length && carried.every(({ file, source }, index) => {
+        const checked = review.forwardedAttachments[index]
+        return checked?.partId === source.partId && checked.name === file.name && checked.mimeType === file.mimeType && checked.size === file.size
+      })),
+  }
+}
 
 // spec/app/inbox/sending.md, "The answer to the request in flight ends it; a reply that does not match it, or none, leaves it unknown"
 /** Each message of a change, once, under its own key within the attempt: done only where every one was, known only where every one is. */
@@ -36,11 +57,13 @@ effect function changed(attempt: number, kind: Kind, account: number, messages: 
 /** The draft `draft` sent from `account` exactly as the owner wrote it, once, under the attempt's own key. */
 effect function sent(attempt: number, account: number, draft: number): Event!!(Attempts | Cloud | Mail | Letters) {
   const words = (try Letters).words(draft)
+  const files = filesOf(words.files)
+  if (files === undefined) return { type: "answered", attempt, done: false, matches: true, gmail: 0 }
   const ended = try operate(attempt, account, {
     kind: "send", mode: words.mode, to: words.to, cc: words.cc, bcc: words.bcc, subject: words.subject, bodyText: words.text,
     ...(words.answers === undefined ? {} : { replyMessageId: words.answers }),
-    ...(words.files.length === 0 ? {} : { attachments: words.files.map(({ name, mimeType, data }) => ({ name, mimeType, dataBase64: data })) }),
-  })
+    ...files.fields,
+  }, { matches: files.matches })
   return { type: "answered", attempt, done: ended.done, matches: ended.known, gmail: 0 }
 }
 
@@ -50,6 +73,8 @@ effect function drafted(attempt: number, kind: Kind, account: number, draft: num
   const letters = try Letters
   const words = letters.words(draft)
   const copy = letters.copy(gmail)
+  const files = filesOf(words.files)
+  if (files === undefined) return { type: "answered", attempt, done: false, matches: true, gmail: 0 }
   if (kind !== "SaveDraft" && copy?.account !== account) return { type: "answered", attempt, done: false, matches: true, gmail: 0 }
   const ended = kind === "DeleteDraft"
     ? try operate(attempt, account, { kind: "draft-delete", draftId: copy?.id ?? "", expectedDigest: copy?.digest ?? "", confirmPermanentDelete: true })
@@ -57,12 +82,13 @@ effect function drafted(attempt: number, kind: Kind, account: number, draft: num
       kind: kind === "SaveDraft" ? "draft-create" : "draft-replace", mode: words.mode, to: words.to, cc: words.cc, bcc: words.bcc, subject: words.subject, bodyText: words.text,
       ...(words.answers === undefined ? {} : { replyMessageId: words.answers }),
       ...(copy === undefined || kind === "SaveDraft" ? {} : { draftId: copy.id, expectedDigest: copy.digest }),
-      ...(words.files.length === 0 ? {} : { attachments: words.files.map(({ name, mimeType, data }) => ({ name, mimeType, dataBase64: data })) }),
-    })
+      ...files.fields,
+    }, { matches: files.matches })
   const id = ended.result?.["draftId"]
   const digest = ended.result?.["providerDigest"]
   const saved = ended.done && kind !== "DeleteDraft" && typeof id === "string" && typeof digest === "string" ? letters.copied(account, id, digest) : 0
-  return { type: "answered", attempt, done: ended.done && (kind === "DeleteDraft" || saved !== 0), matches: ended.known, gmail: saved }
+  const done = ended.done && (kind === "DeleteDraft" || (saved !== 0 && (try letters.keepCopies())))
+  return { type: "answered", attempt, done, matches: ended.known && (!ended.done || done), gmail: done ? saved : 0 }
 }
 
 /** Tell the composer `event` about the draft an operation was handed. */
@@ -143,4 +169,4 @@ const told = started(effect {
 const sessions = hearing(ownerChanges, Sending.Machine, (): Event => ({ type: "sessionChanged" }), "World")
 
 /** Archive, Trash and their restores: kept across restarts, held for the undo window, and sent through the owner's cloud. */
-export const operations = together(reacting(Sending, { keep: 1, open: [{ type: "restart" }, "World"], carry }), released, dispatched, told, sessions)
+export const operations = together(reacting(Sending, { keep: operationStoreVersion, open: [{ type: "restart" }, "World"], carry }), released, dispatched, told, sessions)

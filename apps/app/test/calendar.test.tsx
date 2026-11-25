@@ -8,6 +8,7 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Settings } from "../gen/app__settings.effect.vibe";
 import { Machine as Link } from "../gen/app__calendar__link.effect.vibe";
 import { Machine as Reminders } from "../gen/app__reminders.effect.vibe";
+import { Machine as Alerts } from "../gen/app__reminders__alerts.effect.vibe";
 import calendar from "../src/calendar/index.tsx";
 import { civilDay, dateOf, dayStart } from "../src/calendar/time.ts";
 import { createReminderItem, resetReminderStores } from "../src/reminders/reminders.vibe";
@@ -136,6 +137,79 @@ describe("Calendar without a connected account", () => {
     await until(alpha, runtime, View, (state) => state.reminder === 0);
     expect(detail()).toBeUndefined();
     expect(button(/^Bring the blue notebook,/)).toBeDefined();
+  });
+
+  it("Snoozes only the selected alerted revision and keeps its date in Calendar (spec/app/reminders/alerts.md, \"Story: Alert on due reminders and act from the banner\")", async () => {
+    const world = morning(true);
+    world.reminders.mirrorDatedItems = true;
+    const { alpha } = await open(world, only("view:Calendar"));
+    const runtime = calendar.runtime(alpha);
+    await openCalendar(alpha);
+    await until(alpha, runtime, View, (state) => state.front && state.anchor === world.today);
+    await until(alpha, alpha.runtime, Reminders, (state) => state.sync.status === "Loaded");
+
+    const inputs = { listId: DEFAULT_LIST_ID, title: "Bring the blue notebook", dueMinute: 570, alertMinutes: 0 };
+    const first = await alpha.runtime.runPromise(createReminderItem({ ...inputs, dueDate: "2026-11-24" }));
+    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
+    const tomorrow = await alpha.runtime.runPromise(createReminderItem({ ...inputs, dueDate: "2026-11-25" }));
+    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
+    if (!first || !tomorrow) throw new Error("Expected two saved reminders");
+    const revision = first.revision + 1;
+    expect(remindersStore.findItem(first.id)).toMatchObject({ agentTaskId: `task-${first.id}`, revision });
+
+    await until(alpha, runtime, View, (state) => state.reminders === 1);
+    await press(/^Bring the blue notebook,/);
+    await until(alpha, runtime, View, (state) => state.reminder > 0);
+    const detail = () => document.querySelector('[data-alpha-subview="calendar-detail"]')?.textContent;
+    expect(detail()).toContain("Alert at start");
+    await vi.waitFor(() => expect(world.reminders.scheduled.get(first.id)?.at).toBe(world.at(0, 9.5)));
+    await press("Snooze reminder 10 minutes");
+    const untilMs = world.now + 10 * 60_000;
+    await vi.waitFor(() => expect(detail()).toContain("Snoozed until"));
+    await vi.waitFor(() => expect(world.reminders.scheduled.get(first.id)).toMatchObject({ at: untilMs, dueAt: world.at(0, 9.5) }));
+    expect(remindersStore.findItem(first.id)).toMatchObject({ dueDate: first.dueDate, dueMinute: first.dueMinute, snoozedUntilMs: untilMs });
+    expect(world.reminders.items.find((item) => item.id === first.id)?.snoozedUntilMs).toBe(untilMs);
+    expect(remindersStore.findItem(tomorrow.id)?.snoozedUntilMs).toBeNull();
+    expect(world.reminders.items.find((item) => item.id === tomorrow.id)?.snoozedUntilMs).toBeNull();
+
+    const selected = remindersStore.specIdForItem(first.id);
+    world.reminders.items = world.reminders.items.map((item) => item.id === first.id ? { ...item, revision: item.revision + 1 } : item);
+    await press("Snooze reminder 10 minutes");
+    await until(alpha, alpha.runtime, Alerts, (state) => state.entries.some((entry) => entry.id === selected && entry.attempt.outcome === "Refused"));
+    expect(remindersStore.findItem(first.id)).toMatchObject({ revision: revision + 1, snoozedUntilMs: untilMs });
+  });
+
+  it("Saves the Calendar Reminders form once without adding a calendar event (spec/app/calendar/editor.md, \"Story: Write an event\")", async () => {
+    const world = { ...morning(false), signedIn: false };
+    const eventCount = world.calendar.events.length;
+    const { alpha } = await open(world, only("view:Calendar"));
+    const runtime = calendar.runtime(alpha);
+    await openCalendar(alpha);
+    await until(alpha, runtime, View, (state) => state.front && state.anchor === world.today);
+    await until(alpha, alpha.runtime, Reminders, (state) => state.sync.status === "Loaded");
+
+    await press("New event");
+    await until(alpha, runtime, Editor, (state) => state.form === "NewEvent" && state.shown);
+    await press("Reminders");
+    await fill("Title", "Leave through the garden");
+    await fill("Reminder time", "10:15");
+    await press("Weekdays");
+    await press("None");
+    await fill("Notes", "Close the gate.");
+    expect(document.querySelector('[aria-label="Location"]')).toBeNull();
+    expect(remindersStore.snapshot().snapshot.items).toHaveLength(0);
+    await press("Save event");
+    await until(alpha, runtime, Editor, (state) => !state.shown && state.write.outcome === "Confirmed");
+    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
+    await until(alpha, runtime, View, (state) => state.reminders === 1);
+
+    expect(world.calendar.events).toHaveLength(eventCount);
+    expect(world.reminders.items).toHaveLength(1);
+    expect(world.reminders.items[0]).toMatchObject({
+      title: "Leave through the garden", notes: "Close the gate.", dueDate: "2026-11-24", dueMinute: 615, recurrence: "weekdays", alertMinutes: null,
+    });
+    await press(/^Leave through the garden,/);
+    expect(document.querySelector('[data-alpha-subview="calendar-detail"]')?.textContent).toContain("Due 10:15 AM");
   });
 });
 

@@ -400,7 +400,7 @@ describe("Notes", () => {
     expect(button("Remove Design sync")).toBeUndefined();
   });
 
-  it("Reviews a generated transcript before saving it (spec/app/notes/voice.md, \"Story: Read and use the transcript\")", async () => {
+  it("Reviews a generated transcript before saving it (spec/app/notes/voice.md, \"Story: Read and use the transcript\"; spec/app/assistant/cards.md, \"The owner reviews the summary before it can be saved\")", async () => {
     const world = scene();
     world.phone = true;
     const recordingId = "retained-recording";
@@ -417,7 +417,7 @@ describe("Notes", () => {
       windows.push(request.offsetMs);
       return Promise.resolve(request.offsetMs === 0 ? "The door closes at dusk." : "Send a reminder on Thursday.");
     };
-    const { alpha } = await open(world, only("view:Notes"));
+    const { alpha } = await open(world, only("assistant", "view:Notes"));
     const runtime = notes.runtime(alpha);
     await drawn(() => runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Notes" }))));
     await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
@@ -447,6 +447,37 @@ describe("Notes", () => {
     expect(world.notes.playing).toBeUndefined();
     await drawn(() => runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Notes" }))));
     await drawn(() => vi.waitFor(() => expect(button("Open Field recording")).toBeDefined()));
+
+    // spec/app/assistant/cards.md, "The owner reviews the summary before it can be saved"
+    await press("Open Field recording");
+    await until(alpha, runtime, Voice, (state) => state.showing && state.added === 2);
+    const ask = assistant.runtime(alpha);
+    await until(alpha, ask, Composer, (state) => state.slot === "Open");
+    await control("Ask Alpha about this transcript");
+    await press("Ask Alpha about this transcript");
+    await until(alpha, ask, Conversation, (state) => state.ready && state.context.selected);
+    world.ask.nextReplyChunks = ["The door closes at dusk."];
+    const before = world.notes.notes.find((one) => one.id === noteId);
+    await press("Send");
+    const review = /^Review summary note/;
+    await rendered(() => expect(button(review)).toBeDefined());
+    await press(review);
+    await control("Save recording summary");
+    expect(document.querySelector<HTMLTextAreaElement>("textarea[name=summary]")?.value).toBe("The door closes at dusk.");
+    await pressOnTop("Cancel");
+    expect(world.notes.revision).toBe(revision + 1);
+    await press(review);
+    await control("Save recording summary");
+    await fill("Summary", "The door closes at dusk on Thursday.");
+    await fill("Action items", "Check the door");
+    await pressOnTop("Save recording summary");
+    await rendered(() => expect(document.body.textContent).toContain("Recording summary saved."));
+    expect(world.notes.notes.find((one) => one.id === noteId)).toMatchObject({
+      title: before?.title, body: before?.body,
+      format: { kind: "voice", data: { ...before?.format?.data, summary: ["The door closes at dusk on Thursday."], actions: [{ t: "Check the door", done: false }] } },
+    });
+    expect(world.notes.revision).toBe(revision + 2);
+    expect(button("Save recording summary")).toBeUndefined();
   });
 
   it("The agent opens the note I named, and only that, only for my request now (spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened\"; spec/app/notes/note.md, \"Only the owner opens a dialog or a question in Notes; a note is opened by the owner, or by the agent for the one the owner just named; and nothing opens while anything else of Notes is open\"; spec/app/assistant/index.md, \"Story: Let Alpha open what it is talking about\")", async () => {

@@ -7,7 +7,10 @@ const onValueChange = fn();
 export const meta: ComponentMeta<SliderProps> = {
   args: { "aria-label": "Volume", defaultValue: 40, onValueChange },
   bounds: { defaultValue: [0, 100] },
-  examples: { "Value text": { "aria-label": "Text size", min: 1, max: 3, defaultValue: 2, "aria-valuetext": "Medium" } },
+  examples: {
+    "Value text": { "aria-label": "Text size", min: 1, max: 3, defaultValue: 2, "aria-valuetext": "Medium" },
+    Playback: { variant: "playback", "aria-label": "Position", max: 24, defaultValue: 4, "aria-valuetext": "0:04" },
+  },
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onValueChange.mockClear();
