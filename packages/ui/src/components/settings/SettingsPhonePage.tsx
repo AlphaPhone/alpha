@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { AppWindow } from "lucide-react";
 import { ListGroup } from "../ListGroup.tsx";
 import { SettingsAndroidRow } from "./SettingsAndroidRow.tsx";
@@ -19,6 +20,8 @@ export type SettingsPhonePageProps = SettingsAndroidProps & {
   told?: AndroidTold;
   /** Goes back to General. */
   onBack?: () => void;
+  /** The SIMs, carrier and telephony roles reported by the Phone app. */
+  children?: ReactNode;
 };
 
 /**
@@ -26,9 +29,10 @@ export type SettingsPhonePageProps = SettingsAndroidProps & {
  * default apps, where the Assistant is changed.
  * @model spec/app/settings/facts.md
  */
-export function SettingsPhonePage({ home, assistant, requesting, onRequestHome, told, onBack, starting, onAndroid }: SettingsPhonePageProps) {
+export function SettingsPhonePage({ home, assistant, requesting, onRequestHome, told, onBack, starting, onAndroid, children }: SettingsPhonePageProps) {
   return (
-    <SettingsPage title="Phone" told={told} onBack={onBack}>
+    <SettingsPage title="Phone" told={told} onBack={onBack} backLabel="Back to General">
+      {children}
       <ListGroup>
         <SettingsRoleRow role="home" word={home} />
         <SettingsRoleRow role="assistant" word={assistant} />

@@ -63,10 +63,6 @@ module web {
     return new Promise((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Camera frame could not be encoded")), "image/jpeg", .92))
   }
   /** @throws {never} */
-  export const videoTrack = (stream: MediaStream): MediaStreamTrack | undefined => stream.getVideoTracks()[0]
-  /** @throws {never} */
-  export const videoBlob = (chunks: Blob[], type: string): Blob => new Blob(chunks, { type })
-  /** @throws {never} */
   export const urlOf = (blob: Blob): string => URL.createObjectURL(blob)
   /** @throws {never} */
   export const revoke = (url: string): void => URL.revokeObjectURL(url)
@@ -75,11 +71,15 @@ module web {
     return new MediaRecorder(new MediaStream([...video.getVideoTracks(), ...(audio?.getAudioTracks() ?? [])]))
   }
   /** @throws {never} */
+  export function recordingBlob(chunks: Blob[], mimeType: string): Blob | undefined {
+    return chunks.length > 0 ? new Blob(chunks, { type: mimeType }) : undefined
+  }
+  /** @throws {never} */
   export function permissionFailure(cause: unknown): boolean {
     return cause instanceof DOMException && ["NotAllowedError", "PermissionDeniedError", "SecurityError"].includes(cause.name)
   }
 }
-import { image, media, permission, permissionFailure, recorder, release, revoke, urlOf, videoBlob, videoTrack } from web
+import { image, media, permission, permissionFailure, recorder, recordingBlob, release, revoke, urlOf } from web
 
 export type Aspect = "4:3" | "16:9"
 export type Flash = "off" | "auto" | "on" | "torch"
@@ -300,7 +300,7 @@ export const browserCamera = Layer.effect(CameraPort, effect {
       bound()
       const played = try tried(() => view?.play() ?? Promise.reject(new Error("Camera view is closed")))
       if (!played) { release(stream); opened = undefined; owner = 0; bound(); return undefined }
-      const track = videoTrack(stream)
+      const track = Effect.try(() => stream.getVideoTracks()[0]) catch () => undefined
       if (track !== undefined) {
         track.onended = () => { PubSub.publishUnsafe(signals, { ticket, kind: "preview-lost" }) }
       }
@@ -347,7 +347,7 @@ export const browserCamera = Layer.effect(CameraPort, effect {
         recording.onerror = () => { Deferred.doneUnsafe(answer, succeed(undefined)) }
         recording.onstop = () => {
           release(audio)
-          Deferred.doneUnsafe(answer, succeed(chunks.length > 0 ? videoBlob(chunks, recording.mimeType) : undefined))
+          Deferred.doneUnsafe(answer, succeed(recordingBlob(chunks, recording.mimeType)))
         }
         try Effect.try(() => recording.start(1000))
         return recording

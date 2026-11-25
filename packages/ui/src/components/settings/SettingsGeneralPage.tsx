@@ -44,6 +44,8 @@ export type SettingsGeneralPageProps = SettingsAndroidProps &
     said?: SettingsResetNoticeProps["said"];
     /** Update rows owned by the update area. */
     updates?: ReactNode;
+    /** Commands in the General header. */
+    actions?: ReactNode;
   };
 
 const themes = { system: "System", light: "Light", dark: "Dark" } as const;
@@ -53,11 +55,11 @@ const themes = { system: "System", light: "Light", dark: "Dark" } as const;
  * and default apps, and Erase all data at the foot. Rows are numbered by slot, as on the first page.
  * @model spec/app/settings/index.md
  */
-export function SettingsGeneralPage({ wifi, bluetooth, mobileData, theme, alerts, image = false, told, onBack, onOpen, onPhone = false, reviewing, onErase, requestingHome, onRequestHome, said, updates, starting, onAndroid, place, onPlace }: SettingsGeneralPageProps) {
+export function SettingsGeneralPage({ wifi, bluetooth, mobileData, theme, alerts, image = false, told, onBack, onOpen, onPhone = false, reviewing, onErase, requestingHome, onRequestHome, said, updates, starting, onAndroid, place, onPlace, actions }: SettingsGeneralPageProps) {
   const at = (row: number) => placed({ place, onPlace }, row);
   const android = { starting, onAndroid };
   return (
-    <SettingsPage title="General" told={told} onBack={onBack}>
+    <SettingsPage title="General" told={told} onBack={onBack} backLabel="Back to Settings" actions={actions}>
       {said ? <SettingsResetNotice said={said} /> : null}
       {onPhone ? (
         <ListGroup>

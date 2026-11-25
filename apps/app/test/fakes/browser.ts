@@ -6,6 +6,7 @@ interface TabEvents {
   stateChanged: BrowserTabState;
   tabOpened: { session: string; id: string; opener?: string; private?: boolean };
   tabClosed: { session: string; id: string };
+  findResult: { session: string; id: string; navigation?: string; cleared?: boolean; index?: number; count?: number; done?: boolean };
 }
 
 /** One native tab of the fake tab host: its web view's history and what it shows. */
@@ -18,6 +19,9 @@ interface Held {
   navigation: number;
   loading: boolean;
   committed: boolean;
+  /** The matches of what is being found, and the one stood on. */
+  matches: number;
+  match: number;
 }
 
 /** What the fake phone's tab host keeps, as `AlphaBrowserPlugin` keeps it: its saved session, bookmarks and the tabs it holds. */
@@ -112,6 +116,9 @@ function titleOf(href: string): string {
   return sites[href]?.title ?? url.hostname;
 }
 
+/** What a page says, without its markup. */
+const textOf = (html: string) => html.replace(/<[^>]*>/g, " ");
+
 function drawn(href: string): string {
   const url = URL.parse(href);
   if (url === null) return "";
@@ -148,6 +155,7 @@ export function alphaBrowser(world: BrowserScene): Faked {
         canBack: tab.at > 0, canForward: tab.at < tab.history.length - 1, private: tab.private,
       };
     };
+    const found = (tab: Held) => void Promise.resolve().then(() => emit("findResult", { session, id: tab.id, navigation: String(tab.navigation), index: tab.match, count: tab.matches, done: true }));
     const told = (tab: Held) => {
       tab.sequence += 1;
       emit("stateChanged", stateOf(tab));
@@ -198,7 +206,7 @@ export function alphaBrowser(world: BrowserScene): Faked {
       create: ({ session: asked, id, private: privateTab }) => {
         world.calls.push("create");
         session = asked;
-        const tab: Held = { id, private: privateTab === true, history: [], at: -1, sequence: 0, navigation: 0, loading: false, committed: false };
+        const tab: Held = { id, private: privateTab === true, history: [], at: -1, sequence: 0, navigation: 0, loading: false, committed: false, matches: 0, match: 0 };
         world.tabs.set(id, tab);
         return Promise.resolve(stateOf(tab));
       },
@@ -232,9 +240,28 @@ export function alphaBrowser(world: BrowserScene): Faked {
         draw();
         return Promise.resolve();
       },
-      find: (options) => Promise.resolve(stateOf(held(options))),
-      findNext: (options) => Promise.resolve(stateOf(held(options))),
-      clearFind: (options) => Promise.resolve(stateOf(held(options))),
+      find: (options) => {
+        const tab = held(options);
+        const text = textOf(drawn(tab.history[tab.at] ?? "")).toLowerCase();
+        const query = options.query.toLowerCase();
+        tab.matches = query === "" ? 0 : text.split(query).length - 1;
+        tab.match = tab.matches > 0 ? 1 : 0;
+        found(tab);
+        return Promise.resolve(stateOf(tab));
+      },
+      findNext: (options) => {
+        const tab = held(options);
+        if (tab.matches > 0) tab.match = ((tab.match - 1 + (options.forward === false ? -1 : 1) + tab.matches) % tab.matches) + 1;
+        found(tab);
+        return Promise.resolve(stateOf(tab));
+      },
+      clearFind: (options) => {
+        const tab = held(options);
+        tab.matches = 0;
+        tab.match = 0;
+        emit("findResult", { session, id: tab.id, navigation: String(tab.navigation), cleared: true });
+        return Promise.resolve(stateOf(tab));
+      },
       bookmarks: () => Promise.resolve(listed()),
       setBookmark: ({ url, saved, title }) => {
         world.bookmarks = saved ? [{ url, ...(title === undefined ? {} : { title }) }, ...world.bookmarks.filter((one) => one.url !== url)] : world.bookmarks.filter((one) => one.url !== url);

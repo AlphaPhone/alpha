@@ -49,7 +49,7 @@ export function SettingsAppPage({ app, grants = {}, read = "loaded", images = fa
     return grant ? [{ access, grant }] : [];
   });
   return (
-    <SettingsPage title={titles[app]} told={told} onBack={onBack}>
+    <SettingsPage title={titles[app]} told={told} onBack={onBack} backLabel="Back to Apps">
       {app === "inbox" ? (
         <ListGroup>
           <SettingsNavRow title="Google & email" icon={<Link />} onOpen={onHandOver && (() => onHandOver("google-and-email"))} />

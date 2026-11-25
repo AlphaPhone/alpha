@@ -54,7 +54,8 @@ view group (maps, browser) (`packages/agent/src/runtime/core-plugins.ts` there,
 its own subpaths now), `-calendar`, `-inbox`, `-notes`, `-files`,
 `-workflow`, `-maps` and `-browser`, and the pack carries each in the same
 group. Notes exports no plugin, only a module the entry builds
-(`notesModule`), so it is hosted rather than bundled. Scheduling is now the
+(`notesModule`), so it is hosted rather than bundled. Alpha opens Notes
+with three days of Trash retention. Scheduling is now the
 agent's own `scheduled-tasks`, `tasks` and `triggers` modules; the
 proposal of a device step is its `device-actions` module, and a drafted
 reply its `reply-draft`; approvals, notifications, views and the task
@@ -71,6 +72,7 @@ whose only action is the calculator the old agent never had.
 pure val corePlugins: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-notes", "@elizaos/plugin-files", "@elizaos/plugin-workflow")
 pure val viewPlugins: List[str] = List("@elizaos/plugin-maps", "@elizaos/plugin-browser")
 pure val hostedPlugins: List[str] = List("@elizaos/plugin-notes")
+pure val notesTrashDays = 3
 pure val packedPlugins: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-notes", "@elizaos/plugin-files", "@elizaos/plugin-workflow", "@elizaos/plugin-maps", "@elizaos/plugin-browser")
 pure val bundledPlugins: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-files", "@elizaos/plugin-workflow", "@elizaos/plugin-maps", "@elizaos/plugin-browser")
 pure val agentModules: List[str] = List("@elizaos/agent/device-actions", "@elizaos/agent/reply-draft", "@elizaos/agent/approvals", "@elizaos/agent/notifications", "@elizaos/agent/views", "@elizaos/agent/scheduled-tasks", "@elizaos/agent/tasks", "@elizaos/agent/triggers", "@elizaos/agent/surface")
@@ -150,8 +152,17 @@ health and which device steps it takes; Home and Calendar
 (`apps/app/src/home/cards.vibe`, `apps/app/src/calendar/agent.vibe`) read the
 calendar feed and the calendars and create, change, answer and delete
 events through the calendar plugin. Workflows reads the owner identity,
-active and removed workflows, prompts, scheduled tasks and the runs of a
-prompt. The scanner can hand the owner’s reviewed scan text to Notes through the Notes plugin. The approvals area lists the agent's proposals and resolves one
+active and removed workflows, prompts, scheduled tasks, definitions,
+execution and approval receipts. It sends the owner's exact-version
+approval, lifecycle and run decisions and reads back their outcomes.
+The builder reads the phone catalogue, generates and validates drafts,
+saves the reviewed spec and checks save receipts. Workflows also sends
+the owner's prompt and scheduled task changes. Scheduled Digests reads
+hosted sources, loops and retained results. It sends reviewed schedule
+changes and acknowledges an opened result.
+Notes reads the same owner identity and calls the Notes module to
+read and edit notes, erase Trash and finish recording cleanup. The scanner
+hands the owner’s reviewed scan text to Notes through that module. The approvals area lists the agent's proposals and resolves one
 through the approvals module. A route an area
 fakes for want of an agent plugin is not listed: none does today. Each line
 of `apps/agent/host/routes.jsonl` is one route; the pack is refused unless
@@ -220,6 +231,47 @@ pure val pageRoutes: List[Route] = List(
   { method: Get, path: "/api/triggers/{id}/runs", stream: false },
   { method: Get, path: "/api/notes/state", stream: false },
   { method: Post, path: "/api/notes/interact", stream: false },
+  { method: Post, path: "/api/notes/trash/erase", stream: false },
+  { method: Get, path: "/api/notes/trash/recordings", stream: false },
+  { method: Post, path: "/api/notes/trash/recordings/complete", stream: false },
+  { method: Get, path: "/api/workflow/status", stream: false },
+  { method: Get, path: "/api/workflow/hosted/loops", stream: false },
+  { method: Post, path: "/api/workflow/hosted/loops", stream: false },
+  { method: Get, path: "/api/workflow/hosted/sources", stream: false },
+  { method: Get, path: "/api/workflow/hosted/results", stream: false },
+  { method: Post, path: "/api/workflow/hosted/results/ack", stream: false },
+  { method: Get, path: "/api/workflow/workflows/{id}", stream: false },
+  { method: Get, path: "/api/workflow/workflows/{id}/executions", stream: false },
+  { method: Get, path: "/api/workflow/executions/{id}", stream: false },
+  { method: Get, path: "/api/workflow/executions/{id}/approvals", stream: false },
+  { method: Post, path: "/api/workflow/executions/{id}/approvals/{nodeId}/{iteration}", stream: false },
+  { method: Post, path: "/api/workflow/workflows/{id}/activate", stream: false },
+  { method: Post, path: "/api/workflow/workflows/{id}/deactivate", stream: false },
+  { method: Post, path: "/api/workflow/workflows/{id}/metadata", stream: false },
+  { method: Post, path: "/api/workflow/workflows/{id}/lifecycle", stream: false },
+  { method: Get, path: "/api/workflow/workflows/{id}/metadata-mutations/{mutationId}", stream: false },
+  { method: Get, path: "/api/workflow/workflows/{id}/lifecycle-mutations/{mutationId}", stream: false },
+  { method: Post, path: "/api/workflow/workflows/{id}/run", stream: false },
+  { method: Post, path: "/api/workflow/executions/{id}/cancel", stream: false },
+  { method: Get, path: "/api/workflow/workflows/{id}/submissions/{submissionId}", stream: false },
+  { method: Get, path: "/api/workflow/phone/catalog", stream: false },
+  { method: Get, path: "/api/workflow/phone/mutations/{mutationId}", stream: false },
+  { method: Post, path: "/api/workflow/phone/generate", stream: false },
+  { method: Post, path: "/api/workflow/phone/validate", stream: false },
+  { method: Post, path: "/api/workflow/phone/workflows", stream: false },
+  { method: Post, path: "/api/workflow/workflows/{id}/phone-spec", stream: false },
+  { method: Get, path: "/api/scheduled-tasks/{id}", stream: false },
+  { method: Get, path: "/api/triggers/{id}", stream: false },
+  { method: Post, path: "/api/triggers", stream: false },
+  { method: Post, path: "/api/triggers/{id}/execute", stream: false },
+  { method: Put, path: "/api/triggers/{id}", stream: false },
+  { method: Delete, path: "/api/triggers/{id}", stream: false },
+  { method: Post, path: "/api/scheduled-tasks/{id}/snooze", stream: false },
+  { method: Post, path: "/api/scheduled-tasks/{id}/complete", stream: false },
+  { method: Post, path: "/api/scheduled-tasks/{id}/dismiss", stream: false },
+  { method: Post, path: "/api/scheduled-tasks/{id}/skip", stream: false },
+  { method: Post, path: "/api/scheduled-tasks/{id}/reopen", stream: false },
+  { method: Post, path: "/api/scheduled-tasks/{id}/fire", stream: false },
 )
 pure def admitted(listed: List[Route], r: Route): bool = listed.includes(r)
 pure def routeListAdmitted(listed: List[Route]): bool =

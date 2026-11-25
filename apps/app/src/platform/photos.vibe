@@ -6,14 +6,17 @@ module native {
   import type { DeviceLibraryClient, PhotosClient } from "@elizaos/os/bridges/definitions/media"
   import { deviceLibraryClient, deviceLibraryPlugin, photosClient, photosPlugin } from "@elizaos/os/bridges/media"
 
+  let library: PhotosClient | undefined
+  let reviewed: DeviceLibraryClient | undefined
+
   /** @throws {never} */
   export function phoneLibrary(name: string): PhotosClient {
-    return photosClient(photosPlugin(name), name)
+    return (library ??= photosClient(photosPlugin(name), name))
   }
 
   /** @throws {never} */
   export function reviewedLibrary(name: string): DeviceLibraryClient {
-    return deviceLibraryClient(deviceLibraryPlugin(name), name)
+    return (reviewed ??= deviceLibraryClient(deviceLibraryPlugin(name), name))
   }
 }
 import { phoneLibrary, reviewedLibrary } from native
@@ -201,7 +204,8 @@ module browser {
   }
 }
 import { type BrowserCapture, browserCaptures, browserOriginal, captureEvent, latestBrowserCapture, page, saveBrowserCapture } from browser
-export { type BrowserCapture, latestBrowserCapture, saveBrowserCapture }
+export { latestBrowserCapture, saveBrowserCapture }
+export type { BrowserCapture }
 
 /** The phone's permitted library and its reviewed read surface, or the captures saved in this browser. */
 export service PhotosPort {
@@ -232,10 +236,10 @@ const reviewedName = "AlphaPhotoLibrary"
 export const phonePhotos = Layer.sync(PhotosPort, () => {
   const phone = registered(photosName) ? Option.some(phoneLibrary(photosName)) : Option.none<PhotosClient>()
   const reviewed = registered(reviewedName) ? Option.some(reviewedLibrary(reviewedName)) : Option.none<DeviceLibraryClient>()
-  const changes = Option.isNone(phone) ? Stream.empty : Stream.callback<void>((queue) => acquireRelease(
-    effect { return tryPromise(() => phone.value.onLibraryChanged(() => { Queue.offerUnsafe(queue, undefined) })) catch () => undefined },
+  const changes = Option.isNone(phone) ? Stream.empty : Stream.callback<void>((queue) => Effect.asVoid(acquireRelease(
+    Effect.orElseSucceed(tryPromise(() => phone.value.onLibraryChanged((): void => { Queue.offerUnsafe(queue, undefined) })), () => undefined),
     (handle) => handle === undefined ? Effect.void : ignore(tryPromise(() => handle.remove())),
-  ))
+  )))
   return { phone, reviewed, changes, captures: () => succeed([]), original: () => succeed(undefined), ...entry() }
 })
 
