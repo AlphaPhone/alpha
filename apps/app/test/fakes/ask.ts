@@ -118,6 +118,9 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
         return;
       }
       const answer = () => {
+        for (const { action } of actions as readonly { readonly action?: unknown }[]) {
+          if (typeof action === "string") controller.enqueue(frame({ type: "tool", name: action, label: "Working" }));
+        }
         if (custom !== undefined && custom.length > 0) {
           for (const piece of custom) controller.enqueue(frame({ type: "token", text: piece, ...(provisional ? { provisional } : {}) }));
           const full = custom.join("");

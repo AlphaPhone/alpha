@@ -665,7 +665,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
   });
 
   // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view"
-  it("runs only the exact terminal Files action from compact Talk", async () => {
+  it("runs the agent's own terminal Files action from compact Talk, and nothing for a turn that proposes none", async () => {
     const world = { ...scene(), phone: true, image: true, signedIn: false };
     world.ask.metadata = [];
     world.ask.spokenFiles = [];
@@ -682,22 +682,23 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await press("Talk");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
 
-    const speak = async (id: string, text: string, sent: number) => {
+    const speak = async (id: string, text: string, sent: number, proposes = true) => {
       review.proposal.id = id;
       review.proposal.state = "pending";
       review.proposal.payload.requestMessageId = `m${world.ask.said.length + 1}u`;
-      world.ask.nextReplyChunks = ["There is a Files action for this turn."];
-      world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: {
+      world.ask.nextReplyChunks = [proposes ? "There is a Files action for this turn." : "It is a quarter past two."];
+      world.ask.nextActions = () => proposes ? [{ action: "PROPOSE_DEVICE_ACTION", data: {
         proposalId: id, state: "pending", executed: false, awaitingDeviceExecution: true, directRequest: true, approvalRequired: false,
-      } }];
+      } }] : [];
       speakUtterance(world, text);
       await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === sent && s.phase === "Listening" && s.mic === "On");
     };
 
-    await speak("other-filter", "Show photos in Download", 1);
-    expect(review.claims).toEqual([]);
-    expect(world.ask.metadata.at(-1)).toMatchObject({ voiceUi: { agentActionMode: "direct-request-v1" } });
-    await speak("asked-filter", "Show PDFs in Download", 2);
+    await speak("no-files-request", "What time is it?", 1, false);
+    expect([review.claims, world.files.calls.includes("storageQuery")]).toEqual([[], false]);
+    expect(world.ask.metadata.at(-1)).toMatchObject({ voiceUi: { agentActionMode: "direct-files-v1" } });
+    expect(world.voice.spoken.some((said) => said.text.includes("quarter past two"))).toBe(true);
+    await speak("asked-filter", "only the pdfs in my downloads", 2);
     expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "asked-filter" })]);
     expect(world.ask.spokenFiles.at(-1)).toEqual({ channel: "VOICE_DM", images: undefined });
     expect(world.voice.spoken.some((said) => said.text.includes("Showing 1 item in Files"))).toBe(true);
@@ -735,7 +736,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await speak("ordinal", "Open result 1", 1);
     expect(review.claims).toEqual([]);
     expect(alpha.runtime.runSync(Shell.Machine.use((machine) => machine.get())).trail).toEqual([]);
-    expect(world.ask.metadata.at(-1)).not.toMatchObject({ voiceUi: { agentActionMode: "direct-request-v1" } });
+    expect(world.ask.metadata.at(-1)).toMatchObject({ voiceUi: { agentActionMode: "direct-files-v1" } });
 
     review.proposal.payload.operation = filter;
     await speak("named-filter", "Show PDFs in Download", 2);
@@ -780,6 +781,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 1 && state.phase === "Listening" && state.mic === "On");
     expect(world.ask.spokenFiles?.at(-1)).toEqual(attached);
     if (!secret) expect(world.ask.metadata.at(-1)).toMatchObject({ observation: { view: "files", selectedObject: { kind: "document" } } });
+    if (!secret) expect(world.ask.metadata.at(-1)).not.toMatchObject({ voiceUi: { agentActionMode: "direct-files-v1" } });
 
     speakUtterance(world, "Please summarize this file");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 2 && state.phase === "Listening");
