@@ -12,7 +12,7 @@ import { type Job, Whole, answer, contained, due, reacting, run, started, stream
 import type { Time } from "../runtime/time.vibe"
 
 module page {
-  import { isSecureWebAddress } from "@elizaos/os-bridges"
+  import { addressFacts, isSecureWebAddress } from "@elizaos/os-bridges"
   import type { Input } from "../../gen/app__browser__address.ts"
 
   /** Whether `href` came over HTTPS with a host. @throws {never} */
@@ -33,16 +33,18 @@ module page {
     const web = /^https?:\/\//i.test(text)
     const rest = text.replace(/^https?:\/\//i, "")
     const authority = rest.split(/[/?#]/)[0] ?? ""
+    const spaced = /\s/.test(text)
+    const mail = /^[^\s/:@?#%]+@[^\s/:@?#%]+\.[^\s/:@?#%]+$/.test(text)
     return {
       blank: text === "",
       tooLong: text.length > 8192,
-      userInfo: authority.includes("@") && (web || !/\s/.test(text)) && !/^[^\s@]+@[^\s@]+\.[^\s@/]+$/.test(text),
+      userInfo: !mail && (addressFacts(text, "DefaultHttps").userInfo || authority.includes("@") && (web || !spaced)),
       web,
-      spaced: /\s/.test(text),
+      spaced,
       colon: /^[A-Za-z][\w-]*:(?!\d)/.test(text) && !web,
       host: /^(localhost|\[[\da-f:.]+\]|[^\s/:@.]+(\.[^\s/:@.]+)+)(:\d+)?([/?#]\S*)?$/i.test(rest) && !/^[\d.:]+$/.test(rest),
       numeric: /^[\d.:]+$/.test(text),
-      mail: /^[^\s@/]+@[^\s@/]+\.[^\s@/]+$/.test(text),
+      mail,
     }
   }
   /** The address the tab host opens for what was typed: the web address it names, or a search for it. @throws {never} */

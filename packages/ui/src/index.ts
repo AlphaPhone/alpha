@@ -188,6 +188,7 @@ export * from "./components/notes/VoiceNoteView.tsx";
 export * from "./components/browser/BrowserBar.tsx";
 export * from "./components/browser/BrowserLibrary.tsx";
 export * from "./components/browser/BrowserAddressBar.tsx";
+export * from "./components/browser/BrowserAddressChoices.tsx";
 export * from "./components/browser/BrowserNewTab.tsx";
 export * from "./components/browser/PrivateMark.tsx";
 export * from "./components/browser/PrivateNotice.tsx";
