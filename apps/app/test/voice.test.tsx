@@ -13,12 +13,14 @@ import { Machine as Dock } from "../gen/app__assistant__dock.effect.vibe";
 import { Machine as Locator } from "../gen/app__assistant__context.effect.vibe";
 import { Machine as Files } from "../gen/app__files.effect.vibe";
 import { Machine as FilePreview } from "../gen/app__files__preview.effect.vibe";
+import { Machine as Preferences } from "../gen/app__settings__preferences.effect.vibe";
 import type { Mount } from "../src/areas.ts";
 import { dictate } from "../src/assistant/dictation.vibe";
 import assistant from "../src/assistant/index.tsx";
 import files from "../src/files/index.tsx";
 import { button, closeAll, drawn, fill, open, press, seen, underAct, until as drawnUntil } from "./alpha.tsx";
 import { scene, type Scene } from "./fakes/scene.ts";
+import { textReview } from "./fakes/text-review.ts";
 import { fakeWorld } from "./fakes/world.vibe";
 
 type VoiceRuntime = ManagedRuntime.ManagedRuntime<
@@ -613,6 +615,47 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     speakUtterance(world, "And now?");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 1 && s.phase === "Listening");
     expect([world.ask.said.at(-1), world.ask.metadata.length, world.ask.metadata.at(-1)]).toEqual(["And now?", 3, typed]);
+    await press("Stop voice conversation");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
+  });
+
+  // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view"
+  it("runs only the exact terminal Files action from compact Talk", async () => {
+    const world = { ...scene(), phone: true, image: true, signedIn: false };
+    world.ask.metadata = [];
+    world.ask.spokenFiles = [];
+    const filter = { type: "files_filter", kind: "pdf", folder: "Download" } as const;
+    const review = textReview(world.notes.owner, "other-filter", filter);
+    world.telephony.textReview = review;
+    const { alpha } = await open(world, [...talkMounts, { at: "view:Files", load: () => import("../src/files/index.tsx") }]);
+    const area = assistant.runtime(alpha);
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "openView", view: "Files" }))));
+    await drawnUntil(alpha, area, Conversation, (s) => s.ready && s.observing && s.context.showing.tag === "App" && s.context.showing.view === "Files");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
+    await drawnUntil(alpha, files.runtime(alpha), Files, (s) => s.access === "Granted" && s.storage.status === "Loaded");
+    await drawnUntil(alpha, alpha.runtime, Preferences, (s) => s.document.read.status === "Loaded" && !s.askFirst);
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
+
+    const speak = async (id: string, text: string, sent: number) => {
+      review.proposal.id = id;
+      review.proposal.state = "pending";
+      review.proposal.payload.requestMessageId = `m${world.ask.said.length + 1}u`;
+      world.ask.nextReplyChunks = ["There is a Files action for this turn."];
+      world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: {
+        proposalId: id, state: "pending", executed: false, awaitingDeviceExecution: true, directRequest: true, approvalRequired: false,
+      } }];
+      speakUtterance(world, text);
+      await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === sent && s.phase === "Listening" && s.mic === "On");
+    };
+
+    await speak("other-filter", "Show photos in Download", 1);
+    expect(review.claims).toEqual([]);
+    expect(world.ask.metadata.at(-1)).toMatchObject({ voiceUi: { agentActionMode: "direct-request-v1" } });
+    await speak("asked-filter", "Show PDFs in Download", 2);
+    expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "asked-filter" })]);
+    expect(world.ask.spokenFiles.at(-1)).toEqual({ channel: "VOICE_DM", images: undefined });
+    expect(world.voice.spoken.some((said) => said.text.includes("Showing 1 item in Files"))).toBe(true);
     await press("Stop voice conversation");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
   });

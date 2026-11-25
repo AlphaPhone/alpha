@@ -709,13 +709,15 @@ pure def sometimesAFilterFollowedTheOwner(s: Files): bool = S::finding(s.search)
 ### An explicit request to open or filter Files may act directly on the same idle Files view
 
 The phone remembers the place and the list and search tickets when the
-owner sends a typed request from Files. Only an exact, authorized Files
+owner sends a typed or spoken request from Files. Only an exact, authorized Files
 command asks for direct execution on its turn. When the resident returns
 that message's matching direct proposal, the phone may carry it out once if
 the owner allows direct action, the same place and tickets still show
 and the open viewer is empty. A different request, an unreadable
-preference, or a work item in progress keeps the usual review. The
-agent gets a result receipt without the opened file's contents. An open
+preference, or a work item in progress keeps the usual review. A spoken
+request uses its own current voice turn and conversation, and an attached
+document does not authorize a direct action. The agent gets a result
+receipt without the opened file's contents. An open
 counts only when that folder loaded or that file could be shown.
 
 ```quint
