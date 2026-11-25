@@ -10,7 +10,7 @@ import { isCloudFundsRefusal } from "../assistant/assistant.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type VoiceEvent, VoiceBridge } from "../platform/voice.vibe"
 import { fresh } from "../runtime/attempts.vibe"
-import { type Job, answer, contained, due, hearing, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, due, following, hearing, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
 import { signedIn } from "./account.vibe"
 
 const views: ReadonlyArray<Shell.View> = [
@@ -442,6 +442,9 @@ export const voiceWithCalls = started(effect {
   })
 }, "voice observing calls")
 
+// spec/app/voice/index.md, "A failed conversation ends quietly: why it failed is kept only until voice returns to idle, and nothing is shown"
+const quietly = following(Voice.Machine, (voice) => voice.phase === "Failed", Voice.Machine, (failed): Voice.Event | undefined => (failed ? { type: "dismiss" } : undefined))
+
 const bridgeEvents = hearing(
   Stream.unwrap(effect {
     const bridge = try VoiceBridge
@@ -475,6 +478,7 @@ export const voicing = Layer.provideMerge(
     navigation,
     bridgeEvents,
     signedIn,
+    quietly,
   ),
   voiceWords,
 )

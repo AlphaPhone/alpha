@@ -624,12 +624,14 @@ pure def alwaysAnUnconfirmedStopKeepsVoiceClosed(v: Voice): bool =
 pure def sometimesStopUnconfirmed(v: Voice): bool = v.latched
 ```
 
-### A failure is shown once the conversation has stopped, and is one the owner can act on
+### A failed conversation ends quietly: why it failed is kept only until voice returns to idle, and nothing is shown
 
-A denied microphone offers "Open app settings".
+As in the existing app, a conversation that could not start or went on
+failing shows no words: voice returns to idle at once, and Talk is offered
+again.
 
 ```quint
-pure def alwaysAFailureIsShownWhenStopped(v: Voice): bool =
+pure def alwaysAFailureIsKeptOnlyOnceStopped(v: Voice): bool =
   (v.phase == Failed implies v.failure != D::NoFailure)
     and (v.failure != D::NoFailure implies (v.phase == Failed or v.phase == Stopping))
     and (v.failure == D::NoFailure or v.failure == D::Denied or v.failure == D::NoMicrophone or v.failure == D::Recognition)
@@ -647,8 +649,6 @@ pure def sometimesDenied(v: Voice): bool = v.phase == Failed and v.failure == D:
 > conversation to come back when the call ends.
 
 ### A call pauses the conversation: the microphone closes, speech stops, and the turn in flight is dropped
-
-The owner sees "Voice paused for a phone call".
 
 ```quint
 pure def canPauseForCall(v: Voice): bool = talking(v) and v.mic != Asking and not(v.disclosing) and v.phase != Paused

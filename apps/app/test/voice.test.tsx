@@ -325,7 +325,7 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
 
     world.voice.credentialId = "cred-owner-8";
     await sendVoice(runtime, { type: "startTalking", now: untimed });
-    await until(runtime, Voice.Machine, (s) => s.phase === "Failed");
+    await until(runtime, Voice.Machine, (s) => s.phase === "Failed" || s.phase === "Idle");
     await sendVoice(runtime, { type: "startTalking", now: untimed });
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
     expect(world.voice.cloudStarts.map((one) => one.credentialId)).toEqual(["cred-owner-7", "cred-owner-7", "cred-owner-8"]);
@@ -336,7 +336,7 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     await sendVoice(runtime, { type: "returned" });
     await untilCondition(runtime, () => world.voice.relayWarmups.length === 3, () => world.voice.relayWarmups);
     await sendVoice(runtime, { type: "startTalking", now: untimed });
-    await until(runtime, Voice.Machine, (s) => s.phase === "Failed");
+    await until(runtime, Voice.Machine, (s) => s.phase === "Failed" || s.phase === "Idle");
     expect([(await getVoice(runtime)).mic, world.voice.cloudStarts.length]).toEqual(["Off", 3]);
   });
 });
@@ -387,8 +387,8 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.route.account === "SignedOut" && !s.route.consent);
   });
 
-  // spec/app/voice/index.md, "Starting asks for the microphone the first time, opens it once it is allowed, and holds the speech engine while talking"; spec/app/voice/index.md, "Audio leaves the phone only on a route the owner agreed to"
-  it("a signed-out owner's Talk ends quietly: nothing leaves the phone, nothing is shown, and Talk is offered again", async () => {
+  // spec/app/voice/index.md, "Starting asks for the microphone the first time, opens it once it is allowed, and holds the speech engine while talking"; spec/app/voice/index.md, "Audio leaves the phone only on a route the owner agreed to"; spec/app/voice/index.md, "A failed conversation ends quietly: why it failed is kept only until voice returns to idle, and nothing is shown"
+  it("a signed-out owner's Talk ends quietly: voice returns to idle, nothing leaves the phone, nothing is shown, and Talk is offered again", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
     world.voice.onDevice = false;
     const { alpha } = await open(world, talkMounts);
@@ -396,9 +396,9 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
 
     await press("Talk");
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.session > 0 && (s.phase === "Failed" || s.phase === "Idle"));
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.session > 0 && s.phase === "Idle");
     const after = await area.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()));
-    expect([after.mic, after.network, world.voice.cloudStarts, world.voice.relayWarmups, document.querySelector("[role=alertdialog], [role=alert], [role=note]"), button("Talk") !== undefined]).toEqual([
+    expect([after.mic, after.network, world.voice.cloudStarts, world.voice.relayWarmups, document.querySelector("[role=alertdialog], [role=alert], [role=note], [role=status]"), button("Talk") !== undefined]).toEqual([
       "Off", false, [], [], null, true,
     ]);
   });
