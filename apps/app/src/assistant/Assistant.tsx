@@ -293,6 +293,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           onTalk: speech?.onTalk,
           onStop: conversation.can({ type: "stop" }) ? () => void conversation.send({ type: "stop" }) : undefined,
         }}
+        attachmentNotice={onComms ? undefined : seen.attachmentNotice}
         transcript={{
           messages,
           liveMessages: [...writingReply, ...failed, ...mediaCards, ...mediaNote],
@@ -332,7 +333,6 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           },
           unavailable: !talking.ready ? "away" : talking.context.sensitive ? "sensitive" : undefined,
           attachments: onComms ? undefined : waiting(writing, draftFiles),
-          attachmentNotice: onComms ? undefined : seen.attachmentNotice,
           onPreviewAttachment: !onComms && canPreview ? (id) => {
             const file = draftFiles.find((one) => one.id === id);
             if (file) preview(file);

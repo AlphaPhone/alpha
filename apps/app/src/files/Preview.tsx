@@ -82,17 +82,17 @@ export function Preview({ runtime }: PreviewProps) {
         </div>
         <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto px-6 pb-12">
           <DialogTitle className="mb-2 font-display text-3xl font-light break-words">{name}</DialogTitle>
-          {file && <p className="mb-4 flex items-center gap-2 text-sm text-muted-foreground"><FileText aria-hidden className="size-4.5" />{file.mimeType === "application/pdf" ? "PDF" : { Media: "Media", Photo: "Image", Text: "Text", Archive: "Archive", Pdf: "PDF", Receipt: "Receipt" }[state.kind]}</p>}
+          {file !== undefined && <p className="mb-4 flex items-center gap-2 text-sm text-muted-foreground"><FileText aria-hidden className="size-4.5" />{file.mimeType === "application/pdf" ? "PDF" : { Media: "Media", Photo: "Image", Text: "Text", Archive: "Archive", Pdf: "PDF", Receipt: "Receipt" }[state.kind]}</p>}
           {state.attempt.outcome === "Unknown" && state.offered.item === state.item && state.offered.revision === state.revision && <Alert variant="warn">Check Inbox before offering this file again</Alert>}
           {!usable(state) && <Alert variant="warn">Alpha can no longer read this file</Alert>}
           {state.content.status === "Loading" && <Spinner label="Opening the file" />}
           {state.content.status === "Failed" && <Alert variant="warn">{state.why === "Locked" ? "This PDF is locked" : state.why === "TooLarge" ? "This file is too large to show" : state.why === "TooSlow" ? "This PDF took too long to open" : "This file cannot be shown here"}</Alert>}
           {state.drawing.status === "Failed" && <Alert variant="warn">This page cannot be shown</Alert>}
           {mine && content.text !== undefined && <pre className="font-mono text-sm whitespace-pre-wrap break-words">{content.text}</pre>}
-          {mine && state.kind === "Photo" && content.uri && <img alt={name} src={content.uri} decoding="async" className="mx-auto w-full max-h-[55dvh] object-contain" />}
-          {mine && state.kind === "Media" && content.uri && (file?.mimeType.startsWith("audio/") ? <audio {...mediaProps} src={content.uri} className="w-full" /> : <video {...mediaProps} src={content.uri} className="mx-auto w-full max-h-[55dvh]" />)}
+          {mine && state.kind === "Photo" && content.uri !== undefined && <img alt={name} src={content.uri} decoding="async" className="mx-auto w-full max-h-[55dvh] object-contain" />}
+          {mine && state.kind === "Media" && content.uri !== undefined && (file?.mimeType.startsWith("audio/") ? <audio {...mediaProps} src={content.uri} className="w-full" /> : <video {...mediaProps} src={content.uri} className="mx-auto w-full max-h-[55dvh]" />)}
           {owner({ type: "play" }) && <Button variant="ghost" size="icon" aria-label={state.playing ? "Pause" : "Play"} className="mx-auto mt-2 flex" onClick={() => tell({ type: "play" })}>{state.playing ? <Pause /> : <Play />}</Button>}
-          {mine && state.kind === "Pdf" && state.drawing.status === "Loaded" && content.page && <img alt={`Page ${state.page} of ${state.pages}`} src={content.page} decoding="async" className="w-full rounded-sm border border-border shadow-sm" />}
+          {mine && state.kind === "Pdf" && state.drawing.status === "Loaded" && content.page !== undefined && <img alt={`Page ${state.page} of ${state.pages}`} src={content.page} decoding="async" className="w-full rounded-sm border border-border shadow-sm" />}
           {state.kind === "Pdf" && state.pages > 1 && (
             <div className="mt-2 flex items-center justify-between gap-2 text-sm text-muted-foreground">
               {owner({ type: "turnTo", page: state.page - 1 }) ? <Button variant="ghost" size="icon" aria-label="Previous page" onClick={() => tell({ type: "turnTo", page: state.page - 1 })}><ChevronLeft /></Button> : <span className="size-11" />}

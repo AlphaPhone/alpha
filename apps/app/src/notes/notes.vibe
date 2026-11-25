@@ -1,114 +1,200 @@
-// spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Open a note"; spec/app/notes/index.md, "Story: Another owner never sees my notes"
-import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { CloudError } from "@elizaos/cloud/client"
-import * as List from "../../gen/app__notes.effect.vibe"
-import type { Change, Effect as Out, Event } from "../../gen/app__notes.effect.vibe"
-import type { Actor } from "../../gen/app__notes__note.ts"
-import * as Shell from "../../gen/app__shell.effect.vibe"
+// spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Open a note"; spec/app/notes/index.md, "Story: Organise my notes"; spec/app/notes/index.md, "Story: Another owner never sees my notes"
+import * as Actions from "../../gen/app__notes__actions.effect.vibe"
+import * as Notes from "../../gen/app__notes.effect.vibe"
+import * as Editor from "../../gen/app__notes__editor.effect.vibe"
+import * as Link from "../../gen/app__notes__linkNote.effect.vibe"
+import * as Voice from "../../gen/app__notes__voice.effect.vibe"
+import * as Recorder from "../../gen/app__notes__recording.effect.vibe"
+import * as Previous from "../../gen/app__notes__previous.effect.vibe"
+import * as Transfer from "../../gen/app__notes__transfer.effect.vibe"
+import * as Trash from "../../gen/app__notes__trash.effect.vibe"
+import type { Actor } from "../../gen/app__notes__note.effect.vibe"
+import { unlinked } from "../../gen/app__notes__note.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import type { Agent } from "../platform/agent.vibe"
-import { Cloud } from "../platform/cloud.vibe"
-import { type Job, answer, contained, reacting, run, started, together } from "../runtime/reactor.vibe"
-import { keep, noteOf, storedId } from "./shown.ts"
-import { interact, readState } from "./store.vibe"
-import { type Opened, shows, tellOwner } from "./views.vibe"
+import { Device } from "../platform/device.vibe"
+import { NoteStore, noteStore } from "../platform/notes.vibe"
+import { ownerAt } from "../platform/owner.vibe"
+import { type Job, answer, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { actions } from "./actions.vibe"
+import { NoteContent, formatChanged, fromSaved, noteContent, numberOf } from "./content.vibe"
+import { NoteEditor, editing } from "./editor.vibe"
+import { ownerRecords, recording } from "./recording.vibe"
+import { ownerEarlier, previous } from "./previous.vibe"
+import { transfers } from "./transfer.vibe"
+import { sides } from "./sides.vibe"
+import { trashing } from "./trash.vibe"
 
-/** The folders the phone keeps for one owner's notes, and their own revision. */
-schema Shelf { readonly revision: number; readonly folders: { readonly id: string; readonly name: string }[] }
-const decodeShelf = Schema.decodeUnknownEffect(Schema.fromJsonString(Shelf))
+const phone: Actor = "Phone"
 
-/** Where the phone keeps `owner`'s folders. */
-function shelfKey(owner: number): string {
-  return `alpha.notes.folders.${owner}`
-}
-
-/** The folders the phone keeps for `owner`: none before the first is made. */
-effect function shelfOf(owner: number): Shelf!!KeyValueStore.KeyValueStore {
-  const text = (try KeyValueStore.KeyValueStore).get(shelfKey(owner)) catch () => undefined
-  const empty: Shelf = { revision: 1, folders: [] }
-  return text === undefined ? empty : (decodeShelf(text) catch () => empty)
-}
-
-// spec/app/notes/index.md, "Only the phone answers a reading, only the newest reading is taken, and only a well-formed one no older than the one shown"
-/** `owner`'s notes and folders, as the answer to the reading numbered `ticket`. */
-effect function list(ticket: number, owner: number): Event!!(Agent | KeyValueStore.KeyValueStore) {
-  const failed: Event = { type: "listed", ticket, ok: false, version: 0, rows: [], folders: [], shelf: 0 }
-  return effect {
-    const read = try readState()
-    const shelf = try shelfOf(owner)
-    const { rows, folders } = keep(read.notes, shelf.folders, read.revision)
-    return { type: "listed", ticket, ok: true, version: Math.max(1, read.revision), rows, folders, shelf: shelf.revision } as Event
-  } catch () => failed
-}
-
-// spec/app/notes/index.md, "A change ends as the store says, and the list is read again whatever the answer"
-/** Write `change` to the owner's store over the revision it names: a pin is kept in the note's own format. */
-effect function write(ticket: number, change: Change): Event!!Agent {
-  const refused: Event = { type: "changeWritten", ticket, ok: false, known: true }
-  const id = storedId(change.note)
-  const note = noteOf(change.note)
-  if ((change.op !== "Pin" && change.op !== "Unpin") || id === undefined || note === undefined) return refused
-  const format = { kind: note.format?.kind ?? "text", data: { ...note.format?.data, pinned: change.op === "Pin" } }
-  return effect {
-    try interact("update-note", { id, format, expectedRevision: change.base })
-    return { type: "changeWritten", ticket, ok: true, known: true } as Event
-  } catch effect (failure) => (failure._tag === "Refused" ? refused : { type: "changeWritten", ticket, ok: false, known: false } as Event)
-}
-
-function carry(fx: Out): Job<Event, Agent | KeyValueStore.KeyValueStore | Shell.Machine | Opened, [by: Actor]> {
-  return match (fx) {
-    when { tag: "Lists", let ticket, let owner }: answer("list", list(ticket, owner), { type: "listed", ticket, ok: false, version: 0, rows: [], folders: [], shelf: 0 }, "Phone");
-    when { tag: "Writes", let ticket, let change }: answer("write", write(ticket, change), { type: "changeWritten", ticket, ok: false, known: false }, "Phone");
-    when { tag: "Shows", let row }: run("show", shows(row), "Phone");
-    when { tag: "OpensAccount" }: run("account", effect { try contained((try Shell.Machine).send({ type: "openView", view: "Settings" }), "opening Settings") }, "Phone");
-  }
-}
-
-const kept = reacting(List, { carry })
-
-const ownersKey = "alpha.notes.owners"
-const decodeIds = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Schema.String)))
-
-/** The number `account` keeps on this phone across restarts: 0 for no account. */
-effect function numberOf(account: string): number!!KeyValueStore.KeyValueStore {
-  if (account === "") return 0
-  const store = try KeyValueStore.KeyValueStore
-  const text = store.get(ownersKey) catch () => undefined
-  const known: ReadonlyArray<string> = text === undefined ? [] : (decodeIds(text) catch () => [])
-  const at = known.indexOf(account)
-  if (at >= 0) return at + 1
-  try ignore(store.set(ownersKey, JSON.stringify([...known, account])))
-  return known.length + 1
-}
-
-/** The account the cloud session is signed in to: "" when signed out, nothing when the cloud could not say. */
-effect function account(): (string | undefined)!!Cloud {
-  const { client } = try Cloud
-  return effect {
-    const signed = try tryPromise({ try: () => client.account(), catch: (cause) => cause })
-    return signed.id
-  } catch (failed) => (failed instanceof CloudError && failed.failure.tag === "CloudCredentialInvalid" ? "" : undefined)
-}
-
-// spec/app/notes/index.md, "When another owner takes the phone, the list forgets everything shown, asked or proposed, and reads nothing until opened again"; spec/app/notes/index.md, "Opening Notes, or trying again, reads the owner's notes"
-/** Tell the list who is signed in, then read that owner's notes. */
-effect function opened() {
-  const who = try account()
-  const notes = try List.Machine
-  if (who !== undefined) {
-    const owner = try numberOf(who)
-    if ((try notes.get()).owner !== owner) {
-      try contained(notes.send({ type: "ownerChanged", owner }, "Phone"), "telling Notes who is signed in")
-      try tellOwner(owner)
+effect function listed(owner: number, ticket: number): Notes.Event!!(Agent | Notes.Machine | Editor.Machine | NoteStore | NoteContent) {
+  const fail: Notes.Event = { type: "listed", ticket, ok: false, version: 0, rows: [], folders: [], shelf: 0 }
+  const identity = ownerAt() catch () => ""
+  if (identity === "" || numberOf("owner", identity) !== owner) return fail
+  const store = try NoteStore
+  const snapshot = store.read() catch () => undefined
+  if (snapshot === undefined || (ownerAt() catch () => "") !== identity) return fail
+  const machine = try Notes.Machine
+  if (!Notes.canListed(try machine.get(), ticket, phone)) return fail
+  const content = try NoteContent
+  const read = content.publish(identity, snapshot) catch () => undefined
+  if (read === undefined) return fail
+  const editor = try Editor.Machine
+  const active = try editor.get()
+  if (active.note > 0) {
+    const row = read.rows.find((row) => row.id === active.note)
+    const saved = read.noteByNumber.get(active.note)
+    const said: Editor.Event = { type: "noteRead", note: active.note, latest: read.version, present: row !== undefined, link: row?.source ?? unlinked }
+    if (Editor.canNoteRead(active, said.note, said.latest, said.present, said.link, phone)) {
+      if (!Editor.waiting(active) && saved !== undefined) try content.showDraft(fromSaved(saved, identity, read.version))
+      try ignore(editor.send(said, phone))
     }
   }
-  try contained(notes.send({ type: "refresh" }, "Owner"), "reading the notes")
+  return { type: "listed", ticket, ok: true, version: read.version, rows: read.rows, folders: read.folders, shelf: read.shelf }
 }
 
-/** Each time the shell brings Notes forward, who is signed in, and their notes read again. */
-const fronted = started(effect {
-  const forward = Stream.filter(Stream.changes(Stream.map((try Shell.Machine).changes, (shell) => Shell.showing(shell, "Notes"))), (front) => front)
-  try Stream.runForEach(forward, () => contained(opened(), "opening Notes"))
-}, "following Notes to the front")
+effect function written(owner: number, ticket: number, change: Notes.Change): Notes.Event!!(Agent | NoteStore | NoteContent) {
+  const failed: Notes.Event = { type: "changeWritten", ticket, ok: false, known: true }
+  const done: Notes.Event = { type: "changeWritten", ticket, ok: true, known: true }
+  const identity = ownerAt() catch () => ""
+  if (identity === "" || numberOf("owner", identity) !== owner) return failed
+  const { note, folder, base, op, name } = change
+  const content = try NoteContent
+  const current = try content.collection()
+  if (current.owner !== identity) return failed
+  if (op === "AddFolder" || op === "RenameFolder" || op === "RemoveFolder") {
+    return effect { try content.changeFolders(identity, base, op, folder, name); return done } catch () => failed
+  }
+  const row = current.noteByNumber.get(note)
+  if (row === undefined || base !== current.version) return failed
+  if (op === "Create" || op === "Rewrite") return failed
+  const destination = current.folderByNumber.get(folder)
+  if (op === "Move" && folder > 0 && destination === undefined) return failed
+  const fields = op === "Move" ? { folderId: destination?.id ?? null } : { pinned: op === "Pin" }
+  return effect {
+    try (try NoteStore).update({ id: row.id, expectedRevision: base - 1, format: formatChanged(row, fields) })
+    return done
+  } catch (error) => ({ ...failed, known: error.known })
+}
 
-/** Notes' list: in memory, told who is signed in and read from the agent's store each time Notes comes forward. */
-export const notes = together(kept, fronted)
+effect function opened(row: Notes.Row) {
+  const content = try NoteContent
+  const current = try content.collection()
+  const note = current.noteByNumber.get(row.id)
+  if (note === undefined || current.version !== row.revision || (ownerAt() catch () => "") !== current.owner) return
+  const { id, revision, kind, origin, source: link } = row
+  if (Notes.viewFor(kind) === "Visiting") {
+    try ignore((try Link.Machine).send({ type: "openLink", note: id, revision, kind, origin, link, covered: false }, "Owner"))
+  } else if (Notes.viewFor(kind) === "Listening") {
+    const format = note.format?.data
+    const segments = Array.isArray(format?.segments) ? Math.max(1, format.segments.length) : 1
+    const heard = Array.isArray(format?.lines) && format.lines.length > 0 ? segments : 0
+    const summary = Array.isArray(format?.summary) && format.summary.length > 0 ? heard : 0
+    try ignore((try Voice.Machine).send({ type: "openVoice", note: id, revision, segments, heard, summary, covered: false }, "Owner"))
+  } else {
+    const editor = try Editor.Machine
+    const moved = editor.send({ type: "openNote", id, revision, kind, link, covered: false }, "Owner") catch () => undefined
+    if (moved !== undefined) try content.showDraft(fromSaved(note, current.owner, revision))
+  }
+}
+
+function carry(fx: Notes.Effect): Job<Notes.Event, Agent | Notes.Machine | Editor.Machine | NoteStore | NoteContent | Shell | Link.Machine | Voice.Machine, [Actor]> {
+  return match (fx) {
+    when { tag: "Lists" }: answer("list", listed(fx.owner, fx.ticket), { type: "listed", ticket: fx.ticket, ok: false, version: 0, rows: [], folders: [], shelf: 0 }, phone);
+    when { tag: "Writes" }: answer(`write ${fx.ticket}`, written(fx.owner, fx.ticket, fx.change), { type: "changeWritten", ticket: fx.ticket, ok: false, known: false }, phone);
+    when { tag: "Shows" }: run("open", opened(fx.row), phone);
+    when { tag: "OpensAccount" }: run("account", effect { try ignore((try Shell).send({ type: "openView", view: "Settings" })) }, phone);
+  }
+}
+
+export effect function enter() {
+  const content = try NoteContent
+  const list = try Notes.Machine
+  const editor = try Editor.Machine
+  const trash = try Trash.Machine
+  const link = try Link.Machine
+  const voice = try Voice.Machine
+  const identity = ownerAt() catch () => ""
+  const owner = identity === "" ? 0 : numberOf("owner", identity)
+  if ((try list.get()).owner !== owner) try content.clear()
+  try ignore(list.send({ type: "ownerChanged", owner }, phone))
+  try ignore(editor.send({ type: "ownerChanged", owner }, phone))
+  try ignore(trash.send({ type: "ownerChanged", owner }, phone))
+  try ignore(link.send({ type: "ownerChanged", owner }, phone))
+  try ignore(voice.send({ type: "ownerChanged", owner }, phone))
+  try ignore((try Actions.Machine).send({ type: "ownerChanged", owner }, phone))
+  try ownerRecords(owner)
+  try ownerEarlier(owner)
+  try ignore((try Transfer.Machine).send({ type: "ownerChanged", owner }, phone))
+  if (owner === 0) return
+  const recovered = try exit(content.readDraft(identity))
+  const held = try editor.get()
+  const draft = Exit.isSuccess(recovered) ? recovered.value : undefined
+  if (draft === undefined && held.owner === owner && Editor.waiting(held) && !held.showing) {
+    try ignore(editor.send({ type: "restart", readable: false }, phone))
+  }
+  if (draft !== undefined && draft.owner === identity) {
+    if (Editor.waiting(held)) try content.showDraft(draft)
+    else {
+      const accepted = editor.send({ type: "draftFound", note: draft.id === "" ? 0 : numberOf("note", draft.id), made: draft.made,
+        kind: draft.kind, base: draft.base, edits: 1, folder: draft.folder, link: unlinked, readable: true }, phone) catch () => undefined
+      if (accepted !== undefined) try content.showDraft(draft)
+    }
+  }
+  try ignore(list.send({ type: "refresh" }, phone))
+  try ignore(trash.send({ type: "resumeAction" }, phone))
+}
+
+const opening = started(effect {
+  const shell = try Shell
+  const device = try Device
+  const changes = Stream.changes(Stream.map(shell.changes, (state) => showing(state, "Notes")))
+  const visible = Stream.changes(Stream.concat(Stream.fromEffect(device.showing()), device.visible))
+  try Stream.runForEach(Stream.zipLatest(changes, visible), effect ([shown, front]) => {
+    if (shown && front) try enter()
+  })
+}, "enter Notes")
+
+/** The Notes view observes these resident machines. The agent's store is opened only when Notes is requested. */
+export const notes = Layer.provideMerge(together(reacting(Notes, { carry }), editing, trashing, sides, recording, previous, transfers, actions, opening), Layer.merge(noteStore, noteContent))
+
+effect function took() {
+  const prior = try Previous.Machine
+  const recorder = try Recorder.Machine
+  const link = try Link.Machine
+  const voice = try Voice.Machine
+  const editor = try Editor.Machine
+  const trash = try Trash.Machine
+  const list = try Notes.Machine
+  if (Previous.canBack(try prior.get())) {
+    try ignore(prior.send({ type: "back" }, "Owner"))
+    return true
+  }
+  if (Recorder.canBack(try recorder.get())) {
+    try ignore(recorder.send({ type: "back" }, "Owner"))
+    return true
+  }
+  if (Link.canBack(try link.get())) {
+    try ignore(link.send({ type: "back" }, "Owner"))
+    return true
+  }
+  if (Voice.canBack(try voice.get())) {
+    try ignore(voice.send({ type: "back" }, "Owner"))
+    return true
+  }
+  if (Trash.canBack(try trash.get())) {
+    try ignore(trash.send({ type: "back" }, "Owner"))
+    return true
+  }
+  if (Editor.canBack(try editor.get())) {
+    try (try NoteEditor).close()
+    return true
+  }
+  if (Notes.canBack(try list.get())) {
+    try ignore(list.send({ type: "back" }, "Owner"))
+    return true
+  }
+  return false
+}
+
+export const back = took()

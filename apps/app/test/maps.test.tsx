@@ -94,7 +94,7 @@ describe("Maps on a phone", () => {
     await until(alpha, runtime, Screen, () => world.maps.watches.size === 0);
 
     // spec/app/maps/index.md, "End stops guidance and its location and goes back to the directions"
-    await press("End");
+    await press("End navigation");
     await until(alpha, runtime, Screen, (s) => s.trip.guidance === "Stopped" && s.directions);
 
     // spec/app/maps/index.md, "Back leaves one mode: navigation to its directions, directions to the place, the place to the search, the search to the map"
@@ -215,12 +215,12 @@ describe("Maps in a browser", () => {
     expect(world.maps.asked).toEqual([]);
 
     // spec/app/maps/index.md, "The place on the card is saved under a name, renamed under another, or forgotten"; spec/app/maps/index.md, "A saved list that cannot be read is never written over, and a change is told only once it reads back"
-    await fill("Name", "Pier");
     await press("Save");
-    await until(first.alpha, runtime, Screen, (s) => s.saved.length === 2 && s.saved[1]?.name === "Pier" && s.notice === "PlaceSaved");
+    await until(first.alpha, runtime, Screen, (s) => s.saved.length === 2 && s.notice === "PlaceSaved");
     expect(document.body.textContent).toContain("Place saved on this device.");
-    await fill("Name", "Quay");
-    await press("Rename");
+    await press("Rename place");
+    await fill("Place name", "Quay");
+    await press("Apply place name");
     await until(first.alpha, runtime, Screen, (s) => s.saved.length === 2 && s.saved[1]?.name === "Quay" && s.notice === "PlaceRenamed");
     await first.close();
 
@@ -253,7 +253,8 @@ describe("Maps in a browser", () => {
     // spec/app/maps/index.md, "A route is asked from coordinates or another place, which ends a pending \"Use my location\"": Google's map offers no coordinate prompt
     await press("Directions");
     await until(second.alpha, again, Screen, (s) => s.directions);
-    expect([document.querySelector("input[aria-label='Starting point']")?.getAttribute("placeholder"), Boolean(button("From Office"))]).toEqual(["Place", true]);
+    await fill("Starting point", "Off");
+    expect([document.querySelector("input[aria-label='Starting point']")?.getAttribute("placeholder"), Boolean(button("From Office"))]).toEqual(["My location", true]);
   });
 
   it("A saved list Alpha cannot read is never written over (spec/app/maps/index.md, \"Story: Look at a place\")", async () => {
@@ -299,7 +300,7 @@ describe("Maps in a browser", () => {
     // spec/app/maps/index.md, "The card shares the place or the arrival time, opens its website, or opens it in the phone's maps app"; spec/app/maps/index.md, "A copied number is told: \"Number copied\" or \"Couldn't copy\""
     await press("Harbour Gallery");
     await until(alpha, runtime, Screen, (s) => s.place !== 0);
-    expect(button("Copy number")).toBeUndefined();
+    expect(button("Copy phone number")).toBeUndefined();
 
     // spec/app/maps/index.md, "A starting point can be a place found by its name, around the phone or the last start"
     await press("Directions");
@@ -312,14 +313,14 @@ describe("Maps in a browser", () => {
 
     // spec/app/maps/index.md, "Swapping the ends keeps each end's place and plans the reverse route"
     const before = await runtime.runPromise(Effect.flatMap(Screen, (screen) => screen.get()));
-    await press("Swap ends");
+    await press("Swap starting point and destination");
     await until(alpha, runtime, Screen, (s) => s.place === before.startPlace && s.startPlace === before.place && s.trip.route !== 0);
     expect(world.maps.asked.at(-1)?.body).toMatchObject({ from: gallery.coordinate, to: harbour.coordinate });
-    expect(button("Copy number")).toBeUndefined();
+    expect(button("Copy phone number")).toBeUndefined();
     await hardware("back");
     await hardware("back");
     await until(alpha, runtime, Screen, (s) => !s.directions && s.place === before.startPlace);
-    await press("Copy number");
+    await press("Copy phone number");
     await until(alpha, runtime, Screen, (s) => s.copyNotice !== "Uncopied");
     expect(document.body.textContent).toMatch(/Number copied|Couldn't copy/);
   });

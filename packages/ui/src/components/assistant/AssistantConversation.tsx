@@ -1,5 +1,6 @@
 import type { ComponentProps } from "react";
 import { cn } from "../../lib/cn.ts";
+import { Alert } from "../Alert.tsx";
 import { AssistantChatHeader, type AssistantChatHeaderProps } from "./AssistantChatHeader.tsx";
 import { AssistantChatHistory, type AssistantChatHistoryProps } from "./AssistantChatHistory.tsx";
 import { AssistantComposer, type AssistantComposerProps } from "./AssistantComposer.tsx";
@@ -9,6 +10,8 @@ import { AssistantTranscript, type AssistantTranscriptProps } from "./AssistantT
 export type AssistantConversationProps = Omit<ComponentProps<"section">, "children"> & {
   /** The top of the sheet: Go Home, the handle, and the size and Minimize controls. */
   header: AssistantChatHeaderProps;
+  /** Which files could not be attached or saved with the message. */
+  attachmentNotice?: string;
   /** The messages and the turn's state. */
   transcript: AssistantTranscriptProps;
   /** The conversations, shown inside the sheet in place of the messages while given. */
@@ -27,7 +30,7 @@ export type AssistantConversationProps = Omit<ComponentProps<"section">, "childr
  * focus and the native keyboard session survive a tap that raises it.
  * @model spec/app/assistant/index.md
  */
-export function AssistantConversation({ header, transcript, history, composer, pill, detent = "sheet", className, ...props }: AssistantConversationProps) {
+export function AssistantConversation({ header, attachmentNotice, transcript, history, composer, pill, detent = "sheet", className, ...props }: AssistantConversationProps) {
   const resting = detent === "bar" || detent === "pill";
   const full = detent === "full";
   return (
@@ -45,6 +48,7 @@ export function AssistantConversation({ header, transcript, history, composer, p
     >
       <div hidden={resting} className={cn("min-h-0 flex-1 basis-auto flex-col", resting ? "hidden" : "flex")}>
         <AssistantChatHeader {...header} grabber={full ? undefined : header.grabber} />
+        {attachmentNotice && <Alert variant="warn" className="mx-3 shrink-0">{attachmentNotice}</Alert>}
         {history
           ? <AssistantChatHistory {...history} className={cn("min-h-0 flex-1 overflow-y-auto px-5 py-2", history.className)} />
           : <AssistantTranscript {...transcript} className={cn("flex-1", transcript.className)} />}

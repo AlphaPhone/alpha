@@ -9,7 +9,7 @@ import { installedPackages, toolScripts, toolsCode } from "./cache.ts";
 import { chromiumForExplore } from "./chromium.ts";
 import { bin, exec, startGroup } from "./run.ts";
 import { profile, type TestProfile } from "./testing/profile.ts";
-import { appScript, COLOUR, COUNTEREXAMPLES, DRIVERS, filesUnder, indent, isTestFile, manifest, packageFiles, packageManager, servedAt, TRACES, tsApi, type Remember, type Reported } from "./util.ts";
+import { appScript, COLOUR, COUNTEREXAMPLES, DRIVERS, filesUnder, indent, isTestFile, manifest, packageFiles, pnpmLockfile, servedAt, TRACES, tsApi, type Remember, type Reported } from "./util.ts";
 
 const SPECIFICATION = "test/bombadil.ts";
 const SAVED = "test/__traces__/bombadil";
@@ -185,7 +185,7 @@ export function pageInputs(root: string, mode: TestProfile = "normal"): string |
     const bytes = fs.readFileSync(file);
     hash.update(`${name}\0${bytes.length}\0`).update(bytes);
   }
-  const { lock } = packageManager(root);
+  const lock = pnpmLockfile(root);
   if (lock) hash.update(fs.readFileSync(lock));
   return hash.digest("hex");
 }
@@ -228,7 +228,7 @@ async function bombadil(root: string, origin: string, how: { seconds: number } |
 
 /** Run the package's app script until it prints its address, explore what it serves there, and stop it. */
 async function served(root: string, script: string, checking: string, explore: (origin: string) => Promise<Explored>): Promise<Explored> {
-  const command = `${packageManager(root).name} run ${script}`;
+  const command = `pnpm run ${script}`;
   const app = startGroup(command, root, { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1", BROWSER: "none", SPEC_TESTS: checking });
   app.child.stdin.end();
   const said: string[] = [];
@@ -265,7 +265,7 @@ export async function explore(directory: string, remember: Remember, mode: TestP
   const script = appScript(root);
   if (!script) return [[false, "explore", `${page} is a page, and package.json has no start or dev script that serves it: add one that prints the address it serves at`, "", page]];
   const saved = path.join(root, SAVED);
-  const command = `${packageManager(root).name} run ${script}`;
+  const command = `pnpm run ${script}`;
   const specification = fs.existsSync(path.join(root, SPECIFICATION)) ? SPECIFICATION : "Bombadil's defaults";
   const broke = (r: Extract<Explored, { kind: "broke" }>, how: string): Reported<"explore"> => [false, "explore", `${page}: the page ${how} ${r.properties.join(", ")} (${command})`,
     indent(`${r.report}\n\nSaved as ${SAVED}, which is replayed first from now on; \`pnpm exec bombadil browser inspect ${SAVED}\` shows each state.`), page];

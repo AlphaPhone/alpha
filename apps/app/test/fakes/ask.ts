@@ -10,6 +10,8 @@ export interface AskScene {
   readonly turns: Map<string, () => void>;
   readonly kept: Map<string, Kept>;
   searchDown: boolean;
+  /** The agent fails every read of a conversation's messages with a 503, as while it is starting. */
+  pagesDown: boolean;
   acknowledgment?: string;
   metadata?: unknown[];
   /** The failure fields of the resident's terminal reply. */
@@ -26,7 +28,7 @@ export interface Kept {
 }
 
 export function askScene(): AskScene {
-  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, cloudWarmCalls: 0 };
+  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, pagesDown: false, cloudWarmCalls: 0 };
 }
 
 const encoder = new TextEncoder();
@@ -89,6 +91,7 @@ export function askRoutes(scene: AskScene): Route[] {
     (request, url) => {
       const id = /^\/api\/conversations\/([^/]+)\/messages$/.exec(url.pathname)?.[1];
       if (request.method !== "GET" || id === undefined || id === "messages") return;
+      if (scene.pagesDown) return Response.json({ error: "starting" }, { status: 503 });
       const one = scene.kept.get(id);
       return one === undefined ? Response.json({ error: "unknown_conversation" }, { status: 404 }) : Response.json({ messages: one.messages.map((message) => ({ ...message, timestamp: 0 })) });
     },

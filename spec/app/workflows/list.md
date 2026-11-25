@@ -21,7 +21,7 @@ type Kind = Reminder | Prompt | Routine | Schedule
 type KindFilter = AllKinds | Reminders | Prompts | Routines | Schedules
 type StatusFilter = AnyStatus | Active | Inactive | Removed
 type Badge = On | Off | WaitingForYou | HistoryKept
-type Place = ListingRows | ListingDetail({ row: int }) | ListingAdd
+type Place = ListingRows | ListingDetail({ row: int }) | ListingAdd | ListingDigests({ adding: bool, result: int })
 type Effect = ReadList({ ticket: int, owner: int })
 type Listing = {
   owner: int, list: R::Read, count: int, kind: KindFilter, status: StatusFilter,
@@ -40,6 +40,7 @@ pure val ticketValues = Set(1, 2, 3)
 pure val countValues = Set(-1, 0, 3)
 pure val ownerValues = Set(0, 1, 2)
 pure val rowValues = Set(0, 1, 2)
+pure val resultValues = Set(0, 1, 2)
 ```
 
 ### The list is read from the agent for the owner signed in, one reading at a time
@@ -57,7 +58,7 @@ pure def listRead(l: Listing, ticket: int, ok: bool, count: int, complete: bool)
   { ...l, list: R::answer(l.list, ok), count: if (ok) count else l.count, complete: ok and complete }
 ```
 
-### From the list the owner can open one row or Add to Workflows, and Back returns to the same filters
+### From the list the owner can open a row, Add to Workflows, or the digests; Back returns to the same filters
 
 ```quint
 pure def canOpenRow(l: Listing, row: int): bool = l.place == ListingRows and not(l.sheet) and l.owner >= 1 and l.count >= 1 and row >= 1
@@ -68,9 +69,33 @@ pure def canOpenAdd(l: Listing): bool = l.place == ListingRows and not(l.sheet) 
 
 pure def openAdd(l: Listing): Listing = { ...l, place: ListingAdd }
 
+pure def canOpenDigests(l: Listing): bool =
+  (l.place == ListingRows or l.place == ListingAdd) and not(l.sheet) and l.owner >= 1
+
+pure def openDigests(l: Listing): Listing = { ...l, place: ListingDigests({ adding: l.place == ListingAdd, result: 0 }) }
+
+pure def canOpenDigestResult(l: Listing, result: int): bool =
+  val place = l.place
+  match place {
+    | ListingDigests(d) => result >= 1 and d.result == 0
+    | _ => false
+  }
+
+pure def openDigestResult(l: Listing, result: int): Listing =
+  val place = l.place
+  match place {
+    | ListingDigests(d) => { ...l, place: ListingDigests({ ...d, result: result }) }
+    | _ => l
+  }
+
 pure def canClosePlace(l: Listing): bool = l.place != ListingRows
 
-pure def closePlace(l: Listing): Listing = { ...l, place: ListingRows }
+pure def closePlace(l: Listing): Listing =
+  val place = l.place
+  match place {
+    | ListingDigests(d) => { ...l, place: if (d.result >= 1) ListingDigests({ ...d, result: 0 }) else if (d.adding) ListingAdd else ListingRows }
+    | _ => { ...l, place: ListingRows }
+  }
 
 pure def alwaysOnlyTheListShowsFilters(l: Listing): bool = l.sheet implies l.place == ListingRows
 ```

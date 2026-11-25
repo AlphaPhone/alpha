@@ -163,7 +163,7 @@ function carry(fx: Camera.Effect): CameraJob {
   switch (fx.tag) {
     case "AskAccess": return answer("camera permission", permission("camera"), { type: "accessIs", grant: "Unasked", now: untimed }, "Phone")
     case "AskMicrophone": return answer("mic permission", permission("microphone"), { type: "microphoneIs", grant: "Unasked" }, "Phone")
-    case "OpenSettings": return run("camera settings", effect { try (try SystemSettings).open("AppPermissions", 0) }, "Phone")
+    case "OpenSettings": return run("camera settings", effect { try (try SystemSettings).open("AppPermissions", "") }, "Phone")
     case "StartPreview": return run(`bind preview ${fx.ticket}`, startPreview(fx.ticket, fx.lens), "Phone")
     case "StopPreview": return run(`release preview ${fx.ticket}`, effect { try (try CameraPort).stop(fx.ticket) }, "Phone")
     case "SetFlash": return run("flash", effect { try (try CameraPort).flash(fx.auto ? "auto" : fx.on ? (fx.video ? "torch" : "on") : "off") }, "Phone")
@@ -214,7 +214,7 @@ const visit = started(effect {
   const port = try CameraPort
   const photos = try CameraAssets
   const visibility = Stream.concat(Stream.succeed(try device.showing()), device.visible)
-  const states = Stream.zipLatestAll([shell.changes, layers.changes, visibility, photos.mounted] as const)
+  const states = Stream.zipLatestAll(shell.changes, layers.changes, visibility, photos.mounted)
   try Stream.runForEach(states, effect ([where, above, shown, mounted]) => {
     const wanted = shown && mounted && Shell.showing(where, "Camera")
     const state = try camera.get()
