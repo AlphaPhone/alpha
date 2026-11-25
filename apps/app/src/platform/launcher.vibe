@@ -68,9 +68,10 @@ export const phoneLauncher = Layer.effect(Launcher, effect {
   const refusalOf = (cause: unknown) => loaded.launcherRefusalCode(cause) ?? "failed"
   return {
     effect presentation() {
-      const build = tryPromise(() => system.getBuildInfo()) catch () => ({ launcher: false, version: "" })
       const launch = tryPromise(() => system.getLaunchInfo()) catch () => ({ assistant: false })
-      return { phone: true, launcher: build.launcher, assistant: launch.assistant }
+      const status = tryPromise(() => system.getStatus()) catch () => undefined
+      const launcher = status?.roles.some((role) => role.role === "home" && role.available && role.held) === true
+      return { phone: true, launcher: launcher && !launch.assistant, assistant: launch.assistant }
     },
     effect apps() {
       const listed = try tryPromise({ try: () => system.listLauncherApps({ icons: true }), catch: (cause) => new Unlisted({ cause }) })

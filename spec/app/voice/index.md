@@ -110,7 +110,7 @@ type Effect =
   | Record({ ticket: int })
   | Transcribe({ ticket: int, network: bool })
   | Abandon({ recording: int })
-  | Fill({ field: D::Field })
+  | Fill({ field: D::Field, filling: int })
 
 type Change = { state: Voice, out: List[Effect] }
 
@@ -889,7 +889,8 @@ pure def transcribeAgain(v: Voice, now: int): Change =
 
 pure def canRecordAgain(v: Voice): bool = D::canRecordAgain(v.recorder)
 
-pure def recordAgain(v: Voice): Voice = { ...v, recorder: D::recordAgain(v.recorder) }
+pure def recordAgain(v: Voice): Change =
+  { state: { ...v, recorder: D::recordAgain(v.recorder) }, out: List(Abandon({ recording: v.recorder.ticket })) }
 
 pure def canEdit(v: Voice, words: bool): bool = D::canEdit(v.recorder, words)
 
@@ -898,25 +899,29 @@ pure def edit(v: Voice, words: bool): Voice = { ...v, recorder: D::edit(v.record
 
 ### Using the transcript fills the field dictation started in, and dictation never sends
 
-A messaging bar's dictation fills that bar, never Ask Alpha.
+A messaging bar's dictation fills that bar, never Ask Alpha. The fill names
+its own number, so a late delivery cannot fill the field of a newer recording.
 
 ```quint
 pure def canFill(v: Voice): bool = D::canFill(v.recorder)
 
 pure def fill(v: Voice): Change =
-  { state: { ...v, recorder: D::fill(v.recorder) }, out: List(Fill({ field: v.recorder.field })) }
+  val filled = D::fill(v.recorder)
+  { state: { ...v, recorder: filled }, out: List(Fill({ field: v.recorder.field, filling: filled.filled }), Abandon({ recording: v.recorder.ticket })) }
 
 pure def stepDictationFillsItsOwnField(before: Voice, after: Voice, out: List[Effect]): bool =
-  out.every(e => match e { | Fill(f) => f.field == before.recorder.field and before.recorder.stage == D::Review | _ => true })
+  out.every(e => match e { | Fill(f) => f.field == before.recorder.field and before.recorder.stage == D::Review and f.filling == after.recorder.filled and f.filling == before.recorder.filled + 1 | _ => true })
 ```
 
 ### Closing the recorder abandons any recording or transcription it was waiting for
+
+A clip kept for a recognition retry or review is also discarded when the recorder closes.
 
 ```quint
 pure def canCloseRecorder(v: Voice): bool = D::canCloseRecorder(v.recorder)
 
 pure def closeRecorder(v: Voice): Change =
-  val busy = v.recorder.stage == D::Starting or v.recorder.stage == D::Recording or v.recorder.stage == D::Transcribing
+  val busy = v.recorder.stage == D::Starting or v.recorder.stage == D::Recording or v.recorder.clip
   { state: { ...v, recorder: D::closeRecorder(v.recorder) },
     out: if (busy) List(Abandon({ recording: v.recorder.ticket })) else List() }
 ```

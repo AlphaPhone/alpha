@@ -32,6 +32,7 @@ do next.
   `font-display`, are a contact's name and initials at the top of their card. `text-lead` is the street of the next turn,
   `text-title` a document's name over its preview, and `text-figure` and `text-figure-sm` a route's time.
   `leading-row` sets `text-body` as a note's or a routine's title in a list.
+  `text-badge` is a video's length over a thumbnail and `text-tile-name` an album's name under its cover.
   `text-headline` is an open voice or link note's title and `text-quote` a clip kept from a page.
   `text-tab-count` in a `rounded-tab-count` outline is the Browser's count of open tabs.
   In Calendar, `text-fine` is an invitation's time, `text-prose` an event's notes and `text-date` a day
@@ -40,7 +41,8 @@ do next.
 - **Shape.** `radius` is a card; `rounded-group` a group of rows; `rounded-panel` a notice or a search bar; `rounded-home-card` is a Home overview card;
   `rounded-drawer-icon` rounds an installed app icon; `rounded-option` is a row of a floating menu and
   `rounded-box` the box of a list row's selection check; `rounded-chip` is a choice chip and an invitation
-  row, `rounded-action` a labelled action button. `rounded-tile` is an app tile, a menu and a dialog;
+  row, `rounded-action` a labelled action button; `rounded-segment` is a segmented control and
+  `rounded-segment-option` the option chosen in it. `rounded-tile` is an app tile, a menu and a dialog;
   `rounded-sheet` the top of a bottom sheet, `rounded-chat` the top of the Ask Alpha sheet; `rounded-full` a
   button and a chip, `rounded-dock` the Ask Alpha bar.
   Everything pressed is at least 44px in both directions.
@@ -50,7 +52,7 @@ do next.
   dialog, `z-toast` a notice, `z-voice` the voice overlay. `z-10`, `z-20` and `z-50` order things inside one view.
 - **Motion.** `fast` for press, `base` for most changes, `slow` for entering and leaving, on
   `ease-standard`; `animate-rise` brings in a sheet, `animate-drop` a menu, `animate-fade` a screen,
-  `animate-shimmer` work in progress, `animate-wiggle` an app tile on Home while Home is being edited.
+  `animate-shimmer` work in progress, `animate-blink` the dots of a reply being written, `animate-wiggle` an app tile on Home while Home is being edited.
   Reduced motion stops them all.
 - **Width.** Layout follows the measured width, not the orientation: from `md` a centered reading
   column, from `lg` a list beside its detail.
@@ -122,11 +124,15 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `rounded.tab-count` | 0.4375rem |
 | `rounded.action` | 1.125rem |
 | `rounded.chip` | 1.5rem |
+| `rounded.segment` | 0.9375rem |
+| `rounded.segment-option` | 0.6875rem |
 | `font.sans` | "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif |
 | `font.display` | Denton, Fraunces, Georgia, serif |
 | `font.mono` | ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace |
 | `text.2xs.size` | 0.6875rem |
 | `text.2xs.leading` | 1.4 |
+| `text.badge.size` | 0.71875rem |
+| `text.badge.leading` | 1.2 |
 | `text.xs.size` | 0.75rem |
 | `text.xs.leading` | 1.175 |
 | `text.fine.size` | 0.78125rem |
@@ -143,6 +149,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.sm.leading` | 1.175 |
 | `text.subject.size` | 0.90625rem |
 | `text.subject.leading` | 1.2 |
+| `text.tile-name.size` | 0.9375rem |
+| `text.tile-name.leading` | 1.35 |
 | `text.base.size` | 0.9375rem |
 | `text.base.leading` | 1.175 |
 | `text.prose.size` | 0.96875rem |
@@ -240,11 +248,13 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `keyframes.fade` | from{opacity:0}to{opacity:1} |
 | `keyframes.shimmer` | from{background-position:200% 0}to{background-position:-200% 0} |
 | `keyframes.wiggle` | from{transform:rotate(-1.5deg)}to{transform:rotate(1.5deg)} |
+| `keyframes.blink` | 0%,100%{opacity:0.2}50%{opacity:1} |
 | `animate.rise` | rise 460ms cubic-bezier(0.19, 1, 0.22, 1) both |
 | `animate.drop` | drop 500ms cubic-bezier(0.19, 1, 0.22, 1) both |
 | `animate.fade` | fade 700ms ease both |
 | `animate.shimmer` | shimmer 2s linear infinite |
 | `animate.wiggle` | wiggle 300ms ease-in-out infinite alternate |
+| `animate.blink` | blink 1.2s ease-in-out infinite |
 | `breakpoint.sm` | 40rem |
 | `breakpoint.md` | 47.5rem |
 | `breakpoint.lg` | 62.5rem |

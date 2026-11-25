@@ -1,6 +1,6 @@
-// spec/site/index.md, "Story: Watch Alpha at work"
+// spec/site/index.md, "Story: Walk through what Alpha does"
 import * as Demo from "../gen/site.effect.vibe"
-import { type Event, running } from "../gen/site.effect.vibe"
+import { type Event, ticking } from "../gen/site.effect.vibe"
 
 module web {
   /** @throws {never} */
@@ -8,26 +8,29 @@ module web {
   /** @throws {never} */
   export const asksStill = (): boolean => matchMedia("(prefers-reduced-motion: reduce)").matches
   /** @throws {never} */
-  export const pages = (): EventTarget => document
+  export const view = (): EventTarget => window
   /** @throws {never} */
-  export const outOfSight = (): boolean => document.visibilityState === "hidden"
+  export const reached = (): string => Array.from(document.querySelectorAll<HTMLElement>("[data-passage]")).reduce(
+    (scene, passage) => passage.getBoundingClientRect().top < innerHeight * (matchMedia("(min-width: 47.5rem)").matches ? 0.6 : 0.9) ? passage.dataset.passage ?? scene : scene,
+    "Home",
+  )
 }
-import { asksStill, calmQuery, outOfSight, pages } from web
+import { asksStill, calmQuery, reached, view } from web
 
 export const untimed = 0
 
 export service Page {
   still(): boolean!!
-  hidden(): boolean!!
+  passage(): string!!
   readonly stilled: Stream.Stream<boolean>
-  readonly hid: Stream.Stream<boolean>
+  readonly passages: Stream.Stream<string>
 }
 
 export const browserPage = Layer.succeed(Page, {
   still: () => sync(asksStill),
-  hidden: () => sync(outOfSight),
+  passage: () => sync(reached),
   stilled: Stream.suspend(() => Stream.map(Stream.fromEventListener(calmQuery(), "change"), () => asksStill())),
-  hid: Stream.suspend(() => Stream.map(Stream.fromEventListener(pages(), "visibilitychange"), () => outOfSight())),
+  passages: Stream.suspend(() => Stream.map(Stream.merge(Stream.fromEventListener(view(), "scroll"), Stream.fromEventListener(view(), "resize")), () => reached())),
 })
 
 export const demo = Layer.provide(Layer.effect(Demo.Machine, effect {
@@ -38,21 +41,27 @@ export const demo = Layer.provide(Layer.effect(Demo.Machine, effect {
     return try inner.send({ ...event, now })
   }
   const told = (event: Event) => ignore(send(event))
-  // spec/site/index.md, "When the page opens it plays from Home, unless the visitor asks for less motion"
-  try told({ type: "start", now: untimed, still: try page.still(), hidden: try page.hidden() })
-  // spec/site/index.md, "Pausing keeps the time the beat has left, and playing again goes on from it"
-  try fork.scoped Stream.runForEach(page.hid, (hidden) => told({ type: "sight", hidden, now: untimed }))
-  // spec/site/index.md, "A visitor who comes to ask for less motion has the demo paused and the scene shown whole"
+  const receive = (input: unknown) => flatMap(Demo.decodeEvent(input), send)
+  const shown = (scene: string) => ignore(receive({ type: "show", scene, now: untimed }))
+  // spec/site/index.md, "When the page opens the phone is on Home, shown whole for a visitor who asks for less motion"
+  try told({ type: "start", now: untimed, still: try page.still() })
+  // spec/site/index.md, "The phone shows the scene of the passage the visitor has reached, from its start"
+  try shown(try page.passage())
+  try fork.scoped Stream.runForEach(Stream.changes(page.passages), shown)
+  // spec/site/index.md, "A visitor who comes to ask for less motion has the scene shown whole, and one who stops asking sees it play from its start"
   try fork.scoped Stream.runForEach(page.stilled, (still) => told({ type: "calm", still, now: untimed }))
-  // spec/site/index.md, "A beat moves on only while the demo plays in sight, once its time has come"
-  const due = Stream.switchMap(inner.changes, (state) => running(state)
-    ? Stream.fromEffect(effect { try sleep(Math.max(0, state.due - (try Clock.currentTimeMillis))) })
+  // spec/site/index.md, "A beat moves on once its time has come, Home starting over and every other scene resting on its last beat"
+  const due = Stream.switchMap(inner.changes, (state) => ticking(state)
+    ? Stream.fromEffect(effect {
+      const wait = state.due - (try Clock.currentTimeMillis)
+      if (wait > 0) try sleep(wait)
+    })
     : Stream.empty)
   try fork.scoped Stream.runForEach(due, () => told({ type: "tick", now: untimed }))
   return {
     changes: inner.changes,
     get: () => inner.get(),
     send,
-    receive: (input: unknown) => flatMap(Demo.decodeEvent(input), send),
+    receive,
   }
 }), Demo.machine())
