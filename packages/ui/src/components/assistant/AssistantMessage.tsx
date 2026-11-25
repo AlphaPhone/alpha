@@ -46,7 +46,7 @@ function ReplyRuns({ runs, onOpenLink }: { runs: readonly ReplyInline[]; onOpenL
       case "emphasis": return <em key={index}><ReplyRuns runs={run.children} onOpenLink={onOpenLink} /></em>;
       case "code": return <code key={index} className="rounded-sm bg-secondary px-1 font-mono text-sm">{run.text}</code>;
       case "link": return (
-        <a key={index} className="underline underline-offset-2" href={run.href} target="_blank" rel="noopener noreferrer" onClick={(event) => {
+        <a key={index} className="relative underline underline-offset-2" href={run.href} target="_blank" rel="noopener noreferrer" onClick={(event) => {
           event.stopPropagation();
           if (!onOpenLink) return;
           event.preventDefault();
@@ -66,7 +66,7 @@ function ReplyBlocks({ blocks, onOpenLink }: { blocks: readonly ReplyBlock[]; on
       case "code": return <pre key={index} className="rounded-md bg-secondary p-3 font-mono text-sm whitespace-pre-wrap wrap-anywhere">{block.text}</pre>;
       case "rule": return <hr key={index} className="border-border" />;
       case "list": {
-        const items = block.items.map((item, at) => <li key={at} className="flex flex-col gap-1 pl-0.5"><ReplyBlocks blocks={item} onOpenLink={onOpenLink} /></li>);
+        const items = block.items.map((item, at) => <li key={at} className="space-y-1 pl-0.5"><ReplyBlocks blocks={item} onOpenLink={onOpenLink} /></li>);
         return block.start === undefined
           ? <ul key={index} className="flex list-disc flex-col gap-1 pl-5">{items}</ul>
           : <ol key={index} start={block.start} className="flex list-decimal flex-col gap-1 pl-5">{items}</ol>;
