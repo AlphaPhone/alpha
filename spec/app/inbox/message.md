@@ -21,9 +21,10 @@ fetch on its own, raises Ask Alpha and opens a link in Alpha's Browser.
 
 ### The message view holds the account and message open, its place in the thread, the read of its body or the copy saved on the phone, why it could not be read, and what is under review
 
-Message 0 is none. Positions in the thread count from 0, the oldest. A
-message read names its actual place, message and history revision, which
-Ask Alpha uses for the message on screen.
+Message 0 is none. Positions in the thread count from 0, the oldest.
+Once the shell finds the open message's place, the reader can move
+through the thread. Ask Alpha uses the message and history revision of
+the body on screen.
 
 ```quint
 import read as R from "../../kit/read"
@@ -31,6 +32,7 @@ import attempt as A from "../../kit/attempt"
 import access.* from "./access"
 
 type Handling = Opening | Saving
+type ReadPlace = SelectedMessage | ThreadPosition | NewestMessage
 type Fault = Fine | Unreachable | Revoked | Gone | Stale | TooLarge | Moved
 type Held = { account: int, message: int, attachment: int }
 type MessageView = {
@@ -40,7 +42,7 @@ type MessageView = {
 }
 
 type Effect =
-  | ReadMessage({ ticket: int, account: int, message: int, position: int, newest: bool })
+  | ReadMessage({ ticket: int, account: int, message: int, position: int, place: ReadPlace })
   | CheckAccounts
   | RefreshList({ account: int })
   | OpenLink({ message: int, link: int })
@@ -84,22 +86,36 @@ pure def settledAt(position: int, remote: bool, s: MessageView): MessageView =
     unsure: if (unsureNow) remembered(s.unsure, heldOf(s)) else s.unsure,
   }
 
-pure def reading(position: int, remote: bool, newest: bool, s: MessageView): Shown =
+pure def reading(position: int, remote: bool, place: ReadPlace, s: MessageView): Shown =
   val body = R::ask(s.body)
   {
     state: { ...settledAt(position, remote, s), body: body, fromPhone: false, fault: Fine },
-    out: List(ReadMessage({ ticket: body.ticket, account: s.account, message: s.message, position: position, newest: newest })),
+    out: List(ReadMessage({ ticket: body.ticket, account: s.account, message: s.message, position: position, place: place })),
   }
 ```
 
-### A message opens at its newest place in the thread, only while the grant of its account allows reading
+### Opening a row reads the exact message chosen while its account may be read
+
+The message body can be shown before the shell finds its place among the
+other messages. The answer that finds its place keeps the same message
+and cannot change another read or a review.
 
 ```quint
-pure def canOpen(s: MessageView, access: Access, account: int, message: int, thread: int): bool =
-  message != 0 and thread >= 1 and allowsFor(access, account, Reading)
+pure def canOpen(s: MessageView, access: Access, account: int, message: int): bool =
+  message != 0 and allowsFor(access, account, Reading)
 
-pure def open(s: MessageView, access: Access, account: int, message: int, thread: int, remote: bool): Shown =
-  reading(thread - 1, remote, true, { ...s, account: account, message: message, thread: thread })
+pure def open(s: MessageView, access: Access, account: int, message: int, remote: bool): Shown =
+  reading(0, remote, SelectedMessage, { ...s, account: account, message: message, thread: 1 })
+
+pure def canThreadLocated(s: MessageView, ticket: int, access: Access, message: int, position: int, thread: int): bool =
+  s.message != 0 and s.message == message and s.body.status == R::Loaded and s.body.ticket == ticket and s.thread == 1
+    and allowsFor(access, s.account, Reading) and thread > 1 and 0 <= position and position < thread
+
+pure def threadLocated(s: MessageView, ticket: int, access: Access, message: int, position: int, thread: int): MessageView =
+  { ...s, position: position, thread: thread }
+
+pure def stepAReadFromARowKeepsItsMessage(before: MessageView, via: str, after: MessageView): bool =
+  (via == "loaded" and before.thread == 1 and after.body.status == R::Loaded) implies after.message == before.message
 ```
 
 ### Previous and next move one place through the thread
@@ -112,12 +128,12 @@ shown always belongs to the message at the accepted position.
 pure def canEarlier(s: MessageView, access: Access): bool =
   s.message != 0 and s.body.status == R::Loaded and s.position > 0 and allowsFor(access, s.account, Reading)
 
-pure def earlier(s: MessageView, access: Access, remote: bool): Shown = reading(s.position - 1, remote, false, s)
+pure def earlier(s: MessageView, access: Access, remote: bool): Shown = reading(s.position - 1, remote, ThreadPosition, s)
 
 pure def canNewer(s: MessageView, access: Access): bool =
   s.message != 0 and s.body.status == R::Loaded and s.position < s.thread - 1 and allowsFor(access, s.account, Reading)
 
-pure def newer(s: MessageView, access: Access, remote: bool): Shown = reading(s.position + 1, remote, false, s)
+pure def newer(s: MessageView, access: Access, remote: bool): Shown = reading(s.position + 1, remote, ThreadPosition, s)
 ```
 
 ### Only the newest read's answer is shown, while its account may still be read; a read that fails says why
@@ -132,7 +148,8 @@ it in Gmail". A conversation that changed asks to be reopened.
 ```quint
 pure def canLoaded(s: MessageView, ticket: int, access: Access, ok: bool, message: int, position: int, thread: int): bool =
   R::canAnswer(s.body, ticket) and allowsFor(access, s.account, Reading)
-    and (ok implies (message != 0 and 0 <= position and position < thread))
+    and (ok implies (message != 0 and 0 <= position and position < thread
+      and (s.thread == 1 implies (message == s.message and position == 0 and thread == 1))))
 
 pure def loaded(s: MessageView, ticket: int, access: Access, ok: bool, fault: Fault, revision: int, message: int, position: int, thread: int): Shown =
   val body = R::answer(s.body, ok)
@@ -149,13 +166,14 @@ pure def canRetry(s: MessageView, access: Access): bool =
   s.message != 0 and s.body.status == R::Failed and (s.fault == Unreachable or s.fault == Stale)
     and allowsFor(access, s.account, Reading)
 
-pure def retry(s: MessageView, access: Access, remote: bool): Shown = reading(s.position, remote, s.thread == 1, s)
+pure def retry(s: MessageView, access: Access, remote: bool): Shown =
+  reading(s.position, remote, if (s.thread == 1) SelectedMessage else ThreadPosition, s)
 
-pure def canReopen(s: MessageView, access: Access, thread: int): bool =
-  s.message != 0 and s.body.status == R::Failed and s.fault == Moved and thread >= 1 and allowsFor(access, s.account, Reading)
+pure def canReopen(s: MessageView, access: Access): bool =
+  s.message != 0 and s.body.status == R::Failed and s.fault == Moved and allowsFor(access, s.account, Reading)
 
-pure def reopen(s: MessageView, access: Access, thread: int, remote: bool): Shown =
-  reading(thread - 1, remote, true, { ...s, thread: thread })
+pure def reopen(s: MessageView, access: Access, remote: bool): Shown =
+  reading(s.thread - 1, remote, if (s.thread == 1) SelectedMessage else NewestMessage, s)
 
 pure def sometimesAMessageIsGone(s: MessageView): bool = s.message == 0 and s.fault == Gone
 
@@ -232,16 +250,16 @@ attachments. It goes when access is known: read afresh if the account may
 be read, closed otherwise, and with the saved list.
 
 ```quint
-pure def canOpenSaved(s: MessageView, account: int, message: int, thread: int, checking: bool, kept: bool): bool =
-  account != 0 and message != 0 and thread >= 1 and checking and kept
+pure def canOpenSaved(s: MessageView, account: int, message: int, checking: bool, kept: bool): bool =
+  account != 0 and message != 0 and checking and kept
 
-pure def openSaved(s: MessageView, account: int, message: int, thread: int, checking: bool, kept: bool): MessageView =
-  { ...close(s), account: account, message: message, thread: thread, position: thread - 1, fromPhone: true }
+pure def openSaved(s: MessageView, account: int, message: int, checking: bool, kept: bool): MessageView =
+  { ...close(s), account: account, message: message, thread: 1, fromPhone: true }
 
 pure def canAccessKnown(s: MessageView): bool = s.fromPhone
 
 pure def accessKnown(s: MessageView, access: Access, remote: bool): Shown =
-  if (allowsFor(access, s.account, Reading)) reading(s.position, remote, s.thread == 1, s) else { state: close(s), out: List() }
+  if (allowsFor(access, s.account, Reading)) reading(0, remote, SelectedMessage, s) else { state: close(s), out: List() }
 ```
 
 ### A saved copy is shown only with nothing read for it
@@ -337,6 +355,10 @@ pure def stepAnAttachmentIsUsedOnlyFromItsReview(before: MessageView, after: Mes
 ```
 
 ### An attachment use ends as its own answer says, or unknown
+
+Android saves to a destination the owner picks and confirms success only
+after reading back the same bytes. A browser download cannot confirm
+what was saved.
 
 ```quint
 pure def canAttachmentHandled(s: MessageView, attempt: int): bool = A::canConclude(s.file, attempt)

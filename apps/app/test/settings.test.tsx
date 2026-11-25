@@ -15,7 +15,7 @@ import * as Layers from "../gen/app__shell__layers.effect.vibe";
 import settings from "../src/settings/index.tsx";
 import { button, closeAll, fill, hardware, later, only, open as openAlpha, press, seen, underAct, until } from "./alpha.tsx";
 import { account } from "./fakes/cloud.ts";
-import { notices } from "./fakes/settings.ts";
+import { type ListenerScene, notices } from "./fakes/settings.ts";
 import { type Scene, scene } from "./fakes/scene.ts";
 
 underAct();
@@ -233,6 +233,53 @@ describe("Settings", () => {
     expect(titled("Use for autofill")).toBeUndefined();
     await hardware("back");
     expect(await page(alpha)).toBe("Apps");
+  });
+
+  it("See and control the listener (spec/app/voice/listener.md, \"Story: See and control the listener\")", async () => {
+    const pause = Promise.withResolvers<unknown>();
+    const listener: ListenerScene = {
+      status: { available: true, state: "LISTENING", label: "Listening", consented: true, listening: true, microphoneOpen: true },
+      pauseReply: pause.promise,
+      openSettings: false,
+    };
+    const stock = await settingsOpen({ ...scene(), phone: true });
+    await press("Privacy");
+    await vi.waitFor(() => expect(button("Permissions")).toBeDefined());
+    expect(button("Listening settings")).toBeUndefined();
+    await stock.close();
+
+    const world = { ...scene(), phone: true, image: true };
+    world.settings.listener = listener;
+    const { alpha } = await settingsOpen(world);
+    await press("Privacy");
+    const listening = () => {
+      const row = titled("Listening");
+      return row instanceof HTMLLabelElement ? document.getElementById(row.htmlFor) : undefined;
+    };
+    await vi.waitFor(() => expect(listening()?.getAttribute("aria-checked")).toBe("true"));
+    await press("Pause listening");
+    await hardware("back");
+    expect(await page(alpha)).toBe("Top");
+    expect(button(/^Microphone may be on/)).toBeUndefined();
+    await act(async () => pause.resolve({ ...listener.status, state: "PAUSED_USER", listening: false, microphoneOpen: false, saved: false }));
+    await vi.waitFor(() => expect(button(/^Microphone may be on/)).toBeDefined());
+    await press(/^Microphone may be on/);
+    await vi.waitFor(() => expect(world.settings.opened).toEqual(["home"]));
+    await press("Privacy");
+    await press("Turn off listening");
+    await vi.waitFor(() => expect(listening()?.getAttribute("aria-checked")).toBe("false"));
+    expect(button(/^Microphone may be on/)).toBeUndefined();
+    await press("Listening settings");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Listening settings are unavailable"));
+    listener.openSettings = true;
+    await tap("Listening");
+    await vi.waitFor(() => expect(world.settings.opened).toEqual(["home", "sense-settings"]));
+    expect(listening()?.getAttribute("aria-checked")).toBe("false");
+
+    listener.status = { available: true, state: "PAUSED_CALL", label: "Paused", consented: true, listening: false, microphoneOpen: false };
+    await seen(false);
+    await seen(true);
+    await vi.waitFor(() => expect(titled("Listening")?.textContent).toContain("Paused during a call"));
   });
 
   it("Look at access again (spec/app/startup/access.md, \"Story: Look at access again\")", async () => {

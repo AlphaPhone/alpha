@@ -6,6 +6,7 @@ import * as Message from "../../gen/app__inbox__message.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { native } from "../platform/device.vibe"
+import { InboxAttachmentFiles, canSaveOnPhone } from "../platform/inboxAttachments.vibe"
 import { started } from "../runtime/reactor.vibe"
 import { Mail, revisionOf } from "./gmail.vibe"
 import { provider } from "./provider.vibe"
@@ -32,13 +33,19 @@ export const attachmentPreviews = Layer.sync(AttachmentPreviews, () => {
 
 export const forgetPreview = started(effect {
   const previews = try AttachmentPreviews
+  const destination = try InboxAttachmentFiles
   const reader = try Message.Machine
+  const shell = try Shell
   let before = 0
-  const reviews = Stream.changes(Stream.map(reader.changes, (state) => state.attachment === 0 ? 0 : state.file.id))
-  try Stream.runForEach(reviews, (attempt) => sync(() => {
-    if (before !== attempt) previews.forget(before)
+  const reviews = Stream.changes(Stream.map(Stream.zipLatest(reader.changes, shell.changes), ([state, view]) =>
+    state.attachment === 0 || !showing(view, "Inbox") ? 0 : state.file.id))
+  try Stream.runForEach(reviews, effect (attempt) => {
+    if (before !== 0 && before !== attempt) {
+      previews.forget(before)
+      try destination.cancel(before)
+    }
     before = attempt
-  }))
+  })
 }, "clearing an attachment preview")
 
 module web {
@@ -74,9 +81,9 @@ export function canPreviewAttachment(file: FilePart): boolean {
   return file.partId !== "" && file.mimeType.toLowerCase() === "text/plain" && file.size >= 0 && file.size <= 512 * 1024
 }
 
-/** Opaque downloads are offered only where a browser download destination is available. */
+/** The browser requests a download. Android verifies the copy written to the chosen document. */
 export function canSaveAttachment(file: FilePart): boolean {
-  return file.partId !== "" && file.size >= 0 && file.size <= 5 * 1024 * 1024 && !native() && downloads()
+  return file.partId !== "" && file.size >= 0 && file.size <= 5 * 1024 * 1024 && (native() ? canSaveOnPhone() : downloads())
 }
 
 effect function custody(request: Request) {
@@ -102,7 +109,7 @@ function matches(part: FilePart, fetched: ReviewedMailAttachment): boolean {
 }
 
 /** Carries out exactly the use confirmed by the owner, while its account, reader ticket and provider revision agree. */
-export effect function handleAttachment(request: Request): Message.Event!!(Cloud | Mail | Inbox.Machine | Message.Machine | AttachmentPreviews | Shell) {
+export effect function handleAttachment(request: Request): Message.Event!!(Cloud | Mail | Inbox.Machine | Message.Machine | AttachmentPreviews | InboxAttachmentFiles | Shell) {
   const { attempt, handling } = request
   const refused = { type: "attachmentHandled", attempt, done: false, known: true } as const
   const owner = try custody(request)
@@ -124,6 +131,7 @@ export effect function handleAttachment(request: Request): Message.Event!!(Cloud
   }
   if (!canSaveAttachment(part)) return refused
   const saved = client.gmailOpaqueAttachment(grant, id, part.partId, history) catch () => undefined
-  if (saved === undefined || !matches(part, saved) || !(try current) || !download(saved)) return refused
-  return { type: "attachmentHandled", attempt, done: false, known: false }
+  if (saved === undefined || !matches(part, saved) || !(try current)) return refused
+  const outcome = native() ? (try (try InboxAttachmentFiles).save(attempt, saved)) : download(saved) ? "unknown" : "refused"
+  return { type: "attachmentHandled", attempt, done: outcome === "saved", known: outcome !== "unknown" }
 }
