@@ -58,6 +58,7 @@ function LiveAssistant({ runtime }: Shown<Layer.Success<typeof screens> | Reside
       useInEmail: destination ? (selection) => void runtime.runPromise(emailMessage(selection, destination)) : undefined,
     }}
     speech={{
+      showUnavailableTalk: !available,
       onTalk: canTalk ? () => void runtime.runPromise(beginTalk()) : undefined,
       onDictate: canDictate ? () => void runtime.runPromise(dictate()) : undefined,
       voice: recorder !== undefined && recorder.stage !== "Closed" && recorder.field === "ComposerField"

@@ -39,11 +39,12 @@ import { chip, type MessageActions, useMessageRows } from "./history.tsx";
 import { ReplyFailure } from "./ReplyFailure.tsx";
 import { type Attached, type Line, Talk } from "./talk.vibe";
 import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx";
+import { CommsBriefing } from "../phone/comms.vibe";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | Talk | MailQuestions | LayersMachine | MediaReview, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview, unknown>;
   messageActions?: MessageActions;
-  speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "voice" | "voiceNotice">;
+  speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voice" | "voiceNotice">;
   canReadAloud?: boolean;
 }
 
@@ -123,8 +124,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       if (assistantDetent === "Typing") element.focus();
     }
   }, [assistantDetent, compact]);
-  const fileInput = useRef<HTMLInputElement>(null);
-  const fileTarget = useRef<{ binding: Writing["binding"]; slot: number } | undefined>(undefined);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileTargetRef = useRef<{ binding: Writing["binding"]; slot: number } | undefined>(undefined);
   const [talking, shown, writing, finding] = [conversation.state, chats.state, composer.state, search.state];
   const free = talking && shown && writing ? freedom(talking, writing, shown.chosen) : { replying: true, holding: true };
   const lines = !shown || (shown.page.status === "Idle" && shown.chosen === 0) ? emptyLines : seen.pages.get(shown.page.ticket)?.lines ?? emptyLines;
@@ -147,6 +148,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const start = { type: "start", ...free } as const;
   const newChat = shown.chosen === 0;
   const subject = onComms ? comms.state?.key : undefined;
+  const brief = subject !== undefined && comms.state?.briefed === subject && shell.state?.trail.at(-1) === "Phone"
+    ? runtime.runSync(CommsBriefing.use((reading) => reading.forSubject(subject))) : "";
   const request = subject === undefined ? "" : (comms.state?.requests.find((draft) => draft.about === subject)?.request ?? "");
   const sendable = subject !== undefined
     ? request.trim() !== "" && request.length <= textLimit && askable(talking) && (!newChat || chats.can(start))
@@ -256,9 +259,9 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         src={`data:${previewed.mimeType};base64,${previewed.data}`}
         onOpenChange={(open) => { if (!open && attachments.can({ type: "closePreview" })) void attachments.send({ type: "closePreview" }); }}
       />}
-      <input ref={fileInput} type="file" accept={acceptedFiles} multiple hidden onChange={(event) => {
-        const target = fileTarget.current;
-        fileTarget.current = undefined;
+      <input ref={fileInputRef} type="file" accept={acceptedFiles} multiple hidden onChange={(event) => {
+        const target = fileTargetRef.current;
+        fileTargetRef.current = undefined;
         const files = Array.from(event.currentTarget.files ?? []);
         event.currentTarget.value = "";
         if (target && files.length > 0) void runtime.runPromise(insertFiles(target.binding, target.slot, files));
@@ -284,7 +287,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         attachmentNotice={onComms ? undefined : seen.attachmentNotice}
         transcript={{
           messages,
-          liveMessages: [...writingReply, ...failed, ...mediaCards, ...mediaNote],
+          liveMessages: [...(brief === "" ? [] : [{ id: `briefing:${subject}`, author: "alpha" as const, text: brief }]), ...writingReply, ...failed, ...mediaCards, ...mediaNote],
           position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around) },
           visible: open,
           status: shown.page.status === "Loading" ? "loading" : shown.page.status === "Failed" ? "failed" : "loaded",
@@ -337,9 +340,9 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           onStop: conversation.can({ type: "stop" }) ? () => void conversation.send({ type: "stop" }) : undefined,
           stopping: talking.turn.stopping,
           onAttach: !onComms && composer.can({ type: "attach", count: 1 }) ? () => {
-            fileTarget.current = { binding: writing.binding, slot: writing.read.ticket };
+            fileTargetRef.current = { binding: writing.binding, slot: writing.read.ticket };
             openWithFocus(false);
-            fileInput.current?.click();
+            fileInputRef.current?.click();
           } : undefined,
           onFocusField: assistantDetent === "Typing" ? undefined : () => openWithFocus(false),
           onHistory: () => {

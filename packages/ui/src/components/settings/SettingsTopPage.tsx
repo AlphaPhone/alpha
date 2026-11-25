@@ -12,10 +12,12 @@ export type SettingsTopPageProps = SettingsAndroidProps &
   SettingsPlaceProps & {
     /** This is a development build, which has the Developer page. */
     developer?: boolean;
-  /** The device can open Android settings. */
-  onPhone?: boolean;
-  /** Commands in the Settings header. */
-  actions?: ReactNode;
+    /** The device can open Android settings. */
+    onPhone?: boolean;
+    /** Commands in the Settings header. */
+    actions?: ReactNode;
+    /** The status supplied by the area that owns the account. */
+    accountDetail?: ReactNode;
     /** The voice area could not confirm the microphone stopped: the listener is linked from here. */
     micMayBeOn?: boolean;
     /** What Alpha tells about the last start of an Android page. */
@@ -43,7 +45,7 @@ const links: SettingsPageLink[] = [
  * above it are shown.
  * @model spec/app/settings/index.md
  */
-export function SettingsTopPage({ developer = false, onPhone = true, actions, micMayBeOn = false, told, onOpen, onHandOver, starting, onAndroid, place, onPlace, children, leading }: SettingsTopPageProps) {
+export function SettingsTopPage({ developer = false, onPhone = true, actions, accountDetail, micMayBeOn = false, told, onOpen, onHandOver, starting, onAndroid, place, onPlace, children, leading }: SettingsTopPageProps) {
   const at = (row: number) => placed({ place, onPlace }, row);
   const android = { starting, onAndroid };
   return (
@@ -54,7 +56,7 @@ export function SettingsTopPage({ developer = false, onPhone = true, actions, mi
         </ListGroup>
       ) : null}
       <ListGroup>
-        <SettingsNavRow title="Account" icon={<UserRound />} onOpen={onHandOver && (() => onHandOver("account-and-plan"))} {...at(1)} />
+        <SettingsNavRow title="Account" aria-label="Account" detail={accountDetail} icon={<UserRound />} onOpen={onHandOver && (() => onHandOver("account-and-plan"))} {...at(1)} />
       </ListGroup>
       {links.map((link, index) => (
         <ListGroup key={link.page}>
