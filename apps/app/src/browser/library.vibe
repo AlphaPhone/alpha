@@ -1,0 +1,118 @@
+// spec/app/browser/library.md, "Story: Keep bookmarks"; spec/app/browser/library.md, "Story: Look back through history"
+import * as Library from "../../gen/app__browser__library.effect.vibe"
+import type { Effect as Out, Event, Job as Writing } from "../../gen/app__browser__library.effect.vibe"
+import { TabHost, hosted } from "../platform/browser.vibe"
+import { type Job, answer, reacting } from "../runtime/reactor.vibe"
+
+/** A saved bookmark, as the phone keeps it. */
+export interface Mark {
+  readonly url: string
+  readonly title: string
+}
+
+/**
+ * The lists the phone keeps, as the library last read or wrote them: the bookmarks, and history oldest first. The
+ * library's rules count them; this holds what they are, for the sheet and for the next write. It holds no rule.
+ */
+export interface Lists {
+  readonly marks: ReadonlyArray<Mark>
+  readonly history: ReadonlyArray<string>
+}
+
+let lists: Lists = { marks: [], history: [] }
+/** The page the write under way adds or removes. */
+let target: Mark | undefined
+const listeners = new Set<() => void>()
+const changed = (next: Lists) => {
+  lists = next
+  for (const listener of [...listeners]) listener()
+}
+
+/** The lists as they are now. */
+export const listsNow = () => lists
+/** Hear each change of the lists. */
+export function onLists(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => { listeners.delete(listener) }
+}
+
+// spec/app/browser/library.md, "A page that commits in a normal tab is counted in history, which keeps the newest hundred"
+/** A page committed in a normal tab: history gains it, and loses its oldest page when full. */
+export function remember(url: string) {
+  if (url === "") return
+  changed({ ...lists, history: [...lists.history, url].slice(-Library.maxHistory) })
+}
+
+// spec/app/browser/library.md, "Clearing all browsing data empties history at once"
+/** Clearing all browsing data emptied history. */
+export function forgetHistory() {
+  changed({ ...lists, history: [] })
+}
+
+/** The page the next bookmark write adds or removes. */
+export function aimMark(mark: Mark) {
+  target = mark
+}
+
+const entriesOf = (list: { readonly urls: ReadonlyArray<string>; readonly entries?: ReadonlyArray<{ readonly url: string; readonly title?: string }> }): Mark[] =>
+  list.urls.map((url) => ({ url, title: list.entries?.find((entry) => entry.url === url)?.title ?? "" }))
+
+// spec/app/browser/library.md, "The latest read gives the bookmarks and history, says it could not read them, or finds the bookmark list damaged and offers once to replace it"
+effect function loading(ticket: number): Event!!TabHost {
+  const failed: Event = { type: "loaded", ticket, ok: false, damaged: false, count: 0, entries: 0 }
+  const read = effect {
+    const marks = try hosted("bookmarks", (plugin, session) => plugin.bookmarks({ session }))
+    const kept = try hosted("browsingState", (plugin, session) => plugin.browsingState({ session }))
+    return { marks: entriesOf(marks).slice(0, Library.maxMarks), history: kept.history.slice(-Library.maxHistory) }
+  } catch () => undefined
+  const found = read
+  if (found === undefined) return failed
+  changed(found)
+  return { type: "loaded", ticket, ok: true, damaged: false, count: found.marks.length, entries: found.history.length }
+}
+
+// spec/app/browser/library.md, "A write that lands changes the lists, and one that fails changes nothing and says so"; spec/app/browser/library.md, "Pages visited while history is being cleared stay in it"
+effect function marked(mark: Mark | undefined, saved: boolean): boolean!!TabHost {
+  if (mark === undefined) return false
+  const done = effect {
+    const list = try hosted("setBookmark", (plugin, session) => plugin.setBookmark({ session, url: mark.url, saved, ...(saved ? { title: mark.title } : {}) }))
+    changed({ ...lists, marks: entriesOf(list) })
+    return true
+  } catch () => false
+  return done
+}
+
+effect function cleared(): boolean!!(TabHost | Library.Machine) {
+  const kept = (try (try Library.Machine).get()).kept
+  const left = lists.history.slice(kept)
+  const done = effect {
+    const saved = try hosted("browsingState", (plugin, session) => plugin.browsingState({ session }))
+    try hosted("saveBrowsingState", (plugin, session) => plugin.saveBrowsingState({ session, tabs: saved.tabs, cur: saved.cur, history: left }))
+    changed({ ...lists, history: left })
+    return true
+  } catch () => false
+  return done
+}
+
+effect function writing(write: number, job: Writing): Event!!(TabHost | Library.Machine) {
+  const mark = target
+  const ok = match (job) {
+    when "Adding": try marked(mark, true);
+    when "Removing": try marked(mark, false);
+    when "Repairing": false;
+    when "Clearing": try cleared();
+    when "Idle": false;
+  }
+  return { type: "written", ticket: write, ok }
+}
+
+function carry(fx: Out): Job<Event, TabHost | Library.Machine, []> {
+  return match (fx) {
+    when { tag: "Load", let ticket }: answer("load", loading(ticket), { type: "loaded", ticket, ok: false, damaged: false, count: 0, entries: 0 });
+    when { tag: "Write", let write, let job }: answer("write", writing(write, job), { type: "written", ticket: write, ok: false });
+  }
+}
+
+// spec/app/browser/library.md, "The library is read when it opens and again on request, never under a write"
+/** The bookmarks and history, read when the Browser opens. */
+export const library = reacting(Library, { open: [{ type: "askRead" }], carry })

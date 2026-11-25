@@ -1,0 +1,99 @@
+// spec/app/browser/index.md, "Story: Let the agent open a page"
+import type { DeviceOperation } from "@elizaos/agent/operations"
+import * as Browser from "../../gen/app__browser.effect.vibe"
+import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { contained } from "../runtime/reactor.vibe"
+import * as Address from "../../gen/app__browser__address.effect.vibe"
+import { Pages, inputOf } from "./browser.vibe"
+
+/** The agent's operations the Browser answers: a page to open, and its tabs to show. */
+export type Browsing = Extract<DeviceOperation, { type: "browser_navigate" | "browser_tabs_show" }>
+
+/** Whether the Browser answers `operation`. */
+export function isBrowsing(operation: DeviceOperation): operation is Browsing {
+  return operation.type === "browser_navigate" || operation.type === "browser_tabs_show"
+}
+
+/** A page the agent asked to open, shown to the owner as it will open. */
+export interface Proposal {
+  readonly url: string
+  readonly secure: boolean
+  readonly userInfo: boolean
+}
+
+/** The page the agent proposed and the owner has not yet answered; only this shell writes it. */
+export service Proposed {
+  get(): Proposal | undefined
+  set(proposal: Proposal | undefined): void
+  subscribe(listener: () => void): () => void
+  snapshot(): Proposal | undefined
+}
+
+/** The Browser's answer to the agent: the proposal it holds for the owner. */
+export const agent = Layer.sync(Proposed, () => {
+  let held: Proposal | undefined
+  const listeners = new Set<() => void>()
+  return {
+    get: () => held,
+    set(proposal: Proposal | undefined) {
+      held = proposal
+      for (const listener of [...listeners]) listener()
+    },
+    subscribe(listener: () => void) {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+    snapshot: () => held,
+  }
+})
+
+/** What the address bar's rules look at in an address the agent named. */
+function proposalOf(url: string): Proposal {
+  const parsed = URL.parse(url)
+  return { url, secure: parsed?.protocol === "https:", userInfo: parsed !== null && (parsed.username !== "" || parsed.password !== "") }
+}
+
+// spec/app/browser/index.md, "The agent opens only an HTTPS address with no user name or password in it, in a new normal tab, one at a time"; spec/app/browser/index.md, "One layer at a time covers the page, and Back uncovers it"
+/**
+ * Hand the agent's operation to the Browser; `current` says it belongs to the message the owner just sent. A page to
+ * open is held for the owner's review, which the Browser shows; the tabs are shown at once. Answers whether it was taken.
+ */
+export effect function propose(operation: Browsing, current: boolean): boolean!!(Proposed | Browser.Machine | Shell) {
+  if (!current) return false
+  const machine = try Browser.Machine
+  const shell = try Shell
+  if (operation.type === "browser_tabs_show") {
+    try contained(shell.send({ type: "agentOpenView", view: "Browser" }), "the agent showing the tabs")
+    return try contained(machine.send({ type: "cover", layer: "Switcher" }), "the agent showing the tabs")
+  }
+  const proposal = proposalOf(operation.url)
+  const proposed = try Proposed
+  if (proposed.get() !== undefined || !Browser.canAgentOpen(try machine.get(), proposal.secure, proposal.userInfo)) return false
+  proposed.set(proposal)
+  try contained(shell.send({ type: "agentOpenView", view: "Browser" }), "the agent's page to review")
+  return true
+}
+
+/** Withdraw the page under review when Alpha stops showing the agent's proposal. Answers whether one was held. */
+export effect function withdrawn(): boolean!!Proposed {
+  const proposed = try Proposed
+  const held = proposed.get() !== undefined
+  proposed.set(undefined)
+  return held
+}
+
+// spec/app/browser/index.md, "The agent opens only an HTTPS address with no user name or password in it, in a new normal tab, one at a time"; spec/app/browser/index.md, "The agent's page never takes the owner's place, and the agent is told whenever its tab is taken away"
+/** The owner opened the page as shown: a new normal tab of the agent's, with its native tab, loading it beside the owner's. Answers whether it opened. */
+export effect function approve(): boolean!!(Proposed | Browser.Machine | Pages) {
+  const proposed = try Proposed
+  const held = proposed.get()
+  proposed.set(undefined)
+  if (held === undefined) return false
+  const machine = try Browser.Machine
+  const tab = (try machine.get()).issued + 1
+  if (!(try contained(machine.send({ type: "agentOpen", secure: held.secure, userInfo: held.userInfo }), "the agent's page"))) return false
+  const pages = try Pages
+  try pages.aim(tab, held.url)
+  const runtime = try pages.of(tab)
+  return try promise(() => runtime.runPromiseExit(Address.Machine.use((page) => page.send({ type: "submit", i: inputOf(held.url) }))).then((sent) => sent._tag === "Success"))
+}

@@ -1,8 +1,12 @@
 // @vitest-environment happy-dom
+import type { DeviceOperation } from "@elizaos/agent/operations";
 import { Effect } from "effect";
+import { act } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
 import { Machine as Page } from "../gen/app__browser__address.effect.vibe";
+import { Machine as Library } from "../gen/app__browser__library.effect.vibe";
+import { type Browsing, propose } from "../src/browser/agent.vibe";
 import { Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
 import { button, closeAll, drawn, fill, hardware, open, press, underAct, until } from "./alpha.tsx";
@@ -98,5 +102,88 @@ describe("The Browser on a phone", () => {
     await until(alpha, runtime, Tabs, (s) => s.erasing === "Asked");
     await press("Clear");
     await until(alpha, runtime, Tabs, (s) => s.erasing === "Kept" && s.privates.length === 1 && s.kept.length === 0);
+  });
+  it("Open the page in another browser (spec/app/browser/share.md, \"Story: Open the page in another browser\")", async () => {
+    const { alpha, runtime, world } = await onBrowser();
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    world.browser.failing.set("plain.example", "insecure");
+    world.browser.failing.set("down.example", "unreachable");
+    const tab = () => runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
+
+    // spec/app/browser/share.md, "A page that could not load or timed out at an HTTPS address may open in another browser; any other failure may not"
+    await go("plain.example");
+    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab())));
+    await until(alpha, page, Page, (p) => p.phase === "Failed");
+    expect(button("Open in browser")).toBeUndefined();
+
+    await go("down.example/today");
+    await until(alpha, page, Page, (p) => p.phase === "Failed");
+    await press("Open in browser");
+    await until(alpha, page, Page, () => world.browser.elsewhere.length === 1);
+    expect(world.browser.elsewhere).toEqual(["https://down.example/today"]);
+
+    // spec/app/browser/share.md, "The next load of the page ends the offer for a failed page"
+    world.browser.failing.clear();
+    await go("news.example/on-device-agents");
+    await until(alpha, page, Page, (p) => p.phase === "Shown");
+    expect(button("Open in browser")).toBeUndefined();
+  });
+
+  it("Let the agent open a page (spec/app/browser/index.md, \"Story: Let the agent open a page\")", async () => {
+    const { alpha, runtime, world } = await onBrowser();
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    const ask = (operation: unknown, current = true) => act(async () => { await runtime.runPromise(propose(operation as Browsing, current)); });
+    const owner = runtime.runSync(Tabs.use((m) => m.get())).selected;
+
+    // spec/app/browser/index.md, "The agent opens only an HTTPS address with no user name or password in it, in a new normal tab, one at a time"
+    await ask({ type: "browser_navigate", url: "http://news.example/on-device-agents" } satisfies Partial<DeviceOperation>);
+    expect(document.querySelector("[data-alpha-review]")).toBeNull();
+    await ask({ type: "browser_navigate", url: "https://news.example/on-device-agents" }, false);
+    expect(document.querySelector("[data-alpha-review]")).toBeNull();
+    await ask({ type: "browser_navigate", url: "https://news.example/on-device-agents" });
+    expect(document.querySelector("[data-alpha-review]")?.textContent).toContain("https://news.example/on-device-agents");
+    await press("Open");
+    await until(alpha, runtime, Tabs, (s) => s.agent !== 0 && s.selected === owner && s.native.includes(s.agent));
+    const agentTab = runtime.runSync(Tabs.use((m) => m.get())).agent;
+    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(agentTab)));
+    await until(alpha, page, Page, (p) => p.phase === "Shown");
+    expect(world.browser.tabs.get(`tab${agentTab}`)?.history).toEqual(["https://news.example/on-device-agents"]);
+
+    // spec/app/browser/index.md, "\"Stop and take over\" stops the agent and gives its tab to the owner"
+    await press("Stop and take over");
+    await until(alpha, runtime, Tabs, (s) => s.agent === 0);
+
+    // spec/app/browser/index.md, "One layer at a time covers the page, and Back uncovers it": the tabs open with no card for the owner's current message only
+    await ask({ type: "browser_tabs_show" }, false);
+    await until(alpha, runtime, Tabs, (s) => s.layer === "Uncovered");
+    await ask({ type: "browser_tabs_show" });
+    await until(alpha, runtime, Tabs, (s) => s.layer === "Switcher");
+    await hardware("back");
+    await until(alpha, runtime, Tabs, (s) => s.layer === "Uncovered");
+  });
+
+  it("Keep bookmarks and look back through history (spec/app/browser/library.md, \"Story: Keep bookmarks\"; spec/app/browser/library.md, \"Story: Look back through history\")", async () => {
+    const { alpha, runtime, world } = await onBrowser();
+    await until(alpha, runtime, Library, (s) => s.read.status === "Loaded" && s.marks === 1);
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    await go("news.example/on-device-agents");
+    const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
+    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
+    await until(alpha, page, Page, (p) => p.phase === "Shown");
+
+    // spec/app/browser/library.md, "A page that commits in a normal tab is counted in history, which keeps the newest hundred"
+    await until(alpha, runtime, Library, (s) => s.history === 4);
+
+    // spec/app/browser/library.md, "Bookmarking the shown page adds it when it is an HTTPS page without a user name or password and fewer than a hundred are saved, and otherwise says why not"
+    await press("Menu");
+    await press("Bookmark this page");
+    await until(alpha, runtime, Library, (s) => s.marks === 2 && s.job === "Idle");
+    expect(world.browser.bookmarks.map((one) => one.url)).toEqual(["https://news.example/on-device-agents", "https://enclave.example/keys-in-hardware"]);
+
+    // spec/app/browser/library.md, "Clearing all browsing data empties history at once"
+    await press("Menu");
+    await press("Clear all browsing data");
+    await press("Clear");
+    await until(alpha, runtime, Library, (s) => s.history === 0);
   });
 });
