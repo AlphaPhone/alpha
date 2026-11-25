@@ -1,4 +1,4 @@
-import { area } from "../runtime/area.tsx";
+import { area } from "../runtime/ui.tsx";
 import { Ask } from "./Ask.tsx";
 import { asking } from "./ask.vibe";
 

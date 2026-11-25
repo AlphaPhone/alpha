@@ -5,9 +5,8 @@ import { AudioLines, ChevronLeft, FileText, Folder, Image, Trash2, Video } from 
 import type { Machine } from "../../gen/app__files__trash.effect.vibe";
 import { daysLeft, view } from "../../gen/app__files__trash.ts";
 import { useMachine } from "../../gen/app__files__trash.react.ts";
-import { useTimed } from "../runtime/react.ts";
-import { untimed } from "../runtime/reactor.vibe";
-import { Time } from "../runtime/time.vibe";
+import { useTimed } from "../runtime/ui.tsx";
+import { untimed, Time } from "../runtime/index.vibe";
 import { TrashFacts } from "./trashFacts.vibe";
 
 export interface TrashProps {

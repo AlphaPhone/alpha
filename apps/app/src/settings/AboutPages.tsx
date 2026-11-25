@@ -1,15 +1,14 @@
 // spec/app/settings/licences.md, "Story: Read the licences"; spec/app/settings/developer.md, "Story: Read the problem log"
 import { ConfirmDialog, SettingsLicenceDetail, SettingsLicencesPage, SettingsProblemLogPage, type SettingsProblemLogPageProps } from "@repo/ui";
-import type { ManagedRuntime } from "effect";
+import { Effect, type ManagedRuntime } from "effect";
 import { useState } from "react";
 import * as DeveloperGen from "../../gen/app__settings__developer.ts";
 import { useMachine as useDeveloper } from "../../gen/app__settings__developer.react.ts";
 import type { Machine as DeveloperMachine } from "../../gen/app__settings__developer.effect.vibe";
 import { useMachine as useLicences } from "../../gen/app__settings__licences.react.ts";
 import type { Machine as LicencesMachine } from "../../gen/app__settings__licences.effect.vibe";
-import { useTimed } from "../runtime/react.ts";
-import { untimed } from "../runtime/reactor.vibe";
-import type { Time } from "../runtime/time.vibe";
+import { useTimed } from "../runtime/ui.tsx";
+import { untimed, type Time } from "../runtime/index.vibe";
 import { type Notice, Notices } from "./about.vibe";
 import type { Common } from "./Settings.tsx";
 
@@ -26,12 +25,13 @@ const flags: Record<string, string> = {
 };
 
 const matches = (notice: Notice, query: string) => `${notice.name} ${notice.license}`.toLowerCase().includes(query.trim().toLowerCase());
+const readNotices = Effect.flatMap(Notices, (held) => held.get());
 
 /** The licences, searched; one opens from the list the search shows, and Back returns to the same search. */
 export function Licences({ runtime, common }: AboutProps) {
   const { state, send, can } = useTimed(runtime, useLicences);
   if (!state) return null;
-  const notices = runtime.runSync(Notices.use((held) => held.get()));
+  const notices = runtime.runSync(readNotices);
   const shown = notices.filter((notice) => matches(notice, state.query));
   const open = state.licence >= 0 ? shown[state.licence] : undefined;
   if (open !== undefined) {

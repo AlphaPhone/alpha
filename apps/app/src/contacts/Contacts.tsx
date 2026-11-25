@@ -13,12 +13,10 @@ import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
 import type { Machine as VoicemailMachine } from "../../gen/app__phone__voicemail.effect.vibe";
 import { useMachine as useVoicemail } from "../../gen/app__phone__voicemail.react.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
-import { returnPhoneTab } from "../phone/back.vibe";
-import { PhoneTabs } from "../phone/PhoneTabs.tsx";
-import { callerInitials, displayNumber } from "../phone/words.ts";
+import { returnPhoneTab, callerInitials, displayNumber } from "../comms/index.vibe";
+import { PhoneTabs, CommsBar, type CommsServices } from "../comms/ui.tsx";
 import { type Book, type Form, Rows, blankForm, sheetOf } from "./contacts.vibe";
-import { CommsBar, type CommsServices } from "../phone/CommsBar.tsx";
-import type { Alpha } from "../runtime/area.tsx";
+import type { Alpha } from "../runtime/ui.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 
 export interface ContactsProps {
@@ -230,7 +228,7 @@ interface ContactValuesProps {
   kind: "Phone" | "Email";
   values: readonly string[];
   locked: boolean;
-  change(values: readonly string[]): void;
+  change: (values: readonly string[]) => void;
 }
 
 /** A phone or email field, with room for the owner to add and remove entries. */

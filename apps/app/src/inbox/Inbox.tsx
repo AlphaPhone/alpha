@@ -25,18 +25,16 @@ import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Machine as Preferences } from "../../gen/app__settings__preferences.effect.vibe";
 import { useMachine as usePreferences } from "../../gen/app__settings__preferences.react.ts";
-import type { Alpha } from "../runtime/area.tsx";
+import { type Alpha, useTimed } from "../runtime/ui.tsx";
 import { loadsImages } from "../../gen/app__settings__preferences.ts";
-import { useTimed } from "../runtime/react.ts";
-import type { Cloud } from "../platform/cloud.vibe";
-import { untimed } from "../runtime/reactor.vibe";
-import { Time } from "../runtime/time.vibe";
+import type { Cloud } from "../platform/index.vibe";
+import { untimed, Time } from "../runtime/index.vibe";
 import { Compose, FileOffer, Shelf, Suggested } from "./Compose.tsx";
 import type { Offers } from "./suggestion.vibe";
 import type { Machine as Offering } from "../../gen/app__inbox__suggestion.effect.vibe";
 import type { Incoming } from "./adding.vibe";
 import type { Machine as Adding } from "../../gen/app__inbox__adding.effect.vibe";
-import { type Beginning, Letters, begin, openGmailDraft } from "./composer.vibe";
+import { type Beginning, type Letters, begin, openGmailDraft } from "./composer.vibe";
 import { type Letter, Mail, revisionOf } from "./gmail.vibe";
 import { connectMailFrame, frameDocument, prepareMessage } from "./mail-html.ts";
 import { AttachmentPreviews, canPreviewAttachment, canSaveAttachment } from "./attachment.vibe";
@@ -62,7 +60,7 @@ type Change = keyof typeof operationNames;
 const isChange = (kind: Kind): kind is Change => kind in operationNames;
 
 /** What Mail holds, read at the state the screen shows. */
-const mailOf = <A,>(runtime: Runtime, read: (mail: Mail["Service"]) => A): A => runtime.runSync(Mail.use((mail) => Effect.sync(() => read(mail))));
+const mailOf = <A,>(runtime: Runtime, read: (mail: Mail["Service"]) => A): A => runtime.runSync(Effect.flatMap(Mail, (mail) => Effect.sync(() => read(mail))));
 
 /** When a message arrived, as the list words it: a time on Alpha's day, else a date. */
 function arrived(receivedAt: string, today: number): string {
@@ -145,8 +143,10 @@ function toastOf(state: Operations, operation: (typeof operationNames)[Change], 
 
 /** The body of a message with nothing able to run, its remote images only once they may load, and its links each reviewed. */
 function Body({ read, images, onReview }: { read: MailMessage; images: boolean; onReview: (link: number) => void }) {
-  const { formatted, links } = prepareMessage(read);
-  const document = useMemo(() => formatted ? frameDocument(formatted, images) : undefined, [formatted, images]);
+  const { formatted, links, document } = useMemo(() => {
+    const prepared = prepareMessage(read);
+    return { ...prepared, document: prepared.formatted ? frameDocument(prepared.formatted, images) : undefined };
+  }, [read, images]);
   const frame = useCallback((node: HTMLIFrameElement | null) => node ? connectMailFrame(node, onReview) : undefined, [onReview]);
   const additional = links.flatMap((link, at) => formatted?.inline.has(link.url) ? [] : [{ ...link, at: at + 1 }]);
   const list = (
@@ -217,7 +217,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const file = files.at(state.attachment - 1);
   const outcome = state.file.outcome;
   const preview = file && state.handling === "Opening" && outcome === "Confirmed"
-    ? runtime.runSync(AttachmentPreviews.use((previews) => Effect.sync(() => previews.read(state.file.id))))
+    ? runtime.runSync(Effect.flatMap(AttachmentPreviews, (previews) => Effect.sync(() => previews.read(state.file.id))))
     : undefined;
   const contents = loaded ? prepareMessage(read) : undefined;
   const link = state.link > 0 ? contents?.links.at(state.link - 1) : undefined;
@@ -327,7 +327,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const selecting = !draftsFolder && selection === folderKey && !searching && readable(state) && !state.saved && state.pages > 0;
   const chosenMessages = new Set(state.chosen);
   const access = accessOf(state, account);
-  const today = runtime.runSync(Time.use((time) => time.latest()));
+  const today = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
   const checking = state.accounts.status === "Loading";
   const row = ({ message: number, card, draftId }: Letter): InboxListRow => {
     const open = { type: "open", access, account, message: number, thread: 1, remote } as const;

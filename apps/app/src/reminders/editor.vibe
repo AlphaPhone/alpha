@@ -1,7 +1,7 @@
 // spec/app/reminders/editor.md, "Story: Create and edit a reminder safely"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Editor from "../../gen/app__reminders__editor.effect.vibe"
-import { contained, reacting, started, together } from "../runtime/reactor.vibe"
+import { contained, reacting, started, together } from "../runtime/index.vibe"
 import type { ReminderRecurrence } from "./recurrence.ts"
 import { civilDayFromString } from "./recurrence.ts"
 import {

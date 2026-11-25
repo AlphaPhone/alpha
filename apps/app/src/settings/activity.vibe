@@ -2,14 +2,13 @@
 import type { AgentStatus } from "@elizaos/os-bridges"
 import { MediaReview } from "../assistant/media-review.vibe"
 import * as Records from "../../gen/app__account__records.effect.vibe"
-import * as Shell from "../../gen/app__shell.effect.vibe"
+import type * as Shell from "../../gen/app__shell.effect.vibe"
 import type { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
 import * as Activity from "../../gen/app__settings__activity.effect.vibe"
 import { activityInFront, needsRecords } from "./recovery.vibe"
-import { Agent } from "../platform/agent.vibe"
-import { Device, native } from "../platform/device.vibe"
-import { type Job, answer, contained, due, hearing, reacting, started, together, untimed } from "../runtime/reactor.vibe"
+import { Agent, Device, native } from "../platform/index.vibe"
+import { type Job, answer, contained, due, hearing, reacting, started, together, untimed } from "../runtime/index.vibe"
 
 function connection(status: AgentStatus | undefined): Activity.Connection {
   if (status === undefined) return "Offline"

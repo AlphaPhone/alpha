@@ -3,11 +3,8 @@ import * as Developer from "../../gen/app__settings__developer.effect.vibe"
 import * as Licences from "../../gen/app__settings__licences.effect.vibe"
 import * as Prefs from "../../gen/app__settings__preferences.effect.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
-import { Device, native } from "../platform/device.vibe"
-import { type PhoneReport, type Problem, SystemSettings } from "../platform/systemSettings.vibe"
-import { VoiceBridge } from "../platform/voice.vibe"
-import { type Job, answer, due, following, reacting, run, stop, together, untimed } from "../runtime/reactor.vibe"
-import { Time } from "../runtime/time.vibe"
+import { Device, native, type PhoneReport, type Problem, SystemSettings, VoiceBridge } from "../platform/index.vibe"
+import { type Job, answer, due, following, reacting, run, stop, together, untimed, Time } from "../runtime/index.vibe"
 
 module web {
   /** The licence notices shipped with Alpha, beside its page: never a remote source. */

@@ -8,9 +8,8 @@ import type { Kind, Policy } from "../../gen/app__inbox__letter.ts"
 import type { Actor } from "../../gen/app__inbox__access.ts"
 import type { GmailDraftContent } from "@elizaos/plugin-inbox-client"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
-import { Cloud } from "../platform/cloud.vibe"
-import { Device } from "../platform/device.vibe"
-import { type Job, answer, contained, due, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import { Cloud, Device } from "../platform/index.vibe"
+import { type Job, answer, contained, due, reacting, run, started, together, untimed } from "../runtime/index.vibe"
 import { Mail, asked } from "./gmail.vibe"
 import { ownerChanges } from "./mailbox.vibe"
 import { provider } from "./provider.vibe"
@@ -86,11 +85,11 @@ const SavedWords = Schema.Struct({
   to: Schema.Array(Schema.String), cc: Schema.Array(Schema.String), bcc: Schema.Array(Schema.String),
   subject: Schema.String, text: Schema.String,
 })
-const Seen = Schema.Struct({ digest: Schema.String, words: Schema.optionalKey(SavedWords) })
-const Copy = Schema.Struct({ account: Schema.Number, id: Schema.String, digest: Schema.String, seen: Schema.optionalKey(Seen) })
-type Copy = typeof Copy.Type
-type Seen = typeof Seen.Type
-const readCopies = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Copy)))
+const SeenSchema = Schema.Struct({ digest: Schema.String, words: Schema.optionalKey(SavedWords) })
+const CopySchema = Schema.Struct({ account: Schema.Number, id: Schema.String, digest: Schema.String, seen: Schema.optionalKey(SeenSchema) })
+type Copy = typeof CopySchema.Type
+type Seen = typeof SeenSchema.Type
+const readCopies = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(CopySchema)))
 
 /**
  * The words of each draft of this session, by its number: what the screen shows and edits, what a write keeps on the

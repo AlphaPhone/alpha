@@ -14,10 +14,9 @@ import { useMachine as useRecorder } from "../../gen/app__notes__recording.react
 import { useMachine as usePrevious } from "../../gen/app__notes__previous.react.ts";
 import { useMachine as useTransfer } from "../../gen/app__notes__transfer.react.ts";
 import { useMachine as useVoice } from "../../gen/app__notes__voice.react.ts";
-import { NoteDocuments } from "../platform/noteDocuments.vibe";
-import { NoteDevice } from "../platform/noteDevice.vibe";
+import { NoteDocuments, NoteDevice } from "../platform/index.vibe";
 import { unfinished } from "../../gen/app__notes__recording.ts";
-import type { Alpha } from "../runtime/area.tsx";
+import type { Alpha } from "../runtime/ui.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 import { type Collection, type DraftWords, NoteContent, audioIdOf, hasContent, savedVoice } from "./content.vibe";
 import { type Fields, NoteEditor } from "./editor.vibe";

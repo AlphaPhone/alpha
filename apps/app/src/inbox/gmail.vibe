@@ -4,8 +4,8 @@ import { gmailReadable, type GmailAccount, type GmailDraftSummary } from "@eliza
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import type { Failure, Folder, Linked, Mailbox, Selection } from "../../gen/app__inbox.ts"
 import type { Fault } from "../../gen/app__inbox__message.ts"
-import { Cloud, type CloudClient } from "../platform/cloud.vibe"
-import { Attempts } from "../runtime/attempts.vibe"
+import { Cloud, type CloudClient } from "../platform/index.vibe"
+import { Attempts } from "../runtime/index.vibe"
 import { provider } from "./provider.vibe"
 
 module pure {

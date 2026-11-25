@@ -2,8 +2,8 @@
 import * as ClockView from "../../gen/app__clock.effect.vibe"
 import * as Alarms from "../../gen/app__clock__alarms.effect.vibe"
 import * as Timers from "../../gen/app__clock__timers.effect.vibe"
-import { feel } from "../shell/haptics.vibe"
-import { contained, started, together } from "../runtime/reactor.vibe"
+import { feel } from "../shell/index.vibe"
+import { contained, started, together } from "../runtime/index.vibe"
 import { playChimePulse } from "./chime.ts"
 import { clockRecords } from "./records.ts"
 

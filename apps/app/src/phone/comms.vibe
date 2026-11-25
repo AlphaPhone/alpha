@@ -6,7 +6,7 @@ import type { Event } from "../../gen/app__phone__comms.effect.vibe"
 import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
 import { Machine as Phone, clear, liveCall } from "../../gen/app__phone.effect.vibe"
 import { Machine as Voicemail } from "../../gen/app__phone__voicemail.effect.vibe"
-import { contained, following, reacting, started, together } from "../runtime/reactor.vibe"
+import { contained, following, reacting, started, together } from "../runtime/index.vibe"
 import { Dialer } from "./phone.vibe"
 
 /** The actual shell app an entry in the communications stage can return to. */

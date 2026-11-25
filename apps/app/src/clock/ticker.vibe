@@ -3,8 +3,7 @@ import * as ClockView from "../../gen/app__clock.effect.vibe"
 import * as Alarms from "../../gen/app__clock__alarms.effect.vibe"
 import * as Stopwatch from "../../gen/app__clock__stopwatch.effect.vibe"
 import * as Timers from "../../gen/app__clock__timers.effect.vibe"
-import { started, together } from "../runtime/reactor.vibe"
-import { Time } from "../runtime/time.vibe"
+import { started, together, Time } from "../runtime/index.vibe"
 
 interface TickStore {
   readonly snapshot: () => number

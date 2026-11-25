@@ -7,7 +7,7 @@ import { useMachine as useConversation } from "../../gen/app__assistant.react.ts
 import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
-import type { Area } from "../runtime/area.tsx";
+import type { Area } from "../runtime/ui.tsx";
 import { type AssistantProps } from "./Assistant.tsx";
 import { freedom } from "./assistant.vibe";
 import assistant from "./index.tsx";
@@ -39,10 +39,10 @@ function ConversationActions({ runtime }: AssistantProps) {
   return (
     <>
       <ListGroup>
-        {chats.can(start) ? <SettingsNavRow title="New" value="New conversation" icon={<Plus />} onOpen={() => {
+        {chats.can(start) ? <SettingsNavRow title="New" aria-label="New" value="New conversation" icon={<Plus />} onOpen={() => {
           void chats.send(start).then((result) => { if (result._tag === "Success") openAskAlpha(); });
         }} /> : null}
-        {chats.can(browse) ? <SettingsNavRow title={list === "Failed" ? "Retry" : "History"} value={list === "Idle" ? "Load conversations" : undefined} icon={list === "Failed" ? <RotateCw /> : <Clock />} onOpen={() => void chats.send(browse)} /> : null}
+        {chats.can(browse) ? <SettingsNavRow title={list === "Failed" ? "Retry" : "History"} aria-label={list === "Failed" ? "Retry" : "History"} value={list === "Idle" ? "Load conversations" : undefined} icon={list === "Failed" ? <RotateCw /> : <Clock />} onOpen={() => void chats.send(browse)} /> : null}
       </ListGroup>
       {listed.length > 0 ? (
         <ListGroup aria-label="Chat history">

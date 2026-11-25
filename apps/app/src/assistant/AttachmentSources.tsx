@@ -29,7 +29,7 @@ function sizeOf(bytes: number): string {
 export function AttachmentSources({ tab, room, accept, chooseDocument, onAttach, onClose, onReturnFocus, onTab }: AttachmentSourcesProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const openerRef = useRef<HTMLButtonElement>(null);
-  const [selected, select] = useState<readonly SourceSelection[]>([]);
+  const [selected, setSelected] = useState<readonly SourceSelection[]>([]);
   const [search, setSearch] = useState("");
   const [reading, setReading] = useState(false);
   const [problem, setProblem] = useState(false);
@@ -44,7 +44,7 @@ export function AttachmentSources({ tab, room, accept, chooseDocument, onAttach,
     }
     setReading(true);
     setProblem(false);
-    void chooseDocument().then((file) => { if (file) select([file]); }).catch(() => setProblem(true)).finally(() => setReading(false));
+    void chooseDocument().then((file) => { if (file) setSelected([file]); }).catch(() => setProblem(true)).finally(() => setReading(false));
   };
   const attach = () => {
     if (reading || selected.length === 0) return;
@@ -54,7 +54,7 @@ export function AttachmentSources({ tab, room, accept, chooseDocument, onAttach,
   };
   const switchTo = (shown: Tab) => {
     if (shown === tab || reading) return;
-    select([]);
+    setSelected([]);
     setSearch("");
     setProblem(false);
     onTab(shown);
@@ -82,12 +82,13 @@ export function AttachmentSources({ tab, room, accept, chooseDocument, onAttach,
             className={cn("h-11 flex-1 rounded-action px-2 text-base", value === tab && "bg-foreground text-background hover:bg-foreground/90")}>{label}</Button>)}
         </nav>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-4" aria-busy={reading || undefined}>
+          {/* eslint-disable-next-line no-restricted-syntax -- hidden native file picker input */}
           <input ref={inputRef} type="file" aria-label={`Select ${source}`} accept={accept} multiple hidden onChange={(event) => {
             const files = Array.from(event.currentTarget.files ?? []);
             event.currentTarget.value = "";
             if (files.length > 0) {
               setProblem(false);
-              select(files.map((file) => ({ id: crypto.randomUUID(), name: file.name, bytes: file.size, photo: photos ? file : undefined, load: () => Promise.resolve(file) })));
+              setSelected(files.map((file) => ({ id: crypto.randomUUID(), name: file.name, bytes: file.size, photo: photos ? file : undefined, load: () => Promise.resolve(file) })));
             }
           }} />
           {problem && <p role="alert" className="py-3 text-sm text-destructive">Could not attach the selected files</p>}
@@ -96,7 +97,7 @@ export function AttachmentSources({ tab, room, accept, chooseDocument, onAttach,
             {matches.map((file) => (
               <button key={file.id} type="button" aria-label={`Remove ${file.name} from the selection`} aria-pressed="true" disabled={reading}
                 className={cn("relative min-w-0 overflow-hidden text-left text-base", photos ? "aspect-square rounded-lg bg-secondary" : "flex min-h-19 w-full items-center gap-3.5 border-b py-3")}
-                onClick={() => select(selected.filter((item) => file !== item))}>
+                onClick={() => setSelected(selected.filter((item) => file !== item))}>
                 {photos && file.photo ? <img alt={file.name} className="size-full object-cover" ref={(node) => {
                   if (!node || file.photo === undefined) return;
                   const url = URL.createObjectURL(file.photo);
@@ -114,7 +115,7 @@ export function AttachmentSources({ tab, room, accept, chooseDocument, onAttach,
         </div>
         <footer style={{ minHeight: 81 }} className="flex shrink-0 items-center gap-3 border-t px-5 pt-2 pb-[max(--spacing(3.5),calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))_+_--spacing(2)))] text-meta">
           <span role="status" className="flex-1 text-muted-foreground">{selected.length > 0 ? `${selected.length} selected` : ""}</span>
-          {selected.length > 0 && <Button variant="secondary" size="icon" className="w-auto px-3.5 text-sm" disabled={reading} onClick={() => select([])}>Clear</Button>}
+          {selected.length > 0 && <Button variant="secondary" size="icon" className="w-auto px-3.5 text-sm" disabled={reading} onClick={() => setSelected([])}>Clear</Button>}
           <Button variant="secondary" size="icon" className="w-auto px-3.5 text-sm" onClick={browse} disabled={reading}>
             {fromComputer ? "From computer" : `Choose ${source}`}
           </Button>

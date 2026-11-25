@@ -2,7 +2,7 @@
 import { CloudError } from "@elizaos/cloud"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Screen from "../../gen/app__maps.effect.vibe"
-import { mode, pressMs, readable, shown, typingMs } from "../../gen/app__maps.effect.vibe"
+import { pressMs, readable, shown, typingMs } from "../../gen/app__maps.effect.vibe"
 import type { Change, Effect as Out, Event as Ev, HandOff, Maps as State } from "../../gen/app__maps.effect.vibe"
 import * as Credits from "../../gen/app__maps__credits.effect.vibe"
 import type { Effect as CreditsOut, Event as CreditsEv } from "../../gen/app__maps__credits.effect.vibe"
@@ -13,12 +13,8 @@ import type { Offer, Origin, Travel } from "../../gen/app__maps__navigation.effe
 import { type Saved, maxSaved } from "../../gen/app__maps__places.effect.vibe"
 import type { Grant as Allowed } from "../../gen/kit__permission.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
-import { type CloudClient, Cloud } from "../platform/cloud.vibe"
-import { Device } from "../platform/device.vibe"
-import { type Grant, Location, type Sighting } from "../platform/location.vibe"
-import { Navigation } from "../platform/navigation.vibe"
-import { type Job, answer, due, following, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
-import { Time } from "../runtime/time.vibe"
+import { type CloudClient, Cloud, Device, type LocationGrant as Grant, Location, type Sighting, Navigation } from "../platform/index.vibe"
+import { type Job, answer, due, following, reacting, run, started, stream, together, untimed, Time } from "../runtime/index.vibe"
 import { type Coverage, type Spot, type View, type Way, atlas } from "./atlas.vibe"
 import { type Point, coordinateOf, measured, meters, pointOf } from "./geometry.ts"
 
@@ -180,7 +176,7 @@ effect function pinned(at: Point): Ev!!never {
   return { type: "dropPin", place: atlas.numberOf({ name, category: "", at, providerId: "", id: "", google: false }) }
 }
 
-// spec/app/maps/index.md, "Routes are asked for the place on screen, under the trip's newest ticket"; spec/app/maps/index.md, "A route is asked from coordinates or another place, which ends a pending \"Use my location\""
+// spec/app/maps/index.md, "Routes are asked for the place on screen, under the trip's newest ticket"; spec/app/maps/index.md, "Story: Get directions"
 effect function planned(ticket: number, origin: Origin, travel: Travel, place: number, start: Point): Ev!!(Cloud | Time | Screen.Machine) {
   const from = origin === "MyLocation" ? atlas.snapshot().here?.at : origin === "Unset" ? undefined : start
   const to = atlas.spot(place)
@@ -200,7 +196,7 @@ function allowedOf(grant: Grant): Allowed {
   return grant === "precise" ? "Granted" : grant === "approximate" ? "Limited" : grant === "denied" ? "Denied" : "Unasked"
 }
 
-// spec/app/maps/index.md, "A fix goes to whoever holds the location"; spec/app/maps/navigation.md, "A fix moves guidance only when it is precise, fresh and close: arrival within 25 meters, a turn passed within 40 meters or beyond 60, the route left beyond 75"; spec/app/maps/connection.md, "\"Use my location\" gives up after 15 seconds without a fix"
+// spec/app/maps/index.md, "A fix goes to whoever holds the location"; spec/app/maps/navigation.md, "A fix moves guidance only when it is precise, fresh and close: arrival within 25 meters, a turn passed within 40 meters or beyond 60, the route left beyond 75"; spec/app/maps/connection.md, "Story: Connect through my cloud account"
 function located(session: number, once: boolean): Stream.Stream<Ev, never, Location | Time | Screen.Machine> {
   return Stream.unwrap(effect {
     const location = try Location
@@ -275,7 +271,7 @@ effect function permitted(): Ev!!Location {
   return { type: "observeLocation", grant: allowedOf(try (try Location).request()) }
 }
 
-// spec/app/maps/index.md, "\"Use my location\" locates once when allowed, asks when it may, and otherwise opens Settings"
+// spec/app/maps/index.md, "Story: Get directions"
 effect function settingsOpened(): void!!Location {
   try ignore((try Location).openSettings())
 }
@@ -520,13 +516,13 @@ const opening = started(effect {
     const grant = allowedOf(try location.permission())
     try ignore(screen.send({ type: "admitDialer", on: (try device.capabilities()).image }))
     try ignore(screen.send({ type: "observeLocation", grant }))
-    try ignore(screen.send({ type: "quietFix" }))
     try accountRead()
+    try ignore(screen.send({ type: "quietFix" }))
     try ignore(screen.send({ type: "connect" }))
   })
 }, "opening Maps")
 
-// spec/app/maps/index.md, "Leaving Maps keeps guidance with its service and ends it without; a pending \"Use my location\" and the Calendar return end"; spec/app/maps/index.md, "The notification of this journey opens Maps on its guidance, or stops it"
+// spec/app/maps/index.md, "Story: Navigate"; spec/app/maps/index.md, "The notification of this journey opens Maps on its guidance, or stops it"
 const presence = started(effect {
   const shell = try Shell
   const device = try Device

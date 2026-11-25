@@ -6,9 +6,8 @@ import { useSyncExternalStore } from "react";
 import type { Machine as StopwatchMachine } from "../../gen/app__clock__stopwatch.effect.vibe";
 import { useMachine as useStopwatch } from "../../gen/app__clock__stopwatch.react.ts";
 import { bestLapIndex, elapsedAt, lastLapTotal, worstLapIndex } from "../../gen/app__clock__stopwatch.ts";
-import { useTimed } from "../runtime/react.ts";
-import { untimed } from "../runtime/reactor.vibe";
-import type { Time } from "../runtime/time.vibe";
+import { useTimed } from "../runtime/ui.tsx";
+import { untimed, type Time } from "../runtime/index.vibe";
 import { stopwatchNow } from "./ticker.vibe";
 import { formatStopwatch } from "./time.ts";
 
@@ -40,7 +39,7 @@ export function StopwatchTab({ runtime }: StopwatchTabProps) {
   return (
     <section aria-label="Stopwatch" className="flex flex-col gap-5">
       <Card className="items-center gap-2 py-8 rounded-tile border-0 bg-secondary">
-        <span aria-label="Stopwatch elapsed time" className="font-display text-5xl font-light tabular-nums text-foreground">
+        <span aria-label="Stopwatch elapsed time" className="font-display text-display font-light tabular-nums text-foreground">
           {formatStopwatch(totalElapsed)}
         </span>
         {state.laps.length > 0 && (

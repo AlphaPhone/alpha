@@ -5,7 +5,7 @@ import type { Effect as Out, Event, Picked } from "../../gen/app__inbox__adding.
 import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import { canAttach } from "../../gen/app__inbox__letter.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
-import { type Job, answer, contained, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, reacting, run, started, together, untimed } from "../runtime/index.vibe"
 import { type Attached, Letters, policy } from "./composer.vibe"
 import { ownerChanges } from "./mailbox.vibe"
 

@@ -2,8 +2,8 @@
 import { Effect, Layer } from "effect";
 import * as View from "../../gen/app__calendar.effect.vibe";
 import * as Editor from "../../gen/app__calendar__editor.effect.vibe";
-import { area } from "../runtime/area.tsx";
-import { together } from "../runtime/reactor.vibe";
+import { area } from "../runtime/ui.tsx";
+import { together } from "../runtime/index.vibe";
 import { changes } from "./agent.vibe";
 import { Calendar } from "./Calendar.tsx";
 import { calendar } from "./calendar.vibe";

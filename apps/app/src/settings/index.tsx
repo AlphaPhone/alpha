@@ -5,9 +5,9 @@ import type { Page } from "../../gen/app__settings.ts";
 import * as Licensing from "../../gen/app__settings__licences.effect.vibe";
 import * as Pages from "../../gen/app__settings.effect.vibe";
 import { mediaReview } from "../assistant/media-review.vibe";
-import { type Resident, type Shown, area } from "../runtime/area.tsx";
+import { type Resident, type Shown, area } from "../runtime/ui.tsx";
 import { reviewBack } from "../startup/settingsAccess.vibe";
-import { together } from "../runtime/reactor.vibe";
+import { together } from "../runtime/index.vibe";
 import { about } from "./about.vibe";
 import { activity } from "./activity.vibe";
 import { Licences, Problems } from "./AboutPages.tsx";
@@ -31,13 +31,19 @@ const pageBack = Licensing.Machine.use((licences) =>
 const back = Effect.flatMap(reviewBack, (closed) => closed ? Effect.succeed(true)
   : Effect.flatMap(recoveryBack, (closedRecovery) => closedRecovery ? Effect.succeed(true) : pageBack));
 
-function Screen({ runtime, alpha }: Shown<Layer.Success<typeof machines> | Resident>) {
-  const further = useMemo((): Partial<Record<Page, Drawn>> => ({
+type SettingsRuntime = Shown<Layer.Success<typeof machines> | Resident>["runtime"];
+
+function furtherOf(runtime: SettingsRuntime): Partial<Record<Page, Drawn>> {
+  return {
     NetworkPage: ({ common }) => <Network runtime={runtime} common={common} />,
     CarrierPage: ({ common }) => <Carrier runtime={runtime} common={common} />,
     Licences: ({ common }) => <Licences runtime={runtime} common={common} />,
     Problems: ({ common }) => <Problems runtime={runtime} common={common} />,
-  }), [runtime]);
+  };
+}
+
+function Screen({ runtime, alpha }: Shown<Layer.Success<typeof machines> | Resident>) {
+  const further = useMemo(() => furtherOf(runtime), [runtime]);
   return <Settings runtime={runtime} alpha={alpha} further={further} />;
 }
 

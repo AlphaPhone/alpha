@@ -1,7 +1,7 @@
 // spec/app/phone/index.md, "Phone reads the call log whenever Recents comes to the front"; spec/app/messages/index.md, "Messages reads the conversation list each time it comes to the front"; spec/app/contacts/index.md, "Contacts reads the list each time it comes to the front"
 import { Machine as Shell, type Shell as Where, type View, showing } from "../../gen/app__shell.effect.vibe"
-import { Device } from "../platform/device.vibe"
-import { contained, started } from "../runtime/reactor.vibe"
+import { Device } from "../platform/index.vibe"
+import { contained, started } from "../runtime/index.vibe"
 
 /** Whether `view` is the app on top of the shell's trail. */
 export const on = (view: View) => (state: Where) => showing(state, view)

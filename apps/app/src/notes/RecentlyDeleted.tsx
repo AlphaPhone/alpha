@@ -3,9 +3,8 @@ import { Alert, AppHeader, Button, NoteRow, Sheet, SheetContent, Spinner } from 
 import { ChevronLeft, Trash2 } from "lucide-react";
 import type * as Trash from "../../gen/app__notes__trash.ts";
 import { useMachine as useTrash } from "../../gen/app__notes__trash.react.ts";
-import type { Alpha } from "../runtime/area.tsx";
-import { useTimed } from "../runtime/react.ts";
-import { untimed } from "../runtime/reactor.vibe";
+import { type Alpha, useTimed } from "../runtime/ui.tsx";
+import { untimed } from "../runtime/index.vibe";
 import { type Collection, numberOf } from "./content.vibe";
 import { titleOf } from "./present.ts";
 

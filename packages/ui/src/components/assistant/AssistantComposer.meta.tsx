@@ -84,7 +84,8 @@ export const meta: ComponentMeta<AssistantComposerProps> = {
         { keys: "[/MouseLeft]", coords: { clientX: 20, clientY: 200 } },
       ]);
       await userEvent.pointer([{ keys: "[MouseLeft]", target: background, coords: { clientX: 20, clientY: 400 } }]);
-      await expect([onDragRelease.mock.calls.length, onDragRelease.mock.calls[0]?.[0].direction, onDragLift.mock.calls.length]).toEqual([1, "up", 1]);
+      const releaseArg = onDragRelease.mock.calls[0]?.[0] as { direction?: string } | undefined;
+      await expect([onDragRelease.mock.calls.length, releaseArg?.direction, onDragLift.mock.calls.length]).toEqual([1, "up", 1]);
     },
     Closed: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       await expect(within(canvasElement).getByRole("textbox", { name: "Message Alpha" })).toBeDisabled();

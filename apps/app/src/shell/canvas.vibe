@@ -1,9 +1,8 @@
 // spec/app/shell/keyboard.md, "Story: Type without the page turning sideways"
 import * as Canvas from "../../gen/app__shell__keyboard.effect.vibe"
 import type { Event, Field } from "../../gen/app__shell__keyboard.effect.vibe"
-import { Device } from "../platform/device.vibe"
-import { Launcher } from "../platform/launcher.vibe"
-import { applying, contained, reacting, started, together } from "../runtime/reactor.vibe"
+import { Device, Launcher } from "../platform/index.vibe"
+import { applying, contained, reacting, started, together } from "../runtime/index.vibe"
 
 module page {
   export type Heard = "resize" | "focus" | "front" | number | { readonly keyboard: boolean }

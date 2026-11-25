@@ -8,7 +8,7 @@ import { useMachine } from "../../gen/app__files__scan.react.ts";
 import { pageLimit } from "../../gen/app__files__scanDraft.ts";
 import type { Page } from "../../gen/app__files__scanDraft.ts";
 import type { Event } from "../../gen/app__files__scan.ts";
-import type { Resident, Shown } from "../runtime/area.tsx";
+import type { Resident, Shown } from "../runtime/ui.tsx";
 import { ScanCorrection } from "./ScanCorrection.tsx";
 import { ScanAssets, addScanImage, editScanLine, exportScan, noteContent, reviewCalendarEvent, type scan } from "./scan.vibe";
 

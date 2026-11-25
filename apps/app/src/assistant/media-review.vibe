@@ -11,12 +11,8 @@ import { composeRecipient, reviewedCompose, type MessageDraftTarget } from "../m
 import { readAgentSms } from "../messages/agent-send.vibe"
 import { currentSmsSelection, type MessageSmsRequest, type SmsSelection, type SmsSelectionContext } from "../messages/agent-sim.vibe"
 import { notesOperation, notesOperationWords } from "../notes/device-actions.vibe"
-import { phoneContactChoices, phoneQuery, pickPhoneContact, type NamedPhoneReview, type ReviewedPhoneContact } from "../phone/named-review.vibe"
-import { displayNumber } from "../phone/words.ts"
-import { Agent, type Runtime } from "../platform/agent.vibe"
-import { Device, registered } from "../platform/device.vibe"
-import { ownerAt } from "../platform/owner.vibe"
-import { Telephony } from "../platform/telephony.vibe"
+import { phoneContactChoices, phoneQuery, pickPhoneContact, type NamedPhoneReview, type ReviewedPhoneContact, displayNumber } from "../comms/index.vibe"
+import { Agent, type Runtime, Device, registered, ownerAt, Telephony } from "../platform/index.vibe"
 import { Talk } from "./talk.vibe"
 
 /** Area-owned equipment and approved executors. The resident protocol never receives a media bridge handle. */

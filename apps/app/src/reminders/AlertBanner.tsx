@@ -5,9 +5,8 @@ import { Bell, Check, Clock, X } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import type * as Alerts from "../../gen/app__reminders__alerts.effect.vibe";
 import { useMachine as useAlertsMachine } from "../../gen/app__reminders__alerts.react.ts";
-import { useTimed } from "../runtime/react.ts";
-import { untimed } from "../runtime/reactor.vibe";
-import { Time } from "../runtime/time.vibe";
+import { useTimed } from "../runtime/ui.tsx";
+import { untimed, Time } from "../runtime/index.vibe";
 import { alertBannerStore } from "./alerts.vibe";
 import { formatRelativeDue, snoozeTargetMs } from "./recurrence.ts";
 

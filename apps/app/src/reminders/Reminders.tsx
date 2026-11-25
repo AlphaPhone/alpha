@@ -36,9 +36,8 @@ import {
 import { useState, useSyncExternalStore } from "react";
 import type { DeleteMode, SmartView, SortKey } from "../../gen/app__reminders.ts";
 import { useMachine as useRemindersMachine } from "../../gen/app__reminders.react.ts";
-import type { Resident, Shown } from "../runtime/area.tsx";
-import { useTimed } from "../runtime/react.ts";
-import { Time } from "../runtime/time.vibe";
+import { type Resident, type Shown, useTimed } from "../runtime/ui.tsx";
+import { Time } from "../runtime/index.vibe";
 import { beginEditReminder, beginNewReminder } from "./editor.vibe";
 import { DeleteListDialog, ListEditorDialog } from "./ListEditorDialog.tsx";
 import { formatRelativeDue, quickDatePresets } from "./recurrence.ts";

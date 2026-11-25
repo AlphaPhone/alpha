@@ -1,13 +1,13 @@
 // spec/app/contacts/agent.md, "Story: Approve what the agent asked"; spec/app/contacts/agent.md, "A change is shown line by line, and a removed value never reads as kept"; spec/app/contacts/agent.md, "The owner picks the exact number or the one contact, and that one is shown"
 import { Banner, Button, Card, cn, ListGroup, ListRow } from "@repo/ui";
-import type { ManagedRuntime } from "effect";
+import { Effect, type ManagedRuntime } from "effect";
 import type { Machine as AgentMachine } from "../../gen/app__contacts__agent.effect.vibe";
 import { lineChange, reachesANumber } from "../../gen/app__contacts__agent.ts";
 import { useMachine as useAgent } from "../../gen/app__contacts__agent.react.ts";
 import type { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe";
 import { clear } from "../../gen/app__phone.ts";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
-import type { Telephony } from "../platform/telephony.vibe";
+import type { Telephony } from "../platform/index.vibe";
 import { type Lines, Requested, afterOf, chooseNumber, choicesOf, linesOf, unchangedBy } from "./requests.vibe";
 
 export interface ReviewProps {
@@ -37,6 +37,8 @@ function Changes({ before, after, removing, saved }: { before: Lines; after: Lin
   );
 }
 
+const readRequested = Effect.flatMap(Requested, (requested) => requested.get());
+
 /**
  * What the agent asked of the phone, shown exactly: the number to pick, the text, or the contact before and after, for
  * the owner to approve or decline. Nothing happens without the owner's approval.
@@ -46,14 +48,14 @@ export function Review({ runtime }: ReviewProps) {
   const { state, can, send } = useAgent(runtime);
   const phone = usePhone(runtime).state;
   if (!state || !phone || (state.stage !== "Shown" && state.stage !== "Choosing")) return null;
-  const held = runtime.runSync(Requested.use((requested) => requested.get()));
+  const held = runtime.runSync(readRequested);
   const safe = clear(phone);
   const approve = { type: "approve", clear: safe, spoken: false } as const;
   const target = held.matches.find((one) => one.id === state.contact);
   const before = target === undefined ? blank : linesOf(target);
   const text = state.ask === "Text" && state.stage === "Shown";
   return (
-    <Card role="dialog" data-alpha-review="" aria-label={asks[state.ask]} className={cn("fixed inset-x-4 bottom-24 z-40 flex flex-col gap-3 p-4", text && "gap-2 rounded-tile bg-background px-5 pt-5 pb-4")}>
+    <Card role="dialog" data-alpha-review="" aria-label={asks[state.ask]} className={cn("fixed inset-x-4 bottom-24 z-dialog flex flex-col gap-3 p-4", text && "gap-2 rounded-tile bg-background px-5 pt-5 pb-4")}>
       <h2 className="font-semibold wrap-anywhere">{text ? `To ${state.number}` : asks[state.ask]}</h2>
       {state.stage === "Choosing" && (
         <ListGroup aria-label={reachesANumber(state.ask) ? "Which number" : "Which contact"}>

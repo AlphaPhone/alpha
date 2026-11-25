@@ -4,7 +4,7 @@ import * as Messages from "../../gen/app__messages.effect.vibe"
 import * as Phone from "../../gen/app__phone.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Voicemail from "../../gen/app__phone__voicemail.effect.vibe"
-import { contained } from "../runtime/reactor.vibe"
+import { contained } from "../runtime/index.vibe"
 
 /** Whether `event` was a step of the screen's own, taken by the rules. */
 effect function stepped<Ev>(machine: { send(event: Ev): unknown!unknown }, event: Ev | undefined): boolean!! {

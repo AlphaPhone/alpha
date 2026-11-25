@@ -1,4 +1,4 @@
-import { allowsTestMocks } from "../platform/build.ts";
+import { allowsTestMocks } from "../platform/index.vibe";
 
 /**
  * Whether this is a development build: the development server, or a build made with `ELIZA_DEV_ALLOW_TEST_MOCKS=1`.
@@ -10,5 +10,6 @@ export function development(): boolean {
 
 /** The version this build of Alpha names, and the mode it was built in, for the diagnostics it exports. @throws {never} */
 export function versions(): { readonly app: string; readonly mode: string } {
-  return { app: import.meta.env.VITE_ALPHA_VERSION ?? "development", mode: import.meta.env.MODE };
+  const version: unknown = import.meta.env.VITE_ALPHA_VERSION;
+  return { app: typeof version === "string" ? version : "development", mode: import.meta.env.MODE };
 }

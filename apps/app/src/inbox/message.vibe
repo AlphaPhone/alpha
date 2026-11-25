@@ -10,16 +10,14 @@ import { Machine as Preferences } from "../../gen/app__settings__preferences.eff
 import { loadsImages } from "../../gen/app__settings__preferences.effect.vibe"
 import type { Actor } from "../../gen/app__inbox__access.ts"
 import { reviewMailContext, MailContextRefused } from "@elizaos/plugin-inbox-client"
-import { Agent } from "../platform/agent.vibe"
+import { Agent, Cloud } from "../platform/index.vibe"
 import { MailQuestions, sourceOf, type MailQuestion } from "./mail-context.vibe"
-import { Cloud } from "../platform/cloud.vibe"
-import { Attempts } from "../runtime/attempts.vibe"
-import { type Job, answer, contained, following, hearing, reacting, run, started, stream, together } from "../runtime/reactor.vibe"
+import { type Attempts, type Job, answer, contained, following, hearing, reacting, run, started, stream, together } from "../runtime/index.vibe"
 import { Mail, asked, body, faultOf, relabel, revisionOf } from "./gmail.vibe"
 import { backFromDraft } from "./composer.vibe"
 import { ownerChanges } from "./mailbox.vibe"
 import { prepareMessage } from "./mail-html.ts"
-import { ThreadPages, threadFault, threadMessage, threadPages } from "./thread.vibe"
+import { type ThreadPages, threadFault, threadMessage, threadPages } from "./thread.vibe"
 import { type AttachmentPreviews, attachmentPreviews, forgetPreview, handleAttachment } from "./attachment.vibe"
 
 module web {
@@ -162,12 +160,15 @@ const access = started(effect {
   const grants = Stream.zipLatest(list.changes, view.changes) |> Stream.map(%, ([mailbox, shown]) => ({ shown, access: accessOf(mailbox, shown.account), known: mailbox.accounts.status === "Loaded" }))
   try Stream.runForEach(Stream.changesWith(grants, (a, b) => JSON.stringify(a.access) === JSON.stringify(b.access) && a.known === b.known && a.shown.account === b.shown.account), effect ({ shown, access, known }) => {
     if (shown.account === 0) return
-    try contained(view.send({ type: "accessChanged", access }), "the grant of the message open")
     // spec/app/inbox/message.md, "While the list shows its saved copy and access is being checked, a message saved on the phone opens from there, marked as saved"
-    if (known && shown.fromPhone) {
-      const remote = loadsImages(try (try Preferences).get())
-      try contained(view.send({ type: "accessKnown", access, remote }), "access known")
+    if (shown.fromPhone) {
+      if (known) {
+        const remote = loadsImages(try (try Preferences).get())
+        try contained(view.send({ type: "accessKnown", access, remote }), "access known")
+      }
+      return
     }
+    try contained(view.send({ type: "accessChanged", access }), "the grant of the message open")
   })
 }, "the grant of the message open")
 

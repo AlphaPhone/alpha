@@ -27,12 +27,12 @@ import { useMachine as useComms } from "../../gen/app__phone__comms.react.ts";
 import { Machine as ShellMachine, showing } from "../../gen/app__shell.effect.vibe";
 import type { Machine as LayersMachine } from "../../gen/app__shell__layers.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
-import { untimed } from "../runtime/reactor.vibe";
+import { untimed } from "../runtime/index.vibe";
 import { MailQuestions } from "../inbox/mail-context.vibe";
-import { home } from "../shell/shell.vibe";
+import { home } from "../shell/index.vibe";
 import { isCommsView } from "../shell/views.tsx";
 import { type MediaCard, MediaReview, namedReviewQuery } from "./media-review.vibe";
-import { Documents } from "../platform/documents.vibe";
+import { Documents } from "../platform/index.vibe";
 import { AttachmentSources } from "./AttachmentSources.tsx";
 import { askComms, freedom } from "./assistant.vibe";
 import { acceptedFiles, acceptedPhotos, chooseDocument, type FileTarget, insertFiles, previewFile, readChosenDocument, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
@@ -40,14 +40,13 @@ import { chip, type MessageActions, useMessageRows } from "./history.tsx";
 import { ReplyFailure } from "./ReplyFailure.tsx";
 import { shownReply } from "./shown.ts";
 import { type Attached, type Line, Talk } from "./talk.vibe";
-import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx";
-import { CommsBriefing } from "../phone/comms.vibe";
-import { displayNumber } from "../phone/words.ts";
+import { CommsTarget, type CommsTargetServices } from "../comms/ui.tsx";
+import { CommsBriefing, displayNumber } from "../comms/index.vibe";
 
 export interface AssistantProps {
   runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview | Documents, unknown>;
   messageActions?: MessageActions;
-  speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "voiceNotice"> & { voice?: ReactNode | ((compact: boolean) => ReactNode) };
+  speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & { voice?: ReactNode | ((compact: boolean) => ReactNode) };
   canReadAloud?: boolean;
 }
 
@@ -193,32 +192,125 @@ function MailReviewDialogs({ open, review, attach, dismiss }: MailReviewDialogsP
   );
 }
 
-interface DockHandleProps {
+function useDockGesture({ dock, sectionRef, composerRef, open, compact, assistantDetent, onComms, hasShell }: {
   dock: ReturnType<typeof useDock>;
-  detent: Parameters<typeof dockOpen>[0];
+  sectionRef: RefObject<HTMLElement | null>;
+  composerRef: RefObject<HTMLTextAreaElement | null>;
+  open: boolean;
   compact: boolean;
-  field: RefObject<HTMLTextAreaElement | null>;
-}
-
-function DockHandle({ dock, detent, compact, field }: DockHandleProps) {
-  const open = dockOpen(detent);
-  return (
+  assistantDetent: Parameters<typeof dockOpen>[0];
+  onComms: boolean;
+  hasShell: boolean;
+}) {
+  const [following, setFollowing] = useState<number | undefined>(undefined);
+  const gestureRef = useRef<{ y: number; height: number; moved: boolean } | undefined>(undefined);
+  // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": the sheet follows the finger, and the release lands where the dock's rules say
+  const begin = (y: number) => {
+    const shown = sectionRef.current?.getBoundingClientRect().height ?? 0;
+    gestureRef.current = { y, height: open ? Math.max(shown, barHeight) : barHeight, moved: false };
+    void dock.send({ type: "press", detent: assistantDetent, now: untimed });
+  };
+  const follow = (y: number) => {
+    const g = gestureRef.current;
+    if (!g || !dock.can({ type: "drag" }) && dock.state?.gesture !== "Dragging") return;
+    if (!g.moved) {
+      g.moved = true;
+      void dock.send({ type: "drag" });
+    }
+    setFollowing(Math.min(window.innerHeight, Math.max(barHeight, Math.round(g.height + g.y - y))));
+  };
+  const settle = ({ direction, flick, y }: AssistantRelease) => {
+    const g = gestureRef.current;
+    gestureRef.current = undefined;
+    setFollowing(undefined);
+    const height = g ? Math.max(0, Math.round(g.height + g.y - y)) : Math.max(0, Math.round(window.innerHeight - y));
+    void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: barHeight, full: window.innerHeight, now: untimed });
+  };
+  const letGo = () => {
+    gestureRef.current = undefined;
+    setFollowing(undefined);
+    void dock.send({ type: "shift", now: untimed });
+  };
+  const grabber = hasShell ? (
     <AssistantGrabber
       variant={open ? "handle" : "mark"}
-      onPress={() => { void dock.send({ type: "press", detent, now: untimed }); }}
-      onDrag={() => { void dock.send({ type: "drag" }); }}
-      onRelease={({ direction, flick, y }) => {
-        const height = Math.max(0, Math.round(window.innerHeight - y));
-        void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: barHeight, full: window.innerHeight, now: untimed });
-      }}
+      onPress={({ y }) => begin(y)}
+      onDrag={({ y }) => follow(y)}
+      onRelease={settle}
       onLift={() => {
+        gestureRef.current = undefined;
+        setFollowing(undefined);
         void dock.send({ type: "lift", now: untimed });
-        if (!open && !compact) field.current?.focus();
+        if (!open && !compact) composerRef.current?.focus();
       }}
-      onCancel={() => { void dock.send({ type: "shift", now: untimed }); }}
+      onCancel={letGo}
       onTap={({ keyboard }) => {
         void dock.send({ type: "click", now: untimed });
-        if (!open && keyboard && !compact) field.current?.focus();
+        if (!open && keyboard && !compact) composerRef.current?.focus();
+      }}
+    />
+  ) : undefined;
+  const barDrag = !open && !onComms ? { onPress: ({ y }: { y: number }) => begin(y), onDrag: ({ y }: { y: number }) => follow(y), onRelease: settle, onLift: letGo, onCancel: letGo } : undefined;
+  return { following, grabber, barDrag };
+}
+
+function ChatScrim({ active, typing, composerRef, onDismiss }: {
+  active: boolean;
+  typing: boolean;
+  composerRef: RefObject<HTMLTextAreaElement | null>;
+  onDismiss: () => void;
+}) {
+  const scrimRef = useRef<number | undefined>(undefined);
+  if (!active) return null;
+  return (
+    <div
+      aria-hidden
+      data-alpha-chat-scrim=""
+      className="fixed inset-0 z-dock touch-none"
+      onPointerDown={(event) => {
+        event.preventDefault();
+        scrimRef.current = event.pointerId;
+      }}
+      onPointerUp={(event) => {
+        if (scrimRef.current !== event.pointerId) return;
+        scrimRef.current = undefined;
+        if (typing) composerRef.current?.blur();
+        onDismiss();
+      }}
+      onPointerCancel={() => { scrimRef.current = undefined; }}
+    />
+  );
+}
+
+function AssistantSearchModal({ search, finding, seen, shownChosen, free }: {
+  search: ReturnType<typeof useSearch>;
+  finding: NonNullable<ReturnType<typeof useSearch>["state"]>;
+  seen: ReturnType<Talk["Service"]["board"]["snapshot"]>;
+  shownChosen: number;
+  free: { replying: boolean; holding: boolean };
+}) {
+  const [words, setWords] = useState("");
+  return (
+    <AssistantSearchSheet
+      open={finding.open}
+      onOpenChange={(open) => { if (!open && search.can({ type: "closeSearch" })) void search.send({ type: "closeSearch" }); }}
+      search={{
+        words,
+        hits: seen.hits.slice(0, finding.shown).map((hit, at) => ({ id: String(at + 1), chat: seen.titles.get(hit.conversation) ?? "Ask Alpha", snippet: hit.text })),
+        status: finding.hits.status === "Idle" ? "idle" : finding.hits.status === "Loading" ? "loading" : finding.hits.status === "Failed" ? "failed" : "loaded",
+        blocked: free.replying || free.holding,
+        onWordsChange: (typed) => {
+          setWords(typed);
+          const find = { type: "find", words: typed.trim() } as const;
+          if (search.can(find)) void search.send(find);
+        },
+        onMore: search.can({ type: "more" }) ? () => void search.send({ type: "more" }) : undefined,
+        onOpenHit: (id) => {
+          const hit = seen.hits[Number(id) - 1];
+          if (hit === undefined) return;
+          const open = { type: "openHit", hit: Number(id), conversation: hit.conversation, message: hit.message, here: hit.conversation === shownChosen, ...free } as const;
+          if (search.can(open)) void search.send(open);
+        },
       }}
     />
   );
@@ -241,17 +333,15 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const mail = useMemo(() => runtime.runSync(MailQuestions), [runtime]);
   const mailStore = useMemo(() => ({ subscribe: (listener: () => void) => mail.subscribe(listener), snapshot: () => mail.snapshot() }), [mail]);
   const reviewed = useSyncExternalStore(mailStore.subscribe, mailStore.snapshot);
-  const [following, setFollowing] = useState<number | undefined>(undefined);
-  const gestureRef = useRef<{ y: number; height: number; moved: boolean } | undefined>(undefined);
   const sectionRef = useRef<HTMLElement>(null);
-  const scrimRef = useRef<number | undefined>(undefined);
-  const [words, setWords] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const focusOnRevealRef = useRef(false);
   const currentView = shell.state?.trail.at(-1);
   const onComms = isCommsView(currentView);
   const assistantDetent = shell.state?.assistant ?? "Bar";
   const compact = assistantDetent === "Bar" && currentView !== undefined && currentView !== "Browser" && !onComms;
+  const open = dockOpen(assistantDetent);
+  const { following, grabber, barDrag } = useDockGesture({ dock, sectionRef, composerRef, open, compact, assistantDetent, onComms, hasShell: Boolean(shell.state) });
   const composerField = useCallback((element: HTMLTextAreaElement | null) => {
     composerRef.current = element;
     if (element && !compact && focusOnRevealRef.current) {
@@ -344,7 +434,6 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const failed = seen.failure === undefined ? [] : [{ id: "failure", author: "alpha", text: "", children: <ReplyFailure {...seen.failure} fix={seen.failure.kind === "OutOfFunds" ? "FundingFix" : seen.failure.fix} live onRetry={() => type(board.lastSent)} onSettings={settingsAction ? onSettings : undefined} /> } as const];
   const quoted = board.line(shown.chosen, writing.editor.quote)?.text;
   const view = talking.context.showing.tag === "App" ? talking.context.showing.view : "Home";
-  const open = dockOpen(assistantDetent);
   const full = assistantDetent === "Full";
   const keptHeight = assistantDetent === "Sheet" && dock.state && dock.state.kept > 0 ? dock.state.kept : undefined;
   const carry = (asks: readonly Ask[]) => {
@@ -368,53 +457,6 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       if (sent._tag === "Failure") focusOnRevealRef.current = false;
     });
   };
-  // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": the sheet follows the finger, and the release lands where the dock's rules say
-  const begin = (y: number) => {
-    const shown = sectionRef.current?.getBoundingClientRect().height ?? 0;
-    gestureRef.current = { y, height: open ? Math.max(shown, barHeight) : barHeight, moved: false };
-    void dock.send({ type: "press", detent: assistantDetent, now: untimed });
-  };
-  const follow = (y: number) => {
-    const g = gestureRef.current;
-    if (!g || !dock.can({ type: "drag" }) && dock.state?.gesture !== "Dragging") return;
-    if (!g.moved) {
-      g.moved = true;
-      void dock.send({ type: "drag" });
-    }
-    setFollowing(Math.min(window.innerHeight, Math.max(barHeight, Math.round(g.height + g.y - y))));
-  };
-  const settle = ({ direction, flick, y }: AssistantRelease) => {
-    const g = gestureRef.current;
-    gestureRef.current = undefined;
-    setFollowing(undefined);
-    const height = g ? Math.max(0, Math.round(g.height + g.y - y)) : Math.max(0, Math.round(window.innerHeight - y));
-    void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: barHeight, full: window.innerHeight, now: untimed });
-  };
-  const letGo = () => {
-    gestureRef.current = undefined;
-    setFollowing(undefined);
-    void dock.send({ type: "shift", now: untimed });
-  };
-  const grabber = shell.state ? (
-    <AssistantGrabber
-      variant={open ? "handle" : "mark"}
-      onPress={({ y }) => begin(y)}
-      onDrag={({ y }) => follow(y)}
-      onRelease={settle}
-      onLift={() => {
-        gestureRef.current = undefined;
-        setFollowing(undefined);
-        void dock.send({ type: "lift", now: untimed });
-        if (!open && !compact) composerRef.current?.focus();
-      }}
-      onCancel={letGo}
-      onTap={({ keyboard }) => {
-        void dock.send({ type: "click", now: untimed });
-        if (!open && keyboard && !compact) composerRef.current?.focus();
-      }}
-    />
-  ) : undefined;
-  const barDrag = !open && !onComms ? { onPress: ({ y }: { y: number }) => begin(y), onDrag: ({ y }: { y: number }) => follow(y), onRelease: settle, onLift: letGo, onCancel: letGo } : undefined;
   const live = following !== undefined;
   const scrim = !onComms && !live && !dock.state?.voice && currentView !== "Camera" && (assistantDetent === "Sheet" || assistantDetent === "Typing");
 
@@ -422,24 +464,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
     <>
       <AssistantAttachments runtime={runtime} attachments={attachments} preview={previewed} targetRef={fileTargetRef} composerRef={composerRef} />
       {onComms && full && <CommsTarget runtime={runtime} placement="strip" />}
-      {scrim ? (
-        <div
-          aria-hidden
-          data-alpha-chat-scrim=""
-          className="fixed inset-0 z-dock touch-none"
-          onPointerDown={(event) => {
-            event.preventDefault();
-            scrimRef.current = event.pointerId;
-          }}
-          onPointerUp={(event) => {
-            if (scrimRef.current !== event.pointerId) return;
-            scrimRef.current = undefined;
-            if (assistantDetent === "Typing") composerRef.current?.blur();
-            if (shell.can(back)) void shell.send(back);
-          }}
-          onPointerCancel={() => { scrimRef.current = undefined; }}
-        />
-      ) : null}
+      <ChatScrim active={scrim} typing={assistantDetent === "Typing"} composerRef={composerRef} onDismiss={() => { if (shell.can(back)) void shell.send(back); }} />
       {(!onComms || open) && <AssistantConversation
         ref={sectionRef}
         detent={live && !onComms ? "sheet" : assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
@@ -541,28 +566,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         }}
       />}
       <MailReviewDialogs open={!onComms && open} review={reviewed} attach={attachMail} dismiss={() => mail.show({})} />
-      <AssistantSearchSheet
-        open={finding.open}
-        onOpenChange={(open) => { if (!open && search.can({ type: "closeSearch" })) void search.send({ type: "closeSearch" }); }}
-        search={{
-          words,
-          hits: seen.hits.slice(0, finding.shown).map((hit, at) => ({ id: String(at + 1), chat: seen.titles.get(hit.conversation) ?? "Ask Alpha", snippet: hit.text })),
-          status: finding.hits.status === "Idle" ? "idle" : finding.hits.status === "Loading" ? "loading" : finding.hits.status === "Failed" ? "failed" : "loaded",
-          blocked: free.replying || free.holding,
-          onWordsChange: (typed) => {
-            setWords(typed);
-            const find = { type: "find", words: typed.trim() } as const;
-            if (search.can(find)) void search.send(find);
-          },
-          onMore: search.can({ type: "more" }) ? () => void search.send({ type: "more" }) : undefined,
-          onOpenHit: (id) => {
-            const hit = seen.hits[Number(id) - 1];
-            if (hit === undefined) return;
-            const open = { type: "openHit", hit: Number(id), conversation: hit.conversation, message: hit.message, here: hit.conversation === shown.chosen, ...free } as const;
-            if (search.can(open)) void search.send(open);
-          },
-        }}
-      />
+      <AssistantSearchModal search={search} finding={finding} seen={seen} shownChosen={shown.chosen} free={free} />
     </>
   );
 }

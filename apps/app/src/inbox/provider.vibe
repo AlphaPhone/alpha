@@ -1,7 +1,6 @@
 // spec/app/inbox/index.md, "Story: See my mail"; spec/app/inbox/message.md, "Story: Read a message"
 import { managedGmailClient, type ManagedGmailClient, type ManagedGmailTransport, AttachmentRefused, MailProtocolFailed, MailUnreachable, reviewOpaqueAttachment, type MailAttachmentReviewer } from "@elizaos/plugin-inbox-client"
-import type { Account } from "../platform/cloud.vibe"
-import { Garbled, Refused } from "../platform/remote.vibe"
+import { type Account, Garbled, Refused } from "../platform/index.vibe"
 
 const previewLimit = 512 * 1024
 

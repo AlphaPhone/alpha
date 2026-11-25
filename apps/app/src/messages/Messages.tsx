@@ -12,13 +12,12 @@ import { content, noMatches, noThreads, smsNeeded, threadsFailed } from "../../g
 import { useMachine as useMessages } from "../../gen/app__messages.react.ts";
 import { delivered, sentAll, uncertain } from "../../gen/app__messages__sending.ts";
 import { useMachine as useComposer } from "../../gen/app__messages__composer.react.ts";
-import { Time } from "../runtime/time.vibe";
-import { callerInitials, displayNumber, shortWhen } from "../phone/words.ts";
+import { Time, untimed } from "../runtime/index.vibe";
+import { callerInitials, displayNumber, shortWhen } from "../comms/index.vibe";
 import { Drafts, attachAll, prepare, sameSubscription, supported } from "./composer.vibe";
 import { Conversations, Inbox, titleOf } from "./messages.vibe";
-import { CommsBar, useCommsDock } from "../phone/CommsBar.tsx";
-import type { Resident } from "../runtime/area.tsx";
-import { untimed } from "../runtime/reactor.vibe";
+import { CommsBar, useCommsDock } from "../comms/ui.tsx";
+import type { Resident } from "../runtime/ui.tsx";
 import { useMachine as useVoice } from "../../gen/app__voice.react.ts";
 import { dictateMessage, type voiceArea } from "./dictation.vibe";
 

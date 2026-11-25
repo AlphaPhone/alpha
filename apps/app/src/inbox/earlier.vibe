@@ -1,12 +1,11 @@
 // spec/app/inbox/drafts.md, "Story: Keep the drafts the earlier Alpha kept"; spec/app/inbox/index.md, "The account the owner last chose in the earlier Alpha is chosen once, where the accounts have answered and none is selected, while it is connected"; spec/app/platform/adoption.md, "A value is moved by copying it only where the new place is still empty, and its earlier place is cleared only once the new place holds a value"
-import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import type * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Inbox from "../../gen/app__inbox.effect.vibe"
 import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import type { Phase, Receipt } from "../../gen/app__inbox__drafts.effect.vibe"
 import type { Before, Kind } from "../../gen/app__inbox__letter.ts"
-import { type Place, adopt, earlierSlot, keptAt } from "../platform/adoption.vibe"
-import { Cloud } from "../platform/cloud.vibe"
-import { contained, started } from "../runtime/reactor.vibe"
+import { type Place, adopt, earlierSlot, keptAt, Cloud } from "../platform/index.vibe"
+import { contained, started } from "../runtime/index.vibe"
 import { mibOf } from "./adding.vibe"
 import { type Words, Letters, acceptable, nothing } from "./composer.vibe"
 import { Mail, asked } from "./gmail.vibe"
@@ -21,7 +20,7 @@ module digest {
 import { sha256Hex } from digest
 
 const Addresses = Schema.Array(Schema.String)
-const EarlierDraft = Schema.Struct({
+const EarlierDraftSchema = Schema.Struct({
   version: Schema.Literal(1), id: Schema.NonEmptyString, owner: Schema.String,
   to: Addresses, cc: Schema.optionalKey(Addresses), bcc: Schema.optionalKey(Addresses),
   subject: Schema.String, body: Schema.String,
@@ -32,13 +31,13 @@ const EarlierDraft = Schema.Struct({
   reply: Schema.optionalKey(Schema.Struct({ messageId: Schema.String })),
   earlierThanSent: Schema.optionalKey(Schema.Literal(true)),
 })
-type EarlierDraft = typeof EarlierDraft.Type
+type EarlierDraft = typeof EarlierDraftSchema.Type
 
-const Saved = Schema.fromJsonString(EarlierDraft)
-const Shelved = Schema.fromJsonString(Schema.Struct({ version: Schema.Literal(1), owner: Schema.String, items: Schema.Array(Schema.Struct({ draft: EarlierDraft })) }))
+const Saved = Schema.fromJsonString(EarlierDraftSchema)
+const Shelved = Schema.fromJsonString(Schema.Struct({ version: Schema.Literal(1), owner: Schema.String, items: Schema.Array(Schema.Struct({ draft: EarlierDraftSchema })) }))
 const Retained = Schema.fromJsonString(Schema.Struct({ version: Schema.Literal(1), binding: Schema.String, text: Schema.String }))
-const Unsaved = Schema.fromJsonString(Schema.Struct({ version: Schema.Literal(1), owner: Schema.String, draft: EarlierDraft }))
-const Journal = Schema.fromJsonString(Schema.Struct({
+const Unsaved = Schema.fromJsonString(Schema.Struct({ version: Schema.Literal(1), owner: Schema.String, draft: EarlierDraftSchema }))
+const JournalSchema = Schema.fromJsonString(Schema.Struct({
   version: Schema.Literal(1), owner: Schema.String, grantId: Schema.String, requestId: Schema.NonEmptyString,
   proposal: Schema.Struct({
     kind: Schema.String, to: Schema.optionalKey(Addresses), cc: Schema.optionalKey(Addresses), bcc: Schema.optionalKey(Addresses),
@@ -48,7 +47,7 @@ const Journal = Schema.fromJsonString(Schema.Struct({
   receipt: Schema.NullOr(Schema.Struct({ state: Schema.String })),
   source: Schema.optionalKey(Schema.Struct({ draftId: Schema.NonEmptyString })),
 }))
-type Journal = typeof Journal.Type
+type Journal = typeof JournalSchema.Type
 
 /** The cloud environments the earlier Alpha signed in to, each of which named its own owner. */
 const environments = ["production", "staging"] as const
@@ -133,7 +132,7 @@ effect function adoptAccount(environment: string, user: string, organization: st
   if (named === undefined) return
   const operation = earlierSlot(`inbox-operation:v1:${named.operation}`)
   const kept = operation.read() catch () => Option.none<string>()
-  const record = Option.isNone(kept) ? undefined : decoded(Journal, kept.value)
+  const record = Option.isNone(kept) ? undefined : decoded(JournalSchema, kept.value)
   const ours = record !== undefined && record.owner === owner && record.grantId === grant ? record : undefined
   const receipt = ours === undefined ? "NoReceipt" : try receiptNow(ours, grant)
   const places: ReadonlyArray<readonly [Place<string>, (text: string) => ReadonlyArray<EarlierDraft> | undefined]> = [

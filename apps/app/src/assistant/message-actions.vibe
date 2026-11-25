@@ -3,11 +3,11 @@ import * as Chats from "../../gen/app__assistant__chats.effect.vibe"
 import * as Inbox from "../../gen/app__inbox.effect.vibe"
 import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import type { Machine as OffersMachine } from "../../gen/app__inbox__suggestion.effect.vibe"
-import * as Shell from "../../gen/app__shell.effect.vibe"
+import type * as Shell from "../../gen/app__shell.effect.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { useInEmail, type Offers } from "../inbox/suggestion.vibe"
 import { say, type Said } from "../notices/toasts.vibe"
-import { Device } from "../platform/device.vibe"
+import { Device } from "../platform/index.vibe"
 import { Talk, type Line } from "./talk.vibe"
 
 /** The exact page and recorded message offered by the transcript. */

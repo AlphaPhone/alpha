@@ -1,6 +1,6 @@
 // spec/app/files/scan.md, "Story: Arrange the pages"; spec/app/files/scan.md, "Story: Keep the scan as I work"; spec/app/files/scan.md, "Story: Make the PDF, and keep the photo"
 import { createScanDraftStore, scannedLinks, type ScanTextLine } from "@elizaos/plugin-files-client"
-import { registered } from "../platform/device.vibe"
+import { registered } from "../platform/index.vibe"
 import type { Page } from "../../gen/app__files__scanDraft.ts"
 
 export interface ScanImage {

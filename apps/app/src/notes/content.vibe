@@ -4,9 +4,8 @@ import { noteFolderId, notesFolderName, type NoteFolder } from "@elizaos/plugin-
 import type { NoteFormat, NotesSnapshot, StickyNote } from "@elizaos/plugin-notes-client"
 import type { Folder, Row } from "../../gen/app__notes.effect.vibe"
 import { type Kind, type Origin, type Source, unlinked } from "../../gen/app__notes__note.effect.vibe"
-import { Vault, type Slot } from "../platform/vault.vibe"
-import { fresh } from "../runtime/attempts.vibe"
-import { Time } from "../runtime/time.vibe"
+import { Vault, type Slot } from "../platform/index.vibe"
+import { fresh, Time } from "../runtime/index.vibe"
 
 module pure {
   /** Stable numbers for canonical identifiers, with a separate namespace per kind of identifier. @throws {never} */

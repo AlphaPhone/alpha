@@ -1,4 +1,4 @@
-import { area } from "../runtime/area.tsx";
+import { area } from "../runtime/ui.tsx";
 import { Inbox } from "./Inbox.tsx";
 import { back, reading } from "./message.vibe";
 

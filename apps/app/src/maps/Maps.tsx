@@ -1,9 +1,9 @@
 // spec/app/maps/index.md, "Story: Move between the screen's modes"; spec/app/maps/index.md, "Story: Search for a place"; spec/app/maps/index.md, "Story: Look at a place"; spec/app/maps/index.md, "Story: Get directions"; spec/app/maps/index.md, "Story: Navigate"; spec/app/maps/index.md, "Story: Use my location"; spec/app/maps/index.md, "Story: Let the agent help with Maps"; spec/app/maps/credits.md, "Story: See the map for what I am looking at"
 import { Alert, Banner, Button, cn, Input, type MapCamera, MapsChip, MapsPillButton, MapsPlaceRow, MapsRoundButton, MapsSearchBar, MapsSheet, MapsStatusCard, type MapStyle, MapView, Spinner } from "@repo/ui";
 import { ArrowUp, ArrowUpDown, ArrowUpLeft, ArrowUpRight, Bike, Bus, Car, Check, ChevronLeft, Clock, Coffee, CornerUpLeft, CornerUpRight, Dumbbell, ExternalLink, Footprints, Fuel, Globe, Info, Link, LocateFixed, type LucideIcon, Mail, MapPin, Navigation, Phone, RotateCw, Search, Share2, ShoppingCart, SquarePlus, Star, Undo2, Utensils, X } from "lucide-react";
-import { useState, useSyncExternalStore } from "react";
-import type { Resident, Shown } from "../runtime/area.tsx";
-import { untimed } from "../runtime/reactor.vibe";
+import { createElement, useState, useSyncExternalStore } from "react";
+import type { Resident, Shown } from "../runtime/ui.tsx";
+import { untimed } from "../runtime/index.vibe";
 import { AppBack } from "../shell/AppBack.tsx";
 import { useMachine as useScreen } from "../../gen/app__maps.react.ts";
 import { followsThePhone, googleShown, mode, panPixels, saysOutsideCoverage } from "../../gen/app__maps.ts";
@@ -552,12 +552,10 @@ function Guidance({ screen, state, seen, spot, kept, way }: { screen: Screen; st
   const after = way?.turns[state.trip.turn + 1];
   const arrived = state.trip.guidance === "Arrived";
   const precise = seen.here !== undefined && !state.imprecise && !seen.here.approximate && !state.trip.rerouting;
-  const TurnIcon = arrived ? Check : turnIcon(turn?.maneuver);
-  const NextIcon = turnIcon(after?.maneuver);
   return (
     <>
       <div data-host-chrome="" role="status" className="absolute inset-x-3 top-12.5 z-50 flex items-center gap-4 rounded-sheet bg-alpha px-5 py-4.5 text-alpha-foreground shadow-lg motion-safe:animate-drop in-data-[alpha-launcher]:top-23.5">
-        <TurnIcon aria-hidden className="size-13 shrink-0" />
+        {createElement(arrived ? Check : turnIcon(turn?.maneuver), { "aria-hidden": true, className: "size-13 shrink-0" })}
         <div className="min-w-0">
           {!arrived && precise && turn !== undefined && <div className="font-display text-4xl leading-none font-light">{distance(turn.meters)}</div>}
           <div className="mt-1 truncate text-lead font-semibold">
@@ -567,7 +565,7 @@ function Guidance({ screen, state, seen, spot, kept, way }: { screen: Screen; st
       </div>
       {!arrived && after !== undefined && (
         <div className="absolute top-39.5 left-7 z-10 flex h-10 items-center gap-2 rounded-b-lg bg-alpha px-3.5 text-sm font-semibold text-alpha-foreground brightness-75 in-data-[alpha-launcher]:top-50.5">
-          Then<NextIcon aria-hidden className="size-5 shrink-0" /><span className="max-w-55 truncate">{after.instruction}</span>
+          Then{createElement(turnIcon(after.maneuver), { "aria-hidden": true, className: "size-5 shrink-0" })}<span className="max-w-55 truncate">{after.instruction}</span>
         </div>
       )}
       {/* eslint-disable-next-line better-tailwindcss/no-unknown-classes -- Guidance stays dark in both themes, as on develop; `dark` is the design system's theme class. */}

@@ -1,6 +1,6 @@
 // spec/app/clock/world.md, "Story: Track times around the world"
 import * as World from "../../gen/app__clock__world.effect.vibe"
-import { reacting } from "../runtime/reactor.vibe"
+import { reacting } from "../runtime/index.vibe"
 
 /** Resident world clock machine holding pinned city ids across restarts. */
 export const worldClock = reacting(World, {

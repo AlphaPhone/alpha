@@ -23,20 +23,12 @@ import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
 import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
 import { syncClockNow } from "../clock/sync.vibe"
 import { type NoteTranscript, type NotesSelection, type RendererNote, noteSubjects, notesSelection, transcriptCurrent } from "../notes/selection.vibe"
-import type { NoteStore } from "../platform/notes.vibe"
+import { type NoteStore, type Telephony, Agent, isCloudFundsRefusal, Device, Location, type VoiceBridge, Refused, ask, outcomeOf } from "../platform/index.vibe"
 import { captureSmsSelection, type MessageSmsRequest, type SmsSelection, type SmsSelectionContext } from "../messages/agent-sim.vibe"
-import type { Telephony } from "../platform/telephony.vibe"
 import { syncRemindersNow } from "../reminders/reminders.vibe"
-import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
-import { Device } from "../platform/device.vibe"
-import { Location } from "../platform/location.vibe"
-import type { VoiceBridge } from "../platform/voice.vibe"
-import { Refused, ask, outcomeOf } from "../platform/remote.vibe"
-import { Attempts, fresh } from "../runtime/attempts.vibe"
-import { CommsPrompts, type CommsPrompt, commsViewOf } from "../phone/comms.vibe"
+import { Attempts, fresh, type Job, answer, applying, contained, following, reacting, run, started, stream, together, untimed, Time } from "../runtime/index.vibe"
+import { CommsPrompts, type CommsPrompt, commsViewOf } from "../comms/index.vibe"
 import { MailQuestions, withMail } from "../inbox/mail-context.vibe"
-import { type Job, answer, applying, contained, following, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
-import { Time } from "../runtime/time.vibe"
 import { VoiceWords } from "../voice/voice.vibe"
 import { MediaReview, mediaReview } from "./media-review.vibe"
 import { type Board, type Line, Talk, talk } from "./talk.vibe"
@@ -792,7 +784,26 @@ const looked = started(effect {
 }, "telling the screen")
 
 // spec/app/assistant/index.md, "When another conversation is shown, the last turn stays behind with its own"
-const left = following(Chats.Machine, (chats) => chats.chosen, Conversation.Machine, (): Conversation.Event => ({ type: "leave" }))
+const left = started(effect {
+  const chats = try Chats.Machine
+  const conversation = try Conversation.Machine
+  const { board } = try Talk
+  let seen = false
+  let previous = 0
+  try Stream.runForEach(chats.changes, effect (shown) => {
+    if (!seen) {
+      seen = true
+      previous = shown.chosen
+    } else if (shown.chosen !== previous) {
+      previous = shown.chosen
+      try contained(conversation.send({ type: "leave" }), "leaving the conversation")
+    }
+    const request = board.waitingRequest
+    if (request === undefined || Chats.making(shown)) return
+    board.waitingRequest = undefined
+    if (shown.chosen !== 0) try postRequest(request)
+  })
+}, "leaving conversation and sending waiting request")
 
 // spec/app/assistant/composer.md, "The slot is opened when the composer is shown, and opened again after it could not be read"
 const opening = following(Composer.Machine, (composer) => (composer.slot === "Closed" && composer.read.status !== "Loading" ? composer.binding : undefined), Composer.Machine, (binding): Composer.Event | undefined => (binding === undefined ? undefined : { type: "open" }))
@@ -866,17 +877,6 @@ export effect function askComms(request: CommsPrompt): void!!(Chats.Machine | Co
   const free = freedom(conversation, try (try Composer.Machine).get(), 0)
   if (!(try contained(chats.send({ type: "start", ...free }), "opening a conversation for the request"))) board.waitingRequest = undefined
 }
-
-const requested = started(effect {
-  const chats = try Chats.Machine
-  const { board } = try Talk
-  try Stream.runForEach(chats.changes, effect (shown) => {
-    const request = board.waitingRequest
-    if (request === undefined || Chats.making(shown)) return
-    board.waitingRequest = undefined
-    if (shown.chosen !== 0) try postRequest(request)
-  })
-}, "sending a request after opening its conversation")
 
 const submitted = started(effect {
   try Stream.runForEach((try CommsPrompts).submissions, askComms)
@@ -969,7 +969,7 @@ export const assisting = Layer.provideMerge(
     reacting(Dock, { carry: carryDock }),
     Attachments.machine(),
     reacting(Locator, { carry: carryLocator }),
-    reached, looked, left, opening, saving, bound, requested, submitted, allowing, forgetting, rested, keyboardRest, steppingBack, carried, carriedAloud,
+    reached, looked, left, opening, saving, bound, submitted, allowing, forgetting, rested, keyboardRest, steppingBack, carried, carriedAloud,
   ),
   Layer.mergeAll(Layer.fresh(turns), talk, handoffs),
 )

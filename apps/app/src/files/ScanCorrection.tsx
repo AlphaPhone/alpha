@@ -5,7 +5,7 @@ import { Effect, type Layer } from "effect";
 import { RotateCw } from "lucide-react";
 import { useState, type PointerEvent } from "react";
 import { useMachine } from "../../gen/app__files__correction.react.ts";
-import type { Resident, Shown } from "../runtime/area.tsx";
+import type { Resident, Shown } from "../runtime/ui.tsx";
 import { ScanAssets, setScanOutline, type scan } from "./scan.vibe";
 
 type Runtime = Layer.Success<typeof scan> | Resident;

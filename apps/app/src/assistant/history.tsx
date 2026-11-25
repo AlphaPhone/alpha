@@ -51,7 +51,7 @@ export function useMessageRows({ runtime, board, lines, chats, writing, replying
       const selection = { conversation: chats.chosen, page: chats.page.ticket, message };
       const blank = text.trim() === "";
       const copy = actions?.copy;
-      const useInEmail = actions?.useInEmail;
+      const sendToEmail = actions?.useInEmail;
       const fork = { type: "fork", message, replying, holding } as const;
       const quote = { type: "quote", message, recorded } as const;
       const editAgain = { type: "editAgain", message, mine: line.mine, recorded } as const;
@@ -66,7 +66,7 @@ export function useMessageRows({ runtime, board, lines, chats, writing, replying
         onFork: recorded && Chats.enabled(chats, fork) ? () => chat(fork) : undefined,
         onQuote: Composer.enabled(writing, quote) ? () => compose(quote) : undefined,
         onCopy: copy && Chats.copyableText(recorded, blank) ? () => copy(selection) : undefined,
-        onUseInEmail: useInEmail && Chats.textForEmail(recorded, blank, line.mine) ? () => useInEmail(selection) : undefined,
+        onUseInEmail: sendToEmail && Chats.textForEmail(recorded, blank, line.mine) ? () => sendToEmail(selection) : undefined,
         onEditAgain: Composer.enabled(writing, editAgain) ? () => { board.type(line.text); compose(editAgain); } : undefined,
         onReadAloud: canReadAloud && recorded && !blank && Chats.enabled(chats, readAloud) ? () => chat(readAloud) : undefined,
         onPreview: onPreview && line.attachments?.length ? (id) => {

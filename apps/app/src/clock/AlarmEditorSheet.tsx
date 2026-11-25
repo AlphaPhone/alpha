@@ -93,7 +93,7 @@ export function AlarmEditorSheet({ runtime, alarmId, onClose }: AlarmEditorSheet
               <Button variant="ghost" size="icon" aria-label="Increase hour" onClick={() => adjustHour(1)}>
                 <Plus aria-hidden className="size-4" />
               </Button>
-              <span className="font-display text-5xl font-light tabular-nums" aria-label="Selected hour">
+              <span className="font-display text-display font-light tabular-nums" aria-label="Selected hour">
                 {display.time.split(":")[0]}
               </span>
               <Button variant="ghost" size="icon" aria-label="Decrease hour" onClick={() => adjustHour(-1)}>
@@ -105,7 +105,7 @@ export function AlarmEditorSheet({ runtime, alarmId, onClose }: AlarmEditorSheet
               <Button variant="ghost" size="icon" aria-label="Increase minute" onClick={() => adjustMinute(1)}>
                 <Plus aria-hidden className="size-4" />
               </Button>
-              <span className="font-display text-5xl font-light tabular-nums" aria-label="Selected minute">
+              <span className="font-display text-display font-light tabular-nums" aria-label="Selected minute">
                 {display.time.split(":")[1]}
               </span>
               <Button variant="ghost" size="icon" aria-label="Decrease minute" onClick={() => adjustMinute(-1)}>

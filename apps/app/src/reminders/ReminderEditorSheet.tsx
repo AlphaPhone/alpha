@@ -6,7 +6,7 @@ import { Plus, Trash2, X } from "lucide-react";
 import { useState, useSyncExternalStore } from "react";
 import type * as Editor from "../../gen/app__reminders__editor.effect.vibe";
 import { useMachine as useEditorMachine } from "../../gen/app__reminders__editor.react.ts";
-import { Time } from "../runtime/time.vibe";
+import { Time } from "../runtime/index.vibe";
 import { editorDraftStore, type ReminderEditorFields, updateEditorDraft } from "./editor.vibe";
 import { inputTimeToMinute, minuteToInputTime, quickDatePresets } from "./recurrence.ts";
 import type { ReminderListRecord, ReminderPriority, ReminderRecurrence, ReminderSubtaskRecord } from "./store.ts";

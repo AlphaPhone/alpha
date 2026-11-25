@@ -10,16 +10,16 @@ import { useMachine as useVoice } from "../../gen/app__voice.react.ts";
 import { quiet } from "../../gen/app__voice.ts";
 import { useMachine as useSpeaker } from "../../gen/app__voice__output.react.ts";
 import { voiceArea } from "../messages/dictation.vibe";
-import { VoiceBridge } from "../platform/voice.vibe";
-import { VoiceEnd } from "../phone/CommsTarget.tsx";
-import { area, type Resident, type Shown } from "../runtime/area.tsx";
-import { applying, following, together, untimed } from "../runtime/reactor.vibe";
-import { keyboardVoice } from "../shell/canvas.vibe";
+import { VoiceBridge } from "../platform/index.vibe";
+import { VoiceEnd } from "../comms/ui.tsx";
+import { area, type Resident, type Shown } from "../runtime/ui.tsx";
+import { applying, following, together, untimed } from "../runtime/index.vibe";
+import { keyboardVoice } from "../shell/index.vibe";
 import { voiceReported } from "../update/activity.vibe";
 import { TalkControls } from "../voice/TalkControls.tsx";
 import { DictationControls } from "../voice/DictationControls.tsx";
 import { Assistant } from "./Assistant.tsx";
-import { assistantBack, assisting } from "./assistant.vibe";
+import { assistantBack, assisting, spokenScreen } from "./assistant.vibe";
 import { copyMessage, emailDestination, emailMessage } from "./message-actions.vibe";
 import { dictate } from "./dictation.vibe";
 import { aloud } from "./read-aloud.vibe";
@@ -28,7 +28,7 @@ import { beginTalk, commsVoicePanel, talkFromComms } from "./voice-entry.vibe";
 const voiceOwnsComposer = (state: VoiceState) => !quiet(state) || state.recorder.stage !== "Closed";
 
 const screens = together(
-  assisting, voiceArea, aloud, talkFromComms, commsVoicePanel,
+  assisting, voiceArea, aloud, talkFromComms, spokenScreen, commsVoicePanel,
   following(Voice, voiceOwnsComposer, Dock, (on) => ({ type: "voicing", on, now: untimed } as const)),
   applying(Voice, voiceOwnsComposer, keyboardVoice),
   voiceReported("assistant"),
@@ -57,14 +57,16 @@ function LiveAssistant({ runtime }: Shown<Layer.Success<typeof screens> | Reside
     canReadAloud={readingAllowed}
     messageActions={{
       copy: (selection) => void runtime.runPromise(copyMessage(selection)),
+      // eslint-disable-next-line @eslint-react/no-unnecessary-use-prefix -- message action callback prop name, not a React hook
       useInEmail: destination ? (selection) => void runtime.runPromise(emailMessage(selection, destination)) : undefined,
     }}
     speech={{
-      onTalk: canTalk ? () => void runtime.runPromise(beginTalk()) : !available && noCall ? () => undefined : undefined,
+      showUnavailableTalk: !available,
+      onTalk: canTalk ? () => void runtime.runPromise(beginTalk()) : undefined,
       onDictate: canDictate ? () => void runtime.runPromise(dictate()) : undefined,
       voice: recorder !== undefined && recorder.stage !== "Closed" && recorder.field === "ComposerField"
         ? <DictationControls runtime={runtime} />
-        : voice.state !== undefined && !quiet(voice.state) ? <TalkControls runtime={runtime} trailing={<VoiceEnd runtime={runtime} />} /> : undefined,
+        : voice.state !== undefined && !quiet(voice.state) ? (compact) => <TalkControls compact={compact} runtime={runtime} trailing={<VoiceEnd runtime={runtime} />} /> : undefined,
     }}
   />;
 }

@@ -3,10 +3,8 @@ import type { StagedDeletion, ListedVoicemail, VoicemailId, VoicemailListing } f
 import { Machine as PhoneMachine, liveCall } from "../../gen/app__phone.effect.vibe"
 import * as Voicemail from "../../gen/app__phone__voicemail.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__phone__voicemail.effect.vibe"
-import { type Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
-import { recognizesVoicemail, transcribeVoicemail } from "../platform/voice.vibe"
-import { type Job, answer, applying, contained, following, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
-import { Time } from "../runtime/time.vibe"
+import { type Telephony, TelephonyRefused, namesOf, telephony, recognizesVoicemail, transcribeVoicemail } from "../platform/index.vibe"
+import { type Job, answer, applying, contained, following, hearing, reacting, run, started, together, Time } from "../runtime/index.vibe"
 
 /** What Voicemail counts, kept beside it: the voicemails last listed, the one open, its audio as a playable source and its transcript. */
 export interface Heard {

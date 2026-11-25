@@ -38,8 +38,8 @@ function toSegment(p: Point, a: Point, b: Point): { away: number; along: number 
 /** The distance from `p` to the nearest point of `line`, in whole meters. @throws {never} */
 export function toLine(p: Point, line: readonly Point[]): number {
   let nearest = Number.POSITIVE_INFINITY;
-  for (let at = 1; at < line.length; at++) nearest = Math.min(nearest, toSegment(p, line[at - 1]!, line[at]!).away);
-  return Math.round(line.length === 1 ? meters(p, line[0]!) : nearest);
+  for (let at = 1; at < line.length; at++) nearest = Math.min(nearest, toSegment(p, line[at - 1], line[at]).away);
+  return Math.round(line.length === 1 ? meters(p, line[0]) : nearest);
 }
 
 /**

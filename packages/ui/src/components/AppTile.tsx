@@ -14,7 +14,7 @@ export type AppTileProps = Omit<ComponentProps<"button">, "children"> & {
 export function AppTile({ label, icon, badge, type = "button", className, ...props }: AppTileProps) {
   return (
     <button type={type} className={cn("focus-visible:outline-none", launcherRing, "group flex min-w-0 flex-col items-center gap-[calc(var(--alpha-home-spacing,var(--spacing))*2)] rounded-tile disabled:pointer-events-none disabled:opacity-50", className)} {...props}>
-      <span aria-hidden className="relative flex size-[calc(var(--alpha-home-spacing,var(--spacing))*16)] items-center justify-center rounded-[min(var(--radius-tile),calc(var(--alpha-home-spacing,var(--spacing))*5.5))] bg-secondary text-foreground">
+      <span aria-hidden className="relative flex size-[calc(var(--alpha-home-spacing,var(--spacing))*16)] items-center justify-center rounded-tile bg-secondary text-foreground" style={{ borderRadius: "min(var(--radius-tile), calc(var(--alpha-home-spacing, var(--spacing)) * 5.5))" }}>
         <span className="flex transition-opacity duration-fast ease-out group-active:opacity-55 motion-reduce:transition-none [&>svg]:size-[calc(var(--alpha-home-spacing,var(--spacing))*7.5)] [&>img]:size-[calc(var(--alpha-home-spacing,var(--spacing))*11)]">{icon}</span>
         {badge ? <span className="absolute top-3 right-3 size-2 rounded-full bg-alpha" /> : null}
       </span>

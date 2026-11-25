@@ -4,7 +4,7 @@ import type { Effect as Out, Event } from "../../gen/app__calendar__deletions.ef
 import * as Editor from "../../gen/app__calendar__editor.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Notices from "../../gen/app__notices__toasts.effect.vibe"
-import { type Due, type Job, due, following, hearing, reacting, tell, together } from "../runtime/reactor.vibe"
+import { type Due, type Job, due, following, hearing, reacting, tell, together } from "../runtime/index.vibe"
 import { shown } from "./shown.ts"
 
 // spec/app/calendar/deletions.md, "Confirming a deletion holds it; a deletion still waiting is sent first, so the only Undo shown is the newest"; spec/app/calendar/deletions.md, "A refused send shows the event again and says it was not deleted; a sent deletion hides it until a read no longer has it unchanged"; spec/app/calendar/deletions.md, "A deletion is sent only when its window ended with its notice gone, when the owner leaves, when a newer one is confirmed, or when the owner sends one a restart paused, at the revision confirmed"

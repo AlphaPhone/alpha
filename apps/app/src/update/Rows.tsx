@@ -7,8 +7,8 @@ import {
   automaticStatus, checkLabel, checking, downloading, installLabel, installRowShown, noteText, offerName, offerNotes,
 } from "../../gen/app__update.ts";
 import { useMachine } from "../../gen/app__update.react.ts";
-import { useTimed } from "../runtime/react.ts";
-import type { Time } from "../runtime/time.vibe";
+import { useTimed } from "../runtime/ui.tsx";
+import type { Time } from "../runtime/index.vibe";
 
 export interface UpdateRowsProps {
   /** Provides the resident updates machine. */

@@ -1,7 +1,7 @@
 // spec/app/voice/index.md, "Story: Dictate into a field"; spec/app/voice/index.md, "Using the transcript fills the field dictation started in, and dictation never sends"
 import * as Composer from "../../gen/app__assistant__composer.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
-import { contained } from "../runtime/reactor.vibe"
+import { contained } from "../runtime/index.vibe"
 import { VoiceWords, openDictation } from "../voice/voice.vibe"
 import { sameBinding } from "./attachments.vibe"
 import { Talk } from "./talk.vibe"

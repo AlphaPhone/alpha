@@ -1,4 +1,4 @@
-import { area } from "../runtime/area.tsx";
+import { area } from "../runtime/ui.tsx";
 import { ClockAlertOverlay } from "./ClockAlertOverlay.tsx";
 import { ensureClockResident } from "./sync.vibe";
 

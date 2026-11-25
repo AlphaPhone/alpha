@@ -4,8 +4,7 @@ import type { DeviceOperation } from "@elizaos/agent"
 import { operationIdOf, type DirectSmsReview, type SmsSendResult } from "@elizaos/os-bridges"
 import { normalizePhoneNumber } from "@elizaos/os-bridges"
 import { Machine as Phone, clear } from "../../gen/app__phone.effect.vibe"
-import { Device } from "../platform/device.vibe"
-import { type Telephony, TelephonyAbsent, TelephonyRefused, telephony } from "../platform/telephony.vibe"
+import { Device, type Telephony, TelephonyAbsent, TelephonyRefused, telephony } from "../platform/index.vibe"
 import { activeSmsSelection, type SmsSelection } from "./agent-sim.vibe"
 
 type Sms = Extract<DeviceOperation, { type: "sms_send" }>

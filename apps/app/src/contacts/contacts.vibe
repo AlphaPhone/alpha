@@ -5,13 +5,9 @@ import * as Contacts from "../../gen/app__contacts.effect.vibe"
 import type { Change, Effect as Out, Event, Sheet } from "../../gen/app__contacts.effect.vibe"
 import { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
-import { SystemSettings } from "../platform/systemSettings.vibe"
-import { Telephony, TelephonyRefused, readAddressBook, telephony } from "../platform/telephony.vibe"
-import { type Job, answer, applying, following, reacting, run, together } from "../runtime/reactor.vibe"
-import { Time } from "../runtime/time.vibe"
-import { Dialer, grantOf, prefilled } from "../phone/phone.vibe"
-import { Callers } from "../phone/voicemail.vibe"
-import { on, visiting } from "../phone/visit.vibe"
+import { SystemSettings, type Telephony, TelephonyRefused, readAddressBook, telephony } from "../platform/index.vibe"
+import { type Job, answer, applying, following, reacting, run, together, Time } from "../runtime/index.vibe"
+import { Dialer, grantOf, prefilled, Callers, on, visiting } from "../comms/index.vibe"
 
 /** What the form holds: a name, numbers, addresses and notes, as the owner typed them. */
 export interface Form {

@@ -4,7 +4,7 @@ import { AudioLines, ChevronLeft, Pause, Play } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import { useMachine } from "../../gen/app__notes__recording.react.ts";
 import type { Event } from "../../gen/app__notes__recording.ts";
-import type { Alpha } from "../runtime/area.tsx";
+import type { Alpha } from "../runtime/ui.tsx";
 import { RecordingDisplay, control } from "./recording.vibe";
 
 function elapsed(seconds: number) {

@@ -1,10 +1,9 @@
 // spec/app/assistant/index.md, "Story: Let Alpha open what it is talking about"; spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
 import * as Conversation from "../../gen/app__assistant.effect.vibe"
 import { Machine as Shell, type View, parseEvent, showing } from "../../gen/app__shell.effect.vibe"
-import { Agent } from "../platform/agent.vibe"
-import { ask } from "../platform/remote.vibe"
+import { Agent, ask } from "../platform/index.vibe"
 import { agentOpen, mayAgentOpen } from "../notes/agent.vibe"
-import { contained, started } from "../runtime/reactor.vibe"
+import { contained, started } from "../runtime/index.vibe"
 
 module web {
   /** A fresh id for this page as a renderer of the agent's views. @throws {never} */

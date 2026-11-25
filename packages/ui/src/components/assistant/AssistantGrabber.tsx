@@ -64,8 +64,9 @@ function swallowNextClick(view: Window) {
  * stays that button's click.
  */
 export function useAssistantDrag(callbacks: AssistantDrag, captureOnPress = false) {
-  const latest = useRef(callbacks);
-  latest.current = callbacks;
+  const latestRef = useRef(callbacks);
+  // eslint-disable-next-line react-hooks/refs -- packages/ui forbids useEffect; window drag listeners read latest callbacks via ref
+  latestRef.current = callbacks;
   const trackRef = useRef<{ track: Track; stop: () => void } | undefined>(undefined);
   return {
     onPointerDown: (event: PointerEvent<HTMLElement>) => {
@@ -81,20 +82,20 @@ export function useAssistantDrag(callbacks: AssistantDrag, captureOnPress = fals
         if (!t.moved && Math.abs(y - t.start) > slop) t.moved = true;
         t.prev = t.last;
         t.last = { y, at: e.timeStamp };
-        if (t.moved) latest.current.onDrag?.({ y });
+        if (t.moved) latestRef.current.onDrag?.({ y });
       };
       const up = (e: globalThis.PointerEvent) => {
         if (!mine(e)) return;
         stop();
-        if (!t.moved) return latest.current.onLift?.({ now: e.timeStamp });
+        if (!t.moved) return latestRef.current.onLift?.({ now: e.timeStamp });
         if (!captureOnPress) swallowNextClick(view);
         const y = e.clientY;
-        latest.current.onRelease?.({ direction: y < t.start ? "up" : "down", flick: fast(t), y, now: e.timeStamp });
+        latestRef.current.onRelease?.({ direction: y < t.start ? "up" : "down", flick: fast(t), y, now: e.timeStamp });
       };
       const cancel = (e: globalThis.PointerEvent) => {
         if (!mine(e)) return;
         stop();
-        latest.current.onCancel?.({ now: e.timeStamp });
+        latestRef.current.onCancel?.({ now: e.timeStamp });
       };
       const stop = () => {
         trackRef.current = undefined;
@@ -106,7 +107,7 @@ export function useAssistantDrag(callbacks: AssistantDrag, captureOnPress = fals
       view.addEventListener("pointermove", move);
       view.addEventListener("pointerup", up);
       view.addEventListener("pointercancel", cancel);
-      latest.current.onPress?.({ now: event.timeStamp, y: event.clientY });
+      latestRef.current.onPress?.({ now: event.timeStamp, y: event.clientY });
     },
   };
 }

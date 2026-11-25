@@ -3,7 +3,7 @@ import { Layer } from "effect";
 import { ChevronLeft } from "lucide-react";
 import { useMachine as useComms } from "../../gen/app__phone__comms.react.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
-import { area, type Resident, type Shown } from "../runtime/area.tsx";
+import { area, type Resident, type Shown } from "../runtime/ui.tsx";
 import { CallStrip } from "./CallStrip.tsx";
 import { commsViewOf } from "./comms.vibe";
 
