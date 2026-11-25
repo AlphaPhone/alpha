@@ -28,7 +28,7 @@ export type InboxListScreenProps = Pick<InboxListProps, "rows" | "loading" | "on
     onOpenSearch?: () => void;
     /** Closes the search and returns to the unfiltered folder. */
     onCloseSearch?: () => void;
-    /** Called with the folder chosen; offered only where mail can be read. */
+    /** Called with the folder chosen; offered only where mail can be read, and the folders are shown only with it. */
     onChooseFolder?: InboxFolderBarProps["onChoose"];
     /** What the list is in need of telling: saved, out of date, missing newer mail, or access withdrawn. */
     notice?: InboxNoticeKind;
@@ -107,7 +107,7 @@ export function InboxListScreen({
       actions={searching ? undefined : actions}
       className="[&_header>h1]:pl-0.5 [&_main>div]:gap-2 [&_main>div]:pt-1"
     >
-      {searching ? null : <InboxFolderBar folder={folder} unavailable={unavailable} onChoose={onChooseFolder} />}
+      {searching || !onChooseFolder ? null : <InboxFolderBar folder={folder} unavailable={unavailable} onChoose={onChooseFolder} />}
       {notice ? <InboxNotice kind={notice} onAction={onNoticeAction} /> : null}
       {chosen > 0 ? <InboxSelectionBar count={chosen} onArchive={onArchive} onTrash={onTrash} onRestore={onRestore} /> : null}
       {rows.length === 0 && loading ? <InboxListState kind="loading" />

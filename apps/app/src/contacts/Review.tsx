@@ -1,5 +1,5 @@
 // spec/app/contacts/agent.md, "Story: Approve what the agent asked"; spec/app/contacts/agent.md, "A change is shown line by line, and a removed value never reads as kept"; spec/app/contacts/agent.md, "The owner picks the exact number or the one contact, and that one is shown"
-import { Banner, Button, Card, ListGroup, ListRow } from "@repo/ui";
+import { Banner, Button, Card, cn, ListGroup, ListRow } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import type { Machine as AgentMachine } from "../../gen/app__contacts__agent.effect.vibe";
 import { lineChange, reachesANumber } from "../../gen/app__contacts__agent.ts";
@@ -51,9 +51,10 @@ export function Review({ runtime }: ReviewProps) {
   const approve = { type: "approve", clear: safe, spoken: false } as const;
   const target = held.matches.find((one) => one.id === state.contact);
   const before = target === undefined ? blank : linesOf(target);
+  const text = state.ask === "Text" && state.stage === "Shown";
   return (
-    <Card role="dialog" data-alpha-review="" aria-label={asks[state.ask]} className="fixed inset-x-4 bottom-24 z-40 flex flex-col gap-3 p-4">
-      <h2 className="font-semibold">{asks[state.ask]}</h2>
+    <Card role="dialog" data-alpha-review="" aria-label={asks[state.ask]} className={cn("fixed inset-x-4 bottom-24 z-40 flex flex-col gap-3 p-4", text && "gap-2 rounded-tile bg-background px-5 pt-5 pb-4")}>
+      <h2 className="font-semibold wrap-anywhere">{text ? `To ${state.number}` : asks[state.ask]}</h2>
       {state.stage === "Choosing" && (
         <ListGroup aria-label={reachesANumber(state.ask) ? "Which number" : "Which contact"}>
           {reachesANumber(state.ask)
@@ -70,8 +71,8 @@ export function Review({ runtime }: ReviewProps) {
       {state.more && <p className="text-sm text-muted-foreground">More contacts matched than are shown</p>}
       {state.stage === "Shown" && (
         <>
-          {reachesANumber(state.ask) && <ListRow title={target?.name ?? state.number} detail={state.number} />}
-          {state.ask === "Text" && <p className="whitespace-pre-wrap rounded-md border p-3">{state.text}</p>}
+          {reachesANumber(state.ask) && !text && <ListRow title={target?.name ?? state.number} detail={state.number} />}
+          {text && <p className="text-lg whitespace-pre-wrap wrap-anywhere">{state.text}</p>}
           {state.ask === "AddContact" && held.matches.length > 0 && (
             <ListGroup aria-label="Already in Contacts">
               {held.matches.map((twin) => <ListRow key={twin.id} title={twin.name} detail={[...twin.phones, ...twin.emails].join(", ")} />)}
@@ -87,10 +88,17 @@ export function Review({ runtime }: ReviewProps) {
           {!safe && <Banner variant="warn">Nothing is done during a call that may be an emergency call</Banner>}
         </>
       )}
-      <div className="flex gap-2">
-        {can(approve, "Owner") && <Button aria-label={state.ask === "Text" ? "Send this text" : undefined} data-alpha-review-send="" onClick={() => void send(approve, "Owner")}>{state.ask === "Text" ? "Send" : state.ask === "Dial" ? "Call" : "Approve"}</Button>}
-        {can({ type: "decline" }, "Owner") && <Button variant="ghost" onClick={() => void send({ type: "decline" }, "Owner")}>Not now</Button>}
-      </div>
+      {text ? (
+        <div className="flex flex-wrap justify-end gap-2">
+          {can({ type: "decline" }, "Owner") && <Button variant="secondary" className="font-normal" onClick={() => void send({ type: "decline" }, "Owner")}>Don’t send</Button>}
+          {can(approve, "Owner") && <Button aria-label="Send this text" data-alpha-review-send="" className="bg-foreground font-normal text-background hover:bg-foreground/90 active:bg-foreground/80" onClick={() => void send(approve, "Owner")}>Send</Button>}
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          {can(approve, "Owner") && <Button aria-label={state.ask === "Text" ? "Send this text" : undefined} data-alpha-review-send="" onClick={() => void send(approve, "Owner")}>{state.ask === "Text" ? "Send" : state.ask === "Dial" ? "Call" : "Approve"}</Button>}
+          {can({ type: "decline" }, "Owner") && <Button variant="ghost" onClick={() => void send({ type: "decline" }, "Owner")}>Not now</Button>}
+        </div>
+      )}
     </Card>
   );
 }

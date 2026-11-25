@@ -167,6 +167,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
           data-host-chrome=""
           className="absolute inset-x-3 top-2 z-10 in-data-[alpha-launcher]:top-13"
           lead={now === "Browse" ? "search" : "back"}
+          back={now === "Browse" && alpha ? <AppBack alpha={alpha} className="size-13 rounded-full [&_svg]:size-5.5" /> : undefined}
           onLead={now === "Browse" ? openSearch : back}
           aria-label="Search Maps"
           placeholder="Search"
@@ -231,11 +232,13 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
       {now === "Navigating" && can({ type: "recenter" }) && (
         <MapsRoundButton tone="night" size="xl" aria-label="Recenter" className="absolute right-4 bottom-34 z-10" onClick={() => void send({ type: "recenter" })}><LocateFixed /></MapsRoundButton>
       )}
+      {/* spec/app/maps/credits.md, "Other maps keep their credit links and an information button" */}
       {now !== "Navigating" && credits.can({ type: "openInfo" }) && (
-        <div className="absolute left-3 z-10" style={{ bottom: floatBottom }}>
+        <div className="absolute right-20 left-3 z-10 flex items-center gap-2 transition-[bottom] duration-slow ease-standard" style={{ bottom: floatBottom }}>
           {badgeOnly(state.link)
             ? <button type="button" aria-label="Google Maps" onClick={() => void credits.send({ type: "openInfo" })}><img src={googleMaps} alt="Google Maps" width={98} height={18} /></button>
             : <MapsRoundButton tone="float" size="sm" aria-label="Map credits" onClick={() => void credits.send({ type: "openInfo" })}><Info /></MapsRoundButton>}
+          {!badgeOnly(state.link) && <MapsCredits attribution={coverage?.available ? coverage.attribution : undefined} />}
         </div>
       )}
       {credits.state.infoOpen && (
@@ -508,5 +511,20 @@ function Guidance({ screen, state, seen, spot, kept, way }: { screen: Screen; st
         </div>
       </div>
     </>
+  );
+}
+
+/** The credit links v121 floated on a white chip at the foot of the map: the provider's attribution, or OpenFreeMap's three links. */
+function MapsCredits({ attribution }: { attribution?: string }) {
+  return (
+    <p className="min-w-0 rounded-option bg-background px-2 py-0.5 text-xs leading-normal text-foreground shadow-md wrap-anywhere">
+      {attribution ?? (
+        <>
+          <a href="https://openfreemap.org/" target="_blank" rel="noopener noreferrer" className="underline">OpenFreeMap</a>{" · "}
+          <a href="https://www.openmaptiles.org/" target="_blank" rel="noopener noreferrer" className="underline">© OpenMapTiles</a>{" · "}
+          <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" className="underline">© OpenStreetMap</a>
+        </>
+      )}
+    </p>
   );
 }

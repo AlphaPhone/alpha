@@ -15,7 +15,10 @@ export type CalendarHeaderProps = Omit<ComponentProps<"header">, "title"> & {
   children?: ReactNode;
 };
 
-/** The top of Calendar: Back, the month that opens the month dialog, and Calendar's actions. */
+/**
+ * The top of Calendar: Back, the month that opens the month dialog, and Calendar's actions. On the launcher
+ * (`data-alpha-launcher`, the phone's Home) the month is the serif display title, as v121 drew it on the phone.
+ */
 export function CalendarHeader({ title, expanded = false, onTitle, leading, className, children, ...props }: CalendarHeaderProps) {
   const Chevron = expanded ? ChevronUp : ChevronDown;
   return (
@@ -23,7 +26,7 @@ export function CalendarHeader({ title, expanded = false, onTitle, leading, clas
       {leading}
       <button type="button" aria-label="Choose date" aria-expanded={expanded} disabled={!onTitle} onClick={onTitle}
         className={cn(focusRing, "flex min-h-12 min-w-0 grow items-center gap-1.5 rounded-lg text-left disabled:cursor-default")}>
-        <h1 className="m-0 min-w-0 truncate text-xl leading-plain font-semibold">{title}</h1>
+        <h1 className="m-0 min-w-0 truncate text-xl leading-plain font-semibold in-data-[alpha-launcher]:font-display in-data-[alpha-launcher]:text-3xl in-data-[alpha-launcher]:font-light">{title}</h1>
         <Chevron aria-hidden className="mt-1 size-4.5 text-muted-foreground" />
       </button>
       {children}
