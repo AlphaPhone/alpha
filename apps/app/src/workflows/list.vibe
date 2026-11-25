@@ -200,7 +200,7 @@ const followForeground = started(effect {
 const home = applying(List.Machine, (state) => ({ owner: state.owner, read: state.list }), effect ({ owner, read }) => {
   const source = try (try Rows).view(owner)
   const displayed = source.rows.filter((row) => (row.kind === "Routine" || row.kind === "Prompt") && row.on && !row.removed)
-    .map((row) => ({ title: row.title, detail: "On" }))
+    .map((row) => ({ title: row.title, detail: "Enabled" }))
   const freshness: Freshness = read.status === "Failed" ? "Stale"
     : source.problems.some((problem) => problem === "Workflows" || problem === "Prompts") ? "SomeUnavailable"
       : read.status === "Loaded" ? "UpToDate" : "NotCurrent"

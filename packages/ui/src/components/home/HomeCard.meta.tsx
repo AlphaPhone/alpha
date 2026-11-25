@@ -4,5 +4,5 @@ import { type HomeCardProps, HomeCardLines } from "./HomeCard.tsx";
 
 export const meta: ComponentMeta<HomeCardProps> = {
   args: { title: "Unread", icon: <Mail />, children: <HomeCardLines lines={[{ title: "Ana Lima", detail: "Lunch on Friday?" }]} /> },
-  examples: { "Not current": { notCurrent: "Not up to date" } },
+  examples: { "With status": { status: "Updated 9:41 AM" } },
 };
