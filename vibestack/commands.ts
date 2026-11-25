@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { subscribe, unsubscribe } from "node:diagnostics_channel";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -10,7 +11,7 @@ import { conformance, type Machine } from "./conform.ts";
 import { explore } from "./explore.ts";
 import { readSpecs } from "./parse.ts";
 import { entry, remembered, steady, type Memory } from "./cache.ts";
-import { findBin, onPath, startAttached } from "./run.ts";
+import { startAttached } from "./run.ts";
 import { simulation } from "./simulate.ts";
 import { profile, type TestProfile } from "./testing/profile.ts";
 import { generated, mirrorGen, typecheckAll } from "./units.ts";
@@ -259,61 +260,8 @@ function attachAndPropagateExit(exe: string, args: string[], cwd: string, label:
 }
 
 export function launchStudio(root: string, args: string[]) {
-  const envPath = process.env.VIBESTACK_STUDIO_PATH;
-  if (envPath) {
-    const resolved = path.resolve(envPath);
-    if (resolved.endsWith(".js") || resolved.endsWith(".mjs") || resolved.endsWith(".ts")) {
-      attachAndPropagateExit(process.execPath, [resolved, ...args], root, "studio");
-    } else {
-      attachAndPropagateExit(resolved, args, root, "studio");
-    }
-    return;
-  }
-
-  const siblingServer = path.resolve(import.meta.dirname, "studio/dist/server.mjs");
-  if (fs.existsSync(siblingServer)) {
-    attachAndPropagateExit(process.execPath, [siblingServer, ...args], root, "studio");
-    return;
-  }
-
-  const localBin = findBin("vibestack-studio", root);
-  if (localBin) {
-    attachAndPropagateExit(localBin, args, root, "studio");
-    return;
-  }
-
-  const globalBin = onPath("vibestack-studio");
-  if (globalBin) {
-    attachAndPropagateExit(globalBin, args, root, "studio");
-    return;
-  }
-
-  attachAndPropagateExit("pnpm", ["dlx", "vibestack-studio@latest", ...args], root, "studio");
-}
-
-export function launchCreate(root: string, args: string[]) {
-  const siblingDist = path.resolve(import.meta.dirname, "../../create-vibestack/dist/cli.js");
-  const siblingSrc = path.resolve(import.meta.dirname, "../../create-vibestack/src/cli.ts");
-  if (fs.existsSync(siblingDist)) {
-    attachAndPropagateExit(process.execPath, [siblingDist, ...args], root, "create-vibestack");
-    return;
-  }
-  if (fs.existsSync(siblingSrc)) {
-    attachAndPropagateExit(process.execPath, [siblingSrc, ...args], root, "create-vibestack");
-    return;
-  }
-
-  const localBin = findBin("create-vibestack", root);
-  if (localBin) {
-    attachAndPropagateExit(localBin, args, root, "create-vibestack");
-    return;
-  }
-
-  const globalBin = onPath("create-vibestack");
-  if (globalBin) {
-    attachAndPropagateExit(globalBin, args, root, "create-vibestack");
-    return;
-  }
-
-  attachAndPropagateExit("pnpm", ["dlx", "create-vibestack@latest", ...args], root, "create-vibestack");
+  const [loader, entry] = import.meta.filename.endsWith(".js")
+    ? [[], path.join(import.meta.dirname, "studio/dist/server.mjs")]
+    : [["--import", pathToFileURL(createRequire(path.join(import.meta.dirname, "studio/package.json")).resolve("vibelang/register")).href], path.join(import.meta.dirname, "studio/src/main.vibe")];
+  attachAndPropagateExit(process.execPath, [...loader, entry, ...args], root, "studio");
 }

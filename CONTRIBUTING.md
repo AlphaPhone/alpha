@@ -167,6 +167,7 @@ See [SPEC.md, "One spec tree"](SPEC.md#one-spec-tree).
 | Component props and `*.meta.tsx` | Stories, catalog and interaction/accessibility tests in `generated/stories/` | `vibestack/stories`; no |
 | `packages/design-system/tokens.json` | Theme CSS in `packages/design-system/generated/` | `vibestack/design`; no |
 | `vibestack/` | Packaged `vibestack` / `spec` CLI and typed subpath exports in `dist/` | `pnpm build`; no, included in the package |
+| `vibestack/studio/` | Studio's bundled server (`vibestack/studio/dist/server.mjs`) and page (`vibestack/studio/dist/page/`), copied into `dist/studio/dist/` for the packaged command | `pnpm build`; no, included in the package |
 | A person's review | `spec/lock.json` | `pnpm accept`; yes |
 | A journey or walk that disagrees with the application | `test/counterexamples/<name>/` | `traces`; yes, replayed before later walks |
 | An exploration that broke a property | Bombadil's run of the page in `test/__traces__/bombadil/` | `explore` (`vibestack/explore.ts`); no, replayed first and removed once it breaks nothing |

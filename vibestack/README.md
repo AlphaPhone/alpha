@@ -274,6 +274,15 @@ pnpm exec spec new <name>    # a starter spec/<name>/index.md
 pnpm check
 ```
 
+`spec init` changes nothing a project wrote. It reads whether the project is on
+VibeLang or plain TypeScript; `--mode vibelang|typescript|specs-only` chooses
+instead, and `--exclude <dirs>` keeps directories out of the spec tree, both
+recorded in [`vibestack.json`](#configuration). `spec doctor --install-dafny`
+installs the Dafny the proofs need. To move to a newer tarball, `spec upgrade
+--from /path/to/vibestack-<version>.tgz` installs it, refreshes the managed
+skills and documents and aligns the toolchain pins, leaving files the project
+edited as they are; `--dry-run` lists what it would change first.
+
 | `spec init` adds | |
 |---|---|
 | `.agents/skills/`, `AGENTS.md` | the agent's procedure, skills, bundled references and license notice. Later invocations add missing files and refresh the marked Vibestack section in AGENTS.md |
@@ -325,7 +334,7 @@ current one. Installed as a package, use `pnpm exec spec <command> [<dir>]`.
 |---|---|
 | `pnpm dev` | Starts Studio on this project and every workspace package's `dev` script, together |
 | `pnpm studio [<dir>]` | Opens Studio alone, on one project |
-| `pnpm check [<dir>] [--json]` | Checks spec, source and tests, and explores each page; ends with a `next:` line ([JSON shape](../CONTRIBUTING.md#changing-the-tools)) |
+| `pnpm check [<dir>] [--json] [--timings]` | Checks spec, source and tests, and explores each page; ends with a `next:` line ([JSON shape](../CONTRIBUTING.md#changing-the-tools)); `--timings` adds each phase's duration |
 | `pnpm quick` | Types, lint and tests of what changed |
 | `pnpm verify` | Everything CI runs: build, types, tests, browser tests, checks, lint, Knip, Madge, jscpd and the selftest, for every workspace package |
 | `pnpm gen [<dir>]` | Generates `gen/` only |
@@ -333,7 +342,8 @@ current one. Installed as a package, use `pnpm exec spec <command> [<dir>]`.
 | `pnpm accept [<dir>]` | The user's sign-off: checks afresh and records what `review` lists, [all or nothing](../SPEC.md#review) |
 | `pnpm accept unproved` | Records the listed obligations as simulated only. The user's decision |
 | `pnpm new [<path>]` | Fills an empty root index or creates a child [starter spec](../SPEC.md#writing-a-spec) |
-| `node vibestack/spec.ts init [<dir>]` | Sets up an existing project ([above](#using-it-from-another-package)) |
+| `node vibestack/spec.ts init [<dir>] [--mode vibelang\|typescript\|specs-only] [--exclude <dirs>]` | Sets up an existing project ([above](#using-it-from-another-package)) |
+| `node vibestack/spec.ts upgrade [<version>] [--from <path>] [--dry-run]` | In a project that installed the tools: installs another version, refreshes the managed skills and documents and aligns the toolchain pins ([above](#using-it-from-another-package)) |
 | `pnpm demo` | Runs the order example's scripted checkout session |
 | `pnpm selftest` | Breaks the pipeline one way at a time and checks each break is caught, checks what the documents name, and installs and checks every example, as five cached tasks |
 | `node vibestack/spec.ts link [<dir>]` | Creates or refreshes the ignored agent skill links and `CLAUDE.md` |

@@ -37,6 +37,7 @@ export function checkout(): Checkout {
 const stamp = (at: Checkout) => path.join(at.root, ".alpha/ready.json");
 
 const preparedPackages = [
+  { name: "@elizaos/plugin-calendar-client", entry: "packages/plugin-calendar-client/dist/src/index.js" },
   { name: "@elizaos/plugin-files-client", entry: "packages/plugin-files-client/dist/src/index.js" },
   { name: "@elizaos/plugin-inbox-client", entry: "packages/plugin-inbox-client/dist/src/index.js" },
   { name: "@elizaos/plugin-maps-client", entry: "packages/plugin-maps-client/dist/src/index.js" },

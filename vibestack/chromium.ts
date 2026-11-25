@@ -13,8 +13,6 @@ export function hostedCiWorkspace(): string | undefined {
 function isWorkspaceChromium(workspace: string): boolean {
   const candidates = [
     path.join(workspace, "vibestack", "chromium.ts"),
-    path.join(workspace, "packages", "vibestack", "src", "chromium.ts"),
-    path.join(workspace, "packages", "vibestack", "dist", "chromium.js"),
     path.join(workspace, "node_modules", "vibestack", "dist", "chromium.js"),
   ];
   if (candidates.includes(import.meta.filename)) return true;

@@ -34,11 +34,8 @@ export const NODE = process.execPath;
 const SPEC_BIN = process.platform === "win32" ? "spec.cmd" : "spec";
 
 /**
- * Resolve the target project's `spec` command in priority order:
- * 1. Target project's `node_modules/.bin/spec`
- * 2. Target project's vendored `vibestack/spec.ts`
- * 3. Monorepo sibling `packages/vibestack/{dist/spec.js,src/spec.ts}`
- * 4. Fallback `pnpm dlx vibestack`
+ * The target project's `spec` command: its installed `node_modules/.bin/spec`, its vendored
+ * `vibestack/spec.ts`, or else the tools Studio ships in (`spec.ts` from source, `spec.js` packaged).
  * @throws {never}
  */
 export function specCommand(root: string, args: string[]): [string, string[]] {
@@ -48,23 +45,8 @@ export function specCommand(root: string, args: string[]): [string, string[]] {
   const vendored = path.join(root, "vibestack", "spec.ts");
   if (fs.existsSync(vendored)) return [NODE, [vendored, ...args]];
 
-  const siblingCandidates = BUNDLED
-    ? [
-        path.join(root, "packages", "vibestack", "dist", "spec.js"),
-        path.join(root, "packages", "vibestack", "src", "spec.ts"),
-        path.resolve(STUDIO_ROOT, "..", "..", "dist", "spec.js"),
-        path.resolve(STUDIO_ROOT, "..", "spec.ts"),
-      ]
-    : [
-        path.join(root, "packages", "vibestack", "src", "spec.ts"),
-        path.join(root, "packages", "vibestack", "dist", "spec.js"),
-        path.resolve(STUDIO_ROOT, "..", "spec.ts"),
-        path.resolve(STUDIO_ROOT, "..", "..", "dist", "spec.js"),
-      ];
-  const sibling = siblingCandidates.find((file) => fs.existsSync(file));
-  if (sibling) return [NODE, [sibling, ...args]];
-
-  return ["pnpm", ["dlx", "vibestack", ...args]];
+  const own = ["spec.ts", "spec.js"].map((file) => path.join(TOOLS, file)).find((file) => fs.existsSync(file)) ?? path.join(TOOLS, "spec.js");
+  return [NODE, [own, ...args]];
 }
 
 /** @throws {never} */

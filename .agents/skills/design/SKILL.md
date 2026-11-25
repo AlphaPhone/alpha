@@ -66,7 +66,8 @@ repository they are `@repo/ui`; a standalone project keeps its own.
 | Tokens | `tokens.json`, and `design.md` describing them | `generated/tokens.css`, `generated/theme.css` (the Tailwind v4 entry) | `spec tokens build`, `check` |
 | Stories | the component, and `<Name>.meta.tsx` where its types are not enough | `generated/stories/`: Storybook stories, `catalog.json`, and a mount test and a browser test (accessibility) of every story; a disabled or loading story is played to check that it refuses clicks and keys | `spec stories gen [--watch] [--check]` |
 
-`spec` is the tool's command (`pnpm exec spec`). In `@repo/ui`: `pnpm gen` (the stories),
+`spec` is the tool's command: `pnpm exec spec` in a project that installed
+it, `node ../../spec.ts` in an example. In `@repo/ui`: `pnpm gen` (the stories),
 `pnpm storybook`, `pnpm test`, `pnpm test:browser`; in
 `@repo/design-system`: `pnpm build`, `pnpm check`.
 
