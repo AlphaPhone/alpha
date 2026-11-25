@@ -243,7 +243,7 @@ describe("Contacts on an Alpha image", () => {
     // spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"
     expect(await read({ type: "sms_reply_selected", body: "On my way" })).toEqual({ kind: "sms-reply", status: "drafted" });
     await until(alpha, alpha.runtime, Composer, (s) => s.slot.author === "AlphaWrote");
-    expect([await read({ type: "sms_reply_selected", body: "Running late" }), (document.querySelector("textarea[aria-label=Message]") as HTMLTextAreaElement).value, world.telephony.sent]).toEqual([
+    expect([await read({ type: "sms_reply_selected", body: "Running late" }), (document.querySelector("textarea[aria-label='Text Maya']") as HTMLTextAreaElement).value, world.telephony.sent]).toEqual([
       { kind: "sms-reply", status: "occupied" }, "On my way", [],
     ]);
 
