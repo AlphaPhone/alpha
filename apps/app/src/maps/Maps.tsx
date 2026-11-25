@@ -34,6 +34,12 @@ const kindsOfPlace: ReadonlyArray<{ label: string; query: string; icon: LucideIc
 /** How tall the search sheet stands at each of its heights: raised, it stops under the search field. */
 const sheetHeights: Record<Sheet, number | string> = { Peek: 250, Half: 520, Full: "calc(100% - 104px)" };
 const sheetOrder: readonly Sheet[] = ["Peek", "Half", "Full"];
+const recoveryPositions = {
+  Browse: "top-32.5 in-data-[alpha-launcher]:top-43.5",
+  Search: "top-21.5 in-data-[alpha-launcher]:top-32.5",
+  Place: "top-21 in-data-[alpha-launcher]:top-32",
+  Directions: "top-47 in-data-[alpha-launcher]:top-58",
+} satisfies Record<Exclude<ReturnType<typeof mode>, "Navigating">, string>;
 
 /** The open map drawn where no provider is working, and outside the provider's coverage. */
 const worldStyle = "https://tiles.openfreemap.org/styles/bright";
@@ -145,6 +151,10 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   const floatBottom = (now === "Search" ? (state.sheet === "Peek" ? 250 : 520) : cardHeight || 110) + 14;
   const back = offer(screen, { type: "goBack" });
   const openSearch = offer(screen, { type: "openSearch" });
+  const retryMap = offer(screen, { type: "retryMap" });
+  const myLocation = offer(screen, { type: "useMyLocation" });
+  const locationDisclosure = can({ type: "continueDisclosure" }) && myLocation === undefined && (now === "Browse" || now === "Directions");
+  const showRecovery = retryMap !== undefined && !locationDisclosure && now !== "Navigating";
   return (
     <section aria-label="Maps" className="relative isolate flex flex-1 flex-col overflow-hidden">
       <MapView
@@ -210,8 +220,8 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
         )}
         {holding(state.link) && <Alert variant="warn">{`Maps request limit reached. Try again in ${Math.max(1, Math.ceil(state.link.held / 60))} minutes.`}</Alert>}
         {state.link.known && state.link.account === 0 && <Alert variant="info">Sign in to Alpha Cloud to use Maps.</Alert>}
-        {can({ type: "retryMap" }) && (
-          <Banner variant="warn" action={<Button size="sm" variant="outline" onClick={() => void send({ type: "retryMap" })}>Retry</Button>}>The map could not be drawn.</Banner>
+        {retryMap && !showRecovery && (
+          <Banner variant="warn" action={<Button size="sm" variant="outline" onClick={retryMap}>Retry</Button>}>The map could not be drawn.</Banner>
         )}
         {!state.keepable && <Alert variant="warn">Saved places could not be read. Existing data has not been replaced.</Alert>}
         {state.guideNotice !== "Quiet" && <Alert variant="info">{told[state.guideNotice]}</Alert>}
@@ -227,14 +237,26 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
         )}
       </div>
 
-      {can({ type: "continueDisclosure" }) && !can({ type: "useMyLocation" }) && (now === "Browse" || now === "Directions") && (
+      {showRecovery && (
+        <MapsStatusCard data-alpha-maps-status="" data-map-state="error"
+          className={cn("absolute inset-x-5 z-10 max-h-[calc(100%-15rem)] overflow-y-auto leading-chat", recoveryPositions[now])}
+          text={<span role="status">Map rendering is unavailable. Retry the map or open a saved place.</span>}
+          actions={(
+            <>
+              {myLocation && <MapsPillButton size="lg" className="text-sm font-normal" onClick={myLocation}>My location</MapsPillButton>}
+              <MapsPillButton size="lg" tone="fill" aria-label="Retry map" className="gap-1.5 px-3 text-sm font-normal" onClick={retryMap}><RotateCw aria-hidden className="size-4.5" />Retry</MapsPillButton>
+            </>
+          )} />
+      )}
+
+      {locationDisclosure && (
         <MapsStatusCard role="dialog" aria-label="Location" className={cn("absolute inset-x-5 z-10", now === "Directions" ? "top-58 in-data-[alpha-launcher]:top-69" : "top-43.5 in-data-[alpha-launcher]:top-54.5")}
           text="Maps uses your location to show where you are and to plan routes from it. Searches and route points go to the Maps provider; your agent is never told where you are."
           actions={<MapsPillButton size="lg" onClick={() => void send({ type: "continueDisclosure" })}>Continue</MapsPillButton>} />
       )}
 
-      {now !== "Navigating" && can({ type: "useMyLocation" }) && !(now === "Search" && state.sheet === "Full") && (
-        <MapsRoundButton tone="float" size="md" aria-label="My location" className="absolute right-4 z-10 transition-[bottom] duration-slow ease-standard" style={{ bottom: floatBottom }} onClick={() => void send({ type: "useMyLocation" })}><LocateFixed /></MapsRoundButton>
+      {now !== "Navigating" && myLocation && !(now === "Search" && state.sheet === "Full") && (
+        <MapsRoundButton tone="float" size="md" aria-label="My location" className="absolute right-4 z-10 transition-[bottom] duration-slow ease-standard" style={{ bottom: floatBottom }} onClick={myLocation}><LocateFixed /></MapsRoundButton>
       )}
       {now === "Navigating" && can({ type: "recenter" }) && (
         <MapsRoundButton tone="night" size="xl" aria-label="Recenter" className="absolute right-4 bottom-34 z-10" onClick={() => void send({ type: "recenter" })}><LocateFixed /></MapsRoundButton>

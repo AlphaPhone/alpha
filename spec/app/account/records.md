@@ -20,13 +20,14 @@ import outside as O from "./outside"
 
 type Archived = AllArchived | SomeArchived | NoneArchived | ArchiveUnknown
 type Effect = ReadRecords({ check: int }) | Archive({ attempt: int }) | Cleared
-type Records = { review: R::Read, kept: int, attempt: A::Attempt }
+type Records = { review: R::Read, kept: int, attempt: A::Attempt, showing: bool, boot: int }
 type Moved = { state: Records, out: List[Effect] }
 
-pure val initial: Records = { review: R::unread, kept: 0, attempt: A::plan(0) }
+pure val initial: Records = { review: R::unread, kept: 0, attempt: A::plan(0), showing: false, boot: 0 }
 
 pure val ticketValues = Set(1, 2, 3, 4)
 pure val countValues = Set(0, 3)
+pure val bootValues = Set(0, 1, 2)
 pure val weight_recordsRead = 10
 pure val weight_archived = 10
 ```
@@ -36,15 +37,23 @@ pure val weight_archived = 10
 ```quint
 pure def asking(kept: int, r: Records): Moved = { state: { ...r, kept: kept, review: R::ask(r.review) }, out: List(ReadRecords({ check: r.review.ticket + 1 })) }
 
-pure def canOpened(r: Records): bool = r.attempt.outcome != A::Sent
+pure def canOpened(r: Records): bool = not(r.showing) and r.attempt.outcome != A::Sent and not(phoneMustRestart(r))
 
-pure def opened(r: Records): Moved = asking(0, { ...r, attempt: A::plan(r.attempt.id + 1) })
+pure def opened(r: Records): Moved = asking(0, { ...r, attempt: A::plan(r.attempt.id + 1), showing: true })
+```
+
+### Closing a review discards its reading. If an archive was already sent, its answer can still settle it
+
+```quint
+pure def canCloseReview(r: Records): bool = r.showing
+
+pure def closeReview(r: Records): Records = { ...r, showing: false, review: O::retire(r.review) }
 ```
 
 ### The owner is shown how many records the failure kept, as the phone reads them
 
 ```quint
-pure def canReadRecords(r: Records, reviewing: bool): bool = reviewing and r.review.status != R::Loading and r.attempt.outcome != A::Sent
+pure def canReadRecords(r: Records, reviewing: bool): bool = r.showing and reviewing and r.review.status != R::Loading and r.attempt.outcome != A::Sent
 
 pure def readRecords(r: Records, reviewing: bool): Moved = asking(r.kept, r)
 
@@ -61,7 +70,7 @@ refused.
 
 ```quint
 pure def canArchive(r: Records, review: int, reviewing: bool, held: bool): bool =
-  reviewing and not(held) and A::canRecord(r.attempt) and r.review.status == R::Loaded and review == r.review.ticket
+  r.showing and reviewing and not(held) and A::canRecord(r.attempt) and r.review.status == R::Loaded and review == r.review.ticket
 
 pure def archive(r: Records, review: int, reviewing: bool, held: bool): Moved =
   { state: { ...r, attempt: A::dispatch(A::record(r.attempt)) }, out: List(Archive({ attempt: r.attempt.id })) }
@@ -72,14 +81,17 @@ pure def stepAnArchiveFollowsTheReviewShown(before: Records, after: Records, out
 
 ### Records all archived start the agent again; some kept are read again and can be tried again; an unknown outcome asks for a phone restart
 
+When no archive was sent, Alpha discards the reviewed count and requires a new reading before another confirmation.
+
 ```quint
 pure def canArchived(r: Records, ticket: int): bool = A::canConclude(r.attempt, ticket)
 
 pure def archived(r: Records, ticket: int, result: Archived): Moved =
   val concluded = { ...r, attempt: A::conclude(r.attempt, result == AllArchived, result != ArchiveUnknown) }
-  if (result == SomeArchived) asking(concluded.kept, concluded)
-  else if (result == AllArchived) { state: concluded, out: List(Cleared) }
-  else { state: concluded, out: List() }
+  if (result == SomeArchived and r.showing) asking(concluded.kept, concluded)
+  else if (result == AllArchived) { state: { ...concluded, showing: false }, out: List(Cleared) }
+  else if (result == NoneArchived) { state: { ...concluded, kept: 0, review: R::answer(concluded.review, false) }, out: List() }
+  else { state: { ...concluded, showing: false }, out: List() }
 
 pure def phoneMustRestart(r: Records): bool = r.attempt.outcome == A::Unknown
 ```
@@ -121,14 +133,24 @@ pure def sometimesArchived(r: Records): bool = r.attempt.outcome == A::Confirmed
 pure def reopened(r: Records, rebooted: bool, reviewing: bool): Moved =
   val lost = if (r.attempt.outcome == A::Sent) A::conclude(r.attempt, false, false) else r.attempt
   val fresh = if (rebooted and lost.outcome == A::Unknown) A::plan(lost.id + 1) else lost
-  val q = { ...r, review: O::retire(r.review), attempt: fresh }
+  val q = { ...r, review: O::retire(r.review), attempt: fresh, showing: reviewing }
   if (reviewing) asking(q.kept, q) else { state: q, out: List() }
 
 pure def lawAPhoneRestartEndsAnUnknownArchive(id: int, count: int): bool =
-  val stuck = { review: { status: R::Loaded, ticket: 1 }, kept: 3, attempt: { id: id, outcome: A::Unknown } }
+  val stuck = { ...initial, showing: true, review: { status: R::Loaded, ticket: 1 }, kept: 3, attempt: { id: id, outcome: A::Unknown } }
   val back = reopened(stuck, true, true).state
   val read = recordsRead(back, back.review.ticket, true, count)
   not(canArchive(stuck, 1, true, false)) and canArchive(read, read.review.ticket, true, false)
+```
+
+### On launch the phone's boot number distinguishes a device restart from reopening Alpha
+
+An unavailable boot number cannot clear an uncertain archive. The owner opens the review again from Agent activity.
+
+```quint
+pure def launched(r: Records, boot: int): Records =
+  val fresh = reopened(r, r.boot > 0 and boot > 0 and boot != r.boot, false).state
+  { ...fresh, boot: if (boot > 0) boot else r.boot }
 ```
 
 ### A review can survive Alpha reopening with the outcome of its archive unknown
@@ -147,5 +169,5 @@ pure def sometimesArchivingAgainAfterARestart(r: Records): bool =
 ### Erasing Alpha drops the review and refuses every answer still in flight
 
 ```quint
-pure def erase(r: Records): Records = { ...r, review: O::retire(r.review), kept: 0, attempt: A::plan(r.attempt.id + 1) }
+pure def erase(r: Records): Records = { ...r, review: O::retire(r.review), kept: 0, showing: false, attempt: A::plan(r.attempt.id + 1) }
 ```

@@ -325,13 +325,13 @@ function RemindersOverview({
 }) {
   return (
     <>
-      <section aria-label="Smart lists" className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <section aria-label="Smart lists" className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
         {SMART_META.map((tile) => (
           <button
             key={tile.view}
             type="button"
             onClick={() => onOpenSmart(tile.view)}
-            className="flex flex-col gap-3 rounded-tile border border-border bg-card p-3.5 text-left transition-colors hover:bg-secondary/60"
+            className="flex flex-col gap-2 rounded-tile border border-border bg-card p-3 text-left transition-colors hover:bg-secondary/60"
           >
             <div className="flex items-center justify-between gap-2">
               <span className={cn("flex size-8 items-center justify-center rounded-full", tile.badgeClass)}>
@@ -687,7 +687,7 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
 
   return (
     <>
-      <div className="flex flex-1 flex-col gap-4 px-4 pt-2 pb-28">
+      <div className="flex flex-1 flex-col gap-3.5 px-4 pt-2 pb-32">
         <div className="flex items-center justify-between gap-2">
           {drilledIn && !searching ? (
             <div className="flex min-w-0 items-center gap-2">
@@ -700,7 +700,7 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
             <div className="min-w-0 flex-1">
               <SearchField
                 aria-label="Search reminders"
-                placeholder="Search reminders, notes, subtasks"
+                placeholder="Search reminders"
                 value={searchQuery}
                 onValueChange={(value) => {
                   setSearchQuery(value);

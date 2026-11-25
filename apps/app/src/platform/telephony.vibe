@@ -6,13 +6,14 @@ import type { PhoneClient, PhoneNumber } from "@elizaos/os-bridges"
 
 module held {
   import { registerPlugin } from "@capacitor/core"
-  import { Schema } from "effect"
+  import { Schema, Semaphore } from "effect"
   import { createDeferredDeletions, type ActionJournalPlugin, type StagedDeletion } from "@elizaos/os-bridges"
   import { rejectionCode } from "@elizaos/os-bridges"
   import { addressBookPlugin, createAddressBookClient, createContactNames } from "@elizaos/os-bridges"
   import { messagesClient, type MessagesNativePlugin } from "@elizaos/os-bridges"
   import { parseMmsSendResult, type MmsBinding, type OperationId } from "@elizaos/os-bridges"
   import { phoneClient, type PhoneNativePlugin, type PhoneNumber } from "@elizaos/os-bridges"
+  import { composerPlugin } from "./composerPort.vibe"
 
   type OwnerDialPlugin = PhoneNativePlugin & {
     classifyDialNumber(input: { number: PhoneNumber }): Promise<unknown>
@@ -63,11 +64,14 @@ module held {
       classifyDialNumber: (number: PhoneNumber) => classifyDialNumber(nativePhone, number),
       ownerDialScreen: (number: PhoneNumber) => ownerDialScreen(nativePhone, number),
       messages: messagesClient(nativePhone, journal),
+      composer: (trustedTap: boolean, signal: AbortSignal, current: () => Promise<boolean>) =>
+        messagesClient(composerPlugin(nativePhone, trustedTap, signal, current), journal),
       async mmsReceipt(binding: MmsBinding, operation: OperationId, hash: string) {
         const raw = await nativePhone.mmsSendResult({ operationId: operation })
         return parseMmsSendResult(raw, binding, operation, hash)
       },
       contacts: createAddressBookClient({ install: "WritingInstall", plugin: addressBook, journal }),
+      addressBookRead: Semaphore.makeUnsafe(1),
       names: createContactNames(addressBook),
     }
   }
@@ -94,9 +98,11 @@ export interface TelephonyClients {
   classifyDialNumber(number: PhoneNumber): Promise<AndroidDialKind>
   ownerDialScreen(number: PhoneNumber): Promise<boolean>
   readonly messages: MessagesClient
+  composer(trustedTap: boolean, signal: AbortSignal, current: () => Promise<boolean>): MessagesClient
   /** Reads the native record and checks it against the original review digest, without the picture bytes. */
   mmsReceipt(binding: MmsBinding, operation: OperationId, hash: string): Promise<MmsSendResult | undefined>
   readonly contacts: AddressBookClient
+  readonly addressBookRead: Semaphore.Semaphore
   readonly names: ContactNamesClient
   readonly deletions: DeferredDeletionsClient
   deletionReceipt(staged: StagedDeletion): Promise<TelephonyDeletionPhase | undefined>
@@ -127,10 +133,26 @@ export effect function namesOf(surface: NameSurface, numbers: ReadonlyArray<stri
 /** One call of eliza's clients: refused before the phone where there is no image, and typed where the phone refused. */
 export effect function telephony<A>(method: string, run: (clients: TelephonyClients) => Promise<A>): A!(TelephonyAbsent | TelephonyRefused)!Telephony {
   const found = try (try Telephony).clients()
+  return try nativeCall(method, () => run(found))
+}
+
+effect function nativeCall<A>(method: string, call: (signal: AbortSignal) => Promise<A>): A!TelephonyRefused {
   return try tryPromise({
-    try: () => run(found),
+    try: call,
     catch: (cause) => new TelephonyRefused({ method, code: codeOf(cause), tag: tagOf(cause), cause }),
   })
+}
+
+/** Only the manual composer's Send uses its own transport, with cancellation tied to this exact attempt. */
+export effect function sendFromComposer<A>(trustedTap: boolean, current: () => Promise<boolean>, send: (client: MessagesClient) => Promise<A>): A!(TelephonyAbsent | TelephonyRefused)!Telephony {
+  const clients = try (try Telephony).clients()
+  return try nativeCall("composerSend", (signal) => send(clients.composer(trustedTap, signal, current)))
+}
+
+/** The address book keeps one read ticket, shared by list, card and number searches. A new read waits until the outstanding native answer settles. */
+export effect function readAddressBook<A>(method: string, read: (book: AddressBookClient) => Promise<A>): A!(TelephonyAbsent | TelephonyRefused)!Telephony {
+  const clients = try (try Telephony).clients()
+  return try clients.addressBookRead.withPermit(Effect.uninterruptible(nativeCall(method, () => read(clients.contacts))))
 }
 
 /** On an Alpha image: eliza's own clients of `ElizaTelephony`, `ElizaContacts` and `ElizaActionJournal`, which the image's host registers. */

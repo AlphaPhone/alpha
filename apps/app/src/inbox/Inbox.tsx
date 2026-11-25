@@ -77,7 +77,7 @@ const senderAddress = (from: string) => /<([^>]+)>/u.exec(from)?.[1] ?? from;
 
 /** Why the list has nothing to show, as the list's state says it; none where it has rows to show or is reading. */
 function emptyOf(s: Mailbox): InboxListStateKind | undefined {
-  if (!s.signedIn) return "signedOut";
+  if (!s.signedIn || s.failure === "LeaseNeeded") return "signedOut";
   if (s.accounts.status === "Loaded" && s.selected.account === 0 && s.connected.length === 0) return "notConnected";
   if (s.accounts.status === "Loaded" && s.selected.account !== 0 && !readable(s)) return "needsAccess";
   if (readable(s) && !searchableIn(s.selected.folder, s)) return "unavailable";

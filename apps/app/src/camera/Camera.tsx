@@ -1,19 +1,19 @@
 // spec/app/camera/index.md, "Story: Open the camera"; spec/app/camera/index.md, "Story: Frame the shot"; spec/app/camera/index.md, "Story: Take photos and videos"; spec/app/camera/index.md, "Story: Let Alpha take a photo"
 import { Button, cn, focusRing, Spinner } from "@repo/ui";
-import { CameraOff, ChevronLeft, Clock, FileScan, Flashlight, FlashlightOff, Grid3x3, MicOff, Sparkles, SwitchCamera, Video, Zap, ZapOff } from "lucide-react";
-import { useCallback, useRef, useState, type PointerEvent } from "react";
+import { CameraOff, ChevronLeft, Clock, FileScan, Flashlight, FlashlightOff, Grid3x3, MicOff, SwitchCamera, Video, Zap, ZapOff } from "lucide-react";
+import { useCallback, useRef, useState, useSyncExternalStore, type PointerEvent } from "react";
 import type { Camera as Visit, Event, Mode, Said } from "../../gen/app__camera.ts";
 import { chosenLens, ready, recording } from "../../gen/app__camera.ts";
 import { useMachine } from "../../gen/app__camera.react.ts";
 import { allows } from "../../gen/kit__permission.ts";
-import { CameraPort, type LensFacts, type Point } from "../platform/camera.vibe";
+import { CameraPort, type CameraMedia, type LensFacts, type Point } from "../platform/camera.vibe";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { Scan } from "../files/Scan.tsx";
 import type { cameraScan } from "../files/scan.vibe";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
-import { approveCapture, CameraAssets, focus, shutter, type camera } from "./camera.vibe";
+import { approveCapture, CameraAssets, focus, shutter, type CameraThumbnails, type camera } from "./camera.vibe";
 import { Effect, type Layer } from "effect";
 
 type Runtime = Layer.Success<typeof camera> | Layer.Success<typeof cameraScan> | Resident;
@@ -179,6 +179,20 @@ function ZoomStops({ state, lens, zoom }: { state: Visit; lens: LensFacts | unde
   );
 }
 
+function LastCapture({ id, media, thumbnails, open }: {
+  id: number;
+  media: CameraMedia;
+  thumbnails: CameraThumbnails;
+  open: () => void;
+}) {
+  const thumbnail = useSyncExternalStore(thumbnails.subscribe, () => thumbnails.snapshot(id));
+  return (
+    <button type="button" aria-label="Open last capture in Photos" onClick={open} className={cn("size-13 justify-self-start overflow-hidden rounded-drawer-icon border border-foreground/70 landscape:justify-self-center", focusRing)}>
+      {media.mime.startsWith("video/") && !thumbnail ? <Video aria-hidden className="m-auto size-5" /> : <img src={thumbnail ?? media.source} alt="" className="size-full object-cover" />}
+    </button>
+  );
+}
+
 /** Camera’s live viewfinder, framing controls, shutter, last capture and capture approval. @model spec/app/camera/index.md */
 export function Camera({ runtime, alpha }: Shown<Runtime>) {
   const { state, can: permits, send } = useTimed(runtime, useMachine);
@@ -191,8 +205,9 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
   if (!state) return null;
 
   const port = runtime.runSync(CameraPort);
-  const lens = runtime.runSync(Effect.flatMap(CameraAssets, (assets) => assets.lens(state.preview)));
-  const last = state.last === 0 ? undefined : runtime.runSync(Effect.flatMap(CameraAssets, (assets) => assets.read(state.last)));
+  const assets = runtime.runSync(CameraAssets);
+  const lens = runtime.runSync(assets.lens(state.preview));
+  const last = state.last === 0 ? undefined : runtime.runSync(assets.read(state.last));
   const can: Can = (event) => permits(event, "Owner");
   const fire: Fire = (event) => { if (can(event)) void send(event, "Owner"); };
   const video = state.mode === "Video";
@@ -209,7 +224,7 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
   const photoShutter = can({ type: "shutter" }) || can({ type: "cancelDelay" });
   const flashLabel = !video ? (state.flashAuto ? "Flash auto" : state.flash ? "Flash on" : "Flash off") : state.flash ? "Light on" : "Light off";
   const Flash = video ? (state.flash ? Flashlight : FlashlightOff) : state.flash || state.flashAuto ? Zap : ZapOff;
-  const videoShutter = can({ type: "stopRecording", now: untimed }) || can({ type: "startRecording", sound: true });
+  const videoShutter = state.film.stage === "Running" || can({ type: "startRecording", sound: true });
 
   return (
     <section
@@ -269,7 +284,12 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
         )}
       </div>
 
-      <footer className="z-10 flex flex-col justify-center gap-4 bg-background pb-4 landscape:row-start-2 landscape:gap-2 landscape:pb-0">
+      <footer className={cn(
+        "z-10 flex flex-col justify-center gap-4 bg-background landscape:row-start-2 landscape:gap-2 landscape:pb-0",
+        shell.state?.assistant === "Bar"
+          ? "pb-[calc(var(--alpha-dock-clearance,5.125rem)+--spacing(9))]"
+          : "pb-29.5",
+      )}>
         {!inProgress && (
           <div role="group" aria-label="Camera mode" className="flex min-h-11 justify-center gap-2 overflow-x-auto landscape:flex-wrap landscape:gap-0">
             {(["Video", "Photo"] satisfies Mode[]).map((mode) => (
@@ -288,14 +308,12 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
         )}
         <div className="grid grid-cols-[1fr_auto_1fr] items-center justify-items-center px-11 landscape:grid-cols-1 landscape:gap-2 landscape:px-3">
           {last && can({ type: "openLast" }) ? (
-            <button type="button" aria-label="Open last capture in Photos" onClick={() => fire({ type: "openLast" })} className={cn("size-13 justify-self-start overflow-hidden rounded-drawer-icon border border-foreground/70 landscape:justify-self-center", focusRing)}>
-              {last.mime.startsWith("video/") && !last.thumbnail ? <Video aria-hidden className="m-auto size-5" /> : <img src={last.thumbnail ?? last.source} alt="" className="size-full object-cover" />}
-            </button>
+            <LastCapture id={state.last} media={last} thumbnails={assets.thumbnails} open={() => fire({ type: "openLast" })} />
           ) : <span />}
           <button
             type="button"
             aria-label={!video ? (state.countdown > 0 ? "Cancel timer" : "Take photo") : state.film.stage === "Running" ? "Stop recording" : "Record video"}
-            aria-busy={state.shot !== 0 || state.film.stage === "Opening" || state.film.stage === "Stopping"}
+            aria-busy={state.shot !== 0 || inProgress && state.film.stage !== "Running"}
             disabled={!active || (video ? !videoShutter : !photoShutter)}
             onClick={click}
             className={cn("flex size-20 items-center justify-center rounded-full border-4 border-foreground disabled:opacity-60", focusRing)}

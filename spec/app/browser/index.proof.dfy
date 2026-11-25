@@ -218,28 +218,31 @@ lemma popup_ensures(s: Browser, opener: int)
   }
 }
 
-lemma restored_ensures(s: Browser, ticket: int, ok: bool, shown: int)
-  ensures (inv(s) ==> canRestored(s, ticket, shown) ==> alwaysTabsAreBounded(restored(s, ticket, ok, shown)))
-  ensures (inv(s) ==> canRestored(s, ticket, shown) ==> alwaysEveryNativeTabHasAnOwner(restored(s, ticket, ok, shown)))
-  ensures (inv(s) ==> canRestored(s, ticket, shown) ==> alwaysTabNumbersAreNeverReused(restored(s, ticket, ok, shown)))
-  ensures (inv(s) ==> canRestored(s, ticket, shown) ==> alwaysAnUntouchedLaunchIsBare(restored(s, ticket, ok, shown)))
-  ensures (inv(s) ==> canRestored(s, ticket, shown) ==> alwaysAPrivateTabIsNeverSaved(restored(s, ticket, ok, shown)))
-  ensures (inv(s) ==> canRestored(s, ticket, shown) ==> alwaysWritesWaitForTheRead(restored(s, ticket, ok, shown)))
-  ensures (inv(s) ==> canRestored(s, ticket, shown) ==> alwaysAFailedSaveWaits(restored(s, ticket, ok, shown)))
-  ensures (inv(s) ==> canRestored(s, ticket, shown) ==> alwaysTheSavedSessionFits(restored(s, ticket, ok, shown)))
-  ensures (inv(s) ==> canRestored(s, ticket, shown) ==> alwaysClearingWaitsForTheWriter(restored(s, ticket, ok, shown)))
-  ensures (inv(s) ==> canRestored(s, ticket, shown) ==> alwaysTheAgentDrivesAnOpenNormalTab(restored(s, ticket, ok, shown)))
-  ensures (inv(s) ==> canRestored(s, ticket, shown) ==> stepANumberNeverGoesBack(s, "restored", restored(s, ticket, ok, shown)))
-  ensures (inv(s) ==> canRestored(s, ticket, shown) ==> stepNoNativeTabIsLeftBehind(s, "restored", restored(s, ticket, ok, shown), []))
-  ensures (inv(s) ==> canRestored(s, ticket, shown) ==> stepARefusedPopupIsClosed(s, "restored", restored(s, ticket, ok, shown), []))
-  ensures (inv(s) ==> canRestored(s, ticket, shown) ==> stepARestartEndsPrivateTabs(s, "restored", restored(s, ticket, ok, shown)))
-  ensures (inv(s) ==> canRestored(s, ticket, shown) ==> stepTabsWaitForTheSavedSession(s, "restored", restored(s, ticket, ok, shown)))
-  ensures (inv(s) ==> canRestored(s, ticket, shown) ==> stepAnUnreadSessionIsNeverOverwritten(s, "restored", restored(s, ticket, ok, shown)))
-  ensures (inv(s) ==> canRestored(s, ticket, shown) ==> stepOneWriteAtATime(s, "restored", restored(s, ticket, ok, shown), []))
-  ensures (inv(s) ==> canRestored(s, ticket, shown) ==> stepTheAgentNeverTakesTheOwnersPlace(s, "restored", restored(s, ticket, ok, shown), []))
+lemma restored_ensures(s: Browser, ticket: int, ok: bool, shown: int, incoming: seq<int>)
+  ensures (inv(s) ==> canRestored(s, ticket, ok, shown, incoming) ==> alwaysTabsAreBounded(restored(s, ticket, ok, shown, incoming)))
+  ensures (inv(s) ==> canRestored(s, ticket, ok, shown, incoming) ==> alwaysEveryNativeTabHasAnOwner(restored(s, ticket, ok, shown, incoming)))
+  ensures (inv(s) ==> canRestored(s, ticket, ok, shown, incoming) ==> alwaysTabNumbersAreNeverReused(restored(s, ticket, ok, shown, incoming)))
+  ensures (inv(s) ==> canRestored(s, ticket, ok, shown, incoming) ==> alwaysAnUntouchedLaunchIsBare(restored(s, ticket, ok, shown, incoming)))
+  ensures (inv(s) ==> canRestored(s, ticket, ok, shown, incoming) ==> alwaysAPrivateTabIsNeverSaved(restored(s, ticket, ok, shown, incoming)))
+  ensures (inv(s) ==> canRestored(s, ticket, ok, shown, incoming) ==> alwaysWritesWaitForTheRead(restored(s, ticket, ok, shown, incoming)))
+  ensures (inv(s) ==> canRestored(s, ticket, ok, shown, incoming) ==> alwaysAFailedSaveWaits(restored(s, ticket, ok, shown, incoming)))
+  ensures (inv(s) ==> canRestored(s, ticket, ok, shown, incoming) ==> alwaysTheSavedSessionFits(restored(s, ticket, ok, shown, incoming)))
+  ensures (inv(s) ==> canRestored(s, ticket, ok, shown, incoming) ==> alwaysClearingWaitsForTheWriter(restored(s, ticket, ok, shown, incoming)))
+  ensures (inv(s) ==> canRestored(s, ticket, ok, shown, incoming) ==> alwaysTheAgentDrivesAnOpenNormalTab(restored(s, ticket, ok, shown, incoming)))
+  ensures (inv(s) ==> canRestored(s, ticket, ok, shown, incoming) ==> stepANumberNeverGoesBack(s, "restored", restored(s, ticket, ok, shown, incoming)))
+  ensures (inv(s) ==> canRestored(s, ticket, ok, shown, incoming) ==> stepNoNativeTabIsLeftBehind(s, "restored", restored(s, ticket, ok, shown, incoming), []))
+  ensures (inv(s) ==> canRestored(s, ticket, ok, shown, incoming) ==> stepARefusedPopupIsClosed(s, "restored", restored(s, ticket, ok, shown, incoming), []))
+  ensures (inv(s) ==> canRestored(s, ticket, ok, shown, incoming) ==> stepARestartEndsPrivateTabs(s, "restored", restored(s, ticket, ok, shown, incoming)))
+  ensures (inv(s) ==> canRestored(s, ticket, ok, shown, incoming) ==> stepTabsWaitForTheSavedSession(s, "restored", restored(s, ticket, ok, shown, incoming)))
+  ensures (inv(s) ==> canRestored(s, ticket, ok, shown, incoming) ==> stepAnUnreadSessionIsNeverOverwritten(s, "restored", restored(s, ticket, ok, shown, incoming)))
+  ensures (inv(s) ==> canRestored(s, ticket, ok, shown, incoming) ==> stepOneWriteAtATime(s, "restored", restored(s, ticket, ok, shown, incoming), []))
+  ensures (inv(s) ==> canRestored(s, ticket, ok, shown, incoming) ==> stepTheAgentNeverTakesTheOwnersPlace(s, "restored", restored(s, ticket, ok, shown, incoming), []))
 {
-  if inv(s) && canRestored(s, ticket, shown) {
+  if inv(s) && canRestored(s, ticket, ok, shown, incoming) {
     Members((set_x: int) => !((set_x in s.open)), s.kept);
+    if |incoming| != 0 {
+      Members((set_x: int) => !((set_x in s.open)), incoming);
+    }
   }
 }
 

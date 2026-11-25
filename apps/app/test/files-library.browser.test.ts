@@ -45,7 +45,7 @@ it("imports a chosen file, opens its text, and finds it again in a new browser l
     const trashed = await storage.storageTrash({ paths: [path], reviewed: reviewed.reviewed });
     expect(trashed.outcomes).toEqual([expect.objectContaining({ path, status: "trashed" })]);
     const trash = await storage.storageTrashList();
-    const item = trash.items?.find((one) => one.origin === path);
+    const item = trash.items?.find((one) => one.origin === "Download" && one.name === name);
     if (!item) throw new Error("the imported file did not reach Recently deleted");
     await expect(storage.storageEmptyTrash({ ids: [item.id], confirmed: true })).resolves.toMatchObject({ status: "ready", count: 1 });
     expect(await documents.read(id)).toMatchObject({ status: "unavailable" });
