@@ -9,7 +9,7 @@ export interface Stored {
   body: string;
   html: string | null;
   files: MailMessage["attachments"];
-  attachmentText?: Readonly<Record<string, string>>;
+  attachmentData?: Readonly<Record<string, Uint8Array<ArrayBuffer>>>;
 }
 
 type DraftFixture = {
@@ -219,10 +219,9 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       if (grantId !== scene.google?.connection) return refused(403, "google_reauth_required");
       const stored = scene.mail.find(({ card }) => card.id === messageId);
       const file = stored?.files.find((part) => part.partId === partId);
-      const text = partId === undefined ? undefined : stored?.attachmentText?.[partId];
-      if (!file || text === undefined) return refused(404, "not_found");
+      const bytes = partId === undefined ? undefined : stored?.attachmentData?.[partId];
+      if (!file || bytes === undefined) return refused(404, "not_found");
       if (historyId === undefined || stored?.card.metadata.historyId !== historyId) return refused(409, "stale_revision");
-      const bytes = new TextEncoder().encode(text);
       scene.attachmentReads.push(`${messageId}/${partId}`);
       const dataBase64 = btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(""));
       return crypto.subtle.digest("SHA-256", bytes).then((digest) => Response.json({

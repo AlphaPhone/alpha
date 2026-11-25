@@ -40,11 +40,11 @@ import { type Letter, Mail, revisionOf } from "./gmail.vibe";
 import { MailSignIn } from "./mailbox.vibe";
 import { connectMailFrame, frameDocument, prepareMessage } from "./mail-html.ts";
 import { AttachmentPreviews, canPreviewAttachment, canSaveAttachment } from "./attachment.vibe";
-import { native } from "../platform/device.vibe";
+import { InboxAttachmentFiles } from "../platform/inboxAttachments.vibe";
 
 export interface InboxProps {
   /** Provides the list, the message open and its marks, the changes, the shell, Mail, which holds what Gmail said, and the phone's sign-in for mail. */
-  runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Changes | Writing | Adding | Incoming | Offering | Offers | Letters | Shell | Mail | Time | Preferences | Cloud | AttachmentPreviews | MailSignIn, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Changes | Writing | Adding | Incoming | Offering | Offers | Letters | Shell | Mail | Time | Preferences | Cloud | AttachmentPreviews | InboxAttachmentFiles | MailSignIn, unknown>;
 }
 
 type Runtime = InboxProps["runtime"];
@@ -213,6 +213,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const told = marking.state?.told;
   const notice = told !== undefined && told in markNotices ? markNotices[told as keyof typeof markNotices] : undefined;
   const files = loaded ? read.attachments : [];
+  const destination = runtime.runSync(InboxAttachmentFiles.use(({ destination }) => Effect.succeed(destination)));
   const unsure = (attachment: number) => state.unsure.some((held) => held.account === state.account && held.message === state.message && held.attachment === attachment);
   const reviewing = (attachment: number, handling: "Opening" | "Saving") => {
     const event = { type: "reviewAttachment", attachment, handling } as const;
@@ -252,9 +253,9 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
         attachments={files.map((one, at) => ({
           id: `${one.partId}:${at}`, name: one.name, size: sizeOf(one.size),
           onOpen: state.revision > 0 && canPreviewAttachment(one) ? reviewing(at + 1, "Opening") : undefined,
-          onSave: state.revision > 0 && canSaveAttachment(one) ? reviewing(at + 1, "Saving") : undefined,
+          onSave: state.revision > 0 && destination !== "unavailable" && canSaveAttachment(one) ? reviewing(at + 1, "Saving") : undefined,
           saveUnconfirmed: unsure(at + 1),
-          browserDownload: !native(),
+          browserDownload: destination === "download",
         }))}
         unread={unread}
         onToggleRead={loaded && marking.can(mark, "Owner") ? () => void marking.send(mark, "Owner") : undefined}
@@ -278,7 +279,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
         handling={state.handling === "Saving" ? "save" : "open"}
         outcome={outcome === "Planned" ? "review" : outcome === "Recorded" || outcome === "Sent" ? "working" : outcome === "Confirmed" ? "done" : outcome === "Refused" ? "refused" : "unknown"}
         preview={preview}
-        browserDownload={!native()}
+        browserDownload={destination === "download"}
         onConfirm={can({ type: "confirmAttachment", access }) ? () => void send({ type: "confirmAttachment", access }) : undefined}
         onClose={() => void send({ type: "closeAttachment" })}
       />

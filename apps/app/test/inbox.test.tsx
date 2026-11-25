@@ -78,7 +78,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     termSheet.files = [...termSheet.files, {
       partId: "2", name: "agenda.txt", mimeType: "text/plain", size: new TextEncoder().encode(attachmentText).byteLength, supported: true,
     }];
-    termSheet.attachmentText = { "2": attachmentText };
+    termSheet.attachmentData = { "2": new TextEncoder().encode(attachmentText) };
     const earlierLunch = letter(0, "Earlier lunch plan", ["SENT"], "Could you make it Friday?", undefined, Date.parse(termSheet.card.receivedAt) - 3_600_000);
     world.inbox.mail.push({ ...earlierLunch, card: { ...earlierLunch.card, threadId: "t1" } });
     const first = await open(world);
@@ -157,7 +157,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"
     await drawn(() => {
-      const attachment = document.querySelector<HTMLButtonElement>('button[aria-label^="Open agenda.txt "]');
+      const attachment = [...document.querySelectorAll<HTMLButtonElement>("main button")].find((one) => one.textContent?.startsWith("Open agenda.txt "));
       if (!attachment) throw new Error("no attachment preview");
       attachment.click();
     });

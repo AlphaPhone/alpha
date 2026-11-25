@@ -11,6 +11,10 @@ export const meta: ComponentMeta<InboxAttachmentReviewProps> = {
     Save: { handling: "save" },
     Working: { handling: "save", outcome: "working" },
     Opened: { outcome: "done" },
+    "Reviewed image": {
+      name: "Receipt.png", outcome: "done",
+      preview: { kind: "image", url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jC0cAAAAASUVORK5CYII=", digest: "e5701bba84550b9c8ff2846fb86b8f60900431456546808fc0d38fc8d9f4c2dc" },
+    },
     Saved: { handling: "save", outcome: "done" },
     Refused: { handling: "save", outcome: "refused" },
     "Save not confirmed": { handling: "save", outcome: "unknown" },
@@ -22,6 +26,10 @@ export const meta: ComponentMeta<InboxAttachmentReviewProps> = {
       const sheet = await screen.findByRole("dialog", { name: "Open this file?" });
       await userEvent.click(within(sheet).getByRole("button", { name: "Open" }));
       await expect(onConfirm.mock.calls.length).toBe(1);
+    },
+    "Reviewed image": async () => {
+      const sheet = await screen.findByRole("dialog", { name: "Receipt.png" });
+      await expect(within(sheet).getByRole("img", { name: "Receipt.png" })).toBeVisible();
     },
     "Save not confirmed": async () => {
       const sheet = await screen.findByRole("dialog", { name: "Save this file?" });
