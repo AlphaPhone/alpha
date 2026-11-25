@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { gzipSync } from "node:zlib";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -185,11 +186,30 @@ export async function stageRuntime(): Promise<string> {
       throw new Error(`Android runtime payload refused: ${failure.reason}${subject}`, { cause });
     }
   }
+  keepGzipAssets(join(output, "android/app/src/main/assets"));
   if (existsSync(runtimes)) for (const other of readdirSync(runtimes)) if (other !== digest) rmSync(join(runtimes, other), { recursive: true, force: true });
   const data = join(android, "agent");
   mkdirSync(data, { recursive: true });
   for (const file of ["host.json", "character.json", "policy.json"]) copyFileSync(join(packHost(), file), join(data, file));
   return output;
+}
+
+/**
+ * The Android Gradle plugin's asset merge gunzips every asset named `*.gz` once and drops the extension, so
+ * an inventoried `assets/agent/vector.tar.gz` would reach the APK as `vector.tar` and the device's runtime
+ * store, which opens each asset by its inventoried name, would refuse the whole runtime. Each such asset is
+ * staged wrapped in one more gzip layer as `<name>.gz`, which the merge unwraps back to the exact inventoried
+ * bytes and name; `verify` checks the result against the inventory. The page's OCR training data
+ * (`public/ocr/eng.traineddata.gz`) gets the same wrap after `cap copy`, and `verify` audits the packaged page.
+ */
+export function keepGzipAssets(assets: string) {
+  if (!existsSync(assets)) return;
+  for (const name of readdirSync(assets, { recursive: true }).map(String)) {
+    const file = join(assets, name);
+    if (!name.endsWith(".gz") || name.endsWith(".gz.gz") || !statSync(file).isFile()) continue;
+    writeFileSync(`${file}.gz`, gzipSync(readFileSync(file)));
+    rmSync(file);
+  }
 }
 
 /** The page, built with the test mocks off, and the record that says so. */
@@ -311,7 +331,11 @@ export async function build(release: boolean) {
     mappings: release,
     signing: { environment: signingNames },
     gradleArguments: ["-PelizaSpeechBridgeCapacitor=true"],
-    prepare: [{ command: join(app, "node_modules/.bin/cap"), args: ["copy", "android"] }],
+    prepare: [
+      { command: join(app, "node_modules/.bin/cap"), args: ["copy", "android"] },
+      // After the page copy and before Gradle: the page's own *.gz assets (the OCR training data) need the same wrap as the runtime's.
+      () => keepGzipAssets(join(app, androidPaths.project, "app/src/main/assets/public")),
+    ],
     record: {
       name: "build-config.json",
       metadata: {
