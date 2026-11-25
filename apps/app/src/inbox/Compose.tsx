@@ -1,6 +1,7 @@
 // spec/app/inbox/drafts.md, "Story: Write a message"; spec/app/inbox/drafts.md, "Story: Set a draft aside or discard it"; spec/app/inbox/sending.md, "Story: Send a draft I reviewed"
 import { Button, InboxComposer, InboxDiscardDialog, InboxDraftReview, InboxFileOfferSheet, InboxSuggestionSheet, type InboxNoticeKind, type InboxSendOutcomeProps } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
+import { useMemo } from "react";
 import { type Mailbox, accessOf } from "../../gen/app__inbox.ts";
 import type { Machine as Writing } from "../../gen/app__inbox__drafts.effect.vibe";
 import { type Composer, flushed, ready } from "../../gen/app__inbox__drafts.ts";
@@ -9,6 +10,9 @@ import { type Letter, canAttach } from "../../gen/app__inbox__letter.ts";
 import type { Machine as Adding } from "../../gen/app__inbox__adding.effect.vibe";
 import type { Refusal } from "../../gen/app__inbox__adding.ts";
 import { useMachine as useAdding } from "../../gen/app__inbox__adding.react.ts";
+import { available } from "../../gen/app__shell.ts";
+import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
+import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Machine as Offering } from "../../gen/app__inbox__suggestion.effect.vibe";
 import { useMachine as useOffer } from "../../gen/app__inbox__suggestion.react.ts";
 import { held } from "../../gen/app__inbox__shelf.ts";
@@ -18,18 +22,33 @@ import { useMachine as useChanges } from "../../gen/app__inbox__sending.react.ts
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import type { Time } from "../runtime/time.vibe";
-import { Incoming } from "./adding.vibe";
+import type { Telephony } from "../platform/telephony.vibe";
+import { ContactAddresses, Incoming, pickPeople } from "./adding.vibe";
 import { Offers, fits } from "./suggestion.vibe";
 import { Letters, type Words, acceptable, backFromDraft, choiceOf, mibOf, policy, restoreMyEdits, useLatestSavedDraft } from "./composer.vibe";
 import { Mail } from "./gmail.vibe";
 
 export interface ComposeProps {
-  runtime: ManagedRuntime.ManagedRuntime<Writing | Changes | Adding | Incoming | Offering | Offers | Letters | Mail | Time, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<Writing | Changes | Adding | Incoming | ContactAddresses | Offering | Offers | Letters | Mail | Time | Shell | Telephony, unknown>;
   list: Mailbox;
 }
 
 const titles = { Fresh: "new", Reply: "reply", ReplyAll: "replyAll", Forward: "forward", Saved: "saved" } as const;
 const emptyAddressFields = { to: "", cc: "", bcc: "" } as const;
+
+function correspondents(read: ReturnType<Mail.Shape["shown"]>): { name: string; email: string }[] {
+  const addresses = new Map<string, { name: string; email: string }>();
+  for (const { card } of read) {
+    for (const person of [card.from, ...card.to, ...card.cc]) {
+      const email = /<([^>]+)>/u.exec(person)?.[1] ?? person.trim();
+      const key = email.toLowerCase();
+      if (acceptable(email) && !addresses.has(key)) {
+        addresses.set(key, { name: person.replace(/<[^>]*>/u, "").replace(/"/gu, "").trim() || email, email });
+      }
+    }
+  }
+  return [...addresses.values()];
+}
 
 /** How the last operation on `letter` stands, while it is worth telling. */
 function outcomeOf(ops: Operations, letter: Letter): InboxSendOutcomeProps["outcome"] | undefined {
@@ -59,6 +78,11 @@ export function Compose({ runtime, list }: ComposeProps) {
   const { state, can, send } = useTimed(runtime, useDrafts);
   const ops = useTimed(runtime, useChanges);
   const adding = useAdding(runtime);
+  const shell = useShell(runtime).state;
+  const account = state?.letter.account;
+  const recent = useMemo(() => list.selected.account === account
+    ? runtime.runSync(Mail.use((mail) => Effect.sync(() => correspondents(mail.shown(list)))))
+    : [], [account, list, runtime]);
   if (!state || !ops.state || !adding.state || !state.open) return null;
   const letter = state.letter;
   const draft = letter.id;
@@ -66,6 +90,12 @@ export function Compose({ runtime, list }: ComposeProps) {
   const typing = words.pending ?? emptyAddressFields;
   const access = accessOf(list, letter.account);
   const from = runtime.runSync(Mail.use((mail) => Effect.sync(() => mail.email(letter.account))));
+  const contactState = adding.state;
+  const contactsOpen = contactState.contactDraft === draft;
+  const contactTicket = contactState.people.ticket;
+  const closeContacts = { type: "closePeople" } as const;
+  const morePeople = { type: "morePeople", draft } as const;
+  const mayUseContacts = shell !== undefined && available(shell, "Contacts");
   const write = { type: "write", now: untimed } as const;
   const change = (next: Partial<Words>) => {
     if (!can(write, "Owner")) return;
@@ -75,7 +105,11 @@ export function Compose({ runtime, list }: ComposeProps) {
   const line = (name: "to" | "cc" | "bcc") => ({
     recipients: words[name].map((address) => ({ address, valid: acceptable(address) })),
     value: typing[name],
-    onValueChange: (value: string) => change({ pending: { ...typing, [name]: value } }),
+    onValueChange: (value: string) => {
+      change({ pending: { ...typing, [name]: value } });
+      const finding = { type: "findPeople", draft, query: value.trim().slice(0, 200) } as const;
+      if (name === "to" && adding.can(finding)) void adding.send(finding);
+    },
     onAdd: (address: string) => {
       const added = { type: "addRecipient", now: untimed, draft, valid: acceptable(address) } as const;
       if (address === "") return;
@@ -96,12 +130,19 @@ export function Compose({ runtime, list }: ComposeProps) {
     },
   });
   const query = typing.to.trim().toLowerCase();
-  const correspondents = list.selected.account === letter.account
-    ? runtime.runSync(Mail.use((mail) => Effect.sync(() => mail.shown(list))))
-      .map(({ card }) => ({ name: card.from.replace(/<[^>]*>/u, "").replace(/"/gu, "").trim(), email: /<([^>]+)>/u.exec(card.from)?.[1] ?? card.from }))
-      .filter((one, at, all) => acceptable(one.email) && one.email !== from && !words.to.includes(one.email) && all.findIndex((other) => other.email.toLowerCase() === one.email.toLowerCase()) === at)
-    : [];
-  const suggested = query === "" ? (words.to.length === 0 ? correspondents.slice(0, 3) : []) : correspondents.filter(({ name, email }) => name.toLowerCase().includes(query) || email.toLowerCase().includes(query));
+  const addressedTo = new Set(words.to.map((email) => email.toLowerCase()));
+  const eligible = recent.filter(({ email }) => email.toLowerCase() !== from.toLowerCase() && !addressedTo.has(email.toLowerCase()));
+  const suggested = query === "" ? (words.to.length === 0 ? eligible.slice(0, 3) : []) : eligible.filter(({ name, email }) => name.toLowerCase().includes(query) || email.toLowerCase().includes(query));
+  const page = contactsOpen && contactState.people.status === "Loaded" ? runtime.runSync(ContactAddresses.use(({ current }) => Effect.sync(current))) : undefined;
+  const choices = page?.ticket === contactTicket ? page.addresses.flatMap((person, at) => {
+    const event = { type: "chooseContact", draft, ticket: contactTicket, address: at + 1 } as const;
+    return addressedTo.has(person.email.toLowerCase()) || !adding.can(event) ? [] : [{ ...person, onChoose: () => void adding.send(event) }];
+  }) : [];
+  const contactsStatus = !contactsOpen ? undefined
+    : contactState.contacts === "InSettings" ? "Allow Contacts in Settings"
+      : contactState.contacts === "Asked" || contactState.people.status === "Loading" ? "Reading contacts…"
+        : contactState.people.status === "Failed" ? "Couldn’t read contacts"
+          : choices.length === 0 ? "No matching contacts" : undefined;
   const kept = state.stored && flushed(state);
   const addressed = Object.values(typing).every((value) => value.trim() === "");
   const changeFrom = (account: number) => ({ type: "changeFrom", account, access: accessOf(list, account), typing: !addressed }) as const;
@@ -160,7 +201,14 @@ export function Compose({ runtime, list }: ComposeProps) {
           if (can(event, "Owner")) void send(event, "Owner");
         } : undefined}
         to={line("to")}
-        suggestions={suggested.map(({ name, email }) => ({ name: name || email, email }))}
+        suggestions={contactsOpen ? choices : suggested}
+        contactsOpen={contactsOpen}
+        contactsStatus={contactsStatus}
+        onContacts={mayUseContacts ? () => {
+          if (contactState.contacts !== "InSettings" && adding.can(closeContacts)) void adding.send(closeContacts);
+          else void runtime.runPromise(pickPeople(draft));
+        } : undefined}
+        onMoreContacts={adding.can(morePeople) ? () => void adding.send(morePeople) : undefined}
         cc={line("cc")}
         bcc={line("bcc")}
         subject={words.subject}

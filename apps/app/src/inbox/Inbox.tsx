@@ -33,7 +33,7 @@ import { Time } from "../runtime/time.vibe";
 import { Compose, FileOffer, Suggested } from "./Compose.tsx";
 import type { Offers } from "./suggestion.vibe";
 import type { Machine as Offering } from "../../gen/app__inbox__suggestion.effect.vibe";
-import type { Incoming } from "./adding.vibe";
+import type { ContactAddresses, Incoming } from "./adding.vibe";
 import type { Machine as Adding } from "../../gen/app__inbox__adding.effect.vibe";
 import { type Beginning, Letters, begin, openGmailDraft } from "./composer.vibe";
 import { type Letter, Mail, revisionOf } from "./gmail.vibe";
@@ -41,10 +41,11 @@ import { MailSignIn } from "./mailbox.vibe";
 import { connectMailFrame, frameDocument, prepareMessage } from "./mail-html.ts";
 import { AttachmentPreviews, canPreviewAttachment, canSaveAttachment } from "./attachment.vibe";
 import { InboxAttachmentFiles } from "../platform/inboxAttachments.vibe";
+import type { Telephony } from "../platform/telephony.vibe";
 
 export interface InboxProps {
   /** Provides the list, the message open and its marks, the changes, the shell, Mail, which holds what Gmail said, and the phone's sign-in for mail. */
-  runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Changes | Writing | Adding | Incoming | Offering | Offers | Letters | Shell | Mail | Time | Preferences | Cloud | AttachmentPreviews | InboxAttachmentFiles | MailSignIn, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Changes | Writing | Adding | Incoming | ContactAddresses | Offering | Offers | Letters | Shell | Mail | Time | Preferences | Cloud | AttachmentPreviews | InboxAttachmentFiles | MailSignIn | Telephony, unknown>;
 }
 
 type Runtime = InboxProps["runtime"];
@@ -248,7 +249,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const link = state.link > 0 ? contents?.links.at(state.link - 1) : undefined;
   const original = read?.message;
   const from = senderAddress(card?.from ?? "");
-  const replyTo = original?.replyTo;
+  const replyTo = original && "replyTo" in original && typeof original.replyTo === "string" ? original.replyTo : undefined;
   const answered = original === undefined || read === undefined ? undefined : {
     id: original.id, from: original.from, replyTo, others: [...original.to, ...original.cc], subject: original.subject,
     body: read.bodyText, historyId: original.metadata.historyId, files,
