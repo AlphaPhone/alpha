@@ -343,6 +343,18 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       await vi.waitFor(() => onMessage("You said: Limes tonight?Ask Ana <b>now</b>one", "Copy"));
       await vi.waitFor(() => expect(world.settings.copied.at(-1)).toBe("You said: Limes tonight?\n\nAsk Ana (https://ana.example/) <b>now</b>\n\n• one"));
     }
+
+    // spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one": the owner's own words keep it.
+    for (const [said, drawn, plain] of [[["Sure.\n[answer] Paris"], "Sure.Paris", "Sure.\nParis"], [["Paris. [answer]"], "Paris.", "Paris."], [["<promise> One sec."], "One sec.", "One sec."], [["[ans", "wer] Paris"], "Paris", "Paris"]] as const) {
+      world.ask.nextReplyChunks = said;
+      write("Capital of France? [answer]");
+      await press("Send");
+      await vi.waitFor(() => expect(lines().slice(-2)).toEqual(["Capital of France? [answer]", drawn]));
+      if (phone) {
+        onMessage(drawn, "Copy");
+        await vi.waitFor(() => expect(world.settings.copied.at(-1)).toBe(plain));
+      }
+    }
   });
 
   // spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/chats.md, "Story: Open a message that search found"
@@ -538,12 +550,13 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/assistant/index.md, "Stop reply ends a streaming reply, and takes back a message nothing was heard of"
     world.ask.stalled = true;
-    world.ask.nextReplyChunks = ["Read [Octopus](https://en.wikipedia.org/wiki/Octopus) and **Lim"];
+    world.ask.nextReplyChunks = ["Read [Octopus](https://en.wikipedia.org/wiki/Octopus) and **Lim", " [ans"];
     write("Take your time");
     await press("Send");
     await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Streaming");
     expect(button("Send")).toBe(undefined);
     // spec/app/assistant/reply.md, "Prose is drawn with its Markdown: bold, italics, code, headings, lists and quotes; a link is a link only to an https address, and HTML reads as text": the reply still being written holds back its open mark, and its link opens through the phone's link path.
+    // spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one": the "[ans" it ends in is held back too.
     const writing = await vi.waitFor(() => {
       const found = document.querySelector("[data-alpha-message-id='reply'] a");
       if (!found) throw new Error("no link in the reply being written");

@@ -79,7 +79,7 @@ export function AlarmEditorSheet({ runtime, alarmId, onClose }: AlarmEditorSheet
             <Button variant="ghost" onClick={onClose}>Cancel</Button>
             {existing !== undefined && (
               <Button variant="destructive" aria-label="Delete alarm" onClick={handleDelete}>
-                <Trash2 aria-hidden className="size-4" />
+                <Trash2 aria-hidden className="size-4.5" />
                 Delete
               </Button>
             )}
@@ -91,25 +91,25 @@ export function AlarmEditorSheet({ runtime, alarmId, onClose }: AlarmEditorSheet
           <div className="flex items-center justify-center gap-4 rounded-lg bg-secondary p-4">
             <div className="flex flex-col items-center gap-1">
               <Button variant="ghost" size="icon" aria-label="Increase hour" onClick={() => adjustHour(1)}>
-                <Plus aria-hidden className="size-4" />
+                <Plus aria-hidden className="size-4.5" />
               </Button>
               <span className="text-4xl font-light tabular-nums" aria-label="Selected hour">
                 {display.time.split(":")[0]}
               </span>
               <Button variant="ghost" size="icon" aria-label="Decrease hour" onClick={() => adjustHour(-1)}>
-                <Minus aria-hidden className="size-4" />
+                <Minus aria-hidden className="size-4.5" />
               </Button>
             </div>
             <span className="text-3xl font-light text-muted-foreground">:</span>
             <div className="flex flex-col items-center gap-1">
               <Button variant="ghost" size="icon" aria-label="Increase minute" onClick={() => adjustMinute(1)}>
-                <Plus aria-hidden className="size-4" />
+                <Plus aria-hidden className="size-4.5" />
               </Button>
               <span className="text-4xl font-light tabular-nums" aria-label="Selected minute">
                 {display.time.split(":")[1]}
               </span>
               <Button variant="ghost" size="icon" aria-label="Decrease minute" onClick={() => adjustMinute(-1)}>
-                <Minus aria-hidden className="size-4" />
+                <Minus aria-hidden className="size-4.5" />
               </Button>
             </div>
             {!meta.hour24 && (
@@ -165,7 +165,7 @@ export function AlarmEditorSheet({ runtime, alarmId, onClose }: AlarmEditorSheet
                 </SelectContent>
               </Select>
               <Button variant="outline" size="icon" aria-label="Preview sound" onClick={() => playChimePulse(sound, false)}>
-                <Volume2 aria-hidden className="size-4" />
+                <Volume2 aria-hidden className="size-4.5" />
               </Button>
             </div>
           </div>

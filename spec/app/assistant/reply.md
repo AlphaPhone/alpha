@@ -390,6 +390,42 @@ pure val useValues = Set(Shown, Copied, Quoted, ReadAloud, Emailed, Spoken)
 pure def lawOnlyTheShownReplyKeepsItsMarks(use: Use): bool = keepsMarks(use) iff use == Shown
 ```
 
+### The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one
+
+eliza asks the model to begin a reply that runs no tool with a turn tag,
+`[answer]` or `[promise]`, and does not always take it out. Alpha takes
+the tag out of the model's text wherever it stands: at the start of a
+line, inside one or at its end, in square or angle brackets (`<promise>`),
+in any case, opening or closing, with the spaces after it, and inside a
+fence too, since it is never code. A reply still being written holds back
+an opening bracket at its end, or one followed by the start of a tag
+(`[ans`, `<pro`), until the next words show whether it is one; a finished
+reply keeps such an ending as written. The owner's own words are never
+read for it and keep every tag as written.
+
+```quint
+type Author = OwnerWrote | ModelWrote
+type TagRun = OtherWords | TurnTag | TurnTagSoFar
+
+pure def keptRun(words: TagRun, author: Author, writing: bool): bool =
+  author == OwnerWrote or match words {
+    | OtherWords => true
+    | TurnTag => false
+    | TurnTagSoFar => not(writing)
+  }
+
+pure val authorValues = Set(OwnerWrote, ModelWrote)
+pure val wordsValues = Set(OtherWords, TurnTag, TurnTagSoFar)
+
+pure def lawTheModelsTurnTagIsNeverKept(writing: bool): bool = not(keptRun(TurnTag, ModelWrote, writing))
+
+pure def lawTheOwnersWordsAreKeptAsWritten(words: TagRun, writing: bool): bool = keptRun(words, OwnerWrote, writing)
+
+pure def lawATagStillBeingWrittenWaits(author: Author): bool = keptRun(TurnTagSoFar, author, true) iff author == OwnerWrote
+
+pure def lawAFinishedReplyKeepsAnUnfinishedTag(author: Author): bool = keptRun(TurnTagSoFar, author, false)
+```
+
 ## Story: Know what my agent changed
 
 > As the owner, I want to see what an action in a reply actually did, once,
