@@ -112,7 +112,7 @@ export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | 
       <Button variant="ghost" size="icon" aria-label="Add to Workflows" onClick={() => dispatch(add)}><Plus aria-hidden /></Button>}>
       {state === undefined && <Spinner aria-label="Refreshing workflows" />}
       {state !== undefined && place?.tag === "ListingRows" && <>
-        <div className="flex items-center justify-between gap-3 px-1 pb-3">
+        <div className="flex items-center justify-between gap-3 px-1">
           <button type="button" aria-label="Filter workflows" aria-haspopup="dialog" disabled={!can(filter)} onClick={() => dispatch(filter)}
             className="flex min-h-12 min-w-0 items-center gap-1.5 rounded-md text-left text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
             <span className="min-w-0 break-words">{listLabel(state.kind, state.status)}</span><ChevronDown aria-hidden className="size-4 shrink-0" />
