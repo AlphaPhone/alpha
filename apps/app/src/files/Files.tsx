@@ -1,7 +1,7 @@
 // spec/app/files/index.md, "Story: Browse my storage"; spec/app/files/index.md, "Story: Arrange and filter what I see"; spec/app/files/index.md, "Story: Change my files"; spec/app/files/index.md, "Folders come before files in every sort: by name in the phone's order of names, by date the newest first, by size the largest first; choosing the sort again turns the order within the folders and within the files"; spec/app/files/index.md, "The owner sees a listed item's details: what it is, how big it is, when it last changed and where it is; they close when the owner closes them or moves, or when the item is no longer listed"
-import { Alert, AppHeader, Button, Checkbox, Chip, cn, Dialog, DialogContent, DialogTitle, EmptyState, FilesCard, filesCardCancel, FilesRow, FilesSelectionBar, focusRing, ListGroup, ListRow, Menu, MenuContent, MenuItem, MenuTrigger, Progress, SearchField, Sheet, SheetContent, Spinner } from "@repo/ui";
+import { Alert, AppHeader, Button, Checkbox, Chip, cn, Dialog, DialogContent, DialogTitle, EmptyState, FilesCard, filesCardCancel, FilesRow, FilesSelectionBar, focusRing, Input, ListGroup, ListRow, Menu, MenuContent, MenuItem, MenuTrigger, Progress, SearchField, Sheet, SheetContent, Spinner } from "@repo/ui";
 import { Effect, Option, type Layer, type ManagedRuntime } from "effect";
-import { ArrowDown, ArrowUp, AudioLines, Calendar, Check, ChevronLeft, Copy, Download, Ellipsis, File, FileArchive, FileText, Folder, FolderInput, FolderOpen, HardDrive, Image, Info, LayoutGrid, Menu as Rows, Pencil, Plus, RefreshCw, Search, Share2, Trash2, Type, Video, X, type LucideIcon } from "lucide-react";
+import { ArrowDown, ArrowUp, AudioLines, Calendar, Check, ChevronLeft, Copy, Download, Ellipsis, File, FileArchive, FileText, Folder, FolderInput, HardDrive, Image, Info, LayoutGrid, Menu as Rows, Pencil, Plus, RefreshCw, Search, Share2, Trash2, Type, Video, X, type LucideIcon } from "lucide-react";
 import { Fragment, useMemo, useState, type MouseEvent } from "react";
 import type { Event as FilesEvent, Files as FilesState, Machine, Order } from "../../gen/app__files.effect.vibe";
 import { ahead, browse, chosen, detailed, grouped, empty, filled } from "../../gen/app__files.ts";
@@ -101,9 +101,7 @@ export function Files({ runtime, alpha }: FilesProps) {
   const [naming, setNaming] = useState<Naming | undefined>(undefined);
   const [kind, setKind] = useState<Kind | undefined>(undefined);
   const [filtering, setFiltering] = useState(false);
-  /** The place where the owner chose Select before marking anything, as develop keeps an empty selection open. */
   const [choosingAt, setChoosingAt] = useState<string | undefined>(undefined);
-  /** Which of develop's two selection actions opened the destination sheet. */
   const [destination, setDestination] = useState<"move" | "copy">("move");
   const items = state?.items;
   const order = state?.order;
@@ -124,17 +122,10 @@ export function Files({ runtime, alpha }: FilesProps) {
   const shown = browse(state);
   const label = (handle: number) => labelOf(runtime, handle);
   if (shown === "Closed") return null;
-  if (shown === "Unsupported") return <>{header("Files")}<EmptyState className="m-4" title="This phone's storage cannot be reached" />{scanner}</>;
+  if (shown === "Unsupported") return <>{header("Files")}<StorageStatus title="Storage unavailable" />{scanner}</>;
   if (shown === "NotAsked" || shown === "NoAccess") {
-    return (
-      <>
-        {header("Files")}
-        <EmptyState className="m-4" title={shown === "NotAsked" ? "Alpha may not read your files yet" : "Alpha may not read your files"}>
-          {owner({ type: "allow" }) && <Button onClick={() => tell({ type: "allow" })}>{shown === "NotAsked" ? "Allow" : "Open Settings"}</Button>}
-        </EmptyState>
-        {scanner}
-      </>
-    );
+    const allow = owner({ type: "allow" }) ? () => tell({ type: "allow" }) : undefined;
+    return <>{header("Files")}<StorageStatus title="Allow all files access" text="Files shows your files and folders after you allow access." action={shown === "NotAsked" ? "Allow" : "Open Settings"} onAction={allow} />{scanner}</>;
   }
   if (state.trash) return <><Trash runtime={runtime} onBack={owner({ type: "closeTrash" }) ? () => tell({ type: "closeTrash" }) : undefined} />{scanner}</>;
   const atTop = shown === "AtTop";
@@ -226,14 +217,7 @@ export function Files({ runtime, alpha }: FilesProps) {
     setChoosingAt(undefined);
     if (marks.size > 0 && owner({ type: "cancelSelection" })) tell({ type: "cancelSelection" });
   };
-  const moveOrCopy = (op: "move" | "copy") => owner({ type: "openMoveTo" }) ? () => { setDestination(op); tell({ type: "openMoveTo" }); } : undefined;
-  const selectionActions = [
-    { label: "Share", icon: <Share2 />, onPress: owner({ type: "openShare", mail: false }) ? () => tell({ type: "openShare", mail: false }) : undefined },
-    { label: "Move", icon: <FolderInput />, onPress: moveOrCopy("move") },
-    { label: "Copy", icon: <Copy />, onPress: moveOrCopy("copy") },
-    { label: "Rename", icon: <Pencil />, onPress: owner({ type: "begin", work: "Rename", name: unnamed }) ? () => setNaming({ work: "Rename", name: firstPicked?.name ?? "" }) : undefined },
-    { label: "Delete", icon: <Trash2 />, onPress: owner({ type: "askToDelete" }) ? () => tell({ type: "askToDelete" }) : undefined },
-  ].filter((action) => action.onPress !== undefined || (marks.size === 0 && action.label !== "Rename"));
+  const selectionActions = actionsOf({ owner, tell, chosenCount: marks.size, setDestination, rename: () => setNaming({ work: "Rename", name: firstPicked?.name ?? "" }) });
   const canDetails = firstPicked !== undefined && picked.length === 1 && owner({ type: "showDetails", target: firstPicked.id });
   return (
     <section aria-label="Files" className="relative flex min-h-0 flex-1 flex-col">
@@ -291,13 +275,12 @@ export function Files({ runtime, alpha }: FilesProps) {
           {(ended === "Refused" || ended === "Unknown") && <Alert variant="warn">{ended === "Unknown" ? `Alpha cannot tell whether the phone could ${changeWords[change.work]}` : `The phone could not ${changeWords[change.work]}`}</Alert>}
           {change.sending.outcome === "Refused" && <Alert variant="warn">Android could not open sharing</Alert>}
           {change.stale && <Alert variant="info">The selection changed, so nothing was shared</Alert>}
-          <Undo runtime={runtime} />
           {looked !== "NoFilter" && (
             <div className="flex flex-col gap-2">
               <div className="px-2"><Chip onClear={owner({ type: "clearFilter" }) ? () => tell({ type: "clearFilter" }) : undefined} clearLabel="Clear the filter">
                 {[state.search.filter.anyKind ? "" : kinds.find(([one]) => one === state.search.filter.kind)?.[1] ?? "", state.search.filter.text === "" ? "" : `“${state.search.filter.text}”`, dateRange(state.search.filter)].filter(Boolean).join(" · ") || "Everything"}
               </Chip></div>
-              {looked === "Looking" && <Spinner label="Looking" />}
+              {looked === "Looking" && <p role="status" className="px-6 py-2 text-sm text-muted-foreground">Searching…</p>}
               {looked === "Nothing" && <EmptyState icon={<Search className="size-10" />} title="No files match." className={filesEmpty} />}
               {looked === "Trouble" && <Alert variant="warn">The search could not finish</Alert>}
               {looked === "Unfinished" && <Alert variant="info">Nothing found in what the phone could search</Alert>}
@@ -320,7 +303,7 @@ export function Files({ runtime, alpha }: FilesProps) {
             </>
           ) : looked === "NoFilter" && (
             <>
-              {shown === "Reading" && (state.items.length === 0 || groupedCategory) && <Spinner label="Reading the folder" />}
+              {shown === "Reading" && (state.items.length === 0 || groupedCategory) && <p role="status" className="mx-2 my-2 text-sm text-muted-foreground">Loading…</p>}
               {shown === "Unreachable" && <Alert variant="destructive">This place cannot be read now</Alert>}
               {empty(state) && folderGroups.length === 0 && <EmptyState icon={state.inCategory ? <CategoryIcon className="size-11" /> : <Folder className="size-11" />} title={state.inCategory ? `No ${category?.toLowerCase() ?? "files"}` : "This folder is empty"} className={filesEmpty} />}
               {shown === "Showing" && state.partial && <Alert variant="info">Only part of this place could be read</Alert>}
@@ -336,11 +319,12 @@ export function Files({ runtime, alpha }: FilesProps) {
             </>
           )}
         </div>
+        <Undo runtime={runtime} />
         {selecting && (
           <FilesSelectionBar actions={selectionActions} />
         )}
       </div>
-      <FileLayers state={state} destination={destination} picked={picked} naming={naming} setNaming={setNaming} owner={owner} tell={tell} label={label} location={location} />
+      <FileLayers state={state} destination={destination} onMoved={() => setDestination("move")} picked={picked} naming={naming} setNaming={setNaming} owner={owner} tell={tell} label={label} location={location} />
       <Preview runtime={runtime} today={today} />
       {scanner}
       <Sheet open={change.panel !== 0} onOpenChange={(open) => { if (!open && owner({ type: "closeShare" })) tell({ type: "closeShare" }); }}>
@@ -355,10 +339,38 @@ export function Files({ runtime, alpha }: FilesProps) {
 }
 
 
+/** Develop's selection bar: Share, Move, Copy, Rename for one item, Delete; each shown while the rules take it, and dimmed while nothing is chosen. */
+function actionsOf({ owner, tell, chosenCount, setDestination, rename }: {
+  readonly owner: (event: FilesEvent) => boolean;
+  readonly tell: (event: FilesEvent) => void;
+  readonly chosenCount: number;
+  readonly setDestination: (op: "move" | "copy") => void;
+  readonly rename: () => void;
+}) {
+  const moveOrCopy = (op: "move" | "copy") => owner({ type: "openMoveTo" }) ? () => { setDestination(op); tell({ type: "openMoveTo" }); } : undefined;
+  return [
+    { label: "Share", icon: <Share2 />, onPress: owner({ type: "openShare", mail: false }) ? () => tell({ type: "openShare", mail: false }) : undefined },
+    { label: "Move", icon: <FolderInput />, onPress: moveOrCopy("move") },
+    { label: "Copy", icon: <Copy />, onPress: moveOrCopy("copy") },
+    { label: "Rename", icon: <Pencil />, onPress: owner({ type: "begin", work: "Rename", name: unnamed }) ? rename : undefined },
+    { label: "Delete", icon: <Trash2 />, onPress: owner({ type: "askToDelete" }) ? () => tell({ type: "askToDelete" }) : undefined },
+  ].filter((action) => action.onPress !== undefined || (chosenCount === 0 && action.label !== "Rename"));
+}
+
+/** Develop's storage notice at the top of Files: a filled card that says why nothing is listed, with its one way forward. */
+function StorageStatus({ title, text, action, onAction }: { readonly title: string; readonly text?: string; readonly action?: string; readonly onAction?: (() => void) | undefined }) {
+  return (
+    <div className="m-2 flex items-center gap-3 rounded-xl bg-secondary px-4 py-3.5 text-base">
+      {text === undefined ? <div role="alert" className="min-w-0 flex-1">{title}</div> : <div className="min-w-0 flex-1"><strong className="font-semibold">{title}</strong><p className="mt-1 text-sm text-muted-foreground">{text}</p></div>}
+      {onAction && action && <button type="button" className={cn(focusRing, "min-h-11 shrink-0 rounded-xl bg-alpha px-4 font-semibold text-alpha-foreground")} onClick={onAction}>{action}</button>}
+    </div>
+  );
+}
+
 function FilesHome({ state, label, owner, tell, refresh }: Pick<FileLayersProps, "state" | "label" | "owner" | "tell"> & { readonly refresh: boolean }) {
   const primary = state.volumes[0];
   return <>
-    {state.storage.status === "Loading" && <Spinner label="Reading your storage" />}
+    {state.storage.status === "Loading" && <p role="status" className="mx-4 my-2 text-sm text-muted-foreground">Loading…</p>}
     {state.storage.status === "Failed" && <Alert variant="destructive"><span>Your storage cannot be read now</span>{refresh && <Button variant="ghost" size="sm" onClick={() => tell({ type: "refresh" })}>Retry</Button>}</Alert>}
     {(state.storage.status === "Loaded" || state.volumes.length > 0) && (
       <>
@@ -396,6 +408,8 @@ type FileLayersProps = {
   readonly state: FilesState;
   /** Whether the destination sheet moves or copies, as the selection bar's Move or Copy opened it. */
   readonly destination: "move" | "copy";
+  /** Called when the destination card closes, so the next one moves unless Copy opens it. */
+  readonly onMoved: () => void;
   readonly picked: readonly Item[];
   readonly naming: Naming | undefined;
   readonly setNaming: (draft: Naming | undefined) => void;
@@ -405,7 +419,7 @@ type FileLayersProps = {
   readonly location: (item: Item) => string;
 };
 
-function FileLayers({ state, destination, picked, naming, setNaming, owner, tell, label, location }: FileLayersProps) {
+function FileLayers({ state, destination, onMoved, picked, naming, setNaming, owner, tell, label, location }: FileLayersProps) {
   const [details] = detailed(state);
   const { change } = state;
   const namingEvent = naming === undefined ? undefined : naming.destinationRead === undefined
@@ -414,7 +428,6 @@ function FileLayers({ state, destination, picked, naming, setNaming, owner, tell
   const newDestination = { type: "beginDestinationFolder", destinationTicket: state.sheet.reading.ticket, name: unnamed } as const;
   const destinationFolderFailed = change.work === "NewFolder" && change.folder === state.sheet.trail.at(-1)
     && (change.attempt.outcome === "Refused" || change.attempt.outcome === "Unknown");
-  /** The name a rename starts from, which is not yet a clash: develop shows it plainly until the owner changes it. */
   const renamedFrom = naming?.work === "Rename" ? picked[0]?.name : undefined;
   const submitName = () => {
     if (namingEvent !== undefined && owner(namingEvent)) { tell(namingEvent); setNaming(undefined); }
@@ -451,17 +464,17 @@ function FileLayers({ state, destination, picked, naming, setNaming, owner, tell
         onConfirm={submitName}
       >
         <form onSubmit={(event) => { event.preventDefault(); submitName(); }}>
-          <input
+          <Input
             aria-label="Name"
             maxLength={255}
             value={naming?.name ?? ""}
-            aria-invalid={namingEvent !== undefined && namingEvent.name !== "" && namingEvent.name !== renamedFrom && !owner(namingEvent) ? true : undefined}
+            invalid={namingEvent !== undefined && namingEvent.name !== "" && namingEvent.name !== renamedFrom && !owner(namingEvent)}
             onFocus={(event) => {
               const dot = naming?.work === "Rename" && picked[0]?.kind !== "Folder" ? event.target.value.lastIndexOf(".") : -1;
               event.target.setSelectionRange(0, dot > 0 ? dot : event.target.value.length);
             }}
             onChange={(event) => setNaming(naming && { ...naming, name: event.target.value })}
-            className="h-12 w-full min-w-0 rounded-md bg-secondary px-3.5 text-md text-foreground outline-none aria-invalid:ring-2 aria-invalid:ring-destructive"
+            className="rounded-md"
           />
         </form>
       </FilesCard>
@@ -477,12 +490,12 @@ function FileLayers({ state, destination, picked, naming, setNaming, owner, tell
       </Dialog>
       <FilesCard
         open={state.sheet.open}
-        onOpenChange={(open) => { if (!open && owner({ type: "closeMoveTo" })) tell({ type: "closeMoveTo" }); }}
+        onOpenChange={(open) => { if (!open && owner({ type: "closeMoveTo" })) { onMoved(); tell({ type: "closeMoveTo" }); } }}
         title={destination === "copy" ? "Copy to" : "Move to"}
         cancelLabel="Cancel"
         confirmLabel={destination === "copy" ? "Copy here" : "Move here"}
         confirmDisabled={!owner({ type: "begin", work: destination === "copy" ? "CopyTo" : "MoveTo", name: "" })}
-        onConfirm={() => tell({ type: "begin", work: destination === "copy" ? "CopyTo" : "MoveTo", name: "" })}
+        onConfirm={() => { onMoved(); tell({ type: "begin", work: destination === "copy" ? "CopyTo" : "MoveTo", name: "" }); }}
       >
         <nav aria-label="Destination path" className="flex min-h-10 items-center gap-1 text-meta text-muted-foreground">
           {state.sheet.trail.length > 0 && owner({ type: "moveUp", depth: state.sheet.trail.length - 1 }) && <Button variant="ghost" size="icon" aria-label="Parent folder" onClick={() => tell({ type: "moveUp", depth: state.sheet.trail.length - 1 })}><ChevronLeft /></Button>}

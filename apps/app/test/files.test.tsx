@@ -351,7 +351,7 @@ describe("Files on a phone", () => {
     expect(world.files.shared).toEqual([["Download/dunes.jpg"]]);
     // spec/app/files/change.md, "Each sheet sends once, by email when an account can take it, through the phone's chooser, as copied text or saved through the system picker, and then goes away; sharing by text message is not offered"
     await press("Share");
-    await press("Copy");
+    await pressOnTop("Copy");
     await until(alpha, runtime, Browser, (s) => s.change.sending.outcome === "Confirmed" && s.change.sentTo === "Copy");
     expect(await navigator.clipboard.readText()).toBe("Internal storage/Download/dunes.jpg");
     // spec/app/files/change.md, "The sheet goes away when the owner closes it or Files is hidden, and when the selection changes the owner is told it sent nothing; a sheet never opens again"
@@ -526,7 +526,7 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.viewer > previousViewer);
     expect([paths(world).includes("primary:Download/codes.txt"), document.querySelector("[aria-label='Preview']")?.textContent?.includes("codes.txt")]).toEqual([true, true]);
 
-    await choose("Move to", "File actions");
+    await choose("Add to folder", "File actions");
     await until(alpha, runtime, Browser, (s) => s.sheet.open && s.sheet.reading.status === "Loaded");
     expect(runtime.runSync(Browser.use((m) => m.get())).picked).toHaveLength(1);
     await hardware("back");
@@ -536,7 +536,7 @@ describe("Files on a phone", () => {
     await press("Cancel");
     await press("codes.txt");
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded");
-    await choose("Move to Trash", "File actions");
+    await choose("Delete", "File actions");
     await until(alpha, runtime, Browser, (s) => s.deleting.showing);
     await pressOnTop("Delete");
     await until(alpha, runtime, Shown, (s) => s.viewer === 0);
@@ -561,7 +561,7 @@ describe("Files on a phone", () => {
     await press("attach.txt");
     await until(alpha, runtime, Shown, (state) => state.content.status === "Loaded");
 
-    await choose("Use in email", "File actions");
+    await choose("Email", "File actions");
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Inbox");
     await until(alpha, runtime, Shown, (state) => state.attempt.outcome === "Confirmed");
     expect(alpha.runtime.runSync(Drafts.use((model) => model.get())).open).toBe(false);
@@ -967,7 +967,7 @@ describe("Files on a phone", () => {
     // spec/app/files/trash.md, "The owner opens a listed Trash item's details and can restore or ask to erase that same item"
     await press("beach.jpg");
     await until(alpha, runtime, Bin, (s) => s.details !== 0);
-    expect(document.querySelector("[aria-label='Trash item details']")?.textContent).toContain("Internal storage › Download");
+    expect([...document.querySelectorAll("[role=dialog]")].at(-1)?.textContent).toContain("Internal storage › Download");
     await hardware("back");
     await until(alpha, runtime, Bin, (s) => s.open && s.details === 0);
     await press("beach.jpg");
@@ -981,7 +981,7 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Bin, (s) => s.listing.status === "Loaded" && s.entries.length === 1);
     await press("old.txt");
     await pressOnTop("Delete now");
-    await pressOnTop("Erase");
+    await pressOnTop("Delete");
     await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Confirmed" && s.entries.length === 0);
     expect(world.files.trash).toEqual([]);
 
@@ -1000,9 +1000,10 @@ describe("Files on a phone", () => {
     world.files.trash.push({ id: "13", was: { volume: "primary", path: "Download/d.txt", directory: false, mimeType: "text/plain", size: 1, modified: 1 }, deletedAt: world.files.now });
     await press("Refresh");
     await until(alpha, runtime, Bin, (s) => s.listing.status === "Loaded" && s.entries.length === 2);
-    await press("Mark c.txt");
-    await press("Mark d.txt");
-    await press("Restore marked");
+    await press("Select items");
+    await press("Select c.txt");
+    await press("Select d.txt");
+    await press("Restore");
     await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Confirmed" && s.entries.length === 0 && s.listing.status === "Loaded");
     expect(paths(world).filter((path) => path.endsWith("c.txt") || path.endsWith("d.txt"))).toEqual(["primary:Download/c.txt", "primary:Download/d.txt"]);
 
@@ -1042,9 +1043,9 @@ describe("Files on a phone", () => {
     );
     await press("Refresh");
     await until(alpha, runtime, Bin, (s) => s.listing.status === "Loaded" && s.entries.length === 2);
-    await press("Empty the Trash");
+    await press("Empty");
     await until(alpha, runtime, Bin, (s) => s.erasing.showing && s.doomed.length === 2);
-    await pressOnTop("Erase");
+    await pressOnTop("Empty");
     await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Confirmed" && s.entries.length === 0 && s.listing.status === "Loaded");
     expect(world.files.trash).toEqual([]);
     // spec/app/files/trash.md, "The Trash is closed, without access, reading, unreadable, empty or listing"
