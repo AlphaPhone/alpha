@@ -26,7 +26,7 @@ import { Reviewing, approve, decline } from "./agent.vibe";
 import { Pages, type PageRuntime, addressOf, idOf, inputOf, openDownloads, placed } from "./browser.vibe";
 import { LibraryRows, editHistory, markPage, setMark } from "./library.vibe";
 import { type SharePages, cancelPrivateFrame, confirmPrivateFrame, offerShare } from "./share.vibe";
-import { type SiteRows, clearSiteShown, siteShown } from "./site.vibe";
+import { type SitePage, type SiteRows, clearSiteShown, siteShown } from "./site.vibe";
 
 export interface BrowserProps {
   /** Provides the Browser's tabs and each tab's page, `browser` of browser.vibe, over the resident machines and the phone's tab host. */
@@ -73,7 +73,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const [typed, setTyped] = useState("");
   const [refusal, setRefusal] = useState<string>();
   const [finding, setFinding] = useState("");
-  const [clearingSite, setClearingSite] = useState<string>();
+  const [clearingSite, setClearingSite] = useState<SitePage>();
   if (!state) return null;
   const tab = tabs.selected;
   const tabHost = runtime.runSync(TabHost);
@@ -143,7 +143,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     native && canShare && { label: "Share", icon: <Share2 />, onSelect: () => void runtime.runPromise(offerShare("System")) },
     canShare && binding !== undefined && { label: "Copy link", icon: <Link />, onSelect: () => void runtime.runPromise(offerShare("Copy")) },
     native && can({ type: "openFind" }) && { label: "Find", name: "Find in page", icon: <Search />, onSelect: () => { setFinding(""); void browser.send({ type: "uncover" }).then(() => send({ type: "openFind" })); } },
-    clearable !== undefined && { label: "Clear site", name: "Clear site data", icon: <ListFilter />, onSelect: () => { setClearingSite(clearable.host); void browser.send({ type: "uncover" }); } },
+    clearable !== undefined && { label: "Clear site", name: "Clear site data", icon: <ListFilter />, onSelect: () => { setClearingSite(clearable); void browser.send({ type: "uncover" }); } },
     canAskErase(tabs) && { label: "Clear all", name: "Clear all browsing data", icon: <Trash2 />, onSelect: () => void browser.send({ type: "askErase" }) },
   ];
   const stood = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.sought(tab)));
@@ -211,10 +211,10 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
         Your browser will receive this private page.
       </ConfirmDialog>
       <AgentPageCard runtime={runtime} />
-      <BrowserReview open={clearingSite !== undefined} title={`Clear data for ${clearingSite ?? ""}?`} confirmLabel="Clear data" destructive
-        onConfirm={() => { setClearingSite(undefined); void runtime.runPromise(clearSiteShown()); }}
+      <BrowserReview open={clearingSite !== undefined} title={`Clear data for ${clearingSite?.host ?? ""}?`} confirmLabel="Clear data" destructive
+        onConfirm={() => { if (clearingSite !== undefined) void runtime.runPromise(clearSiteShown(clearingSite)); setClearingSite(undefined); }}
         onCancel={() => setClearingSite(undefined)}>
-        {`Signs you out of ${clearingSite ?? ""}.`}
+        {`Signs you out of ${clearingSite?.host ?? ""}.`}
       </BrowserReview>
       <BrowserReview open={tabs.erasing === "Asked"} title="Clear browsing data?" confirmLabel="Clear data" destructive
         onConfirm={() => { if (canConfirmErase(tabs)) void browser.send({ type: "confirmErase" }); }}

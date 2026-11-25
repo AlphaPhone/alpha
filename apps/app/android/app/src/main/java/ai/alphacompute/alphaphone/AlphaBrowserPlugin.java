@@ -1042,7 +1042,9 @@ public class AlphaBrowserPlugin extends Plugin {
  @PluginMethod public void clearSiteData(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;
   if(!Objects.equals(session,call.getString("session"))){call.reject("Expired browser session");return;}
   Tab t=tabs.get(call.getString("id"));
-  if(t==null||t.dead||!safe(t.url)||!Objects.equals(call.getString("url"),t.url)){call.reject("Load a website before clearing its data.");return;}
+  if(t==null||t.dead||paused||destroyed||!Objects.equals(presentedId,t.id)||!t.committed||t.loading||!t.error.isEmpty()
+   ||!safe(t.url)||!Objects.equals(call.getString("url"),t.url)||!Objects.equals(t.web.getUrl(),t.url)
+   ||!Objects.equals(call.getString("navigation"),String.valueOf(t.navigation))){call.reject("The page changed. Review it again before clearing site data.");return;}
   if(!WebViewFeature.isFeatureSupported(WebViewFeature.DELETE_BROWSING_DATA)){call.reject("This Android WebView cannot clear site data.");return;}
   try{
    String[] site=new String[1];

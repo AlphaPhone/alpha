@@ -37,6 +37,7 @@ export interface BrowserScene {
   readonly calls: string[];
   readonly shared: BrowserPageGuard[];
   showInFiles: (() => void) | undefined;
+  navigateFromPage?: (id: string, url: string) => void;
 }
 
 /** develop's fixture photographs, served beside the fakes. */
@@ -215,6 +216,10 @@ export function alphaBrowser(world: BrowserScene): Faked {
       told(tab);
       commit(tab, tab.navigation);
     };
+    world.navigateFromPage = (id, url) => {
+      const tab = world.tabs.get(id);
+      if (tab) go(tab, url);
+    };
     const held = (options: { session: string; id: string }) => {
       world.calls.push("tab");
       const tab = world.tabs.get(options.id);
@@ -306,9 +311,14 @@ export function alphaBrowser(world: BrowserScene): Faked {
         draw();
         return Promise.resolve({ closed });
       },
-      clearSiteData: ({ url }) => {
+      clearSiteData: (options) => {
+        const tab = held(options);
+        if (!("navigation" in options) || options.navigation !== String(tab.navigation) ||
+            !tab.committed || tab.loading || options.url !== tab.history[tab.at]) {
+          return Promise.reject(rejection("The reviewed page changed"));
+        }
         world.calls.push("clearSiteData");
-        return Promise.resolve({ site: new URL(url).host });
+        return Promise.resolve({ site: new URL(options.url).host });
       },
       readingSupport: () => Promise.resolve({ available: false }),
       reviewQuestion: () => Promise.reject(rejection("Reading unavailable")),

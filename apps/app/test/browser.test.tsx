@@ -195,6 +195,27 @@ describe("The Browser on a phone", () => {
     expect([...world.browser.tabs.values()].map((one) => one.history.at(-1))).toEqual(["https://www.google.com/search?q=on%20device%20agents"]);
   });
 
+  it.each([
+    "https://enclave.example/keys-in-hardware",
+    "https://news.example/on-device-agents",
+  ])("Keeps site data if the page moves to %s while clearing is reviewed (spec/app/browser/site.md, \"Clearing a site's data needs a loaded site, and runs one at a time\")", async (target) => {
+    const { alpha, runtime, world } = await onBrowser();
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    await go("news.example/on-device-agents");
+    const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
+    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
+    await until(alpha, page, Page, (p) => p.phase === "Shown" && p.secure);
+    const initial = page.runSync(Page.use((m) => m.get()));
+    await press("Menu");
+    await press("Clear site data");
+    expect(document.querySelector("[role=alertdialog]")?.textContent).toContain("news.example");
+    await drawn(() => { world.browser.navigateFromPage?.(`tab${tab}`, target); });
+    await until(alpha, page, Page, (p) => p.phase === "Shown" && p.load > initial.load);
+    await press("Clear data");
+    expect(world.browser.calls).not.toContain("clearSiteData");
+    expect(runtime.runSync(Site.use((m) => m.get())).clear).toBe(0);
+  });
+
   it("Open, pick and close tabs (spec/app/browser/index.md, \"Story: Open, pick and close tabs\"; spec/app/browser/index.md, \"Story: Clear all browsing data\")", async () => {
     const { alpha, runtime, world } = await onBrowser();
     await until(alpha, runtime, Tabs, (s) => s.hydrated);
