@@ -49,7 +49,7 @@ async function settingsOpen(world = { ...scene(), phone: true }) {
 }
 
 describe("Settings", () => {
-  it("Find a setting and come back (spec/app/settings/index.md, \"Story: Find a setting and come back\")", async () => {
+  it("Find a setting and come back (spec/app/settings/index.md, \"Story: Find a setting and come back\"; spec/app/account/plan.md, \"Story: Know my plan\")", async () => {
     const { alpha, machines, world } = await settingsOpen();
     // spec/app/settings/index.md, "The build says once whether it is a development build, and the phone whether Alpha runs on a phone and on an Alpha image"
     await until(alpha, alpha.runtime, Pages.Machine, (s) => s.told && s.phone && !s.image && s.development);
@@ -74,7 +74,9 @@ describe("Settings", () => {
     await vi.waitFor(() => expect(button("Account")?.textContent).toContain(account.email));
     await press("Account");
     await until(alpha, alpha.runtime, Layers.Machine, (state) => Layers.listed(state, "account"));
+    const shownBalance = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(12.5);
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain(account.email));
+    await vi.waitFor(() => expect(document.querySelector('[aria-label="Cloud plan"]')?.textContent).toContain(shownBalance));
     await hardware("back");
     await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
     expect(await page(alpha)).toBe("Top");
@@ -84,6 +86,7 @@ describe("Settings", () => {
     await until(alpha, alpha.runtime, Layers.Machine, (state) => Layers.listed(state, "account"));
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Sign-in required"));
     expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain(account.email);
+    expect(document.querySelector('[aria-label="Cloud plan"]')).toBeNull();
     await press("Close Account");
     await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
     await vi.waitFor(() => expect(button("Account")?.textContent).toContain("Signed out"));
@@ -153,6 +156,7 @@ describe("Settings", () => {
     world.signedIn = true;
 
     await press("Restart Alpha");
+    await vi.waitFor(() => expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain("3 records"));
     await press("Archive and restart");
     await vi.waitFor(() => {
       expect(recovery.tokens).toEqual(["1.check"]);

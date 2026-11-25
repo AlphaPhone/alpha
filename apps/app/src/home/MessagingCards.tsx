@@ -3,7 +3,7 @@ import { HomeCard, HomeCardLines } from "@repo/ui";
 import { Hash, Send } from "lucide-react";
 import type { ReactNode } from "react";
 import * as Cards from "../../gen/app__home__cards.ts";
-import type { MessagingCardSnapshot, MessagingPlatform } from "../messaging/bridge.vibe";
+import type { MessagingHomeCardSnapshot, MessagingPlatform } from "../messaging/bridge.vibe";
 
 function cardTitle(platform: MessagingPlatform, unread: number, mentions: number): string {
   const counts = mentions > 0 ? `${unread} unread · ${mentions} @` : `${unread} unread`;
@@ -11,7 +11,7 @@ function cardTitle(platform: MessagingPlatform, unread: number, mentions: number
 }
 
 /** Convert a live `MessagingBridge` card snapshot into the spec's `Cards.Messaging` record. */
-export function messagingStateOf(card: MessagingCardSnapshot): Cards.Messaging {
+export function messagingStateOf(card: MessagingHomeCardSnapshot): Cards.Messaging {
   return { ...card, rows: [...card.rows] };
 }
 
@@ -19,7 +19,7 @@ export function messagingStateOf(card: MessagingCardSnapshot): Cards.Messaging {
 export function renderMessagingCard(
   platform: MessagingPlatform,
   kind: "TelegramCard" | "SlackCard",
-  card: MessagingCardSnapshot,
+  card: MessagingHomeCardSnapshot,
   open: { readonly disabled: boolean; readonly onClick: () => void },
 ): ReactNode {
   const status = Cards.messagingCard(messagingStateOf(card));

@@ -52,7 +52,7 @@ type Effect =
   | SetBackground({ id: int, on: bool })
   | SetNotices({ id: int, on: bool })
   | ReadResult({ ticket: int, owner: int, result: int })
-  | AskAlpha({ result: int })
+  | AskAlpha({ owner: int, result: int })
 type Digests = {
   owner: int, open: bool, checks: Checks,
   stage: Stage, inbox: R::Read, page: int, pageEnd: int, pageRan: Brief,
@@ -154,10 +154,24 @@ pure def noticeOpened(d: Digests, owner: int, upTo: int, checks: Checks): Moved 
 
 ### Ask Alpha about a result hands that result to Ask Alpha
 
-```quint
-pure def canAskAbout(d: Digests, result: int): bool = d.open and 1 <= result and result <= d.bucket.kept
+The owner presses Ask Alpha on the displayed result. The inbox that owns
+the displayed row confirms it is still retained for this owner. Android
+requires the same lease that supplied the result. The handoff samples
+the selected result and the current owner again before staging a safe
+excerpt with an editable suggestion. The owner chooses when to send.
 
-pure def askAbout(d: Digests, result: int): Moved = { state: d, out: List(AskAlpha({ result: result })) }
+```quint
+pure def canAskAbout(d: Digests, owner: int, result: int, retained: bool): bool =
+  d.open and owner >= 1 and d.owner == owner and result >= 1 and retained
+
+pure def askAbout(d: Digests, owner: int, result: int, retained: bool): Moved =
+  { state: d, out: List(AskAlpha({ owner: owner, result: result })) }
+
+pure def stepOnlyTheRetainedOwnersResultIsAsked(before: Digests, via: str, after: Digests, out: List[Effect]): bool =
+  out.every(one => match one {
+    | AskAlpha(ask) => via == "askAbout" and before.open and ask.owner == before.owner and ask.owner >= 1 and ask.result >= 1 and after == before
+    | _ => true
+  })
 ```
 
 ### Background checks and notifications are asked one at a time each and shown as the platform last took them
@@ -168,7 +182,7 @@ agent named by local auth. Consent and retained history are scoped to
 that verified pair. An older agent-only record proves neither its owner
 nor their consent and stays sealed. A verified owner starts with checks
 off until they choose otherwise.
-The browser answers with what it durably saved; Android supplies its own
+The browser answers with what it durably saved. Android owns its own
 delivery and notification settings.
 
 ```quint
@@ -210,7 +224,7 @@ pure def noticesAnswered(d: Digests, id: int, applied: bool): Moved =
 pure def switchHonest(s: Switch): bool = s.attempt.outcome != A::Recorded and s.attempt.id >= 0
 
 pure def stepASwitchMovesOnlyByTheAgentsAnswer(before: Digests, via: str, after: Digests): bool = and {
-  after.background.on != before.background.on implies (via == "backgroundAnswered" or via == "ownerChanged"),
+  after.background.on != before.background.on implies (via == "backgroundAnswered" or via == "ownerChanged" or via == "nativeChecksRead"),
   after.notices.on != before.notices.on implies (via == "noticesAnswered" or via == "ownerChanged"),
 }
 ```
@@ -427,6 +441,50 @@ pure def ownerChanged(d: Digests, owner: int, backgroundOn: bool, noticesOn: boo
              focus: 0, fromNotice: false, details: { ...d.details, status: R::Idle },
              background: keptSwitch(d.background, backgroundOn), notices: keptSwitch(d.notices, noticesOn) },
     out: drop(d) }
+```
+
+### Android supplies one verified view of retained results and background checks
+
+When the Android delivery bridge is installed, the native inbox alone
+fetches, stores and acknowledges its results. Home and the open Workflows
+panel read committed snapshots. An invalidation asks for another snapshot
+without fetching or acknowledging anything. The Workflows panel may ask
+the native bridge to sync in the foreground. Sync and preference changes
+name a previously admitted native lease. A different lease refuses them,
+and the renderer never retries with it. A device offering scheduled checks
+shows the last native preference for the same verified owner.
+Devices that can only sync in the foreground have no background switch.
+Reading the native preference cannot complete a change that is in hand.
+
+Digest notifications are offered separately when the native snapshot says
+they are disabled. Only the owner's action in the panel can ask Android
+for notification permission or channel settings. The request uses the
+currently displayed lease and the next native snapshot reports whether
+notices are allowed. Enabling background checks leaves that choice to
+the owner.
+
+An ordinary Android result tap carries an opaque token and the exact
+run, workflow, version and saved cursor. Workflows opens that result
+only after the current owner still retains it. The renderer settles
+the token after the route commits and the same verified lease still
+admits the result. A notice is opened as a read, without sending to
+Ask Alpha.
+
+```quint
+pure def canNativeChecksRead(d: Digests, owner: int, scheduled: bool, backgroundOn: bool): bool =
+  d.open and owner == d.owner and owner > 0 and d.background.attempt.outcome != A::Sent and
+    (scheduled or not(backgroundOn))
+
+pure def nativeChecksRead(d: Digests, owner: int, scheduled: bool, backgroundOn: bool): Digests = {
+  ...d, checks: if (scheduled) BackgroundChecks else NoChecks,
+  background: keptSwitch(d.background, backgroundOn),
+}
+
+pure def lawNativeChecksCannotChangeAnotherOwner(d: Digests, owner: int, scheduled: bool, backgroundOn: bool): bool =
+  canNativeChecksRead(d, owner, scheduled, backgroundOn) implies owner == d.owner
+
+pure def lawAReadCannotConfirmANativeChange(d: Digests, owner: int, scheduled: bool, backgroundOn: bool): bool =
+  canNativeChecksRead(d, owner, scheduled, backgroundOn) implies d.background.attempt.outcome != A::Sent
 ```
 
 ### An owner's results can wait for them while another owner is signed in

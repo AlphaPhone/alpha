@@ -3,6 +3,8 @@ import { digestInbox, type DigestResult, hostedDigestProtocol } from "@elizaos/p
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Home from "../gen/app__home.effect.vibe";
+import { Machine as DigestSchedules } from "../gen/app__digests__schedules.effect.vibe";
+import { Machine as WorkflowList } from "../gen/app__workflows__list.effect.vibe";
 import * as Cards from "../gen/app__home__cards.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Toasts } from "../gen/app__notices__toasts.effect.vibe";
@@ -15,6 +17,8 @@ import { waiting } from "../src/home/waiting.vibe";
 import { fromAreas } from "../src/home/cards.vibe";
 import { MessagingBridge } from "../src/messaging/bridge.vibe";
 import { digestScope } from "../src/workflows/brief.vibe";
+import workflows from "../src/workflows/index.tsx";
+import type { NativeDigestScene, WorkflowsScene } from "./fakes/workflows.ts";
 
 underAct();
 afterEach(closeAll);
@@ -177,6 +181,53 @@ describe("Home on a phone", () => {
     expect(dialog()).toBeNull();
   });
 
+  it('Holds a native app for App info and to pin it (spec/app/home/drawer.md, "Story: Act on an installed app from its menu")', async () => {
+    const world = { ...scene(), phone: true };
+    const { alpha } = await open(world, only("home"));
+    const homes = home.runtime(alpha);
+    const menu = () => document.querySelector('[role="menu"][aria-label="Clock"]');
+    const action = (label: string) => [...(menu()?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])]
+      .find((item) => item.textContent === label);
+    const selectAction = async (label: string) => {
+      const item = action(label);
+      expect(item).toBeInstanceOf(HTMLElement);
+      await drawn(() => item?.click());
+    };
+    const holdClock = async () => {
+      const clock = button("Open Clock");
+      expect(clock).toBeInstanceOf(HTMLButtonElement);
+      await drawn(() => clock?.dispatchEvent(pointer("pointerdown", 100, 235)));
+      await later(alpha, 450);
+      await vi.waitFor(() => expect(menu()).not.toBeNull());
+      await drawn(() => clock?.dispatchEvent(pointer("pointerup", 100, 235)));
+    };
+
+    await until(alpha, homes, Home.Machine, (state) => state.host === "AsApp" && state.tiles.load.status === "Loaded");
+    await press("Apps");
+    await until(alpha, homes, Home.Machine, (state) => state.installed.read.status === "Loaded");
+    await holdClock();
+    await hardware("back");
+    await vi.waitFor(() => expect(menu()).toBeNull());
+    expect((await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).drawer).toBe(true);
+    expect(world.launcher.opened).toEqual([]);
+
+    await holdClock();
+    await selectAction("App info");
+    await until(alpha, homes, Home.Machine, (state) => state.handoff.ask.tag === "AppInfo" && state.handoff.attempt.outcome === "Confirmed");
+    expect([world.launcher.infos, world.launcher.opened, menu()]).toEqual([["org.fixture.clock"], [], null]);
+
+    await holdClock();
+    await selectAction("Add to Home");
+    await until(alpha, homes, Home.Machine, (state) => state.tiles.save.outcome === "Confirmed");
+    await until(alpha, alpha.runtime, Shell, (state) => !state.drawer);
+    expect(tiles()).toContain("app:org.fixture.clock/org.fixture.clock.Main");
+
+    await press("Apps");
+    await until(alpha, alpha.runtime, Shell, (state) => state.drawer);
+    await holdClock();
+    expect(action("On Home")?.getAttribute("aria-disabled")).toBe("true");
+  });
+
   // spec/app/home/cards.md, "Story: See my day at a glance"; spec/app/home/cards.md, "Story: The agenda card"; spec/app/home/cards.md, "Story: Open my day from a card"
   it("See my day at a glance and open it from a card (spec/app/home/cards.md, \"Story: See my day at a glance\"; spec/app/home/cards.md, \"Story: The agenda card\"; spec/app/home/cards.md, \"Story: Open my day from a card\")", async () => {
     const hour = 3_600_000;
@@ -276,6 +327,84 @@ describe("Home on a phone", () => {
     await vi.waitFor(() => expect(card("Latest brief")?.textContent).toContain("Didn't run"), { timeout: 5_000 });
     await pressCard("Latest brief");
     await showing("Workflows");
+  });
+
+  it('Shows Android’s retained brief and refreshes its digest results through the native inbox (spec/app/digests/index.md, "Android supplies one verified view of retained results and background checks")', async () => {
+    const world = { ...scene(), phone: true };
+    const initial = digestResult(1, "finished", "Owner’s retained Android brief");
+    const missed = digestResult(2, "missed", "A missed run cannot replace the brief");
+    const resultText = "The exact result from native refresh";
+    const refreshed = digestResult(3, "finished", resultText);
+    world.ask.spokenFiles = [];
+    const browser: NonNullable<WorkflowsScene["hosted"]> = {
+      entries: [digestResult(90, "finished", "Browser result for the same agent")], reads: 0, acknowledgements: [],
+    };
+    const native: NativeDigestScene = {
+      snapshot: { rows: [initial, missed], backgroundEnabled: false, noticesAllowed: false, lease: "native-digest-lease", support: "nativeScheduled" },
+      incoming: undefined,
+      manualLeases: [],
+    };
+    world.workflows.hosted = browser;
+    world.workflows.nativeDigests = native;
+    const { alpha } = await open(world);
+    const brief = () => [...document.querySelectorAll("section[aria-label='Your day'] > button")]
+      .find((candidate) => candidate.textContent?.startsWith("Latest brief"))?.textContent;
+    const results = () => [...document.querySelectorAll<HTMLButtonElement>("ul[aria-label='Digest results'] li > button")];
+    await vi.waitFor(() => expect(brief()).toContain(initial.output), { timeout: 5_000 });
+    expect(brief()).not.toContain(missed.output);
+    expect(native.manualLeases).toEqual([]);
+
+    await press("Workflows");
+    const area = workflows.runtime(alpha);
+    await until(alpha, area, WorkflowList, (state) => state.list.status === "Loaded");
+    await press("Add to Workflows");
+    await press("Scheduled digests");
+    await until(alpha, area, DigestSchedules, (state) => state.open && state.schedules.status === "Loaded");
+    await vi.waitFor(() => expect(results()).toHaveLength(2), { timeout: 5_000 });
+
+    const started = native.manualLeases.length;
+    native.incoming = [initial, missed, refreshed];
+    await press("Refresh digests");
+    await vi.waitFor(() => expect(results()).toHaveLength(3), { timeout: 5_000 });
+    expect(native.manualLeases.slice(started)).toEqual([native.snapshot.lease]);
+
+    await drawn(() => {
+      const row = results().find((item) => item.textContent?.includes(new Date(refreshed.scheduledAt).toLocaleString()));
+      if (row === undefined) throw new Error("Refreshed digest unavailable");
+      row.click();
+    });
+    await vi.waitFor(() => expect(document.querySelector("[aria-label='Digest result']")?.textContent).toContain(resultText));
+
+    // spec/app/digests/index.md, "Ask Alpha about a result hands that result to Ask Alpha"
+    const composer = () => document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']");
+    const attachment = "Remove Saved result.txt";
+    const recorded = () => document.querySelectorAll("section[aria-label='Ask Alpha'] [role=log] article").length;
+    const unsent = () => expect([recorded(), world.ask.kept.size, world.ask.said, world.ask.spokenFiles]).toEqual([0, 0, [], []]);
+    await vi.waitFor(() => expect(button("Ask Alpha")).toBeDefined());
+    await press("Ask Alpha");
+    await vi.waitFor(() => expect([composer()?.value, Boolean(button(attachment))]).toEqual(["Help me understand this saved result.", true]));
+    unsent();
+
+    await press(attachment);
+    await vi.waitFor(() => expect(button(attachment)).toBeUndefined());
+    const draft = "Tell me which part should come first.";
+    await fill("Message Alpha", draft);
+    await press("Minimize chat");
+    await vi.waitFor(() => expect(button("Ask Alpha")).toBeDefined());
+    await press("Ask Alpha");
+    await vi.waitFor(() => expect([composer()?.value, Boolean(button(attachment))]).toEqual([draft, true]));
+    unsent();
+
+    await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+    await press("Send");
+    await vi.waitFor(() => expect(world.ask.said).toEqual([draft]));
+    expect(world.ask.spokenFiles?.map(({ images }) => images)).toEqual([
+      [{ name: "Saved result.txt", mimeType: "text/plain", data: btoa(resultText) }],
+    ]);
+
+    await hardware("home");
+    await vi.waitFor(() => expect(brief()).toContain(refreshed.output), { timeout: 5_000 });
+    expect([browser.reads, browser.acknowledgements]).toEqual([0, []]);
   });
 
   // spec/app/home/index.md, "Story: See the apps on this phone"; spec/app/home/index.md, "Story: Open an app"

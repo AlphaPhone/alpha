@@ -98,7 +98,7 @@ export interface MessagingBridgeSnapshot {
 }
 
 /** Empty disconnected Home card snapshot matching `quietMessaging` in `spec/app/home/cards.md`. */
-export const quietMessagingCard: MessagingHomeCardSnapshot = {
+const quietMessagingCard: MessagingHomeCardSnapshot = {
   connected: false,
   unread: 0,
   mentions: 0,

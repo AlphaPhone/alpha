@@ -188,6 +188,18 @@ pure def canFramed(p: Page, load: int): bool = canCommitted(p, load)
 pure def framed(p: Page, load: int): Step = committed(p, load, false)
 ```
 
+### Another load of the shown browser frame reports that the page is blocked
+
+An additional load of the current opaque frame may have left the requested
+document. The frame stays where it is, and Alpha can reload the requested
+address. There is no second history entry.
+
+```quint
+pure def canFrameBlocked(p: Page, load: int): bool = p.phase == Shown and not(p.secure) and load == p.load
+
+pure def frameBlocked(p: Page, load: int): Page = { ...started(p), phase: Failed, load: p.load }
+```
+
 ### Stop ends the load under way, and its late answer is refused
 
 ```quint

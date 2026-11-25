@@ -1,8 +1,8 @@
 // spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"; spec/app/browser/address.md, "Story: Browse privately"
 import { Button, BrowserAddressBar, type BrowserAddressChoice, BrowserAddressChoices, BrowserFindBar, BrowserBar, BrowserLibrary, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserTabs, ConfirmDialog, PrivateMark } from "@repo/ui";
-import { ChevronLeft, Download, History, Plus, RotateCw, Search, Square, Star, Trash2 } from "lucide-react";
+import { ChevronLeft, Download, History, Link, Plus, RotateCw, Search, Share2, Square, Star, Trash2 } from "lucide-react";
 import { Effect, Option } from "effect";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { canAskErase, canCancelErase, canConfirmErase, canOpenTab } from "../../gen/app__browser.ts";
 import type { Browser as State } from "../../gen/app__browser.ts";
 import { useMachine } from "../../gen/app__browser.react.ts";
@@ -11,17 +11,21 @@ import { verdict } from "../../gen/app__browser__address.ts";
 import { useMachine as usePage } from "../../gen/app__browser__address.react.ts";
 import { Machine as LibraryMachine } from "../../gen/app__browser__library.effect.vibe";
 import { useMachine as useLibrary } from "../../gen/app__browser__library.react.ts";
+import type { Machine as ShareMachine } from "../../gen/app__browser__share.effect.vibe";
+import { useMachine as useShare } from "../../gen/app__browser__share.react.ts";
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
 import { TabHost } from "../platform/browser.vibe";
 import type { Alpha, Resident } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
+import { desktopPreview } from "../shell/canvas.vibe";
 import type { ManagedRuntime } from "effect";
 import { Pages, type PageRuntime, addressOf, idOf, inputOf, openDownloads, placed } from "./browser.vibe";
 import { LibraryRows, markPage, setMark } from "./library.vibe";
+import { type SharePages, offerShare } from "./share.vibe";
 
 export interface BrowserProps {
   /** Provides the Browser's tabs and each tab's page, `browser` of browser.vibe, over the resident machines and the phone's tab host. */
-  runtime: ManagedRuntime.ManagedRuntime<Machine | Pages | LibraryMachine | LibraryRows | TabHost | Shell | Resident, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<Machine | Pages | LibraryMachine | LibraryRows | ShareMachine | SharePages | TabHost | Shell | Resident, unknown>;
   alpha: Alpha;
 }
 
@@ -50,10 +54,17 @@ export function Browser({ runtime, alpha }: BrowserProps) {
   return <Tab key={state.selected} runtime={runtime} alpha={alpha} tabs={state} page={page} />;
 }
 
+function BrowserPagePlace({ runtime }: Pick<BrowserProps, "runtime">) {
+  // The desktop canvas can move while this element's logical size stays the same.
+  useSyncExternalStore(desktopPreview.subscribe, desktopPreview.snapshot, () => undefined);
+  return <div data-alpha-browser-page="" aria-hidden ref={(place) => { if (place) void runtime.runPromise(placed); }} className="absolute inset-0" />;
+}
+
 function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page: PageRuntime }) {
   const browser = useMachine(runtime);
   const { state, can, send } = usePage(page);
   const library = useLibrary(runtime);
+  const share = useShare(runtime);
   const [typed, setTyped] = useState("");
   const [refusal, setRefusal] = useState<string>();
   const [finding, setFinding] = useState("");
@@ -65,8 +76,11 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const { host, path } = addressParts(shownAddress);
   const editing = tabs.layer === "Address";
   const native = Option.isSome(tabHost.plugin);
+  const hasLibrary = native || tabHost.web !== undefined;
+  const canCopy = native && state.phase === "Shown" && tabHost.session.pageBinding(idOf(tab)) !== undefined;
+  const canShare = native && share.can({ type: "openPanel", ready: canCopy });
   const privateTab = state.kind === "Private";
-  const readSuggestions = () => native ? loadLibrary(runtime) : undefined;
+  const readSuggestions = () => hasLibrary ? loadLibrary(runtime) : undefined;
   const cover = (layer: State["layer"]) => (browser.can({ type: "cover", layer }) ? () => void browser.send({ type: "cover", layer }) : undefined);
   const leading = <AppBack alpha={alpha} />;
   const submit = (text: string) => {
@@ -93,7 +107,9 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const opening = (kind: "Normal" | "Private") => (canOpenTab(tabs, kind) ? () => {
     void browser.send({ type: "openTab", kind }).then(readSuggestions);
   } : undefined);
-  const binding = tabs.layer === "Menu" ? tabHost.session.pageBinding(idOf(tab)) : undefined;
+  const binding = tabs.layer === "Menu" && state.phase === "Shown"
+    ? tabHost.web === undefined ? tabHost.session.pageBinding(idOf(tab)) : tabHost.web.current(idOf(tab), state.load)
+    : undefined;
   const booked = binding !== undefined && runtime.runSync(Effect.flatMap(LibraryRows, (rows) => rows.bookmarks())).some((entry) => entry.url === binding.url);
   const canBookmark = library.can(booked ? { type: "unmark" } : { type: "mark", secure: state.secure, userInfo: false });
   const chooseBookmark = () => {
@@ -104,7 +120,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     void runtime.runPromise(markPage(binding, !booked)).then((sent) => { if (sent) void browser.send({ type: "uncover" }); });
   };
   const menu = () => void browser.send({ type: "cover", layer: "Menu" }).then(() => {
-    if (native && library.state?.read.status !== "Loaded") void loadLibrary(runtime);
+    if (hasLibrary && (tabHost.web !== undefined || library.state?.read.status !== "Loaded")) void loadLibrary(runtime);
   });
   const bookmarkNotice = library.state?.notice === "NotSecure" ? "HTTPS only"
     : library.state?.notice === "Full" ? "The bookmark list is full."
@@ -114,9 +130,11 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     can({ type: "stop" }) && { label: "Stop", name: "Stop loading", icon: <Square />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => send({ type: "stop" })); } },
     canOpenTab(tabs, "Normal") && { label: "New tab", icon: <Plus />, onSelect: () => opening("Normal")?.() },
     canOpenTab(tabs, "Private") && { label: "Private tab", name: "New private tab", icon: <PrivateMark aria-hidden />, onSelect: () => opening("Private")?.() },
-    native && { label: booked ? "Bookmarked" : "Bookmark", icon: <Star fill={booked ? "currentColor" : "none"} />, disabled: !canBookmark, onSelect: chooseBookmark },
-    native && { label: "Library", name: "Library, bookmarks and history", icon: <History />, onSelect: openLibrary },
-    native && { label: "Downloads", icon: <Download />, onSelect: () => void runtime.runPromise(openDownloads) },
+    hasLibrary && { label: booked ? "Bookmarked" : "Bookmark", icon: <Star fill={booked ? "currentColor" : "none"} />, disabled: !canBookmark, onSelect: chooseBookmark },
+    hasLibrary && { label: "Library", name: "Library, bookmarks and history", icon: <History />, onSelect: openLibrary },
+    hasLibrary && { label: "Downloads", icon: <Download />, onSelect: () => void runtime.runPromise(openDownloads) },
+    canShare && { label: "Share", icon: <Share2 />, onSelect: () => void runtime.runPromise(offerShare("System")) },
+    canShare && canCopy && { label: "Copy link", icon: <Link />, onSelect: () => void runtime.runPromise(offerShare("Copy")) },
     native && can({ type: "openFind" }) && { label: "Find", name: "Find in page", icon: <Search />, onSelect: () => { setFinding(""); void browser.send({ type: "uncover" }).then(() => send({ type: "openFind" })); } },
     canAskErase(tabs) && { label: "Clear all", name: "Clear all browsing data", icon: <Trash2 />, onSelect: () => void browser.send({ type: "askErase" }) },
   ];
@@ -152,11 +170,11 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
             onTabs={cover("Switcher")}
             onMenu={cover("Menu") && menu}
           />}
-      {state.phase === "Loading" && <div role="progressbar" aria-label="Loading website" className="h-0.75 shrink-0 overflow-hidden bg-secondary"><div className="h-full w-1/3 bg-primary" /></div>}
+      {state.phase === "Loading" && <div role="progressbar" aria-label="Loading website" className="h-0.75 shrink-0 overflow-hidden bg-secondary"><div className="h-full w-[35%] bg-alpha motion-safe:animate-page-loading motion-reduce:w-full" /></div>}
       <div inert={tabs.layer !== "Uncovered"} className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
         {state.phase === "Blank"
           ? <BrowserNewTab private={privateTab} privateNotice={privateNotice} onSearch={cover("Address") && edit} />
-          : <div data-alpha-browser-page="" aria-hidden ref={(place) => { if (place) void runtime.runPromise(placed); }} className="absolute inset-0" />}
+          : <BrowserPagePlace runtime={runtime} />}
       </div>
       {editing && <AddressChoices runtime={runtime} query={typed} privateTab={privateTab} privateNotice={privateNotice} refusal={state.refused ? refusal : undefined} onOpen={submit} />}
       {state.finding && tabs.layer === "Uncovered" && (

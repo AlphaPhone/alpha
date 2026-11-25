@@ -49,6 +49,7 @@ function LiveAssistant({ runtime }: Shown<Layer.Success<typeof screens> | Reside
   const canTalk = available && noCall && audioFree && voice.can(talk);
   const canDictate = available && noCall && audioFree && composer.state?.away === "Free" && composer.can({ type: "edit", blank: false, long: false }) && voice.can({ type: "openRecorder", target: "ComposerField" });
   const recorder = voice.state?.recorder;
+  const review = recorder?.stage === "Review" && recorder.field === "ComposerField";
   const readingAllowed = noCall && speaker !== undefined && !speaker.latched && voice.state !== undefined && quiet(voice.state) && recorder?.stage === "Closed" && runtime.runSync(bridge.canRead());
   return <Assistant
     runtime={runtime}
@@ -58,13 +59,18 @@ function LiveAssistant({ runtime }: Shown<Layer.Success<typeof screens> | Reside
       useInEmail: destination ? (selection) => void runtime.runPromise(emailMessage(selection, destination)) : undefined,
     }}
     speech={{
+      keyboard: voice.state && {
+        session: voice.state.session,
+        confirmed: quiet(voice.state) ? voice.state.phase === "Idle" && !voice.state.latched && recorder?.stage === "Closed" : undefined,
+      },
       showUnavailableTalk: !available,
+      voiceReview: review ? <DictationControls runtime={runtime} /> : undefined,
       onTalk: canTalk ? () => void runtime.runPromise(beginTalk()) : undefined,
       onDictate: canDictate ? () => void runtime.runPromise(dictate()) : undefined,
-      voice: ({ compactDock, atBar }) => recorder !== undefined && recorder.stage !== "Closed" && recorder.field === "ComposerField"
-        ? <DictationControls runtime={runtime} />
+      voice: ({ compactDock, atBar, onKeyboard }) => recorder !== undefined && recorder.stage !== "Closed" && recorder.field === "ComposerField"
+        ? review ? undefined : <DictationControls runtime={runtime} />
         : voice.state !== undefined && !quiet(voice.state)
-          ? <TalkControls runtime={runtime} compact={compactDock || (atBar && !voice.state.network)} trailing={<VoiceEnd runtime={runtime} />} />
+          ? <TalkControls runtime={runtime} compact={compactDock || (atBar && !voice.state.network)} onKeyboard={onKeyboard} trailing={<VoiceEnd runtime={runtime} />} />
           : undefined,
     }}
   />;
