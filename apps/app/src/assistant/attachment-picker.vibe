@@ -505,7 +505,7 @@ const retirement = started(effect {
   const conversation = try Conversation
   const touched = Stream.mergeAll([Stream.as(machine.changes, undefined), Stream.as(shell.changes, undefined),
     Stream.as(composer.changes, undefined), Stream.as(conversation.changes, undefined)], { concurrency: "unbounded" })
-  try Stream.runForEach(touched, effect {
+  try Stream.runForEach(touched, effect () => {
     const choices = try writer.withPermits(1)(effect {
       const visit = board.current()
       if (visit === undefined || (try sameVisit(visit))) return undefined
