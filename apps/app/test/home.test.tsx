@@ -5,10 +5,11 @@ import * as Cards from "../gen/app__home__cards.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Toasts } from "../gen/app__notices__toasts.effect.vibe";
 import home from "../src/home/index.tsx";
-import { button, closeAll, drawn, fill, hardware, later, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, hardware, later, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
+import { savedKey, written } from "../src/home/saved.vibe";
 import { waiting } from "../src/home/waiting.vibe";
-import { agendaFrom } from "../src/home/cards.vibe";
+import { fromAreas } from "../src/home/cards.vibe";
 
 underAct();
 afterEach(closeAll);
@@ -33,9 +34,9 @@ describe("Home on a phone", () => {
     const { alpha } = first;
     const homes = home.runtime(alpha);
 
-    // spec/app/home/index.md, "Startup says once per run how Alpha is presented, and Home then reads its saved tiles": with nothing saved Home shows Alpha's own apps that this phone admits.
+    // spec/app/home/index.md, "Startup says once per run how Alpha is presented, and Home then reads its saved tiles": with nothing saved Home shows Alpha's own apps that this phone admits, and no Apps drawer tile.
     await until(alpha, homes, Home.Machine, (h) => h.host === "AsLauncher" && h.tiles.load.status === "Loaded");
-    expect(tiles()).toEqual(alphaApps);
+    expect([tiles(), Boolean(button("Apps"))]).toEqual([alphaApps, false]);
 
     // spec/app/home/tiles.md, "Only Phone, Messages and Inbox carry a badge, only when something waits there, and no tile does while Home is being edited"
     await drawn(() => { waiting.tell("Inbox", "3 unread"); waiting.tell("Notes", "1 shared"); });
@@ -59,7 +60,7 @@ describe("Home on a phone", () => {
     await until(alpha, homes, Home.Machine, (h) => !h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 2);
     expect(tiles().at(-1)).toBe("view:Notes");
 
-    // spec/app/home/index.md, "Back closes one layer of Home's own: an app's menu, then Add to Home, then editing; Done ends editing"
+    // spec/app/home/index.md, "Back closes one layer of Home's own: Add to Home, then editing; Done ends editing"
     await hardware("back");
     await until(alpha, homes, Home.Machine, (h) => !h.editing);
     expect(Boolean(button("Done"))).toBe(false);
@@ -84,63 +85,76 @@ describe("Home on a phone", () => {
     ];
     const { alpha } = await open(world);
     const homes = home.runtime(alpha);
-    const agenda = () => [...document.querySelectorAll("button")].find((found) => /^Open (calendar event|overdue reminder)/.test(found.getAttribute("aria-label") ?? ""));
+    const agenda = () => [...document.querySelectorAll("button")].find((found) => /^(Next|Overdue reminder)/.test(found.textContent ?? ""));
 
     // spec/app/home/cards.md, "When Home shows, when Alpha comes back to the front, and when the local day turns while Home shows, Home asks again for every calendar it has not read today"; spec/app/home/cards.md, "The card leads with an overdue reminder, then the item that begins first; of two alike, the first read"
     await until(alpha, homes, Cards.Machine, (c) => c.calendar.source === "Ready" && c.calendar.items.length === 2);
-    expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Dentist/);
+    expect(agenda()?.textContent).toMatch(/^NextDentist/);
 
     // spec/app/home/cards.md, "The agenda draws on both calendars and the reminders saved on the phone, leaving out a calendar Calendar hides and a reminder already done"
-    await drawn(() => agendaFrom.hidden([2]));
-    expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Standup/);
-    await drawn(() => agendaFrom.reminders([{ due: day + 7 * hour, overdue: true, done: false, title: "Call the bank" }, { due: day, overdue: true, done: true, title: "Paid rent" }]));
+    await drawn(() => fromAreas.hidden([2]));
+    expect(agenda()?.textContent).toMatch(/^NextStandup/);
+    await drawn(() => fromAreas.reminders([{ due: day + 7 * hour, overdue: true, done: false, title: "Call the bank" }, { due: day, overdue: true, done: true, title: "Paid rent" }]));
     // spec/app/home/cards.md, "Under an overdue reminder the card also names the next item that is not overdue, so the reminder never hides it"
-    expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open overdue reminder: Call the bank/);
-    expect(agenda()?.textContent).toContain("Standup");
+    expect(agenda()?.textContent).toMatch(/^Overdue reminderCall the bank.*Standup/);
 
     // spec/app/home/cards.md, "A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed"
     await drawn(() => agenda()?.click());
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Calendar");
-    await drawn(() => { agendaFrom.reminders([]); agendaFrom.hidden([]); });
+    await drawn(() => { fromAreas.reminders([]); fromAreas.hidden([]); });
   });
 
-  // spec/app/home/index.md, "Story: See the apps on this phone"; spec/app/home/index.md, "Story: Find an app and see its details"; spec/app/home/index.md, "Story: Open an app"
-  it("See the apps on this phone, find one and open it (spec/app/home/index.md, \"Story: See the apps on this phone\"; spec/app/home/index.md, \"Story: Find an app and see its details\"; spec/app/home/index.md, \"Story: Open an app\")", async () => {
+  // spec/app/home/cards.md, "Story: The other cards"; spec/app/home/cards.md, "Story: Open my day from a card"
+  it("See what waits in my apps on Home's cards and open one (spec/app/home/cards.md, \"Story: The other cards\"; spec/app/home/cards.md, \"Story: Open my day from a card\")", async () => {
+    const world = { ...scene(), phone: true, image: true };
+    const { alpha } = await open(world);
+    await until(alpha, home.runtime(alpha), Home.Machine, (h) => h.tiles.load.status === "Loaded");
+    await until(alpha, alpha.runtime, Shell, (s) => s.image);
+    const card = (title: string) => [...document.querySelectorAll<HTMLButtonElement>("section[aria-label='Your day'] > button")].find((found) => found.textContent?.startsWith(title));
+
+    // spec/app/home/cards.md, "The Messages and Phone cards show their waiting rows, only on an Alpha image, and are not drawn without a row"; spec/app/home/cards.md, "The mail card shows the unread count, senders and subjects only, never a message body; marked not up to date when Inbox's page is not, and not drawn without an account or a row"
+    await drawn(() => {
+      fromAreas.messages([{ title: "Ana", detail: "Lunch at one?" }]);
+      fromAreas.phone([]);
+      fromAreas.mail({ connected: true, unread: 4, rows: [{ title: "Bank", detail: "Statement ready" }], current: false });
+    });
+    expect([card("Messages") !== undefined, card("Phone") !== undefined, card("4 unread")?.textContent]).toEqual([true, false, expect.stringMatching(/Not up to date/)]);
+
+    // spec/app/home/cards.md, "The Workflows card shows the first two enabled rows and how many more, marked when they are not current, stale or partly unavailable, and is not drawn without a row"; spec/app/home/cards.md, "The brief card shows the brief kept for Home, or that its run failed, and is not drawn without one"
+    await drawn(() => {
+      fromAreas.flows({ rows: [{ title: "Morning brief", detail: "Daily" }, { title: "Inbox sweep", detail: "Hourly" }, { title: "Rent", detail: "Monthly" }], freshness: "SomeUnavailable" });
+      fromAreas.brief({ outcome: "RunFailed", at: 7 * 3_600_000 });
+    });
+    expect(card("Morning brief")?.textContent).toMatch(/Morning brief.*Inbox sweep.*\+1 more/);
+    expect(card("Morning brief")?.textContent).not.toMatch(/Rent/);
+
+    // spec/app/home/cards.md, "The row holds the agenda, Messages, Phone, mail, brief and Workflows cards in that order, each only when drawn, and is not drawn when none is"
+    expect([...document.querySelectorAll("section[aria-label='Your day'] > button")].map((found) => ["Messages", "4 unread", "Latest brief", "Morning brief"].find((title) => found.textContent?.startsWith(title)))).toEqual(["Messages", "4 unread", "Latest brief", "Morning brief"]);
+
+    // spec/app/home/cards.md, "A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed"
+    await drawn(() => card("4 unread")?.click());
+    await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Inbox");
+    await hardware("home");
+    await drawn(() => card("Latest brief")?.click());
+    await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Workflows");
+
+    await drawn(() => { fromAreas.messages([]); fromAreas.mail({ connected: false, unread: 0, rows: [], current: false }); fromAreas.flows({ rows: [], freshness: "UpToDate" }); fromAreas.brief(undefined); });
+    await hardware("home");
+    expect(document.querySelector("section[aria-label='Your day']")).toBeNull();
+  });
+
+  // spec/app/home/index.md, "Story: See the apps on this phone"; spec/app/home/index.md, "Story: Open an app"
+  it("Keep saved installed apps on Home up to date and open them (spec/app/home/index.md, \"Story: See the apps on this phone\"; spec/app/home/index.md, \"Story: Open an app\")", async () => {
     const world = { ...scene(), phone: true };
+    localStorage.setItem(savedKey, written([{ tag: "Own", view: "Notes" }, { tag: "Installed", app: "org.fixture.clock/org.fixture.clock.Main" }]));
     const { alpha } = await open(world);
     const homes = home.runtime(alpha);
-    await until(alpha, homes, Home.Machine, (h) => h.tiles.load.status === "Loaded");
 
-    // spec/app/home/index.md, "When the shell moves, what no longer fits closes: anything over Home ends editing, the drawer opening included, and a closed drawer drops its search and menu": the drawer opening reads the apps.
-    world.launcher.unlisted = true;
-    await press("Apps");
-    await until(alpha, homes, Home.Machine, (h) => h.installed.read.status === "Failed");
-
-    // spec/app/home/index.md, "In the open drawer that could not read the apps, Try again reads them once more"
-    world.launcher.unlisted = false;
-    await press("Try again");
+    // spec/app/home/index.md, "Once the saved tiles are read, the phone's apps are read if Home holds an installed app, and a record that could not be read is told"
     await until(alpha, homes, Home.Machine, (h) => h.installed.read.status === "Loaded");
-    expect([Boolean(drawerButton("Clock")), Boolean(drawerButton("Mail"))]).toEqual([true, true]);
+    expect([tiles(), Boolean(button("Apps"))]).toEqual([["view:Notes", "app:org.fixture.clock/org.fixture.clock.Main"], false]);
 
-    // spec/app/home/index.md, "A new search in the open drawer replaces the last and closes any open menu"
-    await fill("Search apps", "cl");
-    await until(alpha, homes, Home.Machine, (h) => h.query === "cl");
-    expect([Boolean(drawerButton("Clock")), Boolean(drawerButton("Mail"))]).toEqual([true, false]);
-
-    // spec/app/home/index.md, "An app's menu opens in the open drawer, for an app in the last reading, and says Add to Home or On Home"
-    await drawn(() => drawerButton("Clock")?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })));
-    await until(alpha, homes, Home.Machine, (h) => Home.menuIsOpen(h.menu));
-    // spec/app/home/index.md, "Add to Home adds one of Alpha's own apps it lists, and an app's menu in the drawer adds that app; adding from the menu closes the drawer"
-    await drawn(() => {
-      const add = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => item.textContent === "Add to Home");
-      if (!add) throw new Error("no Add to Home menu item");
-      add.click();
-    });
-    await until(alpha, alpha.runtime, Shell, (s) => !s.drawer);
-    await until(alpha, homes, Home.Machine, (h) => h.tiles.save.outcome === "Confirmed");
-    expect(tiles().at(-1)).toBe("app:org.fixture.clock/org.fixture.clock.Main");
-
-    // spec/app/home/index.md, "Only an app in the last reading is opened, never while Home is being edited, and never by the touch that opened its menu"
+    // spec/app/home/index.md, "Only an app in the last reading is opened, never while Home is being edited"
     await drawn(() => tileButton("app:org.fixture.clock/org.fixture.clock.Main")?.click());
     await until(alpha, homes, Home.Machine, (h) => h.handoff.attempt.outcome === "Confirmed");
     expect(world.launcher.opened).toEqual(["org.fixture.clock"]);
@@ -152,9 +166,9 @@ describe("Home on a phone", () => {
     await until(alpha, alpha.runtime, Toasts, (t) => t.showing);
     expect([toast(), world.launcher.opened.length]).toEqual(["Couldn't open Clock. It's turned off.", 2]);
 
-    // spec/app/home/index.md, "A reading's answer closes a menu whose app has gone, and a failed one that takes an installed tile off Home says so"; spec/app/home/index.md, "Home shows a tile only while its app is on this phone; a tile whose app has gone keeps its place and comes back with the app"
-    const clock = world.launcher.apps[0]!;
-    world.launcher.apps = world.launcher.apps.slice(1);
+    // spec/app/home/index.md, "A failed reading that takes an installed tile off Home says so"; spec/app/home/index.md, "Home shows a tile only while its app is on this phone; a tile whose app has gone keeps its place and comes back with the app"
+    const [clock, ...rest] = world.launcher.apps;
+    world.launcher.apps = rest;
     world.launcher.changed();
     await until(alpha, homes, Home.Machine, (h) => !h.installed.apps.includes("org.fixture.clock/org.fixture.clock.Main") && h.installed.read.status === "Loaded");
     expect(tiles()).not.toContain("app:org.fixture.clock/org.fixture.clock.Main");
@@ -196,7 +210,7 @@ describe("Home in a browser", () => {
     const homes = home.runtime(alpha);
     await until(alpha, homes, Home.Machine, (h) => h.tiles.load.status === "Loaded");
 
-    // spec/app/home/index.md, "Off the phone Home reads no apps, opens nothing of the drawer, edits nothing and asks Android nothing"
+    // spec/app/home/index.md, "Off the phone Home reads no apps, edits nothing and asks Android nothing"
     await pulled();
     expect([Boolean(button("Apps")), (await homes.runPromise(Home.Machine.use((m) => m.get()))).handoff.attempt.id]).toEqual([false, 0]);
     held("Notes");

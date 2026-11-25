@@ -5,7 +5,7 @@ import { readBundleManifest } from "@elizaos/agent/bundle"
 import { decodeLaunchDocument } from "@elizaos/agent/launch"
 import { defineRoutes } from "@elizaos/agent/routes"
 import { deployment } from "@repo/deployment"
-import { pinnedCheckout, pinnedPack } from "@repo/eliza-harness/pinned"
+import { pinnedCheckout, pinnedPack } from "@repo/eliza-harness"
 import {
   type Environment, type Manifest, bundledPlugins, calendarEdits, characterAdmitted, cloudModel, corePlugins, entryCarried, gmailChanges, googleAdmitted,
   hostedPlugins, inputAdmitted, localEmbeddings, notesTrashDays, packAdmitted, packEntry, packedFor, packedPlugins, persistMemory, personalDetailSwap,

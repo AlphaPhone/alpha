@@ -10,10 +10,12 @@ export interface PlatformScene {
   readonly earlier: Map<string, string>;
   /** The streams the agent is still writing for `/api/platform/drip`, which says one thing and then waits. */
   readonly dripping: Set<object>;
+  /** The requests the agent is still holding open for `/api/platform/hang` until aborted. */
+  readonly hanging: Set<object>;
 }
 
 export function platformScene(): PlatformScene {
-  return { listening: new Set(), earlier: new Map(), dripping: new Set() };
+  return { listening: new Set(), earlier: new Map(), dripping: new Set(), hanging: new Set() };
 }
 
 /**
@@ -54,6 +56,14 @@ export function platformRoutes(scene: PlatformScene): Route[] {
       scene.dripping.add(one);
       send("first");
       return () => scene.dripping.delete(one);
+    }) : undefined),
+    (request, url) => (request.method === "PUT" && url.pathname === "/api/platform/hang" ? new Promise<Response>((_, reject) => {
+      const one = {};
+      scene.hanging.add(one);
+      request.signal.addEventListener("abort", () => {
+        scene.hanging.delete(one);
+        reject(new DOMException("aborted", "AbortError"));
+      }, { once: true });
     }) : undefined),
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== "/api/events") return undefined;
