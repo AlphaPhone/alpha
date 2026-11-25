@@ -1,6 +1,6 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
 import {
-  Alert, AssistantCard, AssistantChatHistorySheet, AssistantConversation, AssistantGrabber, AssistantSearchSheet, ConfirmDialog,
+  Alert, Button, AssistantCard, AssistantChatHistorySheet, AssistantConversation, AssistantGrabber, AssistantSearchSheet, ConfirmDialog,
   type AssistantAttachment, type AssistantDraftNoticeProps, type AssistantMessageProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
@@ -28,13 +28,21 @@ import { type Machine as ShellMachine, showing } from "../../gen/app__shell.effe
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { MailQuestions } from "../inbox/mail-context.vibe";
+import { useInEmail, type Offers } from "../inbox/suggestion.vibe";
+import type { Machine as InboxList } from "../../gen/app__inbox.effect.vibe";
+import { useMachine as useInboxList } from "../../gen/app__inbox.react.ts";
+import type { Machine as InboxSuggestions } from "../../gen/app__inbox__suggestion.effect.vibe";
+import type { Machine as InboxWriting } from "../../gen/app__inbox__drafts.effect.vibe";
+import { useMachine as useInboxWriting } from "../../gen/app__inbox__drafts.react.ts";
 import { isCommsView } from "../shell/views.tsx";
+import { type Attachment, removeAttachment } from "./attachments.vibe";
+import { MediaReview } from "./media-review.vibe";
 import { askComms, freedom } from "./assistant.vibe";
 import { Talk } from "./talk.vibe";
 import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | Talk | MailQuestions, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | Talk | MailQuestions | InboxList | InboxWriting | InboxSuggestions | Offers | MediaReview, unknown>;
 }
 
 function turnOf(talking: Talking, label: string): AssistantTurnNoteProps["status"] | undefined {
@@ -64,10 +72,14 @@ function noticeOf(writing: Writing): AssistantDraftNoticeProps["status"] | undef
   return undefined;
 }
 
-function waiting(writing: Writing): AssistantAttachment[] {
+function chip(file: Pick<Attachment, "id" | "name" | "mimeType">): AssistantAttachment {
+  return { id: file.id, kind: file.mimeType.startsWith("image/") ? "image" : "file", name: file.name };
+}
+
+function waiting(writing: Writing, files: readonly Attachment[]): AssistantAttachment[] {
   const { editor } = writing;
   return [
-    ...Array.from({ length: editor.files }, (_, at): AssistantAttachment => ({ id: `file ${at + 1}`, kind: "file", name: `File ${at + 1}` })),
+    ...files.slice(0, editor.files).map(chip),
     ...(editor.mail ? [{ id: "mail", kind: "mail", name: "Mail" } as const] : []),
     ...(editor.transcript ? [{ id: "transcript", kind: "transcript", name: "Transcript" } as const] : []),
     ...(editor.shown ? [{ id: "shown", kind: "image", name: "Photo" } as const] : []),
@@ -109,6 +121,8 @@ export function Assistant({ runtime }: AssistantProps) {
   const reply = useReply(runtime);
   const shell = useShell(runtime);
   const dock = useDock(runtime);
+  const inbox = useInboxList(runtime);
+  const email = useInboxWriting(runtime);
   const comms = useComms(runtime);
   const board = runtime.runSync(Effect.map(Talk, (talk) => talk.board));
   const seen = useSyncExternalStore((listener) => board.subscribe(listener), () => board.snapshot());
@@ -130,7 +144,7 @@ export function Assistant({ runtime }: AssistantProps) {
   const request = subject === undefined ? "" : (comms.state?.requests.find((draft) => draft.about === subject)?.request ?? "");
   const sendable = subject !== undefined
     ? request.trim() !== "" && request.length <= textLimit && askable(talking) && (!newChat || chats.can(start))
-    : newChat ? writing.editor.text && !writing.long && chats.can(start) && askable(talking) : composer.can(hold);
+    : newChat ? (writing.editor.text || writing.editor.files > 0) && !writing.long && chats.can(start) && askable(talking) : composer.can(hold);
   const status = turnOf(talking, seen.label);
   const notice = noticeOf(writing);
   const check = { type: "checkForReply" } as const;
@@ -196,16 +210,20 @@ export function Assistant({ runtime }: AssistantProps) {
     const quote = { type: "quote", message, recorded: settled } as const;
     const editAgain = { type: "editAgain", message, mine: line.mine, recorded: settled } as const;
     const readAloud = { type: "readAloud", message, mine: line.mine } as const;
+    const account = inbox.state?.selected.account ?? 0;
+    const canOfferMail = settled && !line.mine && line.text.trim() !== "" && (email.state?.open || account !== 0);
     return {
       id: line.id,
       author: line.mine ? "owner" : "alpha",
       text: line.text,
+      ...(line.files === undefined ? {} : { attachments: line.files.map(chip) }),
       ...(line.quote === undefined ? {} : { quote: line.quote }),
       ...(line.failure === undefined ? {} : { children: failureCard({ kind: line.failure, fix: "NoFix", waitMs: -1 }, false) }),
       onFork: settled && chats.can(fork) ? () => void chats.send(fork) : undefined,
       onQuote: composer.can(quote) ? () => void composer.send(quote) : undefined,
       onEditAgain: composer.can(editAgain) ? () => { board.type(line.text); void composer.send(editAgain); } : undefined,
       onReadAloud: message > 0 && chats.can(readAloud) ? () => void chats.send(readAloud) : undefined,
+      onUseInEmail: canOfferMail ? () => void runtime.runPromise(useInEmail(line.text, "Ask Alpha", { target: "NewEmail", account, message: 0 })) : undefined,
     };
   });
   // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
@@ -213,6 +231,16 @@ export function Assistant({ runtime }: AssistantProps) {
   const later = { type: "scroll", around: board.numbered(lines.at(-1)?.id ?? "") } as const;
   const writingReply = seen.reply !== "" ? [{ id: "reply", author: "alpha", text: seen.reply } as const] : [];
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
+  const mediaCards = seen.media.filter((card) => !talking.context.sensitive && card.conversation === shown.chosen && card.revision === talking.context.revision).map((card) => ({
+    id: `media ${card.id}`, author: "alpha" as const, text: "", children: (
+      <div className="grid gap-2">
+        <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, action: "Approve" }}
+          onHandOn={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, true)))} />
+        <Button className="justify-self-end" variant="ghost" onClick={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, false)))}>Decline</Button>
+      </div>
+    ),
+  }));
+  const mediaNote = seen.mediaNote === "" ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote }];
   const failed = seen.failure === undefined ? [] : [{ id: "failure", author: "alpha", text: "", children: failureCard(seen.failure, true) } as const];
   const quoteId = writing.editor.quote > 0 ? board.messageId(writing.editor.quote) : undefined;
   const quoted = quoteId === undefined ? undefined : lines.find((line) => line.id === quoteId)?.text;
@@ -275,7 +303,7 @@ export function Assistant({ runtime }: AssistantProps) {
           grabber: open ? grabber : undefined,
         }}
         transcript={{
-          messages: [...messages, ...writingReply, ...failed],
+          messages: [...messages, ...writingReply, ...failed, ...mediaCards, ...mediaNote],
           position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around) },
           visible: open,
           status: shown.page.status === "Loading" ? "loading" : shown.page.status === "Failed" ? "failed" : "loaded",
@@ -306,7 +334,7 @@ export function Assistant({ runtime }: AssistantProps) {
             onCheck: writing.unsettled && conversation.can(check) ? () => void conversation.send(check) : undefined,
           },
           unavailable: !talking.ready ? "away" : talking.context.sensitive ? "sensitive" : undefined,
-          attachments: onComms ? undefined : waiting(writing),
+          attachments: onComms ? undefined : waiting(writing, seen.files),
           quote: onComms ? undefined : quoted,
           editing: !onComms && writing.editor.editing > 0,
           opener: !open ? grabber : undefined,
@@ -321,11 +349,10 @@ export function Assistant({ runtime }: AssistantProps) {
           } : undefined,
           onRemoveAttachment: (id) => {
             if (id === "question") void composer.send({ type: "removeQuestion" });
-            else if (id.startsWith("file ")) void composer.send({ type: "removeFile" });
             else if (id === "mail" || id === "transcript" || id === "shown") {
               if (id === "mail") mail.clear();
               void composer.send({ type: "detach", kind: detached[id] });
-            }
+            } else void runtime.runPromise(removeAttachment(id));
           },
           onUnquote: composer.can({ type: "unquote" }) ? () => void composer.send({ type: "unquote" }) : undefined,
         }}

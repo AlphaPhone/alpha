@@ -122,6 +122,7 @@ export function askRoutes(scene: AskScene): Route[] {
       const keep = (role: "user" | "assistant", text: string) => void messages.push({ id: `m${scene.said.length}${role === "user" ? "u" : "a"}`, role, text });
       return request.json().then((body: { text: string; metadata?: unknown }) => {
         scene.metadata?.push(body.metadata);
+        if (body.text !== body.text.trim()) return Response.json({ error: "invalid_message" }, { status: 400 });
         if (found[2] === undefined) return Response.json({ text: `You said: ${body.text}`, ...named(scene.said.length) });
         scene.said.push(body.text);
         keep("user", body.text);

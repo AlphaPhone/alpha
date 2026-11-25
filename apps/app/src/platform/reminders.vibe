@@ -1,0 +1,61 @@
+// spec/app/notices/reminders.md, "Story: Get my reminder at its time, even after a reboot"; spec/app/platform/index.md, "Story: Reach the phone's native capabilities"
+import type {
+  AndroidReminderCancelInput, AndroidReminderCancelResult, AndroidReminderList,
+  AndroidReminderPendingTap, AndroidReminderScheduleInput, AndroidReminderScheduleResult,
+} from "@elizaos/os/bridges/reminders"
+import { registered } from "./device.vibe"
+
+module held {
+  import { remindersClient } from "@elizaos/os/bridges/reminders"
+  import type { RemindersClient } from "@elizaos/os/bridges/reminders"
+
+  let made: RemindersClient | undefined
+  /** eliza's client of the reminders plugin, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
+  export function client(): RemindersClient {
+    return (made ??= remindersClient())
+  }
+}
+import { client } from held
+
+/** The phone's reminders plugin could not be reached or refused the call. */
+export error RemindersUnread { cause: unknown }
+
+/**
+ * The phone's native reminder alarms, through eliza's `ElizaReminders` plugin: scheduling, cancelling, listing
+ * persisted alarms and reading or consuming a notification tap token.
+ */
+export service PhoneReminders {
+  readonly present: boolean
+  schedule(input: AndroidReminderScheduleInput): AndroidReminderScheduleResult!RemindersUnread
+  cancel(input: AndroidReminderCancelInput): AndroidReminderCancelResult!RemindersUnread
+  list(): AndroidReminderList!RemindersUnread
+  pendingTap(): AndroidReminderPendingTap!RemindersUnread
+  consumeTap(token: string): void!RemindersUnread
+}
+
+const plugin = "ElizaReminders"
+
+/** On the phone: eliza's `remindersClient()` of `@elizaos/os/bridges/reminders`, where the host registered the plugin. */
+export const phoneReminders = Layer.sync(PhoneReminders, () => {
+  const present = registered(plugin)
+  return {
+    present,
+    schedule: (input: AndroidReminderScheduleInput) => tryPromise({ try: () => client().schedule(input), catch: (cause) => new RemindersUnread({ cause }) }),
+    cancel: (input: AndroidReminderCancelInput) => tryPromise({ try: () => client().cancel(input), catch: (cause) => new RemindersUnread({ cause }) }),
+    list: () => tryPromise({ try: () => client().list(), catch: (cause) => new RemindersUnread({ cause }) }),
+    pendingTap: () => tryPromise({ try: () => client().pendingTap(), catch: (cause) => new RemindersUnread({ cause }) }),
+    consumeTap: (token: string) => tryPromise({ try: () => client().consumeTap(token), catch: (cause) => new RemindersUnread({ cause }) }),
+  }
+})
+
+const absent = (): RemindersUnread => new RemindersUnread({ cause: "a browser has no phone reminders plugin" })
+
+/** In a browser: no phone reminders plugin. */
+export const browserReminders = Layer.succeed(PhoneReminders, {
+  present: false,
+  schedule: () => fail(absent()),
+  cancel: () => fail(absent()),
+  list: () => fail(absent()),
+  pendingTap: () => fail(absent()),
+  consumeTap: () => fail(absent()),
+})

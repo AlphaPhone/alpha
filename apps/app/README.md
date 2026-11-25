@@ -58,7 +58,7 @@ which `pnpm install` makes where the checkout is built, on this package's one co
 | Command | Does |
 |---|---|
 | `pnpm eliza` | once per pin: clones eliza at the pin into `~/.cache/alpha/eliza-vibestack/<commit>` (`ALPHA_ELIZA_DIR` names another place, `ALPHA_ELIZA_SOURCE` a local clone to copy), installs it, builds core, the cloud, the agent, the device package and the agent's device bundle, and links `.eliza`. Worktrees that ask at once wait for the one that builds |
-| `pnpm dev` | the page over a local eliza cloud (its own `serve` command, with its staging mailbox) and agent (with its approvals, notifications, schedule and tasks modules): one signed-in, funded owner, a scripted model and a read-only plan catalog, over state of that run alone (`ALPHA_ELIZA_STATE=<dir>` keeps the agent's) |
+| `pnpm dev` | the page over a local eliza cloud (its own `serve` command, with its staging mailbox) and the agent pack the phone ships (`@repo/agent`'s build, with every plugin and action its policy allows): one signed-in, funded owner, a scripted model (or `ALPHA_DEV_MODEL=cerebras`) and a read-only plan catalog, over state of that run alone (`ALPHA_ELIZA_STATE=<dir>` keeps the agent's) |
 | `ALPHA_FAKES=1 pnpm dev` | the page over the journeys' fakes, with no eliza: what the explore stage serves. `ALPHA_FAKES=phone` gives the page the fake phone's plugins, as on an Alpha image |
 | `pnpm test` | the journeys in Node. `test/<area>.eliza.test.tsx` asks the run's setup for the owner named after its file, on one local cloud, with an agent of their own (`@repo/eliza-harness/owned`); a run with none of them starts nothing |
 | `pnpm test:browser` | the journeys that need a real browser, in Chromium |

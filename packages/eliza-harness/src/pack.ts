@@ -104,12 +104,19 @@ export function packPrepared(plugins: readonly string[]): Pack {
   return { commit, root, packages: workspace(root) };
 }
 
+/** A compiled Alpha product plugin staged inside the pack entry's `node_modules`. */
+export interface ProductPackage {
+  readonly name: string;
+  readonly dir: string;
+}
+
 /**
  * Write the pack's entry package inside the clone: its `package.json`, `entry.js` with `source`, and each `@elizaos`
  * package of the clone linked in its `node_modules`, so the entry's imports resolve to the clone's own packages.
+ * When `product` is given, its compiled JS files are staged as a local package inside `node_modules`.
  * The whole package replaces the last one at once. Returns the entry file.
  */
-export function stagePackEntry(pack: Pack, source: string): string {
+export function stagePackEntry(pack: Pack, source: string, product?: ProductPackage): string {
   const parent = path.join(pack.root, ".alpha");
   fs.mkdirSync(parent, { recursive: true });
   const target = path.join(parent, "pack-entry");
@@ -122,6 +129,17 @@ export function stagePackEntry(pack: Pack, source: string): string {
     for (const [name, directory] of pack.packages) {
       if (name.startsWith("@elizaos/")) fs.symlinkSync(directory, path.join(scope, name.slice("@elizaos/".length)), "dir");
     }
+    if (product !== undefined) {
+      const productTarget = path.join(staging, "node_modules", product.name);
+      fs.mkdirSync(productTarget, { recursive: true });
+      for (const entry of fs.readdirSync(product.dir)) {
+        if (entry.endsWith(".js")) fs.copyFileSync(path.join(product.dir, entry), path.join(productTarget, entry));
+      }
+      fs.writeFileSync(
+        path.join(productTarget, "package.json"),
+        `${JSON.stringify({ name: product.name, version: "0.1.0", private: true, type: "module", main: "./index.js" }, null, 2)}\n`,
+      );
+    }
     fs.rmSync(target, { recursive: true, force: true });
     fs.renameSync(staging, target);
   } catch (cause) {
@@ -129,4 +147,35 @@ export function stagePackEntry(pack: Pack, source: string): string {
     throw cause;
   }
   return path.join(target, "entry.js");
+}
+
+/** The pack `pnpm --filter @repo/agent build` wrote: its bundle, and the policy its launch carries. */
+export const packDist = path.join(repository, "apps/agent/dist");
+
+/**
+ * What a launch of the built pack names: the bundle, the policy's allowed actions and load list, and the workflow
+ * worker the bundle pinned, where the pack's clone built it, as the phone stages it beside the bundle. A pack restored
+ * from a build cache comes without its clone, so the clone is prepared here where it is not.
+ * @throws {Error} where the pack is not built
+ */
+export async function builtPack() {
+  const read = (file: string) => {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(packDist, file), "utf8")) as unknown;
+    } catch {
+      throw new Error(`the agent pack is not built at ${packDist}: run \`pnpm --filter @repo/agent build\``);
+    }
+  };
+  const manifest = read("bundle/manifest.json") as { workflowWorkerSha256?: string };
+  const policy = read("host/policy.json") as { actions: { allowed: string[] }; plugins: { load: string[] } };
+  const clone = await packCheckout(policy.plugins.load.filter((name) => name.startsWith("@elizaos/plugin-")));
+  const workflow = clone.packages.get("@elizaos/plugin-workflow");
+  if (workflow === undefined || manifest.workflowWorkerSha256 === undefined) throw new Error("the agent pack pins no workflow worker");
+  const runtimeDir = path.join(workflow, "dist");
+  const { executable } = JSON.parse(fs.readFileSync(path.join(runtimeDir, "workflow-worker.json"), "utf8")) as { executable: string };
+  return {
+    bundle: path.join(packDist, "bundle/agent.mjs"),
+    policy: { actions: { allowed: policy.actions.allowed }, plugins: { load: policy.plugins.load } },
+    workflowWorker: { runtimeDir, executable, sha256: manifest.workflowWorkerSha256 },
+  };
 }
