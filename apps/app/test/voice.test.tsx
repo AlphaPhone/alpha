@@ -10,6 +10,7 @@ import { shell } from "../src/shell/shell.vibe";
 import { placeOf, type VoiceWords, voicing } from "../src/voice/voice.vibe";
 import { Machine as Dock } from "../gen/app__assistant__dock.effect.vibe";
 import type { Mount } from "../src/areas.ts";
+import { dictate } from "../src/assistant/dictation.vibe";
 import assistant from "../src/assistant/index.tsx";
 import { button, closeAll, drawn, open, press, seen, underAct, until as drawnUntil } from "./alpha.tsx";
 import { scene, type Scene } from "./fakes/scene.ts";
@@ -436,7 +437,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
   });
 
   // spec/app/voice/index.md, "Story: Dictate into a field"; spec/app/voice/index.md, "Recording asks for the microphone the first time, like a conversation"; spec/app/voice/dictation.md, "A microphone failure ends dictation quietly and a failed transcription keeps its clip"
-  it("a dictation the microphone refuses ends quietly: the recorder closes, nothing is shown, and Dictate is offered again", async () => {
+  it("a dictation the microphone refuses closes quietly and restores the composer's microphone control", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
     world.voice.permission = "prompt";
     world.voice.grantOnRequest = false;
@@ -447,13 +448,13 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
       expect(check()).toBe(true);
     };
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
-    await settled(() => button("Dictate") !== undefined);
+    await settled(() => button("Talk") !== undefined);
 
-    await press("Dictate");
+    await drawn(() => area.runPromise(dictate()));
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.recorder.stage === "Ready" && s.recorder.field === "ComposerField");
     await press("Start recording");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.recorder.stage === "Closed" && s.permission.asked);
-    await settled(() => button("Dictate") !== undefined);
+    await settled(() => button("Talk") !== undefined);
     expect([document.querySelector("[role=alertdialog], [role=alert], [role=note], [role=status], section[aria-label='Voice transcription']"), world.voice.permission]).toEqual([null, "denied"]);
   });
 });
