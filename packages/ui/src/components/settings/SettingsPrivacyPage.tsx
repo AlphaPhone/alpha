@@ -52,8 +52,6 @@ export function SettingsPrivacyPage({ read, askFirst, saving, recovering, onAskF
       <ListGroup>
         <SettingsNavRow title="Permissions" icon={<SlidersHorizontal />} onOpen={onOpen && (() => onOpen("permissions"))} {...at(0)} />
         <SettingsDeviceSwitch setting="ask-first" read={read} checked={askFirst} saving={saving} recovering={recovering} onChange={onAskFirstChange} onRecover={onRecover} />
-      </ListGroup>
-      <ListGroup heading="Share with Alpha">
         {shared.map((share) => (
           <SettingsDeviceSwitch key={share} setting={share} read={read} checked={read === "loaded" && shares[share] === true} saving={saving} recovering={recovering} onChange={onShareChange && ((on) => onShareChange(share, on))} />
         ))}
