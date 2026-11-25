@@ -12,7 +12,9 @@ const noChanges = () => () => {};
 export function BrowserFrames({ alpha }: { alpha: Alpha }) {
   const web = alpha.runtime.runSync(TabHost).web;
   const { frames, placement } = useSyncExternalStore(web?.subscribe ?? noChanges, web?.snapshot ?? noFrames, noFrames);
-  return frames.map(({ id, load, url, privateTab }) => {
+  return frames.map(({ request, status }) => {
+    const { id, load, url, privateTab } = request;
+    const stopped = status === "Stopped";
     const position = placement?.id === id ? placement : undefined;
     return (
       <section key={id} hidden={position === undefined} inert={position === undefined}
@@ -21,9 +23,10 @@ export function BrowserFrames({ alpha }: { alpha: Alpha }) {
         {!privateTab && <a href={url} rel="noopener noreferrer" target="_blank" className="flex min-h-7.75 items-center justify-end gap-1.5 px-3 py-2 text-label underline">
           Open in browser <ExternalLink aria-hidden className="size-3.5" />
         </a>}
-        <iframe key={load} title="Website" src={url} referrerPolicy="no-referrer"
+        {status !== undefined && <p role="status" className="m-0 p-3 font-sans text-sm leading-normal">{stopped ? "Stopped" : "Page blocked"}</p>}
+        <iframe key={stopped ? "stopped" : load} title="Website" src={stopped ? "about:blank" : url} referrerPolicy="no-referrer"
           sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"
-          onLoad={() => web?.loaded(id, load)} className="min-h-0 w-full flex-1 border-0" />
+          onLoad={stopped ? undefined : () => web?.loaded(id, load)} className="min-h-0 w-full flex-1 border-0" />
       </section>
     );
   });

@@ -341,13 +341,14 @@ function consentOf(account: GmailAccount) {
   return { read, send: read && has("google.gmail.send"), modify: read && (has("google.gmail.manage") || has("google.gmail.mailbox")) }
 }
 
-/** The failure of a read, as the list tells it: offline, access withdrawn, or Gmail not reached for another reason. */
+/** The failure of a read, as the list tells it: offline, access withdrawn, a phone that needs one more sign-in for its mail lease, or Gmail not reached for another reason. */
 export function failureOf(failed: unknown): Failure {
   const cause = failed instanceof Asked ? failed.cause : failed
   if (!(cause instanceof CloudError)) return "Unreachable"
   const failure = cause.failure
   if (failure.tag === "CloudNetwork") return "Offline"
   if (failure.tag === "CloudCredentialInvalid") return "Revoked"
+  if (failure.tag === "CloudRefused" && failure.reason === "DeviceKeyNotAllowed") return "LeaseNeeded"
   if (failure.tag === "CloudRefused" && (failure.code === "GoogleReauthRequired" || failure.reason === "CredentialRevoked" || failure.reason === "GrantRequired" || failure.reason === "CapabilityMissing")) return "Revoked"
   return "Unreachable"
 }

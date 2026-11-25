@@ -58,7 +58,10 @@
     { "configuration": "implementation", "module": "androidx.webkit:webkit", "toolchainVersion": "androidxWebkitVersion" },
     { "configuration": "testImplementation", "module": "junit:junit", "toolchainVersion": "junitVersion" }
   ],
-  "appScripts": [{ "root": "consumer", "path": "android/app/browser.gradle" }],
+  "appScripts": [
+    { "root": "consumer", "path": "android/app/browser.gradle" },
+    { "root": "consumer", "path": "android/app/hosted-digest.gradle" }
+  ],
   "agent": {
     "host": { "root": "consumer", "path": "android/agent/host.json" },
     "character": { "root": "consumer", "path": "android/agent/character.json" },

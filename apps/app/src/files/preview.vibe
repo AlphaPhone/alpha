@@ -300,7 +300,7 @@ export effect function view(item: Item, siblings: ReadonlyArray<string>, owner: 
       return false
     }, effect (selected) => {
       if (!retained && selected?.status === "selected" && "selectionId" in selected) {
-        released = Exit.isSuccess(try exit(tryPromise(() => docs.value.forget(selected.selectionId))))
+        released = Exit.isSuccess(try exit(tryPromise(() => docs.value.forget(selected.selectionId as SelectionId))))
       }
     })
     if (outside && (try current)) {
