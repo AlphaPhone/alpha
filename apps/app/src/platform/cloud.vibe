@@ -153,7 +153,7 @@ function plugged(relay: Relay, wifi: WiFi.Shape): Remote {
         when Refused: throw cause;
         default: throw new Unreachable({ cause });
       }
-      if (!replied(reply.status)) throw refusal(reply.status, reply.retryAfter)
+      if (!replied(reply.status)) throw refusal(reply.status, reply.retryAfter, undefined, new TextDecoder().decode(reply.body))
       return try parsed(new TextDecoder().decode(reply.body))
     },
     events: () => Stream.fail(new Unsent({ cause: "the phone's cloud plugin streams nothing" })),

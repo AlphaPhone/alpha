@@ -12,6 +12,7 @@ import { type Files, phoneFiles } from "./files.vibe"
 import { type Location, browserLocation, phoneLocation } from "./location.vibe"
 import { type Calls, browserCalls, phoneCalls } from "./calls.vibe"
 import { type Telephony, browserTelephony, phoneTelephony } from "./telephony.vibe"
+import { type NetworkLocation, browserNetworkLocation, phoneNetworkLocation } from "./networkLocation.vibe"
 import { type VoiceBridge, browserVoiceBridge, phoneVoiceBridge } from "./voice.vibe"
 import { type Documents, phoneDocuments } from "./documents.vibe"
 import { type InboxAttachmentFiles, phoneInboxAttachments } from "./inboxAttachments.vibe"
@@ -34,6 +35,7 @@ export type Plugins =
   | Location
   | Telephony
   | Calls
+  | NetworkLocation
   | VoiceBridge
   | Documents
   | InboxAttachmentFiles
@@ -55,6 +57,7 @@ export const phonePlugins = Layer.mergeAll(
   phoneLocation,
   phoneTelephony,
   phoneCalls,
+  phoneNetworkLocation,
   phoneVoiceBridge,
   phoneDocuments,
   phoneInboxAttachments,
@@ -77,6 +80,7 @@ export const browserPlugins = Layer.mergeAll(
   browserLocation,
   browserTelephony,
   browserCalls,
+  browserNetworkLocation,
   browserVoiceBridge,
   browserNavigation,
   browserTabHost,

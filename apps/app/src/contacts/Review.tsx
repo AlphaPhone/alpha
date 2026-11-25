@@ -1,4 +1,4 @@
-// spec/app/contacts/agent.md, "Story: Approve what the agent asked"; spec/app/contacts/agent.md, "A change is shown line by line, and a removed value never reads as kept"; spec/app/contacts/agent.md, "The owner picks the exact number or the one contact, and that one is shown"
+// spec/app/contacts/agent.md, "Story: Approve what the agent asked"; spec/app/contacts/agent.md, "A change is shown line by line, and a removed value never reads as kept"; spec/app/contacts/agent.md, "The owner picks the exact number or the one contact, and that one is shown"; spec/app/contacts/agent.md, "A text's review says when it likely goes as several linked texts"
 import { Banner, Button, Mark, cn } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
 import { Check, Phone as Call, Plus, Trash2 } from "lucide-react";
@@ -11,7 +11,7 @@ import { clear } from "../../gen/app__phone.ts";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
 import type { Telephony } from "../platform/telephony.vibe";
 import { callerInitials, displayNumber } from "../phone/words.ts";
-import { type Lines, Requested, afterOf, chooseNumber, choicesOf, linesOf, unchangedBy } from "./requests.vibe";
+import { type Lines, Requested, afterOf, chooseNumber, choicesOf, likelyTexts, linesOf, unchangedBy } from "./requests.vibe";
 
 export interface ReviewProps {
   /** Provides the agent's requests, Phone's machine, for whether a call may be an emergency call, and what the phone found for the request. */
@@ -77,8 +77,12 @@ export function Review({ runtime }: ReviewProps) {
   const phone = usePhone(runtime).state;
   if (!state || !phone || (state.stage !== "Shown" && state.stage !== "Choosing")) return null;
   const held = runtime.runSync(Effect.flatMap(Requested, (requested) => requested.get()));
+  if (held.request !== state.request) return null;
   const safe = clear(phone);
-  const approve = { type: "approve", clear: safe, spoken: false } as const;
+  const { request } = state;
+  const approve = { type: "approve", request, shown: state.review.shown, clear: safe, spoken: false } as const;
+  const showAgain = { type: "showAgain", request } as const;
+  const decline = { type: "decline", request } as const;
   const approved = () => void send(approve, "Owner");
   const target = held.matches.find((one) => one.id === state.contact);
   const before = target === undefined ? blank : linesOf(target);
@@ -91,7 +95,7 @@ export function Review({ runtime }: ReviewProps) {
     : state.ask === "AddContact" ? (held.matches.length > 0 ? `Add anyway: ${twin} is already in Contacts` : `Add ${after.name}`)
     : `Save changes to ${before.name}`;
   return (
-    <div role="dialog" data-alpha-review="" aria-label={asks[state.ask]}
+    <div role="dialog" data-alpha-review={request} data-alpha-review-version={state.review.shown} aria-label={asks[state.ask]}
       className="fixed inset-x-4 bottom-24 z-50 flex flex-col gap-2.5 rounded-tile bg-background px-3.5 py-3 text-foreground shadow-md ring-1 ring-border">
       <p className="flex items-center gap-1.5 text-xs font-semibold tracking-loose text-muted-foreground uppercase"><Mark aria-hidden className="size-4.5 text-alpha" />Needs approval</p>
       <div className="flex items-center gap-2.5">
@@ -107,18 +111,19 @@ export function Review({ runtime }: ReviewProps) {
         )}
       </div>
       {state.stage === "Shown" && state.ask === "Text" && <p className="rounded-action bg-secondary p-3 whitespace-pre-wrap wrap-anywhere">{state.text}</p>}
+      {state.stage === "Shown" && state.ask === "Text" && likelyTexts(state.text) > 1 && <p className="text-sm text-muted-foreground">It likely goes as {likelyTexts(state.text)} linked texts</p>}
       {(state.stage === "Choosing" || contactChange) && (
         <div role="group" aria-label={state.stage === "Choosing" ? (reachesANumber(state.ask) ? "Which number" : "Which contact") : "Contact"} className="flex flex-col gap-0.5">
           {state.more && <p className="mb-1 text-sm leading-detail text-muted-foreground wrap-anywhere">Only the first {maxMatches} matching contacts are shown. For another one, ask again with their full name.</p>}
           {state.stage === "Choosing" && (reachesANumber(state.ask)
             ? choicesOf(held.matches).map(({ contact, number }) => {
-                const choose = { type: "choose", number, contact: contact.id, emergency: false, unchanged: false } as const;
+                const choose = { type: "choose", request, number, contact: contact.id, emergency: false, unchanged: false } as const;
                 return <Option key={`${contact.id} ${number}`} label={`${asks[state.ask]} ${contact.name} ${displayNumber(number)}`} name={contact.name} lines={[{ text: displayNumber(number) }]}
                   icon={state.ask === "Dial" ? <Call /> : <Check />} tone={state.ask === "Dial" ? "call" : "alpha"} disabled={!can(choose, "Owner")}
                   onChoose={() => void runtime.runPromise(chooseNumber(state, held, contact.id, number))} />;
               })
             : held.matches.map((contact) => {
-                const choose = { type: "choose", number: "", contact: contact.id, emergency: false, unchanged: unchangedBy(held.operation, contact) } as const;
+                const choose = { type: "choose", request, number: "", contact: contact.id, emergency: false, unchanged: unchangedBy(held.operation, contact) } as const;
                 const removing = state.ask === "DeleteContact";
                 return <Option key={contact.id} label={`${removing ? "Delete" : "Change"} ${contact.name}`} name={contact.name}
                   lines={[...contact.phones.map(displayNumber), ...contact.emails].slice(0, 2).map((text) => ({ text }))}
@@ -135,11 +140,11 @@ export function Review({ runtime }: ReviewProps) {
           )}
         </div>
       )}
-      {state.stage === "Shown" && !can(approve, "Owner") && can({ type: "showAgain" }, "Owner") && (
-        <Banner variant="warn" action={<Button size="sm" onClick={() => void send({ type: "showAgain" }, "Owner")}>Show again</Button>}>This changed on the phone</Banner>
+      {state.stage === "Shown" && !can(approve, "Owner") && can(showAgain, "Owner") && (
+        <Banner variant="warn" action={<Button size="sm" onClick={() => void send(showAgain, "Owner")}>Show again</Button>}>This changed on the phone</Banner>
       )}
       {state.stage === "Shown" && !safe && <Banner variant="warn">Nothing is done during a call that may be an emergency call</Banner>}
-      {can({ type: "decline" }, "Owner") && <button type="button" className="min-h-11 self-end px-3 text-sm text-muted-foreground" onClick={() => void send({ type: "decline" }, "Owner")}>Not now</button>}
+      {can(decline, "Owner") && <button type="button" className="min-h-11 self-end px-3 text-sm text-muted-foreground" onClick={() => void send(decline, "Owner")}>Not now</button>}
     </div>
   );
 }

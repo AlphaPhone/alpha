@@ -2,6 +2,7 @@
 import type { AndroidRoleStatus, DeviceSettingsStatus, FilesAccess, LibraryScopeKind, LocationPermissionStatus, MirrorStatus, NativeCrashEntry, PasswordsClient, SettingsHandoff, StorageVolume, SystemFacts, SystemSettingsPage } from "@elizaos/os-bridges"
 import type { Opened, Target } from "../../gen/app__settings__android.ts"
 import type { Access, AccessGrant, Alert, Holder, Reading } from "../../gen/app__settings__facts.ts"
+import { storageKnown } from "../../gen/app__settings__facts.effect.vibe"
 import type { Grant } from "../../gen/kit__permission.ts"
 import { appVersion } from "./build.ts"
 import { calendarAccess } from "./calendar.vibe"
@@ -182,7 +183,7 @@ const settled = <A>(call: () => Promise<A>) => Effect.option(tryPromise(call))
 /** The storage the primary volume reports, as used of total, only where Android reported a total and used is never above it. */
 function storageOf(volumes: ReadonlyArray<StorageVolume> | undefined): Reading | undefined {
   const primary = volumes?.find((volume) => volume.primary)
-  if (primary === undefined || primary.total <= 0 || primary.free < 0 || primary.free > primary.total) return undefined
+  if (primary === undefined || primary.free < 0 || !storageKnown(primary.total - primary.free, primary.total)) return undefined
   const gigabytes = (bytes: number) => `${Math.round(bytes / 1e8) / 10} GB`
   return { fact: "Storage", value: `${gigabytes(primary.total - primary.free)} of ${gigabytes(primary.total)}` }
 }

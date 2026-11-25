@@ -6,14 +6,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { at } from "../src/areas.ts";
 import { adopt, earlierSlot, keptAt, vaulted } from "../src/platform/adoption.vibe";
-import { Agent, type Reached } from "../src/platform/agent.vibe";
+import { Agent, type Reached, viewDiagnostic } from "../src/platform/agent.vibe";
 import { Cloud } from "../src/platform/cloud.vibe";
-import { testMocks } from "../src/platform/device.vibe";
+import { Device, testMocks } from "../src/platform/device.vibe";
+import { NetworkLocation } from "../src/platform/networkLocation.vibe";
+import { type Refused, resetOf } from "../src/platform/remote.vibe";
 import { Telegram } from "../src/platform/telegram.vibe";
 import { type Slot, Vault } from "../src/platform/vault.vibe";
 import type { Platform } from "../src/platform/platform.vibe";
 import { area } from "../src/runtime/area.tsx";
-import { button, closeAll, hardware, only, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
 import { account } from "./fakes/cloud.ts";
 import { publish } from "./fakes/platform.ts";
 import { scene } from "./fakes/scene.ts";
@@ -151,6 +153,74 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     // spec/app/platform/index.md, "A refusal carries a wait only when the other side answered 429 with a whole number of seconds, at most a day"
     expect([await agent(429), await agent(503)]).toEqual([["Refused", 429, 30], ["Refused", 503, undefined]]);
     expect([await cloud(429), await cloud(503)]).toEqual([["Refused", 429, 30], ["Refused", 503, undefined]]);
+    // spec/app/platform/index.md, "A refusal carries the time the other side named for its allowance to come back, and a reader takes it only while it lies ahead"
+    const back = Date.UTC(2030, 0, 1);
+    const reset = failed(await alpha.runtime.runPromiseExit(Effect.flatMap(Cloud, (one) => one.call(HttpClientRequest.get(`/api/v1/platform/spent?until=${back}`))))) as Refused | undefined;
+    expect([reset?._tag, reset?.status, reset?.wait, reset?.resetAt]).toEqual(["Refused", 429, undefined, back]);
+    expect([resetOf(reset!, back - 1), resetOf(reset!, back), resetOf((failed(await alpha.runtime.runPromiseExit(Effect.flatMap(Cloud, (one) => one.call(cloudBusy(429)))))) as Refused, 0)]).toEqual([back, undefined, undefined]);
+  });
+
+  // spec/app/platform/index.md, "Story: Know roughly where my phone is without GPS"
+  it("Know roughly where my phone is without GPS: a position looked up seldom, kept while the same networks are seen, and none in a browser (spec/app/platform/index.md, \"Story: Know roughly where my phone is without GPS\")", async () => {
+    const world = { ...scene(), phone };
+    const { alpha } = await open(world, only("home"));
+    const network = world.platform.network;
+    const locate = () => alpha.runtime.runPromise(Effect.flatMap(NetworkLocation, (one) => one.locate()));
+    const accuracy = async () => Option.getOrUndefined(Option.map(await locate(), (fix) => fix.accuracy));
+    const minutes = (count: number) => later(alpha, count * 60_000);
+    if (!phone) return void expect([Option.isNone(await locate()), network.asked]).toEqual([true, []]);
+    // spec/app/platform/index.md, "A network position is asked only when one is needed now, reused for fifteen minutes, and kept for an hour while the same networks are seen": two callers at once share one lookup.
+    const [first] = await Promise.all([locate(), locate()]);
+    expect([Option.map(first, (fix) => [fix.lat, fix.lng, fix.accuracy]), network.asked]).toEqual([Option.some([51_500_000, -120_000, 40]), [undefined]]);
+    await minutes(1);
+    expect([await accuracy(), network.asked]).toEqual([40, [undefined]]);
+    await minutes(15);
+    expect([await accuracy(), network.asked]).toEqual([40, [undefined, "cafe"]]);
+    await minutes(45);
+    expect([await accuracy(), network.asked]).toEqual([40, [undefined, "cafe", undefined]]);
+    network.failing = true;
+    await minutes(16);
+    expect([await accuracy(), network.asked.length]).toEqual([40, 4]);
+    await minutes(1);
+    expect([await accuracy(), network.asked.length]).toEqual([40, 4]);
+    // spec/app/platform/index.md, "With too few networks seen, the plugin asks for the position of the phone's address alone, and that answer is never confirmed unchanged"
+    Object.assign(network, { failing: false, seen: "", accuracy: 3000 });
+    await minutes(2);
+    expect([await accuracy(), network.asked.at(-1)]).toEqual([3000, "cafe"]);
+    await minutes(16);
+    expect([await accuracy(), network.asked.length, network.asked.at(-1)]).toEqual([3000, 6, undefined]);
+    // spec/app/platform/index.md, "A network position is taken only where it lies on the globe, has an accuracy, and is neither from the future nor over an hour old"
+    network.accuracy = 0;
+    await minutes(16);
+    expect([await accuracy(), network.asked.length]).toEqual([3000, 7]);
+    await minutes(1);
+    expect(network.asked.length).toBe(7);
+  });
+
+  // spec/app/platform/index.md, "A failed view request is recorded by its step and a fingerprint of its id, never by its path or body"
+  it("Talk to the resident agent: a failed view request is recorded by its step and its id's fingerprint alone (spec/app/platform/index.md, \"A failed view request is recorded by its step and a fingerprint of its id, never by its path or body\")", async () => {
+    const { alpha } = await open({ ...scene(), phone }, only("home"));
+    const id = "0f8fad5b-d9cb-469f-a165-70867728950e";
+    const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(id)))].slice(0, 8).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    const said = (method: string, path: string, body?: string) => alpha.runtime.runPromise(viewDiagnostic(method, path, body));
+    expect(await Promise.all([
+      said("POST", "/api/views/interact-claim", JSON.stringify({ requestId: id })),
+      said("POST", "/api/views/interact-result?x=1", JSON.stringify({ requestId: "not-generated" })),
+      said("POST", "/api/views/calendar/navigate", JSON.stringify({ completedActionHandoffId: id, secret: "words" })),
+      said("POST", "/api/views/calendar/navigate", JSON.stringify({ completedActionHandoffId: id, pad: "a".repeat(5000) })),
+      said("GET", "/api/views/interact-claim", JSON.stringify({ requestId: id })),
+      said("POST", "/api/messages", JSON.stringify({ requestId: id })),
+    ])).toEqual([` navigation=claim navigation_ref=${digest}`, " navigation=result", ` navigation=prepare navigation_ref=${digest}`, " navigation=prepare", "", ""]);
+  });
+
+  // spec/app/platform/index.md, "Story: Come back to my phone where I left it"
+  it("Come back to my phone where I left it: one return is heard once, however often Android says the page shows (spec/app/platform/index.md, \"Story: Come back to my phone where I left it\")", async () => {
+    const { alpha } = await open({ ...scene(), phone }, only("home"));
+    const heard = alpha.runtime.runPromise(Effect.flatMap(Device, (device) => Stream.runCollect(Stream.take(device.visible, 3))));
+    // spec/app/platform/index.md, "Alpha hears it came back to the front once for each return, and a screen that has gone hears nothing more"
+    for (const shown of [true, false, false, true, true, false]) await seen(shown);
+    expect(await heard).toEqual([false, true, false]);
+    await seen(true);
   });
 
   // spec/app/platform/feed.md, "Story: Follow what my agent does on my screen"
@@ -196,10 +266,17 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect([await secret(open_), localStorage.getItem(earlier), world.secrets.get("alpha.test.open")]).toEqual(["Adopted", null, "\"Work\""]);
     // spec/app/platform/adoption.md, "A value is moved by copying it only where the new place is still empty, and its earlier place is cleared only once the new place holds a value": the earlier Alpha's encrypted slot moves into the secure store, and leaves only once it is there.
     world.secrets.delete("alpha.test.open");
-    world.platform.earlier.set("assistant-draft:v1:device", "Draft");
-    const slotted = (slot: Slot) => run(Effect.flatMap(vaulted(slot), (to) => adopt(earlierSlot("assistant-draft:v1:device"), to, (value: string) => Option.some(Redacted.make(value)))));
-    expect([await slotted(shut), world.platform.earlier.get("assistant-draft:v1:device")]).toEqual(["NotAdopted", "Draft"]);
-    expect([await slotted(open_), world.platform.earlier.has("assistant-draft:v1:device"), world.secrets.get("alpha.test.open")]).toEqual(["Adopted", false, "\"Draft\""]);
+    const draft = `assistant-draft:v1:${"a".repeat(64)}`;
+    world.platform.earlier.set(draft, "Draft");
+    const slotted = (slot: Slot, from = draft) => run(Effect.flatMap(vaulted(slot), (to) => adopt(earlierSlot(from), to, (value: string) => Option.some(Redacted.make(value)))));
+    // spec/app/platform/adoption.md, "The page reads the earlier Alpha's encrypted store where it is and never writes it: it may only read one of the earlier page's own slots, or clear it while it still holds what was read": a slot the phone cannot open, and one the earlier page did not keep, stay where they are.
+    world.platform.unreadable.add(draft);
+    expect([await slotted(open_), world.platform.earlier.get(draft), world.secrets.has("alpha.test.open")]).toEqual(["NothingToAdopt", "Draft", false]);
+    world.platform.unreadable.delete(draft);
+    world.platform.earlier.set("cloud:production", "{\"token\":\"t\"}");
+    expect([await slotted(open_, "cloud:production"), world.platform.earlier.get("cloud:production"), world.secrets.has("alpha.test.open")]).toEqual(["NothingToAdopt", "{\"token\":\"t\"}", false]);
+    expect([await slotted(shut), world.platform.earlier.get(draft)]).toEqual(["NotAdopted", "Draft"]);
+    expect([await slotted(open_), world.platform.earlier.has(draft), world.secrets.get("alpha.test.open")]).toEqual(["Adopted", false, "\"Draft\""]);
   });
 });
 
