@@ -1,14 +1,6 @@
 import type { ComponentProps } from "react";
-import { createLucideIcon } from "lucide-react";
+import { CalendarGlyph } from "../../lib/icons.ts";
 import { HomeCard } from "./HomeCard.tsx";
-
-/** lucide-react 1.18.0's calendar, which v121 drew on Home: a day lower than today's lucide calendar, with longer rings and the rule on 10. */
-const Calendar = createLucideIcon("calendar", [
-  ["path", { d: "M8 2v4", key: "1cmpym" }],
-  ["path", { d: "M16 2v4", key: "4m81vk" }],
-  ["rect", { width: "18", height: "18", x: "3", y: "4", rx: "2", key: "1hopcy" }],
-  ["path", { d: "M3 10h18", key: "8toen8" }],
-]);
 
 /** An event or a reminder as the agenda card shows it. */
 export type HomeAgendaItem = {
@@ -38,7 +30,7 @@ export type HomeAgendaCardProps = Omit<ComponentProps<"button">, "children" | "t
  */
 export function HomeAgendaCard({ item, heading, overdue = false, next, notCurrent = false, ...props }: HomeAgendaCardProps) {
   return (
-    <HomeCard variant="agenda" title={heading ?? (overdue ? "Overdue reminder" : "Next")} icon={<Calendar />} notCurrent={notCurrent ? "Not up to date" : undefined} {...props}>
+    <HomeCard variant="agenda" title={heading ?? (overdue ? "Overdue reminder" : "Next")} icon={<CalendarGlyph />} notCurrent={notCurrent ? "Not up to date" : undefined} {...props}>
       <span className="flex min-h-0 flex-1 items-center">
         <span className="line-clamp-3 font-display text-home-display tracking-tight wrap-anywhere">{item.title}</span>
       </span>

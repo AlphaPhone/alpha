@@ -10,7 +10,6 @@ import { Time } from "../runtime/time.vibe"
 import { waiting } from "../home/waiting.vibe"
 import { civilDay } from "../calendar/time.ts"
 import { fromAreas } from "../home/cards.vibe"
-import { whenLabel } from "../home/when.ts"
 import { Device } from "../platform/device.vibe"
 import { afterMailSignIn, leaseRefusalReason } from "../../gen/app__platform.effect.vibe"
 import { Cloud, mailSignIn } from "../platform/cloud.vibe"
@@ -137,14 +136,6 @@ function waitingOf(said: Inbox.Attention): string | undefined {
   return `${said.unread}${said.more ? "+" : ""} unread`
 }
 
-/** What the mail card says under its rows, as v121's did: how current the page is, and when it was read. */
-function statusOf(said: Inbox.Attention, current: boolean, now: number): string {
-  const read = said.at > 0 ? whenLabel(said.at, now) : ""
-  if (said.standing === "Stale") return `Open to retry${read ? ` · last updated ${read}` : ""}`
-  if (!current) return read ? `Not updated since ${read}` : "Not updated recently"
-  return [said.more ? "Recent email" : "", read ? `Updated ${read}` : ""].filter(Boolean).join(" · ")
-}
-
 const home = started(effect {
   const list = try Inbox.Machine
   const ledger = try Mail
@@ -161,13 +152,11 @@ const home = started(effect {
       title: card.subject || "No subject",
       detail: card.from.replace(/<[^>]*>/u, "").replace(/"/gu, "").trim() || card.from,
     })) : []
-    const now = try time.now()
-    const card = { connected, unread: unread.unread, rows, current: unread.standing === "Ready" && civilDay(unread.at) === civilDay(now) }
-    const status = statusOf(unread, card.current, now)
-    const written = JSON.stringify([card, unread.more, status])
+    const card = { connected, unread: unread.unread, rows, current: unread.standing === "Ready" && civilDay(unread.at) === civilDay(try time.now()) }
+    const written = JSON.stringify([card, unread.more])
     if (written !== previous) {
       previous = written
-      fromAreas.mail(card, unread.more, status)
+      fromAreas.mail(card, unread.more)
     }
   })
 }, "telling Home")
