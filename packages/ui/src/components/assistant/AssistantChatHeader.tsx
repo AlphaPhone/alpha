@@ -42,8 +42,8 @@ export function AssistantChatHeader({ title, context, grabber, onHome, onClose, 
         >
           <ChevronLeft aria-hidden className="-mr-2 size-4.5 shrink-0" />
           <span aria-hidden className="flex size-8.5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-alpha text-alpha-foreground"><Mark className="size-[118%] shrink-0" /></span>
-          {told ? <AssistantContextChip {...told} /> : null}
         </button>
+        {told ? <AssistantContextChip {...told} className="ml-2.5" /> : null}
       </div>
       {grabber ?? <span />}
       <div className="col-start-3 flex min-w-0 items-center justify-end gap-0.5">
