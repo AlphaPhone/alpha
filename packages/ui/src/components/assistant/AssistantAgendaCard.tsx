@@ -8,6 +8,8 @@ export type AssistantAgendaRow = {
   time: string;
   /** What it is. */
   title: string;
+  /** The one that matters most in the day, marked in Alpha blue. */
+  marked?: boolean;
 };
 
 export type AssistantAgendaCardProps = Pick<AssistantCardFrameProps, "settled" | "onOpen"> & {
@@ -25,7 +27,7 @@ export function AssistantAgendaCard({ title, rows, onOpen, settled = false }: As
       {rows.map((row) => (
         <span key={row.id} className="flex items-center gap-3.5 border-b border-border px-4 py-3.25">
           <span className="w-10 shrink-0 text-meta text-muted-foreground tabular-nums">{row.time}</span>
-          <span aria-hidden className="size-1.75 shrink-0 rounded-full bg-border" />
+          <span aria-hidden className={cn("size-1.75 shrink-0 rounded-full", row.marked && !settled ? "bg-alpha" : "bg-border")} />
           <span className={cn("min-w-0 text-base break-words", settled && "text-muted-foreground")}>{row.title}</span>
         </span>
       ))}

@@ -1,6 +1,6 @@
 import type { ComponentProps } from "react";
 import { cn } from "../lib/cn.ts";
-import { field } from "../lib/styles.ts";
+import { textField } from "../lib/styles.ts";
 
 export type TextareaProps = Omit<ComponentProps<"textarea">, "children"> & {
   /** Marks the value as refused, visibly and through `aria-invalid`. */
@@ -9,5 +9,5 @@ export type TextareaProps = Omit<ComponentProps<"textarea">, "children"> & {
 
 /** A text field of several lines that grows with what it holds. Name it with a `Label` or `aria-label`. */
 export function Textarea({ invalid = false, className, ...props }: TextareaProps) {
-  return <textarea aria-invalid={invalid || undefined} className={cn(field, "field-sizing-content min-h-12 resize-none py-3", className)} {...props} />;
+  return <textarea aria-invalid={invalid || undefined} className={cn(textField, "field-sizing-content min-h-12 resize-none py-3", className)} {...props} />;
 }

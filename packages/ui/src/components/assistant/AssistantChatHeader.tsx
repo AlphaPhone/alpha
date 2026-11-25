@@ -10,6 +10,8 @@ export type AssistantChatHeaderProps = Omit<ComponentProps<"header">, "title" | 
   title: string;
   /** What the agent is told of the screen showing; shown only when it is more than the view: a selection, or a private screen. */
   context?: AssistantContextChipProps;
+  /** What the conversation is beside, under Alpha's mark, such as the person and app a communications sheet is over. */
+  subtitle?: ReactNode;
   /** The handle that resizes the sheet, in the middle: an `AssistantGrabber`. */
   grabber?: ReactNode;
   /** Goes Home: the back mark and Alpha's mark at the start. */
@@ -27,7 +29,7 @@ export type AssistantChatHeaderProps = Omit<ComponentProps<"header">, "title" | 
  * fill the screen or lower Ask Alpha.
  * @model spec/app/assistant/chats.md
  */
-export function AssistantChatHeader({ title, context, grabber, onHome, onClose, expanded = false, onResize, className, ...props }: AssistantChatHeaderProps) {
+export function AssistantChatHeader({ title, context, subtitle, grabber, onHome, onClose, expanded = false, onResize, className, ...props }: AssistantChatHeaderProps) {
   const told = context && (context.sensitive || context.selected) ? context : undefined;
   return (
     <header className={cn("grid shrink-0 grid-cols-[minmax(0,1fr)_2.75rem_minmax(0,1fr)] items-center px-3 pb-1", className)} {...props}>
@@ -42,6 +44,7 @@ export function AssistantChatHeader({ title, context, grabber, onHome, onClose, 
         >
           <ChevronLeft aria-hidden className="-mr-2 size-4.5 shrink-0" />
           <span aria-hidden className="flex size-8.5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-alpha text-alpha-foreground"><Mark className="size-[118%] shrink-0" /></span>
+          {subtitle ? <span className="min-w-0 truncate text-caption text-muted-foreground">{subtitle}</span> : null}
         </button>
         {told ? <AssistantContextChip {...told} className="ml-2.5" /> : null}
       </div>

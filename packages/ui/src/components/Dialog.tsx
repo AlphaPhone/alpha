@@ -65,5 +65,5 @@ export function DialogTitle({ className, ...props }: DialogTitleProps) {
 
 /** What the dialog asks or says, under its title, and its accessible description. */
 export function DialogDescription({ className, ...props }: DialogDescriptionProps) {
-  return <DialogPrimitive.Description className={cn(surfaceDescription, "-mt-2", className)} {...props} />;
+  return <DialogPrimitive.Description className={cn(surfaceDescription, "-mt-1.5", className)} {...props} />;
 }

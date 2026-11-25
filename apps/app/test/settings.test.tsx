@@ -202,7 +202,7 @@ describe("Settings", () => {
       await until(alpha, machines, Android.Machine, (s) => s.told === "SaidNearby");
       // spec/app/settings/android.md, "Alpha's alert, permission and photo pages open for Alpha itself, never for another app, and a channel's page names its channel"
       await tap("Notifications");
-      await tap("Alpha's alerts");
+      await tap("Notifications");
       await until(alpha, machines, Android.Machine, (s) => s.target === "AlphaAlerts" && s.start.read.status === "Loaded");
       await tap("Reminders");
       await until(alpha, machines, Android.Machine, (s) => s.target === "AlertChannel" && s.start.read.status === "Loaded");
