@@ -29,9 +29,9 @@ export service CameraAssets {
   readonly mounted: Stream.Stream<boolean>
   newest(): number!!
   store(media: CameraMedia, secure: boolean): number!!
-  read(id: number): CameraMedia | undefined!!
+  read(id: number): (CameraMedia | undefined)!!
   setLens(ticket: number, lens: LensFacts): void!!
-  lens(ticket: number): LensFacts | undefined!!
+  lens(ticket: number): (LensFacts | undefined)!!
   setPoint(tap: number, point: Point): void!!
   point(tap: number): Point!!
 }
@@ -119,7 +119,7 @@ effect function permission(kind: "camera" | "microphone"): Camera.Event!!CameraP
   return kind === "camera" ? { type: "accessIs", grant, now: untimed } : { type: "microphoneIs", grant }
 }
 
-effect function saved(media: CameraMedia, elapsed: number): CameraMedia | undefined!! {
+effect function saved(media: CameraMedia, elapsed: number): (CameraMedia | undefined)!! {
   if (media.blob === undefined) return media
   const video = media.mime.startsWith("video/")
   const suffix = video ? (media.mime.startsWith("video/mp4") ? "mp4" : "webm") : "jpg"
