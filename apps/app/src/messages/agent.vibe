@@ -1,12 +1,13 @@
 // spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"
 import { NOT_DISPATCHED } from "@elizaos/agent/client"
-import type { DeviceOperation } from "@elizaos/agent/operations"
-import { MMS_MAX_BODY } from "@elizaos/os/bridges/definitions/messages"
+import { type DeviceOperation, type OperationResultOf, readResult } from "@elizaos/agent/operations"
+import { MMS_MAX_BODY, threadIdOf } from "@elizaos/os/bridges/definitions/messages"
 import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/phone"
 import { Machine as Composer, bound } from "../../gen/app__messages__composer.effect.vibe"
 import { Machine as Messages, removing } from "../../gen/app__messages.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Device } from "../platform/device.vibe"
+import { Telephony, telephony } from "../platform/telephony.vibe"
 import { contained } from "../runtime/reactor.vibe"
 import { Drafts } from "./composer.vibe"
 import { Conversations, Inbox } from "./messages.vibe"
@@ -18,6 +19,72 @@ export interface MessageDraftTarget {
 }
 
 const refused = { kind: "refused", code: NOT_DISPATCHED } as const
+
+type ReadSelected = Extract<DeviceOperation, { type: "messages_read_selected" }>
+const readSelected: ReadSelected = { type: "messages_read_selected" }
+
+module selection {
+  import type { MessageRow } from "@elizaos/os/bridges/messages"
+
+  const maxRows = 20
+  const maxBody = 1600
+  // The native execution journal caps its entire encrypted entry at 64 KiB.
+  const maxBodyWireBytes = 48 * 1024
+  const wire = new TextEncoder()
+
+  /** The visible tail, oldest first, measured the same way the native journal stores it. @throws {never} */
+  export function messageTail(rows: readonly MessageRow[], older: boolean) {
+    const listed = rows.flatMap((row) => "incomplete" in row ? [] : [row])
+      .sort((one, other) => other.date - one.date)
+    const tail = []
+    let truncated = older || listed.length !== rows.length || listed.length > maxRows
+    let remaining = maxBodyWireBytes
+    for (const row of listed.slice(0, maxRows)) {
+      const body = row.body.slice(0, maxBody).replace(/[\uD800-\uDBFF]$/u, "")
+      const message = { direction: row.direction === "incoming" ? "in" : "out", date: row.date, body } as const
+      const size = wire.encode(JSON.stringify(message)).byteLength + 1
+      if (size > remaining) { truncated = true; break }
+      remaining -= size
+      truncated ||= body !== row.body
+      tail.push(message)
+    }
+    return { messages: tail.reverse(), truncated }
+  }
+}
+import { messageTail } from selection
+
+// spec/app/contacts/agent.md, "The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it"
+/** One exact visible provider thread, when its current read can be shared. */
+effect function selectedMessage(target: MessageDraftTarget): (OperationResultOf<"messages_read_selected"> | undefined)!!(Device | Shell | Messages | Inbox | Conversations) {
+  if (!(try (try Device).showing()) || !showing(try (try Shell).get(), "Messages")) return undefined
+  const where = try (try Messages).get()
+  if (!where.front || where.pane !== "Conversation" || where.page.status !== "Loaded" || where.sms.grant !== "Granted") return undefined
+  if (where.thread !== target.thread || where.page.ticket !== target.ticket) return undefined
+  const held = try (try Inbox).get()
+  if (held.messagesThread !== where.thread) return undefined
+  const saved = try (try Conversations).get(where.thread)
+  if (Option.isNone(saved) || threadIdOf(saved.value.id) === null || held.messages.some((one) => one.threadId !== saved.value.id)) return undefined
+  const addresses = saved.value.addresses
+  const address = addresses.length === 1 ? addresses[0] : undefined
+  const displayName = address === undefined ? undefined : held.names.get(address)?.trim().slice(0, 128)
+  const number = normalizePhoneNumber(address)
+  const person = displayName && displayName !== address && (number === null || normalizePhoneNumber(displayName) !== number) ? displayName : null
+  const tail = messageTail(held.messages, held.messagesNext !== undefined)
+  return readResult<"messages_read_selected">(readSelected, { kind: "messages-read", status: "read", participant: person, ...tail })
+}
+
+/** Return a thread receipt only under the current explicit approval and the phone's current SMS permission. */
+export effect function shareSelectedMessage(target: MessageDraftTarget | undefined, current: () => Promise<boolean>): unknown!!(Device | Shell | Messages | Inbox | Conversations | Telephony) {
+  if (target === undefined || !(try (try Device).capabilities()).image) return refused
+  const allowed = tryPromise(current) catch () => false
+  if (!allowed) return refused
+  const native = telephony("Messages sharing permission", (client) => client.messages.status()) catch () => undefined
+  if (native?.permissions.sms !== "granted") return refused
+  const still = tryPromise(current) catch () => false
+  if (!still) return refused
+  const result = try selectedMessage(target)
+  return result?.status === "read" ? { kind: "applied", result } : refused
+}
 
 /** When the addressed draft navigates, the Ask Alpha sheet stays where it was. */
 effect function addressed(number: string): (number | undefined)!!(Shell | Messages | Conversations) {

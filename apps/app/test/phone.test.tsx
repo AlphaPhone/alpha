@@ -76,7 +76,7 @@ describe("Phone on an Alpha image", () => {
 
     // spec/app/phone/index.md, "Phone reads the call log whenever Recents comes to the front"
     await openPhone(alpha);
-    await until(alpha, alpha.runtime, Phone, (s) => s.carrier && s.telecom === "NoCall" && s.recents.status === "Loaded" && s.rows === 2);
+    await until(alpha, alpha.runtime, Phone, (s) => s.carrier === "CarrierReady" && s.telecom === "NoCall" && s.recents.status === "Loaded" && s.rows === 2);
     expect(world.telephony.dialed).toEqual([]);
 
     // spec/app/phone/index.md, "Tapping a recent call hands its number to the dialer"; spec/app/phone/index.md, "With the dialer role a call is placed through Telecom, and counts as started only when Telecom accepted it"
@@ -107,7 +107,7 @@ describe("Phone on an Alpha image", () => {
 
     // spec/app/phone/index.md, "Each digit, or each digit taken back, is judged by the phone and looked up among the contacts on the phone"
     for (const key of ["4", "1", "5", "5", "5", "5", "0", "1", "0", "0"]) await press(key);
-    await until(alpha, alpha.runtime, Phone, (s) => s.typed === "Dialable" && s.matched && s.carrier && s.telecom === "NoCall");
+    await until(alpha, alpha.runtime, Phone, (s) => s.typed === "Dialable" && s.matched && s.carrier === "CarrierReady" && s.telecom === "NoCall");
     await press("Call");
     await until(alpha, alpha.runtime, Phone, (s) => s.dialled && s.dial.status === "Loaded");
     expect([world.telephony.dialed, world.telephony.placed]).toEqual([["14155550100"], []]);
@@ -149,21 +149,65 @@ describe("Phone on an Alpha image", () => {
     const { alpha } = await openPhoneWorld(world);
     await until(alpha, alpha.runtime, Shell, (s) => s.image);
     await openPhone(alpha);
-    await until(alpha, alpha.runtime, Phone, (s) => s.carrier && s.recents.status === "Loaded");
+    await until(alpha, alpha.runtime, Phone, (s) => s.carrier === "CarrierReady" && s.recents.status === "Loaded");
     expect(button("Call Maya Chen")?.disabled).toBe(false);
 
     world.telephony.mobileService = false;
     act(() => world.telephony.report());
-    await until(alpha, alpha.runtime, Phone, (s) => !s.carrier);
+    await until(alpha, alpha.runtime, Phone, (s) => s.carrier === "CarrierUnavailable");
     expect(button("Call Maya Chen")?.disabled).toBe(true);
 
     world.telephony.mobileService = true;
     world.telephony.live = [{ id: "possible-emergency", state: "active", connectedAt: world.now }];
     world.telephony.emergency = null;
     act(() => world.telephony.report());
-    await until(alpha, alpha.runtime, Phone, (s) => s.carrier && s.telecom === "MaybeEmergencyCall");
+    await until(alpha, alpha.runtime, Phone, (s) => s.carrier === "CarrierReady" && s.telecom === "MaybeEmergencyCall");
     expect(button("Call Maya Chen")?.disabled).toBe(true);
     expect([world.telephony.placed, world.telephony.dialed]).toEqual([[], []]);
+  });
+
+  it("Hands off to the system dialer when cell service or call state is unknown (spec/app/phone/index.md, \"Story: Call a number\")", async () => {
+    const world = image();
+    world.telephony.mobileService = undefined;
+    const { alpha } = await openPhoneWorld(world);
+    await until(alpha, alpha.runtime, Shell, (s) => s.image);
+    await openPhone(alpha);
+    await until(alpha, alpha.runtime, Phone, (s) => s.carrier === "CarrierUnknown" && s.telecom === "NoCall" && s.recents.status === "Loaded");
+    await press("Call Maya Chen");
+    await until(alpha, alpha.runtime, Phone, (s) => s.dial.status === "Loaded");
+    expect([world.telephony.dialed, world.telephony.placed]).toEqual([["+14155550100"], []]);
+
+    await hardware("home");
+    await until(alpha, alpha.runtime, Phone, (s) => !s.front);
+    world.telephony.mobileService = true;
+    world.telephony.callStateKnown = false;
+    act(() => world.telephony.report());
+    await openPhone(alpha);
+    await until(alpha, alpha.runtime, Phone, (s) => s.carrier === "CarrierReady" && s.telecom === "CallUnknown" && s.recents.status === "Loaded");
+    const operation = { type: "phone_call", target: { kind: "number", number: "+14155550100" } } as const;
+    await act(async () => {
+      expect(await alpha.runtime.runPromise(phoneAction(operation, () => Promise.resolve(true)))).toMatchObject({ kind: "refused" });
+    });
+    await press("Call Maya Chen");
+    await until(alpha, alpha.runtime, Phone, (s) => s.dial.status === "Loaded");
+    expect([world.telephony.dialed, world.telephony.placed]).toEqual([["+14155550100", "+14155550100"], []]);
+  });
+
+  it("Lets Android determine which emergency numbers can open the dialer without service (spec/app/phone/index.md, \"Story: Call a number\")", async () => {
+    const world = image();
+    world.telephony.mobileService = false;
+    world.telephony.emergencyNumbers.add("09");
+    const { alpha } = await openPhoneWorld(world);
+    await until(alpha, alpha.runtime, Shell, (s) => s.image);
+    await openPhone(alpha);
+    await tab("Keypad");
+    await until(alpha, alpha.runtime, Phone, (s) => s.tab === "Keypad" && s.carrier === "CarrierUnavailable");
+    await press("0");
+    await press("9");
+    await until(alpha, alpha.runtime, Phone, (s) => s.numberKind === "EmergencyNumber");
+    await press("Call");
+    await until(alpha, alpha.runtime, Phone, (s) => s.dial.status === "Loaded");
+    expect([world.telephony.dialed, world.telephony.placed]).toEqual([["09"], []]);
   });
 
   it("See missed calls on Home, then unheard voicemail (spec/app/phone/index.md, \"Story: See missed calls on Home\"; spec/app/phone/voicemail.md, \"Story: See my voicemail\")", async () => {

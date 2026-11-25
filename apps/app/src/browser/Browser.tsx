@@ -85,7 +85,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     const known = runtime.runSync(Effect.map(TabHost, (host) => host.session.info(idOf(one))));
     const privateTab = tabs.privates.includes(one);
     const blank = privateTab ? "New private tab" : "New tab";
-    return { id: one, title: known?.title || known?.url || blank, where: `${privateTab ? "Private · " : ""}${addressParts(known?.url).host || blank}`, current: one === tab, private: privateTab };
+    return { id: one, title: known?.title || known?.url || blank, where: `${privateTab ? "Private · " : ""}${known?.url ?? ""}`, current: one === tab, private: privateTab };
   });
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
@@ -122,7 +122,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
         <BrowserTabs
           leading={<Button variant="ghost" size="icon" aria-label="Back to page" onClick={() => void browser.send({ type: "uncover" })}><ChevronLeft /></Button>}
           tabs={cards}
-          onPick={(one) => tell({ type: "pick", tab: one })?.()}
+          onPick={(one) => tell(one === tab ? { type: "uncover" } : { type: "pick", tab: one })?.()}
           onClose={(one) => tell({ type: "closeTab", tab: one, instead: one === tab ? (others.at(-1) ?? one) : tab })?.()}
           onNew={opening("Normal")}
           onNewPrivate={opening("Private")}

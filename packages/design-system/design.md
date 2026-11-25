@@ -22,7 +22,10 @@ do next.
   Fraunces behind it, at weight `light`: a screen's display title on the launcher, the date on Home, a large figure. The sizes
   are in rem, so Android's text size scales them: `base` is body text, `md` a row title or a field,
   `caption` and `sm` the quieter line beside it, `xl` a shared app header title in the browser, `3xl` a screen title
-  (also the shared app header title in `font-display` on the launcher), and `4xl` the Home date. Text up to `lg` is set at Public Sans's own line height (1.175), as develop sets it; copy that
+  (also the shared app header title in `font-display` on an app's first page on the launcher, drawn no larger than lets
+  a 4.4em word fit its own row above 150% text), `home-display` that title on a screen inside an app on the launcher, on
+  one line and cut with an ellipsis until above 150% text, where every header title takes its own row and wraps, and
+  `4xl` the Home date. Text up to `lg` is set at Public Sans's own line height (1.175), as develop sets it; copy that
   is read at length takes `leading-normal`. `tracking-caps` with `text-xs` is a small uppercase label; `text-label` names an app tile on
   Home and in the drawer. A list row reads `text-base`,
   `text-subject` and `text-snippet` line by line; `text-meta` is a status line under a header, and `text-body`
@@ -30,7 +33,7 @@ do next.
   keypad key's letters; `text-keypad-number` the number being dialled, `text-keypad-digit` a key's
   digit and `text-keypad-letters` the letters under it; `text-contact-name` and `text-contact-initials`, in
   `font-display`, are a contact's name and initials at the top of their card. `text-lead` is the street of the next turn,
-  `text-title` a document's name over its preview, and `text-figure` and `text-figure-sm` a route's time.
+  `text-title` a document's name over its preview and Notes' Recently deleted header on the launcher, and `text-figure` and `text-figure-sm` a route's time.
   `leading-row` sets `text-body` as a note's or a routine's title in a list.
   `text-badge` is a video's length over a thumbnail and `text-tile-name` an album's name under its cover.
   `text-headline` is an open voice or link note's title and `text-quote` a clip kept from a page.
@@ -44,10 +47,11 @@ do next.
   row, `rounded-action` a labelled action button; `rounded-segment` is a segmented control and
   `rounded-segment-option` the option chosen in it. `rounded-tile` is an app tile, a menu and a dialog;
   `rounded-sheet` the top of a bottom sheet, `rounded-chat` the top of the Ask Alpha sheet; `rounded-full` a
-  button and a chip, `rounded-dock` the Ask Alpha bar.
+  button and a chip, `rounded-dock` the Ask Alpha bar and `rounded-dock-compact` its compact controls.
   Everything pressed is at least 44px in both directions.
 - **Elevation.** `shadow-sm` lifts a control, `shadow-menu` a menu, `shadow-md` a dialog or a notice, `shadow-lg` a raised card,
-  `shadow-dock` the floating Ask Alpha bar (`shadow-dock-dark` on black), `shadow-sheet` a bottom sheet.
+  `shadow-dock` the floating Ask Alpha bar, `shadow-dock-compact` its compact controls, and `shadow-sheet` a bottom sheet.
+  Both dock shadows have a `-dark` variant for black surfaces.
 - **Layers.** `z-dock` is the Ask Alpha bar, `z-sheet` the conversation and bottom sheets, `z-dialog` a
   dialog, `z-toast` a notice, `z-voice` the voice overlay. `z-10`, `z-20` and `z-50` order things inside one view.
 - **Motion.** `fast` for press, `base` for most changes, `slow` for entering and leaving, on
@@ -120,6 +124,7 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `rounded.group` | 1.625rem |
 | `rounded.panel` | 1.5rem |
 | `rounded.dock` | 1.9375rem |
+| `rounded.dock-compact` | 1.875rem |
 | `rounded.chat` | 1.875rem |
 | `rounded.tab-count` | 0.4375rem |
 | `rounded.action` | 1.125rem |
@@ -243,6 +248,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `shadow.menu` | 0 4px 20px oklch(0 0 0 / 0.12) |
 | `shadow.dock` | 0 14px 40px oklch(0 0 0 / 0.12) |
 | `shadow.dock-dark` | 0 14px 40px oklch(0 0 0 / 0.45) |
+| `shadow.dock-compact` | 0 12px 34px oklch(0 0 0 / 0.12) |
+| `shadow.dock-compact-dark` | 0 12px 34px oklch(0 0 0 / 0.45) |
 | `keyframes.rise` | from{opacity:0;transform:translateY(1.75rem)}to{opacity:1;transform:none} |
 | `keyframes.drop` | from{opacity:0;transform:translateY(-2.25rem)}to{opacity:1;transform:none} |
 | `keyframes.fade` | from{opacity:0}to{opacity:1} |

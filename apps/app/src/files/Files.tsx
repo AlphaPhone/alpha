@@ -4,7 +4,7 @@ import { Effect, Option, type Layer, type ManagedRuntime } from "effect";
 import { ArrowDown, ArrowDownWideNarrow, ArrowUp, AudioLines, ScanLine, Download, Ellipsis, File, FileArchive, FileText, Folder, FolderInput, FolderOpen, HardDrive, Image, Info, LayoutGrid, List, Pencil, Plus, RefreshCw, Search, Share2, Trash2, Video, X, type LucideIcon } from "lucide-react";
 import { Fragment, useMemo, useState, type MouseEvent } from "react";
 import type { Event as FilesEvent, Files as FilesState, Machine, Order } from "../../gen/app__files.effect.vibe";
-import { ahead, browse, chosen, detailed, empty, filled } from "../../gen/app__files.ts";
+import { ahead, browse, chosen, detailed, grouped, empty, filled } from "../../gen/app__files.ts";
 import { useMachine } from "../../gen/app__files.react.ts";
 import type { Dest, Work } from "../../gen/app__files__change.ts";
 import { finding } from "../../gen/app__files__search.ts";
@@ -15,6 +15,7 @@ import type { Alpha, Resident } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 import { Time } from "../runtime/time.vibe";
 import { Handles } from "./handles.vibe";
+import { CategoryGroups } from "./category.vibe";
 import type { Machine as PreviewMachine } from "../../gen/app__files__preview.effect.vibe";
 import type { Machine as RecentMachine } from "../../gen/app__files__recent.effect.vibe";
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
@@ -22,13 +23,14 @@ import { useMachine as useRecent } from "../../gen/app__files__recent.react.ts";
 import type { Opened } from "./preview.vibe";
 import { Preview, RecentFiles } from "./Preview.tsx";
 import { Trash, Undo } from "./Trash.tsx";
+import type { TrashFacts } from "./trashFacts.vibe";
 import { Scan } from "./Scan.tsx";
 import { type scan, startScan } from "./scan.vibe";
 
 export interface FilesProps {
   /** Provides Files and its Trash, `files` of files.vibe, the numbers of the phone's storage and Alpha's time. */
   alpha: Alpha;
-  runtime: ManagedRuntime.ManagedRuntime<Machine | TrashMachine | PreviewMachine | RecentMachine | Opened | Handles | Time | Shell | Layer.Success<typeof scan> | Resident, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<Machine | TrashMachine | TrashFacts | PreviewMachine | RecentMachine | Opened | Handles | CategoryGroups | Time | Shell | Layer.Success<typeof scan> | Resident, unknown>;
 }
 
 const categories: readonly [Kind, string][] = [["Download", "Downloads"], ["Image", "Images"], ["Video", "Videos"], ["Audio", "Audio"], ["Document", "Documents"]];
@@ -128,6 +130,11 @@ export function Files({ runtime, alpha }: FilesProps) {
   const selecting = marks.size > 0;
   const grid = state.layout === "Grid";
   const category = categories.find(([kind]) => kind === state.category)?.[1];
+  const groupedCategory = grouped(state);
+  const folderGroups = groupedCategory
+    ? runtime.runSync(Effect.flatMap(CategoryGroups, (groups) => groups.read(state.listing.ticket)))
+    : [];
+  const CategoryIcon = icons[state.category];
   const primary = state.volumes[0];
   const place = state.inCategory ? category : state.trail.length === 1 && state.trail[0] === primary?.id ? "All files" : label(state.trail.at(-1) ?? 0);
   const title = selecting ? String(marks.size) : atTop ? "Files" : (place ?? "Files");
@@ -181,7 +188,7 @@ export function Files({ runtime, alpha }: FilesProps) {
   return (
     <section aria-label="Files" className="relative flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-0 flex-1 flex-col">
-        <AppHeader title={title} leading={selecting && owner({ type: "cancelSelection" }) ? <Button variant="ghost" size="icon" aria-label="Cancel" onClick={() => tell({ type: "cancelSelection" })}><X /></Button> : back}>
+        <AppHeader title={title} detail={selecting || !atTop} leading={selecting && owner({ type: "cancelSelection" }) ? <Button variant="ghost" size="icon" aria-label="Cancel" onClick={() => tell({ type: "cancelSelection" })}><X /></Button> : back}>
           {selecting && canDetails && <Button variant="ghost" size="icon" aria-label="Details" onClick={() => tell({ type: "showDetails", target: firstPicked.id })}><Info /></Button>}
           {selecting && owner({ type: "selectAll" }) && <Button variant="ghost" className="h-11 px-3" onClick={() => tell({ type: "selectAll" })}>Select all</Button>}
           {!selecting && showTools && (
@@ -291,11 +298,19 @@ export function Files({ runtime, alpha }: FilesProps) {
             </>
           ) : looked === "NoFilter" && (
             <>
-              {shown === "Reading" && state.items.length === 0 && <Spinner label="Reading the folder" />}
+              {shown === "Reading" && (state.items.length === 0 || groupedCategory) && <Spinner label="Reading the folder" />}
               {shown === "Unreachable" && <Alert variant="destructive">This place cannot be read now</Alert>}
-              {empty(state) && <EmptyState icon={<Folder />} title="Nothing here" className={filesEmpty} />}
+              {empty(state) && folderGroups.length === 0 && <EmptyState icon={state.inCategory ? <CategoryIcon /> : <Folder />} title={state.inCategory ? `No ${category?.toLowerCase() ?? "files"}` : "Nothing here"} className={filesEmpty} />}
               {shown === "Showing" && state.partial && <Alert variant="info">Only part of this place could be read</Alert>}
-              {sorted.length > 0 && <div role="group" aria-label="Listed" className={grid ? "grid grid-cols-3 gap-2" : undefined}>{sorted.map(row)}</div>}
+              {groupedCategory && folderGroups.length > 0 && (
+                <div role="group" aria-label="Folders" className={grid ? "grid grid-cols-3 gap-2" : undefined}>
+                  {folderGroups.map((group) => {
+                    const open = { type: "openCategoryGroup", groupTrail: [...group.trail], ticket: state.listing.ticket } satisfies FilesEvent;
+                    return <FilesRow key={group.folder} layout={grid ? "tile" : "row"} name={group.name} detail={group.folder || "Internal storage"} count={String(group.count)} icon={<CategoryIcon />} aria-label={`Open ${group.name}`} disabled={!owner(open)} onClick={() => tell(open)} />;
+                  })}
+                </div>
+              )}
+              {!groupedCategory && sorted.length > 0 && <div role="group" aria-label="Listed" className={grid ? "grid grid-cols-3 gap-2" : undefined}>{sorted.map(row)}</div>}
             </>
           )}
         </div>

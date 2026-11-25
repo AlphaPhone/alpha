@@ -165,6 +165,7 @@ catalogs:
 
 overrides:
   '@effect/platform-node-shared': 4.1.1
+  pdfjs-dist>@napi-rs/canvas: '-'
 
 importers:
 
@@ -367,6 +368,9 @@ importers:
       lucide-react:
         specifier: 'catalog:'
         version: 1.74.0(@types/react@19.3.0)(react@19.3.1)
+      pdfjs-dist:
+        specifier: 6.3.289
+        version: 6.3.289
       react:
         specifier: 'catalog:'
         version: 19.3.1
@@ -5137,6 +5141,10 @@ packages:
   pbf@5.2.0:
     resolution: {integrity: sha512-R6YptaRZl0t9SVO6MllszYq1IkaOQawzprndmvQxEoFrtvX7fT+oNIPoVD152NOllmLWEC3ThxzUTqBX12q5FQ==}
     hasBin: true
+
+  pdfjs-dist@6.3.289:
+    resolution: {integrity: sha512-ZHjSVpDa3D6izMq8/04lvkhkATUmL9px6ChPaXc1k6nU2Mrhlg1/7F0bdUqCwUjw3NsPTfPZsMDUU6ZIcRaeQw==}
+    engines: {node: '>=22.13.0 || >=24'}
 
   pend@1.2.0:
     resolution: {integrity: sha512-F3asv42UuXchdzt+xXqfW1OGlVBe+mxa2mqI0pg5yAHZPvFmY3Y6drSf/GQ1A86WgWEN9Kzh/WrgKa6iGcHXLg==}
@@ -10655,6 +10663,8 @@ snapshots:
   pbf@5.2.0:
     dependencies:
       protocol-buffers-schema: 3.6.1
+
+  pdfjs-dist@6.3.289: {}
 
   pend@1.2.0: {}
 
