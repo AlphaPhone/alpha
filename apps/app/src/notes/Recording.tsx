@@ -1,5 +1,6 @@
 // spec/app/notes/recording.md, "Story: Record a voice note"; spec/app/notes/recording.md, "Story: Discard a recording"
 import { Alert, AppHeader, Button, Dialog, DialogContent, DialogTitle, Spinner } from "@repo/ui";
+import { Effect } from "effect";
 import { ArrowLeft, AudioLines, Pause, Play } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import { useMachine } from "../../gen/app__notes__recording.react.ts";
@@ -13,8 +14,8 @@ function elapsed(seconds: number) {
 
 export function Recording({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime: Alpha["runtime"] }) {
   const recording = useMachine(runtime);
-  const display = runtime.runSync(RecordingDisplay.asEffect());
-  const { seconds, peak } = useSyncExternalStore(display.subscribe, display.snapshot, display.snapshot);
+  const display = runtime.runSync(RecordingDisplay.use((shown) => Effect.succeed(shown)));
+  const { seconds, peak } = useSyncExternalStore((listener) => display.subscribe(listener), () => display.snapshot(), () => display.snapshot());
   const state = recording.state;
   if (state === undefined) return null;
   const send = (event: Event) => void recording.send(event, "Owner");

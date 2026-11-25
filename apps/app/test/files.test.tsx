@@ -40,7 +40,8 @@ const choose = async (name: string, menu = "Files options") => {
   });
 };
 const paths = (world: ReturnType<typeof scene>) => world.files.stored.map((one) => `${one.volume}:${one.path}`).sort();
-const select = (name: string) => press(`Select ${name}`);
+/** Choose `name`: its checkbox before anything is chosen, the row itself once choosing. */
+const select = (name: string) => (button(`Select ${name}`) ? press(`Select ${name}`) : openRow(name));
 const buttonOnTop = (name: string) => [...([...document.querySelectorAll("[role=dialog]")].at(-1)?.querySelectorAll("button") ?? [])].find((one) => (one.getAttribute("aria-label") ?? one.textContent) === name);
 
 /** Alpha on a phone with Files on screen, its storage read. */
