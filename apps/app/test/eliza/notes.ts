@@ -35,6 +35,7 @@ if ((process.env.ALPHA_DEV_MODEL ?? "") === "" && process.env.ALPHA_NOTES_ORIGIN
 const timings = process.env.ALPHA_MODEL_TIMING_LOG ?? path.join(fs.mkdtempSync(path.join(os.tmpdir(), "alpha-notes-")), "model-timing.jsonl");
 const shots = process.env.ALPHA_NOTES_SHOTS;
 const only = (process.env.ALPHA_NOTES_ONLY ?? "").split(",").filter((one) => one !== "");
+const routes = (process.env.ALPHA_NOTES_HOW ?? "typed,spoken").split(",");
 
 async function served(): Promise<{ origin: string; stop: () => void }> {
   const given = process.env.ALPHA_NOTES_ORIGIN;
@@ -121,9 +122,13 @@ async function turn(browser: Browser, origin: string, one: Case, spoken: boolean
   const title = one.title ?? newest?.title ?? "";
   let ended: number | undefined;
   let shownId: string | undefined;
+  let view: string | undefined;
   page.on("requestfinished", (request) => { if (request.url().includes("/messages/stream")) ended = Date.now(); });
   page.on("request", (request) => {
-    if (request.url().includes("/views/interact-result")) shownId = (request.postDataJSON() as { result?: { shown?: { noteId?: string } } }).result?.shown?.noteId;
+    if (!request.url().includes("/views/interact-result")) return;
+    const told = request.postDataJSON() as { success?: boolean; result?: { switched?: boolean; shown?: { noteId?: string } } };
+    shownId = told.result?.shown?.noteId;
+    view = told.result?.shown !== undefined ? "shown" : told.result?.switched === true ? "switched, note not shown" : "not switched";
   });
   if (spoken) {
     await page.getByRole("button", { name: "Talk", exact: true }).click();
@@ -150,6 +155,7 @@ async function turn(browser: Browser, origin: string, one: Case, spoken: boolean
   return {
     how: spoken ? "spoken" : "typed", id: one.id, title, opened: shown !== undefined && shownId === meant?.id, created: one.items === undefined ? undefined : meant !== undefined,
     replyMs: ended === undefined ? undefined : ended - sent, openMs: shown === undefined ? undefined : shown - sent,
+    view: view ?? "no view handed back",
     modelCalls: made.length, modelMs: made.reduce((sum, call) => sum + call.ms, 0),
     steps: made.map((call) => `${call.called.join("+") || "reply"} ${call.ms}`).join(", "),
   };
@@ -163,7 +169,7 @@ try {
   for (const seed of seeds) if (!kept.includes(seed.title)) await interact(setup, origin, "create-note", { content: `${seed.title}\n${seed.body}` });
   await setup.context().close();
   const rows = [];
-  for (const spoken of [false, true]) for (const one of cases) if (only.length === 0 || only.includes(one.id)) rows.push(await turn(browser, origin, one, spoken));
+  for (const spoken of [false, true].filter((voiced) => routes.includes(voiced ? "spoken" : "typed"))) for (const one of cases) if (only.length === 0 || only.includes(one.id)) rows.push(await turn(browser, origin, one, spoken));
   for (const row of rows) process.stdout.write(`${JSON.stringify(row)}\n`);
   if (rows.some((row) => !row.opened)) process.exitCode = 1;
 } finally {

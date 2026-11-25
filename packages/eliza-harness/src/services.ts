@@ -153,7 +153,7 @@ interface Tool { readonly type: string; readonly function: { readonly name: stri
 const uniformTools = (tools: readonly Tool[]): Tool[] =>
   tools.every((tool) => tool.function.strict === true) ? [...tools] : tools.map(({ function: { strict: _strict, ...declared }, ...tool }) => ({ ...tool, function: declared }));
 
-/** One model call as `ALPHA_MODEL_TIMING_LOG` keeps it: when it started, how long until its headers, its first output and its end, and what it asked and called. */
+/** One model call as `ALPHA_MODEL_TIMING_LOG` keeps it: when it started, how long until its headers, its first output and its end, what it asked and called with which arguments, and the start of the text it wrote. */
 interface CallTiming {
   readonly kind: "model";
   readonly startedAt: number;
@@ -165,10 +165,12 @@ interface CallTiming {
   readonly tools: number;
   readonly called: string[];
   readonly answered: string[];
+  readonly said: string;
+  readonly args: string[];
   readonly usage: unknown;
 }
 
-type Delta = { content?: unknown; reasoning?: unknown; reasoning_content?: unknown; tool_calls?: { function?: { name?: unknown } }[] };
+type Delta = { content?: unknown; reasoning?: unknown; reasoning_content?: unknown; tool_calls?: { index?: unknown; function?: { name?: unknown; arguments?: unknown } }[] };
 type Choice = { delta?: Delta; message?: Delta };
 
 /** What the tools answered since the model last spoke, as this call tells it: why a turn took the steps it did. */
@@ -196,6 +198,8 @@ function noted(log: string, input: Record<string, unknown>, startedAt: number, a
   const called = new Set<string>();
   let firstMs: number | undefined;
   let usage: unknown;
+  let said = "";
+  const args = new Map<number, string>();
   let pending = "";
   const read = (json: string) => {
     let body: { choices?: Choice[]; usage?: unknown };
@@ -203,7 +207,12 @@ function noted(log: string, input: Record<string, unknown>, startedAt: number, a
     for (const choice of body.choices ?? []) {
       const part = choice.delta ?? choice.message;
       if (firstMs === undefined && carries(part)) firstMs = Date.now() - startedAt;
-      for (const call of part?.tool_calls ?? []) if (typeof call.function?.name === "string") called.add(call.function.name);
+      if (typeof part?.content === "string" && said.length < 600) said += part.content;
+      for (const [at, call] of (part?.tool_calls ?? []).entries()) {
+        if (typeof call.function?.name === "string") called.add(call.function.name);
+        const index = typeof call.index === "number" ? call.index : at;
+        if (typeof call.function?.arguments === "string") args.set(index, `${args.get(index) ?? ""}${call.function.arguments}`.slice(0, 300));
+      }
     }
     if (body.usage !== undefined && body.usage !== null) usage = body.usage;
   };
@@ -219,7 +228,7 @@ function noted(log: string, input: Record<string, unknown>, startedAt: number, a
     else read(pending);
     const messages = Array.isArray(input.messages) ? input.messages.length : 0;
     const tools = Array.isArray(input.tools) ? input.tools.length : 0;
-    const row: CallTiming = { kind: "model", startedAt, headersMs, firstMs, ms: Date.now() - startedAt, status: answer.statusCode, messages, tools, called: [...called], answered: answeredBefore(input.messages), usage };
+    const row: CallTiming = { kind: "model", startedAt, headersMs, firstMs, ms: Date.now() - startedAt, status: answer.statusCode, messages, tools, called: [...called], answered: answeredBefore(input.messages), said: said.slice(0, 600), args: [...args.values()], usage };
     fs.appendFileSync(log, `${JSON.stringify(row)}\n`);
   });
   return (part: Buffer) => {
