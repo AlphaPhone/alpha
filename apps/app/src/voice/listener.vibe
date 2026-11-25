@@ -19,7 +19,6 @@ function reportOf(status: Extract<ListenerStatus, { available: true }>): Model.R
     on: status.state !== "OFF" || status.microphoneOpen,
     mic: status.microphoneOpen,
     consent: status.consented,
-    // Native policy reports listening only while the microphone indicator lease is valid.
     fresh: status.listening,
     lost: status.state === "STOPPED_INDICATOR_LOST",
     paused: status.state === "PAUSED_USER",
@@ -44,7 +43,6 @@ function carry(out: Model.Effect): Job<Model.Event, Device, []> {
     when { tag: "ReadStatus", let ticket }: answer("listener status", read(ticket), failed(ticket));
     when { tag: "Pause", pausing: let ticket }: answer("pause listener", read(ticket, "pause"), failed(ticket));
     when { tag: "TurnOff", stopping: let ticket }: answer("turn off listener", read(ticket, "turnOff"), failed(ticket));
-    // This Settings mount never dispatches wake events.
     when { tag: "StartVoice" }: stop("listener wake");
   }
 }

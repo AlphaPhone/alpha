@@ -137,7 +137,6 @@ describe("Settings", () => {
     expect(listeningSwitch()?.getAttribute("aria-checked")).toBe("false");
     expect(listener.status).toMatchObject({ state: "OFF", consented: false, microphoneOpen: false });
 
-    // Consent and activation occur in the native listener's screen, outside Alpha.
     await seen(false);
     listener.status = { available: true, state: "LISTENING", label: "Listening",
       consented: true, listening: true, microphoneOpen: true };
