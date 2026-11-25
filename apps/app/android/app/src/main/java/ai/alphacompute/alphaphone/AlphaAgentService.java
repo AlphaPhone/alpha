@@ -27,7 +27,25 @@ public final class AlphaAgentService extends AgentService {
 
   private record SpeechHost(String name, InferenceHost host) {}
 
+  /**
+   * Moves the earlier on-device agent's PGlite store and runtime aside by rename before launch
+   * (spec/app/platform/storage.md). Neither is read by the new agent, so any failure is logged
+   * and retried at the next launch without blocking startup.
+   */
+  private void moveLegacyStateAside() {
+    try {
+      for (LegacyAgentState.Outcome outcome : LegacyAgentState.moveAside(getFilesDir().toPath())) {
+        if (outcome.move != LegacyAgentState.Move.NOTHING_TO_MOVE) {
+          android.util.Log.i("AlphaLegacyAgent", outcome.toString());
+        }
+      }
+    } catch (RuntimeException unexpected) {
+      android.util.Log.w("AlphaLegacyAgent", "legacy state left in place: " + unexpected.getClass().getSimpleName());
+    }
+  }
+
   @Override protected void configureLaunch(Map<String, String> variables) {
+    moveLegacyStateAside();
     synchronized (speechLock) {
       if (retiring) return;
       if (speech != null) {

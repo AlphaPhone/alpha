@@ -1,0 +1,5 @@
+{
+  "ndk": "28.2.13676358",
+  "cmake": "4.0.3",
+  "engineRepository": "https://github.com/elizaOS/llama.cpp.git"
+}

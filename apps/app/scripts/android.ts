@@ -29,6 +29,9 @@ const usage = "Usage: node scripts/android.ts <inputs|pack|stage|web|host|build 
 const sha256 = (bytes: Uint8Array | string) => createHash("sha256").update(bytes).digest("hex");
 const readJson = (file: string): unknown => JSON.parse(readFileSync(file, "utf8"));
 const record = (value: unknown): Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
+const text = (value: unknown): string => typeof value === "string" ? value : "";
+const writeOut = (line: string) => { process.stdout.write(`${line}\n`); };
+const writeErr = (line: string) => { process.stderr.write(`${line}\n`); };
 const writeJson = (file: string, value: unknown) => {
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
@@ -60,9 +63,9 @@ interface Problem { readonly input: string; readonly problem: string; readonly f
 /** eliza.lock.json pins a commit of eliza's develop line, built and linked as `.eliza`, with no edit in its source. */
 export function pinProblems(): Problem[] {
   const lock = record(readJson(join(root, "eliza.lock.json")));
-  const commit = String(lock.commit ?? "");
+  const commit = text(lock.commit);
   const problems: Problem[] = [];
-  if (lock.branch !== "develop") problems.push({ input: "eliza.lock.json", problem: `branch is ${String(lock.branch)}, not develop`, fix: "Pin a reviewed commit of eliza develop" });
+  if (lock.branch !== "develop") problems.push({ input: "eliza.lock.json", problem: `branch is ${text(lock.branch) || "unset"}, not develop`, fix: "Pin a reviewed commit of eliza develop" });
   let checkout: string;
   try {
     checkout = prepared().root;
@@ -98,7 +101,7 @@ export function inputProblems(env: NodeJS.ProcessEnv = environment()): Problem[]
 
 function refuseOn(problems: readonly Problem[]) {
   if (problems.length === 0) return;
-  for (const { input, problem, fix } of problems) console.error(`MISSING ${input}: ${problem}. Run: ${fix}`);
+  for (const { input, problem, fix } of problems) writeErr(`MISSING ${input}: ${problem}. Run: ${fix}`);
   process.exitCode = 2;
   throw new Error(`${problems.length} Android build input(s) missing`);
 }
@@ -243,7 +246,10 @@ export function auditBundle(directory: string): string[] {
 export function hostProfile(updateManifestUrl: string) {
   const profile = record(readJson(join(android, "host.json")));
   const placeholders = record(profile.manifestPlaceholders);
-  const fields = Array.isArray(profile.buildConfigFields) ? profile.buildConfigFields : [];
+  const rawFields: readonly unknown[] = Array.isArray(profile.buildConfigFields) ? profile.buildConfigFields : [];
+  const fields = rawFields
+    .map(record)
+    .filter((field) => field.name !== "CLOUD_API_ORIGIN" && field.name !== "ALPHA_UPDATE_MANIFEST_URL");
   return {
     ...profile,
     manifestPlaceholders: { ...placeholders, appLinkHost: production.appLinkHost, signInCallbackPath },
@@ -274,7 +280,7 @@ export async function generateHost(runtime: string) {
 }
 
 interface BuildConsumer {
-  buildAndroidConsumer(options: Record<string, unknown>): { files: readonly string[] };
+  buildAndroidConsumer(this: void, options: Record<string, unknown>): { files: readonly string[] };
 }
 
 const consumerModule: string = "@elizaos/os/android/build-consumer.mjs";
@@ -290,9 +296,9 @@ export async function build(release: boolean) {
   const findings = auditBundle(join(app, androidPaths.web));
   if (findings.length > 0) throw new Error(`The production bundle audit failed:\n${findings.join("\n")}`);
   const host = await generateHost(runtime);
-  console.log(`Generated the ${host.appId} Android host (${host.files.length} files, Gradle ${host.toolchain})`);
-  const { buildAndroidConsumer } = (await import(consumerModule)) as BuildConsumer;
-  buildAndroidConsumer({
+  writeOut(`Generated the ${host.appId} Android host (${host.files.length} files, Gradle ${host.toolchain})`);
+  const consumer = (await import(consumerModule)) as BuildConsumer;
+  consumer.buildAndroidConsumer({
     root: app,
     environment: {
       ...env,
@@ -338,7 +344,7 @@ const REQUIRED_CLASSES = [
   ...["AlphaDevicePlugin", "AlphaCloudSpeechPlugin", "AlphaLocalSpeechPlugin", "AlphaBrowserPlugin", "AlphaCarrierSetupPlugin", "AlphaCallStatePlugin",
     "AlphaOngoingCallPlugin", "AlphaAgentService", "AlphaCalendarPlugin", "AlphaTelephonyPlugin", "AlphaContactsPlugin", "AlphaResetPlugin", "AlphaActionJournalPlugin",
     "AlphaFilesPlugin", "AlphaSelectedDocumentsPlugin", "AlphaPhotoLibraryPlugin", "AlphaPhotosPlugin", "AlphaPhotosPermissionsPlugin",
-    "AlphaMediaEnrollmentPlugin", "AlphaScanPlugin"].map((name) => `Lai/alphacompute/alphaphone/${name};`),
+    "AlphaMediaEnrollmentPlugin", "AlphaScanPlugin", "AlphaMapsTransportPlugin", "LegacyAgentState"].map((name) => `Lai/alphacompute/alphaphone/${name};`),
   "Lai/eliza/plugins/camera/CameraPlugin;",
   "Lai/eliza/plugins/filesystem/FilesPlugin;",
   ...["PermittedPhotosPlugin", "PermittedMediaCatalog", "OwnedPhotoEdits", "OwnedVideoPlayback", "OwnedCaptures",
@@ -456,7 +462,7 @@ export function verify(env: NodeJS.ProcessEnv = environment()) {
     results,
   };
   writeJson(join(artifacts, "apk-manifest.json"), manifest);
-  for (const row of results) console.log(`${row.mode} ${row.file} versionCode ${row.versionCode} ${row.abis.join(",")} ${row.signed ? `signed ${row.signer}` : "unsigned"}, page audit passed, runtime packaged`);
+  for (const row of results) writeOut(`${row.mode} ${row.file} versionCode ${row.versionCode} ${row.abis.join(",")} ${row.signed ? `signed ${row.signer}` : "unsigned"}, page audit passed, runtime packaged`);
   return manifest;
 }
 
@@ -465,8 +471,8 @@ async function main(argv: readonly string[]) {
   switch (command) {
     case "inputs": {
       const problems = inputProblems();
-      for (const { input, problem, fix } of problems) console.log(`MISSING ${input}: ${problem}. Run: ${fix}`);
-      if (problems.length === 0) console.log(`Every Android build input is present for eliza ${String(record(readJson(join(root, "eliza.lock.json"))).commit)}`);
+      for (const { input, problem, fix } of problems) writeOut(`MISSING ${input}: ${problem}. Run: ${fix}`);
+      if (problems.length === 0) writeOut(`Every Android build input is present for eliza ${text(record(readJson(join(root, "eliza.lock.json"))).commit)}`);
       return problems.length === 0 ? 0 : 2;
     }
     case "pack":
@@ -474,7 +480,7 @@ async function main(argv: readonly string[]) {
       buildPack();
       return 0;
     case "stage":
-      console.log(`Staged the agent runtime in ${relative(app, await stageRuntime())}`);
+      writeOut(`Staged the agent runtime in ${relative(app, await stageRuntime())}`);
       return 0;
     case "web":
       buildWeb();
@@ -483,7 +489,7 @@ async function main(argv: readonly string[]) {
       return auditOutcome(resolve(rest[0] ?? join(app, androidPaths.web)));
     case "host": {
       const host = await generateHost(await stageRuntime());
-      console.log(`Generated the ${host.appId} Android host (${host.files.length} files, Gradle ${host.toolchain})`);
+      writeOut(`Generated the ${host.appId} Android host (${host.files.length} files, Gradle ${host.toolchain})`);
       return 0;
     }
     case "build":
@@ -494,15 +500,15 @@ async function main(argv: readonly string[]) {
       verify();
       return 0;
     default:
-      console.error(usage);
+      writeErr(usage);
       return 2;
   }
 }
 
 function auditOutcome(directory: string) {
   const findings = auditBundle(directory);
-  for (const finding of findings) console.error(`DENY ${finding}`);
-  if (findings.length === 0) console.log(`PASS ${relative(app, directory) || "."}: no mock, fixture or developer surface`);
+  for (const finding of findings) writeErr(`DENY ${finding}`);
+  if (findings.length === 0) writeOut(`PASS ${relative(app, directory) || "."}: no mock, fixture or developer surface`);
   return findings.length === 0 ? 0 : 1;
 }
 
@@ -510,7 +516,7 @@ if (import.meta.main) {
   try {
     process.exitCode = await main(process.argv.slice(2)) || process.exitCode;
   } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
+    writeErr(error instanceof Error ? error.message : String(error));
     process.exitCode ||= 1;
   }
 }
