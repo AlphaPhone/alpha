@@ -1,13 +1,19 @@
 // @vitest-environment happy-dom
-import { Effect } from "effect";
+import { ConversationRecord } from "@elizaos/agent";
+import { Effect, Schema } from "effect";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
-import { afterEach, beforeAll, expect, it } from "vitest";
+import { afterEach, beforeAll, expect, it, vi } from "vitest";
+import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
+import { Machine as Chats } from "../gen/app__assistant__chats.effect.vibe";
+import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Ask } from "../gen/app__ask.effect.vibe";
+import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import type { Mount } from "../src/areas.ts";
 import ask from "../src/ask/index.tsx";
+import assistant from "../src/assistant/index.tsx";
 import { Agent } from "../src/platform/agent.vibe";
 import { Cloud } from "../src/platform/cloud.vibe";
-import { button, closeAll, fill, openOver, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, only, openOver, press, underAct, until } from "./alpha.tsx";
 import { owned } from "@repo/eliza-harness";
 import { elizaWorld } from "./eliza/world.vibe";
 
@@ -77,4 +83,65 @@ it("Read what my agent keeps, from eliza's agent with its modules loaded (spec/k
   const { conversations } = await read("/api/conversations") as { conversations: { id: string }[] };
   const { messages } = await read(`/api/conversations/${conversations[0]?.id}/messages`) as { messages: { role: string; text: string }[] };
   expect(messages.slice(0, 2)).toEqual([expect.objectContaining({ role: "user", text: "Say hello." }), expect.objectContaining({ role: "assistant", text: "Hello from the cloud." })]);
+}, 300_000);
+
+it('Ask and stop a reply from Home through the real resident and cloud (spec/app/assistant/index.md, "Story: Ask Alpha something"); (spec/app/assistant/index.md, "Story: Stop a reply")', async () => {
+  const { alpha } = await openOver(elizaWorld(mine), only("home", "assistant"));
+  const runtime = assistant.runtime(alpha);
+  const roomList = Schema.decodeUnknownSync(Schema.Struct({ conversations: Schema.Array(ConversationRecord) }));
+  const rooms = async () => roomList(await mine.agentSays<unknown>("/api/conversations")).conversations;
+  const balance = async () => (await alpha.runtime.runPromise(Effect.flatMap(Cloud, (cloud) => Effect.promise(() => cloud.client.snapshot())))).balance.usdMicros;
+  const rendered = () => Array.from(document.querySelectorAll("[role=log] [data-alpha-message-text]"), (row) => row.textContent);
+  const before = await rooms();
+  const beforeBalance = await balance();
+  const askedBefore = (await mine.asked()).length;
+
+  await until(alpha, runtime, Conversation, (state) => state.ready);
+  await press("Open conversation");
+  await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+  await until(alpha, runtime, Composer, (state) => state.binding.owner > 0 && state.slot === "Open");
+
+  await drawn(() => {
+    const trigger = button("Chat actions");
+    if (!trigger) throw new Error("Chat actions did not open from Home");
+    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  });
+  await drawn(() => {
+    const start = [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((item) => item.textContent === "New chat");
+    if (!start) throw new Error("New chat was not offered");
+    start.click();
+  });
+  await until(alpha, runtime, Chats, (state) => state.chosen > 0 && state.make.outcome === "Confirmed" && state.page.status === "Loaded");
+  await until(alpha, runtime, Composer, (state) => state.binding.conversation > 0 && state.slot === "Open");
+  const opened = await rooms();
+  const added = opened.filter((room) => before.every((previous) => previous.id !== room.id));
+  expect(added).toHaveLength(1);
+  const [record] = added;
+  if (!record) throw new Error("The agent did not return the new conversation");
+  const transcript = () => mine.agentSays<unknown>(`/api/conversations/${encodeURIComponent(record.id)}/messages`);
+
+  const prompt = "What time did we set for the review?";
+  const answer = "The review is at nine.";
+  await mine.script({ kind: "text", parts: ["[answer] The review ", "is at nine."] });
+  await fill("Message Alpha", prompt);
+  await press("Send");
+  await until(alpha, runtime, Conversation, (state) => state.turn.reply === "Complete");
+  await drawn(() => vi.waitFor(() => expect(rendered()).toEqual([prompt, answer])));
+  expect(await transcript()).toMatchObject({ messages: [{ role: "user", text: prompt }, { role: "assistant", text: answer }] });
+  expect(await balance()).toBeLessThan(beforeBalance);
+
+  const next = "Read the schedule before you answer.";
+  const partial = "I am reading the schedule.";
+  await mine.script({ kind: "stall", first: `[answer] ${partial}` });
+  await fill("Message Alpha", next);
+  await press("Send");
+  await until(alpha, runtime, Conversation, (state) => state.turn.reply === "Streaming");
+  await drawn(() => vi.waitFor(() => expect(rendered()).toContain(partial)));
+  expect(button("Send")).toBeUndefined();
+  await press("Stop reply");
+  await until(alpha, runtime, Conversation, (state) => state.turn.reply === "Stopped" && state.check !== "Aborting" && state.recheck.status !== "Loading");
+  expect(rendered()).toEqual(expect.arrayContaining([prompt, answer, next]));
+  expect((await rooms()).map(({ id }) => id).sort()).toEqual(opened.map(({ id }) => id).sort());
+  const sent = (await mine.asked()).slice(askedBefore).map((request) => request.findLast((message) => message.role === "user")?.content);
+  expect(sent).toEqual([expect.stringMatching(/^What time did we set for the review\?(\n|$)/), expect.stringMatching(/^Read the schedule before you answer\.(\n|$)/)]);
 }, 300_000);
