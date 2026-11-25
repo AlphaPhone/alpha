@@ -113,7 +113,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     can({ type: "stop" }) && { label: "Stop", name: "Stop loading", icon: <Square />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => send({ type: "stop" })); } },
     canOpenTab(tabs, "Normal") && { label: "New tab", icon: <Plus />, onSelect: () => opening("Normal")?.() },
     canOpenTab(tabs, "Private") && { label: "Private tab", name: "New private tab", icon: <PrivateMark aria-hidden />, onSelect: () => opening("Private")?.() },
-    native && { label: booked ? "Bookmarked" : "Bookmark", name: booked ? "Remove bookmark" : "Bookmark this page", icon: <Star className={booked ? "fill-current" : undefined} />, disabled: !canBookmark, onSelect: chooseBookmark },
+    native && { label: booked ? "Bookmarked" : "Bookmark", icon: <Star className={booked ? "fill-current" : undefined} />, disabled: !canBookmark, onSelect: chooseBookmark },
     native && { label: "Library", name: "Library, bookmarks and history", icon: <Clock />, onSelect: openLibrary },
     native && { label: "Downloads", icon: <Download />, onSelect: () => void runtime.runPromise(openDownloads) },
     can({ type: "openFind" }) && { label: "Find", name: "Find in page", icon: <Search />, onSelect: () => { setFinding(""); void browser.send({ type: "uncover" }).then(() => send({ type: "openFind" })); } },

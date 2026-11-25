@@ -366,7 +366,6 @@ describe("Maps in a browser", () => {
     expect(button("Copy phone number")).toBeUndefined();
     await hardware("back");
     await hardware("back");
-    await hardware("back");
     await until(alpha, runtime, Screen, (s) => !s.directions && s.place === before.startPlace);
     await press("Copy phone number");
     await until(alpha, runtime, Screen, (s) => s.copyNotice !== "Uncopied");
