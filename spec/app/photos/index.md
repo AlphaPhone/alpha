@@ -320,6 +320,11 @@ pure def stepAPageKeepsWhatWasListed(before: Photos, via: str, after: Photos): b
     implies (before.rows.subseteq(after.rows) and allOlder(after.rows.exclude(before.rows), before.rows))
 ```
 
+The grid reads small previews separately for the rows near the viewport.
+Moving or resizing the viewport does not change which rows are listed,
+selected or focusable. A new library revision or a closed grid makes any
+outstanding preview answer obsolete.
+
 ### The phone can say its library is locked until the phone is unlocked
 
 Photos then lists nothing and says "Unlock the phone, then reopen Photos".
