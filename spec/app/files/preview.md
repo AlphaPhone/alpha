@@ -37,14 +37,14 @@ type Preview = {
   viewer: int, viewers: int, item: int, kind: Kind, revision: int, reachable: bool, siblings: List[str],
   content: R::Read, playing: bool, secret: bool,
   page: int, pages: int, drawing: R::Read, drawnAt: int, why: Why,
-  attempt: A::Attempt, offered: Seen,
+  attempt: A::Attempt, offered: Seen, renaming: int,
 }
 
 pure val initial: Preview = {
   viewer: 0, viewers: 0, item: 0, kind: Photo, revision: 0, reachable: false, siblings: List(),
   content: R::unread, playing: false, secret: false,
   page: 0, pages: 0, drawing: R::unread, drawnAt: 0, why: Fine,
-  attempt: A::plan(0), offered: { item: 0, revision: 0 },
+  attempt: A::plan(0), offered: { item: 0, revision: 0 }, renaming: 0,
 }
 ```
 
@@ -68,6 +68,7 @@ type Effect =
   | OpenElsewhere({ item: int, revision: int, writable: bool })
   | ShareFile({ viewer: int, item: int, revision: int })
   | ActOnStoredFile({ viewer: int, item: int, revision: int, operation: StorageAction, name: str })
+  | RenamePicked({ viewer: int, item: int, revision: int, name: str })
   | Lost({ item: int })
   | SelectAgain({ item: int })
   | Forget({ item: int })
@@ -331,6 +332,37 @@ pure def stepAStoredActionNamesTheExactPreview(before: Preview, via: str, after:
   })
 ```
 
+### A picked document is renamed through its provider using the access held for the viewer
+
+A provider that can rename it may keep access, in which case the renamed
+document is read again. If the provider completed the rename and access
+ended, the owner sees the requested name and must select the file again.
+The result of naming a picked document cannot change the document that a
+later viewer shows. While the provider is working, one rename is enough.
+
+```quint
+pure def canRenamePicked(s: Preview, name: str, renameable: bool, by: Actor): bool =
+  by == Owner and usable(s) and renameable and s.renaming == 0 and name != ""
+
+pure def renamePicked(s: Preview, name: str, renameable: bool, by: Actor): Moved =
+  { state: { ...s, renaming: s.viewer },
+    out: List(RenamePicked({ viewer: s.viewer, item: s.item, revision: s.revision, name: name })) }
+
+pure def canPickedRenameFinished(s: Preview, viewer: int, by: Actor): bool =
+  by == Phone and s.renaming != 0 and viewer == s.renaming
+
+pure def pickedRenameFinished(s: Preview, viewer: int, by: Actor): Preview =
+  { ...s, renaming: 0 }
+
+pure def stepAPickedRenameNamesTheExactPreview(before: Preview, via: str, after: Preview, out: List[Effect]): bool =
+  out.every(e => match e {
+    | RenamePicked(x) => via == "renamePicked" and usable(before) and before.renaming == 0
+        and x.viewer == before.viewer and x.item == before.item and x.revision == before.revision
+        and after.renaming == before.viewer
+    | _ => true
+  })
+```
+
 ### A file that holds a verification code or another secret is never handed to Ask Alpha
 
 The phone says so when it reads the file; it is said again each time the
@@ -481,7 +513,7 @@ pure def sometimesAFileMustBeSelectedAgain(s: Preview): bool = showing(s) and no
 pure def canRestart(s: Preview, by: Actor): bool = by == Phone
 
 pure def restart(s: Preview, by: Actor): Moved =
-  { state: { ...emptied(0, s), attempt: F::cut(s.attempt) }, out: closing(s) }
+  { state: { ...emptied(0, s), attempt: F::cut(s.attempt), renaming: 0 }, out: closing(s) }
 
 pure def stepARestartLeavesNothingToAnswer(before: Preview, via: str, after: Preview): bool =
   via == "restart" implies

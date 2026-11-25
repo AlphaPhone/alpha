@@ -45,7 +45,7 @@ type PhotosProps = Shown<PhotosRuntime>;
 
 const imageTypes = "image/jpeg,image/png,image/webp";
 
-type ImagePreview = { readonly source: File; readonly frame: BrowserEditFrame };
+type ImagePreview = { readonly source: File; readonly frame: BrowserEditFrame; readonly reading: AbortSignal };
 
 interface ImageChoiceProps {
   readonly runtime: PhotosProps["runtime"];
@@ -77,6 +77,7 @@ function ImageChoice({ runtime, choice, canScan, close, focusTools }: ImageChoic
     return () => node.removeEventListener("cancel", cancel);
   }, [finishPick]);
   function beginPick(event: React.MouseEvent<HTMLInputElement>) {
+    if (ownsPickerRef.current) return;
     if (runtime.runSync(Effect.flatMap(PhotoChooser, (picker) => picker.begin()))) ownsPickerRef.current = true;
     else event.preventDefault();
   }
@@ -94,18 +95,21 @@ function ImageChoice({ runtime, choice, canScan, close, focusTools }: ImageChoic
     const prepared = await runtime.runPromiseExit(Effect.tryPromise(() => renderBrowserPhoto(source, { turns: 0, look: "none", whiteBackground: true })), { signal: reading.signal });
     if (reading.signal.aborted) return;
     if (prepared._tag !== "Success") { describe("Unsupported image."); return; }
-    show({ source, frame: prepared.value });
+    show({ source, frame: prepared.value, reading: reading.signal });
     describe(`${source.name} · ${prepared.value.width} × ${prepared.value.height} copy`);
   }
   async function scan() {
-    if (!picture) return;
+    if (!picture || picture.reading.aborted) return;
+    finishPick();
     const chosen = await runtime.runPromiseExit(consumeImageChoice(choice));
     if (chosen._tag !== "Success" || !chosen.value) return;
     await runtime.runPromiseExit(Effect.flatMap(PhotoChooser, (picker) => picker.begin()).pipe(Effect.flatMap((began) =>
       began ? scanSelectedImage(picture.source) : Effect.void)));
   }
   function save() {
-    if (picture) void runtime.runPromiseExit(importImageChoice(choice, picture.frame, `${picture.source.name.replace(/\.[^.]+$/, "") || "Photo"}.jpg`));
+    if (!picture || picture.reading.aborted) return;
+    finishPick();
+    void runtime.runPromiseExit(importImageChoice(choice, picture.frame, `${picture.source.name.replace(/\.[^.]+$/, "") || "Photo"}.jpg`));
   }
   return <Dialog open onOpenChange={(open) => { if (!open) close(); }}>
     <DialogContent ref={connect} aria-describedby={undefined} onCloseAutoFocus={(event) => { event.preventDefault(); focusTools(); }}>
