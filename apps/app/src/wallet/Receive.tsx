@@ -22,6 +22,7 @@ export function Receive({ ledger }: { ledger: Ledger }) {
             const name = account.network === "" ? account.symbol : account.network;
             return (
               <section key={account.family} aria-label={name} className="flex flex-col items-center gap-3">
+                <p className="self-start text-sm text-muted-foreground">{name}</p>
                 <WalletQr value={account.address} label={`${name} address as a QR code`} />
                 <WalletAddress
                   className="self-stretch"
