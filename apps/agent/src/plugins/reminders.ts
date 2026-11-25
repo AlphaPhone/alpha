@@ -401,7 +401,7 @@ export function remindersAction(store: AlphaAppsStore, timeZone: string): AgentA
   const action: AgentAction = {
     name: "REMINDERS_MANAGE",
     similes: ["MANAGE_REMINDERS", "ALPHA_REMINDERS", "REMINDER_LISTS"],
-    description: "Create, list, query, update, complete, reopen, snooze, reschedule, flag, move, delete reminders, manage custom lists, and add/toggle subtasks in Alpha Reminders.",
+    description: "The owner's reminders in Alpha's Reminders app: set one (it is saved, shows in Reminders and fires at its due time), or list, query, update, complete, reopen, snooze, flag, move or delete one, manage custom lists, and add or toggle subtasks.",
     parameters: [
       {
         name: "op", description: "What to do: list or query reminders, create, update, complete, reopen, snooze, flag, move or delete one, add or toggle a subtask, or create, rename or delete a list.", required: true,
