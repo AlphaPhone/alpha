@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Ear, ListChecks, SlidersHorizontal } from "lucide-react";
+import { ListChecks, SlidersHorizontal } from "lucide-react";
 import { ListGroup } from "../ListGroup.tsx";
 import { SettingsDeviceSwitch, type SettingsDeviceSwitchProps } from "./SettingsDeviceSwitch.tsx";
 import { SettingsNavRow } from "./SettingsNavRow.tsx";
@@ -34,8 +34,6 @@ export type SettingsPrivacyPageProps = SettingsPlaceProps & {
   onOpen?: (page: SettingsPageName) => void;
   /** Opens the access walkthrough, to set up Alpha's access. */
   onSetUpAccess?: () => void;
-  /** Hands over to the voice area, which owns the listener; the row is offered only on an Alpha image, which has one. */
-  onListener?: () => void;
   /** The rows other areas own on this page, such as where speech goes. */
   children?: ReactNode;
 };
@@ -45,7 +43,7 @@ export type SettingsPrivacyPageProps = SettingsPlaceProps & {
  * where speech goes, the listener on an Alpha image, and the walkthrough to set up access.
  * @model spec/app/settings/index.md
  */
-export function SettingsPrivacyPage({ read, askFirst, saving, recovering, onAskFirstChange, shares = {}, onShareChange, onRecover, onBack, onOpen, onSetUpAccess, onListener, place, onPlace, children }: SettingsPrivacyPageProps) {
+export function SettingsPrivacyPage({ read, askFirst, saving, recovering, onAskFirstChange, shares = {}, onShareChange, onRecover, onBack, onOpen, onSetUpAccess, place, onPlace, children }: SettingsPrivacyPageProps) {
   const at = (row: number) => placed({ place, onPlace }, row);
   return (
     <SettingsPage title="Privacy" onBack={onBack} backLabel="Back to Settings">
@@ -57,11 +55,6 @@ export function SettingsPrivacyPage({ read, askFirst, saving, recovering, onAskF
         ))}
       </ListGroup>
       {children}
-      {onListener ? (
-        <ListGroup>
-          <SettingsNavRow title="Listener" icon={<Ear />} onOpen={onListener} {...at(2)} />
-        </ListGroup>
-      ) : null}
       <ListGroup>
         <SettingsNavRow title="Access setup" icon={<ListChecks />} onOpen={onSetUpAccess} {...at(1)} />
       </ListGroup>

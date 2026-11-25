@@ -292,12 +292,12 @@ function Privacy({ runtime, alpha, common }: PageProps) {
   if (!device) return null;
   const { recovery, ...shown } = device;
   const review = { type: "reviewAllAccess" } as const;
-  const listener = { type: "handOver", neighbour: "Listener", micMayBeOn: false } as const;
   return (
     <>
       {recovery}
-      <SettingsPrivacyPage {...common} {...shown} onSetUpAccess={can(review) ? () => void send(review) : undefined} onListener={can(listener) ? () => void send(listener) : undefined}>
+      <SettingsPrivacyPage {...common} {...shown} onSetUpAccess={can(review) ? () => void send(review) : undefined}>
         {alpha.slot("settings/voice")}
+        {alpha.slot("settings/listening")}
       </SettingsPrivacyPage>
     </>
   );
