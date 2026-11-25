@@ -55,7 +55,9 @@ describe("Contacts on an Alpha image", () => {
     await fill("Search or ask", "Maya");
     await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 1);
     expect(document.querySelector('[aria-label="Ben Ortiz"]')).toBeNull();
-    await press("Ask Alpha");
+    // spec/app/contacts/index.md, "Searching or changing the filter chip starts a new list"
+    expect([button("Ask Alpha"), button("Talk")?.disabled]).toEqual([undefined, false]);
+    await drawn(() => document.querySelector<HTMLInputElement>("input[aria-label='Search or ask']")?.form?.requestSubmit());
     await drawn(() => vi.waitFor(() => expect(world.ask.said).toEqual(["Maya"])));
     await drawn(() => alpha.back());
     await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar");

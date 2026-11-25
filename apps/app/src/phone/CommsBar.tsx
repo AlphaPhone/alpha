@@ -143,8 +143,8 @@ function CommsQuery({ runtime, phone, filter, placeholder, onAsk, onTalk }: { ru
     }}>
       <Input key={owned ? "search" : "ask"} name="query" data-alpha-composer="" aria-label={placeholder} placeholder={placeholder}
         value={query} maxLength={owned?.maxLength} onChange={(event) => (owned?.onChange ?? setDraft)(event.currentTarget.value)}
-        className="h-11 min-w-0 flex-1 rounded-full border-0 bg-transparent py-2.75 pr-0.5 pl-2 shadow-none" />
-      {query.trim() === "" && onTalk
+        className="h-11 min-w-0 flex-1 rounded-full border-0 bg-transparent py-2.75 pr-0.5 pl-2 shadow-none focus-visible:outline-none" />
+      {(query.trim() === "" || owned) && onTalk
         ? <Button size="icon" variant="ghost" type="button" aria-label="Talk" onClick={onTalk}><Mic /></Button>
         : <Button size="icon" variant="ghost" type="submit" aria-label="Ask Alpha"><ArrowUp /></Button>}
     </form>
