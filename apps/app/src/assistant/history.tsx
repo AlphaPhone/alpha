@@ -8,6 +8,7 @@ import * as Composer from "../../gen/app__assistant__composer.effect.vibe";
 import type { useMachine as useSearch } from "../../gen/app__assistant__search.react.ts";
 import type { MessageSelection } from "./message-actions.vibe";
 import { MapsCardView, mapsCardsOf } from "./maps-cards.tsx";
+import { wordsOf } from "./words.ts";
 import { ReplyFailure } from "./ReplyFailure.tsx";
 import type { Attached, Board, Line } from "./talk.vibe";
 
@@ -47,11 +48,10 @@ export function useMessageRows({ runtime, board, lines, chats, writing, replying
     if (!chats || !writing || lines.length === 0) return empty;
     const chat = (event: Chats.Event) => void runtime.runPromiseExit(Effect.flatMap(Chats.Machine, (machine) => machine.send(event)));
     const compose = (event: Composer.Event) => void runtime.runPromiseExit(Effect.flatMap(Composer.Machine, (machine) => machine.send(event)));
-    const newest = lines.findLastIndex((line) => !line.mine);
-    return lines.map((line, at): HistoryRow => {
+    return lines.map((line): HistoryRow => {
       const { text, cards } = line.mine ? { text: line.text, cards: [] } : mapsCardsOf(line.text);
-      const live = at === newest;
       const message = board.numbered(line.id);
+      const live = !line.mine && message > 0 && message === chats.messages && !replying;
       const recorded = message > 0 && settled;
       const selection = { conversation: chats.chosen, page: chats.page.ticket, message };
       const blank = text.trim() === "";
@@ -66,7 +66,7 @@ export function useMessageRows({ runtime, board, lines, chats, writing, replying
         author: line.mine ? "owner" : "alpha",
         text,
         attachments: line.attachments?.map(chip),
-        quote: line.quote,
+        quote: line.quote === undefined ? undefined : wordsOf({ mine: false, text: line.quote }),
         children: cards.length === 0 && line.failure === undefined ? undefined : <>
           {cards.map((card, index) => <MapsCardView key={index} card={card} settled={!live} onOpen={live ? onOpenMaps : undefined} />)}
           {line.failure === undefined ? null : <ReplyFailure kind={line.failure} onSettings={onSettings} />}
