@@ -9,6 +9,7 @@ import type { Row } from "./catalog.vibe";
 import { OpenedPhoto, photoLook } from "./viewer.vibe";
 import { photoLooks } from "../platform/photoCanvas.vibe";
 import { CropFrame } from "./CropFrame.tsx";
+import { trashDaysLabel, trashDaysLeft } from "./Grid.tsx";
 import { Time } from "../runtime/time.vibe";
 
 const filters: readonly Look[] = ["Original", "Vivid", "Warm", "Cool", "Mono", "Fade", "Noir"];
@@ -87,6 +88,7 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum
   const timestamp = current.item?.takenAt ?? current.item?.date ?? current.browser?.item.created ?? (row?.kind === "browser" ? row.item.created : undefined);
   const now = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
   const date = timestamp === undefined ? undefined : new Date(timestamp);
+  const expiry = inTrash ? trashDaysLeft(current.item?.expiresAt ?? (row?.kind === "phone" ? row.item.expiresAt : undefined), now) : undefined;
   const day = date === undefined ? name : date.toDateString() === new Date(now).toDateString() ? "Today" : formatDate.format(date);
   function action(event: Event) {
     if (can(event, "Owner")) void send(event, "Owner");
@@ -234,7 +236,8 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum
         <Button variant="ghost" size="icon" aria-label={state.editing ? "Cancel edit" : "Back to photos"} onClick={close}>{state.editing ? <X /> : <ChevronLeft />}</Button>
         {state.editing ? <div className="flex-1"><h1 className="sr-only">{state.kind === "Clip" ? "Edit video" : "Edit photo"}</h1></div> : <div className="min-w-0 flex-1">
           <h1 className="truncate text-base font-semibold">{day}</h1>
-          {date && <time className="block truncate text-caption text-muted-foreground" dateTime={date.toISOString()}>{formatTime.format(date)}</time>}
+          {expiry !== undefined ? <span className="block truncate text-caption text-muted-foreground">{trashDaysLabel(expiry)}</span>
+            : date && <time className="block truncate text-caption text-muted-foreground" dateTime={date.toISOString()}>{formatTime.format(date)}</time>}
         </div>}
         {!state.editing && showing && photosMenu.length > 0 && <Menu>
           <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Photo actions"><Ellipsis /></Button></MenuTrigger>

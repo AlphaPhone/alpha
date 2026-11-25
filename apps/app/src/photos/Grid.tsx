@@ -127,6 +127,8 @@ type TileProps = {
   readonly row: Row;
   readonly image?: string;
   readonly selected?: boolean;
+  readonly trashed: boolean;
+  readonly daysLeft?: number;
   readonly interactive: boolean;
   readonly focus: (button: HTMLButtonElement | null) => void;
 };
@@ -154,18 +156,30 @@ function timing(seconds: number): string {
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }
 
-const Tile = memo(function Tile({ number, row, image, selected, interactive, focus }: TileProps) {
+export function trashDaysLeft(expiresAt: number | undefined, now: number): number | undefined {
+  return expiresAt !== undefined && Number.isFinite(expiresAt) && expiresAt > 0 ? Math.max(0, Math.ceil((expiresAt - now) / 86_400_000)) : undefined;
+}
+
+export function trashDaysLabel(days: number): string {
+  return `${days} ${days === 1 ? "day" : "days"} left`;
+}
+
+const Tile = memo(function Tile({ number, row, image, selected, trashed, daysLeft, interactive, focus }: TileProps) {
   const video = row.kind === "phone" ? row.item.kind === "video" : row.item.mimeType.startsWith("video/");
   const name = row.item.name ?? (video ? "Video" : "Photo");
-  const starred = row.item.favorite === true;
+  const starred = !trashed && row.item.favorite === true;
   return (
     <button ref={focus} type="button" data-alpha-media-key={number} aria-label={name} aria-pressed={selected}
+      aria-description={daysLeft === undefined ? undefined : trashDaysLabel(daysLeft)}
       disabled={!interactive}
       className="relative grid aspect-square min-h-0 min-w-0 touch-pan-y place-items-center overflow-hidden bg-secondary focus-visible:outline-focus focus-visible:outline-offset-focus">
       {image ? <img src={image} loading="lazy" decoding="async" alt="" className="absolute inset-0 size-full object-cover" /> : <Image aria-hidden className="size-6 text-muted-foreground" />}
       {starred && <span aria-label="Favorite"
         // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": favorites on an image keep the dark contrast surface in either theme
         className="dark absolute bottom-1.5 left-1.5 grid size-4.5 place-items-center rounded-full bg-background/75 text-foreground"><Heart aria-hidden className="size-3 fill-current" /></span>}
+      {daysLeft !== undefined && <span aria-hidden
+        // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the expiry badge stays readable on a photo in either theme
+        className="dark absolute bottom-1 left-1.5 rounded-sm bg-background/60 px-0.5 text-caption font-bold text-foreground">{daysLeft}d</span>}
       {video && <span className="absolute right-1 bottom-1 flex items-center gap-1 rounded-full bg-background/80 px-1.5 py-0.5 text-xs"><Play aria-hidden className="size-3 fill-current" />{timing(row.item.duration ?? 0)}</span>}
       {selected !== undefined && <span aria-hidden className={cn("absolute top-1.5 right-1.5 grid size-6 place-items-center rounded-full border border-background", selected ? "bg-primary text-primary-foreground" : "bg-background/65")}>{selected && <Check className="size-4" />}</span>}
     </button>
@@ -330,7 +344,8 @@ export function MediaGrid({ rows, selection, grouped, density, runtime, revision
             const present = (visibleLines === undefined ? index < thumbnailBatch : visibleLines === null || visibleLines.has(first))
               || line.some(({ number }) => number === focused || number === requested);
             return <ThumbnailLine key={first} members={members} observe={observeLine} style={size.style}>{present ? line.map(({ number, row }) => (
-              <Tile key={number} number={number} row={row} image={images?.get(number)} selected={selection?.has(number)} interactive={open !== undefined} focus={focus} />
+              <Tile key={number} number={number} row={row} image={images?.get(number)} selected={selection?.has(number)} trashed={trash}
+                daysLeft={trash && row.kind === "phone" ? trashDaysLeft(row.item.expiresAt, now) : undefined} interactive={open !== undefined} focus={focus} />
             )) : undefined}</ThumbnailLine>;
           })}
         </section>
