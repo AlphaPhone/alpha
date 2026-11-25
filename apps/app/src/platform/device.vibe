@@ -1,6 +1,6 @@
-// spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"; spec/app/platform/index.md, "Story: Reach the phone's native capabilities"; spec/app/platform/index.md, "Mocks, fixtures and developer surfaces exist only when the build allows test mocks"
+// spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"; spec/app/platform/index.md, "Alpha hears it came back to the front once for each return, and a screen that has gone hears nothing more"; spec/app/platform/index.md, "Story: Reach the phone's native capabilities"; spec/app/platform/index.md, "Mocks, fixtures and developer surfaces exist only when the build allows test mocks"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { fixturesAllowed, reachable, variantOf } from "../../gen/app__platform.effect.vibe"
+import { fixturesAllowed, news, reachable, variantOf } from "../../gen/app__platform.effect.vibe"
 import { allowsTestMocks } from "./build.ts"
 
 module web {
@@ -156,6 +156,21 @@ const buttons: Stream.Stream<Button> = Stream.suspend(() => Stream.merge(
   Stream.as(Stream.fromEventListener(page(), "launcher-home"), "home" as const),
 ))
 
+/**
+ * Each time the page is shown or hidden, for as long as the one listening reads it: a word Android gives again
+ * without a change is no news, and a listener that has gone is removed with it.
+ */
+function heard(): Stream.Stream<boolean> {
+  return Stream.suspend(() => {
+    let was = showing()
+    return Stream.filter(Stream.map(Stream.fromEventListener(pages(), "visibilitychange"), () => showing()), (now) => {
+      const told = news(was, now)
+      was = now
+      return told
+    })
+  })
+}
+
 const key = "alpha.textScale"
 
 /** The page's part of the phone, the same on a phone and in a browser; the text size kept is applied before the first paint. */
@@ -176,7 +191,7 @@ effect function paged() {
     mark: (name: string, value: string | undefined) => sync(() => marked(name, value)),
     buttons,
     textAskVisits: Stream.suspend(() => Stream.merge(Stream.fromEventListener(page(), "alpha-text-ask"), Stream.fromEventListener(page(), "focus"))),
-    visible: Stream.suspend(() => Stream.map(Stream.fromEventListener(pages(), "visibilitychange"), () => showing())),
+    visible: heard(),
     showing: () => sync(showing),
   }
 }

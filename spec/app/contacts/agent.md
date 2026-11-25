@@ -25,7 +25,7 @@ type Actor = Owner | Agent | Device
 
 ### What a request holds
 
-One request at a time: what was asked, how far it got, how many contacts
+One request at a time and its ticket: what was asked, how far it got, how many contacts
 or numbers the search found, whether more matched than are shown, how many
 contacts already hold a new contact's name or number, whether a text names
 a number the owner wrote, whether the number is an emergency number, the
@@ -41,13 +41,13 @@ type Ask = Dial | Text | AddContact | ChangeContact | DeleteContact
 type Stage = Quiet | Looking | Choosing | Shown | Acting | Confirming | Ended
 type Ending = Done | Declined | Withdrawn | NotFound | Unavailable | EmergencyRefused | NotWritten | Unchanged | NotDone | Unsure
 type Request = {
-  stage: Stage, ask: Ask, matches: int, more: bool, twins: int, addressed: bool, emergency: bool,
+  request: int, stage: Stage, ask: Ask, matches: int, more: bool, twins: int, addressed: bool, emergency: bool,
   number: str, text: str, contact: str,
   lookup: R::Read, review: V::Review, attempt: A::Attempt, ending: Ending,
 }
 
 pure val initial: Request = {
-  stage: Quiet, ask: Dial, matches: 0, more: false, twins: 0, addressed: false, emergency: false,
+  request: 0, stage: Quiet, ask: Dial, matches: 0, more: false, twins: 0, addressed: false, emergency: false,
   number: "", text: "", contact: "",
   lookup: R::unread, review: V::unreviewed, attempt: A::plan(0), ending: Done,
 }
@@ -82,11 +82,14 @@ pure def acts(out: List[Effect]): bool = out.some(e => match e { | Act(a) => tru
 
 ```quint
 pure val ticketValues = Set(1, 2)
+pure val requestValues = Set(1, 2, 3)
+pure val shownValues = Set(1, 2, 3)
 pure val idValues = Set(1, 2, 3)
 pure val matchesValues = Set(-1, 0, 1, 2)
 pure val numberValues = Set("", "+14155550100")
 pure val textValues = Set("", "Running late")
 pure val contactValues = Set("", "7")
+pure val unitsValues = Set(0, 70, 71, 134, 135, 160, 161, 306, 307)
 pure val weight_found = 3
 pure val weight_approve = 3
 ```
@@ -118,9 +121,12 @@ pure def canAsked(r: Request, ask: Ask, byName: bool, emergency: bool, written: 
 
 pure def reachesANumber(ask: Ask): bool = ask == Dial or ask == Text
 
+pure def stepEveryNewRequestTakesANewTicket(before: Request, via: str, after: Request): bool =
+  after.request == (if (via == "asked") before.request + 1 else before.request)
+
 pure def asked(r: Request, ask: Ask, byName: bool, emergency: bool, written: bool, pictures: bool, number: str, text: str, by: Actor): Moved =
   val fresh = {
-    ...r, ask: ask, matches: 0, more: false, twins: 0, contact: "",
+    ...r, request: r.request + 1, ask: ask, matches: 0, more: false, twins: 0, contact: "",
     number: if (reachesANumber(ask) and not(byName)) number else "", text: if (ask == Text) text else "",
     addressed: reachesANumber(ask) and not(byName), emergency: ask == Dial and emergency and not(byName),
   }
@@ -190,10 +196,10 @@ the reason. A change that would leave the chosen contact as it is ends at
 once.
 
 ```quint
-pure def canChoose(r: Request, number: str, contact: str, emergency: bool, unchanged: bool, by: Actor): bool =
-  by == Owner and r.stage == Choosing and contact != "" and (reachesANumber(r.ask) iff number != "")
+pure def canChoose(r: Request, request: int, number: str, contact: str, emergency: bool, unchanged: bool, by: Actor): bool =
+  by == Owner and request == r.request and r.stage == Choosing and contact != "" and (reachesANumber(r.ask) iff number != "")
 
-pure def choose(r: Request, number: str, contact: str, emergency: bool, unchanged: bool, by: Actor): Moved =
+pure def choose(r: Request, request: int, number: str, contact: str, emergency: bool, unchanged: bool, by: Actor): Moved =
   val chosen = { ...r, number: number, contact: contact, emergency: r.ask == Dial and emergency }
   if (chosen.emergency) finish(EmergencyRefused, chosen)
   else if (r.ask == ChangeContact and unchanged) finish(Unchanged, chosen)
@@ -239,6 +245,33 @@ pure def alwaysMoreMatchedOnlyAfterASearch(r: Request): bool =
     and (r.twins > 0 implies (r.ask == AddContact and r.lookup.status == R::Loaded))
 ```
 
+### A text's review says when it likely goes as several linked texts
+
+Android divides a long text itself. A text all in the GSM alphabet fits 160
+characters in one text and 153 in each part once it is divided, a character
+of the alphabet's extension costing two; any other text fits 70 UTF-16
+units, and 67 in each part. A text that fits in one says nothing; a longer
+one reads "It likely goes as N linked texts", worded as likely since a
+carrier's settings can change the count (AC-20).
+
+```quint
+pure val gsmSingle = 160
+pure val gsmPart = 153
+pure val wideSingle = 70
+pure val widePart = 67
+
+pure def likelyParts(units: int, gsm: bool): int =
+  val single = if (gsm) gsmSingle else wideSingle
+  val part = if (gsm) gsmPart else widePart
+  if (units <= single) 1 else (units + part - 1) / part
+
+pure def lawATextThatFitsOneSaysNothing(units: int, gsm: bool): bool =
+  (units <= (if (gsm) gsmSingle else wideSingle)) iff likelyParts(units, gsm) == 1
+
+pure def lawALongerTextNeverReadsAsFewerParts(units: int, gsm: bool): bool =
+  likelyParts(units + 1, gsm) >= likelyParts(units, gsm)
+```
+
 ### A request is shown only for exactly one number or contact, and a choice is offered for several contacts or any of the numbers found
 
 ```quint
@@ -273,25 +306,27 @@ pure def canChanged(r: Request, by: Actor): bool = by == Device and r.stage == S
 
 pure def changed(r: Request, by: Actor): Request = { ...r, review: V::revise(r.review) }
 
-pure def canShowAgain(r: Request, by: Actor): bool = by == Owner and r.stage == Shown and not(V::canConfirm(r.review))
+pure def canShowAgain(r: Request, request: int, by: Actor): bool = by == Owner and request == r.request and r.stage == Shown and not(V::canConfirm(r.review))
 
-pure def showAgain(r: Request, by: Actor): Request = { ...r, review: V::present(r.review) }
+pure def showAgain(r: Request, request: int, by: Actor): Request = { ...r, review: V::present(r.review) }
 ```
 
 ### Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call
 
 `clear` is Phone's fact that no call which may be an emergency call is
-live. Approving acts once, under the next number. A text to a number the
+live. The tap names the request ticket and the revision of the card it
+was drawn on, so a previous card cannot approve a later request. Approving
+acts once, under the next number. A text to a number the
 owner wrote, shown on its card, whose whole review is showing, can also be
 approved by the owner saying "Send this text" as the next thing said in
 Talk. A text to a contact has its number picked on the phone, by touch.
 Nothing else is approved by voice, and the phrase is never spoken back.
 
 ```quint
-pure def canApprove(r: Request, clear: bool, spoken: bool, by: Actor): bool =
-  by == Owner and r.stage == Shown and V::canConfirm(r.review) and clear and (spoken implies (r.ask == Text and r.addressed))
+pure def canApprove(r: Request, request: int, shown: int, clear: bool, spoken: bool, by: Actor): bool =
+  by == Owner and request == r.request and shown == r.review.shown and r.stage == Shown and V::canConfirm(r.review) and clear and (spoken implies (r.ask == Text and r.addressed))
 
-pure def approve(r: Request, clear: bool, spoken: bool, by: Actor): Moved =
+pure def approve(r: Request, request: int, shown: int, clear: bool, spoken: bool, by: Actor): Moved =
   val attempt = A::dispatch(A::record(A::plan(r.attempt.id + 1)))
   { state: { ...r, stage: Acting, review: V::confirm(r.review), attempt: attempt }, out: acting(attempt.id, r) }
 ```
@@ -299,13 +334,13 @@ pure def approve(r: Request, clear: bool, spoken: bool, by: Actor): Moved =
 ### The owner can decline, and a review Alpha stops showing is withdrawn
 
 ```quint
-pure def canDecline(r: Request, by: Actor): bool = by == Owner and (r.stage == Choosing or r.stage == Shown)
+pure def canDecline(r: Request, request: int, by: Actor): bool = by == Owner and request == r.request and (r.stage == Choosing or r.stage == Shown)
 
-pure def decline(r: Request, by: Actor): Moved = finish(Declined, { ...r, review: V::dismiss(r.review) })
+pure def decline(r: Request, request: int, by: Actor): Moved = finish(Declined, { ...r, review: V::dismiss(r.review) })
 
-pure def canWithdraw(r: Request, by: Actor): bool = by == Device and (r.stage == Looking or r.stage == Choosing or r.stage == Shown)
+pure def canWithdraw(r: Request, request: int, by: Actor): bool = by == Device and request == r.request and (r.stage == Looking or r.stage == Choosing or r.stage == Shown)
 
-pure def withdraw(r: Request, by: Actor): Moved = finish(Withdrawn, { ...r, review: V::dismiss(r.review) })
+pure def withdraw(r: Request, request: int, by: Actor): Moved = finish(Withdrawn, { ...r, review: V::dismiss(r.review) })
 ```
 
 ### Only a text to a number the owner wrote is approved by voice, and only that text names the number at once
@@ -321,6 +356,10 @@ pure def sometimesAnAddressedText(r: Request): bool = r.stage == Shown and r.ask
 pure def stepOnlyApprovedRequestsAct(before: Request, via: str, after: Request, out: List[Effect]): bool =
   acts(out) implies (via == "approve" and before.stage == Shown and V::canConfirm(before.review)
     and out == acting(before.attempt.id + 1, before))
+
+pure def lawAPreviousCardCannotApprove(r: Request): bool =
+  not(canApprove(r, r.request - 1, r.review.shown, true, false, Owner))
+    and not(canApprove(r, r.request, r.review.shown - 1, true, false, Owner))
 ```
 
 ### The agent never calls an emergency number, and is told why
