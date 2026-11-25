@@ -26,6 +26,7 @@ export interface ScanSaved {
 
 module web {
   import type { PdfReceipt, ScanImage, ScanSaved, StoredPage } from "./scanStore.vibe"
+  // eslint-disable-next-line boundaries/no-unknown-dependencies -- Vite resolves the worker loader to this directory’s scan PDF worker.
   import Draw from "./scanPdf.worker.ts?worker"
   import { admittedTextLayer } from "@elizaos/plugin-files-client"
   import { scannedLinks } from "@elizaos/plugin-files-client"

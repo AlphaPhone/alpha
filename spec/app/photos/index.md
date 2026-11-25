@@ -60,6 +60,8 @@ type Effect =
   | Revoke
   | PickItems
   | OpenSettings
+  | ReadCameraAlbums({ photo: int, ticket: int })
+  | DropCamera({ photo: int })
   | Fetch({ ticket: int, tab: Tab, filter: Filter, query: str, person: int, album: int, page: bool, own: bool, only: Set[int] })
   | WriteAlbum({ attempt: int, change: AL::AlbumChange, album: int, name: str, items: Set[int], basis: int, by: Actor })
   | ChangeItems({ attempt: int, change: C::Change, items: Set[int], basis: int, by: Actor })
@@ -82,7 +84,7 @@ type Photos = {
   library: R::Read, locked: bool, paging: bool, more: bool, revision: int,
   tab: Tab, filter: Filter, query: str, person: int, album: int, density: Density,
   rows: Set[int], mine: Set[int], starred: Set[int], albums: Set[int], cameraItem: int,
-  selecting: bool, selected: Set[int], choosingImage: bool, imageChoice: int,
+  selecting: bool, selected: Set[int], cameraAlbum: int, cameraAlbumTicket: int, choosingImage: bool, imageChoice: int,
   shelf: AL::Shelf, job: C::Run,
 }
 
@@ -93,7 +95,7 @@ pure val initial: Photos = {
   library: R::unread, locked: false, paging: false, more: false, revision: 0,
   tab: Library, filter: Everything, query: "", person: 0, album: 0, density: Regular,
   rows: Set(), mine: Set(), starred: Set(), albums: Set(), cameraItem: 0,
-  selecting: false, selected: Set(), choosingImage: false, imageChoice: 0,
+  selecting: false, selected: Set(), cameraAlbum: 0, cameraAlbumTicket: 0, choosingImage: false, imageChoice: 0,
   shelf: AL::initial, job: C::initial,
 }
 
@@ -107,6 +109,22 @@ pure def fresh(s: Photos): bool =
   s.library.status == R::Loaded or (s.job.request.outcome != A::Unknown and s.shelf.write.outcome != A::Unknown)
 
 pure def still(s: Photos): bool = s.shelf.dialog == AL::NoDialog and not(C::running(s.job)) and fresh(s)
+
+pure def cameraVisit(s: Photos): bool =
+  s.visible and not(s.secure) and s.tab == Library and s.filter == Everything and s.album == 0
+
+pure def cameraAction(s: Photos, photo: int, revision: int): bool =
+  cameraVisit(s) and photo > 0 and photo == s.cameraItem and s.library.status == R::Loaded and revision == s.revision
+
+pure def clearCameraAlbum(s: Photos): Photos =
+  if (s.cameraAlbum == 0) s else { ...s, cameraAlbum: 0, shelf: AL::closeDialog(s.shelf) }
+
+pure def clearCameraVisit(s: Photos): Photos = clearCameraAlbum({ ...s, cameraItem: 0 })
+
+pure def dropCamera(s: Photos): List[Effect] =
+  if (s.cameraItem > 0) List(DropCamera({ photo: s.cameraItem })) else List()
+
+pure def albumItems(s: Photos): Set[int] = if (s.cameraAlbum == 0) s.selected else Set(s.cameraAlbum)
 ```
 
 ### What the simulator tries
@@ -115,6 +133,7 @@ pure def still(s: Photos): bool = s.shelf.dialog == AL::NoDialog and not(C::runn
 pure val photoValues = Set(1, 2, 3)
 pure val cameraItemValues = Set(0, 1, 2, 3)
 pure val albumValues = Set(1, 2)
+pure val choicesValues = Set(Set(), Set(1), Set(1, 2))
 pure val choiceValues = Set(0, 1, 2, 3)
 pure val rowsValues = Set(Set(), Set(1), Set(1, 2), Set(2, 3))
 pure val ownedValues = Set(Set(), Set(1), Set(3))
@@ -214,18 +233,19 @@ requests not yet sent; the grid is read again for Alpha's own captures.
 ```quint
 pure def fetching(page: bool, out: List[Effect], s: Photos): Done =
   val asked = R::ask(s.library)
+  val current = if (cameraVisit(s)) clearCameraAlbum(s) else clearCameraVisit(s)
   if (s.visible)
-    emit(out.append(Fetch({
+    emit((if (cameraVisit(s)) out else out.concat(dropCamera(s))).append(Fetch({
       ticket: asked.ticket, tab: s.tab, filter: s.filter, query: s.query, person: s.person, album: s.album,
       page: page, own: not(P::allows(s.access)), only: s.only,
-    })), { ...s, library: asked, paging: page, cameraItem: 0 })
+    })), { ...current, library: asked, paging: page })
   else emit(out, s)
 
 pure def listing(out: List[Effect], s: Photos): Done = fetching(false, out, s)
 
 pure def forgetting(albums: bool, s: Photos): Photos =
   {
-    ...s, rows: Set(), mine: Set(), starred: Set(), more: false, cameraItem: 0, selecting: false, selected: Set(), choosingImage: false,
+    ...s, rows: Set(), mine: Set(), starred: Set(), more: false, cameraItem: 0, cameraAlbum: 0, selecting: false, selected: Set(), choosingImage: false,
     shelf: AL::closeDialog(s.shelf), job: C::cancel(s.job),
     albums: if (albums) Set() else s.albums, album: if (albums) 0 else s.album, tab: if (albums) Library else s.tab,
   }
@@ -236,7 +256,10 @@ pure def accessIs(s: Photos, grant: P::Grant, videos: bool, by: Actor): Done =
   val access = P::observe(s.access, grant)
   val kinds = videos and P::allows(access)
   val told = { ...s, access: access, videos: kinds, filter: if (s.filter == Videos and not(kinds)) Everything else s.filter }
-  if (P::allows(access)) listing(List(), told) else listing(List(Revoke), forgetting(true, told))
+  val sameScope = access.grant == s.access.grant and kinds == s.videos
+  val current = if (sameScope) told else clearCameraVisit(told)
+  if (P::allows(access)) listing(if (sameScope) List() else dropCamera(s), current)
+  else listing(List(Revoke), forgetting(true, current))
 ```
 
 ### Losing access to the library closes the Viewer and Recently deleted
@@ -331,15 +354,15 @@ Without library access it must be Alpha’s own capture. This open never adds
 to the lock-screen session.
 
 ```quint
-pure def cameraScope(s: Photos): bool =
-  s.visible and not(s.secure) and not(s.paging) and s.tab == Library and s.filter == Everything and s.album == 0
+pure def cameraScope(s: Photos): bool = cameraVisit(s) and not(s.paging)
 
 pure def admittedCameraItem(s: Photos, cameraItem: int, owned: Set[int]): int =
-  if (cameraScope(s) and cameraItem > 0 and (P::allows(s.access) or owned.contains(cameraItem))) cameraItem else 0
+  if (cameraVisit(s) and (not(s.paging) or cameraItem == s.cameraItem) and cameraItem > 0
+    and (P::allows(s.access) or owned.contains(cameraItem))) cameraItem else 0
 
 pure def lawCameraItemRequiresItsCurrentScope(s: Photos, cameraItem: int, owned: Set[int]): bool =
   admittedCameraItem(s, cameraItem, owned) > 0 implies
-    (cameraScope(s) and (P::allows(s.access) or owned.contains(cameraItem)))
+    (cameraVisit(s) and (not(s.paging) or cameraItem == s.cameraItem) and (P::allows(s.access) or owned.contains(cameraItem)))
 
 pure def canListed(s: Photos, ticket: int, by: Actor): bool = by == Phone and s.visible and R::canAnswer(s.library, ticket)
 
@@ -354,12 +377,14 @@ pure def listed(s: Photos, ticket: int, ok: bool, rows: Set[int], owned: Set[int
   val own = (if (s.paging) s.mine.union(owned) else owned).intersect(whole)
   val stars = (if (s.paging) s.starred.union(starred) else starred).intersect(whole)
   val kept = s.selected.intersect(whole)
-  if (not(ok)) emit(List(), answered)
+  val capture = admittedCameraItem(s, cameraItem, owned)
+  val expired = if (s.cameraItem == capture) List() else dropCamera(s)
+  if (not(ok)) emit(dropCamera(s), clearCameraVisit(answered))
   else if (s.paging and (revision != s.revision or not(allOlder(rows, s.rows)))) listing(List(), answered)
-  else emit(List(), {
-    ...answered, rows: whole, mine: own, starred: stars, cameraItem: admittedCameraItem(s, cameraItem, owned), albums: if (items) s.albums else shown,
+  else emit(expired, {
+    ...answered, rows: whole, mine: own, starred: stars, cameraItem: capture, albums: if (items) s.albums else shown,
     more: more and items, revision: revision, selected: kept, selecting: s.selecting and items,
-    shelf: if (s.shelf.dialog == AL::ChooseAlbum and kept.size() == 0) AL::closeDialog(s.shelf) else s.shelf,
+    shelf: if (s.shelf.dialog == AL::ChooseAlbum and kept.size() == 0 and s.cameraAlbum == 0) AL::closeDialog(s.shelf) else s.shelf,
   })
 
 pure def stepAPageKeepsWhatWasListed(before: Photos, via: str, after: Photos): bool =
@@ -379,8 +404,8 @@ Photos then lists nothing and says "Unlock the phone, then reopen Photos".
 ```quint
 pure def canLockedOut(s: Photos, ticket: int, by: Actor): bool = canListed(s, ticket, by)
 
-pure def lockedOut(s: Photos, ticket: int, by: Actor): Photos =
-  { ...forgetting(false, s), library: R::answer(s.library, false), locked: true }
+pure def lockedOut(s: Photos, ticket: int, by: Actor): Done =
+  emit(dropCamera(s), { ...forgetting(false, s), library: R::answer(s.library, false), locked: true })
 
 pure def sometimesLocked(s: Photos): bool = s.locked and s.visible
 ```
@@ -613,9 +638,15 @@ pure def shareSelected(s: Photos, by: Actor): Photos = starting(C::Share, s.sele
 
 ### The Viewer's favourite, share or delete of the item open is a change of that one item, at the revision it showed
 
+The exact capture admitted from Camera can receive the Viewer's owner
+actions during that visit. It remains separate from the items the grid or
+the agent can select. Each library read reconfirms the capture’s current
+scope and unchanged content before another action. An unavailable or
+changed capture closes its Viewer.
+
 ```quint
 pure def canRequested(s: Photos, change: C::Change, photo: int, revision: int, by: Actor): bool =
-  unlocked(s) and still(s) and s.rows.contains(photo) and change != C::Restore
+  unlocked(s) and still(s) and (s.rows.contains(photo) or cameraAction(s, photo, revision)) and change != C::Restore
     and C::canStart(s.job, change, Set(photo), revision, by)
 
 pure def requested(s: Photos, change: C::Change, photo: int, revision: int, by: Actor): Photos =
@@ -641,7 +672,8 @@ pure def canChanged(s: Photos, attempt: int, done: Set[int], stale: Set[int], by
 
 pure def changed(s: Photos, attempt: int, done: Set[int], stale: Set[int], declined: bool, known: bool, by: Actor): Done =
   val r = C::answered(s.job, attempt, done, stale, declined, known)
-  if (C::running(r)) emit(List(), { ...s, job: r }) else listing(List(), { ...s, job: r })
+  val result = if (known and s.job.change == C::Trash and done.contains(s.cameraItem)) clearCameraVisit(s) else s
+  if (C::running(r)) emit(List(), { ...result, job: r }) else listing(List(), { ...result, job: r })
 ```
 
 ### The owner stops the requests of a run not yet sent
@@ -682,7 +714,9 @@ pure def stepChangesAreTheOwners(before: Photos, via: str, after: Photos, out: L
       (Set("trashSelected", "favouriteSelected", "shareSelected").contains(via)
         and after.job.left.subseteq(before.selected) and before.selected.subseteq(after.job.left) and after.job.basis == before.revision)
       or (via == "confirmProposal" and after.job.left.subseteq(before.rows) and after.job.basis == before.revision)
-      or (via == "requested" and after.job.left.size() == 1 and after.job.left.subseteq(before.rows))
+      or (via == "requested" and after.job.left.size() == 1
+        and (after.job.left.subseteq(before.rows)
+          or (after.job.left.contains(before.cameraItem) and cameraAction(before, before.cameraItem, after.job.basis))))
       or (via == "undoTrash" and after.job.change == C::Restore))))
 
 pure def alwaysRunsAreTheOwners(s: Photos): bool =
@@ -740,15 +774,45 @@ pure def chooseAlbum(s: Photos, by: Actor): Photos = { ...s, shelf: AL::openDial
 
 pure def canCloseDialog(s: Photos, by: Actor): bool = by == Owner and AL::canCloseDialog(s.shelf)
 
-pure def closeDialog(s: Photos, by: Actor): Photos = { ...s, shelf: AL::closeDialog(s.shelf) }
+pure def closeDialog(s: Photos, by: Actor): Photos = { ...s, cameraAlbum: 0, shelf: AL::closeDialog(s.shelf) }
 ```
 
-### A dialog about an album is about the album showing, and "Add to album" is about a selection
+### The owner can add the Camera capture in the Viewer to an album
+
+The owner opens the album chooser for the exact Camera capture in the
+Viewer. Photos closes Info first and reads its current album choices for
+that chooser's ticket. Closing the chooser or refreshing the library clears
+its capture subject.
+
+```quint
+pure def canChooseCameraAlbum(s: Photos, photo: int, revision: int, by: Actor): bool =
+  by == Owner and unlocked(s) and still(s) and not(s.selecting) and cameraAction(s, photo, revision)
+    and AL::canOpenDialog(s.shelf, AL::ChooseAlbum, 0)
+
+pure def chooseCameraAlbum(s: Photos, photo: int, revision: int, by: Actor): Done =
+  val ticket = s.cameraAlbumTicket + 1
+  emit(List(ReadCameraAlbums({ photo: photo, ticket: ticket })),
+    { ...s, cameraAlbum: photo, cameraAlbumTicket: ticket, shelf: AL::openDialog(s.shelf, AL::ChooseAlbum, 0) })
+
+pure def canCameraAlbumsLoaded(s: Photos, photo: int, ticket: int, by: Actor): bool =
+  by == Phone and unlocked(s) and s.cameraAlbum == photo and photo > 0 and s.cameraAlbumTicket == ticket
+    and (s.shelf.dialog == AL::ChooseAlbum or s.shelf.dialog == AL::NewAlbum)
+
+pure def cameraAlbumsLoaded(s: Photos, photo: int, ticket: int, choices: Set[int], by: Actor): Photos =
+  { ...s, albums: choices }
+
+pure def sometimesCameraAlbum(s: Photos): bool = s.cameraAlbum > 0 and s.shelf.dialog == AL::ChooseAlbum
+```
+
+### A dialog about an album is about the album showing, and "Add to album" has a subject
 
 ```quint
 pure def alwaysDialogNamesItsSubject(s: Photos): bool =
   ((s.shelf.dialog == AL::RenameAlbum or s.shelf.dialog == AL::DeleteAlbum) implies (s.shelf.target == s.album and s.album != 0))
-    and (s.shelf.dialog == AL::ChooseAlbum implies (s.selecting and s.selected.size() > 0))
+    and (s.shelf.dialog == AL::ChooseAlbum implies ((s.selecting and s.selected.size() > 0) or s.cameraAlbum != 0))
+    and (s.cameraAlbum != 0 implies (s.cameraAlbum == s.cameraItem and not(s.selecting) and unlocked(s)
+      and s.library.status == R::Loaded
+      and (s.shelf.dialog == AL::ChooseAlbum or s.shelf.dialog == AL::NewAlbum)))
     and AL::alwaysDialogNamesItsSubject(s.shelf)
 ```
 
@@ -766,18 +830,18 @@ pure def writing(change: AL::AlbumChange, album: int, name: str, letters: int, i
 
 pure def canSaveAlbum(s: Photos, name: str, letters: int, by: Actor): bool =
   by == Owner and unlocked(s) and fresh(s)
-    and ((s.shelf.dialog == AL::NewAlbum and AL::canWrite(s.shelf, AL::Create, 0, name, letters, s.selected.size() > 0, false, s.albums.size()))
+    and ((s.shelf.dialog == AL::NewAlbum and AL::canWrite(s.shelf, AL::Create, 0, name, letters, albumItems(s).size() > 0, false, s.albums.size()))
       or (s.shelf.dialog == AL::RenameAlbum and AL::canWrite(s.shelf, AL::Rename, s.shelf.target, name, letters, false, false, s.albums.size())))
 
 pure def saveAlbum(s: Photos, name: str, letters: int, by: Actor): Done =
-  if (s.shelf.dialog == AL::NewAlbum) writing(AL::Create, 0, name, letters, s.selected, false, by, s)
+  if (s.shelf.dialog == AL::NewAlbum) writing(AL::Create, 0, name, letters, albumItems(s), false, by, s)
   else writing(AL::Rename, s.shelf.target, name, letters, Set(), false, by, s)
 
 pure def canAddTo(s: Photos, album: int, by: Actor): bool =
-  by == Owner and unlocked(s) and fresh(s) and s.selecting and s.albums.contains(album)
-    and AL::canWrite(s.shelf, AL::Add, album, "", 0, s.selected.size() > 0, false, s.albums.size())
+  by == Owner and unlocked(s) and fresh(s) and (s.selecting or s.cameraAlbum != 0) and s.albums.contains(album)
+    and AL::canWrite(s.shelf, AL::Add, album, "", 0, albumItems(s).size() > 0, false, s.albums.size())
 
-pure def addTo(s: Photos, album: int, by: Actor): Done = writing(AL::Add, album, "", 0, s.selected, false, by, s)
+pure def addTo(s: Photos, album: int, by: Actor): Done = writing(AL::Add, album, "", 0, albumItems(s), false, by, s)
 
 pure def canConfirmDelete(s: Photos, by: Actor): bool =
   by == Owner and unlocked(s) and fresh(s) and AL::canWrite(s.shelf, AL::Delete, s.shelf.target, "", 0, false, false, s.albums.size())
@@ -799,9 +863,9 @@ pure def stepAlbumChangesCarryTheSelection(before: Photos, via: str, after: Phot
     | WriteAlbum(w) =>
         w.by == Owner and w.basis == before.revision and fresh(before) and unlocked(before)
           and ((w.change == AL::Add or w.change == AL::Remove or (w.change == AL::Create and via != "confirmAlbum"))
-            implies (w.items.subseteq(before.selected) and before.selected.subseteq(w.items)))
+            implies (w.items.subseteq(albumItems(before)) and albumItems(before).subseteq(w.items)))
           and (via == "confirmAlbum" implies (w.change == AL::Create and w.items.size() > 0 and w.items.subseteq(before.rows)))
-          and (w.change == AL::Add implies (before.albums.contains(w.album) and before.selecting and w.items.size() > 0))
+          and (w.change == AL::Add implies (before.albums.contains(w.album) and (before.selecting or before.cameraAlbum != 0) and w.items.size() > 0))
           and (w.change == AL::Remove implies (w.album == before.album and before.selecting and w.items.size() > 0))
           and (w.change == AL::Delete implies (before.shelf.dialog == AL::DeleteAlbum and w.album == before.album))
     | _ => true

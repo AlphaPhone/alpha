@@ -77,6 +77,7 @@ module capacitor {
     stopLiveCapture(options: { captureId: string; discard: boolean }): Promise<{ captureId: string; serverClosed: boolean }>
     synthesizeLocal(options: { requestId: string; text: string; append?: boolean; replace?: boolean }): Promise<{ playbackId?: string }>
     play(options: { playbackId: string; replace?: boolean }): Promise<unknown>
+    setSpeechOutputMuted(options: { muted: boolean }): Promise<void>
     stopPlayback(options: { requestId?: string }): Promise<unknown>
     cancel(options: { requestId: string }): Promise<unknown>
     startRecording(options: Record<string, never>): Promise<{ recordingId?: string }>
@@ -179,6 +180,7 @@ export service VoiceBridge {
   openMic(session: number, network: boolean): boolean!VoiceBridgeFailed
   closeMic(session: number): void!VoiceBridgeFailed
   playSentence(session: number, turn: number, text: string, append: boolean): void!VoiceBridgeFailed
+  setSpeakerMuted(session: number, muted: boolean): boolean!!
   hush(turn: number): void!!
   canRead(): boolean!!
   readAloud(ticket: number, text: string): Stream.Stream<ReadingEvent>
@@ -323,6 +325,8 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   let cloudCapture: { close(): Promise<void>; cancel(): Promise<void> } | undefined
   let cloudSpeechAbort: AbortController | undefined
   let activePlaybackRequest: string | undefined
+  const speakerLock = try Semaphore.make(1)
+  let localSpeakerOwner: number | undefined
   const recordingLock = try Semaphore.make(1)
   let recording: DictationClip | undefined
   let openingRecording: Map<string, RecordingStop> | undefined
@@ -407,6 +411,19 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     })
   }
 
+  // spec/app/voice/index.md, "Speaker mute is offered after the current speech bridge confirms gain control"
+  effect function restoreLocalOutput(retiring: (owner: number) => boolean): boolean!! {
+    return try speakerLock.withPermit(Effect.uninterruptible(effect {
+      if (localSpeakerOwner === undefined || !retiring(localSpeakerOwner)) return true
+      const restored = effect {
+        try tryPromise(() => localPlugin().setSpeechOutputMuted({ muted: false }))
+        return true
+      } catch () => false
+      if (restored) localSpeakerOwner = undefined
+      return restored
+    }))
+  }
+
   effect function openMic(session: number, network: boolean): boolean!VoiceBridgeFailed {
     const reopen = activeSession === session
     activeSession = session
@@ -443,6 +460,9 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     if (!registered(LOCAL_PLUGIN)) throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "no-voice-plugin" })
     const probed = cachedStatus ?? (try probeStatus(true))
     if (!probed.liveCapture) throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "resident-speech-transport-unavailable" })
+    if (!(try restoreLocalOutput((owner) => owner !== session))) {
+      throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "speaker-reset-unconfirmed" })
+    }
     if (activeSession !== session) throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "session-changed" })
     const capture: LiveCapture = { session, captureId: fresh(), listening: false, echoCancelled: false }
     nativeCapture = capture
@@ -516,6 +536,29 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     }
   }
 
+  effect function setSpeakerMuted(session: number, muted: boolean): boolean!! {
+    if (session !== activeSession) return false
+    const cloud = cloudStream
+    if (cloud !== undefined) {
+      const set = effect {
+        try tryPromise(() => cloud.setOutputMuted(muted))
+        return activeSession === session && cloudStream === cloud
+      } catch () => false
+      return set
+    }
+    if (!registered(LOCAL_PLUGIN)) return false
+    return try speakerLock.withPermit(Effect.uninterruptible(effect {
+      if (activeSession !== session || cloudStream !== undefined) return false
+      if (muted) localSpeakerOwner = session
+      const set = effect {
+        try tryPromise(() => localPlugin().setSpeechOutputMuted({ muted }))
+        return true
+      } catch () => false
+      if (set && !muted) localSpeakerOwner = undefined
+      return set && activeSession === session
+    }))
+  }
+
   effect function hush(_turn: number): void!! {
     cloudSpeechAbort?.abort()
     cloudSpeechAbort = undefined
@@ -546,7 +589,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   // spec/app/voice/output.md, "Only the current reading's audio plays, and it ends once, as its own answer says"
   function readAloud(ticket: number, text: string): Stream.Stream<ReadingEvent> {
     return Stream.callback<ReadingEvent>((queue) => effect {
-      if (!registered(LOCAL_PLUGIN) || ticket <= stoppedThrough) {
+      if (!registered(LOCAL_PLUGIN) || !(try restoreLocalOutput(() => true)) || ticket <= stoppedThrough) {
         Queue.offerUnsafe(queue, { kind: "ready", ok: false })
         Queue.endUnsafe(queue)
         return
@@ -603,7 +646,8 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
       activePlaybackRequest = undefined
       const stopPlay = try (tryPromise(() => localPlugin().stopPlayback(req === undefined ? {} : { requestId: req })) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))
       const stopCap = try (stopNativeCapture(session, true) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))
-      confirmed = stopPlay && stopCap && confirmed
+      const restored = try restoreLocalOutput((owner) => owner === session)
+      confirmed = stopPlay && stopCap && restored && confirmed
     }
     return confirmed
   }
@@ -635,6 +679,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     openMic,
     closeMic,
     playSentence,
+    setSpeakerMuted,
     hush,
     canRead: () => sync(() => registered(LOCAL_PLUGIN)),
     readAloud,
@@ -725,6 +770,7 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
     openMic: () => Effect.fail(new VoiceBridgeFailed({ method: "openMic", cause: "browser-no-native-voice" })),
     closeMic: () => Effect.void,
     playSentence: () => Effect.void,
+    setSpeakerMuted: () => succeed(false),
     hush: () => Effect.void,
     canRead: () => succeed(false),
     readAloud: () => Stream.succeed<ReadingEvent>({ kind: "ready", ok: false }),

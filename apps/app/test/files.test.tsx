@@ -553,7 +553,7 @@ describe("Files on a phone", () => {
     await press("Internal storage");
     await press("Download");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 2);
-    const now = () => runtime.runSync(Browser.use((m) => m.get()));
+    const now = () => runtime.runSync(Effect.flatMap(Browser, (machine) => machine.get()));
     // spec/app/files/index.md, "The phone offers Files to an agent that takes Files' operations, and naming files by their place among the results shown only beside them; a request the phone cannot take is never shown for approval"
     expect(await runtime.runPromise(offer)).toEqual({ operations: true, positions: true });
 

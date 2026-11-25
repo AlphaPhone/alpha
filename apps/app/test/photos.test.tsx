@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { Effect } from "effect";
 import { afterEach, expect, it } from "vitest";
 import { Machine as Library } from "../gen/app__photos.effect.vibe";
 import { Machine as Viewer } from "../gen/app__photos__viewer.effect.vibe";
@@ -136,7 +137,7 @@ it('Offer the original photo for Inbox to review (spec/app/photos/viewer.md, "St
   await until(alpha, runtime, Viewer, (state) => state.read.status === "Loaded");
   await photoAction("Email");
   await until(alpha, letters, Adding, (state) => state.thing !== 0);
-  expect(letters.runSync(Incoming.use((incoming) => incoming.file()))).toEqual({
+  expect(letters.runSync(Incoming.use((incoming) => Effect.sync(() => incoming.file())))).toEqual({
     source: "Photos", attached: { name: source.name, mimeType: "image/png", size: source.size, data: dataBase64 },
   });
   expect([world.inbox.changes, world.inbox.attached, world.inbox.drafts.size]).toEqual([[], [], 0]);
