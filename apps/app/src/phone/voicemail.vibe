@@ -5,6 +5,7 @@ import { Machine as PhoneMachine, liveCall } from "../../gen/app__phone.effect.v
 import * as Voicemail from "../../gen/app__phone__voicemail.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__phone__voicemail.effect.vibe"
 import { type Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
+import { recognizesVoicemail, transcribeVoicemail } from "../platform/voice.vibe"
 import { type Job, answer, applying, contained, following, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 
@@ -76,7 +77,30 @@ effect function fetched(ticket: number): Event!!(Telephony | Voicemails | Voicem
   const state = try (try Voicemail.Machine).get()
   const current = (try store.get()).open
   if (state.open && state.audio.status === "Loading" && state.audio.ticket === ticket && Option.isSome(open) && open.value.id === current) try store.set({ audio: source })
-  return { type: "audioFetched", ticket, ok: source !== "", recognizer: false }
+  return { type: "audioFetched", ticket, ok: source !== "", recognizer: source !== "" && recognizesVoicemail() }
+}
+
+// spec/app/phone/voicemail.md, "Only the open voicemail's newest transcript is shown"
+effect function transcribed(ticket: number): Event!!(Voicemails | Voicemail.Machine) {
+  const store = try Voicemails
+  const machine = try Voicemail.Machine
+  const current = (state: Voicemail.Voicemail) => state.front && state.open && !state.carrierText
+    && state.transcript.ticket === ticket && state.transcript.status === "Loading"
+  const open = try opened()
+  if (Option.isNone(open) || open.value.carrierTranscript !== null || !current(try machine.get())) {
+    return { type: "transcribed", ticket, ok: false }
+  }
+  const id = open.value.id
+  const ended = Stream.runHead(Stream.filter(machine.changes, (state) => !current(state)))
+  const text = try.race [
+    Effect.orElseSucceed(transcribeVoicemail(id), () => ""),
+    Effect.as(ended, ""),
+  ]
+  const selected = try opened()
+  const allowed = current(try machine.get()) && Option.isSome(selected)
+    && selected.value.id === id && selected.value.carrierTranscript === null
+  if (allowed && text !== "") try store.set({ transcript: text })
+  return { type: "transcribed", ticket, ok: allowed && text !== "" }
 }
 
 /** The native receipt owns the outcome, even if the staged item is already hidden from the list. */
@@ -144,7 +168,7 @@ function carry(fx: Out): Job<Event, Telephony | Voicemails | PhoneMachine | Voic
   return match (fx) {
     when { tag: "ReadList", let ticket, let refresh }: answer("list", listed(ticket, refresh), { type: "listed", ticket, ok: false, carrier: false, count: 0, unheard: 0, stillOpen: false });
     when { tag: "FetchAudio", let ticket }: answer("audio", fetched(ticket), { type: "audioFetched", ticket, ok: false, recognizer: false });
-    when { tag: "TranscribeOnPhone", let ticket }: answer("transcript", succeed<Event>({ type: "transcribed", ticket, ok: false }), { type: "transcribed", ticket, ok: false });
+    when { tag: "TranscribeOnPhone", let ticket }: answer("transcript", transcribed(ticket), { type: "transcribed", ticket, ok: false });
     when { tag: "MarkHeard" }: run("heard", effect {
       const open = try opened()
       if (Option.isSome(open)) try ignore(telephony("markVoicemailHeard", (c) => c.phone.markVoicemailHeard(open.value.id)))
