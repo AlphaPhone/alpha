@@ -138,7 +138,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect(visited).toHaveBeenCalledWith("https://northpoint.test/room", "_blank", "noopener,noreferrer");
 
     // spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"
-    await action("Open agenda.txt");
+    await press(/^Open\s*agenda\.txt/);
     await until(alpha, runtime, Shown, (s) => s.attachment === 2);
     expect([world.inbox.attachmentReads, document.querySelector("[aria-label='Attachment contents']")]).toEqual([[], null]);
     await confirm("Open");
