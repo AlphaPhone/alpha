@@ -63,6 +63,11 @@ const search = (text: string) => fill("Search mail", text).then(() => document.q
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   it("See my mail (spec/app/inbox/index.md, \"Story: See my mail\")", async () => {
     const world = { ...scene(), phone };
+    const attachmentText = '<strong data-attachment-fixture>Lunch agenda</strong>';
+    const lunch = world.inbox.mail.find(({ card }) => card.id === "g1");
+    if (!lunch) throw new Error("Missing lunch fixture");
+    lunch.files = [{ partId: "1", name: "agenda.txt", mimeType: "text/plain", size: new TextEncoder().encode(attachmentText).byteLength, supported: true }];
+    lunch.attachmentText = { "1": attachmentText };
     for (let at = 5; at <= 30; at += 1) world.inbox.mail.push(letter(at, `Newsletter ${at}`, ["INBOX"]));
     const earlierLunch = letter(0, "Earlier lunch plan", ["SENT"], "Could you make it Friday?");
     world.inbox.mail.push({ ...earlierLunch, card: { ...earlierLunch.card, threadId: "t1" } });
@@ -127,6 +132,17 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Shown, (s) => s.link === 0);
     step("9");
     expect(visited).toHaveBeenCalledWith("https://cafe.test/menu", "_blank", "noopener,noreferrer");
+
+    // spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"
+    await action("Open agenda.txt");
+    await until(alpha, runtime, Shown, (s) => s.attachment === 1);
+    expect([world.inbox.attachmentReads, document.querySelector("[aria-label='Attachment contents']")]).toEqual([[], null]);
+    await confirm("Open");
+    await until(alpha, runtime, Shown, (s) => s.file.outcome === "Confirmed");
+    const preview = document.querySelector("[aria-label='Attachment contents']");
+    expect([world.inbox.attachmentReads, preview?.textContent, preview?.querySelector("strong")]).toEqual([["g1/1"], attachmentText, null]);
+    await confirm("Close");
+    await until(alpha, runtime, Shown, (s) => s.attachment === 0);
 
     // spec/app/inbox/marking.md, "The owner marks a message read or unread; while another mark is in flight the owner is told it is still in progress, and a message whose last mark was unconfirmed is marked again only after the list was read afresh"
     await menu("Mark as unread");
