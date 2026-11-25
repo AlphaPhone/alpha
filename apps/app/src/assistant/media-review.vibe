@@ -160,7 +160,7 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
     case "files_open": return { title: "Open a file", detail: "path" in value ? value.path : `Item ${value.shown} in the current list` }
     case "files_folder_create": return { title: "Create a folder", detail: value.name }
     case "files_share": return { title: "Share a file", detail: "paths" in value ? value.paths.join(", ") : "Open Android sharing" }
-    case "files_move": return { title: "Move a file", detail: "paths" in value ? `${value.paths.join(", ")} → ${value.dest}` : value.dest }
+    case "files_move": return { title: "Move a file", detail: `${value.paths.join(", ")} → ${value.dest}` }
     case "files_trash": return { title: "Move a file to Trash", detail: "paths" in value ? value.paths.join(", ") : "Review the file in the current list" }
   }
 }
