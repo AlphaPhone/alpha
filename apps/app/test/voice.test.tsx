@@ -954,12 +954,21 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.route.account === "SignedOut" && !s.route.consent);
   });
 
-  // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
-  it("a spoken turn tells the agent the same screen as typing and follows the current prepared view with Talk still open", async () => {
+  const openPhoneTalk = async (talking: boolean) => {
     const world = { ...scene(), phone: true, signedIn: false };
     const { alpha, area } = await onComposer(world);
     await drawnUntil(alpha, area, Conversation, (s) => s.ready && s.observing);
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
+    if (talking) {
+      await press("Talk");
+      await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
+    }
+    return { world, alpha, area };
+  };
+
+  // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
+  it("a spoken turn tells the agent the same screen a typed turn sent at that moment does, location and view claim included", async () => {
+    const { world, alpha, area } = await openPhoneTalk(false);
     world.ask.metadata = [];
 
     await fill("Message Alpha", "What is on my screen?");
@@ -1515,20 +1524,9 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect(world.ask.said).toEqual([]);
   });
 
-  const startPhoneTalk = async () => {
-    const world = { ...scene(), phone: true, signedIn: false };
-    const { alpha } = await open(world, talkMounts);
-    const area = assistant.runtime(alpha);
-    await drawnUntil(alpha, area, Conversation, (s) => s.ready && s.observing);
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
-    await press("Talk");
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
-    return { world, alpha, area };
-  };
-
   // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"; spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/voice/index.md, "Voice keeps talking after a navigation only when it is the one the conversation asked for; any other ends it"
   it("opens a spoken reply's prepared view through voice without ending the active conversation", async () => {
-    const { world, alpha, area } = await startPhoneTalk();
+    const { world, alpha, area } = await openPhoneTalk(true);
 
     world.ask.nextReplyChunks = ["Opening Calendar."];
     world.ask.nextActions = (metadata) => {
@@ -1547,7 +1545,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
 
   // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically"; spec/app/voice/index.md, "Alpha is speaking exactly while sentences of the current turn are queued"; spec/app/voice/index.md, "Interrupt stops Alpha speaking and listens for the next turn"
   it("ignores stale transcripts outside listening and prevents an interrupted turn from corrupting the next turn", async () => {
-    const { world, alpha, area } = await startPhoneTalk();
+    const { world, alpha, area } = await openPhoneTalk(true);
 
     world.ask.acknowledgment = "Checking.";
     world.ask.holdAfterTools = true;

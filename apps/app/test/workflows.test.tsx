@@ -280,6 +280,16 @@ describe("Workflows", () => {
     expect(world.workflows.prompts.get("weekly-prompt")?.instructions).toBe("Changed in another session.");
   });
 
+  const openMonthlyStatement = async (world: ReturnType<typeof scene>, withAssistant = false) => {
+    const alpha = await openWorkflows(world, withAssistant);
+    const area = workflows.runtime(alpha);
+    await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
+    await choose("Monthly statement");
+    await until(alpha, area, Definition, (state) => state.detail.status === "Loaded");
+    await until(alpha, area, Runs, (state) => state.reading.status === "Loaded");
+    return { alpha, area };
+  };
+
   it('Runs the reviewed version, follows its approval and opens its output (spec/app/workflows/runs.md, "Story: Run a workflow now"; spec/app/workflows/sheet.md, "Story: Read a run\'s sheet"; spec/app/workflows/approvals.md, "Story: Answer a run\'s approval on the phone"; spec/app/workflows/approvals.md, "Story: Confirm exactly what this workflow does on my phone"; spec/app/workflows/approvals.md, "Story: Open the run a notice names"; spec/app/workflows/sheet.md, "Story: Open a finished workflow from its notification")', async () => {
     // spec/app/assistant/index.md, "Stored attachments are posted with their message, and a message whose attachments could not be stored never left": the WebView's IndexedDB keeps the run attached to Ask Alpha.
     vi.stubGlobal("indexedDB", memoryIndexedDB());
@@ -539,12 +549,7 @@ describe("Workflows", () => {
   // spec/app/workflows/request.md, "The owner can let go of a request only once its record was checked, and it is then never sent again"; spec/app/workflows/runs.md, "Story: Run a workflow now"; spec/app/workflows/index.md, "A change offered again is reviewed again before the same request is sent, or let go once its record was read"; spec/app/workflows/builder.md, "Story: Save a workflow on the agent once"
   it("letting go clears retained run, lifecycle, and authoring keys so a new request succeeds, and lifecycle offers resend", async () => {
     const world = scene();
-    const alpha = await openWorkflows(world);
-    const area = workflows.runtime(alpha);
-    await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
-    await choose("Monthly statement");
-    await until(alpha, area, Definition, (state) => state.detail.status === "Loaded");
-    await until(alpha, area, Runs, (state) => state.reading.status === "Loaded");
+    const { alpha, area } = await openMonthlyStatement(world);
 
     const scope = await area.runPromise(ownerAt());
     const runKey = `alpha/workflows/run/${encodeURIComponent(scope)}/${encodeURIComponent("monthly-statement")}`;
@@ -577,8 +582,15 @@ describe("Workflows", () => {
     ])));
     await drawn(() => undefined);
     expect(button("Review the same change")).toBeDefined();
+    await press("Review the same change");
+    await until(alpha, area, Definition, (state) => state.review.showing);
+    await pressOnTop("Send again");
+    await until(alpha, area, Definition, (state) => state.change.again && state.change.attempt.outcome === "Sent" && !state.change.live);
+    const retainedAfterResend = await area.runPromise(Effect.flatMap(KeyValueStore.KeyValueStore, (store) => store.get(changeKey)));
+    expect(retainedAfterResend).toContain('"mutation":"m-old"');
     await press("Allow a different change");
     await until(alpha, area, Definition, (state) => !state.change.offered);
+    await vi.waitFor(async () => expect(await area.runPromise(Effect.flatMap(KeyValueStore.KeyValueStore, (store) => store.get(changeKey)))).toBeUndefined());
     await area.runPromise(Effect.flatMap(Definition, (m) => m.send({ type: "flip", wanted: "TurnOn" })));
     await until(alpha, area, Definition, (state) => state.change.attempt.id === 2 && state.change.attempt.outcome !== "Recorded" && !state.change.live);
     const afterChange = await area.runPromise(Effect.flatMap(Definition, (m) => m.get()));

@@ -87,7 +87,7 @@ effect function changeContext() {
   const definition = try DefinitionWords
   const rows = try Rows
   const store = try KeyValueStore.KeyValueStore
-  const { workflow } = try WorkflowsApi
+  const { workflow, request } = try WorkflowsApi
   const state = try machine.get()
   return { definition, rows, store, workflow, state, machine }
 }
@@ -103,7 +103,7 @@ effect function changed(id: number, change: Change, version: number, name: numbe
   const kept = previous === undefined || previous === "unreachable" ? undefined : (Schema.decodeUnknownEffect(HeldChange)(previous) catch () => undefined)
   if (previous === "unreachable") return { type: "changeUnanswered" }
   if (state.change.again) {
-    if (change !== "TurnOn" && change !== "TurnOff" && (kept === undefined || kept.id !== id || kept.workflowId !== current.id || kept.version !== current.versionId)) {
+    if (change !== "TurnOn" && change !== "TurnOff" && (kept === undefined || kept.id !== id || kept.workflowId !== current.id || kept.version !== current.versionId || kept.change !== change)) {
       return { type: "changeUnanswered" }
     }
   } else if (previous !== undefined && (kept === undefined || kept.id >= id)) {
@@ -120,16 +120,31 @@ effect function changed(id: number, change: Change, version: number, name: numbe
       if (change === "Rename") {
         const text = try definition.name(state.target)
         if (text.length !== name) return "refused"
-        try workflow.changeMetadata(current.id, current.versionId, text, current.description, keep)
+        if (state.change.again && kept !== undefined) {
+          const trimmed = text.trim()
+          if (trimmed === "" || trimmed.length > 200 || current.description.length > 4000) return "refused"
+          try request(`/api/workflow/workflows/${encodeURIComponent(current.id)}/metadata`, { mutationId: kept.mutation, expectedVersionId: current.versionId, name: trimmed, description: current.description })
+          const confirmed = try workflow.reconcileMetadata(current.id, current.versionId, kept.mutation)
+          if (confirmed === null || confirmed.name !== trimmed || confirmed.description !== current.description) return "unknown"
+        } else {
+          try workflow.changeMetadata(current.id, current.versionId, text, current.description, keep)
+        }
       } else {
-        try workflow.lifecycle(current.id, current.versionId, change === "Remove" ? "remove" : "restore", keep)
+        const operation = change === "Remove" ? "remove" as const : "restore" as const
+        if (state.change.again && kept !== undefined) {
+          try request(`/api/workflow/workflows/${encodeURIComponent(current.id)}/lifecycle`, { mutationId: kept.mutation, expectedVersionId: current.versionId, operation })
+          const confirmed = try workflow.reconcileLifecycle(current.id, current.versionId, kept.mutation, operation)
+          if (confirmed === null) return "unknown"
+        } else {
+          try workflow.lifecycle(current.id, current.versionId, operation, keep)
+        }
       }
       try ignore(store.remove(key))
     }
     return "applied"
   } catch (failure) => declined(failure) ? "refused" : "unknown"
   if ((ownerAt() catch () => "") !== scope || outcome === "unknown") return { type: "changeUnanswered" }
-  if (outcome === "refused") try ignore(store.remove(key))
+  if (outcome === "refused" && !state.change.again) try ignore(store.remove(key))
   try refresh()
   return { type: "changeAnswered", id, applied: outcome === "applied" }
 }
