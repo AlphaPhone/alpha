@@ -49,8 +49,9 @@ export function Ask({ runtime }: AskProps) {
         onSubmit={(event) => {
           event.preventDefault();
           if (!can(say)) return;
-          void send(say);
-          setDraft("");
+          void send(say).then((outcome) => {
+            if (outcome._tag === "Success") setDraft("");
+          });
         }}
       >
         <Input aria-label="Ask Alpha" placeholder="Ask Alpha" value={draft} onChange={(event) => setDraft(event.target.value)} />

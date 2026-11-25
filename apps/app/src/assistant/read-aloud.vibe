@@ -1,11 +1,13 @@
 // spec/app/voice/output.md, "Story: Listen to a message, a note or a page"; spec/app/voice/output.md, "Stopping, or losing what is read (another conversation, another screen, a hidden page, a closed chat), stops the reading"
 import * as Chats from "../../gen/app__assistant__chats.effect.vibe"
+import { Machine as Phone } from "../../gen/app__phone.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
 import * as Speaker from "../../gen/app__voice__output.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import { VoiceBridge } from "../platform/voice.vibe"
 import { type Job, answer, contained, hearing, reacting, started, stream, together } from "../runtime/reactor.vibe"
+import { speakableText, spokenForm } from "../voice/voice.vibe"
 import { Talk } from "./talk.vibe"
 import { wordsOf } from "./words.ts"
 
@@ -30,11 +32,14 @@ function prepare(ticket: number, item: number): Stream.Stream<Speaker.Event, nev
     const conversation = (try (try Chats.Machine).get()).chosen
     const line = board.line(conversation, item)
     const bridge = try VoiceBridge
-    const audio = line === undefined || line.mine ? Stream.succeed<Speaker.Event>({ type: "ready", ticket, ok: false })
-      : Stream.map(bridge.readAloud(ticket, wordsOf(line)), (event): Speaker.Event => ({ type: event.kind, ticket, ok: event.ok }))
-    return Stream.concat(audio, Stream.fromEffect(effect {
+    const spoken = line === undefined || line.mine ? "" : spokenForm(speakableText(wordsOf(line))).trim()
+    const audio = spoken === "" ? Stream.succeed<Speaker.Event>({ type: "ready", ticket, ok: false })
+      : Stream.map(bridge.readAloud(ticket, spoken), (event): Speaker.Event => ({ type: event.kind, ticket, ok: event.ok }))
+    return Stream.concat(audio, Stream.unwrap(effect {
+      const latest = try speaker.get()
+      if (!latest.retiring || latest.ticket !== ticket) return Stream.empty
       const confirmed = try bridge.silenceReading(ticket)
-      return { type: "cleaned", confirmed } as Speaker.Event
+      return Stream.succeed<Speaker.Event>({ type: "cleaned", confirmed })
     }))
   })
 }
@@ -54,11 +59,17 @@ const left = started(effect {
   const shell = try Shell
   const voice = try Voice.Machine
   const speaker = try Speaker.Machine
+  const phone = Option.getOrUndefined(try Effect.serviceOption(Phone))
+  const calls = phone === undefined
+    ? Stream.succeed(false)
+    : Stream.map(phone.changes, (state) => state.telecom === "OrdinaryCall" || state.telecom === "MaybeEmergencyCall")
   let previous: string | undefined
-  const reading = Stream.zipLatest(Stream.zipLatest(chat.changes, shell.changes), voice.changes)
-  try Stream.runForEach(reading, effect ([[chat, shell], voice]) => {
+  const reading = Stream.zipLatest(Stream.zipLatest(chat.changes, shell.changes), Stream.zipLatest(voice.changes, calls))
+  try Stream.runForEach(reading, effect ([[chat, shell], [voice, onCall]]) => {
     const key = `${chat.chosen}/${shell.trail.at(-1) ?? "home"}/${shell.assistant === "Bar"}/${Voice.quiet(voice)}/${voice.recorder.stage === "Closed"}`
-    if (previous !== undefined && key !== previous && Speaker.canStop(try speaker.get())) try contained(speaker.send({ type: "stop" }), "stopping Read aloud")
+    if ((onCall || (previous !== undefined && key !== previous)) && Speaker.canStop(try speaker.get())) {
+      try contained(speaker.send({ type: "stop" }), "stopping Read aloud")
+    }
     previous = key
   })
 }, "following the reading's screen")

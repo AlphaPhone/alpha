@@ -68,7 +68,7 @@ export function useMessageRows({ runtime, board, lines, chats, writing, replying
         attachments: line.attachments?.map(chip),
         quote: line.quote === undefined ? undefined : wordsOf({ mine: false, text: line.quote }),
         children: cards.length === 0 && line.failure === undefined ? undefined : <>
-          {cards.map((card, index) => <MapsCardView key={index} card={card} settled={!live} onOpen={live ? onOpenMaps : undefined} />)}
+          {cards.map((card) => <MapsCardView key={JSON.stringify(card)} card={card} settled={!live} onOpen={live ? onOpenMaps : undefined} />)}
           {line.failure === undefined ? null : <ReplyFailure kind={line.failure} onSettings={onSettings} />}
         </>,
         onFork: recorded && Chats.enabled(chats, fork) ? () => chat(fork) : undefined,
@@ -98,12 +98,13 @@ export function useHistorySheets(
   const shown = chats.state;
   const finding = search.state;
   const start = { type: "start", ...free } as const;
-  const browse = () => {
+  const browse = chats.can({ type: "browse" }) ? () => {
     void chats.send({ type: "browse" });
     setListing(true);
-  };
+  } : undefined;
   const searchHistory = search.can({ type: "openSearch" }) ? () => {
-    void chats.send({ type: "browse" });
+    setWords("");
+    if (chats.can({ type: "browse" })) void chats.send({ type: "browse" });
     void search.send({ type: "openSearch" });
   } : undefined;
   const sheets = shown && finding ? (
@@ -124,14 +125,19 @@ export function useHistorySheets(
             setListing(false);
           },
           onStart: chats.can(start) ? () => { void chats.send(start); setListing(false); } : undefined,
-          onRetry: () => void chats.send({ type: "browse" }),
+          onRetry: chats.can({ type: "browse" }) ? () => void chats.send({ type: "browse" }) : undefined,
         }}
       />
       <AssistantSearchSheet
         open={finding.open}
-        onOpenChange={(open) => { if (!open && search.can({ type: "closeSearch" })) void search.send({ type: "closeSearch" }); }}
+        onOpenChange={(open) => {
+          if (!open) {
+            setWords("");
+            if (search.can({ type: "closeSearch" })) void search.send({ type: "closeSearch" });
+          }
+        }}
         search={{
-          words,
+          words: finding.open ? words : "",
           hits: seen.hits.slice(0, finding.shown).map((hit, at) => ({ id: String(at + 1), chat: seen.titles.get(hit.conversation) ?? "Ask Alpha", snippet: hit.text })),
           status: finding.hits.status === "Idle" ? "idle" : finding.hits.status === "Loading" ? "loading" : finding.hits.status === "Failed" ? "failed" : "loaded",
           blocked: free.replying || free.holding,

@@ -1,5 +1,6 @@
 // spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/assistant/dock.md, "While voice owns Ask Alpha its open sheet is not dragged, a drag under way is let go, and the sheet is dragged again once voice ends"
 import type { Layer } from "effect";
+import { useMemo } from "react";
 import { Machine as Dock } from "../../gen/app__assistant__dock.effect.vibe";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
 import { useMachine as useInbox } from "../../gen/app__inbox.react.ts";
@@ -41,8 +42,10 @@ function LiveAssistant({ runtime }: Shown<Layer.Success<typeof screens> | Reside
   const speaker = useSpeaker(runtime).state;
   const composer = useComposer(runtime);
   const telecom = usePhone(runtime).state?.telecom;
-  const bridge = runtime.runSync(VoiceBridge);
-  const available = runtime.runSync(bridge.available());
+  const { available, canRead } = useMemo(() => {
+    const bridge = runtime.runSync(VoiceBridge);
+    return { available: runtime.runSync(bridge.available()), canRead: runtime.runSync(bridge.canRead()) };
+  }, [runtime]);
   const audioFree = speaker !== undefined && speaker.stage === "Silent" && !speaker.retiring;
   const noCall = telecom !== "OrdinaryCall" && telecom !== "MaybeEmergencyCall";
   const talk = { type: "startTalking", now: untimed } as const;
@@ -50,13 +53,14 @@ function LiveAssistant({ runtime }: Shown<Layer.Success<typeof screens> | Reside
   const canDictate = available && noCall && audioFree && composer.state?.away === "Free" && composer.can({ type: "edit", blank: false, long: false }) && voice.can({ type: "openRecorder", target: "ComposerField" });
   const recorder = voice.state?.recorder;
   const review = recorder?.stage === "Review" && recorder.field === "ComposerField";
-  const readingAllowed = noCall && speaker !== undefined && !speaker.latched && voice.state !== undefined && quiet(voice.state) && recorder?.stage === "Closed" && runtime.runSync(bridge.canRead());
+  const readingAllowed = noCall && speaker !== undefined && !speaker.latched && voice.state !== undefined && quiet(voice.state) && recorder?.stage === "Closed" && canRead;
+  const emailAction = destination ? (selection: Parameters<typeof emailMessage>[0]) => void runtime.runPromise(emailMessage(selection, destination)) : undefined;
   return <Assistant
     runtime={runtime}
     canReadAloud={readingAllowed}
     messageActions={{
       copy: (selection) => void runtime.runPromise(copyMessage(selection)),
-      useInEmail: destination ? (selection) => void runtime.runPromise(emailMessage(selection, destination)) : undefined,
+      useInEmail: emailAction,
     }}
     speech={{
       keyboard: voice.state && {

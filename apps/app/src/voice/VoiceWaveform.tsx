@@ -41,7 +41,7 @@ export function VoiceWaveform({ phase, compact = false }: { phase: ShownPhase; c
     const animations = Array.from(element.children, (child, number) =>
       child.animate(frames, {
         duration: visual.duration,
-        iterations: Infinity,
+        iterations: phase === "Stopping" ? 1 : Infinity,
         delay: phase === "Thinking" || phase === "Transcribing" ? number * (compact ? 110 : 32) : (number % motif.length) * (phase === "Speaking" ? 38 : 70),
         fill: "both",
       }));

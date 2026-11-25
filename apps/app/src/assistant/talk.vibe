@@ -9,6 +9,7 @@ import type { MailQuestion } from "../inbox/mail-context.vibe"
 import type { Sighting } from "../platform/location.vibe"
 import type { CommsPrompt } from "../phone/comms.vibe"
 import type { NoteTranscript } from "../notes/selection.vibe"
+import { createBoundedCache } from "../runtime/shelf.vibe"
 
 /** One file selected by the owner, with the bytes admitted by the Ask Alpha attachment policy. */
 export interface Attached {
@@ -48,9 +49,16 @@ export interface Line {
   readonly attachments?: readonly Attached[]
 }
 
+export interface PageBounds {
+  readonly hasEarlier: boolean
+  readonly hasLater: boolean
+}
+
 interface MessagePage {
   readonly conversation: number
   readonly lines: ReadonlyArray<Line>
+  readonly hasEarlier: boolean
+  readonly hasLater: boolean
 }
 
 /** A search hit: the conversation it is in, by its number, the message, by its number, and what it says. */
@@ -143,9 +151,9 @@ export interface Board {
   /** The page under `ticket`, and mutations of a turn's own page. */
   page(ticket: number): ReadonlyArray<Line>
   line(conversation: number, message: number): Line | undefined
-  putPage(ticket: number, conversation: number, lines: ReadonlyArray<Line>): void
+  putPage(ticket: number, conversation: number, lines: ReadonlyArray<Line>, bounds?: PageBounds): void
   /** Take confirmed rows and retire loaded copies of any now-redacted attachment, returning its open preview ticket. */
-  takeHistory(ticket: number, conversation: number, lines: readonly Line[], redacted: ReadonlySet<string>): number | undefined
+  takeHistory(ticket: number, conversation: number, lines: readonly Line[], redacted: ReadonlySet<string>, bounds?: PageBounds): number | undefined
   append(ticket: number, conversation: number, line: Line): void
   rename(ticket: number, line: Line, id: string): void
   drop(ticket: number, line: Line): void
@@ -182,6 +190,8 @@ module pure {
 }
 import { unkept } from pure
 
+const maxRetainedPages = 8
+
 /** The board, with the conversations numbered before kept from the store, and each new one kept there. */
 export const talk = Layer.effect(Talk, effect {
   const store = try KeyValueStore.KeyValueStore
@@ -190,12 +200,14 @@ export const talk = Layer.effect(Talk, effect {
   let records: Known[] = []
   const messages: string[] = []
   const numbers = new Map<string, number>()
+  const pageCache = createBoundedCache<number, MessagePage>(maxRetainedPages)
   const listeners = new Set<() => void>()
   let position: { readonly ticket: number; readonly sighting: Sighting } | undefined
   let seen: Seen = {
     pages: new Map(), reply: "", label: "", failure: undefined, typed: "", files: [], filesBinding: undefined, filesAuthority: undefined, transcript: undefined, attachmentNotice: "", preview: undefined, media: [], mediaNote: undefined, saved: "", hits: [],
     titles: new Map(),
   }
+  const snapshotPages = (): ReadonlyMap<number, MessagePage> => new Map(pageCache.entries())
   const keep = () => {
     const key = catalogue
     if (key !== undefined) runFork(ignore(store.set(key, JSON.stringify({ conversations: records.map((one) => ({ id: one.record.id, roomId: one.record.roomId, title: one.title })) }))))
@@ -262,14 +274,13 @@ export const talk = Layer.effect(Talk, effect {
       if (previous !== undefined && authority !== undefined && sameArchiveAuthority(previous, authority)) return false
       archiveAuthority = authority
       if (previous === undefined) return false
-      const pages = new Map(seen.pages)
       let changed = false
-      for (const [ticket, page] of pages) {
+      for (const [ticket, page] of pageCache.entries()) {
         if (!page.lines.some((line) => line.attachments !== undefined)) continue
-        pages.set(ticket, { ...page, lines: page.lines.map((line) => line.attachments === undefined ? line : { ...line, attachments: undefined }) })
+        pageCache.set(ticket, { ...page, lines: page.lines.map((line) => line.attachments === undefined ? line : { ...line, attachments: undefined }) })
         changed = true
       }
-      if (changed || seen.preview !== undefined) board.change({ pages, preview: undefined })
+      if (changed || seen.preview !== undefined) board.change({ pages: snapshotPages(), preview: undefined })
       return true
     },
     page: (ticket) => seen.pages.get(ticket)?.lines ?? [],
@@ -283,20 +294,23 @@ export const talk = Layer.effect(Talk, effect {
       }
       return undefined
     },
-    putPage: (ticket, conversation, lines) => {
-      board.change({ pages: new Map([...seen.pages, [ticket, { conversation, lines }]]) })
+    putPage: (ticket, conversation, lines, bounds) => {
+      const prior = pageCache.get(ticket)
+      const nextBounds = bounds ?? (prior === undefined ? { hasEarlier: false, hasLater: false } : { hasEarlier: prior.hasEarlier, hasLater: prior.hasLater })
+      pageCache.set(ticket, { conversation, lines, ...nextBounds })
+      board.change({ pages: snapshotPages() })
     },
-    takeHistory: (ticket, conversation, lines, redacted) => {
+    takeHistory: (ticket, conversation, lines, redacted, bounds) => {
       const incoming = new Map(lines.map((line) => [line.id, line]))
       const merged = [...lines, ...board.page(ticket).filter((line) => !incoming.has(line.id))]
+      const nextBounds = bounds ?? { hasEarlier: false, hasLater: false }
       if (redacted.size === 0) {
-        board.putPage(ticket, conversation, merged)
+        board.putPage(ticket, conversation, merged, nextBounds)
         return undefined
       }
-      const pages = new Map(seen.pages)
       const preview = seen.preview
       let closed: number | undefined
-      for (const [previous, page] of seen.pages) {
+      for (const [previous, page] of pageCache.entries()) {
         if (page.conversation !== conversation) continue
         let updated = false
         const kept = page.lines.map((line) => {
@@ -306,10 +320,10 @@ export const talk = Layer.effect(Talk, effect {
           updated = true
           return replacement
         })
-        if (previous !== ticket && updated) pages.set(previous, { conversation, lines: kept })
+        if (previous !== ticket && updated) pageCache.set(previous, { ...page, lines: kept })
       }
-      pages.set(ticket, { conversation, lines: merged })
-      board.change(closed === undefined ? { pages } : { pages, preview: undefined })
+      pageCache.set(ticket, { conversation, lines: merged, ...nextBounds })
+      board.change(closed === undefined ? { pages: snapshotPages() } : { pages: snapshotPages(), preview: undefined })
       return closed
     },
     append: (ticket, conversation, line) => {
@@ -335,6 +349,7 @@ export const talk = Layer.effect(Talk, effect {
     records = remembered.map((one) => ({ record: { id: one.id, roomId: one.roomId } as ConversationRecord, title: one.title }))
     messages.length = 0
     numbers.clear()
+    pageCache.clear()
     position = undefined
     board.draftSeat = next
     board.phoneDrafts = undefined

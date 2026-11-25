@@ -26,9 +26,10 @@ export effect function dictate(): void!!(Voice.Machine | VoiceWords | Composer.M
 export effect function editDictation(text: string): void!!(Voice.Machine | VoiceWords) {
   const voice = try Voice.Machine
   const current = try voice.get()
-  const event: Voice.Event = { type: "edit", words: text.trim() !== "" }
+  const words = text.trim() !== ""
+  const event: Voice.Event = { type: "edit", words }
   if (current.recorder.field !== "ComposerField" || !Voice.enabled(current, event)) return
   const { memory } = try VoiceWords
-  memory.dictatedText = text
-  try ignore(voice.send(event))
+  memory.setDictated(text, memory.dictatedDurationMs)
+  if (current.recorder.words !== words) try ignore(voice.send(event))
 }
