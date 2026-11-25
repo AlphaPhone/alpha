@@ -1,15 +1,19 @@
 // spec/app/assistant/attachments.md, "Each file is checked against its limits: an image is made to fit, audio and video never go, and the message's files fit together"; spec/app/assistant/composer.md, "Files chosen are added up to the upload limit of four"; spec/app/assistant/index.md, "Stored attachments are posted with their message, and a message whose attachments could not be stored never left"
 import * as Picker from "../../gen/app__assistant__attachments.effect.vibe"
 import type { SelectionId } from "@elizaos/os-bridges"
+import { Agent } from "../platform/agent.vibe"
 import { Documents } from "../platform/documents.vibe"
+import type { NoteStore } from "../platform/notes.vibe"
+import { launchOwnerAt } from "../platform/owner.vibe"
 import { batchFits, fileBase64Cap, fits, imageBase64Cap, nameLimit, reencoded } from "../../gen/app__assistant__attachments.effect.vibe"
 import * as Composer from "../../gen/app__assistant__composer.effect.vibe"
 import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
-import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { Machine as Shell, canRaise } from "../../gen/app__shell.effect.vibe"
+import { type NoteTranscript, type NotesSelection, transcriptCurrent } from "../notes/selection.vibe"
 import { fresh } from "../runtime/attempts.vibe"
 import { contained } from "../runtime/reactor.vibe"
 import { reencodeImage } from "./image-encode.ts"
-import { type Attached, Talk } from "./talk.vibe"
+import { type Attached, type TranscriptAttachment, Talk } from "./talk.vibe"
 
 const images = ["image/jpeg", "image/png", "image/gif", "image/webp"]
 const documents = ["application/pdf", "text/plain", "text/csv", "text/markdown", "application/json"]
@@ -20,6 +24,7 @@ const base64 = /^[A-Za-z0-9+/]+={0,2}$/
 /** The owner sends a file reviewed in another app to the existing Ask Alpha draft. */
 export service MediaHandoff {
   attach(file: Attached): boolean!!
+  offerTranscript(transcript: NoteTranscript): boolean!!
 }
 
 export effect function attachToAlpha(file: Attached): boolean!!MediaHandoff {
@@ -199,6 +204,43 @@ export effect function stageAttachment(file: Attached): boolean!!(Talk | Compose
   return true
 }
 
+// spec/app/assistant/composer.md, "Story: Attach, quote and edit again"
+export effect function stageTranscript(transcript: NoteTranscript): boolean!!(Talk | Composer.Machine | Conversation | NotesSelection | NoteStore) {
+  const { board, attachmentLock } = try Talk
+  const composer = try Composer.Machine
+  const conversation = try Conversation
+  const shell = try Shell
+  return try attachmentLock.withPermits(1)(effect {
+    const before = try composer.get()
+    const offer: Composer.Event = { type: "offer", kind: "Transcript", revision: before.offeredAt + 1 }
+    if (transcript.opened <= board.lastTranscriptOffer || before.editor.editing > 0 || !Composer.enabled(before, offer) ||
+      (try conversation.get()).context.sensitive || !(try transcriptCurrent(transcript))) return false
+    const live = try composer.get()
+    const screen = (try conversation.get()).context
+    if (screen.sensitive || !sameBinding(live.binding, before.binding) ||
+      live.editor.editing > 0 || !Composer.enabled(live, offer)) return false
+    if (!(try contained(composer.send(offer), "attaching the saved transcript"))) return false
+    board.lastTranscriptOffer = transcript.opened
+    board.change({ transcript: { offered: transcript, binding: live.binding } })
+    const typed: Composer.Event = { type: "edit", blank: false, long: false }
+    if (board.snapshot().typed.trim() === "" && Composer.enabled(try composer.get(), typed)) {
+      board.type("Summarize this for me")
+      if (!(try contained(composer.send(typed), "starting the transcript question"))) board.type("")
+    }
+    if (canRaise(try shell.get(), "Sheet")) try contained(shell.send({ type: "raise", detent: "Sheet" }), "opening Ask Alpha")
+    return true
+  })
+}
+
+export effect function retireTranscript(expected?: TranscriptAttachment): void!!(Talk | Composer.Machine) {
+  const { board } = try Talk
+  const composer = try Composer.Machine
+  if (expected !== undefined && board.snapshot().transcript !== expected) return
+  board.change({ transcript: undefined })
+  const event: Composer.Event = { type: "detach", kind: "Transcript" }
+  if (Composer.enabled(try composer.get(), event)) try contained(composer.send(event), "detaching the transcript")
+}
+
 export effect function removeFile(id: string): void!!(Talk | Composer.Machine) {
   const { board, attachmentLock } = try Talk
   const composer = try Composer.Machine
@@ -221,13 +263,26 @@ export effect function stageFiles(key: string, files: readonly Attached[]): bool
 
 export const dropFiles = (key: string) => ignore(tryPromise(() => store(key)))
 
+// spec/app/assistant/attachments.md, "A recorded attachment is read only for its verified owner, agent and exact message"
+export effect function attachmentAuthority(): (Picker.ArchiveAuthority | undefined)!!Agent {
+  const { life } = try Agent
+  const before = life.status() catch () => undefined
+  if (before?.available !== true || before.state !== "running") return undefined
+  const identity = launchOwnerAt() catch () => undefined
+  if (identity === undefined) return undefined
+  const after = life.status() catch () => undefined
+  if (after?.available !== true || after.state !== "running" || after.epoch !== before.epoch) return undefined
+  return { owner: identity.identityId, agent: identity.agentId, epoch: after.epoch }
+}
+
 export interface AttachmentHistory {
-  readonly owner: number
+  readonly authority: Picker.ArchiveAuthority
   readonly conversation: string
   readonly room: string
 }
 
-const sentKey = ({ owner, conversation, room }: AttachmentHistory, message: string) => JSON.stringify(["sent", owner, conversation, room, message])
+const sentKey = ({ authority, conversation, room }: AttachmentHistory, message: string) =>
+  JSON.stringify(["sent-v2", Picker.archiveAddress(authority, conversation, room, message)])
 
 export const rememberFiles = (history: AttachmentHistory, message: string, files: readonly Attached[]) =>
   stageFiles(sentKey(history, message), files)

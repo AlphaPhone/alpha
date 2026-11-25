@@ -432,6 +432,87 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
 const talkMounts: Mount[] = [{ at: "assistant", load: () => import("../src/assistant/index.tsx") }];
 
 describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold a spoken conversation\")", () => {
+  it.each([
+    { name: "Home", view: undefined },
+    { name: "Calendar", view: "Calendar" },
+    { name: "Browser", view: "Browser" },
+  ] as const)("draws the compact Talk waveform over $name during on-device speech", async ({ view }) => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const { alpha } = await open(world, talkMounts);
+    const area = assistant.runtime(alpha);
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
+    if (view !== undefined) await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "openView", view }))));
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");
+    const waveform = () => document.querySelector("[data-alpha-pill-voice] [data-alpha-voice-animation]");
+    expect(waveform()?.getAttribute("data-phase")).toBe("Listening");
+    expect(waveform()?.children.length).toBe(5);
+
+    await press("Mute microphone");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.muted && state.mic === "Off");
+    expect(waveform()?.getAttribute("data-phase")).toBe("Muted");
+    expect(world.voice.activeMicSession).toBeUndefined();
+
+    await press("Stop voice conversation");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle");
+    expect(waveform()).toBeNull();
+  });
+
+  it("restores the local speaker before unrelated playback when Talk stops during a mute (spec/app/voice/index.md, \"Speaker mute is offered after the current speech bridge confirms gain control\")", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const { alpha } = await open(world, talkMounts);
+    const area = assistant.runtime(alpha);
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.speaker === "SpeakerOn");
+    expect(world.voice.speakerGainRequests).toEqual([false]);
+
+    await press("Mute speaker");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.speaker === "SpeakerOff");
+    expect(button("Unmute speaker")?.getAttribute("aria-pressed")).toBe("true");
+    expect(world.voice.speakerMuted).toBe(true);
+    expect(world.voice.activeMicSession).toBeDefined();
+    await press("Unmute speaker");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.speaker === "SpeakerOn");
+
+    const pending = Promise.withResolvers<void>();
+    const began = Promise.withResolvers<void>();
+    world.voice.speakerGainGate = async (muted) => {
+      if (muted) {
+        began.resolve();
+        await pending.promise;
+      }
+    };
+    try {
+      await press("Mute speaker");
+      await began.promise;
+      expect(button("Mute speaker")?.disabled).toBe(true);
+      await press("Stop voice conversation");
+      await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Stopping");
+      expect(world.voice.speakerGainRequests).toEqual([false, true, false, true]);
+    } finally {
+      pending.resolve();
+    }
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle");
+    expect(world.voice.speakerGainRequests).toEqual([false, true, false, true, false]);
+
+    await area.runPromise(Effect.flatMap(VoiceBridge, (bridge) => Stream.runCollect(bridge.readAloud(1, "Another reading."))));
+    expect(world.voice.speakerMutedAtPlayback).toEqual([false]);
+  });
+
+  it("keeps the speaker control hidden when the live bridge refuses gain (spec/app/voice/index.md, \"Speaker mute is offered after the current speech bridge confirms gain control\")", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    world.voice.speakerGainGate = () => Promise.reject(new Error("Output gain unavailable"));
+    const { alpha } = await open(world, talkMounts);
+    const area = assistant.runtime(alpha);
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.speaker === "SpeakerUnavailable");
+    expect(button("Mute speaker")).toBeUndefined();
+    expect(button("Mute microphone")).toBeDefined();
+    expect(world.voice.activeMicSession).toBeDefined();
+  });
+
   it("keeps the resting Talk control visible but unavailable on a browser without speech", async () => {
     const world = scene();
     const { alpha } = await open(world, talkMounts);

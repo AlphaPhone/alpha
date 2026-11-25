@@ -129,24 +129,26 @@ type TileProps = {
   readonly selected?: boolean;
   readonly trashed: boolean;
   readonly daysLeft?: number;
+  readonly captureTime?: string;
   readonly interactive: boolean;
   readonly focus: (button: HTMLButtonElement | null) => void;
 };
 
 /** Days within this many days of today have a heading of their own, as in v121; older items are grouped by month. */
 const dayHeadings = 30;
+const timeOfDay = new Intl.DateTimeFormat(undefined, { timeStyle: "short" });
 
 const startOfDay = (at: number) => new Date(at).setHours(0, 0, 0, 0);
 
-/** The heading an item taken `at` falls under, as of `now`: "Today", "Yesterday", "Sat, Oct 31", then "October 2026". */
-export function headingOf(at: number, now: number): string {
+/** The section heading or the exact day of an individual photo. */
+export function headingOf(at: number, now: number, exactDay = false): string {
   const ago = Math.round((startOfDay(now) - startOfDay(at)) / 86_400_000);
   const shot = new Date(at);
   if (ago <= 0) return "Today";
   if (ago === 1) return "Yesterday";
-  if (ago < dayHeadings) {
-    const otherYear = shot.getFullYear() !== new Date(now).getFullYear();
-    return shot.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", ...(otherYear ? { year: "numeric" } : {}) });
+  if (ago < dayHeadings || exactDay) {
+    const includeYear = ago >= dayHeadings || shot.getFullYear() !== new Date(now).getFullYear();
+    return shot.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", ...(includeYear ? { year: "numeric" } : {}) });
   }
   return shot.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 }
@@ -164,9 +166,10 @@ export function trashDaysLabel(days: number): string {
   return `${days} ${days === 1 ? "day" : "days"} left`;
 }
 
-const Tile = memo(function Tile({ number, row, image, selected, trashed, daysLeft, interactive, focus }: TileProps) {
+const Tile = memo(function Tile({ number, row, image, selected, trashed, daysLeft, captureTime, interactive, focus }: TileProps) {
   const video = row.kind === "phone" ? row.item.kind === "video" : row.item.mimeType.startsWith("video/");
-  const name = row.item.name ?? (video ? "Video" : "Photo");
+  const kind = video ? "Video" : "Photo";
+  const name = row.item.name?.trim() || (captureTime === undefined ? kind : `${kind}, ${captureTime}`);
   const starred = !trashed && row.item.favorite === true;
   return (
     <button ref={focus} type="button" data-alpha-media-key={number} aria-label={name} aria-pressed={selected}
@@ -226,20 +229,20 @@ export function MediaGrid({ rows, selection, grouped, density, runtime, revision
   const { connect, observeLine, visibleLines, images } = useThumbnails(runtime, revision, trash);
   const [focused, setFocused] = useState<number>();
   const [requested, setRequested] = useState<number>();
-  const pendingFocus = useRef<number | undefined>(undefined);
+  const pendingFocusRef = useRef<number | undefined>(undefined);
   const focus = useCallback((button: HTMLButtonElement | null) => {
-    if (!button || pendingFocus.current === undefined || mediaNumber(button) !== pendingFocus.current) return;
-    pendingFocus.current = undefined;
+    if (!button || pendingFocusRef.current === undefined || mediaNumber(button) !== pendingFocusRef.current) return;
+    pendingFocusRef.current = undefined;
     button.focus();
     setRequested(undefined);
   }, []);
   const pinchRef = useRef<{ distance: number; start: Density; reported: Density } | undefined>(undefined);
-  const anchor = useRef<{ density: Density; member: string; offset: number; focused: number | undefined } | undefined>(undefined);
+  const anchorRef = useRef<{ density: Density; member: string; offset: number; focused: number | undefined } | undefined>(undefined);
   const placeAnchor = useCallback((section: HTMLElement | null) => {
-    const saved = anchor.current;
+    const saved = anchorRef.current;
     const pane = section?.parentElement;
     if (!pane || saved?.density !== density) return;
-    anchor.current = undefined;
+    anchorRef.current = undefined;
     const line = Array.from(pane.querySelectorAll<HTMLElement>("[data-alpha-grid-line]")).find((one) =>
       one.dataset.alphaGridLine?.split(",").includes(saved.member));
     if (line) pane.scrollTop += line.getBoundingClientRect().top - pane.getBoundingClientRect().top - saved.offset;
@@ -290,17 +293,17 @@ export function MediaGrid({ rows, selection, grouped, density, runtime, revision
     const next = order[current + (event.shiftKey ? -1 : 1)];
     if (next === undefined || event.currentTarget.querySelector(`button[data-alpha-media-key="${next}"]`)) return;
     event.preventDefault();
-    pendingFocus.current = next;
+    pendingFocusRef.current = next;
     setRequested(next);
   }
   function focusLeft(event: FocusEvent<HTMLDivElement>) {
     if (event.currentTarget.contains(event.relatedTarget)) return;
-    pendingFocus.current = undefined;
+    pendingFocusRef.current = undefined;
     setRequested(undefined);
     setFocused(undefined);
   }
   function startPinch(event: TouchEvent<HTMLDivElement>) {
-    anchor.current = undefined;
+    anchorRef.current = undefined;
     const distance = touchDistance(event);
     pinchRef.current = distance > 0 ? { distance, start: density, reported: density } : undefined;
   }
@@ -319,7 +322,7 @@ export function MediaGrid({ rows, selection, grouped, density, runtime, revision
       one.getBoundingClientRect().bottom > top);
     const member = line?.dataset.alphaGridLine?.split(",", 1)[0];
     if (line && member) {
-      anchor.current = { density: changed, member, offset: line.getBoundingClientRect().top - top,
+      anchorRef.current = { density: changed, member, offset: line.getBoundingClientRect().top - top,
         focused: mediaNumber(pane.ownerDocument.activeElement) };
     }
     resize(changed);
@@ -343,10 +346,12 @@ export function MediaGrid({ rows, selection, grouped, density, runtime, revision
             const first = line[0]?.number ?? 0;
             const present = (visibleLines === undefined ? index < thumbnailBatch : visibleLines === null || visibleLines.has(first))
               || line.some(({ number }) => number === focused || number === requested);
-            return <ThumbnailLine key={first} members={members} observe={observeLine} style={size.style}>{present ? line.map(({ number, row }) => (
-              <Tile key={number} number={number} row={row} image={images?.get(number)} selected={selection?.has(number)} trashed={trash}
-                daysLeft={trash && row.kind === "phone" ? trashDaysLeft(row.item.expiresAt, now) : undefined} interactive={open !== undefined} focus={focus} />
-            )) : undefined}</ThumbnailLine>;
+            return <ThumbnailLine key={first} members={members} observe={observeLine} style={size.style}>{present ? line.map(({ number, row }) => {
+              const timestamp = row.item.name?.trim() ? 0 : taken(row);
+              const captureTime = timestamp > 0 ? `${headingOf(timestamp, now, true)} ${timeOfDay.format(timestamp)}` : undefined;
+              return <Tile key={number} number={number} row={row} image={images?.get(number)} selected={selection?.has(number)} trashed={trash} captureTime={captureTime}
+                daysLeft={trash && row.kind === "phone" ? trashDaysLeft(row.item.expiresAt, now) : undefined} interactive={open !== undefined} focus={focus} />;
+            }) : undefined}</ThumbnailLine>;
           })}
         </section>
       ))}

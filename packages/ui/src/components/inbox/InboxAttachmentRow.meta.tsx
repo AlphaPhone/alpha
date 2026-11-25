@@ -17,7 +17,7 @@ export const meta: ComponentMeta<InboxAttachmentRowProps> = {
       onOpen.mockClear();
       onSave.mockClear();
       const canvas = within(canvasElement);
-      await userEvent.click(canvas.getByRole("button", { name: "Open Invoice 2041.pdf" }));
+      await userEvent.click(canvas.getByRole("button", { name: /Invoice 2041\.pdf.*184 KB/ }));
       await userEvent.click(canvas.getByRole("button", { name: "Save Invoice 2041.pdf" }));
       await expect([onOpen.mock.calls.length, onSave.mock.calls.length]).toEqual([1, 1]);
     },

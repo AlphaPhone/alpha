@@ -108,7 +108,14 @@ describe("the shell", () => {
     await swiped({ x: 5, y: 300 }, { x: 40, y: 300 });
     await swiped({ x: 200, y: 300 }, { x: 300, y: 300 });
     expect((await alpha.runtime.runPromise(Shell.use((s) => s.get()))).trail).toEqual(["Notes"]);
-    await swiped({ x: 5, y: 300 }, { x: 80, y: 300 });
+    await drawn(() => {
+      const pointer = { bubbles: true, pointerType: "touch", pointerId: 7, isPrimary: true };
+      const touch = { target: page, identifier: 3, clientX: 5, clientY: 300 };
+      page.dispatchEvent(new PointerEvent("pointerdown", { ...pointer, clientX: touch.clientX, clientY: touch.clientY }));
+      page.dispatchEvent(new TouchEvent("touchstart", { bubbles: true, touches: [new Touch(touch)] }));
+      page.dispatchEvent(new PointerEvent("pointercancel", pointer));
+      page.dispatchEvent(new TouchEvent("touchend", { bubbles: true, changedTouches: [new Touch({ ...touch, clientX: 80 })] }));
+    });
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
 
     // spec/app/shell/gestures.md, "On the launcher a pull down that Home allows opens Android's shade, and a swipe up from the bottom bar goes Home; nothing else is a swipe"

@@ -6,9 +6,9 @@ import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import { allows } from "../../gen/kit__permission.effect.vibe"
 import { Machine as Scan } from "../../gen/app__files__scan.effect.vibe"
-import { scanCameraImage } from "../files/scan.vibe"
+import { scanBack, scanCameraImage } from "../files/scan.vibe"
 import { Device } from "../platform/device.vibe"
-import { CameraPort, playable, type CameraMedia, type LensFacts, type Point } from "../platform/camera.vibe"
+import { CameraPort, ownedCaptureId, playable, type CameraMedia, type LensFacts, type Point } from "../platform/camera.vibe"
 import { PhotosPort, latestBrowserCapture, saveBrowserCapture } from "../platform/photos.vibe"
 import { attachToAlpha } from "../assistant/attachments.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
@@ -250,7 +250,7 @@ const hardware = started(effect {
   const events = Stream.merge(port.signals, port.volumeKeys)
   try Stream.runForEach(events, effect (signal) => {
     if (signal === undefined) {
-      try shutter()
+      if (Camera.volumeShutter(try camera.get())) try shutter()
       return
     }
     const { ticket, kind } = signal
@@ -266,8 +266,8 @@ const hardware = started(effect {
   })
 }, "Camera hardware")
 
-const volume = applying(Camera.Machine, (state) => Camera.ready(state), effect (ready: boolean) => {
-  try (try CameraPort).volume(ready)
+const volume = applying(Camera.Machine, Camera.volumeShutter, effect (enabled: boolean) => {
+  try (try CameraPort).volume(enabled)
 })
 
 const mode = applying(Camera.Machine, (state) => ({ ticket: state.phase === "Ready" ? state.preview : 0, mode: state.mode }), effect ({ ticket, mode }: { ticket: number; mode: Camera.Mode }) => {
@@ -326,7 +326,12 @@ const latest = applying(Camera.Machine, (s) => s.showing && !s.secure ? s.visit 
 
 effect function openLast(photo: number): void!!(CameraAssets | PhotosPort | Shell.Machine) {
   const media = try (try CameraAssets).read(photo)
-  if (media?.libraryId !== undefined) try (try PhotosPort).handoff(media.libraryId)
+  if (media !== undefined) {
+    const ownedId = ownedCaptureId(media.path, media.mime.startsWith("video/"))
+    if (media.libraryId !== undefined || ownedId !== undefined) {
+      try (try PhotosPort).handoff({ libraryId: media.libraryId, ownedId })
+    }
+  }
   try openView("Photos")
 }
 
@@ -388,6 +393,17 @@ effect function askAbout(photo: number) {
 }
 
 export const camera = together(reacting(Camera, { carry, timers }), assets, visit, hardware, volume, mode, approval, latest)
+
+/** Take one step within Camera before handing Back to the shell. */
+export const cameraBack = effect {
+  if (try scanBack) return true
+  const machine = try Camera.Machine
+  const state = try machine.get()
+  if (!Camera.recordingTakesBack(state)) return false
+  if (Camera.canStopRecording(state, "Owner"))
+    try contained(machine.send({ type: "stopRecording", now: untimed }, "Owner"), "stopping the recording")
+  return true
+}
 
 /** Take a photo, stop a recording, or start the mode's next capture from the screen or the hardware shutter. */
 export effect function shutter(): void!!Camera.Machine {

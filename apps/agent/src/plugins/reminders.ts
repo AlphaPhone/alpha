@@ -312,13 +312,32 @@ export function remindersAction(store: AlphaAppsStore, timeZone: string): AgentA
     name: "REMINDERS_MANAGE",
     similes: ["MANAGE_REMINDERS", "ALPHA_REMINDERS", "REMINDER_LISTS"],
     description: "Create, list, query, update, complete, reopen, snooze, reschedule, flag, move, delete reminders, manage custom lists, and add/toggle subtasks in Alpha Reminders.",
+    parameters: [
+      {
+        name: "op", description: "What to do: list or query reminders, create, update, complete, reopen, snooze, flag, move or delete one, add or toggle a subtask, or create, rename or delete a list.", required: true,
+        schema: { type: "string", enum: ["list", "query", "create", "update", "complete", "reopen", "snooze", "flag", "move", "delete", "add_subtask", "toggle_subtask", "create_list", "rename_list", "delete_list"] },
+      },
+      { name: "title", description: "The reminder's title to create one; for other operations, the title of the reminder to act on.", required: false, schema: { type: "string" } },
+      { name: "id", description: "The reminder's id, as the Reminders context lists it, to act on one reminder.", required: false, schema: { type: "string" } },
+      { name: "newTitle", description: "A new title for update.", required: false, schema: { type: "string" } },
+      { name: "notes", description: "The reminder's notes.", required: false, schema: { type: "string" } },
+      { name: "dueDate", description: "The day it is due, as YYYY-MM-DD in the owner's time zone.", required: false, schema: { type: "string" } },
+      { name: "dueMinute", description: "The time it is due, as minutes after midnight in the owner's time zone (6 PM is 1080).", required: false, schema: { type: "integer", minimum: 0, maximum: 1439 } },
+      { name: "recurrence", description: "How it repeats.", required: false, schema: { type: "string", enum: ["none", "daily", "weekdays", "weekly", "monthly", "yearly"] } },
+      { name: "priority", description: "Its priority.", required: false, schema: { type: "string", enum: ["none", "low", "medium", "high"] } },
+      { name: "flagged", description: "Whether it is flagged.", required: false, schema: { type: "boolean" } },
+      { name: "listName", description: "The list to act on: the list to put a new reminder in or to show, the destination for move, or the current name of the list for rename_list or delete_list.", required: false, schema: { type: "string" } },
+      { name: "name", description: "The new list's name for create_list, or the new name for rename_list.", required: false, schema: { type: "string" } },
+      { name: "view", description: "Which reminders to list.", required: false, schema: { type: "string", enum: ["all", "today", "scheduled", "flagged", "overdue", "completed"] } },
+      { name: "query", description: "Text to search reminder titles and notes for.", required: false, schema: { type: "string" } },
+      { name: "minutes", description: "Minutes to snooze for.", required: false, schema: { type: "integer", minimum: 1 } },
+      { name: "subtaskTitle", description: "A subtask's title, to add or toggle it.", required: false, schema: { type: "string" } },
+    ],
     validate: () => Promise.resolve(true),
-    handler: async (runtime, message, _state, options, callback) => {
+    handler: async (runtime, message, _state, options) => {
       const params = asRecord(asRecord(options).parameters ?? asRecord(options));
       const text = readRawString(asRecord(message.content), "text") ?? "";
-      const result = await handleRemindersManage(store, runtime, timeZone, params, text);
-      if (callback !== undefined) await callback({ text: result.text });
-      return result;
+      return handleRemindersManage(store, runtime, timeZone, params, text);
     },
   };
   showsApp(action, "reminders");

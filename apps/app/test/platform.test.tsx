@@ -203,9 +203,17 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
   });
 });
 
+it('Keeps a trail from before the Apps drawer while reopening (spec/app/shell/index.md, "When Alpha opens again the trail is kept, and Ask Alpha is closed")', async () => {
+  const earlier = { trail: ["Notes"], assistant: "Sheet", image: false, contacts: false };
+  localStorage.setItem("alpha/app/shell/index@1", JSON.stringify(earlier));
+  const { alpha } = await open(scene(), only("home"));
+  await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Notes" && state.assistant === "Bar");
+  expect(JSON.parse(localStorage.getItem("alpha/app/shell/index@2") ?? "null")).toMatchObject({ trail: ["Notes"], drawer: false, assistant: "Bar" });
+});
+
 // spec/app/platform/index.md, "Story: Keep my phone's state across restarts"
 it("Keep my phone's state across restarts: a kept value Alpha can no longer read is set aside, and no copy waiting is written over (spec/app/platform/index.md, \"Story: Keep my phone's state across restarts\")", async () => {
-  const kept = "alpha/app/shell/index@1";
+  const kept = "alpha/app/shell/index@2";
   let waiting: [string, string][] = [];
   const storedAsides = (): [string, string][] => Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
     .filter((key): key is string => key !== null && key.startsWith(`${kept}.unreadable`))

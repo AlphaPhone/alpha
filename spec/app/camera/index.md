@@ -700,7 +700,7 @@ pure def settling(f: F::Film, before: Camera): Camera =
 
 pure def filming(f: F::Film, now: int, c: Camera): Done =
   val landed = settling(f, c)
-  if (c.film.stage == F::Running and f.stage == F::Stopping) afterRecording(List(StopRecording), landed)
+  if (c.film.stage != F::Stopping and f.stage == F::Stopping) afterRecording(List(StopRecording), landed)
   else if (f.stage == F::Checking and c.film.stage != F::Checking) afterRecording(List(CheckRecording({ video: f.video })), landed)
   else afterRecording(List(), landed)
 
@@ -708,7 +708,8 @@ pure def canRecordingStarted(s: Camera, by: Actor): bool = by == Phone and F::ca
 
 pure def recordingStarted(s: Camera, ok: bool, now: int, by: Actor): Done =
   val begun = F::started(s.film, ok, now)
-  if (ok and not(holds(s))) emit(List(StopRecording), { ...s, film: F::stop(begun, now) }) else filming(begun, now, s)
+  val current = if (begun.stage == F::Running and not(holds(s))) F::stop(begun, now) else begun
+  filming(current, now, s)
 
 pure def canTick(s: Camera, now: int, by: Actor): bool = by == Phone and F::canTick(s.film, now)
 
@@ -747,6 +748,24 @@ pure def recordingEnded(s: Camera, ok: bool, video: int, now: int, by: Actor): D
 pure def canRecordingVerified(s: Camera, by: Actor): bool = by == Phone and F::canVerified(s.film)
 
 pure def recordingVerified(s: Camera, ok: bool, now: int, by: Actor): Done = filming(F::verified(s.film, ok), now, s)
+```
+
+### Back stays in Camera while the recorder settles
+
+```quint
+pure def recordingTakesBack(s: Camera): bool = F::pending(s.film)
+```
+
+### Volume keys fire the available shutter while Camera is ready for the owner
+
+The hardware keys adjust volume while Camera is covered, asking about the
+microphone, reviewing a capture request, or scanning a frame.
+
+```quint
+pure def volumeShutter(s: Camera): bool =
+  ready(s) and not(G::open(s.agent)) and not(s.readingFrame)
+    and (if (s.mode == Photo) canCancelDelay(s, Owner) or canShutter(s, Owner)
+      else s.film.stage == F::Running or (P::allows(s.mic) and canStartRecording(s, true, Owner)))
 ```
 
 ### A video saved while Camera is unlocked becomes the last capture

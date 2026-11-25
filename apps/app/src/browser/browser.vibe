@@ -7,12 +7,13 @@ import * as Address from "../../gen/app__browser__address.effect.vibe"
 import type { Effect as PageOut, Event as PageEvent, Page } from "../../gen/app__browser__address.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { BrowserDownloadsHandoff, TabHost, hosted } from "../platform/browser.vibe"
+import { readWebBrowsing, saveWebBrowsing } from "../platform/browserWeb.vibe"
 import type { Install } from "../runtime/attempts.vibe"
 import { type Job, Whole, answer, contained, due, reacting, run, started, stream, together, untimed, whole } from "../runtime/reactor.vibe"
 import type { Time } from "../runtime/time.vibe"
 
 module page {
-  import { isSecureWebAddress } from "@elizaos/os-bridges"
+  import { addressFacts, isSecureWebAddress } from "@elizaos/os-bridges"
   import type { Input } from "../../gen/app__browser__address.ts"
 
   /** Whether `href` came over HTTPS with a host. @throws {never} */
@@ -33,16 +34,18 @@ module page {
     const web = /^https?:\/\//i.test(text)
     const rest = text.replace(/^https?:\/\//i, "")
     const authority = rest.split(/[/?#]/)[0] ?? ""
+    const spaced = /\s/.test(text)
+    const mail = /^[^\s/:@?#%]+@[^\s/:@?#%]+\.[^\s/:@?#%]+$/.test(text)
     return {
       blank: text === "",
       tooLong: text.length > 8192,
-      userInfo: authority.includes("@") && (web || !/\s/.test(text)) && !/^[^\s@]+@[^\s@]+\.[^\s@/]+$/.test(text),
+      userInfo: !mail && (addressFacts(text, "DefaultHttps").userInfo || authority.includes("@") && (web || !spaced)),
       web,
-      spaced: /\s/.test(text),
+      spaced,
       colon: /^[A-Za-z][\w-]*:(?!\d)/.test(text) && !web,
       host: /^(localhost|\[[\da-f:.]+\]|[^\s/:@.]+(\.[^\s/:@.]+)+)(:\d+)?([/?#]\S*)?$/i.test(rest) && !/^[\d.:]+$/.test(rest),
       numeric: /^[\d.:]+$/.test(text),
-      mail: /^[^\s@/]+@[^\s@/]+\.[^\s@/]+$/.test(text),
+      mail,
     }
   }
   /** The address the tab host opens for what was typed: the web address it names, or a search for it. @throws {never} */
@@ -63,6 +66,7 @@ export { addressOf, inputOf }
 /** The native tab of a tab number: numbers are never used twice, so neither is an id. */
 export const idOf = (tab: number): string => `tab${tab}`
 const tabOf = (id: string): number => (/^tab(\d+)$/.test(id) ? Number(id.slice(3)) : 0)
+const failedRestore = (ticket: number): TabsEvent => ({ type: "restored", ticket, ok: false, shown: 0, incoming: [] })
 
 /** A tab's page: its own machine, made when the tab is first asked for and ended with the tab. */
 export type PageRuntime = ManagedRuntime.ManagedRuntime<Address.Machine | Time, unknown>
@@ -105,6 +109,10 @@ effect function tellTabs(event: TabsEvent): boolean!!Tabs.Machine {
 effect function made(tab: number, kind: Tabs.Kind): void!!(TabHost | Tabs.Machine) {
   const host = try TabHost
   const id = idOf(tab)
+  if (host.web !== undefined) {
+    try sync(() => host.web?.create(id, kind === "Private"))
+    return
+  }
   const plugin = host.plugin
   const ok = Option.isSome(plugin) && try promise(() => host.session.ensure(id, kind === "Private", () => plugin.value.create({ session: host.session.session, id, private: kind === "Private" })).then(() => true, () => false))
   if (!ok) try tellTabs({ type: "nativeLost", tab })
@@ -113,20 +121,28 @@ effect function made(tab: number, kind: Tabs.Kind): void!!(TabHost | Tabs.Machin
 // spec/app/browser/index.md, "A launch reads the saved session, and may ask again after a failed read"; spec/app/browser/index.md, "The saved tabs replace an untouched launch tab, or join the open tabs when they all fit"
 effect function restoredFrom(ticket: number): TabsEvent!!(TabHost | Pages | Tabs.Machine) {
   return effect {
-    const saved = try hosted("browsingState", (plugin, session) => plugin.browsingState({ session }))
+    const host = try TabHost
+    const saved = host.web === undefined ? try hosted("browsingState", (plugin, session) => plugin.browsingState({ session })) : try readWebBrowsing()
     const s = try (try Tabs.Machine).get()
     const pages = try Pages
-    const back = restoreBrowsing(saved, { visits: try pages.visits() }, s.untouched)
-    const cur = tabOf(back.cur ?? "")
-    const shown = s.kept.includes(cur) ? cur : (s.kept[0] ?? 0)
-    if (!Tabs.canRestored(s, ticket, shown)) return { type: "restored", ticket, ok: false, shown }
+    const adopting = host.web !== undefined && s.kept.length === 0
+    const back = restoreBrowsing(saved, { visits: try pages.visits() }, s.untouched || host.web !== undefined)
+    const rows = back.restored.map((row, index) => ({ ...row, tab: adopting ? s.issued + index + 1 : tabOf(row.id) }))
+    const incoming = adopting ? rows.map((row) => row.tab) : []
+    const cur = rows.find((row) => row.id === back.cur)?.tab ?? 0
+    const shown = adopting ? cur : s.kept.includes(cur) ? cur : (s.kept[0] ?? 0)
+    if (!Tabs.canRestored(s, ticket, true, shown, incoming)) return failedRestore(ticket)
+    const restored: TabsEvent = { type: "restored", ticket, ok: true, shown, incoming }
+    if (!Tabs.restored(s, ticket, true, shown, incoming).hydrated) return restored
     try pages.keepVisits(back.visits)
-    for (const row of back.restored) {
-      const tab = tabOf(row.id)
-      if (s.kept.includes(tab)) try pages.aim(tab, row.url)
+    for (const { tab, url, title } of rows) {
+      if (adopting || s.kept.includes(tab)) {
+        try pages.aim(tab, url)
+        try sync(() => host.web?.restore(idOf(tab), url, title))
+      }
     }
-    return { type: "restored", ticket, ok: true, shown }
-  } catch () => ({ type: "restored", ticket, ok: false, shown: 0 })
+    return restored
+  } catch () => failedRestore(ticket)
 }
 
 // spec/app/browser/index.md, "A stale session is written once it has been read, one write at a time, and never while browsing data is being cleared"
@@ -137,20 +153,22 @@ effect function written(write: number): TabsEvent!!(TabHost | Tabs.Machine | Pag
     const visits = try (try Pages).visits()
     const snapshot = browsingSnapshot(
       { tabs: s.open.map((tab) => ({ id: idOf(tab), priv: s.privates.includes(tab) })), visits, cur: idOf(s.selected) },
-      (id) => host.session.info(id),
+      (id) => host.web === undefined ? host.session.info(id) : host.web.info(id),
     )
-    try hosted("saveBrowsingState", (plugin, session) => plugin.saveBrowsingState({ session, ...snapshot }))
+    if (host.web === undefined) try hosted("saveBrowsingState", (plugin, session) => plugin.saveBrowsingState({ session, ...snapshot }))
+    else try saveWebBrowsing(snapshot)
     return { type: "saved", ticket: write, ok: true, now: untimed }
   } catch () => ({ type: "saved", ticket: write, ok: false, now: untimed })
 }
 
 function carryTabs(fx: TabsOut): Job<TabsEvent, TabHost | Pages | Tabs.Machine, []> {
   return match (fx) {
-    when { tag: "Restore", let ticket }: answer("restore", restoredFrom(ticket), { type: "restored", ticket, ok: false, shown: 0 });
+    when { tag: "Restore", let ticket }: answer("restore", restoredFrom(ticket), failedRestore(ticket));
     when { tag: "Create", let tab, let kind }: run(`create ${tab}`, made(tab, kind));
     when { tag: "Close", let tab }: run(`close ${tab}`, effect {
       const host = try TabHost
-      try ignore(hosted("close", (plugin, session) => plugin.close({ session, id: idOf(tab) })))
+      if (host.web === undefined) try ignore(hosted("close", (plugin, session) => plugin.close({ session, id: idOf(tab) })))
+      else try sync(() => host.web?.close(idOf(tab)))
       host.session.forget([idOf(tab)])
       try (try Pages).end(tab)
     });
@@ -162,7 +180,12 @@ function carryTabs(fx: TabsOut): Job<TabsEvent, TabHost | Pages | Tabs.Machine, 
 
 effect function erased(): TabsEvent!!(TabHost | Pages) {
   return effect {
-    try hosted("clearBrowsingData", (plugin, session) => plugin.clearBrowsingData({ session }))
+    const host = try TabHost
+    if (host.web === undefined) try hosted("clearBrowsingData", (plugin, session) => plugin.clearBrowsingData({ session }))
+    else {
+      try saveWebBrowsing({})
+      try sync(() => host.web?.clear())
+    }
     try (try Pages).keepVisits([])
     return { type: "erased", ok: true }
   } catch () => ({ type: "erased", ok: false })
@@ -174,7 +197,7 @@ effect function visited(tab: number, load: number): void!!(Pages | TabHost | Tab
   if (!Tabs.canTouch(tabs, tab) || tabs.erasing === "Running") return
   const page = try pageOf(tab)
   const host = try TabHost
-  const url = host.session.info(idOf(tab))?.url
+  const url = (try sync(() => host.web?.address(idOf(tab)))) ?? host.session.info(idOf(tab))?.url
   if (page.load !== load || page.phase !== "Shown" || !savedBrowserUrl(url)) return
   try (try Pages).visit(url)
   try tellTabs({ type: "touch", tab })
@@ -195,11 +218,15 @@ effect function went(tab: number, load: number, way: Address.Way): PageEvent!!(T
     if (way === "Address" || way === "Query") {
       const aimed = try (try Pages).aimed(tab)
       if (Option.isNone(aimed)) return failed
-      host.session.beginNavigation(id, aimed.value)
-      try hosted("navigate", (plugin, session) => plugin.navigate({ session, id, url: aimed.value }))
+      if (host.web === undefined) {
+        host.session.beginNavigation(id, aimed.value)
+        try hosted("navigate", (plugin, session) => plugin.navigate({ session, id, url: aimed.value }))
+      } else if (!(try sync(() => host.web?.navigate(id, load, aimed.value)))) return failed
     } else {
-      const command = way === "Again" ? "reload" : way === "Backward" ? "back" : "forward"
-      try hosted("command", (plugin, session) => plugin.command({ session, id, command }))
+      if (host.web === undefined) {
+        const command = way === "Again" ? "reload" : way === "Backward" ? "back" : "forward"
+        try hosted("command", (plugin, session) => plugin.command({ session, id, command }))
+      } else if (!(try sync(() => host.web?.move(id, load, way)))) return failed
     }
     return { type: "started" }
   } catch () => failed
@@ -208,7 +235,11 @@ effect function went(tab: number, load: number, way: Address.Way): PageEvent!!(T
 function carryPage(tab: number) {
   return (fx: PageOut): Job<PageEvent, TabHost | Pages | Tabs.Machine, []> => match (fx) {
     when { tag: "Go", let load, let way }: stream(`go ${tab}`, Stream.fromEffect(went(tab, load, way)) |> Stream.filter(%, (event) => event.type === "failed"), { type: "failed", load });
-    when { tag: "Halt" }: run(`halt ${tab}`, ignore(hosted("command", (plugin, session) => plugin.command({ session, id: idOf(tab), command: "stop" }))));
+    when { tag: "Halt", let load }: run(`halt ${tab}`, effect {
+      const host = try TabHost
+      if (host.web === undefined) try ignore(hosted("command", (plugin, session) => plugin.command({ session, id: idOf(tab), command: "stop" })))
+      else try sync(() => host.web?.stop(idOf(tab), load))
+    });
     when { tag: "Visit", let load }: run(`visit ${tab}`, visited(tab, load));
     when { tag: "Find" }: run(`find ${tab}`, ignore(effect {
       const { text } = try (try Pages).sought(tab)
@@ -270,6 +301,14 @@ const tabs = reacting(Tabs, {
 const told = started(effect {
   const host = try TabHost
   try Stream.runForEach(host.told, effect (said) => {
+    if (said.kind === "framed") {
+      const { id, load } = said.request
+      const tab = tabOf(id)
+      if ((try (try Tabs.Machine).get()).open.includes(tab) && (try sync(() => host.web?.current(id, load))) === said.request) {
+        try tellPage(tab, { type: "framed", load })
+      }
+      return
+    }
     if (said.kind === "showDownloads") {
       const raw = said.raw
       if (typeof raw === "object" && raw !== null && "session" in raw && raw.session === host.session.session && showing(try (try Shell).get(), "Browser")) {
@@ -323,6 +362,10 @@ const shown = started(effect {
 
 effect function present(tab: number, host: TabHost.Shape): void!! {
   const place = placeOfPage()
+  if (host.web !== undefined) {
+    try sync(() => host.web?.present(tab === 0 || place === undefined ? null : { id: idOf(tab), ...place }))
+    return
+  }
   const plugin = host.plugin
   if (Option.isNone(plugin)) return
   try ignore(tryPromise(() => tab === 0 || place === undefined

@@ -1,6 +1,6 @@
 import { Effect, Layer } from "effect";
 import { type ReactElement, Suspense, lazy } from "react";
-import { MediaHandoff, stageAttachment } from "./assistant/attachments.vibe";
+import { MediaHandoff, stageAttachment, stageTranscript } from "./assistant/attachments.vibe";
 import { executeMedia } from "./assistant/media-executors.ts";
 import { MediaExecutors } from "./assistant/media-review.vibe";
 import { type Mount, type Place, mounts as every } from "./areas.ts";
@@ -19,6 +19,10 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
     attach: (file) => Effect.promise(async () => {
       const { default: assistant } = await import("./assistant/index.tsx");
       return assistant.runtime(alpha).runPromise(stageAttachment(file));
+    }).pipe(Effect.catchCause(() => Effect.succeed(false))),
+    offerTranscript: (transcript) => Effect.promise(async () => {
+      const { default: assistant } = await import("./assistant/index.tsx");
+      return assistant.runtime(alpha).runPromise(stageTranscript(transcript));
     }).pipe(Effect.catchCause(() => Effect.succeed(false))),
   });
   const executors = Layer.succeed(MediaExecutors, {

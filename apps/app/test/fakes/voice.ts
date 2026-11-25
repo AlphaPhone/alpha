@@ -9,6 +9,8 @@ export interface SpokenSentence {
   readonly channel: "local" | "cloud";
 }
 
+type NoteWindow = { readonly requestId: string; readonly recordingId: string; readonly noteId: string; readonly offsetMs: number; readonly durationMs: number };
+
 export interface VoiceScene {
   permission: "granted" | "denied" | "prompt";
   grantOnRequest: boolean;
@@ -22,6 +24,7 @@ export interface VoiceScene {
   finishRecording?: () => void;
   readonly dictationClips: string[];
   voicemailTranscription: ((id: string, requestId: string) => Promise<string>) | undefined;
+  noteTranscription?: (window: NoteWindow) => Promise<string>;
   readonly canceledVoicemailTranscriptions: string[];
   probeGate: (() => Promise<void>) | undefined;
   warmSpeechOutputCalls: number;
@@ -42,6 +45,10 @@ export interface VoiceScene {
   streamTiming: unknown;
   stopCloudSpeechCalls: number;
   hushCalls: number;
+  speakerMuted: boolean;
+  speakerGainGate?: (muted: boolean) => Promise<void>;
+  readonly speakerGainRequests: boolean[];
+  readonly speakerMutedAtPlayback: boolean[];
   readonly spoken: SpokenSentence[];
   activeMicSession: string | undefined;
   emitLocal?: (event: string, data: unknown) => void;
@@ -82,6 +89,9 @@ export function voiceScene(): VoiceScene {
     streamTiming: { format: "alpha-cloud-stream-timing-v1", records: [] },
     stopCloudSpeechCalls: 0,
     hushCalls: 0,
+    speakerMuted: false,
+    speakerGainRequests: [],
+    speakerMutedAtPlayback: [],
     spoken: [],
     activeMicSession: undefined,
   };
@@ -148,14 +158,24 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
         return Promise.resolve({ playbackId });
       },
       play: ({ playbackId }: { playbackId: string }) => {
+        voice.speakerMutedAtPlayback.push(voice.speakerMuted);
         emit("playbackEnded", { playbackId });
         return Promise.resolve({});
+      },
+      setSpeechOutputMuted: async ({ muted }: { muted: boolean }) => {
+        voice.speakerGainRequests.push(muted);
+        await voice.speakerGainGate?.(muted);
+        voice.speakerMuted = muted;
       },
       stopPlayback: () => {
         voice.hushCalls += 1;
         return Promise.resolve({});
       },
       cancel: () => Promise.resolve({}),
+      transcribeSavedNote: async (window: NoteWindow) => {
+        if (voice.noteTranscription === undefined) throw rejection("No saved note transcription");
+        return { text: await voice.noteTranscription(window), local: true };
+      },
       startRecording: async () => {
         const recordingId = `rec-${++recordingSeq}`;
         activeRecording = recordingId;

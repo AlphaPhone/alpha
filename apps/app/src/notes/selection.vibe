@@ -10,11 +10,21 @@ import { Machine as Layers, pageInert } from "../../gen/app__shell__layers.effec
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import type { Agent } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
+import { NoteStore } from "../platform/notes.vibe"
 import { ownerAt } from "../platform/owner.vibe"
-import { NoteContent, numberOf } from "./content.vibe"
+import { NoteContent, numberOf, savedVoice } from "./content.vibe"
 
 export type RendererNote = { readonly kind: "canonical-note" | "canonical-note-source"; readonly id: string; readonly revision: string }
 export type NotesSelection = Notes | Editor | Link | Voice | Previous | Trash | Recorder | Layers | Shell | Device | Agent | NoteContent
+export type NoteTranscript = {
+  readonly owner: number
+  readonly number: number
+  readonly opened: number
+  readonly record: RendererNote & { readonly kind: "canonical-note" }
+  readonly title: string
+}
+
+type NoteSubjects = { readonly note: number; readonly owner: number; readonly revision: number; readonly opened: number }
 
 function chosen(list: List, editor: Writing, link: Dialog, voice: VoiceNote): number {
   if (list.read.status !== "Loaded" || list.owner === 0) return 0
@@ -30,14 +40,18 @@ export const noteSubjects = Stream.unwrap(effect {
   const editor = try Editor
   const link = try Link
   const voice = try Voice
-  return Stream.changes(Stream.map(Stream.zipLatest(Stream.zipLatest(list.changes, editor.changes), Stream.zipLatest(link.changes, voice.changes)),
-    ([[notes, writing], [linked, speaking]]) => chosen(notes, writing, linked, speaking)))
+  return Stream.changesWith(Stream.map(Stream.zipLatest(Stream.zipLatest(list.changes, editor.changes), Stream.zipLatest(link.changes, voice.changes)),
+    ([[notes, writing], [linked, speaking]]): NoteSubjects => ({
+      note: chosen(notes, writing, linked, speaking), owner: notes.owner, revision: notes.version, opened: speaking.showing ? speaking.opened : 0,
+    })), (one, next) => one.note === next.note && one.owner === next.owner && one.revision === next.revision && one.opened === next.opened)
 })
 
 /** Only identifiers cross to the agent. The agent reads its own saved words after receiving an owner turn. */
 export effect function notesSelection(): (RendererNote | undefined)!!NotesSelection {
-  const shell = try (try Shell).get()
-  if (!showing(shell, "Notes") || !(try (try Device).showing()) || pageInert(try (try Layers).get())) return undefined
+  const shell = try Shell
+  if (!showing(try shell.get(), "Notes")) return undefined
+  const identity = ownerAt() catch () => ""
+  if (identity === "" || !(try (try Device).showing()) || !showing(try shell.get(), "Notes") || pageInert(try (try Layers).get())) return undefined
   if ((try (try Previous).get()).showing || (try (try Trash).get()).showing || unfinished(try (try Recorder).get())) return undefined
   const list = try (try Notes).get()
   const editor = try (try Editor).get()
@@ -45,10 +59,24 @@ export effect function notesSelection(): (RendererNote | undefined)!!NotesSelect
   const voice = try (try Voice).get()
   const id = chosen(list, editor, link, voice)
   const snapshot = try (try NoteContent).collection()
-  if (list.read.status !== "Loaded" || list.version !== snapshot.version || snapshot.owner === "" || numberOf("owner", snapshot.owner) !== list.owner) return undefined
-  if ((ownerAt() catch () => "") !== snapshot.owner) return undefined
+  if (list.read.status !== "Loaded" || list.version !== snapshot.version || snapshot.owner !== identity || numberOf("owner", identity) !== list.owner) return undefined
   const note = snapshot.noteByNumber.get(id)
   if (note !== undefined) return { kind: "canonical-note", id: note.id, revision: String(snapshot.version - 1) }
   if (editor.showing || link.showing || voice.showing) return undefined
   return { kind: "canonical-note-source", id: "notes", revision: String(snapshot.version - 1) }
+}
+
+/** Only the still visible, exact saved recording can supply an attached transcript. */
+export effect function transcriptCurrent(transcript: NoteTranscript): boolean!!(NotesSelection | NoteStore) {
+  if (!showing(try (try Shell).get(), "Notes") || !(try (try Device).showing()) ||
+    pageInert(try (try Layers).get())) return false
+  const saved = (try NoteStore).read() catch () => undefined
+  if (saved === undefined || String(saved.revision) !== transcript.record.revision) return false
+  const note = saved.notes.find((item) => item.id === transcript.record.id)
+  if (note === undefined || (savedVoice(note)?.lines.length ?? 0) === 0) return false
+  const selected = try notesSelection()
+  const voice = try (try Voice).get()
+  return selected?.kind === "canonical-note" && selected.id === transcript.record.id && selected.revision === transcript.record.revision &&
+    voice.showing && voice.owner === transcript.owner && voice.note === transcript.number && voice.opened === transcript.opened &&
+    String(voice.revision - 1) === transcript.record.revision && voice.added > 0
 }

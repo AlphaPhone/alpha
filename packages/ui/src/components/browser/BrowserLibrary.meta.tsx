@@ -9,5 +9,6 @@ export const meta: ComponentMeta<BrowserLibraryProps> = {
     failed: false,
     onBack: () => {},
     onOpen: () => {},
+    onRemoveBookmark: () => {},
   },
 };
