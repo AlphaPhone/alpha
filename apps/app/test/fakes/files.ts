@@ -49,6 +49,7 @@ export interface FilesScene {
   readonly texts: Record<string, string>;
   selectedByPicker: string | undefined;
   pickerRenameNeedsReselection: boolean;
+  readonly renamedSelections: Map<string, Stored>;
 }
 
 const file = (volume: string, path: string, mimeType: string, size = 100, modified = 1): Stored => ({ volume, path, directory: false, mimeType, size, modified });
@@ -67,7 +68,7 @@ export function filesScene(): FilesScene {
       folder("primary", "Documents/Old"),
       file("card", "song.mp3", "audio/mpeg", 4_000, 2),
     ],
-    trash: [], shared: [], opened: [], calls: [], gate: Promise.resolve(), now: 10, listMost: 5_000, queryMost: 500, changed: () => {}, watching: undefined, refusing: [], forgotten: [], texts: {}, selectedByPicker: undefined, pickerRenameNeedsReselection: false,
+    trash: [], shared: [], opened: [], calls: [], gate: Promise.resolve(), now: 10, listMost: 5_000, queryMost: 500, changed: () => {}, watching: undefined, refusing: [], forgotten: [], texts: {}, selectedByPicker: undefined, pickerRenameNeedsReselection: false, renamedSelections: new Map(),
   };
 }
 
@@ -241,7 +242,7 @@ export function selectedDocuments(scene: FilesScene): Faked {
     pickSelected(): Promise<unknown>;
     attachmentSelected(options: { selectionId: string }): Promise<unknown>;
   }, Record<string, never>>(() => {
-    const renamed = new Map<string, Stored>();
+    const renamed = scene.renamedSelections;
     const held = (selectionId: string) => scene.forgotten.includes(selectionId) ? undefined
       : renamed.get(selectionId) ?? scene.stored.find((one) => `selection:${one.path}` === selectionId);
     const described = (selectionId: string, found: Stored) => ({
@@ -261,7 +262,7 @@ export function selectedDocuments(scene: FilesScene): Faked {
       },
       describeSelected({ selectionId }) {
         const found = held(selectionId);
-        return Promise.resolve(found ? described(selectionId, found) : { status: "renamed-reselect", message: "" });
+        return Promise.resolve(found ? described(selectionId, found) : { status: "unavailable", message: "" });
       },
       renameSelected({ selectionId, name }) {
         const found = held(selectionId);
@@ -293,6 +294,7 @@ export function selectedDocuments(scene: FilesScene): Faked {
         return Promise.resolve({ status: "opened", message: "" });
       },
       forgetSelected({ selectionId }) {
+        renamed.delete(selectionId);
         scene.forgotten.push(selectionId);
         return Promise.resolve();
       },

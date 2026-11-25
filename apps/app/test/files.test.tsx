@@ -699,7 +699,13 @@ describe("Files on a phone", () => {
     expect(localStorage.getItem("alpha.files.recent.v1")).toBeNull();
     await until(first.alpha, first.runtime, Browser, (s) => s.open && s.storage.status === "Loaded");
     await press("lease.pdf");
-    await until(first.alpha, first.runtime, Shown, (s) => s.drawing.status === "Loaded" && s.kind === "Pdf");
+    await until(first.alpha, first.runtime, Shown, (s) => s.drawing.status === "Loaded" && s.kind === "Pdf" && s.revision === 5);
+    // spec/app/files/preview.md, "A picked document is renamed through its provider using the access held for the viewer"
+    await choose("Rename", "File actions");
+    await fill("Name", "retained-lease.pdf");
+    await pressOnTop("Rename");
+    await until(first.alpha, first.runtime, Shown, (s) => s.drawing.status === "Loaded" && s.renaming === 0 && s.revision === world.files.now);
+    expect(paths(world)).toContain("primary:Download/retained-lease.pdf");
     await press("Close");
     await until(first.alpha, first.runtime, Browser, (s) => s.storage.status === "Loaded");
     await press("Internal storage");
@@ -718,6 +724,13 @@ describe("Files on a phone", () => {
     await until(second.alpha, second.runtime, Browser, (s) => s.layout === "Grid" && s.order === "ByName");
     await until(second.alpha, second.runtime, Shown, (s) => s.viewer === 0);
     await until(second.alpha, second.runtime, Recent, (s) => s.rows.length === 2 && s.rows.filter((row) => row.grant === 0).length === 1);
+    await choose("Browse storage");
+    await press("retained-lease.pdf");
+    await until(second.alpha, second.runtime, Shown, (s) => s.drawing.status === "Loaded" && s.revision === world.files.now);
+    await press("Close");
+    await press("Internal storage");
+    await openRow("Documents");
+    await until(second.alpha, second.runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 2);
 
     // spec/app/files/change.md, "A restart reports a change or a share cut off as unknown, the change's items unknown too, and closes the choice and the sheet"
     await select("notes.txt");
