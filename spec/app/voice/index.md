@@ -451,10 +451,6 @@ pure def lawMinutesAreAlwaysSaid(hour: int, minute: int, written: Meridiem): boo
 
 On the Cloud speech relay, the microphone reopens on the conversation's own
 relay stream under the same owner, for every turn of the conversation.
-Discovered on vibestack-develop: each reopening asked the relay as a new
-owner, the relay refused it and closed, and Talk ended as soon as Alpha
-first spoke, so a turn whose acknowledgment was said while its tools still
-ran was cut off before its note opened or its reply came.
 
 ```quint
 pure def nextTurn(heard: bool, v: Voice): Change =
