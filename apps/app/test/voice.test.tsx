@@ -163,16 +163,17 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     expect([[...new Set(world.voice.relayWarmups)], warm.mic, world.voice.startCloudSpeechCalls, world.voice.startLiveCaptureCalls]).toEqual([["production"], "Off", 0, 0]);
   });
 
-  it('reports unavailable local Talk before opening the microphone (spec/app/voice/index.md, "The microphone opens for the current session only, and a microphone that cannot open fails the conversation")', async () => {
+  it('returns quietly to idle when local Talk is unavailable before opening the microphone (spec/app/voice/index.md, "The microphone opens for the current session only, and a microphone that cannot open fails the conversation"; spec/app/voice/index.md, "A failed conversation ends quietly: why it failed is kept only until voice returns to idle, and nothing is shown")', async () => {
     const world = { ...scene(), phone: true };
     world.voice.nativeTransport = false;
     const runtime = bootVoice(world);
     await until(runtime, Voice.Machine, (s) => s.warmed);
     await sendVoice(runtime, { type: "permissionChanged", grant: "Granted" });
+    const before = (await getVoice(runtime)).session;
     await sendVoice(runtime, { type: "startTalking", now: untimed });
-    await until(runtime, Voice.Machine, (s) => s.phase === "Failed");
-    const failed = await getVoice(runtime);
-    expect([failed.mic, failed.failure, failed.engineHeld, world.voice.activeMicSession]).toEqual(["Off", "NoMicrophone", false, undefined]);
+    await until(runtime, Voice.Machine, (s) => s.session > before && s.phase === "Idle");
+    const stopped = await getVoice(runtime);
+    expect([stopped.mic, stopped.failure, stopped.engineHeld, world.voice.activeMicSession, world.voice.startLiveCaptureCalls]).toEqual(["Off", "NoFailure", false, undefined, 0]);
   });
 
   it('recognizes the same recorded clip after a failed attempt (spec/app/voice/index.md, "Story: Dictate into a field")', async () => {
