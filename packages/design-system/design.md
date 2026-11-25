@@ -18,7 +18,7 @@ do next.
   and a chosen box or radio, is `alpha` with `alpha-foreground`, Alpha blue in both themes. `destructive`, `ok`, `warn` and `info` are states,
   `call` a live or answerable call (the same green in both themes, behind white text), `call-ended` the moment after one ends,
   `dial` the button that places one, `hangup` the red behind or inside a control that ends a call or removes a recording,
-  never text, `record` a running recording and `record-shutter` the Video shutter. Camera's access notice is `camera-panel`, its focus target `camera-focus`, and `camera-focused` once the camera confirms it. A state color always sits beside a
+  never text, `record` a running recording and `record-shutter` the Video shutter. `map` marks pins, the phone and the route on a map, and `alpha-deep` the tab under Maps guidance's banner, both the same in both themes. Camera's access notice is `camera-panel`, its focus target `camera-focus`, and `camera-focused` once the camera confirms it. A state color always sits beside a
   word or an accessible name, never alone.
 - **Type.** `font-sans` is Public Sans, for everything read or pressed. `font-display` is Denton, with
   Fraunces behind it, at weight `light`: a screen's display title on the launcher, the date on Home, a large figure. The sizes
@@ -35,7 +35,7 @@ do next.
   keypad key's letters; `text-keypad-number` the number being dialled, `text-keypad-digit` a key's
   digit and `text-keypad-letters` the letters under it; `text-contact-name` and `text-contact-initials`, in
   `font-display`, are a contact's name and initials at the top of their card. `text-lead` is the street of the next turn,
-  `text-title` a document's name over its preview and Notes' Recently deleted header on the launcher, and `text-figure` and `text-figure-sm` a route's time.
+  `text-title` a document's name over its preview and Notes' Recently deleted header on the launcher, and `text-figure` and `text-figure-sm` a route's time, `text-figure-lg` the distance to Maps guidance's next turn.
   `leading-row` sets `text-body` as a note's or a routine's title in a list, and `leading-transcript` a transcript read back, such as a voicemail's.
   `text-badge` is a video's length over a thumbnail and `text-tile-name` an album's name under its cover.
   `text-headline` is an open voice or link note's title and `text-quote` a clip kept from a page.
@@ -46,18 +46,20 @@ do next.
   chip's date; an event's page is titled `text-display` and its form `text-display-sm`. `leading-plain` is
   the browser's own line height for Public Sans, for a line whose box the design measures. `leading-details`
   spaces the From, To and Date lines of a message's details in Inbox, and `leading-message` the text of an email
-  being written.
+  being written; `leading-status` sets the Maps status card.
 - **Shape.** `radius` is a card; `rounded-group` a group of rows; `rounded-panel` a notice or a search bar; `rounded-home-card` is a Home overview card;
   `rounded-drawer-icon` rounds an installed app icon; `rounded-option` is a row of a floating menu and
   `rounded-box` the box of a list row's selection check; `rounded-chip` is a choice chip and an invitation
   row, `rounded-action` a labelled action button; `rounded-segment` is a segmented control and
   `rounded-segment-option` the option chosen in it; `rounded-camera-stop` is Camera's stop square and focus target. `rounded-tile` is an app tile, a menu and a dialog;
   `rounded-sheet` the top of a bottom sheet, `rounded-chat` the top of the Ask Alpha sheet; `rounded-full` a
-  button and a chip, `rounded-dock` the Ask Alpha bar and `rounded-dock-compact` its compact controls.
+  button and a chip, `rounded-dock` the Ask Alpha bar and `rounded-dock-compact` its compact controls; `rounded-bar` is the foot bar of Maps guidance.
   Everything pressed is at least 44px in both directions.
 - **Elevation.** `shadow-sm` lifts a control, `shadow-menu` a menu, `shadow-md` a dialog or a notice, `shadow-lg` a raised card,
   `shadow-dock` the floating Ask Alpha bar, `shadow-dock-compact` its compact controls, `shadow-bar` the ongoing-call bar over a view,
-  and `shadow-sheet` a bottom sheet. The dock and bar shadows have a `-dark` variant for black surfaces.
+  and `shadow-sheet` a bottom sheet. The dock and bar shadows have a `-dark` variant for black surfaces. Over the map, `shadow-float` lifts the search bar,
+  a round control and the directions card, `shadow-chip` a saved-place chip and `shadow-credit` the credit links,
+  each with a `-dark` variant, as is `shadow-sheet`; `shadow-banner` is Maps guidance's turn banner.
 - **Layers.** `z-dock` is the Ask Alpha bar, `z-sheet` the conversation and bottom sheets, `z-dialog` a
   dialog, `z-toast` a notice, `z-voice` the voice overlay. `z-10`, `z-20` and `z-50` order things inside one view.
 - **Motion.** `fast` for press, `base` for most changes, `slow` for entering and leaving, on
@@ -129,6 +131,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `record-shutter` | oklch(0.6083 0.209 27.03) | — |
 | `camera-focus` | oklch(0.8819 0.1534 90.23) | — |
 | `camera-focused` | oklch(0.8086 0.1479 154.1) | — |
+| `map` | oklch(0.414 0.266 266.5) | — |
+| `alpha-deep` | oklch(0.354 0.245 264.1) | — |
 
 | Token | Value |
 | --- | --- |
@@ -150,6 +154,7 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `rounded.segment` | 0.9375rem |
 | `rounded.segment-option` | 0.6875rem |
 | `rounded.camera-stop` | 0.5rem |
+| `rounded.bar` | 2rem |
 | `font.sans` | "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif |
 | `font.display` | Denton, Fraunces, Georgia, serif |
 | `font.mono` | ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace |
@@ -215,6 +220,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.title.tracking` | -0.01em |
 | `text.figure-sm.size` | 1.875rem |
 | `text.figure-sm.leading` | 1.05 |
+| `text.figure-lg.size` | 2.5rem |
+| `text.figure-lg.leading` | 1 |
 | `text.keypad-letters.size` | 0.6875rem |
 | `text.keypad-letters.leading` | 1.1 |
 | `text.keypad-letters.tracking` | 0.12em |
@@ -255,6 +262,7 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `leading.field` | 1.375 |
 | `leading.chat` | 1.5 |
 | `leading.plain` | 1.18 |
+| `leading.status` | 1.45 |
 | `leading.details` | 1.45 |
 | `leading.message` | 1.55 |
 | `leading.detail` | 1.35 |
@@ -280,6 +288,14 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `shadow.dock-dark` | 0 14px 40px oklch(0 0 0 / 0.45) |
 | `shadow.dock-compact` | 0 12px 34px oklch(0 0 0 / 0.12) |
 | `shadow.dock-compact-dark` | 0 12px 34px oklch(0 0 0 / 0.45) |
+| `shadow.float` | 0 6px 22px oklch(0 0 0 / 0.12) |
+| `shadow.float-dark` | 0 6px 22px oklch(0 0 0 / 0.45) |
+| `shadow.chip` | 0 4px 14px oklch(0 0 0 / 0.12) |
+| `shadow.chip-dark` | 0 4px 14px oklch(0 0 0 / 0.45) |
+| `shadow.credit` | 0 2px 12px oklch(0 0 0 / 0.12) |
+| `shadow.credit-dark` | 0 2px 12px oklch(0 0 0 / 0.45) |
+| `shadow.sheet-dark` | 0 -10px 40px oklch(0 0 0 / 0.45) |
+| `shadow.banner` | 0 10px 30px oklch(0 0 0 / 0.5) |
 | `shadow.bar` | 0 2px 8px oklch(0 0 0 / 0.12) |
 | `shadow.bar-dark` | 0 2px 8px oklch(0 0 0 / 0.45) |
 | `shadow.focus-target` | 0 0 2px oklch(0 0 0) |
