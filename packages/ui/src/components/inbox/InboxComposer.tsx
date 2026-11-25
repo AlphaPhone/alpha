@@ -27,6 +27,8 @@ export type InboxComposerProps = Pick<InboxDraftStatusProps, "keeping" | "gmail"
     onFromChange?: (id: string) => void;
     /** The To line. */
     to: Line;
+    /** People the owner has mail from, offered under the To line: a few while it is empty, every match while an address is typed. Choosing one adds it to To. */
+    suggestions?: { name: string; email: string }[];
     /** The Cc line. */
     cc: Line;
     /** The Bcc line. */
@@ -81,7 +83,7 @@ export type InboxComposerProps = Pick<InboxDraftStatusProps, "keeping" | "gmail"
  * @model spec/app/inbox/drafts.md
  */
 export function InboxComposer({
-  kind, accounts, from, onFromChange, to, cc, bcc, subject, onSubjectChange, text, onTextChange, attachments, onRemoveAttachment, onAttach, clash = false,
+  kind, accounts, from, onFromChange, to, suggestions = [], cc, bcc, subject, onSubjectChange, text, onTextChange, attachments, onRemoveAttachment, onAttach, clash = false,
   onRestoreMine, onUseSaved, notice, onNoticeAction, outcome, storage, onReloadStorage, keeping, gmail, sent, onKeepAgain, onSend, onSaveToGmail, onCheckCopy, onDeleteGmailCopy, onSetAside, onDiscard,
 }: InboxComposerProps) {
   const [more, setMore] = useState(false);
@@ -90,7 +92,7 @@ export function InboxComposer({
   return (
     <div className="flex h-full min-h-0 flex-col bg-background pt-[env(safe-area-inset-top)] text-base text-foreground motion-safe:animate-rise">
       <InboxHeader leading={<button type="button" aria-label="Back from draft" disabled={!onSetAside} onClick={onSetAside} className={inboxHeaderButton}><ChevronLeft className="size-5.5!" /></button>}>
-        <h1 className="min-w-0 flex-1 truncate text-body leading-tight font-semibold">{titles[kind]}</h1>
+        <h1 className="min-w-0 flex-1 truncate text-md font-semibold">{titles[kind]}</h1>
         {menu ? (
           <Menu>
             <MenuTrigger aria-label="Draft actions" className={cn(inboxHeaderButton, "[&_svg]:size-5.5")}><Ellipsis /></MenuTrigger>
@@ -123,6 +125,19 @@ export function InboxComposer({
               {...to}
               trailing={<button type="button" aria-label="Cc and Bcc" aria-expanded={showMore} disabled={cc.recipients.length > 0 || bcc.recipients.length > 0 || cc.value !== "" || bcc.value !== ""} onClick={() => setMore(!more)} className={inboxLineButton}><ChevronDown aria-hidden /></button>}
             />
+            {suggestions.length > 0 ? (
+              <div role="group" aria-label="Suggested recipients" className="flex max-h-82.5 flex-col overflow-y-auto border-b border-border py-1.5">
+                {suggestions.map(({ name, email }) => (
+                  <button key={email} type="button" onClick={() => to.onAdd(email)} className={cn(focusRing, "flex items-center gap-3 rounded-md px-1 py-1.75 text-left active:bg-accent")}>
+                    <span aria-hidden className="flex size-9.5 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-bold whitespace-nowrap text-secondary-foreground">{Array.from(name.trim())[0]?.toUpperCase()}</span>
+                    <span className="flex min-w-0 flex-col">
+                      <span className="truncate text-base">{name}</span>
+                      <span className="truncate text-meta text-muted-foreground">{email}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
             {showMore ? (
               <>
                 <InboxRecipientField label="Cc" {...cc} />

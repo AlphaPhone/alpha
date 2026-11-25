@@ -316,7 +316,7 @@ function telephony(world: TelephonyScene): Faked {
         world.sent.push({ operationId, recipients, body });
         const thread = world.texts.find((one) => one.address === recipients[0])?.thread ?? Math.max(0, ...world.texts.map((one) => one.thread)) + 1;
         const submitted = world.holdSmsSubmission;
-        if (!submitted) world.texts.push({ id: Math.max(0, ...world.texts.map((one) => one.id)) + 1, thread, address: recipients[0], box: "sent", date: 1_700_000_400_000 + world.sent.length, body, read: true });
+        if (!submitted) world.texts.push({ id: Math.max(0, ...world.texts.map((one) => one.id)) + 1, thread, address: recipients[0], box: "sent", date: Math.max(1_700_000_400_000 + world.sent.length, ...world.texts.map((one) => one.date + 1)), body, read: true });
         const parts = recipients.map((_number, recipientIndex) => ({ index: recipientIndex, recipientIndex, partIndex: 0, sent: submitted ? "unknown" : "success", delivery: "unknown" }));
         const record = { kind: "sms-send", operationId, subscriptionId, bindingHash, status: submitted ? "submitted" : "sent", parts, createdAt: 1_700_000_400_000 };
         world.journal.set(operationId, record);

@@ -12,7 +12,7 @@ import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { ask } from "../platform/remote.vibe"
 import { Views, delivery, preparedIn } from "../assistant/views.vibe"
-import { MediaReview, requestedFilesOperation, sameFiles, type FilesOrigin } from "../assistant/media-review.vibe"
+import { filesOnlyHeaders, MediaReview, sameFiles, type FilesOrigin } from "../assistant/media-review.vibe"
 import type { Attached } from "../assistant/talk.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type VoiceEvent, VoiceBridge } from "../platform/voice.vibe"
@@ -24,7 +24,7 @@ import { replyWords } from "@repo/ui"
 import { dictationClock } from "./dictation-clock.vibe"
 
 const views: ReadonlyArray<Shell.View> = [
-  "Phone", "Messages", "Inbox", "Calendar", "Clock", "Reminders", "Browser", "Camera", "Photos", "Maps", "Notes", "Contacts", "Files", "Workflows", "Settings",
+  "Phone", "Messages", "Inbox", "Calendar", "Clock", "Reminders", "Browser", "Camera", "Photos", "Maps", "Notes", "Contacts", "Files", "Workflows", "Wallet", "Settings",
 ]
 
 export function placeOf(view: Shell.View | undefined): number {
@@ -389,12 +389,10 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view"
     const alreadyInFiles = showing?.tag === "App" && showing.view === "Files"
     const selected = observation?.metadata?.observation?.selectedObject
-    const operation = sameScreen && images.length === 0
-      && selected?.kind !== "document" ? requestedFilesOperation(spoken) : undefined
-    const outside = !alreadyInFiles && operation !== undefined && !("shown" in operation) ? operation : undefined
-    const review = operation === undefined || !alreadyInFiles && outside === undefined ? undefined : Option.getOrUndefined(try Effect.serviceOption(MediaReview))
+    const mayAskFiles = sameScreen && images.length === 0 && selected?.kind !== "document"
+    const review = mayAskFiles ? Option.getOrUndefined(try Effect.serviceOption(MediaReview)) : undefined
     const files = review === undefined || !alreadyInFiles ? undefined : try review.filesContext()
-    const origin = review === undefined || outside === undefined ? undefined : try review.filesOrigin(true)
+    const origin = review === undefined || alreadyInFiles ? undefined : try review.filesOrigin(true)
     const enrolled = review === undefined || (files === undefined && origin === undefined) ? undefined : try review.session()
     const stillTalking = effect {
       if (conversation === undefined || chats === undefined || shownChat === undefined || views === undefined) return false
@@ -408,12 +406,11 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     const readyToSend = review !== undefined && (files !== undefined ? sameFiles(files, try review.filesContext())
       : origin !== undefined && (try review.filesOrigin(true))?.route === origin.route)
     const direct = enrolled !== undefined && readyToSend && (try atSource) ? enrolled : undefined
-    awaitingFiles = direct !== undefined
     if (!Voice.canSentence(try voice.get(), session, turn)) {
       Queue.endUnsafe(queue)
       return
     }
-    const admittedScreen = review === undefined ? sameScreen : try atSource
+    const admittedScreen = direct === undefined ? sameScreen : try atSource
     const metadata = admittedScreen ? { ...observation?.metadata, ...(views === undefined ? {} : delivery(views.clientId, direct !== undefined)) } : {}
     // spec/app/assistant/reply.md, "One brief acknowledgment at most, only from the agent's acknowledgment frame, before any tool runs": it is said at once, with no hold, as the turn's first line.
     let cued = false
@@ -426,10 +423,16 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       memory.enqueueCue(turn, line)
       Queue.offerUnsafe(queue, { type: "sentence", session, turn })
     }
-    const hooks = { onPreview: feed, onAcknowledgment: cue, onTool: () => { toolRan = true } }
+    const hooks = {
+      onPreview: feed, onAcknowledgment: cue,
+      onTool: (name: string) => {
+        toolRan = true
+        if (direct !== undefined && name === "PROPOSE_DEVICE_ACTION") awaitingFiles = true
+      },
+    }
     const result = tryPromise(() => controller.send({
       text: spoken, channelType: "VOICE_DM", ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }),
-    }, { stream: hooks, ...(direct === undefined ? {} : { headers: direct.headers }) })) catch () => undefined
+    }, { stream: hooks, ...(direct === undefined ? {} : { headers: filesOnlyHeaders(direct) }) })) catch () => undefined
     if (isCloudFundsRefusal(result)) {
       memory.lastReply = ""
       Queue.offerUnsafe(queue, { type: "refusedForFunds", session, turn })
@@ -437,15 +440,15 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       return
     }
     let filesReport: string | undefined
-    if (direct !== undefined && review !== undefined && operation !== undefined && streamed
+    if (direct !== undefined && review !== undefined && awaitingFiles && streamed
       && result?.kind === "Replied" && result.reply.userMessageId !== undefined && result.reply.failureKind === undefined) {
       const message = result.reply.userMessageId
       const report = (note: string) => { filesReport = note }
-      if (files !== undefined) try review.spokenFiles(direct, message, { files, operation, current: atSource, report }, result.reply.actionResults)
-      if (outside !== undefined && origin !== undefined && conversation !== undefined && screen !== undefined && (try atSource)) {
+      if (files !== undefined) try review.spokenFiles(direct, message, { files, current: atSource, report }, result.reply.actionResults)
+      if (origin !== undefined && conversation !== undefined && screen !== undefined && (try atSource)) {
         const open = (source: Effect.Effect<boolean>) => openFilesForVoice(origin, session, turn, source, memory, voice, shell)
         const changes = Stream.merge(Stream.map(conversation.changes, () => undefined), Stream.map(voice.changes, () => undefined))
-        try review.spokenFilesFrom(direct, message, { origin, operation: outside, current: stillTalking, report },
+        try review.spokenFilesFrom(direct, message, { origin, current: stillTalking, report },
           { view: conversation, revision: screen.context.revision, moved: succeed(true), open, changes }, result.reply.actionResults)
       }
     }

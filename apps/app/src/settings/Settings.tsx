@@ -252,6 +252,8 @@ function General({ runtime, alpha, common }: PageProps) {
       reviewing={reset.state !== undefined && loading(reset.state.review)}
       onErase={reset.can(erase) ? () => void reset.send(erase) : undefined}
       said={reset.state && saidNames[reset.state.said]}
+      home={facts && roleWords[FactsGen.roleWord(facts, facts.home)]}
+      assistant={facts && roleWords[FactsGen.roleWord(facts, facts.assistant)]}
       requestingHome={facts !== undefined && loading(facts.request)}
       onRequestHome={can(request) ? () => void send(request) : undefined}
       updates={alpha.slot("settings/update")}
@@ -316,19 +318,9 @@ function Permissions({ runtime, common }: PageProps) {
   );
 }
 
-// spec/app/settings/facts.md, "Set as Home is offered when the newest answer reported a Home role that Alpha can take and does not hold, one request at a time"
-function Phone({ runtime, alpha, common }: PageProps) {
-  const { state, can, send } = useTimed(runtime, useFacts);
-  if (!state) return null;
-  const request = { type: "requestHome", at: untimed } as const;
+function Phone({ alpha, common }: PageProps) {
   return (
-    <SettingsPhonePage
-      {...common}
-      home={roleWords[FactsGen.roleWord(state, state.home)]}
-      assistant={roleWords[FactsGen.roleWord(state, state.assistant)]}
-      requesting={loading(state.request)}
-      onRequestHome={can(request) ? () => void send(request) : undefined}
-    >
+    <SettingsPhonePage told={common.told} onBack={common.onBack}>
       {alpha.slot("settings/phone")}
     </SettingsPhonePage>
   );
@@ -401,7 +393,7 @@ function About({ runtime, alpha, common }: PageProps) {
   const activity = useActivity(runtime).state;
   const agent = activity === undefined ? undefined : agentWords[ActivityGen.agentWord(activity.connection)];
   return (
-    <SettingsAboutPage {...common} onPhone={pages?.phone} agent={agent} alphaVersion={reading(facts, "Versions")} androidVersion={reading(facts, "AndroidVersion")} storage={reading(facts, "Storage")}>
+    <SettingsAboutPage {...common} onPhone={pages?.phone} agent={agent} alphaVersion={reading(facts, "Versions")} androidVersion={reading(facts, "AndroidVersion")}>
       {alpha.slot("settings/about")}
     </SettingsAboutPage>
   );

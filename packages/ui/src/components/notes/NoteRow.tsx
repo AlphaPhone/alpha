@@ -11,10 +11,12 @@ export type NoteRowProps = Omit<ComponentProps<"button">, "title"> & {
   preview: string;
   /** Marks a voice note with its waveform. */
   voice?: boolean;
+  /** A short note at the row's end, such as the days a deleted note has left; an empty one keeps its place. */
+  aside?: string;
 };
 
 /** One note in the Notes list: its title, then its date and the first two lines of what it holds. */
-export function NoteRow({ title, date, preview, voice = false, className, ...props }: NoteRowProps) {
+export function NoteRow({ title, date, preview, voice = false, aside, className, ...props }: NoteRowProps) {
   return (
     <button
       type="button"
@@ -24,11 +26,12 @@ export function NoteRow({ title, date, preview, voice = false, className, ...pro
       {voice && <AudioLines aria-hidden className="mt-0.5 size-4.5 shrink-0 text-primary" />}
       <span className="block min-w-0 flex-auto">
         <span className="block truncate text-body leading-row font-semibold">{title}</span>
-        <span className="mt-0.5 line-clamp-2 text-sm whitespace-pre-line text-muted-foreground">
+        <span className="mt-0.5 line-clamp-2 text-sm leading-normal whitespace-pre-line text-muted-foreground">
           <span className="text-foreground">{date}</span>
           {`  ${preview}`}
         </span>
       </span>
+      {aside !== undefined && <span aria-hidden className="shrink-0 pt-0.5 text-meta text-muted-foreground tabular-nums">{aside}</span>}
     </button>
   );
 }
