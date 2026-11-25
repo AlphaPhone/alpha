@@ -1,6 +1,6 @@
 // spec/app/browser/index.md, "Story: Let the agent open a page"; spec/app/approvals/direct.md, "Story: Let Alpha show me things without asking each time"
-import { NOT_DISPATCHED } from "@elizaos/agent/client"
-import type { DeviceOperation } from "@elizaos/agent/operations"
+import { NOT_DISPATCHED } from "@elizaos/agent"
+import type { DeviceOperation } from "@elizaos/agent"
 import * as Browser from "../../gen/app__browser.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { contained } from "../runtime/reactor.vibe"

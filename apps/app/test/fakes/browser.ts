@@ -1,5 +1,5 @@
 // spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/address.md, "Story: Watch a page load"
-import type { BrowserBookmarkList, BrowserPageGuard, BrowserSavedState, BrowserTabHostPlugin, BrowserTabState } from "@elizaos/os/bridges/definitions/tab-host";
+import type { BrowserBookmarkList, BrowserPageGuard, BrowserSavedState, BrowserTabHostPlugin, BrowserTabState } from "@elizaos/os-bridges";
 import { type Faked, plugin, rejection } from "./phone.ts";
 
 interface TabEvents {
@@ -7,6 +7,7 @@ interface TabEvents {
   tabOpened: { session: string; id: string; opener?: string; private?: boolean };
   tabClosed: { session: string; id: string };
   findResult: { session: string; id: string; navigation?: string; cleared?: boolean; index?: number; count?: number; done?: boolean };
+  showDownloads: { session: string };
 }
 
 /** One native tab of the fake tab host: its web view's history and what it shows. */
@@ -37,10 +38,13 @@ export interface BrowserScene {
   shown: { id: string; x: number; y: number; width: number; height: number } | undefined;
   /** Every call the page made, by method. */
   readonly calls: string[];
+  showInFiles: (() => void) | undefined;
   /** Hosts whose pages fail: `unreachable` as the network fails, `insecure` as a site with no HTTPS connection. */
   readonly failing: Map<string, "unreachable" | "insecure">;
   /** The addresses `openFailedPage` opened in another browser. */
   readonly elsewhere: string[];
+  /** The pages handed to Android's share sheet. */
+  readonly shared: string[];
 }
 
 /** develop's fixture photographs, served beside the fakes. */
@@ -143,6 +147,8 @@ export function browserScene(): BrowserScene {
     calls: [],
     failing: new Map(),
     elsewhere: [],
+    shared: [],
+    showInFiles: undefined,
   };
 }
 
@@ -313,7 +319,7 @@ export function alphaBrowser(world: BrowserScene): Faked {
       reviewQuestion: () => Promise.reject(rejection("Reading unavailable")),
       reviewReading: () => Promise.reject(rejection("Reading unavailable")),
       cancelReading: () => Promise.resolve(),
-      share: (options) => Promise.resolve(stateOf(held(options))),
+      share: (options) => { world.shared.push(options.url); return Promise.resolve(stateOf(held(options))); },
       openExternalBrowser: () => Promise.resolve(),
       // `pageContext`: the shown normal tab's committed page as its web view reads it, never a private tab's.
       pageContext: (options) => {
@@ -329,7 +335,14 @@ export function alphaBrowser(world: BrowserScene): Faked {
         world.elsewhere.push(options.url);
         return Promise.resolve();
       },
-      downloads: () => Promise.resolve(),
+      downloads: ({ session: requested }) => {
+        world.calls.push("downloads");
+        world.showInFiles = () => {
+          world.showInFiles = undefined;
+          emit("showDownloads", { session: requested });
+        };
+        return Promise.resolve();
+      },
       loginFillStatus: () => Promise.resolve({ available: false }),
     };
   });

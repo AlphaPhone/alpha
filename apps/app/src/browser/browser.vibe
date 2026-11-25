@@ -1,29 +1,27 @@
 // spec/app/browser/address.md, "Story: Find in page"; spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/index.md, "Story: Keep my tabs through a restart"; spec/app/browser/index.md, "Story: Save the session"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"
 import type * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { browsingSnapshot, restoreBrowsing } from "@elizaos/os/bridges/browsing-session"
+import { browsingSnapshot, DEFAULT_BROWSING_LIMITS, restoreBrowsing, savedBrowserUrl } from "@elizaos/os-bridges"
 import * as Tabs from "../../gen/app__browser.effect.vibe"
 import type { Browser, Effect as TabsOut, Event as TabsEvent } from "../../gen/app__browser.effect.vibe"
 import * as Address from "../../gen/app__browser__address.effect.vibe"
 import type { Effect as PageOut, Event as PageEvent, Page } from "../../gen/app__browser__address.effect.vibe"
-import * as Library from "../../gen/app__browser__library.effect.vibe"
 import * as Share from "../../gen/app__browser__share.effect.vibe"
 import type { Effect as ShareOut, Event as ShareEvent } from "../../gen/app__browser__share.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import * as Inbox from "../../gen/app__inbox.effect.vibe"
 import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import type { Machine as Suggestions } from "../../gen/app__inbox__suggestion.effect.vibe"
+import type { BrowserPageGuard, BrowserTabHostPlugin } from "@elizaos/os-bridges"
 import { type EmailDestination, emailDestination } from "../assistant/message-actions.vibe"
 import { type Offers, useInEmail } from "../inbox/suggestion.vibe"
-import type { BrowserPageGuard, BrowserTabHostPlugin } from "@elizaos/os/bridges/definitions/tab-host"
-import { TabHost, hosted } from "../platform/browser.vibe"
+import { BrowserDownloadsHandoff, TabHost, hosted } from "../platform/browser.vibe"
 import { Device } from "../platform/device.vibe"
 import type { Install } from "../runtime/attempts.vibe"
 import { type Job, Whole, answer, contained, due, reacting, run, started, stream, together, untimed, whole } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import { Kept, forgetHistory, historyToSave, kept, library, remember } from "./library.vibe"
 
 module page {
-  import { isSecureWebAddress } from "@elizaos/os/browser/address"
+  import { addressFacts, isSecureWebAddress } from "@elizaos/os-bridges"
   import type { Input } from "../../gen/app__browser__address.ts"
 
   /** Whether `href` came over HTTPS with a host. @throws {never} */
@@ -44,16 +42,18 @@ module page {
     const web = /^https?:\/\//i.test(text)
     const rest = text.replace(/^https?:\/\//i, "")
     const authority = rest.split(/[/?#]/)[0] ?? ""
+    const spaced = /\s/.test(text)
+    const mail = /^[^\s/:@?#%]+@[^\s/:@?#%]+\.[^\s/:@?#%]+$/.test(text)
     return {
       blank: text === "",
       tooLong: text.length > 8192,
-      userInfo: authority.includes("@") && (web || !/\s/.test(text)) && !/^[^\s@]+@[^\s@]+\.[^\s@/]+$/.test(text),
+      userInfo: !mail && (addressFacts(text, "DefaultHttps").userInfo || authority.includes("@") && (web || !spaced)),
       web,
-      spaced: /\s/.test(text),
+      spaced,
       colon: /^[A-Za-z][\w-]*:(?!\d)/.test(text) && !web,
       host: /^(localhost|\[[\da-f:.]+\]|[^\s/:@.]+(\.[^\s/:@.]+)+)(:\d+)?([/?#]\S*)?$/i.test(rest) && !/^[\d.:]+$/.test(rest),
       numeric: /^[\d.:]+$/.test(text),
-      mail: /^[^\s@/]+@[^\s@/]+\.[^\s@/]+$/.test(text),
+      mail,
     }
   }
   /** The address the tab host opens for what was typed: the web address it names, or a search for it. @throws {never} */
@@ -78,7 +78,7 @@ const tabOf = (id: string): number => (/^tab(\d+)$/.test(id) ? Number(id.slice(3
 /** A tab's page: its own machines, the page and what may leave the Browser of it, made when the tab is first asked for and ended with the tab. */
 export type PageRuntime = ManagedRuntime.ManagedRuntime<Address.Machine | Share.Machine | Time, unknown>
 
-/** Alpha's own tab host beyond eliza's: a page that failed at an HTTPS address opens in another browser, as the host named it. */
+/** Alpha's own tab host beyond eliza's: a page that failed at an HTTPS address opens in another browser, as the host named it, and the shown page is read for a turn. */
 type AlphaTabHost = BrowserTabHostPlugin & { openFailedPage(options: BrowserPageGuard): Promise<void>; pageContext(options: BrowserPageGuard): Promise<Readonly<Record<string, unknown>>> }
 
 /** What Alpha's tab host says of a failed tab beyond eliza's state: the HTTPS address another browser may still reach. */
@@ -101,6 +101,10 @@ export service Pages {
   sought(tab: number): { readonly text: string; readonly index: number }!!
   stood(tab: number, index: number): void!!
   end(tab: number): void!!
+  /** The saved and newly committed normal-tab addresses in recent-first order. */
+  visits(): readonly string[]!!
+  keepVisits(history: readonly string[]): void!!
+  visit(url: string): void!!
 }
 
 effect function pageOf(tab: number): Page!!Pages {
@@ -136,24 +140,28 @@ effect function restoredFrom(ticket: number): TabsEvent!!(TabHost | Pages | Tabs
   return effect {
     const saved = try hosted("browsingState", (plugin, session) => plugin.browsingState({ session }))
     const s = try (try Tabs.Machine).get()
-    const back = restoreBrowsing(saved, { visits: [] }, s.untouched)
+    const pages = try Pages
+    const back = restoreBrowsing(saved, { visits: try pages.visits() }, s.untouched)
+    const cur = tabOf(back.cur ?? "")
+    const shown = s.kept.includes(cur) ? cur : (s.kept[0] ?? 0)
+    if (!Tabs.canRestored(s, ticket, shown)) return { type: "restored", ticket, ok: false, shown }
+    try pages.keepVisits(back.visits)
     for (const row of back.restored) {
       const tab = tabOf(row.id)
-      if (s.kept.includes(tab)) try (try Pages).aim(tab, row.url)
+      if (s.kept.includes(tab)) try pages.aim(tab, row.url)
     }
-    const cur = tabOf(back.cur ?? "")
-    return { type: "restored", ticket, ok: true, shown: s.kept.includes(cur) ? cur : (s.kept[0] ?? 0) }
+    return { type: "restored", ticket, ok: true, shown }
   } catch () => ({ type: "restored", ticket, ok: false, shown: 0 })
 }
 
 // spec/app/browser/index.md, "A stale session is written once it has been read, one write at a time, and never while browsing data is being cleared"
-effect function written(write: number): TabsEvent!!(Kept | TabHost | Tabs.Machine) {
+effect function written(write: number): TabsEvent!!(TabHost | Tabs.Machine | Pages) {
   return effect {
     const host = try TabHost
     const s = try (try Tabs.Machine).get()
-    const visits = try historyToSave()
+    const visits = try (try Pages).visits()
     const snapshot = browsingSnapshot(
-      { tabs: s.open.map((tab) => ({ id: idOf(tab), priv: s.privates.includes(tab) })), visits: [...visits], cur: idOf(s.selected) },
+      { tabs: s.open.map((tab) => ({ id: idOf(tab), priv: s.privates.includes(tab) })), visits, cur: idOf(s.selected) },
       (id) => host.session.info(id),
     )
     try hosted("saveBrowsingState", (plugin, session) => plugin.saveBrowsingState({ session, ...snapshot }))
@@ -161,17 +169,7 @@ effect function written(write: number): TabsEvent!!(Kept | TabHost | Tabs.Machin
   } catch () => ({ type: "saved", ticket: write, ok: false, now: untimed })
 }
 
-// spec/app/browser/index.md, "Cleared data takes every normal tab and the saved session with it, and keeps the private tabs"; spec/app/browser/library.md, "Clearing all browsing data empties history at once"
-effect function erased(): TabsEvent!!(Kept | TabHost | Library.Machine) {
-  return effect {
-    try hosted("clearBrowsingData", (plugin, session) => plugin.clearBrowsingData({ session }))
-    try forgetHistory()
-    try contained((try Library.Machine).send({ type: "wiped" }), "history cleared with all browsing data")
-    return { type: "erased", ok: true } as TabsEvent
-  } catch () => ({ type: "erased", ok: false })
-}
-
-function carryTabs(fx: TabsOut): Job<TabsEvent, Kept | TabHost | Pages | Tabs.Machine | Library.Machine, []> {
+function carryTabs(fx: TabsOut): Job<TabsEvent, TabHost | Pages | Tabs.Machine, []> {
   return match (fx) {
     when { tag: "Restore", let ticket }: answer("restore", restoredFrom(ticket), { type: "restored", ticket, ok: false, shown: 0 });
     when { tag: "Create", let tab, let kind }: run(`create ${tab}`, made(tab, kind));
@@ -187,17 +185,40 @@ function carryTabs(fx: TabsOut): Job<TabsEvent, Kept | TabHost | Pages | Tabs.Ma
   }
 }
 
+effect function erased(): TabsEvent!!(TabHost | Pages) {
+  return effect {
+    try hosted("clearBrowsingData", (plugin, session) => plugin.clearBrowsingData({ session }))
+    try (try Pages).keepVisits([])
+    return { type: "erased", ok: true }
+  } catch () => ({ type: "erased", ok: false })
+}
+
+// spec/app/browser/library.md, "A page that commits in a normal tab is counted in history, which keeps the newest hundred"
+effect function visited(tab: number, load: number): void!!(Pages | TabHost | Tabs.Machine) {
+  const tabs = try (try Tabs.Machine).get()
+  if (!Tabs.canTouch(tabs, tab) || tabs.erasing === "Running") return
+  const page = try pageOf(tab)
+  const host = try TabHost
+  const url = host.session.info(idOf(tab))?.url
+  if (page.load !== load || page.phase !== "Shown" || !savedBrowserUrl(url)) return
+  try (try Pages).visit(url)
+  try tellTabs({ type: "touch", tab })
+}
+
 // spec/app/browser/address.md, "Submitting text opens it, searches for it or says why not, and blank text is not submitted"; spec/app/browser/address.md, "Back and forward move through the tab's own pages"; spec/app/browser/address.md, "Reload loads a shown, failed or stopped page again"
 effect function went(tab: number, load: number, way: Address.Way): PageEvent!!(TabHost | Pages | Tabs.Machine) {
   const failed: PageEvent = { type: "failed", load }
   return effect {
+    const host = try TabHost
+    if (!(try host.observing())) return failed
     const s = try (try Tabs.Machine).get()
+    const p = try pageOf(tab)
+    if (!s.open.includes(tab) || p.phase !== "Loading" || p.load !== load) return failed
     elsewhere.delete(idOf(tab))
     try tellShare(tab, { type: "pageChanged" })
     if (!s.native.includes(tab)) try tellTabs({ type: "load", tab })
     try made(tab, Tabs.kindOf(s, tab))
     const id = idOf(tab)
-    const host = try TabHost
     if (way === "Address" || way === "Query") {
       const aimed = try (try Pages).aimed(tab)
       if (Option.isNone(aimed)) return failed
@@ -209,14 +230,6 @@ effect function went(tab: number, load: number, way: Address.Way): PageEvent!!(T
     }
     return { type: "started" }
   } catch () => failed
-}
-
-// spec/app/browser/library.md, "A page that commits in a normal tab is counted in history, which keeps the newest hundred"; spec/app/browser/index.md, "A normal tab whose page changes makes the saved session stale"
-/** A page committed in a normal tab: history gains it, and the saved session is stale. */
-effect function visited(tab: number): void!!(Kept | TabHost | Tabs.Machine | Library.Machine) {
-  try remember((try TabHost).session.info(idOf(tab))?.url ?? "")
-  try contained((try Library.Machine).send({ type: "visited" }), "a page in history")
-  try tellTabs({ type: "touch", tab })
 }
 
 /** The shown page's guard, as the host last said it: the page a call is for, which the host refuses once it moved on. */
@@ -240,8 +253,7 @@ effect function leaving(tab: number, confirmed: boolean): ShareEvent!!(TabHost |
   const guard = try guardOf(tab)
   const runtime = try (try Pages).of(tab)
   const share = try promise(() => runtime.runPromise(Share.Machine.use((machine) => machine.get())))
-  const id = idOf(tab)
-  const failedAt = elsewhere.get(id)
+  const failedAt = elsewhere.get(idOf(tab))
   if (Option.isNone(guard) || (share.stranded && failedAt === undefined)) return { type: "launched", ok: false, found: true }
   const sent = share.stranded && failedAt !== undefined
     ? hosted("openFailedPage", (plugin) => (plugin as AlphaTabHost).openFailedPage({ ...guard.value, url: failedAt }))
@@ -277,10 +289,10 @@ function carryShare(tab: number) {
 }
 
 function carryPage(tab: number) {
-  return (fx: PageOut): Job<PageEvent, Kept | TabHost | Pages | Tabs.Machine | Library.Machine, []> => match (fx) {
+  return (fx: PageOut): Job<PageEvent, TabHost | Pages | Tabs.Machine, []> => match (fx) {
     when { tag: "Go", let load, let way }: stream(`go ${tab}`, Stream.fromEffect(went(tab, load, way)) |> Stream.filter(%, (event) => event.type === "failed"), { type: "failed", load });
     when { tag: "Halt" }: run(`halt ${tab}`, ignore(hosted("command", (plugin, session) => plugin.command({ session, id: idOf(tab), command: "stop" }))));
-    when { tag: "Visit" }: run(`visit ${tab}`, visited(tab));
+    when { tag: "Visit", let load }: run(`visit ${tab}`, visited(tab, load));
     when { tag: "Find" }: run(`find ${tab}`, ignore(effect {
       const { text } = try (try Pages).sought(tab)
       try hosted("find", (plugin, session) => plugin.find({ session, id: idOf(tab), query: text }))
@@ -296,6 +308,7 @@ const pages = Layer.effect(Pages, effect {
   const made = new Map<number, PageRuntime>()
   const aims = new Map<number, string>()
   const finds = new Map<number, { text: string; index: number }>()
+  let history: readonly string[] = []
   return {
     effect of(tab: number): PageRuntime!! {
       const known = made.get(tab)
@@ -305,7 +318,7 @@ const pages = Layer.effect(Pages, effect {
       const privateTab = Option.isSome(found) && (try found.value.get()).privates.includes(tab)
       const page = reacting(Address, { carry: carryPage(tab), ...(privateTab ? { open: [{ type: "bePrivate" }] as const } : {}) })
       const machine = whole(Layer.provideMerge(reacting(Share, { carry: carryShare(tab) }), page))
-      const runtime: PageRuntime = ManagedRuntime.make(Layer.provideMerge(machine, Layer.succeedContext(context as Context.Context<KeyValueStore.KeyValueStore | Time | Install | Kept | TabHost | Pages | Tabs.Machine | Library.Machine | Mail>)))
+      const runtime: PageRuntime = ManagedRuntime.make(Layer.provideMerge(machine, Layer.succeedContext(context as Context.Context<KeyValueStore.KeyValueStore | Time | Install | TabHost | Pages | Tabs.Machine | Mail>)))
       made.set(tab, runtime)
       return runtime
     },
@@ -314,6 +327,11 @@ const pages = Layer.effect(Pages, effect {
     seek: (tab: number, text: string) => sync(() => { finds.set(tab, { text, index: 0 }) }),
     sought: (tab: number) => sync(() => finds.get(tab) ?? { text: "", index: 0 }),
     stood: (tab: number, index: number) => sync(() => { finds.set(tab, { text: finds.get(tab)?.text ?? "", index }) }),
+    visits: () => sync(() => history),
+    keepVisits: (visits: readonly string[]) => sync(() => { history = visits }),
+    visit: (url: string) => sync(() => {
+      history = [url, ...history.filter((visit) => visit !== url)].slice(0, DEFAULT_BROWSING_LIMITS.history)
+    }),
     effect end(tab: number): void!! {
       const runtime = made.get(tab)
       made.delete(tab)
@@ -336,6 +354,13 @@ const tabs = reacting(Tabs, {
 const told = started(effect {
   const host = try TabHost
   try Stream.runForEach(host.told, effect (said) => {
+    if (said.kind === "showDownloads") {
+      const raw = said.raw
+      if (typeof raw === "object" && raw !== null && "session" in raw && raw.session === host.session.session && showing(try (try Shell).get(), "Browser")) {
+        try (try BrowserDownloadsHandoff).open()
+      }
+      return
+    }
     if (said.kind === "closed") {
       const id = host.session.applyClosed(said.raw)
       if (id !== undefined) try tellTabs({ type: "nativeLost", tab: tabOf(id) })
@@ -403,6 +428,14 @@ effect function present(tab: number, host: TabHost.Shape): void!! {
     : plugin.value.present({ session: host.session.session, id: idOf(tab), ...place })))
 }
 
+// spec/app/browser/downloads.md, "Story: Download a file"
+/** Open the current native Browser's Downloads list after its menu closes. */
+export const openDownloads: void!!(Tabs.Machine | Shell | TabHost) = effect {
+  if (!showing(try (try Shell).get(), "Browser") || (try (try Tabs.Machine).get()).layer !== "Menu") return
+  if (!(try tellTabs({ type: "uncover" }))) return
+  try contained(hosted("downloads", (plugin, session) => plugin.downloads({ session })), "opening Browser downloads")
+}
+
 /** Draw the page shown where the Browser marks its place, once that place is drawn. */
 export const placed: void!!(Tabs.Machine | Shell | TabHost) = effect {
   const s = try (try Tabs.Machine).get()
@@ -440,7 +473,7 @@ export effect function pageFor(): unknown!!(Tabs.Machine | TabHost | Time) {
 }
 
 /** The Browser's tabs, kept across restarts, and each tab's page, carried out through the phone's tab host. */
-export const browser = Layer.provideMerge(together(tabs, told, shown, away, library), Layer.merge(pages, kept))
+export const browser = Layer.provideMerge(together(tabs, told, shown, away), pages)
 
 // spec/app/messages/index.md, "Only the newest read of the open conversation is shown, and it marks the shown messages read only where Alpha is the phone's SMS app"; spec/app/browser/index.md, "Story: Open, pick and close tabs"
 /** A link the owner tapped in Messages opens in one selected normal Browser tab through the address machine. */
@@ -465,7 +498,8 @@ export effect function openMessageLink(href: string): boolean!!(Tabs.Machine | P
   return try tellTabs({ type: "uncover" })
 }
 
-// spec/app/browser/index.md, "One layer at a time covers the page, and Back uncovers it"; spec/app/browser/address.md, "Back and forward move through the tab's own pages"; spec/app/browser/share.md, "The owner confirms the private page as shown, or cancels"
+// spec/app/browser/index.md, "One layer at a time covers the page, and Back uncovers it"; spec/app/browser/address.md, "Back and forward move through the tab's own pages"
+// spec/app/browser/share.md, "The owner confirms the private page as shown, or cancels"
 /** Back inside the Browser: the layer over the page, a handoff to another browser under review, then the tab's own page before. Whether it took one. */
 export const back: boolean!!(Tabs.Machine | Pages) = effect {
   const machine = try Tabs.Machine

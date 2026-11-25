@@ -63,6 +63,7 @@ export function Scan({ runtime }: Shown<Runtime>) {
   const selected = (image: File, replacing: number, camera: boolean) => {
     void runtime.runPromiseExit(addScanImage(image, replacing, camera));
   };
+  const selectedImage = state.origin === "SelectedImage";
   const review = state.keeping.overwrite.showing;
   const ready = can({ type: "add", frame: state.images + 1, replacing: 0, camera: false }, "Phone");
   const canExport = allowed({ type: "exportPdf" });
@@ -74,8 +75,10 @@ export function Scan({ runtime }: Shown<Runtime>) {
   return (
     <>
     <Dialog open onOpenChange={(open) => { if (!open) fire({ type: "close" }); }}>
-      <DialogContent aria-describedby={undefined} closeLabel="Close document" className="flex max-h-[min(90dvh,46rem)] flex-col overflow-y-auto">
-        <DialogTitle>Scan document</DialogTitle>
+      <DialogContent aria-describedby={undefined} closeLabel={selectedImage ? "Cancel scan" : "Close document"} className="flex max-h-[min(90dvh,46rem)] flex-col overflow-y-auto">
+        <DialogTitle>{selectedImage ? "Scan text" : "Scan document"}</DialogTitle>
+        {selectedImage && <p className="text-sm text-muted-foreground">On device</p>}
+        {allowed({ type: "showPages" }) && <Button variant="secondary" size="sm" onClick={() => fire({ type: "showPages" })}>Multi-page</Button>}
         {state.keeping.broken && <Alert variant="destructive">The saved draft could not be read.</Alert>}
         {allowed({ type: "resume" }) && (
           <div className="flex items-center justify-between rounded-tile bg-secondary p-3">
@@ -106,16 +109,16 @@ export function Scan({ runtime }: Shown<Runtime>) {
               const number = at + 1;
               return (
                 <li key={image} className="grid gap-2 rounded-tile bg-card p-3">
-                  <p className="font-semibold">Page {number}</p>
-                  {page !== undefined && <img src={page.uri} alt={`Document page ${number}`} className="max-h-32 w-full object-contain" loading="lazy" />}
+                  {!selectedImage && <p className="font-semibold">Page {number}</p>}
+                  {page !== undefined && <img src={page.uri} alt={selectedImage ? "Selected image" : `Document page ${number}`} className="max-h-32 w-full object-contain" loading="lazy" />}
                   <div className="flex flex-wrap gap-2">
                     {replace && correction.can(begin, "Owner") && <Button variant="secondary" size="sm" aria-label={`Correct page ${number}`} onClick={() => void correction.send(begin, "Owner")}><Crop />Correct</Button>}
                     {replace && <PickPage capture replacing={image} selected={selected} label={`Retake page ${number}`}><Camera className="size-4" aria-hidden />Retake</PickPage>}
                     {replace && <PickPage capture={false} replacing={image} selected={selected} label={`Replace page ${number}`}><ImagePlus className="size-4" aria-hidden />Replace</PickPage>}
                     {allowed({ type: "moveToEnd", image }) && at < state.pages.length - 1 && <Button variant="secondary" size="sm" aria-label={`Move page ${number} to end`} onClick={() => fire({ type: "moveToEnd", image })}><ArrowDown /></Button>}
-                    {allowed({ type: "remove", image }) && <Button variant="ghost" size="icon" aria-label={`Remove page ${number}`} onClick={() => fire({ type: "remove", image })}><Trash2 /></Button>}
+                    {!selectedImage && allowed({ type: "remove", image }) && <Button variant="ghost" size="icon" aria-label={`Remove page ${number}`} onClick={() => fire({ type: "remove", image })}><Trash2 /></Button>}
                     {allowed({ type: "keepPhoto", image }) && <Button variant="secondary" size="sm" onClick={() => fire({ type: "keepPhoto", image })}><Save />Keep photo</Button>}
-                    {allowed(read) && <Button variant="secondary" size="sm" loading={reading} onClick={() => fire(read)}>Read text</Button>}
+                    {reading && selectedImage ? <p role="status" className="text-sm text-muted-foreground">Reading text…</p> : allowed(read) && <Button variant="secondary" size="sm" loading={reading} onClick={() => fire(read)}>Read text</Button>}
                     {allowed({ type: "copyText", image }) && <Button variant="secondary" size="sm" onClick={() => fire({ type: "copyText", image })}>Copy text</Button>}
                     {allowed({ type: "reviewLinks", image }) && <Button variant="secondary" size="sm" onClick={() => fire({ type: "reviewLinks", image })}>Review links</Button>}
                     {allowed({ type: "suggestEvent", image }) && <Button variant="secondary" size="sm" loading={event?.status === "Loading"} onClick={() => fire({ type: "suggestEvent", image })}>Suggest event</Button>}
@@ -130,8 +133,8 @@ export function Scan({ runtime }: Shown<Runtime>) {
                   {event?.status === "Loaded" && !suggestion && <p className="text-sm text-muted-foreground">No date and time found</p>}
                   {blank && <p className="text-sm text-muted-foreground">No text found</p>}
                   {!blank && words !== undefined && (
-                    <details>
-                      <summary className="font-semibold">Review page text</summary>
+                    <details open={selectedImage || undefined}>
+                      <summary className="font-semibold">{selectedImage ? "Scanned text" : "Review page text"}</summary>
                       {words.lines.length === 0 ? <p className="whitespace-pre-wrap">{words.text}</p> : words.lines.map((line, index) => (
                         <label key={`${line.x}:${line.y}:${line.width}:${line.height}`} className="mb-1 block">
                           <span className="sr-only">Line {index + 1}</span>
@@ -171,7 +174,7 @@ export function Scan({ runtime }: Shown<Runtime>) {
               </DialogContent>
             </Dialog>
           )}
-          {(canExport || busy) && <Button size="sm" loading={busy} onClick={() => void runtime.runPromiseExit(exportScan(false))}><FileDown />Save PDF</Button>}
+          {(canExport || busy) && <Button size="sm" loading={busy} onClick={() => void runtime.runPromiseExit(exportScan(false))}><FileDown />{selectedImage ? "Save photo PDF" : "Save PDF"}</Button>}
           {canExport && searchable && <Button variant="secondary" size="sm" onClick={() => void runtime.runPromiseExit(exportScan(true))}>Searchable PDF</Button>}
         </div>
       </DialogContent>

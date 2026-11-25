@@ -2,12 +2,12 @@
 import type {
   AndroidReminderCancelInput, AndroidReminderCancelResult, AndroidReminderList,
   AndroidReminderPendingTap, AndroidReminderScheduleInput, AndroidReminderScheduleResult,
-} from "@elizaos/os/bridges/reminders"
+} from "@elizaos/os-bridges"
 import { registered } from "./device.vibe"
 
 module held {
-  import { remindersClient } from "@elizaos/os/bridges/reminders"
-  import type { RemindersClient } from "@elizaos/os/bridges/reminders"
+  import { remindersClient } from "@elizaos/os-bridges"
+  import type { RemindersClient } from "@elizaos/os-bridges"
 
   let made: RemindersClient | undefined
   /** eliza's client of the reminders plugin, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
@@ -35,7 +35,7 @@ export service PhoneReminders {
 
 const plugin = "ElizaReminders"
 
-/** On the phone: eliza's `remindersClient()` of `@elizaos/os/bridges/reminders`, where the host registered the plugin. */
+/** On the phone: eliza's `remindersClient()` of `@elizaos/os-bridges`, where the host registered the plugin. */
 export const phoneReminders = Layer.sync(PhoneReminders, () => {
   const present = registered(plugin)
   return {

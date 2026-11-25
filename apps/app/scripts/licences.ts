@@ -218,7 +218,7 @@ function ocrDrafts(): Draft[] {
     license: "Apache-2.0", source: "https://github.com/tesseract-ocr/tessdata_best", flags: flagged("Apache-2.0"),
     text: read(join(app, "public/ocr/tessdata-LICENSE.txt")).trim(),
   })
-  const sdk = installed(app, "@elizaos/plugin-files")
+  const sdk = installed(app, "@elizaos/plugin-files-client")
   const pdf = sdk === undefined ? undefined : installed(sdk, "pdf-lib")
   if (pdf === undefined) throw new Error("The SDK's searchable PDF engine is unavailable")
   drafts.push(packageDraft(pdf, json(join(pdf, "package.json"))))

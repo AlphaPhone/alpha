@@ -11,9 +11,10 @@ import { fromAreas } from "../home/cards.vibe"
 import { waiting } from "../home/waiting.vibe"
 import { applying, contained, started, together } from "../runtime/reactor.vibe"
 import { recentsLimit } from "./phone.vibe"
+import { displayNumber } from "./words.ts"
 
 const called = (row: { readonly cachedName: string | null; readonly number: string; readonly date: number }): Row => ({
-  title: row.cachedName || row.number || "Unknown caller",
+  title: row.cachedName || displayNumber(row.number) || "Unknown caller",
   detail: new Date(row.date).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
 })
 
@@ -26,7 +27,7 @@ effect function report(): void!!(Telephony | Phone | Messages | Voicemail) {
   const unread = threads?.rows.flatMap((row) => "incomplete" in row || !row.unread ? [] : [row])
   const listing = telephony("refreshVoicemail", (c) => c.phone.refreshVoicemail("AutomaticRead")) catch () => undefined
   const unheard = listing?.carrier === "CarrierReady" ? listing.voicemails.filter((one) => !one.heard) : undefined
-  if (unread !== undefined) fromAreas.messages(unread.slice(0, 2).map((row) => ({ title: row.addresses.join(", ") || "Unknown sender", detail: row.snippet })))
+  if (unread !== undefined) fromAreas.messages(unread.slice(0, 2).map((row) => ({ title: row.addresses.map(displayNumber).join(", ") || "Unknown sender", detail: row.snippet })))
   if (missed !== undefined || unheard !== undefined) fromAreas.phone((missed?.length ? missed : unheard ?? []).slice(0, 2).map(called))
   if (missed !== undefined) try contained((try Phone).send({ type: "missedReported", count: missed.length }), "missed calls")
   if (unread !== undefined) try contained((try Messages).send({ type: "unreadReported", count: unread.length }), "unread conversations")

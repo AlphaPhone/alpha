@@ -97,7 +97,7 @@ export function ReminderEditorSheet({
   function addSubtask() {
     const trimmed = newSubtask.trim();
     if (trimmed === "" || fields.subtasks.length >= 50) return;
-    const entry: ReminderSubtaskRecord = { id: `sub_${fields.subtasks.length + 1}_${trimmed.length}`, title: trimmed, done: false };
+    const entry: ReminderSubtaskRecord = { id: `sub_${crypto.randomUUID().slice(0, 8)}`, title: trimmed, done: false };
     patch({ subtasks: [...fields.subtasks, entry] });
     setNewSubtask("");
   }

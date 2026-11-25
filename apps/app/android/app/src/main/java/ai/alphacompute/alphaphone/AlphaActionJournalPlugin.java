@@ -5,12 +5,14 @@ import ai.eliza.plugins.actionjournal.ActionJournal;
 import ai.eliza.plugins.actionjournal.ActionJournalConfiguration;
 import ai.eliza.plugins.actionjournal.ActionJournalPlugin;
 import ai.eliza.plugins.actionjournal.deletion.DeferredDeletionCoordinator;
+import ai.eliza.plugins.actionjournal.deletion.DeferredDeletionJournal;
 import android.content.Context;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import java.util.concurrent.Callable;
+import java.util.regex.Pattern;
 import org.json.JSONObject;
 
 @CapacitorPlugin(name = "ElizaActionJournal")
@@ -33,6 +35,7 @@ public final class AlphaActionJournalPlugin extends ActionJournalPlugin {
  @Override protected ActionJournal createJournal() { return journal(getContext()); }
 
  private static final double MAX_REVISION = 9_007_199_254_740_991d;
+ private static final Pattern DELETION_ID = Pattern.compile("[A-Za-z0-9_-]{1,128}");
 
  private void deviceWork(PluginCall call, Callable<JSObject> operation) {
   Runnable refused = () -> call.reject(refusal());
@@ -80,6 +83,28 @@ public final class AlphaActionJournalPlugin extends ActionJournalPlugin {
    JSONObject payload = call.getData().getJSONObject("next");
    boolean kept = DeviceExecutionJournal.of(getContext()).edit(call.getString("proposalId"), revision.longValue(), new JSONObject(payload.toString()));
    return new JSObject().put("kept", kept);
+  });
+ }
+
+ /** Only the recorded outcome of the owner's exact telephony deletion leaves the journal. */
+ @PluginMethod public void telephonyDeletionReceipt(PluginCall call) {
+  deviceWork(call, () -> {
+   String kind = call.getString("kind", "");
+   String id = call.getString("id", "");
+   if (!("message".equals(kind) || "voicemail".equals(kind) || "contact".equals(kind)) || id == null || !DELETION_ID.matcher(id).matches()) {
+    throw new IllegalArgumentException("Invalid telephony deletion identity");
+   }
+   DeferredDeletionCoordinator coordinator = deletions();
+   JSONObject row = coordinator.receipt(kind, id);
+   if (row == null || !DeferredDeletionJournal.same(row.getJSONObject("owner"), coordinator.manualOwner())) {
+    return new JSObject();
+   }
+   deletions(); // The foreground and image must still admit publication after the durable read.
+   String phase = row.getString("phase");
+   return switch (phase) {
+    case "deleted", "undone", "conflict", "unknown" -> new JSObject().put("kind", kind).put("id", id).put("phase", phase);
+    default -> new JSObject();
+   };
   });
  }
 

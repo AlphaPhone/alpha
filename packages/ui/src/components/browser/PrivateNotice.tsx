@@ -1,13 +1,14 @@
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { cn } from "../../lib/cn.ts";
 
-export type PrivateNoticeProps = ComponentProps<"p">;
+export type PrivateNoticeProps = ComponentProps<"p"> & { icon?: ReactNode };
 
 /** What a private tab keeps: nothing once it closes. */
-export function PrivateNotice({ className, ...props }: PrivateNoticeProps) {
+export function PrivateNotice({ className, icon, children, ...props }: PrivateNoticeProps) {
   return (
     <p role="note" aria-label="Private tab notice" className={cn("text-subject text-muted-foreground", className)} {...props}>
-      Private · cleared on close
+      {icon}
+      <span>{children ?? "Private · cleared on close"}</span>
     </p>
   );
 }

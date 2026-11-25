@@ -31,16 +31,17 @@ export service NoteDocuments {
 }
 
 const unavailable: DocumentResult = { status: "unavailable" }
+const unverified: DocumentResult = { status: "unverified" }
 
 export const noteDocuments = Layer.sync(NoteDocuments, () => {
   const api = registered("AlphaNoteDocuments") ? client() : undefined
-  const answered = (call: (api: Android) => Promise<unknown>) => api === undefined ? succeed(unavailable) : (effect {
-    const raw = try tryPromise(() => call(api))
-    return try Schema.decodeUnknownEffect(Result)(raw)
-  } |> Effect.orElseSucceed(%, (): DocumentResult => unavailable))
+  const answered = (call: (api: Android) => Promise<unknown>, onFailure: DocumentResult) => api === undefined ? succeed(unavailable) : Effect.catch(
+    flatMap(tryPromise(() => call(api)), Schema.decodeUnknownEffect(Result)),
+    () => succeed(onFailure),
+  )
   return {
     available: api !== undefined,
-    pick: (importing: boolean, title: string) => answered((native) => native.pick({ importing, title })),
-    write: (handle: string, text: string) => answered((native) => native.write({ handle, text })),
+    pick: (importing: boolean, title: string) => answered((native) => native.pick({ importing, title }), unavailable),
+    write: (handle: string, text: string) => answered((native) => native.write({ handle, text }), unverified),
   }
 })

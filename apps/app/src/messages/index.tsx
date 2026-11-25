@@ -1,11 +1,12 @@
-import { Layer } from "effect";
+import type { Layer } from "effect";
 import { say } from "../notices/toasts.vibe";
 import { registered } from "../platform/device.vibe";
 import { messagesBack } from "../phone/back.vibe";
 import { area, type Resident, type Shown } from "../runtime/area.tsx";
+import { voiceArea } from "./dictation.vibe";
 import { Messages } from "./Messages.tsx";
 
-function MessagesView({ runtime, alpha }: Shown<Resident>) {
+function MessagesView({ runtime, alpha }: Shown<Resident | Layer.Success<typeof voiceArea>>) {
   const openLink = registered("AlphaBrowser") ? (href: string) => {
     void Promise.all([import("../browser/index.tsx"), import("../browser/browser.vibe")])
       .then(([{ default: browser }, { openMessageLink }]) => browser.runtime(alpha).runPromise(openMessageLink(href)))
@@ -16,4 +17,4 @@ function MessagesView({ runtime, alpha }: Shown<Resident>) {
 }
 
 /** Messages, at its view: its machine and the composer's are resident. */
-export default area(Layer.empty, MessagesView, { back: messagesBack });
+export default area(voiceArea, MessagesView, { back: messagesBack });

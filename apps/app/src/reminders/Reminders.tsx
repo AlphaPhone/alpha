@@ -12,7 +12,6 @@ import {
   MenuContent,
   MenuItem,
   MenuTrigger,
-  Screen,
   SearchField,
   cn,
 } from "@repo/ui";
@@ -81,12 +80,12 @@ const SMART_META: readonly {
   readonly label: string;
   readonly badgeClass: string;
 }[] = [
-  { view: "TodayView", label: "Today", badgeClass: "bg-info text-info-foreground" },
+  { view: "TodayView", label: "Today", badgeClass: "bg-info text-primary-foreground" },
   { view: "ScheduledView", label: "Scheduled", badgeClass: "bg-destructive text-destructive-foreground" },
   { view: "AllView", label: "All", badgeClass: "bg-foreground text-background" },
-  { view: "FlaggedView", label: "Flagged", badgeClass: "bg-warn text-warn-foreground" },
+  { view: "FlaggedView", label: "Flagged", badgeClass: "bg-warn text-primary-foreground" },
   { view: "OverdueView", label: "Overdue", badgeClass: "bg-destructive text-destructive-foreground" },
-  { view: "CompletedView", label: "Completed", badgeClass: "bg-ok text-ok-foreground" },
+  { view: "CompletedView", label: "Completed", badgeClass: "bg-ok text-primary-foreground" },
 ];
 
 const SORT_LABELS: Readonly<Record<SortKey, string>> = {
@@ -688,15 +687,30 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
 
   return (
     <>
-      <Screen
-        title={activeTitle}
-        leading={drilledIn && !searching ? (
-          <Button type="button" variant="ghost" size="icon" aria-label="All lists" onClick={() => setDrilledIn(false)}>
-            <ArrowLeft />
-          </Button>
-        ) : undefined}
-        actions={(
-          <div className="flex items-center gap-1">
+      <div className="flex flex-1 flex-col gap-4 px-4 pt-2 pb-28">
+        <div className="flex items-center justify-between gap-2">
+          {drilledIn && !searching ? (
+            <div className="flex min-w-0 items-center gap-2">
+              <Button type="button" variant="ghost" size="icon" aria-label="All lists" onClick={() => setDrilledIn(false)}>
+                <ArrowLeft />
+              </Button>
+              <h2 className="truncate text-lg font-semibold text-foreground">{activeTitle}</h2>
+            </div>
+          ) : (
+            <div className="min-w-0 flex-1">
+              <SearchField
+                aria-label="Search reminders"
+                placeholder="Search reminders, notes, subtasks"
+                value={searchQuery}
+                onValueChange={(value) => {
+                  setSearchQuery(value);
+                  const open = value.trim() !== "";
+                  if (can({ type: "setSearchOpen", open })) void send({ type: "setSearchOpen", open });
+                }}
+              />
+            </div>
+          )}
+          <div className="flex shrink-0 items-center gap-1">
             {drilledIn && !searching ? (
               <SortFilterMenu
                 sort={state.sort}
@@ -719,8 +733,8 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
               <Plus />
             </Button>
           </div>
-        )}
-      >
+        </div>
+
         {syncError ? (
           <Banner
             variant="warn"
@@ -733,19 +747,6 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
           >
             {syncError}
           </Banner>
-        ) : null}
-
-        {!drilledIn || searching ? (
-          <SearchField
-            aria-label="Search reminders"
-            placeholder="Search reminders, notes, subtasks"
-            value={searchQuery}
-            onValueChange={(value) => {
-              setSearchQuery(value);
-              const open = value.trim() !== "";
-              if (can({ type: "setSearchOpen", open })) void send({ type: "setSearchOpen", open });
-            }}
-          />
         ) : null}
 
         {searching ? (
@@ -800,7 +801,7 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
             onDeleteList={setDeletingList}
           />
         )}
-      </Screen>
+      </div>
 
       <ReminderEditorSheet
         runtime={runtime}

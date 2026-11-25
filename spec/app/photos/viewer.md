@@ -40,13 +40,24 @@ its editor is not available.
 
 ```quint
 type Kind = Still | Clip
+type ViewerOrigin = LibraryItem | CameraCapture
 type Look = Original | Vivid | Warm | Cool | Mono | Fade | Noir
-type Edit = { turns: int, cropped: bool, look: Look, start: int, end: int }
+type CropBounds = { x: int, y: int, width: int, height: int }
+type Edit = { turns: int, cropped: bool, bounds: CropBounds, look: Look, start: int, end: int }
 type Refusal = NoRefusal | Animated | TooLarge | TooLong | NoRoom | NoEditor
 
+type Pan = { x: int, y: int }
 pure val maxZoom = 8
+pure val panUnits = 1000
+pure val centered: Pan = { x: 0, y: 0 }
 
-pure def untouched(duration: int): Edit = { turns: 0, cropped: false, look: Original, start: 0, end: duration }
+pure def validPan(pan: Pan): bool =
+  pan.x >= -panUnits and pan.x <= panUnits and pan.y >= -panUnits and pan.y <= panUnits
+
+pure val cropUnits = 10000
+pure val wholePhoto: CropBounds = { x: 0, y: 0, width: cropUnits, height: cropUnits }
+
+pure def untouched(duration: int): Edit = { turns: 0, cropped: false, bounds: wholePhoto, look: Original, start: 0, end: duration }
 ```
 
 ### What the viewer asks of the phone
@@ -59,7 +70,7 @@ the revision shown; and a change of the item, which Photos carries out.
 ```quint
 type Effect =
   | Load({ ticket: int, photo: int })
-  | Render({ revision: int, edit: Edit })
+  | Render({ revision: int, edit: Edit, cropSource: bool })
   | WriteCopy({ attempt: int, photo: int, revision: int, edit: Edit, replace: bool })
   | FindCopy({ attempt: int, ticket: int })
   | AskAbout({ photo: int, revision: int })
@@ -72,8 +83,8 @@ type Effect =
 Whether the viewer is showing, whether it was opened from the lock screen
 and the captures it may then show; the item open (none is 0), who opened it
 and whether it was listed in Photos; its read, kind, length, revision and
-favourite; whether it was deleted while open; zoom, playback and the info
-sheet; the editor: the edit, its preview and whether that failed, why the
+favourite; whether it was deleted while open; zoom, pan, controls, playback
+and the info sheet; the editor: the edit, its preview and whether that failed, why the
 phone refused to edit, whether the original is to be replaced; the save,
 and the lookup of a copy whose outcome is not known. Only the save, its
 lookup and the count of saves are kept through a restart.
@@ -81,10 +92,10 @@ lookup and the count of saves are kept through a restart.
 ```quint
 type Viewer = {
   visible: bool, secure: bool, scope: Set[int],
-  open: int, openedBy: Actor, listed: bool, read: R::Read,
+  open: int, openedBy: Actor, origin: ViewerOrigin, listed: bool, read: R::Read,
   kind: Kind, duration: int, revision: int, favourite: bool, gone: bool,
-  zoom: int, playing: bool, position: int, info: bool,
-  editing: bool, edit: Edit, preview: V::Review, unavailable: bool, refusal: Refusal, replace: bool,
+  zoom: int, pan: Pan, chrome: bool, muted: bool, playing: bool, position: int, info: bool,
+  editing: bool, cropping: bool, edit: Edit, preview: V::Review, unavailable: bool, refusal: Refusal, replace: bool,
   save: A::Attempt, attempts: int, lookup: R::Read, found: bool, restored: bool,
 }
 
@@ -92,10 +103,10 @@ type Done = { state: Viewer, out: List[Effect] }
 
 pure val initial: Viewer = {
   visible: true, secure: false, scope: Set(),
-  open: 0, openedBy: Owner, listed: false, read: R::unread,
+  open: 0, openedBy: Owner, origin: LibraryItem, listed: false, read: R::unread,
   kind: Still, duration: 0, revision: 0, favourite: false, gone: false,
-  zoom: 1, playing: false, position: 0, info: false,
-  editing: false, edit: untouched(0), preview: V::unreviewed, unavailable: false, refusal: NoRefusal, replace: false,
+  zoom: 1, pan: centered, chrome: true, muted: false, playing: false, position: 0, info: false,
+  editing: false, cropping: false, edit: untouched(0), preview: V::unreviewed, unavailable: false, refusal: NoRefusal, replace: false,
   save: A::plan(0), attempts: 0, lookup: R::unread, found: false, restored: false,
 }
 
@@ -119,10 +130,12 @@ pure val onlyValues = Set(Set(), Set(1))
 pure val durationValues = Set(0, 3)
 pure val revisionValues = Set(1, 2)
 pure val levelValues = Set(0, 1, 8, 9)
+pure val panValues = Set(centered, { x: 500, y: -500 }, { x: 1001, y: 0 })
 pure val attemptValues = Set(1, 2, 3)
 pure val ticketValues = Set(1, 2, 3, 4)
 pure val startValues = Set(0, 1)
 pure val endValues = Set(2, 3)
+pure val boundsValues = Set(wholePhoto, { x: 1300, y: 1500, width: 4700, height: 7100 })
 pure val weight_openItem = 4
 pure val weight_loaded = 20
 pure val weight_startEdit = 6
@@ -135,8 +148,8 @@ pure val weight_saved = 20
 ## Story: Look at a photo or video
 
 > As the owner, I want to open a photo or video, see it load or be told it
-> could not, zoom into a photo, play a video from where I choose, swipe to
-> the next one, and see its details.
+> could not, zoom and pan in a photo, show or hide the controls, play or mute
+> a video from where I choose, swipe to the next one, and see its details.
 
 ### An item opens from what Photos lists, and is read from the phone; from the lock screen only one of that session's captures opens
 
@@ -150,22 +163,38 @@ pure def reading(photo: int, v: Viewer): Done =
   val asked = R::ask(v.read)
   emit(List(Load({ ticket: asked.ticket, photo: photo })), {
     ...v, open: photo, read: asked, kind: Still, duration: 0, gone: false, favourite: false,
-    zoom: 1, playing: false, position: 0, info: false, edit: untouched(0), replace: false,
+    zoom: 1, pan: centered, chrome: true, muted: false, playing: false, position: 0, info: false, edit: untouched(0), replace: false,
   })
 
-pure def canOpenItem(s: Viewer, photo: int, listed: bool, secure: bool, only: Set[int], reviewing: bool, by: Actor): bool =
+pure def canOpenItem(s: Viewer, photo: int, listed: bool, secure: bool, only: Set[int], reviewing: bool, origin: ViewerOrigin, by: Actor): bool =
   s.visible and photo > 0 and not(s.editing) and listed and (secure implies only.contains(photo))
     and (by == Owner or (by == Agent and not(secure) and not(reviewing)))
+    and (origin == CameraCapture implies (by == Owner and not(secure)))
 
-pure def openItem(s: Viewer, photo: int, listed: bool, secure: bool, only: Set[int], reviewing: bool, by: Actor): Done =
-  reading(photo, { ...s, secure: secure, scope: if (secure) only else Set(), openedBy: by, listed: listed })
+pure def openItem(s: Viewer, photo: int, listed: bool, secure: bool, only: Set[int], reviewing: bool, origin: ViewerOrigin, by: Actor): Done =
+  reading(photo, { ...s, secure: secure, scope: if (secure) only else Set(), openedBy: by, origin: origin, listed: listed })
 
 pure def alwaysOpensOnlyWhatPhotosLists(s: Viewer): bool =
   (s.open != 0 implies s.listed) and ((s.open != 0 and s.openedBy == Agent) implies not(s.secure))
 
+```
+
+### Back from a Camera capture returns to Camera
+
+When the owner has opened the last capture from Camera, Back returns along
+the shell's trail if Camera is directly behind Photos. Crop, edit and item
+info take Back first. An item opened from the grid returns to the grid.
+
+```quint
+pure def cameraBack(s: Viewer): bool =
+  s.visible and s.open != 0 and s.origin == CameraCapture and not(s.cropping or s.editing or s.info)
+
+pure def alwaysCameraOriginBelongsToTheOwner(s: Viewer): bool =
+  s.origin == CameraCapture implies (s.open != 0 and s.openedBy == Owner and not(s.secure))
+
 pure def canClose(s: Viewer, by: Actor): bool = by == Owner and s.open != 0 and not(s.editing)
 
-pure def close(s: Viewer, by: Actor): Viewer = { ...s, open: 0, playing: false, info: false, gone: false }
+pure def close(s: Viewer, by: Actor): Viewer = { ...s, open: 0, origin: LibraryItem, playing: false, info: false, gone: false }
 ```
 
 ### Only the newest read's answer is shown, while the viewer is showing; one that failed can be read again
@@ -188,12 +217,13 @@ pure def reload(s: Viewer, by: Actor): Done = reading(s.open, s)
 ### While an item is being read, nothing of it plays, zooms, shows its info or is edited
 
 Discovered by the proof: without it, an item read anew could seem to keep
-the position, zoom or "replace the original" of the one before.
+the position, zoom, pan, hidden controls, mute or "replace the original" of the one before.
 
 ```quint
 pure def alwaysNothingOfAnItemBeingRead(s: Viewer): bool =
   s.read.status == R::Loading
-    implies (s.position == 0 and s.zoom == 1 and not(s.playing) and not(s.info) and not(s.editing) and not(s.replace))
+    implies (s.position == 0 and s.zoom == 1 and s.pan == centered and s.chrome and not(s.muted)
+      and not(s.playing) and not(s.info) and not(s.editing) and not(s.replace))
 ```
 
 ### The owner swipes to the next or previous item Photos lists, and on the lock screen only within its session
@@ -222,13 +252,34 @@ pure def alwaysTheLockScreenShowsOnlyItsSession(s: Viewer): bool =
 pure def canZoomTo(s: Viewer, level: int, by: Actor): bool =
   by == Owner and shown(s) and s.kind == Still and not(s.editing) and level >= 1 and level <= maxZoom
 
-pure def zoomTo(s: Viewer, level: int, by: Actor): Viewer = { ...s, zoom: level }
+pure def zoomTo(s: Viewer, level: int, by: Actor): Viewer =
+  { ...s, zoom: level, pan: if (level == 1) centered else s.pan }
+```
+
+### The owner pans a zoomed photo within its frame and shows or hides the controls from the media surface
+
+Each pan coordinate is a fraction of the distance the picture can move in
+that direction. Returning to the photo's own size centers it. Opening the
+editor or reading another item shows the controls again.
+
+```quint
+pure def canPanTo(s: Viewer, pan: Pan, by: Actor): bool =
+  by == Owner and shown(s) and s.kind == Still and not(s.editing) and s.zoom > 1 and validPan(pan)
+
+pure def panTo(s: Viewer, pan: Pan, by: Actor): Viewer = { ...s, pan: pan }
+
+pure def canToggleChrome(s: Viewer, by: Actor): bool =
+  by == Owner and shown(s) and not(s.editing) and not(s.info)
+
+pure def toggleChrome(s: Viewer, by: Actor): Viewer = { ...s, chrome: not(s.chrome) }
 ```
 
 ### A video plays and pauses, and its position stays within it, or within the part kept while it is trimmed
 
 The owner moves the position anywhere from the start to the end; the phone
-reports it as the video plays, and playing stops at the end.
+reports it as the video plays, and playing stops at the end. The viewer
+shows the elapsed time and total length. The owner can mute or unmute the
+video without changing its playback position.
 
 ```quint
 pure def canPlay(s: Viewer, by: Actor): bool =
@@ -239,6 +290,10 @@ pure def play(s: Viewer, by: Actor): Viewer = { ...s, playing: true }
 pure def canPause(s: Viewer, by: Actor): bool = by == Owner and s.playing
 
 pure def pause(s: Viewer, by: Actor): Viewer = { ...s, playing: false }
+
+pure def canToggleMute(s: Viewer, by: Actor): bool = by == Owner and shown(s) and s.kind == Clip
+
+pure def toggleMute(s: Viewer, by: Actor): Viewer = { ...s, muted: not(s.muted) }
 
 pure def canSeek(s: Viewer, position: int, by: Actor): bool =
   by == Owner and shown(s) and s.kind == Clip and position <= upTo(s)
@@ -265,7 +320,8 @@ pure def toggleInfo(s: Viewer, by: Actor): Viewer = { ...s, info: not(s.info) }
 
 ```quint
 pure def alwaysViewWithinBounds(s: Viewer): bool =
-  s.zoom >= 1 and s.zoom <= maxZoom and s.position >= 0 and s.position <= s.duration
+  s.zoom >= 1 and s.zoom <= maxZoom and validPan(s.pan) and (s.zoom == 1 implies s.pan == centered)
+    and s.position >= 0 and s.position <= s.duration and (s.muted implies s.kind == Clip)
     and ((s.playing or s.info or s.editing) implies shown(s))
     and (s.playing implies s.kind == Clip) and not(s.info and s.editing)
     and ((s.editing and s.kind == Clip) implies (s.edit.start <= s.position and s.position <= s.edit.end))
@@ -281,7 +337,7 @@ phone answers it. A read on its way is answered too late to be shown.
 pure def canHideView(s: Viewer, by: Actor): bool = by == Phone and s.visible
 
 pure def hideView(s: Viewer, by: Actor): Viewer =
-  { ...s, visible: false, playing: false, info: false, editing: false, preview: V::dismiss(s.preview) }
+  { ...s, visible: false, playing: false, info: false, editing: false, cropping: false, preview: V::dismiss(s.preview) }
 
 pure def canShowView(s: Viewer, by: Actor): bool = by == Phone and not(s.visible)
 
@@ -295,7 +351,7 @@ pure def showView(s: Viewer, by: Actor): Done =
 pure def canRevoked(s: Viewer, by: Actor): bool = by == Phone and s.open != 0
 
 pure def revoked(s: Viewer, by: Actor): Viewer =
-  { ...s, open: 0, gone: false, playing: false, info: false, editing: false, preview: V::dismiss(s.preview), secure: false, scope: Set() }
+  { ...s, open: 0, origin: LibraryItem, gone: false, playing: false, info: false, editing: false, cropping: false, preview: V::dismiss(s.preview), secure: false, scope: Set() }
 ```
 
 ### An item can be loading, fail to load, play part way, be zoomed in, or show its info
@@ -357,7 +413,7 @@ pure def trashOpen(s: Viewer, neighbour: int, by: Actor): Done =
   val asked = Request({ change: C::Trash, photo: s.open, revision: s.revision })
   val onward = reading(neighbour, { ...s, openedBy: Owner })
   if (neighbour > 0) { state: onward.state, out: List(asked).concat(onward.out) }
-  else emit(List(asked), { ...s, open: 0, playing: false, info: false })
+  else emit(List(asked), { ...s, open: 0, origin: LibraryItem, playing: false, info: false })
 
 pure def stepItemLeavesOnlyByTheOwner(before: Viewer, via: str, after: Viewer, out: List[Effect]): bool =
   out.every(e => match e {
@@ -381,13 +437,13 @@ pure def canItemChanged(s: Viewer, by: Actor): bool = by == Phone and shown(s)
 
 pure def itemChanged(s: Viewer, revision: int, favourite: bool, by: Actor): Done =
   val revised = { ...s, revision: revision, favourite: favourite, preview: V::revise(s.preview), unavailable: false }
-  if (s.editing) emit(List(Render({ revision: revised.preview.revision, edit: s.edit })), revised)
+  if (s.editing) emit(List(Render({ revision: revised.preview.revision, edit: s.edit, cropSource: s.cropping })), revised)
   else emit(List(), revised)
 
 pure def canDeleted(s: Viewer, by: Actor): bool = by == Phone and s.open != 0
 
 pure def deleted(s: Viewer, by: Actor): Viewer =
-  { ...s, gone: true, playing: false, info: false, editing: false, preview: V::dismiss(s.preview) }
+  { ...s, gone: true, playing: false, info: false, editing: false, cropping: false, preview: V::dismiss(s.preview) }
 
 pure def alwaysGoneOffersNothing(s: Viewer): bool = s.gone implies (s.open != 0 and not(s.playing) and not(s.info) and not(s.editing))
 ```
@@ -415,12 +471,12 @@ pure def canStartEdit(s: Viewer, by: Actor): bool =
 pure def startEdit(s: Viewer, by: Actor): Done =
   val fresh = untouched(s.duration)
   val revised = V::revise(s.preview)
-  emit(List(Render({ revision: revised.revision, edit: fresh })),
-    { ...s, editing: true, playing: false, info: false, zoom: 1, edit: fresh, preview: revised, replace: false, unavailable: false, refusal: NoRefusal })
+  emit(List(Render({ revision: revised.revision, edit: fresh, cropSource: false })),
+    { ...s, editing: true, cropping: false, playing: false, info: false, zoom: 1, pan: centered, chrome: true, edit: fresh, preview: revised, replace: false, unavailable: false, refusal: NoRefusal })
 
-pure def canCancelEdit(s: Viewer, by: Actor): bool = by == Owner and s.editing
+pure def canCancelEdit(s: Viewer, by: Actor): bool = by == Owner and s.editing and not(s.cropping)
 
-pure def cancelEdit(s: Viewer, by: Actor): Viewer = { ...s, editing: false, playing: false, preview: V::dismiss(s.preview) }
+pure def cancelEdit(s: Viewer, by: Actor): Viewer = { ...s, editing: false, cropping: false, playing: false, preview: V::dismiss(s.preview) }
 ```
 
 ### The phone can refuse to edit the item, which closes the editor and says why
@@ -429,7 +485,7 @@ pure def cancelEdit(s: Viewer, by: Actor): Viewer = { ...s, editing: false, play
 pure def canEditRefused(s: Viewer, why: Refusal, by: Actor): bool = by == Phone and s.editing and not(busy(s.save)) and why != NoRefusal
 
 pure def editRefused(s: Viewer, why: Refusal, by: Actor): Viewer =
-  { ...s, editing: false, playing: false, preview: V::dismiss(s.preview), refusal: why }
+  { ...s, editing: false, cropping: false, playing: false, preview: V::dismiss(s.preview), refusal: why }
 ```
 
 ### Every change to the edit asks for a new preview, and the old one no longer counts
@@ -439,22 +495,30 @@ takes Vivid, Warm, Cool, Mono, Fade or Noir. A clip is trimmed to at least a ten
 playing and puts it at the start kept. The trim handles read on the clock.
 
 ```quint
+pure def inside(bounds: CropBounds): bool =
+  bounds.x >= 0 and bounds.y >= 0 and bounds.width > 0 and bounds.height > 0
+    and bounds.x + bounds.width <= cropUnits and bounds.y + bounds.height <= cropUnits
+
+pure def rotated(bounds: CropBounds): CropBounds =
+  { x: cropUnits - bounds.y - bounds.height, y: bounds.x, width: bounds.height, height: bounds.width }
+
 pure def fits(e: Edit, kind: Kind, duration: int): bool =
   e.turns >= 0 and e.turns < 4 and
-    (if (kind == Still) (e.start == 0 and e.end == 0)
-     else (e.look == Original and 0 <= e.start and e.start < e.end and e.end <= duration))
+    (if (kind == Still) (e.start == 0 and e.end == 0 and not(e.cropped) and inside(e.bounds))
+     else (e.look == Original and 0 <= e.start and e.start < e.end and e.end <= duration and e.bounds == wholePhoto))
 
 pure def handles(e: Edit): List[RC::Clock] = List(RC::clock(e.start), RC::clock(e.end))
 
 pure def edited(e: Edit, v: Viewer): Done =
   val revised = V::revise(v.preview)
-  emit(List(Render({ revision: revised.revision, edit: e })), { ...v, edit: e, preview: revised, unavailable: false })
+  emit(List(Render({ revision: revised.revision, edit: e, cropSource: v.cropping })), { ...v, edit: e, preview: revised, unavailable: false })
 
-pure def canRotate(s: Viewer, by: Actor): bool = by == Owner and s.editing and not(busy(s.save))
+pure def canRotate(s: Viewer, by: Actor): bool = by == Owner and s.editing and not(s.cropping) and not(busy(s.save))
 
-pure def rotate(s: Viewer, by: Actor): Done = edited({ ...s.edit, turns: (s.edit.turns + 1) % 4 }, s)
+pure def rotate(s: Viewer, by: Actor): Done =
+  edited({ ...s.edit, turns: (s.edit.turns + 1) % 4, bounds: rotated(s.edit.bounds) }, s)
 
-pure def canCrop(s: Viewer, by: Actor): bool = canRotate(s, by)
+pure def canCrop(s: Viewer, by: Actor): bool = canRotate(s, by) and s.kind == Clip
 
 pure def crop(s: Viewer, by: Actor): Done = edited({ ...s.edit, cropped: not(s.edit.cropped) }, s)
 
@@ -470,7 +534,33 @@ pure def trim(s: Viewer, start: int, end: int, by: Actor): Done =
 
 pure def alwaysEditFitsTheItem(s: Viewer): bool =
   fits(s.edit, s.kind, s.duration) and (s.editing implies (shown(s) and not(s.secure))) and (s.replace implies s.kind == Still)
-    and (s.editing implies s.refusal == NoRefusal)
+    and (s.editing implies s.refusal == NoRefusal) and (s.cropping implies (s.editing and s.kind == Still))
+```
+
+### Cropping a photo shows its full rotated frame, and only the area applied changes the edit
+
+The owner moves or resizes a rectangle inside the photo, freely or in a
+Square, 4:3 or 16:9 aspect that follows its orientation. The full frame
+is no crop. Cancelling leaves the previous crop in place. The chosen
+rectangle is measured in ten-thousandths of the rotated photo, and
+turning the photo keeps the same area. The crop frame itself cannot be
+saved as an edit. Apply first and review the newly rendered preview.
+
+```quint
+pure def canBeginCrop(s: Viewer, by: Actor): bool =
+  canRotate(s, by) and s.kind == Still and V::canConfirm(s.preview)
+
+pure def beginCrop(s: Viewer, by: Actor): Done = edited(s.edit, { ...s, cropping: true })
+
+pure def canCancelCrop(s: Viewer, by: Actor): bool = by == Owner and s.cropping
+
+pure def cancelCrop(s: Viewer, by: Actor): Done = edited(s.edit, { ...s, cropping: false })
+
+pure def canApplyCrop(s: Viewer, bounds: CropBounds, by: Actor): bool =
+  canCancelCrop(s, by) and V::canConfirm(s.preview) and inside(bounds)
+
+pure def applyCrop(s: Viewer, bounds: CropBounds, by: Actor): Done =
+  edited({ ...s.edit, bounds: bounds }, { ...s, cropping: false })
 ```
 
 ### Only the preview of the edit as it is now is shown; one the phone could not render is rendered again on request
@@ -499,18 +589,23 @@ A video edit is always saved as a copy.
 
 ```quint
 pure def canChooseReplace(s: Viewer, replace: bool, by: Actor): bool =
-  by == Owner and s.editing and not(busy(s.save)) and (replace implies s.kind == Still) and replace != s.replace
+  by == Owner and s.editing and not(s.cropping) and not(busy(s.save)) and (replace implies s.kind == Still) and replace != s.replace
 
 pure def chooseReplace(s: Viewer, replace: bool, by: Actor): Viewer = { ...s, replace: replace }
 ```
 
 ### Saving writes exactly the edit previewed, of the revision previewed, once, and an untouched edit has nothing to save
 
-The save is recorded before it is written, and is kept through a restart.
+The save is recorded before it is written, and is kept through a restart. In a
+browser the reviewed edit and its outcome are written to the browser's photo
+library together, and choosing Replace requires a capture owned by that
+library. Images carried over from the earlier browser library can be copied. A browser video
+copy is encoded locally, including the saved clip's audio and the trim,
+rotation and crop the owner applied.
 
 ```quint
 pure def canSave(s: Viewer, by: Actor): bool =
-  by == Owner and s.editing and V::canConfirm(s.preview) and not(unresolved(s)) and s.edit != untouched(s.duration)
+  by == Owner and s.editing and not(s.cropping) and V::canConfirm(s.preview) and not(unresolved(s)) and s.edit != untouched(s.duration)
 
 pure def save(s: Viewer, by: Actor): Done =
   val n = s.attempts + 1
@@ -521,7 +616,7 @@ pure def save(s: Viewer, by: Actor): Done =
 pure def stepSavesWhatWasPreviewed(before: Viewer, via: str, after: Viewer, out: List[Effect]): bool =
   out.every(e => match e {
     | WriteCopy(w) =>
-        via == "save" and V::canConfirm(before.preview) and not(unresolved(before)) and before.edit != untouched(before.duration)
+        via == "save" and not(before.cropping) and V::canConfirm(before.preview) and not(unresolved(before)) and before.edit != untouched(before.duration)
           and w.attempt == after.save.id and w.photo == before.open and w.revision == before.revision
           and w.edit == before.edit and fits(w.edit, before.kind, before.duration)
           and (w.replace implies (before.replace and before.kind == Still))
@@ -541,7 +636,7 @@ pure def canSaved(s: Viewer, attempt: int, by: Actor): bool = by == Phone and A:
 pure def saved(s: Viewer, attempt: int, confirmed: bool, known: bool, by: Actor): Done =
   val ended = { ...s, save: A::conclude(s.save, confirmed, known) }
   if (s.editing and ended.save.outcome == A::Refused) edited(s.edit, ended)
-  else emit(List(), { ...ended, editing: false, playing: false, preview: V::dismiss(s.preview) })
+  else emit(List(), { ...ended, editing: false, cropping: false, playing: false, preview: V::dismiss(s.preview) })
 ```
 
 ### An edit can be ready to save, have nothing to save, or wait on a preview that failed
@@ -607,6 +702,10 @@ pure def copyFound(s: Viewer, ticket: int, ok: bool, found: bool, by: Actor): Vi
 ```
 
 ### A restart forgets the viewer but keeps the save; a save still on its way is no longer trusted, and is looked up
+
+Saved viewer records from before the current viewer controls restart from
+the same save, attempt count and lookup. Presentation starts at the
+current defaults. A lookup still asks for the original operation receipt.
 
 ```quint
 pure def canRestart(s: Viewer, by: Actor): bool = by == Phone

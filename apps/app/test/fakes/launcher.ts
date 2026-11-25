@@ -1,5 +1,5 @@
 // spec/app/home/index.md, "Story: Open an app"; spec/app/home/index.md, "Story: See the apps on this phone"
-import type { LauncherApp, NotificationShadeOutcome } from "@elizaos/os/bridges/definitions/system";
+import type { LauncherApp, NotificationShadeOutcome } from "@elizaos/os-bridges";
 
 /** What the fake phone's launcher holds: its apps, how it answers, and what Home asked of it. */
 export interface LauncherScene {

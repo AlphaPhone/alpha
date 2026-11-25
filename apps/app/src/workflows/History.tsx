@@ -61,13 +61,19 @@ export function History({ runtime, row, owner }: HistoryProps) {
     );
   }
   const description = history.workflow?.description ?? row.summary;
-  const steps = history.workflow?.steps ?? (row.kind === "Routine" ? row.record.steps : []);
+  const occurrences = new Map<string, number>();
+  const steps = (history.workflow?.steps ?? (row.kind === "Routine" ? row.record.steps : [])).map((step) => {
+    const key = JSON.stringify([step.label, step.description]);
+    const occurrence = (occurrences.get(key) ?? 0) + 1;
+    occurrences.set(key, occurrence);
+    return { ...step, key: `${key}/${String(occurrence)}` };
+  });
   return (
     <>
       {description !== "" && <p className="whitespace-pre-wrap break-words">{description}</p>}
       {steps.length > 0 && (
         <ol aria-label="Steps" className="flex flex-col gap-3">
-          {steps.map((step, index) => <li key={`${index}/${step.label}`} className="flex items-start gap-3">
+          {steps.map((step, index) => <li key={step.key} className="flex items-start gap-3">
             <span className="grid size-7 shrink-0 place-items-center rounded-full bg-secondary text-sm">{index + 1}</span>
             <span className="min-w-0 break-words">
               <span>{step.label}</span>

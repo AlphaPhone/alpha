@@ -1,6 +1,6 @@
 // spec/app/workflows/clock.md, "Story: Describe an alarm for Clock"; spec/app/workflows/clock.md, "Story: Review, then hand over to Clock"; spec/app/workflows/clock.md, "Story: Know what happened"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import type { ClockRequest, ClockStatus } from "@elizaos/os/bridges/definitions/system"
+import type { ClockRequest, ClockStatus } from "@elizaos/os-bridges"
 import * as Model from "../../gen/app__workflows__clock.effect.vibe"
 import type { Effect as Out, Event, Handoff, Receipt } from "../../gen/app__workflows__clock.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
@@ -8,11 +8,11 @@ import { Device, registered } from "../platform/device.vibe"
 import { type Job, answer, applying, hearing, reacting, together } from "../runtime/reactor.vibe"
 
 module native {
-  import type { SystemClient } from "@elizaos/os/bridges/system"
+  import type { SystemClient } from "@elizaos/os-bridges"
 
   /** Clock goes through the same ElizaSystem plugin as Android Settings. */
   export function systemOf(): Promise<SystemClient> {
-    return import("@elizaos/os/bridges/system").then((module) => module.System)
+    return import("@elizaos/os-bridges").then((module) => module.System)
   }
 
   /** @throws {never} */

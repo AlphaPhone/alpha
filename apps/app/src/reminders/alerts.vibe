@@ -7,7 +7,7 @@ import { attemptedWith } from "../platform/remote.vibe"
 import type { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, due, reacting, run, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import { alertInstantMs } from "./recurrence.ts"
+import { advanceDueDate, alertInstantMs } from "./recurrence.ts"
 import { type ReminderItemRecord, type RemindersSnapshot, remindersStore } from "./store.ts"
 
 /** Optional native Android reminder alarm bridge wired by the integrator without coupling Reminders to platform internals. */
@@ -116,7 +116,22 @@ effect function syncComplete(id: number, attemptId: number): Event!!(Agent | Tim
   return try syncBannerAction(
     id,
     attemptId,
-    (row, now) => ({ ...row, completed: true, completedAtMs: now, snoozedUntilMs: null, revision: row.revision + 1, updatedAtMs: now }),
+    (row, now) => {
+      if (row.recurrence !== "none" && row.dueDate !== null) {
+        return {
+          ...row,
+          dueDate: advanceDueDate(row.dueDate, row.recurrence),
+          subtasks: row.subtasks.map((sub) => ({ ...sub, done: false })),
+          completed: false,
+          completedAtMs: null,
+          snoozedUntilMs: null,
+          notifiedAtMs: null,
+          revision: row.revision + 1,
+          updatedAtMs: now,
+        }
+      }
+      return { ...row, completed: true, completedAtMs: now, snoozedUntilMs: null, revision: row.revision + 1, updatedAtMs: now }
+    },
     (item, _now, key) => HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(`/api/alpha/reminders/items/${encodeURIComponent(item.id)}/complete`), { idempotencyKey: key }),
   )
 }
@@ -126,7 +141,7 @@ effect function syncSnooze(id: number, until: number, attemptId: number): Event!
     id,
     attemptId,
     (row, now) => ({ ...row, snoozedUntilMs: until, revision: row.revision + 1, updatedAtMs: now }),
-    (item, _now, key) => HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(`/api/alpha/reminders/items/${encodeURIComponent(item.id)}/snooze`), { snoozedUntilMs: until, idempotencyKey: key }),
+    (item, _now, key) => HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(`/api/alpha/reminders/items/${encodeURIComponent(item.id)}/snooze`), { untilMs: until, idempotencyKey: key }),
   )
 }
 

@@ -1,0 +1,147 @@
+// spec/app/photos/viewer.md, "Story: Edit a photo or trim a video"
+module editor {
+  import type { CropRect } from "@elizaos/os-bridges"
+
+  export const photoLooks = {
+    none: "none", vivid: "saturate(1.55) contrast(1.08)", warm: "sepia(.3) saturate(1.35) hue-rotate(-8deg)",
+    cool: "saturate(1.1) hue-rotate(14deg) brightness(1.03)", mono: "grayscale(1) contrast(1.05)",
+    fade: "contrast(.78) brightness(1.12) saturate(.75)", noir: "grayscale(1) contrast(1.55) brightness(.88)",
+  } as const
+
+  export type PhotoLook = keyof typeof photoLooks
+  export type PhotoTransform = { readonly turns: number; readonly look: PhotoLook; readonly crop?: CropRect; readonly whiteBackground?: boolean }
+  export interface BrowserEditFrame {
+    readonly file: Blob
+    readonly width: number
+    readonly height: number
+    readonly thumbnail: string
+    readonly duration?: number
+  }
+
+  const photoBytes = 33_554_432
+  const photoEdge = 2048
+  const thumbEdge = 240
+  const photoPixels = 32_000_000
+
+  type RGB = [number, number, number]
+  type ColorTransform = (r: number, g: number, b: number) => RGB
+
+  function colorTransform(kind: string, n: number): ColorTransform | undefined {
+    if (kind === "brightness") return (r, g, b) => [r * n, g * n, b * n]
+    if (kind === "contrast") return (r, g, b) => [r * n + 127.5 * (1 - n), g * n + 127.5 * (1 - n), b * n + 127.5 * (1 - n)]
+    if (kind === "saturate" || kind === "grayscale") {
+      const s = kind === "grayscale" ? 1 - n : n
+      return (r, g, b) => { const l = .2126 * r + .7152 * g + .0722 * b; return [l + (r - l) * s, l + (g - l) * s, l + (b - l) * s] }
+    }
+    if (kind === "sepia") return (r, g, b) => [r * (1 - n) + n * (.393 * r + .769 * g + .189 * b), g * (1 - n) + n * (.349 * r + .686 * g + .168 * b), b * (1 - n) + n * (.272 * r + .534 * g + .131 * b)]
+    if (kind === "hue-rotate") {
+      const c = Math.cos(n * Math.PI / 180), s = Math.sin(n * Math.PI / 180)
+      return (r, g, b) => [
+        (.213 + .787 * c - .213 * s) * r + (.715 - .715 * c - .715 * s) * g + (.072 - .072 * c + .928 * s) * b,
+        (.213 - .213 * c + .143 * s) * r + (.715 + .285 * c + .140 * s) * g + (.072 - .072 * c - .283 * s) * b,
+        (.213 - .213 * c - .787 * s) * r + (.715 - .715 * c + .715 * s) * g + (.072 + .928 * c + .072 * s) * b,
+      ]
+    }
+    return undefined
+  }
+
+  function repaint(context: CanvasRenderingContext2D, width: number, height: number, look: PhotoLook) {
+    if (look === "none") return
+    const steps = [...photoLooks[look].matchAll(/([a-z-]+)\(([-.\d]+)/g)].flatMap((match) => {
+      const transform = colorTransform(match[1] ?? "", Number(match[2]))
+      return transform ? [transform] : []
+    })
+    const image = context.getImageData(0, 0, width, height)
+    const data = image.data
+    for (const change of steps) {
+      for (let at = 0; at < data.length; at += 4) {
+        const [r, g, b] = change(data[at] ?? 0, data[at + 1] ?? 0, data[at + 2] ?? 0)
+        data[at] = r
+        data[at + 1] = g
+        data[at + 2] = b
+      }
+    }
+    context.putImageData(image, 0, 0)
+  }
+
+  function canvasAt(width: number, height: number, edge: number) {
+    const canvas = document.createElement("canvas")
+    const scale = Math.min(1, edge / Math.max(width, height))
+    canvas.width = Math.max(1, Math.round(width * scale))
+    canvas.height = Math.max(1, Math.round(height * scale))
+    const drawer = canvas.getContext("2d")
+    if (drawer === null) throw new Error("Photo editing is unavailable.")
+    return { canvas, drawer }
+  }
+
+  function thumbnailOf(image: CanvasImageSource, width: number, height: number): string {
+    const thumb = canvasAt(width, height, thumbEdge)
+    thumb.drawer.drawImage(image, 0, 0, thumb.canvas.width, thumb.canvas.height)
+    return thumb.canvas.toDataURL("image/jpeg", .78)
+  }
+
+  /** The saved camera tile keeps only a small picture, separate from the original. */
+  export async function browserPhotoThumbnail(file: Blob): Promise<string | undefined> {
+    if (!file.type.startsWith("image/") || typeof createImageBitmap === "undefined") return undefined
+    const image = await createImageBitmap(file)
+    try { return thumbnailOf(image, image.width, image.height) } finally { image.close() }
+  }
+
+  function extract(crop: CropRect | undefined, width: number, height: number) {
+    if (crop === undefined) return { x: 0, y: 0, width, height }
+    if (![crop.x, crop.y, crop.width, crop.height].every(Number.isFinite) || crop.x < 0 || crop.y < 0 || crop.width <= 0 || crop.height <= 0 || crop.x + crop.width > 1.000000001 || crop.y + crop.height > 1.000000001) throw new Error("Choose a crop within the photo.")
+    const left = Math.min(width - 1, Math.round(crop.x * width))
+    const top = Math.min(height - 1, Math.round(crop.y * height))
+    const right = Math.min(width, Math.max(left + 1, Math.round((crop.x + crop.width) * width)))
+    const bottom = Math.min(height, Math.max(top + 1, Math.round((crop.y + crop.height) * height)))
+    return { x: left, y: top, width: right - left, height: bottom - top }
+  }
+
+  export async function photoRefusal(file: Blob, width: number, height: number): Promise<"Animated" | "TooLarge" | "NoEditor" | undefined> {
+    if (file.size > photoBytes || width * height > photoPixels) return "TooLarge"
+    if (file.type === "image/gif") return "Animated"
+    if (file.type === "image/webp" || file.type === "image/png") {
+      const data = new Uint8Array(await file.slice(0, 65_536).arrayBuffer())
+      if (file.type === "image/webp" && data[12] === 86 && data[13] === 80 && data[14] === 56 && data[15] === 88 && ((data[20] ?? 0) & 2) !== 0) return "Animated"
+      if (file.type === "image/png") {
+        const view = new DataView(data.buffer)
+        for (let at = 8; at + 8 <= data.length; at += 12 + view.getUint32(at)) {
+          const type = view.getUint32(at + 4)
+          if (type === 0x6163544c) return "Animated"
+          if (type === 0x49444154) break
+        }
+      }
+    }
+    return typeof createImageBitmap === "undefined" || !file.type.startsWith("image/") ? "NoEditor" : undefined
+  }
+
+  /** The Blob in a successful preview is also the Blob made durable by Save. */
+  export async function renderBrowserPhoto(file: Blob, edit: PhotoTransform): Promise<BrowserEditFrame> {
+    if (![0, 1, 2, 3].includes(edit.turns) || !Object.hasOwn(photoLooks, edit.look) || file.size > photoBytes) throw new Error("This photo cannot be edited.")
+    const picture = await createImageBitmap(file)
+    try {
+      const { width, height } = picture
+      if (width < 1 || height < 1 || width * height > photoPixels) throw new Error("This photo is too large to edit.")
+      const rotated = edit.turns % 2 !== 0
+      const wide = rotated ? height : width, high = rotated ? width : height
+      const kept = extract(edit.crop, wide, high)
+      const { canvas, drawer } = canvasAt(kept.width, kept.height, photoEdge)
+      if (edit.whiteBackground) {
+        drawer.fillStyle = "white"
+        drawer.fillRect(0, 0, canvas.width, canvas.height)
+      }
+      const filtered = typeof drawer.filter === "string"
+      if (filtered) drawer.filter = photoLooks[edit.look]
+      drawer.scale(canvas.width / kept.width, canvas.height / kept.height)
+      drawer.translate(wide / 2 - kept.x, high / 2 - kept.y)
+      drawer.rotate(edit.turns * Math.PI / 2)
+      drawer.drawImage(picture, -width / 2, -height / 2)
+      if (!filtered) repaint(drawer, canvas.width, canvas.height, edit.look)
+      const saved = await new Promise<Blob>((resolve, reject) => canvas.toBlob((output) => output === null ? reject(new Error("The photo could not be encoded.")) : resolve(output), "image/jpeg", .9))
+      return { file: saved, width: canvas.width, height: canvas.height, thumbnail: thumbnailOf(canvas, canvas.width, canvas.height) }
+    } finally { picture.close() }
+  }
+}
+import { browserPhotoThumbnail, photoLooks, photoRefusal, renderBrowserPhoto, type BrowserEditFrame, type PhotoLook, type PhotoTransform } from editor
+export { browserPhotoThumbnail, photoLooks, photoRefusal, renderBrowserPhoto }
+export type { BrowserEditFrame, PhotoLook, PhotoTransform }

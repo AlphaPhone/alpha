@@ -1,6 +1,6 @@
 // spec/agent/index.md, "Story: Run Alpha's agent on the phone"
 import { randomUUID } from "node:crypto";
-import { type ScheduledTasksApi, readTurnContext, scheduledTasksServiceType, showsApp } from "@elizaos/agent";
+import { type ScheduledTasksApi, readTurnContext, scheduledTasksServiceType, showsApp } from "@elizaos/agent-host";
 import {
   type AlphaAppsStore, DEFAULT_LIST_ID, addCivilDays, civilToEpochMs, normalizeListColor,
   normalizeListIcon, normalizePriority, normalizeRecurrence, parseCivilDate, todayCivilDate,
@@ -515,7 +515,7 @@ export function remindersRoutes(store: AlphaAppsStore, runtime: AgentRuntimeLike
         const body = asRecord(input.body);
         const item = store.snoozeItem(input.parameters.get("id") ?? "", {
           minutes: readNumber(body, "minutes"),
-          untilMs: readNumber(body, "untilMs"),
+          untilMs: readNumber(body, "untilMs") ?? readNumber(body, "snoozedUntilMs"),
         });
         if (item === undefined) return { status: 404, body: { error: "reminder_not_found" } };
         await notifyReminder(runtime, `Snoozed: ${item.title}`, "Reminder snoozed.", item.id);

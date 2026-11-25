@@ -3,7 +3,7 @@
 The filter the owner sees over [Files](./index.md), and the agent's own
 reading of the files, each a read whose late answers are refused. Files
 holds it, decides when either may be asked, and matches the filter's text
-against each name.
+against each name, with kind and modification dates counted together.
 
 ## Story: Filter what I see
 
@@ -11,29 +11,33 @@ against each name.
 > nothing or could not finish, shows only what matches it in the place I am
 > in, and follows me when I go elsewhere.
 
-### A filter is a kind, or any kind, and a text; the search holds the filter on, the place it searched, its reading and what it found, the agent's request that set it, and the agent's own reading
+### A filter has a kind or any kind, text and an inclusive range of modification times; the search holds the filter on, the place it searched, its reading and what it found, the agent's request that set it, and the agent's own reading
 
-A place is a folder named by its path, or a category.
+A place is a folder named by its path, or a category. The phone turns a
+calendar date into the start or end of that local day. An omitted bound
+uses the first or last time the phone can show.
 
 ```quint
 import read as R from "../../kit/read"
 import shared as F from "./shared"
 
-type Filter = { text: str, kind: F::Kind, anyKind: bool }
+type Filter = { text: str, kind: F::Kind, anyKind: bool, from: int, to: int }
 type Where = { trail: List[int], inCategory: bool, category: F::Kind }
 type Search = {
   filter: Filter, searching: bool, within: Where, query: R::Read, hits: List[F::Item], complete: bool, asker: int,
   peek: R::Read, peeker: int,
 }
 
-pure val everything: Filter = { text: "", kind: F::Other, anyKind: true }
+pure val everything: Filter = { text: "", kind: F::Other, anyKind: true, from: 0, to: 8640000000000000 }
 pure val top: Where = { trail: List(), inCategory: false, category: F::Other }
 pure val initial: Search = {
   filter: everything, searching: false, within: top, query: R::unread, hits: List(), complete: false, asker: 0,
   peek: R::unread, peeker: 0,
 }
 
-pure def ofKind(f: Filter, i: F::Item): bool = f.anyKind or i.kind == f.kind
+pure def ofKind(f: Filter, i: F::Item): bool = f.anyKind or F::fitsKind(f.kind, i.kind)
+
+pure def inDates(f: Filter, revision: int): bool = revision >= f.from and revision <= f.to
 ```
 
 ### What the simulator tries
@@ -42,17 +46,18 @@ pure def ofKind(f: Filter, i: F::Item): bool = f.anyKind or i.kind == f.kind
 pure val ticketValues = Set(1, 2, 3)
 pure val askerValues = Set(0, 7)
 pure val requestValues = Set(7, 8)
-pure val wantedValues = Set({ text: "", kind: F::Image, anyKind: false }).union(Set({ text: "b", kind: F::Other, anyKind: true }))
+pure val wantedValues = Set({ ...everything, kind: F::Image, anyKind: false })
+  .union(Set({ ...everything, text: "b" }, { ...everything, kind: F::Pdf, anyKind: false, from: 1, to: 2 }))
 pure val whereValues = Set({ trail: List(1), inCategory: false, category: F::Other }).union(Set({ trail: List(), inCategory: true, category: F::Image }))
 pure val entriesValues =
   Set(List())
-    .union(Set(List({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0 }, { id: 3, name: "c", revision: 1, kind: F::Document, volume: 1, bytes: 0 })))
+    .union(Set(List({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0 }, { id: 3, name: "c", revision: 1, kind: F::Pdf, volume: 1, bytes: 0 })))
 ```
 
 ### A filter is looking, found nothing, found files, found nothing in what the phone could search, or could not finish
 
 A new filter replaces the one before it, and only its own answer is shown,
-keeping only what is of its kind; Files keeps only what matches its text.
+keeping only what is of its kind and within its dates. Files keeps only what matches its text.
 The phone says whether its search reached every file; a search that did
 not is never said to have found nothing.
 
@@ -73,7 +78,7 @@ pure def searchFor(s: Search, wanted: Filter, where: Where, asker: int): Search 
 pure def canSearched(s: Search, ticket: int): bool = s.searching and R::canAnswer(s.query, ticket)
 
 pure def searched(s: Search, ticket: int, ok: bool, complete: bool, entries: List[F::Item]): Search =
-  { ...s, query: R::answer(s.query, ok), hits: if (ok) entries.select(i => ofKind(s.filter, i)) else List(), complete: ok and complete }
+  { ...s, query: R::answer(s.query, ok), hits: if (ok) entries.select(i => ofKind(s.filter, i) and inDates(s.filter, i.revision)) else List(), complete: ok and complete }
 
 pure def canClearFilter(s: Search): bool = s.searching
 
@@ -87,11 +92,11 @@ pure def follow(s: Search, where: Where): Search =
   if (s.searching) { ...s, within: where, query: R::ask(s.query), hits: List(), complete: false } else { ...s, within: where }
 ```
 
-### Results shown belong to the filter on, answered, and are of its kind
+### Results shown belong to the filter on, answered, and are of its kind and within its dates
 
 ```quint
 pure def alwaysResultsAreOfTheFiltersKind(s: Search): bool =
-  s.hits.every(i => ofKind(s.filter, i)) and (s.hits.length() > 0 implies (s.searching and s.query.status == R::Loaded))
+  s.hits.every(i => ofKind(s.filter, i) and inDates(s.filter, i.revision)) and (s.hits.length() > 0 implies (s.searching and s.query.status == R::Loaded))
 ```
 
 ### The agent reads for itself, and only its newest reading is answered

@@ -64,6 +64,7 @@ import type { Time } from "../runtime/time.vibe";
 import type { Machine as AccessReviewMachine } from "../../gen/app__startup__access.effect.vibe";
 import { AccessReview } from "../startup/SettingsAccess.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
+import { AccountStatus } from "../account/index.tsx";
 
 /** What every Settings page reads: where the owner is, the phone's facts, the hand-overs to Android, the preferences, the reset and the developer tools. */
 export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | FactsMachine | AccessReviewMachine | ActivityMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ShellMachine | Time, unknown>;
@@ -212,9 +213,8 @@ function useDevice(runtime: SettingsRuntime) {
 function Top({ runtime, alpha, common }: PageProps) {
   const pages = usePages(runtime).state;
   return (
-    <SettingsTopPage {...common} leading={<AppBack alpha={alpha} />} onPhone={pages?.phone ?? false} developer={pages?.development ?? false}>
-      {alpha.slot("settings/account")}
-    </SettingsTopPage>
+    <SettingsTopPage {...common} leading={<AppBack alpha={alpha} />} onPhone={pages?.phone ?? false}
+      developer={pages?.development ?? false} accountDetail={<AccountStatus alpha={alpha} />} />
   );
 }
 
@@ -468,7 +468,7 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
   const start = android.state && loading(android.state.start) ? { target: targetNames[android.state.target], channel: android.state.channel || undefined } : undefined;
   const refresh = { type: "refresh", at: untimed } as const;
   const common: Common = {
-    actions: (page === "Top" || page === "General") && facts.can(refresh)
+    actions: state.phone && (page === "Top" || page === "General") && facts.can(refresh)
       ? <Button variant="ghost" size="sm" onClick={() => void facts.send(refresh)}>Refresh</Button>
       : undefined,
     onBack: can(goBack) ? () => void send(goBack) : undefined,
