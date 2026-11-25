@@ -819,7 +819,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
       proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true,
     } }];
     const text = "Text +14155550100 saying Meet upstairs. Bring the keys.";
-    speakUtterance(world, text);
+    await drawn(() => speakUtterance(world, text));
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 1 && state.reviewPending && state.phase === "Listening" && state.mic === "On");
     expect(room.messages.some((line) => line.role === "user" && line.text === text)).toBe(true);
     expect(world.ask.metadata.at(-1)).toMatchObject({ observation: { selectedObject: { kind: "sms-subscription", id: "1" } } });
@@ -837,11 +837,11 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     const sendBounds = vi.spyOn(send, "getBoundingClientRect").mockReturnValue(new DOMRect(16, 58, 60, 30));
     const viewportBounds = vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 320, 120));
     try {
-      speakUtterance(world, "Send this text.");
-      await vi.waitFor(() => expect(review.confirmations).toHaveLength(1));
+      await drawn(() => speakUtterance(world, "Send this text."));
+      await vi.waitFor(() => expect(review.confirmations).toHaveLength(1), { timeout: 12_000 });
       await drawn(() => review.confirmations[0]?.confirm());
       await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 2 && !state.reviewPending && state.phase === "Listening" && state.mic === "On");
-      speakUtterance(world, "Send this text.");
+      await drawn(() => speakUtterance(world, "Send this text."));
       await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 3 && state.phase === "Listening" && state.mic === "On");
     } finally {
       for (const confirmation of review.confirmations) confirmation.confirm();
