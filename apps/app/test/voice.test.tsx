@@ -741,7 +741,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
   });
 
   // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"
-  it("shows a spoken text in its open chat for touch review and keeps confirmation local", async () => {
+  it("accepts one spoken confirmation of the entire current text review without asking the agent again", async () => {
     const world = { ...scene(), phone: true, image: true, signedIn: false };
     const operation = { type: "sms_send", recipients: ["+14155550100"], body: "Meet upstairs.\nBring the keys.", subscriptionId: 1 } as const;
     const review = textReview(world.notes.owner, "spoken-reviewed-sms", operation);
@@ -779,11 +779,34 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect(document.body.textContent).toContain(operation.body);
     expect([review.decisions, review.claims, world.telephony.sent]).toEqual([[], [], []]);
 
-    speakUtterance(world, "Send this text.");
-    await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 2 && state.phase === "Listening" && state.mic === "On");
+    const send = button("Approve");
+    const card = send?.closest<HTMLElement>("[data-alpha-review]");
+    const viewport = card?.closest<HTMLElement>("[role='log']");
+    if (send === undefined || !card || !viewport) throw new Error("The addressed text was not drawn in the conversation");
+    const bounds = new DOMRect(8, 8, 300, 92);
+    const hit = vi.spyOn(document, "elementFromPoint").mockReturnValue(send);
+    const cardBounds = vi.spyOn(card, "getBoundingClientRect").mockReturnValue(bounds);
+    const sendBounds = vi.spyOn(send, "getBoundingClientRect").mockReturnValue(new DOMRect(16, 58, 60, 30));
+    const viewportBounds = vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 320, 120));
+    try {
+      speakUtterance(world, "Send this text.");
+      await vi.waitFor(() => expect(review.confirmations).toHaveLength(1));
+      await drawn(() => review.confirmations[0]?.confirm());
+      await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 2 && !state.reviewPending && state.phase === "Listening" && state.mic === "On");
+      speakUtterance(world, "Send this text.");
+      await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 3 && state.phase === "Listening" && state.mic === "On");
+    } finally {
+      for (const confirmation of review.confirmations) confirmation.confirm();
+      hit.mockRestore();
+      cardBounds.mockRestore();
+      sendBounds.mockRestore();
+      viewportBounds.mockRestore();
+    }
     expect(world.ask.said).toEqual(["Start this chat", text]);
-    expect(button("Approve")).toBeDefined();
-    expect([review.decisions, review.claims, world.telephony.sent]).toEqual([[], [], []]);
+    expect(button("Approve")).toBeUndefined();
+    expect([review.decisions, review.claims, world.telephony.sent]).toEqual([
+      [review.proposal.id], [review.proposal.id], [{ operationId: review.proposal.id, recipients: [...operation.recipients], body: operation.body }],
+    ]);
   });
 
   // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view"

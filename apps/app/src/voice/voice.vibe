@@ -14,6 +14,7 @@ import { Views, delivery, pageIn, preparedIn, resendWithoutMode } from "../assis
 import { filesOnlyHeaders, MediaReview, sameFiles } from "../assistant/media-review.vibe"
 import { Talk, type Attached, type DraftSeat } from "../assistant/talk.vibe"
 import type { MessageSmsRequest } from "../messages/agent-sim.vibe"
+import { sendShowing } from "../contacts/requests.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type VoiceEvent, VoiceBridge } from "../platform/voice.vibe"
 import { fresh } from "../runtime/attempts.vibe"
@@ -175,7 +176,7 @@ module pure {
     return number !== null && number.replace(/\D/g, "").length >= 7 ? number : undefined
   }
 
-  /** The approval instruction is local while the owner must approve on the phone. @throws {never} */
+  /** The explicit confirmation is a local instruction for a visible text review. @throws {never} */
   export function smsConfirmation(spoken: string): boolean {
     return /^(?:(?:yes|okay|ok|please)[,\s]+)*send\s+this\s+text[.!?]?$/iu.test(spoken)
   }
@@ -327,6 +328,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     const asked = views === undefined ? 0 : try views.begin()
     const source = try shell.get()
     const sourceRoute = source.route
+    let smsRoute = sourceRoute
     const screen = conversation === undefined ? undefined : try conversation.get()
     const chatPage = chats === undefined ? undefined : try chats.get()
     const shownChat = chatPage?.chosen
@@ -354,7 +356,8 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       const speech = try voice.get()
       const where = try shell.get()
       return visible.observing && !visible.context.sensitive && visible.context.revision === screen.context.revision
-        && where.route === sourceRoute && (where.assistant === "Sheet" || where.assistant === "Full") && (try views.current()) === asked
+        && where.route === smsRoute && (where.assistant === "Sheet" || where.assistant === "Full"
+          || (where.assistant === "Bar" && source.assistant === "Bar" && smsRoute === sourceRoute)) && (try views.current()) === asked
         && chosen.chosen === chatPage.chosen && chosen.page.ticket === chatPage.page.ticket && chosen.page.status === "Loaded"
         && activeRoom?.id === room.id && activeRoom.roomId === room.roomId && speech.session === session && speech.turn >= turn
         && Voice.talking(speech) && speech.phase !== "Paused" && clear(try handset.get())
@@ -520,9 +523,14 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       && result.reply.userMessageId !== undefined && result.reply.failureKind === undefined && (try smsCurrent)) {
       const card = try smsReview.spokenSms(sms.opened, result.reply.userMessageId, result.reply.actionResults, {
         recipient: sms.recipient, selection: sms.selection, conversation: sms.conversation, revision: sms.revision,
-        room: sms.room, session, current: smsCurrent,
+        room: sms.room, current: smsCurrent, session, turn,
       })
-      if (card !== undefined && (try smsCurrent) && Voice.canSentence(try voice.get(), session, turn)) {
+      if (card !== undefined && (try smsCurrent) && (try shell.get()).assistant === "Bar"
+        && (try contained(shell.send({ type: "raise", detent: "Sheet" }, (state) => state.route === smsRoute
+          && state.assistant === "Bar" && Effect.runSync(lease.current)), "showing the text review from Talk"))) smsRoute += 1
+      const where = try shell.get()
+      if (card !== undefined && (where.assistant === "Sheet" || where.assistant === "Full")
+        && (try smsCurrent) && Voice.canSentence(try voice.get(), session, turn)) {
         chat.change({ media: [...chat.snapshot().media, card] })
         smsShown = true
       }
@@ -612,8 +620,22 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     }
     if (smsConfirmation(spoken)) {
       const card = chat?.snapshot().media.find((one) => one.spokenSms !== undefined)
-      const open = card?.spokenSms !== undefined && (try card.spokenSms.current)
-      finishLocally(open ? "Tap Approve on the text review." : "There’s no text open for review.")
+      const review = Option.getOrUndefined(try Effect.serviceOption(MediaReview))
+      if (review === undefined || card?.spokenSms === undefined || !(try card.spokenSms.current)
+        || !Voice.addressedTextConfirmation(try voice.get(), card.spokenSms.session, card.spokenSms.turn, sendShowing(card.id))) {
+        finishLocally(card === undefined ? "There’s no text open for review." : "Check the whole text review before sending.")
+        return
+      }
+      const conversation = Option.getOrUndefined(try Effect.serviceOption(Conversation))
+      const chats = Option.getOrUndefined(try Effect.serviceOption(Chats))
+      const talk = Option.getOrUndefined(try Effect.serviceOption(Talk))
+      if (conversation === undefined || chats === undefined || talk === undefined) { finishLocally(); return }
+      try (review.decide(card, true, "Speech")
+        |> Effect.provideService(%, Conversation, conversation)
+        |> Effect.provideService(%, Chats, chats)
+        |> Effect.provideService(%, Talk, talk))
+      const note = chat?.snapshot().mediaNote
+      finishLocally(note?.conversation === card.conversation ? note.text : "I couldn’t confirm the send. Check Messages before trying again.")
       return
     }
     const shared = memory.chat
