@@ -1,0 +1,80 @@
+// spec/app/contacts/agent.md, "Only the phone answers the newest search, and the request goes on by what it found"; spec/app/contacts/agent.md, "The owner picks the exact number or the one contact, and that one is shown"; spec/app/contacts/agent.md, "Nothing is done but what the owner approved, as it was shown, once"
+import type { DeviceOperation } from "@elizaos/agent"
+import { normalizePhoneNumber, type AddressBookContact, type ContactDetail, type PhoneNumber } from "@elizaos/os-bridges"
+import { maxMatches } from "../../gen/app__contacts__agent.effect.vibe"
+import { Telephony, telephony } from "../platform/telephony.vibe"
+import { classifyDialNumber } from "./phone.vibe"
+
+export interface PhoneChoice {
+  readonly contact: AddressBookContact["id"]
+  readonly lookup: AddressBookContact["lookup"]
+  readonly name: string
+  readonly number: PhoneNumber
+}
+
+/** The exact native row and number the owner saw, bound to the original named request. */
+export interface ReviewedPhoneContact extends PhoneChoice {
+  readonly query: string
+  readonly version: ContactDetail["version"]
+}
+
+export type NamedPhoneReview =
+  | { readonly tag: "Choices"; readonly options: readonly PhoneChoice[]; readonly more: boolean }
+  | { readonly tag: "Exact"; readonly selected: ReviewedPhoneContact }
+  | { readonly tag: "Unavailable"; readonly reason: string }
+
+export function phoneQuery(op: DeviceOperation): string | undefined {
+  return (op.type === "phone_call" || op.type === "phone_dial") && op.target.kind === "contact" ? op.target.query.trim() : undefined
+}
+
+const unavailable = (reason: string): NamedPhoneReview => ({ tag: "Unavailable", reason })
+
+/** Read Contacts locally for a proposal. Even one number remains a choice. */
+export effect function phoneContactChoices(query: string): NamedPhoneReview!!Telephony {
+  if (query === "") return unavailable("No contact name was provided.")
+  const page = effect {
+    const access = try telephony("open", (c) => c.contacts.open())
+    if (!access.available || !access.readable) return undefined
+    return try telephony("list", (c) => c.contacts.list({ query, limit: maxMatches + 1, kind: "ExplicitRead" }))
+  } catch () => undefined
+  if (page === undefined) return unavailable("Contacts could not be read on this phone.")
+  const choices: PhoneChoice[] = []
+  const seen = new Set<string>()
+  for (const row of page.contacts) {
+    if ("incomplete" in row) continue
+    for (const raw of row.phones) {
+      const number = normalizePhoneNumber(raw)
+      if (number === null) continue
+      const key = `${row.id}\n${number}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      choices.push({ contact: row.id, lookup: row.lookup, name: row.name, number })
+      if (choices.length > maxMatches) return { tag: "Choices", options: choices.slice(0, maxMatches), more: true }
+    }
+  }
+  const more = page.next !== null
+  if (choices.length === 0) return unavailable(more ? "No number could be reviewed in these matches. Ask with a more specific name."
+    : "No matching contact with a phone number was found.")
+  return { tag: "Choices", options: choices, more }
+}
+
+function hasNumber(row: ContactDetail | undefined, choice: PhoneChoice): row is ContactDetail {
+  return row !== undefined && row.id === choice.contact && row.lookup === choice.lookup && row.displayName === choice.name
+    && row.phoneNumbers.some(({ number }) => normalizePhoneNumber(number) === choice.number)
+}
+
+/** Show a fresh, explicit number review only after the owner picks a visible choice. */
+export effect function pickPhoneContact(query: string, choice: PhoneChoice): NamedPhoneReview!!Telephony {
+  const row = telephony("get", (c) => c.contacts.get(choice.contact, "ExplicitRead")) catch () => undefined
+  if (!hasNumber(row, choice)) return unavailable("This contact changed. Ask again to review its current number.")
+  const kind = try classifyDialNumber(choice.number)
+  if (kind === "EmergencyNumber") return unavailable("Alpha cannot act on an emergency number.")
+  if (kind !== "OrdinaryNumber") return unavailable("Android could not classify this number.")
+  return { tag: "Exact", selected: { ...choice, query, version: row.version } }
+}
+
+/** Recheck the selected contact by native ID. A changed row never selects a replacement number. */
+export effect function currentPhoneContact(selected: ReviewedPhoneContact): boolean!!Telephony {
+  const row = telephony("get", (c) => c.contacts.get(selected.contact, "ExplicitRead")) catch () => undefined
+  return hasNumber(row, selected) && row.version === selected.version
+}

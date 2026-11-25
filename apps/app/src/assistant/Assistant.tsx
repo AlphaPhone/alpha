@@ -42,6 +42,7 @@ import { ReplyFailure } from "./ReplyFailure.tsx";
 import { type Attached, type Line, Talk } from "./talk.vibe";
 import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx";
 import { CommsBriefing } from "../phone/comms.vibe";
+import { displayNumber } from "../phone/words.ts";
 
 export interface AssistantProps {
   runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview | Documents, unknown>;
@@ -203,8 +204,23 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const mediaCards = seen.media.filter((card) => !talking.context.sensitive && card.conversation === shown.chosen && card.revision === talking.context.revision).map((card) => ({
     id: `media ${card.id}`, author: "alpha" as const, text: "", children: (
       <div className="grid gap-2">
-        <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, action: "Approve" }}
-          onHandOn={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, true)))} />
+        {card.phone?.tag === "Choices" ? (
+          <div role="group" aria-label="Choose a phone number" className="grid gap-2 rounded-sheet bg-secondary p-3">
+            <p className="font-semibold">Choose a number for {card.detail}</p>
+            {card.phone.options.map((choice, index) => (
+              <Button key={`${choice.contact}\n${choice.number}`} variant="ghost" className="h-auto min-h-11 justify-start text-left whitespace-normal"
+                onClick={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.choosePhone(card, index)))}>
+                {choice.name} · {displayNumber(choice.number)}
+              </Button>
+            ))}
+            {card.phone.more && <p className="text-sm text-muted-foreground">More contacts matched. Use a more specific name if needed.</p>}
+          </div>
+        ) : card.phone?.tag === "Unavailable" ? (
+          <Alert role="status">{card.phone.reason}</Alert>
+        ) : (
+          <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, action: "Approve" }}
+            onHandOn={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, true)))} />
+        )}
         <Button className="justify-self-end" variant="ghost" onClick={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, false)))}>Decline</Button>
       </div>
     ),

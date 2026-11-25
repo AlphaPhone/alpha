@@ -8,7 +8,7 @@ const refused = { kind: "refused", code: NOT_DISPATCHED } as const;
 export async function executeMedia(alpha: Alpha, operation: DeviceOperation, call: ExecutorCall, authority: ReviewAuthority): Promise<unknown> {
   if (operation.type === "phone_keypad" || operation.type === "phone_dial" || operation.type === "phone_call") {
     const { phoneAction } = await import("../phone/agent.vibe");
-    return alpha.runtime.runPromise(phoneAction(operation, authority.current));
+    return alpha.runtime.runPromise(phoneAction(operation, authority.current, authority.phone));
   }
   if (operation.type === "sms_reply_selected" || operation.type === "sms_compose") {
     const { messageAction } = await import("../messages/agent.vibe");
