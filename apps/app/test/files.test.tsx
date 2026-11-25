@@ -745,11 +745,11 @@ describe("Files on a phone", () => {
       await press("Send");
       await until(alpha, chat, Conversation, (s) => review.pendingReads > reads && s.turn.reply === "Complete");
     };
-    const browsing = () => runtime.runSync(Browser.use((m) => m.get()));
-    const before = browsing();
+    const before = runtime.runSync(Browser.use((m) => m.get()));
 
     await send("no-files-request", "What is in my Downloads?", "Nothing");
-    expect([button("Approve"), review.decisions, review.claims, browsing().trail, browsing().search.filter]).toEqual([undefined, [], [], before.trail, before.search.filter]);
+    const after = runtime.runSync(Browser.use((m) => m.get()));
+    expect([button("Approve"), review.decisions, review.claims, after.trail, after.search.filter]).toEqual([undefined, [], [], before.trail, before.search.filter]);
 
     await send("reviewed-filter", "Could you tidy up my Downloads?", "Review");
     await vi.waitFor(() => expect(button("Approve")).toBeDefined());
