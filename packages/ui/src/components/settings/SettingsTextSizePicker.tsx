@@ -29,25 +29,27 @@ const sizes: { percent: Percent; sample: string }[] = [
 export function SettingsTextSizePicker({ size, busy = false, onChoose }: SettingsTextSizePickerProps) {
   return (
     <ListGroup heading="Text size">
-      <div role="group" aria-label="Text size" aria-busy={busy || undefined} className="flex flex-wrap items-center gap-1 px-2.5 py-2">
-        {sizes.map(({ percent, sample }) => (
-          <button
-            key={percent}
-            type="button"
-            aria-label={`${percent} percent`}
-            aria-pressed={size === percent}
-            disabled={busy || !onChoose}
-            className={cn(
-              focusRing,
-              "flex min-h-14 min-w-11 flex-auto items-center justify-center rounded-drawer-icon px-1.5 leading-tight text-foreground disabled:pointer-events-none aria-pressed:bg-alpha aria-pressed:text-alpha-foreground",
-              busy && "opacity-50",
-            )}
-            onClick={() => onChoose?.(percent)}
-          >
-            <span aria-hidden className={sample}>Aa</span>
-          </button>
-        ))}
-        {busy ? <Spinner size="sm" label="Applying" className="basis-full" /> : null}
+      <div role="group" aria-label="Text size" aria-busy={busy || undefined} className="flex flex-col gap-1 px-2.5 py-2">
+        <div className="flex items-center gap-1">
+          {sizes.map(({ percent, sample }) => (
+            <button
+              key={percent}
+              type="button"
+              aria-label={`${percent} percent`}
+              aria-pressed={size === percent}
+              disabled={busy || !onChoose}
+              className={cn(
+                focusRing,
+                "flex min-h-14 min-w-11 flex-auto items-center justify-center rounded-drawer-icon px-1.5 leading-tight text-foreground disabled:pointer-events-none aria-pressed:bg-alpha aria-pressed:text-alpha-foreground",
+                busy && "opacity-50",
+              )}
+              onClick={() => onChoose?.(percent)}
+            >
+              <span aria-hidden className={sample}>Aa</span>
+            </button>
+          ))}
+        </div>
+        {busy ? <Spinner size="sm" label="Applying" /> : null}
       </div>
     </ListGroup>
   );

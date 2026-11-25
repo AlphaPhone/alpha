@@ -211,7 +211,7 @@ export function Scan({ runtime }: Shown<Runtime>) {
       </DialogContent>
     </Dialog>
     <ScanCorrection runtime={runtime} />
-    {state.search.stage !== "SearchClosed" && <ScanSearchable key={state.search.ticket} runtime={runtime} state={state} close={() => fire({ type: "cancelSearch" })} />}
+    {state.search.stage !== "SearchClosed" && <ScanSearchable key={state.search.ticket} runtime={runtime} state={state} close={() => fire({ type: "cancelSearch", ticket: state.search.ticket })} />}
     <Dialog open={state.text.links.showing} onOpenChange={(open) => { if (!open) fire({ type: "closeLinks" }); }}>
       <DialogContent aria-describedby={undefined} closeLabel="Close links">
         <DialogTitle>Scanned links</DialogTitle>

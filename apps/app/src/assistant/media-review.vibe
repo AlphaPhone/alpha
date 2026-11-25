@@ -1,4 +1,4 @@
-// spec/app/approvals/index.md, "Story: One action at a time"; spec/app/approvals/proposal.md, "Story: Decide"; spec/app/photos/agent.md, "Story: Let Alpha read my library"; spec/app/phone/comms.md, "Story: Approve what Alpha proposes, one thing at a time"; spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"
+// spec/app/approvals/index.md, "Story: One action at a time"; spec/app/approvals/proposal.md, "Story: Decide"; spec/app/photos/agent.md, "Story: Let Alpha read my library"; spec/app/phone/comms.md, "Story: Approve what Alpha proposes, one thing at a time"; spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"; spec/app/assistant/index.md, "Alpha asks the agent to warm up at launch, on return to the foreground and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it"
 import { DeviceExecution, NOT_DISPATCHED, type DeviceAgent, type ExecutorCall, type JournalIdentity, type RuntimeRequestHeaders } from "@elizaos/agent"
 import { mayRunDirectly, readOperation, readResult, type DeviceOperation } from "@elizaos/agent"
 import { filterLabel } from "@elizaos/plugin-files-client"
@@ -839,7 +839,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
   const sameSms = (selection: SmsSelection) => Effect.provideContext(currentSmsSelection(selection), smsContext)
   const voicemailContext = try Effect.context<VoicemailReadContext>()
   const voicemailTarget = () => Effect.provideContext(selectedVoicemail(), voicemailContext)
-  const lock = try Semaphore.make(1)
+  const [lock, enrolling] = [try Semaphore.make(1), try Semaphore.make(1)]
   let latest: Session | undefined
   const isLatest = (opened: Session) => opened === latest
   const scopes = new Map<string, ApprovalScope>()
@@ -871,14 +871,15 @@ export const mediaReview = Layer.effect(MediaReview, effect {
     if (!registered("AlphaMediaEnrollment") || !registered("ElizaActionJournal")) return undefined
     const status = life.status() catch () => undefined
     if (status?.state !== "running") { latest = undefined; pinnedFiles.clear(); return undefined }
-    if (latest?.epoch === status.epoch) return latest
-    pinnedFiles.clear()
-    const owner = Effect.provideService(ownerAt(), Agent, agent) catch () => undefined
-    const { image } = try device.capabilities()
-    latest = owner === undefined ? undefined : (enrolled(status.epoch, owner, image, runtime, guarded, readBack) catch () => undefined)
-    const fresh = latest
-    if (fresh !== undefined) try ignore(tryPromise(() => fresh.execute.sync()))
-    return latest
+    return try enrolling.withPermits(1)(effect {
+      if (latest?.epoch === status.epoch) return latest
+      pinnedFiles.clear()
+      const owner = Effect.provideService(ownerAt(), Agent, agent) catch () => undefined
+      const { image } = try device.capabilities()
+      const fresh = (latest = owner === undefined ? undefined : (enrolled(status.epoch, owner, image, runtime, guarded, readBack) catch () => undefined))
+      if (fresh !== undefined) try ignore(tryPromise(() => fresh.execute.sync()))
+      return latest
+    })
   }
   effect function proposals(opened: Session): (readonly Proposal[] | undefined)!! {
     const answer = (tryPromise(() => runtime.request(`${prefix}/proposals`, undefined, opened.headers)) |> flatMap(%, Schema.decodeUnknownEffect(listed))) catch () => undefined

@@ -23,22 +23,22 @@ export const meta: ComponentMeta<SettingsProblemLogPageProps> = {
       onClear.mockClear();
       onRecover.mockClear();
       const canvas = within(canvasElement);
-      await userEvent.click(canvas.getByRole("button", { name: "Clear" }));
+      await userEvent.click(canvas.getByRole("button", { name: "Clear problem log" }));
       await userEvent.click(canvas.getByRole("button", { name: "Recover notification data" }));
       await expect([onClear.mock.calls.length, onRecover.mock.calls]).toEqual([1, [["notification-data"]]]);
     },
     Unavailable: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onRetry.mockClear();
       const canvas = within(canvasElement);
-      await expect(canvas.queryByRole("button", { name: "Clear" })).toBeNull();
-      await userEvent.click(canvas.getByRole("button", { name: "Retry" }));
+      await expect(canvas.queryByRole("button", { name: "Clear problem log" })).toBeNull();
+      await userEvent.click(canvas.getByRole("button", { name: "Problem log unavailable, retry" }));
       await expect(onRetry.mock.calls.length).toBe(1);
     },
     Clearing: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onClear.mockClear();
       const canvas = within(canvasElement);
       await expect(canvas.getByRole("status", { name: "Clearing" })).toBeTruthy();
-      await expect(canvas.queryByRole("button", { name: "Clear" })).toBeNull();
+      await expect(canvas.queryByRole("button", { name: "Clear problem log" })).toBeNull();
     },
   },
 };
