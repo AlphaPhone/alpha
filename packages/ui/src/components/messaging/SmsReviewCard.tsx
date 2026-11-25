@@ -26,8 +26,8 @@ export type SmsReviewCardProps = {
 export function SmsReviewCard({ to, number, body, note, onSend, onDecline, className }: SmsReviewCardProps) {
   return (
     <section aria-label={`Text to ${to}`} data-alpha-sms-review="" className={cn("flex flex-col gap-2 rounded-[1.375rem] border border-border bg-background px-4.5 pt-4 pb-3.5 text-foreground", className)}>
-      <p className="text-lg leading-snug font-bold tabular-nums wrap-anywhere">To {to}</p>
-      {number ? <p className="-mt-1.5 text-sm text-muted-foreground tabular-nums">{number}</p> : null}
+      <p className="text-lg leading-snug font-bold wrap-anywhere">To {to}</p>
+      {number ? <p className="-mt-1.5 text-sm text-muted-foreground">{number}</p> : null}
       <p className="text-lead leading-normal whitespace-pre-wrap wrap-anywhere">{body}</p>
       {note ? <p className="text-sm text-muted-foreground">{note}</p> : null}
       {onSend || onDecline ? (
