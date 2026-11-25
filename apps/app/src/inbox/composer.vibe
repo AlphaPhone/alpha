@@ -72,11 +72,11 @@ const SavedWords = Schema.Struct({
   to: Schema.Array(Schema.String), cc: Schema.Array(Schema.String), bcc: Schema.Array(Schema.String),
   subject: Schema.String, text: Schema.String,
 })
-const Seen = Schema.Struct({ digest: Schema.String, words: Schema.optionalKey(SavedWords) })
-const Copy = Schema.Struct({ account: Schema.Number, id: Schema.String, digest: Schema.String, seen: Schema.optionalKey(Seen) })
-type Copy = typeof Copy.Type
-type Seen = typeof Seen.Type
-const readCopies = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Copy)))
+const SeenSchema = Schema.Struct({ digest: Schema.String, words: Schema.optionalKey(SavedWords) })
+const CopySchema = Schema.Struct({ account: Schema.Number, id: Schema.String, digest: Schema.String, seen: Schema.optionalKey(SeenSchema) })
+type Copy = typeof CopySchema.Type
+type Seen = typeof SeenSchema.Type
+const readCopies = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(CopySchema)))
 
 /** The storage charged to the draft for a file. */
 export const mibOf = (bytes: number) => Math.max(1, Math.ceil(bytes / 1_048_576))
@@ -260,7 +260,7 @@ function addressCounts(words: Pick<Words, "to" | "cc" | "bcc">) {
 }
 
 // spec/app/inbox/drafts.md, "On a clash the owner chooses Restore my edits or Use latest saved draft, is told which was kept, and the choice is written to the phone"
-export effect function useLatestSavedDraft(): void!!(Drafts.Machine | Letters) {
+export effect function chooseLatestSavedDraft(): void!!(Drafts.Machine | Letters) {
   const composer = try Drafts.Machine
   const letters = try Letters
   const state = try composer.get()
@@ -383,7 +383,7 @@ export interface Beginning {
   readonly kind: Kind
   readonly account: number
   /** The message answered, as Gmail names it, with its sender, other recipients, subject and attachments. */
-  readonly message?: { readonly id: string; readonly from: string; readonly others: ReadonlyArray<string>; readonly subject: string; readonly body: string; readonly historyId: string | null; readonly files: MailMessage["attachments"] }
+  readonly message?: { readonly id: string; readonly from: string; readonly replyTo?: string; readonly others: ReadonlyArray<string>; readonly subject: string; readonly body: string; readonly historyId: string | null; readonly files: MailMessage["attachments"] }
 }
 
 const addressOf = (from: string) => /<([^>]+)>/u.exec(from)?.[1] ?? from.trim()
@@ -395,9 +395,20 @@ export effect function begin(beginning: Beginning): boolean!!(Drafts.Machine | L
   const ledger = try Mail
   const words = try Letters
   const { kind, account, message } = beginning
-  const sender = message === undefined ? "" : addressOf(message.from)
+  const replyTo = message?.replyTo ?? ""
+  const directsReply = acceptable(replyTo)
+  const sender = directsReply ? replyTo : addressOf(message?.from ?? "")
   const own = ledger.email(account).toLowerCase()
-  const others = message === undefined ? [] : message.others.map(addressOf).filter((one) => one.toLowerCase() !== own && one !== sender)
+  const covered = new Set([own, sender.toLowerCase()])
+  const others: string[] = []
+  for (const recipient of message?.others ?? []) {
+    const address = addressOf(recipient)
+    const key = address.toLowerCase()
+    if (acceptable(address) && !covered.has(key)) {
+      covered.add(key)
+      others.push(address)
+    }
+  }
   const replying = kind === "Reply" || kind === "ReplyAll"
   const forward = kind === "Forward" ? message : undefined
   const files = forward?.files ?? []
@@ -408,7 +419,7 @@ export effect function begin(beginning: Beginning): boolean!!(Drafts.Machine | L
     && new Set(files.map((file) => file.partId)).size === files.length
     && new Set(files.map((file) => file.name.toLowerCase())).size === files.length
   const event: Event = {
-    type: "compose", kind, account, others: kind === "ReplyAll" ? others.length : 0, replyTo: false,
+    type: "compose", kind, account, others: kind === "ReplyAll" ? others.length : 0, replyTo: directsReply,
     addressable: acceptable(sender), files: files.length, mib, forwardable, policy,
   }
   const sent = try exit(composer.send(event, "Owner"))

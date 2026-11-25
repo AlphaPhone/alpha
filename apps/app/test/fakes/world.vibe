@@ -30,8 +30,13 @@ function clockAt(world: Scene) {
  * browser's fetch, answered by the fake services' routes, or, where `world.phone`, the plugins Android gives the page,
  * over the same routes.
  */
-export function fakeWorld(world: Scene, messaging?: MessagingLayers): Layer.Layer<Platform | TestClock.TestClock> {
-  const { agent, cloud } = services(world)
+export function fakeWorld(world: Scene, options?: Partial<ReturnType<typeof services>> & MessagingLayers): Layer.Layer<Platform | TestClock.TestClock> {
+  const defaults = services(world)
+  const agent = options?.agent ?? defaults.agent
+  const cloud = options?.cloud ?? defaults.cloud
+  const messaging = options?.slack || options?.telegram || options?.sessions
+    ? { slack: options.slack, telegram: options.telegram, sessions: options.sessions }
+    : undefined
   const platform = world.phone
     ? Layer.provide(phonePlatform(messaging), Layer.effectDiscard(acquireRelease(sync(() => plugIn(plugins(world, { agent, cloud }))), (unplug) => sync(unplug))))
     : pagePlatform(Layer.provide(agentAt("http://agent.test"), fetching(agent)), Layer.provide(cloudAt("http://cloud.test"), fetching(cloud)), messaging)

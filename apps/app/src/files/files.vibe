@@ -23,7 +23,7 @@ import * as Shown from "../../gen/app__files__preview.effect.vibe"
 import * as Recent from "../../gen/app__files__recent.effect.vibe"
 import type { Documents } from "../platform/documents.vibe"
 import { type Opened, preview, taken, view } from "./preview.vibe"
-import { Answers, type ReviewedBatch, answers } from "./agent.vibe"
+import { Answers, type Receipt, type ReviewedBatch, answers } from "./agent.vibe"
 
 module names {
   /** Whether `name` contains `text`, as the owner reads it: letters compared without their case. @throws {never} */
@@ -493,6 +493,14 @@ effect function allowed(settings: boolean): Event!!(Files | Browser.Machine) {
   return try reported(true)
 }
 
+function receiptJob<Event>(ticket: number, ran: boolean, outcome: Receipt["outcome"], done: number): Job<Event, Answers, ["Phone"]> {
+  return run(`receipt ${ticket}`, effect {
+    const answers = try Answers
+    const bound = try answers.reviewed(ticket)
+    try answers.receipt(ticket, { ran, outcome, ...(bound === undefined ? {} : { done }) })
+  }, "Phone")
+}
+
 function carry(fx: Out): Job<Event, Files | Handles | Browser.Machine | Bin.Machine | Documents | Opened | Recent.Machine | Shown.Machine | Answers | CategoryGroups | Device | Shell | Toasts | Said, [by: Actor]> {
   return match (fx) {
     when { tag: "AskAccess" }: answer("access", allowed(false), { type: "accessReported", grant: "Denied", supported: true }, "Phone");
@@ -514,11 +522,7 @@ function carry(fx: Out): Job<Event, Files | Handles | Browser.Machine | Bin.Mach
     when { tag: "Show", let item, let siblings, let owner }: run("show", view(item, siblings, owner), "Phone");
     when { tag: "Share", let ticket, let channel, let items, let approval }: answer(`share ${ticket}`, shared(ticket, channel, items, approval), { type: "shareEnded", ticket, opened: false, known: false }, "Phone");
     when { tag: "Taken", let items }: run("taken", taken(items), "Phone");
-    when { tag: "Receipt", let ticket, let ran, let outcome, let done }: run(`receipt ${ticket}`, effect {
-      const answers = try Answers
-      const bound = try answers.reviewed(ticket)
-      try answers.receipt(ticket, { ran, outcome, ...(bound === undefined ? {} : { done }) })
-    }, "Phone");
+    when { tag: "Receipt", let ticket, let ran, let outcome, let done }: receiptJob(ticket, ran, outcome, done);
   }
 }
 
@@ -721,11 +725,7 @@ function carryBin(fx: Bin.Effect): Job<Bin.Event, Files | Handles | Bin.Machine 
       try taken(items)
       try (try Browser.Machine).send({ type: "refresh" }, "Phone")
     }), "Phone");
-    when { tag: "Receipt", let ticket, let ran, let outcome, let done }: run(`receipt ${ticket}`, effect {
-      const answers = try Answers
-      const bound = try answers.reviewed(ticket)
-      try answers.receipt(ticket, { ran, outcome, ...(bound === undefined ? {} : { done }) })
-    }, "Phone");
+    when { tag: "Receipt", let ticket, let ran, let outcome, let done }: receiptJob(ticket, ran, outcome, done);
   }
 }
 

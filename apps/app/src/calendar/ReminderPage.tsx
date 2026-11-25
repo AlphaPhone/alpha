@@ -1,5 +1,6 @@
 // spec/app/calendar/index.md, "Story: See reminders among my events"; spec/app/reminders/index.md, "Story: Create, update, flag, move, complete and delete reminders with Undo"
-import { Button, CalendarEventMenu, CalendarEventPage, CalendarEventRow, CalendarEventRows, Dialog, DialogContent, DialogDescription, DialogTitle, cn } from "@repo/ui";
+import type { ReminderItemRecord } from "@repo/launcher-records";
+import { Button, CalendarEventMenu, CalendarEventPage, CalendarEventRow, CalendarEventRows, cn } from "@repo/ui";
 import { Effect } from "effect";
 import { Bell, Repeat } from "lucide-react";
 import { useRef } from "react";
@@ -7,12 +8,14 @@ import { Machine as Calendar } from "../../gen/app__calendar.effect.vibe";
 import { useMachine as useReopen } from "../../gen/app__calendar__reminderReopen.react.ts";
 import { snoozeSelectedReminder } from "../reminders/alerts.vibe";
 import { deleteReminderItem, toggleReminderComplete } from "../reminders/reminders.vibe";
-import { remindersStore, type ReminderItemRecord } from "../reminders/store.ts";
+import { remindersStore } from "../reminders/store.ts";
 import type { Alpha } from "../runtime/area.tsx";
 import type { CalendarProps } from "./Calendar.tsx";
 import { startReminderEdit } from "./editor.vibe";
+import { ReminderReview } from "./ReminderReview.tsx";
 import { confirmReopening, reviewReopening } from "./reopen.vibe";
 import type { DatedReminder } from "./reminders.ts";
+import { zone } from "./time.ts";
 
 const hour = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 const date = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "short", day: "numeric" });
@@ -21,8 +24,7 @@ function noteFor(item: ReminderItemRecord): string {
   if (item.completed) return "Completed · no further alarm scheduled";
   if (item.alertMinutes === null) return "No alert · saved on this device";
   if (item.notifiedAtMs !== null) return "Notification posted";
-  return [item.snoozedUntilMs === null ? "" : `Snoozed until ${new Date(item.snoozedUntilMs).toLocaleString()}`,
-    "Scheduled. Alerts may arrive a few minutes late."].filter(Boolean).join("\n");
+  return "Scheduled. Alerts may arrive a few minutes late.";
 }
 
 function alertCaption(minutes: number): string {
@@ -52,7 +54,19 @@ export function ReminderPage({ alpha, runtime, row, onBack }: { alpha: Alpha; ru
   const cancel = () => { if (review.can({ type: "cancel" })) void review.send({ type: "cancel" }); };
   const oneTime = record.recurrence === "none";
   const completion = record.completedAtMs;
-  const words = [record.notes, noteFor(record)].filter(Boolean).join("\n");
+  const kept = record.history ?? [];
+  const occurrences = record.completed && completion !== null && !kept.some((item) => item.completedAtMs === completion && item.dueAtMs === begin)
+    ? [...kept, { revision: record.revision, dueAtMs: begin, completedAtMs: completion }] : kept;
+  const history = occurrences.map(({ revision, completedAtMs, dueAtMs }, at) => (
+    <div key={revision} className={cn("text-caption text-muted-foreground", record.completed && at === 0 ? "mt-2.5" : "mt-2")}>
+      {`Completed ${new Date(completedAtMs).toLocaleString()} · due ${new Date(dueAtMs).toLocaleString()}`}
+    </div>
+  ));
+  const snoozed = !record.completed && record.notifiedAtMs === null && record.alertMinutes !== null && record.snoozedUntilMs !== null
+    ? `Snoozed until ${new Date(record.snoozedUntilMs).toLocaleString()}` : "";
+  const repeats = oneTime ? "" : `${record.recurrence} · ${zone()}. ${record.alertMinutes === null
+    ? "Next occurrence is saved with no alert after Done." : "Next occurrence is scheduled after Done."}`;
+  const words = [record.notes, snoozed, repeats, noteFor(record)].filter(Boolean).join("\n");
   return (
     <CalendarEventPage title={record.title} when={`Due ${hour.format(begin)}`} day={date.format(begin)} source="Reminders" notes={words} onBack={onBack}
       actions={<CalendarEventMenu items={[{ label: "Edit", name: "Edit event", onSelect: edit }, { label: "Delete", name: "Delete event", onSelect: remove }]} />}>
@@ -60,35 +74,18 @@ export function ReminderPage({ alpha, runtime, row, onBack }: { alpha: Alpha; ru
         <span role="img" aria-label={oneTime ? record.completed ? "Completed." : "One-time reminder." : record.recurrence} className="block text-muted-foreground">
           <Repeat aria-hidden className="size-4.5" />
         </span>
-        {record.completed && completion !== null ? (
-          <div className="mt-2.5 text-caption text-muted-foreground">{`Completed ${new Date(completion).toLocaleString()} · due ${new Date(begin).toLocaleString()}`}</div>
-        ) : null}
+        {record.completed ? history : null}
         {!record.completed || oneTime ? <div className={cn("flex flex-wrap gap-2", record.completed ? "mt-3" : "mt-3.5")}>
           <Button size="lg" variant={record.completed ? "secondary" : "primary"} className={record.completed ? "h-13 rounded-lg px-4 text-base font-normal" : "h-13 rounded-lg bg-foreground px-4 text-base font-normal text-background hover:bg-foreground/90"}
             ref={record.completed ? reviewTriggerRef : undefined} aria-label={record.completed ? "Reopen reminder" : "Complete reminder occurrence"}
             onClick={record.completed ? reopen : toggle}>{record.completed ? "Reopen" : "Done"}</Button>
           {!record.completed && record.alertMinutes !== null ? <Button size="lg" variant="secondary" className="h-13 rounded-lg px-4 text-base font-normal" aria-label="Snooze reminder 10 minutes" onClick={snooze}>10 min</Button> : null}
         </div> : null}
+        {!record.completed ? history : null}
       </div>
       {record.alertMinutes !== null ? <CalendarEventRows><CalendarEventRow icon={<Bell />} text={alertCaption(record.alertMinutes)} /></CalendarEventRows> : null}
-      <Dialog open={reviewing} onOpenChange={(open) => { if (!open) cancel(); }}>
-        <DialogContent className="inset-x-3 top-1/2 bottom-auto max-w-110 -translate-y-1/2 gap-0 rounded-action border border-border bg-background p-0 motion-safe:animate-fade"
-          overlayClassName="bg-foreground/53 dark:bg-background/53" onCloseAutoFocus={(event) => {
-            if (reviewTriggerRef.current === null) return;
-            event.preventDefault();
-            reviewTriggerRef.current.focus();
-          }}>
-          <div className="px-4 py-4">
-            <DialogTitle className="font-sans text-xl leading-normal font-bold">Reopen?</DialogTitle>
-            <DialogDescription className="mt-3 text-md leading-normal text-foreground">No alert</DialogDescription>
-          </div>
-          <div className="flex flex-wrap gap-2 border-t border-border px-4 py-3">
-            <Button size="sm" variant="secondary" className="h-auto min-h-11 min-w-11 rounded-sm border border-border px-3.5 py-2.5 text-md leading-normal font-normal" disabled={sending} onClick={cancel}>Cancel</Button>
-            <Button size="sm" variant="secondary" className="h-auto min-h-11 min-w-11 rounded-sm border border-border px-3.5 py-2.5 text-md leading-normal font-normal" loading={sending}
-              onClick={() => void runtime.runPromise(confirmReopening())}>Reopen</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <ReminderReview open={reviewing} title="Reopen?" details="No alert" action="Reopen" sending={sending}
+        onApprove={() => void runtime.runPromise(confirmReopening())} onCancel={cancel} returnFocus={() => reviewTriggerRef.current} />
     </CalendarEventPage>
   );
 }

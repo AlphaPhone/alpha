@@ -1,6 +1,6 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/assistant/dock.md, "Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows, and a swipe up from it opens the sheet"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/app/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence every line stays code"
 import {
-  Alert, AssistantCard, AssistantCardFrame, Button, AssistantConversation, AssistantGrabber, AssistantMessageDraftCard, AssistantPhotoPreview, ConfirmDialog, Sheet, SheetContent, SmsReviewCard, Textarea,
+  Alert, AssistantCard, AssistantCardFrame, Button, AssistantConversation, AssistantGrabber, AssistantMessageDraftCard, AssistantNoticeCard, AssistantPhotoPreview, ConfirmDialog, Sheet, SheetContent, SmsReviewCard, Textarea,
   type AssistantAttachment, type AssistantComposerProps, type AssistantPull, type AssistantDraftNoticeProps, type AssistantMessageProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
@@ -33,7 +33,7 @@ import type { Machine as LayersMachine } from "../../gen/app__shell__layers.effe
 import { useMachine as useLayers } from "../../gen/app__shell__layers.react.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
-import { MailQuestions } from "../inbox/mail-context.vibe";
+import { acceptMailReview, MailQuestions, type MailQuestion } from "../inbox/mail-context.vibe";
 import { MessagingBridge, type MessagingBridgeApi, type MessagingDraftProposal } from "../messaging/bridge.vibe";
 import { home } from "../shell/shell.vibe";
 import { isCommsView } from "../shell/views.tsx";
@@ -46,6 +46,7 @@ import { Documents } from "../platform/documents.vibe";
 import { AttachmentSources, type AttachmentSourceRow } from "./AttachmentSources.tsx";
 import { AttachmentPicker, choosePickerRow, clearPickerChoice, importPickerFiles, openAttachmentPicker, pickSystemDocument, upPickerFolder, usePickerVolume } from "./attachment-picker.vibe";
 import { askComms, freedom, openChatSearch, restTyping } from "./assistant.vibe";
+import { contactChatActionsId } from "./contact-search.ts";
 import { acceptedFiles, acceptedPhotos, attachmentAuthority, previewFile, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
 import { chip, type MessageActions, useHistorySheets, useMessageRows } from "./history.tsx";
 import { barHeight, ChatScrim, useSheetFollow } from "./follow.tsx";
@@ -475,6 +476,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const mail = useMemo(() => runtime.runSync(MailQuestions), [runtime]);
   const reviewed = useExternal(mail);
   const draftCards = useMessagingDrafts(runtime, shell);
+  const acceptingMail = useRef<MailQuestion | undefined>(undefined);
   const sectionRef = useRef<HTMLElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const focusOnRevealRef = useRef(false);
@@ -504,7 +506,13 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const free = talking && shown && writing ? freedom(talking, writing, shown.chosen) : { replying: true, holding: true };
   const searchRoute = shell.state?.route;
   const beginSearch = searchRoute === undefined ? undefined : () => void runtime.runPromiseExit(openChatSearch(searchRoute));
-  const history = useHistorySheets(chats, search, layers, seen, free, beginSearch, () => focusChatActions(composerRef.current));
+  const returnChatFocus = () => focusChatActions(composerRef.current);
+  const returnSearchFocus = () => {
+    const origin = finding?.origin;
+    if (origin?.tag !== "ContactDock") returnChatFocus();
+    else if (origin.route === searchRoute) document.getElementById(contactChatActionsId(origin.route, origin.person))?.focus();
+  };
+  const history = useHistorySheets(chats, search, layers, seen, free, beginSearch, returnChatFocus, returnSearchFocus);
   const page = shown === undefined || (shown.page.status === "Idle" && shown.chosen === 0) ? undefined : seen.pages.get(shown.page.ticket);
   const lines = page?.lines ?? emptyLines;
   const canPreview = attachments.can({ type: "preview", attachment: 1 });
@@ -580,13 +588,29 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const attachMail = () => {
     const question = mail.snapshot().question;
     const offer = { type: "offer", kind: "Mail", revision: writing.offeredAt + 1 } as const;
-    if (!question || !composer.can(offer)) return;
-    void composer.send(offer).then((outcome) => {
+    if (!question || acceptingMail.current || !composer.can(offer)) return;
+    acceptingMail.current = question;
+    void (async () => {
+      const accepted = await runtime.runPromise(acceptMailReview(question));
+      if (mail.snapshot().question !== question) return;
+      if (!accepted || !composer.can(offer)) {
+        mail.show({ failure: "changed" });
+        return;
+      }
+      const outcome = await composer.send(offer);
       if (outcome._tag !== "Success" || mail.snapshot().question !== question) return;
       mail.attach(question);
       if (!board.snapshot().typed.trim()) type("Summarize this email");
       composerRef.current?.focus();
+    })().finally(() => {
+      acceptingMail.current = undefined;
     });
+  };
+  const dismissMail = () => {
+    if (acceptingMail.current) return;
+    const notice = mail.snapshot().question?.notice;
+    mail.show({});
+    if (notice) void runtime.runPromise(notice.dismiss());
   };
   const send = () => {
     if (subject !== undefined) {
@@ -690,7 +714,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         transcript={{
           messages,
           holdMessage: open ? holdMessage : undefined,
-          liveMessages: [...(brief === "" ? [] : [{ id: `briefing:${subject}`, author: "alpha" as const, text: brief, onOpenLink }]), ...writingReply, ...draftCards, ...failed, ...mediaCards, ...mediaNote, ...recordingSummary],
+          briefing: brief === "" ? undefined : <AssistantNoticeCard key={`briefing:${subject}`} title="Phone" detail={brief} />,
+          liveMessages: [...writingReply, ...draftCards, ...failed, ...mediaCards, ...mediaNote, ...recordingSummary],
           interim: open && shown.around === 0 && !talking.context.sensitive ? interim : undefined,
           position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around), earlier, later },
           visible: open,
@@ -787,7 +812,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           onUnquote: composer.can({ type: "unquote" }) ? () => void composer.send({ type: "unquote" }) : undefined,
         }}
       />}
-      <MailReviewDialogs open={!onComms && open} review={reviewed} attach={attachMail} dismiss={() => mail.show({})} />
+      <MailReviewDialogs open={!onComms && open} review={reviewed} attach={attachMail} dismiss={dismissMail} />
       {history.sheets}
     </>
   );

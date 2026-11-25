@@ -6,7 +6,7 @@ import { expect, it, vi } from "vitest";
 import { App } from "../src/App.tsx";
 import { boot } from "../src/boot.tsx";
 import type { Platform } from "../src/platform/platform.vibe";
-import { button, closeAll, drawn, only, openOver, press, underAct } from "./alpha.tsx";
+import { button, closeAll, drawn, hardware, only, openOver, press, underAct } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import { fakeWorld } from "./fakes/world.vibe";
 
@@ -53,6 +53,7 @@ it("Holds native Home until the phone confirms the signed-in account (spec/app/a
   world.voice.startupSignIn = { startEmail, verify };
   underAct();
   try {
+    localStorage.setItem("alpha:startup-permission-walkthrough:v1", JSON.stringify({ version: 4, status: "completed", step: 7 }));
     await openOver(fakeWorld(world), only("home", "overlay"), true);
     await vi.waitFor(() => expect(document.querySelector('form[aria-label="Sign in with email"]')).toBeTruthy());
     expect(button("Settings")).toBeUndefined();
@@ -76,6 +77,52 @@ it("Holds native Home until the phone confirms the signed-in account (spec/app/a
     await press("Verify");
     await vi.waitFor(() => expect(button("Settings")).toBeDefined());
     expect(verify).toHaveBeenCalledTimes(2);
+  } finally {
+    await closeAll();
+    react.IS_REACT_ACT_ENVIRONMENT = undefined;
+  }
+});
+
+it("Shows native Access after sign-in and keeps the owner's place through restart (spec/app/startup/access.md, \"Story: Walk through each access in order\")", async () => {
+  const world = { ...scene(), phone: true, signedIn: true };
+  world.settings.permissionStates.notifications = "prompt";
+  world.settings.permissionReplies.notifications = "denied";
+  world.settings.permissionStates.camera = "prompt";
+  world.settings.permissionReplies.camera = "granted";
+  const dialog = () => document.querySelector('[role="dialog"]');
+  const step = (number: number) => vi.waitFor(() => expect(dialog()?.textContent).toContain(`Step ${number} of 7`));
+  underAct();
+  try {
+    const first = await openOver(fakeWorld(world), only("home", "overlay"), true);
+    await step(1);
+    expect(button("Settings")).toBeUndefined();
+    expect(world.settings.permissionRequests).toEqual([]);
+    await hardware("back");
+    await step(1);
+    await vi.waitFor(() => expect(button("Allow")).toBeDefined());
+    await press("Allow");
+    await vi.waitFor(() => expect(world.settings.permissionRequests).toEqual(["notifications"]));
+    await vi.waitFor(() => expect(button("Skip")).toBeDefined());
+    await press("Skip");
+    await step(2);
+    await first.close();
+
+    world.settings.permissionStates.notifications = "prompt-with-rationale";
+    await openOver(fakeWorld(world), only("home", "overlay"), true);
+    await step(2);
+    await vi.waitFor(() => expect(button("Skip")).toBeDefined());
+    await press("Skip");
+    await step(3);
+    await vi.waitFor(() => expect(button("Allow")).toBeDefined());
+    await press("Allow");
+    for (let number = 4; number <= 7; ++number) {
+      await step(number);
+      await vi.waitFor(() => expect(button("Skip")).toBeDefined());
+      await press("Skip");
+    }
+    await vi.waitFor(() => expect(button("Settings")).toBeDefined());
+    expect(dialog()).toBeNull();
+    expect(world.settings.permissionRequests).toEqual(["notifications", "camera"]);
   } finally {
     await closeAll();
     react.IS_REACT_ACT_ENVIRONMENT = undefined;

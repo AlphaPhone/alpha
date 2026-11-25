@@ -104,6 +104,19 @@ module web {
     try { callback = video.requestVideoFrameCallback(frame) } catch (cause) { stop(); throw cause }
     return { stream: framed, stop }
   }
+  export function hasTorch(track: MediaStreamTrack): boolean {
+    const capabilities = track.getCapabilities()
+    if (!("torch" in capabilities)) return false
+    const torch = capabilities.torch
+    return torch === true || (Array.isArray(torch) && torch.includes(true))
+  }
+  /** Confirm a browser light setting from the same camera track. */
+  export async function setTorch(track: MediaStreamTrack, lit: boolean): Promise<boolean> {
+    const constraint: MediaTrackConstraintSet & { torch: boolean } = { torch: lit }
+    await track.applyConstraints({ advanced: [constraint] })
+    const settings = track.getSettings()
+    return "torch" in settings && settings.torch === lit
+  }
   /** Confirm only a focus point that the camera track reports acquiring. */
   export async function focusAt(video: HTMLVideoElement, track: MediaStreamTrack, tap: { x: number; y: number }, framing: Framing): Promise<boolean> {
     const supported = media()?.getSupportedConstraints()
@@ -146,10 +159,12 @@ module web {
     return cause instanceof DOMException && ["NotAllowedError", "PermissionDeniedError", "SecurityError"].includes(cause.name)
   }
 }
-import { focusAt, type Framing, framedVideo, image, media, permission, permissionFailure, recorder, recordingBlob, release, revoke, urlOf } from web
+import { focusAt, type Framing, framedVideo, hasTorch, image, media, permission, permissionFailure, recorder, recordingBlob, release, revoke, setTorch, urlOf } from web
 
 export type Aspect = "4:3" | "16:9"
 export type Flash = "off" | "auto" | "on" | "torch"
+export type CameraLight = { readonly kind: "flash"; readonly mode: Flash }
+  | { readonly kind: "torch"; readonly ticket: number; readonly lit: boolean }
 export interface Point { readonly x: number; readonly y: number; readonly viewportX?: number; readonly viewportY?: number }
 export interface LensFacts {
   readonly minimum: number
@@ -185,7 +200,7 @@ export service CameraPort {
   start(ticket: number, lens: Lens, aspect: Aspect): (LensFacts | undefined)!!
   stop(ticket: number): void!!
   mode(mode: Mode): boolean!!
-  flash(mode: Flash): boolean!!
+  light(change: CameraLight): boolean!!
   volume(enabled: boolean): void!!
   zoom(level: number): boolean!!
   focus(point: Point): boolean!!
@@ -196,7 +211,7 @@ export service CameraPort {
 }
 
 const recordingOptions = { quality: "highest", maxDuration: 300, maxFileSize: 100 * 1024 * 1024 } as const
-const browserZoom = { minimum: 10, maximum: 80, flash: false, aspects: [] } satisfies LensFacts
+const browserZoom = { minimum: 10, maximum: 80 } as const
 const grantOf = (value: string): Grant => value === "granted" ? "Granted" : value === "denied" ? "Denied" : "Unasked"
 const directionOf = (lens: Lens) => lens === "Front" ? "front" as const : "back" as const
 const dataImage = (value: string | undefined) => value ? `data:image/jpeg;base64,${value}` : ""
@@ -297,7 +312,7 @@ export const phoneCamera = Layer.effect(CameraPort, effect {
       try ignore(tryPromise(() => camera().stopPreview()))
     }),
     mode: (mode: Mode) => tried(() => camera().setCaptureMode({ mode: mode === "Photo" ? "photo" : "video", quality: recordingOptions.quality })),
-    flash: (mode: Flash) => tried(() => camera().setSettings({ settings: { flash: mode } })),
+    light: (change: CameraLight) => change.kind === "flash" ? tried(() => camera().setSettings({ settings: { flash: change.mode } })) : succeed(false),
     volume: (enabled: boolean) => registered("AlphaDevice") ? ignore(tryPromise(() => volume(enabled))) : Effect.void,
     zoom: (level: number) => tried(() => camera().setZoom({ zoom: level / 10 })),
     focus: ({ x, y, viewportX, viewportY }: Point) => tried(() => camera().setFocusPoint({ x: viewportX ?? x, y: viewportY ?? y })),
@@ -396,7 +411,8 @@ export const browserCamera = Layer.effect(CameraPort, effect {
       const played = try tried(() => view?.play() ?? Promise.reject(new Error("Camera view is closed")))
       if (!played) { release(stream); opened = undefined; owner = 0; bound(); return undefined }
       track.onended = () => { PubSub.publishUnsafe(signals, { ticket, kind: "preview-lost" }) }
-      return { ...browserZoom, maximum: lens === "Front" ? 10 : browserZoom.maximum }
+      const flash = mirror ? false : (Effect.try(() => hasTorch(track)) catch () => false)
+      return { ...browserZoom, maximum: mirror ? browserZoom.minimum : browserZoom.maximum, flash, aspects: [] }
     }),
     stop: (ticket: number) => Semaphore.withPermit(turn, sync(() => {
       if (owner !== ticket) return
@@ -406,7 +422,12 @@ export const browserCamera = Layer.effect(CameraPort, effect {
       bound()
     })),
     mode: () => succeed(true),
-    flash: () => succeed(false),
+    effect light(change: CameraLight): boolean!! {
+      const preview = opened
+      if (change.kind !== "torch" || change.ticket !== owner || preview === undefined || framing.mirror) return false
+      const confirmed = tryPromise(() => setTorch(preview.track, change.lit)) catch () => false
+      return confirmed && opened === preview && preview.track.readyState === "live"
+    },
     volume: () => Effect.void,
     zoom: (level: number) => sync(() => {
       if (opened === undefined || framing.mirror || level < browserZoom.minimum || level > browserZoom.maximum) return false

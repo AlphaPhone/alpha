@@ -382,6 +382,7 @@ pure val pageRoutes: List[Route] = List(
   { method: Get, path: "/api/workflow/workflows/{id}/executions", stream: false },
   { method: Get, path: "/api/workflow/executions/{id}", stream: false },
   { method: Get, path: "/api/workflow/executions/{id}/approvals", stream: false },
+  { method: Get, path: "/api/workflow/executions/{id}/phone-review", stream: false },
   { method: Post, path: "/api/workflow/executions/{id}/approvals/{nodeId}/{iteration}", stream: false },
   { method: Post, path: "/api/workflow/workflows/{id}/activate", stream: false },
   { method: Post, path: "/api/workflow/workflows/{id}/deactivate", stream: false },
@@ -654,15 +655,13 @@ eliza's plugins find some device services by name, which Alpha's entry is to
 supply (`spec/agent/plugins/profile.md` in eliza, "Host runtime services
 register with storage before every listed plugin, never under an agent
 service's name, and a pinned worker is the workflow-worker service"):
-`workflow-device`, the enrolled phone's steps inside a workflow;
-`workflow-native-digests`, the reviewed native sources of a digest; and
-Maps' saved places, kept under the agent's state. The pack's entry is
-written inside the pinned clone and cannot carry Alpha's code until eliza's
-bundle builder admits a package outside its source root, so these stay
-unavailable: a workflow step on the device, a native digest source and a
-saved place each answer that the phone cannot do it yet.
+`workflow-device` uses eliza's workflow offer and waits for the receipt from
+the exact enrolled phone. The pack keeps Android's decision, claim and
+receipt protocol even when a run is already approved in Workflows. Native
+digest sources and Maps' saved places still answer that the phone cannot
+do them.
 
 ```quint
-pure val awaitingHostServices: Set[str] = Set("workflow-device", "workflow-native-digests", "maps-saved-places")
+pure val awaitingHostServices: Set[str] = Set("workflow-native-digests", "maps-saved-places")
 pure def serviceAvailable(service: str): bool = not(awaitingHostServices.contains(service))
 ```

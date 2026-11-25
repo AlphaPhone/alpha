@@ -1,8 +1,11 @@
 // spec/app/settings/index.md, "Story: Find a setting and come back"
 import type { DataResetPlugin, AndroidRoleStatus, ElizaPasswordsPlugin, ListenerStatus, PasswordEditorInput, PasswordEntrySummary, PasswordsStatus, LaunchTarget, LauncherAppsChange, NativeCrashEntry, SystemFacts, SystemHostPlugin, SystemPlugin, SystemSettingsPage, ApprovedJoinResult, ConnectOptions, ConnectivityResult, WiFiNetwork, WiFiPlugin } from "@elizaos/os-bridges";
 import type { PasswordProvider, PasswordProviderAction } from "../../src/platform/systemSettings.vibe";
+import type { PermissionState } from "@capacitor/core";
 import type { LauncherScene } from "./launcher.ts";
 import { type Faked, plugin, rejection } from "./phone.ts";
+
+type AppPermission = "camera" | "notifications";
 
 /** A field as Alpha's `AlphaCarrierSetup` plugin reports one. */
 export interface CarrierField { status: "available" | "permission-denied" | "unavailable" | "unsupported" | "not-read"; value?: string }
@@ -44,6 +47,9 @@ export interface SettingsScene {
   autofill: PasswordsStatus["autofill"];
   autofillDestination: Awaited<ReturnType<ElizaPasswordsPlugin["openAutofillSettings"]>>["destination"];
   passwordProvider?: PasswordProvider;
+  readonly permissionRequests: AppPermission[];
+  readonly permissionStates: Partial<Record<AppPermission, PermissionState>>;
+  readonly permissionReplies: Partial<Record<AppPermission, PermissionState>>;
   crashes: NativeCrashEntry[];
   reset: { status: string; message: string };
   readonly reviews: number[];
@@ -73,6 +79,7 @@ export function settingsScene(): SettingsScene {
     hostFacts: { androidRelease: "16", permissions: { Microphone: false, Calendar: true } },
     passwordsUnlocked: false, passwords: [], passwordEdits: [], passwordRowActions: [],
     autofill: { supported: true, selected: "none" }, autofillDestination: "autofill-picker",
+    permissionRequests: [], permissionStates: {}, permissionReplies: {},
     gate: Promise.resolve(), grantsHome: true, opened: [], copied: [], refusesCopy: false, crashes: [], reset: { status: "cancelled", message: "Nothing was reset." }, reviews: [],
     networks: [{ ssid: "home", bssid: "00:11:22:33:44:55", rssi: -50, frequency: 2412, capabilities: "[WPA2-PSK-CCMP]", secured: true, security: "wpa2" }],
     joinAnswer: "connected", joins: [], connectivity: { online: true, validated: true, captivePortal: false, ssid: "home" }, consents: [], told: 0, refusesConsent: false, consentGate: Promise.resolve(),
@@ -291,8 +298,19 @@ export function elizaPasswords(scene: SettingsScene): Faked {
 
 /** The Android-only Settings methods exposed by AlphaDevice. */
 export function settingsHost(scene: SettingsScene) {
+  const permissionState = (permission: AppPermission) => scene.permissionStates[permission] ??
+    (permission === "camera" && scene.hostFacts.permissions.Camera ? "granted" : "denied");
   return {
     settingsFacts: () => Promise.resolve(scene.hostFacts),
+    accessPermissionStatus: ({ permission }: { permission: AppPermission }) => Promise.resolve({ state: permissionState(permission) }),
+    requestAccessPermission: ({ permission }: { permission: AppPermission }) => {
+      const state = permissionState(permission);
+      if (state === "prompt" || state === "prompt-with-rationale") {
+        scene.permissionRequests.push(permission);
+        scene.permissionStates[permission] = scene.permissionReplies[permission] ?? state;
+      }
+      return Promise.resolve({ state: permissionState(permission) });
+    },
     passwordProviderStatus: () => Promise.resolve(scene.passwordProvider),
     openPasswordProvider: async ({ action }: { action: PasswordProviderAction }) => {
       await page(scene, `password-provider ${action}`);

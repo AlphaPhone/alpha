@@ -1,0 +1,97 @@
+// spec/app/inbox/notices.md, "Story: Open my message from a notice"
+import type { MailNoticeTap } from "@elizaos/plugin-inbox-client"
+import * as Inbox from "../../gen/app__inbox.effect.vibe"
+import * as Message from "../../gen/app__inbox__message.effect.vibe"
+import * as Shell from "../../gen/app__shell.effect.vibe"
+import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
+import { reviewStillNamesTheNotice } from "../../gen/app__inbox__notices.effect.vibe"
+import { Machine as Preferences } from "../../gen/app__settings__preferences.effect.vibe"
+import { Cloud } from "../platform/cloud.vibe"
+import { Device } from "../platform/device.vibe"
+import { contained, started } from "../runtime/reactor.vibe"
+import { Mail, asked } from "./gmail.vibe"
+import { questionAbout } from "./message.vibe"
+import { InboxNotices, grantOf, owner, signals } from "./notices.vibe"
+
+function sameTap(left: MailNoticeTap, right: MailNoticeTap | null | undefined): boolean {
+  return right != null && left.token === right.token && left.generation === right.generation && left.grantId === right.grantId
+    && left.credentialId === right.credentialId && left.userId === right.userId && left.question === right.question
+    && left.messageId === right.messageId && left.threadId === right.threadId
+}
+
+// spec/app/inbox/notices.md, "A tapped notice opens its message in Inbox for the account watched, which the list selects first, and only a notice that is up"
+effect function openTap(tap: MailNoticeTap) {
+  const { messageId, threadId, grantId } = tap
+  if (messageId === undefined || threadId === undefined) return false
+  const { background } = try InboxNotices
+  const device = try Device
+  const inbox = try Inbox.Machine
+  const shell = try Shell.Machine
+  const mail = try Mail
+  const reader = try Message.Machine
+  const drafts = try Drafts.Machine
+  const { client } = try Cloud
+  const selected = (try inbox.get()).selected.account
+  const generation = mail.generation(selected)
+  const sameScope = effect {
+    const list = try inbox.get()
+    return (try device.showing()) && list.selected.account === selected && grantOf(list, mail) === grantId && mail.generation(selected) === generation
+  }
+  const canOpen = effect {
+    const state = try shell.get()
+    return (try sameScope) && state.assistant === "Bar" && Shell.showing(state, "Inbox")
+  }
+  if (!(try canOpen)) return false
+  const identity = try owner(grantId)
+  if (identity?.credentialId !== tap.credentialId || identity.userId !== tap.userId || !(try canOpen)) return false
+  const message = asked((signal) => client.gmailRead({ grantId, messageId }, { signal })) catch () => undefined
+  if (!message || message.message.id !== messageId || message.message.threadId !== threadId || !(try canOpen)) return false
+  const draft = try drafts.get()
+  if (draft.open && (!Drafts.canSetAside(draft) || !(try contained(drafts.send({ type: "setAside" }, "Owner"), "keeping the Inbox draft")))) return false
+  const latest = background.pending() catch () => null
+  if (!sameTap(tap, latest) || !(try canOpen)) return false
+  if (tap.question !== true && !(try contained(background.consume(tap.token), "opening the Gmail notification"))) return false
+  if (!(try canOpen)) return false
+  const list = try inbox.get()
+  if (!Shell.showing(try shell.get(), "Inbox") || list.selected.account !== selected || mail.grant(selected) !== grantId) return false
+  const account = list.selected.account
+  const number = try mail.remember(account, message.message)
+  const remote = (try (try Preferences).get()).images
+  if (!(try contained(reader.send({ type: "open", account, message: number, remote, access: Inbox.accessOf(list, account) }), "opening the exact notified message"))) return false
+  if (tap.question !== true) return true
+  const pending = try reader.get()
+  const answered = try Stream.runHead(Stream.filter(reader.changes, (state) => state.body.ticket !== pending.body.ticket || state.body.status !== "Loading"))
+  if (Option.isNone(answered) || !(try sameScope)) return false
+  const held = answered.value
+  const body = mail.body(held.body.ticket)
+  if (held.body.ticket !== pending.body.ticket || held.body.status !== "Loaded" || held.message !== number || body?.message.id !== messageId || body.message.threadId !== threadId) return false
+  try questionAbout(account, number, held.revision, {
+    accept: () => effect {
+      const current = background.pending() catch () => null
+      const review = try reader.get()
+      if (!reviewStillNamesTheNotice({
+        tap: sameTap(tap, current),
+        account: (try sameScope) && review.account === account,
+        reader: Shell.showing(try shell.get(), "Inbox") && review.message === number && review.body.status === "Loaded",
+        revision: review.body.ticket === held.body.ticket && review.revision === held.revision,
+      })) return false
+      return try contained(background.consume(tap.token), "accepting the exact Gmail notification")
+    },
+    dismiss: () => ignore(background.releaseQuestion(tap.token)),
+  })
+  return true
+}
+
+export const notifiedReader = started(effect {
+  const panel = try InboxNotices
+  if (!panel.supported) return
+  const device = try Device
+  const drafts = try Drafts.Machine
+  const available = Stream.map(Stream.changes(Stream.map(drafts.changes, (state) => state.open && !Drafts.canSetAside(state))), () => undefined)
+  let shown: MailNoticeTap | undefined
+  try Stream.runForEach(Stream.merge(signals(panel.background), available), () => effect {
+    if (!(try device.showing())) return
+    const tap = panel.background.pending() catch () => null
+    if (tap !== null && (shown === undefined || !sameTap(shown, tap)) && (try openTap(tap))) shown = tap
+  })
+}, "opening the exact Gmail notification")

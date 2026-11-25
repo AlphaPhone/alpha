@@ -1,9 +1,9 @@
 import { type ComponentProps, type PointerEvent, type ReactNode, type Ref, useRef } from "react";
-import { ArrowUp, Clock, Keyboard, Mic, Paperclip, Plus, Search } from "lucide-react";
+import { ArrowUp, Keyboard, Mic } from "lucide-react";
 import { cn } from "../../lib/cn.ts";
 import { Button } from "../Button.tsx";
 import { Mark } from "../Mark.tsx";
-import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
+import { AssistantChatActions } from "./AssistantChatActions.tsx";
 import { Textarea } from "../Textarea.tsx";
 import { AssistantDraftNotice, type AssistantDraftNoticeProps } from "./AssistantDraftNotice.tsx";
 import type { AssistantAttachment } from "./AssistantAttachmentChip.tsx";
@@ -146,7 +146,6 @@ export function AssistantComposer({
   const targeting = !bar && placeholder !== undefined;
   const frame = bar ? "mx-4 [--alpha-composer-rest:1.75rem]" : "mx-3 [--alpha-composer-rest:1.875rem]";
   const pull = useAssistantPull<HTMLTextAreaElement>(fieldPull, true);
-  const acting = Boolean(onAttach || onSearch || onNew || making || onHistory) && !closed;
   return (
     <div role={compact ? "group" : undefined} aria-label={compact ? "Assistant controls" : undefined} data-alpha-compact-dock={compact ? "" : undefined} data-host-chrome={bar ? "" : undefined} className={cn("flex shrink-0 flex-col gap-2", frame, !compact && !targeting && !voice && "not-in-data-[alpha-native]:[--alpha-composer-fit:clamp(0px,calc((412px_-_100vw)_/_11),2px)]", "mb-[max(calc(var(--alpha-composer-rest)_-_var(--alpha-composer-fit,0px)),calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))_+_0.75rem))]", className)} style={lift ? { marginBottom: lift, ...style } : style} {...props}>
       {notice ? <AssistantDraftNotice {...notice} /> : null}
@@ -162,18 +161,7 @@ export function AssistantComposer({
           <Button size="icon" aria-label="Open conversation" data-alpha-input-drag-alpha="" className="overflow-hidden bg-alpha text-alpha-foreground hover:bg-alpha/90" onClick={onOpen}><Mark aria-hidden className="size-[118%]" /></Button>
         ) : null) : null}
         {compact ? <Button variant="ghost" size="icon" aria-label="Type" disabled={closed} onClick={onType}><Keyboard /></Button> : (
-          <Menu>
-            <MenuTrigger asChild>
-              <Button variant="ghost" size="icon" aria-label="Chat actions" disabled={!acting} className="hover:bg-transparent disabled:opacity-40"><Plus /></Button>
-            </MenuTrigger>
-            <MenuContent side="top" align="start" alignOffset={bar ? -57 : -16} sideOffset={bar ? 4 : 20}
-              className="min-w-55 rounded-tile border-0 bg-background p-2 shadow-dock-compact dark:shadow-dock-compact-dark [&>[role=menuitem]]:min-h-12 [&>[role=menuitem]]:rounded-md [&>[role=menuitem]]:px-3">
-              {onAttach ? <MenuItem onSelect={onAttach}><Paperclip aria-hidden />Attach media</MenuItem> : null}
-              {onSearch ? <MenuItem onSelect={onSearch}><Search aria-hidden />Search chat</MenuItem> : null}
-              {onNew || making ? <MenuItem disabled={making} onSelect={onNew}><Plus aria-hidden />New chat</MenuItem> : null}
-              {onHistory ? <MenuItem onSelect={onHistory}><Clock aria-hidden />Chat history</MenuItem> : null}
-            </MenuContent>
-          </Menu>
+          <AssistantChatActions placement={bar ? "bar" : "sheet"} disabled={closed} onAttach={onAttach} onSearch={onSearch} onNew={onNew} making={making} onHistory={onHistory} />
         )}
         <Textarea
           ref={fieldRef}

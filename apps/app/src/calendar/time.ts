@@ -23,11 +23,6 @@ export function dayStart(civil: number): number {
   return dateOf(civil).getTime();
 }
 
-/** The first instant of the civil day after `ms`'s: the next midnight. @throws {never} */
-export function nextMidnight(ms: number): number {
-  return dayStart(civilDay(ms) + 1);
-}
-
 /** The civil day of the first of the month `months` after the month of `civil`. @throws {never} */
 export function monthStart(civil: number, months: number): number {
   const date = dateOf(civil);

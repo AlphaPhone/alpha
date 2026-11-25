@@ -1,12 +1,12 @@
 // spec/agent/index.md, "Story: Run Alpha's agent on the phone"
+import type {
+  ClockAlarmPhase, ClockAlarmRecord, ClockSnapshot, ClockSound, ClockTimerRecord, ClockTimerStatus, WorldCityRecord,
+  ReminderItemRecord, ReminderListColor, ReminderListIcon, ReminderListRecord, ReminderPriority,
+  ReminderRecurrence, ReminderSubtaskRecord, RemindersSnapshot,
+} from "@repo/launcher-records";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type {
-  ClockAlarmPhase, ClockAlarmRecord, ClockSnapshot, ClockSound, ClockTimerRecord, ClockTimerStatus,
-  ReminderItemRecord, ReminderListColor, ReminderListIcon, ReminderListRecord, ReminderPriority,
-  ReminderRecurrence, RemindersSnapshot, ReminderSubtaskRecord, WorldCityRecord,
-} from "./types.ts";
 
 /** Default list identifier always present in Reminders. */
 export const DEFAULT_LIST_ID = "default";
@@ -718,10 +718,15 @@ export class AlphaAppsStore {
     return updated;
   }
 
-  completeItem(id: string): { readonly item: ReminderItemRecord; readonly nextItem: ReminderItemRecord | null } | undefined {
+  completeItem(id: string, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone): { readonly item: ReminderItemRecord; readonly nextItem: ReminderItemRecord | null } | undefined {
+    const held = this.reminders.items.find((item) => item.id === id);
+    if (held?.completed) return { item: held, nextItem: null };
     const stashed = this.stashReminder(id);
     if (stashed === undefined) return undefined;
     const { existing, nowMs } = stashed;
+    const dueAtMs = existing.dueDate === null ? null : civilToEpochMs(existing.dueDate, existing.dueMinute, timeZone);
+    const history = dueAtMs === null ? {} : { history: [...(existing.history ?? []),
+      { revision: existing.revision, dueAtMs, completedAtMs: nowMs }].slice(-32) };
     const nextDate = existing.dueDate !== null ? advanceDueDate(existing.dueDate, existing.recurrence) : null;
     if (nextDate !== null) {
       const advanced: ReminderItemRecord = {
@@ -730,6 +735,7 @@ export class AlphaAppsStore {
         subtasks: existing.subtasks.map((sub) => ({ ...sub, done: false })),
         completed: false,
         completedAtMs: null,
+        ...history,
         snoozedUntilMs: null,
         notifiedAtMs: null,
         revision: existing.revision + 1,
@@ -740,7 +746,7 @@ export class AlphaAppsStore {
       return { item: advanced, nextItem: advanced };
     }
     const completed: ReminderItemRecord = {
-      ...existing, completed: true, completedAtMs: nowMs, snoozedUntilMs: null,
+      ...existing, ...history, completed: true, completedAtMs: nowMs, snoozedUntilMs: null,
       revision: existing.revision + 1, updatedAtMs: nowMs,
     };
     const items = this.reminders.items.map((entry) => (entry.id === id ? completed : entry));

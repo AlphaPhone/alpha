@@ -214,7 +214,7 @@ effect function today(): Event!!Time {
   return { type: "dayBegins", day: civilDay(try (try Time).now()) }
 }
 
-// spec/app/calendar/index.md, "When the date changes, a calendar on today moves to the new today, and any other day stays the same date"; spec/app/calendar/index.md, "While Calendar is in front it reads again once a minute, never during a read"
+// spec/app/calendar/index.md, "When the date changes, a calendar on today moves to the new today, and any other day stays the same date"; spec/app/calendar/index.md, "While Calendar is in front it reads again once a minute, never during a read and never under an open event"
 const kept = reacting(View, {
   open: Effect.map(today(), (event) => [event] as const),
   carry,
@@ -282,4 +282,4 @@ const reminders = started(effect {
 export const calendar = together(kept, told, fronted, returned, widened, writing, reminders)
 
 /** Every machine of the Calendar area, which its screen reads, and Alpha's time. */
-export type Calendared = View.Machine | Writes.Machine | Changes.Machine | Linking.Machine | Held.Machine | Canvas.Machine | Reopen.Machine | Cloud | Device | Time | KeyValueStore.KeyValueStore | Toasts | Said
+export type Calendared = View.Machine | Writes.Machine | Changes.Machine | Linking.Machine | Held.Machine | Canvas.Machine | Reopen.Machine | Shell.Machine | Cloud | Device | Time | KeyValueStore.KeyValueStore | Toasts | Said

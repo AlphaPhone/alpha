@@ -17,6 +17,7 @@ import type { Alpha } from "./runtime/area.tsx";
 import { Contained } from "./runtime/contained.tsx";
 import { rooted } from "./runtime/root.vibe";
 import { startupSignIn, StartupSignIn } from "./startup/signIn.vibe";
+import * as Access from "../gen/app__startup__access.effect.vibe";
 import { back, taking } from "./shell/shell.vibe";
 
 /** Alpha over `platform`: one root runtime of the resident machines, and each screen of `mounts` at its place, loaded when it is first drawn, and contained: one that throws or cannot be loaded stops alone. */
@@ -115,9 +116,13 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
     dispose: root.dispose,
   };
   if (requireNativeSignIn) alpha.taking("startup/sign-in", () => root.runtime.runPromise(StartupSignIn.use((signIn) => Effect.gen(function* () {
-    if (!(yield* signIn.active())) return false;
-    yield* signIn.back();
-    return true;
+    if (yield* signIn.active()) {
+      yield* signIn.back();
+      return true;
+    }
+    if (!(yield* signIn.confirmedAccount())) return false;
+    const access = yield* Access.Machine.use((permissions) => permissions.get());
+    return !access.covered && (!access.begun || !Access.completed(access));
   }))));
   const stopped = (place: string, cause: unknown) => void root.runtime.runPromiseExit(Effect.logError(`the screen at ${place} stopped`, cause));
   for (const mount of mounts) {

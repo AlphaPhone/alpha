@@ -1,6 +1,7 @@
 // spec/app/inbox/index.md, "Story: See my mail"
 import type { createCloudClient, GoogleStatus, MailCard, MailMessage, MailOperation, MailSearch } from "@elizaos/cloud";
-import type { OpaqueMailAttachment } from "@elizaos/plugin-inbox-client";
+import type { MailBackgroundSelection, MailBackgroundStatus, MailNoticeTap, OpaqueMailAttachment } from "@elizaos/plugin-inbox-client";
+import { type Faked, rejection } from "./phone.ts";
 import type { Route } from "./routes.ts";
 
 /** A message of the fake mailbox: eliza's card of it, and what reading it whole gives. */
@@ -54,7 +55,51 @@ export interface InboxScene {
   loseSendReply?: boolean;
   loseDraftReply?: boolean;
   readonly receiptReads: string[];
+  notices?: InboxNoticeScene;
 }
+
+export interface InboxNoticeScene {
+  selection?: MailBackgroundSelection;
+  pending?: MailNoticeTap;
+  enter?: (tap: MailNoticeTap) => void;
+  readonly spent: string[];
+  readonly released: string[];
+}
+
+/** What the native Gmail worker gives Capacitor after it has checked the tapped notice. */
+export const alphaInboxNotices = (scene: InboxNoticeScene): Faked => (emit) => {
+  const status = (): MailBackgroundStatus => scene.selection
+    ? { status: "watching-new-mail", notificationsAllowed: true, grantId: scene.selection.grantId, lastSyncAt: 1 }
+    : { status: "disabled", notificationsAllowed: true };
+  scene.enter = (tap) => {
+    scene.pending = tap;
+    emit("changed", {});
+  };
+  return {
+    configure: async (selection: MailBackgroundSelection) => { scene.selection = selection; emit("changed", {}); return status(); },
+    withdraw: async ({ grantId }: { grantId?: string }) => {
+      if (grantId === undefined || scene.selection?.grantId === grantId) {
+        scene.selection = undefined;
+        scene.pending = undefined;
+        emit("changed", {});
+      }
+    },
+    status: async () => status(),
+    pending: async () => scene.pending ?? {},
+    consume: async ({ token }: { token: string }) => {
+      if (scene.pending?.token !== token) throw rejection("Gmail tap changed");
+      scene.spent.push(token);
+      scene.pending = undefined;
+    },
+    releaseQuestion: async ({ token }: { token: string }) => {
+      if (scene.pending?.question && scene.pending.token === token) {
+        scene.released.push(token);
+        scene.pending = undefined;
+      }
+    },
+    notificationSettings: async () => undefined,
+  };
+};
 
 /** Android's save picker in the fake phone, with its selected documents kept as exact copies. */
 export const alphaInboxAttachments = (scene: InboxScene) => () => ({
@@ -150,7 +195,8 @@ function operation(requestId: string, kind: MailOperation["receipt"]["kind"], st
 /** What a dispatched label change does to the mailbox. */
 function relabel(stored: Stored, kind: string) {
   const without = (label: string) => stored.card.labels.filter((one) => one !== label);
-  const labels = kind === "mark-read" ? without("UNREAD") : kind === "mark-unread" ? [...stored.card.labels, "UNREAD"]
+  const labels = kind === "mark-read" ? without("UNREAD") : kind === "mark-unread" ? [...without("UNREAD"), "UNREAD"]
+    : kind === "star" ? [...without("STARRED"), "STARRED"] : kind === "unstar" ? without("STARRED")
     : kind === "archive" ? without("INBOX") : kind === "trash" ? [...without("INBOX"), "TRASH"]
     : kind === "unarchive" ? [...without("INBOX"), "INBOX"] : kind === "untrash" ? [...without("TRASH").filter((one) => one !== "INBOX"), "INBOX"] : stored.card.labels;
   stored.card = { ...stored.card, labels, isUnread: labels.includes("UNREAD") };

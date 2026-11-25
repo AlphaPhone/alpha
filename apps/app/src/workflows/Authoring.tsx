@@ -30,30 +30,54 @@ const presets: readonly { key: Preset; label: string }[] = [
 ];
 const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-function StepInput({ options, prior, onAdd }: {
+function StepInput({ options, prior, notes, calendars, list, calendarAccess, openSettings, loading, failed, zone, onAdd }: {
   options: readonly DraftOperation[];
   prior: readonly { id: number }[];
-  onAdd: (operation: DraftOperation, source: number, text: string, suffix: string) => void;
+  notes: readonly { id: string; title: string }[] | undefined;
+  calendars: readonly { id: string; title: string }[] | undefined;
+  list: (operation: "SelectedNotes" | "CalendarRange") => void;
+  calendarAccess: boolean;
+  openSettings: (() => void) | undefined;
+  loading: boolean;
+  failed: boolean;
+  zone: string;
+  onAdd: (operation: DraftOperation, source: number, text: string, suffix: string, selected: readonly string[]) => Promise<boolean>;
 }) {
   const [operation, setOperation] = useState<DraftOperation>("supplied_text");
   const [source, setSource] = useState(0);
   const [text, setText] = useState("");
   const [suffix, setSuffix] = useState("");
+  const [choices, setChoices] = useState<readonly string[]>([]);
+  const [rejected, setRejected] = useState(false);
   const selected = options.find((item) => item === operation) ?? options[0];
   if (selected === undefined) return null;
   const from = prior.find((step) => step.id === source) ?? prior.at(-1);
-  const first = selected === "supplied_text";
+  const first = selected === "supplied_text" || selected === "selected_notes" || selected === "calendar_range";
+  const resources = selected === "selected_notes" || selected === "calendar_range";
+  const calendar = selected === "calendar_range";
+  const rows = calendar ? calendars : notes;
+  const missing = resources ? choices.length === 0 || (calendar && (!text || !suffix || suffix <= text))
+    : text.trim() === "" && selected !== "compose_draft";
   return (
     <form className="flex flex-col gap-3" onSubmit={(event) => {
       event.preventDefault();
-      onAdd(selected, first ? 0 : from?.id ?? 0, text, suffix);
-      setText("");
-      setSuffix("");
+      void onAdd(selected, first ? 0 : from?.id ?? 0, text, suffix, choices).then((added) => {
+        setRejected(!added);
+        if (!added) return;
+        setText("");
+        setSuffix("");
+        setChoices([]);
+      });
     }}>
       <label className="grid gap-1 text-sm">Step
         <Select value={selected} onValueChange={(value) => {
           const chosen = options.find((item) => item === value);
-          if (chosen) setOperation(chosen);
+          if (chosen === undefined || chosen === selected) return;
+          setOperation(chosen);
+          setRejected(false);
+          setText("");
+          setSuffix("");
+          setChoices([]);
         }}>
           <SelectTrigger aria-label="Step" />
           <SelectContent>{options.map((item) => <SelectItem key={item} value={item}>{titles[item]}</SelectItem>)}</SelectContent>
@@ -65,13 +89,42 @@ function StepInput({ options, prior, onAdd }: {
           <SelectContent>{prior.map((step, index) => <SelectItem key={step.id} value={String(step.id)}>Step {index + 1}</SelectItem>)}</SelectContent>
         </Select>
       </label>}
-      <label className="grid gap-1 text-sm">{selected === "compose_draft" ? "Prefix" : selected === "model_draft" ? "Instructions" : "Text"}
-        <Textarea value={text} maxLength={4000} onChange={(event) => setText(event.currentTarget.value)} />
-      </label>
+      {resources ? (
+        <fieldset className="flex flex-col gap-2">
+          <legend className="text-sm font-semibold">{calendar ? "Calendars" : "Notes"}</legend>
+          {calendar && openSettings ? <Button type="button" variant="secondary" onClick={openSettings}>Open Android permissions</Button> : (
+            <Button type="button" variant="secondary" disabled={loading} onClick={() => list(calendar ? "CalendarRange" : "SelectedNotes")}>
+              {calendar ? (calendarAccess ? "Show calendars" : "Allow calendar access") : "Show notes"}
+            </Button>
+          )}
+          {loading && <Spinner aria-label="Reading sources" />}
+          {failed && <Alert variant="warn" role="status">Sources couldn’t be read.</Alert>}
+          {rows?.length === 0 && <p className="text-sm text-muted-foreground">{calendar ? "No calendars found" : "No saved notes"}</p>}
+          {rows && <div className="max-h-48 overflow-auto">
+            {rows.map(({ id, title }) => <label key={id} className="flex min-h-11 items-center gap-3 text-sm">
+              <input type="checkbox" checked={choices.includes(id)} disabled={choices.length >= 16 && !choices.includes(id)}
+                onChange={(event) => setChoices(event.currentTarget.checked ? [...choices, id] : choices.filter((one) => one !== id))} />
+              {title || (calendar ? "Unnamed calendar" : "Untitled note")}
+            </label>)}
+          </div>}
+          {calendar && rows && (
+            <div className="grid grid-cols-2 gap-2">
+              <label className="grid gap-1 text-sm">From<Input type="date" value={text} onChange={(event) => setText(event.currentTarget.value)} /></label>
+              <label className="grid gap-1 text-sm">Until<Input type="date" value={suffix} onChange={(event) => setSuffix(event.currentTarget.value)} /></label>
+              <p className="col-span-2 text-sm text-muted-foreground">Up to seven days in {zone}.</p>
+            </div>
+          )}
+        </fieldset>
+      ) : <label className="grid gap-1 text-sm">{selected === "compose_draft" ? "Prefix" : selected === "model_draft" ? "Instructions" : selected === "save_note" ? "Note title" : "Text"}
+        <Textarea value={text} maxLength={selected === "save_note" ? 256 : 4000} onChange={(event) => setText(event.currentTarget.value)} />
+      </label>}
       {selected === "compose_draft" && <label className="grid gap-1 text-sm">Suffix
         <Input value={suffix} maxLength={Math.max(0, 4000 - text.length)} onChange={(event) => setSuffix(event.currentTarget.value)} />
       </label>}
-      <Button type="submit" variant="secondary" disabled={(text.trim() === "" && selected !== "compose_draft") || (!first && from === undefined)}>
+      {rejected && <Alert variant="warn" role="status">{calendar
+        ? "Choose available calendars and a range of up to seven days."
+        : "Check the step’s inputs and try again."}</Alert>}
+      <Button type="submit" variant="secondary" disabled={missing || (!first && from === undefined)}>
         <Plus aria-hidden />Add step
       </Button>
     </form>
@@ -95,7 +148,14 @@ export function Authoring({ runtime, owner, offered = true }: AuthoringProps) {
   const review = { type: "reviewSave", unfinished: false } as const;
   const confirm: Event = state.save.offered ? { type: "confirmResend" } : { type: "confirmSave", unfinished: false };
   const clock = `${String(state.when.hour).padStart(2, "0")}:${String(state.when.minute).padStart(2, "0")}`;
-  const options = draft.catalog ? available(draft.catalog).filter((one) => state.steps.length > 0 || one === "supplied_text") : [];
+  const options = draft.catalog ? available(draft.catalog, draft.device !== undefined)
+    .filter((one) => state.steps.length > 0 || one === "supplied_text" || one === "selected_notes" || one === "calendar_range") : [];
+  const choices = state.choices.status === "Loaded" ? draft.choices : undefined;
+  const listSources = (op: "SelectedNotes" | "CalendarRange") => {
+    const ask = { type: "askCalendarAccess" } as const;
+    if (op === "CalendarRange" && builder.can(ask)) tell(ask);
+    else tell({ type: "listChoices", op });
+  };
   return (
     <section className="flex flex-col gap-4">
       {state.offer.status === "Loading" && <Spinner aria-label="Reading available steps" />}
@@ -107,8 +167,13 @@ export function Authoring({ runtime, owner, offered = true }: AuthoringProps) {
       <ol aria-label="Workflow steps" className="divide-y divide-border">
         {draft.steps.map((step) => <li key={step.id} className="py-2">{titles[step.operation]}</li>)}
       </ol>
-      {editable && <StepInput options={options} prior={state.steps}
-        onAdd={(operation, source, text, suffix) => void runtime.runPromiseExit(appendDraft(operation, source, text, suffix))} />}
+      {editable && <StepInput options={options} prior={state.steps} zone={draft.zone} list={listSources}
+        notes={choices?.tag === "SelectedNotes" ? choices.rows : undefined}
+        calendars={choices?.tag === "CalendarRange" ? choices.rows : undefined}
+        calendarAccess={state.access.grant === "Granted" || state.access.grant === "Limited"}
+        openSettings={builder.can({ type: "openSettings" }) ? () => tell({ type: "openSettings" }) : undefined}
+        loading={state.choices.status === "Loading"} failed={state.choices.status === "Failed"}
+        onAdd={(operation, source, text, suffix, selected) => runtime.runPromise(appendDraft(operation, source, text, suffix, selected)).catch(() => false)} />}
       {builder.can({ type: "removeStep" }) && <Button variant="ghost" onClick={() => void runtime.runPromiseExit(removeDraftStep())}>Remove last step</Button>}
       {generate.can(describe) && <Button variant="secondary" onClick={() => void generate.send(describe)}><Sparkles aria-hidden />Describe to Alpha</Button>}
       {state.schedules && <fieldset className="flex flex-col gap-2">

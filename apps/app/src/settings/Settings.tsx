@@ -39,6 +39,7 @@ import {
   type SettingsTextSizePickerProps,
 } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
+import type { MailBackgroundStatus } from "@elizaos/plugin-inbox-client";
 import { type ReactNode, useState, useSyncExternalStore } from "react";
 import * as Records from "../../gen/app__account__records.ts";
 import { useMachine as useRecords } from "../../gen/app__account__records.react.ts";
@@ -84,9 +85,10 @@ import { AccountStatus } from "../account/index.tsx";
 import { CalendarAccount, type CalendarConnection } from "./calendar.vibe";
 import { PasswordEntries } from "./PasswordEntries.tsx";
 import { ProtonPass } from "./ProtonPass.tsx";
+import { InboxNotices } from "../inbox/notices.vibe";
 
 /** What every Settings page reads: where the owner is, the phone's facts, the hand-overs to Android, the preferences, the reset and the developer tools. */
-export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | CalendarAccount | FactsMachine | AccessReviewMachine | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ListenerMachine | ShellMachine | LayersMachine | Time | Device | SystemSettings, unknown>;
+export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | CalendarAccount | FactsMachine | AccessReviewMachine | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ListenerMachine | ShellMachine | LayersMachine | Time | Device | SystemSettings | InboxNotices, unknown>;
 
 /** What the frame gives each page: the runtime, Alpha's places, and the props every page shares. */
 export interface PageProps {
@@ -388,12 +390,24 @@ const calendarStatuses: Record<CalendarConnection, NonNullable<SettingsAppPagePr
   Checking: "checking", NoGrant: "not-connected", ReadOnly: "read-only", Writable: "connected", Unchecked: "unchecked",
 };
 
+const inboxWatchPhases: Record<MailBackgroundStatus["status"], NonNullable<SettingsAppPageProps["inboxWatch"]>["phase"]> = {
+  "web-unavailable": "off", unavailable: "stopped", disabled: "off", waiting: "waiting",
+  "watching-new-mail": "watching", "catching-up": "catchingUp", "history-expired": "expired",
+  unsupported: "stopped", retrying: "retrying", "grant-unavailable": "noLongerAllowed", "capacity-reached": "stopped",
+};
+const inboxCheckedAt = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
+const noInboxWatch = () => undefined;
+const noInboxChanges = () => noInboxWatch;
+
 function App({ runtime, common, app }: PageProps & { app: "inbox" | "workflows" | "calendar" | "camera" | "photos" | "maps" | "notes" }) {
   const facts = useFacts(runtime).state;
   const phone = usePages(runtime).state?.phone;
   const device = useDevice(runtime);
   const calendar = runtime.runSync(CalendarAccount);
   const status = useSyncExternalStore(calendar.subscribe, calendar.snapshot, calendar.snapshot);
+  const notices = app === "inbox" ? runtime.runSync(InboxNotices) : undefined;
+  const watching = useSyncExternalStore(notices?.subscribe ?? noInboxChanges, notices?.snapshot ?? noInboxWatch, noInboxWatch);
+  const delivery = watching?.delivery;
   return (
     <>
     {device?.recovery}
@@ -402,6 +416,12 @@ function App({ runtime, common, app }: PageProps & { app: "inbox" | "workflows" 
       app={app}
       onPhone={phone}
       calendarStatus={app === "calendar" ? calendarStatuses[status] : undefined}
+      inboxWatch={notices?.supported && delivery ? {
+        phase: delivery.notificationsAllowed === false ? "noLongerAllowed" : inboxWatchPhases[delivery.status],
+        account: watching?.account,
+        checkedAt: delivery.lastSyncAt ? inboxCheckedAt.format(delivery.lastSyncAt) : undefined,
+        onSettings: () => void runtime.runPromise(notices.settings()),
+      } : undefined}
       grants={grants(facts)}
       read={device?.read}
       images={device?.images}

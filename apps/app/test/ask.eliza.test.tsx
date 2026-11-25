@@ -8,14 +8,16 @@ import { Machine as Chats } from "../gen/app__assistant__chats.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Ask } from "../gen/app__ask.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
-import type { Mount } from "../src/areas.ts";
 import ask from "../src/ask/index.tsx";
 import assistant from "../src/assistant/index.tsx";
 import { Agent } from "../src/platform/agent.vibe";
 import { Cloud } from "../src/platform/cloud.vibe";
-import { button, closeAll, drawn, fill, only, openOver, press, underAct, until } from "./alpha.tsx";
+import { askExample, askExampleLines, button, closeAll, drawn, fill, only, openOver, press, underAct, until } from "./alpha.tsx";
 import { owned } from "@repo/eliza-harness";
 import { elizaWorld } from "./eliza/world.vibe";
+import type { Answering } from "./fakes/routes.ts";
+import { scene } from "./fakes/scene.ts";
+import { fakeWorld } from "./fakes/world.vibe";
 
 let mine: Awaited<ReturnType<typeof owned>>;
 
@@ -26,15 +28,10 @@ beforeAll(async () => {
 }, 600_000);
 afterEach(closeAll);
 
-/** The worked example at Ask Alpha's place, which only its own journeys mount. */
-const asked: Mount[] = [{ at: "assistant", load: () => import("../src/ask/index.tsx") }];
-
-const lines = () => [...document.querySelectorAll("section[aria-label='Ask Alpha'] ol li")].map((line) => line.textContent);
-
 // spec/app/ask/index.md, "Story: Talk to my agent"
 it("Talk to my agent, through eliza's agent and cloud (spec/app/ask/index.md, \"Story: Talk to my agent\")", async () => {
   expect([mine.key.mailed, mine.key.accountId === "", mine.agent.token === ""]).toEqual([expect.stringMatching(/^\d{6}$/), false, false]);
-  const { alpha } = await openOver(elizaWorld(mine), asked);
+  const { alpha } = await openOver(elizaWorld(mine), askExample);
   const asking = ask.runtime(alpha);
   const balance = async () => (await alpha.runtime.runPromise(Effect.flatMap(Cloud, (cloud) => Effect.promise(() => cloud.client.snapshot())))).balance.usdMicros;
   expect(await balance()).toBe(mine.granted);
@@ -48,7 +45,7 @@ it("Talk to my agent, through eliza's agent and cloud (spec/app/ask/index.md, \"
   await press("Send");
   // spec/app/ask/index.md, "Only the turn under way is heard: its reply so far, then the whole reply, or that it did not finish"
   await until(alpha, asking, Ask, (s) => s.turn.outcome === "Confirmed");
-  expect(lines()).toEqual(["Say hello.", "Hello from the cloud."]);
+  expect(askExampleLines()).toEqual(["Say hello.", "Hello from the cloud."]);
   const textOf = (value: unknown) => (typeof value === "string" ? value : "");
   const last = (await mine.asked()).at(-1);
   expect([last?.length, last?.[0]?.role, textOf(last?.[0]?.content).includes(mine.system), last?.[1]?.role, /^Say hello\.(\n|$)/.test(textOf(last?.[1]?.content))])
@@ -63,7 +60,7 @@ it("Talk to my agent, through eliza's agent and cloud (spec/app/ask/index.md, \"
   expect(Boolean(button("Send"))).toBe(false);
   await press("Stop");
   await until(alpha, asking, Ask, (s) => s.turn.outcome === "Refused");
-  expect([lines(), document.querySelector("section[aria-label='Ask Alpha'] [role=alert]")?.textContent]).toEqual([["Say hello.", "Hello from the cloud.", "Take your time.", "Thinking"], "The reply stopped"]);
+  expect([askExampleLines(), document.querySelector("section[aria-label='Ask Alpha'] [role=alert]")?.textContent]).toEqual([["Say hello.", "Hello from the cloud.", "Take your time.", "Thinking"], "The reply stopped"]);
 }, 300_000);
 
 // spec/kit/read.md, "Story: Read from outside"
@@ -164,4 +161,72 @@ it('Ask and stop a reply from Home through the real resident and cloud (spec/app
   const sent = (await mine.asked()).map((request) => request.findLast((message) => message.role === "user")?.content);
   const matching = sent.filter((text): text is string => typeof text === "string" && [prompt, next].some((one) => text === one || text.startsWith(`${one}\n\nNote from the agent host, not the person:\n`)));
   expect(matching.map((text) => text.split("\n", 1)[0])).toEqual([prompt, next]);
+}, 300_000);
+
+/** The native plugin fixture forwards to the actual services for this journey's account. */
+function forward(origin: string, token: string): Answering {
+  return async (request) => {
+    const { pathname, search } = new URL(request.url);
+    const headers = new Headers(request.headers);
+    headers.set("authorization", `Bearer ${token}`);
+    return fetch(new URL(pathname + search, origin), {
+      method: request.method, headers, signal: request.signal,
+      ...(request.body === null ? {} : { body: await request.arrayBuffer() }),
+    });
+  };
+}
+
+it('Approve a photo requested by the resident agent (spec/app/camera/index.md, "Story: Let Alpha take a photo")', async () => {
+  const world = { ...scene(), phone: true, image: true, now: Date.now() };
+  world.camera.galleryVolume = "external_primary";
+  const { alpha } = await openOver(fakeWorld(world, {
+    agent: forward(mine.agent.origin, mine.agent.token),
+    cloud: forward(mine.cloud.local, mine.key.token),
+  }), only("home", "assistant", "view:Camera", "view:Photos", "notice"));
+  const runtime = assistant.runtime(alpha);
+  const waitForScreen = (assertScreen: () => void) => vi.waitFor(async () => {
+    await drawn(() => undefined);
+    assertScreen();
+  }, { timeout: 30_000 });
+
+  await until(alpha, runtime, Conversation, (state) => state.ready);
+  await press("Open conversation");
+  await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+  await until(alpha, runtime, Composer, (state) => state.binding.owner > 0 && state.slot === "Open" && state.away === "Free");
+  const prompt = "Take a photo with the back camera.";
+  await mine.script({ kind: "tool", name: "PROPOSE_DEVICE_ACTION", input: { operation: { type: "camera_capture_photo", lens: "back" } } }, prompt);
+  await mine.script({ kind: "text", parts: ["[answer] Review the request on your phone."] }, prompt);
+  await fill("Message Alpha", prompt);
+  await waitForScreen(() => expect(button("Send")?.disabled).toBe(false));
+  await press("Send");
+
+  await waitForScreen(() => expect(button("Approve")?.disabled).toBe(false));
+  expect(world.camera.photos).toHaveLength(0);
+  await press("Approve");
+
+  const viewfinder = () => document.querySelector('[aria-label="Camera request"]');
+  const take = () => [...(viewfinder()?.querySelectorAll("button") ?? [])].find((control) => control.textContent === "Take photo");
+  await waitForScreen(() => {
+    expect(viewfinder()?.textContent).toContain("Back camera requested");
+    expect(take()?.disabled).toBe(false);
+  });
+  expect([world.camera.photos.length, world.camera.preview?.direction]).toEqual([0, "back"]);
+  await drawn(() => take()?.click());
+  await waitForScreen(() => {
+    expect(world.camera.photos).toMatchObject([{ saveToGallery: true, thumbnailOnly: true }]);
+    expect(button("Open last photo")).toBeDefined();
+  });
+
+  const receipt = () => [...(world.telephony.enrollment?.journal.values() ?? [])].find((entry) => entry.acknowledged);
+  await waitForScreen(() => expect(receipt()?.evidence.result).toMatchObject({
+    kind: "camera_capture_photo", mediaId: "1", libraryId: "m:external_primary:i:1", width: 1280, height: 720,
+  }));
+  const image = world.photos.rows.find((row) => row.kind === "image" && row.image !== "")?.image;
+  if (!image) throw new Error("The phone fixture has no image bytes");
+  world.photos.rows.unshift({
+    id: "m:external_primary:i:1", name: "Agent capture.jpg", owned: true, kind: "image", image,
+    width: 1280, height: 720, size: 10_000, date: world.now, revision: "agent-capture",
+  });
+  await press("Open last photo");
+  await waitForScreen(() => expect(document.querySelector('[data-alpha-subview="photos-viewer"] img[alt="Agent capture.jpg"]')).not.toBeNull());
 }, 300_000);

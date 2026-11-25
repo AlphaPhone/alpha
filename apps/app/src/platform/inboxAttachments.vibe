@@ -53,9 +53,16 @@ module browser {
 }
 import { downloads } from browser
 
+/** Request a browser download and release its object URL after the browser can consume it. */
+export effect function saveBrowserCopy(name: string, blob: Blob): boolean!! {
+  const url = tryPromise(() => Promise.resolve(downloadCopy(name, blob))) catch () => undefined
+  if (url === undefined) return false
+  try Effect.forkDetach(ensuring(sleep("1 minute"), sync(() => releasePreview(url))))
+  return true
+}
+
 /** A browser without Files can still hand the copy to its downloads, which report no disk outcome. */
-export const attachmentDownloads = Layer.effect(InboxAttachmentFiles, effect {
-  const lifetime = try Effect.scope
+export const attachmentDownloads = Layer.sync(InboxAttachmentFiles, () => {
   const available = downloads()
   return {
     destination: available ? ("download" as const) : ("unavailable" as const),
@@ -63,9 +70,8 @@ export const attachmentDownloads = Layer.effect(InboxAttachmentFiles, effect {
       if (!available) return "refused"
       const bytes = decodeBase64(file.dataBase64)
       if (!bytes) return "refused"
-      const url = downloadCopy(file.name, blobOf([bytes], "application/octet-stream"))
-      try Effect.forkIn(ensuring(sleep("1 minute"), sync(() => releasePreview(url))), lifetime)
-      return "unknown"
+      const requested = try saveBrowserCopy(file.name, blobOf([bytes], "application/octet-stream"))
+      return requested ? "unknown" : "refused"
     },
     cancel: () => Effect.void,
   } satisfies InboxAttachmentFiles.Shape

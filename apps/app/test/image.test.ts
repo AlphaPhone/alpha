@@ -16,6 +16,7 @@ const scratch = () => { const directory = mkdtempSync(join(tmpdir(), "alpha-rele
 const write = (directory: string, name: string, value: unknown) => { const file = join(directory, name); writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); return file; };
 const digest = (seed: string) => createHash("sha256").update(seed).digest("hex");
 const digestOf = (bytes: Uint8Array | undefined) => createHash("sha256").update(bytes ?? new Uint8Array()).digest("hex");
+const apkManifest = (results: readonly Record<string, unknown>[], testMocks = false) => ({ schema: 1, applicationId: PACKAGE, variant: "launcher", testMocks, results });
 
 /** What a `pnpm aosp` command answered: its result, or the tag and words of the failure it ended with. */
 async function run(...argv: string[]) {
@@ -168,8 +169,8 @@ describe("Qualify and publish a release (spec/release/index.md, \"Story: Qualify
 
   it("refuses a build its verification recorded with test mocks, and one with no row at all (spec/release/index.md, \"A build is a candidate only when its verification recorded it distributable: no test mocks, the production bundle audit passed, Alpha's one signer, the runtime packaged with its notices, an on-device voice slot, and for an image its platform certificate\")", async () => {
     const directory = scratch();
-    const mocked = await released("blockers", "--apk-manifest", write(directory, "mocked.json", { apks: [{ variant: "launcher", build: "release", testMocks: true }] }));
-    const empty = await released("blockers", "--apk-manifest", write(directory, "empty.json", { apks: [] }));
+    const mocked = await released("blockers", "--apk-manifest", write(directory, "mocked.json", apkManifest([candidateRow(122)], true)));
+    const empty = await released("blockers", "--apk-manifest", write(directory, "empty.json", apkManifest([])));
     expect([mocked.ok, mocked.ok ? "" : mocked.said.includes("\"mocks\":true"), empty.ok]).toEqual([false, true, false]);
   });
 
@@ -182,8 +183,8 @@ describe("Qualify and publish a release (spec/release/index.md, \"Story: Qualify
 });
 
 /** A verify row of an unsigned release candidate with nothing else to block it, as eliza's verification records one. */
-const candidateRow = (overrides: Record<string, unknown> = {}) => ({
-  mode: "release", sha256: digest("candidate"), testMocks: false, bundleAudit: "passed", signed: false, runtime: "PACKAGED", runtimeNotices: true,
+const candidateRow = (versionCode: number, overrides: Record<string, unknown> = {}) => ({
+  mode: "release", variant: "launcher", versionCode, sha256: digest("candidate"), testMocks: false, bundleAudit: "passed", signed: false, runtime: "PACKAGED", runtimeNotices: true,
   runtimeProfile: "native", voiceHost: { packaged: true, differences: [], qualified: true }, licenceBlockers: [], distributable: false, ...overrides,
 });
 
@@ -193,14 +194,21 @@ describe("Build a candidate and sign it (spec/release/index.md, \"Story: Build a
     const run = join(directory, "run.json");
     const unsigned = join(directory, "launcher-release-unsigned.apk");
     writeFileSync(unsigned, "unsigned candidate bytes");
-    const verified = write(directory, "apk-manifest.json", { apks: [candidateRow()] });
+    const receipt = (version: number, overrides?: Record<string, unknown>) => apkManifest([{ mode: "debug", variant: "launcher", testMocks: true }, candidateRow(version, overrides)]);
+    const verified = write(directory, "apk-manifest.json", receipt(122));
     const stage = () => (JSON.parse(readFileSync(run, "utf8")) as { state: { stage: string; attempt: number; reviewed: boolean } }).state;
     // spec/release/index.md, "A build is a candidate only when its verification recorded it distributable: no test mocks, the production bundle audit passed, Alpha's one signer, the runtime packaged with its notices, an on-device voice slot, and for an image its platform certificate"
-    expect(await released("candidate", "--run", run, "--number", "122", "--attempt", "1", "--apk-manifest", write(directory, "mocked.json", { apks: [candidateRow({ testMocks: true })] }))).toMatchObject({ ok: false, tag: "ReleaseRefused" });
+    expect(await released("candidate", "--run", run, "--number", "122", "--attempt", "1", "--apk-manifest", write(directory, "mocked.json", receipt(122, { testMocks: true })))).toMatchObject({ ok: false, tag: "ReleaseRefused" });
+    const unqualified = await released("candidate", "--run", run, "--number", "122", "--attempt", "1", "--apk-manifest", write(directory, "unqualified.json", receipt(122, { voiceHost: undefined, runtimeNotices: undefined })));
+    expect(unqualified.ok ? "" : unqualified.said).toContain("RuntimeNoticesMissing");
+    expect(unqualified.ok ? "" : unqualified.said).toContain("VoiceNotRecorded");
     // spec/release/index.md, "A candidate is built only when none is in flight, numbered by a run above every run before it, the floor and the published version"
-    expect(await released("candidate", "--run", run, "--number", "74", "--attempt", "1", "--apk-manifest", verified)).toMatchObject({ ok: false, tag: "ReleaseRefused" });
+    expect(await released("candidate", "--run", run, "--number", "74", "--attempt", "1", "--apk-manifest", write(directory, "before-floor.json", receipt(74)))).toMatchObject({ ok: false, tag: "ReleaseRefused" });
+    const wrongVersion = await released("candidate", "--run", run, "--number", "123", "--attempt", "1", "--apk-manifest", verified);
+    expect(wrongVersion.ok ? "" : wrongVersion.said).toContain("does not record launcher version 123");
+    const next = write(directory, "next.json", receipt(123));
     expect(await released("candidate", "--run", run, "--number", "122", "--attempt", "1", "--apk-manifest", verified)).toMatchObject({ ok: true, value: { stage: "Built", number: 122 } });
-    expect(await released("candidate", "--run", run, "--number", "123", "--attempt", "1", "--apk-manifest", verified)).toMatchObject({ ok: false, tag: "ReleaseRefused" });
+    expect(await released("candidate", "--run", run, "--number", "123", "--attempt", "1", "--apk-manifest", next)).toMatchObject({ ok: false, tag: "ReleaseRefused" });
     // spec/release/index.md, "The candidate is mirrored privately, creating the object only if it is absent, or reusing one whose bytes read back the same"
     const mirror = join(directory, "private");
     expect(await released("mirror", "--run", run, "--apk", unsigned, "--to", mirror)).toMatchObject({ ok: true, value: { mirrored: join(mirror, "alpha-phone-122-unsigned.apk") } });
@@ -227,7 +235,7 @@ describe("Build a candidate and sign it (spec/release/index.md, \"Story: Build a
     // spec/release/index.md, "A candidate can be abandoned before it is published": its number stays spent.
     expect(await released("abandon", "--run", run)).toMatchObject({ ok: true, value: { stage: "Abandoned" } });
     expect(await released("candidate", "--run", run, "--number", "122", "--attempt", "1", "--apk-manifest", verified)).toMatchObject({ ok: false, tag: "ReleaseRefused" });
-    expect(await released("candidate", "--run", run, "--number", "123", "--attempt", "1", "--apk-manifest", verified)).toMatchObject({ ok: true, value: { stage: "Built", number: 123 } });
+    expect(await released("candidate", "--run", run, "--number", "123", "--attempt", "1", "--apk-manifest", next)).toMatchObject({ ok: true, value: { stage: "Built", number: 123 } });
   });
 });
 

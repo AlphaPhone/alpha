@@ -175,7 +175,7 @@ export function Files({ runtime, alpha }: FilesProps) {
     const action = selecting ? toggle : open;
     const onClick = owner(action) ? () => tell(action) : undefined;
     return (
-      <div key={item.id} className="group relative min-w-0">
+      <div key={item.id} className={cn("group relative min-w-0", !grid && "[contain-intrinsic-size:auto_4rem] [content-visibility:auto] focus-within:[content-visibility:visible]")}>
         <FilesRow
           layout={grid ? "tile" : "row"}
           aria-label={item.name}

@@ -13,6 +13,7 @@ import home from "../src/home/index.tsx";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { button, closeAll, drawn, fill, later, only, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
 import { type Scene, scene } from "./fakes/scene.ts";
+import { workflowNoteOffer } from "./fakes/workflows.ts";
 
 underAct();
 afterEach(closeAll);
@@ -229,8 +230,12 @@ describe("Workflows", () => {
     expect(world.workflows.prompts.get("weekly-prompt")?.instructions).toBe("Changed in another session.");
   });
 
-  it('Runs the reviewed version, follows its approval and opens its output (spec/app/workflows/runs.md, "Story: Run a workflow now"; spec/app/workflows/sheet.md, "Story: Read a run\'s sheet"; spec/app/workflows/approvals.md, "Story: Answer a run\'s approval on the phone")', async () => {
+  it('Runs the reviewed version, follows its approval and opens its output (spec/app/workflows/runs.md, "Story: Run a workflow now"; spec/app/workflows/sheet.md, "Story: Read a run\'s sheet"; spec/app/workflows/approvals.md, "Story: Answer a run\'s approval on the phone"; spec/app/workflows/approvals.md, "Story: Confirm exactly what this workflow does on my phone")', async () => {
     const world = scene();
+    world.phone = true;
+    world.image = true;
+    const device = await workflowNoteOffer(world.workflows, world.notes.owner);
+    world.telephony.textReview = device;
     world.workflows.stage = "Running";
     const alpha = await openWorkflows(world);
     const area = workflows.runtime(alpha);
@@ -268,8 +273,20 @@ describe("Workflows", () => {
     await until(alpha, area, Approvals, (state) => state.approval === "Waiting" && state.sheet);
     expect(document.querySelector('[aria-label="Workflow approval"]')?.textContent).toContain("Review the revised statement preview");
     await press("Approve");
-    await until(alpha, area, Approvals, (state) => state.approval === "Approved");
+    await vi.waitFor(() => expect(world.workflows.stage).toBe("Device"));
     expect(world.workflows.decisions).toEqual([{ version: "monthly-statement-v3", digest: "a".repeat(64), approved: true }]);
+    expect(world.notes.creations.size).toBe(0);
+    await later(alpha, 4_000);
+    await until(alpha, area, Approvals, (state) => state.device.phase === "DeviceShown");
+    expect(document.querySelector('[aria-label="Review device action"]')?.textContent).toContain("Statement saved by Workflows");
+    await press("Approve device action");
+    await until(alpha, area, Approvals, (state) => state.device.phase === "DeviceAnswered");
+    await until(alpha, area, Approvals, (state) => state.approval === "Approved");
+    expect({ notes: world.notes.notes.filter(({ title }) => title === "Statement saved by Workflows"), claims: device.claims, sent: device.receipts }).toMatchObject({
+      notes: [{ title: "Statement saved by Workflows" }], claims: [device.proposal.id],
+      sent: [{ outcome: "applied", operationId: device.proposal.id }],
+    });
+    world.workflows.stage = "Done";
 
     await later(alpha, 4_000);
     await until(alpha, area, Sheet, (state) => state.output.status === "Loaded" && state.status === "Done");

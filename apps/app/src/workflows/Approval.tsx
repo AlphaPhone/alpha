@@ -52,3 +52,41 @@ export function Approval({ runtime, run, owner, approvals }: ApprovalProps) {
     </section>
   );
 }
+
+
+const operations = {
+  read_selected_notes: "Read selected notes",
+  read_calendar_range: "Read calendar range",
+  create_note: "Save in Notes",
+} as const;
+
+/** The phone's own proposal, after the agent has recorded its workflow approval. */
+export function WorkflowDeviceApproval({ runtime, run, owner }: ApprovalProps) {
+  const machine = useTimed(runtime, useMachine);
+  const state = machine.state?.device;
+  if (!state || state.runNumber !== run || state.phase === "DeviceIdle") return null;
+  const shown = runtime.runSync(Effect.flatMap(ApprovalWords, (words) => words.device()));
+  if (!shown || shown.owner !== owner || shown.number !== state.number) return null;
+  const allow = { type: "decideDevice", number: shown.number, runNumber: run, approved: true, now: untimed } as const;
+  const deny = { ...allow, approved: false };
+  const pill = cn(focusRing, "min-h-11 rounded-full px-4.5");
+  return (
+    <section aria-label="Review device action" className="mt-5.5 flex flex-col gap-3 rounded-panel bg-secondary px-5 py-4.5 text-base leading-transcript">
+      <strong className="font-semibold">{operations[shown.offer.operation.type]}</strong>
+      <details className="text-sm leading-chat wrap-anywhere">
+        <summary className={cn(focusRing, "min-h-11 cursor-pointer py-3 font-semibold")}>Details</summary>
+        {shown.detail.map((line, index) => (
+          <p key={`${index}/${line.length}`} className="whitespace-pre-wrap">{line}</p>
+        ))}
+      </details>
+      {(machine.can(allow) || machine.can(deny)) && (
+        <div className="flex flex-wrap gap-3">
+          {machine.can(deny) && <button type="button" className={cn(pill, "bg-background")} onClick={() => void machine.send(deny)}>Deny</button>}
+          {machine.can(allow) && <button type="button" className={cn(pill, "bg-primary text-primary-foreground")} onClick={() => void machine.send(allow)}>Approve device action</button>}
+        </div>
+      )}
+      {state.phase === "DeviceSending" && <p role="status">Waiting for your phone…</p>}
+      {state.phase === "DeviceUnconfirmed" && <Alert variant="warn" role="status">The outcome couldn’t be confirmed. Check the run before trying again.</Alert>}
+    </section>
+  );
+}

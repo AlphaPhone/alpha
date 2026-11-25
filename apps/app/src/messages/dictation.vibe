@@ -10,7 +10,7 @@ import { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import { VoiceBridge } from "../platform/voice.vibe"
 import { contained, started, together } from "../runtime/reactor.vibe"
-import { VoiceWords, openDictation, voiceWithCalls, voicing } from "../voice/voice.vibe"
+import { type VoiceWords, openDictation, voiceWithCalls, voicing } from "../voice/voice.vibe"
 import { Drafts } from "./composer.vibe"
 
 const remainingInMessages = (where: Messages.Messages): boolean => where.front && where.pane === "Conversation" && Messages.readable(where)

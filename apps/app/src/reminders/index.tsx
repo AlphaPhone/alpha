@@ -1,4 +1,4 @@
-// spec/app/reminders/index.md, "Back from an open list returns to the overview before leaving Reminders, and leaving the app resets the overview"; spec/app/reminders/editor.md, "Story: Create or edit a reminder with safe validation and draft recovery"
+// spec/app/reminders/index.md, "Back from an open list returns to the overview before leaving Reminders, and leaving the app resets the overview"; spec/app/reminders/editor.md, "Story: Create and edit a reminder safely"
 import { Effect } from "effect";
 import * as RemindersMachine from "../../gen/app__reminders.effect.vibe";
 import * as EditorMachine from "../../gen/app__reminders__editor.effect.vibe";

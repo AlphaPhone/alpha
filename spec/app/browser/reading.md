@@ -117,7 +117,9 @@ pure val ticketValues = Set(1, 2)
 ### An explicit reading starts from the current committed HTTPS page
 
 Where this phone's WebView cannot read a page privately, reading aloud says
-"Page reading unavailable". The owner can choose an explicit review on the
+why and names Android System WebView. The Browser checks the installed
+WebView when it opens, shows an unavailable note in the menu after a
+definite refusal and checks before starting an explicit reading. The owner can choose an explicit review on the
 normal or private tab in front. A private tab never supplies the automatic
 page context for an ordinary question. On Android the phone checks the
 selected document before releasing an excerpt to Alpha's editor. In a web

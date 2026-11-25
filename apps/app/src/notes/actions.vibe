@@ -81,7 +81,7 @@ export effect function shareVoice(fx: VoiceShare): Voice.Event!!VoiceSharePorts 
     return queued === undefined ? unavailable : done
   }
   const name = `${title.replace(/[^\p{L}\p{N} ._-]+/gu, "_").trim().slice(0, 140) || "Note"}.txt`
-  return downloadText(name, text) ? done : unavailable
+  return (try downloadText(name, text)) ? done : unavailable
 }
 
 function carry(fx: Actions.Effect): Job<Actions.Event, Scope, [Actor]> {

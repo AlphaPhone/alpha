@@ -12,10 +12,10 @@ import {
   aaptManifestTree, apkReleaseBlockers, apkUpdateAdmission, apkUpdateReceipt, integrityQuery, listAndroidArtifactEntries, manifestFacts, qaEvidenceAdmission,
   readApkBuildFlags, readApkSignerDigest, readbackInventory, snapshotAndroidArtifact,
 } from "@elizaos/os";
-import { Data, Effect } from "effect";
+import { Data, Effect, Schema } from "effect";
 import * as Channel from "../gen/release.ts";
 import {
-  type Apk, type Blockers, type Custody, type Readback, admitted, channelManifest, channelRepository, channelRepositoryId, channelTag, clear, distributable, earlierRepositories, maxApkBytes,
+  type Apk, type Blockers, type Custody, type Readback, admitted, channelManifest, channelRepository, channelRepositoryId, channelTag, distributable, earlierRepositories, maxApkBytes,
   custodyProven, retiredTag, updatedItself,
 } from "../gen/release.ts";
 import { pilotPassed } from "../gen/app__image.ts";
@@ -147,16 +147,25 @@ const whole = (text: string, name: string) => {
   return number;
 };
 
-/** What every row of the verification's APK manifest blocks, together; none at all is a blocker of its own. */
-function recordedBlockers(file: string, platform: string | undefined, signed: boolean) {
-  const recorded = JSON.parse(readFileSync(file, "utf8")) as { readonly apks?: readonly unknown[] };
-  const review = { reviewedSigner: reviewedSigner(), ...(platform === undefined ? {} : { image: { platformCertificateSha256: platform } }) };
-  const rows = (recorded.apks ?? []).map((row) => blockersOf(apkReleaseBlockers(row, review), signed));
-  const all = rows.reduce<Blockers>((sum, row) => ({
-    mocks: sum.mocks || row.mocks, audit: sum.audit || row.audit, signer: sum.signer || row.signer, runtime: sum.runtime || row.runtime,
-    notices: sum.notices || row.notices, voice: sum.voice || row.voice, platform: sum.platform || row.platform,
-  }), clear);
-  return { rows: rows.length, blockers: rows.length === 0 ? { ...clear, audit: true } : all };
+const apkManifest = Schema.Struct({
+  schema: Schema.Literal(1), applicationId: Schema.Literal(PACKAGE), variant: Schema.Literal("launcher"),
+  testMocks: Schema.Boolean, results: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
+});
+
+/** The release verifier's one launcher result, checked against the run and APK when supplied. */
+function recordedBlockers(file: string, expected: { signed: boolean; versionCode?: number; sha256?: string; platformCertificate?: string }) {
+  const recorded = Schema.decodeUnknownSync(apkManifest)(JSON.parse(readFileSync(file, "utf8")));
+  const rows = recorded.results.filter((row) => row.mode === "release" && row.variant === "launcher");
+  const [row] = rows;
+  if (rows.length !== 1 || row === undefined) throw new ReleaseRefused({ message: `${file} must record exactly one launcher release` });
+  if (expected.versionCode !== undefined && row.versionCode !== expected.versionCode)
+    throw new ReleaseRefused({ message: `${file} does not record launcher version ${expected.versionCode}` });
+  if (expected.sha256 !== undefined && row.sha256 !== expected.sha256)
+    throw new ReleaseRefused({ message: `${file} does not record the signed APK's digest` });
+  const review = { reviewedSigner: reviewedSigner(), manifestTestMocks: recorded.testMocks,
+    ...(expected.platformCertificate === undefined ? {} : { image: { platformCertificateSha256: expected.platformCertificate } }) };
+  const reasons = apkReleaseBlockers(row, review).filter((reason) => expected.signed || (reason !== "Unsigned" && reason !== "NotRecordedDistributable"));
+  return { rows: rows.length, blockers: blockersOf(reasons, expected.signed), reasons };
 }
 
 /** The facts the admission rule reads from the APK's own bytes, never from a record of it. */
@@ -221,8 +230,8 @@ const commands = {
   blockers: (argv: readonly string[]) => Effect.gen(function* () {
     const found = yield* attempt(() => flags(argv, ["apk-manifest", "platform-certificate"]));
     const [file = ""] = yield* attempt(() => found.need("apk-manifest"));
-    const { rows, blockers } = yield* attempt(() => recordedBlockers(file, found.values["platform-certificate"], true));
-    if (!distributable(blockers)) return yield* new ReleaseRefused({ message: `not distributable: ${JSON.stringify(blockers)}` });
+    const { rows, blockers, reasons } = yield* attempt(() => recordedBlockers(file, { signed: true, platformCertificate: found.values["platform-certificate"] }));
+    if (!distributable(blockers)) return yield* new ReleaseRefused({ message: `not distributable: ${JSON.stringify(blockers)} (${reasons.join(", ")})` });
     return { distributable: true, rows, blockers };
   }),
   admit: (argv: readonly string[]) => Effect.gen(function* () {
@@ -246,8 +255,10 @@ const commands = {
   candidate: (argv: readonly string[]) => Effect.gen(function* () {
     const found = yield* attempt(() => flags(argv, ["run", "number", "attempt", "apk-manifest", "platform-certificate"]));
     const [file = "", number = "", tried = "", recorded = ""] = yield* attempt(() => found.need("run", "number", "attempt", "apk-manifest"));
-    const event = { type: "build" as const, number: yield* attempt(() => whole(number, "number")), attempt: yield* attempt(() => whole(tried, "attempt")),
-      blockers: (yield* attempt(() => recordedBlockers(recorded, found.values["platform-certificate"], false))).blockers };
+    const versionCode = yield* attempt(() => whole(number, "number"));
+    const { blockers, reasons } = yield* attempt(() => recordedBlockers(recorded, { signed: false, versionCode, platformCertificate: found.values["platform-certificate"] }));
+    if (!distributable(blockers)) return yield* new ReleaseRefused({ message: `launcher version ${versionCode} cannot be a candidate: ${reasons.join(", ")}` });
+    const event = { type: "build" as const, number: versionCode, attempt: yield* attempt(() => whole(tried, "attempt")), blockers };
     const run = yield* attempt(() => runOf(file));
     const floor = (yield* attempt(() => signerRecord())).lastRelease?.versionCode ?? 0;
     if (run.can({ type: "retainElsewhere", version: floor })) yield* attempt(() => run.take({ type: "retainElsewhere", version: floor }));
@@ -329,9 +340,9 @@ const commands = {
     const [file = "", apk = "", recorded = "", to = ""] = yield* attempt(() => flags(argv, ["run", "apk", "apk-manifest", "to"]).need("run", "apk", "apk-manifest", "to"));
     const run = yield* attempt(() => runOf(file));
     if (!run.can({ type: "deliver", now: hours() })) return yield* new ReleaseRefused({ message: "no signed release waits to be delivered" });
-    const verified = yield* attempt(() => recordedBlockers(recorded, undefined, true).blockers);
-    if (!distributable(verified)) return yield* new ReleaseRefused({ message: `the signed build is not recorded distributable: ${JSON.stringify(verified)}` });
     const read = yield* admit(apk, run.state.number);
+    const { blockers, reasons } = yield* attempt(() => recordedBlockers(recorded, { signed: true, versionCode: run.state.number, sha256: read.sha256 }));
+    if (!distributable(blockers)) return yield* new ReleaseRefused({ message: `the signed build is not recorded distributable: ${reasons.join(", ")}` });
     return yield* attempt(() => {
       mkdirSync(to, { recursive: true });
       const target = join(to, `alpha-phone-${run.state.number}.apk`);

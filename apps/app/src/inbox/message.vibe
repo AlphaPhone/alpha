@@ -24,7 +24,7 @@ import { Mail, asked, body, faultOf, relabel, revisionOf } from "./gmail.vibe"
 import { backFromDraft } from "./composer.vibe"
 import { ownerChanges } from "./mailbox.vibe"
 import { prepareMessage } from "./mail-html.ts"
-import { ThreadPages, locateThread, threadFault, threadMessage, threadPages } from "./thread.vibe"
+import { type ThreadPages, locateThread, threadFault, threadMessage, threadPages } from "./thread.vibe"
 import { type AttachmentPreviews, attachmentPreviews, drawAttachmentPage, forgetPreview, handleAttachment } from "./attachment.vibe"
 
 module web {
@@ -96,7 +96,7 @@ const refreshed = (account: number) => effect {
 }
 
 // spec/app/inbox/message.md, "Ask Alpha is handed the message on screen, once it has loaded, named by its account, number and history revision"
-const questionAbout = (account: number, message: number, revision: number) => effect {
+export const questionAbout = (account: number, message: number, revision: number, notice?: MailQuestion["notice"]) => effect {
   const view = try Message.Machine
   const list = try Inbox.Machine
   const ledger = try Mail
@@ -138,7 +138,7 @@ const questionAbout = (account: number, message: number, revision: number) => ef
       if (!(try live)) throw new MailContextRefused({ reason: "changed" })
       return { source: sourceOf(grant, fetched), destination: target }
     }
-    questions.show({ question: { review, current } })
+    questions.show({ question: { review, current, ...(notice === undefined ? {} : { notice }) } })
   } catch (cause) => questions.show({ failure: cause instanceof MailContextRefused && cause.reason === "too-large" ? "tooLarge" : "changed" })
   try ignore(shell.send({ type: "raise", detent: "Sheet" }))
 }

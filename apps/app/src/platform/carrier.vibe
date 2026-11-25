@@ -28,21 +28,21 @@ module held {
 import { copied, plugin } from held
 
 const FieldStatus = Schema.Literals(["available", "permission-denied", "unavailable", "unsupported", "not-read"])
-const Reported = Schema.Struct({ status: FieldStatus, value: Schema.optionalKey(Schema.String) })
-type Reported = typeof Reported.Type
+const ReportedSchema = Schema.Struct({ status: FieldStatus, value: Schema.optionalKey(Schema.String) })
+type Reported = typeof ReportedSchema.Type
 const Subscription = Schema.Struct({
   subscriptionId: Schema.Int, embedded: Schema.Boolean, slotIndex: Schema.optionalKey(Schema.Int),
-  carrier: Reported, iccid: Reported, operator: Reported, operatorCode: Reported,
-  name: Schema.optionalKey(Reported), dataState: Schema.optionalKey(Reported), networkType: Schema.optionalKey(Reported),
-  dataEnabled: Reported, roaming: Reported, defaultData: Schema.optionalKey(Schema.Boolean),
+  carrier: ReportedSchema, iccid: ReportedSchema, operator: ReportedSchema, operatorCode: ReportedSchema,
+  name: Schema.optionalKey(ReportedSchema), dataState: Schema.optionalKey(ReportedSchema), networkType: Schema.optionalKey(ReportedSchema),
+  dataEnabled: ReportedSchema, roaming: ReportedSchema, defaultData: Schema.optionalKey(Schema.Boolean),
 })
-const Setup = Schema.Struct({
-  canChooseSms: Schema.Boolean, smsRole: Reported, dialerRole: Reported, eid: Reported,
-  hardware: Schema.Struct({ manufacturer: Reported, model: Reported, baseband: Reported, device: Schema.optionalKey(Reported), android: Schema.optionalKey(Reported) }),
-  slots: Schema.Array(Schema.Struct({ slotIndex: Schema.Int, imei: Reported, simState: Reported })),
+const SetupSchema = Schema.Struct({
+  canChooseSms: Schema.Boolean, smsRole: ReportedSchema, dialerRole: ReportedSchema, eid: ReportedSchema,
+  hardware: Schema.Struct({ manufacturer: ReportedSchema, model: ReportedSchema, baseband: ReportedSchema, device: Schema.optionalKey(ReportedSchema), android: Schema.optionalKey(ReportedSchema) }),
+  slots: Schema.Array(Schema.Struct({ slotIndex: Schema.Int, imei: ReportedSchema, simState: ReportedSchema })),
   subscriptions: Schema.Struct({ status: Schema.optionalKey(FieldStatus), items: Schema.Array(Subscription) }),
 })
-type Setup = typeof Setup.Type
+type Setup = typeof SetupSchema.Type
 
 /** What one read of the carrier's identifiers found, and whether there is an eSIM and Alpha can take the SMS role. */
 export interface Identifiers {
@@ -96,12 +96,12 @@ function fieldsOf(setup: Setup): ReadonlyArray<Field> {
 
 /** On the phone: Alpha's `AlphaCarrierSetup` plugin. */
 export const phoneCarrierSetup = Layer.succeed(CarrierSetup, {
-  read: () => Effect.map(Effect.option(Effect.flatMap(tryPromise(() => plugin().read()), Schema.decodeUnknownEffect(Setup))), Option.map((setup): Identifiers => ({
+  read: () => Effect.map(Effect.option(Effect.flatMap(tryPromise(() => plugin().read()), Schema.decodeUnknownEffect(SetupSchema))), Option.map((setup): Identifiers => ({
     fields: fieldsOf(setup),
     esim: setup.eid.status === "not-read" || setup.eid.status === "available" || setup.subscriptions.items.some((sim) => sim.embedded),
     smsChoice: setup.canChooseSms,
   }))),
-  readEid: () => Effect.map(Effect.option(Effect.flatMap(tryPromise(() => plugin().readEid()), Schema.decodeUnknownEffect(Reported))), (eid) => (Option.isSome(eid) ? fieldOf("Imei", 0, eid.value) : fieldOf("Imei", -1, { status: "not-read" }))),
+  readEid: () => Effect.map(Effect.option(Effect.flatMap(tryPromise(() => plugin().readEid()), Schema.decodeUnknownEffect(ReportedSchema))), (eid) => (Option.isSome(eid) ? fieldOf("Imei", 0, eid.value) : fieldOf("Imei", -1, { status: "not-read" }))),
   copy: (text: string) => Effect.map(Effect.option(tryPromise(() => copied(text))), Option.isSome),
 })
 

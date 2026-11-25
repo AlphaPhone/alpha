@@ -323,6 +323,14 @@ pure def sometimesTheAgendaFollowedTheDate(s: Calendar): bool = s.layout == Agen
 > after that to send me to Android's Calendar settings, so that I am never
 > asked again and again.
 
+### A reviewed workflow reads only the selected phone calendars in its approved range
+
+The phone checks the existing read grant and foreground before and after
+reading. It queries only the approved calendar IDs, interval, time zone
+and event limit. A stale Workflows review or a reply outside that scope
+settles without calendar data. The reply carries only the event identity,
+title, time, all-day flag and the revision of those fields.
+
 ### Calendar asks for the phone's calendar only while it lacks it, and only once
 
 ```quint

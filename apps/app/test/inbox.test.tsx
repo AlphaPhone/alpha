@@ -6,6 +6,7 @@ import { Machine as Marks } from "../gen/app__inbox__marking.effect.vibe";
 import { Machine as Shown } from "../gen/app__inbox__message.effect.vibe";
 import { Machine as Changes } from "../gen/app__inbox__sending.effect.vibe";
 import { Machine as Writing } from "../gen/app__inbox__drafts.effect.vibe";
+import { Machine as Adding } from "../gen/app__inbox__adding.effect.vibe";
 import { Machine as Offering } from "../gen/app__inbox__suggestion.effect.vibe";
 import { Machine as Shell, showing } from "../gen/app__shell.effect.vibe";
 import home from "../src/home/index.tsx";
@@ -16,7 +17,7 @@ import { button, closeAll, drawn, fill, hardware, later, only, open, press, unde
 import { Effect } from "effect";
 import { Letters, nothing } from "../src/inbox/composer.vibe";
 import { Mail } from "../src/inbox/gmail.vibe";
-import { letter } from "./fakes/inbox.ts";
+import { type InboxNoticeScene, letter } from "./fakes/inbox.ts";
 import { type Scene, scene } from "./fakes/scene.ts";
 
 underAct();
@@ -46,20 +47,18 @@ const menu = (item: string, label = "More actions") => drawn(() => {
   if (!(found instanceof HTMLElement)) throw new Error(`no ${item} in the menu`);
   found.click();
 }));
-const write = (name: string, text: string) => drawn(() => {
-  const found = [...document.querySelectorAll("textarea, input")].find((field) => field.getAttribute("aria-label") === name);
-  if (!(found instanceof HTMLTextAreaElement || found instanceof HTMLInputElement)) throw new Error(`no field ${name}`);
-  Object.getOwnPropertyDescriptor(Object.getPrototypeOf(found) as object, "value")?.set?.call(found, text);
-  found.dispatchEvent(new Event("input", { bubbles: true }));
-});
 const told = () => document.body.textContent ?? "";
 const title = () => document.querySelector("main[aria-label]:not([aria-label=Inbox]), main[aria-label=Inbox]")?.getAttribute("aria-label");
 const step = (name: string) => process.stderr.write(`STEP ${name}\n`);
-const tile = (view: string) => drawn(() => {
-  const found = document.querySelector<HTMLButtonElement>(`[data-home-tile='view:${view}']`);
-  if (!found) throw new Error(`no tile ${view}; visible text: ${told().slice(0, 240)}`);
-  found.click();
-});
+async function openInboxFromHome(alpha: Alpha) {
+  await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0);
+  await homeIsReady(alpha);
+  await drawn(() => {
+    const tile = document.querySelector<HTMLButtonElement>("[data-home-tile='view:Inbox']");
+    if (!tile) throw new Error(`no Inbox tile on Home; visible text: ${told().slice(0, 240)}`);
+    tile.click();
+  });
+}
 const action = (name: string) => drawn(() => {
   const found = document.querySelector<HTMLButtonElement>(`button[aria-label='${name}']`);
   if (!found) throw new Error(`no action ${name}`);
@@ -77,6 +76,113 @@ async function openInbox(world: Scene) {
   await homeIsReady(opened.alpha);
   return opened;
 }
+
+it("Open or ask about the exact Android mail notice (spec/app/inbox/notices.md, \"Story: Hear about new mail\"; spec/app/inbox/notices.md, \"Story: Open my message from a notice\"; spec/app/inbox/notices.md, \"Ask Alpha from a notice checks the same email again before spending the tap\")", async () => {
+  const world = { ...scene(), phone: true };
+  const notices: InboxNoticeScene = { spent: [], released: [] };
+  world.inbox.notices = notices;
+  const { alpha } = await openInbox(world);
+  const runtime = inbox.runtime(alpha);
+  await drawn(() => vi.waitFor(() => expect(notices.selection?.grantId).toBe(world.inbox.google?.connection)));
+  const selection = notices.selection;
+  if (!selection || !notices.enter) throw new Error("No native mail watch");
+  const enter = notices.enter;
+  const tap = { ...selection, generation: "notice-generation" };
+  const first = world.inbox.mail.find(({ card }) => card.id === "g1");
+  const second = world.inbox.mail.find(({ card }) => card.id === "g3");
+  if (!first || !second) throw new Error("Missing mail for notification tap");
+
+  await drawn(() => enter({ ...tap, token: "obsolete", grantId: "retired-grant", messageId: first.card.id, threadId: first.card.threadId }));
+  expect(notices.spent).toEqual([]);
+  await drawn(() => enter({ ...tap, token: "ordinary", messageId: first.card.id, threadId: first.card.threadId }));
+  await until(alpha, runtime, Shown, (state) => state.body.status === "Loaded");
+  expect([title(), notices.spent, world.ask.said]).toEqual([first.card.subject, ["ordinary"], []]);
+
+  const ask = { ...tap, question: true, messageId: second.card.id, threadId: second.card.threadId };
+  const review = () => document.querySelector("[role=alertdialog]")?.textContent ?? "";
+  await drawn(() => enter({ ...ask, token: "dismissed" }));
+  await drawn(() => vi.waitFor(() => expect(review()).toContain(second.body)));
+  await confirm("Cancel");
+  await drawn(() => vi.waitFor(() => expect(notices.released).toEqual(["dismissed"])));
+  expect([notices.spent, world.ask.said]).toEqual([["ordinary"], []]);
+  await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" }))));
+  await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Bar" && showing(state, "Inbox"));
+
+  await drawn(() => enter({ ...ask, token: "reviewed" }));
+  await drawn(() => vi.waitFor(() => expect(review()).toContain(second.body)));
+  await confirm("Add to chat");
+  await drawn(() => vi.waitFor(() => expect(notices.spent).toEqual(["ordinary", "reviewed"])));
+  expect(world.ask.said).toEqual([]);
+}, 30_000);
+
+it("Choose a phone contact for the email I’m writing (spec/app/inbox/adding.md, \"Story: Add files and people to my draft\"; spec/app/inbox/adding.md, \"The people shown are for the draft and the newest Contacts read, and choosing one adds only its displayed address\")", async () => {
+  const world = { ...scene(), phone: true, image: true };
+  world.telephony.contacts = false;
+  const maya = world.telephony.people[0];
+  if (!maya) throw new Error("Missing Android contact fixture");
+  const email = "maya@example.test";
+  maya.emailAddresses = [{ address: email, type: "home" }];
+  const { alpha } = await openInbox(world);
+  const runtime = inbox.runtime(alpha);
+  await until(alpha, alpha.runtime, Shell, (state) => state.contacts);
+  await openInboxFromHome(alpha);
+  await until(alpha, runtime, List, (state) => state.list.status === "Loaded");
+  await press("Compose");
+  await until(alpha, runtime, Writing, (state) => state.open && state.letter.kind === "Fresh");
+  const show = async () => {
+    await press("Choose contacts");
+    await until(alpha, runtime, Adding, (state) => state.people.status === "Loaded" && state.addresses === 1);
+  };
+  const choose = () => drawn(() => vi.waitFor(() => {
+    const choice = document.querySelector<HTMLButtonElement>('[aria-label="Contact addresses"] button');
+    expect(choice?.textContent ?? "").toContain(email);
+    choice?.click();
+  }));
+  await show();
+  expect(world.telephony.contacts).toBe(true);
+  world.telephony.contacts = false;
+  await choose();
+  await until(alpha, runtime, Adding, (state) => state.contactDraft === 0);
+  expect(await runtime.runPromise(Effect.flatMap(Writing, (writing) => Effect.map(writing.get(), (state) => state.letter.recipients)))).toBe(0);
+  world.telephony.contacts = true;
+  await show();
+  await choose();
+  await until(alpha, runtime, Writing, (state) => state.letter.recipients === 1);
+  const added = await runtime.runPromise(Effect.flatMap(Writing, (writing) => Effect.flatMap(writing.get(), (state) =>
+    Effect.map(Letters, (letters) => letters.words(state.letter.id).to))));
+  expect([world.telephony.contacts, added, world.inbox.changes]).toEqual([true, [email], []]);
+});
+
+it("Star and mark the mail I reviewed (spec/app/inbox/sending.md, \"Story: Change the stars or read state of selected mail\")", async () => {
+  const world = scene();
+  const { alpha } = await openInbox(world);
+  const runtime = inbox.runtime(alpha);
+  const subjects: readonly [string, string] = ["Notes for the 3:00 review", "Dinner Friday?"];
+  await tile("Inbox");
+  await until(alpha, runtime, List, (state) => state.list.status === "Loaded");
+  await select(subjects[0]);
+  await row(subjects[1]);
+  await until(alpha, runtime, List, (state) => state.chosen.length === subjects.length);
+  await menu("Star", "Mail options");
+  await until(alpha, runtime, Changes, (state) => state.review.showing && state.kind === "Star");
+  expect([...(document.querySelector("[role=alertdialog] ul")?.querySelectorAll("li") ?? [])].map((one) => one.textContent)).toEqual(expect.arrayContaining(subjects));
+  expect(world.inbox.changes).toEqual([]);
+  await confirm("Yes");
+  await until(alpha, runtime, Changes, (state) => state.attempt.outcome === "Confirmed");
+  await menu("Starred", "More folders");
+  await until(alpha, runtime, List, (state) => state.selected.folder === "Starred" && state.list.status === "Loaded");
+  expect(rows()).toEqual(subjects);
+
+  await select(subjects[0]);
+  await row(subjects[1]);
+  await until(alpha, runtime, List, (state) => state.chosen.length === subjects.length);
+  await menu("Mark as read", "Mail options");
+  await until(alpha, runtime, Changes, (state) => state.review.showing && state.kind === "MarkRead");
+  await confirm("Yes");
+  await until(alpha, runtime, Changes, (state) => state.attempt.outcome === "Confirmed");
+  expect(world.inbox.mail.filter(({ card }) => subjects.includes(card.subject)).map(({ card }) => [card.labels.includes("STARRED"), card.isUnread])).toEqual([[true, false], [true, false]]);
+  expect(world.inbox.changes).toHaveLength(4);
+});
 
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   it("See my mail (spec/app/inbox/index.md, \"Story: See my mail\"; spec/app/inbox/message.md, \"Story: Ask Alpha about a message\")", async () => {
@@ -99,7 +205,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const runtime = inbox.runtime(alpha);
 
     // spec/app/inbox/index.md, "Opening Inbox, and every change to Google access, checks the accounts again, even while a check is out"
-    await tile("Inbox");
+    await openInboxFromHome(alpha);
     await until(alpha, runtime, List, (s) => s.list.status === "Loaded" && s.pages === 1);
     step("1");
     expect([rows().slice(0, 2), rows().length]).toEqual([["Revised term sheet", "Notes for the 3:00 review"], 25]);
@@ -108,7 +214,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     // spec/app/inbox/index.md, "Only a card with a positive attachment hint shows a paperclip"
     const attachmentBadge = (subject: string) => {
       const message = opens().find((open) => subjectOf(open) === subject);
-      return [Boolean(message?.querySelector("svg.lucide-paperclip")), message?.textContent?.includes("Has attachments.")];
+      const announced = [...(message?.querySelectorAll(".sr-only") ?? [])].some((label) => label.textContent === "Has attachments");
+      return [Boolean(message?.querySelector("svg.lucide-paperclip")), announced];
     };
     expect([attachmentBadge("Revised term sheet"), attachmentBadge("Dinner Friday?"), attachmentBadge("Standup notes")]).toEqual([[true, true], [false, false], [false, false]]);
     expect(world.inbox.attachmentReads).toEqual([]);
@@ -160,8 +267,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       // spec/app/inbox/message.md, "Ask Alpha is handed the message on screen, once it has loaded, named by its account, number and history revision"
       await menu("Ask Alpha");
       await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
-      await drawn(() => vi.waitFor(() => expect(document.querySelector("[role=dialog]")?.textContent).toContain("Share this email with Alpha?")));
-      expect([document.querySelector("[role=dialog]")?.textContent, world.ask.said]).toEqual([expect.stringContaining(termSheet.body), []]);
+      await drawn(() => vi.waitFor(() => expect(document.querySelector("[role=alertdialog]")?.textContent ?? "").toContain("Share this email with Alpha?")));
+      expect([document.querySelector("[role=alertdialog]")?.textContent, world.ask.said]).toEqual([expect.stringContaining(termSheet.body), []]);
       await confirm("Add to chat");
       await drawn(() => vi.waitFor(() => expect(document.querySelector('textarea[aria-label="Message Alpha"]')).not.toBeNull()));
       await fill("Message Alpha", "What changed in the term sheet?");
@@ -199,11 +306,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     }
 
     // spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"
-    await drawn(() => {
-      const attachment = [...document.querySelectorAll<HTMLButtonElement>("main button")].find((one) => one.textContent?.startsWith("Open agenda.txt "));
-      if (!attachment) throw new Error("no attachment preview");
-      attachment.click();
-    });
+    await press(/^Open\s*agenda\.txt/);
     await until(alpha, runtime, Shown, (s) => s.attachment === 2);
     expect([world.inbox.attachmentReads, document.querySelector("[aria-label='Attachment contents']")]).toEqual([[], null]);
     await confirm("Open");
@@ -314,12 +417,12 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   const world = { ...scene(), phone: true };
   world.inbox.google = undefined;
   world.inbox.offline = true;
+  world.signedIn = false;
   const { alpha } = await openInbox(world);
   const runtime = inbox.runtime(alpha);
 
   // spec/app/platform/index.md, "The owner's tap on a mail sign-in control starts the phone's one more sign-in for mail where the phone wants it, then reads again once": signed out, the phone wants no mail sign-in and Connect Eliza Cloud opens Settings as it always did.
-  world.signedIn = false;
-  await press("Inbox");
+  await openInboxFromHome(alpha);
   await until(alpha, runtime, List, (s) => !s.signedIn);
   await press("Connect Eliza Cloud");
   await until(alpha, alpha.runtime, Shell, (s) => showing(s, "Settings"));
@@ -328,7 +431,7 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   await hardware("home");
 
   // spec/app/inbox/index.md, "The answer names the connected accounts, their credentials and grants; the account chosen stays selected while it is connected, else the one account that may be read, else none and the owner chooses": a failed check changes nothing, and with nothing listed the list says mail could not be read and offers to check again
-  await press("Inbox");
+  await openInboxFromHome(alpha);
   await until(alpha, runtime, List, (s) => s.accounts.status === "Failed");
   expect([rows(), told()]).toEqual([[], expect.stringContaining("Mail could not be read")]);
   world.inbox.offline = false;
@@ -341,7 +444,7 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   // spec/app/inbox/index.md, "Mail is read only while signed in, for a selected account whose grant allows reading, and not once Google refused it as withdrawn"
   world.inbox.google = { email: "owner@gmail.test", connection: "grant-2", capabilities: ["google.basic_identity"] };
   await alpha.back();
-  await press("Inbox");
+  await openInboxFromHome(alpha);
   await until(alpha, runtime, List, (s) => s.accounts.status === "Loaded" && s.connected.length === 1);
   await drawn(() => [...document.querySelectorAll("button")].find((one) => one.textContent?.includes("owner@gmail.test"))?.click());
   await until(alpha, runtime, List, (s) => s.selected.account !== 0);
@@ -350,13 +453,13 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   // spec/app/platform/index.md, "A mail or calendar request the phone holds back for want of its mail lease reads as the cloud's own refusal of the device key there, never as a sign-out"; spec/app/inbox/index.md, "A check the phone holds back for want of the mail lease keeps the session and everything kept, and asks for one more sign-in": on a phone signed in before mail leases existed, opening Inbox, twice, keeps the draft, the accounts and the owner's session, and asks to sign in.
   const draft = { ...nothing, subject: "Kept through the lease" };
   await alpha.runtime.runPromise(Letters.use((letters) => Effect.andThen(Effect.sync(() => letters.set(9, draft)), letters.keep(9))));
-  const generation = () => alpha.runtime.runPromise(Mail.use((mail) => Effect.sync(() => mail.generation())));
+  const generation = () => alpha.runtime.runPromise(Effect.map(Mail, (mail) => mail.generation()));
   const kept = await generation();
   const before = await runtime.runPromise(List.use((list) => list.get()));
   world.mailLease.held = false;
   for (const opening of [1, 2]) {
     await alpha.back();
-    await press("Inbox");
+    await openInboxFromHome(alpha);
     await until(alpha, runtime, List, (s) => s.failure === "LeaseNeeded" && s.accounts.status === "Failed" && s.accounts.ticket >= before.accounts.ticket + opening);
   }
   const after = await runtime.runPromise(List.use((list) => list.get()));
@@ -385,13 +488,13 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   // spec/app/inbox/index.md, "A check the phone holds back for want of the mail lease keeps the session and everything kept, and asks for one more sign-in": with mail on screen, the list keeps its saved rows and asks to Reconnect above them.
   world.inbox.google = { email: "owner@gmail.test", connection: "grant-2", capabilities: ["google.basic_identity", "google.gmail.triage", "google.gmail.send", "google.gmail.manage"] };
   await hardware("home");
-  await tile("Inbox");
+  await openInboxFromHome(alpha);
   await until(alpha, runtime, List, (s) => s.list.status === "Loaded" && s.pages >= 1);
   const shown = rows();
   expect(shown.length).toBeGreaterThan(0);
   world.mailLease.held = false;
   await hardware("home");
-  await tile("Inbox");
+  await openInboxFromHome(alpha);
   await until(alpha, runtime, List, (s) => s.failure === "LeaseNeeded");
   expect([rows(), Boolean(button("Reconnect Gmail")), told().includes("Connect Eliza Cloud")]).toEqual([shown, true, false]);
 
@@ -416,7 +519,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   original.attachmentData = { "1": bytes };
   const { alpha, close } = await openInbox(world);
   const runtime = inbox.runtime(alpha);
-  await tile("Inbox");
+  await openInboxFromHome(alpha);
   await until(alpha, runtime, List, (s) => s.list.status === "Loaded" && s.pages === 1);
 
   // spec/app/inbox/drafts.md, "A new message, a reply, a reply to all or a forward begins as [one draft](./letter.md) says; a reply to a message with no usable address is refused and the owner told"
@@ -426,7 +529,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await until(alpha, runtime, Writing, (s) => s.open && s.letter.kind === "Reply" && s.letter.recipients === 1);
 
   // spec/app/inbox/drafts.md, "Every change to the text, recipients or attachments is an edit, counted at once"; spec/app/inbox/drafts.md, "Edits are written to the phone once typing pauses, and no later than the longest wait after a burst began, one write at a time under its own ticket"
-  await write("Message", "Thanks, it is all in order.");
+  await fill("Message", "Thanks, it is all in order.");
   await later(alpha, 10);
   await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded" && s.letter.revision >= 2);
 
@@ -438,7 +541,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await until(alpha, runtime, Offering, (s) => s.used === 1 && s.text === 0);
   await later(alpha, 10);
   await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded");
-  expect((document.querySelector("textarea[aria-label=Message]") as HTMLTextAreaElement | null)?.value).toBe("Thanks, it is all in order.\n\nSee you on Friday.");
+  expect(document.querySelector<HTMLTextAreaElement>("textarea[aria-label=Message]")?.value).toBe("Thanks, it is all in order.\n\nSee you on Friday.");
 
   // spec/app/inbox/sending.md, "Story: Save my draft to Gmail, or delete it there, knowingly"
   await menu("Save to Gmail", "Draft actions");
@@ -546,7 +649,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await press("Compose");
   await until(alpha, runtime, Writing, (s) => s.open);
   await fill("To", "unfinished@");
-  await write("Message", "Keep these words.");
+  await fill("Message", "Keep these words.");
   await hardware("back");
   await until(alpha, runtime, Writing, (s) => !s.open && s.shelf.shelved.length === 1);
   await close();
@@ -571,8 +674,7 @@ it("shows the authorized first page of unread Inbox mail on Home", async () => {
   for (let id = 2; id <= 27; id++) world.inbox.mail.push(letter(id, `Read mail ${id}`, ["INBOX"], "", "Sender", Date.UTC(2026, 9, 31, 0, id)));
   const { alpha } = await open(world, only("home", "view:Inbox"));
   const inboxState = inbox.runtime(alpha);
-  await homeIsReady(alpha);
-  await tile("Inbox");
+  await openInboxFromHome(alpha);
   await until(alpha, inboxState, List, (state) => state.list.status === "Loaded" && state.pages === 1);
   expect(document.querySelectorAll("h1")).toHaveLength(1);
   await press("Back to apps");

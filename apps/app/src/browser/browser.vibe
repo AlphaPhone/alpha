@@ -16,6 +16,11 @@ import type { Install } from "../runtime/attempts.vibe"
 import { type Job, Whole, answer, contained, due, reacting, run, started, stream, together, untimed, whole } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 
+/** Whether Browser is on the shell's active view. */
+export effect function browserInFront(): boolean!!Shell {
+  return showing(try (try Shell).get(), "Browser")
+}
+
 module page {
   import { addressFacts, isSecureWebAddress } from "@elizaos/os-bridges"
   import type { Input } from "../../gen/app__browser__address.ts"

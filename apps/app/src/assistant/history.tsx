@@ -123,20 +123,20 @@ export function useHistorySheets(
   free: { replying: boolean; holding: boolean },
   beginSearch: (() => void) | undefined,
   returnFocus: () => void,
+  returnSearchFocus: () => void,
 ) {
-  const [words, setWords] = useState("");
   const shown = chats.state;
   const finding = search.state;
+  const openSearch = finding?.open === true;
+  const [typed, setTyped] = useState({ open: openSearch, words: "" });
+  if (typed.open !== openSearch) setTyped({ open: openSearch, words: "" });
   const start = { type: "start", ...free } as const;
   const listing = layers.state !== undefined && top(layers.state).id === historyLayer;
   const closeHistory = () => { if (layers.can(hideHistory)) void layers.send(hideHistory); };
   const browse = layers.can(showHistory) ? () => {
     void layers.send(showHistory).then(({ _tag }) => { if (_tag === "Success") void chats.send({ type: "browse" }); });
   } : undefined;
-  const searchHistory = beginSearch !== undefined && search.can({ type: "openSearch" }) ? () => {
-    setWords("");
-    beginSearch();
-  } : undefined;
+  const searchHistory = beginSearch !== undefined && search.can({ type: "openSearch" }) ? beginSearch : undefined;
   const sheets = shown && finding ? (
     <>
       <AssistantChatHistorySheet
@@ -161,16 +161,16 @@ export function useHistorySheets(
       />
       <AssistantSearchSheet
         open={finding.open}
-        onReturnFocus={returnFocus}
+        onReturnFocus={returnSearchFocus}
         onOpenChange={(open) => { if (!open && search.can({ type: "closeSearch" })) void search.send({ type: "closeSearch" }); }}
         search={{
-          words,
+          words: typed.open === openSearch ? typed.words : "",
           hits: seen.hits.slice(0, finding.shown).map((hit, at) => ({ id: String(at + 1), chat: seen.titles.get(hit.conversation) ?? "Ask Alpha", snippet: hit.text })),
           status: finding.hits.status === "Idle" ? "idle" : finding.hits.status === "Loading" ? "loading" : finding.hits.status === "Failed" ? "failed" : "loaded",
           blocked: free.replying || free.holding,
-          onWordsChange: (typed) => {
-            setWords(typed);
-            const find = { type: "find", words: typed.trim() } as const;
+          onWordsChange: (words) => {
+            setTyped({ open: openSearch, words });
+            const find = { type: "find", words: words.trim() } as const;
             if (search.can(find)) void search.send(find);
           },
           onMore: search.can({ type: "more" }) ? () => void search.send({ type: "more" }) : undefined,
