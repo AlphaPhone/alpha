@@ -21,10 +21,12 @@ this writes.
 ### The editor holds the form and the event it edits, the form's draft and recovery banner, the one write in flight, and what is in doubt
 
 A form is for a new event or for an existing one, on screen or kept aside.
-Its day is a civil date, never an offset from today. Its draft counts the
+Its day is a civil date, never an offset from today, so a form opened
+before midnight keeps its date after it. Its draft counts the
 owner's edits and the event revision they build on; it is kept on the phone,
 in the slot of the owner signed in (0 is no owner), unless the phone failed
-to keep it. Whether the form has a title is known. One write to the phone's
+to keep it, or the owner's slot holds a draft the phone can no longer read.
+Whether the form has a title is known. One write to the phone's
 calendar is in flight at a time. A create whose outcome is unknown, and the
 events whose change is unknown, are remembered across a restart. A
 discard or a replace waits for the owner to confirm it.
@@ -45,7 +47,7 @@ type Editor = {
   allDay: bool, start: int, end: int, repeats: bool, scope: Scope, extras: bool,
   draft: D::Draft, kept: bool, banner: Banner, confirming: Confirm,
   write: A::Attempt, kind: Write, writing: int, filed: bool,
-  unknownCreate: bool, separate: bool, receipts: R::Read, latched: Set[int],
+  unknownCreate: bool, separate: bool, receipts: R::Read, latched: Set[int], unreadable: bool,
 }
 
 type Effect =
@@ -54,6 +56,7 @@ type Effect =
   | HandOff({ id: int, day: int })
   | CheckReceipts({ ticket: int })
   | KeepDraft
+  | ResetSlot
 
 type Composed = { state: Editor, out: List[Effect] }
 
@@ -62,7 +65,7 @@ pure val initial: Editor = {
   allDay: false, start: 0, end: 1, repeats: false, scope: Unchosen, extras: false,
   draft: D::blank, kept: false, banner: NoBanner, confirming: NoConfirm,
   write: A::plan(0), kind: Create, writing: 0, filed: false,
-  unknownCreate: false, separate: false, receipts: R::unread, latched: Set(),
+  unknownCreate: false, separate: false, receipts: R::unread, latched: Set(), unreadable: false,
 }
 
 pure val idValues = Set(1, 2)
@@ -121,7 +124,7 @@ pure def canEditReminder(s: Editor, id: int, revision: int): bool =
   canEditEvent(s, id, revision) and revision > 0
 
 pure def editReminder(s: Editor, id: int, revision: int, day: int): Editor =
-  { ...editEvent(s, id, revision, day, false), form: EditReminder, kept: true,
+  { ...editEvent(s, id, revision, day, false), form: EditReminder, kept: not(s.unreadable),
     draft: { ...D::edit(D::blank), base: revision } }
 ```
 
@@ -133,7 +136,7 @@ already open or kept, or the phone cannot keep it, the note or the scan
 stays as it was and says Calendar did not take it.
 
 ```quint
-pure def canFromNote(s: Editor): bool = s.form == NoForm
+pure def canFromNote(s: Editor): bool = s.form == NoForm and not(s.unreadable)
 
 pure def fromNote(s: Editor, day: int): Composed = readingReceipts(s.receipts, { ...opened(day, s), titled: true, draft: D::edit(D::blank), kept: true })
 
@@ -143,14 +146,15 @@ pure def sometimesFilledFromANote(s: Editor): bool = s.form == NewEvent and s.dr
 ### Each edit is counted and kept on the phone at once, unless the phone failed to keep the draft
 
 Edits wait while a save is in flight and while the owner chooses between
-two drafts.
+two drafts. Over a slot the phone cannot read, edits are counted but never
+kept, so what the slot holds is not written over.
 
 ```quint
 pure def typable(s: Editor): bool =
   s.shown and s.draft.sync != D::Saving and not(D::canChoose(s.draft))
     and (s.banner == NoBanner or s.banner == Failed) and s.confirming == NoConfirm
 
-pure def typed(d: D::Draft, edited: Editor): Editor = { ...edited, draft: D::edit(d), kept: edited.banner != Failed }
+pure def typed(d: D::Draft, edited: Editor): Editor = { ...edited, draft: D::edit(d), kept: edited.banner != Failed and not(edited.unreadable) }
 
 pure def canEditTitle(s: Editor, blank: bool): bool = typable(s)
 
@@ -513,9 +517,9 @@ pure def eventRead(s: Editor, id: int, revision: int, whole: bool): Editor =
   else if (s.draft.sync == D::Kept) { ...released, revision: revision, draft: { ...s.draft, base: revision } }
   else { ...released, revision: revision, draft: D::collide(s.draft, revision) }
 
-pure def canEventMissing(s: Editor, id: int): bool = id > 0 and s.latched.contains(id)
+pure def canEventMissing(s: Editor, id: int, whole: bool): bool = id > 0 and s.latched.contains(id) and whole
 
-pure def eventMissing(s: Editor, id: int): Editor =
+pure def eventMissing(s: Editor, id: int, whole: bool): Editor =
   if (s.form == EditEvent and s.target == id and s.draft.sync == D::Saving) withoutForm(s.write, { ...s, latched: s.latched.exclude(Set(id)) })
   else { ...s, latched: s.latched.exclude(Set(id)) }
 ```
@@ -603,11 +607,11 @@ pure def canKeepFailed(s: Editor): bool = s.shown and s.banner == NoBanner and s
 
 pure def keepFailed(s: Editor): Editor = { ...s, banner: Failed, kept: false, confirming: NoConfirm }
 
-pure def canRetryKeeping(s: Editor): bool = s.banner == Failed
+pure def canRetryKeeping(s: Editor): bool = s.banner == Failed and not(s.unreadable)
 
 pure def retryKeeping(s: Editor): Composed = { state: s, out: List(KeepDraft) }
 
-pure def canDraftKept(s: Editor): bool = s.banner == Failed
+pure def canDraftKept(s: Editor): bool = s.banner == Failed and not(s.unreadable)
 
 pure def draftKept(s: Editor): Editor = { ...s, banner: NoBanner, kept: true }
 ```
@@ -676,6 +680,23 @@ pure def stepKeptEditsAreLostOnlyByChoice(before: Editor, via: str, after: Edito
     implies (via == "discard" or via == "handOff" or via == "written" or via == "receiptsChecked" or via == "eventMissing" or via == "ownerChanged")
 ```
 
+### Cancel, Back, a hidden page, a locked screen or leaving Calendar closes the form and its confirmations; the slot keeps the edits
+
+A form with edits kept on the phone is set aside, offered back by its
+banner; any other form is gone. A save in flight keeps its form until it
+ends.
+
+```quint
+pure def canLeave(s: Editor): bool = (s.shown and s.draft.sync != D::Saving) or s.confirming != NoConfirm
+
+pure def leave(s: Editor): Editor =
+  if (s.shown and s.draft.sync != D::Saving)
+    (if (D::unsaved(s.draft) and s.kept) { ...s, shown: false, banner: Available, confirming: NoConfirm } else withoutForm(s.write, s))
+  else { ...s, confirming: NoConfirm }
+
+pure def sometimesSetAsideOnLeaving(s: Editor): bool = s.banner == Available and s.form == EditEvent and s.write.id == 0
+```
+
 ### A draft can be offered back after a restart, fail to be kept, or meet another copy
 
 ```quint
@@ -684,6 +705,38 @@ pure def sometimesOfferedAfterRestart(s: Editor): bool = s.banner == Available a
 pure def sometimesKeepingFailed(s: Editor): bool = s.banner == Failed and D::unsaved(s.draft)
 
 pure def sometimesAnotherCopy(s: Editor): bool = s.banner == Conflict and s.form == EditEvent
+```
+
+## Story: Recover a draft the phone cannot read
+
+> As the owner, I want a draft Alpha cannot read kept as it is and
+> explained, and in development to reset only the copy I confirmed.
+
+### A slot the phone cannot read is kept and explained; only a development build resets it, and only as it was when the owner confirmed
+
+The shell says when the owner's slot holds a draft it cannot read. Nothing
+is kept over it: new forms open blank and say their edits are not kept.
+A production build only explains that the data is kept. A development
+build, with the test mocks on, offers to reset it: the slot is removed only
+while it still holds exactly what was read when the owner confirmed, and
+any write since leaves it.
+
+```quint
+pure def canSlotUnreadable(s: Editor): bool = s.form == NoForm and not(s.unreadable)
+
+pure def slotUnreadable(s: Editor): Editor = { ...s, unreadable: true }
+
+pure def canResetSlot(s: Editor, development: bool): bool = s.unreadable and development and s.form == NoForm
+
+pure def resetSlot(s: Editor, development: bool): Composed = { state: s, out: List(ResetSlot) }
+
+pure def canSlotReset(s: Editor, ok: bool): bool = s.unreadable
+
+pure def slotReset(s: Editor, ok: bool): Editor = { ...s, unreadable: not(ok) }
+
+pure def alwaysAnUnreadableSlotIsNeverWritten(s: Editor): bool = s.unreadable implies not(s.kept)
+
+pure def sometimesAFormOverAnUnreadableSlot(s: Editor): bool = s.unreadable and s.form == NewEvent and D::unsaved(s.draft)
 ```
 
 ## Story: Keep each account's draft with that account
@@ -700,7 +753,7 @@ first.
 ```quint
 pure def canOwnerChanged(s: Editor, owner: int): bool = owner != s.owner and owner >= 0 and not(inFlight(s))
 
-pure def ownerChanged(s: Editor, owner: int): Editor = { ...withoutForm(s.write, s), owner: owner }
+pure def ownerChanged(s: Editor, owner: int): Editor = { ...withoutForm(s.write, s), owner: owner, unreadable: false }
 ```
 
 ### A draft can be set aside when another owner signs in

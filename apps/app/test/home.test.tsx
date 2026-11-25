@@ -33,8 +33,8 @@ const pulled = (startY = 68, dx = 0) => drawn(() => {
   zone?.dispatchEvent(pointer("pointerdown", 100, startY));
   zone?.dispatchEvent(pointer("pointerup", 100 + dx, startY + 80));
 });
-const alphaApps = ["view:Inbox", "view:Telegram", "view:Slack", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Files", "view:Workflows", "view:Settings"];
-const homeOrder = ["view:Phone", "view:Messages", "view:Inbox", "view:Telegram", "view:Slack", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Contacts", "view:Files", "view:Workflows", "view:Settings"];
+const alphaApps = ["view:Inbox", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Files", "view:Workflows", "view:Settings"];
+const homeOrder = ["view:Phone", "view:Messages", "view:Inbox", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Contacts", "view:Files", "view:Workflows", "view:Settings"];
 const holdingHome = (world: Scene) => {
   world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true, holders: ["ai.alphacompute.alphaphone"] } : role);
   return world;
@@ -74,7 +74,7 @@ describe("Home on a phone", () => {
       waiting.tell("Slack", "1 mention");
       waiting.tell("Notes", "1 shared");
     });
-    expect([button("Inbox3 unread") !== undefined, button("Telegram2 unread") !== undefined, button("Slack1 mention") !== undefined, button("Notes") !== undefined]).toEqual([true, true, true, true]);
+    expect([button("Inbox3 unread") !== undefined, button("Notes") !== undefined]).toEqual([true, true]);
 
     // spec/app/home/index.md, "A long press on bare Home starts editing, only on the phone and once the tiles are read"
     await drawn(() => button("Notes")?.dispatchEvent(pointer("pointerdown", 80, 330)));
@@ -99,27 +99,33 @@ describe("Home on a phone", () => {
     await until(alpha, homes, Home.Machine, (h) => h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 2);
     expect(tiles().at(-1)).toBe("view:Notes");
     // spec/app/home/index.md, "Add to Home adds one of Alpha's own apps it lists"
-    await press("Wallet");
+    for (const [step, label] of [["Clock", 3], ["Reminders", 4], ["Wallet", 5], ["Telegram", 6]] as const) {
+      await press(step);
+      await until(alpha, homes, Home.Machine, (h) => h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === label);
+    }
+    await press("Slack");
     // spec/app/home/index.md, "Add to Home closes once there is nothing left to add"
-    await until(alpha, homes, Home.Machine, (h) => !h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 3);
-    expect(tiles().slice(-2)).toEqual(["view:Notes", "view:Wallet"]);
+    await until(alpha, homes, Home.Machine, (h) => !h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 7);
+    const added = ["view:Notes", "view:Clock", "view:Reminders", "view:Wallet", "view:Telegram", "view:Slack"];
+    expect(tiles().slice(-added.length)).toEqual(added);
 
     // spec/app/home/index.md, "Back closes one layer of Home's own: Add to Home, then editing; Done ends editing"
     await hardware("back");
     await until(alpha, homes, Home.Machine, (h) => !h.editing);
     expect(Boolean(button("Done"))).toBe(false);
+    expect([button("Telegram2 unread") !== undefined, button("Slack1 mention") !== undefined]).toEqual([true, true]);
 
     // spec/app/home/index.md, "A restart forgets everything but its numbers, which keep rising, so nothing asked before it can answer after it": the tiles come back as they were saved.
     await first.close();
     const second = await open(world, only("home"));
     await until(second.alpha, home.runtime(second.alpha), Home.Machine, (h) => h.tiles.load.status === "Loaded" && h.tiles.load.ticket === 2);
-    expect(tiles().slice(-2)).toEqual(["view:Notes", "view:Wallet"]);
+    expect(tiles().slice(-added.length)).toEqual(added);
 
     // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it": the same saved tiles on an Alpha image that grants contacts show Phone, Messages and Contacts in Home order too.
     await second.close();
     const third = await open({ ...world, image: true }, only("home"));
     await until(third.alpha, home.runtime(third.alpha), Home.Machine, (h) => h.tiles.load.status === "Loaded" && h.tiles.load.ticket === 3);
-    expect(tiles()).toEqual([...homeOrder.filter((tile) => tile !== "view:Notes"), "view:Notes", "view:Wallet"]);
+    expect(tiles()).toEqual([...homeOrder.filter((tile) => tile !== "view:Notes"), ...added]);
 
     // spec/app/home/tiles.md, "What was saved comes back as it was saved, an empty Home included; with no record Home shows its defaults"
     await third.close();
@@ -471,8 +477,8 @@ describe("Home on a phone", () => {
     expect([browser.reads, browser.acknowledgements]).toEqual([0, []]);
   });
 
-  // spec/app/home/index.md, "Story: See the apps on this phone"; spec/app/home/index.md, "Story: Open an app"
-  it("Keep saved installed apps on Home up to date and open them (spec/app/home/index.md, \"Story: See the apps on this phone\"; spec/app/home/index.md, \"Story: Open an app\")", async () => {
+  // spec/app/home/apps.md, "Story: Know what is installed"; spec/app/home/index.md, "Story: See the apps on this phone"; spec/app/home/index.md, "Story: Open an app"
+  it("Keep saved installed apps on Home up to date and open them (spec/app/home/apps.md, \"Story: Know what is installed\"; spec/app/home/index.md, \"Story: See the apps on this phone\"; spec/app/home/index.md, \"Story: Open an app\")", async () => {
     const world = { ...scene(), phone: true };
     localStorage.setItem(savedKey, written([{ tag: "Own", view: "Notes" }, { tag: "Installed", app: "org.fixture.clock/org.fixture.clock.Main" }]));
     const { alpha } = await open(world);
@@ -504,6 +510,17 @@ describe("Home on a phone", () => {
     world.launcher.changed();
     await until(alpha, homes, Home.Machine, (h) => h.installed.apps.includes("org.fixture.clock/org.fixture.clock.Main"));
     expect(tiles().at(-1)).toBe("app:org.fixture.clock/org.fixture.clock.Main");
+
+    // spec/app/home/apps.md, "A change seen while Alpha shows is read at once, unless a reading is on its way; seen while Alpha is away, it waits"; spec/app/home/apps.md, "When Alpha comes back to the front, a change that waited is read once"
+    const asked = (await homes.runPromise(Home.Machine.use((h) => h.get()))).installed.read.ticket;
+    await seen(false);
+    world.launcher.apps = world.launcher.apps.slice(1);
+    world.launcher.changed();
+    await until(alpha, homes, Home.Machine, (h) => h.installed.pending);
+    expect((await homes.runPromise(Home.Machine.use((h) => h.get()))).installed.read.ticket).toBe(asked);
+    await seen(true);
+    await until(alpha, homes, Home.Machine, (h) => !h.installed.pending && h.installed.read.status === "Loaded" && !h.installed.apps.includes("org.fixture.clock/org.fixture.clock.Main"));
+    expect((await homes.runPromise(Home.Machine.use((h) => h.get()))).installed.read.ticket).toBe(asked + 1);
   });
 
   // spec/app/home/index.md, "Story: Pull down for notifications"

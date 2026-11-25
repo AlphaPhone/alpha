@@ -283,7 +283,8 @@ pure def sometimesARestartForgetsTheReads(c: Cards): bool =
 ### The agenda draws on both calendars and the reminders saved on the phone, leaving out a calendar Calendar hides and a reminder already done
 
 The reminders come from the area that keeps them, and which calendars are
-hidden from Calendar's display settings. Every item names where it was
+hidden from Calendar's display settings: 0 hides the agent's calendar,
+any other number one of the phone's. Every item names where it was
 read.
 
 ```quint
@@ -298,7 +299,10 @@ type Others = {
   messages: List[Row], phone: List[Row], flows: Flows, brief: Outcome,
 }
 
-pure def onCard(i: Item, o: Others): bool = not(i.done) and not(i.origin == PhoneCalendar and o.hidden.contains(i.calendar))
+pure def hiddenItem(i: Item, o: Others): bool =
+  (i.origin == PhoneCalendar and o.hidden.contains(i.calendar)) or (i.origin == AgentCalendar and o.hidden.contains(0))
+
+pure def onCard(i: Item, o: Others): bool = not(i.done) and not(hiddenItem(i, o))
 
 pure def candidates(c: Cards, o: Others): List[Item] =
   c.calendar.items.concat(c.agent.items).concat(o.reminders.select(r => r.origin == Reminder)).select(i => onCard(i, o))
@@ -372,7 +376,7 @@ pure def lawTheFollowingItemIsNotOverdue(items: List[Item], now: int): bool =
 
 ```quint
 pure def lawTheCardShowsOnlyWhatMayBeOnIt(cards: Cards, now: int, others: Others): bool =
-  lead(candidates(cards, others), now).every(i => not(i.done) and not(i.origin == PhoneCalendar and others.hidden.contains(i.calendar)))
+  lead(candidates(cards, others), now).every(i => not(i.done) and not(hiddenItem(i, others)))
 ```
 
 ### The agenda card shows its item current, marks it not up to date, or is not drawn

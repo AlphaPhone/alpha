@@ -453,7 +453,7 @@ pure def sometimesATileWaitsForItsApp(h: Home): bool =
 
 ### Add to Home adds one of Alpha's own apps it lists
 
-Wallet is available through Add to Home and is kept when saved on Home.
+Clock, Reminders, Wallet, Telegram and Slack are available through Add to Home and are kept when saved on Home.
 
 ```quint
 pure def holdsView(tiles: List[T::Tile], view: S::View): bool = tiles.some(t => T::shows(t, view))

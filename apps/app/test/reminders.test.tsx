@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 // spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"; spec/app/reminders/index.md, "Story: Create, update, flag, move, complete and delete reminders with Undo"; spec/app/reminders/alerts.md, "Story: Alert on due reminders and act from the banner"; spec/app/reminders/recurrence.md, "Story: Repeat reminders cleanly across months and leap years"
+import type { AndroidReminderCancelInput, AndroidReminderTarget } from "@elizaos/os-bridges";
 import type { ReminderItemRecord, ReminderListRecord, RemindersSnapshot } from "@repo/launcher-records";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { Effect, Layer } from "effect";
@@ -16,7 +17,8 @@ import home from "../src/home/index.tsx";
 import { agentAt } from "../src/platform/agent.vibe";
 import { cloudAt } from "../src/platform/cloud.vibe";
 import { pagePlatform } from "../src/platform/platform.vibe";
-import { type NativeRemindersPort, setNativeRemindersPort } from "../src/reminders/alerts.vibe";
+import { PhoneReminders, RemindersUnread } from "../src/platform/reminders.vibe";
+import { type NativeRemindersPort, setNativeRemindersPort, syncAlertsWithSnapshot } from "../src/reminders/alerts.vibe";
 import alertOverlayArea from "../src/reminders/alertOverlay.tsx";
 import remindersArea from "../src/reminders/index.tsx";
 import { advanceDueDate, civilDateAt, dueInstantMs, formatCivilDate, formatRelativeDue } from "../src/reminders/recurrence.ts";
@@ -472,5 +474,91 @@ describe("Reminders full journeys", () => {
     const secondRuntime = remindersArea.runtime(second.alpha);
     await until(second.alpha, secondRuntime, RemindersMachine.Machine, (s) => s.sync.status === "Loaded");
     expect(remindersStore.snapshot().snapshot.items.some((i) => i.title === "Pack passport")).toBe(true);
+  });
+
+  // spec/app/reminders/alerts.md, "Story: Alert on due reminders and act from the banner"
+  it("cancels native reminder alarms using the live alarm target from phone.list() and SHA-256 bindingHash", async () => {
+    const today = formatCivilDate(civilDateAt(baseNow));
+    const cancelled: AndroidReminderCancelInput[] = [];
+    const liveTarget: AndroidReminderTarget = {
+      sourceId: "reminders-store",
+      sourceRevision: "7",
+      reminderId: "rem-native-cancel",
+      occurrenceId: "rem-native-cancel:occ-42",
+      revision: "3",
+    };
+    const item: ReminderItemRecord = {
+      id: "rem-native-cancel",
+      listId: DEFAULT_LIST_ID,
+      title: "Take medicine",
+      notes: "With water",
+      dueDate: today,
+      dueMinute: 18 * 60,
+      alertMinutes: 0,
+      recurrence: "none",
+      priority: "none",
+      flagged: false,
+      subtasks: [],
+      completed: true,
+      completedAtMs: baseNow,
+      snoozedUntilMs: null,
+      notifiedAtMs: null,
+      agentTaskId: null,
+      revision: 4,
+      createdAtMs: baseNow - 60_000,
+      updatedAtMs: baseNow,
+    };
+    const { runtime } = await launchReminders(baseNow, [item]);
+    const unused = () => Effect.fail(new RemindersUnread({ cause: "unused" }));
+    const fakePhone = {
+      present: true,
+      schedule: unused,
+      cancel: (input: AndroidReminderCancelInput) => Effect.sync(() => {
+        cancelled.push(input);
+        return { id: input.id, cancelled: true };
+      }),
+      list: () => Effect.succeed({
+        notificationsEnabled: true,
+        reminders: [{
+          id: item.id,
+          title: item.title,
+          body: item.notes,
+          occurrenceId: liveTarget.occurrenceId,
+          target: liveTarget,
+          createdAt: baseNow - 60_000,
+          at: baseNow + 60_000,
+          dueAt: baseNow + 60_000,
+          alertMinutes: 0,
+          status: "scheduled" as const,
+          mode: "inexact" as const,
+          history: [],
+        }],
+      }),
+      operate: unused,
+      pendingTap: unused,
+      consumeTap: unused,
+    };
+    const snapshot: RemindersSnapshot = { ...defaultSnapshot(baseNow), items: [item] };
+    await runtime.runPromise(Effect.provideService(syncAlertsWithSnapshot(snapshot, baseNow), PhoneReminders, fakePhone));
+
+    const expectedOp = { type: "reminder_cancel", target: liveTarget };
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(expectedOp)));
+    const expectedHash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+
+    expect(cancelled).toEqual([{
+      id: item.id,
+      target: liveTarget,
+      operationId: `cancel-${item.id}-${item.revision}`,
+      bindingHash: expectedHash,
+    }]);
+
+    // When phone.list() has no matching live alarm, cancel is not called.
+    cancelled.length = 0;
+    await runtime.runPromise(Effect.provideService(
+      syncAlertsWithSnapshot(snapshot, baseNow),
+      PhoneReminders,
+      { ...fakePhone, list: () => Effect.succeed({ notificationsEnabled: true, reminders: [] }) },
+    ));
+    expect(cancelled).toEqual([]);
   });
 });

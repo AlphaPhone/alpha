@@ -143,11 +143,13 @@ const account = started(effect {
     state.owner === 0 ? Effect.void : contained(flatMap(accountRead(), (event) => link.send(event)), "reading what Google allows"))
 }, "reading the Google account for the link")
 
+// spec/app/calendar/link.md, "Setup starts only from a write grant, for the owner signed in; a read-only grant goes on to consent for more access, and a missing one sends nothing"
 /** Read what Google allows now and start the link setup. */
 export effect function setUp(): void!!(Cloud | Link.Machine) {
   const link = try Link.Machine
   try contained(link.send(try accountRead()), "reading what Google allows")
   try contained(link.send({ type: "start" }), "starting Google Calendar link setup")
 }
+
 /** The link: in memory, a run at a time, its answers refused once another owner signs in. */
 export const linking = together(reacting(Link, { carry }), calendar, account)
