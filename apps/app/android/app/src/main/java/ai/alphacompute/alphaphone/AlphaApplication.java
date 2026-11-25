@@ -1,4 +1,4 @@
-// spec/agent/index.md, "Story: Run Alpha's agent on the phone"
+// spec/agent/index.md, "Story: Run Alpha's agent on the phone"; spec/app/platform/adoption.md, "Background work the earlier Alpha queued never runs: at every start the phone cancels each job queued for the work manager the earlier Alpha shipped, and only those"
 package ai.alphacompute.alphaphone;
 
 import ai.eliza.os.agent.AgentService;
@@ -17,9 +17,10 @@ public final class AlphaApplication extends Application {
 
  @Override public void onCreate() {
   super.onCreate();
+  boolean main = getPackageName().equals(getProcessName());
+  if (!android.os.Process.isIsolated() && main) AlphaEarlier.retireWork(this);
   AlphaAgentCredentials credentials = new AlphaAgentCredentials(this);
   AgentService.useCredentials(credentials);
-  boolean main = getPackageName().equals(getProcessName());
   CredentialReader reader = credentials.reader();
   HostedDigestDelivery digests = main ? HostedDigestDelivery.start(this, reader) : null;
   InboxNoticeDelivery inbox = main ? InboxNoticeDelivery.get(this) : null;

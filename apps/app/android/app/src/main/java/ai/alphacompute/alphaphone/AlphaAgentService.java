@@ -1,4 +1,4 @@
-// spec/agent/index.md, "Story: Run Alpha's agent on the phone"; spec/app/settings/preferences.md, "The agent is launched allowed to change Gmail and Calendar exactly as the phone last read or saved, allowed neither once it could not read them, and Alpha says nothing of it before the first answer"
+// spec/agent/index.md, "Story: Run Alpha's agent on the phone"; spec/app/settings/preferences.md, "The agent is launched allowed to change Gmail and Calendar exactly as the phone last read or saved, allowed neither once it could not read them, and Alpha says nothing of it before the first answer"; spec/app/platform/adoption.md, "Story: Keep what the earlier on-device agent stored"
 package ai.alphacompute.alphaphone;
 
 import ai.eliza.os.agent.AgentConfig;
@@ -8,6 +8,7 @@ import ai.eliza.voice.LocalInferenceHost;
 import ai.eliza.voice.VoiceAssets;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.util.Log;
 import java.io.File;
 import java.io.IOException;
 import java.util.Map;
@@ -28,6 +29,7 @@ public final class AlphaAgentService extends AgentService {
   private record SpeechHost(String name, InferenceHost host) {}
 
   @Override protected void configureLaunch(Map<String, String> variables) {
+    moveLegacyStateAside();
     synchronized (speechLock) {
       if (retiring) return;
       if (speech != null) {
@@ -53,6 +55,15 @@ public final class AlphaAgentService extends AgentService {
       }
     }
     started.host().stop();
+  }
+
+  private void moveLegacyStateAside() {
+    try {
+      for (LegacyAgentState.Outcome outcome : LegacyAgentState.moveAside(getFilesDir().toPath()))
+        if (outcome.move != LegacyAgentState.Move.NOTHING_TO_MOVE) Log.i("AlphaLegacyAgent", outcome.toString());
+    } catch (RuntimeException unexpected) {
+      Log.w("AlphaLegacyAgent", "legacy state left in place: " + unexpected.getClass().getSimpleName());
+    }
   }
 
   static boolean localSpeechHostReady() {

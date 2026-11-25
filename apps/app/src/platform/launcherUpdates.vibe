@@ -10,7 +10,7 @@ module held {
     snapshot(): Promise<{ appVersionCode?: number; appSigner?: string; appAutomaticUpdates?: "starting" | "permission-required" | "supported" | "unsupported" }>
     checkForUpdate(): Promise<{ manifest?: string; manifestSha256?: string }>
     installUpdate(options: { apkUrl: string; sha256: string; sizeBytes: number; versionCode: number; automatic?: boolean; manifestSha256?: string }): Promise<{ status?: "offer-unavailable" | "offer-withdrawn" | "offer-response-changed" | "starting" | "permission-required" | "unsupported" }>
-    updateState(): Promise<{ pending?: boolean; phase?: "preparing" | "paused"; activationId?: string; bridgeId?: string; canContinue?: boolean; automatic?: boolean; outcome?: string; resumeEligible?: boolean; idle?: boolean }>
+    updateState(): Promise<{ pending?: boolean; phase?: "preparing" | "paused"; activationId?: string; bridgeId?: string; canContinue?: boolean; automatic?: boolean; outcome?: string; resume?: boolean; idle?: boolean }>
     activateUpdate(options: { activationId: string; bridgeId: string; ready: boolean; resumeEligible?: boolean }): Promise<void>
     continueUpdate(options: { activationId: string; bridgeId: string }): Promise<void>
     openUpdatePermissionSettings(): Promise<{ status: "opened" | "unsupported" }>
@@ -62,7 +62,10 @@ export interface Ids {
   readonly bridgeId: string
 }
 
-/** Android's activation of a staged update as it stands: pending, preparing or paused, or settled with its outcome. */
+/**
+ * Android's activation of a staged update as it stands: pending, preparing or paused, or settled with its outcome,
+ * whether this bridge may reconnect after it, and whether the updater is idle, with nothing pending or paused.
+ */
 export interface Activation {
   readonly pending: boolean
   readonly paused: boolean
@@ -70,6 +73,7 @@ export interface Activation {
   readonly canContinue: boolean
   readonly outcome: Option.Option<string>
   readonly resume: boolean
+  readonly idle: boolean
   readonly ids: Option.Option<Ids>
 }
 
@@ -94,7 +98,7 @@ const permissions = { starting: "Starting", "permission-required": "Required", s
 const endings = { "offer-unavailable": "Deferred", "offer-withdrawn": "OfferWithdrawn", "offer-response-changed": "OfferChanged", starting: "WhileStarting", "permission-required": "WithoutPermission", unsupported: "WithoutSupport" } as const
 
 /** Nothing pending and nothing settled: what a phone or a browser without Alpha's updater has. */
-const nothing: Activation = { pending: false, paused: false, automatic: false, canContinue: false, outcome: Option.none(), resume: false, ids: Option.none() }
+const nothing: Activation = { pending: false, paused: false, automatic: false, canContinue: false, outcome: Option.none(), resume: false, idle: true, ids: Option.none() }
 
 /** Alpha's own updater, the `AlphaDevice` plugin, as this build's host registers it. */
 const updater = "AlphaDevice"
@@ -122,7 +126,7 @@ export const phoneLauncherUpdates = Layer.succeed(LauncherUpdates, {
     const ids = state.activationId !== undefined && state.bridgeId !== undefined ? Option.some({ activationId: state.activationId, bridgeId: state.bridgeId }) : Option.none<Ids>()
     return {
       pending: state.pending === true, paused: state.phase === "paused", automatic: state.automatic === true, canContinue: state.canContinue === true,
-      outcome: Option.fromNullishOr(state.outcome), resume: state.resumeEligible === true, ids,
+      outcome: Option.fromNullishOr(state.outcome), resume: state.resume === true, idle: state.idle === true, ids,
     }
   },
   answer: (ids: Ids, ready: boolean) => asked("activateUpdate", () => plugin().activateUpdate({ ...ids, ready, ...(ready ? { resumeEligible: true } : {}) })),

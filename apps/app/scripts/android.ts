@@ -7,11 +7,11 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { generateAndroidHost, parseApkSignerDigest, stageRuntimePayload } from "@elizaos/os";
+import { apkReleaseBlockers, generateAndroidHost, parseApkSignerDigest, stageRuntimePayload } from "@elizaos/os";
 import { packPrepared, prepared } from "@repo/eliza-harness";
 import { Effect, Layer } from "effect";
 import { FetchHttpClient } from "effect/http";
-import { androidPaths, identity, production, signInCallbackPath } from "../capacitor.config.ts";
+import { androidPaths, identity, production, signInCallbackPath, updateManifestUrl } from "../capacitor.config.ts";
 import { localOcrAssets } from "./ocr-assets.ts";
 
 export const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -95,6 +95,9 @@ export function inputProblems(env: NodeJS.ProcessEnv = environment()): Problem[]
     problems.push({ input: "Local speech toolchain", problem: "the pinned NDK or CMake is missing", fix: "sdkmanager 'ndk;28.2.13676358' 'cmake;3.22.1'" });
   if (env.ELIZA_INFERENCE_ENGINE_DIR && !existsSync(join(env.ELIZA_INFERENCE_ENGINE_DIR, "tools/omnivoice/CMakeLists.txt")))
     problems.push({ input: "Local speech engine", problem: "the supplied engine checkout does not exist", fix: "Unset ELIZA_INFERENCE_ENGINE_DIR or point it at the engine in .eliza/packages/os/android/local-inference/engine.lock.json" });
+  const python = env.ALPHA_VOICE_PYTHON ?? "python3";
+  if (!voiceBuilt() && spawnSync(python, ["-c", `import ${VOICE_CONVERTERS.join(", ")}`], { stdio: "ignore" }).status !== 0)
+    problems.push({ input: "Local speech converters", problem: `${python} cannot import ${VOICE_CONVERTERS.join(", ")}`, fix: "Set ALPHA_VOICE_PYTHON to a Python that has them (gguf from the engine checkout's gguf-py)" });
   const set = signingNames.filter((name) => (env[name] ?? "").trim() !== "");
   if (set.length > 0 && set.length < signingNames.length) problems.push({ input: "release signing", problem: `only ${set.join(", ")} are set`, fix: `Set all of ${signingNames.join(", ")} or none` });
   return problems;
@@ -110,6 +113,15 @@ function refuseOn(problems: readonly Problem[]) {
 function voiceDirectory() {
   return join(android, ".cache", "voice", prepared().commit);
 }
+
+const VOICE_CONVERTERS = ["torch", "numpy", "gguf", "zstandard", "librosa", "onnx"];
+const voiceBuilt = () => {
+  try {
+    return existsSync(join(voiceDirectory(), "build-record.json"));
+  } catch {
+    return false;
+  }
+};
 
 function voiceRecord(directory: string) {
   const at = prepared();
@@ -141,6 +153,7 @@ function stageVoice(env: NodeJS.ProcessEnv) {
   if (!existsSync(join(directory, "build-record.json"))) {
     run(process.execPath, [
       join(module, "scripts/build-native.ts"), "--workspace", join(android, ".cache", "voice-work", expectedEngine), "--out", directory,
+      "--python", env.ALPHA_VOICE_PYTHON ?? "python3",
     ], { env: { ...env, ELIZA_INFERENCE_ENGINE_DIR: engine } });
   }
   voiceRecord(directory);
@@ -166,6 +179,14 @@ function workflowWorker() {
   return { dir, executable };
 }
 
+const STAMP = "android/app/src/main/assets/agent/alpha-source.json";
+
+/** The source the staged runtime was built from: the eliza pin, the lock's bytes and this script's bytes. */
+export function sourceStamp() {
+  const lock = readFileSync(join(root, "eliza.lock.json"));
+  return { schema: 1, base: String(record(JSON.parse(lock.toString("utf8"))).commit), lockSha256: sha256(lock), scriptSha256: sha256(readFileSync(fileURLToPath(import.meta.url))) };
+}
+
 /** The staged runtime payload: libeliza_node.so per ABI, agent.mjs, its manifest and inventory, for the bundle the pack built. */
 export async function stageRuntime(): Promise<string> {
   const bundle = packBundle();
@@ -186,6 +207,7 @@ export async function stageRuntime(): Promise<string> {
     }
   }
   if (existsSync(runtimes)) for (const other of readdirSync(runtimes)) if (other !== digest) rmSync(join(runtimes, other), { recursive: true, force: true });
+  writeJson(join(output, STAMP), sourceStamp());
   const data = join(android, "agent");
   mkdirSync(data, { recursive: true });
   for (const file of ["host.json", "character.json", "policy.json"]) copyFileSync(join(packHost(), file), join(data, file));
@@ -248,10 +270,15 @@ export function hostProfile() {
   const profile = record(readJson(join(android, "host.json")));
   const placeholders = record(profile.manifestPlaceholders);
   const fields = Array.isArray(profile.buildConfigFields) ? profile.buildConfigFields : [];
+  const computed = [
+    { name: "CLOUD_API_ORIGIN", type: "String", value: production.cloud },
+    { name: "CLOUD_APP_LINK_HOST", type: "String", value: production.appLinkHost },
+    { name: "ALPHA_UPDATE_MANIFEST_URL", type: "String", value: updateManifestUrl },
+  ];
   return {
     ...profile,
-    manifestPlaceholders: { ...placeholders, appLinkHost: production.appLinkHost, signInCallbackPath },
-    buildConfigFields: [...fields, { name: "CLOUD_API_ORIGIN", type: "String", value: production.cloud }, { name: "CLOUD_APP_LINK_HOST", type: "String", value: production.appLinkHost }],
+    manifestPlaceholders: { ...placeholders, appLinkHost: production.appLinkHost, signInCallbackPath, alphaUpdateChannel: "public", alphaUpdateManifestSha256: `sha256:${sha256(updateManifestUrl)}` },
+    buildConfigFields: [...fields.filter((field) => !computed.some((own) => own.name === record(field).name)), ...computed],
   };
 }
 
@@ -288,6 +315,8 @@ export async function build(release: boolean) {
   buildPack();
   const runtime = await stageRuntime();
   buildWeb();
+  const notices = ["--packaged-runtime", packBundle(), "--into", join(app, androidPaths.web)];
+  run(process.execPath, [join(app, "scripts/licences.ts"), ...notices], { env });
   const findings = auditBundle(join(app, androidPaths.web));
   if (findings.length > 0) throw new Error(`The production bundle audit failed:\n${findings.join("\n")}`);
   const host = await generateHost(runtime);
@@ -311,7 +340,7 @@ export async function build(release: boolean) {
     mappings: release,
     signing: { environment: signingNames },
     gradleArguments: ["-PelizaSpeechBridgeCapacitor=true"],
-    prepare: [{ command: join(app, "node_modules/.bin/cap"), args: ["copy", "android"] }],
+    prepare: [{ command: process.execPath, args: [join(app, "scripts/capacitor-cli.ts"), "copy", "android"] }],
     record: {
       name: "build-config.json",
       metadata: {
@@ -325,7 +354,7 @@ export async function build(release: boolean) {
   if (!release) for (const name of [`${variant}-release.apk`, `${variant}-release-unsigned.apk`, `mapping/${variant}-release-mapping.txt`]) rmSync(join(artifacts, name), { force: true });
   mkdirSync(join(artifacts, "sbom"), { recursive: true });
   rmSync(join(artifacts, "sbom/alpha.cdx.json"), { force: true });
-  run(process.execPath, [join(app, "scripts/licences.ts"), "--sbom", join(artifacts, "sbom/alpha.cdx.json")], { env });
+  run(process.execPath, [join(app, "scripts/licences.ts"), ...notices, "--sbom", join(artifacts, "sbom/alpha.cdx.json")], { env });
 }
 
 function buildTool(name: string, env: NodeJS.ProcessEnv): string {
@@ -335,6 +364,7 @@ function buildTool(name: string, env: NodeJS.ProcessEnv): string {
 }
 
 const INFERENCE_ENTRY = /\.(gguf|onnx|ort|tflite|safetensors|pte|task)$|(^|\/)lib[^/]*(llama|ggml|mtmd|onnxruntime|sherpa|whisper|piper|executorch|elizainference|omnivoice)[^/]*\.so|(^|\/)llama(-omnivoice)?-server$|^assets\/([^/]+\/)*models?\//i;
+const NODE_NOTICE = "Node.js runtime (libeliza_node.so)";
 const REQUIRED_CLASSES = [
   ...["AlphaDevicePlugin", "AlphaCloudSpeechPlugin", "AlphaLocalSpeechPlugin", "AlphaBrowserPlugin", "AlphaCarrierSetupPlugin", "AlphaCallStatePlugin",
     "AlphaOngoingCallPlugin", "AlphaAgentService", "AlphaCalendarPlugin", "AlphaTelephonyPlugin", "AlphaContactsPlugin", "AlphaResetPlugin", "AlphaActionJournalPlugin",
@@ -355,6 +385,7 @@ interface Row {
   readonly sha256: string;
   readonly bytes: number;
   readonly signed: boolean;
+  readonly signer: string | null;
   readonly signerSha256: string | null;
   readonly debuggable: boolean;
   readonly versionCode: number;
@@ -364,6 +395,9 @@ interface Row {
   readonly bundleAudit: "passed";
   readonly runtime: "PACKAGED";
   readonly runtimeNotices: boolean;
+  readonly runtimeProfile: "native" | "cloud";
+  readonly voiceHost: { readonly packaged: boolean; readonly differences: readonly string[]; readonly qualified: boolean };
+  readonly licenceBlockers: readonly string[];
   readonly distributable: boolean;
   readonly blockers: readonly string[];
 }
@@ -437,8 +471,11 @@ export function checkApk(file: string, mode: "debug" | "release", env: NodeJS.Pr
     if (!entries.includes(path)) throw new Error(`${name} lacks its inventoried ${path}`);
     if (sha256(read(path)) !== row.sha256) throw new Error(`${name}'s ${path} differs from its inventory`);
   }
-  const runtimeNotices = recordedRuntimeNotices({ entries, listed, packagedAbis: wantedAbis });
+  const binaryNotices = recordedRuntimeNotices({ entries, listed, packagedAbis: wantedAbis });
   for (const data of ["host.json", "character.json", "policy.json"]) if (!entries.includes(`assets/agent/${data}`)) throw new Error(`${name} carries no agent ${data}`);
+  const stamp = record(JSON.parse(read("assets/agent/alpha-source.json").toString("utf8")));
+  const pin = String(record(readJson(join(root, "eliza.lock.json"))).commit);
+  if (stamp.base !== pin) throw new Error(`${name}'s runtime was built from eliza ${String(stamp.base)}, not the pinned ${pin}`);
   const pluginManifest = "assets/capacitor.plugins.json";
   if (!entries.includes(pluginManifest)) throw new Error(`${name} lacks the Capacitor plugin discovery manifest`);
   const discovered: unknown = JSON.parse(read(pluginManifest).toString("utf8"));
@@ -457,15 +494,23 @@ export function checkApk(file: string, mode: "debug" | "release", env: NodeJS.Pr
   const classes = execFileSync(buildTool("dexdump", env), [file], { encoding: "utf8", maxBuffer: 1024 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] });
   const missing = REQUIRED_CLASSES.filter((descriptor) => !classes.includes(`Class descriptor  : '${descriptor}'`));
   if (missing.length > 0) throw new Error(`${name} lacks ${missing.join(", ")}`);
+  const notices = entries.includes("assets/public/licenses/third-party-notices.json") ? JSON.parse(read("assets/public/licenses/third-party-notices.json").toString("utf8")) as unknown : [];
+  const noticeRows = Array.isArray(notices) ? notices.map(record) : [];
+  const pageNodeNotice = noticeRows.some((row) => row.name === NODE_NOTICE);
+  if (!pageNodeNotice) throw new Error(`${name}'s notices do not list the packaged Node runtime`);
+  const runtimeNotices = binaryNotices && pageNodeNotice;
+  const licenceBlockers = noticeRows.flatMap((row) => (Array.isArray(row.flags) ? row.flags : []).map((flag) => `${String(flag)}: ${String(row.name)}@${String(row.version).split("\n")[0]}`));
+  const voiceHost = { packaged: voiceFiles.size > 0, differences: [], qualified: false };
+  const runtimeProfile = voiceHost.packaged ? "native" as const : "cloud" as const;
   const signed = !name.endsWith("-unsigned.apk");
   const signerSha256 = signed ? parseApkSignerDigest(execFileSync(buildTool("apksigner", env), ["verify", "--print-certs", file], { encoding: "utf8" })) ?? null : null;
   if (signed && signerSha256 === null) throw new Error(`${name} has no single verifiable signer`);
-  const blockers = [...(mode === "debug" ? ["debug build"] : []), ...(signed ? [] : ["unsigned release"]),
-    ...(runtimeNotices ? [] : ["Node runtime notices missing or unverified"])];
-  return {
-    mode, variant, flavor: variant, file: name, name, sha256: sha256(bytes), bytes: bytes.byteLength, signed, signerSha256, debuggable, versionCode, versionName: packageLine[3] ?? "",
-    abis: abiList, testMocks: false, bundleAudit: "passed", runtime: "PACKAGED", runtimeNotices, distributable: blockers.length === 0, blockers,
+  const row = {
+    mode, variant, flavor: variant, file: name, name, sha256: sha256(bytes), bytes: bytes.byteLength, signed, signer: signerSha256, signerSha256, debuggable, versionCode, versionName: packageLine[3] ?? "",
+    abis: abiList, testMocks: false as const, bundleAudit: "passed" as const, runtime: "PACKAGED" as const, runtimeNotices, runtimeProfile, voiceHost, licenceBlockers,
   };
+  const blockers: string[] = mode === "debug" ? ["debug build"] : apkReleaseBlockers({ ...row, distributable: false });
+  return { ...row, distributable: mode === "release" && blockers.length === 0, blockers };
 }
 
 /** Checks both APKs in artifacts/ and writes artifacts/apk-manifest.json: one debug and one release row of the launcher. */
@@ -484,12 +529,13 @@ export function verify(env: NodeJS.ProcessEnv = environment()) {
     results,
   };
   writeJson(join(artifacts, "apk-manifest.json"), manifest);
-  for (const row of results) console.log(`${row.mode} ${row.file} versionCode ${row.versionCode} ${row.abis.join(",")} ${row.signed ? `signed ${row.signerSha256}` : "unsigned"}, page audit passed, runtime packaged, Node notices ${row.runtimeNotices ? "verified" : "unverified"}`);
+  for (const row of results) console.log(`${row.mode} ${row.file} versionCode ${row.versionCode} ${row.abis.join(",")} ${row.signed ? `signed ${row.signerSha256}` : "unsigned"}, page audit passed, runtime packaged, Node notices ${row.runtimeNotices ? "verified" : "unverified"}, speech ${row.runtimeProfile}, blockers: ${row.blockers.join(", ") || "none"}`);
   return manifest;
 }
 
 async function main(argv: readonly string[]) {
-  const [command, ...rest] = argv;
+  const [command, ...given] = argv;
+  const rest = given[0] === "--" ? given.slice(1) : given;
   switch (command) {
     case "inputs": {
       const problems = inputProblems();
@@ -538,7 +584,8 @@ if (import.meta.main) {
   try {
     process.exitCode = await main(process.argv.slice(2)) || process.exitCode;
   } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
+    const tagged = record(error);
+    console.error(typeof tagged._tag === "string" ? `${tagged._tag}: ${JSON.stringify(tagged)}` : error instanceof Error ? error.message : String(error));
     process.exitCode ||= 1;
   }
 }

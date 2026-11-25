@@ -9,7 +9,7 @@ import { Device } from "../platform/device.vibe"
 import { LauncherUpdates } from "../platform/launcherUpdates.vibe"
 import { type Job, answer, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import { type Engagement, Engagements, engagements } from "./activity.vibe"
+import { type Engagement, Engagements, engagements, notesReported } from "./activity.vibe"
 import { Names, names } from "./names.vibe"
 
 const hex64 = /^[0-9a-f]{64}$/
@@ -162,7 +162,7 @@ interface Facts {
   readonly reported: Engagement
 }
 
-/** The owner's activity: what an automatic update waits on. The phone reports no audio mode apart from a call. */
+/** The owner's activity: what an automatic update waits on. Audio counts as normal while no call is up; Alpha's updater reads Android's audio mode itself before it commits. */
 function activityOf({ shell, layers, call, front, typing, reported }: Facts): Activity {
   const held = layers.holds.some((id) => id !== holder)
   return Updates.withSignIn({
@@ -190,7 +190,7 @@ const activity = started(effect {
 /** The earliest time a check falls due or a put-off automatic update may be tried again, while Alpha is on screen and free. */
 function nextWake(state: Updates.Updates): Option.Option<number> {
   if (!state.visible || !Updates.free(state)) return Option.none()
-  const check = state.checked === "Never" ? 0 : state.checkedAt + (state.checked === "Missed" ? Updates.retry : Updates.interval)
+  const check = state.checked === "Never" ? 0 : state.checkedAt + (state.checked === "Missed" ? Updates.backoff(state.misses) : Updates.interval)
   return Option.some(state.deferrals > 0 && state.retryAt < check ? state.retryAt : check)
 }
 
@@ -213,4 +213,4 @@ const schedule = started(effect {
 }, "the update schedule")
 
 /** Alpha's launcher updates, from launch: checks and automatic updates run whether or not Settings was ever opened. */
-export const updating = together(names, engagements, machine, phone, shown, activity, schedule)
+export const updating = together(names, engagements, machine, phone, shown, activity, schedule, notesReported)
