@@ -5,6 +5,7 @@ import { type ReactNode, useSyncExternalStore } from "react";
 import * as Cards from "../../gen/app__home__cards.ts";
 import type { Machine } from "../../gen/app__home__cards.effect.vibe";
 import { useMachine } from "../../gen/app__home__cards.react.ts";
+import { dayStart } from "../calendar/time.ts";
 import { openCalls, openUnread } from "../phone/reports.vibe";
 import { shortWhen } from "../phone/words.ts";
 import type { Resident } from "../runtime/area.tsx";
@@ -43,7 +44,7 @@ function following(item: Cards.Item, now: number): HomeAgendaNext {
 /** Why the lead item may not be up to date: its calendar's last read failed, or it was read on an earlier day. */
 function readLineOf(state: Cards.Cards, item: Cards.Item, now: number): string {
   const feeds = item.origin === "PhoneCalendar" ? [state.calendar] : item.origin === "AgentCalendar" ? [state.agent] : [state.calendar, state.agent];
-  const behind = feeds.find((feed) => feed.source !== "Unanswered" && (feed.source !== "Ready" || feed.day < Cards.dayOf(now)));
+  const behind = feeds.find((feed) => feed.source !== "Unanswered" && (feed.source !== "Ready" || feed.day < state.today));
   if (behind === undefined) return "";
   return behind.source === "Ready" ? `Not updated since ${whenLabel(behind.since, now)}` : "Open Calendar to retry";
 }
@@ -58,7 +59,7 @@ export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Res
   const given = useSyncExternalStore(fromAreas.subscribe, fromAreas.snapshot, fromAreas.snapshot);
   if (!state) return [];
   const told = others(given, image);
-  const now = Math.max(state.calendar.since, state.agent.since, state.today * Cards.dayLength);
+  const now = Math.max(state.calendar.since, state.agent.since, dayStart(state.today));
   const latest = Math.max(now, runtime.runSync(Effect.flatMap(Time, (time) => time.latest())));
   const open = (kind: Cards.Kind) => ({
     disabled: !can({ type: "openCard", kind, now }),
