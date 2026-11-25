@@ -6,7 +6,7 @@ import type { Change, Effect as Out, Event, Sheet } from "../../gen/app__contact
 import { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { Telephony, TelephonyRefused, telephony } from "../platform/telephony.vibe"
+import { Telephony, TelephonyRefused, readAddressBook, telephony } from "../platform/telephony.vibe"
 import { type Job, answer, applying, following, reacting, run, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { Dialer, grantOf, prefilled } from "../phone/phone.vibe"
@@ -110,7 +110,7 @@ effect function listed(ticket: number, further: boolean): Event!!(Telephony | Ro
   const grant = grantOf(status?.permissions.contacts)
   if (grant !== "Granted") return { type: "listed", ticket, ok: status !== undefined, grant, count: 0, further: false, editable: false }
   const read = effect {
-    const book = try telephony("open", (c) => c.contacts.open())
+    const book = try readAddressBook("open contacts", (c) => c.open())
     const found = new Map((further ? held.rows : []).map((one) => [one.id, one] as const))
     let cursor = further ? held.next : undefined
     const seen = new Set<ContactCursor>()
@@ -118,7 +118,7 @@ effect function listed(ticket: number, further: boolean): Event!!(Telephony | Ro
     const minimum = found.size
     while (more && found.size === minimum) {
       const position = cursor
-      const page = try telephony("list", (c) => c.contacts.list({ query, limit: 50, kind: "ExplicitRead", ...(position === undefined ? {} : { cursor: position }) }))
+      const page = try readAddressBook("list contacts", (c) => c.list({ query, limit: 50, kind: "ExplicitRead", ...(position === undefined ? {} : { cursor: position }) }))
       for (const row of page.contacts) if (!("incomplete" in row) && (chip === "Everyone" || row.starred)) found.set(row.id, row)
       const next = page.next ?? undefined
       more = next !== undefined && !seen.has(next)
@@ -139,7 +139,7 @@ effect function read(ticket: number): Event!!(Telephony | Rows | Contacts.Machin
   const machine = try Contacts.Machine
   const contact = (try machine.get()).contact
   const blank: Sheet = { names: 0, phones: 0, emails: 0, notes: 0, notable: true }
-  const found = !isContactId(contact) ? undefined : telephony("get", (c) => c.contacts.get(contact, "ExplicitRead")) catch () => undefined
+  const found = !isContactId(contact) ? undefined : readAddressBook("read contact", (c) => c.get(contact, "ExplicitRead")) catch () => undefined
   const seen = found === undefined ? blank : sheetOf(found)
   if (Contacts.canContactRead(try machine.get(), ticket, seen)) try store.set({ card: found, reach: "" })
   return { type: "contactRead", ticket, ok: found !== undefined, seen }
