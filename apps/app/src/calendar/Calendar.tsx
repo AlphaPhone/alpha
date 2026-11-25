@@ -281,7 +281,7 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
   const searching = s.overlay === "Search";
   const listing = searching || s.layout === "Agenda";
   const agendaFrom = dayStart(s.today);
-  const agendaUntil = dayStart(monthStart(s.anchor, 2));
+  const listWindow = { begin: readWindow(s.anchor).begin, end: dayStart(monthStart(s.anchor, 2)) };
   const largeAgenda = canvas?.agenda ?? false;
   const month = s.overlay === "MonthDialog" || s.overlay === "LayoutMenu";
   const anchorDate = dateOf(s.anchor);
@@ -342,7 +342,8 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
       <Undo runtime={runtime} />
       </div>
       <div data-alpha-subview="calendar-list" inert={pageCovered} className="relative flex min-h-0 flex-1 flex-col">
-        {searching ? <Searching key={searchRound} runtime={runtime} reminders={reminders} query={query} onQuery={setQuery} open={openFound} /> : null}
+        {searching ? <Searching key={searchRound} runtime={runtime} rows={schedule} today={s.today} query={query} onQuery={setQuery} open={openFound}
+          range={listWindow} disconnected={disconnected} /> : null}
         <Access runtime={runtime} />
         {dayReminders > 0 && s.owner === 0 && !shown.present() && view.can({ type: "openAccountSettings" }) ? (
           <button type="button" aria-label="Open Calendar settings" onClick={send({ type: "openAccountSettings" })}
@@ -418,8 +419,8 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
           </>
         )}
         {s.layout === "Agenda" && !searching ? (
-          <CalendarList aria-label="Schedule" range={`Through ${monthDayYear.format(agendaUntil - 1)}`}>
-            <Days rows={schedule.filter((row) => row.end > agendaFrom && row.begin < agendaUntil)} today={s.today} from={agendaFrom} open={openRow}
+          <CalendarList aria-label="Schedule" range={`Through ${monthDayYear.format(listWindow.end - 1)}`}>
+            <Days rows={schedule.filter((row) => row.end > agendaFrom && row.begin < listWindow.end)} today={s.today} from={agendaFrom} open={openRow}
               empty={disconnected ? "Not connected" : "No upcoming events"} />
           </CalendarList>
         ) : null}
@@ -670,21 +671,26 @@ function Undo({ runtime }: CalendarProps) {
 
 // spec/app/calendar/index.md, "Search and the Calendars sheet open over the days, never over an open event"
 /** Search over the days: a field under the header, and the events read whose title, place or notes hold every word typed. */
-function Searching({ runtime, reminders, query, onQuery, open }: CalendarProps & { reminders: ReadonlyArray<DatedReminder>; query: string; onQuery: (query: string) => void; open: (row: CalendarRow) => (() => void) | undefined }) {
+function Searching({ runtime, rows, today, query, onQuery, open, range, disconnected }: CalendarProps & {
+  rows: ReadonlyArray<CalendarRow>;
+  today: number;
+  query: string;
+  onQuery: (query: string) => void;
+  open: (row: CalendarRow) => (() => void) | undefined;
+  range: ReturnType<typeof readWindow>;
+  disconnected: boolean;
+}) {
   const view = useView(runtime);
-  const s = view.state;
-  if (!s) return null;
   const typed = query.toLocaleLowerCase().split(/\s+/).filter((word) => word !== "");
-  const range = readWindow(s.anchor);
-  const found = [...shown.visible(s.hidden, allows(s.access), s.connected), ...reminders.filter((row) => row.begin >= range.begin && row.begin < range.end)]
+  const found = rows
+    .filter((row) => row.end > range.begin && row.begin < range.end)
     .filter((row) => typed.every((word) => ("record" in row ? `${row.title} ${row.record.notes}` : `${row.title} ${row.place} ${row.notes}`).toLocaleLowerCase().includes(word)));
-  const read = s.phone.status === "Loaded" || s.google.status === "Loaded";
   return (
     <>
       <CalendarSearchBar aria-label="Search events" placeholder="Search events" autoFocus value={query} onChange={(event) => onQuery(event.target.value)}
         onClose={() => void view.send({ type: "closeOverlay" })} />
-      <CalendarList aria-label="Search results" range={read ? `Searching ${monthDayYear.format(range.begin)} – ${monthDayYear.format(range.end - 1)}` : undefined}>
-        <Days rows={found} today={s.today} from={range.begin} open={open} empty={typed.length > 0 ? "No matching events" : "No events"} />
+      <CalendarList aria-label="Search results" range={`Searching ${monthDayYear.format(range.begin)} – ${monthDayYear.format(range.end - 1)}`}>
+        <Days rows={found} today={today} from={range.begin} open={open} empty={disconnected ? "Not connected" : typed.length > 0 ? "No matching events" : "No events"} />
       </CalendarList>
     </>
   );

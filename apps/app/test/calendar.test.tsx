@@ -140,6 +140,21 @@ describe("Calendar without a connected account", () => {
     expect(schedule?.textContent).not.toContain("No upcoming events");
   });
 
+  it("Shows the covered window and disconnection while searching standalone Calendar (spec/app/calendar/index.md, \"Search and the Calendars sheet open over the days, never over an open event\")", async () => {
+    const world = { ...morning(false), signedIn: false };
+    world.inbox.google = undefined;
+    const { alpha, runtime } = await onCalendar(world);
+    await until(alpha, runtime, View, (state) => state.front && state.owner === 0 && !state.connected);
+    await press("Search events");
+    await until(alpha, runtime, View, (state) => state.overlay === "Search");
+    const results = document.querySelector('[aria-label="Search results"][role="region"]');
+    expect(results?.textContent).toContain("Searching Oct 1, 2026 – Dec 31, 2026");
+    expect(results?.textContent).toContain("Not connected");
+    await fill("Search events", "Dentist");
+    expect(results?.textContent).toContain("Not connected");
+    expect(results?.textContent).not.toContain("No matching events");
+  });
+
   it("Shows and completes the exact dated reminder in Calendar (spec/app/calendar/index.md, \"Story: See reminders among my events\")", async () => {
     const world = { ...morning(false), signedIn: false };
     const { alpha } = await open(world, only("view:Calendar"));
