@@ -146,7 +146,7 @@ describe("Settings", () => {
     await press("General");
     await press("Display");
     // spec/app/settings/preferences.md, "A choice shows at once and is kept on the phone, one at a time, with ten seconds to be kept"
-    await tap("Light");
+    await press("Light");
     await until(first.alpha, first.alpha.runtime, Prefs.Machine, (s) => s.kept === "Light" && s.keeping.read.status === "Loaded");
     // spec/app/settings/preferences.md, "Legible text is turned on or off by the owner and kept with the appearance, the same way"
     await tap("Legible text");
@@ -194,7 +194,7 @@ describe("Settings", () => {
   it("Read the licences (spec/app/settings/licences.md, \"Story: Read the licences\")", async () => {
     const { alpha, machines } = await settingsOpen();
     await press("About");
-    await press("Licences");
+    await press("Licenses");
     await until(alpha, machines, Licences.Machine, (s) => s.load.read.status === "Loaded" && s.found === 3);
     // spec/app/settings/licences.md, "Searching narrows the loaded list to the licences that match, from its top, and an empty search shows them all"
     await fill("Search licences", "mpl");
@@ -206,7 +206,7 @@ describe("Settings", () => {
     await until(alpha, machines, Licences.Machine, (s) => s.licence < 0 && s.query === "mpl");
     // spec/app/settings/licences.md, "Opening the page clears the search, and loads the licences unless they are loading or loaded with some found"
     await hardware("back");
-    await press("Licences");
+    await press("Licenses");
     await until(alpha, machines, Licences.Machine, (s) => s.query === "" && s.shown === 3);
     expect(shipped).toHaveBeenCalledTimes(1);
   });
