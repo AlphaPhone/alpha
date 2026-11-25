@@ -380,7 +380,7 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | VoiceBridge | Vo
       }
       return { type: "transcribed", ticket, failure: "NoFailure" } as Voice.Event
     }, { type: "transcribed", ticket, failure: "Recognition" });
-    when { tag: "Abandon", let recording }: run("abandon", effect { try (try VoiceBridge).abandon(recording) });
+    when { tag: "Abandon", let recording }: run(`abandon ${recording}`, effect { try (try VoiceBridge).abandon(recording) });
     when { tag: "Fill", let field, let filling }: run(`fill ${filling}`, effect {
       const { memory } = try VoiceWords
       const target = memory.fillComposer

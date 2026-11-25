@@ -523,7 +523,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     events: makeNativeEvents(eventSubscribers, () => nativeCapture),
     effect startRecording(ticket: number): RecordedClip!VoiceBridgeFailed {
       if (!registered(LOCAL_PLUGIN)) throw new VoiceBridgeFailed({ method: "startRecording", cause: "no-voice-plugin" })
-      return try recordingLock.withPermits(1)(effect {
+      return try recordingLock.withPermits(1)(Effect.uninterruptible(effect {
         if (ticket <= retiredRecording) throw new VoiceBridgeFailed({ method: "startRecording", cause: "recording-retired" })
         const started = try tryPromise({
           try: () => localPlugin().startRecording({}),
@@ -536,11 +536,11 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
         const clip: DictationClip = { recordingId: started.recordingId, started: ticket, stopped: false }
         recording = clip
         return clip
-      })
+      }))
     },
     effect transcribe(ticket: number, _network: boolean): string!VoiceBridgeFailed {
       if (!registered(LOCAL_PLUGIN)) throw new VoiceBridgeFailed({ method: "transcribeLocalRecording", cause: "no-voice-plugin" })
-      const clip = try recordingLock.withPermits(1)(effect {
+      const clip = try recordingLock.withPermits(1)(Effect.uninterruptible(effect {
         const current = recording
         if (current === undefined || current.started > ticket || ticket <= retiredRecording) {
           throw new VoiceBridgeFailed({ method: "stopRecording", cause: "no-recording" })
@@ -556,7 +556,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
           current.stopped = true
         }
         return current
-      })
+      }))
       if (ticket <= retiredRecording || recording !== clip) throw new VoiceBridgeFailed({ method: "transcribeLocalRecording", cause: "recording-retired" })
       const result = try tryPromise({
         try: () => localPlugin().transcribeLocalRecording({ requestId: fresh(), recordingId: clip.recordingId }),
@@ -567,12 +567,12 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     effect abandon(ticket: number): void!! {
       retiredRecording = Math.max(retiredRecording, ticket)
       if (!registered(LOCAL_PLUGIN)) return
-      try recordingLock.withPermits(1)(effect {
+      try recordingLock.withPermits(1)(Effect.uninterruptible(effect {
         const clip = recording
         if (clip === undefined || clip.started > ticket) return
         recording = undefined
         try ignore(tryPromise(() => localPlugin().cancelRecording({})))
-      })
+      }))
     },
   }
 })
