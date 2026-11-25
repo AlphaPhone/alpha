@@ -13,7 +13,7 @@ it("Keeps a contact's actions above Ask Alpha (spec/app/contacts/index.md, \"Sto
   await page.viewport(390, 600);
   const world = { ...scene(), phone: true, image: true };
   await open(world, only("home", "assistant", "view:Contacts"));
-  await page.locator('[data-home-tile="view:Contacts"]').click();
+  await page.getByRole("button", { name: "Contacts", exact: true }).click();
   await page.getByRole("button", { name: "Maya Chen", exact: true }).click();
   await expect.element(page.getByRole("heading", { name: "Maya Chen", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Open Alpha", exact: true }).click();

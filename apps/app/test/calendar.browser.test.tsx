@@ -41,7 +41,7 @@ it("Shows the selected day across a wide canvas and at large text (spec/app/cale
   expect(columns()[1]?.querySelector('button[aria-label^="Current source,"]')).not.toBeNull();
   await expect.element(page.getByRole("button", { name: "All-day source, All day" })).toBeVisible();
   const dates = columns().map((column) => column.getAttribute("aria-label"));
-  await page.locator("[data-alpha-calendar-day]").nth(2).getByRole("button", { name: /^Overnight source,/ }).click();
+  await page.getByRole("group", { name: dates[2] ?? undefined, exact: true }).getByRole("button", { name: /^Overnight source,/ }).click();
   await expect.element(page.getByRole("heading", { name: "Overnight source", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Back to calendar" }).click();
   await until(alpha, view, View, (state) => state.open === 0);

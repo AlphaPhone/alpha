@@ -5,7 +5,7 @@ import { useCallback, useRef, useState, useSyncExternalStore, type PointerEvent 
 import type { Camera as Visit, Event, Mode, Said } from "../../gen/app__camera.ts";
 import { chosenLens, ready, recording } from "../../gen/app__camera.ts";
 import { useMachine } from "../../gen/app__camera.react.ts";
-import { remaining, showsTimeLeft, timer, type Clock } from "../../gen/app__camera__recording.ts";
+import { remaining, showsTimeLeft, timer, type Clock as RecordingTime } from "../../gen/app__camera__recording.ts";
 import { allows } from "../../gen/kit__permission.ts";
 import { CameraPort, type CameraMedia, type LensFacts, type Point } from "../platform/camera.vibe";
 import type { Resident, Shown } from "../runtime/area.tsx";
@@ -24,7 +24,7 @@ type Fire = (event: Event) => void;
 const stops = [[5, ".5"], [10, "1"], [20, "2"], [50, "5"], [100, "10"]] as const;
 const notices = { Quiet: "", NotTaken: "Photo not taken", NothingRecorded: "Nothing recorded", NotSaved: "Save unconfirmed" } satisfies Record<Said, string>;
 
-const clock = ({ minutes, seconds }: Clock) => `${minutes}:${seconds.toString().padStart(2, "0")}`;
+const clock = ({ minutes, seconds }: RecordingTime) => `${minutes}:${seconds.toString().padStart(2, "0")}`;
 
 function Viewfinder({ state, native, zoom, focusAt, bind }: {
   state: Visit;

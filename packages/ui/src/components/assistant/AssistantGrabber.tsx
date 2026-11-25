@@ -7,7 +7,7 @@ type Press = { now: number };
 /** Where a released drag ended, which way it went, whether it was a flick, and when. */
 export type AssistantRelease = { direction: "up" | "down"; flick: boolean; y: number; now: number };
 
-export type AssistantGrabberProps = Omit<ComponentProps<"button">, "children" | "disabled" | "onClick" | "onPointerDown" | "onPointerMove" | "onPointerUp" | "onPointerCancel" | "onLostPointerCapture"> & {
+export type AssistantGrabberProps = Omit<ComponentProps<"button">, "children" | "disabled" | "onClick" | "onDrag" | "onPointerDown" | "onPointerMove" | "onPointerUp" | "onPointerCancel" | "onLostPointerCapture"> & {
   /** The resting dock opens by its mark. The sheet uses a resize handle. */
   variant?: "mark" | "handle";
   /** A finger came down on the handle; `now` is the event's time in milliseconds. */
