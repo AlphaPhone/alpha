@@ -53,7 +53,7 @@ export function StopwatchTab({ runtime }: StopwatchTabProps) {
       <div className="grid grid-cols-2 gap-3">
         {state.status === "Paused" ? (
           <Button variant="secondary" disabled={!sw.can(resetEvent)} onClick={() => void sw.send(resetEvent)}>
-            <Undo2 aria-hidden className="size-4" />
+            <Undo2 aria-hidden className="size-4.5" />
             Reset
           </Button>
         ) : (
@@ -64,19 +64,19 @@ export function StopwatchTab({ runtime }: StopwatchTabProps) {
 
         {state.status === "Reset" && (
           <Button disabled={!sw.can(startEvent)} onClick={() => void sw.send(startEvent)}>
-            <Play aria-hidden className="size-4" />
+            <Play aria-hidden className="size-4.5" />
             Start
           </Button>
         )}
         {state.status === "Running" && (
           <Button variant="destructive" disabled={!sw.can(pauseEvent)} onClick={() => void sw.send(pauseEvent)}>
-            <Pause aria-hidden className="size-4" />
+            <Pause aria-hidden className="size-4.5" />
             Pause
           </Button>
         )}
         {state.status === "Paused" && (
           <Button disabled={!sw.can(resumeEvent)} onClick={() => void sw.send(resumeEvent)}>
-            <Play aria-hidden className="size-4" />
+            <Play aria-hidden className="size-4.5" />
             Resume
           </Button>
         )}

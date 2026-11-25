@@ -47,7 +47,7 @@ export function AlarmsTab({ runtime }: AlarmsTabProps) {
           )}
         </div>
         <Button size="sm" aria-label="Add alarm" disabled={!view.can({ type: "openSheet", sheet: { tag: "NewAlarm" } })} onClick={openNew}>
-          <Plus aria-hidden className="size-4" />
+          <Plus aria-hidden className="size-4.5" />
           Add alarm
         </Button>
       </div>
@@ -115,7 +115,7 @@ export function AlarmsTab({ runtime }: AlarmsTabProps) {
                       aria-label={`Delete alarm ${timeLabel}`}
                       onClick={() => void runtime.runPromise(deleteAlarmWithUndo(item.id))}
                     >
-                      <Trash2 aria-hidden className="size-4" />
+                      <Trash2 aria-hidden className="size-4.5" />
                     </Button>
                     <Switch
                       aria-label={`Toggle alarm ${timeLabel}`}

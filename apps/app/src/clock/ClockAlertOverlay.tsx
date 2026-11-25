@@ -56,7 +56,7 @@ export function ClockAlertOverlay({ runtime }: ClockAlertOverlayProps) {
             </div>
             {canMute && (
               <Button variant="ghost" size="icon" aria-label="Mute alarm sound" onClick={() => void view.send({ type: "muteAlert" })}>
-                <VolumeX aria-hidden className="size-4" />
+                <VolumeX aria-hidden className="size-4.5" />
               </Button>
             )}
           </div>
@@ -93,7 +93,7 @@ export function ClockAlertOverlay({ runtime }: ClockAlertOverlayProps) {
           </div>
           {canMute && (
             <Button variant="ghost" size="icon" aria-label="Mute timer sound" onClick={() => void view.send({ type: "muteAlert" })}>
-              <VolumeX aria-hidden className="size-4" />
+              <VolumeX aria-hidden className="size-4.5" />
             </Button>
           )}
         </div>

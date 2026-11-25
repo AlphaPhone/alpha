@@ -58,7 +58,7 @@ export function WorldClockTab({ runtime }: WorldClockTabProps) {
           disabled={!view.can({ type: "openSheet", sheet: { tag: "AddCity" } })}
           onClick={() => void view.send({ type: "openSheet", sheet: { tag: "AddCity" } })}
         >
-          <Plus aria-hidden className="size-4" />
+          <Plus aria-hidden className="size-4.5" />
           Add city
         </Button>
       </div>
