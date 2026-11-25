@@ -66,8 +66,11 @@ async function ask(running: Awaited<ReturnType<typeof askingOnBrowser>>, text: s
   return world.ask.metadata?.[0] as { observation?: { view?: string }; browserPage?: { url?: string; text?: string; tabId?: string } } | undefined;
 }
 
-const go = (text: string) => drawn(async () => {
-  await press(button("Search or type address") ? "Search or type address" : /^Edit address/);
+const go = (text: string, kind: "normal" | "private" = "normal") => drawn(async () => {
+  if (kind === "private") {
+    await press("Menu");
+    await pressOnTop("New private tab");
+  } else await press(button("Search or type address") ? "Search or type address" : /^Edit address/);
   await fill("Address", text);
   const form = document.querySelector<HTMLFormElement>("form[role=search]");
   if (!form) throw new Error("no address field");
@@ -259,7 +262,7 @@ describe("The Browser on a phone", () => {
     expect(runtime.runSync(Effect.flatMap(Site, (m) => m.get())).clear).toBe(0);
   });
 
-  it("Reads the selected page aloud through the phone's opaque approval (spec/app/browser/reading.md, \"Story: Hear the page read aloud\")", async () => {
+  it.each(["normal", "private"] as const)("Reads the selected page aloud through the phone's opaque approval (spec/app/browser/reading.md, \"Story: Hear the page read aloud\") on a %s tab", async (kind) => {
     const world = { ...scene(), phone: true, image: true };
     let reviewOwner: string | undefined;
     let reviewSession: string | undefined;
@@ -273,7 +276,7 @@ describe("The Browser on a phone", () => {
     const runtime = browser.runtime(alpha);
     await press("Browser");
     await until(alpha, runtime, Tabs, (state) => state.hydrated);
-    await go("https://example.test/article");
+    await go("https://example.test/article", kind);
     const tab = runtime.runSync(Tabs.use((tabs) => tabs.get())).selected;
     const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
     await until(alpha, page, Page, (state) => state.phase === "Shown" && state.secure);
@@ -288,6 +291,7 @@ describe("The Browser on a phone", () => {
     await drawn(() => vi.waitFor(() => expect(world.voice.spokenPages).toHaveLength(1)));
     await until(alpha, runtime, Reader, (state) => state.phase === "Idle");
     await until(alpha, speaking, Speaker, (state) => state.stage === "Silent" && !state.retiring);
+    if (kind === "private") expect(world.browser.saved.history).not.toContain("https://example.test/article");
     expect(world.voice.spoken).toEqual([]);
     expect(world.voice.spokenPages).toEqual([{ readingToken: "on-device-review", ownerId: reviewOwner, sessionId: reviewSession, requestId: expect.any(String) }]);
     expect(cancellations()).toBe(1);
@@ -309,7 +313,7 @@ describe("The Browser on a phone", () => {
     expect(cancellations()).toBe(2);
   });
 
-  it("Reviews and edits a Browser excerpt before putting it in the chat draft (spec/app/browser/reading.md, \"Story: Review an excerpt to ask about\")", async () => {
+  it.each(["normal", "private"] as const)("Reviews and edits a Browser excerpt before putting it in the chat draft (spec/app/browser/reading.md, \"Story: Review an excerpt to ask about\") on a %s tab", async (kind) => {
     const world = { ...scene(), phone: true, image: true };
     world.browser.pageTitle = (url) => url === "https://example.test/article" ? "Article 123456" : undefined;
     let release: ((text: string) => void) | undefined;
@@ -321,7 +325,7 @@ describe("The Browser on a phone", () => {
     const turn = await ask.runPromise(Effect.map(Conversation.use((m) => m.get()), (s) => s.turn.send.id));
     await press("Browser");
     await until(alpha, runtime, Tabs, (s) => s.hydrated);
-    await go("https://example.test/article");
+    await go("https://example.test/article", kind);
     const tab = runtime.runSync(Tabs.use((tabs) => tabs.get())).selected;
     const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
     await until(alpha, page, Page, (state) => state.phase === "Shown" && state.secure);

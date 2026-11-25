@@ -49,7 +49,7 @@ function eligible(address: string): boolean {
 
 effect function selected(tab: number): (Page | undefined)!!(Pages | TabHost) {
   const panel = try pageOf(tab)
-  if (panel.phase !== "Shown" || panel.kind !== "Normal") return undefined
+  if (panel.phase !== "Shown") return undefined
   const host = try TabHost
   const web = host.web
   const id = idOf(tab)

@@ -351,7 +351,7 @@ export function alphaBrowser(world: BrowserScene): Faked {
       readingSupport: () => Promise.resolve({ available: world.reviewReading !== undefined }),
       reviewQuestion: (page) => {
         const tab = stateOf(held(page));
-        if (world.shown?.id !== page.id || !tab.committed || tab.loading || tab.private || tab.url !== page.url || tab.navigation !== page.navigation) {
+        if (world.shown?.id !== page.id || !tab.committed || tab.loading || tab.url !== page.url || tab.navigation !== page.navigation) {
           return Promise.reject(rejection("The Browser page changed"));
         }
         return world.reviewQuestion?.(page) ?? Promise.reject(rejection("Reading unavailable"));

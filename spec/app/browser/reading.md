@@ -117,9 +117,11 @@ pure val ticketValues = Set(1, 2)
 ### An explicit reading starts from the current committed HTTPS page
 
 Where this phone's WebView cannot read a page privately, reading aloud says
-"Page reading unavailable". Ask Alpha starts only on a normal tab. On
-Android the phone asks the owner before releasing its excerpt to Alpha's
-editor. In a web browser the current HTTPS frame may provide its requested
+"Page reading unavailable". The owner can choose an explicit review on the
+normal or private tab in front. A private tab never supplies the automatic
+page context for an ordinary question. On Android the phone checks the
+selected document before releasing an excerpt to Alpha's editor. In a web
+browser the current HTTPS frame may provide its requested
 address for a public read without credentials. The frame still has no secure
 connection mark, and a blocked or stopped frame cannot start a read.
 
