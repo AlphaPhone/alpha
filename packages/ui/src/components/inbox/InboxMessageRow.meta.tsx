@@ -17,8 +17,7 @@ export const meta: ComponentMeta<InboxMessageRowProps> = {
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onOpen.mockClear();
-      const canvas = within(canvasElement);
-      await userEvent.click(canvas.getByRole("button", { name: /Lunch on Friday/ }));
+      await userEvent.click(within(canvasElement).getByRole("button", { name: /Lunch on Friday/ }));
       await expect(onOpen.mock.calls.length).toBe(1);
     },
     Selecting: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
