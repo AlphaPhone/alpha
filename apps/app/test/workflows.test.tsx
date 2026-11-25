@@ -88,8 +88,9 @@ describe("Workflows", () => {
     const area = workflows.runtime(alpha);
     await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
 
+    await press("Add to Workflows");
     const opener = button("Clock alarms");
-    expect(opener?.textContent).toBe("Alarms");
+    expect(opener?.textContent).toBe("Alarm");
     await press("Clock alarms");
     await until(alpha, area, Clock, (state) => state.open && state.history.status === "Loaded");
 
@@ -131,7 +132,7 @@ describe("Workflows", () => {
     for (const { id, displayName, ...timing } of existing) {
       await choose(displayName);
       await until(alpha, area, Automations, (state) => state.present && state.list.status === "Loaded");
-      await press("Edit");
+      await press("Edit prompt");
       await fill("Instructions", "Review the updated details.");
       await press("Review");
       await pressOnTop("Save changes");
@@ -147,7 +148,7 @@ describe("Workflows", () => {
 
     await choose("Delivery review");
     await until(alpha, area, Automations, (state) => state.present && state.list.status === "Loaded");
-    await press("Edit");
+    await press("Edit prompt");
     await press("Weekends");
     await press("Review");
     await pressOnTop("Save changes");
@@ -155,7 +156,7 @@ describe("Workflows", () => {
     expect(world.workflows.prompts.get("weekly-prompt")).toMatchObject({ cronExpression: "13 8 * * 0,6", revision: 3 });
 
     await until(alpha, area, Automations, (state) => state.present && state.list.status === "Loaded");
-    await press("Edit");
+    await press("Edit prompt");
     await fill("Instructions", "One more update.");
     await press("Review");
     const current = world.workflows.prompts.get("weekly-prompt");

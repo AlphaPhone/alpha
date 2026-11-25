@@ -186,7 +186,7 @@ export function App({ alpha }: AppProps) {
       onTouchEnd={touchEnded}
       onTouchCancel={() => { if (startedRef.current?.touch) startedRef.current = undefined; }}
       style={frameStyle}
-      className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground has-[[data-alpha-camera-native]]:bg-transparent sm:pointer-fine:max-w-103", side && "flex-row", preview && "absolute m-0 rounded-panel")}
+      className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground has-[[data-alpha-camera-native]]:bg-transparent has-[[data-alpha-call-strip=over]]:pt-[calc(env(safe-area-inset-top)_+_4rem)] sm:pointer-fine:max-w-103", side && "flex-row", preview && "absolute m-0 rounded-panel")}
     >
       <div
         data-alpha-shell-page=""

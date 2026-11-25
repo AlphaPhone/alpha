@@ -373,7 +373,12 @@ describe("in a browser", () => {
     await until(alpha, runtime, View, (s) => s.overlay === "Search");
     await fill("Search events", "dent");
     await tap("Dentist");
-    await until(alpha, runtime, View, (s) => s.anchor === world.today + 2 && s.overlay === "NoOverlay" && s.google.status === "Loaded");
+    await until(alpha, runtime, View, (s) => s.open !== 0 && s.overlay === "NoOverlay");
+    expect(document.querySelector("[data-alpha-subview=calendar-detail] h1")?.textContent).toBe("Dentist");
+    await press("Back to calendar");
+    await until(alpha, runtime, View, (s) => s.open === 0);
+    await press(dayButton(world.today + 2));
+    await until(alpha, runtime, View, (s) => s.anchor === world.today + 2 && s.google.status === "Loaded");
     expect(titles()).toEqual(["Dentist"]);
 
     // spec/app/calendar/index.md, "A switch of the Calendars sheet hides or shows one calendar"; spec/app/calendar/presentation.md, "A hidden calendar's rows show neither in Calendar nor on Home"

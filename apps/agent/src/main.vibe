@@ -8,7 +8,7 @@ import { pinnedCheckout, pinnedPack } from "@repo/eliza-harness"
 import {
   type Environment, type Manifest, bundledPlugins, calendarEdits, characterAdmitted, cloudModel, corePlugins, entryCarried, gmailChanges, googleAdmitted,
   hostedPlugins, inputAdmitted, localEmbeddings, nativeDigestAck, nativeDigestAckLimit, nativeDigestQueries, nativeDigestScope, nativeRoutes, nativeRoutesAdmitted, nativeSpeechRoutes, notesTrashDays, packAdmitted, packEntry, packedFor, packedPlugins, pageQueries, persistMemory, personalDetailSwap,
-  policyAdmitted, privacyAdmitted, productPluginName, proposalsAdmitted, refusedActions, routeListAdmitted, secretSwap, viewPlugins,
+  policyAdmitted, privacyAdmitted, productPluginName, proposalsAdmitted, refusedActions, routeListAdmitted, secretSwap, viewPlugins, walletSettings,
 } from "../gen/agent.effect.vibe"
 
 module node {
@@ -60,8 +60,10 @@ schema Host {
 
 /** The export each hosted package builds its module with, as `runAgentCli`'s `hostModules` takes it. */
 const localSpeechModule = "@elizaos/plugin-local-inference"
+const walletModuleName = "@elizaos/plugin-wallet"
 const hostedExports: Readonly<Record<string, string>> = {
   "@elizaos/plugin-notes": "notesModule",
+  [walletModuleName]: "walletModule",
   [localSpeechModule]: "localInferenceModule",
 }
 
@@ -114,6 +116,10 @@ export function entrySource(bundled: readonly string[], hosted: readonly { name:
     `  hostModules: new Map([${allHosted.map(({ name }, index) => {
       let factory = `host${index}`
       if (name === "@elizaos/plugin-notes") factory = `(context) => { context.runtime.setSetting("ELIZA_NOTES_TRASH_RETENTION_DAYS", ${JSON.stringify(notesTrashDays)}); return host${index}(context); }`
+      if (name === walletModuleName) {
+        const settings = JSON.stringify(walletSettings.map(({ setting, held }) => [setting, held]))
+        factory = `(context) => { for (const [setting, held] of ${settings}) context.runtime.setSetting(setting, held); return host${index}(context); }`
+      }
       if (name === localSpeechModule) {
         const named = JSON.stringify(localSpeechModule)
         factory = `(context) => { const engine = speechEngine(context); return engine === undefined

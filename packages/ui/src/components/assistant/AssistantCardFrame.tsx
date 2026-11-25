@@ -18,10 +18,12 @@ export type AssistantCardFrameProps = Omit<ComponentProps<"div">, "title"> & {
   onOpen?: () => void;
   /** Done with, or answered by a newer reply: the card is quiet and offers nothing. */
   settled?: boolean;
+  /** What ends a live card's head in place of its chevron. */
+  trailing?: ReactNode;
 };
 
 /** The surface every card of a reply shares: its head with the kind's mark on Alpha blue, what it holds and its controls, quiet once settled. */
-export function AssistantCardFrame({ icon, title, detail, children, actions, onOpen, settled = false, className, ...props }: AssistantCardFrameProps) {
+export function AssistantCardFrame({ icon, title, detail, children, actions, onOpen, settled = false, trailing, className, ...props }: AssistantCardFrameProps) {
   const head = (
     <>
       <span aria-hidden className={cn("flex size-11.5 shrink-0 items-center justify-center rounded-lg [&_svg:not([class*='size-'])]:size-5.5", settled ? "bg-accent text-muted-foreground" : "bg-alpha text-alpha-foreground")}>{icon}</span>
@@ -29,7 +31,7 @@ export function AssistantCardFrame({ icon, title, detail, children, actions, onO
         <span className={cn("line-clamp-3 text-md font-semibold break-words", settled && "text-muted-foreground")}>{title}</span>
         {detail ? <span className="text-meta break-words text-muted-foreground">{detail}</span> : null}
       </span>
-      {onOpen && !settled ? <ChevronRight aria-hidden className="size-4.5 shrink-0 text-muted-foreground" /> : null}
+      {onOpen && !settled ? trailing ?? <ChevronRight aria-hidden className="size-4.5 shrink-0 text-muted-foreground" /> : null}
     </>
   );
   const row = "flex w-full items-center gap-3.5 p-3.5 text-left";

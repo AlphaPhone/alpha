@@ -26,6 +26,8 @@ export interface Turn {
   readonly instruction: string
   readonly at: Point
   readonly meters: number
+  /** The manoeuvre the provider names for the turn, drawn as its icon; none goes straight on. */
+  readonly maneuver?: string
 }
 
 /** A route beyond its ticket: its length, time, line and turns. */
@@ -34,6 +36,8 @@ export interface Way {
   readonly seconds: number
   readonly line: readonly Point[]
   readonly turns: readonly Turn[]
+  /** Whether the provider timed the route with live traffic. */
+  readonly live?: boolean
 }
 
 /** Where the phone was last seen, and whether the fix was only approximate. */

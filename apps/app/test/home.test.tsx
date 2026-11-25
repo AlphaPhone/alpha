@@ -32,8 +32,8 @@ const pulled = (startY = 68, dx = 0) => drawn(() => {
   zone?.dispatchEvent(pointer("pointerdown", 100, startY));
   zone?.dispatchEvent(pointer("pointerup", 100 + dx, startY + 80));
 });
-const alphaApps = ["view:Inbox", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Files", "view:Workflows", "view:Settings"];
-const homeOrder = ["view:Phone", "view:Messages", "view:Inbox", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Contacts", "view:Files", "view:Workflows", "view:Settings"];
+const alphaApps = ["view:Inbox", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Files", "view:Workflows", "view:Wallet", "view:Settings"];
+const homeOrder = ["view:Phone", "view:Messages", "view:Inbox", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Contacts", "view:Files", "view:Workflows", "view:Wallet", "view:Settings"];
 const holdingHome = (world: Scene) => {
   world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true, holders: ["ai.alphacompute.alphaphone"] } : role);
   return world;
@@ -154,7 +154,7 @@ describe("Home on a phone", () => {
     await press("Open Clock");
     await vi.waitFor(() => expect(world.launcher.opened).toEqual(["org.fixture.clock"]));
 
-    // spec/app/shell/focus.md, "A layer that closes gives focus back to the control that opened it, never over a control that took it".
+    // spec/app/shell/focus.md, "A layer that closes gives focus back to the control that opened it, never over a control that took it"
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (state) => !state.drawer);
     await focusedAfterFrames(opener);
@@ -306,7 +306,8 @@ describe("Home on a phone", () => {
     const { alpha } = await open(world);
     await until(alpha, home.runtime(alpha), Home.Machine, (h) => h.tiles.load.status === "Loaded");
     await until(alpha, alpha.runtime, Shell, (s) => s.image);
-    const card = (title: string) => [...document.querySelectorAll<HTMLButtonElement>("section[aria-label='Your day'] > button")].find((found) => found.textContent?.startsWith(title));
+    const card = (title: string) => [...document.querySelectorAll<HTMLButtonElement>("section[aria-label='Your day'] > button")]
+      .find((found) => found.textContent?.startsWith(title) || found.getAttribute("aria-label")?.startsWith(`Open ${title}`));
     const pressCard = (title: string) => drawn(() => {
       const found = card(title);
       if (!found || found.disabled) throw new Error(`Home card unavailable: ${title}`);
@@ -331,11 +332,11 @@ describe("Home on a phone", () => {
       fromAreas.flows({ rows: [{ title: "Morning brief", detail: "Daily" }, { title: "Inbox sweep", detail: "Hourly" }, { title: "Rent", detail: "Monthly" }], freshness: "SomeUnavailable" });
       fromAreas.brief({ outcome: "RunFailed", at: 7 * 3_600_000 });
     });
-    expect(card("Morning brief")?.textContent).toMatch(/Morning brief.*Inbox sweep.*\+1 more/);
+    expect(card("Morning brief")?.textContent).toMatch(/Morning brief.*Inbox sweep.*Some unavailable/);
     expect(card("Morning brief")?.textContent).not.toMatch(/Rent/);
 
-    // spec/app/home/cards.md, "The row holds the agenda, Messages, Phone, mail, brief and Workflows cards in that order, each only when drawn, and is not drawn when none is"
-    expect([...document.querySelectorAll("section[aria-label='Your day'] > button")].map((found) => ["Messages", "4 unread", "Latest brief", "Morning brief"].find((title) => found.textContent?.startsWith(title)))).toEqual(["Messages", "4 unread", "Latest brief", "Morning brief"]);
+    // spec/app/home/cards.md, "The row holds the agenda, Messages, Phone, Workflows, mail and brief cards in that order, each only when drawn, and is not drawn when none is"
+    expect([...document.querySelectorAll("section[aria-label='Your day'] > button")].map((found) => ["Messages", "Morning brief", "4 unread", "Latest brief"].find((title) => found.textContent?.startsWith(title) || found.getAttribute("aria-label")?.startsWith(`Open ${title}`)))).toEqual(["Messages", "Morning brief", "4 unread", "Latest brief"]);
 
     await drawn(() => { fromAreas.messages([]); fromAreas.mail({ connected: false, unread: 0, rows: [], current: false }); fromAreas.flows({ rows: [], freshness: "UpToDate" }); fromAreas.brief(undefined); });
     expect(document.querySelector("section[aria-label='Your day']")).toBeNull();
@@ -345,11 +346,11 @@ describe("Home on a phone", () => {
     await pressCard("4 unread");
     await showing("Inbox");
 
-    // Returning to Home refreshes the brief from the current owner's retained inbox.
+    // spec/app/digests/index.md, "Home shows the newest kept result of the owner that ran, finished or failed, through a restart; a result that did not run never replaces it, and a page of another owner never reaches it"
     await keepDigests(alpha, digestScope({ agentId: world.notes.owner, identityId: world.notes.ownerIdentity }), [digestResult(1, "failed", "The morning brief could not run.")]);
     await hardware("home");
     await showing();
-    await vi.waitFor(() => expect(card("Latest brief")?.textContent).toContain("Didn't run"), { timeout: 5_000 });
+    await vi.waitFor(() => expect(card("Latest brief")?.textContent).toMatch(/The morning brief could not run\..*Failed/), { timeout: 5_000 });
     await pressCard("Latest brief");
     await showing("Workflows");
   });

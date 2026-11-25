@@ -54,19 +54,19 @@ module page {
       const field = document.documentElement.hasAttribute("data-alpha-keyboard") ? "input[type=search]" : "h1"
       return main.querySelector<HTMLElement>(`[data-alpha-apps-drawer] ${field}`) ?? undefined
     }
-    if (target === "HomeStart") return main.querySelector<HTMLElement>(focusable) ?? undefined
+    if (target === "HomeStart") return main.querySelector<HTMLElement>("[data-home-tile]") ?? main.querySelector<HTMLElement>(focusable) ?? undefined
     if (target === "Title") return main.querySelector<HTMLElement>("h1") ?? undefined
     if (target === "Region") return main
     return undefined
   }
   /** Whether the screen's target is drawn. @throws {never} */
   export const found = (target: Target): boolean => targetOf(target) !== undefined
-  /** Focus the screen's target, letting a title or region take focus from script. @throws {never} */
+  /** Focus the screen's target, letting a title or region take focus from script; Home's first app takes it without scrolling the page. @throws {never} */
   export function moveTo(target: Target): void {
     const element = targetOf(target)
     if (element === undefined) return
     if (!element.matches(focusable)) element.tabIndex = -1
-    element.focus()
+    element.focus({ preventScroll: target === "HomeStart" })
   }
   /** What the page says about focus: it moved, the owner keyed or pressed, or the window changed. */
   export type Heard = "focus" | "keyed" | "pointed" | "resize"

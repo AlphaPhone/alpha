@@ -1,11 +1,12 @@
 // spec/app/files/scan.md, "Searchable PDF reads only unread pages in order, then asks for a separate save"
-import { Alert, Button, Dialog, DialogContent, DialogTitle, Textarea } from "@repo/ui";
+import { Alert, Button, Dialog, DialogContent, DialogTitle, Textarea, cn } from "@repo/ui";
 import type { Layer } from "effect";
 import { useState } from "react";
 import type { Scan } from "../../gen/app__files__scan.ts";
 import { native } from "../platform/device.vibe";
 import type { Shown, Resident } from "../runtime/area.tsx";
 import { ScanAssets, confirmSearch, searchWords, type SearchLine, type scan } from "./scan.vibe";
+import { scanPanel, scanTitle } from "./scan-dialog.ts";
 
 type Runtime = Layer.Success<typeof scan> | Resident;
 const saveProblems = {
@@ -28,8 +29,8 @@ export function ScanSearchable({ runtime, state, close }: Pick<Shown<Runtime>, "
   const submit = (save: boolean) => void runtime.runPromiseExit(confirmSearch(search.ticket, [...edits.values()], save));
   return (
     <Dialog open onOpenChange={(open) => { if (!open) close(); }}>
-      <DialogContent aria-label="Review searchable PDF" aria-describedby={undefined} closeLabel="Cancel searchable PDF" className="max-h-[90dvh] overflow-y-auto">
-        <DialogTitle>Review text</DialogTitle>
+      <DialogContent aria-label="Review searchable PDF" aria-describedby={undefined} closeLabel="Cancel searchable PDF" className={cn(scanPanel, "overflow-y-auto")}>
+        <DialogTitle className={scanTitle}>Review text</DialogTitle>
         <p className="text-sm font-medium text-muted-foreground">On device</p>
         {search.stage === "SearchReading" && <p role="status">Reading page {current + 1} of {search.pages.length}…</p>}
         {search.stage === "SearchFailed" && <Alert variant="destructive">Text could not be read. Close and try again.</Alert>}
