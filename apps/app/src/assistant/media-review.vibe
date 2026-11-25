@@ -181,6 +181,16 @@ export interface MediaCard {
   readonly phone?: NamedPhoneReview
 }
 
+function visibleCards(entries: readonly ({ card: MediaCard; fromTerminal: boolean } | undefined)[], terminalCurrent: boolean): readonly MediaCard[] {
+  const firstRead = entries.find((entry) => entry?.card.operation.type === "messages_read_selected")?.card
+  const visible: MediaCard[] = []
+  for (const entry of entries) {
+    if (entry === undefined || (entry.fromTerminal && !terminalCurrent)) continue
+    if (entry.card.operation.type !== "messages_read_selected" || entry.card === firstRead) visible.push(entry.card)
+  }
+  return visible
+}
+
 interface Session {
   readonly epoch: number
   readonly identity: JournalIdentity
@@ -525,14 +535,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
             + (op.type === "files_move" ? ` → ${op.dest || "Internal storage"}` : "") }) }
         return { card, fromTerminal: request === undefined }
       }, { concurrency: 4 })
-      const firstRead = cards.find((entry) => entry?.card.operation.type === "messages_read_selected")?.card
-      const shown: MediaCard[] = []
-      const stillShowing = currentReview && opened === latest && (try reviewContext(revision, view))
-      for (const entry of cards) {
-        if (entry === undefined || (entry.fromTerminal && !stillShowing)) continue
-        if (entry.card.operation.type !== "messages_read_selected" || entry.card === firstRead) shown.push(entry.card)
-      }
-      return shown
+      return visibleCards(cards, currentReview && opened === latest && (try reviewContext(revision, view)))
     },
     effect choosePhone(card: MediaCard, choice: number) {
       const { board } = try Talk

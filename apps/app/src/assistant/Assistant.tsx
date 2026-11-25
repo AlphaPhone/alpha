@@ -126,11 +126,11 @@ interface AssistantAttachmentsProps {
   runtime: AssistantProps["runtime"];
   attachments: ReturnType<typeof useAttachments>;
   preview: Attached | undefined;
-  target: RefObject<FileTarget | undefined>;
-  composer: RefObject<HTMLTextAreaElement | null>;
+  targetRef: RefObject<FileTarget | undefined>;
+  composerRef: RefObject<HTMLTextAreaElement | null>;
 }
 
-function AssistantAttachments({ runtime, attachments, preview, target, composer }: AssistantAttachmentsProps) {
+function AssistantAttachments({ runtime, attachments, preview, targetRef, composerRef }: AssistantAttachmentsProps) {
   return (
     <>
       {preview !== undefined && <AssistantPhotoPreview
@@ -148,20 +148,20 @@ function AssistantAttachments({ runtime, attachments, preview, target, composer 
           if (chosen) return { id: chosen.id, name: chosen.name, bytes: chosen.bytes, load: () => runtime.runPromise(readChosenDocument(chosen.id)) };
         } : undefined}
         onClose={() => {
-          target.current = undefined;
+          targetRef.current = undefined;
           void attachments.send({ type: "cancel" });
         }}
-        onReturnFocus={() => composer.current?.parentElement?.querySelector<HTMLButtonElement>('button[aria-label="Chat actions"]')?.focus()}
+        onReturnFocus={() => composerRef.current?.parentElement?.querySelector<HTMLButtonElement>('button[aria-label="Chat actions"]')?.focus()}
         onTab={(tab) => void attachments.send({ type: "switchTab", tab })}
         onAttach={async (selected) => {
-          const held = target.current;
+          const held = targetRef.current;
           if (!held) return false;
           const files = await Promise.all(selected.map((file) => file.load()));
-          const current = () => target.current === held;
+          const current = () => targetRef.current === held;
           if (files.some((file) => file === undefined) || !current()) return false;
           const accepted = await runtime.runPromise(insertFiles(held, files.filter((file) => file !== undefined), current));
           if (accepted && current()) {
-            target.current = undefined;
+            targetRef.current = undefined;
             await attachments.send({ type: "cancel" });
           }
           return accepted;
@@ -358,7 +358,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
 
   return (
     <>
-      <AssistantAttachments runtime={runtime} attachments={attachments} preview={previewed} target={fileTargetRef} composer={composerRef} />
+      <AssistantAttachments runtime={runtime} attachments={attachments} preview={previewed} targetRef={fileTargetRef} composerRef={composerRef} />
       {onComms && full && <CommsTarget runtime={runtime} placement="strip" />}
       {(!onComms || open) && <AssistantConversation
         detent={assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
