@@ -163,7 +163,12 @@ microphone. On a phone with the Cloud speech relay, warming the network
 route also has the relay open its connection to Cloud speech, so the first
 conversation starts on a warm connection; like the rest of the warm-up it
 shows nothing and its failure is ignored. Once warm, redundant prewarm requests are refused until Alpha
-returns to the foreground or the account changes.
+returns to the foreground or the account changes. A local reply waits up
+to ten seconds for any speech readiness probe already in flight, so
+warming cannot win the speaker request slot from its first sentence.
+Microphone capture and Cloud playback do not wait for the local probe.
+After the wait only the current session and turn may play, at the
+speaker's current gain.
 
 ```quint
 pure def canPrewarm(v: Voice, now: int): bool = not(v.warmed) and not(v.latched) and not(v.prompting)
@@ -446,13 +451,19 @@ pure def sentencePlayed(v: Voice, session: int, turn: int): Change =
 
 ### A reply that needs the owner's review in chat keeps voice listening with the microphone open
 
-The owner can tap the review in chat. For an addressed text alone, the
-next utterance in the same Talk session can say “Send this text” while the
-entire review and its Send control are visible. The confirmation is handled
-on the phone without another agent turn. Any pre-review reply speech is hushed and a non-blocking review
-notice is shown, while the conversation returns straight to listening with
-the microphone open (when unmuted) for the next turn. Settling the review
-clears the notice and never stops voice.
+Talk takes a proposal from the agent's completed action result and the
+phone's matching current enrollment, request and review target. An
+admitted review shows in Ask Alpha. If Talk is on the bar, it brings up
+the sheet for the review. The reply's prose creates no review. The owner
+reviews and decides in chat. Any pre-review reply speech is hushed, and
+Talk returns to listening with the microphone open when unmuted. Its
+notice follows the last matching review still shown, including while the
+decision is being confirmed. When that review settles or leaves this
+chat, the notice clears without stopping Talk.
+
+For an addressed text alone, saying “Send this text” immediately after the
+proposal in the same Talk session confirms it while the entire review and
+its Send control are visible. The phone handles that confirmation locally.
 
 ```quint
 pure def canReplyEnds(v: Voice, session: int, turn: int, asks: bool): bool =
