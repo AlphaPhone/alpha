@@ -23,7 +23,7 @@ import { Opens, opens } from "./opens.vibe"
 import { ownerRecords, recording } from "./recording.vibe"
 import { ownerEarlier, previous } from "./previous.vibe"
 import { transfers } from "./transfer.vibe"
-import { sides } from "./sides.vibe"
+import { VoiceReview, sides } from "./sides.vibe"
 import { trashing } from "./trash.vibe"
 
 const phone: Actor = "Phone"
@@ -136,7 +136,10 @@ export effect function enter() {
   const voice = try Voice.Machine
   const identity = ownerAt() catch () => ""
   const owner = identity === "" ? 0 : numberOf("owner", identity)
-  if ((try list.get()).owner !== owner) try content.clear()
+  if ((try list.get()).owner !== owner) {
+    try content.clear()
+    try (try VoiceReview).put(undefined)
+  }
   try ignore(list.send({ type: "ownerChanged", owner }, phone))
   try ignore(editor.send({ type: "ownerChanged", owner }, phone))
   try ignore(trash.send({ type: "ownerChanged", owner }, phone))

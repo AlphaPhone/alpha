@@ -62,6 +62,9 @@ module capacitor {
 
   export interface ListenerHandle { remove(): Promise<void> }
 
+  /** One time window of a retained Notes recording. */
+  export type SavedNoteWindow = { readonly recordingId: string; readonly noteId: string; readonly offsetMs: number; readonly durationMs: number }
+
   export interface LocalVoicePlugin {
     checkPermissions(): Promise<{ microphone?: string }>
     requestPermissions(): Promise<{ microphone?: string }>
@@ -81,6 +84,7 @@ module capacitor {
     dictationForeground(options: Record<string, never>): Promise<{ available?: boolean }>
     cancelRecording(options: Record<string, never>): Promise<unknown>
     transcribeLocalRecording(options: { requestId: string; recordingId: string; automatic: boolean }): Promise<{ text?: string }>
+    transcribeSavedNote(options: SavedNoteWindow & { readonly requestId: string }): Promise<unknown>
     transcribeVoicemail(options: { requestId: string; id: string }): Promise<unknown>
     cancelVoicemailTranscription(options: { requestId: string }): Promise<void>
     addListener(event: string, listener: (data: unknown) => void): Promise<ListenerHandle>
@@ -90,6 +94,21 @@ module capacitor {
   /** @throws {never} */
   export function localPlugin(): LocalVoicePlugin {
     return (made ??= registerPlugin<LocalVoicePlugin>("AlphaVoiceCloud"))
+  }
+
+  /** Cancel and retire the same native request if its caller stops waiting. */
+  export async function readSavedNote(input: SavedNoteWindow, requestId: string, signal: AbortSignal): Promise<unknown> {
+    signal.throwIfAborted()
+    const plugin = localPlugin()
+    const cancel = () => { void plugin.cancel({ requestId }).catch(() => undefined) }
+    signal.addEventListener("abort", cancel, { once: true })
+    try {
+      const result = await plugin.transcribeSavedNote({ ...input, requestId })
+      signal.throwIfAborted()
+      return result
+    } finally {
+      signal.removeEventListener("abort", cancel)
+    }
   }
 
   export async function readVoicemail(id: string, requestId: string, signal: AbortSignal): Promise<string> {
@@ -136,7 +155,8 @@ module capacitor {
     }
   }
 }
-import { localPlugin, makeAbort, makeSessionGuard, readVoicemail, relayPlugin, signInAccounts } from capacitor
+import { type SavedNoteWindow, localPlugin, makeAbort, makeSessionGuard, readSavedNote, readVoicemail, relayPlugin, signInAccounts } from capacitor
+export { type SavedNoteWindow, readSavedNote }
 
 export error VoiceBridgeFailed { method: string; cause: unknown }
 /** Recognition ran on the confirmed clip, stayed in custody, or could not start. */

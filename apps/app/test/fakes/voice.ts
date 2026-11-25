@@ -9,6 +9,8 @@ export interface SpokenSentence {
   readonly channel: "local" | "cloud";
 }
 
+type NoteWindow = { readonly requestId: string; readonly recordingId: string; readonly noteId: string; readonly offsetMs: number; readonly durationMs: number };
+
 export interface VoiceScene {
   permission: "granted" | "denied" | "prompt";
   grantOnRequest: boolean;
@@ -22,6 +24,7 @@ export interface VoiceScene {
   finishRecording?: () => void;
   readonly dictationClips: string[];
   voicemailTranscription: ((id: string, requestId: string) => Promise<string>) | undefined;
+  noteTranscription?: (window: NoteWindow) => Promise<string>;
   readonly canceledVoicemailTranscriptions: string[];
   probeGate: (() => Promise<void>) | undefined;
   warmSpeechOutputCalls: number;
@@ -156,6 +159,10 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
         return Promise.resolve({});
       },
       cancel: () => Promise.resolve({}),
+      transcribeSavedNote: async (window: NoteWindow) => {
+        if (voice.noteTranscription === undefined) throw rejection("No saved note transcription");
+        return { text: await voice.noteTranscription(window), local: true };
+      },
       startRecording: async () => {
         const recordingId = `rec-${++recordingSeq}`;
         activeRecording = recordingId;

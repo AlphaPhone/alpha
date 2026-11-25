@@ -2,6 +2,7 @@
 import { parseNoteFormat } from "@elizaos/plugin-notes-client";
 import type { NotesSnapshot, StickyNote } from "@elizaos/plugin-notes-client";
 import { Schema } from "effect";
+import { type Faked, rejection } from "./phone.ts";
 import type { Route } from "./routes.ts";
 
 /** The agent's notes store as the fake agent holds it; a journey changes it between steps. */
@@ -11,6 +12,7 @@ export interface NotesScene {
   owner: string;
   trash: NonNullable<NotesSnapshot["trash"]>;
   creations: Map<string, string>;
+  readonly audio: Map<string, { readonly noteId: string; readonly durationMs: number }>;
   /** Whether a read of the store fails, as an agent without its notes answers. */
   failing: boolean;
   /** Whether a write to the store fails while reads still answer, as an agent that cannot change its notes answers. */
@@ -48,6 +50,7 @@ export function notesScene(now = Date.now()): NotesScene {
     owner: "agent-owner",
     trash: [],
     creations: new Map(),
+    audio: new Map(),
     notes: [
       note("enclave", "Enclave launch", "Confirm attestation flow\nShip the keys-on-device doc\nDry run Friday", now - 20 * 60_000, { kind: "text", data: { pinned: true } }),
       note("sync", "Design sync", "", now - hour, {
@@ -84,6 +87,20 @@ export function notesScene(now = Date.now()): NotesScene {
       note("landlord", "Radiator", "Call the landlord Friday. Bedroom radiator clanks all night.", september),
     ],
   };
+}
+
+/** The retained Notes recordings as the Android host reports them. */
+export function alphaNotes(scene: NotesScene): Faked {
+  return () => ({
+    permission: () => Promise.resolve({ grant: "granted" }),
+    status: () => Promise.resolve({ state: "idle" }),
+    consumeOpen: () => Promise.resolve({ open: false }),
+    previousExists: () => Promise.resolve({ present: false }),
+    describe: ({ audioId }: { audioId: string }) => {
+      const recording = scene.audio.get(audioId);
+      return recording === undefined ? Promise.reject(rejection("No such recording")) : Promise.resolve({ ...recording, audioId });
+    },
+  });
 }
 
 const Interact = Schema.Struct({
