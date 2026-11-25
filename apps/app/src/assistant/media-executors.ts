@@ -1,5 +1,6 @@
 // spec/app/browser/index.md, "Story: Let the agent open a page"
 import { type ExecutorCall, NOT_DISPATCHED, type DeviceOperation } from "@elizaos/agent";
+import { Effect } from "effect";
 import type { Alpha } from "../runtime/area.tsx";
 import type { ReviewAuthority } from "./media-review.vibe";
 
@@ -53,6 +54,18 @@ export async function executeMedia(alpha: Alpha, operation: DeviceOperation, cal
     const mediaId = media?.libraryId?.match(/:i:([1-9][0-9]{0,24})$/)?.[1];
     if (media === undefined || mediaId === undefined || media.width <= 0 || media.height <= 0) return undefined;
     return { kind: "applied", result: { version: 1, kind: operation.type, operationId: call.operationId, mediaId, libraryId: media.libraryId, width: Math.round(media.width), height: Math.round(media.height), mime: "image/jpeg" } };
+  }
+  if (operation.type === "read_selected_notes" || operation.type === "create_note") {
+    const { createWorkflowNote, selectedWorkflowNotes } = await import("../notes/workflow-device.vibe");
+    if (operation.type === "create_note") return alpha.runtime.runPromise(createWorkflowNote(operation, call, authority.current));
+    const result = await alpha.runtime.runPromise(selectedWorkflowNotes(operation, authority.current));
+    return result === undefined ? refused : { kind: "applied", result };
+  }
+  if (operation.type === "read_calendar_range") {
+    const { readWorkflowCalendar } = await import("../calendar/workflow-device.vibe");
+    const current = Effect.tryPromise(authority.current).pipe(Effect.orElseSucceed(() => false));
+    const result = await alpha.runtime.runPromise(readWorkflowCalendar(operation, current));
+    return result === undefined ? refused : { kind: "applied", result };
   }
   if (operation.type === "browser_navigate") {
     const [{ default: browser }, { openApproved }] = await Promise.all([import("../browser/index.tsx"), import("../browser/agent.vibe")]);

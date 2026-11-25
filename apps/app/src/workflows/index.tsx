@@ -15,6 +15,7 @@ import { applying, together } from "../runtime/reactor.vibe";
 import { automations, backAutomations } from "./automations.vibe";
 import { backClock, clock } from "./clock.vibe";
 import { backDigests, digests } from "./digests.vibe";
+import { mediaReview } from "../assistant/media-review.vibe";
 import { NativeDigestPanel } from "./native-digests.vibe";
 
 const clockNotice = applying(ClockState, (state) => state.open,
@@ -22,7 +23,7 @@ const clockNotice = applying(ClockState, (state) => state.open,
 const scheduleNotice = applying(DigestSchedules,
   (state) => state.open && (state.editing || state.review.showing || state.runReview.showing || state.change.live || state.runNow.live),
   (blocked) => Effect.flatMap(NativeDigestPanel, (view) => view.deferNotice("Schedule", blocked)));
-const mounted = together(history, lifecycle, runs, approvals, authoring, automations, clock, digests, clockNotice, scheduleNotice,
+const mounted = together(history, lifecycle, runs, approvals, authoring, automations, clock, digests, mediaReview, clockNotice, scheduleNotice,
   stepping("view:Workflows", Machine, (state) => state.sheet || state.place.tag !== "ListingRows"));
 
 const back = Effect.gen(function* () {

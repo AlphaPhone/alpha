@@ -17,7 +17,7 @@ import type { WorkflowRow } from "./list.vibe";
 import type { DefinitionWords } from "./lifecycle.vibe";
 import { Lifecycle, LifecyclePower, LifecycleReview } from "./Lifecycle.tsx";
 import { RunButton, RunControls } from "./RunControls.tsx";
-import { Approval } from "./Approval.tsx";
+import { Approval, WorkflowDeviceApproval } from "./Approval.tsx";
 
 const labels = { NoRun: "", Running: "Running", Done: "Finished", Failed: "Failed", Stopped: "Stopped", Missed: "Missed", Skipped: "Skipped", Interrupted: "Outcome unknown" } satisfies Record<Status, string>;
 const waiting = "Waiting for approval";
@@ -141,6 +141,7 @@ export function History({ runtime, row, owner }: HistoryProps) {
           ? <p role="status" className="mt-4 text-sm leading-chat">Your agent couldn’t tell how this run ended. Check before running it again.</p>
           : opened?.raw.error && <p role="status" className="mt-4 text-sm leading-chat">{errorText(opened.raw)}</p>}
         <Approval runtime={runtime} run={state.runId} owner={owner} {...(opened ? { approvals: opened.approvals } : {})} />
+        <WorkflowDeviceApproval runtime={runtime} run={state.runId} owner={owner} />
         {state.text === "Empty" && <p className="mt-4 text-sm text-muted-foreground">No output</p>}
         {opened?.raw.output && (state.text === "Text" || state.text === "Truncated") &&
           <div className="mt-5.5 rounded-panel bg-secondary px-5 py-4.5 font-display text-xl leading-detail font-light whitespace-pre-wrap break-words">{opened.raw.output}</div>}

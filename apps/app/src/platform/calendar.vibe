@@ -1,10 +1,12 @@
 // spec/app/calendar/index.md, "Story: Let Calendar read my phone's calendar"; spec/app/calendar/editor.md, "Story: Write an event"; spec/app/calendar/editor.md, "Story: Never create an event twice"; spec/kit/permission.md, "Story: Ask for access"
 import type { AndroidCalendarDeletionScope, AndroidCalendarEditorFields, AndroidCalendarHandoffEvent, AndroidCalendarList, CalendarClient, CalendarPick, CalendarRange } from "@elizaos/os-bridges"
+import type { WorkflowCalendarReadOperation } from "@elizaos/plugin-workflow-client"
 import { registered } from "./device.vibe"
 
 module held {
   import { calendarClient, calendarPlugin } from "@elizaos/os-bridges"
   import type { AndroidCalendarEditorFields, AndroidCalendarHandoffEvent, CalendarClient } from "@elizaos/os-bridges"
+  import type { WorkflowCalendarReadOperation } from "@elizaos/plugin-workflow-client"
   import { rendererDeletionClock } from "@elizaos/os-bridges"
 
   /** How long, by the clock eliza's deletion window keeps, until `expiresElapsed`. @throws {never} */
@@ -19,6 +21,9 @@ module held {
    */
   export interface Creations {
     checkPermissions(): Promise<{ calendar: string }>
+    requestWorkflowReadAccess(): Promise<unknown>
+    workflowCalendars(): Promise<unknown>
+    readWorkflowRange(input: Omit<WorkflowCalendarReadOperation, "type">): Promise<unknown>
     open(input: { id: string; begin?: number; end?: number }): Promise<{ status: string }>
     save(input: AndroidCalendarEditorFields & { calendarId: string; creationId: string; separateCreation: boolean }): Promise<{ status: string; id?: string }>
     saveOptions(input: { event: OptionEvent; calendarId: string; creationId: string; separateCreation: boolean }): Promise<{ status: string; id?: string }>
@@ -71,6 +76,9 @@ export service PhoneCalendar {
   readonly present: boolean
   grant(): Grant!!
   list(range: CalendarRange): AndroidCalendarList!CalendarUnread
+  workflowAccess(): Grant!!
+  workflowCalendars(): unknown!CalendarUnread
+  workflowRange(range: Omit<WorkflowCalendarReadOperation, "type">): unknown!CalendarUnread
   requestAccess(): boolean!CalendarUnread
   open(id: string, begin: number, end: number): void!CalendarUnread
   handOff(event: AndroidCalendarHandoffEvent): boolean!CalendarUnread
@@ -102,6 +110,13 @@ export const phoneCalendar = Layer.sync(PhoneCalendar, () => {
       return (calendar === "granted" ? "Granted" : calendar === "denied" ? "Denied" : "Unasked") as Grant
     }), () => "Unasked" as Grant),
     list: (range: CalendarRange) => tryPromise({ try: () => client().list(range), catch: (cause) => new CalendarUnread({ cause }) }),
+    effect workflowAccess() {
+      return (tryPromise(() => native().requestWorkflowReadAccess())
+      |> flatMap(%, Schema.decodeUnknownEffect(Schema.Struct({ status: Schema.Literals(["granted", "denied"]) })))
+      |> map(%, (answer): Grant => answer.status === "granted" ? "Granted" : "Denied")) catch () => "Denied" as Grant
+    },
+    workflowCalendars: () => tryPromise({ try: () => native().workflowCalendars(), catch: (cause) => new CalendarUnread({ cause }) }),
+    workflowRange: (range: Omit<WorkflowCalendarReadOperation, "type">) => tryPromise({ try: () => native().readWorkflowRange(range), catch: (cause) => new CalendarUnread({ cause }) }),
     requestAccess: () => tryPromise({ try: async () => (await client().requestAccess()).status === "granted", catch: (cause) => new CalendarUnread({ cause }) }),
     open: (id: string, begin: number, end: number) => tryPromise({ try: async () => { await native().open({ id, begin, end }) }, catch: (cause) => new CalendarUnread({ cause }) }),
     handOff: (event: AndroidCalendarHandoffEvent) => tryPromise({ try: async () => (await client().insertHandoff(event)).outcome === "Opened", catch: (cause) => new CalendarUnread({ cause }) }),
@@ -144,6 +159,9 @@ export const browserCalendar = Layer.succeed(PhoneCalendar, {
   present: false,
   grant: () => succeed("Denied" as Grant),
   list: () => fail(absent()),
+  workflowAccess: () => succeed("Denied" as Grant),
+  workflowCalendars: () => fail(absent()),
+  workflowRange: () => fail(absent()),
   requestAccess: () => fail(absent()),
   open: () => fail(absent()),
   handOff: () => fail(absent()),

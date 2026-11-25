@@ -4,6 +4,7 @@ import { DeviceExecution, NOT_DISPATCHED, type ConversationRecord, type DeviceAg
 import { mayRunDirectly, readOperation, readResult, type DeviceOperation } from "@elizaos/agent"
 import type { PhoneNumber } from "@elizaos/os-bridges"
 import { filterLabel } from "@elizaos/plugin-files-client"
+import { type PhoneDeviceTarget, type WorkflowDeviceBinding, parseWorkflowBinding } from "@elizaos/plugin-workflow-client"
 import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
 import { Machine as Chats } from "../../gen/app__assistant__chats.effect.vibe"
 import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
@@ -54,6 +55,7 @@ export interface ReviewAuthority {
 
 interface ApprovalScope {
   readonly active: boolean!!
+  readonly beforeDispatch?: Effect.Effect<boolean>
   readonly foregroundFiles?: Effect.Effect<ForegroundFiles | undefined>
   readonly continueDraft?: boolean!!
   readonly target?: MessageDraftTarget
@@ -403,8 +405,34 @@ interface Session {
   readonly identity: JournalIdentity
   readonly headers: RuntimeRequestHeaders
   readonly capabilities: ReadonlySet<string>
+  readonly workflowPhone: boolean
   readonly execute: DeviceExecution<DeviceOperation>
   readonly decide: DeviceAgent["decide"]
+}
+
+type WorkflowOperation = Extract<DeviceOperation, {
+  readonly type: "read_selected_notes" | "read_calendar_range" | "create_note"
+}>
+
+export interface WorkflowDeviceOffer {
+  readonly id: string
+  readonly digest: string
+  readonly expiresAt: number
+  readonly binding: WorkflowDeviceBinding
+  readonly operation: WorkflowOperation
+  readonly target: PhoneDeviceTarget
+}
+
+function workflowOperation(raw: unknown): WorkflowOperation | undefined {
+  const checked = readOperation(raw)?.operation
+  if (checked?.type === "read_selected_notes" || checked?.type === "read_calendar_range" || checked?.type === "create_note") return checked
+  return undefined
+}
+
+export function sameWorkflowOffer(shown: WorkflowDeviceOffer, next: WorkflowDeviceOffer): boolean {
+  return shown.id === next.id && shown.digest === next.digest && shown.expiresAt === next.expiresAt &&
+    shown.target.installationId === next.target.installationId && shown.target.enrollmentId === next.target.enrollmentId &&
+    JSON.stringify(shown.binding) === JSON.stringify(next.binding) && JSON.stringify(shown.operation) === JSON.stringify(next.operation)
 }
 
 function operation(raw: unknown) {
@@ -503,6 +531,9 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
 /** Enrollment and the proposal protocol share the same live resident identity. */
 export service MediaReview {
   session(): (Session | undefined)!!
+  workflowDevice(): (PhoneDeviceTarget | undefined)!!
+  workflowOffers(runId: string, current: Effect.Effect<boolean>): readonly WorkflowDeviceOffer[]!!
+  decideWorkflow(offer: WorkflowDeviceOffer, approve: boolean, current: Effect.Effect<boolean>, authorized: Effect.Effect<boolean>): boolean!!
   filesOrigin(spoken?: boolean): (FilesOrigin | undefined)!!
   filesContext(): (FilesReadContext | undefined)!!
   spokenSms(session: Session, message: string, actions: DeviceActionReply["actionResults"], source: SpokenSmsReview): (MediaCard | undefined)!!
@@ -578,21 +609,29 @@ effect function enrolled(epoch: number, owner: string, image: boolean, runtime: 
   if (capabilities.length === 0) throw new EnrollmentRefused({ reason: "Media operations are unavailable" })
   const headers = { "x-eliza-device-id": offer.agentId, "x-eliza-device-key": key, "x-eliza-device-capabilities": capabilities.join(",") }
   let raw = tryPromise(() => runtime.request(`${prefix}/context`, undefined, headers)) catch () => undefined
-  if (raw === undefined) {
-    const answer = try Schema.decodeUnknownEffect(registration)(try tryPromise(() => runtime.request(`${prefix}/register`, { label: "Alpha Phone", capabilities }, headers)))
-    if (answer.installationId !== offer.agentId) throw new EnrollmentRefused({ reason: "Another installation answered" })
-    raw = try tryPromise(() => runtime.request(`${prefix}/context`, undefined, headers))
+  const wantsWorkflow = registered("ElizaCalendar") && registered("AlphaNotes")
+  let workflowPhone = false
+  if (raw === undefined || wantsWorkflow) {
+    const answer = (tryPromise(() => runtime.request(
+      `${prefix}/register`, { label: "Alpha Phone", capabilities, ...(wantsWorkflow ? { workflowProtocol: 1 } : {}) }, headers,
+    )) |> flatMap(%, Schema.decodeUnknownEffect(registration))) catch () => undefined
+    if (answer?.installationId === offer.agentId) {
+      raw = try tryPromise(() => runtime.request(`${prefix}/context`, undefined, headers))
+      workflowPhone = wantsWorkflow
+    } else if (raw === undefined || answer !== undefined) {
+      throw new EnrollmentRefused({ reason: "The device could not enroll" })
+    }
   }
   const confirmed = try Schema.decodeUnknownEffect(context)(raw)
   if (confirmed.subjectUserId !== offer.identityId || confirmed.agentId !== offer.agentId || confirmed.installationId !== offer.agentId) throw new EnrollmentRefused({ reason: "Device scope changed" })
   const identity = { origin, ownerId: owner, ...confirmed }
   const agent = routes(runtime, headers, capabilities.includes(cameraLibraryIdCapability))
   const execute = new DeviceExecution<DeviceOperation>({
-    identity, agent, journal: journal(), validate: operation,
+    identity, agent, journal: journal(), validate: (value) => workflowOperation(value) ?? operation(value),
     execute: executeAction,
     readBack,
   })
-  return { epoch, identity, headers, capabilities: new Set(capabilities), execute, decide: agent.decide }
+  return { epoch, identity, headers, capabilities: new Set(capabilities), workflowPhone, execute, decide: agent.decide }
 }
 
 function filesCompletion(outcome: FileActionReport, synced: boolean): string {
@@ -946,7 +985,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
   const pinnedFiles = new Map<string, PinnedFileReview>()
   const guarded = (operation: DeviceOperation, call: ExecutorCall) => runPromise(effect {
     const scope = scopes.get(call.proposalId)
-    if (scope === undefined || !(try scope.active)) return { kind: "refused", code: NOT_DISPATCHED }
+    if (scope === undefined || !(try scope.active) || (scope.beforeDispatch !== undefined && !(try scope.beforeDispatch))) return { kind: "refused", code: NOT_DISPATCHED }
     const foreground = scope.foregroundFiles === undefined ? undefined : try scope.foregroundFiles
     if (scope.foregroundFiles !== undefined && foreground === undefined) return { kind: "refused", code: NOT_DISPATCHED }
     const continueDraft = scope.continueDraft
@@ -994,6 +1033,50 @@ export const mediaReview = Layer.effect(MediaReview, effect {
     const owner = Effect.provideService(ownerAt(), Agent, agent) catch () => ""
     const front = (tryPromise(() => enrollment().authority()) |> map(%, (one) => one.active === true)) catch () => false
     return status?.state === "running" && status.epoch === opened.epoch && owner === opened.identity.ownerId && front && (try device.showing())
+  }
+  effect function workflowOffers(runId: string, current: Effect.Effect<boolean>): readonly WorkflowDeviceOffer[]!! {
+    if (!(try current)) return []
+    const opened = try session()
+    if (opened === undefined || !opened.workflowPhone || !(try enrollmentIsCurrent(opened))) return []
+    const found = try proposals(opened)
+    if (found === undefined || !(try enrollmentIsCurrent(opened)) || !(try current)) return []
+    const { installationId, enrollmentId } = opened.identity
+    const target = { installationId, enrollmentId }
+    const now = try Clock.currentTimeMillis
+    const candidates: WorkflowDeviceOffer[] = []
+    for (const proposal of found) {
+      const expiresAt = Date.parse(proposal.expiresAt)
+      if (proposal.state !== "pending" || !fromThisEnrollment(proposal, opened) ||
+        !Number.isFinite(expiresAt) || expiresAt <= now || proposal.payload.workflow === undefined) continue
+      const binding = parseWorkflowBinding(proposal.payload.workflow) catch () => undefined
+      const operation = workflowOperation(proposal.payload.operation)
+      if (binding?.runId === runId && operation !== undefined) {
+        candidates.push({ id: proposal.id, digest: proposal.digest, expiresAt, binding, operation, target })
+      }
+    }
+    return candidates
+  }
+  effect function decideWorkflow(shown: WorkflowDeviceOffer, approve: boolean, current: Effect.Effect<boolean>, authorized: Effect.Effect<boolean>): boolean!! {
+    return try lock.withPermits(1)(effect {
+      const found = (try workflowOffers(shown.binding.runId, current)).find((offer) => sameWorkflowOffer(shown, offer))
+      const opened = latest
+      if (found === undefined || opened === undefined) return false
+      const active = effect {
+        return opened === latest && (try current) && (try enrollmentIsCurrent(opened)) &&
+          (try Clock.currentTimeMillis) < found.expiresAt && (try current)
+      }
+      if (!(try active)) return false
+      if (!approve) {
+        const answer = tryPromise(() => opened.decide(found.id, { digest: found.digest, approved: false })) catch () => undefined
+        return answer !== undefined
+      }
+      const beforeDispatch = effect { return (try active) && (try authorized) && (try active) }
+      scopes.set(found.id, { active, beforeDispatch })
+      const result = (tryPromise(() => opened.execute.approve(found, {
+        live: true, nonsensitive: true, exact: true, forceReview: true, requestEligible: true, reviewed: true,
+      })) |> ensuring(%, sync(() => { scopes.delete(found.id) }))) catch () => undefined
+      return result?.kind === "settled" && result.synced && result.result.tag === "Applied"
+    })
   }
   effect function reviewContext(revision: number, conversation: Conversation.Shape): boolean!! {
     const showing = (try conversation.get()).context
@@ -1083,6 +1166,14 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         revision: source.revision, enrollmentId: opened.identity.enrollmentId, ...review,
         detail: `SIM ${source.selection.subscription.slot + 1}\n${review.detail}`, sms: source.selection, spokenSms: source }
     },
+    effect workflowDevice() {
+      const opened = try session()
+      if (opened === undefined || !opened.workflowPhone || !(try enrollmentIsCurrent(opened))) return undefined
+      const { installationId, enrollmentId } = opened.identity
+      return { installationId, enrollmentId }
+    },
+    workflowOffers,
+    decideWorkflow,
     effect history() {
       const opened = try session()
       if (opened === undefined || !(try enrollmentIsCurrent(opened))) return undefined

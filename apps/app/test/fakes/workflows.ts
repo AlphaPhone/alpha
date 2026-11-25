@@ -1,7 +1,9 @@
-import type { DigestResult } from "@elizaos/plugin-workflow-client";
+import { Effect } from "effect";
+import { type DigestResult, type WorkflowPhoneReview, workflowSha } from "@elizaos/plugin-workflow-client";
 import type { NativeDigestSnapshot } from "../../src/platform/hosted-digests.vibe";
 import { type Faked, rejection } from "./phone.ts";
 import { type Route, readJsonBody } from "./routes.ts";
+import { textReview } from "./text-review.ts";
 
 const record = {
   id: "monthly-statement",
@@ -47,6 +49,27 @@ async function digest(spec: unknown): Promise<string> {
 const approvalNode = "preview";
 const approvalDigest = "a".repeat(64);
 const executionPath = `/api/workflow/executions/${receipt.id}`;
+
+export async function workflowNoteOffer(world: WorkflowsScene, agentId: string) {
+  const operation = { type: "create_note", title: "Statement saved by Workflows", body: "A reviewed note." } as const;
+  const offer = textReview(agentId, "workflow-note-proposal", operation);
+  const { installationId, enrollmentId } = offer.proposal.payload;
+  const spec: WorkflowPhoneReview["spec"] = {
+    device: { installationId, enrollmentId },
+    version: 1, name: record.name, description: "", trigger: { kind: "manual" },
+    steps: [
+      { id: "source", kind: "Read", operation: "supplied_text", text: operation.body },
+      { id: approvalNode, kind: "Write", operation: "save_note", source: "source", title: operation.title },
+    ],
+  };
+  const specDigest = await Effect.runPromise(workflowSha(spec));
+  const scope = { runId: receipt.id, workflowId: record.id, versionId: record.versionId, specDigest };
+  world.phoneReview = { ...scope, spec, status: "running", finished: false, cancellationRequestedAt: null };
+  const settled = Promise.withResolvers<void>();
+  world.deviceReceipt = settled.promise;
+  offer.workflow = { binding: { ...scope, stepId: approvalNode }, offered: () => world.stage === "Device", answered: settled.resolve };
+  return offer;
+}
 
 type PromptTiming =
   | { triggerType: "once"; scheduledAtIso: string }
@@ -108,7 +131,9 @@ export interface WorkflowsScene {
   readonly saves: Map<string, Record<string, unknown>>;
   readonly decisions: Array<{ version: string; digest: string; approved: boolean }>;
   run: boolean;
-  stage: "Running" | "Waiting" | "Done";
+  stage: "Running" | "Waiting" | "Device" | "Done";
+  phoneReview?: WorkflowPhoneReview;
+  deviceReceipt?: Promise<void>;
   receiptReads: number;
   approvalTitle: string;
   failingPrompts: boolean;
@@ -159,7 +184,7 @@ function review(world: WorkflowsScene) {
     approvals: [{
       runId: receipt.id, workflowId: record.id, workflowVersionId: record.versionId,
       nodeId: approvalNode, iteration: 0, requestDigest: approvalDigest,
-      status: world.stage === "Done" ? "approved" : "pending", expiresAt: 60_000,
+      status: world.stage === "Done" || world.stage === "Device" ? "approved" : "pending", expiresAt: 60_000,
       title: world.approvalTitle, operation: "Show preview", summary: "Review this month's statement preview.",
       target: "Monthly statement", account: "This phone", supported: true,
     }],
@@ -203,6 +228,7 @@ export function workflowRoutes(world: WorkflowsScene): Route[] {
           world.receiptReads += 1;
           return Response.json({ execution: execution(world) });
         case `${executionPath}/approvals`: return Response.json(review(world));
+        case `${executionPath}/phone-review`: return world.phoneReview === undefined ? Response.json({}, { status: 404 }) : Response.json(world.phoneReview);
       }
       const saved = world.created.find((one) => url.pathname === `/api/workflow/workflows/${one.id}`);
       if (saved !== undefined) return Response.json(saved);
@@ -276,12 +302,13 @@ export function workflowRoutes(world: WorkflowsScene): Route[] {
         });
       }
       if (url.pathname === `${executionPath}/approvals/${approvalNode}/0`) {
-        return readJsonBody(request).then((body) => {
+        return readJsonBody(request).then(async (body) => {
           if (world.stage !== "Waiting" || body.expectedVersionId !== record.versionId || body.requestDigest !== approvalDigest || body.approved !== true) {
             return Response.json({}, { status: 409 });
           }
           world.decisions.push({ version: body.expectedVersionId, digest: body.requestDigest, approved: body.approved });
-          world.stage = "Done";
+          world.stage = world.phoneReview === undefined ? "Done" : "Device";
+          await world.deviceReceipt;
           return Response.json(review(world), { status: 202 });
         });
       }

@@ -83,6 +83,8 @@ export function entrySource(bundled: readonly string[], hosted: readonly { name:
   const localScope = nativeSpeechRoutes.find(({ method }) => method === "Get")?.path ?? ""
   return [
     `import { runAgentCli } from "../../packages/agent-host/dist/src/cli.js"`,
+    'import { workflowDeviceOffer } from "../../packages/agent-host/dist/src/device-actions/workflow-offer.js"',
+    'import { Service } from "@elizaos/core"',
     'import { Effect } from "effect"',
     ...(includesSpeech ? [
       'import { androidInferenceEngine } from "../../packages/os/dist/src/inference/index.js"',
@@ -109,7 +111,18 @@ export function entrySource(bundled: readonly string[], hosted: readonly { name:
     '  if (account === undefined) return { status: 503, body: { error: "RESIDENT_ACCOUNT_UNAVAILABLE" } }',
     '  return { status: 200, body: { epoch: context.epoch, agentId: context.runtime.agentId, userId: account.userId, organizationId: account.organizationId } }',
     '} })',
+    'class WorkflowDevice extends Service {',
+    '  static serviceType = "workflow-device"',
+    '  capabilityDescription = "Reviewed workflow steps on the enrolled Alpha phone"',
+    '  stopping = new AbortController()',
+    '  static async start(runtime) { return new WorkflowDevice(runtime) }',
+    '  constructor(runtime) { super(runtime); this.offer = workflowDeviceOffer(runtime) }',
+    '  enrollment() { return this.offer.enrollment() }',
+    '  perform(binding, target, operation) { return this.offer.perform(binding, target, operation, this.stopping.signal) }',
+    '  async stop() { this.stopping.abort() }',
+    '}',
     "runAgentCli({",
+    "  runtimeServices: () => [WorkflowDevice],",
     "  bundled: [",
     ...bundled.map((name, index) => `    { packageName: ${JSON.stringify(name)}, plugin: plugin${index}.default ?? plugin${index}.plugin },`),
     ...allHosted.map(({ name }) => `    { packageName: ${JSON.stringify(name)}, plugin: undefined },`),
