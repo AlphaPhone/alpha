@@ -139,6 +139,27 @@ describe("Messages on an Alpha image", () => {
     await ready(alpha.runtime, Messages, "Messages state", (s) => s.pane === "Conversation" && s.page.status === "Loaded" && s.shown.rows === 1);
     await ready(alpha.runtime, Messages, "Messages state", () => world.telephony.texts[0].read);
 
+    // spec/app/messages/index.md, "Keep clipboard feedback on the selected message's menu"
+    const actions = () => document.querySelector('[data-alpha-sms-actions]');
+    await bubble("See you at five");
+    await press("Copy");
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(button("Copied!")).toBeDefined();
+    }, { timeout: 12_000, interval: 50 });
+    expect([actions()?.querySelector('[role="status"]')?.textContent, world.settings.copied]).toEqual(["Copied.", ["See you at five"]]);
+    await later(alpha, 1_400);
+    expect(button("Copy")).toBeDefined();
+    world.settings.refusesCopy = true;
+    await press("Copy");
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(actions()?.querySelector('[role="status"]')?.textContent).toBe("Copy failed");
+    }, { timeout: 12_000, interval: 50 });
+    expect([Boolean(button("Copy")), world.settings.copied]).toEqual([true, ["See you at five"]]);
+    await drawn(() => actions()?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(actions()).toBeNull();
+
     // spec/app/messages/composer.md, "Typing changes the draft and makes it the owner's; emptying it leaves no draft"
     await ready(alpha.runtime, Composer, "Composer state", (s) => s.thread > 0 && s.recipients === 1);
 

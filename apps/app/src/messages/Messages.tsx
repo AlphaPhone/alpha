@@ -15,7 +15,7 @@ import { useMachine as useComposer } from "../../gen/app__messages__composer.rea
 import { Time } from "../runtime/time.vibe";
 import { callerInitials, displayNumber, shortWhen } from "../phone/words.ts";
 import { Drafts, attachAll, prepare, sameSubscription, supported } from "./composer.vibe";
-import { Conversations, Inbox, titleOf } from "./messages.vibe";
+import { Conversations, type CopyReport, Inbox, titleOf } from "./messages.vibe";
 import { CommsBar, useCommsDock } from "../phone/CommsBar.tsx";
 import type { Resident } from "../runtime/area.tsx";
 import { untimed } from "../runtime/reactor.vibe";
@@ -62,7 +62,7 @@ function stamp(at: number, now: number): string {
 }
 
 function clearChoice(runtime: MessagesProps["runtime"]) {
-  runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ chosen: "" })));
+  runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ chosen: "", copyRequest: undefined })));
 }
 
 /**
@@ -218,8 +218,29 @@ function PictureGlyph() {
 }
 
 interface BubbleActions {
-  copy?: (() => void) | undefined;
+  copy?: ((report: CopyReport) => void) | undefined;
   remove?: (() => void) | undefined;
+}
+
+// spec/app/messages/index.md, "Keep clipboard feedback on the selected message's menu"
+function BubbleMenu({ actions, close }: { actions: BubbleActions; close: () => void }) {
+  const [copy, setCopy] = useState<Parameters<CopyReport>[0] | "pending">();
+  const newest = useRef(0);
+  return (
+    <div data-alpha-sms-actions role="menu" aria-label="Message actions" className={`mt-2 flex max-w-full overflow-x-auto rounded-md bg-secondary p-1${copy === "failed" ? " flex-wrap" : ""}`} onKeyDown={(event) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      close();
+    }}>
+      {actions.copy && <button type="button" role="menuitem" autoFocus className={`${actionItem} min-w-25`} disabled={copy === "pending"} onClick={() => {
+        const attempt = ++newest.current;
+        setCopy("pending");
+        actions.copy?.((outcome) => { if (attempt === newest.current) setCopy(outcome); });
+      }}>{copy === "copied" ? "Copied!" : <><Copy aria-hidden className="size-4" />Copy</>}</button>}
+      {actions.remove && <button type="button" role="menuitem" autoFocus={!actions.copy} className={`${actionItem} text-destructive`} onClick={actions.remove}><Trash2 aria-hidden className="size-4" />Delete</button>}
+      <span role="status" className={copy === "failed" ? "basis-full px-2 pb-1 text-caption text-destructive" : "sr-only"}>{copy === "copied" ? "Copied." : copy === "failed" ? "Copy failed" : ""}</span>
+    </div>
+  );
 }
 
 const Bubble = memo(function Bubble({ row, now, choose, actions, onOpenLink }: { row: MessageRow; now: number; choose: (id: string) => void; actions?: BubbleActions | undefined; onOpenLink?: MessagesProps["onOpenLink"] }) {
@@ -273,17 +294,7 @@ const Bubble = memo(function Bubble({ row, now, choose, actions, onOpenLink }: {
         <span data-alpha-message-meta title={new Date(row.date).toLocaleString()} className="px-1.5 text-2xs text-muted-foreground">{[stamp(row.date, now), status].filter(Boolean).join(" · ")}</span>
         {failed && <CircleAlert className="size-4 text-destructive" role="img" aria-label="Message failed" />}
       </div>
-      {actions && (
-        <div data-alpha-sms-actions role="menu" aria-label="Message actions" className="mt-2 flex max-w-full overflow-x-auto rounded-md bg-secondary p-1" onKeyDown={(event) => {
-          if (event.key !== "Escape") return;
-          event.stopPropagation();
-          choose("");
-          triggerRef.current?.focus();
-        }}>
-          {actions.copy && <button type="button" role="menuitem" autoFocus className={`${actionItem} min-w-25`} onClick={actions.copy}><Copy aria-hidden className="size-4" />Copy</button>}
-          {actions.remove && <button type="button" role="menuitem" autoFocus={!actions.copy} className={`${actionItem} text-destructive`} onClick={actions.remove}><Trash2 aria-hidden className="size-4" />Delete</button>}
-        </div>
-      )}
+      {actions && <BubbleMenu actions={actions} close={() => { choose(""); triggerRef.current?.focus(); }} />}
     </div>
   );
 });
@@ -312,7 +323,7 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink, vie
     return () => { resize.disconnect(); scrollRef.current = null; };
   }, []);
   const choose = useCallback((id: string) => {
-    runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ chosen: id })));
+    runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ chosen: id, copyRequest: undefined })));
     setSelected(id);
   }, [runtime]);
   if (!state || !phone) return null;
@@ -322,10 +333,13 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink, vie
   const selectedRow = rows.find((row) => row.id === selected);
   const confirm = { type: "confirmDelete", clear: clear(phone) } as const;
   const actions = selectedRow && !("incomplete" in selectedRow) && content(state) ? state.confirming ? {
-    copy: selectedRow.body ? () => undefined : undefined,
+    copy: selectedRow.body ? (report: CopyReport) => report(undefined) : undefined,
     remove: () => undefined,
   } : {
-    copy: selectedRow.body && can({ type: "copy" }) ? () => { void send({ type: "copy" }); } : undefined,
+    copy: selectedRow.body && can({ type: "copy" }) ? (report: CopyReport) => {
+      runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ copyRequest: { row: selectedRow, report } })));
+      void send({ type: "copy" }).then((result) => { if (result._tag !== "Success") report("failed"); });
+    } : undefined,
     remove: state.smsApp && state.removal.outcome !== "Unknown" && can({ type: "askDelete" }) ? () => {
       const { id, kind, threadId, date } = selectedRow;
       runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ deleteTarget: { id, kind, threadId, date } })));

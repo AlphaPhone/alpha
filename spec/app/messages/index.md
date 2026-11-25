@@ -455,6 +455,13 @@ pure def stepHandingOnChangesNothing(before: Messages, via: str, after: Messages
   (via == "copy" or via == "call" or via == "openElsewhere") implies after == before
 ```
 
+### Keep clipboard feedback on the selected message's menu
+
+The open action menu shows “Copied!” for 1.4 seconds after the phone
+copies the selected message. If the phone rejects the write, the menu
+says “Copy failed” and lets the owner try again. Closing the menu or
+selecting another message clears its feedback.
+
 ### "Delete message?" is asked over a message that is shown, and Keep closes it
 
 ```quint
