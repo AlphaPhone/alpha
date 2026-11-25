@@ -68,13 +68,14 @@ pure def admit(s: Shell, image: bool, contacts: bool): Shell =
 ### Opening an app shows it on top and lowers Ask Alpha to its bar
 
 The app already showing is not opened again, and the trail keeps the last
-six.
+six. An Android Ask Alpha visit closes before the owner can open another app.
 
 ```quint
 pure def showing(s: Shell, view: View): bool =
   s.trail.length() > 0 and s.trail.nthOr(s.trail.length() - 1, view) == view
 
-pure def canOpenView(s: Shell, view: View): bool = available(s, view) and not(showing(s, view))
+pure def canOpenView(s: Shell, view: View): bool =
+  s.textAsk == NoTextAsk and available(s, view) and not(showing(s, view))
 
 pure def openView(s: Shell, view: View): Shell =
   val grown = s.trail.append(view)
@@ -149,13 +150,15 @@ pure def goBack(s: Shell): Shell =
 
 The communications stage asks for this step only when its history names
 the preceding app. It can return from Phone, Messages or Contacts to one
-of those apps while Ask Alpha is open.
+of those apps while Ask Alpha is open. An Android Ask Alpha visit
+handles Back before that history returns.
 
 ```quint
 pure def commsView(view: View): bool = view == Phone or view == Messages or view == Contacts
 
 pure def canReturnCommsView(s: Shell, previous: View): bool =
-  (s.assistant == Sheet or s.assistant == Full) and s.trail.length() > 1 and commsView(previous)
+  s.textAsk == NoTextAsk and (s.assistant == Sheet or s.assistant == Full)
+    and s.trail.length() > 1 and commsView(previous)
     and commsView(s.trail.nthOr(s.trail.length() - 1, Settings)) and s.trail.nthOr(s.trail.length() - 2, Settings) == previous
 
 pure def returnCommsView(s: Shell, previous: View): Shell = recordRoute({ before: s, after: { ...s, trail: s.trail.removeAt(s.trail.length() - 1) } })
@@ -307,7 +310,8 @@ Alpha raises its existing chat without starting a voice turn or applying
 any intent content. The phone says when the current visit has closed.
 When Alpha was already visible the prior panel returns in place.
 Otherwise Android moves Alpha's task behind the preceding one. A refused
-return leaves Ask open so the owner can try again.
+return leaves Ask open so the owner can try again. A communications
+stage behind the visit does not take Back before that visit closes.
 
 ```quint
 pure val ticketValues = Set(1, 2, 3)

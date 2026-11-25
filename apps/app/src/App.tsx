@@ -97,7 +97,7 @@ export function App({ alpha }: AppProps) {
   }
   const shellFailed = cause !== undefined;
   const showing = state.trail.at(-1);
-  const owner = `${showing ?? "home"}:${state.assistant}:${launcher}`;
+  const owner = `${showing ?? "home"}:${state.assistant}:${launcher}:${state.textAskThrough}`;
   const beginSwipe = (event: PointerEvent<HTMLElement>) => {
     if (shellFailed || signingIn || state.textAsk.tag === "TextAskVisit" || !event.isPrimary || event.button !== 0 || event.defaultPrevented) return;
     startedRef.current = undefined;

@@ -60,7 +60,7 @@
   <activity android:name=".AlphaResetRecoveryActivity" android:exported="false" android:process=":reset_recovery" android:taskAffinity="${applicationId}.reset" android:excludeFromRecents="true" android:launchMode="singleTask" android:theme="@android:style/Theme.DeviceDefault.DayNight" android:label="@string/alpha_reset_recovery_label" />
   <activity android:name=".HostedDigestQuestionActivity" android:exported="false" android:noHistory="true"
    android:excludeFromRecents="true" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
-  <activity android:name=".AlphaAssistActivity" android:enabled="false" android:exported="true" android:taskAffinity="${applicationId}.assistant" android:excludeFromRecents="true" android:noHistory="true" android:theme="@android:style/Theme.Translucent.NoTitleBar">
+  <activity android:name=".AlphaAssistActivity" android:enabled="false" android:exported="true" android:permission="android.permission.STATUS_BAR_SERVICE" android:taskAffinity="${applicationId}.assistant" android:excludeFromRecents="true" android:noHistory="true" android:theme="@android:style/Theme.Translucent.NoTitleBar">
    <intent-filter><action android:name="android.intent.action.ASSIST" /><category android:name="android.intent.category.DEFAULT" /></intent-filter>
    <meta-data android:name="ai.eliza.os.POWER_VOICE_ACTIVITY" android:value="ai.alphacompute.alphaphone.AlphaPowerVoiceActivity" />
   </activity>
