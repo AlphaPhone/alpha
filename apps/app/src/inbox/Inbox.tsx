@@ -1,6 +1,6 @@
 // spec/app/inbox/index.md, "Story: See my mail"; spec/app/inbox/message.md, "Story: Read a message"; spec/app/inbox/marking.md, "Story: Mark mail read or unread"; spec/app/inbox/sending.md, "Story: Archive or trash mail, with Undo"
 import {
-  Alert, Button, InboxAccountList, InboxAttachmentReview, InboxChangeReview, InboxChangeToast, type InboxFolder,
+  Alert, Button, InboxAccountList, type InboxAttachmentPreview, InboxAttachmentReview, InboxChangeReview, InboxChangeToast, type InboxFolder,
   InboxLinkReview, type InboxListRow, InboxListScreen, type InboxListStateKind, InboxMessageScreen, type InboxMessageFaultKind, InboxNotice,
   type InboxNoticeKind, ToastRegion,
 } from "@repo/ui";
@@ -221,9 +221,21 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   };
   const file = files.at(state.attachment - 1);
   const outcome = state.file.outcome;
-  const preview = file && state.handling === "Opening" && outcome === "Confirmed"
+  const attachment = file && state.handling === "Opening" && outcome === "Confirmed"
     ? runtime.runSync(AttachmentPreviews.use((previews) => Effect.sync(() => previews.read(state.file.id))))
     : undefined;
+  const turn = (page: number) => {
+    const event = { type: "pdfPage", access, page } as const;
+    return can(event) ? () => void send(event) : undefined;
+  };
+  const pdf = state.pdf;
+  const preview: InboxAttachmentPreview | undefined = attachment?.kind !== "pdf" ? attachment : {
+    kind: "pdf", digest: attachment.digest, page: pdf.page, pages: pdf.pages,
+    drawing: pdf.drawing.status === "Loading" ? { kind: "loading" }
+      : pdf.drawing.status === "Loaded" && attachment.page === pdf.page ? { kind: "rendered", url: attachment.url }
+        : { kind: "failed", onRetry: turn(pdf.page) },
+    onPrevious: turn(pdf.page - 1), onNext: turn(pdf.page + 1),
+  };
   const contents = loaded ? prepareMessage(read) : undefined;
   const link = state.link > 0 ? contents?.links.at(state.link - 1) : undefined;
   const original = read?.message;

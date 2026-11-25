@@ -93,7 +93,7 @@ export function quickDatePresets(nowMs: number): { readonly today: string; reado
   };
 }
 
-/** Compute the snooze target instant for 10m, 1h, or tomorrow 9:00 AM relative to `nowMs`. */
+/** Compute the snooze target instant for 10m, 1h, or tomorrow 9:00 AM relative to `nowMs`. @throws {never} */
 export function snoozeTargetMs(nowMs: number, preset: "10m" | "1h" | "tomorrow"): number {
   if (preset === "10m") return nowMs + 10 * 60_000;
   if (preset === "1h") return nowMs + 60 * 60_000;

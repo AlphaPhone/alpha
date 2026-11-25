@@ -13,7 +13,7 @@ import { type Job, answer, contained, hearing, reacting, run, started, together,
 import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import type { Event as DraftEvent } from "../../gen/app__inbox__drafts.effect.vibe"
 import { type Attached, Letters } from "./composer.vibe"
-import { type Proposal, Mail, operate, relabel } from "./gmail.vibe"
+import { type Proposal, Mail, operate, operationStoreVersion, relabel } from "./gmail.vibe"
 import { ownerChanges } from "./mailbox.vibe"
 
 const labels = { Archive: "archive", Trash: "trash", Unarchive: "unarchive", Untrash: "untrash" } as const
@@ -168,4 +168,4 @@ const told = started(effect {
 const sessions = hearing(ownerChanges, Sending.Machine, (): Event => ({ type: "sessionChanged" }), "World")
 
 /** Archive, Trash and their restores: kept across restarts, held for the undo window, and sent through the owner's cloud. */
-export const operations = together(reacting(Sending, { keep: 1, open: [{ type: "restart" }, "World"], carry }), released, dispatched, told, sessions)
+export const operations = together(reacting(Sending, { keep: operationStoreVersion, open: [{ type: "restart" }, "World"], carry }), released, dispatched, told, sessions)

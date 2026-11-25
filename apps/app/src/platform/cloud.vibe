@@ -79,7 +79,9 @@ function fetching(direct: Wired): typeof globalThis.fetch {
       : HttpClientRequest.bodyUint8Array(started, body.bytes, headers["content-type"])
     return runPromise(effect {
       const opened = try direct.open(request)
-      return answer(Stream.toReadableStream(opened.body), opened.status, { ...opened.headers })
+      // The typed client reads a refusal's whole body. A bodyless HTTP refusal still carries its status.
+      const response = opened.status >= 400 ? try opened.text : Stream.toReadableStream(opened.body)
+      return answer(response, opened.status, { ...opened.headers })
     }, { signal })
   }
 }

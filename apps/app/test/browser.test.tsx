@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { Effect } from "effect";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
@@ -315,6 +315,49 @@ describe("The Browser on a phone", () => {
     expect(button("Open")).toBeUndefined();
     await drawn(() => vi.waitFor(async () => expect(await front()).toBe("https://en.wikipedia.org/wiki/Eiffel_Tower")));
     expect(await tabs()).toEqual(kept);
+  });
+
+  it("After I open the agent's page, my next question takes that page with it (spec/app/browser/index.md, \"Story: Let the agent open a page\"; spec/app/browser/reading.md, \"A question asked while Browser is the open screen reads the tab in front once, only when it is a normal tab whose HTTPS page has committed and Browser page for Alpha is on\"; spec/app/assistant/context.md, \"A turn carries the page Browser hands it for the tab in front, beside the observation, only to a peer that declares it\")", async () => {
+    // The page's place has a size, as Android lays the web view there, so the tab host presents the shown tab.
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    const laidOut = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.hasAttribute("data-alpha-browser-page") ? new DOMRect(0, 120, 390, 600) : original.call(this);
+    });
+    onTestFinished(() => { laidOut.mockRestore(); });
+    const world = { ...scene(), phone: true, image: true };
+    const { alpha } = await open(world, only("home", "assistant", "view:Browser"));
+    const ask = assistant.runtime(alpha);
+    const runtime = browser.runtime(alpha);
+    await until(alpha, ask, Composer, (s) => s.slot === "Open");
+    await until(alpha, ask, Conversation, (s) => s.ready);
+    const composer = () => document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']");
+    const url = "https://example.com/";
+    const asked = async (text: string, page?: string) => {
+      world.ask.nextReplyChunks = [page === undefined ? "It is an example domain." : "It's on your screen to open."];
+      world.ask.nextActions = (metadata) => page === undefined ? [] : [{ action: "BROWSER_OPEN", data: { actionName: "BROWSER_OPEN", mode: "open", operation: { type: "browser_navigate", url: page }, clientId: String((metadata as { viewClientId?: unknown }).viewClientId) } }];
+      const turn = (await ask.runPromise(Effect.flatMap(Conversation, (c) => c.get()))).turn.send.id + 1;
+      await drawn(() => vi.waitFor(() => expect(composer()).not.toBeNull()));
+      if (composer()?.hidden) await press("Type");
+      await fill("Message Alpha", text);
+      await press("Send");
+      await until(alpha, ask, Conversation, (c) => c.turn.send.id === turn && c.turn.reply === "Complete");
+    };
+    const front = async () => {
+      const s = await runtime.runPromise(Effect.flatMap(Tabs, (t) => t.get()));
+      const tab = world.browser.tabs.get(`tab${s.selected}`);
+      return s.agent === 0 && tab?.committed ? tab.history[tab.at] : undefined;
+    };
+
+    await asked("Open example.com", url);
+    await drawn(() => vi.waitFor(() => expect(button("Open")).toBeDefined()));
+    await press("Open");
+    await drawn(() => vi.waitFor(async () => expect(await front()).toBe(url), { timeout: 10_000 }));
+    world.ask.metadata = [];
+    await asked("Summarize this page.");
+    const told = world.ask.metadata.at(-1) as { observation?: { view?: string }; browserPage?: { url?: string; title?: string; text?: string } } | undefined;
+    expect(told?.observation?.view).toBe("browser");
+    expect(told?.browserPage).toEqual(expect.objectContaining({ url, title: "example.com" }));
+    expect(told?.browserPage?.text).toContain("Example");
   });
 
   it("On an enrolled phone, the agent's page proposal opens in Browser only on Open in Ask Alpha's card (spec/app/browser/index.md, \"Story: Let the agent open a page\"; spec/app/browser/index.md, \"The agent opens only an HTTPS address with no user name or password in it, in a new normal tab, one at a time\")", async () => {
