@@ -39,7 +39,7 @@ export function AlertBanner({
     >
       <div className="flex items-start gap-3">
         <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground">
-          <Bell aria-hidden className="size-4" />
+          <Bell aria-hidden className="size-4.5" />
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium tracking-caps text-muted-foreground uppercase">Reminder due</p>
@@ -70,7 +70,7 @@ export function AlertBanner({
           disabled={!can(completeEvent)}
           onClick={() => void send(completeEvent)}
         >
-          <Check aria-hidden className="size-4" />
+          <Check aria-hidden className="size-4.5" />
           Complete
         </Button>
         <Button

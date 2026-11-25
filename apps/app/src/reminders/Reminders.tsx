@@ -97,17 +97,17 @@ const SORT_LABELS: Readonly<Record<SortKey, string>> = {
 function SmartGlyph({ view }: { readonly view: SmartView }) {
   switch (view) {
     case "TodayView":
-      return <CalendarDays aria-hidden className="size-4" />;
+      return <CalendarDays aria-hidden className="size-4.5" />;
     case "ScheduledView":
-      return <Calendar aria-hidden className="size-4" />;
+      return <Calendar aria-hidden className="size-4.5" />;
     case "AllView":
-      return <Inbox aria-hidden className="size-4" />;
+      return <Inbox aria-hidden className="size-4.5" />;
     case "FlaggedView":
-      return <Star aria-hidden className="size-4" />;
+      return <Star aria-hidden className="size-4.5" />;
     case "OverdueView":
-      return <Bell aria-hidden className="size-4" />;
+      return <Bell aria-hidden className="size-4.5" />;
     case "CompletedView":
-      return <CircleCheck aria-hidden className="size-4" />;
+      return <CircleCheck aria-hidden className="size-4.5" />;
   }
 }
 
@@ -209,7 +209,7 @@ function ReminderRow({
         onClick={() => onToggleFlag(item.id)}
         className={item.flagged ? "text-primary [&_svg]:fill-current" : "text-muted-foreground"}
       >
-        <Star className="size-4" />
+        <Star className="size-4.5" />
       </Button>
     </div>
   );
@@ -346,7 +346,7 @@ function RemindersOverview({
       <div className="flex items-center justify-between pt-1">
         <h2 className="text-sm font-semibold tracking-caps text-muted-foreground uppercase">My Lists</h2>
         <Button type="button" variant="ghost" size="sm" onClick={onNewList}>
-          <ListChecks aria-hidden className="size-4" />
+          <ListChecks aria-hidden className="size-4.5" />
           New list
         </Button>
       </div>
@@ -373,7 +373,7 @@ function RemindersOverview({
                   <Menu>
                     <MenuTrigger asChild>
                       <Button type="button" variant="ghost" size="icon" aria-label={`Manage ${list.name}`}>
-                        <Ellipsis className="size-4" />
+                        <Ellipsis className="size-4.5" />
                       </Button>
                     </MenuTrigger>
                     <MenuContent>
@@ -390,7 +390,7 @@ function RemindersOverview({
 
       <div className="flex justify-end pt-2">
         <Button type="button" onClick={onNewReminder}>
-          <Plus aria-hidden className="size-4" />
+          <Plus aria-hidden className="size-4.5" />
           New reminder
         </Button>
       </div>
@@ -445,7 +445,7 @@ function RemindersDetail({
       ) : completedCount > 0 ? (
         <div className="flex justify-end">
           <Button type="button" variant="secondary" size="sm" onClick={onClearCompleted}>
-            <Trash2 aria-hidden className="size-4" />
+            <Trash2 aria-hidden className="size-4.5" />
             Clear completed
           </Button>
         </div>
@@ -460,7 +460,7 @@ function RemindersDetail({
           </p>
           {!isCompletedView ? (
             <Button type="button" onClick={onNewReminder}>
-              <Plus aria-hidden className="size-4" />
+              <Plus aria-hidden className="size-4.5" />
               New reminder
             </Button>
           ) : null}
@@ -510,7 +510,7 @@ function RemindersDetail({
           <Menu>
             <MenuTrigger asChild>
               <Button type="button" variant="ghost" size="sm">
-                <Ellipsis aria-hidden className="size-4" />
+                <Ellipsis aria-hidden className="size-4.5" />
                 List options
               </Button>
             </MenuTrigger>
@@ -566,7 +566,7 @@ function SortFilterMenu({
         </MenuItem>
         {canClearCompleted ? (
           <MenuItem destructive onSelect={onClearCompleted}>
-            <Trash2 aria-hidden className="size-4" />
+            <Trash2 aria-hidden className="size-4.5" />
             Clear completed
           </MenuItem>
         ) : null}
