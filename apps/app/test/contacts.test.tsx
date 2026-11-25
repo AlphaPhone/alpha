@@ -432,6 +432,55 @@ describe("Contacts on an Alpha image", () => {
     await until(alpha, alpha.runtime, Contacts, (s) => s.opened && s.card.status === "Loaded");
     expect(await read({ type: "contact_read_selected" })).toEqual({ kind: "contact-read", status: "read", contact: { displayName: "Ben Ortiz", phoneNumbers: ["+14155550122"], emailAddresses: [] } });
   });
+
+  it("Does not disclose full latest-sender address unless includeAddress is strictly true (spec/app/contacts/agent.md, \"The latest text's sender is named by its number alone, and the whole number only where the agent asked for it\")", async () => {
+    const world = image();
+    const { alpha } = await open(world);
+    await until(alpha, alpha.runtime, Shell, (s) => s.image && s.contacts);
+    const masked = { type: "sms_latest_sender", includeAddress: undefined } as unknown as Reading;
+    expect(await alpha.runtime.runPromise(answerReading(masked))).toEqual({ kind: "sms-latest-sender", status: "found", numberEnding: "0100" });
+  });
+
+  it("Offers review when a contact update replaces a distinct number with a duplicate (spec/app/contacts/agent.md, \"A change that would leave the contact as it is is never offered\")", async () => {
+    const world = image();
+    const maya = world.telephony.people.find((one) => one.id === "7");
+    if (!maya) throw new Error("missing Maya fixture");
+    maya.phoneNumbers = [{ number: "+14155550100", type: "mobile" }, { number: "+14155550199", type: "work" }];
+    const { alpha } = await open(world);
+    await until(alpha, alpha.runtime, Shell, (s) => s.image && s.contacts);
+    expect(await alpha.runtime.runPromise(propose({
+      type: "contact_update", query: "Maya", set: { phoneNumbers: ["+14155550100", "+14155550100"] },
+    }, false))).toBe(true);
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Shown" || s.stage === "Ended");
+    const agent = await alpha.runtime.runPromise(Effect.flatMap(Agent, (machine) => machine.get()));
+    expect([agent.stage, agent.ending]).toEqual(["Shown", "Done"]);
+  });
+
+  it("Does not carry a refused edit banner onto a fresh New contact form (spec/app/contacts/index.md, \"A new contact starts from a blank form, and a change from the contact as the phone holds it now\")", async () => {
+    const world = image();
+    const maya = world.telephony.people.find((one) => one.id === "7");
+    if (!maya) throw new Error("missing Maya fixture");
+    const { alpha } = await open(world);
+    await until(alpha, alpha.runtime, Shell, (s) => s.image && s.contacts);
+    await launch("Contacts");
+    await until(alpha, alpha.runtime, Contacts, (s) => s.front && s.list.status === "Loaded" && s.rows === 2);
+    await press("Maya Chen");
+    await until(alpha, alpha.runtime, Contacts, (s) => s.opened && s.card.status === "Loaded");
+    await press("Edit");
+    await until(alpha, alpha.runtime, Contacts, (s) => s.form === "Changing");
+    await fill("First name", "Maya Updated");
+    maya.revision += 1;
+    await press("Save");
+    await until(alpha, alpha.runtime, Contacts, (s) => s.write.outcome === "Refused");
+    expect(document.body.textContent).toContain("This contact changed.");
+    await press("Cancel");
+    await until(alpha, alpha.runtime, Contacts, (s) => s.form === "Shut");
+    await press("Back");
+    await until(alpha, alpha.runtime, Contacts, (s) => !s.opened);
+    await press("New contact");
+    await until(alpha, alpha.runtime, Contacts, (s) => s.form === "Adding");
+    expect(document.body.textContent).not.toContain("The phone did not save the contact");
+  });
 });
 
 // spec/app/voice/index.md, "Story: Go where the conversation takes me"; spec/app/voice/index.md, "Voice keeps talking after a navigation only when it is the one the conversation asked for; any other ends it"

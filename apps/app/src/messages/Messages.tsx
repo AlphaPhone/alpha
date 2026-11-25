@@ -112,6 +112,7 @@ function Threads({ runtime, messages: { state, can, send }, onBack, handoff, dis
   const openingRef = useRef(false);
   if (!state) return null;
   const { threads, sought, names } = runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.get()));
+  const query = state.sought ? sought : "";
   const now = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
   const search = (typed: string) => {
     const event = { type: "search", typed: typed.trim() !== "" } as const;
@@ -151,7 +152,7 @@ function Threads({ runtime, messages: { state, can, send }, onBack, handoff, dis
         <header className={cn("flex h-13 shrink-0 items-center gap-0.5 px-2 in-data-[alpha-launcher]:h-14", messagesTop)} data-alpha-messages-search-header>
           <Button variant="ghost" size="icon" className="size-13 rounded-lg" aria-label="Back to messages" onClick={() => { search(""); setSearching(false); }}><ChevronLeft /></Button>
           <div role="search" aria-label="Search messages" className="min-w-0 flex-1">
-            <SearchField autoFocus keepClear aria-label="Search conversations" placeholder="Search conversations" value={sought} onValueChange={search} clearLabel="Clear search" className="[&_button]:size-13 [&_button]:min-w-13 [&_button]:rounded-tile [&_input:focus-visible]:outline-none" />
+            <SearchField autoFocus keepClear aria-label="Search conversations" placeholder="Search conversations" value={query} onValueChange={search} clearLabel="Clear search" className="[&_button]:size-13 [&_button]:min-w-13 [&_button]:rounded-tile [&_input:focus-visible]:outline-none" />
           </div>
         </header>
       ) : (
@@ -172,7 +173,7 @@ function Threads({ runtime, messages: { state, can, send }, onBack, handoff, dis
         <>
           <div className="flex shrink-0 flex-wrap items-center gap-2 px-4 pb-2 empty:hidden" role="group" aria-label="Filter conversations">
             {state.chip === "UnreadThreads" && <Chip onClear={can(all) ? () => void send(all) : undefined} clearLabel="Show all conversations" className="[&>button_svg]:size-3.5">Unread</Chip>}
-            {!searching && state.sought && <Chip onClear={() => search("")} clearLabel="Clear the search" className="[&>button_svg]:size-3.5">{sought}</Chip>}
+            {!searching && state.sought && <Chip onClear={() => search("")} clearLabel="Clear the search" className="[&>button_svg]:size-3.5">{query}</Chip>}
           </div>
           <div data-alpha-messages-threads className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain py-1">
             {state.list.status === "Loading" && state.threads === 0 && <span role="status" className="sr-only">Reading conversations</span>}
@@ -207,9 +208,9 @@ function Threads({ runtime, messages: { state, can, send }, onBack, handoff, dis
         </>
       )}
       <CommsBar runtime={runtime} closed={smsNeeded(state) ? undefined : (ask, talk) => (
-        <form className="flex min-w-0 flex-1 items-center gap-1" onSubmit={(event) => { event.preventDefault(); ask(sought.trim()); }}>
-          <Input data-alpha-composer aria-label="Search or ask" placeholder="Search or ask" value={sought} onChange={(event) => search(event.target.value)} className="h-11 min-w-0 flex-1 rounded-none border-0 bg-transparent py-2.75 pr-0.5 pl-2 shadow-none focus-visible:outline-none" />
-          {sought.trim() !== "" ? <Button size="icon" variant="ghost" type="submit" aria-label="Ask Alpha"><ArrowUp /></Button>
+        <form className="flex min-w-0 flex-1 items-center gap-1" onSubmit={(event) => { event.preventDefault(); ask(query.trim()); }}>
+          <Input data-alpha-composer aria-label="Search or ask" placeholder="Search or ask" value={query} onChange={(event) => search(event.target.value)} className="h-11 min-w-0 flex-1 rounded-none border-0 bg-transparent py-2.75 pr-0.5 pl-2 shadow-none focus-visible:outline-none" />
+          {query.trim() !== "" ? <Button size="icon" variant="ghost" type="submit" aria-label="Ask Alpha"><ArrowUp /></Button>
             : talk && <Button size="icon" variant="ghost" type="button" aria-label="Talk" onClick={talk}><Mic /></Button>}
         </form>
       )} />
@@ -442,7 +443,7 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink, vie
         </div>
       </div>
       {state.removal.outcome === "Unknown" && <p role="status" className={`${notice} px-3`}>Alpha cannot tell whether the message was deleted</p>}
-      {state.removal.outcome === "Refused" && held.deleteTarget && <p role="status" className={`${notice} px-3`}>The message was not deleted</p>}
+      {state.removal.outcome === "Refused" && held.deleteTarget && conversation._tag === "Some" && held.deleteTarget.threadId === conversation.value.id && <p role="status" className={`${notice} px-3`}>The message was not deleted</p>}
       <DeleteMessageDialog open={state.confirming} container={view}
         onCancel={cancelDelete}
         onDelete={() => void (selectedRow && !("incomplete" in selectedRow) && can(confirm) && send(confirm))}

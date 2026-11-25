@@ -16,12 +16,15 @@ import home from "../src/home/index.tsx";
 import type { Alpha } from "../src/runtime/area.tsx";
 import assistant from "../src/assistant/index.tsx";
 import { openInboxAccount } from "../src/account/profile.vibe";
-import { useInEmail } from "../src/inbox/suggestion.vibe";
+import { handOver } from "../src/inbox/adding.vibe";
+import { suggest, useInEmail } from "../src/inbox/suggestion.vibe";
+import { linkOf } from "../src/inbox/links.ts";
 import inbox from "../src/inbox/index.tsx";
-import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
+import { asleep, button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
 import { Effect } from "effect";
-import { Letters, nothing } from "../src/inbox/composer.vibe";
+import { Letters, begin, nothing } from "../src/inbox/composer.vibe";
 import { Mail } from "../src/inbox/gmail.vibe";
+import { Cloud } from "../src/platform/cloud.vibe";
 import { type InboxNoticeScene, letter } from "./fakes/inbox.ts";
 import { type Scene, scene } from "./fakes/scene.ts";
 
@@ -980,4 +983,179 @@ it("keeps attacker URLs and phone numbers from a reviewed email out of owner tex
   const unsupported = await runCase(true);
   expect(unsupported.said).toEqual([]);
   expect(unsupported.metadata).toEqual([]);
+});
+
+async function openInboxWorld(world = scene()) {
+  const running = await open(world, only("home", "view:Inbox", "view:Settings"));
+  const runtime = inbox.runtime(running.alpha);
+  await until(running.alpha, home.runtime(running.alpha), Home, (s) => s.tiles.load.status === "Loaded");
+  await tile("Inbox");
+  await until(running.alpha, runtime, List, (s) => s.list.status === "Loaded" && s.pages === 1);
+  return { ...running, world, runtime };
+}
+
+async function flushDraft(alpha: Alpha, runtime: ReturnType<typeof inbox.runtime>) {
+  await later(alpha, 10);
+  await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded");
+}
+
+async function openSaveReview(alpha: Alpha, runtime: ReturnType<typeof inbox.runtime>) {
+  await flushDraft(alpha, runtime);
+  await menu("Save to Gmail", "Draft actions");
+  await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "SaveDraft");
+}
+
+async function saveReplyDraft(alpha: Alpha, runtime: ReturnType<typeof inbox.runtime>, body: string) {
+  await row("Standup notes");
+  await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded");
+  await menu("Reply");
+  await until(alpha, runtime, Writing, (s) => s.open && s.letter.kind === "Reply");
+  await write("Message", body);
+  await openSaveReview(alpha, runtime);
+  await confirm("Save");
+  await until(alpha, runtime, Changes, (s) => s.kind === "SaveDraft" && s.attempt.outcome === "Confirmed");
+  await until(alpha, runtime, Writing, (s) => s.letter.gmail !== 0);
+}
+
+it("Distinguishes prose colons from bare-domain phishing labels in linkOf (spec/app/inbox/message.md, \"Only an https link without credentials in it can be reviewed and opened; any other link stays text\")", () => {
+  expect([
+    linkOf("https://northpoint.test/room", "Meeting: 3pm").mismatch,
+    linkOf("https://evil.example/steal", "bank.example/login").mismatch,
+    linkOf("https://bank.example/login", "bank.example/login").mismatch,
+  ]).toEqual([false, true, false]);
+});
+
+it("Refuses oversized file handoffs into a new draft with NoRoom (spec/app/inbox/adding.md, \"A file handed over from Files or Photos is shown to the owner before it joins the draft open, or starts a new message from the account given, and only where it fits\")", async () => {
+  const { alpha, runtime } = await openInboxWorld();
+  expect(await runtime.runPromise(handOver({ name: "huge.jpg", mimeType: "image/jpeg", size: 6 * 1024 * 1024, data: "" }, "Photos"))).toBe(true);
+  await until(alpha, runtime, Adding, (s) => s.thing !== 0 && s.into === 0);
+  await confirm("New email");
+  await until(alpha, runtime, Adding, (s) => s.thing === 0);
+  const addingState = await runtime.runPromise(Adding.use((m) => m.get()));
+  expect([addingState.refused, (await runtime.runPromise(Writing.use((m) => m.get()))).open]).toEqual(["NoRoom", false]);
+});
+
+it("Deduplicates ReplyAll recipients case-insensitively and drops invalid addresses (spec/app/inbox/drafts.md, \"A new message, a reply, a reply to all or a forward begins as [one draft](./letter.md) says; a reply to a message with no usable address is refused and the owner told\")", async () => {
+  const { alpha, runtime } = await openInboxWorld();
+  expect(await runtime.runPromise(begin({
+    kind: "ReplyAll",
+    account: 1,
+    message: { id: "g4", from: "Sam <Sam@okafor.example>", others: ["sam@okafor.example", "alex@okafor.example", "ALEX@okafor.example", "not-an-email"], subject: "Standup notes", files: 0 },
+  }))).toBe(true);
+  await until(alpha, runtime, Writing, (s) => s.open && s.letter.kind === "ReplyAll");
+  const replyState = await runtime.runPromise(Writing.use((m) => m.get()));
+  const replyWords = await runtime.runPromise(Letters.use((l) => Effect.sync(() => l.words(replyState.letter.id))));
+  expect([replyState.letter.recipients, replyWords.to, replyWords.cc]).toEqual([2, ["Sam@okafor.example"], ["alex@okafor.example"]]);
+});
+
+it("Invalidates an open draft send review when the draft changes (spec/app/inbox/sending.md, \"A change to what is under review, or to a draft whose operation is recorded and not yet sent, stops it and says it must be looked at again\")", async () => {
+  const { alpha, runtime } = await openInboxWorld();
+  await press("Compose");
+  await until(alpha, runtime, Writing, (s) => s.open);
+  await write("Message", "First revision");
+  await later(alpha, 10);
+  await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded");
+  await press("Send email");
+  await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "Send");
+  await write("Message", "Edited during review");
+  await vi.waitFor(async () => {
+    const ops = await runtime.runPromise(Changes.use((m) => m.get()));
+    expect([ops.review.showing, ops.changed]).toEqual([false, true]);
+  }, { timeout: 3_000 });
+});
+
+it("Recovers from an externally deleted 404 Gmail draft copy and an unsure draft save (spec/app/inbox/letter.md, \"A Gmail copy read unchanged since the revision it was made on lets the draft be saved over it; one changed is a clash; one gone is saved anew\"; spec/app/inbox/drafts.md, \"Before a draft with a Gmail copy is saved over it, and whenever the draft is unsure of that copy, Gmail's copy is read, one read at a time, while its account may be read\")", async () => {
+  const { alpha, world, runtime } = await openInboxWorld();
+  await saveReplyDraft(alpha, runtime, "Draft for copy check");
+  await write("Message", "Edited after Gmail deleted copy");
+  await flushDraft(alpha, runtime);
+  world.inbox.drafts.clear();
+  await menu("Check Gmail copy", "Draft actions");
+  await until(alpha, runtime, Writing, (s) => s.lookup.status !== "Loading");
+  const afterGone = await runtime.runPromise(Writing.use((m) => m.get()));
+  expect([afterGone.lookup.status, afterGone.letter.gmail]).toEqual(["Loaded", 0]);
+
+  await openSaveReview(alpha, runtime);
+  const cloud = await runtime.runPromise(Cloud);
+  const dispatch = cloud.client.gmailDispatch.bind(cloud.client);
+  const dropOnce = vi.spyOn(cloud.client, "gmailDispatch").mockImplementationOnce((args, opts) => {
+    world.inbox.offline = true;
+    return dispatch(args, opts);
+  });
+  try {
+    await confirm("Save");
+    await until(alpha, runtime, Changes, (s) => s.kind === "SaveDraft" && s.attempt.outcome === "Unknown");
+    await until(alpha, runtime, Writing, (s) => s.letter.unsure);
+  } finally {
+    dropOnce.mockRestore();
+    world.inbox.offline = false;
+  }
+  await flushDraft(alpha, runtime);
+  await menu("Check Gmail copy", "Draft actions");
+  await until(alpha, runtime, Writing, (s) => !s.letter.unsure && s.lookup.status === "Loaded");
+  expect(told()).toContain("Your save did not reach Gmail");
+});
+
+it("Sends a draft saved in Gmail with its draftId (spec/app/inbox/sending.md, \"A draft's operation is reviewed as the draft is, on its From account, once it is wholly kept on the phone, while nothing else is under way and no unknown outcome is unseen\")", async () => {
+  const { alpha, runtime } = await openInboxWorld();
+  await saveReplyDraft(alpha, runtime, "Send with Gmail draft id");
+  const cloud = await runtime.runPromise(Cloud);
+  const sendProposals: Array<{ kind?: string; draftId?: string; expectedDigest?: string }> = [];
+  const prepare = cloud.client.gmailPrepare.bind(cloud.client);
+  const spy = vi.spyOn(cloud.client, "gmailPrepare").mockImplementation((args, opts) => {
+    if (args.proposal.kind === "send") sendProposals.push(args.proposal);
+    return prepare(args, opts);
+  });
+  try {
+    await press("Send email");
+    await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "Send");
+    await confirm("Send");
+    await until(alpha, runtime, Changes, (s) => s.kind === "Send" && s.attempt.outcome === "Confirmed");
+    await until(alpha, runtime, Writing, (s) => !s.open);
+  } finally {
+    spy.mockRestore();
+  }
+  expect([Boolean(sendProposals[0]?.draftId), Boolean(sendProposals[0]?.expectedDigest)]).toEqual([true, true]);
+});
+
+it("Persists a suggestion inserted into a shelved draft across restart (spec/app/inbox/suggestion.md, \"What goes in is the text shown, where it was aimed, as the owner confirmed it, once\")", async () => {
+  const { alpha, world, close, runtime } = await openInboxWorld();
+  await press("Compose");
+  await until(alpha, runtime, Writing, (s) => s.open);
+  const shelvedId = (await runtime.runPromise(Writing.use((m) => m.get()))).letter.id;
+  await write("Message", "Initial note.");
+  await later(alpha, 10);
+  await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded");
+  await hardware("back");
+  await until(alpha, runtime, Writing, (s) => !s.open && s.shelf.shelved.includes(shelvedId));
+  expect(await runtime.runPromise(suggest("Appended from Alpha.", shelvedId))).toBe(true);
+  await press("Review email suggestion");
+  await until(alpha, runtime, Offering, (s) => s.review.showing && s.draft === shelvedId);
+  await confirm("Add");
+  await until(alpha, runtime, Offering, (s) => s.used === 1 && s.text === 0);
+  await close();
+
+  const reopened = await open(world, only("home", "view:Inbox", "view:Settings"));
+  const restored = inbox.runtime(reopened.alpha);
+  await until(reopened.alpha, restored, Writing, (s) => s.shelf.shelved.includes(shelvedId));
+  const persistedWords = await restored.runPromise(Letters.use((l) => Effect.sync(() => l.words(shelvedId).text)));
+  expect(persistedWords).toBe("Initial note.\n\nAppended from Alpha.");
+});
+
+it("Dispatches a held Archive after restart once accounts restore its grant (spec/app/inbox/sending.md, \"A recorded operation sends its one request, for its own account under that account's grant now, exactly as reviewed: a draft while it is at the revision shown and its hand-over is written to the phone, archive and Trash once the undo window has passed\")", async () => {
+  const { alpha, world, close, runtime } = await openInboxWorld();
+  await choose("Standup notes");
+  await action("Archive");
+  await confirm("Yes");
+  await until(alpha, runtime, Changes, (s) => s.kind === "Archive" && s.undo.holding === "Held");
+  await close();
+
+  asleep(world, 15_000);
+  const reopened = await open(world, only("home", "view:Inbox", "view:Settings"));
+  const restored = inbox.runtime(reopened.alpha);
+  await until(reopened.alpha, restored, List, (s) => s.accounts.status === "Loaded");
+  await vi.waitFor(async () => {
+    const ops = await restored.runPromise(Changes.use((m) => m.get()));
+    expect([ops.kind, ops.attempt.outcome, world.inbox.changes.at(-1)]).toEqual(["Archive", "Confirmed", "archive g4"]);
+  }, { timeout: 5_000 });
 });

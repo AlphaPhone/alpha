@@ -15,6 +15,7 @@ import { Machine as Home } from "../gen/app__home.effect.vibe";
 import assistant from "../src/assistant/index.tsx";
 import { executeMedia } from "../src/assistant/media-executors.ts";
 import { readAgentSms } from "../src/messages/agent-send.vibe";
+import { Drafts } from "../src/messages/composer.vibe";
 import { idOf, Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
 import home from "../src/home/index.tsx";
@@ -1060,5 +1061,73 @@ describe("Messages on an Alpha image", () => {
     const tab = runtime.runSync(Effect.map(Tabs.use((machine) => machine.get()), (state) => state.selected));
     const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
     await ready(page, Page, "Browser link page", (state) => state.phase === "Shown" && !state.secure);
+  });
+
+  it("Clears stale Messages search filter when opening Unread from Home (spec/app/messages/index.md, \"One tap on Home's unread card opens the conversation when exactly one is unread, and the list filtered to the unread ones when several are\")", async () => {
+    const world = image();
+    world.telephony.texts.push({ id: 2, thread: 2, address: "+14155550122", box: "inbox", date: 1_700_000_060_000, body: "Lunch?", read: false });
+    const { alpha } = await openImage(world);
+    await openMessages(alpha);
+    await ready(alpha.runtime, Messages, "two unread threads", (s) => s.list.status === "Loaded" && s.threads === 2);
+    await write("Search or ask", "Maya");
+    await ready(alpha.runtime, Messages, "filtered to Maya", (s) => s.sought && s.list.status === "Loaded" && s.threads === 1);
+    await hardware("home");
+    await ready(alpha.runtime, Messages, "Messages closed on Home", (s) => !s.front);
+    await openUnreadCard();
+    await ready(alpha.runtime, Messages, "Unread filter loaded", (s) => s.front && s.pane === "Threads" && s.chip === "UnreadThreads" && s.list.status === "Loaded");
+    const unreadState = await alpha.runtime.runPromise(Effect.flatMap(Messages, (m) => m.get()));
+    const searchField = document.querySelector<HTMLInputElement>('input[aria-label="Search or ask"]');
+    expect([unreadState.sought, unreadState.threads, searchField?.value ?? ""]).toEqual([false, 2, ""]);
+  });
+
+  it("Drops stored draft text after sending so subsequent agent drafts succeed (spec/app/messages/composer.md, \"Typing changes the draft and makes it the owner's; emptying it leaves no draft\"; spec/app/messages/composer.md, \"The agent's draft goes into the open conversation's draft only while it is empty, and never sends\")", async () => {
+    const world = image();
+    const { alpha } = await openImage(world);
+    await openMessages(alpha);
+    await ready(alpha.runtime, Messages, "Maya listed", (s) => s.list.status === "Loaded" && s.threads === 1);
+    await press("Maya Chen");
+    await ready(alpha.runtime, Messages, "Maya conversation", (s) => s.pane === "Conversation" && s.page.status === "Loaded");
+    await ready(alpha.runtime, Composer, "Maya composer", (s) => s.thread > 0 && s.sending.grant === "Granted");
+    await write("Message", "Already sent");
+    await ready(alpha.runtime, Composer, "owner wrote", (s) => s.slot.author === "OwnerWrote");
+    await press("Send");
+    await ready(alpha.runtime, Composer, "send confirmed and slot cleared", (s) => s.outgoing.op.outcome === "Confirmed" && s.slot.author === "Nobody" && s.slot.draft.sync === "Kept");
+    const mayaThread = (await alpha.runtime.runPromise(Effect.flatMap(Composer, (m) => m.get()))).thread;
+    const leftover = await alpha.runtime.runPromise(Effect.flatMap(Drafts, (drafts) => drafts.text(mayaThread)));
+    const pageTicket = (await alpha.runtime.runPromise(Effect.flatMap(Messages, (m) => m.get()))).page.ticket;
+    const reply = await executeMedia(
+      alpha,
+      { type: "sms_reply_selected", body: "Follow up" },
+      { proposalId: "follow-up", operationId: "follow-up", attemptId: 1 },
+      { target: { thread: mayaThread, ticket: pageTicket }, current: () => Promise.resolve(true) },
+    );
+    expect([leftover, reply]).toEqual(["", { kind: "applied", result: { kind: "sms-reply", status: "drafted" } }]);
+  });
+
+  it("Does not carry a delete-refused banner into another conversation (spec/app/messages/index.md, \"The phone's answer ends the removal it names, and the conversation is read again unless it was refused\")", async () => {
+    const world = { ...image(), now: 1_799_999_999_000 };
+    world.telephony.texts.push({ id: 2, thread: 2, address: "+14155550122", box: "inbox", date: 1_700_000_060_000, body: "Lunch?", read: false });
+    const { alpha } = await openImage(world);
+    await openMessages(alpha);
+    await ready(alpha.runtime, Messages, "two threads", (s) => s.list.status === "Loaded" && s.threads === 2);
+    await press("Maya Chen");
+    await ready(alpha.runtime, Messages, "Maya conversation", (s) => s.pane === "Conversation" && s.page.status === "Loaded");
+    world.telephony.holdMessageDeletion = true;
+    await bubble("See you at five");
+    await press("Delete");
+    await ready(alpha.runtime, Messages, "delete confirmation", (s) => s.confirming);
+    await confirm("Delete");
+    await ready(alpha.runtime, Toasts, "undo toast", (s) => s.showing && s.current.undo);
+    const staged = world.telephony.staged.at(-1);
+    if (!staged) throw new Error("expected staged message deletion");
+    staged.phase = "conflict";
+    await later(alpha, 2_000);
+    await ready(alpha.runtime, Messages, "deletion refused on conflict", (s) => s.removal.outcome === "Refused");
+    expect(document.body.textContent).toContain("The message was not deleted");
+    await press("Back");
+    await ready(alpha.runtime, Messages, "back to thread list", (s) => s.pane === "Threads" && s.list.status === "Loaded");
+    await press("Ben Ortiz");
+    await ready(alpha.runtime, Messages, "Ben conversation", (s) => s.pane === "Conversation" && s.page.status === "Loaded");
+    expect(document.body.textContent).not.toContain("The message was not deleted");
   });
 });

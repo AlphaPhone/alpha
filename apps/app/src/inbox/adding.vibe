@@ -185,12 +185,24 @@ effect function joined(draft: number, account: number, mib: number): void!!(Inco
   if (file === undefined) return
   const composer = try Drafts.Machine
   const words = try Letters
+  const target = draft !== 0 ? draft : (try composer.get()).made + 1
+  const before = words.words(target)
+  const next = { ...before, files: [...before.files, file] }
+  words.set(target, next)
   const event: Drafts.Event = draft !== 0 ? { type: "attached", now: untimed, draft, mib, policy } : { type: "startedWithFile", account, mib, policy }
   const sent = try exit(composer.send(event, "Owner"))
-  if (!Exit.isSuccess(sent)) return
+  if (!Exit.isSuccess(sent)) {
+    if (draft !== 0) words.set(target, before)
+    else try words.forget(target)
+    return
+  }
   const into = sent.value.state.letter.id
-  const before = words.words(into)
-  words.set(into, { ...before, files: [...before.files, file] })
+  if (into !== target) {
+    if (draft !== 0) words.set(target, before)
+    else try words.forget(target)
+    const actual = words.words(into)
+    words.set(into, { ...actual, files: [...actual.files, file] })
+  }
 }
 
 function carry(fx: Out): Job<Event, Incoming | ContactAddresses | Adding.Machine | Drafts.Machine | Letters | Shell | Telephony | SystemSettings, []> {
