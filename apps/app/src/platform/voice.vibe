@@ -647,7 +647,6 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
         environment: CLOUD_ENVIRONMENT,
         credentialId: cloudKey ?? (try signedInKey(signInAccounts())),
         assertCurrent: makeSessionGuard(() => activeSession, currentSession),
-        // The SDK invokes this only for the active speech generation of its current capture.
         onInterim: (text) => {
           const current = cloudPreview
           if (activeSession !== currentSession || current?.session !== currentSession) return
