@@ -95,7 +95,8 @@ export const digests = Layer.provideMerge(Layer.provideMerge(Layer.effect(Digest
   const scopes = try Ref.make<{ scope?: OwnerScope; hash: string; inbox?: DigestInbox }>({ hash: "" })
   const catalog = try Ref.make<{ loops: ReadonlyArray<DigestLoop>; sources: ReadonlyArray<DigestSource>; results: ReadonlyArray<DigestResult> }>({ loops: [], sources: [], results: [] })
   const syncs = try Ref.make(0)
-  const synced = try PubSub.unbounded<ReadonlyArray<DigestResult>>()
+  // The newest read is replayed to a follower that subscribes after it, so Home's brief never misses the first read.
+  const synced = try PubSub.unbounded<ReadonlyArray<DigestResult>>({ replay: 1 })
   const android = build.info.variant !== "browser"
   const pendingKey = (hash: string) => ownerKey("device", `workflows/digest-pending/${hash}`)
 
