@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// spec/app/image/index.md, "Story: Stage Alpha into an image"; spec/agent/index.md, "Story: Build the pack only from the pinned eliza"
+// spec/app/image/index.md, "Story: Stage Alpha into an image"; spec/agent/index.md, "Story: Build the pack only from the pinned eliza"; spec/agent/index.md, "The launch names the pack's pinned workflow worker"
 import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -8,7 +8,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { generateAndroidHost, stageRuntimePayload } from "@elizaos/os";
-import { prepared } from "@repo/eliza-harness";
+import { packPrepared, prepared } from "@repo/eliza-harness";
 import { Effect, Layer } from "effect";
 import { FetchHttpClient } from "effect/http";
 import { androidPaths, identity, production, signInCallbackPath } from "../capacitor.config.ts";
@@ -154,6 +154,17 @@ export function buildPack() {
 const packBundle = () => join(agentPack, "dist/bundle");
 const packHost = () => join(agentPack, "dist/host");
 
+/** The exact workflow worker emitted by the pack's pinned Eliza checkout. */
+function workflowWorker() {
+  const name = "@elizaos/plugin-workflow";
+  const plugin = packPrepared([name]).packages.get(name);
+  if (plugin === undefined) throw new Error(`The reviewed agent pack has no ${name}`);
+  const dir = join(plugin, "dist");
+  const { executable } = record(readJson(join(dir, "workflow-worker.json")));
+  if (typeof executable !== "string" || executable === "") throw new Error("The reviewed workflow worker manifest has no executable");
+  return { dir, executable };
+}
+
 /** The staged runtime payload: libeliza_node.so per ABI, agent.mjs, its manifest and inventory, for the bundle the pack built. */
 export async function stageRuntime(): Promise<string> {
   const bundle = packBundle();
@@ -164,7 +175,14 @@ export async function stageRuntime(): Promise<string> {
   const output = join(runtimes, digest);
   if (!existsSync(join(output, "android/app/src/main/assets/agent/inventory.json"))) {
     rmSync(output, { recursive: true, force: true });
-    await runEffect(stageRuntimePayload({ abi: [...abis], bundleDir: bundle, output }));
+    try {
+      await runEffect(stageRuntimePayload({ abi: [...abis], bundleDir: bundle, workflowWorker: workflowWorker(), output }));
+    } catch (cause) {
+      const failure = record(cause);
+      if (failure._tag !== "PayloadRefused" || typeof failure.reason !== "string") throw cause;
+      const subject = typeof failure.subject === "string" && failure.subject !== "" ? ` (${failure.subject})` : "";
+      throw new Error(`Android runtime payload refused: ${failure.reason}${subject}`, { cause });
+    }
   }
   if (existsSync(runtimes)) for (const other of readdirSync(runtimes)) if (other !== digest) rmSync(join(runtimes, other), { recursive: true, force: true });
   const data = join(android, "agent");
