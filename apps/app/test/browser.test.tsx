@@ -639,7 +639,9 @@ describe("The Browser on a phone", () => {
     await asked("open the Wikipedia article about the Eiffel Tower", eiffel);
     await drawn(() => vi.waitFor(() => expect(button("Open")).toBeDefined()));
     await asked("open example.org", "https://example.org/");
-    await drawn(() => vi.waitFor(() => expect(document.body.textContent).toContain("example.org")));
+    // The owner's own words name example.org too: wait for the card itself to name the newer page.
+    const card = () => [...document.querySelectorAll("[aria-label='Operation details']")].map((details) => details.textContent ?? "");
+    await drawn(() => vi.waitFor(() => expect(card().some((text) => text.includes("example.org"))).toBe(true)));
     expect(document.body.textContent).not.toContain("en.wikipedia.org/wiki/Eiffel_Tower");
     await press("Open");
     await drawn(() => vi.waitFor(async () => expect(await front()).toBe("https://example.org/"), { timeout: 10_000 }));
