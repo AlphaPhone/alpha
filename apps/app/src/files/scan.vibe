@@ -45,7 +45,7 @@ export service ScanAssets {
   words(id: number, revision: number): (ScanWords | undefined)!!
   holdWords(id: number, revision: number, value: ScanWords): void!!
   review(ticket: number, words?: ReadonlyMap<number, ScanWords>): (ReadonlyMap<number, ScanWords> | undefined)!!
-  retireReview(ticket: number): void!!
+  retireReview(ticket: number, closed: boolean): void!!
   outline(image: number, draft?: ScanOutline): ScanOutline!!
   hold(id: number, image: ScanImage): void!!
   keep(ids: ReadonlySet<number>): void!!
@@ -59,6 +59,7 @@ const assets = Layer.effect(ScanAssets, effect {
   const images = new Map<number, ScanPage>()
   const text = new Map<number, Map<number, ScanWords>>()
   let review: { ticket: number; words: ReadonlyMap<number, ScanWords> } | undefined
+  let retiredThrough = 0
   let outline: { image: number; draft: ScanOutline } | undefined
   const turn = try Semaphore.make(1)
   let prepared: { ticket: number; pdf?: Blob } | undefined
@@ -82,10 +83,13 @@ const assets = Layer.effect(ScanAssets, effect {
       text.set(id, row)
     }),
     review: (ticket: number, words?: ReadonlyMap<number, ScanWords>) => sync(() => {
-      if (words !== undefined) review = { ticket, words }
+      if (words !== undefined && ticket > retiredThrough && (review === undefined || review.ticket <= ticket)) review = { ticket, words }
       return review?.ticket === ticket ? review.words : undefined
     }),
-    retireReview: (ticket: number) => sync(() => { if (review?.ticket !== ticket) review = undefined }),
+    retireReview: (ticket: number, closed: boolean) => sync(() => {
+      retiredThrough = Math.max(retiredThrough, closed ? ticket : ticket - 1)
+      if (review !== undefined && review.ticket <= retiredThrough) review = undefined
+    }),
     outline: (image: number, draft?: ScanOutline) => sync(() => {
       if (draft !== undefined) outline = { image, draft }
       return outline?.image === image ? outline.draft : { corners: fullPageCorners(), turns: 0 }
@@ -273,9 +277,13 @@ effect function prepare(ticket: number, pages: ReadonlyArray<Page>, review: numb
     }
   }
   if (review !== 0) {
-    const made = createScanPdf({ title: "Scanned document", creator: "Alpha" }, images, layers) catch () => undefined
-    if (made === undefined) return { ...failed, problem: "TooMuchText" }
-    try assets.document(ticket, blobOf([made], "application/pdf"))
+    const made = map(createScanPdf({ title: "Scanned document", creator: "Alpha" }, images, layers), (bytes) => ({ bytes })) catch (error) => {
+      if (error._tag === "PdfRefused" && error.reason === "too-large") return { problem: "TooLarge" } as const
+      const rejectedText = error._tag === "TextLayerRefused" || (error._tag === "PdfRefused" && error.reason === "unsupported-text")
+      return { problem: rejectedText ? "TooMuchText" : "NotDrawn" } as const
+    }
+    if ("problem" in made) return { ...failed, problem: made.problem }
+    try assets.document(ticket, blobOf([made.bytes], "application/pdf"))
     return { ...failed, ok: true, problem: "NoProblem" }
   }
   const built = tryPromise((signal) => drawPdf(images, signal)) catch () => undefined
@@ -459,7 +467,7 @@ effect function savedSearch(ticket: number): void!!(ScanAssets | Scan.Machine) {
     if (!Scan.currentSearch(state, ticket)) return
     const reviewed = staged === undefined ? undefined : try revisedSearch(state.pages, staged)
     if (staged === undefined || reviewed === undefined || !Scan.canFinishSearch(state, ticket, reviewed, "Phone")) {
-      if (Scan.canCancelSearch(state, "Phone")) try ignore(model.send({ type: "cancelSearch" }, "Phone"))
+      if (Scan.canCancelSearch(state, ticket, "Phone")) try ignore(model.send({ type: "cancelSearch", ticket }, "Phone"))
       return
     }
     try keepReviewed(reviewed, staged)
@@ -619,11 +627,12 @@ const edits = started(effect {
     const live = new Set([...state.pages, ...state.keeping.carrying, ...state.keeping.saved].map((page) => page.image))
     try held.keep(live)
     const active = try model.get()
-    if (Scan.canCancelSearch(active, "Phone") && !Scan.currentSearch(active, active.search.ticket)) {
-      try contained(model.send({ type: "cancelSearch" }, "Phone"), "retiring stale searchable text")
+    const ticket = active.search.ticket
+    if (Scan.canCancelSearch(active, ticket, "Phone") && !Scan.currentSearch(active, ticket)) {
+      try contained(model.send({ type: "cancelSearch", ticket }, "Phone"), "retiring stale searchable text")
     }
     const search = (try model.get()).search
-    try held.retireReview(search.stage === "SearchClosed" ? 0 : search.ticket)
+    try held.retireReview(search.ticket, search.stage === "SearchClosed")
     if (Scan.canSaveDraft(state, "Phone")) try contained(model.send({ type: "saveDraft" }, "Phone"), "keeping the scan draft")
   })
 }, "keeping scan pages")
@@ -632,7 +641,8 @@ const edits = started(effect {
 export const scanBack = effect {
   const model = try Scan.Machine
   const state = try model.get()
-  if (Scan.canCancelSearch(state, "Owner")) return try contained(model.send({ type: "cancelSearch" }, "Owner"), "closing searchable text")
+  const ticket = state.search.ticket
+  if (Scan.canCancelSearch(state, ticket, "Owner")) return try contained(model.send({ type: "cancelSearch", ticket }, "Owner"), "closing searchable text")
   if (state.search.stage === "SearchSaving") return true
   const editing = try Correction.Machine
   if (Correction.canCancel(try editing.get(), "Owner")) return try contained(editing.send({ type: "cancel" }, "Owner"), "closing the correction")
