@@ -404,14 +404,14 @@ a call, an unreadable call state and the first 30 seconds after boot.
 
 ```quint
 type CallState = NoCall | OnACall | CallUnknown
-type Recheck = { front: bool, audio: bool, call: CallState, booted: bool, sameOffer: bool, permitted: bool }
+type ReadAgain = { front: bool, audio: bool, call: CallState, booted: bool, sameOffer: bool, permitted: bool }
 
-pure def stillIdle(r: Recheck): bool =
+pure def stillIdle(r: ReadAgain): bool =
   r.front and r.audio and r.call == NoCall and r.booted and r.sameOffer and r.permitted
 
 pure def canRechecked(s: Install): bool = s.phase == Rechecking
 
-pure def rechecked(s: Install, check: Recheck): Moved =
+pure def rechecked(s: Install, check: ReadAgain): Moved =
   if (stillIdle(check)) { state: { ...s, phase: Stopped, rechecked: true }, out: List() }
   else { state: endedAs(Cancelled, s), out: List(ResumeAgent({ activation: s.activation }), Reconnect({ activation: s.activation })) }
 ```
@@ -419,11 +419,11 @@ pure def rechecked(s: Install, check: Recheck): Moved =
 ### An unreadable call state, a call, other audio, the shade or the first 30 seconds after boot keep an automatic update from committing
 
 ```quint
-pure def lawAnUnreadableCallBlocks(r: Recheck): bool = not(stillIdle({ ...r, call: CallUnknown })) and not(stillIdle({ ...r, call: OnACall }))
+pure def lawAnUnreadableCallBlocks(r: ReadAgain): bool = not(stillIdle({ ...r, call: CallUnknown })) and not(stillIdle({ ...r, call: OnACall }))
 
-pure def lawTheFirstThirtySecondsBlock(r: Recheck): bool = not(stillIdle({ ...r, booted: false }))
+pure def lawTheFirstThirtySecondsBlock(r: ReadAgain): bool = not(stillIdle({ ...r, booted: false }))
 
-pure def lawOtherAudioOrTheShadeBlocks(r: Recheck): bool = not(stillIdle({ ...r, audio: false })) and not(stillIdle({ ...r, front: false }))
+pure def lawOtherAudioOrTheShadeBlocks(r: ReadAgain): bool = not(stillIdle({ ...r, audio: false })) and not(stillIdle({ ...r, front: false }))
 ```
 
 ### An automatic update that was committed had passed its re-check
@@ -628,7 +628,8 @@ pure def sometimesCancelledAfterRestart(s: Install): bool =
 pure val versionValues = Set(2, 3)
 pure val digestValues = Set(1, 2)
 pure val urlValues = Set(1, 2)
-pure val calm: Recheck = { front: true, audio: true, call: NoCall, booted: true, sameOffer: true, permitted: true }
+pure val calm: ReadAgain = { front: true, audio: true, call: NoCall, booted: true, sameOffer: true, permitted: true }
+pure val rValues = checkValues
 pure val checkValues =
   Set(calm).union(Set({ ...calm, call: CallUnknown })).union(Set({ ...calm, call: OnACall }))
     .union(Set({ ...calm, booted: false })).union(Set({ ...calm, front: false })).union(Set({ ...calm, sameOffer: false }))

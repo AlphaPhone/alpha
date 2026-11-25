@@ -352,14 +352,14 @@ export const publishRelease = ({ run, port, apk, manifestFile, read }: {
 
 const commands = {
   channel: (_argv: readonly string[], _port: ChannelPort) => Effect.succeed({ repository: channelRepository, repositoryId: channelRepositoryId, tag: channelTag, manifestUrl: manifestUrl() }),
-  blockers: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
+  blockers: (argv: readonly string[], _port: ChannelPort) => Effect.gen(function* () {
     const found = yield* attempt(() => flags(argv, ["apk-manifest", "platform-certificate"]));
     const [file = ""] = yield* attempt(() => found.need("apk-manifest"));
     const { rows, blockers } = yield* attempt(() => recordedBlockers(file, found.values["platform-certificate"], true));
     if (!distributable(blockers)) return yield* new ReleaseRefused({ message: `not distributable: ${JSON.stringify(blockers)}` });
     return { distributable: true, rows, blockers };
   }),
-  admit: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
+  admit: (argv: readonly string[], _port: ChannelPort) => Effect.gen(function* () {
     const found = yield* attempt(() => flags(argv, ["apk", "version"]));
     const [file = "", version = ""] = yield* attempt(() => found.need("apk", "version"));
     return yield* admit(file, yield* attempt(() => whole(version, "version")));
@@ -406,15 +406,15 @@ const commands = {
     }
     return yield* attempt(() => run.take(event));
   }),
-  rerun: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
+  rerun: (argv: readonly string[], _port: ChannelPort) => Effect.gen(function* () {
     const [file = ""] = yield* attempt(() => flags(argv, ["run"]).need("run"));
     return yield* attempt(() => runOf(file).take({ type: "rerun" }));
   }),
-  abandon: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
+  abandon: (argv: readonly string[], _port: ChannelPort) => Effect.gen(function* () {
     const [file = ""] = yield* attempt(() => flags(argv, ["run"]).need("run"));
     return yield* attempt(() => runOf(file).take({ type: "abandon" }));
   }),
-  mirror: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
+  mirror: (argv: readonly string[], _port: ChannelPort) => Effect.gen(function* () {
     const [file = "", apk = "", to = ""] = yield* attempt(() => flags(argv, ["run", "apk", "to"]).need("run", "apk", "to"));
     const run = yield* attempt(() => runOf(file));
     return yield* attempt(() => {
@@ -430,7 +430,7 @@ const commands = {
       return { mirrored: target, sha256: sha256File(target), state: run.take(event) };
     });
   }),
-  plan: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
+  plan: (argv: readonly string[], _port: ChannelPort) => Effect.gen(function* () {
     const [file = "", apk = "", out = ""] = yield* attempt(() => flags(argv, ["run", "apk", "out"]).need("run", "apk", "out"));
     const run = yield* attempt(() => runOf(file));
     return yield* attempt(() => {
@@ -441,7 +441,7 @@ const commands = {
       return { plan, planSha256: sha256File(out), state: run.take(event) };
     });
   }),
-  review: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
+  review: (argv: readonly string[], _port: ChannelPort) => Effect.gen(function* () {
     const [file = "", planFile = "", approved = ""] = yield* attempt(() => flags(argv, ["run", "plan", "plan-sha256"]).need("run", "plan", "plan-sha256"));
     const run = yield* attempt(() => runOf(file));
     return yield* attempt(() => {
@@ -451,7 +451,7 @@ const commands = {
       return run.take({ type: "review" });
     });
   }),
-  sign: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
+  sign: (argv: readonly string[], _port: ChannelPort) => Effect.gen(function* () {
     const found = yield* attempt(() => flags(argv, ["run", "plan", "apk", "out", "keystore", "key-label", "apksigner"]));
     const [file = "", planFile = "", apk = "", out = "", keystore = "", label = ""] = yield* attempt(() => found.need("run", "plan", "apk", "out", "keystore", "key-label"));
     const run = yield* attempt(() => runOf(file));
@@ -478,7 +478,7 @@ const commands = {
     yield* attempt(() => state.stage === "Signed" ? renameSync(partial, out) : rmSync(partial, { force: true }));
     return { signed: state.stage === "Signed" ? out : undefined, state };
   }),
-  deliver: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
+  deliver: (argv: readonly string[], _port: ChannelPort) => Effect.gen(function* () {
     const [file = "", apk = "", recorded = "", to = ""] = yield* attempt(() => flags(argv, ["run", "apk", "apk-manifest", "to"]).need("run", "apk", "apk-manifest", "to"));
     const run = yield* attempt(() => runOf(file));
     if (!run.can({ type: "deliver", now: hours() })) return yield* new ReleaseRefused({ message: "no signed release waits to be delivered" });
@@ -495,7 +495,7 @@ const commands = {
       return { delivered: target, receipt, state };
     });
   }),
-  qualify: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
+  qualify: (argv: readonly string[], _port: ChannelPort) => Effect.gen(function* () {
     const [file = "", apk = "", evidence = ""] = yield* attempt(() => flags(argv, ["run", "apk", "evidence"]).need("run", "apk", "evidence"));
     const run = yield* attempt(() => runOf(file));
     return yield* attempt(() => {
@@ -541,7 +541,7 @@ const commands = {
     if (!channelHealthy(facts)) return yield* new ReleaseRefused({ message: `the channel is not healthy: ${JSON.stringify({ ...facts, legacyFloor })}` });
     return { versionCode: version, ...facts };
   }),
-  pilot: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
+  pilot: (argv: readonly string[], _port: ChannelPort) => Effect.gen(function* () {
     const found = yield* attempt(() => flags(argv, ["serial", "apk", "version", "record", "stock-home"]));
     const [serial = "", file = "", version = "", out = ""] = yield* attempt(() => found.need("serial", "apk", "version", "record"));
     const read = yield* admit(file, yield* attempt(() => whole(version, "version")));
@@ -572,7 +572,7 @@ const commands = {
     if (read.readback !== undefined && !read.passed) return yield* new ReleaseRefused({ message: `the phone did not update itself to ${offer.versionCode}; its record is ${out}` });
     return read;
   }),
-  custody: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
+  custody: (argv: readonly string[], _port: ChannelPort) => Effect.gen(function* () {
     const found = yield* attempt(() => flags(argv, ["out", "scratch"]));
     const [out = ""] = yield* attempt(() => found.need("out"));
     const secrets = Object.fromEntries(CUSTODY_SECRETS.map((name) => [name, process.env[name] ?? ""]));
@@ -582,14 +582,14 @@ const commands = {
     if (!custodyProven(proof.custody)) return yield* new ReleaseRefused({ message: `the protected keys are not the enrolled ones; the proof is ${out}` });
     return proof;
   }),
-  "os-plan": (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
+  "os-plan": (argv: readonly string[], _port: ChannelPort) => Effect.gen(function* () {
     const found = yield* attempt(() => flags(argv, ["plan", "plan-sha256"]));
     const [file = "", reviewed = ""] = yield* attempt(() => found.need("plan", "plan-sha256"));
     const { plan, facts } = yield* attempt(() => osPlanOf(readFileSync(file), reviewed, toolsPin()));
     if (!osPlanAdmitted({ ...facts, inputs: true })) return yield* new ReleaseRefused({ message: `the OS signing plan is not admitted: ${JSON.stringify(facts)}` });
     return { admitted: true, targetFiles: plan.targetFiles, otaTools: plan.otaTools, outputObject: plan.outputObject };
   }),
-  "os-sign": (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
+  "os-sign": (argv: readonly string[], _port: ChannelPort) => Effect.gen(function* () {
     const found = yield* attempt(() => flags(argv, ["plan", "plan-sha256", "target-files", "ota-tools", "work", "scratch"]));
     const [file = "", reviewed = "", target = "", tools = "", work = ""] = yield* attempt(() => found.need("plan", "plan-sha256", "target-files", "ota-tools", "work"));
     const secrets = Object.fromEntries(CUSTODY_SECRETS.slice(0, 3).map((name) => [name, process.env[name] ?? ""]));

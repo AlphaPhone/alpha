@@ -392,7 +392,11 @@ pure def sometimesCouldNotCheck(s: Updates): bool = s.note == CouldNotCheck
 
 Open is an app, Ask Alpha raised, a sheet or menu, a screen with
 a step of its own such as Home being edited, or anything else holding the
-phone. A recording under way is not idle either.
+phone. A review card and a chat that is not at rest show only in Ask Alpha
+raised or over Home as a sheet, so they are open too; the notification
+shade is drawn by Android over Alpha without telling the page, so Alpha's
+updater reads it as the window's focus at its re-check ([Install](./install.md)).
+A recording under way is not idle either.
 
 ```quint
 pure def ownerIdle(a: Activity): bool =
