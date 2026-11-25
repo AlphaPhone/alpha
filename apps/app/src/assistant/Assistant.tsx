@@ -272,6 +272,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const currentView = shell.state?.trail.at(-1);
   const onComms = isCommsView(currentView);
   const assistantDetent = shell.state?.assistant ?? "Bar";
+  const { following, gesture, done } = useSheetFollow(dock, assistantDetent, sectionRef);
   const compact = assistantDetent === "Bar" && currentView !== undefined && currentView !== "Browser" && !onComms;
   const composerField = useCallback((element: HTMLTextAreaElement | null) => {
     composerRef.current = element;
@@ -401,7 +402,6 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const open = dockOpen(assistantDetent);
   const full = assistantDetent === "Full";
   const keptHeight = assistantDetent === "Sheet" && dock.state && dock.state.kept > 0 ? dock.state.kept : undefined;
-  const { following, gesture, done } = useSheetFollow(dock, assistantDetent, sectionRef);
   const carry = (asks: readonly Ask[]) => {
     for (const ask of asks) {
       if (ask.tag === "Raise" && shell.can({ type: "raise", detent: ask.detent })) void shell.send({ type: "raise", detent: ask.detent });
@@ -526,7 +526,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           onFocusField: () => carry(dockFocused(assistantDetent)),
           onBlur: assistantDetent === "Typing" && !onComms ? (event) => {
             const next = event.relatedTarget;
-            if (next instanceof Element && (event.currentTarget.contains(next) || next.closest("[role='menu']"))) return;
+            if (next instanceof Element && (event.currentTarget.contains(next) || next.closest("[role='menu'], [role='dialog'], [role='alertdialog']"))) return;
             void runtime.runPromise(restTyping);
           } : undefined,
           onHistory: history.browse,
@@ -534,7 +534,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           onNew: chats.can(start) ? () => void chats.send(start) : undefined,
           making: making(shown),
           onClick: assistantDetent === "Bar" && !compact ? (event) => {
-            if (event.target instanceof Element && event.target.closest("button, textarea")) return;
+            if (!(event.target instanceof Element) || !event.currentTarget.contains(event.target) || event.target.closest("button, textarea")) return;
             typeWithFocus();
           } : undefined,
           onRemoveAttachment: (id) => {

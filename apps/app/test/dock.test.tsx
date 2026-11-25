@@ -162,11 +162,11 @@ describe("Ask Alpha dock and shell navigation", () => {
     expect(mark).not.toBeNull();
     await at("pointerdown", 700, mark ?? window);
     await underAct(async () => { await pressed(); });
-    await at("pointermove", 650);
-    await at("pointermove", 500);
+    await at("pointermove", 650, mark ?? window);
+    await at("pointermove", 500, mark ?? window);
     expect([section()?.getAttribute("data-alpha-detent"), section()?.style.height]).toEqual(["sheet", "302px"]);
     expect((await shell()).assistant).toBe("Bar");
-    await at("pointerup", 500);
+    await at("pointerup", 500, mark ?? window);
     await act(async () => { await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet")))); });
 
     // spec/app/assistant/dock.md, "A released drag lands on the bar, a sheet at a height, or the full screen": pulled to the floor by its handle, the open sheet follows and rests on the bar
@@ -174,10 +174,10 @@ describe("Ask Alpha dock and shell navigation", () => {
     expect(handle).not.toBeNull();
     await at("pointerdown", 400, handle ?? window);
     await underAct(async () => { await pressed(); });
-    await at("pointermove", 500);
-    await at("pointermove", 740);
+    await at("pointermove", 500, handle ?? window);
+    await at("pointermove", 740, handle ?? window);
     expect(section()?.style.height).toBe("102px");
-    await at("pointerup", 740);
+    await at("pointerup", 740, handle ?? window);
     await act(async () => { await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Bar")))); });
     expect(section()?.getAttribute("data-alpha-detent")).toBe("bar");
   });
@@ -225,7 +225,7 @@ describe("Ask Alpha dock and shell navigation", () => {
       scrim?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX: 40, clientY: 120, pointerId: 11, pointerType: "touch", isPrimary: true }));
       await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Bar"))));
     });
-    await act(async () => { await new Promise((settled) => setTimeout(settled, 50)); });
+    await act(async () => { await Effect.runPromise(Effect.sleep("50 millis")); });
     expect(await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).toMatchObject({ trail: ["Browser"], assistant: "Bar" });
   });
 
