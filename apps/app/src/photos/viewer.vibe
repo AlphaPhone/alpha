@@ -1,5 +1,5 @@
 // spec/app/photos/viewer.md, "Story: Look at a photo or video"; spec/app/photos/viewer.md, "Story: Edit a photo or trim a video"; spec/app/photos/viewer.md, "Story: Keep a copy through a restart"; spec/app/photos/viewer.md, "Story: Share what I am looking at"
-import type { EditOperationId, EditPreview, MediaItem, VideoEditSession } from "@elizaos/os/bridges/definitions/media"
+import type { EditOperationId, EditPreview, MediaItem, VideoEditSession } from "@elizaos/os-bridges"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Library from "../../gen/app__photos.effect.vibe"
 import type { Actor } from "../../gen/app__photos__actor.effect.vibe"
@@ -14,7 +14,7 @@ import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vi
 
 module sources {
   import { Schema } from "effect"
-  import { EditReceipt } from "@elizaos/os/bridges/media.schema"
+  import { EditReceipt } from "@elizaos/os-bridges"
 
   /** @throws {never} */
   export function editOperation(raw: string | undefined): EditOperationId | undefined {

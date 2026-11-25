@@ -1,7 +1,5 @@
 // spec/app/files/scan.md, "Story: Arrange the pages"; spec/app/files/scan.md, "Story: Keep the scan as I work"; spec/app/files/scan.md, "Story: Make the PDF, and keep the photo"
-import { createScanDraftStore } from "@elizaos/plugin-files/documents/scan-draft"
-import { scannedLinks } from "@elizaos/plugin-files/documents/scan-links"
-import type { ScanTextLine } from "@elizaos/plugin-files/documents/scan-text-layer"
+import { createScanDraftStore, scannedLinks, type ScanTextLine } from "@elizaos/plugin-files-client"
 import { registered } from "../platform/device.vibe"
 import type { Page } from "../../gen/app__files__scanDraft.ts"
 
@@ -29,8 +27,8 @@ export interface ScanSaved {
 module web {
   import type { PdfReceipt, ScanImage, ScanSaved, StoredPage } from "./scanStore.vibe"
   import Draw from "./scanPdf.worker.ts?worker"
-  import { admittedTextLayer } from "@elizaos/plugin-files/documents/scan-text-layer"
-  import { scannedLinks } from "@elizaos/plugin-files/documents/scan-links"
+  import { admittedTextLayer } from "@elizaos/plugin-files-client"
+  import { scannedLinks } from "@elizaos/plugin-files-client"
   import { registerPlugin } from "@capacitor/core"
 
   interface ScanWriter {

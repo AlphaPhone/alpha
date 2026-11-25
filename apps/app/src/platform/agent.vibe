@@ -1,14 +1,13 @@
 // spec/kit/read.md, "Story: Read from outside"; spec/app/account/index.md, "Story: Have the agent running"; spec/app/platform/index.md, "Story: Talk to the resident agent"; spec/app/platform/index.md, "A request or stream Alpha stops waiting for is withdrawn from the phone, and may still have reached the agent"; spec/app/platform/feed.md, "Story: Follow what my agent does on my screen"
-import { type RuntimeJsonBridge, type RuntimeRequestHeaders, type RuntimeStatus, type RuntimeStreamFrame, RuntimeRequestError, createRuntimeJsonClient } from "@elizaos/agent/client"
-import { BridgeUnavailable } from "@elizaos/os/bridges/bridge"
-import type { AgentEvent, AgentMethod, AgentRecoveryArchive, AgentRecoveryReview, AgentRoute, AgentStatus, AgentStreamData, AgentStreamEnd, AgentTopic, ElizaAgentPlugin } from "@elizaos/os/bridges/definitions/agent"
+import { type RuntimeJsonBridge, type RuntimeRequestHeaders, type RuntimeStatus, type RuntimeStreamFrame, RuntimeRequestError, createRuntimeJsonClient } from "@elizaos/agent"
+import { BridgeUnavailable, type AgentEvent, type AgentMethod, type AgentRecoveryArchive, type AgentRecoveryReview, type AgentRoute, type AgentStatus, type AgentStreamData, type AgentStreamEnd, type AgentTopic, type ElizaAgentPlugin } from "@elizaos/os-bridges"
 import { chunkTaken, deliveryOf, replied } from "../../gen/app__platform.effect.vibe"
 import { Machine as Feed, type FrameKind, machine as feedMachine } from "../../gen/app__platform__feed.effect.vibe"
 import { fresh } from "../runtime/attempts.vibe"
 import { type Failure, type Listening, type Opened, type Remote, type Wired, Unreachable, Unsent, parsed, patience, refusal, remoteAt, sse } from "./remote.vibe"
 
 module held {
-  import { agentClient } from "@elizaos/os/bridges/agent"
+  import { agentClient } from "@elizaos/os-bridges"
 
   let made: ReturnType<typeof agentClient> | undefined
   /** eliza's client of the plugin, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
@@ -21,7 +20,7 @@ import { client } from held
 /**
  * eliza's own client of its agent: `request(path, body?)` and `stream(path, body, signal?)`, which wait for an agent
  * that is starting. It is what eliza's `TurnController`, `readReplyStream`, `TaskLifecycle` and surface client of
- * `@elizaos/agent/client` take as their transport, so an area that talks to the agent in eliza's own protocol passes
+ * `@elizaos/agent` take as their transport, so an area that talks to the agent in eliza's own protocol passes
  * it to them and restates none of their wire shapes.
  */
 export type Runtime = ReturnType<typeof createRuntimeJsonClient>
@@ -426,7 +425,7 @@ function fed(plugin: ElizaAgentPlugin, topic: AgentTopic, clientId: string | und
 
 /**
  * The agent on the phone, through the `ElizaAgent` plugin of eliza's Android package, which holds the launch token
- * and checks each route against the host's list: eliza's `agentClient()` of `@elizaos/os/bridges/agent`.
+ * and checks each route against the host's list: eliza's `agentClient()` of `@elizaos/os-bridges`.
  */
 export const relayedAgent = Layer.sync(Agent, () => {
   const plugin = client()

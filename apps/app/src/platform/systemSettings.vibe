@@ -1,16 +1,14 @@
 // spec/app/settings/facts.md, "Story: See what the phone says"; spec/app/settings/android.md, "Story: Change what only Android can change"
-import type { AndroidRoleStatus, NativeCrashEntry, SettingsHandoff, SystemFacts, SystemSettingsPage } from "@elizaos/os/bridges/definitions/system"
-import type { LocationPermissionStatus } from "@elizaos/os/bridges/definitions/location"
-import type { FilesAccess, StorageVolume } from "@elizaos/os/bridges/definitions/files"
+import type { AndroidRoleStatus, NativeCrashEntry, SettingsHandoff, SystemFacts, SystemSettingsPage, LocationPermissionStatus, FilesAccess, StorageVolume } from "@elizaos/os-bridges"
 import type { Opened, Target } from "../../gen/app__settings__android.ts"
 import type { Access, AccessGrant, Holder, Reading } from "../../gen/app__settings__facts.ts"
 import type { Grant } from "../../gen/kit__permission.ts"
 
 module held {
-  import type { SystemClient } from "@elizaos/os/bridges/system"
-  import { locationClient } from "@elizaos/os/bridges/location"
-  import { wifiClient } from "@elizaos/os/bridges/wifi"
-  import { filesClient } from "@elizaos/os/bridges/files"
+  import type { SystemClient } from "@elizaos/os-bridges"
+  import { locationClient } from "@elizaos/os-bridges"
+  import { wifiClient } from "@elizaos/os-bridges"
+  import { filesClient } from "@elizaos/os-bridges"
 
   let system: Promise<SystemClient> | undefined
   let location: ReturnType<typeof locationClient> | undefined
@@ -21,7 +19,7 @@ module held {
    * up, since Capacitor binds a plugin to the platform it finds when the plugin is first registered.
    */
   export function systemOf(): Promise<SystemClient> {
-    return (system ??= import("@elizaos/os/bridges/system").then((bridge) => bridge.System))
+    return (system ??= import("@elizaos/os-bridges").then((bridge) => bridge.System))
   }
   /** eliza's clients of the other plugins, each made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
   export function locationOf(): ReturnType<typeof locationClient> {

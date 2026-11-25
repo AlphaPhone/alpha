@@ -1,6 +1,6 @@
 // spec/app/files/correction.md, "Story: Correct a page's edges"
 import { Alert, Button, Dialog, DialogContent, DialogTitle, cn, focusRing } from "@repo/ui";
-import type { ScanCorner, ScanCorners } from "@elizaos/plugin-files/documents/scan-correction";
+import type { ScanCorner, ScanCorners } from "@elizaos/plugin-files-client";
 import type { Layer } from "effect";
 import { RotateCw } from "lucide-react";
 import { useState, type PointerEvent } from "react";

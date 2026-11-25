@@ -1,6 +1,5 @@
 // spec/app/approvals/index.md, "Story: One action at a time"; spec/app/approvals/proposal.md, "Story: Decide"; spec/app/photos/agent.md, "Story: Let Alpha read my library"; spec/app/phone/comms.md, "Story: Approve what Alpha proposes, one thing at a time"; spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"
-import { DeviceExecution, NOT_DISPATCHED, type DeviceAgent, type ExecutorCall, type JournalIdentity, type RuntimeRequestHeaders } from "@elizaos/agent/client"
-import { operationOf, readOperation, type DeviceOperation } from "@elizaos/agent/operations"
+import { DeviceExecution, NOT_DISPATCHED, type DeviceAgent, type ExecutorCall, type JournalIdentity, type RuntimeRequestHeaders, operationOf, readOperation, type DeviceOperation } from "@elizaos/agent"
 import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
 import { Machine as Chats } from "../../gen/app__assistant__chats.effect.vibe"
 import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
@@ -28,7 +27,7 @@ interface ApprovalScope {
 
 module native {
   import { registerPlugin } from "@capacitor/core"
-  import type { DeviceJournal, JournalEntry } from "@elizaos/agent/client"
+  import type { DeviceJournal, JournalEntry } from "@elizaos/agent"
 
   interface EnrollmentPlugin {
     enrollmentKey(input: { slot: string }): Promise<{ key: string }>

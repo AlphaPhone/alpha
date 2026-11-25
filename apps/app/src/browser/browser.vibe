@@ -1,6 +1,6 @@
 // spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/index.md, "Story: Keep my tabs through a restart"; spec/app/browser/index.md, "Story: Save the session"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"
 import type * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { browsingSnapshot, restoreBrowsing } from "@elizaos/os/bridges/browsing-session"
+import { browsingSnapshot, restoreBrowsing } from "@elizaos/os-bridges"
 import * as Tabs from "../../gen/app__browser.effect.vibe"
 import type { Browser, Effect as TabsOut, Event as TabsEvent } from "../../gen/app__browser.effect.vibe"
 import * as Address from "../../gen/app__browser__address.effect.vibe"
@@ -12,7 +12,7 @@ import { type Job, Whole, answer, contained, due, reacting, run, started, stream
 import type { Time } from "../runtime/time.vibe"
 
 module page {
-  import { isSecureWebAddress } from "@elizaos/os/browser/address"
+  import { isSecureWebAddress } from "@elizaos/os-bridges"
   import type { Input } from "../../gen/app__browser__address.ts"
 
   /** Whether `href` came over HTTPS with a host. @throws {never} */

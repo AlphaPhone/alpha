@@ -1,5 +1,5 @@
 // spec/app/settings/index.md, "Each page links to what another area owns there"; spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"; spec/kit/read.md, "Story: Read from outside"
-import { CloudError, isCredentialInvalid, networkError } from "@elizaos/cloud/client"
+import { CloudError, isCredentialInvalid, networkError } from "@elizaos/cloud"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import { type Account, Cloud } from "../platform/cloud.vibe"
 import { Device } from "../platform/device.vibe"

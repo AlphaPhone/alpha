@@ -1,6 +1,6 @@
 // spec/app/photos/agent.md, "Story: Let Alpha read my library"; spec/app/photos/agent.md, "Story: Let Alpha change my photos"
-import type { DeviceOperation, OperationResultOf } from "@elizaos/agent/operations"
-import type { MediaItem } from "@elizaos/os/bridges/definitions/media"
+import type { DeviceOperation, OperationResultOf } from "@elizaos/agent"
+import type { MediaItem } from "@elizaos/os-bridges"
 import * as Library from "../../gen/app__photos.effect.vibe"
 import type { Actor } from "../../gen/app__photos__actor.effect.vibe"
 import * as Assistant from "../../gen/app__photos__agent.effect.vibe"
@@ -12,7 +12,7 @@ import { Catalog, type Row } from "./catalog.vibe"
 
 module wire {
   import { Schema } from "effect"
-  import { MediaId } from "@elizaos/os/bridges/media.schema"
+  import { MediaId } from "@elizaos/os-bridges"
 
   /** @throws {never} */
   export function mediaId(id: string) {

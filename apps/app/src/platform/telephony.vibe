@@ -1,15 +1,12 @@
 // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
-import type { DeferredDeletionsClient } from "@elizaos/os/bridges/action-journal"
-import type { AddressBookClient, ContactNamesClient, NameSurface } from "@elizaos/os/bridges/contacts"
-import type { MessagesClient } from "@elizaos/os/bridges/messages"
-import type { PhoneClient } from "@elizaos/os/bridges/phone"
+import type { DeferredDeletionsClient, AddressBookClient, ContactNamesClient, NameSurface, MessagesClient, PhoneClient } from "@elizaos/os-bridges"
 
 module held {
-  import { actionJournalPlugin, createDeferredDeletions } from "@elizaos/os/bridges/action-journal"
-  import { rejectionCode } from "@elizaos/os/bridges/bridge"
-  import { addressBookPlugin, createAddressBookClient, createContactNames } from "@elizaos/os/bridges/contacts"
-  import { messagesClient, messagesPlugin } from "@elizaos/os/bridges/messages"
-  import { phoneClient, telephonyPlugin } from "@elizaos/os/bridges/phone"
+  import { actionJournalPlugin, createDeferredDeletions } from "@elizaos/os-bridges"
+  import { rejectionCode } from "@elizaos/os-bridges"
+  import { addressBookPlugin, createAddressBookClient, createContactNames } from "@elizaos/os-bridges"
+  import { messagesClient, messagesPlugin } from "@elizaos/os-bridges"
+  import { phoneClient, telephonyPlugin } from "@elizaos/os-bridges"
   function make() {
     const journal = actionJournalPlugin()
     return {

@@ -1,8 +1,8 @@
 // spec/kit/attempt.md, "Story: Do something outside, once"
-import type { ElizaSecureStoreError, ElizaSecureStoreReadError } from "@elizaos/os/bridges/definitions/secure-store"
+import type { ElizaSecureStoreError, ElizaSecureStoreReadError } from "@elizaos/os-bridges"
 
 module held {
-  import { secureStoreClient } from "@elizaos/os/bridges/secure-store"
+  import { secureStoreClient } from "@elizaos/os-bridges"
 
   let made: ReturnType<typeof secureStoreClient> | undefined
   /** eliza's client of the plugin, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
@@ -35,7 +35,7 @@ export service Vault {
 
 /**
  * The phone's secure store, through the `ElizaSecureStore` plugin of eliza's Android package: eliza's
- * `secureStoreClient()` of `@elizaos/os/bridges/secure-store`, which decodes each answer. A value is one JSON text.
+ * `secureStoreClient()` of `@elizaos/os-bridges`, which decodes each answer. A value is one JSON text.
  */
 export const relayedVault = Layer.sync(Vault, () => {
   const store = client()

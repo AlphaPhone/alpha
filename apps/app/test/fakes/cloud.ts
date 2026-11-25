@@ -1,5 +1,5 @@
 // spec/kit/read.md, "Story: Read from outside"
-import type { Account } from "@elizaos/cloud/client";
+import type { Account } from "@elizaos/cloud";
 import { busy } from "./platform.ts";
 import type { Route } from "./routes.ts";
 

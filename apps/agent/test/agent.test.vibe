@@ -1,6 +1,6 @@
 // spec/agent/index.md, "Story: Run Alpha's agent on the phone"
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports -- ConversationRecord is the schema `schema Created` decodes with, a value the projection ESLint reads does not show
-import { ConversationRecord, TurnController, createRuntimeJsonClient } from "@elizaos/agent/client"
+import { ConversationRecord, TurnController, createRuntimeJsonClient } from "@elizaos/agent"
 import { describe, expect, it } from "@effect/vitest"
 import { configurationExit, coreActions, entryCarried, packedPlugins, productPluginName, refusedActions, workerAdmitted } from "../gen/agent.effect.vibe"
 import { type Running, call, launchFor, listed, manifest, pinnedWorker, policy, ready, socketBridge, startPhoneAgent, startRun } from "./phone.ts"
