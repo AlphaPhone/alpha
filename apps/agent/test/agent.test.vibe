@@ -114,19 +114,18 @@ describe("Run Alpha's agent on the phone", () => {
       const history = `/api/conversations/${opened.id}/messages`
       const latest = try promise(() => call(first, "GET", history))
       const { messages } = try Schema.decodeUnknownEffect(Schema.fromJsonString(History))(latest.body)
-      const { anchor, prior, centered, older } = try Effect.try(() => {
-        const anchor = messages.at(-1)
-        const prior = messages.at(-2)
-        if (anchor === undefined || prior === undefined) throw new Error("The sent turn has no two recorded messages")
-        const id = encodeURIComponent(anchor.id)
-        const centered = `${history}?around=${id}`
-        const cursor = `${history}?before=${anchor.timestamp}&beforeId=${id}`
-        const older = `${cursor}&limit=1`
+      const anchor = messages.at(-1)
+      const prior = messages.at(-2)
+      if (anchor === undefined || prior === undefined) throw new Error("The sent turn has no two recorded messages")
+      const id = encodeURIComponent(anchor.id)
+      const centered = `${history}?around=${id}`
+      const cursor = `${history}?before=${anchor.timestamp}&beforeId=${id}`
+      const older = `${cursor}&limit=1`
+      try Effect.try(() => {
         const gate = defineRoutes(listed())
         const admitted = (target: string) => gate.admit({ method: "GET", target, streamed: false, body: undefined }).tag === "Admitted"
         expect([history, centered, older, `${older}&beforeId=${id}`, `${cursor}&limit=2`, `${history}?before=01&beforeId=${id}&limit=1`].map(admitted))
           .toEqual([true, true, true, false, false, false])
-        return { anchor, prior, centered, older }
       })
       const near = try promise(() => call(first, "GET", centered))
       const edge = try promise(() => call(first, "GET", older))
