@@ -80,9 +80,8 @@ pure val dayValues = Set(0, 3, 7)
 pure val hourValues = Set(7, 24)
 pure val minuteValues = Set(0, 60)
 pure val zoneValues = Set(0, 1)
-pure val whenValues = Set(S::daily(0), S::pickPreset(S::daily(1), S::Manual), S::pickPreset(S::daily(1), S::Custom))
 pure val heldValues = Set(1, 2)
-pure val whenValues = S::wValues.union(Set({ preset: S::Weekdays, days: Set(1, 2, 3, 4, 5), hour: 8, minute: 0, zone: 0 }))
+pure val whenValues = S::wValues.union(Set(S::daily(0), S::pickPreset(S::daily(1), S::Manual), S::pickPreset(S::daily(1), S::Custom), { preset: S::Weekdays, days: Set(1, 2, 3, 4, 5), hour: 8, minute: 0, zone: 0 }))
 pure val opValues = Set(T::SuppliedText, T::CalendarRange, T::Contains, T::ReadAloud, T::SelectedNotes)
 pure val stepsValues = Set(
   List(),

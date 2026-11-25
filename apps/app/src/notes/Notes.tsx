@@ -1,5 +1,6 @@
 // spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Organise my notes"; spec/app/notes/editor.md, "Story: Write a note"; spec/app/notes/trash.md, "Story: Delete a note and get it back"
 import { Alert, AppHeader, Button, Chip, EmptyState, Input, LinkNoteView, Menu, MenuContent, MenuItem, MenuTrigger, NoteEditor as NoteForm, NoteRow, NotesList as NoteRows, Spinner, VoiceNoteView } from "@repo/ui";
+import { Effect } from "effect";
 import { ArrowLeft, Ellipsis, FileDown, Folder, Mail, MessageSquare, Mic, Plus, Trash2 } from "lucide-react";
 import { useState, useSyncExternalStore, type FormEvent } from "react";
 import * as Notes from "../../gen/app__notes.ts";

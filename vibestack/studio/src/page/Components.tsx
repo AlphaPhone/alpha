@@ -8,7 +8,7 @@ import { Machine, machine } from "../../gen/components.effect.vibe";
 import { useMachine } from "../../gen/components.react.ts";
 import { initial, type Event } from "../../gen/components.ts";
 import type { RuleMeta, RuleRole, SimResult, SpecModelGraph } from "../graph.ts";
-import type { Component, ComponentIndex, Prop, Story } from "../../../vibestack/src/stories/emit.ts";
+import type { Component, ComponentIndex, Prop, Story } from "../../../stories/emit.ts";
 import {
   S, fetchPreview, graphOf, isDarkTheme, openComponent, openStateFocus, postSim, reveal, select, useStudio,
 } from "./studio.ts";
