@@ -20,6 +20,7 @@ import { type TelephonyScene, telephonyRoutes, telephonyScene } from "./telephon
 import { type UpdateScene, updateScene } from "./update.ts";
 import { type VoiceScene, voiceScene } from "./voice.ts";
 import { type BrowserScene, browserScene } from "./browser.ts";
+import { type WalletScene, walletRoutes, walletScene } from "./wallet.ts";
 
 export interface Scene {
   phone: boolean;
@@ -47,6 +48,7 @@ export interface Scene {
   readonly update: UpdateScene;
   readonly voice: VoiceScene;
   readonly browser: BrowserScene;
+  readonly wallet: WalletScene;
 }
 
 export function scene(): Scene {
@@ -71,6 +73,7 @@ export function scene(): Scene {
     update: updateScene(),
     voice: voiceScene(),
     browser: browserScene(),
+    wallet: walletScene(),
   };
 }
 
@@ -90,6 +93,7 @@ export function services(world: Scene) {
       ...workflowRoutes(world.workflows),
       ...platformRoutes(world.platform),
       ...telephonyRoutes(world.telephony),
+      ...walletRoutes(world.wallet, () => world.now),
     ]),
     cloud: answering([
       ...cloudRoutes(),
