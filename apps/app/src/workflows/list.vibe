@@ -2,7 +2,7 @@
 import type { RemoteWorkflow } from "@elizaos/plugin-workflow-client"
 import type { Freshness } from "../../gen/app__home__cards.effect.vibe"
 import * as List from "../../gen/app__workflows__list.effect.vibe"
-import type { Effect as Out, Event } from "../../gen/app__workflows__list.effect.vibe"
+import type { Effect as Out, Event, StatusFilter } from "../../gen/app__workflows__list.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { fromAreas } from "../home/cards.vibe"
 import type { Shell as ShellState } from "../../gen/app__shell.effect.vibe"
@@ -22,7 +22,7 @@ export type WorkflowRow = UnnumberedRow & { readonly number: number }
 
 type Source = "Workflows" | "Removed workflows" | "Prompts" | "Scheduled tasks"
 
-interface Snapshot {
+export interface Snapshot {
   readonly owner: number
   readonly rows: ReadonlyArray<WorkflowRow>
   readonly problems: ReadonlyArray<Source>
@@ -91,11 +91,16 @@ function promptRow(record: Prompt): UnnumberedRow {
   return { kind: "Prompt", record, id: record.id, title: record.displayName, summary: record.instructions, on: record.enabled, removed: false }
 }
 
+/** A scheduled task's row, named as the agent named it ("Morning check-in", a routine's or reminder's title), never by its kind's identifier. */
 function taskRow(record: ScheduledTask): UnnumberedRow {
   const kind = record.kind === "personal-assistant.reminder" ? "Reminder" : "Schedule"
   const on = record.trigger.kind !== "manual" && ["scheduled", "fired", "acknowledged"].includes(record.state.status)
-  const title = kind === "Reminder" ? record.promptInstructions : record.metadata.recordKey ?? record.kind
-  return { kind, record, id: record.taskId, title, summary: kind === "Reminder" ? "" : record.promptInstructions, on, removed: false }
+  return { kind, record, id: record.taskId, title: record.promptInstructions.trim() || "Scheduled task", summary: "", on, removed: false }
+}
+
+/** What the list says could not be read: removed workflows only under Removed, the one standing whose rows they would be. */
+export function shownUnder(snapshot: Snapshot, standing: StatusFilter): Snapshot {
+  return standing === "Removed" ? snapshot : { ...snapshot, problems: snapshot.problems.filter((source) => source !== "Removed workflows") }
 }
 
 effect function read(ticket: number, owner: number): Event!!(WorkflowsApi | Agent | Rows | List.Machine) {

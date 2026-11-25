@@ -3,7 +3,9 @@ import { Effect, Layer } from "effect";
 import { Browser } from "./Browser.tsx";
 import { back, browser } from "./browser.vibe";
 import { cancelHistory, library } from "./library.vibe";
-import { sharing } from "./share.vibe";
+import { cancelPrivateFrame, sharing } from "./share.vibe";
+
+const backFromHistory = Effect.flatMap(cancelHistory(), (cancelled) => cancelled ? Effect.succeed(true) : back);
 
 /** The Browser, at its view (areas.ts): its tabs, kept across restarts, and each tab's page in the phone's tab host. */
-export default area(Layer.provideMerge(Layer.merge(library, sharing), browser), Browser, { back: Effect.flatMap(cancelHistory(), (cancelled) => cancelled ? Effect.succeed(true) : back) });
+export default area(Layer.provideMerge(Layer.merge(library, sharing), browser), Browser, { back: Effect.flatMap(cancelPrivateFrame(), (cancelled) => cancelled ? Effect.succeed(true) : backFromHistory) });

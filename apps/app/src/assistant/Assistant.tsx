@@ -46,14 +46,16 @@ import { type Attached, type Line, Talk } from "./talk.vibe";
 import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx";
 import { CommsBriefing } from "../phone/comms.vibe";
 import { displayNumber } from "../phone/words.ts";
-import { wordsOf } from "./words.ts";
+import { replyBlocks, wordsOf } from "./words.ts";
+import { handToMaps } from "../maps/handoff.ts";
+import type { MapsCard } from "@elizaos/plugin-maps-client";
 import { type TalkStopReceipt, type VoiceKeyboard, useTalkKeyboard } from "../voice/useTalkKeyboard.ts";
 
 export interface AssistantProps {
   runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | SettingsPages | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview | Documents | Agent, unknown>;
   messageActions?: MessageActions;
   speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & {
-    voiceReview?: ReactNode;
+    voicePanel?: ReactNode;
     keyboard?: TalkStopReceipt;
     voice?: (presentation: { compactDock: boolean; atBar: boolean; onKeyboard: VoiceKeyboard }) => ReactNode;
   };
@@ -276,7 +278,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const scrimRef = useRef<{ pointer: number; x: number; y: number; moved: boolean } | undefined>(undefined);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const focusOnRevealRef = useRef(false);
-  const { voice: renderVoice, voiceReview, keyboard, ...speechProps } = speech ?? {};
+  const { voice: renderVoice, voicePanel, keyboard, ...speechProps } = speech ?? {};
   const keyboardOwner = useCallback(() => keyboardScope(runtime), [runtime]);
   const { onKeyboard, takeFocus } = useTalkKeyboard(composerRef, keyboardOwner, keyboard);
   const currentView = shell.state?.trail.at(-1);
@@ -304,13 +306,40 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const onSettings = useCallback(() => {
     if (settingsAction) void runtime.runPromiseExit(Effect.flatMap(ShellMachine, (machine) => machine.send(settingsAction)));
   }, [runtime, settingsAction]);
-  const onOpenMaps = useCallback(() => void runtime.runPromiseExit(Effect.flatMap(ShellMachine, (machine) => machine.send(maps))), [runtime]);
+  // spec/app/maps/cards.md, "A card's Map button runs one flow, chosen from what the card carries": a search card hands Maps its search
+  const [opened, setOpened] = useState<ReadonlySet<number>>(() => new Set());
+  const onOpenMaps = useCallback((card: MapsCard, message: number) => {
+    setOpened((before) => new Set([...before, message]));
+    const query = card.kind === "places" || card.kind === "locate" ? card.query : undefined;
+    handToMaps(query !== undefined && query.trim() !== "" ? query : undefined);
+    void runtime.runPromiseExit(Effect.flatMap(ShellMachine, (machine) => machine.send(maps)));
+  }, [runtime]);
+  const mapsShowing = Boolean(shell.state && showing(shell.state, "Maps"));
+  // spec/app/maps/cards.md, "A tap sends one answer while the composer is quiet; a draft or an edit says why it waits; a failed send asks again"
+  const answeredRef = useRef(new Set<string>());
+  const onChoose = useCallback((choice: string, value: string) => {
+    if (!talking || answeredRef.current.has(choice) || board.snapshot().typed.trim() !== "") return;
+    const edit = { type: "edit", blank: false, long: value.length > textLimit } as const;
+    if (!composer.can(edit)) return;
+    answeredRef.current.add(choice);
+    board.type(value);
+    const answer = { type: "hold", askable: askable(talking) } as const;
+    void composer.send(edit)
+      .then(() => {
+        board.hold(value);
+        board.type("");
+        return composer.send(answer);
+      })
+      .then((outcome) => { if (outcome._tag !== "Success") answeredRef.current.delete(choice); });
+  }, [board, composer, talking]);
   const messages = useMessageRows({
     runtime, board, lines, chats: shown, writing, ...free, actions: messageActions, canReadAloud,
     settled: Boolean(talking && !inFlight(talking.turn) && !pending(talking)),
     onSettings: settingsAction ? onSettings : undefined,
     onPreview: canPreview ? preview : undefined,
-    onOpenMaps: shell.can(maps) ? onOpenMaps : undefined,
+    onOpenMaps: shell.can(maps) || mapsShowing ? onOpenMaps : undefined,
+    opened,
+    onChoose,
   });
   if (conversation.cause || chats.cause || composer.cause || reply.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Ask Alpha</Alert>;
   if (!talking || !shown || !writing || !finding) return null;
@@ -369,8 +398,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
   const earlier = { type: "scroll", around: board.numbered(lines[0]?.id ?? "") } as const;
   const later = { type: "scroll", around: board.numbered(lines.at(-1)?.id ?? "") } as const;
-  const streamed = shownReply(seen.reply);
-  const writingReply = streamed !== "" ? [{ id: "reply", author: "alpha", text: streamed } as const] : [];
+  const replyWords = replyBlocks(shownReply(seen.reply), true).words;
+  const writingReply = replyWords !== "" ? [{ id: "reply", author: "alpha", text: replyWords } as const] : [];
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
   const mediaCards = seen.media.filter((card) => !talking.context.sensitive && card.conversation === shown.chosen && card.revision === talking.context.revision).map((card) => ({
     id: `media ${card.id}`, author: "alpha" as const, text: "", children: <DeviceReview runtime={runtime} card={card} />,
@@ -472,7 +501,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       ) : null}
       {(!onComms || open) && <AssistantConversation
         ref={sectionRef}
-        voiceReview={voiceReview}
+        voicePanel={voicePanel}
         detent={live && !onComms ? "sheet" : assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
         className={onComms ? "relative w-full motion-safe:transition-[height] motion-safe:duration-[420ms]" : open || live ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
         style={onComms
@@ -482,7 +511,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           title: seen.titles.get(shown.chosen) ?? "Ask Alpha",
           context: { view, selected: talking.context.selected, sensitive: talking.context.sensitive },
           onHome: () => void runtime.runPromise(home()),
-          onClose: open && shell.can({ type: "goBack" }) ? () => void shell.send({ type: "goBack" }) : undefined,
+          onClose: open && shell.can({ type: "goBack" }) ? () => void shell.send({ type: "goBack" }).then((lowered) => { if (full && lowered._tag === "Success" && shell.can({ type: "goBack" })) void shell.send({ type: "goBack" }); }) : undefined,
           expanded: assistantDetent === "Full",
           onResize: assistantDetent === "Full"
             ? () => void shell.send({ type: "goBack" })
@@ -498,8 +527,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           status: shown.page.status === "Loading" ? "loading" : shown.page.status === "Failed" ? "failed" : "loaded",
           turn: status === undefined ? undefined : { status, label: seen.label === "" ? undefined : seen.label, onCheck: checkable ? () => void conversation.send(check) : undefined },
           onRetry: chats.can({ type: "reread" }) ? () => void chats.send({ type: "reread" }) : undefined,
-          onEarlier: chats.can(earlier) ? () => void chats.send(earlier) : undefined,
-          onLater: chats.can(later) ? () => void chats.send(later) : undefined,
+          onEarlier: earlier.around > 1 && chats.can(earlier) ? () => void chats.send(earlier) : undefined,
+          onLater: later.around < shown.messages && chats.can(later) ? () => void chats.send(later) : undefined,
           onReturnToOriginal: chats.can({ type: "returnToOriginal", ...free }) ? () => void chats.send({ type: "returnToOriginal", ...free }) : undefined,
         }}
         composer={{

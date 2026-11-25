@@ -195,6 +195,12 @@ it("Keeps my phone draft through restart and leaves it with my account (spec/app
   expect(world.ask.said).toEqual([]);
 });
 
+/** Wait, on the runtime of `alpha`, until `check` holds. */
+async function settled(alpha: Awaited<ReturnType<typeof open>>["alpha"], check: () => boolean, detail: () => unknown) {
+  for (let turn = 0; turn < 2_000 && !check(); turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
+  if (!check()) throw new Error(`did not settle: ${JSON.stringify(detail())}`);
+}
+
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/chats.md, "Story: Start a conversation, or fork one"
   it("Ask Alpha something, in a conversation made for it (spec/app/assistant/index.md, \"Story: Ask Alpha something\")", async () => {
@@ -217,6 +223,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Reply, (s) => s.status === "Settled" && s.final === "You said: Hello".length);
     // spec/app/assistant/index.md, "The agent is told the view, the time zone, the day only from Calendar, and whether something is selected"
     expect(world.ask.metadata).toMatchObject([{ observation: { view: "home", sensitive: false } }]);
+    // spec/app/browser/reading.md, "Only the committed page of a normal tab in front, while Browser is the open screen and Browser page for Alpha is on, is ever handed over": a turn asked on Home takes no page.
+    expect(world.ask.metadata[0]).not.toHaveProperty("browserPage");
     // spec/app/assistant/context.md, "The locator holds whether the owner allows it, the time last told, the last GPS fix and the last network answer, each read once under its ticket, and when each may be read again": a cold turn never waits for a fix, and starts one read behind it.
     expect(locationIn(world.ask.metadata[0])).toBe(undefined);
     if (phone) await until(alpha, runtime, Locator, (s) => s.gpsAt >= 0);
@@ -290,8 +298,11 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect([(document.querySelector("section[aria-label='Ask Alpha'] [role=log]")?.textContent ?? "").includes("You’re out of plan allowance and credits, so I couldn’t reply."), Boolean(button("Manage plan"))]).toEqual([true, true]);
     world.ask.refusal = undefined;
 
-    // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
-    await press("Earlier");
+    // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing": the
+    // transcript offers Earlier only while messages before the first one showing exist, so here, with the first message
+    // showing, the conversation is read around it directly.
+    expect(button("Earlier")).toBeUndefined();
+    await runtime.runPromise(Effect.flatMap(Chats, (chats) => chats.send({ type: "scroll", around: 1 })));
     await until(alpha, runtime, Chats, (s) => s.around > 0 && s.page.status === "Loaded");
     expect(lines().slice(0, 2)).toEqual(["Hello", "You said: Hello"]);
 
@@ -361,6 +372,36 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const said = await runtime.runPromise(Effect.flatMap(Reply, (machine) => machine.get()));
     expect([said.acks, lines()]).toEqual([1, ["What's on today?", "You said: What's on today?"]]);
     expect(document.body.textContent?.includes("Let me look")).toBe(false);
+  });
+
+  // spec/app/assistant/index.md, "Alpha asks the agent to warm up at launch, on return to the foreground and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it"
+  it("Warm the agent before my first message: at launch, on return and when Ask Alpha is raised, never while it cannot answer, and without a word (spec/app/assistant/index.md, \"Alpha asks the agent to warm up at launch, on return to the foreground and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it\")", async () => {
+    const world = { ...scene(), phone };
+    const { alpha, runtime } = await openAssistant(world);
+    const asked = () => world.ask.warmUps.length;
+    await settled(alpha, () => asked() === 1, asked);
+    await seen(false);
+    await seen(true);
+    await settled(alpha, () => asked() === 2, asked);
+    await alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "raise", detent: "Sheet" })));
+    await settled(alpha, () => asked() === 3, asked);
+    await alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "raise", detent: "Full" })));
+    world.ask.warmUpFails = true;
+    await seen(false);
+    await seen(true);
+    await settled(alpha, () => asked() === 4, asked);
+    world.ask.canRespond = false;
+    const reads = world.ask.statusReads;
+    await seen(false);
+    await seen(true);
+    await settled(alpha, () => world.ask.statusReads > reads, () => world.ask.statusReads);
+    await later(alpha, 10);
+    expect([asked(), world.ask.opened, world.ask.said, lines(), document.body.textContent?.toLowerCase().includes("warm"), new Set(world.ask.warmUps.map((headers) => JSON.stringify(headers))).size]).toEqual([4, 0, [], [], false, 1]);
+    world.ask.canRespond = true;
+    write("Hello");
+    await press("Send");
+    await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Complete");
+    expect([lines(), world.ask.said]).toEqual([["Hello", "You said: Hello"], ["Hello"]]);
   });
 
   it("Search my conversations, and open a hit where it was said (spec/app/assistant/search.md, \"Story: Search my conversations\")", async () => {

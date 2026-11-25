@@ -123,7 +123,7 @@ export function AssistantGrabber({ variant = "handle", onPress, onDrag, onReleas
       type="button"
       data-alpha-grabber=""
       aria-label={variant === "mark" ? "Open conversation" : "Resize chat"}
-      className={cn(focusRing, "flex size-11 shrink-0 touch-none justify-center", variant === "mark" ? "items-center overflow-hidden rounded-full bg-alpha text-alpha-foreground" : "cursor-grab items-start rounded-sm pt-1.5", className)}
+      className={cn(focusRing, "flex size-11 shrink-0 touch-none justify-center", variant === "mark" ? "items-center overflow-hidden rounded-full bg-alpha text-alpha-foreground" : "cursor-grab items-start rounded-sm px-0.5 pt-1.5", className)}
       {...handlers}
       onClick={(event) => onTap?.({ now: event.timeStamp, keyboard: event.detail === 0 })}
       {...props}

@@ -1,5 +1,5 @@
 // spec/app/account/billing.md, "The plans and their prices are read from Cloud, and only the newest reading is taken"; spec/app/account/plan.md, "Story: Know my plan"; spec/app/settings/index.md, "Each page links to what another area owns there"; spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"; spec/kit/read.md, "Story: Read from outside"
-import { Button, Sheet, SheetContent, Spinner, StatusDot } from "@repo/ui";
+import { Button, cn, Sheet, SheetContent, Spinner, StatusDot } from "@repo/ui";
 import { ChevronDown, X } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import type * as Billing from "../../gen/app__account__billing.effect.vibe";
@@ -106,7 +106,7 @@ export function AccountStatus({ alpha }: { alpha: Alpha }) {
   const label = current.tag === "Read" ? current.contact || "Signed in"
     : current.tag === "SignInRequired" ? "Signed out" : "Account unavailable";
   return <StatusDot status={current.tag === "Read" ? "ok" : "off"} label={label} showLabel
-    className="gap-1.5 text-caption text-muted-foreground [&_svg]:size-1.5 [&_circle]:fill-current" />;
+    className={cn("flex gap-1.5 text-caption leading-normal text-muted-foreground [&_circle]:fill-current [&_svg]:size-2.5", current.tag === "Read" && "[&_svg]:text-status-ok")} />;
 }
 
 /** The account sheet above Settings, drawing only the details the authenticated account read returned. */

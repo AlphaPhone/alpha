@@ -12,7 +12,7 @@ import { Machine as Messages } from "../gen/app__messages.effect.vibe";
 import { Machine as Composer } from "../gen/app__messages__composer.effect.vibe";
 import { at } from "../src/areas.ts";
 import home from "../src/home/index.tsx";
-import { button, closeAll, drawn, fill, later, only, open as openAlpha, press, pressOnTop, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, later, only, open as openAlpha, press, underAct, until } from "./alpha.tsx";
 import { type Scene, scene } from "./fakes/scene.ts";
 
 underAct();
@@ -67,7 +67,7 @@ describe("Contacts on an Alpha image", () => {
     await until(alpha, alpha.runtime, Contacts, (s) => s.opened && s.card.status === "Loaded" && s.held.phones === 1);
 
     // spec/app/contacts/index.md, "Save writes a form that was changed and has a name, a number or an address"
-    await press("Edit");
+    await press("Edit contact");
     await until(alpha, alpha.runtime, Contacts, (s) => s.form === "Changing");
     await fill("Last name", "Chen-Ortiz");
     expect(button("Save")?.disabled, "Save is available after editing a contact").toBe(false);
@@ -83,9 +83,9 @@ describe("Contacts on an Alpha image", () => {
     // spec/app/contacts/index.md, "Confirming deletes the contact that was shown"
     const deletion = Promise.withResolvers<void>();
     world.telephony.holdContactDeletion = deletion.promise;
-    await press("Delete");
+    await press("Delete contact");
     await until(alpha, alpha.runtime, Contacts, (s) => s.confirming);
-    await pressOnTop("Delete");
+    await press("Delete");
     await until(alpha, alpha.runtime, Contacts, (s) => s.write.outcome === "Sent" && s.change === "Remove");
     expect(world.telephony.people.map((one) => one.id)).toEqual(["7", "8"]);
     deletion.resolve();
@@ -114,7 +114,7 @@ describe("Contacts on an Alpha image", () => {
     await press("New contact");
     await press("Maya Chen");
     await until(alpha, alpha.runtime, Contacts, (s) => s.opened && s.card.status === "Loaded");
-    await press("Edit");
+    await press("Edit contact");
     await until(alpha, alpha.runtime, Contacts, () => world.telephony.editors.length === 2);
     expect([world.telephony.editors, (await alpha.runtime.runPromise(Contacts.use((machine) => machine.get()))).form, world.telephony.people.map((one) => one.revision)]).toEqual([["new", "7"], "Shut", [1, 1]]);
   });
@@ -186,14 +186,14 @@ describe("Contacts on an Alpha image", () => {
     // spec/app/contacts/agent.md, "A change is shown line by line, and a removed value never reads as kept"
     await ask({ type: "contact_update", query: "Ben", add: { phoneNumbers: ["+14155550123"] } });
     await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Shown" && s.contact === "8");
-    await press("Approve");
+    await press("Save changes to Ben Ortiz");
     await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "Done");
     expect(world.telephony.people.find((one) => one.id === "8")).toMatchObject({ displayName: "Ben Ortiz", givenName: "Ben", phoneNumbers: [{ number: "+14155550122", type: "mobile" }, { number: "+14155550123", type: "mobile" }] });
 
     // spec/app/contacts/agent.md, "Only the phone answers the newest search, and the request goes on by what it found": a new contact whose name is already in Contacts is shown with that contact.
     await ask({ type: "contact_create", contact: { displayName: "Maya Chen", phoneNumbers: ["+14155550177"], emailAddresses: [] } });
     await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Shown" && s.ask === "AddContact" && s.twins === 1);
-    await press("Approve");
+    await press("Add anyway: Maya Chen is already in Contacts");
     await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "Done");
     expect(world.telephony.people.filter((one) => one.displayName === "Maya Chen").length).toBe(2);
 
@@ -203,14 +203,14 @@ describe("Contacts on an Alpha image", () => {
     const ben = world.telephony.people.find((one) => one.id === "8");
     if (!ben) throw new Error("the phone has no reviewed contact");
     ben.revision += 1;
-    await press("Approve");
+    await press("Delete Ben Ortiz");
     await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "NotDone");
     expect(world.telephony.people).toContain(ben);
 
     // spec/app/contacts/agent.md, "Only the phone answers the action, and the request ends as that answer says"
     await ask({ type: "contact_delete", query: "Ben" });
     await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Shown" && s.contact === "8");
-    await press("Approve");
+    await press("Delete Ben Ortiz");
     await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "Done");
     expect(world.telephony.people).not.toContain(ben);
   });

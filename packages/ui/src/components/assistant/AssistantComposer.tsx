@@ -135,8 +135,8 @@ export function AssistantComposer({
             <MenuTrigger asChild>
               <Button variant="ghost" size="icon" aria-label="Chat actions" disabled={!acting} className="hover:bg-transparent disabled:opacity-40"><Plus /></Button>
             </MenuTrigger>
-            <MenuContent side="top" align="start" alignOffset={bar ? 0 : -16} sideOffset={bar ? 12 : 20}
-              className="min-w-55 rounded-tile border-0 bg-background p-2 shadow-dock dark:shadow-dock-dark [&>[role=menuitem]]:min-h-12 [&>[role=menuitem]]:px-3">
+            <MenuContent side="top" align="start" alignOffset={bar ? -57 : -16} sideOffset={bar ? 4 : 20}
+              className="min-w-55 rounded-tile border-0 bg-background p-2 shadow-dock-compact dark:shadow-dock-compact-dark [&>[role=menuitem]]:min-h-12 [&>[role=menuitem]]:px-3">
               {onAttach ? <MenuItem onSelect={onAttach}><Paperclip aria-hidden />Attach media</MenuItem> : null}
               {onSearch ? <MenuItem onSelect={onSearch}><Search aria-hidden />Search chat</MenuItem> : null}
               {onNew || making ? <MenuItem disabled={making} onSelect={onNew}><Plus aria-hidden />New chat</MenuItem> : null}

@@ -44,8 +44,8 @@ export interface TelephonyScene {
   texts: Text[];
   /** Leaves the staged SMS deletion open so the owner can Undo. */
   holdMessageDeletion: boolean;
-  /** Whether the bridge carries Android's acknowledgment after staging a deletion. */
-  deletionReply: "complete" | "lost" | "malformed";
+  /** What reaches Alpha when it asks Android to stage a deletion. */
+  deletionReply: "complete" | "lost" | "malformed" | "refused";
   readonly deletionAttempts: string[];
   smsNotice: { threadId: string; token: string } | undefined;
   /** Every text the radio was handed: the operation it was reviewed under, and to whom. */
@@ -73,6 +73,9 @@ export interface TelephonyScene {
   deliver: (operationId: string) => void;
   /** While set, the radio has not answered a send yet. */
   hold: Promise<void> | undefined;
+  /** Android submitted this SMS and has not reported its carrier outcome. */
+  holdSmsSubmission: boolean;
+  readonly smsQueries: string[];
   /** Android accepted this MMS and has not reported its carrier outcome. */
   holdMmsSubmission: boolean;
   readonly mmsAttempts: string[];
@@ -131,6 +134,8 @@ export function telephonyScene(): TelephonyScene {
     changed: () => {},
     deliver: () => {},
     hold: undefined,
+    holdSmsSubmission: false,
+    smsQueries: [],
     holdMmsSubmission: false,
     mmsAttempts: [],
     mmsQueries: [],
@@ -284,6 +289,7 @@ function telephony(world: TelephonyScene): Faked {
       },
       deleteMessage: (reference) => {
         world.deletionAttempts.push(reference.id);
+        if (world.deletionReply === "refused") return Promise.reject(rejection("The default messaging app is required", "role-required"));
         const found = world.texts.find((one) => `sms:${one.id}` === reference.id);
         if (found === undefined) return Promise.resolve({ status: "not-found", message: { ...reference } });
         if (!world.holdMessageDeletion) world.texts = world.texts.filter((one) => one !== found);
@@ -304,8 +310,10 @@ function telephony(world: TelephonyScene): Faked {
         const bindingHash = await smsBindingHash({ recipients: recipients as never, body, subscriptionId });
         world.sent.push({ operationId, recipients, body });
         const thread = world.texts.find((one) => one.address === recipients[0])?.thread ?? Math.max(0, ...world.texts.map((one) => one.thread)) + 1;
-        world.texts.push({ id: Math.max(0, ...world.texts.map((one) => one.id)) + 1, thread, address: recipients[0], box: "sent", date: 1_700_000_400_000 + world.sent.length, body, read: true });
-        const record = { kind: "sms-send", operationId, subscriptionId, bindingHash, status: "sent", parts: recipients.map((_number, recipientIndex) => ({ index: recipientIndex, recipientIndex, partIndex: 0, sent: "success", delivery: "unknown" })), createdAt: 1_700_000_400_000 };
+        const submitted = world.holdSmsSubmission;
+        if (!submitted) world.texts.push({ id: Math.max(0, ...world.texts.map((one) => one.id)) + 1, thread, address: recipients[0], box: "sent", date: 1_700_000_400_000 + world.sent.length, body, read: true });
+        const parts = recipients.map((_number, recipientIndex) => ({ index: recipientIndex, recipientIndex, partIndex: 0, sent: submitted ? "unknown" : "success", delivery: "unknown" }));
+        const record = { kind: "sms-send", operationId, subscriptionId, bindingHash, status: submitted ? "submitted" : "sent", parts, createdAt: 1_700_000_400_000 };
         world.journal.set(operationId, record);
         world.changed();
         return record;
@@ -326,7 +334,10 @@ function telephony(world: TelephonyScene): Faked {
       },
       cancelSmsReview: () => Promise.resolve(undefined),
       smsSendHistory: () => Promise.resolve({ receipts: [...world.journal.values()] }),
-      smsSendResult: ({ operationId }) => Promise.resolve(world.journal.get(operationId) ?? Promise.reject(rejection("No send with this operation", "not-found"))),
+      smsSendResult: ({ operationId }) => {
+        world.smsQueries.push(operationId);
+        return Promise.resolve(world.journal.get(operationId) ?? Promise.reject(rejection("No send with this operation", "not-found")));
+      },
       mmsSendResult: ({ operationId }) => {
         world.mmsQueries.push(operationId);
         return Promise.resolve(world.journal.get(operationId) ?? Promise.reject(rejection("No send with this operation", "not-found")));

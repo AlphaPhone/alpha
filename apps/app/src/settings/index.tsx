@@ -9,6 +9,7 @@ import { type Resident, type Shown, area } from "../runtime/area.tsx";
 import { reviewBack } from "../startup/settingsAccess.vibe";
 import { together } from "../runtime/reactor.vibe";
 import { about } from "./about.vibe";
+import { calendarAccount } from "./calendar.vibe";
 import { activity } from "./activity.vibe";
 import { Licences, Problems } from "./AboutPages.tsx";
 import { facts } from "./pages.vibe";
@@ -18,7 +19,7 @@ import { recovery, recoveryBack } from "./recovery.vibe";
 import { resetting } from "./reset.vibe";
 import { type Drawn, Settings } from "./Settings.tsx";
 
-const machines = together(facts, about, activity, recovery, phone, resetting, mediaReview);
+const machines = together(facts, about, activity, recovery, phone, resetting, mediaReview, calendarAccount);
 
 /** Back inside Settings: an open licence closes to its search; otherwise the page showing closes and its parent shows, until the first page, where Back leaves the app. */
 const pageBack = Licensing.Machine.use((licences) =>
