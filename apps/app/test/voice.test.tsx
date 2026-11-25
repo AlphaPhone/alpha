@@ -319,6 +319,27 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     expect(world.ask.kept.get("c1")?.messages.at(-1)?.text).toBe(written.join(""));
   });
 
+  // spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s"
+  it("says the agent's acknowledgment at once, before the reply it was waiting for, and only once", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    world.ask.acknowledgment = "Let me check your calendar.";
+    world.ask.holdAfterTools = true;
+    world.ask.nextReplyChunks = ["You're clear tomorrow. ", "Nothing is booked."];
+    const runtime = await startListening(world);
+
+    speakUtterance(world, "What's on tomorrow");
+    await untilCondition(runtime, () => world.voice.spoken.length === 1, () => world.voice.spoken);
+    expect(world.voice.spoken.map((one) => ({ text: one.text, append: one.append }))).toEqual([{ text: "Let me check your calendar.", append: false }]);
+    for (const release of [...world.ask.turns.values()]) release();
+    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 1 && s.turn === 2);
+    expect(world.voice.spoken.map((one) => ({ text: one.text, append: one.append }))).toEqual([
+      { text: "Let me check your calendar.", append: false },
+      { text: "You're clear tomorrow.", append: true },
+      { text: "Nothing is booked.", append: true },
+    ]);
+    expect(world.ask.kept.get("c1")?.messages.at(-1)?.text).toBe("You're clear tomorrow. Nothing is booked.");
+  });
+
   // spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"
   it("keeps listening after other refusals and ends quietly when Cloud refuses a spoken turn for spent funds", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
