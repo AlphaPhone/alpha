@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The ongoing notification while Notes records a voice note (AlphaNoteRecordingService). -->
+<resources>
+    <string name="note_recording_channel">Notes recording</string>
+    <string name="note_recording_channel_description">Shown while Notes is recording, with Pause and Stop.</string>
+    <string name="note_recording_title_recording">Voice note · Recording</string>
+    <string name="note_recording_title_paused">Voice note · Paused</string>
+    <string name="note_recording_text">Stop here, then save it in Notes.</string>
+    <string name="note_recording_pause">Pause</string>
+    <string name="note_recording_resume">Resume</string>
+    <string name="note_recording_stop">Stop</string>
+</resources>

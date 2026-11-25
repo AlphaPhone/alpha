@@ -1,0 +1,54 @@
+// spec/app/notes/agent.md, "The agent reads one note, or the note the owner has open in Notes in front, and is told the revision it read"; spec/app/assistant/index.md, "The agent is told the view, the time zone, the day only from Calendar, and whether something is selected"
+import { Machine as Notes, type Notes as List } from "../../gen/app__notes.effect.vibe"
+import { Machine as Editor, type Editor as Writing } from "../../gen/app__notes__editor.effect.vibe"
+import { Machine as Link, type Dialog } from "../../gen/app__notes__linkNote.effect.vibe"
+import { Machine as Voice, type VoiceNote } from "../../gen/app__notes__voice.effect.vibe"
+import { Machine as Previous } from "../../gen/app__notes__previous.effect.vibe"
+import { Machine as Trash } from "../../gen/app__notes__trash.effect.vibe"
+import { Machine as Recorder, unfinished } from "../../gen/app__notes__recording.effect.vibe"
+import { Machine as Layers, pageInert } from "../../gen/app__shell__layers.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import type { Agent } from "../platform/agent.vibe"
+import { Device } from "../platform/device.vibe"
+import { ownerAt } from "../platform/owner.vibe"
+import { NoteContent, numberOf } from "./content.vibe"
+
+export type RendererNote = { readonly kind: "canonical-note" | "canonical-note-source"; readonly id: string; readonly revision: string }
+export type NotesSelection = Notes | Editor | Link | Voice | Previous | Trash | Recorder | Layers | Shell | Device | Agent | NoteContent
+
+function chosen(list: List, editor: Writing, link: Dialog, voice: VoiceNote): number {
+  if (list.read.status !== "Loaded" || list.owner === 0) return 0
+  if (editor.showing && editor.owner === list.owner && editor.draft.sync === "Kept" && !editor.deleting) return editor.note
+  if (link.showing && link.owner === list.owner && link.revision === list.version && !link.changed) return link.note
+  if (voice.showing && voice.owner === list.owner && voice.revision === list.version) return voice.note
+  return 0
+}
+
+/** The selected record changes only as each Notes detail confirms which exact saved note it shows. */
+export const noteSubjects = Stream.unwrap(effect {
+  const list = try Notes
+  const editor = try Editor
+  const link = try Link
+  const voice = try Voice
+  return Stream.changes(Stream.map(Stream.zipLatest(Stream.zipLatest(list.changes, editor.changes), Stream.zipLatest(link.changes, voice.changes)),
+    ([[notes, writing], [linked, speaking]]) => chosen(notes, writing, linked, speaking)))
+})
+
+/** Only identifiers cross to the agent. The agent reads its own saved words after receiving an owner turn. */
+export effect function notesSelection(): (RendererNote | undefined)!!NotesSelection {
+  const shell = try (try Shell).get()
+  if (!showing(shell, "Notes") || !(try (try Device).showing()) || pageInert(try (try Layers).get())) return undefined
+  if ((try (try Previous).get()).showing || (try (try Trash).get()).showing || unfinished(try (try Recorder).get())) return undefined
+  const list = try (try Notes).get()
+  const editor = try (try Editor).get()
+  const link = try (try Link).get()
+  const voice = try (try Voice).get()
+  const id = chosen(list, editor, link, voice)
+  const snapshot = try (try NoteContent).collection()
+  if (list.read.status !== "Loaded" || list.version !== snapshot.version || snapshot.owner === "" || numberOf("owner", snapshot.owner) !== list.owner) return undefined
+  if ((ownerAt() catch () => "") !== snapshot.owner) return undefined
+  const note = snapshot.noteByNumber.get(id)
+  if (note !== undefined) return { kind: "canonical-note", id: note.id, revision: String(snapshot.version - 1) }
+  if (editor.showing || link.showing || voice.showing) return undefined
+  return { kind: "canonical-note-source", id: "notes", revision: String(snapshot.version - 1) }
+}

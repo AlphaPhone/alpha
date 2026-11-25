@@ -10,7 +10,7 @@ const onHandOver = fn();
 export const meta: ComponentMeta<SettingsAppsPageProps> = {
   args: { onBack: fn(), onOpen, onOpenApp, onHandOver },
   decorator: fullHeight,
-  examples: { "Returning to a row": { place: 2 } },
+  examples: { "Returning to a row": { place: 1 } },
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onOpen.mockClear();

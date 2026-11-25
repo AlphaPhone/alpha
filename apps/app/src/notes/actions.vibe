@@ -1,0 +1,60 @@
+// spec/app/notes/actions.md, "Story: Share a note, or make a reminder or event from it"; spec/app/notes/actions.md, "Nothing is sent or scheduled from Notes: only the note open under the menu is handed over, as a draft, once per choice"
+import { noteShareText } from "@elizaos/plugin-notes/format"
+import * as Actions from "../../gen/app__notes__actions.effect.vibe"
+import { Machine as Editor } from "../../gen/app__notes__editor.effect.vibe"
+import type { Actor } from "../../gen/app__notes__note.effect.vibe"
+import { Machine as Inbox } from "../../gen/app__inbox.effect.vibe"
+import { Machine as Composer } from "../../gen/app__inbox__drafts.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Letters, begin } from "../inbox/composer.vibe"
+import type { Mail } from "../inbox/gmail.vibe"
+import { NoteDevice } from "../platform/noteDevice.vibe"
+import type { Agent } from "../platform/agent.vibe"
+import { NoteStore } from "../platform/notes.vibe"
+import { ownerAt } from "../platform/owner.vibe"
+import { type Job, reacting, run, untimed } from "../runtime/reactor.vibe"
+import { NoteContent, numberOf } from "./content.vibe"
+
+const phone: Actor = "Phone"
+
+type Scope = Agent | NoteStore | Editor | NoteContent | NoteDevice | Inbox | Composer | Mail | Letters | Shell
+
+effect function email(title: string, text: string): boolean!!(Inbox | Composer | Letters | Mail | Shell) {
+  const mail = try (try Inbox).get()
+  const account = mail.selected.account
+  if (account <= 0 || !(try begin({ kind: "Fresh", account }))) return false
+  const composer = try Composer
+  const draft = (try composer.get()).letter.id
+  if (draft <= 0) return false
+  const letters = try Letters
+  letters.set(draft, { ...letters.words(draft), subject: title, text })
+  const saved = composer.send({ type: "write", now: untimed }, "Owner") catch () => undefined
+  if (saved === undefined) return false
+  try ignore((try Shell).send({ type: "openView", view: "Inbox" }))
+  return true
+}
+
+effect function share(fx: Extract<Actions.Effect, { readonly tag: "Hands" }>): void!!Scope {
+  const editor = try (try Editor).get()
+  const current = try (try NoteContent).collection()
+  const shell = try (try Shell).get()
+  if (!showing(shell, "Notes") || !editor.showing || editor.deleting || editor.draft.sync !== "Kept" || editor.note !== fx.note || editor.link.tie !== "NoLink") return
+  const identity = ownerAt() catch () => ""
+  if (identity === "" || identity !== current.owner || editor.owner !== numberOf("owner", identity)) return
+  const snapshot = (try NoteStore).read() catch () => undefined
+  if (snapshot === undefined || snapshot.revision + 1 !== editor.draft.base || (ownerAt() catch () => "") !== identity) return
+  const saved = snapshot.notes.find((note) => numberOf("note", note.id) === fx.note)
+  if (saved === undefined) return
+  const { title, text } = noteShareText(saved)
+  if (fx.channel === "Email" && (try email(title, text))) return
+  try ignore((try NoteDevice).share(fx.channel, title, text))
+}
+
+function carry(fx: Actions.Effect): Job<Actions.Event, Scope, [Actor]> {
+  return match (fx) {
+    when { tag: "Hands" }: run("draft a share", share(fx), phone);
+    when { tag: "Drafts" }: run("prepare the schedule", Effect.void, phone);
+  }
+}
+
+export const actions = reacting(Actions, { carry })

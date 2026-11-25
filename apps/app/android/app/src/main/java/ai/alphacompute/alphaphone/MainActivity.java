@@ -62,9 +62,12 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(ai.eliza.plugins.signin.ElizaSignInPlugin.class);
   registerPlugin(ai.eliza.plugins.signin.ElizaCloudPlugin.class);
   registerPlugin(ai.eliza.plugins.securestore.SecureStorePlugin.class);
-  registerPlugin(ai.eliza.plugins.system.SystemPlugin.class);
+  registerPlugin(AlphaSystemPlugin.class);
   registerPlugin(AlphaFilesPlugin.class);
   registerPlugin(AlphaSelectedDocumentsPlugin.class);
+  registerPlugin(AlphaNotesPlugin.class);
+  registerPlugin(AlphaNoteDocumentsPlugin.class);
+  AlphaNoteRecordingService.offerFromIntent(this, getIntent());
   registerPlugin(ai.eliza.plugins.camera.CameraPlugin.class);
   registerPlugin(AlphaPhotosPlugin.class);
   registerPlugin(AlphaPhotoLibraryPlugin.class);
@@ -75,6 +78,8 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(ai.eliza.plugins.passwords.PasswordsPlugin.class);
   registerPlugin(AlphaBrowserPlugin.class);
   registerPlugin(AlphaCalendarPlugin.class);
+  registerPlugin(AlphaNotificationsPlugin.class);
+  registerPlugin(AlphaPhotosPermissionsPlugin.class);
   registerPlugin(AlphaResetPlugin.class);
   registerPlugin(AlphaActionJournalPlugin.class);
   registerPlugin(AlphaDevicePlugin.class);

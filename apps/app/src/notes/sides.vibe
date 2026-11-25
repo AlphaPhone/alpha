@@ -1,0 +1,93 @@
+// spec/app/notes/linkNote.md, "Story: Open a link note"; spec/app/notes/voice.md, "Story: Read and use the transcript"; spec/app/notes/voice.md, "Story: Listen to a voice note"
+import * as Link from "../../gen/app__notes__linkNote.effect.vibe"
+import * as Voice from "../../gen/app__notes__voice.effect.vibe"
+import type { Actor } from "../../gen/app__notes__note.effect.vibe"
+import { Machine as Notes } from "../../gen/app__notes.effect.vibe"
+import type { Agent } from "../platform/agent.vibe"
+import { NoteDevice } from "../platform/noteDevice.vibe"
+import { NoteStore } from "../platform/notes.vibe"
+import { ownerAt } from "../platform/owner.vibe"
+import { type Job, answer, reacting, run, together } from "../runtime/reactor.vibe"
+import { NoteContent, audioIdOf, formatChanged, numberOf } from "./content.vibe"
+
+module web {
+  /** A linked page must still be its original HTTP(S) address. */
+  export function pageOf(value: unknown): string {
+    if (typeof value !== "string" || !/^https?:\/\//i.test(value)) return ""
+    try {
+      const page = new URL(value)
+      return page.username === "" && page.password === "" ? page.href : ""
+    } catch {
+      return ""
+    }
+  }
+
+  /** Open the checked page outside Notes. */
+  export function visit(page: string): void {
+    window.open(page, "_blank", "noopener,noreferrer")
+  }
+}
+import { pageOf, visit } from web
+export { pageOf }
+
+const phone: Actor = "Phone"
+
+effect function readPage(number: number): void!!(Agent | NoteContent) {
+  const content = try NoteContent
+  const snapshot = try content.collection()
+  if (snapshot.owner === "" || (ownerAt() catch () => "") !== snapshot.owner) return
+  const note = [...snapshot.noteByNumber.values()].find((item) => typeof item.format?.data.url === "string" && numberOf("web", item.format.data.url) === number)
+  const page = pageOf(note?.format?.data.url)
+  if (page !== "") try ignore(Effect.try(() => visit(page)))
+}
+
+effect function removed(fx: Extract<Link.Effect, { readonly tag: "Removes" }>): Link.Event!!(Agent | Notes | NoteContent | NoteStore) {
+  const failure: Link.Event = { type: "removed", ticket: fx.ticket, ok: false, known: true }
+  const content = try NoteContent
+  const snapshot = try content.collection()
+  const owner = ownerAt() catch () => ""
+  const row = snapshot.noteByNumber.get(fx.note)
+  if (row === undefined || owner !== snapshot.owner || numberOf("owner", owner) !== fx.owner || snapshot.version !== fx.base) return failure
+  const format = formatChanged(row, { url: null, domain: null })
+  const result = (try NoteStore).update({ id: row.id, expectedRevision: fx.base - 1, format: { kind: "text", data: format.data } }) catch (error) => error
+  try ignore((try Notes).send({ type: "storeChanged" }, phone))
+  return "known" in result ? { ...failure, known: result.known } : { ...failure, ok: true }
+}
+
+function linkOut(fx: Link.Effect): Job<Link.Event, Agent | Notes | NoteContent | NoteStore, [Actor]> {
+  return match (fx) {
+    when { tag: "Visits" }: run("visit", readPage(fx.page), phone);
+    when { tag: "Removes" }: answer("remove", removed(fx), { type: "removed", ticket: fx.ticket, ok: false, known: false }, phone);
+  }
+}
+
+effect function played(fx: Extract<Voice.Effect, { readonly tag: "Plays" }>): Voice.Event!!(Agent | NoteContent | NoteDevice) {
+  const failed: Voice.Event = { type: "played", ticket: fx.ticket, ok: false }
+  const collection = try (try NoteContent).collection()
+  const identity = ownerAt() catch () => ""
+  const note = collection.noteByNumber.get(fx.note)
+  if (note === undefined || identity === "" || identity !== collection.owner) return failed
+  const audioId = audioIdOf(note)
+  if (audioId === "") return failed
+  const device = try NoteDevice
+  const saved = device.describe(audioId) catch () => undefined
+  if (saved === undefined || saved.audioId !== audioId || saved.noteId !== note.id) return failed
+  const segments = note.format?.data.segments
+  const offset = Array.isArray(segments) ? segments.slice(0, fx.from).reduce((before, row) =>
+    before + (typeof row === "object" && row !== null && "durationMs" in row && typeof row.durationMs === "number" ? row.durationMs : 0), 0) : 0
+  return { ...failed, ok: try device.play(audioId, note.id, offset) }
+}
+
+function voiceOut(fx: Voice.Effect): Job<Voice.Event, Agent | NoteContent | NoteDevice, [Actor]> {
+  if (fx.tag === "Plays") return answer("play", played(fx), { type: "played", ticket: fx.ticket, ok: false }, phone)
+  if (fx.tag === "Halts") return answer("stop", effect { return { type: "halted", ticket: fx.ticket, ok: try (try NoteDevice).halt() } satisfies Voice.Event }, { type: "halted", ticket: fx.ticket, ok: false }, phone)
+  const failed: Voice.Event | undefined = match (fx) {
+    when { tag: "Transcribes" }: { type: "transcribed", ticket: fx.ticket, ok: false };
+    when { tag: "Summarises" }: { type: "summarised", ticket: fx.ticket, ok: false };
+    when { tag: "Writes" }: { type: "written", ticket: fx.ticket, ok: false, known: true, latest: 0 };
+    when { tag: "AsksAlpha" }: undefined;
+  }
+  return failed === undefined ? run("ask", Effect.void, phone) : answer(fx.tag, succeed(failed), failed, phone)
+}
+
+export const sides = together(reacting(Link, { carry: linkOut }), reacting(Voice, { carry: voiceOut }))
