@@ -291,14 +291,14 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
 
   // spec/app/inbox/index.md, "A check the phone holds back for want of the mail lease keeps the session and everything kept, and asks for one more sign-in": with mail on screen, the list keeps its saved rows and asks to Reconnect above them.
   world.inbox.google = { email: "owner@gmail.test", connection: "grant-2", capabilities: ["google.basic_identity", "google.gmail.triage", "google.gmail.send", "google.gmail.manage"] };
-  await alpha.back();
-  await press("Inbox");
+  await hardware("home");
+  await tile("Inbox");
   await until(alpha, runtime, List, (s) => s.list.status === "Loaded" && s.pages >= 1);
   const shown = rows();
   expect(shown.length).toBeGreaterThan(0);
   world.mailLease.held = false;
-  await alpha.back();
-  await press("Inbox");
+  await hardware("home");
+  await tile("Inbox");
   await until(alpha, runtime, List, (s) => s.failure === "LeaseNeeded");
   expect([rows(), Boolean(button("Reconnect")), told().includes("Connect Eliza Cloud")]).toEqual([shown, true, false]);
 
