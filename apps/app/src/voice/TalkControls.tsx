@@ -46,12 +46,13 @@ export function TalkControls({ runtime, trailing, compact = false }: TalkControl
     <>
       <section aria-label="Voice conversation" data-alpha-pill-voice={compact ? "" : undefined}
         className={cn("flex shrink-0 items-center bg-secondary",
-          compact ? "gap-0.5 self-center rounded-dock-compact p-1.25 shadow-dock-compact dark:shadow-dock-compact-dark" : "min-h-17 gap-1 rounded-sheet px-2 py-1.5")}>
+          compact ? "gap-0.5 self-center rounded-dock-compact p-1.25 shadow-dock-compact dark:shadow-dock-compact-dark"
+            : "min-h-17 gap-1.5 rounded-sheet py-1.5 pr-1.5 pl-5 [&>button]:size-12")}>
         {compact && shell.can(open) && <Button variant="ghost" size="icon" aria-label="Open conversation" onClick={() => void shell.send(open)}>
           {activity}
         </Button>}
+        {!compact && <div className="flex min-w-0 flex-1 items-center">{activity}</div>}
         {!compact && can(type) && <Button variant="ghost" size="icon" aria-label="Switch to keyboard" onClick={() => void send(type)}><Keyboard /></Button>}
-        {!compact && <div className="flex min-w-0 flex-1 items-center px-2">{activity}</div>}
         <p role="status" className="sr-only">{state.muted ? "Microphone muted" : announced[state.phase]}</p>
         {(!compact || !speakerConfirmed) && can({ type: "interrupt" }) && <Button variant="ghost" size="icon" aria-label="Stop speaking" onClick={() => void send({ type: "interrupt" })}><VolumeX /></Button>}
         {speakerConfirmed && <Button variant="ghost" size="icon" disabled={!can(setSpeaker)} aria-pressed={speakerMuted}
@@ -61,7 +62,13 @@ export function TalkControls({ runtime, trailing, compact = false }: TalkControl
         {(compact || canMute) && <Button variant="ghost" size="icon" disabled={!canMute} aria-pressed={state.muted} aria-label={state.muted ? "Unmute microphone" : "Mute microphone"} onClick={() => void send(mute)}>
           {state.muted ? <MicOff /> : <Mic />}
         </Button>}
-        {(compact || can(stop)) && <Button size="icon" className="bg-alpha text-alpha-foreground hover:bg-alpha/90" disabled={!can(stop)} aria-label="Stop voice conversation" onClick={() => void send(stop)}><Square className="size-2.5" fill="currentColor" /></Button>}
+        {(compact || can(stop)) && <Button size="icon" className="bg-alpha text-alpha-foreground hover:bg-alpha/90" disabled={!can(stop)} aria-label="Stop voice conversation" onClick={() => void send(stop)}>
+          {compact ? <Square className="size-2.5" fill="currentColor" /> : (
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round">
+              <path d="M7 7h10v10H7z" />
+            </svg>
+          )}
+        </Button>}
         {trailing}
       </section>
       <ConfirmDialog open={state.disclosing} title="Use cloud speech?" confirmLabel="Use cloud speech" cancelLabel="Use on-device speech"
