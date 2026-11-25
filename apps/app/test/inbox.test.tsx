@@ -101,6 +101,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, List, (s) => s.list.status === "Loaded" && s.pages === 1);
     step("1");
     expect([rows().slice(0, 2), rows().length]).toEqual([["Revised term sheet", "Notes for the 3:00 review"], 25]);
+    expect(opens().find((one) => subjectOf(one) === "Revised term sheet")?.textContent).toContain("Has attachments");
 
     // spec/app/inbox/index.md, "More messages are read with the page cursor, which is given up as its page is asked"
     await press("Load more");

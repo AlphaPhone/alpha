@@ -27,7 +27,7 @@ export function InboxList({ rows, loading = false, onLoadMore, loadingMore = fal
     <div className="-mx-4 flex flex-col">
       <ul aria-label="Email messages" aria-busy={loading || undefined} className="flex flex-col">
         {rows.map(({ id, ...row }) => (
-          <li key={id}><InboxMessageRow {...row} /></li>
+          <li key={id} className="[contain-intrinsic-size:auto_5rem] [content-visibility:auto]"><InboxMessageRow {...row} /></li>
         ))}
       </ul>
       {onLoadMore ? (

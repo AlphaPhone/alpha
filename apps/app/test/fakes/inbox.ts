@@ -188,7 +188,7 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       const from = Number((url.searchParams.get("pageToken") ?? "p0").slice(1));
       const found = scene.mail.filter((stored) => matches(stored, url.searchParams.get("query") ?? ""));
       const page: MailSearch = {
-        messages: found.slice(from, from + size).map((stored) => stored.card), nextPageToken: from + size < found.length ? `p${from + size}` : null,
+        messages: found.slice(from, from + size).map((stored) => ({ ...stored.card, hasAttachments: stored.files.length > 0 })), nextPageToken: from + size < found.length ? `p${from + size}` : null,
         syncedAt: "2026-11-01T00:00:00Z", mailboxHistoryId: String(scene.history), supportsSpamTrash: true,
       };
       return Response.json(page);
