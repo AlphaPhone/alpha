@@ -451,8 +451,13 @@ pure def nativeRoutesAdmitted(listed: List[Route]): bool =
 ### The page names the query values each gated route can receive
 
 Search sends its words, offset and twenty results per page. A conversation
-can request the window around a message. Home's agenda and Calendar send
-the start and end of their window, and Calendar may send a time zone.
+can request the window around a message. To see if an older message exists
+beyond that window, Ask Alpha requests one row before the first message's
+timestamp and identifier. The timestamp is a canonical nonnegative
+decimal, the cursor identifier has the same form as the window's message
+identifier, and when supplied the history limit is one. The latest and
+centered pages can omit the limit. Home's agenda and Calendar send the
+start and end of their window, and Calendar may send a time zone.
 Calendar asks for up to fifty pending approvals. Workflows lists the owner's
 visible tasks, reads a result page for its
 client, and supplies the exact reviewed revision when removing a trigger.
@@ -461,11 +466,17 @@ client, and supplies the exact reviewed revision when removing a trigger.
 type QueryKind = AnyQuery | PatternQuery | FixedQuery
 type RequestQuery = { method: Method, path: str, key: str, kind: QueryKind, value: str, example: str }
 
+pure val historyQueryPath = "/api/conversations/{id}/messages"
+pure val historyMessageId = "[A-Za-z0-9_-]{1,128}"
+
 pure val pageQueries: List[RequestQuery] = List(
   { method: Get, path: "/api/conversations/messages/search", key: "q", kind: AnyQuery, value: "", example: "project notes + plan" },
   { method: Get, path: "/api/conversations/messages/search", key: "offset", kind: PatternQuery, value: "0|[1-9][0-9]{0,15}", example: "0" },
   { method: Get, path: "/api/conversations/messages/search", key: "limit", kind: FixedQuery, value: "20", example: "20" },
-  { method: Get, path: "/api/conversations/{id}/messages", key: "around", kind: PatternQuery, value: "[A-Za-z0-9_-]{1,128}", example: "test-message" },
+  { method: Get, path: historyQueryPath, key: "around", kind: PatternQuery, value: historyMessageId, example: "test-message" },
+  { method: Get, path: historyQueryPath, key: "before", kind: PatternQuery, value: "0|[1-9][0-9]{0,15}", example: "1795478400000" },
+  { method: Get, path: historyQueryPath, key: "beforeId", kind: PatternQuery, value: historyMessageId, example: "test-message" },
+  { method: Get, path: historyQueryPath, key: "limit", kind: PatternQuery, value: "1", example: "1" },
   { method: Get, path: "/api/lifeops/calendar/feed", key: "timeMin", kind: AnyQuery, value: "", example: "2026-11-24T00:00:00.000Z" },
   { method: Get, path: "/api/lifeops/calendar/feed", key: "timeMax", kind: AnyQuery, value: "", example: "2026-11-25T00:00:00.000Z" },
   { method: Get, path: "/api/lifeops/calendar/feed", key: "timeZone", kind: AnyQuery, value: "", example: "America/New_York" },
