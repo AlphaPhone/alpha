@@ -32,11 +32,13 @@ export interface Book {
   readonly form: Form
   readonly reach: string
   readonly problem: ContactDraftProblem | "stale" | "not-found" | undefined
+  /** Who narrowed the list to `sought`: a filter Alpha applied shows as a chip the owner can clear. */
+  readonly filteredBy: "Owner" | "Alpha"
 }
 
 export const blankForm: Form = { givenName: "", familyName: "", phones: [""], emails: [""], notes: "" }
 
-const empty: Book = { rows: [], next: undefined, sought: "", card: undefined, editBase: undefined, form: blankForm, reach: "", problem: undefined }
+const empty: Book = { rows: [], next: undefined, sought: "", card: undefined, editBase: undefined, form: blankForm, reach: "", problem: undefined, filteredBy: "Owner" }
 
 /** The contacts behind Contacts' counts. */
 export service Rows {

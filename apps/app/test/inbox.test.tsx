@@ -307,18 +307,18 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   await hardware("home");
   await tile("Inbox");
   await until(alpha, runtime, List, (s) => s.failure === "LeaseNeeded");
-  expect([rows(), Boolean(button("Reconnect")), told().includes("Connect Eliza Cloud")]).toEqual([shown, true, false]);
+  expect([rows(), Boolean(button("Reconnect Gmail")), told().includes("Connect Eliza Cloud")]).toEqual([shown, true, false]);
 
   // spec/app/inbox/message.md, "Only the newest read's answer is shown, while its account may still be read; a read that fails says why": a message the phone cannot read for want of the lease closes, back to the list and its Reconnect, never a Retry that cannot work.
   await row(shown[0] ?? "");
   await until(alpha, runtime, Shown, (s) => s.message === 0 && s.fault === "Revoked");
   await until(alpha, runtime, List, (s) => s.failure === "LeaseNeeded" && s.accounts.status === "Failed");
-  expect([Boolean(button("Retry")), Boolean(button("Reconnect")), rows()]).toEqual([false, true, shown]);
+  expect([Boolean(button("Retry")), Boolean(button("Reconnect Gmail")), rows()]).toEqual([false, true, shown]);
 
   // spec/app/platform/index.md, "The owner's tap on a mail sign-in control starts the phone's one more sign-in for mail where the phone wants it, then reads again once": Reconnect over the saved rows starts the sign-in for mail, and the list is read again with the lease.
-  await press("Reconnect");
+  await press("Reconnect Gmail");
   await until(alpha, runtime, List, (s) => s.failure === "Fine" && s.accounts.status === "Loaded" && s.list.status === "Loaded");
-  expect([world.mailLease.held, world.mailLease.asked, Boolean(button("Reconnect")), rows()]).toEqual([true, 3, false, shown]);
+  expect([world.mailLease.held, world.mailLease.asked, Boolean(button("Reconnect Gmail")), rows()]).toEqual([true, 3, false, shown]);
 });
 
 it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I reviewed\"; spec/app/inbox/drafts.md, \"Story: Write a message\"; spec/app/inbox/drafts.md, \"Story: Set a draft aside or discard it\"; spec/app/inbox/adding.md, \"Story: Add files and people to my draft\"; spec/app/inbox/suggestion.md, \"Story: Review what is offered into my email\"; spec/app/inbox/sending.md, \"Story: Save my draft to Gmail, or delete it there, knowingly\")", async () => {

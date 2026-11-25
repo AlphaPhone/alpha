@@ -387,13 +387,14 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const earlier = { type: "scroll", around: board.numbered(lines[0]?.id ?? "") } as const;
   const later = { type: "scroll", around: board.numbered(lines.at(-1)?.id ?? "") } as const;
   const replyWords = replyBlocks(seen.reply, true).words;
-  const writingReply = replyWords !== "" ? [{ id: "reply", author: "alpha", text: replyWords } as const] : [];
+  const onOpenLink = messageActions?.openLink;
+  const writingReply = replyWords !== "" ? [{ id: "reply", author: "alpha", text: replyWords, streaming: true, onOpenLink } as const] : [];
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
   const mediaCards = seen.media.filter((card) => !talking.context.sensitive && card.conversation === shown.chosen && card.revision === talking.context.revision).map((card) => ({
     id: `media ${card.id}`, author: "alpha" as const, text: "", children: <DeviceReview runtime={runtime} card={card} />,
   }));
   const mediaNote = talking.context.sensitive || seen.mediaNote?.conversation !== shown.chosen
-    ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote.text }];
+    ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote.text, onOpenLink }];
   const failure = seen.failure;
   const liveFix = failure?.kind === "OutOfFunds" ? "FundingFix" : failure?.fix ?? "NoFix";
   const readAgain = failure?.messageId !== undefined && lines.some((line) => line.id === failure.messageId && line.failure === failure.kind);
@@ -430,11 +431,12 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         detent={assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
         className={onComms ? "relative w-full motion-safe:transition-[height] motion-safe:duration-[420ms]" : open ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
         style={onComms
-          ? { height: assistantDetent === "Full" ? "calc(100dvh - 52px)" : `clamp(38dvh, ${keptHeight === undefined ? "50dvh" : `${keptHeight}px`}, 60dvh)` }
+          ? assistantDetent === "Full" ? { height: "calc(100dvh - 52px)" } : keptHeight === undefined ? undefined : { height: `clamp(38dvh, ${keptHeight}px, 60dvh)` }
           : keptHeight ? { height: keptHeight } : undefined}
         header={{
           title: seen.titles.get(shown.chosen) ?? "Ask Alpha",
           context: { view, selected: talking.context.selected, sensitive: talking.context.sensitive },
+          subtitle: onComms ? <CommsTarget runtime={runtime} placement="context" /> : undefined,
           onHome: () => void runtime.runPromise(home()),
           onClose: open && shell.can({ type: "goBack" }) ? () => void shell.send({ type: "goBack" }).then((lowered) => { if (full && lowered._tag === "Success" && shell.can({ type: "goBack" })) void shell.send({ type: "goBack" }); }) : undefined,
           expanded: assistantDetent === "Full",
@@ -446,7 +448,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         attachmentNotice={onComms ? undefined : seen.attachmentNotice}
         transcript={{
           messages,
-          liveMessages: [...(brief === "" ? [] : [{ id: `briefing:${subject}`, author: "alpha" as const, text: brief }]), ...writingReply, ...failed, ...mediaCards, ...mediaNote],
+          liveMessages: [...(brief === "" ? [] : [{ id: `briefing:${subject}`, author: "alpha" as const, text: brief, onOpenLink }]), ...writingReply, ...failed, ...mediaCards, ...mediaNote],
           position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around) },
           visible: open,
           status: shown.page.status === "Loading" ? "loading" : shown.page.status === "Failed" ? "failed" : "loaded",

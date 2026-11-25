@@ -1,5 +1,5 @@
 // spec/app/workflows/runs.md, "Story: Run a workflow now"; spec/app/workflows/runs.md, "Story: Stop a run"
-import { Alert, Button, ConfirmDialog } from "@repo/ui";
+import { Alert, Button, cn, focusRing } from "@repo/ui";
 import { Play, Square } from "lucide-react";
 import { useMachine } from "../../gen/app__workflows__runs.react.ts";
 import { useMachine as useWorkflow } from "../../gen/app__workflows.react.ts";
@@ -14,26 +14,44 @@ interface RunControlsProps extends Pick<Shown<Resident | Machine | WorkflowMachi
   readonly title: string;
 }
 
-/** Run or stop the exact workflow shown; a later retry names its retained submission. */
-export function RunControls({ runtime, row, owner, title }: RunControlsProps) {
+function useRuns({ runtime, row, owner }: Omit<RunControlsProps, "title">) {
   const runs = useMachine(runtime);
   const current = useWorkflow(runtime).state;
   const state = runs.state;
-  if (!state || state.owner !== owner || state.workflow !== row || !current || current.target !== row || current.owner !== owner) return null;
+  const ready = state !== undefined && state.owner === owner && state.workflow === row && current !== undefined && current.target === row && current.owner === owner;
   const send = (event: Event) => { if (runs.can(event)) void runs.send(event); };
-  const definitionReady = current.open && current.detail.status === "Loaded";
+  return { runs, state: ready ? state : undefined, current: ready ? current : undefined, send };
+}
+
+/** The round run button; pressed once it widens into Confirm run, and a second press runs the version shown. */
+export function RunButton(props: Omit<RunControlsProps, "title">) {
+  const { runs, state, current, send } = useRuns(props);
+  if (!state || !current) return null;
   const review: Event = { type: "reviewRun", version: current.version, removed: current.removed };
   const confirm: Event = state.request.offered
     ? { type: "confirmResend", version: current.version }
     : { type: "confirmRun", version: current.version, removed: current.removed };
-  const canRun = definitionReady && state.reading.status === "Loaded" && runs.can(review);
+  const definitionReady = current.open && current.detail.status === "Loaded";
+  if (state.review.showing) {
+    const label = state.request.offered ? "Send again" : "Confirm run";
+    return <button type="button" aria-label={label} onClick={() => send(confirm)}
+      className={cn(focusRing, "inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full bg-primary px-4 text-primary-foreground")}><Play aria-hidden className="size-5.5" />{label}</button>;
+  }
+  if (!definitionReady || state.reading.status !== "Loaded" || !runs.can(review)) return null;
+  return <button type="button" aria-label="Run now" title="Run now" onClick={() => send(review)}
+    className={cn(focusRing, "grid size-11 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground")}><Play aria-hidden className="size-5.5" /></button>;
+}
+
+/** Stop a run, and what the agent has or has not confirmed about the last request. */
+export function RunControls({ runtime, row, owner }: RunControlsProps) {
+  const { runs, state, current, send } = useRuns({ runtime, row, owner });
+  if (!state || !current) return null;
   return (
-    <section aria-label="Run controls" className="flex flex-col gap-2">
-      <div className="flex flex-wrap gap-2">
-        {canRun && <Button onClick={() => send(review)}><Play aria-hidden />{state.latest.id === 0 ? "Run now" : "Run again"}</Button>}
+    <section aria-label="Run controls" className="flex flex-col gap-2 empty:hidden">
+      {(runs.can({ type: "stopRun" }) || state.reading.status === "Failed") && <div className="mt-3 flex flex-wrap gap-2">
         {runs.can({ type: "stopRun" }) && <Button variant="secondary" onClick={() => send({ type: "stopRun" })}><Square aria-hidden />Stop run</Button>}
         {state.reading.status === "Failed" && <Button variant="secondary" onClick={() => send({ type: "readLatest" })}>Refresh run status</Button>}
-      </div>
+      </div>}
       {state.request.live && <p role="status" className="text-sm text-muted-foreground">Waiting for the agent to start the run…</p>}
       {runs.can({ type: "checkRun" }) && <Alert variant="warn" role="status">
         Your agent didn’t confirm whether it started the run.
@@ -45,10 +63,6 @@ export function RunControls({ runtime, row, owner, title }: RunControlsProps) {
       {runs.can({ type: "letGo" }) && (
         <Button variant="secondary" onClick={() => send({ type: "letGo" })}>Allow a new run</Button>
       )}
-      <ConfirmDialog open={state.review.showing} title={`Run “${title}”?`} confirmLabel={state.request.offered ? "Send again" : "Run now"}
-        onConfirm={() => send(confirm)} onCancel={() => send({ type: "cancelRun" })}>
-        {state.request.offered ? "Alpha will send the same request. The agent can accept it only once." : "Your agent will run the version shown."}
-      </ConfirmDialog>
     </section>
   );
 }

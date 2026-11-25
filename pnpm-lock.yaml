@@ -356,6 +356,9 @@ importers:
       '@elizaos/plugin-notes-client':
         specifier: link:../../.eliza/packages/plugin-notes-client
         version: link:../../.eliza/packages/plugin-notes-client
+      '@elizaos/plugin-wallet-client':
+        specifier: link:../../.eliza/packages/plugin-wallet-client
+        version: link:../../.eliza/packages/plugin-wallet-client
       '@elizaos/plugin-workflow-client':
         specifier: link:../../.eliza/packages/plugin-workflow-client
         version: link:../../.eliza/packages/plugin-workflow-client

@@ -1,3 +1,4 @@
+import { cn } from "../../lib/cn.ts";
 import { Alert } from "../Alert.tsx";
 import { Toast } from "../Toast.tsx";
 
@@ -61,12 +62,20 @@ export const homeNoticeWords = (notice: HomeNoticeMessage): string => {
 };
 
 /**
- * A failure told where the owner is looking: a toast on bare Home, put in the shell's `ToastRegion`, or a warning in
- * place in the edit bar.
+ * A failure told where the owner is looking: a toast on bare Home, put in the shell's `ToastRegion`; a short line in
+ * the edit bar when a change was not saved; or a warning in place.
  * @model spec/app/home/index.md
  */
 export function HomeNotice({ notice, place, className }: HomeNoticeProps) {
-  return place === "AsToast"
-    ? <Toast className={className}>{homeNoticeWords(notice)}</Toast>
-    : <Alert variant="warn" className={className}>{homeNoticeWords(notice)}</Alert>;
+  if (place === "AsToast") return <Toast className={className}>{homeNoticeWords(notice)}</Toast>;
+  if (place === "InEditBar" && notice.tag === "TellNotSaved") {
+    return (
+      <p role="alert" className={cn("flex items-center gap-2 text-sm", className)}>
+        <span aria-hidden className="mr-1.5 size-2 shrink-0 rounded-full bg-destructive" />
+        <span aria-hidden>Couldn’t save</span>
+        <span className="sr-only">{homeNoticeWords(notice)}</span>
+      </p>
+    );
+  }
+  return <Alert variant="warn" className={className}>{homeNoticeWords(notice)}</Alert>;
 }
