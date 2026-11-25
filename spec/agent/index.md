@@ -161,8 +161,8 @@ the owner's prompt and scheduled task changes. Scheduled Digests reads
 hosted sources, loops and retained results. It sends reviewed schedule
 changes and acknowledges an opened result.
 Notes reads the same owner identity and calls the Notes module to
-read and edit notes, erase Trash and finish recording cleanup. The approvals
-area lists the agent's proposals and resolves one
+read and edit notes, erase Trash and finish recording cleanup. The scanner
+hands the owner’s reviewed scan text to Notes through that module. The approvals area lists the agent's proposals and resolves one
 through the approvals module. A route an area
 fakes for want of an agent plugin is not listed: none does today. Each line
 of `apps/agent/host/routes.jsonl` is one route; the pack is refused unless

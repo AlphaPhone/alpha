@@ -159,6 +159,7 @@ effect function tried(task: () => Promise<unknown>): boolean!! {
 export const phoneCamera = Layer.effect(CameraPort, effect {
   const turn = try Semaphore.make(1)
   let owner = 0
+  let latest = 0
   let lenses: ReadonlyArray<CameraDevice> = []
   return {
     nativePreview: true,
@@ -191,7 +192,8 @@ export const phoneCamera = Layer.effect(CameraPort, effect {
       return grantOf(reply?.microphone ?? "")
     },
     start: (ticket: number, lens: Lens, aspect: Aspect) => Semaphore.withPermit(turn, effect {
-      if (owner > ticket) return undefined
+      if (latest > ticket) return undefined
+      latest = ticket
       if (lenses.length === 0) {
         const listed = tryPromise(() => camera().getDevices()) catch () => undefined
         lenses = listed?.devices ?? []
@@ -243,8 +245,8 @@ export const browserCamera = Layer.effect(CameraPort, effect {
   const turn = try Semaphore.make(1)
   const signals = try PubSub.sliding<CameraSignal>(4)
   let owner = 0
+  let latest = 0
   let opened: MediaStream | undefined
-  let preflight: MediaStream | undefined
   let view: HTMLVideoElement | null = null
   let film: BrowserFilm | undefined
 
@@ -265,7 +267,6 @@ export const browserCamera = Layer.effect(CameraPort, effect {
   try addFinalizer(() => sync(() => {
     if (film?.recording.state === "recording") film.recording.stop()
     release(film?.audio)
-    release(preflight)
     release(opened)
   }))
 
@@ -276,26 +277,23 @@ export const browserCamera = Layer.effect(CameraPort, effect {
     volumeKeys: Stream.empty,
     bind: (element: HTMLVideoElement | null) => sync(() => { view = element; bound() }),
     effect access() {
-      const camera = opened !== undefined || preflight !== undefined ? "Granted" : grantOf(try promise(() => permission("camera")))
+      const camera = opened !== undefined ? "Granted" : grantOf(try promise(() => permission("camera")))
       const mic = grantOf(try promise(() => permission("microphone")))
       return { camera: camera as Grant, microphone: mic as Grant }
     },
     effect ask(kind: "camera" | "microphone"): Grant!! {
       return effect {
         const stream = try tryPromise(() => get(kind === "camera" ? { video: videoFor("Back", "4:3") } : { audio: true }))
-        if (kind === "camera") { release(preflight); preflight = stream }
-        else { release(stream) }
+        release(stream)
         return "Granted" as Grant
       } catch (cause) => permissionFailure(cause.cause) ? "Denied" as Grant : "Unasked" as Grant
     },
     start: (ticket: number, lens: Lens, aspect: Aspect) => Semaphore.withPermit(turn, effect {
-      if (owner > ticket) return undefined
+      if (latest > ticket) return undefined
+      latest = ticket
       release(opened)
       opened = undefined
-      const prepared = preflight
-      preflight = undefined
-      if (lens !== "Back" || aspect !== "4:3") release(prepared)
-      const stream = lens === "Back" && aspect === "4:3" && prepared !== undefined ? prepared : (tryPromise(() => get({ video: videoFor(lens, aspect) })) catch () => undefined)
+      const stream = tryPromise(() => get({ video: videoFor(lens, aspect) })) catch () => undefined
       if (stream === undefined || view === null) { release(stream); bound(); return undefined }
       opened = stream
       owner = ticket

@@ -461,7 +461,8 @@ const forgetting = started(effect {
   })
 }, "forgetting the position")
 
-// spec/app/assistant/chats.md, "The newest list says which conversations there are, and a conversation no longer listed stops showing"
+// spec/app/assistant/chats.md, "The newest list says which conversations there are, and a conversation no longer listed stops showing"; spec/app/assistant/chats.md, "The list read after a conversation was gone opens the first it lists, the most recently used, while the new chat is blank and none other is showing or being made"
+/** The agent's conversations in its own order, the most recently used first. */
 effect function listed(ticket: number): Chats.Event!!(Agent | Talk) {
   return effect {
     const { board } = try Talk
@@ -470,7 +471,15 @@ effect function listed(ticket: number): Chats.Event!!(Agent | Talk) {
   } catch () => ({ type: "listed", ticket, ok: false, ids: [] })
 }
 
-// spec/app/assistant/chats.md, "A page of the conversation showing is taken only from the newest asking"; spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"; spec/app/assistant/chats.md, "A conversation the agent says it does not have is forgotten, and a new chat shows in its place"
+/** The list read after a conversation was gone, with whether the new chat is still blank when it is answered. */
+effect function newest(ticket: number): Chats.Event!!(Agent | Talk | Composer.Machine) {
+  const read = try listed(ticket)
+  const writing = try (try Composer.Machine).get()
+  const blank = !Composer.content(writing.editor) && !Composer.attached(writing.editor) && writing.draft.sync === "Kept"
+  return read.type === "listed" ? { ...read, type: "latest", blank } : read
+}
+
+// spec/app/assistant/chats.md, "A page of the conversation showing is taken only from the newest asking"; spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"; spec/app/assistant/chats.md, "A conversation the agent says it does not have is forgotten, and the agent's newest conversation shows in its place, or a new chat when it has none"
 /** A page of the conversation showing, each message numbered as Alpha first saw it: the page counts up to its highest number, which a scroll names. The agent's 404 to a read of the latest messages says it has no such conversation. */
 effect function paged(conversation: number, around: number, ticket: number): Chats.Event!!(Agent | Talk | Chats.Machine | Composer.Machine) {
   return effect {
@@ -526,6 +535,7 @@ effect function forked(conversation: number, message: number, ticket: number): C
 function carryChats(fx: Chats.Effect): Job<Chats.Event, Agent | Talk | Chats.Machine | Composer.Machine | Voice.Machine | VoiceBridge | Speaker, []> {
   return match (fx) {
     when { tag: "ReadList", let ticket }: answer("list", listed(ticket), { type: "listed", ticket, ok: false, ids: [] });
+    when { tag: "ReadLatest", let ticket }: answer("list", newest(ticket), { type: "latest", ticket, ok: false, ids: [], blank: false });
     when { tag: "ReadPage", let conversation, let around, let ticket }: answer("page", paged(conversation, around, ticket), { type: "paged", ticket, ok: false, messages: 0 });
     when { tag: "Create", let ticket }: answer("make", making(ticket, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/conversations"), { title: "Ask Alpha" })), { type: "made", ticket, confirmed: false, known: false, conversation: 1 });
     when { tag: "Fork", let conversation, let message, let ticket }: answer("make", forked(conversation, message, ticket), { type: "made", ticket, confirmed: false, known: false, conversation: conversation + 1 });

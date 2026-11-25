@@ -6,14 +6,17 @@ module native {
   import type { DeviceLibraryClient, PhotosClient } from "@elizaos/os/bridges/definitions/media"
   import { deviceLibraryClient, deviceLibraryPlugin, photosClient, photosPlugin } from "@elizaos/os/bridges/media"
 
+  let library: PhotosClient | undefined
+  let reviewed: DeviceLibraryClient | undefined
+
   /** @throws {never} */
   export function phoneLibrary(name: string): PhotosClient {
-    return photosClient(photosPlugin(name), name)
+    return (library ??= photosClient(photosPlugin(name), name))
   }
 
   /** @throws {never} */
   export function reviewedLibrary(name: string): DeviceLibraryClient {
-    return deviceLibraryClient(deviceLibraryPlugin(name), name)
+    return (reviewed ??= deviceLibraryClient(deviceLibraryPlugin(name), name))
   }
 }
 import { phoneLibrary, reviewedLibrary } from native

@@ -1,26 +1,31 @@
 // spec/app/notes/index.md, "The list holds the owner it shows, the notes and folders it last read with the store's revision, the folder it is narrowed to, and the folder numbers that are gone"; spec/app/notes/editor.md, "Story: Keep my draft through a restart"
 import { authoredNoteText, parseNoteFormat } from "@elizaos/plugin-notes/format"
 import { noteFolderId, notesFolderName, type NoteFolder } from "@elizaos/plugin-notes/organize"
-import type { NoteFormat, NotesSnapshot, StickyNote } from "@elizaos/plugin-notes/types"
+import type { NoteFormat, NoteJson, NotesSnapshot, StickyNote } from "@elizaos/plugin-notes/types"
 import type { Folder, Row } from "../../gen/app__notes.effect.vibe"
 import { type Kind, type Origin, type Source, unlinked } from "../../gen/app__notes__note.effect.vibe"
 import { Vault, type Slot } from "../platform/vault.vibe"
 import { Time } from "../runtime/time.vibe"
 
 module pure {
-  /** Stable numbers for canonical identifiers, with a separate namespace per kind of identifier. */
+  import type { StickyNote } from "@elizaos/plugin-notes/types"
+
+  /** Stable numbers for canonical identifiers, with a separate namespace per kind of identifier.
+   * @throws {never} */
   export function numberOf(kind: string, id: string): number {
     let hash = 14695981039346656037n
     for (const char of `${kind}:${id}`) hash = BigInt.asUintN(64, (hash ^ BigInt(char.codePointAt(0) ?? 0)) * 1099511628211n)
     return Number(hash & 0xfffffffffffffn) + 1
   }
 
-  /** A note's new creation identifier, kept with its content before its first write. */
+  /** A note's new creation identifier, kept with its content before its first write.
+   * @throws {never} */
   export function creationId(): string {
     return crypto.randomUUID()
   }
 
-  /** The stored modification time or when the agent last updated the note. */
+  /** The stored modification time or when the agent last updated the note.
+   * @throws {never} */
   export function moment(note: StickyNote): number {
     const saved = note.format?.data.modifiedAt
     const modified = typeof saved === "string" ? Date.parse(saved) : typeof saved === "number" ? saved : NaN
@@ -122,7 +127,7 @@ export function wordsOf(draft: DraftWords): string {
 }
 
 export function formatOf(draft: DraftWords, existing?: StickyNote, folder?: NoteFolder): NoteFormat {
-  const data = { ...existing?.format?.data, ...(folder === undefined ? {} : { folderId: folder.id }) }
+  const data: { [key: string]: NoteJson } = { ...existing?.format?.data, ...(folder === undefined ? {} : { folderId: folder.id }) }
   if (draft.kind === "Checklist") return { kind: "list", data: { ...data, items: draft.items.map(({ t, done }) => ({ t, done })) } }
   const { items: _items, ...remaining } = data
   return { kind: "text", data: remaining }
