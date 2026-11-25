@@ -7,6 +7,7 @@ import { Machine as Runs } from "../gen/app__workflows__runs.effect.vibe";
 import { Machine as Sheet } from "../gen/app__workflows__sheet.effect.vibe";
 import { Machine as Clock } from "../gen/app__workflows__clock.effect.vibe";
 import { Machine as Approvals } from "../gen/app__workflows__approvals.effect.vibe";
+import { Machine as Builder } from "../gen/app__workflows__builder.effect.vibe";
 import workflows from "../src/workflows/index.tsx";
 import home from "../src/home/index.tsx";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
@@ -24,6 +25,14 @@ const choose = (name: string) => drawn(() => {
   row.click();
 });
 
+/** Type into the field a visible label wraps, as the builder's Name and Text are drawn. */
+const write = (name: string, text: string) => drawn(() => {
+  const label = [...document.querySelectorAll("label")].find((one) => one.firstChild?.textContent?.trim() === name);
+  const found = label?.querySelector<HTMLInputElement | HTMLTextAreaElement>("input, textarea");
+  if (!found) throw new Error(`no field ${name}`);
+  Object.getOwnPropertyDescriptor(Object.getPrototypeOf(found) as object, "value")?.set?.call(found, text);
+  found.dispatchEvent(new Event("input", { bubbles: true }));
+});
 
 async function openWorkflows(world: Scene) {
   const { alpha } = await open(world, only("home", "view:Workflows", "notice"));
@@ -227,6 +236,41 @@ describe("Workflows", () => {
         activity: [{ at: "2026-11-24T07:02:00.000Z", node: undefined }, { at: "2026-11-24T07:01:00.000Z", node: "preview" }],
       });
     });
+  });
+
+  it('Writes a workflow, reviews it and saves it on the agent once (spec/app/workflows/builder.md, "Story: Write a workflow step by step"; "Story: Save a workflow on the agent once")', async () => {
+    const world = scene();
+    const { alpha } = await open(world);
+    await press("Workflows");
+    const area = workflows.runtime(alpha);
+    await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
+    await press("Add to Workflows");
+    await until(alpha, area, Listing, (state) => state.place.tag === "ListingAdd");
+    await press("Workflow");
+    await until(alpha, area, Builder, (state) => state.offer.status === "Loaded");
+
+    await write("Name", "Water the plants");
+    await write("Text", "Water the plants by the window.");
+    await press("Add step");
+    await until(alpha, area, Builder, (state) => state.steps.length === 1 && state.name > 0 && state.draft.sync === "Kept");
+    await press("Review workflow");
+    expect(document.querySelector("[role=alertdialog]")?.textContent).toContain("Runs only when you start it. It starts turned off.");
+    await pressOnTop("Cancel");
+    await until(alpha, area, Builder, (state) => !state.review.showing);
+    expect(world.workflows.created).toEqual([]);
+
+    await press("Review workflow");
+    await pressOnTop("Save workflow");
+    await until(alpha, area, Builder, (state) => state.saved === 1);
+    expect(world.workflows.created.map((one) => ({ name: one.name, active: one.active }))).toEqual([{ name: "Water the plants", active: false }]);
+    expect(world.workflows.saves.size).toBe(1);
+
+    await drawn(() => alpha.back());
+    await until(alpha, area, Listing, (state) => state.list.status === "Loaded" && state.place.tag === "ListingRows");
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(visible("Monthly statement", "Water the plants")).toEqual(["Monthly statement", "Water the plants"]);
+    }, { timeout: 15_000 });
   });
 
   it('Removes a workflow only after its review, keeps its history, and restores it (spec/app/workflows/index.md, "Story: Change a workflow")', async () => {
