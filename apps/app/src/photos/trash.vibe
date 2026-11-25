@@ -88,7 +88,7 @@ effect function ready(ticket: number, items: readonly number[]): Trash.Event!!(P
 
 effect function readyEmpty(ticket: number, revision: number): Trash.Event!!(PhotosPort | Catalog | Prepared | Trash.Machine) {
   const { browser } = try PhotosPort
-  const failed = { type: "emptyReadied", ticket, revision, ok: false, items: [] } as const
+  const failed: Trash.Event = { type: "emptyReadied", ticket, revision, ok: false, items: [] }
   if (Option.isNone(browser)) return failed
   const captures = (tryPromise(() => browser.value.rows()) catch () => undefined)?.filter((item) => item.trashedAt !== undefined)
   const state = try (try Trash.Machine).get()
