@@ -1,5 +1,6 @@
-import { CheckCheck, ChevronLeft, Ellipsis, ListChecks, PenLine, Plus, RotateCw, Search, UserRound } from "lucide-react";
+import { Archive, Check, ChevronLeft, Ellipsis, Plus, RotateCw, Search, Trash2 } from "lucide-react";
 import { useRef } from "react";
+import { cn, focusRing } from "../../lib/cn.ts";
 import { Button } from "../Button.tsx";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
 import { Screen } from "../Screen.tsx";
@@ -8,12 +9,26 @@ import { InboxList, type InboxListProps } from "./InboxList.tsx";
 import { InboxListState, type InboxListStateKind } from "./InboxListState.tsx";
 import { InboxNotice, type InboxNoticeKind } from "./InboxNotice.tsx";
 import { InboxSearchBar, type InboxSearchBarProps } from "./InboxSearchBar.tsx";
-import { InboxSelectionBar, type InboxSelectionBarProps } from "./InboxSelectionBar.tsx";
+
+const actionChip = cn(focusRing, "min-h-9 shrink-0 rounded-action bg-secondary px-3 text-caption whitespace-nowrap text-secondary-foreground disabled:opacity-50");
+
+/** What an empty folder says, as develop's list words it: Starred, All mail and Spam read as a search. */
+const emptyIn = {
+  incoming: "empty", sent: "emptySent", archived: "emptyArchive", trashed: "emptyTrash", drafts: "emptyDrafts", starred: "noResults", allMail: "noResults", spam: "noResults",
+} as const satisfies Record<InboxListScreenProps["folder"], InboxListStateKind>;
 
 export type InboxListScreenProps = Pick<InboxListProps, "rows" | "loading" | "onLoadMore" | "loadingMore"> &
   Pick<InboxFolderBarProps, "folder" | "unavailable"> &
   Pick<InboxSearchBarProps, "onSearch"> &
-  Pick<InboxSelectionBarProps, "onArchive" | "onTrash" | "onRestore" | "onChooseAll"> & {
+  {
+    /** Reviews archiving the messages chosen; offered only where the grant allows changing the mailbox. */
+    onArchive?: () => void;
+    /** Reviews moving the messages chosen to Trash; offered only where the grant allows changing the mailbox. */
+    onTrash?: () => void;
+    /** Reviews putting the messages chosen back where they were, in Archive or Trash; offered only there. */
+    onRestore?: () => void;
+    /** Chooses every message the list shows; offered while some shown are not chosen. */
+    onChooseAll?: () => void;
     /** The address of the account whose mail is shown. */
     account?: string;
     /** Returns from Inbox to the apps. */
@@ -38,7 +53,7 @@ export type InboxListScreenProps = Pick<InboxListProps, "rows" | "loading" | "on
     state?: InboxListStateKind;
     /** Does what the state asks, such as signing in or connecting Gmail. */
     onStateAction?: () => void;
-    /** How many messages are chosen; the selection bar is shown above one or more. */
+    /** How many messages are chosen; while selecting, the title counts them. */
     chosen?: number;
     /** Puts the list in selection mode, so each row chooses a message. */
     onStartSelection?: () => void;
@@ -46,16 +61,16 @@ export type InboxListScreenProps = Pick<InboxListProps, "rows" | "loading" | "on
     onFinishSelection?: () => void;
     /** Clears the choices while staying in selection mode. */
     onClearSelection?: () => void;
-    /** How many drafts are set aside; the way back to them is shown above none. */
-    aside?: number;
-    /** Opens the drafts set aside. */
-    onShelf?: () => void;
     /** Reads the first page again; offered while mail can be read and no read is under way. */
     onRefresh?: () => void;
     /** Starts a new message; offered once an account is chosen. */
     onCompose?: () => void;
-    /** Opens the choice among the connected accounts. */
-    onAccount?: () => void;
+    /** The accounts mail can be read from; with more than one, each is a chip under the folders that shows its mail. */
+    accounts?: { id: string; email: string }[];
+    /** Shows the mail of the account chosen among `accounts`. */
+    onChooseAccount?: (id: string) => void;
+    /** The drafts set aside, each offered as "Open local draft" under the folders, which brings it back as it was left. */
+    aside?: { id: string; onOpen?: () => void }[];
   };
 
 /**
@@ -67,7 +82,7 @@ export type InboxListScreenProps = Pick<InboxListProps, "rows" | "loading" | "on
 export function InboxListScreen({
   account, onBack, folder, unavailable, onChooseFolder, searching = false, search, onSearchChange, onSearch, onOpenSearch, onCloseSearch,
   notice, onNoticeAction, state, onStateAction, chosen = 0, onStartSelection, onFinishSelection, onClearSelection,
-  onArchive, onTrash, onRestore, onChooseAll, aside = 0, onShelf, onRefresh, onCompose, onAccount, rows, loading, onLoadMore, loadingMore,
+  onArchive, onTrash, onRestore, onChooseAll, onRefresh, onCompose, accounts = [], onChooseAccount, aside = [], rows, loading, onLoadMore, loadingMore,
 }: InboxListScreenProps) {
   const focusSearchAfterCloseRef = useRef(false);
   const closeSearch = () => {
@@ -77,24 +92,28 @@ export function InboxListScreen({
   const compose = onCompose ?? (state === "signedOut" ? onStateAction : undefined);
   const actions = (
     <>
-      {onRefresh || loading ? <Button variant="ghost" size="icon" aria-label="Refresh" loading={loading} disabled={!onRefresh} onClick={onRefresh}><RotateCw /></Button> : null}
+      {onRefresh || loading ? <Button variant="ghost" size="icon" aria-label="Refresh" loading={loading} disabled={!onRefresh} onClick={onRefresh}><RotateCw className="size-5" /></Button> : null}
       {state !== "signedOut" && <Button variant="ghost" size="icon" aria-label="Search email" disabled={!onOpenSearch} onClick={onOpenSearch} ref={(button) => {
         if (button && focusSearchAfterCloseRef.current) {
           focusSearchAfterCloseRef.current = false;
           button.focus();
         }
-      }}><Search /></Button>}
-      <Button variant="ghost" size="icon" aria-label="Compose" disabled={!compose} onClick={compose}><Plus /></Button>
-      {onStartSelection || onFinishSelection || onAccount || (aside > 0 && onShelf) ? (
+      }}><Search className="size-5" /></Button>}
+      <Button variant="ghost" size="icon" aria-label="Compose" disabled={!compose} onClick={compose}><Plus className="size-5" /></Button>
+      {onStartSelection || onFinishSelection ? (
         <Menu>
           <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Mail options"><Ellipsis /></Button></MenuTrigger>
-          <MenuContent>
-            {onStartSelection || onFinishSelection ? <MenuItem onSelect={onFinishSelection ?? onStartSelection}><ListChecks />{onFinishSelection ? "Finish selection" : "Select emails"}</MenuItem> : null}
-            {onFinishSelection && (onChooseAll || onClearSelection) ? (
-              <MenuItem onSelect={onChooseAll ?? onClearSelection}><CheckCheck />{onChooseAll ? "Select all shown" : "Deselect all"}</MenuItem>
+          <MenuContent className="min-w-52">
+            <MenuItem onSelect={onFinishSelection ?? onStartSelection}><Check className="size-5.5" />{onFinishSelection ? "Finish selection" : "Select emails"}</MenuItem>
+            {onFinishSelection ? (
+              <>
+                <MenuItem disabled={!onChooseAll && !onClearSelection} onSelect={onChooseAll ?? onClearSelection}><Check className="size-5.5" />{onChooseAll || !onClearSelection ? "Select all shown" : "Deselect all"}</MenuItem>
+                {folder === "archived" || folder === "trashed"
+                  ? <MenuItem disabled={!onRestore} onSelect={onRestore}><Archive className="size-5.5" />{folder === "trashed" ? "Restore from Trash" : "Restore to Inbox"}</MenuItem>
+                  : <MenuItem disabled={!onArchive} onSelect={onArchive}><Archive className="size-5.5" />Archive</MenuItem>}
+                {folder === "trashed" ? null : <MenuItem disabled={!onTrash} onSelect={onTrash}><Trash2 className="size-5.5" />Move to Trash</MenuItem>}
+              </>
             ) : null}
-            {onAccount ? <MenuItem onSelect={onAccount}><UserRound />{account ?? "Gmail accounts"}</MenuItem> : null}
-            {aside > 0 && onShelf ? <MenuItem onSelect={onShelf}><PenLine />Drafts set aside ({aside})</MenuItem> : null}
           </MenuContent>
         </Menu>
       ) : null}
@@ -102,18 +121,27 @@ export function InboxListScreen({
   );
   return (
     <Screen
-      title={chosen > 0 ? `${chosen} selected` : inboxFolders[folder]}
-      leading={searching || onBack ? <Button variant="ghost" size="icon" aria-label={searching ? "Back to inbox" : "Back to apps"} className="ml-1" onClick={searching ? closeSearch : onBack}><ChevronLeft className="size-5" /></Button> : undefined}
+      title={chosen > 0 || onFinishSelection ? `${chosen} selected` : inboxFolders[folder]}
+      leading={searching || onBack ? <Button variant="ghost" size="icon" aria-label={searching ? "Back to inbox" : "Back to apps"} onClick={searching ? closeSearch : onBack}><ChevronLeft className="size-5.5" /></Button> : undefined}
       titleControl={searching ? <InboxSearchBar value={search} onValueChange={onSearchChange} onSearch={onSearch} onClose={closeSearch} focusOnOpen /> : undefined}
       actions={searching ? undefined : actions}
-      className="[&_header>h1]:pl-0.5 [&_main>div]:gap-2 [&_main>div]:pt-1"
+      className="[&_main>div]:gap-0 [&_main>div]:pt-1"
     >
       {!searching && state !== "signedOut" ? <InboxFolderBar folder={folder} unavailable={unavailable} onChoose={onChooseFolder} /> : null}
+      {!searching && (aside.length > 0 || accounts.length > 1) ? (
+        <div role="group" aria-label="Mail actions" className="-mx-4 flex touch-pan-x gap-2 overflow-x-auto px-5 pb-2">
+          {aside.map(({ id, onOpen }) => (
+            <button key={id} type="button" disabled={!onOpen} onClick={onOpen} className={actionChip}>Open local draft</button>
+          ))}
+          {accounts.length > 1 ? accounts.map(({ id, email }) => (
+            <button key={id} type="button" aria-label={email} aria-pressed={email === account} disabled={!onChooseAccount} onClick={() => onChooseAccount?.(id)} className={actionChip}>{email}</button>
+          )) : null}
+        </div>
+      ) : null}
       {state === "signedOut" && onStateAction ? <Button variant="secondary" size="sm" className="ml-1 self-start px-3 font-medium" onClick={onStateAction}>Connect Eliza Cloud</Button> : null}
-      {notice ? <InboxNotice kind={notice} onAction={onNoticeAction} /> : null}
-      {chosen > 0 ? <InboxSelectionBar count={chosen} onArchive={onArchive} onTrash={onTrash} onRestore={onRestore} /> : null}
+      {notice ? <InboxNotice kind={notice} onAction={onNoticeAction} plain /> : null}
       {rows.length === 0 && loading ? <InboxListState kind="loading" />
-        : state && rows.length === 0 ? <InboxListState kind={state === "empty" && folder === "sent" ? "emptySent" : state} onAction={onStateAction} />
+        : state && rows.length === 0 ? <InboxListState kind={state === "empty" ? emptyIn[folder] : state} onAction={onStateAction} />
         : <InboxList rows={rows} loading={loading} onLoadMore={onLoadMore} loadingMore={loadingMore} />}
     </Screen>
   );

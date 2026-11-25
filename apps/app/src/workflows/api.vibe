@@ -57,7 +57,6 @@ export schema ScheduledTask {
   readonly promptInstructions: string
   readonly state: { readonly status: string; readonly firedAt?: string }
   readonly trigger: { readonly kind: "once" | "cron" | "manual"; readonly atIso?: string; readonly expression?: string; readonly tz?: string }
-  readonly metadata: { readonly recordKey?: string }
 }
 
 const Triggers = Schema.Struct({ triggers: Schema.Array(Prompt) })

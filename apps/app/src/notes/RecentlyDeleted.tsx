@@ -38,9 +38,9 @@ export function RecentlyDeleted({ runtime, collection }: { readonly runtime: Alp
   return <>
     {state.showing && <section aria-label="Recently deleted" data-alpha-subview="notes-trash" className="flex min-h-0 flex-1 flex-col">
       <AppHeader title="Recently deleted" detail
-        className="min-h-14 shrink-0 [&>h1]:ml-1 [&>h1]:font-display [&>h1]:text-title [&>h1]:font-light [&>button[data-notes-empty][aria-label]]:h-12 [&>button[data-notes-empty][aria-label]]:w-auto"
+        className="shrink-0 [&>h1]:ml-1 [&>h1]:font-display [&>h1]:text-title [&>h1]:leading-serif [&>h1]:font-light [&>button[data-notes-empty][aria-label]]:h-12 [&>button[data-notes-empty][aria-label]]:w-auto"
         leading={<Button size="icon" variant="ghost" aria-label="Back to notes" onClick={() => send(back)}><ChevronLeft /></Button>}>
-        {state.entries.length > 0 && <Button data-notes-empty="" aria-label="Empty Recently deleted" className="px-3.5 text-md"
+        {state.entries.length > 0 && <Button data-notes-empty="" aria-label="Empty Recently deleted" className="px-3.5 text-base"
           variant="ghost" disabled={!can(askEmpty)} onClick={() => send(askEmpty)}>Empty</Button>}
       </AppHeader>
       <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto px-4 pb-[11.875rem]">
@@ -55,7 +55,7 @@ export function RecentlyDeleted({ runtime, collection }: { readonly runtime: Alp
             const view = { type: "openEntry", id: entry.id } as const;
             const description = deletionDate(entry.at);
             return <li key={entry.id}>
-              <NoteRow title={titleOf(note)} date="" preview={description} aria-label={titleOf(note)} aria-description={description}
+              <NoteRow title={titleOf(note)} date="" preview={description} aside="" aria-label={titleOf(note)} aria-description={description}
                 disabled={!can(view)} onClick={() => send(view)} />
             </li>;
           })}
@@ -65,15 +65,15 @@ export function RecentlyDeleted({ runtime, collection }: { readonly runtime: Alp
     <Sheet open={reviewing || selected !== undefined} onOpenChange={(open) => { if (!open && can(back)) send(back); }}>
       <SheetContent title={heading} description={details} data-alpha-notes-trash-sheet=""
         {...(!reviewing && { "data-alpha-notes-recovery": "", "aria-labelledby": undefined, "aria-label": `Recover “${title}”?` })}
-        className="bottom-27 max-h-[calc(100dvh-8.75rem)] gap-6 bg-card px-6 pt-7 shadow-none pb-[calc(0.75rem+max(1.75rem,calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))+0.75rem)))] before:absolute before:top-3 before:left-1/2 before:h-1 before:w-10 before:-translate-x-1/2 before:rounded-full before:bg-muted-foreground/45 [&>div:first-child]:gap-2 [&>div:last-child]:gap-2.5 [&_h2]:font-display [&_h2]:text-home-display [&_h2]:font-light"
+        className="bottom-27 max-h-[calc(100dvh-8.75rem)] gap-2 bg-card px-6 pt-7.5 shadow-none pb-[calc(0.75rem+max(1.75rem,calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))+0.75rem)))] before:absolute before:top-3 before:left-1/2 before:h-1 before:w-10 before:-translate-x-1/2 before:rounded-full before:bg-muted-foreground/45 [&>div:first-child]:gap-2 [&>div:last-child]:mt-4 [&>div:last-child]:gap-2.5 [&>div:last-child>*]:h-13 [&>div:last-child>*]:text-base [&>p]:leading-plain [&_h2]:pt-0"
         actions={reviewing ? <>
-          <Button variant="secondary" size="lg" className="text-md" onClick={() => send({ type: "cancel" })}>Cancel</Button>
-          {!full && <Button size="lg" className={`text-md ${contrast}`} disabled={!can(confirm)} onClick={() => send(confirm)}>
+          <Button variant="secondary" size="lg" className="text-base" onClick={() => send({ type: "cancel" })}>Cancel</Button>
+          {!full && <Button size="lg" className={`text-base ${contrast}`} disabled={!can(confirm)} onClick={() => send(confirm)}>
             <Trash2 className="size-4.5" /> {emptying ? "Delete all" : "Delete"}
           </Button>}
         </> : <>
-          <Button variant="secondary" size="lg" className="text-md" disabled={!can(askErase)} onClick={() => send(askErase)}>Delete now</Button>
-          <Button size="lg" className={`text-md ${contrast}`} disabled={!can(recover)} onClick={() => send(recover)}>Recover</Button>
+          <Button variant="secondary" size="lg" className="text-base" disabled={!can(askErase)} onClick={() => send(askErase)}>Delete now</Button>
+          <Button size="lg" className={`text-base ${contrast}`} disabled={!can(recover)} onClick={() => send(recover)}>Recover</Button>
         </>}>
         {(state.failed || state.unsure) && <Alert variant="warn">
           {state.unsure ? "Alpha couldn't confirm the last change" : "Couldn't change Recently deleted"}

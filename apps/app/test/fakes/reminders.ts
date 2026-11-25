@@ -120,7 +120,7 @@ function advanceDate(date: string, recurrence: FakeReminderItem["recurrence"]): 
   return `${String(base.getUTCFullYear()).padStart(4, "0")}-${String(base.getUTCMonth() + 1).padStart(2, "0")}-${String(base.getUTCDate()).padStart(2, "0")}`;
 }
 
-/** Fake agent routes serving `/api/alpha/reminders/*`, `/api/notifications*`, and `/api/scheduled-tasks` over `scene`. */
+/** Fake agent routes serving `/api/alpha/reminders/*` and `/api/notifications*` over `scene`; Workflows serves `/api/scheduled-tasks`. */
 export function remindersRoutes(scene: RemindersScene, now: () => number): Route[] {
   const errOf = () =>
     scene.failStatus === undefined ? undefined : Response.json({ error: "reminders_unavailable" }, { status: scene.failStatus });
@@ -146,9 +146,6 @@ export function remindersRoutes(scene: RemindersScene, now: () => number): Route
         if (row === undefined) return Response.json({ error: "notification_not_found" }, { status: 404 });
         row.read = true;
         return Response.json({ notification: row });
-      }
-      if (url.pathname === "/api/scheduled-tasks" && request.method === "GET") {
-        return Response.json({ tasks: [] });
       }
       return undefined;
     },

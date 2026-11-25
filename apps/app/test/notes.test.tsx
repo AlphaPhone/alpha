@@ -201,8 +201,8 @@ describe("Notes", () => {
     await until(alpha, runtime, Editor, (state) => state.showing && state.draft.sync === "Kept");
     const pinned = () => (world.notes.notes.find((row) => row.id === "gifts")?.format?.data as { readonly pinned?: boolean } | undefined)?.pinned;
     const choose = async (name: string) => {
-      await control("Note actions");
-      await drawn(() => button("Note actions")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+      await control("More");
+      await drawn(() => button("More")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
       const choice = () => [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((item) => item.textContent?.trim() === name);
       await rendered(() => expect(choice()?.getAttribute("aria-disabled")).toBeNull());
       await drawn(() => choice()?.click());
