@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { Effect } from "effect";
 import { act } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Chats } from "../gen/app__assistant__chats.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
@@ -14,7 +14,7 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import type { Mount } from "../src/areas.ts";
 import assistant from "../src/assistant/index.tsx";
 import { untimed } from "../src/runtime/reactor.vibe";
-import { button, closeAll, fill, hardware, later, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -333,5 +333,58 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Stopped" && s.check !== "Aborting" && s.recheck.status !== "Loading");
     const { check } = await runtime.runPromise(Effect.flatMap(Conversation, (machine) => machine.get()));
     expect([world.ask.turns.size, lines()[0], check === "StoppedForSure" || check === "LookLater"]).toEqual([0, "Take your time", true]);
+  });
+});
+
+/** The card in the conversation whose title is `title`, if one is shown. */
+const card = (title: string) => [...document.querySelectorAll("section[aria-label='Ask Alpha'] [role=log] article")].find((one) => one.textContent?.includes(title));
+
+/** Press `name` on the card titled `title`, as the owner taps it. */
+const onCard = (title: string, name: string) => drawn(() => {
+  const found = [...(card(title)?.querySelectorAll("button") ?? [])].find((one) => one.textContent === name);
+  if (!found) throw new Error(`no ${name} on the card ${title}`);
+  found.click();
+});
+
+// spec/app/approvals/index.md, "Story: One action at a time"; spec/app/messages/sending.md, "Story: Send a message once"
+describe("on an Alpha image", () => {
+  it("A text Alpha asks to send is shown on its card first, sent once only on the owner's Send, told to the agent, and a draft or a declined one sends nothing (spec/app/messages/sending.md, \"Story: Send a message once\"; spec/app/approvals/proposal.md, \"Story: Decide\"; spec/app/messages/composer.md, \"The agent's draft goes into the open conversation's draft only while it is empty, and never sends\")", async () => {
+    const world = { ...scene(), phone: true, image: true };
+    const { desk } = world.telephony;
+    desk.owner = "owner-1";
+    const to = { kind: "number", number: "+14155550133" };
+    const offer = (id: string, requestMessageId: string, operation: object) =>
+      desk.proposals.push({ id, digest: id.padStart(64, "d"), state: "pending", requestMessageId, operation: { type: "sms_compose", target: to, ...operation } });
+    offer("proposal-1", "m1u", { body: "On my way" });
+    await openAssistant(world);
+
+    write("Text 415 555 0133 that I'm on my way");
+    await press("Send");
+    await vi.waitFor(() => expect(card("Send a text to +14155550133")?.textContent).toContain("On my way"));
+    expect([desk.capabilities, world.telephony.sent, desk.proposals[0]?.state]).toEqual(["phone.keypad.v1,phone.dial.v1,phone.call.v1,views.telephony.v1,sms.compose.v1,sms.compose.v2", [], "pending"]);
+
+    // spec/app/messages/sending.md, "Story: Send a message once": the owner's Send sends it once, under the proposal's own operation, and the agent hears the phone's record.
+    await onCard("Send a text to +14155550133", "Send");
+    await vi.waitFor(() => expect(desk.proposals[0]?.state).toBe("done"));
+    expect([world.telephony.sent, desk.proposals[0]?.receipt]).toEqual([
+      [{ operationId: "proposal-1", recipients: ["+14155550133"], body: "On my way" }],
+      { outcome: "applied", operationId: "proposal-1", result: { kind: "sms-compose", status: "sent" } },
+    ]);
+
+    // spec/app/approvals/proposal.md, "A card is open only while its proposal is pending": the next turn offers nothing, and nothing is sent again.
+    write("Thanks");
+    await press("Send");
+    await vi.waitFor(() => expect(world.ask.said).toEqual(["Text 415 555 0133 that I'm on my way", "Thanks"]));
+    await vi.waitFor(() => expect(lines().at(-1)).toBe("You said: Thanks"));
+    expect([card("Send a text to"), world.telephony.sent.length]).toEqual([undefined, 1]);
+
+    // spec/app/approvals/proposal.md, "Only the owner it is for declines a pending proposal, from its card or from the history of phone actions, and the agent is told": a draft is shown too, and a declined one sends nothing.
+    offer("proposal-2", "m3u", { body: "Running late", draft: true });
+    write("Draft them that I'm running late");
+    await press("Send");
+    await vi.waitFor(() => expect(card("Draft a text to +14155550133")?.textContent).toContain("Running late"));
+    await onCard("Draft a text to +14155550133", "Decline");
+    await vi.waitFor(() => expect(desk.proposals[1]?.state).toBe("rejected"));
+    expect(world.telephony.sent.length).toBe(1);
   });
 });
