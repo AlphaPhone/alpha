@@ -195,6 +195,58 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     expect([reviewed.recorder.words, reviewed.sent]).toEqual([true, 0]);
   });
 
+  // spec/app/voice/index.md, "A clip is transcribed on the route speech takes now"
+  it("recognizes one native completion even when a stale recording ID follows it before Start returns", async () => {
+    const world = { ...scene(), phone: true };
+    const runtime = bootVoice(world);
+    await until(runtime, Voice.Machine, (s) => s.warmed);
+    await sendVoice(runtime, { type: "permissionChanged", grant: "Granted" });
+    await sendVoice(runtime, { type: "openRecorder", target: "ComposerField" });
+    await sendVoice(runtime, { type: "startRecording" });
+    await until(runtime, Voice.Machine, (s) => s.recorder.stage === "Recording");
+    await sendVoice(runtime, { type: "closeRecorder" });
+
+    world.voice.recordingStartGate = () => {
+      world.voice.finishRecording?.();
+      world.voice.emitLocal?.("recordingStopped", { recordingId: "retired-native-id", status: "failed" });
+      return Promise.resolve();
+    };
+    await sendVoice(runtime, { type: "openRecorder", target: "ComposerField" });
+    await sendVoice(runtime, { type: "startRecording" });
+    await until(runtime, Voice.Machine, (s) => s.recorder.stage === "Review");
+    expect(world.voice.dictationClips).toEqual(["rec-2"]);
+    expect((await getVoice(runtime)).sent).toBe(0);
+  });
+
+  // spec/app/voice/index.md, "A clip is transcribed on the route speech takes now"
+  it("keeps a confirmed clip when obscured and never offers a recognition retry for a refused stop", async () => {
+    const world = { ...scene(), phone: true };
+    world.voice.dictationInFront = false;
+    const runtime = bootVoice(world);
+    await until(runtime, Voice.Machine, (s) => s.warmed);
+    await sendVoice(runtime, { type: "permissionChanged", grant: "Granted" });
+    await sendVoice(runtime, { type: "openRecorder", target: "ComposerField" });
+    await sendVoice(runtime, { type: "startRecording" });
+    await until(runtime, Voice.Machine, (s) => s.recorder.stage === "Recording");
+    world.voice.finishRecording?.();
+    await until(runtime, Voice.Machine, (s) => s.recorder.stage === "Recorded");
+    expect(world.voice.dictationClips).toEqual([]);
+    world.voice.dictationInFront = true;
+    await sendVoice(runtime, { type: "transcribeAgain", now: untimed });
+    await until(runtime, Voice.Machine, (s) => s.recorder.stage === "Review");
+    expect(world.voice.dictationClips).toEqual(["rec-1"]);
+
+    await sendVoice(runtime, { type: "recordAgain" });
+    world.voice.refuseRecordingStop = true;
+    await sendVoice(runtime, { type: "startRecording" });
+    await until(runtime, Voice.Machine, (s) => s.recorder.stage === "Recording");
+    await sendVoice(runtime, { type: "stopRecording", now: untimed });
+    await until(runtime, Voice.Machine, (s) => s.recorder.stage === "Closed");
+    const closed = await getVoice(runtime);
+    expect([closed.recorder.clip, Voice.canTranscribeAgain(closed, untimed)]).toEqual([false, false]);
+    expect(world.voice.dictationClips).toEqual(["rec-1"]);
+  });
+
   // spec/app/voice/index.md, "Alpha's reply is spoken a sentence at a time, sentences streamed before the reply is complete included, and only for the current turn"; spec/app/voice/index.md, "A spoken reply says a written date, clock time, range and percentage in words"
   it("streams multi-sentence replies incrementally with append chaining, says dates and times in words, and returns to listening", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
