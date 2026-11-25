@@ -75,7 +75,7 @@ export interface Seen {
   /** What the agent says it is doing until its reply is written: its acknowledgment, its status or the app its tool uses. */
   readonly label: string
   /** Why the last reply did not finish, the fix the agent named, and how long the provider asked to wait, or -1. */
-  readonly failure: { readonly kind: Failure; readonly fix: Fix; readonly waitMs: number } | undefined
+  readonly failure: { readonly kind: Failure; readonly fix: Fix; readonly waitMs: number; readonly messageId?: string } | undefined
   /** The text in the composer's box, which its slot keeps. */
   readonly typed: string
   readonly files: readonly Attached[]
