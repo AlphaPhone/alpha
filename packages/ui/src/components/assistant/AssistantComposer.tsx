@@ -144,7 +144,7 @@ export function AssistantComposer({
             event.preventDefault();
             if (!event.repeat && !closed && !onStop && !stopping) onSend?.();
           }}
-          className={cn("max-h-[min(10.5rem,28dvh)] min-h-11 min-w-0 flex-1 touch-auto rounded-full bg-transparent py-2.75 text-body leading-field", targeting ? "border border-alpha px-3" : cn("border-0 pr-0.5", bar ? "pl-2" : "pl-0.5"))}
+          className={cn("max-h-[min(10.5rem,28dvh)] min-h-11 min-w-0 flex-1 touch-auto rounded-full bg-transparent py-2.75 text-body leading-field", targeting ? "border border-alpha px-3" : cn("border-0 pr-0.5 focus-visible:outline-none", bar ? "pl-2" : "pl-0.5"))}
         />
         {onDictate && <Button variant="ghost" size="icon" aria-label="Dictate" onClick={onDictate}><AudioLines /></Button>}
         {onStop || stopping ? (
