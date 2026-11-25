@@ -286,37 +286,7 @@ export function Files({ runtime, alpha }: FilesProps) {
           )}
           {atTop ? (
             <>
-              {state.storage.status === "Loading" && <Spinner label="Reading your storage" />}
-              {state.storage.status === "Failed" && <Alert variant="destructive"><span>Your storage cannot be read now</span>{refresh && <Button variant="ghost" size="sm" onClick={() => tell({ type: "refresh" })}>Retry</Button>}</Alert>}
-              {(state.storage.status === "Loaded" || state.volumes.length > 0) && (
-                <>
-                  <div role="group" aria-label="Categories">
-                    {primary && owner({ type: "openVolume", target: primary.id }) && <FilesRow size="place" aria-label="All files" name="All files" icon={<Folder />} onClick={() => tell({ type: "openVolume", target: primary.id })} />}
-                    {categories.map(([kind, name]) => {
-                      const counted = state.tally.counts.find((count) => count.kind === kind);
-                      const Icon = icons[kind];
-                      return <FilesRow key={kind} size="place" aria-label={name} aria-description={counted && `${counted.items} · ${sized(counted.bytes)}`} name={name} icon={<Icon />} count={counted === undefined ? undefined : String(counted.items)} disabled={!owner({ type: "openCategory", kind })} onClick={() => tell({ type: "openCategory", kind })} />;
-                    })}
-                  </div>
-                  <h2 className="mx-2 mt-3.5 mb-1 text-meta font-semibold text-muted-foreground">Storage</h2>
-                  {state.volumes.map((volume) => {
-                    const name = label(volume.id);
-                    return (
-                      <FilesRow
-                        key={volume.id}
-                        size="place"
-                        aria-label={name}
-                        name={name}
-                        icon={<HardDrive />}
-                        detail={volume.total > 0 && <><span className="block">{`${sized(Math.max(0, volume.total - volume.used))} free of ${sized(volume.total)}`}</span><Progress className="mt-2 h-1.5" aria-label={`${name} used`} value={filled(volume.used, volume.total)} /></>}
-                        disabled={!owner({ type: "openVolume", target: volume.id })}
-                        onClick={() => tell({ type: "openVolume", target: volume.id })}
-                      />
-                    );
-                  })}
-                  {owner({ type: "openTrash" }) && <FilesRow size="place" aria-label="Trash" name="Trash" icon={<Trash2 />} count={state.tally.trashed || undefined} onClick={() => tell({ type: "openTrash" })} />}
-                </>
-              )}
+              <FilesHome state={state} label={label} owner={owner} tell={tell} refresh={refresh} />
               <RecentFiles runtime={runtime} />
             </>
           ) : looked === "NoFilter" && (
@@ -360,6 +330,43 @@ export function Files({ runtime, alpha }: FilesProps) {
   );
 }
 
+
+function FilesHome({ state, label, owner, tell, refresh }: Pick<FileLayersProps, "state" | "label" | "owner" | "tell"> & { readonly refresh: boolean }) {
+  const primary = state.volumes[0];
+  return <>
+    {state.storage.status === "Loading" && <Spinner label="Reading your storage" />}
+    {state.storage.status === "Failed" && <Alert variant="destructive"><span>Your storage cannot be read now</span>{refresh && <Button variant="ghost" size="sm" onClick={() => tell({ type: "refresh" })}>Retry</Button>}</Alert>}
+    {(state.storage.status === "Loaded" || state.volumes.length > 0) && (
+      <>
+        <div role="group" aria-label="Categories">
+          {primary && owner({ type: "openVolume", target: primary.id }) && <FilesRow size="place" aria-label="All files" name="All files" icon={<Folder />} onClick={() => tell({ type: "openVolume", target: primary.id })} />}
+          {categories.map(([kind, name]) => {
+            const counted = state.tally.counts.find((count) => count.kind === kind);
+            const Icon = icons[kind];
+            return <FilesRow key={kind} size="place" aria-label={name} aria-description={counted && `${counted.items} · ${sized(counted.bytes)}`} name={name} icon={<Icon />} count={counted === undefined ? undefined : String(counted.items)} disabled={!owner({ type: "openCategory", kind })} onClick={() => tell({ type: "openCategory", kind })} />;
+          })}
+        </div>
+        <h2 className="mx-2 mt-3.5 mb-1 text-caption font-semibold text-muted-foreground">Storage</h2>
+        {state.volumes.map((volume) => {
+          const name = label(volume.id);
+          return (
+            <FilesRow
+              key={volume.id}
+              size="place"
+              aria-label={name}
+              name={name}
+              icon={<HardDrive />}
+              detail={volume.total > 0 && <><span className="block">{`${sized(Math.max(0, volume.total - volume.used))} free of ${sized(volume.total)}`}</span><Progress className="mt-2 h-1.5" aria-label={`${name} used`} value={filled(volume.used, volume.total)} /></>}
+              disabled={!owner({ type: "openVolume", target: volume.id })}
+              onClick={() => tell({ type: "openVolume", target: volume.id })}
+            />
+          );
+        })}
+        {owner({ type: "openTrash" }) && <FilesRow size="place" aria-label="Trash" name="Trash" icon={<Trash2 />} count={state.tally.trashed || undefined} onClick={() => tell({ type: "openTrash" })} />}
+      </>
+    )}
+  </>;
+}
 
 type FileLayersProps = {
   readonly state: FilesState;

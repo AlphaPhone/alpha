@@ -1,4 +1,5 @@
 // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
+import type { JournalEntry } from "@elizaos/agent";
 import type { ActionJournalPlugin } from "@elizaos/os-bridges";
 import type { AddressBookNativePlugin } from "@elizaos/os-bridges";
 import type { MessagesNativePlugin } from "@elizaos/os-bridges";
@@ -6,6 +7,7 @@ import type { PhoneNativePlugin, TelephonySubscription } from "@elizaos/os-bridg
 import { mmsBinding, smsBindingHash } from "@elizaos/os-bridges";
 import { type Faked, plugin, rejection } from "./phone.ts";
 import type { Route } from "./routes.ts";
+import { type TextReviewScene, textReviewEnrollment, textReviewRoute } from "./text-review.ts";
 
 /** A call in the phone's log. */
 export interface LoggedCall { id: number; number: string; name: string | null; date: number; type: "incoming" | "outgoing" | "missed"; seconds?: number }
@@ -75,6 +77,7 @@ export interface TelephonyScene {
   /** What the agent's reply drafter answers: one draft, or none; and every thread it was asked about. */
   replyDraft: string | null;
   readonly asked: unknown[];
+  textReview?: TextReviewScene;
 }
 
 async function versionOf(id: string, revision: number): Promise<string> {
@@ -134,6 +137,7 @@ export function telephonyScene(): TelephonyScene {
 /** The resident agent's reply drafter, over `world`: it answers one draft for the open conversation, and sends nothing. */
 export function telephonyRoutes(world: TelephonyScene): Route[] {
   return [
+    ...(world.textReview === undefined ? [] : [textReviewRoute(world.textReview)]),
     (request, url) => {
       if (request.method !== "POST" || url.pathname !== "/api/messages/reply-draft") return undefined;
       return request.json().then((thread: unknown) => {
@@ -161,7 +165,7 @@ function telephony(world: TelephonyScene): Faked {
     };
     const status = () => ({
       version: 2, voiceCapable: true, smsCapable: true,
-      permissions: { contacts: "granted", phoneState: "granted", sms: world.sms, sendSms: "granted", callLog: world.callLog },
+      permissions: { contacts: world.contacts ? "granted" : "prompt", phoneState: "granted", sms: world.sms, sendSms: "granted", callLog: world.callLog },
       sendMode: "direct", mmsSend: true,
       roles: { dialer: { available: true, held: world.dialer, eligible: true }, sms: { available: true, held: true, eligible: true } },
       defaultDialer: world.dialer ? "ai.alphacompute.alphaphone" : "com.android.dialer", defaultSms: "ai.alphacompute.alphaphone",
@@ -188,6 +192,7 @@ function telephony(world: TelephonyScene): Faked {
       imageCapability: () => Promise.resolve({ version: 1, image: true, feature: "android.hardware.telephony" }),
       status: () => Promise.resolve(status()),
       requestAccess: ({ access }: { access: string }) => {
+        if (access === "contacts") world.contacts = true;
         if (access === "callLog") world.callLog = "granted";
         if (access === "sms") world.sms = "granted";
         return Promise.resolve(status());
@@ -280,6 +285,10 @@ function telephony(world: TelephonyScene): Faked {
         const kept = world.journal.get(operationId);
         if (kept !== undefined) return kept;
         if (world.hold !== undefined) await world.hold;
+        const review = world.textReview;
+        if (review?.proposal.id === operationId) {
+          await new Promise<void>((confirm) => { review.confirmations.push({ operationId, recipients, body, subscriptionId, confirm }); });
+        }
         const bindingHash = await smsBindingHash({ recipients: recipients as never, body, subscriptionId });
         world.sent.push({ operationId, recipients, body });
         const thread = world.texts.find((one) => one.address === recipients[0])?.thread ?? Math.max(0, ...world.texts.map((one) => one.thread)) + 1;
@@ -400,12 +409,26 @@ function contacts(world: TelephonyScene, now: () => number): Faked {
   });
 }
 
-/** `ElizaActionJournal`: only its deletion window is read here. */
+/** `ElizaActionJournal`: deferred deletion and approved device execution have distinct entries. */
 function journal(world: TelephonyScene): Faked {
-  return plugin<ActionJournalPlugin & { telephonyDeletionReceipt(key: { kind: string; id: string }): Promise<unknown> }>(() => {
+  return plugin<Omit<ActionJournalPlugin, "get" | "list"> & {
+    telephonyDeletionReceipt(key: { kind: string; id: string }): Promise<unknown>;
+    get(input: { proposalId: string }): Promise<unknown>;
+    edit(input: { proposalId: string; expectedRevision: number; next: JournalEntry }): Promise<{ kept: boolean }>;
+    list(): Promise<unknown>;
+  }>(() => {
     const unused = () => Promise.reject(rejection("Not a deletion call", "unavailable"));
     return {
-      reserve: unused, markApplying: unused, finish: unused, get: unused, list: unused, dismiss: unused,
+      reserve: unused, markApplying: unused, finish: unused, dismiss: unused,
+      get: ({ proposalId }) => world.textReview === undefined ? unused() : Promise.resolve({ entry: world.textReview.journal.get(proposalId) ?? null }),
+      list: () => world.textReview === undefined ? unused() : Promise.resolve({ entries: [...world.textReview.journal.values()] }),
+      edit: ({ proposalId, expectedRevision, next }) => {
+        const review = world.textReview;
+        const kept = review !== undefined && (review.journal.get(proposalId)?.revision ?? 0) === expectedRevision
+          && next.proposalId === proposalId && next.revision === expectedRevision + 1;
+        if (kept) review.journal.set(proposalId, next);
+        return Promise.resolve({ kept });
+      },
       pending: () => Promise.resolve({
         pending: world.staged.filter((row) => ["queued", "paused", "unknown", "dispatching"].includes(row.phase)).map((row) => ({ ...row, window: "open" })),
       }),
@@ -475,6 +498,7 @@ export function telephonyPlugins(world: TelephonyScene, now: () => number): Reco
     ElizaActionJournal: journal(world),
     AlphaOngoingCall: ongoing(world),
     AlphaCallState: callState(world),
+    ...(world.textReview === undefined ? {} : { AlphaMediaEnrollment: textReviewEnrollment }),
   };
 }
 

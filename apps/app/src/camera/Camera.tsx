@@ -1,6 +1,6 @@
 // spec/app/camera/index.md, "Story: Open the camera"; spec/app/camera/index.md, "Story: Frame the shot"; spec/app/camera/index.md, "Story: Take photos and videos"; spec/app/camera/index.md, "Story: Let Alpha take a photo"
 import { Button, cn, focusRing, Spinner } from "@repo/ui";
-import { CameraOff, ChevronLeft, Clock, FileScan, Flashlight, FlashlightOff, Grid3x3, MicOff, Sparkles, SwitchCamera, Video, Zap, ZapOff } from "lucide-react";
+import { CameraOff, ChevronLeft, Clock, FileScan, Flashlight, FlashlightOff, Grid3x3, MicOff, SwitchCamera, Video, Zap, ZapOff } from "lucide-react";
 import { useCallback, useRef, useState, type PointerEvent } from "react";
 import type { Camera as Visit, Event, Mode, Said } from "../../gen/app__camera.ts";
 import { chosenLens, ready, recording } from "../../gen/app__camera.ts";

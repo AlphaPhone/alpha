@@ -62,12 +62,14 @@ public final class AlphaNotesPlugin extends Plugin {
     return id;
   }
 
-  private boolean inCall() {
-    AudioManager audio = getContext().getSystemService(AudioManager.class);
+  static boolean inCall(Context context) {
+    AudioManager audio = context.getSystemService(AudioManager.class);
     if (audio == null) return false;
     int mode = audio.getMode();
     return mode == AudioManager.MODE_IN_CALL || mode == AudioManager.MODE_IN_COMMUNICATION || mode == AudioManager.MODE_RINGTONE;
   }
+
+  private boolean inCall() { return inCall(getContext()); }
 
   private void recordingChanged(JSObject status) {
     String state = status.optString("state");
@@ -176,15 +178,17 @@ public final class AlphaNotesPlugin extends Plugin {
 
   private static int retainedCapacity(String key) { return slotCapacity(key); }
 
-  private RecordingStore recordings() {
-    JsonCredentialSlots slots = installedSlots(getContext());
-    return new RecordingStore(new File(getContext().getNoBackupFilesDir(), "note-audio"), AUDIO_PREFIX, "noteId",
+  static RecordingStore recordings(Context context) {
+    JsonCredentialSlots slots = installedSlots(context);
+    return new RecordingStore(new File(context.getNoBackupFilesDir(), "note-audio"), AUDIO_PREFIX, "noteId",
         new RecordingStore.Slots() {
           @Override public String read(String key) throws Exception { return slots.read(key); }
           @Override public void write(String key, String value) throws Exception { slots.write(key, value); }
           @Override public void remove(String key) throws Exception { slots.remove(key); }
         }, AUDIO_LIMITS);
   }
+
+  private RecordingStore recordings() { return recordings(getContext()); }
 
   @PluginMethod public void retain(PluginCall call) {
     onDisk(call, () -> {

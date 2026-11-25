@@ -40,13 +40,13 @@ const digestResult = (cursor: number, status: string, output: string): DigestRes
     scheduledAt: at, startedAt: at, completedAt: at, source: {}, status, output, error: null };
 };
 
-function keepDigests(alpha: Alpha, owner: string, entries: readonly DigestResult[]) {
+function keepDigests(alpha: Alpha, scope: string, entries: readonly DigestResult[]) {
   let acknowledged = false;
   const agent = hostedDigestProtocol((path) => Effect.sync(() => {
     if (path.endsWith("/ack")) { acknowledged = true; return {}; }
     return { entries: acknowledged ? [] : entries };
   }));
-  return alpha.runtime.runPromise(Effect.flatMap(digestInbox(digestScope(owner)), (inbox) => inbox.sync(agent, 1)));
+  return alpha.runtime.runPromise(Effect.flatMap(digestInbox(scope), (inbox) => inbox.sync(agent, 1)));
 }
 
 describe("Home on a phone", () => {
@@ -192,7 +192,7 @@ describe("Home on a phone", () => {
     await showing("Inbox");
 
     // Returning to Home refreshes the brief from the current owner's retained inbox.
-    await keepDigests(alpha, world.notes.owner, [digestResult(1, "failed", "The morning brief could not run.")]);
+    await keepDigests(alpha, digestScope({ agentId: world.notes.owner, identityId: world.notes.ownerIdentity }), [digestResult(1, "failed", "The morning brief could not run.")]);
     await hardware("home");
     await showing();
     await vi.waitFor(() => expect(card("Latest brief")?.textContent).toContain("Didn't run"), { timeout: 5_000 });
@@ -276,8 +276,11 @@ describe("Home in a browser", () => {
   it("Shows the current owner's retained brief after restart (spec/app/digests/index.md, \"Story: Receive results without losing or repeating one\")", async () => {
     const world = scene();
     const setup = await open(world);
-    await keepDigests(setup.alpha, world.notes.owner, [digestResult(1, "finished", "Owner’s morning brief"), digestResult(2, "missed", "Must stay off Home")]);
-    await keepDigests(setup.alpha, "another-owner", [digestResult(1, "finished", "Another owner’s morning brief")]);
+    await keepDigests(setup.alpha, digestScope({ agentId: world.notes.owner, identityId: world.notes.ownerIdentity }), [digestResult(1, "finished", "Owner’s morning brief"), digestResult(2, "missed", "Must stay off Home")]);
+    await keepDigests(setup.alpha, digestScope({ agentId: world.notes.owner, identityId: "another-owner" }),
+      [digestResult(1, "finished", "Another owner’s morning brief")]);
+    await keepDigests(setup.alpha, `alpha/workflows/digests/${encodeURIComponent(world.notes.owner)}`,
+      [digestResult(100, "finished", "Unverified older brief")]);
     await setup.close();
 
     await open(world);
@@ -285,8 +288,9 @@ describe("Home in a browser", () => {
       .find((card) => card.textContent?.startsWith("Latest brief"))?.textContent;
     await vi.waitFor(() => expect(latest()).toContain("Owner’s morning brief"));
     expect(latest()).not.toContain("Must stay off Home");
+    expect(latest()).not.toContain("Unverified older brief");
 
-    world.notes.owner = "another-owner";
+    world.notes.ownerIdentity = "another-owner";
     await seen(false);
     await seen(true);
     await vi.waitFor(() => expect(latest()).toContain("Another owner’s morning brief"));

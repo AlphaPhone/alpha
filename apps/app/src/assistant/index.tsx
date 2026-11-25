@@ -61,9 +61,9 @@ function LiveAssistant({ runtime }: Shown<Layer.Success<typeof screens> | Reside
       showUnavailableTalk: !available,
       onTalk: canTalk ? () => void runtime.runPromise(beginTalk()) : undefined,
       onDictate: canDictate ? () => void runtime.runPromise(dictate()) : undefined,
-      voice: recorder !== undefined && recorder.stage !== "Closed" && recorder.field === "ComposerField"
+      voice: (compact) => recorder !== undefined && recorder.stage !== "Closed" && recorder.field === "ComposerField"
         ? <DictationControls runtime={runtime} />
-        : voice.state !== undefined && !quiet(voice.state) ? <TalkControls runtime={runtime} trailing={<VoiceEnd runtime={runtime} />} /> : undefined,
+        : voice.state !== undefined && !quiet(voice.state) ? <TalkControls runtime={runtime} compact={compact} trailing={<VoiceEnd runtime={runtime} />} /> : undefined,
     }}
   />;
 }

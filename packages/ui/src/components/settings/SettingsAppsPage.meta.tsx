@@ -5,22 +5,20 @@ import type { SettingsAppsPageProps } from "./SettingsAppsPage.tsx";
 
 const onOpen = fn();
 const onOpenApp = fn();
-const onHandOver = fn();
 
 export const meta: ComponentMeta<SettingsAppsPageProps> = {
-  args: { onBack: fn(), onOpen, onOpenApp, onHandOver },
+  args: { onBack: fn(), onOpen, onOpenApp },
   decorator: fullHeight,
   examples: { "Returning to a row": { place: 1 } },
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onOpen.mockClear();
       onOpenApp.mockClear();
-      onHandOver.mockClear();
       const canvas = within(canvasElement);
       await userEvent.click(canvas.getByRole("button", { name: "Workflows" }));
       await userEvent.click(canvas.getByRole("button", { name: "Files" }));
       await userEvent.click(canvas.getByRole("button", { name: "Passwords" }));
-      await expect([onOpen.mock.calls, onOpenApp.mock.calls, onHandOver.mock.calls]).toEqual([[["workflows"]], [["files"]], [["password-manager"]]]);
+      await expect([onOpen.mock.calls, onOpenApp.mock.calls]).toEqual([[["workflows"], ["passwords"]], [["files"]]]);
     },
     "Returning to a row": ({ canvasElement }: { canvasElement: HTMLElement }) => expect(document.activeElement).toBe(within(canvasElement).getByRole("button", { name: "Calendar" })),
   },

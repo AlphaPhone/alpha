@@ -67,6 +67,29 @@ async function callRoute(
   return result as { status: number; body: Record<string, unknown> };
 }
 
+describe("Alpha product plugin: what the model may pass and what the owner sees", () => {
+  it("declares each action's parameters, so a call with the model's arguments runs, and echoes no result text to the owner", async () => {
+    const store = new AlphaAppsStore({ now: () => Date.UTC(2026, 10, 24, 18, 0) });
+    const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime: makeFakeRuntime().runtime });
+    const declared = Object.fromEntries((plugin.actions ?? []).map((action) => [action.name, (action.parameters ?? []).map((parameter) => parameter.name)]));
+    expect(declared.CLOCK_TIMER).toEqual(expect.arrayContaining(["action", "durationSeconds", "label", "id"]));
+    expect(declared.CLOCK_ALARM).toEqual(expect.arrayContaining(["action", "hour", "minute", "days", "label", "enabled", "id"]));
+    expect(declared.CLOCK_WORLD).toEqual(expect.arrayContaining(["action", "city", "timeZone"]));
+    expect(declared.REMINDERS_MANAGE).toEqual(expect.arrayContaining(["op", "title", "dueDate", "dueMinute", "id"]));
+    const said: string[] = [];
+    const callback = (content: { text?: string }) => { said.push(content.text ?? ""); return Promise.resolve([]); };
+    const timer = plugin.actions!.find((action) => action.name === "CLOCK_TIMER")!;
+    const started = await timer.handler(makeFakeRuntime().runtime, emptyMessage("Set a timer for 5 minutes"), emptyState, { parameters: { action: "start", durationSeconds: 300 } }, callback as never);
+    expect(started?.success).toBe(true);
+    expect(store.getClock().timers[0]?.durationMs).toBe(300_000);
+    const reminders = plugin.actions!.find((action) => action.name === "REMINDERS_MANAGE")!;
+    const added = await reminders.handler(makeFakeRuntime().runtime, emptyMessage("remind me to call the plumber at 6pm"), emptyState, { parameters: { op: "create", title: "Call the plumber", dueDate: "2026-11-24", dueMinute: 1080 } }, callback as never);
+    expect(added?.success).toBe(true);
+    expect(store.getReminders().items.map(({ title, dueDate, dueMinute }) => ({ title, dueDate, dueMinute }))).toEqual([{ title: "Call the plumber", dueDate: "2026-11-24", dueMinute: 1080 }]);
+    expect(said).toEqual([]);
+  });
+});
+
 describe("Alpha product plugin: Clock actions, provider, and routes", () => {
   // spec/agent/index.md, "The agent may run the actions the old phone's agent ran plus Alpha's Clock and Reminders actions, and every other action the bundle registers is listed as refused with its reason"
   it("runs CLOCK_ALARM, CLOCK_TIMER, CLOCK_WORLD actions and injects CLOCK_CONTEXT", async () => {
