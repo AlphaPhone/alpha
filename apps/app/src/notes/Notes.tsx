@@ -1,5 +1,5 @@
 // spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Organise my notes"; spec/app/notes/editor.md, "Story: Write a note"; spec/app/notes/trash.md, "Story: Delete a note and get it back"
-import { Alert, AppHeader, Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input, LinkNoteView, Menu, MenuContent, MenuItem, MenuTrigger, NoteEditor as NoteForm, NoteRow, NotesList as NoteRows, Spinner, VoiceNoteView } from "@repo/ui";
+import { Alert, AppHeader, Button, Chip, Dialog, DialogContent, DialogDescription, DialogTitle, Input, LinkNoteView, Menu, MenuContent, MenuItem, MenuTrigger, NoteEditor as NoteForm, NoteMenu, NoteRow, NotesList as NoteRows, Spinner, VoiceNoteView } from "@repo/ui";
 import { Download, Ellipsis, Folder, FolderInput, Mail, MessageSquare, Mic, Pin, Plus, Trash2 } from "lucide-react";
 import { useState, useSyncExternalStore, type FormEvent } from "react";
 import * as Notes from "../../gen/app__notes.ts";
@@ -51,21 +51,22 @@ function TransferNotice({ runtime }: { readonly runtime: Runtime }) {
   </Alert>;
 }
 
-/** Pin or Unpin, and Move to each other folder, for the open note, as v121's note menus held them; none the list does not allow. */
+/**
+ * Pin or Unpin for the open note, as v121's note menus held it, and Move to each other folder (Shaw's folders, which v121 did not have).
+ * Each is sent covered while the editor still holds an unsaved draft, so the list refuses it as it refuses opening a row then.
+ */
 function useOrganise(runtime: Runtime, note: number) {
   const list = useNotes(runtime);
+  const writing = useEditor(runtime).state;
+  const covered = writing !== undefined && Editor.waiting(writing);
   const entry = list.state === undefined ? undefined : Notes.shown(list.state).find((row) => row.id === note);
   const organise = (event: Notes.Event) => list.can(event, "Owner") ? () => void list.send(event, "Owner") : undefined;
-  const pin = entry && organise({ type: "change", c: { ...Notes.nothing, note: entry.id, base: entry.revision, op: entry.pinned ? "Unpin" : "Pin" }, covered: false });
+  const pin = entry && organise({ type: "change", c: { ...Notes.nothing, note: entry.id, base: entry.revision, op: entry.pinned ? "Unpin" : "Pin" }, covered });
   const moves = entry === undefined || list.state === undefined ? [] : [{ id: 0, name: "No folder" }, ...list.state.folders].flatMap((folder) => {
-    const move = folder.id === entry.folder ? undefined : organise({ type: "change", c: { ...Notes.nothing, op: "Move", note: entry.id, base: entry.revision, folder: folder.id }, covered: false });
+    const move = folder.id === entry.folder ? undefined : organise({ type: "change", c: { ...Notes.nothing, op: "Move", note: entry.id, base: entry.revision, folder: folder.id }, covered });
     return move ? [{ folder, move }] : [];
   });
-  const items = <>
-    {pin && <MenuItem onSelect={pin}><Pin /> {entry?.pinned ? "Unpin" : "Pin"}</MenuItem>}
-    {moves.map(({ folder, move }) => <MenuItem key={folder.id} onSelect={move}><FolderInput /> {folder.id === 0 ? "Move out of folder" : `Move to ${folder.name}`}</MenuItem>)}
-  </>;
-  return { any: pin !== undefined || moves.length > 0, items };
+  return { pinned: entry?.pinned === true, pin, moves };
 }
 
 function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly saved: DraftWords }) {
@@ -96,7 +97,7 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
   const status = current.draft.sync === "Saving" ? "Saving…" : current.failed ? "Couldn't save the note"
     : current.full ? "There isn't room to keep your draft" : current.told === "WasUnknown" ? "Alpha couldn't confirm the deletion"
       : current.told === "WasRefused" ? "Couldn't delete the note" : current.told === "WasFull" ? "Recently deleted is full" : undefined;
-  const menu = (deletable || exportable || shared || organised.any) && <Menu onOpenChange={(open) => {
+  const menu = (deletable || exportable || shared || organised.pin !== undefined || organised.moves.length > 0) && <Menu onOpenChange={(open) => {
     if (open && actions.can(sharing, "Owner")) void actions.send(sharing, "Owner");
     if (!open && actions.can({ type: "closeMenu" }, "Owner")) void actions.send({ type: "closeMenu" }, "Owner");
   }}>
@@ -106,7 +107,8 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
         <MenuItem onSelect={() => void actions.send({ type: "share", channel: "Email", mark: 0 }, "Owner")}><Mail /> Share by email</MenuItem>
         <MenuItem onSelect={() => void actions.send({ type: "share", channel: "Messages", mark: 0 }, "Owner")}><MessageSquare /> Share in Messages</MenuItem>
       </>}
-      {organised.items}
+      {organised.pin && <MenuItem onSelect={organised.pin}><Pin /> {organised.pinned ? "Unpin" : "Pin"}</MenuItem>}
+      {organised.moves.map(({ folder, move }) => <MenuItem key={folder.id} onSelect={move}><FolderInput /> {folder.id === 0 ? "Move out of folder" : `Move to ${folder.name}`}</MenuItem>)}
       {exportable && <MenuItem onSelect={() => void transfer.send(exporting, "Owner")}><Download /> Save as text</MenuItem>}
       {deletable && <><div role="separator" className="my-1 border-t border-border" /><MenuItem destructive onSelect={() => send(deletion)}><Trash2 /> Delete</MenuItem></>}
     </MenuContent>
@@ -171,10 +173,11 @@ function LinkedNote({ runtime, collection }: { readonly runtime: Runtime; readon
     clips={clips}
     onBack={close}
     onVisit={page !== "" && link.can(event, "Owner") ? () => void link.send(event, "Owner") : undefined}
-    menu={(link.can(askRemove, "Owner") || organised.any) && <Menu>
+    menu={(link.can(askRemove, "Owner") || organised.pin !== undefined) && <Menu>
       <MenuTrigger asChild><Button aria-label="Link actions" size="icon" variant="ghost"><Ellipsis /></Button></MenuTrigger>
       <MenuContent align="end">
-        {organised.items}
+        {organised.pin && <MenuItem onSelect={organised.pin}><Pin /> {organised.pinned ? "Unpin" : "Pin"}</MenuItem>}
+        {organised.pin && link.can(askRemove, "Owner") && <div role="separator" className="my-1 border-t border-border" />}
         {link.can(askRemove, "Owner") && <MenuItem destructive onSelect={() => void link.send(askRemove, "Owner")}>Remove source</MenuItem>}
       </MenuContent>
     </Menu>}
@@ -198,7 +201,6 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
   const device = runtime.runSync(NoteDevice);
   const review = runtime.runSync(VoiceReview);
   const state = voice.state;
-  const organised = useOrganise(runtime, state?.note ?? 0);
   if (!state?.showing) return null;
   const note = collection.noteByNumber.get(state.note);
   const data = note?.format?.data;
@@ -218,6 +220,10 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
   const audio = note !== undefined && audioIdOf(note) !== "";
   const current = state.revision === collection.version;
   const pending = current && state.heard > state.added ? runtime.runSync(review.get(state)) : undefined;
+  const pinned = note?.format?.data.pinned === true;
+  const pin = { type: "setPinned", pinned: !pinned } as const;
+  const canPin = current && note !== undefined && voice.can(pin, "Owner");
+  const pinWrite = state.part === "Pin" || state.part === "Unpin";
   const canTranscribe = device.canTranscribe && audio && current && state.added === 0 && voice.can(transcribe, "Phone");
   const canRetry = device.canTranscribe && audio && current && voice.can(retry, "Owner");
   const generate = (again = false) => void runtime.runPromise(generateTranscript(state.note, state.revision, again));
@@ -235,16 +241,13 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
   } : undefined;
   return <VoiceNoteView
     className="relative inset-auto flex-1"
-    menu={organised.any && <Menu>
-      <MenuTrigger asChild><Button aria-label="More" size="icon" variant="ghost"><Ellipsis /></Button></MenuTrigger>
-      <MenuContent align="end">{organised.items}</MenuContent>
-    </Menu>}
     title={note === undefined ? "Voice note" : titleOf(note)}
     meta={note === undefined ? "" : [dated(note, collection.readAt), length].filter(Boolean).join(" · ")}
     playback={player ? { time: length, playing: state.play.status === "Loading", toggle, seek } : undefined}
     summary={saved?.summary}
     actions={saved?.actions}
     lines={lines}
+    menu={note !== undefined && <NoteMenu pinned={pinned} onPin={canPin ? () => void voice.send(pin, "Owner") : undefined} />}
     onAskTranscript={canUseTranscript ? () => void voice.send(ask, "Owner") : undefined}
     onCopyTranscript={copy}
     onBack={() => void voice.send(back, "Owner")}
@@ -258,8 +261,8 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
       {state.deaf && <Alert variant="warn" className="mt-4">This recording couldn't be transcribed</Alert>}
       {canRetry && <Button className="mt-4" variant="secondary" onClick={() => generate(true)}>Try again</Button>}
       {pending !== undefined && voice.can(showTranscript, "Owner") && <Button className="mt-4" variant="secondary" onClick={() => void voice.send(showTranscript, "Owner")}>Review transcript</Button>}
-      {state.writing.outcome === "Refused" && <Alert variant="warn" className="mt-4">The transcript couldn't be added. Reopen the note to review its saved version.</Alert>}
-      {state.writing.outcome === "Unknown" && <Alert variant="warn" className="mt-4">Alpha couldn't confirm the transcript was added. Reopen the note to check.</Alert>}
+      {state.writing.outcome === "Refused" && <Alert variant="warn" className="mt-4">{pinWrite ? "The pin couldn’t be changed." : "The transcript couldn’t be added. Reopen the note to review its saved version."}</Alert>}
+      {state.writing.outcome === "Unknown" && <Alert variant="warn" className="mt-4">{pinWrite ? "Alpha couldn’t confirm the pin change. Reopen the note to check." : "Alpha couldn’t confirm the transcript was added. Reopen the note to check."}</Alert>}
       {state.play.status === "Failed" && <Alert variant="warn" className="mt-4">This recording couldn't be played</Alert>}
       <Dialog open={pending !== undefined && state.review.showing} onOpenChange={(open) => { if (!open && state.review.showing) void voice.send(back, "Owner"); }}>
         <DialogContent>
@@ -346,8 +349,7 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
           <MenuContent align="end">
             <MenuItem onSelect={() => void bin.send(openTrash, "Owner")}><Trash2 /> Recently deleted</MenuItem>
             {previous.can(showPrevious, "Owner") && <MenuItem onSelect={() => void previous.send(showPrevious, "Owner")}><Folder /> On this phone</MenuItem>}
-            {state.folders.filter((item) => item.id !== state.filter).map((item) => <MenuItem key={item.id} onSelect={() => listEvent({ type: "filterBy", folder: item.id })}><Folder /> {item.name}</MenuItem>)}
-            {available && <MenuItem onSelect={() => { setForm({ op: "AddFolder" }); setFolderName(""); }}><Plus /> New folder</MenuItem>}
+            {available && <MenuItem onSelect={() => { setForm({ op: "AddFolder" }); setFolderName(""); }}><Folder /> New folder</MenuItem>}
             {folder && <MenuItem onSelect={() => { setForm({ op: "RenameFolder", folder }); setFolderName(folder.name); }}>Rename folder</MenuItem>}
             {folder && can(folderChange("RemoveFolder", folder.id, "")) && <MenuItem onSelect={() => listEvent(folderChange("RemoveFolder", folder.id, ""))}>Delete folder</MenuItem>}
           </MenuContent>
@@ -355,6 +357,9 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
       </AppHeader>
       <div className="flex min-h-0 flex-col px-4">
         <TransferNotice runtime={runtime} />
+        {state.folders.length > 0 && <nav aria-label="Note folders" className="flex flex-wrap gap-2 pb-2">
+          {state.folders.filter((item) => item.id !== state.filter).map((item) => <Chip key={item.id} onClick={() => listEvent({ type: "filterBy", folder: item.id })}>{item.name}</Chip>)}
+        </nav>}
         {form && <form onSubmit={submit} className="flex flex-wrap items-center gap-2 pb-2">
           <Input aria-label="Folder name" className="min-w-32 flex-1" value={folderName} maxLength={40} onChange={(event) => setFolderName(event.currentTarget.value)} autoFocus />
           <Button type="submit" disabled={!can(folderChange(form.op, form.op === "RenameFolder" ? form.folder.id : 0, folderName.trim()))}>Save</Button>

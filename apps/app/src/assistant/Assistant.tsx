@@ -49,6 +49,7 @@ export interface AssistantProps {
   runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview | Documents | Agent, unknown>;
   messageActions?: MessageActions;
   speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & {
+    voiceReview?: ReactNode;
     voice?: (presentation: { compactDock: boolean; atBar: boolean }) => ReactNode;
   };
   canReadAloud?: boolean;
@@ -230,6 +231,7 @@ function DockHandle({ dock, detent, compact, focusOnPointerOpen, field }: DockHa
 
 /** @model spec/app/assistant/index.md */
 export function Assistant({ runtime, messageActions, speech, canReadAloud = false }: AssistantProps) {
+  const { voiceReview, ...composerSpeech } = speech ?? {};
   const conversation = useConversation(runtime);
   const attachments = useAttachments(runtime);
   const chats = useChats(runtime);
@@ -367,6 +369,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       <AssistantAttachments runtime={runtime} attachments={attachments} preview={previewed} targetRef={fileTargetRef} composerRef={composerRef} />
       {onComms && full && <CommsTarget runtime={runtime} placement="strip" />}
       {(!onComms || open) && <AssistantConversation
+        voiceReview={voiceReview}
         detent={assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
         className={onComms ? "relative w-full motion-safe:transition-[height] motion-safe:duration-[420ms]" : open ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
         style={onComms
@@ -397,7 +400,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           onReturnToOriginal: chats.can({ type: "returnToOriginal", ...free }) ? () => void chats.send({ type: "returnToOriginal", ...free }) : undefined,
         }}
         composer={{
-          ...speech,
+          ...composerSpeech,
           voice: speech?.voice?.({ compactDock: compact, atBar: assistantDetent === "Bar" }),
           onDictate: onComms || inFlight(talking.turn) || !speech?.onDictate ? undefined : () => {
             openWithFocus(false);

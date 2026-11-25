@@ -5,7 +5,7 @@ import { filterLabel } from "@elizaos/plugin-files-client"
 import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
 import { Machine as Chats } from "../../gen/app__assistant__chats.effect.vibe"
 import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
-import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Machine as Shell, type Detent, type View, agentOpenView, canAgentOpenFilesFrom, showing } from "../../gen/app__shell.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import * as Prefs from "../../gen/app__settings__preferences.effect.vibe"
 import type { FileActionReport, FileReview, FilesReadContext } from "../files/agent.vibe"
@@ -20,13 +20,15 @@ import { Device, registered } from "../platform/device.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { Telephony } from "../platform/telephony.vibe"
 import { Talk } from "./talk.vibe"
+import { navigateFilesForReply } from "./views.vibe"
 
 /** Area-owned equipment and approved executors. The resident protocol never receives a media bridge handle. */
 export service MediaExecutors {
   execute(operation: DeviceOperation, call: ExecutorCall, authority: ReviewAuthority): unknown!!
   reviewFiles(operation: DeviceOperation): (FileReview | undefined)!!
   filesContext(): (FilesReadContext | undefined)!!
-  static readonly defaultValue = () => ({ execute: () => succeed({ kind: "refused", code: NOT_DISPATCHED }), reviewFiles: () => succeed(undefined), filesContext: () => succeed(undefined) })
+  readyFiles(): (FilesReadContext | undefined)!!
+  static readonly defaultValue = () => ({ readyFiles: () => succeed(undefined), execute: () => succeed({ kind: "refused", code: NOT_DISPATCHED }), reviewFiles: () => succeed(undefined), filesContext: () => succeed(undefined) })
 }
 
 export interface ReviewAuthority {
@@ -41,6 +43,7 @@ export interface ReviewAuthority {
 
 interface ApprovalScope {
   readonly active: boolean!!
+  readonly foregroundFiles?: Effect.Effect<ForegroundFiles | undefined>
   readonly continueDraft?: boolean!!
   readonly target?: MessageDraftTarget
   readonly sms?: SmsSelection
@@ -137,8 +140,44 @@ interface DirectFiles {
 
 type DirectFilesTarget = Pick<MediaCard, "id" | "digest" | "expiresAt" | "operation" | "files">
 
+export interface FilesOrigin {
+  readonly source: View[]
+  readonly destination: View[]
+  readonly panel: Detent
+  readonly route: number
+  readonly spoken: boolean
+}
+
+export type OutsideFilesOperation = Exclude<DirectFilesOperation, { readonly shown: number }>
+
+export interface FilesContinuation {
+  readonly operation: OutsideFilesOperation
+  readonly origin: FilesOrigin
+  readonly current: Effect.Effect<boolean>
+  readonly report: (note: string) => void
+}
+
+interface OutsideFiles extends FilesContinuation {
+  readonly ticket: number
+  readonly hold: (work: Effect.Effect<void>) => void
+}
+
+export interface FilesRouteSteps {
+  readonly view: Conversation.Shape
+  readonly revision: number
+  readonly moved: Effect.Effect<boolean>
+  readonly open: (source: Effect.Effect<boolean>) => Effect.Effect<boolean>
+  readonly changes: Stream.Stream<unknown>
+}
+
+interface ForegroundFiles {
+  readonly current: Effect.Effect<boolean>
+  readonly files?: FileReview
+}
+
 interface DeviceActionReply {
   readonly directFiles?: DirectFiles
+  readonly outsideFiles?: OutsideFiles
   readonly clientMessageId: string
   readonly sms?: MessageSmsRequest
   readonly actionResults: readonly { readonly action: string; readonly data: unknown }[]
@@ -187,6 +226,10 @@ function sameFileOperation(expected: DirectFilesOperation, actual: DeviceOperati
     && expected.text === actual.text && expected.folder === actual.folder && expected.from === actual.from && expected.to === actual.to
 }
 
+function sameTrail(expected: readonly View[], current: readonly View[]): boolean {
+  return expected.length === current.length && expected.every((view, index) => view === current[index])
+}
+
 export function sameFiles(before: FilesReadContext, after: FilesReadContext | undefined): boolean {
   if (after === undefined || before.listing !== after.listing || before.search !== after.search) return false
   const { where } = before
@@ -218,6 +261,14 @@ function repliedDeviceActions(actions: DeviceActionReply["actionResults"]): Read
 
 function fromThisEnrollment(proposal: Proposal, opened: Session): boolean {
   return proposal.payload.installationId === opened.identity.installationId && proposal.payload.enrollmentId === opened.identity.enrollmentId
+}
+
+function directFromReply(proposal: Proposal, opened: Session, message: string, actions: ReadonlyMap<string, ReplyAction>, expected: DirectFilesOperation, at: number): boolean {
+  const expires = Date.parse(proposal.expiresAt)
+  if (proposal.state !== "pending" || proposal.payload.workflow !== undefined || !Number.isFinite(expires) || expires <= at
+    || proposal.payload.requestMessageId !== message || actions.get(proposal.id) !== "Direct" || !fromThisEnrollment(proposal, opened)) return false
+  const checked = readOperation(proposal.payload.operation)
+  return checked !== undefined && sameFileOperation(expected, checked.operation) && mayRunDirectly(checked, "NoBinding", true)
 }
 
 function reviewFromReply(proposal: Proposal, opened: Session, actions: ReadonlyMap<string, ReplyAction>): boolean {
@@ -358,8 +409,10 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
 /** Enrollment and the proposal protocol share the same live resident identity. */
 export service MediaReview {
   session(): (Session | undefined)!!
+  filesOrigin(spoken?: boolean): (FilesOrigin | undefined)!!
   filesContext(): (FilesReadContext | undefined)!!
   spokenFiles(session: Session, message: string, request: DirectFiles, actions: DeviceActionReply["actionResults"]): boolean!!
+  spokenFilesFrom(session: Session, message: string, request: FilesContinuation, route: FilesRouteSteps, actions: DeviceActionReply["actionResults"]): boolean!!
   messageTarget(): (MessageDraftTarget | undefined)!!
   pending(session: Session, message: string, conversation: number, revision: number, target: MessageDraftTarget | undefined, reply: DeviceActionReply): readonly MediaCard[]!!Conversation
   choosePhone(card: MediaCard, choice: number): void!!(Talk | Conversation | Chats)
@@ -474,21 +527,35 @@ export const mediaReview = Layer.effect(MediaReview, effect {
   const guarded = (operation: DeviceOperation, call: ExecutorCall) => runPromise(effect {
     const scope = scopes.get(call.proposalId)
     if (scope === undefined || !(try scope.active)) return { kind: "refused", code: NOT_DISPATCHED }
+    const foreground = scope.foregroundFiles === undefined ? undefined : try scope.foregroundFiles
+    if (scope.foregroundFiles !== undefined && foreground === undefined) return { kind: "refused", code: NOT_DISPATCHED }
     const continueDraft = scope.continueDraft
-    return try executors.execute(operation, call, { current: () => runPromise(scope.active), ...(scope.target === undefined ? {} : { target: scope.target }),
+    const current = foreground?.current ?? scope.active
+    const files = foreground?.files ?? scope.files
+    if (foreground !== undefined && !(try current)) return { kind: "refused", code: NOT_DISPATCHED }
+    return try executors.execute(operation, call, { current: () => runPromise(current), ...(scope.target === undefined ? {} : { target: scope.target }),
       ...(continueDraft === undefined ? {} : { continueDraft: () => runPromise(continueDraft) }),
-      ...(scope.sms === undefined ? {} : { sms: scope.sms }), ...(scope.files === undefined ? {} : { files: scope.files }),
+      ...(scope.sms === undefined ? {} : { sms: scope.sms }), ...(files === undefined ? {} : { files }),
       ...(scope.reportFiles === undefined ? {} : { reportFiles: scope.reportFiles }), ...(scope.phone === undefined ? {} : { phone: scope.phone }) })
   })
   const readBack = (operation: DeviceOperation, call: ExecutorCall) => operation.type === "sms_send"
     ? runPromise(readAgentSms(operation, call) |> Effect.provideService(%, Device, device) |> Effect.provideService(%, Telephony, telephony))
     : Promise.resolve(undefined)
+  effect function filesDirectAllowed(): boolean!! {
+    const prefs = try preferences.get()
+    return Prefs.free(prefs) && !Prefs.asksBeforeActing(prefs, "FilesAction") && (try device.showing()) && !Layers.pageInert(try layers.get())
+  }
   // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view"
   effect function filesContext(): (FilesReadContext | undefined)!! {
-    const prefs = try preferences.get()
-    if (!Prefs.free(prefs) || Prefs.asksBeforeActing(prefs, "FilesAction")
-      || !(try device.showing()) || !showing(try shell.get(), "Files") || Layers.pageInert(try layers.get())) return undefined
+    if (!(try filesDirectAllowed()) || !showing(try shell.get(), "Files")) return undefined
     return try executors.filesContext()
+  }
+  // spec/app/files/index.md, "An exact Files request from another screen may open Files once after the typed reply finishes"
+  effect function filesOrigin(spoken = false): (FilesOrigin | undefined)!! {
+    if (!registered("ElizaFiles") || !(try filesDirectAllowed())) return undefined
+    const current = try shell.get()
+    if (!canAgentOpenFilesFrom(current, current.trail, current.assistant, current.route, spoken)) return undefined
+    return { source: [...current.trail], destination: agentOpenView(current, "Files").trail, panel: current.assistant, route: current.route, spoken }
   }
   effect function messageTarget(): (MessageDraftTarget | undefined)!! {
     if (!(try device.showing()) || !showing(try shell.get(), "Messages")) return undefined
@@ -524,6 +591,32 @@ export const mediaReview = Layer.effect(MediaReview, effect {
     const { assistant } = try shell.get()
     return showing.revision === revision && !showing.sensitive && (assistant === "Sheet" || assistant === "Full") && (try device.showing())
   }
+  effect function executeDirectFiles(opened: Session, proposal: { id: string; digest: string; expiresAt: number; operation: DeviceOperation },
+    active: Effect.Effect<boolean>, current: Effect.Effect<boolean>, report: (note: string) => void,
+    files?: FileReview, foregroundFiles?: Effect.Effect<ForegroundFiles | undefined>): boolean!! {
+    if (!(try active)) return false
+    const { id, digest, expiresAt, operation } = proposal
+    const checked = readOperation(operation)
+    const requestEligible = checked !== undefined && mayRunDirectly(checked, "NoBinding", true)
+    const forceReview = Prefs.asksBeforeActing(try preferences.get(), "FilesAction")
+    if (!requestEligible || forceReview) return false
+    let filesOutcome: FileActionReport | undefined
+    scopes.set(id, { active, reportFiles: (outcome) => { filesOutcome = outcome }, ...(files === undefined ? {} : { files }),
+      ...(foregroundFiles === undefined ? {} : { foregroundFiles }) })
+    const done = (tryPromise(() => opened.execute.approve({ id, digest, expiresAt, operation }, {
+        live: true, nonsensitive: true, exact: true, forceReview, requestEligible, reviewed: false,
+      })) |> ensuring(%, sync(() => { scopes.delete(id) }))) catch () => undefined
+    if (done?.kind === "noAuthority" || done?.kind === "invalid") return false
+    if (try current) {
+      const note = done?.kind !== "settled" ? notStarted
+        : done.result.tag === "Unknown" ? "The result could not be confirmed. Check before trying again."
+        : filesOutcome !== undefined ? filesCompletion(filesOutcome, done.synced)
+        : done.result.tag === "Applied" ? done.synced ? "Opened the requested item in Files." : "Opened the requested item in Files. Agent receipt pending."
+        : "Nothing changed."
+      report(note)
+    }
+    return true
+  }
   effect function actOnFiles(opened: Session, card: DirectFilesTarget, request: DirectFiles): boolean!! {
     return try lock.withPermits(1)(effect {
       const matching = effect {
@@ -531,27 +624,60 @@ export const mediaReview = Layer.effect(MediaReview, effect {
           && (try Clock.currentTimeMillis) < card.expiresAt && sameFiles(request.files, try filesContext())
       }
       const active = effect { return (try matching) && (try enrollmentIsCurrent(opened)) && (try matching) }
-      if (!(try active)) return false
-      const { id, digest, expiresAt, operation } = card
-      const checked = readOperation(operation)
-      const requestEligible = checked !== undefined && mayRunDirectly(checked, "NoBinding", true)
-      const forceReview = Prefs.asksBeforeActing(try preferences.get(), "FilesAction")
-      if (!requestEligible || forceReview) return false
-      let filesOutcome: FileActionReport | undefined
-      scopes.set(id, { active, reportFiles: (outcome) => { filesOutcome = outcome }, ...(card.files === undefined ? {} : { files: card.files }) })
-      const done = (tryPromise(() => opened.execute.approve({ id, digest, expiresAt, operation }, {
-          live: true, nonsensitive: true, exact: true, forceReview, requestEligible, reviewed: false,
-        })) |> ensuring(%, sync(() => { scopes.delete(id) }))) catch () => undefined
-      if (done?.kind === "noAuthority" || done?.kind === "invalid") return false
-      if (try request.current) {
-        const note = done?.kind !== "settled" ? notStarted
-          : done.result.tag === "Unknown" ? "The result could not be confirmed. Check before trying again."
-          : filesOutcome !== undefined ? filesCompletion(filesOutcome, done.synced)
-          : done.result.tag === "Applied" ? done.synced ? "Opened the requested item in Files." : "Opened the requested item in Files. Agent receipt pending."
-          : "Nothing changed."
-        request.report(note)
+      return try executeDirectFiles(opened, card, active, request.current, request.report, card.files)
+    })
+  }
+
+  // spec/app/files/index.md, "An exact Files request from another screen may open Files once after the typed reply finishes"
+  effect function continueInFiles(opened: Session, proposal: Proposal, request: FilesContinuation, steps: FilesRouteSteps): boolean!! {
+    return try lock.withPermits(1)(effect {
+      const { origin, operation } = request
+      const { view, revision, moved, open, changes } = steps
+      const expiresAt = Date.parse(proposal.expiresAt)
+      const live = effect {
+        return opened === latest && (try request.current) && !(try view.get()).context.sensitive
+          && (try Clock.currentTimeMillis) < expiresAt && (try filesDirectAllowed())
       }
-      return true
+      const source = effect {
+        return (try live) && (try view.get()).context.revision === revision
+          && canAgentOpenFilesFrom(try shell.get(), origin.source, origin.panel, origin.route, origin.spoken)
+      }
+      const atDestination = effect {
+        const shown = try shell.get()
+        return shown.assistant === origin.panel && !shown.drawer && shown.route === origin.route + 1 && sameTrail(origin.destination, shown.trail)
+      }
+      const arrived = effect {
+        const { context } = try view.get()
+        return (try live) && (try moved) && (try atDestination) && context.revision === revision + 1
+          && context.showing.tag === "App" && context.showing.view === "Files"
+      }
+      const active = effect { return (try source) && (try enrollmentIsCurrent(opened)) && (try source) }
+      const updates = Stream.merge(Stream.map(changes, () => undefined), Stream.map(shell.changes, () => undefined))
+      const foreground = effect {
+        if (!(try active) || !(try open(source))) return undefined
+        const entered = try Effect.timeoutOption(Stream.runHead(Stream.filterEffect(updates, effect () => {
+          return (try arrived) || !(try live) || !(try atDestination) || (try view.get()).context.revision > revision + 1
+        })), "10 seconds")
+        if (Option.isNone(entered) || !(try arrived)) return undefined
+        const retired = Effect.as(Stream.runHead(Stream.filterEffect(updates, () => Effect.map(arrived, (valid) => !valid))), undefined)
+        const files = try Effect.raceFirst(executors.readyFiles(), retired)
+        if (files === undefined || !(try arrived)) return undefined
+        effect function current(): boolean!! {
+          if (!(try arrived) || !(try enrollmentIsCurrent(opened)) || !(try arrived)) return false
+          const now = try filesContext()
+          return now !== undefined && files !== undefined && sameFiles(files, now)
+        }
+        const reviewed = operation.type === "files_open" && (try current()) ? try executors.reviewFiles(operation) : undefined
+        if ((operation.type === "files_open" && reviewed === undefined) || !(try current())) return undefined
+        return { current: current(), ...(reviewed === undefined ? {} : { files: reviewed }) }
+      }
+      const report = effect {
+        const shown = try shell.get()
+        return (try request.current) && (try device.showing()) && shown.assistant === origin.panel
+          && ((shown.route === origin.route && sameTrail(origin.source, shown.trail))
+            || (try atDestination))
+      }
+      return try executeDirectFiles(opened, { id: proposal.id, digest: proposal.digest, expiresAt, operation }, active, report, request.report, undefined, foreground)
     })
   }
   effect function hasReceipt(opened: Session, proposal: Proposal): boolean!! {
@@ -613,6 +739,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       })
     },
     messageTarget,
+    filesOrigin,
     filesContext,
     effect spokenFiles(opened, message, request, results) {
       const actions = repliedDeviceActions(results)
@@ -633,6 +760,17 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       return try actOnFiles(opened, { id: offer.id, digest: offer.digest, expiresAt: Date.parse(offer.expiresAt), operation: op,
         ...(files === undefined ? {} : { files }) }, request)
     },
+    effect spokenFilesFrom(opened, message, request, route, results) {
+      if (!request.origin.spoken || !(try request.current)) return false
+      const actions = repliedDeviceActions(results)
+      if (![...actions.values()].some((action) => action === "Direct")) return false
+      const answer = try proposals(opened)
+      const at = try Clock.currentTimeMillis
+      const candidates = answer?.filter((proposal) => directFromReply(proposal, opened, message, actions, request.operation, at))
+      const candidate = candidates?.[0]
+      if (candidate === undefined || candidates?.length !== 1) return false
+      return try continueInFiles(opened, candidate, request, route)
+    },
     effect pending(opened: Session, message: string, conversation: number, revision: number, target: MessageDraftTarget | undefined, reply: DeviceActionReply) {
       const view = try Conversation
       const answer = try proposals(opened)
@@ -642,6 +780,22 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       const currentReview = answer.some((proposal) => reviewFromReply(proposal, opened, actions)) && (try reviewContext(revision, view))
         && (try enrollmentIsCurrent(opened)) && opened === latest && (try reviewContext(revision, view))
       const at = try Clock.currentTimeMillis
+      const outside = reply.outsideFiles
+      const directOutside = outside === undefined ? [] : answer.filter((proposal) => directFromReply(proposal, opened, message, actions, outside.operation, at))
+      const [candidate] = directOutside
+      if (outside !== undefined && candidate !== undefined && directOutside.length === 1 && (try outside.current)) {
+        const current = effect {
+          const state = try view.get()
+          return (try outside.current) && state.turn.send.id === outside.ticket && state.turn.reply === "Complete" && !state.turn.stopping
+        }
+        const moved = effect {
+          const state = try view.get()
+          return state.opening.id === outside.ticket && state.opening.outcome === "Confirmed"
+        }
+        const { source, panel, route } = outside.origin
+        const open = () => navigateFilesForReply(view, outside.ticket, source, panel, route)
+        outside.hold(Effect.asVoid(continueInFiles(opened, candidate, { ...outside, current }, { view, revision, moved, open, changes: view.changes })))
+      }
       for (const [id, pin] of pinnedFiles) if (pin.expiresAt <= at) pinnedFiles.delete(id)
       const cards = try Effect.forEach(answer, effect (proposal) => {
         if (proposal.state !== "pending" || proposal.payload.workflow !== undefined) return undefined
@@ -650,6 +804,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         if (op === undefined || !Number.isFinite(expiresAt) || expiresAt <= at) return undefined
         const filesOperation = op.type.startsWith("files_")
         const request = proposal.payload.requestMessageId
+        if (filesOperation && outside !== undefined && actions.get(proposal.id) === "Direct") return undefined
         if (request === undefined) {
           if (!(commsReview(op) || filesOperation) || !currentReview || !reviewFromReply(proposal, opened, actions)) return undefined
         } else if (request !== message || (filesOperation && (!fromThisEnrollment(proposal, opened)
@@ -691,13 +846,8 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       const visible = visibleCards(cards, currentReview && opened === latest && (try reviewContext(revision, view)))
       const owner = reply.directFiles
       if (owner === undefined || !(try owner.current)) return visible
-      const direct = visible.find((card) => {
-        const proposal = answer.find((one) => one.id === card.id)
-        if (proposal?.payload.requestMessageId !== message || actions.get(card.id) !== "Direct"
-          || !fromThisEnrollment(proposal, opened) || !sameFileOperation(owner.operation, card.operation)) return false
-        const exact = readOperation(proposal.payload.operation)
-        return exact !== undefined && mayRunDirectly(exact, "NoBinding", true)
-      })
+      const direct = visible.find((card) => answer.some((proposal) =>
+        proposal.id === card.id && directFromReply(proposal, opened, message, actions, owner.operation, at)))
       if (direct === undefined) return visible
       const current = effect { return (try owner.current) && (try reviewContext(revision, view)) }
       return (try actOnFiles(opened, direct, { ...owner, current })) ? visible.filter((card) => card !== direct) : visible
