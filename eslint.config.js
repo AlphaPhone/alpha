@@ -44,7 +44,7 @@ const untyped = ["*.{js,ts}", "vibestack/studio/scripts/**", "**/.storybook/**",
 const tsx = ["packages/ui/**/*.{ts,tsx}", "apps/**/*.{ts,tsx}", "vibestack/studio/src/page/**/*.{ts,tsx}"]
 const design = "packages/design-system"
 const writing = 'AGENTS.md, "Writing code"'
-const citation = String.raw`spec\/\S+\.md, "[^"]+"`
+const citation = String.raw`spec\/\S+\.md, "(?:[^"\\]|\\["\\])+"`
 const suppressible = String.raw`(?!code\/|barrel\/|no-console\b)[\w@/-]+`
 // AGENTS.md, "Writing code": a citation's line may end with `: ` and what the step shows, and a declaration keeps its doc comment.
 const cited = new RegExp(String.raw`^\s*${citation}(?:; ${citation})*(?:: \S.*)?\s*$`)

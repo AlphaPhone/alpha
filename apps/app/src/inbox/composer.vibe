@@ -68,11 +68,11 @@ const SavedWords = Schema.Struct({
   to: Schema.Array(Schema.String), cc: Schema.Array(Schema.String), bcc: Schema.Array(Schema.String),
   subject: Schema.String, text: Schema.String,
 })
-const Seen = Schema.Struct({ digest: Schema.String, words: Schema.optionalKey(SavedWords) })
-const Copy = Schema.Struct({ account: Schema.Number, id: Schema.String, digest: Schema.String, seen: Schema.optionalKey(Seen) })
-type Copy = typeof Copy.Type
-type Seen = typeof Seen.Type
-const readCopies = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Copy)))
+const SeenSchema = Schema.Struct({ digest: Schema.String, words: Schema.optionalKey(SavedWords) })
+const CopySchema = Schema.Struct({ account: Schema.Number, id: Schema.String, digest: Schema.String, seen: Schema.optionalKey(SeenSchema) })
+type Copy = typeof CopySchema.Type
+type Seen = typeof SeenSchema.Type
+const readCopies = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(CopySchema)))
 
 /**
  * The words of each draft of this session, by its number: what the screen shows and edits, what a write keeps on the

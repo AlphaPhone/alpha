@@ -30,7 +30,7 @@ import { syncRemindersNow } from "../reminders/reminders.vibe"
 import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
 import { Device, native } from "../platform/device.vibe"
 import { Location } from "../platform/location.vibe"
-import { type PageInFront, TabHost, pageInFront } from "../platform/browser.vibe"
+import { type PageInFront, type TabHost, pageInFront } from "../platform/browser.vibe"
 import type { VoiceBridge } from "../platform/voice.vibe"
 import { Refused, ask, outcomeOf } from "../platform/remote.vibe"
 import { Attempts, fresh } from "../runtime/attempts.vibe"
@@ -81,7 +81,7 @@ const made = () => Schema.Struct({ conversation: titled })
 const page = () => Schema.Struct({ messages: Schema.Array(Schema.Struct({ id: Schema.String, role: Schema.Literals(["user", "assistant"]), text: Schema.String, clientMessageId: Schema.optionalKey(Schema.String), failureKind: Schema.optionalKey(Schema.String), cloudCode: Schema.optionalKey(Schema.String) })) })
 const hits = () => Schema.Struct({ results: Schema.Array(Schema.Struct({ conversationId: Schema.NonEmptyString, roomId: Schema.NonEmptyString, messageId: Schema.String, role: Schema.Literals(["user", "assistant"]), text: Schema.String })) })
 
-// Eliza's pinned history contract projects a redacted body to this exact text.
+/** Eliza's pinned history contract projects a redacted body to this exact text. */
 const privateHistoryNotice = "[Private information removed]"
 
 const slotted = Schema.fromJsonString(Schema.Struct({ revision: Schema.Int, text: Schema.String, sending: Schema.Boolean }))

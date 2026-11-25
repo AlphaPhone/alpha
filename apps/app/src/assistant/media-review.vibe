@@ -840,7 +840,7 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
   }
 }
 
-export const mediaReview = Layer.effect(MediaReview, effect {
+const mediaReviewContext = effect {
   const agent = try Agent
   const { runtime, life } = agent
   const executors = try MediaExecutors
@@ -950,6 +950,17 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       ? recovered.result.tag === "Applied" ? "Phone confirmed the text request" : "The phone did not send the text"
       : undefined
   }
+  return {
+    runtime, executors, device, telephony, shell, layers, preferences, sameSms, voicemailTarget, lock, isLatest, scopes, pinnedFiles,
+    messageTarget, session, proposals, enrollmentIsCurrent, reviewContext, hasReceipt, readAttempt, readyToDecline, toSettle, recoverText,
+  }
+}
+
+export const mediaReview = Layer.effect(MediaReview, effect {
+  const {
+    runtime, executors, device, telephony, shell, layers, preferences, sameSms, voicemailTarget, lock, isLatest, scopes, pinnedFiles,
+    messageTarget, session, proposals, enrollmentIsCurrent, reviewContext, hasReceipt, readAttempt, readyToDecline, toSettle, recoverText,
+  } = try mediaReviewContext
   const { methods: files, actOnFiles, continueInFiles } = filesActions({
     device, shell, layers, preferences, executors, lock, scopes, isLatest, enrollmentIsCurrent, proposals,
   })
@@ -1036,7 +1047,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       if (option === undefined || query === undefined) return
       effect function shown(opened: Session): boolean!! {
         const time = try Clock.currentTimeMillis
-        return opened === latest && card.enrollmentId === opened.identity.enrollmentId
+        return isLatest(opened) && card.enrollmentId === opened.identity.enrollmentId
           && board.snapshot().media.includes(card) && card.conversation === (try chats.get()).chosen
           && card.reviewRequest === board.lastSentId && time < card.expiresAt && (try reviewContext(card.revision, view))
       }
@@ -1096,7 +1107,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         const showing = (try conversation.get()).context
         const chosen = (try chats.get()).chosen
         const time = try Clock.currentTimeMillis
-        if (session !== latest || (card.target !== undefined && !sameTarget(card.target, try messageTarget())) || (card.sms !== undefined && !(try sameSms(card.sms)))
+        if (!isLatest(session) || (card.target !== undefined && !sameTarget(card.target, try messageTarget())) || (card.sms !== undefined && !(try sameSms(card.sms)))
           || (card.voicemail !== undefined && !sameVoicemail(card.voicemail, try voicemailTarget()))
           || card.enrollmentId !== session.identity.enrollmentId || card.conversation !== chosen
           || card.revision !== showing.revision || showing.sensitive || time >= card.expiresAt) return false
@@ -1131,7 +1142,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       effect function canStage(session: Session): boolean!! {
         const context = (try conversation.get()).context
         const where = try shell.get()
-        return session === latest && card.enrollmentId === session.identity.enrollmentId && card.conversation === (try chats.get()).chosen
+        return isLatest(session) && card.enrollmentId === session.identity.enrollmentId && card.conversation === (try chats.get()).chosen
           && card.reviewRequest !== undefined && card.reviewRequest === board.lastSentId && !context.sensitive && (try Clock.currentTimeMillis) < card.expiresAt
           && showing(where, "Messages") && (where.assistant === "Sheet" || where.assistant === "Full") && (try device.showing())
       }

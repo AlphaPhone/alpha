@@ -49,6 +49,14 @@ function selected(file: SelectedFile): SelectedDocument {
 
 const unavailable = (error: VolumeRefused) => ({ status: "unavailable" as const, message: error.message })
 
+/** Request a browser download and release its object URL after the browser can consume it. */
+export effect function saveBrowserCopy(name: string, blob: Blob): boolean!! {
+  const url = tryPromise(() => Promise.resolve(downloadCopy(name, blob))) catch () => undefined
+  if (url === undefined) return false
+  try Effect.forkDetach(ensuring(sleep("1 minute"), sync(() => releasePreview(url))))
+  return true
+}
+
 /** The same browser library is used by the folders, file picker, and file preview. */
 const webLibrary = Layer.effectContext(effect {
   const volume = try FilesVolume
@@ -56,11 +64,8 @@ const webLibrary = Layer.effectContext(effect {
   const selections = try librarySelections()
   const changed = try PubSub.unbounded<void>()
   const changes = Stream.fromPubSub(changed)
-  const lifetime = try Effect.scope
   effect function saveCopy(name: string, blob: Blob): DocumentHandoff!! {
-    const url = downloadCopy(name, blob)
-    try Effect.forkIn(ensuring(sleep("1 minute"), sync(() => releasePreview(url))), lifetime)
-    return { status: "opened", message: "" }
+    return (try saveBrowserCopy(name, blob)) ? { status: "opened", message: "" } : { status: "failed", message: "The file could not be downloaded." }
   }
   const blobs = new Map<string, string>()
   const pages = new Map<string, Map<number, PdfPage>>()

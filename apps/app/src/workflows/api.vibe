@@ -48,7 +48,6 @@ const Identifier = Schema.NonEmptyString
 const Once = { triggerType: Schema.Literal("once"), scheduledAtIso: Schema.NonEmptyString }
 const Recurring = { triggerType: Schema.Literal("cron"), cronExpression: Schema.NonEmptyString }
 const OnEvent = { triggerType: Schema.Literal("event"), eventKind: Schema.NonEmptyString }
-const Timing = Schema.Union([Schema.Struct(Once), Schema.Struct(Recurring), Schema.Struct(OnEvent)])
 const PromptFields = {
   id: Identifier,
   displayName: Schema.String,
@@ -57,13 +56,14 @@ const PromptFields = {
   revision: Schema.Int,
   timezone: Schema.NonEmptyString,
 }
-export const Prompt = Schema.Union([
+export const PromptSchema = Schema.Union([
   Schema.Struct({ ...PromptFields, ...Once }),
   Schema.Struct({ ...PromptFields, ...Recurring }),
   Schema.Struct({ ...PromptFields, ...OnEvent }),
 ])
-export type Prompt = typeof Prompt.Type
-export type PromptTiming = typeof Timing.Type
+export type Prompt = typeof PromptSchema.Type
+type TimingOf<Variant> = Variant extends Prompt ? Omit<Variant, keyof typeof PromptFields> : never
+export type PromptTiming = TimingOf<Prompt>
 
 export schema ScheduledTask {
   readonly taskId: Identifier
@@ -74,7 +74,7 @@ export schema ScheduledTask {
   readonly trigger: { readonly kind: "once" | "cron" | "manual"; readonly atIso?: string; readonly expression?: string; readonly tz?: string }
 }
 
-const Triggers = Schema.Struct({ triggers: Schema.Array(Prompt) })
+const Triggers = Schema.Struct({ triggers: Schema.Array(PromptSchema) })
 const Tasks = Schema.Struct({ tasks: Schema.Array(ScheduledTask) })
 
 export effect function readPrompts() {

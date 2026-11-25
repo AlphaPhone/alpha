@@ -9,7 +9,7 @@ import { TabHost, hosted } from "../platform/browser.vibe"
 import { type FrameRequest } from "../platform/browserWeb.vibe"
 import { Device } from "../platform/device.vibe"
 import { type Job, answer, contained, following, reacting, started, together } from "../runtime/reactor.vibe"
-import { Pages, browserInFront, idOf, pageOf } from "./browser.vibe"
+import { type Pages, browserInFront, idOf, pageOf } from "./browser.vibe"
 
 module page {
   /** Whether the Browser's document is in the foreground. @throws {never} */

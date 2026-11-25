@@ -12,6 +12,7 @@ import {
 } from "../gen/agent.effect.vibe"
 
 module node {
+  import type { buildAgentBundle } from "@elizaos/agent-host"
   import { pathToFileURL } from "node:url"
   import { isDeepStrictEqual } from "node:util"
 
@@ -29,8 +30,8 @@ module node {
   }
 
   /** eliza's bundle builder of the clone at `dir`: the entry it ships imports that clone's agent, so the builder must be the same tree's. */
-  export function builderOf(dir: string): Promise<typeof import("@elizaos/agent-host")> {
-    return import(pathToFileURL(`${dir}/packages/agent-host/dist/src/bundle/build.js`).href) as Promise<typeof import("@elizaos/agent-host")>
+  export function builderOf(dir: string): Promise<{ buildAgentBundle: typeof buildAgentBundle }> {
+    return import(pathToFileURL(`${dir}/packages/agent-host/dist/src/bundle/build.js`).href) as Promise<{ buildAgentBundle: typeof buildAgentBundle }>
   }
 }
 import { builderOf, root, sameRules, words } from node

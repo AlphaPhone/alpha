@@ -28,11 +28,16 @@ export function selectedFile(signal: AbortSignal): Promise<File | undefined> {
 /** Save a copy and return its browser address for the shell to release. @throws {never} */
 export function downloadCopy(name: string, blob: Blob): string {
   const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.download = name;
-  link.href = url;
-  link.click();
-  return url;
+  try {
+    const link = document.createElement("a");
+    link.download = name;
+    link.href = url;
+    link.click();
+    return url;
+  } catch (error) {
+    releasePreview(url);
+    throw error;
+  }
 }
 
 /** Opens the browser or operating system's share picker for this exact file. */

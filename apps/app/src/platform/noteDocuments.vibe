@@ -1,5 +1,6 @@
 // spec/app/notes/transfer.md, "Story: Import and export a text file"
 import { registered } from "./device.vibe"
+import { saveBrowserCopy } from "./library.vibe"
 
 module checked {
   import { registerPlugin } from "@capacitor/core"
@@ -17,20 +18,10 @@ module checked {
 }
 import { type Android, client } from checked
 
-module browser {
-  import { downloadCopy, releasePreview } from "./browser-library.ts"
-
-  /** Ask the browser to save the exact text. It does not report the disk outcome. @throws {never} */
-  export function downloadText(name: string, text: string): boolean {
-    try {
-      const url = downloadCopy(name, new Blob([text], { type: "text/plain;charset=utf-8" }))
-      setTimeout(() => releasePreview(url), 60_000)
-      return true
-    } catch { return false }
-  }
+/** Ask the browser to save the exact text. It does not report the disk outcome. */
+export effect function downloadText(name: string, text: string): boolean!! {
+  return try saveBrowserCopy(name, new Blob([text], { type: "text/plain;charset=utf-8" }))
 }
-import { downloadText } from browser
-export { downloadText }
 
 const Result = Schema.Struct({
   status: Schema.Literals(["picked", "cancelled", "unavailable", "unreadable", "exported", "unverified", "failed"]),

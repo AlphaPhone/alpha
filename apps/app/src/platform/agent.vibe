@@ -79,8 +79,8 @@ const waits = { startupTimeoutMs: 30_000, pollMs: 250, requestTimeoutMs: 10_000 
 
 schema Health { readonly ready: boolean }
 
+/** The native agent gate preserves literal plus signs and expects spaces percent-encoded. */
 function located(request: HttpClientRequest.HttpClientRequest): string {
-  // The native agent gate preserves literal plus signs and expects spaces percent-encoded.
   const query = UrlParams.toString(request.urlParams).replaceAll("+", "%20")
   return query === "" ? request.url : `${request.url}?${query}`
 }
