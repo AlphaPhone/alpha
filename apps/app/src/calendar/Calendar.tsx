@@ -681,8 +681,8 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
         <div role="group" aria-label="Save changes to" className="mx-6 my-1 flex flex-wrap items-center gap-2">
           <span className="text-meta text-muted-foreground">Save changes to</span>
           {scopes.map(({ scope, label }) => (
-            <CalendarChip key={scope} chosen={e.scope === scope} disabled={!editor.can({ type: "chooseScope", scope }) && e.scope !== scope}
-              className={e.scope === scope ? undefined : "bg-secondary"} onClick={() => void editor.send({ type: "chooseScope", scope })}>{label}</CalendarChip>
+            <CalendarChip key={scope} label={label} chosen={e.scope === scope} disabled={!editor.can({ type: "chooseScope", scope }) && e.scope !== scope}
+              className={e.scope === scope ? undefined : "bg-secondary"} onClick={() => void editor.send({ type: "chooseScope", scope })} />
           ))}
         </div>
       ) : null}
@@ -773,8 +773,9 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
               <CalendarFormRow icon={<CalendarIcon />}>
                 <div className="flex min-w-0 flex-[1_1_0] flex-wrap gap-2">
                   {(["Agent", "Phone"] as const).map((target) => (
-                    <CalendarChip key={target} chosen={(fields.calendar ?? "Agent") === target} dot={target === "Agent" ? "primary" : "foreground"}
-                      onClick={() => change({ ...fields, calendar: target }, plain)}>{target === "Agent" ? "Your agent's calendar" : "This phone's calendar"}</CalendarChip>
+                    <CalendarChip key={target} label={target === "Agent" ? "Your agent's calendar" : "This phone's calendar"}
+                      chosen={(fields.calendar ?? "Agent") === target} dot={target === "Agent" ? "primary" : "foreground"}
+                      onClick={() => change({ ...fields, calendar: target }, plain)} />
                   ))}
                 </div>
               </CalendarFormRow>
@@ -783,10 +784,10 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
               <CalendarFormRow icon={<Repeat />}>
                 <div className="flex min-w-0 flex-[1_1_0] flex-wrap gap-1.5">
                   {repeats.map(({ repeat, label }) => (
-                    <CalendarChip key={repeat} chosen={(fields.repeat ?? "NoRepeat") === repeat} onClick={() => {
+                    <CalendarChip key={repeat} label={label} chosen={(fields.repeat ?? "NoRepeat") === repeat} onClick={() => {
                       const extras = repeat !== "NoRepeat" || fields.people.trim() !== "";
                       change({ ...fields, repeat }, extras === e.extras ? plain : { type: "setExtras", extras });
-                    }}>{label}</CalendarChip>
+                    }} />
                   ))}
                 </div>
               </CalendarFormRow>

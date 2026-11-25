@@ -2,14 +2,18 @@
 import * as Model from "../../gen/app__workflows__automations.effect.vibe"
 import type { Change, Effect as Out, Event, Fired, Kind, Status } from "../../gen/app__workflows__automations.effect.vibe"
 import * as Listing from "../../gen/app__workflows__list.effect.vibe"
-import type { When } from "../../gen/app__workflows__schedule.effect.vibe"
+import { daily, same, type Preset, type When } from "../../gen/app__workflows__schedule.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { Garbled, Refused, ask, outcomeOf } from "../platform/remote.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, applying, following, reacting, together } from "../runtime/reactor.vibe"
-import { Prompt, ScheduledTask } from "./api.vibe"
+import { Prompt, type PromptTiming, ScheduledTask } from "./api.vibe"
 import { type WorkflowRow, Rows, refresh } from "./list.vibe"
+
+type EditSource =
+  | { readonly kind: "New" }
+  | { readonly kind: "Existing"; readonly prompt: Prompt; readonly baseline: When }
 
 interface EditorWords {
   readonly owner: number
@@ -17,18 +21,35 @@ interface EditorWords {
   readonly title: string
   readonly text: string
   readonly zone: string
+  readonly source: EditSource
 }
 
-const empty: EditorWords = { owner: 0, row: 0, title: "", text: "", zone: "UTC" }
+interface ObservedPrompt {
+  readonly owner: number
+  readonly row: number
+  readonly ticket: number
+  readonly prompt: Prompt
+}
+
+const empty: EditorWords = { owner: 0, row: 0, title: "", text: "", zone: "UTC", source: { kind: "New" } }
 
 export service AutomationWords {
   view(): EditorWords!!
   hold(words: EditorWords): void!!
+  current(owner: number, row: number, ticket: number): (Prompt | undefined)!!
+  remember(shown: ObservedPrompt): void!!
 }
 
 const words = Layer.sync(AutomationWords, () => {
   let current = empty
-  return { view: () => succeed(current), hold: (words: EditorWords) => sync(() => { current = words }) }
+  let observed: ObservedPrompt | undefined
+  return {
+    view: () => succeed(current),
+    hold: (words: EditorWords) => sync(() => { current = words }),
+    current: (owner: number, row: number, ticket: number) =>
+      succeed(observed?.owner === owner && observed.row === row && observed.ticket === ticket ? observed.prompt : undefined),
+    remember: (shown: ObservedPrompt) => sync(() => { observed = shown }),
+  }
 })
 
 module local {
@@ -102,20 +123,71 @@ effect function read(ticket: number, owner: number): Event!!Needs {
   const count = (try rows.view(owner)).rows.length
   const base: Event = { ...failed, ok: source.list.status === "Loaded", count, complete: source.complete }
   if (selected === undefined || selected.kind === "Routine") return base
-  const found = effect {
+  const found: { event: Event; prompt?: Prompt } = effect {
     if (selected.kind === "Prompt") {
       const { trigger } = try ask(Agent, HttpClientRequest.get(promptPath(selected.id)), TriggerReply)
-      return trigger.id === selected.id ? { ...base, present: true, on: trigger.enabled } : failed
+      return trigger.id === selected.id ? { event: { ...base, present: true, on: trigger.enabled }, prompt: trigger } : { event: failed }
     }
     const { task } = try ask(Agent, HttpClientRequest.get(taskPath(selected.id)), TaskReply)
-    if (task.taskId !== selected.id || !task.ownerVisible) return failed
+    if (task.taskId !== selected.id || !task.ownerVisible) return { event: failed }
     const status = taskStatus(task.state.status)
-    return { ...base, present: true, on: status === "Scheduled" && task.trigger.kind !== "manual",
-      status, issue: status === "Failed", issues: status === "Failed" ? 1 : 0, kind: sourceKind(selected) }
-  } catch (error) => error instanceof Refused && error.status === 404 ? base : failed
+    return { event: { ...base, present: true, on: status === "Scheduled" && task.trigger.kind !== "manual",
+      status, issue: status === "Failed", issues: status === "Failed" ? 1 : 0, kind: sourceKind(selected) } }
+  } catch (error) => ({ event: error instanceof Refused && error.status === 404 ? base : failed })
+  const confirmed = ownerAt() catch () => ""
   const live = try machine.get()
-  if (live.row !== state.row || live.owner !== owner || (ownerAt() catch () => "") !== scope) return failed
-  return found
+  if (confirmed !== scope || live.row !== state.row || live.owner !== owner ||
+    !Model.canAutomationsRead(live, ticket, count, 0)) return failed
+  if (found.prompt !== undefined) try (try AutomationWords).remember({ owner, row: state.row, ticket, prompt: found.prompt })
+  return found.event
+}
+
+function cronDays(token: string): readonly number[] | undefined {
+  const days = new Set<number>()
+  for (const part of token.split(",")) {
+    const match = /^([0-7])(?:-([0-7]))?$/.exec(part)
+    if (match === null) return undefined
+    const from = Number(match[1])
+    const to = Number(match[2] ?? from)
+    if (from > to) return undefined
+    for (let day = from; day <= to; day += 1) days.add(day % 7)
+  }
+  return [...days].sort((a, b) => a - b)
+}
+
+function editableTiming(prompt: Prompt): When | undefined {
+  if (prompt.triggerType !== "cron") return undefined
+  const clock = /^([0-5]?\d)\s+([01]?\d|2[0-3])\s+\*\s+\*\s+(\S+)$/.exec(prompt.cronExpression.trim())
+  if (clock?.[3] === undefined) return undefined
+  const hour = Number(clock[2])
+  const minute = Number(clock[1])
+  const days = clock[3] === "*" ? [] : cronDays(clock[3])
+  if (days === undefined) return undefined
+  const dayList = days.join(",")
+  const preset: Preset = days.length === 0 || days.length === 7 ? "Daily"
+    : dayList === "1,2,3,4,5" ? "Weekdays" : dayList === "0,6" ? "Weekends" : "Custom"
+  return { preset, hour, minute, zone: 0, days: preset === "Daily" ? [] : [...days] }
+}
+
+export function promptEditEvent(prompt: Prompt): Extract<Event, { type: "editRow" }> {
+  const when = editableTiming(prompt)
+  return { type: "editRow", chars: prompt.instructions.length, when: when ?? daily(0), timingEditable: when !== undefined, workflow: 0 }
+}
+
+function originalTiming(prompt: Prompt): PromptTiming {
+  switch (prompt.triggerType) {
+    case "once": return { triggerType: "once", scheduledAtIso: prompt.scheduledAtIso }
+    case "cron": return { triggerType: "cron", cronExpression: prompt.cronExpression }
+    case "event": return { triggerType: "event", eventKind: prompt.eventKind }
+  }
+}
+
+function sameTiming(receipt: Prompt, asked: PromptTiming): boolean {
+  switch (asked.triggerType) {
+    case "once": return receipt.triggerType === "once" && receipt.scheduledAtIso === asked.scheduledAtIso
+    case "cron": return receipt.triggerType === "cron" && receipt.cronExpression === asked.cronExpression
+    case "event": return receipt.triggerType === "event" && receipt.eventKind === asked.eventKind
+  }
 }
 
 function cron(when: When): string {
@@ -135,15 +207,21 @@ effect function change(id: number, wanted: Change, when: When, minutes: number):
     if (wanted === "Create" || wanted === "Edit") {
       const draft = try (try AutomationWords).view()
       if (draft.owner !== state.owner || draft.row !== state.row || draft.title.trim() === "" || draft.text.trim() === "") return failed
-      const common = { kind: "prompt", displayName: draft.title.trim(), instructions: draft.text.trim(), timezone: draft.zone,
-        triggerType: "cron", cronExpression: cron(when) }
-      if (wanted === "Create") {
-        const { trigger } = try ask(Agent, post("/api/triggers", { ...common, enabled: false, wakeMode: "inject_now" }), TriggerReply)
+      const source = draft.source
+      const timing: PromptTiming = source.kind === "Existing" && same(when, source.baseline)
+        ? originalTiming(source.prompt) : { triggerType: "cron", cronExpression: cron(when) }
+      const form = { kind: "prompt", displayName: draft.title.trim(), instructions: draft.text.trim(), timezone: draft.zone, ...timing }
+      if (wanted === "Create" && source.kind === "New") {
+        const { trigger } = try ask(Agent, post("/api/triggers", { ...form, enabled: false, wakeMode: "inject_now" }), TriggerReply)
         return { ...failed, applied: !trigger.enabled }
       }
-      if (selected?.kind !== "Prompt") return failed
-      const { trigger } = try ask(Agent, put(promptPath(selected.id), { ...common, expectedRevision: selected.record.revision }), TriggerReply)
-      return { ...failed, applied: trigger.id === selected.id && trigger.revision > selected.record.revision }
+      if (wanted !== "Edit" || selected?.kind !== "Prompt" || source.kind !== "Existing" || source.prompt.id !== selected.id) return failed
+      const original = source.prompt
+      const { trigger } = try ask(Agent, put(promptPath(original.id), { ...form, expectedRevision: original.revision }), TriggerReply)
+      const applied = trigger.id === original.id && trigger.revision === original.revision + 1 && trigger.enabled === original.enabled &&
+        trigger.displayName === form.displayName && trigger.instructions === form.instructions &&
+        trigger.timezone === form.timezone && sameTiming(trigger, timing)
+      return applied ? { ...failed, applied } : ({ type: "changeUnanswered" } as const)
     }
     if (selected === undefined || selected.kind === "Routine") return failed
     if (selected.kind === "Prompt") {
@@ -206,21 +284,26 @@ const choosing = applying(Listing.Machine, (state) => ({ owner: state.owner, row
 const sending = following(Model.Machine, (state) => Model.canSendChange(state), Model.Machine,
   (ready): Event | undefined => ready ? { type: "sendChange" } : undefined)
 
-export effect function editAutomation(owner: number, row: number): void!!(Model.Machine | Rows | AutomationWords) {
+export effect function editAutomation(owner: number, row: number): void!!(Model.Machine | AutomationWords) {
   const machine = try Model.Machine
   const state = try machine.get()
   if (state.row !== row || state.owner !== owner) return
-  const selected = try (try Rows).row(owner, row)
-  if (row !== 0 && selected?.kind !== "Prompt") return
-  const clock = selected?.kind === "Prompt" && selected.record.triggerType === "cron" ? selected.record.cronExpression?.split(" ") : undefined
-  const draft = selected?.kind === "Prompt" ? {
-    owner, row, title: selected.title, text: selected.summary, zone: selected.record.timezone,
-  } : { owner, row, title: "", text: "", zone: timezone() }
-  const event: Event = selected?.kind === "Prompt"
-    ? { type: "editRow", chars: draft.text.length, hour: Number(clock?.[1] ?? 8), minute: Number(clock?.[0] ?? 0), zone: 0, workflow: 0 }
-    : { type: "openEditor", kind: "PromptTask", zone: 0 }
+  const words = try AutomationWords
+  const prompt = try words.current(owner, row, state.list.ticket)
+  if (row !== 0 && prompt === undefined) return
+  if (prompt === undefined) {
+    const event: Event = { type: "openEditor", kind: "PromptTask", zone: 0 }
+    if (!Model.enabled(state, event)) return
+    try words.hold({ ...empty, owner, zone: timezone() })
+    try ignore(machine.send(event))
+    return
+  }
+  const event = promptEditEvent(prompt)
   if (!Model.enabled(state, event)) return
-  try (try AutomationWords).hold(draft)
+  try words.hold({
+    owner, row, title: prompt.displayName, text: prompt.instructions, zone: prompt.timezone,
+    source: { kind: "Existing", prompt, baseline: event.when },
+  })
   try ignore(machine.send(event))
 }
 

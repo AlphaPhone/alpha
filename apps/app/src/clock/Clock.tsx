@@ -47,7 +47,7 @@ export function Clock({ runtime }: ClockProps) {
       >
         <TabsList aria-label="Clock sections">
           {TABS.map((item) => (
-            <TabsTrigger key={item.value} value={item.value}>
+            <TabsTrigger key={item.value} value={item.value} className="px-2 text-xs sm:px-3 sm:text-sm">
               {item.label}
             </TabsTrigger>
           ))}

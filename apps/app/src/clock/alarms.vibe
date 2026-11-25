@@ -54,6 +54,9 @@ export effect function createAlarm(draft: AlarmDraft): number!!(Alarms.Machine |
   const before = try machine.get()
   const nextId = before.issued + 1
   const fireAt = nextAlarmFireAt(draft.hour, draft.minute, draft.daysMask, now)
+  const hadPrior = clockRecords.snapshot().alarms.has(nextId)
+  const prior = clockRecords.alarm(nextId)
+  clockRecords.setAlarm(nextId, { label: draft.label.trim(), sound: draft.sound, remoteId: `alarm-${nextId}`, updatedAtMs: now })
   const sent = try contained(
     machine.send({
       type: "create",
@@ -66,8 +69,10 @@ export effect function createAlarm(draft: AlarmDraft): number!!(Alarms.Machine |
     }),
     "creating an alarm",
   )
-  if (!sent) return 0
-  clockRecords.setAlarm(nextId, { label: draft.label.trim(), sound: draft.sound, remoteId: `alarm-${nextId}`, updatedAtMs: now })
+  if (!sent) {
+    if (hadPrior) clockRecords.setAlarm(nextId, prior)
+    return 0
+  }
   try persistClockMeta()
   return nextId
 }
@@ -84,6 +89,8 @@ export effect function updateAlarm(id: number, draft: AlarmDraft): boolean!!(Ala
   const { machine, now, current } = try loadAlarm(id)
   if (current === undefined) return false
   const fireAt = current.enabled ? nextAlarmFireAt(draft.hour, draft.minute, draft.daysMask, now) : 0
+  const prior = clockRecords.alarm(id)
+  clockRecords.setAlarm(id, { label: draft.label.trim(), sound: draft.sound, updatedAtMs: now })
   const sent = try contained(
     machine.send({
       type: "update",
@@ -97,8 +104,10 @@ export effect function updateAlarm(id: number, draft: AlarmDraft): boolean!!(Ala
     }),
     "updating an alarm",
   )
-  if (!sent) return false
-  clockRecords.setAlarm(id, { label: draft.label.trim(), sound: draft.sound, updatedAtMs: now })
+  if (!sent) {
+    clockRecords.setAlarm(id, prior)
+    return false
+  }
   try persistClockMeta()
   return true
 }
@@ -108,9 +117,13 @@ export effect function toggleAlarm(id: number, enabled: boolean): boolean!!(Alar
   const { machine, now, current } = try loadAlarm(id)
   if (current === undefined) return false
   const fireAt = enabled ? nextAlarmFireAt(current.hour, current.minute, current.daysMask, now) : 0
-  const sent = try contained(machine.send({ type: "toggle", id, on: enabled, fireAt }), "toggling an alarm")
-  if (!sent) return false
+  const prior = clockRecords.alarm(id)
   clockRecords.setAlarm(id, { updatedAtMs: now })
+  const sent = try contained(machine.send({ type: "toggle", id, on: enabled, fireAt }), "toggling an alarm")
+  if (!sent) {
+    clockRecords.setAlarm(id, prior)
+    return false
+  }
   try persistClockMeta()
   return true
 }
@@ -119,17 +132,24 @@ export effect function toggleAlarm(id: number, enabled: boolean): boolean!!(Alar
 export effect function deleteAlarmWithUndo(id: number): boolean!!(Alarms.Machine | Time | KeyValueStore.KeyValueStore | Said | Toasts.Machine) {
   const machine = try Alarms.Machine
   const now = try (try Time).now()
-  const sent = try contained(machine.send({ type: "requestDelete", id, now: untimed }), "deleting an alarm")
-  if (!sent) return false
   clockRecords.markAlarmDeleted(id)
+  const sent = try contained(machine.send({ type: "requestDelete", id, now: untimed }), "deleting an alarm")
+  if (!sent) {
+    clockRecords.unmarkAlarmDeleted(id)
+    return false
+  }
   try persistClockMeta()
   const store = try KeyValueStore.KeyValueStore
   const undo = effect {
+    const prior = clockRecords.alarm(id)
+    clockRecords.unmarkAlarmDeleted(id)
+    clockRecords.setAlarm(id, { updatedAtMs: now + 1 })
     const undone = try contained(machine.send({ type: "undoDelete", now: untimed }), "undoing an alarm deletion")
     if (undone) {
-      clockRecords.unmarkAlarmDeleted(id)
-      clockRecords.setAlarm(id, { updatedAtMs: now + 1 })
       try ignore(store.set(metaStoreKey, clockRecords.serialize()))
+    } else {
+      clockRecords.setAlarm(id, prior)
+      clockRecords.markAlarmDeleted(id)
     }
   }
   const label = clockRecords.alarm(id).label

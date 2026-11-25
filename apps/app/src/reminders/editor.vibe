@@ -165,9 +165,15 @@ export effect function updateEditorDraft(patch: Partial<ReminderEditorFields>): 
       try contained(editor.send({ type: "addSubtask" }), "adding reminder subtask")
     } else if (patch.subtasks.length < prev.subtasks.length && Editor.canRemoveSubtask(state)) {
       try contained(editor.send({ type: "removeSubtask" }), "removing reminder subtask")
+    } else if (Editor.canEditNotes(state)) {
+      try contained(editor.send({ type: "editNotes", ok: true }), "marking subtask edit dirty")
     }
   }
-  if ((patch.priority !== undefined && patch.priority !== prev.priority) || (patch.flagged !== undefined && patch.flagged !== prev.flagged)) {
+  if (
+    (patch.priority !== undefined && patch.priority !== prev.priority)
+    || (patch.flagged !== undefined && patch.flagged !== prev.flagged)
+    || (patch.alertMinutes !== undefined && patch.alertMinutes !== prev.alertMinutes)
+  ) {
     const state = try editor.get()
     if (Editor.canEditNotes(state)) try contained(editor.send({ type: "editNotes", ok: true }), "marking draft dirty")
   }

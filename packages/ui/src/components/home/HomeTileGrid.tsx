@@ -34,7 +34,7 @@ export type HomeTileGridProps = Omit<ComponentProps<"nav">, "children"> & {
 };
 
 /** App grids keep four columns while the measured text fits, then give each label more room. */
-const tileColumns = "grid grid-cols-[repeat(auto-fill,minmax(min(100%,max(calc(25%_-_.5px),calc(62px_*_var(--alpha-text-scale,1)))),1fr))] gap-y-6";
+const tileColumns = "grid grid-cols-[repeat(auto-fill,minmax(min(100%,max(calc(25%_-_.5px),calc(62px_*_var(--alpha-text-scale,1)))),1fr))] gap-y-[calc(var(--alpha-home-spacing,var(--spacing))*6)]";
 
 const steps: Partial<Record<string, -1 | 1>> = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 };
 
@@ -54,7 +54,7 @@ type Drag = {
  * @model spec/app/home/tiles.md
  */
 export function HomeTileGrid({ tiles, editing = false, onOpen, onBeginEditing, hold, onRemove, onMove, className, ...props }: HomeTileGridProps) {
-  const dragging = useRef<Drag | undefined>(undefined);
+  const draggingRef = useRef<Drag | undefined>(undefined);
   const movedRef = useRef<string | null>(null);
 
   const keys = (event: KeyboardEvent, index: number, id: string) => {
@@ -71,9 +71,9 @@ export function HomeTileGrid({ tiles, editing = false, onOpen, onBeginEditing, h
   };
 
   const clearDrag = () => {
-    const drag = dragging.current;
+    const drag = draggingRef.current;
     if (!drag) return;
-    dragging.current = undefined;
+    draggingRef.current = undefined;
     drag.cell.style.removeProperty("transform");
     drag.cell.removeAttribute("data-home-dragging");
   };
@@ -83,10 +83,10 @@ export function HomeTileGrid({ tiles, editing = false, onOpen, onBeginEditing, h
     const cell = event.currentTarget.closest<HTMLElement>("[data-home-cell]");
     if (!cell) return;
     const width = cell.getBoundingClientRect().width;
-    dragging.current = { id, pointer: event.pointerId, cell, x: event.clientX, y: event.clientY, scale: width > 0 ? cell.offsetWidth / width : 1, moved: false };
+    draggingRef.current = { id, pointer: event.pointerId, cell, x: event.clientX, y: event.clientY, scale: width > 0 ? cell.offsetWidth / width : 1, moved: false };
   };
   const moveDrag = (event: PointerEvent<HTMLElement>) => {
-    const drag = dragging.current;
+    const drag = draggingRef.current;
     if (!drag || drag.pointer !== event.pointerId) return;
     if (!editing || !onMove || drag.cell.closest("[inert]")) { clearDrag(); return; }
     const dx = (event.clientX - drag.x) * drag.scale;
@@ -100,7 +100,7 @@ export function HomeTileGrid({ tiles, editing = false, onOpen, onBeginEditing, h
     drag.cell.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
   };
   const endDrag = (event: PointerEvent<HTMLElement>) => {
-    const drag = dragging.current;
+    const drag = draggingRef.current;
     if (!drag || drag.pointer !== event.pointerId) return;
     clearDrag();
     if (!drag.moved || !editing || !onMove || drag.cell.closest("[inert]")) return;
@@ -116,20 +116,20 @@ export function HomeTileGrid({ tiles, editing = false, onOpen, onBeginEditing, h
     if (onto && fromIndex >= 0 && toIndex >= 0) onMove({ id: drag.id, onto, behind: toIndex > fromIndex });
   };
   const cancelDrag = (event: PointerEvent<HTMLElement>) => {
-    if (dragging.current?.pointer === event.pointerId) clearDrag();
+    if (draggingRef.current?.pointer === event.pointerId) clearDrag();
   };
 
   return (
     <nav
       aria-label="Apps on Home"
-      className={cn(tileColumns, "px-4", className)}
+      className={cn(tileColumns, "px-[calc(var(--alpha-home-spacing,var(--spacing))*4)]", className)}
       onBlur={(event) => {
         if (event.relatedTarget) movedRef.current = null;
       }}
       onPointerMove={moveDrag}
       onPointerUp={endDrag}
       onPointerCancel={cancelDrag}
-      onPointerLeave={(event) => { if (!dragging.current?.moved) cancelDrag(event); }}
+      onPointerLeave={(event) => { if (!draggingRef.current?.moved) cancelDrag(event); }}
       onLostPointerCapture={(event) => { if (event.target === event.currentTarget) cancelDrag(event); }}
       {...props}
     >

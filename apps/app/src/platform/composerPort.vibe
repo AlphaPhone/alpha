@@ -1,0 +1,92 @@
+// spec/app/messages/composer.md, "Only the owner's Send sends: a draft or a picture, with send access, a SIM where there is a choice, and never during a call that may be an emergency call"
+module web {
+  import type { MessagesNativePlugin } from "@elizaos/os-bridges"
+
+  interface ComposerPort extends EventTarget {
+    postMessage(data: string): void
+  }
+
+  type Draft = Parameters<MessagesNativePlugin["sendSms"]>[0] | Parameters<MessagesNativePlugin["sendMms"]>[0]
+
+  function notStarted(): Error {
+    return Object.assign(new Error("Open Messages and review the draft again."), { code: "composer-not-started" })
+  }
+
+  function packagedPort(): ComposerPort | undefined {
+    if (typeof window === "undefined" || window.top !== window || window.location.origin !== "https://localhost" ||
+      typeof AbortSignal.any !== "function" || typeof AbortSignal.timeout !== "function") return undefined
+    const port = (window as Window & { alphaMessagesComposer?: ComposerPort }).alphaMessagesComposer
+    return typeof port?.postMessage === "function" ? port : undefined
+  }
+
+  function visible(): boolean {
+    return document.visibilityState === "visible" && document.hasFocus()
+  }
+
+  function post(port: ComposerPort, kind: "sms" | "mms", draft: Draft, signal: AbortSignal): Promise<unknown> {
+    if (signal.aborted || !visible()) return Promise.reject(notStarted())
+    const requestId = crypto.randomUUID()
+    const request = JSON.stringify({ requestId, kind, draft })
+    const deadline = AbortSignal.any([signal, AbortSignal.timeout(30_000)])
+    return new Promise((resolve, reject) => {
+      function cleanup() {
+        port.removeEventListener("message", received)
+        deadline.removeEventListener("abort", cancelled)
+        window.removeEventListener("blur", cancelled)
+        window.removeEventListener("pagehide", cancelled)
+        document.removeEventListener("visibilitychange", visibility)
+      }
+      function cancelled() {
+        cleanup()
+        try { port.postMessage(JSON.stringify({ requestId, kind: "cancel" })) }
+        catch { void 0 }
+        reject(new Error("The Messages send could not be confirmed."))
+      }
+      function visibility() {
+        if (!visible()) cancelled()
+      }
+      function received(event: Event) {
+        if (!(event instanceof MessageEvent) || typeof event.data !== "string") return
+        let reply: unknown
+        try { reply = JSON.parse(event.data) } catch { return }
+        if (typeof reply !== "object" || reply === null || !("requestId" in reply) || reply.requestId !== requestId) return
+        cleanup()
+        if (Object.keys(reply).length !== 2) { reject(new Error("Malformed Messages send reply.")); return }
+        if ("result" in reply) { resolve(reply.result); return }
+        const error = "error" in reply ? reply.error : undefined
+        if (typeof error !== "object" || error === null || !("code" in error) || typeof error.code !== "string") {
+          reject(new Error("Malformed Messages send reply."))
+          return
+        }
+        reject(Object.assign(new Error("Messages send was refused."), { code: error.code }))
+      }
+      port.addEventListener("message", received)
+      deadline.addEventListener("abort", cancelled, { once: true })
+      window.addEventListener("blur", cancelled)
+      window.addEventListener("pagehide", cancelled)
+      document.addEventListener("visibilitychange", visibility)
+      try { port.postMessage(request) }
+      catch { cancelled() }
+    })
+  }
+
+  /** Substitute only the owner's send calls and leave the pinned client's parsing and receipts in place. @throws {never} */
+  export function composerPlugin<P extends Pick<MessagesNativePlugin, "sendSms" | "sendMms">>(plugin: P, trustedTap: boolean, signal: AbortSignal, current: () => Promise<boolean>): P {
+    const port = packagedPort()
+    async function send(kind: "sms" | "mms", draft: Draft, fallback: () => Promise<unknown>) {
+      if (signal.aborted || !(await current().catch(() => false)) || signal.aborted) throw notStarted()
+      if (port === undefined) return fallback()
+      if (!trustedTap) throw notStarted()
+      return post(port, kind, draft, signal)
+    }
+    return new Proxy(plugin, {
+      get(native, method, receiver) {
+        if (method === "sendSms") return (draft: Parameters<MessagesNativePlugin["sendSms"]>[0]) => send("sms", draft, () => native.sendSms(draft))
+        if (method === "sendMms") return (draft: Parameters<MessagesNativePlugin["sendMms"]>[0]) => send("mms", draft, () => native.sendMms(draft))
+        return Reflect.get(native, method, receiver)
+      },
+    })
+  }
+}
+import { composerPlugin } from web
+export { composerPlugin }

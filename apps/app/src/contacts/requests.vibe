@@ -1,18 +1,16 @@
 // spec/app/contacts/agent.md, "Story: Let the agent ask for a call or a contact change"; spec/app/contacts/agent.md, "Story: Approve what the agent asked"; spec/app/contacts/agent.md, "Story: Learn how the request ended"
-import type { DeviceOperation } from "@elizaos/agent/operations"
-import type { AddressBookContact, ContactDetail } from "@elizaos/os/bridges/contacts"
-import type { DirectSmsReview, OperationId, SmsSendResult } from "@elizaos/os/bridges/messages"
-import type { PhoneNumber } from "@elizaos/os/bridges/phone"
+import type { DeviceOperation } from "@elizaos/agent"
+import type { AddressBookContact, ContactDetail, DirectSmsReview, OperationId, PhoneNumber, SmsSendResult } from "@elizaos/os-bridges"
 import * as Agent from "../../gen/app__contacts__agent.effect.vibe"
 import { Machine as ContactsMachine, canBookChanged } from "../../gen/app__contacts.effect.vibe"
 import { Machine as PhoneMachine, clear } from "../../gen/app__phone.effect.vibe"
-import type { Ask, Effect as Out, Ending, Event } from "../../gen/app__contacts__agent.effect.vibe"
-import { Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
+import type { Ask, Effect as Out, Ending, Event, Request } from "../../gen/app__contacts__agent.effect.vibe"
+import { Telephony, TelephonyRefused, namesOf, readAddressBook, telephony } from "../platform/telephony.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, reacting, run, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import { judge } from "../phone/words.ts"
-import { draftFrom } from "./contacts.vibe"
+import { classifyDialNumber } from "../phone/phone.vibe"
+import { draftFrom, removeContact } from "./contacts.vibe"
 
 /** The agent's operations the phone answers as a request: a call, a text, or a contact added, changed or deleted. */
 export type Asking = Extract<DeviceOperation, { type: "phone_call" | "phone_dial" | "sms_send" | "mms_send" | "sms_compose" | "contact_create" | "contact_update" | "contact_delete" }>
@@ -82,13 +80,35 @@ export function isAsking(operation: DeviceOperation): operation is Asking {
 
 // spec/app/contacts/agent.md, "Only the agent asks, and only when no other request is open"; spec/app/contacts/agent.md, "A call or a text to a number reaches only a number the owner wrote"
 /** Hand the agent's operation to the phone as a request; `written` says the owner wrote the number it names. Answers whether the request was taken. */
-export effect function propose(operation: Asking, written: boolean): boolean!!(Requested | Agent.Machine) {
+export effect function propose(operation: Asking, written: boolean): boolean!!(Requested | Agent.Machine | Telephony) {
   const machine = try Agent.Machine
   if (Agent.open(try machine.get())) return false
+  const store = try Requested
+  const before = try store.get()
   const { ask, number, search, text, pictures } = askOf(operation)
-  try (try Requested).set({ ...quiet, operation })
-  const event: Event = { type: "asked", ask, byName: number === "" && search !== "", emergency: judge(number) === "Emergency", written, pictures, number, text }
+  const dial = ask === "Dial" && number !== ""
+  const kind = dial ? try classifyDialNumber(number) : "NumberUnknown"
+  if ((dial && kind === "NumberUnknown") || Agent.open(try machine.get()) || (try store.get()) !== before) return false
+  try store.set({ ...quiet, operation })
+  const event: Event = { type: "asked", ask, byName: number === "" && search !== "", emergency: kind === "EmergencyNumber", written, pictures, number, text }
   return try contained(machine.send(event, "Agent"), "the agent's request")
+}
+
+function sameChoice(current: Request, before: Request): boolean {
+  return current.stage === "Choosing" && current.ask === before.ask &&
+    current.lookup.ticket === before.lookup.ticket && current.review.revision === before.review.revision
+}
+
+// spec/app/contacts/agent.md, "The owner picks the exact number or the one contact, and that one is shown"
+/** Choose the number from the still-current request, with Android classification for a call. */
+export effect function chooseNumber(state: Request, review: Asked, contact: string, number: string): boolean!!(Requested | Agent.Machine | Telephony) {
+  const machine = try Agent.Machine
+  const store = try Requested
+  if (state.stage !== "Choosing" || !sameChoice(try machine.get(), state) || (try store.get()) !== review) return false
+  if (!review.matches.some((found) => found.id === contact && found.phones.includes(number))) return false
+  const kind = state.ask === "Dial" ? try classifyDialNumber(number) : "OrdinaryNumber"
+  if (kind === "NumberUnknown" || !sameChoice(try machine.get(), state) || (try store.get()) !== review) return false
+  return try contained(machine.send({ type: "choose", number, contact, emergency: kind === "EmergencyNumber", unchanged: false }, "Owner"), "choosing the reviewed number")
 }
 
 // spec/app/contacts/agent.md, "The owner can decline, and a review Alpha stops showing is withdrawn"
@@ -164,14 +184,14 @@ effect function searched(ticket: number): Event!!(Telephony | Requested | Agent.
     ? [...new Set([operation.contact.displayName, ...operation.contact.phoneNumbers].map((text) => text.trim()).filter((text) => text !== ""))]
     : [askOf(operation).search]
   const pages = effect {
-    try telephony("open", (c) => c.contacts.open())
-    return try Effect.forEach(searches, (query) => telephony("list", (c) => c.contacts.list({ query, limit: Agent.maxMatches + 1 })))
+    try readAddressBook("open contacts", (c) => c.open())
+    return try Effect.forEach(searches, (query) => readAddressBook("search contacts", (c) => c.list({ query, limit: Agent.maxMatches + 1 })))
   } catch () => undefined
   if (pages === undefined) return failed
   const all = Array.from(new Map(complete(pages.flatMap((page) => page.contacts)).map((one) => [one.id, one] as const)).values())
   const candidates = all.slice(0, Agent.maxMatches)
   const documents = state.ask === "ChangeContact" || state.ask === "DeleteContact"
-    ? try Effect.forEach(candidates, (one) => Effect.orElseSucceed(telephony("get", (c) => c.contacts.get(one.id, "ExplicitRead")), () => undefined), { concurrency: 4 })
+    ? try Effect.forEach(candidates, (one) => Effect.orElseSucceed(readAddressBook("read reviewed contact", (c) => c.get(one.id, "ExplicitRead")), () => undefined))
     : []
   if (documents.some((document) => document === undefined)) return failed
   const reviewed = new Map(documents.flatMap((document) => document === undefined ? [] : [[document.id, document] as const]))
@@ -224,13 +244,19 @@ effect function watched(review: DirectSmsReview, operation: OperationId, first: 
 }
 
 // spec/app/contacts/agent.md, "Nothing is done but what the owner approved, as it was shown, once"
-effect function acted(id: number, ask: Ask, number: string, text: string, contact: string): Event!!(Telephony | Requested | Attempts | Time | PhoneMachine | ContactsMachine) {
+effect function acted(id: number, ask: Ask, number: string, text: string, contact: string): Event!!(Telephony | Requested | Attempts | Time | Agent.Machine | PhoneMachine | ContactsMachine) {
   const store = try Requested
   const held = try store.get()
   const refused: Event = { type: "acted", id, done: false, known: true }
   if (!clear(try (try PhoneMachine).get())) return refused
   return effect {
     if (ask === "Dial") {
+      const approval = try Agent.Machine
+      const before = try approval.get()
+      if (!Agent.canActed(before, id, "Device") || before.number !== number || (try classifyDialNumber(number)) !== "OrdinaryNumber") return refused
+      const after = try approval.get()
+      if (!Agent.canActed(after, id, "Device") || after.number !== number || after.contact !== contact ||
+        (try store.get()) !== held || !clear(try (try PhoneMachine).get())) return refused
       const report = try telephony("dial", (c) => c.phone.dial(number))
       return { type: "acted", id, done: report.dialStatus === "DialHandedOff", known: true } satisfies Event
     }
@@ -253,9 +279,9 @@ effect function acted(id: number, ask: Ask, number: string, text: string, contac
     const card = held.reviewed.get(contact)
     if (shown === undefined || card === undefined) return refused
     if (ask === "DeleteContact") {
-      const done = try telephony("remove", (c) => c.contacts.remove({ id: card.id, version: card.version }))
-      if (done.status === "queued" || done.status === "stale") try contactsChanged()
-      return { type: "acted", id, done: done.status === "queued", known: true } satisfies Event
+      const outcome = try removeContact(card)
+      if (outcome !== "refused") try contactsChanged()
+      return { type: "acted", id, done: outcome === "deleted", known: outcome !== "unknown" } satisfies Event
     }
     const done = try telephony("updateContact", (c) => c.contacts.updateContact({ id: card.id, version: card.version }, draftFrom(card, afterOf(held.operation, linesOf(shown)))))
     if (done.status === "saved" || done.status === "stale" || done.status === "unknown") try contactsChanged()
