@@ -31,12 +31,15 @@ function authOf(device: DeviceRoute | undefined): Auth {
   return device === undefined ? "Public" : authOfClass[device.auth]
 }
 
+const streamingPaths = new Set(["/api/v1/chat/completions", "/api/v1/voice/tts", "/api/v1/voice/stt", "/api/v1/voice/speech/ws"])
+
 /** Why eliza would refuse the table, one line per route it would refuse: empty when every route is one it loads. */
 export function tableProblems(table: ReadonlyArray<TableRoute> = cloudTable): ReadonlyArray<string> {
   return table.flatMap((route) => {
     const found = deviceRoutes.filter((device) => device.method === route.verb && samePath(route, device))
     const underSignIn = signInPrefixes.some((prefix) => route.path.startsWith(prefix))
-    const listing = { matches: found.length, buffered: true, auth: authOf(found[0]) }
-    return pageRoute(listing, underSignIn) ? [] : [`${wireVerb[route.verb]} ${route.path}: ${found.length === 1 ? (underSignIn ? "belongs to sign-in" : "needs a fresh or stepped-up session") : `matches ${found.length} of eliza's device routes`}`]
+    const buffered = !streamingPaths.has(route.path)
+    const listing = { matches: found.length, buffered, auth: authOf(found[0]) }
+    return pageRoute(listing, underSignIn) ? [] : [`${wireVerb[route.verb]} ${route.path}: ${found.length === 1 ? (underSignIn ? "belongs to sign-in" : !buffered ? "is a streaming route" : "needs a fresh or stepped-up session") : `matches ${found.length} of eliza's device routes`}`]
   })
 }

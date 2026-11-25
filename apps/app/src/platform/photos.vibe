@@ -3,11 +3,11 @@ import type { DeviceLibraryClient, PhotosClient, Reviewed } from "@elizaos/os-br
 import { registered } from "./device.vibe"
 
 module native {
-  import { registerPlugin } from "@capacitor/core"
   import { Schema } from "effect"
   import { MMS_MAX_TOTAL_BYTES } from "@elizaos/os-bridges"
-  import { deviceLibraryClient, deviceLibraryPlugin, photosClient } from "@elizaos/os-bridges"
-  import type { DeviceLibraryClient, PhotosClient, PhotosPlugin, Reviewed } from "@elizaos/os-bridges"
+  import { deviceLibraryClient, photosClient } from "@elizaos/os-bridges"
+  import type { DeviceLibraryClient, DeviceLibraryPlugin, PhotosClient, PhotosPlugin, Reviewed } from "@elizaos/os-bridges"
+  import { plugin as capacitorPlugin } from "./capacitor.ts"
 
   export const photoEmailMaxBytes = 5 * 1024 * 1024
   const OriginalPicture = Schema.Struct({
@@ -22,10 +22,9 @@ module native {
     readMessagePicture(input: Reviewed): Promise<unknown>
     readEmailPicture(input: Reviewed): Promise<unknown>
   }
-  let nativePictures: (PhotosPlugin & NativePictures) | undefined
 
   function selectedPhotos(name: string): PhotosPlugin & NativePictures {
-    return (nativePictures ??= registerPlugin<PhotosPlugin & NativePictures>(name))
+    return capacitorPlugin<PhotosPlugin & NativePictures>(name)
   }
 
   export async function readOriginalPicture(pluginName: string, picture: Reviewed, use: PhotoAttachmentUse): Promise<PhotoOriginalPicture> {
@@ -46,7 +45,7 @@ module native {
 
   /** @throws {never} */
   export function reviewedLibrary(name: string): DeviceLibraryClient {
-    return (reviewed ??= deviceLibraryClient(deviceLibraryPlugin(name), name))
+    return (reviewed ??= deviceLibraryClient(capacitorPlugin<DeviceLibraryPlugin>(name), name))
   }
 }
 import { phoneLibrary, photoEmailMaxBytes, readOriginalPicture, reviewedLibrary, type PhotoAttachmentUse, type PhotoOriginalPicture } from native
@@ -130,11 +129,41 @@ module browser {
     })
   }
 
+  let lastTimestamp = 0
+
+  function monotonicNow(provided?: number): number {
+    const candidate = provided !== undefined && Number.isSafeInteger(provided) ? provided : Date.now()
+    lastTimestamp = Math.max(lastTimestamp, candidate)
+    return lastTimestamp
+  }
+
+  function decodeDataUri(uri: string): Blob | undefined {
+    if (!uri.startsWith("data:")) return undefined
+    const comma = uri.indexOf(",")
+    if (comma < 0) return undefined
+    const header = uri.slice(5, comma)
+    const payload = uri.slice(comma + 1)
+    const parts = header.split(";")
+    const mimeType = parts[0] || "application/octet-stream"
+    const isBase64 = parts.some((part) => part.toLowerCase() === "base64")
+    try {
+      if (isBase64) {
+        const binary = atob(payload)
+        const bytes = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
+        return new Blob([bytes], { type: mimeType })
+      }
+      return new Blob([decodeURIComponent(payload)], { type: mimeType })
+    } catch {
+      return undefined
+    }
+  }
+
   /** Keep the original before the capture is reported as saved. */
-  export async function saveBrowserCapture(file: Blob, name: string, width: number, height: number, duration?: number, thumbnail?: string): Promise<string> {
+  export async function saveBrowserCapture(file: Blob, name: string, width: number, height: number, duration?: number, thumbnail?: string, now?: number): Promise<string> {
     const preview = thumbnail ?? await browserPhotoThumbnail(file).catch(() => undefined)
     const database = await storage()
-    const created = Date.now()
+    const created = monotonicNow(now)
     const id = `browser:${created}:${crypto.randomUUID()}`
     try {
       await new Promise<void>((resolve, reject) => {
@@ -201,9 +230,10 @@ module browser {
     return new Promise((resolve, reject) => {
       const tx = database.transaction([...tables], mode)
       let result: T
-      tx.oncomplete = () => resolve(result)
+      let settled = false
+      tx.oncomplete = () => settled ? resolve(result) : reject(new Error("The photo library transaction produced no result."))
       tx.onabort = () => reject(tx.error ?? new Error("The photo library transaction was interrupted."))
-      try { use(tx, (value) => { result = value }) }
+      try { use(tx, (value) => { result = value; settled = true }) }
       catch (cause) { tx.abort(); reject(cause) }
     })
   }
@@ -351,7 +381,7 @@ module browser {
             const sourceRevision = item.id.startsWith(earlierPrefix) ? item.sourceRevision ?? item.revision : undefined
             const next = operation === "favorite" || operation === "unfavorite"
               ? { ...item, favorite: operation === "favorite", sourceRevision, revision: crypto.randomUUID() }
-              : { ...item, trashedAt: operation === "trash" ? Date.now() : undefined, sourceRevision, revision: crypto.randomUUID() }
+              : { ...item, trashedAt: operation === "trash" ? monotonicNow() : undefined, sourceRevision, revision: crypto.randomUUID() }
             media.put(next)
             changed.push({ id: item.id, status: "done", item: next })
           }
@@ -549,7 +579,7 @@ module browser {
               results.add(result, operation)
               return
             }
-            const created = replace ? source.created : Date.now()
+            const created = replace ? source.created : monotonicNow()
             const id = replace ? source.id : `browser:${created}:${crypto.randomUUID()}`
             const extension = frame.file.type === "video/mp4" ? "mp4" : frame.file.type.startsWith("video/") ? "webm" : "jpg"
             const name = `${replace ? "" : "Edited "}${source.name.replace(/\.[^.]+$/, "")}.${extension}`
@@ -603,12 +633,22 @@ module browser {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(name)
       let absent = false
+      let blocked = false
+      request.onblocked = () => {
+        blocked = true
+        reject(new Error("The photo library is open in another tab."))
+      }
       request.onupgradeneeded = (event) => {
-        if (event.oldVersion !== 0) return
+        if (blocked || event.oldVersion !== 0) return
         absent = true
         request.transaction?.abort()
       }
-      request.onsuccess = () => resolve(request.result)
+      request.onsuccess = () => {
+        const database = request.result
+        database.onversionchange = () => database.close()
+        if (blocked) database.close()
+        else resolve(database)
+      }
       request.onerror = () => { if (absent) resolve(undefined); else reject(request.error) }
     })
   }
@@ -722,7 +762,8 @@ module browser {
         }
       })
       if (found?.uri === undefined) return undefined
-      const file = await (await fetch(found.uri)).blob()
+      const file = decodeDataUri(found.uri)
+      if (file === undefined) return undefined
       const extension = file.type === "video/mp4" ? "mp4" : file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : undefined
       const name = extension === undefined ? found.item.name : `Camera.${extension}`
       return { item: { ...found.item, mimeType: file.type || found.item.mimeType, size: file.size, name }, file }

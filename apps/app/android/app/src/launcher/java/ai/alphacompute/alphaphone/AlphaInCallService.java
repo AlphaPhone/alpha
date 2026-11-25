@@ -71,7 +71,7 @@ public final class AlphaInCallService extends InCallService {
     private static final Map<Call, String> CALL_IDS =
             Collections.synchronizedMap(new LinkedHashMap<>());
 
-    private static final Set<Runnable> LISTENERS = new LinkedHashSet<>();
+    private static final Set<Runnable> LISTENERS = Collections.synchronizedSet(new LinkedHashSet<>());
     private final Map<Call, Call.Callback> callbacks = new HashMap<>();
     /** Contact names by call ID and number. An empty name is a lookup that found none or is running. Main thread only. */
     private final Map<String, String> names = new HashMap<>();
@@ -89,26 +89,36 @@ public final class AlphaInCallService extends InCallService {
     @Override public void onCreate() {
         super.onCreate();
         activeService = this;
+        NotificationManager notifications = getSystemService(NotificationManager.class);
+        if (notifications == null) return;
         NotificationChannel channel = new NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_HIGH);
         // Telecom provides the ringtone; duplicate channel audio would ring twice.
         channel.setSound(null, null);
         channel.setDescription(CHANNEL_DESCRIPTION);
-        getSystemService(NotificationManager.class).createNotificationChannel(channel);
+        notifications.createNotificationChannel(channel);
         // Dialing and connected calls are already on the call screen: their ongoing notice stays in
         // the shade and status bar without a heads-up banner over the screen the owner is using.
         NotificationChannel ongoing = new NotificationChannel(ONGOING_CHANNEL_ID, ONGOING_CHANNEL_NAME, NotificationManager.IMPORTANCE_LOW);
         ongoing.setSound(null, null);
         ongoing.enableVibration(false);
         ongoing.setDescription(ONGOING_CHANNEL_DESCRIPTION);
-        getSystemService(NotificationManager.class).createNotificationChannel(ongoing);
+        notifications.createNotificationChannel(ongoing);
     }
 
-    public static List<String> callIds() { return new ArrayList<>(ACTIVE_CALLS.keySet()); }
+    public static List<String> callIds() {
+        synchronized (ACTIVE_CALLS) {
+            return new ArrayList<>(ACTIVE_CALLS.keySet());
+        }
+    }
     public static Call call(String id) { return ACTIVE_CALLS.get(id); }
     public static void observe(Runnable listener) { LISTENERS.add(listener); }
     public static void unobserve(Runnable listener) { LISTENERS.remove(listener); }
     private static void publish() {
-        for (Runnable listener : new ArrayList<>(LISTENERS)) listener.run();
+        List<Runnable> snapshot;
+        synchronized (LISTENERS) {
+            snapshot = new ArrayList<>(LISTENERS);
+        }
+        for (Runnable listener : snapshot) listener.run();
     }
     public static CallAudioState audioState() { return activeService == null ? null : activeService.getCallAudioState(); }
     public static void mute(boolean muted) { if (activeService != null) activeService.setMuted(muted); }
@@ -180,7 +190,7 @@ public final class AlphaInCallService extends InCallService {
             if (callId != null) {
                 posted.remove(callId);
                 launched.remove(callId);
-                notifications.cancel(callId, 1);
+                if (notifications != null) notifications.cancel(callId, 1);
             }
             publish();
             return;
@@ -194,7 +204,7 @@ public final class AlphaInCallService extends InCallService {
         // notice rate, and Android then drops updates, which can leave a stale notice (a ringing
         // notice on an answered call). The notice is posted only when what it says or offers changes.
         String content = AlphaCallPresentation.noticeContent(label, state);
-        if (!content.equals(posted.put(callId, content))) {
+        if (notifications != null && !content.equals(posted.put(callId, content))) {
             // Only a ringing call alerts. Outgoing and connected calls use the quiet channel.
             Notification.Builder builder = new Notification.Builder(this, ringing ? CHANNEL_ID : ONGOING_CHANNEL_ID)
                 .setSmallIcon(NOTIFICATION_ICON)
@@ -228,8 +238,8 @@ public final class AlphaInCallService extends InCallService {
         boolean launchNow = "added".equals(event) && !waitingForIncomingAlert;
         // Keep the incoming screen available if Android cannot present a banner or full-screen alert.
         if (ringing) {
-            NotificationChannel channel = notifications.getNotificationChannel(CHANNEL_ID);
-            launchNow = !notifications.areNotificationsEnabled() || channel == null
+            NotificationChannel channel = notifications == null ? null : notifications.getNotificationChannel(CHANNEL_ID);
+            launchNow = notifications == null || !notifications.areNotificationsEnabled() || channel == null
                 || channel.getImportance() < NotificationManager.IMPORTANCE_HIGH;
         }
         if (launchNow && launched.add(callId)) showCall(callId);
@@ -298,7 +308,7 @@ public final class AlphaInCallService extends InCallService {
     @Override public void onDestroy() {
         NotificationManager notifications = getSystemService(NotificationManager.class);
         for (Map.Entry<Call, Call.Callback> entry : callbacks.entrySet()) entry.getKey().unregisterCallback(entry.getValue());
-        for (String id : callIds()) notifications.cancel(id, 1);
+        if (notifications != null) for (String id : callIds()) notifications.cancel(id, 1);
         callbacks.clear();
         names.clear();
         posted.clear();

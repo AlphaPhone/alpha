@@ -87,9 +87,10 @@ module clips {
       const chunks: Blob[] = []
       let bytes = 0, frame = 0, stopped = false, finished = false
       let reached = edit.start
+      const usesVideoFrame = typeof video.requestVideoFrameCallback === "function"
       const cleanup = () => {
-        if (typeof video.cancelVideoFrameCallback === "function") video.cancelVideoFrameCallback(frame)
-        else cancelAnimationFrame(frame)
+        if (usesVideoFrame && typeof video.cancelVideoFrameCallback === "function") video.cancelVideoFrameCallback(frame)
+        video.removeEventListener("timeupdate", paint)
         video.pause()
         video.onended = null
         video.onerror = null
@@ -98,11 +99,16 @@ module clips {
         recorder.onerror = null
         signal.removeEventListener("abort", aborted)
       }
+      const stopRecorder = () => {
+        if (recorder.state !== "inactive") {
+          try { recorder.stop() } catch { return }
+        }
+      }
       const finish = (error?: unknown) => {
         if (finished) return
         finished = true
         cleanup()
-        if (recorder.state !== "inactive") recorder.stop()
+        stopRecorder()
         const mime = (recorder.mimeType || chunks[0]?.type || "").split(";")[0] ?? ""
         if (error !== undefined) reject(error)
         else if (bytes === 0 || (mime !== "video/mp4" && mime !== "video/webm")) reject(new Error("The edited video could not be encoded."))
@@ -114,10 +120,10 @@ module clips {
         stopped = true
         reached = video.currentTime
         video.pause()
-        if (recorder.state !== "inactive") recorder.stop()
+        stopRecorder()
       }
       const next = () => {
-        frame = typeof video.requestVideoFrameCallback === "function" ? video.requestVideoFrameCallback(paint) : requestAnimationFrame(paint)
+        if (usesVideoFrame) frame = video.requestVideoFrameCallback(paint)
       }
       const paint = () => {
         if (stopped || finished) return
@@ -140,6 +146,7 @@ module clips {
       signal.addEventListener("abort", aborted, { once: true })
       try {
         recorder.start(200)
+        if (!usesVideoFrame) video.addEventListener("timeupdate", paint)
         next()
         void video.play().catch(finish)
       } catch (error) { finish(error) }

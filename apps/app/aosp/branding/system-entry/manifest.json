@@ -3,17 +3,17 @@
   "project": "frameworks/base",
   "revision": "94b4c163b7dfe5ce3607f7bb8456f9573f7de57d",
   "patch": "alpha-native-system-entry.patch",
-  "patchSha256": "58e75d2ad0e02198bc46e49d3100f8bb5a422c4e8e18781e3d2f9dd28b53d8a0",
+  "patchSha256": "32ac7aa7a3522940c85687412edd330b8b104cc60a5135890b895c87d465ab0a",
   "files": [
     {
       "path": "packages/SystemUI/compose/features/src/com/android/systemui/shade/ui/composable/ShadeHeader.kt",
       "beforeSha256": "4fecfe8289d38854835041984e07dbab7991051067de0e0b0782df0592d41feb",
-      "afterSha256": "64192b2b3e9e4327273f98922eedddb6399110c0a44b37dea116c56e0b58ccfe"
+      "afterSha256": "83c251ab7ce2143163b7e2a370f228cb001040ccb6f6a6db1b81d416167cdb3c"
     },
     {
       "path": "packages/SystemUI/res/drawable/ic_alpha_system_mark.xml",
       "beforeSha256": null,
-      "afterSha256": "413370aeb9e855612c60d07f4d699dc8fcf474bef78792cd0de66e169b2e68c4"
+      "afterSha256": "58705ecbf40ff70d0376e2d520ec323123354e51f474c1dd27b258e839c5b9c2"
     },
     {
       "path": "packages/SystemUI/res/layout/combined_qs_header.xml",
@@ -43,7 +43,7 @@
     {
       "path": "packages/SystemUI/src/com/android/systemui/keyguard/data/quickaffordance/AlphaAssistantQuickAffordanceConfig.kt",
       "beforeSha256": null,
-      "afterSha256": "983cfe131720fc40df1aefcf0aa86cccad4ed28349cc2e89d91bb31bc559106a"
+      "afterSha256": "014fcf15729161cc5fc77580eea41bf80ce949f33b33583187df7886800fdd15"
     },
     {
       "path": "packages/SystemUI/src/com/android/systemui/keyguard/data/quickaffordance/AlphaSystemEntryPolicy.java",
@@ -63,11 +63,11 @@
     {
       "path": "packages/SystemUI/src/com/android/systemui/shade/AlphaShadeWordmarkView.java",
       "beforeSha256": null,
-      "afterSha256": "6f913f7b37c0897bcef2cb73fed0fc5ed19630efe918a318877e31677c63b693"
+      "afterSha256": "0c4ae55b6a89365c1957cb3b231049befe02f8718586b3eb670f18169aa47b1f"
     }
   ],
   "identity": {
-    "source": "apps/app/public/logo-mark.svg"
+    "source": "packages/design-system/brand/mark.svg"
   },
   "productOverlay": {
     "path": "product-overlay/values/alpha-system-entry.xml",

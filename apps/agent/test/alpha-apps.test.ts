@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { AlphaAppsStore, alphaAppsPluginName, createAlphaAppsPlugin } from "../src/plugins/index.ts";
-import { advanceDueDate } from "../src/plugins/store.ts";
+import { advanceDueDate, civilToEpochMs } from "../src/plugins/store.ts";
 import type { AgentRoute, AgentRuntimeLike, ClockSnapshot, ReminderItemRecord, RemindersSnapshot } from "../src/plugins/types.ts";
 
 const emptyMessage = (text: string, metadata?: Record<string, unknown>) =>
@@ -369,5 +369,75 @@ describe("Alpha product plugin: Reminders actions, provider, recurrence, and rou
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("converges DST offsets, re-mirrors recurring reminders, prevents deleted reminder resurrection, validates HTTP payloads, and rejects unknown ops and overflow", async () => {
+    const springAlarm = civilToEpochMs("2026-03-08", 7 * 60, "America/Los_Angeles");
+    expect(springAlarm).toBe(Date.UTC(2026, 2, 8, 14, 0, 0));
+    const fallAlarm = civilToEpochMs("2026-11-01", 7 * 60, "America/Los_Angeles");
+    expect(fallAlarm).toBe(Date.UTC(2026, 10, 1, 15, 0, 0));
+
+    const store = new AlphaAppsStore({ now: () => Date.UTC(2026, 10, 24, 15, 0, 0) });
+    const appliedVerbs: { taskId: string; request: unknown }[] = [];
+    const tasks: {
+      taskId: string; kind: string; ownerVisible: boolean; promptInstructions: string;
+      status: string; trigger: { kind: string; atIso?: string }; metadata: Record<string, unknown>;
+    }[] = [];
+    const runtime = {
+      getService: (name: string) => name === "scheduled-tasks" ? {
+        list: () => Promise.resolve([...tasks]),
+        create: (task: { kind: string; ownerVisible: boolean; promptInstructions: string; trigger: { kind: string; atIso?: string }; metadata: Record<string, unknown> }) => {
+          const created = { taskId: `task-${tasks.length + 1}`, ...task, status: "Scheduled" };
+          tasks.push(created);
+          return Promise.resolve({ kind: "created", task: created });
+        },
+        applyVerb: (taskId: string, request: unknown) => {
+          appliedVerbs.push({ taskId, request });
+          return Promise.resolve({ kind: "applied" });
+        },
+      } : null,
+    } as unknown as AgentRuntimeLike;
+
+    const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime });
+    const routes = plugin.routes!;
+    const alarmAction = plugin.actions!.find((a) => a.name === "CLOCK_ALARM")!;
+    const timerAction = plugin.actions!.find((a) => a.name === "CLOCK_TIMER")!;
+    const worldAction = plugin.actions!.find((a) => a.name === "CLOCK_WORLD")!;
+    const remAction = plugin.actions!.find((a) => a.name === "REMINDERS_MANAGE")!;
+
+    expect((await alarmAction.handler(runtime, emptyMessage(""), emptyState, { parameters: { action: "bogus" } }))?.success).toBe(false);
+    expect((await timerAction.handler(runtime, emptyMessage(""), emptyState, { parameters: { action: "bogus" } }))?.success).toBe(false);
+    expect((await worldAction.handler(runtime, emptyMessage(""), emptyState, { parameters: { action: "bogus" } }))?.success).toBe(false);
+    expect((await remAction.handler(runtime, emptyMessage(""), emptyState, { parameters: { op: "bogus" } }))?.success).toBe(false);
+
+    const badClock = await callRoute(routes, "PUT", "/api/alpha/clock", { body: { alarms: [{ id: "bad", hour: "nope" }] } });
+    expect(badClock.status).toBe(400);
+    const badRestore = await callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/restore", { params: { id: "r1" }, body: { item: { id: "other", title: "X" } } });
+    expect(badRestore.status).toBe(400);
+
+    const created = await remAction.handler(runtime, emptyMessage(""), emptyState, {
+      parameters: { op: "create", title: "Daily vitamins", dueDate: "2026-11-24", dueMinute: 540, recurrence: "daily" },
+    });
+    const createdItem = (created?.data as { item: ReminderItemRecord }).item;
+    expect(createdItem.agentTaskId).toBe("task-1");
+
+    const completed = await remAction.handler(runtime, emptyMessage(""), emptyState, { parameters: { op: "complete", id: createdItem.id } });
+    const nextItem = (completed?.data as { nextItem: ReminderItemRecord | null }).nextItem;
+    expect(nextItem?.dueDate).toBe("2026-11-25");
+    expect(nextItem?.agentTaskId).toBe("task-2");
+    expect(appliedVerbs.some((v) => v.taskId === "task-1")).toBe(true);
+
+    if (tasks[0] !== undefined) tasks[0].status = "Completed";
+    await callRoute(routes, "GET", "/api/alpha/reminders");
+    expect(store.getReminders().items.find((i) => i.id === createdItem.id)?.completed).toBe(false);
+
+    await callRoute(routes, "DELETE", "/api/alpha/reminders/items/{id}", { params: { id: createdItem.id } });
+    expect(appliedVerbs.some((v) => v.taskId === "task-2")).toBe(true);
+    await callRoute(routes, "GET", "/api/alpha/reminders");
+    expect(store.getReminders().items).toHaveLength(0);
+
+    for (let i = 0; i < 16; i += 1) store.createTimer({ durationMs: 60_000, label: `T${i}` });
+    const overflow = await callRoute(routes, "POST", "/api/alpha/clock/timers", { body: { durationMs: 60_000, label: "Overflow" } });
+    expect(overflow.status).toBe(409);
   });
 });

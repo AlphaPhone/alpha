@@ -72,7 +72,17 @@ public final class AlphaNoteRecordingService extends Service {
   JSObject status=AlphaNoteRecorder.get(context).status();String state=status.optString("state");
   if(!"recording".equals(state)&&!"paused".equals(state))return;
   if(!java.util.Objects.equals(foregroundRecording,status.getString("recordingId")))return;
-  context.getSystemService(NotificationManager.class).notify(NOTIFICATION_ID,notification(context,status));
+  NotificationManager manager=context.getSystemService(NotificationManager.class);
+  if(manager!=null)manager.notify(NOTIFICATION_ID,notification(context,status));
+ }
+ private static boolean isDeviceLocked(Context context){
+  android.app.KeyguardManager lock=context.getSystemService(android.app.KeyguardManager.class);
+  return lock==null||lock.isDeviceLocked();
+ }
+ private static boolean canResumeMicrophone(Context context){
+  return !isDeviceLocked(context)
+   &&!AlphaNotesPlugin.inCall(context)
+   &&context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)==android.content.pm.PackageManager.PERMISSION_GRANTED;
  }
  private static Intent intent(Context context,String action,String recordingId){
   String identity=recordingId==null?"":recordingId;
@@ -89,9 +99,12 @@ public final class AlphaNoteRecordingService extends Service {
   String recording=intent==null?"":intent.getStringExtra(EXTRA_RECORDING);
   AlphaNoteRecorder recorder=AlphaNoteRecorder.get(this);
   if(ACTION_PAUSE.equals(action)||ACTION_RESUME.equals(action)){
-
-   if(recording!=null&&recorder.owns(recording))try{if(ACTION_PAUSE.equals(action))recorder.pause(recording);else if(foreground&&recording.equals(foregroundRecording)&&"paused".equals(recorder.status().optString("state")))recorder.resume(recording);}catch(RuntimeException|java.io.IOException changed){}
+   if(recording!=null&&recorder.owns(recording))try{
+    if(ACTION_PAUSE.equals(action))recorder.pause(recording);
+    else if(foreground&&recording.equals(foregroundRecording)&&"paused".equals(recorder.status().optString("state"))&&canResumeMicrophone(this))recorder.resume(recording);
+   }catch(RuntimeException|java.io.IOException changed){}
    refresh(this);
+   if(!foreground)stopSelf(startId);
    return START_NOT_STICKY;
   }
   if(ACTION_FINISH.equals(action)){
@@ -138,16 +151,24 @@ public final class AlphaNoteRecordingService extends Service {
   * with Resume; Stop in both. The words are in res/values/alpha-note-recording.xml. */
  static Notification notification(Context context,JSObject status){
   NotificationManager manager=context.getSystemService(NotificationManager.class);
-
-  NotificationChannel channel=new NotificationChannel(CHANNEL,context.getString(R.string.note_recording_channel),NotificationManager.IMPORTANCE_LOW);
-  channel.setDescription(context.getString(R.string.note_recording_channel_description));
-  channel.setShowBadge(false);
-  manager.createNotificationChannel(channel);
+  if(manager!=null){
+   NotificationChannel channel=new NotificationChannel(CHANNEL,context.getString(R.string.note_recording_channel),NotificationManager.IMPORTANCE_LOW);
+   channel.setDescription(context.getString(R.string.note_recording_channel_description));
+   channel.setShowBadge(false);
+   manager.createNotificationChannel(channel);
+  }
   String recording=status.optString("recordingId","");boolean paused="paused".equals(status.optString("state"));
   Intent open=new Intent(context,MainActivity.class).setAction(ACTION_SHOW_NOTES).setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
   PendingIntent content=PendingIntent.getActivity(context,0,open,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
-  PendingIntent toggle=PendingIntent.getService(context,paused?2:1,intent(context,paused?ACTION_RESUME:ACTION_PAUSE,recording),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
-  PendingIntent finish=PendingIntent.getService(context,3,intent(context,ACTION_FINISH,recording),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
+  PendingIntent toggle=PendingIntent.getForegroundService(context,paused?2:1,intent(context,paused?ACTION_RESUME:ACTION_PAUSE,recording),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
+  PendingIntent finish=PendingIntent.getForegroundService(context,3,intent(context,ACTION_FINISH,recording),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
+  Notification publicVersion=new Notification.Builder(context,CHANNEL)
+   .setSmallIcon(R.drawable.ic_note_recording)
+   .setContentTitle(context.getString(paused?R.string.note_recording_title_paused:R.string.note_recording_title_recording))
+   .setOngoing(true)
+   .setOnlyAlertOnce(true)
+   .setCategory(Notification.CATEGORY_SERVICE)
+   .build();
   Notification.Builder builder=new Notification.Builder(context,CHANNEL)
    .setSmallIcon(R.drawable.ic_note_recording)
    .setContentTitle(context.getString(paused?R.string.note_recording_title_paused:R.string.note_recording_title_recording))
@@ -156,8 +177,8 @@ public final class AlphaNoteRecordingService extends Service {
    .setOngoing(true)
    .setOnlyAlertOnce(true)
    .setCategory(Notification.CATEGORY_SERVICE)
-
-   .setVisibility(Notification.VISIBILITY_PUBLIC)
+   .setVisibility(Notification.VISIBILITY_PRIVATE)
+   .setPublicVersion(publicVersion)
    .addAction(new Notification.Action.Builder(null,context.getString(paused?R.string.note_recording_resume:R.string.note_recording_pause),toggle).build())
    .addAction(new Notification.Action.Builder(null,context.getString(R.string.note_recording_stop),finish).build());
   if(paused)builder.setShowWhen(false).setUsesChronometer(false);

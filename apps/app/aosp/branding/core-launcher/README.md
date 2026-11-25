@@ -4,9 +4,9 @@ This source packet belongs to Alpha's OS image, not per-device customization. It
 
 - Core-launcher classification hides Alpha from the routine foreground-app manager only while the enabled preinstalled Alpha owns Home. Other apps, a sideloaded impostor, another selected launcher, and unknown identity keep normal controls. Voice Stop/Mute, App Info, ANR handling and renderer recovery are unchanged.
 - Native Quick Settings defaults omit unavailable Wallet, Cast, mobile-data and device-control shortcuts. OS resources define both normal and split layouts. Version 2 updates known stock layouts once. Version 3 preserves an owner’s reviewed stock or custom layout. The repository records the version after saving the selected layout, then keeps subsequent owner edits.
-- Provisioning and the post-update boot check grant the declared shared-storage app-op only to installed enabled system Alpha for the primary user, outside device-owner management and only while the app-op is unconfigured. An existing allow or deny remains untouched. App-private storage permissions are not granted.
+- Provisioning and the post-update boot check apply a one-time shared-storage app-op default only to installed enabled system (or updated-system) Alpha for the primary user, outside device-owner or organization-owned managed-profile management and only while the app-op is unconfigured and the one-time marker (`alpha_shared_storage_default_granted`) has not yet been recorded. An existing allow or deny remains untouched and a subsequent `appops reset` will not re-grant. App-private storage permissions are not granted.
 
-The normal `scripts/stage-alpha-os-branding.py` always includes this packet in fresh-image and OS-update source staging. It verifies the exact baseline and patch outputs in scratch space, then uses the existing all-file admission and backup transaction. There is no phone-side customization step.
+Note: `apps/app/scripts/aosp.ts` does not yet wire this branding packet automatically; apply it via `apply.py` on the reviewed `frameworks/base` checkout. There is no phone-side customization step.
 
 Run `python3 prepare.py --fetch` to fetch missing public hash-pinned baseline inputs and reproduce the packet. An existing mismatched baseline fails without replacement. For separate read-only admission use the existing tool:
 

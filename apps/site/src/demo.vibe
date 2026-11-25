@@ -53,8 +53,11 @@ export const demo = Layer.provide(Layer.effect(Demo.Machine, effect {
   // spec/site/index.md, "A beat moves on once its time has come, Home starting over and every other scene resting on its last beat"
   const due = Stream.switchMap(inner.changes, (state) => ticking(state)
     ? Stream.fromEffect(effect {
-      const wait = state.due - (try Clock.currentTimeMillis)
-      if (wait > 0) try sleep(wait)
+      for (;;) {
+        const wait = state.due - (try Clock.currentTimeMillis)
+        if (wait <= 0) break
+        try sleep(wait)
+      }
     })
     : Stream.empty)
   try fork.scoped Stream.runForEach(due, () => told({ type: "tick", now: untimed }))

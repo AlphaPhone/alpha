@@ -1,2 +1,4 @@
 /generated/
 .cache/
+__pycache__/
+*.pyc

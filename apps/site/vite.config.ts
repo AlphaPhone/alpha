@@ -40,9 +40,15 @@ function prerender(): Plugin {
       const built = (name: string) => import(pathToFileURL(join(server, `${name}.js`)).href);
       const { Site: drawn } = (await built("Site")) as { Site: typeof Site };
       const { demo, browserPage } = (await built("demo")) as { demo: typeof Demo; browserPage: typeof Page };
-      const page = renderToString(createElement(drawn, { runtime: ManagedRuntime.make(Layer.provide(demo, browserPage)) }));
+      const runtime = ManagedRuntime.make(Layer.provide(demo, browserPage));
+      let page = "";
+      try {
+        page = renderToString(createElement(drawn, { runtime }));
+      } finally {
+        await runtime.dispose();
+      }
       const index = join(out, "index.html");
-      await writeFile(index, (await readFile(index, "utf8")).replace('<div id="root"></div>', `<div id="root">${page}</div>`));
+      await writeFile(index, (await readFile(index, "utf8")).replace('<div id="root"></div>', () => `<div id="root">${page}</div>`));
       await Promise.all(Object.entries(stable).map(([name, source]) => copyFile(resolve(root, source), join(out, name))));
     },
   };

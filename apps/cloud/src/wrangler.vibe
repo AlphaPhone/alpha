@@ -30,7 +30,11 @@ export function resourceId(value: string): ResourceId {
 }
 
 const hostOf = (origin: string) => URL.parse(origin)?.host ?? origin
-const inZone = (host: string, zone: string) => host === zone || host.endsWith("." + zone)
+const inZone = (host: string, zone: string) => {
+  const h = host.toLowerCase()
+  const z = zone.toLowerCase()
+  return h === z || h.endsWith("." + z)
+}
 
 /** The profile text the API Worker reads from its assets: byte for byte the text CLOUD_PROFILE_SHA256 names. */
 function profileText(profile: CloudProfile): string {

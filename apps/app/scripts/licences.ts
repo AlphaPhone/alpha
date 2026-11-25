@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // spec/app/image/licences.md, "Story: Ship what Alpha is built from, with its licences"
-import { createHash, randomUUID } from "node:crypto"
+import { createHash } from "node:crypto"
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs"
-import { dirname, join, relative, resolve } from "node:path"
+import { dirname, join, relative, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import { licenceFlags as flagsOf, releaseBlockedByLicences, type Family, type Flag, type FontCheck } from "../gen/app__image__licences.ts"
 
@@ -46,7 +46,7 @@ export interface Notice {
   readonly obligations?: readonly { readonly flag: string; readonly note: string }[]
 }
 
-interface Draft { name: string; version: string; license: string; source: string; text: string; textSource?: string; flags: string[]; reason?: string }
+interface Draft { name: string; version: string; license: string; source: string; text: string; textSource?: string; flags: string[] }
 
 interface LicenseObject { readonly type?: string }
 interface PackageManifest {
@@ -125,6 +125,15 @@ function licenceText(dir: string): string {
   return readdirSync(dir).filter((file) => LICENCE_FILE.test(file) && statSync(join(dir, file)).isFile()).sort().map((file) => read(join(dir, file)).trim()).join("\n\n")
 }
 
+function canonicalExpression(license: string): string {
+  if (license === "UNKNOWN") return ""
+  const ids = alternatives(license)[0] ?? []
+  if (ids.length === 0) return ""
+  const texts = ids.map((id) => canonical(id))
+  if (texts.some((item) => item === "")) return ""
+  return texts.join("\n\n---\n\n")
+}
+
 function packageDraft(dir: string, manifest: PackageManifest): Draft {
   const stated = manifestLicence(manifest)
   const license = stated === "" || /^(SEE LICEN[CS]E IN\b|UNLICENSED$)/i.test(stated) ? "UNKNOWN" : stated
@@ -132,7 +141,7 @@ function packageDraft(dir: string, manifest: PackageManifest): Draft {
   const source = typeof manifest.repository === "string" ? manifest.repository : (manifest.repository?.url ?? `https://www.npmjs.com/package/${manifest.name}`)
   const own = licenceText(dir)
   if (own !== "") return { name: manifest.name, version: manifest.version, license, source, text: own, flags }
-  const text = license === "UNKNOWN" ? "" : canonical(alternatives(license)[0]?.join(" AND ") ?? "")
+  const text = canonicalExpression(license)
   return {
     name: manifest.name, version: manifest.version, license, source, flags: [...flags, "licence-text-missing-from-package"],
     textSource: text === "" ? undefined : "spdx-canonical",
@@ -149,28 +158,33 @@ function installed(from: string, name: string): string | undefined {
   }
 }
 
-/** Every npm package the app ships: the production dependencies of the app and of its workspace packages, each once, with eliza's packages as one entry. */
+/** Every npm package the app ships: the production dependencies of the app, its workspace packages, `@elizaos/*` packages and `apps/agent`, each once, with eliza's packages as one entry. */
 function npmDrafts(): Draft[] {
   const drafts = new Map<string, Draft>()
   const visited = new Set<string>()
   const walk = (dir: string) => {
-    if (visited.has(dir)) return
-    visited.add(dir)
-    const manifest = json<PackageManifest>(join(dir, "package.json"))
-    const inWorkspace = !dir.includes(`${"/"}node_modules${"/"}`) && dir !== root
-    if (!inWorkspace && !manifest.name.startsWith("@elizaos/")) drafts.set(`${manifest.name}@${manifest.version}`, packageDraft(dir, manifest))
-    if (manifest.name.startsWith("@elizaos/") && dir !== app) return
+    const canonicalDir = realpathSync(dir)
+    if (visited.has(canonicalDir)) return
+    visited.add(canonicalDir)
+    const manifest = json<PackageManifest>(join(canonicalDir, "package.json"))
+    const inWorkspace = !canonicalDir.split(sep).includes("node_modules") && canonicalDir !== root
+    const isEliza = manifest.name.startsWith("@elizaos/")
+    const isRepo = manifest.name.startsWith("@repo/")
+    if (!inWorkspace && !isEliza && !isRepo) drafts.set(`${manifest.name}@${manifest.version}`, packageDraft(canonicalDir, manifest))
     const names = [...Object.keys(manifest.dependencies ?? {}), ...Object.keys(manifest.optionalDependencies ?? {})]
     for (const name of names) {
-      const found = installed(dir, name)
+      const found = installed(canonicalDir, name) ?? installed(app, name)
       if (found === undefined) {
         if (Object.hasOwn(manifest.optionalDependencies ?? {}, name)) continue
+        if (isEliza) continue
         throw new Error(`${name}, a dependency of ${manifest.name}, is not installed: run pnpm install`)
       }
-      if (!name.startsWith("@elizaos/")) walk(found)
+      walk(found)
     }
   }
   walk(app)
+  const agentDir = join(root, "apps/agent")
+  if (existsSync(join(agentDir, "package.json"))) walk(agentDir)
   return [...drafts.values()]
 }
 
@@ -191,9 +205,9 @@ interface OcrSources {
 /** The libraries linked into OCR's shipped WebAssembly and the bundled OCR language data. */
 function ocrDrafts(): Draft[] {
   const directory = join(app, "licenses/tesseract-core")
-  const sources = json(join(directory, "sources.json")) as OcrSources
+  const sources = json<OcrSources>(join(directory, "sources.json"))
   const engine = installed(app, sources.package)
-  if (engine === undefined || (json(join(engine, "package.json")) as { version?: string }).version !== sources.version) throw new Error("The OCR engine does not match the recorded licences")
+  if (engine === undefined || json<{ version?: string }>(join(engine, "package.json")).version !== sources.version) throw new Error("The OCR engine does not match the recorded licences")
   for (const [file, digest] of Object.entries(sources.cores)) {
     if (sha256(join(engine, file)) !== digest) throw new Error(`The OCR core ${file} differs from its recorded binary`)
   }
@@ -214,7 +228,7 @@ function ocrDrafts(): Draft[] {
   if (english === undefined) throw new Error("The OCR language data is unavailable")
   drafts.push({
     name: "Tesseract English trained data (tessdata 4.0.0_best_int)",
-    version: (json(join(english, "package.json")) as { version?: string }).version ?? "",
+    version: json<{ version?: string }>(join(english, "package.json")).version ?? "",
     license: "Apache-2.0", source: "https://github.com/tesseract-ocr/tessdata_best", flags: flagged("Apache-2.0"),
     text: read(join(app, "public/ocr/tessdata-LICENSE.txt")).trim(),
   })
@@ -291,19 +305,22 @@ function obligation(flag: string, entry: Draft): string {
 }
 
 function finish(draft: Draft): Notice {
-  const { reason: _reason, ...entry } = draft
   const flags = [...new Set(draft.flags)]
-  return flags.length ? { ...entry, flags, obligations: flags.map((flag) => ({ flag, note: obligation(flag, draft) })) } : { ...entry, flags }
+  return flags.length ? { ...draft, flags, obligations: flags.map((flag) => ({ flag, note: obligation(flag, draft) })) } : { ...draft, flags }
 }
 
 export interface Inventory { readonly notices: readonly Notice[]; readonly fontCheck: "FontResolved" | "FontUnresolved" | "FontCheckNotRun"; readonly openSourceFlags: readonly Flag[] }
+
+function isProprietaryDraft(draft: Draft): boolean {
+  return draft.license.startsWith("LicenseRef-") || draft.flags.some((flag) => flag.startsWith("proprietary-"))
+}
 
 /** What Alpha ships, each with its licence: npm packages, eliza, the Android runtime classpath and the fonts. @throws {Error} */
 export function inventory(): Inventory {
   const fonts = fontDrafts()
   const drafts = [...npmDrafts(), elizaDraft(), ...androidDrafts(), ...ocrDrafts(), ...fonts.drafts]
   const notices = drafts.map(finish).sort((a, b) => a.name.localeCompare(b.name, "en") || a.version.localeCompare(b.version, "en"))
-  const openSourceFlags = [...new Set(drafts.flatMap((draft) => flagsOf(alternatives(draft.license).map((ids) => ids.map(familyOf)))))]
+  const openSourceFlags = [...new Set(drafts.filter((draft) => !isProprietaryDraft(draft)).flatMap((draft) => flagsOf(alternatives(draft.license).map((ids) => ids.map(familyOf)))))]
   return { notices, fontCheck: fonts.check, openSourceFlags }
 }
 
@@ -322,19 +339,60 @@ export function renderText(notices: readonly Notice[]): string {
   return `${header}\n\n${blocks.join("\n\n")}\n`
 }
 
+const MAVEN_COORDINATE = /^([^:\s]+):([^:\s]+):([^:\s]+)$/
+
+function deterministicUuid(seed: string): string {
+  const hash = createHash("sha256").update(seed).digest()
+  hash[6] = ((hash[6] ?? 0) & 0x0f) | 0x50
+  hash[8] = ((hash[8] ?? 0) & 0x3f) | 0x80
+  const hex = hash.subarray(0, 16).toString("hex")
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`
+}
+
 /** A CycloneDX 1.5 software bill of materials of the same inventory. */
-export function renderSbom(notices: readonly Notice[], serial: string): string {
+export function renderSbom(notices: readonly Notice[], serial?: string): string {
   const version = json<PackageManifest>(join(app, "package.json")).version
-  const components = notices.map((entry) => {
+  const components = notices.flatMap((entry) => {
     const parsed = alternatives(entry.license)
-    return {
-      type: "library", name: entry.name, version: entry.version.split("\n")[0],
-      licenses: parsed.length === 1 && parsed[0]?.length === 1 ? [{ license: { id: entry.license } }] : [{ expression: entry.license }],
-      ...(entry.source.startsWith("http") ? { externalReferences: [{ type: "distribution", url: entry.source }] } : {}),
-      properties: entry.flags.map((flag) => ({ name: "alpha:licence-flag", value: flag })),
+    const licenses = parsed.length === 1 && parsed[0]?.length === 1 ? [{ license: { id: entry.license } }] : [{ expression: entry.license }]
+    const externalReferences = entry.source.startsWith("http") ? { externalReferences: [{ type: "distribution", url: entry.source }] } : {}
+    const properties = entry.flags.map((flag) => ({ name: "alpha:licence-flag", value: flag }))
+    const lines = entry.version.split("\n").map((line) => line.trim()).filter(Boolean)
+    if (lines.length > 1 && lines.every((line) => MAVEN_COORDINATE.test(line))) {
+      const subcomponents = lines.map((line) => {
+        const match = MAVEN_COORDINATE.exec(line)
+        const group = match?.[1] ?? ""
+        const artifact = match?.[2] ?? ""
+        const coordVersion = match?.[3] ?? line
+        return {
+          type: "library",
+          name: `${group}:${artifact}`,
+          version: coordVersion,
+          purl: `pkg:maven/${group}/${artifact}@${coordVersion}`,
+          licenses,
+        }
+      })
+      return [{
+        type: "library",
+        name: entry.name,
+        version: lines[0] ?? "",
+        licenses,
+        ...externalReferences,
+        properties,
+        components: subcomponents,
+      }]
     }
+    return [{
+      type: "library",
+      name: entry.name,
+      version: lines[0] ?? "",
+      licenses,
+      ...externalReferences,
+      properties,
+    }]
   })
-  return `${JSON.stringify({ bomFormat: "CycloneDX", specVersion: "1.5", serialNumber: `urn:uuid:${serial}`, version: 1,
+  const serialId = serial ?? deterministicUuid(`${version}\n${renderJson(notices)}`)
+  return `${JSON.stringify({ bomFormat: "CycloneDX", specVersion: "1.5", serialNumber: `urn:uuid:${serialId}`, version: 1,
     metadata: { component: { type: "application", name: "Alpha", version } }, components }, null, 2)}\n`
 }
 
@@ -344,33 +402,36 @@ export function currentText(file: string): string | undefined {
   try { return read(file) } catch { return undefined }
 }
 
-export function exitWith(code: number): void {
-  process.exitCode = code
-}
-
 const font = (check: Inventory["fontCheck"]): FontCheck => check
 
 /** Write the notices, or with `--check` say whether the committed ones are current; with `--sbom FILE`, write the bill of materials too. @throws {Error} */
 export function licences(argv: readonly string[]) {
   const check = argv.includes("--check")
   const sbomAt = argv.indexOf("--sbom")
+  const out = sbomAt >= 0 ? argv[sbomAt + 1] : undefined
+  if (sbomAt >= 0 && (out === undefined || out.startsWith("--"))) throw new Error("--sbom needs a file")
   const found = inventory()
   const flagLines = found.notices.flatMap((entry) => entry.flags.map((flag) => `LICENCE FLAG ${flag}: ${entry.name}@${entry.version.split("\n")[0]} (${entry.license})`))
-  if (releaseBlockedByLicences([...found.openSourceFlags], font(found.fontCheck)))
-    throw new Error(`The font licence check is ${found.fontCheck}: a release cannot ship until every bundled font's check runs`)
+  if (releaseBlockedByLicences([...found.openSourceFlags], font(found.fontCheck))) {
+    const osBlocked = releaseBlockedByLicences([...found.openSourceFlags], "FontResolved")
+    const fontBlocked = releaseBlockedByLicences([], font(found.fontCheck))
+    const reasons: string[] = []
+    if (osBlocked) reasons.push(`open-source licence flags block release: ${found.openSourceFlags.join(", ")}`)
+    if (fontBlocked) reasons.push(`the font licence check is ${found.fontCheck}: a release cannot ship until every bundled font's check runs`)
+    throw new Error(reasons.join("; ") || "Release blocked by licence policy")
+  }
   const written: readonly (readonly [string, string])[] = [[outputs.json, renderJson(found.notices)], [outputs.text, renderText(found.notices)]]
   if (check) {
     const stale = written.filter(([file, content]) => currentText(file) !== content).map(([file]) => relative(app, file))
     if (stale.length) throw new Error(`The third-party notices are stale: ${stale.join(", ")}. Run pnpm licences`)
+    if (out !== undefined) writeFileSync(out, renderSbom(found.notices), { flag: "wx" })
     return { current: true, entries: found.notices.length, fontCheck: found.fontCheck, flagLines }
   }
   for (const [file, content] of written) {
     mkdirSync(dirname(file), { recursive: true })
     writeFileSync(file, content)
   }
-  const out = sbomAt >= 0 ? argv[sbomAt + 1] : undefined
-  if (sbomAt >= 0 && (out === undefined || out.startsWith("--"))) throw new Error("--sbom needs a file")
-  if (out !== undefined) writeFileSync(out, renderSbom(found.notices, randomUUID()), { flag: "wx" })
+  if (out !== undefined) writeFileSync(out, renderSbom(found.notices), { flag: "wx" })
   return { entries: found.notices.length, flagged: found.notices.filter((entry) => entry.flags.length).length, fontCheck: found.fontCheck, flagLines }
 }
 

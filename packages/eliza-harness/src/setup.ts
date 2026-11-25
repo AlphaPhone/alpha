@@ -39,7 +39,13 @@ export default async function setup(project: TestProject) {
   const agents: Agent[] = [];
   const owners = new Map<string, Promise<Owned>>();
   async function owned(name: string): Promise<Owned> {
-    const running = await (cloud ??= startCloud(state, names.map(email), granted));
+    if (cloud === undefined) {
+      cloud = startCloud(state, names.map(email), granted).catch((cause: unknown) => {
+        cloud = undefined;
+        throw cause;
+      });
+    }
+    const running = await cloud;
     const key = running.owners.get(email(name));
     if (key === undefined) throw new Error(`no owner ${name}: an owner is named after its journey's file, test/${name}.eliza.test.tsx`);
     const character = characterOf(email(name));
@@ -51,12 +57,28 @@ export default async function setup(project: TestProject) {
     const name = new URL(request.url ?? "/", "http://setup").searchParams.get("owner") ?? "";
     if (!/^[a-z][a-z0-9-]*$/.test(name)) return void response.writeHead(400).end();
     let asked = owners.get(name);
-    if (!asked) owners.set(name, asked = owned(name));
+    if (!asked) {
+      const pending = owned(name).catch((cause: unknown) => {
+        if (owners.get(name) === pending) owners.delete(name);
+        throw cause;
+      });
+      owners.set(name, asked = pending);
+    }
     asked.then((found) => response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(found)), (cause: unknown) => response.writeHead(500).end(String(cause)));
   });
-  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
-  const slack = await startSlackProvider();
-  const telegram = await startTelegramProvider();
+  let slack: Awaited<ReturnType<typeof startSlackProvider>> | undefined;
+  let telegram: Awaited<ReturnType<typeof startTelegramProvider>> | undefined;
+  try {
+    await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+    slack = await startSlackProvider();
+    telegram = await startTelegramProvider();
+  } catch (cause) {
+    server.close();
+    await slack?.stop().catch(() => undefined);
+    await telegram?.stop().catch(() => undefined);
+    fs.rmSync(state, { recursive: true, force: true });
+    throw cause;
+  }
   project.provide("eliza", `http://127.0.0.1:${(server.address() as AddressInfo).port}`);
   project.provide("slackOrigin", slack.origin);
   project.provide("telegramOrigin", telegram.origin);

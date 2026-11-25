@@ -12,6 +12,7 @@ import {
   bearerToken,
   createProviderServer,
   escapeHtml,
+  ownGet,
   paginateSlice,
   randomToken,
   sendHtml,
@@ -143,6 +144,16 @@ const DEFAULT_USER_SCOPES = [
 ].join(",");
 
 const APP_ID = "A01ALPHA";
+const MAX_IDEMPOTENCY = 500;
+const MAX_AUTH_CODES = 500;
+
+function pruneRecordCap(record: Record<string, unknown>, max: number): void {
+  const keys = Object.keys(record);
+  if (keys.length <= max) return;
+  for (const key of keys.slice(0, keys.length - max)) {
+    delete record[key];
+  }
+}
 
 function makeMessage(
   ts: string,
@@ -433,11 +444,24 @@ function nextSlackTs(state: SlackState): string {
   return `${seconds}.${String(state.tsCounter).padStart(6, "0")}`;
 }
 
+function parseTsParts(ts: string): readonly [number, number] | undefined {
+  const [secRaw, seqRaw = "0"] = ts.split(".");
+  if (secRaw === undefined || !/^\d+$/.test(secRaw) || !/^\d+$/.test(seqRaw)) return undefined;
+  return [Number(secRaw), Number(seqRaw)];
+}
+
 function compareTs(a: string, b: string): number {
-  const numA = Number(a);
-  const numB = Number(b);
-  if (numA !== numB) return numA - numB;
+  const parsedA = parseTsParts(a);
+  const parsedB = parseTsParts(b);
+  if (parsedA !== undefined && parsedB !== undefined) {
+    if (parsedA[0] !== parsedB[0]) return parsedA[0] - parsedB[0];
+    if (parsedA[1] !== parsedB[1]) return parsedA[1] - parsedB[1];
+  }
   return a.localeCompare(b);
+}
+
+function canAccessChannel(channel: SlackChannel, userId: string): boolean {
+  return !channel.is_private || channel.members.includes(userId);
 }
 
 function visibleTimelineMessages(channel: SlackChannel): SlackMessage[] {
@@ -506,7 +530,7 @@ function resolveSlackAuth(req: ParsedRequest, res: ServerResponse, state: SlackS
     sendJson(res, 200, { ok: false, error: "bot_token_not_allowed" });
     return undefined;
   }
-  const token = state.tokens[raw];
+  const token = ownGet(state.tokens, raw);
   if (!token) {
     sendJson(res, 200, { ok: false, error: "invalid_auth" });
     return undefined;
@@ -515,7 +539,7 @@ function resolveSlackAuth(req: ParsedRequest, res: ServerResponse, state: SlackS
     sendJson(res, 200, { ok: false, error: "token_revoked" });
     return undefined;
   }
-  const workspace = state.workspaces[token.team_id];
+  const workspace = ownGet(state.workspaces, token.team_id);
   if (!workspace) {
     sendJson(res, 200, { ok: false, error: "team_not_found" });
     return undefined;
@@ -523,12 +547,22 @@ function resolveSlackAuth(req: ParsedRequest, res: ServerResponse, state: SlackS
   return { workspace, userId: token.user_id, token };
 }
 
-function redirectWithParams(redirectUri: string, entries: Readonly<Record<string, string>>): string {
-  const target = new URL(redirectUri);
-  for (const [key, value] of Object.entries(entries)) {
-    if (value !== "") target.searchParams.set(key, value);
+function parseAllowedRedirectUri(raw: string): URL | undefined {
+  const target = URL.parse(raw);
+  if (target === null) return undefined;
+  if (target.protocol === "https:" || target.protocol === "alphaphone:") return target;
+  if (target.protocol === "http:" && (target.hostname === "127.0.0.1" || target.hostname === "localhost" || target.hostname === "[::1]")) {
+    return target;
   }
-  return target.toString();
+  return undefined;
+}
+
+function redirectWithParams(target: URL, entries: Readonly<Record<string, string>>): string {
+  const next = new URL(target.href);
+  for (const [key, value] of Object.entries(entries)) {
+    if (value !== "") next.searchParams.set(key, value);
+  }
+  return next.toString();
 }
 
 function renderConsentHtml(state: SlackState, fields: Readonly<Record<string, string>>): string {
@@ -574,7 +608,7 @@ function handleAuthorize(req: ParsedRequest, res: ServerResponse, ctx: ProviderC
     return;
   }
   const teamId = asString(req.params.team) ?? "T01ALPHA";
-  if (!state.workspaces[teamId]) {
+  if (!ownGet(state.workspaces, teamId)) {
     sendJson(res, 400, { ok: false, error: "team_not_found" });
     return;
   }
@@ -587,10 +621,22 @@ function handleAuthorize(req: ParsedRequest, res: ServerResponse, ctx: ProviderC
     code_challenge_method: asString(req.params.code_challenge_method) ?? "",
     team: teamId,
   };
+  let parsedRedirect: URL | undefined;
+  if (fields.redirect_uri !== "") {
+    parsedRedirect = parseAllowedRedirectUri(fields.redirect_uri);
+    if (parsedRedirect === undefined) {
+      sendJson(res, 400, { ok: false, error: "bad_redirect_uri" });
+      return;
+    }
+  }
+  if (fields.code_challenge !== "" && fields.code_challenge_method !== "S256") {
+    sendJson(res, 400, { ok: false, error: "invalid_code_challenge_method" });
+    return;
+  }
   const decision = asString(req.params.decision);
   if (req.method === "POST" && decision === "deny") {
-    if (fields.redirect_uri) {
-      sendRedirect(res, redirectWithParams(fields.redirect_uri, { error: "access_denied", state: fields.state }));
+    if (parsedRedirect) {
+      sendRedirect(res, redirectWithParams(parsedRedirect, { error: "access_denied", state: fields.state }));
       return;
     }
     sendJson(res, 200, { ok: false, error: "access_denied", state: fields.state });
@@ -613,9 +659,10 @@ function handleAuthorize(req: ParsedRequest, res: ServerResponse, ctx: ProviderC
     ...(fields.code_challenge_method ? { code_challenge_method: fields.code_challenge_method } : {}),
     used: false,
   };
+  pruneRecordCap(state.authCodes, MAX_AUTH_CODES);
   ctx.save();
-  if (fields.redirect_uri) {
-    sendRedirect(res, redirectWithParams(fields.redirect_uri, { code, state: fields.state }));
+  if (parsedRedirect) {
+    sendRedirect(res, redirectWithParams(parsedRedirect, { code, state: fields.state }));
     return;
   }
   sendJson(res, 200, { ok: true, code, state: fields.state, team_id: teamId });
@@ -665,7 +712,7 @@ function handleOAuthAccess(req: ParsedRequest, res: ServerResponse, ctx: Provide
       sendJson(res, 200, { ok: false, error: "invalid_refresh_token" });
       return;
     }
-    const workspace = state.workspaces[existing.team_id];
+    const workspace = ownGet(state.workspaces, existing.team_id);
     if (!workspace) {
       sendJson(res, 200, { ok: false, error: "team_not_found" });
       return;
@@ -675,7 +722,7 @@ function handleOAuthAccess(req: ParsedRequest, res: ServerResponse, ctx: Provide
   }
 
   const code = asString(req.params.code);
-  const record = code ? state.authCodes[code] : undefined;
+  const record = ownGet(state.authCodes, code);
   if (!record) {
     sendJson(res, 200, { ok: false, error: "invalid_code" });
     return;
@@ -684,19 +731,24 @@ function handleOAuthAccess(req: ParsedRequest, res: ServerResponse, ctx: Provide
     sendJson(res, 200, { ok: false, error: "code_already_used" });
     return;
   }
+  const clientId = asString(req.params.client_id);
+  if (clientId !== record.client_id) {
+    sendJson(res, 200, { ok: false, error: "invalid_client_id" });
+    return;
+  }
   const redirectUri = asString(req.params.redirect_uri);
-  if (record.redirect_uri && redirectUri && redirectUri !== record.redirect_uri) {
+  if (record.redirect_uri !== "" && redirectUri !== record.redirect_uri) {
     sendJson(res, 200, { ok: false, error: "bad_redirect_uri" });
     return;
   }
   if (record.code_challenge) {
     const verifier = asString(req.params.code_verifier);
-    if (!verifier || !verifyPkceS256(verifier, record.code_challenge)) {
+    if (record.code_challenge_method !== "S256" || !verifier || !verifyPkceS256(verifier, record.code_challenge)) {
       sendJson(res, 200, { ok: false, error: "invalid_code_verifier" });
       return;
     }
   }
-  const workspace = state.workspaces[record.team_id];
+  const workspace = ownGet(state.workspaces, record.team_id);
   if (!workspace) {
     sendJson(res, 200, { ok: false, error: "team_not_found" });
     return;
@@ -707,8 +759,8 @@ function handleOAuthAccess(req: ParsedRequest, res: ServerResponse, ctx: Provide
 
 function requireChannel(req: ParsedRequest, res: ServerResponse, auth: ResolvedAuth): SlackChannel | undefined {
   const channelId = asString(req.params.channel);
-  const channel = channelId ? auth.workspace.channels[channelId] : undefined;
-  if (!channel) {
+  const channel = ownGet(auth.workspace.channels, channelId);
+  if (!channel || !canAccessChannel(channel, auth.userId)) {
     sendJson(res, 200, { ok: false, error: "channel_not_found" });
     return undefined;
   }
@@ -803,7 +855,7 @@ function handleUsersConversations(req: ParsedRequest, res: ServerResponse, auth:
   const typeSet = new Set(rawTypes.split(",").map((item) => item.trim()).filter(Boolean));
   const excludeArchived = asBoolean(req.params.exclude_archived) ?? false;
   const matching = Object.values(auth.workspace.channels)
-    .filter((ch) => matchesConversationTypes(ch, typeSet) && (!excludeArchived || !ch.is_archived))
+    .filter((ch) => canAccessChannel(ch, auth.userId) && matchesConversationTypes(ch, typeSet) && (!excludeArchived || !ch.is_archived))
     .map((ch) => computeChannelSummary(ch, auth.userId));
   const page = paginateSlice(matching, asString(req.params.cursor), asNumber(req.params.limit) ?? 100);
   sendJson(res, 200, {
@@ -829,7 +881,7 @@ function handleConversationsOpen(
     return;
   }
   for (const uid of requested) {
-    if (!auth.workspace.users[uid]) {
+    if (!ownGet(auth.workspace.users, uid)) {
       sendJson(res, 200, { ok: false, error: "user_not_found" });
       return;
     }
@@ -855,7 +907,7 @@ function handleConversationsOpen(
     : `G${String(Object.keys(auth.workspace.channels).length + 1).padStart(2, "0")}MPIM`;
   const created: SlackChannel = {
     id,
-    name: isIm ? id : `mpdm-${memberSet.map((u) => auth.workspace.users[u]?.name ?? u).join("--")}`,
+    name: isIm ? id : `mpdm-${memberSet.map((u) => ownGet(auth.workspace.users, u)?.name ?? u).join("--")}`,
     is_channel: false,
     is_group: !isIm,
     is_im: isIm,
@@ -941,10 +993,10 @@ function handlePostMessage(
     return;
   }
   const idemKey = req.headers["idempotency-key"];
-  const scopedIdem = idemKey ? `${auth.workspace.id}:${channel.id}:${idemKey}` : undefined;
-  if (scopedIdem && state.idempotency[scopedIdem]) {
-    const cached = state.idempotency[scopedIdem];
-    sendJson(res, 200, { ok: true, channel: cached.channel, ts: cached.ts, message: cached.message });
+  const scopedIdem = idemKey ? `${auth.workspace.id}:${auth.userId}:${channel.id}:${idemKey}` : undefined;
+  const cached = ownGet(state.idempotency, scopedIdem);
+  if (cached) {
+    sendJson(res, 200, { ok: true, channel: cached.channel, ts: cached.ts, message: structuredClone(cached.message) });
     return;
   }
   const threadTs = asString(req.params.thread_ts);
@@ -955,7 +1007,8 @@ function handlePostMessage(
   }
   const message = appendSlackMessage(ctx, auth.workspace, channel, auth.userId, text, threadTs, replyBroadcast, true);
   if (scopedIdem) {
-    state.idempotency[scopedIdem] = { channel: channel.id, ts: message.ts, message };
+    state.idempotency[scopedIdem] = { channel: channel.id, ts: message.ts, message: structuredClone(message) };
+    pruneRecordCap(state.idempotency, MAX_IDEMPOTENCY);
     ctx.save();
   }
   sendJson(res, 200, { ok: true, channel: channel.id, ts: message.ts, message });
@@ -1073,6 +1126,7 @@ function handleSearchMessages(req: ParsedRequest, res: ServerResponse, auth: Res
   }
   const matches: Record<string, unknown>[] = [];
   for (const channel of Object.values(auth.workspace.channels)) {
+    if (!canAccessChannel(channel, auth.userId)) continue;
     if (
       channelFilter &&
       channel.name.toLowerCase() !== channelFilter &&
@@ -1081,7 +1135,7 @@ function handleSearchMessages(req: ParsedRequest, res: ServerResponse, auth: Res
       continue;
     }
     for (const msg of channel.messages) {
-      const author = auth.workspace.users[msg.user];
+      const author = ownGet(auth.workspace.users, msg.user);
       if (
         userFilter &&
         msg.user.toLowerCase() !== userFilter &&
@@ -1135,6 +1189,7 @@ function handleSlackControl(
     const teamId = asString(req.params.team_id);
     let revoked = 0;
     const affectedTeams = new Set<string>();
+    const revokedTokens = new Set<string>();
     for (const item of Object.values(state.tokens)) {
       if (item.revoked) continue;
       if (specificToken && item.access_token !== specificToken) continue;
@@ -1142,24 +1197,26 @@ function handleSlackControl(
       item.revoked = true;
       revoked += 1;
       affectedTeams.add(item.team_id);
+      revokedTokens.add(item.access_token);
     }
     ctx.save();
     for (const tid of affectedTeams) {
       pushSlackEvent(ctx, tid, { type: "tokens_revoked", tokens: { oauth: [tid] } });
     }
+    ctx.sse.closeWhere((meta) => meta?.token !== undefined && revokedTokens.has(meta.token));
     sendJson(res, 200, { ok: true, revoked });
     return true;
   }
 
   if (req.pathname === "/__control/inject" && req.method === "POST") {
     const teamId = asString(req.params.team_id) ?? "T01ALPHA";
-    const workspace = state.workspaces[teamId];
+    const workspace = ownGet(state.workspaces, teamId);
     if (!workspace) {
       sendJson(res, 404, { ok: false, error: "team_not_found" });
       return true;
     }
     const channelId = asString(req.params.channel) ?? Object.keys(workspace.channels)[0];
-    const channel = channelId ? workspace.channels[channelId] : undefined;
+    const channel = ownGet(workspace.channels, channelId);
     if (!channel) {
       sendJson(res, 404, { ok: false, error: "channel_not_found" });
       return true;
@@ -1250,7 +1307,7 @@ function handleSlackApi(req: ParsedRequest, res: ServerResponse, ctx: ProviderCo
 
   switch (req.pathname) {
     case "/api/auth.test": {
-      const user = auth.workspace.users[auth.userId];
+      const user = ownGet(auth.workspace.users, auth.userId);
       sendJson(res, 200, {
         ok: true,
         url: auth.workspace.url,
@@ -1266,6 +1323,7 @@ function handleSlackApi(req: ParsedRequest, res: ServerResponse, ctx: ProviderCo
       auth.token.revoked = true;
       ctx.save();
       pushSlackEvent(ctx, auth.workspace.id, { type: "tokens_revoked", tokens: { oauth: [auth.workspace.id] } });
+      ctx.sse.closeWhere((meta) => meta?.token === auth.token.access_token);
       sendJson(res, 200, { ok: true, revoked: true });
       return;
     }
@@ -1352,7 +1410,7 @@ function handleSlackApi(req: ParsedRequest, res: ServerResponse, ctx: ProviderCo
     }
     case "/api/users.info": {
       const uid = asString(req.params.user);
-      const found = uid ? auth.workspace.users[uid] : undefined;
+      const found = ownGet(auth.workspace.users, uid);
       if (!found) {
         sendJson(res, 200, { ok: false, error: "user_not_found" });
         return;
@@ -1363,6 +1421,7 @@ function handleSlackApi(req: ParsedRequest, res: ServerResponse, ctx: ProviderCo
     case "/api/events.stream": {
       ctx.sse.connect(res, {
         filter: (envelope) => envelope.channel === auth.workspace.id,
+        meta: { token: auth.token.access_token, team_id: auth.workspace.id },
       });
       return;
     }

@@ -33,6 +33,7 @@ public final class AlphaNotesPlugin extends Plugin {
   private final ExecutorService files = Executors.newSingleThreadExecutor();
   private volatile boolean front = true;
   private volatile boolean closed;
+  private final AlphaNoteRecorder.Listener recorderListener = this::recordingChanged;
   private String lastRecordingState = "";
   private MediaPlayer player;
   private String playingId;
@@ -85,7 +86,7 @@ public final class AlphaNotesPlugin extends Plugin {
   @Override public void load() {
     super.load();
     try {
-      recorder().setListener(this::recordingChanged);
+      recorder().setListener(recorderListener);
     } catch (RuntimeException unavailable) {
       lastRecordingState = "";
     }
@@ -148,7 +149,7 @@ public final class AlphaNotesPlugin extends Plugin {
         case "Pause" -> call.resolve(recorder().pause(id));
         case "End" -> call.resolve(recorder().stop(id));
         case "Resume" -> {
-          if (!front || locked() || inCall() || player != null) { call.reject("The microphone is unavailable"); return; }
+          if (!front || locked() || inCall() || player != null || getPermissionState("microphone") != PermissionState.GRANTED) { call.reject("The microphone is unavailable"); return; }
           JSObject status = recorder().resume(id);
           AlphaNoteRecordingService.start(getContext(), id);
           call.resolve(status);
@@ -195,10 +196,18 @@ public final class AlphaNotesPlugin extends Plugin {
       String audioId = recordingId(call);
       AlphaNoteRecorder recorder = recorder();
       String noteId = call.getString("noteId");
-      if (recorder.claimCanonicalSave(audioId)) {
-        call.resolve(JSObject.fromJSONObject(recordings().retain(recorder.joined(audioId), audioId, noteId, recorder.totalMs(), "", true)));
-      } else {
+      if (!recorder.beginCanonicalSave(audioId)) {
         call.reject("The recording changed");
+        return;
+      }
+      try {
+        File joined = recorder.joined(audioId);
+        JSObject retained = JSObject.fromJSONObject(recordings().retain(joined, audioId, noteId, recorder.totalMs(), "", true));
+        recorder.commitCanonicalSave(audioId);
+        call.resolve(retained);
+      } catch (Exception failure) {
+        recorder.abortCanonicalSave(audioId);
+        throw failure;
       }
     });
   }
@@ -208,37 +217,39 @@ public final class AlphaNotesPlugin extends Plugin {
   }
 
   @PluginMethod public void play(PluginCall call) {
-    onMain(call, () -> {
-      if (!front || locked() || inCall()) { call.reject("Playback is unavailable"); return; }
+    onDisk(call, () -> {
       String id = RecordingStore.id(call.getString("audioId"));
       RecordingStore store = recordings();
       String note = call.getString("noteId");
       if (!Objects.equals(note, store.describe(id).optString("noteId"))) { call.reject("The recording changed"); return; }
       File file = store.playable(id);
-      endedPlayback(false);
-      MediaPlayer next = new MediaPlayer();
-      player = next;
-      playingId = id;
-      playback = call;
-      try {
-        next.setDataSource(file.getAbsolutePath());
-        next.setOnPreparedListener(ready -> {
-          if (player != ready) return;
-          try {
-            int from = Math.max(0, call.getInt("offsetMs", 0));
-            if (from > 0) ready.seekTo(Math.min(ready.getDuration(), from));
-            ready.start();
-          } catch (RuntimeException unavailable) { endedPlayback(false); }
-        });
-        next.setOnCompletionListener(done -> { if (player == done) endedPlayback(true); });
-        next.setOnErrorListener((failed, code, detail) -> {
-          if (player == failed) endedPlayback(false);
-          return true;
-        });
-        next.prepareAsync();
-      } catch (Exception unavailable) {
+      onMain(call, () -> {
+        if (!front || locked() || inCall()) { call.reject("Playback is unavailable"); return; }
         endedPlayback(false);
-      }
+        MediaPlayer next = new MediaPlayer();
+        player = next;
+        playingId = id;
+        playback = call;
+        try {
+          next.setDataSource(file.getAbsolutePath());
+          next.setOnPreparedListener(ready -> {
+            if (player != ready) return;
+            try {
+              int from = Math.max(0, call.getInt("offsetMs", 0));
+              if (from > 0) ready.seekTo(Math.min(ready.getDuration(), from));
+              ready.start();
+            } catch (RuntimeException unavailable) { endedPlayback(false); }
+          });
+          next.setOnCompletionListener(done -> { if (player == done) endedPlayback(true); });
+          next.setOnErrorListener((failed, code, detail) -> {
+            if (player == failed) endedPlayback(false);
+            return true;
+          });
+          next.prepareAsync();
+        } catch (Exception unavailable) {
+          endedPlayback(false);
+        }
+      });
     });
   }
 
@@ -274,7 +285,8 @@ public final class AlphaNotesPlugin extends Plugin {
 
   @PluginMethod public void share(PluginCall call) {
     onMain(call, () -> {
-      if (!front || locked()) { call.reject("Open Notes to share a draft"); return; }
+      android.app.Activity activity = getActivity();
+      if (activity == null || !front || locked()) { call.reject("Open Notes to share a draft"); return; }
       String title = call.getString("title", "");
       String text = call.getString("text", "");
       boolean mail = "Email".equals(call.getString("channel"));
@@ -282,7 +294,7 @@ public final class AlphaNotesPlugin extends Plugin {
       Intent draft = new Intent(Intent.ACTION_SENDTO, android.net.Uri.parse(mail ? "mailto:" : "smsto:"));
       if (mail) draft.putExtra(Intent.EXTRA_SUBJECT, title).putExtra(Intent.EXTRA_TEXT, text);
       else draft.putExtra("sms_body", title.isBlank() ? text : title + "\n\n" + text);
-      getActivity().startActivity(draft);
+      activity.startActivity(AlphaDevicePlugin.handOff(draft));
       call.resolve();
     });
   }
@@ -294,9 +306,11 @@ public final class AlphaNotesPlugin extends Plugin {
 
   @PluginMethod public void settings(PluginCall call) {
     onMain(call, () -> {
+      android.app.Activity activity = getActivity();
+      if (activity == null) { call.reject("Settings are unavailable"); return; }
       Intent page = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
           android.net.Uri.parse("package:" + getContext().getPackageName()));
-      getActivity().startActivity(page);
+      activity.startActivity(AlphaDevicePlugin.handOff(page));
       call.resolve();
     });
   }
@@ -329,7 +343,7 @@ public final class AlphaNotesPlugin extends Plugin {
 
   @Override protected void handleOnDestroy() {
     closed = true;
-    try { recorder().setListener(null); } catch (RuntimeException unavailable) { lastRecordingState = ""; }
+    try { recorder().clearListener(recorderListener); } catch (RuntimeException unavailable) { lastRecordingState = ""; }
     main.post(() -> endedPlayback(false));
     files.shutdownNow();
     super.handleOnDestroy();

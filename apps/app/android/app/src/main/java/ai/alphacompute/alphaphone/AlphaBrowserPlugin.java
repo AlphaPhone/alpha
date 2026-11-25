@@ -99,7 +99,8 @@ public class AlphaBrowserPlugin extends Plugin {
  private String namespace;
  private final WebViewListener hostNavigation = new WebViewListener() {
   @Override public void onPageStarted(WebView view) {
-   if(view==getBridge().getWebView())resetHostDocument();
+   Bridge bridge=getBridge();
+   if(bridge!=null&&view==bridge.getWebView())resetHostDocument();
   }
  };
  private void resetHostDocument() {
@@ -157,6 +158,9 @@ public class AlphaBrowserPlugin extends Plugin {
  private java.util.function.Consumer<Map<String,Boolean>> runtimeResult;
  private ActivityResultLauncher<Uri> takePicture;
  private Uri pictureUri;
+ private java.io.File pictureFile;
+ private final Map<String,List<java.io.File>> privateCameraFiles=new HashMap<>();
+ private boolean autofillCallbackRegistered;
  /** One site prompt at a time: permission, HTTP authentication or camera choice. */
  private AlertDialog siteDialog;
  private Tab siteDialogTab;
@@ -167,21 +171,49 @@ public class AlphaBrowserPlugin extends Plugin {
  private WebChromeClient.CustomViewCallback customCallback;
  private OnBackPressedCallback fullscreenBack;
  private void cancelFile() { ValueCallback<Uri[]> callback=fileCallback;fileCallback=null;fileTab=null;if(callback!=null)callback.onReceiveValue(null); }
+ private java.io.File privateCameraDirectory() { return new java.io.File(getContext().getCacheDir(),"browser-private-camera"); }
+ private void purgePrivateCameraFiles() {
+  for(List<java.io.File> files:privateCameraFiles.values())for(java.io.File file:files)file.delete();
+  privateCameraFiles.clear();
+  java.io.File[] stale=privateCameraDirectory().listFiles();
+  if(stale!=null)for(java.io.File file:stale)file.delete();
+ }
+ private void cancelReadingSpeech(String requestId) {
+  if(requestId==null||requestId.isBlank())return;
+  Bridge bridge=getBridge();
+  if(bridge==null)return;
+  PluginHandle local=bridge.getPlugin("AlphaVoiceCloud");
+  if(local!=null&&local.getInstance() instanceof AlphaLocalSpeechPlugin voice)voice.cancelReadingSpeech(requestId);
+  PluginHandle cloud=bridge.getPlugin("ElizaCloudSpeech");
+  if(cloud!=null&&cloud.getInstance() instanceof AlphaCloudSpeechPlugin stream)stream.cancelReadingSpeech(requestId);
+ }
+ private void onUi(PluginCall call, Runnable work) {
+  android.app.Activity activity=getActivity();
+  if(activity==null){call.reject("Browser closed");return;}
+  activity.runOnUiThread(()->{
+   if(closed(call)||activity.isFinishing()||activity.isDestroyed()){if(!destroyed)call.reject("Browser closed");return;}
+   work.run();
+  });
+ }
  @Override public void load() {
+  super.load();
   BrowserTabHostConfig identity=config();namespace=freshNamespace();
-  reading=new AlphaReviewedReading(getActivity(),requestId->{},identity.allowLoopback);
-  pageShare=getActivity().getActivityResultRegistry().register(identity.registryKey("share"),new ActivityResultContracts.StartActivityForResult(),result->{shareOutstanding=false;});
-  downloads=new AlphaBrowserDownloads(getActivity(),new AlphaBrowserDownloads.Config(identity.downloadPreferences,identity.allowLoopback));
+  androidx.appcompat.app.AppCompatActivity activity=getActivity();
+  if(activity==null)return;
+  reading=new AlphaReviewedReading(activity,this::cancelReadingSpeech,identity.allowLoopback);
+  pageShare=activity.getActivityResultRegistry().register(identity.registryKey("share"),new ActivityResultContracts.StartActivityForResult(),result->{shareOutstanding=false;});
+  downloads=new AlphaBrowserDownloads(activity,new AlphaBrowserDownloads.Config(identity.downloadPreferences,identity.allowLoopback));
   downloads.purgeStaleCaptures();
-  runtimePermissions=getActivity().getActivityResultRegistry().register(identity.registryKey("site-permission"),new ActivityResultContracts.RequestMultiplePermissions(),result->{
+  purgePrivateCameraFiles();
+  runtimePermissions=activity.getActivityResultRegistry().register(identity.registryKey("site-permission"),new ActivityResultContracts.RequestMultiplePermissions(),result->{
    java.util.function.Consumer<Map<String,Boolean>> callback=runtimeResult;runtimeResult=null;if(callback!=null)callback.accept(result);
   });
-  takePicture=getActivity().getActivityResultRegistry().register(identity.registryKey("take-picture"),new ActivityResultContracts.TakePicture(),this::pictureTaken);
-  bookmarks=AlphaBrowserStores.bookmarks(getActivity());
-  sessionStore=AlphaBrowserStores.session(getActivity());
+  takePicture=activity.getActivityResultRegistry().register(identity.registryKey("take-picture"),new ActivityResultContracts.TakePicture(),this::pictureTaken);
+  bookmarks=AlphaBrowserStores.bookmarks(activity);
+  sessionStore=AlphaBrowserStores.session(activity);
   profileRetirement=getContext().getSharedPreferences(identity.retiredProfilePreferences,0);
-  navigationHandler.post(()->{if(!destroyed)getBridge().addWebViewListener(hostNavigation);});
-  filePicker=getActivity().getActivityResultRegistry().register(identity.registryKey("file"),new ActivityResultContracts.StartActivityForResult(),result->{
+  navigationHandler.post(()->{Bridge bridge=getBridge();if(!destroyed&&bridge!=null)bridge.addWebViewListener(hostNavigation);});
+  filePicker=activity.getActivityResultRegistry().register(identity.registryKey("file"),new ActivityResultContracts.StartActivityForResult(),result->{
    pickerOutstanding=false;ValueCallback<Uri[]> callback=fileCallback;Tab tab=fileTab;fileCallback=null;fileTab=null;
    if(callback==null)return;
    if(result.getResultCode()!=android.app.Activity.RESULT_OK||tab==null||tab.dead||tabs.get(tab.id)!=tab||tab.navigation!=fileNavigation){callback.onReceiveValue(null);return;}
@@ -190,10 +222,12 @@ public class AlphaBrowserPlugin extends Plugin {
    if(selected.isEmpty()||selected.size()>16||selected.stream().anyMatch(uri->uri==null||!"content".equals(uri.getScheme()))){callback.onReceiveValue(null);return;}
    callback.onReceiveValue(selected.toArray(new Uri[0]));
   });
-  getActivity().runOnUiThread(() -> {
-  getBridge().getWebView().setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
-  AutofillManager autofill=getActivity().getSystemService(AutofillManager.class);
-  if(autofill!=null)autofill.registerCallback(autofillCallback);
+  activity.runOnUiThread(() -> {
+  if(destroyed||activity.isFinishing()||activity.isDestroyed())return;
+  Bridge bridge=getBridge();
+  if(bridge!=null&&bridge.getWebView()!=null)bridge.getWebView().setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
+  AutofillManager autofill=activity.getSystemService(AutofillManager.class);
+  if(autofill!=null){autofill.registerCallback(autofillCallback);autofillCallbackRegistered=true;}
   if (!WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE) || !cleanedProfiles.add(config().privatePrefix)) return;
   for(String name:ProfileStore.getInstance().getAllProfileNames()) if(ephemeralProfile(name)) {
    try { ProfileStore.getInstance().deleteProfile(name);
@@ -233,7 +267,8 @@ public class AlphaBrowserPlugin extends Plugin {
  private void cancelAutofill(Tab t) {
   t.autofillEnabled=false;
   if(t.fields!=null)t.fields.revoke(true);
-  AutofillManager manager=getActivity().getSystemService(AutofillManager.class);
+  android.app.Activity activity=getActivity();
+  AutofillManager manager=activity==null?null:activity.getSystemService(AutofillManager.class);
   if(manager!=null) {
    if(t.autofillVirtualId!=View.NO_ID) {
     manager.notifyViewVisibilityChanged(t.web,t.autofillVirtualId,false);
@@ -255,7 +290,8 @@ public class AlphaBrowserPlugin extends Plugin {
   * addresses keep cancelling. */
  private void commitAutofill(Tab t) {
   t.autofillEnabled=false;
-  AutofillManager manager=getActivity().getSystemService(AutofillManager.class);
+  android.app.Activity activity=getActivity();
+  AutofillManager manager=activity==null?null:activity.getSystemService(AutofillManager.class);
   if(manager!=null)manager.commit();
   if(t.fields!=null)t.fields.revoke(false);
   t.web.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
@@ -337,6 +373,8 @@ public class AlphaBrowserPlugin extends Plugin {
   if(reading!=null)reading.cancelFor(t.id);
   disableAutofill(t);
   if(downloads!=null){downloads.cancelReview(t.id);if(t.priv)downloads.forgetPrivate(t.id);}
+  List<java.io.File> privPhotos=privateCameraFiles.remove(t.id);
+  if(privPhotos!=null)for(java.io.File file:privPhotos)file.delete();
   if(siteDialogTab==t)dismissSiteDialogs();
   if(fullscreenTab==t)exitFullscreen(true);
   if(fileTab==t)cancelFile();
@@ -386,8 +424,8 @@ public class AlphaBrowserPlugin extends Plugin {
   * dialog would throw on the main thread and end the process); every such call is rejected.
   */
  private boolean closed(PluginCall call){if(!destroyed)return false;call.reject("Browser closed");return true;}
- private void run(PluginCall call, java.util.function.Consumer<Tab> action) { getActivity().runOnUiThread(() -> {if(closed(call))return; if (!Objects.equals(session, call.getString("session"))) { call.reject("Expired browser session"); return; } Tab t = tabs.get(call.getString("id")); if (t == null || t.dead) { call.reject("Browser tab is unavailable"); return; } try { action.accept(t); call.resolve(state(t)); } catch (Exception e) { call.reject("Browser operation failed"); } }); }
- @PluginMethod public void create(PluginCall call) { getActivity().runOnUiThread(() -> {if(closed(call))return;
+ private void run(PluginCall call, java.util.function.Consumer<Tab> action) { onUi(call, () -> { if (!Objects.equals(session, call.getString("session"))) { call.reject("Expired browser session"); return; } Tab t = tabs.get(call.getString("id")); if (t == null || t.dead) { call.reject("Browser tab is unavailable"); return; } try { action.accept(t); call.resolve(state(t)); } catch (Exception e) { call.reject("Browser operation failed"); } }); }
+ @PluginMethod public void create(PluginCall call) { onUi(call, () -> {
   String requested = call.getString("session"), id = call.getString("id");
   if (requested == null || !BrowserTabHostConfig.validTabId(id)) { call.reject("Invalid browser identity"); return; }
   if (session != null && !session.equals(requested)) { call.reject("Expired browser session"); return; }
@@ -516,7 +554,7 @@ public class AlphaBrowserPlugin extends Plugin {
     }
     /** A capture-enabled image input offers the camera only after an explicit choice. */
     private void offerCamera(Tab t,FileChooserParams params) {
-     AlertDialog dialog=new AlertDialog.Builder(getActivity()).setTitle(AlphaBrowserCopy.PHOTO_TITLE).setMessage(AlphaBrowserCopy.photoMessage(Uri.parse(t.url).getHost()))
+     AlertDialog dialog=new AlertDialog.Builder(getActivity()).setTitle(AlphaBrowserCopy.PHOTO_TITLE).setMessage(AlphaBrowserCopy.photoMessage(Uri.parse(t.url).getHost(),t.priv))
       .setPositiveButton(AlphaBrowserCopy.USE_CAMERA,(d,w)->{siteDialogCancel=null;cameraForFile(t);})
       .setNeutralButton(AlphaBrowserCopy.CHOOSE_FILE,(d,w)->{siteDialogCancel=null;if(fileTab==t&&t.navigation==fileNavigation)openPicker(t,params);else{pickerOutstanding=false;cancelFile();}})
       .setNegativeButton(AlphaBrowserCopy.CANCEL,null).create();
@@ -567,7 +605,7 @@ public class AlphaBrowserPlugin extends Plugin {
  private void dismissSiteDialogs(){
   AlertDialog dialog=siteDialog;if(dialog==null)return;
   revokeSiteDialogAutofill();
-  if(siteDialogAutofill){siteDialogAutofill=false;AutofillManager manager=getActivity().getSystemService(AutofillManager.class);if(manager!=null)manager.cancel();}
+  if(siteDialogAutofill){siteDialogAutofill=false;android.app.Activity activity=getActivity();AutofillManager manager=activity==null?null:activity.getSystemService(AutofillManager.class);if(manager!=null)manager.cancel();}
   Runnable pending=siteDialogCancel;siteDialog=null;siteDialogTab=null;siteDialogCancel=null;
   dialog.dismiss();
   if(pending!=null)pending.run();
@@ -667,12 +705,42 @@ public class AlphaBrowserPlugin extends Plugin {
   sitePermission(t,origin,Collections.singletonList("location"),granted->{if(done[0])return;done[0]=true;callback.invoke(requested,granted.contains("location"),false);});
  }
  private boolean secureAuthPage(Uri page){return config().passwordPage(page.getScheme(),page.getHost());}
+ private static int effectivePort(Uri uri){
+  int port=uri.getPort();
+  if(port>0)return port;
+  if("https".equalsIgnoreCase(uri.getScheme()))return 443;
+  if("http".equalsIgnoreCase(uri.getScheme()))return 80;
+  return -1;
+ }
+ private static boolean authHostMatches(Uri page,String rawHost){
+  if(page==null||rawHost==null||rawHost.isBlank()||page.getHost()==null)return false;
+  String askedHost=rawHost.trim();
+  int askedPort=-1;
+  if(askedHost.startsWith("[")){
+   int end=askedHost.indexOf(']');
+   if(end<0)return false;
+   if(end+1<askedHost.length()){
+    if(askedHost.charAt(end+1)!=':')return false;
+    try{askedPort=Integer.parseInt(askedHost.substring(end+2));}catch(NumberFormatException invalid){return false;}
+   }
+   askedHost=askedHost.substring(1,end);
+  }else{
+   int colon=askedHost.lastIndexOf(':');
+   if(colon>0&&askedHost.indexOf(':')==colon){
+    try{askedPort=Integer.parseInt(askedHost.substring(colon+1));}catch(NumberFormatException invalid){return false;}
+    askedHost=askedHost.substring(0,colon);
+   }
+  }
+  if(!askedHost.equalsIgnoreCase(page.getHost()))return false;
+  if(askedPort!=-1&&askedPort!=effectivePort(page))return false;
+  return true;
+ }
  private void httpAuth(Tab t,HttpAuthHandler handler,String host,String realm){
-  String asked=host==null?null:host.replaceFirst(":\\d+$","");
+  String asked=host==null?null:host.trim();
   boolean matched=false;
   for(String candidate:new String[]{t.url,t.pendingMain}){
    if(candidate==null||asked==null)continue;Uri page=Uri.parse(candidate);
-   if(page.getHost()==null||!asked.equalsIgnoreCase(page.getHost()))continue;
+   if(!authHostMatches(page,asked))continue;
    matched=true;
    if(!secureAuthPage(page)){handler.cancel();fail(t,"This site asks for a password over an insecure connection. It was not sent.");return;}
   }
@@ -718,14 +786,28 @@ public class AlphaBrowserPlugin extends Plugin {
   java.util.function.Consumer<Boolean> launch=ok->{
    if(!ok||fileTab!=t||t.dead||t.navigation!=revision){pickerOutstanding=false;cancelFile();if(!ok)notice(t,"Android has not allowed "+config().appName+" to use the camera. You can allow it in Android Settings.");return;}
    try{
-    android.content.ContentValues values=new android.content.ContentValues();
-    values.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME,config().storagePrefix+"-"+UUID.randomUUID().toString().substring(0,8)+".jpg");
-    values.put(android.provider.MediaStore.MediaColumns.MIME_TYPE,"image/jpeg");
-    values.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,android.os.Environment.DIRECTORY_PICTURES);
-    pictureUri=getContext().getContentResolver().insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,values);
+    if(t.priv){
+     java.io.File dir=privateCameraDirectory();
+     if(!dir.isDirectory()&&!dir.mkdirs())throw new IllegalStateException();
+     java.io.File file=new java.io.File(dir,config().storagePrefix+"-priv-"+UUID.randomUUID().toString().substring(0,8)+".jpg");
+     pictureFile=file;
+     pictureUri=androidx.core.content.FileProvider.getUriForFile(getContext(),getContext().getPackageName()+".browser.fileprovider",file);
+     privateCameraFiles.computeIfAbsent(t.id,key->new ArrayList<>()).add(file);
+    }else{
+     pictureFile=null;
+     android.content.ContentValues values=new android.content.ContentValues();
+     values.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME,config().storagePrefix+"-"+UUID.randomUUID().toString().substring(0,8)+".jpg");
+     values.put(android.provider.MediaStore.MediaColumns.MIME_TYPE,"image/jpeg");
+     values.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,android.os.Environment.DIRECTORY_PICTURES);
+     pictureUri=getContext().getContentResolver().insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,values);
+    }
     if(pictureUri==null)throw new IllegalStateException();
     takePicture.launch(pictureUri);
-   }catch(Exception unavailable){if(pictureUri!=null)try{getContext().getContentResolver().delete(pictureUri,null,null);}catch(Exception ignored){}pictureUri=null;pickerOutstanding=false;cancelFile();notice(t,"The camera is unavailable.");}
+   }catch(Exception unavailable){
+    if(pictureFile!=null){pictureFile.delete();pictureFile=null;}
+    else if(pictureUri!=null)try{getContext().getContentResolver().delete(pictureUri,null,null);}catch(Exception ignored){}
+    pictureUri=null;pickerOutstanding=false;cancelFile();notice(t,"The camera is unavailable.");
+   }
   };
   if(granted(android.Manifest.permission.CAMERA)){launch.accept(true);return;}
   if(runtimeResult!=null){pickerOutstanding=false;cancelFile();return;}
@@ -733,9 +815,12 @@ public class AlphaBrowserPlugin extends Plugin {
   try{runtimePermissions.launch(androidPermissions("camera"));}catch(RuntimeException unavailable){runtimeResult=null;pickerOutstanding=false;cancelFile();}
  }
  private void pictureTaken(Boolean saved){
-  pickerOutstanding=false;Uri photo=pictureUri;pictureUri=null;ValueCallback<Uri[]> callback=fileCallback;Tab tab=fileTab;fileCallback=null;fileTab=null;
+  pickerOutstanding=false;Uri photo=pictureUri;pictureUri=null;java.io.File tempFile=pictureFile;pictureFile=null;ValueCallback<Uri[]> callback=fileCallback;Tab tab=fileTab;fileCallback=null;fileTab=null;
   boolean ok=Boolean.TRUE.equals(saved)&&photo!=null&&callback!=null&&tab!=null&&!tab.dead&&tabs.get(tab.id)==tab&&tab.navigation==fileNavigation;
-  if(!ok&&photo!=null)try{getContext().getContentResolver().delete(photo,null,null);}catch(Exception ignored){}
+  if(!ok){
+   if(tempFile!=null)tempFile.delete();
+   else if(photo!=null)try{getContext().getContentResolver().delete(photo,null,null);}catch(Exception ignored){}
+  }
   if(callback!=null)callback.onReceiveValue(ok?new Uri[]{photo}:null);
  }
  private void enterFullscreen(Tab t,View view,WebChromeClient.CustomViewCallback callback){
@@ -935,7 +1020,7 @@ public class AlphaBrowserPlugin extends Plugin {
   for(Tab tab:tabs.values()){clearTimeout(tab);disableAutofill(tab);tab.frame.setHostRectsReceived(false);tab.frame.setVisibility(View.GONE);}
   call.reject(reason);
  }
- @PluginMethod public void present(PluginCall call) { getActivity().runOnUiThread(() -> {if(closed(call))return;
+ @PluginMethod public void present(PluginCall call) { onUi(call, () -> {
   if (!Objects.equals(session,call.getString("session"))) { call.reject("Expired browser session"); return; }
   String nextId=call.getString("id");
   Object rawLayer=call.getData().opt("layer");
@@ -943,8 +1028,11 @@ public class AlphaBrowserPlugin extends Plugin {
   TabLayer layer=TabLayer.parse(rawLayer);
   if(layer==null){rejectPresentation(call,"Unknown browser layer");return;}
   Tab next=tabs.get(nextId);
-  ViewGroup host=(ViewGroup)getActivity().findViewById(android.R.id.content);
-  View branch=TabInputRouter.hostBranch(host,getBridge().getWebView());
+  android.app.Activity activity=getActivity();
+  Bridge bridge=getBridge();
+  if(activity==null||bridge==null||bridge.getWebView()==null){call.reject("Browser closed");return;}
+  ViewGroup host=(ViewGroup)activity.findViewById(android.R.id.content);
+  View branch=TabInputRouter.hostBranch(host,bridge.getWebView());
   float x=call.getFloat("x",0f),y=call.getFloat("y",0f),width=call.getFloat("width",0f),height=call.getFloat("height",0f);
   ArrayList<HostRect> hostRects=new ArrayList<>();
   if(next!=null&&layer==TabLayer.BELOW_HOST){
@@ -986,11 +1074,11 @@ public class AlphaBrowserPlugin extends Plugin {
   }
   result.put("urls",urls);result.put("entries",entries);return result;
  }
- @PluginMethod public void bookmarks(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;
+ @PluginMethod public void bookmarks(PluginCall call) { onUi(call,()->{
   if(!bookmarkSession(call))return;
   try{call.resolve(bookmarkResult(bookmarks.entries()));}catch(Exception unavailable){call.reject("Saved bookmarks could not be read. Existing bookmarks were not changed.");}
  }); }
- @PluginMethod public void setBookmark(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;
+ @PluginMethod public void setBookmark(PluginCall call) { onUi(call,()->{
   if(!bookmarkSession(call))return;
   String url=call.getString("url");Boolean saved=call.getBoolean("saved");
   if(!BrowserBookmarkStore.valid(url)||saved==null){call.reject("Only HTTPS addresses without embedded credentials can be bookmarked.");return;}
@@ -998,12 +1086,12 @@ public class AlphaBrowserPlugin extends Plugin {
   if(saved&&title!=null&&title!=org.json.JSONObject.NULL&&!(title instanceof String)){call.reject("A bookmark title must be text.");return;}
   try{call.resolve(bookmarkResult(bookmarks.change(url,saved,title instanceof String text?text:null)));}catch(Exception unavailable){call.reject("Bookmark could not be saved. The device stores up to 100 bookmarks; existing data was not changed.");}
  }); }
- @PluginMethod public void browsingState(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;
+ @PluginMethod public void browsingState(PluginCall call) { onUi(call,()->{
   if(!bookmarkSession(call))return;
   try{call.resolve(JSObject.fromJSONObject(sessionStore.read()));}catch(Exception unavailable){call.reject("Saved tabs and history could not be read. They were not changed.");}
  }); }
  /** Normal tabs and history only; the renderer never sends private tabs. */
- @PluginMethod public void saveBrowsingState(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;
+ @PluginMethod public void saveBrowsingState(PluginCall call) { onUi(call,()->{
   if(!bookmarkSession(call))return;
   if(clearing){call.reject("Browsing data is being cleared.");return;}
   try{
@@ -1015,7 +1103,7 @@ public class AlphaBrowserPlugin extends Plugin {
  /** Clear browsing data: cookies and site data, history and cache of the
   * persistent normal-tab profile. Open normal tabs close first so a live page
   * cannot rewrite its data; private tabs are unaffected. Bookmarks remain. */
- @PluginMethod public void clearBrowsingData(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;
+ @PluginMethod public void clearBrowsingData(PluginCall call) { onUi(call,()->{
   if(!bookmarkSession(call))return;
   if(clearing){call.reject("Browsing data is already being cleared.");return;}
   if(!WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)||!WebViewFeature.isFeatureSupported(WebViewFeature.DELETE_BROWSING_DATA)){call.reject("This Android WebView cannot clear browser data. Update Android System WebView.");return;}
@@ -1034,15 +1122,20 @@ public class AlphaBrowserPlugin extends Plugin {
   });
  }); }
  /** Cookies and storage for the selected tab's site (registrable domain) only. */
- @PluginMethod public void clearSiteData(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;
+ @PluginMethod public void clearSiteData(PluginCall call) { onUi(call,()->{
   if(!Objects.equals(session,call.getString("session"))){call.reject("Expired browser session");return;}
   Tab t=tabs.get(call.getString("id"));
   if(t==null||t.dead||!safe(t.url)||!Objects.equals(call.getString("url"),t.url)){call.reject("Load a website before clearing its data.");return;}
   if(!WebViewFeature.isFeatureSupported(WebViewFeature.DELETE_BROWSING_DATA)){call.reject("This Android WebView cannot clear site data.");return;}
   try{
-   String[] site=new String[1];
-   site[0]=WebStorageCompat.deleteBrowsingDataForSite(WebViewCompat.getProfile(t.web).getWebStorage(),Uri.parse(t.url).getHost(),()->{JSObject result=new JSObject();result.put("site",site[0]);call.resolve(result);});
-   String cleared=site[0]==null?Uri.parse(t.url).getHost():site[0];
+   final String fallbackHost=Uri.parse(t.url).getHost();
+   final String[] site=new String[1];
+   site[0]=WebStorageCompat.deleteBrowsingDataForSite(WebViewCompat.getProfile(t.web).getWebStorage(),fallbackHost,()->{
+    JSObject result=new JSObject();
+    result.put("site",site[0]!=null?site[0]:fallbackHost);
+    call.resolve(result);
+   });
+   String cleared=site[0]==null?fallbackHost:site[0];
    downloads.clearSite(cleared);
    if(!t.priv)try{sessionStore.clearPermissionsForSite(cleared);}catch(Exception unavailable){notice(t,"Website permissions for this site could not be cleared. Use Clear browsing data.");}
   }catch(Exception unavailable){call.reject("Site data could not be cleared.");}
@@ -1051,7 +1144,7 @@ public class AlphaBrowserPlugin extends Plugin {
  @PluginMethod public void readingSupport(PluginCall call) { JSObject out=new JSObject();out.put("available",BrowserReadingWorld.supported());call.resolve(out); }
  @PluginMethod public void reviewQuestion(PluginCall call) { reviewPage(call,true); }
  @PluginMethod public void reviewReading(PluginCall call) { reviewPage(call,false); }
- private void reviewPage(PluginCall call,boolean question) { getActivity().runOnUiThread(()->{if(closed(call))return;
+ private void reviewPage(PluginCall call,boolean question) { onUi(call,()->{
   Tab tab=tabs.get(call.getString("id"));String owner=session,url=call.getString("url"),navigation=call.getString("navigation");
   java.util.function.BooleanSupplier current=()->!destroyed&&!paused&&Objects.equals(owner,session)&&Objects.equals(session,call.getString("session"))&&tab!=null&&tabs.get(tab.id)==tab&&!tab.dead&&Objects.equals(presentedId,tab.id)&&tab.web.isShown()&&tab.committed&&!tab.loading&&tab.error.isEmpty()&&Objects.equals(url,tab.url)&&Objects.equals(url,tab.web.getUrl())&&Objects.equals(navigation,String.valueOf(tab.navigation))&&url!=null&&url.startsWith("https://");
   if(!current.getAsBoolean()){call.reject("Load a visible HTTPS page before reading");return;}
@@ -1062,9 +1155,9 @@ public class AlphaBrowserPlugin extends Plugin {
   * Privacy, Browser page for Alpha, and the renderer asks only while that is on. Only the tab
   * Browser presents, with the committed HTTPS page the renderer observed; never a private tab.
   * A sensitive address, a page without an isolated world, a slow read or a malformed result
-  * resolves as withheld, with the address (no query for a sensitive one) and title only.
+  * resolves as withheld, with the address (origin only for a sensitive one) and title only.
   */
- @PluginMethod public void pageContext(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;
+ @PluginMethod public void pageContext(PluginCall call) { onUi(call,()->{
   Tab tab=tabs.get(call.getString("id"));String owner=session,url=call.getString("url"),navigation=call.getString("navigation");
   java.util.function.BooleanSupplier current=()->!destroyed&&!paused&&Objects.equals(owner,session)&&Objects.equals(session,call.getString("session"))&&tab!=null&&tabs.get(tab.id)==tab&&!tab.dead&&Objects.equals(presentedId,tab.id)&&tab.committed&&!tab.loading&&tab.error.isEmpty()&&Objects.equals(url,tab.url)&&Objects.equals(url,tab.web.getUrl())&&Objects.equals(navigation,String.valueOf(tab.navigation));
   if(!current.getAsBoolean()){call.reject("Browser page changed","page-changed");return;}
@@ -1076,10 +1169,18 @@ public class AlphaBrowserPlugin extends Plugin {
   BrowserReadingWorld world=tab.readingWorld;
   if(world==null||!world.available()||!world.ready()){withheld.accept(AlphaPageContext.UNREADABLE);return;}
   final boolean[] answered={false};
-  Runnable unreadable=()->{if(answered[0])return;answered[0]=true;withheld.accept(AlphaPageContext.UNREADABLE);};
-  new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(unreadable,1000);
+  final Runnable[] timeoutRef=new Runnable[1];
+  Runnable unreadable=()->{
+   if(answered[0])return;
+   answered[0]=true;
+   if(timeoutRef[0]!=null)navigationHandler.removeCallbacks(timeoutRef[0]);
+   withheld.accept(AlphaPageContext.UNREADABLE);
+  };
+  timeoutRef[0]=unreadable;
+  navigationHandler.postDelayed(unreadable,1000);
   world.evaluate(AlphaPageContext.SCRIPT,encoded->{
    if(answered[0])return;
+   navigationHandler.removeCallbacks(unreadable);
    if(!current.getAsBoolean()){answered[0]=true;call.reject("Browser page changed","page-changed");return;}
    org.json.JSONObject result;
    try{result=AlphaPageContext.accept(new org.json.JSONTokener(encoded).nextValue());}catch(Exception error){result=null;}
@@ -1088,7 +1189,7 @@ public class AlphaBrowserPlugin extends Plugin {
    try{answered[0]=true;JSObject out=JSObject.fromJSONObject(result);out.put("url",address);out.put("title",title);call.resolve(out);}catch(Exception error){answered[0]=false;unreadable.run();}
   },unreadable);
  }); }
- @PluginMethod public void cancelReading(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;if(Objects.equals(session,call.getString("session")))reading.cancel();call.resolve();}); }
+ @PluginMethod public void cancelReading(PluginCall call) { onUi(call,()->{if(Objects.equals(session,call.getString("session")))reading.cancel();call.resolve();}); }
  /** Releases the approved excerpt once to the host's bound speech request. */
  public String consumeReading(PluginCall call)throws Exception{return reading.consume(call);}
  @PluginMethod public void share(PluginCall call) { run(call,t->{
@@ -1100,18 +1201,21 @@ public class AlphaBrowserPlugin extends Plugin {
   shareOutstanding=true;try{pageShare.launch(Intent.createChooser(send,AlphaBrowserCopy.SHARE_PAGE));}catch(RuntimeException failure){shareOutstanding=false;throw failure;}
  }); }
  /** Explicit user handoff of the unchanged visible HTTPS page to an installed browser. */
- @PluginMethod public void openExternalBrowser(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;
+ @PluginMethod public void openExternalBrowser(PluginCall call) { onUi(call,()->{
   Tab t=tabs.get(call.getString("id"));
+  Bridge bridge=getBridge();
   if(!Objects.equals(session,call.getString("session"))||t==null||t.dead||paused||destroyed||shareOutstanding||pickerOutstanding
    ||!Objects.equals(presentedId,t.id)||!t.web.isShown()||!t.committed||t.loading||!t.error.isEmpty()
    ||!Objects.equals(call.getString("navigation"),String.valueOf(t.navigation))||!Objects.equals(call.getString("url"),t.url)||!Objects.equals(t.web.getUrl(),t.url)
-   ||!BrowserExternalPage.allowed(t.url,getBridge().getWebView().getUrl())||(t.priv&&!Boolean.TRUE.equals(call.getBoolean("privateConfirmed")))){call.reject("The visible HTTPS page changed. Review it again before leaving "+config().hostName+".");return;}
+   ||bridge==null||bridge.getWebView()==null||!BrowserExternalPage.allowed(t.url,bridge.getWebView().getUrl())||(t.priv&&!Boolean.TRUE.equals(call.getBoolean("privateConfirmed")))){call.reject("The visible HTTPS page changed. Review it again before leaving "+config().hostName+".");return;}
   java.util.ArrayList<Intent> candidates=externalBrowsers(Uri.parse(t.url));
   if(candidates.isEmpty()){call.reject("No other installed browser can open this page. Use a password or another sign-in method.");return;}
   Intent chooser=Intent.createChooser(candidates.remove(0),AlphaBrowserCopy.OPEN_ELSEWHERE);
   chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS,candidates.toArray(new Intent[0]));
   for(Tab tab:tabs.values())disableAutofill(tab);
-  try{getActivity().startActivity(chooser);call.resolve();}catch(RuntimeException unavailable){call.reject("The other browser could not be opened. Your page remains in "+config().hostName+".");}
+  android.app.Activity activity=getActivity();
+  if(activity==null){call.reject("The other browser could not be opened. Your page remains in "+config().hostName+".");return;}
+  try{activity.startActivity(chooser);call.resolve();}catch(RuntimeException unavailable){call.reject("The other browser could not be opened. Your page remains in "+config().hostName+".");}
  }); }
  /** One VIEW intent per installed full browser other than this app, each bound to its activity. */
  private java.util.ArrayList<Intent> externalBrowsers(Uri page) {
@@ -1131,7 +1235,7 @@ public class AlphaBrowserPlugin extends Plugin {
   * WebView's reason: only that address goes, to the default browser's Custom Tab when it has one,
   * or to the browser chooser. The page must still be the failed one the renderer showed.
   */
- @PluginMethod public void openFailedPage(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;
+ @PluginMethod public void openFailedPage(PluginCall call) { onUi(call,()->{
   Tab t=tabs.get(call.getString("id"));
   if(!Objects.equals(session,call.getString("session"))||t==null||t.dead||t.priv||paused||destroyed||shareOutstanding||pickerOutstanding
    ||!Objects.equals(presentedId,t.id)||!t.frame.isShown()||t.loading||t.elsewhereUrl.isEmpty()
@@ -1141,16 +1245,18 @@ public class AlphaBrowserPlugin extends Plugin {
   if(candidates.isEmpty()){call.reject("No other installed browser can open this page.");return;}
   java.util.ArrayList<String> packages=new java.util.ArrayList<>();for(Intent candidate:candidates)packages.add(candidate.getComponent().getPackageName());
   for(Tab tab:tabs.values())disableAutofill(tab);
+  android.app.Activity activity=getActivity();
+  if(activity==null){call.reject("The other browser could not be opened. Your page remains in "+config().hostName+".");return;}
   try{
    String customTabs=androidx.browser.customtabs.CustomTabsClient.getPackageName(getContext(),packages);
    if(customTabs!=null&&packages.contains(customTabs)){
     androidx.browser.customtabs.CustomTabsIntent custom=new androidx.browser.customtabs.CustomTabsIntent.Builder().setShowTitle(true).setShareState(androidx.browser.customtabs.CustomTabsIntent.SHARE_STATE_OFF).build();
     custom.intent.setPackage(customTabs);if(hostIsHome())custom.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-    custom.launchUrl(getActivity(),page);
+    custom.launchUrl(activity,page);
    }else{
     Intent chooser=Intent.createChooser(candidates.remove(0),AlphaBrowserCopy.OPEN_ELSEWHERE);
     chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS,candidates.toArray(new Intent[0]));
-    getActivity().startActivity(chooser);
+    activity.startActivity(chooser);
    }
    call.resolve();
   }catch(RuntimeException unavailable){call.reject("The other browser could not be opened. Your page remains in "+config().hostName+".");}
@@ -1161,16 +1267,17 @@ public class AlphaBrowserPlugin extends Plugin {
    return home!=null&&home.activityInfo!=null&&getContext().getPackageName().equals(home.activityInfo.packageName);
   } catch(RuntimeException unavailable) { return false; }
  }
- @PluginMethod public void downloads(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;String requested=call.getString("session");if(requested==null||(session!=null&&!Objects.equals(session,requested))){call.reject("Expired browser session");return;}session=requested;for(Tab tab:tabs.values())disableAutofill(tab);String shown=requested;downloads.show(()->{if(destroyed||!Objects.equals(session,shown))return;JSObject event=new JSObject();event.put("session",shown);notifyListeners("showDownloads",event);});call.resolve();}); }
+ @PluginMethod public void downloads(PluginCall call) { onUi(call,()->{String requested=call.getString("session");if(requested==null||(session!=null&&!Objects.equals(session,requested))){call.reject("Expired browser session");return;}session=requested;for(Tab tab:tabs.values())disableAutofill(tab);String shown=requested;downloads.show(()->{if(destroyed||!Objects.equals(session,shown))return;JSObject event=new JSObject();event.put("session",shown);notifyListeners("showDownloads",event);});call.resolve();}); }
  /** Whether website password fill can work in this browser (no secrets, no tab state). */
  @PluginMethod public void loginFillStatus(PluginCall call) { JSObject result=new JSObject(); boolean available=BrowserLoginFields.supported(); result.put("available",available); if(!available)result.put("reason",BrowserFieldOrigin.UNSUPPORTED); call.resolve(result); }
- @PluginMethod public void close(PluginCall call) { getActivity().runOnUiThread(() -> {if(closed(call))return; if (!Objects.equals(session,call.getString("session"))) { call.reject("Expired browser session"); return; } Tab t=tabs.remove(call.getString("id")); if(t!=null) dispose(t); call.resolve(); }); }
- @Override protected void handleOnPause() { paused=true;if(reading!=null)reading.cancel();flushCookies();exitFullscreen(true); for(Tab t:tabs.values()) { clearTimeout(t); syncAutofill(t); t.frame.setHostRectsReceived(false);t.frame.setVisibility(View.GONE); if(!t.dead)t.web.onPause(); } }
+ @PluginMethod public void close(PluginCall call) { onUi(call, () -> { if (!Objects.equals(session,call.getString("session"))) { call.reject("Expired browser session"); return; } Tab t=tabs.remove(call.getString("id")); if(t!=null) dispose(t); call.resolve(); }); }
+ @Override protected void handleOnPause() { paused=true;if(reading!=null)reading.cancel();flushCookies();exitFullscreen(true); for(Tab t:tabs.values()) { clearTimeout(t); syncAutofill(t); t.frame.setHostRectsReceived(false);t.frame.setVisibility(View.GONE); if(!t.dead)t.web.onPause(); } super.handleOnPause(); }
  /** Persist normal-tab sign-in cookies promptly; the process may be killed in background. */
  private void flushCookies() {
   try{if(WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)){androidx.webkit.Profile profile=ProfileStore.getInstance().getProfile(config().persistentProfile);if(profile!=null)profile.getCookieManager().flush();}}catch(Exception unavailable){}
  }
  @Override protected void handleOnResume() {
+  super.handleOnResume();
   paused=false;
   for(Tab t:tabs.values()) if(!t.dead){
    t.web.onResume();
@@ -1180,6 +1287,30 @@ public class AlphaBrowserPlugin extends Plugin {
    JSObject event=state(t);event.put("surfaceResumed",true);notifyListeners("stateChanged",event);
   }
  }
- @Override protected void handleOnDestroy() { destroyed=true;if(reading!=null)reading.cancel();getBridge().removeWebViewListener(hostNavigation);if(downloads!=null)downloads.destroy();dismissSiteDialogs();exitFullscreen(true);if(runtimePermissions!=null)runtimePermissions.unregister();if(takePicture!=null)takePicture.unregister();AutofillManager manager=getActivity().getSystemService(AutofillManager.class);if(manager!=null)manager.unregisterCallback(autofillCallback);cancelFile();if(filePicker!=null)filePicker.unregister();if(pageShare!=null)pageShare.unregister();ArrayList<Tab> all=new ArrayList<>(tabs.values());tabs.clear();
-  for(Tab t:all) dispose(t); session=null; }
+ @Override protected void handleOnDestroy() {
+  destroyed=true;
+  navigationHandler.removeCallbacksAndMessages(null);
+  if(reading!=null)reading.cancel();
+  Bridge bridge=getBridge();
+  if(bridge!=null)bridge.removeWebViewListener(hostNavigation);
+  if(downloads!=null)downloads.destroy();
+  dismissSiteDialogs();
+  exitFullscreen(true);
+  if(runtimePermissions!=null)runtimePermissions.unregister();
+  if(takePicture!=null)takePicture.unregister();
+  if(autofillCallbackRegistered){
+   autofillCallbackRegistered=false;
+   android.app.Activity activity=getActivity();
+   AutofillManager manager=activity==null?null:activity.getSystemService(AutofillManager.class);
+   if(manager!=null)manager.unregisterCallback(autofillCallback);
+  }
+  cancelFile();
+  if(filePicker!=null)filePicker.unregister();
+  if(pageShare!=null)pageShare.unregister();
+  ArrayList<Tab> all=new ArrayList<>(tabs.values());tabs.clear();
+  for(Tab t:all) dispose(t);
+  purgePrivateCameraFiles();
+  session=null;
+  super.handleOnDestroy();
+ }
 }

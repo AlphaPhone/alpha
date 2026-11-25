@@ -38,46 +38,60 @@ public final class AlphaScanPlugin extends Plugin {
         final String id = UUID.randomUUID().toString();
         final File file;
         final long length;
+        FileOutputStream out;
         long wrote;
         boolean picking;
 
-        Draft(File file, long length) {
+        Draft(File file, long length) throws IOException {
             this.file = file;
             this.length = length;
+            this.out = new FileOutputStream(file, false);
+        }
+
+        void closeOut() {
+            FileOutputStream stream = out;
+            out = null;
+            if (stream != null) {
+                try { stream.close(); } catch (IOException ignored) {}
+            }
         }
     }
 
     @Override public void load() {
-        worker.execute(() -> {
+        super.load();
+        PluginWorkers.submit(worker, () -> {
             File[] remains = getContext().getCacheDir().listFiles((directory, filename) -> filename.startsWith("alpha-scan-") && filename.endsWith(".pdf"));
             if (remains != null) {
                 for (File file : remains) file.delete();
             }
-        });
+        }, () -> {});
     }
 
     @PluginMethod public void begin(PluginCall call) {
-        worker.execute(() -> {
+        PluginWorkers.submit(worker, () -> {
             Integer length = call.getInt("length");
             if (inFlight != null || length == null || length < 5 || length > DOCUMENT_LIMIT) {
                 call.reject("A document cannot start", "SCAN_REFUSED");
                 return;
             }
+            File temp = null;
             try {
-                inFlight = new Draft(File.createTempFile("alpha-scan-", ".pdf", getContext().getCacheDir()), length);
+                temp = File.createTempFile("alpha-scan-", ".pdf", getContext().getCacheDir());
+                inFlight = new Draft(temp, length);
                 call.resolve(new JSObject().put("id", inFlight.id));
             } catch (IOException error) {
+                if (temp != null) temp.delete();
                 call.reject("The document could not be prepared", "SCAN_REFUSED", error);
             }
-        });
+        }, () -> call.reject("The document could not be prepared", "SCAN_REFUSED"));
     }
 
     @PluginMethod public void append(PluginCall call) {
-        worker.execute(() -> {
+        PluginWorkers.submit(worker, () -> {
             Draft draft = matching(call);
             String chunk = call.getString("data");
             Integer offset = call.getInt("offset");
-            if (draft == null || draft.picking || offset == null || offset != draft.wrote
+            if (draft == null || draft.picking || draft.out == null || offset == null || offset != draft.wrote
                     || chunk == null || chunk.length() > ((CHUNK_LIMIT + 2) / 3) * 4) {
                 call.reject("The document chunk was refused", "SCAN_REFUSED");
                 return;
@@ -91,41 +105,52 @@ public final class AlphaScanPlugin extends Plugin {
                         || bytes[3] != 'F' || bytes[4] != '-')) {
                     throw new IOException("Invalid PDF signature");
                 }
-                try (FileOutputStream out = new FileOutputStream(draft.file, true)) {
-                    out.write(bytes);
-                }
+                draft.out.write(bytes);
                 draft.wrote += bytes.length;
+                if (draft.wrote == draft.length) {
+                    draft.out.flush();
+                    draft.closeOut();
+                }
                 call.resolve();
             } catch (IOException | IllegalArgumentException error) {
                 retire(draft);
                 call.reject("The document could not be prepared", "SCAN_REFUSED", error);
             }
-        });
+        }, () -> call.reject("The document chunk was refused", "SCAN_REFUSED"));
     }
 
     @PluginMethod public void save(PluginCall call) {
-        worker.execute(() -> {
+        PluginWorkers.submit(worker, () -> {
             Draft draft = matching(call);
-            if (draft == null || draft.picking || draft.wrote != draft.length) {
+            Activity activity = getActivity();
+            if (draft == null || draft.picking || draft.wrote != draft.length
+                    || activity == null || !AlphaDevicePlugin.shareForeground(activity)) {
                 call.resolve(status(false, true));
                 return;
             }
+            draft.closeOut();
             draft.picking = true;
             Intent intent = DocumentDestinations.create("application/pdf", "Scanned document.pdf")
                     .addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-            getActivity().runOnUiThread(() -> {
+            activity.runOnUiThread(() -> {
+                if (!AlphaDevicePlugin.shareForeground(activity)) {
+                    PluginWorkers.submit(worker, () -> { draft.picking = false; call.resolve(status(false, true)); },
+                            () -> call.resolve(status(false, true)));
+                    return;
+                }
                 try {
                     startActivityForResult(call, intent, "picked");
                 } catch (RuntimeException error) {
-                    worker.execute(() -> { retire(draft); call.resolve(status(false, true)); });
+                    PluginWorkers.submit(worker, () -> { retire(draft); call.resolve(status(false, true)); },
+                            () -> { draft.closeOut(); draft.file.delete(); call.resolve(status(false, true)); });
                 }
             });
-        });
+        }, () -> call.resolve(status(false, true)));
     }
 
     @ActivityCallback private void picked(PluginCall call, ActivityResult result) {
         if (call == null) return;
-        worker.execute(() -> {
+        PluginWorkers.submit(worker, () -> {
             Draft draft = matching(call);
             Intent data = result.getData();
             Uri uri = data == null ? null : data.getData();
@@ -140,6 +165,7 @@ public final class AlphaScanPlugin extends Plugin {
             }
             DocumentExport.Outcome outcome;
             try {
+                draft.closeOut();
                 outcome = write(draft, uri);
             } finally {
                 retire(draft);
@@ -161,7 +187,7 @@ public final class AlphaScanPlugin extends Plugin {
                 }
             }
             call.resolve(receipt);
-        });
+        }, () -> call.resolve(status(false, false)));
     }
 
     private DocumentExport.Outcome write(Draft draft, Uri uri) {
@@ -205,11 +231,11 @@ public final class AlphaScanPlugin extends Plugin {
     }
 
     @PluginMethod public void abandon(PluginCall call) {
-        worker.execute(() -> {
+        PluginWorkers.submit(worker, () -> {
             Draft draft = matching(call);
             if (draft != null && !draft.picking) retire(draft);
             call.resolve();
-        });
+        }, call::resolve);
     }
 
     private Draft matching(PluginCall call) {
@@ -217,6 +243,7 @@ public final class AlphaScanPlugin extends Plugin {
     }
 
     private void retire(Draft draft) {
+        draft.closeOut();
         draft.file.delete();
         if (inFlight == draft) inFlight = null;
     }
@@ -226,7 +253,8 @@ public final class AlphaScanPlugin extends Plugin {
     }
 
     @Override protected void handleOnDestroy() {
-        worker.execute(() -> { if (inFlight != null) retire(inFlight); });
+        PluginWorkers.submit(worker, () -> { if (inFlight != null) retire(inFlight); }, () -> {});
         worker.shutdown();
+        super.handleOnDestroy();
     }
 }

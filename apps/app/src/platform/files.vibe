@@ -3,12 +3,13 @@ import type { ElizaFilesPlugin } from "@elizaos/os-bridges"
 import { registered } from "./device.vibe"
 
 module held {
-  import { filesClient } from "@elizaos/os-bridges"
+  import { filesClient, type ElizaFilesPlugin } from "@elizaos/os-bridges"
+  import { plugin as capacitorPlugin } from "./capacitor.ts"
 
   let made: ReturnType<typeof filesClient> | undefined
   /** eliza's client of the plugin, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
   export function client(): ReturnType<typeof filesClient> {
-    return (made ??= filesClient())
+    return (made ??= filesClient(capacitorPlugin<ElizaFilesPlugin>("ElizaFiles")))
   }
 }
 import { client } from held
@@ -39,10 +40,10 @@ const name = "ElizaFiles"
 export const phoneFiles = Layer.sync(Files, () => {
   if (!registered(name)) return { plugin: Option.none(), changed: Stream.empty }
   const plugin = client()
-  const changed = Stream.callback<void>((queue) => acquireRelease(
-    promise(() => plugin.addListener("storageChanged", () => { Queue.offerUnsafe(queue, undefined) })),
-    (handle) => promise(() => handle.remove()),
-  ))
+  const changed = Stream.callback<void>((queue) => Effect.asVoid(acquireRelease(
+    Effect.orElseSucceed(tryPromise(() => plugin.addListener("storageChanged", () => { Queue.offerUnsafe(queue, undefined) })), () => undefined),
+    (handle) => handle === undefined ? Effect.void : ignore(tryPromise(() => handle.remove())),
+  )))
   return { plugin: Option.some(plugin), changed }
 })
 
