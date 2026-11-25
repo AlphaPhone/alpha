@@ -713,7 +713,7 @@ describe("Settings", () => {
   });
 
   it("Shows Carrier setup guidance on the web without exposing phone identifiers", async () => {
-    const alpha = await open(scene());
+    const { alpha } = await open(scene());
     await press("Settings");
     await press("General");
     expect(button("Wi-Fi")).toBeUndefined();
