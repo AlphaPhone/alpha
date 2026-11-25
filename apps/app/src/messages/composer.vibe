@@ -244,7 +244,7 @@ function journaled(id: number, recipients: number): Stream.Stream<Event, never, 
     const held = try store.outgoing()
     if (Option.isNone(held) || !canDigest()) return denied
     const send = held.value
-    const current = effect {
+    const current = effect () => {
       const { outgoing } = try composer.get()
       return outgoing.op.id === id && outgoing.op.outcome === "Recorded" && outgoing.thread === send.thread
         && outgoing.recipients === recipients && send.to.length === recipients && clear(try phone.get())
