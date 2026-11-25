@@ -8,7 +8,7 @@ import { PhotosPort, canReplaceBrowserEdit, isBrowserEdit, type BrowserSource } 
 import { photoRefusal, renderBrowserPhoto, type BrowserEditFrame, type PhotoLook } from "../platform/photoCanvas.vibe"
 import { clipRefusal, renderBrowserClip } from "../platform/videoCanvas.vibe"
 import { Catalog } from "./catalog.vibe"
-import { answer, applying, reacting, run, together, type Job } from "../runtime/reactor.vibe"
+import { answer, applying, reacting, run, started, together, type Job } from "../runtime/reactor.vibe"
 import { say, type Said } from "../notices/toasts.vibe"
 import { handOver } from "../inbox/adding.vibe"
 import { attachToAlpha } from "../assistant/attachments.vibe"
@@ -110,7 +110,7 @@ effect function loaded(ticket: number, photo: number): Viewer.Event!!(Viewer.Mac
     const duration = kind === "Clip" ? Math.max(1, Math.round((source.item.duration ?? 0) * 10)) : 0
     if (!Viewer.canLoaded(try viewing.get(), ticket, kind, duration, "Phone")) return failed(ticket)
     try (try OpenedPhoto).hold({ photo, uri: localUri(source.file), local: true, browser: source })
-    return { type: "loaded", ticket, ok: true, kind, duration, revision: try cache.revision(), favourite: false }
+    return { type: "loaded", ticket, ok: true, kind, duration, revision: try cache.revision(), favourite: source.item.favorite === true }
   }
   if (Option.isNone(phone)) return failed(ticket)
   const item = tryPromise(() => phone.value.read({ id: row.item.id, includeTrashed: row.item.trashed === true })) catch () => undefined
@@ -326,5 +326,31 @@ const releasing = applying(Viewer.Machine, (s) => ({ photo: s.open, editing: s.e
   if (photo === 0) try (try OpenedPhoto).hold(emptyMedia)
 })
 
+const browserUpdates = started(effect {
+  const library = try Library.Machine
+  const viewer = try Viewer.Machine
+  const open = try OpenedPhoto
+  const { capture } = try PhotosPort
+  const cache = try Catalog
+  try Stream.runForEach(library.changes, effect (state) => {
+    if (!state.visible || state.library.status !== "Loaded") return
+    const view = try viewer.get()
+    const current = try open.current()
+    const source = current.browser
+    if (source === undefined || current.photo !== view.open || !Viewer.canItemChanged(view, "Phone")) return
+    const row = (try cache.displayed()).rows.get(view.open)
+    if (row?.kind !== "browser" || row.item.revision === source.item.revision) return
+    const fresh = capture(row.item.id) catch () => undefined
+    const now = try viewer.get()
+    if (fresh === undefined || now.open !== view.open || (try open.current()) !== current || !Viewer.canItemChanged(now, "Phone")) return
+    if (fresh.item.trashedAt !== undefined && source.item.trashedAt === undefined) {
+      try ignore(viewer.send({ type: "deleted" }, "Phone"))
+      return
+    }
+    try open.hold({ photo: view.open, uri: localUri(fresh.file), local: true, browser: fresh })
+    try ignore(viewer.send({ type: "itemChanged", revision: state.revision, favourite: fresh.item.favorite === true }, "Phone"))
+  })
+}, "refreshing an open browser photo")
+
 /** The viewer's hands, over its rule-owned playback and edit state. */
-export const viewer = together(opened, reacting(Viewer, { keep: 1, open: [{ type: "restart" }, "Phone"], carry }), releasing)
+export const viewer = together(opened, reacting(Viewer, { keep: 1, open: [{ type: "restart" }, "Phone"], carry }), releasing, browserUpdates)
