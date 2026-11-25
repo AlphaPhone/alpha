@@ -76,6 +76,9 @@ const made = () => Schema.Struct({ conversation: titled })
 const page = () => Schema.Struct({ messages: Schema.Array(Schema.Struct({ id: Schema.String, role: Schema.Literals(["user", "assistant"]), text: Schema.String, clientMessageId: Schema.optionalKey(Schema.String), failureKind: Schema.optionalKey(Schema.String), cloudCode: Schema.optionalKey(Schema.String) })) })
 const hits = () => Schema.Struct({ results: Schema.Array(Schema.Struct({ conversationId: Schema.NonEmptyString, roomId: Schema.NonEmptyString, messageId: Schema.String, text: Schema.String })) })
 
+// Eliza's pinned history contract projects a redacted body to this exact text.
+const privateHistoryNotice = "[Private information removed]"
+
 const slotted = Schema.fromJsonString(Schema.Struct({ revision: Schema.Int, text: Schema.String, sending: Schema.Boolean }))
 
 const pageSize = 20
@@ -597,7 +600,11 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
     const authority = try attachmentAuthority()
     const pivot = around > 0 ? board.messageId(around) : undefined
     const { messages } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(known.record.id)}/messages`, { urlParams: pivot === undefined ? {} : { around: pivot } }), page())
-    const keys = messages.flatMap((one) => (one.role === "user" && one.clientMessageId ? [one.clientMessageId] : []))
+    const redacted = new Set(messages.filter((one) => one.text === privateHistoryNotice).map((one) => one.id))
+    const keys = messages.flatMap((one) => {
+      const key = one.clientMessageId
+      return key !== undefined && Attachments.archiveRowNamesFile(one.role === "user", redacted.has(one.id), key) ? [key] : []
+    })
     const saved = authority === undefined ? undefined : try readFiles({ authority, conversation: known.record.id, room: known.record.roomId }, keys)
     const currentOwner = (saved?.size ?? 0) === 0 ? authority : try attachmentAuthority()
     const current = try (try Chats.Machine).get()
@@ -606,15 +613,18 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
     const recorded = messages.map((one): Line => {
       const key = one.clientMessageId
       const attachments = key !== undefined && authority !== undefined && currentOwner !== undefined &&
-        Attachments.archiveReadAdmitted(authority, currentOwner, one.role === "user", key) ? saved?.get(key) : undefined
+        Attachments.archiveReadAdmitted(authority, currentOwner, one.role === "user", redacted.has(one.id), key) ? saved?.get(key) : undefined
       return {
         id: one.id, mine: one.role === "user", text: one.text,
         ...(one.failureKind === undefined ? {} : { failure: one.cloudCode === undefined ? failures[one.failureKind] ?? "OtherFailure" : "OutOfFunds" }),
         ...(attachments === undefined ? {} : { attachments }),
       }
     })
-    const ids = new Set(recorded.map((one) => one.id))
-    board.putPage(ticket, conversation, [...recorded, ...board.page(ticket).filter((one) => !ids.has(one.id))])
+    const preview = board.takeHistory(ticket, conversation, recorded, redacted)
+    if (preview !== undefined) {
+      const picker = try Attachments.Machine
+      try ignore(picker.send({ type: "closePreview" }, (state) => state.preview === preview && board.snapshot().preview === undefined))
+    }
     const numbers = messages.map((one) => board.messageNumber(one.id))
     return { type: "paged", ticket, ok: true, messages: Math.max(0, ...numbers) }
   } catch (failure) => (around === 0 && failure instanceof Refused && failure.status === 404 ? { type: "notFound", ticket } : { type: "paged", ticket, ok: false, messages: 0 })
