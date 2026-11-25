@@ -4,6 +4,7 @@ import { Check, Heart, Image, Play } from "lucide-react";
 import { memo, useCallback, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type MouseEvent, type ReactNode, type TouchEvent, type UIEvent } from "react";
 import { cn } from "@repo/ui";
 import type { Density } from "../../gen/app__photos.ts";
+import { headingOf } from "../runtime/dateHeading.ts";
 import { taken, type Row } from "./catalog.vibe";
 import { thumbnailBatch, viewportThumbnails } from "./photos.vibe";
 
@@ -134,24 +135,7 @@ type TileProps = {
   readonly focus: (button: HTMLButtonElement | null) => void;
 };
 
-/** Days within this many days of today have a heading of their own, as in v121; older items are grouped by month. */
-const dayHeadings = 30;
 const timeOfDay = new Intl.DateTimeFormat(undefined, { timeStyle: "short" });
-
-const startOfDay = (at: number) => new Date(at).setHours(0, 0, 0, 0);
-
-/** The section heading or the exact day of an individual photo. */
-export function headingOf(at: number, now: number, exactDay = false): string {
-  const ago = Math.round((startOfDay(now) - startOfDay(at)) / 86_400_000);
-  const shot = new Date(at);
-  if (ago <= 0) return "Today";
-  if (ago === 1) return "Yesterday";
-  if (ago < dayHeadings || exactDay) {
-    const includeYear = ago >= dayHeadings || shot.getFullYear() !== new Date(now).getFullYear();
-    return shot.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", ...(includeYear ? { year: "numeric" } : {}) });
-  }
-  return shot.toLocaleDateString("en-US", { month: "long", year: "numeric" });
-}
 
 function timing(seconds: number): string {
   const whole = Math.max(0, Math.floor(seconds));

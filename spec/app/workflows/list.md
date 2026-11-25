@@ -63,12 +63,16 @@ pure def listRead(l: Listing, ticket: int, ok: bool, count: int, complete: bool)
 
 ### From the list the owner can open a row, Add to Workflows, or the digests; Back returns to the same filters
 
+Anyone can open the Add page to see the available choices. Reading the
+agent's rows, creating a routine on the agent and opening hosted digests
+still depend on the signed-in owner.
+
 ```quint
 pure def canOpenRow(l: Listing, row: int): bool = l.place == ListingRows and not(l.sheet) and l.owner >= 1 and l.count >= 1 and row >= 1
 
 pure def openRow(l: Listing, row: int): Listing = { ...l, place: ListingDetail({ row: row }) }
 
-pure def canOpenAdd(l: Listing): bool = l.place == ListingRows and not(l.sheet) and l.owner >= 1
+pure def canOpenAdd(l: Listing): bool = l.place == ListingRows and not(l.sheet)
 
 pure def openAdd(l: Listing): Listing = { ...l, place: ListingAdd }
 
