@@ -1,0 +1,114 @@
+// spec/app/digests/index.md, "Story: See my digests"; spec/app/digests/index.md, "Story: Receive results without losing or repeating one"; spec/app/digests/index.md, "Story: Keep digests to their owner and through a restart"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { type WorkflowRequest, workflowHttpError, hostedDigestProtocol } from "@elizaos/plugin-workflow-client"
+import * as Digests from "../../gen/app__digests.effect.vibe"
+import { Machine as Listing } from "../../gen/app__workflows__list.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { Device, native } from "../platform/device.vibe"
+import { type ResidentOwner, launchOwnerAt, sameResidentOwner } from "../platform/owner.vibe"
+import { applying, started, together } from "../runtime/reactor.vibe"
+import { WorkflowsApi } from "./api.vibe"
+import { DigestHistory, digestScope } from "./brief.vibe"
+import { Rows } from "./list.vibe"
+
+module page {
+  /** The shell's origin-wide page lock is only available on browsers with Web Locks. @throws {never} */
+  export function locksAvailable(): boolean {
+    return typeof navigator !== "undefined" && "locks" in navigator
+  }
+}
+import { locksAvailable } from page
+
+const browserChecks = (): boolean => !native() && locksAvailable()
+const preference = (identity: ResidentOwner): string => `${digestScope(identity)}/visible-checks`
+
+const binding = applying(Listing, (state) => ({ owner: state.owner, open: state.place.tag === "ListingDigests" }), effect ({ owner, open }) => {
+  if (!browserChecks()) return
+  const model = try Digests.Machine
+  if ((try model.get()).owner !== owner) {
+    const store = try KeyValueStore.KeyValueStore
+    const identity = owner > 0 ? (launchOwnerAt() catch () => undefined) : undefined
+    const verified = identity !== undefined && (try (try Rows).sameDigestOwner(identity, owner))
+    const backgroundOn = identity !== undefined && verified && (store.get(preference(identity)) catch () => undefined) === "on"
+    if ((try (try Listing).get()).owner !== owner) return
+    try ignore(model.send({ type: "ownerChanged", owner: verified ? owner : 0, backgroundOn, noticesOn: false }))
+  }
+  try ignore(model.send(open ? { type: "openPanel", checks: "ResultChecks" } : { type: "closePanel" }))
+})
+
+/** Save the switch for this verified owner, then tell the model whether the save was accepted. */
+export effect function setBrowserDigestChecks(owner: number, on: boolean): void!!(Agent | Device | Digests.Machine | KeyValueStore.KeyValueStore | Listing | Rows) {
+  if (!browserChecks()) return
+  const model = try Digests.Machine
+  const list = try Listing
+  const rows = try Rows
+  const device = try Device
+  const store = try KeyValueStore.KeyValueStore
+  const identity = launchOwnerAt() catch () => undefined
+  const listing = try list.get()
+  if (identity === undefined || listing.owner !== owner || listing.place.tag !== "ListingDigests" ||
+    !(try rows.sameDigestOwner(identity, owner)) || !(try device.showing())) return
+  const moved = model.send({ type: "setBackground", on }, (state) => state.owner === owner) catch () => undefined
+  const request = moved?.out.find((command) => command.tag === "SetBackground")
+  if (request?.tag !== "SetBackground") return
+  const applied = effect {
+    const confirmed = launchOwnerAt() catch () => undefined
+    if (!sameResidentOwner(identity, confirmed) || !(try rows.sameDigestOwner(identity, owner))) return false
+    try store.set(preference(identity), request.on ? "on" : "off")
+    return true
+  } catch () => false
+  try ignore(model.send({ type: "backgroundAnswered", id: request.id, applied }, (state) => state.owner === owner))
+}
+
+function canCheck(state: Digests.Digests, owner: number): boolean {
+  return state.owner === owner && !state.open && Digests.pullAllowed(state)
+}
+
+const checks = started(effect {
+  if (!browserChecks()) return
+  const model = try Digests.Machine
+  const device = try Device
+  const rows = try Rows
+  const list = try Listing
+  const agent = try Agent
+  const { request } = try WorkflowsApi
+  const inbox = try DigestHistory
+
+  const poll = effect (owner: number): void!!Agent => {
+    const identity = launchOwnerAt() catch () => undefined
+    if (identity === undefined) return
+    const allowed = effect {
+      return canCheck(try model.get(), owner) && (try list.get()).owner === owner &&
+        (try rows.sameDigestOwner(identity, owner)) && (try device.showing())
+    }
+    if (!(try allowed)) return
+    const ownsRequest = effect {
+      const current = Effect.provideService(launchOwnerAt(), Agent, agent) catch () => undefined
+      return sameResidentOwner(identity, current) && (try allowed)
+    }
+    const checked: WorkflowRequest = effect (path: string, body: unknown) => {
+      if (!(try ownsRequest)) throw workflowHttpError(0, {})
+      const received = try request(path, body)
+      if (!(try ownsRequest)) throw workflowHttpError(0, {})
+      return received
+    }
+    const protocol = hostedDigestProtocol(checked)
+    const capabilities = protocol.capabilities() catch () => undefined
+    if (capabilities?.digests && (try allowed)) try inbox.sync(identity, protocol)
+  }
+
+  const visibility = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
+  const active = Stream.changes(Stream.zipLatestWith(model.changes, visibility, (state, visible) =>
+    visible && canCheck(state, state.owner) ? state.owner : 0))
+  const watching = Stream.switchMap(active, (owner) => owner === 0 ? Stream.empty : Stream.concat(
+    Stream.fromEffectDrain(poll(owner)),
+    Stream.fromEffectRepeat(effect {
+      try sleep("60 seconds")
+      try poll(owner)
+    }),
+  ))
+  try Stream.runDrain(watching)
+}, "checking for scheduled digests while the browser is visible")
+
+/** Browser consent and scheduling. The SDK inbox owns durable result and acknowledgement rounds. */
+export const browserDigestDelivery = together(Digests.machine(), binding, checks)

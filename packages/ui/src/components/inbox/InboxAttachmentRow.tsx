@@ -27,7 +27,7 @@ export function InboxAttachmentRow({ name, size, onOpen, onSave, saveUnconfirmed
     <div className="flex max-w-full items-center gap-2">
       <button
         type="button"
-        aria-label={`Open ${name}`}
+        aria-description="Open attachment"
         disabled={!onOpen}
         onClick={onOpen}
         className={cn(focusRing, "flex max-w-full min-w-0 items-center gap-3 rounded-tile bg-secondary py-3 pr-4.5 pl-3.5 text-left text-secondary-foreground")}

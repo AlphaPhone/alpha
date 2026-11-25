@@ -1,6 +1,6 @@
 // spec/app/platform/index.md, "Story: Talk to the resident agent"
 import { Agent } from "./agent.vibe"
-import { type Failure, ask } from "./remote.vibe"
+import { type Failure, Garbled, ask } from "./remote.vibe"
 
 const LocalOwner = Schema.Struct({
   identity: Schema.Struct({ kind: Schema.Literal("owner"), id: Schema.NonEmptyString }),
@@ -11,4 +11,35 @@ const LocalOwner = Schema.Struct({
 export effect function ownerAt(): string!Failure!Agent {
   const owner = try ask(Agent, HttpClientRequest.get("/api/auth/me"), LocalOwner)
   return owner.identity.id
+}
+
+/** The owner of the currently serving launch, paired with its resident agent. */
+export interface ResidentOwner {
+  readonly agentId: string
+  readonly identityId: string
+}
+
+const CapabilitiesOwner = Schema.Struct({
+  protocol: Schema.Literal(1),
+  agentId: Schema.NonEmptyString,
+  identityId: Schema.NonEmptyString,
+})
+
+/** The device offer attests the launch owner for the agent named by local auth. */
+export effect function launchOwnerOf(agentId: string): ResidentOwner!Failure!Agent {
+  const offer = try ask(Agent, HttpClientRequest.get("/api/client-devices/capabilities"), CapabilitiesOwner)
+  if (offer.agentId !== agentId) throw new Garbled({ cause: "Resident agent changed" })
+  return { agentId, identityId: offer.identityId }
+}
+
+export effect function launchOwnerAt(): ResidentOwner!Failure!Agent {
+  return try launchOwnerOf(try ownerAt())
+}
+
+export function residentOwnerKey(owner: ResidentOwner): string {
+  return JSON.stringify([owner.agentId, owner.identityId])
+}
+
+export function sameResidentOwner(first: ResidentOwner, second: ResidentOwner | undefined): boolean {
+  return second !== undefined && first.agentId === second.agentId && first.identityId === second.identityId
 }

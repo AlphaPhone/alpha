@@ -8,6 +8,8 @@ export interface CameraScene {
   microphone: CameraGrant;
   preview: CameraPreviewOptions | undefined;
   startGate: Promise<unknown>;
+  recordingGate?: Promise<void>;
+  volumeShutter: boolean;
   readonly photos: PhotoCaptureOptions[];
   readonly modes: string[];
   readonly focus: Array<{ x: number; y: number }>;
@@ -15,8 +17,18 @@ export interface CameraScene {
 }
 
 export const cameraScene = (): CameraScene => ({
-  permission: "granted", microphone: "granted", preview: undefined, startGate: Promise.resolve(), photos: [], modes: [], focus: [], savedVideos: [],
+  permission: "granted", microphone: "granted", preview: undefined, startGate: Promise.resolve(), volumeShutter: false, photos: [], modes: [], focus: [], savedVideos: [],
 });
+
+/** The native key interceptor records the latest setting sent by Camera. */
+export function cameraKeys(world: CameraScene) {
+  return {
+    setVolumeShutter({ enabled }: { enabled: boolean }) {
+      world.volumeShutter = enabled;
+      return Promise.resolve();
+    },
+  };
+}
 
 export function elizaCamera(world: CameraScene): Faked {
   const settings: CameraSettings = {
@@ -64,6 +76,7 @@ export function elizaCamera(world: CameraScene): Faked {
     },
     async startRecording() {
       if (world.preview === undefined) throw rejection("No live view", "PREVIEW_STOPPED");
+      await world.recordingGate;
     },
     async stopRecording() {
       const path = `content://media/external/video/media/${world.savedVideos.length + 1}`;

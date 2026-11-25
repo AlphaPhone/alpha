@@ -39,6 +39,9 @@ import {
 } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import { type ReactNode, useState } from "react";
+import * as Records from "../../gen/app__account__records.ts";
+import { useMachine as useRecords } from "../../gen/app__account__records.react.ts";
+import type { Machine as RecordsMachine } from "../../gen/app__account__records.effect.vibe";
 import * as ActivityGen from "../../gen/app__settings__activity.ts";
 import { useMachine as useActivity } from "../../gen/app__settings__activity.react.ts";
 import type { Machine as ActivityMachine } from "../../gen/app__settings__activity.effect.vibe";
@@ -61,6 +64,9 @@ import { useMachine as useDeveloper } from "../../gen/app__settings__developer.r
 import type { Machine as DeveloperMachine } from "../../gen/app__settings__developer.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Machine as ShellMachine } from "../../gen/app__shell.effect.vibe";
+import { useMachine as useLayers } from "../../gen/app__shell__layers.react.ts";
+import type { Machine as LayersMachine } from "../../gen/app__shell__layers.effect.vibe";
+import { pageInert } from "../../gen/app__shell__layers.ts";
 import type { Alpha } from "../runtime/area.tsx";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
@@ -71,7 +77,7 @@ import { AppBack } from "../shell/AppBack.tsx";
 import { AccountStatus } from "../account/index.tsx";
 
 /** What every Settings page reads: where the owner is, the phone's facts, the hand-overs to Android, the preferences, the reset and the developer tools. */
-export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | FactsMachine | AccessReviewMachine | ActivityMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ShellMachine | Time, unknown>;
+export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | FactsMachine | AccessReviewMachine | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ShellMachine | LayersMachine | Time, unknown>;
 
 /** What the frame gives each page: the runtime, Alpha's places, and the props every page shares. */
 export interface PageProps {
@@ -413,8 +419,18 @@ const agentWords: Record<ActivityGen.AgentWord, NonNullable<Parameters<typeof Se
 /** Agent activity as reported by the resident host, with the conversation controls owned by Ask Alpha. */
 function Activity({ runtime, alpha, common }: PageProps) {
   const { state, can, send } = useTimed(runtime, useActivity);
-  if (!state) return null;
-  const retry = { type: "recover", how: "Retry", connection: state.connection } as const;
+  const records = useRecords(runtime);
+  const layers = useLayers(runtime).state;
+  if (!state || !records.state || !layers) return null;
+  const recovery = { type: "recover", how: state.connection === "NeedsRestart" ? "Restart" : "Retry", connection: state.connection } as const;
+  const review = records.state;
+  const archive = { type: "archive", review: review.review.ticket, reviewing: state.connection === "NeedsRestart", held: pageInert(layers) } as const;
+  const close = { type: "closeReview" } as const;
+  const canConfirm = records.can(archive);
+  const archiving = review.attempt.outcome === "Sent";
+  const needsPhoneRestart = Records.phoneMustRestart(review);
+  const canRecover = can(recovery) && Records.canOpened(review);
+  const dismiss = () => { if (records.can(close)) void records.send(close); };
   const refresh = { type: "refreshActions", connection: state.connection, at: untimed } as const;
   const decline = (proposal: string) => ({ type: "decline", proposal, connection: state.connection, at: untimed }) as const;
   const settle = (proposal: string, happened: boolean) => ({ type: "reconcileAction", proposal, happened, connection: state.connection, at: untimed }) as const;
@@ -429,9 +445,26 @@ function Activity({ runtime, alpha, common }: PageProps) {
       onRefresh={can(refresh) ? () => void send(refresh) : undefined}
       onDecline={(proposal) => { if (can(decline(proposal))) void send(decline(proposal)); }}
       onReconcile={(proposal, happened) => { if (can(settle(proposal, happened))) void send(settle(proposal, happened)); }}
-      onRecover={can(retry) ? () => void send(retry) : undefined}
+      onRecover={canRecover ? () => void send(recovery) : undefined}
       onHandOver={common.onHandOver}
     >
+      {needsPhoneRestart ? <Banner variant="warn">Alpha couldn’t confirm the archive. Restart your phone before trying again.</Banner> : null}
+      {review.showing && !canConfirm && !archiving ? (
+        <Banner variant={review.review.status === "Loading" ? "info" : "warn"}>
+          {review.review.status === "Loading" ? "Checking retained records…" : "Alpha couldn’t confirm the recovery. Close this review and try again."}
+          <Button variant="ghost" size="sm" onClick={dismiss}>Close review</Button>
+        </Banner>
+      ) : null}
+      <ConfirmDialog
+        open={review.showing && (canConfirm || archiving)}
+        title="Restart Alpha?"
+        confirmLabel="Archive and restart"
+        loading={archiving}
+        onConfirm={() => { if (canConfirm) void records.send(archive); }}
+        onCancel={dismiss}
+      >
+        Archive {review.kept} {review.kept === 1 ? "record" : "records"} held by the failed agent and restart it.
+      </ConfirmDialog>
       {alpha.slot("settings/activity")}
     </SettingsActivityPage>
   );

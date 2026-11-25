@@ -157,7 +157,7 @@ module capacitor {
   }
 }
 import { type SavedNoteWindow, localPlugin, makeAbort, makeSessionGuard, readSavedNote, readVoicemail, relayPlugin, signInAccounts } from capacitor
-export { type SavedNoteWindow, readSavedNote }
+export { type SavedNoteWindow, readSavedNote, signInAccounts }
 
 export error VoiceBridgeFailed { method: string; cause: unknown }
 /** Recognition ran on the confirmed clip, stayed in custody, or could not start. */
@@ -214,7 +214,7 @@ export effect function transcribeVoicemail(id: string): string!VoiceBridgeFailed
 const CLOUD_STREAM_PLUGIN = "ElizaCloudSpeech"
 const SIGN_IN_PLUGIN = "ElizaSignIn"
 /** The cloud the phone signs in to, whose account the relay speaks for. */
-const CLOUD_ENVIRONMENT = "production" as EnvironmentName
+export const CLOUD_ENVIRONMENT = "production" as EnvironmentName
 /** How long a background call to the relay, a warm-up or its timing records, may run before it is dropped. */
 const RELAY_WARMUP_BOUND = "5 seconds"
 
@@ -458,8 +458,10 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
       return capture.fullDuplex
     }
     if (!registered(LOCAL_PLUGIN)) throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "no-voice-plugin" })
-    const probed = cachedStatus ?? (try probeStatus(true))
-    if (!probed.liveCapture) throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "resident-speech-transport-unavailable" })
+    const live = tryPromise(() => localPlugin().liveCaptureStatus({})) catch () => undefined
+    if (live?.available !== true || live.nativeTransport !== true) {
+      throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "resident-speech-transport-unavailable" })
+    }
     if (!(try restoreLocalOutput((owner) => owner !== session))) {
       throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "speaker-reset-unconfirmed" })
     }
