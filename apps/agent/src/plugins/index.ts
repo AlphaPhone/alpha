@@ -39,3 +39,4 @@ export const alphaAppsModule: ModuleFactory<never> = (context: ModuleContext) =>
 };
 
 export { AlphaAppsStore } from "./store.ts";
+export { makeNativeNotesCleanup } from "./notes-cleanup.vibe";

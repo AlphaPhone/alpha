@@ -335,7 +335,6 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/notes/interact", stream: false },
   { method: Post, path: "/api/notes/trash/erase", stream: false },
   { method: Get, path: "/api/notes/trash/recordings", stream: false },
-  { method: Post, path: "/api/notes/trash/recordings/complete", stream: false },
   { method: Get, path: "/api/workflow/status", stream: false },
   { method: Get, path: "/api/workflow/hosted/loops", stream: false },
   { method: Post, path: "/api/workflow/hosted/loops", stream: false },
@@ -428,7 +427,22 @@ pure val nativeDigestRoutes: List[Route] = List(
   { method: Get, path: "/api/workflow/hosted/results", stream: false },
   { method: Post, path: nativeDigestAck, stream: false },
 )
-pure val nativeRoutes = nativeSpeechRoutes.concat(nativeDigestRoutes)
+```
+
+### Only the phone's native channel can verify that a reviewed recording was erased
+
+Android names the pending receipt and its serving owner, agent and epoch.
+Only the native route can ask to prepare that exact receipt or confirm it
+from the phone's durable removal evidence. In either phase the resident
+requires its current reserved receipt with no saved references. The Notes
+service clears the receipt only after receiving its proof in that request.
+The page can read pending receipts. It cannot complete them.
+
+```quint
+pure val nativeNotesCleanup = "/api/alpha-runtime/notes-recording-cleanup"
+pure val nativeNotesCleanupLimit = 2048
+pure val nativeRecordingRoutes: List[Route] = List({ method: Post, path: nativeNotesCleanup, stream: false })
+pure val nativeRoutes = nativeSpeechRoutes.concat(nativeDigestRoutes).concat(nativeRecordingRoutes)
 pure def nativeRoutesAdmitted(listed: List[Route]): bool =
   listed.length() == nativeRoutes.length() and listed.every(route => nativeRoutes.includes(route))
     and nativeRoutes.every(route => listed.includes(route))

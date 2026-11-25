@@ -286,6 +286,12 @@ importers:
       '@elizaos/agent-host':
         specifier: link:../../.eliza/packages/agent-host
         version: link:../../.eliza/packages/agent-host
+      '@elizaos/plugin-notes':
+        specifier: link:../../.eliza/packages/plugin-notes
+        version: link:../../.eliza/packages/plugin-notes
+      '@elizaos/plugin-notes-client':
+        specifier: link:../../.eliza/packages/plugin-notes-client
+        version: link:../../.eliza/packages/plugin-notes-client
       '@repo/deployment':
         specifier: workspace:*
         version: link:../../packages/deployment
