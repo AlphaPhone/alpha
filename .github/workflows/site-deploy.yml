@@ -61,4 +61,4 @@ jobs:
             echo "The Pages project alphaphone publishes $production, not vibestack: this upload would be a preview." >&2
             exit 1
           fi
-          npx --yes wrangler@4.166.0 pages deploy dist --project-name=alphaphone --branch=vibestack --commit-hash="$GITHUB_SHA" --commit-dirty=false
+          pnpm dlx wrangler@4.166.0 pages deploy dist --project-name=alphaphone --branch=vibestack --commit-hash="$GITHUB_SHA" --commit-dirty=false

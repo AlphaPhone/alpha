@@ -43,7 +43,7 @@ export function publicP256(key: unknown): boolean {
   const jwk = key as Record<string, unknown>;
   if (jwk.kty !== "EC" || jwk.crv !== "P-256" || typeof jwk.kid !== "string" || jwk.d !== undefined) return false;
   try {
-    createPublicKey({ key: jwk as never, format: "jwk" });
+    createPublicKey({ key: jwk, format: "jwk" });
     return true;
   } catch {
     return false;

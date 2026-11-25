@@ -5,7 +5,7 @@ import type * as TS from "typescript";
 import { InstallationChanged } from "../installed.ts";
 import { isStd, type Spec } from "../parse.ts";
 import { exec } from "../run.ts";
-import { fileCitations, HAS_CITATION, indent, isTestFile, manifest, missingCitations, owner, packageCode, packageManager, packageScripts, testInputs, testReceipt, tokenize, tsApi, type Citation, type Remember, type Reported } from "../util.ts";
+import { fileCitations, HAS_CITATION, indent, isTestFile, manifest, missingCitations, owner, packageCode, packageScripts, testInputs, testReceipt, tokenize, tsApi, type Citation, type Remember, type Reported } from "../util.ts";
 import type { TestProfile } from "./profile.ts";
 
 /** The configuration every package shares (vibestack/testing/vitest.ts): `spec init` writes it, and `check` where test/ has nothing to run it. */
@@ -36,7 +36,6 @@ export async function tests(checking: string, dir: string, specs: Spec[], rememb
       script = "vitest run";
     }
     if (!script) return said;
-    const manager = packageManager(root);
     const fingerprint = testInputs(root, mode);
     if (!fresh && fingerprint !== undefined) {
       try {
@@ -49,7 +48,7 @@ export async function tests(checking: string, dir: string, specs: Spec[], rememb
     const runTests = async (): Promise<Reported<"tests">> => {
       const { NODE_TEST_CONTEXT: _, ...env } = process.env;
       // The root that is checking: spec.ts refuses a check of it, or of a package below it, started from these tests.
-      const t = await exec(manager.name, ["run", "test", ...(mode === "nightly" ? ["--mode", "nightly"] : [])], root, { ...env, SPEC_TESTS: fs.realpathSync(checking) });
+      const t = await exec("pnpm", ["run", "test", ...(mode === "nightly" ? ["--mode", "nightly"] : [])], root, { ...env, SPEC_TESTS: fs.realpathSync(checking) });
       const ok = t.status === 0 && !t.stopped;
       // From the runner's list of failures, Vitest's or Node's, at most 200 lines of it; else the end of what it said.
       const stdout = stripVTControlCharacters(t.stdout), stderr = stripVTControlCharacters(t.stderr);
@@ -57,7 +56,7 @@ export async function tests(checking: string, dir: string, specs: Spec[], rememb
       const first = lines.findIndex((l) => /✖ failing tests:|⎯.*Failed (?:Suites|Tests) \d+/.test(l));
       const shown = first < 0 ? stdout.split("\n").slice(-80).join("\n") + stderr
         : [...lines.slice(first, first + 200), ...lines.length > first + 200 ? [`… ${lines.length - first - 200} more lines`] : []].join("\n");
-      return [ok, "tests", ok ? "pass" : "fail", indent((shown + (t.stopped ? `\n${t.stopped}` : "")).trim()), `${manager.name} run test`];
+      return [ok, "tests", ok ? "pass" : "fail", indent((shown + (t.stopped ? `\n${t.stopped}` : "")).trim()), "pnpm run test"];
     };
     said.push(await (fingerprint === undefined ? runTests() : remember(fingerprint, runTests, ([ok]) => ok)));
   } catch (e) {

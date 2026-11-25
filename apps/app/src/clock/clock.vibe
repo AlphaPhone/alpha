@@ -1,0 +1,6 @@
+// spec/app/clock/index.md, "Story: Move between Clock tabs and sheets"; spec/app/clock/index.md, "Story: Hear and prioritize ringing alerts"
+import * as ClockView from "../../gen/app__clock.effect.vibe"
+import { reacting } from "../runtime/reactor.vibe"
+
+/** Clock screen navigation and active alert coordination machine, kept resident for the ringing overlay. */
+export const clockView = reacting(ClockView, {})

@@ -12,7 +12,7 @@ const none: Partial<InboxListScreenProps> = { onArchive: undefined, onTrash: und
 export const meta: ComponentMeta<InboxListScreenProps> = {
   args: {
     ...none, account: "sam.rivera@gmail.com", folder: "incoming", search: "", rows, onSearchChange: fn(), onSearch: fn(), onChooseFolder: fn(), onOpenSearch: fn(), onCloseSearch: fn(),
-    onRefresh, onCompose, onAccount, loading: false, loadingMore: false, chosen: 0, aside: 0,
+    onBack: fn(), onRefresh, onCompose, onAccount, loading: false, loadingMore: false, chosen: 0, aside: 0,
   },
   examples: {
     "More to read": { onLoadMore: fn() },
@@ -20,7 +20,7 @@ export const meta: ComponentMeta<InboxListScreenProps> = {
     "Saved list while offline": { notice: "savedList", onNoticeAction: fn(), onRefresh: undefined, onCompose: undefined, rows: rows.map((row) => ({ ...row, onChosenChange: undefined, onSwipe: undefined })) },
     "Drafts set aside": { aside: 2, onShelf: fn() },
     "Searching": { searching: true, search: "tax", rows: rows.slice(3) },
-    "Loading first page": { loading: true, rows: [], onRefresh: undefined, state: undefined },
+    "Loading first page": { loading: true, rows: [], onRefresh: undefined, onBack: undefined, state: undefined },
     "Signed out": { account: undefined, rows: [], state: "signedOut", onStateAction: fn(), onRefresh: undefined, onCompose: undefined, onAccount: undefined, onChooseFolder: undefined, onSearch: undefined, onOpenSearch: undefined },
     "Needs access": { rows: [], state: "needsAccess", onStateAction: fn(), onRefresh: undefined, onCompose: undefined, onChooseFolder: undefined, onSearch: undefined },
     "Access withdrawn": { rows: [], state: "needsAccess", notice: "reconnect", onNoticeAction: fn(), onRefresh: undefined, onCompose: undefined },

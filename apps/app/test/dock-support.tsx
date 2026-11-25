@@ -6,11 +6,15 @@ import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Assistant } from "../src/assistant/Assistant.tsx";
 import { assisting } from "../src/assistant/assistant.vibe";
+import { MediaHandoff } from "../src/assistant/attachments.vibe";
+import { MediaExecutors } from "../src/assistant/media-review.vibe";
+import { aloud } from "../src/assistant/read-aloud.vibe";
 import { agentAt } from "../src/platform/agent.vibe";
 import { cloudAt } from "../src/platform/cloud.vibe";
+import { voiceArea } from "../src/messages/dictation.vibe";
 import { pagePlatform } from "../src/platform/platform.vibe";
 import { resident } from "../src/resident.vibe";
-import { whole } from "../src/runtime/reactor.vibe";
+import { together, whole } from "../src/runtime/reactor.vibe";
 
 const closers: (() => Promise<void>)[] = [];
 
@@ -19,7 +23,7 @@ export async function closeAllDocks() {
   localStorage.clear();
 }
 
-export async function mountDock({ view = "Browser", withToast = false, flush }: { view?: "Browser" | "Home"; withToast?: boolean; flush?: (work: () => Promise<void> | void) => Promise<void> } = {}) {
+export async function mountDock({ view = "Browser", withToast = false, flush }: { view?: "Browser" | "Calendar" | "Home" | "Settings"; withToast?: boolean; flush?: (work: () => Promise<void> | void) => Promise<void> } = {}) {
   const run = flush ?? (async (work: () => Promise<void> | void) => { await work(); });
   const client = Layer.succeed(
     HttpClient.HttpClient,
@@ -34,8 +38,12 @@ export async function mountDock({ view = "Browser", withToast = false, flush }: 
       return Effect.succeed(HttpClientResponse.fromWeb(request, new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } })));
     }),
   );
-  const platform = pagePlatform(Layer.provide(agentAt("http://agent.test"), client), Layer.provide(cloudAt("http://cloud.test"), client));
-  const runtime = ManagedRuntime.make(Layer.provideMerge(Layer.provideMerge(whole(assisting), resident), platform));
+  const platform = Layer.mergeAll(
+    pagePlatform(Layer.provide(agentAt("http://agent.test"), client), Layer.provide(cloudAt("http://cloud.test"), client)),
+    Layer.succeed(MediaHandoff, { attach: () => Effect.succeed(false), offerTranscript: () => Effect.succeed(false) }),
+    Layer.succeed(MediaExecutors, { reviewFiles: () => Effect.succeed(undefined), execute: () => Effect.succeed(undefined) }),
+  );
+  const runtime = ManagedRuntime.make(Layer.provideMerge(whole(together(assisting, voiceArea, aloud)), Layer.provideMerge(resident, platform)));
   const host = document.body.appendChild(document.createElement("div"));
   const reactRoot = createRoot(host);
   await run(async () => {
@@ -54,7 +62,7 @@ export async function mountDock({ view = "Browser", withToast = false, flush }: 
     await runtime.dispose();
   });
   await run(async () => {
-    if (view === "Browser") await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "openView", view: "Browser" })));
+    if (view !== "Home") await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "openView", view })));
     await runtime.runPromise(Effect.flatMap(Composer, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.slot === "Open"))));
   });
   return { runtime, host };

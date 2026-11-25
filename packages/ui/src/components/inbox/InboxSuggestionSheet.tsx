@@ -11,6 +11,8 @@ export type InboxSuggestionSheetProps = {
   from: "alpha" | "owner";
   /** Where text from elsewhere in Alpha came from, such as Notes. */
   source?: string;
+  /** The email account the draft belongs to. */
+  account?: string;
   /** Where it goes: the draft shown, or a new reply or new email started with it. */
   target: "draft" | "newReply" | "newEmail";
   /** It is too long to fit the draft: it is refused whole, never cut short, and the offer stays. */
@@ -29,7 +31,7 @@ export type InboxSuggestionSheetProps = {
  *
  * @model spec/app/inbox/suggestion.md
  */
-export function InboxSuggestionSheet({ open, text, from, source, target, tooLong = false, onAdd, onReplace, onDismiss }: InboxSuggestionSheetProps) {
+export function InboxSuggestionSheet({ open, text, from, source, account, target, tooLong = false, onAdd, onReplace, onDismiss }: InboxSuggestionSheetProps) {
   return (
     <Sheet open={open} onOpenChange={(next) => { if (!next) onDismiss(); }}>
       <SheetContent
@@ -44,6 +46,7 @@ export function InboxSuggestionSheet({ open, text, from, source, target, tooLong
         }
       >
         <div className="flex flex-col gap-3">
+          {account ? <p className="text-sm break-words text-muted-foreground">{account}</p> : null}
           <p className="rounded-lg bg-secondary p-4 text-base break-words whitespace-pre-wrap text-secondary-foreground">{text}</p>
           {tooLong ? <InboxNotice kind="suggestionTooLong" /> : null}
         </div>

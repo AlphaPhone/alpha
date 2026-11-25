@@ -1,0 +1,101 @@
+// spec/app/clock/timers.md, "Story: Run multiple countdown timers"
+import type * as KeyValueStore from "effect/persistence/KeyValueStore"
+import * as Timers from "../../gen/app__clock__timers.effect.vibe"
+import type { Event, Timer } from "../../gen/app__clock__timers.effect.vibe"
+import { contained, due, reacting, untimed } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
+import { persistClockMeta } from "./alarms.vibe"
+import { clockRecords } from "./records.ts"
+
+function timerDeadlines(state: Timers.Timers) {
+  return state.items
+    .filter((item) => item.status === "Running" && item.endAt > 0)
+    .map((item) => due<Event, []>(`timer ${item.id}`, item.endAt, { type: "finish", id: item.id, now: untimed }))
+}
+
+/** Create a countdown timer, optionally starting it immediately, and persist its label. */
+export effect function createTimer(durationMs: number, label: string, autoStart = true): number!!(Timers.Machine | Time | KeyValueStore.KeyValueStore) {
+  const machine = try Timers.Machine
+  const now = try (try Time).now()
+  const nextId = (try machine.get()).issued + 1
+  const hadPrior = clockRecords.snapshot().timers.has(nextId)
+  const prior = clockRecords.timer(nextId)
+  clockRecords.setTimer(nextId, { label: label.trim(), remoteId: `timer-${nextId}`, updatedAtMs: now })
+  const sent = try contained(machine.send({ type: "create", durationMs, autoStart, at: untimed }), "creating a timer")
+  if (!sent) {
+    if (hadPrior) clockRecords.setTimer(nextId, prior)
+    return 0
+  }
+  try persistClockMeta()
+  return nextId
+}
+
+effect function sendTimerUpdate(id: number, event: Event, label: string): boolean!!(Timers.Machine | Time | KeyValueStore.KeyValueStore) {
+  const now = try (try Time).now()
+  const prior = clockRecords.timer(id)
+  clockRecords.setTimer(id, { updatedAtMs: now })
+  const sent = try contained((try Timers.Machine).send(event), label)
+  if (!sent) {
+    clockRecords.setTimer(id, prior)
+    return false
+  }
+  try persistClockMeta()
+  return true
+}
+
+/** Start a ready timer. */
+export effect function startTimer(id: number): boolean!!(Timers.Machine | Time | KeyValueStore.KeyValueStore) {
+  return try sendTimerUpdate(id, { type: "start", id, at: untimed }, "starting a timer")
+}
+
+/** Pause a running timer. */
+export effect function pauseTimer(id: number): boolean!!(Timers.Machine | Time | KeyValueStore.KeyValueStore) {
+  return try sendTimerUpdate(id, { type: "pause", id, now: untimed }, "pausing a timer")
+}
+
+/** Resume a paused timer. */
+export effect function resumeTimer(id: number): boolean!!(Timers.Machine | Time | KeyValueStore.KeyValueStore) {
+  return try sendTimerUpdate(id, { type: "resume", id, at: untimed }, "resuming a timer")
+}
+
+/** Add time (default +1:00) to a running, paused, or ringing timer. */
+export effect function addTimerMinute(id: number, deltaMs = 60_000): boolean!!(Timers.Machine | Time | KeyValueStore.KeyValueStore) {
+  return try sendTimerUpdate(id, { type: "addTime", id, deltaMs, at: untimed }, "adding time to a timer")
+}
+
+/** Reset a timer back to its initial duration. */
+export effect function resetTimer(id: number): boolean!!(Timers.Machine | Time | KeyValueStore.KeyValueStore) {
+  return try sendTimerUpdate(id, { type: "reset", id }, "resetting a timer")
+}
+
+/** Dismiss a ringing timer back to ready. */
+export effect function dismissTimer(id: number): boolean!!(Timers.Machine | Time | KeyValueStore.KeyValueStore) {
+  return try sendTimerUpdate(id, { type: "dismiss", id }, "dismissing a timer")
+}
+
+/** Delete a timer and record its deletion tombstone for agent sync. */
+export effect function removeTimer(id: number): boolean!!(Timers.Machine | Time | KeyValueStore.KeyValueStore) {
+  const prior = clockRecords.timer(id)
+  clockRecords.markTimerDeleted(id)
+  const sent = try contained((try Timers.Machine).send({ type: "remove", id }), "removing a timer")
+  if (!sent) {
+    clockRecords.setTimer(id, prior)
+    return false
+  }
+  try persistClockMeta()
+  return true
+}
+
+/** Compute live remaining milliseconds for a timer at `nowMs`. */
+export function liveRemainingMs(item: Timer, nowMs: number): number {
+  if (item.status === "Running") return Math.max(0, item.endAt - nowMs)
+  if (item.status === "Ringing") return 0
+  return item.remainingMs
+}
+
+/** Resident concurrent timers machine with persistent state and per-timer completion deadlines. */
+export const timers = reacting(Timers, {
+  keep: 1,
+  open: [{ type: "reopen", now: untimed }],
+  timers: timerDeadlines,
+})

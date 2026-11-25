@@ -366,7 +366,7 @@ pure def sometimesCouldNotCheck(s: Updates): bool = s.note == CouldNotCheck
 
 ### The owner is idle only on Home with nothing open, not typing, no voice, no dialog and the connection not busy, and the phone is quiet only with Alpha in front, no call and normal audio
 
-Open is an app, the drawer, Ask Alpha raised, a sheet or menu, a screen with
+Open is an app, Ask Alpha raised, a sheet or menu, a screen with
 a step of its own such as Home being edited, or anything else holding the
 phone. A recording under way is not idle either.
 
@@ -534,6 +534,16 @@ pure def alwaysDeferralsAreBounded(s: Updates): bool = s.deferrals >= 0 and s.de
 
 ```quint
 pure def sometimesWaitingToRetry(s: Updates): bool = s.deferrals > 0 and not(s.installing)
+
+pure val eval_witness_sometimesWaitingToRetry = (
+  ("observePhone", 1, 1, Supported),
+  ("show", true),
+  ("observeActivity", quiet),
+  "checkNow",
+  ("answer", 1, Answered({ index: false, releases: List(good(1, 2)), manifest: 7 }), 0),
+  ("startAutomatically", 0),
+  ("endInstall", Deferred, 0)
+)
 ```
 
 ### Every check and every install ends, so Settings never waits on one for ever

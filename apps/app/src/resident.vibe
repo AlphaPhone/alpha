@@ -1,4 +1,5 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"
+import { scanEntry } from "./files/scanEntry.vibe"
 import { together, whole } from "./runtime/reactor.vibe"
 import { pages } from "./settings/pages.vibe"
 import { preferences } from "./settings/preferences.vibe"
@@ -28,6 +29,13 @@ import { defaultMessagingBridge } from "./messaging/bridge.vibe"
 import { messagingWire } from "./messaging/wire.vibe"
 import { telegramResident } from "./telegram/resident.vibe"
 import { slackResident } from "./slack/resident.vibe"
+import { notes } from "./notes/notes.vibe"
+import { startupReview } from "./startup/settingsAccess.vibe"
+import { clockResident } from "./clock/sync.vibe"
+import { remindersResident } from "./reminders/reminders.vibe"
+import { listing as workflowList } from "./workflows/list.vibe"
+import { digestBrief } from "./workflows/brief.vibe"
+import { browserDigestDelivery } from "./workflows/browser-digests.vibe"
 
 /**
  * The machines that live from launch to exit: those another area follows or tells, and those that must act while
@@ -35,6 +43,7 @@ import { slackResident } from "./slack/resident.vibe"
  * any order: they find each other once all are built. Lines are only ever added.
  */
 const machines = together(
+  scanEntry,
   shell,
   toasts,
   haptics,
@@ -63,6 +72,13 @@ const machines = together(
   telegramResident,
   slackResident,
   messagingWire,
+  notes,
+  startupReview,
+  clockResident,
+  remindersResident,
+  workflowList,
+  digestBrief,
+  browserDigestDelivery,
 )
 
 /** The resident machines, closed: each machine one of them follows or tells is among them. */

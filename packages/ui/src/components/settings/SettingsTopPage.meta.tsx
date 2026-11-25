@@ -33,7 +33,7 @@ export const meta: ComponentMeta<SettingsTopPageProps> = {
       onHandOver.mockClear();
       const canvas = within(canvasElement);
       await userEvent.click(canvas.getByRole("button", { name: "Privacy" }));
-      await userEvent.click(canvas.getByRole("button", { name: "Account and plan" }));
+      await userEvent.click(canvas.getByRole("button", { name: "Account" }));
       await expect([onOpen.mock.calls, onHandOver.mock.calls]).toEqual([[["privacy"]], [["account-and-plan"]]]);
     },
     "Mic may be on": async ({ canvasElement }: { canvasElement: HTMLElement }) => {

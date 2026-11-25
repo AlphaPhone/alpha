@@ -10,7 +10,7 @@
     "studio": "node vibestack/spec.ts studio",
     "eliza": "pnpm --filter @repo/eliza-harness eliza",
     "cloud": "node vibestack/spec.ts tasks @repo/cloud#build && node apps/cloud/dist/src/main.js",
-    "no-bun": "node vibestack/spec.ts tasks @repo/eliza-harness#build && node packages/eliza-harness/dist/src/no-bun.js",
+    "no-bun": "node packages/eliza-harness/scripts/no-bun.ts",
     "check": "node vibestack/spec.ts check",
     "gen": "node vibestack/spec.ts gen",
     "accept": "node vibestack/spec.ts accept",
@@ -35,7 +35,7 @@
     "lint:css": "stylelint \"**/*.css\" --allow-empty-input",
     "analyze": "knip && madge --circular vibestack packages apps && jscpd .",
     "quick": "node vibestack/spec.ts tasks typecheck test //#lint:js //#lint:css",
-    "verify": "node vibestack/spec.ts tasks build typecheck test test:browser check //#lint:js //#lint:css //#analyze //#selftest:tools:a //#selftest:tools:b //#selftest:tools:rest //#selftest:docs //#selftest:examples",
+    "verify": "node vibestack/spec.ts tasks //#no-bun build typecheck test test:browser check //#lint:js //#lint:css //#analyze //#selftest:tools:a //#selftest:tools:b //#selftest:tools:rest //#selftest:docs //#selftest:examples",
     "all": "node vibestack/spec.ts tasks"
   },
   "version": "0.1.0",

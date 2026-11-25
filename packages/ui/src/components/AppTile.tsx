@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps, CSSProperties, ReactNode } from "react";
 import { cn, launcherRing } from "../lib/cn.ts";
 
 export type AppTileProps = Omit<ComponentProps<"button">, "children"> & {
@@ -8,23 +8,25 @@ export type AppTileProps = Omit<ComponentProps<"button">, "children"> & {
   icon: ReactNode;
   /** What is waiting in the app, such as "3 unread": shown as a dot and said after the name. */
   badge?: string;
-  /** A second line when the drawer needs to tell two apps with the same name apart. */
+  /** Uses the installed Apps grid's fixed icon and visible labels. */
+  drawer?: boolean;
+  /** The package, activity or profile that distinguishes this installed app. */
   detail?: string;
-  /** The drawer uses a smaller icon face and a foreground label. */
-  variant?: "home" | "drawer";
 };
 
-/** An app on Home or in the Apps drawer: pressing it opens the app. */
-export function AppTile({ label, icon, badge, detail, variant = "home", type = "button", className, ...props }: AppTileProps) {
-  const drawer = variant === "drawer";
+const homeFace: CSSProperties = { borderRadius: "min(var(--radius-tile), calc(var(--alpha-home-spacing, var(--spacing)) * 5.5))" };
+
+/** An app on Home or in Apps: pressing it opens the app. */
+export function AppTile({ label, icon, badge, drawer = false, detail, type = "button", className, ...props }: AppTileProps) {
   return (
-    <button type={type} aria-label={detail ? `${label} (${detail})` : undefined} className={cn("focus-visible:outline-none", launcherRing, "group flex min-w-0 flex-col items-center gap-2 rounded-tile disabled:pointer-events-none disabled:opacity-50", drawer && "w-full", className)} {...props}>
-      <span aria-hidden className={cn("relative flex size-16 items-center justify-center rounded-tile bg-secondary text-foreground", drawer && "size-14 rounded-drawer-icon")}>
-        <span className="flex transition-opacity duration-fast ease-out group-active:opacity-55 motion-reduce:transition-none">{icon}</span>
+    <button type={type} className={cn("focus-visible:outline-none", launcherRing, "group flex min-w-0 flex-col items-center rounded-tile disabled:pointer-events-none", drawer ? "w-full gap-2" : "gap-[calc(var(--alpha-home-spacing,var(--spacing))*2)] disabled:opacity-50", className)} {...props}>
+      <span aria-hidden style={drawer ? undefined : homeFace} className={cn("relative flex items-center justify-center bg-secondary text-foreground", drawer ? "size-14 rounded-drawer-icon" : "size-[calc(var(--alpha-home-spacing,var(--spacing))*16)]")}>
+        <span className={cn("flex", !drawer && "transition-opacity duration-fast ease-out group-active:opacity-55 motion-reduce:transition-none [&>svg]:size-[calc(var(--alpha-home-spacing,var(--spacing))*7.5)] [&>img]:size-[calc(var(--alpha-home-spacing,var(--spacing))*11)]")}>{icon}</span>
         {badge ? <span className="absolute top-3 right-3 size-2 rounded-full bg-alpha" /> : null}
       </span>
-      <span className={cn("max-w-full text-center text-label wrap-anywhere text-muted-foreground", drawer && "text-foreground")}>{label}</span>
-      {detail ? <span className="max-w-full text-center text-xs wrap-anywhere text-muted-foreground">{detail}</span> : null}
+      {drawer && <span className="sr-only">Open{" "}</span>}
+      <span className={cn("max-w-full text-center text-label wrap-anywhere", drawer ? "text-foreground" : "text-muted-foreground [font-size:min(var(--text-label),calc(var(--alpha-home-spacing,var(--spacing))*3*var(--alpha-text-scale,1)))]")}>{label}</span>
+      {detail && <span className="max-w-full text-center text-2xs wrap-anywhere text-muted-foreground">{" "}{detail}</span>}
       {badge ? <span className="sr-only">{badge}</span> : null}
     </button>
   );

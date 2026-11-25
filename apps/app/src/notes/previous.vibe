@@ -1,0 +1,100 @@
+// spec/app/notes/previous.md, "Story: Look at the notes from before"; spec/app/notes/previous.md, "The phone says whether there are notes from before, and only then is Previous notes offered"
+import * as Previous from "../../gen/app__notes__previous.effect.vibe"
+import type { Actor, Kind } from "../../gen/app__notes__note.effect.vibe"
+import type { Agent } from "../platform/agent.vibe"
+import { NoteDevice } from "../platform/noteDevice.vibe"
+import { ownerAt } from "../platform/owner.vibe"
+import { type Job, answer, reacting } from "../runtime/reactor.vibe"
+import { numberOf } from "./content.vibe"
+
+const phone: Actor = "Phone"
+const Entry = Schema.Struct({
+  id: Schema.NonEmptyString,
+  kind: Schema.Literals(["text", "list", "voice", "link"]),
+  title: Schema.String,
+  body: Schema.optionalKey(Schema.String),
+  items: Schema.optionalKey(Schema.Array(Schema.Struct({ t: Schema.String, done: Schema.optionalKey(Schema.Boolean) }))),
+  lines: Schema.optionalKey(Schema.Array(Schema.Struct({ t: Schema.String }))),
+  summary: Schema.optionalKey(Schema.Array(Schema.String)),
+  actions: Schema.optionalKey(Schema.Array(Schema.Struct({ t: Schema.String }))),
+  clips: Schema.optionalKey(Schema.Array(Schema.String)),
+  url: Schema.optionalKey(Schema.String),
+})
+const Legacy = Schema.fromJsonString(Schema.Struct({ version: Schema.Literal(1), currentRaw: Schema.String }))
+const Current = Schema.fromJsonString(Schema.Struct({ version: Schema.Literal(2), records: Schema.Array(Entry) }))
+const Bin = Schema.fromJsonString(Schema.Struct({ version: Schema.Literal(1), entries: Schema.Array(Schema.Struct({ note: Entry })) }))
+
+const kinds: Record<typeof Entry.Type.kind, Kind> = { text: "Text", list: "Checklist", voice: "Voice", link: "Link" }
+
+export interface PreviousNote {
+  readonly id: number
+  readonly kind: Kind
+  readonly title: string
+  readonly body: string
+  readonly details: ReadonlyArray<string>
+}
+
+function shaped(entry: typeof Entry.Type): PreviousNote {
+  return {
+    id: numberOf("old-note", entry.id),
+    kind: kinds[entry.kind], title: entry.title, body: entry.body ?? "",
+    details: [
+      ...(entry.url === undefined ? [] : [entry.url]),
+      ...(entry.items?.map((item) => `${item.done ? "✓" : "○"} ${item.t}`) ?? []),
+      ...(entry.lines?.map((line) => line.t) ?? []),
+      ...(entry.summary ?? []),
+      ...(entry.actions?.map((item) => item.t) ?? []),
+      ...(entry.clips ?? []),
+    ],
+  }
+}
+
+export service EarlierNotes {
+  get(id: number): (PreviousNote | undefined)!!
+  replace(notes: ReadonlyArray<PreviousNote>): void!!
+}
+
+const earlier = Layer.sync(EarlierNotes, () => {
+  let byNumber = new Map<number, PreviousNote>()
+  return {
+    get: (id: number) => sync(() => byNumber.get(id)),
+    replace: (notes: ReadonlyArray<PreviousNote>) => sync(() => { byNumber = new Map(notes.map((note) => [note.id, note])) }),
+  }
+})
+
+effect function listed(ticket: number, owner: number): Previous.Event!!(NoteDevice | Agent | Previous.Machine | EarlierNotes) {
+  const failed: Previous.Event = { type: "listed", ticket, ok: false, olds: [], binned: [] }
+  const identity = ownerAt() catch () => ""
+  if (identity === "" || numberOf("owner", identity) !== owner) return failed
+  return effect {
+    const device = try NoteDevice
+    const records = try device.earlier("records")
+    const trash = try device.earlier("trash")
+    const saved = records === null ? [] : (try Schema.decodeUnknownEffect(Current)((try Schema.decodeUnknownEffect(Legacy)(records)).currentRaw)).records.map(shaped)
+    const binned = trash === null ? [] : (try Schema.decodeUnknownEffect(Bin)(trash)).entries.map((row) => shaped(row.note))
+    const state = try (try Previous.Machine).get()
+    if (!Previous.canListed(state, ticket, phone) || state.owner !== owner || (ownerAt() catch () => "") !== identity) return failed
+    try (try EarlierNotes).replace([...saved, ...binned])
+    return { type: "listed", ticket, ok: true, olds: saved.map(({ id, kind }) => ({ id, kind })), binned: binned.map(({ id, kind }) => ({ id, kind })) } satisfies Previous.Event
+  } catch () => failed
+}
+
+function carry(fx: Previous.Effect): Job<Previous.Event, NoteDevice | Agent | Previous.Machine | EarlierNotes, [Actor]> {
+  return answer("read previous notes", listed(fx.ticket, fx.owner), { type: "listed", ticket: fx.ticket, ok: false, olds: [], binned: [] }, phone)
+}
+
+/** Read only from the device's previous Notes store, and start clean when ownership changes. */
+export effect function ownerEarlier(owner: number): void!!(Previous.Machine | NoteDevice | EarlierNotes) {
+  const previous = try Previous.Machine
+  const before = try previous.get()
+  if (before.owner !== owner) {
+    try (try EarlierNotes).replace([])
+    try ignore(previous.send({ type: "ownerChanged", owner }, phone))
+  }
+  if (owner <= 0) return
+  const device = try NoteDevice
+  const exists = try device.previousExists()
+  try ignore(previous.send({ type: "previousFound", present: exists }, phone))
+}
+
+export const previous = Layer.provideMerge(reacting(Previous, { carry }), earlier)

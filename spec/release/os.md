@@ -16,6 +16,10 @@ release owner updates an image by hand, and four drills prove recovery.
 
 ### The channel is pinned to its manifest, hosts, product, device, OTA certificate and AVB key, with no key rotation and no data wipe
 
+The manifest is `alpha-os-update.json` under the release tagged `os-pilot`
+of Alpha's repository, eliza-research/alpha, where the launcher channel
+also lives ([Release](./index.md)).
+
 ```quint
 type Profile = {
   manifest: str, hosts: str, product: str, device: str, certificate: str, avb: str, rotate: bool, wipe: bool,
@@ -38,7 +42,7 @@ type Os = {
 }
 
 pure val pinned: Profile = {
-  manifest: "https://github.com/alphacompute/alpha/releases/download/os-pilot/alpha-os-update.json",
+  manifest: "https://github.com/eliza-research/alpha/releases/download/os-pilot/alpha-os-update.json",
   hosts: "github.com release-assets.githubusercontent.com objects.githubusercontent.com storage.googleapis.com",
   product: "alpha_stallion_phone", device: "stallion",
   certificate: "66046a0729fe8d14b9bb53051b2225b396f7bcb07b2a757eac6fc799b1aee11e",

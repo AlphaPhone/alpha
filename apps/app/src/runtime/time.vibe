@@ -26,12 +26,13 @@ const kept = 5000
 export function timeOver(resumed: Stream.Stream<unknown>) {
   return Layer.effect(Time, effect {
     const store = try KeyValueStore.KeyValueStore
+    const clock = try Clock.clockWith((clock) => succeed(clock))
     const before = Number((store.get(key) catch () => undefined) ?? 0)
-    let wall = try Clock.currentTimeMillis
+    let wall = try clock.currentTimeMillis
     let latest = Number.isSafeInteger(before) && before > wall ? before : wall
     let saved = latest
     effect function now(): number!! {
-      const read = try Clock.currentTimeMillis
+      const read = try clock.currentTimeMillis
       latest = read >= latest ? read : latest + Math.max(0, Math.ceil((read - wall) / 2))
       wall = read
       if (latest - saved >= kept) {

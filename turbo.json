@@ -20,6 +20,9 @@
     ".cache/toolchain.json"
   ],
   "tasks": {
+    "//#no-bun": {
+      "cache": false
+    },
     "gen": {
       "outputs": [
         "gen/**",
@@ -333,6 +336,27 @@
       "outputs": [
         ".cache/test-result-*.json"
       ]
+    },
+    "@repo/app#test": {
+      "dependsOn": [
+        "gen",
+        "//#gen",
+        "^build",
+        "@repo/agent#build"
+      ],
+      "outputs": [
+        ".cache/test-result-*.json"
+      ],
+      "env": [
+        "VIBESTACK_QUINT_EVALUATOR"
+      ]
+    },
+    "@repo/app#dev": {
+      "dependsOn": [
+        "@repo/agent#build"
+      ],
+      "cache": false,
+      "persistent": true
     },
     "//#check": {
       "dependsOn": [

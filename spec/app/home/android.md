@@ -1,7 +1,7 @@
 # Asking Android
 
-What [Home](./index.md) asks of Android: to open an installed app, to show
-an app's info page, or to open its notification shade. Each ask is an
+What [Home](./index.md) asks of Android: to open an installed app or to
+open its notification shade. Each ask is an
 attempt sent as it is made; Alpha waits five seconds for Android's answer
 and then stops waiting without claiming either outcome. The launcher
 decides what may be asked and what the owner is told.
@@ -16,7 +16,7 @@ decides what may be asked and what the owner is told.
 ```quint
 import attempt as A from "../../kit/attempt"
 
-type Ask = OpenApp({ app: str }) | AppInfo({ app: str }) | Shade
+type Ask = OpenApp({ app: str }) | Shade
 type Handoff = { ask: Ask, attempt: A::Attempt, until: int }
 
 pure val patience = 5000
@@ -27,13 +27,13 @@ pure def isShade(ask: Ask): bool = match ask { | Shade => true | _ => false }
 
 pure def isOpening(ask: Ask): bool = match ask { | OpenApp(o) => true | _ => false }
 
-pure def appOf(ask: Ask): str = match ask { | OpenApp(o) => o.app | AppInfo(i) => i.app | Shade => "" }
+pure def appOf(ask: Ask): str = match ask { | OpenApp(o) => o.app | Shade => "" }
 ```
 
 ### What the simulator tries
 
 ```quint
-pure val askValues = Set(OpenApp({ app: "clock" }), AppInfo({ app: "mail" }), Shade)
+pure val askValues = Set(OpenApp({ app: "clock" }), Shade)
 pure val nowValues = Set(0, 2000, 6000, 12000)
 pure val ticketValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
 ```

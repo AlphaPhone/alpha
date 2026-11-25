@@ -57,7 +57,7 @@ export effect function keptAt(key: string): Place<string>!!KeyValueStore.KeyValu
 }
 
 /** A place the earlier Alpha only kept things in: nothing new is ever written there. */
-export error EarlierOnly { place: string }
+error EarlierOnly { place: string }
 
 /**
  * What the earlier Alpha kept in its connection plugin's encrypted slot `slot`, as one text: read, and cleared only

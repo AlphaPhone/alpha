@@ -13,5 +13,5 @@ export type SettingsNavRowProps = Omit<ListRowProps, "onClick" | "trailing" | "a
 
 /** A row that opens a page of Settings, or another area's own screen. */
 export function SettingsNavRow({ icon, value, onOpen, ...props }: SettingsNavRowProps) {
-  return <ListRow leading={icon} trailing={onOpen ? <>{value}<ChevronRight aria-hidden className="size-5" /></> : value} onClick={onOpen} {...props} />;
+  return <ListRow leading={icon} trailing={onOpen ? <>{value}<ChevronRight aria-hidden className="size-4" /></> : value} onClick={onOpen} {...props} />;
 }

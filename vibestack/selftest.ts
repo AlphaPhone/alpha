@@ -293,7 +293,7 @@ pure def selected(which: bool): Set[Field] = {
     assert.deepEqual(await explore(scratch({ "package.json": manifest({ start: "node server.js" }) }), remember), []);
     const [unserved, silent] = await Promise.all([
       explore(scratch({ "package.json": manifest({ build: "true" }), "index.html": page("") }), remember),
-      explore(scratch({ "package.json": manifest({ start: "node -e \"console.log('starting')\"" }), "index.html": page(""), "src/main.ts": 'import "../../";' }), () => assert.fail("an enclosing import must exercise the server again")),
+      explore(scratch({ "package.json": JSON.stringify({ scripts: { start: "node -e \"console.log('starting')\"" } }), "index.html": page(""), "src/main.ts": 'import "../../";' }), () => assert.fail("an enclosing import must exercise the server again")),
     ]);
     assert.deepEqual(unserved.map(([ok, stage, summary]) => [ok, stage, summary]), [[false, "explore", "index.html is a page, and package.json has no start or dev script that serves it: add one that prints the address it serves at"]]);
     assert.deepEqual(silent.map(([ok, stage]) => [ok, stage]), [[false, "explore"]]);

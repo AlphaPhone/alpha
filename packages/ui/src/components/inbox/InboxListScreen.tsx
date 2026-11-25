@@ -1,4 +1,4 @@
-import { CheckCheck, ChevronLeft, Ellipsis, ListChecks, PenLine, Plus, RefreshCw, Search, UserRound } from "lucide-react";
+import { CheckCheck, ChevronLeft, Ellipsis, ListChecks, PenLine, Plus, RotateCw, Search, UserRound } from "lucide-react";
 import { useRef } from "react";
 import { Button } from "../Button.tsx";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
@@ -16,6 +16,8 @@ export type InboxListScreenProps = Pick<InboxListProps, "rows" | "loading" | "on
   Pick<InboxSelectionBarProps, "onArchive" | "onTrash" | "onRestore" | "onChooseAll"> & {
     /** The address of the account whose mail is shown. */
     account?: string;
+    /** Returns from Inbox to the apps. */
+    onBack?: () => void;
     /** Whether the list header holds its search field. */
     searching?: boolean;
     /** What is typed in the search field. */
@@ -63,25 +65,26 @@ export type InboxListScreenProps = Pick<InboxListProps, "rows" | "loading" | "on
  * @model spec/app/inbox/index.md
  */
 export function InboxListScreen({
-  account, folder, unavailable, onChooseFolder, searching = false, search, onSearchChange, onSearch, onOpenSearch, onCloseSearch,
+  account, onBack, folder, unavailable, onChooseFolder, searching = false, search, onSearchChange, onSearch, onOpenSearch, onCloseSearch,
   notice, onNoticeAction, state, onStateAction, chosen = 0, onStartSelection, onFinishSelection, onClearSelection,
   onArchive, onTrash, onRestore, onChooseAll, aside = 0, onShelf, onRefresh, onCompose, onAccount, rows, loading, onLoadMore, loadingMore,
 }: InboxListScreenProps) {
-  const focusSearchAfterClose = useRef(false);
+  const focusSearchAfterCloseRef = useRef(false);
   const closeSearch = () => {
-    focusSearchAfterClose.current = true;
+    focusSearchAfterCloseRef.current = true;
     onCloseSearch?.();
   };
+  const compose = onCompose ?? (state === "signedOut" ? onStateAction : undefined);
   const actions = (
     <>
-      {onRefresh || loading ? <Button variant="ghost" size="icon" aria-label="Refresh" loading={loading} disabled={!onRefresh} onClick={onRefresh}><RefreshCw /></Button> : null}
-      <Button variant="ghost" size="icon" aria-label="Search email" disabled={!onOpenSearch} onClick={onOpenSearch} ref={(button) => {
-        if (button && focusSearchAfterClose.current) {
-          focusSearchAfterClose.current = false;
+      {onRefresh || loading ? <Button variant="ghost" size="icon" aria-label="Refresh" loading={loading} disabled={!onRefresh} onClick={onRefresh}><RotateCw /></Button> : null}
+      {state !== "signedOut" && <Button variant="ghost" size="icon" aria-label="Search email" disabled={!onOpenSearch} onClick={onOpenSearch} ref={(button) => {
+        if (button && focusSearchAfterCloseRef.current) {
+          focusSearchAfterCloseRef.current = false;
           button.focus();
         }
-      }}><Search /></Button>
-      <Button variant="ghost" size="icon" aria-label="Compose" disabled={!onCompose} onClick={onCompose}><Plus /></Button>
+      }}><Search /></Button>}
+      <Button variant="ghost" size="icon" aria-label="Compose" disabled={!compose} onClick={compose}><Plus /></Button>
       {onStartSelection || onFinishSelection || onAccount || (aside > 0 && onShelf) ? (
         <Menu>
           <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Mail options"><Ellipsis /></Button></MenuTrigger>
@@ -100,15 +103,18 @@ export function InboxListScreen({
   return (
     <Screen
       title={chosen > 0 ? `${chosen} selected` : inboxFolders[folder]}
-      leading={searching ? <Button variant="ghost" size="icon" aria-label="Back to inbox" onClick={closeSearch}><ChevronLeft /></Button> : undefined}
+      leading={searching || onBack ? <Button variant="ghost" size="icon" aria-label={searching ? "Back to inbox" : "Back to apps"} className="ml-1" onClick={searching ? closeSearch : onBack}><ChevronLeft className="size-5" /></Button> : undefined}
       titleControl={searching ? <InboxSearchBar value={search} onValueChange={onSearchChange} onSearch={onSearch} onClose={closeSearch} focusOnOpen /> : undefined}
       actions={searching ? undefined : actions}
-      className="[&_main>div]:gap-2 [&_main>div]:pt-1"
+      className="[&_header>h1]:pl-0.5 [&_main>div]:gap-2 [&_main>div]:pt-1"
     >
-      {searching ? null : <InboxFolderBar folder={folder} unavailable={unavailable} onChoose={onChooseFolder} />}
+      {!searching && state !== "signedOut" ? <InboxFolderBar folder={folder} unavailable={unavailable} onChoose={onChooseFolder} /> : null}
+      {state === "signedOut" && onStateAction ? <Button variant="secondary" size="sm" className="ml-1 self-start px-3 font-medium" onClick={onStateAction}>Connect Eliza Cloud</Button> : null}
       {notice ? <InboxNotice kind={notice} onAction={onNoticeAction} /> : null}
       {chosen > 0 ? <InboxSelectionBar count={chosen} onArchive={onArchive} onTrash={onTrash} onRestore={onRestore} /> : null}
-      {state && rows.length === 0 && !loading ? <InboxListState kind={state} onAction={onStateAction} /> : <InboxList rows={rows} loading={loading} onLoadMore={onLoadMore} loadingMore={loadingMore} />}
+      {rows.length === 0 && loading ? <InboxListState kind="loading" />
+        : state && rows.length === 0 ? <InboxListState kind={state === "empty" && folder === "sent" ? "emptySent" : state} onAction={onStateAction} />
+        : <InboxList rows={rows} loading={loading} onLoadMore={onLoadMore} loadingMore={loadingMore} />}
     </Screen>
   );
 }

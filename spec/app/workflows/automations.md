@@ -42,9 +42,9 @@ type Effect =
   | AskAgent({ id: int, change: Change, kind: Kind, when: S::When, text: int, target: int, minutes: int })
   | ReadChangeRecord({ ticket: int, id: int })
 type Automations = {
-  owner: int, list: R::Read, complete: bool, count: int, issues: int,
+  owner: int, row: int, list: R::Read, complete: bool, count: int, issues: int,
   present: bool, on: bool, status: Status, issue: bool, rowKind: Kind,
-  editing: bool, kind: Kind, when: S::When, text: int, target: int,
+  editing: bool, kind: Kind, when: S::When, timingEditable: bool, text: int, target: int,
   review: V::Review, proposed: Change, minutes: int,
   change: Q::Request, changing: Change, asked: Asked, fired: Fired, recovering: bool,
 }
@@ -55,9 +55,9 @@ pure val maxSnooze = 1440
 pure val nothingAsked: Asked = { kind: PromptTask, when: S::daily(0), text: 0, target: 0, minutes: 0 }
 
 pure val initial: Automations = {
-  owner: 0, list: R::unread, complete: false, count: 0, issues: 0,
+  owner: 0, row: 0, list: R::unread, complete: false, count: 0, issues: 0,
   present: false, on: false, status: Scheduled, issue: false, rowKind: PromptTask,
-  editing: false, kind: PromptTask, when: S::daily(0), text: 0, target: 0,
+  editing: false, kind: PromptTask, when: S::daily(0), timingEditable: true, text: 0, target: 0,
   review: V::unreviewed, proposed: Create, minutes: 10,
   change: Q::unasked, changing: Create, asked: nothingAsked, fired: NotFired, recovering: false,
 }
@@ -71,10 +71,23 @@ pure val minuteValues = Set(-1, 30, 60)
 pure val dayValues = Set(-1, 0, 6, 7)
 pure val statusValues = Set(Scheduled, Completed, Dismissed)
 pure val zoneValues = Set(0, 1)
+pure val whenValues = Set(S::daily(0), S::pickPreset(S::daily(1), S::Weekdays), S::pickPreset(S::daily(1), S::Custom))
 pure val charsValues = Set(0, 12, 2001)
 pure val minutesValues = Set(0, 15, 1441)
 pure val workflowValues = Set(0, 1)
 pure val ownerValues = Set(0, 1, 2)
+pure val rowValues = Set(0, 1, 2)
+```
+
+### Changing the focused row closes its editor and actions when no change is kept
+
+```quint
+pure def canFocusRow(a: Automations, row: int): bool = a.owner >= 1 and row >= 0 and row != a.row and Q::canFile(a.change)
+
+pure def focusRow(a: Automations, row: int): Automations = {
+  ...a, row: row, list: { ...a.list, status: R::Idle }, present: false, on: false, issue: false,
+  editing: false, review: V::dismiss(V::revise(a.review)),
+}
 ```
 
 ### The list is read for the owner signed in, once at a time, and only its newest answer is taken
@@ -321,18 +334,23 @@ pure def sometimesALostRunIsLetGo(a: Automations): bool = a.changing == Fire and
 
 ### The editor opens on a free panel, empty for a new automation or with the row's own text and time for an edit
 
+An existing prompt opens with the revision, schedule and zone read from
+the agent. If the editor cannot express that schedule, it shows it as
+saved and offers changes to the name and instructions. A text-only edit
+retains the saved timing exactly.
+
 ```quint
 pure def canOpenEditor(a: Automations, kind: Kind, zone: int): bool = free(a) and zone >= 0
 
 pure def openEditor(a: Automations, kind: Kind, zone: int): Automations =
-  { ...a, editing: true, proposed: Create, kind: kind, when: S::daily(zone), text: 0, target: 0, review: V::dismiss(V::revise(a.review)) }
+  { ...a, editing: true, proposed: Create, kind: kind, when: S::daily(zone), timingEditable: true, text: 0, target: 0, review: V::dismiss(V::revise(a.review)) }
 
-pure def canEditRow(a: Automations, chars: int, hour: int, minute: int, zone: int, workflow: int): bool =
-  free(a) and offers(a, Edit) and 1 <= chars and chars <= maxText and S::canSetTime(S::daily(zone), hour, minute) and zone >= 0
+pure def canEditRow(a: Automations, chars: int, when: S::When, timingEditable: bool, workflow: int): bool =
+  free(a) and offers(a, Edit) and 1 <= chars and chars <= maxText and S::wellFormed(when)
     and (a.rowKind == WorkflowTask iff workflow >= 1) and workflow >= 0
 
-pure def editRow(a: Automations, chars: int, hour: int, minute: int, zone: int, workflow: int): Automations =
-  { ...a, editing: true, proposed: Edit, kind: a.rowKind, when: S::setTime(S::daily(zone), hour, minute), text: chars,
+pure def editRow(a: Automations, chars: int, when: S::When, timingEditable: bool, workflow: int): Automations =
+  { ...a, editing: true, proposed: Edit, kind: a.rowKind, when: when, timingEditable: timingEditable, text: chars,
     target: workflow, review: V::dismiss(V::revise(a.review)) }
 
 pure def canCloseEditor(a: Automations): bool = a.editing
@@ -355,19 +373,19 @@ pure def canSetTarget(a: Automations, workflow: int): bool = a.editing and a.kin
 
 pure def setTarget(a: Automations, workflow: int): Automations = { ...a, target: workflow, review: voided(a.review) }
 
-pure def canPickPreset(a: Automations, preset: S::Preset): bool = a.editing and S::canPickPreset(a.when, preset)
+pure def canPickPreset(a: Automations, preset: S::Preset): bool = a.editing and a.timingEditable and S::canPickPreset(a.when, preset)
 
 pure def pickPreset(a: Automations, preset: S::Preset): Automations = { ...a, when: S::pickPreset(a.when, preset), review: voided(a.review) }
 
-pure def canToggleDay(a: Automations, day: int): bool = a.editing and S::canToggleDay(a.when, day)
+pure def canToggleDay(a: Automations, day: int): bool = a.editing and a.timingEditable and S::canToggleDay(a.when, day)
 
 pure def toggleDay(a: Automations, day: int): Automations = { ...a, when: S::toggleDay(a.when, day), review: voided(a.review) }
 
-pure def canSetTime(a: Automations, hour: int, minute: int): bool = a.editing and S::canSetTime(a.when, hour, minute)
+pure def canSetTime(a: Automations, hour: int, minute: int): bool = a.editing and a.timingEditable and S::canSetTime(a.when, hour, minute)
 
 pure def setTime(a: Automations, hour: int, minute: int): Automations = { ...a, when: S::setTime(a.when, hour, minute), review: voided(a.review) }
 
-pure def canSetZone(a: Automations, zone: int): bool = a.editing and S::canSetZone(a.when, zone)
+pure def canSetZone(a: Automations, zone: int): bool = a.editing and a.timingEditable and S::canSetZone(a.when, zone)
 
 pure def setZone(a: Automations, zone: int): Automations = { ...a, when: S::setZone(a.when, zone), review: voided(a.review) }
 ```

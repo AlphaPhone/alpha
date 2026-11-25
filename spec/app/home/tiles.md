@@ -50,7 +50,7 @@ pure def there(apps: Set[str], shell: S::Shell, tile: Tile): bool =
   match tile { | Own(o) => S::available(shell, o.view) | Installed(i) => apps.contains(i.app) }
 ```
 
-### Home's defaults are every one of Alpha's own apps, in Home order, and Home holds at most 4096 tiles
+### Home's defaults use the product's Home order, and Home holds at most 4096 tiles
 
 ```quint
 pure val homeOrder: List[S::View] = List(
@@ -92,7 +92,7 @@ pure val tilesValues = Set(
   List(Own({ view: S::Inbox }), Own({ view: S::Inbox }), Installed({ app: "clock" })))
 pure val leftValues = Set(List(), List(Own({ view: S::Notes })), List(Installed({ app: "clock" }), Own({ view: S::Inbox })))
 pure val rightValues = leftValues
-pure val iValues = Set(-1, 0, 5, 14, 15)
+pure val iValues = Set(-1, 0, 5, homeOrder.length() - 1, homeOrder.length())
 pure val ticketValues = Set(1, 2, 3, 4, 5, 6)
 ```
 

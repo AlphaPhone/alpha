@@ -1,0 +1,167 @@
+package ai.alphacompute.alphaphone;
+
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.app.Service;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.ServiceInfo;
+import android.os.Build;
+import android.os.IBinder;
+import com.getcapacitor.JSObject;
+
+/**
+ * Keeps an open Notes recording (AlphaNoteRecorder) running with the screen off, as a
+ * microphone-type foreground service with an ongoing notification. It is started from the
+ * foreground when a recording starts or resumes and ends when the recording is stopped,
+ * saved or discarded. It never starts the microphone on its own; Pause in the notification
+ * pauses the open recording, and while it is paused the notification says so and offers Resume.
+ * Stop in the notification stops it as Stop does in Notes: the recording is kept for Notes to save.
+ * The chronometer shows the recording's own length, not the time since the last resume.
+ */
+public final class AlphaNoteRecordingService extends Service {
+ static final String CHANNEL="alpha.notes.recording";
+ static final int NOTIFICATION_ID=0x4e524543;
+ static final String ACTION_START="ai.alphacompute.alphaphone.notes.recording.START";
+ static final String ACTION_PAUSE="ai.alphacompute.alphaphone.notes.recording.PAUSE";
+ static final String ACTION_STOP="ai.alphacompute.alphaphone.notes.recording.STOP";
+ static final String ACTION_RESUME="ai.alphacompute.alphaphone.notes.recording.RESUME";
+ /** Stop in the notification: the microphone is released and the recording is kept for Notes to save. */
+ static final String ACTION_FINISH="ai.alphacompute.alphaphone.notes.recording.FINISH";
+ /** A tap on the notification: MainActivity opens Notes, where the open recording is shown again. */
+ static final String ACTION_SHOW_NOTES="ai.alphacompute.alphaphone.notes.recording.SHOW";
+ /** True while this service holds the foreground with its notification. */
+ private static volatile boolean foreground;
+ private static volatile String foregroundRecording;
+ private static volatile AlphaNoteRecordingService activeService;
+ private volatile int lastStartId;
+ static final String EXTRA_RECORDING="recording";
+ /** A notification tap waits this long for a renderer that can show Notes; HOME or one consumption retires it. */
+ private static final long SHOW_NOTES_LIFETIME_MS=30_000;
+ private static long showNotesUntil=-1;
+ static synchronized boolean offerFromIntent(Context context, Intent intent) {
+  android.app.KeyguardManager lock = context.getSystemService(android.app.KeyguardManager.class);
+  if (intent == null || !ACTION_SHOW_NOTES.equals(intent.getAction()) || !foreground || lock == null || lock.isDeviceLocked()) return false;
+  offerShowNotes();
+  return true;
+ }
+ static synchronized void offerShowNotes(){showNotesUntil=android.os.SystemClock.elapsedRealtime()+SHOW_NOTES_LIFETIME_MS;}
+ static synchronized void clearShowNotes(){showNotesUntil=-1;}
+ static synchronized boolean consumeShowNotes(){boolean open=showNotesUntil>=0&&android.os.SystemClock.elapsedRealtime()<showNotesUntil;showNotesUntil=-1;return open;}
+
+ static void start(Context context,String recordingId){
+  try{context.startForegroundService(intent(context,ACTION_START,recordingId));}
+  catch(RuntimeException refused){}
+ }
+ /** The recording is stopped, saved or discarded: leave the foreground. */
+ static void recordingClosed(Context context,String recordingId){
+  try{context.startService(intent(context,ACTION_STOP,recordingId));}
+  catch(RuntimeException backgroundRestricted){
+   AlphaNoteRecordingService service=activeService;
+   if(service!=null){
+    int startId=service.lastStartId;
+    new android.os.Handler(android.os.Looper.getMainLooper()).post(()->service.stopClosedRecording(recordingId,startId));
+   }
+  }
+ }
+ /** The recording paused or resumed (in Alpha or from the notification): show its state. */
+ static void refresh(Context context){
+  if(!foreground)return;
+  JSObject status=AlphaNoteRecorder.get(context).status();String state=status.optString("state");
+  if(!"recording".equals(state)&&!"paused".equals(state))return;
+  if(!java.util.Objects.equals(foregroundRecording,status.getString("recordingId")))return;
+  context.getSystemService(NotificationManager.class).notify(NOTIFICATION_ID,notification(context,status));
+ }
+ private static Intent intent(Context context,String action,String recordingId){
+  String identity=recordingId==null?"":recordingId;
+
+
+  return new Intent(context,AlphaNoteRecordingService.class).setAction(action).setIdentifier(identity).putExtra(EXTRA_RECORDING,identity);
+ }
+
+ @Override public IBinder onBind(Intent intent){return null;}
+
+ @Override public int onStartCommand(Intent intent,int flags,int startId){
+  activeService=this;lastStartId=startId;
+  String action=intent==null?null:intent.getAction();
+  String recording=intent==null?"":intent.getStringExtra(EXTRA_RECORDING);
+  AlphaNoteRecorder recorder=AlphaNoteRecorder.get(this);
+  if(ACTION_PAUSE.equals(action)||ACTION_RESUME.equals(action)){
+
+   if(recording!=null&&recorder.owns(recording))try{if(ACTION_PAUSE.equals(action))recorder.pause(recording);else if(foreground&&recording.equals(foregroundRecording)&&"paused".equals(recorder.status().optString("state")))recorder.resume(recording);}catch(RuntimeException|java.io.IOException changed){}
+   refresh(this);
+   return START_NOT_STICKY;
+  }
+  if(ACTION_FINISH.equals(action)){
+
+   if(recording!=null&&recorder.owns(recording))try{recorder.stop(recording);}catch(RuntimeException changed){}
+   stopClosedRecording(recording,startId);
+   return START_NOT_STICKY;
+  }
+  if(ACTION_STOP.equals(action)){
+   stopClosedRecording(recording,startId);
+   return START_NOT_STICKY;
+  }
+
+  if(foreground&&(recording==null||!recorder.owns(recording)))return START_NOT_STICKY;
+
+  try{
+   Notification shown=notification(this,recorder.status());
+   if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.R)startForeground(NOTIFICATION_ID,shown,ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
+   else startForeground(NOTIFICATION_ID,shown);
+   foregroundRecording=recording;
+   foreground=true;
+  }catch(RuntimeException refused){stopSelf(startId);return START_NOT_STICKY;}
+  if(recording==null||!recorder.owns(recording)){foregroundRecording=null;foreground=false;stopForeground(STOP_FOREGROUND_REMOVE);stopSelf(startId);}
+  return START_NOT_STICKY;
+ }
+ /** A failed command launch may retire only this service's current recording and start ID. */
+ private void stopClosedRecording(String recording,int startId){
+  if(activeService!=this)return;
+  AlphaNoteRecorder recorder=AlphaNoteRecorder.get(this);
+  String state=recorder.status().optString("state");
+  if("recording".equals(state)||"paused".equals(state))return;
+  if(recording==null||recording.isEmpty()){
+   if(recorder.open())return;
+  }else{
+   if(foreground&&!recording.equals(foregroundRecording))return;
+   if(recorder.open()&&!recorder.owns(recording))return;
+  }
+  if(!stopSelfResult(startId))return;
+  foregroundRecording=null;foreground=false;stopForeground(STOP_FOREGROUND_REMOVE);
+ }
+ @Override public void onDestroy(){if(activeService==this){activeService=null;foregroundRecording=null;foreground=false;}super.onDestroy();}
+
+ /** "Voice note · Recording" with a chronometer at the recording's length and Pause, or "Voice note · Paused"
+  * with Resume; Stop in both. The words are in res/values/alpha-note-recording.xml. */
+ static Notification notification(Context context,JSObject status){
+  NotificationManager manager=context.getSystemService(NotificationManager.class);
+
+  NotificationChannel channel=new NotificationChannel(CHANNEL,context.getString(R.string.note_recording_channel),NotificationManager.IMPORTANCE_LOW);
+  channel.setDescription(context.getString(R.string.note_recording_channel_description));
+  channel.setShowBadge(false);
+  manager.createNotificationChannel(channel);
+  String recording=status.optString("recordingId","");boolean paused="paused".equals(status.optString("state"));
+  Intent open=new Intent(context,MainActivity.class).setAction(ACTION_SHOW_NOTES).setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
+  PendingIntent content=PendingIntent.getActivity(context,0,open,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
+  PendingIntent toggle=PendingIntent.getService(context,paused?2:1,intent(context,paused?ACTION_RESUME:ACTION_PAUSE,recording),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
+  PendingIntent finish=PendingIntent.getService(context,3,intent(context,ACTION_FINISH,recording),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
+  Notification.Builder builder=new Notification.Builder(context,CHANNEL)
+   .setSmallIcon(R.drawable.ic_note_recording)
+   .setContentTitle(context.getString(paused?R.string.note_recording_title_paused:R.string.note_recording_title_recording))
+   .setContentText(context.getString(R.string.note_recording_text))
+   .setContentIntent(content)
+   .setOngoing(true)
+   .setOnlyAlertOnce(true)
+   .setCategory(Notification.CATEGORY_SERVICE)
+
+   .setVisibility(Notification.VISIBILITY_PUBLIC)
+   .addAction(new Notification.Action.Builder(null,context.getString(paused?R.string.note_recording_resume:R.string.note_recording_pause),toggle).build())
+   .addAction(new Notification.Action.Builder(null,context.getString(R.string.note_recording_stop),finish).build());
+  if(paused)builder.setShowWhen(false).setUsesChronometer(false);
+  else builder.setUsesChronometer(true).setShowWhen(true).setWhen(System.currentTimeMillis()-Math.max(0,status.optLong("durationMs",0)));
+  return builder.build();
+ }
+}

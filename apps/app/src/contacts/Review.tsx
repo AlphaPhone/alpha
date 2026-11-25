@@ -7,12 +7,12 @@ import { useMachine as useAgent } from "../../gen/app__contacts__agent.react.ts"
 import type { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe";
 import { clear } from "../../gen/app__phone.ts";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
-import { judge } from "../phone/words.ts";
-import { type Lines, Requested, afterOf, choicesOf, linesOf, unchangedBy } from "./requests.vibe";
+import type { Telephony } from "../platform/telephony.vibe";
+import { type Lines, Requested, afterOf, chooseNumber, choicesOf, linesOf, unchangedBy } from "./requests.vibe";
 
 export interface ReviewProps {
   /** Provides the agent's requests, Phone's machine, for whether a call may be an emergency call, and what the phone found for the request. */
-  runtime: ManagedRuntime.ManagedRuntime<AgentMachine | PhoneMachine | Requested, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<AgentMachine | PhoneMachine | Requested | Telephony, unknown>;
 }
 
 const asks = { Dial: "Call", Text: "Text", AddContact: "Add contact", ChangeContact: "Change contact", DeleteContact: "Delete contact" } as const;
@@ -25,11 +25,13 @@ function Changes({ before, after, removing, saved }: { before: Lines; after: Lin
   const will = new Set([...after.phones, ...after.emails]);
   return (
     <ListGroup aria-label="Contact">
-      {before.name !== "" && after.name !== before.name && !removing && <ListRow title={after.name} detail={`Rename from ${before.name}`} className="font-semibold" />}
+      {after.name !== "" && <ListRow title={<span className="wrap-anywhere whitespace-normal">{after.name}</span>}
+        detail={removing ? "Remove" : before.name !== "" && after.name !== before.name ? `Rename from ${before.name}` : undefined}
+        className={removing ? "line-through" : "font-semibold"} />}
       {[...new Set([...was, ...will])].map((value) => {
         const change = removing ? "RemoveLine" : lineChange(was.has(value), will.has(value));
         const elsewhere = change === "AddLine" ? saved.get(value) : undefined;
-        return <ListRow key={value} title={value} detail={elsewhere === undefined || elsewhere === before.name ? lines[change] : `${lines[change]}, saved as ${elsewhere}`} className={change === "RemoveLine" ? "line-through" : change === "AddLine" ? "font-semibold" : undefined} />;
+        return <ListRow key={value} title={<span className="wrap-anywhere whitespace-normal">{value}</span>} detail={elsewhere === undefined || elsewhere === before.name ? lines[change] : `${lines[change]}, saved as ${elsewhere}`} className={change === "RemoveLine" ? "line-through" : change === "AddLine" ? "font-semibold" : undefined} />;
       })}
     </ListGroup>
   );
@@ -56,8 +58,9 @@ export function Review({ runtime }: ReviewProps) {
         <ListGroup aria-label={reachesANumber(state.ask) ? "Which number" : "Which contact"}>
           {reachesANumber(state.ask)
             ? choicesOf(held.matches).map(({ contact, number }) => {
-                const choose = { type: "choose", number, contact: contact.id, emergency: judge(number.replace(/[^\d+]/g, "")) === "Emergency", unchanged: false } as const;
-                return <ListRow key={`${contact.id} ${number}`} title={contact.name} detail={number} disabled={!can(choose, "Owner")} onClick={() => void send(choose, "Owner")} />;
+                const choose = { type: "choose", number, contact: contact.id, emergency: false, unchanged: false } as const;
+                return <ListRow key={`${contact.id} ${number}`} title={contact.name} detail={number} disabled={!can(choose, "Owner")}
+                  onClick={() => void runtime.runPromise(chooseNumber(state, held, contact.id, number))} />;
               })
             : held.matches.map((contact) => {
                 const choose = { type: "choose", number: "", contact: contact.id, emergency: false, unchanged: unchangedBy(held.operation, contact) } as const;
@@ -75,7 +78,7 @@ export function Review({ runtime }: ReviewProps) {
               {held.matches.map((twin) => <ListRow key={twin.id} title={twin.name} detail={[...twin.phones, ...twin.emails].join(", ")} />)}
             </ListGroup>
           )}
-          {state.ask === "AddContact" && <p className={held.matches.length > 0 ? "font-semibold" : undefined}>{held.matches.length > 0 ? "Add (keep existing)" : afterOf(held.operation, blank).name}</p>}
+          {state.ask === "AddContact" && held.matches.length > 0 && <p className="font-semibold">Add (keep existing)</p>}
           {(state.ask === "AddContact" || state.ask === "ChangeContact" || state.ask === "DeleteContact") && (
             <Changes before={before} after={afterOf(held.operation, before)} removing={state.ask === "DeleteContact"} saved={held.saved} />
           )}

@@ -1,0 +1,4 @@
+peerDependencies:
+  '@types/bun': '*'
+engines:
+  bun: '>=1.2'

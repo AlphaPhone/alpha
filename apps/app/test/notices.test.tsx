@@ -2,6 +2,7 @@
 import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Toasts } from "../gen/app__notices__toasts.effect.vibe";
+import { Machine as Layers } from "../gen/app__shell__layers.effect.vibe";
 import { keep, offer, say, withdraw } from "../src/notices/toasts.vibe";
 import { button, closeAll, later, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
@@ -53,5 +54,16 @@ describe("the toasts", () => {
     expect(Boolean(button("Dismiss Your recording was not saved"))).toBe(true);
     await press("Dismiss Your recording was not saved");
     await until(alpha, alpha.runtime, Toasts, (t) => t.kept.length === 0);
+
+    // spec/app/notices/toasts.md, "Story: See a toast over a dialog"
+    const dialog = document.body.appendChild(document.createElement("div"));
+    dialog.setAttribute("role", "dialog");
+    await alpha.runtime.runPromise(Layers.use((layers) => layers.send({ type: "openLayer", id: "confirm", kind: "DialogLayer", covers: true })));
+    await until(alpha, alpha.runtime, Toasts, (t) => t.dialog === 1);
+    await alpha.runtime.runPromise(say("Copied inside dialog"));
+    await until(alpha, alpha.runtime, Toasts, (t) => t.showing && t.shownIn === 1);
+    expect(dialog.querySelector("[role=status]")?.textContent).toBe("Copied inside dialog");
+    await alpha.runtime.runPromise(Layers.use((layers) => layers.send({ type: "closeLayer", id: "confirm" })));
+    dialog.remove();
   });
 });

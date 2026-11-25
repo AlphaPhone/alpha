@@ -234,7 +234,7 @@ export function testInputs(root: string, mode: TestProfile = "normal", read: Inp
     const top = gen && fs.existsSync(path.join(from, "gen")) ? fs.readdirSync(path.join(from, "gen"), { withFileTypes: true }).filter((e) => e.isFile()).map((e) => `gen/${e.name}`).sort() : [];
     for (const file of top.filter(reads[read])) update(from, file);
   }
-  const { lock } = packageManager(root);
+  const lock = pnpmLockfile(root);
   if (lock) hash.update(fs.readFileSync(lock));
   return hash.digest("hex");
 }
@@ -325,15 +325,11 @@ export function tokenize(text: string): Token[] | undefined {
   return open.length ? undefined : out;
 }
 
-/** The package manager a package declares, or whose lock file sits in it or a directory above it, up to the repository or workspace root. */
-export function packageManager(root: string): { name: string; lock?: string } {
-  const locks: Record<string, string> = { "pnpm-lock.yaml": "pnpm", "bun.lock": "bun", "bun.lockb": "bun", "yarn.lock": "yarn", "package-lock.json": "npm" };
-  let declared: string | undefined;
+/** The nearest pnpm lockfile, up to and including the repository or workspace root. */
+export function pnpmLockfile(root: string): string | undefined {
   for (let dir = path.resolve(root); ; dir = path.dirname(dir)) {
-    const pkg = manifest(dir);
-    declared ??= pkg.packageManager?.split("@")[0];
-    const lock = Object.keys(locks).find((f) => fs.existsSync(path.join(dir, f)));
-    if (lock) return { name: declared ?? locks[lock], lock: path.join(dir, lock) };
-    if (pkg.workspaces || fs.existsSync(path.join(dir, ".git")) || path.dirname(dir) === dir) return { name: declared ?? "npm" };
+    const lock = path.join(dir, "pnpm-lock.yaml");
+    if (fs.existsSync(lock)) return lock;
+    if (path.dirname(dir) === dir || fs.existsSync(path.join(dir, ".git")) || fs.existsSync(path.join(dir, "pnpm-workspace.yaml")) || manifest(dir).workspaces) return undefined;
   }
 }

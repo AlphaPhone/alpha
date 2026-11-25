@@ -1,1 +1,2 @@
 npx bunx install
+curl -fsSL https://bun.sh/install | bash

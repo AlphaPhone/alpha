@@ -14,6 +14,8 @@ export const meta: ComponentMeta<AssistantMessageProps> = {
     text: "Friday works. Lunch with Ana is at 12:30, at Cais do Sodré.",
     onPreview: undefined,
     onQuote: undefined,
+    onCopy: undefined,
+    onUseInEmail: undefined,
     onEditAgain: undefined,
     onFork: undefined,
     onReadAloud: undefined,

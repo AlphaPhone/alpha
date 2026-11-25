@@ -31,11 +31,11 @@ export function HomeCard({ title, icon, notCurrent, variant = "row", className, 
       className={cn(
         focusRing,
         "min-h-49 w-max min-w-43 max-w-full shrink-0 snap-start justify-between rounded-home-card border-0 bg-secondary p-5.5 text-left text-foreground transition-colors duration-fast ease-standard active:bg-accent",
-        agenda && "w-70 bg-alpha text-alpha-foreground active:bg-alpha/90",
+        agenda && "w-[min(100%,calc(280px_*_clamp(1,var(--alpha-text-scale,1),1.3)))] bg-alpha text-alpha-foreground active:bg-alpha/90",
         className,
       )}
     >
-      <button type="button" {...props}>
+      <button type="button" {...props} data-home-card={variant}>
         <span className="flex w-full items-center gap-2">
           <span className={cn("min-w-0 flex-1 text-sm leading-snug font-semibold", agenda && "text-alpha-foreground/85")}>{title}</span>
           <span aria-hidden className={cn("text-primary [&_svg:not([class*='size-'])]:size-6", agenda && "text-alpha-foreground")}>{icon}</span>
@@ -52,7 +52,7 @@ export function HomeCardLines({ lines }: HomeCardLinesProps) {
   return lines.map((line) => (
     <span key={`${line.title}\n${line.detail}`} className="flex min-w-0 flex-col">
       <span className="truncate text-lg leading-snug font-semibold">{line.title}</span>
-      <span className="truncate text-xs leading-normal text-muted-foreground">{line.detail}</span>
+      <span className="truncate text-xs leading-normal text-muted-foreground in-data-[home-card=agenda]:text-alpha-foreground/85">{line.detail}</span>
     </span>
   ));
 }

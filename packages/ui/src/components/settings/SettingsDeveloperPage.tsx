@@ -31,7 +31,7 @@ export type SettingsDeveloperPageProps = SettingsAndroidProps &
 export function SettingsDeveloperPage({ exporting, told, onBack, onOpen, onExport, onTryMocks, onHandOver, starting, onAndroid, place, onPlace }: SettingsDeveloperPageProps) {
   const at = (row: number) => placed({ place, onPlace }, row);
   return (
-    <SettingsPage title="Developer" told={told} onBack={onBack}>
+    <SettingsPage title="Developer" told={told} onBack={onBack} backLabel="Back to Settings">
       <ListGroup>
         <SettingsNavRow title="Problem log" icon={<Bug />} onOpen={onOpen && (() => onOpen("problems"))} {...at(0)} />
         <SettingsExportRow exporting={exporting} onExport={onExport} {...at(1)} />

@@ -1,7 +1,8 @@
-// spec/app/phone/voicemail.md, "Closing the voicemail returns to the list"; spec/app/messages/index.md, "Back returns from a conversation or the picker to the list, and reads it again"; spec/app/contacts/index.md, "Closing the contact returns to the list"; spec/app/phone/details.md, "The page reads only while it is in front, and leaving forgets what it read"
+// spec/app/phone/voicemail.md, "Closing the voicemail returns to the list"; spec/app/messages/index.md, "Back returns from a conversation or the picker to the list, and reads it again"; spec/app/contacts/index.md, "Closing the contact returns to the list"
 import * as Contacts from "../../gen/app__contacts.effect.vibe"
 import * as Messages from "../../gen/app__messages.effect.vibe"
-import * as Info from "../../gen/app__phone__details.effect.vibe"
+import * as Phone from "../../gen/app__phone.effect.vibe"
+import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Voicemail from "../../gen/app__phone__voicemail.effect.vibe"
 import { contained } from "../runtime/reactor.vibe"
 
@@ -32,12 +33,32 @@ export const contactsBack = effect {
   const step = state.confirming ? { type: "keep" } as const
     : state.form !== "Shut" && !Contacts.pending(state) ? { type: "discard" } as const
     : state.opened ? { type: "closeContact" } as const
+    : Contacts.canEndSearch(state) ? { type: "endSearch" } as const
     : undefined
   return try stepped(contacts, step)
 }
 
-/** Back on Settings → Phone closes the page. */
-export const detailsBack = effect {
-  const info = try Info.Machine
-  return try stepped(info, (try info.get()).shown ? { type: "show", showing: false } as const : undefined)
+
+// spec/app/shell/index.md, "Returning to the prior communications app keeps Ask Alpha open at its current height"
+/** Return from Phone's Contacts tab once, then select the latest tab the owner chose. */
+export effect function returnPhoneTab(wanted: () => Phone.Tab): void!!(Phone.Machine | Shell.Machine) {
+  const shell = try Shell.Machine
+  const handset = try Phone.Machine
+  const before = try shell.get()
+  if (before.trail.at(-1) !== "Contacts" || before.trail.at(-2) !== "Phone") return
+  const sameTrail = (where: Shell.Shell) => where.trail.length === before.trail.length && where.trail.every((view, at) => view === before.trail[at])
+  const back = { type: "goBack" } as const
+  if (before.assistant === "Typing" && !(try contained(shell.send(back, (where) => sameTrail(where) && where.assistant === "Typing"), "leaving typing for the Phone tabs"))) return
+  const from = try shell.get()
+  if (!sameTrail(from) || from.assistant === "Typing") return
+  const go = from.assistant === "Bar" ? back : { type: "returnCommsView", previous: "Phone" } as const
+  if (!(try contained(shell.send(go, (where) => sameTrail(where) && where.assistant === from.assistant), "returning to Phone from Contacts"))) return
+  const front = timeout(Stream.runHead(Stream.filter(handset.changes, (state) => state.front)), "2 seconds") catch () => Option.none()
+  const where = try shell.get()
+  if (Option.isNone(front) || where.trail.length !== before.trail.length - 1 || where.trail.some((view, at) => view !== before.trail[at])) return
+  const state = try handset.get()
+  const tab = wanted()
+  if (state.front && Phone.canPickTab(state, tab)) {
+    try contained(handset.send({ type: "pickTab", tab }, (current) => current.front && current.tab === state.tab), "selecting the Phone tab")
+  }
 }

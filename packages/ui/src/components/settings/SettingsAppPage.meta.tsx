@@ -26,7 +26,7 @@ export const meta: ComponentMeta<SettingsAppPageProps> = {
       onHandOver.mockClear();
       const canvas = within(canvasElement);
       await userEvent.click(canvas.getByRole("switch", { name: /Load images/ }));
-      await userEvent.click(canvas.getByRole("button", { name: "Google and email" }));
+      await userEvent.click(canvas.getByRole("button", { name: "Google & email" }));
       await expect([onImagesChange.mock.calls, onHandOver.mock.calls]).toEqual([[[true]], [["google-and-email"]]]);
     },
     Workflows: async ({ canvasElement }: { canvasElement: HTMLElement }) => {

@@ -2,7 +2,7 @@
 
 The camera of the phone: a viewfinder that focuses where the owner taps,
 zooms by pinch or by its chips, flips between the lenses and lights the
-flash; it takes photos and records videos, and shows the last one taken.
+flash, self-timer, framing grid and photo aspect ratio; it takes photos and records videos, and shows the last one taken.
 Opened from the lock screen of an Alpha image it is the secure camera,
 which shows only what was taken there and opens nothing else. A video's
 timer, limits and ending are the [Recording](./recording.md); a photo taken
@@ -41,6 +41,7 @@ the cause.
 ```quint
 type Mode = Photo | Video
 type Lens = Back | Front
+type RequestedLens = AsShown | WantsBack | WantsFront
 type Phase = Off | Starting | Ready | Failed
 type Said = Quiet | NotTaken | NothingRecorded | NotSaved
 type Cause = NoCause | Left | Denied | PreviewFailed | Busy | Protected
@@ -48,7 +49,7 @@ type Cause = NoCause | Left | Denied | PreviewFailed | Busy | Protected
 pure val minZoom = 5
 pure val oneTime = 10
 pure val maxZoom = 100
-pure val grace = 10
+pure val grace = 10000
 ```
 
 ### What Camera asks of the phone
@@ -57,7 +58,7 @@ Android's camera and microphone prompts and its Settings, and the shell's
 "Unlock to continue"; a preview started or stopped, each under its own
 number; the flash, the zoom and the focus point; a photo, for the owner or
 for the agent's request; a recording started, stopped or checked; the
-scanner in Files; the last capture opened in Photos, limited on the lock
+transient scanner's live frame; the last capture opened in Photos, limited on the lock
 screen to what was taken there; Ask Alpha about the live frame or the last
 capture; asking the shell to lower Ask Alpha so the owner sees the
 viewfinder the agent asks to use; and the agent's answer: how its request
@@ -71,14 +72,14 @@ type Effect =
   | Unlock
   | StartPreview({ ticket: int, lens: Lens })
   | StopPreview({ ticket: int })
-  | SetFlash({ on: bool })
+  | SetFlash({ on: bool, auto: bool, video: bool })
   | SetZoom({ level: int })
   | FocusAt({ tap: int })
   | Capture({ ticket: int, request: int })
   | StartRecording({ sound: bool })
   | StopRecording
   | CheckRecording({ video: int })
-  | OpenScan
+  | OpenScan({ ticket: int })
   | OpenLast({ photo: int, only: Set[int] })
   | AskAbout({ photo: int })
   | Uncover
@@ -99,11 +100,12 @@ type Camera = {
   permission: P::Permission, mic: P::Permission,
   showing: bool, secure: bool, visit: int, covered: bool, coveredAt: int,
   phase: Phase, preview: int, pending: Set[int],
-  mode: Mode, lens: Lens, flash: bool, zoom: int,
+  mode: Mode, lens: Lens, flash: bool, flashAuto: bool, zoom: int,
+  grid: bool, wide: bool, delay: int, countdown: int, nextCount: int,
   taps: int, focus: int, writing: int, confirmed: int, waited: int,
-  shots: int, shot: int, shotFor: int,
+  shots: int, shot: int, shotFor: int, readingFrame: bool,
   film: F::Film, filmVisit: int,
-  agent: G::Capture, cause: Cause,
+  agent: G::Capture, requestedLens: RequestedLens, cause: Cause,
   said: Said, last: int, session: Set[int],
 }
 
@@ -113,11 +115,12 @@ pure val initial: Camera = {
   permission: P::unasked, mic: P::unasked,
   showing: false, secure: false, visit: 0, covered: false, coveredAt: 0,
   phase: Off, preview: 0, pending: Set(),
-  mode: Photo, lens: Back, flash: false, zoom: oneTime,
+  mode: Photo, lens: Back, flash: false, flashAuto: false, zoom: oneTime,
+  grid: false, wide: false, delay: 0, countdown: 0, nextCount: 0,
   taps: 0, focus: 0, writing: 0, confirmed: 0, waited: 0,
-  shots: 0, shot: 0, shotFor: 0,
+  shots: 0, shot: 0, shotFor: 0, readingFrame: false,
   film: F::initial, filmVisit: 0,
-  agent: G::initial, cause: NoCause,
+  agent: G::initial, requestedLens: AsShown, cause: NoCause,
   said: Quiet, last: 0, session: Set(),
 }
 
@@ -147,9 +150,10 @@ pure def answering(d: Done, before: Camera): Done =
 
 ```quint
 pure val levelValues = Set(4, 5, 10, 20, 100)
-pure val pieceValues = Set(40, 70)
-pure val nowValues = Set(0, 150, 300, 450)
-pure val atValues = Set(0, 150)
+pure val pieceValues = Set(41943040, 73400320)
+pure val totalValues = Set(1, 41943040, 104857600)
+pure val nowValues = Set(0, 150000, 300000, 450000)
+pure val atValues = Set(0, 150000)
 pure val ticketValues = Set(1, 2, 3, 4, 5, 6, 7, 8)
 pure val tapValues = Set(1, 2, 3, 4, 5, 6, 7, 8)
 pure val photoValues = Set(0, 8, 9)
@@ -194,6 +198,22 @@ pure def open(s: Camera, secure: bool, newest: int, by: Actor): Done =
   if (mayStart(shown)) starting(List(), shown) else emit(List(), shown)
 ```
 
+### An older library read never replaces a photo taken while it was pending
+
+Camera reads a one-item Camera album page when opening. This may fill its
+last-capture tile only for the unlocked visit and last capture that asked.
+The still capture owns the tile as soon as its checked receipt arrives.
+
+```quint
+pure val visitValues = Set(1, 2, 3)
+pure val previousValues = Set(0, 3, 8)
+
+pure def canLastSeen(s: Camera, visit: int, previous: int, by: Actor): bool =
+  by == Phone and s.showing and not(s.secure) and s.visit == visit and s.last == previous and free(s)
+
+pure def lastSeen(s: Camera, visit: int, previous: int, newest: int, by: Actor): Camera = { ...s, last: newest }
+```
+
 ### Camera asks Android for the camera and the microphone once, and afterwards sends the owner to Settings
 
 A video records sound only with the microphone allowed; without it the owner
@@ -228,7 +248,7 @@ a recording under way is stopped and finished first.
 ```quint
 pure def retiring(now: int, out: List[Effect], c: Camera): Done =
   val released = {
-    ...c, shot: 0, shotFor: 0, focus: 0, writing: 0, confirmed: 0,
+    ...c, shot: 0, shotFor: 0, readingFrame: false, focus: 0, writing: 0, confirmed: 0, countdown: 0, nextCount: 0,
     agent: if (c.agent.stage == G::Shooting) G::lost(c.agent, Phone) else c.agent,
   }
   if (c.film.stage == F::Running) emit(out.append(StopRecording), { ...released, film: F::stop(c.film, now) })
@@ -278,7 +298,7 @@ pure def canPreviewLost(s: Camera, ticket: int, by: Actor): bool =
 
 pure def previewLost(s: Camera, ticket: int, by: Actor): Done =
   val failed = blocking(PreviewFailed, {
-    ...s, phase: Failed, shot: 0, shotFor: 0, focus: 0, writing: 0, confirmed: 0,
+    ...s, phase: Failed, shot: 0, shotFor: 0, readingFrame: false, focus: 0, writing: 0, confirmed: 0, countdown: 0, nextCount: 0,
     said: if (s.shot != 0 and s.shotFor == 0) NotTaken else s.said,
     agent: if (s.agent.stage == G::Shooting) G::lost(s.agent, Phone) else s.agent,
   })
@@ -356,7 +376,7 @@ a recording, a photo or an agent's request holds it.
 ```quint
 pure def canCovered(s: Camera, by: Actor): bool = by == Phone and s.showing and not(s.covered)
 
-pure def covered(s: Camera, at: int, by: Actor): Camera = { ...s, covered: true, coveredAt: at, agent: seen(s.agent) }
+pure def covered(s: Camera, at: int, by: Actor): Camera = { ...s, covered: true, coveredAt: at, agent: seen(s.agent), countdown: 0, nextCount: 0 }
 
 pure def canUncovered(s: Camera, by: Actor): bool = by == Phone and s.covered
 
@@ -445,7 +465,7 @@ pure def sometimesReleasedUnderAskAlpha(s: Camera): bool = s.showing and s.cover
 pure def canSetMode(s: Camera, mode: Mode, by: Actor): bool =
   by == Owner and s.showing and not(s.covered) and mode != s.mode and free(s)
 
-pure def setMode(s: Camera, mode: Mode, by: Actor): Camera = { ...s, mode: mode, agent: seen(s.agent) }
+pure def setMode(s: Camera, mode: Mode, by: Actor): Camera = { ...s, mode: mode, flash: false, flashAuto: false, countdown: 0, nextCount: 0, agent: seen(s.agent) }
 ```
 
 ### Flipping the lens turns the flash off, returns to one time and starts the other lens's preview
@@ -455,22 +475,25 @@ pure def canFlip(s: Camera, by: Actor): bool = by == Owner and ready(s) and free
 
 pure def flip(s: Camera, by: Actor): Done =
   starting(List(StopPreview({ ticket: s.preview })),
-    { ...s, lens: if (s.lens == Back) Front else Back, flash: false, zoom: oneTime })
+    { ...s, lens: if (s.lens == Back) Front else Back, flash: false, flashAuto: false, zoom: oneTime, countdown: 0, nextCount: 0 })
 ```
 
-### The flash belongs to the back lens
+### Photo flash cycles off, auto and on; the back lens lights video with a torch
 
 ```quint
-pure def canToggleFlash(s: Camera, by: Actor): bool = by == Owner and ready(s) and s.lens == Back
+pure def canToggleFlash(s: Camera, by: Actor): bool = by == Owner and ready(s) and s.lens == Back and (not(recording(s)) or s.film.stage == F::Running)
 
-pure def toggleFlash(s: Camera, by: Actor): Done = emit(List(SetFlash({ on: not(s.flash) })), { ...s, flash: not(s.flash) })
+pure def toggleFlash(s: Camera, by: Actor): Done =
+  val on = if (s.mode == Video) not(s.flash) else s.flashAuto
+  val automatic = s.mode == Photo and not(s.flash or s.flashAuto)
+  emit(List(SetFlash({ on: on, auto: automatic, video: s.mode == Video })), { ...s, flash: on, flashAuto: automatic })
 ```
 
-### Zoom moves within what the lens allows, by chip or by pinch, while not recording
+### Zoom moves within what the lens allows, by chip or by pinch, including while a recording runs
 
 ```quint
 pure def canZoomTo(s: Camera, level: int, by: Actor): bool =
-  by == Owner and ready(s) and not(recording(s)) and level != s.zoom
+  by == Owner and ready(s) and (not(recording(s)) or s.film.stage == F::Running) and level != s.zoom
     and level >= minZoom and level <= maxZoom and (s.lens == Front implies level == oneTime)
 
 pure def zoomTo(s: Camera, level: int, by: Actor): Done = emit(List(SetZoom({ level: level })), { ...s, zoom: level, agent: seen(s.agent) })
@@ -540,6 +563,34 @@ pure def sometimesFocusAfterWaiting(s: Camera): bool = s.confirmed != 0 and s.co
 pure def sometimesZoomed(s: Camera): bool = ready(s) and s.zoom > oneTime and s.flash
 ```
 
+### The grid turns on and off without restarting the preview
+
+```quint
+pure def canToggleGrid(s: Camera, by: Actor): bool = by == Owner and ready(s)
+
+pure def toggleGrid(s: Camera, by: Actor): Camera = { ...s, grid: not(s.grid) }
+```
+
+### With both photo ratios available, changing ratio starts a preview of the same lens
+
+```quint
+pure def canToggleRatio(s: Camera, by: Actor): bool =
+  by == Owner and ready(s) and free(s) and s.mode == Photo and s.countdown == 0
+
+pure def toggleRatio(s: Camera, by: Actor): Done =
+  starting(List(StopPreview({ ticket: s.preview })), { ...s, wide: not(s.wide) })
+```
+
+### The photo timer cycles off, three seconds and ten seconds
+
+```quint
+pure def canCycleDelay(s: Camera, by: Actor): bool =
+  by == Owner and ready(s) and free(s) and s.mode == Photo and s.countdown == 0
+
+pure def cycleDelay(s: Camera, by: Actor): Camera =
+  { ...s, delay: if (s.delay == 0) 3 else if (s.delay == 3) 10 else 0 }
+```
+
 ## Story: Take photos and videos
 
 > As the owner, I want to take a photo with one press, record a video with
@@ -549,11 +600,36 @@ pure def sometimesZoomed(s: Camera): bool = ready(s) and s.zoom > oneTime and s.
 ### A photo is taken in Photo mode over a ready preview, one shutter at a time
 
 ```quint
-pure def canShutter(s: Camera, by: Actor): bool = by == Owner and ready(s) and s.mode == Photo and free(s)
+pure def canShutter(s: Camera, by: Actor): bool = by == Owner and ready(s) and s.mode == Photo and free(s) and s.countdown == 0
 
 pure def shutter(s: Camera, by: Actor): Done =
   val n = s.shots + 1
   emit(List(Capture({ ticket: n, request: 0 })), { ...s, shots: n, shot: n, shotFor: 0 })
+```
+
+### A timed shutter counts down, and pressing again cancels it
+
+The owner can cancel a countdown by pressing the shutter again. Leaving,
+losing the preview, being covered, changing mode or flipping the lens cancels
+it too, so no delayed shot can be taken on a different viewfinder.
+
+```quint
+pure def canStartDelay(s: Camera, by: Actor): bool = canShutter(s, by) and s.delay > 0
+
+pure def startDelay(s: Camera, now: int, by: Actor): Camera =
+  { ...s, countdown: s.delay, nextCount: now + F::second }
+
+pure def canCancelDelay(s: Camera, by: Actor): bool = by == Owner and s.countdown > 0
+
+pure def cancelDelay(s: Camera, by: Actor): Camera = { ...s, countdown: 0, nextCount: 0 }
+
+pure def canDelayTick(s: Camera, now: int, by: Actor): bool =
+  by == Phone and ready(s) and s.mode == Photo and free(s) and s.countdown > 0 and now >= s.nextCount
+
+pure def delayTick(s: Camera, now: int, by: Actor): Done =
+  val remaining = s.countdown - (now - s.nextCount) / F::second - 1
+  if (remaining <= 0) shutter({ ...s, countdown: 0, nextCount: 0 }, Owner)
+  else emit(List(), { ...s, countdown: remaining, nextCount: now + F::second })
 ```
 
 ### A capture answers the shutter in flight: the agent's goes to its request, and every photo saved becomes the last
@@ -564,7 +640,7 @@ A photo the phone could not save is said in the banner.
 pure def remember(photo: int, c: Camera): Camera =
   { ...c, last: photo, session: if (c.secure) c.session.union(Set(photo)) else c.session }
 
-pure def canCaptured(s: Camera, ticket: int, by: Actor): bool = by == Phone and s.shot != 0 and ticket == s.shot
+pure def canCaptured(s: Camera, ticket: int, by: Actor): bool = by == Phone and s.shot != 0 and ticket == s.shot and not(s.readingFrame)
 
 pure def captured(s: Camera, ticket: int, photo: int, by: Actor): Done =
   val answered = {
@@ -605,7 +681,8 @@ A recording the phone opens after Camera was left, or lost access, is
 stopped at once. When a recording ends away from Camera, the preview it kept
 is released. A video saved while Camera is unlocked becomes the last
 capture, whichever opening of Camera started it; on the lock screen only one
-started in this opening does.
+started in this opening does. The recorder may report its cumulative size
+again as it finishes, so only new data counts toward the limit.
 
 ```quint
 pure def afterRecording(out: List[Effect], c: Camera): Done =
@@ -623,7 +700,7 @@ pure def settling(f: F::Film, before: Camera): Camera =
 
 pure def filming(f: F::Film, now: int, c: Camera): Done =
   val landed = settling(f, c)
-  if (c.film.stage == F::Running and f.stage == F::Stopping) afterRecording(List(StopRecording), landed)
+  if (c.film.stage != F::Stopping and f.stage == F::Stopping) afterRecording(List(StopRecording), landed)
   else if (f.stage == F::Checking and c.film.stage != F::Checking) afterRecording(List(CheckRecording({ video: f.video })), landed)
   else afterRecording(List(), landed)
 
@@ -631,7 +708,8 @@ pure def canRecordingStarted(s: Camera, by: Actor): bool = by == Phone and F::ca
 
 pure def recordingStarted(s: Camera, ok: bool, now: int, by: Actor): Done =
   val begun = F::started(s.film, ok, now)
-  if (ok and not(holds(s))) emit(List(StopRecording), { ...s, film: F::stop(begun, now) }) else filming(begun, now, s)
+  val held = if (begun.stage == F::Running and not(holds(s))) F::stop(begun, now) else begun
+  filming(held, now, s)
 
 pure def canTick(s: Camera, now: int, by: Actor): bool = by == Phone and F::canTick(s.film, now)
 
@@ -640,6 +718,12 @@ pure def tick(s: Camera, now: int, by: Actor): Done = filming(F::tick(s.film, no
 pure def canChunk(s: Camera, piece: int, by: Actor): bool = by == Phone and F::canChunk(s.film, piece)
 
 pure def chunk(s: Camera, piece: int, now: int, by: Actor): Done = filming(F::chunk(s.film, piece, now), now, s)
+
+pure def canRecordingSize(s: Camera, total: int, by: Actor): bool =
+  by == Phone and total > s.film.bytes and total <= F::maxBytes and F::canChunk(s.film, total - s.film.bytes)
+
+pure def recordingSize(s: Camera, total: int, now: int, by: Actor): Done =
+  chunk(s, total - s.film.bytes, now, by)
 
 pure def canStopRecording(s: Camera, by: Actor): bool = by == Owner and F::canStop(s.film)
 
@@ -666,9 +750,34 @@ pure def canRecordingVerified(s: Camera, by: Actor): bool = by == Phone and F::c
 pure def recordingVerified(s: Camera, ok: bool, now: int, by: Actor): Done = filming(F::verified(s.film, ok), now, s)
 ```
 
-### A video saved while Camera is unlocked becomes the last capture
+### Back stays in Camera while the recorder settles
 
 ```quint
+pure def recordingTakesBack(s: Camera): bool = F::pending(s.film)
+```
+
+### Volume keys fire the available shutter while Camera is ready for the owner
+
+The hardware keys adjust volume while Camera is covered, asking about the
+microphone, reviewing a capture request, or scanning a frame.
+
+```quint
+pure def volumeShutter(s: Camera): bool =
+  ready(s) and not(G::open(s.agent)) and not(s.readingFrame)
+    and (if (s.mode == Photo) canCancelDelay(s, Owner) or canShutter(s, Owner)
+      else s.film.stage == F::Running or (P::allows(s.mic) and canStartRecording(s, true, Owner)))
+```
+
+### A video saved while Camera is unlocked becomes the last capture
+
+The last capture can open as soon as the phone saves it. While Camera shows
+that newly saved video, the tile can fill in its thumbnail from that same
+owned video. If the thumbnail is unavailable, the tile shows the video icon.
+
+```quint
+pure def savedVideoThumbnail(s: Camera): int =
+  if (s.showing and not(s.secure) and not(s.covered) and s.film.stage == F::Saved and s.last == s.film.video) s.last else 0
+
 pure def stepASavedVideoIsTheLast(before: Camera, after: Camera): bool =
   (before.film.stage != F::Saved and after.film.stage == F::Saved and not(before.secure)) implies after.last == after.film.video
 ```
@@ -741,6 +850,30 @@ pure def sometimesNothingRecorded(s: Camera): bool = s.said == NothingRecorded
 > I see and approve, never while I am taking one, and to be told why when it
 > could not.
 
+### An agent may name a lens, but approval still belongs to the owner looking through it
+
+A requested lens rebinds the preview for review. The owner may frame the
+photo or change lenses, but an explicit front or back request can be
+approved and shot only on that lens.
+
+```quint
+pure def chosenLens(s: Camera): Lens =
+  if (s.requestedLens == WantsFront) Front else if (s.requestedLens == WantsBack) Back else s.lens
+
+pure def canAgentLens(s: Camera, requested: RequestedLens, by: Actor): bool =
+  G::canAsk(s.agent, by) and s.showing and not(s.secure) and P::allows(s.permission)
+    and s.phase != Failed and free(s) and s.countdown == 0
+
+pure def agentLens(s: Camera, requested: RequestedLens, by: Actor): Done =
+  val choice = { ...s, requestedLens: requested }
+  val lens = chosenLens(choice)
+  val switched = { ...choice, lens: lens, zoom: oneTime, flash: false, flashAuto: false }
+  if (lens == s.lens) emit(List(), choice)
+  else if (s.phase == Ready) starting(List(StopPreview({ ticket: s.preview })), switched)
+  else if (s.phase == Starting or mayStart(switched)) starting(List(), switched)
+  else emit(List(), switched)
+```
+
 ### The agent asks only over a Camera that is showing, unlocked and allowed; an idle preview is started for it, and Ask Alpha over it is lowered
 
 The agent usually asks while the owner talks to Alpha in Ask Alpha over
@@ -751,7 +884,7 @@ not live waits to be shown.
 
 ```quint
 pure def canAgentAsk(s: Camera, by: Actor): bool =
-  G::canAsk(s.agent, by) and s.showing and not(s.secure) and P::allows(s.permission) and s.phase != Failed and free(s)
+  G::canAsk(s.agent, by) and s.showing and not(s.secure) and P::allows(s.permission) and s.phase != Failed and free(s) and s.countdown == 0
 
 pure def agentAsk(s: Camera, by: Actor): Done =
   val request = G::ask(s.agent, by)
@@ -765,11 +898,11 @@ pure def agentAsk(s: Camera, by: Actor): Done =
 A request asked while the preview starts waits for it.
 
 ```quint
-pure def canAgentShown(s: Camera, by: Actor): bool = G::canReshown(s.agent, by) and ready(s)
+pure def canAgentShown(s: Camera, by: Actor): bool = G::canReshown(s.agent, by) and ready(s) and chosenLens(s) == s.lens
 
 pure def agentShown(s: Camera, by: Actor): Camera = { ...s, agent: G::reshown(s.agent, by) }
 
-pure def canAgentApprove(s: Camera, by: Actor): bool = G::canApprove(s.agent, by) and ready(s)
+pure def canAgentApprove(s: Camera, by: Actor): bool = G::canApprove(s.agent, by) and ready(s) and chosenLens(s) == s.lens
 
 pure def agentApprove(s: Camera, by: Actor): Camera = { ...s, agent: G::approve(s.agent, by) }
 
@@ -813,7 +946,7 @@ pure def canAgentShoot(s: Camera, sensitive: bool, by: Actor): bool = G::canShoo
 pure def agentShoot(s: Camera, sensitive: bool, by: Actor): Done =
   val n = s.shots + 1
   if (sensitive) answering(emit(List(), blocking(Protected, s)), s)
-  else if (not(ready(s) and free(s))) answering(emit(List(), blocking(Busy, s)), s)
+  else if (not(ready(s) and free(s) and s.countdown == 0 and chosenLens(s) == s.lens)) answering(emit(List(), blocking(Busy, s)), s)
   else emit(List(Capture({ ticket: n, request: s.agent.request })),
     { ...s, agent: G::shoot(s.agent, by), shots: n, shot: n, shotFor: s.agent.request })
 ```
@@ -845,6 +978,7 @@ pure def alwaysOneShutterOnTheCamera(s: Camera): bool =
     and ((s.agent.stage == G::Shooting) iff (s.shot != 0 and s.shotFor != 0))
     and (s.shotFor != 0 implies s.shotFor == s.agent.request)
     and (s.shot == 0 implies s.shotFor == 0)
+    and (s.readingFrame implies (s.shot != 0 and s.shotFor == 0 and not(s.secure)))
     and (s.shot != 0 implies (s.showing and not(recording(s))))
     and G::alwaysResultsAreHonest(s.agent)
 ```
@@ -936,7 +1070,7 @@ pure def alwaysSecureShowsOnlyItsSession(s: Camera): bool =
 pure def stepTheLockScreenOpensNothingElse(before: Camera, after: Camera, out: List[Effect]): bool =
   out.every(e => match e {
     | OpenLast(o) => before.secure implies (o.only.contains(o.photo) and o.only.subseteq(before.session))
-    | OpenScan => not(before.secure)
+    | OpenScan(o) => not(before.secure)
     | OpenSettings => not(before.secure)
     | AskAccess => not(before.secure)
     | AskMicrophone => not(before.secure)
@@ -971,16 +1105,29 @@ pure def sometimesEarlierRecordingFinishing(s: Camera): bool = s.secure and s.sh
 
 ## Story: Scan a document
 
-> As the owner, I want "Scan document" in Camera to take me to scanning,
-> which Files owns.
+> As the owner, I want to read and review text in the current viewfinder frame,
+> and return to Camera when I close it.
 
-### "Scan document" hands the camera to the scanner in Files, except on the lock screen
+### Scanning takes the current live Photo frame without adding a capture to Photos
 
-Camera is left as when the owner leaves it; Files' scanner takes the camera.
+The unlocked owner holds the same shutter as a photo until the phone answers.
+A scan covers Camera during review and leaves the last photo alone. Leaving
+Camera releases that shutter and the later frame is discarded.
 
 ```quint
-pure def canScanDocument(s: Camera, by: Actor): bool = by == Owner and s.showing and not(s.secure) and free(s)
+pure def canScanDocument(s: Camera, by: Actor): bool =
+  by == Owner and ready(s) and s.mode == Photo and not(s.secure) and free(s)
+    and s.countdown == 0 and not(G::open(s.agent))
 
-pure def scanDocument(s: Camera, now: int, by: Actor): Done =
-  answering(retiring(now, List(OpenScan), blocking(Left, { ...s, showing: false, covered: false })), s)
+pure def scanDocument(s: Camera, by: Actor): Done =
+  val ticket = s.shots + 1
+  emit(List(OpenScan({ ticket: ticket })), { ...s, shots: ticket, shot: ticket, readingFrame: true })
+
+pure def canScannedFrame(s: Camera, ticket: int, by: Actor): bool =
+  by == Phone and s.readingFrame and s.shot == ticket
+
+pure def scannedFrame(s: Camera, ticket: int, ok: bool, by: Actor): Camera =
+  { ...s, shot: 0, readingFrame: false, said: if (ok) Quiet else NotTaken }
+
+pure val fair_scannedFrame = "weak"
 ```

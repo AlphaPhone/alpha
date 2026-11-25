@@ -12,30 +12,33 @@ its microphone and its owner allow one.
 
 ### A recording and its limits
 
-A recording is idle, opening, running, stopping, being checked after the
-size limit cut it, or ended as saved, empty or broken, and may have been
-interrupted. It runs with sound or without, from the moment the phone said it started, and stops by itself at
+A recording is idle, opening, waiting to stop as soon as it opens, running,
+stopping, being checked after the size limit cut it, or ended as saved, empty
+or broken, and may have been interrupted. It runs with sound or without, from the moment the phone said it started, and stops by itself at
 five minutes or 100 MB. A stop the phone has not finished within ten seconds
 breaks it.
 
 ```quint
-type Stage = Idle | Opening | Running | Stopping | Checking | Saved | Empty | Broken
+type Stage = Idle | Opening | StopWhenOpened | Running | Stopping | Checking | Saved | Empty | Broken
 
 type Film = {
   stage: Stage, sound: bool, since: int, elapsed: int, bytes: int, truncated: bool, preempted: bool,
   deadline: int, checked: bool, video: int,
 }
 
-pure val maxBytes = 100
+pure val maxBytes = 104857600
 pure val maxSeconds = 300
-pure val stopGrace = 10
+pure val stopGrace = 10000
+pure val second = 1000
 
 pure val initial: Film = {
   stage: Idle, sound: false, since: 0, elapsed: 0, bytes: 0, truncated: false, preempted: false,
   deadline: 0, checked: false, video: 0,
 }
 
-pure def recording(f: Film): bool = f.stage == Opening or f.stage == Running or f.stage == Stopping
+pure def opening(f: Film): bool = f.stage == Opening or f.stage == StopWhenOpened
+
+pure def recording(f: Film): bool = opening(f) or f.stage == Running or f.stage == Stopping
 
 pure def pending(f: Film): bool = recording(f) or f.stage == Checking
 
@@ -47,8 +50,8 @@ pure def stopping(now: int, f: Film): Film = { ...f, stage: Stopping, deadline: 
 ### What the simulator tries
 
 ```quint
-pure val pieceValues = Set(40, 70)
-pure val nowValues = Set(0, 150, 300, 450)
+pure val pieceValues = Set(41943040, 73400320)
+pure val nowValues = Set(0, 150000, 300000, 450000)
 pure val videoValues = Set(0, 7)
 pure val weight_chunk = 3
 ```
@@ -70,19 +73,22 @@ pure def start(f: Film, sound: bool): Film = { ...initial, stage: Opening, sound
 ### The phone says whether the recording started; one that did not is broken
 
 ```quint
-pure def canStarted(f: Film): bool = f.stage == Opening
+pure def canStarted(f: Film): bool = opening(f)
 
 pure def started(f: Film, ok: bool, now: int): Film =
-  if (ok) { ...f, stage: Running, since: now } else { ...f, stage: Broken }
+  if (not(ok)) { ...f, stage: Broken }
+  else if (f.stage == StopWhenOpened) stopping(now, { ...f, since: now })
+  else { ...f, stage: Running, since: now }
 ```
 
 ### The timer runs forward from the recording's start, and five minutes stops it
 
 ```quint
-pure def canTick(f: Film, now: int): bool = f.stage == Running and now >= f.since + f.elapsed
+pure def canTick(f: Film, now: int): bool = f.stage == Running and now >= f.since + f.elapsed * second
 
 pure def tick(f: Film, now: int): Film =
-  val timed = { ...f, elapsed: if (now - f.since > maxSeconds) maxSeconds else now - f.since }
+  val seconds = (now - f.since) / second
+  val timed = { ...f, elapsed: if (seconds > maxSeconds) maxSeconds else seconds }
   if (timed.elapsed >= maxSeconds) stopping(now, timed) else timed
 ```
 
@@ -97,12 +103,16 @@ pure def chunk(f: Film, piece: int, now: int): Film =
   if ((not(room) or kept.bytes == maxBytes) and f.stage == Running) stopping(now, kept) else kept
 ```
 
-### The owner stops a running recording
+### Back stops a recording while it opens or runs
+
+If the recorder is still opening, the stop waits for the phone to confirm it
+started. Back stays in Camera until the recording has settled.
 
 ```quint
-pure def canStop(f: Film): bool = f.stage == Running
+pure def canStop(f: Film): bool = f.stage == Opening or f.stage == Running
 
-pure def stop(f: Film, now: int): Film = stopping(now, f)
+pure def stop(f: Film, now: int): Film =
+  if (f.stage == Opening) { ...f, stage: StopWhenOpened } else stopping(now, f)
 ```
 
 ### A recording interrupted by a call or another app taking the camera is stopped, and keeps what was recorded
@@ -163,7 +173,7 @@ already over its limit.
 pure def alwaysWithinLimits(f: Film): bool =
   f.bytes >= 0 and f.bytes <= maxBytes and f.elapsed >= 0 and f.elapsed <= maxSeconds
     and (f.stage == Running implies (f.bytes < maxBytes and not(f.truncated) and f.elapsed < maxSeconds))
-    and (f.stage == Opening implies (f.bytes == 0 and f.elapsed == 0 and not(f.truncated)))
+    and (opening(f) implies (f.bytes == 0 and f.elapsed == 0 and not(f.truncated)))
 ```
 
 ### A recording is settled exactly once

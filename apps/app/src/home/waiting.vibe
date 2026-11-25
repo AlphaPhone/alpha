@@ -4,16 +4,18 @@ import type { View } from "../../gen/app__shell.effect.vibe"
 let current: ReadonlyMap<View, string> = new Map()
 const listeners = new Set<() => void>()
 
+function subscribeWaiting(this: void, listener: () => void): () => void {
+  listeners.add(listener)
+  return () => { listeners.delete(listener) }
+}
+
 /**
  * What waits in each of Alpha's own apps, in the owner's words, such as "2 missed calls": told by the app's own area,
  * and read by Home's tiles as an external store, without an effect. Home decides which tiles show it.
  */
 export const waiting = {
   snapshot: (): ReadonlyMap<View, string> => current,
-  subscribe(listener: () => void): () => void {
-    listeners.add(listener)
-    return () => { listeners.delete(listener) }
-  },
+  subscribe: subscribeWaiting,
   /** `view` has `said` waiting in it, or nothing where `said` is undefined. */
   tell(view: View, said: string | undefined): void {
     const next = new Map(current)

@@ -64,15 +64,22 @@ export function Network({ runtime, common }: PhoneProps) {
 
 const kinds: Record<CarrierGen.Kind, string> = {
   Imei: "IMEI", SimState: "SIM", Iccid: "ICCID", CarrierName: "Carrier", Operator: "Network", OperatorCode: "MCC/MNC", MobileData: "Mobile data",
-  Roaming: "Roaming", Manufacturer: "Manufacturer", Model: "Model", Baseband: "Baseband", SmsRole: "SMS app", PhoneRole: "Phone app",
+  Roaming: "Roaming", Manufacturer: "Manufacturer", Model: "Model", DeviceName: "Device", AndroidVersion: "Android version", Baseband: "Baseband",
+  SmsRole: "Default SMS app", PhoneRole: "Default phone app", ActiveSims: "Active SIMs", SimType: "SIM type", SimSlot: "SIM slot",
+  SimName: "SIM name", DataState: "Data connection", NetworkType: "Data network", DefaultData: "Default data SIM",
 };
 const missing: Record<CarrierGen.Status, SettingsCarrierField["missing"]> = { Returned: undefined, AccessDenied: "access-denied", Missing: "unavailable", Unsupported: "unsupported", NotRead: "not-read" };
 
-const named = (field: CarrierGen.Field) => (field.kind === "Imei" || field.kind === "SimState" || field.index > 0 ? `${kinds[field.kind]} ${field.index + 1}` : kinds[field.kind]);
+const simFields = new Set<CarrierGen.Kind>(["SimType", "SimSlot", "CarrierName", "SimName", "Iccid", "Operator", "OperatorCode", "MobileData", "DataState", "NetworkType", "Roaming", "DefaultData"]);
+const deviceFields = new Set<CarrierGen.Kind>(["Manufacturer", "Model", "DeviceName", "AndroidVersion", "Baseband"]);
+const named = (field: CarrierGen.Field) => field.kind === "Imei" || field.kind === "SimState" ? `${kinds[field.kind]} ${field.index + 1}` : kinds[field.kind];
+const group = (field: CarrierGen.Field) => simFields.has(field.kind) ? `Active SIM ${field.index + 1}` : deviceFields.has(field.kind) ? "Device hardware" : undefined;
 
 /** One identifier as the page shows it: what Android returned, or why it returned nothing. */
 const shown = (field: CarrierGen.Field, name: string): SettingsCarrierField =>
-  field.status === "Returned" ? { name, value: CarrierGen.shownValue(field) } : { name, missing: missing[field.status] };
+  field.status === "Returned"
+    ? { name, group: group(field), value: CarrierGen.shownValue(field), identifier: field.kind === "Imei" || field.kind === "Iccid" }
+    : { name, group: group(field), missing: missing[field.status] };
 
 /** The identifiers a carrier asks for, read only when the owner asks, and forgotten when the page goes. */
 export function Carrier({ runtime, common }: PhoneProps) {

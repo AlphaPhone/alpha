@@ -4,7 +4,8 @@ import { type Whole, whole } from "./reactor.vibe"
 /**
  * The root runtime of `layer`, the platform and the resident machines, from launch to exit, and the runtime of each
  * area over it. An area's runtime shares the root's services and its memory of what is built: a layer both name is
- * built once, so no machine is opened a second time.
+ * built once, so no machine is opened a second time. `over` builds an area's runtime closed over the root when its
+ * screen is first loaded; `dispose` closes every area's runtime and then the root.
  */
 export function rooted<R, E>(layer: Layer.Layer<R, E>) {
   const runtime = ManagedRuntime.make(layer)
@@ -12,13 +13,11 @@ export function rooted<R, E>(layer: Layer.Layer<R, E>) {
   const areas: Array<ManagedRuntime.ManagedRuntime<never, unknown>> = []
   return {
     runtime,
-    /** A runtime of `area`'s machines, closed over the root: made when a screen is first loaded, kept until Alpha closes. */
     over<I, AE>(area: Layer.Layer<I, AE, R | I | Whole>): ManagedRuntime.ManagedRuntime<I | R, E | AE> {
       const made = ManagedRuntime.make(Layer.provideMerge(whole(area), context) as Layer.Layer<I | R, E | AE>, { memoMap: runtime.memoMap })
       areas.push(made)
       return made
     },
-    /** Close every area's runtime, then the root: the process dying, for a test. */
     dispose: (): Promise<void> => runPromise(effect {
       for (const area of areas.splice(0)) try area.disposeEffect
       try runtime.disposeEffect

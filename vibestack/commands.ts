@@ -288,11 +288,7 @@ export function launchStudio(root: string, args: string[]) {
     return;
   }
 
-  if (onPath("pnpm")) {
-    attachAndPropagateExit("pnpm", ["dlx", "vibestack-studio@latest", ...args], root, "studio");
-  } else {
-    attachAndPropagateExit("npx", ["--yes", "vibestack-studio@latest", ...args], root, "studio");
-  }
+  attachAndPropagateExit("pnpm", ["dlx", "vibestack-studio@latest", ...args], root, "studio");
 }
 
 export function launchCreate(root: string, args: string[]) {
@@ -319,9 +315,5 @@ export function launchCreate(root: string, args: string[]) {
     return;
   }
 
-  if (onPath("pnpm")) {
-    attachAndPropagateExit("pnpm", ["dlx", "create-vibestack@latest", ...args], root, "create-vibestack");
-  } else {
-    attachAndPropagateExit("npx", ["--yes", "create-vibestack@latest", ...args], root, "create-vibestack");
-  }
+  attachAndPropagateExit("pnpm", ["dlx", "create-vibestack@latest", ...args], root, "create-vibestack");
 }

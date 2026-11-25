@@ -1,0 +1,95 @@
+// spec/app/clock/timers.md, "Story: Run multiple countdown timers"; spec/app/clock/stopwatch.md, "Story: Time laps with the stopwatch"
+import * as ClockView from "../../gen/app__clock.effect.vibe"
+import * as Alarms from "../../gen/app__clock__alarms.effect.vibe"
+import * as Stopwatch from "../../gen/app__clock__stopwatch.effect.vibe"
+import * as Timers from "../../gen/app__clock__timers.effect.vibe"
+import { started, together } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
+
+interface TickStore {
+  readonly snapshot: () => number
+  readonly subscribe: (listener: () => void) => () => void
+  readonly set: (now: number) => void
+}
+
+function makeTickStore(): TickStore {
+  let value = 0
+  const listeners = new Set<() => void>()
+  return {
+    snapshot: () => value,
+    subscribe(listener: () => void): () => void {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+    set(now: number): void {
+      if (now === value) return
+      value = now
+      for (const listener of [...listeners]) listener()
+    },
+  }
+}
+
+/** Live one-second clock timestamp fed by Effect Time for Alarms, Timers, and World Clock displays. */
+export const clockNow: TickStore = makeTickStore()
+
+/** High-resolution timestamp fed by Effect Time while Stopwatch is Running. */
+export const stopwatchNow: TickStore = makeTickStore()
+
+const runningTimerTick = started(effect {
+  const time = try Time
+  const timers = try Timers.Machine
+  clockNow.set(try time.now())
+  const active = Stream.changes(Stream.map(timers.changes, (state) => state.items.some((item) => item.status === "Running")))
+  try Stream.runDrain(Stream.switchMap(active, (running) => {
+    if (!running) return Stream.fromEffect(effect { clockNow.set(try time.now()) })
+    return Stream.fromEffectDrain(effect {
+      for (;;) {
+        clockNow.set(try time.now())
+        try sleep(1000)
+      }
+    })
+  }))
+}, "Clock running timer ticks")
+
+const alarmChangeTick = started(effect {
+  const time = try Time
+  const alarms = try Alarms.Machine
+  try Stream.runForEach(alarms.changes, effect () => {
+    clockNow.set(try time.now())
+  })
+}, "Clock alarm timestamp refresh")
+
+/** Resident lightweight clock tick layer (ticks every second only while a timer is running). */
+export const residentClockTick = together(runningTimerTick, alarmChangeTick)
+
+const screenSecondTick = started(effect {
+  const time = try Time
+  const view = try ClockView.Machine
+  const onWorld = Stream.changes(Stream.map(view.changes, (state) => state.tab === "World"))
+  try Stream.runDrain(Stream.switchMap(onWorld, (worldTab) => Stream.fromEffectDrain(effect {
+    const cadence = worldTab ? 1000 : 60_000
+    for (;;) {
+      clockNow.set(try time.now())
+      try sleep(cadence)
+    }
+  })))
+}, "Clock screen ticks")
+
+const stopwatchRunningTick = started(effect {
+  const time = try Time
+  const sw = try Stopwatch.Machine
+  stopwatchNow.set(try time.now())
+  const running = Stream.changes(Stream.map(sw.changes, (state) => state.status === "Running"))
+  try Stream.runDrain(Stream.switchMap(running, (isRunning) => {
+    if (!isRunning) return Stream.fromEffect(effect { stopwatchNow.set(try time.now()) })
+    return Stream.fromEffectDrain(effect {
+      for (;;) {
+        stopwatchNow.set(try time.now())
+        try sleep(50)
+      }
+    })
+  }))
+}, "Stopwatch high-resolution ticks")
+
+/** Area-scoped Clock screen ticker for live World Clock seconds and 50ms Stopwatch display. */
+export const clockScreenTick = together(screenSecondTick, stopwatchRunningTick)

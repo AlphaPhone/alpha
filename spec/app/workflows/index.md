@@ -43,7 +43,7 @@ type Effect =
   | AskAgent({ id: int, change: Change, version: int, name: int })
   | ReadRecord({ ticket: int, id: int })
 type Workflows = {
-  owner: int, open: bool, detail: R::Read, version: int, name: int, active: bool, removed: bool, scheduled: bool,
+  owner: int, target: int, open: bool, detail: R::Read, version: int, name: int, active: bool, removed: bool, scheduled: bool,
   renaming: int, review: V::Review, proposed: Change, unknownShown: bool,
   change: Q::Request, changing: Change, named: int, newName: int,
 }
@@ -52,7 +52,7 @@ type Moved = { state: Workflows, out: List[Effect] }
 pure val maxName = 80
 
 pure val initial: Workflows = {
-  owner: 0, open: false, detail: R::unread, version: 0, name: 0, active: false, removed: false, scheduled: false,
+  owner: 0, target: 0, open: false, detail: R::unread, version: 0, name: 0, active: false, removed: false, scheduled: false,
   renaming: 0, review: V::unreviewed, proposed: TurnOn, unknownShown: false,
   change: Q::unasked, changing: TurnOn, named: 0, newName: 0,
 }
@@ -63,6 +63,7 @@ pure val versionValues = Set(0, 1, 2)
 pure val nameValues = Set(0, 3)
 pure val charsValues = Set(0, 5, 81)
 pure val ownerValues = Set(0, 1, 2)
+pure val rowValues = Set(1, 2)
 pure val weight_workflowRead = 10
 pure val weight_reviewChange = 4
 pure val weight_confirmChange = 4
@@ -74,6 +75,17 @@ pure val weight_checkChange = 4
 pure val weight_changeChecked = 10
 pure val weight_reviewResend = 6
 pure val weight_confirmResend = 6
+```
+
+### Selecting another workflow closes the previous review, and a kept change remains bound to the workflow it names
+
+```quint
+pure def canSelectWorkflow(w: Workflows, row: int): bool = w.owner >= 1 and row >= 1 and row != w.target and Q::canFile(w.change)
+
+pure def selectWorkflow(w: Workflows, row: int): Workflows = {
+  ...w, target: row, open: false, detail: { ...w.detail, status: R::Idle }, version: 0, name: 0, active: false,
+  removed: false, scheduled: false, renaming: 0, review: V::dismiss(V::revise(w.review)), unknownShown: false,
+}
 ```
 
 ### Opening a workflow, or refreshing it, reads it from the agent for the owner signed in, and closes any review

@@ -1,5 +1,6 @@
-import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { createHash, createPublicKey } from "node:crypto";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync as readdir, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Cause, Effect, Exit } from "effect";
@@ -7,13 +8,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import { alphaPrivileged, firstBootGrants } from "../gen/app__image.ts";
 import { aosp, otaArguments, place } from "../scripts/aosp.ts";
 import { inventory, licences } from "../scripts/licences.ts";
-import { type Adb, kept, pilotUpdate, release } from "../scripts/release.ts";
+import { type Adb, type Offer, avbMetadata, custodyProof, kept, pilotUpdate, readBack, release } from "../scripts/release.ts";
 
 const scratches: string[] = [];
 afterEach(() => { for (const directory of scratches.splice(0)) rmSync(directory, { recursive: true, force: true }); });
 const scratch = () => { const directory = mkdtempSync(join(tmpdir(), "alpha-release-")); scratches.push(directory); return directory; };
 const write = (directory: string, name: string, value: unknown) => { const file = join(directory, name); writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); return file; };
 const digest = (seed: string) => createHash("sha256").update(seed).digest("hex");
+const digestOf = (bytes: Uint8Array | undefined) => createHash("sha256").update(bytes ?? new Uint8Array()).digest("hex");
 
 /** What a `pnpm aosp` command answered: its result, or the tag and words of the failure it ended with. */
 async function run(...argv: string[]) {
@@ -207,7 +209,8 @@ describe("Build a candidate and sign it (spec/release/index.md, \"Story: Build a
     expect(await released("review", "--run", run, "--plan", join(directory, "plan.json"), "--plan-sha256", planSha256)).toMatchObject({ ok: true, value: { stage: "Planned", reviewed: true, plan: 1 } });
     // spec/release/index.md, "Signing happens only in the protected environment, from the reviewed plan of the same attempt, with one signer and no key rotation": a keystore inside the working tree is not the protected one.
     const sign = (keystore: string) => released("sign", "--run", run, "--plan", join(directory, "plan.json"), "--apk", unsigned, "--out", join(directory, "signed.apk"), "--keystore", keystore, "--key-label", "alpha-release");
-    expect(await sign(place("aosp/signing/release-signer.json"))).toMatchObject({ ok: false, said: expect.stringContaining("protected keystore") });
+    const unguarded = await sign(place("aosp/signing/release-signer.json"));
+    expect([unguarded.ok, unguarded.ok ? "" : unguarded.said.includes("protected keystore")]).toEqual([false, true]);
     // spec/release/index.md, "A rerun keeps its number and takes a new attempt, before signing only": the plan reviewed for the first attempt no longer signs.
     expect(await released("rerun", "--run", run)).toMatchObject({ ok: true, value: { number: 122, attempt: 2 } });
     const keystore = join(directory, "release.p12");
@@ -229,6 +232,13 @@ describe("Build a candidate and sign it (spec/release/index.md, \"Story: Build a
 const PACKAGE = "ai.alphacompute.alphaphone";
 const STOCK = "com.android.launcher3/.Launcher";
 
+/** Answers one fake adb line from the first matching pattern. */
+function replyFor(answers: readonly [RegExp, () => string][], line: string) {
+  const answer = answers.find(([pattern]) => pattern.test(line));
+  if (answer === undefined) throw new Error(`the phone does not answer adb ${line}`);
+  return answer[1]();
+}
+
 /** A pilot phone at the other end of adb: Home's holder, Alpha's installed version and data, and every command it was sent. */
 function pilotPhone({ install = (): void => undefined } = {}) {
   const apk = digest("alpha 122");
@@ -241,7 +251,7 @@ function pilotPhone({ install = (): void => undefined } = {}) {
     const activity = /^shell cmd package set-home-activity --user 0 (\S+)$/.exec(line);
     if (activity?.[1] !== undefined) { phone.activity = activity[1]; return ""; }
     if (line.startsWith("install -r ")) { install(); phone.version = 122; return "Success"; }
-    const answers: [RegExp, () => string][] = [
+    return replyFor([
       [/^shell am get-current-user$/, () => "0"],
       [/^shell cmd role get-role-holders /, () => phone.holders.join(";")],
       [/^shell cmd package resolve-activity /, () => `priority=0 preferredOrder=0\n${phone.activity}`],
@@ -256,10 +266,7 @@ function pilotPhone({ install = (): void => undefined } = {}) {
       [/^shell date \+%s$/, () => "1790000000"],
       [/^shell am start /, () => ""],
       [/^shell logcat /, () => "1790000003.000 ElizaAgent: Detached agent health check passed"],
-    ];
-    const answer = answers.find(([pattern]) => pattern.test(line));
-    if (answer === undefined) throw new Error(`the phone does not answer adb ${line}`);
-    return answer[1]();
+    ], line);
   };
   return { phone, adb, apk: { file: "alpha-phone-122.apk", sha256: apk, versionCode: 122 } };
 }
@@ -267,13 +274,13 @@ function pilotPhone({ install = (): void => undefined } = {}) {
 describe("Update a pilot phone by cable (spec/release/pilot.md, \"Story: Update a pilot phone by cable\")", () => {
   it("hands Home to the stock launcher, installs in place, checks Alpha's data, gives Home back and starts the agent, holding the phone throughout", () => {
     const locks = scratch();
-    let second: unknown;
+    let second: { _tag?: string; message?: string } | undefined;
     const { phone, adb, apk } = pilotPhone({ install: () => {
       // spec/release/pilot.md, "A run claims the phone's lock, and no other run can start until it is released"
-      try { pilotUpdate({ adb, serial: "pilot-1", apk, locks }); } catch (failure) { second = failure; }
+      try { pilotUpdate({ adb, serial: "pilot-1", apk, locks }); } catch (failure) { second = failure as { _tag?: string; message?: string }; }
     } });
     const update = pilotUpdate({ adb, serial: "pilot-1", apk, locks, agentAttempts: 1 });
-    expect(second).toMatchObject({ _tag: "ReleaseRefused", message: expect.stringContaining("another pilot run holds this phone") });
+    expect([second?._tag, second?.message?.includes("another pilot run holds this phone")]).toEqual(["ReleaseRefused", true]);
     // spec/release/pilot.md, "A pilot update claims the phone, reads its data, installs, checks, restores Home and starts the agent, in that order"
     expect(update.state).toMatchObject({ leg: "Done", locked: false, moved: true, restoration: "Restored", before: "Inventory", verified: true, stopped: true, agent: "Running", passed: true, home: "AlphaHome" });
     expect(update.receipt).toEqual({ packageMatches: true, data: "DataPreserved", passed: true });
@@ -291,5 +298,94 @@ describe("Update a pilot phone by cable (spec/release/pilot.md, \"Story: Update 
     // spec/release/pilot.md, "An installer that does not return is never taken as installed"; spec/release/pilot.md, "The agent is started only after a verified install, a clean stop and Home restored or never moved"
     expect(update.state).toMatchObject({ leg: "Done", dispatched: true, returned: false, verified: false, agent: "Unstarted", passed: false, restoration: "Restored" });
     expect([update.failures, phone.sent.some((line) => line.startsWith("shell am start"))]).toEqual([["adb: device offline"], false]);
+  });
+});
+
+describe("Read back a phone that updated itself (spec/release/index.md, \"Story: Read back a phone that updated itself\")", () => {
+  it("passes a phone that took the offer in place with Alpha as the installer, and not one another program installed", () => {
+    const offer: Offer = { versionCode: 122, sha256: digest("alpha 122"), sizeBytes: 4096, apkUrl: "https://github.com/eliza-research/alpha/releases/download/app-stable-alphacompute/alpha-phone-122.apk", signerSha256: digest("signer") };
+    const phone = { version: 121, apk: digest("alpha 121"), initiator: "com.android.shell", sent: [] as string[] };
+    const adb: Adb = (args) => {
+      const line = args.join(" ");
+      phone.sent.push(line);
+      return replyFor([
+        [/^shell am get-current-user$/, () => "0"],
+        [/^shell dumpsys package /, () => `versionCode=${phone.version} minSdk=35\n  userId=10234\n  firstInstallTime=2026-11-01 10:00:00\n  installInitiatingPackageName=${phone.initiator}`],
+        [/^shell pm path /, () => "package:/data/app/alpha/base.apk"],
+        [/^shell sha256sum /, () => `${phone.apk}  /data/app/alpha/base.apk`],
+        [/^shell cmd role get-role-holders /, () => PACKAGE],
+        [/^shell cmd package resolve-activity /, () => `priority=0\n${PACKAGE}/.MainActivity`],
+      ], line);
+    };
+    const before = readBack({ adb, offer });
+    Object.assign(phone, { version: 122, apk: offer.sha256, initiator: PACKAGE });
+    // spec/release/index.md, "A phone updated itself only when it kept its install, runs the offered version with the offered APK's exact bytes, Alpha started the install, and Home and the offer did not change"
+    expect(readBack({ adb, offer, before: before.observed })).toMatchObject({ passed: true, readback: { sameInstall: true, advanced: true, exact: true, selfInitiated: true, homeKept: true, offerKept: true } });
+    phone.initiator = "com.android.shell";
+    expect(readBack({ adb, offer, before: before.observed })).toMatchObject({ passed: false, readback: { selfInitiated: false } });
+    expect(phone.sent.every((line) => !/install|role add|set-home|am start|force-stop/.test(line))).toBe(true);
+  });
+});
+
+describe("Prove the protected release keys (spec/release/index.md, \"Story: Sign a release\")", () => {
+  it("builds the verified-boot metadata Alpha committed from its key", () => {
+    const committed = readFileSync(place("aosp/signing/public/avb_pkmd.bin"));
+    const bits = committed.readUInt32BE(0);
+    const n = committed.subarray(8, 8 + bits / 8).toString("base64url");
+    const key = createPublicKey({ key: { kty: "RSA", n, e: "AQAB" }, format: "jwk" }).export({ type: "spki", format: "der" });
+    // spec/release/index.md, "The protected keys are proven to be the enrolled ones: each of the nine OS certificates, the two verified-boot keys and Alpha's app key pairs with its committed public identity, none is a test key, and no two are the same"
+    expect(avbMetadata(key, bits).equals(committed)).toBe(true);
+  });
+
+  it("proves disposable keys that match their committed identities, and refuses when one committed identity is another key's", () => {
+    const directory = scratch();
+    const keys = join(directory, "keys");
+    const committed = join(directory, "public");
+    mkdirSync(keys);
+    mkdirSync(committed);
+    const openssl = (...args: string[]) => execFileSync("openssl", args, { stdio: ["ignore", "pipe", "pipe"] });
+    const certificate = (name: string) => {
+      openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", join(directory, `${name}.key`), "-out", join(keys, `${name}.x509.pem`), "-subj", `/CN=${name}`, "-days", "1");
+      return createHash("sha256").update(openssl("x509", "-in", join(keys, `${name}.x509.pem`), "-outform", "DER")).digest("hex");
+    };
+    const names = ["releasekey", "platform", "shared", "media", "networkstack", "sdk_sandbox", "bluetooth", "nfc", "apex"];
+    const certificates: Record<string, string> = {};
+    const entries: unknown[] = [];
+    for (const name of names) {
+      certificates[name] = certificate(name);
+      openssl("pkcs8", "-topk8", "-in", join(directory, `${name}.key`), "-outform", "DER", "-out", join(keys, `${name}.pk8.enc`), "-passout", "pass:os-secret");
+      copyFileSync(join(keys, `${name}.x509.pem`), join(committed, `${name}.x509.pem`));
+      entries.push({ name, kind: "x509-pk8", certificateSha256: certificates[name] });
+    }
+    const avb: Record<string, Buffer> = {};
+    for (const name of ["apex_payload", "avb"]) {
+      openssl("genrsa", "-out", join(directory, `${name}.key`), "2048");
+      openssl("rsa", "-in", join(directory, `${name}.key`), "-pubout", "-out", join(keys, `${name}.pub.pem`));
+      openssl("pkcs8", "-topk8", "-in", join(directory, `${name}.key`), "-out", join(keys, `${name}.pem.enc`), "-passout", "pass:os-secret");
+      avb[name] = avbMetadata(openssl("pkey", "-pubin", "-in", join(keys, `${name}.pub.pem`), "-outform", "DER"), 2048);
+      writeFileSync(join(keys, `${name}.avbpubkey`), avb[name] ?? "");
+      entries.push({ name, kind: "avb-rsa", avbPublicKeySha256: digestOf(avb[name]) });
+    }
+    writeFileSync(join(keys, "avb_pkmd.bin"), avb.avb ?? "");
+    writeFileSync(join(committed, "avb_pkmd.bin"), avb.avb ?? "");
+    writeFileSync(join(committed, "apex_payload.avbpubkey"), avb.apex_payload ?? "");
+    writeFileSync(join(keys, "fingerprints.json"), JSON.stringify({ schemaVersion: 1, testKeys: false, keys: entries }));
+    const appSigner = certificate("alphaphone_app");
+    copyFileSync(join(keys, "alphaphone_app.x509.pem"), join(committed, "alphaphone_app.x509.pem"));
+    openssl("pkcs12", "-export", "-inkey", join(directory, "alphaphone_app.key"), "-in", join(keys, "alphaphone_app.x509.pem"), "-name", "alpha-release", "-out", join(directory, "app.p12"), "-passout", "pass:app-secret");
+    rmSync(join(keys, "alphaphone_app.x509.pem"));
+    execFileSync("tar", ["czf", join(directory, "keys.tgz"), "-C", keys, ...readdir(keys)], { env: { ...process.env, COPYFILE_DISABLE: "1" } });
+    const archive = readFileSync(join(directory, "keys.tgz")).toString("base64");
+    const half = Math.ceil(archive.length / 8) * 4;
+    const secrets = {
+      ALPHA_OS_RELEASE_KEYS_PART1_B64: archive.slice(0, half), ALPHA_OS_RELEASE_KEYS_PART2_B64: archive.slice(half), ALPHA_OS_RELEASE_KEYS_PASSPHRASE: "os-secret",
+      ALPHA_APP_RELEASE_KEYSTORE_B64: readFileSync(join(directory, "app.p12")).toString("base64"), ALPHA_APP_RELEASE_KEYSTORE_PASSWORD: "app-secret",
+    };
+    const bits = Object.fromEntries([...names, "apex_payload", "avb", "alphaphone_app"].map((name) => [name, 2048]));
+    const enrolled = { certificates, avbSha256: digestOf(avb.avb), appSigner, bits, publicDirectory: committed };
+    // spec/release/index.md, "The protected keys are proven to be the enrolled ones: each of the nine OS certificates, the two verified-boot keys and Alpha's app key pairs with its committed public identity, none is a test key, and no two are the same"
+    expect(custodyProof({ secrets, enrolled, scratch: directory }).custody).toEqual({ pairs: 12, matching: 12, distinct: true, testKeys: false });
+    copyFileSync(join(committed, "media.x509.pem"), join(committed, "platform.x509.pem"));
+    expect(custodyProof({ secrets, enrolled, scratch: directory }).custody).toEqual({ pairs: 12, matching: 11, distinct: true, testKeys: false });
   });
 });

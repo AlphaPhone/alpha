@@ -1,151 +1,141 @@
-import { X } from "lucide-react";
-import { cn } from "../../lib/cn.ts";
-import { AppHeader } from "../AppHeader.tsx";
+import { Search, X } from "lucide-react";
 import { Button } from "../Button.tsx";
-import { SearchField } from "../SearchField.tsx";
-import { Spinner } from "../Spinner.tsx";
-import { HomeAppMenu } from "./HomeAppMenu.tsx";
-import { HomeDrawerApp } from "./HomeDrawerApp.tsx";
-import { HomeNotice, type HomeNoticeMessage } from "./HomeNotice.tsx";
+import { AppTile } from "../AppTile.tsx";
+import { Input } from "../Input.tsx";
+import { cn } from "../../lib/cn.ts";
+import { dockClearance } from "../../lib/styles.ts";
+import { type HomeNoticeMessage, HomeNotice } from "./HomeNotice.tsx";
+import { InstalledAppIcon } from "./InstalledAppIcon.tsx";
 import { tileColumns } from "./HomeTileGrid.tsx";
 
-/** What the open drawer shows, as the launcher decides it. */
-export type HomeDrawerView = "Spinner" | "CannotRead" | "NoAppsInstalled" | "NoMatch" | "Grid";
+/** An app from the accepted launcher catalog. */
+export interface DrawerApp {
+  readonly id: string;
+  readonly label: string;
+  readonly packageName: string;
+  readonly activityName?: string;
+  readonly profile?: string;
+  readonly user?: string;
+  readonly locked?: boolean;
+  readonly image?: string;
+}
 
-/** An app of the last reading of the phone's apps. */
-export type HomeInstalledApp = {
-  /** The launcher's name for it: its package, activity and profile. */
-  id: string;
-  /** Its name, as Android gives it. */
-  label: string;
-  /** Its package, which tells apart two apps of the same name in one profile. */
-  package: string;
-  /** The profile it is installed in, such as "Work"; left out for the owner's own. */
-  profile?: string;
-  /** Its icon, as an image URL. */
-  image?: string;
-  /** It is on Home already. */
-  onHome: boolean;
-};
-
-export type AppsDrawerProps = {
-  /** A spinner, that the apps could not be read, that none are installed, that none match the search, or the apps. */
-  view: HomeDrawerView;
-  /** The apps of the last reading that match the search; their order is the drawer's own. */
-  apps: readonly HomeInstalledApp[];
-  /** A newer reading is on its way while the last list stays up. */
-  refreshing?: boolean;
-  /** What is searched; the parent keeps it. */
-  query: string;
-  /** Called with the search as it is typed. */
+export interface AppsDrawerProps {
+  readonly apps: readonly DrawerApp[];
+  readonly query: string;
+  readonly catalog: "reading" | "ready" | "unavailable";
+  readonly opening?: string;
+  readonly notice?: HomeNoticeMessage;
   onSearch: (query: string) => void;
-  /** Closes the drawer. */
   onClose: () => void;
-  /** Asks Android to open an app; left out while Android is being asked something, so the apps refuse. */
-  onOpenApp?: (id: string) => void;
-  /** The app Android is being asked to open. */
-  opening?: string;
-  /** The app whose menu is open. */
-  menu?: string;
-  /** Opens an app's menu. */
-  onOpenMenu?: (id: string) => void;
-  /** Closes the open menu. */
-  onCloseMenu: () => void;
-  /** Adds the menu's app to Home; left out while a change is being saved. */
-  onAddToHome?: (id: string) => void;
-  /** Hands the menu's app to Android's App info; left out while Android is being asked something. */
-  onShowAppInfo?: (id: string) => void;
-  /** Reads the apps again after they could not be read; left out where nothing may be read. */
-  onTryAgain?: () => void;
-  /** A failure told while the drawer is open. */
-  notice?: HomeNoticeMessage;
-  className?: string;
-};
+  onBack?: () => void;
+  onOpen: (id: string) => void;
+  onRetry?: () => void;
+}
 
-const plain = (text: string) => text.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase();
+const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
+const folded = (text: string) => text.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase();
+const short = (app: DrawerApp) => app.activityName?.split(".").at(-1) || app.activityName || "";
 
-/** Prefix matches first, then by name; an app whose name another shares says its profile, or else its package. */
-const arrange = (apps: readonly HomeInstalledApp[], query: string) => {
-  const search = plain(query.trim());
-  const twinsOf = (name: string) => apps.filter((other) => plain(other.label) === name);
-  return apps
-    .map((app) => {
-      const name = plain(app.label);
-      const twins = twinsOf(name);
-      const byProfile = new Set(twins.map((twin) => twin.profile)).size === twins.length;
-      return { app, name, detail: twins.length < 2 ? undefined : byProfile ? app.profile : app.package };
-    })
-    .sort((a, b) => Number(!a.name.startsWith(search)) - Number(!b.name.startsWith(search)) || a.name.localeCompare(b.name) || (a.detail ?? "").localeCompare(b.detail ?? ""));
-};
+function byName(apps: readonly DrawerApp[], name: (app: DrawerApp) => string) {
+  const groups = new Map<string, DrawerApp[]>();
+  for (const app of apps) {
+    const key = name(app);
+    const group = groups.get(key);
+    if (group) group.push(app);
+    else groups.set(key, [app]);
+  }
+  return groups;
+}
 
-const empty = {
-  CannotRead: "Apps could not be read.",
-  NoAppsInstalled: "No apps",
-  NoMatch: "No apps match",
-};
-
-/**
- * The Apps drawer: a search over the apps installed on the phone, their grid, and an app's menu. A press opens an
- * app and a long press its menu.
- * @model spec/app/home/index.md
- */
-export function AppsDrawer({
-  view, apps, refreshing = false, query, onSearch, onClose, onOpenApp, opening, menu, onOpenMenu, onCloseMenu, onAddToHome, onShowAppInfo, onTryAgain, notice, className,
-}: AppsDrawerProps) {
-  const entries = arrange(apps, query);
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Apps"
-      onKeyDown={(event) => {
-        if (event.key === "Escape" && !event.defaultPrevented) {
-          event.preventDefault();
-          if (menu) onCloseMenu();
-          else onClose();
+function detailsFor(apps: readonly DrawerApp[]) {
+  const details = new Map<string, string[]>();
+  const groups = byName(apps, (app) => `${folded(app.label)}\n${app.profile ?? ""}`);
+  for (const group of groups.values()) {
+    for (const app of group) {
+      const parts = app.profile ? [app.locked ? `${app.profile} · locked` : app.profile] : [];
+      if (group.length > 1) {
+        const before = parts.length;
+        const siblings = group.filter((other) => other.packageName === app.packageName);
+        if (siblings.length < group.length) parts.push(app.packageName);
+        if (siblings.length > 1 && app.activityName) {
+          parts.push(siblings.filter((other) => short(other) === short(app)).length === 1 ? short(app) : app.activityName);
+          if (app.user && siblings.filter((other) => other.activityName === app.activityName).length > 1) {
+            parts.push(`profile ${app.user}`);
+          }
         }
-      }}
-      className={cn("flex min-h-0 flex-col bg-background pt-[max(--spacing(14),calc(env(safe-area-inset-top)+--spacing(3)))] text-foreground motion-safe:animate-fade", className)}
-    >
-      <AppHeader title="Apps" className="min-h-11 shrink-0 px-3 [&_h1]:py-0 [&_h1]:pl-2">
+        if (parts.length === before) parts.push(app.packageName);
+      }
+      details.set(app.id, parts);
+    }
+  }
+  const names = byName(apps, (app) => `${folded(app.label)}\n${details.get(app.id)?.join("\n") ?? ""}`);
+  for (const same of names.values()) {
+    if (same.length < 2) continue;
+    for (const app of same) {
+      const visible = details.get(app.id) ?? [];
+      const identity = [app.packageName, app.activityName, app.user ? `profile ${app.user}` : undefined];
+      details.set(app.id, [...visible, ...identity.filter((part): part is string => Boolean(part && !visible.includes(part)))]);
+    }
+  }
+  return details;
+}
+
+function matches(apps: readonly DrawerApp[], query: string) {
+  const search = folded(query.trim());
+  const details = detailsFor(apps);
+  return apps.flatMap((app) => {
+    const name = folded(app.label);
+    const rank = name.startsWith(search) ? 0 : name.includes(search) ? 1 : folded(app.packageName).includes(search) ? 2 : -1;
+    return rank < 0 ? [] : [{ app, rank, detail: details.get(app.id) ?? [] }];
+  }).sort((a, b) => a.rank - b.rank || collator.compare(a.app.label, b.app.label)
+    || a.app.packageName.localeCompare(b.app.packageName) || a.app.id.localeCompare(b.app.id));
+}
+
+/** The native launcher catalog in a drawer over Home. @model spec/app/home/drawer.md */
+export function AppsDrawer({ apps, query, catalog, opening, notice, onSearch, onClose, onBack = onClose, onOpen, onRetry }: AppsDrawerProps) {
+  const entries = matches(apps, query);
+  const reading = catalog === "reading";
+  const failed = catalog === "unavailable";
+  return (
+    <section data-alpha-apps-drawer="" role="dialog" aria-modal="true" aria-label="Apps"
+      className="absolute inset-x-0 top-[max(--spacing(11),var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] bottom-0 z-10 flex min-h-0 flex-col bg-background pt-3 text-foreground"
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || event.defaultPrevented) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onBack();
+      }}>
+      <header className="flex h-11 shrink-0 items-center gap-2 pr-3 pl-5">
+        <h1 className="grow font-display text-3xl font-light outline-none">Apps</h1>
         <Button variant="ghost" size="icon" aria-label="Close apps" onClick={onClose}><X className="size-5" /></Button>
-      </AppHeader>
-      <SearchField aria-label="Search apps" placeholder="Search apps" autoComplete="off" value={query} onValueChange={onSearch} className="mx-4 mt-3 mb-2 shrink-0 [&_input]:rounded-full [&_input]:border-0 [&_input]:bg-secondary [&_input]:pl-11 [&>svg]:size-4.5" />
-      {notice ? <HomeNotice notice={notice} place="InDrawer" className="mx-5 my-1" /> : null}
-      <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto px-2 pt-1 pb-[calc(--spacing(27)+env(safe-area-inset-bottom))]">
-        {view === "Grid" ? (
-          <div aria-busy={refreshing || undefined} className={cn(tileColumns, "gap-y-5 px-0.5 py-1.5")}>
-            {entries.map(({ app, detail }) => (
-              <HomeAppMenu
-                key={app.id}
-                open={app.id === menu}
-                label={detail ? `${app.label} (${detail})` : app.label}
-                onHome={app.onHome}
-                onAddToHome={onAddToHome && (() => onAddToHome(app.id))}
-                onShowAppInfo={onShowAppInfo && (() => onShowAppInfo(app.id))}
-                onClose={onCloseMenu}
-              >
-                <HomeDrawerApp
-                  label={app.label}
-                  detail={detail}
-                  image={app.image}
-                  opening={opening === app.id}
-                  disabled={!onOpenApp}
-                  onClick={onOpenApp && (() => onOpenApp(app.id))}
-                  onOpenMenu={onOpenMenu && (() => onOpenMenu(app.id))}
-                />
-              </HomeAppMenu>
-            ))}
-          </div>
-        ) : view === "Spinner" ? (
-          <div className="flex justify-center py-7 text-muted-foreground"><Spinner label="Reading apps" /></div>
-        ) : (
-          <div className="flex flex-col items-center gap-3 px-4 py-7 text-center text-sm text-muted-foreground">
-            <p role="status">{empty[view]}</p>
-            {view === "CannotRead" && onTryAgain ? <Button variant="secondary" onClick={onTryAgain}>Try again</Button> : null}
+      </header>
+      <div className="relative mx-4 mt-3 mb-2 shrink-0">
+        <Search aria-hidden className="pointer-events-none absolute top-1/2 left-4 size-4.5 -translate-y-1/2 text-muted-foreground" />
+        <Input type="search" aria-label="Search apps" placeholder="Search apps" autoComplete="off" enterKeyHint="search"
+          value={query} onChange={(event) => onSearch(event.currentTarget.value)} className="rounded-panel border-0 pr-4 pl-11.5" />
+      </div>
+      {notice && <HomeNotice notice={notice} place="InDrawer" className="mx-5 mt-1" />}
+      <div aria-busy={reading || undefined} className={cn(dockClearance, "min-h-0 flex-1 touch-pan-y overflow-y-auto px-2 pt-1 [scrollbar-width:none]")}>
+        <div data-alpha-apps-grid="" className={cn(tileColumns, "gap-y-5 px-0.5 py-1.5")}>
+          {entries.map(({ app, detail }) => {
+            const description = detail.join(" · ");
+            return (
+              <div key={app.id} data-launcher-app={app.id} className="flex min-w-0 justify-center">
+                <AppTile drawer label={app.label} detail={description}
+                  aria-busy={opening === app.id || undefined} disabled={opening !== undefined} onClick={() => onOpen(app.id)}
+                  icon={<InstalledAppIcon image={app.image} className={app.image ? "size-14 rounded-drawer-icon" : "size-6.5"} />} />
+              </div>
+            );
+          })}
+        </div>
+        {(failed || (entries.length === 0 && !reading)) && (
+          <div className="px-4 py-7 text-center text-sm text-muted-foreground">
+            <p role="status">{failed ? "Apps could not be read." : "No apps"}</p>
+            {onRetry && failed && <Button variant="secondary" className="mt-3 h-11 px-4.5 font-normal text-inherit" onClick={onRetry}>Try again</Button>}
           </div>
         )}
       </div>
-    </div>
+    </section>
   );
 }

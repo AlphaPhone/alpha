@@ -1,8 +1,10 @@
 # Browser
 
-Web pages in native tabs. Normal tabs share one kept profile, with its
-cookies and sign-ins, and come back after a restart; private tabs are
-ephemeral and are never saved. This spec is the tabs and the saved session.
+Web pages in tabs. On Android normal tabs share one kept profile, with its
+cookies and sign-ins, and come back after a restart. Private tabs are never
+saved. In a web browser the pages are sandboxed frames, and the enclosing
+browser controls site cookies and sign-ins. This spec is the tabs and the
+saved session.
 What one tab does is in the specs beside it:
 
 - [Address](./address.md): one tab's page: the address bar, loading, the secure mark, back and forward, and find in page
@@ -24,9 +26,9 @@ and the sites' remembered answers.
 
 ### The Browser holds its open tabs, which are private, the one shown, their native tabs, the saved session and its writer, and what covers the page
 
-A tab is a number, never used twice. A native tab is the web view Android
-keeps for a tab that has loaded a page. The saved session is the record on
-the phone; the writer carries one copy of it at a time.
+A tab is a number, never used twice. A hosted tab is the web view Android
+keeps or the frame a web browser keeps for that tab. The saved session is
+the record on the device; the writer carries one copy of it at a time.
 
 ```quint
 import read as R from "../../kit/read"
@@ -69,6 +71,7 @@ pure val tabValues = Set(1, 2, 3, 4, 5)
 pure val insteadValues = tabValues
 pure val openerValues = tabValues
 pure val shownValues = tabValues
+pure val incomingValues = Set(Set(), Set(2), Set(2, 3), Set(2, 3, 4, 5, 6, 7, 8, 9))
 pure val ticketValues = Set(1, 2)
 pure val nowValues = Set(0, 3, 70)
 pure val weight_openTab = 4
@@ -248,17 +251,29 @@ The tab shown after a restore is one of the saved tabs. After a failed
 read the owner browses unsaved; a later read that finds more saved tabs
 than fit beside the open ones leaves the saved session unread.
 
-```quint
-pure def canRestored(s: Browser, ticket: int, shown: int): bool =
-  R::canAnswer(s.restore, ticket) and (s.kept.size() == 0 or s.kept.contains(shown))
+When a web installation has saved tabs and no tab numbers on record yet,
+the restore assigns fresh numbers in saved order and keeps the saved
+selection. Those tabs count toward the same limit and an already active
+tab keeps its place.
 
-pure def restored(s: Browser, ticket: int, ok: bool, shown: int): Browser =
-  val fits = s.untouched or s.open.size() + s.kept.size() <= maxTabs
+```quint
+pure def canRestored(s: Browser, ticket: int, ok: bool, shown: int, incoming: Set[int]): bool =
+  R::canAnswer(s.restore, ticket) and (
+    if (not(ok)) incoming.size() == 0
+    else if (incoming.size() == 0) s.kept.size() == 0 or s.kept.contains(shown)
+    else s.kept.size() == 0 and incoming.size() <= maxTabs and incoming.contains(shown)
+      and incoming.forall(tab => tab > s.issued and tab <= s.issued + maxTabs)
+  )
+
+pure def restored(s: Browser, ticket: int, ok: bool, shown: int, incoming: Set[int]): Browser =
+  val fromDisk = if (incoming.size() == 0) s.kept else incoming
+  val issued = if (incoming.size() == 0) s.issued else s.issued + maxTabs
+  val fits = s.untouched or s.open.size() + fromDisk.size() <= maxTabs
   val read = { ...s, restore: R::answer(s.restore, ok and fits) }
   if (not(ok and fits)) read
-  else if (s.kept.size() == 0) { ...read, hydrated: true }
-  else if (s.untouched) { ...read, hydrated: true, open: s.kept, selected: shown }
-  else { ...read, hydrated: true, open: s.open.union(s.kept), stale: true }
+  else if (fromDisk.size() == 0) { ...read, hydrated: true }
+  else if (s.untouched) { ...read, hydrated: true, issued: issued, open: fromDisk, selected: shown }
+  else { ...read, hydrated: true, issued: issued, open: s.open.union(fromDisk), stale: true }
 ```
 
 ### A restart ends every private tab and every native tab, and starts from one new tab

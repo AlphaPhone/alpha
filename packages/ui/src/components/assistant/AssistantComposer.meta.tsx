@@ -1,4 +1,4 @@
-import { expect, fn, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import type { ComponentMeta } from "vibestack/stories";
 import type { AssistantComposerProps } from "./AssistantComposer.tsx";
 
@@ -14,6 +14,9 @@ export const meta: ComponentMeta<AssistantComposerProps> = {
     onValueChange,
     onAttach,
     onTalk: fn(),
+    onSearch: fn(),
+    onNew: fn(),
+    onHistory: fn(),
     onFocusField,
     onSend: undefined,
     onStop: undefined,
@@ -45,6 +48,10 @@ export const meta: ComponentMeta<AssistantComposerProps> = {
       onFocusField.mockClear();
       await userEvent.type(within(canvasElement).getByRole("textbox", { name: "Message Alpha" }), "Hi");
       await expect([onValueChange.mock.calls.length, onFocusField.mock.calls.length]).toEqual([2, 1]);
+      await userEvent.click(within(canvasElement).getByRole("button", { name: "Chat actions" }));
+      await expect((await within(canvasElement.ownerDocument.body).findAllByRole("menuitem")).map((item) => item.textContent)).toEqual(["Attach media", "Search chat", "New chat", "Chat history"]);
+      await userEvent.keyboard("{Escape}");
+      await waitFor(() => expect(canvasElement.ownerDocument.querySelector("[data-aria-hidden]")).toBeNull());
     },
     Writing: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onSend.mockClear();

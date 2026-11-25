@@ -71,7 +71,7 @@ pure def canUnreadable(s: Page): bool = s.mount != Mounted
 pure def unreadable(s: Page): Page = { ...s, mount: Holding, canContinue: false }
 ```
 
-### "Updating Alpha…" shows while a page holds or an update is pending, and "Continue update" only while it is paused and Android allows
+### Updating Alpha… shows while a page holds or an update is pending, and Continue update only while it is paused and Android allows
 
 ```quint
 pure def dialogShown(s: Page): bool = s.mount == Holding or s.activation != 0

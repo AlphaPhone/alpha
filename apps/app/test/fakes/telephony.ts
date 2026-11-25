@@ -1,20 +1,22 @@
 // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
-import type { ActionJournalPlugin } from "@elizaos/os/bridges/definitions/action-journal";
-import type { AddressBookNativePlugin } from "@elizaos/os/bridges/definitions/contacts";
-import type { MessagesNativePlugin } from "@elizaos/os/bridges/definitions/messages";
-import type { PhoneNativePlugin } from "@elizaos/os/bridges/definitions/phone";
-import { mmsBinding, smsBindingHash } from "@elizaos/os/bridges/messages";
+import type { JournalEntry } from "@elizaos/agent";
+import type { ActionJournalPlugin } from "@elizaos/os-bridges";
+import type { AddressBookNativePlugin } from "@elizaos/os-bridges";
+import type { MessagesNativePlugin } from "@elizaos/os-bridges";
+import type { PhoneNativePlugin, TelephonySubscription } from "@elizaos/os-bridges";
+import { mmsBinding, smsBindingHash } from "@elizaos/os-bridges";
 import { type Faked, plugin, rejection } from "./phone.ts";
 import type { Route } from "./routes.ts";
+import { type TextReviewScene, textReviewEnrollment } from "./text-review.ts";
 
 /** A call in the phone's log. */
-export interface LoggedCall { id: number; number: string; name: string | null; date: number; type: "incoming" | "outgoing" | "missed" }
+export interface LoggedCall { id: number; number: string; name: string | null; date: number; type: "incoming" | "outgoing" | "missed"; seconds?: number }
 /** A voicemail the carrier delivered. */
-export interface HeldVoicemail { id: number; number: string; date: number; heard: boolean; deleted: boolean }
+export interface HeldVoicemail { id: number; number: string; date: number; heard: boolean; deleted: boolean; seconds?: number; name?: string; transcript?: string }
 /** A text in the phone's SMS provider: received into the inbox, or sent from it. */
-export interface Text { id: number; thread: number; address: string; box: "inbox" | "sent"; date: number; body: string; read: boolean }
+export interface Text { id: number; thread: number; address: string; box: "inbox" | "sent"; date: number; body: string; read: boolean; pictures?: number }
 /** A contact in the address book. */
-export interface Person { id: string; displayName: string; givenName: string; familyName: string; phoneNumbers: { number: string; type: string }[]; emailAddresses: { address: string; type: string }[]; notes?: string; revision: number }
+export interface Person { id: string; displayName: string; givenName: string; familyName: string; phoneNumbers: { number: string; type: string }[]; emailAddresses: { address: string; type: string }[]; notes?: string; starred?: boolean; revision: number }
 /** A call Telecom holds. */
 export interface Live { id: string; state: "dialing" | "ringing" | "active" | "held"; connectedAt: number | null }
 
@@ -31,7 +33,10 @@ export interface TelephonyScene {
   placed: string[];
   dialed: string[];
   carrier: "ready" | "unconfigured" | "unsupported";
-  mobileService: boolean;
+  mobileService: boolean | undefined;
+  subscriptions: TelephonySubscription[];
+  callStateKnown: boolean;
+  readonly emergencyNumbers: Set<string>;
   voicemails: HeldVoicemail[];
   /** True while this fake phone's voicemail deletion is still in Android's Undo window. */
   holdVoicemailDeletion: boolean;
@@ -46,6 +51,8 @@ export interface TelephonyScene {
   contacts: boolean;
   /** Whether the phone lets Alpha write contacts, beside reading them. */
   editable: boolean;
+  /** While this waits, Android has queued the contact deletion and still holds the contact. */
+  holdContactDeletion: Promise<void> | undefined;
   /** The phone's own contact editor, each time it was opened: on a new contact, or on the contact named. */
   editors: string[];
   people: Person[];
@@ -63,9 +70,14 @@ export interface TelephonyScene {
   deliver: (operationId: string) => void;
   /** While set, the radio has not answered a send yet. */
   hold: Promise<void> | undefined;
+  /** Android accepted this MMS and has not reported its carrier outcome. */
+  holdMmsSubmission: boolean;
+  readonly mmsAttempts: string[];
+  readonly mmsQueries: string[];
   /** What the agent's reply drafter answers: one draft, or none; and every thread it was asked about. */
   replyDraft: string | null;
   readonly asked: unknown[];
+  textReview?: TextReviewScene;
 }
 
 async function versionOf(id: string, revision: number): Promise<string> {
@@ -86,11 +98,15 @@ export function telephonyScene(): TelephonyScene {
     dialed: [],
     carrier: "ready",
     mobileService: true,
+    subscriptions: [{ id: 1, slot: 0, displayName: "Carrier", carrierName: "Carrier", defaultSms: true, defaultVoice: true }],
+    callStateKnown: true,
+    emergencyNumbers: new Set(["911", "112"]),
     voicemails: [{ id: 11, number: "+14155550100", date: 1_700_000_100_000, heard: false, deleted: false }],
     holdVoicemailDeletion: false,
     sms: "granted",
     texts: [{ id: 1, thread: 1, address: "+14155550100", box: "inbox", date: 1_700_000_050_000, body: "See you at five", read: false }],
     holdMessageDeletion: false,
+    holdContactDeletion: undefined,
     smsNotice: undefined,
     sent: [],
     journal: new Map(),
@@ -110,6 +126,9 @@ export function telephonyScene(): TelephonyScene {
     changed: () => {},
     deliver: () => {},
     hold: undefined,
+    holdMmsSubmission: false,
+    mmsAttempts: [],
+    mmsQueries: [],
     replyDraft: "Five works, see you there",
     asked: [],
   };
@@ -130,7 +149,12 @@ export function telephonyRoutes(world: TelephonyScene): Route[] {
 
 /** `ElizaTelephony`: eliza's calls, call log, voicemail and SMS provider, over `world`. */
 function telephony(world: TelephonyScene): Faked {
-  return plugin<PhoneNativePlugin & MessagesNativePlugin & { smsNoticePending(): Promise<unknown>; acknowledgeSmsNotice(input: { token: string }): Promise<void> }, Record<string, unknown>>((emit) => {
+  return plugin<PhoneNativePlugin & MessagesNativePlugin & {
+    classifyDialNumber(input: { number: string }): Promise<unknown>;
+    ownerDialScreen(input: { number: string }): Promise<unknown>;
+    smsNoticePending(): Promise<unknown>;
+    acknowledgeSmsNotice(input: { token: string }): Promise<void>;
+  }, Record<string, unknown>>((emit) => {
     world.changed = () => emit("messagesChanged", {});
     world.deliver = (operationId) => {
       const record = world.journal.get(operationId);
@@ -140,29 +164,34 @@ function telephony(world: TelephonyScene): Faked {
     };
     const status = () => ({
       version: 2, voiceCapable: true, smsCapable: true,
-      permissions: { contacts: "granted", phoneState: "granted", sms: world.sms, sendSms: "granted", callLog: world.callLog },
+      permissions: { contacts: world.contacts ? "granted" : "prompt", phoneState: "granted", sms: world.sms, sendSms: "granted", callLog: world.callLog },
       sendMode: "direct", mmsSend: true,
       roles: { dialer: { available: true, held: world.dialer, eligible: true }, sms: { available: true, held: true, eligible: true } },
       defaultDialer: world.dialer ? "ai.alphacompute.alphaphone" : "com.android.dialer", defaultSms: "ai.alphacompute.alphaphone",
-      subscriptions: [{ id: 1, slot: 0, displayName: "Carrier", carrierName: "Carrier", defaultSms: true, defaultVoice: true }], defaultSmsSubscriptionId: 1,
+      subscriptions: world.subscriptions, defaultSmsSubscriptionId: world.subscriptions.find((line) => line.defaultSms)?.id ?? null,
     });
     const smsGranted = () => {
       if (world.sms !== "granted") throw rejection("SMS access is not granted", "permission-required");
     };
     const thread = (number: number) => {
       const rows = world.texts.filter((one) => one.thread === number).sort((x, y) => y.date - x.date);
-      return { id: `thread:${number}`, date: rows[0]!.date, messageCount: rows.length, snippet: rows[0]!.body, unread: rows.some((one) => !one.read), addresses: [rows[0]!.address] };
+      return { id: `thread:${number}`, date: rows[0].date, messageCount: rows.length, snippet: rows[0].body, unread: rows.some((one) => !one.read), addresses: [rows[0].address] };
     };
     const message = (one: Text) => ({
       id: `sms:${one.id}`, kind: "sms", threadId: `thread:${one.thread}`, direction: one.box === "inbox" ? "incoming" : "outgoing",
       status: one.box === "inbox" ? (one.read ? "read" : "received") : "sent", date: one.date, read: one.read, subscriptionId: 1,
-      addresses: [one.address], body: one.body, deliveryReport: one.box === "inbox" ? null : "pending", attachments: 0,
+      addresses: [one.address], body: one.body, deliveryReport: one.box === "inbox" ? null : "pending", attachments: one.pictures ?? 0,
     });
     const voicemail = (id: string) => world.voicemails.find((one) => String(one.id) === id && !one.deleted);
+    const dial = ({ number }: { number: string }) => {
+      world.dialed.push(number);
+      return Promise.resolve({ status: "handed-off", target: "dialer", handler: "com.android.dialer", message: "Your phone app is open with the number." });
+    };
     return {
       imageCapability: () => Promise.resolve({ version: 1, image: true, feature: "android.hardware.telephony" }),
       status: () => Promise.resolve(status()),
       requestAccess: ({ access }: { access: string }) => {
+        if (access === "contacts") world.contacts = true;
         if (access === "callLog") world.callLog = "granted";
         if (access === "sms") world.sms = "granted";
         return Promise.resolve(status());
@@ -174,12 +203,13 @@ function telephony(world: TelephonyScene): Faked {
       listRecentCalls: ({ limit }) => {
         if (world.callLog !== "granted") return Promise.reject(rejection("Call-log access is not granted", "permission-required"));
         const rows = [...world.calls].sort((x, y) => y.date - x.date).slice(0, limit + 1);
-        return Promise.resolve({ calls: rows.map((one) => ({ id: String(one.id), number: one.number, cachedName: one.name, date: one.date, durationSeconds: 30, type: one.type, isNew: one.type === "missed" })) });
+        return Promise.resolve({ calls: rows.map((one) => ({ id: String(one.id), number: one.number, cachedName: one.name, date: one.date, durationSeconds: one.seconds ?? 30, type: one.type, isNew: one.type === "missed" })) });
       },
-      dial: ({ number }) => {
-        world.dialed.push(number);
-        return Promise.resolve({ status: "handed-off", target: "dialer", handler: "com.android.dialer", message: "Your phone app is open with the number." });
-      },
+      dial,
+      classifyDialNumber: ({ number }) => Promise.resolve({ kind: world.emergencyNumbers.has(number) ? "emergency" : "ordinary" }),
+      ownerDialScreen: (input) => world.callStateKnown && world.live.length > 0 && world.emergency !== false
+        ? Promise.reject(rejection("Wait for the possible emergency call to end.", "unavailable"))
+        : dial(input),
       placeCall: ({ number }) => {
         if (!world.dialer) return Promise.reject(rejection("Make this app your phone app to place calls here.", "role-required"));
         world.placed.push(number);
@@ -193,7 +223,7 @@ function telephony(world: TelephonyScene): Faked {
       listVoicemail: ({ limit }) => Promise.resolve({
         state: world.carrier,
         voicemails: world.carrier === "unsupported" ? [] : world.voicemails.filter((one) => !one.deleted).slice(0, limit).map((one) => ({
-          id: String(one.id), number: one.number, cachedName: null, date: one.date, durationSeconds: 24, isNew: !one.heard, hasAudio: true, carrierTranscript: null,
+          id: String(one.id), number: one.number, cachedName: one.name ?? null, date: one.date, durationSeconds: one.seconds ?? 24, isNew: !one.heard, hasAudio: true, carrierTranscript: one.transcript ?? null,
         })),
       }),
       fetchVoicemailAudio: () => Promise.resolve({ status: "ready" }),
@@ -254,16 +284,21 @@ function telephony(world: TelephonyScene): Faked {
         const kept = world.journal.get(operationId);
         if (kept !== undefined) return kept;
         if (world.hold !== undefined) await world.hold;
+        const review = world.textReview;
+        if (review?.proposal.id === operationId) {
+          await new Promise<void>((confirm) => { review.confirmations.push({ operationId, recipients, body, subscriptionId, confirm }); });
+        }
         const bindingHash = await smsBindingHash({ recipients: recipients as never, body, subscriptionId });
         world.sent.push({ operationId, recipients, body });
         const thread = world.texts.find((one) => one.address === recipients[0])?.thread ?? Math.max(0, ...world.texts.map((one) => one.thread)) + 1;
-        world.texts.push({ id: Math.max(0, ...world.texts.map((one) => one.id)) + 1, thread, address: recipients[0]!, box: "sent", date: 1_700_000_400_000 + world.sent.length, body, read: true });
+        world.texts.push({ id: Math.max(0, ...world.texts.map((one) => one.id)) + 1, thread, address: recipients[0], box: "sent", date: 1_700_000_400_000 + world.sent.length, body, read: true });
         const record = { kind: "sms-send", operationId, subscriptionId, bindingHash, status: "sent", parts: recipients.map((_number, recipientIndex) => ({ index: recipientIndex, recipientIndex, partIndex: 0, sent: "success", delivery: "unknown" })), createdAt: 1_700_000_400_000 };
         world.journal.set(operationId, record);
         world.changed();
         return record;
       },
       async sendMms({ operationId, recipients, body, attachments, subscriptionId }) {
+        world.mmsAttempts.push(operationId);
         const kept = world.journal.get(operationId);
         if (kept !== undefined) return kept;
         if (world.hold !== undefined) await world.hold;
@@ -272,20 +307,23 @@ function telephony(world: TelephonyScene): Faked {
           attachments: attachments.map((one) => ({ name: one.name, contentType: one.contentType, bytes: Uint8Array.from(atob(one.data), (byte) => byte.charCodeAt(0)) })),
         });
         world.sent.push({ operationId, recipients, body });
-        const record = { kind: "mms-send", operationId, subscriptionId, bindingHash, status: "sent", createdAt: 1_700_000_400_000 };
+        const record = { kind: "mms-send", operationId, subscriptionId, bindingHash, status: world.holdMmsSubmission ? "submitted" : "sent", createdAt: 1_700_000_400_000 };
         world.journal.set(operationId, record);
         return record;
       },
       cancelSmsReview: () => Promise.resolve(undefined),
       smsSendHistory: () => Promise.resolve({ receipts: [...world.journal.values()] }),
       smsSendResult: ({ operationId }) => Promise.resolve(world.journal.get(operationId) ?? Promise.reject(rejection("No send with this operation", "not-found"))),
-      mmsSendResult: ({ operationId }) => Promise.resolve(world.journal.get(operationId) ?? Promise.reject(rejection("No send with this operation", "not-found"))),
+      mmsSendResult: ({ operationId }) => {
+        world.mmsQueries.push(operationId);
+        return Promise.resolve(world.journal.get(operationId) ?? Promise.reject(rejection("No send with this operation", "not-found")));
+      },
     };
   });
 }
 
 /** `ElizaContacts`: the address book, over `world`. */
-function contacts(world: TelephonyScene): Faked {
+function contacts(world: TelephonyScene, now: () => number): Faked {
   return plugin<AddressBookNativePlugin>(() => {
     const status = () => ({ available: true, readable: world.contacts, writable: world.contacts && world.editable });
     const find = (id: string) => world.people.find((one) => one.id === id);
@@ -295,14 +333,19 @@ function contacts(world: TelephonyScene): Faked {
         world.contacts = true;
         return Promise.resolve(status());
       },
-      list: ({ query, limit }) => {
+      list: ({ query, limit, cursor }) => {
         const q = query.toLowerCase();
         const digits = query.replace(/[^\d+]/g, "");
         const found = world.people.filter((one) => one.displayName.toLowerCase().includes(q) || (digits !== "" && one.phoneNumbers.some((phone) => phone.number.replace(/[^\d+]/g, "").includes(digits)))).sort((x, y) => Number(x.id) - Number(y.id));
-        const page = found.slice(0, limit);
+        const offset = cursor === undefined ? 0 : Number(cursor.split(".", 3)[1]);
+        const page = found.slice(offset, offset + limit);
+        const after = offset + page.length;
+        const last = page.at(-1);
+        const more = after < found.length;
         return Promise.resolve({
-          contacts: page.map((one) => ({ id: one.id, lookup: `lookup-${one.id}`, name: one.displayName, revision: String(one.revision), starred: false, phones: one.phoneNumbers.map(({ number }) => number), emails: one.emailAddresses.map(({ address }) => address) })),
-          more: found.length > limit,
+          contacts: page.map((one) => ({ id: one.id, lookup: `lookup-${one.id}`, name: one.displayName, revision: String(one.revision), starred: one.starred ?? false, phones: one.phoneNumbers.map(({ number }) => number), emails: one.emailAddresses.map(({ address }) => address) })),
+          more,
+          ...(more && last !== undefined ? { next: `v1.${after}.${last.id}.${encodeURIComponent(query)}` } : {}),
         });
       },
       create: () => {
@@ -318,7 +361,7 @@ function contacts(world: TelephonyScene): Faked {
         if (one === undefined) throw new Error("Contact not found");
         return {
           id: one.id, lookup: `lookup-${one.id}`, displayName: one.displayName, givenName: one.givenName, familyName: one.familyName,
-          ...(one.notes === undefined ? {} : { notes: one.notes }), starred: false, phoneNumbers: one.phoneNumbers, emailAddresses: one.emailAddresses, version: await versionOf(one.id, one.revision),
+          ...(one.notes === undefined ? {} : { notes: one.notes }), starred: one.starred ?? false, phoneNumbers: one.phoneNumbers, emailAddresses: one.emailAddresses, version: await versionOf(one.id, one.revision),
         };
       },
       save: async ({ id, version, ...draft }) => {
@@ -345,9 +388,19 @@ function contacts(world: TelephonyScene): Faked {
         if (one === undefined) return { status: "not-found" };
         const revision = one.revision;
         if (await versionOf(id, revision) !== version || find(id) !== one || one.revision !== revision) return { status: "stale" };
-        world.people = world.people.filter((person) => person !== one);
-        const staged = { id: `staged-${world.staged.length + 1}`, kind: "contact", target: { id, version }, phase: "queued", deadline: { expiresAt: 1_800_000_000_000 } };
+        const staged = { id: `staged-${world.staged.length + 1}`, kind: "contact", target: { id, version }, phase: "queued", deadline: { expiresAt: now() + 200 } };
         world.staged.push(staged);
+        const settle = () => {
+          if (staged.phase !== "queued") return;
+          if (find(id) !== one || one.revision !== revision) {
+            staged.phase = "conflict";
+            return;
+          }
+          world.people = world.people.filter((person) => person !== one);
+          staged.phase = "deleted";
+        };
+        if (world.holdContactDeletion === undefined) settle();
+        else void world.holdContactDeletion.then(settle);
         return { status: "queued", deletion: staged };
       },
       resolveNames: ({ numbers }) => Promise.resolve({ names: numbers.map((number) => ({ number, name: world.people.find((one) => one.phoneNumbers.some((phone) => phone.number === number))?.displayName ?? null, photo: null })) }),
@@ -355,13 +408,34 @@ function contacts(world: TelephonyScene): Faked {
   });
 }
 
-/** `ElizaActionJournal`: only its deletion window is read here. */
+/** `ElizaActionJournal`: deferred deletion and approved device execution have distinct entries. */
 function journal(world: TelephonyScene): Faked {
-  return plugin<ActionJournalPlugin>(() => {
+  return plugin<Omit<ActionJournalPlugin, "get" | "list"> & {
+    telephonyDeletionReceipt(key: { kind: string; id: string }): Promise<unknown>;
+    get(input: { proposalId: string }): Promise<unknown>;
+    edit(input: { proposalId: string; expectedRevision: number; next: JournalEntry }): Promise<{ kept: boolean }>;
+    list(): Promise<unknown>;
+  }>(() => {
     const unused = () => Promise.reject(rejection("Not a deletion call", "unavailable"));
     return {
-      reserve: unused, markApplying: unused, finish: unused, get: unused, list: unused, dismiss: unused,
-      pending: () => Promise.resolve({ pending: world.staged.map((row) => ({ ...row, window: "open" })) }),
+      reserve: unused, markApplying: unused, finish: unused, dismiss: unused,
+      get: ({ proposalId }) => world.textReview === undefined ? unused() : Promise.resolve({ entry: world.textReview.journal.get(proposalId) ?? null }),
+      list: () => world.textReview === undefined ? unused() : Promise.resolve({ entries: [...world.textReview.journal.values()] }),
+      edit: ({ proposalId, expectedRevision, next }) => {
+        const review = world.textReview;
+        const kept = review !== undefined && (review.journal.get(proposalId)?.revision ?? 0) === expectedRevision
+          && next.proposalId === proposalId && next.revision === expectedRevision + 1;
+        if (kept) review.journal.set(proposalId, next);
+        return Promise.resolve({ kept });
+      },
+      pending: () => Promise.resolve({
+        pending: world.staged.filter((row) => ["queued", "paused", "unknown", "dispatching"].includes(row.phase)).map((row) => ({ ...row, window: "open" })),
+      }),
+      telephonyDeletionReceipt: ({ kind, id }) => {
+        const row = world.staged.find((one) => one.kind === kind && one.id === id);
+        const phase = row?.phase === "dispatching" ? "unknown" : row?.phase;
+        return Promise.resolve(phase !== undefined && ["deleted", "undone", "conflict", "unknown"].includes(phase) ? { kind, id, phase } : {});
+      },
       undo: ({ kind, id }) => {
         const row = world.staged.find((one) => one.kind === kind && one.id === id);
         if (row !== undefined && row.phase === "queued") row.phase = "undone";
@@ -399,7 +473,13 @@ function ongoing(world: TelephonyScene): Faked {
 /** `AlphaCallState`: whether a call is live and whether it may be an emergency call, read and pushed with each report. */
 function callState(world: TelephonyScene): Faked {
   return (emit) => {
-    const reading = () => ({ inCall: world.live.length > 0, emergency: world.live.length > 0 ? world.emergency : false, emergencyLive: world.live.length > 0 && world.emergency !== false, watching: true, carrier: world.mobileService });
+    const reading = () => {
+      const inCall = world.callStateKnown ? world.live.length > 0 : null;
+      return {
+        inCall, emergency: inCall === true ? world.emergency : inCall === false ? false : null,
+        emergencyLive: inCall === true && world.emergency !== false, watching: true, carrier: world.mobileService,
+      };
+    };
     const told = world.report;
     world.report = () => {
       told();
@@ -410,12 +490,75 @@ function callState(world: TelephonyScene): Faked {
 }
 
 /** The telephony plugins an Alpha image's host registers. */
-export function telephonyPlugins(world: TelephonyScene): Record<string, Faked> {
+export function telephonyPlugins(world: TelephonyScene, now: () => number): Record<string, Faked> {
   return {
     ElizaTelephony: telephony(world),
-    ElizaContacts: contacts(world),
+    ElizaContacts: contacts(world, now),
     ElizaActionJournal: journal(world),
     AlphaOngoingCall: ongoing(world),
     AlphaCallState: callState(world),
+    ...(world.textReview === undefined ? {} : { AlphaMediaEnrollment: textReviewEnrollment }),
+  };
+}
+
+/**
+ * The image the dev server shows with `ALPHA_FAKES=phone`: the people, calls, voicemail and conversations of develop's
+ * fixtures, dated from `now`, so Phone, Messages and Contacts can be laid beside develop's. Journeys use `telephonyScene`.
+ */
+export function developTelephony(now: number): TelephonyScene {
+  const minute = 60_000;
+  const midnight = new Date(now);
+  midnight.setHours(0, 0, 0, 0);
+  const today = (minutes: number) => midnight.getTime() + minutes * minute;
+  const ago = (minutes: number) => now - minutes * minute;
+  const person = (id: number, givenName: string, familyName: string, number: string, email: string, notes: string, starred = false): Person => ({
+    id: String(id), displayName: `${givenName} ${familyName}`.trim(), givenName, familyName, phoneNumbers: [{ number, type: "mobile" }],
+    emailAddresses: email === "" ? [] : [{ address: email, type: "home" }], notes, starred, revision: 1,
+  });
+  const people = [
+    person(1, "Ana", "Torres", "+14155550171", "ana@torres.example", "Climbing partner"),
+    person(2, "Ben", "Adler", "+14155550163", "ben@adler.example", "Accountant"),
+    person(3, "Dad", "", "+15035550110", "", "", true),
+    person(4, "Jordan", "Park", "+12125550187", "jordan@northpoint.example", "Partner, Northpoint", true),
+    person(5, "Kenji", "Sato", "+12065550148", "kenji@sato.example", ""),
+    person(6, "Lena", "Ruiz", "+17185550121", "lena@ruiz.example", ""),
+    person(7, "Maya", "Chen", "+14155550132", "maya@lumen.example", "Design lead at Lumen", true),
+    person(8, "Olivia", "Brooks", "+14155550126", "olivia@brooks.example", "Landlord"),
+    person(9, "Priya", "Nair", "+16505550144", "priya@nair.example", "", true),
+    person(10, "Sam", "Okafor", "+15105550199", "sam@okafor.example", ""),
+  ];
+  const number = (name: string) => people.find((one) => one.displayName === name)!.phoneNumbers[0].number;
+  const call = (id: number, name: string | null, at: number, type: LoggedCall["type"], seconds: number, raw = ""): LoggedCall =>
+    ({ id, number: name === null ? raw : number(name), name, date: ago(at), type, seconds });
+  let text = 0;
+  const thread = (id: number, name: string, unread: number, rows: ReadonlyArray<readonly [boolean, string | number, number]>): Text[] =>
+    rows.map(([mine, body, at], index) => ({
+      id: ++text, thread: id, address: number(name), box: mine ? "sent" : "inbox", date: today(at) + index,
+      body: typeof body === "string" ? body : "", read: mine || index < rows.length - unread, ...(typeof body === "number" ? { pictures: 1 } : {}),
+    }));
+  return {
+    ...telephonyScene(),
+    people,
+    calls: [
+      call(1, "Maya Chen", 12, "missed", 0),
+      call(2, null, 52, "incoming", 24, "+16285550199"),
+      call(3, "Jordan Park", 190, "outgoing", 740),
+      call(4, "Dad", 1300, "incoming", 1260),
+      call(5, "Priya Nair", 1570, "outgoing", 95),
+      call(6, "Sam Okafor", 3000, "missed", 0),
+      call(7, "Lena Ruiz", 4500, "incoming", 300),
+    ],
+    voicemails: [
+      { id: 11, number: number("Maya Chen"), date: ago(11), heard: false, deleted: false, seconds: 18, transcript: "Hey, it's Maya. Quick one: can we push the review to 3:30? I want to get the prototype on the device first. Call me back." },
+      { id: 12, number: number("Dad"), date: ago(1320), heard: true, deleted: false, seconds: 34, transcript: "Hi kiddo, just checking in. Mom wants to know if you're coming up for the weekend. No rush, call when you can." },
+      { id: 13, number: "+12125550100", name: "Dr. Patel's office", date: ago(2900), heard: true, deleted: false, seconds: 22, transcript: "This is Dr. Patel's office confirming your appointment Thursday at 10 AM. Please call back to confirm." },
+    ],
+    texts: [
+      ...thread(1, "Maya Chen", 1, [[false, "Pushed the new flows to Figma", -330], [true, "Looks great. Review tomorrow?", -322], [false, "Yes! Put it on the calendar", -321], [true, "Design review is at 3", 750], [false, "Still on for 3? I can bring the prototype.", 844]]),
+      ...thread(2, "Priya Nair", 3, [[true, "Saturday was so fun", -600], [false, "Right?? Lunch Tuesday?", -590], [true, "Yes. Tartine at 1", -588], [false, "Sent you the photos from Saturday", 700], [false, 0, 700], [false, 1, 700]]),
+      ...thread(3, "Jordan Park", 0, [[false, "Can we do 4:30 instead of 4?", 615], [true, "Works.", 618]]),
+      ...thread(4, "Sam Okafor", 0, [[false, "Running 10 min late to standup", 562], [true, "No worries", 563]]),
+      ...thread(5, "Dad", 0, [[false, "Did you see the game last night?", -700], [true, "Missed it! Call you Sunday", -650], [false, "Ok. Love you", -640]]),
+    ],
   };
 }

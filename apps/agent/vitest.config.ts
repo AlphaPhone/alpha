@@ -1,4 +1,4 @@
-import { checkout } from "@repo/eliza-harness/checkout";
+import { checkout } from "@repo/eliza-harness";
 import { project } from "vibestack/testing/vitest";
 import { defineConfig, mergeConfig } from "vitest/config";
 

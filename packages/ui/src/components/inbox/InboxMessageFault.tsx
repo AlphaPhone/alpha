@@ -1,12 +1,11 @@
-import { CircleAlert, FileWarning, MessagesSquare, RefreshCcw } from "lucide-react";
-import { Button } from "../Button.tsx";
-import { EmptyState } from "../EmptyState.tsx";
+import { RotateCw } from "lucide-react";
+import { cn, focusRing } from "../../lib/cn.ts";
 
 const faults = {
-  unreachable: { icon: <CircleAlert />, title: "Message could not be read", action: "Try again" },
-  changed: { icon: <RefreshCcw />, title: "This message changed in Gmail", action: "Try again" },
-  conversationChanged: { icon: <MessagesSquare />, title: "This conversation changed", action: "Reopen" },
-  tooLarge: { icon: <FileWarning />, title: "Too large to show here", action: "Open in Gmail" },
+  unreachable: { title: "Message could not be read", action: "Retry" },
+  changed: { title: "This message changed in Gmail", action: "Retry" },
+  conversationChanged: { title: "This conversation changed", action: "Reopen" },
+  tooLarge: { title: "Too large to show here", action: "Open in Gmail" },
 } as const;
 
 export type InboxMessageFaultKind = keyof typeof faults;
@@ -24,6 +23,13 @@ export type InboxMessageFaultProps = {
  * @model spec/app/inbox/message.md
  */
 export function InboxMessageFault({ kind, onAction }: InboxMessageFaultProps) {
-  const { icon, title, action } = faults[kind];
-  return <EmptyState icon={icon} title={title}>{onAction ? <Button onClick={onAction}>{action}</Button> : null}</EmptyState>;
+  const { title, action } = faults[kind];
+  return (
+    <>
+      <p role="status" className="mt-5.5 text-body whitespace-pre-wrap">{title}</p>
+      {onAction ? (
+        <button type="button" onClick={onAction} className={cn(focusRing, "inline-flex min-h-11 items-center gap-1.5 rounded-sm text-primary")}><RotateCw aria-hidden className="size-4" />{action}</button>
+      ) : null}
+    </>
+  );
 }

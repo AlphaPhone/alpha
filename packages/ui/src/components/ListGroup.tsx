@@ -2,8 +2,8 @@ import { type ComponentProps, type ReactNode, useId } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../lib/cn.ts";
 
-const rowsVariants = cva("flex flex-col overflow-hidden rounded-lg", {
-  variants: { surface: { card: "rounded-group bg-secondary py-1 text-secondary-foreground", plain: "" } },
+const rowsVariants = cva("flex flex-col overflow-hidden", {
+  variants: { surface: { card: "rounded-group bg-secondary py-1 text-secondary-foreground", plain: "rounded-lg" } },
   defaultVariants: { surface: "card" },
 });
 

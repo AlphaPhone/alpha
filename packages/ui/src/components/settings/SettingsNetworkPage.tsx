@@ -62,13 +62,13 @@ const unsecured = (security: SettingsNetworkSecurity) => security === "open" || 
  * @model spec/app/settings/network.md
  */
 export function SettingsNetworkPage({ online, reading = false, scan, scanning = false, networks, joined, joining = false, fits, onJoin, onRescan, told, onBack, starting, onAndroid }: SettingsNetworkPageProps) {
-  const [chosen, choose] = useState<SettingsNearbyNetwork | undefined>(undefined);
+  const [chosen, setChosen] = useState<SettingsNearbyNetwork | undefined>(undefined);
   const [passphrase, setPassphrase] = useState("");
   const said = scans[scan];
   const android = { starting, onAndroid };
   const ready = chosen !== undefined && onJoin !== undefined && !joining && (fits?.(chosen, passphrase) ?? false);
   return (
-    <SettingsPage title="Network" told={told} onBack={onBack} actions={onRescan ? <Button variant="ghost" size="sm" onClick={onRescan}>Scan again</Button> : undefined}>
+    <SettingsPage title="Network" told={told} onBack={onBack} backLabel="Back to General" actions={onRescan ? <Button variant="ghost" size="sm" onClick={onRescan}>Scan again</Button> : undefined}>
       {said ? <Banner variant="warn">{said}</Banner> : null}
       {joined ? <Banner variant={joined === "connected" ? "info" : "warn"}>{joins[joined]}</Banner> : null}
       <ListGroup>
@@ -84,7 +84,7 @@ export function SettingsNetworkPage({ online, reading = false, scan, scanning = 
             detail={securities[network.security]}
             selected={chosen?.name === network.name}
             onClick={() => {
-              choose(network);
+              setChosen(network);
               setPassphrase("");
             }}
           />
@@ -98,7 +98,7 @@ export function SettingsNetworkPage({ online, reading = false, scan, scanning = 
             if (!ready) return;
             onJoin(chosen, passphrase);
             setPassphrase("");
-            choose(undefined);
+            setChosen(undefined);
           }}
         >
           {unsecured(chosen.security) ? null : (

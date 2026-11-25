@@ -140,6 +140,112 @@ lemma checkSent_ensures(s: Composer, draft: int, access: app__inbox__access_Acce
   }
 }
 
+lemma checkedSentNoOp(s: Composer, ticket: int, ok: bool, found: bool)
+  requires inv(s) && canCheckedSent(s, ticket) && (!ok || !named(s, s.checking) || letterNamed(s, s.checking).doubt.attempt == 0)
+  ensures alwaysAnOpenDraftIsWhole(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysAWaitingEditHasItsDeadline(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysTheCopyIsTheDraft(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysOneCheckRunsAtATime(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysAnUnsureDraftIsHandedToNothing(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysTheShelfHoldsOtherDraftsOfThisSession(checkedSent(s, ticket, ok, found).state)
+  ensures stepAWriteIsDueOnlyAfterItsPause(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
+  ensures stepOneWriteAtATime(s, "checkedSent", checkedSent(s, ticket, ok, found).state, checkedSent(s, ticket, ok, found).out)
+  ensures stepAHandedDraftStaysPut(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
+  ensures stepADraftIsForgottenOnlyWhenDiscardedOrGone(s, "checkedSent", checkedSent(s, ticket, ok, found).state, checkedSent(s, ticket, ok, found).out)
+  ensures stepASentDraftIsForgottenOrMarked(s, "checkedSent", checkedSent(s, ticket, ok, found).state, checkedSent(s, ticket, ok, found).out)
+  ensures stepAnUnknownSendIsCheckedOnce(s, checkedSent(s, ticket, ok, found).state, checkedSent(s, ticket, ok, found).out)
+  ensures stepEditingASavedDraftReplacesNone(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
+  ensures stepADraftComesBackAsItWasSetAside(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
+{
+}
+
+lemma checkedSentOpen(s: Composer, ticket: int, ok: bool, found: bool)
+  requires inv(s) && canCheckedSent(s, ticket) && ok && named(s, s.checking) && letterNamed(s, s.checking).doubt.attempt != 0 && (s.open && s.letter.id == s.checking)
+  ensures alwaysAnOpenDraftIsWhole(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysAWaitingEditHasItsDeadline(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysTheCopyIsTheDraft(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysOneCheckRunsAtATime(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysAnUnsureDraftIsHandedToNothing(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysTheShelfHoldsOtherDraftsOfThisSession(checkedSent(s, ticket, ok, found).state)
+  ensures stepAWriteIsDueOnlyAfterItsPause(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
+  ensures stepOneWriteAtATime(s, "checkedSent", checkedSent(s, ticket, ok, found).state, checkedSent(s, ticket, ok, found).out)
+  ensures stepAHandedDraftStaysPut(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
+  ensures stepADraftIsForgottenOnlyWhenDiscardedOrGone(s, "checkedSent", checkedSent(s, ticket, ok, found).state, checkedSent(s, ticket, ok, found).out)
+  ensures stepASentDraftIsForgottenOrMarked(s, "checkedSent", checkedSent(s, ticket, ok, found).state, checkedSent(s, ticket, ok, found).out)
+  ensures stepAnUnknownSendIsCheckedOnce(s, checkedSent(s, ticket, ok, found).state, checkedSent(s, ticket, ok, found).out)
+  ensures stepEditingASavedDraftReplacesNone(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
+  ensures stepADraftComesBackAsItWasSetAside(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
+{
+}
+
+lemma checkedSentAsideNotFound(s: Composer, ticket: int, ok: bool, found: bool)
+  requires inv(s) && canCheckedSent(s, ticket) && ok && named(s, s.checking) && letterNamed(s, s.checking).doubt.attempt != 0 && !(s.open && s.letter.id == s.checking) && !found
+  ensures alwaysAnOpenDraftIsWhole(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysAWaitingEditHasItsDeadline(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysTheCopyIsTheDraft(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysOneCheckRunsAtATime(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysAnUnsureDraftIsHandedToNothing(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysTheShelfHoldsOtherDraftsOfThisSession(checkedSent(s, ticket, ok, found).state)
+  ensures stepAWriteIsDueOnlyAfterItsPause(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
+  ensures stepOneWriteAtATime(s, "checkedSent", checkedSent(s, ticket, ok, found).state, checkedSent(s, ticket, ok, found).out)
+  ensures stepAHandedDraftStaysPut(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
+  ensures stepADraftIsForgottenOnlyWhenDiscardedOrGone(s, "checkedSent", checkedSent(s, ticket, ok, found).state, checkedSent(s, ticket, ok, found).out)
+  ensures stepASentDraftIsForgottenOrMarked(s, "checkedSent", checkedSent(s, ticket, ok, found).state, checkedSent(s, ticket, ok, found).out)
+  ensures stepAnUnknownSendIsCheckedOnce(s, checkedSent(s, ticket, ok, found).state, checkedSent(s, ticket, ok, found).out)
+  ensures stepEditingASavedDraftReplacesNone(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
+  ensures stepADraftComesBackAsItWasSetAside(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
+{
+  var told := s.(check := kit__read_answer(s.check, ok), checking := 0);
+  var l := letterNamed(s, s.checking);
+  ShelfLetter(s, s.checking);
+  AmendKeepsTheShelf(told, app__inbox__letter_notSent(l));
+}
+
+lemma checkedSentAsideForget(s: Composer, ticket: int, ok: bool, found: bool)
+  requires inv(s) && canCheckedSent(s, ticket) && ok && named(s, s.checking) && letterNamed(s, s.checking).doubt.attempt != 0 && !(s.open && s.letter.id == s.checking) && found && app__inbox__letter_forgettable(letterNamed(s, s.checking), letterNamed(s, s.checking).doubt.revision) && letterNamed(s, s.checking).sending == 0
+  ensures alwaysAnOpenDraftIsWhole(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysAWaitingEditHasItsDeadline(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysTheCopyIsTheDraft(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysOneCheckRunsAtATime(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysAnUnsureDraftIsHandedToNothing(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysTheShelfHoldsOtherDraftsOfThisSession(checkedSent(s, ticket, ok, found).state)
+  ensures stepAWriteIsDueOnlyAfterItsPause(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
+  ensures stepOneWriteAtATime(s, "checkedSent", checkedSent(s, ticket, ok, found).state, checkedSent(s, ticket, ok, found).out)
+  ensures stepAHandedDraftStaysPut(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
+  ensures stepADraftIsForgottenOnlyWhenDiscardedOrGone(s, "checkedSent", checkedSent(s, ticket, ok, found).state, checkedSent(s, ticket, ok, found).out)
+  ensures stepASentDraftIsForgottenOrMarked(s, "checkedSent", checkedSent(s, ticket, ok, found).state, checkedSent(s, ticket, ok, found).out)
+  ensures stepAnUnknownSendIsCheckedOnce(s, checkedSent(s, ticket, ok, found).state, checkedSent(s, ticket, ok, found).out)
+  ensures stepEditingASavedDraftReplacesNone(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
+  ensures stepADraftComesBackAsItWasSetAside(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
+{
+  var told := s.(check := kit__read_answer(s.check, ok), checking := 0);
+  ShelfLetter(s, s.checking);
+  TakeKeepsTheShelf(told, s.checking);
+}
+
+lemma checkedSentAsideMarked(s: Composer, ticket: int, ok: bool, found: bool)
+  requires inv(s) && canCheckedSent(s, ticket) && ok && named(s, s.checking) && letterNamed(s, s.checking).doubt.attempt != 0 && !(s.open && s.letter.id == s.checking) && found && !(app__inbox__letter_forgettable(letterNamed(s, s.checking), letterNamed(s, s.checking).doubt.revision) && letterNamed(s, s.checking).sending == 0)
+  ensures alwaysAnOpenDraftIsWhole(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysAWaitingEditHasItsDeadline(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysTheCopyIsTheDraft(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysOneCheckRunsAtATime(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysAnUnsureDraftIsHandedToNothing(checkedSent(s, ticket, ok, found).state)
+  ensures alwaysTheShelfHoldsOtherDraftsOfThisSession(checkedSent(s, ticket, ok, found).state)
+  ensures stepAWriteIsDueOnlyAfterItsPause(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
+  ensures stepOneWriteAtATime(s, "checkedSent", checkedSent(s, ticket, ok, found).state, checkedSent(s, ticket, ok, found).out)
+  ensures stepAHandedDraftStaysPut(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
+  ensures stepADraftIsForgottenOnlyWhenDiscardedOrGone(s, "checkedSent", checkedSent(s, ticket, ok, found).state, checkedSent(s, ticket, ok, found).out)
+  ensures stepASentDraftIsForgottenOrMarked(s, "checkedSent", checkedSent(s, ticket, ok, found).state, checkedSent(s, ticket, ok, found).out)
+  ensures stepAnUnknownSendIsCheckedOnce(s, checkedSent(s, ticket, ok, found).state, checkedSent(s, ticket, ok, found).out)
+  ensures stepEditingASavedDraftReplacesNone(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
+  ensures stepADraftComesBackAsItWasSetAside(s, "checkedSent", checkedSent(s, ticket, ok, found).state)
+{
+  var told := s.(check := kit__read_answer(s.check, ok), checking := 0);
+  var l := letterNamed(s, s.checking);
+  ShelfLetter(s, s.checking);
+  AmendKeepsTheShelf(told, app__inbox__letter_foundSent(l));
+}
+
 lemma checkedSent_ensures(s: Composer, ticket: int, ok: bool, found: bool)
   ensures (inv(s) ==> canCheckedSent(s, ticket) ==> alwaysAnOpenDraftIsWhole(checkedSent(s, ticket, ok, found).state))
   ensures (inv(s) ==> canCheckedSent(s, ticket) ==> alwaysAWaitingEditHasItsDeadline(checkedSent(s, ticket, ok, found).state))
@@ -156,18 +262,17 @@ lemma checkedSent_ensures(s: Composer, ticket: int, ok: bool, found: bool)
   ensures (inv(s) ==> canCheckedSent(s, ticket) ==> stepEditingASavedDraftReplacesNone(s, "checkedSent", checkedSent(s, ticket, ok, found).state))
   ensures (inv(s) ==> canCheckedSent(s, ticket) ==> stepADraftComesBackAsItWasSetAside(s, "checkedSent", checkedSent(s, ticket, ok, found).state))
 {
-  if inv(s) && canCheckedSent(s, ticket) && ok && named(s, s.checking) && letterNamed(s, s.checking).doubt.attempt != 0 {
-    var told := s.(check := kit__read_answer(s.check, ok), checking := 0);
-    var l := letterNamed(s, s.checking);
-    if !(s.open && s.letter.id == s.checking) {
-      ShelfLetter(s, s.checking);
-      if !found {
-        AmendKeepsTheShelf(told, app__inbox__letter_notSent(l));
-      } else if app__inbox__letter_forgettable(l, l.doubt.revision) && l.sending == 0 {
-        TakeKeepsTheShelf(told, s.checking);
-      } else {
-        AmendKeepsTheShelf(told, app__inbox__letter_foundSent(l));
-      }
+  if inv(s) && canCheckedSent(s, ticket) {
+    if !ok || !named(s, s.checking) || letterNamed(s, s.checking).doubt.attempt == 0 {
+      checkedSentNoOp(s, ticket, ok, found);
+    } else if s.open && s.letter.id == s.checking {
+      checkedSentOpen(s, ticket, ok, found);
+    } else if !found {
+      checkedSentAsideNotFound(s, ticket, ok, found);
+    } else if app__inbox__letter_forgettable(letterNamed(s, s.checking), letterNamed(s, s.checking).doubt.revision) && letterNamed(s, s.checking).sending == 0 {
+      checkedSentAsideForget(s, ticket, ok, found);
+    } else {
+      checkedSentAsideMarked(s, ticket, ok, found);
     }
   }
 }

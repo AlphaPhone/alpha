@@ -1,35 +1,51 @@
 import { elizaCalendar } from "./calendar.ts";
-import { alphaMapsTransport, elizaLocation } from "./maps.ts";
-import { type Faked, elizaAgent, elizaCloud, elizaSecureStore, present } from "./phone.ts";
-import type { Answering } from "./routes.ts";
+import { cameraKeys, elizaCamera } from "./camera.ts";
 import { elizaFiles, selectedDocuments } from "./files.ts";
+import { alphaMapsTransport, elizaLocation } from "./maps.ts";
+import { alphaNotes } from "./notes.ts";
+import { type Faked, elizaAgent, elizaCloud, elizaSecureStore } from "./phone.ts";
+import { alphaPhotos } from "./photos.ts";
+import { alphaConnection } from "./platform.ts";
+import { elizaReminders } from "./reminders.ts";
+import type { Answering } from "./routes.ts";
 import type { Scene } from "./scene.ts";
-import { alphaCarrierSetup, elizaReset, elizaSystem, elizaWiFi } from "./settings.ts";
+import { alphaAgentConsent, alphaCarrierSetup, elizaNotices, elizaPasswords, elizaReset, elizaSystem, elizaWiFi, settingsHost } from "./settings.ts";
 import { telephonyPlugins } from "./telephony.ts";
 import { alphaDevice } from "./update.ts";
-import { alphaConnection } from "./platform.ts";
+import { alphaBrowser } from "./browser.ts";
 import { alphaVoiceCloud, elizaCloudSpeech, elizaSignIn } from "./voice.ts";
 
+/**
+ * The plugins the fake phone's host registers, by the names their `@CapacitorPlugin` gives: one line per plugin, and
+ * its import. Lines are only ever added, and git keeps every branch's (`.gitattributes`). An Alpha image's host
+ * registers eliza's telephony plugin, and its contacts plugin where the image grants contacts.
+ */
 export function plugins(world: Scene, services: { readonly agent: Answering; readonly cloud: Answering }): Record<string, Faked> {
   return {
-    ElizaAgent: elizaAgent(services.agent),
-    ElizaCloud: elizaCloud(services.cloud, () => world.signedIn),
-    ElizaSecureStore: elizaSecureStore(world.secrets, world.slots),
+    ElizaAgent: elizaAgent(services.agent, world.settings.recovery),
+    ElizaCloud: elizaCloud(services.cloud, () => world.signedIn, () => world.mailLease),
+    ElizaSecureStore: elizaSecureStore(world.secrets, (key) => world.slots.has(key) || /^notes-(?:draft|folders):[1-9][0-9]*$/.test(key)),
     ElizaCalendar: elizaCalendar(world.calendar),
+    ElizaReminders: elizaReminders(world.reminders, () => world.now),
+    ElizaCamera: elizaCamera(world.camera),
     ElizaFiles: elizaFiles(world.files),
+    AlphaPhotos: alphaPhotos(world.photos),
     SelectedDocuments: selectedDocuments(world.files),
     ElizaLocation: elizaLocation(world.maps, () => world.now),
-    ...(world.image ? { ElizaTelephony: present, ElizaContacts: present } : {}),
     ElizaSystem: elizaSystem(world.launcher, world.settings),
     ElizaReset: elizaReset(world.settings),
     ElizaWiFi: elizaWiFi(world.settings),
     AlphaCarrierSetup: alphaCarrierSetup(world.settings),
     AlphaMapsTransport: alphaMapsTransport(world.maps),
-    ...(world.image ? telephonyPlugins(world.telephony) : {}),
-    AlphaDevice: alphaDevice(world.update, () => world.now),
+    ...(world.image ? telephonyPlugins(world.telephony, () => world.now) : {}),
+    AlphaDevice: (emit) => ({ ...alphaDevice(world.update, () => world.now)(emit), ...settingsHost(world.settings), ...alphaAgentConsent(world.settings), ...cameraKeys(world.camera) }),
+    ElizaNotifications: elizaNotices(world.settings),
+    ElizaPasswords: elizaPasswords(world.settings),
     AlphaConnection: alphaConnection(world.platform),
     ...(world.voice.onDevice ? { AlphaVoiceCloud: alphaVoiceCloud(world.voice) } : {}),
     ElizaCloudSpeech: elizaCloudSpeech(world.voice),
     ElizaSignIn: elizaSignIn(world.voice, () => world.signedIn),
+    AlphaBrowser: alphaBrowser(world.browser),
+    ...(world.notes.audio.size > 0 ? { AlphaNotes: alphaNotes(world.notes) } : {}),
   };
 }

@@ -38,7 +38,7 @@ export type SettingsProblemLogPageProps = Pick<SettingsExportRowProps, "exportin
  */
 export function SettingsProblemLogPage({ log, problems, needs, clearing = false, exporting, onBack, onRetry, onClear, onExport, onRecover }: SettingsProblemLogPageProps) {
   return (
-    <SettingsPage title="Problem log" onBack={onBack}>
+    <SettingsPage title="Problem log" onBack={onBack} backLabel="Back to Developer">
       <ListGroup>
         {log === "waiting" ? <Skeleton className="m-4 h-5 w-24" /> : null}
         {log === "none" ? <ListRow title="No problems" trailing={<StatusDot status="ok" label="None" />} /> : null}
