@@ -165,7 +165,7 @@ it("Star and mark the mail I reviewed (spec/app/inbox/sending.md, \"Story: Chang
   const subjects: readonly [string, string] = ["Notes for the 3:00 review", "Dinner Friday?"];
   await tile("Inbox");
   await until(alpha, runtime, List, (state) => state.list.status === "Loaded");
-  await select(subjects[0]);
+  await choose(subjects[0]);
   await row(subjects[1]);
   await until(alpha, runtime, List, (state) => state.chosen.length === subjects.length);
   await menu("Star", "Mail options");
@@ -178,7 +178,7 @@ it("Star and mark the mail I reviewed (spec/app/inbox/sending.md, \"Story: Chang
   await until(alpha, runtime, List, (state) => state.selected.folder === "Starred" && state.list.status === "Loaded");
   expect(rows()).toEqual(subjects);
 
-  await select(subjects[0]);
+  await choose(subjects[0]);
   await row(subjects[1]);
   await until(alpha, runtime, List, (state) => state.chosen.length === subjects.length);
   await menu("Mark as read", "Mail options");
