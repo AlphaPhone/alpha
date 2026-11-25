@@ -1,6 +1,7 @@
 // spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"; spec/app/voice/index.md, "A spoken reply says a written date, clock time, range and percentage in words"; spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"
-import { ConversationRecord, TurnController, type TurnContext } from "@elizaos/agent"
+import { ConversationRecord, TurnController, type TurnContext, type TurnTransport } from "@elizaos/agent"
 import { Machine as Conversation, type Context as Screen } from "../../gen/app__assistant.effect.vibe"
+import { Machine as Chats } from "../../gen/app__assistant__chats.effect.vibe"
 import { sendsOpenDocument } from "../../gen/app__assistant__context.effect.vibe"
 import { Machine as Phone } from "../../gen/app__phone.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
@@ -11,6 +12,7 @@ import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { ask } from "../platform/remote.vibe"
 import { Views, delivery, preparedIn } from "../assistant/views.vibe"
+import { MediaReview, requestedFilesOperation, sameFiles, type FilesOrigin } from "../assistant/media-review.vibe"
 import type { Attached } from "../assistant/talk.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type VoiceEvent, VoiceBridge } from "../platform/voice.vibe"
@@ -32,6 +34,14 @@ export function viewOfPlace(place: number): Shell.View | undefined {
   return place >= 2 ? views[place - 2] : undefined
 }
 
+interface FilesNavigation {
+  readonly session: number
+  readonly turn: number
+  readonly opened: Deferred.Deferred<boolean>
+  readonly apply: Effect.Effect<boolean>
+  readonly decline: Effect.Effect<void>
+}
+
 export interface VoiceMemory {
   conversation: ConversationRecord | undefined
   heardText: string
@@ -43,7 +53,9 @@ export interface VoiceMemory {
   readonly playLock: Semaphore.Semaphore
   reviewNotice: string
   dictatedText: string
+  dictatedDurationMs: number | undefined
   fillTarget: { readonly field: Field; readonly filling: number; readonly apply: (words: string) => void!! } | undefined
+  filesNavigation: FilesNavigation | undefined
   /** The observation and any file the spoken request may attach from the screen now showing. */
   screen: ((shown: Screen, spoken: string) => {
     readonly metadata: TurnContext | undefined
@@ -76,7 +88,9 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
     playLock,
     reviewNotice: "",
     dictatedText: "",
+    dictatedDurationMs: undefined,
     fillTarget: undefined,
+    filesNavigation: undefined,
     screen: undefined,
     cueWaiting: false,
     enqueueSentence(turn: number, text: string) {
@@ -128,6 +142,7 @@ export effect function openDictation<R>(field: Field, apply: (words: string) => 
   const filling = (try voice.get()).recorder.filled + 1
   if (!(try contained(voice.send({ type: "openRecorder", target: field }), "opening dictation"))) return false
   memory.dictatedText = ""
+  memory.dictatedDurationMs = undefined
   memory.fillTarget = { field, filling, apply: (words) => Effect.provideContext(apply(words), context) }
   return true
 }
@@ -286,8 +301,8 @@ effect function ensureConversation(): (ConversationRecord | undefined)!!(Agent |
 }
 
 // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
-function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event, never, Agent | VoiceWords | Voice.Machine> {
-  return Stream.callback<Voice.Event, never, Agent | VoiceWords | Voice.Machine>((queue) => effect {
+function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event, never, Agent | VoiceWords | Voice.Machine | Shell.Machine> {
+  return Stream.callback<Voice.Event, never, Agent | VoiceWords | Voice.Machine | Shell.Machine>((queue) => effect {
     const { runtime } = try Agent
     const { memory } = try VoiceWords
     const record = try ensureConversation()
@@ -299,12 +314,27 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       return
     }
     const rendering = try Effect.serviceOption(Views)
-    const conversation = try Effect.serviceOption(Conversation)
+    const conversation = Option.getOrUndefined(try Effect.serviceOption(Conversation))
+    const chats = Option.getOrUndefined(try Effect.serviceOption(Chats))
+    const voice = try Voice.Machine
+    const shell = try Shell.Machine
     const views = Option.getOrUndefined(rendering)
     const asked = views === undefined ? 0 : try views.begin()
-    const screen = Option.isSome(conversation) ? try conversation.value.get() : undefined
+    const screen = conversation === undefined ? undefined : try conversation.get()
+    const shownChat = chats === undefined ? undefined : (try chats.get()).chosen
     const told = views !== undefined && screen !== undefined && screen.observing && !screen.context.sensitive
-    const controller = new TurnController(runtime)
+    let streamed = false
+    const transport: TurnTransport = {
+      request(path, body, headers) {
+        if (body !== undefined) streamed = false
+        return runtime.request(path, body, headers)
+      },
+      stream(path, body, signal, headers) {
+        streamed = true
+        return runtime.stream(path, body, signal, headers)
+      },
+    }
+    const controller = new TurnController(transport)
     try ignore(tryPromise(() => controller.bind(record)))
     let shown = ""
     let said = 0
@@ -327,8 +357,9 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       said += split.consumed
       for (const sentence of split.ready) say(sentence)
     }
+    let awaitingFiles = false
     const feed = (written: string, provisional: boolean) => {
-      if (provisional) return
+      if (provisional || awaitingFiles) return
       emitNavigation(written)
       if (replyNeedsReview(written)) return
       const clean = speakableText(written)
@@ -337,8 +368,8 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       sayFrom(clean, false)
     }
     const observation = told && screen !== undefined && memory.screen !== undefined ? try memory.screen(screen.context, spoken) : undefined
-    const current = Option.isSome(conversation) ? try conversation.value.get() : undefined
-    const currentTurn = Voice.canSentence(try (try Voice.Machine).get(), session, turn)
+    const current = conversation === undefined ? undefined : try conversation.get()
+    const currentTurn = Voice.canSentence(try voice.get(), session, turn)
     const sameScreen = told && current !== undefined && current.observing && !current.context.sensitive && current.context.revision === screen?.context.revision
     const showing = current?.context.showing
     const file = observation?.attachment
@@ -354,7 +385,35 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       return
     }
     const images = entailsAttachment && file !== undefined ? [{ data: file.data, mimeType: file.mimeType, name: file.name }] : []
-    const metadata = sameScreen ? { ...observation?.metadata, ...(views === undefined ? {} : delivery(views.clientId)) } : {}
+    // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view"
+    const alreadyInFiles = showing?.tag === "App" && showing.view === "Files"
+    const selected = observation?.metadata?.observation?.selectedObject
+    const operation = sameScreen && images.length === 0 && observation?.explicitlyRequested !== true
+      && selected?.kind !== "document" ? requestedFilesOperation(spoken) : undefined
+    const outside = !alreadyInFiles && operation !== undefined && !("shown" in operation) ? operation : undefined
+    const review = operation === undefined || !alreadyInFiles && outside === undefined ? undefined : Option.getOrUndefined(try Effect.serviceOption(MediaReview))
+    const files = review === undefined || !alreadyInFiles ? undefined : try review.filesContext()
+    const origin = review === undefined || outside === undefined ? undefined : try review.filesOrigin(true)
+    const enrolled = review === undefined || (files === undefined && origin === undefined) ? undefined : try review.session()
+    const stillTalking = effect {
+      if (conversation === undefined || chats === undefined || shownChat === undefined || views === undefined) return false
+      const now = try conversation.get()
+      return now.observing && !now.context.sensitive && (try views.current()) === asked
+        && (try chats.get()).chosen === shownChat && memory.conversation === record
+        && controller.conversation?.id === record.id && controller.conversation?.roomId === record.roomId
+        && Voice.canSentence(try voice.get(), session, turn)
+    }
+    const atSource = effect { return (try stillTalking) && conversation !== undefined && (try conversation.get()).context.revision === screen?.context.revision }
+    const readyToSend = review !== undefined && (files !== undefined ? sameFiles(files, try review.filesContext())
+      : origin !== undefined && (try review.filesOrigin(true))?.route === origin.route)
+    const direct = enrolled !== undefined && readyToSend && (try atSource) ? enrolled : undefined
+    awaitingFiles = direct !== undefined
+    if (!Voice.canSentence(try voice.get(), session, turn)) {
+      Queue.endUnsafe(queue)
+      return
+    }
+    const admittedScreen = review === undefined ? sameScreen : try atSource
+    const metadata = admittedScreen ? { ...observation?.metadata, ...(views === undefined ? {} : delivery(views.clientId, direct !== undefined)) } : {}
     // spec/app/assistant/reply.md, "One brief acknowledgment at most, only from the agent's acknowledgment frame, before any tool runs": it is said at once, with no hold, as the turn's first line.
     let cued = false
     let toolRan = false
@@ -369,18 +428,35 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     const hooks = { onPreview: feed, onAcknowledgment: cue, onTool: () => { toolRan = true } }
     const result = tryPromise(() => controller.send({
       text: spoken, channelType: "VOICE_DM", ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }),
-    }, { stream: hooks })) catch () => undefined
+    }, { stream: hooks, ...(direct === undefined ? {} : { headers: direct.headers }) })) catch () => undefined
     if (isCloudFundsRefusal(result)) {
       memory.lastReply = ""
       Queue.offerUnsafe(queue, { type: "refusedForFunds", session, turn })
       Queue.endUnsafe(queue)
       return
     }
-    const finalText = result?.kind === "Replied" ? result.reply.text : ""
-    const prepared = sameScreen && views !== undefined && result?.kind === "Replied" ? preparedIn(result.reply.actionResults, views.clientId) : undefined
+    let filesReport: string | undefined
+    if (direct !== undefined && review !== undefined && operation !== undefined && streamed
+      && result?.kind === "Replied" && result.reply.userMessageId !== undefined && result.reply.failureKind === undefined) {
+      const message = result.reply.userMessageId
+      const report = (note: string) => { filesReport = note }
+      if (files !== undefined) try review.spokenFiles(direct, message, { files, operation, current: atSource, report }, result.reply.actionResults)
+      if (outside !== undefined && origin !== undefined && conversation !== undefined && screen !== undefined && (try atSource)) {
+        const open = (source: Effect.Effect<boolean>) => openFilesForVoice(origin, session, turn, source, memory, voice, shell)
+        const changes = Stream.merge(Stream.map(conversation.changes, () => undefined), Stream.map(voice.changes, () => undefined))
+        try review.spokenFilesFrom(direct, message, { origin, operation: outside, current: stillTalking, report },
+          { view: conversation, revision: screen.context.revision, moved: succeed(true), open, changes }, result.reply.actionResults)
+      }
+    }
+    if (!Voice.canSentence(try voice.get(), session, turn)) {
+      Queue.endUnsafe(queue)
+      return
+    }
+    const finalText = filesReport ?? (result?.kind === "Replied" ? result.reply.text : "")
+    const prepared = !awaitingFiles && admittedScreen && views !== undefined && result?.kind === "Replied" ? preparedIn(result.reply.actionResults, views.clientId) : undefined
     if (views !== undefined && prepared !== undefined) try views.spoken({ asked, handoff: prepared })
     memory.lastReply = finalText
-    emitNavigation(finalText)
+    if (!awaitingFiles) emitNavigation(finalText)
     const asks = replyNeedsReview(finalText)
     if (asks) {
       memory.reviewNotice = finalText
@@ -393,6 +469,52 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false })
     Queue.endUnsafe(queue)
   })
+}
+
+// spec/app/voice/index.md, "An exact spoken Files request may follow its own leased navigation once"
+effect function openFilesForVoice(origin: FilesOrigin, session: number, turn: number, atSource: Effect.Effect<boolean>,
+  memory: VoiceMemory, voice: Voice.Machine.Shape, shell: Shell.Machine.Shape): boolean!! {
+  if (memory.filesNavigation !== undefined || !(try atSource)) return false
+  const place = placeOf("Files")
+  if (!Voice.canAgentNavigatesFiles(try voice.get(), session, turn, place)) return false
+  const opened = try Deferred.make<boolean>()
+  const allowed = () => Effect.runSync(atSource)
+  let route: FilesNavigation
+  let reserved = false
+  const apply = effect {
+    return try contained(shell.send({ type: "agentOpenFilesFrom", source: origin.source, panel: origin.panel, route: origin.route, spoken: true },
+      () => reserved && memory.filesNavigation === route && !Deferred.isDoneUnsafe(opened)
+        && Effect.runSync(voice.get()).claim === place && allowed()), "opening Files for Talk")
+  }
+  const decline = effect {
+    if (memory.filesNavigation !== route || (try Deferred.isDone(opened))) return
+    const held = reserved
+    reserved = false
+    if (held) try contained(voice.send({ type: "claimReleased", session }, (now) =>
+      now.turn === turn && now.claim === place), "releasing the spoken Files route")
+    try Deferred.succeed(opened, false)
+  }
+  route = { session, turn, opened, apply, decline }
+  memory.filesNavigation = route
+  return try Effect.ensuring(effect {
+    const claimed = try contained(voice.send({ type: "agentNavigatesFiles", session, turn, place }, (now) => {
+      reserved = memory.filesNavigation === route && Voice.canAgentNavigatesFiles(now, session, turn, place) && allowed()
+      return reserved
+    }), "claiming the spoken Files route")
+    if (!claimed) return false
+    return try Deferred.await(opened)
+  }, effect {
+    try decline
+    if (memory.filesNavigation === route) memory.filesNavigation = undefined
+  })
+}
+
+effect function navigateLeasedFiles(session: number, turn: number, place: number): void!!VoiceWords {
+  const leased = (try VoiceWords).memory.filesNavigation
+  if (leased === undefined || leased.session !== session || leased.turn !== turn || place !== placeOf("Files")) return
+  try Effect.ensuring(effect {
+    if (try leased.apply) try Deferred.succeed(leased.opened, true)
+  }, leased.decline)
 }
 
 effect function navigateForVoice(place: number): (Voice.Event | undefined)!!(Shell.Machine | Voice.Machine) {
@@ -458,6 +580,7 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
       const confirmed = try (try VoiceBridge).shut(session)
       return { type: "stopped", confirmed }
     }, { type: "stopped", confirmed: false });
+    when { tag: "NavigateFiles", let session, let turn, let place }: run("navigate Files", navigateLeasedFiles(session, turn, place));
     when { tag: "Navigate", let place }: stream("navigate", Stream.unwrap(effect {
       const immediate = try navigateForVoice(place)
       return immediate === undefined ? Stream.empty : Stream.succeed(immediate)
@@ -475,7 +598,9 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
       if (trimmed === "") return { type: "transcribed", ticket, failure: "NoSpeech" } as Voice.Event
       const current = try (try Voice.Machine).get()
       if (Voice.canTranscribed(current, ticket, "NoFailure")) {
-        (try VoiceWords).memory.dictatedText = trimmed
+        const { memory } = try VoiceWords
+        memory.dictatedText = trimmed
+        memory.dictatedDurationMs = result.durationMs
       }
       return { type: "transcribed", ticket, failure: "NoFailure" } as Voice.Event
     }, { type: "transcribed", ticket, failure: "Recognition" });
@@ -487,6 +612,7 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
       const words = memory.dictatedText.trim()
       memory.fillTarget = undefined
       memory.dictatedText = ""
+      memory.dictatedDurationMs = undefined
       if (words !== "") try target.apply(words)
     });
   }
@@ -520,6 +646,7 @@ const visibility = started(effect {
 const navigation = started(effect {
   const shell = try Shell.Machine
   const voice = try Voice.Machine
+  const { memory } = try VoiceWords
   let lastPlace: number | undefined
   try Stream.runForEach(shell.changes, effect (state) => {
     const place = placeOf(state.trail.at(-1))
@@ -529,6 +656,8 @@ const navigation = started(effect {
     }
     if (place === lastPlace) return
     lastPlace = place
+    const leased = memory.filesNavigation
+    if (leased !== undefined && place === placeOf("Files")) try Deferred.await(leased.opened)
     try contained(voice.send({ type: "navigated", place }), "voice observing navigation")
   })
 }, "voice observing shell navigation")
@@ -563,6 +692,7 @@ const discardedDictation = applying(Voice.Machine, (voice) => voice.recorder, ef
   if (memory.fillTarget === undefined || memory.fillTarget.filling <= recorder.filled) return
   memory.fillTarget = undefined
   memory.dictatedText = ""
+  memory.dictatedDurationMs = undefined
 })
 
 const bridgeEvents = hearing(
