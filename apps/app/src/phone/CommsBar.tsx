@@ -1,7 +1,7 @@
 // spec/app/phone/comms.md, "Story: Address the person or Alpha from one bar"; spec/app/phone/comms.md, "Story: Never lose End"
 import { Button, Input, Mark } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { ArrowUp, Mic, PhoneOff } from "lucide-react";
+import { ArrowUp, Mic, Phone } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { Machine as ShellMachine } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
@@ -104,7 +104,7 @@ export function CommsBar({ runtime, closed, person }: CommsBarProps) {
           skipTap.current = false;
         }}><Mark className="size-[118%]" aria-hidden /></Button>
       {typeof closed === "function" ? closed((query) => void open(query), ending ? undefined : talk) : closed ?? <CommsQuery runtime={runtime} phone={phone && !ending} placeholder={placeholder} onAsk={(query) => void open(query)} onTalk={ending ? undefined : talk} />}
-      {ending && <Button variant="destructive" size="icon" className="size-11 shrink-0" aria-label="End call" onClick={() => void bar.send(end)}><PhoneOff /></Button>}
+      {ending && <Button variant="destructive" size="icon" className="size-11 shrink-0" aria-label="End call" onClick={() => void bar.send(end)}><Phone className="rotate-135" /></Button>}
     </div>
   );
 }

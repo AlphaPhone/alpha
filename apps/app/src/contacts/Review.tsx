@@ -1,5 +1,5 @@
 // spec/app/contacts/agent.md, "Story: Approve what the agent asked"; spec/app/contacts/agent.md, "A change is shown line by line, and a removed value never reads as kept"; spec/app/contacts/agent.md, "The owner picks the exact number or the one contact, and that one is shown"
-import { Banner, Button, Card, ListGroup, ListRow } from "@repo/ui";
+import { Banner, Button, Card, ListGroup, ListRow, SmsReviewCard } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import type { Machine as AgentMachine } from "../../gen/app__contacts__agent.effect.vibe";
 import { lineChange, reachesANumber } from "../../gen/app__contacts__agent.ts";
@@ -51,6 +51,22 @@ export function Review({ runtime }: ReviewProps) {
   const approve = { type: "approve", clear: safe, spoken: false } as const;
   const target = held.matches.find((one) => one.id === state.contact);
   const before = target === undefined ? blank : linesOf(target);
+  const warnings = (
+    <>
+      {!can(approve, "Owner") && can({ type: "showAgain" }, "Owner") && (
+        <Banner variant="warn" action={<Button size="sm" onClick={() => void send({ type: "showAgain" }, "Owner")}>Show again</Button>}>This changed on the phone</Banner>
+      )}
+      {!safe && <Banner variant="warn">Nothing is done during a call that may be an emergency call</Banner>}
+    </>
+  );
+  if (state.stage === "Shown" && state.ask === "Text") return (
+    <div role="dialog" data-alpha-review="" aria-label={asks.Text} className="fixed inset-x-4 bottom-24 z-40 flex flex-col gap-2">
+      <SmsReviewCard to={target?.name ?? state.number} number={target === undefined ? undefined : state.number} body={state.text} className="shadow-md"
+        onSend={can(approve, "Owner") ? () => void send(approve, "Owner") : undefined}
+        onDecline={can({ type: "decline" }, "Owner") ? () => void send({ type: "decline" }, "Owner") : undefined} />
+      {warnings}
+    </div>
+  );
   return (
     <Card role="dialog" data-alpha-review="" aria-label={asks[state.ask]} className="fixed inset-x-4 bottom-24 z-40 flex flex-col gap-3 p-4">
       <h2 className="font-semibold">{asks[state.ask]}</h2>
@@ -72,7 +88,6 @@ export function Review({ runtime }: ReviewProps) {
       {state.stage === "Shown" && (
         <>
           {reachesANumber(state.ask) && <ListRow title={target?.name ?? state.number} detail={state.number} />}
-          {state.ask === "Text" && <p className="whitespace-pre-wrap rounded-md border p-3">{state.text}</p>}
           {state.ask === "AddContact" && held.matches.length > 0 && (
             <ListGroup aria-label="Already in Contacts">
               {held.matches.map((twin) => <ListRow key={twin.id} title={twin.name} detail={[...twin.phones, ...twin.emails].join(", ")} />)}
@@ -82,14 +97,11 @@ export function Review({ runtime }: ReviewProps) {
           {(state.ask === "AddContact" || state.ask === "ChangeContact" || state.ask === "DeleteContact") && (
             <Changes before={before} after={afterOf(held.operation, before)} removing={state.ask === "DeleteContact"} saved={held.saved} />
           )}
-          {!can(approve, "Owner") && can({ type: "showAgain" }, "Owner") && (
-            <Banner variant="warn" action={<Button size="sm" onClick={() => void send({ type: "showAgain" }, "Owner")}>Show again</Button>}>This changed on the phone</Banner>
-          )}
-          {!safe && <Banner variant="warn">Nothing is done during a call that may be an emergency call</Banner>}
+          {warnings}
         </>
       )}
       <div className="flex gap-2">
-        {can(approve, "Owner") && <Button aria-label={state.ask === "Text" ? "Send this text" : undefined} data-alpha-review-send="" onClick={() => void send(approve, "Owner")}>{state.ask === "Text" ? "Send" : state.ask === "Dial" ? "Call" : "Approve"}</Button>}
+        {can(approve, "Owner") && <Button data-alpha-review-send="" onClick={() => void send(approve, "Owner")}>{state.ask === "Dial" ? "Call" : "Approve"}</Button>}
         {can({ type: "decline" }, "Owner") && <Button variant="ghost" onClick={() => void send({ type: "decline" }, "Owner")}>Not now</Button>}
       </div>
     </Card>

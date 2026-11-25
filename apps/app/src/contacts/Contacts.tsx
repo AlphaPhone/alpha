@@ -2,7 +2,7 @@
 import { Alert, AppHeader, Avatar, Banner, Button, Chip, ConfirmDialog, Input, ListGroup, ListRow, SearchField, Spinner, Tabs, TabsContent, Textarea } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
 import { CONTACT_MAX_ADDRESS, CONTACT_MAX_NAME, CONTACT_MAX_NOTES, CONTACT_MAX_NUMBER } from "@elizaos/os-bridges";
-import { ArrowLeft, Check, ChevronDown, ChevronLeft, Mail, MessageSquare, Minus, NotebookText, Pencil, Phone as Call, Plus, Search, Trash2, X } from "lucide-react";
+import { ArrowLeft, ArrowUp, Check, ChevronDown, ChevronLeft, Mail, MessageSquare, Mic, Minus, NotebookText, Pencil, Phone as Call, Plus, Search, Trash2, X } from "lucide-react";
 import { useMemo } from "react";
 import type { Machine as ContactsMachine } from "../../gen/app__contacts.effect.vibe";
 import { accessNeeded, listFailed, listedEmpty, maxEach, noMatches, pending, refused, shown, uncertain } from "../../gen/app__contacts.ts";
@@ -130,9 +130,11 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
       )}
       <CommsBar runtime={runtime}
         person={state.opened && held.card !== undefined ? { label: held.card.displayName, initials: callerInitials(held.card.displayName) } : undefined}
-        closed={!state.opened && !searching && can({ type: "search", typed: true }) ? (ask) => (
-          <form className="min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); ask(query.trim()); }}>
-            <SearchField data-alpha-composer aria-label="Search or ask" placeholder="Search or ask" value={query} onValueChange={search} maxLength={128} />
+        closed={!state.opened && !searching && can({ type: "search", typed: true }) ? (ask, talk) => (
+          <form className="flex min-w-0 flex-1 items-center gap-1" onSubmit={(event) => { event.preventDefault(); ask(query.trim()); }}>
+            <Input data-alpha-composer aria-label="Search or ask" placeholder="Search or ask" value={query} onChange={(event) => search(event.target.value)} maxLength={128} className="min-w-0 flex-1 border-0 bg-transparent pl-2 shadow-none" />
+            {query.trim() !== "" ? <Button size="icon" variant="ghost" type="submit" aria-label="Ask Alpha"><ArrowUp /></Button>
+              : talk && <Button size="icon" variant="ghost" type="button" aria-label="Talk" onClick={talk}><Mic /></Button>}
           </form>
         ) : undefined} />
     </section>
@@ -208,7 +210,9 @@ function Card({ runtime, safe }: ContactsProps & { safe: boolean }) {
 }
 
 function contactLabel(kind: string) {
-  return kind.startsWith("custom:") ? kind.slice("custom:".length) : kind.replaceAll("-", " ");
+  if (kind.startsWith("custom:")) return kind.slice("custom:".length);
+  const words = kind.replaceAll("-", " ");
+  return words.charAt(0).toLocaleUpperCase() + words.slice(1);
 }
 
 const problems: Record<NonNullable<Book["problem"]>, string> = {

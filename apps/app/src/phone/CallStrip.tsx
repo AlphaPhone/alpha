@@ -1,7 +1,7 @@
 // spec/app/phone/call.md, "Story: See my live call over every view"
 import { Button, cn } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { Phone, PhoneOff } from "lucide-react";
+import { Phone } from "lucide-react";
 import type { BarWords, Machine as BarMachine } from "../../gen/app__phone__call.effect.vibe";
 import { barDrawn, barWords, shownCall } from "../../gen/app__phone__call.ts";
 import { useMachine } from "../../gen/app__phone__call.react.ts";
@@ -67,7 +67,7 @@ export function CallStrip({ runtime, stage = false }: CallStripProps) {
       </Button>
       <span className="sr-only" role="status">{words}</span>
       {ending && (ended ? <span aria-hidden className="size-12 shrink-0" /> :
-        <Button variant="destructive" size="icon" className="size-12" aria-label="End call" disabled={!can(end)} onClick={() => void send(end)}><PhoneOff /></Button>)}
+        <Button variant="destructive" size="icon" className="size-12" aria-label="End call" disabled={!can(end)} onClick={() => void send(end)}><Phone className="rotate-135" /></Button>)}
     </div>
   );
 }

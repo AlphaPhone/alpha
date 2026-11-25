@@ -112,11 +112,11 @@ function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesPr
         <header className="flex h-13 shrink-0 items-center gap-0.5 px-2 [&>button]:size-13" data-alpha-messages-header data-alpha-stage-header>
           {onBack && <Button variant="ghost" size="icon" aria-label="Back to apps" onClick={onBack}><ChevronLeft /></Button>}
           <h1 className="min-w-0 flex-1 truncate text-xl leading-tight font-semibold">Messages</h1>
-          {!smsNeeded(state) && <Button variant="ghost" size="icon" aria-label="Search messages" data-alpha-messages-search onClick={() => setSearching(true)}><Search /></Button>}
+          {!smsNeeded(state) && <Button variant="ghost" size="icon" aria-label="Search messages" data-alpha-messages-search onClick={() => setSearching(true)}><Search className="size-5" /></Button>}
           {can({ type: "newMessage" }) && <Button variant="ghost" size="icon" aria-label="New message" data-alpha-messages-new onClick={() => {
             runtime.runSync(Inbox.use((inbox) => inbox.set({ typed: "" })));
             void send({ type: "newMessage" });
-          }}><Pencil /></Button>}
+          }}><Pencil className="size-5" /></Button>}
         </header>
       )}
       {smsNeeded(state) && (can(allow) || can(settings)) && (
@@ -532,8 +532,8 @@ function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { m
       <header data-alpha-navigation-header className={`${header} pr-4 pb-2`}>
         {can({ type: "back" }) && <Button variant="ghost" size="icon" aria-label="Back" onClick={() => void send({ type: "back" })}><ChevronLeft /></Button>}
         <form className="min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); if (numbers.length > 0) open(numbers, true); }}>
-          <SearchField ref={input} aria-label="To" placeholder="To" autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={230}
-            data-alpha-messages-recipients value={typed} onValueChange={find} />
+          <Input ref={input} type="text" aria-label="To" placeholder="To" autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={230}
+            data-alpha-messages-recipients value={typed} onChange={(event) => find(event.target.value)} className="h-11 rounded-full border-0 bg-secondary px-4 shadow-none" />
         </form>
         <Button variant="ghost" size="icon" aria-label="Choose a contact" aria-expanded={browsing} onClick={() => { setBrowsing(!browsing); input.current?.focus(); }}><Plus /></Button>
       </header>
@@ -560,7 +560,7 @@ function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { m
                 }}>
                   <Avatar name={contact.name} aria-hidden className="size-11 text-base" />
                   <span className="min-w-0 flex-1 truncate text-base font-semibold">{contact.name}</span>
-                  <span className="shrink-0 text-sm text-muted-foreground tabular-nums">{phone}</span>
+                  <span className="shrink-0 text-sm text-muted-foreground tabular-nums">{displayNumber(phone)}</span>
                 </button>
               </li>
             )))}

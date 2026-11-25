@@ -1,6 +1,6 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
 import {
-  Alert, AssistantCard, Button, AssistantChatHistorySheet, AssistantConversation, AssistantGrabber, AssistantPhotoPreview, AssistantSearchSheet, ConfirmDialog,
+  Alert, AssistantCard, Button, AssistantChatHistorySheet, AssistantConversation, AssistantGrabber, AssistantPhotoPreview, AssistantSearchSheet, ConfirmDialog, SmsReviewCard,
   type AssistantAttachment, type AssistantComposerProps, type AssistantDraftNoticeProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
@@ -32,7 +32,7 @@ import { untimed } from "../runtime/reactor.vibe";
 import { MailQuestions } from "../inbox/mail-context.vibe";
 import { home } from "../shell/shell.vibe";
 import { isCommsView } from "../shell/views.tsx";
-import { MediaReview } from "./media-review.vibe";
+import { MediaReview, type MediaCard } from "./media-review.vibe";
 import { Documents } from "../platform/documents.vibe";
 import { AttachmentSources } from "./AttachmentSources.tsx";
 import { askComms, freedom } from "./assistant.vibe";
@@ -86,6 +86,14 @@ function waiting(writing: Writing, files: readonly Attached[]): AssistantAttachm
     ...(editor.shown ? [{ id: "shown", kind: "image", name: "Photo" } as const] : []),
     ...(editor.question ? [{ id: "question", kind: "transcript", name: "Question" } as const] : []),
   ];
+}
+
+/** A text the agent asks to send to a number it names, as its review card shows it; undefined for every other request. */
+function textOf(card: MediaCard): { to: string; body: string; note?: string } | undefined {
+  const operation = card.operation;
+  if (operation.type === "sms_send") return { to: operation.recipients.join(", "), body: operation.body, note: "Confirm the text and SIM in Android to send it." };
+  if (operation.type === "sms_compose" && "target" in operation && operation.target.kind === "number") return { to: operation.target.number, body: operation.body };
+  return undefined;
 }
 
 const detached = { mail: "Mail", transcript: "Transcript", shown: "Shown" } as const;
@@ -200,15 +208,22 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const later = { type: "scroll", around: board.numbered(lines.at(-1)?.id ?? "") } as const;
   const writingReply = seen.reply !== "" ? [{ id: "reply", author: "alpha", text: seen.reply } as const] : [];
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
-  const mediaCards = seen.media.filter((card) => !talking.context.sensitive && card.conversation === shown.chosen && card.revision === talking.context.revision).map((card) => ({
-    id: `media ${card.id}`, author: "alpha" as const, text: "", children: (
-      <div className="grid gap-2">
-        <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, action: "Approve" }}
-          onHandOn={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, true)))} />
-        <Button className="justify-self-end" variant="ghost" onClick={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, false)))}>Decline</Button>
-      </div>
-    ),
-  }));
+  const mediaCards = seen.media.filter((card) => !talking.context.sensitive && card.conversation === shown.chosen && card.revision === talking.context.revision).map((card) => {
+    const texting = textOf(card);
+    return {
+      id: `media ${card.id}`, author: "alpha" as const, text: "", children: texting ? (
+        <SmsReviewCard {...texting}
+          onSend={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, true)))}
+          onDecline={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, false)))} />
+      ) : (
+        <div className="grid gap-2">
+          <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, action: "Approve" }}
+            onHandOn={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, true)))} />
+          <Button className="justify-self-end" variant="ghost" onClick={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, false)))}>Decline</Button>
+        </div>
+      ),
+    };
+  });
   const mediaNote = talking.context.sensitive || seen.mediaNote?.conversation !== shown.chosen
     ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote.text }];
   const failed = seen.failure === undefined ? [] : [{ id: "failure", author: "alpha", text: "", children: <ReplyFailure {...seen.failure} fix={seen.failure.kind === "OutOfFunds" ? "FundingFix" : seen.failure.fix} live onRetry={() => type(board.lastSent)} onSettings={settingsAction ? onSettings : undefined} /> } as const];
