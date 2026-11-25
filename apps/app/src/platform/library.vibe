@@ -122,7 +122,7 @@ const webLibrary = Layer.effectContext(effect {
     storageRename: ({ path, name }) => announce(volume.rename(path, name), (path) => ({ path })),
     storageCreateFolder: ({ parent, name }) => announce(volume.createFolder(parent, name), (path) => ({ path })),
     storageTrash: (input) => announce(volume.trash(input), outcomes),
-    storageTrashList: () => answer(volume.trashList(), (items) => ({ items })),
+    storageTrashList: () => answer(volume.trashList(), (items) => ({ items: items.filter((item) => item.unreadable !== true) })),
     storageRestore: ({ ids }) => announce(volume.restore(ids), outcomes),
     storageEmptyTrash: ({ ids, confirmed }) => announce(volume.emptyTrash(ids, confirmed), (count) => ({ count })),
     storageShare: ({ paths }) => Effect.runPromise(Effect.match(volume.share(paths), { onFailure: storageFailure, onSuccess: (count) => ({ status: "opened", count } as const) })),

@@ -69,7 +69,7 @@ pure def canStopRecording(r: Recorder): bool = r.stage == Recording
 
 pure def stopRecording(r: Recorder): Recorder = { ...r, stage: Transcribing, clip: true }
 
-pure def canRecordingStopped(r: Recorder, ticket: int): bool =
+pure def stopsWhileRecording(r: Recorder, ticket: int): bool =
   ticket == r.ticket and (r.stage == Starting or r.stage == Recording)
 ```
 
