@@ -11,6 +11,7 @@ import { Machine as Settings } from "../../gen/app__settings.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import type { BrowserPageGuard } from "@elizaos/os-bridges"
 import { BrowserDownloadsHandoff, TabHost, hosted } from "../platform/browser.vibe"
+import { say } from "../notices/toasts.vibe"
 import { readWebBrowsing, saveWebBrowsing } from "../platform/browserWeb.vibe"
 import type { Install } from "../runtime/attempts.vibe"
 import { type Job, Whole, answer, contained, due, reacting, run, started, stream, together, untimed, whole } from "../runtime/reactor.vibe"
@@ -528,6 +529,23 @@ export const openPasswords: void!!(Tabs.Machine | Shell | Settings) = effect {
   if (try contained(shell.send({ type: "openView", view: "Settings" }, (before) => showing(before, "Browser")), "opening Settings")) {
     if (showing(try shell.get(), "Settings")) try contained((try Settings).send({ type: "openBrowserPasswords" }), "opening Password manager")
   }
+}
+
+// spec/app/browser/address.md, "Story: Find in page"
+/** Search the current Android tab or explain that there is no page to search. */
+export effect function openFindFromMenu(tab: number) {
+  const tabs = try Tabs.Machine
+  const view = try (try Shell).get()
+  const s = try tabs.get()
+  if (!showing(view, "Browser") || s.layer !== "Menu" || s.selected !== tab || Option.isNone((try TabHost).plugin)) return false
+  const page = try pageOf(tab)
+  if (page.phase !== "Shown") {
+    try say("Load a page before finding text in it.", true)
+    return false
+  }
+  if (!(try contained(tabs.send({ type: "uncover" }, (before) => before.layer === "Menu" && before.selected === tab), "closing the Browser menu"))) return false
+  if (!showing(try (try Shell).get(), "Browser") || (try tabs.get()).selected !== tab) return false
+  return try tellPage(tab, page.finding ? { type: "typeFind", empty: true } : { type: "openFind" })
 }
 
 // spec/app/browser/share.md, "Story: Open the page in another browser"

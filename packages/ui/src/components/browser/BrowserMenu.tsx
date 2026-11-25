@@ -39,7 +39,7 @@ export function BrowserMenu({ items, onClose }: BrowserMenuProps) {
           </p>
         ) : (
           <button key={item.name ?? item.label} type="button" aria-label={item.name ?? item.label} disabled={item.disabled} onClick={item.onSelect}
-            className={cn(focusRing, "flex min-h-12.5 shrink-0 items-center gap-3.5 rounded-action px-3.5 text-left text-base active:bg-accent disabled:opacity-45 [&_svg]:size-5 [&_svg]:shrink-0")}>
+            className={cn(focusRing, "flex min-h-12.5 shrink-0 items-center gap-3.5 rounded-action px-3.5 text-left text-base active:bg-accent disabled:opacity-45 [&_svg:not([class*='size-'])]:size-5 [&_svg]:shrink-0")}>
             {item.icon}{item.label}
           </button>
         ))}

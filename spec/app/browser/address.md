@@ -353,6 +353,9 @@ pure def sometimesPrivatePage(p: Page): bool = p.kind == Private and p.phase == 
 
 ### The find bar opens over a shown page
 
+On Android, choosing Find with no shown page keeps the menu open and asks
+the owner to load a page.
+
 ```quint
 pure def canOpenFind(p: Page): bool = p.phase == Shown and not(p.finding)
 

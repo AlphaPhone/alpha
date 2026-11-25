@@ -29,8 +29,8 @@ underAct();
 afterEach(closeAll);
 
 /** Alpha on an Alpha image with the Browser on screen. */
-async function onBrowser(world = { ...scene(), phone: true, image: true }) {
-  const running = await open(world, only("home", "view:Browser"));
+async function onBrowser(world = { ...scene(), phone: true, image: true }, notices = false) {
+  const running = await open(world, notices ? only("home", "notice", "view:Browser") : only("home", "view:Browser"));
   await until(running.alpha, home.runtime(running.alpha), Home, (h) => h.tiles.load.status === "Loaded");
   const runtime = browser.runtime(running.alpha);
   await press("Browser");
@@ -421,10 +421,17 @@ describe("The Browser on a phone", () => {
   });
 
   it("Only opens a private HTTPS page after the owner confirms it (spec/app/browser/share.md, \"Story: Open the page in another browser\")", async () => {
-    const { alpha, runtime, world } = await onBrowser();
+    const { alpha, runtime, world } = await onBrowser(undefined, true);
     await until(alpha, runtime, Tabs, (s) => s.hydrated);
     await press("Menu");
-    expect(button("Open externally, passkeys unsupported here")).toBeUndefined();
+    await press("Find in page");
+    await drawn(() => vi.waitFor(() => expect(document.body.textContent).toContain("Load a page before finding text in it.")));
+    expect(button("Close find in page")).toBeUndefined();
+    await later(alpha, 10000);
+    await press("Open externally, passkeys unsupported here");
+    await drawn(() => vi.waitFor(() => expect(document.body.textContent).toContain("Load an HTTPS page before opening another browser.")));
+    expect(button("Close menu")).toBeDefined();
+    expect(world.browser.handedOff).toEqual([]);
     await press("New private tab");
     await until(alpha, runtime, Tabs, (s) => s.privates.length === 1 && s.layer === "Address");
     await drawn(async () => {

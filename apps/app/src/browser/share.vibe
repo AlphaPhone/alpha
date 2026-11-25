@@ -165,12 +165,16 @@ export effect function offerPrivateFrame(frame: FrameRequest) {
 }
 
 // spec/app/browser/share.md, "Story: Open the page in another browser"
-/** Review or hand off the exact committed HTTPS page named by the native menu. */
-export effect function offerNativeHandoff(page: BrowserPageBinding) {
+/** Review or hand off the current Android page, or say what needs to load first. */
+export effect function offerNativeHandoff(page: BrowserPageBinding | undefined) {
   const held = try SharePages
   return try Semaphore.withPermit(held.reviewTurn, effect {
     const tabs = try (try Tabs).get()
-    if (tabs.layer !== "Menu" || !(try sync(() => isSecureWebAddress(page.url))) || !(try currentPage(page))) return
+    if (tabs.layer !== "Menu" || !(try browserInFront()) || !foreground() || Option.isNone((try TabHost).plugin)) return
+    if (page === undefined || !(try sync(() => isSecureWebAddress(page.url))) || !(try currentPage(page))) {
+      try say("Load an HTTPS page before opening another browser.", true)
+      return
+    }
     const machine = try Share.Machine
     const prompt = { type: "openExternally", kind: page.private ? "Private" : "Normal", secure: true } as const
     if (!Share.enabled(try machine.get(), prompt)) return
