@@ -1,108 +1,142 @@
 // spec/app/workflows/clock.md, "Story: Describe an alarm for Clock"; spec/app/workflows/clock.md, "Story: Review, then hand over to Clock"; spec/app/workflows/clock.md, "Story: Know what happened"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import * as Clock from "../../gen/app__workflows__clock.effect.vibe"
+import type { ClockRequest, ClockStatus } from "@elizaos/os/bridges/definitions/system"
+import * as Model from "../../gen/app__workflows__clock.effect.vibe"
 import type { Effect as Out, Event, Handoff, Receipt } from "../../gen/app__workflows__clock.effect.vibe"
-import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
-import { type ClockRequest, type ClockStatus, PhoneClock } from "../platform/clock.vibe"
-import { Device } from "../platform/device.vibe"
-import { type Job, answer, following, hearing, reacting, together } from "../runtime/reactor.vibe"
+import * as Shell from "../../gen/app__shell.effect.vibe"
+import { Device, registered } from "../platform/device.vibe"
+import { type Job, answer, applying, hearing, reacting, together } from "../runtime/reactor.vibe"
 
-/** The label as the owner typed it: the spec counts its characters, this holds them until Clock is asked. */
-export service Label {
+module native {
+  import type { SystemClient } from "@elizaos/os/bridges/system"
+
+  /** Clock goes through the same ElizaSystem plugin as Android Settings. */
+  export function systemOf(): Promise<SystemClient> {
+    return import("@elizaos/os/bridges/system").then((module) => module.System)
+  }
+
+  /** @throws {never} */
+  export function timeZone(): string {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+  }
+}
+import { systemOf, timeZone } from native
+
+export const clockAvailable = () => registered("ElizaSystem")
+
+export service AlarmLabel {
+  read(): string!!
   set(text: string): void!!
-  get(): string!!
+  zone(): string!!
+  reviewed(zone: string): void!!
 }
 
-const label = Layer.sync(Label, () => {
-  let typed = ""
+const label = Layer.sync(AlarmLabel, () => {
+  let value = ""
+  let selectedZone = ""
   return {
-    set: (text: string) => sync(() => { typed = text }),
-    get: () => sync(() => typed),
+    read: () => succeed(value),
+    set: (text: string) => sync(() => { value = text }),
+    zone: () => succeed(selectedZone),
+    reviewed: (zone: string) => sync(() => { selectedZone = zone }),
   }
 })
 
-/** What Alpha remembers of the last handoff on this phone: its kind and what Clock answered, never more. */
-schema Kept {
-  readonly kind: "SetAlarm" | "ShowAlarms" | "Snooze" | "Dismiss"
-  readonly receipt: "ClockOpened" | "ClockUnavailable" | "ClockDenied" | "ClockFailed" | "Unclear"
+const outcomes: Readonly<Record<ClockStatus, Receipt>> = { opened: "ClockOpened", failed: "ClockFailed", unavailable: "ClockUnavailable", denied: "ClockDenied", unknown: "Unclear" }
+
+const Kind = Schema.Literals(["SetAlarm", "ShowAlarms", "Snooze", "Dismiss"])
+const Stored = Schema.fromJsonString(Schema.Struct({
+  id: Schema.Int, kind: Kind, receipt: Schema.Literals(["Unclear", "ClockOpened", "ClockFailed", "ClockUnavailable", "ClockDenied"]),
+}))
+const key = "alpha/workflows/clock"
+
+function request(kind: Handoff, hour: number, minute: number, label: string, snooze: number, days: readonly number[]): ClockRequest {
+  switch (kind) {
+    case "SetAlarm": return { action: "set", hour, minute, label, ...(days.length === 0 ? {} : { days: [...days] }) }
+    case "ShowAlarms": return { action: "show" }
+    case "Dismiss": return { action: "dismiss" }
+    case "Snooze": return { action: "snooze", minutes: snooze }
+  }
 }
 
-const keptKey = "alpha.clock.lastHandoff"
-const decodeKept = Schema.decodeUnknownEffect(Schema.fromJsonString(Kept))
-
-const receipts: Readonly<Record<ClockStatus, Receipt>> = {
-  opened: "ClockOpened", unavailable: "ClockUnavailable", denied: "ClockDenied", failed: "ClockFailed", unknown: "Unclear",
-}
-
-effect function remember(kept: Kept): boolean!!KeyValueStore.KeyValueStore {
-  return effect { try (try KeyValueStore.KeyValueStore).set(keptKey, JSON.stringify(kept)); return true } catch () => false
-}
-
-// spec/app/workflows/clock.md, "Only the newest read is taken: it shows the last handoff and what Clock answered, and once a phone is known to carry repeat days it stays known"
-/** The last handoff kept on this phone, and whether Clock is handed repeat days: eliza's bridge carries them wherever it carries a Clock. */
-effect function readHistory(ticket: number): Event!!(KeyValueStore.KeyValueStore | PhoneClock) {
-  const repeats = (try PhoneClock).present
+effect function history(ticket: number): Event!!KeyValueStore.KeyValueStore {
+  const failed: Event = { type: "historyRead", ticket, ok: false, repeats: false, lastKind: "SetAlarm", lastReceipt: "NoReceipt" }
+  const store = try KeyValueStore.KeyValueStore
   return effect {
-    const text = try (try KeyValueStore.KeyValueStore).get(keptKey)
-    if (text === undefined) return { type: "historyRead", ticket, ok: true, repeats, lastKind: "SetAlarm", lastReceipt: "NoReceipt" }
-    const kept = try decodeKept(text)
-    return { type: "historyRead", ticket, ok: true, repeats, lastKind: kept.kind, lastReceipt: kept.receipt }
-  } catch () => ({ type: "historyRead", ticket, ok: false, repeats, lastKind: "SetAlarm", lastReceipt: "NoReceipt" })
+    const raw = try store.get(key)
+    const found = raw === undefined ? undefined : try Schema.decodeUnknownEffect(Stored)(raw)
+    return { ...failed, ok: true, repeats: true, lastKind: found?.kind ?? "SetAlarm", lastReceipt: found?.receipt ?? "NoReceipt" }
+  } catch () => failed
 }
 
-// spec/app/workflows/clock.md, "Confirm records one handoff of what was shown, before Clock is opened"
-/** Keep the handoff before Clock is opened, as unknown until Clock answers: a restart then shows it unknown, never opened. */
-effect function keep(id: number, kind: Handoff): Event!!KeyValueStore.KeyValueStore {
-  return { type: "handoffKept", id, ok: try remember({ kind, receipt: "Unclear" }) }
+effect function record(id: number, kind: Handoff): Event!!KeyValueStore.KeyValueStore {
+  const store = try KeyValueStore.KeyValueStore
+  const kept = effect {
+    try store.set(key, JSON.stringify({ id, kind, receipt: "Unclear" }))
+    return true
+  } catch () => false
+  return { type: "handoffKept", id, ok: kept }
 }
 
-/** What Clock is asked for `fx`, with the label as typed; none where the label held is not the one reviewed. */
-function requestOf(fx: Extract<Out, { tag: "OpenClock" }>, typed: string): ClockRequest | undefined {
-  return match (fx.kind) {
-    when "SetAlarm": typed.length === fx.label || fx.label === 0
-      ? { action: "set", hour: fx.hour, minute: fx.minute, label: fx.label === 0 ? "" : typed, ...(fx.days.length === 0 ? {} : { days: [...fx.days].sort((a, b) => a - b) }) }
-      : undefined;
-    when "ShowAlarms": { action: "show" };
-    when "Snooze": { action: "snooze", minutes: fx.snooze };
-    when "Dismiss": { action: "dismiss" };
-  }
+type Needs = AlarmLabel | Device | KeyValueStore.KeyValueStore
+
+effect function open(id: number, kind: Handoff, hour: number, minute: number, length: number, snooze: number, days: readonly number[]): Event!!Needs {
+  const label = try AlarmLabel
+  const text = try label.read()
+  const inZone = try label.zone()
+  const store = try KeyValueStore.KeyValueStore
+  const visible = try (try Device).showing()
+  const requestToSend = request(kind, hour, minute, text, snooze, days)
+  const receipt = effect {
+    if (!visible || (kind === "SetAlarm" && (text.length !== length || inZone === ""))) return "ClockFailed" satisfies Receipt
+    const system = try tryPromise(systemOf)
+    const reviewed = { ...requestToSend, reviewed: true, ...(kind === "SetAlarm" ? { timeZone: inZone } : {}) }
+    const answered = try tryPromise(() => system.openClock(reviewed))
+    return outcomes[answered.status]
+  } catch () => "Unclear" as const
+  try ignore(store.set(key, JSON.stringify({ id, kind, receipt })))
+  return { type: "clockAnswered", id, answer: receipt }
 }
 
-// spec/app/workflows/clock.md, "Clock is opened once the handoff is kept, with exactly what was reviewed, and a handoff that could not be kept is not sent"; spec/app/workflows/clock.md, "Clock's answer to the handoff still open ends it: opened, refused, or unknown"
-/** Hand the reviewed request to Clock once, keep what Clock answered, and tell the page. */
-effect function openClock(fx: Extract<Out, { tag: "OpenClock" }>): Event!!(KeyValueStore.KeyValueStore | PhoneClock | Label) {
-  const request = requestOf(fx, try (try Label).get())
-  const answered: Receipt = request === undefined ? "ClockFailed" : receipts[try (try PhoneClock).open(request)]
-  try remember({ kind: fx.kind, receipt: answered === "ClockFailed" || answered === "ClockOpened" || answered === "ClockUnavailable" || answered === "ClockDenied" ? answered : "Unclear" })
-  return { type: "clockAnswered", id: fx.id, answer: answered }
-}
-
-function carry(fx: Out): Job<Event, KeyValueStore.KeyValueStore | PhoneClock | Label, []> {
+function carry(fx: Out): Job<Event, Needs, []> {
   return match (fx) {
-    when { tag: "ReadHistory", let ticket }: answer("history", readHistory(ticket), { type: "historyRead", ticket, ok: false, repeats: false, lastKind: "SetAlarm", lastReceipt: "NoReceipt" });
-    when { tag: "KeepHandoff", let id, let kind }: answer(`keep ${id}`, keep(id, kind), { type: "handoffKept", id, ok: false });
-    when { tag: "OpenClock" }: answer(`open ${fx.id}`, openClock(fx), { type: "clockAnswered", id: fx.id, answer: "Unclear" });
+    when { tag: "ReadHistory", let ticket }: answer("Clock history", history(ticket),
+      { type: "historyRead", ticket, ok: false, repeats: false, lastKind: "SetAlarm", lastReceipt: "NoReceipt" });
+    when { tag: "KeepHandoff", let id, let kind }: answer("Clock handoff receipt", record(id, kind), { type: "handoffKept", id, ok: false });
+    when { tag: "OpenClock", let id, let kind, let hour, let minute, let label, let snooze, let days }: answer("open Android Clock",
+      open(id, kind, hour, minute, label, snooze, days), { type: "clockAnswered", id, answer: "Unclear" });
   }
 }
 
-// spec/app/workflows/clock.md, "A restart forgets the page, withdraws a handoff not yet sent, and leaves one that was being opened unknown"
-const kept = reacting(Clock, { keep: 1, open: [{ type: "restart" }], carry })
-
-// spec/app/workflows/clock.md, "Leaving Workflows closes the page and forgets what was described"
-const left = following(Shell, (shell) => showing(shell, "Workflows"), Clock.Machine, (shown): Event | undefined => (shown ? undefined : { type: "leave" }))
-
-// spec/app/workflows/clock.md, "A review ends when Alpha is hidden or the page is closed, and a handoff not yet sent is withdrawn"
-const hidden = hearing(Stream.unwrap(effect { return (try Device).visible }), Clock.Machine, (visible): Event | undefined => (visible ? undefined : { type: "suspend" }))
-
-/** The Clock page of Workflows: kept across restarts, handed over through the phone's Clock, closed when Workflows is left or Alpha is hidden. */
-export const clock = together(kept, left, hidden, label)
-
-/** Whether this phone has a Clock to hand a request to, which opening the page is told. */
-export effect function clockHere(): boolean!!PhoneClock {
-  return (try PhoneClock).present
+export effect function setAlarmLabel(text: string): void!!(Model.Machine | AlarmLabel) {
+  const machine = try Model.Machine
+  if (!Model.canSetLabel(try machine.get(), text.length)) return
+  try (try AlarmLabel).set(text)
+  try ignore(machine.send({ type: "setLabel", chars: text.length }))
 }
 
-/** Back on the Clock page closes it, waiting for a handoff in flight; with the page closed, Back is not the page's. */
-export const back = Clock.Machine.use((machine) =>
-  Effect.flatMap(machine.get(), (state) =>
-    state.open ? Effect.as(Effect.orElseSucceed(machine.send({ type: "closeClock" }), () => undefined), true) : Effect.succeed(false)))
+export effect function reviewAlarm(): void!!(Model.Machine | AlarmLabel) {
+  const machine = try Model.Machine
+  if (!Model.canPrepare(try machine.get())) return
+  try (try AlarmLabel).reviewed(timeZone())
+  try ignore(machine.send({ type: "prepare" }))
+}
+
+export effect function backClock(): boolean!!Model.Machine {
+  const machine = try Model.Machine
+  const state = try machine.get()
+  if (!state.open) return false
+  if (Model.canCancelReview(state)) try ignore(machine.send({ type: "cancelReview" }))
+  else try ignore(machine.send({ type: "closeClock" }))
+  return true
+}
+
+const hidden = hearing(Stream.unwrap(effect { return Stream.filter((try Device).visible, (shown) => !shown) }),
+  Model.Machine, () => ({ type: "suspend" } as const))
+const gone = applying(Shell.Machine, (state) => Shell.showing(state, "Workflows"), effect (shown: boolean) => {
+  if (shown) return
+  try (try AlarmLabel).set("")
+  try ignore((try Model.Machine).send({ type: "leave" }))
+})
+
+export const clock = together(reacting(Model, { carry }), label, hidden, gone)

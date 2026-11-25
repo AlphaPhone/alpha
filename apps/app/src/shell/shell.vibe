@@ -10,15 +10,11 @@ export service Backs {
   take(place: string): boolean!!
 }
 
-/** Each screen at a place is asked in turn, as boot draws them, until one takes Back: a place may draw several screens. */
 const backs = Layer.sync(Backs, () => {
-  const held = new Map<string, ReadonlyArray<boolean!!>>()
+  const held = new Map<string, boolean!!>()
   return {
-    register: (place: string, took: boolean!!) => sync(() => { held.set(place, [...(held.get(place) ?? []), took]) }),
-    effect take(place: string): boolean!! {
-      for (const took of held.get(place) ?? []) if (try took) return true
-      return false
-    },
+    register: (place: string, took: boolean!!) => sync(() => { held.set(place, took) }),
+    take: (place: string) => held.get(place) ?? succeed(false),
   }
 })
 

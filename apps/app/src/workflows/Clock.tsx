@@ -1,138 +1,85 @@
 // spec/app/workflows/clock.md, "Story: Describe an alarm for Clock"; spec/app/workflows/clock.md, "Story: Review, then hand over to Clock"; spec/app/workflows/clock.md, "Story: Know what happened"
-import { Button, Card, CardFooter, Chip, EmptyState, Input, ListGroup, ListRow, Spinner } from "@repo/ui";
-import { AlarmClock, ChevronLeft, ChevronRight } from "lucide-react";
-import { useState } from "react";
+import { Effect } from "effect";
+import { Alert, Button, ConfirmDialog, Input, Spinner } from "@repo/ui";
+import { ExternalLink } from "lucide-react";
 import { useMachine } from "../../gen/app__workflows__clock.react.ts";
-import { busy } from "../../gen/app__workflows__clock.ts";
-import type { Clock as State, Handoff, Receipt } from "../../gen/app__workflows__clock.ts";
+import { type Event, type Handoff, type Receipt, busy, maxLabel, maxSnooze } from "../../gen/app__workflows__clock.ts";
+import type { Machine } from "../../gen/app__workflows__clock.effect.vibe";
 import type { Resident, Shown } from "../runtime/area.tsx";
-import type { Layer } from "effect";
-import { Label, type clock, clockHere } from "./clock.vibe";
+import { AlarmLabel, reviewAlarm, setAlarmLabel } from "./clock.vibe";
 
-const kinds: ReadonlyArray<{ kind: Handoff; label: string }> = [
-  { kind: "SetAlarm", label: "Set alarm" }, { kind: "ShowAlarms", label: "Show alarms" }, { kind: "Snooze", label: "Snooze" }, { kind: "Dismiss", label: "Dismiss" },
-];
+interface ClockProps extends Pick<Shown<Resident | Machine | AlarmLabel>, "runtime"> {}
 
-/** Monday first, as the week reads; 1 is Sunday, as Clock counts. */
-const week: ReadonlyArray<{ day: number; short: string; name: string }> = [
-  { day: 2, short: "Mon", name: "Monday" }, { day: 3, short: "Tue", name: "Tuesday" }, { day: 4, short: "Wed", name: "Wednesday" },
-  { day: 5, short: "Thu", name: "Thursday" }, { day: 6, short: "Fri", name: "Friday" }, { day: 7, short: "Sat", name: "Saturday" }, { day: 1, short: "Sun", name: "Sunday" },
-];
+const actions = [
+  ["SetAlarm", "Set alarm"], ["ShowAlarms", "Show alarms"], ["Snooze", "Snooze"], ["Dismiss", "Dismiss"],
+] as const satisfies readonly (readonly [Handoff, string])[];
+const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-/** v121's sentence for each answer (legacy ui/clock/clock-handoff-presentation.ts, CLOCK_STATUS_TEXT). */
-const answered: Record<Receipt, string> = {
+const receipts: Record<Receipt, string> = {
   NoReceipt: "",
-  NotSent: "Not sent.",
-  Withdrawn: "Not sent.",
-  ClockOpened: "Sent to Clock. Check the Clock app; Alpha can’t confirm an alarm changed.",
-  ClockUnavailable: "Clock isn’t available for this.",
-  ClockDenied: "Android didn’t allow this Clock action.",
-  ClockFailed: "Not sent.",
-  Unclear: "Alpha can’t tell whether Clock got the request. Check Clock before trying again.",
+  NotSent: "The request wasn’t kept. Clock wasn’t opened.",
+  Withdrawn: "The review closed before Clock could open.",
+  ClockOpened: "Clock opened. Check Clock to see whether it kept the alarm.",
+  ClockUnavailable: "There’s no Clock app that can open this request.",
+  ClockDenied: "Android didn’t allow this request.",
+  ClockFailed: "Clock couldn’t open this request.",
+  Unclear: "Clock didn’t confirm that it opened. Check Clock before trying again.",
 };
 
-const pad = (value: number) => String(value).padStart(2, "0");
-
-/** The days chosen, as v121 said them (describeClockDays): Sunday first, as Clock counts. */
-function daysOf(days: readonly number[]): string {
-  const sorted = [...days].sort((a, b) => a - b);
-  if (sorted.length === 7) return "every day";
-  if (sorted.join() === "2,3,4,5,6") return "weekdays";
-  if (sorted.join() === "1,7") return "weekends";
-  return sorted.map((day) => week.find((one) => one.day === day)?.short ?? "").join(", ");
+function reviewText(kind: Handoff, time: string, label: string, snooze: number, repeat: string) {
+  if (kind === "SetAlarm") return [`Alarm at ${time}`, label, repeat || "Once"].filter(Boolean).join(" · ");
+  if (kind === "Snooze") return `Ask Clock to snooze its current alarm for ${snooze} minutes.`;
+  if (kind === "Dismiss") return "Ask Clock to dismiss its current alarm.";
+  return "Open your alarms in Clock.";
 }
 
-/** What Clock will be asked, exactly as it will be handed over, in v121's words (describeClockHandoff). */
-function reviewOf(state: State, typed: string): string {
-  if (state.kind === "SetAlarm") {
-    const repeat = state.days.length === 0 ? "" : `, repeating ${daysOf(state.days)}`;
-    const named = state.label === 0 ? "" : ` named “${typed}”`;
-    return `Ask Clock to set ${pad(state.hour)}:${pad(state.minute)}${repeat}${named}. Review the alarm in Clock; Alpha can’t confirm creation or ringing.`;
-  }
-  if (state.kind === "ShowAlarms") return "Open Clock’s alarms page.";
-  if (state.kind === "Snooze") return `Open Clock so you can choose the intended alarm and snooze it yourself. Select the duration there; ${state.snooze} minutes will not be applied automatically.`;
-  return "Open Clock so you can choose the intended alarm and dismiss it yourself. Alpha will not dismiss or disable an alarm automatically.";
-}
-
-type Runtime = Shown<Layer.Success<typeof clock> | Resident>["runtime"];
-
-/** The row in Workflows that opens the Clock page, and the page: what to ask of Clock, its review and Clock's answer. */
-export function Clock({ runtime }: { runtime: Runtime }) {
-  const { state, can, send } = useMachine(runtime);
-  const [typed, setTyped] = useState("");
-  const [snooze, setSnooze] = useState<string | undefined>(undefined);
-  if (!state) return null;
-  if (!state.open) {
-    return (
-      <ListGroup>
-        <ListRow title="Android Clock" aria-label="Android Clock" leading={<AlarmClock />} trailing={<ChevronRight aria-hidden className="size-5" />} disabled={!can({ type: "openClock", available: true })} onClick={() => void send({ type: "openClock", available: runtime.runSync(clockHere()) })} />
-      </ListGroup>
-    );
-  }
-  const label = (text: string) => {
-    if (!can({ type: "setLabel", chars: text.length })) return;
-    runtime.runSync(Label.use((held) => held.set(text)));
-    setTyped(text);
-    void send({ type: "setLabel", chars: text.length });
-  };
-  const time = (value: string) => {
-    const [hour, minute] = value.split(":").map(Number);
-    if (hour !== undefined && minute !== undefined && can({ type: "setTime", hour, minute })) void send({ type: "setTime", hour, minute });
-  };
-  const minutes = (value: string) => {
-    setSnooze(value);
-    const asked = Number(value);
-    if (Number.isInteger(asked) && can({ type: "setSnooze", minutes: asked })) void send({ type: "setSnooze", minutes: asked });
-  };
-  const said = answered[state.receipt] || (state.lastReceipt === "NoReceipt" ? "" : `Last time: ${answered[state.lastReceipt]}`);
-  return (
-    <section aria-label="Android Clock" className="flex flex-col gap-5 px-4 pb-4">
-      <header className="flex items-center gap-2">
-        <Button variant="ghost" size="icon" aria-label="Close Clock" disabled={!can({ type: "closeClock" })} onClick={() => void send({ type: "closeClock" })}><ChevronLeft /></Button>
-        <h2 className="text-xl font-semibold">Android Clock</h2>
-      </header>
-      {!state.clock ? <EmptyState icon={<AlarmClock />} title="No Clock app on this device" /> : state.history.status === "Loading" ? <Spinner aria-label="Reading the last Clock request" /> : state.history.status === "Failed" ? (
-        <Button variant="secondary" onClick={() => void send({ type: "retryHistory" })} disabled={!can({ type: "retryHistory" })}>Try again</Button>
-      ) : (
-        <>
-          {said ? <p role="status" className="text-sm text-muted-foreground">{said}</p> : null}
-          <div role="radiogroup" aria-label="What Clock should do" className="flex flex-wrap gap-2">
-            {kinds.map(({ kind, label: name }) => (
-              <Chip key={kind} role="radio" aria-checked={state.kind === kind} pressed={state.kind === kind} disabled={state.kind !== kind && !can({ type: "pick", wanted: kind })} onPressedChange={() => { if (can({ type: "pick", wanted: kind })) void send({ type: "pick", wanted: kind }); }}>{name}</Chip>
-            ))}
-          </div>
-          {state.kind === "SetAlarm" ? (
-            <>
-              <Input type="time" aria-label="Alarm time" required value={`${pad(state.hour)}:${pad(state.minute)}`} disabled={busy(state)} onChange={(event) => time(event.currentTarget.value)} className="h-16 text-3xl tabular-nums" />
-              <Input aria-label="Alarm label" placeholder="Label" maxLength={200} value={typed} disabled={busy(state)} onChange={(event) => label(event.currentTarget.value)} />
-              {state.repeats ? (
-                <div role="group" aria-label="Repeat" className="flex flex-wrap gap-2">
-                  {week.map(({ day, short, name }) => (
-                    <Chip key={day} aria-label={`Repeat on ${name}`} pressed={state.days.includes(day)} disabled={!can({ type: "toggleDay", day })} onPressedChange={() => void send({ type: "toggleDay", day })}>{short}</Chip>
-                  ))}
-                </div>
-              ) : null}
-            </>
-          ) : null}
-          {state.kind === "Snooze" ? (
-            <label className="flex items-center gap-3">
-              <Input type="number" aria-label="Snooze minutes" inputMode="numeric" min={1} max={60} value={snooze ?? String(state.snooze)} disabled={busy(state)} onChange={(event) => minutes(event.currentTarget.value)} className="w-24" />
-              <span className="text-muted-foreground">min</span>
-            </label>
-          ) : null}
-          {state.review.showing ? (
-            <Card aria-label="Clock request">
-              <p className="text-base">{reviewOf(state, typed)}</p>
-              <CardFooter>
-                <Button variant="ghost" onClick={() => void send({ type: "cancelReview" })} disabled={!can({ type: "cancelReview" })}>Cancel</Button>
-                <Button onClick={() => void send({ type: "confirm" })} disabled={!can({ type: "confirm" })}>Open Clock</Button>
-              </CardFooter>
-            </Card>
-          ) : (
-            <Button loading={busy(state)} disabled={!can({ type: "prepare" })} onClick={() => void send({ type: "prepare" })}>Review</Button>
-          )}
-        </>
-      )}
-    </section>
-  );
+/** Review a Clock handoff inside Workflows. Clock reports only whether it opened. */
+export function ClockPage({ runtime }: ClockProps) {
+  const machine = useMachine(runtime);
+  const state = machine.state;
+  if (!state?.open) return null;
+  const tell = (event: Event) => { if (machine.can(event)) void machine.send(event); };
+  const label = runtime.runSync(Effect.flatMap(AlarmLabel, (value) => value.read()));
+  const time = `${String(state.hour).padStart(2, "0")}:${String(state.minute).padStart(2, "0")}`;
+  const repeating = days.filter((_, index) => state.days.includes(index + 1)).join(", ");
+  const receipt = state.receipt === "NoReceipt" ? state.lastReceipt : state.receipt;
+  const disabled = busy(state);
+  if (!state.clock) return <Alert role="status">Clock isn’t available on this device.</Alert>;
+  return <section aria-label="Clock alarms" className="flex flex-col gap-4">
+    <div className="grid grid-cols-2 gap-2">
+      {actions.map(([kind, title]) => <Button key={kind} variant={kind === state.kind ? "primary" : "secondary"} aria-pressed={kind === state.kind}
+        disabled={disabled} onClick={() => tell({ type: "pick", wanted: kind })}>{title}</Button>)}
+    </div>
+    {state.kind === "SetAlarm" && <>
+      <label className="grid gap-1 text-sm">Alarm time
+        <Input type="time" value={time} disabled={disabled} onChange={(event) => {
+          const [hour, minute] = event.currentTarget.value.split(":").map(Number);
+          if (hour !== undefined && minute !== undefined) tell({ type: "setTime", hour, minute });
+        }} />
+      </label>
+      <label className="grid gap-1 text-sm">Label
+        <Input value={label} maxLength={maxLabel} disabled={disabled} onChange={(event) => void runtime.runPromiseExit(setAlarmLabel(event.currentTarget.value))} />
+      </label>
+      {state.repeats && <fieldset className="flex flex-wrap gap-2">
+        <legend className="mb-2 text-sm">Repeat</legend>
+        {days.map((day, index) => <Button key={day} size="sm" variant={state.days.includes(index + 1) ? "primary" : "secondary"}
+          aria-label={day} aria-pressed={state.days.includes(index + 1)} disabled={disabled}
+          onClick={() => tell({ type: "toggleDay", day: index + 1 })}>{day.slice(0, 3)}</Button>)}
+        <p className="w-full text-sm text-muted-foreground">{repeating || "Once"}</p>
+      </fieldset>}
+    </>}
+    {state.kind === "Snooze" && <label className="grid gap-1 text-sm">Snooze minutes
+      <Input type="number" min={1} max={maxSnooze} value={state.snooze} disabled={disabled}
+        onChange={(event) => tell({ type: "setSnooze", minutes: event.currentTarget.valueAsNumber })} />
+    </label>}
+    {state.history.status === "Loading" && <Spinner aria-label="Reading the last Clock request" />}
+    {state.history.status === "Failed" && <Button variant="secondary" onClick={() => tell({ type: "retryHistory" })}>Retry Clock history</Button>}
+    {machine.can({ type: "prepare" }) && <Button onClick={() => void runtime.runPromiseExit(reviewAlarm())}>Review<ExternalLink aria-hidden /></Button>}
+    {disabled && <Spinner aria-label="Opening Clock" />}
+    {receipt !== "NoReceipt" && <Alert role="status" variant={receipt === "ClockOpened" ? "ok" : "warn"}>{receipts[receipt]}</Alert>}
+    <ConfirmDialog open={state.review.showing} title="Open Clock?" confirmLabel="Open Clock"
+      onConfirm={() => tell({ type: "confirm" })} onCancel={() => tell({ type: "cancelReview" })}>
+      {reviewText(state.kind, time, label, state.snooze, repeating)}
+    </ConfirmDialog>
+  </section>;
 }

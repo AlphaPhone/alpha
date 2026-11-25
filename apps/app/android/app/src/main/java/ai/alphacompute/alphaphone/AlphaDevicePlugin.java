@@ -76,15 +76,26 @@ public final class AlphaDevicePlugin extends Plugin {
   out.put("textScalePercent",textScalePercent(getContext()));out.put("effectiveTextZoom",effectiveTextZoom(getContext(),textScalePercent(getContext())));
   NotificationManager notifications=(NotificationManager)getContext().getSystemService(Context.NOTIFICATION_SERVICE);
   out.put("notificationsEnabled",notifications!=null&&notifications.areNotificationsEnabled());
-  JSObject grants=new JSObject();
-  boolean fine=getContext().checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED,coarse=getContext().checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)==PackageManager.PERMISSION_GRANTED;
-  out.put("locationAccess",fine?"precise":coarse?"approximate":"denied");
-  // Only permissions Alpha declares. Contacts is removed from the manifest, so it is not reported.
-  String[][] permissions={{"Microphone",Manifest.permission.RECORD_AUDIO},{"Location",Manifest.permission.ACCESS_FINE_LOCATION},{"Camera",Manifest.permission.CAMERA},{"Calendar",Manifest.permission.READ_CALENDAR}};
-  for(String[] p:permissions)grants.put(p[0],getContext().checkSelfPermission(p[1])==PackageManager.PERMISSION_GRANTED);
-  grants.put("Location",fine||coarse);out.put("permissions",grants);
+  putSettingsGrants(getContext(),out);
   out.put("passwordProvider",PasswordProviderSupport.status(getContext()));
   appFacts(getContext(),out);call.resolve(out);
+ }
+ @PluginMethod public void settingsFacts(PluginCall call) {
+  JSObject out=new JSObject();
+  out.put("androidRelease",Build.VERSION.RELEASE);
+  putSettingsGrants(getContext(),out);
+  call.resolve(out);
+ }
+ private static void putSettingsGrants(Context context,JSObject out) {
+  JSObject grants=new JSObject();
+  boolean fine=context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED;
+  boolean coarse=context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)==PackageManager.PERMISSION_GRANTED;
+  out.put("locationAccess",fine?"precise":coarse?"approximate":"denied");
+  grants.put("Microphone",context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED);
+  grants.put("Location",fine||coarse);
+  grants.put("Camera",context.checkSelfPermission(Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED);
+  grants.put("Calendar",context.checkSelfPermission(Manifest.permission.READ_CALENDAR)==PackageManager.PERMISSION_GRANTED);
+  out.put("permissions",grants);
  }
  /** Alpha's own build facts, omitted when Android cannot answer. */
  static void appFacts(Context context,JSObject out){
@@ -139,6 +150,22 @@ public final class AlphaDevicePlugin extends Plugin {
     try{activity.startActivity(new Intent(Settings.ACTION_SETTINGS));}
     catch(RuntimeException unavailable){call.reject("This Android settings page is unavailable");return;}
     JSObject out=new JSObject();out.put("status","opened");out.put("page",page);out.put("specific",true);call.resolve(out);
+   });
+   return;
+  }
+  if("screen-lock".equals(page)||"all-files".equals(page)){
+   android.app.Activity activity=getActivity();
+   if(activity==null){call.reject("This Android settings page is unavailable");return;}
+   boolean files="all-files".equals(page);
+   if(files&&Build.VERSION.SDK_INT<30){call.reject("This Android settings page is unavailable");return;}
+   Intent intent=files
+     ? new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, android.net.Uri.parse("package:"+getContext().getPackageName()))
+     : new Intent(Settings.ACTION_SECURITY_SETTINGS);
+   activity.runOnUiThread(()->{
+    if(!shareForeground(activity)){call.reject("Open and unlock Alpha first");return;}
+    try{activity.startActivity(handOff(intent));}
+    catch(RuntimeException unavailable){call.reject("This Android settings page is unavailable");return;}
+    call.resolve(new JSObject().put("status","opened").put("page",page).put("specific",files));
    });
    return;
   }
@@ -974,6 +1001,13 @@ public final class AlphaDevicePlugin extends Plugin {
    androidx.core.view.WindowInsetsControllerCompat bars=androidx.core.view.WindowCompat.getInsetsController(activity.getWindow(),activity.getWindow().getDecorView());
    bars.setAppearanceLightStatusBars(!dark);bars.setAppearanceLightNavigationBars(!dark);call.resolve();
   });
+ }
+ /** The Google consent the agent launches with from now on (AlphaAgentService), as the owner's Settings last read or saved it. */
+ @PluginMethod public void setAgentGoogleConsent(PluginCall call){
+  Boolean gmail=call.getBoolean("gmailChanges"),calendar=call.getBoolean("calendarEdits");
+  if(gmail==null||calendar==null){call.reject("Choose Gmail changes and Calendar edits.");return;}
+  try{if(AlphaAgentService.keep(getContext(),new ai.eliza.os.agent.AgentConfig.GoogleConsent(gmail,calendar)))call.resolve();else call.reject("Agent consent could not be saved");}
+  catch(IllegalStateException unconfigured){call.reject("The agent service is not configured");}
  }
  /** Touch feedback for a renderer control (AlphaHaptics). Android skips it when the owner turned touch feedback off. */
  @PluginMethod public void haptic(PluginCall call){

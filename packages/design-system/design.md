@@ -19,10 +19,10 @@ do next.
   `call` a live or answerable call, `dial` the button that places one, `record` a running recording. A state color always sits beside a
   word or an accessible name, never alone.
 - **Type.** `font-sans` is Public Sans, for everything read or pressed. `font-display` is Denton, with
-  Fraunces behind it, at weight `light`: a screen's one title, the date on Home, a large figure. The sizes
+  Fraunces behind it, at weight `light`: a screen's display title on the launcher, the date on Home, a large figure. The sizes
   are in rem, so Android's text size scales them: `base` is body text, `md` a row title or a field,
-  `caption` and `sm` the quieter line beside it, `xl` an app's header title, `3xl` a screen title, `4xl` the
-  Home date. Text up to `lg` is set at Public Sans's own line height (1.175), as develop sets it; copy that
+  `caption` and `sm` the quieter line beside it, `xl` a shared app header title in the browser, `3xl` a screen title
+  (also the shared app header title in `font-display` on the launcher), and `4xl` the Home date. Text up to `lg` is set at Public Sans's own line height (1.175), as develop sets it; copy that
   is read at length takes `leading-normal`. `tracking-caps` with `text-xs` is a small uppercase label; `text-label` names an app tile on
   Home and in the drawer. A list row reads `text-base`,
   `text-subject` and `text-snippet` line by line; `text-meta` is a status line under a header, and `text-body`

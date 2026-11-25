@@ -65,7 +65,7 @@ pure def aboutAlpha(target: Target): bool =
 
 pure def scopeOf(target: Target): Scope = if (aboutAlpha(target)) AlphasOwn else WholePhone
 
-pure def namesItsChannel(target: Target, channel: int): bool = (target == AlertChannel) == (channel > 0)
+pure def namesItsChannel(target: Target, channel: str): bool = (target == AlertChannel) == (channel != "")
 ```
 
 ### Android holds the last start of one of its pages, and what Alpha said about it
@@ -74,12 +74,12 @@ Nothing here outlives Alpha.
 
 ```quint
 type Told = Silent | SaidNearby | SaidUnavailable | SaidNoAnswer
-type Android = { start: T::Timed, target: Target, channel: int, told: Told }
+type Android = { start: T::Timed, target: Target, channel: str, told: Told }
 
-type Effect = OpenAndroid({ target: Target, channel: int, scope: Scope, start: int })
+type Effect = OpenAndroid({ target: Target, channel: str, scope: Scope, start: int })
 type Started = { state: Android, out: List[Effect] }
 
-pure val initial: Android = { start: T::unasked, target: AndroidHome, channel: 0, told: Silent }
+pure val initial: Android = { start: T::unasked, target: AndroidHome, channel: "", told: Silent }
 ```
 
 ### One start of an Android page is in flight at a time, from the page that offers it
@@ -89,12 +89,12 @@ A start has ten seconds to be answered.
 ```quint
 pure val startLimit = 10000
 pure val atValues = Set(0, 4000, 20000)
-pure val channelValues = Set(0, 2)
+pure val channelValues = Set("", "reminders")
 
-pure def canHandOff(s: Android, page: I::Page, target: Target, channel: int, at: int): bool =
+pure def canHandOff(s: Android, page: I::Page, target: Target, channel: str, at: int): bool =
   offers(page, target) and namesItsChannel(target, channel) and not(T::busy(s.start))
 
-pure def handOff(s: Android, page: I::Page, target: Target, channel: int, at: int): Started =
+pure def handOff(s: Android, page: I::Page, target: Target, channel: str, at: int): Started =
   val asking = T::ask(s.start, at, startLimit)
   {
     state: { ...s, start: asking, target: target, channel: channel, told: Silent },
@@ -104,16 +104,14 @@ pure def handOff(s: Android, page: I::Page, target: Target, channel: int, at: in
 
 ### Android says whether it opened that page, a nearby one, or none
 
-Only mobile networks, airplane mode and Do Not Disturb have a nearby page;
-a page Android refused never falls back to its settings home. Alpha says
-so when a nearby page opened, and says unavailable when none did.
+Mobile networks, airplane mode, Do Not Disturb, screen lock, and the SIM and access point pages may open a related Android page. Alpha says so when a nearby page opened, and says unavailable when none did.
 
 ```quint
 type Opened = Exactly | Nearby | NotAtAll
 
 pure val startValues = Set(1, 2, 3)
 
-pure def hasNearby(target: Target): bool = target == MobileNetworks or target == AirplaneMode or target == DoNotDisturb
+pure def hasNearby(target: Target): bool = target == MobileNetworks or target == AirplaneMode or target == DoNotDisturb or target == ScreenLock or target == SimCards or target == AccessPointNames
 
 pure def canAndroidAnswered(s: Android, start: int, opened: Opened): bool =
   T::canAnswer(s.start, start) and (opened == Nearby implies hasNearby(s.target))
