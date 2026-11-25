@@ -148,7 +148,8 @@ goes through eliza's `ElizaAgent` plugin, which checks each request against
 the host file's route list. Ask Alpha opens its conversation with
 `POST /api/conversations` (`apps/app/src/ask/ask.vibe`), and eliza's
 `TurnController`, which carries its turns, posts each message buffered or
-streamed and asks the agent to stop a turn by its room. The assistant
+streamed and asks the agent to stop a turn by its room; the assistant
+also asks the agent to warm its model before the owner's first turn. The assistant
 (`apps/app/src/assistant/assistant.vibe`) lists conversations, reads a
 conversation's messages, forks one, searches messages, asks the agent's
 health and which device steps it takes; Home and Calendar
@@ -190,6 +191,7 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/conversations/{id}/messages/stream", stream: true },
   { method: Post, path: "/api/conversations/{id}/fork", stream: false },
   { method: Post, path: "/api/turns/{roomId}/abort", stream: false },
+  { method: Post, path: "/api/turns/warm", stream: false },
   { method: Get, path: "/api/client-devices/capabilities", stream: false },
   { method: Post, path: "/api/client-devices/register", stream: false },
   { method: Get, path: "/api/client-devices/context", stream: false },

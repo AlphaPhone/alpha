@@ -14,6 +14,7 @@ import {
   type SettingsAndroidTarget,
   type SettingsAndroidTold,
   SettingsAppPage,
+  type SettingsAppPageProps,
   SettingsAppsPage,
   SettingsBatteryPage,
   SettingsDeveloperPage,
@@ -38,7 +39,7 @@ import {
   type SettingsTextSizePickerProps,
 } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useState, useSyncExternalStore } from "react";
 import * as Records from "../../gen/app__account__records.ts";
 import { useMachine as useRecords } from "../../gen/app__account__records.react.ts";
 import type { Machine as RecordsMachine } from "../../gen/app__account__records.effect.vibe";
@@ -75,9 +76,10 @@ import type { Machine as AccessReviewMachine } from "../../gen/app__startup__acc
 import { AccessReview } from "../startup/SettingsAccess.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 import { AccountStatus } from "../account/index.tsx";
+import { CalendarAccount, type CalendarConnection } from "./calendar.vibe";
 
 /** What every Settings page reads: where the owner is, the phone's facts, the hand-overs to Android, the preferences, the reset and the developer tools. */
-export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | FactsMachine | AccessReviewMachine | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ShellMachine | LayersMachine | Time, unknown>;
+export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | CalendarAccount | FactsMachine | AccessReviewMachine | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ShellMachine | LayersMachine | Time, unknown>;
 
 /** What the frame gives each page: the runtime, Alpha's places, and the props every page shares. */
 export interface PageProps {
@@ -363,15 +365,24 @@ function Apps({ runtime, common }: PageProps) {
   );
 }
 
+const calendarStatuses: Record<CalendarConnection, NonNullable<SettingsAppPageProps["calendarStatus"]>> = {
+  Checking: "checking", NoGrant: "not-connected", ReadOnly: "read-only", Writable: "connected", Unchecked: "unchecked",
+};
+
 function App({ runtime, common, app }: PageProps & { app: "inbox" | "workflows" | "calendar" | "camera" | "photos" | "maps" | "notes" }) {
   const facts = useFacts(runtime).state;
+  const phone = usePages(runtime).state?.phone;
   const device = useDevice(runtime);
+  const calendar = runtime.runSync(CalendarAccount);
+  const status = useSyncExternalStore(calendar.subscribe, calendar.snapshot, calendar.snapshot);
   return (
     <>
     {device?.recovery}
     <SettingsAppPage
       {...common}
       app={app}
+      onPhone={phone}
+      calendarStatus={app === "calendar" ? calendarStatuses[status] : undefined}
       grants={grants(facts)}
       read={device?.read}
       images={device?.images}
