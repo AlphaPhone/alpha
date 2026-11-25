@@ -86,6 +86,8 @@ function change(patch: Partial<Seen>): void {
   for (const listener of [...listeners]) listener()
 }
 
+const keyOf = (spot: Spot) => (spot.id === "" ? `@${spot.at.lat},${spot.at.lng}` : `${spot.providerId}/${spot.id}`)
+
 /**
  * The world around the Maps machine: the places, routes, position and tiles its numbers stand for. The shell writes
  * it before it tells the machine, and the screen reads it with `useSyncExternalStore`. It holds no rule.
@@ -99,7 +101,7 @@ export const atlas = {
   // spec/app/maps/places.md, "A saved place keeps its name, its coordinates and the provider's identity of it, and nothing else"
   /** The number of `spot`: the one the same place already has (its provider's id, or for a pin its coordinates), or a new one never given before. */
   numberOf(spot: Spot): number {
-    const key = spot.id === "" ? `@${spot.at.lat},${spot.at.lng}` : `${spot.providerId}/${spot.id}`
+    const key = keyOf(spot)
     const number = byProvider.get(key) ?? next++
     byProvider.set(key, number)
     change({ spots: new Map(current.spots).set(number, { ...current.spots.get(number), ...spot }) })
@@ -163,6 +165,7 @@ export const atlas = {
     byProvider.clear()
     handles.clear()
     const kept = new Map([...current.spots].filter(([, spot]) => !spot.google))
+    for (const [number, spot] of kept) byProvider.set(keyOf(spot), number)
     current = { ...empty, spots: kept, here: current.here, view: current.view, showings: current.showings }
     for (const listener of [...listeners]) listener()
   },

@@ -1,6 +1,6 @@
 // spec/app/maps/index.md, "Story: Move between the screen's modes"; spec/app/maps/index.md, "Story: Search for a place"; spec/app/maps/index.md, "Story: Look at a place"; spec/app/maps/index.md, "Story: Get directions"; spec/app/maps/index.md, "Story: Navigate"; spec/app/maps/index.md, "Story: Use my location"; spec/app/maps/index.md, "Story: Let the agent help with Maps"; spec/app/maps/credits.md, "Story: See the map for what I am looking at"
 import { Alert, cn, Input, type MapCamera, MapsChip, MapsPillButton, MapsPlaceRow, MapsRoundButton, MapsSearchBar, MapsSheet, MapsStatusCard, type MapStyle, MapView, Spinner, Toast, ToastRegion } from "@repo/ui";
-import { ArrowUpDown, Bike, Bus, Car, Check, ChevronLeft, Clock, Coffee, Dumbbell, ExternalLink, Footprints, Fuel, Globe, Info, LocateFixed, Lock, type LucideIcon, MapPin, Navigation, Phone, RotateCw, Search, Settings, Share2, ShoppingCart, SquarePlus, Star, Utensils, X } from "lucide-react";
+import { ArrowUpDown, Bike, Bus, Car, Check, ChevronLeft, Clock, Coffee, Dumbbell, ExternalLink, Footprints, Fuel, Globe, Info, Link, LocateFixed, Lock, type LucideIcon, Mail, MapPin, Navigation, Phone, RotateCw, Search, Settings, Share2, ShoppingCart, SquarePlus, Star, Utensils, X } from "lucide-react";
 import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { untimed } from "../runtime/reactor.vibe";
@@ -10,9 +10,10 @@ import { followsThePhone, googleShown, mode, panPixels, saysOutsideCoverage } fr
 import type { CopyNotice, GuideNotice, Maps as State, SavedNotice, Sheet } from "../../gen/app__maps.ts";
 import type { Machine as ScreenMachine } from "../../gen/app__maps.effect.vibe";
 import { useMachine as useCredits } from "../../gen/app__maps__credits.react.ts";
-import { breaksThePlane, cameraAim, compassShown, northUpAfterGuidance, placeZoom, resultsMaxZoom, routeMaxZoom } from "../../gen/app__maps__credits.ts";
+import { breaksThePlane, cameraAim, compassShown, fitPadding, followZoom, northUpAfterGuidance, placeZoom, resultsMaxZoom, routeMaxZoom } from "../../gen/app__maps__credits.ts";
 import type { Machine as CreditsMachine } from "../../gen/app__maps__credits.effect.vibe";
 import { badgeOnly, holding, needsSettings } from "../../gen/app__maps__connection.ts";
+import type { Wait } from "../../gen/app__maps__connection.ts";
 import { offers } from "../../gen/app__maps__navigation.ts";
 import type { Travel } from "../../gen/app__maps__navigation.ts";
 import { hasRoom } from "../../gen/app__maps__places.ts";
@@ -52,10 +53,33 @@ const told: Record<GuideNotice, string> = {
   StoppedFromNotification: "Navigation stopped from the notification.",
   PausedAway: "Navigation paused while the app is in the background. Tap Start to resume.",
   AccountChanged: "The Maps account changed. Navigation ended.",
-  RerouteKept: "Waiting for a precise location before rerouting. Keeping the current route.",
+  RerouteKept: "Rerouting needs a precise, up-to-date location. The current route was kept.",
 };
 
 const copies: Record<CopyNotice, string> = { Uncopied: "", NumberCopied: "Number copied", CopyFailed: "Couldn't copy" };
+
+// spec/app/maps/connection.md, "A wait Cloud names holds every Maps request back until it ends: a rate limit for at most a day, a spent allowance for at most 400 days, and any other wait one minute"
+/** What the owner reads while Cloud's wait holds Maps: Alpha's sentence around Cloud's number. */
+function waitText(wait: Wait, seconds: number): string {
+  if (wait === "AllowanceSpent") {
+    const days = Math.max(1, Math.ceil(seconds / 86_400));
+    return `You have used your Maps allowance for this period. It resets in ${days} ${days === 1 ? "day" : "days"}.`;
+  }
+  if (wait === "RateLimited") {
+    const minutes = Math.max(1, Math.ceil(seconds / 60));
+    return `Maps request limit reached. Try again in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`;
+  }
+  return "Maps request limit reached. Try again later.";
+}
+
+// spec/app/maps/index.md, "The card shares the place or the arrival time, opens its website, or opens it in the phone's maps app"
+/** The line under a place's name: its provider's most specific category, or what kind of place of the phone it is, or none. */
+function subtitleOf(spot: Spot, saved: boolean): string | undefined {
+  if (saved) return "Saved on this device";
+  if (spot.category !== "") return spot.category;
+  if (spot.providerId === "" && spot.id === "") return "Selected location";
+  return undefined;
+}
 
 /** The recent search `typed` is, in any case, or `typed` itself. */
 const recentOf = (recent: readonly string[], typed: string) => recent.find((query) => query.toLowerCase() === typed.toLowerCase()) ?? typed;
@@ -151,7 +175,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   const [typed, setTyped] = useState("");
   const { state, can, send } = screen;
   const handed = useSyncExternalStore(watchHandoff, handedQuery, handedQuery);
-  const handOver = handed === undefined ? undefined : { type: "handOver", query: handed, chars: handed.length } as const;
+  const handOver = handed === undefined ? undefined : { type: "handOver", query: handed, chars: handed.length, meeting: 0 } as const;
   // spec/app/maps/index.md, "A query another app hands to Maps opens as a search, never over navigation": a search not taken is dropped when Maps leaves
   useEffect(() => () => { takeHandedQuery(); }, []);
   useEffect(() => {
@@ -174,6 +198,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   });
   const kept = saved.find((entry) => entry.place === state.place);
   const following = followsThePhone(state) && seen.here !== undefined;
+  const googleMissing = state.link.google && tiles === undefined;
   const style: MapStyle = state.link.basemap === "Cloud" && tiles !== undefined
     ? { kind: "raster", tileSize: tiles.tileSize, minZoom: tiles.minZoom, maxZoom: tiles.maxZoom, tile: (z, x, y, signal) => runtime.runPromise(tile(z, x, y, signal)) }
     : { kind: "vector", url: worldStyle };
@@ -220,12 +245,14 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
     ...(retryMap ? ["Map rendering is unavailable. Retry the map or open a saved place."] : []),
     ...(refused ? ["Location permission was not granted. You can choose an origin manually.", "Allow location in Settings to show your position."] : []),
     ...(state.link.coverage.status === "Failed" && !holding(state.link) ? ["Maps could not be reached."] : []),
-    ...(holding(state.link) ? [`Maps request limit reached. Try again in ${Math.max(1, Math.ceil(state.link.held / 60))} minutes.`] : []),
+    ...(holding(state.link) ? [waitText(state.link.wait, state.link.held)] : []),
+    ...(state.link.unoffered ? ["Maps unavailable"] : []),
     ...(state.link.known && state.link.account === 0 ? ["Sign in to Alpha Cloud to use Maps."] : []),
     ...(!state.keepable ? ["Saved places could not be read. Existing data has not been replaced."] : []),
     ...(now === "Place" && coverage?.available && saysOutsideCoverage(state, inside) ? [`This location is outside ${coverage.sources.data} coverage.`] : []),
     ...(now === "Search" && state.search.status === "Failed" && !holding(state.link) ? ["The search failed."] : []),
     ...(state.guideNotice === "Quiet" ? [] : [told[state.guideNotice]]),
+    ...(state.missedFix ? ["No location fix arrived."] : []),
     ...(state.notice === "NoNotice" ? [] : [notices[state.notice]]),
   ];
   const statusActions: ReactNode[] = [
@@ -238,9 +265,11 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   const infoShown = !badgeOnly(state.link) && coverage?.available === true;
   return (
     <section aria-label="Maps" className="relative isolate flex flex-1 flex-col overflow-hidden">
-      <MapView
+      {googleMissing ? <Alert variant="warn" role="img" aria-label="Map" className="absolute inset-x-3 top-1/2 z-0">The Google map is missing.</Alert> : <MapView
         className="absolute inset-0 h-full rounded-none"
         zoomControls={false}
+        followZoom={followZoom}
+        fitPadding={fitPadding}
         opening={{ at: northAmerica, zoom: style.kind === "raster" ? 2 : 2.4 }}
         compassBottom={now === "Navigating" ? 198 : floatBottom + 60}
         label={spot === undefined ? "Map" : `Map of ${placeName}`}
@@ -261,7 +290,8 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
         onPressEnd={lift}
         onSettled={(view) => void runtime.runPromise(settled(view))}
         onDragged={() => offer(screen, { type: "panMap" })?.()}
-      />
+        onMenu={(at) => offer(screen, { type: "menuPin", lat: Math.round(at.lat * 1e6), lng: Math.round(at.lng * 1e6) })?.()}
+      />}
 
       {(now === "Browse" || now === "Search" || now === "Place") && (
         <MapsSearchBar
@@ -429,14 +459,14 @@ function PlaceSheet({ screen, state, spot, kept, height, back }: { screen: Scree
   const [name, setName] = useState("");
   const { can, send } = screen;
   const saveName = kept?.name ?? spot.name;
-  const pinned = spot.id === "" && pointIn(spot.name) !== undefined;
+  const subtitle = subtitleOf(spot, kept !== undefined);
   return (
     <MapsSheet aria-label={shown(saveName)} height={height} grows className="px-5 pt-4.5">
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <h2 className="font-display text-3xl font-light break-words">{shown(saveName)}</h2>
           {can({ type: "startRenaming" }) && <button type="button" aria-label="Rename place" className="min-h-12 px-3 text-primary" onClick={() => { setName(saveName); void send({ type: "startRenaming" }); }}>Rename</button>}
-          <div className="mt-1.5 text-sm text-muted-foreground">{pinned ? "Selected location" : spot.category || "Place"}</div>
+          <div className="mt-1.5 text-sm text-muted-foreground">{subtitle ?? "Place"}</div>
           {spot.hours !== undefined && <div className="mt-1 text-sm"><span className="font-semibold">Hours</span><span className="text-muted-foreground">{` · ${spot.hours}`}</span></div>}
         </div>
         <MapsRoundButton tone="fill" size="sm" aria-label="Close place" className="-mt-0.5 -mr-1.5" disabled={!back} onClick={back}><X className="size-4.5" /></MapsRoundButton>
@@ -447,6 +477,8 @@ function PlaceSheet({ screen, state, spot, kept, height, back }: { screen: Scree
           ? can({ type: "namePlace", name: saveName }) && <MapsRoundButton aria-label="Save" aria-pressed={false} onClick={() => void send({ type: "namePlace", name: saveName })}><Star /></MapsRoundButton>
           : can({ type: "forgetPlace" }) && <MapsRoundButton aria-label="Remove from saved" aria-pressed className="text-primary" onClick={() => void send({ type: "forgetPlace" })}><Star className="fill-current" /></MapsRoundButton>}
         {can({ type: "handOn", kind: "SharePlace" }) && <MapsRoundButton aria-label="Share" onClick={() => void send({ type: "handOn", kind: "SharePlace" })}><Share2 /></MapsRoundButton>}
+        {can({ type: "handOn", kind: "EmailPlace" }) && <MapsRoundButton aria-label="Email" onClick={() => void send({ type: "handOn", kind: "EmailPlace" })}><Mail /></MapsRoundButton>}
+        {can({ type: "handOn", kind: "CopyLink" }) && <MapsRoundButton aria-label="Copy link" onClick={() => void send({ type: "handOn", kind: "CopyLink" })}><Link /></MapsRoundButton>}
         {spot.website !== undefined && can({ type: "handOn", kind: "Website" }) && <MapsRoundButton aria-label="Website" onClick={() => void send({ type: "handOn", kind: "Website" })}><Globe /></MapsRoundButton>}
         {can({ type: "handOn", kind: "MapsApp" }) && <MapsRoundButton aria-label="Open in another app" onClick={() => void send({ type: "handOn", kind: "MapsApp" })}><ExternalLink /></MapsRoundButton>}
       </div>
@@ -474,12 +506,8 @@ function PlaceSheet({ screen, state, spot, kept, height, back }: { screen: Scree
 function DirectionsCard({ screen, state, seen, spot, kept, saved, back }: { screen: Screen; state: State; seen: Seen; spot: Spot; kept: Kept | undefined; saved: Kept[]; back: (() => void) | undefined }) {
   const [start, setStart] = useState("");
   const { can, send } = screen;
-  const startAt = pointIn(start);
   const startFrom = () => {
-    if (startAt !== undefined && can({ type: "planFrom", origin: "Coordinates", lat: startAt.lat, lng: startAt.lng })) {
-      return void send({ type: "planFrom", origin: "Coordinates", lat: startAt.lat, lng: startAt.lng });
-    }
-    if (startAt === undefined && can({ type: "findOrigin", query: start.trim() })) void send({ type: "findOrigin", query: start.trim() });
+    if (can({ type: "findOrigin", query: start.trim() })) void send({ type: "findOrigin", query: start.trim() });
   };
   const starts = state.originsFound > 0 ? seen.origins.slice(0, state.originsFound).flatMap((place) => {
     const found = atlas.spot(place);
@@ -582,7 +610,7 @@ function Guidance({ screen, state, seen, spot, kept, way }: { screen: Screen; st
   const turn = way?.turns[state.trip.turn];
   const after = way?.turns[state.trip.turn + 1];
   const arrived = state.trip.guidance === "Arrived";
-  const precise = seen.here !== undefined && !seen.here.approximate && !state.trip.rerouting;
+  const precise = seen.here !== undefined && !seen.here.approximate && !state.imprecise && !state.trip.rerouting;
   const [startedAt] = useState(Date.now);
   return (
     <>
@@ -591,7 +619,7 @@ function Guidance({ screen, state, seen, spot, kept, way }: { screen: Screen; st
         <div className="min-w-0">
           <div className="font-display text-figure-lg font-light">{arrived ? "Arrived" : precise && turn !== undefined ? distance(turn.meters) : state.trip.rerouting ? "Rerouting…" : "Locating…"}</div>
           <div className="mt-1 truncate text-lead font-semibold">
-            {arrived ? shown(kept?.name ?? spot.name) : seen.here === undefined ? "Waiting for your location" : seen.here.approximate ? "Turn guidance needs a precise location" : state.trip.rerouting ? "Finding a new route" : turn?.instruction ?? ""}
+            {arrived ? shown(kept?.name ?? spot.name) : seen.here === undefined ? "Waiting for your location." : state.imprecise || seen.here.approximate ? "Turn guidance needs a precise, up-to-date location." : state.trip.rerouting ? "Finding a new route" : turn?.instruction ?? ""}
           </div>
         </div>
       </div>

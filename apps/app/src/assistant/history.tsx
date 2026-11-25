@@ -1,11 +1,12 @@
 // spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/chats.md, "Story: Reuse words from a message"; spec/app/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence every line stays code"
-import { AssistantChatHistorySheet, AssistantSearchSheet, Button, type AssistantAttachment, type AssistantMessageProps } from "@repo/ui";
+import { AssistantCard, AssistantChatHistorySheet, AssistantSearchSheet, Button, type AssistantAttachment, type AssistantMessageProps } from "@repo/ui";
 import type { MapsCard } from "@elizaos/plugin-maps-client";
 import { Effect, type ManagedRuntime } from "effect";
 import { useMemo, useState } from "react";
 import * as Chats from "../../gen/app__assistant__chats.effect.vibe";
 import type { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import * as Composer from "../../gen/app__assistant__composer.effect.vibe";
+import { textLimit } from "../../gen/app__assistant__composer.ts";
 import type { useMachine as useSearch } from "../../gen/app__assistant__search.react.ts";
 import type { useMachine as useLayers } from "../../gen/app__shell__layers.react.ts";
 import { top } from "../../gen/app__shell__layers.ts";
@@ -13,7 +14,24 @@ import type { MessageSelection } from "./message-actions.vibe";
 import { MapsCardView, mapsCardsOf } from "./maps-cards.tsx";
 import { replyBlocks, wordsOf } from "./words.ts";
 import { ReplyFailure } from "./ReplyFailure.tsx";
-import type { Attached, Board, Line } from "./talk.vibe";
+import type { Attached, Board, Line, StoredNotice } from "./talk.vibe";
+
+const storedNotices: Record<StoredNotice, { readonly title: string; readonly detail: string; readonly action?: "signIn" | "retry"; readonly label?: string }> = {
+  "model-unavailable": { title: "No AI model ready", detail: "Connect a provider in Settings, then try again.", action: "signIn", label: "Open Settings" },
+  "runtime-error": { title: "Agent error", detail: "The agent hit an error while replying.", action: "retry", label: "Send again" },
+  "model-and-runtime-error": { title: "Agent error", detail: "No AI model is ready and the agent hit an error. Check Settings.", action: "signIn", label: "Open Settings" },
+};
+
+function NoticeCard({ kind, asked, onSettings, onSendAgain }: { kind: StoredNotice; asked?: string; onSettings?: () => void; onSendAgain?: (text: string) => void }) {
+  const { title, detail, action, label } = storedNotices[kind];
+  const act = action === "retry" ? (asked !== undefined && onSendAgain ? () => onSendAgain(asked) : undefined) : onSettings;
+  return <AssistantCard
+    card={act === undefined || action === undefined
+      ? { kind: "plain", text: `${title}. ${detail}` }
+      : { kind: "action", action, title, detail, ...(label === undefined ? {} : { label }) }}
+    onAct={act}
+  />;
+}
 
 export interface MessageActions {
   copy: (selection: MessageSelection) => void;
@@ -62,8 +80,14 @@ export function useMessageRows({ runtime, board, lines, chats, writing, replying
     if (!chats || !writing || prepared.length === 0) return empty;
     const chat = (event: Chats.Event) => void runtime.runPromiseExit(Effect.flatMap(Chats.Machine, (machine) => machine.send(event)));
     const compose = (event: Composer.Event) => void runtime.runPromiseExit(Effect.flatMap(Composer.Machine, (machine) => machine.send(event)));
-    return prepared.flatMap(({ line, cards, reply: { words: text, choices } }): HistoryRow[] => {
-      if (!line.mine && text.trim() === "" && cards.length === 0 && choices.length === 0 && line.failure === undefined && !line.attachments?.length) return [];
+    const sendAgain = (text: string) => {
+      const edit = { type: "edit", blank: text.trim() === "", long: text.length > textLimit } as const;
+      if (!Composer.enabled(writing, edit)) return;
+      board.type(text);
+      compose(edit);
+    };
+    return prepared.flatMap(({ line, cards, reply: { words: text, choices } }, at): HistoryRow[] => {
+      if (!line.mine && text.trim() === "" && cards.length === 0 && choices.length === 0 && line.failure === undefined && line.notice === undefined && !line.attachments?.length) return [];
       const message = board.numbered(line.id);
       const live = !line.mine && message > 0 && message === chats.messages && !replying;
       const open = live && onOpenMaps !== undefined && opened?.has(message) !== true ? onOpenMaps : undefined;
@@ -81,10 +105,12 @@ export function useMessageRows({ runtime, board, lines, chats, writing, replying
       return [{
         id: line.id,
         author: line.mine ? "owner" : "alpha",
-        text,
+        text: line.notice === undefined ? text : "",
         attachments: line.attachments?.map(chip),
         quote: line.quote === undefined ? undefined : wordsOf({ mine: false, text: line.quote }),
-        children: cards.length === 0 && choices.length === 0 && line.failure === undefined ? undefined : <>
+        children: line.notice !== undefined
+          ? <NoticeCard kind={line.notice} asked={lines[at - 1]?.mine ? lines[at - 1]?.text : undefined} onSettings={onSettings} onSendAgain={sendAgain} />
+          : cards.length === 0 && choices.length === 0 && line.failure === undefined ? undefined : <>
           {cards.map((card, index) => <MapsCardView key={index} card={card} settled={!live} onOpen={open === undefined ? undefined : () => open(card, message)} />)}
           {live && onChoose !== undefined ? choices.map((choice) => (
             <div key={choice.id} className="flex flex-wrap gap-2">

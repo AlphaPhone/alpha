@@ -162,15 +162,27 @@ effect function excerpt(ticket: number): Reader.Event!!Inputs {
     if (!(try current(question))) return outcome(ticket, "Late")
     if (question.purpose === "OnPhone") return try nativeExcerpt(question, page, ticket)
     if (question.purpose !== "Ask") return outcome(ticket, "Failed")
-    const read = try promise(() => pageQuestionReading(() => plugin.reviewQuestion(host.session.guard(page))).then(
-      (result) => ({ kind: "read" as const, result }),
-      (failure: unknown) => ({ kind: "failed" as const, failure }),
-    ))
-    if (read.kind === "failed") {
-      const failure = read.failure
-      return outcome(ticket, typeof failure === "object" && failure !== null && "code" in failure && failure.code === SENSITIVE_PAGE ? "Sensitive" : "Failed")
+    // Retry transient empty/title-only native captures within the turn budget before reporting unreadable.
+    const clock = try Time
+    const deadline = (try clock.now()) + 1_000
+    for (let attempt = 0; ; attempt += 1) {
+      if (attempt > 0) {
+        const now = try clock.now()
+        if (now >= deadline) break
+        try clock.until(Math.min(deadline, now + 200))
+        if (!Reader.canExtracted(try reader.get(), ticket, "Visible") || !(try current(question))) return outcome(ticket, "Late")
+      }
+      const read = try promise(() => pageQuestionReading(() => plugin.reviewQuestion(host.session.guard(page))).then(
+        (result) => ({ kind: "read" as const, result }),
+        (failure: unknown) => ({ kind: "failed" as const, failure }),
+      ))
+      if (read.kind === "failed") {
+        const failure = read.failure
+        return outcome(ticket, typeof failure === "object" && failure !== null && "code" in failure && failure.code === SENSITIVE_PAGE ? "Sensitive" : "Failed")
+      }
+      words = read.result.text
+      if (words.trim() !== "" || attempt >= 4) break
     }
-    words = read.result.text
   } else return outcome(ticket, "Failed")
   if (!Reader.canExtracted(try reader.get(), ticket, "Visible") || !(try current(question))) return outcome(ticket, "Late")
   if (question.purpose === "Ask" && !(try cover(question))) return outcome(ticket, "Late")

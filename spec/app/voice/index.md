@@ -509,13 +509,14 @@ pure def stepReviewKeepsVoiceAndMicrophoneOpen(before: Voice, via: str, after: V
 ### A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does
 
 Cloud's own code for an account with no plan allowance and no credits
-left decides it, never the owner's words. Nothing of the turn is spoken,
-voice shows no text of its own about it, and it does not listen again:
-the conversation shuts down as Stop shuts it.
+left decides it, never the owner's words — whether Cloud refuses a spoken
+turn or refuses real-time Talk startup or streaming. Nothing of the turn is
+spoken, and voice does not listen again or loop on fallback: the
+conversation shuts down as Stop shuts it.
 
 ```quint
 pure def canRefusedForFunds(v: Voice, session: int, turn: int): bool =
-  (v.phase == Thinking or v.phase == Speaking) and session == v.session and turn == v.turn and not(v.replied)
+  talking(v) and v.mic != Asking and not(v.disclosing) and session == v.session and turn == v.turn and not(v.replied)
 
 pure def refusedForFunds(v: Voice, session: int, turn: int): Change = shutDown(D::NoFailure, false, v)
 

@@ -470,3 +470,48 @@ pure def lawASuccessIsNeverReplaced(later: Result): bool = merged(Succeeded, lat
 
 pure def lawALaterReceiptWinsOtherwise(seen: Result, later: Result): bool = seen != Succeeded implies merged(seen, later) == later
 ```
+
+### A receipt's title says what its result proves: Completed only for a success, Not confirmed while it is unknown, Not completed for a failure
+
+A result the agent cannot prove is unknown, never a failure: "I couldn't
+confirm the result."
+
+```quint
+type ReceiptTitle = Completed | NotConfirmed | NotCompleted | NoTitle
+
+pure def titleOf(result: Result): ReceiptTitle = if (result == Succeeded) Completed else if (result == Pending) NotConfirmed else NotCompleted
+
+pure def lawOnlyASuccessIsCompleted(result: Result): bool = (titleOf(result) == Completed) iff (result == Succeeded)
+```
+
+### A reply cut off after an action took effect says it was done, or that it needs approval when all it did was ask for approval
+
+It reads "Done · reply cut off", or "Needs your approval · reply cut off".
+
+```quint
+type CutOff = NotCutOff | DoneCutOff | NeedsApprovalCutOff
+
+pure def cutOffOf(interrupted: bool, applied: int, approvals: int, effectBeforeFailure: bool): CutOff =
+  if (not(interrupted)) NotCutOff
+  else if (applied > 0 and applied == approvals) NeedsApprovalCutOff
+  else if (applied > 0 or effectBeforeFailure) DoneCutOff
+  else NotCutOff
+
+pure val appliedValues = Set(0, 1, 2)
+pure val approvalsValues = Set(0, 1)
+
+pure def lawAnApprovalAskedIsNeverDone(approvals: int): bool = approvals >= 1 implies cutOffOf(true, approvals, approvals, false) == NeedsApprovalCutOff
+
+pure def lawAFinishedReplyIsNeverCutOff(applied: int, approvals: int, before: bool): bool = cutOffOf(false, applied, approvals, before) == NotCutOff
+```
+
+### A receipt that could not reach the agent keeps its result and says it is not synced yet, until it is uploaded
+
+The phone keeps it and a later sweep uploads it; the upload never runs the
+action again. A capture the owner cancelled has nothing to sync.
+
+```quint
+pure def unsynced(uploaded: bool, captureCancelled: bool): bool = not(uploaded) and not(captureCancelled)
+
+pure def lawAnUploadedReceiptIsSynced(cancelled: bool): bool = not(unsynced(true, cancelled))
+```

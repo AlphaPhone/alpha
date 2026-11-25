@@ -61,11 +61,20 @@ export async function executeMedia(alpha: Alpha, operation: DeviceOperation, cal
     const result = await alpha.runtime.runPromise(selectedWorkflowNotes(operation, authority.current));
     return result === undefined ? refused : { kind: "applied", result };
   }
-  if (operation.type === "read_calendar_range") {
+  if (operation.type === "read_calendar_range" && authority.workflow) {
     const { readWorkflowCalendar } = await import("../calendar/workflow-device.vibe");
     const current = Effect.tryPromise(authority.current).pipe(Effect.orElseSucceed(() => false));
     const result = await alpha.runtime.runPromise(readWorkflowCalendar(operation, current));
     return result === undefined ? refused : { kind: "applied", result };
+  }
+  if (operation.type === "read_calendar_range" || operation.type.startsWith("calendar_")) {
+    const [{ default: calendar }, { calendarOperation, executeCalendar }] = await Promise.all([import("../calendar/index.tsx"), import("../calendar/device-actions.vibe")]);
+    const exact = calendarOperation(operation);
+    return exact === undefined ? refused : calendar.runtime(alpha).runPromise(executeCalendar(exact, call));
+  }
+  if (operation.type === "maps_read_selected") {
+    const [{ default: maps }, { readSelected }] = await Promise.all([import("../maps/index.tsx"), import("../maps/agent.vibe")]);
+    return maps.runtime(alpha).runPromise(readSelected(operation, authority.current));
   }
   if (operation.type === "browser_navigate") {
     const [{ default: browser }, { openApproved }] = await Promise.all([import("../browser/index.tsx"), import("../browser/agent.vibe")]);

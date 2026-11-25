@@ -1,0 +1,84 @@
+// spec/app/maps/index.md, "While Maps is in front the agent is told what it shows, a place, a route or a search, by a handle that names it on this phone only"; spec/app/maps/index.md, "The agent may ask to read the place on the card, which is put to the owner once its last read has ended"; spec/app/maps/index.md, "Approving hands the agent the place shown, as a read sent once under its question's number, or starts guidance on the route shown"; spec/app/maps/index.md, "The agent is told how its read ended: delivered, refused, or unknown when no answer can be trusted"
+import { NOT_DISPATCHED, type DeviceOperation, type OperationResultOf, readResult } from "@elizaos/agent"
+import * as Screen from "../../gen/app__maps.effect.vibe"
+import type { Maps as State } from "../../gen/app__maps.effect.vibe"
+import type { Travel } from "../../gen/app__maps__navigation.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Device } from "../platform/device.vibe"
+import { atlas } from "./atlas.vibe"
+import { degreesOf } from "./geometry.ts"
+import { coverageOf, readsHeld, type Selected, selectedOf } from "./maps.vibe"
+
+type ReadSelected = Extract<DeviceOperation, { type: "maps_read_selected" }>
+type Read = OperationResultOf<"maps_read_selected">
+
+const refused = { kind: "refused", code: NOT_DISPATCHED } as const
+const modes: Partial<Record<Travel, "drive" | "walk" | "bicycle">> = { Drive: "drive", Walk: "walk", Bicycle: "bicycle" }
+
+/** Whether Maps is the screen the owner sees, with the phone unlocked and awake. */
+effect function inFront(): boolean!!(Device | Shell) {
+  return (try (try Device).showing()) && showing(try (try Shell).get(), "Maps")
+}
+
+/** What Maps shows the agent this turn: the place or route on screen by its handle and revision, or nothing outside Maps. */
+export effect function mapsSelected(): (Selected | undefined)!!(Device | Shell | Screen.Machine) {
+  const front = try inFront()
+  return selectedOf(try (try Screen.Machine).get(), front)
+}
+
+function point(at: { readonly lat: number; readonly lng: number }) {
+  const { lat, lng } = degreesOf(at)
+  return { latitude: lat, longitude: lng }
+}
+
+// spec/app/maps/index.md, "The card shares the place or the arrival time, opens its website, or opens it in the phone's maps app"
+/** The place or route `state` shows, as the agent's read names it, with the provider's own credit: none for a place Google served or a route by transit. */
+function readOf(state: State, operation: ReadSelected): Read | undefined {
+  const spot = atlas.spot(state.place)
+  const coverage = coverageOf(state)
+  if (spot === undefined || spot.google || coverage === undefined || !coverage.available) return undefined
+  const provider = { providerId: spot.providerId === "" ? coverage.providerId : spot.providerId, providerRevision: coverage.revision, attribution: coverage.attribution }
+  if (operation.target.kind === "map-place") {
+    const label = (state.saved.find((entry) => entry.place === state.place)?.name ?? spot.name).trim().slice(0, 300)
+    return readResult<"maps_read_selected">(operation, { kind: "maps_read_selected", version: 1, target: operation.target, fields: { kind: "map-place", ...provider, label, coordinate: point(spot.at) } })
+  }
+  const way = atlas.way(state.trip.route, state.chosen)
+  const mode = modes[state.trip.travel]
+  const from = way?.line[0]
+  const to = way?.line.at(-1)
+  if (way === undefined || mode === undefined || from === undefined || to === undefined) return undefined
+  return readResult<"maps_read_selected">(operation, {
+    kind: "maps_read_selected", version: 1, target: operation.target,
+    fields: { kind: "map-route", ...provider, from: point(from), to: point(to), mode, distanceMeters: way.meters, durationSeconds: way.seconds, traffic: "none" },
+  })
+}
+
+/**
+ * The agent's read of what Maps shows, once the owner approved it in the conversation: the read is put to the Maps
+ * screen under the handle and revision the agent was told, approved there with the owner's answer, and its outcome told
+ * back to the screen. A selection that changed since, or Maps out of view, is never read.
+ */
+export effect function readSelected(operation: ReadSelected, current: () => Promise<boolean>): unknown!!(Device | Shell | Screen.Machine) {
+  const allowed = tryPromise(current) catch () => false
+  if (!allowed) return refused
+  const screen = try Screen.Machine
+  const seen = try mapsSelected()
+  const target = operation.target
+  if (seen === undefined || seen.kind !== target.kind || seen.id !== target.id || seen.revision !== target.revision) return refused
+  const revision = Number(target.revision)
+  const asked = screen.send({ type: "askToRead", revision }) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false)
+  if (!(try asked)) return refused
+  const ticket = (try screen.get()).asked
+  readsHeld.add(ticket)
+  const approved = screen.send({ type: "approve" }) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false)
+  if (!(try approved)) {
+    readsHeld.delete(ticket)
+    try Effect.ignore(screen.send({ type: "decline" }))
+    return refused
+  }
+  const state = try screen.get()
+  const read = readOf(state, operation)
+  try Effect.ignore(screen.send({ type: "answerTell", ticket, confirmed: read !== undefined, known: true }))
+  readsHeld.delete(ticket)
+  return read === undefined ? refused : { kind: "applied", result: read }
+}

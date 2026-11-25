@@ -87,6 +87,12 @@ export interface MapViewProps {
   onPressMove: (pixels: number) => void;
   /** The press ended: lifted, a second finger, or the menu that follows a held finger. */
   onPressEnd: () => void;
+  /** The secondary button asked for a pin here (desktop right click, without a long press in progress). */
+  onMenu?: (at: MapPoint) => void;
+  /** The closest zoom `follow` keeps (sixteen unless told). */
+  followZoom?: number;
+  /** Padding around a fitted route, in pixels (forty-eight unless told). */
+  fitPadding?: number;
   /** The camera came to rest on this view. */
   onSettled: (view: MapBounds) => void;
   /** The owner began to drag the map. */
@@ -103,7 +109,10 @@ function styleOf(style: MapStyle, protocol: string): string | StyleSpecification
   return {
     version: 8,
     sources: { cloud: { type: "raster", tiles: [`${protocol}://tiles/{z}/{x}/{y}`], tileSize: style.tileSize, minzoom: style.minZoom, maxzoom: style.maxZoom } },
-    layers: [{ id: "cloud-raster", type: "raster", source: "cloud" }],
+    layers: [
+      { id: "land", type: "background", paint: { "background-color": "#e8e8e8" } },
+      { id: "cloud-raster", type: "raster", source: "cloud" },
+    ],
   };
 }
 
@@ -179,12 +188,12 @@ function paint(map: MapLibre, painted: Painted, props: MapViewProps, onPin: (key
   const camera = props.camera;
   if (camera.kind === "keep" || camera.key === painted.camera) return;
   painted.camera = camera.key;
-  if (camera.kind === "follow") map.easeTo({ center: [camera.at.lng, camera.at.lat], zoom: Math.max(map.getZoom(), 16.5), duration: 500 });
+  if (camera.kind === "follow") map.easeTo({ center: [camera.at.lng, camera.at.lat], zoom: Math.max(map.getZoom(), props.followZoom ?? 16), duration: 500 });
   else if (camera.kind === "centre") map.easeTo({ center: [camera.at.lng, camera.at.lat], zoom: camera.zoom, duration: 0 });
   else if (camera.kind === "northUp") map.easeTo({ bearing: 0, pitch: 0, duration: 350 });
   else if (camera.points.length > 0) {
     const bounds = camera.points.reduce((b, p) => b.extend([p.lng, p.lat]), new maplibregl.LngLatBounds());
-    map.fitBounds(bounds, { padding: 48, maxZoom: camera.maxZoom, duration: 350 });
+    map.fitBounds(bounds, { padding: props.fitPadding ?? 48, maxZoom: camera.maxZoom, duration: 350 });
   }
 }
 
@@ -223,6 +232,7 @@ export function MapView(props: MapViewProps) {
     let styleLoaded = false;
     try {
       maplibregl.setWorkerUrl(mapWorkerUrl);
+      maplibregl.setWorkerCount(1);
       instance = new maplibregl.Map({
         container: node, style: styleOf(chosen, protocol), attributionControl: false,
         center: opening === undefined ? [0, 20] : [opening.at.lng, opening.at.lat], zoom: opening?.zoom ?? 1.5,
@@ -271,7 +281,11 @@ export function MapView(props: MapViewProps) {
     instance.on("mousedown", (event) => { if (event.originalEvent.button === 0) press(event.lngLat, event.point); });
     instance.on("mousemove", (event) => moved(event.point));
     instance.on("mouseup", end);
-    instance.on("contextmenu", end);
+    instance.on("contextmenu", (event) => {
+      event.originalEvent.preventDefault();
+      if (down !== undefined) return end();
+      latestRef.current.onMenu?.({ lat: event.lngLat.lat, lng: event.lngLat.lng });
+    });
     instance.on("dragstart", () => latestRef.current.onDragged?.());
     instance.on("moveend", () => {
       const bounds = instance.getBounds();

@@ -544,7 +544,7 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
 
   // spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/voice/index.md, "Voice keeps talking after a navigation only when it is the one the conversation asked for; any other ends it"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"
   it("keeps voice, mic, and raised Sheet open across agent navigation to an app, to Home, and same-screen refresh, while owner navigation stops voice", async () => {
-    const world = { ...scene(), phone: true, signedIn: false };
+    const world = { ...scene(), phone: true, image: true, signedIn: false };
     const runtime = await startListening(world);
     await sendShell(runtime, { type: "raise", detent: "Sheet" });
 
@@ -562,6 +562,13 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     speakUtterance(world, "Refresh home");
     await until(runtime, Voice.Machine, (s) => s.sent === 3 && s.phase === "Listening" && s.mic === "On" && s.claim === 0);
     expect(await getShell(runtime)).toMatchObject({ trail: [], assistant: "Sheet" });
+
+    for (const [view, sent] of [["Phone", 4], ["Contacts", 5], ["Messages", 6]] as const) {
+      world.ask.nextReplyChunks = [`[NAVIGATE:${view}] Opening ${view}.`];
+      speakUtterance(world, `Open ${view}`);
+      await until(runtime, Voice.Machine, (s) => s.sent === sent && s.phase === "Listening" && s.mic === "On" && s.followed === placeOf(view) && s.claim === 0);
+      expect(await getShell(runtime)).toMatchObject({ trail: [view], assistant: "Sheet" });
+    }
 
     await sendShell(runtime, { type: "openView", view: "Notes" });
     await until(runtime, Voice.Machine, (s) => s.phase === "Idle");
@@ -1437,5 +1444,39 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect(document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]")?.value).toBe("Original draft\nTyped transcript");
     expect(world.voice.dictationClips).toHaveLength(1);
     expect(world.ask.said).toEqual([]);
+  });
+
+  // spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"
+  it("preserves Cloud credit refusals during real-time Talk and keeps actionable Talk failures visible when fallback is unavailable", async () => {
+    const world = { ...scene(), phone: true };
+    world.voice.onDevice = false;
+    world.voice.localReady = false;
+    world.voice.liveCaptureAvailable = false;
+    const { alpha, area } = await onComposer(world, ...only("notice"));
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.route.account === "CloudAccount" && s.route.consent && s.warmed);
+
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
+    const sessionId = world.voice.activeMicSession;
+    expect(sessionId).toBeDefined();
+
+    await drawn(() => world.voice.emitCloud?.({ sessionId: sessionId!, type: "error", code: "insufficient_credits" }));
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle" && s.mic === "Off" && s.failure === "NoFailure");
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(document.body.textContent).toContain("Voice needs more Eliza Cloud credits. Add credits, then try again.");
+    });
+
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
+    const secondSession = world.voice.activeMicSession;
+    expect(secondSession).toBeDefined();
+
+    await drawn(() => world.voice.emitCloud?.({ sessionId: secondSession!, type: "error", code: "unauthorized" }));
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle" && s.mic === "Off");
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(document.body.textContent).toContain("Sign in to use Cloud voice.");
+    });
   });
 });
