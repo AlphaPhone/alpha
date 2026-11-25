@@ -998,7 +998,7 @@ export function installChatOverlayMotion(Component: Shell) {
 			shell.S().view === "browser" &&
 			(out.chatMode ?? shell.S().chat) === "input" &&
 			!shell.S().shade &&
-			shell.S().voice === "off" &&
+			!shell.chatOwnedByVoice &&
 			!shell.props.assistantSurface;
 		const focusDockComposer = (target?: EventTarget | null) => {
 			const dockEl: HTMLElement | null =
