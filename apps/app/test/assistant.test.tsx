@@ -313,6 +313,21 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       await until(alpha, runtime, Conversation, (s) => s.turn.send.id === 7 && s.turn.reply === "Complete");
       expect(locationIn(world.ask.metadata?.at(-1))).toBe(undefined);
     }
+
+    // spec/app/assistant/reply.md, "Prose is drawn with its Markdown: bold, italics, code, headings, lists and quotes; a link is a link only to an https address, and HTML reads as text"
+    const marked = "**Limes** tonight?\n> Ask [Ana](https://ana.example/) <b>now</b>\n- [one](javascript:alert(1))";
+    write(marked);
+    await press("Send");
+    await until(alpha, runtime, Reply, (s) => s.status === "Settled" && s.final === `You said: ${marked}`.length);
+    await vi.waitFor(() => expect([...document.querySelectorAll("[role=log] article")].at(-1)?.querySelector("strong")).toBeTruthy());
+    const reply = [...document.querySelectorAll("[role=log] article")].at(-1);
+    expect([reply?.querySelector("strong")?.textContent, reply?.querySelector("blockquote a")?.getAttribute("href"), reply?.querySelectorAll("a").length, reply?.querySelector("b"), reply?.querySelector("li")?.textContent, lines().at(-1)])
+      .toEqual(["Limes", "https://ana.example/", 1, null, "one", "You said: Limes tonight?Ask Ana <b>now</b>one"]);
+    // spec/app/assistant/reply.md, "Copy, quote, read aloud, use in email and Talk take the reply's plain words, without its marks"
+    if (phone) {
+      await vi.waitFor(() => onMessage("You said: Limes tonight?Ask Ana <b>now</b>one", "Copy"));
+      await vi.waitFor(() => expect(world.settings.copied.at(-1)).toBe("You said: Limes tonight?\n\nAsk Ana (https://ana.example/) <b>now</b>\n\n• one"));
+    }
   });
 
   // spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/chats.md, "Story: Open a message that search found"
