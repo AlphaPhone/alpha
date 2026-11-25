@@ -6,7 +6,7 @@ import type { Browser, Effect as TabsOut, Event as TabsEvent } from "../../gen/a
 import * as Address from "../../gen/app__browser__address.effect.vibe"
 import type { Effect as PageOut, Event as PageEvent, Page } from "../../gen/app__browser__address.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
-import { TabHost, hosted } from "../platform/browser.vibe"
+import { BrowserDownloadsHandoff, TabHost, hosted } from "../platform/browser.vibe"
 import type { Install } from "../runtime/attempts.vibe"
 import { type Job, Whole, answer, contained, due, reacting, run, started, stream, together, untimed, whole } from "../runtime/reactor.vibe"
 import type { Time } from "../runtime/time.vibe"
@@ -232,6 +232,13 @@ const tabs = reacting(Tabs, {
 const told = started(effect {
   const host = try TabHost
   try Stream.runForEach(host.told, effect (said) => {
+    if (said.kind === "showDownloads") {
+      const raw = said.raw
+      if (typeof raw === "object" && raw !== null && "session" in raw && raw.session === host.session.session && showing(try (try Shell).get(), "Browser")) {
+        try (try BrowserDownloadsHandoff).open()
+      }
+      return
+    }
     if (said.kind === "closed") {
       const id = host.session.applyClosed(said.raw)
       if (id !== undefined) try tellTabs({ type: "nativeLost", tab: tabOf(id) })
@@ -283,6 +290,14 @@ effect function present(tab: number, host: TabHost.Shape): void!! {
   try ignore(tryPromise(() => tab === 0 || place === undefined
     ? plugin.value.present({ session: host.session.session, id: null })
     : plugin.value.present({ session: host.session.session, id: idOf(tab), ...place })))
+}
+
+// spec/app/browser/downloads.md, "Story: Download a file"
+/** Open the current native Browser's Downloads list after its menu closes. */
+export const openDownloads: void!!(Tabs.Machine | Shell | TabHost) = effect {
+  if (!showing(try (try Shell).get(), "Browser") || (try (try Tabs.Machine).get()).layer !== "Menu") return
+  if (!(try tellTabs({ type: "uncover" }))) return
+  try contained(hosted("downloads", (plugin, session) => plugin.downloads({ session })), "opening Browser downloads")
 }
 
 /** Draw the page shown where the Browser marks its place, once that place is drawn. */

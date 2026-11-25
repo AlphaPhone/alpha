@@ -39,11 +39,12 @@ import { chip, type MessageActions, useMessageRows } from "./history.tsx";
 import { ReplyFailure } from "./ReplyFailure.tsx";
 import { type Attached, type Line, Talk } from "./talk.vibe";
 import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx";
+import { CommsBriefing } from "../phone/comms.vibe";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | Talk | MailQuestions | LayersMachine | MediaReview, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview, unknown>;
   messageActions?: MessageActions;
-  speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "voice" | "voiceNotice">;
+  speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voice" | "voiceNotice">;
   canReadAloud?: boolean;
 }
 
@@ -111,8 +112,20 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const [listing, setListing] = useState(false);
   const [words, setWords] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
-  const fileTarget = useRef<{ binding: Writing["binding"]; slot: number } | undefined>(undefined);
+  const focusOnRevealRef = useRef(false);
+  const currentView = shell.state?.trail.at(-1);
+  const onComms = isCommsView(currentView);
+  const assistantDetent = shell.state?.assistant ?? "Bar";
+  const compact = assistantDetent === "Bar" && currentView !== undefined && currentView !== "Browser" && !onComms;
+  const composerField = useCallback((element: HTMLTextAreaElement | null) => {
+    composerRef.current = element;
+    if (element && !compact && focusOnRevealRef.current) {
+      focusOnRevealRef.current = false;
+      if (assistantDetent === "Typing") element.focus();
+    }
+  }, [assistantDetent, compact]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileTargetRef = useRef<{ binding: Writing["binding"]; slot: number } | undefined>(undefined);
   const [talking, shown, writing, finding] = [conversation.state, chats.state, composer.state, search.state];
   const free = talking && shown && writing ? freedom(talking, writing, shown.chosen) : { replying: true, holding: true };
   const lines = !shown || (shown.page.status === "Idle" && shown.chosen === 0) ? emptyLines : seen.pages.get(shown.page.ticket)?.lines ?? emptyLines;
@@ -134,8 +147,9 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const hold = { type: "hold", askable: askable(talking) } as const;
   const start = { type: "start", ...free } as const;
   const newChat = shown.chosen === 0;
-  const onComms = isCommsView(shell.state?.trail.at(-1));
   const subject = onComms ? comms.state?.key : undefined;
+  const brief = subject !== undefined && comms.state?.briefed === subject && shell.state?.trail.at(-1) === "Phone"
+    ? runtime.runSync(CommsBriefing.use((reading) => reading.forSubject(subject))) : "";
   const request = subject === undefined ? "" : (comms.state?.requests.find((draft) => draft.about === subject)?.request ?? "");
   const sendable = subject !== undefined
     ? request.trim() !== "" && request.length <= textLimit && askable(talking) && (!newChat || chats.can(start))
@@ -188,17 +202,17 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const mediaCards = seen.media.filter((card) => !talking.context.sensitive && card.conversation === shown.chosen && card.revision === talking.context.revision).map((card) => ({
     id: `media ${card.id}`, author: "alpha" as const, text: "", children: (
       <div className="grid gap-2">
-        <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, action: card.action ?? "Approve" }}
+        <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, action: "Approve" }}
           onHandOn={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, true)))} />
         <Button className="justify-self-end" variant="ghost" onClick={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, false)))}>Decline</Button>
       </div>
     ),
   }));
-  const mediaNote = seen.mediaNote === "" ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote }];
+  const mediaNote = talking.context.sensitive || seen.mediaNote?.conversation !== shown.chosen
+    ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote.text }];
   const failed = seen.failure === undefined ? [] : [{ id: "failure", author: "alpha", text: "", children: <ReplyFailure {...seen.failure} fix={seen.failure.kind === "OutOfFunds" ? "FundingFix" : seen.failure.fix} live onRetry={() => type(board.lastSent)} onSettings={settingsAction ? onSettings : undefined} /> } as const];
   const quoted = board.line(shown.chosen, writing.editor.quote)?.text;
   const view = talking.context.showing.tag === "App" ? talking.context.showing.view : "Home";
-  const assistantDetent = shell.state?.assistant ?? "Bar";
   const open = dockOpen(assistantDetent);
   const full = assistantDetent === "Full";
   const keptHeight = assistantDetent === "Sheet" && dock.state && dock.state.kept > 0 ? dock.state.kept : undefined;
@@ -207,6 +221,14 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       if (ask.tag === "Raise" && shell.can({ type: "raise", detent: ask.detent })) void shell.send({ type: "raise", detent: ask.detent });
     }
     if (focusField) composerRef.current?.focus();
+  };
+  const revealComposer = () => {
+    const typing = { type: "raise", detent: "Typing" } as const;
+    if (!shell.can(typing)) return;
+    focusOnRevealRef.current = true;
+    void shell.send(typing).then((sent) => {
+      if (sent._tag === "Failure") focusOnRevealRef.current = false;
+    });
   };
   const grabber = shell.state ? (
     <AssistantGrabber
@@ -219,12 +241,12 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       }}
       onLift={() => {
         void dock.send({ type: "lift", now: untimed });
-        if (!open) composerRef.current?.focus();
+        if (!open && !compact) composerRef.current?.focus();
       }}
       onCancel={() => { void dock.send({ type: "shift", now: untimed }); }}
       onTap={({ keyboard }) => {
         void dock.send({ type: "click", now: untimed });
-        if (!open && keyboard) composerRef.current?.focus();
+        if (!open && keyboard && !compact) composerRef.current?.focus();
       }}
     />
   ) : undefined;
@@ -237,9 +259,9 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         src={`data:${previewed.mimeType};base64,${previewed.data}`}
         onOpenChange={(open) => { if (!open && attachments.can({ type: "closePreview" })) void attachments.send({ type: "closePreview" }); }}
       />}
-      <input ref={fileInput} type="file" accept={acceptedFiles} multiple hidden onChange={(event) => {
-        const target = fileTarget.current;
-        fileTarget.current = undefined;
+      <input ref={fileInputRef} type="file" accept={acceptedFiles} multiple hidden onChange={(event) => {
+        const target = fileTargetRef.current;
+        fileTargetRef.current = undefined;
         const files = Array.from(event.currentTarget.files ?? []);
         event.currentTarget.value = "";
         if (target && files.length > 0) void runtime.runPromise(insertFiles(target.binding, target.slot, files));
@@ -265,7 +287,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         attachmentNotice={onComms ? undefined : seen.attachmentNotice}
         transcript={{
           messages,
-          liveMessages: [...writingReply, ...failed, ...mediaCards, ...mediaNote],
+          liveMessages: [...(brief === "" ? [] : [{ id: `briefing:${subject}`, author: "alpha" as const, text: brief }]), ...writingReply, ...failed, ...mediaCards, ...mediaNote],
           position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around) },
           visible: open,
           status: shown.page.status === "Loading" ? "loading" : shown.page.status === "Failed" ? "failed" : "loaded",
@@ -281,10 +303,10 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
             openWithFocus(false);
             speech.onDictate?.();
           },
-          fieldRef: composerRef,
+          fieldRef: composerField,
           value: subject === undefined ? seen.typed : request,
           onValueChange: type,
-          placeholder: onComms ? "Ask Alpha" : undefined,
+          placeholder: onComms ? "Ask Alpha" : assistantDetent === "Bar" && currentView === "Browser" ? "Ask about this page" : undefined,
           leading: onComms ? <CommsTarget runtime={runtime} placement="composer" /> : undefined,
           closed: subject === undefined && !composer.can({ type: "edit", blank: false, long: false }),
           notice: notice === undefined || onComms ? undefined : {
@@ -309,16 +331,20 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           quote: onComms ? undefined : quoted,
           editing: !onComms && writing.editor.editing > 0,
           opener: !open ? grabber : undefined,
-          onOpen: !open && !grabber ? () => openWithFocus(true) : undefined,
-          onSend: sendable && !inFlight(talking.turn) ? send : undefined,
+          onOpen: !open && !grabber ? () => openWithFocus(!compact) : undefined,
+          onType: compact ? revealComposer : undefined,
+          onSend: sendable && !inFlight(talking.turn) ? () => {
+            if (assistantDetent === "Typing") openWithFocus(false);
+            send();
+          } : undefined,
           onStop: conversation.can({ type: "stop" }) ? () => void conversation.send({ type: "stop" }) : undefined,
           stopping: talking.turn.stopping,
           onAttach: !onComms && composer.can({ type: "attach", count: 1 }) ? () => {
-            fileTarget.current = { binding: writing.binding, slot: writing.read.ticket };
+            fileTargetRef.current = { binding: writing.binding, slot: writing.read.ticket };
             openWithFocus(false);
-            fileInput.current?.click();
+            fileInputRef.current?.click();
           } : undefined,
-          onFocusField: () => openWithFocus(false),
+          onFocusField: assistantDetent === "Typing" ? undefined : () => openWithFocus(false),
           onHistory: () => {
             void chats.send({ type: "browse" });
             setListing(true);
@@ -326,7 +352,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           onSearch: search.can({ type: "openSearch" }) ? () => { void chats.send({ type: "browse" }); void search.send({ type: "openSearch" }); } : undefined,
           onNew: chats.can(start) ? () => void chats.send(start) : undefined,
           making: making(shown),
-          onClick: !open ? (event) => {
+          onClick: assistantDetent === "Bar" && !compact ? (event) => {
             if (event.target instanceof Element && event.target.closest("button, textarea")) return;
             openWithFocus(true);
           } : undefined,

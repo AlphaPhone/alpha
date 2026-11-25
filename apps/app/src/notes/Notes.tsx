@@ -1,7 +1,7 @@
 // spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Organise my notes"; spec/app/notes/editor.md, "Story: Write a note"; spec/app/notes/trash.md, "Story: Delete a note and get it back"
-import { Alert, AppHeader, Button, Chip, EmptyState, Input, LinkNoteView, Menu, MenuContent, MenuItem, MenuTrigger, NoteEditor as NoteForm, NoteRow, NotesList as NoteRows, Spinner, VoiceNoteView } from "@repo/ui";
-import { ArrowLeft, Ellipsis, FileDown, Folder, Mail, MessageSquare, Mic, Plus, Trash2 } from "lucide-react";
+import { Alert, AppHeader, Button, Chip, Input, LinkNoteView, Menu, MenuContent, MenuItem, MenuTrigger, NoteEditor as NoteForm, NoteRow, NotesList as NoteRows, VoiceNoteView } from "@repo/ui";
 import { Effect } from "effect";
+import { Ellipsis, FileDown, Folder, Mail, MessageSquare, Mic, Plus, Trash2 } from "lucide-react";
 import { useState, useSyncExternalStore, type FormEvent } from "react";
 import * as Notes from "../../gen/app__notes.ts";
 import * as Editor from "../../gen/app__notes__editor.ts";
@@ -18,22 +18,20 @@ import { useMachine as useVoice } from "../../gen/app__notes__voice.react.ts";
 import { NoteDocuments } from "../platform/noteDocuments.vibe";
 import { NoteDevice } from "../platform/noteDevice.vibe";
 import { unfinished } from "../../gen/app__notes__recording.ts";
-import type { Alpha, Resident } from "../runtime/area.tsx";
-import { untimed } from "../runtime/reactor.vibe";
-import { useTimed } from "../runtime/react.ts";
+import type { Alpha } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
-import { type Collection, type DraftWords, NoteContent, audioIdOf, hasContent, numberOf } from "./content.vibe";
+import { type Collection, type DraftWords, NoteContent, audioIdOf, hasContent } from "./content.vibe";
 import { type Fields, NoteEditor } from "./editor.vibe";
 import { enter } from "./notes.vibe";
 import { record } from "./recording.vibe";
 import { Previous } from "./Previous.tsx";
-import { clock, dated, preview } from "./present.ts";
+import { clock, dated, preview, titleOf } from "./present.ts";
 import { Recording } from "./Recording.tsx";
+import { RecentlyDeleted } from "./RecentlyDeleted.tsx";
 import { pageOf } from "./sides.vibe";
 
 type Runtime = Alpha["runtime"];
 type Form = { readonly op: "AddFolder" } | { readonly op: "RenameFolder"; readonly folder: Notes.Folder };
-const titleOf = (note: Collection["noteByNumber"] extends ReadonlyMap<number, infer T> ? T : never) => note.title.trim() || "Untitled";
 
 const transferNotices = {
   Done: "Saved.",
@@ -59,15 +57,16 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
   const actions = useActions(runtime);
   const bin = useTrash(runtime).state;
   const transfer = useTransfer(runtime);
-  const hasDocuments = runtime.runSync(NoteDocuments.use((device) => Effect.succeed(device.available)));
+  const hasDocuments = runtime.runSync(NoteDocuments).available;
+  const writer = runtime.runSync(NoteEditor);
   const [next, setNext] = useState("");
   const current = writing.state;
   if (!current?.showing) return null;
   const owner = (event: Editor.Event) => writing.can(event, "Owner");
   const send = (event: Editor.Event) => void writing.send(event, "Owner");
-  const edit = (fields: Partial<Fields>) => void runtime.runPromise(NoteEditor.use((writer) => writer.typed(fields)));
+  const edit = (fields: Partial<Fields>) => void runtime.runPromise(writer.typed(fields));
   const action = (kind: "close" | "save" | "takeSaved" | "keepMine" | "keepAsNew") =>
-    void runtime.runPromise(NoteEditor.use((writer) => writer[kind]()));
+    void runtime.runPromise(writer[kind]());
   const close = owner({ type: "close" }) ? () => action("close") : undefined;
   const checklist = saved.kind === "Checklist";
   const deletion: Editor.Event = { type: "deleteNote", ready: bin !== undefined && Trash.ready(bin) };
@@ -130,48 +129,6 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
         {current.failed && owner({ type: "save" }) && hasContent(saved) && <Button className="self-start" size="sm" onClick={() => action("save")}>Try again</Button>}
       </>}
     />
-  );
-}
-
-function TrashScreen({ runtime, collection }: { readonly runtime: Runtime; readonly collection: Collection }) {
-  const model = useTimed(runtime, useTrash);
-  const state = model.state;
-  if (!state?.showing && state?.question !== "AskFull") return null;
-  const owner = (event: Trash.Event) => model.can(event, "Owner");
-  const send = (event: Trash.Event) => void model.send(event, "Owner");
-  const opened = collection.trash.find((item) => numberOf("note", item.note.id) === state.opened);
-  return (
-    <section aria-label="Recently deleted" className="flex min-h-0 flex-1 flex-col">
-      <AppHeader title="Recently deleted" leading={<Button size="icon" variant="ghost" aria-label="Back to notes" onClick={() => send({ type: "back" })}><ArrowLeft /></Button>}>
-        {owner({ type: "askEmpty" }) && <Button variant="ghost" onClick={() => send({ type: "askEmpty" })}>Delete all</Button>}
-      </AppHeader>
-      <div className="flex flex-col gap-3 px-6">
-        {state.read.status === "Loading" && <Spinner label="Reading deleted notes" />}
-        {state.read.status === "Failed" && <Alert variant="warn">Recently deleted is unavailable</Alert>}
-        {state.failed && <Alert variant="warn">Couldn't change Recently deleted</Alert>}
-        {state.unsure && <Alert variant="warn">Alpha couldn't confirm the last change</Alert>}
-        {state.read.status === "Loaded" && state.entries.length === 0 && <EmptyState title="No recently deleted notes" />}
-        {state.question !== "NoQuestion" && <Alert variant="warn">
-          {state.question === "AskFull" ? "Recently deleted is full." : state.question === "AskEmpty" ? "Permanently delete every note in Recently deleted?" : "Permanently delete this note?"}
-          <div className="mt-2 flex gap-2">
-            {owner({ type: "cancel" }) && <Button variant="secondary" onClick={() => send({ type: "cancel" })}>Cancel</Button>}
-            {state.question !== "AskFull" && owner({ type: "confirm", now: untimed, storage: true }) && <Button variant="destructive" onClick={() => send({ type: "confirm", now: untimed, storage: true })}>Delete forever</Button>}
-          </div>
-        </Alert>}
-        {opened ? <article className="pb-4"><h2 className="font-display text-2xl">{titleOf(opened.note)}</h2><p className="whitespace-pre-wrap">{opened.note.body}</p></article> : state.entries.map((entry) => {
-          const saved = collection.trash.find((row) => numberOf("note", row.note.id) === entry.id);
-          if (saved === undefined) return null;
-          const view = { type: "openEntry", id: entry.id } as const;
-          const recover = { type: "recover", id: entry.id, now: untimed, storage: true } as const;
-          const erase = { type: "askErase", id: entry.id } as const;
-          return <div className="flex flex-wrap items-center gap-2 border-b py-2" key={entry.id}>
-            <Button variant="ghost" className="mr-auto" disabled={!owner(view)} onClick={() => send(view)}>{titleOf(saved.note)}</Button>
-            {owner(recover) && <Button size="sm" variant="secondary" onClick={() => send(recover)}>Recover</Button>}
-            {owner(erase) && <Button size="icon" variant="ghost" aria-label={`Delete ${titleOf(saved.note)} forever`} onClick={() => send(erase)}><Trash2 /></Button>}
-          </div>;
-        })}
-      </div>
-    </section>
   );
 }
 
@@ -262,10 +219,11 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
   const recorder = useRecorder(runtime).state;
   const previous = usePrevious(runtime);
   const transfer = useTransfer(runtime);
-  const hasDocuments = runtime.runSync(NoteDocuments.use((device) => Effect.succeed(device.available)));
-  const hasMic = runtime.runSync(NoteDevice.use((device) => Effect.succeed(device.available)));
-  const content = runtime.runSync(NoteContent.use((read) => Effect.succeed(read)));
-  const data = useSyncExternalStore((listener) => content.subscribe(listener), () => content.snapshot(), () => content.snapshot());
+  const hasDocuments = runtime.runSync(NoteDocuments).available;
+  const hasMic = runtime.runSync(NoteDevice).available;
+  const writer = runtime.runSync(NoteEditor);
+  const content = runtime.runSync(NoteContent);
+  const data = useSyncExternalStore(content.subscribe, content.snapshot, content.snapshot);
   const [form, setForm] = useState<Form>();
   const [folderName, setFolderName] = useState("");
   const state = list.state;
@@ -275,10 +233,13 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
   const listEvent = (event: Notes.Event) => void list.send(event, "Owner");
   const can = (event: Notes.Event) => list.can(event, "Owner");
   if (previous.state?.showing) return <Previous runtime={runtime} />;
-  if (bin.state?.showing || bin.state?.question === "AskFull") return <TrashScreen runtime={runtime} collection={collection} />;
+  if (bin.state?.showing) return <RecentlyDeleted runtime={runtime} collection={collection} />;
   if (links.state?.showing) return <LinkedNote runtime={runtime} collection={collection} />;
   if (voice.state?.showing) return <VoiceNote runtime={runtime} collection={collection} />;
-  if (writing.showing && draft !== undefined) return <EditorScreen runtime={runtime} saved={draft} />;
+  if (writing.showing && draft !== undefined) return <>
+    <EditorScreen key={writing.note} runtime={runtime} saved={draft} />
+    {bin.state?.question === "AskFull" && <RecentlyDeleted runtime={runtime} collection={collection} />}
+  </>;
   if (recorder !== undefined && unfinished(recorder)) return <Recording alpha={alpha} runtime={runtime} />;
   const available = Notes.readyForNew(state);
   const newNote = { type: "newNote", kind: "Text", available, covered: false, folder: state.filter } as const;
@@ -325,7 +286,7 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
     <section aria-label="Notes" data-alpha-subview="notes-list" className="flex min-h-0 flex-1 flex-col">
       <AppHeader title="Notes" leading={<AppBack alpha={alpha} />}>
         {available && hasMic && !Editor.waiting(writing) && <Button size="icon" variant="ghost" aria-label="Record voice note" onClick={() => void runtime.runPromise(record)}><Mic /></Button>}
-        {editor.can(newNote, "Owner") && <Button size="icon" variant="ghost" aria-label="New note" onClick={() => void runtime.runPromise(NoteEditor.use((writer) => writer.newNote("Text", available, state.filter, false)))}><Plus /></Button>}
+        {editor.can(newNote, "Owner") && <Button size="icon" variant="ghost" aria-label="New note" onClick={() => void runtime.runPromise(writer.newNote("Text", available, state.filter, false))}><Plus /></Button>}
         {bin.can(openTrash, "Owner") && <Menu>
           <MenuTrigger asChild><Button size="icon" variant="ghost" aria-label="Notes options"><Ellipsis /></Button></MenuTrigger>
           <MenuContent align="end">
@@ -352,9 +313,9 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
           {writing.unreadable && hasDocuments && transfer.can(rescueDraft, "Owner") && <Button size="sm" onClick={() => void transfer.send(rescueDraft, "Owner")}>Save out draft</Button>}
           {editor.can({ type: "askDrop" }, "Owner") && <Button size="sm" variant="secondary" onClick={() => void editor.send({ type: "askDrop" }, "Owner")}>Discard draft</Button>}
           {writing.dropping && editor.can({ type: "cancelDrop" }, "Owner") && <Button size="sm" variant="secondary" onClick={() => void editor.send({ type: "cancelDrop" }, "Owner")}>Keep draft</Button>}
-          {editor.can({ type: "dropDraft" }, "Owner") && <Button size="sm" variant="destructive" onClick={() => void runtime.runPromise(NoteEditor.use((writer) => writer.discard()))}>Discard permanently</Button>}
+          {editor.can({ type: "dropDraft" }, "Owner") && <Button size="sm" variant="destructive" onClick={() => void runtime.runPromise(writer.discard())}>Discard permanently</Button>}
           {editor.can(reopen, "Owner") && <Button size="sm" onClick={() => void editor.send(reopen, "Owner")}>Reopen</Button>}
-          {editor.can({ type: "discardDraft" }, "Owner") && <Button size="sm" variant="secondary" onClick={() => void runtime.runPromise(NoteEditor.use((writer) => writer.discard()))}>Discard</Button>}
+          {editor.can({ type: "discardDraft" }, "Owner") && <Button size="sm" variant="secondary" onClick={() => void runtime.runPromise(writer.discard())}>Discard</Button>}
         </div>}
         {state.writing.outcome === "Unknown" && <Alert variant="warn">Alpha couldn't confirm the last change</Alert>}
         {state.writing.outcome === "Refused" && <Alert variant="warn">The note or folder couldn't be changed</Alert>}
@@ -374,7 +335,7 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
 }
 
 /** @model spec/app/notes/index.md */
-export function NotesScreen({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime: import("effect").ManagedRuntime.ManagedRuntime<Resident, unknown> }) {
+export function NotesScreen({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime: Runtime }) {
   const notes = useNotes(runtime);
   if (notes.cause) return <Alert variant="destructive" className="m-4">Alpha couldn't open Notes</Alert>;
   if (notes.state === undefined) return null;

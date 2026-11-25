@@ -1,14 +1,18 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Machine as List } from "../gen/app__inbox.effect.vibe";
 import { Machine as Marks } from "../gen/app__inbox__marking.effect.vibe";
 import { Machine as Shown } from "../gen/app__inbox__message.effect.vibe";
 import { Machine as Changes } from "../gen/app__inbox__sending.effect.vibe";
 import { Machine as Writing } from "../gen/app__inbox__drafts.effect.vibe";
 import { Machine as Offering } from "../gen/app__inbox__suggestion.effect.vibe";
+import { Machine as Shell } from "../gen/app__shell.effect.vibe";
+import home from "../src/home/index.tsx";
+import type { Alpha } from "../src/runtime/area.tsx";
 import { useInEmail } from "../src/inbox/suggestion.vibe";
 import inbox from "../src/inbox/index.tsx";
-import { button, closeAll, drawn, fill, hardware, later, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, only, open, press, underAct, until } from "./alpha.tsx";
 import { letter } from "./fakes/inbox.ts";
 import { scene } from "./fakes/scene.ts";
 
@@ -346,4 +350,29 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
     document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.value,
     world.inbox.changes.length,
   ]).toEqual(["unfinished@", "Keep these words.", 2]);
+});
+
+// spec/app/home/cards.md, "The mail card shows the unread count, senders and subjects only, never a message body; marked not up to date when Inbox's page is not, and not drawn without an account or a row"
+it("shows the authorized first page of unread Inbox mail on Home", async () => {
+  const world = scene();
+  world.inbox.mail.splice(0, world.inbox.mail.length, letter(1, "A private subject", ["INBOX", "UNREAD"], "A private message body"));
+  for (let id = 2; id <= 27; id++) world.inbox.mail.push(letter(id, `Read mail ${id}`, ["INBOX"], "", "Sender", Date.UTC(2026, 9, 31, 0, id)));
+  const { alpha } = await open(world, only("home", "view:Inbox"));
+  const inboxState = inbox.runtime(alpha);
+  async function homeIsReady(app: Alpha) {
+    await until(app, home.runtime(app), Home, (state) => state.tiles.load.status === "Loaded");
+  }
+  await homeIsReady(alpha);
+  await tile("Inbox");
+  await until(alpha, inboxState, List, (state) => state.list.status === "Loaded" && state.pages === 1);
+  expect(document.querySelectorAll("h1")).toHaveLength(1);
+  await press("Back to apps");
+  await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0);
+  await homeIsReady(alpha);
+  const card = button("Open Inbox, 1+ unread");
+  expect(card?.textContent).toContain("A private subject");
+  expect(card?.textContent).toContain("Sender 1");
+  expect(card?.textContent).not.toContain("A private message body");
+  await press("Open Inbox, 1+ unread");
+  await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Inbox");
 });

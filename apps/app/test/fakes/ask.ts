@@ -17,12 +17,17 @@ export interface AskScene {
   /** How many reads of a conversation's messages, and of the list of conversations, the agent was asked. */
   pageReads: number;
   listReads: number;
+  /** While set, the agent holds each answer to a read of the list until the test lets it go. */
+  holdLists: boolean;
+  readonly heldLists: (() => void)[];
   acknowledgment?: string;
   metadata?: unknown[];
   /** The failure fields of the resident's terminal reply. */
   refusal?: Pick<TurnReply, "cloudCode" | "planAction"> & { readonly failureKind: NonNullable<TurnReply["failureKind"]> };
   nextReplyChunks?: readonly string[];
   nextReplyProvisional?: boolean;
+  /** The actions the next reply says it ran, made from the turn's metadata, as eliza's agent lists them on its done frame. */
+  nextActions?: (metadata: unknown) => readonly unknown[];
   cloudWarmCalls: number;
 }
 
@@ -33,7 +38,7 @@ export interface Kept {
 }
 
 export function askScene(): AskScene {
-  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, pagesDown: false, pagesMissing: false, pageReads: 0, listReads: 0, cloudWarmCalls: 0 };
+  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, pagesDown: false, pagesMissing: false, pageReads: 0, listReads: 0, holdLists: false, heldLists: [], cloudWarmCalls: 0 };
 }
 
 const encoder = new TextEncoder();
@@ -41,11 +46,13 @@ const frame = (data: unknown) => encoder.encode(`data: ${JSON.stringify(data)}\n
 /** What ends a turn, as eliza's agent names its messages (`.eliza/packages/agent/src/client/reply-frame.schema.vibe`, `DoneFrame`). */
 const named = (turn: number) => ({ messageId: `m${turn}a`, userMessageId: `m${turn}u`, agentName: "Alpha", actionResults: [] });
 
-function reply(scene: AskScene, room: string, text: string, keep: (said: string) => void): Response {
+function reply(scene: AskScene, room: string, text: string, keep: (said: string) => void, metadata: unknown): Response {
   const custom = scene.nextReplyChunks;
   const provisional = scene.nextReplyProvisional;
+  const actions = scene.nextActions?.(metadata) ?? [];
   scene.nextReplyChunks = undefined;
   scene.nextReplyProvisional = undefined;
+  scene.nextActions = undefined;
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
       controller.enqueue(frame({ type: "status", activity: "thinking" }));
@@ -65,7 +72,7 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
         for (const piece of custom) controller.enqueue(frame({ type: "token", text: piece, ...(provisional ? { provisional } : {}) }));
         const full = custom.join("");
         keep(full);
-        controller.enqueue(frame({ type: "done", fullText: full, ...named(scene.said.length) }));
+        controller.enqueue(frame({ type: "done", fullText: full, ...named(scene.said.length), actionResults: actions }));
         controller.close();
         return;
       }
@@ -92,7 +99,8 @@ export function askRoutes(scene: AskScene): Route[] {
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== "/api/conversations") return;
       scene.listReads += 1;
-      return Response.json({ conversations: [...scene.kept].map(([id, one]) => ({ id, roomId: one.roomId, title: one.title, createdAt: 0, updatedAt: 0 })) });
+      const listing = Response.json({ conversations: [...scene.kept].map(([id, one]) => ({ id, roomId: one.roomId, title: one.title, createdAt: 0, updatedAt: 0 })) });
+      return scene.holdLists ? new Promise<Response>((resolve) => void scene.heldLists.push(() => resolve(listing))) : listing;
     },
     (request, url) => {
       const id = /^\/api\/conversations\/([^/]+)\/messages$/.exec(url.pathname)?.[1];
@@ -138,7 +146,7 @@ export function askRoutes(scene: AskScene): Route[] {
         scene.said.push(body.text);
         keep("user", body.text);
         Object.assign(messages.at(-1) ?? {}, { clientMessageId: (body as { clientMessageId?: string }).clientMessageId });
-        return reply(scene, `r${found[1]}`, body.text, (said) => keep("assistant", said));
+        return reply(scene, `r${found[1]}`, body.text, (said) => keep("assistant", said), body.metadata);
       });
     },
     (request, url) => {

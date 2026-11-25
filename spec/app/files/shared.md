@@ -18,14 +18,17 @@ turns into its receipt.
 
 The revision is the time the phone says the file last changed, and the
 size is in bytes as the phone last listed it; a folder's size is zero.
+A PDF is a document that the phone identified by its media type.
 
 ```quint
 import read as R from "../../kit/read"
 import attempt as A from "../../kit/attempt"
 import draft as D from "../../kit/draft"
 
-type Kind = Folder | Image | Video | Audio | Document | Download | Other
+type Kind = Folder | Image | Video | Audio | Document | Pdf | Download | Other
 type Item = { id: int, name: str, revision: int, kind: Kind, volume: int, bytes: int }
+
+pure def fitsKind(kind: Kind, actual: Kind): bool = actual == kind or (kind == Document and actual == Pdf)
 ```
 
 ### A new name is not empty and not one already used beside it

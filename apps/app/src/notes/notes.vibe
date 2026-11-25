@@ -8,7 +8,7 @@ import * as Recorder from "../../gen/app__notes__recording.effect.vibe"
 import * as Previous from "../../gen/app__notes__previous.effect.vibe"
 import * as Transfer from "../../gen/app__notes__transfer.effect.vibe"
 import * as Trash from "../../gen/app__notes__trash.effect.vibe"
-import type { Actor } from "../../gen/app__notes__note.effect.vibe"
+import type { Actor, Request } from "../../gen/app__notes__note.effect.vibe"
 import { unlinked } from "../../gen/app__notes__note.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import type { Agent } from "../platform/agent.vibe"
@@ -19,6 +19,7 @@ import { type Job, answer, reacting, run, started, together } from "../runtime/r
 import { actions } from "./actions.vibe"
 import { NoteContent, formatChanged, fromSaved, noteContent, numberOf } from "./content.vibe"
 import { NoteEditor, editing } from "./editor.vibe"
+import { Opens, opens } from "./opens.vibe"
 import { ownerRecords, recording } from "./recording.vibe"
 import { ownerEarlier, previous } from "./previous.vibe"
 import { transfers } from "./transfer.vibe"
@@ -77,7 +78,9 @@ effect function written(owner: number, ticket: number, change: Notes.Change): No
   } catch (error) => ({ ...failed, known: error.known })
 }
 
-effect function opened(row: Notes.Row) {
+// spec/app/notes/index.md, "The owner opens a note the list shows, when nothing else of Notes is open, and it opens as listed"; spec/app/notes/index.md, "The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened"
+/** Open `row` as its kind needs, in the name of `by` and for the owner's request `req` an agent's open carries. */
+effect function opened(row: Notes.Row, by: Actor, req: Request) {
   const content = try NoteContent
   const current = try content.collection()
   const note = current.noteByNumber.get(row.id)
@@ -90,20 +93,36 @@ effect function opened(row: Notes.Row) {
     const segments = Array.isArray(format?.segments) ? Math.max(1, format.segments.length) : 1
     const heard = Array.isArray(format?.lines) && format.lines.length > 0 ? segments : 0
     const summary = Array.isArray(format?.summary) && format.summary.length > 0 ? heard : 0
-    try ignore((try Voice.Machine).send({ type: "openVoice", note: id, revision, segments, heard, summary, covered: false }, "Owner"))
+    try ignore((try Voice.Machine).send({ type: "openVoice", note: id, revision, segments, heard, summary, covered: false, req }, by))
   } else {
     const editor = try Editor.Machine
-    const moved = editor.send({ type: "openNote", id, revision, kind, link, covered: false }, "Owner") catch () => undefined
+    const moved = editor.send({ type: "openNote", id, revision, kind, link, covered: false, req }, by) catch () => undefined
     if (moved !== undefined) try content.showDraft(fromSaved(note, current.owner, revision))
   }
 }
 
-function carry(fx: Notes.Effect): Job<Notes.Event, Agent | Notes.Machine | Editor.Machine | NoteStore | NoteContent | Shell | Link.Machine | Voice.Machine, [Actor]> {
+/** Open what the agent named, then tell whoever waits on it whether the editor or voice note holds it now. */
+effect function openedForAgent(row: Notes.Row, req: Request) {
+  try opened(row, "Agent", req)
+  const editor = try (try Editor.Machine).get()
+  const voice = try (try Voice.Machine).get()
+  try (try Opens).settle(req.turn, (editor.showing && editor.note === row.id) || (voice.showing && voice.note === row.id))
+}
+
+/** Open what the list hands over; an agent's open, however its job ends, is told once whether it opened. */
+effect function shown(row: Notes.Row, by: Actor, req: Request) {
+  if (by !== "Agent") return try opened(row, by, req)
+  const opens = try Opens
+  try Effect.ensuring(openedForAgent(row, req), opens.settle(req.turn, false))
+}
+
+function carry(fx: Notes.Effect): Job<Notes.Event, Agent | Notes.Machine | Editor.Machine | NoteStore | NoteContent | Shell | Link.Machine | Voice.Machine | Opens, [Actor]> {
   return match (fx) {
     when { tag: "Lists" }: answer("list", listed(fx.owner, fx.ticket), { type: "listed", ticket: fx.ticket, ok: false, version: 0, rows: [], folders: [], shelf: 0 }, phone);
     when { tag: "Writes" }: answer(`write ${fx.ticket}`, written(fx.owner, fx.ticket, fx.change), { type: "changeWritten", ticket: fx.ticket, ok: false, known: false }, phone);
-    when { tag: "Shows" }: run("open", opened(fx.row), phone);
+    when { tag: "Shows" }: run(fx.by === "Agent" ? `agent open ${fx.req.turn}` : "open", shown(fx.row, fx.by, fx.req), phone);
     when { tag: "OpensAccount" }: run("account", effect { try ignore((try Shell).send({ type: "openView", view: "Settings" })) }, phone);
+    when { tag: "NotOpened" }: run("not opened", effect { try (try Opens).settle(fx.turn, false) }, phone);
   }
 }
 
@@ -155,8 +174,8 @@ const opening = started(effect {
   })
 }, "enter Notes")
 
-/** The Notes view observes these resident machines. The agent's store is opened only when Notes is requested. */
-export const notes = Layer.provideMerge(together(reacting(Notes, { carry }), editing, trashing, sides, recording, previous, transfers, actions, opening), Layer.merge(noteStore, noteContent))
+/** The Notes view observes these resident machines. The agent's store is opened only when Notes is requested; Ask Alpha waits here on the agent's open of a note. */
+export const notes = Layer.provideMerge(together(reacting(Notes, { carry }), editing, trashing, sides, recording, previous, transfers, actions, opening), Layer.mergeAll(noteStore, noteContent, opens))
 
 effect function took() {
   const prior = try Previous.Machine

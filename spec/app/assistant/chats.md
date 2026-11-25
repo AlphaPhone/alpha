@@ -102,15 +102,26 @@ pure def browse(c: Chats): Moved =
 
 ### The newest list says which conversations there are, and a conversation no longer listed stops showing
 
+Its page is left behind with it, so a read of it still loading, or waiting
+on the list after a 404, never keeps the new chat loading.
+
 ```quint
 pure def canListed(c: Chats, ticket: int, ids: List[int]): bool = R::canAnswer(c.list, ticket) and ids.every(i => i > 0)
 
 pure def listed(c: Chats, ticket: int, ok: bool, ids: List[int]): Chats =
   val listing = if (ok) ids else c.ids
   val chosen = if (listing.includes(c.chosen)) c.chosen else 0
+  val stays = chosen == c.chosen
   { ...c, list: R::answer(c.list, ok), ids: listing, chosen: chosen,
     origin: if (chosen > 0 and listing.includes(c.origin) and c.origin != chosen) c.origin else 0,
-    messages: if (chosen == c.chosen) c.messages else 0 }
+    page: if (stays) c.page else X::dropped(c.page), around: if (stays) c.around else 0,
+    messages: if (stays) c.messages else 0 }
+```
+
+### A new chat holds no conversation's page
+
+```quint
+pure def alwaysANewChatHoldsNoPage(c: Chats): bool = c.chosen == 0 implies c.page.status == R::Idle
 ```
 
 ### Another conversation is chosen only while the turn and the composer are free
@@ -316,16 +327,33 @@ pure def fork(c: Chats, message: int, replying: bool, holding: bool): Moved =
 
 ### What was made shows under the agent's number for it, a fork with the way back to its original; when nobody knows, the list is read again
 
+A list still being read when a conversation is made is read again, as
+the next rule says.
+
 ```quint
 pure def canMade(c: Chats, ticket: int, conversation: int): bool =
   A::canConclude(c.make, ticket) and conversation > 0 and conversation != c.chosen
 
 pure def made(c: Chats, ticket: int, confirmed: bool, known: bool, conversation: int): Moved =
   val ended = { ...c, make: A::conclude(c.make, confirmed, known) }
+  val added = shown(conversation, 0, if (c.forkAt > 0) c.chosen else 0, { ...ended, ids: c.ids.append(conversation) })
+  val again = browse(added.state)
   if (confirmed and known)
-    shown(conversation, 0, if (c.forkAt > 0) c.chosen else 0, { ...ended, ids: c.ids.append(conversation) })
+    if (c.list.status == R::Loading) { state: again.state, out: added.out.concat(again.out) } else added
   else if (not(known)) browse(ended)
   else { state: ended, out: List() }
+```
+
+### A list asked before a conversation was made is left behind, so its answer never takes that conversation away
+
+The agent's answer to a list read asked before the conversation existed
+cannot have it, so that read is left behind and the list is read again
+from what the agent now has.
+
+```quint
+pure def stepAListAskedBeforeAConversationWasMadeIsLeftBehind(before: Chats, via: str, after: Chats): bool =
+  (via == "made" and after.chosen != before.chosen and before.list.status == R::Loading)
+    implies after.list.ticket > before.list.ticket
 ```
 
 ### Back to the original leaves the fork for the conversation it came from
