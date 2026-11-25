@@ -20,7 +20,7 @@ export type CalendarFormPageProps = ComponentProps<"div"> & {
 export function CalendarFormPage({ onBack, onSave, actions, saving = false, className, children, ...props }: CalendarFormPageProps) {
   return (
     <div data-alpha-subview="calendar-form" className={cn("absolute inset-0 z-50 flex flex-col bg-background motion-safe:animate-fade", className)} {...props}>
-      <div data-host-chrome="" className="flex h-13 shrink-0 items-center gap-0.5 pr-2 pl-2">
+      <div data-host-chrome="" className="flex h-13 shrink-0 items-center gap-0.5 pr-4 pl-2">
         <CalendarHeaderAction aria-label="Back to calendar" onClick={onBack}><ChevronLeft aria-hidden /></CalendarHeaderAction>
         <span className="grow" />
         {actions ?? (
