@@ -38,8 +38,8 @@ export const meta: ComponentMeta<SettingsActivityPageProps> = {
       const canvas = within(canvasElement);
       await userEvent.click(canvas.getByRole("button", { name: "Decline" }));
       await userEvent.click(canvas.getByRole("button", { name: "Didn’t" }));
-      await userEvent.click(canvas.getByRole("button", { name: "Conversations" }));
-      await expect([onDecline.mock.calls, onReconcile.mock.calls, onHandOver.mock.calls]).toEqual([[["1"]], [["2", false]], [["conversations"]]]);
+      await expect(canvas.queryByRole("button", { name: "Conversations" })).toBeNull();
+      await expect([onDecline.mock.calls, onReconcile.mock.calls, onHandOver.mock.calls]).toEqual([[["1"]], [["2", false]], []]);
     },
     "Needs restart": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onRecover.mockClear();

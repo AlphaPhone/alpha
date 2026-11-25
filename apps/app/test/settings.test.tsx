@@ -89,10 +89,11 @@ describe("Settings", () => {
     await vi.waitFor(() => expect(button("Account")?.textContent).toContain("Signed out"));
     world.signedIn = true;
 
-    // spec/app/settings/index.md, "Each page links to what another area owns there": Agent activity offers the conversations, which the shell opens over the app.
+    // spec/app/settings/index.md, "Each page links to what another area owns there": Agent activity offers the conversations as Alpha's earlier build did, New and History; New starts one, which the shell opens over the app.
     await press("About");
     await press("Agent activity");
-    await press("Conversations");
+    expect([Boolean(button("New conversation")), Boolean(button("Load conversations"))]).toEqual([true, true]);
+    await press("New conversation");
     await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Full");
     expect((await machines.runPromise(Facts.Machine.use((facts) => facts.get()))).read.read.status).toBe("Loaded");
     expect(world.settings.opened).toEqual([]);
