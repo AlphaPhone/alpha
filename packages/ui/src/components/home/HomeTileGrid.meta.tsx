@@ -25,13 +25,15 @@ export const hiddenApps: Omit<HomeTileItem, "badge">[] = [
 
 const unbadged = homeTiles.map(({ badge: _badge, ...tile }) => tile);
 const onOpen = fn();
+const onOpenDrawer = fn();
 const onBeginEditing = fn();
 const onRemove = fn();
 const onMove = fn();
 
 export const meta: ComponentMeta<HomeTileGridProps> = {
-  args: { tiles: homeTiles, onOpen, onBeginEditing, onRemove, onMove },
+  args: { tiles: homeTiles, onOpen, onOpenDrawer: undefined, onBeginEditing, onRemove, onMove },
   examples: {
+    "With Apps drawer": { onOpenDrawer },
     Editing: { tiles: unbadged, editing: true },
     "Editing while saving": { tiles: unbadged, editing: true, onRemove: undefined, onMove: undefined },
     "Off the phone": { onBeginEditing: undefined },
@@ -47,6 +49,13 @@ export const meta: ComponentMeta<HomeTileGridProps> = {
       await fireEvent.contextMenu(canvas.getByRole("button", { name: "Maps" }));
       await expect([onOpen.mock.calls, onBeginEditing.mock.calls.length]).toEqual([[["Inbox"]], 1]);
       await expect(canvas.queryByRole("button", { name: "Apps" })).toBeNull();
+    },
+    "With Apps drawer": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+      onOpenDrawer.mockClear();
+      const apps = within(canvasElement).getByRole("button", { name: "Apps", exact: true });
+      await expect(apps).toHaveAttribute("aria-haspopup", "dialog");
+      await userEvent.click(apps);
+      await expect(onOpenDrawer).toHaveBeenCalledTimes(1);
     },
     Editing: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onMove.mockClear();
