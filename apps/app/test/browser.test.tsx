@@ -178,6 +178,19 @@ const libraryTab = (name: "History" | "Bookmarks") => drawn(() => {
   tab.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
 });
 
+const selectedPage = (runtime: ReturnType<typeof browser.runtime>) => {
+  const tab = runtime.runSync(Effect.map(Effect.flatMap(Tabs, (m) => m.get()), (s) => s.selected));
+  return { tab, page: runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab))) };
+};
+
+const askClearAll = async (alpha: Awaited<ReturnType<typeof onBrowser>>["alpha"], runtime: ReturnType<typeof browser.runtime>, choice: "Cancel" | "Clear data") => {
+  await press("Menu");
+  await press("Clear all browsing data");
+  await until(alpha, runtime, Tabs, (s) => s.erasing === "Asked");
+  await press(choice);
+  await until(alpha, runtime, Tabs, (s) => s.erasing === "Kept");
+};
+
 describe("The Browser on a phone", () => {
   it("Opens the saved Library (spec/app/browser/library.md, \"Story: Keep bookmarks\"; spec/app/browser/library.md, \"Story: Look back through history\"; spec/app/browser/address.md, \"Story: Go where I typed\")", async () => {
     const world = { ...scene(), phone: true, image: true };
@@ -825,8 +838,7 @@ describe("The Browser on a phone", () => {
     const { alpha, runtime, world } = await onBrowser();
     await until(alpha, runtime, Tabs, (s) => s.hydrated);
     await go("http://127.0.0.1");
-    const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
-    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
+    const { page } = selectedPage(runtime);
     await until(alpha, page, Page, (p) => p.phase === "Shown");
     expect([...world.browser.tabs.values()].map((one) => one.history[one.at])).toEqual(["http://127.0.0.1"]);
   });
@@ -835,24 +847,23 @@ describe("The Browser on a phone", () => {
     const { alpha, runtime } = await onBrowser();
     await until(alpha, runtime, Tabs, (s) => s.hydrated);
     await go("news.example/on-device-agents");
-    const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
-    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
+    const { page } = selectedPage(runtime);
     await until(alpha, page, Page, (p) => p.phase === "Shown");
     await press("Menu");
     await press("Find in page");
     await until(alpha, page, Page, (p) => p.finding);
-    await fill("Find in page", "agent");
+    await fill("Find in page", "the");
     await until(alpha, page, Page, (p) => p.find.status === "Loaded" && p.matches > 1);
-    const matches = page.runSync(Page.use((m) => m.get())).matches;
-    expect(document.body.textContent).toContain(`1 of ${matches}`);
+    const total = page.runSync(Page.use((m) => m.get())).matches;
+    expect(document.body.textContent).toContain(`1 of ${total}`);
     await press("Next match");
-    await expect.poll(() => document.body.textContent).toContain(`2 of ${matches}`);
+    await expect.poll(() => document.body.textContent).toContain(`2 of ${total}`);
   });
 
   it("Does not create a native tab when load is refused on a non-selected tab (spec/app/browser/index.md, \"A tab gets its native tab when it is the one shown and loads a page, and loses it if Android cannot make one\")", async () => {
     const { alpha, runtime, world } = await onBrowser();
     await until(alpha, runtime, Tabs, (s) => s.hydrated);
-    const first = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
+    const { tab: first } = selectedPage(runtime);
     await press("Menu");
     await press("New tab");
     await until(alpha, runtime, Tabs, (s) => s.open.length === 2 && s.selected !== first);
@@ -871,15 +882,12 @@ describe("The Browser on a phone", () => {
     await until(alpha, runtime, Library, (s) => s.read.status === "Loaded" && s.history === 3);
     await hardware("back");
     await go("https://alpha.example/fresh-visit");
-    const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
-    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
+    const { tab, page } = selectedPage(runtime);
     await until(alpha, page, Page, (p) => p.phase === "Shown");
     await until(alpha, runtime, Library, (s) => s.history === 4);
-    await press("Menu");
-    await press("Clear all browsing data");
-    await until(alpha, runtime, Tabs, (s) => s.erasing === "Asked");
-    await press("Clear data");
-    await until(alpha, runtime, Tabs, (s) => s.erasing === "Kept");
+    await askClearAll(alpha, runtime, "Cancel");
+    expect(runtime.runSync(Library.use((m) => m.get())).history).toBe(4);
+    await askClearAll(alpha, runtime, "Clear data");
     await until(alpha, runtime, Library, (s) => s.history === 0);
     expect(runtime.runSync(Effect.map(TabHost, (host) => host.session.info(`tab${tab}`)))).toBeUndefined();
   });

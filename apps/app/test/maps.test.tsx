@@ -44,6 +44,23 @@ async function typeMapSearch(text: string) {
 /** The places the results list shows, by name. */
 const results = () => [...document.querySelectorAll("section[aria-label=Maps] button")].map((found) => found.getAttribute("aria-label")).filter((name) => name?.startsWith("Harbour"));
 
+/** Open Maps on `world` and wait until its provider is installed when `ready` is true. */
+async function openMaps(world: ReturnType<typeof scene>, ready = true) {
+  const running = await open(world, withMaps);
+  await showMaps(running.alpha);
+  const runtime = maps.runtime(running.alpha);
+  if (ready) await until(running.alpha, runtime, Screen, (s) => s.link.provider !== 0);
+  return { ...running, runtime };
+}
+
+/** Focus Search Maps, submit `query`, and wait for search results or a dropped pin. */
+async function searchFor(alpha: Alpha, runtime: ReturnType<typeof maps.runtime>, query: string, pin = false) {
+  await focus("Search Maps");
+  await fill("Search Maps", query);
+  await enter("Search Maps");
+  await until(alpha, runtime, Screen, (s) => (pin ? s.place !== 0 : s.search.status === "Loaded"));
+}
+
 describe("Maps on a phone", () => {
   it("Search for a place, get directions and navigate (spec/app/maps/index.md, \"Story: Search for a place\"; spec/app/maps/index.md, \"Story: Get directions\"; spec/app/maps/index.md, \"Story: Navigate\")", async () => {
     const world = { ...scene(), phone: true };
@@ -387,32 +404,25 @@ describe("Maps in a browser", () => {
   it("Takes a quiet fix on open that fails silently and clears one-shot GPS watches (spec/app/maps/index.md, \"Opening Maps with location already allowed and nothing chosen takes one fix quietly, once a visit\"; spec/app/maps/index.md, \"A fix goes to whoever holds the location\")", async () => {
     const world = { ...scene(), phone: true };
     world.maps.here = undefined;
-    const first = await open(world, withMaps);
-    await showMaps(first.alpha);
-    const runtime = maps.runtime(first.alpha);
-    await until(first.alpha, runtime, Screen, (s) => s.link.locator !== "Nobody");
-    const locating = await runtime.runPromise(Effect.flatMap(Screen, (screen) => screen.get()));
+    const first = await openMaps(world, false);
+    await until(first.alpha, first.runtime, Screen, (s) => s.link.locator !== "Nobody");
+    const locating = await first.runtime.runPromise(Effect.flatMap(Screen, (screen) => screen.get()));
     expect([locating.link.locator, locating.quiet]).toEqual(["Finder", true]);
     await later(first.alpha, 16_000);
-    await until(first.alpha, runtime, Screen, (s) => s.link.locator === "Nobody");
-    const timedOut = await runtime.runPromise(Effect.flatMap(Screen, (screen) => screen.get()));
+    await until(first.alpha, first.runtime, Screen, (s) => s.link.locator === "Nobody");
+    const timedOut = await first.runtime.runPromise(Effect.flatMap(Screen, (screen) => screen.get()));
     expect([timedOut.missedFix, world.maps.watches.size]).toEqual([false, 0]);
     await first.close();
 
     const secondWorld = { ...scene(), phone: true };
-    const second = await open(secondWorld, withMaps);
-    await showMaps(second.alpha);
-    const secondRuntime = maps.runtime(second.alpha);
-    await until(second.alpha, secondRuntime, Screen, (s) => s.link.provider !== 0 && s.link.locator === "Nobody");
+    const second = await openMaps(secondWorld);
+    await until(second.alpha, second.runtime, Screen, (s) => s.link.locator === "Nobody");
     expect(secondWorld.maps.watches.size).toBe(0);
   });
 
   it("Never searches typed coordinates on pause, clears search results on empty input, and clears search text on Back (spec/app/maps/index.md, \"Recent searches are the last five, newest first, each once\"; spec/app/maps/index.md, \"Typing searches once the owner pauses for 350 milliseconds, and Enter searches at once\")", async () => {
     const world = scene();
-    const { alpha } = await open(world, withMaps);
-    await showMaps(alpha);
-    const runtime = maps.runtime(alpha);
-    await until(alpha, runtime, Screen, (s) => s.link.provider !== 0);
+    const { alpha, runtime } = await openMaps(world);
 
     await focus("Search Maps");
     await fill("Search Maps", "43.73, 7.42");
@@ -420,61 +430,49 @@ describe("Maps in a browser", () => {
     const afterCoords = await runtime.runPromise(Effect.flatMap(Screen, (screen) => screen.get()));
     expect([world.maps.asked.filter((a) => a.path.includes("/places/search")).length, afterCoords.recent]).toEqual([0, []]);
 
-    await fill("Search Maps", "harbour");
-    await enter("Search Maps");
-    await until(alpha, runtime, Screen, (s) => s.search.status === "Loaded" && s.results === 2);
+    await searchFor(alpha, runtime, "harbour");
+    await until(alpha, runtime, Screen, (s) => s.results === 2);
     await fill("Search Maps", "");
     await until(alpha, runtime, Screen, (s) => s.query === "" && s.results === 0);
 
     await fill("Search Maps", "harbour");
     await hardware("back");
     await until(alpha, runtime, Screen, (s) => !s.searching);
-    const input = document.querySelector<HTMLInputElement>("input[aria-label='Search Maps']");
-    expect(input?.value).toBe("");
+    expect(document.querySelector<HTMLInputElement>("input[aria-label='Search Maps']")?.value).toBe("");
   });
 
   it("Shows Maps unavailable, distinct Cloud wait notices, and missing Google map notice (spec/app/maps/connection.md, \"Only the newest read's answer is taken, while signed in, and a healthy answer installs the provider for that account\"; spec/app/maps/connection.md, \"A wait Cloud names holds every Maps request back until it ends: a rate limit for at most a day, a spent allowance for at most 400 days, and any other wait one minute\"; spec/app/maps/connection.md, \"Google's content is drawn only on Google's own map, whose only credit is the Google Maps badge\")", async () => {
     const unofferedWorld = scene();
     unofferedWorld.maps.coverage = { available: false };
-    const first = await open(unofferedWorld, withMaps);
-    await showMaps(first.alpha);
-    const firstRuntime = maps.runtime(first.alpha);
-    await until(first.alpha, firstRuntime, Screen, (s) => s.link.unoffered);
+    const first = await openMaps(unofferedWorld, false);
+    await until(first.alpha, first.runtime, Screen, (s) => s.link.unoffered);
     expect(document.body.textContent).toContain("Maps unavailable");
     await first.close();
 
     const googleWorld = scene();
     googleWorld.maps.coverage = { ...googleWorld.maps.coverage, providerId: "eliza-cloud-google" } as typeof googleWorld.maps.coverage;
-    const second = await open(googleWorld, withMaps);
-    await showMaps(second.alpha);
-    const secondRuntime = maps.runtime(second.alpha);
-    await until(second.alpha, secondRuntime, Screen, (s) => s.link.google);
+    const second = await openMaps(googleWorld, false);
+    await until(second.alpha, second.runtime, Screen, (s) => s.link.google);
     expect(document.body.textContent).toContain("The Google map is missing.");
     expect(document.querySelector("[role=application]")).toBeNull();
 
-    const account = (await secondRuntime.runPromise(Effect.flatMap(Screen, (screen) => screen.get()))).link.account;
+    const account = (await second.runtime.runPromise(Effect.flatMap(Screen, (screen) => screen.get()))).link.account;
     await act(async () => {
-      await secondRuntime.runPromise(Effect.flatMap(Screen, (screen) => screen.send({ type: "cloudWaits", wait: "Unnamed", seconds: 60, now: googleWorld.now, account })));
+      await second.runtime.runPromise(Effect.flatMap(Screen, (screen) => screen.send({ type: "cloudWaits", wait: "Unnamed", seconds: 60, now: googleWorld.now, account })));
     });
     expect(document.body.textContent).toContain("Maps request limit reached. Try again later.");
     await act(async () => {
-      await secondRuntime.runPromise(Effect.flatMap(Screen, (screen) => screen.send({ type: "cloudWaits", wait: "AllowanceSpent", seconds: 86_400 * 3, now: googleWorld.now, account })));
+      await second.runtime.runPromise(Effect.flatMap(Screen, (screen) => screen.send({ type: "cloudWaits", wait: "AllowanceSpent", seconds: 86_400 * 3, now: googleWorld.now, account })));
     });
     expect(document.body.textContent).toContain("You have used your Maps allowance for this period. It resets in 3 days.");
   });
 
-  it("Shows imprecise notice on stale fix, updates remaining guidance distance, and offers Share arrival in Guidance (spec/app/maps/navigation.md, \"A fix moves guidance only when it is precise, fresh and close: arrival within 25 meters, a turn passed within 40 meters or beyond 60, the route left beyond 75\"; spec/app/maps/navigation.md, \"Something remains ahead while going, and nothing once guidance stops or arrives\"; spec/app/maps/index.md, \"The card shares the place or the arrival time, opens its website, or opens it in the phone's maps app\")", async () => {
+  it("Shows imprecise notice on stale fix, updates remaining guidance distance, and offers Share arrival in Guidance (spec/app/maps/navigation.md, \"A fix moves guidance only when it is precise, fresh and close: arrival within 25 meters, a turn passed within 40 meters or after two fixes beyond 60, the route left beyond 75\"; spec/app/maps/navigation.md, \"Something remains ahead while going, and nothing once guidance stops or arrives\"; spec/app/maps/index.md, \"The card shares the place or the arrival time, opens its website, or opens it in the phone's maps app\")", async () => {
     const world = { ...scene(), phone: true };
     const start = { latitude: 43.7300, longitude: 7.4200 };
     world.maps.routes = [cloudRoute("fast", start, harbour.coordinate, 600, 3)];
-    const { alpha } = await open(world, withMaps);
-    await showMaps(alpha);
-    const runtime = maps.runtime(alpha);
-    await until(alpha, runtime, Screen, (s) => s.link.provider !== 0);
-    await focus("Search Maps");
-    await fill("Search Maps", "harbour");
-    await enter("Search Maps");
-    await until(alpha, runtime, Screen, (s) => s.search.status === "Loaded");
+    const { alpha, runtime } = await openMaps(world);
+    await searchFor(alpha, runtime, "harbour");
     await press("Harbour Cafe");
     await press("Directions");
     await until(alpha, runtime, Screen, (s) => s.trip.route !== 0);
@@ -495,39 +493,28 @@ describe("Maps in a browser", () => {
 
   it("Strips provider details from saved storage, enforces legacy 200-place limit, forgets details on leave, and blocks cross-provider saved origins (spec/app/maps/places.md, \"A saved place keeps its name, its coordinates and the provider's identity of it, and nothing else\"; spec/app/maps/places.md, \"A saved provider place is used only with the open-data provider that served it\"; spec/app/maps/index.md, \"A place's details are read from its provider once it is on the card, and shown only while it still is\")", async () => {
     const world = { ...scene(), phone: true };
-    const first = await open(world, withMaps);
-    await showMaps(first.alpha);
-    const runtime = maps.runtime(first.alpha);
-    await until(first.alpha, runtime, Screen, (s) => s.link.provider !== 0);
-    await focus("Search Maps");
-    await fill("Search Maps", "harbour");
-    await enter("Search Maps");
-    await until(first.alpha, runtime, Screen, (s) => s.search.status === "Loaded");
+    const first = await openMaps(world);
+    await searchFor(first.alpha, first.runtime, "harbour");
     await press("Harbour Cafe");
-    await until(first.alpha, runtime, Screen, (s) => s.place !== 0);
-    const cafe = (await runtime.runPromise(Effect.flatMap(Screen, (screen) => screen.get()))).place;
+    await until(first.alpha, first.runtime, Screen, (s) => s.place !== 0);
+    const cafe = (await first.runtime.runPromise(Effect.flatMap(Screen, (screen) => screen.get()))).place;
     await press("Save");
-    await until(first.alpha, runtime, Screen, (s) => s.saved.length === 1);
+    await until(first.alpha, first.runtime, Screen, (s) => s.saved.length === 1);
     const rawSaved = localStorage.getItem("alpha/maps/saved@1") ?? "";
     expect(rawSaved).not.toContain("+377 93 15 00 00");
     expect(rawSaved).not.toContain("\"phone\"");
 
     await seen(false);
-    await until(first.alpha, runtime, Screen, (s) => s.trip.away);
+    await until(first.alpha, first.runtime, Screen, (s) => s.trip.away);
     expect(atlas.spot(cafe)?.phone).toBeUndefined();
     await first.close();
     await seen(true);
 
     const otherWorld = scene();
     otherWorld.maps.coverage = { ...otherWorld.maps.coverage, providerId: "other-open" } as typeof otherWorld.maps.coverage;
-    const second = await open(otherWorld, withMaps);
-    await showMaps(second.alpha);
-    const secondRuntime = maps.runtime(second.alpha);
-    await until(second.alpha, secondRuntime, Screen, (s) => s.link.provider !== 0 && s.saved.length === 1);
-    await focus("Search Maps");
-    await fill("Search Maps", "48.85, 2.35");
-    await enter("Search Maps");
-    await until(second.alpha, secondRuntime, Screen, (s) => s.place !== 0);
+    const second = await openMaps(otherWorld);
+    await until(second.alpha, second.runtime, Screen, (s) => s.saved.length === 1);
+    await searchFor(second.alpha, second.runtime, "48.85, 2.35", true);
     await press("Directions");
     await fill("Starting point", "Harbour");
     expect(button("From Harbour Cafe")).toBeUndefined();
@@ -540,9 +527,7 @@ describe("Maps in a browser", () => {
         id: `p${index}`, label: `Place ${index}`, coordinate: { latitude: 43.7 + index * 0.0001, longitude: 7.4 }, savedAt: index + 1,
       })),
     }));
-    const third = await open(scene(), withMaps);
-    await showMaps(third.alpha);
-    const thirdRuntime = maps.runtime(third.alpha);
-    await until(third.alpha, thirdRuntime, Screen, (s) => s.link.provider !== 0 && !s.keepable);
+    const third = await openMaps(scene());
+    await until(third.alpha, third.runtime, Screen, (s) => !s.keepable);
   });
 });

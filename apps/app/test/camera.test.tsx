@@ -433,7 +433,7 @@ describe("Camera on a phone", () => {
     expect(world.camera.photos).toHaveLength(0);
   });
 
-  it("Returns Blocked Denied immediately when agent capture runs with camera permission denied (spec/app/camera/agent.md, \"Story: Take a photo the agent asked for\")", async () => {
+  it("Returns Blocked Denied immediately when agent capture runs with camera permission denied (spec/app/camera/agent.md, \"Story: Take a photo for Alpha\")", async () => {
     const world = { ...scene(), phone: true };
     world.camera.permission = "denied";
     const { alpha } = await open(world, only("home", "view:Camera", "notice"));
@@ -447,17 +447,15 @@ describe("Camera on a phone", () => {
 
   it("Forgets a deleted last capture across Camera visits (spec/app/camera/index.md, \"An older library read never replaces a photo taken while it was pending\")", async () => {
     const world = { ...scene(), phone: true };
-    const { alpha } = await open(world, only("home", "view:Camera", "notice"));
-    const runtime = camera.runtime(alpha);
+    const running = await open(world, only("home", "view:Camera", "notice"));
+    const runtime = camera.runtime(running.alpha);
     await press("Camera");
-    await until(alpha, runtime, Machine, (state) => state.phase === "Ready" && state.last > 0);
-    for (let i = world.photos.rows.length - 1; i >= 0; i--) {
-      if (world.photos.rows[i]?.owned) world.photos.rows.splice(i, 1);
-    }
+    await until(running.alpha, runtime, Machine, (state) => state.phase === "Ready" && state.last > 0);
+    world.photos.rows.splice(0, world.photos.rows.length, ...world.photos.rows.filter((item) => !item.owned));
     await hardware("back");
-    await until(alpha, runtime, Machine, (state) => !state.showing);
+    await until(running.alpha, runtime, Machine, (state) => !state.showing);
     await press("Camera");
-    await until(alpha, runtime, Machine, (state) => state.phase === "Ready" && state.last === 0);
+    await until(running.alpha, runtime, Machine, (state) => state.phase === "Ready" && state.last === 0);
     expect(await runtime.runPromise(Effect.flatMap(CameraAssets, (assets) => assets.newest()))).toBe(0);
   });
 });

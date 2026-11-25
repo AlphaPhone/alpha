@@ -494,12 +494,12 @@ type CaptureNeeds = Camera.Machine | CameraAssets | Shell.Machine | PhotosPort |
 /** An agent capture opens Camera before entering the viewfinder's own single review and returns its actual outcome. */
 export effect function requestCapture(lens?: "front" | "back", offer?: CapturedPhotoOffer): CaptureAnswer!!CaptureNeeds {
   const machine = try Camera.Machine
-  const beforeVisit = (try machine.get()).visit
+  const before = try machine.get()
   if (!(try openView("Camera"))) return { result: "Blocked", cause: "Left" }
   try uncover()
   const shell = try Shell.Machine
   const route = (try shell.get()).route
-  const visible = Stream.filter(machine.changes, (state) => (state.showing && (allows(state.permission) || state.permission.asked || state.permission.grant !== "Unasked")) || (!state.showing && state.visit > beforeVisit))
+  const visible = Stream.filter(machine.changes, (state) => (state.showing && (allows(state.permission) || state.permission.asked || state.permission.grant !== "Unasked")) || (!state.showing && (before.showing || state.visit > before.visit)))
   const opened = timeout(Stream.runHead(visible), 90000) catch () => Option.none<Camera.Camera>()
   if (Option.isNone(opened)) return { result: "Expired", cause: "NoCause" }
   const state = try machine.get()
