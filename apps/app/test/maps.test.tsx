@@ -87,6 +87,8 @@ describe("Maps on a phone", () => {
     // spec/app/maps/index.md, "Start guides along the route shown, with location allowed"
     await press("Start");
     await until(alpha, runtime, Screen, (s) => s.trip.guidance === "Going" && s.link.locator === "Guide");
+    // spec/app/maps/index.md, "Story: Navigate": the banner and its Then tab draw each turn's own arrow, as v121's guidance did
+    expect([...document.querySelectorAll("[data-maneuver]")].map((found) => found.getAttribute("data-maneuver"))).toEqual(["depart", "left"]);
 
     // spec/app/maps/navigation.md, "A fix moves guidance only when it is precise, fresh and close: arrival within 25 meters, a turn passed within 40 meters or beyond 60, the route left beyond 75"
     move(world.maps, harbour.coordinate.latitude, harbour.coordinate.longitude, 8, world.now);
