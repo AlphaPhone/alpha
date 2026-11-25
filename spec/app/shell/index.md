@@ -29,7 +29,8 @@ type Shell = { trail: List[View], drawer: bool, assistant: Detent, image: bool, 
 pure val initial: Shell = { trail: List(), drawer: false, assistant: Bar, image: false, contacts: false, route: 0 }
 pure val maxTrail = 6
 
-pure def recordRoute(move: { before: Shell, after: Shell }): Shell =
+type RouteMove = { before: Shell, after: Shell }
+pure def recordRoute(move: RouteMove): Shell =
   if (move.before.trail == move.after.trail and move.before.drawer == move.after.drawer and move.before.assistant == move.after.assistant) move.after
   else { ...move.after, route: move.before.route + 1 }
 ```

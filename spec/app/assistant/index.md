@@ -792,9 +792,10 @@ It uses the same single opening ticket as any other completed reply.
 
 ```quint
 pure def canNavigateFiles(c: Conversation, ticket: int, source: List[S::View], panel: S::Detent, route: int): bool =
+  val showing = c.context.showing
   canNavigate(c, ticket, S::Files) and not(c.turn.stopping) and route >= 0
     and (panel == S::Sheet or panel == S::Full)
-    and match c.context.showing {
+    and match showing {
       | Home => source.length() == 0
       | App(app) => app.view != S::Files and source.length() > 0
           and source.nthOr(source.length() - 1, app.view) == app.view
