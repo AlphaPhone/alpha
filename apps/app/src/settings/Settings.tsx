@@ -223,6 +223,7 @@ function General({ runtime, alpha, common }: PageProps) {
   const pages = usePages(runtime).state;
   const { state: facts, can, send } = useTimed(runtime, useFacts);
   const reset = useTimed(runtime, useReset);
+  const prefs = useTimed(runtime, usePrefs).state;
   const request = { type: "requestHome", at: untimed } as const;
   const onPhone = pages?.phone ?? false;
   const erase = { type: "erase", at: untimed, onPhone } as const;
@@ -232,6 +233,8 @@ function General({ runtime, alpha, common }: PageProps) {
       wifi={reading(facts, "Wifi")}
       bluetooth={reading(facts, "Bluetooth")}
       mobileData={reading(facts, "MobileData")}
+      theme={prefs && themeNames[prefs.theme]}
+      alerts={reading(facts, "Alerts")}
       image={pages?.image ?? false}
       onPhone={onPhone}
       reviewing={reset.state !== undefined && loading(reset.state.review)}

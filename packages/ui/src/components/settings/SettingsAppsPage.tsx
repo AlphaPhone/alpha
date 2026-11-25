@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Calendar, Camera, Folder, Globe, Image, KeyRound, Mail, MapPin, MessageSquare, StickyNote, Workflow } from "lucide-react";
+import { CalendarDays, Camera, Folder, Globe, Images, LockKeyhole, Mail, MapPin, MessageSquare, NotebookText, Workflow } from "lucide-react";
 import { ListGroup } from "../ListGroup.tsx";
 import { SettingsNavRow } from "./SettingsNavRow.tsx";
 import { SettingsPage } from "./SettingsPage.tsx";
@@ -7,7 +7,7 @@ import { type Neighbour, placed, type SettingsPageName, type SettingsPlaceProps 
 
 type AppView = "browser" | "files" | "messages";
 type Destination = { page: SettingsPageName } | { neighbour: Neighbour } | { view: AppView };
-type AppRow = { title: string; icon: ReactNode } & Destination;
+type AppRow = { title: string; icon: ReactNode; slot: number } & Destination;
 
 export type SettingsAppsPageProps = SettingsPlaceProps & {
   /** Goes back to the first page. */
@@ -23,17 +23,17 @@ export type SettingsAppsPageProps = SettingsPlaceProps & {
 };
 
 const apps: AppRow[] = [
-  { view: "browser", title: "Browser", icon: <Globe /> },
-  { page: "calendar", title: "Calendar", icon: <Calendar /> },
-  { page: "camera", title: "Camera", icon: <Camera /> },
-  { view: "files", title: "Files", icon: <Folder /> },
-  { page: "inbox", title: "Inbox", icon: <Mail /> },
-  { page: "maps", title: "Maps", icon: <MapPin /> },
-  { view: "messages", title: "Messages", icon: <MessageSquare /> },
-  { page: "notes", title: "Notes", icon: <StickyNote /> },
-  { neighbour: "password-manager", title: "Passwords", icon: <KeyRound /> },
-  { page: "photos", title: "Photos", icon: <Image /> },
-  { page: "workflows", title: "Workflows", icon: <Workflow /> },
+  { view: "browser", title: "Browser", slot: 8, icon: <Globe /> },
+  { page: "calendar", title: "Calendar", slot: 2, icon: <CalendarDays /> },
+  { page: "camera", title: "Camera", slot: 3, icon: <Camera /> },
+  { view: "files", title: "Files", slot: 9, icon: <Folder /> },
+  { page: "inbox", title: "Inbox", slot: 0, icon: <Mail /> },
+  { page: "maps", title: "Maps", slot: 5, icon: <MapPin /> },
+  { view: "messages", title: "Messages", slot: 10, icon: <MessageSquare /> },
+  { page: "notes", title: "Notes", slot: 6, icon: <NotebookText /> },
+  { neighbour: "password-manager", title: "Passwords", slot: 7, icon: <LockKeyhole /> },
+  { page: "photos", title: "Photos", slot: 4, icon: <Images /> },
+  { page: "workflows", title: "Workflows", slot: 1, icon: <Workflow /> },
 ];
 
 /**
@@ -49,8 +49,8 @@ export function SettingsAppsPage({ onBack, onOpen, onOpenApp, onHandOver, image 
   return (
     <SettingsPage title="Apps" onBack={onBack} backLabel="Back to Settings">
       <ListGroup>
-        {apps.map((app, row) => ("view" in app && app.view === "messages" && !image) ? null : (
-          <SettingsNavRow key={app.title} title={app.title} icon={app.icon} onOpen={open(app)} {...placed({ place, onPlace }, row)} />
+        {apps.map((app) => ("view" in app && app.view === "messages" && !image) ? null : (
+          <SettingsNavRow key={app.title} title={app.title} icon={app.icon} onOpen={open(app)} {...placed({ place, onPlace }, app.slot)} />
         ))}
       </ListGroup>
     </SettingsPage>

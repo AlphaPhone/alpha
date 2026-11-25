@@ -1,11 +1,12 @@
 import type { ReactNode } from "react";
-import { History, Scale, Smartphone } from "lucide-react";
+import { Clock, SlidersHorizontal, Smartphone } from "lucide-react";
 import { ListGroup } from "../ListGroup.tsx";
 import { Mark } from "../Mark.tsx";
 import { SettingsAndroidRow } from "./SettingsAndroidRow.tsx";
 import { SettingsFactRow } from "./SettingsFactRow.tsx";
 import { SettingsNavRow } from "./SettingsNavRow.tsx";
 import { SettingsPage } from "./SettingsPage.tsx";
+import { SettingsReading } from "./SettingsReading.tsx";
 import { type AndroidTold, placed, type Reading, type SettingsAndroidProps, type SettingsPageName, type SettingsPlaceProps } from "./vocabulary.ts";
 
 export type SettingsAboutPageProps = SettingsAndroidProps &
@@ -38,19 +39,22 @@ export function SettingsAboutPage({ alphaVersion, androidVersion, storage, onPho
   const at = (row: number) => placed({ place, onPlace }, row);
   return (
     <SettingsPage title="About" told={told} onBack={onBack} backLabel="Back to Settings">
-      <div className="flex justify-center py-4">
-        <span className="flex size-16 items-center justify-center rounded-full bg-alpha text-alpha-foreground">
-          <Mark aria-hidden className="size-8" />
+      <div className="flex flex-col items-center gap-2.5 px-6 pt-5.5 pb-4.5 text-center">
+        <span className="flex size-16 items-center justify-center overflow-hidden rounded-full bg-alpha text-alpha-foreground">
+          <Mark aria-hidden className="size-[118%] shrink-0" />
         </span>
+        <h2 className="font-display text-title font-light">Alpha Phone</h2>
+        <p className="text-caption text-muted-foreground">
+          {alphaVersion.word === "reported" ? `Version ${alphaVersion.value}` : <SettingsReading reading={alphaVersion} />}
+        </p>
       </div>
       <ListGroup>
-        <SettingsFactRow title="Alpha" reading={alphaVersion} />
         <SettingsFactRow title="Android" reading={androidVersion} />
         {storage ? <SettingsFactRow title="Storage" reading={storage} /> : null}
       </ListGroup>
       <ListGroup>
-        {onPhone ? <SettingsNavRow title="Agent activity" value={agent === "running" ? "Running" : agent === "starting" ? "Starting" : agent === "needs-you" ? "Needs attention" : agent === "stopped" ? "Stopped" : undefined} icon={<History />} onOpen={onOpen && (() => onOpen("activity"))} {...at(0)} /> : null}
-        <SettingsNavRow title="Licenses" icon={<Scale />} onOpen={onOpen && (() => onOpen("licences"))} {...at(1)} />
+        {onPhone ? <SettingsNavRow title="Agent activity" value={agent === "running" ? "Running" : agent === "starting" ? "Starting" : agent === "needs-you" ? "Needs attention" : agent === "stopped" ? "Stopped" : undefined} icon={<Clock />} aria-label="Agent activity" onOpen={onOpen && (() => onOpen("activity"))} {...at(0)} /> : null}
+        <SettingsNavRow title="Licenses" icon={<SlidersHorizontal />} onOpen={onOpen && (() => onOpen("licences"))} {...at(1)} />
         {onPhone ? <SettingsAndroidRow target="about-phone" title="About phone" icon={<Smartphone />} starting={starting} onAndroid={onAndroid} {...at(2)} /> : null}
       </ListGroup>
       {children}

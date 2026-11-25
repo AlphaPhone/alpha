@@ -31,7 +31,7 @@ export function AssistantConversation({ header, transcript, composer, detent = "
       className={cn(
         "flex flex-col text-foreground",
         resting ? "z-dock" : "z-sheet overflow-hidden bg-card",
-        full ? "h-full rounded-none pt-4" : resting ? null : cn("rounded-t-sheet pt-1", props.style?.height ? "max-h-dvh" : "min-h-[38dvh] max-h-[60dvh]"),
+        full ? "h-full rounded-none pt-[calc(max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))+--spacing(4))]" : resting ? null : cn("rounded-t-sheet pt-1", props.style?.height ? "max-h-dvh" : "min-h-[38dvh] max-h-[60dvh]"),
         className,
       )}
       {...props}

@@ -41,11 +41,12 @@ export function SettingsDisplayPage({ theme, keeping, onChooseTheme, legible = f
   return (
     <SettingsPage title="Display" told={told} onBack={onBack} backLabel="Back to General">
       {notice ? <SettingsPreferencesNotice notice={notice} /> : null}
+      <p aria-hidden className="px-2 pt-1 pb-2.5 font-display text-headline font-light">Aa</p>
       <SettingsAppearancePicker theme={theme} keeping={keeping} onChoose={onChooseTheme} />
+      <SettingsTextSizePicker size={size} busy={sizing} onChoose={onChooseSize} />
       <ListGroup>
         <SettingsSwitchRow title="Legible text" icon={<Type />} checked={legible} saving={keeping} onCheckedChange={onLegibleChange} />
       </ListGroup>
-      <SettingsTextSizePicker size={size} busy={sizing} onChoose={onChooseSize} />
       <ListGroup>
         <SettingsAndroidRow target="display-settings" title="Display settings" icon={<Smartphone />} starting={starting} onAndroid={onAndroid} />
         <SettingsAndroidRow target="brightness" title="Brightness" icon={<SunMedium />} starting={starting} onAndroid={onAndroid} />

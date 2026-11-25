@@ -54,7 +54,7 @@ export function SettingsTopPage({ developer = false, onPhone = true, actions, mi
         </ListGroup>
       ) : null}
       <ListGroup>
-        <SettingsNavRow title="Account and plan" icon={<UserRound />} onOpen={onHandOver && (() => onHandOver("account-and-plan"))} {...at(1)} />
+        <SettingsNavRow title="Account" icon={<UserRound />} onOpen={onHandOver && (() => onHandOver("account-and-plan"))} {...at(1)} />
       </ListGroup>
       {links.map((link, index) => (
         <ListGroup key={link.page}>
