@@ -227,6 +227,14 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   const { alpha } = await open(world);
   const runtime = inbox.runtime(alpha);
 
+  // spec/app/platform/index.md, "A cloud request the phone holds back for want of a sign-in reads as the cloud's own 401": a phone signed in before mail leases existed is asked to sign in for its mail, never told Gmail could not be reached.
+  world.mailLease = false;
+  await press("Inbox");
+  await until(alpha, runtime, List, (s) => (s.revision >= 2 && !s.signedIn) || s.accounts.status === "Failed");
+  expect(told()).toContain("Connect Eliza Cloud");
+  world.mailLease = true;
+  await alpha.back();
+
   // spec/app/inbox/index.md, "The owner can be signed out, have no account connected, have several to choose from, lack read access, be asked to reconnect Gmail, and a check can be asked again before the last answers"
   await press("Inbox");
   await until(alpha, runtime, List, (s) => s.accounts.status === "Loaded" && s.connected.length === 0);

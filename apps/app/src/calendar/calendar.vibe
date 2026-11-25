@@ -13,7 +13,8 @@ import type * as Changes from "../../gen/app__calendar__agent.effect.vibe"
 import type * as Linking from "../../gen/app__calendar__link.effect.vibe"
 import type { AndroidCalendarEvent } from "@elizaos/os-bridges"
 import { Agent } from "../platform/agent.vibe"
-import { Cloud } from "../platform/cloud.vibe"
+import type { Cloud } from "../platform/cloud.vibe"
+import { Machine as Settings } from "../../gen/app__settings.effect.vibe"
 import { PhoneCalendar } from "../platform/calendar.vibe"
 import { type Failure, ask } from "../platform/remote.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
@@ -175,7 +176,7 @@ effect function hand(id: number, to: "Maps" | "AndroidCalendar" | "VideoCall" | 
   if (row.source === "Phone") return try (try PhoneCalendar).open(row.key, row.begin, row.end)
 }
 
-function carry(fx: Out): Job<Event, PhoneCalendar | Agent | SystemSettings | Shell.Machine | Time | KeyValueStore.KeyValueStore, []> {
+function carry(fx: Out): Job<Event, PhoneCalendar | Agent | SystemSettings | Shell.Machine | Settings | Time | KeyValueStore.KeyValueStore, []> {
   return match (fx) {
     when { tag: "ReadDay", let source, let ticket, let day }:
       answer(`read ${source}`, readDay(source, ticket, day), source === "Google" ? { type: "googleAnswered", ticket, ok: false, rows: 0 } : { type: "phoneAnswered", ticket, ok: false, rows: 0, limited: false });
@@ -187,7 +188,12 @@ function carry(fx: Out): Job<Event, PhoneCalendar | Agent | SystemSettings | She
         return { type: "accessAnswered", grant: granted ? "Granted" : "Denied" } as Event
       }, { type: "accessAnswered", grant: "Denied" });
     when { tag: "OpenCalendarSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", "") });
-    when { tag: "OpenAccountSettings" }: run("account", effect { try contained((try Shell.Machine).send({ type: "openView", view: "Settings" }), "opening Settings") });
+    when { tag: "OpenAccountSettings" }: run("account", effect {
+      const shell = try Shell.Machine
+      if (try contained(shell.send({ type: "openView", view: "Settings" }), "opening Settings")) {
+        try contained((try Settings).send({ type: "openSection", page: "CalendarApp" }), "opening Calendar settings")
+      }
+    });
   }
 }
 

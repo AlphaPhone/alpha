@@ -9,6 +9,7 @@ import { assistantInert, pageInert, takesBack } from "../gen/app__shell__layers.
 import { barHeight, edge, swipe } from "../gen/app__shell__gestures.ts";
 import { useMachine as usePage } from "../gen/app__update__page.react.ts";
 import { dialogShown, editorsMounted } from "../gen/app__update__page.ts";
+import { BrowserFrames } from "./browser/BrowserFrames.tsx";
 import { native } from "./platform/device.vibe";
 import type { Alpha } from "./runtime/area.tsx";
 import { AppBack } from "./shell/AppBack.tsx";
@@ -202,6 +203,7 @@ export function App({ alpha }: AppProps) {
               {alpha.slot(`view:${showing}`)}
             </div>
           )}
+        {!native() && <BrowserFrames alpha={alpha} />}
       </div>
       <div
         data-alpha-assistant-host=""

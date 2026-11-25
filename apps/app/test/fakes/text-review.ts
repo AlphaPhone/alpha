@@ -2,7 +2,6 @@ import type { DeviceOperation, JournalEntry } from "@elizaos/agent";
 import { type Faked, plugin } from "./phone.ts";
 import { readJsonBody, type Route } from "./routes.ts";
 
-const installationId = "agent-on-phone";
 const enrollmentId = "this-phones-enrollment";
 const key = "a".repeat(64);
 const attemptId = "device-attempt-1";
@@ -10,12 +9,12 @@ const attemptId = "device-attempt-1";
 type Sms = Extract<DeviceOperation, { type: "sms_send" }>;
 type Confirmation = Pick<Sms, "recipients" | "body" | "subscriptionId"> & { operationId: string; confirm(): void };
 
-export function textReview(owner: string, id: string, operation: Extract<DeviceOperation, { type: "sms_send" | "sms_compose" }>) {
+export function textReview(agentId: string, id: string, operation: Extract<DeviceOperation, { type: "sms_send" | "sms_compose" }>) {
   return {
-    owner,
+    agentId,
     proposal: {
       id, digest: "b".repeat(64), state: "pending", expiresAt: new Date(Date.now() + 60_000).toISOString(),
-      payload: { installationId, enrollmentId, operation },
+      payload: { installationId: agentId, enrollmentId, operation },
     },
     pendingReads: 0,
     journal: new Map<string, JournalEntry>(),
@@ -34,8 +33,8 @@ export const textReviewEnrollment: Faked = plugin<{
 }>(() => ({ enrollmentKey: () => Promise.resolve({ key }), authority: () => Promise.resolve({ active: true }) }));
 
 /** The resident lists and settles only this enrolled phone's exact proposal. */
-export function textReviewRoute(review: TextReviewScene): Route {
-  const { proposal } = review;
+export function textReviewRoute(review: TextReviewScene, subjectUserId: string): Route {
+  const { agentId, proposal } = review;
   const capabilities = proposal.payload.operation.type === "sms_send" ? ["sms.send.v1"] : ["sms.compose.v1", "sms.compose.v2"];
   const prefix = "/api/client-devices/";
   const reject = (status: number) => Response.json({ error: "review refused" }, { status });
@@ -44,12 +43,12 @@ export function textReviewRoute(review: TextReviewScene): Route {
     if (!path.startsWith(prefix)) return undefined;
     const resource = path.slice(prefix.length);
     if (request.method === "GET" && resource === "capabilities") {
-      return Response.json({ agentId: installationId, identityId: review.owner, deviceActions: { protocol: 1, capabilities } });
+      return Response.json({ protocol: 1, agentId, identityId: subjectUserId, deviceActions: { protocol: 1, capabilities } });
     }
-    if (request.headers.get("x-eliza-device-id") !== installationId || request.headers.get("x-eliza-device-key") !== key
+    if (request.headers.get("x-eliza-device-id") !== agentId || request.headers.get("x-eliza-device-key") !== key
       || request.headers.get("x-eliza-device-capabilities") !== capabilities.join(",")) return reject(401);
     if (request.method === "GET" && resource === "context") {
-      return Response.json({ agentId: installationId, installationId, enrollmentId, subjectUserId: review.owner });
+      return Response.json({ agentId, installationId: agentId, enrollmentId, subjectUserId });
     }
     if (request.method === "GET" && resource === "proposals") {
       review.pendingReads += 1;

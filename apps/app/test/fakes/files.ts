@@ -227,6 +227,7 @@ export function elizaFiles(scene: FilesScene): Faked {
       },
       storageOpen({ path }) {
         called("open");
+        if (scene.refusing.includes("storageOpen")) return Promise.resolve({ status: "unsupported" });
         scene.opened.push(path);
         return Promise.resolve({ status: "opened", count: 1 });
       },

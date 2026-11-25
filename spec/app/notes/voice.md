@@ -28,14 +28,14 @@ import note.* from "./note"
 
 type Part = Transcript | Summary
 type VoiceNote = {
-  owner: int, note: int, revision: int, segments: int, showing: bool,
+  owner: int, note: int, revision: int, opened: int, segments: int, showing: bool,
   listen: R::Read, asked: int, heard: int, deaf: bool, quiet: bool, added: int, review: V::Review,
   summarising: R::Read, upTo: int, summary: int,
   writing: A::Attempt, part: Part, writeUpTo: int, play: R::Read, from: int, halting: bool, unconfirmed: bool,
 }
 
 pure val initial: VoiceNote = {
-  owner: 0, note: 0, revision: 0, segments: 0, showing: false,
+  owner: 0, note: 0, revision: 0, opened: 0, segments: 0, showing: false,
   listen: R::unread, asked: 0, heard: 0, deaf: false, quiet: false, added: 0, review: V::unreviewed,
   summarising: R::unread, upTo: 0, summary: 0,
   writing: A::plan(0), part: Transcript, writeUpTo: 0, play: R::unread, from: 0, halting: false, unconfirmed: false,
@@ -56,7 +56,7 @@ type Effect =
   | Transcribes({ ticket: int, owner: int, note: int, upTo: int })
   | Summarises({ ticket: int, owner: int, note: int, upTo: int })
   | Writes({ ticket: int, owner: int, note: int, base: int, part: Part, upTo: int })
-  | AsksAlpha({ note: int, upTo: int })
+  | AsksAlpha({ owner: int, note: int, revision: int, opened: int, upTo: int })
   | Plays({ ticket: int, note: int, from: int, segments: int })
   | Halts({ ticket: int })
 type Moved = { state: VoiceNote, out: List[Effect] }
@@ -84,7 +84,8 @@ Nothing being written to another voice note may be on its way, and nothing
 may still be playing. The agent opens only the one note the owner just
 named, as Notes lets it (Notes, "The agent opens the one note the owner
 named, as the list last read it, once for the owner's current request, and
-is told whether it opened"); an owner's tap carries no request.
+is told whether it opened"); an owner's tap carries no request. Each
+opening takes its own number, including when the same note opens again.
 
 ```quint
 pure def canOpenVoice(v: VoiceNote, note: int, revision: int, segments: int, heard: int, summary: int, covered: bool, req: Request, by: Actor): bool =
@@ -92,7 +93,7 @@ pure def canOpenVoice(v: VoiceNote, note: int, revision: int, segments: int, hea
     and segments > 0 and 0 <= summary and summary <= heard and heard <= segments
 
 pure def openVoice(v: VoiceNote, note: int, revision: int, segments: int, heard: int, summary: int, covered: bool, req: Request, by: Actor): VoiceNote =
-  { ...v, note: note, revision: revision, segments: segments, showing: true,
+  { ...v, note: note, revision: revision, opened: v.opened + 1, segments: segments, showing: true,
     listen: dropped(v.listen), asked: heard, heard: heard, deaf: false, quiet: false, added: heard,
     review: V::dismiss(v.review), summarising: dropped(v.summarising), upTo: 0, summary: summary, writeUpTo: 0,
     play: dropped(v.play), from: 0, unconfirmed: false }
@@ -222,20 +223,27 @@ pure def stepTheNoteHoldsWhatIsShown(before: VoiceNote, via: str, after: VoiceNo
 
 ### Ask Alpha about this transcript hands Ask Alpha the transcript the note holds
 
-The shell then raises Ask Alpha.
+The shell offers the transcript once for this opening of the note and
+raises Ask Alpha when the composer takes it.
 
 ```quint
 pure def canAskAlpha(v: VoiceNote, by: Actor): bool = by == Owner and v.showing and v.added > 0
 
-pure def askAlpha(v: VoiceNote, by: Actor): Moved = { state: v, out: List(AsksAlpha({ note: v.note, upTo: v.added })) }
+pure def askAlpha(v: VoiceNote, by: Actor): Moved =
+  { state: v, out: List(AsksAlpha({ owner: v.owner, note: v.note, revision: v.revision, opened: v.opened, upTo: v.added })) }
 ```
 
 ### Only the transcript the owner added leaves the note, and only what was shown is written to it
+
+Copy text writes the open note's saved transcript to the clipboard after
+the owner's tap, when the same saved version is still showing. The phone
+says whether it could copy.
 
 ```quint
 pure def stepOnlyTheAddedTranscriptLeaves(before: VoiceNote, via: str, after: VoiceNote, out: List[Effect]): bool =
   out.every(e => match e {
     | AsksAlpha(a) => a.upTo == before.added and a.upTo > 0 and a.note == before.note
+        and a.owner == before.owner and a.revision == before.revision and a.opened == before.opened
     | Summarises(x) => x.upTo == before.added and x.note == before.note
     | Transcribes(t) => t.upTo == before.segments and before.listen.status != R::Loading
     | Writes(w) => not(busy(before)) and w.base == before.revision and w.note == before.note and w.owner == before.owner
@@ -302,7 +310,9 @@ pure def sometimesAWriteUnknown(v: VoiceNote): bool = v.writing.outcome == A::Un
 
 ### A voice note plays from the start, or from a line of the transcript, and only within the audio written; only the answer to the current playing counts
 
-Played through, the player rests; one that cannot be played says so.
+The player rests when playback ends and reports a playback failure. The
+screen offers playback controls when the note has retained audio the phone
+can play.
 
 ```quint
 pure def canPlay(v: VoiceNote, from: int, by: Actor): bool =
@@ -404,7 +414,7 @@ pure def stepLeavingKeepsTheWrite(before: VoiceNote, via: str, after: VoiceNote)
 pure def canOwnerChanged(v: VoiceNote, owner: int, by: Actor): bool = by == Phone and owner != v.owner and owner >= 0
 
 pure def ownerChanged(v: VoiceNote, owner: int, by: Actor): Moved =
-  halt(v.play, { ...initial, owner: owner, listen: dropped(v.listen), summarising: dropped(v.summarising),
+  halt(v.play, { ...initial, owner: owner, opened: v.opened, listen: dropped(v.listen), summarising: dropped(v.summarising),
     play: v.play, halting: v.halting, unconfirmed: v.unconfirmed, writing: cutOff(v.writing) })
 
 pure def stepNoAnswerForAFormerOwner(before: VoiceNote, via: str, after: VoiceNote): bool =

@@ -1,5 +1,5 @@
 import { elizaCalendar } from "./calendar.ts";
-import { elizaCamera } from "./camera.ts";
+import { cameraKeys, elizaCamera } from "./camera.ts";
 import { elizaFiles, selectedDocuments } from "./files.ts";
 import { alphaMapsTransport, elizaLocation } from "./maps.ts";
 import { alphaNotes } from "./notes.ts";
@@ -22,9 +22,9 @@ import { alphaVoiceCloud, elizaCloudSpeech, elizaSignIn } from "./voice.ts";
  */
 export function plugins(world: Scene, services: { readonly agent: Answering; readonly cloud: Answering }): Record<string, Faked> {
   return {
-    ElizaAgent: elizaAgent(services.agent),
-    ElizaCloud: elizaCloud(services.cloud, () => world.signedIn),
-    ElizaSecureStore: elizaSecureStore(world.secrets, world.slots),
+    ElizaAgent: elizaAgent(services.agent, world.settings.recovery),
+    ElizaCloud: elizaCloud(services.cloud, () => world.signedIn, () => world.mailLease),
+    ElizaSecureStore: elizaSecureStore(world.secrets, (key) => world.slots.has(key) || /^notes-(?:draft|folders):[1-9][0-9]*$/.test(key)),
     ElizaCalendar: elizaCalendar(world.calendar),
     ElizaReminders: elizaReminders(world.reminders, () => world.now),
     ElizaCamera: elizaCamera(world.camera),
@@ -38,7 +38,7 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     AlphaCarrierSetup: alphaCarrierSetup(world.settings),
     AlphaMapsTransport: alphaMapsTransport(world.maps),
     ...(world.image ? telephonyPlugins(world.telephony, () => world.now) : {}),
-    AlphaDevice: (emit) => ({ ...alphaDevice(world.update, () => world.now)(emit), ...settingsHost(world.settings), ...alphaAgentConsent(world.settings) }),
+    AlphaDevice: (emit) => ({ ...alphaDevice(world.update, () => world.now)(emit), ...settingsHost(world.settings), ...alphaAgentConsent(world.settings), ...cameraKeys(world.camera) }),
     ElizaNotifications: elizaNotices(world.settings),
     ElizaPasswords: elizaPasswords(world.settings),
     AlphaConnection: alphaConnection(world.platform),

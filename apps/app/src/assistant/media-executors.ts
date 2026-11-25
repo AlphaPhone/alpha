@@ -34,7 +34,7 @@ export async function executeMedia(alpha: Alpha, operation: DeviceOperation, cal
   }
   if (operation.type.startsWith("files_")) {
     const [{ default: files }, { fileAction }] = await Promise.all([import("../files/index.tsx"), import("../files/agent.vibe")]);
-    return files.runtime(alpha).runPromise(fileAction(operation, call, authority.files, authority.current));
+    return files.runtime(alpha).runPromise(fileAction(operation, call, authority.files, authority.current, authority.reportFiles));
   }
   if (operation.type.startsWith("notes_")) {
     const { executeNotes, notesOperation } = await import("../notes/device-actions.vibe");

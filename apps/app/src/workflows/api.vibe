@@ -30,18 +30,25 @@ export const workflowsApi = Layer.effect(WorkflowsApi, effect {
 
 const Identifier = Schema.NonEmptyString
 
-export schema Prompt {
-  readonly id: Identifier
-  readonly displayName: string
-  readonly instructions: string
-  readonly enabled: boolean
-  readonly revision: Schema.Int
-  readonly triggerType: "once" | "cron" | "event"
-  readonly scheduledAtIso?: string
-  readonly cronExpression?: string
-  readonly eventKind?: string
-  readonly timezone: string
+const Once = { triggerType: Schema.Literal("once"), scheduledAtIso: Schema.NonEmptyString }
+const Recurring = { triggerType: Schema.Literal("cron"), cronExpression: Schema.NonEmptyString }
+const OnEvent = { triggerType: Schema.Literal("event"), eventKind: Schema.NonEmptyString }
+const Timing = Schema.Union([Schema.Struct(Once), Schema.Struct(Recurring), Schema.Struct(OnEvent)])
+const PromptFields = {
+  id: Identifier,
+  displayName: Schema.String,
+  instructions: Schema.String,
+  enabled: Schema.Boolean,
+  revision: Schema.Int,
+  timezone: Schema.NonEmptyString,
 }
+export const Prompt = Schema.Union([
+  Schema.Struct({ ...PromptFields, ...Once }),
+  Schema.Struct({ ...PromptFields, ...Recurring }),
+  Schema.Struct({ ...PromptFields, ...OnEvent }),
+])
+export type Prompt = typeof Prompt.Type
+export type PromptTiming = typeof Timing.Type
 
 export schema ScheduledTask {
   readonly taskId: Identifier

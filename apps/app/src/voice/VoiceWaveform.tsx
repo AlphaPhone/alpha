@@ -25,6 +25,11 @@ const tones: Partial<Record<ShownPhase, string>> = {
 };
 const bars = Array.from({ length: 35 }, (_, number) => ({ number, height: motif[number % motif.length] }));
 
+function cancel(animation: Animation) {
+  void animation.finished.catch(() => undefined);
+  animation.cancel();
+}
+
 /** Voice phase motion, with the waveform and animation parameters used in Alpha's Develop renderer. */
 export function VoiceWaveform({ phase, compact = false }: { phase: ShownPhase; compact?: boolean }) {
   const visual = motion[phase];
@@ -42,7 +47,7 @@ export function VoiceWaveform({ phase, compact = false }: { phase: ShownPhase; c
       }));
     const update = () => {
       for (const animation of animations) {
-        if (preference.matches) animation.cancel();
+        if (preference.matches) cancel(animation);
         else if (document.hidden) animation.pause();
         else animation.play();
       }
@@ -53,7 +58,7 @@ export function VoiceWaveform({ phase, compact = false }: { phase: ShownPhase; c
     return () => {
       document.removeEventListener("visibilitychange", update);
       preference.removeEventListener("change", update);
-      for (const animation of animations) animation.cancel();
+      for (const animation of animations) cancel(animation);
     };
   }, [compact, phase, visual]);
   return (

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { Effect } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Machine as Contacts } from "../gen/app__contacts.effect.vibe";
@@ -40,7 +40,7 @@ const launch = (name: "Contacts" | "Messages") => drawn(() => {
 });
 
 describe("Contacts on an Alpha image", () => {
-  it("Browse my contacts, look at one, change it and delete it (spec/app/contacts/index.md, \"Story: Browse my contacts\"; spec/app/contacts/index.md, \"Story: Give Alpha access to my contacts\"; spec/app/contacts/index.md, \"Story: Know what happened to my change\"; spec/app/contacts/index.md, \"Story: Look at one contact\"; spec/app/contacts/index.md, \"Story: Add or change a contact\"; spec/app/contacts/index.md, \"Story: Delete a contact\")", async () => {
+  it("Browse my contacts, look at one, change it and delete it (spec/app/contacts/index.md, \"Story: Browse my contacts\"; spec/app/contacts/index.md, \"Story: Give Alpha access to my contacts\"; spec/app/contacts/index.md, \"Story: Know what happened to my change\"; spec/app/contacts/index.md, \"Story: Look at one contact\"; spec/app/contacts/index.md, \"Story: Add or change a contact\"; spec/app/contacts/index.md, \"Story: Delete a contact\"; spec/app/phone/comms.md, \"Story: Address the person or Alpha from one bar\")", async () => {
     const world = image();
     world.telephony.contacts = false;
     const { alpha } = await open(world);
@@ -55,6 +55,10 @@ describe("Contacts on an Alpha image", () => {
     await fill("Search or ask", "Maya");
     await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 1);
     expect(document.querySelector('[aria-label="Ben Ortiz"]')).toBeNull();
+    await press("Ask Alpha");
+    await drawn(() => vi.waitFor(() => expect(world.ask.said).toEqual(["Maya"])));
+    await drawn(() => alpha.back());
+    await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar");
     await fill("Search or ask", "");
     await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 2);
 

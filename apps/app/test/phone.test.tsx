@@ -14,7 +14,7 @@ import home from "../src/home/index.tsx";
 import { phoneAction } from "../src/phone/agent.vibe";
 import { phoneContactChoices, pickPhoneContact } from "../src/phone/named-review.vibe";
 import type { Alpha } from "../src/runtime/area.tsx";
-import { button, closeAll, drawn, hardware, only, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, only, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -118,6 +118,69 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Phone, (s) => s.tab === "Recents" && s.recents.status === "Loaded" && s.rows === 2);
     await hardware("home");
     await until(alpha, alpha.runtime, Phone, (s) => !s.front && s.rows === 0);
+  });
+
+  it("Switches out of Phone's Contacts tab without closing Phone or Ask Alpha", async () => {
+    const { alpha } = await openPhoneWorld();
+    await until(alpha, alpha.runtime, Shell, (state) => state.image && state.contacts);
+    await openPhone(alpha);
+    await until(alpha, alpha.runtime, Phone, (state) => state.voicemail);
+    await tab("Voicemail");
+    await until(alpha, alpha.runtime, Phone, (state) => state.tab === "Voicemail");
+    const contactsFront = () => until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Phone,Contacts");
+    await tab("Contacts");
+    await contactsFront();
+    expect(document.querySelector('[data-alpha-phone-tab="contacts"]')?.getAttribute("aria-selected")).toBe("true");
+
+    await until(alpha, alpha.runtime, Phone, (state) => !state.front);
+    await drawn(() => {
+      for (const name of ["keypad", "recents"]) {
+        const target = document.querySelector<HTMLButtonElement>(`[data-alpha-phone-tab="${name}"]`);
+        if (!target) throw new Error(`no Phone tab ${name}`);
+        target.focus();
+        target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+      }
+    });
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Phone");
+    await until(alpha, alpha.runtime, Phone, (state) => state.front && state.tab === "Recents" && state.recents.status === "Loaded");
+    expect(button("Call Maya Chen")).toBeDefined();
+
+    await tab("Contacts");
+    await contactsFront();
+    await press("Open Alpha");
+    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+    await fill("Ask Alpha", "Keep the Contacts draft");
+    const draftKept = () => until(alpha, alpha.runtime, Comms, (state) => state.requests.some((draft) => draft.request === "Keep the Contacts draft"));
+    await draftKept();
+    await press("Expand chat");
+    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Full");
+    expect(document.querySelector("[data-alpha-shell-page]")?.hasAttribute("inert")).toBe(true);
+    await press("Shrink chat");
+    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+    await tab("Keypad");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Phone" && state.assistant === "Sheet");
+    await until(alpha, alpha.runtime, Phone, (state) => state.front && state.tab === "Keypad");
+    expect(document.querySelector('[data-alpha-phone-tab="keypad"]')?.getAttribute("aria-selected")).toBe("true");
+    await draftKept();
+
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Phone" && state.assistant === "Bar");
+    await tab("Contacts");
+    await contactsFront();
+    await press("Back");
+    await until(alpha, alpha.runtime, Phone, (state) => state.front && state.tab === "Keypad");
+
+    await hardware("home");
+    await until(alpha, home.runtime(alpha), Home, (state) => state.tiles.load.status === "Loaded");
+    await drawn(() => {
+      const tile = document.querySelector<HTMLButtonElement>("[data-home-tile='view:Contacts']");
+      if (!tile) throw new Error("no Contacts tile on Home");
+      tile.click();
+    });
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Contacts");
+    expect(document.querySelector('[role="tablist"][aria-label="Phone"]')).toBeNull();
+    await press("Back");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0);
   });
 
   it(`Opens the reviewed keypad without dialing (spec/app/phone/index.md, "A number handed to Phone opens the keypad with it filled in, and never dials")`, async () => {
