@@ -16,6 +16,8 @@
     "@effect/platform-node": "4.1.1",
     "@elizaos/agent": "link:../../.eliza/packages/agent",
     "@elizaos/agent-host": "link:../../.eliza/packages/agent-host",
+    "@elizaos/plugin-notes": "link:../../.eliza/packages/plugin-notes",
+    "@elizaos/plugin-notes-client": "link:../../.eliza/packages/plugin-notes-client",
     "@repo/deployment": "workspace:*",
     "@repo/eliza-harness": "workspace:*",
     "effect": "4.1.1",

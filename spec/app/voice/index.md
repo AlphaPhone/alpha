@@ -116,6 +116,7 @@ type Effect =
   | Shut({ session: int, keyboard: bool })
   | SayCallEnded
   | Navigate({ session: int, turn: int, place: int, sourceRoute: int })
+  | CheckDictation({ ticket: int })
   | Record({ ticket: int })
   | Transcribe({ ticket: int, network: bool, automatic: bool })
   | Abandon({ recording: int })
@@ -984,9 +985,21 @@ So the microphone serves one of them at a time.
 pure def canOpenRecorder(v: Voice, target: D::Field): bool =
   quiet(v) and not(v.latched) and D::canOpenRecorder(v.recorder)
 
-pure def openRecorder(v: Voice, target: D::Field): Voice = { ...v, recorder: D::openRecorder(v.recorder, target) }
+pure def openRecorder(v: Voice, target: D::Field): Change =
+  val opened = D::openRecorder(v.recorder, target)
+  { state: { ...v, recorder: opened },
+    out: if (target == D::ComposerField) List(CheckDictation({ ticket: opened.ticket })) else List() }
 
 pure def alwaysOneVoiceAtATime(v: Voice): bool = v.recorder.stage != D::Closed implies quiet(v)
+```
+
+### Only the current Ask Alpha recorder takes the answer to its recognition check
+
+```quint
+pure def canRecognitionChecked(v: Voice, ticket: int, ready: bool): bool = D::canRecognitionChecked(v.recorder, ticket, ready)
+
+pure def recognitionChecked(v: Voice, ticket: int, ready: bool): Voice =
+  { ...v, recorder: D::recognitionChecked(v.recorder, ticket, ready) }
 ```
 
 ### Recording asks for the microphone the first time, like a conversation

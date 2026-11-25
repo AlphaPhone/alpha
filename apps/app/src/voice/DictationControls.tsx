@@ -49,12 +49,17 @@ export function DictationControls({ runtime, onKeyboard, playback }: {
   const settings = { type: "openSettings" } as const;
   const recording = recorder.stage === "Recording";
   const review = recorder.stage === "Review";
+  const waitingForRecognition = recorder.stage === "Ready" && recorder.preparation !== "Prepared";
   const retired = recorder.stage === "Recorded" || recorder.stage === "Review" || recorder.stage === "Transcribing";
   const seconds = recording && elapsed.ticket === recorder.ticket ? elapsed.seconds
     : retired ? (dictatedDurationMs === undefined ? undefined : Math.floor(dictatedDurationMs / 1000))
       : 0;
   const primary = {
-    Ready: { label: "Start recording", icon: Mic, event: start, enabled: can(start) && !can(settings) },
+    Ready: {
+      label: recorder.preparation === "Preparing" ? "Preparing on-device speech"
+        : recorder.preparation === "Unavailable" ? "On-device speech unavailable" : "Start recording",
+      icon: Mic, event: start, enabled: can(start) && !can(settings),
+    },
     Starting: { label: "Starting microphone", icon: Mic, event: start, enabled: false },
     Recording: { label: "Stop recording", icon: VoiceStopIcon, event: stop, enabled: can(stop) },
     Transcribing: { label: "Cancel transcription", icon: VoiceStopIcon, event: close, enabled: can(close) },
@@ -99,7 +104,8 @@ export function DictationControls({ runtime, onKeyboard, playback }: {
         </div>
       )}
       {playback?.failed && <p role="status" className="text-sm leading-voice-status text-muted-foreground">Playback failed</p>}
-      <Button className="min-h-14 gap-2.5 rounded-sheet px-4" disabled={pending || !primary.enabled} onClick={() => void send(primary.event)}>
+      <Button className={cn("min-h-14 gap-2.5 rounded-sheet px-4", waitingForRecognition && "disabled:opacity-100")}
+        disabled={pending || !primary.enabled} onClick={() => void send(primary.event)}>
         <PrimaryIcon aria-hidden="true" className="size-6" />{primary.label}
       </Button>
       {review && (playback || can(another)) && <Button variant="secondary" className={cn("h-11 px-4 font-normal", playback && dictatedText.trim() === "" && !pending && "disabled:opacity-100")}

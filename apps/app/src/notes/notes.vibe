@@ -29,6 +29,7 @@ import { ownerEarlier, previous } from "./previous.vibe"
 import { transfers } from "./transfer.vibe"
 import { VoiceReview, sides } from "./sides.vibe"
 import { trashing } from "./trash.vibe"
+import { Recovery, voiceDeletion } from "./voiceDeletion.vibe"
 
 const phone: Actor = "Phone"
 type DeleteSelection = Extract<Notes.Effect, { readonly tag: "DeletesSelection" }>
@@ -257,6 +258,7 @@ export effect function enter() {
   try ignore(list.send({ type: "ownerChanged", owner }, phone))
   try ignore(editor.send({ type: "ownerChanged", owner }, phone))
   try ignore(trash.send({ type: "ownerChanged", owner }, phone))
+  try ignore((try Recovery.Machine).send({ type: "ownerChanged", owner }, phone))
   try ignore(link.send({ type: "ownerChanged", owner }, phone))
   try ignore(voice.send({ type: "ownerChanged", owner }, phone))
   try ignore((try Actions.Machine).send({ type: "ownerChanged", owner }, phone))
@@ -280,6 +282,7 @@ export effect function enter() {
   }
   try ignore(list.send({ type: "refresh" }, phone))
   try ignore(trash.send({ type: "resumeAction" }, phone))
+  try ignore(trash.send({ type: "maintain", now: untimed }, phone))
 }
 
 const opening = started(effect {
@@ -298,7 +301,7 @@ const opening = started(effect {
 }, "enter Notes")
 
 /** The Notes view observes these resident machines. The agent's store is opened only when Notes is requested; Ask Alpha waits here on the agent's open of a note. */
-export const notes = Layer.provideMerge(together(reacting(Notes, { carry }), editing, trashing, sides, recording, previous, transfers, actions, opening), Layer.mergeAll(noteStore, noteContent, opens))
+export const notes = Layer.provideMerge(together(reacting(Notes, { carry }), editing, trashing, voiceDeletion, sides, recording, previous, transfers, actions, opening), Layer.mergeAll(noteStore, noteContent, opens))
 
 effect function took() {
   const prior = try Previous.Machine
