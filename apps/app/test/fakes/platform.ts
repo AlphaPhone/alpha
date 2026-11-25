@@ -1,5 +1,5 @@
 // spec/app/platform/index.md, "Story: Talk to the resident agent"; spec/app/platform/index.md, "Story: Be told when to try again"; spec/app/platform/feed.md, "Story: Follow what my agent does on my screen"
-import type { Faked } from "./phone.ts";
+import { type Faked, rejection } from "./phone.ts";
 import { type Route, feed } from "./routes.ts";
 
 /** What the fake agent holds for the platform's journeys: the live events it publishes, and who is listening. */
@@ -8,6 +8,8 @@ export interface PlatformScene {
   readonly listening: Set<{ readonly topic: string; readonly clientId: string | null; readonly send: (data: unknown) => void }>;
   /** What the earlier Alpha kept in its connection plugin's encrypted slots, by slot. */
   readonly earlier: Map<string, string>;
+  /** The earlier slots whose file the phone's key no longer opens, or that exceed the earlier Alpha's limit for them. */
+  readonly unreadable: Set<string>;
   /** The streams the agent is still writing for `/api/platform/drip`, which says one thing and then waits. */
   readonly dripping: Set<object>;
   /** The requests the agent is still holding open for `/api/platform/hang` until aborted. */
@@ -15,20 +17,33 @@ export interface PlatformScene {
 }
 
 export function platformScene(): PlatformScene {
-  return { listening: new Set(), earlier: new Map(), dripping: new Set(), hanging: new Set() };
+  return { listening: new Set(), earlier: new Map(), unreadable: new Set(), dripping: new Set(), hanging: new Set() };
 }
 
+const digest = "[a-f0-9]{64}";
+/** The earlier page's own drafts and pending records, the only slots `AlphaConnectionPlugin.java` answers for (`AlphaEarlier.PAGE_SLOTS`). */
+const pageSlots = new RegExp(`^(?:${[
+  "inbox-drafts:v1:[\\s\\S]*", `inbox-operation:v1:${digest}`, "sms-draft:v1:(new|thread:[1-9][0-9]{0,18})",
+  `assistant-draft:v1:${digest}`, "alpha-proposal:v1", "stage-session:v1", `workflow-draft:v1:${digest}`, "clock-handoff:v1:device",
+  "reminder-creations:v1:device", "reminder-deletions:v1:device", `calendar-linked-sync:v1:${digest}`,
+  "notes-draft:v1:device", "note-origins:v1:device", "notes-audio-deletions:v1:device",
+].join("|")})$`);
+
 /**
- * `AlphaConnectionPlugin.java` of the earlier Alpha, which the APK keeps for its encrypted slots: `secureRead` answers
- * `{ value }`, null for an empty slot, and `secureCompareExchange` replaces a slot only while it holds `expectedValue`.
+ * `AlphaConnectionPlugin.java`, which reads the earlier Alpha's encrypted slots where they are: `secureRead` answers
+ * `{ value }`, null for an empty slot, and `secureCompareExchange` only clears a slot while it holds `expectedValue`.
+ * Each refuses a slot the earlier page did not keep, and a read refuses a slot that cannot be opened.
  */
 export function alphaConnection(scene: PlatformScene): Faked {
   return () => ({
-    secureRead: ({ slot }: { slot: string }) => Promise.resolve({ value: scene.earlier.get(slot) ?? null }),
+    secureRead({ slot }: { slot: string }) {
+      if (!pageSlots.test(slot) || scene.unreadable.has(slot)) return Promise.reject(rejection("Secure storage read failed"));
+      return Promise.resolve({ value: scene.earlier.get(slot) ?? null });
+    },
     secureCompareExchange({ slot, expectedValue, value }: { slot: string; expectedValue: string; value: string | null }) {
+      if (!pageSlots.test(slot) || typeof expectedValue !== "string" || value !== null) return Promise.reject(rejection("Secure draft update failed"));
       if (scene.earlier.get(slot) !== expectedValue) return Promise.resolve({ status: "conflict" });
-      if (value === null) scene.earlier.delete(slot);
-      else scene.earlier.set(slot, value);
+      scene.earlier.delete(slot);
       return Promise.resolve({ status: "saved" });
     },
   });

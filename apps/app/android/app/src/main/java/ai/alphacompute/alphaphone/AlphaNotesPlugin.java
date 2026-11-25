@@ -164,20 +164,8 @@ public final class AlphaNotesPlugin extends Plugin {
     });
   }
 
-  private static JsonCredentialSlots installedSlots(Context context) {
-    return new JsonCredentialSlots(new File(context.getNoBackupFilesDir(), "connection-credentials"), "alpha.connection.aes.v1",
-        AlphaNotesPlugin::slotCapacity, AlphaNotesPlugin::retainedCapacity);
-  }
-
-  private static int slotCapacity(String key) {
-    if (key.startsWith(AUDIO_PREFIX)) return 512 * 1024;
-    return key.equals("notes-folders:v1:device") ? 64 * 1024 : 32 * 1024 * 1024;
-  }
-
-  private static int retainedCapacity(String key) { return slotCapacity(key); }
-
   private RecordingStore recordings() {
-    JsonCredentialSlots slots = installedSlots(getContext());
+    JsonCredentialSlots slots = AlphaEarlier.store(getContext());
     return new RecordingStore(new File(getContext().getNoBackupFilesDir(), "note-audio"), AUDIO_PREFIX, "noteId",
         new RecordingStore.Slots() {
           @Override public String read(String key) throws Exception { return slots.read(key); }
@@ -299,7 +287,7 @@ public final class AlphaNotesPlugin extends Plugin {
 
   @PluginMethod public void previousExists(PluginCall call) {
     onDisk(call, () -> {
-      JsonCredentialSlots slots = installedSlots(getContext());
+      JsonCredentialSlots slots = AlphaEarlier.store(getContext());
       for (String name : new String[]{"notes-records:v1:device", "notes-trash:v1:device"}) {
         if (slots.slotFile(slots.slotHash(name)).getBaseFile().isFile()) {
           call.resolve(new JSObject().put("present", true));
@@ -318,7 +306,7 @@ public final class AlphaNotesPlugin extends Plugin {
         case "folders" -> "notes-folders:v1:device";
         default -> throw new IllegalArgumentException();
       };
-      String text = installedSlots(getContext()).read(key);
+      String text = AlphaEarlier.read(getContext(), key);
       call.resolve(new JSObject().put("text", text == null ? org.json.JSONObject.NULL : text));
     });
   }

@@ -183,10 +183,17 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect([await secret(open_), localStorage.getItem(earlier), world.secrets.get("alpha.test.open")]).toEqual(["Adopted", null, "\"Work\""]);
     // spec/app/platform/adoption.md, "A value is moved by copying it only where the new place is still empty, and its earlier place is cleared only once the new place holds a value": the earlier Alpha's encrypted slot moves into the secure store, and leaves only once it is there.
     world.secrets.delete("alpha.test.open");
-    world.platform.earlier.set("assistant-draft:v1:device", "Draft");
-    const slotted = (slot: Slot) => run(Effect.flatMap(vaulted(slot), (to) => adopt(earlierSlot("assistant-draft:v1:device"), to, (value: string) => Option.some(Redacted.make(value)))));
-    expect([await slotted(shut), world.platform.earlier.get("assistant-draft:v1:device")]).toEqual(["NotAdopted", "Draft"]);
-    expect([await slotted(open_), world.platform.earlier.has("assistant-draft:v1:device"), world.secrets.get("alpha.test.open")]).toEqual(["Adopted", false, "\"Draft\""]);
+    const draft = `assistant-draft:v1:${"a".repeat(64)}`;
+    world.platform.earlier.set(draft, "Draft");
+    const slotted = (slot: Slot, from = draft) => run(Effect.flatMap(vaulted(slot), (to) => adopt(earlierSlot(from), to, (value: string) => Option.some(Redacted.make(value)))));
+    // spec/app/platform/adoption.md, "The earlier Alpha's encrypted store is read where it is and never written: the page may only read one of the earlier page's own slots, or clear it while it still holds what was read": a slot the phone cannot open, and one the earlier page did not keep, stay where they are.
+    world.platform.unreadable.add(draft);
+    expect([await slotted(open_), world.platform.earlier.get(draft), world.secrets.has("alpha.test.open")]).toEqual(["NothingToAdopt", "Draft", false]);
+    world.platform.unreadable.delete(draft);
+    world.platform.earlier.set("cloud:production", "{\"token\":\"t\"}");
+    expect([await slotted(open_, "cloud:production"), world.platform.earlier.get("cloud:production"), world.secrets.has("alpha.test.open")]).toEqual(["NothingToAdopt", "{\"token\":\"t\"}", false]);
+    expect([await slotted(shut), world.platform.earlier.get(draft)]).toEqual(["NotAdopted", "Draft"]);
+    expect([await slotted(open_), world.platform.earlier.has(draft), world.secrets.get("alpha.test.open")]).toEqual(["Adopted", false, "\"Draft\""]);
   });
 });
 

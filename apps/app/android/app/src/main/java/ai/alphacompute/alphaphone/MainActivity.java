@@ -81,6 +81,7 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaNotificationsPlugin.class);
   registerPlugin(AlphaPhotosPermissionsPlugin.class);
   registerPlugin(AlphaResetPlugin.class);
+  registerPlugin(AlphaConnectionPlugin.class);
   registerPlugin(AlphaActionJournalPlugin.class);
   registerPlugin(AlphaDevicePlugin.class);
   registerPlugin(AlphaCarrierSetupPlugin.class);
