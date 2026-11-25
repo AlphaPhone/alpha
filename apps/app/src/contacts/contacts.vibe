@@ -215,7 +215,7 @@ function carry(fx: Out): Job<Event, Telephony | Rows | Contacts.Machine | System
       const status = telephony("requestAccess", (c) => c.phone.requestAccess("contacts")) catch () => undefined
       return { type: "accessReported", grant: grantOf(status?.permissions.contacts) } satisfies Event
     }, { type: "accessReported", grant: "Unasked" });
-    when { tag: "Settings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", 0) });
+    when { tag: "Settings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", "") });
     when { tag: "Open", let app }: run("reach", reached(app));
     when { tag: "Editor", let fresh }: run("editor", editor(fresh));
     when { tag: "Write", let id, let change, let contact }: answer(`write ${id}`, written(id, change, contact), { type: "writeLost" });
@@ -228,7 +228,7 @@ const shown = visiting(on("Contacts"), Contacts.Machine, (showing): Event => (sh
 
 const forget = applying(Contacts.Machine, (state) => ({
   list: !state.front || state.list.status === "Failed",
-  card: !state.opened,
+  card: !state.opened && !(Contacts.pending(state) && state.change === "Remove"),
   form: state.form === "Shut",
 }), effect ({ list, card, form }) => {
   try (try Rows).set({

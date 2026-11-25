@@ -297,11 +297,11 @@ const updates = started(effect {
   const playing = Stream.changes(Stream.map(recorder.changes, (state) => state.phase === "Recording" || state.phase === "Stopping"))
   const ticks = Stream.switchMap(playing, (polling) => polling ? Stream.filter(poll, (tape): tape is Tape => tape !== undefined) : Stream.empty)
   const opened = Stream.merge(device.openAsked, Stream.as(Stream.filter(devicePage.visible, (front) => front), undefined))
-  try fork.scoped Stream.runForEach(opened, effect () => {
+  const reopen = effect () => {
     if (try device.consumeOpen()) try ignore(shell.send({ type: "openView", view: "Notes" }))
-  })
-  if (try device.consumeOpen()) try ignore(shell.send({ type: "openView", view: "Notes" }))
-  try Stream.runForEach(Stream.merge(device.changed, ticks), report)
+  }
+  try reopen()
+  try Effect.all([Stream.runForEach(opened, reopen), Stream.runForEach(Stream.merge(device.changed, ticks), report)], { concurrency: "unbounded" })
 }, "watch the phone’s Notes recorder")
 
 const calls = following(Calls, (state) => state.calls.length > 0, Rec.Machine,

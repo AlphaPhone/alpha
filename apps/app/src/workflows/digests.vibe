@@ -1,5 +1,5 @@
 // spec/app/digests/index.md, "Story: See my digests"; spec/app/digests/index.md, "Story: Receive results without losing or repeating one"; spec/app/digests/schedules.md, "Story: Keep my digest schedules"
-import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import type * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { type WorkflowRequest, WorkflowHttpError, WorkflowLifecycleRejected, workflowHttpError } from "@elizaos/plugin-workflow/client"
 import { type DigestLoop, type DigestResult, type DigestSource, type DigestSpec, digestInbox, digestSourceState, hostedDigestProtocol } from "@elizaos/plugin-workflow/digests"
 import * as List from "../../gen/app__workflows__list.effect.vibe"
@@ -65,8 +65,9 @@ effect function read(ticket: number, owner: number): Event!!Needs {
   const plan = try Plan.Machine
   const fallback = { ...fail, missed: (try plan.get()).missed }
   if (!(try rows.sameOwner(ownerKey, owner))) return fallback
+  const agent = try Agent
   const checked: WorkflowRequest = effect (path: string, body: unknown) => {
-    const confirmed = ownerAt() catch () => ""
+    const confirmed = Effect.provideService(ownerAt(), Agent, agent) catch () => ""
     if (confirmed !== ownerKey) throw workflowHttpError(0, {})
     return try request(path, body)
   }

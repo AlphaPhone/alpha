@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import type { Page } from "../../gen/app__settings.ts";
 import * as Licensing from "../../gen/app__settings__licences.effect.vibe";
 import * as Pages from "../../gen/app__settings.effect.vibe";
-import { assisting } from "../assistant/assistant.vibe";
+import { mediaReview } from "../assistant/media-review.vibe";
 import { type Resident, type Shown, area } from "../runtime/area.tsx";
 import { reviewBack } from "../startup/settingsAccess.vibe";
 import { together } from "../runtime/reactor.vibe";
@@ -17,7 +17,7 @@ import { Carrier, Network } from "./PhonePages.tsx";
 import { resetting } from "./reset.vibe";
 import { type Drawn, Settings } from "./Settings.tsx";
 
-const machines = together(facts, about, activity, phone, resetting, assisting);
+const machines = together(facts, about, activity, phone, resetting, mediaReview);
 
 /** Back inside Settings: an open licence closes to its search; otherwise the page showing closes and its parent shows, until the first page, where Back leaves the app. */
 const pageBack = Licensing.Machine.use((licences) =>

@@ -71,7 +71,6 @@ const typing = Layer.effect(NoteEditor, effect {
   const editor = try Editor.Machine
   const turn = try Semaphore.make(1)
 
-  /** Save from the current words before closing, holding any failed or overtaken draft. */
   effect function close() {
     const current = try editor.get()
     if (!Editor.canClose(current)) return

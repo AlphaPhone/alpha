@@ -5,9 +5,10 @@ import { useMachine as useConversation } from "../../gen/app__assistant.react.ts
 import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
-import { area } from "../runtime/area.tsx";
+import type { Area } from "../runtime/area.tsx";
 import { type AssistantProps } from "./Assistant.tsx";
-import { assisting, freedom } from "./assistant.vibe";
+import { freedom } from "./assistant.vibe";
+import assistant from "./index.tsx";
 
 function ConversationActions({ runtime }: AssistantProps) {
   const conversation = useConversation(runtime).state;
@@ -30,4 +31,11 @@ function ConversationActions({ runtime }: AssistantProps) {
 }
 
 /** The owner can start an Ask Alpha conversation without leaving the Agent activity page. */
-export default area(assisting, ConversationActions);
+export default {
+  open(alpha) {
+    const runtime = assistant.runtime(alpha);
+    return function ActivityConversations() {
+      return <ConversationActions runtime={runtime} />;
+    };
+  },
+} satisfies Area;
