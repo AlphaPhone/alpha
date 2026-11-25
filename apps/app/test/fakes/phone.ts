@@ -1,4 +1,5 @@
 import type { AgentEvents, AgentRequest, AgentStatus, AgentStreamRequest, ElizaAgentPlugin, ElizaCloudPlugin, NativeCloudRequest, ElizaSecureStorePlugin, ElizaSecureStoreResult } from "@elizaos/os-bridges";
+import { deviceRoutes } from "@elizaos/cloud";
 import type { Answering } from "./routes.ts";
 
 /**
@@ -131,17 +132,27 @@ export function elizaAgent(agent: Answering): Faked {
   });
 }
 
+/** Whether eliza's cloud client lists `method` and the path of `target` as a mail or calendar route (`Mail`), which the phone sends only with its device lease. */
+function mailRoute(method: string, target: string): boolean {
+  const pieces = new URL(target, "http://cloud.phone").pathname.slice(1).split("/");
+  return deviceRoutes.some((route) => route.auth === "Mail" && route.method.toUpperCase() === method && route.path.length === pieces.length
+    && route.path.every((piece, at) => piece.tag === "Param" || piece.text === pieces[at]));
+}
+
 /**
- * `ElizaCloudPlugin.java`, the `ElizaCloud` plugin: `request` sends one listed route under the device key it alone
- * holds and answers the status, the headers a page may read and the body in base64; what it will not send it rejects
- * with one of eliza's `CloudFailure` codes.
+ * `ElizaCloudPlugin.java`, the `ElizaCloud` plugin: `request` sends one listed route under the credential it alone
+ * holds, the device lease on a mail or calendar route and the device key on any other, and answers the status, the
+ * headers a page may read and the body in base64; what it will not send it rejects with one of eliza's `CloudFailure`
+ * codes, `mail-lease-upgrade-required` for a mail or calendar route on a phone signed in without a lease.
  */
-export function elizaCloud(cloud: Answering, signedIn: () => boolean): Faked {
+export function elizaCloud(cloud: Answering, signedIn: () => boolean, leased: () => boolean = () => true): Faked {
   return plugin<ElizaCloudPlugin>(() => ({
     async request({ method, target, headers, body }: NativeCloudRequest) {
       if (!target.startsWith("/api/")) throw rejection("not-listed");
       if (!signedIn()) throw rejection("sign-in-required");
-      const response = await cloud(new Request(new URL(target, "http://cloud.phone"), { method, headers: { ...headers, authorization: "Bearer device-key", ...(body === undefined ? {} : { "content-type": "application/json" }) }, body })).catch(() => { throw rejection("network"); });
+      const mail = mailRoute(method, target);
+      if (mail && !leased()) throw rejection("mail-lease-upgrade-required");
+      const response = await cloud(new Request(new URL(target, "http://cloud.phone"), { method, headers: { ...headers, authorization: mail ? "Bearer mail-lease" : "Bearer device-key", ...(body === undefined ? {} : { "content-type": "application/json" }) }, body })).catch(() => { throw rejection("network"); });
       const found = { etag: response.headers.get("etag"), contentType: response.headers.get("content-type"), retryAfter: response.headers.get("retry-after") };
       return { status: response.status, body: base64(new Uint8Array(await response.arrayBuffer())), ...Object.fromEntries(Object.entries(found).filter(([, value]) => value !== null)) };
     },

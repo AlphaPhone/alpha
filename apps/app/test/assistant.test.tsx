@@ -226,7 +226,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
   // spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/chats.md, "Story: Open a message that search found"
   it("Search my conversations, and open a hit where it was said (spec/app/assistant/search.md, \"Story: Search my conversations\")", async () => {
     const world = { ...scene(), phone };
-    world.ask.kept.set("c7", { roomId: "r7", title: "Lunch", messages: [{ id: "m1", role: "user", text: "Lunch on Friday?" }, { id: "m2", role: "assistant", text: "Friday at noon works." }, Object.assign({ id: "m3", role: "assistant" as const, text: "" }, { failureKind: "limit_reached" })] });
+    world.ask.kept.set("c7", { roomId: "r7", title: "Lunch", messages: [{ id: "m1", role: "user", text: "Lunch on Friday?" }, { id: "m2", role: "assistant", text: "Friday at noon works." }, Object.assign({ id: "m3", role: "assistant" as const, text: "" }, { failureKind: "limit_reached" }), Object.assign({ id: "m4", role: "assistant" as const, text: "" }, { failureKind: "insufficient_credits", cloudCode: "allowance_exhausted" })] });
     const { alpha, runtime } = await openAssistant(world, false);
 
     // spec/app/assistant/search.md, "Words are searched from the first hit, and empty words are not searched"
@@ -240,6 +240,9 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect([lines().slice(0, 2), document.querySelector("section[aria-label='Results']")]).toEqual([["Lunch on Friday?", "Friday at noon works."], null]);
     // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again": a reply read again from history says why it did not finish, and to wait a moment.
     expect(document.querySelector("[role=log]")?.textContent).toContain("Too many requests. Wait a moment, then try again");
+    // spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it": a reply kept with Cloud's funds code, read again, shows the one out-of-funds line, never spent credits.
+    const reread = document.querySelector("[role=log]")?.textContent ?? "";
+    expect([reread.includes("You’re out of plan allowance and credits, so I couldn’t reply."), reread.includes("Out of credits")]).toEqual([true, false]);
 
     // spec/app/assistant/search.md, "Only the newest asking's hits are shown, a page at a time, after those already shown": a search that fails says so.
     world.ask.searchDown = true;
