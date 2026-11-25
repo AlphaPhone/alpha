@@ -15,7 +15,7 @@ import { Catalog } from "./catalog.vibe";
 import { MediaGrid } from "./Grid.tsx";
 import { MediaViewer } from "./Viewer.tsx";
 import type { agentPhotos } from "./agent.vibe";
-import type { library } from "./photos.vibe";
+import { PhotoChooser, type library } from "./photos.vibe";
 import type { trash } from "./trash.vibe";
 import type { viewer } from "./viewer.vibe";
 import type { Layer } from "effect";
@@ -134,7 +134,9 @@ export function Photos({ runtime, alpha }: PhotosProps) {
     if (album?.owned) add("Delete album", { type: "deleteAlbum" }, <Trash2 />, menu);
   }
   if (!selection && !inTrash && opened === 0 && state.visible && !secure && scan.state && scan.can({ type: "startImage", frame: scan.state.images + 1 }, "Phone")) {
-    menu.push({ label: "Scan image text", icon: <ScanText />, run: () => scanInput.current?.click() });
+    menu.push({ label: "Scan image text", icon: <ScanText />, run: () => {
+      if (scanInput.current && runtime.runSync(Effect.flatMap(PhotoChooser, (picker) => picker.begin()))) scanInput.current.click();
+    } });
   }
   const status = inTrash ? bin.read.status : state.library.status;
   const dialog = state.shelf.dialog;
@@ -157,10 +159,12 @@ export function Photos({ runtime, alpha }: PhotosProps) {
   </AppHeader>;
   return (
     <section aria-label="Photos" className="relative flex min-h-0 flex-1 flex-col bg-background">
-      <input ref={scanInput} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={(event) => {
+      <input ref={scanInput} type="file" accept="image/jpeg,image/png,image/webp" hidden
+        onCancel={() => runtime.runSync(Effect.flatMap(PhotoChooser, (picker) => picker.finish()))} onChange={(event) => {
         const source = event.currentTarget.files?.[0];
         event.currentTarget.value = "";
         if (source) void runtime.runPromiseExit(scanSelectedImage(source));
+        else runtime.runSync(Effect.flatMap(PhotoChooser, (picker) => picker.finish()));
       }} />
       <Scan runtime={runtime} alpha={alpha} />
       <div inert={opened !== 0} aria-hidden={opened !== 0 || undefined} className="flex min-h-0 flex-1 flex-col" data-alpha-subview="photos-list">
