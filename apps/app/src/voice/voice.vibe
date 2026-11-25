@@ -445,8 +445,9 @@ interface VoicePost {
   readonly queue: Queue.Queue<Voice.Event, Cause.Done>
   readonly lease: SpokenChatLease
   readonly spoken: string
-  readonly finishLocally: () => void
 }
+
+type VoiceCompletion = Extract<Voice.Event, { type: "replyEnds" | "refusedForFunds" }>
 
 type VoiceOutput = Pick<VoicePost, "session" | "turn" | "queue"> & {
   readonly memory: VoiceMemory
@@ -507,13 +508,13 @@ function voiceTurnOutput({ session, turn, queue, memory, holdForText }: VoiceOut
     get usedDirect() { return usedDirect },
     get awaitingFiles() { return awaitingFiles },
     finishSpeech(finalText: string) {
-    const full = speakableText(replyBlocks(finalText).words)
-    sayFrom(full.length >= shown.length ? full : shown, true)
+      const full = speakableText(replyBlocks(finalText).words)
+      sayFrom(full.length >= shown.length ? full : shown, true)
     },
   }
 }
 
-effect function postVoiceTurn({ session, turn, queue, lease, spoken, finishLocally }: VoicePost): void!!(Agent | VoiceWords | Voice.Machine | Shell.Machine) {
+effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost): (VoiceCompletion | undefined)!!(Agent | VoiceWords | Voice.Machine | Shell.Machine) {
   const { runtime } = try Agent
   const { memory } = try VoiceWords
   const voice = try Voice.Machine
@@ -591,10 +592,7 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken, finishLocal
     sensitive: current?.context.sensitive ?? true,
     currentTurn,
   })
-  if (!currentTurn) {
-    Queue.endUnsafe(queue)
-    return
-  }
+  if (!currentTurn) return undefined
   const images = entailsAttachment && file !== undefined ? [{ data: file.data, mimeType: file.mimeType, name: file.name }] : []
   // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view"
   const alreadyInFiles = showing?.tag === "App" && showing.view === "Files"
@@ -622,8 +620,9 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken, finishLocal
   const readyToSend = review !== undefined && (files !== undefined ? sameFiles(files, try review.filesContext())
     : origin !== undefined && (try review.filesOrigin(true))?.route === origin.route)
   const direct = enrolled !== undefined && readyToSend && (try atSource) ? enrolled : undefined
-  if (!(try lease.verified) || !(try currentRequest)) { finishLocally(); return }
-  if (sms !== undefined && !(try smsCurrent)) { finishLocally(); return }
+  const refused: VoiceCompletion = { type: "replyEnds", session, turn, asks: false }
+  if (!(try lease.verified) || !(try currentRequest)) return refused
+  if (sms !== undefined && !(try smsCurrent)) return refused
   const admittedScreen = direct === undefined ? sameScreen : try atSource
   const sent = effect (files: typeof direct) => {
     output.beginAttempt(files !== undefined)
@@ -643,16 +642,10 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken, finishLocal
   }, stopped), effect {
     if (controller.pending) try ignore(tryPromise(() => controller.interrupt()))
   })
-  if (!(try currentRequest)) {
-    Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false })
-    Queue.endUnsafe(queue)
-    return
-  }
+  if (!(try currentRequest)) return refused
   if (isCloudFundsRefusal(result)) {
     memory.lastReply = ""
-    Queue.offerUnsafe(queue, { type: "refusedForFunds", session, turn })
-    Queue.endUnsafe(queue)
-    return
+    return { type: "refusedForFunds", session, turn }
   }
   if (result?.kind === "Replied") try lease.settle(result, spoken)
   let filesReport: string | undefined
@@ -670,10 +663,7 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken, finishLocal
         { view: conversation, revision: screen.context.revision, moved: succeed(true), open, changes }, result.reply.actionResults)
     }
   }
-  if (!Voice.canSentence(try voice.get(), session, turn)) {
-    Queue.endUnsafe(queue)
-    return
-  }
+  if (!Voice.canSentence(try voice.get(), session, turn)) return undefined
   let smsShown = false
   if (sms !== undefined && smsReview !== undefined && chat !== undefined && streamed && result?.kind === "Replied"
     && result.reply.userMessageId !== undefined && result.reply.failureKind === undefined && (try smsCurrent)) {
@@ -708,10 +698,7 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken, finishLocal
       if (place !== undefined) try openRouteForVoice(place, sourceRoute, session, turn, currentRequest, memory, voice, shell)
     }
   }
-  if (!Voice.canSentence(try voice.get(), session, turn)) {
-    Queue.endUnsafe(queue)
-    return
-  }
+  if (!Voice.canSentence(try voice.get(), session, turn)) return undefined
   let asks = smsShown
   if (!output.usedDirect && review !== undefined && enrolled !== undefined && chat !== undefined && chats !== undefined
     && chatPage !== undefined && chatPage.around === 0 && conversation !== undefined && screen !== undefined && streamed
@@ -745,14 +732,8 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken, finishLocal
     }
   }
   memory.lastReply = finalText
-  if (asks) {
-    Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: true })
-    Queue.endUnsafe(queue)
-    return
-  }
-  output.finishSpeech(finalText)
-  Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false })
-  Queue.endUnsafe(queue)
+  if (!asks) output.finishSpeech(finalText)
+  return { type: "replyEnds", session, turn, asks }
 }
 
 // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
@@ -808,11 +789,12 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     const carried = try shared.writer.withPermitsIfAvailable(1)(effect {
       const abandoned = Effect.as(Stream.runHead(Stream.filter(voice.changes, (state) => !Voice.canSentence(state, session, turn))), undefined)
       const lease = try Effect.raceFirst(shared.begin(session, turn, current), abandoned)
-      if (lease === undefined) return false
-      try postVoiceTurn({ session, turn, queue, lease, spoken, finishLocally })
-      return true
+      if (lease === undefined) return { type: "replyEnds", session, turn, asks: false } as const
+      return try postVoiceTurn({ session, turn, queue, lease, spoken })
     })
-    if (Option.isNone(carried) || !carried.value) finishLocally()
+    if (Option.isNone(carried)) { finishLocally(); return }
+    if (carried.value !== undefined) Queue.offerUnsafe(queue, carried.value)
+    Queue.endUnsafe(queue)
   }
   return Stream.callback<Voice.Event, never, VoiceWords>((queue) => effect {
     const { memory } = try VoiceWords
