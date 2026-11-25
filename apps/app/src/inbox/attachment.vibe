@@ -1,33 +1,42 @@
 // spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"; spec/app/inbox/message.md, "An attachment use ends as its own answer says, or unknown"
 import type { MailMessage } from "@elizaos/cloud"
 import type { ReviewedMailAttachment } from "@elizaos/plugin-inbox-client"
+import { blobOf, decodeBase64, encoded, scaledImage, scanImageTypes } from "@elizaos/plugin-files-client"
+import type { InboxAttachmentPreview } from "@repo/ui"
 import * as Inbox from "../../gen/app__inbox.effect.vibe"
 import * as Message from "../../gen/app__inbox__message.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Cloud } from "../platform/cloud.vibe"
-import { native } from "../platform/device.vibe"
-import { InboxAttachmentFiles, canSaveOnPhone } from "../platform/inboxAttachments.vibe"
+import { previewOf, releasePreview } from "../platform/browser-library.ts"
+import { InboxAttachmentFiles } from "../platform/inboxAttachments.vibe"
 import { started } from "../runtime/reactor.vibe"
 import { Mail, revisionOf } from "./gmail.vibe"
 import { provider } from "./provider.vibe"
 
 type FilePart = MailMessage["attachments"][number]
 type Request = Extract<Message.Effect, { tag: "HandleAttachment" }>
-type Preview = { readonly text: string; readonly digest: string }
 
 /** A preview lives only for the attachment review that opened it. The bytes are never kept. */
 export service AttachmentPreviews {
-  read(attempt: number): Preview | undefined
-  show(attempt: number, preview: Preview): void
+  read(attempt: number): InboxAttachmentPreview | undefined
+  show(attempt: number, preview: InboxAttachmentPreview): void
   forget(attempt: number): void
 }
 
-export const attachmentPreviews = Layer.sync(AttachmentPreviews, () => {
-  let shown: { attempt: number; preview: Preview } | undefined
+export const attachmentPreviews = Layer.effect(AttachmentPreviews, effect {
+  let shown: { attempt: number; preview: InboxAttachmentPreview } | undefined
+  const clear = () => {
+    if (shown?.preview.kind === "image") releasePreview(shown.preview.url)
+    shown = undefined
+  }
+  try addFinalizer(() => sync(clear))
   return {
     read: (attempt: number) => shown?.attempt === attempt ? shown.preview : undefined,
-    show: (attempt: number, preview: Preview) => { shown = { attempt, preview } },
-    forget: (attempt: number) => { if (shown?.attempt === attempt) shown = undefined },
+    show: (attempt: number, preview: InboxAttachmentPreview) => {
+      clear()
+      shown = { attempt, preview }
+    },
+    forget: (attempt: number) => { if (shown?.attempt === attempt) clear() },
   }
 })
 
@@ -48,42 +57,15 @@ export const forgetPreview = started(effect {
   })
 }, "clearing an attachment preview")
 
-module web {
-  import type { OpaqueMailAttachment } from "@elizaos/plugin-inbox-client"
-
-  /** Whether this browser has an ordinary link download destination. @throws {never} */
-  export function downloads(): boolean {
-    return typeof document !== "undefined" && "download" in document.createElement("a") && typeof URL.createObjectURL === "function"
-  }
-
-  /** Requests a download of checked opaque bytes. A link does not report its disk outcome. @throws {never} */
-  export function download(file: OpaqueMailAttachment): boolean {
-    try {
-      const bytes = Uint8Array.from(atob(file.dataBase64), (value) => value.charCodeAt(0))
-      const url = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }))
-      try {
-        const link = document.createElement("a")
-        link.href = url
-        link.download = file.name
-        link.click()
-      } finally {
-        if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => URL.revokeObjectURL(url))
-        else URL.revokeObjectURL(url)
-      }
-      return true
-    } catch { return false }
-  }
-}
-import { download, downloads } from web
-
-/** Only bounded plain text is opened in Alpha. Binary parts can be downloaded without opening them. */
+/** Open bounded plain text and raster images; other types can be saved without opening them. */
 export function canPreviewAttachment(file: FilePart): boolean {
-  return file.partId !== "" && file.mimeType.toLowerCase() === "text/plain" && file.size >= 0 && file.size <= 512 * 1024
+  const type = file.mimeType.toLowerCase()
+  return file.partId !== "" && file.size >= 0 && (type === "text/plain" ? file.size <= 512 * 1024 : scanImageTypes.includes(type) && file.size <= 5 * 1024 * 1024)
 }
 
-/** The browser requests a download. Android verifies the copy written to the chosen document. */
+/** The managed Inbox route supplies an exact file of up to five MiB. */
 export function canSaveAttachment(file: FilePart): boolean {
-  return file.partId !== "" && file.size >= 0 && file.size <= 5 * 1024 * 1024 && (native() ? canSaveOnPhone() : downloads())
+  return file.partId !== "" && file.size >= 0 && file.size <= 5 * 1024 * 1024
 }
 
 effect function custody(request: Request) {
@@ -124,14 +106,23 @@ export effect function handleAttachment(request: Request): Message.Event!!(Cloud
   if (handling === "Opening") {
     if (!canPreviewAttachment(part)) return refused
     const opened = client.gmailAttachment(grant, id, part.partId, history) catch () => undefined
-    if (opened?.text === undefined || !matches(part, opened) || !(try current)) return refused
+    if (opened === undefined || !matches(part, opened) || !(try current)) return refused
     const previews = try AttachmentPreviews
-    previews.show(attempt, { text: opened.text, digest: opened.sha256 })
+    if (opened.text !== undefined) {
+      previews.show(attempt, { kind: "text", text: opened.text, digest: opened.sha256 })
+    } else {
+      const bytes = decodeBase64(opened.dataBase64)
+      if (bytes === undefined || !scanImageTypes.includes(opened.mimeType)) return refused
+      const raster = flatMap(scaledImage(blobOf([bytes], opened.mimeType), 2048), (image) => encoded(image, "image/png")) catch () => undefined
+      if (raster === undefined || !(try current)) return refused
+      previews.show(attempt, { kind: "image", url: previewOf(raster), digest: opened.sha256 })
+    }
     return { type: "attachmentHandled", attempt, done: true, known: true }
   }
-  if (!canSaveAttachment(part)) return refused
+  const destination = try InboxAttachmentFiles
+  if (!canSaveAttachment(part) || destination.destination === "unavailable") return refused
   const saved = client.gmailOpaqueAttachment(grant, id, part.partId, history) catch () => undefined
   if (saved === undefined || !matches(part, saved) || !(try current)) return refused
-  const outcome = native() ? (try (try InboxAttachmentFiles).save(attempt, saved)) : download(saved) ? "unknown" : "refused"
+  const outcome = try destination.save(attempt, saved)
   return { type: "attachmentHandled", attempt, done: outcome === "saved", known: outcome !== "unknown" }
 }
