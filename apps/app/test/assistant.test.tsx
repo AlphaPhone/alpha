@@ -40,7 +40,7 @@ function write(text: string) {
 /** Open the menu of the message that says `text` and choose `item`, as the owner does with the keyboard. */
 function onMessage(text: string, item: string) {
   act(() => {
-    const found = [...document.querySelectorAll("[role=log] article button[aria-haspopup=menu]")].find((one) => document.getElementById(one.getAttribute("aria-labelledby") ?? "")?.textContent === text);
+    const found = [...document.querySelectorAll("[role=log] article button[aria-haspopup=menu]")].find((one) => one.nextElementSibling?.textContent === text);
     if (!(found instanceof HTMLButtonElement)) throw new Error(`no message ${text}`);
     found.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   });
@@ -327,7 +327,9 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const link = reply?.querySelector("a");
     act(() => { link?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
     expect([link?.closest("button"), document.querySelector("[role=menu]")]).toEqual([null, null]);
-    act(() => { reply?.querySelector<HTMLButtonElement>("button[aria-haspopup=menu]")?.click(); });
+    const messagePress = reply?.querySelector<HTMLButtonElement>("button[aria-haspopup=menu]");
+    expect([messagePress?.getAttribute("aria-label"), messagePress?.textContent, messagePress?.hasAttribute("aria-labelledby"), messagePress?.nextElementSibling?.textContent]).toEqual(["Message actions", "", false, "You said: Limes tonight?Ask Ana <b>now</b>one"]);
+    act(() => { messagePress?.click(); });
     expect(document.querySelector("[role=menu]")?.getAttribute("aria-label")).toBe("Message actions");
     act(() => { reply?.querySelector<HTMLButtonElement>("button[aria-haspopup=menu]")?.click(); });
     // spec/app/assistant/reply.md, "Copy, quote, read aloud, use in email and Talk take the reply's plain words, without its marks"
@@ -524,10 +526,20 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/assistant/index.md, "Stop reply ends a streaming reply, and takes back a message nothing was heard of"
     world.ask.stalled = true;
+    world.ask.nextReplyChunks = ["Read [Octopus](https://en.wikipedia.org/wiki/Octopus) and **Lim"];
     write("Take your time");
     await press("Send");
     await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Streaming");
     expect(button("Send")).toBe(undefined);
+    // spec/app/assistant/reply.md, "Prose is drawn with its Markdown: bold, italics, code, headings, lists and quotes; a link is a link only to an https address, and HTML reads as text": the reply still being written holds back its open mark, and its link opens through the phone's link path.
+    const writing = await vi.waitFor(() => {
+      const found = document.querySelector("[data-alpha-message-id='reply'] a");
+      if (!found) throw new Error("no link in the reply being written");
+      return found;
+    });
+    const tap = new MouseEvent("click", { bubbles: true, cancelable: true });
+    act(() => { writing.dispatchEvent(tap); });
+    expect([writing.getAttribute("href"), writing.closest("[data-alpha-message-id]")?.textContent, tap.defaultPrevented]).toEqual(["https://en.wikipedia.org/wiki/Octopus", "Read Octopus and Lim", phone]);
     await press("Stop reply");
     // spec/app/assistant/index.md, "The agent's answer to the abort starts the one read of the conversation"; spec/app/assistant/index.md, "The read says the reply finished anyway, was stopped for sure, was never recorded, or to look later"
     await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Stopped" && s.check !== "Aborting" && s.recheck.status !== "Loading");
