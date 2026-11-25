@@ -3,6 +3,7 @@ import { Alert, AppHeader, Button, NoteRow, Sheet, SheetContent, Spinner } from 
 import { ChevronLeft, Trash2 } from "lucide-react";
 import type * as Trash from "../../gen/app__notes__trash.ts";
 import { useMachine as useTrash } from "../../gen/app__notes__trash.react.ts";
+import { useMachine as useRecovery } from "../../gen/app__notes__voiceDeletion.react.ts";
 import type { Alpha } from "../runtime/area.tsx";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
@@ -19,6 +20,7 @@ const confirm = { type: "confirm", storage: true, now: untimed } as const;
 /** Deleted notes keep their own list and are reviewed in a sheet before any change. */
 export function RecentlyDeleted({ runtime, collection }: { readonly runtime: Alpha["runtime"]; readonly collection: Collection }) {
   const model = useTimed(runtime, useTrash);
+  const recovery = useRecovery(runtime);
   const state = model.state;
   if (!state || (!state.showing && state.question !== "AskFull")) return null;
   const can = (event: Trash.Event) => model.can(event, "Owner");
@@ -34,6 +36,12 @@ export function RecentlyDeleted({ runtime, collection }: { readonly runtime: Alp
   const details = full ? "Recently deleted is full." : reviewing ? "This can’t be undone." : selected && deletionDate(selected.at);
   const recover = { type: "recover", id: state.opened, now: untimed, storage: true } as const;
   const askErase = { type: "askErase", id: state.opened } as const;
+  const showRecording = { type: "showRow", covered: reviewing || selected !== undefined } as const;
+  const dismissRecording = { type: "putAside" } as const;
+  const keepRecording = { type: "decide", choice: "Retire" } as const;
+  const eraseRecording = { type: "decide", choice: "FinishCanonical" } as const;
+  const reviewingRecording = state.showing && !showRecording.covered && recovery.state?.review.showing === true;
+  const recordingNeedsReview = recovery.can(showRecording, "Owner");
 
   return <>
     {state.showing && <section aria-label="Recently deleted" data-alpha-subview="notes-trash" className="flex min-h-0 flex-1 flex-col">
@@ -48,6 +56,10 @@ export function RecentlyDeleted({ runtime, collection }: { readonly runtime: Alp
         {state.read.status === "Failed" && <Alert variant="warn">Recently deleted is unavailable</Alert>}
         {state.failed && <Alert variant="warn">Couldn't change Recently deleted</Alert>}
         {state.unsure && <Alert variant="warn">Alpha couldn't confirm the last change</Alert>}
+        {recordingNeedsReview && <Alert variant="warn">
+          <span>Recording deletion needs review</span>
+          <Button variant="ghost" size="sm" onClick={() => void recovery.send(showRecording, "Owner")}>Review</Button>
+        </Alert>}
         <ul aria-label="Recently deleted notes">
           {state.entries.map((entry) => {
             const note = noteAt(entry.id);
@@ -79,6 +91,17 @@ export function RecentlyDeleted({ runtime, collection }: { readonly runtime: Alp
           {state.unsure ? "Alpha couldn't confirm the last change" : "Couldn't change Recently deleted"}
         </Alert>}
       </SheetContent>
+    </Sheet>
+    <Sheet open={reviewingRecording} onOpenChange={(open) => {
+      if (!open && recovery.can(dismissRecording, "Owner")) void recovery.send(dismissRecording, "Owner");
+    }}>
+      <SheetContent title="Delete the recording?" description="The note is gone. Alpha couldn’t confirm that its recording was deleted."
+        actions={<>
+          <Button variant="secondary" size="lg" disabled={!recovery.can(keepRecording, "Owner")}
+            onClick={() => void recovery.send(keepRecording, "Owner")}>Keep recording</Button>
+          <Button size="lg" className={contrast} disabled={!recovery.can(eraseRecording, "Owner")}
+            onClick={() => void recovery.send(eraseRecording, "Owner")}><Trash2 className="size-4.5" /> Delete recording</Button>
+        </>} />
     </Sheet>
   </>;
 }

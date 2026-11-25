@@ -1,5 +1,6 @@
 // spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/assistant/dock.md, "While voice owns Ask Alpha its open sheet is not dragged, a drag under way is let go, and the sheet is dragged again once voice ends"
 import type { Layer } from "effect";
+import { useMemo } from "react";
 import { Machine as Dock } from "../../gen/app__assistant__dock.effect.vibe";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
 import { useMachine as useInbox } from "../../gen/app__inbox.react.ts";
@@ -22,6 +23,7 @@ import { VoiceInterim } from "../voice/VoiceInterim.tsx";
 import { interimLiveness } from "../voice/voice.vibe";
 import { DictationControls } from "../voice/DictationControls.tsx";
 import { Assistant } from "./Assistant.tsx";
+import type { MessageActions } from "./history.tsx";
 import { assistantBack, assisting, spokenScreen } from "./assistant.vibe";
 import { copyMessage, emailDestination, emailMessage } from "./message-actions.vibe";
 import { dictate } from "./dictation.vibe";
@@ -40,7 +42,6 @@ const screens = together(
 function LiveAssistant({ runtime, alpha }: Shown<Layer.Success<typeof screens> | Resident>) {
   const inbox = useInbox(runtime).state;
   const drafts = useDrafts(runtime).state;
-  const destination = emailDestination(inbox, drafts);
   const voice = useVoice(runtime);
   const speaker = useSpeaker(runtime).state;
   const composer = useComposer(runtime);
@@ -61,10 +62,9 @@ function LiveAssistant({ runtime, alpha }: Shown<Layer.Success<typeof screens> |
       toggle: (ticket: number) => void runtime.runPromise(readTranscript(ticket)),
     } : undefined;
   const readingAllowed = noCall && speaker !== undefined && !speaker.latched && voice.state !== undefined && quiet(voice.state) && recorder?.stage === "Closed" && runtime.runSync(bridge.canRead());
-  return <Assistant
-    runtime={runtime}
-    canReadAloud={readingAllowed}
-    messageActions={{
+  const messageActions = useMemo<MessageActions>(() => {
+    const destination = emailDestination(inbox, drafts);
+    return {
       copy: (selection) => void runtime.runPromise(copyMessage(selection)),
       useInEmail: destination ? (selection) => void runtime.runPromise(emailMessage(selection, destination)) : undefined,
       reading: speaker?.text === "Message" && reading(speaker)
@@ -72,7 +72,12 @@ function LiveAssistant({ runtime, alpha }: Shown<Layer.Success<typeof screens> |
       openLink: registered("AlphaBrowser") ? (href) => void Promise.all([import("../browser/index.tsx"), import("../browser/browser.vibe")])
         .then(([{ default: browser }, { openMessageLink }]) => browser.runtime(alpha).runPromise(openMessageLink(href, "Ask Alpha")))
         .catch(() => false) : undefined,
-    }}
+    };
+  }, [alpha, drafts, inbox, runtime, speaker]);
+  return <Assistant
+    runtime={runtime}
+    canReadAloud={readingAllowed}
+    messageActions={messageActions}
     speech={{
       keyboard: voice.state && {
         session: voice.state.session,

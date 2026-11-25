@@ -40,7 +40,11 @@ owner" or "the user". The model also described example.com from memory when
 asked to summarize "this page" on Home, where no page goes with the turn, so
 the prompt tells the agent that it sees a web page only in the latest
 message's Browser page, and with none to say that no page is open rather
-than describe one. Asked "Go home." from Notes, with Home declared as a
+than describe one. With a page that had little text, the model filled in
+what it knew of the site, calling example.com a reserved placeholder domain
+when the page said nothing of it, so the prompt also tells the agent to answer
+from the page's title, address and text alone and to say when a page has
+little on it. Asked "Go home." from Notes, with Home declared as a
 view, the model most often planned directions to a saved Home place or asked
 which was meant, where the old phone went to its home screen. So the prompt
 tells the agent that the phone's screens are its views and Home is the home
@@ -331,7 +335,6 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/notes/interact", stream: false },
   { method: Post, path: "/api/notes/trash/erase", stream: false },
   { method: Get, path: "/api/notes/trash/recordings", stream: false },
-  { method: Post, path: "/api/notes/trash/recordings/complete", stream: false },
   { method: Get, path: "/api/workflow/status", stream: false },
   { method: Get, path: "/api/workflow/hosted/loops", stream: false },
   { method: Post, path: "/api/workflow/hosted/loops", stream: false },
@@ -424,7 +427,22 @@ pure val nativeDigestRoutes: List[Route] = List(
   { method: Get, path: "/api/workflow/hosted/results", stream: false },
   { method: Post, path: nativeDigestAck, stream: false },
 )
-pure val nativeRoutes = nativeSpeechRoutes.concat(nativeDigestRoutes)
+```
+
+### Only the phone's native channel can verify that a reviewed recording was erased
+
+Android names the pending receipt and its serving owner, agent and epoch.
+Only the native route can ask to prepare that exact receipt or confirm it
+from the phone's durable removal evidence. In either phase the resident
+requires its current reserved receipt with no saved references. The Notes
+service clears the receipt only after receiving its proof in that request.
+The page can read pending receipts. It cannot complete them.
+
+```quint
+pure val nativeNotesCleanup = "/api/alpha-runtime/notes-recording-cleanup"
+pure val nativeNotesCleanupLimit = 2048
+pure val nativeRecordingRoutes: List[Route] = List({ method: Post, path: nativeNotesCleanup, stream: false })
+pure val nativeRoutes = nativeSpeechRoutes.concat(nativeDigestRoutes).concat(nativeRecordingRoutes)
 pure def nativeRoutesAdmitted(listed: List[Route]): bool =
   listed.length() == nativeRoutes.length() and listed.every(route => nativeRoutes.includes(route))
     and nativeRoutes.every(route => listed.includes(route))

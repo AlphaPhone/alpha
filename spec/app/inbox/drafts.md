@@ -36,7 +36,7 @@ import letter as L from "./letter"
 import shelf as S from "./shelf"
 import access.* from "./access"
 
-type Notice = Clear | NoReplyAddress | NotEditable | MineRestored | SavedTaken | SaveFound | SaveNotFound
+type Notice = Clear | NoReplyAddress | NotEditable | MineRestored | SavedTaken | SaveFound | SaveNotFound | CopyDeleted | CopyNotDeleted
 type Composer = {
   session: int, open: bool, letter: L::Letter, made: int,
   kept: L::Letter, copy: L::Letter, stored: bool,
@@ -49,7 +49,7 @@ type Effect =
   | Keep({ ticket: int, session: int, draft: int, revision: int })
   | KeepAside({ session: int, draft: int, revision: int })
   | Load({ ticket: int, session: int })
-  | ReadCopy({ ticket: int, draft: int, account: int, gmail: int })
+  | ReadCopy({ ticket: int, draft: int, account: int, gmail: int, attempt: int })
   | ReadSent({ ticket: int, draft: int, account: int, attempt: int })
   | Forget({ session: int, draft: int })
 type Written = { state: Composer, out: List[Effect] }
@@ -542,12 +542,12 @@ pure def sometimesADraftAsideIsHandedOn(s: Composer): bool = s.shelf.shelved.exi
 > As the owner, I want to check once whether a send Alpha could not
 > confirm reached Gmail, rather than send it twice or never know.
 
-### An unknown send is checked once, by reading Gmail's Sent for it, while its account may be read and no new send of the draft is handed over
+### An unknown send is checked once by reading its own Gmail operation receipt, while its account may be read and no new send of the draft is handed over
 
-Found, it counts as sent, and a send of it again that waits no longer
-matches what was reviewed. Not found, it is known not to have gone. If
-the check fails, it stays unknown, and only the owner's choice sends it
-again.
+A receipt that confirms the send counts as sent, and a resend already
+under review must be reviewed again. A receipt that explicitly rejects
+the send counts as unsent. An unavailable receipt or one that is still
+unsettled leaves the send unknown. Only the owner can choose to send again.
 
 ```quint
 pure def canCheckSent(s: Composer, draft: int, access: Access): bool =
@@ -610,11 +610,15 @@ pure def lookUp(s: Composer, access: Access): Written =
   val lookup = R::ask(s.lookup)
   {
     state: { ...s, lookup: lookup },
-    out: List(ReadCopy({ ticket: lookup.ticket, draft: s.letter.id, account: s.letter.account, gmail: s.letter.gmail })),
+    out: List(ReadCopy({ ticket: lookup.ticket, draft: s.letter.id, account: s.letter.account, gmail: s.letter.gmail, attempt: s.letter.copyAttempt })),
   }
 ```
 
 ### What the read finds settles an unsure draft, and the owner is told whether the lost save was found; it lets a draft be saved over a copy unchanged since it was made, or stops it at a clash; nothing is saved over either until the owner chooses
+
+For an unknown save the answer says whether that save landed. For an
+unknown deletion it says whether its provider copy remains. A receipt
+still pending does not settle either.
 
 ```quint
 pure def canCopyRead(s: Composer, ticket: int, found: bool, held: int, gmail: int): bool =
@@ -623,6 +627,10 @@ pure def canCopyRead(s: Composer, ticket: int, found: bool, held: int, gmail: in
 pure def copyRead(s: Composer, ticket: int, ok: bool, found: bool, held: int, gmail: int): Written =
   val told = { ...s, lookup: R::answer(s.lookup, ok) }
   if (not(ok) or s.letter.sending != 0) { state: told, out: List() }
+  else if (s.letter.unsure and s.letter.use == L::ToDelete) {
+    if (found) touched(L::notFound(s.letter), { ...told, notice: CopyNotDeleted })
+    else touched(L::readCopy(L::notFound(s.letter), false, 0), { ...told, notice: CopyDeleted })
+  }
   else if (s.letter.unsure and found) touched(L::found(s.letter, held, gmail), { ...told, notice: SaveFound })
   else if (s.letter.unsure) touched(L::notFound(s.letter), { ...told, notice: SaveNotFound })
   else if (s.letter.draft.sync == D::Edited and s.letter.gmail != 0) touched(L::readCopy(s.letter, found, held), told)

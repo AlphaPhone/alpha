@@ -1,5 +1,5 @@
 /* eslint-disable @eslint-react/no-array-index-key -- A reply's blocks and runs are read from its text in order and never move. */
-import { type ComponentProps, Fragment, type KeyboardEvent, type MouseEvent, type ReactNode, useCallback, useId, useState } from "react";
+import { type ComponentProps, Fragment, type KeyboardEvent, type MouseEvent, type ReactNode, useCallback, useId, useMemo, useState } from "react";
 import { AudioLines, Copy, CornerUpLeft, GitBranch, Mail, Pencil, Square } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { Mark } from "../Mark.tsx";
@@ -83,7 +83,7 @@ function ReplyBlocks({ blocks, onOpenLink }: { blocks: readonly ReplyBlock[]; on
 
 /** Gives focus back to the message whose row of actions `from` is in. */
 function refocus(from: HTMLElement) {
-  from.closest("article")?.querySelector<HTMLButtonElement>("button[aria-haspopup=menu]")?.focus();
+  from.closest("article")?.querySelector<HTMLButtonElement>("button[aria-haspopup=menu]")?.focus({ preventScroll: true });
 }
 
 /** Moves between the actions of the row with the arrow keys, Home and End, as a menu does; Escape closes it. */
@@ -109,8 +109,10 @@ function roam(event: KeyboardEvent<HTMLDivElement>, close: () => void) {
  */
 export function AssistantMessage({ author, text, quote, attachments = [], children, onPreview, onQuote, onCopy, onUseInEmail, onEditAgain, onFork, onReadAloud, readAloudActive = false, hold, onOpenLink, streaming = false, className, ...props }: AssistantMessageProps) {
   const owner = author === "owner";
-  const body = <span className="break-words whitespace-pre-line">{text}</span>;
-  const shown = owner ? body : <span className="flex flex-col gap-3 break-words"><ReplyBlocks blocks={replyMarkdown(text, streaming)} onOpenLink={onOpenLink} /></span>;
+  const shown = useMemo(() => owner
+    ? <span className="break-words whitespace-pre-line">{text}</span>
+    : <span className="flex flex-col gap-3 break-words"><ReplyBlocks blocks={replyMarkdown(text, streaming)} onOpenLink={onOpenLink} /></span>,
+  [onOpenLink, owner, streaming, text]);
   const bubble = cn("max-w-full text-left text-base", owner ? "rounded-tile rounded-br-box bg-alpha px-4 py-2.75 leading-normal text-alpha-foreground" : "text-body leading-chat");
   const actions = Boolean(onQuote || onCopy || onUseInEmail || onEditAgain || onFork || onReadAloud);
   const [open, setOpen] = useState<false | "pointer" | "keys">(false);

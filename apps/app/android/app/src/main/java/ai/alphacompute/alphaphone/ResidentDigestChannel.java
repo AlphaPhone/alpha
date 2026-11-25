@@ -8,6 +8,7 @@ import ai.eliza.plugins.signin.CredentialPolicy.Account;
 import ai.eliza.plugins.signin.CredentialPolicy.Custody;
 import ai.eliza.plugins.signin.CredentialReader;
 import ai.eliza.plugins.signin.DeviceCredentialStore;
+import android.content.Context;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -22,6 +23,7 @@ import org.json.JSONObject;
 final class ResidentDigestChannel {
  static final String ORIGIN = "https://device.alpha.invalid";
  private static final String RESULTS = "/api/workflow/hosted/results";
+ private static final String RECORDING_CLEANUP = "/api/alpha-runtime/notes-recording-cleanup";
  private static final Pattern ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9_-]{0,127}");
  private static final int SMALL_REPLY = 65_536;
  private static final int RESULTS_REPLY = 1_048_576;
@@ -32,6 +34,18 @@ final class ResidentDigestChannel {
  }
 
  record Scope(String ownerId, String agentId, String digest) {}
+
+ record RecordingCleanup(String audioId, String noteId, String operationId, String deletedAt) {
+  RecordingCleanup {
+   Objects.requireNonNull(operationId);
+   Objects.requireNonNull(deletedAt);
+  }
+
+  JSONObject wire() throws Exception {
+   return new JSONObject().put("audioId", audioId).put("noteId", noteId)
+    .put("operationId", operationId).put("deletedAt", deletedAt);
+  }
+ }
 
  private record Lease(long epoch, long generation, Account account) {}
 
@@ -52,6 +66,23 @@ final class ResidentDigestChannel {
 
   void check() throws IOException {
    synchronized (policy) { checkLease(lease); }
+  }
+
+  void prepareRecordingCleanup(RecordingCleanup receipt) throws Exception {
+   recordingCleanup("prepare", "pending", receipt);
+  }
+
+  void confirmRecordingCleanup(RecordingCleanup receipt) throws Exception {
+   recordingCleanup("confirm", "confirmed", receipt);
+  }
+
+  private void recordingCleanup(String phase, String expected, RecordingCleanup receipt) throws Exception {
+   JSONObject identity = new JSONObject().put("userId", scope.ownerId()).put("organizationId", organizationId())
+    .put("agentId", scope.agentId()).put("epoch", epoch());
+   byte[] body = new JSONObject().put("phase", phase).put("receipt", receipt.wire()).put("scope", identity)
+    .toString().getBytes(StandardCharsets.UTF_8);
+   JSONObject reply = request(lease, "POST", RECORDING_CLEANUP, body, SMALL_REPLY);
+   if (!expected.equals(reply.get("status"))) throw new IOException("Recording cleanup could not be confirmed");
   }
 
   JSONObject fetch(String clientId) throws Exception {
@@ -83,6 +114,12 @@ final class ResidentDigestChannel {
   JSONObject status = request(session.lease, "GET", "/api/workflow/status", null, SMALL_REPLY);
   if (status.optInt("hostedDigestProtocol") != 1) throw new IOException("Hosted digests unavailable");
   return session;
+ }
+
+ static Session openAccount(Context context) throws Exception {
+  CredentialReader reader = new AlphaAgentCredentials(context).reader();
+  if (!(reader instanceof DeviceCredentialStore store)) throw new SecurityException("Resident owner unavailable");
+  return new ResidentDigestChannel(store, store::generation).openAccount();
  }
 
  /** Native account attestation is available independently of Workflows. */
@@ -123,9 +160,9 @@ final class ResidentDigestChannel {
   if (response.status() == 401 || response.status() == 403) {
    throw new SecurityException("Resident owner unavailable");
   }
-  if (response.status() < 200 || response.status() >= 300 || response.body() == null
+  if (response.status() != 200 || response.body() == null
     || response.body().length > limit) {
-   throw new IOException("Resident digest request failed");
+   throw new IOException("Resident request failed");
   }
   return new JSONObject(new String(response.body(), StandardCharsets.UTF_8));
  }

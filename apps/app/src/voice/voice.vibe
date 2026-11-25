@@ -929,6 +929,12 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
     }, { type: "stopped", confirmed: false });
     when { tag: "SayCallEnded" }: run("call notice", say("Voice paused for a phone call."));
     when { tag: "Navigate", let session, let turn, let place, let sourceRoute }: run("spoken navigation", navigateLeased(session, turn, place, sourceRoute));
+    when { tag: "CheckDictation", let ticket }: answer("check dictation recognition", effect {
+      const voice = try Voice.Machine
+      if (!Voice.canRecognitionChecked(try voice.get(), ticket, true)) return { type: "recognitionChecked", ticket, ready: false }
+      const recognition = try (try VoiceBridge).probeStatus(false)
+      return { type: "recognitionChecked", ticket, ready: recognition.ready }
+    }, { type: "recognitionChecked", ticket, ready: false });
     when { tag: "Record", let ticket }: answer("record", effect {
       const current = try (try Voice.Machine).get()
       if (Voice.canRecordingStarted(current, ticket)) {
@@ -1107,7 +1113,8 @@ function stored(key: string, start?: Voice.Voice) {
     const store = try KeyValueStore.KeyValueStore
     const current = store.get(key) catch () => undefined
     if (current !== undefined) return Voice.stored(key, start)
-    const raw = store.get("alpha/app/voice/index@1") catch () => undefined
+    const earlier = store.get("alpha/app/voice/index@2") catch () => undefined
+    const raw = earlier ?? (store.get("alpha/app/voice/index@1") catch () => undefined)
     const old = raw === undefined ? undefined : rememberedVoice(raw)
     const recovered = old === undefined ? undefined : (Voice.decodeState({ ...Voice.initial, ...old }) catch () => undefined)
     return Voice.stored(key, recovered ?? start)
@@ -1117,7 +1124,7 @@ function stored(key: string, start?: Voice.Voice) {
 export const voicing = Layer.provideMerge(
   together(
     reacting({ ...Voice, stored }, {
-      keep: 2,
+      keep: 3,
       open: [{ type: "restart" }],
       carry: carryVoice,
       timers: (v) => (v.retryAt > 0 ? [due("retry", v.retryAt, { type: "retryDue", now: untimed })] : []),

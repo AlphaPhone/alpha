@@ -80,6 +80,7 @@ import { AccessReview } from "../startup/SettingsAccess.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 import { AccountStatus } from "../account/index.tsx";
 import { CalendarAccount, type CalendarConnection } from "./calendar.vibe";
+import { PasswordEntries } from "./PasswordEntries.tsx";
 
 /** What every Settings page reads: where the owner is, the phone's facts, the hand-overs to Android, the preferences, the reset and the developer tools. */
 export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | CalendarAccount | FactsMachine | AccessReviewMachine | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ListenerMachine | ShellMachine | LayersMachine | Time, unknown>;
@@ -345,6 +346,7 @@ function Passwords({ runtime, common }: PageProps) {
   const canChoose = service.word === "reported" && (service.value === "None" || service.value === "Other");
   return (
     <SettingsPage title="Password manager" onBack={common.onBack} backLabel="Back to Apps" told={common.told} actions={common.actions}>
+      <PasswordEntries runtime={runtime} />
       <ListGroup heading="Autofill">
         <SettingsFactRow title="Autofill service" reading={service} />
         {canChoose ? <SettingsAndroidRow title="Use for autofill" target="password-autofill" starting={common.starting} onAndroid={common.onAndroid} /> : null}

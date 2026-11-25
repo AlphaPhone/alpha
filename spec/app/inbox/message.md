@@ -35,10 +35,11 @@ type Handling = Opening | Saving
 type ReadPlace = SelectedMessage | ThreadPosition | NewestMessage
 type Fault = Fine | Unreachable | Revoked | Gone | Stale | TooLarge | Moved
 type Held = { account: int, message: int, attachment: int }
+type Pdf = { page: int, pages: int, drawing: R::Read }
 type MessageView = {
   account: int, message: int, thread: int, position: int, body: R::Read, fromPhone: bool, fault: Fault, revision: int,
   remote: bool, images: bool, link: int, warning: bool,
-  attachment: int, handling: Handling, file: A::Attempt, attempts: int, unsure: List[Held],
+  attachment: int, handling: Handling, file: A::Attempt, attempts: int, unsure: List[Held], pdf: Pdf,
 }
 
 type Effect =
@@ -47,13 +48,16 @@ type Effect =
   | RefreshList({ account: int })
   | OpenLink({ message: int, link: int })
   | HandleAttachment({ attempt: int, account: int, message: int, attachment: int, handling: Handling })
+  | DrawPdf({ attempt: int, ticket: int, page: int })
   | AskAlpha({ account: int, message: int, revision: int })
 type Shown = { state: MessageView, out: List[Effect] }
+
+pure val emptyPdf: Pdf = { page: 0, pages: 0, drawing: R::unread }
 
 pure val initial: MessageView = {
   account: 0, message: 0, thread: 0, position: 0, body: R::unread, fromPhone: false, fault: Fine, revision: 0,
   remote: false, images: false, link: 0, warning: false,
-  attachment: 0, handling: Opening, file: A::plan(0), attempts: 0, unsure: List(),
+  attachment: 0, handling: Opening, file: A::plan(0), attempts: 0, unsure: List(), pdf: emptyPdf,
 }
 
 pure val accountValues = Set(0, 1, 2)
@@ -65,6 +69,8 @@ pure val ticketValues = Set(1, 2, 3)
 pure val linkValues = Set(0, 1, 2)
 pure val attachmentValues = Set(0, 1, 2)
 pure val attemptValues = Set(1, 2, 3)
+pure val pagesValues = Set(0, 1, 3)
+pure val pageValues = Set(0, 1, 2, 3)
 ```
 
 ### Showing a place in the thread reads it under a new ticket, with images as the preference says and nothing under review
@@ -84,6 +90,7 @@ pure def settledAt(position: int, remote: bool, s: MessageView): MessageView =
     ...s, position: position, remote: remote, images: false, link: 0, warning: false, attachment: 0,
     file: if (gaveUp) A::conclude(s.file, false, false) else s.file,
     unsure: if (unsureNow) remembered(s.unsure, heldOf(s)) else s.unsure,
+    pdf: { ...emptyPdf, drawing: { ...s.pdf.drawing, status: R::Idle } },
   }
 
 pure def reading(position: int, remote: bool, place: ReadPlace, s: MessageView): Shown =
@@ -328,9 +335,9 @@ pure def alwaysAWarningBelongsToALinkUnderReview(s: MessageView): bool = s.warni
 
 ### An attachment is reviewed before it is opened or saved, and one use is in flight at a time
 
-Alpha shows the checked text or a raster of a supported image in the
-review, after getting the exact attachment named by the message and its
-revision. Closing it releases the preview.
+Alpha shows checked text, a raster of a supported image, or the first
+rendered PDF page after getting the exact attachment named by the message
+and its revision. Closing it releases the preview.
 
 ```quint
 pure def canReviewAttachment(s: MessageView, attachment: int, handling: Handling): bool =
@@ -365,20 +372,53 @@ a copy there. Both confirm success only after reading back the same bytes.
 A browser download cannot confirm what was saved.
 
 ```quint
-pure def canAttachmentHandled(s: MessageView, attempt: int): bool = A::canConclude(s.file, attempt)
+pure def canAttachmentHandled(s: MessageView, attempt: int, done: bool, known: bool, pages: int): bool =
+  A::canConclude(s.file, attempt) and (pages == 0 or (pages > 0 and done and known and s.handling == Opening))
 
-pure def attachmentHandled(s: MessageView, attempt: int, done: bool, known: bool): MessageView =
+pure def attachmentHandled(s: MessageView, attempt: int, done: bool, known: bool, pages: int): MessageView =
   val file = A::conclude(s.file, done, known)
   {
     ...s, file: file,
     unsure:
       if (file.outcome == A::Unknown and s.handling == Saving) remembered(s.unsure, heldOf(s))
       else s.unsure,
+    pdf: if (pages == 0) s.pdf else { page: 1, pages: pages, drawing: R::answer(R::ask(s.pdf.drawing), true) },
   }
 
 pure def canCloseAttachment(s: MessageView): bool = s.attachment != 0
 
 pure def closeAttachment(s: MessageView): MessageView = settledAt(s.position, s.remote, s)
+```
+
+### A reviewed PDF turns one page at a time under a new draw ticket, and shows only the page drawn for that review
+
+Alpha retains the reviewed bytes until the review closes. A failed page
+can be retried or left for another page. Changing the message, losing
+access, closing the review or restarting releases the preview and
+refuses its pending answer.
+
+```quint
+pure def canPdfPage(s: MessageView, access: Access, page: int): bool =
+  s.pdf.pages > 0 and allowsFor(access, s.account, Reading) and 1 <= page and page <= s.pdf.pages
+    and (page == s.pdf.page - 1 or page == s.pdf.page + 1 or (page == s.pdf.page and s.pdf.drawing.status == R::Failed))
+
+pure def pdfPage(s: MessageView, access: Access, page: int): Shown =
+  val drawing = R::ask(s.pdf.drawing)
+  { state: { ...s, pdf: { ...s.pdf, page: page, drawing: drawing } },
+    out: List(DrawPdf({ attempt: s.file.id, ticket: drawing.ticket, page: page })) }
+
+pure def canPdfDrawn(s: MessageView, attempt: int, ticket: int, page: int): bool =
+  s.pdf.pages > 0 and s.file.id == attempt and s.pdf.page == page and R::canAnswer(s.pdf.drawing, ticket)
+
+pure def pdfDrawn(s: MessageView, attempt: int, ticket: int, page: int, ok: bool): MessageView =
+  { ...s, pdf: { ...s.pdf, drawing: R::answer(s.pdf.drawing, ok) } }
+
+pure def alwaysPdfBelongsToTheOpenReview(s: MessageView): bool =
+  if (s.pdf.pages == 0) s.pdf.page == 0 and s.pdf.drawing.status == R::Idle
+  else s.attachment != 0 and s.handling == Opening and s.file.outcome == A::Confirmed
+    and 1 <= s.pdf.page and s.pdf.page <= s.pdf.pages and s.pdf.drawing.status != R::Idle
+
+pure def sometimesALaterPdfPageIsDrawn(s: MessageView): bool = s.pdf.page > 1 and s.pdf.drawing.status == R::Loaded
 ```
 
 ### An attachment whose saving may have happened is not saved again, from this message of this account or after closing it, and is remembered once
@@ -429,6 +469,7 @@ pure def stepNothingRunsOnItsOwn(before: MessageView, via: str, after: MessageVi
   out.every(e => match e {
     | OpenLink(l) => via == "openLink" and l.link != 0
     | HandleAttachment(h) => via == "confirmAttachment" and h.attachment != 0
+    | DrawPdf(d) => via == "pdfPage" and before.file.id == d.attempt and after.pdf.page == d.page and after.pdf.drawing.ticket == d.ticket
     | AskAlpha(a) => via == "askAlpha" and a.message != 0
     | ReadMessage(r) => r.message != 0 and via != "openLink" and via != "confirmAttachment" and via != "askAlpha"
     | CheckAccounts => via == "loaded"

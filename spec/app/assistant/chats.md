@@ -149,6 +149,11 @@ pure def paged(c: Chats, ticket: int, ok: bool, messages: int): Chats =
 
 ### Older or newer messages are read around a message of the conversation showing
 
+Earlier and Later are offered when the resident confirms there are messages
+past the current page in that direction. The page is centered on the loaded
+server row at that edge. The number Alpha gives a message identifies it and
+carries no information about its position in history.
+
 ```quint
 pure def canScroll(c: Chats, around: int): bool =
   c.chosen > 0 and c.page.status == R::Loaded and 1 <= around and around <= c.messages and around != c.around

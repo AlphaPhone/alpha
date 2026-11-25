@@ -396,7 +396,7 @@ function settledSignIns(): Stream.Stream<void> {
 export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   const lifetime = try Effect.scope
   let cachedStatus: SpeechStatus | undefined
-  let statusFlight: Deferred.Deferred<SpeechStatus> | undefined
+  let statusFlight: { readonly ttsOnly: boolean; readonly done: Deferred.Deferred<SpeechStatus> } | undefined
   let activeSession = 0
   let nativeCapture: LiveCapture | undefined
   let cloudStream: CloudStreamingSpeech | undefined
@@ -436,14 +436,20 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     if (cachedStatus !== undefined && (!ttsOnly ? cachedStatus.ready : cachedStatus.ttsReady || cachedStatus.ready)) {
       return cachedStatus
     }
-    if (statusFlight !== undefined) return try Deferred.await(statusFlight)
+    const pending = statusFlight
+    if (pending !== undefined) {
+      const status = try Deferred.await(pending.done)
+      if (ttsOnly || !pending.ttsOnly) return status
+      return try probeStatus(false)
+    }
     const absent: SpeechStatus = { ready: false, ttsReady: false, liveCapture: false }
     if (!registered(LOCAL_PLUGIN)) {
       cachedStatus = absent
       return absent
     }
     const flight = try Deferred.make<SpeechStatus>()
-    statusFlight = flight
+    statusFlight = { ttsOnly, done: flight }
+    let settled = absent
     return try ensuring(effect {
       const plugin = localPlugin()
       const [localResult, liveResult] = try Effect.all([
@@ -451,16 +457,16 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
         Effect.orElseSucceed(tryPromise(() => plugin.liveCaptureStatus({})), () => ({ available: false, nativeTransport: false })),
       ], { concurrency: "unbounded" })
       const status: SpeechStatus = {
-        ready: localResult.ready === true,
+        ready: !ttsOnly && localResult.ready === true,
         ttsReady: localResult.ttsReady === true || localResult.ready === true,
         liveCapture: liveResult.available === true && liveResult.nativeTransport === true,
       }
       cachedStatus = status
-      try Deferred.succeed(flight, status)
+      settled = status
       return status
     }, effect {
       statusFlight = undefined
-      try Deferred.succeed(flight, absent)
+      try Deferred.succeed(flight, settled)
     })
   }
 
@@ -647,7 +653,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   effect function awaitSpeechOutputWarmup(session: number): void!! {
     const warming = statusFlight
     if (warming !== undefined && activeSession === session && cloudStream === undefined) {
-      try ignore(timeout(Deferred.await(warming), LOCAL_OUTPUT_WARMUP_BOUND))
+      try ignore(timeout(Deferred.await(warming.done), LOCAL_OUTPUT_WARMUP_BOUND))
     }
   }
 

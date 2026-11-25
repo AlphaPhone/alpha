@@ -8,6 +8,7 @@ import { type SavedNoteWindow, readSavedNote } from "./voice.vibe"
 
 module native {
   import { type PluginListenerHandle, registerPlugin } from "@capacitor/core"
+  import type { NotesTrashRecordingCleanup } from "@elizaos/plugin-notes-client"
   import type { Command } from "../../gen/app__notes__recording.effect.vibe"
 
   export type Earlier = "records" | "trash" | "folders"
@@ -23,7 +24,7 @@ module native {
     describe(input: { readonly audioId: string }): Promise<unknown>
     play(input: { readonly audioId: string; readonly noteId: string; readonly offsetMs: number }): Promise<unknown>
     halt(): Promise<unknown>
-    purge(input: { readonly audioId: string; readonly noteId: string; readonly operationId: string }): Promise<unknown>
+    purge(input: NotesTrashRecordingCleanup): Promise<unknown>
     consumeOpen(): Promise<unknown>
     previousExists(): Promise<unknown>
     share(input: { readonly channel: "Email" | "Messages"; readonly title: string; readonly text: string }): Promise<unknown>
@@ -103,6 +104,7 @@ const noTape = (): Tape => ({ state: "idle" })
 export const noteDevice = Layer.sync(NoteDevice, () => {
   const available = registered("AlphaNotes")
   const canTranscribe = available && registered("AlphaVoiceCloud")
+  const purges = Semaphore.makeUnsafe(1)
   const api = available ? client() : undefined
   const asked = <A>(call: (native: NotesPlugin) => Promise<A>) => api === undefined ? Effect.fail(absent()) : tryPromise({ try: () => call(api), catch: absent })
   const decoded = <A>(schema: Schema.Decoder<A>, raw: unknown) => mapError(Schema.decodeUnknownEffect(schema)(raw), absent)
@@ -140,10 +142,13 @@ export const noteDevice = Layer.sync(NoteDevice, () => {
     },
     play: (audioId: string, noteId: string, offsetMs: number) => Effect.catch(Effect.map(read(Played, (native) => native.play({ audioId, noteId, offsetMs })), ({ ok }) => ok), () => succeed(false)),
     halt: () => Effect.catch(Effect.map(read(Played, (native) => native.halt()), ({ ok }) => ok), () => succeed(false)),
-    effect purge(receipt: NotesTrashRecordingCleanup) {
+    purge: (receipt: NotesTrashRecordingCleanup) => Semaphore.withPermit(purges, effect {
       const result = asked((native) => native.purge(receipt)) catch () => undefined
       return typeof result === "object" && result !== null && "status" in result && result.status === "purged"
-    },
+        && "audioId" in result && result.audioId === receipt.audioId
+        && "noteId" in result && result.noteId === receipt.noteId
+        && "operationId" in result && result.operationId === receipt.operationId
+    }),
     consumeOpen: () => Effect.catch(Effect.map(read(Offered, (native) => native.consumeOpen()), ({ open }) => open), () => succeed(false)),
     share: (channel: "Email" | "Messages", title: string, text: string) => ignore(asked((native) => native.share({ channel, title, text }))),
     settings: () => ignore(asked((native) => native.settings())),

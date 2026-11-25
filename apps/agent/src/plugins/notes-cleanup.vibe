@@ -1,0 +1,53 @@
+// spec/agent/index.md, "Only the phone's native channel can verify that a reviewed recording was erased"
+import type { LocalRoute } from "@elizaos/agent"
+import type { ModuleContext } from "@elizaos/agent-host"
+import { notesRecordingCleanupHost } from "@elizaos/plugin-notes"
+import { CleanupReceipt, type NotesTrashRecordingCleanup } from "@elizaos/plugin-notes-client"
+
+schema CleanupScope { userId: string; organizationId: string; agentId: string; epoch: Schema.Int }
+schema CleanupRequest { phase: "prepare" | "confirm"; receipt: CleanupReceipt; scope: CleanupScope }
+
+const readCleanup = Schema.decodeUnknownOption(CleanupRequest, { onExcessProperty: "error" })
+
+function exactReceipt(a: NotesTrashRecordingCleanup, b: NotesTrashRecordingCleanup): boolean {
+  return a.operationId === b.operationId && a.noteId === b.noteId && a.audioId === b.audioId && a.deletedAt === b.deletedAt
+}
+
+function owns(context: ModuleContext, scope: CleanupScope): boolean {
+  const account = context.launch.account
+  return account !== undefined && account.userId === scope.userId && account.organizationId === scope.organizationId
+    && context.runtime.agentId === scope.agentId && context.epoch === scope.epoch
+}
+
+/** One resident launch may verify only the canonical receipt being confirmed by that native request. */
+export function makeNativeNotesCleanup(path: string) {
+  const proving = new WeakMap<AbortSignal, NotesTrashRecordingCleanup>()
+  const unavailable = { status: 409, body: { status: "unavailable" } }
+  return {
+    verifyRecordingCleanup(receipt: NotesTrashRecordingCleanup, signal?: AbortSignal): Promise<boolean> {
+      const proof = signal === undefined ? undefined : proving.get(signal)
+      return Promise.resolve(proof !== undefined && exactReceipt(proof, receipt))
+    },
+    route(context: ModuleContext): LocalRoute {
+      return {
+        method: "POST", path,
+        handler: ({ body, signal }) => runPromise(effect {
+          const input = Option.getOrUndefined(readCleanup(body))
+          if (input === undefined) return { status: 400, body: { status: "invalid" } }
+          if (!owns(context, input.scope)) return { status: 403, body: { status: "wrong-scope" } }
+          const host = notesRecordingCleanupHost(context.runtime)
+          if (host === undefined) return { status: 503, body: { status: "unavailable" } }
+          const { receipt } = input
+          const pending = tryPromise(() => host.canVerifyRecordingCleanup(receipt, signal)) catch () => false
+          if (!pending || signal.aborted) return unavailable
+          if (input.phase === "prepare") return { status: 200, body: { status: "pending" } }
+          const confirmed = Effect.ensuring(effect {
+            try sync(() => { proving.set(signal, receipt) })
+            return try tryPromise(() => host.acknowledgeTrashRecordingCleanup(receipt, signal))
+          }, sync(() => { proving.delete(signal) })) catch () => false
+          return confirmed ? { status: 200, body: { status: "confirmed" } } : unavailable
+        }, { signal }),
+      }
+    },
+  }
+}

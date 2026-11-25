@@ -7,7 +7,7 @@ import { deployment } from "@repo/deployment"
 import { pinnedCheckout, pinnedPack } from "@repo/eliza-harness"
 import {
   type Environment, type Manifest, bundledPlugins, calendarEdits, characterAdmitted, cloudModel, corePlugins, entryCarried, gmailChanges, googleAdmitted,
-  hostedPlugins, inputAdmitted, localEmbeddings, nativeDigestAck, nativeDigestAckLimit, nativeDigestQueries, nativeDigestScope, nativeRoutes, nativeRoutesAdmitted, nativeSpeechRoutes, notesTrashDays, packAdmitted, packEntry, packedFor, packedPlugins, pageQueries, persistMemory, personalDetailSwap,
+  hostedPlugins, inputAdmitted, localEmbeddings, nativeDigestAck, nativeDigestAckLimit, nativeDigestQueries, nativeDigestScope, nativeNotesCleanup, nativeNotesCleanupLimit, nativeRoutes, nativeRoutesAdmitted, nativeSpeechRoutes, notesTrashDays, packAdmitted, packEntry, packedFor, packedPlugins, pageQueries, persistMemory, personalDetailSwap,
   launchViews, policyAdmitted, privacyAdmitted, productPluginName, proposalsAdmitted, refusedActions, routeListAdmitted, secretSwap, viewPlugins, viewsAdmitted, walletSettings,
 } from "../gen/agent.effect.vibe"
 
@@ -63,7 +63,7 @@ schema Host {
 const localSpeechModule = "@elizaos/plugin-local-inference"
 const walletModuleName = "@elizaos/plugin-wallet"
 const hostedExports: Readonly<Record<string, string>> = {
-  "@elizaos/plugin-notes": "notesModule",
+  "@elizaos/plugin-notes": "notesModuleWith",
   [walletModuleName]: "walletModule",
   [localSpeechModule]: "localInferenceModule",
 }
@@ -88,7 +88,8 @@ export function entrySource(bundled: readonly string[], hosted: readonly { name:
       'import { androidInferenceEngine } from "../../packages/os/dist/src/inference/index.js"',
     ] : []),
     ...bundled.map((name, index) => `import * as plugin${index} from ${JSON.stringify(name)}`),
-    ...allHosted.map(({ name, module }, index) => `import { ${module} as host${index} } from ${JSON.stringify(name)}`),
+    ...allHosted.map(({ name, module }, index) => `import { ${module} as host${index}${name === product.name ? ", makeNativeNotesCleanup" : ""} } from ${JSON.stringify(name)}`),
+    `const notesCleanup = makeNativeNotesCleanup(${JSON.stringify(nativeNotesCleanup)})`,
     "",
     ...(includesSpeech ? [
       'const speechEngine = (context) => {',
@@ -116,7 +117,7 @@ export function entrySource(bundled: readonly string[], hosted: readonly { name:
     `  productPlugin: ${JSON.stringify(product.name)},`,
     `  hostModules: new Map([${allHosted.map(({ name }, index) => {
       let factory = `host${index}`
-      if (name === "@elizaos/plugin-notes") factory = `(context) => { context.runtime.setSetting("ELIZA_NOTES_TRASH_RETENTION_DAYS", ${JSON.stringify(notesTrashDays)}); return host${index}(context); }`
+      if (name === "@elizaos/plugin-notes") factory = `(context) => { context.runtime.setSetting("ELIZA_NOTES_TRASH_RETENTION_DAYS", ${JSON.stringify(notesTrashDays)}); return host${index}({ verifyRecordingCleanup: notesCleanup.verifyRecordingCleanup })(context); }`
       if (name === walletModuleName) {
         const settings = JSON.stringify(walletSettings.map(({ setting, held }) => [setting, held]))
         factory = `(context) => { for (const [setting, held] of ${settings}) context.runtime.setSetting(setting, held); return host${index}(context); }`
@@ -130,7 +131,7 @@ export function entrySource(bundled: readonly string[], hosted: readonly { name:
       if (name === product.name) {
         const privateRoutes = includesSpeech ? "nativeSpeechScope(context), nativeRuntimeScope(context)" : "nativeRuntimeScope(context)"
         factory = `(context) => Effect.map(host${index}(context), (module) => ({
-          ...module, plugin: { ...module.plugin, routes: [...(module.plugin.routes ?? []), ${privateRoutes}] }
+          ...module, plugin: { ...module.plugin, routes: [...(module.plugin.routes ?? []), ${privateRoutes}, notesCleanup.route(context)] }
         }))`
       }
       return `[${JSON.stringify(name)}, ${factory}]`
@@ -184,7 +185,9 @@ function queries(route: RouteLine, native = false) {
 }
 
 function routeBodyLimit(route: RouteLine, native: boolean): number | undefined {
-  return native && route.method === "POST" && route.path === nativeDigestAck ? nativeDigestAckLimit : undefined
+  if (!native || route.method !== "POST") return undefined
+  if (route.path === nativeDigestAck) return nativeDigestAckLimit
+  return route.path === nativeNotesCleanup ? nativeNotesCleanupLimit : undefined
 }
 
 /** Refuse a route list unless it matches its channel's policy and eliza admits each route. */

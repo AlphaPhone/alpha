@@ -1,6 +1,6 @@
 // spec/app/inbox/index.md, "Story: See my mail"; spec/app/inbox/message.md, "Story: Read a message"; spec/app/inbox/marking.md, "Story: Mark mail read or unread"; spec/app/inbox/sending.md, "Story: Archive or trash mail, with Undo"
 import {
-  Alert, Button, InboxAccountList, InboxAttachmentReview, InboxChangeReview, InboxChangeToast, type InboxFolder,
+  Alert, Button, InboxAccountList, type InboxAttachmentPreview, InboxAttachmentReview, InboxChangeReview, InboxChangeToast, type InboxFolder,
   InboxLinkReview, type InboxListRow, InboxListScreen, type InboxListStateKind, InboxMessageScreen, type InboxMessageFaultKind, InboxNotice,
   type InboxNoticeKind, ToastRegion,
 } from "@repo/ui";
@@ -65,12 +65,14 @@ const isChange = (kind: Kind): kind is Change => kind in operationNames;
 /** What Mail holds, read at the state the screen shows. */
 const mailOf = <A,>(runtime: Runtime, read: (mail: Mail["Service"]) => A): A => runtime.runSync(Mail.use((mail) => Effect.sync(() => read(mail))));
 
+const mailTime = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+const mailDate = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+
 /** When a message arrived, as the list words it: a time on Alpha's day, else a date. */
-function arrived(receivedAt: string, today: number): string {
+function arrived(receivedAt: string, today: string): string {
   const at = new Date(receivedAt);
   if (Number.isNaN(at.getTime())) return "";
-  const sameDay = new Date(today).toDateString() === at.toDateString();
-  return sameDay ? at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : at.toLocaleDateString([], { month: "short", day: "numeric" });
+  return (at.toDateString() === today ? mailTime : mailDate).format(at);
 }
 
 /** When a message arrived in full, as its details word it: weekday, date, time with seconds, and time zone. */
@@ -184,7 +186,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const marking = useMarks(runtime);
   const changes = useTimed(runtime, useChanges);
   const remote = usePreferences(runtime).state?.images ?? false;
-  const today = runtime.runSync(Time.use((time) => time.latest()));
+  const today = new Date(runtime.runSync(Time.use((time) => time.latest()))).toDateString();
   const read = state ? mailOf(runtime, (mail) => mail.body(state.body.ticket)) : undefined;
   const reviewLink = useCallback((at: number) => {
     const link = read === undefined ? undefined : prepareMessage(read).links.at(at - 1);
@@ -221,12 +223,28 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   };
   const file = files.at(state.attachment - 1);
   const outcome = state.file.outcome;
-  const preview = file && state.handling === "Opening" && outcome === "Confirmed"
+  const attachment = file && state.handling === "Opening" && outcome === "Confirmed"
     ? runtime.runSync(AttachmentPreviews.use((previews) => Effect.sync(() => previews.read(state.file.id))))
     : undefined;
+  const turn = (page: number) => {
+    const event = { type: "pdfPage", access, page } as const;
+    return can(event) ? () => void send(event) : undefined;
+  };
+  const pdf = state.pdf;
+  const preview: InboxAttachmentPreview | undefined = attachment?.kind !== "pdf" ? attachment : {
+    kind: "pdf", digest: attachment.digest, page: pdf.page, pages: pdf.pages,
+    drawing: pdf.drawing.status === "Loading" ? { kind: "loading" }
+      : pdf.drawing.status === "Loaded" && attachment.page === pdf.page ? { kind: "rendered", url: attachment.url }
+        : { kind: "failed", onRetry: turn(pdf.page) },
+    onPrevious: turn(pdf.page - 1), onNext: turn(pdf.page + 1),
+  };
   const contents = loaded ? prepareMessage(read) : undefined;
   const link = state.link > 0 ? contents?.links.at(state.link - 1) : undefined;
-  const answered = card === undefined ? undefined : { id: card.id, from: card.from, others: [...card.to, ...card.cc], subject: card.subject, body: read?.bodyText, files: files.length };
+  const original = read?.message;
+  const answered = original === undefined || read === undefined ? undefined : {
+    id: original.id, from: original.from, others: [...original.to, ...original.cc], subject: original.subject,
+    body: read.bodyText, historyId: original.metadata.historyId, files,
+  };
   return (
     <>
       <InboxMessageScreen
@@ -332,7 +350,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const selecting = !draftsFolder && selection === folderKey && !searching && readable(state) && !state.saved && state.pages > 0;
   const chosenMessages = new Set(state.chosen);
   const access = accessOf(state, account);
-  const today = runtime.runSync(Time.use((time) => time.latest()));
+  const today = new Date(runtime.runSync(Time.use((time) => time.latest()))).toDateString();
   const checking = state.accounts.status === "Loading";
   const row = ({ message: number, card, draftId }: Letter): InboxListRow => {
     const open = { type: "open", access, account, message: number, remote } as const;
@@ -354,7 +372,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
         : folder === "Sent" ? `To: ${card.to.length ? card.to.join(", ") : "(no recipients)"}` : senderName(card.from),
       initial: draftsFolder ? "D" : folder === "Sent" ? (card.to[0] ?? "?").slice(0, 1).toUpperCase() : undefined,
       subject: card.subject || "(no subject)", snippet: card.snippet,
-      time: arrived(card.receivedAt, today), unread: card.isUnread, chosen, selecting,
+      time: arrived(card.receivedAt, today), unread: card.isUnread, attachment: card.hasAttachments, chosen, selecting,
       onOpen: editing ?? (opening ? () => void message.send(opening) : undefined),
       onChosenChange: selecting && can(toggle) ? () => void send(toggle) : undefined,
       onSwipe: canArchive ? () => void send(swipe).then((applied) => {

@@ -42,7 +42,7 @@ export const phoneInboxAttachments = Layer.sync(InboxAttachmentFiles, () => {
       } catch () => "unknown"
     },
     cancel: (attempt) => host === undefined ? Effect.void : ignore(tryPromise(() => host.cancelReviewed({ attempt: String(attempt) }))),
-  }
+  } satisfies InboxAttachmentFiles.Shape
 })
 
 module browser {
@@ -68,5 +68,5 @@ export const attachmentDownloads = Layer.effect(InboxAttachmentFiles, effect {
       return "unknown"
     },
     cancel: () => Effect.void,
-  }
+  } satisfies InboxAttachmentFiles.Shape
 })
