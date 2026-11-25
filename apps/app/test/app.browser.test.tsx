@@ -14,7 +14,7 @@ import "../src/main.css";
 afterEach(closeAll);
 
 const withSample = [...mounts, at("view:Notes", () => import("./sample/index.tsx"))];
-const trail = (): unknown => (JSON.parse(localStorage.getItem("alpha/app/shell/index@1") ?? "null") as { trail: unknown } | null)?.trail;
+const trail = (): unknown => (JSON.parse(localStorage.getItem("alpha/app/shell/index@2") ?? "null") as { trail: unknown } | null)?.trail;
 
 // spec/app/shell/index.md, "Story: Move between Home and the apps"
 it("Move between Home and the apps, and find the same place after the page is opened again (spec/app/shell/index.md, \"Story: Move between Home and the apps\")", async () => {

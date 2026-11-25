@@ -8,7 +8,7 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Toasts } from "../gen/app__notices__toasts.effect.vibe";
 import home from "../src/home/index.tsx";
 import type { Alpha } from "../src/runtime/area.tsx";
-import { button, closeAll, drawn, hardware, later, open, press, seen, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
 import { scene, type Scene } from "./fakes/scene.ts";
 import { savedKey, written } from "../src/home/saved.vibe";
 import { waiting } from "../src/home/waiting.vibe";
@@ -57,9 +57,9 @@ describe("Home on a phone", () => {
     const { alpha } = first;
     const homes = home.runtime(alpha);
 
-    // spec/app/home/index.md, "Startup says once per run how Alpha is presented, and Home then reads its saved tiles": with nothing saved Home shows Alpha's own apps that this phone admits, and no Apps drawer tile.
+    // spec/app/home/index.md, "Startup says once per run how Alpha is presented, and Home then reads its saved tiles": with nothing saved Home shows Alpha's own apps that this phone admits, and the Apps drawer tile on the admitted phone.
     await until(alpha, homes, Home.Machine, (h) => h.host === "AsLauncher" && h.tiles.load.status === "Loaded");
-    expect([tiles(), Boolean(button("Apps"))]).toEqual([alphaApps, false]);
+    expect([tiles(), Boolean(button("Apps"))]).toEqual([alphaApps, true]);
 
     // spec/app/home/tiles.md, "Only Phone, Messages and Inbox carry a badge, only when something waits there, and no tile does while Home is being edited"
     await drawn(() => { waiting.tell("Inbox", "3 unread"); waiting.tell("Notes", "1 shared"); });
@@ -106,6 +106,60 @@ describe("Home on a phone", () => {
     const recovered = await open(world);
     await until(recovered.alpha, home.runtime(recovered.alpha), Home.Machine, (h) => h.tiles.load.status === "Failed");
     expect([tiles(), localStorage.getItem(savedKey)]).toEqual([alphaApps, "{invalid"]);
+  });
+
+  it('Find an installed app in Apps (spec/app/home/index.md, "Story: Find an installed app in Apps"; spec/app/home/drawer.md, "Story: Find an installed app by name")', async () => {
+    const world = { ...scene(), phone: true };
+    const { alpha } = await open(world, only("home", "assistant"));
+    const homes = home.runtime(alpha);
+    const dialog = () => document.querySelector('[role="dialog"][aria-label="Apps"]');
+    const search = () => dialog()?.querySelector<HTMLInputElement>('input[aria-label="Search apps"]');
+    const focusedAfterFrames = async (target: HTMLElement | null | undefined) => {
+      expect(target).toBeInstanceOf(HTMLElement);
+      for (let frame = 0; frame < 13 && document.activeElement !== target; frame += 1) await later(alpha, 16);
+      expect(document.activeElement).toBe(target);
+    };
+    await until(alpha, homes, Home.Machine, (h) => h.host === "AsApp" && h.tiles.load.status === "Loaded");
+    expect((await homes.runPromise(Home.Machine.use((m) => m.get()))).installed.read.status).toBe("Idle");
+
+    const opener = button("Apps");
+    await press("Apps");
+    await until(alpha, homes, Home.Machine, (h) => h.installed.read.status === "Loaded");
+    await focusedAfterFrames(dialog()?.querySelector("h1"));
+    expect(opener?.closest("[inert]")).not.toBeNull();
+
+    await drawn(() => search()?.focus());
+    await fill("Search apps", "fíxture.clock");
+    expect([Boolean(button("Open Clock")), Boolean(button("Open Mail"))]).toEqual([true, false]);
+    await press("Open Clock");
+    await vi.waitFor(() => expect(world.launcher.opened).toEqual(["org.fixture.clock"]));
+
+    // spec/app/shell/focus.md, "A layer that closes gives focus back to the control that opened it, never over a control that took it".
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (state) => !state.drawer);
+    await focusedAfterFrames(opener);
+
+    await press("Apps");
+    await until(alpha, alpha.runtime, Shell, (state) => state.drawer);
+    await vi.waitFor(() => expect([search()?.value, Boolean(button("Open Mail"))]).toEqual(["", true]));
+
+    // spec/app/shell/index.md, "Back closes one layer: Ask Alpha by a step, then the app on top": Ask Alpha stays above the drawer and leaves first.
+    await press("Open conversation");
+    await until(alpha, alpha.runtime, Shell, (state) => state.drawer && state.assistant === "Sheet");
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (state) => state.drawer && state.assistant === "Bar");
+    expect(dialog()).not.toBeNull();
+    const composer = document.activeElement;
+    expect(composer?.getAttribute("aria-label")).toBe("Message Alpha");
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (state) => !state.drawer);
+    expect(document.activeElement).toBe(composer);
+
+    await press("Apps");
+    await until(alpha, alpha.runtime, Shell, (state) => state.drawer);
+    await hardware("home");
+    await until(alpha, alpha.runtime, Shell, (state) => !state.drawer && state.trail.length === 0);
+    expect(dialog()).toBeNull();
   });
 
   // spec/app/home/cards.md, "Story: See my day at a glance"; spec/app/home/cards.md, "Story: The agenda card"; spec/app/home/cards.md, "Story: Open my day from a card"
@@ -209,7 +263,7 @@ describe("Home on a phone", () => {
 
     // spec/app/home/index.md, "Once the saved tiles are read, the phone's apps are read if Home holds an installed app, and a record that could not be read is told"
     await until(alpha, homes, Home.Machine, (h) => h.installed.read.status === "Loaded");
-    expect([tiles(), Boolean(button("Apps"))]).toEqual([["view:Notes", "app:org.fixture.clock/org.fixture.clock.Main"], false]);
+    expect([tiles(), Boolean(button("Apps"))]).toEqual([["view:Notes", "app:org.fixture.clock/org.fixture.clock.Main"], true]);
 
     // spec/app/home/index.md, "Only an app in the last reading is opened, never while Home is being edited"
     await drawn(() => tileButton("app:org.fixture.clock/org.fixture.clock.Main")?.click());
