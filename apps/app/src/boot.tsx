@@ -4,6 +4,7 @@ import { MediaHandoff, stageAttachment } from "./assistant/attachments.vibe";
 import { executeMedia } from "./assistant/media-executors.ts";
 import { MediaExecutors } from "./assistant/media-review.vibe";
 import { type Mount, type Place, mounts as every } from "./areas.ts";
+import { ScanExports } from "./files/scanEntry.vibe";
 import { BrowserDownloadsHandoff } from "./platform/browser.vibe";
 import type { Platform } from "./platform/platform.vibe";
 import { resident } from "./resident.vibe";
@@ -29,7 +30,13 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
       await files.runtime(alpha).runPromise(showBrowserDownloads);
     }).pipe(Effect.orElseSucceed(() => undefined)),
   });
-  const root = rooted(Layer.provideMerge(resident, Layer.mergeAll(platform, media, executors, downloads)));
+  const scans = Layer.succeed(ScanExports, {
+    record: (selection) => Effect.tryPromise(async () => {
+      const [{ default: files }, { retainScanExport }] = await Promise.all([import("./files/index.tsx"), import("./files/scan.vibe")]);
+      await files.runtime(alpha).runPromise(retainScanExport(selection));
+    }).pipe(Effect.orElseSucceed(() => undefined)),
+  });
+  const root = rooted(Layer.provideMerge(resident, Layer.mergeAll(platform, media, executors, downloads, scans)));
   const placed = new Map<Place, ReactElement[]>();
   const alpha: Alpha = {
     runtime: root.runtime,

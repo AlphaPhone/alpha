@@ -1,7 +1,7 @@
 // spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/index.md, "Story: Select photos"; spec/app/photos/index.md, "Story: Change albums from what I am looking at"
 import { Effect } from "effect";
-import { Album, ChevronLeft, ChevronRight, Ellipsis, Heart, Image, Images, ListChecks, Plus, Search, Share2, Trash2, Undo2, X } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { Album, ChevronLeft, ChevronRight, Ellipsis, Heart, Image, Images, ListChecks, Plus, ScanText, Search, Share2, Trash2, Undo2, X } from "lucide-react";
+import { useRef, useState, type ReactNode } from "react";
 import { Alert, AppHeader, Button, Chip, ConfirmDialog, EmptyState, Input, ListRow, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, Spinner, cn } from "@repo/ui";
 import { useMachine as useLibrary } from "../../gen/app__photos.react.ts";
 import { useMachine as useTrash } from "../../gen/app__photos__trash.react.ts";
@@ -19,8 +19,11 @@ import type { library } from "./photos.vibe";
 import type { trash } from "./trash.vibe";
 import type { viewer } from "./viewer.vibe";
 import type { Layer } from "effect";
+import { Scan } from "../files/Scan.tsx";
+import { scanSelectedImage, type imageScan } from "../files/scan.vibe";
+import { useMachine as useScan } from "../../gen/app__files__scan.react.ts";
 
-type PhotosRuntime = Layer.Success<typeof agentPhotos> | Layer.Success<typeof library> | Layer.Success<typeof viewer> | Layer.Success<typeof trash> | Resident;
+type PhotosRuntime = Layer.Success<typeof agentPhotos> | Layer.Success<typeof library> | Layer.Success<typeof viewer> | Layer.Success<typeof trash> | Layer.Success<typeof imageScan> | Resident;
 
 interface Tool {
   readonly icon: ReactNode;
@@ -44,6 +47,8 @@ export function Photos({ runtime, alpha }: PhotosProps) {
   const trash = useTrash(runtime);
   const viewer = useViewer(runtime);
   const agent = useAgent(runtime);
+  const scan = useScan(runtime);
+  const scanInput = useRef<HTMLInputElement>(null);
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
   const [name, setName] = useState("");
@@ -128,6 +133,9 @@ export function Photos({ runtime, alpha }: PhotosProps) {
     if (album?.owned && owner({ type: "renameAlbum" })) menu.push({ label: "Rename album", icon: <Album />, run: () => { setName(album.title); talk({ type: "renameAlbum" }); } });
     if (album?.owned) add("Delete album", { type: "deleteAlbum" }, <Trash2 />, menu);
   }
+  if (!selection && !inTrash && opened === 0 && state.visible && !secure && scan.state && scan.can({ type: "startImage", frame: scan.state.images + 1 }, "Phone")) {
+    menu.push({ label: "Scan image text", icon: <ScanText />, run: () => scanInput.current?.click() });
+  }
   const status = inTrash ? bin.read.status : state.library.status;
   const dialog = state.shelf.dialog;
   const request = agent.state?.stage === "Shown" ? agent.state.request : undefined;
@@ -149,6 +157,12 @@ export function Photos({ runtime, alpha }: PhotosProps) {
   </AppHeader>;
   return (
     <section aria-label="Photos" className="relative flex min-h-0 flex-1 flex-col bg-background">
+      <input ref={scanInput} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={(event) => {
+        const source = event.currentTarget.files?.[0];
+        event.currentTarget.value = "";
+        if (source) void runtime.runPromiseExit(scanSelectedImage(source));
+      }} />
+      <Scan runtime={runtime} alpha={alpha} />
       <div inert={opened !== 0} aria-hidden={opened !== 0 || undefined} className="flex min-h-0 flex-1 flex-col" data-alpha-subview="photos-list">
         {header}
         {!selection && !inTrash && !album && (owner({ type: "showTab", tab: "Library" }) || owner({ type: "showTab", tab: "Albums" })) &&

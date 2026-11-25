@@ -14,6 +14,13 @@ the senders are [Who acts on photos](./actor.md). Photos are taken in the
 [Camera](../camera/). The shell decides when Photos is showing and from
 where; Notices shows Undo and says when it is gone.
 
+## Story: Scan text from a selected image
+
+> As the owner, I want to read text from one image I choose, with on-device
+> recognition and a review over Photos. Dismissing the review returns to the
+> same library. The image is only used in the [scan review](../files/scan.md)
+> unless I explicitly save something from it.
+
 ## Domain
 
 ### What Photos shows

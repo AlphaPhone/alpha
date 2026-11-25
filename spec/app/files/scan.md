@@ -28,14 +28,15 @@ import scanDraft as K from "./scanDraft"
 import scanText as T from "./scanText"
 
 type Actor = Owner | Phone
+type Origin = Document | SelectedImage | SelectedDocument
 type Problem = NoProblem | TooLarge | TooMuchText | NotDrawn
 type Scan = {
-  open: bool, pages: List[K::Page], images: int, keeping: K::Keeping, text: T::Text,
+  open: bool, origin: Origin, pages: List[K::Page], images: int, keeping: K::Keeping, text: T::Text,
   pdf: A::Attempt, problem: Problem, written: List[List[int]], keep: A::Attempt, keptNow: int, kept: List[int],
 }
 
 pure val initial: Scan = {
-  open: false, pages: List(), images: 0, keeping: K::initial, text: T::initial,
+  open: false, origin: Document, pages: List(), images: 0, keeping: K::initial, text: T::initial,
   pdf: A::plan(1), problem: NoProblem, written: List(), keep: A::plan(0), keptNow: 0, kept: List(),
 }
 ```
@@ -83,6 +84,8 @@ pure val baseValues = Set(0, 1)
 pure val linksValues = Set(0, 2, 12)
 pure val linkValues = Set(1, 2)
 pure val weight_start = 4
+pure val weight_startImage = 4
+pure val weight_showPages = 3
 pure val weight_loaded = 6
 pure val weight_add = 10
 pure val weight_recognize = 8
@@ -112,13 +115,13 @@ pure val pagesValues =
 
 ```quint
 pure def edited(pages: List[K::Page], s: Scan): Scan =
-  { ...s, pages: pages, keeping: K::edit(s.keeping), text: T::edited(s.text) }
+  { ...s, pages: pages, keeping: if (s.origin == Document) K::edit(s.keeping) else s.keeping, text: T::edited(s.text) }
 ```
 
 ### Opening a scan reads the saved draft, and keeps the pages still to save from before
 
 ```quint
-pure def canStart(s: Scan, by: Actor): bool = by == Owner and not(s.open) and not(exporting(s))
+pure def canStart(s: Scan, by: Actor): bool = by == Owner and s.origin == Document and not(s.open) and not(exporting(s))
 
 pure def start(s: Scan, by: Actor): Moved =
   val keeping = K::load(s.keeping)
@@ -129,6 +132,29 @@ pure def canLoaded(s: Scan, ticket: int, by: Actor): bool = by == Phone and s.op
 
 pure def loaded(s: Scan, ticket: int, ok: bool, readable: bool, base: int, pages: List[K::Page], by: Actor): Scan =
   { ...s, keeping: K::loaded(s.keeping, ticket, ok, readable, base, pages) }
+```
+
+### A selected image opens a transient text review above Photos, reads text immediately, and becomes a multi-page document only at the owner's request
+
+The selected image does not enter the Photos library or replace the saved
+Files draft. The owner can correct its text, review links, save a note,
+review an event, and save a PDF. Choosing Multi-page adds page controls
+to this review, leaving the saved Files draft alone.
+
+```quint
+pure def canStartImage(s: Scan, frame: int, by: Actor): bool =
+  by == Phone and not(s.open) and not(exporting(s)) and frame > 0 and not(s.keeping.stored) and not(D::unsaved(s.keeping.draft))
+
+pure def startImage(s: Scan, frame: int, by: Actor): Moved =
+  val image = s.images + 1
+  val opened = { ...s, origin: SelectedImage, open: true, images: image, pages: List({ ...K::noPage, image: image }), problem: NoProblem }
+  recognize(opened, image, Owner)
+
+pure def canShowPages(s: Scan, by: Actor): bool = by == Owner and s.origin == SelectedImage and editable(s)
+pure def showPages(s: Scan, by: Actor): Scan = { ...s, origin: SelectedDocument }
+
+pure def alwaysASelectedImageDoesNotHoldADraft(s: Scan): bool =
+  s.origin != Document implies (not(s.keeping.stored) and not(D::unsaved(s.keeping.draft)) and s.keeping.loading.status == R::Idle)
 ```
 
 ### The owner resumes the draft as it is stored: into an empty scan at once, over pages only after confirming, and after a conflict only once it was read again
@@ -158,7 +184,7 @@ pure def stepResumeBringsBackWhatIsStored(before: Scan, via: str, after: Scan): 
 
 ```quint
 pure def canAdd(s: Scan, frame: int, replacing: int, camera: bool, by: Actor): bool =
-  by == Phone and editable(s) and frame > 0
+  by == Phone and s.origin != SelectedImage and editable(s) and frame > 0
     and (if (replacing == 0) s.pages.length() < K::pageLimit else has(s, replacing))
 
 pure def add(s: Scan, frame: int, replacing: int, camera: bool, by: Actor): Scan =
@@ -357,7 +383,7 @@ pure def sometimesANoteIsMade(s: Scan): bool = s.text.note.outcome == A::Confirm
 ### The phone saves the pages when there are edits, and so may the owner; each save names its number
 
 ```quint
-pure def canSaveDraft(s: Scan, by: Actor): bool = K::canSave(s.keeping, s.pages)
+pure def canSaveDraft(s: Scan, by: Actor): bool = s.origin == Document and K::canSave(s.keeping, s.pages)
 
 pure def saveDraft(s: Scan, by: Actor): Moved =
   val keeping = K::save(s.keeping, s.pages)
@@ -455,7 +481,8 @@ pure def canExported(s: Scan, ticket: int, by: Actor): bool = by == Phone and A:
 
 pure def exported(s: Scan, ticket: int, confirmed: bool, known: bool, by: Actor): Moved =
   val pdf = A::conclude(s.pdf, confirmed, known)
-  { state: { ...s, pdf: pdf, written: if (pdf.outcome == A::Refused) s.written else writing(s) },
+  { state: { ...s, pdf: pdf, pages: if (s.origin == Document or s.open) s.pages else List(),
+      written: if (pdf.outcome == A::Refused) s.written else writing(s) },
     out: if (pdf.outcome == A::Confirmed) List(ToRecent({ ticket: ticket })) else List() }
 ```
 
@@ -547,7 +574,8 @@ exported again; once the phone was asked, its answer still counts.
 
 ```quint
 pure def closed(by: Actor, s: Scan): Scan =
-  { ...s, open: false, text: T::close(s.text), keeping: K::close(s.keeping), pdf: F::withdraw(s.pdf) }
+  { ...s, open: false, pages: if (s.origin == Document or exporting(s)) s.pages else List(),
+    text: T::close(s.text), keeping: K::close(s.keeping), pdf: F::withdraw(s.pdf) }
 
 pure def canClose(s: Scan, by: Actor): bool = by == Owner and s.open
 

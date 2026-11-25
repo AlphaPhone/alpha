@@ -2,10 +2,12 @@
 import * as Library from "../../gen/app__photos.effect.vibe"
 import * as Trash from "../../gen/app__photos__trash.effect.vibe"
 import * as Viewer from "../../gen/app__photos__viewer.effect.vibe"
+import { scanBack } from "../files/scan.vibe"
 import * as Assistant from "../../gen/app__photos__agent.effect.vibe"
 
 /** Back closes the topmost Photos surface before it leaves the app. */
 export const back = effect {
+  if (try scanBack) return true
   const review = try Assistant.Machine
   if ((try review.get()).stage === "Shown") return Exit.isSuccess(try exit(review.send({ type: "decline" }, "Owner")))
   const shown = try Viewer.Machine
