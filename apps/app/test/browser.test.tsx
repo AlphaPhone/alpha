@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { Effect } from "effect";
 import { act } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
 import { Machine as Page } from "../gen/app__browser__address.effect.vibe";
@@ -326,6 +326,12 @@ describe("The Browser on a phone", () => {
   it("Let my agent read the page I have open in Browser (spec/app/assistant/context.md, \"Story: Let my agent read the page I have open in Browser\")", async () => {
     const running = await askingOnBrowser();
     const { alpha, runtime } = running;
+    // happy-dom lays nothing out: give the page's place the size Android's web view takes, so the tab is presented there.
+    const measure = HTMLElement.prototype.getBoundingClientRect;
+    const laidOut = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.hasAttribute("data-alpha-browser-page") ? new DOMRect(0, 64, 412, 700) : measure.call(this);
+    });
+    onTestFinished(() => laidOut.mockRestore());
     await go("news.example/on-device-agents");
     const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
     await until(alpha, runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab))), Page, (p) => p.phase === "Shown");
