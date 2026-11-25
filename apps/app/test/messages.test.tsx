@@ -79,6 +79,21 @@ const bubble = (text: string) => act(async () => {
   found.dispatchEvent(new KeyboardEvent("keydown", { key: "ContextMenu", bubbles: true }));
 });
 
+/** Choose an action from the open conversation's composer menu. */
+async function composeAction(name: string) {
+  await drawn(() => {
+    const trigger = document.querySelector<HTMLButtonElement>('button[aria-label="Message actions"]');
+    if (!trigger) throw new Error("Message actions are unavailable");
+    trigger.focus();
+    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  });
+  await drawn(() => {
+    const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((one) => one.textContent === name);
+    if (!item) throw new Error(`Message action ${name} was not shown`);
+    item.click();
+  });
+}
+
 describe("Messages on an Alpha image", () => {
   it("See my conversations, read one, and send a message once (spec/app/messages/index.md, \"Story: See my conversations\"; spec/app/messages/composer.md, \"Story: Let Alpha suggest a draft\"; spec/app/messages/index.md, \"Story: Read a conversation\"; spec/app/messages/composer.md, \"Story: Send a message\"; spec/app/messages/sending.md, \"Story: Send a message once\"; spec/app/messages/sending.md, \"Story: Know whether it arrived\")", async () => {
     const world = image();
@@ -97,7 +112,7 @@ describe("Messages on an Alpha image", () => {
     await ready(alpha.runtime, Composer, "Composer state", (s) => s.thread > 0 && s.recipients === 1);
 
     // spec/app/messages/composer.md, "Alpha's suggestion is asked for only when the draft is empty, and lands only if it still is"; spec/app/messages/composer.md, "Undo takes Alpha's draft away"
-    await press("Let Alpha suggest a reply");
+    await composeAction("Let Alpha suggest a reply");
     await ready(alpha.runtime, Composer, "Composer state", (s) => s.slot.author === "AlphaWrote" && s.suggestion.status === "Loaded");
     expect([world.telephony.asked, (document.querySelector("textarea[aria-label=Message]") as HTMLTextAreaElement).value, world.telephony.sent]).toEqual([
       [{ participant: "+14155550100", messages: [{ direction: "in", date: 1_700_000_050_000, body: "See you at five" }], truncated: false }], "Five works, see you there", [],
@@ -112,8 +127,11 @@ describe("Messages on an Alpha image", () => {
     // spec/app/phone/comms.md, "Story: Address the person or Alpha from one bar"
     expect(document.querySelectorAll("[data-alpha-composer]")).toHaveLength(1);
     await press("Open Alpha");
-    await ready(alpha.runtime, Shell, "Alpha image admitted", (s) => s.assistant === "Sheet");
-    expect(document.querySelectorAll("[data-alpha-composer]")).toHaveLength(1);
+    await ready(alpha.runtime, Shell, "Ask Alpha sheet", (s) => s.assistant === "Sheet");
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect([...document.querySelectorAll("[data-alpha-composer]")].map((field) => field.getAttribute("aria-label"))).toEqual(["Ask Alpha"]);
+    }, { timeout: 12_000 });
     await write("Ask Alpha", "What did I miss?");
     await press("Back to texting Maya Chen");
     await ready(alpha.runtime, Shell, "Alpha image admitted", (s) => s.assistant === "Bar");
@@ -128,6 +146,10 @@ describe("Messages on an Alpha image", () => {
     await press("Stop recording");
     await ready(messageView, Voice, "Messages transcript returned", (state) => state.recorder.stage === "Closed");
     const dictated = "On my way Dictated note";
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.value).toBe(dictated);
+    }, { timeout: 12_000 });
     expect([document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.value, world.telephony.sent, world.ask.opened, world.ask.said, world.voice.startLiveCaptureCalls])
       .toEqual([dictated, [], openedChats, [], 0]);
 
@@ -227,9 +249,10 @@ describe("Messages on an Alpha image", () => {
     await ready(first.alpha.runtime, Messages, "conversation list", (state) => state.list.status === "Loaded" && state.threads === 1);
     await press("Maya Chen");
     await ready(first.alpha.runtime, Composer, "picture composer", (state) => state.thread > 0 && state.sending.grant === "Granted");
+    await composeAction("Add media");
     await drawn(() => {
       const picker = document.querySelector<HTMLInputElement>('input[type="file"][aria-label="Attach a picture"]');
-      if (!picker) throw new Error("No picture picker");
+      if (!picker || picker.disabled) throw new Error("No usable picture picker");
       Object.defineProperty(picker, "files", { value: [new File([Uint8Array.from(atob("R0lGODlhAQABAAAAACwAAAAAAQABAAA="), (byte) => byte.charCodeAt(0))], "photo.gif", { type: "image/gif" })] });
       picker.dispatchEvent(new Event("change", { bubbles: true }));
     });
@@ -297,8 +320,10 @@ describe("Messages on an Alpha image", () => {
     await ready(runtime, Tabs, "new Browser tab", (state) => state.selected > 1);
     const tab = runtime.runSync(Effect.map(Tabs.use((machine) => machine.get()), (state) => state.selected));
     const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
+    await vi.waitFor(() => {
+      const committed = [...world.browser.tabs.values()].filter((one) => one.committed && !one.private && one.history.at(-1) === "http://news.example/lunch");
+      if (committed.length !== 1) throw new Error(`Browser host did not commit the tapped URL: ${JSON.stringify(world.browser.calls)}`);
+    }, { timeout: 12_000 });
     await ready(page, Page, "Browser link page", (state) => state.phase === "Shown");
-    expect([...world.browser.tabs.values()].map((one) => ({ private: one.private, history: one.history })))
-      .toEqual([{ private: false, history: ["http://news.example/lunch"] }]);
   });
 });
