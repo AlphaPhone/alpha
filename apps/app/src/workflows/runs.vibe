@@ -3,9 +3,11 @@ import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { type WorkflowRun, WorkflowAdmissionRejected, WorkflowHttpError, WorkflowResponseInvalid } from "@elizaos/plugin-workflow-client"
 import * as Model from "../../gen/app__workflows__runs.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__workflows__runs.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import * as Listing from "../../gen/app__workflows__list.effect.vibe"
 import * as Sheet from "../../gen/app__workflows__sheet.effect.vibe"
 import type { Agent } from "../platform/agent.vibe"
+import { Device } from "../platform/device.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { type Job, answer, applying, following, reacting, started, together } from "../runtime/reactor.vibe"
 import { WorkflowsApi } from "./api.vibe"
@@ -174,12 +176,29 @@ const sending = following(Model.Machine, (state) => Model.canSendRun(state), Mod
 const polling = started(effect {
   const machine = try Model.Machine
   const listing = try Listing.Machine
-  const active = Stream.changes(Stream.map(Stream.zipLatest(machine.changes, listing.changes), ([state, page]) =>
-    Model.running(state) && page.owner === state.owner && page.place.tag === "ListingDetail" && page.place.row === state.workflow))
-  try Stream.runDrain(Stream.switchMap(active, (running) => running ? Stream.fromEffectRepeat(effect {
-    try sleep("4 seconds")
-    try ignore(machine.send({ type: "readLatest" }))
-  }) : Stream.empty))
+  const device = try Device
+  const shell = try Shell
+  const visible = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
+  const view = Stream.map(shell.changes, (state) => showing(state, "Workflows"))
+  const foreground = Stream.map(Stream.zipLatest(visible, view), ([seen, onView]) => seen && onView)
+  const focused = Stream.map(Stream.zipLatest(machine.changes, listing.changes), ([state, page]) =>
+    Model.running(state) && page.owner === state.owner && page.place.tag === "ListingDetail" && page.place.row === state.workflow)
+  const active = Stream.changes(Stream.map(Stream.zipLatest(focused, foreground), ([running, shown]) => running && shown))
+  let paused = false
+  try Stream.runDrain(Stream.switchMap(active, (running) => {
+    if (!running) {
+      paused = true
+      return Stream.empty
+    }
+    const onResume = paused ? Stream.fromEffectDrain(effect {
+      paused = false
+      if ((try device.showing()) && showing(try shell.get(), "Workflows")) try ignore(machine.send({ type: "readLatest" }))
+    }) : Stream.empty
+    return Stream.concat(onResume, Stream.fromEffectRepeat(effect {
+      try sleep("4 seconds")
+      if ((try device.showing()) && showing(try shell.get(), "Workflows")) try ignore(machine.send({ type: "readLatest" }))
+    }))
+  }))
 }, "following the running workflow")
 
 export effect function backRuns(): boolean!!Model.Machine {

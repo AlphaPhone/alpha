@@ -1,5 +1,5 @@
 // spec/app/reminders/index.md, "Creating, renaming and deleting custom lists protects the default Reminders list and keeps every item in a valid list"
-import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input, Label, cn } from "@repo/ui";
+import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input, Label, cn, focusRing } from "@repo/ui";
 import { useState } from "react";
 import type { DeleteMode } from "../../gen/app__reminders.ts";
 import type { ReminderListColor, ReminderListIcon, ReminderListRecord } from "./store.ts";
@@ -59,11 +59,18 @@ export function ListEditorDialog({
                   aria-pressed={color === swatch}
                   onClick={() => setColor(swatch)}
                   className={cn(
-                    "flex size-9 items-center justify-center rounded-full transition-transform",
-                    listColorBadgeClass(swatch),
-                    color === swatch && "ring-2 ring-ring ring-offset-2 ring-offset-popover scale-105",
+                    focusRing,
+                    "flex size-11 items-center justify-center rounded-full p-1 transition-transform",
                   )}
-                />
+                >
+                  <span
+                    className={cn(
+                      "flex size-9 items-center justify-center rounded-full transition-transform",
+                      listColorBadgeClass(swatch),
+                      color === swatch && "ring-2 ring-ring ring-offset-2 ring-offset-popover scale-105",
+                    )}
+                  />
+                </button>
               ))}
             </div>
           </div>
@@ -76,6 +83,7 @@ export function ListEditorDialog({
                   type="button"
                   variant={icon === choice ? "primary" : "secondary"}
                   size="sm"
+                  className="min-h-11"
                   aria-label={listIconLabel(choice)}
                   aria-pressed={icon === choice}
                   onClick={() => setIcon(choice)}

@@ -1,6 +1,6 @@
 // spec/app/workflows/sheet.md, "Story: See a workflow's history"; spec/app/workflows/sheet.md, "Story: Read a run's sheet"
 import type { WorkflowRun } from "@elizaos/plugin-workflow-client";
-import { Effect } from "effect";
+import { useSyncExternalStore } from "react";
 import { Alert, Button, EmptyState, ListRow, Spinner } from "@repo/ui";
 import { Check, ChevronRight, CircleAlert, Clock, Minus, Play, Sparkles, Square, Volume2, VolumeX, X } from "lucide-react";
 import { type Event, newerVersion } from "../../gen/app__workflows__sheet.ts";
@@ -95,9 +95,11 @@ interface HistoryProps extends Pick<Shown<Resident | HistoryWordsPort | Machine 
 /** The run history and the sheet of an exact run, as the agent last read them. */
 export function History({ runtime, row, owner }: HistoryProps) {
   const sheet = useMachine(runtime);
+  const wordsPort = runtime.runSync(HistoryWordsPort);
+  const snapshot = useSyncExternalStore(wordsPort.subscribe, wordsPort.snapshot, wordsPort.snapshot);
   const state = sheet.state;
   if (state === undefined || state.owner !== owner) return <Spinner aria-label="Reading runs" />;
-  const history = runtime.runSync(Effect.flatMap(HistoryWordsPort, (words) => words.view(owner, row.number)));
+  const history = snapshot.owner === owner && snapshot.row === row.number ? snapshot : { owner: 0, row: 0, all: [] };
   const opened = history.opened?.number === state.runId ? history.opened : undefined;
   const send = (event: Event) => { if (sheet.can(event)) void sheet.send(event); };
   if (state.runId > 0) {

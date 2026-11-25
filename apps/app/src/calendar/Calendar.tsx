@@ -3,13 +3,14 @@ import {
   type CalendarBlock, CalendarAgendaRow, CalendarAnswer, CalendarAnswers, CalendarChip, CalendarDayChips, CalendarEventAction, CalendarEventBlock, CalendarEventMenu, CalendarEventPage,
   CalendarEventRow, CalendarEventRows, CalendarFieldRow, CalendarFormCard, CalendarFormDate, CalendarFormPage, CalendarFormRow, CalendarFormTitle, CalendarHeader, CalendarSwitch,
   CalendarHeaderAction, CalendarInvite, CalendarJoin, CalendarList, CalendarListHeading, CalendarMonthPanel, CalendarNotice, CalendarNoticeAction, CalendarNotesField,
-  CalendarPerson, CalendarPickerField, CalendarSearchBar, CalendarPill, CalendarTimeline, CalendarTimeRow, CalendarWeekStrip, Label, ListGroup, ListRow, Sheet, SheetContent, Spinner, Switch, Toast,
+  CalendarPerson, CalendarPickerField, CalendarSearchBar, CalendarPill, CalendarTimeline, CalendarTimeRow, CalendarWeekStrip, Label, ListGroup, ListRow, Sheet, SheetContent, Spinner, Switch,
+  cn, dockClearance, focusRing,
 } from "@repo/ui";
-import type { ManagedRuntime } from "effect";
+import { Effect, type ManagedRuntime } from "effect";
 import {
   Calendar as CalendarIcon, CalendarDays, ChevronRight, MapPin, Plus, Repeat, RotateCcw, Search, Settings, TextAlignStart, UserRound, Video, X,
 } from "lucide-react";
-import { type ReactNode, useState, useSyncExternalStore } from "react";
+import { type ReactNode, useMemo, useState, useSyncExternalStore } from "react";
 import * as View from "../../gen/app__calendar.ts";
 import { useMachine as useView } from "../../gen/app__calendar.react.ts";
 import type * as Changes from "../../gen/app__calendar__agent.ts";
@@ -28,18 +29,22 @@ import type { Event as DeletionEvent } from "../../gen/app__calendar__deletions.
 import {
   type ReplyWord, dayEmptiness, firstColumnDay, monthCells, replyWord, rowShown, showsOffsets, statusAction, timelineFirstHour, timelineLastHour,
 } from "../../gen/app__calendar__presentation.ts";
-import { type SaveBlock, goingOffered, managedDeleteOffered, maybeOffered, saveBlock } from "../../gen/app__calendar__writing.ts";
+import {
+  type Occurrences as WritingOccurrences, type SaveBlock, goingOffered, managedDeleteOffered, managedScopeAllowed, maybeOffered, saveBlock, wallTimeSavable,
+} from "../../gen/app__calendar__writing.ts";
 import { type Deletions, type Reach, rowHidden } from "../../gen/app__calendar__deletions.ts";
 import { type RequestStatus, requestStatus } from "../../gen/app__calendar__agent.ts";
-import { type Request, requests } from "./requests.ts";
+import type { Request, RequestsStore } from "./requests.ts";
 import type { Calendared } from "./calendar.vibe";
-import { type Fields, kept, startForm, typed } from "./editor.vibe";
-import { type Row, onDay, shown } from "./shown.ts";
+import { confirmDelete } from "./deletions.vibe";
+import { type Fields, kept, rowFields, startForm, takeSaved, typed } from "./editor.vibe";
+import { type Row, type ShownStore, onDay } from "./shown.ts";
+import { Requests, Shown } from "./stores.vibe";
 import { allows } from "../../gen/kit__permission.ts";
-import { civilDay, dateOf, dayStart, monthStart, readWindow, weekStart } from "./time.ts";
+import { civilDay, dateOf, dayStart, localWallTime, monthStart, readWindow, shiftDays, wallDateTime, weekStart } from "./time.ts";
 
 export interface CalendarProps {
-  /** Provides Calendar's machines, `calendared` of calendar.vibe. */
+  /** Provides Calendar's machines and scoped stores, `Calendared` of calendar.vibe. */
   runtime: ManagedRuntime.ManagedRuntime<Calendared, unknown>;
   /** Alpha, for the shell's Back in Calendar's own header. */
   alpha?: Alpha;
@@ -98,18 +103,41 @@ const saveOff: Readonly<Record<SaveBlock, string>> = {
   CheckEvent: "This event changed. Check it before saving.", AddTitle: "",
 };
 
+const scopeWriting: Readonly<Record<Exclude<Editor.Scope, "Unchosen">, WritingOccurrences>> = {
+  ThisOne: "ThisOccurrence", ThisAndFollowing: "FromThisOn", WholeSeries: "EntireSeries",
+};
+
 const hourMs = 3_600_000;
 const quarter = 15 * 60_000;
+const insetFocus = cn(focusRing, "focus-visible:-outline-offset-focus");
+
+/** Subscribe to the runtime-scoped `Shown` shelf. */
+function useShown(runtime: CalendarProps["runtime"]): ShownStore {
+  const store = useMemo(() => runtime.runSync(Effect.flatMap(Shown, (found) => Effect.succeed(found))), [runtime]);
+  useSyncExternalStore(store.subscribe, store.snapshot, store.snapshot);
+  return store;
+}
+
+/** Subscribe to the runtime-scoped `Requests` shelf. */
+function useRequests(runtime: CalendarProps["runtime"]): RequestsStore {
+  const store = useMemo(() => runtime.runSync(Effect.flatMap(Requests, (found) => Effect.succeed(found))), [runtime]);
+  useSyncExternalStore(store.subscribe, store.snapshot, store.snapshot);
+  return store;
+}
 
 // spec/app/calendar/deletions.md, "A deletion hides its event, the series from this occurrence on, or the whole series, and only rows of the same source"
-/** Whether a deletion waiting, being sent or awaiting its read hides `row`. */
-function deletedNow(d: Deletions | undefined, row: Row): boolean {
+/** Whether a deletion waiting, being sent or awaiting its read hides `row`, preserving its phase-specific reach. */
+function deletedNow(d: Deletions | undefined, row: Row, shown: ShownStore): boolean {
   if (!d) return false;
-  return [d.waiting, d.sending, d.hiding].some((id) => {
+  const active: ReadonlyArray<readonly [number, Reach]> = [
+    [d.waiting, d.reach],
+    [d.sending, d.sendingReach],
+    [d.hiding, d.hidingReach],
+  ];
+  return active.some(([id, reach]) => {
     if (id === 0) return false;
     const held = shown.lastSeen(id);
     if (!held) return row.id === id;
-    const reach: Reach = id === d.waiting ? d.reach : "OneEvent";
     return rowHidden(reach, row.id === id, held.series !== "" && row.series === held.series, row.begin >= held.begin, row.source === held.source);
   });
 }
@@ -127,9 +155,13 @@ function dayName(day: number, today: number): string {
   return shortDate.format(dateOf(day));
 }
 
-/** The hours from midnight of `ms` on civil `day`. */
+/** The local wall-clock hours into civil `day` for `ms`, immune to DST day-length shifts. */
 function hoursInto(ms: number, day: number): number {
-  return (ms - dayStart(day)) / hourMs;
+  const atDay = civilDay(ms);
+  if (atDay < day) return 0;
+  if (atDay > day) return 24;
+  const at = new Date(ms);
+  return at.getHours() + at.getMinutes() / 60 + at.getSeconds() / 3600;
 }
 
 const offset = (ms: number) => -new Date(ms).getTimezoneOffset();
@@ -163,11 +195,14 @@ function span(rows: ReadonlyArray<Row>, day: number): { first: number; last: num
   return { first: timelineFirstHour(Math.min(7, ...timed.map(startHour))), last: Math.min(24, timelineLastHour(Math.max(23, ...timed.map(endHour)))) };
 }
 
-/** Each timed event of `day` in its lane, side by side where events overlap. */
+/** Each timed event of `day` in its lane, side by side where events overlap, guarded against non-positive spans. */
 function lanes(rows: ReadonlyArray<Row>, day: number): ReadonlyArray<{ row: Row; start: number; length: number; lane: number; lanes: number }> {
   const timed = rows.filter((row) => !row.allDay).map((row) => {
-    const start = Math.max(0, hoursInto(row.begin, day));
-    return { row, start, length: Math.min(24, hoursInto(row.end, day)) - start };
+    const start = Math.min(23.75, Math.max(0, hoursInto(row.begin, day)));
+    const rawEnd = Math.min(24, hoursInto(row.end, day));
+    const fallback = row.end > row.begin ? (row.end - row.begin) / hourMs : 0.25;
+    const length = rawEnd > start ? rawEnd - start : Math.min(24 - start, Math.max(0.25, fallback));
+    return { row, start, length: Math.max(0.25, length) };
   }).sort((a, b) => a.start - b.start || b.length - a.length);
   const ends: number[] = [];
   const laneOf = timed.map(({ start, length }) => {
@@ -213,16 +248,25 @@ function duration(ms: number): string {
   return [h ? `${h} h` : "", m ? `${m} min` : ""].filter((part) => part !== "").join(" ");
 }
 
+/** Axis hour entries for `[first..last]` formatted from DST-free reference wall hours, including 24:00 when needed. */
+function axisHours(first: number, last: number): ReadonlyArray<{ hour: number; label: string }> {
+  const cap = Math.min(last, 24);
+  return Array.from({ length: cap - first + 1 }, (_, at) => first + at).map((hour) => ({
+    hour,
+    label: hourOnly.format(new Date(2000, 0, 1, hour % 24, 0)),
+  }));
+}
+
 /** Calendar: the anchored day from the phone's calendar and the agent's, an event, its form, and the agent's card. */
 export function Calendar({ runtime, alpha }: CalendarProps) {
   const view = useView(runtime);
   const editor = useEditor(runtime);
   const deleting = useHeld(runtime).state;
-  useSyncExternalStore((listener) => shown.subscribe(listener), () => shown.snapshot(), () => shown.snapshot());
+  const shown = useShown(runtime);
   const s = view.state;
   if (!s) return <Spinner />;
   const send = (event: View.Event) => () => void view.send(event);
-  const visible = shown.visible(s.hidden, allows(s.access), s.connected).filter((row) => !deletedNow(deleting, row));
+  const visible = shown.visible(s.hidden, allows(s.access), s.connected).filter((row) => !deletedNow(deleting, row, shown));
   const dayRows = (day: number) => visible.filter((row) => onDay(row, day));
   const opening = (row: Row): View.Event => ({ type: "openEvent", id: row.id, place: row.place !== "", video: row.video !== "", local: row.source === "Phone", web: row.link !== "" });
   const openRow = (row: Row) => {
@@ -247,7 +291,7 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
   const week = Array.from({ length: 7 }, (_, at) => weekStart(s.anchor) + at).map((day) => ({
     key: day, letter: narrowDay.format(dateOf(day)), date: dateOf(day).getDate(), label: longDate.format(dateOf(day)),
     today: day === s.today, selected: day === s.anchor, busy: dayRows(day).length > 0,
-    onPick: view.can({ type: "pickDay", day }) ? send({ type: "pickDay", day }) : day === s.anchor ? () => undefined : undefined,
+    onPick: view.can({ type: "pickDay", day }) ? send({ type: "pickDay", day }) : undefined,
   }));
   const block = (row: Row, day: number, placed: { start: number; length: number; lane: number; lanes: number }): CalendarBlock => ({
     key: row.id, title: row.title || "Untitled event", sub: row.place || (row.video ? "Video call" : ""), time: clock(Math.max(row.begin, dayStart(day))),
@@ -259,7 +303,7 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
       {text}
       {offerSettings && view.can({ type: "openAccountSettings" }) ? (
         <button type="button" aria-label="Open Calendar settings" onClick={send({ type: "openAccountSettings" })}
-          className="mt-1.5 flex min-h-11 items-center gap-1.5 rounded-full bg-secondary px-4 text-sm leading-plain font-semibold text-foreground">
+          className={cn(insetFocus, "mt-1.5 flex min-h-11 items-center gap-1.5 rounded-full bg-secondary px-4 text-sm leading-plain font-semibold text-foreground")}>
           <Settings aria-hidden className="size-4.5" />Settings
         </button>
       ) : null}
@@ -268,13 +312,16 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
   const rows = dayRows(s.anchor);
   const allDay = rows.filter((row) => row.allDay);
   const columns = s.layout === "Columns" ? Array.from({ length: 3 }, (_, at) => firstColumnDay(s.anchor, 3) + at) : [];
-  const hours = (() => {
-    const { first, last } = span(columns.length > 0 ? columns.flatMap(dayRows) : rows, s.anchor);
-    return Array.from({ length: Math.min(last, 23) - first + 1 }, (_, at) => first + at).map((hour) => ({ hour, label: hourOnly.format(dayStart(s.anchor) + hour * hourMs) }));
-  })();
+  const range = columns.length > 0
+    ? columns.reduce((acc, colDay) => {
+        const one = span(dayRows(colDay), colDay);
+        return { first: Math.min(acc.first, one.first), last: Math.max(acc.last, one.last) };
+      }, { first: 7, last: 23 })
+    : span(rows, s.anchor);
+  const hours = axisHours(range.first, range.last);
   return (
     <div className="absolute inset-0 flex flex-col overflow-hidden leading-plain">
-      <div data-alpha-subview="calendar-list" inert={open !== undefined || editor.state?.shown === true} className="flex min-h-0 flex-1 flex-col">
+      <div data-alpha-subview="calendar-list" inert={month || open !== undefined || editor.state?.shown === true} className="flex min-h-0 flex-1 flex-col">
         <CalendarHeader title={title} expanded={month} onTitle={month ? send({ type: "closeOverlay" }) : view.can({ type: "openMonth" }) ? send({ type: "openMonth" }) : undefined}
           className="pr-2 pl-2" leading={alpha ? <AppBack alpha={alpha} className="size-13 [&_svg]:size-5.5" /> : null}>
           {month ? null : view.can({ type: "goToday" }) ? <CalendarHeaderAction aria-label="Today" onClick={send({ type: "goToday" })}><CalendarDays aria-hidden /></CalendarHeaderAction> : null}
@@ -291,6 +338,7 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
           </CalendarNotice>
         ) : null}
         {editor.state?.filed ? <CalendarNotice>{editor.state.kind === "Reply" ? "Your answer waits for your approval below." : "This change waits for your approval below."}</CalendarNotice> : null}
+        <PausedDeletion runtime={runtime} />
         <Drafts runtime={runtime} day={s.anchor} />
         <Proposal runtime={runtime} />
         {listing ? null : (
@@ -302,12 +350,12 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
               </div>
             ) : null}
             {allDay.length > 0 && columns.length === 0 ? (
-              <div data-alpha-calendar-all-day="" className="flex max-h-33 shrink-0 gap-2.5 overflow-y-auto pr-4 pb-2 pl-3">
+              <div data-alpha-calendar-all-day="" className="flex max-h-33 shrink-0 gap-2.5 overflow-y-auto overscroll-contain pr-4 pb-2 pl-3">
                 <span className="w-9.5 shrink-0 pt-3 text-right text-2xs leading-plain text-muted-foreground">All day</span>
                 <div className="flex min-w-0 grow flex-col gap-1.5">
                   {allDay.map((row) => (
                     <button key={row.id} type="button" aria-label={`${row.title || "Untitled event"}, All day`} disabled={!openRow(row)} onClick={openRow(row)}
-                      className="min-h-10 rounded-md bg-secondary px-4 py-2.5 text-left text-sm font-semibold">{row.title || "Untitled event"}</button>
+                      className={cn(insetFocus, "min-h-11 rounded-md bg-secondary px-4 py-2.5 text-left text-sm font-semibold")}>{row.title || "Untitled event"}</button>
                   ))}
                 </div>
               </div>
@@ -318,6 +366,7 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
               </div>
             ) : null}
             <CalendarTimeline hours={hours}
+              className={cn("pt-2", dockClearance)}
               blocks={columns.length > 0 ? [] : lanes(rows, s.anchor).map((placed) => block(placed.row, s.anchor, placed))}
               now={s.anchor === s.today && columns.length === 0 ? now : undefined}
               empty={disconnected ? dayEmpty("Not connected", true)
@@ -339,16 +388,15 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
           </>
         )}
         {s.layout === "Agenda" && !searching ? (
-          <CalendarList aria-label="Schedule" range={`Through ${monthDay.format(readWindow(s.anchor).end - 1)}`}>
+          <CalendarList aria-label="Schedule" className={dockClearance} range={`Through ${monthDay.format(readWindow(s.anchor).end - 1)}`}>
             <Days rows={visible.filter((row) => row.end > dayStart(s.today))} today={s.today} from={dayStart(s.today)} open={openRow} empty="No upcoming events" />
           </CalendarList>
         ) : null}
       </div>
       {month ? <Month runtime={runtime} /> : null}
       <Calendars runtime={runtime} />
-      {open === undefined ? null : <EventPage runtime={runtime} row={open} today={s.today} />}
-      {editor.state?.shown ? <Form runtime={runtime} day={s.anchor} today={s.today} connected={s.connected} /> : null}
-      <Undo runtime={runtime} />
+      {open === undefined ? null : <EventPage runtime={runtime} row={open} today={s.today} inert={editor.state?.shown === true} />}
+      {editor.state?.shown ? <Form runtime={runtime} day={s.anchor} today={s.today} connected={s.connected} viewOwner={s.owner} /> : null}
     </div>
   );
 }
@@ -390,7 +438,7 @@ function Invite({ runtime, row, today, onOpen }: CalendarProps & { row: Row; tod
   return (
     <CalendarInvite initials={initials(organizer?.name ?? row.title)} title={row.title || "Untitled event"}
       when={`${dayName(civilDay(row.begin), today)} · ${row.allDay ? "All day" : hourMinute.format(row.begin)}`} onOpen={onOpen}
-      onDecline={declinable ? () => void held.send(decline) : undefined} onAccept={editor.can(going) ? () => void editor.send(going) : undefined} />
+      onDecline={declinable ? () => void runtime.runPromise(confirmDelete(decline)) : undefined} onAccept={editor.can(going) ? () => void editor.send(going) : undefined} />
   );
 }
 
@@ -398,6 +446,8 @@ function Invite({ runtime, row, today, onOpen }: CalendarProps & { row: Row; tod
 /** The month dialog: a month's days to pick from, the layouts, and the calendars shown. */
 function Month({ runtime }: CalendarProps) {
   const view = useView(runtime);
+  const deleting = useHeld(runtime).state;
+  const shown = useShown(runtime);
   const [shift, setShift] = useState(0);
   const s = view.state;
   if (!s) return null;
@@ -405,9 +455,10 @@ function Month({ runtime }: CalendarProps) {
   const firstDate = dateOf(first);
   const lead = (firstDate.getDay() + 6) % 7;
   const cells = monthCells(monthStart(s.anchor, shift + 1) - first, lead);
-  const visible = shown.visible(s.hidden, allows(s.access), s.connected);
+  const visible = shown.visible(s.hidden, allows(s.access), s.connected).filter((row) => !deletedNow(deleting, row, shown));
   const anchorDate = dateOf(s.anchor);
   const toMonth = (year: number, month: number) => setShift((year - anchorDate.getFullYear()) * 12 + month - anchorDate.getMonth());
+  const canClose = view.can({ type: "closeOverlay" });
   const close = () => void view.send({ type: "closeOverlay" });
   const choose = (layout: View.Layout) => async () => {
     if (s.overlay === "MonthDialog") {
@@ -417,6 +468,7 @@ function Month({ runtime }: CalendarProps) {
     await view.send({ type: "chooseLayout", layout });
   };
   const calendars = async () => {
+    if (!canClose) return;
     await view.send({ type: "closeOverlay" });
     await view.send({ type: "openCalendars" });
   };
@@ -430,14 +482,14 @@ function Month({ runtime }: CalendarProps) {
       days={Array.from({ length: cells }, (_, at) => first - lead + at).map((day) => ({
         key: day, date: dateOf(day).getDate(), label: cellLabel.format(dateOf(day)).replace(",", ""), outside: dateOf(day).getMonth() !== firstDate.getMonth(),
         today: day === s.today, selected: day === s.anchor, busy: visible.some((row) => onDay(row, day)),
-        onPick: view.can({ type: "pickDay", day }) ? () => void view.send({ type: "pickDay", day }) : day === s.anchor ? close : undefined,
+        onPick: view.can({ type: "pickDay", day }) ? () => void view.send({ type: "pickDay", day }) : day === s.anchor && canClose ? close : undefined,
       }))}>
       <div role="group" aria-label="Calendar view" className="mt-3 flex flex-wrap gap-2">
         {offered.map(({ layout, label }) => (
-          <CalendarPill key={layout} pressed={s.layout === layout} disabled={s.layout !== layout && !(s.overlay === "LayoutMenu" ? view.can({ type: "chooseLayout", layout }) : view.can({ type: "closeOverlay" }))}
+          <CalendarPill key={layout} pressed={s.layout === layout} disabled={s.layout !== layout && !(s.overlay === "LayoutMenu" ? view.can({ type: "chooseLayout", layout }) : canClose)}
             onClick={s.layout === layout ? undefined : () => void choose(layout)()}>{label}</CalendarPill>
         ))}
-        <CalendarPill onClick={() => void calendars()}>Calendars</CalendarPill>
+        <CalendarPill disabled={!canClose} onClick={() => void calendars()}>Calendars</CalendarPill>
       </div>
     </CalendarMonthPanel>
   );
@@ -447,6 +499,7 @@ function Month({ runtime }: CalendarProps) {
 /** The Calendars sheet: each calendar with its switch, and the Google row. */
 function Calendars({ runtime }: CalendarProps) {
   const view = useView(runtime);
+  const shown = useShown(runtime);
   const s = view.state;
   if (!s) return null;
   return (
@@ -468,7 +521,7 @@ function Calendars({ runtime }: CalendarProps) {
 // spec/app/calendar/index.md, "Story: Let Calendar read my phone's calendar"
 function Access({ runtime }: CalendarProps) {
   const view = useView(runtime);
-  useSyncExternalStore((listener) => shown.subscribe(listener), () => shown.snapshot(), () => shown.snapshot());
+  const shown = useShown(runtime);
   if (!view.state || !shown.present()) return null;
   if (view.can({ type: "askAccess" })) {
     return <CalendarNotice actions={<CalendarNoticeAction onClick={() => void view.send({ type: "askAccess" })}>Allow</CalendarNoticeAction>}>Calendar needs access to your phone's calendar.</CalendarNotice>;
@@ -485,7 +538,7 @@ function Access({ runtime }: CalendarProps) {
 
 // spec/app/calendar/index.md, "Story: Look at an event"; spec/app/calendar/editor.md, "Story: Delete an event, or answer an invitation"; spec/app/calendar/deletions.md, "Confirming a deletion holds it; a deletion still waiting is sent first, so the only Undo shown is the newest"
 /** An open event over the days: its time, day and calendar, video call, place, people and notes, and what can be done with it. */
-function EventPage({ runtime, row, today }: CalendarProps & { row: Row; today: number }) {
+function EventPage({ runtime, row, today, inert }: CalendarProps & { row: Row; today: number; inert?: boolean }) {
   const view = useView(runtime);
   const editor = useEditor(runtime);
   const held = useHeld(runtime);
@@ -498,7 +551,7 @@ function EventPage({ runtime, row, today }: CalendarProps & { row: Row; today: n
     const confirmed = { type: "confirm", id: row.id, reach, revision: row.revision, now: untimed } as const;
     const scope: Editor.Scope = reach === "WholeSeries" ? "WholeSeries" : reach === "FromThisOn" ? "ThisAndFollowing" : "ThisOne";
     return deletable && held.can(confirmed) && editor.can({ type: "deleteEvent", id: row.id, revision: row.revision, scope, repeating: row.recurring })
-      ? () => void held.send(confirmed).then(() => view.send({ type: "closeEvent" })) : undefined;
+      ? () => void runtime.runPromise(confirmDelete(confirmed)).then(() => view.send({ type: "closeEvent" })) : undefined;
   };
   const respond = (going: boolean, offered: boolean): Editor.Event => ({ type: "respond", id: row.id, revision: row.revision, going, offered });
   const going = respond(true, goingOffered(row.answer, row.answerable));
@@ -522,7 +575,7 @@ function EventPage({ runtime, row, today }: CalendarProps & { row: Row; today: n
     row.editable && row.managed ? "Delete or decline this event in Google Calendar." : null,
   ].filter((text) => text !== null).map((text) => <div key={text} className="mt-3 text-sm leading-plain text-muted-foreground">{text}</div>);
   return (
-    <CalendarEventPage title={row.title || "Untitled event"} onBack={close} when={interval(row)} day={dayName(civilDay(row.begin), today)}
+    <CalendarEventPage inert={inert} title={row.title || "Untitled event"} onBack={close} when={interval(row)} day={dayName(civilDay(row.begin), today)}
       source={row.source === "Phone" ? "Phone calendar" : "Your agent's calendar"} dot={stripe(row)} notes={row.notes}
       actions={menu ? (
         <CalendarEventMenu items={[
@@ -551,47 +604,54 @@ function EventPage({ runtime, row, today }: CalendarProps & { row: Row; today: n
       </CalendarEventRows>
       {row.people.length > 0 ? (
         <div className="mt-3 flex flex-col">
-          {row.people.map((person) => <CalendarPerson key={`${person.name}-${person.organizer}`} initials={initials(person.name)} name={person.name} status={words[replyWord(person.organizer, person.status)]} />)}
+          {(() => {
+            const counts = new Map<string, number>();
+            return row.people.map((person) => {
+              const base = `${person.email || person.name}-${person.organizer}-${person.status}`;
+              const seenCount = (counts.get(base) ?? 0) + 1;
+              counts.set(base, seenCount);
+              const key = seenCount === 1 ? base : `${base}#${seenCount}`;
+              return <CalendarPerson key={key} initials={initials(person.name)} name={person.name} status={words[replyWord(person.organizer, person.status)]} />;
+            });
+          })()}
         </div>
       ) : null}
     </CalendarEventPage>
   );
 }
 
-// spec/app/calendar/deletions.md, "Undo inside the window sends nothing, and shows the event again"; spec/app/calendar/deletions.md, "The window ends only once its Undo notice is no longer shown"
-function Undo({ runtime }: CalendarProps) {
+// spec/app/calendar/deletions.md, "A restart pauses a deletion still in its window; the owner sends it or keeps the event"
+/** Inline recovery banner for a deletion paused across an app restart; active Undo toasts flow through `notices/toasts.vibe`. */
+function PausedDeletion({ runtime }: CalendarProps) {
   const held = useTimed(runtime, useHeld);
+  const shown = useShown(runtime);
   const d = held.state;
-  if (!d) return null;
-  const titled = (id: number) => shown.lastSeen(id)?.title || "the event";
-  const region = (toast: ReactNode) => <div role="status" aria-live="polite" className="pointer-events-none absolute inset-x-4 top-15 z-toast flex flex-col items-center">{toast}</div>;
-  if (d.waiting === 0 || !d.notice) {
-    if (d.dropped !== 0) return region(<Toast>{`${titled(d.dropped)} was not deleted: you signed in to another account.`}</Toast>);
-    if (d.failed !== 0) return region(<Toast>{`Couldn't delete ${titled(d.failed)}. It may have changed; it's shown again.`}</Toast>);
-    return null;
-  }
+  if (!d || d.waiting === 0 || !d.paused) return null;
+  const title = shown.lastSeen(d.waiting)?.title || "the event";
   const undo: DeletionEvent | undefined = held.can({ type: "undo", now: untimed }) ? { type: "undo", now: untimed } : held.can({ type: "undoShown" }) ? { type: "undoShown" } : undefined;
-  if (d.paused) {
-    return region(
-      <Toast onUndo={undo ? () => void held.send(undo) : undefined} undoLabel="Keep it">
-        {`Alpha restarted before deleting ${titled(d.waiting)}.`}
-        {held.can({ type: "sendPaused" }) ? <button type="button" className="ml-2 font-semibold underline" onClick={() => void held.send({ type: "sendPaused" })}>Delete</button> : null}
-      </Toast>,
-    );
-  }
-  return region(<Toast onUndo={undo ? () => void held.send(undo) : undefined}>{`${titled(d.waiting)} deleted`}</Toast>);
+  return (
+    <CalendarNotice tone="caution" actions={<>
+      {undo ? <CalendarNoticeAction onClick={() => void held.send(undo)}>Keep it</CalendarNoticeAction> : null}
+      {held.can({ type: "sendPaused" }) ? <CalendarNoticeAction onClick={() => void held.send({ type: "sendPaused" })}>Delete</CalendarNoticeAction> : null}
+    </>}>
+      {`Alpha restarted before deleting ${title}.`}
+    </CalendarNotice>
+  );
 }
 
 // spec/app/calendar/index.md, "Search and the Calendars sheet open over the days, never over an open event"
 /** Search over the days: a field under the header, and the events read whose title, place or notes hold every word typed. */
 function Searching({ runtime }: CalendarProps) {
   const view = useView(runtime);
+  const deleting = useHeld(runtime).state;
+  const shown = useShown(runtime);
   const [query, setQuery] = useState("");
   const s = view.state;
   if (!s) return null;
-  const typed = query.toLocaleLowerCase().split(/\s+/).filter((word) => word !== "");
+  const typedQuery = query.toLocaleLowerCase().split(/\s+/).filter((word) => word !== "");
   const found = shown.visible(s.hidden, allows(s.access), s.connected)
-    .filter((row) => typed.every((word) => `${row.title} ${row.place} ${row.notes}`.toLocaleLowerCase().includes(word)));
+    .filter((row) => !deletedNow(deleting, row, shown))
+    .filter((row) => typedQuery.every((word) => `${row.title} ${row.place} ${row.notes}`.toLocaleLowerCase().includes(word)));
   const range = readWindow(s.anchor);
   const read = s.phone.status === "Loaded" || s.google.status === "Loaded";
   const open = (row: Row) => (view.can({ type: "pickDay", day: civilDay(row.begin) }) ? () => void view.send({ type: "pickDay", day: civilDay(row.begin) }) : undefined);
@@ -599,8 +659,8 @@ function Searching({ runtime }: CalendarProps) {
     <>
       <CalendarSearchBar aria-label="Search events" placeholder="Search events" autoFocus value={query} onChange={(event) => setQuery(event.target.value)}
         onClose={() => void view.send({ type: "closeOverlay" })} />
-      <CalendarList aria-label="Search results" range={read ? `Searching ${monthDay.format(range.begin)} – ${monthDay.format(range.end - 1)}` : undefined}>
-        <Days rows={found} today={s.today} from={range.begin} open={open} empty={typed.length > 0 ? "No matching events" : "No events"} />
+      <CalendarList aria-label="Search results" className={dockClearance} range={read ? `Searching ${monthDay.format(range.begin)} – ${monthDay.format(range.end - 1)}` : undefined}>
+        <Days rows={found} today={s.today} from={range.begin} open={open} empty={typedQuery.length > 0 ? "No matching events" : "No events"} />
       </CalendarList>
     </>
   );
@@ -624,85 +684,30 @@ function Drafts({ runtime, day }: CalendarProps & { day: number }) {
   );
 }
 
-// spec/app/calendar/editor.md, "Story: Write an event"; spec/app/calendar/editor.md, "Story: Hand Android Calendar what Alpha cannot write"; spec/app/calendar/editor.md, "Story: Never create an event twice"
-function Form({ runtime, day, today, connected }: CalendarProps & { day: number; today: number; connected: boolean }) {
-  const editor = useEditor(runtime);
-  const [fields, setFields] = useState<Fields>(() => runtime.runSync(kept(day, editor.state?.owner ?? 0)));
-  const [picking, setPicking] = useState<string | undefined>(undefined);
-  const e = editor.state;
-  if (!e) return null;
-  const blank = fields.title.trim() === "";
-  const plain: Editor.Event = { type: "editTitle", blank };
-  const change = (next: Fields, edit: Editor.Event) => {
-    setFields(next);
-    void runtime.runPromise(typed(next, edit));
-  };
-  const timing = (begin: number, end: number): Editor.Event => ({ type: "setTiming", start: begin, end });
-  const retime = (begin: number, end: number) => {
-    if (Number.isFinite(begin) && Number.isFinite(end) && end > begin && editor.can(timing(begin, end))) change({ ...fields, begin, end }, timing(begin, end));
-  };
-  const retimer = (begin: number, end: number) => (end > begin && editor.can(timing(begin, end)) ? () => retime(begin, end) : undefined);
-  const length = fields.end - fields.begin;
-  const startDay = civilDay(fields.begin);
-  const endDay = civilDay(fields.end);
-  const onTime = (base: number, value: string) => {
-    const [h, m] = value.split(":").map(Number);
-    return dayStart(base) + (h ?? 0) * hourMs + (m ?? 0) * 60_000;
-  };
-  const toDay = (value: string) => civilDay(new Date(`${value}T12:00`).getTime());
-  const off = startDay - today;
-  const firstChip = off === 0 ? 1 : off > 0 ? Math.max(1, off - 3) : off - 3;
-  const chips = [0, ...Array.from({ length: 21 }, (_, at) => firstChip + at).filter((at) => at !== 0)].map((at) => {
-    const target = today + at;
-    const shift = (target - startDay) * 86_400_000;
-    return {
-      key: target, top: at === 0 ? "Today" : shortDay.format(dateOf(target)), date: dateOf(target).getDate(), label: dayName(target, today), chosen: target === startDay,
-      onPick: retimer(fields.begin + shift, fields.end + shift),
-    };
-  });
-  const people = fields.people.split(",").map((one) => one.trim()).filter((one) => one !== "");
-  const setPeople = (list: ReadonlyArray<string>) => {
-    const next = list.join(", ");
-    const extras = next !== "" || (fields.repeat ?? "NoRepeat") !== "NoRepeat";
-    change({ ...fields, people: next }, extras === e.extras ? plain : { type: "setExtras", extras });
-  };
-  const addTyped = () => {
-    const email = (picking ?? "").trim();
-    if (/^[^\s@]+@[^\s@]+$/.test(email) && !people.includes(email)) setPeople([...people, email]);
-    setPicking("");
-  };
-  const scopes: ReadonlyArray<{ scope: Editor.Scope; label: string }> = [
-    { scope: "ThisOne", label: "This event" }, { scope: "ThisAndFollowing", label: "This and following" }, { scope: "WholeSeries", label: "All events" },
-  ];
-  const off_ = !e.extras && !editor.can({ type: "save" }) ? saveOff[saveBlock(e.form === "NewEvent" && e.receipts.status === "Loading", e.draft.sync === "Saving", false, Editor.canKeepMyChanges(e), !e.titled)] : "";
-  const choosesCalendar = e.form === "NewEvent" && connected && shown.present();
-  const choosesRepeat = e.form === "NewEvent" && (!connected || fields.calendar === "Phone");
-  const close = () => (editor.can({ type: "close" }) ? void editor.send({ type: "close" }) : undefined);
+/** Banners over the event form for storage failures, draft clashes, event conflicts, and doubtful creations. */
+function FormBanners({ e, editor, onReload, onTakeSaved, wallError }: {
+  e: Editor.Editor; editor: ReturnType<typeof useEditor>; onReload: () => void; onTakeSaved: () => void; wallError: string;
+}) {
   return (
-    <CalendarFormPage onBack={close} saving={e.draft.sync === "Saving"} onSave={!e.extras && editor.can({ type: "save" }) ? () => void editor.send({ type: "save" }) : undefined}>
-      {e.form === "EditEvent" && e.repeats ? (
-        <div role="group" aria-label="Save changes to" className="mx-6 my-1 flex flex-wrap items-center gap-2">
-          <span className="text-meta text-muted-foreground">Save changes to</span>
-          {scopes.map(({ scope, label }) => (
-            <CalendarChip key={scope} label={label} chosen={e.scope === scope} disabled={!editor.can({ type: "chooseScope", scope }) && e.scope !== scope}
-              className={e.scope === scope ? undefined : "bg-secondary"} onClick={() => void editor.send({ type: "chooseScope", scope })} />
-          ))}
-        </div>
+    <>
+      {wallError ? <CalendarNotice tone="caution" className="mx-6">{wallError}</CalendarNotice> : null}
+      {e.banner === "Failed" ? (
+        <CalendarNotice tone="caution" className="mx-6" actions={editor.can({ type: "retryKeeping" }) ? <CalendarNoticeAction onClick={() => void editor.send({ type: "retryKeeping" })}><RotateCcw aria-hidden />Retry</CalendarNoticeAction> : null}>
+          Not saved on this phone
+        </CalendarNotice>
       ) : null}
-      <p role="status" aria-label="Calendar form draft status" className="mx-6 my-1 text-meta text-muted-foreground">{off_}</p>
-      {e.banner === "Failed" ? <CalendarNotice tone="caution" className="mx-6" actions={<CalendarNoticeAction onClick={() => void editor.send({ type: "retryKeeping" })}><RotateCcw aria-hidden />Retry</CalendarNoticeAction>}>Not saved on this phone</CalendarNotice> : null}
       {e.banner === "Conflict" ? (
         <CalendarNotice className="mx-6" actions={<>
-          <CalendarNoticeAction onClick={() => void editor.send({ type: "keepMyDraft" })}>Keep mine</CalendarNoticeAction>
+          {editor.can({ type: "keepMyDraft" }) ? <CalendarNoticeAction onClick={() => void editor.send({ type: "keepMyDraft" })}>Keep mine</CalendarNoticeAction> : null}
           {editor.can({ type: "askReplace" }) ? <CalendarNoticeAction onClick={() => void editor.send({ type: "askReplace" })}>Use the other</CalendarNoticeAction> : null}
-          {editor.can({ type: "takeOtherDraft" }) ? <CalendarNoticeAction onClick={() => { setFields(runtime.runSync(kept(day, e.owner))); void editor.send({ type: "takeOtherDraft" }); }}>Replace mine</CalendarNoticeAction> : null}
+          {editor.can({ type: "takeOtherDraft" }) ? <CalendarNoticeAction onClick={() => { onReload(); void editor.send({ type: "takeOtherDraft" }); }}>Replace mine</CalendarNoticeAction> : null}
           {editor.can({ type: "callOff" }) ? <CalendarNoticeAction onClick={() => void editor.send({ type: "callOff" })}>Cancel</CalendarNoticeAction> : null}
         </>}>Another copy of this draft replaced it.</CalendarNotice>
       ) : null}
       {Editor.canKeepMyChanges(e) ? (
         <CalendarNotice tone="caution" className="mx-6" actions={<>
-          <CalendarNoticeAction onClick={() => void editor.send({ type: "keepMyChanges" })}>Keep my changes</CalendarNoticeAction>
-          <CalendarNoticeAction onClick={() => void editor.send({ type: "takeSavedChanges" })}>Use the saved event</CalendarNoticeAction>
+          {editor.can({ type: "keepMyChanges" }) ? <CalendarNoticeAction onClick={() => void editor.send({ type: "keepMyChanges" })}>Keep my changes</CalendarNoticeAction> : null}
+          {editor.can({ type: "takeSavedChanges" }) ? <CalendarNoticeAction onClick={onTakeSaved}>Use the saved event</CalendarNoticeAction> : null}
         </>}>This event changed since you started editing it.</CalendarNotice>
       ) : null}
       {e.form === "NewEvent" && e.receipts.status === "Failed" ? (
@@ -717,55 +722,191 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
           {editor.can({ type: "letDoubtGo" }) ? <CalendarNoticeAction onClick={() => void editor.send({ type: "letDoubtGo" })}>Stop checking</CalendarNoticeAction> : null}
         </>}>Alpha can't tell whether your last new event was saved.</CalendarNotice>
       ) : null}
+    </>
+  );
+}
+
+/** Warning text when a chosen local time does not exist or happens twice on a clock change. */
+function wallMessage(kind: string): string {
+  if (kind === "WallMissing") return "That local time does not exist when the clocks change. Choose another time.";
+  if (kind === "WallTwice") return "That local time happens twice when the clocks change. Choose another time.";
+  return "";
+}
+
+// spec/app/calendar/editor.md, "Story: Write an event"; spec/app/calendar/editor.md, "Story: Hand Android Calendar what Alpha cannot write"; spec/app/calendar/editor.md, "Story: Never create an event twice"; spec/app/calendar/writing.md, "A missing or repeated wall time is refused, and nothing is saved"
+function Form({ runtime, day, today, connected, viewOwner }: CalendarProps & { day: number; today: number; connected: boolean; viewOwner: number }) {
+  const editor = useEditor(runtime);
+  const shown = useShown(runtime);
+  const [fields, setFields] = useState<Fields>(() => runtime.runSync(kept(day, editor.state?.owner ?? 0)));
+  const [picking, setPicking] = useState<string | undefined>(undefined);
+  const [wallError, setWallError] = useState("");
+  const e = editor.state;
+  if (!e) return null;
+  const blank = fields.title.trim() === "";
+  const plain: Editor.Event = { type: "editTitle", blank };
+  const canEdit = editor.can(plain);
+  const change = (next: Fields, edit: Editor.Event) => {
+    setFields(next);
+    void runtime.runPromise(typed(next, edit));
+  };
+  const timing = (begin: number, end: number): Editor.Event => ({ type: "setTiming", start: begin, end });
+  const retime = (begin: number, end: number) => {
+    if (Number.isFinite(begin) && Number.isFinite(end) && end > begin && editor.can(timing(begin, end))) {
+      setWallError("");
+      change({ ...fields, begin, end }, timing(begin, end));
+    }
+  };
+  const retimer = (begin: number, end: number) => (end > begin && editor.can(timing(begin, end)) ? () => retime(begin, end) : undefined);
+  const length = fields.end - fields.begin;
+  const startDay = civilDay(fields.begin);
+  const endDay = civilDay(fields.end);
+  const inclusiveEndDay = Math.max(startDay, civilDay(Math.max(fields.begin, fields.end - 1)));
+  const toDay = (value: string) => (/^\d{4}-\d{2}-\d{2}$/.test(value) ? civilDay(new Date(`${value}T12:00`).getTime()) : NaN);
+  const moveStartTo = (targetDay: number) => {
+    if (!canEdit || !Number.isFinite(targetDay)) return;
+    if (fields.allDay) {
+      const spanDays = Math.max(0, inclusiveEndDay - startDay);
+      retime(dayStart(targetDay), dayStart(targetDay + spanDays + 1));
+      return;
+    }
+    const moved = shiftDays(fields.begin, targetDay - startDay);
+    if (!wallTimeSavable(moved.kind)) { setWallError(wallMessage(moved.kind)); return; }
+    retime(moved.ms, moved.ms + length);
+  };
+  const setWall = (base: number, value: string, apply: (ms: number) => void) => {
+    if (!canEdit) return;
+    const [h, m] = value.split(":").map(Number);
+    if (!Number.isFinite(h) || !Number.isFinite(m)) return;
+    const resolved = localWallTime(base, h, m);
+    if (!wallTimeSavable(resolved.kind)) { setWallError(wallMessage(resolved.kind)); return; }
+    apply(resolved.ms);
+  };
+  const off = startDay - today;
+  const firstChip = off === 0 ? 1 : off > 0 ? Math.max(1, off - 3) : off - 3;
+  const chips = [0, ...Array.from({ length: 21 }, (_, at) => firstChip + at).filter((at) => at !== 0)].map((at) => {
+    const target = today + at;
+    const moved = fields.allDay ? undefined : shiftDays(fields.begin, target - startDay);
+    const nextBegin = fields.allDay ? dayStart(target) : moved?.ms ?? fields.begin;
+    const nextEnd = fields.allDay ? dayStart(target + Math.max(0, inclusiveEndDay - startDay) + 1) : nextBegin + length;
+    return {
+      key: target, top: at === 0 ? "Today" : shortDay.format(dateOf(target)), date: dateOf(target).getDate(), label: dayName(target, today), chosen: target === startDay,
+      onPick: canEdit && editor.can(timing(nextBegin, nextEnd)) ? () => moveStartTo(target) : undefined,
+    };
+  });
+  const people = fields.people.split(",").map((one) => one.trim()).filter((one) => one !== "");
+  const setPeople = (list: ReadonlyArray<string>) => {
+    const next = list.join(", ");
+    const extras = next !== "";
+    change({ ...fields, people: next }, extras === e.extras ? plain : { type: "setExtras", extras });
+  };
+  const addTyped = () => {
+    const email = (picking ?? "").trim();
+    if (/^[^\s@]+@[^\s@]+$/.test(email) && !people.includes(email)) setPeople([...people, email]);
+    setPicking("");
+  };
+  const editingRow = e.form === "EditEvent" ? (shown.find(e.target) ?? shown.lastSeen(e.target)) : undefined;
+  const scopes: ReadonlyArray<{ scope: Exclude<Editor.Scope, "Unchosen">; label: string }> = ([
+    { scope: "ThisOne", label: "This event" },
+    { scope: "ThisAndFollowing", label: "This and following" },
+    { scope: "WholeSeries", label: "All events" },
+  ] as const).filter(({ scope }) =>
+    managedScopeAllowed(editingRow?.managed ?? false, scopeWriting[scope])
+    && !(editingRow?.source === "Phone" && scope === "ThisAndFollowing"));
+  const otherAccount = viewOwner !== e.owner;
+  const off_ = !e.extras && !editor.can({ type: "save" }) ? saveOff[saveBlock(e.form === "NewEvent" && e.receipts.status === "Loading", e.draft.sync === "Saving", otherAccount, Editor.canKeepMyChanges(e), !e.titled)] : "";
+  const choosesCalendar = e.form === "NewEvent" && connected && shown.present();
+  const choosesRepeat = e.form === "NewEvent" && (!connected || fields.calendar === "Phone");
+  const toggleAllDayEvent: Editor.Event = editor.can({ type: "setAllDay", allDay: !fields.allDay }) ? { type: "setAllDay", allDay: !fields.allDay } : plain;
+  const close = () => (editor.can({ type: "close" }) ? void editor.send({ type: "close" }) : undefined);
+  const reloadFromStore = () => {
+    setWallError("");
+    setFields(runtime.runSync(kept(day, e.owner)));
+  };
+  const handleTakeSaved = () => {
+    const saved = editingRow ? rowFields(editingRow) : fields;
+    setWallError("");
+    setPicking(undefined);
+    setFields(saved);
+    void runtime.runPromise(takeSaved(saved));
+  };
+  const toggleAllDay = (allDay: boolean) => {
+    setWallError("");
+    const nextBegin = allDay ? dayStart(startDay) : wallDateTime(startDay, 9, 0);
+    const nextEnd = allDay ? dayStart(inclusiveEndDay + 1) : wallDateTime(inclusiveEndDay, 10, 0);
+    change({ ...fields, allDay, begin: nextBegin, end: Math.max(nextBegin + 60_000, nextEnd) }, toggleAllDayEvent);
+  };
+  return (
+    <CalendarFormPage onBack={close} saving={e.draft.sync === "Saving"} onSave={!e.extras && !wallError && editor.can({ type: "save" }) ? () => void editor.send({ type: "save" }) : undefined}>
+      {e.form === "EditEvent" && e.repeats ? (
+        <div role="group" aria-label="Save changes to" className="mx-6 my-1 flex flex-wrap items-center gap-2">
+          <span className="text-meta text-muted-foreground">Save changes to</span>
+          {scopes.map(({ scope, label }) => (
+            <CalendarChip key={scope} label={label} chosen={e.scope === scope} disabled={!editor.can({ type: "chooseScope", scope }) && e.scope !== scope}
+              className={e.scope === scope ? undefined : "bg-secondary"} onClick={() => void editor.send({ type: "chooseScope", scope })} />
+          ))}
+        </div>
+      ) : null}
+      <p role="status" aria-label="Calendar form draft status" className="mx-6 my-1 text-meta text-muted-foreground">{off_}</p>
+      <FormBanners e={e} editor={editor} onReload={reloadFromStore} onTakeSaved={handleTakeSaved} wallError={wallError} />
       <CalendarFormTitle value={fields.title} disabled={!editor.can({ type: "editTitle", blank: false })}
         onChange={(input) => change({ ...fields, title: input.target.value }, { type: "editTitle", blank: input.target.value.trim() === "" })} />
-      <CalendarFormDate label="Date" aria-label="Calendar date" value={dateValue(fields.begin)} onChange={(input) => {
-        const shift = (toDay(input.target.value) - startDay) * 86_400_000;
-        retime(fields.begin + shift, fields.end + shift);
-      }} />
+      <CalendarFormDate label="Date" aria-label="Calendar date" value={dateValue(fields.begin)} disabled={!canEdit}
+        onChange={(input) => moveStartTo(toDay(input.target.value))} />
       <CalendarDayChips days={chips} />
       <div className="flex flex-col gap-2.5 px-5 pt-3">
-        {fields.allDay ? null : (
-          <CalendarFormCard className="py-1 pr-2 pl-4">
-            <CalendarTimeRow caption={hourMinute.format(fields.begin)} label="Start time" value={timeValue(fields.begin)}
-              onChange={(value) => { const begin = onTime(startDay, value); retime(begin, begin + length); }}
-              earlierLabel="Start earlier" laterLabel="Start later" onEarlier={retimer(fields.begin - quarter, fields.end - quarter)} onLater={retimer(fields.begin + quarter, fields.end + quarter)} />
-            <CalendarTimeRow icon={null} caption={`${hourMinute.format(fields.end)} · ${duration(length)}`} label="End time" value={timeValue(fields.end)}
-              onChange={(value) => retime(fields.begin, onTime(endDay, value))}
-              earlierLabel="End earlier" laterLabel="End later" onEarlier={retimer(fields.begin, Math.max(fields.begin + 60_000, fields.end - quarter))} onLater={retimer(fields.begin, fields.end + quarter)} />
-            <CalendarFormDate inset label="Ends on" aria-label="End date" value={dateValue(fields.end)} onChange={(input) => {
-              const shift = (toDay(input.target.value) - endDay) * 86_400_000;
-              retime(fields.begin, fields.end + shift);
+        <CalendarFormCard className="py-1 pr-2 pl-4">
+          {fields.allDay ? null : (
+            <>
+              <CalendarTimeRow caption={hourMinute.format(fields.begin)} label="Start time" value={timeValue(fields.begin)}
+                onChange={(value) => setWall(startDay, value, (begin) => retime(begin, begin + length))}
+                earlierLabel="Start earlier" laterLabel="Start later" onEarlier={retimer(fields.begin - quarter, fields.end - quarter)} onLater={retimer(fields.begin + quarter, fields.end + quarter)} />
+              <CalendarTimeRow icon={null} caption={`${hourMinute.format(fields.end)} · ${duration(length)}`} label="End time" value={timeValue(fields.end)}
+                onChange={(value) => setWall(endDay, value, (end) => retime(fields.begin, end))}
+                earlierLabel="End earlier" laterLabel="End later" onEarlier={retimer(fields.begin, Math.max(fields.begin + 60_000, fields.end - quarter))} onLater={retimer(fields.begin, fields.end + quarter)} />
+            </>
+          )}
+          <CalendarFormDate inset label="Ends on" aria-label="End date" disabled={!canEdit}
+            value={dateValue(fields.allDay ? dayStart(inclusiveEndDay) : fields.end)}
+            onChange={(input) => {
+              const chosenDay = toDay(input.target.value);
+              if (!Number.isFinite(chosenDay)) return;
+              if (fields.allDay) {
+                if (chosenDay >= startDay) retime(dayStart(startDay), dayStart(chosenDay + 1));
+                return;
+              }
+              const moved = shiftDays(fields.end, chosenDay - endDay);
+              if (!wallTimeSavable(moved.kind)) { setWallError(wallMessage(moved.kind)); return; }
+              retime(fields.begin, moved.ms);
             }} />
-          </CalendarFormCard>
-        )}
-        <CalendarFieldRow icon={<MapPin />} aria-label="Location" placeholder="Location" value={fields.place} disabled={!editor.can(plain)}
+        </CalendarFormCard>
+        <CalendarFieldRow icon={<MapPin />} aria-label="Location" placeholder="Location" value={fields.place} disabled={!canEdit}
           onChange={(input) => change({ ...fields, place: input.target.value }, plain)} />
         <CalendarFormCard className="h-14 flex-row items-center gap-3.5 pr-3 pl-4">
           <CalendarIcon aria-hidden className="size-5.5 shrink-0 text-muted-foreground" />
           <span className="grow text-body leading-plain">All day</span>
-          <CalendarSwitch aria-label="All day" checked={fields.allDay} disabled={!editor.can({ type: "setAllDay", allDay: !fields.allDay })}
-            onCheckedChange={(allDay) => change({ ...fields, allDay }, { type: "setAllDay", allDay })} />
+          <CalendarSwitch aria-label="All day" checked={fields.allDay} disabled={!editor.can(toggleAllDayEvent)} onCheckedChange={toggleAllDay} />
         </CalendarFormCard>
         <CalendarFormCard className="gap-1 py-2.5 pr-3 pl-4">
           <div className="flex min-h-13 flex-wrap items-center gap-3.5">
             <UserRound aria-hidden className="size-5.5 shrink-0 text-muted-foreground" />
             {people.map((person) => (
-              <button key={person} type="button" aria-label={`Remove ${person}`} onClick={() => setPeople(people.filter((one) => one !== person))}
-                className="flex min-h-9 max-w-full min-w-0 items-center gap-1.5 rounded-full bg-background py-0 pr-2.5 pl-1 text-sm font-semibold wrap-anywhere">
+              <button key={person} type="button" aria-label={`Remove ${person}`} disabled={!canEdit} onClick={() => setPeople(people.filter((one) => one !== person))}
+                className={cn(insetFocus, "flex min-h-11 max-w-full min-w-0 items-center gap-1.5 rounded-full bg-background py-0 pr-2.5 pl-1 text-sm font-semibold wrap-anywhere disabled:opacity-50")}>
                 <span aria-hidden className="flex size-7 items-center justify-center rounded-full bg-accent text-2xs font-bold whitespace-nowrap">{initials(person)}</span>
                 {person.replace(/@.*/, "")}
                 <X aria-hidden className="size-3.5 text-muted-foreground" />
               </button>
             ))}
             {picking === undefined ? (
-              <button type="button" aria-label="Add people" onClick={() => setPicking("")} className="flex h-13 items-center gap-0.5 rounded-action bg-background px-2.5">
+              <button type="button" aria-label="Add people" disabled={!canEdit} onClick={() => setPicking("")}
+                className={cn(insetFocus, "flex h-13 items-center gap-0.5 rounded-action bg-background px-2.5 disabled:opacity-50")}>
                 <Plus aria-hidden className="size-4" /><UserRound aria-hidden className="size-4" />
               </button>
             ) : null}
           </div>
           {picking === undefined ? null : (
-            <CalendarPickerField aria-label="Name or email" placeholder="Name or email" autoFocus value={picking} onChange={(input) => setPicking(input.target.value)}
+            <CalendarPickerField aria-label="Name or email" placeholder="Name or email" autoFocus value={picking} disabled={!canEdit}
+              onChange={(input) => setPicking(input.target.value)}
               onKeyDown={(key) => { if (key.key === "Enter") { key.preventDefault(); addTyped(); } if (key.key === "Escape") setPicking(undefined); }}
               doneLabel="Done adding people" onDone={() => { addTyped(); setPicking(undefined); }} />
           )}
@@ -777,8 +918,17 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
                 <div className="flex min-w-0 flex-[1_1_0] flex-wrap gap-2">
                   {(["Agent", "Phone"] as const).map((target) => (
                     <CalendarChip key={target} label={target === "Agent" ? "Your agent's calendar" : "This phone's calendar"}
-                      chosen={(fields.calendar ?? "Agent") === target} dot={target === "Agent" ? "primary" : "foreground"}
-                      onClick={() => change({ ...fields, calendar: target }, plain)} />
+                      chosen={(fields.calendar ?? "Agent") === target} dot={target === "Agent" ? "primary" : "foreground"} disabled={!canEdit}
+                      onClick={() => {
+                        const nextRepeat = target === "Agent" ? "NoRepeat" : fields.repeat;
+                        const nextExtras = fields.people.trim() !== "";
+                        const nextFields: Fields = { ...fields, calendar: target, repeat: nextRepeat };
+                        const edit: Editor.Event = nextExtras !== e.extras
+                          ? { type: "setExtras", extras: nextExtras }
+                          : target === "Agent" && e.repeats && editor.can({ type: "setRepeats", repeats: false })
+                            ? { type: "setRepeats", repeats: false } : plain;
+                        change(nextFields, edit);
+                      }} />
                   ))}
                 </div>
               </CalendarFormRow>
@@ -787,9 +937,10 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
               <CalendarFormRow icon={<Repeat />}>
                 <div className="flex min-w-0 flex-[1_1_0] flex-wrap gap-1.5">
                   {repeats.map(({ repeat, label }) => (
-                    <CalendarChip key={repeat} label={label} chosen={(fields.repeat ?? "NoRepeat") === repeat} onClick={() => {
-                      const extras = repeat !== "NoRepeat" || fields.people.trim() !== "";
-                      change({ ...fields, repeat }, extras === e.extras ? plain : { type: "setExtras", extras });
+                    <CalendarChip key={repeat} label={label} chosen={(fields.repeat ?? "NoRepeat") === repeat} disabled={!canEdit} onClick={() => {
+                      const repeating = repeat !== "NoRepeat";
+                      const edit: Editor.Event = editor.can({ type: "setRepeats", repeats: repeating }) ? { type: "setRepeats", repeats: repeating } : plain;
+                      change({ ...fields, repeat }, edit);
                     }} />
                   ))}
                 </div>
@@ -799,11 +950,11 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
         ) : null}
         {e.extras ? (
           <button type="button" aria-label="Open in Android Calendar" disabled={!editor.can({ type: "handOff" })} onClick={() => void editor.send({ type: "handOff" })}
-            className="flex min-h-13 items-center gap-2 rounded-lg bg-secondary px-4 py-3 text-left disabled:opacity-50">
+            className={cn(insetFocus, "flex min-h-13 items-center gap-2 rounded-lg bg-secondary px-4 py-3 text-left disabled:opacity-50")}>
             <CalendarIcon aria-hidden className="size-4.5" />Calendar<ChevronRight aria-hidden className="size-4 text-muted-foreground" />
           </button>
         ) : null}
-        <CalendarNotesField icon={<TextAlignStart />} aria-label="Notes" placeholder="Notes" value={fields.notes} disabled={!editor.can(plain)}
+        <CalendarNotesField icon={<TextAlignStart />} aria-label="Notes" placeholder="Notes" value={fields.notes} disabled={!canEdit}
           onChange={(input) => change({ ...fields, notes: input.target.value }, plain)} />
       </div>
     </CalendarFormPage>
@@ -813,18 +964,22 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
 // spec/app/calendar/agent.md, "Only the owner approves, and approving sends the change once, under a new number"; spec/app/calendar/agent.md, "A card that leaves out a field its change would set can be declined, never approved"
 function Proposal({ runtime }: CalendarProps) {
   const agent = useChanges(runtime);
+  const shown = useShown(runtime);
+  const reqStore = useRequests(runtime);
   const a = agent.state;
   if (!a) return null;
   if (a.stage === "Idle") return a.result in results ? <CalendarNotice>{results[a.result]}</CalendarNotice> : null;
   const row = shown.find(a.id);
-  const request = requests.find(a.filing);
+  const request = reqStore.find(a.filing);
+  const expired = reqStore.isExpired(a.filing);
+  const reqState: Changes.RequestState = expired ? "RequestExpired" : "RequestPending";
   const f = request?.fields;
   const start = f ? Date.parse(f.startAt) : NaN;
   const end = f ? Date.parse(f.endAt) : NaN;
   return (
     <section aria-label="Calendar change" className="mx-4 mb-2 shrink-0 rounded-chip bg-secondary px-5 py-4.5 text-base leading-normal">
       <strong>{`${changes[a.change]}${a.reply === "NoReply" ? "" : `: ${replies[a.reply]}`}${a.updated ? " (updated)" : ""}`}</strong>
-      <p className="text-meta text-muted-foreground">{statuses[requestStatus(request !== undefined, a.complete, "RequestPending")]}</p>
+      <p className="text-meta text-muted-foreground">{statuses[requestStatus(request !== undefined, a.complete, reqState)]}</p>
       {row ? <p>{`${a.change === "Update" ? "Now: " : ""}${row.title || "Untitled event"} · ${shortDate.format(row.begin)} · ${interval(row)}`}</p> : null}
       {f ? (
         <dl>
@@ -841,8 +996,8 @@ function Proposal({ runtime }: CalendarProps) {
       {a.complete ? null : <p className="text-meta text-muted-foreground">Alpha can't check this whole change, so it can't be approved.</p>}
       {a.stage === "Sending" || a.stage === "ReadingBack" ? <Spinner size="sm" /> : null}
       <div className="mt-3 flex flex-wrap gap-2">
-        {agent.can({ type: "decline" }, "Owner") ? <button type="button" className="min-h-11 rounded-full bg-background px-4.5" onClick={() => void agent.send({ type: "decline" }, "Owner")}>Decline</button> : null}
-        {agent.can({ type: "approve" }, "Owner") ? <button type="button" className="min-h-11 rounded-full bg-alpha px-4.5 text-alpha-foreground" onClick={() => void agent.send({ type: "approve" }, "Owner")}>Approve</button> : null}
+        {agent.can({ type: "decline" }, "Owner") ? <button type="button" className={cn(insetFocus, "min-h-11 rounded-full bg-background px-4.5")} onClick={() => void agent.send({ type: "decline" }, "Owner")}>Decline</button> : null}
+        {!expired && agent.can({ type: "approve" }, "Owner") ? <button type="button" className={cn(insetFocus, "min-h-11 rounded-full bg-alpha px-4.5 text-alpha-foreground")} onClick={() => void agent.send({ type: "approve" }, "Owner")}>Approve</button> : null}
       </div>
     </section>
   );
@@ -873,7 +1028,7 @@ function GoogleRow({ runtime }: CalendarProps) {
   const l = link.state;
   if (!l || !view.state || l.owner === 0) return null;
   const running = l.phase !== "Idle" && l.phase !== "Done";
-  const pill = "min-h-11 rounded-full px-4 text-sm font-semibold";
+  const pill = cn(insetFocus, "min-h-11 rounded-full px-4 text-sm font-semibold");
   return (
     <ListGroup heading="Google Calendar">
       <ListRow title={running ? "Checking…" : rowWords[Link.rowOf(l)]} detail={said[l.said] || (l.ending === "NoOutcome" ? undefined : endings[l.ending])} />

@@ -1,16 +1,17 @@
-// spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"; spec/app/reminders/editor.md, "Story: Create or edit a reminder with safe validation and draft recovery"
+// spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"; spec/app/reminders/editor.md, "Story: Create and edit a reminder safely"
 import { Effect, Layer } from "effect";
 import * as RemindersMachine from "../../gen/app__reminders.effect.vibe";
-import * as EditorMachine from "../../gen/app__reminders__editor.effect.vibe";
 import { area } from "../runtime/area.tsx";
+import { closeReminderEditor } from "./editor.vibe";
 import { Reminders } from "./Reminders.tsx";
 
 const back = Effect.gen(function* () {
-  const editor = yield* EditorMachine.Machine;
+  if (yield* closeReminderEditor()) return true;
   const reminders = yield* RemindersMachine.Machine;
   const tried: ReadonlyArray<Effect.Effect<unknown, unknown>> = [
-    editor.send({ type: "close" }),
     reminders.send({ type: "closeItem" }),
+    reminders.send({ type: "setSearchOpen", open: false }),
+    reminders.send({ type: "leaveList" }),
   ];
   for (const step of tried) {
     if (yield* Effect.match(step, { onFailure: () => false, onSuccess: () => true })) return true;

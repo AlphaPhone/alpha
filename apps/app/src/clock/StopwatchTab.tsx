@@ -2,15 +2,14 @@
 import { Button, Card } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import { Flag, Pause, Play, RotateCcw } from "lucide-react";
-import { useSyncExternalStore } from "react";
 import type { Machine as StopwatchMachine } from "../../gen/app__clock__stopwatch.effect.vibe";
 import { useMachine as useStopwatch } from "../../gen/app__clock__stopwatch.react.ts";
 import { bestLapIndex, elapsedAt, lastLapTotal, worstLapIndex } from "../../gen/app__clock__stopwatch.ts";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import type { Time } from "../runtime/time.vibe";
-import { stopwatchNow } from "./ticker.vibe";
 import { formatStopwatch } from "./time.ts";
+import { useStopwatchNow } from "./useClockStore.ts";
 
 export interface StopwatchTabProps {
   /** Stopwatch machine and Alpha Time service. */
@@ -20,7 +19,7 @@ export interface StopwatchTabProps {
 /** Precision stopwatch with centisecond display, lap splits, and fastest/slowest highlights. */
 export function StopwatchTab({ runtime }: StopwatchTabProps) {
   const sw = useTimed(runtime, useStopwatch);
-  const tickNow = useSyncExternalStore(stopwatchNow.subscribe, stopwatchNow.snapshot);
+  const tickNow = useStopwatchNow(runtime);
   const state = sw.state;
   if (!state) return null;
 

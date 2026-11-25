@@ -1,8 +1,10 @@
 // spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it"; spec/app/calendar/agent.md, "A card is complete only with known fields, a valid time and, for a change, a verified target"
-import type { Change, Reply } from "../../gen/app__calendar__agent.ts";
+import { Option, Schema } from "effect";
+import type { Change, Reply, Result } from "../../gen/app__calendar__agent.ts";
 import { cardComplete, targetVerified } from "../../gen/app__calendar__agent.ts";
+import { createShelf } from "../runtime/store.ts";
 import type { Row } from "./shown.ts";
-import { externalStore } from "../runtime/store.ts";
+import { localDate } from "./time.ts";
 
 /** The fields a Calendar request of the agent sets, as eliza's `CalendarEventFields` of `@elizaos/plugin-calendar` names them. */
 export interface RequestFields {
@@ -32,14 +34,55 @@ export interface Request {
   readonly reply: Reply;
   readonly fields: RequestFields | undefined;
   readonly occurrences: Occurrences;
-  /** The event a change names, the calendar it is on and the version the agent selected; "" for a new event. */
+  /** The event a change names, the calendar it is on, its expected start time, and the version the agent selected; "" for a new event. */
   readonly eventId: string;
   readonly calendarId: string;
+  readonly targetStartAt: string;
   readonly expectedVersion: string;
   readonly notify: boolean;
   /** Whether every key of the request is one Alpha knows how to show. */
   readonly known: boolean;
   readonly expiresAt: string;
+}
+
+const RequestFieldsSchema = Schema.Struct({
+  title: Schema.String,
+  description: Schema.String,
+  location: Schema.String,
+  startAt: Schema.String,
+  endAt: Schema.String,
+  isAllDay: Schema.Boolean,
+  timeZone: Schema.String,
+  attendees: Schema.Array(Schema.String),
+});
+
+/** Schema for a persisted Calendar approval request kept across restarts. */
+export const RequestSchema = Schema.Struct({
+  filing: Schema.Number,
+  id: Schema.String,
+  revision: Schema.String,
+  changes: Schema.Number,
+  change: Schema.Literals(["Create", "Update", "Delete", "Respond"]),
+  reply: Schema.Literals(["NoReply", "Going", "Maybe", "NotGoing"]),
+  fields: Schema.optionalKey(RequestFieldsSchema),
+  occurrences: Schema.Literals(["instance", "this_and_following", "series", ""]),
+  eventId: Schema.String,
+  calendarId: Schema.String,
+  targetStartAt: Schema.optionalKey(Schema.String),
+  expectedVersion: Schema.String,
+  notify: Schema.Boolean,
+  known: Schema.Boolean,
+  expiresAt: Schema.String,
+});
+
+const decodeStored = Schema.decodeUnknownOption(Schema.fromJsonString(RequestSchema));
+
+/** Decode a persisted Calendar request from JSON without unsafe type assertions. @throws {never} */
+export function decodeRequest(raw: string): Request | undefined {
+  const decoded = decodeStored(raw);
+  if (Option.isNone(decoded)) return undefined;
+  const value = decoded.value;
+  return { ...value, fields: value.fields, targetStartAt: value.targetStartAt ?? "" };
 }
 
 const kinds: Readonly<Record<string, Change>> = { schedule_event: "Create", modify_event: "Update", cancel_event: "Delete", respond_invitation: "Respond" };
@@ -69,37 +112,6 @@ function fieldsOf(value: unknown): { fields: RequestFields | undefined; known: b
   };
 }
 
-const numbers = new Map<string, { filing: number; revision: string; changes: number }>();
-let next = 0;
-
-/** A Calendar request of the agent's approvals list, read from its untrusted wire row; none for a request of another kind. @throws {never} */
-export function requestOf(row: unknown, floor: number): Request | undefined {
-  const wire = record(row);
-  const payload = record(wire?.payload);
-  const change = record(payload?.change);
-  if (wire === undefined || change === undefined) return undefined;
-  const kind = kinds[text(change.action)];
-  const id = text(wire.id);
-  if (kind === undefined || id === "" || text(wire.state) !== "pending") return undefined;
-  const revision = text(wire.revision);
-  const before = numbers.get(id);
-  next = Math.max(next, floor);
-  const counted = before === undefined ? { filing: ++next, revision, changes: 0 } : before.revision === revision ? before : { ...before, revision, changes: before.changes + 1 };
-  numbers.set(id, counted);
-  const target = record(change.target);
-  const source = record(target?.source ?? change.source);
-  const { fields, known } = fieldsOf(change.fields);
-  const scope = text(change.scope);
-  return {
-    filing: counted.filing, id, revision, changes: counted.changes, change: kind,
-    reply: kind === "Respond" ? (answers[text(change.response)] ?? "NoReply") : "NoReply",
-    fields, occurrences: scope === "instance" || scope === "this_and_following" || scope === "series" ? scope : "",
-    eventId: text(target?.eventId), calendarId: text(source?.calendarId), expectedVersion: text(target?.expectedVersion),
-    notify: change.notifyAttendees === true, known: known && Object.keys(change).every((key) => changeKeys.has(key)),
-    expiresAt: text(wire.expiresAt),
-  };
-}
-
 /** Whether a request's times make a span: an end after its start, where it sets them. @throws {never} */
 export function timeValid(request: Request): boolean {
   if (request.fields === undefined) return true;
@@ -108,27 +120,132 @@ export function timeValid(request: Request): boolean {
   return Number.isFinite(start) && Number.isFinite(end) && end > start;
 }
 
-/** Whether the card may be approved: known fields, a valid time and, for a change, exactly one event of one calendar at the version asked. @throws {never} */
+/** Whether `matched` starts at the instant or all-day date named by `expectedStartAt`. @throws {never} */
+function matchesStart(matched: Row, expectedStartAt: string): boolean {
+  if (expectedStartAt === "") return true;
+  if (matched.allDay) {
+    const parsed = localDate(expectedStartAt);
+    return Number.isFinite(parsed) && matched.begin === parsed;
+  }
+  const parsed = Date.parse(expectedStartAt);
+  return Number.isFinite(parsed) && matched.begin === parsed;
+}
+
+/** Whether the card may be approved: known fields, a valid time and, for a change, exactly one event of one calendar at the start and version asked. @throws {never} */
 export function complete(request: Request, rows: ReadonlyArray<Row>): boolean {
-  const matches = rows.filter((row) => row.key === request.eventId);
-  const calendars = new Set(matches.map((row) => row.calendarId));
-  const same = matches.length === 1 && matches[0] !== undefined && (request.calendarId === "" || matches[0].calendarId === request.calendarId);
-  const verified = targetVerified(calendars.size, matches.length, same, same && matches[0]?.version === request.expectedVersion);
+  const byId = rows.filter((row) => row.key === request.eventId);
+  const matchingCalendar = request.calendarId === "" ? byId : byId.filter((row) => row.calendarId === request.calendarId);
+  const calendars = new Set(byId.map((row) => row.calendarId));
+  const matched = matchingCalendar.length === 1 ? matchingCalendar[0] : undefined;
+  const startMatches = matched !== undefined && matchesStart(matched, request.targetStartAt);
+  const versionMatches = matched !== undefined && matched.version === request.expectedVersion;
+  const verified = targetVerified(calendars.size, matchingCalendar.length, startMatches, versionMatches);
   return cardComplete(request.change, request.known, verified, timeValid(request));
 }
 
-const held = new Map<number, Request>();
-const version = externalStore(0);
+/** Scoped per-runtime store of agent Calendar requests, expiry flags, and reported outcomes. */
+export interface RequestsStore {
+  /** @throws {never} */
+  readonly snapshot: () => number;
+  /** @throws {never} */
+  readonly subscribe: (listener: () => void) => () => void;
+  /** Parse an untrusted wire approval row into a numbered `Request` within this runtime's store. @throws {never} */
+  readonly fromWire: (row: unknown, floor: number) => Request | undefined;
+  /** @throws {never} */
+  readonly keep: (request: Request) => void;
+  /** @throws {never} */
+  readonly find: (filing: number) => Request | undefined;
+  /** Mark a pending request expired when its `expiresAt` passes. @throws {never} */
+  readonly markExpired: (filing: number) => void;
+  /** Whether a request has been marked expired. @throws {never} */
+  readonly isExpired: (filing: number) => boolean;
+  /** Record the final `Report` outcome for a filing. @throws {never} */
+  readonly recordResult: (filing: number, result: Result) => void;
+  /** The last reported outcome for `filing`, if any. @throws {never} */
+  readonly lastResult: (filing: number) => Result | undefined;
+  /** Drop all pending requests when the signed-in owner changes. @throws {never} */
+  readonly clear: () => void;
+  /** Reset all state when the runtime scope closes. @throws {never} */
+  readonly reset: () => void;
+}
 
-/** The requests the card was given, by the number the machine names each by, as a store the screen reads. */
-export const requests = {
-  snapshot: version.snapshot,
-  subscribe: version.subscribe,
+/** Create a scoped Calendar requests store backed by a reactive shelf, with no module-level mutable state. @throws {never} */
+export function createRequestsStore(): RequestsStore {
+  const numbers = new Map<string, { filing: number; revision: string; changes: number }>();
+  const held = new Map<number, Request>();
+  const expired = new Set<number>();
+  const reported = new Map<number, Result>();
+  const version = createShelf(0);
+  let next = 0;
+
   /** @throws {never} */
-  keep(request: Request): void {
-    held.set(request.filing, request);
-    version.set(version.snapshot() + 1);
-  },
-  /** @throws {never} */
-  find: (filing: number): Request | undefined => held.get(filing),
-};
+  function told(): void {
+    version.update((n) => n + 1);
+  }
+
+  return {
+    snapshot: version.snapshot,
+    subscribe: version.subscribe,
+    fromWire(row, floor) {
+      const wire = record(row);
+      const payload = record(wire?.payload);
+      const change = record(payload?.change);
+      if (wire === undefined || change === undefined) return undefined;
+      const kind = kinds[text(change.action)];
+      const id = text(wire.id);
+      if (kind === undefined || id === "" || text(wire.state) !== "pending") return undefined;
+      const revision = text(wire.revision);
+      const before = numbers.get(id);
+      next = Math.max(next, floor);
+      const counted = before === undefined
+        ? { filing: ++next, revision, changes: 0 }
+        : before.revision === revision ? before : { ...before, revision, changes: before.changes + 1 };
+      numbers.set(id, counted);
+      const target = record(change.target);
+      const source = record(target?.source ?? change.source);
+      const { fields, known } = fieldsOf(change.fields);
+      const scope = text(change.scope);
+      return {
+        filing: counted.filing, id, revision, changes: counted.changes, change: kind,
+        reply: kind === "Respond" ? (answers[text(change.response)] ?? "NoReply") : "NoReply",
+        fields, occurrences: scope === "instance" || scope === "this_and_following" || scope === "series" ? scope : "",
+        eventId: text(target?.eventId), calendarId: text(source?.calendarId), targetStartAt: text(target?.startAt),
+        expectedVersion: text(target?.expectedVersion),
+        notify: change.notifyAttendees === true, known: known && Object.keys(change).every((key) => changeKeys.has(key)),
+        expiresAt: text(wire.expiresAt),
+      };
+    },
+    keep(request) {
+      held.set(request.filing, request);
+      told();
+    },
+    find: (filing) => held.get(filing),
+    markExpired(filing) {
+      if (expired.has(filing)) return;
+      expired.add(filing);
+      told();
+    },
+    isExpired: (filing) => expired.has(filing),
+    recordResult(filing, result) {
+      reported.set(filing, result);
+      told();
+    },
+    lastResult: (filing) => reported.get(filing),
+    clear() {
+      numbers.clear();
+      held.clear();
+      expired.clear();
+      reported.clear();
+      next = 0;
+      told();
+    },
+    reset() {
+      numbers.clear();
+      held.clear();
+      expired.clear();
+      reported.clear();
+      next = 0;
+      version.reset();
+    },
+  };
+}

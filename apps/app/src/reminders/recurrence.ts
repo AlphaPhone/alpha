@@ -48,11 +48,19 @@ export function civilDayFromString(text: string | null | undefined): number | un
   return Math.floor(Date.UTC(parsed.year, parsed.month - 1, parsed.day) / 86_400_000);
 }
 
-/** Convert a civil date and optional minute-of-day into a local epoch millisecond instant. @throws {never} */
+/** Convert a civil date and optional minute-of-day into a local epoch millisecond instant (defaults date-only to 9:00 AM for alert timing). @throws {never} */
 export function dueInstantMs(dueDate: string | null, dueMinute: number | null): number | null {
   const parsed = parseCivilDate(dueDate);
   if (!parsed) return null;
   const minute = dueMinute ?? 9 * 60;
+  return new Date(parsed.year, parsed.month - 1, parsed.day, Math.floor(minute / 60), minute % 60, 0, 0).getTime();
+}
+
+/** Convert a civil date and optional minute-of-day into a sort key instant (date-only reminders sort at start of day 00:00 before timed reminders). @throws {never} */
+export function dueSortInstantMs(dueDate: string | null, dueMinute: number | null): number | null {
+  const parsed = parseCivilDate(dueDate);
+  if (!parsed) return null;
+  const minute = dueMinute ?? 0;
   return new Date(parsed.year, parsed.month - 1, parsed.day, Math.floor(minute / 60), minute % 60, 0, 0).getTime();
 }
 
@@ -93,7 +101,7 @@ export function quickDatePresets(nowMs: number): { readonly today: string; reado
   };
 }
 
-/** Compute the snooze target instant for 10m, 1h, or tomorrow 9:00 AM relative to `nowMs`. */
+/** Compute the snooze target instant for 10m, 1h, or tomorrow 9:00 AM relative to `nowMs`. @throws {never} */
 export function snoozeTargetMs(nowMs: number, preset: "10m" | "1h" | "tomorrow"): number {
   if (preset === "10m") return nowMs + 10 * 60_000;
   if (preset === "1h") return nowMs + 60 * 60_000;
@@ -101,14 +109,14 @@ export function snoozeTargetMs(nowMs: number, preset: "10m" | "1h" | "tomorrow")
   return new Date(tomorrow.year, tomorrow.month - 1, tomorrow.day, 9, 0, 0, 0).getTime();
 }
 
-/** Format a minute-of-day (`0..1439`) as a 12-hour clock string (e.g. `9:00 AM`). */
+const localeTimeFormatter = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+
+/** Format a minute-of-day (`0..1439`) using the owner's locale clock preference. @throws {never} */
 export function formatMinuteOfDay(minute: number): string {
   const clamped = Math.max(0, Math.min(1439, Math.floor(minute)));
   const hour24 = Math.floor(clamped / 60);
   const mins = clamped % 60;
-  const period = hour24 >= 12 ? "PM" : "AM";
-  const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
-  return `${hour12}:${pad2(mins)} ${period}`;
+  return localeTimeFormatter.format(new Date(2000, 0, 1, hour24, mins, 0, 0));
 }
 
 /** Format a minute-of-day as `HH:MM` for time inputs. */

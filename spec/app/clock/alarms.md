@@ -235,15 +235,29 @@ pure def ackMissed(s: Alarms, id: int): Alarms =
   { ...s, items: s.items.listMap(a => if (a.id != id) a else { ...a, missed: false }) }
 ```
 
-### Reopening after a restart clears pending Undo and settles timed-out rings without double-firing
+### Reopening after a restart clears pending Undo and settles timed-out rings and missed alarms without double-firing
 
 ```quint
+pure def timedOutAt(a: Alarm, now: int): bool =
+  (a.phase == Ringing and now >= a.fireAt + ringTimeout)
+    or (a.enabled and a.phase != Ringing and dueAtOf(a) > 0 and now >= dueAtOf(a) + ringTimeout)
+
 pure def reopen(s: Alarms, now: int): Alarms =
   { ...s, hidden: noAlarm, hasHidden: false, undo: U::free,
     items: s.items.listMap(a =>
-      if (a.phase == Ringing and now >= a.fireAt + ringTimeout)
-        { ...a, enabled: a.daysMask > 0, phase: Idle, fireAt: if (a.daysMask > 0) a.fireAt else 0, snoozeUntil: 0, missed: true }
+      if (timedOutAt(a, now))
+        { ...a, enabled: a.daysMask > 0, phase: Idle, fireAt: 0, snoozeUntil: 0, missed: true }
       else a) }
+
+pure def canReschedule(s: Alarms, id: int, nextFireAt: int, now: int): bool =
+  hasAlarm(s.items, id) and alarmOf(s.items, id).enabled and alarmOf(s.items, id).daysMask > 0
+    and alarmOf(s.items, id).phase == Idle and alarmOf(s.items, id).fireAt == 0
+    and now >= 0 and nextFireAt > now
+
+pure def reschedule(s: Alarms, id: int, nextFireAt: int, now: int): Alarms =
+  { ...s, items: s.items.listMap(a =>
+      if (a.id != id) a
+      else { ...a, fireAt: nextFireAt }) }
 ```
 
 ### Syncing from the resident agent admits only valid, unique, bounded alarm lists

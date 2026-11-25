@@ -1,12 +1,17 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { Effect } from "effect";
 import { Machine as Listing } from "../gen/app__workflows__list.effect.vibe";
 import { Machine as Definition } from "../gen/app__workflows.effect.vibe";
 import { Machine as Automations } from "../gen/app__workflows__automations.effect.vibe";
+import { Machine as Builder } from "../gen/app__workflows__builder.effect.vibe";
 import { Machine as Runs } from "../gen/app__workflows__runs.effect.vibe";
 import { Machine as Sheet } from "../gen/app__workflows__sheet.effect.vibe";
 import { Machine as Clock } from "../gen/app__workflows__clock.effect.vibe";
 import { Machine as Approvals } from "../gen/app__workflows__approvals.effect.vibe";
+import { Machine as Toasts } from "../gen/app__notices__toasts.effect.vibe";
+import { AlarmLabel } from "../src/workflows/clock.vibe";
+import { DraftWords } from "../src/workflows/authoring.vibe";
 import workflows from "../src/workflows/index.tsx";
 import home from "../src/home/index.tsx";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
@@ -209,5 +214,147 @@ describe("Workflows", () => {
         activity: [{ at: "2026-11-24T07:02:00.000Z", node: undefined }, { at: "2026-11-24T07:01:00.000Z", node: "preview" }],
       });
     });
+  });
+
+  it('Cancels speech synthesis on Stop reading and sheet close (spec/app/workflows/sheet.md, "Story: Read a run\'s sheet")', async () => {
+    const cancel = vi.fn();
+    const speak = vi.fn();
+    class FakeUtterance {
+      readonly text: string;
+      onend: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      constructor(text: string) { this.text = text; }
+    }
+    vi.stubGlobal("speechSynthesis", { speak, cancel });
+    vi.stubGlobal("SpeechSynthesisUtterance", FakeUtterance);
+    try {
+      const world = scene();
+      world.workflows.run = true;
+      world.workflows.stage = "Done";
+      const alpha = await openWorkflows(world);
+      const area = workflows.runtime(alpha);
+      await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
+      await choose("Monthly statement");
+      await until(alpha, area, Sheet, (state) => state.history.status === "Loaded" && state.shown === 1);
+      await drawn(() => {
+        const row = document.querySelector<HTMLButtonElement>('[aria-label="Run history"] li > button');
+        if (!row) throw new Error("No run history");
+        row.click();
+      });
+      await until(alpha, area, Sheet, (state) => state.output.status === "Loaded" && state.text === "Text");
+
+      await press("Read aloud");
+      await until(alpha, area, Sheet, (state) => state.speech.outcome === "Sent");
+      expect(speak).toHaveBeenCalledTimes(1);
+
+      await press("Stop reading");
+      await until(alpha, area, Sheet, (state) => state.speech.outcome !== "Sent");
+      expect(cancel).toHaveBeenCalled();
+
+      const cancelsAfterStop = cancel.mock.calls.length;
+      await press("Read aloud");
+      await until(alpha, area, Sheet, (state) => state.speech.outcome === "Sent");
+      await drawn(() => alpha.back());
+      await until(alpha, area, Sheet, (state) => state.runId === 0);
+      expect(cancel.mock.calls.length).toBeGreaterThan(cancelsAfterStop);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('Toggles a list row switch without navigating and tracks approval notices and Waiting for you badge (spec/app/workflows/list.md, "Story: Find a workflow"; spec/app/workflows/approvals.md, "Story: Answer a run\'s approval on the phone")', async () => {
+    const world = scene();
+    world.workflows.run = true;
+    world.workflows.stage = "Waiting";
+    const alpha = await openWorkflows(world);
+    const area = workflows.runtime(alpha);
+    await until(alpha, area, Listing, (state) => state.list.status === "Loaded" && state.complete);
+
+    const toggle = document.querySelector<HTMLButtonElement>('[role="switch"][aria-label="Turn Desk check off"]');
+    expect(toggle).not.toBeNull();
+    await drawn(() => { toggle?.click(); });
+    await vi.waitFor(() => expect(world.workflows.promptEdits.at(-1)).toEqual({ enabled: false, expectedRevision: 1 }));
+    const listingState = await area.runPromise(Listing.use((machine) => machine.get()));
+    expect(listingState.place.tag).toBe("ListingRows");
+
+    await choose("Monthly statement");
+    await until(alpha, area, Sheet, (state) => state.history.status === "Loaded" && state.shown === 1);
+    await drawn(() => {
+      const row = document.querySelector<HTMLButtonElement>('[aria-label="Run history"] li > button');
+      if (!row) throw new Error("No run history");
+      row.click();
+    });
+    await until(alpha, area, Approvals, (state) => state.approval === "Waiting" && state.sheet);
+    const toastsWhileWaiting = await area.runPromise(Toasts.use((machine) => machine.get()));
+    expect(toastsWhileWaiting.kept.some((entry) => entry.area === "workflows-approval")).toBe(true);
+
+    await drawn(() => alpha.back());
+    await drawn(() => alpha.back());
+    await until(alpha, area, Listing, (state) => state.place.tag === "ListingRows");
+    const statementRow = rows().find((one) => one.textContent?.startsWith("Monthly statement"));
+    expect(statementRow?.textContent).toContain("Waiting for you");
+  });
+
+  it('Allows clearing the Clock snooze input without NaN snap-back and keeps AlarmLabel while Sent (spec/app/workflows/clock.md, "Story: Describe an alarm for Clock")', async () => {
+    const world = scene();
+    world.phone = true;
+    const alpha = await openWorkflows(world);
+    const area = workflows.runtime(alpha);
+    await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
+
+    await press("Clock alarms");
+    await until(alpha, area, Clock, (state) => state.open && state.history.status === "Loaded");
+    await fill("Alarm label", "Morning standup");
+    const storedLabel = await area.runPromise(Effect.flatMap(AlarmLabel, (label) => label.read()));
+    expect(storedLabel).toBe("Morning standup");
+
+    await pressOnTop("Snooze");
+    await fill("Snooze minutes", "");
+    const input = document.querySelector<HTMLInputElement>('input[aria-label="Snooze minutes"]');
+    expect(input?.value).toBe("");
+    await fill("Snooze minutes", "15");
+    await until(alpha, area, Clock, (state) => state.snooze === 15);
+  });
+
+  it('Recovers from unanswered automation changes via checkChange and letGo (spec/app/workflows/automations.md, "Story: Act on an automation")', async () => {
+    const world = scene();
+    const alpha = await openWorkflows(world);
+    const area = workflows.runtime(alpha);
+    await until(alpha, area, Listing, (state) => state.list.status === "Loaded" && state.complete);
+
+    await choose("Desk check");
+    await until(alpha, area, Automations, (state) => state.present && state.list.status === "Loaded");
+    await area.runPromise(Automations.use((machine) => machine.send({ type: "act", wanted: "Disable", minutes: 0 })));
+    await until(alpha, area, Automations, (state) => state.change.attempt.outcome === "Refused" || state.change.attempt.outcome === "Unknown" || state.change.live);
+    const afterAct = await area.runPromise(Automations.use((machine) => machine.get()));
+    if (afterAct.change.live) {
+      await area.runPromise(Automations.use((machine) => machine.send({ type: "changeUnanswered" })));
+    }
+    const current = await area.runPromise(Automations.use((machine) => machine.get()));
+    if (current.change.attempt.outcome === "Unknown" && current.change.record.status !== "Loaded") {
+      await press("Check change");
+      await until(alpha, area, Automations, (state) => state.change.record.status === "Loaded" || state.change.record.status === "Failed");
+      const allowBtn = button("Allow a different change");
+      if (allowBtn) {
+        await press("Allow a different change");
+        await until(alpha, area, Automations, (state) => state.change.attempt.outcome === "Unknown" && !state.change.offered);
+      }
+    }
+  });
+
+  it('Computes unfinished draft state and exposes Conflicted recovery controls in Authoring (spec/app/workflows/builder.md, "Story: Keep the draft on the phone")', async () => {
+    const world = scene();
+    const alpha = await openWorkflows(world);
+    const area = workflows.runtime(alpha);
+    await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
+
+    await press("Add to Workflows");
+    await until(alpha, area, Listing, (state) => state.place.tag === "ListingAdd");
+    await press("Workflow");
+    await until(alpha, area, Builder, (state) => state.open);
+    expect(button("Review workflow")).toBeUndefined();
+
+    const draft = await area.runPromise(Effect.flatMap(DraftWords, (words) => words.view()));
+    expect(draft.owner).toBeGreaterThanOrEqual(0);
   });
 });

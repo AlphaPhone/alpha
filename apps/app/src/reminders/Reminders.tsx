@@ -14,6 +14,8 @@ import {
   MenuTrigger,
   SearchField,
   cn,
+  dockClearance,
+  focusRing,
 } from "@repo/ui";
 import {
   AlertCircle,
@@ -34,15 +36,15 @@ import {
   SlidersHorizontal,
   Trash2,
 } from "lucide-react";
+import { Effect } from "effect";
 import { useState, useSyncExternalStore } from "react";
-import type { DeleteMode, SmartView, SortKey } from "../../gen/app__reminders.ts";
+import type { DeleteMode, Priority, SmartView, SortKey } from "../../gen/app__reminders.ts";
 import { useMachine as useRemindersMachine } from "../../gen/app__reminders.react.ts";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { useTimed } from "../runtime/react.ts";
-import { Time } from "../runtime/time.vibe";
 import { beginEditReminder, beginNewReminder } from "./editor.vibe";
 import { DeleteListDialog, ListEditorDialog } from "./ListEditorDialog.tsx";
-import { formatRelativeDue, quickDatePresets } from "./recurrence.ts";
+import { advanceDueDate, civilDayFromString, civilDayNumber, formatRelativeDue, quickDatePresets } from "./recurrence.ts";
 import { ReminderEditorSheet } from "./ReminderEditorSheet.tsx";
 import {
   clearCompletedReminders,
@@ -57,6 +59,7 @@ import {
   toggleReminderFlag,
   updateReminderList,
 } from "./reminders.vibe";
+import { RemindersNowShelf, RemindersShelf } from "./shelf.vibe";
 import {
   computeSmartCounts,
   DEFAULT_LIST_ID,
@@ -67,7 +70,7 @@ import {
   type ReminderListColor,
   type ReminderListIcon,
   type ReminderListRecord,
-  remindersStore,
+  type RemindersSnapshot,
   searchReminders,
   selectViewItems,
   sortReminders,
@@ -88,12 +91,21 @@ const SMART_META: readonly {
   { view: "CompletedView", label: "Completed", badgeClass: "bg-ok text-primary-foreground" },
 ];
 
+const SORT_KEYS: readonly SortKey[] = ["SortDue", "SortPriority", "SortTitle", "SortCreated"];
+
 const SORT_LABELS: Readonly<Record<SortKey, string>> = {
   SortDue: "Due date",
   SortPriority: "Priority",
   SortTitle: "Title",
   SortCreated: "Created",
 };
+
+const PRIORITY_FILTERS: readonly { readonly value: Priority; readonly label: string }[] = [
+  { value: "NoPriority", label: "All priorities" },
+  { value: "HighPriority", label: "High priority" },
+  { value: "MediumPriority", label: "Medium priority" },
+  { value: "LowPriority", label: "Low priority" },
+];
 
 function SmartGlyph({ view }: { readonly view: SmartView }) {
   switch (view) {
@@ -121,6 +133,8 @@ function ReminderRow({
   listName,
   showListBadge,
   nowMs,
+  canComplete,
+  canFlag,
   onToggleComplete,
   onToggleFlag,
   onEdit,
@@ -129,6 +143,8 @@ function ReminderRow({
   readonly listName: string;
   readonly showListBadge: boolean;
   readonly nowMs: number;
+  readonly canComplete: boolean;
+  readonly canFlag: boolean;
   readonly onToggleComplete: (id: string) => void;
   readonly onToggleFlag: (id: string) => void;
   readonly onEdit: (item: ReminderItemRecord) => void;
@@ -139,28 +155,33 @@ function ReminderRow({
   const snoozed = item.snoozedUntilMs !== null && item.snoozedUntilMs > nowMs;
 
   return (
-    <div className="flex items-start gap-3 px-4 py-3">
+    <div className="flex items-start gap-2 px-2 py-2">
       <button
         type="button"
+        disabled={!canComplete}
         aria-label={item.completed ? `Reopen ${item.title}` : `Complete ${item.title}`}
         aria-pressed={item.completed}
         onClick={() => onToggleComplete(item.id)}
-        className={cn(
-          "mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border-2 transition-colors",
-          item.completed
-            ? "border-primary bg-primary text-primary-foreground"
-            : overdue
-              ? "border-destructive text-transparent hover:border-primary"
-              : "border-muted-foreground text-transparent hover:border-primary",
-        )}
+        className={cn(focusRing, "group inline-flex size-11 shrink-0 items-center justify-center rounded-full disabled:cursor-not-allowed disabled:opacity-50")}
       >
-        <Check aria-hidden className="size-3.5" />
+        <span
+          className={cn(
+            "flex size-6 items-center justify-center rounded-full border-2 transition-colors",
+            item.completed
+              ? "border-primary bg-primary text-primary-foreground"
+              : overdue
+                ? "border-destructive text-transparent group-hover:border-primary"
+                : "border-muted-foreground text-transparent group-hover:border-primary",
+          )}
+        >
+          <Check aria-hidden className="size-3.5" />
+        </span>
       </button>
 
       <button
         type="button"
         onClick={() => onEdit(item)}
-        className="flex min-w-0 flex-1 flex-col gap-1 text-left"
+        className={cn(focusRing, "flex min-h-11 min-w-0 flex-1 flex-col justify-center gap-1 rounded-md py-1 text-left")}
       >
         <span className="flex items-baseline gap-1.5">
           <PriorityMark priority={item.priority} />
@@ -205,6 +226,7 @@ function ReminderRow({
         type="button"
         variant="ghost"
         size="icon"
+        disabled={!canFlag}
         aria-label={item.flagged ? `Unflag ${item.title}` : `Flag ${item.title}`}
         aria-pressed={item.flagged}
         onClick={() => onToggleFlag(item.id)}
@@ -219,10 +241,12 @@ function ReminderRow({
 function QuickAddBar({
   nowMs,
   defaultDate,
+  canCreate,
   onAdd,
 }: {
   readonly nowMs: number;
   readonly defaultDate: string | null;
+  readonly canCreate: boolean;
   readonly onAdd: (title: string, dueDate: string | null) => void;
 }) {
   const [title, setTitle] = useState("");
@@ -234,7 +258,7 @@ function QuickAddBar({
 
   function submit() {
     const trimmed = title.trim();
-    if (trimmed === "") return;
+    if (!canCreate || trimmed === "") return;
     onAdd(trimmed, resolvedDue);
     setTitle("");
     setPreset("default");
@@ -245,18 +269,19 @@ function QuickAddBar({
       <div className="flex items-center gap-2">
         <Input
           aria-label="Quick add reminder"
+          disabled={!canCreate}
           value={title}
           placeholder="New reminder…"
           onChange={(event) => setTitle(event.target.value)}
           onKeyDown={(event) => { if (event.key === "Enter") submit(); }}
         />
-        <Button type="button" size="sm" disabled={title.trim() === ""} onClick={submit}>
+        <Button type="button" size="sm" className="min-h-11" disabled={!canCreate || title.trim() === ""} onClick={submit}>
           Add
         </Button>
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
-        <Chip pressed={preset === "today"} onPressedChange={(on) => setPreset(on ? "today" : "default")}>Today</Chip>
-        <Chip pressed={preset === "tomorrow"} onPressedChange={(on) => setPreset(on ? "tomorrow" : "default")}>Tomorrow</Chip>
+        <Chip disabled={!canCreate} pressed={preset === "today"} onPressedChange={(on) => setPreset(on ? "today" : "default")}>Today</Chip>
+        <Chip disabled={!canCreate} pressed={preset === "tomorrow"} onPressedChange={(on) => setPreset(on ? "tomorrow" : "default")}>Tomorrow</Chip>
       </div>
     </div>
   );
@@ -268,6 +293,8 @@ function ReminderItemsCard({
   listNames,
   showListBadge,
   nowMs,
+  canCompleteItem,
+  canFlagItem,
   onToggleComplete,
   onToggleFlag,
   onEdit,
@@ -277,6 +304,8 @@ function ReminderItemsCard({
   readonly listNames: ReadonlyMap<string, string>;
   readonly showListBadge: boolean;
   readonly nowMs: number;
+  readonly canCompleteItem: (item: ReminderItemRecord) => boolean;
+  readonly canFlagItem: (item: ReminderItemRecord) => boolean;
   readonly onToggleComplete: (id: string) => void;
   readonly onToggleFlag: (id: string) => void;
   readonly onEdit: (item: ReminderItemRecord) => void;
@@ -291,6 +320,8 @@ function ReminderItemsCard({
           listName={listNames.get(item.listId) ?? "Reminders"}
           showListBadge={showListBadge}
           nowMs={nowMs}
+          canComplete={canCompleteItem(item)}
+          canFlag={canFlagItem(item)}
           onToggleComplete={onToggleComplete}
           onToggleFlag={onToggleFlag}
           onEdit={onEdit}
@@ -305,6 +336,10 @@ function RemindersOverview({
   lists,
   snapshot,
   hiddenIds,
+  canCreateList,
+  canRenameList,
+  canDeleteList,
+  canCreateItem,
   onOpenSmart,
   onOpenCustomList,
   onNewList,
@@ -314,8 +349,12 @@ function RemindersOverview({
 }: {
   readonly counts: Readonly<Record<SmartView, number>>;
   readonly lists: readonly ReminderListRecord[];
-  readonly snapshot: ReturnType<typeof remindersStore.snapshot>["snapshot"];
+  readonly snapshot: RemindersSnapshot;
   readonly hiddenIds: ReadonlySet<string>;
+  readonly canCreateList: boolean;
+  readonly canRenameList: (list: ReminderListRecord) => boolean;
+  readonly canDeleteList: (list: ReminderListRecord) => boolean;
+  readonly canCreateItem: boolean;
   readonly onOpenSmart: (view: SmartView) => void;
   readonly onOpenCustomList: (list: ReminderListRecord) => void;
   readonly onNewList: () => void;
@@ -331,7 +370,10 @@ function RemindersOverview({
             key={tile.view}
             type="button"
             onClick={() => onOpenSmart(tile.view)}
-            className="flex flex-col gap-2 rounded-tile border border-border bg-card p-3 text-left transition-colors hover:bg-secondary/60"
+            className={cn(
+              focusRing,
+              "flex min-h-20 flex-col gap-2 rounded-tile border border-border bg-card p-3 text-left transition-colors hover:bg-secondary/60",
+            )}
           >
             <div className="flex items-center justify-between gap-2">
               <span className={cn("flex size-8 items-center justify-center rounded-full", tile.badgeClass)}>
@@ -346,7 +388,7 @@ function RemindersOverview({
 
       <div className="flex items-center justify-between pt-1">
         <h2 className="text-sm font-semibold tracking-caps text-muted-foreground uppercase">My Lists</h2>
-        <Button type="button" variant="ghost" size="sm" onClick={onNewList}>
+        <Button type="button" variant="ghost" size="sm" className="min-h-11" disabled={!canCreateList} onClick={onNewList}>
           <ListPlus aria-hidden className="size-4" />
           New list
         </Button>
@@ -378,8 +420,8 @@ function RemindersOverview({
                       </Button>
                     </MenuTrigger>
                     <MenuContent>
-                      <MenuItem onSelect={() => onRenameList(list)}>Rename list</MenuItem>
-                      <MenuItem destructive onSelect={() => onDeleteList(list)}>Delete list</MenuItem>
+                      <MenuItem disabled={!canRenameList(list)} onSelect={() => onRenameList(list)}>Rename list</MenuItem>
+                      <MenuItem destructive disabled={!canDeleteList(list)} onSelect={() => onDeleteList(list)}>Delete list</MenuItem>
                     </MenuContent>
                   </Menu>
                 </div>
@@ -390,7 +432,7 @@ function RemindersOverview({
       </ListGroup>
 
       <div className="flex justify-end pt-2">
-        <Button type="button" onClick={onNewReminder}>
+        <Button type="button" disabled={!canCreateItem} onClick={onNewReminder}>
           <Plus aria-hidden className="size-4" />
           New reminder
         </Button>
@@ -410,6 +452,12 @@ function RemindersDetail({
   completedCount,
   defaultQuickDue,
   nowMs,
+  canCreateItem,
+  canClearCompleted,
+  canCompleteItem,
+  canFlagItem,
+  canRenameActive,
+  canDeleteActive,
   onQuickAdd,
   onClearCompleted,
   onNewReminder,
@@ -429,6 +477,12 @@ function RemindersDetail({
   readonly completedCount: number;
   readonly defaultQuickDue: string | null;
   readonly nowMs: number;
+  readonly canCreateItem: boolean;
+  readonly canClearCompleted: boolean;
+  readonly canCompleteItem: (item: ReminderItemRecord) => boolean;
+  readonly canFlagItem: (item: ReminderItemRecord) => boolean;
+  readonly canRenameActive: boolean;
+  readonly canDeleteActive: boolean;
   readonly onQuickAdd: (title: string, dueDate: string | null) => void;
   readonly onClearCompleted: () => void;
   readonly onNewReminder: () => void;
@@ -442,10 +496,10 @@ function RemindersDetail({
   return (
     <>
       {!isCompletedView ? (
-        <QuickAddBar nowMs={nowMs} defaultDate={defaultQuickDue} onAdd={onQuickAdd} />
+        <QuickAddBar nowMs={nowMs} defaultDate={defaultQuickDue} canCreate={canCreateItem} onAdd={onQuickAdd} />
       ) : completedCount > 0 ? (
         <div className="flex justify-end">
-          <Button type="button" variant="secondary" size="sm" onClick={onClearCompleted}>
+          <Button type="button" variant="secondary" size="sm" className="min-h-11" disabled={!canClearCompleted} onClick={onClearCompleted}>
             <Trash2 aria-hidden className="size-4" />
             Clear completed
           </Button>
@@ -460,7 +514,7 @@ function RemindersDetail({
               : "Add a reminder above or tap the plus button for dates, repeats, priority and subtasks."}
           </p>
           {!isCompletedView ? (
-            <Button type="button" onClick={onNewReminder}>
+            <Button type="button" disabled={!canCreateItem} onClick={onNewReminder}>
               <Plus aria-hidden className="size-4" />
               New reminder
             </Button>
@@ -475,6 +529,8 @@ function RemindersDetail({
             listNames={listNames}
             showListBadge
             nowMs={nowMs}
+            canCompleteItem={canCompleteItem}
+            canFlagItem={canFlagItem}
             onToggleComplete={onToggleComplete}
             onToggleFlag={onToggleFlag}
             onEdit={onEdit}
@@ -489,6 +545,8 @@ function RemindersDetail({
             listNames={listNames}
             showListBadge={false}
             nowMs={nowMs}
+            canCompleteItem={canCompleteItem}
+            canFlagItem={canFlagItem}
             onToggleComplete={onToggleComplete}
             onToggleFlag={onToggleFlag}
             onEdit={onEdit}
@@ -500,6 +558,8 @@ function RemindersDetail({
           listNames={listNames}
           showListBadge={viewTag === "Smart"}
           nowMs={nowMs}
+          canCompleteItem={canCompleteItem}
+          canFlagItem={canFlagItem}
           onToggleComplete={onToggleComplete}
           onToggleFlag={onToggleFlag}
           onEdit={onEdit}
@@ -510,14 +570,14 @@ function RemindersDetail({
         <div className="flex justify-end pt-1">
           <Menu>
             <MenuTrigger asChild>
-              <Button type="button" variant="ghost" size="sm">
+              <Button type="button" variant="ghost" size="sm" className="min-h-11">
                 <EllipsisVertical aria-hidden className="size-4" />
                 List options
               </Button>
             </MenuTrigger>
             <MenuContent>
-              <MenuItem onSelect={() => onRenameList(activeList)}>Rename list</MenuItem>
-              <MenuItem destructive onSelect={() => onDeleteList(activeList)}>Delete list</MenuItem>
+              <MenuItem disabled={!canRenameActive} onSelect={() => onRenameList(activeList)}>Rename list</MenuItem>
+              <MenuItem destructive disabled={!canDeleteActive} onSelect={() => onDeleteList(activeList)}>Delete list</MenuItem>
             </MenuContent>
           </Menu>
         </div>
@@ -530,19 +590,23 @@ function SortFilterMenu({
   sort,
   showCompleted,
   flaggedOnly,
+  priorityFilter,
   canClearCompleted,
   onSelectSort,
   onToggleCompleted,
   onToggleFlagged,
+  onSelectPriority,
   onClearCompleted,
 }: {
   readonly sort: SortKey;
   readonly showCompleted: boolean;
   readonly flaggedOnly: boolean;
+  readonly priorityFilter: Priority;
   readonly canClearCompleted: boolean;
   readonly onSelectSort: (key: SortKey) => void;
   readonly onToggleCompleted: () => void;
   readonly onToggleFlagged: () => void;
+  readonly onSelectPriority: (priority: Priority) => void;
   readonly onClearCompleted: () => void;
 }) {
   return (
@@ -553,7 +617,7 @@ function SortFilterMenu({
         </Button>
       </MenuTrigger>
       <MenuContent>
-        {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
+        {SORT_KEYS.map((key) => (
           <MenuItem key={key} onSelect={() => onSelectSort(key)}>
             <span className="flex-1">Sort by {SORT_LABELS[key]}</span>
             {sort === key ? <Check aria-hidden className="size-4 text-primary" /> : null}
@@ -565,6 +629,12 @@ function SortFilterMenu({
         <MenuItem onSelect={onToggleFlagged}>
           <span className="flex-1">{flaggedOnly ? "Show all items" : "Flagged only"}</span>
         </MenuItem>
+        {PRIORITY_FILTERS.map((opt) => (
+          <MenuItem key={opt.value} onSelect={() => onSelectPriority(opt.value)}>
+            <span className="flex-1">{opt.label}</span>
+            {priorityFilter === opt.value ? <Check aria-hidden className="size-4 text-primary" /> : null}
+          </MenuItem>
+        ))}
         {canClearCompleted ? (
           <MenuItem destructive onSelect={onClearCompleted}>
             <Trash2 aria-hidden className="size-4" />
@@ -576,28 +646,168 @@ function SortFilterMenu({
   );
 }
 
+function RemindersHeader({
+  drilledIn,
+  searching,
+  activeTitle,
+  searchQuery,
+  canLeave,
+  canCreateItem,
+  canClearCompleted,
+  sort,
+  showCompleted,
+  flaggedOnly,
+  priorityFilter,
+  onLeave,
+  onSearchChange,
+  onSelectSort,
+  onToggleCompleted,
+  onToggleFlagged,
+  onSelectPriority,
+  onClearCompleted,
+  onNewReminder,
+}: {
+  readonly drilledIn: boolean;
+  readonly searching: boolean;
+  readonly activeTitle: string;
+  readonly searchQuery: string;
+  readonly canLeave: boolean;
+  readonly canCreateItem: boolean;
+  readonly canClearCompleted: boolean;
+  readonly sort: SortKey;
+  readonly showCompleted: boolean;
+  readonly flaggedOnly: boolean;
+  readonly priorityFilter: Priority;
+  readonly onLeave: () => void;
+  readonly onSearchChange: (value: string) => void;
+  readonly onSelectSort: (key: SortKey) => void;
+  readonly onToggleCompleted: () => void;
+  readonly onToggleFlagged: () => void;
+  readonly onSelectPriority: (priority: Priority) => void;
+  readonly onClearCompleted: () => void;
+  readonly onNewReminder: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      {drilledIn && !searching ? (
+        <div className="flex min-w-0 items-center gap-2">
+          <Button type="button" variant="ghost" size="icon" aria-label="All lists" disabled={!canLeave} onClick={onLeave}>
+            <ArrowLeft />
+          </Button>
+          <h2 className="truncate text-lg font-semibold text-foreground">{activeTitle}</h2>
+        </div>
+      ) : (
+        <div className="min-w-0 flex-1">
+          <SearchField
+            aria-label="Search reminders"
+            placeholder="Search reminders"
+            value={searchQuery}
+            onValueChange={onSearchChange}
+          />
+        </div>
+      )}
+      <div className="flex shrink-0 items-center gap-1">
+        {drilledIn && !searching ? (
+          <SortFilterMenu
+            sort={sort}
+            showCompleted={showCompleted}
+            flaggedOnly={flaggedOnly}
+            priorityFilter={priorityFilter}
+            canClearCompleted={canClearCompleted}
+            onSelectSort={onSelectSort}
+            onToggleCompleted={onToggleCompleted}
+            onToggleFlagged={onToggleFlagged}
+            onSelectPriority={onSelectPriority}
+            onClearCompleted={onClearCompleted}
+          />
+        ) : null}
+        <Button type="button" variant="ghost" size="icon" aria-label="New reminder" disabled={!canCreateItem} onClick={onNewReminder}>
+          <Plus />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function RemindersModals({
+  runtime,
+  snapshot,
+  hiddenIds,
+  completedCount,
+  canDeleteSelected,
+  listDialog,
+  deletingList,
+  confirmClear,
+  onSaveDraft,
+  onDeleteItem,
+  onCloseListDialog,
+  onSubmitList,
+  onCloseDeleteList,
+  onDeleteList,
+  onConfirmClear,
+  onCancelClear,
+}: {
+  readonly runtime: Shown<Resident | RemindersMachines>["runtime"];
+  readonly snapshot: RemindersSnapshot;
+  readonly hiddenIds: ReadonlySet<string>;
+  readonly completedCount: number;
+  readonly canDeleteSelected: boolean;
+  readonly listDialog: { readonly open: boolean; readonly editing: ReminderListRecord | null };
+  readonly deletingList: ReminderListRecord | null;
+  readonly confirmClear: boolean;
+  readonly onSaveDraft: () => void;
+  readonly onDeleteItem: (id: string) => void;
+  readonly onCloseListDialog: () => void;
+  readonly onSubmitList: (name: string, color: ReminderListColor, icon: ReminderListIcon) => void;
+  readonly onCloseDeleteList: () => void;
+  readonly onDeleteList: (listId: string, mode: DeleteMode) => void;
+  readonly onConfirmClear: () => void;
+  readonly onCancelClear: () => void;
+}) {
+  return (
+    <>
+      <ReminderEditorSheet runtime={runtime} lists={snapshot.lists} canDelete={canDeleteSelected} onSave={onSaveDraft} onDelete={onDeleteItem} />
+      {listDialog.open ? (
+        <ListEditorDialog key={listDialog.editing?.id ?? "new"} open initial={listDialog.editing} onClose={onCloseListDialog} onSubmit={onSubmitList} />
+      ) : null}
+      <DeleteListDialog
+        list={deletingList}
+        itemCount={deletingList ? snapshot.items.filter((item) => item.listId === deletingList.id && !hiddenIds.has(item.id)).length : 0}
+        onClose={onCloseDeleteList}
+        onDelete={onDeleteList}
+      />
+      <ConfirmDialog open={confirmClear} title="Clear completed reminders?" confirmLabel="Clear" destructive onConfirm={onConfirmClear} onCancel={onCancelClear}>
+        This permanently removes all {completedCount} completed {completedCount === 1 ? "reminder" : "reminders"}.
+      </ConfirmDialog>
+    </>
+  );
+}
+
 /** Main Reminders screen: Smart Lists overview, Custom Lists, live search, quick add, sort/filter, editor sheet and due-time alert banner. */
 export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
   const { state, can, send } = useTimed(runtime, useRemindersMachine);
-  const storeView = useSyncExternalStore((listener) => remindersStore.subscribe(listener), remindersStore.snapshot);
-  const [drilledIn, setDrilledIn] = useState(false);
+  const store = runtime.runSync(Effect.map(RemindersShelf, (service) => service.store));
+  const nowShelf = runtime.runSync(Effect.map(RemindersNowShelf, (service) => service.shelf));
+  const storeView = useSyncExternalStore(store.subscribe, store.snapshot);
+  const nowMs = useSyncExternalStore(nowShelf.subscribe, nowShelf.snapshot);
   const [searchQuery, setSearchQuery] = useState("");
   const [listDialog, setListDialog] = useState<{ readonly open: boolean; readonly editing: ReminderListRecord | null }>({ open: false, editing: null });
   const [deletingList, setDeletingList] = useState<ReminderListRecord | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
-  const nowMs = runtime.runSync(Time.use((time) => time.latest()));
 
   if (!state) return null;
   const { snapshot, hiddenIds, syncError } = storeView;
+  const drilledIn = state.drilledIn;
   const listNames = new Map(snapshot.lists.map((list) => [list.id, list.name]));
   const counts = computeSmartCounts(snapshot.items, hiddenIds, nowMs);
   const todayStr = quickDatePresets(nowMs).today;
   const searching = searchQuery.trim() !== "";
   const activeView = state.view;
   const activeList = activeView.tag === "CustomList"
-    ? snapshot.lists.find((list) => remindersStore.specIdForList(list.id) === activeView.listId) ?? snapshot.lists[0]
+    ? snapshot.lists.find((list) => store.specIdForList(list.id) === activeView.listId) ?? snapshot.lists[0]
     : undefined;
   const activeListId = activeList?.id ?? DEFAULT_LIST_ID;
+  const activeListSpecId = Math.max(1, store.specIdForList(activeListId));
   const activeTitle = searching
     ? "Search"
     : !drilledIn
@@ -606,62 +816,63 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
         ? smartTitle(state.view.view)
         : (activeList?.name ?? "Reminders");
 
-  function openSmart(view: SmartView) {
-    if (can({ type: "selectSmartView", view })) void send({ type: "selectSmartView", view });
-    setDrilledIn(true);
-  }
+  const canCreateList = can({ type: "createList" });
+  const canRefresh = can({ type: "refresh" });
+  const canClearCompleted = can({ type: "clearCompleted" });
+  const canCreateItem = can({
+    type: "createItem",
+    spec: { listId: activeListSpecId, hasDue: false, dueDay: 0, hasDueTime: false, dueMinute: 0, repeat: "NoRepeat", priority: "NoPriority", flagged: false },
+  });
+  const canRenameListRecord = (list: ReminderListRecord): boolean => {
+    const specId = store.specIdForList(list.id);
+    return specId > 0 && can({ type: "renameList", listId: specId });
+  };
+  const canDeleteListRecord = (list: ReminderListRecord): boolean => {
+    const specId = store.specIdForList(list.id);
+    return !list.isDefault && specId > 1 && can({ type: "deleteList", listId: specId, mode: "ReassignToDefault" });
+  };
+  const canCompleteItem = (item: ReminderItemRecord): boolean => {
+    const specId = store.specIdForItem(item.id);
+    if (specId <= 0) return false;
+    const recurring = !item.completed && item.recurrence !== "none" && item.dueDate !== null;
+    const nextDueDate = recurring && item.dueDate !== null ? advanceDueDate(item.dueDate, item.recurrence) : item.dueDate;
+    const nextDueDay = civilDayFromString(nextDueDate) ?? (civilDayFromString(item.dueDate) ?? civilDayNumber(nowMs)) + 1;
+    return can({ type: "toggleComplete", itemId: specId, nextDueDay, at: nowMs });
+  };
+  const canFlagItem = (item: ReminderItemRecord): boolean => {
+    const specId = store.specIdForItem(item.id);
+    return specId > 0 && can({ type: "toggleFlag", itemId: specId });
+  };
 
-  function openCustomList(list: ReminderListRecord) {
-    const specId = remindersStore.specIdForList(list.id);
+  const openSmart = (view: SmartView) => { if (can({ type: "selectSmartView", view })) void send({ type: "selectSmartView", view }); };
+  const openCustomList = (list: ReminderListRecord) => {
+    const specId = store.specIdForList(list.id);
     if (specId > 0 && can({ type: "selectCustomList", listId: specId })) void send({ type: "selectCustomList", listId: specId });
-    setDrilledIn(true);
-  }
-
-  function openNewEditor() {
-    const presetDue = drilledIn && state?.view.tag === "Smart" && (state.view.view === "TodayView" || state.view.view === "ScheduledView")
-      ? todayStr
-      : null;
-    const presetFlag = drilledIn && state?.view.tag === "Smart" && state.view.view === "FlaggedView";
+  };
+  const leaveList = () => { if (can({ type: "leaveList" })) void send({ type: "leaveList" }); };
+  const openNewEditor = () => {
+    if (!canCreateItem) return;
+    const presetDue = drilledIn && state.view.tag === "Smart" && (state.view.view === "TodayView" || state.view.view === "ScheduledView") ? todayStr : null;
+    const presetFlag = drilledIn && state.view.tag === "Smart" && state.view.view === "FlaggedView";
     void runtime.runPromise(beginNewReminder(activeListId, { dueDate: presetDue, flagged: presetFlag }));
-  }
-
-  function openEditEditor(item: ReminderItemRecord) {
+  };
+  const openEditEditor = (item: ReminderItemRecord) => {
+    const specId = store.specIdForItem(item.id);
+    if (specId > 0 && can({ type: "openItem", itemId: specId })) void send({ type: "openItem", itemId: specId });
     void runtime.runPromise(beginEditReminder(item));
-  }
-
-  function handleSaveDraft() {
-    void runtime.runPromise(saveReminderDraft());
-  }
-
-  function handleToggleComplete(id: string) {
-    void runtime.runPromise(toggleReminderComplete(id));
-  }
-
-  function handleToggleFlag(id: string) {
-    void runtime.runPromise(toggleReminderFlag(id));
-  }
-
-  function handleDeleteItem(id: string) {
-    void runtime.runPromise(deleteReminderItem(id));
-  }
-
-  function handleQuickAdd(title: string, dueDate: string | null) {
-    const flagged = drilledIn && state?.view.tag === "Smart" && state.view.view === "FlaggedView";
+  };
+  const handleSaveDraft = () => { void runtime.runPromise(saveReminderDraft()); };
+  const handleToggleComplete = (id: string) => { void runtime.runPromise(toggleReminderComplete(id)); };
+  const handleToggleFlag = (id: string) => { void runtime.runPromise(toggleReminderFlag(id)); };
+  const handleDeleteItem = (id: string) => { void runtime.runPromise(deleteReminderItem(id)); };
+  const handleQuickAdd = (title: string, dueDate: string | null) => {
+    const flagged = drilledIn && state.view.tag === "Smart" && state.view.view === "FlaggedView";
     void runtime.runPromise(createReminderItem({ listId: activeListId, title, dueDate, flagged }));
-  }
-
-  function handleListSubmit(name: string, color: ReminderListColor, icon: ReminderListIcon) {
-    if (listDialog.editing) {
-      void runtime.runPromise(updateReminderList(listDialog.editing.id, name, color, icon));
-    } else {
-      void runtime.runPromise(createReminderList(name, color, icon));
-    }
-  }
-
-  function handleDeleteList(listId: string, mode: DeleteMode) {
-    void runtime.runPromise(deleteReminderList(listId, mode));
-    if (activeList?.id === listId) setDrilledIn(false);
-  }
+  };
+  const handleListSubmit = (name: string, color: ReminderListColor, icon: ReminderListIcon) => {
+    void runtime.runPromise(listDialog.editing ? updateReminderList(listDialog.editing.id, name, color, icon) : createReminderList(name, color, icon));
+  };
+  const handleDeleteList = (listId: string, mode: DeleteMode) => { void runtime.runPromise(deleteReminderList(listId, mode)); };
 
   const wireFilter = {
     showCompleted: state.filter.showCompleted,
@@ -687,59 +898,47 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
 
   return (
     <>
-      <div className="flex flex-1 flex-col gap-3.5 px-4 pt-2 pb-32">
-        <div className="flex items-center justify-between gap-2">
-          {drilledIn && !searching ? (
-            <div className="flex min-w-0 items-center gap-2">
-              <Button type="button" variant="ghost" size="icon" aria-label="All lists" onClick={() => setDrilledIn(false)}>
-                <ArrowLeft />
-              </Button>
-              <h2 className="truncate text-lg font-semibold text-foreground">{activeTitle}</h2>
-            </div>
-          ) : (
-            <div className="min-w-0 flex-1">
-              <SearchField
-                aria-label="Search reminders"
-                placeholder="Search reminders"
-                value={searchQuery}
-                onValueChange={(value) => {
-                  setSearchQuery(value);
-                  const open = value.trim() !== "";
-                  if (can({ type: "setSearchOpen", open })) void send({ type: "setSearchOpen", open });
-                }}
-              />
-            </div>
-          )}
-          <div className="flex shrink-0 items-center gap-1">
-            {drilledIn && !searching ? (
-              <SortFilterMenu
-                sort={state.sort}
-                showCompleted={state.filter.showCompleted}
-                flaggedOnly={state.filter.flaggedOnly}
-                canClearCompleted={state.view.tag === "Smart" && state.view.view === "CompletedView" && counts.CompletedView > 0}
-                onSelectSort={(key) => { if (can({ type: "setSort", sort: key })) void send({ type: "setSort", sort: key }); }}
-                onToggleCompleted={() => {
-                  const next = { ...state.filter, showCompleted: !state.filter.showCompleted };
-                  if (can({ type: "setFilter", criteria: next })) void send({ type: "setFilter", criteria: next });
-                }}
-                onToggleFlagged={() => {
-                  const next = { ...state.filter, flaggedOnly: !state.filter.flaggedOnly };
-                  if (can({ type: "setFilter", criteria: next })) void send({ type: "setFilter", criteria: next });
-                }}
-                onClearCompleted={() => setConfirmClear(true)}
-              />
-            ) : null}
-            <Button type="button" variant="ghost" size="icon" aria-label="New reminder" onClick={openNewEditor}>
-              <Plus />
-            </Button>
-          </div>
-        </div>
+      <div className={cn("flex flex-1 flex-col gap-3.5 px-4 pt-2", dockClearance)}>
+        <RemindersHeader
+          drilledIn={drilledIn}
+          searching={searching}
+          activeTitle={activeTitle}
+          searchQuery={searchQuery}
+          canLeave={can({ type: "leaveList" })}
+          canCreateItem={canCreateItem}
+          canClearCompleted={state.view.tag === "Smart" && state.view.view === "CompletedView" && counts.CompletedView > 0 && canClearCompleted}
+          sort={state.sort}
+          showCompleted={state.filter.showCompleted}
+          flaggedOnly={state.filter.flaggedOnly}
+          priorityFilter={state.filter.priority}
+          onLeave={leaveList}
+          onSearchChange={(value) => {
+            setSearchQuery(value);
+            const open = value.trim() !== "";
+            if (can({ type: "setSearchOpen", open })) void send({ type: "setSearchOpen", open });
+          }}
+          onSelectSort={(key) => { if (can({ type: "setSort", sort: key })) void send({ type: "setSort", sort: key }); }}
+          onToggleCompleted={() => {
+            const next = { ...state.filter, showCompleted: !state.filter.showCompleted };
+            if (can({ type: "setFilter", criteria: next })) void send({ type: "setFilter", criteria: next });
+          }}
+          onToggleFlagged={() => {
+            const next = { ...state.filter, flaggedOnly: !state.filter.flaggedOnly };
+            if (can({ type: "setFilter", criteria: next })) void send({ type: "setFilter", criteria: next });
+          }}
+          onSelectPriority={(priority) => {
+            const next = { ...state.filter, priority };
+            if (can({ type: "setFilter", criteria: next })) void send({ type: "setFilter", criteria: next });
+          }}
+          onClearCompleted={() => setConfirmClear(true)}
+          onNewReminder={openNewEditor}
+        />
 
         {syncError ? (
           <Banner
             variant="warn"
             action={(
-              <Button type="button" variant="secondary" size="sm" onClick={() => void runtime.runPromise(refreshRemindersList())}>
+              <Button type="button" variant="secondary" size="sm" className="min-h-11" disabled={!canRefresh} onClick={() => void runtime.runPromise(refreshRemindersList())}>
                 <RefreshCw aria-hidden className="size-3.5" />
                 Retry
               </Button>
@@ -757,6 +956,8 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
               listNames={listNames}
               showListBadge
               nowMs={nowMs}
+              canCompleteItem={canCompleteItem}
+              canFlagItem={canFlagItem}
               onToggleComplete={handleToggleComplete}
               onToggleFlag={handleToggleFlag}
               onEdit={openEditEditor}
@@ -772,6 +973,10 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
             lists={snapshot.lists}
             snapshot={snapshot}
             hiddenIds={hiddenIds}
+            canCreateList={canCreateList}
+            canRenameList={canRenameListRecord}
+            canDeleteList={canDeleteListRecord}
+            canCreateItem={canCreateItem}
             onOpenSmart={openSmart}
             onOpenCustomList={openCustomList}
             onNewList={() => setListDialog({ open: true, editing: null })}
@@ -791,6 +996,12 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
             completedCount={counts.CompletedView}
             defaultQuickDue={defaultQuickDue}
             nowMs={nowMs}
+            canCreateItem={canCreateItem}
+            canClearCompleted={canClearCompleted}
+            canCompleteItem={canCompleteItem}
+            canFlagItem={canFlagItem}
+            canRenameActive={activeList ? canRenameListRecord(activeList) : false}
+            canDeleteActive={activeList ? canDeleteListRecord(activeList) : false}
             onQuickAdd={handleQuickAdd}
             onClearCompleted={() => setConfirmClear(true)}
             onNewReminder={openNewEditor}
@@ -803,43 +1014,27 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
         )}
       </div>
 
-      <ReminderEditorSheet
+      <RemindersModals
         runtime={runtime}
-        lists={snapshot.lists}
-        onSave={handleSaveDraft}
-        onDelete={handleDeleteItem}
-      />
-
-      {listDialog.open ? (
-        <ListEditorDialog
-          key={listDialog.editing?.id ?? "new"}
-          open
-          initial={listDialog.editing}
-          onClose={() => setListDialog({ open: false, editing: null })}
-          onSubmit={handleListSubmit}
-        />
-      ) : null}
-
-      <DeleteListDialog
-        list={deletingList}
-        itemCount={deletingList ? snapshot.items.filter((item) => item.listId === deletingList.id && !hiddenIds.has(item.id)).length : 0}
-        onClose={() => setDeletingList(null)}
-        onDelete={handleDeleteList}
-      />
-
-      <ConfirmDialog
-        open={confirmClear}
-        title="Clear completed reminders?"
-        confirmLabel="Clear"
-        destructive
-        onConfirm={() => {
+        snapshot={snapshot}
+        hiddenIds={hiddenIds}
+        completedCount={counts.CompletedView}
+        canDeleteSelected={state.selectedId > 0 ? can({ type: "deleteItem", itemId: state.selectedId, at: nowMs }) : state.undo.holding !== "Held" && state.write.outcome !== "Sent"}
+        listDialog={listDialog}
+        deletingList={deletingList}
+        confirmClear={confirmClear}
+        onSaveDraft={handleSaveDraft}
+        onDeleteItem={handleDeleteItem}
+        onCloseListDialog={() => setListDialog({ open: false, editing: null })}
+        onSubmitList={handleListSubmit}
+        onCloseDeleteList={() => setDeletingList(null)}
+        onDeleteList={handleDeleteList}
+        onConfirmClear={() => {
           setConfirmClear(false);
           void runtime.runPromise(clearCompletedReminders());
         }}
-        onCancel={() => setConfirmClear(false)}
-      >
-        This permanently removes all {counts.CompletedView} completed {counts.CompletedView === 1 ? "reminder" : "reminders"}.
-      </ConfirmDialog>
+        onCancelClear={() => setConfirmClear(false)}
+      />
     </>
   );
 }

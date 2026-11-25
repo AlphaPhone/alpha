@@ -7,16 +7,29 @@ import { ask } from "../platform/remote.vibe"
 export service WorkflowsApi {
   readonly workflow: WorkflowClient
   readonly request: WorkflowRequest
+  scope(owner: string): void!!
 }
+
+module zone {
+  /** The device's current IANA time zone, falling back to UTC. @throws {never} */
+  export function localTimeZone(): string {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+  }
+}
+export { localTimeZone } from zone
 
 export const workflowsApi = Layer.effect(WorkflowsApi, effect {
   const { runtime } = try Agent
   const inFlight = new Map<string, Promise<unknown>>()
+  let currentOwner = ""
   const read = (path: string) => {
-    const pending = inFlight.get(path)
+    const key = `${currentOwner}\0${path}`
+    const pending = inFlight.get(key)
     if (pending !== undefined) return pending
-    const fresh = runtime.request(path).finally(() => { inFlight.delete(path) })
-    inFlight.set(path, fresh)
+    const fresh = runtime.request(path).finally(() => {
+      if (inFlight.get(key) === fresh) inFlight.delete(key)
+    })
+    inFlight.set(key, fresh)
     return fresh
   }
   const request: WorkflowRequest = effect (path: string, body: unknown) => try tryPromise({
@@ -25,7 +38,15 @@ export const workflowsApi = Layer.effect(WorkflowsApi, effect {
       ? workflowHttpError(error.status, { code: error.code, error: error.message })
       : workflowHttpError(0, {}),
   })
-  return { workflow: workflowClient(request), request }
+  return {
+    workflow: workflowClient(request),
+    request,
+    scope: (owner: string) => sync(() => {
+      if (owner === currentOwner) return
+      currentOwner = owner
+      inFlight.clear()
+    }),
+  }
 })
 
 const Identifier = Schema.NonEmptyString
@@ -33,7 +54,6 @@ const Identifier = Schema.NonEmptyString
 const Once = { triggerType: Schema.Literal("once"), scheduledAtIso: Schema.NonEmptyString }
 const Recurring = { triggerType: Schema.Literal("cron"), cronExpression: Schema.NonEmptyString }
 const OnEvent = { triggerType: Schema.Literal("event"), eventKind: Schema.NonEmptyString }
-const Timing = Schema.Union([Schema.Struct(Once), Schema.Struct(Recurring), Schema.Struct(OnEvent)])
 const PromptFields = {
   id: Identifier,
   displayName: Schema.String,
@@ -42,13 +62,16 @@ const PromptFields = {
   revision: Schema.Int,
   timezone: Schema.NonEmptyString,
 }
-export const Prompt = Schema.Union([
+export const PromptSchema = Schema.Union([
   Schema.Struct({ ...PromptFields, ...Once }),
   Schema.Struct({ ...PromptFields, ...Recurring }),
   Schema.Struct({ ...PromptFields, ...OnEvent }),
 ])
-export type Prompt = typeof Prompt.Type
-export type PromptTiming = typeof Timing.Type
+export type Prompt = typeof PromptSchema.Type
+export type PromptTiming =
+  | { readonly triggerType: "once"; readonly scheduledAtIso: string }
+  | { readonly triggerType: "cron"; readonly cronExpression: string }
+  | { readonly triggerType: "event"; readonly eventKind: string }
 
 export schema ScheduledTask {
   readonly taskId: Identifier
@@ -60,7 +83,7 @@ export schema ScheduledTask {
   readonly metadata: { readonly recordKey?: string }
 }
 
-const Triggers = Schema.Struct({ triggers: Schema.Array(Prompt) })
+const Triggers = Schema.Struct({ triggers: Schema.Array(PromptSchema) })
 const Tasks = Schema.Struct({ tasks: Schema.Array(ScheduledTask) })
 
 export effect function readPrompts() {

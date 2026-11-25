@@ -4,13 +4,30 @@ import { type PhoneStep, type PhoneWorkflowCatalog, type PhoneWorkflowSaveExpect
 import * as Build from "../../gen/app__workflows__builder.effect.vibe"
 import * as Generate from "../../gen/app__workflows__generate.effect.vibe"
 import * as List from "../../gen/app__workflows__list.effect.vibe"
+import { canFile } from "../../gen/app__workflows__request.effect.vibe"
 import type { When } from "../../gen/app__workflows__schedule.effect.vibe"
 import type { Operation, Step } from "../../gen/app__workflows__steps.effect.vibe"
 import type { Agent } from "../platform/agent.vibe"
+import { PhoneCalendar } from "../platform/calendar.vibe"
+import { NoteStore } from "../platform/notes.vibe"
 import { ownerAt } from "../platform/owner.vibe"
+import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type Job, answer, applying, following, reacting, run, together } from "../runtime/reactor.vibe"
-import { WorkflowsApi } from "./api.vibe"
+import { createShelf } from "../runtime/shelf.vibe"
+import { Time } from "../runtime/time.vibe"
+import { WorkflowsApi, localTimeZone } from "./api.vibe"
 import { Rows, refresh } from "./list.vibe"
+
+export interface NoteChoice {
+  readonly id: string
+  readonly revision: string
+  readonly title: string
+}
+
+export interface CalendarChoice {
+  readonly id: string
+  readonly label: string
+}
 
 interface Draft {
   readonly owner: number
@@ -21,30 +38,29 @@ interface Draft {
   readonly prompt: string
   readonly generated?: PhoneWorkflowSpec
   readonly zone: string
+  readonly held: number
+  readonly noteChoices: readonly NoteChoice[]
+  readonly calendarChoices: readonly CalendarChoice[]
 }
 
-const blank: Draft = { owner: 0, name: "", description: "", steps: [], prompt: "", zone: "" }
+const blank: Draft = { owner: 0, name: "", description: "", steps: [], prompt: "", zone: "", held: 0, noteChoices: [], calendarChoices: [] }
 
 export service DraftWords {
   view(): Draft!!
   set(draft: Draft): void!!
+  snapshot(this: void): Draft
+  subscribe(this: void, listener: () => void): () => void
 }
 
 const words = Layer.sync(DraftWords, () => {
-  let current = blank
+  const shelf = createShelf<Draft>(blank)
   return {
-    view: () => succeed(current),
-    set: (draft: Draft) => sync(() => { current = draft }),
+    view: () => sync(() => shelf.get()),
+    set: (draft: Draft) => sync(() => { shelf.set(draft) }),
+    snapshot: shelf.snapshot,
+    subscribe: shelf.subscribe,
   }
 })
-
-module zone {
-  /** @throws {never} */
-  export function localZone(): string {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
-  }
-}
-import { localZone } from zone
 
 const operations: Readonly<Record<PhoneStep["operation"], Operation>> = {
   supplied_text: "SuppliedText", selected_notes: "SelectedNotes", selected_reminders: "SelectedReminders", calendar_range: "CalendarRange",
@@ -106,6 +122,7 @@ const saveKey = (scope: string) => `${draftKey(scope)}/submit`
 const DraftRecord = Schema.fromJsonString(Schema.Struct({
   version: Schema.Literal(1), name: Schema.String, description: Schema.String,
   steps: Schema.Array(Schema.Unknown), trigger: Schema.Unknown,
+  held: Schema.optionalKey(Schema.Int),
 }))
 
 function timing(trigger: PhoneWorkflowTrigger): When {
@@ -123,10 +140,12 @@ effect function readDraft(scope: string) {
   const record = (Schema.decodeUnknownEffect(DraftRecord)(raw) catch () => undefined)
   if (record === undefined) return undefined
   const parsed = (validatePhoneWorkflowSpec({
-    ...record, name: record.name.trim() || "Draft",
+    version: record.version, name: record.name.trim() || "Draft", description: record.description, trigger: record.trigger,
     steps: record.steps.length === 0 ? [{ kind: "Read", operation: "supplied_text", id: "draft", text: "Draft" }] : record.steps,
   }) catch () => undefined)
-  return parsed === undefined ? undefined : { ...parsed, name: record.name, steps: record.steps.length === 0 ? [] : parsed.steps }
+  return parsed === undefined ? undefined : {
+    ...parsed, name: record.name, steps: record.steps.length === 0 ? [] : parsed.steps, held: record.held ?? 0,
+  }
 }
 
 const Saved = Schema.fromJsonString(Schema.Struct({
@@ -134,7 +153,7 @@ const Saved = Schema.fromJsonString(Schema.Struct({
   expected: Schema.Struct({ mutationId: Schema.NonEmptyString, specDigest: Schema.NonEmptyString, compilerRevision: Schema.NonEmptyString }),
 }))
 
-type Needs = Agent | WorkflowsApi | DraftWords | Rows | KeyValueStore.KeyValueStore | List.Machine | Build.Machine
+type Needs = Agent | WorkflowsApi | DraftWords | Rows | KeyValueStore.KeyValueStore | List.Machine | Build.Machine | NoteStore | PhoneCalendar | SystemSettings | Time
 
 effect function offer(ticket: number): Build.Event!!Needs {
   const failed: Build.Event = { type: "offerRead", ticket, ok: false, speaks: false, reminders: false, runDay: false, schedules: false, generates: false, steps: [], name: 0, when: Build.initial.when }
@@ -154,7 +173,8 @@ effect function offer(ticket: number): Build.Event!!Needs {
   const restored = prior === undefined || live.name !== 0 || live.steps.length > 0 ? undefined : prior
   try box.set({ ...draft, owner: live.owner, catalog,
     name: restored?.name ?? draft.name, description: restored?.description ?? draft.description, steps: restored?.steps ?? draft.steps,
-    zone: restored?.trigger.kind === "time" ? restored.trigger.timeZone : draft.zone || localZone() })
+    held: restored?.held ?? draft.held,
+    zone: restored?.trigger.kind === "time" ? restored.trigger.timeZone : draft.zone || localTimeZone() })
 
   return {
     ...failed, ok: true, speaks: offered(catalog, "read_aloud") && offered(catalog, "app_notification"),
@@ -175,11 +195,69 @@ effect function keep(write: number, owner: number): Build.Event!!Needs {
   const scope = ownerAt() catch () => ""
   if (state.owner !== owner || words.owner !== owner || !(try (try Rows).sameOwner(scope, owner))) return failed
   const store = try KeyValueStore.KeyValueStore
+  const existing = try readDraft(scope)
+  if (existing !== undefined && existing.held > words.held) {
+    return { type: "draftKept", write, result: "WriteCollided", held: existing.held }
+  }
+  const nextHeld = Math.max(words.held, existing?.held ?? 0) + 1
   const kept = effect {
-    try store.set(draftKey(scope), JSON.stringify({ ...specification(state, words), name: words.name }))
+    try store.set(draftKey(scope), JSON.stringify({ ...specification(state, words), name: words.name, held: nextHeld }))
     return true
   } catch () => false
-  return kept ? { ...failed, result: "WriteLanded" } : failed
+  if (kept) try box.set({ ...(try box.view()), held: nextHeld })
+  return kept ? { type: "draftKept", write, result: "WriteLanded", held: nextHeld } : failed
+}
+
+effect function readChoices(ticket: number, op: Operation): Build.Event!!Needs {
+  const failed: Build.Event = { type: "choicesListed", ticket, ok: false }
+  const machine = try Build.Machine
+  const state = try machine.get()
+  const box = try DraftWords
+  const rows = try Rows
+  const scope = ownerAt() catch () => ""
+  if (!(try rows.sameOwner(scope, state.owner))) return failed
+  if (op === "SelectedNotes") {
+    const snapshot = (try NoteStore).read() catch () => undefined
+    if (snapshot === undefined || (ownerAt() catch () => "") !== scope) return failed
+    const live = try machine.get()
+    if (live.owner !== state.owner || !Build.canChoicesListed(live, ticket)) return failed
+    const noteChoices: NoteChoice[] = snapshot.notes.map((note) => ({
+      id: note.id,
+      revision: String(snapshot.revision),
+      title: note.title.trim() || note.body.split("\n")[0]?.trim() || "Untitled note",
+    }))
+    try box.set({ ...(try box.view()), noteChoices })
+    return { type: "choicesListed", ticket, ok: true }
+  }
+  if (op === "CalendarRange") {
+    const cal = try PhoneCalendar
+    if (!cal.present) return failed
+    const now = try (try Time).now()
+    const listed = cal.list({ begin: now, end: now + 7 * 86_400_000 }) catch () => undefined
+    if (listed === undefined || listed.status !== "ready" || (ownerAt() catch () => "") !== scope) return failed
+    const live = try machine.get()
+    if (live.owner !== state.owner || !Build.canChoicesListed(live, ticket)) return failed
+    const calendarChoices: CalendarChoice[] = listed.calendars.map((entry) => ({
+      id: entry.id,
+      label: entry.name?.trim() || entry.id,
+    }))
+    try box.set({ ...(try box.view()), calendarChoices })
+    return { type: "choicesListed", ticket, ok: true }
+  }
+  return failed
+}
+
+effect function askCalendarAccess(): Build.Event!!Needs {
+  const cal = try PhoneCalendar
+  if (!cal.present) return { type: "calendarAccess", grant: "Denied" }
+  const current = try cal.grant()
+  if (current === "Granted") return { type: "calendarAccess", grant: "Granted" }
+  const granted = cal.requestAccess() catch () => false
+  return { type: "calendarAccess", grant: granted ? "Granted" : "Denied" }
+}
+
+effect function openCalendarSettings(): void!!Needs {
+  try ignore((try SystemSettings).open("AppPermissions", ""))
 }
 
 effect function save(id: number, revision: number): Build.Event!!Needs {
@@ -248,12 +326,47 @@ function carry(fx: Build.Effect): Job<Build.Event, Needs, []> {
     when { tag: "ReadOffer", let ticket }: answer("workflow catalogue", offer(ticket),
       { type: "offerRead", ticket, ok: false, speaks: false, reminders: false, runDay: false, schedules: false, generates: false, steps: [], name: 0, when: Build.initial.when });
     when { tag: "KeepDraft", let write, let owner }: answer("keep workflow draft", keep(write, owner), { type: "draftKept", write, result: "WriteFailed", held: 0 });
-    when { tag: "ReadChoices", let ticket }: answer("workflow sources", succeed<Build.Event>({ type: "choicesListed", ticket, ok: false }), { type: "choicesListed", ticket, ok: false });
-    when { tag: "AskCalendarAccess" }: answer("workflow calendar permissions", succeed<Build.Event>({ type: "calendarAccess", grant: "Denied" }), { type: "calendarAccess", grant: "Denied" });
-    when { tag: "OpenSettings" }: run("workflow calendar settings", succeed(undefined));
+    when { tag: "ReadChoices", let ticket, let op }: answer("workflow sources", readChoices(ticket, op), { type: "choicesListed", ticket, ok: false });
+    when { tag: "AskCalendarAccess" }: answer("workflow calendar permissions", askCalendarAccess(), { type: "calendarAccess", grant: "Denied" });
+    when { tag: "OpenSettings" }: run("workflow calendar settings", openCalendarSettings());
     when { tag: "SaveWorkflow", let id, let revision }: answer("save workflow", save(id, revision), { type: "saveUnanswered" });
     when { tag: "ReadSaveRecord", let ticket, let id }: answer("workflow save receipt", checked(ticket, id), { type: "saveChecked", ticket, ok: false, found: false, updated: false });
   }
+}
+
+export effect function takeSavedDraft(): void!!(Agent | Rows | DraftWords | Build.Machine | KeyValueStore.KeyValueStore) {
+  const machine = try Build.Machine
+  const state = try machine.get()
+  const scope = ownerAt() catch () => ""
+  if (!(try (try Rows).sameOwner(scope, state.owner))) return
+  const saved = try readDraft(scope)
+  const steps = saved === undefined ? [] : shapes(saved.steps)
+  if (!Build.canTakeSaved(state, steps)) return
+  const box = try DraftWords
+  const current = try box.view()
+  try box.set({
+    ...current,
+    name: saved?.name ?? "",
+    description: saved?.description ?? "",
+    steps: saved?.steps ?? [],
+    held: saved?.held ?? current.held,
+    zone: saved?.trigger.kind === "time" ? saved.trigger.timeZone : current.zone,
+  })
+  try ignore(machine.send({ type: "takeSaved", steps }))
+}
+
+export effect function keepMyDraft(): void!!(Agent | Rows | DraftWords | Build.Machine | KeyValueStore.KeyValueStore) {
+  const machine = try Build.Machine
+  const state = try machine.get()
+  if (!Build.canKeepMine(state)) return
+  const scope = ownerAt() catch () => ""
+  const saved = scope === "" ? undefined : try readDraft(scope)
+  if (saved !== undefined) {
+    const box = try DraftWords
+    const current = try box.view()
+    try box.set({ ...current, held: Math.max(current.held, saved.held) })
+  }
+  try ignore(machine.send({ type: "keepMine" }))
 }
 
 export effect function renameDraft(name: string): void!!(DraftWords | Build.Machine) {
@@ -389,10 +502,21 @@ export effect function backDraft(): boolean!!(Build.Machine | Generate.Machine) 
 const saving = following(Build.Machine, (state) => Build.canKeepDraft(state) && !state.unwritable ? state.draft.edits : 0,
   Build.Machine, (dirty): Build.Event | undefined => dirty > 0 ? { type: "keepDraft" } : undefined)
 
+const releaseSavedKey = applying(
+  Build.Machine,
+  (state) => ({ owner: state.owner, free: canFile(state.save) }),
+  effect ({ owner, free }: { owner: number; free: boolean }) => {
+    if (!free || owner <= 0) return
+    const scope = ownerAt() catch () => ""
+    if (!(try (try Rows).sameOwner(scope, owner))) return
+    try ignore((try KeyValueStore.KeyValueStore).remove(saveKey(scope)))
+  },
+)
+
 export const authoring = together(
   reacting(Build, { carry }),
   reacting(Generate, { carry: (fx) => answer("generate workflow", generated(fx.ticket), {
     type: "draftGenerated", ticket: fx.ticket, ok: false, steps: [], active: false, scheduled: false, revised: false, speaks: false, reminders: false, runDay: false,
   }) }),
-  words, visible, saving,
+  words, visible, saving, releaseSavedKey,
 )
