@@ -44,7 +44,9 @@ import { type Attached, type Line, Talk } from "./talk.vibe";
 import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx";
 import { CommsBriefing } from "../phone/comms.vibe";
 import { displayNumber } from "../phone/words.ts";
-import { wordsOf } from "./words.ts";
+import { replyBlocks, wordsOf } from "./words.ts";
+import { handToMaps } from "../maps/handoff.ts";
+import type { MapsCard } from "@elizaos/plugin-maps-client";
 import { type TalkStopReceipt, type VoiceKeyboard, useTalkKeyboard } from "../voice/useTalkKeyboard.ts";
 
 export interface AssistantProps {
@@ -292,13 +294,32 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const onSettings = useCallback(() => {
     if (settingsAction) void runtime.runPromiseExit(Effect.flatMap(ShellMachine, (machine) => machine.send(settingsAction)));
   }, [runtime, settingsAction]);
-  const onOpenMaps = useCallback(() => void runtime.runPromiseExit(Effect.flatMap(ShellMachine, (machine) => machine.send(maps))), [runtime]);
+  // spec/app/maps/cards.md, "A card's Map button runs one flow, chosen from what the card carries": a search card hands Maps its search
+  const openedRef = useRef(new Set<number>());
+  const onOpenMaps = useCallback((card: MapsCard, message: number) => {
+    openedRef.current.add(message);
+    const query = card.kind === "places" || card.kind === "locate" ? card.query : undefined;
+    if (query !== undefined && query.trim() !== "") handToMaps(query);
+    void runtime.runPromiseExit(Effect.flatMap(ShellMachine, (machine) => machine.send(maps)));
+  }, [runtime]);
+  const mapsShowing = Boolean(shell.state && showing(shell.state, "Maps"));
+  // spec/app/maps/cards.md, "A tap sends one answer while the composer is quiet; a draft or an edit says why it waits; a failed send asks again"
+  const answeredRef = useRef(new Set<string>());
   const messages = useMessageRows({
     runtime, board, lines, chats: shown, writing, ...free, actions: messageActions, canReadAloud,
     settled: Boolean(talking && !inFlight(talking.turn) && !pending(talking)),
     onSettings: settingsAction ? onSettings : undefined,
     onPreview: canPreview ? preview : undefined,
-    onOpenMaps: shell.can(maps) ? onOpenMaps : undefined,
+    onOpenMaps: shell.can(maps) || mapsShowing ? onOpenMaps : undefined,
+    opened: openedRef.current,
+    onChoose: (choice: string, value: string) => {
+      if (!talking) return;
+      const answer = { type: "hold", askable: askable(talking) } as const;
+      if (answeredRef.current.has(choice) || board.snapshot().typed.trim() !== "" || !composer.can(answer)) return;
+      answeredRef.current.add(choice);
+      board.hold(value);
+      void composer.send(answer);
+    },
   });
   if (conversation.cause || chats.cause || composer.cause || reply.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Ask Alpha</Alert>;
   if (!talking || !shown || !writing || !finding) return null;
@@ -356,7 +377,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
   const earlier = { type: "scroll", around: board.numbered(lines[0]?.id ?? "") } as const;
   const later = { type: "scroll", around: board.numbered(lines.at(-1)?.id ?? "") } as const;
-  const writingReply = seen.reply !== "" ? [{ id: "reply", author: "alpha", text: seen.reply } as const] : [];
+  const replyWords = replyBlocks(seen.reply).words;
+  const writingReply = replyWords !== "" ? [{ id: "reply", author: "alpha", text: replyWords } as const] : [];
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
   const mediaCards = seen.media.filter((card) => !talking.context.sensitive && card.conversation === shown.chosen && card.revision === talking.context.revision).map((card) => ({
     id: `media ${card.id}`, author: "alpha" as const, text: "", children: <DeviceReview runtime={runtime} card={card} />,
