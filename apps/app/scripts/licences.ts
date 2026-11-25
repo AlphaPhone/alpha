@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto"
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs"
 import { dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { packPrepared } from "@repo/eliza-harness"
 import { licenceFlags as flagsOf, releaseBlockedByLicences, type Family, type Flag, type FontCheck } from "../gen/app__image__licences.ts"
 
 export const app = resolve(dirname(fileURLToPath(import.meta.url)), "..")
@@ -140,12 +141,12 @@ function packageDraft(dir: string, manifest: PackageManifest): Draft {
   }
 }
 
-/** The installed directory of a dependency, as Node resolves it from the package that names it. */
+/** The installed directory of a dependency, as Node resolves it from the package that names it, looking no higher than this workspace: an enclosing checkout's node_modules never enters the inventory. */
 function installed(from: string, name: string): string | undefined {
   for (let dir = from; ; dir = dirname(dir)) {
     const candidate = join(dir, "node_modules", name)
     if (existsSync(join(candidate, "package.json"))) return realpathSync(candidate)
-    if (dirname(dir) === dir) return undefined
+    if (dir === root || dirname(dir) === dir) return undefined
   }
 }
 
@@ -242,6 +243,46 @@ function androidDrafts(): Draft[] {
   })
 }
 
+export const NODE_ENTRY = "Node.js runtime (libeliza_node.so)"
+
+/** Alpha's own code staged into the agent pack's entry (the entry package and Alpha's product plugin), found by its package.json digest. */
+function alphaOwn(name: string, digest: string): boolean {
+  const alpha = join(packPrepared([]).root, ".alpha")
+  if (!existsSync(alpha)) return false
+  return readdirSync(alpha).filter((entry) => entry.startsWith("pack-entry-")).some((entry) =>
+    [join(alpha, entry, "package.json"), join(alpha, entry, "node_modules", name, "package.json")].some((file) => existsSync(file) && sha256(file) === digest))
+}
+
+/** The packages a built agent bundle names (its manifest.json), found by name, version and package.json digest in the pinned eliza checkout. */
+function bundledPackages(bundle: string): Draft[] {
+  const manifest = json<{ readonly packages: readonly { readonly name: string; readonly version: string; readonly sha256: string }[] }>(join(bundle, "manifest.json"))
+  const store = join(root, ".eliza/node_modules/.pnpm")
+  const candidates = (name: string, version: string) => [
+    ...readdirSync(store).filter((entry) => entry.startsWith(`${name.replace("/", "+")}@${version}`)).map((entry) => join(store, entry, "node_modules", name)),
+    ...[join(root, ".eliza/packages/agent"), join(root, ".eliza")].flatMap((from) => installed(from, name) ?? []),
+  ]
+  const drafts: Draft[] = []
+  for (const row of manifest.packages) {
+    if (row.name.startsWith("@elizaos/") || alphaOwn(row.name, row.sha256)) continue
+    const dir = candidates(row.name, row.version).find((candidate) => existsSync(join(candidate, "package.json")) && sha256(join(candidate, "package.json")) === row.sha256)
+    if (dir === undefined) throw new Error(`${row.name}@${row.version}, bundled into the agent, is not in the pinned eliza checkout: run pnpm eliza`)
+    drafts.push(packageDraft(dir, json<PackageManifest>(join(dir, "package.json"))))
+  }
+  return drafts
+}
+
+/** The packaged agent runtime: the Android Node runtime eliza's lock pins, and every npm package bundled into agent.mjs. */
+export function runtimeDrafts(bundle: string): Draft[] {
+  const lock = json<{ readonly version: string; readonly ndk: string; readonly buildCommit: string }>(join(root, ".eliza/packages/os/aosp/runtime/node.lock.json"))
+  if (process.versions.node !== lock.version) throw new Error(`The Node licence is read from this Node ${process.versions.node}; the packaged runtime is ${lock.version}`)
+  const text = read(join(dirname(process.execPath), "../LICENSE")).trim()
+  const node: Draft = {
+    name: NODE_ENTRY, version: `${lock.version} (Android NDK ${lock.ndk}, eliza build ${lock.buildCommit})`, license: "MIT", flags: flagged("MIT"),
+    source: `https://github.com/nodejs/node/tree/v${lock.version}`, text,
+  }
+  return [node, ...bundledPackages(bundle)]
+}
+
 /** The fonts the design system ships, each with its recorded licence, and whether every one has a record. */
 export function fontDrafts(): { drafts: Draft[]; check: "FontResolved" | "FontUnresolved" | "FontCheckNotRun" } {
   const directory = join(root, "packages/design-system/fonts")
@@ -299,9 +340,10 @@ function finish(draft: Draft): Notice {
 export interface Inventory { readonly notices: readonly Notice[]; readonly fontCheck: "FontResolved" | "FontUnresolved" | "FontCheckNotRun"; readonly openSourceFlags: readonly Flag[] }
 
 /** What Alpha ships, each with its licence: npm packages, eliza, the Android runtime classpath and the fonts. @throws {Error} */
-export function inventory(): Inventory {
+export function inventory(bundle?: string): Inventory {
   const fonts = fontDrafts()
-  const drafts = [...npmDrafts(), elizaDraft(), ...androidDrafts(), ...ocrDrafts(), ...fonts.drafts]
+  const found = new Map([...npmDrafts(), elizaDraft(), ...androidDrafts(), ...ocrDrafts(), ...fonts.drafts, ...(bundle === undefined ? [] : runtimeDrafts(bundle))].map((draft) => [`${draft.name}@${draft.version}`, draft]))
+  const drafts = [...found.values()]
   const notices = drafts.map(finish).sort((a, b) => a.name.localeCompare(b.name, "en") || a.version.localeCompare(b.version, "en"))
   const openSourceFlags = [...new Set(drafts.flatMap((draft) => flagsOf(alternatives(draft.license).map((ids) => ids.map(familyOf)))))]
   return { notices, fontCheck: fonts.check, openSourceFlags }
@@ -350,15 +392,26 @@ export function exitWith(code: number): void {
 
 const font = (check: Inventory["fontCheck"]): FontCheck => check
 
-/** Write the notices, or with `--check` say whether the committed ones are current; with `--sbom FILE`, write the bill of materials too. @throws {Error} */
+/** Write the notices, or with `--check` say whether the committed ones are current; with `--packaged-runtime BUNDLE` list the agent runtime too, with `--into DIR` write them under DIR/licenses, with `--sbom FILE` write the bill of materials too. @throws {Error} */
 export function licences(argv: readonly string[]) {
   const check = argv.includes("--check")
   const sbomAt = argv.indexOf("--sbom")
-  const found = inventory()
+  const option = (name: string) => {
+    const at = argv.indexOf(name)
+    if (at < 0) return undefined
+    const value = argv[at + 1]
+    if (value === undefined || value.startsWith("--")) throw new Error(`${name} needs a directory`)
+    return value
+  }
+  const bundle = option("--packaged-runtime")
+  const into = option("--into")
+  if (check && (bundle !== undefined || into !== undefined)) throw new Error("--check compares the committed notices, which list no packaged runtime")
+  const found = inventory(bundle)
   const flagLines = found.notices.flatMap((entry) => entry.flags.map((flag) => `LICENCE FLAG ${flag}: ${entry.name}@${entry.version.split("\n")[0]} (${entry.license})`))
   if (releaseBlockedByLicences([...found.openSourceFlags], font(found.fontCheck)))
     throw new Error(`The font licence check is ${found.fontCheck}: a release cannot ship until every bundled font's check runs`)
-  const written: readonly (readonly [string, string])[] = [[outputs.json, renderJson(found.notices)], [outputs.text, renderText(found.notices)]]
+  const target = into === undefined ? outputs : { json: join(into, "licenses/third-party-notices.json"), text: join(into, "licenses/THIRD_PARTY_NOTICES.txt") }
+  const written: readonly (readonly [string, string])[] = [[target.json, renderJson(found.notices)], [target.text, renderText(found.notices)]]
   if (check) {
     const stale = written.filter(([file, content]) => currentText(file) !== content).map(([file]) => relative(app, file))
     if (stale.length) throw new Error(`The third-party notices are stale: ${stale.join(", ")}. Run pnpm licences`)

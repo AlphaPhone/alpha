@@ -14,13 +14,10 @@ import { Engagements } from "./activity.vibe"
 import { Names } from "./names.vibe"
 import { holder } from "./updates.vibe"
 
-/** How often Android's activation is read again while one is pending or the page holds. */
-const following = 1000
-
 /** The ids of each activation this page has read, by the number that stands for it. */
 const known = new Map<number, Ids>()
 
-const settlements: Readonly<Record<string, Settlement>> = { installed: "WasInstalled", canceled: "WasCancelled", cancelled: "WasCancelled" }
+const settlements: Readonly<Record<string, Settlement>> = { installed: "WasInstalled", canceled: "WasCancelled", cancelled: "WasCancelled", failed: "WasFailed" }
 
 // spec/app/update/page.md, "When every area has saved its drafts the page answers ready, and otherwise it refuses"; spec/app/update/page.md, "A page is ready for an update only with no voice turn, connection step, call or recording under way, and for a hands-off update only while the phone is still idle"
 effect function flushed(activation: number): Event!!(Updates.Machine | Engagements) {
@@ -71,7 +68,7 @@ function carry(fx: Out): Job<Event, LauncherUpdates | Updates.Machine | Engageme
 
 const machine = reacting(Page, { carry })
 
-// spec/app/update/page.md, "A pending update is read for this page, never an older one than the page has taken up"; spec/app/update/page.md, "A page that cannot read the update state holds rather than mount"; spec/app/update/page.md, "The update settles for this page when nothing is pending, or with the outcome of its own activation"
+// spec/app/update/page.md, "A pending update is read for this page, never an older one than the page has taken up"; spec/app/update/page.md, "A page that cannot read the update state holds rather than mount"; spec/app/update/page.md, "The update settles for this page when nothing is pending, or with the outcome of its own activation"; spec/app/update/page.md, "An update read under another bridge is never taken up or answered by this page"; spec/app/update/page.md, "An unknown outcome lets a page go only once Android's updater is idle, and then neither reconnects nor explains"
 effect function read(): void!!(LauncherUpdates | Names | Page.Machine) {
   const page = try Page.Machine
   const names = try Names
@@ -81,16 +78,19 @@ effect function read(): void!!(LauncherUpdates | Names | Page.Machine) {
     return
   }
   const now = reply.value
-  const number = Option.isSome(now.ids) ? try names.number(`activation:${now.ids.value.activationId}`) : (try page.get()).activation
-  if (Option.isSome(now.ids)) known.set(number, now.ids.value)
+  const state = try page.get()
+  const number = Option.isSome(now.ids) ? try names.number(`activation:${now.ids.value.activationId}`) : state.activation
+  const bridge = Option.isSome(now.ids) ? try names.number(`bridge:${now.ids.value.bridgeId}`) : state.bridge
+  if (Option.isSome(now.ids) && (state.activation === 0 || bridge === state.bridge)) known.set(number, now.ids.value)
   if (now.pending && number > 0) {
-    try ignore(page.send({ type: "read", activation: number, stage: now.paused ? "Paused" : "Preparing", canContinue: now.canContinue, automatic: now.automatic }))
+    try ignore(page.send({ type: "read", activation: number, bridge, stage: now.paused ? "Paused" : "Preparing", canContinue: now.canContinue, automatic: now.automatic }))
     return
   }
-  const ending: Settlement = Option.isSome(now.outcome) ? settlements[now.outcome.value] ?? "WasFailed" : "Gone"
-  try ignore(page.send({ type: "endUpdate", activation: number, ending, resume: now.resume }))
+  const ending: Settlement = Option.isSome(now.outcome) ? settlements[now.outcome.value] ?? "Unknown" : "Gone"
+  try ignore(page.send({ type: "endUpdate", activation: number, bridge, ending, resume: now.resume, idle: now.idle }))
 }
 
+// spec/app/update/page.md, "While an update is pending or the page holds, Android's activation is read again every second"
 /** Android's activation, read at launch, each time Android says it is ready or settled, and every second while one is pending or the page holds. */
 const followed = started(effect {
   const page = try Page.Machine
@@ -100,7 +100,7 @@ const followed = started(effect {
     try read()
     const state = try page.get()
     const next = Effect.asVoid(Stream.runHead(told))
-    if (state.activation !== 0 || state.mount !== "Mounted") try race(next, time.until((try time.now()) + following))
+    if (Page.following(state)) try race(next, time.until((try time.now()) + Page.readEvery))
     else try next
   }
 }, "following Android's activation of an update")

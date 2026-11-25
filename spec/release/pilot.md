@@ -147,7 +147,7 @@ pure def cleanBoundary(s: Pilot): bool =
 pure def canStartAgent(s: Pilot): bool = s.leg == Starting and cleanBoundary(s)
 
 pure def startAgent(s: Pilot, agent: Agent): Pilot =
-  { ...s, leg: Recording, agent: agent, passed: agent == Running or agent == NotVerified }
+  { ...s, leg: Recording, agent: agent, passed: agent == Running }
 
 pure def canSkipStart(s: Pilot): bool = s.leg == Starting and not(cleanBoundary(s))
 
@@ -158,13 +158,17 @@ pure def alwaysTheAgentStartsOnlyCleanly(s: Pilot): bool = s.agent != Unstarted 
 
 ### A run passes only when the agent came back
 
+Alpha's process running while Android lists no agent service is not the
+agent back: that run fails.
+
 ```quint
 pure def canRecordRun(s: Pilot): bool = s.leg == Recording
 
 pure def recordRun(s: Pilot): Pilot = { ...s, leg: Recorded }
 
-pure def alwaysPassedOnlyWithTheAgentBack(s: Pilot): bool =
-  s.passed == (s.agent == Running or s.agent == NotVerified)
+pure def alwaysPassedOnlyWithTheAgentBack(s: Pilot): bool = s.passed == (s.agent == Running)
+
+pure def runPassed(s: Pilot): bool = s.leg == Done and s.passed
 ```
 
 ### Each record of a run is made at its own step and kept to the end
