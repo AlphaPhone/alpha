@@ -81,7 +81,7 @@ const screenSync = started(effect {
 }, "syncing Slack screen to agent")
 
 /** Read the current Home `SlackCard` snapshot from the active workspace's spec state and non-secret ledger. */
-export const slackHomeCard: SlackHomeCard!!(Workspaces.Machine | SlackLedger) = effect {
+export const slackHomeCard = effect {
   const state = try (try Workspaces.Machine).get()
   const ledger = try SlackLedger
   const said = Workspaces.attention(state)
@@ -104,7 +104,7 @@ export const slackHomeCard: SlackHomeCard!!(Workspaces.Machine | SlackLedger) = 
 }
 
 /** Step back within the Slack area: Thread drawer -> Channel -> OAuth/Consent -> Shell. */
-export const slackBack: boolean!!(Auth.Machine | Conversation.Machine | Composer.Machine) = effect {
+export const slackBack = effect {
   const conv = try Conversation.Machine
   const comp = try Composer.Machine
   const auth = try Auth.Machine

@@ -44,6 +44,7 @@ import { useMachine as useConversation } from "../../gen/app__telegram__conversa
 import type { Machine as NoticesMachine } from "../../gen/app__telegram__notices.effect.vibe";
 import type { TelegramDialogSummary } from "../platform/telegram.vibe";
 import { useTimed } from "../runtime/react.ts";
+import { swapComposerTarget } from "../messaging/composer.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { Time } from "../runtime/time.vibe";
 import {
@@ -600,11 +601,7 @@ function ConversationView({
     : undefined;
 
   const swapTarget = () => {
-    if (isAlphaBar) {
-      if (composer.can({ type: "closeAlphaSheet" }, "Owner")) void composer.send({ type: "closeAlphaSheet" }, "Owner");
-    } else if (composer.can({ type: "openAlphaSheet", height: "SheetOpen" }, "Owner")) {
-      void composer.send({ type: "openAlphaSheet", height: "SheetOpen" }, "Owner");
-    }
+    swapComposerTarget(composer, isAlphaBar);
   };
 
   const sendAllowed = isEditing

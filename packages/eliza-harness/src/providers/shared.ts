@@ -97,7 +97,7 @@ export interface ProviderServerConfig<S> {
 export const CORS_HEADERS: Readonly<Record<string, string>> = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-  "access-control-allow-headers": "Authorization, Content-Type, Idempotency-Key, X-Slack-Workspace",
+  "access-control-allow-headers": "Authorization, Content-Type, Idempotency-Key, X-Slack-Workspace, b3, traceparent, tracestate",
   "access-control-expose-headers": "Retry-After, Content-Type",
 };
 
@@ -547,7 +547,11 @@ export async function createProviderServer<S>(config: ProviderServerConfig<S>): 
   const server = http.createServer((incoming, outgoing) => {
     void (async () => {
       if ((incoming.method ?? "GET").toUpperCase() === "OPTIONS") {
-        outgoing.writeHead(204, CORS_HEADERS);
+        const requested = incoming.headers["access-control-request-headers"];
+        const headers = typeof requested === "string" && requested.trim() !== ""
+          ? { ...CORS_HEADERS, "access-control-allow-headers": requested }
+          : CORS_HEADERS;
+        outgoing.writeHead(204, headers);
         outgoing.end();
         return;
       }

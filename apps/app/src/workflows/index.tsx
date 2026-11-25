@@ -8,4 +8,4 @@ import { backList, listing } from "./list.vibe";
 const mounted = together(listing, stepping("view:Workflows", Machine, (state) => state.sheet || state.place.tag !== "ListingRows"));
 
 /** Workflows, opened over the resident agent the first time the view is drawn. */
-export default area(mounted, Workflows, { back: backList });
+export default area(mounted, Workflows, { back: backList() });

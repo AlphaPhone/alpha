@@ -25,6 +25,9 @@ import { messages } from "./messages/messages.vibe"
 import { contacts } from "./contacts/contacts.vibe"
 import { requests } from "./contacts/requests.vibe"
 import { defaultMessagingBridge } from "./messaging/bridge.vibe"
+import { messagingWire } from "./messaging/wire.vibe"
+import { telegramResident } from "./telegram/resident.vibe"
+import { slackResident } from "./slack/resident.vibe"
 
 /**
  * The machines that live from launch to exit: those another area follows or tells, and those that must act while
@@ -57,6 +60,9 @@ const machines = together(
   focus,
   reports,
   defaultMessagingBridge,
+  telegramResident,
+  slackResident,
+  messagingWire,
 )
 
 /** The resident machines, closed: each machine one of them follows or tells is among them. */

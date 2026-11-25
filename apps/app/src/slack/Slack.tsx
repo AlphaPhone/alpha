@@ -43,6 +43,7 @@ import { useMachine as useConversation } from "../../gen/app__slack__conversatio
 import type { Machine as NoticesMachine } from "../../gen/app__slack__notices.effect.vibe";
 import type { SlackChannelSummary, SlackMessage, SlackUser } from "../platform/slack.vibe";
 import { useTimed } from "../runtime/react.ts";
+import { swapComposerTarget } from "../messaging/composer.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import type { Time } from "../runtime/time.vibe";
 import {
@@ -402,13 +403,7 @@ function SlackChannelView({
       <ChatComposer
         target={isAlphaBar ? "alpha" : "chat"}
         targetAvatar={{ name: channelLabel }}
-        onSwapTarget={() => {
-          if (isAlphaBar) {
-            if (composer.can({ type: "closeAlphaSheet" }, "Owner")) void composer.send({ type: "closeAlphaSheet" }, "Owner");
-          } else if (composer.can({ type: "openAlphaSheet", height: "SheetOpen" }, "Owner")) {
-            void composer.send({ type: "openAlphaSheet", height: "SheetOpen" }, "Owner");
-          }
-        }}
+        onSwapTarget={() => { swapComposerTarget(composer, isAlphaBar); }}
         value={composerValue}
         placeholder={isAlphaBar ? "Ask Alpha about this Slack conversation" : isThread ? "Reply in thread..." : `Message ${channelLabel}`}
         context={editing ? { kind: "edit", excerpt: editing.original } : undefined}
@@ -675,33 +670,32 @@ function SlackWorkspaceListView({
         >
           <ListGroup>
             {connectedMetas.map((meta) => (
-              <ListRow
-                key={meta.teamId}
-                title={meta.name}
-                detail={`Team ${meta.teamId}`}
-                selected={meta.num === activeWorkspace}
-                trailing={(
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    aria-label={`Sign out ${meta.name}`}
-                    disabled={!auth.can({ type: "signOutWorkspace", workspace: meta.num })}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setSwitcherOpen(false);
-                      setConfirmSignOut(meta);
-                    }}
-                  >
-                    Sign out
-                  </Button>
-                )}
-                onClick={() => {
-                  setSwitcherOpen(false);
-                  if (workspaces.can({ type: "switchWorkspace", workspace: meta.num })) {
-                    void workspaces.send({ type: "switchWorkspace", workspace: meta.num });
-                  }
-                }}
-              />
+              <div key={meta.teamId} className="flex items-center gap-1 pr-2">
+                <ListRow
+                  className="min-w-0 flex-1"
+                  title={meta.name}
+                  detail={`Team ${meta.teamId}`}
+                  selected={meta.num === activeWorkspace}
+                  onClick={() => {
+                    setSwitcherOpen(false);
+                    if (workspaces.can({ type: "switchWorkspace", workspace: meta.num })) {
+                      void workspaces.send({ type: "switchWorkspace", workspace: meta.num });
+                    }
+                  }}
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label={`Sign out ${meta.name}`}
+                  disabled={!auth.can({ type: "signOutWorkspace", workspace: meta.num })}
+                  onClick={() => {
+                    setSwitcherOpen(false);
+                    setConfirmSignOut(meta);
+                  }}
+                >
+                  Sign out
+                </Button>
+              </div>
             ))}
           </ListGroup>
         </SheetContent>

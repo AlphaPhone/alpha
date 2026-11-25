@@ -18,7 +18,7 @@ import { agentAt } from "../src/platform/agent.vibe";
 import { cloudAt } from "../src/platform/cloud.vibe";
 import { MessagingSessions, messagingSessions } from "../src/platform/messaging.vibe";
 import { pagePlatform } from "../src/platform/platform.vibe";
-import { assertSlackUserToken, slackAt } from "../src/platform/slack.vibe";
+import { type Slack, assertSlackUserToken, slackAt } from "../src/platform/slack.vibe";
 import { together, whole } from "../src/runtime/reactor.vibe";
 import { SlackScreen } from "../src/slack/Slack.tsx";
 import { completeSlackOAuthCallback, submitSlackTokenAttempt } from "../src/slack/auth.vibe";
@@ -27,11 +27,21 @@ import { executeSlackAgentRequest, slackAmbientSnapshot, slackBack, slackHomeCar
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+type SlackTestServices =
+  | Preferences.Machine
+  | AuthMachine
+  | WorkspacesMachine
+  | ConversationMachine
+  | ComposerMachine
+  | AgentMachine
+  | NoticesMachine
+  | SlackLedger
+  | MessagingSessions
+  | Slack
+  | KeyValueStore.KeyValueStore;
+
 interface MountedSlack {
-  readonly runtime: ManagedRuntime.ManagedRuntime<
-    Preferences.Machine | AuthMachine | WorkspacesMachine | ConversationMachine | ComposerMachine | AgentMachine | NoticesMachine | SlackLedger | MessagingSessions | KeyValueStore.KeyValueStore,
-    unknown
-  >;
+  readonly runtime: ManagedRuntime.ManagedRuntime<SlackTestServices, unknown>;
   readonly host: HTMLDivElement;
   readonly close: () => Promise<void>;
 }
@@ -77,7 +87,7 @@ async function mountSlack(origin: string): Promise<MountedSlack> {
 
 async function waitFor<S>(
   runtime: MountedSlack["runtime"],
-  changes: Effect.Effect<Stream.Stream<S>, never, never>,
+  changes: Effect.Effect<Stream.Stream<S>, never, SlackTestServices>,
   predicate: (state: S) => boolean,
 ): Promise<S> {
   let matched!: S;
