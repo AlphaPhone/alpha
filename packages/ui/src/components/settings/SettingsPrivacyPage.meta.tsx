@@ -32,6 +32,7 @@ export const meta: ComponentMeta<SettingsPrivacyPageProps> = {
     Reading: { read: "reading" },
     Saving: { saving: true },
     "Acts without asking": { askFirst: false },
+    "On an Alpha image": { onListener: fn() },
     Unreadable: { read: "failed", onRecover },
     Recovering: { read: "failed", recovering: true },
   },

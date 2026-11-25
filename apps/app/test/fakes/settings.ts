@@ -1,5 +1,5 @@
 // spec/app/settings/index.md, "Story: Find a setting and come back"
-import type { DataResetPlugin, AndroidRoleStatus, ElizaPasswordsPlugin, PasswordsStatus, LaunchTarget, LauncherAppsChange, ListenerStatus, ListenerStopReceipt, NativeCrashEntry, SensePlugin, SystemFacts, SystemHostPlugin, SystemPlugin, SystemSettingsPage, ApprovedJoinResult, ConnectOptions, ConnectivityResult, WiFiNetwork, WiFiPlugin } from "@elizaos/os-bridges";
+import type { DataResetPlugin, AndroidRoleStatus, ElizaPasswordsPlugin, ListenerStatus, PasswordsStatus, LaunchTarget, LauncherAppsChange, NativeCrashEntry, SystemFacts, SystemHostPlugin, SystemPlugin, SystemSettingsPage, ApprovedJoinResult, ConnectOptions, ConnectivityResult, WiFiNetwork, WiFiPlugin } from "@elizaos/os-bridges";
 import type { LauncherScene } from "./launcher.ts";
 import { type Faked, plugin, rejection } from "./phone.ts";
 
@@ -13,20 +13,20 @@ export interface RecoveryScene {
   readonly tokens: string[];
 }
 
-interface ListenerScene {
+export interface ListenerScene {
   status: ListenerStatus;
-  refusesStop: boolean;
-  readonly calls: string[];
+  readonly pauseReply: Promise<unknown>;
+  openSettings: boolean;
 }
 
 /** What the fake phone holds for Settings, and how it behaves; a journey changes it between steps. */
 export interface SettingsScene {
   facts: SystemFacts;
   recovery?: RecoveryScene;
+  listener?: ListenerScene;
   roles: AndroidRoleStatus[];
   launcher: boolean;
   version: string;
-  readonly listener: ListenerScene;
   hostFacts: { androidRelease: string; permissions: { Camera?: boolean; Microphone?: boolean; Calendar?: boolean } };
   /** Reads of the phone's facts wait for this before they answer. */
   gate: Promise<unknown>;
@@ -61,11 +61,6 @@ export function settingsScene(): SettingsScene {
       { role: "assistant", androidRole: "android.app.role.ASSISTANT", held: false, holders: [], available: true },
     ],
     launcher: true, version: "1.4.0",
-    listener: {
-      status: { available: true, state: "OFF", label: "Listening off", consented: false,
-        listening: false, microphoneOpen: false },
-      refusesStop: false, calls: [],
-    },
     hostFacts: { androidRelease: "16", permissions: { Microphone: false, Calendar: true } },
     autofill: { supported: true, selected: "none" }, autofillDestination: "autofill-picker",
     gate: Promise.resolve(), grantsHome: true, opened: [], copied: [], refusesCopy: false, crashes: [], reset: { status: "cancelled", message: "Nothing was reset." }, reviews: [],
@@ -76,31 +71,6 @@ export function settingsScene(): SettingsScene {
       iccid: { status: "permission-denied" }, eid: { status: "available", value: "89049032000000000000000000000001" },
     },
   };
-}
-
-/** The listening bridge offers status, a stop and its own consent screen. */
-export function elizaSense(scene: ListenerScene): Faked {
-  const stop = (action: "pause" | "turnOff"): ListenerStopReceipt => {
-    scene.calls.push(action);
-    if (scene.refusesStop || !scene.status.available) return { available: false };
-    const paused = action === "pause";
-    const receipt = {
-      ...scene.status,
-      state: paused ? "PAUSED_USER" : "OFF",
-      label: paused ? "Listening paused" : "Listening off",
-      saved: true, listening: false, microphoneOpen: false,
-    } as const;
-    scene.status = receipt;
-    return receipt;
-  };
-  return plugin<SensePlugin>(() => ({
-    status: async () => { scene.calls.push("status"); return scene.status; },
-    pause: async () => stop("pause"),
-    turnOff: async () => stop("turnOff"),
-    openSettings: async () => { scene.calls.push("openSettings"); return { opened: true }; },
-    bindInvocationSession: async () => {},
-    takeInvocation: async () => ({ assistant: false }),
-  }));
 }
 
 const page = (scene: SettingsScene, name: string) => {
@@ -233,6 +203,22 @@ export function alphaCarrierSetup(scene: SettingsScene): Faked {
   });
 }
 
+
+/** The qualified image listener's status, stop receipts and explicit native settings handoff. */
+export function elizaSense(scene: SettingsScene, listener: ListenerScene): Faked {
+  return () => ({
+    status: () => Promise.resolve(listener.status),
+    pause: () => listener.pauseReply,
+    turnOff: async () => {
+      listener.status = { available: true, state: "OFF", label: "Off", consented: false, listening: false, microphoneOpen: false };
+      return { ...listener.status, saved: true };
+    },
+    openSettings: async () => {
+      if (listener.openSettings) await page(scene, "sense-settings");
+      return { opened: listener.openSettings };
+    },
+  });
+}
 
 /** Android's autofill status and provider picker through the native Passwords bridge. */
 export function elizaPasswords(scene: SettingsScene): Faked {

@@ -198,7 +198,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const unread = card?.isUnread ?? false;
   const mark = { type: "mark", access, account: state.account, message: state.message, unread: !unread } as const;
   const retry = { type: "retry", access, remote } as const;
-  const reopen = { type: "reopen", access, thread: state.thread, remote } as const;
+  const reopen = { type: "reopen", access, remote } as const;
   const earlier = { type: "earlier", access, remote } as const;
   const newer = { type: "newer", access, remote } as const;
   const history = revisionOf(card);
@@ -333,8 +333,8 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const today = runtime.runSync(Time.use((time) => time.latest()));
   const checking = state.accounts.status === "Loading";
   const row = ({ message: number, card, draftId }: Letter): InboxListRow => {
-    const open = { type: "open", access, account, message: number, thread: 1, remote } as const;
-    const saved = { type: "openSaved", account, message: number, thread: 1, checking, kept: state.saved } as const;
+    const open = { type: "open", access, account, message: number, remote } as const;
+    const saved = { type: "openSaved", account, message: number, checking, kept: state.saved } as const;
     const opening = draftsFolder ? undefined : message.can(open) ? open : message.can(saved) ? saved : undefined;
     const editing = draftsFolder && draftId !== undefined && !state.saved && readable(state) ? () => {
       setUnopenedDraft(undefined);

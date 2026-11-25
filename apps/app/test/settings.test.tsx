@@ -15,7 +15,7 @@ import * as Layers from "../gen/app__shell__layers.effect.vibe";
 import settings from "../src/settings/index.tsx";
 import { button, closeAll, fill, hardware, later, only, open as openAlpha, press, seen, underAct, until } from "./alpha.tsx";
 import { account } from "./fakes/cloud.ts";
-import { notices } from "./fakes/settings.ts";
+import { type ListenerScene, notices } from "./fakes/settings.ts";
 import { type Scene, scene } from "./fakes/scene.ts";
 
 underAct();
@@ -26,7 +26,7 @@ history.replaceState(null, "", "/?tools=1");
 const shipped = vi.fn(() => Promise.resolve(Response.json(notices)));
 vi.stubGlobal("fetch", ((input: RequestInfo | URL, init?: RequestInit) => (String(input).endsWith("licenses/third-party-notices.json") ? shipped() : fetch(input, init))) as typeof fetch);
 
-const open = (world: Scene) => openAlpha(world, only("home", "view:Settings", "settings/phone", "settings/activity", "settings/listening", "overlay"));
+const open = (world: Scene) => openAlpha(world, only("home", "view:Settings", "settings/phone", "settings/activity", "overlay"));
 
 /** The row, switch or choice whose title is `title`, as a person reads it: a row's title, never its value beside it. */
 const titled = (title: string) => [...document.querySelectorAll<HTMLElement>("button, label")].find((found) => found.querySelector("span > span")?.textContent === title);
@@ -111,48 +111,6 @@ describe("Settings", () => {
     await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Full");
     expect((await machines.runPromise(Facts.Machine.use((facts) => facts.get()))).read.read.status).toBe("Loaded");
     expect(world.settings.opened).toEqual([]);
-  });
-
-  it.each([false, true])("Omits the image listener when the image is unavailable (phone %s)", async (phone) => {
-    const { alpha, world } = await settingsOpen({ ...scene(), phone });
-    await press("Privacy");
-    await until(alpha, alpha.runtime, Pages.Machine, (s) => s.page === "Privacy");
-    expect(titled("Listener")).toBeUndefined();
-    expect(titled("Listening")).toBeUndefined();
-    expect(titled("Listening settings")).toBeUndefined();
-    expect(world.settings.listener.calls).toEqual([]);
-  });
-
-  it('Opens the image listener consent screen and reports stops (spec/app/voice/listener.md, "Story: See and control the listener")', async () => {
-    const { world } = await settingsOpen({ ...scene(), phone: true, image: true });
-    const listener = world.settings.listener;
-    const mutations = () => listener.calls.filter((called) => called !== "status");
-    const listeningSwitch = () => titled("Listening")?.querySelector('[role="switch"]');
-    await press("Privacy");
-    await vi.waitFor(() => expect(listeningSwitch()?.getAttribute("aria-checked")).toBe("false"));
-    expect(mutations()).toEqual([]);
-
-    await tap("Listening settings");
-    await vi.waitFor(() => expect(mutations()).toEqual(["openSettings"]));
-    expect(listeningSwitch()?.getAttribute("aria-checked")).toBe("false");
-    expect(listener.status).toMatchObject({ state: "OFF", consented: false, microphoneOpen: false });
-
-    await seen(false);
-    listener.status = { available: true, state: "LISTENING", label: "Listening",
-      consented: true, listening: true, microphoneOpen: true };
-    await seen(true);
-    await vi.waitFor(() => expect(listeningSwitch()?.getAttribute("aria-checked")).toBe("true"));
-    expect(mutations()).toEqual(["openSettings"]);
-
-    listener.refusesStop = true;
-    await tap("Pause listening");
-    await vi.waitFor(() => expect(titled("Listening")?.textContent).toContain("The microphone may be on"));
-    expect(mutations()).toEqual(["openSettings", "pause"]);
-    listener.refusesStop = false;
-    await tap("Listening");
-    await vi.waitFor(() => expect(listeningSwitch()?.getAttribute("aria-checked")).toBe("false"));
-    expect(titled("Listening")?.textContent).toContain("Off");
-    expect(mutations()).toEqual(["openSettings", "pause", "turnOff"]);
   });
 
   it("See what the phone says (spec/app/settings/facts.md, \"Story: See what the phone says\")", async () => {
@@ -275,6 +233,53 @@ describe("Settings", () => {
     expect(titled("Use for autofill")).toBeUndefined();
     await hardware("back");
     expect(await page(alpha)).toBe("Apps");
+  });
+
+  it("See and control the listener (spec/app/voice/listener.md, \"Story: See and control the listener\")", async () => {
+    const pause = Promise.withResolvers<unknown>();
+    const listener: ListenerScene = {
+      status: { available: true, state: "LISTENING", label: "Listening", consented: true, listening: true, microphoneOpen: true },
+      pauseReply: pause.promise,
+      openSettings: false,
+    };
+    const stock = await settingsOpen({ ...scene(), phone: true });
+    await press("Privacy");
+    await vi.waitFor(() => expect(button("Permissions")).toBeDefined());
+    expect(button("Listening settings")).toBeUndefined();
+    await stock.close();
+
+    const world = { ...scene(), phone: true, image: true };
+    world.settings.listener = listener;
+    const { alpha } = await settingsOpen(world);
+    await press("Privacy");
+    const listening = () => {
+      const row = titled("Listening");
+      return row instanceof HTMLLabelElement ? document.getElementById(row.htmlFor) : undefined;
+    };
+    await vi.waitFor(() => expect(listening()?.getAttribute("aria-checked")).toBe("true"));
+    await press("Pause listening");
+    await hardware("back");
+    expect(await page(alpha)).toBe("Top");
+    expect(button(/^Microphone may be on/)).toBeUndefined();
+    await act(async () => pause.resolve({ ...listener.status, state: "PAUSED_USER", listening: false, microphoneOpen: false, saved: false }));
+    await vi.waitFor(() => expect(button(/^Microphone may be on/)).toBeDefined());
+    await press(/^Microphone may be on/);
+    await vi.waitFor(() => expect(world.settings.opened).toEqual(["home"]));
+    await press("Privacy");
+    await press("Turn off listening");
+    await vi.waitFor(() => expect(listening()?.getAttribute("aria-checked")).toBe("false"));
+    expect(button(/^Microphone may be on/)).toBeUndefined();
+    await press("Listening settings");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Listening settings are unavailable"));
+    listener.openSettings = true;
+    await tap("Listening");
+    await vi.waitFor(() => expect(world.settings.opened).toEqual(["home", "sense-settings"]));
+    expect(listening()?.getAttribute("aria-checked")).toBe("false");
+
+    listener.status = { available: true, state: "PAUSED_CALL", label: "Paused", consented: true, listening: false, microphoneOpen: false };
+    await seen(false);
+    await seen(true);
+    await vi.waitFor(() => expect(titled("Listening")?.textContent).toContain("Paused during a call"));
   });
 
   it("Look at access again (spec/app/startup/access.md, \"Story: Look at access again\")", async () => {
