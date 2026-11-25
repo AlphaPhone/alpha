@@ -85,7 +85,7 @@ pure def editable(s: Scan): bool = pagesEditable(s) and s.search.stage != Search
 pure val imageValues = Set(1, 2, 3)
 pure val frameValues = Set(1)
 pure val replacingValues = Set(0, 1)
-pure val atValues = Set(-1, 0, 1, 2)
+pure val slotValues = Set(-1, 0, 1, 2)
 pure val earlierValues = Set(1, 2, 3)
 pure val laterValues = Set(1, 2, 3)
 pure val ticketValues = Set(1, 2, 3)
@@ -239,30 +239,30 @@ pure def canRemove(s: Scan, image: int, by: Actor): bool = by == Owner and edita
 
 pure def remove(s: Scan, image: int, by: Actor): Scan = edited(s.pages.select(p => p.image != image), s)
 
-pure def adjacentPages(pages: List[K::Page], at: int, earlier: int, later: int): bool =
-  at >= 0 and at < pages.length() - 1 and earlier > 0 and later > 0 and earlier != later
-    and pages.nthOr(at, K::noPage).image == earlier and pages.nthOr(at + 1, K::noPage).image == later
+pure def adjacentPages(pages: List[K::Page], slot: int, earlier: int, later: int): bool =
+  slot >= 0 and slot < pages.length() - 1 and earlier > 0 and later > 0 and earlier != later
+    and pages.nthOr(slot, K::noPage).image == earlier and pages.nthOr(slot + 1, K::noPage).image == later
     and pages.select(p => p.image == earlier or p.image == later).length() == 2
 
-pure def swappedPages(pages: List[K::Page], at: int): List[K::Page] =
-  val valid = at >= 0 and at < pages.length() - 1
-  val first = pages.nthOr(at, K::noPage)
-  val second = pages.nthOr(if (valid) at + 1 else -1, K::noPage)
+pure def swappedPages(pages: List[K::Page], slot: int): List[K::Page] =
+  val valid = slot >= 0 and slot < pages.length() - 1
+  val first = pages.nthOr(slot, K::noPage)
+  val second = pages.nthOr(if (valid) slot + 1 else -1, K::noPage)
   if (valid) pages.listMap(p => if (p.image == first.image) second else if (p.image == second.image) first else p)
   else pages
 
-pure def canSwapPages(s: Scan, at: int, earlier: int, later: int, by: Actor): bool =
-  by == Owner and editable(s) and adjacentPages(s.pages, at, earlier, later)
+pure def canSwapPages(s: Scan, slot: int, earlier: int, later: int, by: Actor): bool =
+  by == Owner and editable(s) and adjacentPages(s.pages, slot, earlier, later)
 
-pure def swapPages(s: Scan, at: int, earlier: int, later: int, by: Actor): Scan =
-  edited(swappedPages(s.pages, at), s)
+pure def swapPages(s: Scan, slot: int, earlier: int, later: int, by: Actor): Scan =
+  edited(swappedPages(s.pages, slot), s)
 
-pure def lawAdjacentPagesSwapWhole(pages: List[K::Page], at: int, earlier: int, later: int): bool =
-  val swapped = swappedPages(pages, at)
-  adjacentPages(pages, at, earlier, later) implies
+pure def lawAdjacentPagesSwapWhole(pages: List[K::Page], slot: int, earlier: int, later: int): bool =
+  val swapped = swappedPages(pages, slot)
+  adjacentPages(pages, slot, earlier, later) implies
     (swapped.length() == pages.length() and swapped.every(p => pages.includes(p))
-      and swapped.nthOr(at, K::noPage) == pages.nthOr(at + 1, K::noPage)
-      and swapped.nthOr(at + 1, K::noPage) == pages.nthOr(at, K::noPage))
+      and swapped.nthOr(slot, K::noPage) == pages.nthOr(slot + 1, K::noPage)
+      and swapped.nthOr(slot + 1, K::noPage) == pages.nthOr(slot, K::noPage))
 
 pure val eval_witness_canSwapPages = (("start", Owner), ("add", 1, 0, false, Phone),
   ("add", 1, 0, true, Phone), ("swapPages", 0, 1, 2, Owner))
