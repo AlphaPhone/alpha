@@ -21,11 +21,12 @@ import { assistantBack, assisting } from "./assistant.vibe";
 import { copyMessage, emailDestination, emailMessage } from "./message-actions.vibe";
 import { dictate } from "./dictation.vibe";
 import { aloud } from "./read-aloud.vibe";
+import { beginTalk, talkFromComms } from "./voice-entry.vibe";
 
 const voiceOwnsComposer = (state: VoiceState) => !quiet(state) || state.recorder.stage !== "Closed";
 
 const screens = together(
-  assisting, voiceArea, aloud,
+  assisting, voiceArea, aloud, talkFromComms,
   following(Voice, voiceOwnsComposer, Dock, (on) => ({ type: "voicing", on, now: untimed } as const)),
   applying(Voice, voiceOwnsComposer, keyboardVoice),
 );
@@ -48,9 +49,6 @@ function LiveAssistant({ runtime }: Shown<Layer.Success<typeof screens> | Reside
   const canDictate = available && noCall && audioFree && composer.state?.away === "Free" && composer.can({ type: "edit", blank: false, long: false }) && voice.can({ type: "openRecorder", target: "ComposerField" });
   const recorder = voice.state?.recorder;
   const readingAllowed = noCall && speaker !== undefined && !speaker.latched && voice.state !== undefined && quiet(voice.state) && recorder?.stage === "Closed" && runtime.runSync(bridge.canRead());
-  const startTalk = () => void runtime.runPromise(keyboardVoice(true)).then(() => voice.send(talk)).then((sent) => {
-    if (sent._tag === "Failure") void runtime.runPromise(keyboardVoice(false));
-  });
   return <Assistant
     runtime={runtime}
     canReadAloud={readingAllowed}
@@ -59,7 +57,7 @@ function LiveAssistant({ runtime }: Shown<Layer.Success<typeof screens> | Reside
       useInEmail: destination ? (selection) => void runtime.runPromise(emailMessage(selection, destination)) : undefined,
     }}
     speech={{
-      onTalk: canTalk ? startTalk : undefined,
+      onTalk: canTalk ? () => void runtime.runPromise(beginTalk()) : undefined,
       onDictate: canDictate ? () => void runtime.runPromise(dictate()) : undefined,
       voice: recorder !== undefined && recorder.stage !== "Closed" && recorder.field === "ComposerField"
         ? <DictationControls runtime={runtime} />

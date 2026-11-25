@@ -88,13 +88,14 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
 })
 
 // spec/app/voice/index.md, "Using the transcript fills the field dictation started in, and dictation never sends"
-export effect function openDictation(field: Field, apply: (words: string) => void!!): boolean!!(Voice.Machine | VoiceWords) {
+export effect function openDictation<R>(field: Field, apply: (words: string) => void!!R): boolean!!(Voice.Machine | VoiceWords | R) {
   const voice = try Voice.Machine
   const { memory } = try VoiceWords
+  const context = try Effect.context<R>()
   const filling = (try voice.get()).recorder.filled + 1
   if (!(try contained(voice.send({ type: "openRecorder", target: field }), "opening dictation"))) return false
   memory.dictatedText = ""
-  memory.fillTarget = { field, filling, apply }
+  memory.fillTarget = { field, filling, apply: (words) => Effect.provideContext(apply(words), context) }
   return true
 }
 
