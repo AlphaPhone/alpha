@@ -113,14 +113,15 @@ jobs:
         run: |
           private="$RUNNER_TEMP/candidate"
           run="$private/run.json"
-          unsigned=$(ls "$private"/alpha-phone-*-unsigned.apk)
+          unsigned=("$private"/alpha-phone-*-unsigned.apk)
+          [[ ${#unsigned[@]} == 1 && -f ${unsigned[0]} ]] || { echo 'Expected one unsigned launcher APK'; exit 1; }
           keys="$RUNNER_TEMP/keys"
           install -d -m 700 "$keys"
           printf '%s' "$ALPHA_APP_RELEASE_KEYSTORE" | base64 -d > "$keys/release.p12"
           chmod 600 "$keys/release.p12"
-          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner"
+          apksigner="$ANDROID_HOME/build-tools/36.0.0/apksigner"
           pnpm -s release review --run "$run" --plan "$private/plan.json" --plan-sha256 "$PLAN_SHA256"
-          pnpm -s release sign --run "$run" --plan "$private/plan.json" --apk "$unsigned" --out artifacts/launcher-release.apk --keystore "$keys/release.p12" --key-label alpha-release --apksigner "$apksigner"
+          pnpm -s release sign --run "$run" --plan "$private/plan.json" --apk "${unsigned[0]}" --out artifacts/launcher-release.apk --keystore "$keys/release.p12" --key-label alpha-release --apksigner "$apksigner"
           rm -rf "$keys"
           pnpm android verify
           pnpm -s release deliver --run "$run" --apk artifacts/launcher-release.apk --apk-manifest artifacts/apk-manifest.json --to "$RUNNER_TEMP/delivered"
