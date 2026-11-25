@@ -362,7 +362,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     if (activeSession !== session) throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "session-changed" })
     const capture: LiveCapture = { session, captureId: fresh(), listening: false, echoCancelled: false }
     nativeCapture = capture
-    const started = try tryPromise({
+    const started = tryPromise({
       try: () => localPlugin().startLiveCapture({
         captureId: capture.captureId, nativeAsr: true, echoCancel: true, bargeIn: true, reopen,
       }),
