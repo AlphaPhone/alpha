@@ -1,6 +1,6 @@
 // spec/app/maps/index.md, "Story: Move between the screen's modes"; spec/app/maps/index.md, "Story: Search for a place"; spec/app/maps/index.md, "Story: Look at a place"; spec/app/maps/index.md, "Story: Get directions"; spec/app/maps/index.md, "Story: Navigate"; spec/app/maps/index.md, "Story: Use my location"; spec/app/maps/index.md, "Story: Let the agent help with Maps"; spec/app/maps/credits.md, "Story: See the map for what I am looking at"
 import { Alert, Banner, Button, cn, Input, type MapCamera, MapsChip, MapsPillButton, MapsPlaceRow, MapsRoundButton, MapsSearchBar, MapsSheet, MapsStatusCard, type MapStyle, MapView, Spinner } from "@repo/ui";
-import { ArrowUpDown, Bike, Bus, Car, Check, ChevronLeft, Clock, Coffee, Dumbbell, ExternalLink, Footprints, Fuel, Globe, Info, LocateFixed, type LucideIcon, MapPin, Navigation, Phone, Search, Share2, ShoppingCart, SquarePlus, Star, Utensils, X } from "lucide-react";
+import { ArrowUp, ArrowUpDown, ArrowUpLeft, ArrowUpRight, Bike, Bus, Car, Check, ChevronLeft, Clock, Coffee, CornerUpLeft, CornerUpRight, Dumbbell, ExternalLink, Footprints, Fuel, Globe, Info, LocateFixed, type LucideIcon, MapPin, Navigation, Phone, RotateCw, Search, Share2, ShoppingCart, SquarePlus, Star, Undo2, Utensils, X } from "lucide-react";
 import { useState, useSyncExternalStore } from "react";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { untimed } from "../runtime/reactor.vibe";
@@ -58,6 +58,14 @@ const copies: Record<CopyNotice, string> = { Uncopied: "", NumberCopied: "Number
 
 /** The recent search `typed` is, in any case, or `typed` itself. */
 const recentOf = (recent: readonly string[], typed: string) => recent.find((query) => query.toLowerCase() === typed.toLowerCase()) ?? typed;
+
+/** Each kind of turn's arrow, as v121's guidance drew it (ui/maps/guidance.ts); arriving shows the pin. */
+const turnIcons: Record<string, LucideIcon> = {
+  depart: ArrowUp, continue: ArrowUp, "slight-left": ArrowUpLeft, left: CornerUpLeft, "sharp-left": CornerUpLeft, "keep-left": CornerUpLeft,
+  "slight-right": ArrowUpRight, right: CornerUpRight, "sharp-right": CornerUpRight, "keep-right": CornerUpRight, "u-turn": Undo2, roundabout: RotateCw, arrive: MapPin,
+};
+/** The arrow for a turn, the straight one where the provider names no kind. */
+const turnIcon = (maneuver: string | undefined): LucideIcon => turnIcons[maneuver ?? "continue"] ?? ArrowUp;
 
 const minutes = (seconds: number) => `${Math.max(1, Math.round(seconds / 60))} min`;
 const distance = (meters: number) => (meters < 1000 ? `${meters} m` : `${(meters / 1000).toFixed(1)} km`);
@@ -186,7 +194,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
       {now === "Browse" && saved.length > 0 && (
         <nav aria-label="Saved places" className="absolute inset-x-0 top-18 z-10 flex touch-pan-x gap-2 overflow-x-auto px-3 pb-2.5 [scrollbar-width:none] in-data-[alpha-launcher]:top-29">
           {saved.map((entry) => (
-            <MapsChip key={entry.place} label={entry.name} icon={<Star />} disabled={!can({ type: "pickSaved", place: entry.place })} onClick={offer(screen, { type: "pickSaved", place: entry.place })} />
+            <MapsChip key={entry.place} label={entry.name} icon={<MapPin />} disabled={!can({ type: "pickSaved", place: entry.place })} onClick={offer(screen, { type: "pickSaved", place: entry.place })} />
           ))}
         </nav>
       )}
@@ -297,7 +305,7 @@ function SearchSheet({ screen, state, seen, saved, height, onRecent }: { screen:
           </div>
         )}
         {state.query === "" && saved.map((entry) => (
-          <MapsPlaceRow key={entry.place} aria-label={entry.name} name={entry.name} detail={entry.spot.category || entry.spot.address} icon={<Star />}
+          <MapsPlaceRow key={entry.place} aria-label={entry.name} name={entry.name} detail={entry.spot.category || entry.spot.address} icon={<MapPin />}
             disabled={!can({ type: "pickSaved", place: entry.place })} onClick={() => void send({ type: "pickSaved", place: entry.place })} />
         ))}
         {seen.results.slice(0, state.results).map((place) => {
@@ -483,10 +491,12 @@ function Guidance({ screen, state, seen, spot, kept, way }: { screen: Screen; st
   const after = way?.turns[state.trip.turn + 1];
   const arrived = state.trip.guidance === "Arrived";
   const precise = seen.here !== undefined && !seen.here.approximate && !state.trip.rerouting;
+  const TurnIcon = arrived ? Check : turnIcon(turn?.maneuver);
+  const NextIcon = turnIcon(after?.maneuver);
   return (
     <>
       <div data-host-chrome="" role="status" className="absolute inset-x-3 top-12.5 z-50 flex items-center gap-4 rounded-sheet bg-alpha px-5 py-4.5 text-alpha-foreground shadow-lg motion-safe:animate-drop in-data-[alpha-launcher]:top-23.5">
-        {arrived ? <Check aria-hidden className="size-13 shrink-0" /> : <Navigation aria-hidden className="size-13 shrink-0" />}
+        <TurnIcon aria-hidden className="size-13 shrink-0" />
         <div className="min-w-0">
           {!arrived && precise && turn !== undefined && <div className="font-display text-4xl leading-none font-light">{distance(turn.meters)}</div>}
           <div className="mt-1 truncate text-lead font-semibold">
@@ -496,7 +506,7 @@ function Guidance({ screen, state, seen, spot, kept, way }: { screen: Screen; st
       </div>
       {!arrived && after !== undefined && (
         <div className="absolute top-39.5 left-7 z-10 flex h-10 items-center gap-2 rounded-b-lg bg-alpha px-3.5 text-sm font-semibold text-alpha-foreground brightness-75 in-data-[alpha-launcher]:top-50.5">
-          Then<span className="max-w-55 truncate">{after.instruction}</span>
+          Then<NextIcon aria-hidden className="size-5 shrink-0" /><span className="max-w-55 truncate">{after.instruction}</span>
         </div>
       )}
       {/* eslint-disable-next-line better-tailwindcss/no-unknown-classes -- Guidance stays dark in both themes, as on develop; `dark` is the design system's theme class. */}
