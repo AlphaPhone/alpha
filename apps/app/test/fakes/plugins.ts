@@ -26,7 +26,7 @@ import { alphaHostedDigests } from "./workflows.ts";
 export function plugins(world: Scene, services: { readonly agent: Answering; readonly cloud: Answering }): Record<string, Faked> {
   return {
     ElizaAgent: elizaAgent(services.agent, world.settings.recovery),
-    ElizaCloud: elizaCloud(services.cloud, () => world.signedIn, world.mailLease),
+    ElizaCloud: elizaCloud(services.cloud, () => world.signedIn, world.mailLease, (url) => { world.checkout?.opened.push(url); }),
     AlphaAssistantDraft: alphaAssistantDraft(world.ask, () => ({ owner: world.notes.ownerIdentity, agent: world.notes.owner, epoch: 1 })),
     ElizaSecureStore: elizaSecureStore(world.secrets, (key) => world.slots.has(key) || /^notes-(?:draft|folders):[1-9][0-9]*$/.test(key)),
     ElizaCalendar: elizaCalendar(world.calendar),
@@ -43,7 +43,11 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     AlphaCarrierSetup: alphaCarrierSetup(world.settings),
     AlphaMapsTransport: alphaMapsTransport(world.maps),
     ...(world.image ? telephonyPlugins(world.telephony, () => world.now) : {}),
-    AlphaDevice: (emit) => ({ ...alphaDevice(world.update, () => world.now)(emit), ...settingsHost(world.settings), ...alphaAgentConsent(world.settings), ...cameraKeys(world.camera) }),
+    AlphaDevice: (emit) => ({ ...alphaDevice(world.update, () => world.now)(emit), ...settingsHost(world.settings), ...alphaAgentConsent(world.settings), ...cameraKeys(world.camera), takeBillingReturn: () => {
+      const session = world.checkout?.returned ?? null;
+      if (world.checkout) world.checkout.returned = null;
+      return Promise.resolve({ session });
+    } }),
     ElizaNotifications: elizaNotices(world.settings),
     ElizaPasswords: elizaPasswords(world.settings),
     AlphaConnection: alphaConnection(world.platform),

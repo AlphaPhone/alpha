@@ -1,0 +1,215 @@
+// spec/app/account/billing.md, "Story: Pay in the browser"; spec/app/account/billing.md, "Story: Keep billing to its sign-in"
+import { checkoutFromResponse, CloudError, isCredentialInvalid, networkError, pathOf, type PlanOffer, routesByName } from "@elizaos/cloud"
+import * as Billing from "../../gen/app__account__billing.effect.vibe"
+import { type Account, Cloud, openCloudCheckout } from "../platform/cloud.vibe"
+import { billReturned, Device, takeBillingReturn } from "../platform/device.vibe"
+import { attemptedWith } from "../platform/remote.vibe"
+import type { Attempts } from "../runtime/attempts.vibe"
+import { contained, due, type Job, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import { accountIsInFront, type Buyer, buyerOf, type Catalog, readAccount, readCatalog, sameBuyer } from "./profile.vibe"
+
+interface Purchase {
+  readonly visit: number
+  readonly buyer: Buyer
+}
+
+service Purchases {
+  get(): (Purchase | undefined)!!
+  hold(purchase: Purchase | undefined): void!!
+}
+
+const custody = Layer.sync(Purchases, () => {
+  let held: Purchase | undefined
+  return { get: () => sync(() => held), hold: (purchase: Purchase | undefined) => sync(() => { held = purchase }) }
+})
+
+type Tier = "Plus" | "Pro"
+
+export const tierOf = (offer: PlanOffer): Tier => offer.key === "pro_monthly" ? "Pro" : "Plus"
+
+effect function currentBuyer(cloud: Account): (Buyer | undefined)!! {
+  const owner = readAccount(cloud) catch () => undefined
+  return owner === undefined ? undefined : try buyerOf(owner)
+}
+
+type Custody = "Matches" | "Changed" | "Unconfirmed"
+
+effect function checkBuyer(cloud: Account, buyer: Buyer): Custody!! {
+  const account = try exit(readAccount(cloud))
+  if (Exit.isFailure(account)) {
+    const issue = Cause.squash(account.cause)
+    return issue instanceof CloudError && isCredentialInvalid(issue) ? "Changed" : "Unconfirmed"
+  }
+  if (account.value.id !== buyer.userId || account.value.organization_id !== buyer.organizationId) return "Changed"
+  const current = try buyerOf(account.value)
+  return current === undefined ? "Unconfirmed" : sameBuyer(buyer, current) ? "Matches" : "Changed"
+}
+
+const snapshot = (cloud: Account) => timeout(tryPromise({ try: (signal) => cloud.client.snapshot({ signal }), catch: networkError }), "10 seconds")
+
+const offerMatches = (one: PlanOffer, other: PlanOffer): boolean => one.key === other.key && one.name === other.name
+  && one.amountCents === other.amountCents && one.currency === other.currency && one.interval === other.interval
+  && one.allowance.amountUsd === other.allowance.amountUsd
+
+/** Recheck the offer, authenticated owner and lack of paid plan before the owner's review creates a visit. */
+export effect function choosePurchase(catalog: Catalog, offer: PlanOffer, reviewNumber: number) {
+  if (catalog.buyer === undefined || !(try accountIsInFront)) return
+  const billing = try Billing.Machine
+  const cloud = try Cloud
+  const buyer = catalog.buyer
+  const checked = effect {
+    if (!sameBuyer(buyer, try currentBuyer(cloud))) return undefined
+    const offers = try timeout(tryPromise({ try: (signal) => cloud.client.plans({ signal }), catch: networkError }), "10 seconds")
+    const plan = try snapshot(cloud)
+    return sameBuyer(buyer, try currentBuyer(cloud)) ? { offers, plan } : undefined
+  } catch () => undefined
+  if (!(try accountIsInFront)) return
+  const state = try billing.get()
+  const tier = tierOf(offer)
+  if (state.reviewNumber !== reviewNumber || state.offers.ticket !== catalog.ticket
+    || !Billing.canChoosePlan(state, tier, reviewNumber, 1, "Unfunded", "ByOwner", false, untimed)) return
+  if (checked?.plan.account.status !== "active" || checked.plan.plan.source !== "free" || checked.plan.balance.usdMicros > 0
+    || !checked.offers.some((found) => offerMatches(found, offer))) {
+    try contained(billing.send({ type: "askOffers", signIn: 1 }), "refreshing the reviewed plan")
+    return
+  }
+  try (try Purchases).hold({ visit: state.visit.number + 1, buyer })
+  try contained(billing.send({ type: "choosePlan", tier, reviewed: reviewNumber, signIn: 1, standing: "Unfunded", origin: "ByOwner", elsewhere: false, now: untimed }), "starting checkout")
+}
+
+effect function openCheckout(visit: number, tier: Tier) {
+  const billing = try Billing.Machine
+  const cloud = try Cloud
+  const purchase = try (try Purchases).get()
+  const failed = (unknown: boolean) => contained(billing.send({ type: "checkoutUnopened", visit, signIn: 1, unknown }), "settling checkout start")
+  if (purchase?.visit !== visit || !(try accountIsInFront) || !sameBuyer(purchase.buyer, try currentBuyer(cloud))) {
+    try failed(false)
+    return
+  }
+  const asked = try attemptedWith(Cloud, (idempotencyKey) => HttpClientRequest.post(pathOf(routesByName.checkout)) |> HttpClientRequest.bodyJsonUnsafe(%, {
+    planKey: tier === "Pro" ? "pro_monthly" : "plus_monthly", idempotencyKey, presentation: "mobile",
+  }), visit)
+  const started = asked.confirmed ? (checkoutFromResponse(asked.body) catch () => undefined) : undefined
+  const owner = try checkBuyer(cloud, purchase.buyer)
+  if (owner !== "Matches") {
+    if (owner === "Changed") try contained(billing.send({ type: "checkoutOwnerLost", visit, signIn: 1 }), "retiring checkout owner")
+    else try failed(!asked.known || asked.confirmed)
+    return
+  }
+  if (started?.status !== "open" || !("checkoutUrl" in started)) {
+    try failed(!asked.known || (asked.confirmed && started === undefined))
+    return
+  }
+  const opened = try contained(billing.send({ type: "checkoutOpened", visit, signIn: 1, command: started.commandId,
+    session: started.sessionId, expiresAt: started.expiresAt, now: untimed }), "keeping checkout")
+  if (!opened) return
+  if (!(try accountIsInFront) || !(try openCloudCheckout(started.checkoutUrl))) {
+    try contained(billing.send({ type: "stopWaiting", now: untimed }), "leaving unopened checkout")
+  }
+}
+
+effect function custodyOf(cloud: Account, visit: number, purchase: Purchase | undefined): Custody!! {
+  return purchase?.visit === visit ? try checkBuyer(cloud, purchase.buyer) : "Unconfirmed"
+}
+
+effect function checkCheckout(attempt: number) {
+  const billing = try Billing.Machine
+  const cloud = try Cloud
+  const state = try billing.get()
+  const purchase = try (try Purchases).get()
+  const { command, session, signIn } = state.checkout
+  if (!Billing.canCheckoutConfirmed(state, attempt, signIn, command)) return
+  const before = try custodyOf(cloud, state.visit.number, purchase)
+  const answered = before === "Matches" ? (effect {
+    const body = try cloud.call(HttpClientRequest.post(pathOf(routesByName.checkoutConfirm)) |> HttpClientRequest.bodyJsonUnsafe(%, { sessionId: session }))
+    return try checkoutFromResponse(body)
+  } catch () => undefined) : undefined
+  const after = before === "Matches" ? try custodyOf(cloud, state.visit.number, purchase) : before
+  if (after === "Changed") {
+    try contained(billing.send({ type: "checkoutOwnerLost", visit: state.visit.number, signIn }), "retiring checkout owner")
+    return
+  }
+  const result: Billing.Paid = after !== "Matches" || answered?.commandId !== command ? "NotKnown"
+    : answered.status === "completed" ? "Settled" : answered.status !== "open" ? "Expired"
+    : "sessionId" in answered && answered.sessionId === session ? "NotPaid" : "NotKnown"
+  try contained(billing.send({ type: "checkoutConfirmed", attempt, signIn, command, result }), "confirming exact checkout")
+}
+
+/** Release an unknown outcome only after reading the exact authenticated account again. */
+export effect function recheckPlan() {
+  const billing = try Billing.Machine
+  const cloud = try Cloud
+  const state = try billing.get()
+  if (!state.unsettled) return
+  const held = try (try Purchases).get()
+  const current = try currentBuyer(cloud)
+  if (current === undefined) return
+  if (state.pending && held?.visit === state.visit.number && !sameBuyer(held.buyer, current)) {
+    try contained(billing.send({ type: "checkoutOwnerLost", visit: state.visit.number, signIn: state.checkout.signIn }), "retiring checkout owner")
+    return
+  }
+  const answer = snapshot(cloud) catch () => undefined
+  if (answer !== undefined && sameBuyer(current, try currentBuyer(cloud)) && (try billing.get()).visit.number === state.visit.number) {
+    try contained(billing.send({ type: "planAnswered" }), "rechecking Cloud plan")
+  }
+}
+
+function effects(refresh: () => void, publishCatalog: (catalog: Catalog | undefined) => void) {
+  return (fx: Billing.Effect): Job<Billing.Event, Billing.Machine | Cloud | Purchases | Attempts | Effect.Services<typeof accountIsInFront>, []> => match (fx) {
+    when { tag: "OpenCheckout", let visit, let tier }: run("open paid checkout", openCheckout(visit, tier));
+    when { tag: "ConfirmCheckout", let attempt }: run("confirm paid checkout", checkCheckout(attempt));
+    when { tag: "CheckPlan" }: run("check Cloud plan", effect {
+      try sync(refresh)
+      try recheckPlan()
+    });
+    when { tag: "ReadOffers", let check }: run("read offered plans", readCatalog(check, publishCatalog));
+    when { tag: "OpenFunds" }: run("unmounted balance checkout", Effect.void);
+    when { tag: "OpenInvoice" }: run("unmounted invoice checkout", Effect.void);
+  }
+}
+
+const returns = started(effect {
+  const phone = try Device
+  const billing = try Billing.Machine
+  const cloud = try Cloud
+  const purchases = try Purchases
+  const ready = Stream.changes(Stream.concat(Stream.fromEffect(phone.showing()), phone.visible))
+  try Stream.runForEach(Stream.filter(Stream.merge(ready, billReturned), (event) => event), effect () => {
+    const state = try billing.get()
+    if (!(try phone.showing())) return
+    if (!state.visit.open && !state.visit.orphan) {
+      if (state.unsettled) try recheckPlan()
+      return
+    }
+    const returned = try takeBillingReturn()
+    if (state.visit.orphan) {
+      if (returned !== null && Billing.canReturnedCold(state, state.visit.number)) {
+        try contained(billing.send({ type: "returnedCold", visit: state.visit.number }), "checking plan after restart")
+      }
+      return
+    }
+    const owner = try custodyOf(cloud, state.visit.number, try purchases.get())
+    if (owner !== "Matches") {
+      if (owner === "Changed") try contained(billing.send({ type: "checkoutOwnerLost", visit: state.visit.number, signIn: state.checkout.signIn }), "retiring checkout owner")
+      return
+    }
+    if (returned !== null && returned === state.checkout.session) {
+      try contained(billing.send({ type: "returned", visit: state.visit.number, signIn: state.checkout.signIn, session: returned, now: untimed }), "taking checkout return")
+    } else if (returned === null && Billing.canResumed(state, untimed)) {
+      try contained(billing.send({ type: "resumed", now: untimed }), "checking resumed checkout")
+    }
+  })
+}, "receiving checkout returns")
+
+/** The subscription journey owns one kept Billing machine, shared by the Account catalog. */
+export function checkout(refresh: () => void, publishCatalog: (catalog: Catalog | undefined) => void) {
+  return Layer.provideMerge(together(reacting(Billing, {
+    keep: 1,
+    open: [{ type: "restart" }],
+    carry: effects(refresh, publishCatalog),
+    timers: (state) => [
+      ...(state.visit.open ? [due<Billing.Event, []>("leave checkout", state.visit.at + Billing.visitLimit, { type: "visitTimedOut", now: untimed })] : []),
+      ...(state.pending && state.confirm.outcome !== "Sent" ? [due<Billing.Event, []>("expire checkout", state.pendingEnds, { type: "checkoutExpired", now: untimed })] : []),
+    ],
+  }), returns), custody)
+}

@@ -43,6 +43,7 @@ const reading: Profile = { tag: "Reading" }
 export interface Catalog {
   readonly ticket: number
   readonly offers: ReadonlyArray<PlanOffer>
+  readonly buyer: Buyer | undefined
 }
 
 /** Display details from the current read, held for the Settings row and Account sheet. */
@@ -50,7 +51,14 @@ export function profileShelf() {
   let current: Profile = reading
   let offers: Catalog | undefined
   const listeners = new Set<() => void>()
+  const checks = new Set<() => void>()
   return {
+    refresh: (): void => { for (const check of checks) check() },
+    refreshed: Stream.callback<void>((queue) => acquireRelease(sync(() => {
+      const check = () => { Queue.offerUnsafe(queue, undefined) }
+      checks.add(check)
+      return check
+    }), (check) => sync(() => { checks.delete(check) }))),
     snapshot: (): Profile => current,
     catalog: (): Catalog | undefined => offers,
     subscribe: (listener: () => void): (() => void) => {
@@ -76,7 +84,7 @@ export effect function openAccount(): void!!Layers.Machine {
 
 const cloudFailure = (cause: unknown) => cause instanceof CloudError ? cause : networkError(cause)
 
-const readAccount = (cloud: Account) => timeout(tryPromise({
+export const readAccount = (cloud: Account) => timeout(tryPromise({
   try: (signal) => cloud.client.account({ signal }),
   catch: cloudFailure,
 }), "10 seconds")
@@ -114,6 +122,27 @@ effect function readForOwner<A>(cloud: Account, owner: CloudProfile, profile: Re
   if (phone && (try credentialOf(after)) !== before) return unavailable
   return Exit.isSuccess(answer) ? { tag: "Current", answer: answer.value } : unavailable
 }
+
+export interface Buyer {
+  readonly userId: string
+  readonly organizationId: string
+  readonly credentialId: string
+  readonly expiresAt: number
+}
+
+export effect function buyerOf(owner: CloudProfile): (Buyer | undefined)!! {
+  if (!native()) return undefined
+  const status = timeout(tryPromise(() => signInAccounts().status({ environment: CLOUD_ENVIRONMENT })), "5 seconds") catch () => undefined
+  const account = status?.account
+  const now = try Clock.currentTimeMillis
+  if (account?.kind !== "signedIn" || account.userId !== owner.id || account.organizationId !== owner.organization_id
+    || !account.credentialId || account.keyExpiresAt <= now) return undefined
+  return { userId: account.userId, organizationId: account.organizationId, credentialId: account.credentialId, expiresAt: account.keyExpiresAt }
+}
+
+export const sameBuyer = (one: Buyer, other: Buyer | undefined): boolean => other !== undefined
+  && one.userId === other.userId && one.organizationId === other.organizationId
+  && one.credentialId === other.credentialId && one.expiresAt === other.expiresAt
 
 const planUnavailable: Plan = { tag: "PlanUnavailable" }
 
@@ -182,7 +211,7 @@ function visit(cloud: Account, place: "Account" | "Settings"): Stream.Stream<Pro
 const settingsIsInFront = (shell: Shell.Shell, settings: Settings.Settings): boolean =>
   Shell.showing(shell, "Settings") && shell.assistant !== "Full" && settings.page === "Top"
 
-const accountIsInFront = effect {
+export const accountIsInFront = effect {
   const shell = try (try Shell.Machine).get()
   const settings = try (try Settings.Machine).get()
   const layers = try (try Layers.Machine).get()
@@ -193,19 +222,22 @@ const accountIsInFront = effect {
 export effect function closeCatalog(publish: (catalog: Catalog | undefined) => void) {
   const billing = try Billing.Machine
   try sync(() => publish(undefined))
-  try contained(billing.send({ type: "reset", signIn: 0 }), "closing Plans")
+  try contained(billing.send({ type: "retireOffers" }), "closing Plans")
 }
 
-/** Reads Cloud's plan catalog only while the authenticated settings visit is still on top. */
-export effect function openCatalog(publish: (catalog: Catalog | undefined) => void) {
+/** Starts a catalog read only while the Account sheet is open. */
+export effect function openCatalog() {
   if (!(try accountIsInFront)) return
+  try contained((try Billing.Machine).send({ type: "askOffers", signIn: 1 }), "asking for Plans")
+}
+
+/** Publishes only the offer receipt of the current Account visit. */
+export effect function readCatalog(ticket: number, publish: (catalog: Catalog | undefined) => void) {
   const billing = try Billing.Machine
   const cloud = try Cloud
-  const read = try exit(billing.send({ type: "askOffers", signIn: 1 }))
-  if (Exit.isFailure(read)) return
-  const ticket = read.value.state.offers.ticket
-  const owner = readAccount(cloud) catch () => undefined
   if (!(try accountIsInFront) || !Billing.canOffersRead(try billing.get(), ticket)) return
+  const owner = readAccount(cloud) catch () => undefined
+  const buyer = owner === undefined ? undefined : try buyerOf(owner)
   const result = owner === undefined ? undefined : try readForOwner(cloud, owner, profileOf(owner), (signal) => cloud.client.plans({ signal }))
   if (!(try accountIsInFront) || !Billing.canOffersRead(try billing.get(), ticket)) return
   const receipt = try contained(billing.send({ type: "offersRead", ticket, ok: result?.tag === "Current" }), "reading Plans")
@@ -213,13 +245,13 @@ export effect function openCatalog(publish: (catalog: Catalog | undefined) => vo
     const settled = try billing.get()
     if (settled.offers.status !== "Loaded" || settled.offers.ticket !== ticket) return
     const offers = result.answer.toSorted((a, b) => a.amountCents - b.amountCents)
-    try sync(() => publish({ ticket, offers }))
+    try sync(() => publish({ ticket, offers, buyer }))
   }
 }
 
 /** Reads the account while Settings or its Account sheet is visible. Leaving interrupts the read and drops its answer. */
-export function profileLive(publish: (value: Profile) => void, publishCatalog: (catalog: Catalog | undefined) => void) {
-  return Layer.provideMerge(started(effect {
+export function profileLive(publish: (value: Profile) => void, publishCatalog: (catalog: Catalog | undefined) => void, refreshed: Stream.Stream<void>) {
+  return started(effect {
     const { changes } = try Layers.Machine
     const cloud = try Cloud
     const device = try Device
@@ -237,8 +269,9 @@ export function profileLive(publish: (value: Profile) => void, publishCatalog: (
       if (place !== "Account") try closeCatalog(publishCatalog)
       return place === "Away"
         ? Stream.succeed<Profile>(reading)
-        : Stream.concat(Stream.succeed<Profile>(reading), visit(cloud, place))
+        : Stream.switchMap(Stream.concat(Stream.succeed(undefined), refreshed), () =>
+          Stream.concat(Stream.succeed<Profile>(reading), visit(cloud, place)))
     }))
     try Stream.runForEach(watched, (value) => sync(() => publish(value)))
-  }, "reading Account"), Billing.machine())
+  }, "reading Account")
 }

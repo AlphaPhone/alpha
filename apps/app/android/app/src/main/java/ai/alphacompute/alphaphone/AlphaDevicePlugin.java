@@ -20,6 +20,11 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 /** Device facts, allowlisted settings, explicit bounded text handoffs and verified app self-updates. */
 @CapacitorPlugin(name="AlphaDevice")
 public final class AlphaDevicePlugin extends Plugin {
+ @PluginMethod public void takeBillingReturn(PluginCall call) {
+  String session = BillingReturn.take();
+  call.resolve(new JSObject().put("session", session == null ? org.json.JSONObject.NULL : session));
+ }
+
  /** Explicit bounded text handoff; chooser opening never claims a sent message. */
  static String boundedShareText(String text){
   if(text==null||text.isBlank()||text.indexOf('\0')>=0||text.length()>65536)throw new IllegalArgumentException();
