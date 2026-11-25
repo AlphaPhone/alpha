@@ -173,6 +173,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       return;
     }
     openWithFocus(false);
+    setListing(false);
     if (newChat) {
       board.queueSend();
       void chats.send(start);
@@ -356,7 +357,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
             setListing(true);
           },
           onSearch: search.can({ type: "openSearch" }) ? () => { void chats.send({ type: "browse" }); void search.send({ type: "openSearch" }); } : undefined,
-          onNew: chats.can(start) ? () => void chats.send(start) : undefined,
+          onNew: chats.can(start) ? () => { setListing(false); void chats.send(start); } : undefined,
           making: making(shown),
           onClick: !open ? (event) => {
             if (event.target instanceof Element && event.target.closest("button, textarea")) return;
