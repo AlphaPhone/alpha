@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
-import { Machine as Phone } from "../gen/app__phone.effect.vibe";
+import { Machine as Phone, type Phone as PhoneState } from "../gen/app__phone.effect.vibe";
 import { Machine as Strip } from "../gen/app__phone__call.effect.vibe";
 import { Machine as Comms } from "../gen/app__phone__comms.effect.vibe";
 import { Machine as Voicemail } from "../gen/app__phone__voicemail.effect.vibe";
@@ -16,7 +16,7 @@ import home from "../src/home/index.tsx";
 import { phoneAction } from "../src/phone/agent.vibe";
 import { phoneContactChoices, pickPhoneContact } from "../src/phone/named-review.vibe";
 import type { Alpha } from "../src/runtime/area.tsx";
-import { button, closeAll, drawn, fill, hardware, only, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, filledPhoneKeypad, hardware, only, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import { textReview } from "./fakes/text-review.ts";
 
@@ -31,6 +31,12 @@ const mounts = [
   at("overlay", () => import("../src/contacts/requestCard.tsx")),
 ];
 const openPhoneWorld = (world = image()) => open(world, mounts);
+async function mountedImage(world: ReturnType<typeof image>) {
+  const { alpha } = await openPhoneWorld(world);
+  await until(alpha, alpha.runtime, Shell, (state) => state.image);
+  return alpha;
+}
+
 const phoneTile = () => document.querySelector<HTMLButtonElement>("[data-home-tile='view:Phone']");
 
 async function openPhone(alpha: Alpha) {
@@ -41,6 +47,11 @@ async function openPhone(alpha: Alpha) {
     tile.click();
   });
   await until(alpha, alpha.runtime, Phone, (state) => state.front);
+}
+
+async function openReadyRecents(alpha: Alpha, matches: (state: PhoneState) => boolean = () => true) {
+  await openPhone(alpha);
+  await until(alpha, alpha.runtime, Phone, (state) => state.carrier === "CarrierReady" && state.recents.status === "Loaded" && matches(state));
 }
 
 const pressPhoneCard = () => drawn(() => {
@@ -63,6 +74,30 @@ const tab = (name: string) => drawn(() => {
   found.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
 });
 
+async function openVoicemail(alpha: Alpha, matches: (state: PhoneState) => boolean = () => true) {
+  await openPhone(alpha);
+  await until(alpha, alpha.runtime, Phone, (state) => state.voicemail && matches(state));
+  await tab("Voicemail");
+}
+
+async function openReviewedVoicemail(
+  world: ReturnType<typeof image>,
+  review: ReturnType<typeof textReview>,
+  matches?: (state: PhoneState) => boolean,
+) {
+  world.telephony.textReview = review;
+  const alpha = await mountedImage(world);
+  const runtime = assistant.runtime(alpha);
+  await openVoicemail(alpha, matches);
+  return { alpha, runtime };
+}
+
+async function askOverPhone(alpha: Alpha, runtime: ReturnType<typeof assistant.runtime>) {
+  await until(alpha, runtime, Conversation, (state) => state.ready && state.context.showing.tag === "App" && state.context.showing.view === "Phone");
+  await press("Open Alpha");
+  await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+}
+
 /** The button named `name` in the agent's request, if it offers one. */
 const inReview = (name: string) => [...document.querySelectorAll("[role=dialog] button")].find((one) => one.textContent === name);
 
@@ -76,12 +111,10 @@ const confirm = (name: string) => drawn(() => {
 describe("Phone on an Alpha image", () => {
   it("See my recent calls, and call a number (spec/app/phone/index.md, \"Story: See my recent calls\"; spec/app/phone/index.md, \"Story: Call a number\")", async () => {
     const world = image();
-    const { alpha } = await openPhoneWorld(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.image);
+    const alpha = await mountedImage(world);
 
     // spec/app/phone/index.md, "Phone reads the call log whenever Recents comes to the front"
-    await openPhone(alpha);
-    await until(alpha, alpha.runtime, Phone, (s) => s.carrier === "CarrierReady" && s.telecom === "NoCall" && s.recents.status === "Loaded" && s.rows === 2);
+    await openReadyRecents(alpha, (state) => state.telecom === "NoCall" && state.rows === 2);
     expect(world.telephony.dialed).toEqual([]);
     expect(button("Missed")).toBeUndefined();
 
@@ -93,8 +126,7 @@ describe("Phone on an Alpha image", () => {
 
   it("Type a number, and call it only when the phone can dial it (spec/app/phone/index.md, \"Story: Type a number\"; spec/app/phone/index.md, \"Story: Call a number\")", async () => {
     const world = image();
-    const { alpha } = await openPhoneWorld(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.image);
+    const alpha = await mountedImage(world);
     await openPhone(alpha);
     await tab("Keypad");
     await until(alpha, alpha.runtime, Phone, (s) => s.tab === "Keypad");
@@ -186,22 +218,20 @@ describe("Phone on an Alpha image", () => {
 
   it(`Opens the reviewed keypad without dialing (spec/app/phone/index.md, "A number handed to Phone opens the keypad with it filled in, and never dials")`, async () => {
     const world = image();
-    const { alpha } = await openPhoneWorld(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.image);
+    const alpha = await mountedImage(world);
     const operation = { type: "phone_keypad", number: "+14155550100" } as const;
     await act(async () => {
       expect(await alpha.runtime.runPromise(phoneAction(operation, () => Promise.resolve(true)))).toEqual({
         kind: "applied", result: { kind: "phone-keypad", status: "opened" },
       });
     });
-    await until(alpha, alpha.runtime, Phone, (s) => s.front && s.tab === "Keypad" && s.digits === 12);
+    await filledPhoneKeypad(alpha, 12);
     expect([world.telephony.placed, world.telephony.dialed]).toEqual([[], []]);
   });
 
   it(`Does not dispatch an expired call approval (spec/app/contacts/agent.md, "Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call")`, async () => {
     const world = image();
-    const { alpha } = await openPhoneWorld(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.image);
+    const alpha = await mountedImage(world);
     const operation = { type: "phone_call", target: { kind: "number", number: "+14155550100" } } as const;
     await act(async () => {
       expect(await alpha.runtime.runPromise(phoneAction(operation, () => Promise.resolve(false)))).toMatchObject({ kind: "refused" });
@@ -247,10 +277,8 @@ describe("Phone on an Alpha image", () => {
 
   it("Gates ordinary calls on Android's carrier and emergency readings (spec/app/phone/index.md, \"Story: Know when a call is live\")", async () => {
     const world = image();
-    const { alpha } = await openPhoneWorld(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.image);
-    await openPhone(alpha);
-    await until(alpha, alpha.runtime, Phone, (s) => s.carrier === "CarrierReady" && s.recents.status === "Loaded");
+    const alpha = await mountedImage(world);
+    await openReadyRecents(alpha);
     expect(button("Call Maya Chen")?.disabled).toBe(false);
 
     world.telephony.mobileService = false;
@@ -270,8 +298,7 @@ describe("Phone on an Alpha image", () => {
   it("Hands off to the system dialer when cell service or call state is unknown (spec/app/phone/index.md, \"Story: Call a number\")", async () => {
     const world = image();
     world.telephony.mobileService = undefined;
-    const { alpha } = await openPhoneWorld(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.image);
+    const alpha = await mountedImage(world);
     await openPhone(alpha);
     await until(alpha, alpha.runtime, Phone, (s) => s.carrier === "CarrierUnknown" && s.telecom === "NoCall" && s.recents.status === "Loaded");
     await press("Call Maya Chen");
@@ -298,8 +325,7 @@ describe("Phone on an Alpha image", () => {
     const world = image();
     world.telephony.mobileService = false;
     world.telephony.emergencyNumbers.add("09");
-    const { alpha } = await openPhoneWorld(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.image);
+    const alpha = await mountedImage(world);
     await openPhone(alpha);
     await tab("Keypad");
     await until(alpha, alpha.runtime, Phone, (s) => s.tab === "Keypad" && s.carrier === "CarrierUnavailable");
@@ -313,8 +339,7 @@ describe("Phone on an Alpha image", () => {
 
   it("See missed calls on Home, then unheard voicemail (spec/app/phone/index.md, \"Story: See missed calls on Home\"; spec/app/phone/voicemail.md, \"Story: See my voicemail\")", async () => {
     const world = image();
-    const { alpha } = await openPhoneWorld(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.image);
+    const alpha = await mountedImage(world);
 
     // spec/app/phone/index.md, "Home shows the missed-calls card while there are missed calls not yet seen"; spec/app/phone/index.md, "One tap on the card opens Recents with the missed calls, and otherwise the Voicemail tab while a voicemail is unheard"
     await until(alpha, alpha.runtime, Phone, (s) => s.missed === 1 && s.voicemail);
@@ -353,11 +378,8 @@ describe("Phone on an Alpha image", () => {
   it("See my voicemail, listen to one, and delete it (spec/app/phone/voicemail.md, \"Story: See my voicemail\"; spec/app/phone/voicemail.md, \"Story: Listen to a voicemail\"; spec/app/phone/voicemail.md, \"Story: Delete a voicemail\")", async () => {
     const world = image();
     world.voice.onDevice = false;
-    const { alpha } = await openPhoneWorld(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.image);
-    await openPhone(alpha);
-    await until(alpha, alpha.runtime, Phone, (s) => s.voicemail);
-    await tab("Voicemail");
+    const alpha = await mountedImage(world);
+    await openVoicemail(alpha);
 
     // spec/app/phone/voicemail.md, "Voicemail reads the list each time its tab comes to the front"
     await until(alpha, alpha.runtime, Voicemail, (s) => s.list.status === "Loaded" && s.items === 1 && s.unheard === 1);
@@ -392,19 +414,11 @@ describe("Phone on an Alpha image", () => {
     const transcribe = vi.fn(() => Promise.resolve("Unrequested on-device transcript"));
     world.voice.voicemailTranscription = transcribe;
     const review = textReview(world.notes.owner, "reviewed-voicemail", { type: "voicemail_read_selected" });
-    world.telephony.textReview = review;
-    const { alpha } = await openPhoneWorld(world);
-    const runtime = assistant.runtime(alpha);
-    await until(alpha, alpha.runtime, Shell, (state) => state.image);
-    await openPhone(alpha);
-    await until(alpha, alpha.runtime, Phone, (state) => state.voicemail);
-    await tab("Voicemail");
+    const { alpha, runtime } = await openReviewedVoicemail(world, review);
     await until(alpha, alpha.runtime, Voicemail, (state) => state.list.status === "Loaded" && state.items === 1);
     await pressVoicemailRow();
     await until(alpha, alpha.runtime, Voicemail, (state) => state.open && state.carrierText && state.audio.status === "Loaded");
-    await until(alpha, runtime, Conversation, (state) => state.ready && state.context.showing.tag === "App" && state.context.showing.view === "Phone");
-    await press("Open Alpha");
-    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+    await askOverPhone(alpha, runtime);
 
     const ask = async (prompt: string) => {
       const reads = review.pendingReads;
@@ -450,19 +464,11 @@ describe("Phone on an Alpha image", () => {
     const replacement = { ...original, transcript: "Replacement voicemail", deletionWitness: `v1:${"b".repeat(64)}` };
     world.telephony.voicemails = [original];
     const review = textReview(world.notes.owner, "delete-voicemail-original", { type: "voicemail_delete_selected" });
-    world.telephony.textReview = review;
-    const { alpha } = await openPhoneWorld(world);
-    const runtime = assistant.runtime(alpha);
-    await until(alpha, alpha.runtime, Shell, (state) => state.image);
-    await openPhone(alpha);
-    await until(alpha, alpha.runtime, Phone, (state) => state.voicemail && state.telecom === "NoCall");
-    await tab("Voicemail");
+    const { alpha, runtime } = await openReviewedVoicemail(world, review, (state) => state.telecom === "NoCall");
 
     const ask = async (request: string) => {
       await until(alpha, alpha.runtime, Voicemail, (state) => state.open && state.audio.status === "Loaded");
-      await until(alpha, runtime, Conversation, (state) => state.ready && state.context.showing.tag === "App" && state.context.showing.view === "Phone");
-      await press("Open Alpha");
-      await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+      await askOverPhone(alpha, runtime);
       world.ask.nextReplyChunks = ["Review the deletion in Phone."];
       world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: {
         proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true,
@@ -512,11 +518,8 @@ describe("Phone on an Alpha image", () => {
       requests.push({ id, requestId });
       return requests.length === 1 ? first.promise : reopened.promise;
     };
-    const { alpha } = await openPhoneWorld(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.image);
-    await openPhone(alpha);
-    await until(alpha, alpha.runtime, Phone, (s) => s.voicemail);
-    await tab("Voicemail");
+    const alpha = await mountedImage(world);
+    await openVoicemail(alpha);
     await until(alpha, alpha.runtime, Voicemail, (s) => s.list.status === "Loaded" && s.items === 1);
 
     await pressVoicemailRow();
@@ -583,11 +586,8 @@ describe("Phone on an Alpha image", () => {
   it(`Keeps a voicemail only when Android confirms Undo (spec/app/phone/voicemail.md, "Undo can keep a voicemail while Android's deletion window is open")`, async () => {
     const world = image();
     world.telephony.holdVoicemailDeletion = true;
-    const { alpha } = await openPhoneWorld(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.image);
-    await openPhone(alpha);
-    await until(alpha, alpha.runtime, Phone, (s) => s.front && s.voicemail);
-    await tab("Voicemail");
+    const alpha = await mountedImage(world);
+    await openVoicemail(alpha, (state) => state.front);
     await until(alpha, alpha.runtime, Voicemail, (s) => s.list.status === "Loaded" && s.items === 1);
     await pressVoicemailRow();
     await until(alpha, alpha.runtime, Voicemail, (s) => s.open);
@@ -606,8 +606,7 @@ describe("Phone on an Alpha image", () => {
 describe("The call strip on an Alpha image", () => {
   it("See my live call over every view, and end it (spec/app/phone/call.md, \"Story: See my live call over every view\"; spec/app/phone/index.md, \"Story: Know when a call is live\")", async () => {
     const world = image();
-    const { alpha } = await openPhoneWorld(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.image);
+    const alpha = await mountedImage(world);
 
     // spec/app/phone/call.md, "While a call rings, Android's incoming alert is the only call bar"
     world.telephony.live = [{ id: "c1", state: "ringing", connectedAt: null }];

@@ -20,6 +20,7 @@
     "@elizaos/plugin-notes-client": "link:../../.eliza/packages/plugin-notes-client",
     "@repo/deployment": "workspace:*",
     "@repo/eliza-harness": "workspace:*",
+    "@repo/launcher-records": "workspace:*",
     "effect": "4.1.1",
     "vibelang-runtime": "0.0.13"
   },

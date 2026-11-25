@@ -49,11 +49,11 @@ export const meta: ComponentMeta<SettingsActivityPageProps> = {
       await expect(onRecover.mock.calls).toEqual([["restart"]]);
     },
     Reading: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
-      await expect(within(canvasElement).queryByRole("button", { name: "Refresh actions" })).toBeNull();
+      await expect(within(canvasElement).queryByRole("button", { name: "Refresh phone actions" })).toBeNull();
     },
     "Nothing listed": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onRefresh.mockClear();
-      await userEvent.click(within(canvasElement).getByRole("button", { name: "Refresh actions" }));
+      await userEvent.click(within(canvasElement).getByRole("button", { name: "Refresh phone actions" }));
       await expect(onRefresh.mock.calls.length).toBe(1);
     },
     Development: async ({ canvasElement }: { canvasElement: HTMLElement }) => {

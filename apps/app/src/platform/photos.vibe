@@ -522,49 +522,66 @@ module browser {
     return undefined
   }
 
+  type EditRead = {
+    readonly transaction: IDBTransaction
+    readonly receipts: IDBObjectStore
+    readonly prior: unknown
+    readonly record: (receipt: BrowserEditReceipt) => void
+  }
+
+  function editReceipt(database: IDBDatabase, stores: string | string[], operation: string, read: (edit: EditRead) => void): Promise<BrowserEditReceipt> {
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction(stores, "readwrite")
+      const receipts = transaction.objectStore(edits)
+      let result: BrowserEditReceipt = { status: "not-started" }
+      transaction.oncomplete = () => resolve(result)
+      transaction.onabort = () => reject(transaction.error)
+      const prior = receipts.get(operation)
+      prior.onsuccess = () => read({ transaction, receipts, prior: prior.result, record: (receipt) => { result = receipt } })
+    })
+  }
+
   /** A receipt and its copy or replacement are committed by the same IndexedDB transaction. */
   export async function saveBrowserEdit(request: BrowserEditSave): Promise<BrowserEditReceipt> {
     if (!isBrowserEdit(request.operation)) throw new Error("Invalid photo edit identity.")
     const database = await storage()
     const { source, frame, replace, operation } = request
     try {
-      const receipt = await new Promise<BrowserEditReceipt>((resolve, reject) => {
-        const tx = database.transaction([store, originals, edits], "readwrite")
-        const captures = tx.objectStore(store)
-        const results = tx.objectStore(edits)
-        let result: BrowserEditReceipt = { status: "not-started" }
-        tx.oncomplete = () => resolve(result)
-        tx.onabort = () => reject(tx.error)
-        const prior = results.get(operation)
-        prior.onsuccess = () => {
-          if (prior.result !== undefined) { result = readReceipt(prior.result) ?? result; return }
-          const current = captures.get(source.id)
-          current.onsuccess = () => {
-            const original: unknown = current.result
-            const isCurrent = source.trashedAt === undefined && (canReplaceBrowserEdit(source.id)
-              ? matching(valid(original) ? original : undefined, source)
-              : !replace && (original === undefined || matching(valid(original) ? original : undefined, source)))
-            if (!isCurrent) {
-              result = { status: "stale" }
-              results.add(result, operation)
-              return
-            }
-            const created = replace ? source.created : Date.now()
-            const id = replace ? source.id : `browser:${created}:${crypto.randomUUID()}`
-            const extension = frame.file.type === "video/mp4" ? "mp4" : frame.file.type.startsWith("video/") ? "webm" : "jpg"
-            const name = `${replace ? "" : "Edited "}${source.name.replace(/\.[^.]+$/, "")}.${extension}`
-            const item: BrowserCapture = { id, name, created, mimeType: frame.file.type, size: frame.file.size,
-              width: frame.width, height: frame.height, duration: frame.duration, thumbnail: frame.thumbnail, revision: operation, favorite: replace && source.favorite === true }
-            if (replace) {
-              captures.put(item)
-              tx.objectStore(originals).put(frame.file, id)
-            } else {
-              captures.add(item)
-              tx.objectStore(originals).add(frame.file, id)
-            }
-            result = { status: "saved", id, name, replaced: replace }
-            results.add(result, operation)
+      const receipt = await editReceipt(database, [store, originals, edits], operation, ({ transaction, receipts, prior, record }) => {
+        if (prior !== undefined) {
+          const receipt = readReceipt(prior)
+          if (receipt !== undefined) record(receipt)
+          return
+        }
+        const captures = transaction.objectStore(store)
+        const current = captures.get(source.id)
+        current.onsuccess = () => {
+          const original: unknown = current.result
+          const isCurrent = source.trashedAt === undefined && (canReplaceBrowserEdit(source.id)
+            ? matching(valid(original) ? original : undefined, source)
+            : !replace && (original === undefined || matching(valid(original) ? original : undefined, source)))
+          if (!isCurrent) {
+            const stale = { status: "stale" } as const
+            record(stale)
+            receipts.add(stale, operation)
+            return
           }
+          const created = replace ? source.created : Date.now()
+          const id = replace ? source.id : `browser:${created}:${crypto.randomUUID()}`
+          const extension = frame.file.type === "video/mp4" ? "mp4" : frame.file.type.startsWith("video/") ? "webm" : "jpg"
+          const name = `${replace ? "" : "Edited "}${source.name.replace(/\.[^.]+$/, "")}.${extension}`
+          const item: BrowserCapture = { id, name, created, mimeType: frame.file.type, size: frame.file.size,
+            width: frame.width, height: frame.height, duration: frame.duration, thumbnail: frame.thumbnail, revision: operation, favorite: replace && source.favorite === true }
+          if (replace) {
+            captures.put(item)
+            transaction.objectStore(originals).put(frame.file, id)
+          } else {
+            captures.add(item)
+            transaction.objectStore(originals).add(frame.file, id)
+          }
+          const saved = { status: "saved", id, name, replaced: replace } as const
+          record(saved)
+          receipts.add(saved, operation)
         }
       })
       if (receipt.status === "saved") window.dispatchEvent(new Event(event))
@@ -577,18 +594,10 @@ module browser {
     if (!isBrowserEdit(operation)) throw new Error("Invalid photo edit identity.")
     const database = await storage()
     try {
-      return await new Promise((resolve, reject) => {
-        const tx = database.transaction(edits, "readwrite")
-        const results = tx.objectStore(edits)
-        let result: BrowserEditReceipt = { status: "not-started" }
-        tx.oncomplete = () => resolve(result)
-        tx.onabort = () => reject(tx.error)
-        const request = results.get(operation)
-        request.onsuccess = () => {
-          const receipt = readReceipt(request.result)
-          if (receipt !== undefined) result = receipt
-          else results.put(result, operation)
-        }
+      return await editReceipt(database, edits, operation, ({ receipts, prior, record }) => {
+        const receipt = readReceipt(prior)
+        if (receipt !== undefined) record(receipt)
+        else receipts.put({ status: "not-started" }, operation)
       })
     } finally { database.close() }
   }

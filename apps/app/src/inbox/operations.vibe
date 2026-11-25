@@ -6,14 +6,14 @@ import type { Effect as Out, Event, Kind } from "../../gen/app__inbox__sending.e
 import type { Actor } from "../../gen/app__inbox__access.ts"
 import type { MailOperation } from "@elizaos/cloud"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
-import { Cloud } from "../platform/cloud.vibe"
-import { Attempts } from "../runtime/attempts.vibe"
+import { type Cloud } from "../platform/cloud.vibe"
+import { type Attempts } from "../runtime/attempts.vibe"
 import { Time } from "../runtime/time.vibe"
 import { type Job, answer, contained, hearing, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import type { Event as DraftEvent } from "../../gen/app__inbox__drafts.effect.vibe"
 import { type Attached, Letters } from "./composer.vibe"
-import { type Proposal, Mail, operate, operationStoreVersion, relabel } from "./gmail.vibe"
+import { type Mail, type Proposal, operate, operationStoreVersion, relabel } from "./gmail.vibe"
 import { ownerChanges } from "./mailbox.vibe"
 
 const labels = { Archive: "archive", Trash: "trash", Unarchive: "unarchive", Untrash: "untrash" } as const

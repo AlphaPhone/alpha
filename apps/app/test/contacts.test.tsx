@@ -18,7 +18,7 @@ import assistant from "../src/assistant/index.tsx";
 import home from "../src/home/index.tsx";
 import { untimed } from "../src/runtime/reactor.vibe";
 import { placeOf } from "../src/voice/voice.vibe";
-import { button, closeAll, drawn, fill, later, only, open as openAlpha, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, filledPhoneKeypad, later, only, open as openAlpha, press, underAct, until } from "./alpha.tsx";
 import { type Scene, scene } from "./fakes/scene.ts";
 
 underAct();
@@ -39,6 +39,12 @@ const open = async (world: Scene) => {
   return running;
 };
 
+async function mountedContacts(world: Scene) {
+  const { alpha } = await open(world);
+  await until(alpha, alpha.runtime, Shell, (state) => state.contacts);
+  return alpha;
+}
+
 const launch = (name: "Contacts" | "Messages") => drawn(() => {
   const tile = document.querySelector<HTMLButtonElement>(`button[data-home-tile='view:${name}']`);
   if (!tile) throw new Error(`no ${name} tile on Home`);
@@ -49,8 +55,7 @@ describe("Contacts on an Alpha image", () => {
   it("Browse my contacts, look at one, change it and delete it (spec/app/contacts/index.md, \"Story: Browse my contacts\"; spec/app/contacts/index.md, \"Story: Give Alpha access to my contacts\"; spec/app/contacts/index.md, \"Story: Know what happened to my change\"; spec/app/contacts/index.md, \"Story: Look at one contact\"; spec/app/contacts/index.md, \"Story: Add or change a contact\"; spec/app/contacts/index.md, \"Story: Delete a contact\"; spec/app/phone/comms.md, \"Story: Address the person or Alpha from one bar\")", async () => {
     const world = image();
     world.telephony.contacts = false;
-    const { alpha } = await open(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.contacts);
+    const alpha = await mountedContacts(world);
 
     // spec/app/contacts/index.md, "Contacts reads the list each time it comes to the front"
     await launch("Contacts");
@@ -113,8 +118,7 @@ describe("Contacts on an Alpha image", () => {
   it("Add or change a contact in the phone's own editor where Alpha may not write contacts (spec/app/contacts/index.md, \"Story: Add or change a contact\")", async () => {
     const world = image();
     world.telephony.editable = false;
-    const { alpha } = await open(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.contacts);
+    const alpha = await mountedContacts(world);
     await launch("Contacts");
     await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 2 && !s.editable);
 
@@ -136,8 +140,7 @@ describe("Contacts on an Alpha image", () => {
       { ...first, id: "59", displayName: "7 Studio" },
       { ...first, id: "60", displayName: "Émile Amari" },
     );
-    const { alpha } = await open(world);
-    await until(alpha, alpha.runtime, Shell, (s) => s.contacts);
+    const alpha = await mountedContacts(world);
     await launch("Contacts");
     await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 50 && s.more);
     await press("More contacts");
@@ -266,7 +269,7 @@ describe("Contacts on an Alpha image", () => {
 
     // spec/app/phone/index.md, "A number handed to Phone opens the keypad with it filled in, and never dials"
     expect(await read({ type: "phone_keypad", number: "+14155550122" })).toEqual({ kind: "phone-keypad", status: "opened" });
-    await until(alpha, alpha.runtime, Phone, (s) => s.front && s.tab === "Keypad" && s.digits === 12);
+    await filledPhoneKeypad(alpha, 12);
     expect([world.telephony.placed, world.telephony.dialed]).toEqual([[], []]);
 
     // spec/app/contacts/index.md, "Searching or changing the filter chip starts a new list"

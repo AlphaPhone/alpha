@@ -41,7 +41,7 @@ export * from "./components/assistant/AssistantAttachmentChip.tsx";
 export * from "./components/assistant/AssistantAttachmentPickerBody.tsx";
 export * from "./components/assistant/AssistantAttachmentPicker.tsx";
 export * from "./components/assistant/AssistantCallCard.tsx";
-export * from "./components/assistant/AssistantCardFrame.tsx";
+export { AssistantCardFrame, type AssistantCardFrameProps } from "./components/assistant/AssistantCardFrame.tsx";
 export * from "./components/assistant/AssistantCard.tsx";
 export * from "./components/assistant/AssistantChatHeader.tsx";
 export * from "./components/assistant/AssistantChatHistorySheet.tsx";

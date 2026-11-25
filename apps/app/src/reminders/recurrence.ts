@@ -1,9 +1,8 @@
 // spec/app/reminders/recurrence.md, "Story: Repeat reminders cleanly across months and leap years"
+import type { ReminderRecurrence } from "@repo/launcher-records";
 import { type CivilDate, type Repeat, nextOccurrence, validDate } from "../../gen/app__reminders__recurrence.ts";
 
 /** Wire recurrence rule shared between Reminders UI and the resident agent. */
-export type ReminderRecurrence = "none" | "daily" | "weekdays" | "weekly" | "monthly" | "yearly";
-
 const wireToSpec: Readonly<Record<ReminderRecurrence, Repeat>> = {
   none: "NoRepeat",
   daily: "Daily",

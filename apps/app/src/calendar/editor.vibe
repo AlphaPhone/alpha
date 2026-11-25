@@ -1,4 +1,5 @@
 // spec/app/calendar/editor.md, "Story: Write an event"; spec/app/calendar/editor.md, "Story: Keep my draft through a restart"; spec/app/calendar/editor.md, "Story: Never create an event twice"; spec/app/calendar/editor.md, "Story: Delete an event, or answer an invitation"
+import type { ReminderItemRecord } from "@repo/launcher-records"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { ScanEntry } from "../files/scanEntry.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
@@ -16,7 +17,7 @@ import { PhoneCalendar, type Written } from "../platform/calendar.vibe"
 import { Attempts, fresh } from "../runtime/attempts.vibe"
 import { civilDateAt, formatCivilDate } from "../reminders/recurrence.ts"
 import { type DatedReminderFields, createReminderItem, editDatedReminder, needsReschedule } from "../reminders/reminders.vibe"
-import { DEFAULT_LIST_ID, type ReminderItemRecord, remindersStore } from "../reminders/store.ts"
+import { DEFAULT_LIST_ID, remindersStore } from "../reminders/store.ts"
 import { answer, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { type Row, androidWindowOf, shown } from "./shown.ts"
@@ -298,7 +299,7 @@ effect function createAgent(attempt: number, fields: Fields): Written!!(Agent | 
 /** What a read back of the agent's calendar finds of a new event: its title and start. */
 schema Created { readonly events: ReadonlyArray<{ readonly title: string; readonly startAt: string }> }
 
-// spec/app/calendar/writing.md, "An invitation answer is sent only by the invitee, at the version shown, under a key made of the answer and that version"; spec/app/calendar/writing.md, "Deleting is an organizer's cancel or an invitee's decline, and nothing when the organizer is unknown"
+// spec/app/calendar/writing.md, "An invitation answer is sent only by the invitee, at the version shown, under a key made of the event, the answer and that version"; spec/app/calendar/writing.md, "Deleting is an organizer's cancel or an invitee's decline, and nothing when the organizer is unknown"
 /** A change, a deletion or an answer to an event of the agent's calendar, sent once at the version shown, then read back. */
 effect function sendAgent(attempt: number, kind: "Update" | "Remove" | "Reply", row: Row, scope: Scope, going: boolean): Written!!(Agent | Attempts | KeyValueStore.KeyValueStore | Editor.Machine | Time) {
   const event = `${calendarBase}/events/${encodeURIComponent(row.key)}`
@@ -396,7 +397,7 @@ effect function handOff() {
   try (try PhoneCalendar).handOff({ ...fieldsOf(fields), ...providerTimes(fields), allDay: fields.allDay, attendees: people, alerts, rrule })
 }
 
-// spec/app/calendar/index.md, "A read asked for during a write waits for it, and follows it once"; spec/app/calendar/deletions.md, "A refused send shows the event again; a sent deletion hides it until a read no longer has it unchanged"
+// spec/app/calendar/index.md, "A read asked for during a write waits for it, and follows it once"; spec/app/calendar/deletions.md, "A refused send shows the event again and says it was not deleted; a sent deletion hides it until a read no longer has it unchanged"
 /** How write `attempt` ended; the calendar asks to read its day again, which waits for the write and then shows it or releases its doubt. */
 effect function written(attempt: number, kind: Write, id: number, scope: Scope, going: boolean) {
   const owning = try owner()

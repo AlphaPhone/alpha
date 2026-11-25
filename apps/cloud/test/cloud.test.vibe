@@ -28,12 +28,20 @@ import { hosting } from "./hosts.ts"
 import resources from "./fixtures/resources.json" with { type: "json" }
 
 module node {
+  import { pathOf, readCloudError, routesByName } from "@elizaos/cloud"
   import { createHash, randomBytes } from "node:crypto"
   import http from "node:http"
   import type { AddressInfo } from "node:net"
   import { runInNewContext } from "node:vm"
 
   type Plans = Readonly<Record<"plus_monthly" | "pro_monthly", { readonly priceId: string; readonly productId: string }>>
+
+  /** Sends the device key to the session-only portal and reads the actual refusal. */
+  export async function portalAnswer(local: string, credential: string) {
+    const route = routesByName.portal
+    const answer = await fetch(`${local}${pathOf(route)}`, { method: "POST", headers: { authorization: `Bearer ${credential}` } })
+    return { status: answer.status, failure: answer.ok ? undefined : (await readCloudError(answer)).failure }
+  }
 
   /**
    * The payment provider's catalog, read only: what the cloud checks before it serves billing. Payments cost money and
@@ -95,13 +103,10 @@ module node {
     return { address: url.href, ...shown }
   }
 }
-import { catalog, challengeOf, random, returnPageAt, returnPageParts } from node
+import { catalog, challengeOf, portalAnswer, random, returnPageAt, returnPageParts } from node
 
 /** The cloud stopped, or said nothing of serving, before its deadline. */
 error NotServing { output: string }
-
-/** What eliza's client was refused with. */
-error Refusal { cause: unknown }
 
 /** `@repo/deployment` names an environment Alpha registers with a local cloud. */
 error NotHosted { name: string }
@@ -202,9 +207,8 @@ effect function gatesOf(local: string, name: string) {
         return
       }
       case "BillingRefused": {
-        const client = createCloudClient({ baseUrl: local, credential: () => held.key })
-        const refusal = try (tryPromise({ try: () => client.billingPortal(), catch: (cause) => new Refusal({ cause }) }) |> flip(%))
-        if ((refusal.cause as { failure?: { tag?: string } }).failure?.tag !== "CloudCredentialInvalid") throw refuse(String(refusal.cause))
+        const answer = try tryPromise({ try: () => portalAnswer(local, held.key), catch: (cause) => refuse(String(cause)) })
+        if (answer.status !== 401 || answer.failure?.tag !== "CloudCredentialInvalid") throw refuse(answer)
         return
       }
     }

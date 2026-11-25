@@ -1,8 +1,9 @@
 // spec/app/reminders/index.md, "Story: Sync with the resident agent and recover across restarts"
+import type { RemindersSnapshot } from "@repo/launcher-records"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { fromAreas } from "../home/cards.vibe"
 import { dueInstantMs } from "./recurrence.ts"
-import { type RemindersSnapshot, isItemOverdue, remindersStore } from "./store.ts"
+import { isItemOverdue, remindersStore } from "./store.ts"
 
 /** The on-device copy of the resident reminder document. */
 export const snapshotKey = "alpha.reminders.snapshot@1"

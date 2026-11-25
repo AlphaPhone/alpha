@@ -39,9 +39,7 @@ export service MediaExecutors {
   static readonly defaultValue = () => ({ readyFiles: () => succeed(undefined), execute: () => succeed({ kind: "refused", code: NOT_DISPATCHED }), reviewFiles: () => succeed(undefined), filesContext: () => succeed(undefined) })
 }
 
-export interface ReviewAuthority {
-  readonly current: () => Promise<boolean>
-  readonly continueDraft?: () => Promise<boolean>
+interface ReviewDetails {
   readonly target?: MessageDraftTarget
   readonly voicemail?: VoicemailTarget
   readonly voicemailDeletion?: ReviewedVoicemailDeletion
@@ -53,20 +51,16 @@ export interface ReviewAuthority {
   readonly phone?: ReviewedPhoneContact
 }
 
-interface ApprovalScope {
+export interface ReviewAuthority extends ReviewDetails {
+  readonly current: () => Promise<boolean>
+  readonly continueDraft?: () => Promise<boolean>
+}
+
+interface ApprovalScope extends ReviewDetails {
   readonly active: boolean!!
   readonly beforeDispatch?: Effect.Effect<boolean>
   readonly foregroundFiles?: Effect.Effect<ForegroundFiles | undefined>
   readonly continueDraft?: boolean!!
-  readonly target?: MessageDraftTarget
-  readonly voicemail?: VoicemailTarget
-  readonly voicemailDeletion?: ReviewedVoicemailDeletion
-  readonly sms?: SmsSelection
-  readonly approvedText?: Omit<SmsApproval, "attemptId">
-  readonly composeLine?: ComposeLine
-  readonly files?: FileReview
-  readonly reportFiles?: (outcome: FileActionReport) => void
-  readonly phone?: ReviewedPhoneContact
 }
 
 module native {
@@ -964,7 +958,7 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
   }
 }
 
-export const mediaReview = Layer.effect(MediaReview, effect {
+const mediaReviewContext = effect {
   const agent = try Agent
   const { runtime, life } = agent
   const executors = try MediaExecutors
@@ -1120,6 +1114,57 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       ? recovered.result.tag === "Applied" ? "Phone confirmed the text request" : "The phone did not send the text"
       : undefined
   }
+  const history: Pick<MediaReview.Shape, "history" | "settle"> = {
+    effect history() {
+      const opened = try session()
+      if (opened === undefined || !(try enrollmentIsCurrent(opened))) return undefined
+      const answer = try proposals(opened)
+      if (answer === undefined) return undefined
+      const at = try Clock.currentTimeMillis
+      const rows = try Effect.forEach(answer, effect (proposal) => {
+        if (proposal.payload.workflow !== undefined) return undefined
+        const outcome = outcomes[proposal.state]
+        if (outcome === undefined) return undefined
+        const visible = operation(proposal.payload.operation)
+        const labelled = visible === undefined ? { title: "Phone action", detail: "" } : words(visible)
+        const unsettled = toSettle(proposal) && (try hasReceipt(opened, proposal))
+        const text = sendsText(visible)
+        const recovered = text && unsettled ? try recoverText(opened, proposal) : undefined
+        const reported = text && proposal.state === "reconciliation_required" ? "Phone could not confirm the send" : outcome
+        return { proposal: proposal.id, ...labelled, outcome: recovered ?? reported, declinable: readyToDecline(proposal, at), unsettled: unsettled && !text }
+      }, { concurrency: 4 })
+      if (!(try enrollmentIsCurrent(opened))) return undefined
+      return rows.filter((row) => row !== undefined)
+    },
+    effect settle(id, action) {
+      return try lock.withPermits(1)(effect {
+        const opened = try session()
+        if (opened === undefined || !(try enrollmentIsCurrent(opened))) return false
+        const found = (try proposals(opened))?.find((proposal) => proposal.id === id && proposal.payload.workflow === undefined)
+        if (found === undefined || !(try enrollmentIsCurrent(opened))) return false
+        if (action === "decline") {
+          if (!readyToDecline(found, try Clock.currentTimeMillis)) return false
+          const result = tryPromise(() => opened.decide(found.id, { digest: found.digest, approved: false })) catch () => undefined
+          return result !== undefined
+        }
+        if (!toSettle(found) || !(try hasReceipt(opened, found))) return false
+        if (sendsText(operation(found.payload.operation))) return (try recoverText(opened, found)) !== undefined
+        const result = tryPromise(() => opened.execute.confirmReview(found.id, action === "happened" ? "ReviewedApplied" : "ReviewedNotApplied")) catch () => "refused"
+        return result === "sent"
+      })
+    },
+  }
+  return {
+    runtime, executors, device, telephony, shell, layers, preferences, sameSms, voicemailTarget, lock, isLatest, scopes, pinnedFiles,
+    messageTarget, session, proposals, enrollmentIsCurrent, reviewContext, readAttempt, history, workflowOffers, decideWorkflow,
+  }
+}
+
+export const mediaReview = Layer.effect(MediaReview, effect {
+  const {
+    runtime, executors, device, telephony, shell, layers, preferences, sameSms, voicemailTarget, lock, isLatest, scopes, pinnedFiles,
+    messageTarget, session, proposals, enrollmentIsCurrent, reviewContext, readAttempt, history, workflowOffers, decideWorkflow,
+  } = try mediaReviewContext
   const { methods: files, actOnFiles, continueInFiles } = filesActions({
     device, shell, layers, preferences, executors, lock, scopes, isLatest, enrollmentIsCurrent, proposals,
   })
@@ -1174,44 +1219,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
     },
     workflowOffers,
     decideWorkflow,
-    effect history() {
-      const opened = try session()
-      if (opened === undefined || !(try enrollmentIsCurrent(opened))) return undefined
-      const answer = try proposals(opened)
-      if (answer === undefined) return undefined
-      const at = try Clock.currentTimeMillis
-      const rows = try Effect.forEach(answer, effect (proposal) => {
-        if (proposal.payload.workflow !== undefined) return undefined
-        const outcome = outcomes[proposal.state]
-        if (outcome === undefined) return undefined
-        const visible = operation(proposal.payload.operation)
-        const labelled = visible === undefined ? { title: "Phone action", detail: "" } : words(visible)
-        const unsettled = toSettle(proposal) && (try hasReceipt(opened, proposal))
-        const text = sendsText(visible)
-        const recovered = text && unsettled ? try recoverText(opened, proposal) : undefined
-        const reported = text && proposal.state === "reconciliation_required" ? "Phone could not confirm the send" : outcome
-        return { proposal: proposal.id, ...labelled, outcome: recovered ?? reported, declinable: readyToDecline(proposal, at), unsettled: unsettled && !text }
-      }, { concurrency: 4 })
-      if (!(try enrollmentIsCurrent(opened))) return undefined
-      return rows.filter((row) => row !== undefined)
-    },
-    effect settle(id, action) {
-      return try lock.withPermits(1)(effect {
-        const opened = try session()
-        if (opened === undefined || !(try enrollmentIsCurrent(opened))) return false
-        const found = (try proposals(opened))?.find((proposal) => proposal.id === id && proposal.payload.workflow === undefined)
-        if (found === undefined || !(try enrollmentIsCurrent(opened))) return false
-        if (action === "decline") {
-          if (!readyToDecline(found, try Clock.currentTimeMillis)) return false
-          const result = tryPromise(() => opened.decide(found.id, { digest: found.digest, approved: false })) catch () => undefined
-          return result !== undefined
-        }
-        if (!toSettle(found) || !(try hasReceipt(opened, found))) return false
-        if (sendsText(operation(found.payload.operation))) return (try recoverText(opened, found)) !== undefined
-        const result = tryPromise(() => opened.execute.confirmReview(found.id, action === "happened" ? "ReviewedApplied" : "ReviewedNotApplied")) catch () => "refused"
-        return result === "sent"
-      })
-    },
+    ...history,
     messageTarget,
     voicemailTarget,
     ...files,
@@ -1225,7 +1233,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       if (option === undefined || query === undefined) return
       effect function shown(opened: Session): boolean!! {
         const time = try Clock.currentTimeMillis
-        return opened === latest && card.enrollmentId === opened.identity.enrollmentId
+        return isLatest(opened) && card.enrollmentId === opened.identity.enrollmentId
           && board.snapshot().media.includes(card) && card.conversation === (try chats.get()).chosen
           && card.decision === undefined && card.reviewRequest !== undefined && (try sameReviewRequest(card, board.lastSentId))
           && time < card.expiresAt && (try reviewContext(card.revision, view))
@@ -1287,7 +1295,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         const showing = (try conversation.get()).context
         const chosen = (try chats.get()).chosen
         const time = try Clock.currentTimeMillis
-        if (session !== latest || (card.target !== undefined && !sameTarget(card.target, try messageTarget())) || (card.sms !== undefined && !(try sameSms(card.sms)))
+        if (!isLatest(session) || (card.target !== undefined && !sameTarget(card.target, try messageTarget())) || (card.sms !== undefined && !(try sameSms(card.sms)))
           || (card.voicemail !== undefined && !sameVoicemail(card.voicemail, try voicemailTarget()))
           || card.enrollmentId !== session.identity.enrollmentId || card.conversation !== chosen
           || card.revision !== showing.revision || showing.sensitive || time >= card.expiresAt) return false
@@ -1323,7 +1331,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       effect function canStage(session: Session): boolean!! {
         const context = (try conversation.get()).context
         const where = try shell.get()
-        return session === latest && card.enrollmentId === session.identity.enrollmentId && card.conversation === (try chats.get()).chosen
+        return isLatest(session) && card.enrollmentId === session.identity.enrollmentId && card.conversation === (try chats.get()).chosen
           && card.reviewRequest !== undefined && (try sameReviewRequest(card, board.lastSentId)) && !context.sensitive && (try Clock.currentTimeMillis) < card.expiresAt
           && showing(where, "Messages") && (where.assistant === "Sheet" || where.assistant === "Full") && (try device.showing())
       }

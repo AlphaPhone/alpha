@@ -9,6 +9,4 @@ import { together } from "../runtime/reactor.vibe";
 import { imageScan } from "../files/scan.vibe";
 import { agentPhotos } from "./agent.vibe";
 
-export const photosArea = area(together(library, viewer, trash, agentPhotos, imageScan), Photos, { back });
-
-export default photosArea;
+export default area(together(library, viewer, trash, agentPhotos, imageScan), Photos, { back });

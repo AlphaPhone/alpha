@@ -202,7 +202,6 @@
         ".agents/**",
         "AGENTS.md",
         "SPEC.md",
-        "LICENSE",
         "package.json",
         "pnpm-lock.yaml",
         "turbo.json",
@@ -232,7 +231,6 @@
         ".agents/**",
         "AGENTS.md",
         "SPEC.md",
-        "LICENSE",
         "package.json",
         "pnpm-lock.yaml",
         "turbo.json",
@@ -268,7 +266,6 @@
         "AGENTS.md",
         "SPEC.md",
         "README.md",
-        "LICENSE",
         "spec/**",
         "package.json",
         "pnpm-lock.yaml",
@@ -428,7 +425,7 @@
       "outputs": []
     },
     "//#analyze": {
-      "dependsOn": ["//#gen", "@repo/design-system#build", "@repo/ui#gen", "vibestack-studio#gen"],
+      "dependsOn": ["//#gen", "@repo/design-system#build", "@repo/eliza-harness#build", "@repo/ui#gen", "vibestack-studio#gen"],
       "inputs": [
         "apps/**",
         "packages/**",
@@ -438,6 +435,7 @@
         "!**/.DS_Store",
         "!{apps,packages,vibestack/studio}/**/gen/**",
         "package.json",
+        "eliza.lock.json",
         "pnpm-workspace.yaml",
         "tsconfig.json",
         "*.config.js",

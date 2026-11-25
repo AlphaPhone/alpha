@@ -1,6 +1,7 @@
 // spec/app/reminders/alerts.md, "Story: Alert on due reminders and act from the banner"
-import type * as KeyValueStore from "effect/persistence/KeyValueStore"
 import type { AndroidReminderOperation } from "@elizaos/os-bridges"
+import type { ReminderItemRecord, RemindersSnapshot } from "@repo/launcher-records"
+import type * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Alerts from "../../gen/app__reminders__alerts.effect.vibe"
 import type { AlertEffect as Out, Event } from "../../gen/app__reminders__alerts.effect.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
@@ -14,7 +15,7 @@ import { externalStore } from "../runtime/store.ts"
 import { Time } from "../runtime/time.vibe"
 import { advanceDueDate, alertInstantMs, dueInstantMs, snoozeTargetMs } from "./recurrence.ts"
 import { persistReminderSnapshot } from "./snapshot.vibe"
-import { type ReminderItemRecord, type RemindersSnapshot, remindersStore } from "./store.ts"
+import { remindersStore } from "./store.ts"
 
 /** Optional native Android reminder alarm bridge wired by the integrator without coupling Reminders to platform internals. */
 export interface NativeRemindersPort {
@@ -33,7 +34,7 @@ export function setNativeRemindersPort(port: NativeRemindersPort | undefined): v
 }
 
 /** Banner snapshot observed synchronously by the global AlertBanner overlay. */
-export interface RingingBannerState {
+interface RingingBannerState {
   readonly specId: number
   readonly revision: number
   readonly item: ReminderItemRecord

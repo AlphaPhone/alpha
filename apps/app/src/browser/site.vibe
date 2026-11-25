@@ -3,11 +3,11 @@ import type { BrowserPageBinding } from "@elizaos/os-bridges"
 import { Machine as Tabs } from "../../gen/app__browser.effect.vibe"
 import * as Site from "../../gen/app__browser__site.effect.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
-import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import type { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { type Said, say } from "../notices/toasts.vibe"
 import { TabHost, hosted } from "../platform/browser.vibe"
 import { answer, contained, reacting, run } from "../runtime/reactor.vibe"
-import { idOf } from "./browser.vibe"
+import { browserInFront, idOf } from "./browser.vibe"
 
 export type SitePage = BrowserPageBinding & { readonly host: string }
 type Clearing = SitePage & { readonly ticket: number }
@@ -54,7 +54,7 @@ export effect function siteShown(): (SitePage | undefined)!!(Tabs | TabHost) {
 }
 
 effect function stillShown(reviewed: SitePage): boolean!!(Tabs | TabHost | Shell) {
-  if (!showing(try (try Shell).get(), "Browser")) return false
+  if (!(try browserInFront())) return false
   const shown = try siteShown()
   return shown?.id === reviewed.id && shown.url === reviewed.url && shown.navigation === reviewed.navigation && shown.revision === reviewed.revision
 }

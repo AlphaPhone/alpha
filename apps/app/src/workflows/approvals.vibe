@@ -2,8 +2,8 @@
 import { type WorkflowApproval, type WorkflowRun, WorkflowHttpError, workflowOperationAdmitted } from "@elizaos/plugin-workflow-client"
 import * as Model from "../../gen/app__workflows__approvals.effect.vibe"
 import type { Answer, Effect as Out, Event } from "../../gen/app__workflows__approvals.effect.vibe"
-import * as Listing from "../../gen/app__workflows__list.effect.vibe"
-import * as Sheet from "../../gen/app__workflows__sheet.effect.vibe"
+import { Machine as Listing } from "../../gen/app__workflows__list.effect.vibe"
+import { Machine as Sheet } from "../../gen/app__workflows__sheet.effect.vibe"
 import type { Agent } from "../platform/agent.vibe"
 import type { NoteStore } from "../platform/notes.vibe"
 import { MediaReview, type WorkflowDeviceOffer, sameWorkflowOffer } from "../assistant/media-review.vibe"
@@ -75,11 +75,11 @@ const kept = Layer.sync(ApprovalWords, () => {
   }
 })
 
-type Needs = Agent | WorkflowsApi | ApprovalWords | Rows | Time | Sheet.Machine | RunVisibility
+type Needs = Agent | WorkflowsApi | ApprovalWords | Rows | Time | Sheet | RunVisibility
 type DeviceNeeds = Needs | MediaReview | Layers | NoteStore
 
 effect function activeRun(owner: number, run: number, scope: string): boolean!!(Needs | Layers) {
-  const view = try (try Sheet.Machine).get()
+  const view = try (try Sheet).get()
   const shell = try (try Shell).get()
   const covers = try (try Layers).get()
   return scope !== "" && view.runId === run && view.owner === owner && !pageInert(covers)
@@ -156,7 +156,7 @@ effect function decided(id: number, runId: number, digest: number, approve: bool
   if (attempted?.number !== digest || attempted.runId !== runId || (approve && !attempted.approval.supported)) return failure
   const scope = ownerAt() catch () => ""
   const rows = try Rows
-  const sheet = try Sheet.Machine
+  const sheet = try Sheet
   const time = try Time
   if (!(try rows.sameOwner(scope, attempted.owner)) || !(try workflowsVisible())) return failure
   const { workflow } = try WorkflowsApi
@@ -203,7 +203,7 @@ function carry(fx: Out): Job<Event, DeviceNeeds, []> {
   }
 }
 
-const watching = applying(Sheet.Machine, (state) => ({ owner: state.owner, runId: state.runId, loaded: state.output.status === "Loaded", ticket: state.output.ticket }),
+const watching = applying(Sheet, (state) => ({ owner: state.owner, runId: state.runId, loaded: state.output.status === "Loaded", ticket: state.output.ticket }),
   effect ({ owner, runId, loaded }: { owner: number; runId: number; loaded: boolean }) => {
     const approvals = try Model.Machine
     const words = try ApprovalWords
@@ -218,7 +218,7 @@ const watching = applying(Sheet.Machine, (state) => ({ owner: state.owner, runId
       try words.clearDevice()
     }
     if (runId === 0 || !loaded) return
-    const list = try (try Listing.Machine).get()
+    const list = try (try Listing).get()
     if (list.owner !== owner || list.place.tag !== "ListingDetail") return
     const history = try (try HistoryWordsPort).view(owner, list.place.row)
     const open = history.opened

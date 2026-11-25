@@ -1,4 +1,5 @@
 // spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"; spec/app/reminders/index.md, "Story: Create, update, flag, move, complete and delete reminders with Undo"; spec/app/reminders/index.md, "Story: Sync with the resident agent and recover across restarts"
+import type { ReminderItemRecord, ReminderListColor, ReminderListIcon, ReminderListRecord, ReminderPriority, ReminderRecurrence, RemindersSnapshot } from "@repo/launcher-records"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Reminders from "../../gen/app__reminders.effect.vibe"
 import type { DeleteMode, Effect as Out, Event } from "../../gen/app__reminders.effect.vibe"
@@ -21,7 +22,6 @@ import {
   reminderEditor,
 } from "./editor.vibe"
 import {
-  type ReminderRecurrence,
   advanceDueDate,
   civilDateAt,
   civilDayFromString,
@@ -31,12 +31,6 @@ import {
 import { persistReminderSnapshot, pushToHomeAgenda, snapshotKey } from "./snapshot.vibe"
 import {
   DEFAULT_LIST_ID,
-  type ReminderItemRecord,
-  type ReminderListColor,
-  type ReminderListIcon,
-  type ReminderListRecord,
-  type ReminderPriority,
-  type RemindersSnapshot,
   normalizeSnapshot,
   priorityToSpec,
   recurrenceToSpec,
