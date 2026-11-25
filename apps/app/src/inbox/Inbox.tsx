@@ -64,7 +64,7 @@ type Change = keyof typeof operationNames;
 const isChange = (kind: Kind): kind is Change => kind in operationNames;
 
 /** What Mail holds, read at the state the screen shows. */
-const mailOf = <A,>(runtime: Runtime, read: (mail: Mail["Service"]) => A): A => runtime.runSync(Mail.use((mail) => Effect.sync(() => read(mail))));
+const mailOf = <A,>(runtime: Runtime, read: (mail: Mail["Service"]) => A): A => runtime.runSync(Effect.map(Mail, read));
 
 const mailTime = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 const mailDate = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
@@ -193,7 +193,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const marking = useMarks(runtime);
   const changes = useTimed(runtime, useChanges);
   const remote = usePreferences(runtime).state?.images ?? false;
-  const today = new Date(runtime.runSync(Time.use((time) => time.latest()))).toDateString();
+  const today = new Date(runtime.runSync(Effect.flatMap(Time, (time) => time.latest()))).toDateString();
   const read = state ? mailOf(runtime, (mail) => mail.body(state.body.ticket)) : undefined;
   const reviewLink = useCallback((at: number) => {
     const link = read === undefined ? undefined : prepareMessage(read).links.at(at - 1);
@@ -222,7 +222,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const told = marking.state?.told;
   const notice = told !== undefined && told in markNotices ? markNotices[told as keyof typeof markNotices] : undefined;
   const files = loaded ? read.attachments : [];
-  const destination = runtime.runSync(InboxAttachmentFiles.use(({ destination }) => Effect.succeed(destination)));
+  const destination = runtime.runSync(Effect.map(InboxAttachmentFiles, (files) => files.destination));
   const unsure = (attachment: number) => state.unsure.some((held) => held.account === state.account && held.message === state.message && held.attachment === attachment);
   const reviewing = (attachment: number, handling: "Opening" | "Saving") => {
     const event = { type: "reviewAttachment", attachment, handling } as const;
@@ -231,7 +231,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const file = files.at(state.attachment - 1);
   const outcome = state.file.outcome;
   const attachment = file && state.handling === "Opening" && outcome === "Confirmed"
-    ? runtime.runSync(AttachmentPreviews.use((previews) => Effect.sync(() => previews.read(state.file.id))))
+    ? runtime.runSync(Effect.map(AttachmentPreviews, (previews) => previews.read(state.file.id)))
     : undefined;
   const turn = (page: number) => {
     const event = { type: "pdfPage", access, page } as const;
@@ -349,7 +349,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const review = <ChangeReview runtime={runtime} list={state} cards={cards} />;
   if (message.state.message !== 0) return <>{<Opened runtime={runtime} list={state} onRefresh={refresh} onBegin={onBegin} />}{review}</>;
   const settings = shell.can({ type: "openView", view: "Settings" }) ? () => void shell.send({ type: "openView", view: "Settings" }) : undefined;
-  const signIn = settings ? () => void runtime.runPromise(MailSignIn.use((mail) => mail.signIn(settings))) : undefined;
+  const signIn = settings ? () => void runtime.runPromise(Effect.flatMap(MailSignIn, (mail) => mail.signIn(settings))) : undefined;
   const hidden = new Set(changes.state ? aside(changes.state) : []);
   const letters = mailOf(runtime, (mail) => mail.shown(state)).filter(({ message: number }) => !hidden.has(number));
   const { account, folder, query } = state.selected;
@@ -360,7 +360,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const selecting = !draftsFolder && selection === folderKey && !searching && readable(state) && !state.saved && state.pages > 0;
   const chosenMessages = new Set(state.chosen);
   const access = accessOf(state, account);
-  const today = new Date(runtime.runSync(Time.use((time) => time.latest()))).toDateString();
+  const today = new Date(runtime.runSync(Effect.flatMap(Time, (time) => time.latest()))).toDateString();
   const checking = state.accounts.status === "Loading";
   const row = ({ message: number, card, draftId }: Letter): InboxListRow => {
     const open = { type: "open", access, account, message: number, remote } as const;
@@ -420,7 +420,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   };
   // spec/app/inbox/shelf.md, "Story: Keep drafts set aside"
   const shelved: InboxListRow[] = drafts.state.shelf.shelved.map((id) => {
-    const words = runtime.runSync(Letters.use((all) => Effect.sync(() => all.words(id))));
+    const words = runtime.runSync(Effect.map(Letters, (all) => all.words(id)));
     const resume = { type: "resume", draft: id } as const;
     return {
       id: `shelf:${id}`, sender: "Draft", initial: "D", subject: words.subject || "(No subject)", snippet: words.text.slice(0, 160), time: "Draft",

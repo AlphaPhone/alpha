@@ -689,15 +689,21 @@ effect function phoneSpeaker() {
   return { restoreLocalOutput, setLocalSpeakerMuted }
 }
 
+interface CloudVoiceSession {
+  readonly session: number
+  readonly stream: CloudStreamingSpeech
+  readonly signal: AbortSignal
+  capture: Awaited<ReturnType<CloudStreamingSpeech["listen"]>> | undefined
+}
+
 export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   const lifetime = try Effect.scope
   const { probeStatus, warmDevice, invalidateStatus, awaitWarmup } = phoneSpeechStatus()
   let activeSession = 0
   let nativeCapture: LiveCapture | undefined
-  let cloudStream: CloudStreamingSpeech | undefined
+  let cloudSpeech: CloudVoiceSession | undefined
   let cloudKey: CredentialId | undefined
   let accountEpoch = 0
-  let cloudCapture: { close(): Promise<void>; cancel(): Promise<void> } | undefined
   let cloudPreview: { readonly session: number; readonly outlet: VoicePreview | undefined } | undefined
   let cloudSpeechAbort: AbortController | undefined
   let activePlaybackRequest: string | undefined
@@ -737,25 +743,29 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     activeSession = session
     if (network && registered(CLOUD_STREAM_PLUGIN)) {
       const currentSession = session
-      const stream = cloudStream ?? createCloudStreamingSpeech({
-        environment: CLOUD_ENVIRONMENT,
-        credentialId: cloudKey ?? (try signedInKey(signInAccounts())),
-        assertCurrent: makeSessionGuard(() => activeSession, currentSession),
-        onInterim: (text) => {
-          const current = cloudPreview
-          if (activeSession !== currentSession || current?.session !== currentSession) return
-          current.outlet?.show(text)
-        },
-      }, relayPlugin())
+      const owner: CloudVoiceSession = cloudSpeech?.session === currentSession ? cloudSpeech : {
+        session: currentSession,
+        signal: makeAbort().signal,
+        capture: undefined,
+        stream: createCloudStreamingSpeech({
+          environment: CLOUD_ENVIRONMENT,
+          credentialId: cloudKey ?? (try signedInKey(signInAccounts())),
+          assertCurrent: makeSessionGuard(() => activeSession, currentSession),
+          onInterim: (text) => {
+            const current = cloudPreview
+            if (activeSession !== currentSession || current?.session !== currentSession) return
+            current.outlet?.show(text)
+          },
+        }, relayPlugin()),
+      }
       if (activeSession !== currentSession) throw new VoiceBridgeFailed({ method: "startCloudSpeech", cause: "session-changed" })
-      cloudStream = stream
+      cloudSpeech = owner
       clearCloudPreview(currentSession)
       const previewOwner = { session: currentSession, outlet: preview }
       cloudPreview = previewOwner
-      const abort = makeAbort()
       const capture = tryPromise({
-        try: () => stream.listen({
-          signal: abort.signal,
+        try: () => owner.stream.listen({
+          signal: owner.signal,
           onSpeechStart: () => publish({ kind: "speechStart", session: currentSession }),
           onSpeechEnd: () => undefined,
           onSegment: (text) => {
@@ -770,11 +780,17 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
         catch: (cause) => new VoiceBridgeFailed({ method: "startCloudSpeech", cause }),
       }) catch effect (failure) => {
         if (cloudPreview === previewOwner) clearCloudPreview(currentSession)
-        cloudStream = undefined
-        cloudKey = undefined
+        if (cloudSpeech === owner) {
+          cloudSpeech = undefined
+          cloudKey = undefined
+        }
         throw failure
       }
-      cloudCapture = capture
+      if (cloudSpeech !== owner || activeSession !== currentSession) {
+        try ignore(tryPromise(() => capture.cancel()))
+        throw new VoiceBridgeFailed({ method: "startCloudSpeech", cause: "session-changed" })
+      }
+      owner.capture = capture
       return capture.fullDuplex
     }
     if (!registered(LOCAL_PLUGIN)) throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "no-voice-plugin" })
@@ -858,25 +874,26 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
 
   effect function closeMic(session: number): void!VoiceBridgeFailed {
     clearCloudPreview(session)
-    if (cloudCapture !== undefined) {
-      const cap = cloudCapture
-      cloudCapture = undefined
-      try tryPromise({ try: () => cap.close(), catch: (cause) => new VoiceBridgeFailed({ method: "closeCloudSpeech", cause }) })
+    const owner = cloudSpeech
+    if (owner?.session === session && owner.capture !== undefined) {
+      const capture = owner.capture
+      owner.capture = undefined
+      try tryPromise({ try: () => capture.close(), catch: (cause) => new VoiceBridgeFailed({ method: "closeCloudSpeech", cause }) })
       return
     }
     try stopNativeCapture(session, false)
   }
 
-  const awaitSpeechOutputWarmup = (session: number) => awaitWarmup(() => activeSession === session && cloudStream === undefined)
+  const awaitSpeechOutputWarmup = (session: number) => awaitWarmup(() => activeSession === session && cloudSpeech === undefined)
 
   effect function playSentence(session: number, _turn: number, text: string, append: boolean): void!VoiceBridgeFailed {
     if (activeSession !== session) return
-    if (cloudStream !== undefined) {
-      const stream = cloudStream
+    const cloud = cloudSpeech
+    if (cloud?.session === session) {
       const abort = makeAbort()
       cloudSpeechAbort = abort
       try tryPromise({
-        try: () => stream.speak(text, abort.signal, () => undefined),
+        try: () => cloud.stream.speak(text, abort.signal, () => undefined),
         catch: (cause) => new VoiceBridgeFailed({ method: "speakCloudSpeech", cause }),
       })
       return
@@ -899,15 +916,15 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
 
   effect function setSpeakerMuted(session: number, muted: boolean): boolean!! {
     if (session !== activeSession) return false
-    const cloud = cloudStream
-    if (cloud !== undefined) {
+    const cloud = cloudSpeech
+    if (cloud?.session === session) {
       const set = effect {
-        try tryPromise(() => cloud.setOutputMuted(muted))
-        return activeSession === session && cloudStream === cloud
+        try tryPromise(() => cloud.stream.setOutputMuted(muted))
+        return activeSession === session && cloudSpeech === cloud
       } catch () => false
       return set
     }
-    return try setLocalSpeakerMuted(session, muted, { active: () => activeSession === session, local: () => cloudStream === undefined })
+    return try setLocalSpeakerMuted(session, muted, { active: () => activeSession === session, local: () => cloudSpeech === undefined })
   }
 
   effect function hush(_turn: number): void!! {
@@ -921,19 +938,20 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
 
   effect function shut(session: number): boolean!! {
     clearCloudPreview(session)
-    if (activeSession === session) activeSession = 0
-    cloudSpeechAbort?.abort()
-    cloudSpeechAbort = undefined
-    let confirmed = true
-    if (cloudCapture !== undefined) {
-      const cap = cloudCapture
-      cloudCapture = undefined
-      confirmed = (try (tryPromise(() => cap.cancel()) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))) && confirmed
+    if (activeSession === session) {
+      activeSession = 0
+      cloudSpeechAbort?.abort()
+      cloudSpeechAbort = undefined
     }
-    if (cloudStream !== undefined) {
-      const stream = cloudStream
-      cloudStream = undefined
-      confirmed = (try (tryPromise(() => stream.stop()) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))) && confirmed
+    let confirmed = true
+    const owner = cloudSpeech
+    if (owner?.session === session) {
+      cloudSpeech = undefined
+      const capture = owner.capture
+      if (capture !== undefined) {
+        confirmed = try (tryPromise(() => capture.cancel()) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))
+      }
+      confirmed = (try (tryPromise(() => owner.stream.stop()) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))) && confirmed
     }
     if (registered(LOCAL_PLUGIN)) {
       const req = activePlaybackRequest
@@ -966,7 +984,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
       }
       accountEpoch += 1
       cloudKey = undefined
-      if (activeSession === 0) cloudStream = undefined
+      if (activeSession === 0) cloudSpeech = undefined
     }),
     openMic,
     closeMic,

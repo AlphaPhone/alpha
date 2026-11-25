@@ -260,7 +260,7 @@ function addressCounts(words: Pick<Words, "to" | "cc" | "bcc">) {
 }
 
 // spec/app/inbox/drafts.md, "On a clash the owner chooses Restore my edits or Use latest saved draft, is told which was kept, and the choice is written to the phone"
-export effect function useLatestSavedDraft(): void!!(Drafts.Machine | Letters) {
+export effect function chooseLatestSavedDraft(): void!!(Drafts.Machine | Letters) {
   const composer = try Drafts.Machine
   const letters = try Letters
   const state = try composer.get()

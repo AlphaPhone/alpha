@@ -45,6 +45,7 @@ const answerOf = (status: number, body: string) => {
 schema Created { conversation: ConversationRecord }
 schema Listed { conversations: { id: string }[] }
 schema History { messages: { id: string; timestamp: Schema.Int }[] }
+error MissingHistoryMessages { expected: number; received: number }
 schema Replied { fullText: string }
 schema Interacted { success: boolean; result: { state?: { notes: { title: string; body: string }[] } } }
 schema Approvals { approvals: Schema.Unknown[] }
@@ -114,10 +115,10 @@ describe("Run Alpha's agent on the phone", () => {
       const history = `/api/conversations/${opened.id}/messages`
       const latest = try promise(() => call(first, "GET", history))
       const { messages } = try Schema.decodeUnknownEffect(Schema.fromJsonString(History))(latest.body)
-      const { anchor, prior, centered, older } = try Effect.try(() => {
-        const anchor = messages.at(-1)
-        const prior = messages.at(-2)
-        if (anchor === undefined || prior === undefined) throw new Error("The sent turn has no two recorded messages")
+      const anchor = messages.at(-1)
+      const prior = messages.at(-2)
+      if (anchor === undefined || prior === undefined) throw new MissingHistoryMessages({ expected: 2, received: messages.length })
+      const { centered, older } = try Effect.try(() => {
         const id = encodeURIComponent(anchor.id)
         const centered = `${history}?around=${id}`
         const cursor = `${history}?before=${anchor.timestamp}&beforeId=${id}`
@@ -126,7 +127,7 @@ describe("Run Alpha's agent on the phone", () => {
         const admitted = (target: string) => gate.admit({ method: "GET", target, streamed: false, body: undefined }).tag === "Admitted"
         expect([history, centered, older, `${older}&beforeId=${id}`, `${cursor}&limit=2`, `${history}?before=01&beforeId=${id}&limit=1`].map(admitted))
           .toEqual([true, true, true, false, false, false])
-        return { anchor, prior, centered, older }
+        return { centered, older }
       })
       const near = try promise(() => call(first, "GET", centered))
       const edge = try promise(() => call(first, "GET", older))

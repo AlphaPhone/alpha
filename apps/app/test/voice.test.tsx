@@ -728,6 +728,22 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.muted && state.mic === "Off");
     expect(preview()).toBeUndefined();
 
+    // spec/app/voice/index.md, "Mute turns the microphone off, and unmuting opens it again only where Alpha listens"; spec/app/voice/index.md, "When the whole reply has been heard, Alpha listens for the next turn"
+    await press("Unmute microphone");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => !state.muted && state.phase === "Listening" && state.mic === "On");
+    expect(world.voice.activeMicSession).toBe(sessionId);
+    const words = ["What is on my calendar?", "And tomorrow?"];
+    for (const [index, text] of words.entries()) {
+      await drawn(() => {
+        world.voice.emitCloud?.({ type: "speech-start", sessionId });
+        world.voice.emitCloud?.({ type: "speech-end", sessionId, text });
+      });
+      await drawnUntil(alpha, area, Voice.Machine, (state) =>
+        state.sent === index + 1 && state.turn === index + 2 && state.phase === "Listening" && state.mic === "On");
+    }
+    expect(world.ask.said).toEqual(words);
+    expect([world.voice.activeMicSession, world.voice.startCloudSpeechCalls]).toEqual([sessionId, 1]);
+
     await press("Stop voice conversation");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle" && s.mic === "Off");
     await drawnUntil(alpha, area, Dock, (s) => !s.voice);

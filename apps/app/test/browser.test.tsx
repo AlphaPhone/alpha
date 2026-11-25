@@ -1,6 +1,5 @@
 // @vitest-environment happy-dom
 import { Effect } from "effect";
-import { act } from "react";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
@@ -54,7 +53,7 @@ async function askingOnBrowser(world = { ...scene(), phone: true, image: true })
 async function ask(running: Awaited<ReturnType<typeof askingOnBrowser>>, text: string) {
   const { alpha, asking, world } = running;
   world.ask.metadata = [];
-  await act(async () => {
+  await drawn(() => {
     const box = [...document.querySelectorAll("textarea")].find((one) => one.getAttribute("aria-label") === "Message Alpha" || one.getAttribute("aria-label") === "Ask about this page");
     if (!box) throw new Error("no composer");
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(box, text);
@@ -88,6 +87,19 @@ const placeNative = () => {
   if (!surface) throw new Error("Browser has no native page slot");
   Object.defineProperty(surface, "getBoundingClientRect", { value: () => new DOMRect(0, 104, 390, 650) });
 };
+
+/** Give native Browser pages a laid-out surface in the DOM fixture. */
+function layOutNativePage(rectangle: DOMRect): void {
+  const measure: unknown = Reflect.get(HTMLElement.prototype, "getBoundingClientRect");
+  if (typeof measure !== "function") throw new Error("The DOM fixture cannot measure elements");
+  const laidOut = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    if (this.hasAttribute("data-alpha-browser-page")) return rectangle;
+    const measured: unknown = Reflect.apply(measure, this, []);
+    if (!(measured instanceof DOMRect)) throw new Error("The DOM fixture measured an invalid rectangle");
+    return measured;
+  });
+  onTestFinished(() => laidOut.mockRestore());
+}
 
 const libraryTab = (name: "History" | "Bookmarks") => drawn(() => {
   const tab = button(name);
@@ -284,11 +296,11 @@ describe("The Browser on a phone", () => {
     const world = { ...scene(), phone: true, image: true };
     let reviewOwner: string | undefined;
     let reviewSession: string | undefined;
-    world.browser.reviewReading = async (page) => {
+    world.browser.reviewReading = (page) => {
       expect(page).toMatchObject({ url: "https://example.test/article", execution: "device" });
       reviewOwner = page.ownerId;
       reviewSession = page.sessionId;
-      return { readingToken: "on-device-review" };
+      return Promise.resolve({ readingToken: "on-device-review" });
     };
     const { alpha } = await open(world, only("home", "assistant", "view:Browser"));
     const runtime = browser.runtime(alpha);
@@ -482,17 +494,15 @@ describe("The Browser on a phone", () => {
     await until(alpha, runtime, Tabs, (s) => s.hydrated);
     world.browser.failing.set("plain.example", "insecure");
     world.browser.failing.set("down.example", "unreachable");
-    const tab = () => runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
-
     // spec/app/browser/share.md, "Only an unreachable HTTPS address makes a failed page leave, and only from a normal tab": an http-only site has no way out.
     await go("plain.example");
-    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab())));
+    const tab = runtime.runSync(Effect.flatMap(Tabs, (tabs) => tabs.get())).selected;
+    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
     await until(alpha, page, Page, (p) => p.phase === "Failed");
     expect(button("Open in browser")).toBeUndefined();
 
     await go("down.example/today");
     await until(alpha, page, Page, (p) => p.phase === "Failed");
-    // The button sits under the Browser's own bar, above the page, never near Ask Alpha.
     const offer = button("Open in browser");
     const place = document.querySelector("[data-alpha-browser-page]");
     expect(offer !== undefined && place !== null && (offer.compareDocumentPosition(place) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0).toBe(true);
@@ -537,12 +547,7 @@ describe("The Browser on a phone", () => {
   it("Let my agent read the page I have open in Browser (spec/app/assistant/context.md, \"Story: Let my agent read the page I have open in Browser\")", async () => {
     const running = await askingOnBrowser();
     const { alpha, runtime } = running;
-    // happy-dom lays nothing out: give the page's place the size Android's web view takes, so the tab is presented there.
-    const measure = HTMLElement.prototype.getBoundingClientRect;
-    const laidOut = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-      return this.hasAttribute("data-alpha-browser-page") ? new DOMRect(0, 64, 412, 700) : measure.call(this);
-    });
-    onTestFinished(() => laidOut.mockRestore());
+    layOutNativePage(new DOMRect(0, 64, 412, 700));
     await go("news.example/on-device-agents");
     const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
     await until(alpha, runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab))), Page, (p) => p.phase === "Shown");
@@ -553,7 +558,7 @@ describe("The Browser on a phone", () => {
     expect(shown?.browserPage).toMatchObject({ url: "https://news.example/on-device-agents", tabId: `tab${tab}` });
     expect(shown?.browserPage?.text).toContain("agent");
 
-    // A private tab is never read.
+    // spec/app/browser/reading.md, "A question asked while Browser is the open screen reads the tab in front once, only when it is a normal tab whose HTTPS page has committed and Browser page for Alpha is on"
     await press("Menu");
     await press("New private tab");
     await until(alpha, runtime, Tabs, (s) => s.privates.includes(s.selected));
@@ -647,22 +652,17 @@ describe("The Browser on a phone", () => {
     await press("Open");
     await drawn(() => vi.waitFor(async () => expect(await front()).toBe("https://en.wikipedia.org/wiki/Eiffel_Tower"), { timeout: 10_000 }));
 
-    const tabs = async () => [...world.browser.tabs.values()].map((one) => one.history[one.at]);
-    const kept = await tabs();
+    const tabs = () => [...world.browser.tabs.values()].map((one) => one.history[one.at]);
+    const kept = tabs();
     await asked("open https://owner:secret@example.org", "https://owner:secret@example.org/");
     await later(alpha, 500);
     expect(button("Open")).toBeUndefined();
     await drawn(() => vi.waitFor(async () => expect(await front()).toBe("https://en.wikipedia.org/wiki/Eiffel_Tower")));
-    expect(await tabs()).toEqual(kept);
+    expect(tabs()).toEqual(kept);
   });
 
   it("After I open the agent's page, my next question takes that page with it (spec/app/browser/index.md, \"Story: Let the agent open a page\"; spec/app/browser/reading.md, \"A question asked while Browser is the open screen reads the tab in front once, only when it is a normal tab whose HTTPS page has committed and Browser page for Alpha is on\"; spec/app/assistant/context.md, \"A turn carries the page Browser hands it for the tab in front, beside the observation, only to a peer that declares it\")", async () => {
-    // The page's place has a size, as Android lays the web view there, so the tab host presents the shown tab.
-    const original = HTMLElement.prototype.getBoundingClientRect;
-    const laidOut = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-      return this.hasAttribute("data-alpha-browser-page") ? new DOMRect(0, 120, 390, 600) : original.call(this);
-    });
-    onTestFinished(() => { laidOut.mockRestore(); });
+    layOutNativePage(new DOMRect(0, 120, 390, 600));
     const world = { ...scene(), phone: true, image: true };
     const { alpha } = await open(world, only("home", "assistant", "view:Browser"));
     const ask = assistant.runtime(alpha);
