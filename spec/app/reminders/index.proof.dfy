@@ -578,3 +578,100 @@ lemma reopen_ensures(s: Reminders)
     SmartCountsHold(moved.state);
   }
 }
+
+lemma takeList_ensures(s: Reminders, listId: int)
+  ensures (inv(s) ==> canTakeList(s, listId) ==> alwaysDefaultListExists(takeList(s, listId)))
+  ensures (inv(s) ==> canTakeList(s, listId) ==> alwaysEveryItemWellFormed(takeList(s, listId)))
+  ensures (inv(s) ==> canTakeList(s, listId) ==> alwaysSelectedItemExists(takeList(s, listId)))
+  ensures (inv(s) ==> canTakeList(s, listId) ==> alwaysHiddenExactlyWhileDeleteHeld(takeList(s, listId)))
+  ensures (inv(s) ==> canTakeList(s, listId) ==> alwaysActiveCustomListExists(takeList(s, listId)))
+  ensures (inv(s) ==> canTakeList(s, listId) ==> alwaysSmartCountsConsistent(takeList(s, listId)))
+  ensures (inv(s) ==> canTakeList(s, listId) ==> stepDeleteOnlyOnExpire(s, "takeList", takeList(s, listId), []))
+  ensures (inv(s) ==> canTakeList(s, listId) ==> stepUndoRestoresExactState(s, "takeList", takeList(s, listId)))
+  ensures (inv(s) ==> canTakeList(s, listId) ==> stepDeleteListKeepsItemsValid(s, "takeList", takeList(s, listId)))
+  ensures (inv(s) ==> canTakeList(s, listId) ==> stepNoSentWriteAfterRestart(s, "takeList", takeList(s, listId), []))
+  ensures (inv(s) ==> canTakeList(s, listId) ==> stepRecurringCompleteAdvancesDue(s, "takeList", takeList(s, listId)))
+{
+  if inv(s) && canTakeList(s, listId) {
+    ListsUniqueFromCounts(s.lists);
+    ListOfMember(s.lists, defaultListId);
+    var defL := listOf(s.lists, defaultListId);
+    var created := ListEntry(listId, false, 1);
+    var after := takeList(s, listId);
+    assert after.lists == s.lists + [created];
+    ProofLib.DistinctByConcat(s.lists, [created], (l: ListEntry) => l.id);
+    ListsCountsFromUnique(after.lists);
+    assert defL in after.lists;
+    ListOfUnique(after.lists, defL);
+    forall it | it in after.items ensures itemWellFormed(it, after.lists, after.nextItemId) {
+      var l :| l in s.lists && l.id == it.listId;
+      assert l in after.lists;
+    }
+    SmartCountsHold(after);
+  }
+}
+
+lemma takeItem_ensures(s: Reminders, itemId: int, spec: ItemSpec, completed: bool)
+  ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> alwaysDefaultListExists(takeItem(s, itemId, spec, completed)))
+  ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> alwaysEveryItemWellFormed(takeItem(s, itemId, spec, completed)))
+  ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> alwaysSelectedItemExists(takeItem(s, itemId, spec, completed)))
+  ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> alwaysHiddenExactlyWhileDeleteHeld(takeItem(s, itemId, spec, completed)))
+  ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> alwaysActiveCustomListExists(takeItem(s, itemId, spec, completed)))
+  ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> alwaysSmartCountsConsistent(takeItem(s, itemId, spec, completed)))
+  ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> stepDeleteOnlyOnExpire(s, "takeItem", takeItem(s, itemId, spec, completed), []))
+  ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> stepUndoRestoresExactState(s, "takeItem", takeItem(s, itemId, spec, completed)))
+  ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> stepDeleteListKeepsItemsValid(s, "takeItem", takeItem(s, itemId, spec, completed)))
+  ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> stepNoSentWriteAfterRestart(s, "takeItem", takeItem(s, itemId, spec, completed), []))
+  ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> stepRecurringCompleteAdvancesDue(s, "takeItem", takeItem(s, itemId, spec, completed)))
+{
+  if inv(s) && canTakeItem(s, itemId, spec, completed) {
+    ItemsUniqueFromCounts(s.items);
+    var prior := itemOf(s.items, itemId);
+    var taken := ItemEntry(itemId, spec.listId, spec.hasDue, (if spec.hasDue then spec.dueDay else 0), spec.hasDueTime, (if spec.hasDueTime then spec.dueMinute else 0), spec.repeat, spec.priority, spec.flagged, completed, prior.snoozedUntil, prior.revision + 1);
+    var after := takeItem(s, itemId, spec, completed);
+    if hasItem(s.items, itemId) {
+      ItemOfMember(s.items, itemId);
+      PutItemPreserves(s.items, s.lists, s.nextItemId, taken);
+    } else {
+      assert after.items == s.items + [taken];
+      ProofLib.DistinctByConcat(s.items, [taken], (it: ItemEntry) => it.id);
+      forall it | it in after.items ensures itemWellFormed(it, after.lists, after.nextItemId) {
+        if it != taken { assert it in s.items; }
+      }
+      forall id | hasItem(s.items, id) ensures hasItem(after.items, id) {
+        var it :| it in s.items && it.id == id;
+        assert it in after.items;
+      }
+    }
+    ItemsCountsFromUnique(after.items);
+    SmartCountsHold(after);
+  }
+}
+
+lemma forgetItem_ensures(s: Reminders, itemId: int)
+  ensures (inv(s) ==> canForgetItem(s, itemId) ==> alwaysDefaultListExists(forgetItem(s, itemId)))
+  ensures (inv(s) ==> canForgetItem(s, itemId) ==> alwaysEveryItemWellFormed(forgetItem(s, itemId)))
+  ensures (inv(s) ==> canForgetItem(s, itemId) ==> alwaysSelectedItemExists(forgetItem(s, itemId)))
+  ensures (inv(s) ==> canForgetItem(s, itemId) ==> alwaysHiddenExactlyWhileDeleteHeld(forgetItem(s, itemId)))
+  ensures (inv(s) ==> canForgetItem(s, itemId) ==> alwaysActiveCustomListExists(forgetItem(s, itemId)))
+  ensures (inv(s) ==> canForgetItem(s, itemId) ==> alwaysSmartCountsConsistent(forgetItem(s, itemId)))
+  ensures (inv(s) ==> canForgetItem(s, itemId) ==> stepDeleteOnlyOnExpire(s, "forgetItem", forgetItem(s, itemId), []))
+  ensures (inv(s) ==> canForgetItem(s, itemId) ==> stepUndoRestoresExactState(s, "forgetItem", forgetItem(s, itemId)))
+  ensures (inv(s) ==> canForgetItem(s, itemId) ==> stepDeleteListKeepsItemsValid(s, "forgetItem", forgetItem(s, itemId)))
+  ensures (inv(s) ==> canForgetItem(s, itemId) ==> stepNoSentWriteAfterRestart(s, "forgetItem", forgetItem(s, itemId), []))
+  ensures (inv(s) ==> canForgetItem(s, itemId) ==> stepRecurringCompleteAdvancesDue(s, "forgetItem", forgetItem(s, itemId)))
+{
+  if inv(s) && canForgetItem(s, itemId) {
+    ItemsUniqueFromCounts(s.items);
+    var after := forgetItem(s, itemId);
+    var p := (it: ItemEntry) => (it.id != itemId);
+    ProofLib.FilterKeepsDistinctBy(p, s.items, (it: ItemEntry) => it.id);
+    ProofLib.FilterSubset(p, s.items);
+    ItemsCountsFromUnique(after.items);
+    forall id | id != itemId && hasItem(s.items, id) ensures hasItem(after.items, id) {
+      var it :| it in s.items && it.id == id;
+      ProofLib.FilterMember(p, s.items, it);
+    }
+    SmartCountsHold(after);
+  }
+}

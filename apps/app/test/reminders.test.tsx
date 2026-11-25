@@ -5,6 +5,7 @@ import { Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import * as RemindersMachine from "../gen/app__reminders.effect.vibe";
+import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import * as AlertsMachine from "../gen/app__reminders__alerts.effect.vibe";
 import { at } from "../src/areas.ts";
 import { agentAt } from "../src/platform/agent.vibe";
@@ -193,7 +194,7 @@ describe("Reminders full journeys", () => {
     const platform = makePlatform(world.now, agentHttp);
     const opened = await openOver(platform, withReminders);
     const runtime = remindersArea.runtime(opened.alpha);
-    await press("Reminders");
+    await drawn(() => opened.alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Reminders" }))));
     await until(opened.alpha, runtime, RemindersMachine.Machine, (s) => s.sync.status === "Loaded");
     return { world, recorder, platform, ...opened, runtime };
   }
