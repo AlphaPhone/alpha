@@ -412,12 +412,10 @@ function makeClockAction(
     description,
     parameters,
     validate: () => Promise.resolve(true),
-    handler: async (_runtime, message, _state, options, callback) => {
+    handler: (_runtime, message, _state, options) => {
       const params = asRecord(asRecord(options).parameters ?? asRecord(options));
       const text = readRawString(asRecord(message.content), "text") ?? "";
-      const result = run(params, text);
-      if (callback !== undefined && result.text !== undefined) await callback({ text: result.text });
-      return result;
+      return Promise.resolve(run(params, text));
     },
   };
   showsApp(action, "clock");

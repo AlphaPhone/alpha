@@ -75,7 +75,7 @@ describe("Alpha product plugin: what the model may pass and what the owner sees"
     const declared = Object.fromEntries((plugin.actions ?? []).map((action) => [action.name, (action.parameters ?? []).map((parameter) => parameter.name)]));
     expect(declared.CLOCK_TIMER).toEqual(expect.arrayContaining(["action", "durationSeconds", "label", "id"]));
     expect(declared.CLOCK_ALARM).toEqual(expect.arrayContaining(["action", "hour", "minute", "days", "label", "enabled", "id"]));
-    expect(declared.CLOCK_WORLD).toEqual(expect.arrayContaining(["action", "city", "timeZone"]));
+    expect(declared.CLOCK_WORLD).toEqual(expect.arrayContaining(["action", "id", "city"]));
     expect(declared.REMINDERS_MANAGE).toEqual(expect.arrayContaining(["op", "title", "dueDate", "dueMinute", "id"]));
     const said: string[] = [];
     const callback = (content: { text?: string }) => { said.push(content.text ?? ""); return Promise.resolve([]); };
