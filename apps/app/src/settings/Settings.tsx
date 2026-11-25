@@ -3,11 +3,13 @@ import {
   Banner,
   Button,
   ConfirmDialog,
+  ListGroup,
   type SettingsAccess,
   type SettingsAccessWord,
   SettingsAboutPage,
   SettingsActivityPage,
   type SettingsActivityPageProps,
+  SettingsAndroidRow,
   type SettingsAndroidStart,
   type SettingsAndroidTarget,
   type SettingsAndroidTold,
@@ -17,10 +19,12 @@ import {
   SettingsDeveloperPage,
   type SettingsDeviceRead,
   SettingsDisplayPage,
+  SettingsFactRow,
   type SettingsFactReading,
   SettingsGeneralPage,
   type SettingsNeighbour,
   SettingsNotificationsPage,
+  SettingsPage,
   type SettingsPageName,
   SettingsPermissionsPage,
   SettingsPhonePage,
@@ -92,13 +96,13 @@ export interface Common {
 const pageNames: Record<Page, SettingsPageName> = {
   Top: "top", General: "general", Display: "display", Sound: "sound", Notifications: "notifications", Battery: "battery",
   NetworkPage: "network", CarrierPage: "carrier", PhonePage: "phone", Privacy: "privacy", Permissions: "permissions", Apps: "apps",
-  InboxApp: "inbox", WorkflowsApp: "workflows", CalendarApp: "calendar", CameraApp: "camera", PhotosApp: "photos", MapsApp: "maps", NotesApp: "notes",
+  InboxApp: "inbox", WorkflowsApp: "workflows", CalendarApp: "calendar", CameraApp: "camera", PhotosApp: "photos", MapsApp: "maps", NotesApp: "notes", PasswordsPage: "passwords",
   About: "about", Activity: "activity", Licences: "licences", Developer: "developer", Problems: "problems",
 };
 const pagesNamed = Object.fromEntries(Object.entries(pageNames).map(([page, name]) => [name, page])) as Record<SettingsPageName, Page>;
 
 const neighbourNames: Record<Neighbour, SettingsNeighbour> = {
-  AccountAndPlan: "account-and-plan", GoogleAndEmail: "google-and-email", CalendarAccount: "calendar-account", PasswordManager: "password-manager",
+  AccountAndPlan: "account-and-plan", GoogleAndEmail: "google-and-email", CalendarAccount: "calendar-account",
   NotificationCollection: "notification-collection", Listener: "listener", Conversations: "conversations", RestartDetails: "restart-details", CalendarBackups: "calendar-backups",
 };
 const neighboursNamed = Object.fromEntries(Object.entries(neighbourNames).map(([neighbour, name]) => [name, neighbour])) as Record<SettingsNeighbour, Neighbour>;
@@ -106,7 +110,7 @@ const neighboursNamed = Object.fromEntries(Object.entries(neighbourNames).map(([
 const targetNames: Record<AndroidGen.Target, SettingsAndroidTarget> = {
   AndroidHome: "android-home", AccountsSync: "accounts-sync", WifiNetworks: "wifi-networks", BluetoothDevices: "bluetooth-devices",
   MobileNetworks: "mobile-networks", AirplaneMode: "airplane-mode", ScreenLock: "screen-lock", DefaultApps: "default-apps",
-  DisplaySettings: "display-settings", Brightness: "brightness", SoundSettings: "sound-settings", DoNotDisturb: "do-not-disturb",
+  PasswordAutofill: "password-autofill", DisplaySettings: "display-settings", Brightness: "brightness", SoundSettings: "sound-settings", DoNotDisturb: "do-not-disturb",
   BatterySaver: "battery-saver", AlphaAlerts: "alpha-alerts", AlertChannel: "alert-channel", NotificationAccess: "notification-access",
   WorkflowAlerts: "workflow-alerts", AppPermissions: "app-permissions", PhotoPermissions: "photo-permissions", AllFilesAccess: "all-files-access",
   LocationSettings: "location-settings", InternetPanel: "internet-panel", SimCards: "sim-cards", AccessPointNames: "access-point-names",
@@ -322,14 +326,29 @@ function Phone({ runtime, alpha, common }: PageProps) {
   );
 }
 
+// spec/app/settings/android.md, "Each Android page is offered on the Settings page it belongs to"
+function Passwords({ runtime, common }: PageProps) {
+  const service = reading(useFacts(runtime).state, "AutofillService");
+  const canChoose = service.word === "reported" && (service.value === "None" || service.value === "Other");
+  return (
+    <SettingsPage title="Password manager" onBack={common.onBack} backLabel="Back to Apps" told={common.told} actions={common.actions}>
+      <ListGroup heading="Autofill">
+        <SettingsFactRow title="Autofill service" reading={service} />
+        {canChoose ? <SettingsAndroidRow title="Use for autofill" target="password-autofill" starting={common.starting} onAndroid={common.onAndroid} /> : null}
+      </ListGroup>
+    </SettingsPage>
+  );
+}
+
 function Apps({ runtime, common }: PageProps) {
   const shell = useShell(runtime);
-  const image = usePages(runtime).state?.image ?? false;
+  const pages = usePages(runtime).state;
   const appViews = { browser: "Browser", files: "Files", messages: "Messages" } as const;
   return (
     <SettingsAppsPage
       {...common}
-      image={image}
+      image={pages?.image ?? false}
+      onPhone={pages?.phone ?? false}
       onOpenApp={(app) => {
         const open = { type: "openView", view: appViews[app] } as const;
         if (shell.can(open)) void shell.send(open);
@@ -439,6 +458,7 @@ const drawn: Partial<Record<Page, Drawn>> = {
   Privacy,
   Permissions,
   Apps,
+  PasswordsPage: Passwords,
   InboxApp: (props) => <App {...props} app="inbox" />,
   WorkflowsApp: (props) => <App {...props} app="workflows" />,
   CalendarApp: (props) => <App {...props} app="calendar" />,
@@ -468,7 +488,7 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
   const start = android.state && loading(android.state.start) ? { target: targetNames[android.state.target], channel: android.state.channel || undefined } : undefined;
   const refresh = { type: "refresh", at: untimed } as const;
   const common: Common = {
-    actions: state.phone && (page === "Top" || page === "General") && facts.can(refresh)
+    actions: state.phone && (page === "Top" || page === "General" || page === "PasswordsPage") && facts.can(refresh)
       ? <Button variant="ghost" size="sm" onClick={() => void facts.send(refresh)}>Refresh</Button>
       : undefined,
     onBack: can(goBack) ? () => void send(goBack) : undefined,

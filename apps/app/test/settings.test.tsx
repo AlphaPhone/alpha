@@ -164,6 +164,28 @@ describe("Settings", () => {
     });
   });
 
+  it("Choose Android autofill in Passwords (spec/app/settings/android.md, \"Story: Change what only Android can change\")", async () => {
+    const { alpha, machines, world } = await settingsOpen();
+    await press("Apps");
+    await press("Passwords");
+    await until(alpha, machines, Facts.Machine, (s) => s.reported.some(({ fact, value }) => fact === "AutofillService" && value === "None"));
+    world.settings.autofillDestination = "system-settings";
+    await tap("Use for autofill");
+    await until(alpha, machines, Android.Machine, (s) => s.target === "PasswordAutofill" && s.told === "SaidNearby");
+    world.settings.autofillDestination = "autofill-picker";
+    await tap("Use for autofill");
+    await until(alpha, machines, Android.Machine, (s) => s.start.read.status === "Loaded" && s.told === "Silent");
+    expect(world.settings.opened).toEqual(["system-settings", "autofill-picker"]);
+
+    world.settings.autofill = { supported: true, selected: "this-app" };
+    await seen(false);
+    await seen(true);
+    await until(alpha, machines, Facts.Machine, (s) => s.reported.some(({ fact, value }) => fact === "AutofillService" && value === "Alpha"));
+    expect(titled("Use for autofill")).toBeUndefined();
+    await hardware("back");
+    expect(await page(alpha)).toBe("Apps");
+  });
+
   it("Look at access again (spec/app/startup/access.md, \"Story: Look at access again\")", async () => {
     const { alpha, world, machines } = await settingsOpen();
     await press("Privacy");

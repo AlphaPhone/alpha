@@ -8,7 +8,7 @@ import { alphaConnection } from "./platform.ts";
 import { elizaReminders } from "./reminders.ts";
 import type { Answering } from "./routes.ts";
 import type { Scene } from "./scene.ts";
-import { alphaAgentConsent, alphaCarrierSetup, elizaNotices, elizaReset, elizaSystem, elizaWiFi, settingsHost } from "./settings.ts";
+import { alphaAgentConsent, alphaCarrierSetup, elizaNotices, elizaPasswords, elizaReset, elizaSystem, elizaWiFi, settingsHost } from "./settings.ts";
 import { telephonyPlugins } from "./telephony.ts";
 import { alphaDevice } from "./update.ts";
 import { alphaBrowser } from "./browser.ts";
@@ -39,6 +39,7 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     ...(world.image ? telephonyPlugins(world.telephony, () => world.now) : {}),
     AlphaDevice: (emit) => ({ ...alphaDevice(world.update, () => world.now)(emit), ...settingsHost(world.settings), ...alphaAgentConsent(world.settings) }),
     ElizaNotifications: elizaNotices(world.settings),
+    ElizaPasswords: elizaPasswords(world.settings),
     AlphaConnection: alphaConnection(world.platform),
     ...(world.voice.onDevice ? { AlphaVoiceCloud: alphaVoiceCloud(world.voice) } : {}),
     ElizaCloudSpeech: elizaCloudSpeech(world.voice),
