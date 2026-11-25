@@ -1,5 +1,5 @@
 import type { ComponentProps, PointerEvent, ReactNode, Ref } from "react";
-import { ArrowUp, AudioLines, Clock, Mic, Paperclip, Plus, Search } from "lucide-react";
+import { ArrowUp, Clock, Mic, Paperclip, Plus, Search } from "lucide-react";
 import { cn } from "../../lib/cn.ts";
 import { Banner } from "../Banner.tsx";
 import { Button } from "../Button.tsx";
@@ -54,7 +54,7 @@ export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "o
   onHistory?: () => void;
   /** Starts a spoken turn; the voice area owns it. */
   onTalk?: () => void;
-  /** Records a transcript the owner can edit before it enters the draft. */
+  /** Records a transcript the owner can edit before it enters the draft; its mic stands where Talk does, only where Talk is not offered. */
   onDictate?: () => void;
   /** Takes the field's place while a voice conversation owns the composer. */
   voice?: ReactNode;
@@ -146,7 +146,6 @@ export function AssistantComposer({
           }}
           className={cn("max-h-[min(10.5rem,28dvh)] min-h-11 min-w-0 flex-1 touch-auto rounded-full bg-transparent py-2.75 text-body leading-field", targeting ? "border border-alpha px-3" : cn("border-0 pr-0.5", bar ? "pl-2" : "pl-0.5"))}
         />
-        {onDictate && <Button variant="ghost" size="icon" aria-label="Dictate" onClick={onDictate}><AudioLines /></Button>}
         {onStop || stopping ? (
           <Button size="icon" aria-label="Stop reply" loading={stopping} className="bg-foreground text-background hover:bg-foreground/90" onClick={onStop}><svg aria-hidden viewBox="0 0 24 24" className="size-5.5"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" /></svg></Button>
         ) : written ? (
@@ -160,6 +159,8 @@ export function AssistantComposer({
           ><ArrowUp /></Button>
         ) : onTalk ? (
           <Button variant="ghost" size="icon" aria-label="Talk" className={bar ? undefined : "bg-foreground text-background hover:bg-foreground/90"} onPointerDown={keepComposerFocus} onClick={onTalk}><Mic /></Button>
+        ) : onDictate ? (
+          <Button variant="ghost" size="icon" aria-label="Dictate" onPointerDown={keepComposerFocus} onClick={onDictate}><Mic /></Button>
         ) : null}
       </div>
     </div>
