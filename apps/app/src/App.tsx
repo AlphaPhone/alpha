@@ -100,9 +100,10 @@ export function App({ alpha }: AppProps) {
   useEffect(() => {
     if (enrolled) alpha.runtime.runFork(openStartupAccess(accessCovered));
   }, [alpha, enrolled, accessCovered]);
-  const accessHolding = enrolled && (!access || !access.begun || !accessCompleted(access));
+  const accessHolding = enrolled && (!access || !access.begun || !accessCompleted(access) || access.finish.allSet);
   const accessMayShow = accessHolding && !accessCovered;
-  const accessShowing = accessMayShow && access !== undefined && accessPanel(access) === "Walkthrough";
+  const accessStage = access !== undefined && accessPanel(access);
+  const accessShowing = accessMayShow && (accessStage === "Walkthrough" || accessStage === "AllSet");
   if (!state) {
     if (updating) return <>{alpha.slot("overlay")}</>;
     return cause

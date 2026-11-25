@@ -83,9 +83,8 @@ export const openStartupAccess = (covered: boolean) => effect {
   const access = try Access.Machine
   if (!(try access.get()).begun) try ignore(access.send(try opening(), "Owner"))
   const model = try access.get()
-  if (Access.completed(model)) return
   if (model.covered !== covered) try ignore(access.send({ type: "context", covered, now: untimed }, "Owner"))
-  if (covered || Access.setUp(model)) return
+  if (covered || Access.completed(model) || Access.setUp(model)) return
   const upTo = try legacyAccessSteps()
   if (Access.canCarriedOver(try access.get(), upTo)) try ignore(access.send({ type: "carriedOver", upTo }, "Owner"))
   try ignore(access.send({ type: "welcome", created: false, now: untimed }, "Owner"))
