@@ -1,6 +1,7 @@
 import { Effect, Layer } from "effect";
 import { type ReactElement, Suspense, lazy } from "react";
 import { captureReviewedDraft, MediaHandoff, stageAttachment, stageTranscript } from "./assistant/attachments.vibe";
+import { readPage, stopPage } from "./assistant/read-aloud.vibe";
 import { executeMedia } from "./assistant/media-executors.ts";
 import { FileContext } from "./assistant/file-context.vibe";
 import { Machine as Shell, showing } from "../gen/app__shell.effect.vibe";
@@ -33,6 +34,14 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
       const { default: assistant } = await import("./assistant/index.tsx");
       return assistant.runtime(alpha).runPromise(captureReviewedDraft());
     }).pipe(Effect.catchCause(() => Effect.succeed(undefined))),
+    offerPageSpeech: (speech) => Effect.promise(async () => {
+      const { default: assistant } = await import("./assistant/index.tsx");
+      return assistant.runtime(alpha).runPromise(readPage(speech));
+    }).pipe(Effect.catchCause(() => Effect.succeed(false))),
+    stopPageSpeech: (item) => Effect.promise(async () => {
+      const { default: assistant } = await import("./assistant/index.tsx");
+      return assistant.runtime(alpha).runPromise(stopPage(item));
+    }).pipe(Effect.ignoreCause),
   });
   const executors = Layer.succeed(MediaExecutors, {
     filesContext: () => Effect.tryPromise(async () => {

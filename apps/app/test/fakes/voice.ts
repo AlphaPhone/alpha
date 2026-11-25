@@ -54,6 +54,7 @@ export interface VoiceScene {
   readonly speakerGainRequests: boolean[];
   readonly speakerMutedAtPlayback: boolean[];
   readonly spoken: SpokenSentence[];
+  readonly spokenPages: { readonly readingToken: string; readonly ownerId: string; readonly sessionId: string }[];
   activeMicSession: string | undefined;
   emitLocal?: (event: string, data: unknown) => void;
   emitCloud?: (event: CloudStreamEvent) => void;
@@ -98,6 +99,7 @@ export function voiceScene(): VoiceScene {
     speakerGainRequests: [],
     speakerMutedAtPlayback: [],
     spoken: [],
+    spokenPages: [],
     activeMicSession: undefined,
   };
 }
@@ -163,6 +165,11 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
         const playbackId = `pb-${++playbackSeq}`;
         await voice.synthesisGate?.();
         return { playbackId };
+      },
+      synthesizeLocalBrowserReading: (reading: VoiceScene["spokenPages"][number]) => {
+        const { readingToken, ownerId, sessionId } = reading;
+        voice.spokenPages.push({ readingToken, ownerId, sessionId });
+        return Promise.resolve({ execution: "device", playbackId: `pb-${++playbackSeq}` });
       },
       play: ({ playbackId }: { playbackId: string }) => {
         voice.speakerMutedAtPlayback.push(voice.speakerMuted);

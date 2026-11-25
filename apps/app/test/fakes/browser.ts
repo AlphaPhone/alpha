@@ -34,6 +34,7 @@ export interface BrowserScene {
   saved: BrowserSavedState;
   beforeSave?: (saved: BrowserSavedState) => Promise<void>;
   reviewQuestion?: (page: BrowserPageGuard) => Promise<{ text: string }>;
+  reviewReading?: BrowserTabHostPlugin["reviewReading"];
   bookmarks: { url: string; title?: string }[];
   readonly tabs: Map<string, Held>;
   /** The tab drawn and where, as `present` last placed it. */
@@ -346,7 +347,7 @@ export function alphaBrowser(world: BrowserScene): Faked {
         world.calls.push("clearSiteData");
         return Promise.resolve({ site: new URL(options.url).host });
       },
-      readingSupport: () => Promise.resolve({ available: false }),
+      readingSupport: () => Promise.resolve({ available: world.reviewReading !== undefined }),
       reviewQuestion: (page) => {
         const tab = stateOf(held(page));
         if (world.shown?.id !== page.id || !tab.committed || tab.loading || tab.private || tab.url !== page.url || tab.navigation !== page.navigation) {
@@ -354,8 +355,14 @@ export function alphaBrowser(world: BrowserScene): Faked {
         }
         return world.reviewQuestion?.(page) ?? Promise.reject(rejection("Reading unavailable"));
       },
-      reviewReading: () => Promise.reject(rejection("Reading unavailable")),
-      cancelReading: () => Promise.resolve(),
+      reviewReading: (page) => {
+        const tab = stateOf(held(page));
+        if (world.shown?.id !== page.id || !tab.committed || tab.loading || tab.url !== page.url || tab.navigation !== page.navigation) {
+          return Promise.reject(rejection("The Browser page changed"));
+        }
+        return world.reviewReading?.(page) ?? Promise.reject(rejection("Reading unavailable"));
+      },
+      cancelReading: () => { world.calls.push("cancelReading"); return Promise.resolve(); },
       share: (options) => {
         const tab = stateOf(held(options));
         if (!tab.committed || tab.loading || tab.url !== options.url || tab.navigation !== options.navigation) {

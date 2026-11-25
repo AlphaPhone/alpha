@@ -12,6 +12,7 @@ import { Machine as Shell, canRaise } from "../../gen/app__shell.effect.vibe"
 import { type NoteTranscript, type NotesSelection, transcriptCurrent } from "../notes/selection.vibe"
 import { fresh } from "../runtime/attempts.vibe"
 import { contained } from "../runtime/reactor.vibe"
+import type { PageSpeech } from "../voice/voice.vibe"
 import { reencodeImage } from "./image-encode.ts"
 import { type Attached, type TranscriptAttachment, Talk } from "./talk.vibe"
 
@@ -28,6 +29,8 @@ export service MediaHandoff {
   attach(file: Attached, current?: Effect.Effect<boolean>, suggestion?: string): boolean!!
   offerTranscript(transcript: NoteTranscript): boolean!!
   reviewedDraft(): (ReviewedDraft | undefined)!!
+  offerPageSpeech(speech: PageSpeech): boolean!!
+  stopPageSpeech(item: number): void!!
 }
 
 export effect function attachToAlpha(file: Attached, current?: Effect.Effect<boolean>, suggestion?: string): boolean!!MediaHandoff {

@@ -258,6 +258,34 @@ describe("The Browser on a phone", () => {
     expect(runtime.runSync(Effect.flatMap(Site, (m) => m.get())).clear).toBe(0);
   });
 
+  it("Reads the selected page aloud through the phone's opaque approval (spec/app/browser/reading.md, \"Story: Hear the page read aloud\")", async () => {
+    const world = { ...scene(), phone: true, image: true };
+    let reviewOwner: string | undefined;
+    let reviewSession: string | undefined;
+    world.browser.reviewReading = async (page) => {
+      expect(page).toMatchObject({ url: "https://example.test/article", execution: "device" });
+      reviewOwner = page.ownerId;
+      reviewSession = page.sessionId;
+      return { readingToken: "on-device-review" };
+    };
+    const { alpha } = await open(world, only("home", "assistant", "view:Browser"));
+    const runtime = browser.runtime(alpha);
+    await press("Browser");
+    await until(alpha, runtime, Tabs, (state) => state.hydrated);
+    await go("https://example.test/article");
+    const tab = runtime.runSync(Tabs.use((tabs) => tabs.get())).selected;
+    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
+    await until(alpha, page, Page, (state) => state.phase === "Shown" && state.secure);
+    placeNative();
+    await press("Menu");
+    await pressOnTop("Read aloud");
+    await drawn(() => vi.waitFor(() => expect(world.voice.spokenPages).toHaveLength(1)));
+    await until(alpha, runtime, Reader, (state) => state.phase === "Idle");
+    expect(world.voice.spoken).toEqual([]);
+    expect(world.voice.spokenPages).toEqual([{ readingToken: "on-device-review", ownerId: reviewOwner, sessionId: reviewSession }]);
+    expect(world.browser.calls.filter((call) => call === "cancelReading")).toHaveLength(1);
+  });
+
   it("Reviews and edits a Browser excerpt before putting it in the chat draft (spec/app/browser/reading.md, \"Story: Review an excerpt to ask about\")", async () => {
     const world = { ...scene(), phone: true, image: true };
     let release: ((text: string) => void) | undefined;

@@ -171,7 +171,7 @@ public class AlphaBrowserPlugin extends Plugin {
  private void cancelFile() { ValueCallback<Uri[]> callback=fileCallback;fileCallback=null;fileTab=null;if(callback!=null)callback.onReceiveValue(null); }
  @Override public void load() {
   BrowserTabHostConfig identity=config();namespace=freshNamespace();
-  reading=new AlphaReviewedReading(getActivity(),requestId->{},identity.allowLoopback);
+  reading=new AlphaReviewedReading(getActivity(),this::cancelReadingSpeech,identity.allowLoopback);
   pageShare=getActivity().getActivityResultRegistry().register(identity.registryKey("share"),new ActivityResultContracts.StartActivityForResult(),result->{shareOutstanding=false;});
   downloads=new AlphaBrowserDownloads(getActivity(),new AlphaBrowserDownloads.Config(identity.downloadPreferences,identity.allowLoopback));
   downloads.purgeStaleCaptures();
@@ -1157,6 +1157,10 @@ public class AlphaBrowserPlugin extends Plugin {
  @PluginMethod public void cancelReading(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;if(Objects.equals(session,call.getString("session")))reading.cancel();call.resolve();}); }
  /** Releases the approved excerpt once to the host's bound speech request. */
  public String consumeReading(PluginCall call)throws Exception{return reading.consume(call);}
+ private void cancelReadingSpeech(String requestId) {
+  var host=getBridge().getPlugin("AlphaVoiceCloud");
+  if(host!=null&&host.getInstance() instanceof AlphaLocalSpeechPlugin speech)speech.cancelBrowserSpeech(requestId);
+ }
  @PluginMethod public void share(PluginCall call) { run(call,t->{
   if(paused||destroyed||shareOutstanding||pickerOutstanding||!Objects.equals(presentedId,t.id)||!t.web.isShown()||!t.committed||t.loading||!t.error.isEmpty()
     ||!Objects.equals(call.getString("navigation"),String.valueOf(t.navigation))||!Objects.equals(call.getString("url"),t.url)||!Objects.equals(t.web.getUrl(),t.url)||!safe(t.url)||t.url.length()>4096||t.url.chars().anyMatch(c->c<32||c==127))throw new IllegalStateException("Current page changed");
