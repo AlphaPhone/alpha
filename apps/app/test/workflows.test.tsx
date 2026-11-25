@@ -41,10 +41,14 @@ async function openWorkflows(world: Scene) {
 describe("Workflows", () => {
   it('Filters the owner’s work and keeps removed history (spec/app/workflows/list.md, "Story: Find a workflow")', async () => {
     const world = scene();
+    world.workflows.run = true;
+    world.workflows.stage = "Waiting";
     const alpha = await openWorkflows(world);
     const area = workflows.runtime(alpha);
     await until(alpha, area, Listing, (state) => state.list.status === "Loaded" && state.complete);
     expect(visible("Monthly statement", "Desk check", "Retired brief")).toEqual(["Monthly statement", "Desk check"]);
+    // spec/app/workflows/list.md, "A row says it waits for the owner whenever one of its runs waits for an approval, whether or not notifications are on; a removed row says its history is kept"
+    expect(button(/^Monthly statement.*Waiting for you$/)).toBeDefined();
 
     await press("Filter workflows");
     await pressOnTop("Removed");
@@ -61,6 +65,17 @@ describe("Workflows", () => {
     await pressOnTop("Refresh list");
     await until(alpha, area, Listing, (state) => state.list.status === "Loaded" && !state.complete);
     expect(visible("Monthly statement", "Desk check", "Retired brief")).toEqual(["Retired brief"]);
+
+    world.workflows.stage = "Done";
+    await press("Filter workflows");
+    await pressOnTop("All");
+    await pressOnTop("Done");
+    await press("Filter workflows");
+    await pressOnTop("Refresh list");
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(button(/^Monthly statement.*Off$/)).toBeDefined();
+    });
   });
 
   it('Reviews a Clock request within its Alarms page and restores focus to the list (spec/app/workflows/clock.md, "Story: Review, then hand over to Clock")', async () => {

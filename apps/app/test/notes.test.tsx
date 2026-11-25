@@ -66,6 +66,24 @@ describe("Notes", () => {
     world.notes.failing = false;
     await press("Reconnect");
     await until(alpha, runtime, List, (s) => s.read.status === "Loaded" && s.rows.length === 6);
+
+    // spec/app/notes/index.md, "The owner narrows the list to a folder, and clears the filter"
+    const chooseNoteOption = async (name: string) => {
+      await drawn(() => button("Notes options")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+      const item = () => [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((entry) => entry.textContent?.trim() === name);
+      await rendered(() => expect(item()).toBeDefined());
+      await drawn(() => item()?.click());
+    };
+    await chooseNoteOption("New folder");
+    await fill("Folder name", "Work");
+    await press("Save");
+    await until(alpha, runtime, List, (s) => s.folders.length === 1 && s.read.status === "Loaded");
+    await chooseNoteOption("Work");
+    await until(alpha, runtime, List, (s) => s.filter !== 0);
+    expect(listed()).toEqual([]);
+    await press("Clear filter");
+    await until(alpha, runtime, List, (s) => s.filter === 0);
+    expect(listed()).toHaveLength(6);
   });
 
   it("Reviews a deleted note in a sheet and recovers it (spec/app/notes/trash.md, \"Story: Delete a note and get it back\")", async () => {

@@ -15,6 +15,7 @@ which a stray click is ignored, and the height a sheet was left at.
 
 ### A released drag lands on the bar, a sheet at a height, or the full screen
 
+An open sheet follows its resize handle as the owner moves it.
 Near the top it fills the screen and near the floor it goes to the bar;
 the zones are 120 points deep, or a third of the travel when that is less.
 An open sheet flicked up fills the screen and flicked down goes to the bar.

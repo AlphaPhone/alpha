@@ -12,7 +12,7 @@ describe("Ask Alpha dock", () => {
   // spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"
   it("Browser input tap opens Sheet with focus (spec/app/assistant/dock.md, \"Focusing or tapping the composer on the bar opens Ask Alpha as a sheet\")", async () => {
     await page.viewport(390, 844);
-    const { runtime } = await mountDock({ view: "Browser" });
+    const { runtime } = await mountDock({ view: "Browser", voiceUnavailable: true });
 
     const section = document.querySelector<HTMLElement>("section[aria-label='Ask Alpha']");
     const beforeTextarea = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
@@ -47,6 +47,7 @@ describe("Ask Alpha dock", () => {
     expect(afterTextarea).toBe(beforeTextarea);
     expect(document.activeElement).toBe(beforeTextarea);
     expect(section?.getAttribute("data-alpha-detent")).toBe("sheet");
+    await expect.element(page.getByRole("button", { name: "Talk" })).toBeDisabled();
 
     // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"
     await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "agentOpenView", view: "Calendar" })));
@@ -77,5 +78,24 @@ describe("Ask Alpha dock", () => {
     grabber?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientY: 760, pointerId: 2, pointerType: "touch" }));
     await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
     expect(document.activeElement).toBe(document.querySelector("textarea[data-alpha-composer]"));
+  });
+
+  // spec/app/assistant/dock.md, "A released drag lands on the bar, a sheet at a height, or the full screen"
+  it("Resizes the open sheet while the pointer is held", async () => {
+    await page.viewport(390, 844);
+    const { runtime } = await mountDock();
+    await runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.send({ type: "raise", detent: "Sheet" })));
+    await expect.element(page.getByRole("button", { name: "Resize chat" })).toBeVisible();
+    const sheet = document.querySelector<HTMLElement>("section[data-alpha-detent='sheet']");
+    const handle = sheet?.querySelector("button[aria-label='Resize chat']");
+    expect(handle).not.toBeNull();
+    const start = handle!.getBoundingClientRect().top + 10;
+    const height = sheet!.getBoundingClientRect().height;
+    const dispatch = (type: string, clientY: number) => handle!.dispatchEvent(new PointerEvent(type, { bubbles: true, clientY, pointerType: "touch", pointerId: 3 }));
+    dispatch("pointerdown", start);
+    dispatch("pointermove", start - 125);
+    await expect.poll(() => sheet!.getBoundingClientRect().height).toBeGreaterThan(height + 90);
+    dispatch("pointercancel", start - 125);
+    await expect.poll(() => sheet!.getBoundingClientRect().height).toBe(height);
   });
 });

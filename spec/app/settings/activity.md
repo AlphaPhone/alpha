@@ -11,8 +11,9 @@ offline, not packaged with this build), its recovery with a bounded number
 of starts, and Cancel while it is busy; the shell passes its state with each
 event. The approvals area owns each phone action's custody and settles the
 owner's word on it; this page reads its journal through the agent and
-reads it again after each word. Conversations open in Ask Alpha, and
-Export diagnostics is the [Developer](./developer.md) export.
+reads it again after each word. New starts a conversation, History reads
+saved conversations, and selecting one opens it in Ask Alpha. Export
+diagnostics is the [Developer](./developer.md) export.
 
 ## Story: Help the agent recover
 

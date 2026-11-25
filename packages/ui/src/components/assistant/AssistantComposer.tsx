@@ -51,7 +51,7 @@ export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "o
   onHistory?: () => void;
   /** Starts a spoken turn; the voice area owns it. */
   onTalk?: () => void;
-  /** Shows the Talk control at rest when the current host has no speech bridge. */
+  /** Shows the Talk control when the current host has no speech bridge. */
   showUnavailableTalk?: boolean;
   /** Records a transcript the owner can edit before it enters the draft; its mic stands where Talk does, only where Talk is not offered. */
   onDictate?: () => void;
@@ -164,8 +164,8 @@ export function AssistantComposer({
           <Button variant="ghost" size="icon" aria-label="Talk" className={bar ? undefined : "bg-foreground text-background hover:bg-foreground/90"} onPointerDown={keepComposerFocus} onClick={onTalk}><Mic /></Button>
         ) : !compact && onDictate ? (
           <Button variant="ghost" size="icon" aria-label="Dictate" onPointerDown={keepComposerFocus} onClick={onDictate}><Mic /></Button>
-        ) : compact || (bar && showUnavailableTalk) ? (
-          <Button variant="ghost" size="icon" aria-label="Talk" className="disabled:opacity-100" disabled><Mic /></Button>
+        ) : compact || (showUnavailableTalk && !targeting) ? (
+          <Button variant="ghost" size="icon" aria-label="Talk" className={cn("disabled:opacity-100", !bar && "bg-foreground text-background")} disabled><Mic /></Button>
         ) : null}
       </div>
     </div>

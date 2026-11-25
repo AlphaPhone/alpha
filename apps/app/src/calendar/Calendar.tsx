@@ -4,14 +4,17 @@ import {
   CalendarEventRow, CalendarEventRows, CalendarFieldRow, CalendarFormCard, CalendarFormDate, CalendarFormPage, CalendarFormRow, CalendarFormTitle, CalendarHeader, CalendarSwitch,
   CalendarHeaderAction, CalendarInvite, CalendarJoin, CalendarList, CalendarListHeading, CalendarMonthPanel, CalendarNotice, CalendarNoticeAction, CalendarNotesField,
   CalendarPerson, CalendarPickerField, CalendarSearchBar, CalendarPill, CalendarTimeline, CalendarTimeRow, CalendarWeekStrip, Label, ListGroup, ListRow, Sheet, SheetContent, Spinner, Switch, Toast,
+  calendarHourHeight,
 } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import {
-  Calendar as CalendarIcon, CalendarDays, ChevronRight, MapPin, Plus, Repeat, RotateCcw, Search, Settings, TextAlignStart, UserRound, Video, X,
+  Bell, Calendar as CalendarIcon, CalendarDays, ChevronRight, MapPin, Plus, Repeat, Search, Settings, TextAlignStart, Undo2, UserRound, Video, X,
 } from "lucide-react";
-import { type ReactNode, useState, useSyncExternalStore } from "react";
+import { type ReactNode, useCallback, useState, useSyncExternalStore } from "react";
 import * as View from "../../gen/app__calendar.ts";
 import { useMachine as useView } from "../../gen/app__calendar.react.ts";
+import { daysFor } from "../../gen/app__shell__keyboard.ts";
+import { useMachine as useCanvas } from "../../gen/app__shell__keyboard.react.ts";
 import type * as Changes from "../../gen/app__calendar__agent.ts";
 import { useMachine as useChanges } from "../../gen/app__calendar__agent.react.ts";
 import * as Editor from "../../gen/app__calendar__editor.ts";
@@ -59,7 +62,6 @@ const cellLabel = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "
 const views: ReadonlyArray<{ layout: View.Layout; label: string }> = [
   { layout: "Timeline", label: "Day" },
   { layout: "Agenda", label: "Schedule" },
-  { layout: "Columns", label: "Days" },
 ];
 
 const changes: Readonly<Record<Changes.Change, string>> = { Create: "Create an event", Update: "Change an event", Delete: "Delete an event", Respond: "Answer an invitation" };
@@ -89,8 +91,12 @@ const words: Readonly<Record<ReplyWord, string>> = {
 };
 
 const repeats: ReadonlyArray<{ repeat: NonNullable<Fields["repeat"]>; label: string }> = [
-  { repeat: "NoRepeat", label: "Once" }, { repeat: "Daily", label: "Daily" }, { repeat: "Weekly", label: "Weekly" },
+  { repeat: "NoRepeat", label: "Once" }, { repeat: "Daily", label: "Daily" }, { repeat: "Weekdays", label: "Weekdays" }, { repeat: "Weekly", label: "Weekly" },
   { repeat: "Monthly", label: "Monthly" }, { repeat: "Yearly", label: "Yearly" },
+];
+
+const alerts: ReadonlyArray<{ minutes: number | undefined; label: string }> = [
+  { minutes: undefined, label: "None" }, { minutes: 0, label: "At start" }, { minutes: 10, label: "10 min" }, { minutes: 60, label: "1 hour" },
 ];
 
 const saveOff: Readonly<Record<SaveBlock, string>> = {
@@ -218,6 +224,16 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
   const view = useView(runtime);
   const editor = useEditor(runtime);
   const deleting = useHeld(runtime).state;
+  const canvas = useCanvas(runtime).state;
+  const [width, setWidth] = useState(0);
+  const surface = useCallback((element: HTMLDivElement | null) => {
+    if (!element) return;
+    setWidth(element.clientWidth);
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => setWidth(element.clientWidth));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
   useSyncExternalStore((listener) => shown.subscribe(listener), () => shown.snapshot(), () => shown.snapshot());
   const s = view.state;
   if (!s) return <Spinner />;
@@ -239,10 +255,11 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
     && visible.length === 0 && s.reminders === 0;
   const searching = s.overlay === "Search";
   const listing = searching || s.layout === "Agenda";
+  const largeAgenda = canvas?.agenda ?? false;
   const month = s.overlay === "MonthDialog" || s.overlay === "LayoutMenu";
   const anchorDate = dateOf(s.anchor);
   const title = anchorDate.getFullYear() === dateOf(s.today).getFullYear() ? monthOnly.format(anchorDate) : monthYear.format(anchorDate);
-  const now = s.readAt > 0 ? hoursInto(s.readAt, s.anchor) : undefined;
+  const now = s.readAt > 0 ? hoursInto(s.readAt, s.today) : undefined;
   const invites = visible.filter((row) => row.answer === "AnswerAwaited" && row.end > dayStart(s.today));
   const week = Array.from({ length: 7 }, (_, at) => weekStart(s.anchor) + at).map((day) => ({
     key: day, letter: narrowDay.format(dateOf(day)), date: dateOf(day).getDate(), label: longDate.format(dateOf(day)),
@@ -267,13 +284,23 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
   );
   const rows = dayRows(s.anchor);
   const allDay = rows.filter((row) => row.allDay);
-  const columns = s.layout === "Columns" ? Array.from({ length: 3 }, (_, at) => firstColumnDay(s.anchor, 3) + at) : [];
+  const room = Math.min(width, canvas?.canvasWidth ?? width);
+  const count = !listing && !largeAgenda && s.wide ? daysFor(room, canvas?.textScale ?? 100) : 1;
+  const columns = count > 1 ? Array.from({ length: count }, (_, at) => {
+    const day = firstColumnDay(s.anchor, count) + at;
+    return { day, rows: dayRows(day) };
+  }) : [];
   const hours = (() => {
-    const { first, last } = span(columns.length > 0 ? columns.flatMap(dayRows) : rows, s.anchor);
+    const spans = columns.length > 0 ? columns.map(({ day, rows: listed }) => span(listed, day)) : [span(rows, s.anchor)];
+    const first = Math.min(...spans.map((one) => one.first));
+    const last = Math.max(...spans.map((one) => one.last));
     return Array.from({ length: Math.min(last, 23) - first + 1 }, (_, at) => first + at).map((hour) => ({ hour, label: hourOnly.format(dayStart(s.anchor) + hour * hourMs) }));
   })();
+  const firstHour = hours[0]?.hour ?? 7;
+  const lastHour = hours.at(-1)?.hour ?? 23;
+  const empty = s.anchor === s.today ? "Nothing scheduled today" : "Free all day";
   return (
-    <div className="absolute inset-0 flex flex-col overflow-hidden leading-plain">
+    <div ref={surface} className="absolute inset-0 flex flex-col overflow-hidden leading-plain">
       <div data-alpha-subview="calendar-list" inert={open !== undefined || editor.state?.shown === true} className="flex min-h-0 flex-1 flex-col">
         <CalendarHeader title={title} expanded={month} onTitle={month ? send({ type: "closeOverlay" }) : view.can({ type: "openMonth" }) ? send({ type: "openMonth" }) : undefined}
           className="pr-2 pl-2" leading={alpha ? <AppBack alpha={alpha} className="size-13 [&_svg]:size-5.5" /> : null}>
@@ -286,7 +313,7 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
         {s.phoneLimited ? <CalendarNotice tone="caution">Android gave only part of this day. Some events may be missing.</CalendarNotice> : null}
         {cut ? <CalendarNotice tone="caution">Google gave only part of your agent's calendar. Some events may be missing.</CalendarNotice> : null}
         {s.phone.status === "Failed" || s.google.status === "Failed" ? (
-          <CalendarNotice tone="caution" actions={view.can({ type: "refresh" }) ? <CalendarNoticeAction aria-label="Retry" onClick={send({ type: "refresh" })}><RotateCcw aria-hidden />Retry</CalendarNoticeAction> : null}>
+          <CalendarNotice tone="caution" actions={view.can({ type: "refresh" }) ? <CalendarNoticeAction aria-label="Retry" onClick={send({ type: "refresh" })}><Undo2 aria-hidden />Retry</CalendarNoticeAction> : null}>
             Calendar couldn't read this day.
           </CalendarNotice>
         ) : null}
@@ -301,7 +328,7 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
                 {invites.map((row) => <Invite key={row.id} runtime={runtime} row={row} today={s.today} onOpen={openRow(row)} />)}
               </div>
             ) : null}
-            {allDay.length > 0 && columns.length === 0 ? (
+            {allDay.length > 0 && !largeAgenda ? (
               <div data-alpha-calendar-all-day="" className="flex max-h-33 shrink-0 gap-2.5 overflow-y-auto pr-4 pb-2 pl-3">
                 <span className="w-9.5 shrink-0 pt-3 text-right text-2xs leading-plain text-muted-foreground">All day</span>
                 <div className="flex min-w-0 grow flex-col gap-1.5">
@@ -314,27 +341,40 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
             ) : null}
             {columns.length > 0 ? (
               <div aria-hidden className="grid shrink-0 pr-4 pb-1.5 pl-15 text-meta font-semibold text-muted-foreground" style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}>
-                {columns.map((day) => <span key={day} className={day === s.today ? "truncate pl-2 text-primary" : "truncate pl-2"}>{`${shortDay.format(dateOf(day))} ${dateOf(day).getDate()}`}</span>)}
+                {columns.map(({ day }) => <span key={day} className={day === s.anchor ? "truncate pl-2 text-foreground" : "truncate pl-2"}>{`${shortDay.format(dateOf(day))} ${dateOf(day).getDate()}`}</span>)}
               </div>
             ) : null}
-            <CalendarTimeline hours={hours}
+            {largeAgenda ? (
+              <CalendarList aria-label="Calendar agenda">
+                <CalendarListHeading>{dayName(s.anchor, s.today)}</CalendarListHeading>
+                {disconnected ? <div className="flex flex-col items-center gap-1.5 text-center text-sm text-muted-foreground">{dayEmpty("Not connected", true)}</div> : null}
+                {rows.length === 0 && !disconnected && free && s.reminders === 0 ? <p className="flex items-center gap-2 text-sm text-muted-foreground"><CalendarIcon aria-hidden className="size-4.5 shrink-0" />{empty}</p> : null}
+                {[...rows].sort((a, b) => Number(b.allDay) - Number(a.allDay) || a.begin - b.begin).map((row) => {
+                  const time = row.allDay ? "All day" : hourMinute.format(Math.max(row.begin, dayStart(s.anchor)));
+                  const title = row.title || "Untitled event";
+                  const open = openRow(row);
+                  return <CalendarAgendaRow key={row.id} aria-label={`${title}, ${time}`} time={time} title={title} where={row.place} disabled={!open} onClick={open} />;
+                })}
+              </CalendarList>
+            ) : <CalendarTimeline hours={hours}
               blocks={columns.length > 0 ? [] : lanes(rows, s.anchor).map((placed) => block(placed.row, s.anchor, placed))}
               now={s.anchor === s.today && columns.length === 0 ? now : undefined}
               empty={disconnected ? dayEmpty("Not connected", true)
-                : columns.length > 0 ? (columns.every((day) => dayRows(day).length === 0) && free ? dayEmpty("Free on these days") : undefined)
-                : free && s.reminders === 0 ? dayEmpty(s.anchor === s.today ? "Nothing scheduled today" : "Free all day") : undefined}
+                : columns.length > 0 ? (columns.every((one) => one.rows.length === 0) && free ? dayEmpty("Free on these days") : undefined)
+                : free && s.reminders === 0 ? dayEmpty(empty) : undefined}
               columns={columns.length > 0 ? (
                 <div data-alpha-calendar-days="" className="absolute inset-y-0 right-4 left-15 grid" style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}>
-                  {columns.map((day) => (
-                    <div key={day} role="group" aria-label={longDate.format(dateOf(day))} aria-current={day === s.today ? "date" : undefined} className="relative border-l border-border">
-                      {lanes(dayRows(day), day).map((placed) => {
+                  {columns.map(({ day, rows: listed }) => (
+                    <div key={day} data-alpha-calendar-day="" role="group" aria-label={longDate.format(dateOf(day))} aria-current={day === s.anchor ? "date" : undefined} className="relative border-l border-border">
+                      {lanes(listed, day).map((placed) => {
                         const one = block(placed.row, day, placed);
-                        return <ColumnBlock key={one.key} block={one} first={hours[0]?.hour ?? 7} />;
+                        return <ColumnBlock key={one.key} block={one} first={firstHour} />;
                       })}
+                      {day === s.today && now !== undefined && now >= firstHour && now <= lastHour && <div aria-hidden className="pointer-events-none absolute inset-x-0 h-0.5 bg-primary" style={{ top: (now - firstHour) * calendarHourHeight + 8 }} />}
                     </div>
                   ))}
                 </div>
-              ) : null} />
+              ) : null} />}
             {s.reminders > 0 ? <CalendarNotice className="mt-2">{s.reminders === 1 ? "1 reminder" : `${s.reminders} reminders`}</CalendarNotice> : null}
           </>
         )}
@@ -356,7 +396,7 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
 /** A block of one of several days side by side, without its start time. */
 function ColumnBlock({ block, first }: { block: CalendarBlock; first: number }) {
   const lanesShown = Math.max(1, block.lanes);
-  return <CalendarEventBlock block={block} first={first} showTime={false} style={{ left: `${(block.lane * 100) / lanesShown}%`, width: `calc(${100 / lanesShown}% - 4px)` }} />;
+  return <CalendarEventBlock block={block} first={first} aria-label={block.label} showTime={false} style={{ left: `${(block.lane * 100) / lanesShown}%`, width: `calc(${100 / lanesShown}% - 4px)` }} />;
 }
 
 /** Each day's heading and its events, from `from` on; `empty` where there are none. */
@@ -420,7 +460,7 @@ function Month({ runtime }: CalendarProps) {
     await view.send({ type: "closeOverlay" });
     await view.send({ type: "openCalendars" });
   };
-  const offered = views.filter(({ layout }) => layout !== "Columns" || s.wide);
+  const selected = s.layout === "Columns" ? "Timeline" : s.layout;
   return (
     <CalendarMonthPanel month={firstDate.getMonth()} year={firstDate.getFullYear()}
       months={Array.from({ length: 12 }, (_, at) => ({ value: at, label: monthOnly.format(new Date(2000, at, 1)) }))}
@@ -433,9 +473,9 @@ function Month({ runtime }: CalendarProps) {
         onPick: view.can({ type: "pickDay", day }) ? () => void view.send({ type: "pickDay", day }) : day === s.anchor ? close : undefined,
       }))}>
       <div role="group" aria-label="Calendar view" className="mt-3 flex flex-wrap gap-2">
-        {offered.map(({ layout, label }) => (
-          <CalendarPill key={layout} pressed={s.layout === layout} disabled={s.layout !== layout && !(s.overlay === "LayoutMenu" ? view.can({ type: "chooseLayout", layout }) : view.can({ type: "closeOverlay" }))}
-            onClick={s.layout === layout ? undefined : () => void choose(layout)()}>{label}</CalendarPill>
+        {views.map(({ layout, label }) => (
+          <CalendarPill key={layout} pressed={selected === layout} disabled={selected !== layout && !(s.overlay === "LayoutMenu" ? view.can({ type: "chooseLayout", layout }) : view.can({ type: "closeOverlay" }))}
+            onClick={selected === layout ? undefined : () => void choose(layout)()}>{label}</CalendarPill>
         ))}
         <CalendarPill onClick={() => void calendars()}>Calendars</CalendarPill>
       </div>
@@ -508,7 +548,9 @@ function EventPage({ runtime, row, today }: CalendarProps & { row: Row; today: n
   const following = row.recurring && row.source === "Google" ? remove("FromThisOn") : undefined;
   const series = row.recurring ? remove("WholeSeries") : undefined;
   const decline = row.cancel === "DeclineInvitation" ? one : undefined;
-  const editing = row.editable && editor.can(edit);
+  const androidView = { type: "openInAndroidCalendar" } as const;
+  const editingInAndroid = row.source === "Phone" && (row.allDay || row.recurring);
+  const editing = row.editable && !editingInAndroid && editor.can(edit);
   const deletes: ReadonlyArray<{ label: string; act: (() => void) | undefined }> = row.cancel === "DeclineInvitation" ? [] : [
     { label: row.recurring ? "Delete this one" : "Delete", act: one },
     { label: "Delete this and following", act: following },
@@ -519,6 +561,7 @@ function EventPage({ runtime, row, today }: CalendarProps & { row: Row; today: n
   const invited = row.answer !== "NotInvited";
   const notices: ReactNode[] = [
     !row.editable ? "This calendar can't be changed here. Edit it in its own app." : null,
+    editingInAndroid && view.can(androidView) ? "Edit this event in Android Calendar." : null,
     row.editable && row.managed ? "Delete or decline this event in Google Calendar." : null,
   ].filter((text) => text !== null).map((text) => <div key={text} className="mt-3 text-sm leading-plain text-muted-foreground">{text}</div>);
   return (
@@ -534,7 +577,7 @@ function EventPage({ runtime, row, today }: CalendarProps & { row: Row; today: n
       {uncertain ? <div role="status" className="mt-3 flex items-center gap-2 rounded-sm bg-secondary p-3 text-meta"><span aria-hidden className="size-2 rounded-full bg-warn" /><span className="flex-1">Unconfirmed</span></div> : null}
       {notices}
       {view.can({ type: "openInGoogle" }) ? <CalendarEventAction aria-label="Open in Google Calendar" onClick={() => void view.send({ type: "openInGoogle" })}><CalendarIcon aria-hidden />Open in Google Calendar</CalendarEventAction> : null}
-      {view.can({ type: "openInAndroidCalendar" }) ? <CalendarEventAction aria-label="Open in Android Calendar" onClick={() => void view.send({ type: "openInAndroidCalendar" })}><CalendarIcon aria-hidden />Open in Android Calendar</CalendarEventAction> : null}
+      {view.can(androidView) ? <CalendarEventAction aria-label="Open in Android Calendar" onClick={() => void view.send(androidView)}><CalendarIcon aria-hidden />Open in Android Calendar</CalendarEventAction> : null}
       {invited && (row.answerable || decline) ? (
         <CalendarAnswers initials={initials(organizer?.name ?? "")}>
           <CalendarAnswer chosen={row.answer === "AnsweredGoing" ? "going" : undefined} disabled={!editor.can(going)} onClick={() => void editor.send(going)}>Going</CalendarAnswer>
@@ -661,10 +704,13 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
     };
   });
   const people = fields.people.split(",").map((one) => one.trim()).filter((one) => one !== "");
+  const withExtras = (next: Fields) => {
+    const extras = next.people.trim() !== "" || next.video === true || next.alert !== undefined;
+    change(next, extras === e.extras ? plain : { type: "setExtras", extras });
+  };
   const setPeople = (list: ReadonlyArray<string>) => {
     const next = list.join(", ");
-    const extras = next !== "" || (fields.repeat ?? "NoRepeat") !== "NoRepeat";
-    change({ ...fields, people: next }, extras === e.extras ? plain : { type: "setExtras", extras });
+    withExtras({ ...fields, people: next });
   };
   const addTyped = () => {
     const email = (picking ?? "").trim();
@@ -676,7 +722,9 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
   ];
   const off_ = !e.extras && !editor.can({ type: "save" }) ? saveOff[saveBlock(e.form === "NewEvent" && e.receipts.status === "Loading", e.draft.sync === "Saving", false, Editor.canKeepMyChanges(e), !e.titled)] : "";
   const choosesCalendar = e.form === "NewEvent" && connected && shown.present();
-  const choosesRepeat = e.form === "NewEvent" && (!connected || fields.calendar === "Phone");
+  const choosesRepeat = e.form === "NewEvent" && shown.present() && (!connected || fields.calendar === "Phone");
+  const choosesOptions = choosesRepeat || (e.form === "NewEvent" && shown.present() && (fields.video === true || fields.alert !== undefined));
+  const editingPhone = e.form === "EditEvent" && shown.find(e.target)?.source === "Phone";
   const close = () => (editor.can({ type: "close" }) ? void editor.send({ type: "close" }) : undefined);
   return (
     <CalendarFormPage onBack={close} saving={e.draft.sync === "Saving"} onSave={!e.extras && editor.can({ type: "save" }) ? () => void editor.send({ type: "save" }) : undefined}>
@@ -690,7 +738,7 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
         </div>
       ) : null}
       <p role="status" aria-label="Calendar form draft status" className="mx-6 my-1 text-meta text-muted-foreground">{off_}</p>
-      {e.banner === "Failed" ? <CalendarNotice tone="caution" className="mx-6" actions={<CalendarNoticeAction onClick={() => void editor.send({ type: "retryKeeping" })}><RotateCcw aria-hidden />Retry</CalendarNoticeAction>}>Not saved on this phone</CalendarNotice> : null}
+      {e.banner === "Failed" ? <CalendarNotice tone="caution" className="mx-6" actions={<CalendarNoticeAction onClick={() => void editor.send({ type: "retryKeeping" })}><Undo2 aria-hidden />Retry</CalendarNoticeAction>}>Not saved on this phone</CalendarNotice> : null}
       {e.banner === "Conflict" ? (
         <CalendarNotice className="mx-6" actions={<>
           <CalendarNoticeAction onClick={() => void editor.send({ type: "keepMyDraft" })}>Keep mine</CalendarNoticeAction>
@@ -706,13 +754,13 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
         </>}>This event changed since you started editing it.</CalendarNotice>
       ) : null}
       {e.form === "NewEvent" && e.receipts.status === "Failed" ? (
-        <CalendarNotice tone="caution" className="mx-6" actions={editor.can({ type: "checkReceipts" }) ? <CalendarNoticeAction onClick={() => void editor.send({ type: "checkReceipts" })}><RotateCcw aria-hidden />Check</CalendarNoticeAction> : null}>
+        <CalendarNotice tone="caution" className="mx-6" actions={editor.can({ type: "checkReceipts" }) ? <CalendarNoticeAction onClick={() => void editor.send({ type: "checkReceipts" })}><Undo2 aria-hidden />Check</CalendarNoticeAction> : null}>
           Alpha couldn't check for events it may already have made, so it won't create this one yet.
         </CalendarNotice>
       ) : null}
       {e.unknownCreate && e.form === "NewEvent" ? (
         <CalendarNotice tone="caution" className="mx-6" actions={<>
-          {editor.can({ type: "checkReceipts" }) ? <CalendarNoticeAction aria-label="Check if events were saved" onClick={() => void editor.send({ type: "checkReceipts" })}><RotateCcw aria-hidden />Check</CalendarNoticeAction> : null}
+          {editor.can({ type: "checkReceipts" }) ? <CalendarNoticeAction aria-label="Check if events were saved" onClick={() => void editor.send({ type: "checkReceipts" })}><Undo2 aria-hidden />Check</CalendarNoticeAction> : null}
           {editor.can({ type: "createSeparately" }) ? <CalendarNoticeAction aria-label="Create a separate event" onClick={() => void editor.send({ type: "createSeparately" })}>Create new</CalendarNoticeAction> : null}
           {editor.can({ type: "letDoubtGo" }) ? <CalendarNoticeAction onClick={() => void editor.send({ type: "letDoubtGo" })}>Stop checking</CalendarNoticeAction> : null}
         </>}>Alpha can't tell whether your last new event was saved.</CalendarNotice>
@@ -744,7 +792,7 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
         <CalendarFormCard className="h-14 flex-row items-center gap-3.5 pr-3 pl-4">
           <CalendarIcon aria-hidden className="size-5.5 shrink-0 text-muted-foreground" />
           <span className="grow text-body leading-plain">All day</span>
-          <CalendarSwitch aria-label="All day" checked={fields.allDay} disabled={!editor.can({ type: "setAllDay", allDay: !fields.allDay })}
+          <CalendarSwitch aria-label="All day" checked={fields.allDay} disabled={editingPhone || !editor.can({ type: "setAllDay", allDay: !fields.allDay })}
             onCheckedChange={(allDay) => change({ ...fields, allDay }, { type: "setAllDay", allDay })} />
         </CalendarFormCard>
         <CalendarFormCard className="gap-1 py-2.5 pr-3 pl-4">
@@ -770,6 +818,13 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
               doneLabel="Done adding people" onDone={() => { addTyped(); setPicking(undefined); }} />
           )}
         </CalendarFormCard>
+        {choosesOptions ? (
+          <CalendarFormCard className="h-14 flex-row items-center gap-3.5 pr-3 pl-4">
+            <Video aria-hidden className="size-5.5 shrink-0 text-muted-foreground" />
+            <span className="grow text-body leading-plain">Video link</span>
+            <CalendarSwitch aria-label="Video link" checked={fields.video === true} disabled={!editor.can(plain)} onCheckedChange={(video) => withExtras({ ...fields, video })} />
+          </CalendarFormCard>
+        ) : null}
         {choosesCalendar || choosesRepeat ? (
           <CalendarFormCard className="gap-1 py-2 pr-3 pl-4">
             {choosesCalendar ? (
@@ -778,7 +833,7 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
                   {(["Agent", "Phone"] as const).map((target) => (
                     <CalendarChip key={target} label={target === "Agent" ? "Your agent's calendar" : "This phone's calendar"}
                       chosen={(fields.calendar ?? "Agent") === target} dot={target === "Agent" ? "primary" : "foreground"}
-                      onClick={() => change({ ...fields, calendar: target }, plain)} />
+                      onClick={() => withExtras({ ...fields, calendar: target, ...(target === "Agent" ? { repeat: "NoRepeat" } : {}) })} />
                   ))}
                 </div>
               </CalendarFormRow>
@@ -786,10 +841,20 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
             {choosesRepeat ? (
               <CalendarFormRow icon={<Repeat />}>
                 <div className="flex min-w-0 flex-[1_1_0] flex-wrap gap-1.5">
-                  {repeats.map(({ repeat, label }) => (
-                    <CalendarChip key={repeat} label={label} chosen={(fields.repeat ?? "NoRepeat") === repeat} onClick={() => {
-                      const extras = repeat !== "NoRepeat" || fields.people.trim() !== "";
-                      change({ ...fields, repeat }, extras === e.extras ? plain : { type: "setExtras", extras });
+                  {repeats.map(({ repeat, label }) => <CalendarChip key={repeat} label={label} chosen={(fields.repeat ?? "NoRepeat") === repeat} disabled={!editor.can(plain)} onClick={() => withExtras({ ...fields, repeat })} />)}
+                </div>
+              </CalendarFormRow>
+            ) : null}
+            {choosesOptions ? (
+              <CalendarFormRow icon={<Bell />}>
+                <div role="group" aria-label="Alert" className="flex min-w-0 flex-[1_1_0] flex-wrap gap-1.5">
+                  {alerts.map(({ minutes, label }) => (
+                    <CalendarChip key={label} label={label} chosen={minutes === fields.alert} disabled={!editor.can(plain)} onClick={() => {
+                      if (minutes !== undefined) withExtras({ ...fields, alert: minutes });
+                      else {
+                        const { alert: _alert, ...next } = fields;
+                        withExtras(next);
+                      }
                     }} />
                   ))}
                 </div>
@@ -797,8 +862,9 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
             ) : null}
           </CalendarFormCard>
         ) : null}
+        {fields.video || fields.alert !== undefined ? <p className="text-sm text-muted-foreground">{fields.video && fields.alert !== undefined ? "Add the video link and alert in Android Calendar." : fields.video ? "Add the video link in Android Calendar." : "Set the alert in Android Calendar."}</p> : null}
         {e.extras ? (
-          <button type="button" aria-label="Open in Android Calendar" disabled={!editor.can({ type: "handOff" })} onClick={() => void editor.send({ type: "handOff" })}
+          <button type="button" aria-label="Open in Android Calendar" disabled={blank || !editor.can({ type: "handOff" })} onClick={() => void editor.send({ type: "handOff" })}
             className="flex min-h-13 items-center gap-2 rounded-lg bg-secondary px-4 py-3 text-left disabled:opacity-50">
             <CalendarIcon aria-hidden className="size-4.5" />Calendar<ChevronRight aria-hidden className="size-4 text-muted-foreground" />
           </button>

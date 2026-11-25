@@ -1,3 +1,4 @@
+import { version } from "../../package.json";
 import { allowsTestMocks } from "../platform/build.ts";
 
 /**
@@ -10,5 +11,5 @@ export function development(): boolean {
 
 /** The version this build of Alpha names, and the mode it was built in, for the diagnostics it exports. @throws {never} */
 export function versions(): { readonly app: string; readonly mode: string } {
-  return { app: import.meta.env.VITE_ALPHA_VERSION ?? "development", mode: import.meta.env.MODE };
+  return { app: import.meta.env.VITE_ALPHA_VERSION ?? version, mode: import.meta.env.MODE };
 }

@@ -89,10 +89,17 @@ describe("Settings", () => {
     await vi.waitFor(() => expect(button("Account")?.textContent).toContain("Signed out"));
     world.signedIn = true;
 
-    // spec/app/settings/index.md, "Each page links to what another area owns there": Agent activity offers the conversations, which the shell opens over the app.
+    // spec/app/assistant/chats.md, "Story: Find my conversations"
+    world.ask.kept.set("c8", { roomId: "r8", title: "Dinner", messages: [{ id: "m8", role: "user", text: "Dinner at eight?" }] });
     await press("About");
     await tap("Agent activity");
-    await press("Conversations");
+    await press("Load conversations");
+    await press("Restore conversation: Dinner");
+    await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Full");
+    await hardware("back");
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar");
+    await press("New conversation");
     await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Full");
     expect((await machines.runPromise(Facts.Machine.use((facts) => facts.get()))).read.read.status).toBe("Loaded");
     expect(world.settings.opened).toEqual([]);
@@ -185,7 +192,17 @@ describe("Settings", () => {
       await until(alpha, machines, Android.Machine, (s) => s.start.read.status !== "Loading");
       const exactly = await machines.runPromise(Android.Machine.use((android) => android.get()));
       expect(exactly.told).toBe(phone ? "Silent" : "SaidUnavailable");
-      if (!phone) return;
+      if (!phone) {
+        // spec/app/settings/index.md, "Story: Find a setting and come back"
+        await hardware("back");
+        await press("Apps");
+        await tap("Photos");
+        await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Photos");
+        await hardware("back");
+        await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Settings");
+        expect(await page(alpha)).toBe("Apps");
+        return;
+      }
       await tap("Mobile data");
       await until(alpha, machines, Android.Machine, (s) => s.told === "SaidNearby");
       // spec/app/settings/android.md, "Alpha's alert, permission and photo pages open for Alpha itself, never for another app, and a channel's page names its channel"
@@ -288,7 +305,7 @@ describe("Settings", () => {
     // spec/app/settings/preferences.md, "The owner changes Ask before Alpha acts, Load images or what Alpha may share only once the phone has read them, one save at a time, with ten seconds to save"
     await tap("Ask before Alpha acts");
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && Prefs.asksBeforeActing(s, "WebAction"));
-    await tap("Browser page");
+    await tap("Browser page for Alpha");
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && !Prefs.allows(s, "BrowserPage"));
     expect(JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}")).toEqual({ askFirst: true, images: true, shares: ["AgentLocation", "GmailChanges", "CalendarEdits"] });
     await tap("Gmail changes");
@@ -303,7 +320,7 @@ describe("Settings", () => {
     const refused = await alpha.runtime.runPromise(Prefs.Machine.use((prefs) => prefs.get()));
     expect([Prefs.allows(refused, "CalendarEdits"), refused.agentGoogle]).toEqual([true, { tag: "Consents", gmailChanges: false, calendarEdits: true }]);
     expect(JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}")).toEqual({ askFirst: true, images: true, shares: ["AgentLocation", "CalendarEdits"] });
-    await tap("Location");
+    await tap("Location for Alpha");
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && !Prefs.allows(s, "AgentLocation"));
     expect(world.settings.consents).toHaveLength(3);
     // spec/app/settings/preferences.md, "A change takes effect when the phone saved it; when the phone refuses it, Alpha says it was not saved and nothing changes; when the phone does not answer in time, Alpha says it was not saved and reads the device preferences again": a change the host takes too late is what Settings shows once the phone has finished with it.

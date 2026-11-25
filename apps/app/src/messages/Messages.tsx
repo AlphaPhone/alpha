@@ -2,7 +2,7 @@
 import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY, MMS_MAX_RECIPIENTS } from "@elizaos/os-bridges";
 import type { MessageRow, ThreadRow } from "@elizaos/os-bridges";
 import { normalizePhoneNumber } from "@elizaos/os-bridges";
-import { Alert, Avatar, Banner, Button, Chip, ConfirmDialog, Input, Menu, MenuContent, MenuItem, MenuTrigger, SearchField, Spinner, Textarea } from "@repo/ui";
+import { Alert, AppHeader, Avatar, Banner, Button, Chip, ConfirmDialog, Input, Menu, MenuContent, MenuItem, MenuTrigger, SearchField, Spinner, Textarea } from "@repo/ui";
 import { Effect, type Layer, type ManagedRuntime } from "effect";
 import { ArrowUp, Camera, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, ImagePlus, Mic, Pencil, Phone as Call, Plus, RefreshCw, Search, Send, Sparkles, Square, Trash2, X } from "lucide-react";
 import { memo, useCallback, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type PointerEvent } from "react";
@@ -17,6 +17,7 @@ import { callerInitials, displayNumber, shortWhen } from "../phone/words.ts";
 import { Drafts, attachAll, prepare, sameSubscription, supported } from "./composer.vibe";
 import { Conversations, Inbox, titleOf } from "./messages.vibe";
 import { CommsBar, useCommsDock } from "../phone/CommsBar.tsx";
+import { commsHeld } from "../phone/comms.vibe";
 import type { Resident } from "../runtime/area.tsx";
 import { untimed } from "../runtime/reactor.vibe";
 import { useMachine as useVoice } from "../../gen/app__voice.react.ts";
@@ -108,15 +109,14 @@ function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesPr
           </div>
         </header>
       ) : (
-        <header className="flex h-13 shrink-0 items-center gap-0.5 px-2 [&>button]:size-13" data-alpha-messages-header data-alpha-stage-header>
-          {onBack && <Button variant="ghost" size="icon" aria-label="Back to apps" onClick={onBack}><ChevronLeft /></Button>}
-          <h1 className="min-w-0 flex-1 truncate text-xl leading-tight font-semibold">Messages</h1>
+        <AppHeader title="Messages" className="shrink-0" data-alpha-messages-header="" data-alpha-stage-header=""
+          leading={onBack && <Button variant="ghost" size="icon" aria-label="Back to apps" onClick={onBack}><ChevronLeft /></Button>}>
           {!smsNeeded(state) && <Button variant="ghost" size="icon" aria-label="Search messages" data-alpha-messages-search onClick={() => setSearching(true)}><Search /></Button>}
           {can({ type: "newMessage" }) && <Button variant="ghost" size="icon" aria-label="New message" data-alpha-messages-new onClick={() => {
             runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ typed: "" })));
             void send({ type: "newMessage" });
           }}><Pencil /></Button>}
-        </header>
+        </AppHeader>
       )}
       {smsNeeded(state) && (can(allow) || can(settings)) && (
         <div className="grid flex-1 place-items-center px-4">
@@ -205,41 +205,65 @@ interface BubbleActions {
   remove?: (() => void) | undefined;
 }
 
-const Bubble = memo(function Bubble({ row, now, choose, actions, onOpenLink }: { row: MessageRow; now: number; choose: (id: string) => void; actions?: BubbleActions | undefined; onOpenLink?: MessagesProps["onOpenLink"] }) {
-  const triggerRef = useRef<HTMLDivElement>(null);
-  const pointerRef = useRef<{ x: number; y: number; at: number } | null>(null);
+const Bubble = memo(function Bubble({ row, now, choose, actions, hold, onOpenLink }: { row: MessageRow; now: number; choose: (id: string) => void; actions?: BubbleActions | undefined; hold: (pressed: () => void) => () => void; onOpenLink?: MessagesProps["onOpenLink"] }) {
+  const triggerRef = useRef<HTMLDivElement | null>(null);
+  const pressRef = useRef<{ id: number; x: number; y: number; cancel: () => void } | undefined>(undefined);
+  const skipClick = useRef(false);
+  const release = useCallback(() => {
+    pressRef.current?.cancel();
+    pressRef.current = undefined;
+  }, []);
+  const trigger = useCallback((node: HTMLDivElement | null) => {
+    triggerRef.current = node;
+    if (node) return release;
+  }, [release]);
   const complete = "incomplete" in row ? undefined : row;
   const outgoing = complete?.direction === "outgoing";
   const failed = complete?.status === "failed";
   const status = failed ? "Not sent" : complete?.status === "pending" ? "Sending" : outgoing && (complete?.status === "delivered" || complete?.deliveryReport === "complete") ? "Delivered" : outgoing ? "Sent" : "";
-  const select = (event: MouseEvent) => {
+  const select = (event: MouseEvent, toggle: boolean) => {
     if (event.target instanceof Element && event.target.closest("a")) return;
     if (document.getSelection()?.isCollapsed === false) return;
-    choose(row.id);
+    choose(toggle && actions ? "" : row.id);
   };
-  const moved = (event: PointerEvent) => {
-    const started = pointerRef.current;
-    if (started && Math.hypot(event.clientX - started.x, event.clientY - started.y) > 12) pointerRef.current = null;
+  const cancel = (event: PointerEvent) => {
+    if (pressRef.current?.id !== event.pointerId) return;
+    skipClick.current = true;
+    release();
   };
   const label = complete ? complete.body || "Picture message" : "A message Alpha cannot show";
   return (
     <div className={`flex max-w-[min(17.5rem,100%)] flex-col ${outgoing ? "items-end self-end" : "items-start self-start"}`}>
-      <div ref={triggerRef} data-alpha-message-id={row.id} data-alpha-sms-outgoing={outgoing} role="button" tabIndex={0} aria-label={`Message actions: ${label}`} aria-haspopup="menu" aria-expanded={Boolean(actions)}
+      <div ref={trigger} data-alpha-message-id={row.id} data-alpha-sms-outgoing={outgoing} role="button" tabIndex={0} aria-label={`Message actions: ${label}`} aria-haspopup="menu" aria-expanded={Boolean(actions)}
         className={`flex max-w-full flex-col gap-0.5 rounded-tile focus-visible:outline-2 focus-visible:outline-ring ${outgoing ? "items-end" : "items-start"}`}
-        onClick={select}
+        onClick={(event) => {
+          if (event.detail === 0 || !skipClick.current) select(event, true);
+          skipClick.current = false;
+        }}
         onContextMenu={(event) => {
           if (event.target instanceof Element && event.target.closest("a")) return;
           event.preventDefault();
-          select(event);
+          select(event, false);
         }}
-        onPointerDown={(event) => { if (event.pointerType === "touch") pointerRef.current = { x: event.clientX, y: event.clientY, at: event.timeStamp }; }}
-        onPointerMove={moved}
-        onPointerCancel={() => { pointerRef.current = null; }}
-        onPointerUp={(event) => {
-          const started = pointerRef.current;
-          pointerRef.current = null;
-          if (started && event.timeStamp - started.at >= 500) choose(row.id);
+        onPointerDown={(event) => {
+          if (!event.isPrimary || event.button !== 0 || (event.target instanceof Element && event.target.closest("a"))) return;
+          release();
+          skipClick.current = false;
+          const id = event.pointerId;
+          const cancelHold = hold(() => {
+            if (pressRef.current?.id !== id || document.getSelection()?.isCollapsed === false) return;
+            skipClick.current = true;
+            choose(row.id);
+          });
+          pressRef.current = { id, x: event.clientX, y: event.clientY, cancel: cancelHold };
         }}
+        onPointerMove={(event) => {
+          const press = pressRef.current;
+          if (press && Math.hypot(event.clientX - press.x, event.clientY - press.y) > 10) cancel(event);
+        }}
+        onPointerCancel={cancel}
+        onPointerLeave={cancel}
+        onPointerUp={(event) => { if (pressRef.current?.id === event.pointerId) release(); }}
         onKeyDown={(event) => {
           if (event.target !== event.currentTarget) return;
           if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10") || event.key === "Enter" || event.key === " ") {
@@ -298,6 +322,10 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink }: M
     runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ chosen: id })));
     setSelected(id);
   }, [runtime]);
+  const hold = useCallback((pressed: () => void) => {
+    const fiber = runtime.runFork(commsHeld(pressed));
+    return () => fiber.interruptUnsafe();
+  }, [runtime]);
   if (!state || !phone) return null;
   const conversation = runtime.runSync(Effect.flatMap(Conversations, (numbering) => numbering.get(state.thread)));
   const addresses = conversation._tag === "Some" ? conversation.value.addresses : [];
@@ -329,7 +357,7 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink }: M
           {state.page.status === "Failed" && <Banner variant="destructive">The conversation could not be read</Banner>}
           {can({ type: "earlierMessages" }) && <Button className="self-center" size="icon" variant="secondary" aria-label="Earlier messages" onClick={() => void send({ type: "earlierMessages" })}><ChevronUp /></Button>}
           <div role="log" aria-label="Messages" className="mt-auto flex flex-col gap-1.5">
-            {chronological.map((row) => <Bubble key={row.id} row={row} now={now} choose={choose} actions={row.id === selected && (actions?.copy || actions?.remove) ? actions : undefined} onOpenLink={onOpenLink} />)}
+            {chronological.map((row) => <Bubble key={row.id} row={row} now={now} choose={choose} hold={hold} actions={row.id === selected && (actions?.copy || actions?.remove) ? actions : undefined} onOpenLink={onOpenLink} />)}
           </div>
           {selectedRow && "incomplete" in selectedRow && can({ type: "openElsewhere" }) && <Button size="sm" variant="outline" className="self-start" onClick={() => void send({ type: "openElsewhere" })}>Open in messaging app</Button>}
           <div key={latest} ref={latest ? anchor : undefined} aria-hidden />

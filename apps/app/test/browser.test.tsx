@@ -109,6 +109,19 @@ describe("The Browser on a phone", () => {
     expect([...world.browser.tabs.values()].map((one) => one.history)).toEqual([["https://news.example/on-device-agents"]]);
     expect(Boolean(document.querySelector("[aria-label='Secure connection']"))).toBe(true);
 
+    // spec/app/browser/share.md, "Story: Share the page"
+    const article = "https://news.example/on-device-agents";
+    await press("Menu");
+    await press("Copy link");
+    await expect.poll(() => world.settings.copied).toEqual([article]);
+    const surface = document.querySelector<HTMLElement>("[data-alpha-browser-page]");
+    if (surface === null) throw new Error("No native Browser page position");
+    Object.defineProperty(surface, "getBoundingClientRect", { value: () => new DOMRect(0, 104, 390, 650) });
+    await press("Menu");
+    await press("Share");
+    await expect.poll(() => world.browser.shared.map(({ url }) => url)).toEqual([article]);
+    await until(alpha, runtime, Tabs, (s) => s.layer === "Uncovered");
+
     // spec/app/browser/address.md, "Typing searches the page, and clearing the text clears the search"; spec/app/browser/address.md, "Only the answer to the latest search counts"
     await press("Menu");
     await press("Find in page");
@@ -131,6 +144,13 @@ describe("The Browser on a phone", () => {
     await go("on device agents");
     await until(alpha, page, Page, (p) => p.phase === "Shown" && p.behind === 1);
     expect([...world.browser.tabs.values()].map((one) => one.history.at(-1))).toEqual(["https://www.google.com/search?q=on%20device%20agents"]);
+
+    // spec/app/browser/share.md, "Choosing where to send the page sends it once, if it is still the page the panel opened on, and closes the panel"
+    await press("Menu");
+    world.browser.redirectOnPresent = "https://enclave.example/keys-in-hardware";
+    await press("Share");
+    await until(alpha, page, Page, () => world.browser.redirectOnPresent === undefined);
+    expect(world.browser.shared.map(({ url }) => url)).toEqual([article]);
   });
 
   it("Open, pick and close tabs (spec/app/browser/index.md, \"Story: Open, pick and close tabs\"; spec/app/browser/index.md, \"Story: Clear all browsing data\")", async () => {

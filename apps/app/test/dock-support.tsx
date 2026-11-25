@@ -23,7 +23,7 @@ export async function closeAllDocks() {
   localStorage.clear();
 }
 
-export async function mountDock({ view = "Browser", withToast = false, flush }: { view?: "Browser" | "Calendar" | "Home" | "Settings"; withToast?: boolean; flush?: (work: () => Promise<void> | void) => Promise<void> } = {}) {
+export async function mountDock({ view = "Browser", withToast = false, voiceUnavailable = false, flush }: { view?: "Browser" | "Calendar" | "Home" | "Settings"; withToast?: boolean; voiceUnavailable?: boolean; flush?: (work: () => Promise<void> | void) => Promise<void> } = {}) {
   const run = flush ?? (async (work: () => Promise<void> | void) => { await work(); });
   const client = Layer.succeed(
     HttpClient.HttpClient,
@@ -51,7 +51,7 @@ export async function mountDock({ view = "Browser", withToast = false, flush }: 
       <div className="relative flex min-h-dvh w-full flex-col bg-background text-foreground">
         <AppHeader title={view} />
         {withToast ? <Toast>Saved</Toast> : <div className="flex-1 p-4 text-sm text-muted-foreground">Web page content</div>}
-        <Assistant runtime={runtime} />
+        <Assistant runtime={runtime} speech={{ showUnavailableTalk: voiceUnavailable }} />
       </div>,
     );
     await runtime.runPromise(Effect.void);

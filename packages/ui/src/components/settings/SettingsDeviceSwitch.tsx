@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { CalendarCog, Hash, MailCheck, MapPin, PanelTop, Send } from "lucide-react";
 import { SettingsRecoverRow } from "./SettingsRecoverRow.tsx";
 import { SettingsSwitchRow } from "./SettingsSwitchRow.tsx";
 import type { DeviceRead } from "./vocabulary.ts";
@@ -30,15 +29,16 @@ const tags = (words: string[]) => (
   </span>
 );
 
-const settings: Record<SettingsDeviceSwitchProps["setting"], { title: string; detail: ReactNode; icon?: ReactNode }> = {
+/** Each switch as Alpha's earlier build drew its toggles: a title and what it covers, with no icon. */
+const settings: Record<SettingsDeviceSwitchProps["setting"], { title: string; detail: ReactNode }> = {
   "ask-first": { title: "Ask before Alpha acts", detail: tags(["Web", "Camera", "Photos"]) },
   images: { title: "Load images", detail: undefined },
-  "agent-location": { title: "Location", detail: "With each message to Alpha", icon: <MapPin /> },
-  "browser-page": { title: "Browser page", detail: "The page open, with each message", icon: <PanelTop /> },
-  "gmail-changes": { title: "Gmail changes", detail: "Drafts, labels and sending", icon: <MailCheck /> },
-  "calendar-edits": { title: "Calendar changes", detail: "Events Alpha adds or edits", icon: <CalendarCog /> },
-  "telegram-context": { title: "Telegram screen", detail: "Open chat and recent messages", icon: <Send /> },
-  "slack-context": { title: "Slack screen", detail: "Open channel or thread, with each message", icon: <Hash /> },
+  "agent-location": { title: "Location for Alpha", detail: "With each message to Alpha" },
+  "browser-page": { title: "Browser page for Alpha", detail: "The page open, with each message" },
+  "gmail-changes": { title: "Gmail changes", detail: "Drafts, labels and sending" },
+  "calendar-edits": { title: "Calendar changes", detail: "Events Alpha adds or edits" },
+  "telegram-context": { title: "Telegram screen", detail: "Open chat and recent messages" },
+  "slack-context": { title: "Slack screen", detail: "Open channel or thread, with each message" },
 };
 
 /**

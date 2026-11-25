@@ -1,7 +1,7 @@
 // spec/app/workflows/builder.md, "Story: Write a workflow step by step"; spec/app/workflows/builder.md, "Story: Save a workflow on the agent once"; spec/app/workflows/generate.md, "Story: Have the agent draft a workflow"
 import { Effect } from "effect";
 import { Alert, Button, ConfirmDialog, Input, ListRow, Select, SelectContent, SelectItem, SelectTrigger, Sheet, SheetContent, Spinner, Textarea } from "@repo/ui";
-import { ChevronRight, Plus, Sparkles, Workflow } from "lucide-react";
+import { ChevronRight, ListChecks, Plus, Sparkles } from "lucide-react";
 import { useState } from "react";
 import type { Machine as BuilderMachine } from "../../gen/app__workflows__builder.effect.vibe";
 import { useMachine as useBuilder } from "../../gen/app__workflows__builder.react.ts";
@@ -89,7 +89,7 @@ export function Authoring({ runtime, owner }: AuthoringProps) {
   const tell = (event: Event) => { if (builder.can(event)) void builder.send(event); };
   if (!state.open) return (
     <ul className="divide-y divide-border">
-      {builder.can(open) && <li><ListRow title="Workflow" leading={<Workflow />} trailing={<ChevronRight aria-hidden />} onClick={() => tell(open)} /></li>}
+      {builder.can(open) && <li><ListRow title="Workflow" leading={<ListChecks />} trailing={<ChevronRight aria-hidden />} onClick={() => tell(open)} /></li>}
     </ul>
   );
   const editable = unlocked(state);

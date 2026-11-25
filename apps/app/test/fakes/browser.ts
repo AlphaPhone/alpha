@@ -1,5 +1,5 @@
 // spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/address.md, "Story: Watch a page load"
-import type { BrowserBookmarkList, BrowserSavedState, BrowserTabHostPlugin, BrowserTabState } from "@elizaos/os-bridges";
+import type { BrowserBookmarkList, BrowserPageGuard, BrowserSavedState, BrowserTabHostPlugin, BrowserTabState } from "@elizaos/os-bridges";
 import { type Faked, plugin, rejection } from "./phone.ts";
 
 interface TabEvents {
@@ -34,6 +34,9 @@ export interface BrowserScene {
   shown: { id: string; x: number; y: number; width: number; height: number } | undefined;
   /** Every call the page made, by method. */
   readonly calls: string[];
+  readonly shared: BrowserPageGuard[];
+  /** Simulate a page-initiated redirect when Android next places a tab. */
+  redirectOnPresent?: string;
   showInFiles: (() => void) | undefined;
 }
 
@@ -135,6 +138,7 @@ export function browserScene(): BrowserScene {
     tabs: new Map(),
     shown: undefined,
     calls: [],
+    shared: [],
     showInFiles: undefined,
   };
 }
@@ -233,6 +237,12 @@ export function alphaBrowser(world: BrowserScene): Faked {
       present: (options) => {
         world.calls.push("present");
         world.shown = options.id === null ? undefined : { id: options.id, x: options.x, y: options.y, width: options.width, height: options.height };
+        const tab = options.id === null ? undefined : world.tabs.get(options.id);
+        if (tab && world.redirectOnPresent !== undefined) {
+          const address = world.redirectOnPresent;
+          world.redirectOnPresent = undefined;
+          go(tab, address);
+        }
         draw();
         return Promise.resolve();
       },
@@ -293,7 +303,14 @@ export function alphaBrowser(world: BrowserScene): Faked {
       reviewQuestion: () => Promise.reject(rejection("Reading unavailable")),
       reviewReading: () => Promise.reject(rejection("Reading unavailable")),
       cancelReading: () => Promise.resolve(),
-      share: (options) => Promise.resolve(stateOf(held(options))),
+      share: (options) => {
+        const tab = held(options);
+        if (world.shown?.id !== tab.id || !tab.committed || tab.loading || options.navigation !== String(tab.navigation) || options.url !== tab.history[tab.at]) {
+          return Promise.reject(rejection("Current page changed"));
+        }
+        world.shared.push(options);
+        return Promise.resolve(stateOf(tab));
+      },
       openExternalBrowser: () => Promise.resolve(),
       downloads: ({ session: requested }) => {
         world.calls.push("downloads");

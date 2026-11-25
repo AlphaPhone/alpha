@@ -1,5 +1,5 @@
 // spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Organise my notes"; spec/app/notes/editor.md, "Story: Write a note"; spec/app/notes/trash.md, "Story: Delete a note and get it back"
-import { Alert, AppHeader, Button, Chip, Dialog, DialogContent, DialogDescription, DialogTitle, Input, LinkNoteView, Menu, MenuContent, MenuItem, MenuTrigger, NoteEditor as NoteForm, NoteRow, NotesList as NoteRows, Spinner, VoiceNoteView } from "@repo/ui";
+import { Alert, AppHeader, Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input, LinkNoteView, Menu, MenuContent, MenuItem, MenuTrigger, NoteEditor as NoteForm, NoteRow, NotesList as NoteRows, Spinner, VoiceNoteView } from "@repo/ui";
 import { Ellipsis, FileDown, Folder, Mail, MessageSquare, Mic, Plus, Trash2 } from "lucide-react";
 import { useState, useSyncExternalStore, type FormEvent } from "react";
 import * as Notes from "../../gen/app__notes.ts";
@@ -323,14 +323,18 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
   return (
     <section aria-label="Notes" data-alpha-subview="notes-list" className="flex min-h-0 flex-1 flex-col">
       <AppHeader title="Notes" leading={<AppBack alpha={alpha} />}>
-        {available && hasMic && !Editor.waiting(writing) && <Button size="icon" variant="ghost" aria-label="Record voice note" onClick={() => void runtime.runPromise(record)}><Mic /></Button>}
-        {editor.can(newNote, "Owner") && <Button size="icon" variant="ghost" aria-label="New note" onClick={() => void runtime.runPromise(writer.newNote("Text", available, state.filter, false))}><Plus /></Button>}
+        {available && hasMic && !Editor.waiting(writing) && <Button size="icon" variant="ghost" aria-label="Record voice note" onClick={() => void runtime.runPromise(record)}><Mic className="size-5" /></Button>}
+        {editor.can(newNote, "Owner") && <Button size="icon" variant="ghost" aria-label="New note" onClick={() => void runtime.runPromise(writer.newNote("Text", available, state.filter, false))}><Plus className="size-5" /></Button>}
         {bin.can(openTrash, "Owner") && <Menu>
           <MenuTrigger asChild><Button size="icon" variant="ghost" aria-label="Notes options"><Ellipsis /></Button></MenuTrigger>
           <MenuContent align="end">
             <MenuItem onSelect={() => void bin.send(openTrash, "Owner")}><Trash2 /> Recently deleted</MenuItem>
             {previous.can(showPrevious, "Owner") && <MenuItem onSelect={() => void previous.send(showPrevious, "Owner")}><Folder /> On this phone</MenuItem>}
-            {available && <MenuItem onSelect={() => { setForm({ op: "AddFolder" }); setFolderName(""); }}><Folder /> New folder</MenuItem>}
+            {state.folders.map((item) => {
+              const filter = { type: "filterBy", folder: item.id } as const;
+              return can(filter) && <MenuItem key={item.id} onSelect={() => listEvent(filter)}><Folder /> {item.name}</MenuItem>;
+            })}
+            {available && <MenuItem onSelect={() => { setForm({ op: "AddFolder" }); setFolderName(""); }}><Plus /> New folder</MenuItem>}
             {folder && <MenuItem onSelect={() => { setForm({ op: "RenameFolder", folder }); setFolderName(folder.name); }}>Rename folder</MenuItem>}
             {folder && can(folderChange("RemoveFolder", folder.id, "")) && <MenuItem onSelect={() => listEvent(folderChange("RemoveFolder", folder.id, ""))}>Delete folder</MenuItem>}
           </MenuContent>
@@ -338,9 +342,6 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
       </AppHeader>
       <div className="flex min-h-0 flex-col px-4">
         <TransferNotice runtime={runtime} />
-        {state.folders.length > 0 && <nav aria-label="Note folders" className="flex flex-wrap gap-2 pb-2">
-          {state.folders.filter((item) => item.id !== state.filter).map((item) => <Chip key={item.id} onClick={() => listEvent({ type: "filterBy", folder: item.id })}>{item.name}</Chip>)}
-        </nav>}
         {form && <form onSubmit={submit} className="flex flex-wrap items-center gap-2 pb-2">
           <Input aria-label="Folder name" className="min-w-32 flex-1" value={folderName} maxLength={40} onChange={(event) => setFolderName(event.currentTarget.value)} autoFocus />
           <Button type="submit" disabled={!can(folderChange(form.op, form.op === "RenameFolder" ? form.folder.id : 0, folderName.trim()))}>Save</Button>
@@ -367,7 +368,7 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
         onClearFilter={can({ type: "clearFilter" }) ? () => listEvent({ type: "clearFilter" }) : undefined}
         onRetry={() => void runtime.runPromise(enter())}
       />
-      {hasDocuments && transfer.can(importText, "Owner") && <Button className="mb-5 ml-4 self-start" variant="secondary" onClick={() => void transfer.send(importText, "Owner")}><FileDown /> Import</Button>}
+      {hasDocuments && transfer.can(importText, "Owner") && <Button className="mb-5 ml-4 h-12 self-start px-3.5 text-sm font-normal" aria-label="Import text note" variant="secondary" onClick={() => void transfer.send(importText, "Owner")}><FileDown /> Import</Button>}
     </section>
   );
 }

@@ -1,11 +1,14 @@
 // spec/app/browser/library.md, "The library is read when it opens and again on request, never under a write"; spec/app/browser/library.md, "The latest read gives the bookmarks and history, says it could not read them, or finds the bookmark list damaged and offers once to replace it"; spec/app/browser/library.md, "Bookmarking the shown page adds it when it is an HTTPS page without a user name or password and fewer than a hundred are saved, and otherwise says why not"; spec/app/browser/library.md, "A write that lands changes the lists, and one that fails changes nothing and says so"
-import { bookmarkBrowserUrl, type BrowserBookmarkList, type BrowserPageBinding } from "@elizaos/os-bridges"
-import { Machine as Tabs } from "../../gen/app__browser.effect.vibe"
+import { bookmarkBrowserUrl, type BrowserBookmarkList } from "@elizaos/os-bridges"
+import type { Machine as Tabs } from "../../gen/app__browser.effect.vibe"
 import * as Library from "../../gen/app__browser__library.effect.vibe"
-import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import type { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import type { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
 import { TabHost, hosted } from "../platform/browser.vibe"
+import { readWebBookmarks, writeWebBookmark } from "../platform/browserWeb.vibe"
+import type { Device } from "../platform/device.vibe"
 import { answer, contained, reacting } from "../runtime/reactor.vibe"
-import { Pages, idOf } from "./browser.vibe"
+import { currentPage, Pages, type PageBinding } from "./browser.vibe"
 
 export type Bookmark = { readonly url: string; readonly title?: string }
 type BookmarkWrite = { readonly ticket: number; readonly entry: Bookmark; readonly saved: boolean }
@@ -47,7 +50,8 @@ function entries(saved: BrowserBookmarkList): Bookmark[] {
 
 effect function load(ticket: number): Library.Event!!(TabHost | Pages | LibraryRows | Library.Machine) {
   return effect {
-    const saved = try hosted("bookmarks", (plugin, session) => plugin.bookmarks({ session }))
+    const host = try TabHost
+    const saved = host.web === undefined ? try hosted("bookmarks", (plugin, session) => plugin.bookmarks({ session })) : try readWebBookmarks()
     const bookmarks = entries(saved)
     const visits = try (try Pages).visits()
     const current = try (try Library.Machine).get()
@@ -76,11 +80,10 @@ export effect function setMark(entry: Bookmark, saved: boolean): boolean!!(Libra
 }
 
 /** Bind a menu bookmark to the page the owner saw, before asking the saved list to change. */
-export effect function markPage(binding: BrowserPageBinding, saved: boolean): boolean!!(TabHost | Tabs | Shell | LibraryRows | Library.Machine) {
-  const tabs = try (try Tabs).get()
-  const host = (try TabHost).session
-  if (tabs.layer !== "Menu" || !showing(try (try Shell).get(), "Browser") || !host.current(binding, idOf(tabs.selected))) return false
-  const title = host.info(binding.id)?.title
+export effect function markPage(binding: PageBinding, saved: boolean): boolean!!(TabHost | Tabs | Shell | Layers | Pages | Device | LibraryRows | Library.Machine) {
+  if (("privateTab" in binding && binding.privateTab) || !(try currentPage(binding, "Menu"))) return false
+  const host = try TabHost
+  const title = host.web === undefined ? host.session.info(binding.id)?.title : try sync(() => host.web?.info(binding.id)?.title)
   return try setMark(title && title !== binding.url ? { url: binding.url, title } : { url: binding.url }, saved)
 }
 
@@ -91,7 +94,10 @@ effect function bookmarkWritten(ticket: number): Library.Event!!(TabHost | Libra
   if (intent === undefined) return failed
   return effect {
     const { entry, saved } = intent
-    const result = try hosted("setBookmark", (plugin, session) => plugin.setBookmark({ session, ...entry, saved }))
+    const host = try TabHost
+    const result = host.web === undefined
+      ? try hosted("setBookmark", (plugin, session) => plugin.setBookmark({ session, ...entry, saved }))
+      : try writeWebBookmark({ ...entry, saved, limit: Library.maxMarks })
     const list = entries(result)
     if (list.some((one) => one.url === entry.url) !== saved) return failed
     const current = try (try Library.Machine).get()

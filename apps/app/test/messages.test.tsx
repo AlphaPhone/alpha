@@ -19,7 +19,7 @@ import { idOf, Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
 import home from "../src/home/index.tsx";
 import messages from "../src/messages/index.tsx";
-import { button, closeAll, drawn, hardware, only, open, press, underAct } from "./alpha.tsx";
+import { button, closeAll, drawn, hardware, later, only, open, press, underAct } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import { textReview } from "./fakes/text-review.ts";
 
@@ -138,6 +138,24 @@ describe("Messages on an Alpha image", () => {
     await press("Maya Chen");
     await ready(alpha.runtime, Messages, "Messages state", (s) => s.pane === "Conversation" && s.page.status === "Loaded" && s.shown.rows === 1);
     await ready(alpha.runtime, Messages, "Messages state", () => world.telephony.texts[0].read);
+
+    // spec/app/messages/index.md, "Story: Read a conversation": a drag leaves actions closed, a stationary hold opens them and its release leaves them open
+    const message = document.querySelector('[role="log"] [data-alpha-message-id]');
+    if (!(message instanceof HTMLElement)) throw new Error("No message bubble");
+    const pointer = (kind: string, x: number) => message.dispatchEvent(new PointerEvent(kind, { bubbles: true, pointerId: 1, pointerType: "mouse", isPrimary: true, clientX: x }));
+    const click = () => message.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+    const menu = () => document.querySelector('[role="menu"][aria-label="Message actions"]');
+    await drawn(() => { pointer("pointerdown", 30); pointer("pointermove", 46); });
+    await later(alpha, 510);
+    await drawn(() => { pointer("pointerup", 46); click(); });
+    expect(menu()).toBeNull();
+    await drawn(() => pointer("pointerdown", 30));
+    await later(alpha, 510);
+    expect(menu()).not.toBeNull();
+    await drawn(() => { pointer("pointerup", 30); click(); });
+    expect(menu()).not.toBeNull();
+    await drawn(() => { pointer("pointerdown", 30); pointer("pointerup", 30); click(); });
+    expect(menu()).toBeNull();
 
     // spec/app/messages/composer.md, "Typing changes the draft and makes it the owner's; emptying it leaves no draft"
     await ready(alpha.runtime, Composer, "Composer state", (s) => s.thread > 0 && s.recipients === 1);

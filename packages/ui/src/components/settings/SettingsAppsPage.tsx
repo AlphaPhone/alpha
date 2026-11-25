@@ -5,7 +5,7 @@ import { SettingsNavRow } from "./SettingsNavRow.tsx";
 import { SettingsPage } from "./SettingsPage.tsx";
 import { placed, type SettingsPageName, type SettingsPlaceProps } from "./vocabulary.ts";
 
-type AppView = "browser" | "files" | "messages";
+type AppView = "browser" | "files" | "messages" | "photos";
 type Destination = { page: SettingsPageName } | { view: AppView };
 type AppRow = { title: string; icon: ReactNode; slot: number } & Destination;
 
@@ -42,6 +42,7 @@ const apps: AppRow[] = [
  */
 export function SettingsAppsPage({ onBack, onOpen, onOpenApp, onPhone = true, image = false, place, onPlace }: SettingsAppsPageProps) {
   const open = (app: AppRow) => {
+    if (!onPhone && "page" in app && app.page === "photos") return onOpenApp && (() => onOpenApp("photos"));
     if ("page" in app) return onOpen && (() => onOpen(app.page));
     return onOpenApp && (() => onOpenApp(app.view));
   };

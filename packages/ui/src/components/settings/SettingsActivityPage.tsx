@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { MessagesSquare, RotateCw, Wrench } from "lucide-react";
+import { RotateCw, Wrench } from "lucide-react";
 import { Banner } from "../Banner.tsx";
 import { Button } from "../Button.tsx";
 import { EmptyState } from "../EmptyState.tsx";
@@ -32,8 +32,10 @@ export type SettingsActivityPageProps = {
   failed?: boolean;
   /** The last decision was sent or attempted and the agent could not confirm it. */
   unconfirmed?: boolean;
-  /** Conversation commands owned by Ask Alpha. */
+  /** Recovery status and its review dialog. */
   children?: ReactNode;
+  /** Conversation commands owned by Ask Alpha. */
+  conversations?: ReactNode;
   /** This is a development build, which links the agent's restart details. */
   development?: boolean;
   /** Goes back to About. */
@@ -46,7 +48,7 @@ export type SettingsActivityPageProps = {
   onDecline?: (proposal: string) => void;
   /** Says whether an action whose outcome the agent could not see happened. */
   onReconcile?: (proposal: string, happened: boolean) => void;
-  /** Hands over to Ask Alpha for the conversations, or to the account area for the agent's restart details. */
+  /** Hands over to the account area for the agent's restart details. */
   onHandOver?: (neighbour: Neighbour) => void;
 };
 
@@ -55,7 +57,7 @@ export type SettingsActivityPageProps = {
  * phone, each declined or settled by the owner, and the conversations.
  * @model spec/app/settings/activity.md
  */
-export function SettingsActivityPage({ connection, actions, reading = false, failed = false, unconfirmed = false, children, development = false, onBack, onRecover, onRefresh, onDecline, onReconcile, onHandOver }: SettingsActivityPageProps) {
+export function SettingsActivityPage({ connection, actions, reading = false, failed = false, unconfirmed = false, children, conversations, development = false, onBack, onRecover, onRefresh, onDecline, onReconcile, onHandOver }: SettingsActivityPageProps) {
   const ready = connection === "ready";
   return (
     <SettingsPage
@@ -64,6 +66,8 @@ export function SettingsActivityPage({ connection, actions, reading = false, fai
       actions={ready ? <Button variant="ghost" size="icon" aria-label="Refresh actions" loading={reading} disabled={!onRefresh} onClick={onRefresh}><RotateCw /></Button> : undefined}
     >
       {ready ? null : <SettingsAgentRecovery connection={connection} onRecover={onRecover} />}
+      {children}
+      {conversations}
       {unconfirmed ? <Banner variant="warn">Alpha could not confirm the action decision</Banner> : null}
       {failed ? <Banner variant="warn">The actions could not be read{actions.length ? ". Showing the last read" : ""}</Banner> : null}
       {ready && actions.length ? (
@@ -84,11 +88,9 @@ export function SettingsActivityPage({ connection, actions, reading = false, fai
       {ready && !actions.length && reading ? <Skeleton className="h-16 rounded-lg" /> : null}
       {ready && !actions.length && !reading && !failed ? <EmptyState title="No phone actions" /> : null}
       {!ready && connection !== "unpackaged" ? <EmptyState title="Actions load when the agent is ready" /> : null}
-      {children}
-      <ListGroup>
-        <SettingsNavRow title="Conversations" icon={<MessagesSquare />} onOpen={onHandOver && (() => onHandOver("conversations"))} />
-        {development ? <SettingsNavRow title="Restart details" icon={<Wrench />} onOpen={onHandOver && (() => onHandOver("restart-details"))} /> : null}
-      </ListGroup>
+      {development && <ListGroup>
+        <SettingsNavRow title="Restart details" icon={<Wrench />} onOpen={onHandOver && (() => onHandOver("restart-details"))} />
+      </ListGroup>}
     </SettingsPage>
   );
 }

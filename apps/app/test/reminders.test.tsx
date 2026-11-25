@@ -4,9 +4,13 @@ import { HttpClient, HttpClientResponse } from "effect/http";
 import { Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import { afterEach, describe, expect, it } from "vitest";
+import { Machine as Home } from "../gen/app__home.effect.vibe";
 import * as RemindersMachine from "../gen/app__reminders.effect.vibe";
 import * as AlertsMachine from "../gen/app__reminders__alerts.effect.vibe";
+import { Machine as Editor } from "../gen/app__reminders__editor.effect.vibe";
+import { Machine as Listing } from "../gen/app__workflows__list.effect.vibe";
 import { at } from "../src/areas.ts";
+import home from "../src/home/index.tsx";
 import { agentAt } from "../src/platform/agent.vibe";
 import { cloudAt } from "../src/platform/cloud.vibe";
 import { pagePlatform } from "../src/platform/platform.vibe";
@@ -34,6 +38,7 @@ import {
   remindersStore,
   type RemindersSnapshot,
 } from "../src/reminders/store.ts";
+import workflows from "../src/workflows/index.tsx";
 import { button, closeAll, drawn, fill, later, only, openOver, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
@@ -60,6 +65,9 @@ function makeFakeAgentReminders(initialNowMs: number): { readonly recorder: Agen
 
       if (path === "/api/health") {
         return HttpClientResponse.fromWeb(request, new Response(JSON.stringify({ ready: true }), { status: 200, headers: { "content-type": "application/json" } }));
+      }
+      if (path === "/api/auth/me" && method === "GET") {
+        return HttpClientResponse.fromWeb(request, Response.json({ identity: { id: "local-agent", kind: "owner" }, access: { role: "OWNER", mode: "local" } }));
       }
       if (path === "/api/alpha/reminders" && method === "GET") {
         return HttpClientResponse.fromWeb(request, new Response(JSON.stringify(recorder.snapshot), { status: 200, headers: { "content-type": "application/json" } }));
@@ -150,7 +158,7 @@ function makeFakeAgentReminders(initialNowMs: number): { readonly recorder: Agen
 }
 
 const withReminders = [
-  ...only("home", "notice"),
+  ...only("home", "notice", "view:Workflows"),
   at("view:Reminders", () => Promise.resolve({ default: remindersArea })),
   at("overlay", () => Promise.resolve({ default: alertOverlayArea })),
 ];
@@ -192,9 +200,16 @@ describe("Reminders full journeys", () => {
     const { recorder, layer: agentHttp } = makeFakeAgentReminders(world.now);
     const platform = makePlatform(world.now, agentHttp);
     const opened = await openOver(platform, withReminders);
-    const runtime = remindersArea.runtime(opened.alpha);
-    await press("Reminders");
-    await until(opened.alpha, runtime, RemindersMachine.Machine, (s) => s.sync.status === "Loaded");
+    const { alpha } = opened;
+    const runtime = remindersArea.runtime(alpha);
+    await until(alpha, home.runtime(alpha), Home, (s) => s.tiles.load.status === "Loaded");
+    await press("Workflows");
+    await until(alpha, workflows.runtime(alpha), Listing, (s) => s.owner > 0);
+    await press("Add to Workflows");
+    await press(/^Phone reminder/);
+    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.sync.status === "Loaded");
+    await until(alpha, runtime, Editor, (s) => s.open);
+    await pressOnTop("Cancel");
     return { world, recorder, platform, ...opened, runtime };
   }
 
@@ -204,6 +219,13 @@ describe("Reminders full journeys", () => {
     expect(document.body.textContent).toContain("Today");
     expect(document.body.textContent).toContain("Scheduled");
     expect(document.body.textContent).toContain("Reminders");
+
+    // spec/app/reminders/index.md, "Back from an open list returns to the overview before leaving Reminders, and leaving the app resets the overview"
+    await press(/Today$/);
+    expect(button("All lists")).toBeDefined();
+    await press("Back");
+    expect(button("All lists")).toBeUndefined();
+    expect(document.querySelector('section[aria-label="Smart lists"]')).toBeTruthy();
 
     const today = formatCivilDate(civilDateAt(world.now));
     const work = await runtime.runPromise(createReminderList("Work", "green", "work"));
@@ -215,6 +237,11 @@ describe("Reminders full journeys", () => {
 
     await runtime.runPromise(updateReminderList(work!.id, "Deep Work", "violet", "bolt"));
     await until(alpha, runtime, RemindersMachine.Machine, (s) => s.write.outcome === "Confirmed");
+
+    await press(/^Deep Work/);
+    expect(button("All lists")).toBeDefined();
+    await drawn(() => alpha.back());
+    expect(document.querySelector('section[aria-label="Smart lists"]')).toBeTruthy();
 
     const dueItem = await runtime.runPromise(createReminderItem({
       listId: work!.id,

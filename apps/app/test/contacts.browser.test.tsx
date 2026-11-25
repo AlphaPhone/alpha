@@ -3,11 +3,31 @@ import { page } from "vitest/browser";
 import { Machine as Agent } from "../gen/app__contacts__agent.effect.vibe";
 import { Machine as Phone } from "../gen/app__phone.effect.vibe";
 import { propose, spokenSend } from "../src/contacts/requests.vibe";
-import { closeAll, open, until } from "./alpha.tsx";
+import { closeAll, only, open, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import "../src/main.css";
 
 afterEach(closeAll);
+
+it("Keeps a contact's actions above Ask Alpha (spec/app/contacts/index.md, \"Story: Look at one contact\"; spec/app/phone/comms.md, \"Story: Address the person or Alpha from one bar\")", async () => {
+  await page.viewport(390, 600);
+  const world = { ...scene(), phone: true, image: true };
+  await open(world, only("home", "assistant", "view:Contacts"));
+  await page.locator('[data-home-tile="view:Contacts"]').click();
+  await page.getByRole("button", { name: "Maya Chen", exact: true }).click();
+  await expect.element(page.getByRole("heading", { name: "Maya Chen", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Open Alpha", exact: true }).click();
+
+  await expect.poll(() => {
+    const sheet = document.querySelector('[data-alpha-detent="sheet"]')?.getBoundingClientRect();
+    const actions = document.querySelector('[role="group"][aria-label="Contact actions"]')?.getBoundingClientRect();
+    return Boolean(sheet && actions && actions.height > 0 && actions.top >= 0 && actions.bottom <= sheet.top);
+  }).toBe(true);
+  await expect.element(page.getByRole("button", { name: "Call +14155550100" })).toBeVisible();
+  await expect.element(page.getByRole("button", { name: "Message +14155550100" })).toBeVisible();
+  expect(world.telephony.placed).toEqual([]);
+  expect(world.telephony.sent).toEqual([]);
+});
 
 it("Approve a shown text by voice (spec/app/contacts/agent.md, \"Story: Approve what the agent asked\")", async () => {
   const world = { ...scene(), phone: true, image: true };

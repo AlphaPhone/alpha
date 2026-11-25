@@ -20,7 +20,11 @@ export function cloudRoute(id: string, from: CloudPlace["coordinate"], to: Cloud
   const at = (share: number) => ({ latitude: from.latitude + (to.latitude - from.latitude) * share, longitude: from.longitude + (to.longitude - from.longitude) * share });
   return {
     providerId: "test-open", id, from, to, mode: "drive", geometry: [from, to], distanceMeters: meters, durationSeconds: meters / 10,
-    steps: Array.from({ length: steps }, (_, index) => ({ instruction: index === 0 ? "Head north" : index === steps - 1 ? "Arrive" : "Turn left", coordinate: at(index / Math.max(1, steps - 1)), distanceMeters: meters / steps })),
+    steps: Array.from({ length: steps }, (_, index) => ({
+      instruction: index === 0 ? "Head north" : index === steps - 1 ? "Arrive" : "Turn left",
+      maneuver: index === 0 ? "depart" : index === steps - 1 ? "arrive" : "left",
+      coordinate: at(index / Math.max(1, steps - 1)), distanceMeters: meters / steps,
+    })),
     attribution, fetchedAt: 1, traffic: "none",
   };
 }

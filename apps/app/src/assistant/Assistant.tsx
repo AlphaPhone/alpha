@@ -4,7 +4,7 @@ import {
   type AssistantAttachment, type AssistantComposerProps, type AssistantDraftNoticeProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
-import { type ReactNode, type RefObject, useCallback, useMemo, useRef, useSyncExternalStore } from "react";
+import { type ReactNode, type RefObject, useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { Conversation as Talking, Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe";
 import { askable, inFlight, pending } from "../../gen/app__assistant.ts";
 import { useMachine as useConversation } from "../../gen/app__assistant.react.ts";
@@ -202,16 +202,24 @@ interface DockHandleProps {
   compact: boolean;
   focusOnPointerOpen: boolean;
   field: RefObject<HTMLTextAreaElement | null>;
+  onDragHeight: (height: number | undefined) => void;
 }
 
-function DockHandle({ dock, detent, compact, focusOnPointerOpen, field }: DockHandleProps) {
+function DockHandle({ dock, detent, compact, focusOnPointerOpen, field, onDragHeight }: DockHandleProps) {
   const open = dockOpen(detent);
   return (
     <AssistantGrabber
       variant={open ? "handle" : "mark"}
-      onPress={() => { void dock.send({ type: "press", detent, now: untimed }); }}
-      onDrag={() => { void dock.send({ type: "drag" }); }}
+      onPress={() => {
+        onDragHeight(undefined);
+        void dock.send({ type: "press", detent, now: untimed });
+      }}
+      onDrag={({ y }) => {
+        if (dock.state?.gesture !== "Dragging") void dock.send({ type: "drag" });
+        if (open) onDragHeight(Math.max(barHeight, Math.round(window.innerHeight - y)));
+      }}
       onRelease={({ direction, flick, y }) => {
+        onDragHeight(undefined);
         const height = Math.max(0, Math.round(window.innerHeight - y));
         void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: barHeight, full: window.innerHeight, now: untimed });
       }}
@@ -219,7 +227,10 @@ function DockHandle({ dock, detent, compact, focusOnPointerOpen, field }: DockHa
         void dock.send({ type: "lift", now: untimed });
         if (!open && focusOnPointerOpen) field.current?.focus();
       }}
-      onCancel={() => { void dock.send({ type: "shift", now: untimed }); }}
+      onCancel={() => {
+        onDragHeight(undefined);
+        void dock.send({ type: "shift", now: untimed });
+      }}
       onTap={({ keyboard }) => {
         void dock.send({ type: "click", now: untimed });
         if (!open && keyboard && !compact) field.current?.focus();
@@ -247,6 +258,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const reviewed = useSyncExternalStore(mailStore.subscribe, mailStore.snapshot);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const focusOnRevealRef = useRef(false);
+  const [dragHeight, setDragHeight] = useState<number>();
   const currentView = shell.state?.trail.at(-1);
   const onComms = isCommsView(currentView);
   const assistantDetent = shell.state?.assistant ?? "Bar";
@@ -345,6 +357,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const open = dockOpen(assistantDetent);
   const full = assistantDetent === "Full";
   const keptHeight = assistantDetent === "Sheet" && dock.state && dock.state.kept > 0 ? dock.state.kept : undefined;
+  const tracking = assistantDetent === "Sheet" && dock.state?.gesture === "Dragging" && dragHeight !== undefined;
+  const sheetHeight = tracking ? dragHeight : keptHeight;
   const openWithFocus = (focusField: boolean) => {
     for (const ask of dockFocused(assistantDetent)) {
       if (ask.tag === "Raise" && shell.can({ type: "raise", detent: ask.detent })) void shell.send({ type: "raise", detent: ask.detent });
@@ -360,7 +374,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
     });
   };
   const grabber = shell.state ? <DockHandle dock={dock} detent={assistantDetent} compact={compact}
-    focusOnPointerOpen={currentView !== undefined && !compact} field={composerRef} /> : undefined;
+    focusOnPointerOpen={currentView !== undefined && !compact} field={composerRef} onDragHeight={setDragHeight} /> : undefined;
 
   return (
     <>
@@ -368,10 +382,10 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       {onComms && full && <CommsTarget runtime={runtime} placement="strip" />}
       {(!onComms || open) && <AssistantConversation
         detent={assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
-        className={onComms ? "relative w-full motion-safe:transition-[height] motion-safe:duration-[420ms]" : open ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
+        className={onComms ? (tracking ? "relative w-full" : "relative w-full motion-safe:transition-[height] motion-safe:duration-[420ms]") : open ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
         style={onComms
-          ? { height: assistantDetent === "Full" ? "calc(100dvh - 52px)" : `clamp(38dvh, ${keptHeight === undefined ? "50dvh" : `${keptHeight}px`}, 60dvh)` }
-          : keptHeight ? { height: keptHeight } : undefined}
+          ? { height: assistantDetent === "Full" ? "calc(100dvh - 52px)" : tracking ? `min(${dragHeight}px, calc(100dvh - 52px))` : `clamp(38dvh, ${keptHeight === undefined ? "50dvh" : `${keptHeight}px`}, 60dvh)` }
+          : sheetHeight === undefined ? undefined : { height: sheetHeight }}
         header={{
           title: seen.titles.get(shown.chosen) ?? "Ask Alpha",
           context: { view, selected: talking.context.selected, sensitive: talking.context.sensitive },

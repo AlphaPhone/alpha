@@ -1,6 +1,6 @@
 // spec/app/browser/address.md, "A browser frame can be shown for the latest request, with no secure mark"; spec/app/browser/index.md, "Story: Open, pick and close tabs"
 // spec/app/browser/index.md, "A launch reads the saved session, and may ask again after a failed read"; spec/app/browser/index.md, "A stale session is written once it has been read, one write at a time, and never while browsing data is being cleared"
-import type { BrowserSavedState } from "@elizaos/os-bridges"
+import type { BrowserBookmarkList, BrowserSavedState } from "@elizaos/os-bridges"
 
 module frames {
   import { isWebAddress } from "@elizaos/os-bridges"
@@ -156,12 +156,16 @@ import { WebFrames, emptyFrames, type FramePlacement, type FrameRequest, type We
 export { WebFrames, emptyFrames, type FramePlacement, type FrameRequest, type WebMove }
 
 module documents {
-  import { normalizeBrowsing, type BrowserSavedState } from "@elizaos/os-bridges"
+  import { bookmarkBrowserUrl, normalizeBrowsing, type BrowserBookmarkList, type BrowserSavedState } from "@elizaos/os-bridges"
 
   const database = "alpha.browser.documents.v1"
   const records = "documents"
   const key = "alpha.browser.session.v1"
+  const bookmarkKey = "alpha.browser.bookmarks.v1"
+  const titleKey = "alpha.browser.bookmark-titles.v1"
   type Envelope = { readonly version: 1; readonly legacy: string | null; readonly value: string | null }
+  type Bookmark = { readonly url: string; readonly title?: string }
+  type BookmarkChange = Bookmark & { readonly saved: boolean; readonly limit: number }
   const blank: Envelope = { version: 1, legacy: null, value: null }
 
   function readEnvelope(record: unknown): Envelope {
@@ -196,20 +200,25 @@ module documents {
     })
   }
 
-  async function transaction<A>(mode: IDBTransactionMode, change: (store: IDBObjectStore, before: Envelope) => A): Promise<A> {
+  async function transaction<A>(mode: IDBTransactionMode, keys: readonly string[], change: (store: IDBObjectStore, before: ReadonlyMap<string, Envelope>) => A): Promise<A> {
     const opened = await connection()
     try {
       return await new Promise((resolve, reject) => {
         const work = opened.transaction(records, mode)
         const store = work.objectStore(records)
-        const read = store.get(key)
+        const before = new Map<string, Envelope>()
         let result: { value: A } | undefined
         let failed: unknown
-        read.onsuccess = () => {
-          try { result = { value: change(store, readEnvelope(read.result)) } }
-          catch (cause) {
-            failed = cause
-            work.abort()
+        for (const key of keys) {
+          const read = store.get(key)
+          read.onsuccess = () => {
+            try {
+              before.set(key, readEnvelope(read.result))
+              if (before.size === keys.length) result = { value: change(store, before) }
+            } catch (cause) {
+              failed = cause
+              work.abort()
+            }
           }
         }
         work.onabort = () => reject(failed ?? work.error)
@@ -218,20 +227,77 @@ module documents {
     } finally { opened.close() }
   }
 
+  function valueOf(before: ReadonlyMap<string, Envelope>, key: string): unknown {
+    const raw = before.get(key)?.value
+    try { return raw == null ? null : JSON.parse(raw) }
+    catch { return undefined }
+  }
+
+  function keep(store: IDBObjectStore, before: ReadonlyMap<string, Envelope>, key: string, value: unknown): void {
+    const envelope: Envelope = { ...(before.get(key) ?? blank), value: JSON.stringify(value) }
+    store.put({ revision: crypto.randomUUID(), raw: JSON.stringify(envelope) }, key)
+  }
+
+  function bookmarkRows(value: unknown): Bookmark[] {
+    return Array.isArray(value) ? value.flatMap((row: unknown) => {
+      if (bookmarkBrowserUrl(row)) return [{ url: row }]
+      if (typeof row !== "object" || row === null || !("url" in row) || !bookmarkBrowserUrl(row.url)) return []
+      return [{ url: row.url, title: "title" in row && typeof row.title === "string" ? row.title : undefined }]
+    }) : []
+  }
+
+  function bookList(before: ReadonlyMap<string, Envelope>): BrowserBookmarkList {
+    const rows = valueOf(before, bookmarkKey)
+    if (rows !== null && !Array.isArray(rows)) throw new Error("Saved bookmarks need recovery")
+    const items = bookmarkRows(rows)
+    const record = valueOf(before, titleKey)
+    const addresses = typeof record === "object" && record !== null && "addresses" in record ? record.addresses : undefined
+    const titles = typeof record === "object" && record !== null && "titles" in record ? record.titles : undefined
+    const names: readonly unknown[] = Array.isArray(addresses) && Array.isArray(titles) && addresses.length === items.length
+      && titles.length === items.length && items.every((item, index) => item.url === addresses[index]) ? titles : []
+    const entries = items.map((item, index) => typeof names[index] === "string" ? { ...item, title: names[index] } : item)
+    return { urls: entries.map(({ url }) => url), entries }
+  }
+
+  export function readBookmarks(): Promise<BrowserBookmarkList> {
+    return transaction("readonly", [bookmarkKey, titleKey], (_store, before) => bookList(before))
+  }
+
+  export function writeBookmark(change: BookmarkChange): Promise<BrowserBookmarkList> {
+    return transaction("readwrite", [bookmarkKey, titleKey], (store, before) => {
+      const previous = bookList(before)
+      if (!bookmarkBrowserUrl(change.url) || previous.urls.includes(change.url) === change.saved) return previous
+      const entries = (previous.entries ?? []).filter(({ url }) => url !== change.url)
+      if (change.saved) {
+        if (entries.length >= change.limit) throw new Error("The bookmark list is full")
+        entries.unshift({ url: change.url, title: change.title })
+      }
+      const urls = entries.map(({ url }) => url)
+      keep(store, before, bookmarkKey, urls)
+      keep(store, before, titleKey, { addresses: urls, titles: entries.map(({ title }) => title ?? null) })
+      return { urls, entries }
+    })
+  }
+
   export function readSession(): Promise<BrowserSavedState> {
-    return transaction("readonly", (_store, before) => normalizeBrowsing(before.value === null ? {} : JSON.parse(before.value)))
+    return transaction("readonly", [key], (_store, before) => {
+      const value = valueOf(before, key)
+      if (value === undefined) throw new Error("Browser storage needs recovery")
+      return normalizeBrowsing(value)
+    })
   }
 
   export function writeSession(saved: unknown): Promise<void> {
-    return transaction("readwrite", (store, before) => {
-      const prior = normalizeBrowsing(before.value === null ? {} : JSON.parse(before.value))
+    return transaction("readwrite", [key], (store, before) => {
+      const value = valueOf(before, key)
+      if (value === undefined) throw new Error("Browser storage needs recovery")
+      const prior = normalizeBrowsing(value)
       const next = normalizeBrowsing(saved)
-      const envelope: Envelope = { ...before, value: JSON.stringify(normalizeBrowsing({ ...next, visitTimes: { ...prior.visitTimes, ...next.visitTimes } })) }
-      store.put({ revision: crypto.randomUUID(), raw: JSON.stringify(envelope) }, key)
+      keep(store, before, key, normalizeBrowsing({ ...next, visitTimes: { ...prior.visitTimes, ...next.visitTimes } }))
     })
   }
 }
-import { readSession, writeSession } from documents
+import { readBookmarks, readSession, writeBookmark, writeSession } from documents
 
 /** Web storage refused a Browser session operation. */
 export error WebBrowsingStoreFailed { operation: string; cause: unknown }
@@ -242,4 +308,12 @@ export effect function readWebBrowsing(): BrowserSavedState!WebBrowsingStoreFail
 
 export effect function saveWebBrowsing(saved: unknown): void!WebBrowsingStoreFailed {
   return try tryPromise({ try: () => writeSession(saved), catch: (cause) => new WebBrowsingStoreFailed({ operation: "write", cause }) })
+}
+
+export effect function readWebBookmarks(): BrowserBookmarkList!WebBrowsingStoreFailed {
+  return try tryPromise({ try: readBookmarks, catch: (cause) => new WebBrowsingStoreFailed({ operation: "read bookmarks", cause }) })
+}
+
+export effect function writeWebBookmark(bookmark: { readonly url: string; readonly title?: string; readonly saved: boolean; readonly limit: number }): BrowserBookmarkList!WebBrowsingStoreFailed {
+  return try tryPromise({ try: () => writeBookmark(bookmark), catch: (cause) => new WebBrowsingStoreFailed({ operation: "write bookmark", cause }) })
 }

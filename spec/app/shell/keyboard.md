@@ -204,8 +204,9 @@ pure def sometimesTheAgendaAtLargeText(c: Canvas): bool = c.agenda and c.mounted
 
 ### Above 150% text, larger than Alpha's own largest size, an app's header gives its title a row of its own under the way back and the screen's actions
 
-At 150% the title still fits beside them, as it did on Alpha's earlier
-build; above it a one-word title would be split.
+At 150% the title still fits beside them. At larger sizes the title wraps
+on its own row, with extra inset off the launcher. Browser's address bar
+keeps its own row.
 
 ```quint
 pure def titleRow(c: Canvas): bool = c.textScale > 150

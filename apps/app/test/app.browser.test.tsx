@@ -34,7 +34,7 @@ it("Move between Home and the apps, and find the same place after the page is op
   expect([await single(), await single()]).toEqual([true, false]);
 });
 
-function savedBrowserTabs(records: readonly { id: string; url: string; title: string }[]): Promise<void> {
+function savedBrowserTabs(records: readonly { id: string; url: string; title: string }[], bookmarks: readonly { url: string; title: string }[] = []): Promise<void> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open("alpha.browser.documents.v1", 1);
     request.onupgradeneeded = () => { request.result.createObjectStore("documents"); };
@@ -43,12 +43,14 @@ function savedBrowserTabs(records: readonly { id: string; url: string; title: st
       const db = request.result;
       const write = db.transaction("documents", "readwrite");
       const store = write.objectStore("documents");
-      const key = "alpha.browser.session.v1";
-      if (records.length === 0) store.delete(key);
-      else {
-        const value = JSON.stringify({ tabs: records, cur: records.at(-1)?.id, history: records.map(({ url }) => url) });
-        store.put({ revision: "develop-session", raw: JSON.stringify({ version: 1, legacy: null, value }) }, key);
-      }
+      const seed = (key: string, stored: object | undefined) => {
+        if (stored === undefined) store.delete(key);
+        else store.put({ revision: "develop-session", raw: JSON.stringify({ version: 1, legacy: null, value: JSON.stringify(stored) }) }, key);
+      };
+      seed("alpha.browser.session.v1", records.length === 0 ? undefined : { tabs: records, cur: records.at(-1)?.id, history: records.map(({ url }) => url) });
+      const addresses = bookmarks.map(({ url }) => url);
+      seed("alpha.browser.bookmarks.v1", bookmarks.length === 0 ? undefined : addresses);
+      seed("alpha.browser.bookmark-titles.v1", bookmarks.length === 0 ? undefined : { addresses, titles: bookmarks.map(({ title }) => title) });
       write.oncomplete = () => { db.close(); resolve(); };
       write.onabort = () => { db.close(); reject(new Error("Could not write the Browser fixture storage", { cause: write.error })); };
     };
@@ -91,6 +93,43 @@ it("Keeps a browser frame while leaving and reopening Browser (spec/app/browser/
     await page.getByRole("button", { name: /^Tabs\b/ }).click();
     await page.getByRole("button", { name: `Close ${fixture.href}`, exact: true }).click();
     await expect.poll(() => iframe.isConnected).toBe(false);
+  } finally {
+    await closeAll();
+    await savedBrowserTabs([]);
+  }
+});
+
+it("Reopens web history and keeps Develop's saved bookmark names (spec/app/browser/library.md, \"Story: Keep bookmarks\"; spec/app/browser/library.md, \"Story: Look back through history\")", async () => {
+  const fixture = new URL("/test/fakes/browser-page.html", location.origin);
+  const first = { id: "old-tab-a", title: "Saved first", url: new URL("?tab=first", fixture).href };
+  const second = { id: "old-tab-b", title: "Saved second", url: new URL("?tab=second", fixture).href };
+  const kept = { url: "https://kept.invalid/", title: "Keep this name" };
+  const removed = { url: "https://removed.invalid/", title: "Remove this bookmark" };
+  await savedBrowserTabs([first, second], [kept, removed]);
+  const openLibrary = async () => {
+    await page.getByRole("button", { name: "Menu", exact: true }).click();
+    await page.getByRole("button", { name: "Library, bookmarks and history" }).click();
+  };
+  try {
+    await open(scene(), only("home", "view:Browser", "assistant"));
+    await page.getByRole("button", { name: "Browser", exact: true }).click();
+    const link = page.getByRole("link", { name: "Open in browser" });
+    await expect.element(link).toHaveAttribute("href", second.url);
+    await openLibrary();
+    await expect.element(page.getByRole("button", { name: /^Keep this name/ })).toBeVisible();
+    const remove = page.getByRole("button", { name: "Remove bookmark Remove this bookmark" });
+    await remove.click();
+    await expect.element(remove).not.toBeInTheDocument();
+    await page.getByRole("tab", { name: "History", exact: true }).click();
+    await page.getByRole("button", { name: /tab=first/ }).click();
+    await expect.element(link).toHaveAttribute("href", first.url);
+    await closeAll();
+
+    await open(scene(), only("home", "view:Browser", "assistant"));
+    await page.getByRole("button", { name: "Browser", exact: true }).click();
+    await openLibrary();
+    await expect.element(page.getByRole("button", { name: /^Keep this name/ })).toBeVisible();
+    await expect.element(remove).not.toBeInTheDocument();
   } finally {
     await closeAll();
     await savedBrowserTabs([]);

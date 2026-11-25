@@ -15,8 +15,8 @@ import { PhoneCalendar, type Written } from "../platform/calendar.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import { type Row, shown } from "./shown.ts"
-import { civilDay, dayStart, feedParams, zone } from "./time.ts"
+import { type Row, androidWindowOf, shown } from "./shown.ts"
+import { civilDay, dayStart, feedParams, utcStart, zone } from "./time.ts"
 
 /** What the owner typed into the form, kept on the phone as it is typed: the spec counts the edits, this holds them. */
 export schema Fields {
@@ -27,11 +27,13 @@ export schema Fields {
   readonly end: number
   readonly allDay: boolean
   readonly people: string
-  readonly repeat?: "NoRepeat" | "Daily" | "Weekly" | "Monthly" | "Yearly"
+  readonly alert?: number
+  readonly video?: boolean
+  readonly repeat?: "NoRepeat" | "Daily" | "Weekdays" | "Weekly" | "Monthly" | "Yearly"
   readonly calendar?: "Agent" | "Phone"
 }
 
-const rules: Readonly<Record<"Daily" | "Weekly" | "Monthly" | "Yearly", string>> = { Daily: "FREQ=DAILY", Weekly: "FREQ=WEEKLY", Monthly: "FREQ=MONTHLY", Yearly: "FREQ=YEARLY" }
+const rules: Readonly<Record<NonNullable<Fields["repeat"]>, string>> = { NoRepeat: "", Daily: "FREQ=DAILY", Weekdays: "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR", Weekly: "FREQ=WEEKLY", Monthly: "FREQ=MONTHLY", Yearly: "FREQ=YEARLY" }
 
 // spec/app/calendar/writing.md, "A new event today starts at the next full hour; on another day it starts at ten"
 /** The form a new event opens with on `day`, at `now`: an hour from the next full hour today, from ten on another day. */
@@ -101,7 +103,7 @@ export effect function fromNote(fields: Fields, day: number) {
 /** An event of the phone as eliza's calendar review picks it. */
 function pickOf(row: Row): CalendarPick {
   return {
-    event: { id: row.key, calendarId: row.calendarId, title: row.title, body: row.notes, location: row.place, begin: row.begin, end: row.end, allDay: row.allDay, recurring: row.recurring },
+    event: { id: row.key, calendarId: row.calendarId, title: row.title, body: row.notes, location: row.place, ...androidWindowOf(row), allDay: row.allDay, recurring: row.recurring },
     calendar: { id: row.calendarId, writable: true, local: true },
   }
 }
@@ -151,14 +153,21 @@ function filed(body: unknown): boolean {
 /** A write the agent took as a request for the owner's approval: made only once the owner approves its card. */
 const waiting: Written & { readonly filed: true } = { confirmed: true, known: true, filed: true }
 
-/** The fields of the form as the agent's calendar takes them: an all-day event as whole UTC dates, a timed one as instants in the phone's zone. */
+// spec/app/calendar/editor.md, "An event ends after it starts"
+/** The provider's interval: whole UTC dates for all-day events and unchanged instants for other events. */
+function providerTimes(fields: Fields) {
+  const begin = fields.allDay ? utcStart(civilDay(fields.begin)) : fields.begin
+  const end = fields.allDay ? utcStart(civilDay(Math.max(fields.begin, fields.end - 1)) + 1) : fields.end
+  return { begin, end, timeZone: fields.allDay ? "UTC" : zone() }
+}
+
+/** The fields of the form as the agent's calendar takes them. */
 function agentFields(fields: Fields) {
-  const dated = (ms: number) => { const at = new Date(ms); return new Date(Date.UTC(at.getFullYear(), at.getMonth(), at.getDate())).toISOString() }
+  const { begin, end, timeZone } = providerTimes(fields)
   return {
     title: fields.title.trim(), location: fields.place,
-    startAt: fields.allDay ? dated(fields.begin) : new Date(fields.begin).toISOString(),
-    endAt: fields.allDay ? dated(fields.end) : new Date(fields.end).toISOString(),
-    isAllDay: fields.allDay, timeZone: zone(),
+    startAt: new Date(begin).toISOString(), endAt: new Date(end).toISOString(),
+    isAllDay: fields.allDay, timeZone,
   }
 }
 
@@ -222,7 +231,11 @@ effect function send(attempt: number, kind: "Create" | "Update" | "Remove" | "Re
     if (newEventTarget(view.connected, fields.calendar === "Phone") === "AgentOwnCalendar") return try createAgent(attempt, fields)
     const creation = try (try Attempts).key(attempt)
     try ignore((try KeyValueStore.KeyValueStore).set(creationKey, creation))
-    return try phone.create(fieldsOf(fields), creation, (try (try Editor.Machine).get()).separate)
+    const separate = (try (try Editor.Machine).get()).separate
+    const rrule = rules[fields.repeat ?? "NoRepeat"]
+    const event = fieldsOf(fields)
+    if (fields.allDay || rrule !== "") return try phone.create({ kind: "Options", event: { ...event, ...providerTimes(fields), allDay: fields.allDay, rrule } }, creation, separate)
+    return try phone.create({ kind: "Timed", event }, creation, separate)
   }
   const row = shown.find(id)
   if (row === undefined) return refused
@@ -233,7 +246,8 @@ effect function send(attempt: number, kind: "Create" | "Update" | "Remove" | "Re
   if (which === undefined) return refused
   const staged = try phone.stage(pickOf(row), which)
   if (staged.kind === "editor") {
-    try ignore(phone.open(row.key, row.begin, row.end))
+    const dates = androidWindowOf(row)
+    try ignore(phone.open(row.key, dates.begin, dates.end))
     return refused
   }
   if (staged.kind !== "ready") return refused
@@ -259,8 +273,9 @@ effect function receipts(ticket: number): Event!!(PhoneCalendar | KeyValueStore.
 effect function handOff() {
   const fields = try kept(0, try owner())
   const people = fields.people.split(",").map((person) => person.trim()).filter((person) => person !== "")
-  const rrule = fields.repeat === undefined || fields.repeat === "NoRepeat" ? {} : { rrule: rules[fields.repeat] }
-  try (try PhoneCalendar).handOff({ ...fieldsOf(fields), allDay: fields.allDay, timeZone: zone(), attendees: people, ...rrule })
+  const rrule = rules[fields.repeat ?? "NoRepeat"]
+  const alerts = fields.alert === undefined ? [] : [fields.alert]
+  try (try PhoneCalendar).handOff({ ...fieldsOf(fields), ...providerTimes(fields), allDay: fields.allDay, attendees: people, alerts, rrule })
 }
 
 // spec/app/calendar/index.md, "A read asked for during a write waits for it, and follows it once"; spec/app/calendar/deletions.md, "A refused send shows the event again; a sent deletion hides it until a read no longer has it unchanged"

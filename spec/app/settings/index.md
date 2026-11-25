@@ -25,7 +25,9 @@ other apps' notifications, their history and recovering notification data
 (the notices area); Google Calendar and its saved-event backups (the
 calendar area); the password vault (the passwords area); the conversations (Ask Alpha); and each phone action's custody (the
 approvals area). Browser, Files and Messages on the Apps page open the app itself
-through the [shell](../shell/). Messages is listed on an Alpha image.
+through the [shell](../shell/), as does Photos in the browser. Messages is listed
+on an Alpha image. Returning from an app opened this way shows Apps and the row
+that opened it.
 
 ## Story: Find a setting and come back
 

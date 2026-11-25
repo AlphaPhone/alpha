@@ -198,6 +198,47 @@ describe("on a phone", () => {
     await until(alpha, runtime, View, (s) => s.phoneRows === 2);
     expect([world.calendar.phoneEvents.map((event) => event.title), titles()]).toEqual([["Gym", "Coffee"], ["Coffee", "Standup", "Team lunch", "Gym"]]);
 
+    // spec/app/calendar/editor.md, "An event ends after it starts": an all-day event sends a positive, UTC-midnight-bounded span
+    await press("New event");
+    await until(alpha, runtime, Editor, (e) => e.shown && e.receipts.status === "Loaded");
+    await fill("Title", "Away for the day");
+    await press("All day");
+    await until(alpha, runtime, Editor, (e) => e.titled && e.allDay && e.kept);
+    await press("Save event");
+    await until(alpha, runtime, Editor, (e) => e.form === "NoForm" && e.write.outcome === "Confirmed");
+    expect(world.calendar.events.find(({ title }) => title === "Away for the day")).toMatchObject({
+      isAllDay: true, startAt: "2026-11-24T00:00:00.000Z", endAt: "2026-11-25T00:00:00.000Z",
+    });
+
+    // spec/app/calendar/writing.md, "Guests, alerts and video rooms go to Android Calendar; zones, all-day and repeats use the direct save for a new event": Android keeps those options on the local row
+    await press("New event");
+    await until(alpha, runtime, Editor, (e) => e.shown && e.receipts.status === "Loaded");
+    await fill("Title", "Office closure");
+    await press("This phone's calendar");
+    await press("All day");
+    await press("Weekdays");
+    await press("Save event");
+    await until(alpha, runtime, Editor, (e) => e.form === "NoForm" && e.write.outcome === "Confirmed");
+    await until(alpha, runtime, View, (state) => state.phoneRows === 3);
+    expect(world.calendar.phoneEvents.find(({ title }) => title === "Office closure")).toMatchObject({
+      allDay: true, recurring: true, begin: Date.UTC(2026, 10, 24), end: Date.UTC(2026, 10, 25),
+    });
+    expect(button("Office closure, All day")).toBeDefined();
+
+    // spec/app/calendar/editor.md, "Story: Hand Android Calendar what Alpha cannot write": the handoff carries the requested alert and writes nothing
+    await press("New event");
+    await fill("Title", "Briefing");
+    await press("This phone's calendar");
+    await press("Video link");
+    await until(alpha, runtime, Editor, (e) => e.extras);
+    await press("10 min");
+    await press("Video link");
+    await press("Open in Android Calendar");
+    await until(alpha, runtime, Editor, (e) => e.form === "NoForm");
+    await vi.waitFor(() => expect(world.calendar.handoffs).toMatchObject([{ title: "Briefing", alerts: [10] }]));
+    expect(world.calendar.phoneEvents.map((event) => event.title)).toEqual(["Gym", "Coffee", "Office closure"]);
+    expect(world.calendar.events.some((event) => event.title === "Briefing")).toBe(false);
+
     // spec/app/calendar/editor.md, "While a create is in doubt its form waits; checking the phone's receipts finds it or not": the phone made the event and could not say so.
     world.calendar.lost = true;
     await press("New event");

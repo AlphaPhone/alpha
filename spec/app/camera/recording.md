@@ -254,7 +254,8 @@ pure val fair_verified = "weak"
 ## Story: Read the clock
 
 > As the owner, I want the recording timer and the trim handles to read as
-> minutes, seconds and tenths, never as 0:60.0.
+> minutes, seconds and tenths, never as 0:60.0, and to see the time left
+> when the recording is close to its limit.
 
 ### A time in tenths of a second reads as minutes, seconds below sixty and tenths
 
@@ -272,4 +273,23 @@ pure def lawClockSecondsBelowSixty(time: int): bool =
 
 ```quint
 pure def timer(f: Film): Clock = clock(f.elapsed * 10)
+```
+
+### A running recording shows time left within a minute of its limit
+
+The time left is the shorter of the duration remaining and, once two
+seconds have elapsed and there are bytes to measure, the estimated
+duration before the size limit. Round the size estimate up to the second.
+
+```quint
+pure def recordingSecondsLeft(f: Film): int =
+  val byTime = maxSeconds - f.elapsed
+  val bySize = if (f.elapsed >= 2 and f.bytes > 0)
+    ((maxBytes - f.bytes) * f.elapsed + f.bytes - 1) / f.bytes
+    else byTime
+  if (bySize < byTime) bySize else byTime
+
+pure def showsTimeLeft(f: Film): bool = f.stage == Running and recordingSecondsLeft(f) <= 60
+
+pure def remaining(f: Film): Clock = clock(recordingSecondsLeft(f) * 10)
 ```

@@ -1,5 +1,5 @@
 // spec/app/workflows/list.md, "Story: Find a workflow"; spec/app/workflows/list.md, "Story: Keep the list to its owner"
-import type { RemoteWorkflow } from "@elizaos/plugin-workflow-client"
+import type { RemoteWorkflow, WorkflowClient } from "@elizaos/plugin-workflow-client"
 import type { Freshness } from "../../gen/app__home__cards.effect.vibe"
 import * as List from "../../gen/app__workflows__list.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__workflows__list.effect.vibe"
@@ -12,7 +12,7 @@ import { type ResidentOwner, launchOwnerOf, ownerAt, residentOwnerKey } from "..
 import { type Job, answer, applying, reacting, started, together } from "../runtime/reactor.vibe"
 import { WorkflowsApi, type Prompt, type ScheduledTask, readPrompts, readSchedules, workflowsApi } from "./api.vibe"
 
-type Routine = { readonly kind: "Routine"; readonly record: RemoteWorkflow }
+type Routine = { readonly kind: "Routine"; readonly record: RemoteWorkflow; readonly waiting: boolean }
 type PromptRow = { readonly kind: "Prompt"; readonly record: Prompt }
 type TaskRow = { readonly kind: "Reminder" | "Schedule"; readonly record: ScheduledTask }
 type RowContent = Routine | PromptRow | TaskRow
@@ -83,8 +83,8 @@ const rows = Layer.sync(Rows, () => {
   }
 })
 
-function routineRow(record: RemoteWorkflow): UnnumberedRow {
-  return { kind: "Routine", record, id: record.id, title: record.name, summary: record.description, on: record.active, removed: record.removed }
+function routineRow(record: RemoteWorkflow, waiting: boolean): UnnumberedRow {
+  return { kind: "Routine", record, id: record.id, title: record.name, summary: record.description, on: record.active, removed: record.removed, waiting }
 }
 
 function promptRow(record: Prompt): UnnumberedRow {
@@ -98,7 +98,16 @@ function taskRow(record: ScheduledTask): UnnumberedRow {
   return { kind, record, id: record.taskId, title, summary: kind === "Reminder" ? "" : record.promptInstructions, on, removed: false }
 }
 
-effect function read(ticket: number, owner: number): Event!!(WorkflowsApi | Agent | Rows | List.Machine) {
+// spec/app/workflows/list.md, "A row says it waits for the owner whenever one of its runs waits for an approval, whether or not notifications are on; a removed row says its history is kept"
+effect function routineRows(workflow: WorkflowClient, definitions: readonly RemoteWorkflow[], showingWorkflows: boolean): UnnumberedRow[]!! {
+  if (!showingWorkflows) return definitions.map((record) => routineRow(record, false))
+  return try Effect.forEach(definitions, effect (record) => {
+    const runs = workflow.executions(record.id) catch () => []
+    return routineRow(record, runs.some((run) => !run.finished && run.status === "waiting-approval" && run.reconciliation?.state !== "outcome-unknown"))
+  }, { concurrency: 4 })
+}
+
+effect function read(ticket: number, owner: number): Event!!(WorkflowsApi | Agent | Rows | List.Machine | Shell) {
   const failed: Event = { type: "listRead", ticket, ok: false, count: 0, complete: false }
   const { workflow } = try WorkflowsApi
   const kept = try Rows
@@ -111,6 +120,8 @@ effect function read(ticket: number, owner: number): Event!!(WorkflowsApi | Agen
     prompts: Effect.orElseSucceed(readPrompts(), () => undefined),
     schedules: Effect.orElseSucceed(readSchedules(), () => undefined),
   }, { concurrency: "unbounded" })
+  const inWorkflows = showing(try (try Shell).get(), "Workflows")
+  const routines = try routineRows(workflow, (received.workflows ?? []).filter((record) => !record.removed), inWorkflows)
   const after = ownerAt() catch () => ""
   if (after !== before) {
     const current = try expected.get()
@@ -127,8 +138,8 @@ effect function read(ticket: number, owner: number): Event!!(WorkflowsApi | Agen
   if (received.schedules === undefined) problems.push("Scheduled tasks")
   if (problems.length === 4) return failed
   const found = [
-    ...(received.workflows ?? []).filter((record) => !record.removed).map(routineRow),
-    ...(received.removed ?? []).map(routineRow),
+    ...routines,
+    ...(received.removed ?? []).map((record) => routineRow(record, false)),
     ...(received.prompts ?? []).map(promptRow),
     ...(received.schedules ?? []).map(taskRow),
   ]
@@ -136,7 +147,7 @@ effect function read(ticket: number, owner: number): Event!!(WorkflowsApi | Agen
   return { type: "listRead", ticket, ok: true, count: found.length, complete: problems.length === 0 }
 }
 
-function carry(fx: Out): Job<Event, Agent | WorkflowsApi | Rows | List.Machine, []> {
+function carry(fx: Out): Job<Event, Agent | WorkflowsApi | Rows | List.Machine | Shell, []> {
   return match (fx) {
     when { tag: "ReadList", let ticket, let owner }: answer("workflows list", read(ticket, owner), { type: "listRead", ticket, ok: false, count: 0, complete: false });
   }
@@ -154,7 +165,7 @@ export effect function refresh(): void!!(Agent | Rows | List.Machine) {
   try ignore(list.send({ type: "readList" }))
 }
 
-export effect function backList(): boolean!!List.Machine {
+export effect function backList(): boolean!!(Agent | Rows | List.Machine) {
   const machine = try List.Machine
   const current = try machine.get()
   if (List.canDismissFilters(current)) {
@@ -163,6 +174,7 @@ export effect function backList(): boolean!!List.Machine {
   }
   if (!List.canClosePlace(current)) return false
   try ignore(machine.send({ type: "closePlace" }))
+  if (current.place.tag === "ListingDetail") try refresh()
   return true
 }
 

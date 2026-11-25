@@ -5,6 +5,7 @@ import { useCallback, useRef, useState, useSyncExternalStore, type PointerEvent 
 import type { Camera as Visit, Event, Mode, Said } from "../../gen/app__camera.ts";
 import { chosenLens, ready, recording } from "../../gen/app__camera.ts";
 import { useMachine } from "../../gen/app__camera.react.ts";
+import { remaining, showsTimeLeft, timer, type Clock } from "../../gen/app__camera__recording.ts";
 import { allows } from "../../gen/kit__permission.ts";
 import { CameraPort, type CameraMedia, type LensFacts, type Point } from "../platform/camera.vibe";
 import type { Resident, Shown } from "../runtime/area.tsx";
@@ -23,8 +24,7 @@ type Fire = (event: Event) => void;
 const stops = [[5, ".5"], [10, "1"], [20, "2"], [50, "5"], [100, "10"]] as const;
 const notices = { Quiet: "", NotTaken: "Photo not taken", NothingRecorded: "Nothing recorded", NotSaved: "Save unconfirmed" } satisfies Record<Said, string>;
 
-const clock = (seconds: number) =>
-  `${Math.floor(seconds / 60).toString().padStart(2, "0")}:${(seconds % 60).toString().padStart(2, "0")}`;
+const clock = ({ minutes, seconds }: Clock) => `${minutes}:${seconds.toString().padStart(2, "0")}`;
 
 function Viewfinder({ state, native, zoom, focusAt, bind }: {
   state: Visit;
@@ -186,9 +186,10 @@ function LastCapture({ id, media, thumbnails, open }: {
   open: () => void;
 }) {
   const thumbnail = useSyncExternalStore(thumbnails.subscribe, () => thumbnails.snapshot(id));
+  const video = media.mime.startsWith("video/");
   return (
-    <button type="button" aria-label="Open last capture in Photos" onClick={open} className={cn("size-13 justify-self-start overflow-hidden rounded-drawer-icon border border-foreground/70 landscape:justify-self-center", focusRing)}>
-      {media.mime.startsWith("video/") && !thumbnail ? <Video aria-hidden className="m-auto size-5" /> : <img src={thumbnail ?? media.source} alt="" className="size-full object-cover" />}
+    <button type="button" aria-label={video ? "Open last video" : "Open last photo"} onClick={open} className={cn("size-13 justify-self-start overflow-hidden rounded-drawer-icon border border-foreground/70 landscape:justify-self-center", focusRing)}>
+      {video && !thumbnail ? <Video aria-hidden className="m-auto size-5" /> : <img src={thumbnail ?? media.source} alt="" className="size-full object-cover" />}
     </button>
   );
 }
@@ -237,7 +238,7 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
       <header className="z-10 flex min-h-13 items-center justify-end gap-1 overflow-x-auto bg-background px-2 landscape:col-span-2">
         {shell.can({ type: "goBack" }) && <Button variant="ghost" size="icon" aria-label="Back to apps" onClick={() => void alpha.back()}><ChevronLeft /></Button>}
         <span className="flex-1" />
-        {inProgress && <span role="timer" aria-label="Recording" className="flex items-center gap-2 rounded-full bg-background/75 px-3 py-1 text-sm font-semibold tabular-nums"><span aria-hidden className="size-2 rounded-full bg-record" />{clock(state.film.elapsed)}</span>}
+        {inProgress && <span role="timer" aria-label="Recording" className="flex items-center gap-2 rounded-full bg-background/75 px-3 py-1 text-sm font-semibold tabular-nums"><span aria-hidden className="size-2 rounded-full bg-record" />{clock(timer(state.film))}{showsTimeLeft(state.film) && ` · ${clock(remaining(state.film))} left`}</span>}
         {can({ type: "flip" }) && <Button variant="ghost" size="icon" aria-label="Switch camera" onClick={() => fire({ type: "flip" })}><SwitchCamera /></Button>}
         {can({ type: "cycleDelay" }) && (
           <Button variant="ghost" size="icon" className="relative" aria-label={state.delay === 0 ? "Timer off" : `Timer ${state.delay} seconds`} aria-pressed={state.delay !== 0} onClick={() => fire({ type: "cycleDelay" })}>

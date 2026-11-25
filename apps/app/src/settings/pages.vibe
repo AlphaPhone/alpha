@@ -43,8 +43,8 @@ function handed(fx: Pages.Effect): Job<Pages.Event, Shell | Layers | Device | Pa
 /** Where the owner is in Settings, from launch: a notice or Ask Alpha may open a section of it. */
 export const pages = together(
   reacting(Pages, { open: admitting, carry: handed }),
-  // spec/app/settings/index.md, "A notice or Ask Alpha may open a section directly, at its top, and Back from it goes to its parent": leaving Settings puts it back at its first page, so opening it from Home shows that page.
-  following(Shell, settingsShowing, Pages.Machine, (shown): Pages.Event | undefined => (shown ? undefined : { type: "openSection", page: "Top" })),
+  // spec/app/settings/index.md, "A notice or Ask Alpha may open a section directly, at its top, and Back from it goes to its parent"
+  following(Shell, (shell) => shell.trail.includes("Settings"), Pages.Machine, (visited): Pages.Event | undefined => (visited ? undefined : { type: "openSection", page: "Top" })),
 )
 
 // spec/app/settings/facts.md, "Only the newest asking's answer is taken, and it replaces everything shown"

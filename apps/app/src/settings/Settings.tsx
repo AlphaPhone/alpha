@@ -75,6 +75,7 @@ import type { Machine as AccessReviewMachine } from "../../gen/app__startup__acc
 import { AccessReview } from "../startup/SettingsAccess.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 import { AccountStatus } from "../account/index.tsx";
+import { versions } from "./build.ts";
 
 /** What every Settings page reads: where the owner is, the phone's facts, the hand-overs to Android, the preferences, the reset and the developer tools. */
 export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | FactsMachine | AccessReviewMachine | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ShellMachine | LayersMachine | Time, unknown>;
@@ -349,7 +350,7 @@ function Passwords({ runtime, common }: PageProps) {
 function Apps({ runtime, common }: PageProps) {
   const shell = useShell(runtime);
   const pages = usePages(runtime).state;
-  const appViews = { browser: "Browser", files: "Files", messages: "Messages" } as const;
+  const appViews = { browser: "Browser", files: "Files", messages: "Messages", photos: "Photos" } as const;
   return (
     <SettingsAppsPage
       {...common}
@@ -389,8 +390,9 @@ function About({ runtime, alpha, common }: PageProps) {
   const pages = usePages(runtime).state;
   const activity = useActivity(runtime).state;
   const agent = activity === undefined ? undefined : agentWords[ActivityGen.agentWord(activity.connection)];
+  const version: SettingsFactReading = pages?.phone ? reading(facts, "Versions") : { word: "reported", value: versions().app };
   return (
-    <SettingsAboutPage {...common} onPhone={pages?.phone} agent={agent} alphaVersion={reading(facts, "Versions")} androidVersion={reading(facts, "AndroidVersion")} storage={reading(facts, "Storage")}>
+    <SettingsAboutPage {...common} onPhone={pages?.phone} agent={agent} alphaVersion={version} androidVersion={reading(facts, "AndroidVersion")}>
       {alpha.slot("settings/about")}
     </SettingsAboutPage>
   );
@@ -447,6 +449,7 @@ function Activity({ runtime, alpha, common }: PageProps) {
       onReconcile={(proposal, happened) => { if (can(settle(proposal, happened))) void send(settle(proposal, happened)); }}
       onRecover={canRecover ? () => void send(recovery) : undefined}
       onHandOver={common.onHandOver}
+      conversations={alpha.slot("settings/activity")}
     >
       {needsPhoneRestart ? <Banner variant="warn">Alpha couldn’t confirm the archive. Restart your phone before trying again.</Banner> : null}
       {review.showing && !canConfirm && !archiving ? (
@@ -465,7 +468,6 @@ function Activity({ runtime, alpha, common }: PageProps) {
       >
         Archive {review.kept} {review.kept === 1 ? "record" : "records"} held by the failed agent and restart it.
       </ConfirmDialog>
-      {alpha.slot("settings/activity")}
     </SettingsActivityPage>
   );
 }

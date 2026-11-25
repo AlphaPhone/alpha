@@ -12,6 +12,9 @@ it is the [composer's](./composer.md).
 > As the owner, I want to see my conversations, open any of them where I
 > left it, start a new one, and find the one I was in after a restart.
 
+Settings › About › Agent activity offers New and History. Selecting a
+saved conversation there opens Ask Alpha on it.
+
 ### Chats know the conversations the agent listed, which one is showing, which one a fork came from, and the messages of the one showing
 
 A conversation is named by the agent's number for it; none showing is 0.

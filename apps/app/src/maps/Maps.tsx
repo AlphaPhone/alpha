@@ -1,6 +1,6 @@
 // spec/app/maps/index.md, "Story: Move between the screen's modes"; spec/app/maps/index.md, "Story: Search for a place"; spec/app/maps/index.md, "Story: Look at a place"; spec/app/maps/index.md, "Story: Get directions"; spec/app/maps/index.md, "Story: Navigate"; spec/app/maps/index.md, "Story: Use my location"; spec/app/maps/index.md, "Story: Let the agent help with Maps"; spec/app/maps/credits.md, "Story: See the map for what I am looking at"
 import { Alert, Banner, Button, cn, Input, type MapCamera, MapsChip, MapsPillButton, MapsPlaceRow, MapsRoundButton, MapsSearchBar, MapsSheet, MapsStatusCard, type MapStyle, MapView, Spinner } from "@repo/ui";
-import { ArrowUpDown, Bike, Bus, Car, Check, ChevronLeft, Clock, Coffee, Dumbbell, ExternalLink, Footprints, Fuel, Globe, Info, LocateFixed, type LucideIcon, MapPin, Navigation, Phone, RotateCw, Search, Share2, ShoppingCart, SquarePlus, Star, Utensils, X } from "lucide-react";
+import { ArrowUp, ArrowUpDown, ArrowUpLeft, ArrowUpRight, Bike, Bus, Car, Check, ChevronLeft, Clock, Coffee, CornerUpLeft, CornerUpRight, Dumbbell, ExternalLink, Footprints, Fuel, Globe, Info, LocateFixed, type LucideIcon, MapPin, Navigation, Phone, RotateCw, Search, Share2, ShoppingCart, SquarePlus, Star, Undo2, Utensils, X } from "lucide-react";
 import { useState, useSyncExternalStore } from "react";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { untimed } from "../runtime/reactor.vibe";
@@ -16,7 +16,7 @@ import { badgeOnly, holding } from "../../gen/app__maps__connection.ts";
 import { offers } from "../../gen/app__maps__navigation.ts";
 import type { Travel } from "../../gen/app__maps__navigation.ts";
 import { hasRoom } from "../../gen/app__maps__places.ts";
-import { type Coverage, type Seen, type Spot, type Way, atlas } from "./atlas.vibe";
+import { type Coverage, type Maneuver, type Seen, type Spot, type Way, atlas } from "./atlas.vibe";
 import { degreesOf, pointIn } from "./geometry.ts";
 import googleMaps from "./google-maps-attribution.svg";
 import { coverageOf, settled, tile } from "./maps.vibe";
@@ -61,6 +61,11 @@ const told: Record<GuideNotice, string> = {
 };
 
 const copies: Record<CopyNotice, string> = { Uncopied: "", NumberCopied: "Number copied", CopyFailed: "Couldn't copy" };
+
+const turnIcons: Record<Maneuver, LucideIcon> = {
+  depart: ArrowUp, continue: ArrowUp, "slight-left": ArrowUpLeft, left: CornerUpLeft, "sharp-left": CornerUpLeft, "keep-left": CornerUpLeft,
+  "slight-right": ArrowUpRight, right: CornerUpRight, "sharp-right": CornerUpRight, "keep-right": CornerUpRight, "u-turn": Undo2, roundabout: RotateCw, arrive: MapPin,
+};
 
 /** The recent search `typed` is, in any case, or `typed` itself. */
 const recentOf = (recent: readonly string[], typed: string) => recent.find((query) => query.toLowerCase() === typed.toLowerCase()) ?? typed;
@@ -122,6 +127,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   const style: MapStyle = state.link.basemap === "Cloud" && tiles !== undefined
     ? { kind: "raster", tileSize: tiles.tileSize, minZoom: tiles.minZoom, maxZoom: tiles.maxZoom, tile: (z, x, y, signal) => runtime.runPromise(tile(z, x, y, signal)) }
     : { kind: "vector", url: worldStyle };
+  const mapAttribution = style.kind === "raster" && coverage?.available ? coverage.attribution : undefined;
   const shownPins = now === "Search" ? seen.results.slice(0, state.results) : state.place !== 0 ? [state.place] : [];
   const pins = shownPins.flatMap((place) => {
     const found = atlas.spot(place);
@@ -196,7 +202,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
       {now === "Browse" && saved.length > 0 && (
         <nav aria-label="Saved places" className="absolute inset-x-0 top-18 z-10 flex touch-pan-x gap-2 overflow-x-auto px-3 pb-2.5 [scrollbar-width:none] in-data-[alpha-launcher]:top-29">
           {saved.map((entry) => (
-            <MapsChip key={entry.place} label={entry.name} icon={<Star />} disabled={!can({ type: "pickSaved", place: entry.place })} onClick={offer(screen, { type: "pickSaved", place: entry.place })} />
+            <MapsChip key={entry.place} label={entry.name} icon={<MapPin />} disabled={!can({ type: "pickSaved", place: entry.place })} onClick={offer(screen, { type: "pickSaved", place: entry.place })} />
           ))}
         </nav>
       )}
@@ -254,17 +260,26 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
         <MapsRoundButton tone="night" size="xl" aria-label="Recenter" className="absolute right-4 bottom-34 z-10" onClick={() => void send({ type: "recenter" })}><LocateFixed /></MapsRoundButton>
       )}
       {now !== "Navigating" && credits.can({ type: "openInfo" }) && (
-        <div className="absolute left-3 z-10" style={{ bottom: floatBottom }}>
+        <div className="absolute right-20 left-3 z-10 flex items-center gap-2" style={{ bottom: floatBottom }}>
           {badgeOnly(state.link)
             ? <button type="button" aria-label="Google Maps" onClick={() => void credits.send({ type: "openInfo" })}><img src={googleMaps} alt="Google Maps" width={98} height={18} /></button>
-            : <MapsRoundButton tone="float" size="sm" aria-label="Map credits" onClick={() => void credits.send({ type: "openInfo" })}><Info /></MapsRoundButton>}
+            : <>
+              <MapsRoundButton tone="float" size="sm" aria-label="Map credits" onClick={() => void credits.send({ type: "openInfo" })}><Info /></MapsRoundButton>
+              <p className="min-w-0 rounded-option bg-background px-2 py-0.5 text-xs leading-normal text-foreground shadow-md wrap-anywhere">
+                {mapAttribution ?? <>
+                  <a href="https://openfreemap.org/" target="_blank" rel="noopener noreferrer" className="underline">OpenFreeMap</a>{" · "}
+                  <a href="https://openmaptiles.org/" target="_blank" rel="noopener noreferrer" className="underline">© OpenMapTiles</a>{" · "}
+                  <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" className="underline">© OpenStreetMap</a>
+                </>}
+              </p>
+            </>}
         </div>
       )}
       {credits.state.infoOpen && (
         <MapsStatusCard role="dialog" aria-label="Map credits" className="absolute inset-x-5 z-50 shadow-md" style={{ bottom: floatBottom + 52 }}
           text={(
             <>
-              {credits.state.copyrightShown ? credits.state.copyright : coverage?.available ? coverage.attribution : "Map data © OpenStreetMap contributors, OpenFreeMap"}
+              {credits.state.copyrightShown ? credits.state.copyright : mapAttribution ?? "Map data © OpenStreetMap contributors, OpenFreeMap"}
               {coverage?.available && <><br />{`Searches and route points go to ${coverage.disclosure.recipients.map((r) => `${r.name} (${r.operator})`).join(", ")} through Alpha Cloud, which keeps only the kind of each request and its result.`}</>}
             </>
           )}
@@ -319,7 +334,7 @@ function SearchSheet({ screen, state, seen, saved, height, onRecent }: { screen:
           </div>
         )}
         {state.query === "" && saved.map((entry) => (
-          <MapsPlaceRow key={entry.place} aria-label={entry.name} name={entry.name} detail={entry.spot.category || entry.spot.address} icon={<Star />}
+          <MapsPlaceRow key={entry.place} aria-label={entry.name} name={entry.name} detail={entry.spot.category || entry.spot.address} icon={<MapPin />}
             disabled={!can({ type: "pickSaved", place: entry.place })} onClick={() => void send({ type: "pickSaved", place: entry.place })} />
         ))}
         {seen.results.slice(0, state.results).map((place) => {
@@ -505,10 +520,12 @@ function Guidance({ screen, state, seen, spot, kept, way }: { screen: Screen; st
   const after = way?.turns[state.trip.turn + 1];
   const arrived = state.trip.guidance === "Arrived";
   const precise = seen.here !== undefined && !seen.here.approximate && !state.trip.rerouting;
+  const TurnIcon = arrived ? Check : turnIcons[turn?.maneuver ?? "continue"];
+  const NextIcon = turnIcons[after?.maneuver ?? "continue"];
   return (
     <>
       <div data-host-chrome="" role="status" className="absolute inset-x-3 top-12.5 z-50 flex items-center gap-4 rounded-sheet bg-alpha px-5 py-4.5 text-alpha-foreground shadow-lg motion-safe:animate-drop in-data-[alpha-launcher]:top-23.5">
-        {arrived ? <Check aria-hidden className="size-13 shrink-0" /> : <Navigation aria-hidden className="size-13 shrink-0" />}
+        <TurnIcon aria-hidden className="size-13 shrink-0" />
         <div className="min-w-0">
           {!arrived && precise && turn !== undefined && <div className="font-display text-4xl leading-none font-light">{distance(turn.meters)}</div>}
           <div className="mt-1 truncate text-lead font-semibold">
@@ -518,7 +535,7 @@ function Guidance({ screen, state, seen, spot, kept, way }: { screen: Screen; st
       </div>
       {!arrived && after !== undefined && (
         <div className="absolute top-39.5 left-7 z-10 flex h-10 items-center gap-2 rounded-b-lg bg-alpha px-3.5 text-sm font-semibold text-alpha-foreground brightness-75 in-data-[alpha-launcher]:top-50.5">
-          Then<span className="max-w-55 truncate">{after.instruction}</span>
+          Then<NextIcon aria-hidden className="size-5 shrink-0" /><span className="max-w-55 truncate">{after.instruction}</span>
         </div>
       )}
       {/* eslint-disable-next-line better-tailwindcss/no-unknown-classes -- Guidance stays dark in both themes, as on develop; `dark` is the design system's theme class. */}

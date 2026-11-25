@@ -1,5 +1,5 @@
 // spec/app/contacts/index.md, "Story: Browse my contacts"; spec/app/contacts/index.md, "Story: Give Alpha access to my contacts"; spec/app/contacts/index.md, "Story: Look at one contact"; spec/app/contacts/index.md, "Story: Add or change a contact"; spec/app/contacts/index.md, "Story: Delete a contact"; spec/app/contacts/index.md, "Story: Know what happened to my change"
-import { Alert, AppHeader, Avatar, Banner, Button, Chip, ConfirmDialog, Input, ListGroup, ListRow, SearchField, Spinner, Tabs, TabsContent, Textarea } from "@repo/ui";
+import { Alert, AppHeader, Avatar, Banner, Button, Chip, ConfirmDialog, Input, ListGroup, ListRow, SearchField, Spinner, Tabs, TabsContent, Textarea, cn } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
 import { CONTACT_MAX_ADDRESS, CONTACT_MAX_NAME, CONTACT_MAX_NOTES, CONTACT_MAX_NUMBER } from "@elizaos/os-bridges";
 import { ArrowLeft, Check, ChevronDown, ChevronLeft, Mail, MessageSquare, Minus, NotebookText, Pencil, Phone as Call, Plus, Search, Trash2, X } from "lucide-react";
@@ -99,7 +99,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
           Contacts needs access to your address book
         </Banner>
       )}
-      {state.opened ? <Card runtime={runtime} safe={safe} /> : (
+      {state.opened ? <Card runtime={runtime} safe={safe} compact={shell.state?.assistant === "Sheet" || shell.state?.assistant === "Full"} /> : (
         <>
           {state.sought && !searching && <Chip className="mx-4 self-start" onClear={() => void send({ type: "endSearch" })} clearLabel="Clear the search">{query} · {state.rows}</Chip>}
           {searching && <div className="flex gap-2 px-4" role="group" aria-label="Show">
@@ -148,7 +148,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
 }
 
 /** One contact as the phone holds it now. */
-function Card({ runtime, safe }: ContactsProps & { safe: boolean }) {
+function Card({ runtime, safe, compact }: ContactsProps & { safe: boolean; compact: boolean }) {
   const { state, can, send } = useContacts(runtime);
   if (!state) return null;
   const card = runtime.runSync(Effect.flatMap(Rows, (rows) => rows.get())).card;
@@ -157,11 +157,15 @@ function Card({ runtime, safe }: ContactsProps & { safe: boolean }) {
     void send({ type: "reach", how });
   };
   const field = "flex min-h-13.5 items-center gap-4 px-5 py-2";
+  const profile = shown(state) && card ? <>
+    <span aria-hidden data-alpha-stage-avatar="" className={cn("flex flex-none items-center justify-center rounded-full bg-secondary", compact ? "size-9 text-sm font-bold" : "mt-2 size-28 self-center font-display text-contact-initials font-light")}>{callerInitials(card.displayName)}</span>
+    <h1 className={cn("font-display font-light wrap-anywhere", compact ? "min-w-0 flex-1 truncate text-xl in-data-[alpha-title-row]:basis-full in-data-[alpha-title-row]:order-1 in-data-[alpha-title-row]:whitespace-normal" : "mt-4 px-4 text-center text-contact-name")}>{card.displayName}</h1>
+  </> : null;
   return (
-    <div className="flex flex-1 flex-col">
-      <div data-host-chrome="" className="mt-11 flex min-h-14 items-center gap-1 px-2">
+    <div data-alpha-contact-detail="" data-alpha-compact={compact} className="flex flex-1 flex-col">
+      <header data-host-chrome="" data-alpha-stage-header="" className={cn("flex min-h-14 shrink-0 items-center gap-1 px-2", compact ? "mt-[max(0.125rem,env(safe-area-inset-top))] in-data-[alpha-title-row]:flex-wrap" : "mt-11")}>
         {can({ type: "closeContact" }) && <Button variant="ghost" size="icon" aria-label="Back" onClick={() => void send({ type: "closeContact" })}><ChevronLeft /></Button>}
-        <span className="flex-1" />
+        {compact && profile ? profile : <span className="flex-1" />}
         {card && can({ type: "amend" }) && <Button variant="ghost" size="icon" aria-label="Edit" onClick={() => {
           runtime.runSync(Effect.flatMap(Rows, (rows) => rows.set({
             editBase: card, problem: undefined,
@@ -175,20 +179,19 @@ function Card({ runtime, safe }: ContactsProps & { safe: boolean }) {
         }}><Pencil /></Button>}
         {can({ type: "amendElsewhere" }) && <Button variant="ghost" size="icon" aria-label="Edit" onClick={() => void send({ type: "amendElsewhere" })}><Pencil /></Button>}
         {can({ type: "askDelete" }) && <Button variant="ghost" size="icon" className="text-record" aria-label="Delete" onClick={() => void send({ type: "askDelete" })}><Trash2 /></Button>}
-      </div>
+      </header>
       {state.card.status === "Loading" && <Spinner label="Reading the contact" />}
       {state.card.status === "Failed" && <Banner variant="destructive">The contact could not be read</Banner>}
       {shown(state) && card && (
         <>
-          <span aria-hidden className="mt-2 flex size-28 items-center justify-center self-center rounded-full bg-secondary font-display text-contact-initials font-light">{callerInitials(card.displayName)}</span>
-          <h1 className="mt-4 px-4 text-center font-display text-contact-name font-light wrap-anywhere">{card.displayName}</h1>
-          {card.phoneNumbers.length > 0 && <div className="flex flex-wrap justify-center gap-3.5 px-4 pt-5.5 pb-1" role="group" aria-label="Contact actions">
+          {!compact && profile}
+          {card.phoneNumbers.length > 0 && <div data-alpha-contact-actions="" className={cn("flex shrink-0 flex-wrap", compact ? "gap-2.5 pr-4 pb-2 pl-15" : "justify-center gap-3.5 px-4 pt-5.5 pb-1")} role="group" aria-label="Contact actions">
             {[...new Set(card.phoneNumbers.map(({ number }) => number))].flatMap((number) => [
-              can({ type: "reach", how: "Call" }) && <Button key={`call ${number}`} variant="secondary" size="icon" className="size-15" aria-label={`Call ${number}`} onClick={() => reach("Call", number)}><Call /></Button>,
-              can({ type: "reach", how: "Message" }) && <Button key={`message ${number}`} variant="secondary" size="icon" className="size-15" aria-label={`Message ${number}`} onClick={() => reach("Message", number)}><MessageSquare /></Button>,
+              can({ type: "reach", how: "Call" }) && <Button key={`call ${number}`} variant="secondary" size="icon" className={compact ? "size-11" : "size-15"} aria-label={`Call ${number}`} onClick={() => reach("Call", number)}><Call /></Button>,
+              can({ type: "reach", how: "Message" }) && <Button key={`message ${number}`} variant="secondary" size="icon" className={compact ? "size-11" : "size-15"} aria-label={`Message ${number}`} onClick={() => reach("Message", number)}><MessageSquare /></Button>,
             ])}
           </div>}
-          <div aria-label="Contact details" role="group" className="mx-4 mt-9 rounded-sheet bg-secondary py-1.5 select-text">
+          <div aria-label="Contact details" role="group" className={cn("mx-4 rounded-sheet bg-secondary py-1.5 select-text", compact ? "mt-3" : "mt-9")}>
             {card.phoneNumbers.map((phone, at) => (
               // eslint-disable-next-line @eslint-react/no-array-index-key -- The phone can return a duplicated number at distinct positions.
               <div key={`${phone.number}-${at}`} className={field}><Call aria-hidden className="size-5 shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1 text-body leading-field wrap-anywhere">{displayNumber(phone.number)}</span><span className="shrink-0 text-sm text-muted-foreground">{contactLabel(phone.type)}</span></div>
