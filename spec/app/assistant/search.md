@@ -10,6 +10,9 @@ time, and opening a hit in its conversation around its message, which
 > there are more, and open one where it was said, never seeing hits for a
 > search I have left behind.
 
+Choosing Search raises [Ask Alpha](../shell/index.md) to the full screen
+before search opens. Closing search or opening a hit leaves that height.
+
 ### Search is open or closed, with the words asked, the hits shown and whether there are more
 
 The hits come from a [read](../../kit/read.md): only the newest asking is

@@ -345,15 +345,17 @@ export function alphaBrowser(world: BrowserScene): Faked {
         world.shared.push(options);
         return Promise.resolve(tab);
       },
-      openExternalBrowser: () => Promise.resolve(),
-      // `pageContext`: the shown normal tab's committed page as its web view reads it, never a private tab's.
-      pageContext: (options) => {
-        const tab = held(options);
-        const url = tab.history[tab.at] ?? "";
-        if (tab.private) return Promise.reject(rejection("Private tabs are never shared"));
-        if (url !== options.url || String(tab.navigation) !== options.navigation) return Promise.reject(rejection("Browser page changed"));
-        return Promise.resolve({ url, title: sites[url]?.title ?? "", text: textOf(drawn(url)).replace(/\s+/g, " ").trim().slice(0, 6000), truncated: false });
+      // AlphaBrowserPlugin.pageContext: the text the owner can see of the guarded page, for one chat turn (spec/app/browser/reading.md).
+      pageContext: (options: BrowserPageGuard) => {
+        const tab = stateOf(held(options));
+        if (!tab.committed || tab.loading || tab.url !== options.url || tab.navigation !== options.navigation) {
+          return Promise.reject(rejection("The Browser page changed"));
+        }
+        world.calls.push("pageContext");
+        const text = textOf(drawn(options.url)).replace(/\s+/g, " ").trim().slice(0, 6000);
+        return Promise.resolve({ url: options.url, title: titleOf(options.url), text, truncated: false });
       },
+      openExternalBrowser: () => Promise.resolve(),
       openFailedPage: (options) => {
         const tab = held(options);
         if (tab.elsewhere === "" || tab.elsewhere !== options.url || String(tab.navigation) !== options.navigation) return Promise.reject(rejection("The page changed. Try again from the page."));

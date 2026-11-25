@@ -334,7 +334,7 @@ const INFERENCE_ENTRY = /\.(gguf|onnx|ort|tflite|safetensors|pte|task)$|(^|\/)li
 const REQUIRED_CLASSES = [
   ...["AlphaDevicePlugin", "AlphaCloudSpeechPlugin", "AlphaLocalSpeechPlugin", "AlphaBrowserPlugin", "AlphaCarrierSetupPlugin", "AlphaCallStatePlugin",
     "AlphaOngoingCallPlugin", "AlphaAgentService", "AlphaCalendarPlugin", "AlphaTelephonyPlugin", "AlphaContactsPlugin", "AlphaResetPlugin", "AlphaActionJournalPlugin",
-    "AlphaFilesPlugin", "AlphaSelectedDocumentsPlugin", "AlphaPhotoLibraryPlugin", "AlphaPhotosPlugin", "AlphaPhotosPermissionsPlugin",
+    "AlphaFilesPlugin", "AlphaSelectedDocumentsPlugin", "AlphaInboxAttachmentsPlugin", "AlphaPhotoLibraryPlugin", "AlphaPhotosPlugin", "AlphaPhotosPermissionsPlugin",
     "AlphaMediaEnrollmentPlugin", "AlphaScanPlugin"].map((name) => `Lai/alphacompute/alphaphone/${name};`),
   "Lai/eliza/plugins/camera/CameraPlugin;",
   "Lai/eliza/plugins/filesystem/FilesPlugin;",

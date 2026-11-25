@@ -1318,6 +1318,20 @@ const steppingBack = started(effect {
   })
 }, "offering Back")
 
+// spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/shell/index.md, "Ask Alpha rises to typing, a sheet or the full screen"
+export effect function openChatSearch(route: number): void!!(Shell | Search.Machine | Chats.Machine) {
+  const shell = try Shell
+  const search = try Search.Machine
+  const current = try shell.get()
+  if (current.route !== route || !Search.canOpenSearch(try search.get())) return
+  const raised = current.assistant === "Full" ? current
+    : (shell.send({ type: "raise", detent: "Full" }, (showing) => showing.route === route) catch () => undefined)
+  if (raised === undefined || (try shell.get()).route !== raised.route) return
+  if (try contained(search.send({ type: "openSearch" }), "opening chat search")) {
+    try ignore((try Chats.Machine).send({ type: "browse" }))
+  }
+}
+
 // spec/app/assistant/index.md, "Back closes a review, then search, then a quote or an edit, one at a time; with none of them open Back is the shell's"
 export const assistantBack = effect {
   const summary = (try Talk).board.snapshot().recordingSummary
