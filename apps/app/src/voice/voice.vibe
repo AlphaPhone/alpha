@@ -11,7 +11,7 @@ import type { Field } from "../../gen/app__voice__dictation.ts"
 import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { ask } from "../platform/remote.vibe"
-import { Views, delivery, preparedIn } from "../assistant/views.vibe"
+import { Views, delivery, pageIn, preparedIn } from "../assistant/views.vibe"
 import { MediaReview, requestedFilesOperation, sameFiles, type FilesOrigin } from "../assistant/media-review.vibe"
 import type { Attached } from "../assistant/talk.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
@@ -454,7 +454,9 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     }
     const finalText = filesReport ?? (result?.kind === "Replied" ? result.reply.text : "")
     const prepared = !awaitingFiles && admittedScreen && views !== undefined && result?.kind === "Replied" ? preparedIn(result.reply.actionResults, views.clientId) : undefined
+    const page = !awaitingFiles && admittedScreen && views !== undefined && result?.kind === "Replied" ? pageIn(result.reply.actionResults, views.clientId) : undefined
     if (views !== undefined && prepared !== undefined) try views.spoken({ asked, handoff: prepared })
+    else if (views !== undefined && page !== undefined) try views.spoken({ asked, page })
     memory.lastReply = finalText
     if (!awaitingFiles) emitNavigation(finalText)
     const asks = replyNeedsReview(finalText)

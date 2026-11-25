@@ -91,7 +91,9 @@ pure def lawPackListsAreConsistent(p: str): bool =
 The old agent had no allowlist: every action its plugins registered could
 run. The pack's plugins register those same actions under the pinned
 eliza's names, and Alpha's `alpha-apps` product plugin registers
-`CLOCK_ALARM`, `CLOCK_TIMER`, `CLOCK_WORLD` and `REMINDERS_MANAGE`. The
+`CLOCK_ALARM`, `CLOCK_TIMER`, `CLOCK_WORLD` and `REMINDERS_MANAGE`.
+`BROWSER_OPEN` opens a web page the owner asks for where no enrolled phone
+takes the open as a proposed step, as the old phone opened one. The
 policy names `alpha-apps` as its product plugin and allows each action by
 name, so an action a later pin adds is refused until it is reviewed here.
 Core's `REPLY`, `IGNORE` and `NONE` are always allowed. Every other
@@ -111,7 +113,7 @@ pure val allowedActions: List[str] = List(
   "WORKFLOW",
   "MAPS_PLACE", "MAPS_WHERE_AM_I", "MAPS_ROUTE", "MAPS_NAVIGATION_START", "MAPS_NAVIGATION_REROUTE", "MAPS_NAVIGATION_STOP",
   "MAPS_SELECT", "MAPS_SAVE", "MAPS_SHARE", "MAPS_COVERAGE", "MAPS_SAVED",
-  "BROWSER", "BROWSER_BACK", "BROWSER_FORWARD", "BROWSER_RELOAD",
+  "BROWSER", "BROWSER_BACK", "BROWSER_FORWARD", "BROWSER_RELOAD", "BROWSER_OPEN",
   "NOTES_LIST", "NOTES_GET", "NOTES_CREATE", "NOTES_UPDATE", "NOTES_DELETE", "NOTES_RESTORE", "NOTES_MOVE",
   "PROPOSE_DEVICE_ACTION", "VIEWS",
   "CLOCK_ALARM", "CLOCK_TIMER", "CLOCK_WORLD", "REMINDERS_MANAGE"

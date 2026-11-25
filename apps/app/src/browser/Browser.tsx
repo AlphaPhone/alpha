@@ -1,4 +1,4 @@
-// spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"; spec/app/browser/address.md, "Story: Browse privately"
+// spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/index.md, "A page the agent asks for opens at once only when my message asked for that address, and any other only once I choose Open on the Browser's card"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"; spec/app/browser/address.md, "Story: Browse privately"
 import { Button, BrowserAddressBar, type BrowserAddressChoice, BrowserAddressChoices, BrowserFindBar, BrowserBar, BrowserLibrary, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserTabs, ConfirmDialog, PrivateMark } from "@repo/ui";
 import { ChevronLeft, Download, History, Link, Plus, RotateCw, Search, Share2, Square, Star, Trash2 } from "lucide-react";
 import { Effect, Option } from "effect";
@@ -21,13 +21,14 @@ import { Time } from "../runtime/time.vibe";
 import { AppBack } from "../shell/AppBack.tsx";
 import { desktopPreview } from "../shell/canvas.vibe";
 import type { ManagedRuntime } from "effect";
+import { Reviewing, approve, decline } from "./agent.vibe";
 import { Pages, type PageRuntime, addressOf, idOf, inputOf, openDownloads, placed } from "./browser.vibe";
 import { LibraryRows, editHistory, markPage, setMark } from "./library.vibe";
 import { type SharePages, cancelPrivateFrame, confirmPrivateFrame, offerShare } from "./share.vibe";
 
 export interface BrowserProps {
   /** Provides the Browser's tabs and each tab's page, `browser` of browser.vibe, over the resident machines and the phone's tab host. */
-  runtime: ManagedRuntime.ManagedRuntime<Machine | Pages | LibraryMachine | LibraryRows | ShareMachine | SharePages | TabHost | Shell | Resident, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<Machine | Pages | LibraryMachine | LibraryRows | ShareMachine | SharePages | Reviewing | TabHost | Shell | Resident, unknown>;
   alpha: Alpha;
 }
 
@@ -203,12 +204,26 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
         onCancel={() => void runtime.runPromise(cancelPrivateFrame())}>
         Your browser will receive this private page.
       </ConfirmDialog>
+      <AgentPageCard runtime={runtime} />
       <ConfirmDialog open={tabs.erasing === "Asked"} title="Clear browsing data?" confirmLabel="Clear" destructive
         onConfirm={() => { if (canConfirmErase(tabs)) void browser.send({ type: "confirmErase" }); }}
         onCancel={() => { if (canCancelErase(tabs)) void browser.send({ type: "cancelErase" }); }}>
         {native ? "Clears history, cookies and tabs." : "Clears Alpha's history and tabs. Your browser manages website cookies."}
       </ConfirmDialog>
     </div>
+  );
+}
+
+function AgentPageCard({ runtime }: Pick<BrowserProps, "runtime">) {
+  const held = runtime.runSync(Reviewing);
+  const page = useSyncExternalStore(held.subscribe, held.get, held.get);
+  const address = addressParts(page?.operation.url);
+  return (
+    <ConfirmDialog open={page !== undefined} title="Open this page?" confirmLabel="Open"
+      onConfirm={() => void runtime.runPromise(approve)}
+      onCancel={() => void runtime.runPromise(decline)}>
+      {address.host}{address.path}
+    </ConfirmDialog>
   );
 }
 

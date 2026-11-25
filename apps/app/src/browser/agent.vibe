@@ -1,0 +1,75 @@
+// spec/app/browser/index.md, "Story: Let the agent open a page"; spec/app/browser/index.md, "The agent opens only an HTTPS address with no user name or password in it, in a new normal tab, one at a time"; spec/app/browser/index.md, "A page the agent asks for opens at once only when my message asked for that address, and any other only once I choose Open on the Browser's card"; spec/app/browser/index.md, "The agent gives its tab up when it is done"
+import * as Tabs from "../../gen/app__browser.effect.vibe"
+import * as Address from "../../gen/app__browser__address.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import type { AgentPage } from "../platform/browser.vibe"
+import { TabHost } from "../platform/browser.vibe"
+import { Pages, inputOf, pageOf, tellPage, tellTabs } from "./browser.vibe"
+
+/** The page the agent asked for that waits for the owner's Open or Cancel on the Browser's card; only this area writes it. */
+export service Reviewing {
+  get(): AgentPage | undefined
+  set(page: AgentPage | undefined): void
+  subscribe(listener: () => void): () => void
+}
+
+/** The Browser's card for the agent's page, held for the life of the area. */
+export const reviewing = Layer.sync(Reviewing, () => {
+  let held: AgentPage | undefined
+  const listeners = new Set<() => void>()
+  return {
+    get: () => held,
+    set(page: AgentPage | undefined) {
+      held = page
+      for (const listener of [...listeners]) listener()
+    },
+    subscribe(listener: () => void) {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+  }
+})
+
+const steadyWait = 5000
+
+/** Open `url` in a new normal tab of the agent's, show it, and give the tab back to the owner: whether it is loading. */
+effect function opened(url: string, asked: boolean, approved: boolean): boolean!!(Tabs.Machine | Pages | Shell | TabHost) {
+  const input = inputOf(url)
+  const secure = URL.parse(url)?.protocol === "https:"
+  if (!Tabs.agentPageOpens({ secure, userInfo: input.userInfo, asked, approved }) || Address.verdict(input) !== "Open") return false
+  const shell = try Shell
+  const tabs = try Tabs.Machine
+  const steady = try race(Stream.runHead(Stream.filter(tabs.changes, Tabs.steady)), Effect.as(sleep(steadyWait), Option.none()))
+  if (Option.isNone(steady) || !showing(try shell.get(), "Browser")) return false
+  const before = try tabs.get()
+  if (!Tabs.canAgentOpen(before, secure, input.userInfo) || !(try tellTabs({ type: "agentOpen", secure, userInfo: input.userInfo }))) return false
+  const tab = before.issued + 1
+  if (!Address.canSubmit(try pageOf(tab), input)) return false
+  try (try Pages).aim(tab, url)
+  if (!(try tellPage(tab, { type: "submit", i: input }))) return false
+  try tellTabs({ type: "pick", tab })
+  return try tellTabs({ type: "agentDone" })
+}
+
+/** The page the agent's reply asked for: opened at once where the owner's message asked for it, else held for the Browser's card. */
+export effect function openAgentPage(page: AgentPage): boolean!!(Reviewing | Tabs.Machine | Pages | Shell | TabHost) {
+  if (!page.review) return try opened(page.operation.url, true, false)
+  const card = try Reviewing
+  card.set(page)
+  return true
+}
+
+/** The owner chose Open on the card: the page opens as shown. */
+export const approve: boolean!!(Reviewing | Tabs.Machine | Pages | Shell | TabHost) = effect {
+  const card = try Reviewing
+  const held = card.get()
+  card.set(undefined)
+  if (held === undefined) return false
+  return try opened(held.operation.url, false, true)
+}
+
+/** The owner chose Cancel: nothing opens. */
+export const decline: void!!Reviewing = effect {
+  const card = try Reviewing
+  card.set(undefined)
+}

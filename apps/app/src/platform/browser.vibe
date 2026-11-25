@@ -1,4 +1,5 @@
 // spec/app/browser/index.md, "The Browser holds its open tabs, which are private, the one shown, their native tabs, the saved session and its writer, and what covers the page"
+import type { DeviceOperation } from "@elizaos/agent"
 import type { BrowserTabHostPlugin, BrowserTabHostListener, BrowserTabSession } from "@elizaos/os-bridges"
 import { registered } from "./device.vibe"
 import { WebFrames, type FrameEvent } from "./browserWeb.vibe"
@@ -49,6 +50,18 @@ export service TabHost {
 /** Open the retained Files area when the owner chooses Show in Files in the phone's Browser Downloads. */
 export service BrowserDownloadsHandoff {
   open(): void!!
+}
+
+/** A page the agent's reply asked the Browser to open: eliza's typed open, and whether it waits for the owner's Open on the Browser's card. */
+export interface AgentPage {
+  readonly operation: Extract<DeviceOperation, { readonly type: "browser_navigate" }>
+  readonly review: boolean
+}
+
+// spec/app/browser/index.md, "A page the agent asks for opens at once only when my message asked for that address, and any other only once I choose Open on the Browser's card"
+/** Hand a page the agent asked for to the Browser, which opens it or shows it for review: whether the Browser took it. */
+export service AgentPages {
+  open(page: AgentPage): boolean!!
 }
 
 /** One call of the tab host, failing with `TabHostFailed` where it refused, broke, or there is none. */
