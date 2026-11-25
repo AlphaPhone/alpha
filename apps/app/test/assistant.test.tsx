@@ -182,7 +182,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const reopened = document.querySelector("[role=log] [data-alpha-message-id='m3a']");
     const fundingLine = "You’re out of plan allowance and credits, so I couldn’t reply.";
     const refusedRows = [...document.querySelectorAll("[role=log] article")].filter((line) => line.textContent?.includes(fundingLine));
-    expect([reopened?.textContent?.includes(fundingLine), reopened?.querySelector("button")?.textContent, refusedRows.length]).toEqual([true, "Manage plan", 1]);
+    const managePlan = [...(reopened?.querySelectorAll("button") ?? [])].some((control) => control.textContent === "Manage plan");
+    expect([reopened?.textContent?.includes(fundingLine), managePlan, refusedRows.length]).toEqual([true, true, 1]);
 
     // spec/app/assistant/composer.md, "A quoted message goes with the next send, until the owner removes the quote"
     onMessage("You said: Hello", "Reply");
