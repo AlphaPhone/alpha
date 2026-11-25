@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Machine as Phone } from "../gen/app__phone.effect.vibe";
@@ -10,12 +11,14 @@ import { Machine as Voicemail } from "../gen/app__phone__voicemail.effect.vibe";
 import { Machine as Agent } from "../gen/app__contacts__agent.effect.vibe";
 import { at } from "../src/areas.ts";
 import { propose } from "../src/contacts/requests.vibe";
+import assistant from "../src/assistant/index.tsx";
 import home from "../src/home/index.tsx";
 import { phoneAction } from "../src/phone/agent.vibe";
 import { phoneContactChoices, pickPhoneContact } from "../src/phone/named-review.vibe";
 import type { Alpha } from "../src/runtime/area.tsx";
 import { button, closeAll, drawn, fill, hardware, only, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
+import { textReview } from "./fakes/text-review.ts";
 
 underAct();
 afterEach(closeAll);
@@ -379,6 +382,64 @@ describe("Phone on an Alpha image", () => {
     await confirm("Delete");
     await until(alpha, alpha.runtime, Voicemail, (s) => s.removal.outcome === "Confirmed" && s.list.status === "Loaded" && s.items === 0);
     expect(world.telephony.voicemails.at(0)?.deleted).toBe(true);
+  });
+
+  it(`Shares only the reviewed open voicemail’s existing transcript (spec/app/contacts/agent.md, "The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it")`, async () => {
+    const world = image();
+    const heard = { id: 11, number: "+14155550199", date: 1_700_000_100_000, seconds: 18, heard: false, deleted: false, transcript: "The carrier left these words." };
+    world.telephony.voicemails = [heard];
+    const transcribe = vi.fn(() => Promise.resolve("Unrequested on-device transcript"));
+    world.voice.voicemailTranscription = transcribe;
+    const review = textReview(world.notes.owner, "reviewed-voicemail", { type: "voicemail_read_selected" });
+    world.telephony.textReview = review;
+    const { alpha } = await openPhoneWorld(world);
+    const runtime = assistant.runtime(alpha);
+    await until(alpha, alpha.runtime, Shell, (state) => state.image);
+    await openPhone(alpha);
+    await until(alpha, alpha.runtime, Phone, (state) => state.voicemail);
+    await tab("Voicemail");
+    await until(alpha, alpha.runtime, Voicemail, (state) => state.list.status === "Loaded" && state.items === 1);
+    await pressVoicemailRow();
+    await until(alpha, alpha.runtime, Voicemail, (state) => state.open && state.carrierText && state.audio.status === "Loaded");
+    await until(alpha, runtime, Conversation, (state) => state.ready && state.context.showing.tag === "App" && state.context.showing.view === "Phone");
+    await press("Open Alpha");
+    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+
+    const ask = async (prompt: string) => {
+      const reads = review.pendingReads;
+      world.ask.nextReplyChunks = ["Review the open voicemail on your phone."];
+      world.ask.nextActions = () => {
+        const chat = [...world.ask.kept].at(-1);
+        const owner = chat?.[1].messages.at(-1);
+        if (!chat || owner?.role !== "user" || !("clientMessageId" in owner) || typeof owner.clientMessageId !== "string") throw new Error("The fake resident lost the owner turn");
+        review.readOrigin = { version: 1, requestId: owner.clientMessageId, conversationId: chat[0], inReplyTo: owner.id };
+        return [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
+      };
+      await fill("Ask Alpha", prompt);
+      await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+      await press("Send");
+      await until(alpha, runtime, Conversation, (state) => review.pendingReads > reads && state.turn.reply === "Complete");
+      await vi.waitFor(() => expect(button("Approve")).toBeDefined());
+    };
+    await ask("Please read the voicemail I have open.");
+    expect(review.receipts).toEqual([]);
+    await pressVoicemailRow(true);
+    await until(alpha, alpha.runtime, Voicemail, (state) => !state.open);
+    await pressVoicemailRow();
+    await until(alpha, alpha.runtime, Voicemail, (state) => state.open && state.carrierText && state.audio.status === "Loaded");
+    await press("Approve");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("That review expired. Ask again from the current screen."));
+    expect([review.decisions, review.receipts, review.completions]).toEqual([[], [], []]);
+
+    await ask("Read what this voicemail says.");
+    await press("Approve");
+    await vi.waitFor(() => expect(review.completions).toHaveLength(1));
+    expect(review.receipts).toEqual([{ outcome: "applied", operationId: review.proposal.id, result: {
+      kind: "voicemail-read", status: "read", caller: null, date: heard.date, durationSeconds: heard.seconds,
+      transcriptState: "ready", engine: "carrier", transcript: heard.transcript,
+    } }]);
+    expect(transcribe).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("The reviewed read answered the original request."));
   });
 
   it(`Shows only the transcript of the current opening (spec/app/phone/voicemail.md, "Only the open voicemail's newest transcript is shown")`, async () => {

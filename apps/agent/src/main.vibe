@@ -50,10 +50,10 @@ schema RouteLine {
 schema Character { name: string; system: string; bio: string[] }
 schema Policy { schema: 1; actions: { allowed: string[]; refused: Record<string, string> }; plugins: { load: string[]; product?: string } }
 schema Notice { channel: string; title: string; text: string }
-schema Service { service: string; notification: { channel: string; title: string; text: string; failure: Notice } }
+schema Service { service: string; hostContextRevision: 1; notification: { channel: string; title: string; text: string; failure: Notice } }
 schema Model { backend: "cloud"; cloudBaseUrl: string; smallModel: string; largeModel: string; imageModel: string }
 schema Host {
-  schema: 1; service: string; notification: { channel: string; title: string; text: string; failure: Notice }; routes: RouteLine[]; nativeRoutes: RouteLine[]; model: Model
+  schema: 1; service: string; hostContextRevision: 1; notification: { channel: string; title: string; text: string; failure: Notice }; routes: RouteLine[]; nativeRoutes: RouteLine[]; model: Model
   embeddings: "none" | "local"; persistMemory: boolean; callerRole: "owner" | "user"; privacy: { secretSwap: boolean; piiSwap: boolean }
   google: { gmailChanges: boolean; calendarEdits: boolean }
 }
@@ -222,7 +222,8 @@ effect function admittedHost(host: string, registered: readonly string[]) {
   if (!googleAdmitted(written.google.gmailChanges, written.google.calendarEdits)) throw new Refused({ message: "the launch consents to Gmail changes or calendar edits the spec does not" })
   const document = JSON.stringify({
     schema: 1, character, policy: { actions: { allowed: policy.actions.allowed }, plugins: policy.plugins },
-    model: written.model, embeddings: written.embeddings, persistMemory: written.persistMemory, callerRole: written.callerRole, privacy: written.privacy, google: written.google,
+    model: written.model, embeddings: written.embeddings, persistMemory: written.persistMemory, callerRole: written.callerRole,
+    hostContextRevision: written.hostContextRevision, privacy: written.privacy, google: written.google,
     account: { userId: "the owner signed in on the phone", organizationId: "their organization" },
   })
   decodeLaunchDocument(document) catch effect () => { throw new Refused({ message: "eliza's agent would refuse the launch the phone writes from these files" }) }
@@ -266,7 +267,7 @@ effect function build(name: string) {
     return query.length === 0 ? route : { ...route, query }
   })
   const host: Host = {
-    schema: 1, service: service.service, notification: service.notification, routes,
+    schema: 1, service: service.service, hostContextRevision: service.hostContextRevision, notification: service.notification, routes,
     nativeRoutes: nativeSpeechRoutes.map(({ method, path, stream }) => ({ method: onWire[method], path, stream })),
     model: { backend: "cloud", cloudBaseUrl: where.cloud, smallModel: cloudModel, largeModel: cloudModel, imageModel: "" },
     embeddings: localEmbeddings ? "local" : "none", persistMemory, callerRole: "owner", privacy: { secretSwap, piiSwap: personalDetailSwap },

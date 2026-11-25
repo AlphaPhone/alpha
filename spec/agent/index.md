@@ -169,7 +169,9 @@ retained page after storing it, using the final result's cursor and run ID.
 Notes reads the same owner identity and calls the Notes module to
 read and edit notes, erase Trash and finish recording cleanup. The scanner
 hands the owner’s reviewed scan text to Notes through that module. The approvals area lists the agent's proposals and resolves one
-through the approvals module. A route an area
+through the approvals module. Ask Alpha completes a reviewed Messages read only
+for the exact owner turn after the agent acknowledges its device receipt.
+A route an area
 fakes for want of an agent plugin is not listed: none does today. Each line
 of `apps/agent/host/routes.jsonl` is one route; the pack is refused unless
 that list is this one, and eliza's route gate admits each of its routes.
@@ -195,6 +197,7 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/client-devices/proposals/{id}/decision", stream: false },
   { method: Post, path: "/api/client-devices/proposals/{id}/claim", stream: false },
   { method: Post, path: "/api/client-devices/proposals/{id}/receipt", stream: false },
+  { method: Post, path: "/api/client-devices/proposals/{id}/read-completion", stream: false },
   { method: Post, path: "/api/client-devices/proposals/{id}/reconciliation", stream: false },
   { method: Get, path: "/api/approvals", stream: false },
   { method: Post, path: "/api/approvals/{id}/resolve", stream: false },

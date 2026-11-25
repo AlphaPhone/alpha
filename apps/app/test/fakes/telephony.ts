@@ -261,6 +261,8 @@ function telephony(world: TelephonyScene): Faked {
         return Promise.resolve({ messages: rows.map(message), next: null });
       },
       latestIncomingSender: (options?: { includeAddress: true }) => {
+        world.textReview?.senderReads.push(options?.includeAddress === true);
+        smsGranted();
         const newest = world.texts.filter((one) => one.box === "inbox").sort((x, y) => y.date - x.date)[0];
         if (newest === undefined) return Promise.resolve({ status: "empty" });
         return Promise.resolve(options?.includeAddress ? { status: "found", address: newest.address, threadId: `thread:${newest.thread}` } : { status: "found", numberEnding: newest.address.slice(-4) });
