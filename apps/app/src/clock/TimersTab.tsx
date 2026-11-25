@@ -1,7 +1,7 @@
 // spec/app/clock/timers.md, "Story: Run multiple countdown timers"
 import { Button, Card, EmptyState, Input, Label, Progress, Sheet, SheetContent, StatusDot } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { Pause, Play, Plus, RotateCcw, Timer as TimerIcon, Trash2 } from "lucide-react";
+import { Clock, Pause, Play, Plus, Trash2, Undo2 } from "lucide-react";
 import { useState, useSyncExternalStore } from "react";
 import type { Machine as ClockViewMachine } from "../../gen/app__clock.effect.vibe";
 import { useMachine as useClockView } from "../../gen/app__clock.react.ts";
@@ -73,7 +73,7 @@ export function TimersTab({ runtime }: TimersTabProps) {
             disabled={!view.can({ type: "openSheet", sheet: { tag: "NewTimer" } })}
             onClick={() => void view.send({ type: "openSheet", sheet: { tag: "NewTimer" } })}
           >
-            <Plus aria-hidden className="size-4" />
+            <Plus aria-hidden className="size-4.5" />
             Custom
           </Button>
         </div>
@@ -93,7 +93,7 @@ export function TimersTab({ runtime }: TimersTabProps) {
       </div>
 
       {items.length === 0 ? (
-        <EmptyState icon={<TimerIcon aria-hidden />} title="No active timers">
+        <EmptyState icon={<Clock aria-hidden />} title="No active timers">
           <Button onClick={() => void view.send({ type: "openSheet", sheet: { tag: "NewTimer" } })}>
             New timer
           </Button>
@@ -108,7 +108,7 @@ export function TimersTab({ runtime }: TimersTabProps) {
             const elapsed = Math.max(0, effectiveMax - remaining);
             const statusKind = item.status === "Ringing" ? "error" : item.status === "Running" ? "ok" : item.status === "Paused" ? "warn" : "off";
             return (
-              <Card key={item.id} className="gap-3">
+              <Card key={item.id} className="gap-3 rounded-tile border-0 bg-secondary">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <StatusDot status={statusKind} label={item.status} />
@@ -120,7 +120,7 @@ export function TimersTab({ runtime }: TimersTabProps) {
                     aria-label={`Delete ${title}`}
                     onClick={() => void runtime.runPromise(removeTimer(item.id))}
                   >
-                    <Trash2 aria-hidden className="size-4" />
+                    <Trash2 aria-hidden className="size-4.5" />
                   </Button>
                 </div>
 
@@ -138,19 +138,19 @@ export function TimersTab({ runtime }: TimersTabProps) {
                 <div className="flex flex-wrap items-center gap-2 pt-1">
                   {item.status === "Ready" && (
                     <Button size="sm" aria-label={`Start ${title}`} onClick={() => void runtime.runPromise(startTimer(item.id))}>
-                      <Play aria-hidden className="size-4" />
+                      <Play aria-hidden className="size-4.5" />
                       Start
                     </Button>
                   )}
                   {item.status === "Running" && (
-                    <Button size="sm" variant="secondary" aria-label={`Pause ${title}`} onClick={() => void runtime.runPromise(pauseTimer(item.id))}>
-                      <Pause aria-hidden className="size-4" />
+                    <Button size="sm" variant="secondary" className="bg-background" aria-label={`Pause ${title}`} onClick={() => void runtime.runPromise(pauseTimer(item.id))}>
+                      <Pause aria-hidden className="size-4.5" />
                       Pause
                     </Button>
                   )}
                   {item.status === "Paused" && (
                     <Button size="sm" aria-label={`Resume ${title}`} onClick={() => void runtime.runPromise(resumeTimer(item.id))}>
-                      <Play aria-hidden className="size-4" />
+                      <Play aria-hidden className="size-4.5" />
                       Resume
                     </Button>
                   )}
@@ -166,7 +166,7 @@ export function TimersTab({ runtime }: TimersTabProps) {
                   )}
                   {item.status !== "Ready" && item.status !== "Ringing" && (
                     <Button size="sm" variant="ghost" aria-label={`Reset ${title}`} onClick={() => void runtime.runPromise(resetTimer(item.id))}>
-                      <RotateCcw aria-hidden className="size-4" />
+                      <Undo2 aria-hidden className="size-4.5" />
                       Reset
                     </Button>
                   )}
