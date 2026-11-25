@@ -63,10 +63,10 @@ pure def browse(more: bool, a: Attachments): Moved =
     folder: if (a.tab == Documents) a.folder else 0,
   })) }
 
-pure def requestObservation(a: Attachments): Moved =
-  { state: { ...a, rows: X::dropped(a.rows), more: false }, out: List(Access({ tab: a.tab, mode: Probe, visit: a.visit })) }
+pure def requestObservation(tab: Tab, a: Attachments): Moved =
+  { state: { ...a, tab: tab, rows: X::dropped(a.rows), more: false }, out: List(Access({ tab: tab, mode: Probe, visit: a.visit })) }
 
-pure def shown(tab: Tab, a: Attachments): Moved = requestObservation({ ...a, tab: tab, query: "", refused: 0 })
+pure def shown(tab: Tab, a: Attachments): Moved = requestObservation(tab, { ...a, query: "", refused: 0 })
 ```
 
 ### What the simulator tries
@@ -130,7 +130,7 @@ pure def setFolder(a: Attachments, folder: int): Moved = browse(false, { ...a, f
 
 pure def canRefresh(a: Attachments): bool = a.open and a.reading.outcome != A::Sent
 
-pure def refresh(a: Attachments): Moved = requestObservation(a)
+pure def refresh(a: Attachments): Moved = requestObservation(a.tab, a)
 ```
 
 ### Access is asked of Android once; after that Settings is offered
