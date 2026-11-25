@@ -496,6 +496,26 @@ export effect function prepare(thread: number, selectedSim: TelephonySubscriptio
   return true
 }
 
+module pictureData {
+  /** @throws {never} */
+  export function pictureBytes(data: string, type: "image/png" | "image/jpeg" | "image/webp", size: number, max: number): Uint8Array | undefined {
+    if (data.length % 4 !== 0 || data.length > Math.ceil(max / 3) * 4) return undefined
+    try {
+      const decoded = atob(data)
+      if (decoded.length !== size) return undefined
+      const signature = type === "image/png" ? [137, 80, 78, 71, 13, 10, 26, 10] : [255, 216, 255]
+      const signatureMatches = type === "image/webp" ? decoded.startsWith("RIFF") && decoded.slice(8, 12) === "WEBP"
+        : signature.every((byte, at) => decoded.charCodeAt(at) === byte)
+      if (!signatureMatches) return undefined
+      return Uint8Array.from(decoded, (byte) => byte.charCodeAt(0))
+    } catch {
+      return undefined
+    }
+  }
+}
+import { pictureBytes } from pictureData
+export { pictureBytes }
+
 // spec/app/messages/index.md, "A picture from Files is offered in a new recipient picker and can join only its chosen empty draft"
 export effect function pictureMessagingReady(): boolean!!Telephony {
   const status = telephony("status", (c) => c.messages.status()) catch () => undefined
@@ -503,12 +523,12 @@ export effect function pictureMessagingReady(): boolean!!Telephony {
 }
 
 // spec/app/messages/index.md, "A picture from Files is offered in a new recipient picker and can join only its chosen empty draft"
-export effect function handOverPicture(picture: Picture): boolean!!(Drafts | Composer.Machine | Messages | Shell) {
+export effect function handOverPicture(picture: Picture, source: "Files" | "Photos"): boolean!!(Drafts | Composer.Machine | Messages | Shell) {
   const shell = try Shell
   const messages = try Messages
   const drafts = try Drafts
   const composer = try (try Composer.Machine).get()
-  if (!showing(try shell.get(), "Files") || Composer.bound(composer) || !Composer.settledDraft(composer) || composer.pictures > 0 ||
+  if (!showing(try shell.get(), source) || Composer.bound(composer) || !Composer.settledDraft(composer) || composer.pictures > 0 ||
     (try drafts.offeredPicture()) !== undefined || (try messages.get()).front) return false
   if (!(try contained(shell.send({ type: "openView", view: "Messages" }), "the picture handed to Messages"))) return false
   const front = try Effect.timeoutOption(Stream.runHead(Stream.filter(messages.changes, (s) => s.front)), "3 seconds")

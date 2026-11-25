@@ -4,17 +4,17 @@ import type { StatusDotProps } from "../StatusDot.tsx";
 export type SettingsPageName =
   | "top" | "general" | "display" | "sound" | "notifications" | "battery" | "phone" | "privacy" | "permissions" | "apps"
   | "inbox" | "workflows" | "calendar" | "camera" | "photos" | "maps" | "notes" | "about" | "activity" | "licences" | "developer" | "problems"
-  | "network" | "carrier";
+  | "network" | "carrier" | "passwords";
 
 /** What another area owns, which a row hands over to: `Neighbour` in spec/app/settings/index.md. */
 export type Neighbour =
-  | "account-and-plan" | "google-and-email" | "calendar-account" | "password-manager" | "notification-collection"
+  | "account-and-plan" | "google-and-email" | "calendar-account" | "notification-collection"
   | "listener" | "conversations" | "restart-details" | "calendar-backups";
 
 /** The pages of Android's own settings a row can open: `Target` in spec/app/settings/android.md. */
 export type AndroidTarget =
   | "android-home" | "accounts-sync" | "wifi-networks" | "bluetooth-devices" | "mobile-networks" | "airplane-mode" | "screen-lock"
-  | "default-apps" | "display-settings" | "brightness" | "sound-settings" | "do-not-disturb" | "battery-saver" | "alpha-alerts"
+  | "default-apps" | "password-autofill" | "display-settings" | "brightness" | "sound-settings" | "do-not-disturb" | "battery-saver" | "alpha-alerts"
   | "alert-channel" | "notification-access" | "workflow-alerts" | "app-permissions" | "photo-permissions" | "location-settings"
   | "about-phone" | "developer-options" | "all-files-access" | "internet-panel" | "sim-cards" | "access-point-names";
 

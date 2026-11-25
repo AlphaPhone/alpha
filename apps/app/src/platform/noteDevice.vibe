@@ -2,7 +2,9 @@
 import type { NotesTrashRecordingCleanup } from "@elizaos/plugin-notes-client"
 import type { Command } from "../../gen/app__notes__recording.effect.vibe"
 import type { Grant } from "../../gen/kit__permission.ts"
+import { fresh } from "../runtime/attempts.vibe"
 import { registered } from "./device.vibe"
+import { type SavedNoteWindow, readSavedNote } from "./voice.vibe"
 
 module native {
   import { type PluginListenerHandle, registerPlugin } from "@capacitor/core"
@@ -44,9 +46,10 @@ module native {
 }
 import { type Earlier, type NotesPlugin, client, ownerDigest } from native
 export { ownerDigest }
+export const transcriptWindowMs = 25000
 
 const Segment = Schema.Struct({ segmentId: Schema.NonEmptyString, durationMs: Schema.Int, text: Schema.optionalKey(Schema.String) })
-const Tape = Schema.Struct({
+const TapeReply = Schema.Struct({
   state: Schema.Literals(["idle", "recording", "paused", "stopped"]),
   recordingId: Schema.optionalKey(Schema.NonEmptyString),
   recovered: Schema.optionalKey(Schema.Boolean),
@@ -58,19 +61,21 @@ const Tape = Schema.Struct({
   peak: Schema.optionalKey(Schema.Number),
 })
 const Permission = Schema.Struct({ grant: Schema.String })
-const Recorded = Schema.Struct({ audioId: Schema.NonEmptyString, noteId: Schema.NonEmptyString, durationMs: Schema.Int })
+const RecordedReply = Schema.Struct({ audioId: Schema.NonEmptyString, noteId: Schema.NonEmptyString, durationMs: Schema.Int })
+const Heard = Schema.Struct({ text: Schema.String.check(Schema.isMaxLength(8000)), local: Schema.Literal(true) })
 const Played = Schema.Struct({ ok: Schema.Boolean })
 const Offered = Schema.Struct({ open: Schema.Boolean })
 const EarlierPresence = Schema.Struct({ present: Schema.Boolean })
 const EarlierText = Schema.Struct({ text: Schema.NullOr(Schema.String) })
-export type Tape = typeof Tape.Type
-export type Recorded = typeof Recorded.Type
+export type Tape = typeof TapeReply.Type
+export type Recorded = typeof RecordedReply.Type
 
 export error RecordingUnavailable
 
 /** Audio custody and microphone permission are owned by the Android Notes host. */
 export service NoteDevice {
   readonly available: boolean
+  readonly canTranscribe: boolean
   readonly changed: Stream.Stream<Tape>
   readonly openAsked: Stream.Stream<void>
   permission(): Grant!!
@@ -81,6 +86,7 @@ export service NoteDevice {
   retain(recordingId: string, noteId: string): Recorded!RecordingUnavailable
   discard(recordingId: string): void!RecordingUnavailable
   describe(audioId: string): Recorded!RecordingUnavailable
+  transcribe(window: SavedNoteWindow): string!RecordingUnavailable
   play(audioId: string, noteId: string, offsetMs: number): boolean!!
   halt(): boolean!!
   purge(receipt: NotesTrashRecordingCleanup): boolean!!
@@ -96,6 +102,7 @@ const noTape = (): Tape => ({ state: "idle" })
 
 export const noteDevice = Layer.sync(NoteDevice, () => {
   const available = registered("AlphaNotes")
+  const canTranscribe = available && registered("AlphaVoiceCloud")
   const api = available ? client() : undefined
   const asked = <A>(call: (native: NotesPlugin) => Promise<A>) => api === undefined ? Effect.fail(absent()) : tryPromise({ try: () => call(api), catch: absent })
   const decoded = <A>(schema: Schema.Decoder<A>, raw: unknown) => mapError(Schema.decodeUnknownEffect(schema)(raw), absent)
@@ -106,7 +113,7 @@ export const noteDevice = Layer.sync(NoteDevice, () => {
   )
   const changed = api === undefined ? Stream.empty : Stream.callback<Tape>((queue) => acquireRelease(
     promise(() => api.addListener("recordingChanged", (raw) => {
-      const report = Schema.decodeUnknownOption(Tape)(raw)
+      const report = Schema.decodeUnknownOption(TapeReply)(raw)
       if (Option.isSome(report)) Queue.offerUnsafe(queue, report.value)
     })),
     (listener) => promise(() => listener.remove()),
@@ -116,15 +123,21 @@ export const noteDevice = Layer.sync(NoteDevice, () => {
     (listener) => promise(() => listener.remove()),
   ))
   return {
-    available, changed, openAsked,
+    available, canTranscribe, changed, openAsked,
     permission: () => granted((native) => native.permission()),
     request: () => granted((native) => native.requestMicrophone()),
-    status: () => available ? read(Tape, (native) => native.status()) : succeed(noTape()),
-    start: (ownerDigest: string, folderId?: string) => read(Tape, (native) => native.start({ ownerDigest, ...(folderId === undefined ? {} : { folderId }) })),
-    command: (recordingId: string, command: Command) => read(Tape, (native) => native.command({ recordingId, command })),
-    retain: (recordingId: string, noteId: string) => read(Recorded, (native) => native.retain({ recordingId, noteId })),
+    status: () => available ? read(TapeReply, (native) => native.status()) : succeed(noTape()),
+    start: (ownerDigest: string, folderId?: string) => read(TapeReply, (native) => native.start({ ownerDigest, ...(folderId === undefined ? {} : { folderId }) })),
+    command: (recordingId: string, command: Command) => read(TapeReply, (native) => native.command({ recordingId, command })),
+    retain: (recordingId: string, noteId: string) => read(RecordedReply, (native) => native.retain({ recordingId, noteId })),
     discard: (recordingId: string) => asked((native) => native.discard({ recordingId })),
-    describe: (audioId: string) => read(Recorded, (native) => native.describe({ audioId })),
+    describe: (audioId: string) => read(RecordedReply, (native) => native.describe({ audioId })),
+    effect transcribe(window: SavedNoteWindow) {
+      if (!canTranscribe) throw new RecordingUnavailable()
+      const requestId = `notes-${fresh()}`
+      const raw = try tryPromise({ try: (signal) => readSavedNote(window, requestId, signal), catch: absent })
+      return (try decoded(Heard, raw)).text
+    },
     play: (audioId: string, noteId: string, offsetMs: number) => Effect.catch(Effect.map(read(Played, (native) => native.play({ audioId, noteId, offsetMs })), ({ ok }) => ok), () => succeed(false)),
     halt: () => Effect.catch(Effect.map(read(Played, (native) => native.halt()), ({ ok }) => ok), () => succeed(false)),
     effect purge(receipt: NotesTrashRecordingCleanup) {

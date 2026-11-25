@@ -64,8 +64,9 @@ pure def untouched(duration: int): Edit = { turns: 0, cropped: false, bounds: wh
 
 A read of the item; a preview of an edit; writing the edited copy, or the
 original in its place; looking up whether a copy was written; asking Alpha
-about the item, and an email with it attached, which Inbox composes, each of
-the revision shown; and a change of the item, which Photos carries out.
+about the item, an email with it attached, which Inbox composes, and an
+original picture for the Messages recipient picker, each of the revision shown;
+and a change of the item, which Photos carries out.
 
 ```quint
 type Effect =
@@ -74,7 +75,8 @@ type Effect =
   | WriteCopy({ attempt: int, photo: int, revision: int, edit: Edit, replace: bool })
   | FindCopy({ attempt: int, ticket: int })
   | AskAbout({ photo: int, revision: int })
-  | Compose({ photo: int, revision: int })
+  | Compose({ photo: int, revision: int, ticket: int })
+  | TextPicture({ photo: int, revision: int, ticket: int })
   | Request({ change: C::Change, photo: int, revision: int })
 ```
 
@@ -377,14 +379,16 @@ pure def sometimesSecureShown(s: Viewer): bool = s.secure and shown(s)
 ## Story: Share what I am looking at
 
 > As the owner, I want to ask Alpha about the photo I am looking at, email
-> or share it, favourite it, or delete it and move on to the next, and to be
+> it, offer it for a new message, share it, favourite it, or delete it and move
+> on to the next, and to be
 > told when it was deleted while I looked.
 
 ### Only the owner sends the revision showing to Alpha, to an email or to Android's share sheet, favourites it, or deletes it, and never from the lock screen
 
 Asking Alpha raises Ask Alpha with this item, which the shell shows; Inbox
-composes the email; the phone sends only the revision named and refuses one
-that changed since. A share, a favourite or a delete is carried out by
+offers the permitted JPEG, PNG or WebP original for email, up to 5 MiB,
+under the same open view and revision. Inbox keeps its own account and draft
+review. A later read of another revision or a closed viewer cannot offer a file. A share, a favourite or a delete is carried out by
 Photos as a change of that one item, which offers Undo after a delete;
 deleting moves on to the neighbour Photos lists, or closes the viewer when
 there is none.
@@ -394,9 +398,9 @@ pure def canAskAlpha(s: Viewer, by: Actor): bool = by == Owner and shown(s) and 
 
 pure def askAlpha(s: Viewer, by: Actor): Done = emit(List(AskAbout({ photo: s.open, revision: s.revision })), { ...s, playing: false })
 
-pure def canEmail(s: Viewer, by: Actor): bool = canAskAlpha(s, by)
+pure def canEmail(s: Viewer, by: Actor): bool = canAskAlpha(s, by) and s.kind == Still
 
-pure def email(s: Viewer, by: Actor): Done = emit(List(Compose({ photo: s.open, revision: s.revision })), { ...s, playing: false })
+pure def email(s: Viewer, by: Actor): Done = emit(List(Compose({ photo: s.open, revision: s.revision, ticket: s.read.ticket })), { ...s, playing: false })
 
 pure def canShare(s: Viewer, by: Actor): bool = canAskAlpha(s, by)
 
@@ -418,13 +422,30 @@ pure def trashOpen(s: Viewer, neighbour: int, by: Actor): Done =
 pure def stepItemLeavesOnlyByTheOwner(before: Viewer, via: str, after: Viewer, out: List[Effect]): bool =
   out.every(e => match e {
     | AskAbout(a) => via == "askAlpha" and a.photo == before.open and a.revision == before.revision and shown(before) and not(before.secure)
-    | Compose(c) => via == "email" and c.photo == before.open and c.revision == before.revision and shown(before) and not(before.secure)
+    | Compose(c) => via == "email" and c.photo == before.open and c.revision == before.revision
+        and c.ticket == before.read.ticket and canEmail(before, Owner)
+    | TextPicture(p) => via == "useInMessages" and p.photo == before.open and p.revision == before.revision
+        and p.ticket == before.read.ticket and canUseInMessages(before, Owner)
     | Request(r) =>
         Set("share", "toggleFavourite", "trashOpen").contains(via) and r.photo == before.open and r.revision == before.revision
           and shown(before) and not(before.secure) and r.change != C::Restore
           and (r.change == C::Favorite implies not(before.favourite)) and (r.change == C::Unfavorite implies before.favourite)
     | _ => true
   })
+```
+
+### Use in Messages offers the exact readable original of a permitted photo
+
+The owner can offer a permitted still picture of the revision shown, while
+that same view is open. The phone refuses one that changed during the read.
+Messages takes a JPEG or PNG within the phone's picture size limit to the
+recipient picker. Its ordinary Send is a separate action.
+
+```quint
+pure def canUseInMessages(s: Viewer, by: Actor): bool = canAskAlpha(s, by) and s.kind == Still
+
+pure def useInMessages(s: Viewer, by: Actor): Done =
+  emit(List(TextPicture({ photo: s.open, revision: s.revision, ticket: s.read.ticket })), s)
 ```
 
 ### The phone reports the item changed or deleted while open
