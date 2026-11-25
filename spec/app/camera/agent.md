@@ -162,6 +162,11 @@ pure def stepShootsTheViewApproved(before: Capture, via: str, after: Capture): b
 
 ### A capture is taken only when the phone saved a photo it names; any other answer, or the camera released first, is uncertain
 
+The receipt and any retry carry the optional photo-library identifier only
+when the current agent connection negotiated it. The phone retains the full
+saved-photo evidence in its own journal, and the receipt still names the
+same saved photo when the optional identifier is omitted.
+
 ```quint
 pure def canCaptured(s: Capture, request: int, by: Actor): bool = by == Phone and s.stage == Shooting and A::canConclude(s.shot, request)
 
