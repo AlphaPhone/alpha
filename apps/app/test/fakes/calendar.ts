@@ -1,5 +1,5 @@
 // spec/app/calendar/index.md, "Story: See my days"; spec/app/calendar/index.md, "Story: See only my own account's calendar"
-import type { AndroidCalendarEvent, AndroidCalendarList, AndroidCalendarPlugin, AndroidCalendarRow } from "@elizaos/os-bridges";
+import type { AndroidCalendarEditorFields, AndroidCalendarEvent, AndroidCalendarHandoffEvent, AndroidCalendarList, AndroidCalendarPlugin, AndroidCalendarRow } from "@elizaos/os-bridges";
 import { type Faked, plugin, rejection } from "./phone.ts";
 import type { Route } from "./routes.ts";
 
@@ -62,6 +62,7 @@ export interface CalendarScene {
   readonly creations: Map<string, string>;
   lost: boolean;
   handedOff: number;
+  readonly handoffs: AndroidCalendarHandoffEvent[];
   /** The agent's approvals list: each Calendar request it filed (`.eliza/packages/agent-host/src/approvals/routes.vibe`), and how it was resolved. */
   readonly approvals: FakeApproval[];
   /** The agent's linked sync control: its revision, whether it is paused, the Google calendar it writes to, and the state of each linked event. */
@@ -72,7 +73,7 @@ export function calendarScene(): CalendarScene {
   return {
     events: [], writes: [], keys: new Map(), down: false, stalled: false, queued: false,
     calendars: [{ id: "local", name: "Phone", writable: true, local: true }], phoneEvents: [], granted: false, asked: 0,
-    creations: new Map(), lost: false, handedOff: 0,
+    creations: new Map(), lost: false, handedOff: 0, handoffs: [],
     control: { revision: 0, paused: true, destination: null, links: [] }, approvals: [],
   };
 }
@@ -245,6 +246,7 @@ export function calendarRoutes(scene: CalendarScene): Route[] {
 /** The calls of `CalendarPlugin.java` eliza's typed client does not name yet: a create under a creation identity, and its receipts. */
 interface Creations {
   save(input: { id?: string; title: string; body?: string; location?: string; begin: number; end: number; calendarId: string; creationId?: string; separateCreation?: boolean; expected?: { revision: string } }): Promise<{ status: string; id?: string; calendarId?: string; creationId?: string }>;
+  saveOptions(input: { event: AndroidCalendarHandoffEvent; calendarId: string; creationId: string; separateCreation: boolean }): ReturnType<Creations["save"]>;
   pendingCreations(): Promise<{ status: string; creations: { creationId: string; status: string }[] }>;
 }
 
@@ -259,6 +261,13 @@ const revisionOf = (event: AndroidCalendarEvent) => JSON.stringify([event.title,
  */
 export function elizaCalendar(scene: CalendarScene): Faked {
   const find = (id: string) => scene.phoneEvents.find((event) => event.id === id);
+  function create(input: AndroidCalendarEditorFields, creationId = "", allDay = false, recurring = false): ReturnType<Creations["save"]> {
+    const id = `p${scene.phoneEvents.length + 1}`;
+    scene.phoneEvents.push({ id, calendarId: "local", title: input.title, body: input.body ?? "", location: input.location ?? "", begin: input.begin, end: input.end, allDay, recurring, creationId });
+    scene.creations.set(creationId, "saved");
+    if (scene.lost) return Promise.reject(rejection("Calendar write could not be confirmed. Check creation receipts before retrying."));
+    return Promise.resolve({ status: "saved", id, calendarId: "local", creationId });
+  }
   return plugin<Omit<AndroidCalendarPlugin, "save"> & Creations>(() => ({
     checkPermissions: () => Promise.resolve({ calendar: scene.granted ? "granted" : "prompt" }),
     requestAccess() {
@@ -271,8 +280,9 @@ export function elizaCalendar(scene: CalendarScene): Faked {
       return Promise.resolve({ status: "ready", calendars: scene.calendars, events: scene.phoneEvents.filter((event) => event.begin < end && event.end > begin), truncated: false });
     },
     open: () => Promise.resolve({ status: "opened" }),
-    insertHandoff() {
+    insertHandoff({ event }) {
       scene.handedOff += 1;
+      scene.handoffs.push(event);
       return Promise.resolve({ status: "opened", alertsPrefilled: false });
     },
     inspect({ id }) {
@@ -280,17 +290,15 @@ export function elizaCalendar(scene: CalendarScene): Faked {
       return Promise.resolve(event ? { status: "ready", revision: revisionOf(event), sourceRevision: revisionOf(event) } : { status: "conflict" });
     },
     save(input) {
-      if (input.id === undefined || input.id === "") {
-        const id = `p${scene.phoneEvents.length + 1}`;
-        scene.phoneEvents.push({ id, calendarId: "local", title: input.title, body: input.body ?? "", location: input.location ?? "", begin: input.begin, end: input.end, allDay: false, recurring: false, creationId: input.creationId ?? "" });
-        scene.creations.set(input.creationId ?? "", "saved");
-        if (scene.lost) return Promise.reject(rejection("Calendar write could not be confirmed. Check creation receipts before retrying."));
-        return Promise.resolve({ status: "saved", id, calendarId: "local", creationId: input.creationId ?? "" });
-      }
+      if (input.id === undefined || input.id === "") return create(input, input.creationId);
       const event = find(input.id);
       if (!event || input.expected?.revision !== revisionOf(event)) return Promise.resolve({ status: "conflict" });
       Object.assign(event, { title: input.title, body: input.body ?? "", location: input.location ?? "", begin: input.begin, end: input.end });
       return Promise.resolve({ status: "saved", id: event.id, calendarId: event.calendarId });
+    },
+    saveOptions({ event, creationId }) {
+      if (event.allDay && (event.timeZone !== "UTC" || event.end <= event.begin || event.begin % 86_400_000 !== 0 || event.end % 86_400_000 !== 0)) return Promise.reject(rejection("Invalid all-day event"));
+      return create(event, creationId, event.allDay, Boolean(event.rrule));
     },
     pendingCreations: () => Promise.resolve({ status: "ready", creations: [...scene.creations].map(([creationId, status]) => ({ creationId, status })) }),
     inspectDeletion({ id }) {
