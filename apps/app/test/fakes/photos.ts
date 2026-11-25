@@ -8,7 +8,7 @@ function row(id: number, name: string, owned: boolean) {
   return { id: `m:external_primary:i:${id}`, name, owned, kind: "image", image: photo, date: 1795400000000 + id * 60_000, width: 1, height: 1, size: 68, revision: `rev-image-${id}` };
 }
 
-type FixtureRow = ReturnType<typeof row> & { duration?: number; path?: string };
+type FixtureRow = ReturnType<typeof row> & { duration?: number; path?: string; trashed?: boolean };
 type ListedRow = Omit<FixtureRow, "owned"> & { owned?: boolean };
 
 function ownedKey(row: Pick<FixtureRow, "id" | "kind">): string {
@@ -59,9 +59,12 @@ export function alphaPhotos(scene: PhotosScene): Faked {
         scene.watching = active;
         return Promise.resolve({ active });
       },
-      list: ({ thumbnails }) => Promise.resolve(scene.access.scope === "denied"
-        ? { items: listed(owned(), thumbnails), next: "" }
-        : { items: listed(scene.rows, thumbnails), next: "", access: scene.access }),
+      list: ({ thumbnails, trashed = false }) => {
+        const binned = (item: { trashed?: boolean }) => (item.trashed === true) === trashed;
+        return Promise.resolve(scene.access.scope === "denied"
+          ? { items: listed(owned().filter(binned), thumbnails), next: "" }
+          : { items: listed(scene.rows.filter(binned), thumbnails), next: "", access: scene.access });
+      },
       listPermitted({ before, query, thumbnails }: Parameters<PhotosPlugin["listPermitted"]>[0] = {}) {
         const rows = scene.rows.filter((item) => query === undefined || item.name.toLowerCase().includes(query.toLowerCase()));
         return Promise.resolve({ items: listed(before === undefined ? rows.slice(0, 2) : rows.slice(2), thumbnails), next: before === undefined && rows.length > 2 ? "next" : "", access: scene.access });

@@ -9,6 +9,7 @@ export const meta: ComponentMeta<InboxListStateProps> = {
   examples: {
     Empty: { kind: "empty", onAction: undefined },
     "No matches": { kind: "noResults", onAction: undefined },
+    Checking: { kind: "checking", onAction: undefined },
     "Not connected": { kind: "notConnected" },
     "Needs access": { kind: "needsAccess" },
     "Spam unavailable": { kind: "unavailable", onAction: undefined },
