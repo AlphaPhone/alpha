@@ -29,20 +29,6 @@ import { replyBlocks } from "../assistant/words.ts"
 import { replyWords } from "@repo/ui"
 import { dictationClock } from "./dictation-clock.vibe"
 
-const views: ReadonlyArray<Shell.View> = [
-  "Phone", "Messages", "Inbox", "Telegram", "Slack", "Calendar", "Clock", "Reminders", "Browser", "Camera", "Photos", "Maps", "Notes", "Contacts", "Files", "Workflows", "Wallet", "Settings",
-]
-
-export function placeOf(view: Shell.View | undefined): number {
-  if (view === undefined) return 1
-  const at = views.indexOf(view)
-  return at >= 0 ? at + 2 : 1
-}
-
-export function viewOfPlace(place: number): Shell.View | undefined {
-  return place >= 2 ? views[place - 2] : undefined
-}
-
 interface SpokenNavigation {
   readonly session: number
   readonly turn: number
@@ -105,7 +91,9 @@ export interface VoiceMemory {
   readonly queuedSentences: string[]
   dispatchedSentences: number
   playbackTurn: number
+  clearedThrough: number
   playbackEpoch: number
+  activeTurn: { readonly turn: number; readonly stop: () => void!! } | undefined
   readonly playLock: Semaphore.Semaphore
   dictatedText: string
   dictatedDurationMs: number | undefined
@@ -131,7 +119,7 @@ export interface VoiceMemory {
   cueAudible(turn: number): void
   /** The turn's acknowledgment is no longer heard: it played out, or it was dropped or cut. */
   endCue(turn: number, how: "Ended" | "Dropped"): void
-  clearQueued(): void
+  clearQueued(through?: number): void
 }
 
 interface SpokenCue {
@@ -169,7 +157,9 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
     queuedSentences: [],
     dispatchedSentences: 0,
     playbackTurn: 0,
+    clearedThrough: 0,
     playbackEpoch: 0,
+    activeTurn: undefined,
     playLock,
     dictatedText: "",
     dictatedDurationMs: undefined,
@@ -181,12 +171,7 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
     cueWaiting: false,
     cue: undefined,
     enqueueSentence(turn: number, text: string) {
-      if (memory.playbackTurn !== turn) {
-        memory.playbackTurn = turn
-        memory.queuedSentences.length = 0
-        memory.dispatchedSentences = 0
-        memory.cueWaiting = false
-      }
+      if (!prepareTurn(turn, true)) return
       // spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s": a cue still queued is dropped here; one already handed to speech is dropped or bounded when this sentence plays.
       if (memory.cueWaiting) {
         memory.queuedSentences.shift()
@@ -196,11 +181,7 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
       memory.queuedSentences.push(text)
     },
     enqueueCue(turn: number, text: string) {
-      if (memory.playbackTurn !== turn) {
-        memory.playbackTurn = turn
-        memory.queuedSentences.length = 0
-        memory.dispatchedSentences = 0
-      }
+      if (!prepareTurn(turn, false)) return false
       // spec/app/assistant/reply.md, "One brief acknowledgment at most, only from the agent's acknowledgment frame, before any tool runs": sentences streamed before it and not yet spoken are the cue's own words, which the acknowledgment replaces; once one is spoken, it is the cue.
       if (memory.dispatchedSentences > 0) return false
       memory.queuedSentences.length = 0
@@ -230,13 +211,25 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
       cue.phase = how === "Ended" && cue.phase === "Audible" ? "Ended" : "Dropped"
       cue.end()
     },
-    clearQueued() {
+    clearQueued(through?: number) {
       memory.playbackEpoch += 1
+      const retired = through ?? Math.max(memory.playbackTurn, memory.activeTurn?.turn ?? 0)
+      if (retired > memory.clearedThrough) memory.clearedThrough = retired
       memory.queuedSentences.length = 0
       memory.dispatchedSentences = 0
       memory.cueWaiting = false
       if (memory.cue !== undefined) memory.endCue(memory.cue.turn, "Dropped")
     },
+  }
+  function prepareTurn(turn: number, clearCue: boolean): boolean {
+    if (turn <= memory.clearedThrough || turn < memory.playbackTurn) return false
+    if (memory.playbackTurn !== turn) {
+      memory.playbackTurn = turn
+      memory.queuedSentences.length = 0
+      memory.dispatchedSentences = 0
+      if (clearCue) memory.cueWaiting = false
+    }
+    return true
   }
   return { memory }
 })
@@ -512,7 +505,7 @@ import { addressedSms, requestedDestination, sameSmsRecipient, smsConfirmation, 
 function placeForDestination(name: string): number | undefined {
   const lowered = name.toLowerCase()
   if (lowered === "home") return 1
-  const matched = views.find((view) => view.toLowerCase() === lowered)
+  const matched = voiceViews.find((view) => view.toLowerCase() === lowered)
   return matched === undefined ? undefined : placeOf(matched)
 }
 
@@ -535,6 +528,7 @@ function voiceTurnOutput({ session, turn, queue, memory, holdForText }: VoiceOut
   let shown = ""
   let said = 0
   const say = (sentence: string) => {
+    if (turn <= memory.clearedThrough || turn < memory.playbackTurn) return
     memory.enqueueSentence(turn, spokenForm(replyWords(sentence, true)))
     Queue.offerUnsafe(queue, { type: "sentence", session, turn })
   }
@@ -547,7 +541,7 @@ function voiceTurnOutput({ session, turn, queue, memory, holdForText }: VoiceOut
   let proposing = false
   let usedDirect = false
   const feed = (written: string, provisional: boolean) => {
-    if (provisional || proposing || holdForText) return
+    if (provisional || proposing || holdForText || turn <= memory.clearedThrough) return
     const clean = speakableText(replyBlocks(written, true).words)
     if (clean.length <= shown.length) return
     shown = clean
@@ -558,7 +552,7 @@ function voiceTurnOutput({ session, turn, queue, memory, holdForText }: VoiceOut
   let cued = false
   let toolRan = false
   const cue = (text: string) => {
-    if (holdForText || cued || toolRan) return
+    if (holdForText || cued || toolRan || turn <= memory.clearedThrough) return
     const line = spokenForm(speakableText(text)).trim()
     if (line === "") return
     cued = true
@@ -575,7 +569,7 @@ function voiceTurnOutput({ session, turn, queue, memory, holdForText }: VoiceOut
   }
   const ready = (fullText: string, actionResults: readonly { readonly action: string }[]) => {
     for (const { action } of actionResults) ran(action)
-    if (holdForText || proposing) return
+    if (holdForText || proposing || turn <= memory.clearedThrough) return
     const full = speakableText(replyBlocks(fullText).words)
     if (full.length > shown.length) shown = full
     sayFrom(full.length >= shown.length ? full : shown, true)
@@ -662,6 +656,14 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
   }
   const controller = new TurnController(transport)
   try ignore(tryPromise(() => controller.bind(record)))
+  let settled = false
+  const stopActive = () => effect {
+    if (settled) return
+    settled = true
+    try ignore(tryPromise(() => controller.interrupt()))
+  }
+  const active = { turn, stop: stopActive }
+  memory.activeTurn = active
   const output = voiceTurnOutput({ session, turn, queue, memory, holdForText: sms !== undefined })
   const observation = observed
   const current = conversation === undefined ? undefined : try conversation.get()
@@ -723,7 +725,9 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
     const first = try sent(direct)
     return resendWithoutMode(first, direct !== undefined) && (try lease.verified) && (try currentRequest) ? try sent(undefined) : first
   }, stopped), effect {
-    if (controller.pending) try ignore(tryPromise(() => controller.interrupt()))
+    if (memory.activeTurn === active) memory.activeTurn = undefined
+    if (controller.pending) try stopActive()
+    else settled = true
   })
   if (!(try currentRequest)) return refused
   if (isCloudFundsRefusal(result)) {
@@ -996,7 +1000,7 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
       const closed = effect { try (try VoiceBridge).closeMic(session); return true } catch () => false
       return closed ? { type: "micClosed", session } : { type: "micCloseFailed", session }
     }, { type: "micCloseFailed", session });
-    when { tag: "Send", let session, let turn }: stream(`send ${session}:${turn}`, sendVoiceTurn(session, turn), { type: "replyEnds", session, turn, asks: false });
+    when { tag: "Send", let session, let turn }: stream("send", sendVoiceTurn(session, turn), { type: "replyEnds", session, turn, asks: false });
     when { tag: "Play", let session, let turn }: answer(`play ${session}:${turn}:${fresh()}`, effect {
       const { memory } = try VoiceWords
       const bridge = try VoiceBridge
@@ -1043,11 +1047,15 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
       return { type: "sentencePlayed", session, turn }
     }, { type: "sentencePlayed", session, turn });
     when { tag: "Hush", let turn }: run("hush", effect {
-      (try VoiceWords).memory.clearQueued()
+      const { memory } = try VoiceWords
+      memory.clearQueued(turn)
+      if (memory.activeTurn !== undefined && memory.activeTurn.turn <= turn) try memory.activeTurn.stop()
       try (try VoiceBridge).hush(turn)
     });
     when { tag: "Shut", let session }: answer("shut", effect {
-      (try VoiceWords).memory.clearQueued()
+      const { memory } = try VoiceWords
+      memory.clearQueued()
+      if (memory.activeTurn !== undefined) try memory.activeTurn.stop()
       const confirmed = try (try VoiceBridge).shut(session)
       return { type: "stopped", confirmed }
     }, { type: "stopped", confirmed: false });
@@ -1190,12 +1198,12 @@ const discardedDictation = applying(Voice.Machine, (voice) => voice.recorder, ef
 const bridgeEvents = hearing(
   Stream.unwrap(effect {
     const bridge = try VoiceBridge
-    const { memory } = try VoiceWords
     const voice = try Voice.Machine
+    const { memory } = try VoiceWords
     return Stream.mapEffect(bridge.events, effect (event: VoiceEvent): (Voice.Event | undefined)!!(Device | Layers.Machine | VoiceBridge) => {
-      if (event.kind === "speechEnd") {
+      if ((event.kind === "speechEnd" || (event.kind === "transcript" && event.final)) && event.text !== "") {
         const state = try voice.get()
-        if (event.text !== "" && state.session === event.session && state.phase === "Listening") {
+        if (Voice.canTurnEnded(state, event.session)) {
           memory.heardText = { session: state.session, turn: state.turn, text: event.text }
         }
       }

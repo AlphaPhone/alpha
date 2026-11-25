@@ -3,7 +3,8 @@ import type { TurnResult } from "@elizaos/agent"
 import * as Conversation from "../../gen/app__assistant.effect.vibe"
 import { resent } from "../../gen/app__assistant__context.effect.vibe"
 import type { Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe"
-import { type Detent, type View, parseEvent } from "../../gen/app__shell.effect.vibe"
+import { Machine as Shell, type Detent, type View, parseEvent, showing } from "../../gen/app__shell.effect.vibe"
+import * as Voice from "../../gen/app__voice.effect.vibe"
 import { readOperation } from "@elizaos/agent"
 import { Agent } from "../platform/agent.vibe"
 import { AgentPages, type AgentPage } from "../platform/browser.vibe"
@@ -185,6 +186,34 @@ effect function navigationEnded(conversation: ConversationMachine.Shape, ticket:
   return Option.isSome(ended) && ended.value.opening.id === ticket && ended.value.opening.outcome === "Confirmed"
 }
 
+export const voiceViews: ReadonlyArray<View> = [
+  "Phone", "Messages", "Inbox", "Telegram", "Slack", "Calendar", "Clock", "Reminders", "Browser", "Camera", "Photos", "Maps", "Notes", "Contacts", "Files", "Workflows", "Wallet", "Settings",
+]
+
+export function placeOf(view: View | undefined): number {
+  if (view === undefined) return 1
+  const at = voiceViews.indexOf(view)
+  return at >= 0 ? at + 2 : 1
+}
+
+export function viewOfPlace(place: number): View | undefined {
+  return place >= 2 ? voiceViews[place - 2] : undefined
+}
+
+// spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"
+/** Open `view` as voice opens any screen it is asked for; whether it is in front. */
+effect function voiced(view: View) {
+  const shell = try Shell
+  if (showing(try shell.get(), view)) return true
+  const maybeVoice = Option.getOrUndefined(try Effect.serviceOption(Voice.Machine))
+  if (maybeVoice === undefined) return try contained(shell.send({ type: "agentOpenView", view }), "opening the view a spoken reply prepared")
+  const current = try maybeVoice.get()
+  const place = placeOf(view)
+  if (!Voice.canAgentNavigates(current, current.session, place)) return false
+  if (!(try contained(maybeVoice.send({ type: "agentNavigates", session: current.session, place }), "opening the view a spoken reply prepared"))) return false
+  try Stream.runHead(Stream.filter(maybeVoice.changes, (state) => state.session !== current.session || state.claim !== place))
+  return showing(try shell.get(), view)
+}
 /**
  * Open the saved note `noteId` for the owner's request `asked`: only if Notes would let the agent open it as it is
  * now, Notes is brought to the front by `front`, and then opened there. Whether the view switched and the note opened;

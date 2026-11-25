@@ -15,7 +15,7 @@ import type { Machine as ChatsMachine } from "../../gen/app__assistant__chats.ef
 import { useMachine as useCards } from "../../gen/app__assistant__cards.react.ts";
 import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import { type Composer as Writing, type Event as ComposerEvent, Machine as ComposerMachine } from "../../gen/app__assistant__composer.effect.vibe";
-import { attachments as attachmentCount, content, enabled as composerAllows, maxFiles, textLimit } from "../../gen/app__assistant__composer.ts";
+import { content, enabled as composerAllows, maxFiles, textLimit } from "../../gen/app__assistant__composer.ts";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
 import type { Machine as DockMachine } from "../../gen/app__assistant__dock.effect.vibe";
 import { browserFieldPull, focused as dockFocused, isOpen as dockOpen, pill as dockPill, sent as dockSent } from "../../gen/app__assistant__dock.ts";
@@ -46,7 +46,7 @@ import type { Machine as NotesMachine } from "../../gen/app__notes.effect.vibe";
 import type { Documents } from "../platform/documents.vibe";
 import { AttachmentSources, type AttachmentSourceRow } from "./AttachmentSources.tsx";
 import { AttachmentPicker, choosePickerRow, clearPickerChoice, importPickerFiles, openAttachmentPicker, openContactAttachmentPicker, pickSystemDocument, selectPickerVolume, upPickerFolder } from "./attachment-picker.vibe";
-import { askComms, freedom, openChatSearch, restTyping } from "./assistant.vibe";
+import { askComms, freedom, holdAndSend, openChatSearch, restTyping, startAndSend } from "./assistant.vibe";
 import { contactChatActionsId } from "./contact-chat-id.ts";
 import { acceptedFiles, acceptedPhotos, attachmentAuthority, previewFile, removeContactFile, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
 import { chip, type MessageActions, useHistorySheets, useMessageRows } from "./history.tsx";
@@ -688,13 +688,10 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       return;
     }
     if (newChat) {
-      board.queueSend();
-      void chats.send(start);
+      void runtime.runPromise(startAndSend(start));
       return;
     }
-    board.hold(seen.typed);
-    board.type("");
-    void composer.send(hold);
+    void runtime.runPromise(holdAndSend(hold));
   };
   const quotedLine = board.line(shown.chosen, writing.editor.quote);
   const quoted = quotedLine === undefined ? undefined : wordsOf(quotedLine);
@@ -809,7 +806,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           onAttach: selectedContact !== undefined && searchRoute !== undefined && contactFiles.length < maxFiles && !inFlight(talking.turn)
             ? () => { void runtime.runPromise(openContactAttachmentPicker(searchRoute, selectedContact)); }
             : !onComms && composer.can({ type: "attach", count: 1 }) ? () => {
-            const request = { type: "openPicker", room: maxFiles - attachmentCount(writing.editor) } as const;
+            const request = { type: "openPicker", room: maxFiles - writing.editor.files } as const;
             if (!attachments.can(request)) return;
             void runtime.runPromise(attachmentAuthority()).then((authority) => {
               if (authority === undefined) {
