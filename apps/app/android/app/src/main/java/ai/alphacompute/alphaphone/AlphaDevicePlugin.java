@@ -25,6 +25,23 @@ public final class AlphaDevicePlugin extends Plugin {
   call.resolve(new JSObject().put("session", session == null ? org.json.JSONObject.NULL : session));
  }
 
+ @PluginMethod public void textAsk(PluginCall call) {
+  if (!(getActivity() instanceof MainActivity activity)) {
+   call.resolve(new JSObject().put("ticket", 0));
+   return;
+  }
+  activity.runOnUiThread(() -> call.resolve(new JSObject().put("ticket", activity.textAskTicket())));
+ }
+
+ @PluginMethod public void closeTextAsk(PluginCall call) {
+  Integer ticket = call.getInt("ticket");
+  if (ticket == null || !(getActivity() instanceof MainActivity activity)) {
+   call.resolve(new JSObject().put("closed", false));
+   return;
+  }
+  activity.runOnUiThread(() -> call.resolve(new JSObject().put("closed", activity.closeTextAsk(ticket))));
+ }
+
  /** Explicit bounded text handoff; chooser opening never claims a sent message. */
  static String boundedShareText(String text){
   if(text==null||text.isBlank()||text.indexOf('\0')>=0||text.length()>65536)throw new IllegalArgumentException();

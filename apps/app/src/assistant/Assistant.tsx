@@ -72,6 +72,7 @@ export interface AssistantProps {
     voice?: (presentation: { compactDock: boolean; atBar: boolean; onKeyboard: VoiceKeyboard }) => ReactNode;
   };
   canReadAloud?: boolean;
+  onCloseTextAsk?: () => void;
 }
 
 function turnOf(talking: Talking, label: string): AssistantTurnNoteProps["status"] | undefined {
@@ -405,7 +406,7 @@ function keyboardScope(runtime: AssistantProps["runtime"]): string | undefined {
 }
 
 /** @model spec/app/assistant/index.md */
-export function Assistant({ runtime, messageActions, speech, canReadAloud = false }: AssistantProps) {
+export function Assistant({ runtime, messageActions, speech, canReadAloud = false, onCloseTextAsk }: AssistantProps) {
   const conversation = useConversation(runtime);
   const attachments = useAttachments(runtime);
   const chats = useChats(runtime);
@@ -577,6 +578,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const view = talking.context.showing.tag === "App" ? talking.context.showing.view : "Home";
   const open = dockOpen(assistantDetent);
   const full = assistantDetent === "Full";
+  const textAsk = shell.state?.textAsk.tag === "TextAskVisit";
   const keptHeight = assistantDetent === "Sheet" && dock.state && dock.state.kept > 0 ? dock.state.kept : undefined;
   const openWithFocus = (focusField: boolean) => {
     for (const ask of dockFocused(assistantDetent)) {
@@ -627,13 +629,14 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           title: seen.titles.get(shown.chosen) ?? "Ask Alpha",
           context: { view, selected: talking.context.selected, sensitive: talking.context.sensitive },
           subtitle: onComms ? <CommsTarget runtime={runtime} placement="context" /> : undefined,
-          onHome: () => void runtime.runPromise(home()),
-          onClose: open && shell.can({ type: "goBack" }) ? () => void shell.send({ type: "goBack" }).then((lowered) => { if (full && lowered._tag === "Success" && shell.can({ type: "goBack" })) void shell.send({ type: "goBack" }); }) : undefined,
+          returnOnClose: textAsk,
+          onHome: textAsk ? onCloseTextAsk : () => void runtime.runPromise(home()),
+          onClose: textAsk ? onCloseTextAsk : open && shell.can({ type: "goBack" }) ? () => void shell.send({ type: "goBack" }).then((lowered) => { if (full && lowered._tag === "Success" && shell.can({ type: "goBack" })) void shell.send({ type: "goBack" }); }) : undefined,
           expanded: assistantDetent === "Full",
-          onResize: assistantDetent === "Full"
+          onResize: textAsk ? undefined : assistantDetent === "Full"
             ? () => void shell.send({ type: "goBack" })
             : shell.can({ type: "raise", detent: "Full" }) ? () => void shell.send({ type: "raise", detent: "Full" }) : undefined,
-          grabber: open ? grabber : undefined,
+          grabber: open && !textAsk ? grabber : undefined,
         }}
         attachmentNotice={onComms ? undefined : seen.attachmentNotice}
         transcript={{

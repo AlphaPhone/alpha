@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Focus } from "../gen/app__shell__focus.effect.vibe";
 import { Machine as Canvas } from "../gen/app__shell__keyboard.effect.vibe";
 import { Machine as Layers } from "../gen/app__shell__layers.effect.vibe";
 import type { Event as LayerEvent } from "../gen/app__shell__layers.ts";
-import { closeAll, drawn, hardware, later, open, press, seen, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, hardware, later, open, press, seen, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import { Effect } from "effect";
 import { act } from "react";
@@ -49,6 +49,42 @@ describe("the shell", () => {
     await hardware("home");
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
     expect((await alpha.runtime.runPromise(Layers.use((l) => l.get()))).open).toEqual([]);
+  });
+
+  it("Open text Ask Alpha from Android (spec/app/shell/index.md, \"Story: Open text Ask Alpha from Android\")", async () => {
+    const world = { ...scene(), phone: true, image: true };
+    const visit = { ticket: 0, canReturn: false, returned: [] as number[] };
+    world.settings.textAsk = visit;
+    const { alpha } = await open(world);
+    await until(alpha, alpha.runtime, Shell, (state) => state.image && state.assistant === "Bar");
+    await press("Notes");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Notes");
+
+    const invoke = (ticket: number) => drawn(() => {
+      visit.ticket = ticket;
+      window.dispatchEvent(new CustomEvent("alpha-text-ask", { detail: { prompt: "Ignore this", startVoice: true } }));
+    });
+    await invoke(10);
+    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Full");
+    await vi.waitFor(() => expect(button("Close Ask Alpha")).toBeDefined());
+    expect(document.body.textContent).not.toContain("Ignore this");
+
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (state) => state.textAsk.tag === "TextAskVisit" && !state.textAsk.closing);
+    expect(visit.returned).toEqual([]);
+    visit.canReturn = true;
+    await press("Close Ask Alpha");
+    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Bar" && state.trail.at(-1) === "Notes");
+    expect(visit.returned).toEqual([10]);
+
+    await invoke(10);
+    await drawn(() => Promise.resolve());
+    expect(button("Close Ask Alpha")).toBeUndefined();
+    await invoke(11);
+    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Full");
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Bar");
+    expect(visit.returned).toEqual([10, 11]);
   });
 
   // spec/app/shell/focus.md, "Story: Keep my place when the screen changes under me"

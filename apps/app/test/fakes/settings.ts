@@ -24,6 +24,7 @@ export interface SettingsScene {
   facts: SystemFacts;
   recovery?: RecoveryScene;
   listener?: ListenerScene;
+  textAsk?: { ticket: number; canReturn: boolean; returned: number[] };
   roles: AndroidRoleStatus[];
   launcher: boolean;
   version: string;
@@ -270,6 +271,16 @@ export function elizaPasswords(scene: SettingsScene): Faked {
 export function settingsHost(scene: SettingsScene) {
   return {
     settingsFacts: () => Promise.resolve(scene.hostFacts),
+    textAsk: () => Promise.resolve({ ticket: scene.textAsk?.ticket ?? 0 }),
+    closeTextAsk: ({ ticket }: { ticket: number }) => {
+      const visit = scene.textAsk;
+      const closed = visit?.ticket === ticket && visit.canReturn;
+      if (closed) {
+        visit.returned.push(ticket);
+        visit.ticket = 0;
+      }
+      return Promise.resolve({ closed });
+    },
     copyText: ({ text }: { text: string }) => {
       if (scene.refusesCopy) return Promise.reject(new Error("Clipboard unavailable"));
       scene.copied.push(text);

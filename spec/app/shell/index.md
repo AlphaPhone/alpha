@@ -24,9 +24,10 @@ rests as a bar, takes typing, opens as a sheet, or fills the screen.
 ```quint
 type View = Phone | Messages | Inbox | Calendar | Clock | Reminders | Browser | Camera | Photos | Maps | Notes | Contacts | Files | Workflows | Wallet | Settings
 type Detent = Bar | Typing | Sheet | Full
-type Shell = { trail: List[View], drawer: bool, assistant: Detent, image: bool, contacts: bool, route: int, spokenRoute: int }
+type TextAsk = NoTextAsk | TextAskVisit({ ticket: int, prior: Detent, closing: bool })
+type Shell = { trail: List[View], drawer: bool, assistant: Detent, image: bool, contacts: bool, route: int, spokenRoute: int, textAsk: TextAsk, textAskThrough: int }
 
-pure val initial: Shell = { trail: List(), drawer: false, assistant: Bar, image: false, contacts: false, route: 0, spokenRoute: 0 }
+pure val initial: Shell = { trail: List(), drawer: false, assistant: Bar, image: false, contacts: false, route: 0, spokenRoute: 0, textAsk: NoTextAsk, textAskThrough: 0 }
 pure val maxTrail = 6
 
 type RouteMove = { before: Shell, after: Shell }
@@ -135,7 +136,7 @@ keeps the page for the next visit.
 pure def layers(s: Shell): int =
   s.trail.length() + (if (s.drawer) 1 else 0) + (if (s.assistant == Bar) 0 else if (s.assistant == Full) 2 else 1)
 
-pure def canGoBack(s: Shell): bool = layers(s) > 0
+pure def canGoBack(s: Shell): bool = s.textAsk == NoTextAsk and layers(s) > 0
 
 pure def goBack(s: Shell): Shell =
   if (s.assistant == Full) recordRoute({ before: s, after: { ...s, assistant: Sheet } })
@@ -173,7 +174,7 @@ task.
 ```quint
 pure def canGoHome(s: Shell): bool = layers(s) > 0
 
-pure def goHome(s: Shell): Shell = recordRoute({ before: s, after: { ...s, trail: List(), drawer: false, assistant: Bar } })
+pure def goHome(s: Shell): Shell = recordRoute({ before: s, after: { ...s, trail: List(), drawer: false, assistant: Bar, textAsk: NoTextAsk } })
 ```
 
 ### Agent navigation shows an admitted app or Home without lowering Ask Alpha
@@ -241,7 +242,7 @@ pure def stepSpokenRouteMarksTheWriter(before: Shell, via: str, after: Shell): b
 ### When Alpha opens again the trail is kept, and Ask Alpha is closed
 
 ```quint
-pure def reopen(s: Shell): Shell = recordRoute({ before: s, after: { ...s, drawer: false, assistant: Bar } })
+pure def reopen(s: Shell): Shell = recordRoute({ before: s, after: { ...s, drawer: false, assistant: Bar, textAsk: NoTextAsk, textAskThrough: 0 } })
 ```
 
 ### The trail never holds more than six apps
@@ -292,4 +293,52 @@ pure def sometimesDrawerOpen(s: Shell): bool = s.drawer
 
 ```quint
 pure def sometimesContactsShowing(s: Shell): bool = showing(s, Contacts)
+```
+
+## Story: Open text Ask Alpha from Android
+
+> As the owner, I want an Android assistant invocation on my Alpha image
+> to open Ask Alpha and let me return to where I was without opening the
+> microphone.
+
+### Only a native Android visit opens text Ask, and Back or Close settles that exact visit
+
+Alpha raises its existing chat without starting a voice turn or applying
+any intent content. The phone says when the current visit has closed.
+When Alpha was already visible the prior panel returns in place.
+Otherwise Android moves Alpha's task behind the preceding one. A refused
+return leaves Ask open so the owner can try again.
+
+```quint
+pure val ticketValues = Set(1, 2, 3)
+
+pure def canOpenTextAsk(s: Shell, ticket: int): bool = s.image and ticket > s.textAskThrough and s.textAsk == NoTextAsk
+pure def openTextAsk(s: Shell, ticket: int): Shell =
+  recordRoute({ before: s, after: { ...s, assistant: Full, textAsk: TextAskVisit({ ticket: ticket, prior: s.assistant, closing: false }), textAskThrough: ticket } })
+
+pure def canCloseTextAsk(s: Shell, ticket: int): bool =
+  val visit = s.textAsk
+  match visit { | NoTextAsk => false | TextAskVisit(v) => not(v.closing) and v.ticket == ticket }
+
+pure def closeTextAsk(s: Shell, ticket: int): Shell =
+  val visit = s.textAsk
+  match visit { | NoTextAsk => s | TextAskVisit(v) => { ...s, textAsk: TextAskVisit({ ...v, closing: true }) } }
+
+pure def canTextAskClosed(s: Shell, ticket: int, closed: bool): bool =
+  val visit = s.textAsk
+  match visit { | NoTextAsk => false | TextAskVisit(v) => v.closing and v.ticket == ticket }
+
+pure def textAskClosed(s: Shell, ticket: int, closed: bool): Shell =
+  val visit = s.textAsk
+  match visit {
+    | NoTextAsk => s
+    | TextAskVisit(v) =>
+      if (closed) recordRoute({ before: s, after: { ...s, assistant: v.prior, textAsk: NoTextAsk } })
+      else { ...s, textAsk: TextAskVisit({ ...v, closing: false }) }
+  }
+
+pure def alwaysTextAskIsFull(s: Shell): bool = s.textAsk != NoTextAsk implies s.assistant == Full
+
+pure def stepClosedTextAskKeepsTheAdmittedTicket(before: Shell, via: str, after: Shell): bool =
+  (via == "closeTextAsk" or via == "textAskClosed") implies after.textAskThrough == before.textAskThrough
 ```
