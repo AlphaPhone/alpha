@@ -24,9 +24,11 @@ module page {
     return [...document.querySelectorAll<HTMLElement>(focusable)].find((element) => keyOf(element) === key)
   }
   /** The key of the control focused now. @throws {never} */
-  export const active = (): string => keyOf(document.activeElement)
+  export const active = (): string => document.activeElement?.closest("[inert]") ? "" : keyOf(document.activeElement)
   /** Whether focus is inside a sheet, menu or dialog. @throws {never} */
   export const layeredNow = (): boolean => document.activeElement?.closest(layered) != null
+  /** Whether focus still belongs to the closing Apps drawer. @throws {never} */
+  export const focusedInApps = (): boolean => document.activeElement?.closest("[data-alpha-apps-drawer]") != null
   /** Whether a control with `key` is on the page. @throws {never} */
   export const shown = (key: string): boolean => key !== "" && find(key) !== undefined
   /** Focus the control with `key`, waiting for an inert wrapper to clear if the layer just closed before React painted. @throws {never} */
@@ -48,7 +50,10 @@ module page {
   function targetOf(target: Target): HTMLElement | undefined {
     const main = document.querySelector("main")
     if (main === null) return undefined
-    if (target === "Search") return main.querySelector<HTMLElement>("input[type=search]") ?? undefined
+    if (target === "Search") {
+      const field = document.documentElement.hasAttribute("data-alpha-keyboard") ? "input[type=search]" : "h1"
+      return main.querySelector<HTMLElement>(`[data-alpha-apps-drawer] ${field}`) ?? undefined
+    }
     if (target === "HomeStart") return main.querySelector<HTMLElement>(focusable) ?? undefined
     if (target === "Title") return main.querySelector<HTMLElement>("h1") ?? undefined
     if (target === "Region") return main
@@ -88,7 +93,7 @@ module page {
   /** @throws {never} */
   export const paged = (): boolean => typeof window !== "undefined" && typeof document !== "undefined"
 }
-import { active, found, give, layeredNow, moveTo, paged, shown, watched } from page
+import { active, focusedInApps, found, give, layeredNow, moveTo, paged, shown, watched } from page
 import type { Heard } from page
 
 /** How long the shell waits for a frame. */
@@ -97,9 +102,9 @@ const frame = Effect.sleep("16 millis")
 /** The control the owner last focused outside a sheet, menu or dialog: the opener of the next layer. */
 let outside = ""
 
-/** What the screen showing gives focus to: Home's first control, or the app's title. */
+/** What the screen showing gives focus to: the Apps drawer, Home's first control, or the app's title. */
 function targetFor(s: Shown): Target {
-  return s.trail.length > 0 ? "Title" : "HomeStart"
+  return s.trail.length > 0 ? "Title" : s.drawer ? "Search" : "HomeStart"
 }
 
 effect function tell(event: Event): (Focus.Focus | undefined)!!Focus.Machine {
@@ -169,12 +174,21 @@ effect function closed(layer: string): void!!Focus.Machine {
 const layering = started(effect {
   if (!paged()) return
   const layers = try Layers.Machine
+  const shell = try Shell.Machine
+  const drawer = Stream.changes(Stream.map(shell.changes, (state) => state.drawer))
   let open: ReadonlyArray<string> = []
-  try Stream.runForEach(layers.changes, effect (l) => {
-    const now = l.open.map((layer) => layer.id)
+  try Stream.runForEach(Stream.zipLatest(layers.changes, drawer), effect ([l, apps]) => {
+    const now = [...(apps ? ["apps-drawer"] : []), ...l.open.map((layer) => layer.id)]
     if (now.some((id) => !open.includes(id))) try heardFocus()
-    for (const id of now) if (!open.includes(id)) try tell({ type: "layerOpened", layer: id, opener: outside })
-    for (const id of open) if (!now.includes(id)) try closed(id)
+    for (const id of now) if (!open.includes(id)) try tell({ type: "layerOpened", layer: id, opener: id === "apps-drawer" ? "home-apps" : outside })
+    for (const id of open) {
+      if (now.includes(id)) continue
+      if (id === "apps-drawer") {
+        if (focusedInApps()) try tell({ type: "blurred" })
+        else try heardFocus()
+      }
+      try closed(id)
+    }
     open = now
   })
 }, "focus")
@@ -182,7 +196,7 @@ const layering = started(effect {
 /** Focus, in memory: given to each new screen, back to a layer's opener, told as it moves, and marked on the page while the owner moves by keyboard. */
 export const focus = together(
   reacting(Focus, {}),
-  following(Shell.Machine, (s) => ({ screen: s.trail.at(-1) ?? "home", target: targetFor(s) }), Focus.Machine, ({ target }) => ({ type: "screenChanged", target } as const)),
+  following(Shell.Machine, (s) => ({ screen: s.trail.at(-1) ?? (s.drawer ? "apps-drawer" : "home"), target: targetFor(s) }), Focus.Machine, ({ target }) => ({ type: "screenChanged", target } as const)),
   framed,
   watching,
   layering,

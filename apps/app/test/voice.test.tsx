@@ -11,9 +11,12 @@ import { placeOf, type VoiceWords, voicing } from "../src/voice/voice.vibe";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Dock } from "../gen/app__assistant__dock.effect.vibe";
 import { Machine as Locator } from "../gen/app__assistant__context.effect.vibe";
+import { Machine as Files } from "../gen/app__files.effect.vibe";
+import { Machine as FilePreview } from "../gen/app__files__preview.effect.vibe";
 import type { Mount } from "../src/areas.ts";
 import { dictate } from "../src/assistant/dictation.vibe";
 import assistant from "../src/assistant/index.tsx";
+import files from "../src/files/index.tsx";
 import { button, closeAll, drawn, fill, open, press, seen, underAct, until as drawnUntil } from "./alpha.tsx";
 import { scene, type Scene } from "./fakes/scene.ts";
 import { fakeWorld } from "./fakes/world.vibe";
@@ -316,6 +319,27 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     expect(world.ask.kept.get("c1")?.messages.at(-1)?.text).toBe(written.join(""));
   });
 
+  // spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s"
+  it("says the agent's acknowledgment at once, before the reply it was waiting for, and only once", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    world.ask.acknowledgment = "Let me check your calendar.";
+    world.ask.holdAfterTools = true;
+    world.ask.nextReplyChunks = ["You're clear tomorrow. ", "Nothing is booked."];
+    const runtime = await startListening(world);
+
+    speakUtterance(world, "What's on tomorrow");
+    await untilCondition(runtime, () => world.voice.spoken.length === 1, () => world.voice.spoken);
+    expect(world.voice.spoken.map((one) => ({ text: one.text, append: one.append }))).toEqual([{ text: "Let me check your calendar.", append: false }]);
+    for (const release of [...world.ask.turns.values()]) release();
+    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 1 && s.turn === 2);
+    expect(world.voice.spoken.map((one) => ({ text: one.text, append: one.append }))).toEqual([
+      { text: "Let me check your calendar.", append: false },
+      { text: "You're clear tomorrow.", append: true },
+      { text: "Nothing is booked.", append: true },
+    ]);
+    expect(world.ask.kept.get("c1")?.messages.at(-1)?.text).toBe("You're clear tomorrow. Nothing is booked.");
+  });
+
   // spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"
   it("keeps listening after other refusals and ends quietly when Cloud refuses a spoken turn for spent funds", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
@@ -432,12 +456,16 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
 const talkMounts: Mount[] = [{ at: "assistant", load: () => import("../src/assistant/index.tsx") }];
 
 describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold a spoken conversation\")", () => {
-  it("draws the compact Talk waveform for the device's listening and muted phases", async () => {
-    const world = { ...scene(), phone: true };
+  it.each([
+    { name: "Home", view: undefined },
+    { name: "Calendar", view: "Calendar" },
+    { name: "Browser", view: "Browser" },
+  ] as const)("draws the compact Talk waveform over $name during on-device speech", async ({ view }) => {
+    const world = { ...scene(), phone: true, signedIn: false };
     const { alpha } = await open(world, talkMounts);
     const area = assistant.runtime(alpha);
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
-    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "openView", view: "Calendar" }))));
+    if (view !== undefined) await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "openView", view }))));
     await press("Talk");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");
     const waveform = () => document.querySelector("[data-alpha-pill-voice] [data-alpha-voice-animation]");
@@ -455,7 +483,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
   });
 
   it("restores the local speaker before unrelated playback when Talk stops during a mute (spec/app/voice/index.md, \"Speaker mute is offered after the current speech bridge confirms gain control\")", async () => {
-    const world = { ...scene(), phone: true };
+    const world = { ...scene(), phone: true, signedIn: false };
     const { alpha } = await open(world, talkMounts);
     const area = assistant.runtime(alpha);
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
@@ -497,7 +525,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
   });
 
   it("keeps the speaker control hidden when the live bridge refuses gain (spec/app/voice/index.md, \"Speaker mute is offered after the current speech bridge confirms gain control\")", async () => {
-    const world = { ...scene(), phone: true };
+    const world = { ...scene(), phone: true, signedIn: false };
     world.voice.speakerGainGate = () => Promise.reject(new Error("Output gain unavailable"));
     const { alpha } = await open(world, talkMounts);
     const area = assistant.runtime(alpha);
@@ -587,6 +615,50 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect([world.ask.said.at(-1), world.ask.metadata.length, world.ask.metadata.at(-1)]).toEqual(["And now?", 3, typed]);
     await press("Stop voice conversation");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
+  });
+
+  // spec/app/assistant/context.md, "A spoken request about the open document attaches it for that turn"
+  it.each([
+    { text: "The shipment arrives on Wednesday", secret: false },
+    { text: "Your verification code is 482913", secret: true },
+  ])("keeps ordinary voice turns opaque and attaches only the requested safe text ($secret)", async ({ text, secret }) => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    world.ask.metadata = [];
+    world.ask.spokenFiles = [];
+    world.files.texts["Documents/notes.txt"] = text;
+    const at = world.files.stored.findIndex((file) => file.path === "Documents/notes.txt");
+    const record = world.files.stored[at];
+    if (record === undefined) throw new Error("no text document");
+    world.files.stored[at] = { ...record, size: text.length };
+    const { alpha } = await open(world, [...talkMounts, { at: "view:Files", load: () => import("../src/files/index.tsx") }]);
+    const area = assistant.runtime(alpha);
+    const storage = files.runtime(alpha);
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "openView", view: "Files" }))));
+    await drawnUntil(alpha, area, Conversation, (state) => state.ready && state.observing && state.context.showing.tag === "App" && state.context.showing.view === "Files");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
+    await drawnUntil(alpha, storage, Files, (state) => state.storage.status === "Loaded");
+    await press("Internal storage");
+    await drawnUntil(alpha, storage, Files, (state) => state.listing.status === "Loaded" && state.trail.length === 1);
+    await press("Documents");
+    await drawnUntil(alpha, storage, Files, (state) => state.listing.status === "Loaded" && state.trail.length === 2);
+    await press("notes.txt");
+    await drawnUntil(alpha, storage, FilePreview, (state) => state.content.status === "Loaded" && state.secret === secret);
+
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");
+    speakUtterance(world, "What should I do now?");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 1 && state.phase === "Listening" && state.mic === "On");
+    expect(world.ask.spokenFiles?.at(-1)).toEqual({ channel: "VOICE_DM", images: undefined });
+    if (!secret) expect(world.ask.metadata.at(-1)).toMatchObject({ observation: { view: "files", selectedObject: { kind: "document" } } });
+
+    speakUtterance(world, "Please summarize this file");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 2 && state.phase === "Listening");
+    expect(world.ask.spokenFiles?.at(-1)).toEqual({ channel: "VOICE_DM", images: secret ? undefined : [
+      { data: btoa(text), mimeType: "text/plain", name: "notes.txt" },
+    ] });
+    expect(JSON.stringify(world.ask.metadata)).not.toContain(text);
+    await press("Stop voice conversation");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle");
   });
 
   // spec/app/voice/index.md, "Starting asks for the microphone the first time, opens it once it is allowed, and holds the speech engine while talking"; spec/app/voice/index.md, "Audio leaves the phone only on a route the owner agreed to"; spec/app/voice/index.md, "A failed conversation ends quietly: why it failed is kept only until voice returns to idle, and nothing is shown"

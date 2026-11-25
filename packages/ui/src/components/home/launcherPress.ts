@@ -23,7 +23,7 @@ export function useLauncherPress(hold: LauncherHold | undefined, onHold: (() => 
   return {
     "data-launcher-hold": onHold ? "" : undefined,
     onPointerDown: (event: PointerEvent<HTMLButtonElement>) => {
-      if (!event.isPrimary || event.button !== 0) return;
+      if (!event.isPrimary || event.button !== 0 || event.currentTarget.disabled) return;
       stop();
       consumedRef.current = false;
       if (!hold || !onHold) return;
@@ -46,7 +46,7 @@ export function useLauncherPress(hold: LauncherHold | undefined, onHold: (() => 
     onPointerLeave: end,
     onPointerCancel: end,
     onContextMenu: (event: MouseEvent<HTMLButtonElement>) => {
-      if (!onHold) return;
+      if (!onHold || event.currentTarget.disabled) return;
       event.preventDefault();
       stop();
       if (consumedRef.current) return;

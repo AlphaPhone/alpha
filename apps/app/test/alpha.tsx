@@ -90,9 +90,12 @@ export function asleep(world: Scene, ms: number) {
 }
 
 /** The button whose accessible name is `name`, if one is shown. */
-export const button = (name: string) => [...document.querySelectorAll("button")].find((found) => (found.getAttribute("aria-label") ?? found.textContent) === name);
+export const button = (name: string | RegExp) => [...document.querySelectorAll("button")].find((found) => {
+  const label = found.getAttribute("aria-label") ?? found.textContent ?? "";
+  return typeof name === "string" ? label === name : label.trim().search(name) !== -1;
+});
 
-export const press = (name: string) => drawn(() => {
+export const press = (name: string | RegExp) => drawn(() => {
   const found = button(name);
   if (!found) throw new Error(`no button ${name}`);
   found.click();

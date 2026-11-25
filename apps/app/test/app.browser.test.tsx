@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { afterEach, expect, it, vi } from "vitest";
-import { page } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 import { Machine as Reminders } from "../gen/app__sample.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Workflows } from "../gen/app__workflows__list.effect.vibe";
@@ -14,7 +14,7 @@ import "../src/main.css";
 afterEach(closeAll);
 
 const withSample = [...mounts, at("view:Notes", () => import("./sample/index.tsx"))];
-const trail = (): unknown => (JSON.parse(localStorage.getItem("alpha/app/shell/index@1") ?? "null") as { trail: unknown } | null)?.trail;
+const trail = (): unknown => (JSON.parse(localStorage.getItem("alpha/app/shell/index@2") ?? "null") as { trail: unknown } | null)?.trail;
 
 // spec/app/shell/index.md, "Story: Move between Home and the apps"
 it("Move between Home and the apps, and find the same place after the page is opened again (spec/app/shell/index.md, \"Story: Move between Home and the apps\")", async () => {
@@ -32,6 +32,69 @@ it("Move between Home and the apps, and find the same place after the page is op
   await expect.element(page.getByRole("button", { name: "Notes" })).toBeVisible();
   expect(trail()).toEqual([]);
   expect([await single(), await single()]).toEqual([true, false]);
+});
+
+function savedBrowserTabs(records: readonly { id: string; url: string; title: string }[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open("alpha.browser.documents.v1", 1);
+    request.onupgradeneeded = () => { request.result.createObjectStore("documents"); };
+    request.onerror = () => reject(new Error("Could not open the Browser fixture storage", { cause: request.error }));
+    request.onsuccess = () => {
+      const db = request.result;
+      const write = db.transaction("documents", "readwrite");
+      const store = write.objectStore("documents");
+      const key = "alpha.browser.session.v1";
+      if (records.length === 0) store.delete(key);
+      else {
+        const value = JSON.stringify({ tabs: records, cur: records.at(-1)?.id, history: records.map(({ url }) => url) });
+        store.put({ revision: "develop-session", raw: JSON.stringify({ version: 1, legacy: null, value }) }, key);
+      }
+      write.oncomplete = () => { db.close(); resolve(); };
+      write.onabort = () => { db.close(); reject(new Error("Could not write the Browser fixture storage", { cause: write.error })); };
+    };
+  });
+}
+
+it("Keeps a browser frame while leaving and reopening Browser (spec/app/browser/address.md, \"A browser frame can be shown for the latest request, with no secure mark\"; spec/app/browser/index.md, \"Story: Open, pick and close tabs\"; spec/app/browser/index.md, \"Story: Keep my tabs through a restart\")", async () => {
+  const fixture = new URL("/test/fakes/browser-page.html", location.origin);
+  expect((await fetch(fixture)).ok).toBe(true);
+  const first = { id: "old-tab-a", title: "Saved first", url: new URL("?tab=first", fixture).href };
+  const second = { id: "old-tab-b", title: "Saved second", url: new URL("?tab=second", fixture).href };
+  await savedBrowserTabs([first, second]);
+  try {
+    await open(scene(), only("home", "view:Browser", "assistant"));
+    await page.getByRole("button", { name: "Browser", exact: true }).click();
+    const link = page.getByRole("link", { name: "Open in browser" });
+    await expect.element(link).toHaveAttribute("href", second.url);
+    await page.getByRole("button", { name: /^Tabs\b/ }).click();
+    const savedFirst = page.getByRole("button", { name: /^Saved first/ });
+    await expect.element(savedFirst).toBeVisible();
+    await savedFirst.click();
+    await expect.element(link).toHaveAttribute("href", first.url);
+    await page.getByRole("button", { name: /^Edit address\b/ }).click();
+    const address = page.getByRole("textbox", { name: "Address" });
+    await address.fill(fixture.href);
+    await userEvent.keyboard("{Enter}");
+    await expect.element(link).toHaveAttribute("href", fixture.href);
+    const iframe = Array.from(document.querySelectorAll<HTMLIFrameElement>("iframe[title=Website]")).find((frame) => frame.src === fixture.href);
+    if (!iframe) throw new Error("the browser frame is missing");
+    await expect.poll(() => iframe.contentDocument).toBeNull();
+
+    await page.getByRole("button", { name: "Back", exact: true }).click();
+    await expect.element(page.getByRole("button", { name: "Browser", exact: true })).toBeVisible();
+    await expect.element(link).not.toBeInTheDocument();
+    await page.getByRole("button", { name: "Browser", exact: true }).click();
+    await expect.element(link).toBeVisible();
+    expect(Array.from(document.querySelectorAll("iframe[title=Website]"))).toContain(iframe);
+    await expect.element(page.getByRole("img", { name: "Secure connection" })).not.toBeInTheDocument();
+
+    await page.getByRole("button", { name: /^Tabs\b/ }).click();
+    await page.getByRole("button", { name: `Close ${fixture.href}`, exact: true }).click();
+    await expect.poll(() => iframe.isConnected).toBe(false);
+  } finally {
+    await closeAll();
+    await savedBrowserTabs([]);
+  }
 });
 
 // spec/app/sample/index.md, "Story: See and dismiss reminders"
