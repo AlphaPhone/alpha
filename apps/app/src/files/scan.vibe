@@ -410,7 +410,7 @@ effect function reviewedWords(ticket: number, pages: ReadonlyArray<Page>, edits:
   return staged
 }
 
-effect function revisedSearch(pages: ReadonlyArray<Page>, staged: ReadonlyMap<number, ScanWords>): (ReadonlyArray<Page> | undefined)!!ScanAssets {
+effect function revisedSearch(pages: ReadonlyArray<Page>, staged: ReadonlyMap<number, ScanWords>): (Page[] | undefined)!!ScanAssets {
   const assets = try ScanAssets
   const result: Page[] = []
   for (const page of pages) {

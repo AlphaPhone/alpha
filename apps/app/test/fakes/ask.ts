@@ -38,6 +38,11 @@ export interface AskScene {
   readonly drafts: Map<string, string>;
   beforeDraftExchange?: () => Promise<void>;
   refusedDraftExchanges: number;
+  /** Whether the agent's status says it can answer, and each warm-up it was asked for, with the headers it came with. */
+  canRespond: boolean;
+  warmUps: Record<string, string>[];
+  warmUpFails: boolean;
+  statusReads: number;
 }
 
 export interface Kept {
@@ -47,7 +52,7 @@ export interface Kept {
 }
 
 export function askScene(): AskScene {
-  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, pagesDown: false, pagesMissing: false, pageReads: 0, listReads: 0, holdLists: false, heldLists: [], cloudWarmCalls: 0, drafts: new Map(), refusedDraftExchanges: 0 };
+  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, pagesDown: false, pagesMissing: false, pageReads: 0, listReads: 0, holdLists: false, heldLists: [], cloudWarmCalls: 0, drafts: new Map(), refusedDraftExchanges: 0, canRespond: true, warmUps: [], warmUpFails: false, statusReads: 0 };
 }
 
 /** A storage address within the fake phone's already verified local account. */
@@ -216,7 +221,16 @@ export function askRoutes(scene: AskScene): Route[] {
         return Response.json({ aborted: stop !== undefined, roomId: room, reason, outcome: stop === undefined ? "nothingRunning" : "stopped" });
       });
     },
-    (request, url) => (request.method === "GET" && url.pathname === "/api/status" ? Response.json({ serverInstanceId: "alpha-fake" }) : undefined),
+    (request, url) => {
+      if (request.method !== "GET" || url.pathname !== "/api/status") return;
+      scene.statusReads += 1;
+      return Response.json({ serverInstanceId: "alpha-fake", canRespond: scene.canRespond });
+    },
+    (request, url) => {
+      if (request.method !== "POST" || url.pathname !== "/api/turns/warm") return;
+      scene.warmUps.push(Object.fromEntries([...request.headers].filter(([name]) => name.startsWith("x-eliza-"))));
+      return scene.warmUpFails ? Response.json({ error: "warm_up_failed" }, { status: 500 }) : Response.json({ started: true }, { status: 202 });
+    },
     (request, url) => {
       if (request.method !== "POST" || url.pathname !== "/api/cloud/warm") return;
       scene.cloudWarmCalls += 1;
