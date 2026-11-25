@@ -2,16 +2,40 @@
 import type { DeferredDeletionsClient, StagedDeletion } from "@elizaos/os-bridges"
 import type { AddressBookClient, ContactNamesClient, NameSurface } from "@elizaos/os-bridges"
 import type { MessagesClient, MmsBinding, MmsSendResult, OperationId } from "@elizaos/os-bridges"
-import type { PhoneClient } from "@elizaos/os-bridges"
+import type { PhoneClient, PhoneNumber } from "@elizaos/os-bridges"
 
 module held {
   import { registerPlugin } from "@capacitor/core"
+  import { Schema } from "effect"
   import { createDeferredDeletions, type ActionJournalPlugin, type StagedDeletion } from "@elizaos/os-bridges"
   import { rejectionCode } from "@elizaos/os-bridges"
   import { addressBookPlugin, createAddressBookClient, createContactNames } from "@elizaos/os-bridges"
   import { messagesClient, messagesPlugin } from "@elizaos/os-bridges"
   import { parseMmsSendResult, type MmsBinding, type OperationId } from "@elizaos/os-bridges"
-  import { phoneClient, telephonyPlugin } from "@elizaos/os-bridges"
+  import { phoneClient, type PhoneNativePlugin, type PhoneNumber } from "@elizaos/os-bridges"
+
+  type OwnerDialPlugin = PhoneNativePlugin & {
+    classifyDialNumber(input: { number: PhoneNumber }): Promise<unknown>
+    ownerDialScreen(input: { number: PhoneNumber }): Promise<unknown>
+  }
+  const DialKind = Schema.Literals(["emergency", "ordinary", "unknown"])
+  export type AndroidDialKind = typeof DialKind.Type
+
+  const dialKind = Schema.decodeUnknownSync(Schema.Struct({ kind: DialKind }))
+  const dialResult = Schema.decodeUnknownSync(Schema.Struct({
+    status: Schema.Literals(["handed-off", "unavailable", "cancelled", "failed"]),
+    target: Schema.Literal("dialer"),
+    handler: Schema.NullOr(Schema.String),
+    message: Schema.String,
+  }))
+
+  async function classifyDialNumber(phone: OwnerDialPlugin, number: PhoneNumber): Promise<AndroidDialKind> {
+    return dialKind(await phone.classifyDialNumber({ number })).kind
+  }
+
+  async function ownerDialScreen(phone: OwnerDialPlugin, number: PhoneNumber): Promise<boolean> {
+    return dialResult(await phone.ownerDialScreen({ number })).status === "handed-off"
+  }
 
   const receiptKinds = { MessageRecord: "message", VoicemailRecord: "voicemail", ContactRecord: "contact" } as const
   type RecordReceiptKey = { readonly kind: typeof receiptKinds[keyof typeof receiptKinds]; readonly id: string }
@@ -31,10 +55,13 @@ module held {
   function make() {
     const journal = registerPlugin<Journal>("ElizaActionJournal")
     const nativeMessages = messagesPlugin()
+    const nativePhone = registerPlugin<OwnerDialPlugin>("ElizaTelephony")
     return {
       deletions: createDeferredDeletions(journal),
       deletionReceipt: (staged: StagedDeletion) => deletionReceipt(journal, staged),
-      phone: phoneClient(telephonyPlugin(), journal),
+      phone: phoneClient(nativePhone, journal),
+      classifyDialNumber: (number: PhoneNumber) => classifyDialNumber(nativePhone, number),
+      ownerDialScreen: (number: PhoneNumber) => ownerDialScreen(nativePhone, number),
       messages: messagesClient(nativeMessages, journal),
       async mmsReceipt(binding: MmsBinding, operation: OperationId, hash: string) {
         const raw = await nativeMessages.mmsSendResult({ operationId: operation })
@@ -58,12 +85,14 @@ module held {
     return typeof cause === "object" && cause !== null && "_tag" in cause && typeof cause._tag === "string" ? cause._tag : ""
   }
 }
-import { clients, codeOf, tagOf, type TelephonyDeletionPhase } from held
+import { clients, codeOf, tagOf, type AndroidDialKind, type TelephonyDeletionPhase } from held
 import { registered } from "./device.vibe"
 
 /** eliza's clients of an Alpha image's telephony: calls, the call log and voicemail; conversations and sends; the address book. */
 export interface TelephonyClients {
   readonly phone: PhoneClient
+  classifyDialNumber(number: PhoneNumber): Promise<AndroidDialKind>
+  ownerDialScreen(number: PhoneNumber): Promise<boolean>
   readonly messages: MessagesClient
   /** Reads the native record and checks it against the original review digest, without the picture bytes. */
   mmsReceipt(binding: MmsBinding, operation: OperationId, hash: string): Promise<MmsSendResult | undefined>

@@ -2,6 +2,7 @@
 import { ConversationRecord, TurnController } from "@elizaos/agent"
 import { Machine as Phone } from "../../gen/app__phone.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
+import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
 import type { Field } from "../../gen/app__voice__dictation.ts"
 import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
@@ -88,13 +89,14 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
 })
 
 // spec/app/voice/index.md, "Using the transcript fills the field dictation started in, and dictation never sends"
-export effect function openDictation(field: Field, apply: (words: string) => void!!): boolean!!(Voice.Machine | VoiceWords) {
+export effect function openDictation<R>(field: Field, apply: (words: string) => void!!R): boolean!!(Voice.Machine | VoiceWords | R) {
   const voice = try Voice.Machine
   const { memory } = try VoiceWords
+  const context = try Effect.context<R>()
   const filling = (try voice.get()).recorder.filled + 1
   if (!(try contained(voice.send({ type: "openRecorder", target: field }), "opening dictation"))) return false
   memory.dictatedText = ""
-  memory.fillTarget = { field, filling, apply }
+  memory.fillTarget = { field, filling, apply: (words) => Effect.provideContext(apply(words), context) }
   return true
 }
 
@@ -333,7 +335,12 @@ effect function navigateForVoice(place: number): (Voice.Event | undefined)!!(She
   return { type: "claimReleased", session: voice.session }
 }
 
-function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | VoiceBridge | VoiceWords | SystemSettings | Shell.Machine | Voice.Machine, []> {
+effect function dictationVisible(): boolean!!(Device | Layers.Machine | VoiceBridge) {
+  if (!(try (try Device).showing()) || Layers.assistantInert(try (try Layers.Machine).get())) return false
+  return try (try VoiceBridge).dictationForeground()
+}
+
+function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.Machine | VoiceBridge | VoiceWords | SystemSettings | Shell.Machine | Voice.Machine, []> {
   return match (fx) {
     when { tag: "Prewarm", let network }: run("prewarm", effect { try (try VoiceBridge).prewarm(network) });
     when { tag: "HoldEngine" }: run("holdEngine", effect { try (try VoiceBridge).holdEngine() });
@@ -381,10 +388,12 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | VoiceBridge | Vo
       const started = effect { try (try VoiceBridge).startRecording(ticket); return true } catch () => false
       return started ? { type: "recordingStarted", ticket } : { type: "recordingFailed", ticket, failure: "NoMicrophone" }
     }, { type: "recordingFailed", ticket, failure: "NoMicrophone" });
-    when { tag: "Transcribe", let ticket, let network }: answer("transcribe", effect {
-      const text = (try VoiceBridge).transcribe(ticket, network) catch () => undefined
-      if (text === undefined) return { type: "transcribed", ticket, failure: "Recognition" } as Voice.Event
-      const trimmed = text.trim()
+    when { tag: "Transcribe", let ticket, let network, let automatic }: answer("transcribe", effect {
+      if (automatic && !(try dictationVisible())) return { type: "transcribed", ticket, failure: "AgentUnavailable" } as Voice.Event
+      const result = try (try VoiceBridge).transcribe(ticket, network, automatic)
+      if (result.kind === "lost") return { type: "clipLost", ticket }
+      if (result.kind !== "recognized") return { type: "transcribed", ticket, failure: result.kind === "obscured" ? "AgentUnavailable" : "Recognition" }
+      const trimmed = result.text.trim()
       if (trimmed === "") return { type: "transcribed", ticket, failure: "NoSpeech" } as Voice.Event
       const current = try (try Voice.Machine).get()
       if (Voice.canTranscribed(current, ticket, "NoFailure")) {
@@ -482,22 +491,25 @@ const bridgeEvents = hearing(
   Stream.unwrap(effect {
     const bridge = try VoiceBridge
     const { memory } = try VoiceWords
-    return Stream.map(bridge.events, (event): VoiceEvent => {
+    return Stream.mapEffect(bridge.events, effect (event: VoiceEvent): (Voice.Event | undefined)!!(Device | Layers.Machine | VoiceBridge) => {
       if (event.kind === "speechEnd" && event.text !== "") memory.heardText = event.text
       else if (event.kind === "transcript" && event.final && event.text !== "") memory.heardText = event.text
-      return event
+      return match (event) {
+        when { kind: "speechStart", let session }: { type: "speechHeard", session };
+        when { kind: "transcript", let session, let final }: final ? { type: "turnEnded", session } : { type: "speechHeard", session };
+        when { kind: "speechEnd", let session }: { type: "turnEnded", session };
+        when { kind: "bargeIn", let session, let echo }: { type: "bargeIn", session, echo };
+        when { kind: "ended", let session, let reason }: reason === "ended"
+          ? undefined
+          : { type: "speechFailed", session, fault: "NotTheNetwork", wait: 0, deviceReady: false, now: untimed };
+        when { kind: "recordingStopped", let ticket, let recorded }: recorded
+          ? { type: "recordingStopped", ticket, showing: try dictationVisible(), now: untimed }
+          : { type: "recordingFailed", ticket, failure: "NoMicrophone" };
+      }
     })
   }),
   Voice.Machine,
-  (event): Voice.Event | undefined => match (event) {
-    when { kind: "speechStart", let session }: { type: "speechHeard", session };
-    when { kind: "transcript", let session, let final }: final ? { type: "turnEnded", session } : { type: "speechHeard", session };
-    when { kind: "speechEnd", let session }: { type: "turnEnded", session };
-    when { kind: "bargeIn", let session, let echo }: { type: "bargeIn", session, echo };
-    when { kind: "ended", let session, let reason }: reason === "ended"
-      ? undefined
-      : { type: "speechFailed", session, fault: "NotTheNetwork", wait: 0, deviceReady: false, now: untimed };
-  },
+  (event) => event,
 )
 
 export const voicing = Layer.provideMerge(

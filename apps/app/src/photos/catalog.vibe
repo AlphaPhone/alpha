@@ -1,6 +1,6 @@
 // spec/app/photos/index.md, "Only the newest read's answer is shown, only while Photos is showing, and a further page only adds older items"
 import type { MediaCursor, MediaItem, OwnedAlbum, Reviewed } from "@elizaos/os-bridges"
-import type { BrowserCapture } from "../platform/photos.vibe"
+import type { BrowserAlbum, BrowserCapture } from "../platform/photos.vibe"
 
 /** The payload behind a numbered item. Its native revision is the one shown to the owner. */
 export type Row = { readonly kind: "phone"; readonly item: MediaItem } | { readonly kind: "browser"; readonly item: BrowserCapture }
@@ -8,7 +8,7 @@ export type Row = { readonly kind: "phone"; readonly item: MediaItem } | { reado
 export interface ListedAlbum {
   readonly title: string
   readonly target: "favorites" | "videos" | "camera" | "screenshots" | `custom:${string}`
-  readonly owned?: OwnedAlbum
+  readonly owned?: OwnedAlbum | BrowserAlbum
   readonly count: number
   readonly cover?: string
 }

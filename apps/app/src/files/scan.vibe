@@ -8,6 +8,7 @@ import { scannedLinks } from "@elizaos/plugin-files-client"
 import { createScanPdf } from "@elizaos/plugin-files-client"
 import { admittedTextLayer, type ScanTextLine } from "@elizaos/plugin-files-client"
 import type { SelectionId } from "@elizaos/os-bridges"
+import * as Camera from "../../gen/app__camera.effect.vibe"
 import * as PhotoLibrary from "../../gen/app__photos.effect.vibe"
 import * as Recent from "../../gen/app__files__recent.effect.vibe"
 import * as Correction from "../../gen/app__files__correction.effect.vibe"
@@ -182,6 +183,28 @@ export effect function scanSelectedImage(blob: Blob) {
     if (!(try contained(model.send({ type: "startImage", frame }, "Phone"), "opening selected image text"))) {
       try held.keep(new Set(state.pages.map((page) => page.image)))
     }
+  })
+}
+
+// spec/app/camera/index.md, "Story: Scan a document"
+export effect function scanCameraImage(blob: Blob, ticket: number, visit: number, preview: number) {
+  const loaded = tryPromise(() => scanImage(blob)) catch () => undefined
+  if (loaded === undefined) return false
+  const held = try ScanAssets
+  const model = try Scan.Machine
+  const camera = try Camera.Machine
+  const shell = try Shell
+  const device = try Device
+  return try Semaphore.withPermit(held.turn, effect {
+    const current = try camera.get()
+    const state = try model.get()
+    const frame = state.images + 1
+    if (!Camera.ready(current) || current.secure || !current.readingFrame || current.shot !== ticket || current.visit !== visit || current.preview !== preview
+      || !showing(try shell.get(), "Camera") || !(try device.showing()) || !Scan.canStartCameraImage(state, frame, "Phone")) return false
+    try held.hold(frame, loaded)
+    if (try contained(model.send({ type: "startCameraImage", frame }, "Phone"), "opening the Camera frame for review")) return true
+    try held.keep(new Set(state.pages.map((page) => page.image)))
+    return false
   })
 }
 
@@ -587,6 +610,19 @@ const photosVisible = started(effect {
 }, "Photos scan foreground")
 
 export const imageScan = together(reacting(Scan, { carry }), Layer.fresh(common), photosVisible)
+
+const cameraVisible = started(effect {
+  const shell = try Shell
+  const camera = try Camera.Machine
+  const model = try Scan.Machine
+  try Stream.runForEach(Stream.zipLatestAll(shell.changes, camera.changes, model.changes), effect ([front, current, state]) => {
+    if ((!showing(front, "Camera") || current.secure) && state.pdf.outcome !== "Sent" && Scan.canHidden(state, false, "Phone")) {
+      try contained(model.send({ type: "hidden", picking: false }, "Phone"), "leaving the Camera scan")
+    }
+  })
+}, "Camera scan foreground")
+
+export const cameraScan = together(reacting(Scan, { carry, attemptScope: "Camera" }), Layer.fresh(common), cameraVisible)
 module compatible {
   /** Add the default origin to an earlier kept Files scan. @throws {never} */
   export function priorScan(raw: string): unknown {

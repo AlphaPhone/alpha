@@ -25,6 +25,7 @@ import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Machine as Preferences } from "../../gen/app__settings__preferences.effect.vibe";
 import { useMachine as usePreferences } from "../../gen/app__settings__preferences.react.ts";
+import type { Alpha } from "../runtime/area.tsx";
 import { useTimed } from "../runtime/react.ts";
 import type { Cloud } from "../platform/cloud.vibe";
 import { untimed } from "../runtime/reactor.vibe";
@@ -280,7 +281,7 @@ const sizeOf = (bytes: number) => (bytes >= 1_000_000 ? `${(bytes / 1_000_000).t
  * its event.
  * @model spec/app/inbox/index.md
  */
-export function Inbox({ runtime }: InboxProps) {
+export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const { state, cause, can, send } = useList(runtime);
   const message = useMessage(runtime);
   const changes = useTimed(runtime, useChanges);
@@ -376,7 +377,7 @@ export function Inbox({ runtime }: InboxProps) {
   return (
     <>
       <InboxListScreen
-        onBack={shell.can({ type: "goBack" }) ? () => void shell.send({ type: "goBack" }) : undefined}
+        onBack={shell.can({ type: "goBack" }) ? () => void alpha.back() : undefined}
         account={account === 0 ? undefined : mailOf(runtime, (mail) => mail.email(account))}
         folder={folderNames[folder]}
         unavailable={!state.searchable}

@@ -98,6 +98,8 @@ export service Mail {
   relabelled(message: number, unread: boolean): void!!
   /** The list on screen for `state`: none, the one kept, or the one read. */
   shown(state: Mailbox): ReadonlyArray<Letter>
+  /** The first page of the unsearched Inbox read for the currently authorized credential. */
+  incoming(state: Mailbox): ReadonlyArray<Letter>
   read(ticket: number, body: MailMessage): void
   body(ticket: number): MailMessage | undefined
   /** Forget every account, message and list of the session before. */
@@ -299,6 +301,14 @@ export const mail = Layer.effect(Mail, effect {
       }
       const live = currentPage(state)
       return live !== undefined && sameSelection(live.selection, state.selected) && live.credential === credentialOf(state) ? live.letters : []
+    },
+    incoming(state: Mailbox) {
+      const credential = credentialOf(state)
+      const kept = currentPage(state) ?? ledger.kept
+      if (kept === undefined || credential === undefined || credential !== state.keptCredential ||
+        kept.credential !== credential || kept.selection.account !== state.selected.account ||
+        kept.selection.folder !== "Incoming" || kept.selection.query !== "") return []
+      return kept.letters.slice(0, pageSize)
     },
     read(ticket: number, body: MailMessage) {
       bodies.set(ticket, body)

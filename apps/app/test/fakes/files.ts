@@ -48,6 +48,7 @@ export interface FilesScene {
   /** What a text file says, by path, where it is not its default words. */
   readonly texts: Record<string, string>;
   selectedByPicker: string | undefined;
+  pickerRenameNeedsReselection: boolean;
 }
 
 const file = (volume: string, path: string, mimeType: string, size = 100, modified = 1): Stored => ({ volume, path, directory: false, mimeType, size, modified });
@@ -66,7 +67,7 @@ export function filesScene(): FilesScene {
       folder("primary", "Documents/Old"),
       file("card", "song.mp3", "audio/mpeg", 4_000, 2),
     ],
-    trash: [], shared: [], opened: [], calls: [], gate: Promise.resolve(), now: 10, listMost: 5_000, queryMost: 500, changed: () => {}, watching: undefined, refusing: [], forgotten: [], texts: {}, selectedByPicker: undefined,
+    trash: [], shared: [], opened: [], calls: [], gate: Promise.resolve(), now: 10, listMost: 5_000, queryMost: 500, changed: () => {}, watching: undefined, refusing: [], forgotten: [], texts: {}, selectedByPicker: undefined, pickerRenameNeedsReselection: false,
   };
 }
 
@@ -188,11 +189,12 @@ export function elizaFiles(scene: FilesScene): Faked {
           .map(({ id, was, deletedAt }) => ({ id, name: leaf(was.path), origin: parent(was.path), directory: was.directory, mimeType: was.mimeType, size: was.size, deletedAt }));
         return Promise.resolve({ status: "ready", items });
       },
-      storageRestore({ ids }) {
+      storageRestore({ volume, ids }) {
         called("restore");
         if (scene.refusing.includes("storageRestore")) return Promise.resolve({ status: "failed" });
+        if (scene.refusing.includes(`storageRestore:${on(volume)}`)) return Promise.reject(new Error("The phone did not return the restore receipt"));
         return Promise.resolve({ status: "ready", outcomes: ids.map((id): FileOutcomeRow => {
-          const found = scene.trash.find((one) => one.id === id);
+          const found = scene.trash.find((one) => one.id === id && one.was.volume === on(volume));
           if (!found) return { path: id, status: "missing" };
           scene.trash.splice(scene.trash.indexOf(found), 1);
           scene.stored.push(found.was);
@@ -239,7 +241,12 @@ export function selectedDocuments(scene: FilesScene): Faked {
     pickSelected(): Promise<unknown>;
     attachmentSelected(options: { selectionId: string }): Promise<unknown>;
   }, Record<string, never>>(() => {
-    const held = (selectionId: string) => scene.stored.find((one) => `selection:${one.path}` === selectionId && !scene.forgotten.includes(selectionId));
+    const renamed = new Map<string, Stored>();
+    const held = (selectionId: string) => scene.forgotten.includes(selectionId) ? undefined
+      : renamed.get(selectionId) ?? scene.stored.find((one) => `selection:${one.path}` === selectionId);
+    const described = (selectionId: string, found: Stored) => ({
+      status: "selected", selectionId, name: leaf(found.path), mimeType: found.mimeType, uri: `content://${found.path}`, size: found.size, modified: found.modified, canRename: true,
+    });
     return {
       restoreSelected: () => Promise.resolve({ status: "unavailable", message: "" }),
       pickSelected() {
@@ -254,9 +261,20 @@ export function selectedDocuments(scene: FilesScene): Faked {
       },
       describeSelected({ selectionId }) {
         const found = held(selectionId);
-        return Promise.resolve(found ? { status: "selected", selectionId, name: leaf(found.path), mimeType: found.mimeType, uri: `content://${found.path}`, size: found.size, modified: found.modified } : { status: "renamed-reselect", message: "" });
+        return Promise.resolve(found ? described(selectionId, found) : { status: "renamed-reselect", message: "" });
       },
-      renameSelected: () => Promise.resolve({ status: "unsupported", message: "" }),
+      renameSelected({ selectionId, name }) {
+        const found = held(selectionId);
+        if (!found) return Promise.resolve({ status: "unavailable", message: "" });
+        found.path = join(parent(found.path), name);
+        found.modified = scene.now;
+        if (scene.pickerRenameNeedsReselection) {
+          renamed.delete(selectionId);
+          return Promise.resolve({ status: "renamed-reselect", message: "" });
+        }
+        renamed.set(selectionId, found);
+        return Promise.resolve(described(selectionId, found));
+      },
       pdfSelected({ selectionId, page }) {
         const found = held(selectionId);
         return Promise.resolve(found?.mimeType === "application/pdf" ? { status: "rendered", message: "", page, pageCount: 3, imageUri: `page://${found.path}/${page}` } : { status: "unsupported", message: "" });
@@ -269,7 +287,11 @@ export function selectedDocuments(scene: FilesScene): Faked {
         scene.opened.push(selectionId);
         return Promise.resolve({ status: "opened", message: "" });
       },
-      shareSelected: () => Promise.resolve({ status: "opened", message: "" }),
+      shareSelected({ selectionId }) {
+        if (!held(selectionId)) return Promise.resolve({ status: "unavailable", message: "" });
+        scene.shared.push([selectionId]);
+        return Promise.resolve({ status: "opened", message: "" });
+      },
       forgetSelected({ selectionId }) {
         scene.forgotten.push(selectionId);
         return Promise.resolve();

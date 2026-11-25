@@ -29,7 +29,9 @@ The Library tab lists photos and videos, narrowed to favourites, videos, a
 person or a search; the Albums tab lists albums, and an album opened from it
 lists its items. Either list is read a page at a time from the phone's
 library, at a revision the phone numbers: each change to the library has a
-higher one.
+higher one. A browser's library consists of captures and images saved in
+that browser and needs no phone permission. It has the same Favorites,
+custom albums, selection and Recently deleted controls.
 
 ```quint
 import permission as P from "../../kit/permission"
@@ -80,7 +82,7 @@ type Photos = {
   library: R::Read, locked: bool, paging: bool, more: bool, revision: int,
   tab: Tab, filter: Filter, query: str, person: int, album: int, density: Density,
   rows: Set[int], mine: Set[int], starred: Set[int], albums: Set[int],
-  selecting: bool, selected: Set[int],
+  selecting: bool, selected: Set[int], choosingImage: bool, imageChoice: int,
   shelf: AL::Shelf, job: C::Run,
 }
 
@@ -91,7 +93,7 @@ pure val initial: Photos = {
   library: R::unread, locked: false, paging: false, more: false, revision: 0,
   tab: Library, filter: Everything, query: "", person: 0, album: 0, density: Regular,
   rows: Set(), mine: Set(), starred: Set(), albums: Set(),
-  selecting: false, selected: Set(),
+  selecting: false, selected: Set(), choosingImage: false, imageChoice: 0,
   shelf: AL::initial, job: C::initial,
 }
 
@@ -112,6 +114,7 @@ pure def still(s: Photos): bool = s.shelf.dialog == AL::NoDialog and not(C::runn
 ```quint
 pure val photoValues = Set(1, 2, 3)
 pure val albumValues = Set(1, 2)
+pure val choiceValues = Set(0, 1, 2, 3)
 pure val rowsValues = Set(Set(), Set(1), Set(1, 2), Set(2, 3))
 pure val ownedValues = Set(Set(), Set(1), Set(3))
 pure val starredValues = Set(Set(), Set(1), Set(1, 2))
@@ -134,6 +137,33 @@ pure val weight_startSelect = 2
 pure val weight_toggle = 2
 pure val weight_chooseAlbum = 4
 pure val weight_addTo = 4
+```
+
+## Story: Choose an image in the browser
+
+> As the owner, I want to choose and preview one JPEG, PNG or WebP up to
+> 16 MB, then save a photo copy or scan the original for text. Leaving or
+> dismissing the chooser drops the selection.
+
+### Only the owner can open the browser chooser and act on its current image
+
+The owner has to be looking at the library on an unlocked device. A new
+chooser supersedes the earlier choice. Saving prepares a JPEG copy up to
+2048 pixels on its longest side. Scanning hands the original to the scan
+review and saves no photo. Neither changes anything until an owner chooses.
+
+```quint
+pure def canOpenImageChoice(s: Photos, browser: bool, by: Actor): bool =
+  by == Owner and browser and s.visible and not(s.secure) and s.tab == Library
+    and not(s.selecting) and not(s.choosingImage) and s.shelf.dialog == AL::NoDialog
+
+pure def openImageChoice(s: Photos, browser: bool, by: Actor): Photos =
+  { ...s, choosingImage: true, imageChoice: s.imageChoice + 1 }
+
+pure def canCloseImageChoice(s: Photos, choice: int, by: Actor): bool =
+  by == Owner and s.visible and not(s.secure) and s.choosingImage and choice == s.imageChoice
+
+pure def closeImageChoice(s: Photos, choice: int, by: Actor): Photos = { ...s, choosingImage: false }
 ```
 
 ## Story: Give Photos access
@@ -194,7 +224,7 @@ pure def listing(out: List[Effect], s: Photos): Done = fetching(false, out, s)
 
 pure def forgetting(albums: bool, s: Photos): Photos =
   {
-    ...s, rows: Set(), mine: Set(), starred: Set(), more: false, selecting: false, selected: Set(),
+    ...s, rows: Set(), mine: Set(), starred: Set(), more: false, selecting: false, selected: Set(), choosingImage: false,
     shelf: AL::closeDialog(s.shelf), job: C::cancel(s.job),
     albums: if (albums) Set() else s.albums, album: if (albums) 0 else s.album, tab: if (albums) Library else s.tab,
   }

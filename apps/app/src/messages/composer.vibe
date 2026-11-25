@@ -6,7 +6,10 @@ import type { PhoneNumber } from "@elizaos/os-bridges"
 import * as Composer from "../../gen/app__messages__composer.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__messages__composer.effect.vibe"
 import type { Effect as SendOut } from "../../gen/app__messages__sending.effect.vibe"
-import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
+import { Machine as Messages, canNewPictureMessage } from "../../gen/app__messages.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { type Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
+import { type Said, say } from "../notices/toasts.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { ask } from "../platform/remote.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
@@ -19,8 +22,14 @@ import { Conversations, Inbox, elsewhere } from "./messages.vibe"
 /** A picture the owner attached: what the phone says it is, and its bytes. */
 export interface Picture {
   readonly name: string
+  readonly wireName?: string
   readonly contentType: MmsAttachmentType
   readonly bytes: Uint8Array
+}
+
+interface PictureOffer {
+  readonly ticket: number
+  readonly picture: Picture
 }
 
 /** What one send carries, kept from Send until its record is retired, so that a send read back after a restart is the same one. */
@@ -48,6 +57,8 @@ export service Drafts {
   drop(thread: number): void!!
   pictures(): ReadonlyArray<Picture>!!
   setPictures(pictures: ReadonlyArray<Picture>): void!!
+  offeredPicture(): (PictureOffer | undefined)!!
+  setOfferedPicture(offer: PictureOffer | undefined): void!!
   outgoing(): Option.Option<Outgoing>!!
   setOutgoing(outgoing: Outgoing): void!!
   bindOutgoing(outgoing: Outgoing): boolean!!
@@ -125,6 +136,7 @@ import { canDigest, keepSend, keptSend, matchesBinding } from text
 const drafts = Layer.effect(Drafts, effect {
   const store = try KeyValueStore.KeyValueStore
   let pictures: ReadonlyArray<Picture> = []
+  let offeredPicture: PictureOffer | undefined
   let sending = { direct: false, pictures: false }
   let outgoing: Option.Option<Outgoing> = Option.fromNullishOr(keptSend(store.get(outgoingKey) catch () => undefined))
   return {
@@ -135,6 +147,8 @@ const drafts = Layer.effect(Drafts, effect {
     drop: (thread: number) => ignore(store.remove(draftKey(thread))),
     pictures: () => sync(() => pictures),
     setPictures: (next: ReadonlyArray<Picture>) => sync(() => { pictures = next }),
+    offeredPicture: () => sync(() => offeredPicture),
+    setOfferedPicture: (offer: PictureOffer | undefined) => sync(() => { offeredPicture = offer }),
     outgoing: () => sync(() => outgoing),
     sending: () => sync(() => sending),
     setSending: (next: { readonly direct: boolean; readonly pictures: boolean }) => sync(() => { sending = next }),
@@ -168,7 +182,7 @@ const sentStatuses = new Set<SmsSendStatus>(["sent", "delivered"])
 const usingMms = (recipients: number, pictured: boolean) => recipients > 1 || pictured
 
 function mmsReview(send: Outgoing, sim: number): MmsReview {
-  return { recipients: [...send.to] as PhoneNumber[], body: send.body, subscriptionId: sim, attachments: send.pictures.map((one) => ({ name: one.name, contentType: one.contentType, bytes: one.bytes })) }
+  return { recipients: [...send.to] as PhoneNumber[], body: send.body, subscriptionId: sim, attachments: send.pictures.map((one) => ({ name: one.wireName ?? one.name, contentType: one.contentType, bytes: one.bytes })) }
 }
 
 effect function receiptOf(send: Outgoing, sim: number, operation: OperationId): (SmsSendStatus | undefined)!!Telephony {
@@ -317,8 +331,14 @@ const opened = started(effect {
   const numbering = try Conversations
   let taken = -1
   try Stream.runForEach(Stream.zipLatest(messages.changes, composer.changes), effect ([state]) => {
+    const store = try Drafts
+    const queued = try store.offeredPicture()
+    if (queued !== undefined && state.offeredPicture !== queued.ticket && state.picker.ticket >= queued.ticket) {
+      try store.setOfferedPicture(undefined)
+    }
     const thread = state.pane === "Conversation" ? state.thread : 0
-    if (thread === taken) return
+    const forThread = queued !== undefined && state.offeredPicture === queued.ticket && thread > 0
+    if (thread === taken && !forThread) return
     const conversation = try numbering.get(thread)
     const recipients = Option.isSome(conversation) ? conversation.value.addresses.length : 0
     const event: Event = thread === 0 ? { type: "closeDraft" } : { type: "openDraft", thread, recipients }
@@ -332,6 +352,19 @@ const opened = started(effect {
       try contained(composer.send({ type: "accessReported", need: "SimAccess", grant: grantOf(status.permissions.phoneState) }), "SIM access")
     }
     if (count >= 1) try contained(composer.send({ type: "simsReported", count }), "the SIMs")
+    if (forThread && queued !== undefined && taken === thread) {
+      const choosing = try messages.get()
+      if (choosing.thread !== thread || choosing.offeredPicture !== queued.ticket) return
+      const current = try composer.get()
+      try store.setOfferedPicture(undefined)
+      try ignore(messages.send({ type: "clearPictureOffer", ticket: queued.ticket }))
+      if (status?.sendMode !== "direct" || !status.mmsSend || !status.roles.sms.held) {
+        try say("Picture messaging is unavailable", true)
+      } else if (current.slot.author !== "Nobody" || (try store.text(thread)) !== "" || current.pictures !== 0 ||
+        !(try attachPicture(thread, queued.picture))) {
+        try say("Finish your existing message draft before adding this picture", true)
+      }
+    }
   })
 }, "the composer's conversation")
 
@@ -388,23 +421,58 @@ export effect function prepare(thread: number, sim: number | null): void!!(Draft
   try store.setOutgoing({ thread, to, body: state.slot.author === "Nobody" ? "" : try store.text(thread), sim, pictures, pictured: pictures.length > 0, operation: undefined, mms: undefined, status: undefined })
 }
 
+// spec/app/messages/index.md, "A picture from Files is offered in a new recipient picker and can join only its chosen empty draft"
+export effect function pictureMessagingReady(): boolean!!Telephony {
+  const status = telephony("status", (c) => c.messages.status()) catch () => undefined
+  return status?.sendMode === "direct" && status.mmsSend && status.roles.sms.held
+}
+
+// spec/app/messages/index.md, "A picture from Files is offered in a new recipient picker and can join only its chosen empty draft"
+export effect function handOverPicture(picture: Picture): boolean!!(Drafts | Composer.Machine | Messages | Shell) {
+  const shell = try Shell
+  const messages = try Messages
+  const drafts = try Drafts
+  const composer = try (try Composer.Machine).get()
+  if (!showing(try shell.get(), "Files") || Composer.bound(composer) || !Composer.settledDraft(composer) || composer.pictures > 0 ||
+    (try drafts.offeredPicture()) !== undefined || (try messages.get()).front) return false
+  if (!(try contained(shell.send({ type: "openView", view: "Messages" }), "the picture handed to Messages"))) return false
+  const front = try Effect.timeoutOption(Stream.runHead(Stream.filter(messages.changes, (s) => s.front)), "3 seconds")
+  if (Option.isNone(front) || !(showing(try shell.get(), "Messages"))) return false
+  const state = try messages.get()
+  if (!canNewPictureMessage(state)) return false
+  try drafts.setOfferedPicture({ ticket: state.picker.ticket + 1, picture })
+  if (try contained(messages.send({ type: "newPictureMessage" }), "the picture's recipient picker")) return true
+  try drafts.setOfferedPicture(undefined)
+  return false
+}
+
+// spec/app/messages/composer.md, "The owner attaches up to five pictures, and removes them one by one"
+effect function attachPicture(thread: number, picture: Picture): boolean!!(Drafts | Composer.Machine) {
+  const store = try Drafts
+  const machine = try Composer.Machine
+  const current = try machine.get()
+  const held = try store.pictures()
+  const wireName = picture.wireName ?? picture.name
+  const fits = !held.some((one) => one.name === picture.name || (one.wireName ?? one.name) === wireName) && held.reduce((sum, one) => sum + one.bytes.length, 0) + picture.bytes.byteLength <= MMS_MAX_TOTAL_BYTES
+  if (current.thread !== thread || !Composer.canAttach(current, fits)) return false
+  try store.setPictures([...held, picture])
+  if (try contained(machine.send({ type: "attach", fits }), "the selected picture")) return true
+  try store.setPictures(held)
+  return false
+}
+
 // spec/app/messages/composer.md, "The owner attaches up to five pictures, and removes them one by one"
 /** Attach the owner's chosen files in turn: each the phone's MMS takes, a JPEG, PNG or GIF within its size with those before, is attached while the composer takes one. */
 export effect function attachAll(files: ReadonlyArray<File>): void!!(Drafts | Composer.Machine) {
-  const store = try Drafts
   const machine = try Composer.Machine
   const thread = (try machine.get()).thread
   for (const file of files) {
-    if (!(MMS_ATTACHMENT_TYPES as ReadonlyArray<string>).includes(file.type) || file.size <= 0 || file.size > MMS_MAX_TOTAL_BYTES) continue
+    const contentType = MMS_ATTACHMENT_TYPES.find((type) => type === file.type)
+    if (contentType === undefined || file.size <= 0 || file.size > MMS_MAX_TOTAL_BYTES) continue
     const bytes = tryPromise(() => file.arrayBuffer()) catch () => undefined
     if (bytes === undefined) continue
-    const current = try machine.get()
-    if (current.thread !== thread) return
-    const held = try store.pictures()
-    const fits = !held.some((one) => one.name === file.name) && held.reduce((sum, one) => sum + one.bytes.length, 0) + bytes.byteLength <= MMS_MAX_TOTAL_BYTES
-    if (!Composer.canAttach(current, fits)) continue
-    try store.setPictures([...held, { name: file.name, contentType: file.type as MmsAttachmentType, bytes: new Uint8Array(bytes) }])
-    try ignore(machine.send({ type: "attach", fits }))
+    if ((try machine.get()).thread !== thread) return
+    try attachPicture(thread, { name: file.name, contentType, bytes: new Uint8Array(bytes) })
   }
 }
 
@@ -414,7 +482,7 @@ const saving = following(Composer.Machine, (state) => Composer.canSaveDraft(stat
 // spec/app/messages/composer.md, "The composer holds at most five pictures and a SIM the phone has"
 /** The pictures kept beside the composer go when it holds none: a message sent with them, or another conversation opened. */
 const unpictured = applying(Composer.Machine, (state) => state.pictures === 0, effect (none: boolean) => {
-  if (none) try (try Drafts).setPictures([])
+  if (none && (try (try Composer.Machine).get()).pictures === 0) try (try Drafts).setPictures([])
 })
 
 /** The composer: kept across restarts, so a draft and a send under way survive them; nothing is sent when Alpha opens again. */

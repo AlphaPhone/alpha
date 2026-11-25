@@ -4,6 +4,7 @@ package ai.alphacompute.alphaphone;
 import ai.eliza.plugins.messages.SmsTelephonyConfiguration;
 import ai.eliza.plugins.messages.TelephonyPlugin;
 import android.Manifest;
+import android.telephony.TelephonyManager;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
@@ -30,6 +31,37 @@ public final class AlphaTelephonyPlugin extends TelephonyPlugin {
    // The signal carries no thread data. The renderer reads it after the foreground check.
    notifyListeners("smsNotice", new JSObject(), true);
   }
+ }
+
+ /** The Android classification of a provider-normalized number for the current phone. */
+ @android.annotation.SuppressLint("MissingPermission")
+ @PluginMethod public void classifyDialNumber(PluginCall call) {
+  if (refused(call)) return;
+  String number = call.getString("number", "");
+  if (number == null || !NUMBER.matcher(number).matches()) {
+   call.reject("Not a dialable phone number", "invalid");
+   return;
+  }
+  String kind;
+  try {
+   TelephonyManager phone = getContext().getSystemService(TelephonyManager.class);
+   kind = phone == null ? "unknown" : phone.isEmergencyNumber(number) ? "emergency" : "ordinary";
+  } catch (RuntimeException unreadable) {
+   kind = "unknown";
+  }
+  JSObject result = new JSObject();
+  result.put("kind", kind);
+  call.resolve(result);
+ }
+
+ /** An owner tap can open ACTION_DIAL, which requires its own Call press. */
+ @PluginMethod public void ownerDialScreen(PluginCall call) {
+  if (refused(call)) return;
+  if (AlphaCallState.read(getContext()).emergencyLive()) {
+   call.reject("Wait for the possible emergency call to end.", "unavailable");
+   return;
+  }
+  super.dial(call);
  }
 
  @PluginMethod public void smsNoticePending(PluginCall call) {

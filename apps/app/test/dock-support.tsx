@@ -23,7 +23,7 @@ export async function closeAllDocks() {
   localStorage.clear();
 }
 
-export async function mountDock({ view = "Browser", withToast = false, flush }: { view?: "Browser" | "Home"; withToast?: boolean; flush?: (work: () => Promise<void> | void) => Promise<void> } = {}) {
+export async function mountDock({ view = "Browser", withToast = false, flush }: { view?: "Browser" | "Calendar" | "Home" | "Settings"; withToast?: boolean; flush?: (work: () => Promise<void> | void) => Promise<void> } = {}) {
   const run = flush ?? (async (work: () => Promise<void> | void) => { await work(); });
   const client = Layer.succeed(
     HttpClient.HttpClient,
@@ -62,7 +62,7 @@ export async function mountDock({ view = "Browser", withToast = false, flush }: 
     await runtime.dispose();
   });
   await run(async () => {
-    if (view === "Browser") await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "openView", view: "Browser" })));
+    if (view !== "Home") await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "openView", view })));
     await runtime.runPromise(Effect.flatMap(Composer, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.slot === "Open"))));
   });
   return { runtime, host };

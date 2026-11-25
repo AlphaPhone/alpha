@@ -142,6 +142,12 @@ function libraryId(path: string, kind: "i" | "v"): string | undefined {
     ? undefined : `m:${volume}:${kind}:${matched[3]}`
 }
 
+function frameDimensions(size: CameraPreviewResult["captureSize"]): { width?: number; height?: number } {
+  if (size === undefined || !Number.isSafeInteger(size.width) || !Number.isSafeInteger(size.height) || size.width < 1 || size.height < 1) return {}
+  const scale = Math.min(1, 2048 / Math.max(size.width, size.height))
+  return { width: Math.max(1, Math.round(size.width * scale)), height: Math.max(1, Math.round(size.height * scale)) }
+}
+
 function lensFacts(bound: CameraPreviewResult, devices: ReadonlyArray<CameraDevice>): LensFacts {
   return {
     minimum: Math.round(bound.minZoom * 10),
@@ -161,6 +167,7 @@ export const phoneCamera = Layer.effect(CameraPort, effect {
   let owner = 0
   let latest = 0
   let lenses: ReadonlyArray<CameraDevice> = []
+  let captureSize: CameraPreviewResult["captureSize"]
   return {
     nativePreview: true,
     present: registered("ElizaCamera"),
@@ -205,11 +212,13 @@ export const phoneCamera = Layer.effect(CameraPort, effect {
         captureAspectRatio: device?.supportedCaptureAspectRatios?.includes(aspect) ? aspect : undefined,
       })) catch () => undefined
       owner = bound === undefined ? 0 : ticket
+      captureSize = bound?.captureSize
       return bound === undefined ? undefined : lensFacts(bound, lenses)
     }),
     stop: (ticket: number) => Semaphore.withPermit(turn, effect {
       if (owner !== ticket) return
       owner = 0
+      captureSize = undefined
       try ignore(tryPromise(() => camera().stopPreview()))
     }),
     mode: (mode: Mode) => tried(() => camera().setCaptureMode({ mode: mode === "Photo" ? "photo" : "video", quality: recordingOptions.quality })),
@@ -218,10 +227,12 @@ export const phoneCamera = Layer.effect(CameraPort, effect {
     zoom: (level: number) => tried(() => camera().setZoom({ zoom: level / 10 })),
     focus: ({ x, y, viewportX, viewportY }: Point) => tried(() => camera().setFocusPoint({ x: viewportX ?? x, y: viewportY ?? y })),
     effect capture(save: boolean): (CameraMedia | undefined)!! {
-      const reply = tryPromise(() => camera().capturePhoto({ format: "jpeg", quality: .92, saveToGallery: save, thumbnailOnly: save, ...(save ? {} : { width: 1280 }) })) catch () => undefined
+      const reply = tryPromise(() => camera().capturePhoto(save
+        ? { format: "jpeg", saveToGallery: true, thumbnailOnly: true }
+        : { format: "jpeg", quality: 90, saveToGallery: false, ...frameDimensions(captureSize) })) catch () => undefined
       if (reply === undefined || (save && !reply.path)) return undefined
       const path = reply.path ?? ""
-      const source = dataImage(reply.thumbnail ?? reply.base64) || (path === "" ? "" : playable(path))
+      const source = dataImage(save ? reply.thumbnail : reply.base64) || (path === "" ? "" : playable(path))
       return source ? { path, source, libraryId: reply.libraryId ?? libraryId(path, "i"), mime: "image/jpeg", width: reply.width, height: reply.height } : undefined
     },
     record: (sound: boolean) => tried(() => camera().startRecording({ ...recordingOptions, saveToGallery: true, audio: sound })),

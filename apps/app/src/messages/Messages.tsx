@@ -491,9 +491,10 @@ function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { m
   const open = (addresses: ReadonlyArray<string>, typedIn: boolean) => {
     clearChoice(runtime);
     const thread = runtime.runSync(Conversations.use((numbering) => numbering.of({ id: "", addresses })));
-    const event = { type: "choose", thread, typed: typedIn } as const;
+    const event = { type: state.offeredPicture > 0 ? "choosePictureRecipient" : "choose", thread, typed: typedIn } as const;
     if (can(event)) void send(event);
   };
+  const offer = state.offeredPicture > 0 ? runtime.runSync(Drafts.use((drafts) => drafts.offeredPicture())) : undefined;
   const to = typed.split(",").map((part) => part.trim());
   const parsed = to.map((part) => /^\+?[\d\s().-]+$/u.test(part) && part.replace(/\D/gu, "").length >= 3 ? normalizePhoneNumber(part) : null);
   const numbers = parsed.length <= MMS_MAX_RECIPIENTS && parsed.every((number) => number !== null) ? [...new Set(parsed)] : [];
@@ -509,6 +510,13 @@ function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { m
         </form>
         <Button variant="ghost" size="icon" aria-label="Choose a contact" aria-expanded={browsing} onClick={() => { setBrowsing(!browsing); input.current?.focus(); }}><Plus /></Button>
       </header>
+      {offer?.ticket === state.offeredPicture && (
+        <div aria-label="Picture for this message" className="flex px-5 py-2">
+          <Chip clearLabel={`Remove ${offer.picture.name}`} onClear={() => void send({ type: "clearPictureOffer", ticket: offer.ticket })}>
+            <PictureIcon aria-hidden />{offer.picture.name}
+          </Chip>
+        </div>
+      )}
       <div data-alpha-messages-picks className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain pb-2">
         {numbers.length > 0 && <div className="px-5 py-1"><Button variant="outline" onClick={() => open(numbers, true)}>{numbers.length === 1 ? `Text ${numbers[0]}` : `Text ${numbers.length} recipients`}</Button></div>}
         {can(allow) && <div className="px-5 py-2"><Button variant="outline" onClick={() => void send(allow)}>Allow Contacts access</Button></div>}

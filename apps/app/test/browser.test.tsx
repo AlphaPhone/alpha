@@ -3,9 +3,11 @@ import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
 import { Machine as Page } from "../gen/app__browser__address.effect.vibe";
+import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
-import { button, closeAll, drawn, fill, hardware, open, press, underAct, until } from "./alpha.tsx";
+import home from "../src/home/index.tsx";
+import { button, closeAll, drawn, fill, hardware, only, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -13,7 +15,8 @@ afterEach(closeAll);
 
 /** Alpha on an Alpha image with the Browser on screen. */
 async function onBrowser(world = { ...scene(), phone: true, image: true }) {
-  const running = await open(world);
+  const running = await open(world, only("home", "view:Browser"));
+  await until(running.alpha, home.runtime(running.alpha), Home, (h) => h.tiles.load.status === "Loaded");
   const runtime = browser.runtime(running.alpha);
   await press("Browser");
   return { ...running, world, runtime };
@@ -84,7 +87,15 @@ describe("The Browser on a phone", () => {
     // spec/app/browser/index.md, "Picking another open tab shows it and uncovers the page"
     await press("Tabs");
     await until(alpha, runtime, Tabs, (s) => s.layer === "Switcher");
-    await press("Switch to The case for on-device agents");
+    const selected = document.querySelector<HTMLButtonElement>("button[aria-current=true]");
+    if (!selected) throw new Error("no active tab card");
+    await drawn(() => selected.click());
+    await until(alpha, runtime, Tabs, (s) => s.layer === "Uncovered" && s.privates.includes(s.selected));
+    await press("Tabs");
+    await until(alpha, runtime, Tabs, (s) => s.layer === "Switcher");
+    const original = [...document.querySelectorAll("button")].find((control) => control.textContent?.startsWith("The case for on-device agents"));
+    if (!original) throw new Error("no original tab card");
+    await drawn(() => original.click());
     await until(alpha, runtime, Tabs, (s) => s.layer === "Uncovered" && s.selected === s.open[0]);
     // spec/app/browser/index.md, "Closing a tab closes its native tab, shows another open tab if it was the one shown, and leaves one new tab when it was the last"
     await press("Tabs");

@@ -8,13 +8,15 @@ import { useMachine } from "../../gen/app__camera.react.ts";
 import { allows } from "../../gen/kit__permission.ts";
 import { CameraPort, type LensFacts, type Point } from "../platform/camera.vibe";
 import type { Resident, Shown } from "../runtime/area.tsx";
+import { Scan } from "../files/Scan.tsx";
+import type { cameraScan } from "../files/scan.vibe";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { approveCapture, CameraAssets, focus, shutter, type camera } from "./camera.vibe";
 import { Effect, type Layer } from "effect";
 
-type Runtime = Layer.Success<typeof camera> | Resident;
+type Runtime = Layer.Success<typeof camera> | Layer.Success<typeof cameraScan> | Resident;
 type Can = (event: Event) => boolean;
 type Fire = (event: Event) => void;
 
@@ -240,7 +242,7 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
             {state.flashAuto && <span aria-hidden className="absolute bottom-1 right-1 text-xs leading-none">A</span>}
           </Button>
         )}
-        {can({ type: "scanDocument", now: untimed }) && <Button variant="ghost" size="icon" aria-label="Scan document" onClick={() => fire({ type: "scanDocument", now: untimed })}><FileScan /></Button>}
+        {can({ type: "scanDocument" }) && <Button variant="ghost" size="icon" aria-label="Scan document" onClick={() => fire({ type: "scanDocument" })}><FileScan /></Button>}
       </header>
 
       <div className="relative flex min-h-36 flex-col">
@@ -303,6 +305,7 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
           <span />
         </div>
       </footer>
+      <Scan runtime={runtime} alpha={alpha} />
     </section>
   );
 }

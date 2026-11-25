@@ -1,0 +1,210 @@
+// spec/app/files/index.md, "Story: Find and open my files"; spec/app/files/recent.md, "Story: Pick a file with the system picker"; spec/app/files/change.md, "Story: Change the files I select"
+import {
+  FilesVolume, type FilesFilter, LibraryStore, type RowOutcome, type SelectedFile, type VolumeRefused,
+  importLibraryFile, importLibraryFolder, indexedLibrary, librarySelections, libraryVolume, validName,
+} from "@elizaos/plugin-files-client"
+import type { ElizaFilesPlugin, FileOutcomeRow, FilesResult } from "@elizaos/os-bridges"
+import type { DocumentHandoff, PdfPage, SelectedDocument, SelectedDocumentsClient, SelectionId } from "@elizaos/os-bridges"
+import { bytesOf, downloadCopy, pdfPage, previewOf, releasePreview, selectedFile, shareCopy } from "./browser-library.ts"
+import { Documents, browserDocuments } from "./documents.vibe"
+import { Files, browserFiles } from "./files.vibe"
+
+module web {
+  /** The browser has an origin-private library when IndexedDB is available. @throws {never} */
+  export const supported = () => typeof indexedDB !== "undefined"
+}
+import { supported } from web
+
+/** The files already kept by Alpha's web renderer. */
+const database = "alpha.browser.files.v1"
+const downloads = "Download"
+
+function storageFailure(error: VolumeRefused): FilesResult {
+  return { status: error.status === "cancelled" ? "unavailable" : error.status, message: error.message }
+}
+
+function answer<A, B extends object>(read: A!VolumeRefused, fields: (value: A) => B): Promise<(FilesResult & B) | FilesResult> {
+  return Effect.runPromise(Effect.match(read, { onFailure: storageFailure, onSuccess: (value) => ({ status: "ready", ...fields(value) } as const) }))
+}
+
+function outcomes(rows: readonly RowOutcome[]): { outcomes: readonly FileOutcomeRow[] } {
+  return { outcomes: rows.flatMap(({ path, status, to }) => (status === "unknown" ? [] : [{ path, status, ...(to === undefined ? {} : { to }) }])) }
+}
+
+function filterOf(input: Parameters<ElizaFilesPlugin["storageQuery"]>[0]): FilesFilter {
+  const kind = input.folders ? "folder" : input.documents ? "document" : input.mimePrefix === "application/pdf" ? "pdf"
+    : input.mimePrefix === "image/" ? "image" : input.mimePrefix === "video/" ? "video" : input.mimePrefix === "audio/" ? "audio" : undefined
+  return {
+    ...(kind === undefined ? {} : { kind }),
+    ...(input.text === undefined ? {} : { text: input.text }),
+    ...(input.folder === undefined ? {} : { folder: input.folder }),
+    ...(input.from === undefined ? {} : { from: new Date(input.from).toISOString() }),
+    ...(input.to === undefined ? {} : { to: new Date(input.to).toISOString() }),
+  }
+}
+
+function selected(file: SelectedFile): SelectedDocument {
+  return { status: "selected", action: "files", selectionId: file.selectionId as SelectionId, name: file.name, mimeType: file.mimeType, size: file.size, canRename: true }
+}
+
+const unavailable = (error: VolumeRefused) => ({ status: "unavailable" as const, message: error.message })
+
+/** The same browser library is used by the folders, file picker, and file preview. */
+const webLibrary = Layer.effectContext(effect {
+  const volume = try FilesVolume
+  const store = try LibraryStore
+  const selections = try librarySelections()
+  const changed = try PubSub.unbounded<void>()
+  const changes = Stream.fromPubSub(changed)
+  const lifetime = try Effect.scope
+  effect function saveCopy(name: string, blob: Blob): DocumentHandoff!! {
+    const url = downloadCopy(name, blob)
+    try Effect.forkIn(ensuring(sleep("1 minute"), sync(() => releasePreview(url))), lifetime)
+    return { status: "opened", message: "" }
+  }
+  const blobs = new Map<string, string>()
+  const pages = new Map<string, Map<number, PdfPage>>()
+  try addFinalizer(() => sync(() => {
+    for (const id of new Set([...blobs.keys(), ...pages.keys()])) forgetUrl(id)
+  }))
+  const selectionId = Schema.decodeUnknownSync(Schema.NonEmptyString.pipe(Schema.brand("SelectionId")))
+  const notify = <A>(write: A!VolumeRefused): A!VolumeRefused => Effect.tap(write, () => PubSub.publish(changed, undefined))
+  const announce = <A>(work: A!VolumeRefused, painted: (value: A) => object) => answer(notify(work), painted)
+  function forgetUrl(id: string): void {
+    const url = blobs.get(id)
+    if (url !== undefined) releasePreview(url)
+    blobs.delete(id)
+    for (const page of pages.get(id)?.values() ?? []) if (page.imageUri !== undefined) releasePreview(page.imageUri)
+    pages.delete(id)
+  }
+  effect function rendered(id: SelectionId, index: number): PdfPage!! {
+    const file = selections.bytes(id) catch () => undefined
+    if (file === undefined) return { status: "unavailable", message: "Select this file again." }
+    const papers = pages.get(id) ?? new Map<number, PdfPage>()
+    pages.set(id, papers)
+    const known = papers.get(index)
+    if (known !== undefined) return known
+    const page = try promise(() => pdfPage(file.blob, index))
+    if (page.status !== "rendered") return page
+    const unchanged = selections.bytes(id) catch () => undefined
+    if (pages.get(id) !== papers || unchanged === undefined) {
+      if (page.imageUri !== undefined) releasePreview(page.imageUri)
+      return { status: "unavailable", message: "Select this file again." }
+    }
+    const duplicate = papers.get(index)
+    if (duplicate !== undefined) {
+      if (page.imageUri !== undefined) releasePreview(page.imageUri)
+      return duplicate
+    }
+    papers.set(index, page)
+    if (papers.size > 8) {
+      const oldest = papers.keys().next().value
+      if (oldest !== undefined) {
+        const uri = papers.get(oldest)?.imageUri
+        if (uri !== undefined) releasePreview(uri)
+        papers.delete(oldest)
+      }
+    }
+    return page
+  }
+  const library: ElizaFilesPlugin = {
+    storageState: () => answer(volume.state(), (state) => ({ access: state.access, volumes: state.volumes })),
+    storageRequestAccess: (input) => answer(volume.requestAccess(input?.settings === true), (access) => ({ access })),
+    storageList: ({ path }) => answer(volume.list(path), (listing) => ({ entries: listing.entries, truncated: !listing.complete })),
+    storageCategory: ({ category, countOnly }) => answer(volume.category(category), (listing) => ({
+      ...(countOnly ? {} : { entries: listing.entries }), count: listing.count ?? listing.entries.length,
+      bytes: listing.entries.reduce((sum, entry) => sum + entry.size, 0), truncated: !listing.complete,
+      ...(listing.folders === undefined ? {} : { folders: listing.folders }),
+    })),
+    storageQuery: (input) => answer(volume.query(filterOf(input)), (listing) => ({ entries: listing.entries })),
+    storageReviewedIdentities: ({ paths }) => answer(volume.reviewedIdentities(paths), (reviewed) => ({ reviewed })),
+    storageTransfer: (input) => announce(volume.transfer(input), outcomes),
+    storageRename: ({ path, name }) => announce(volume.rename(path, name), (path) => ({ path })),
+    storageCreateFolder: ({ parent, name }) => announce(volume.createFolder(parent, name), (path) => ({ path })),
+    storageTrash: (input) => announce(volume.trash(input), outcomes),
+    storageTrashList: () => answer(volume.trashList(), (items) => ({ items })),
+    storageRestore: ({ ids }) => announce(volume.restore(ids), outcomes),
+    storageEmptyTrash: ({ ids, confirmed }) => announce(volume.emptyTrash(ids, confirmed), (count) => ({ count })),
+    storageShare: ({ paths }) => Effect.runPromise(Effect.match(volume.share(paths), { onFailure: storageFailure, onSuccess: (count) => ({ status: "opened", count } as const) })),
+    storageOpen: ({ path }) => Effect.runPromise(Effect.match(effect {
+      const chosen = try selections.select(path)
+      return try ensuring(flatMap(selections.bytes(chosen.selectionId), effect ({ name, blob }) => {
+        try saveCopy(name, blob)
+        return { status: "opened", count: 1 } as const
+      }), selections.forget(chosen.selectionId))
+    }, { onFailure: storageFailure, onSuccess: (value) => value })),
+    storageSelect: ({ path }) => Effect.runPromise(Effect.match(selections.select(path), {
+      onFailure: storageFailure,
+      onSuccess: (file) => ({ ...file, status: "selected", action: "files", canRename: true } as const),
+    })),
+    storageWatch: () => Promise.resolve({ status: "ready" }),
+    storageUnwatch: () => Promise.resolve({ status: "ready" }),
+    async addListener(event, listener) {
+      const fiber = Effect.runFork(Stream.runForEach(changes, () => sync(listener)))
+      return { remove: async () => { await Effect.runPromise(Fiber.interrupt(fiber)) } }
+    },
+  }
+  const client: SelectedDocumentsClient = {
+    restore: () => Promise.resolve({ status: "unavailable" }),
+    describe: (id) => Effect.runPromise(Effect.match(selections.bytes(id), {
+      onFailure: unavailable,
+      onSuccess: ({ name, mimeType, blob }) => {
+        const uri = blobs.get(id) ?? previewOf(blob)
+        blobs.set(id, uri)
+        return { status: "selected", action: "files", selectionId: id, name, mimeType, uri, size: blob.size, canRename: true } as const
+      },
+    })),
+    rename: (id, name) => Effect.runPromise(Effect.match(notify(selections.rename(id, name)), {
+      onFailure: unavailable, onSuccess: (file) => { forgetUrl(id); return selected(file) },
+    })),
+    pdf: (id, index) => Effect.runPromise(rendered(id, index)),
+    read: (id) => Effect.runPromise(Effect.match(selections.readText(id), {
+      onFailure: unavailable,
+      onSuccess: (text) => text.kind === "read" ? { ...text, status: "read", message: "" } as const
+        : text.kind === "large" ? { status: "too-large", message: "This document is too large to preview." } as const
+          : { ...text, status: "unsupported", message: "This document is not text." } as const,
+    })),
+    open: (id) => Effect.runPromise(Effect.matchEffect(selections.bytes(id), { onFailure: (error) => succeed(unavailable(error)), onSuccess: ({ name, blob }) => saveCopy(name, blob) })),
+    share: (id) => Effect.runPromise(Effect.matchEffect(selections.bytes(id), {
+      onFailure: (error) => succeed(unavailable(error)),
+      onSuccess: ({ name, blob }) => promise(() => shareCopy(name, blob)),
+    })),
+    forget: (id) => Effect.runPromise(Effect.andThen(selections.forget(id), sync(() => forgetUrl(id)))),
+  }
+  const docs: Documents.Shape = {
+    client: Option.some(client),
+    effect pick() {
+      return effect {
+        const file = try tryPromise(selectedFile)
+        if (file === undefined) return Option.none()
+        const name = validName(file.name)
+        if (name === undefined) return Option.none()
+        const bytes = try tryPromise(() => bytesOf(file))
+        const mimeType = file.type || "application/octet-stream"
+        const saved = provideService(importLibraryFile(downloads, { name, mimeType, bytes }), LibraryStore, store)
+        const imported = Effect.catch(saved, effect (failure) => {
+          if (failure.status !== "missing") throw failure
+          const folder = provideService(importLibraryFolder(downloads, [{ path: name, mimeType, bytes }]), LibraryStore, store)
+            catch effect (refused) => {
+              if (refused.status !== "exists") throw refused
+              return undefined
+            }
+          return folder === undefined ? try saved : `${folder}/${name}`
+        })
+        const path = try notify(imported)
+        const picked = try selections.select(path)
+        const id = try Effect.try(() => selectionId(picked.selectionId))
+        return Option.some(id)
+      } catch () => Option.none()
+    },
+    attachment: (id) => Effect.match(selections.attachment(id, "mail"), { onFailure: () => Option.none(), onSuccess: Option.some }),
+  }
+  return Context.add(Context.make(Files, { plugin: Option.some(library), changed: changes }), Documents, docs)
+})
+
+const indexed = Layer.provideMerge(libraryVolume("Alpha files.zip"), indexedLibrary(database))
+
+/** Browser storage is local to this origin and never requests Android's broad storage permission. */
+export const browserLibrary = Layer.unwrap(sync(() =>
+  supported() ? Layer.provide(webLibrary, indexed) : Layer.merge(browserFiles, browserDocuments),
+))

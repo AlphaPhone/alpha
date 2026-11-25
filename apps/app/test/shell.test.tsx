@@ -143,7 +143,12 @@ describe("the shell", () => {
 
     await drawn(() => { document.documentElement.style.fontSize = "150%"; });
     await until(alpha, alpha.runtime, Canvas, (c) => c.textScale === 150 && c.agenda && !c.split && c.days === 1);
-    expect([document.documentElement.hasAttribute("data-alpha-split"), document.documentElement.hasAttribute("data-alpha-agenda")]).toEqual([false, true]);
+    expect(["data-alpha-split", "data-alpha-agenda", "data-alpha-title-row"].map((mark) => document.documentElement.hasAttribute(mark))).toEqual([false, true, false]);
+
+    // spec/app/shell/keyboard.md, "Above 150% text, larger than Alpha's own largest size, an app's header gives its title a row of its own under the way back and the screen's actions"
+    await drawn(() => { document.documentElement.style.fontSize = "300%"; });
+    await until(alpha, alpha.runtime, Canvas, (c) => c.textScale === 300);
+    expect(document.documentElement.hasAttribute("data-alpha-title-row")).toBe(true);
 
     await drawn(() => { document.documentElement.style.fontSize = "100%"; });
     await until(alpha, alpha.runtime, Canvas, (c) => c.textScale === 100 && c.split && !c.agenda);

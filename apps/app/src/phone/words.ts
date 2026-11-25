@@ -2,14 +2,10 @@
 import { normalizePhoneNumber } from "@elizaos/os-bridges";
 import type { Typed } from "../../gen/app__phone.ts";
 
-/** Numbers every network routes to emergency services, as Android's own list starts. */
-const emergencyNumbers = new Set(["911", "112", "999", "000", "110", "119", "118", "08"]);
-
-/** What the keypad's digits are: none, a start of a number, a number the phone can dial, or an emergency number. @throws {never} */
+/** Whether the keypad is blank, partial or holds a number Android can accept. @throws {never} */
 export function judge(digits: string): Typed {
   if (digits === "") return "Blank";
-  if (emergencyNumbers.has(digits)) return "Emergency";
-  return digits.replace(/\D/g, "").length >= 3 && normalizePhoneNumber(digits) !== null ? "Dialable" : "Partial";
+  return normalizePhoneNumber(digits) === null ? "Partial" : "Dialable";
 }
 
 /** Whether every word of `query` matches: a word with digits the digits of `number`, any other the start of a word of one of `names`. */
