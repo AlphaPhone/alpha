@@ -269,8 +269,7 @@ pure def timer(f: Film): Clock = clock(f.elapsed * 10)
 
 ### Within a minute of a limit, the timer also shows the time left
 
-As on the old line, a running recording within a minute of a limit says how
-long it has left: the shorter of the time still to run before five minutes
+A running recording within a minute of a limit says how long it has left: the shorter of the time still to run before five minutes
 and, once two seconds are recorded, how long 100 MB lasts at the rate
 recorded so far, rounded up to the second.
 
