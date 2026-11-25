@@ -51,6 +51,31 @@ async function settingsOpen(world = { ...scene(), phone: true }) {
 }
 
 describe("Settings", () => {
+  it("Recovers an unavailable browser account only after Try again", async () => {
+    const world = { ...scene(), signedIn: false };
+    const { alpha } = await settingsOpen(world);
+    await vi.waitFor(() => expect(button("Account")?.textContent).toContain("Signed out"));
+    await press("Account");
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Unavailable"));
+
+    world.signedIn = true;
+    expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain(account.email);
+    await press("Try again");
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain(account.email));
+    await hardware("back");
+    await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
+    expect(await page(alpha)).toBe("Top");
+
+    world.signedIn = false;
+    await act(async () => button("Account")?.focus());
+    await press("Account");
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Unavailable"));
+    await press("Back");
+    await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
+    await vi.waitFor(() => expect(document.activeElement).toBe(button("Account")));
+    expect(await page(alpha)).toBe("Top");
+  });
+
   it("Find a setting and come back (spec/app/settings/index.md, \"Story: Find a setting and come back\"; spec/app/account/plan.md, \"Story: Know my plan\"; spec/app/account/billing.md, \"Story: Pay in the browser\")", async () => {
     const { alpha, machines, world } = await settingsOpen();
     // spec/app/settings/index.md, "The build says once whether it is a development build, and the phone whether Alpha runs on a phone and on an Alpha image"
@@ -251,7 +276,7 @@ describe("Settings", () => {
     });
   });
 
-  it("Choose Android autofill in Passwords (spec/app/settings/android.md, \"Story: Change what only Android can change\")", async () => {
+  it("Manage saved passwords and choose Android autofill (spec/app/settings/facts.md, \"Story: Manage my saved passwords\"; spec/app/settings/android.md, \"Story: Change what only Android can change\")", async () => {
     const { alpha, machines, world } = await settingsOpen();
     await press("Apps");
     await press("Passwords");
@@ -269,6 +294,34 @@ describe("Settings", () => {
     await seen(true);
     await until(alpha, machines, Facts.Machine, (s) => s.reported.some(({ fact, value }) => fact === "AutofillService" && value === "Alpha"));
     expect(titled("Use for autofill")).toBeUndefined();
+
+    world.settings.passwords.push({
+      id: "entry-47", revision: 4, label: "Example account", username: "owner",
+      bindings: [{ kind: "web", facet: "https://example.test", display: "example.test" }], updatedAt: 1000,
+    });
+    await vi.waitFor(() => expect(titled("Unlock")).toBeDefined());
+    await tap("Unlock");
+    await vi.waitFor(() => expect(titled("Example account")).toBeDefined());
+    await fill("Search passwords", "another site");
+    expect(titled("Example account")).toBeUndefined();
+    await fill("Search passwords", "example.test");
+    await tap("Example account");
+    await vi.waitFor(() => expect(titled("Updated account")).toBeDefined());
+    await fill("Search passwords", "");
+    await press("Add password");
+    await vi.waitFor(() => expect(titled("New account")).toBeDefined());
+    expect(world.settings.passwordEdits).toEqual([{ entryId: "entry-47", expectedRevision: 4 }, undefined]);
+
+    await seen(false);
+    await vi.waitFor(() => expect(world.settings.passwordsUnlocked).toBe(false));
+    await seen(true);
+    await vi.waitFor(() => expect(titled("Unlock")).toBeDefined());
+    expect(titled("Updated account")).toBeUndefined();
+    await tap("Unlock");
+    await vi.waitFor(() => expect(titled("Updated account")).toBeDefined());
+    await tap("Lock");
+    await vi.waitFor(() => expect(titled("Unlock")).toBeDefined());
+    expect(titled("Updated account")).toBeUndefined();
     await hardware("back");
     expect(await page(alpha)).toBe("Apps");
   });

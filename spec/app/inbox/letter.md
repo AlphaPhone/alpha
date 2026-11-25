@@ -236,7 +236,7 @@ pure def lawAnEditedDraftIsNotForgotten(revision: int): bool =
   not(forgettable(edited({ ...blank, revision: revision }), revision))
 ```
 
-### A send found in Gmail's Sent counts as sent and is a change to what the draft shows; one not found is known not to have gone
+### The send's own confirmed receipt counts as sent and changes what the draft shows; only a rejection clears the uncertainty as unsent
 
 ```quint
 pure def foundSent(l: Letter): Letter = { ...l, sent: l.doubt.revision, doubt: noDoubt, revision: l.revision + 1 }

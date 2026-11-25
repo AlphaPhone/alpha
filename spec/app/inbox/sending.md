@@ -123,7 +123,8 @@ pure def fitFor(kind: Kind, letter: L::Letter, again: bool): bool =
 pure def free(s: Operations): bool = not(ongoing(s)) and (s.noticed or s.attempt.outcome != A::Unknown)
 
 pure def canPrepare(s: Operations, kind: Kind, access: Access, letter: L::Letter, kept: bool, again: bool, by: Actor): bool =
-  by == Owner and ofDraft(kind) and free(s) and kept and fitFor(kind, letter, again)
+  val chosenAgain = kind == Send and again and s.kind == Send and s.draft == letter.id and s.attempt.outcome == A::Unknown and not(ongoing(s))
+  by == Owner and ofDraft(kind) and (free(s) or chosenAgain) and kept and fitFor(kind, letter, again)
     and allowsFor(access, letter.account, needs(kind))
 
 pure def prepare(s: Operations, kind: Kind, access: Access, letter: L::Letter, kept: bool, again: bool, by: Actor): Operations = {
@@ -335,6 +336,19 @@ pure def leadsToARequestEnds(s: Operations, later: Operations): bool =
 
 pure val fair_answered = "strong"
 pure val fair_replyLost = "strong"
+```
+
+### A lookup that settles the unknown send changes only the outcome of that same draft and attempt
+
+The composer applies the receipt to the draft. The operation can clear
+its uncertainty only while it still names that send.
+
+```quint
+pure def canReconciledSend(s: Operations, draft: int, attempt: int, by: Actor): bool =
+  by == World and live(s) and s.kind == Send and s.draft == draft and s.attempt.id == attempt and s.attempt.outcome == A::Unknown
+
+pure def reconciledSend(s: Operations, draft: int, attempt: int, delivered: bool, by: Actor): Operations =
+  { ...s, attempt: A::conclude(s.attempt, delivered, true), noticed: true }
 ```
 
 ### An outcome that is unknown or confirmed is never sent again, and a later operation never hides an unknown one the owner has not seen

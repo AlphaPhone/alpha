@@ -36,16 +36,16 @@ type Holder = NotAlpha | AnotherApp | Alpha | NoSuchRole
 type Facts = {
   read: T::Timed, taken: int, reported: List[Reading], grants: List[AccessGrant], alerts: List[Alert],
   home: Holder, assistant: Holder, launcher: bool,
-  request: T::Timed, readAtRequest: int,
+  request: T::Timed, readAtRequest: int, vault: VaultView,
 }
 
-type Effect = ReadPhone({ ticket: int }) | RequestHome({ request: int })
+type Effect = ReadPhone({ ticket: int }) | RequestHome({ request: int }) | WorkVault({ request: int, work: VaultWork })
 type Asked = { state: Facts, out: List[Effect] }
 
 pure val initial: Facts = {
   read: T::unasked, taken: 0, reported: List(), grants: List(), alerts: List(),
   home: NotAlpha, assistant: NotAlpha, launcher: false,
-  request: T::unasked, readAtRequest: 0,
+  request: T::unasked, readAtRequest: 0, vault: initialVault,
 }
 
 pure def has(reported: List[Reading], fact: Fact): bool = reported.some(r => r.fact == fact)
@@ -385,4 +385,139 @@ pure def sometimesHomeRequestGivenUp(s: Facts): bool = s.request.read.status == 
 pure def sometimesNoHomeRoleOnThisPhone(s: Facts): bool = roleWord(s, s.home) == NotOnThisPhone
 
 pure def sometimesHeldByAnother(s: Facts): bool = roleWord(s, s.home) == HeldByAnother
+```
+
+## Story: Manage my saved passwords
+
+> As the owner, I want to unlock my saved passwords, search for an entry,
+> and add or edit it in Android's own password editor. I want the list
+> to go away when I lock the vault, leave this page or leave Alpha.
+
+### This visit holds only entry metadata and a deadline from Android
+
+An entry is identified by the exact ID and revision Android listed.
+Settings holds no password and sends neither a secret nor a draft to
+Android. Android's own editor handles the form. Passwords is a sensitive
+[Settings page](./index.md).
+
+```quint
+type VaultRow = { id: str, revision: int, label: str, username: str, terms: List[str] }
+type VaultPhase = VaultAway | VaultChecking | VaultUnavailable | VaultNeedsLock | VaultLocked | VaultUnlocking | VaultReady | VaultEditing | VaultLocking
+type VaultWork = CheckVault | UnlockVault | LockVault | CreatePassword | EditPassword({ id: str, revision: int })
+type VaultResult = VaultNotAvailable | VaultUnsecured | VaultSecured | VaultList({ rows: List[VaultRow], until: int })
+type VaultNotice = VaultQuiet | VaultFailed | VaultChanged
+type VaultView = {
+  here: bool, front: bool, request: int, phase: VaultPhase,
+  rows: List[VaultRow], until: int, query: str, notice: VaultNotice,
+}
+
+pure val initialVault: VaultView = {
+  here: false, front: false, request: 0, phase: VaultAway,
+  rows: List(), until: 0, query: "", notice: VaultQuiet,
+}
+
+pure def beginVault(phase: VaultPhase, work: VaultWork, s: Facts): Asked =
+  val request = s.vault.request + 1
+  { state: { ...s, vault: { ...s.vault, request: request, phase: phase, rows: List(), until: 0,
+      query: if (phase == VaultEditing) s.vault.query else "", notice: VaultQuiet } },
+    out: List(WorkVault({ request: request, work: work })) }
+
+pure def vaultInUse(v: VaultView): bool =
+  v.phase == VaultUnlocking or v.phase == VaultReady or v.phase == VaultEditing
+```
+
+### Leaving the page or hiding Alpha forgets the list and retires the visit
+
+A pending Android screen-lock prompt may hide Alpha while the same
+Settings page remains selected. In that case only its request stays
+pending. No entry metadata is accepted until the page is in front again.
+Leaving the page retires the prompt. A lock in flight finishes before
+another visit can unlock the vault.
+
+```quint
+pure def canVaultPresence(s: Facts, here: bool, front: bool): bool =
+  (front implies here) and (here != s.vault.here or front != s.vault.front)
+
+pure def vaultPresence(s: Facts, here: bool, front: bool): Asked =
+  val v = { ...s.vault, here: here, front: front }
+  val movedVault = { ...s, vault: v }
+  if (v.phase == VaultLocking or (here and v.phase == VaultUnlocking)) { state: movedVault, out: List() }
+  else if (front) beginVault(VaultChecking, CheckVault, movedVault)
+  else if (vaultInUse(v)) beginVault(VaultLocking, LockVault, movedVault)
+  else { state: { ...movedVault, vault: { ...initialVault, here: here, request: v.request } }, out: List() }
+```
+
+### Only the latest Android answer changes this visit and only an unexpired answer supplies rows
+
+Checking a new visit never adopts an existing unlock. Setup needs the
+Android screen lock. After adding or editing, Settings reads what Android
+has saved.
+
+```quint
+pure def vaultWaiting(v: VaultView): bool =
+  v.phase == VaultChecking or v.phase == VaultUnlocking or v.phase == VaultEditing or v.phase == VaultLocking
+
+pure def canVaultAnswered(s: Facts, request: int, result: VaultResult, notice: VaultNotice, now: int): bool =
+  val v = s.vault
+  val valid = match result {
+    | VaultList(l) => v.here and (v.phase == VaultUnlocking or v.phase == VaultEditing) and l.until > now
+    | _ => true
+  }
+  request == v.request and vaultWaiting(v) and (v.front or v.phase == VaultLocking) and valid
+
+pure def vaultAnswered(s: Facts, request: int, result: VaultResult, notice: VaultNotice, now: int): Facts =
+  val v = { ...s.vault, notice: notice }
+  val seen = match result {
+    | VaultNotAvailable => { ...v, phase: VaultUnavailable, query: "" }
+    | VaultUnsecured => { ...v, phase: VaultNeedsLock, query: "" }
+    | VaultSecured => { ...v, phase: VaultLocked, query: "" }
+    | VaultList(l) => { ...v, phase: VaultReady, rows: l.rows, until: l.until }
+  }
+  { ...s, vault: if (v.front) seen else { ...initialVault, here: v.here, request: v.request } }
+
+pure val vaultRow = { id: "one", revision: 1, label: "Account", username: "owner", terms: List("example.test") }
+pure val idValues = Set("one", "two")
+pure val revisionValues = Set(0, 1, 2)
+pure val resultValues = Set(VaultNotAvailable, VaultUnsecured, VaultSecured, VaultList({ rows: List(), until: 40000 }), VaultList({ rows: List(vaultRow), until: 40000 }))
+pure val queryValues = Set("", "account")
+```
+
+### An unlock or lock asks Android, and a row opens only at the revision still listed in this visit
+
+Expiry closes the view immediately. Android also checks that the unlock
+is current, and that edits name the revision that the owner chose.
+
+```quint
+pure def canVaultUnlock(s: Facts): bool = s.vault.front and s.vault.phase == VaultLocked
+pure def vaultUnlock(s: Facts): Asked = beginVault(VaultUnlocking, UnlockVault, s)
+
+pure def canVaultLock(s: Facts): bool = s.vault.front and s.vault.phase == VaultReady
+pure def vaultLock(s: Facts): Asked = beginVault(VaultLocking, LockVault, s)
+
+pure def canVaultExpire(s: Facts, now: int): bool = s.vault.phase == VaultReady and now >= s.vault.until
+pure def vaultExpire(s: Facts, now: int): Asked = beginVault(VaultLocking, LockVault, s)
+
+pure def canVaultCreate(s: Facts, now: int): bool =
+  s.vault.front and s.vault.phase == VaultReady and now < s.vault.until
+
+pure def vaultCreate(s: Facts, now: int): Asked = beginVault(VaultEditing, CreatePassword, s)
+
+pure def canVaultEdit(s: Facts, id: str, revision: int, now: int): bool =
+  canVaultCreate(s, now) and s.vault.rows.some(row => row.id == id and row.revision == revision)
+
+pure def vaultEdit(s: Facts, id: str, revision: int, now: int): Asked =
+  beginVault(VaultEditing, EditPassword({ id: id, revision: revision }), s)
+
+pure def canVaultSearch(s: Facts, query: str): bool = s.vault.phase == VaultReady and s.vault.query != query
+
+pure def vaultSearch(s: Facts, query: str): Facts = { ...s, vault: { ...s.vault, query: query } }
+```
+
+### Only an unlocked visit in front may hold saved rows
+
+```quint
+pure def alwaysVaultRowsStayInFront(s: Facts): bool =
+  (s.vault.rows.length() > 0 or s.vault.until > 0) implies (s.vault.front and s.vault.here and s.vault.phase == VaultReady)
+
+pure def sometimesVaultEntriesAreListed(s: Facts): bool = s.vault.phase == VaultReady and s.vault.rows.length() > 0
 ```

@@ -11,8 +11,9 @@ import type { MailMessage } from "@elizaos/cloud"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { Device } from "../platform/device.vibe"
+import type { Install } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, due, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
-import { Mail, asked } from "./gmail.vibe"
+import { Mail, sendReceipt } from "./gmail.vibe"
 import { ownerChanges } from "./mailbox.vibe"
 import { provider } from "./provider.vibe"
 
@@ -271,18 +272,23 @@ export effect function openGmailDraft(account: number, id: string): boolean!!(Cl
   return Exit.isSuccess(try exit(composer.send(event, "Owner"))) && content !== undefined
 }
 
-// spec/app/inbox/drafts.md, "A send found in Gmail's Sent counts as sent and is a change to what the draft shows; one not found is known not to have gone"
-/** Whether Gmail's Sent holds the draft: a message to its first recipient with its subject. */
-effect function inSent(ticket: number, draft: number, account: number): Event!!(Cloud | Mail | Letters) {
-  const { client } = try Cloud
-  const ledger = try Mail
-  const words = (try Letters).words(draft)
-  const grant = ledger.grant(account)
-  return effect {
-    const query = `in:sent to:${words.to[0] ?? ""} subject:"${words.subject.replace(/"/gu, "")}"`
-    const found = try asked(() => client.gmailSearch({ ...(grant === undefined ? {} : { grantId: grant }), query, maxResults: 5 }))
-    return { type: "checkedSent", ticket, ok: true, found: found.messages.some((card) => card.subject === words.subject) }
-  } catch () => ({ type: "checkedSent", ticket, ok: false, found: false })
+// spec/app/inbox/drafts.md, "An unknown send is checked once by reading its own Gmail operation receipt, while its account may be read and no new send of the draft is handed over"
+effect function inSent(ticket: number, draft: number, account: number, attempt: number): Event!!(Cloud | Mail | Install | Changes | Drafts.Machine | Inbox.Machine) {
+  const composer = try Drafts.Machine
+  const list = try Inbox.Machine
+  const current = effect {
+    const state = try composer.get()
+    const letter = Drafts.letterNamed(state, draft)
+    return Drafts.canCheckedSent(state, ticket) && state.checking === draft && letter.doubt.attempt === attempt && letter.account === account
+      && Inbox.accessOf(try list.get(), account).grant.read
+  }
+  const unknown = { type: "checkedSent", ticket, ok: false, found: false } as const
+  if (!(try current)) return unknown
+  const receipt = try sendReceipt(account, attempt)
+  if ((receipt !== "succeeded" && receipt !== "rejected") || !(try current)) return unknown
+  const found = receipt === "succeeded"
+  try ignore((try Changes).send({ type: "reconciledSend", draft, attempt, delivered: found }, "World"))
+  return { ...unknown, ok: true, found }
 }
 
 effect function written(ticket: number, draft: number): Event!!Letters {
@@ -298,7 +304,7 @@ effect function loaded(ticket: number): Event!!Letters {
 const keptAside = (draft: number) => effect { try ignore((try Letters).keep(draft)) }
 const forgotten = (draft: number) => effect { try (try Letters).forget(draft) }
 
-function carry(fx: Out): Job<Event, Cloud | Mail | Letters | Drafts.Machine | Inbox.Machine, [by: Actor]> {
+function carry(fx: Out): Job<Event, Cloud | Mail | Letters | Install | Changes | Drafts.Machine | Inbox.Machine, [by: Actor]> {
   return match (fx) {
     // spec/app/inbox/drafts.md, "A write goes out only when none is in flight, under the newest ticket, carrying the draft as it is"
     when { tag: "Keep", let ticket, let draft }:
@@ -309,8 +315,8 @@ function carry(fx: Out): Job<Event, Cloud | Mail | Letters | Drafts.Machine | In
       answer("load", loaded(ticket), { type: "loaded", ticket, ok: false }, "World");
     when { tag: "ReadCopy", let ticket, let draft, let account, let gmail }:
       answer("copy", lookedUp(ticket, draft, account, gmail), copyFailed(ticket), "World");
-    when { tag: "ReadSent", let ticket, let draft, let account }:
-      answer("sent", inSent(ticket, draft, account), { type: "checkedSent", ticket, ok: false, found: false }, "World");
+    when { tag: "ReadSent", let ticket, let draft, let account, let attempt }:
+      answer("sent", inSent(ticket, draft, account, attempt), { type: "checkedSent", ticket, ok: false, found: false }, "World");
     when { tag: "Forget", let draft }: run("forget", forgotten(draft), "World");
   }
 }

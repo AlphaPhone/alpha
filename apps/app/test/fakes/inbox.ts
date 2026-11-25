@@ -51,6 +51,8 @@ export interface InboxScene {
   readonly attached: string[];
   readonly attachmentReads: string[];
   readonly savedAttachments: Map<string, string>;
+  loseSendReply?: boolean;
+  readonly receiptReads: string[];
 }
 
 /** Android's save picker in the fake phone, with its selected documents kept as exact copies. */
@@ -102,7 +104,7 @@ export function inboxScene(): InboxScene {
       letter(8, "Win a prize", ["SPAM"], "About Win a prize", "Prize Desk <win@prize.example>", today(7, 0, 2)),
       letter(9, "Notes from me", ["SENT"], "About Notes from me", "You <you@gmail.example>", today(17, 0, 2)),
     ],
-    history: 500, offline: false, revoked: false, changes: [], attached: [], attachmentReads: [], savedAttachments: new Map(), drafts: new Map(),
+    history: 500, offline: false, revoked: false, changes: [], attached: [], attachmentReads: [], savedAttachments: new Map(), drafts: new Map(), receiptReads: [],
   };
 }
 
@@ -154,6 +156,7 @@ function relabel(stored: Stored, kind: string) {
 
 export function inboxRoutes(scene: InboxScene): Route[] {
   const asked = new Map<string, Proposal>();
+  const sent = new Map<string, MailOperation>();
   const forwarded = (source: Delivery["forwardAttachments"]) => {
     if (source === undefined) return [];
     const original = scene.mail.find(({ card }) => card.id === source.messageId && card.metadata.historyId === source.historyId);
@@ -267,8 +270,19 @@ export function inboxRoutes(scene: InboxScene): Route[] {
         scene.changes.push(`send ${to.join(",")} ${proposal.subject}`);
         scene.attached.push(...(proposal.attachments ?? []).map((file) => file.name), ...parts.map(({ file }) => file.name));
         scene.mail.push({ ...letter(scene.mail.length + 100, proposal.subject, ["SENT"], proposal.bodyText), card: { ...letter(scene.mail.length + 100, proposal.subject, ["SENT"]).card, to } });
-        return Response.json(operation(requestId, "send", "succeeded"));
+        const confirmed = operation(requestId, "send", "succeeded");
+        sent.set(requestId, confirmed);
+        if (!scene.loseSendReply) return Response.json(confirmed);
+        scene.loseSendReply = false;
+        return Response.json(operation(requestId, "send", "outcome-unknown"));
       });
+    },
+    (request, url) => {
+      const requestId = new RegExp(`^${operations}/([^/]+)$`, "u").exec(url.pathname)?.[1];
+      if (request.method !== "GET" || requestId === undefined) return;
+      scene.receiptReads.push(requestId);
+      const found = url.searchParams.get("grantId") === scene.google?.connection ? sent.get(requestId) : undefined;
+      return found ? Response.json(found) : refused(404, "not_found");
     },
     (request, url) => {
       const requestId = new RegExp(`^${operations}/([^/]+)/dispatch$`, "u").exec(url.pathname)?.[1];
