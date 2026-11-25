@@ -40,11 +40,11 @@ export function StopwatchTab({ runtime }: StopwatchTabProps) {
   return (
     <section aria-label="Stopwatch" className="flex flex-col gap-5">
       <Card className="items-center gap-2 py-8 rounded-tile border-0 bg-secondary">
-        <span aria-label="Stopwatch elapsed time" className="font-display text-5xl font-light tabular-nums text-foreground">
+        <span aria-label="Stopwatch elapsed time" className="font-mono text-4xl font-light tracking-tight tabular-nums text-foreground">
           {formatStopwatch(totalElapsed)}
         </span>
         {state.laps.length > 0 && (
-          <span className="text-sm tabular-nums text-muted-foreground">
+          <span className="font-mono text-sm tabular-nums text-muted-foreground">
             {`Lap ${state.laps.length + 1} · ${formatStopwatch(currentSplit)}`}
           </span>
         )}
@@ -100,8 +100,8 @@ export function StopwatchTab({ runtime }: StopwatchTabProps) {
                   <span className={toneClass}>
                     {`Lap ${entry.number}${isBest ? " · Fastest" : isWorst ? " · Slowest" : ""}`}
                   </span>
-                  <span className={`text-right tabular-nums ${toneClass}`}>{formatStopwatch(entry.splitMs)}</span>
-                  <span className="text-right tabular-nums text-muted-foreground">{formatStopwatch(entry.totalMs)}</span>
+                  <span className={`text-right font-mono tabular-nums ${toneClass}`}>{formatStopwatch(entry.splitMs)}</span>
+                  <span className="text-right font-mono tabular-nums text-muted-foreground">{formatStopwatch(entry.totalMs)}</span>
                 </li>
               );
             })}

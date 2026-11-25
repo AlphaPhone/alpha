@@ -125,7 +125,7 @@ export function TimersTab({ runtime }: TimersTabProps) {
                 </div>
 
                 <div className="flex items-baseline justify-between gap-3">
-                  <span className={`font-display text-4xl font-light tabular-nums ${item.status === "Ringing" ? "text-destructive" : "text-foreground"}`}>
+                  <span className={`text-4xl font-light tabular-nums ${item.status === "Ringing" ? "text-destructive" : "text-foreground"}`}>
                     {formatTimerDuration(remaining)}
                   </span>
                   <span className="text-xs font-medium text-muted-foreground">

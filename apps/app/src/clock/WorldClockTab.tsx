@@ -42,7 +42,7 @@ export function WorldClockTab({ runtime }: WorldClockTabProps) {
       <Card className="items-center gap-1 py-6 rounded-tile border-0 bg-secondary">
         <span className="text-xs font-semibold tracking-caps text-muted-foreground uppercase">Local time</span>
         <div className="flex items-baseline gap-2">
-          <span className="font-display text-5xl font-light tabular-nums text-foreground">{hero?.time ?? "--:--:--"}</span>
+          <span className="text-4xl font-light tabular-nums text-foreground">{hero?.time ?? "--:--:--"}</span>
           {hero?.period && <span className="text-base font-medium text-muted-foreground">{hero.period}</span>}
         </div>
         <span className="text-sm text-muted-foreground">
@@ -87,7 +87,7 @@ export function WorldClockTab({ runtime }: WorldClockTabProps) {
                     </span>
                   </div>
                   <div className="flex shrink-0 items-baseline gap-1">
-                    <span className="font-display text-3xl font-light tabular-nums text-foreground">{reading?.time ?? "--:--"}</span>
+                    <span className="text-2xl font-light tabular-nums text-foreground">{reading?.time ?? "--:--"}</span>
                     {reading?.period && <span className="text-xs font-medium text-muted-foreground">{reading.period}</span>}
                   </div>
                 </div>
