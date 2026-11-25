@@ -15,14 +15,15 @@ const androidText = (percent: number): CSSProperties => Object.fromEntries(
   Object.entries(tokens.text).map(([name, { size }]) => [`--text-${name}`, `calc(${size} * ${percent / 100})`]),
 );
 
-/** The launcher on a phone 412 points wide, at `percent` Android text; above 150% the shell marks the title's own row. */
-const launcher = (percent: number) => (Story: () => ReactNode) => (
+/** A phone 412 points wide, at `percent` Android text, on the launcher or not; above 150% the shell marks the title's own row. */
+const phone = (percent: number, launcher = true) => (Story: () => ReactNode) => (
   <div data-alpha-title-row={percent > 150 ? "" : undefined} style={androidText(percent)}>
-    <div data-alpha-launcher="" className="w-103 bg-background text-foreground">
+    <div data-alpha-launcher={launcher ? "" : undefined} className="w-103 bg-background text-foreground">
       <Story />
     </div>
   </div>
 );
+const launcher = (percent: number) => phone(percent);
 
 const back = <Button variant="ghost" size="icon" aria-label="Back"><ChevronLeft /></Button>;
 const actions = (
@@ -45,3 +46,6 @@ export const LauncherMainLargeText = { args: main, decorators: [launcher(300)] }
 
 /** At 300% text a screen's title takes its own row and wraps there. */
 export const LauncherDetailLargeText = { args: detail, decorators: [launcher(300)] };
+
+/** Off the launcher, with Alpha not the Home app or opened as the assistant, at 300% text the title also takes its own row and wraps. */
+export const AppMainLargeText = { args: { ...main, title: "Password manager" }, decorators: [phone(300, false)] };
