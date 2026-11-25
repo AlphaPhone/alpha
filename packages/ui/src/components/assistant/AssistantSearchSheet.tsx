@@ -6,24 +6,28 @@ import { AssistantSearch, type AssistantSearchProps } from "./AssistantSearch.ts
 export type AssistantSearchSheetProps = Pick<SheetProps, "open" | "onOpenChange"> & {
   /** What the sheet shows. */
   search: AssistantSearchProps;
+  /** Restores focus to the chat actions that opened Search. */
+  onReturnFocus?: () => void;
 };
 
 /**
  * Search across every conversation in a sheet over Ask Alpha; closing it leaves its asking behind.
  * @model spec/app/assistant/search.md
  */
-export function AssistantSearchSheet({ open, onOpenChange, search }: AssistantSearchSheetProps) {
+export function AssistantSearchSheet({ open, onOpenChange, search, onReturnFocus }: AssistantSearchSheetProps) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         title="Search chats"
+        data-alpha-own-gesture=""
+        onCloseAutoFocus={onReturnFocus && ((event) => { event.preventDefault(); onReturnFocus(); })}
         aria-describedby={undefined}
         overlayClassName="bg-transparent dark:bg-transparent"
-        className="inset-0 max-h-none max-w-md gap-4 bg-background p-5 pb-5 text-foreground shadow-none [&>div:first-child]:min-h-11 [&>div:first-child]:justify-center [&>div:first-child]:pr-12 [&_h2]:text-panel-title [&_h2]:font-bold"
+        className="inset-0 max-h-none max-w-md gap-4 bg-background p-5 pb-5 text-foreground shadow-none before:hidden [&>div:first-child]:min-h-10 [&>div:first-child]:justify-center [&>div:first-child]:pr-12 [&_h2]:font-sans [&_h2]:text-panel-title [&_h2]:font-bold"
       >
         <AssistantSearch {...search} />
         <SheetClose asChild>
-          <Button variant="ghost" size="icon" aria-label="Close search" className="absolute top-5 right-5"><X aria-hidden /></Button>
+          <Button variant="ghost" size="icon" aria-label="Close search" className="absolute top-5 right-5 size-10"><X aria-hidden /></Button>
         </SheetClose>
       </SheetContent>
     </Sheet>

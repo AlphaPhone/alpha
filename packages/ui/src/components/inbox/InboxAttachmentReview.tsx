@@ -1,6 +1,19 @@
-import { CircleAlert, CircleCheck, TriangleAlert } from "lucide-react";
+import { ChevronLeft, ChevronRight, CircleAlert, CircleCheck, TriangleAlert } from "lucide-react";
 import { Button } from "../Button.tsx";
 import { Sheet, SheetClose, SheetContent } from "../Sheet.tsx";
+
+export type InboxAttachmentPreview = { readonly digest: string } & (
+  | { readonly kind: "text"; readonly text: string }
+  | { readonly kind: "image"; readonly url: string }
+  | {
+      readonly kind: "pdf";
+      readonly page: number;
+      readonly pages: number;
+      readonly drawing: { readonly kind: "loading" } | { readonly kind: "failed"; readonly onRetry?: () => void } | { readonly kind: "rendered"; readonly url: string };
+      readonly onPrevious?: () => void;
+      readonly onNext?: () => void;
+    }
+);
 
 export type InboxAttachmentReviewProps = {
   /** Whether the review is up; the parent keeps it. */
@@ -13,8 +26,8 @@ export type InboxAttachmentReviewProps = {
   handling: "open" | "save";
   /** Where the use stands: waiting for the owner, under way, done, refused, or ended with no way to know whether it happened. */
   outcome?: "review" | "working" | "done" | "refused" | "unknown";
-  /** The verified plain text and digest after a successful Open. */
-  preview?: { readonly text: string; readonly digest: string };
+  /** The verified text or a raster derived from the reviewed attachment. */
+  preview?: InboxAttachmentPreview;
   /** The save uses the browser's downloads, which do not report whether the file landed. */
   browserDownload?: boolean;
   /** Goes ahead with the use, once; offered only while the review waits and the account may still be read. */
@@ -24,6 +37,20 @@ export type InboxAttachmentReviewProps = {
 };
 
 const verbs = { open: { ask: "Open", done: "Opened", refused: "Could not open it" }, save: { ask: "Save", done: "Saved to Files", refused: "Could not save it" } } as const;
+
+function PdfPreview({ page, pages, drawing, onPrevious, onNext }: Extract<InboxAttachmentPreview, { kind: "pdf" }>) {
+  const name = `Page ${page} of ${pages}`;
+  return <>
+    <div role="group" aria-label="PDF pages" className="mb-2 flex items-center justify-center gap-2">
+      <Button variant="ghost" size="icon" aria-label="Previous page" disabled={!onPrevious} onClick={onPrevious}><ChevronLeft /></Button>
+      <span className="text-sm tabular-nums" aria-live="polite">{name}</span>
+      <Button variant="ghost" size="icon" aria-label="Next page" disabled={!onNext} onClick={onNext}><ChevronRight /></Button>
+    </div>
+    {drawing.kind === "rendered" ? <img src={drawing.url} alt={name} decoding="async" className="mx-auto block h-auto max-w-full rounded-md bg-alpha-foreground ring-1 ring-border" />
+      : drawing.kind === "loading" ? <p role="status" className="text-center text-sm text-muted-foreground">Loading page…</p>
+        : <div className="flex items-center justify-between gap-2"><p role="alert" className="text-sm">This page could not be opened.</p>{drawing.onRetry ? <Button variant="secondary" onClick={drawing.onRetry}>Retry</Button> : null}</div>}
+  </>;
+}
 
 /**
  * An attachment shown before it is opened or saved: its name and size, then how the use ended, honestly, including
@@ -52,7 +79,10 @@ export function InboxAttachmentReview({ open, name, size, handling, outcome = "r
         {opened ? (
           <>
             <details className="mt-3 break-all text-sm text-muted-foreground"><summary className="min-h-11 cursor-pointer content-center">Details</summary>SHA-256 {opened.digest}</details>
-            <section aria-label="Attachment contents" className="mt-3"><pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-sm">{opened.text}</pre></section>
+            <section aria-label="Attachment contents" className="mt-3">
+              {opened.kind === "text" ? <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-sm">{opened.text}</pre>
+                : opened.kind === "pdf" ? <PdfPreview {...opened} /> : <img src={opened.url} alt={name} className="max-h-[60dvh] max-w-full object-contain" />}
+            </section>
           </>
         ) : outcome === "done" ? <p role="status" className="mt-4 flex items-center gap-2 text-sm"><CircleCheck aria-hidden className="size-5 text-ok" />{words.done}</p> : null}
         {outcome === "refused" ? <p role="alert" className="mt-4 flex items-center gap-2 text-sm"><CircleAlert aria-hidden className="size-5 text-destructive" />{words.refused}</p> : null}

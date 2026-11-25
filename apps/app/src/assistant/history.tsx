@@ -7,6 +7,8 @@ import * as Chats from "../../gen/app__assistant__chats.effect.vibe";
 import type { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import * as Composer from "../../gen/app__assistant__composer.effect.vibe";
 import type { useMachine as useSearch } from "../../gen/app__assistant__search.react.ts";
+import type { useMachine as useLayers } from "../../gen/app__shell__layers.react.ts";
+import { top } from "../../gen/app__shell__layers.ts";
 import type { MessageSelection } from "./message-actions.vibe";
 import { MapsCardView, mapsCardsOf } from "./maps-cards.tsx";
 import { replyBlocks, wordsOf } from "./words.ts";
@@ -17,6 +19,7 @@ export interface MessageActions {
   copy: (selection: MessageSelection) => void;
   useInEmail?: (selection: MessageSelection) => void;
   openLink?: (href: string) => void;
+  reading?: { readonly message: number; readonly stop: () => void };
 }
 
 export function chip(file: Attached): AssistantAttachment {
@@ -50,13 +53,16 @@ interface HistoryProps {
 
 /** Recorded rows and their controls are rebuilt only when their data or available actions change. */
 export function useMessageRows({ runtime, board, lines, chats, writing, replying, holding, settled, canReadAloud, actions, onSettings, onPreview, onOpenMaps, opened, onChoose }: HistoryProps): readonly HistoryRow[] {
+  const prepared = useMemo(() => lines.map((line) => ({
+    line,
+    cards: line.mine ? [] : mapsCardsOf(line.text).cards,
+    reply: line.mine ? { words: line.text, choices: [] } : replyBlocks(line.text),
+  })), [lines]);
   return useMemo(() => {
-    if (!chats || !writing || lines.length === 0) return empty;
+    if (!chats || !writing || prepared.length === 0) return empty;
     const chat = (event: Chats.Event) => void runtime.runPromiseExit(Effect.flatMap(Chats.Machine, (machine) => machine.send(event)));
     const compose = (event: Composer.Event) => void runtime.runPromiseExit(Effect.flatMap(Composer.Machine, (machine) => machine.send(event)));
-    return lines.map((line): HistoryRow => {
-      const cards = line.mine ? [] : mapsCardsOf(line.text).cards;
-      const { words: text, choices } = line.mine ? { words: line.text, choices: [] } : replyBlocks(line.text);
+    return prepared.map(({ line, cards, reply: { words: text, choices } }): HistoryRow => {
       const message = board.numbered(line.id);
       const live = !line.mine && message > 0 && message === chats.messages && !replying;
       const open = live && onOpenMaps !== undefined && opened?.has(message) !== true ? onOpenMaps : undefined;
@@ -69,6 +75,8 @@ export function useMessageRows({ runtime, board, lines, chats, writing, replying
       const quote = { type: "quote", message, recorded } as const;
       const editAgain = { type: "editAgain", message, mine: line.mine, recorded } as const;
       const readAloud = { type: "readAloud", message, mine: line.mine } as const;
+      const reading = actions?.reading;
+      const stopReading = reading !== undefined && reading.message === message && Chats.enabled(chats, readAloud) ? reading.stop : undefined;
       return {
         id: line.id,
         author: line.mine ? "owner" : "alpha",
@@ -90,41 +98,50 @@ export function useMessageRows({ runtime, board, lines, chats, writing, replying
         onUseInEmail: addToEmail && Chats.textForEmail(recorded, blank, line.mine) ? () => addToEmail(selection) : undefined,
         onEditAgain: Composer.enabled(writing, editAgain) ? () => { board.type(line.text); compose(editAgain); } : undefined,
         onOpenLink: actions?.openLink,
-        onReadAloud: canReadAloud && recorded && !blank && Chats.enabled(chats, readAloud) ? () => chat(readAloud) : undefined,
+        onReadAloud: stopReading ?? (canReadAloud && recorded && !blank && Chats.enabled(chats, readAloud) ? () => chat(readAloud) : undefined),
+        readAloudActive: stopReading !== undefined,
         onPreview: onPreview && line.attachments?.length ? (id) => {
           const file = line.attachments?.find((one) => one.id === id);
           if (file) onPreview(file);
         } : undefined,
       };
     });
-  }, [actions, board, canReadAloud, chats, holding, lines, onChoose, onOpenMaps, onPreview, onSettings, opened, replying, runtime, settled, writing]);
+  }, [actions, board, canReadAloud, chats, holding, onChoose, onOpenMaps, onPreview, onSettings, opened, prepared, replying, runtime, settled, writing]);
 }
 
-// spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/search.md, "Story: Search my conversations"
+const historyLayer = "assistant-history";
+const showHistory = { type: "openLayer", id: historyLayer, kind: "SheetLayer", covers: true } as const;
+const hideHistory = { type: "closeLayer", id: historyLayer } as const;
+
+// spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/shell/layers.md, "Back closes the layer on top, and nothing under it"
 export function useHistorySheets(
   chats: ReturnType<typeof useChats>,
   search: ReturnType<typeof useSearch>,
+  layers: ReturnType<typeof useLayers>,
   seen: ReturnType<Board["snapshot"]>,
   free: { replying: boolean; holding: boolean },
+  beginSearch: (() => void) | undefined,
+  returnFocus: () => void,
 ) {
-  const [listing, setListing] = useState(false);
   const [words, setWords] = useState("");
   const shown = chats.state;
   const finding = search.state;
   const start = { type: "start", ...free } as const;
-  const browse = () => {
-    void chats.send({ type: "browse" });
-    setListing(true);
-  };
-  const searchHistory = search.can({ type: "openSearch" }) ? () => {
-    void chats.send({ type: "browse" });
-    void search.send({ type: "openSearch" });
+  const listing = layers.state !== undefined && top(layers.state).id === historyLayer;
+  const closeHistory = () => { if (layers.can(hideHistory)) void layers.send(hideHistory); };
+  const browse = layers.can(showHistory) ? () => {
+    void layers.send(showHistory).then(({ _tag }) => { if (_tag === "Success") void chats.send({ type: "browse" }); });
+  } : undefined;
+  const searchHistory = beginSearch !== undefined && search.can({ type: "openSearch" }) ? () => {
+    setWords("");
+    beginSearch();
   } : undefined;
   const sheets = shown && finding ? (
     <>
       <AssistantChatHistorySheet
         open={listing}
-        onOpenChange={setListing}
+        onOpenChange={(open) => { if (!open) closeHistory(); }}
+        onReturnFocus={returnFocus}
         history={{
           chats: shown.ids.map((id) => ({ id: String(id), title: seen.titles.get(id) ?? "Ask Alpha", current: id === shown.chosen })),
           status: shown.list.status === "Loading" ? "loading" : shown.list.status === "Failed" ? "failed" : "loaded",
@@ -135,14 +152,15 @@ export function useHistorySheets(
             const choose = { type: "choose", conversation: Number(id), ...free } as const;
             if (!chats.can(choose)) return;
             void chats.send(choose);
-            setListing(false);
+            closeHistory();
           },
-          onStart: chats.can(start) ? () => { void chats.send(start); setListing(false); } : undefined,
+          onStart: chats.can(start) ? () => { void chats.send(start); closeHistory(); } : undefined,
           onRetry: () => void chats.send({ type: "browse" }),
         }}
       />
       <AssistantSearchSheet
         open={finding.open}
+        onReturnFocus={returnFocus}
         onOpenChange={(open) => { if (!open && search.can({ type: "closeSearch" })) void search.send({ type: "closeSearch" }); }}
         search={{
           words,

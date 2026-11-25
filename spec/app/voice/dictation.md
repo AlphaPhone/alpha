@@ -110,6 +110,19 @@ pure def canEdit(r: Recorder, words: bool): bool = r.stage == Review
 pure def edit(r: Recorder, words: bool): Recorder = { ...r, words: words }
 ```
 
+### After an unsuccessful recognition, the owner may type the transcript in Ask Alpha
+
+Type opens an empty review for this clip. Editing there does not fill the
+draft. The owner still chooses Use in draft after entering words.
+
+```quint
+pure def canTypeTranscript(r: Recorder, ticket: int): bool =
+  r.field == ComposerField and r.stage == Recorded and r.ticket == ticket and r.failure != NoFailure
+
+pure def typeTranscript(r: Recorder, ticket: int): Recorder =
+  { ...r, stage: Review, failure: NoFailure, words: false }
+```
+
 ### Using the transcript fills the field the recorder was opened from, and sends nothing
 
 The text joins that field's draft; sending it is the owner's own Send there.
@@ -147,8 +160,8 @@ pure def alwaysWordsOnlyInReview(r: Recorder): bool = r.words implies r.stage ==
 
 A microphone failure waits in ready until voice closes the recorder. The
 field keeps what was written. A transcription failure keeps the clip for
-retry or discard. The recorder shows actions for the clip without an error
-notice.
+retry or discard and shows "Voice stopped" with the actions for the clip.
+The underlying service error stays private.
 
 ```quint
 pure def micFailure(f: Failure): bool = f == Denied or f == NoMicrophone
