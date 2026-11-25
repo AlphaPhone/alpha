@@ -31,6 +31,8 @@ export type HomeScreenProps = {
   onMoveTile?: (move: HomeTileMove) => void;
   /** The Home scroller where the launcher can listen for a pull when Android is free. */
   scrollRef?: Ref<HTMLDivElement>;
+  /** Opens the Apps drawer; left out off the phone and while Home is being edited. */
+  onOpenDrawer?: () => void;
   /** Opens Add to Home; left out when it is open or nothing is left to add. */
   onShowHidden?: () => void;
   /** Ends editing. */
@@ -57,7 +59,7 @@ const homeSpacing = "[--alpha-home-spacing:clamp(3px,calc(100cqi/103),var(--spac
  * @model spec/app/home/index.md
  */
 export function HomeScreen({
-  cards = [], tiles, editing = false, covered = false, launcher = false, onOpenTile, onBeginEditing, hold, onRemoveTile, onMoveTile, scrollRef,
+  cards = [], tiles, editing = false, covered = false, launcher = false, onOpenTile, onBeginEditing, hold, onRemoveTile, onMoveTile, scrollRef, onOpenDrawer,
   onShowHidden, onDone, notice, adding = false, hidden = [], onAddToHome, onCloseAdding = () => undefined, className,
 }: HomeScreenProps) {
   return (
@@ -78,6 +80,7 @@ export function HomeScreen({
             hold={hold}
             onRemove={onRemoveTile}
             onMove={onMoveTile}
+            onOpenDrawer={onOpenDrawer}
           />
         ) : (
           <div aria-busy className="min-h-24" />

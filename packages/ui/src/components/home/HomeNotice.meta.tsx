@@ -5,9 +5,10 @@ import type { HomeNoticeProps } from "./HomeNotice.tsx";
 export const meta: ComponentMeta<HomeNoticeProps> = {
   args: { notice: { tag: "TellNotOpened", ask: { tag: "OpenApp", label: "Clock" }, why: "Gone" }, place: "AsToast" },
   examples: {
-    "Turned off": { notice: { tag: "TellNotOpened", ask: { tag: "OpenApp", label: "Clock" }, why: "TurnedOff" } },
-    "Profile locked": { notice: { tag: "TellNotOpened", ask: { tag: "OpenApp", label: "Mail (Work)" }, why: "ProfileLocked" } },
+    "Turned off": { notice: { tag: "TellNotOpened", ask: { tag: "OpenApp", label: "Clock" }, why: "TurnedOff" }, place: "InDrawer" },
+    "Profile locked": { notice: { tag: "TellNotOpened", ask: { tag: "OpenApp", label: "Mail (Work)" }, why: "ProfileLocked" }, place: "InDrawer" },
     "Not in front": { notice: { tag: "TellNotOpened", ask: { tag: "OpenApp", label: "Clock" }, why: "NotInFront" } },
+    "App info refused": { notice: { tag: "TellNotOpened", ask: { tag: "AppInfo", label: "Clock" }, why: "Unable" }, place: "InDrawer" },
     "Shade refused": { notice: { tag: "TellNotOpened", ask: { tag: "Shade" }, why: "Unable" } },
     "No answer": { notice: { tag: "TellNoAnswer" } },
     "Unlock first": { notice: { tag: "TellUnlockFirst" } },

@@ -1,6 +1,6 @@
-// spec/app/home/index.md, "Story: Open an app"; spec/app/home/cards.md, "The row holds the agenda, Messages, Phone, mail, brief and Workflows cards in that order, each only when drawn, and is not drawn when none is"; spec/app/home/index.md, "On the assistant alone Home shows no tile and no card"; spec/app/home/index.md, "Story: Edit Home"; spec/app/home/index.md, "Story: Pull down for notifications"
+// spec/app/home/index.md, "Story: Open an app"; spec/app/home/cards.md, "The row holds the agenda, Messages, Phone, mail, brief and Workflows cards in that order, each only when drawn, and is not drawn when none is"; spec/app/home/index.md, "On the assistant alone Home shows no tile and no card"; spec/app/home/index.md, "Story: Edit Home"; spec/app/home/index.md, "Story: Find an app and see its details"; spec/app/home/index.md, "Story: Pull down for notifications"
 import type { InstalledApp } from "@elizaos/os-bridges";
-import { HomeScreen, type HomeTileItem, InstalledAppIcon } from "@repo/ui";
+import { AppsDrawer, HomeScreen, type HomeInstalledApp, type HomeTileItem, InstalledAppIcon } from "@repo/ui";
 import { useCallback, useSyncExternalStore } from "react";
 import * as Home from "../../gen/app__home.ts";
 import { useMachine as useHome } from "../../gen/app__home.react.ts";
@@ -21,6 +21,11 @@ import type { HomeMachines } from "./index.tsx";
 const owner = "Owner" as const;
 
 /** A tile's id on the screen: `view:<View>` for one of Alpha's own apps, `app:<key>` for an installed one. */
+/** The drawer's view on a phone; off it there is no drawer, which shows a spinner until the shell closes it. */
+const drawerView = (view: Home.Drawer) => (view === "NotOnPhone" ? "Spinner" : view);
+
+const profiles: Readonly<Record<NonNullable<InstalledApp["profile"]>, string>> = { work: "Work", private: "Private", clone: "Clone", other: "Other profile" };
+
 const idOf = (tile: Tile): string => (tile.tag === "Own" ? `view:${tile.view}` : `app:${tile.app}`);
 
 const tileOf = (id: string): Tile => (id.startsWith("view:") ? { tag: "Own", view: id.slice("view:".length) as View } : { tag: "Installed", app: id.slice("app:".length) });
@@ -37,7 +42,7 @@ function tileItem(tile: Tile, known: ReadonlyMap<string, InstalledApp>, said?: s
   return { id: idOf(tile), label: labelOf(tile.app), icon: <InstalledAppIcon image={imageOf(known.get(tile.app))} /> };
 }
 
-/** Home: the day, its cards and the tiles kept on it, each control offered exactly when the rules allow its event. */
+/** Home: the day, its cards, the tiles kept on it and the Apps drawer, each control offered exactly when the rules allow its event. */
 export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   const home = useHome(runtime);
   const shell = useShell(alpha.runtime);
@@ -62,6 +67,15 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   const notice = inline && inline.place === Home.noticeAt(h, s) ? inline.notice : undefined;
   const beginEditing = { type: "beginEditing", shell: s } as const;
   const mayEdit = !saving(h.tiles);
+  const opening = h.handoff.ask.tag === "OpenApp" && h.handoff.attempt.outcome === "Sent" ? h.handoff.ask.app : undefined;
+  const menu = Home.menuApp(h.menu);
+  const apps: HomeInstalledApp[] = [...Home.listing(h)].map((key) => {
+    const app = known.apps.get(key);
+    return {
+      id: key, label: app?.label ?? key, package: app?.packageName ?? key,
+      profile: app?.profile && profiles[app.profile], image: imageOf(app), onHome: Home.isOnHome(h, key),
+    };
+  });
   return (
     <>
       <HomeScreen
@@ -82,6 +96,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
         onRemoveTile={mayEdit ? (id) => offered({ type: "removeFromHome", tile: tileOf(id), shell: s })?.() : undefined}
         onMoveTile={mayEdit ? ({ id, onto, behind }) => offered({ type: "moveTile", tile: tileOf(id), onto: tileOf(onto), behind, shell: s })?.() : undefined}
         scrollRef={homeScroller}
+        onOpenDrawer={Home.offersDrawer(h) && shell.can({ type: "openDrawer" }) ? () => void shell.send({ type: "openDrawer" }) : undefined}
         onShowHidden={offered({ type: "showHidden", shell: s })}
         onDone={offered({ type: "done" })}
         notice={notice}
@@ -91,6 +106,26 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
         onCloseAdding={() => offered({ type: "backOut" })?.()}
       />
       {Home.showsCards(h) && alpha.slot("home/cards")}
+      {s.drawer ? (
+        <AppsDrawer
+          className="fixed inset-0 z-sheet bg-background"
+          view={drawerView(Home.drawer(h))}
+          apps={apps}
+          refreshing={h.installed.read.status === "Loading" && apps.length > 0}
+          query={h.query}
+          onSearch={(query) => offered({ type: "search", query, shell: s })?.()}
+          onClose={() => void alpha.back()}
+          onOpenApp={h.handoff.attempt.outcome === "Sent" ? undefined : (app) => offered({ type: "openApp", app, now: untimed })?.()}
+          opening={opening}
+          menu={menu === "" ? undefined : menu}
+          onOpenMenu={(app) => offered({ type: "openMenu", app, shell: s })?.()}
+          onCloseMenu={() => offered({ type: "backOut" })?.()}
+          onAddToHome={mayEdit ? (app) => offered({ type: "addToHome", tile: { tag: "Installed", app }, shell: s })?.() : undefined}
+          onTryAgain={offered({ type: "tryAgain", shell: s })}
+          onShowAppInfo={(app) => offered({ type: "showAppInfo", app, shell: s, now: untimed })?.()}
+          notice={notice}
+        />
+      ) : null}
     </>
   );
 }
