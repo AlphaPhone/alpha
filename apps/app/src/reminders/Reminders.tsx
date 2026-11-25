@@ -16,23 +16,22 @@ import {
   cn,
 } from "@repo/ui";
 import {
-  AlertCircle,
-  ArrowLeft,
-  CalendarClock,
+  Bell,
+  Calendar,
   CalendarDays,
   Check,
-  CheckCircle2,
+  ChevronLeft,
+  CircleCheck,
   Clock,
-  EllipsisVertical,
-  Flag,
+  Ellipsis,
   Inbox,
-  ListPlus,
-  MoreHorizontal,
+  ListChecks,
   Plus,
-  RefreshCw,
   Repeat,
   SlidersHorizontal,
+  Star,
   Trash2,
+  Undo2,
 } from "lucide-react";
 import { useState, useSyncExternalStore } from "react";
 import type { DeleteMode, SmartView, SortKey } from "../../gen/app__reminders.ts";
@@ -80,12 +79,12 @@ const SMART_META: readonly {
   readonly label: string;
   readonly badgeClass: string;
 }[] = [
-  { view: "TodayView", label: "Today", badgeClass: "bg-info text-primary-foreground" },
-  { view: "ScheduledView", label: "Scheduled", badgeClass: "bg-destructive text-destructive-foreground" },
-  { view: "AllView", label: "All", badgeClass: "bg-foreground text-background" },
-  { view: "FlaggedView", label: "Flagged", badgeClass: "bg-warn text-primary-foreground" },
-  { view: "OverdueView", label: "Overdue", badgeClass: "bg-destructive text-destructive-foreground" },
-  { view: "CompletedView", label: "Completed", badgeClass: "bg-ok text-primary-foreground" },
+  { view: "TodayView", label: "Today", badgeClass: "bg-alpha text-alpha-foreground" },
+  { view: "ScheduledView", label: "Scheduled", badgeClass: "bg-background text-foreground" },
+  { view: "AllView", label: "All", badgeClass: "bg-background text-foreground" },
+  { view: "FlaggedView", label: "Flagged", badgeClass: "bg-background text-foreground" },
+  { view: "OverdueView", label: "Overdue", badgeClass: "bg-background text-foreground" },
+  { view: "CompletedView", label: "Completed", badgeClass: "bg-background text-foreground" },
 ];
 
 const SORT_LABELS: Readonly<Record<SortKey, string>> = {
@@ -100,15 +99,15 @@ function SmartGlyph({ view }: { readonly view: SmartView }) {
     case "TodayView":
       return <CalendarDays aria-hidden className="size-4" />;
     case "ScheduledView":
-      return <CalendarClock aria-hidden className="size-4" />;
+      return <Calendar aria-hidden className="size-4" />;
     case "AllView":
       return <Inbox aria-hidden className="size-4" />;
     case "FlaggedView":
-      return <Flag aria-hidden className="size-4" />;
+      return <Star aria-hidden className="size-4" />;
     case "OverdueView":
-      return <AlertCircle aria-hidden className="size-4" />;
+      return <Bell aria-hidden className="size-4" />;
     case "CompletedView":
-      return <CheckCircle2 aria-hidden className="size-4" />;
+      return <CircleCheck aria-hidden className="size-4" />;
   }
 }
 
@@ -210,7 +209,7 @@ function ReminderRow({
         onClick={() => onToggleFlag(item.id)}
         className={item.flagged ? "text-warn" : "text-muted-foreground"}
       >
-        <Flag className="size-4" />
+        <Star className="size-4" />
       </Button>
     </div>
   );
@@ -331,13 +330,13 @@ function RemindersOverview({
             key={tile.view}
             type="button"
             onClick={() => onOpenSmart(tile.view)}
-            className="flex flex-col gap-2 rounded-tile border border-border bg-card p-3 text-left transition-colors hover:bg-secondary/60"
+            className="flex flex-col gap-2 rounded-tile bg-secondary p-3 text-left transition-colors active:bg-accent"
           >
             <div className="flex items-center justify-between gap-2">
               <span className={cn("flex size-8 items-center justify-center rounded-full", tile.badgeClass)}>
                 <SmartGlyph view={tile.view} />
               </span>
-              <span className="text-2xl font-bold tabular-nums text-foreground">{counts[tile.view]}</span>
+              <span className="font-display text-3xl font-light tabular-nums text-foreground">{counts[tile.view]}</span>
             </div>
             <span className="text-sm font-medium text-muted-foreground">{tile.label}</span>
           </button>
@@ -347,7 +346,7 @@ function RemindersOverview({
       <div className="flex items-center justify-between pt-1">
         <h2 className="text-sm font-semibold tracking-caps text-muted-foreground uppercase">My Lists</h2>
         <Button type="button" variant="ghost" size="sm" onClick={onNewList}>
-          <ListPlus aria-hidden className="size-4" />
+          <ListChecks aria-hidden className="size-4" />
           New list
         </Button>
       </div>
@@ -374,7 +373,7 @@ function RemindersOverview({
                   <Menu>
                     <MenuTrigger asChild>
                       <Button type="button" variant="ghost" size="icon" aria-label={`Manage ${list.name}`}>
-                        <MoreHorizontal className="size-4" />
+                        <Ellipsis className="size-4" />
                       </Button>
                     </MenuTrigger>
                     <MenuContent>
@@ -511,7 +510,7 @@ function RemindersDetail({
           <Menu>
             <MenuTrigger asChild>
               <Button type="button" variant="ghost" size="sm">
-                <EllipsisVertical aria-hidden className="size-4" />
+                <Ellipsis aria-hidden className="size-4" />
                 List options
               </Button>
             </MenuTrigger>
@@ -692,7 +691,7 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
           {drilledIn && !searching ? (
             <div className="flex min-w-0 items-center gap-2">
               <Button type="button" variant="ghost" size="icon" aria-label="All lists" onClick={() => setDrilledIn(false)}>
-                <ArrowLeft />
+                <ChevronLeft />
               </Button>
               <h2 className="truncate text-lg font-semibold text-foreground">{activeTitle}</h2>
             </div>
@@ -740,7 +739,7 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
             variant="warn"
             action={(
               <Button type="button" variant="secondary" size="sm" onClick={() => void runtime.runPromise(refreshRemindersList())}>
-                <RefreshCw aria-hidden className="size-3.5" />
+                <Undo2 aria-hidden className="size-3.5" />
                 Retry
               </Button>
             )}
