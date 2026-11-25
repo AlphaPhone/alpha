@@ -136,23 +136,24 @@ function Access({ state, present, native, can, fire, takeSilent }: {
   const Icon = noMic ? MicOff : CameraOff;
   const title = failed ? "Can’t start camera" : noCamera ? "Camera off" : "Mic off";
   const ask = { type: noCamera ? "askAccess" : "askMicrophone" } as const;
-  const detail = !present
-    ? "A camera is unavailable on this device."
-    : failed
-      ? "Try to start the camera again."
-      : noCamera
-        ? native ? "Allow camera access to see the viewfinder." : "Allow camera access in your browser."
-        : "Allow the microphone, or record without sound.";
+  // v121's one line under the notice: why access is needed, or what went wrong, and what the buttons below do.
+  const allow = native ? "Tap Allow to turn it on in Settings" : "Allow it for this page in your browser, then tap Retry";
+  const detail = failed
+    ? "The camera didn’t start. If another app is using it, close that app, then tap Retry."
+    : noCamera
+      ? `Alpha needs camera access to take photos and videos. ${allow}.`
+      : `Videos record sound with the microphone. ${allow}, or record without sound.`;
+  const action = "h-11 bg-foreground/16 px-4 font-normal hover:bg-foreground/24";
   return (
-    <section role="alert" aria-label={title} className="absolute inset-x-4 top-1/4 z-20 mx-auto flex max-h-1/2 max-w-md flex-col items-center gap-2 overflow-auto rounded-tile bg-secondary p-4 text-center text-secondary-foreground">
-      <Icon className="size-8" aria-hidden />
+    <section role="alert" aria-label={title} className="absolute inset-x-4 top-[38%] z-20 mx-auto flex max-h-[62%] max-w-md flex-col gap-3 overflow-y-auto overscroll-contain rounded-tile bg-secondary p-4 text-center text-secondary-foreground">
+      <Icon className="size-8 self-center" aria-hidden />
       <strong>{title}</strong>
-      <p className="text-sm text-muted-foreground">{detail}</p>
+      <p className="text-sm leading-snug text-muted-foreground">{detail}</p>
       <div className="flex flex-wrap justify-center gap-2">
-        {!failed && present && can(ask) && <Button variant="outline" size="sm" onClick={() => fire(ask)}>Allow</Button>}
-        {native && !failed && can({ type: "openSettings" }) && <Button variant="outline" size="sm" onClick={() => fire({ type: "openSettings" })}>Open Settings</Button>}
-        {failed && can({ type: "retry" }) && <Button variant="outline" size="sm" onClick={() => fire({ type: "retry" })}>Retry</Button>}
-        {noMic && can({ type: "startRecording", sound: false }) && <Button variant="outline" size="sm" aria-label="Record without sound" onClick={takeSilent}>No sound</Button>}
+        {native && !failed && can({ type: "openSettings" }) && <Button variant="ghost" className={action} aria-label="Allow in Settings" onClick={() => fire({ type: "openSettings" })}>Allow</Button>}
+        {!failed && present && can(ask) && <Button variant="ghost" className={action} onClick={() => fire(ask)}>Retry</Button>}
+        {failed && can({ type: "retry" }) && <Button variant="ghost" className={action} onClick={() => fire({ type: "retry" })}>Retry</Button>}
+        {noMic && can({ type: "startRecording", sound: false }) && <Button variant="ghost" className={action} aria-label="Record without sound" onClick={takeSilent}>No sound</Button>}
       </div>
     </section>
   );
