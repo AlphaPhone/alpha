@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn, focusRing } from "../../lib/cn.ts";
+import { Dialog, DialogClose, DialogContent, DialogTitle } from "../Dialog.tsx";
 
 export type FilesCardProps = {
   /** Whether the card is showing; the parent keeps it. */
@@ -30,29 +30,23 @@ export const filesCardConfirm = cn(focusRing, "min-h-11 rounded-full bg-alpha px
 export const filesCardCancel = cn(focusRing, "min-h-11 rounded-full px-4.5 text-base");
 
 /**
- * A Files question or set of facts, as a card resting above Ask Alpha at the foot of the screen over a light scrim: a
- * serif heading, an optional muted line, its content, then Cancel and an accent pill at the end.
+ * A Files question or set of facts, as a `Dialog` card resting above Ask Alpha at the foot of the screen: a serif heading,
+ * an optional muted line, its content, then Cancel and an accent pill at the end.
  */
 export function FilesCard({ open, onOpenChange, title, message, children, cancelLabel, confirmLabel, confirmDisabled = false, onConfirm, className }: FilesCardProps) {
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-dialog bg-foreground/18 motion-safe:animate-fade dark:bg-background/18" />
-        <DialogPrimitive.Content
-          aria-describedby={undefined}
-          className={cn("fixed inset-x-4 bottom-30 z-dialog mx-auto max-h-3/4 max-w-sm overflow-y-auto rounded-sheet bg-background px-5 pt-5.5 pb-6 text-foreground outline-none motion-safe:animate-rise", className)}
-        >
-          <DialogPrimitive.Title className="mb-1.5 font-display text-home-display leading-field font-light wrap-anywhere">{title}</DialogPrimitive.Title>
-          {message ? <p className="mb-3 text-base leading-chat wrap-anywhere text-muted-foreground">{message}</p> : null}
-          {children}
-          {cancelLabel || confirmLabel ? (
-            <div className="mt-4.5 flex flex-wrap justify-end gap-2.5">
-              {cancelLabel ? <DialogPrimitive.Close className={filesCardCancel}>{cancelLabel}</DialogPrimitive.Close> : null}
-              {confirmLabel ? <button type="button" className={filesCardConfirm} disabled={confirmDisabled} onClick={onConfirm}>{confirmLabel}</button> : null}
-            </div>
-          ) : null}
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent aria-describedby={undefined} className={cn("gap-0", className)}>
+        <DialogTitle className="mb-1.5 leading-field">{title}</DialogTitle>
+        {message ? <p className="mb-3 text-base leading-chat wrap-anywhere text-muted-foreground">{message}</p> : null}
+        {children}
+        {cancelLabel || confirmLabel ? (
+          <div className="mt-4.5 flex flex-wrap justify-end gap-2.5">
+            {cancelLabel ? <DialogClose className={filesCardCancel}>{cancelLabel}</DialogClose> : null}
+            {confirmLabel ? <button type="button" className={filesCardConfirm} disabled={confirmDisabled} onClick={onConfirm}>{confirmLabel}</button> : null}
+          </div>
+        ) : null}
+      </DialogContent>
+    </Dialog>
   );
 }
