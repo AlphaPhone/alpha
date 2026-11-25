@@ -55,4 +55,37 @@ describe("The Browser on a phone", () => {
     await until(alpha, page, Page, (p) => p.phase === "Shown" && p.behind === 1);
     expect([...world.browser.tabs.values()].map((one) => one.history.at(-1))).toEqual(["https://www.google.com/search?q=on%20device%20agents"]);
   });
+
+  it("Open, pick and close tabs (spec/app/browser/index.md, \"Story: Open, pick and close tabs\"; spec/app/browser/index.md, \"Story: Clear all browsing data\")", async () => {
+    const { alpha, runtime, world } = await onBrowser();
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    await go("news.example/on-device-agents");
+    // spec/app/browser/index.md, "A new tab, normal or private, opens on top while fewer than eight are open"
+    await press("Menu");
+    await press("New private tab");
+    await until(alpha, runtime, Tabs, (s) => s.open.length === 2 && s.privates.length === 1 && s.layer === "Address");
+    await drawn(async () => {
+      await fill("Address", "enclave.example/keys-in-hardware");
+      document.querySelector<HTMLFormElement>("form[role=search]")?.requestSubmit();
+    });
+    await until(alpha, runtime, Tabs, (s) => s.native.length === 2);
+    expect([...world.browser.tabs.values()].map((one) => one.private)).toEqual([false, true]);
+    // spec/app/browser/index.md, "Picking another open tab shows it and uncovers the page"
+    await press("Tabs");
+    await until(alpha, runtime, Tabs, (s) => s.layer === "Switcher");
+    await press("Switch to The case for on-device agents");
+    await until(alpha, runtime, Tabs, (s) => s.layer === "Uncovered" && s.selected === s.open[0]);
+    // spec/app/browser/index.md, "Closing a tab closes its native tab, shows another open tab if it was the one shown, and leaves one new tab when it was the last"
+    await press("Tabs");
+    await press("Close The case for on-device agents");
+    await until(alpha, runtime, Tabs, (s) => s.open.length === 1 && s.selected === s.privates[0]);
+    expect(world.browser.tabs.size).toBe(1);
+    // spec/app/browser/index.md, "Cleared data takes every normal tab and the saved session with it, and keeps the private tabs"
+    await hardware("back");
+    await press("Menu");
+    await press("Clear all browsing data");
+    await until(alpha, runtime, Tabs, (s) => s.erasing === "Asked");
+    await press("Clear");
+    await until(alpha, runtime, Tabs, (s) => s.erasing === "Kept" && s.privates.length === 1 && s.kept.length === 0);
+  });
 });

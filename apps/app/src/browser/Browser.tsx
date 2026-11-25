@@ -1,7 +1,9 @@
 // spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"; spec/app/browser/address.md, "Story: Browse privately"
-import { BrowserAddressBar, BrowserBar, BrowserNewTab } from "@repo/ui";
+import { Button, BrowserAddressBar, BrowserBar, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserTabs, ConfirmDialog, PrivateMark } from "@repo/ui";
+import { ChevronLeft, Plus, RotateCw, Square, Trash2 } from "lucide-react";
 import { Effect } from "effect";
 import { useState } from "react";
+import { canAskErase, canCancelErase, canConfirmErase, canOpenTab } from "../../gen/app__browser.ts";
 import type { Browser as State } from "../../gen/app__browser.ts";
 import { useMachine } from "../../gen/app__browser.react.ts";
 import type { Machine } from "../../gen/app__browser.effect.vibe";
@@ -59,6 +61,22 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
       .then(() => send({ type: "submit", i: input }))
       .then(() => browser.send({ type: "uncover" }));
   };
+  const tell = (event: Parameters<typeof browser.send>[0]) => (browser.can(event) ? () => void browser.send(event) : undefined);
+  const others = tabs.open.filter((one) => one !== tab);
+  const opening = (kind: "Normal" | "Private") => (canOpenTab(tabs, kind) ? () => { setTyped(""); void browser.send({ type: "openTab", kind }); } : undefined);
+  const offered: (BrowserMenuItem | false)[] = [
+    can({ type: "reload" }) && { label: "Reload", name: "Reload page", icon: <RotateCw />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => send({ type: "reload" })); } },
+    can({ type: "stop" }) && { label: "Stop", name: "Stop loading", icon: <Square />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => send({ type: "stop" })); } },
+    canOpenTab(tabs, "Normal") && { label: "New tab", icon: <Plus />, onSelect: () => opening("Normal")?.() },
+    canOpenTab(tabs, "Private") && { label: "Private tab", name: "New private tab", icon: <PrivateMark aria-hidden />, onSelect: () => opening("Private")?.() },
+    canAskErase(tabs) && { label: "Clear all", name: "Clear all browsing data", icon: <Trash2 />, onSelect: () => void browser.send({ type: "askErase" }) },
+  ];
+  const cards = tabs.open.map((one) => {
+    const known = runtime.runSync(Effect.map(TabHost, (host) => host.session.info(idOf(one))));
+    const privateTab = tabs.privates.includes(one);
+    const blank = privateTab ? "New private tab" : "New tab";
+    return { id: one, title: known?.title || known?.url || blank, where: `${privateTab ? "Private · " : ""}${addressParts(known?.url).host || blank}`, current: one === tab, private: privateTab };
+  });
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       {editing
@@ -83,6 +101,22 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
           ? <BrowserNewTab private={state.kind === "Private"} onSearch={cover("Address") && (() => { setTyped(""); void browser.send({ type: "cover", layer: "Address" }); })} />
           : <div data-alpha-browser-page="" aria-hidden ref={(place) => { if (place) void runtime.runPromise(placed); }} className="absolute inset-0" />}
       </div>
+      {tabs.layer === "Menu" && <BrowserMenu items={offered.filter((item) => item !== false)} onClose={() => void browser.send({ type: "uncover" })} />}
+      {tabs.layer === "Switcher" && (
+        <BrowserTabs
+          leading={<Button variant="ghost" size="icon" aria-label="Back to page" onClick={() => void browser.send({ type: "uncover" })}><ChevronLeft /></Button>}
+          tabs={cards}
+          onPick={(one) => tell({ type: "pick", tab: one })?.()}
+          onClose={(one) => tell({ type: "closeTab", tab: one, instead: one === tab ? (others.at(-1) ?? one) : tab })?.()}
+          onNew={opening("Normal")}
+          onNewPrivate={opening("Private")}
+        />
+      )}
+      <ConfirmDialog open={tabs.erasing === "Asked"} title="Clear browsing data?" confirmLabel="Clear" destructive
+        onConfirm={() => { if (canConfirmErase(tabs)) void browser.send({ type: "confirmErase" }); }}
+        onCancel={() => { if (canCancelErase(tabs)) void browser.send({ type: "cancelErase" }); }}>
+        Clears history, cookies and tabs.
+      </ConfirmDialog>
     </div>
   );
 }
