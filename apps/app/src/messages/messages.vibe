@@ -240,11 +240,10 @@ effect function settledDeletion(id: number, staged: StagedDeletion): Event!!(Tel
       try time.until(staged.expiresAt + delay)
       if (delay === 250) try withdraw("messages", id)
     }
-    const pending = telephony("pending message deletion", (c) => c.deletions.pending()) catch () => undefined
-    const phase = pending?.deletions.find((record) => record.id === staged.id && record.kind === staged.kind)?.phase
-    if (phase === "Deleted") return { type: "removed", id, done: true, known: true }
-    if (phase === "Undone" || phase === "DeletionConflict") return { type: "removed", id, done: false, known: true }
-    if (phase === "UnknownOutcome") break
+    const phase = telephony("message deletion receipt", (c) => c.deletionReceipt(staged)) catch () => undefined
+    if (phase === "deleted") return { type: "removed", id, done: true, known: true }
+    if (phase === "undone" || phase === "conflict") return { type: "removed", id, done: false, known: true }
+    if (phase === "unknown") break
   }
   return { type: "removed", id, done: false, known: false }
 }
