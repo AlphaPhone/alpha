@@ -456,9 +456,11 @@ describe("Settings", () => {
     const refused = await alpha.runtime.runPromise(Prefs.Machine.use((prefs) => prefs.get()));
     expect([Prefs.allows(refused, "CalendarEdits"), refused.agentGoogle]).toEqual([true, { tag: "Consents", gmailChanges: false, calendarEdits: true }]);
     expect(JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}")).toEqual({ askFirst: true, images: true, shares: ["AgentLocation", "CalendarEdits"] });
+    const toldBefore = world.settings.told;
     await tap("Location for Alpha");
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && !Prefs.allows(s, "AgentLocation"));
-    expect(world.settings.consents).toHaveLength(3);
+    await later(alpha, 0);
+    expect([world.settings.consents.length, world.settings.told - toldBefore]).toEqual([3, 0]);
     // spec/app/settings/preferences.md, "A change takes effect when the phone saved it; when the phone refuses it, Alpha says it was not saved and nothing changes; when the phone does not answer in time, Alpha says it was not saved and reads the device preferences again": a change the host takes too late is what Settings shows once the phone has finished with it.
     world.settings.refusesConsent = false;
     let answer = () => undefined as void;
@@ -491,6 +493,48 @@ describe("Settings", () => {
     world.settings.refusesConsent = false;
     await press("Settings");
     await vi.waitFor(() => expect(world.settings.consents).toEqual([{ gmailChanges: false, calendarEdits: true }]));
+  });
+
+  it("The host ends on the Google consent Settings shows when a read and a save cross (spec/app/settings/preferences.md, \"Story: Decide whether Alpha asks before it acts\")", async () => {
+    // spec/app/settings/preferences.md, "The agent is launched allowed to change Gmail and Calendar exactly as the phone last read or saved, allowed neither once it could not read them, and Alpha says nothing of it before the first answer"
+    const { alpha, world } = await settingsOpen();
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded" && Prefs.allows(s, "GmailChanges"));
+    await vi.waitFor(() => expect(world.settings.consents).toEqual([{ gmailChanges: true, calendarEdits: true }]));
+    await press("Privacy");
+    // spec/app/settings/preferences.md, "The agent is launched allowed to change Gmail and Calendar exactly as the phone last read or saved, allowed neither once it could not read them, and Alpha says nothing of it before the first answer": a read answers while the host is slow, the owner's save waits for the host to take the read's consent, and once the save is kept the host is told the saved consent again from Settings.
+    let answer = () => undefined as void;
+    world.settings.consentGate = new Promise((resolve) => { answer = resolve; });
+    let told = world.settings.told;
+    await seen(false);
+    await seen(true);
+    await vi.waitFor(() => expect(world.settings.told).toBe(told + 1));
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded");
+    await tap("Gmail changes");
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loading");
+    await later(alpha, 0);
+    expect(world.settings.told).toBe(told + 1);
+    answer();
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && !Prefs.allows(s, "GmailChanges"));
+    await later(alpha, 0);
+    await vi.waitFor(() => expect(world.settings.consents.at(-1)).toEqual({ gmailChanges: false, calendarEdits: true }));
+    await vi.waitFor(() => expect(world.settings.told).toBe(told + 3));
+    expect(JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}")).toEqual({ askFirst: false, images: true, shares: ["AgentLocation", "BrowserPage", "CalendarEdits"] });
+    // spec/app/settings/preferences.md, "The agent is launched allowed to change Gmail and Calendar exactly as the phone last read or saved, allowed neither once it could not read them, and Alpha says nothing of it before the first answer": a save holds the host past both ten-second limits while the consent of the read that gave up waits its turn, so the host is told neither, and the next read tells it what the save kept.
+    world.settings.consentGate = new Promise((resolve) => { answer = resolve; });
+    told = world.settings.told;
+    await tap("Gmail changes");
+    await later(alpha, 10_000);
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Failed" && s.document.read.status === "Loading");
+    await later(alpha, 10_000);
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Failed" && s.agentGoogle.tag === "Consents" && !s.agentGoogle.gmailChanges && !s.agentGoogle.calendarEdits);
+    expect(world.settings.told).toBe(told + 1);
+    answer();
+    await vi.waitFor(() => expect(world.settings.consents.slice(-2)).toEqual([{ gmailChanges: true, calendarEdits: true }, { gmailChanges: false, calendarEdits: false }]));
+    expect(JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}")).toEqual({ askFirst: false, images: true, shares: ["AgentLocation", "BrowserPage", "CalendarEdits", "GmailChanges"] });
+    await seen(false);
+    await seen(true);
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded" && Prefs.allows(s, "GmailChanges"));
+    await vi.waitFor(() => expect(world.settings.consents.at(-1)).toEqual({ gmailChanges: true, calendarEdits: true }));
   });
 
   it("A phone updated from the previous Alpha keeps its choices (spec/app/settings/preferences.md, \"The device preferences are read when Alpha starts, when Settings opens, when Alpha comes back while Settings shows, and after a change the phone did not answer in time, with ten seconds to answer, never while a change or a recovery is in flight\")", async () => {
