@@ -16,7 +16,7 @@ import type { Machine as CorrectionMachine } from "../../gen/app__files__correct
 import { Handles, type Spot, handles } from "./handles.vibe"
 import { kindOf } from "./entries.vibe"
 import { TrashFacts, type TrashItemFacts, trashFacts } from "./trashFacts.vibe"
-import { CategoryGroups, categoryGroups, groupsFor } from "./category.vibe"
+import { type CategoryGroups, categoryGroups, groupsFor } from "./category.vibe"
 import * as Shown from "../../gen/app__files__preview.effect.vibe"
 import * as Recent from "../../gen/app__files__recent.effect.vibe"
 import type { Documents } from "../platform/documents.vibe"

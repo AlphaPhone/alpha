@@ -26,7 +26,6 @@ export interface ScanSaved {
 
 module web {
   import type { PdfReceipt, ScanImage, ScanSaved, StoredPage } from "./scanStore.vibe"
-  import Draw from "./scanPdf.worker.ts?worker"
   import { admittedTextLayer } from "@elizaos/plugin-files-client"
   import { scannedLinks } from "@elizaos/plugin-files-client"
   import { registerPlugin } from "@capacitor/core"
@@ -148,7 +147,7 @@ module web {
   }
 
   export async function drawPdf(images: ReadonlyArray<Blob>, signal: AbortSignal): Promise<{ pdf: Blob } | { problem: "TooLarge" | "NotDrawn" }> {
-    const worker = new Draw()
+    const worker = new Worker(new URL("./scanPdf.worker.ts", import.meta.url), { type: "module" })
     try {
       return await new Promise((resolve, reject) => {
         if (signal.aborted) { reject(signal.reason); return }

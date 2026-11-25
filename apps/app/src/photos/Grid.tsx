@@ -229,20 +229,20 @@ export function MediaGrid({ rows, selection, grouped, density, runtime, revision
   const { connect, observeLine, visibleLines, images } = useThumbnails(runtime, revision, trash);
   const [focused, setFocused] = useState<number>();
   const [requested, setRequested] = useState<number>();
-  const pendingFocus = useRef<number | undefined>(undefined);
+  const pendingFocusRef = useRef<number | undefined>(undefined);
   const focus = useCallback((button: HTMLButtonElement | null) => {
-    if (!button || pendingFocus.current === undefined || mediaNumber(button) !== pendingFocus.current) return;
-    pendingFocus.current = undefined;
+    if (!button || pendingFocusRef.current === undefined || mediaNumber(button) !== pendingFocusRef.current) return;
+    pendingFocusRef.current = undefined;
     button.focus();
     setRequested(undefined);
   }, []);
   const pinchRef = useRef<{ distance: number; start: Density; reported: Density } | undefined>(undefined);
-  const anchor = useRef<{ density: Density; member: string; offset: number; focused: number | undefined } | undefined>(undefined);
+  const anchorRef = useRef<{ density: Density; member: string; offset: number; focused: number | undefined } | undefined>(undefined);
   const placeAnchor = useCallback((section: HTMLElement | null) => {
-    const saved = anchor.current;
+    const saved = anchorRef.current;
     const pane = section?.parentElement;
     if (!pane || saved?.density !== density) return;
-    anchor.current = undefined;
+    anchorRef.current = undefined;
     const line = Array.from(pane.querySelectorAll<HTMLElement>("[data-alpha-grid-line]")).find((one) =>
       one.dataset.alphaGridLine?.split(",").includes(saved.member));
     if (line) pane.scrollTop += line.getBoundingClientRect().top - pane.getBoundingClientRect().top - saved.offset;
@@ -293,17 +293,17 @@ export function MediaGrid({ rows, selection, grouped, density, runtime, revision
     const next = order[current + (event.shiftKey ? -1 : 1)];
     if (next === undefined || event.currentTarget.querySelector(`button[data-alpha-media-key="${next}"]`)) return;
     event.preventDefault();
-    pendingFocus.current = next;
+    pendingFocusRef.current = next;
     setRequested(next);
   }
   function focusLeft(event: FocusEvent<HTMLDivElement>) {
     if (event.currentTarget.contains(event.relatedTarget)) return;
-    pendingFocus.current = undefined;
+    pendingFocusRef.current = undefined;
     setRequested(undefined);
     setFocused(undefined);
   }
   function startPinch(event: TouchEvent<HTMLDivElement>) {
-    anchor.current = undefined;
+    anchorRef.current = undefined;
     const distance = touchDistance(event);
     pinchRef.current = distance > 0 ? { distance, start: density, reported: density } : undefined;
   }
@@ -322,7 +322,7 @@ export function MediaGrid({ rows, selection, grouped, density, runtime, revision
       one.getBoundingClientRect().bottom > top);
     const member = line?.dataset.alphaGridLine?.split(",", 1)[0];
     if (line && member) {
-      anchor.current = { density: changed, member, offset: line.getBoundingClientRect().top - top,
+      anchorRef.current = { density: changed, member, offset: line.getBoundingClientRect().top - top,
         focused: mediaNumber(pane.ownerDocument.activeElement) };
     }
     resize(changed);
