@@ -46,15 +46,15 @@ pure def listedHas(conversation: int, c: Chats): bool = c.ids.includes(conversat
 
 ### What chats need done outside comes back as an answer naming its ticket
 
-The list of conversations read, to show or to open its newest, a page of a
-conversation's messages read (around a message, or its latest), a
+The list of conversations read, to show or to learn whether one whose
+page answered 404 is still there; a page of a conversation's messages read (around a message, or its latest), a
 conversation created, a fork made from a message, and a message read aloud
 by the voice area.
 
 ```quint
 type Effect =
   | ReadList({ ticket: int })
-  | ReadLatest({ ticket: int })
+  | ReadLatest({ page: int, conversation: int })
   | ReadPage({ conversation: int, around: int, ticket: int })
   | Create({ ticket: int })
   | Fork({ conversation: int, message: int, ticket: int })
@@ -178,42 +178,58 @@ pure def restart(c: Chats): Moved =
   if (c.chosen > 0) { state: paging.state, out: listing.out.concat(paging.out) } else listing
 ```
 
-### A conversation the agent says it does not have is forgotten, and the agent's newest conversation shows in its place, or a new chat when it has none
+### A read of the latest messages answered 404 asks the agent's list whether the conversation is still there
 
-The agent answers a read of a conversation's latest messages with 404 when
-it has no such conversation, as after its store was reset or the phone
-paired with another agent. That is not a read that failed, and nothing is
-said about it: the conversation leaves the list, none shows, and the list
-is read again. A draft written in it stays in its slot on the phone. A 404
-to a read around a message says only that the message is unknown, and like
-any other failed read keeps the conversation showing, to be read again.
+The agent answers 404 when it has no such conversation, as after its store
+was reset or the phone paired with another agent; but a 404 can also come
+from a route or a proxy, so the answer alone never drops a conversation. As
+in v121, the agent's list decides: it is read once, under the page's own
+ticket and naming the conversation, while the page stays loading and
+nothing is said. A newer asking of the page, or a restart, which reads the
+page again, leaves that answer behind. A 404 to a read around a message
+says only that the message is unknown, and like any other failed read
+keeps the conversation showing, to be read again.
 
 ```quint
-pure def canGone(c: Chats, ticket: int): bool = R::canAnswer(c.page, ticket) and c.around == 0
+pure def canNotFound(c: Chats, ticket: int): bool = R::canAnswer(c.page, ticket) and c.around == 0 and c.chosen > 0
 
-pure def gone(c: Chats, ticket: int): Moved =
-  val list = R::ask(c.list)
-  { state: { ...c, ids: c.ids.select(i => i != c.chosen), chosen: 0, origin: 0,
-      list: list, page: X::dropped(c.page), around: 0, messages: 0 },
-    out: List(ReadLatest({ ticket: list.ticket })) }
+pure def notFound(c: Chats, ticket: int): Moved =
+  { state: c, out: List(ReadLatest({ page: ticket, conversation: c.chosen })) }
 ```
 
-### The list read after a conversation was gone opens the first it lists, the most recently used, while the new chat is blank and none other is showing or being made
+### A conversation the list no longer has is forgotten, and the first it lists, the most recently used, shows in its place, or a new chat when there is none
 
-The agent lists the conversation used most recently first. Its answer is
-taken as any newest list is. The shell passes, as `blank`, whether nothing
-is written or attached in the new chat, so what the owner began there is
-never carried into a conversation they did not choose. With none listed,
-the read failed, or the new chat not blank, the new chat stays.
+The agent lists the conversation used most recently first, and its list
+is taken as any newest list is. Only a list that does not have the
+conversation forgets it, so the one that shows next is never the one that
+went, and a conversation shows in its place at most once for each such
+answer. A conversation the list still has, or a list that could not be
+read, is a page that failed, to be read again on the owner's word: nothing
+reads it again by itself. The shell passes, as `replying` and `holding`,
+whether the turn and the composer are free, as when a conversation is
+chosen; while either is not, or a conversation is being made, a new chat
+shows instead. A draft written in the one that went stays in its slot on
+the phone.
 
 ```quint
-pure def canLatest(c: Chats, ticket: int, ids: List[int], blank: bool): bool = canListed(c, ticket, ids)
+pure def canLatest(c: Chats, page: int, ids: List[int], conversation: int): bool =
+  R::canAnswer(c.page, page) and c.chosen == conversation and conversation > 0 and ids.every(i => i > 0)
 
-pure def latest(c: Chats, ticket: int, ok: bool, ids: List[int], blank: bool): Moved =
-  val read = listed(c, ticket, ok, ids)
-  if (ok and blank and ids.length() > 0 and c.chosen == 0 and not(making(c)))
-    shown(ids.head(), 0, 0, read)
-  else { state: read, out: List() }
+pure def latest(c: Chats, page: int, ok: bool, ids: List[int], conversation: int, replying: bool, holding: bool): Moved =
+  val read = { ...listed(c, c.list.ticket, ok, ids), list: c.list }
+  val left = { ...read, page: X::dropped(c.page), around: 0, messages: 0 }
+  if (not(ok) or ids.includes(conversation)) { state: { ...read, page: R::answer(c.page, false) }, out: List() }
+  else if (ids.length() > 0 and not(making(c)) and not(replying) and not(holding)) shown(ids.head(), 0, 0, left)
+  else { state: left, out: List() }
+
+pure def stepAConversationThatWentIsNeverShownAgainAtOnce(before: Chats, via: str, after: Chats): bool =
+  (via == "latest" and after.chosen != before.chosen) implies not(listedHas(before.chosen, after))
+
+pure def stepAConversationThatAnswered404IsNotReadAgainByItself(before: Chats, via: str, after: Chats, out: List[Effect]): bool =
+  (via == "notFound" or via == "latest") implies out.every(e => match e {
+    | ReadPage(p) => p.conversation != before.chosen
+    | _ => true
+  })
 ```
 
 ### Another owner or agent session leaves every conversation behind

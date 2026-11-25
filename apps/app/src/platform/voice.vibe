@@ -26,6 +26,12 @@ export interface RecordedClip {
   readonly recordingId: string
 }
 
+/** Who the phone's sign-in says holds its Cloud key: an account, by the id of its key, no one, or unknown where it could not be read. */
+export type CloudSignIn =
+  | { readonly kind: "signedIn"; readonly credential: string }
+  | { readonly kind: "signedOut" }
+  | { readonly kind: "unknown" }
+
 interface LiveCapture {
   readonly session: number
   readonly captureId: string
@@ -114,6 +120,8 @@ export service VoiceBridge {
   streamTimings(): unknown!!
   probeStatus(ttsOnly: boolean): SpeechStatus!!
   invalidateCache(): void!!
+  /** Forget the Cloud key read for the account before, and the relay session made under it while none runs. */
+  forgetAccount(): void!!
   holdEngine(): boolean!!
   releaseEngineHold(): void!!
   openMic(session: number, network: boolean): boolean!VoiceBridgeFailed
@@ -125,6 +133,9 @@ export service VoiceBridge {
   silenceReading(ticket: number): boolean!!
   shut(session: number): boolean!!
   readonly events: Stream.Stream<VoiceEvent>
+  account(): CloudSignIn!!
+  /** Each sign-in on the phone that settles on an account. */
+  readonly signIns: Stream.Stream<void>
   startRecording(ticket: number): RecordedClip!VoiceBridgeFailed
   transcribe(ticket: number, network: boolean): string!VoiceBridgeFailed
   abandon(ticket: number): void!!
@@ -132,6 +143,7 @@ export service VoiceBridge {
 
 const LOCAL_PLUGIN = "AlphaVoiceCloud"
 const CLOUD_STREAM_PLUGIN = "ElizaCloudSpeech"
+const SIGN_IN_PLUGIN = "ElizaSignIn"
 /** The cloud the phone signs in to, whose account the relay speaks for. */
 const CLOUD_ENVIRONMENT = "production" as EnvironmentName
 /** How long a background call to the relay, a warm-up or its timing records, may run before it is dropped. */
@@ -206,6 +218,27 @@ effect function signedInKey(accounts: ReturnType<typeof signInAccounts>): Creden
   return status.account.credentialId
 }
 
+/** Who the phone's sign-in says holds its Cloud key now, or unknown where there is no sign-in to ask or it did not answer in time. */
+function signedInAccount(): CloudSignIn!! {
+  return registered(SIGN_IN_PLUGIN)
+    ? Effect.orElseSucceed(
+      Effect.map(timeout(tryPromise(() => signInAccounts().status({ environment: CLOUD_ENVIRONMENT })), RELAY_WARMUP_BOUND), (status): CloudSignIn =>
+        status.account.kind === "signedIn" ? { kind: "signedIn", credential: status.account.credentialId } : { kind: "signedOut" }),
+      (): CloudSignIn => ({ kind: "unknown" }))
+    : succeed<CloudSignIn>({ kind: "unknown" })
+}
+
+/** Each sign-in the phone settles on an account, as eliza's sign-in client hears it. */
+function settledSignIns(): Stream.Stream<void> {
+  return Stream.callback<void>((queue) => effect {
+    if (!registered(SIGN_IN_PLUGIN)) return
+    const handle = try Effect.orElseSucceed(tryPromise(() => signInAccounts().addListener("signInSettled", (receipt) => {
+      if (receipt.verdict.kind === "SignedInAs") Queue.offerUnsafe(queue, undefined)
+    })), () => undefined)
+    try addFinalizer(() => handle === undefined ? Effect.void : ignore(tryPromise(() => handle.remove())))
+  })
+}
+
 export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   let cachedStatus: SpeechStatus | undefined
   let statusFlight: Deferred.Deferred<SpeechStatus> | undefined
@@ -214,6 +247,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   let nativeCapture: LiveCapture | undefined
   let cloudStream: CloudStreamingSpeech | undefined
   let cloudKey: CredentialId | undefined
+  let accountEpoch = 0
   let cloudCapture: { close(): Promise<void>; cancel(): Promise<void> } | undefined
   let cloudSpeechAbort: AbortController | undefined
   let activePlaybackRequest: string | undefined
@@ -276,8 +310,9 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
       if (network && registered(CLOUD_STREAM_PLUGIN)) {
         const relay = relayPlugin()
         const accounts = signInAccounts()
+        const epoch = accountEpoch
         fork.detached ignore(timeout(Effect.all([
-          effect { cloudKey = signedInKey(accounts) catch () => undefined },
+          effect { const read = signedInKey(accounts) catch () => undefined; if (epoch === accountEpoch) cloudKey = read },
           ignore(tryPromise(() => relay.prewarmCloudSpeech({ environment: CLOUD_ENVIRONMENT }))),
         ], { concurrency: "unbounded" }), RELAY_WARMUP_BOUND))
       }
@@ -327,7 +362,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     if (activeSession !== session) throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "session-changed" })
     const capture: LiveCapture = { session, captureId: fresh(), listening: false, echoCancelled: false }
     nativeCapture = capture
-    const started = try tryPromise({
+    const started = tryPromise({
       try: () => localPlugin().startLiveCapture({
         captureId: capture.captureId, nativeAsr: true, echoCancel: true, bargeIn: true, reopen,
       }),
@@ -506,6 +541,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
       cachedStatus = undefined
       cloudKey = undefined
     }),
+    forgetAccount: () => sync(() => { accountEpoch += 1; cloudKey = undefined; if (activeSession === 0) cloudStream = undefined }),
     holdEngine: () => registered(LOCAL_PLUGIN)
       ? Effect.orElseSucceed(Effect.map(tryPromise(() => localPlugin().holdSpeechEngine({})), (res) => res.held === true), () => false)
       : succeed(false),
@@ -521,6 +557,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     silenceReading,
     shut,
     events: makeNativeEvents(eventSubscribers, () => nativeCapture),
+    account: signedInAccount, signIns: settledSignIns(),
     effect startRecording(ticket: number): RecordedClip!VoiceBridgeFailed {
       if (!registered(LOCAL_PLUGIN)) throw new VoiceBridgeFailed({ method: "startRecording", cause: "no-voice-plugin" })
       return try recordingLock.withPermits(1)(Effect.uninterruptible(effect {
@@ -591,6 +628,7 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
     streamTimings: () => succeed<unknown>(undefined),
     probeStatus: () => succeed<SpeechStatus>({ ready: false, ttsReady: false, liveCapture: false }),
     invalidateCache: () => sync(() => { warmedCloud = false }),
+    forgetAccount: () => sync(() => { warmedCloud = false }),
     holdEngine: () => succeed(false),
     releaseEngineHold: () => Effect.void,
     openMic: () => Effect.fail(new VoiceBridgeFailed({ method: "openMic", cause: "browser-no-native-voice" })),
@@ -602,6 +640,8 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
     silenceReading: () => succeed(true),
     shut: () => succeed(true),
     events: Stream.empty,
+    account: () => succeed<CloudSignIn>({ kind: "unknown" }),
+    signIns: Stream.empty,
     startRecording: () => Effect.fail(new VoiceBridgeFailed({ method: "startRecording", cause: "browser-no-native-voice" })),
     transcribe: () => Effect.fail(new VoiceBridgeFailed({ method: "transcribe", cause: "browser-no-native-voice" })),
     abandon: () => Effect.void,
