@@ -1,7 +1,7 @@
 // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
 import type { DeferredDeletionsClient, StagedDeletion } from "@elizaos/os/bridges/action-journal"
 import type { AddressBookClient, ContactNamesClient, NameSurface } from "@elizaos/os/bridges/contacts"
-import type { MessagesClient } from "@elizaos/os/bridges/messages"
+import type { MessagesClient, MmsBinding, MmsSendResult, OperationId } from "@elizaos/os/bridges/messages"
 import type { PhoneClient } from "@elizaos/os/bridges/phone"
 
 module held {
@@ -10,6 +10,7 @@ module held {
   import { rejectionCode } from "@elizaos/os/bridges/bridge"
   import { addressBookPlugin, createAddressBookClient, createContactNames } from "@elizaos/os/bridges/contacts"
   import { messagesClient, messagesPlugin } from "@elizaos/os/bridges/messages"
+  import { parseMmsSendResult, type MmsBinding, type OperationId } from "@elizaos/os/bridges/definitions/messages"
   import { phoneClient, telephonyPlugin } from "@elizaos/os/bridges/phone"
 
   const receiptKinds = { MessageRecord: "message", VoicemailRecord: "voicemail", ContactRecord: "contact" } as const
@@ -29,11 +30,16 @@ module held {
 
   function make() {
     const journal = registerPlugin<Journal>("ElizaActionJournal")
+    const nativeMessages = messagesPlugin()
     return {
       deletions: createDeferredDeletions(journal),
       deletionReceipt: (staged: StagedDeletion) => deletionReceipt(journal, staged),
       phone: phoneClient(telephonyPlugin(), journal),
-      messages: messagesClient(messagesPlugin(), journal),
+      messages: messagesClient(nativeMessages, journal),
+      async mmsReceipt(binding: MmsBinding, operation: OperationId, hash: string) {
+        const raw = await nativeMessages.mmsSendResult({ operationId: operation })
+        return parseMmsSendResult(raw, binding, operation, hash)
+      },
       contacts: createAddressBookClient({ install: "WritingInstall", plugin: addressBookPlugin(), journal }),
       names: createContactNames(addressBookPlugin()),
     }
@@ -59,6 +65,8 @@ import { registered } from "./device.vibe"
 export interface TelephonyClients {
   readonly phone: PhoneClient
   readonly messages: MessagesClient
+  /** Reads the native record and checks it against the original review digest, without the picture bytes. */
+  mmsReceipt(binding: MmsBinding, operation: OperationId, hash: string): Promise<MmsSendResult | undefined>
   readonly contacts: AddressBookClient
   readonly names: ContactNamesClient
   readonly deletions: DeferredDeletionsClient

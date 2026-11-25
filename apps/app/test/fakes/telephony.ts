@@ -65,6 +65,10 @@ export interface TelephonyScene {
   deliver: (operationId: string) => void;
   /** While set, the radio has not answered a send yet. */
   hold: Promise<void> | undefined;
+  /** Android accepted this MMS and has not reported its carrier outcome. */
+  holdMmsSubmission: boolean;
+  readonly mmsAttempts: string[];
+  readonly mmsQueries: string[];
   /** What the agent's reply drafter answers: one draft, or none; and every thread it was asked about. */
   replyDraft: string | null;
   readonly asked: unknown[];
@@ -113,6 +117,9 @@ export function telephonyScene(): TelephonyScene {
     changed: () => {},
     deliver: () => {},
     hold: undefined,
+    holdMmsSubmission: false,
+    mmsAttempts: [],
+    mmsQueries: [],
     replyDraft: "Five works, see you there",
     asked: [],
   };
@@ -267,6 +274,7 @@ function telephony(world: TelephonyScene): Faked {
         return record;
       },
       async sendMms({ operationId, recipients, body, attachments, subscriptionId }) {
+        world.mmsAttempts.push(operationId);
         const kept = world.journal.get(operationId);
         if (kept !== undefined) return kept;
         if (world.hold !== undefined) await world.hold;
@@ -275,14 +283,17 @@ function telephony(world: TelephonyScene): Faked {
           attachments: attachments.map((one) => ({ name: one.name, contentType: one.contentType, bytes: Uint8Array.from(atob(one.data), (byte) => byte.charCodeAt(0)) })),
         });
         world.sent.push({ operationId, recipients, body });
-        const record = { kind: "mms-send", operationId, subscriptionId, bindingHash, status: "sent", createdAt: 1_700_000_400_000 };
+        const record = { kind: "mms-send", operationId, subscriptionId, bindingHash, status: world.holdMmsSubmission ? "submitted" : "sent", createdAt: 1_700_000_400_000 };
         world.journal.set(operationId, record);
         return record;
       },
       cancelSmsReview: () => Promise.resolve(undefined),
       smsSendHistory: () => Promise.resolve({ receipts: [...world.journal.values()] }),
       smsSendResult: ({ operationId }) => Promise.resolve(world.journal.get(operationId) ?? Promise.reject(rejection("No send with this operation", "not-found"))),
-      mmsSendResult: ({ operationId }) => Promise.resolve(world.journal.get(operationId) ?? Promise.reject(rejection("No send with this operation", "not-found"))),
+      mmsSendResult: ({ operationId }) => {
+        world.mmsQueries.push(operationId);
+        return Promise.resolve(world.journal.get(operationId) ?? Promise.reject(rejection("No send with this operation", "not-found")));
+      },
     };
   });
 }
