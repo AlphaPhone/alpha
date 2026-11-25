@@ -23,6 +23,8 @@ export interface AskScene {
   holdLists: boolean;
   readonly heldLists: (() => void)[];
   acknowledgment?: string;
+  /** Text the agent streams before its acknowledgment, which it starts again after it, as eliza's planner does with a cue it displayed. */
+  streamedBeforeAcknowledgment?: string;
   /** The next reply holds after its acknowledgment and tool frames, before any text, until the test runs its entry in `turns`. */
   holdAfterTools?: boolean;
   metadata?: unknown[];
@@ -116,7 +118,10 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
         controller.close();
         return;
       }
+      const streamedCue = scene.acknowledgment === undefined ? undefined : scene.streamedBeforeAcknowledgment;
+      if (streamedCue !== undefined) controller.enqueue(frame({ type: "token", text: streamedCue }));
       if (scene.acknowledgment !== undefined) controller.enqueue(frame({ type: "acknowledgment", text: scene.acknowledgment }));
+      if (streamedCue !== undefined) controller.enqueue(frame({ type: "token", fullText: "" }));
       if (scene.acknowledgment !== undefined) controller.enqueue(frame({ type: "tool", name: "CALENDAR", label: "Using Calendar" }));
       if (scene.stalled) {
         for (const piece of custom ?? ["Thinking"]) controller.enqueue(frame({ type: "token", text: piece }));
